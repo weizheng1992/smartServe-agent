@@ -33,6 +33,35 @@ export const orders = pgTable('orders', {
   carrier: text('carrier').notNull(),
   trackingNumber: text('tracking_number').notNull(),
   estimatedDelivery: text('estimated_delivery').notNull(),
+  userId: text('user_id'), // 关联用户，支持 SaaS 级归属权控制
+  businessId: text('business_id').notNull(), // 关联商户（SaaS 租户隔离，如 nike / adidas）
+  totalAmount: real('total_amount'), // 订单总金额
+});
+
+// ============ Products (商品物理表 - SaaS 租户级管理) ============
+
+export const products = pgTable('products', {
+  id: text('id').primaryKey(),
+  businessId: text('business_id').notNull(), // 隔离控制，确保 Adidas 无法查到 Nike 的货
+  name: text('name').notNull(), // 商品名称
+  description: text('description'), // 详细描述
+  price: real('price').notNull(), // 商品单价
+  stock: integer('stock').default(99), // 商品库存
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============ Order Items (订单商品明细关联表 - Relational Normalization) ============
+
+export const orderItems = pgTable('order_items', {
+  id: text('id').primaryKey(),
+  orderId: text('order_id')
+    .references(() => orders.orderId)
+    .notNull(),
+  productId: text('product_id')
+    .references(() => products.id)
+    .notNull(),
+  quantity: integer('quantity').notNull(), // 购买数量
+  priceAtPurchase: real('price_at_purchase').notNull(), // 下单时单价快照
 });
 
 // ============ Long Memory (跨会话事实/偏好) ============

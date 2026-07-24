@@ -26,8 +26,29 @@ export interface MemoryDatabaseState {
       carrier: string;
       tracking_number: string;
       estimated_delivery: string;
+      user_id: string;
+      business_id: string;
+      total_amount: number;
     }
   >;
+  products: Map<
+    string,
+    {
+      id: string;
+      business_id: string;
+      name: string;
+      description: string;
+      price: number;
+      stock: number;
+    }
+  >;
+  orderItems: Array<{
+    id: string;
+    order_id: string;
+    product_id: string;
+    quantity: number;
+    price_at_purchase: number;
+  }>;
   messages: Array<{
     id: string;
     thread_id: string;
@@ -67,9 +88,78 @@ const memoryDb: MemoryDatabaseState = {
         carrier: 'FedEx',
         tracking_number: '1234567890',
         estimated_delivery: '2026-07-20',
+        user_id: 'u_default_id',
+        business_id: 'nike',
+        total_amount: 139.99,
       },
     ],
   ]),
+  products: new Map([
+    [
+      'prod_nike_1',
+      {
+        id: 'prod_nike_1',
+        business_id: 'nike',
+        name: 'Nike Pegasus Trail 5 越野跑鞋',
+        description: '专为户外越野打造，搭载高强度 React 缓震泡棉，耐磨抓地橡胶大底。',
+        price: 139.99,
+        stock: 45,
+      },
+    ],
+    [
+      'prod_nike_2',
+      {
+        id: 'prod_nike_2',
+        business_id: 'nike',
+        name: 'Nike Element 户外防风连帽衫',
+        description: '高透气防泼水面料，反光条设计保障夜间户外运动安全。',
+        price: 85.0,
+        stock: 30,
+      },
+    ],
+    [
+      'prod_adidas_1',
+      {
+        id: 'prod_adidas_1',
+        business_id: 'adidas',
+        name: 'Adidas Ultraboost 1.0 经典跑鞋',
+        description: '卓越的 Boost 能量回馈中底，Primeknit 贴合针织鞋面。',
+        price: 179.99,
+        stock: 50,
+      },
+    ],
+    [
+      'prod_adidas_2',
+      {
+        id: 'prod_adidas_2',
+        business_id: 'adidas',
+        name: 'Adidas Multi-Pack 运动专业棉袜 (3双装)',
+        description: '吸湿排汗，足弓加厚减震缓冲。',
+        price: 12.5,
+        stock: 120,
+      },
+    ],
+    [
+      'prod_eco_1',
+      {
+        id: 'prod_eco_1',
+        business_id: 'ecommerce',
+        name: '电商主站极绒亲肤抗静电保暖毯',
+        description: '高克重复合超细纤维，环保防静电印染，居家车载必备。',
+        price: 49.99,
+        stock: 85,
+      },
+    ],
+  ]),
+  orderItems: [
+    {
+      id: 'item_nike_1',
+      order_id: 'ORD-98712',
+      product_id: 'prod_nike_1',
+      quantity: 1,
+      price_at_purchase: 139.99,
+    },
+  ],
   messages: [],
 };
 
@@ -104,6 +194,27 @@ export class FakePool {
       const orderId = params && typeof params[0] === 'string' ? params[0] : 'ORD-98712';
       const order = memoryDb.orders.get(orderId);
       return { rows: order ? [order] : [] } as DBQueryResult<unknown>;
+    }
+
+    if (s.toUpperCase().includes('FROM PRODUCTS') || s.toUpperCase().includes('FROM "PRODUCTS"')) {
+      const businessId = params && typeof params[0] === 'string' ? params[0] : 'nike';
+      const rows = Array.from(memoryDb.products.values()).filter((p) => p.business_id === businessId);
+      return { rows } as DBQueryResult<unknown>;
+    }
+
+    if (s.toUpperCase().includes('FROM ORDER_ITEMS') || s.toUpperCase().includes('FROM "ORDER_ITEMS"')) {
+      const orderId = params && typeof params[0] === 'string' ? params[0] : 'ORD-98712';
+      const rows = memoryDb.orderItems.filter((item) => item.order_id === orderId);
+      return { rows } as DBQueryResult<unknown>;
+    }
+
+    if (
+      s.toUpperCase().includes('INSERT INTO PRODUCTS') ||
+      s.toUpperCase().includes('INSERT INTO "PRODUCTS"') ||
+      s.toUpperCase().includes('INSERT INTO ORDER_ITEMS') ||
+      s.toUpperCase().includes('INSERT INTO "ORDER_ITEMS"')
+    ) {
+      return { rows: [] };
     }
 
     if (s.toUpperCase().includes('FROM RAG_DOCUMENTS') || s.toUpperCase().includes('FROM "RAG_DOCUMENTS"')) {

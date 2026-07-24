@@ -137,8 +137,13 @@ export class ContextualRAG {
         // 结合向量语义距离 (80%) 与核心业务关键词共现奖励 (20%)，防止边缘弱相关文档污染上下文，极大节省 Token 成本
         const queryLower = query.toLowerCase();
         let keywordBonus = 0;
-        const hasRefundKeywords = queryLower.includes('退') || queryLower.includes('refund') || queryLower.includes('return') || queryLower.includes('换货');
-        const docHasRefundKeywords = row.chunkText.includes('退') || row.chunkText.includes('退款') || row.chunkText.includes('退换货');
+        const hasRefundKeywords =
+          queryLower.includes('退') ||
+          queryLower.includes('refund') ||
+          queryLower.includes('return') ||
+          queryLower.includes('换货');
+        const docHasRefundKeywords =
+          row.chunkText.includes('退') || row.chunkText.includes('退款') || row.chunkText.includes('退换货');
 
         if (hasRefundKeywords && docHasRefundKeywords) {
           keywordBonus = 0.15; // 给予 15% 的高增益相关度加权
@@ -147,7 +152,7 @@ export class ContextualRAG {
         const hybridScore = similarity * 0.8 + keywordBonus * 0.2;
 
         // 严格断路阀：仅当混合评分 >= 0.40 时予以召回。有效剔除闲聊或不相干提问时的政策垃圾数据干扰
-        if (hybridScore >= 0.40) {
+        if (hybridScore >= 0.4) {
           scoredDocs.push({
             id: row.id,
             businessId: row.businessId,
