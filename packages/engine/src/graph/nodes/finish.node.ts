@@ -20,7 +20,12 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
     ragContext = `\n\n[RELEVANT STORE POLICIES & KNOWLEDGE BASE]:\n${formattedDocs}\nIf relevant, explain these policies politely to the customer in Chinese to justify why certain actions (like returns or shipping constraints) can or cannot be taken, and strictly ground your explanation on these rules.`;
   }
 
-  const prompt = `Formulate a clean, professional, and helpful customer support message in Chinese.
+  const systemPrompt =
+    state.businessConfig?.systemPrompt ||
+    'You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.';
+
+  const prompt = `System Instruction Context: "${systemPrompt}"
+Formulate a clean, professional, and helpful customer support message in Chinese.
 Customer Question: "${input}"
 The plan execution details (the ultimate truth from physical database) are: ${JSON.stringify(plan.subtasks || [])}${ragContext}
 

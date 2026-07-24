@@ -224,23 +224,72 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
   let episodicEvents: any[] = [];
   let ragDocs: any[] = [];
 
-  if (inputMessage.trim().length > 3) {
-    // SaaS 多租户隔离：根据 threadId 物理查询对应的商户 businessId
-    let businessId = 'ecommerce';
-    try {
-      const { getDrizzle, threads } = require('db');
-      const { eq } = require('drizzle-orm');
-      const drizzle = getDrizzle();
-      if (drizzle) {
-        const threadRows = await drizzle.select().from(threads).where(eq(threads.id, threadId)).limit(1);
-        if (threadRows[0]?.businessId) {
-          businessId = threadRows[0].businessId;
-        }
-      }
-    } catch (err) {
-      console.warn('[RAG] Failed to select businessId for thread:', err);
-    }
+  // SaaS 多租户隔离及高级动态政策热载入引擎
+  let businessId = 'ecommerce';
+  let dynamicConfig = {
+    businessId: 'ecommerce',
+    systemPrompt:
+      'You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.',
+    intents: {
+      order_status: { description: 'Track or check order delivery status.' },
+      refund: { description: 'Process or request refunds.' },
+      general_query: { description: 'General customer questions.' },
+    },
+    tools: ['getOrderStatus', 'processRefund'],
+    executionMode: 'plan-and-execute',
+    confidenceThresholds: { high: 0.85, mid: 0.6 },
+    refundAutoApprovalLimit: 100, // 默认超过 $100 退款触发审批
+  };
 
+  // 1. 根据 threadId 物理查询对应的商户 businessId，并从物理表加载对应的活跃 JSON 规则快照，实现 Hot-Reloadable SaaS 政策。
+  try {
+    const { getDrizzle, threads, businessConfigs } = require('db');
+    const { eq, and } = require('drizzle-orm');
+    const drizzle = getDrizzle();
+    if (drizzle) {
+      const threadRows = await drizzle.select().from(threads).where(eq(threads.id, threadId)).limit(1);
+      if (threadRows[0]?.businessId) {
+        businessId = threadRows[0].businessId;
+      }
+
+      // 从 Postgres 物理表查询当前商户活跃（is_active = true）的最新 JSON 配置
+      const configRows = await drizzle
+        .select()
+        .from(businessConfigs)
+        .where(and(eq(businessConfigs.businessId, businessId), eq(businessConfigs.isActive, true)))
+        .limit(1);
+
+      if (configRows[0]?.config) {
+        dynamicConfig = {
+          ...dynamicConfig,
+          ...(configRows[0].config as any),
+          businessId,
+        };
+        console.log(
+          `[SaaS Config Engine] ⚡ 动态热加载成功！商户 [${businessId}] 的最新政策规则已载入，退款免签阈值: $${dynamicConfig.refundAutoApprovalLimit}`,
+        );
+      } else {
+        // 自愈装配（Nike: $150, Adidas: $120, 主站: $100）
+        let defaultLimit = 100;
+        if (businessId === 'nike') defaultLimit = 150;
+        else if (businessId === 'adidas') defaultLimit = 120;
+
+        dynamicConfig = {
+          ...dynamicConfig,
+          businessId,
+          refundAutoApprovalLimit: defaultLimit,
+        };
+        console.log(
+          `[SaaS Config Engine] 📦 物理表未载入配置，启用商户 [${businessId}] 默认热装配规则，免签阈值: $${defaultLimit}`,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[SaaS Config Engine] Failed to dynamically load business config:', err);
+  }
+
+  // 2. 只有在文本字数足够多时，才并发运行三路大模型 RAG 与向量检索
+  if (inputMessage.trim().length > 3) {
     const { ContextualRAG } = require('../rag/contextualRag');
     const contextualRag = new ContextualRAG(businessId);
 
@@ -283,6 +332,7 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     longMemoryFacts: longFacts,
     episodicEvents: episodicEvents,
     ragDocuments: ragDocs,
+    businessConfig: dynamicConfig,
     loopCount: 0,
   };
 

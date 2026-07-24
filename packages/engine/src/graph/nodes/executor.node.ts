@@ -79,44 +79,145 @@ Return ONLY the raw JSON object or "NONE". Do not include markdown or backticks.
         // =====================================================================
         if (parsedToolCall.toolName === 'processRefund') {
           try {
-            const { pendingApprovals, getDrizzle } = require('db');
-            const { eq, desc } = require('drizzle-orm');
-            const drizzle = getDrizzle()!;
+            // 🪙 动态限额核免：检查退款金额是否在商户动态设定的免核准限额以内
+            const refundAmountStr = parsedToolCall.args?.refundAmount || parsedToolCall.args?.amount || '99.99';
+            const refundAmount = Number.parseFloat(String(refundAmountStr).replace(/[^0-9.]/g, '')) || 99.99;
+            const autoApprovalLimit = state.businessConfig?.refundAutoApprovalLimit ?? 100;
+            const shouldAutoApprove = refundAmount <= autoApprovalLimit;
 
-            // 查询当前会话最新的审批记录
-            const approvalsList = await drizzle
-              .select()
-              .from(pendingApprovals)
-              .where(eq(pendingApprovals.threadId, state.threadId))
-              .orderBy(desc(pendingApprovals.createdAt))
-              .limit(1);
+            if (shouldAutoApprove) {
+              console.log(
+                `[Approval Gate] ✅ 额度免核签发：退款金额 $${refundAmount} 未超过该租户政策额度限制 ($${autoApprovalLimit})。执行引擎实施免审核直接放行！`,
+              );
+              if (state.jobId) {
+                agentEventEmitter.emit(`${state.jobId}:status`, {
+                  status: 'executing',
+                  node: 'executor',
+                  message: `✅ 政策放行：检测到本次退款金额 ($${refundAmount}) 在商户免签限额 ($${autoApprovalLimit}) 以内，已物理触发【额度免签直接放行】！`,
+                });
+              }
+            } else {
+              const { pendingApprovals, getDrizzle } = require('db');
+              const { eq, desc } = require('drizzle-orm');
+              const drizzle = getDrizzle()!;
 
-            const latestApproval = approvalsList[0];
+              // 查询当前会话最新的审批记录
+              const approvalsList = await drizzle
+                .select()
+                .from(pendingApprovals)
+                .where(eq(pendingApprovals.threadId, state.threadId))
+                .orderBy(desc(pendingApprovals.createdAt))
+                .limit(1);
 
-            // ⏰ 检查处于等待中的审批工单是否已经超过截止时间 (Deadline Check)
-            if (latestApproval && latestApproval.status === 'waiting') {
-              const now = new Date();
-              const isExpired = latestApproval.deadline && now > new Date(latestApproval.deadline);
+              const latestApproval = approvalsList[0];
 
-              if (isExpired) {
-                console.log(
-                  `[Approval Gate] ⏰ 审批工单 [ID: ${latestApproval.id}] 已超过截止时间 (${latestApproval.deadline})，触发自动超时解挂熔断！`,
-                );
+              // ⏰ 检查处于等待中的审批工单是否已经超过截止时间 (Deadline Check)
+              if (latestApproval && latestApproval.status === 'waiting') {
+                const now = new Date();
+                const isExpired = latestApproval.deadline && now > new Date(latestApproval.deadline);
 
-                // 1. 物理更新数据库中的审批工单状态为 'expired'
-                await drizzle
-                  .update(pendingApprovals)
-                  .set({ status: 'expired' })
-                  .where(eq(pendingApprovals.id, latestApproval.id));
+                if (isExpired) {
+                  console.log(
+                    `[Approval Gate] ⏰ 审批工单 [ID: ${latestApproval.id}] 已超过截止时间 (${latestApproval.deadline})，触发自动超时解挂熔断！`,
+                  );
 
-                // 2. 标记当前子任务为 failed 并注入过期描述，解挂任务并使其流向 Validator -> Finish 正常终结并告知用户
+                  // 1. 物理更新数据库中的审批工单状态为 'expired'
+                  await drizzle
+                    .update(pendingApprovals)
+                    .set({ status: 'expired' })
+                    .where(eq(pendingApprovals.id, latestApproval.id));
+
+                  // 2. 标记当前子任务为 failed 并注入过期描述，解挂任务并使其流向 Validator -> Finish 正常终结并告知用户
+                  const updatedStep = {
+                    ...stepToRun,
+                    status: 'failed' as const,
+                    result: {
+                      expiredByTimeout: true,
+                      error: '人工审批已超时。大额资金退款未获得授权，暂未办理。',
+                      message: `⚠️ 安全核发超时：人工审核申请 (ID: ${latestApproval.id}) 已超过截止审批时间 (${new Date(latestApproval.deadline).toLocaleString()}) 仍未获得核准，系统已自动实施超时安全解挂熔断。退款暂未执行，请联系客服转人工处理。`,
+                      approvalId: latestApproval.id,
+                    },
+                  };
+                  updatedSubtasks[currentIndex] = updatedStep;
+
+                  const nextPlan = {
+                    ...currentPlan,
+                    subtasks: updatedSubtasks,
+                  };
+
+                  if (state.jobId) {
+                    agentEventEmitter.emit(`${state.jobId}:status`, {
+                      status: 'executing',
+                      node: 'executor',
+                      message: `⏰ 审核超时熔断：人工核发申请 (ID: ${latestApproval.id}) 超时未审批，执行引擎实施安全解挂与自动断路降级保护。`,
+                      plan: nextPlan,
+                    });
+                  }
+
+                  return {
+                    taskPlan: nextPlan,
+                  };
+                }
+              }
+
+              if (!latestApproval || latestApproval.status === 'waiting') {
+                // 还没有审批记录，或者处于未超时的等待中，我们进行拦截并生成待审批记录！
+                let approvalId = latestApproval?.id;
+                if (!latestApproval) {
+                  approvalId = `appr_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                  const deadline = new Date(Date.now() + 24 * 3600 * 1000); // 24小时超时
+
+                  await drizzle.insert(pendingApprovals).values({
+                    id: approvalId,
+                    threadId: state.threadId,
+                    actionType: 'processRefund',
+                    actionPayload: {
+                      description: stepToRun.description,
+                      args: parsedToolCall.args,
+                      stepIndex: currentIndex,
+                    },
+                    status: 'waiting',
+                    deadline: deadline,
+                  });
+                  console.log(`[Approval Gate] ⚠️ 拦截成功！已成功创建高危物理退款人工审批工单 [ID: ${approvalId}]`);
+                }
+
+                // 维持 pending，让任务挂起
+                const updatedStep = {
+                  ...stepToRun,
+                  status: 'pending' as const,
+                  result: { waitingForApproval: true, approvalId },
+                };
+                updatedSubtasks[currentIndex] = updatedStep;
+
+                const nextPlan = {
+                  ...currentPlan,
+                  subtasks: updatedSubtasks,
+                };
+
+                if (state.jobId) {
+                  agentEventEmitter.emit(`${state.jobId}:status`, {
+                    status: 'executing',
+                    node: 'executor',
+                    message: `⚠️ 安全拦截：系统检测到敏感支付操作 [退款金额: ${parsedToolCall.args?.refundAmount || '100% 原路退回'}]。已物理拦截并自动生成人工审批工单 (ID: ${approvalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`,
+                    plan: nextPlan,
+                  });
+                }
+
+                return {
+                  taskPlan: nextPlan,
+                };
+              }
+              if (latestApproval.status === 'cancelled') {
+                console.log(`[Approval Gate] 🚫 该退款操作已被用户主动取消！工单 ID: ${latestApproval.id}`);
+
                 const updatedStep = {
                   ...stepToRun,
                   status: 'failed' as const,
                   result: {
-                    expiredByTimeout: true,
-                    error: '人工审批已超时。大额资金退款未获得授权，暂未办理。',
-                    message: `⚠️ 安全核发超时：人工审核申请 (ID: ${latestApproval.id}) 已超过截止审批时间 (${new Date(latestApproval.deadline).toLocaleString()}) 仍未获得核准，系统已自动实施超时安全解挂熔断。退款暂未执行，请联系客服转人工处理。`,
+                    cancelledByUser: true,
+                    error: '用户已取消此项操作。',
+                    message: '⚠️ 您已主动取消了此笔退款申请。相关操作已被物理终止。',
                     approvalId: latestApproval.id,
                   },
                 };
@@ -131,7 +232,7 @@ Return ONLY the raw JSON object or "NONE". Do not include markdown or backticks.
                   agentEventEmitter.emit(`${state.jobId}:status`, {
                     status: 'executing',
                     node: 'executor',
-                    message: `⏰ 审核超时熔断：人工核发申请 (ID: ${latestApproval.id}) 超时未审批，执行引擎实施安全解挂与自动断路降级保护。`,
+                    message: `🚫 用户取消操作：检测到您已主动取消本次退款人工审批申请 (ID: ${latestApproval.id})。执行引擎实施无损流程终止与安全退避。`,
                     plan: nextPlan,
                   });
                 }
@@ -140,126 +241,44 @@ Return ONLY the raw JSON object or "NONE". Do not include markdown or backticks.
                   taskPlan: nextPlan,
                 };
               }
-            }
+              if (latestApproval.status === 'rejected') {
+                console.log(`[Approval Gate] ❌ 该退款操作已被管理员拒绝！工单 ID: ${latestApproval.id}`);
 
-            if (!latestApproval || latestApproval.status === 'waiting') {
-              // 还没有审批记录，或者处于未超时的等待中，我们进行拦截并生成待审批记录！
-              let approvalId = latestApproval?.id;
-              if (!latestApproval) {
-                approvalId = `appr_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                const deadline = new Date(Date.now() + 24 * 3600 * 1000); // 24小时超时
-
-                await drizzle.insert(pendingApprovals).values({
-                  id: approvalId,
-                  threadId: state.threadId,
-                  actionType: 'processRefund',
-                  actionPayload: {
-                    description: stepToRun.description,
-                    args: parsedToolCall.args,
-                    stepIndex: currentIndex,
+                const updatedStep = {
+                  ...stepToRun,
+                  status: 'failed' as const,
+                  result: {
+                    rejectedByAdmin: true,
+                    rejectionReason: latestApproval.actionPayload?.rejectionReason || '退款申请不符合政策要求。',
+                    approvalId: latestApproval.id,
                   },
-                  status: 'waiting',
-                  deadline: deadline,
-                });
-                console.log(`[Approval Gate] ⚠️ 拦截成功！已成功创建高危物理退款人工审批工单 [ID: ${approvalId}]`);
+                };
+                updatedSubtasks[currentIndex] = updatedStep;
+
+                const nextPlan = {
+                  ...currentPlan,
+                  subtasks: updatedSubtasks,
+                };
+
+                if (state.jobId) {
+                  agentEventEmitter.emit(`${state.jobId}:status`, {
+                    status: 'executing',
+                    node: 'executor',
+                    message: `❌ 人工审核拒绝：管理员驳回了本次退款申请，理由: [${latestApproval.actionPayload?.rejectionReason || '不符政策要求'}]。决策引擎即将启动回溯重规划。`,
+                    plan: nextPlan,
+                  });
+                }
+
+                return {
+                  taskPlan: nextPlan,
+                };
               }
-
-              // 维持 pending，让任务挂起
-              const updatedStep = {
-                ...stepToRun,
-                status: 'pending' as const,
-                result: { waitingForApproval: true, approvalId },
-              };
-              updatedSubtasks[currentIndex] = updatedStep;
-
-              const nextPlan = {
-                ...currentPlan,
-                subtasks: updatedSubtasks,
-              };
-
-              if (state.jobId) {
-                agentEventEmitter.emit(`${state.jobId}:status`, {
-                  status: 'executing',
-                  node: 'executor',
-                  message: `⚠️ 安全拦截：系统检测到敏感支付操作 [退款金额: ${parsedToolCall.args?.refundAmount || '100% 原路退回'}]。已物理拦截并自动生成人工审批工单 (ID: ${approvalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`,
-                  plan: nextPlan,
-                });
+              if (latestApproval.status === 'approved') {
+                console.log(
+                  `[Approval Gate] ✅ 物理退款工单 [ID: ${latestApproval.id}] 已获得人工核准放行！真刀真枪执行扣款逻辑...`,
+                );
+                // 放行，继续往下执行原有的工具调用
               }
-
-              return {
-                taskPlan: nextPlan,
-              };
-            }
-            if (latestApproval.status === 'cancelled') {
-              console.log(`[Approval Gate] 🚫 该退款操作已被用户主动取消！工单 ID: ${latestApproval.id}`);
-
-              const updatedStep = {
-                ...stepToRun,
-                status: 'failed' as const,
-                result: {
-                  cancelledByUser: true,
-                  error: '用户已取消此项操作。',
-                  message: '⚠️ 您已主动取消了此笔退款申请。相关操作已被物理终止。',
-                  approvalId: latestApproval.id,
-                },
-              };
-              updatedSubtasks[currentIndex] = updatedStep;
-
-              const nextPlan = {
-                ...currentPlan,
-                subtasks: updatedSubtasks,
-              };
-
-              if (state.jobId) {
-                agentEventEmitter.emit(`${state.jobId}:status`, {
-                  status: 'executing',
-                  node: 'executor',
-                  message: `🚫 用户取消操作：检测到您已主动取消本次退款人工审批申请 (ID: ${latestApproval.id})。执行引擎实施无损流程终止与安全退避。`,
-                  plan: nextPlan,
-                });
-              }
-
-              return {
-                taskPlan: nextPlan,
-              };
-            }
-            if (latestApproval.status === 'rejected') {
-              console.log(`[Approval Gate] ❌ 该退款操作已被管理员拒绝！工单 ID: ${latestApproval.id}`);
-
-              const updatedStep = {
-                ...stepToRun,
-                status: 'failed' as const,
-                result: {
-                  rejectedByAdmin: true,
-                  rejectionReason: latestApproval.actionPayload?.rejectionReason || '退款申请不符合政策要求。',
-                  approvalId: latestApproval.id,
-                },
-              };
-              updatedSubtasks[currentIndex] = updatedStep;
-
-              const nextPlan = {
-                ...currentPlan,
-                subtasks: updatedSubtasks,
-              };
-
-              if (state.jobId) {
-                agentEventEmitter.emit(`${state.jobId}:status`, {
-                  status: 'executing',
-                  node: 'executor',
-                  message: `❌ 人工审核拒绝：管理员驳回了本次退款申请，理由: [${latestApproval.actionPayload?.rejectionReason || '不符政策要求'}]。决策引擎即将启动回溯重规划。`,
-                  plan: nextPlan,
-                });
-              }
-
-              return {
-                taskPlan: nextPlan,
-              };
-            }
-            if (latestApproval.status === 'approved') {
-              console.log(
-                `[Approval Gate] ✅ 物理退款工单 [ID: ${latestApproval.id}] 已获得人工核准放行！真刀真枪执行扣款逻辑...`,
-              );
-              // 放行，继续往下执行原有的工具调用
             }
           } catch (dbErr) {
             console.error('[Approval Gate DB Error]:', dbErr);

@@ -65,6 +65,23 @@ export const AgentStateAnnotation = Annotation.Root({
     reducer: (x, y) => y,
     default: () => [],
   }),
+  businessConfig: Annotation<any>({
+    reducer: (x, y) => ({ ...x, ...y }),
+    default: () => ({
+      businessId: 'ecommerce',
+      systemPrompt:
+        'You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.',
+      intents: {
+        order_status: { description: 'Track or check order delivery status.' },
+        refund: { description: 'Process or request refunds.' },
+        general_query: { description: 'General customer questions.' },
+      },
+      tools: ['getOrderStatus', 'processRefund'],
+      executionMode: 'plan-and-execute',
+      confidenceThresholds: { high: 0.85, mid: 0.6 },
+      refundAutoApprovalLimit: 100, // 默认超过 $100 的退款必须人工审核，低于 $100 的自动放行
+    }),
+  }),
 
   // Final formulation output
   output: Annotation<string>({

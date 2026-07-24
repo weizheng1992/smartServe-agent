@@ -71,8 +71,13 @@ Please replan and output an alternative approach that respects this rejection. D
     ragContext = `\n\n[RELEVANT BUSINESS POLICIES & KNOWLEDGE BASE]:\n${formattedDocs}\nStrictly adhere to these store policies while making the plan. If a policy specifies return timelines, tag conditions, or shipping methods, make sure any proposed subtasks or user communication steps strictly follow these rules.`;
   }
 
+  const systemPrompt =
+    state.businessConfig?.systemPrompt ||
+    'You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.';
+
   const llm = getLLM(state.jobId);
-  const prompt = `Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}
+  const prompt = `System Instruction Context: "${systemPrompt}"
+Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}
 Return a JSON object with:
 - "goal": overall goal description
 - "subtasks": array of objects with keys "id" (unique string), "description" (what to do, e.g., call tool getOrderStatus, or ask user for confirmation).
