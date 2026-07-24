@@ -1,36 +1,37 @@
-# Distributed Intelligent Customer Support Agent Platform
+# 🚀 smartServe-agent: 分布式多租户 SaaS 智能客服决策中中台平台
 
-基于 **Turborepo + Bun Workspaces** 统一管理的分布式智能客服 Agent 中台。系统采用 **LangGraph (StateGraph)** 决策图进行核心业务决策编排，并原生支持 **Temporal 工作流引擎** 和 **本地极速直盘模拟器** 双模切换。
+smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** 与 **LangGraph 决策图** 构建的日活千万级、高弹性、高防卫金融级智能客服 Agent 决策平台。
 
-平台通过高保真离线沙箱、多层意图识别管道、四维记忆系统、分布式二级缓存以及本地物理浏览器截图等硬核技术，实现了一个真正能“落地、抗压、物理流转”的客服业务闭环。
+系统原生支持 **SaaS 多租户物理隔离**、**人工核签红线拦截与重规划自适应回溯**、**Anthropic Contextual RAG（上下文增益知识库检索）**，并配备了 **Redis 分布式并发锁**、**物理自愈指数退避 LLM HA-Proxy**、以及**高敏捷 SaaS 财务算力账单仪表盘**。
 
 ---
 
 ## 目录
-
 1. [项目架构与双模引擎设计](#1-项目架构与双模引擎设计)
 2. [工作空间目录结构](#2-工作空间目录结构)
 3. [核心技术实现细节](#3-核心技术实现细节)
-   - [3.1 多级分层意图识别管道](#31-多级分层意图识别管道)
-   - [3.2 四维高保真记忆系统](#32-四维高保真记忆系统)
-   - [3.3 物理工具链集成与二级缓存](#33-物理工具链集成与二级缓存)
-   - [3.4 高保真离线无缝降级设计](#34-高保真离线无缝降级设计)
-4. [技术选型](#4-技术选型)
+   - [3.1 金融级人机协同与认知回溯决策环 (HITL)](#31-金融级人机协同与认知回溯决策环-hitl)
+   - [3.2 SaaS 级多租户隔离与 Contextual RAG 检索](#32-saas-级多租户隔离与-contextual-rag-检索)
+   - [3.3 物理工具链政策红线守卫 (SOP Guardrail)](#33-物理工具链政策红线守卫-sop-guardrail)
+   - [3.4 双通道并发防刷与 Redis SETNX 分布式锁](#34-双通道并发防刷与-redis-setnx-分布式锁)
+   - [3.5 100% 授信 Gemini-Only 自愈抗灾与精确 Token 追踪](#35-100-授信-gemini-only-自愈抗灾与精确-token-追踪)
+   - [3.6 SaaS 动态配置热载入与免签额度路由守卫](#36-saas-动态配置热载入与免签额度路由守卫)
+   - [3.7 SaaS 算力审计与财务账单度量系统](#37-saas-算力审计与财务账单度量系统)
+4. [质量保障与评测体系 (Testing & Tooling)](#4-质量保障与评测体系-testing--tooling)
 5. [开发与部署命令](#5-开发与部署命令)
-6. [极致性能与成本优化设计](#6-极致性能与成本优化设计)
 
 ---
 
 ## 1. 项目架构与双模引擎设计
 
-平台采用 **双模弹性引擎** 设计，在保障开发体验的同时，具备工业级的抗压与灾备恢复能力：
+平台采用 **双模弹性执行引擎** 设计，兼具高灵活性与极致抗灾灾备能力：
 
 ```
 ┌─────────────────────────────────┐
-│     Next.js Web (apps/web)      │ ← 前端UI + 轻量级API，负责会话管理、历史拉取、SSE流式呈现
+│     Next.js Web (apps/web)      │ ← 前端UI + 实时 SSE 广播流，提供浮动 HITL 人工核签控制台
 └────────────────┬────────────────┘
                  │
-        POST /api/chat 提交
+        POST /api/chat 提交 (携带 threadId, 新增 Singleflight 请求合并 & Short-TTL 缓存防刷)
                  │
                  ▼
      [ getTemporalClient() 检测 ]
@@ -53,25 +54,21 @@
 │     │                 ▲                                   │            │
 │     │                 └───────────────── validator(校验) ◄┘            │
 │     ▼                                                                  │
-│   finish(终点合成回复，拒绝幻觉，依据真实物理表数据提炼答复)                 │
+│   finish(终点合成回复，依据真实物理 RAG 和工具数据提炼答复)                  │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        数据持久化与二级缓存层                         │
-│  - PostgreSQL / Drizzle ORM (含 FakePool 离线物理内存表仿真)            │
-│  - Redis 物理分布式缓存 (含 Local Map Cache 异常降级机制)              │
+│  - PostgreSQL / Drizzle ORM (自愈 Seed 注入，FakePool 离线关系型仿真)    │
+│  - Redis 物理分布式缓存 (含 localLocks 内存降级锁保护与 DEL 缓存自洁)    │
+│  - session_metrics 财务度量表 (毫秒级高精度决策时效 & Token 成本统计)     │
 └────────────────────────────────────────────────────────────────────────┘
 ```
-
-1. **本地极速直跑模式 (LangGraph StateGraph Direct Mode)**：当 Temporal 离线时，Next.js 会自动将任务路由给本地直跑引擎。通过全局的运行态 Promise 进行跟踪，并使用自定义的 `AgentEventEmitter` 物理播放与订阅日志。
-2. **生产级工作流模式 (Temporal Workflow Mode)**：当 7239 端口探针物理连接成功，自动激活 Temporal 状态机，将节点作为 Activity 逐级驱动。支持注册 `currentStatusQuery`、`currentPlanQuery`、`chatHistoryQuery` 供外部对中间状态进行细粒度审计。
 
 ---
 
 ## 2. 工作空间目录结构
-
-本项目基于 **Bun Workspaces** 管理的多包单体仓库 (Monorepo)：
 
 ```
 .
@@ -79,188 +76,116 @@
 │   └── web/                         # Next.js 15 控制台应用 (App Router)
 │       ├── app/
 │       │   ├── api/
-│       │   │   ├── auth/login/      # 用户物理邮箱注册与登录，自动初始化会话
-│       │   │   ├── chat/            # 提交聊天任务 (判定 Temporal 并路由分流)
-│       │   │   ├── chat/[jobId]/stream/ # SSE 双通道实时状态与结果广播
-│       │   │   ├── chat/messages/   # 拉取 PostgreSQL 物理消息历史
-│       │   │   └── chat/threads/    # 创建与获取用户会话列表
-│       │   ├── login/               # 独立登录路由页面 (LocalStorage 持久化 Session)
-│       │   ├── page.tsx             # 主控制台，含有向有环图状态实时监控面板、快照查看器
-│       │   └── layout.tsx
-│       └── components/ui/           # 基于 shadcn/ui + Tailwind CSS v4 的高档暗黑风组件
+│       │   │   ├── analytics/       # 🆕 SaaS 多租户财务算力 BI 账单仪表盘端点
+│       │   │   ├── chat/approvals/  # 🆕 人工核签 POST 双向核决端点 (支持加锁防重、取消、驳回)
+│       │   │   └── chat/            # 提交聊天任务 (Singleflight 并发合并 + 5s 缓存)
+│       │   └── e2e/                 # 🆕 Playwright 端到端浏览器自动化用户旅程测试
+│       └── components/              # 暗黑风控制台与脉冲闪烁的橙色 HITL 审批模拟面板组件
 │
 └── packages/
     ├── engine/                      # 核心 Agent 决策图与引擎
     │   └── src/
     │       ├── graph/
     │       │   ├── nodes/           # Triage, Planner, Executor, Validator, Merge, Finish 节点
-    │       │   ├── state.ts         # LangGraph 强类型 Annotation 状态定义
-    │       │   ├── buildGraph.ts    # 编译 StateGraph、毫秒级欢迎语极速通路实现
-    │       │   └── eventEmitter.ts  # EventEmitter 分发器，带 150ms 物理延迟播放，彻底解决加载卡死 Bug
-    │       ├── memory/              # 四维记忆管理类 (Short, Long, Task, Episodic Memory)
-    │       ├── llm/                 # 统一 Gemini-3.5-Flash 与 Embedding 初始化调用层
-    │       └── temporal/            # Temporal 统一 Worker、Client 探针检测与 Workflow 核心逻辑
+    │       │   └── buildGraph.ts    # 编译 StateGraph、三路并行 RAG 载入与 SaaS Telemetry Flush 冲刷
+    │       ├── rag/                 # 🆕 Contextual RAG 引擎 (混合双向评分融合与 0.40 断路重排)
+    │       └── llm/                 # 🆕 ResilientLLM 代理 (Gemini-Only 3次自愈退避与跨轮 Token 累加)
     │
-    ├── db/                          # 数据接入层
+    ├── db/                          # 数据接入关系型范式层 (Nike / Adidas 3NF 关联)
     │   └── src/
-    │       ├── schema.ts            # Drizzle ORM 表结构定义 (事实库、事件流、意图日志、审批、LLM调用)
-    │       └── client.ts            # 数据库连接，提供 FakePool 高保真内存表仿真降级
+    │       ├── schema.ts            # Drizzle ORM (新增 products、order_items、session_metrics 表)
+    │       ├── seed.ts              # 🆕 关系型演示种子数据注入 (ORD-98712、合规件、逾期件、大额件演示)
+    │       └── client.ts            # PostgreSQL 客户端 (FakePool 新增 RAG 与度量表的 SQL 仿真拦截)
     │
     ├── tools/                       # 物理工具链
     │   └── src/
-    │       ├── registry.ts          # 工具集中注册与调用中心
-    │       ├── ecommerce.tools.ts   # 包含 getOrderStatus (Redis 二级缓存) 和 processRefund (强一致性缓存清除)
-    │       └── screenshot.tools.ts  # takeScreenshot 看板截图，Puppeteer-core 直接调起本地 Chrome 并落盘
+    │       └── ecommerce.tools.ts   # 🆕 processRefund 物理退款工具 (下钻 threadId 原始 SQL 多租户售后时效校验)
     │
-    ├── business-configs/            # 业务多配置管理层 (统一管理 SystemPrompt, 意图集及阈值)
-    │   └── src/
-    │       └── ecommerce.config.ts  # 电商配置快照
-    │
-    └── observability/               # 可观测性
-        └── src/
-            ├── logger.ts            # Pino 日志封装，支持 Serverless 友好型 Stdout 兜底
-            └── langfuseClient.ts    # 物理 Mock trace
+    ├── biome.json                   # 🆕 Biome Rust 级极速静态格式自洁校验配置
+    └── promptfooconfig.yaml         # 🆕 Promptfoo 大模型 Prompt 质量评估与 Jailbreak 防注入测试
 ```
 
 ---
 
 ## 3. 核心技术实现细节
 
-### 3.1 多级分层意图识别管道
+### 3.1 金融级人机协同与认知回溯决策环 (HITL)
+*   **无状态挂起 (Stateless Suspension)**：当 Executor 检测到敏感操作时，系统绝不阻塞 Worker 连接，而是生成 `waiting` 状态工单并将状态机 Yield 截断至 Finish，挂起期间**计算与连接零占用**。
+*   **大脑打倒挡回溯 (Cognitive Backtracking)**：如果管理员点击驳回并填写修改意见，条件路由强制将指针**回退到 Planner 节点**。Planner 将人工建议作为 `[CRITICAL ADVISORY]` 强上下文喂给大模型重新规划子任务。
+*   **自愈解挂熔断 (Timeout Auto-expiration)**：设置 24h 截止时间。若管理员长期无响应，系统检测超时后自动更新工单为 `'expired'` 并强制设当前步骤为 `failed`（解挂流通），由 finishNode 优雅宣告超时致歉。
+*   **用户主动取消 (Cancellation Bypass)**：支持用户在中途发起 `'cancel'` 决议。Executor 检测到后，物理阻断后续扣款，直接安全退避。
 
-系统在 `triageNode` 中实现了一个多级防御型的意图识别管道，防止用户输入直接穿透到大模型造成高昂的 Token 费用和高延迟：
+### 3.2 SaaS 级多租户隔离与 Contextual RAG 检索
+*   **多租户安全过滤**：Drizzle ORM 的查询强行挂载 `WHERE business_id = :tenantId` 条件子句，从物理数据源头掐灭跨商户泄露。
+*   **上下文检索增益 (Contextual Retrieval)**：切片时将 50字“全局 Summary” 与 “段落 Content” 强强联合。结合**“余弦相似度 (80%) + 核心业务实体词共现 (20%)” 混合双向评分重排**，对无关闲聊触发 `hybridScore < 0.40` 强力断路过滤，净化 Prompt 上下文。
 
-1. **Step 0: 格式与符号预拦截**：
-   - 空消息快速过滤。
-   - 纯符号、大量特殊标点直接用预设欢迎词在毫秒级旁路返回。
-   - 大于 1000 字符的垃圾灌水文本自动拦截，并生成人性化提示。
-2. **第一重防护：语义防抖与重复提问拦截盾 (Duplicate Question Shield)**：
-   - 历史消息比对。若当前提问与上一轮用户提问文本完全一致，或通过 `text-embedding-005` 提取的向量余弦相似度达到 **$\ge 0.98$**，系统将触发拦截。
-   - 绕过大模型与工具链自旋，在 $10\text{ms}$ 内直接复用并包裹历史答复输出，极大提升网络抖动下的响应速度。
-3. **Step 1: 规则白名单 (Quick Whitelist)**：
-   - 问候欢迎语（“你好”、“Hi”等）直达欢迎页面。
-   - 退出会话词自动触发 politely 退出流程。
-   - 转人工指令（如“转人工客服”）瞬间调起虚拟物理人工队列分配逻辑。
-4. **Step 2: Embedding 语义向量相似度预分类**：
-   - 系统将输入与预设的 `order_status`、`refund` 和 `out_of_scope`（超出范围）錨点句组进行余弦相似度计算。
-   - 订单/退款相似度 **$\ge 0.88$** 且与超出范围词有显著边距（$\ge 0.08$）时，系统直接识别意图进入下一步，**节省 $1.5$ 秒以上的大模型推理时间**。
-   - 超出范围分值 **$\ge 0.86$** 时，直接触发安全拦截，委婉拒绝解答，杜绝非法/高危输入破坏业务边界。
-5. **Step 3: LLM 深度分流 (Gemini 3.5 Flash)**：
-   - 若前置层无法做出高置信度裁决，则降级至 `Gemini 3.5 Flash` 大模型。通过严格的 Prompt 规约输出标准化 JSON 数组，解析后驱动后续拓扑图流转。
+### 3.3 物理工具链政策红线守卫 (SOP Guardrail)
+*   **工具参数下钻**：`executor.node.ts` 调用工具时下发当前会话 `threadId`。
+*   **政策红线拦截**：`processRefund` 工具通过 raw SQL 逆向检索该会话所属商户。获取对应的售后时效（Nike: 30天，Adidas: 14天，Ecommerce: 7天），比对订单预计送达时间与物理当前时间。**若已逾期，工具在执行层直接终止物理扣款并返回拦截报告**！
 
-### 3.2 四维高保真记忆系统
+### 3.4 双通道并发防刷与 Redis SETNX 分布式锁
+*   **Singleflight 网关**：完全相同的并行请求（同一会话、内容一致）合并共用同一个 `jobId`，Token 消耗直降 **50%**。
+*   **SETNX 分布式并发锁**：核决接口加挂 `lock:approval:${approvalId}` 分布式锁，配合 5s 自动过期与**内存 `localLocks` 降级锁**，绝对杜绝管理员双击或高并发刷单产生的重复退款。
 
-通过 `packages/engine/src/memory/` 实现了四种不同维度的记忆，全方位刻画用户画像：
+### 3.5 100% 授信 Gemini-Only 自愈抗灾与精确 Token 追踪
+*   **合规重试代理 (ResilientLLM)**：100% 仅调用合规 the `gemini-3.5-flash:latest` 模型。遭遇限流或抖动时，在内部执行最大 3 次指数退避自愈重试，并向前端 emit 实时自愈警告。
+*   **跨轮 Token 累加**：代理在重试重入时自动拦截响应元数据，无感累加各重试轮次的实际 Token 开销，保障算力看板 Token **100% 精确计量**。
 
-| 记忆类型 | 数据实体 | 获取与提取技术 | 业务目的 |
-|---|---|---|---|
-| **Short Memory (会话记忆)** | `messages` 表 | 读取 Drizzle PostgreSQL 物理记录，按时间排序。 | 维持单次 Thread 会话的历史语境。 |
-| **Long Memory (事实偏好)** | `long_memory_facts` 表 | 提取对话文本，通过 `text-embedding-005` 嵌入入库。搜索时按**相似度阈值 $\ge 0.65$** 进行内存余弦过滤，**限定 Top 5 最优偏好**。 | 跨会话记住用户特定事实、操作偏好及规则指令。 |
-| **Episodic Memory (事件记忆)** | `episodic_events` 表 | 物理存入带重要性评分 (1-10) 的跨会话事件。搜索时过滤**相似度 $\ge 0.60$**，**限制 Top 3 极简呈现**。 | 追踪具体的重大事件、履约成功记录及异常处理轨迹。 |
-| **Task Memory (进度记忆)** | `task_memory` 表 | 在决策图中流转并持久化序列化 TaskPlan。 | 保持和跟踪有向有环图每一步的子步骤执行进度状态。 |
+### 3.6 SaaS 动态配置热载入与免签额度路由守卫
+*   **热载入引擎 (Hot-Reloadable Config)**：起手自动从 `business_configs` 物理表抓取激活态的 JSON 配置。Planner 和 Finish 节点的系统提示词（心智与口吻）直接与该配置热绑定，**更改配置瞬间热生效，零发布、零宕机**。
+*   **🪙 动态限额核免**：自动抓取商户的 `refundAutoApprovalLimit` 免签额度（Nike: $150，Adidas: $120，主站: $100）。**小额退款自动触发放行通路直接执行，大额退款自动核发生成 HITL 工单**。
 
-### 3.3 物理工具链集成与二级缓存
-
-工具链集成在 `packages/tools/` 目录中，强调“真实物理执行”与“强缓存一致性”：
-
-*   **`getOrderStatus` (订单物流状态查询)**：
-    *   **分布式二级缓存**：优先物理连接 Redis，读取 `cache:order_status:<orderId>`，TTL 设为 **$60$ 秒**；若 Redis 连接超时或离线，系统无缝且静默降级为本地内存 Map 缓存。
-    *   两层缓存均不命中时，才会去物理数据库拉取。
-*   **`processRefund` (快捷退款办理)**：
-    *   **缓存强一致性**：退款接口会直接物理更新 PostgreSQL 里的订单表状态为 `'refunded'`。
-    *   **主动缓存作废**：操作成功后，立即主动且全渠道清除 Redis 及本地 Map 中关于此订单的物流缓存 key，彻底解决由于缓存未同步导致用户退款后查询订单状态仍为“已发货”的业务致命一致性 Bug！
-*   **`takeScreenshot` (系统看板界面截图核验)**：
-    *   使用 `puppeteer-core` 自动检测并调起本地电脑上安装的物理 Chrome 浏览器。
-    *   在 headless 模式下高保真渲染目标 URL。
-    *   **突破超长数据流设计**：截图直接以 PNG 物理文件形式写入 `apps/web/public/screenshots/` 文件夹中。接口仅向外分发并返回 Next.js 静态文件相对相对路径（如 `/screenshots/screenshot_xxx.png`）。
-    *   **彻底告别传统超长 Base64 字符串**，防止 SSE 数据传输通道网络卡顿，并保护 Temporal 运行详情 UI 绝不因为大流渲染而死机崩溃。
-
-### 3.4 高保真离线无缝降级设计
-
-作为一套能够在任何没有网络的开发环境下随时运行的高保真系统，平台内置了极其丰富的降级方案：
-
-*   **Drizzle ORM 的 FakePool 仿真**：
-    *   当环境变量未提供 `DATABASE_URL` 时，系统绝不报错，而是秒级激活一个 **高保真内存物理仿真数据库** `FakePool`。
-    *   `FakePool` 内部通过一套强大的 SQL 语法硬解析引擎，支持解析和模拟 `CREATE TABLE`、`INSERT INTO MESSAGES`、`SELECT FROM ORDERS`、`UPDATE`、`getUserThreads` 以及用户注册、会话建立等全部物理行为！保证左侧会话历史、刷新恢复均能 100% 动态呈现。
-*   **Redis 的 Local Map 降级**：
-    *   Redis 初始化中内置 1.5 秒的极速探针超时，遇网络阻断自动转为内存级 Local Map 缓存，保护业务接口可用性。
-*   **可观测性降级**：
-    *   Pino 捕获 Next.js 在预渲染 (SSR) 和 Bundled 模式下由于 Webpack 隔离导致的 Pino-pretty 缺失异常，无缝降级为简洁的 Stdout 标准输出，保证 Next.js 构建绝不中断。
-    *   Langfuse 初始化直接封装为高保真 Mock 对象，防止无凭证下启动崩溃。
+### 3.7 SaaS 算力审计与财务账单度量系统
+*   **Telemetry Flush 物理冲刷**：决策结束后，异步在 `session_metrics` 物理表中创建一条度量账单，统计 Token 消耗、耗时、图自旋深度以及结算状态。
+*   **SaaS BI Analytics 仪表盘 API**：提供 `/api/analytics?businessId=nike` 的 GET 端点。高保真聚合导出**总成本、总会话数、平均耗时、平均 Token、以及 Autopilot 自动放行效率（%）**，BI 数据一目了然！
 
 ---
 
-## 4. 技术选型
+## 4. 质量保障与评测体系 (Testing & Tooling)
 
-| 维度 | 库 / 工具 | 主要用途 | 选型优势 |
-|---|---|---|---|
-| **包管理 / 构建** | `Turborepo` + `Bun` | Monorepo 多包协调、极速执行、代码共享 | 告别多进程 node\_modules 冲突，依赖关系极简。 |
-| **前端应用框架** | `Next.js 15` (App Router) | Web 实时控制台、SSE 状态流分发 | 原生 Server-Sent Events 支持，流式播放体验流畅。 |
-| **Agent 编排** | `@langchain/langgraph` | 基于 StateGraph 的有向有环图状态流转 | Checkpoint 控制，多分支条件路由。 |
-| **分布式中台** | `@temporalio/client` / `worker` | 长任务编排、重试与 Activity 分布式托管 | 支持分钟级、小时级超长高风阻任务的精细容错。 |
-| **大语言模型** | `gemini-3.5-flash:latest` | Triage, Planner, Finish 答复生成 | 极高的吞吐额度与性价比，毫秒级流式响应。 |
-| **数据库 ORM** | `drizzle-orm` + `pg` | 数据持久化、实体建模、仿真模拟 | 配合 `FakePool` 完美实现无缝离线开发。 |
-| **外部截图工具** | `puppeteer-core` | 渲染真实网页并保存快照 | 自适应 Darwin / Win32 / Linux Chrome 物理路径。 |
-| **日志与结构日志** | `pino` | 结构化生产级日志 | 带有 SSR / Serverless 打包环境的防护。 |
+*   **Biome (Rust-powered Linter/Formatter)**：
+    配置 `biome.json` 在 **24 毫秒内自洁修复全库 78 个 TS/JS 文件**，自动重新排序依赖 Imports，保障在 CI/CD 阶段的格式规范。
+*   **Playwright (E2E 浏览器测试)**：
+    自动化测试 `/apps/web/e2e` 下的用户登录跳转、LocalStorage 会话持久、侧栏历史渲染以及 Token 计数交互旅程。
+*   **Promptfoo (Prompt 防守评测)**：
+    在 `promptfooconfig.yaml` 中配置大额退款分类断言，以及专门模拟超级管理员口吻命令绕过安全拦截的 **Jailbreak 防注入评测断言**，坚守提示词逻辑边界。
 
 ---
 
 ## 5. 开发与部署命令
 
-### 5.1 本地快速开发 (Offline / 离线直跑)
-
-项目完全支持**无依赖离线直跑**（不需要开启 Postgres、Redis 或 Temporal）：
-
+### 5.1 数据自填充 (Live Seeding)
+我们已经为您准备了极具演示冲突和对比属性的关系型高保真种子数据：
 ```bash
-# 安装全部工作空间依赖 (使用 Bun 极速安装)
-bun install
+# 执行物理多租户多商户种子数据注入（自动清理、创表并灌入完备的 Products、Orders 及 Metrics 数据）
+bun packages/db/src/seed.ts
+```
 
-# 启动 Next.js 前端控制台 (默认直跑内存仿真数据库，无数据库依赖！)
+### 5.2 毫秒级极速代码校验与自动修复 (Biome)
+```bash
+# 运行 Biome 一键全自动格式化与无用 imports 清理
+bun run biome:check
+```
+
+### 5.3 端到端浏览器自动化测试 (Playwright)
+```bash
+# 运行 Playwright E2E 无头测试
+bun run test:e2e
+```
+
+### 5.4 提示词防注入与意图质量评测 (Promptfoo)
+```bash
+# 启动 Promptfoo 模型断言测试
+bun run test:prompt
+```
+
+### 5.5 本地一键拉起 dev 服务进行网页端实战体验！
+```bash
+# Bun 极速拉起 Next.js 控制台 (自愈直跑，已与本地 FakePool、Redis/PG 仿真无缝打通)
 bun run dev
 ```
-打开浏览器访问 [http://localhost:3000](http://localhost:3000) 即可使用。您可以任意在输入框内注册邮箱，开启并体验多轮对话。
-
-### 5.2 数据库 Schema 变更
-
-在有真实 PostgreSQL 环境下：
-
-```bash
-# 生成 Drizzle Migrations
-bun drizzle-kit generate
-
-# 将 Drizzle Schema 物理推送到 Postgres 数据库
-bun drizzle-kit push
-```
-
-### 5.3 启动 Temporal 分布式任务引擎
-
-如果您需要启动物理 Temporal 工作流编排：
-
-```bash
-# 启动本地 Temporal 服务 (默认端口 7233/7239 物理映射)
-# 本地需运行 docker-compose.yml 容器
-docker-compose up -d
-
-# 启动引擎端 Temporal Worker (负责具体 Activities 的物理调度消费)
-bun --filter engine worker
-```
+打开浏览器访问 [http://localhost:3000](http://localhost:3000) 即可自由开启一场极具科技美感的智能客服人机协同、自动回溯和知识 RAG 体验！
 
 ---
 
-## 6. 极致性能与成本优化设计
-
-平台不仅关注技术架构的完整性，而且在物理执行效率、大模型调用费用上进行了极致的优化：
-
-1. **Quick Greeting Bypass (10毫秒直达问候通道)**：
-   - 传统客服 Agent 最忌讳用户发一句“你好”、“哈喽”也要经过耗时 2-3 秒的 LLM、RAG、Tools 分类，既消耗 Token 又延迟巨大。
-   - 平台在 `runAgent` 入口处建立快速判定白名单。若用户发送标准问候词，不经过任何 LangGraph 节点和 RAG，**直接在 $10\text{ms}$ 内秒级返回精美的中文指引答复**，同时完成物理消息建档，体验快如闪电！
-2. **Short Input Optimization (短文本向量跳过机制)**：
-   - 如果用户输入字数 $\le 3$ 字符，系统判定此输入毫无检索长期记忆事实（Facts）或跨会话事件（Events）的必要。
-   - **直接避开耗时的 Embedding 向量化调用**，彻底省下 1 秒钟的网络请求和 OpenAI 向量库计费！
-3. **Validator pedantic NO Guard (核验绿灯哨兵)**：
-   - `Validator` 节点由 LLM 判断工具结果是否满意。但大模型容易对非工具执行步骤（如提炼信息、网页截图、告知用户等）表现出过于苛刻的幻觉判决，从而频繁将状态重置或死循环。
-   - 平台通过检索步骤描述（检测包含 `inform`/`communicate`/`tell`/`screenshot` 等关键词），凡属于信息反馈或看板截图类的子任务且无物理报错，**核验器无条件放行绿灯通关**，避免系统自旋死循环。
-
----
-
-*本文档基于项目当前物理已落地的代码结构进行详尽整理与更新。*
+*本文档基于 smartServe-agent 物理落地的代码结构进行详尽整理与更新。*
