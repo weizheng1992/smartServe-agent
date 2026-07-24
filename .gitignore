@@ -1,0 +1,74 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+bun.lockb
+
+# Diagnostic reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Directory for instrumenting and packaging
+lib-cov
+coverage
+*.lcov
+
+# Grunt intermediate storage
+.grunt
+
+# node-modules
+node_modules/
+jspm_packages/
+
+# Snowpack dependency directory
+web_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Microbundle cache
+.eslintcache
+
+# Optional Stylelint cache
+.stylelintcache
+
+# Next.js build output
+.next/
+out/
+
+# Rollup output directory
+dist/
+
+# .env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Turbo repo cache
+.turbo/
+
+# Temporal dev server database
+.temporal/
+*.db
+*.db-journal
