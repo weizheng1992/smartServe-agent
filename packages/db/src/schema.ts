@@ -64,6 +64,22 @@ export const orderItems = pgTable('order_items', {
   priceAtPurchase: real('price_at_purchase').notNull(), // 下单时单价快照
 });
 
+// ============ SaaS Billing & Conversational Telemetry (租户账单与分析度量表) ============
+
+export const sessionMetrics = pgTable('session_metrics', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  businessId: text('business_id').notNull(), // SaaS 商户隔离统计
+  threadId: text('thread_id')
+    .references(() => threads.id)
+    .notNull(),
+  totalTokens: integer('total_tokens').default(0), // 算力 Token 消耗
+  calculatedCostUsd: real('calculated_cost_usd').default(0.0), // 换算财务成本 (USD)
+  nodeTransitionsCount: integer('node_transitions_count').default(1), // DAG 图转移深度
+  resolutionStatus: text('resolution_status').notNull(), // 'resolved_auto' | 'waiting_approval' | 'expired' | 'cancelled'
+  avgLatencyMs: real('avg_latency_ms').default(0), // 本次决策耗时 (毫秒)
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // ============ Long Memory (跨会话事实/偏好) ============
 
 export const longMemoryFacts = pgTable('long_memory_facts', {

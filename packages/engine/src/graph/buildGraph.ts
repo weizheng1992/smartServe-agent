@@ -345,7 +345,54 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     });
   }
 
+  const startTime = Date.now();
   const result = await graphApp.invoke(initialState);
+  const elapsedLatency = Date.now() - startTime;
+
+  // 🪙 SaaS Telemetry: 物理记录本次会话的算力消耗、换算成本与图决策深度
+  try {
+    const totalTokens = agentEventEmitter.getTokens(initialState.jobId);
+    const costUsd = (totalTokens / 1000000) * 0.15; // 按照每百万 Token $0.15 换算
+    const nodeTransitions = result.loopCount || 3;
+
+    let resolutionStatus = 'resolved_auto';
+    const plan = result.taskPlan;
+    if (plan && plan.subtasks) {
+      const hasPending = plan.subtasks.some((st: any) => st.result?.waitingForApproval);
+      const hasCancelled = plan.subtasks.some((st: any) => st.result?.cancelledByUser);
+      const hasExpired = plan.subtasks.some((st: any) => st.result?.expiredByTimeout);
+      const hasRejected = plan.subtasks.some((st: any) => st.status === 'failed' && st.result?.rejectedByAdmin);
+
+      if (hasPending) {
+        resolutionStatus = 'waiting_approval';
+      } else if (hasCancelled) {
+        resolutionStatus = 'cancelled';
+      } else if (hasExpired) {
+        resolutionStatus = 'expired';
+      } else if (hasRejected) {
+        resolutionStatus = 'rejected';
+      }
+    }
+
+    const { getDrizzle, sessionMetrics } = require('db');
+    const drizzle = getDrizzle();
+    if (drizzle) {
+      await drizzle.insert(sessionMetrics).values({
+        businessId: dynamicConfig.businessId,
+        threadId: threadId,
+        totalTokens: totalTokens,
+        calculatedCostUsd: costUsd,
+        nodeTransitionsCount: nodeTransitions,
+        resolutionStatus: resolutionStatus,
+        avgLatencyMs: elapsedLatency,
+      });
+      console.log(
+        `[SaaS Telemetry] 📊 成功持久化会话审计：商户 [${dynamicConfig.businessId}]，Token 消耗: ${totalTokens}，换算成本: $${costUsd.toFixed(6)}，解挂状态: ${resolutionStatus}`,
+      );
+    }
+  } catch (metricsErr) {
+    console.warn('[SaaS Telemetry] Failed to persist session metrics in physical table:', metricsErr);
+  }
 
   // Store assistant response back into memories
   if (result.output) {

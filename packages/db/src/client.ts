@@ -217,6 +217,53 @@ export class FakePool {
       return { rows: [] };
     }
 
+    if (
+      s.toUpperCase().includes('INSERT INTO SESSION_METRICS') ||
+      s.toUpperCase().includes('INSERT INTO "SESSION_METRICS"')
+    ) {
+      return { rows: [] };
+    }
+
+    if (s.toUpperCase().includes('FROM SESSION_METRICS') || s.toUpperCase().includes('FROM "SESSION_METRICS"')) {
+      const businessId = params && typeof params[0] === 'string' ? params[0] : 'ecommerce';
+      const mockMetrics = [
+        {
+          id: 'm_1',
+          business_id: businessId,
+          thread_id: 't_1',
+          total_tokens: 4200,
+          calculated_cost_usd: 0.00063,
+          node_transitions_count: 5,
+          resolution_status: 'resolved_auto',
+          avg_latency_ms: 3200,
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+        {
+          id: 'm_2',
+          business_id: businessId,
+          thread_id: 't_2',
+          total_tokens: 8900,
+          calculated_cost_usd: 0.001335,
+          node_transitions_count: 6,
+          resolution_status: 'waiting_approval',
+          avg_latency_ms: 4500,
+          created_at: new Date(Date.now() - 7200000).toISOString(),
+        },
+        {
+          id: 'm_3',
+          business_id: businessId,
+          thread_id: 't_3',
+          total_tokens: 3100,
+          calculated_cost_usd: 0.000465,
+          node_transitions_count: 4,
+          resolution_status: 'resolved_auto',
+          avg_latency_ms: 2800,
+          created_at: new Date(Date.now() - 10800000).toISOString(),
+        },
+      ];
+      return { rows: mockMetrics } as DBQueryResult<unknown>;
+    }
+
     if (s.toUpperCase().includes('FROM RAG_DOCUMENTS') || s.toUpperCase().includes('FROM "RAG_DOCUMENTS"')) {
       const businessId = params && typeof params[0] === 'string' ? params[0] : 'ecommerce';
       const fakeRags = [
