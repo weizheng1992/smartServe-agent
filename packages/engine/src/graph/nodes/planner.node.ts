@@ -75,9 +75,18 @@ Please replan and output an alternative approach that respects this rejection. D
     state.businessConfig?.systemPrompt ||
     'You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.';
 
+  // 🚀 会话上下文记忆：将历史消息拼装注入，大模型即可敏捷关联上一轮提问中提到的核心要素（如订单号 ORD-98712 等）
+  let historyContext = '';
+  if (state.shortMemory && state.shortMemory.length > 0) {
+    const formattedHistory = state.shortMemory
+      .map((m: any) => `${m.role === 'user' ? 'Customer' : 'Agent'}: "${m.content}"`)
+      .join('\n');
+    historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}\n\n[CRITICAL DIRECTIVE]: Carefully read the conversation history above. If the customer is requesting a refund or action in their current input, and they have already provided a specific order ID in previous turns (or you have already queried it successfully), you MUST extract and use that order ID to formulate your subtasks (e.g. processRefund with orderId: ORD-98712). DO NOT plan to ask the customer for the order ID again if it was already mentioned or established in the history!`;
+  }
+
   const llm = getLLM(state.jobId);
   const prompt = `System Instruction Context: "${systemPrompt}"
-Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}
+Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}${historyContext}
 Return a JSON object with:
 - "goal": overall goal description
 - "subtasks": array of objects with keys "id" (unique string), "description" (what to do, e.g., call tool getOrderStatus, or ask user for confirmation).

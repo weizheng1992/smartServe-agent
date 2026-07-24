@@ -321,6 +321,9 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     console.warn('[DB] Failed to persist user message in physical table:', msgErr);
   }
 
+  // 🚀 获取最新的短期会话历史，无缝传递给状态图总线
+  const historyMsgs = await shortMemory.getMessages();
+
   // Build and execute compiled graph
   const graphApp = buildAgentGraph().compile();
 
@@ -333,6 +336,7 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     episodicEvents: episodicEvents,
     ragDocuments: ragDocs,
     businessConfig: dynamicConfig,
+    shortMemory: historyMsgs,
     loopCount: 0,
   };
 

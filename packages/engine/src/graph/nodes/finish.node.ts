@@ -24,10 +24,19 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
     state.businessConfig?.systemPrompt ||
     'You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.';
 
+  // 🚀 会话上下文记忆：将历史消息拼装注入，大模型在总结生成最终答复时，能够完美串联多轮对话上下文脉络
+  let historyContext = '';
+  if (state.shortMemory && state.shortMemory.length > 0) {
+    const formattedHistory = state.shortMemory
+      .map((m: any) => `${m.role === 'user' ? 'Customer' : 'Agent'}: "${m.content}"`)
+      .join('\n');
+    historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}`;
+  }
+
   const prompt = `System Instruction Context: "${systemPrompt}"
 Formulate a clean, professional, and helpful customer support message in Chinese.
 Customer Question: "${input}"
-The plan execution details (the ultimate truth from physical database) are: ${JSON.stringify(plan.subtasks || [])}${ragContext}
+The plan execution details (the ultimate truth from physical database) are: ${JSON.stringify(plan.subtasks || [])}${ragContext}${historyContext}
 
 CRITICAL RULES (最高行为准则 - 严禁幻觉):
 1. You must answer the customer 100% based on the REAL tools results above.

@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { getDrizzle, sessionMetrics } from 'db';
 import { eq } from 'drizzle-orm';
+import { type NextRequest, NextResponse } from 'next/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,10 +12,7 @@ export async function GET(req: NextRequest) {
 
     // SaaS 多租户隔离：如果物理数据库连接正常，查询该租户专属的审计度量数据
     if (drizzle) {
-      rows = await drizzle
-        .select()
-        .from(sessionMetrics)
-        .where(eq(sessionMetrics.businessId, businessId));
+      rows = await drizzle.select().from(sessionMetrics).where(eq(sessionMetrics.businessId, businessId));
     } else {
       // 物理连接异常或离线，无缝切换至 FakePool 本地静态物理度量仿真，高敏捷展现仪表盘！
       const { db } = require('db');
