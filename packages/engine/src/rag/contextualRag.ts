@@ -9,6 +9,107 @@ export interface ScoredRAGDocument {
   similarity: number;
 }
 
+// 🧠 混合检索分词器 (Hybrid Tokenizer): 英文/数字按词拆分，CJK 中文字符按单字（unigram）拆分，完美适配多语言无摩擦全文检索
+function tokenize(text: string): string[] {
+  const normalized = text.toLowerCase();
+  const tokens: string[] = [];
+  const regex = /[a-z0-9]+|[一-龥]/g;
+  let match;
+  while ((match = regex.exec(normalized)) !== null) {
+    tokens.push(match[0]);
+  }
+  return tokens;
+}
+
+interface DocWithTokens {
+  id: string;
+  tokens: string[];
+}
+
+// 🧮 经典数学 BM25 评分算法实现 (Portable BM25 Engine)
+function computeBM25(query: string, docs: DocWithTokens[]): Map<string, number> {
+  const queryTokens = tokenize(query);
+  const scores = new Map<string, number>();
+
+  if (queryTokens.length === 0 || docs.length === 0) {
+    for (const doc of docs) {
+      scores.set(doc.id, 0);
+    }
+    return scores;
+  }
+
+  const N = docs.length;
+  const k1 = 1.2;
+  const b = 0.75;
+
+  let totalLength = 0;
+  for (const doc of docs) {
+    totalLength += doc.tokens.length;
+  }
+  const avgdl = totalLength / N || 1;
+
+  const idf = new Map<string, number>();
+  for (const token of queryTokens) {
+    let n_q = 0;
+    for (const doc of docs) {
+      if (doc.tokens.includes(token)) {
+        n_q++;
+      }
+    }
+    const idfValue = Math.log(Math.max(0.0001, (N - n_q + 0.5) / (n_q + 0.5) + 1));
+    idf.set(token, idfValue);
+  }
+
+  for (const doc of docs) {
+    let score = 0;
+    const docLen = doc.tokens.length;
+    const termFreqs = new Map<string, number>();
+    for (const token of doc.tokens) {
+      termFreqs.set(token, (termFreqs.get(token) || 0) + 1);
+    }
+
+    for (const token of queryTokens) {
+      const f = termFreqs.get(token) || 0;
+      if (f > 0) {
+        const tokenIDF = idf.get(token) || 0;
+        const numerator = f * (k1 + 1);
+        const denominator = f + k1 * (1 - b + b * (docLen / avgdl));
+        score += tokenIDF * (numerator / denominator);
+      }
+    }
+    scores.set(doc.id, score);
+  }
+
+  return scores;
+}
+
+interface DocRankItem {
+  id: string;
+  score: number;
+}
+
+// 🔀 倒数排名融合 (RRF - Reciprocal Rank Fusion)
+function reciprocalRankFusion(
+  vectorRank: DocRankItem[],
+  bm25Rank: DocRankItem[],
+  k = 60
+): Map<string, number> {
+  const rrfScores = new Map<string, number>();
+
+  const applyRank = (rankList: DocRankItem[]) => {
+    rankList.forEach((item, index) => {
+      const rank = index + 1;
+      const rrfContribution = 1 / (k + rank);
+      rrfScores.set(item.id, (rrfScores.get(item.id) || 0) + rrfContribution);
+    });
+  };
+
+  applyRank(vectorRank);
+  applyRank(bm25Rank);
+
+  return rrfScores;
+}
+
 export class ContextualRAG {
   private businessId: string;
 
@@ -106,7 +207,8 @@ export class ContextualRAG {
         .from(ragDocuments)
         .where(eq(ragDocuments.businessId, this.businessId));
 
-      const scoredDocs: ScoredRAGDocument[] = [];
+      const docEmbeddings = new Map<string, number>();
+      const docsWithTokens: DocWithTokens[] = [];
 
       for (const row of rows) {
         let embeddingArray: number[] | null = null;
@@ -133,39 +235,61 @@ export class ContextualRAG {
           similarity = denominator === 0 ? 0 : dotProduct / denominator;
         }
 
-        // 🧠 混合评分与重排过滤 (Hybrid Score Fusion & Semantic Re-ranking)
-        // 结合向量语义距离 (80%) 与核心业务关键词共现奖励 (20%)，防止边缘弱相关文档污染上下文，极大节省 Token 成本
-        const queryLower = query.toLowerCase();
-        let keywordBonus = 0;
-        const hasRefundKeywords =
-          queryLower.includes('退') ||
-          queryLower.includes('refund') ||
-          queryLower.includes('return') ||
-          queryLower.includes('换货');
-        const docHasRefundKeywords =
-          row.chunkText.includes('退') || row.chunkText.includes('退款') || row.chunkText.includes('退换货');
+        docEmbeddings.set(row.id, similarity);
+        docsWithTokens.push({
+          id: row.id,
+          tokens: tokenize(`${row.contextualSummary || ''} ${row.chunkText}`),
+        });
+      }
 
-        if (hasRefundKeywords && docHasRefundKeywords) {
-          keywordBonus = 0.15; // 给予 15% 的高增益相关度加权
-        }
+      // Compute standard BM25 Scores
+      const bm25Scores = computeBM25(query, docsWithTokens);
 
-        const hybridScore = similarity * 0.8 + keywordBonus * 0.2;
+      // Build Vector rank list and BM25 rank list for RRF
+      const vectorRank: DocRankItem[] = Array.from(docEmbeddings.entries())
+        .map(([id, score]) => ({ id, score }))
+        .sort((a, b) => b.score - a.score);
 
-        // 严格断路阀：仅当混合评分 >= 0.40 时予以召回。有效剔除闲聊或不相干提问时的政策垃圾数据干扰
+      const bm25Rank: DocRankItem[] = Array.from(bm25Scores.entries())
+        .filter(([_, score]) => score > 0)
+        .map(([id, score]) => ({ id, score }))
+        .sort((a, b) => b.score - a.score);
+
+      // Calculate Reciprocal Rank Fusion (RRF) scores
+      const rrfScores = reciprocalRankFusion(vectorRank, bm25Rank, 60);
+
+      const scoredDocs: ScoredRAGDocument[] = [];
+
+      for (const row of rows) {
+        const similarity = docEmbeddings.get(row.id) || 0;
+        const bm25Score = bm25Scores.get(row.id) || 0;
+
+        // 🧠 混合断路阀：对无界的 BM25 进行规范化映射 [0, inf) -> [0, 1)，再以向量相似度 (80%) 与精确关键词 (20%) 混合
+        const normalizedBM25 = bm25Score / (bm25Score + 1);
+        const hybridScore = similarity * 0.8 + normalizedBM25 * 0.2;
+
+        // 严格断路阀：仅当混合评分 >= 0.40 时予以召回，防止无关噪音垃圾数据污染
         if (hybridScore >= 0.4) {
           scoredDocs.push({
             id: row.id,
             businessId: row.businessId,
             chunkText: row.chunkText,
             contextualSummary: row.contextualSummary || '',
-            similarity: hybridScore,
+            similarity: hybridScore, // 保持 similarity 为混合得分
           });
         }
       }
 
-      // Sort by similarity descending
-      const sorted = scoredDocs.sort((a, b) => b.similarity - a.similarity).slice(0, limit);
-      console.log(`[RAG] PostgreSQL 物理检索完成，筛选出 ${sorted.length} 个相关 Contextual RAG 切片。`);
+      // 🏆 重排：使用 RRF 分数对通过断路阀的文档进行最终精准降序重排
+      const sorted = scoredDocs
+        .sort((a, b) => {
+          const rrfA = rrfScores.get(a.id) || 0;
+          const rrfB = rrfScores.get(b.id) || 0;
+          return rrfB - rrfA;
+        })
+        .slice(0, limit);
+
+      console.log(`[RAG] PostgreSQL 物理混合检索检索完成，经 BM25 + RRF 重排筛选出 ${sorted.length} 个相关切片。`);
       return sorted;
     } catch (dbErr) {
       console.warn('[RAG] PostgreSQL query failed, falling back to Local Fake RAG:', dbErr);
@@ -203,19 +327,34 @@ export class ContextualRAG {
     // Filter by businessId
     const filtered = fakeData.filter((d) => d.businessId === this.businessId);
 
-    // Simple keyword matching for simulation
-    const queryLower = query.toLowerCase();
+    // Compute high-fidelity BM25 scores on mock data for offline simulation
+    const docsWithTokens = filtered.map((d) => ({
+      id: d.id,
+      tokens: tokenize(`${d.contextualSummary || ''} ${d.chunkText}`),
+    }));
+    const bm25Scores = computeBM25(query, docsWithTokens);
+
     const results = filtered.map((d) => {
-      let score = 0.5; // Base score
-      if (queryLower.includes('退') || queryLower.includes('refund') || queryLower.includes('return')) {
-        score += 0.3;
+      const bm25Score = bm25Scores.get(d.id) || 0;
+      const normalizedBM25 = bm25Score / (bm25Score + 1);
+
+      // Simulating vector similarity base score:
+      // If query has any word matching businessId, increase semantic base score
+      let simulatedVectorSimilarity = 0.35; // default base
+      const queryLower = query.toLowerCase();
+      if (queryLower.includes(this.businessId.toLowerCase())) {
+        simulatedVectorSimilarity = 0.65;
+      } else if (queryLower.includes('退') || queryLower.includes('refund') || queryLower.includes('return') || queryLower.includes('换货')) {
+        simulatedVectorSimilarity = 0.55;
       }
-      if (queryLower.includes(this.businessId)) {
-        score += 0.15;
-      }
-      return { ...d, similarity: score };
+
+      const hybridScore = simulatedVectorSimilarity * 0.8 + normalizedBM25 * 0.2;
+      return { ...d, similarity: hybridScore };
     });
 
-    return results.sort((a, b) => b.similarity - a.similarity).slice(0, 2);
+    return results
+      .filter((r) => r.similarity >= 0.4)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 2);
   }
 }
