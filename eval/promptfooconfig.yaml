@@ -1,0 +1,17 @@
+description: "智能客服平台: Triage, Planner & Answer Quality 全量回归评测大盘"
+
+prompts:
+  - "../classify_prompt.txt"
+  - "../planner_prompt.txt"
+
+providers:
+  - id: "openai:chat:gemini-3.5-flash:latest"
+    config:
+      apiBase: "http://localhost:11211/api/openai/v1"
+      apiKey: "dummy"
+      temperature: 0
+
+tests:
+  - $import: testCases/ecommerce/single-intent.json
+  - $import: testCases/ecommerce/multi-intent.json
+  - $import: testCases/legal/single-intent.json

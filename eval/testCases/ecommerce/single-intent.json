@@ -1,0 +1,41 @@
+[
+  {
+    "description": "意图分类 - 纯查物流单 (ecommerce)",
+    "vars": {
+      "input": "帮我查一下我的订单 ORD-98712 的快递寄到哪里了？",
+      "expectedIntents": ["order_status"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "步骤规划 - 纯查物流单 (ecommerce)",
+    "vars": {
+      "input": "帮我查一下我的订单 ORD-98712 的快递寄到哪里了？",
+      "expectedTools": ["getOrderStatus"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "最终回复质量评测 - 物流查单回答专业度",
+    "vars": {
+      "input": "帮我查一下我的订单 ORD-98712 的快递寄到哪里了？",
+      "expectedRules": "必须为中文回复，礼貌亲切。真实展示由 getOrderStatus 提取出的 FedEx 快递单号 1234567890 且绝对没有胡编乱造的发货时间。"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/answerQuality.scorer.ts"
+      }
+    ]
+  }
+]

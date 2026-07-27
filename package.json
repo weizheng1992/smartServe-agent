@@ -12,7 +12,7 @@
     "biome:lint": "biome lint --write .",
     "biome:check": "biome check --write .",
     "test:e2e": "playwright test",
-    "test:prompt": "promptfoo eval"
+    "test:prompt": "promptfoo eval -c eval/promptfooconfig.yaml"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

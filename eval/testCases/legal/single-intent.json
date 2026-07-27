@@ -1,0 +1,28 @@
+[
+  {
+    "description": "意图分类 - 法律政策及合规咨询",
+    "vars": {
+      "input": "如果我想退货，法律规定的无理由退货时效是多久？",
+      "expectedIntents": ["general_query"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "最终回复质量评测 - 法律及退换货合规咨询专业度",
+    "vars": {
+      "input": "如果我想退货，法律规定的无理由退货时效是多久？",
+      "expectedRules": "中文作答。明确、客观、合规地指出中国《消费者权益保护法》规定的 7 天无理由退货时效要求，并且语气严谨、专业。"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/answerQuality.scorer.ts"
+      }
+    ]
+  }
+]

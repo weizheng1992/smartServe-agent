@@ -1,0 +1,41 @@
+[
+  {
+    "description": "意图分类 - 物流查询与申请退款双重意图",
+    "vars": {
+      "input": "我想看看我买的跑鞋 ORD-98712 到了没，顺便我想把上一笔订单申请退款了",
+      "expectedIntents": ["order_status", "refund"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "步骤规划 - 物流查询与退款双重意图",
+    "vars": {
+      "input": "我想看看我买的跑鞋 ORD-98712 到了没，顺便我想把上一笔订单申请退款了",
+      "expectedTools": ["getOrderStatus", "processRefund"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "最终回复质量评测 - 双重意图复杂场景综合答复质量",
+    "vars": {
+      "input": "我想看看我买的跑鞋 ORD-98712 到了没，顺便我想把上一笔订单申请退款了",
+      "expectedRules": "中文作答。对物流查询进行反馈（展示FedEx单号1234567890），同时对退款申请给予专业的响应，指出退款操作需要满足无理由退换货条件或进入退款审核。"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/answerQuality.scorer.ts"
+      }
+    ]
+  }
+]
