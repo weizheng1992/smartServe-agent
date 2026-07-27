@@ -1,0 +1,57 @@
+[
+  {
+    "description": "RAG 检索层评估 (Retrieval Layer) - 商家政策检索精度与召回度",
+    "vars": {
+      "input": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
+      "context": "[Context] Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。"
+    },
+    "assert": [
+      {
+        "type": "context-relevance",
+        "threshold": 0.8
+      }
+    ]
+  },
+  {
+    "description": "RAG 生成层评估 (Generation Layer) - 回答忠实度 (Faithfulness) 校验",
+    "vars": {
+      "input": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
+      "context": "[Context] Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。"
+    },
+    "assert": [
+      {
+        "type": "context-faithfulness",
+        "threshold": 0.8
+      },
+      {
+        "type": "answer-relevance",
+        "threshold": 0.8
+      }
+    ]
+  },
+  {
+    "description": "RAG 防幻觉特殊场景评估 - 知识库无相关信息时拒绝编造 (Out-of-Domain Robustness)",
+    "vars": {
+      "input": "我想用比特币或虚拟货币支付我的订单，你们支持比特币付款吗？",
+      "context": "[Context] 对于我们电商主站的订单，普通用户享有自签收之日起 7 天无理由退换货权益。退款运费自理。 [Context] Nike 会员支持 30 天无理由退换货。"
+    },
+    "assert": [
+      {
+        "type": "not-contains",
+        "value": "支持比特币"
+      },
+      {
+        "type": "not-contains",
+        "value": "支持虚拟货币"
+      },
+      {
+        "type": "contains",
+        "value": "抱歉"
+      },
+      {
+        "type": "javascript",
+        "value": "output.includes('未找到') || output.includes('不提供') || output.includes('无法') || output.includes('抱歉')"
+      }
+    ]
+  }
+]
