@@ -236,7 +236,7 @@
 ### 📂 核心文件：
 1. **Playwright 配置文件**：`playwright.config.ts` (配置 Chromium, Firefox, Webkit 等浏览器自动化参数)
 2. **E2E 测试用例**：`apps/web/e2e/chat-hitl.spec.ts` (测试未登录重定向、安全登录、左侧会话、右侧 Token 看板、审批流等用户旅程)
-3. **Promptfoo 评估配置文件**：`promptfooconfig.yaml` (配置分类意图断言、大额退款拦截断言、超级管理员 Prompt 注入防御断言)
+3. **Promptfoo 评估配置文件**：`eval/promptfooconfig.yaml` (配置分类意图断言、大额退款拦截断言、超级管理员 Prompt 注入防御断言)
 
 ### 💡 架构解析：
 * **Playwright 真实浏览器旅程**：在测试前自动调起本地 `bun run dev`，通过真实的 Chromium/Firefox 无头浏览器模拟客服与用户，验证 API Session 隔离、实时 SSE 广播流解析等全链路渲染正常。

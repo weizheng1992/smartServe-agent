@@ -1,8 +1,8 @@
 description: "智能客服平台: Triage, Planner & Answer Quality 全量回归评测大盘"
 
 prompts:
-  - "../classify_prompt.txt"
-  - "../planner_prompt.txt"
+  - "prompts/classify_prompt.txt"
+  - "prompts/planner_prompt.txt"
 
 providers:
   - id: "openai:chat:gemini-3.5-flash:latest"

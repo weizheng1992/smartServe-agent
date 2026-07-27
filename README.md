@@ -163,8 +163,9 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │           ├── ecommerce.config.ts  # Nike/Adidas/主站免签额度、提示词、工具授权、意图映射表
 │           └── index.ts             # 统一导出
 │
+├── eval/                            # 🆕 Promptfoo 大模型提示词多意图分类、步骤规划与安全防注入评测平台
+├── scripts/                         # 🆕 数据库完整性审计与死任务扫描自愈工具集
 ├── biome.json                       # 🆕 Biome Rust 级极速格式化/校验配置 (代替 Prettier/ESLint)
-├── promptfooconfig.yaml             # 🆕 Promptfoo 大模型提示词红客渗透与安全 Jailbreak 防护测试
 ├── package.json                     # Monorepo 全局依赖
 ├── turbo.json                       # Turborepo 并发构建拓扑流水线配置
 └── CLAUDE.md                        # Claude Code 本地热绑定开发/设计 SOP 规则
@@ -295,7 +296,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 *   **Playwright (E2E 浏览器测试)**：
     自动化测试 `/apps/web/e2e` 下的用户登录跳转、LocalStorage 会话持久、侧栏历史渲染以及 Token 计数交互旅程。
 *   **Promptfoo (Prompt 防守评测)**：
-    在 `promptfooconfig.yaml` 中配置大额退款分类断言，以及专门模拟超级管理员口吻命令绕过安全拦截的 **Jailbreak 防注入评测断言**，坚守提示词逻辑边界。
+    在 `eval/promptfooconfig.yaml` 中配置大意图 F1 断言、工具调用准确度断言，以及专门模拟超级管理员口吻命令绕过安全拦截的 **Jailbreak 防注入评测与 LLM-as-a-judge 最终回复质量断言**，坚守提示词逻辑边界。
 
 ---
 
