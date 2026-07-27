@@ -39,7 +39,12 @@ export async function executorNode(state: typeof AgentStateAnnotation.State) {
   };
   updatedSubtasks[currentIndex] = stepToRun;
 
-  const allowedTools = state.businessConfig?.tools || ['getOrderStatus', 'processRefund', 'takeScreenshot', 'listUserOrders'];
+  const allowedTools = state.businessConfig?.tools || [
+    'getOrderStatus',
+    'processRefund',
+    'takeScreenshot',
+    'listUserOrders',
+  ];
   const llm = getLLM(state.jobId);
 
   let historyContext = '';

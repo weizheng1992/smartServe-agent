@@ -488,7 +488,9 @@ export class FakePool {
       s.toUpperCase().includes('UPDATE') &&
       (s.toUpperCase().includes('ORDERS') || s.toUpperCase().includes('"ORDERS"'))
     ) {
-      const match = s.match(/WHERE\s+["']?orderId["']?\s*=\s*['"]([^'"]+)['"]/i) || s.match(/WHERE\s+["']?order_id["']?\s*=\s*['"]([^'"]+)['"]/i);
+      const match =
+        s.match(/WHERE\s+["']?orderId["']?\s*=\s*['"]([^'"]+)['"]/i) ||
+        s.match(/WHERE\s+["']?order_id["']?\s*=\s*['"]([^'"]+)['"]/i);
       const id = match ? match[1] : '';
       if (id) {
         const order = memoryDb.orders.get(id);
@@ -588,10 +590,10 @@ async function resolveAndEnsurePgUserId(pool: any, userId: string): Promise<stri
     const hash = require('crypto').createHash('md5').update(userId).digest('hex');
     const detUuid = `${hash.substring(0, 8)}-${hash.substring(8, 12)}-${hash.substring(12, 16)}-${hash.substring(16, 20)}-${hash.substring(20, 32)}`;
 
-    await pool.query(
-      'INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (id) DO NOTHING',
-      [detUuid, `${userId}@guest.system`]
-    );
+    await pool.query('INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (id) DO NOTHING', [
+      detUuid,
+      `${userId}@guest.system`,
+    ]);
     return detUuid;
   } catch (err) {
     console.warn('[DB] resolveAndEnsurePgUserId failed, falling back to first physical user:', err);

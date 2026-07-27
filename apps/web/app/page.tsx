@@ -273,8 +273,13 @@ export default function Home() {
           }
         } else {
           // If no thread exists, automatically create a new unique one on first entry!
-          console.log('[Auto-Create Thread] No threads found for current user, generating a fresh unique session thread...');
-          const newThreadId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+          console.log(
+            '[Auto-Create Thread] No threads found for current user, generating a fresh unique session thread...',
+          );
+          const newThreadId =
+            typeof crypto !== 'undefined' && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
           const createRes = await fetch('/api/chat/threads', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -308,7 +313,10 @@ export default function Home() {
   // Create a new chat session thread
   const handleCreateNewThread = async () => {
     if (!currentUser) return;
-    const newThreadId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const newThreadId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     try {
       const res = await fetch('/api/chat/threads', {
         method: 'POST',

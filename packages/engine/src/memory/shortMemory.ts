@@ -41,7 +41,9 @@ export class ShortMemory {
         content: cleanContent,
         timestamp,
       });
-      console.log(`[ShortMemory] Added message for thread ${this.threadId}: [${role}] ${cleanContent.substring(0, 50)}`);
+      console.log(
+        `[ShortMemory] Added message for thread ${this.threadId}: [${role}] ${cleanContent.substring(0, 50)}`,
+      );
     } catch (err) {
       console.error('[ShortMemory Error] Failed to add message:', err);
     }

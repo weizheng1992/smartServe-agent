@@ -2,7 +2,7 @@ export default function (output: string, context: any) {
   try {
     const expectedTools = context.vars.expectedTools;
     if (!expectedTools) {
-      return { pass: true, score: 1.0, reason: "No expected tools defined to validate" };
+      return { pass: true, score: 1.0, reason: 'No expected tools defined to validate' };
     }
 
     let parsed: any;
@@ -13,7 +13,7 @@ export default function (output: string, context: any) {
       if (match) {
         parsed = JSON.parse(match[0]);
       } else {
-        return { pass: false, score: 0.0, reason: "Output is not valid JSON" };
+        return { pass: false, score: 0.0, reason: 'Output is not valid JSON' };
       }
     }
 

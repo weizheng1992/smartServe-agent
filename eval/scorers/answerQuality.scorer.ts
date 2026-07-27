@@ -3,7 +3,7 @@ import { ChatOpenAI } from '@langchain/openai';
 export default async function (output: string, context: any) {
   try {
     const customerQuestion = context.vars.input;
-    const expectedRules = context.vars.expectedRules || "Be polite, express in Chinese, follow standard support SOP.";
+    const expectedRules = context.vars.expectedRules || 'Be polite, express in Chinese, follow standard support SOP.';
 
     const judge = new ChatOpenAI({
       configuration: {
@@ -53,7 +53,7 @@ Do NOT include markdown backticks or text outside of the JSON.`;
     return {
       pass: score >= 0.8,
       score,
-      reason: parsedJudge.reason || "Evaluated by LLM Judge",
+      reason: parsedJudge.reason || 'Evaluated by LLM Judge',
     };
   } catch (err: any) {
     return { pass: false, score: 0.0, reason: `Error in answerQuality LLM-as-a-judge scorer: ${err.message}` };

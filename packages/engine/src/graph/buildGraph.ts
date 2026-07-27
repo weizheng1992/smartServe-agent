@@ -439,9 +439,13 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
           });
 
           if (resCorrectness.ok && resSuccess.ok) {
-            console.log(`[LangSmith Telemetry] Successfully uploaded "correctness" and "success" feedback scores for run ${runId}`);
+            console.log(
+              `[LangSmith Telemetry] Successfully uploaded "correctness" and "success" feedback scores for run ${runId}`,
+            );
           } else {
-            console.warn(`[LangSmith Telemetry] Failed to upload some feedback for run ${runId}. Correctness status: ${resCorrectness.status}, Success status: ${resSuccess.status}`);
+            console.warn(
+              `[LangSmith Telemetry] Failed to upload some feedback for run ${runId}. Correctness status: ${resCorrectness.status}, Success status: ${resSuccess.status}`,
+            );
           }
         } catch (telemetryErr) {
           console.warn('[LangSmith Telemetry] Error uploading feedback to LangSmith:', telemetryErr);

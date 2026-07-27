@@ -108,7 +108,10 @@ describe('AI Agent Platform System Tests', () => {
               id: '1',
               description: 'List user orders',
               status: 'completed',
-              result: { toolExecuted: 'listUserOrders', output: { orders: [{ orderId: 'ORD-98712', status: 'shipped' }] } },
+              result: {
+                toolExecuted: 'listUserOrders',
+                output: { orders: [{ orderId: 'ORD-98712', status: 'shipped' }] },
+              },
             },
           ],
           currentStepIndex: 1,

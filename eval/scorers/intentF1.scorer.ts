@@ -2,7 +2,7 @@ export default function (output: string, context: any) {
   try {
     const expectedIntents = context.vars.expectedIntents;
     if (!expectedIntents) {
-      return { pass: true, score: 1.0, reason: "No expected intents defined to compute F1" };
+      return { pass: true, score: 1.0, reason: 'No expected intents defined to compute F1' };
     }
 
     let parsed: any;
@@ -13,7 +13,7 @@ export default function (output: string, context: any) {
       if (match) {
         parsed = JSON.parse(match[0]);
       } else {
-        return { pass: false, score: 0.0, reason: "Output is not valid JSON" };
+        return { pass: false, score: 0.0, reason: 'Output is not valid JSON' };
       }
     }
 
@@ -45,12 +45,12 @@ export default function (output: string, context: any) {
     const fn = expSet.size - tp;
 
     if (predSet.size === 0 && expSet.size === 0) {
-      return { pass: true, score: 1.0, reason: "Perfect F1 score (no intents expected, none predicted)" };
+      return { pass: true, score: 1.0, reason: 'Perfect F1 score (no intents expected, none predicted)' };
     }
 
     const precision = predSet.size > 0 ? tp / predSet.size : 0;
     const recall = expSet.size > 0 ? tp / expSet.size : 0;
-    const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+    const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
 
     return {
       pass: f1 >= 0.8,
