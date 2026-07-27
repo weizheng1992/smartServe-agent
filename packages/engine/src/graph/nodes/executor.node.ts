@@ -39,13 +39,26 @@ export async function executorNode(state: typeof AgentStateAnnotation.State) {
   };
   updatedSubtasks[currentIndex] = stepToRun;
 
+  const allowedTools = state.businessConfig?.tools || ['getOrderStatus', 'processRefund', 'takeScreenshot'];
   const llm = getLLM(state.jobId);
+
+  let historyContext = '';
+  if (state.shortMemory && state.shortMemory.length > 0) {
+    const formattedHistory = state.shortMemory
+      .map((m: any) => `${m.role === 'user' ? 'Customer' : 'Agent'}: "${m.content}"`)
+      .join('\n');
+    historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}`;
+  } else {
+    historyContext = `\n\n[CURRENT USER INPUT]:\nCustomer: "${state.input}"`;
+  }
+
   const prompt = `We are executing step: "${stepToRun.description}".
-Choose the correct tool to call from: ["getOrderStatus", "processRefund", "takeScreenshot"].
-And generate the parameters.
+Based on the conversation history below, extract and generate the correct parameters/arguments for the tool (e.g. orderId).
+Choose the correct tool to call from: ${JSON.stringify(allowedTools)}.
 If no tool is needed, return "NONE".
 Otherwise, return a JSON object with keys "toolName" and "args" (object of arguments).
-Return ONLY the raw JSON object or "NONE". Do not include markdown or backticks.`;
+Return ONLY the raw JSON object or "NONE". Do not include markdown or backticks.
+${historyContext}`;
 
   let resultData: any;
   try {
@@ -64,16 +77,16 @@ Return ONLY the raw JSON object or "NONE". Do not include markdown or backticks.
         parsedToolCall = JSON.parse(cleanText);
       } catch {
         // Fallback checks
-        if (stepToRun.description.toLowerCase().includes('status')) {
+        if (stepToRun.description.toLowerCase().includes('status') && allowedTools.includes('getOrderStatus')) {
           parsedToolCall = { toolName: 'getOrderStatus', args: { orderId: '12345' } };
-        } else if (stepToRun.description.toLowerCase().includes('refund')) {
+        } else if (stepToRun.description.toLowerCase().includes('refund') && allowedTools.includes('processRefund')) {
           parsedToolCall = { toolName: 'processRefund', args: { orderId: '12345', reason: 'Customer requested' } };
-        } else if (stepToRun.description.toLowerCase().includes('screenshot')) {
+        } else if (stepToRun.description.toLowerCase().includes('screenshot') && allowedTools.includes('takeScreenshot')) {
           parsedToolCall = { toolName: 'takeScreenshot', args: { url: 'https://example.com' } };
         }
       }
 
-      if (parsedToolCall?.toolName) {
+      if (parsedToolCall?.toolName && allowedTools.includes(parsedToolCall.toolName)) {
         // =====================================================================
         // 🛡️ ANTI-INJECTION GATEKEEPER: 硬核安全审核拦截关卡
         // =====================================================================
@@ -310,11 +323,19 @@ Return ONLY the raw JSON object or "NONE". Do not include markdown or backticks.
           // Physically insert into eval_logs database table if threadId exists
           if (state.threadId) {
             try {
-              const runId = `eval_${Date.now()}`;
+              const runId = '83d67d4e-104c-4325-8aa7-10d4389fc725'; // Fallback seed eval run id
+              // First, ensure a default eval run exists to satisfy foreign key constraint
+              await db.execute(`
+                INSERT INTO eval_runs (id, business_id, git_commit, avg_answer_quality, avg_latency_ms, total_cost_usd)
+                VALUES ('${runId}', 'ecommerce', 'dev', 5.0, 100, 0.0)
+                ON CONFLICT (id) DO NOTHING
+              `);
+
+              const resultId = crypto.randomUUID ? crypto.randomUUID() : 'c9b14668-eab8-4a55-8ad5-fb5d211eb3bd';
               const logsSql = `
                 INSERT INTO eval_results (id, run_id, case_name, passed, metrics)
                 VALUES (
-                  '${runId}',
+                  '${resultId}',
                   '${runId}',
                   'Tool: ${parsedToolCall.toolName}',
                   true,

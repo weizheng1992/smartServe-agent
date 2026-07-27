@@ -435,6 +435,36 @@ export const db: DBInterface = {
   values: (): DBInterface => db,
 
   findOrCreateUserByEmail: async (email: string): Promise<{ id: string; email: string }> => {
+    const pool = getPgPool();
+    if (isUsingRealDb) {
+      try {
+        const selectRes = await pool.query('SELECT id, email FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
+        if (selectRes.rows && selectRes.rows.length > 0) {
+          const row = selectRes.rows[0] as any;
+          return { id: row.id, email: row.email };
+        }
+
+        // Generate UUID for real user
+        const id = crypto.randomUUID ? crypto.randomUUID() : '83d67d4e-104c-4325-8aa7-10d4389fc725';
+        await pool.query('INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW())', [id, email]);
+        console.log(`[DB User PG] Registered physical user with email: ${email}, ID: ${id}`);
+
+        // Auto assign a default session thread for the registered user
+        const defaultThreadId = `thread_local_${id.substring(0, 8)}`;
+        await pool.query('INSERT INTO threads (id, user_id, business_id, status, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW()) ON CONFLICT (id) DO NOTHING', [
+          defaultThreadId,
+          id,
+          'ecommerce',
+          'active'
+        ]);
+        console.log(`[DB Thread PG] Created default thread ${defaultThreadId} for user ${id}`);
+
+        return { id, email };
+      } catch (err) {
+        console.error('[DB User PG Error] Failed to find or create user, falling back to memory:', err);
+      }
+    }
+
     // 🔍 兼容低版本目标下 MapIterator 遍历报错，使用 Array.from() 彻底化解编译异常！
     const userArray = Array.from(memoryDb.users.values());
     for (const u of userArray) {
@@ -463,6 +493,26 @@ export const db: DBInterface = {
   },
 
   getUserThreads: async (userId: string): Promise<DBThread[]> => {
+    const pool = getPgPool();
+    if (isUsingRealDb) {
+      try {
+        const res = await pool.query(
+          'SELECT id, "user_id" AS "userId", "business_id" AS "businessId", status, "created_at" AS "createdAt", "updated_at" AS "updatedAt" FROM threads WHERE "user_id" = $1 ORDER BY "created_at" DESC',
+          [userId]
+        );
+        return res.rows.map((row: any) => ({
+          id: row.id,
+          userId: row.userId || row.user_id,
+          businessId: row.businessId || row.business_id,
+          status: row.status,
+          createdAt: row.createdAt || row.created_at,
+          updatedAt: row.updatedAt || row.updated_at,
+        })) as DBThread[];
+      } catch (err) {
+        console.error('[DB Thread PG Error] Failed to get user threads, falling back to memory:', err);
+      }
+    }
+
     const threadArray = Array.from(memoryDb.threads.values());
     const list = threadArray.filter((t) => t.userId === userId);
     // 按照创建时间降序，保证最新的会话排在最上面！
@@ -470,6 +520,27 @@ export const db: DBInterface = {
   },
 
   createThread: async (threadId: string, userId: string): Promise<DBThread> => {
+    const pool = getPgPool();
+    if (isUsingRealDb) {
+      try {
+        await pool.query(
+          'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") VALUES ($1, $2, $3, $4, NOW(), NOW()) ON CONFLICT (id) DO NOTHING',
+          [threadId, userId, 'ecommerce', 'active']
+        );
+        console.log(`[DB Thread PG] Created/Ensured physical thread ${threadId} for user ${userId}`);
+        return {
+          id: threadId,
+          userId,
+          businessId: 'ecommerce',
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      } catch (err) {
+        console.error('[DB Thread PG Error] Failed to create thread, falling back to memory:', err);
+      }
+    }
+
     const newThread = {
       id: threadId,
       userId,

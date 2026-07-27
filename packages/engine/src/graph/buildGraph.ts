@@ -305,21 +305,8 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     ragDocs = ragRes.status === 'fulfilled' ? ragRes.value : [];
   }
 
-  // Record user query in short memory and physical Postgres messages database table
-  const userMsgId = `msg_u_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+  // Record user query in short memory
   await shortMemory.addMessage('user', inputMessage);
-  try {
-    const { db } = require('db');
-    await db.addMessage({
-      id: userMsgId,
-      threadId,
-      role: 'user',
-      content: inputMessage,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (msgErr) {
-    console.warn('[DB] Failed to persist user message in physical table:', msgErr);
-  }
 
   // 🚀 获取最新的短期会话历史，无缝传递给状态图总线
   const historyMsgs = await shortMemory.getMessages();
@@ -400,20 +387,7 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
 
   // Store assistant response back into memories
   if (result.output) {
-    const assistantMsgId = `msg_a_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     await shortMemory.addMessage('assistant', result.output);
-    try {
-      const { db } = require('db');
-      await db.addMessage({
-        id: assistantMsgId,
-        threadId,
-        role: 'assistant',
-        content: result.output,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (msgErr) {
-      console.warn('[DB] Failed to persist assistant response in physical table:', msgErr);
-    }
     await episodicMemory.addEvent(
       `Handled conversation thread: ${threadId}. Output summary: ${result.output.substring(0, 80)}`,
       5,

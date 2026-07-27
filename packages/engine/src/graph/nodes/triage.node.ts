@@ -122,8 +122,11 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
     const userMsgs = historyMsgs.filter((m) => m.role === 'user');
     const assistantMsgs = historyMsgs.filter((m) => m.role === 'assistant');
 
-    if (userMsgs.length > 0 && assistantMsgs.length > 0) {
-      const lastUserMsg = userMsgs[userMsgs.length - 1];
+    // Since the current message was already appended to shortMemory in buildGraph.ts,
+    // the last message in userMsgs is the current query itself.
+    // The actual previous user message (if any) is at userMsgs[userMsgs.length - 2].
+    if (userMsgs.length >= 2 && assistantMsgs.length > 0) {
+      const lastUserMsg = userMsgs[userMsgs.length - 2];
       const lastAssistantMsg = assistantMsgs[assistantMsgs.length - 1];
 
       // 判断 1: 绝对文本完全一致
@@ -344,11 +347,9 @@ async function logIntentToDB(
 ): Promise<void> {
   try {
     const { db } = require('db');
-    const id = `log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     await db.execute(`
-      INSERT INTO intent_logs (id, thread_id, input_text, predicted_intents, method, confidence, created_at)
+      INSERT INTO intent_logs (thread_id, input_text, predicted_intents, method, confidence, created_at)
       VALUES (
-        '${id}',
         '${threadId}',
         '${inputText.replace(/'/g, "''")}',
         '${JSON.stringify(intents)}',

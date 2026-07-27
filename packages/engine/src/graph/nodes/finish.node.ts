@@ -36,13 +36,14 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   const prompt = `System Instruction Context: "${systemPrompt}"
 Formulate a clean, professional, and helpful customer support message in Chinese.
 Customer Question: "${input}"
-The plan execution details (the ultimate truth from physical database) are: ${JSON.stringify(plan.subtasks || [])}${ragContext}${historyContext}
+The plan execution details (the ultimate truth from physical database) are: ${JSON.stringify(plan.subtasks || [])}${ragContext}${historyContext}Locally discussed details might also reside in the conversation history above.
 
 CRITICAL RULES (最高行为准则 - 严禁幻觉):
-1. You must answer the customer 100% based on the REAL tools results above.
-2. If any tool returned an error (e.g., "Order not found in the physical database" or "Failed to process"), you MUST honestly inform the customer in Chinese that the order does not exist in our database or the tool failed. DO NOT hallucinate, DO NOT fabricate any shipped status, and DO NOT guess any tracking numbers or dates!
-3. If the tool executed successfully and returned the order details (status, carrier, etc.), you summarize them accurately.
-4. Keep the output professional, polite, and fully in Chinese.`;
+1. If the customer is asking about what was just discussed, what actions were just performed in previous turns, or meta-questions about the conversation history (e.g., "刚退款的是哪笔订单?", "我们刚刚查了什么?"), you MUST answer based on the [CONVERSATION HISTORY (PAST TURNS)] above.
+2. Otherwise, for any new queries regarding order status or refunds that executed tools in the current turn, you must answer 100% based on the REAL tools results in the current subtasks list.
+3. If any tool returned an error (e.g., "Order not found in the physical database" or "Failed to process"), you MUST honestly inform the customer in Chinese that the order does not exist in our database or the tool failed. DO NOT hallucinate, DO NOT fabricate any shipped status, and DO NOT guess any tracking numbers or dates!
+4. If the tool executed successfully and returned the order details (status, carrier, etc.), you summarize them accurately.
+5. Keep the output professional, polite, and fully in Chinese.`;
 
   try {
     const response = await llm.invoke(prompt);

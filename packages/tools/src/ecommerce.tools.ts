@@ -208,7 +208,7 @@ export const processRefund = {
       }
 
       // Update the status of the order to "refunded" in the orders database table!
-      await db.execute(`UPDATE "orders" SET status = 'refunded' WHERE "orderId" = '${orderId}'`);
+      await db.execute(`UPDATE "orders" SET status = 'refunded' WHERE "order_id" = '${orderId}'`);
 
       // Invalidate the caches for this order to ensure consistency!
       const cacheKey = `cache:order_status:${orderId}`;
