@@ -1,7 +1,7 @@
 import { logger } from 'observability';
 import { getLLM } from '../../llm/callLLMWithRetry';
 import { agentEventEmitter } from '../eventEmitter';
-import type { AgentStateAnnotation } from '../state';
+import { type AgentStateAnnotation, buildHistoryContext } from '../state';
 
 export async function plannerNode(state: typeof AgentStateAnnotation.State) {
   logger.info({ threadId: state.threadId }, 'plannerNode starting step planning');
@@ -78,19 +78,10 @@ Please replan and output an alternative approach that respects this rejection. D
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型即可敏捷关联上一轮提问中提到的核心要素（如订单号 ORD-98712 等）
   let historyContext = '';
   if (state.shortMemory && state.shortMemory.length > 0) {
-    const formattedHistory = state.shortMemory
-      .map((m: any) => {
-        if (!m) return '';
-        const role = m.role === 'user' ? 'Customer' : 'Agent';
-        const content = m.content;
-        if (content === undefined || content === null || String(content).trim() === '' || String(content) === 'undefined' || String(content) === 'null') {
-          return '';
-        }
-        return `${role}: "${String(content).trim()}"`;
-      })
-      .filter((line: string) => line !== '')
-      .join('\n');
-    historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}\n\n[CRITICAL DIRECTIVE]: Carefully read the conversation history above. If the customer is requesting a refund or action in their current input, and they have already provided a specific order ID in previous turns (or you have already queried it successfully), you MUST extract and use that order ID to formulate your subtasks (e.g. processRefund with orderId: ORD-98712). DO NOT plan to ask the customer for the order ID again if it was already mentioned or established in the history!`;
+    const formattedHistory = buildHistoryContext(state.shortMemory);
+    if (formattedHistory) {
+      historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}\n\n[CRITICAL DIRECTIVE]: Carefully read the conversation history above. If the customer is requesting a refund or action in their current input, and they have already provided a specific order ID in previous turns (or you have already queried it successfully), you MUST extract and use that order ID to formulate your subtasks (e.g. processRefund with orderId: ORD-98712). DO NOT plan to ask the customer for the order ID again if it was already mentioned or established in the history!`;
+    }
   }
 
   const llm = getLLM(state.jobId);

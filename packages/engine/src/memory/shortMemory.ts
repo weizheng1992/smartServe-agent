@@ -53,6 +53,7 @@ export class ShortMemory {
     const dbInstance = getDrizzle();
     const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
+    const cleanContent = content !== undefined && content !== null ? String(content) : '';
 
     if (dbInstance) {
       try {
@@ -61,11 +62,11 @@ export class ShortMemory {
           id,
           threadId: this.threadId,
           role,
-          content,
+          content: cleanContent,
           timestamp,
         });
         console.log(
-          `[ShortMemory] Added message directly to PostgreSQL via Drizzle: [${role}] ${content.substring(0, 50)}`,
+          `[ShortMemory] Added message directly to PostgreSQL via Drizzle: [${role}] ${cleanContent.substring(0, 50)}`,
         );
         return;
       } catch (err) {
@@ -78,10 +79,10 @@ export class ShortMemory {
       id,
       threadId: this.threadId,
       role,
-      content,
+      content: cleanContent,
       timestamp,
     });
-    console.log(`[ShortMemory] Added message for thread ${this.threadId}: [${role}] ${content.substring(0, 50)}`);
+    console.log(`[ShortMemory] Added message for thread ${this.threadId}: [${role}] ${cleanContent.substring(0, 50)}`);
   }
 
   async compress(messages: ShortMemoryMessage[]): Promise<string> {

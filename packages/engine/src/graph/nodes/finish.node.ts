@@ -1,6 +1,6 @@
 import { logger } from 'observability';
 import { getLLM } from '../../llm/callLLMWithRetry';
-import type { AgentStateAnnotation } from '../state';
+import { type AgentStateAnnotation, buildHistoryContext } from '../state';
 
 export async function finishNode(state: typeof AgentStateAnnotation.State) {
   logger.info({ threadId: state.threadId }, 'finishNode formulating final response');
@@ -27,19 +27,10 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型在总结生成最终答复时，能够完美串联多轮对话上下文脉络
   let historyContext = '';
   if (state.shortMemory && state.shortMemory.length > 0) {
-    const formattedHistory = state.shortMemory
-      .map((m: any) => {
-        if (!m) return '';
-        const role = m.role === 'user' ? 'Customer' : 'Agent';
-        const content = m.content;
-        if (content === undefined || content === null || String(content).trim() === '' || String(content) === 'undefined' || String(content) === 'null') {
-          return '';
-        }
-        return `${role}: "${String(content).trim()}"`;
-      })
-      .filter((line: string) => line !== '')
-      .join('\n');
-    historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}`;
+    const formattedHistory = buildHistoryContext(state.shortMemory);
+    if (formattedHistory) {
+      historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}`;
+    }
   }
 
   const prompt = `System Instruction Context: "${systemPrompt}"
