@@ -97,9 +97,9 @@ Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate
 
 [CRITICAL MULTI-TURN MEMORY & RETRIEVAL DIRECTIVES]:
 1. Carefully inspect the [CONVERSATION HISTORY (PAST TURNS)] above. If the customer has already mentioned a specific Order ID (e.g., "ORD-98712") in previous turns, or if an Order ID was successfully checked earlier, you MUST assume the customer's current request (for refund, status query, or returns) is regarding that EXACT Order ID!
-2. Do NOT plan generic placeholder steps like "Retrieve the user's recent orders" or "Query order history" because there are no listing tools available in: ["getOrderStatus", "processRefund"].
+2. If the customer asks "我还有其他订单吗" (Do I have other orders?), "查询我名下的订单" (Query orders under my name), or wants to list their order history, you MUST plan a step to call the "listUserOrders" tool to fetch their recent order list.
 3. If an Order ID (like "ORD-98712") is present in the history, bypass any placeholder check steps, and directly plan a concrete step to execute the requested action. For example: "Call the processRefund tool with orderId 'ORD-98712' to initiate the return/refund in our systems."
-4. If NO Order ID exists anywhere in the conversation history, you MUST plan a step to politely ask the customer to provide their Order ID, rather than attempting to call tools with empty or dummy parameters.
+4. If NO Order ID exists anywhere in the conversation history, and they are asking for an order operation (refund, tracking), you should plan a step to call "listUserOrders" first to dynamically find their recent orders, or ask the customer to provide their Order ID if listUserOrders is unavailable or returns nothing.
 
 Return a JSON object with:
 - "goal": overall goal description

@@ -245,5 +245,53 @@ export const processRefund = {
   },
 };
 
+export const listUserOrders = {
+  name: 'listUserOrders',
+  description: 'List all recent orders and tracking status for the current customer.',
+  schema: z.object({}),
+  execute: async ({ threadId }: { threadId?: string }) => {
+    if (!threadId) {
+      return { error: 'Session threadId is strictly required to query customer orders.' };
+    }
+
+    let userId = '';
+    let businessId = '';
+    try {
+      const { db: physicalDb } = require('db');
+      const res = await physicalDb.execute(
+        `SELECT "user_id" AS "userId", "business_id" AS "businessId" FROM threads WHERE id = '${threadId}'`,
+      );
+      if (res.rows && res.rows[0]) {
+        const row = res.rows[0] as any;
+        userId = row.userId || row.user_id;
+        businessId = row.businessId || row.business_id;
+      }
+    } catch (err) {
+      console.error('[List Orders Tool] Failed to fetch thread session context:', err);
+      return { error: 'Failed to authenticate thread session context.' };
+    }
+
+    if (!userId || !businessId) {
+      return { error: 'Could not resolve valid user context or tenant from the current session thread.' };
+    }
+
+    try {
+      const { db: physicalDb } = require('db');
+      const res = await physicalDb.execute(
+        `SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", "estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount" FROM orders WHERE "user_id" = '${userId}' AND "business_id" = '${businessId}'`,
+      );
+      const rows = res.rows || [];
+      if (rows.length === 0) {
+        return { message: 'No orders found for this customer.' };
+      }
+      return { orders: rows };
+    } catch (err) {
+      console.error('[List Orders Tool] Failed to list user orders:', err);
+      return { error: 'Failed to retrieve orders from database.' };
+    }
+  },
+};
+
 registerTool(getOrderStatus);
 registerTool(processRefund);
+registerTool(listUserOrders);

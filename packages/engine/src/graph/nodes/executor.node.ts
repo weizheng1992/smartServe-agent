@@ -39,7 +39,7 @@ export async function executorNode(state: typeof AgentStateAnnotation.State) {
   };
   updatedSubtasks[currentIndex] = stepToRun;
 
-  const allowedTools = state.businessConfig?.tools || ['getOrderStatus', 'processRefund', 'takeScreenshot'];
+  const allowedTools = state.businessConfig?.tools || ['getOrderStatus', 'processRefund', 'takeScreenshot', 'listUserOrders'];
   const llm = getLLM(state.jobId);
 
   let historyContext = '';
@@ -66,9 +66,11 @@ CRITICAL INSTRUCTIONS FOR TOOL SELECTION:
 2. If the step description mentions retrieving, getting, fetching, checking, or tracking order details, status, or tracking numbers, you MUST select the "getOrderStatus" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
 3. If the step description mentions processing, performing, requesting, or initiating a refund, you MUST select the "processRefund" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
 4. If the step description mentions taking a screenshot, capturing a viewport, rendering, or checking a webpage, you MUST select the "takeScreenshot" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
-5. Do NOT skip tool execution (i.e. do NOT return "NONE") just because the information already seems to be mentioned in the conversation history! Real-time physical retrieval/verification from our database is ALWAYS strictly required to ground the execution.
-6. If a tool is selected, you must extract its arguments from the [CONVERSATION HISTORY] below:
+5. If the step description mentions listing, showing, finding, retrieving, or checking recent orders, order history, other orders, or what orders are under the customer's name, you MUST select the "listUserOrders" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
+6. Do NOT skip tool execution (i.e. do NOT return "NONE") just because the information already seems to be mentioned in the conversation history! Real-time physical retrieval/verification from our database is ALWAYS strictly required to ground the execution.
+7. If a tool is selected, you must extract its arguments from the [CONVERSATION HISTORY] below:
    - For "getOrderStatus" and "processRefund", extract the "orderId" (must look like ORD-XXXXX, e.g., ORD-98712).
+   - For "listUserOrders", there are no arguments (it is a self-contained session query).
    - Carefully look at ALL past turns in the history. If the customer mentioned an order ID in a previous turn, carry it over and use it.
    - Do NOT generate or hallucinate a dummy orderId like "12345" or "123456" if there is no real order ID in the history! If you absolutely cannot find any order ID in the history, return "NONE" so we can ask the customer for it.
 
@@ -425,6 +427,10 @@ ${historyContext}`;
       friendlyMessage = `✅ processRefund 退款物理工作流执行成功！订单 [${refundInfo.orderId || 'ORD-98712'}] 状态已在 Postgres 物理表中更新为: [${refundInfo.status || '已退款'}]，退款结果: [${refundInfo.message || '已自动完成第三方原路划扣'}], 交易参考号: [${refundInfo.transactionId || 'TXN-98712'}], 金额: [${refundInfo.refundAmount || '100% 原路返还'}]。`;
     } else if (resultData.toolExecuted === 'takeScreenshot') {
       friendlyMessage = '✅ takeScreenshot 智能核验工具物理调用成功！已成功在后台渲染目标网页并截取快照。';
+    } else if (resultData.toolExecuted === 'listUserOrders') {
+      const listInfo = resultData.output || {};
+      const count = listInfo.orders?.length || 0;
+      friendlyMessage = `✅ listUserOrders 查单物理接口调用成功！系统已为您自动拉取您名下的所有活跃订单。共检测到 [${count}] 笔历史订单记录，正在由大模型为您规整并输出可视化的订单列表清单...`;
     }
 
     agentEventEmitter.emit(`${state.jobId}:status`, {

@@ -76,7 +76,7 @@ export const AgentStateAnnotation = Annotation.Root({
         refund: { description: 'Process or request refunds.' },
         general_query: { description: 'General customer questions.' },
       },
-      tools: ['getOrderStatus', 'processRefund'],
+      tools: ['getOrderStatus', 'processRefund', 'listUserOrders'],
       executionMode: 'plan-and-execute',
       confidenceThresholds: { high: 0.85, mid: 0.6 },
       refundAutoApprovalLimit: 100, // 默认超过 $100 的退款必须人工审核，低于 $100 的自动放行
