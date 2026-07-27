@@ -12,8 +12,8 @@ providers:
       temperature: 0
 
 tests:
-  - $import: testCases/ecommerce/single-intent.json
-  - $import: testCases/ecommerce/multi-intent.json
-  - $import: testCases/legal/single-intent.json
-  - $import: testCases/security/injection.json
-  - $import: testCases/ecommerce/rag-evaluation.json
+  - testCases/ecommerce/single-intent.json
+  - testCases/ecommerce/multi-intent.json
+  - testCases/legal/single-intent.json
+  - testCases/security/injection.json
+  - testCases/ecommerce/rag-evaluation.json

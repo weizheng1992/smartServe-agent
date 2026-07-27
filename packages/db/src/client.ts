@@ -488,10 +488,13 @@ export class FakePool {
       s.toUpperCase().includes('UPDATE') &&
       (s.toUpperCase().includes('ORDERS') || s.toUpperCase().includes('"ORDERS"'))
     ) {
-      const match =
-        s.match(/WHERE\s+["']?orderId["']?\s*=\s*['"]([^'"]+)['"]/i) ||
-        s.match(/WHERE\s+["']?order_id["']?\s*=\s*['"]([^'"]+)['"]/i);
-      const id = match ? match[1] : '';
+      let id = params && typeof params[0] === 'string' ? params[0] : '';
+      if (!id) {
+        const match =
+          s.match(/WHERE\s+["']?orderId["']?\s*=\s*['"]([^'"]+)['"]/i) ||
+          s.match(/WHERE\s+["']?order_id["']?\s*=\s*['"]([^'"]+)['"]/i);
+        id = match ? match[1] : '';
+      }
       if (id) {
         const order = memoryDb.orders.get(id);
         if (order) {
@@ -572,7 +575,7 @@ export interface DBInterface {
   getMessages: (threadId: string) => Promise<Message[]>;
   addMessage: (message: Message) => Promise<void>;
   getOrder: (orderId: string) => Promise<Order | null>;
-  execute: (queryStr: string) => Promise<DBExecutorResult>;
+  execute: (queryStr: string, params?: unknown[]) => Promise<DBExecutorResult>;
 
   // 新增：和用户关联的账户及会话管理接口
   findOrCreateUserByEmail: (email: string) => Promise<{ id: string; email: string }>;
@@ -798,10 +801,10 @@ export const db: DBInterface = {
     }
   },
 
-  execute: async (queryStr: string): Promise<DBExecutorResult> => {
+  execute: async (queryStr: string, params?: unknown[]): Promise<DBExecutorResult> => {
     const pool = getPgPool();
     try {
-      const res = await pool.query(queryStr);
+      const res = await pool.query(queryStr, params);
       return { rows: res.rows as unknown[] };
     } catch (e) {
       console.error('[DB] execute failed:', e);

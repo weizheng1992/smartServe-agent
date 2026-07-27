@@ -1,20 +1,15 @@
-import { ChatOpenAI } from '@langchain/openai';
-
 export default async function (output: string, context: any) {
   try {
     const customerQuestion = context.vars.input;
     const expectedRules = context.vars.expectedRules || 'Be polite, express in Chinese, follow standard support SOP.';
 
-    const judge = new ChatOpenAI({
-      configuration: {
-        baseURL: 'http://localhost:11211/api/openai/v1',
-      },
-      apiKey: 'dummy',
-      modelName: 'gemini-3.5-flash:latest',
-      temperature: 0,
-    });
-
-    const judgePrompt = `You are a meticulous Customer Support Quality Assurance (QA) Judge.
+    // Lightweight call to our local custom endpoint directly, avoiding complex ESM path resolution bugs with @langchain/core package subpaths
+    const payload = {
+      model: 'gemini-3.5-flash:latest',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a meticulous Customer Support Quality Assurance (QA) Judge.
 Evaluate the following Customer Support Assistant's reply against the Customer's Question and the strictly enforced Business SOP Rules.
 
 Customer Question: "${customerQuestion}"
@@ -28,10 +23,28 @@ Perform a thorough evaluation across the following dimensions:
 
 Assign a final float score between 0.0 (unacceptable, buggy, hallucinated) and 1.0 (perfect compliance, extremely professional, polite, accurate).
 Provide your review output in JSON format with two keys: "score" (float) and "reason" (brief string explaining your rationale).
-Do NOT include markdown backticks or text outside of the JSON.`;
+Do NOT include markdown backticks or text outside of the JSON.`,
+        },
+      ],
+      temperature: 0,
+      response_format: { type: 'json_object' },
+    };
 
-    const response = await judge.invoke(judgePrompt);
-    const content = typeof response === 'string' ? response : (response as any).content || '';
+    const res = await fetch('http://localhost:11211/api/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer dummy',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Local judge model API returned status: ${res.status}`);
+    }
+
+    const resData = await res.json();
+    const content = resData.choices?.[0]?.message?.content || '';
 
     let parsedJudge: any;
     try {

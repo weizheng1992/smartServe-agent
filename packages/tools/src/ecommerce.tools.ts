@@ -76,7 +76,7 @@ export const getOrderStatus = {
     if (order) {
       const items: any[] = [];
       try {
-        const itemsRes = await db.execute(`SELECT * FROM "order_items" WHERE "order_id" = '${orderId}'`);
+        const itemsRes = await db.execute('SELECT * FROM "order_items" WHERE "order_id" = $1', [orderId]);
         if (itemsRes?.rows) {
           for (const itemRow of itemsRes.rows as any[]) {
             const prodId = itemRow.product_id || itemRow.productId;
@@ -87,7 +87,7 @@ export const getOrderStatus = {
             let prodName = '未知商品';
             let prodDesc = '';
             try {
-              const prodRes = await db.execute(`SELECT * FROM "products" WHERE "id" = '${prodId}'`);
+              const prodRes = await db.execute('SELECT * FROM "products" WHERE "id" = $1', [prodId]);
               if (prodRes?.rows?.[0]) {
                 const prod = prodRes.rows[0] as any;
                 prodName = prod.name;
@@ -166,7 +166,8 @@ export const processRefund = {
       try {
         const { db: physicalDb } = require('db');
         const res = await physicalDb.execute(
-          `SELECT "business_id" AS "businessId" FROM threads WHERE id = '${threadId}'`,
+          'SELECT "business_id" AS "businessId" FROM threads WHERE id = $1',
+          [threadId]
         );
         if (res.rows && res.rows[0]) {
           const row = res.rows[0] as any;
@@ -208,7 +209,7 @@ export const processRefund = {
       }
 
       // Update the status of the order to "refunded" in the orders database table!
-      await db.execute(`UPDATE "orders" SET status = 'refunded' WHERE "order_id" = '${orderId}'`);
+      await db.execute('UPDATE "orders" SET status = \'refunded\' WHERE "order_id" = $1', [orderId]);
 
       // Invalidate the caches for this order to ensure consistency!
       const cacheKey = `cache:order_status:${orderId}`;
@@ -259,7 +260,8 @@ export const listUserOrders = {
     try {
       const { db: physicalDb } = require('db');
       const res = await physicalDb.execute(
-        `SELECT "user_id" AS "userId", "business_id" AS "businessId" FROM threads WHERE id = '${threadId}'`,
+        'SELECT "user_id" AS "userId", "business_id" AS "businessId" FROM threads WHERE id = $1',
+        [threadId]
       );
       if (res.rows && res.rows[0]) {
         const row = res.rows[0] as any;
@@ -278,7 +280,8 @@ export const listUserOrders = {
     try {
       const { db: physicalDb } = require('db');
       const res = await physicalDb.execute(
-        `SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", "estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount" FROM orders WHERE "user_id" = '${userId}' AND "business_id" = '${businessId}'`,
+        'SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", "estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount" FROM orders WHERE "user_id" = $1 AND "business_id" = $2',
+        [userId, businessId]
       );
       const rows = res.rows || [];
       if (rows.length === 0) {
