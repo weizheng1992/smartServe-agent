@@ -22,10 +22,18 @@ if (process.env.NODE_ENV !== 'production') {
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, threadId = `thread_${Date.now()}`, userId = 'default_user' } = await req.json();
+    const { message, threadId, userId } = await req.json();
 
     if (!message) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+    }
+
+    // 🛡️ 最底层的多租户会话隔离防卫：无 threadId 或 userId 直接物理拒绝处理！
+    if (!threadId) {
+      return NextResponse.json({ error: 'threadId is strictly required' }, { status: 400 });
+    }
+    if (!userId) {
+      return NextResponse.json({ error: 'userId is strictly required' }, { status: 400 });
     }
 
     const cleanMessage = message.trim().toLowerCase();

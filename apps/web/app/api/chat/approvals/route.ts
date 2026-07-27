@@ -114,8 +114,26 @@ export async function POST(req: NextRequest) {
 
       console.log(`[Approval POST] 正在恢复 thread ${record.threadId} 的 Agent 执行流... 新 jobId: ${jobId}`);
 
+      // 🔍 物理关联所属用户 UUID，防止恢复时降级为 default_user 造成多租户长期记忆交叉污染
+      let threadUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725'; // Fallback seed user
+      try {
+        const { threads: dbThreads, getDrizzle } = require('db');
+        const { eq: drizzleEq } = require('drizzle-orm');
+        const dbInstance = getDrizzle()!;
+        const threadRows = await dbInstance
+          .select({ userId: dbThreads.userId })
+          .from(dbThreads)
+          .where(drizzleEq(dbThreads.id, record.threadId))
+          .limit(1);
+        if (threadRows[0]?.userId) {
+          threadUserId = threadRows[0].userId;
+        }
+      } catch (err) {
+        console.warn('[Approval Route] Failed to fetch thread userId via Drizzle, using record user_id fallback:', err);
+      }
+
       // 直接恢复 Agent 执行（非阻塞）
-      const executionPromise = runAgent(record.threadId, 'default_user', systemPromptText, jobId);
+      const executionPromise = runAgent(record.threadId, threadUserId, systemPromptText, jobId);
 
       if (typeof global !== 'undefined') {
         if (!(global as any).agentRuns) {
