@@ -6,8 +6,8 @@ import {
   Clock,
   Cpu,
   DollarSign,
-  Layers,
   Laptop,
+  Layers,
   Loader2,
   Lock,
   RefreshCw,
@@ -125,9 +125,7 @@ export default function AdminDashboard() {
             <Lock className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-tight text-slate-200">
-              smartServe 客服大盘 & 安全核签中心
-            </h1>
+            <h1 className="text-lg font-bold tracking-tight text-slate-200">smartServe 客服大盘 & 安全核签中心</h1>
             <p className="text-xs text-slate-500 mt-0.5">
               企业级多租户 Human-in-the-Loop 审批流与 APM 财务算力监控控制台
             </p>
@@ -172,14 +170,10 @@ export default function AdminDashboard() {
               TOTAL ACCRUED COST
             </span>
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-bold font-mono text-emerald-400">
-                ${summary.totalCostUsd.toFixed(5)}
-              </span>
+              <span className="text-2xl font-bold font-mono text-emerald-400">${summary.totalCostUsd.toFixed(5)}</span>
               <span className="text-[10px] text-slate-500 font-mono">USD</span>
             </div>
-            <span className="text-[10px] text-slate-400 block mt-1">
-              商户算力总损耗 (Gemini 3.5)
-            </span>
+            <span className="text-[10px] text-slate-400 block mt-1">商户算力总损耗 (Gemini 3.5)</span>
           </div>
 
           <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group">
@@ -189,12 +183,8 @@ export default function AdminDashboard() {
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
               TOTAL CONVERSATIONS
             </span>
-            <div className="text-2xl font-bold font-mono text-indigo-400">
-              {summary.totalSessions}
-            </div>
-            <span className="text-[10px] text-slate-400 block mt-1">
-              会话线程物理总数
-            </span>
+            <div className="text-2xl font-bold font-mono text-indigo-400">{summary.totalSessions}</div>
+            <span className="text-[10px] text-slate-400 block mt-1">会话线程物理总数</span>
           </div>
 
           <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group">
@@ -205,14 +195,10 @@ export default function AdminDashboard() {
               AVERAGE LATENCY
             </span>
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-bold font-mono text-amber-400">
-                {summary.avgLatencyMs}
-              </span>
+              <span className="text-2xl font-bold font-mono text-amber-400">{summary.avgLatencyMs}</span>
               <span className="text-[10px] text-slate-500 font-mono">MS</span>
             </div>
-            <span className="text-[10px] text-slate-400 block mt-1">
-              单次对话全图决策平均耗时
-            </span>
+            <span className="text-[10px] text-slate-400 block mt-1">单次对话全图决策平均耗时</span>
           </div>
 
           <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group">
@@ -222,12 +208,8 @@ export default function AdminDashboard() {
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
               AVERAGE TOKENS
             </span>
-            <div className="text-2xl font-bold font-mono text-slate-200">
-              {summary.avgTokens}
-            </div>
-            <span className="text-[10px] text-slate-400 block mt-1">
-              单会话大模型 Token 平均损耗
-            </span>
+            <div className="text-2xl font-bold font-mono text-slate-200">{summary.avgTokens}</div>
+            <span className="text-[10px] text-slate-400 block mt-1">单会话大模型 Token 平均损耗</span>
           </div>
 
           <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group col-span-1 sm:col-span-2 lg:col-span-1">
@@ -238,13 +220,9 @@ export default function AdminDashboard() {
               AUTOPILOT SUCCESS
             </span>
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-bold font-mono text-emerald-400">
-                {summary.autopilotRate}%
-              </span>
+              <span className="text-2xl font-bold font-mono text-emerald-400">{summary.autopilotRate}%</span>
             </div>
-            <span className="text-[10px] text-slate-400 block mt-1">
-              AI 自主解决率 / 免审批放行比
-            </span>
+            <span className="text-[10px] text-slate-400 block mt-1">AI 自主解决率 / 免审批放行比</span>
           </div>
         </section>
 
@@ -257,17 +235,13 @@ export default function AdminDashboard() {
                 🛡️ 安全红线拦截：待人工核准工单 ({pendingApprovals.length})
               </h2>
             </div>
-            <span className="text-[10px] font-mono text-slate-500 uppercase">
-              Real-time approval dispatch queue
-            </span>
+            <span className="text-[10px] font-mono text-slate-500 uppercase">Real-time approval dispatch queue</span>
           </div>
 
           {pendingApprovals.length === 0 ? (
             <div className="bg-slate-900/30 border border-slate-850 rounded-2xl py-14 text-center space-y-3">
               <CheckCircle2 className="h-10 w-10 text-emerald-500/80 mx-auto" />
-              <p className="text-xs text-slate-400">
-                当前大盘一片绿灯！所有待审批工单已全部核签完成。
-              </p>
+              <p className="text-xs text-slate-400">当前大盘一片绿灯！所有待审批工单已全部核签完成。</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -303,9 +277,7 @@ export default function AdminDashboard() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">Thread ID:</span>
-                          <span className="font-mono text-slate-300 truncate max-w-[150px]">
-                            {approval.threadId}
-                          </span>
+                          <span className="font-mono text-slate-300 truncate max-w-[150px]">{approval.threadId}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">截止日期:</span>
@@ -338,9 +310,7 @@ export default function AdminDashboard() {
                         <input
                           type="text"
                           value={rejectionReasons[approval.id] || ''}
-                          onChange={(e) =>
-                            setRejectionReasons((prev) => ({ ...prev, [approval.id]: e.target.value }))
-                          }
+                          onChange={(e) => setRejectionReasons((prev) => ({ ...prev, [approval.id]: e.target.value }))}
                           placeholder="驳回请在此输入拒绝理由..."
                           className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
                         />
@@ -420,9 +390,7 @@ export default function AdminDashboard() {
 
                       return (
                         <tr key={app.id} className="hover:bg-slate-950/20 transition-colors">
-                          <td className="p-4 font-mono text-slate-300">
-                            {app.id.substring(0, 8)}...
-                          </td>
+                          <td className="p-4 font-mono text-slate-300">{app.id.substring(0, 8)}...</td>
                           <td className="p-4 font-mono">
                             <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-850 text-slate-400 font-semibold uppercase tracking-wider text-[9px]">
                               {app.threadId.startsWith('test_suite') ? 'test_suite' : 'ecommerce'}

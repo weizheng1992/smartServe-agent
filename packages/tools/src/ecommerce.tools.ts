@@ -165,10 +165,9 @@ export const processRefund = {
     if (threadId) {
       try {
         const { db: physicalDb } = require('db');
-        const res = await physicalDb.execute(
-          'SELECT "business_id" AS "businessId" FROM threads WHERE id = $1',
-          [threadId]
-        );
+        const res = await physicalDb.execute('SELECT "business_id" AS "businessId" FROM threads WHERE id = $1', [
+          threadId,
+        ]);
         if (res.rows && res.rows[0]) {
           const row = res.rows[0] as any;
           businessId = row.businessId || row.business_id || 'ecommerce';
@@ -261,7 +260,7 @@ export const listUserOrders = {
       const { db: physicalDb } = require('db');
       const res = await physicalDb.execute(
         'SELECT "user_id" AS "userId", "business_id" AS "businessId" FROM threads WHERE id = $1',
-        [threadId]
+        [threadId],
       );
       if (res.rows && res.rows[0]) {
         const row = res.rows[0] as any;
@@ -281,7 +280,7 @@ export const listUserOrders = {
       const { db: physicalDb } = require('db');
       const res = await physicalDb.execute(
         'SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", "estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount" FROM orders WHERE "user_id" = $1 AND "business_id" = $2',
-        [userId, businessId]
+        [userId, businessId],
       );
       const rows = res.rows || [];
       if (rows.length === 0) {
@@ -307,7 +306,7 @@ export const changeShippingAddress = {
       const { db: physicalDb } = require('db');
       const res = await physicalDb.execute(
         'SELECT status, "total_amount" AS "totalAmount" FROM orders WHERE order_id = $1',
-        [orderId]
+        [orderId],
       );
       const rows = res.rows || [];
       if (rows.length === 0) {
@@ -326,7 +325,9 @@ export const changeShippingAddress = {
 
       // Security risk rule: Large order changes require manual supervisor clearance (HITL)
       if (totalAmount > 100.0) {
-        console.log(`[Address Change Guardrail] 🛡️ High-value order address modification detected ($${totalAmount}). Flagging for human audit.`);
+        console.log(
+          `[Address Change Guardrail] 🛡️ High-value order address modification detected ($${totalAmount}). Flagging for human audit.`,
+        );
         return {
           waitingForApproval: true,
           actionType: 'changeShippingAddress',
@@ -363,7 +364,7 @@ export const generateInvoice = {
       const { db: physicalDb } = require('db');
       const res = await physicalDb.execute(
         'SELECT status, "total_amount" AS "totalAmount" FROM orders WHERE order_id = $1',
-        [orderId]
+        [orderId],
       );
       const rows = res.rows || [];
       if (rows.length === 0) {

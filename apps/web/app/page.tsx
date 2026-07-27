@@ -1489,10 +1489,7 @@ export default function Home() {
           </div>
         )}
       </div>
-      </div>
-
-      {/* Screenshot viewer modal */}
-      {selectedScreenshot && (
+      </div>selectedScreenshot && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center p-6">
           <Card className="bg-slate-900 border-slate-800 max-w-4xl w-full overflow-hidden shadow-2xl">
             <CardHeader className="px-6 py-4 border-b border-slate-800 flex flex-row justify-between items-center space-y-0">
@@ -1523,7 +1520,7 @@ export default function Home() {
             </CardFooter>
           </Card>
         </div>
-      )}
+      )
     </div>
   );
 }

@@ -21,6 +21,37 @@
         "web": "workspace:*",
       },
     },
+    "apps/admin": {
+      "name": "admin",
+      "version": "0.1.0",
+      "dependencies": {
+        "@tanstack/react-query": "^5.62.0",
+        "@temporalio/client": "^1.11.0",
+        "business-configs": "workspace:*",
+        "db": "workspace:*",
+        "drizzle-orm": "^0.45.2",
+        "engine": "workspace:*",
+        "lucide-react": "^0.468.0",
+        "next": "^15.1.0",
+        "observability": "workspace:*",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "tailwindcss-animate": "^1.0.7",
+        "tools": "workspace:*",
+        "zustand": "^5.0.0",
+      },
+      "devDependencies": {
+        "@tailwindcss/postcss": "^4.3.2",
+        "@types/node": "^20.0.0",
+        "@types/react": "19.0.0",
+        "@types/react-dom": "19.0.0",
+        "autoprefixer": "^10.4.0",
+        "bun-types": "latest",
+        "postcss": "^8.4.0",
+        "tailwindcss": "^4.0.0",
+        "typescript": "^5.0.0",
+      },
+    },
     "apps/web": {
       "name": "web",
       "version": "0.1.0",
@@ -736,6 +767,8 @@
     "acorn": ["acorn@8.17.0", "https://npm.apple.com/acorn/-/acorn-8.17.0.tgz", { "bin": { "acorn": "bin/acorn" } }, "sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg=="],
 
     "acorn-import-phases": ["acorn-import-phases@1.0.4", "https://npm.apple.com/acorn-import-phases/-/acorn-import-phases-1.0.4.tgz", { "peerDependencies": { "acorn": "^8.14.0" } }, "sha512-wKmbr/DDiIXzEOiWrTTUcDm24kQ2vGfZQvM2fwg2vXqR5uW6aapr7ObPtj1th32b9u90/Pf4AItvdTh42fBmVQ=="],
+
+    "admin": ["admin@workspace:apps/admin"],
 
     "agent-base": ["agent-base@7.1.4", "https://npm.apple.com/agent-base/-/agent-base-7.1.4.tgz", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
 
@@ -1918,6 +1951,8 @@
     "@types/react-dom/@types/react": ["@types/react@19.2.17", "https://npm.apple.com/@types/react/-/react-19.2.17.tgz", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw=="],
 
     "accepts/negotiator": ["negotiator@0.6.3", "", {}, "sha512-+EUsqGPLsM+j/zdChZjsnX51g4XrHFOIXwfnCVPGlQk/k5giakcKsuxCObBRu6DSm9opw/O6slWbJdghQM4bBg=="],
+
+    "admin/tailwindcss": ["tailwindcss@4.3.2", "https://npm.apple.com/tailwindcss/-/tailwindcss-4.3.2.tgz", {}, "sha512-WtctNNSH8A9jlMIqxzuYumOHU5uGZyRv0Q5svQl+oEPy5w84YpBxdb7MdqyiSPQge5jTJ6zFQLq0PFygdccSBA=="],
 
     "axios/https-proxy-agent": ["https-proxy-agent@5.0.1", "", { "dependencies": { "agent-base": "6", "debug": "4" } }, "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA=="],
 
