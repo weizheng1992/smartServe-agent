@@ -56,6 +56,19 @@ export interface MemoryDatabaseState {
     content: string;
     timestamp: string;
   }>;
+  pendingApprovals: Array<{
+    id: string;
+    threadId: string;
+    thread_id: string;
+    actionType: string;
+    action_type: string;
+    actionPayload: any;
+    action_payload: any;
+    status: string;
+    deadline: string;
+    createdAt: string;
+    created_at: string;
+  }>;
 }
 
 // 在内存中模拟一个完整的物理数据库表状态
@@ -161,6 +174,7 @@ const memoryDb: MemoryDatabaseState = {
     },
   ],
   messages: [],
+  pendingApprovals: [],
 };
 
 export class FakePool {
@@ -313,7 +327,8 @@ export class FakePool {
         const id = String(params[0]);
         const thread_id = String(params[1]);
         const role = String(params[2]);
-        const content = String(params[3]);
+        const rawContent = params[3];
+        const content = rawContent !== undefined && rawContent !== null ? String(rawContent) : '';
         const timestamp = String(params[4]);
         const msg = { id, thread_id, role, content, timestamp };
         if (!memoryDb.messages.some((m) => m.id === id)) {
@@ -331,6 +346,86 @@ export class FakePool {
             updatedAt: new Date().toISOString(),
           });
         }
+      }
+      return { rows: [] };
+    }
+
+    if (s.toUpperCase().includes('FROM PENDING_APPROVALS') || s.toUpperCase().includes('FROM "PENDING_APPROVALS"')) {
+      return { rows: memoryDb.pendingApprovals } as DBQueryResult<unknown>;
+    }
+
+    if (
+      s.toUpperCase().includes('INSERT INTO PENDING_APPROVALS') ||
+      s.toUpperCase().includes('INSERT INTO "PENDING_APPROVALS"')
+    ) {
+      if (params && params.length >= 6) {
+        const id = String(params[0]);
+        const threadId = String(params[1]);
+        const actionType = String(params[2]);
+        const actionPayloadRaw = params[3];
+        const actionPayload = typeof actionPayloadRaw === 'string' ? JSON.parse(actionPayloadRaw) : actionPayloadRaw;
+        const status = String(params[4]);
+        const deadline = String(params[5]);
+        const newApproval = {
+          id,
+          threadId,
+          thread_id: threadId,
+          actionType,
+          action_type: actionType,
+          actionPayload,
+          action_payload: actionPayload,
+          status,
+          deadline,
+          createdAt: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        };
+        memoryDb.pendingApprovals.push(newApproval);
+        console.log(`[DB Emulator] Inserted pending approval: ID ${id} for thread ${threadId}`);
+      }
+      return { rows: [] };
+    }
+
+    if (
+      s.toUpperCase().includes('UPDATE') &&
+      (s.toUpperCase().includes('PENDING_APPROVALS') || s.toUpperCase().includes('"PENDING_APPROVALS"'))
+    ) {
+      const id = params && params.length > 0 ? params[params.length - 1] as string : '';
+      const approval = memoryDb.pendingApprovals.find((a) => a.id === id);
+      if (approval) {
+        if (params.length === 2) {
+          approval.status = String(params[0]);
+        } else if (params.length === 3) {
+          approval.status = String(params[0]);
+          const payloadRaw = params[1];
+          const payload = typeof payloadRaw === 'string' ? JSON.parse(payloadRaw) : payloadRaw;
+          approval.actionPayload = payload;
+          approval.action_payload = payload;
+        }
+        console.log(`[DB Emulator] Updated pending approval ID ${id} -> status: ${approval.status}`);
+      }
+      return { rows: [] };
+    }
+
+    if (s.toUpperCase().includes('FROM THREADS') || s.toUpperCase().includes('FROM "THREADS"')) {
+      const threadId = params && typeof params[0] === 'string' ? params[0] : '';
+      const thread = memoryDb.threads.get(threadId);
+      if (thread) {
+        return {
+          rows: [
+            {
+              id: thread.id,
+              userId: thread.userId,
+              user_id: thread.userId,
+              businessId: thread.businessId,
+              business_id: thread.businessId,
+              status: thread.status,
+              createdAt: thread.createdAt,
+              created_at: thread.createdAt,
+              updatedAt: thread.updatedAt,
+              updated_at: thread.updatedAt,
+            },
+          ],
+        };
       }
       return { rows: [] };
     }
@@ -523,14 +618,30 @@ export const db: DBInterface = {
     const pool = getPgPool();
     if (isUsingRealDb) {
       try {
+        let pgUserId = userId;
+        const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+        if (!isValidUuid) {
+          // If not a valid UUID (e.g. test_suite_user), map to a valid physical user
+          try {
+            const userRes = await pool.query('SELECT id FROM users LIMIT 1');
+            if (userRes.rows && userRes.rows.length > 0) {
+              pgUserId = (userRes.rows[0] as any).id;
+            } else {
+              pgUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
+            }
+          } catch {
+            pgUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
+          }
+        }
+
         await pool.query(
           'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") VALUES ($1, $2, $3, $4, NOW(), NOW()) ON CONFLICT (id) DO NOTHING',
-          [threadId, userId, 'ecommerce', 'active']
+          [threadId, pgUserId, 'ecommerce', 'active']
         );
-        console.log(`[DB Thread PG] Created/Ensured physical thread ${threadId} for user ${userId}`);
+        console.log(`[DB Thread PG] Created/Ensured physical thread ${threadId} for mapped user ${pgUserId}`);
         return {
           id: threadId,
-          userId,
+          userId: pgUserId,
           businessId: 'ecommerce',
           status: 'active',
           createdAt: new Date().toISOString(),

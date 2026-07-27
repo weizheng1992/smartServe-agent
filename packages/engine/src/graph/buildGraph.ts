@@ -243,10 +243,13 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
 
   // 1. 根据 threadId 物理查询对应的商户 businessId，并从物理表加载对应的活跃 JSON 规则快照，实现 Hot-Reloadable SaaS 政策。
   try {
-    const { getDrizzle, threads, businessConfigs } = require('db');
+    const { getDrizzle, threads, businessConfigs, db } = require('db');
     const { eq, and } = require('drizzle-orm');
     const drizzle = getDrizzle();
     if (drizzle) {
+      // 🛡️ 最底层的多租户外键一致性保障：强行确保物理 threads 行在 messages 写入前已真实落盘
+      await db.createThread(threadId, userId);
+
       const threadRows = await drizzle.select().from(threads).where(eq(threads.id, threadId)).limit(1);
       if (threadRows[0]?.businessId) {
         businessId = threadRows[0].businessId;
