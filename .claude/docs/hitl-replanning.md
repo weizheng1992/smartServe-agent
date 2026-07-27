@@ -28,7 +28,12 @@
 | **存储介质** | PostgreSQL `messages` 物理表 | Drizzle ORM `pending_approvals` / `eval_results` |
 | **处理特性** | 状态持久落盘，维护历史上下文连贯性 | 物理无状态（Stateless），支持随时挂起释放与热恢复 |
 
-### 2. 双线程协作与挂起恢复流程
+### 🆕 2. 零 Fallback 级 UUID 安全会话派发
+为杜绝多用户会话串扰或因使用默认共享账号（如 `thread_local_shared`）引发的数据交叉泄露，前端引入了**客户端动态安全 UUID v4 派发机制**：
+*   **UUID v4 动态派发**: 用户进入页面瞬间，在浏览器端利用 `crypto.randomUUID()` 动态分配完全独立、唯一的 threadId 物理写入 Postgres 行，条分缕析，绝对隔离，摒弃一切不安全的不变 Fallback 会话。
+*   **双向 URL 会话同步**: 页面通过 `window.history.replaceState` 实现当前会话 ID 与地址栏 `?threadId=...` 的秒级双向同步，用户刷新或保存书签时 100% 连贯恢复，保障会话完全纯净、高内聚。
+
+### 3. 双线程协作与挂起恢复流程
 
 ```
 [前端/用户发送提问] ──(携带 threadId)──> [Next.js API Gate]
@@ -153,12 +158,12 @@
       }
     }
     ```
-    *   **架构优势**：避免了审批人在下班或长假期间由于无响应，导致用户的提问状态和后台任务被无限期“挂死”或阻塞。通过自动降级熔断，既保障了金融资金的 100% 物理红线安全，又保证了对话交互的高可靠闭环，提供了极为友好的人机协同降级体验。
+    *   **架构优势**：避免了审批人在下班或长假期间由于无响应，导致用户的提问状态 and 后台任务被无限期“挂死”或阻塞。通过自动降级熔断，既保障了金融资金的 100% 物理红线安全，又保证了对话交互的高可靠闭环，提供了极为友好的人机协同降级体验。
 
 #### ③ 无状态挂起与优雅截断 (Stateless Suspension)
 *   **物理文件**：
-    1. `packages/engine/src/graph/nodes/validator.node.ts` (行数 16-25)
-    2. `packages/engine/src/graph/buildGraph.ts` (行数 63-68)
+    1. `packages/engine/src/graph/nodes/validator.node.ts`
+    2. `packages/engine/src/graph/buildGraph.ts`
 *   **实现细节**：
     *   **Validator 旁路**：`validatorNode` 识别到 `step.result.waitingForApproval === true` 时，**不推进 `currentStepIndex`，保留现场原封不动返回**。
     *   **条件边截断**：在 `buildGraph.ts` 编译的条件路由中，一经检测到存在等待审批的步骤，**直接回退至 `finishNode` 并流向 `END` 终止执行**：
@@ -208,8 +213,8 @@
 
 #### ⑥ 认知回溯与倒退规划 (Cognitive Backtracking)
 *   **物理文件**：
-    1. `packages/engine/src/graph/buildGraph.ts` (行数 70-80)
-    2. `packages/engine/src/graph/nodes/planner.node.ts` (行数 51-61)
+    1. `packages/engine/src/graph/buildGraph.ts`
+    2. `packages/engine/src/graph/nodes/planner.node.ts`
 *   **实现细节**：
     *   **图指针打倒挡**：当核决返回驳回结果，`executorNode` 恢复执行，将当前子步骤标为 `failed`。在条件路由中，一旦探测到该状态，**强制将图指针由 validator 倒档推回 `planner` 节点**：
     ```typescript
@@ -249,5 +254,5 @@
 
 ---
 
-*文档编写日期：2026-07-24*
+*文档编写日期：2026-07-27*
 *架构状态：全量生产编译通过 (TypeScript 100% Type-Safe)*

@@ -29,13 +29,18 @@
 ### 📂 核心文件：
 1. **统一导出**：`packages/engine/src/memory/index.ts`
 2. **短期记忆（ShortMemory）**：`packages/engine/src/memory/shortMemory.ts`
-   * *功能*：通过 PostgreSQL 物理表（`messages`）读取和存储最近 10 轮的对话上下文，提供精准的临场对话连贯性。
+   * *功能*：通过 PostgreSQL 物理表（`messages`）读取和存储最近 10 轮的对话上下文，提供临场对话连贯性。
 3. **长期偏好记忆（LongMemory）**：`packages/engine/src/memory/longMemory.ts`
    * *功能*：当大模型检测到“User prefers...”等用户习惯偏好时，会将偏好文本通过 `text-embedding-005` 转化为向量并永久落盘在 `long_memory_facts` 表中。下次会话通过**余弦相似度（Cosine Similarity，硬阈值 $\ge 0.65$）**检索最相关的 5 条偏好注入 Prompt（如：*“用户偏好顺丰快递”*）。
 4. **情境记忆（EpisodicMemory）**：`packages/engine/src/memory/episodicMemory.ts`
    * *功能*：记录历史发生的重大核心事件，并按重要性（`importance`，1-10分）打分并向量化落盘。
 5. **任务记忆（TaskMemory）**：`packages/engine/src/memory/taskMemory.ts`
    * *功能*：物理持久化当前正在执行的任务规划状态（`TaskState`），保障分布式环境下（如 Temporal）任务中断后可从上次 Checkpoint 精准恢复。
+
+### 🆕 4.2.1 自愈式短期记忆加载逻辑 (Self-Healing Short Memory)
+在无状态执行（如 Temporal Activity 异步分流）或 Next.js 模块热更新等边缘复杂环境下，保存在大模型内存中的 `shortMemory` 极易由于进程中断而发生丢失，从而引发**多轮会话记忆断档失忆（Turn Amnesia）**。
+* **物理文件**: `src/graph/nodes/triage.node.ts`, `planner.node.ts`, `executor.node.ts`, `finish.node.ts`
+* **自愈机制**: 各执行节点内置了**数据库级别短期记忆强制反查与加载逻辑**。如果当前 LangGraph 内存里的 `shortMemory` 为空，节点会自动在底层调起 `ShortMemory.getMessages()` 从 PostgreSQL `messages` 数据表中反查加载，并秒级填充回运行时状态机，确保多轮提问无缝、绝对连贯地抓取先前上下文中的 Order ID。
 
 ---
 
@@ -62,13 +67,13 @@
 项目独创了 **“规则前置 -> 规则白名单 -> 语义置信度评估 -> 大模型多意图检测”** 三层意图防御金字塔，确保在超高并发下，既有极高精确度，又有极低算力成本：
 
 1. **第一层：纯规则预过滤 (Rule-based Precheck)**
-   * (行数 99-115) 纯符号拦截、超长文本拦截、空内容过滤。
-   * (行数 170-198) 白名单指令，如“你好”（问候语）、“转人工”、“退出”。**10ms 瞬间由硬编码做出专业答复，大模型开销为 0**。
+   * 纯符号拦截、超长文本拦截、空内容过滤。
+   * 白名单指令，如“你好”（问候语）、“转人工”、“退出”。**10ms 瞬间由硬编码做出专业答复，大模型开销为 0**。
 2. **第二层：物理向量余弦相似度匹配 (Semantic Embedding)**
-   * (行数 207-246) 离线预缓存 `order_status`、`refund` 和 `out_of_scope`（超出业务范围，如天气、写代码、政治）的锚点句向量。
+   * 离线预缓存 `order_status`、`refund` 和 `out_of_scope`（超出业务范围，如天气、写代码、政治）的锚点句向量。
    * 计算用户提问与锚点的最大 Cosine Similarity：若相似度 $\ge 0.88$ 且与无关领域的差值 $\ge 0.08$，直接判定为对应意图，**完美避开大模型分类，提速 10 倍**！
-3. **第三层：大模型深度精细分类 (LLM Deep Triage)**
-   * (行数 251-289) 当两两模糊（如既像查单又像退款）且向量得分都不高时，降级激活 Gemini 3.5 Flash 进行多轮深度解析，保障 100% 的意图捕获底线。
+3. **第三层：大模型深度精戏分类 (LLM Deep Triage)**
+   * 当两两模糊（如既像查单又像退款）且向量得分都不高时，降级激活 Gemini 3.5 Flash 进行多轮深度解析，保障 100% 的意图捕获底线。
 
 ---
 
@@ -105,13 +110,13 @@
 系统在每一个底层通信与逻辑判断细节上都筑起了物理熔断层，确保服务在极端弱网或系统雪崩时依然保持可用：
 
 ### 📂 核心文件：
-1. **死循环熔断器**：`packages/engine/src/graph/buildGraph.ts` (行数 64-67)
+1. **死循环熔断器**：`packages/engine/src/graph/buildGraph.ts`
    * *熔断策略*：当 `currentStepIndex >= 10` 时，强制发生物理熔断并跳出循环进入 `finish` 节点，**防止由于模型决策失误导致 Executor-Validator 无限自旋产生高昂账单**。
-2. **校验器自动绿灯放行**：`packages/engine/src/graph/nodes/validator.node.ts` (行数 34-43)
+2. **校验器自动绿灯放行**：`packages/engine/src/graph/nodes/validator.node.ts`
    * *容错策略*：针对非工具性步骤（如文本提取、圆角截图、话术总结），校验器自动给予 `isValid = true` 放行，**防止严格的大模型校验器对无数据输出的步骤进行挑剔式报错**。
-3. **数据库连接熔断与 FakePool 仿真**：`packages/db/src/client.ts` (行数 142-166)
+3. **数据库连接熔断与 FakePool 仿真**：`packages/db/src/client.ts`
    * *熔断策略*：如果物理 PostgreSQL 连接超时，系统自动捕获异常，打印警告，并**一键无缝启动高保真内存仿真数据库（FakePool）**，绝不让整个服务崩溃。
-4. **缓存无缝熔断**：`packages/tools/src/ecommerce.tools.ts` (行数 29-38)
+4. **缓存无缝熔断**：`packages/tools/src/ecommerce.tools.ts`
    * *熔断策略*：一旦 Redis 连接丢失，物理 `useRedis` 切换为 `false`，并**瞬间无缝降级到本地进程内的 `orderStatusCache (Map)`**，零报错，零服务中断。
 
 ---
@@ -121,7 +126,7 @@
 ### 📂 核心文件：
 1. **可观测基础**：`packages/observability` (内置 `pino` 日志和 `langfuse` 运行链物理追踪)
 2. **事件总线与 Token 累计**：`packages/engine/src/graph/eventEmitter.ts`
-3. **大模型拦截器**：`packages/engine/src/llm/callLLMWithRetry.ts` (行数 14-38)
+3. **大模型拦截器**：`packages/engine/src/llm/callLLMWithRetry.ts`
 4. **SSE 推送网关**：`apps/web/app/api/chat/[jobId]/stream/route.ts`
 5. **前端大屏指标渲染**：`apps/web/app/page.tsx`
 
@@ -137,7 +142,7 @@
 这是项目最硬核的架构闪光点之一，专门用来应对用户手滑连击、高并发刷屏场景：
 
 ### 📂 核心文件：
-* **请求分发控制器**：`apps/web/app/api/chat/route.ts` (核心行数 25 - 80)
+* **请求分发控制器**：`apps/web/app/api/chat/route.ts`
 
 ### 💡 架构解析：
 * **Step 0: Singleflight 并发请求合并 (Request Collapsing)**
@@ -147,7 +152,7 @@
 * **Step 1: 短时高频去重 Cache (5秒 Short-TTL)**
   * 如果用户错开 1-2 秒，连续多次点击发送一模一样的话：
   * 系统拦截命中 `completedRequestsCache` 缓存，在 5 秒黄金防刷期内直接复用上一次成功的 `jobId` 结果返回。
-  * 配合 `eventEmitter.ts` 中**延迟 10 秒内存物理清理的 `clearJob`**，后来挂载上来的客户端依然能完美获取到高保真的历史步骤与结果重放，体验丝滑！
+  * 后来挂载上来的客户端依然能完美获取到高保真的历史步骤与结果重放，体验丝滑！
 
 ---
 
@@ -187,7 +192,7 @@
 
 ## 4.12 🚀 新增：物理自愈代理与三阶指数退避 LLM 重试拦截
 
-在不改变节点调用的前提下，提供了高度健壮的 LLM 调用透明代理（Proxy Wrapper），极大提升分布式及并发调用下的链路高可用性（HA）。
+在不改变节点调用的前提下，提供了高度健壮 of LLM 调用透明代理（Proxy Wrapper），极大提升分布式及并发调用下的链路高可用性（HA）。
 
 ### 📂 核心文件：
 * **大模型自愈代理**：`packages/engine/src/llm/callLLMWithRetry.ts` (实现 `ResilientLLM` 类代理)
@@ -198,7 +203,20 @@
 
 ---
 
-## 4.13 🚀 新增：Rust 级极速代码校验格式化系统（Biome Engine）
+## 4.13 🚀 新增：双向会话同步与零 Fallback 级 UUID 会话管理
+为彻底铲除系统状态流失及数据交叉泄露，系统完全剥离了硬编码和默认的 `thread_local_shared` 回退机制，实现了纯净安全的 UUID 会话控制：
+
+### 📂 核心文件：
+* **前端控制台页面**：`apps/web/app/page.tsx`
+* **Threads 创建端点**：`apps/web/app/api/chat/threads/route.ts`
+
+### 💡 架构解析：
+* **UUID v4 动态派发**: 新用户首次进入时，客户端直接利用 `crypto.randomUUID()` 动态派发一个合规的 UUID 并物理落盘，避免了多租户会话重合。
+* **URL 响应式双向同步**: 页面通过 `window.history.replaceState` 实现当前会话 ID 与地址栏 `?threadId=...` 的双新秒级绑定，使用户保存书签、双标签、刷新时能无损、秒级恢复完全一致的历史会话状态。
+
+---
+
+## 4.14 🚀 新增：Rust 级极速代码校验格式化系统（Biome Engine）
 
 引入了目前业界最前沿、基于 Rust 的超快格式化和静态代码校验引擎 Biome，替换耗时的 Prettier 与 ESLint，大幅缩短开发检查闭环时效。
 
@@ -211,7 +229,7 @@
 
 ---
 
-## 4.14 🚀 新增：E2E 浏览器用户旅程测试（Playwright）与 Prompt 质量评估（Promptfoo）
+## 4.15 🚀 新增：E2E 浏览器用户旅程测试（Playwright）与 Prompt 质量评估（Promptfoo）
 
 引入了端到端（E2E）真实的无头浏览器自动化测试，以及针对 Triage 和 Planner 大模型 Prompt 质量的回归判定、红线防注入评测框架。
 

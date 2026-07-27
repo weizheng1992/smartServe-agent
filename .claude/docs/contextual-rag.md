@@ -11,7 +11,7 @@
 在工业级多商户（如 Nike、Adidas、电商主站）托管客服场景下，传统的 RAG 架构有三大致命缺陷：
 1. **多租户政策幻觉混淆**：若没有对检索数据进行物理/逻辑隔离，大模型在回答 Adidas 会员提问时，极易检索出 Nike 的“30天超长退换货”政策，导致重大的商誉及赔付风险。
 2. **切片语义丢失（Loss of Context）**：传统 RAG 将整篇 SOP 文档切分为 100-300 字的 chunks 并进行向量化。当模型单独检索出某一 chunk（如：*“退款时必须保留防伪扣”*），由于丢失了上下文，模型根本无法得知这是属于 Adidas 的特殊运动鞋政策，还是属于主站的普通服饰 policy。
-3. **向量数据库（pgvector）依赖与离线瘫痪**：大多数系统的向量检索强依赖 pgvector 或 Pinecone 服务。一旦数据库离线或进行本地模拟时，整个知识检索就会完全瘫痪。
+3. **向量数据库（pgvector）依赖与离线瘫痪**：大多数系统的向量检索强依赖 pgvector 或 Pinecone服务。一旦数据库离线或进行本地模拟时，整个知识检索就会完全瘫痪。
 
 为了攻克这些痛点，平台物理实现了 **多租户隔离 Contextual RAG 检索引擎**：
 
@@ -98,10 +98,10 @@ if (s.toUpperCase().includes('FROM RAG_DOCUMENTS')) {
 
 ## 五、 工具级政策红线守卫（Tool-Level SOP Policy Guardrail）
 
-除了在 Planner 阶段依靠 RAG 知识校正模型的大脑规划外，本系统在**物理工具调用执行层**，设计并部署了金融级的**双向二次校签红线守卫（Tool-Level SOP Guardrail）**：
+除了在 Planner 阶段依靠 RAG 知识库校正模型大脑规划，平台还部署了高防卫的物理工具级 SOP 安全拦截门闸：
 
 ### 1. 二次校签物理流程
-*   在 `executor.node.ts` 即将调用物理工具时，系统会自动将当前的 `threadId` 写入参数中：
+*   在 `executor.node.ts` 即将调用物理工具时，系统会自动下发当前的 `threadId` 参数：
     `await toolDef.execute({ ...args, threadId })`
 *   在 `processRefund`（物理退款工具）中，系统会根据 `threadId` 执行高吞吐、轻量级的 raw SQL 溯源其所属 `businessId`（完全避开 Drizzle ORM 的引入警告）：
     `SELECT business_id FROM threads WHERE id = :threadId`
@@ -117,9 +117,16 @@ if (s.toUpperCase().includes('FROM RAG_DOCUMENTS')) {
       "elapsedDays": 20
     }
     ```
-*   **极致工程深度**：此设计实现了 “LLM 智能识别 ➔ 管理员人工授权 ➔ 物理工具二次校验” 的**三重防御机制（Defense-in-Depth）**，将 AI 在金融、商用场景下的安全性拔高到了行业天花板级别！
 
 ---
 
-*文档编写日期：2026-07-24*
+## 🆕 六、 零 Fallback 级顾客查单逻辑设计 (Secure listUserOrders)
+针对多商户 SaaS 的查单诉求，全新扩展了 `listUserOrders` 原子级工具：
+*   **会话关联反查**: 传统 RAG 在查单时常需要 LLM 从提问中自行提取 userId，这容易通过 Prompt Injection 进行**篡改越权查单**。
+*   **零 Fallback 会话校验**: `listUserOrders` **强校验 `threadId` 参数**。它在底层强制执行物理 SQL 查询，动态抓取该会话真实的 `user_id` 与 `business_id`。
+*   **物理拦截熔断**: 一旦无法解出有效的会话，或者发现会话未在 threads 物理表中注册，工具将即刻抛出 `"Session threadId is strictly required to query customer orders."` 安全断路异常，物理上**彻底铲除了通过默认账号或越权 ID 读取他人历史订单的漏洞**！
+
+---
+
+*文档编写日期：2026-07-27*
 *检索架构：Contextual-Embedding (Gemini-3.5-Flash & Text-Embedding)*
