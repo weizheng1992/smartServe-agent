@@ -15,3 +15,4 @@ tests:
   - $import: testCases/ecommerce/single-intent.json
   - $import: testCases/ecommerce/multi-intent.json
   - $import: testCases/legal/single-intent.json
+  - $import: testCases/security/injection.json
