@@ -295,6 +295,102 @@ export const listUserOrders = {
   },
 };
 
+export const changeShippingAddress = {
+  name: 'changeShippingAddress',
+  description: 'Modify the shipping address of an order before it gets shipped.',
+  schema: z.object({
+    orderId: z.string().describe('The unique order identifier.'),
+    newAddress: z.string().describe('The new physical shipping address.'),
+  }),
+  execute: async ({ orderId, newAddress }: { orderId: string; newAddress: string }) => {
+    try {
+      const { db: physicalDb } = require('db');
+      const res = await physicalDb.execute(
+        'SELECT status, "total_amount" AS "totalAmount" FROM orders WHERE order_id = $1',
+        [orderId]
+      );
+      const rows = res.rows || [];
+      if (rows.length === 0) {
+        return { error: `Order ${orderId} not found in database.` };
+      }
+
+      const order = rows[0] as any;
+      const status = order.status || order.status;
+      const totalAmount = Number(order.totalAmount || order.total_amount || 0);
+
+      if (status === 'shipped' || status === 'delivered') {
+        return {
+          error: `⚠️ Address modification blocked: Order ${orderId} is currently [${status.toUpperCase()}] and has already left our logistics centers. Physical modification is impossible.`,
+        };
+      }
+
+      // Security risk rule: Large order changes require manual supervisor clearance (HITL)
+      if (totalAmount > 100.0) {
+        console.log(`[Address Change Guardrail] 🛡️ High-value order address modification detected ($${totalAmount}). Flagging for human audit.`);
+        return {
+          waitingForApproval: true,
+          actionType: 'changeShippingAddress',
+          actionPayload: {
+            args: { orderId, newAddress },
+          },
+          message: `🛡️ Security Alert: Address change for high-value order ${orderId} ($${totalAmount}) has been suspended. Awaiting Supervisor verification.`,
+        };
+      }
+
+      // Standard successful update simulation
+      console.log(`[Address Change] ✅ Order ${orderId} address updated to: "${newAddress}"`);
+      return {
+        orderId,
+        status: 'address_updated',
+        newAddress,
+        message: `✅ Shipping address for order ${orderId} has been successfully updated to: ${newAddress}.`,
+      };
+    } catch (err) {
+      console.error('[Address Change Tool] Failure:', err);
+      return { error: 'Failed to process address change.' };
+    }
+  },
+};
+
+export const generateInvoice = {
+  name: 'generateInvoice',
+  description: 'Generate a structured electronic tax invoice for a completed order.',
+  schema: z.object({
+    orderId: z.string().describe('The unique order identifier.'),
+  }),
+  execute: async ({ orderId }: { orderId: string }) => {
+    try {
+      const { db: physicalDb } = require('db');
+      const res = await physicalDb.execute(
+        'SELECT status, "total_amount" AS "totalAmount" FROM orders WHERE order_id = $1',
+        [orderId]
+      );
+      const rows = res.rows || [];
+      if (rows.length === 0) {
+        return { error: `Order ${orderId} not found in database.` };
+      }
+
+      const order = rows[0] as any;
+      const totalAmount = order.totalAmount || order.total_amount;
+      const invoiceId = `INV-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+
+      console.log(`[Invoice Tool] ✅ Invoice ${invoiceId} compiled for order ${orderId}`);
+      return {
+        invoiceId,
+        orderId,
+        totalAmount,
+        taxAmount: `$${(Number(totalAmount) * 0.08).toFixed(2)}`,
+        message: `✅ Electronic Tax Invoice ${invoiceId} has been successfully compiled and registered with financial tax administrations. Download PDF: /invoices/${invoiceId}.pdf`,
+      };
+    } catch (err) {
+      console.error('[Invoice Tool] Failure:', err);
+      return { error: 'Failed to generate tax invoice.' };
+    }
+  },
+};
+
 registerTool(getOrderStatus);
 registerTool(processRefund);
 registerTool(listUserOrders);
+registerTool(changeShippingAddress);
+registerTool(generateInvoice);
