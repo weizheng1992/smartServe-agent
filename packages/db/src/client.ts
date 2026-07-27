@@ -201,8 +201,30 @@ export class FakePool {
     }
 
     if (s.toUpperCase().includes('FROM ORDERS') || s.toUpperCase().includes('FROM "ORDERS"')) {
-      const orderId = params && typeof params[0] === 'string' ? params[0] : 'ORD-98712';
-      const order = memoryDb.orders.get(orderId);
+      // Check if querying by user_id
+      const userMatch = s.match(/user_id\s*=\s*['"]([^'"]+)['"]/i) || s.match(/user_id\s*=\s*\$1/i);
+      if (userMatch) {
+        const userId = params && typeof params[0] === 'string' ? params[0] : 'u_default_id';
+        const rows = Array.from(memoryDb.orders.values()).filter((o) => o.user_id === userId);
+        return { rows } as DBQueryResult<unknown>;
+      }
+
+      // Check if querying by raw string user_id
+      const rawUserMatch = s.match(/["']user_id["']\s*=\s*['"]([^'"]+)['"]/i);
+      if (rawUserMatch) {
+        const userId = rawUserMatch[1];
+        const rows = Array.from(memoryDb.orders.values()).filter((o) => o.user_id === userId);
+        return { rows } as DBQueryResult<unknown>;
+      }
+
+      let orderId = params && typeof params[0] === 'string' ? params[0] : '';
+      if (!orderId) {
+        const orderIdMatch = s.match(/order_id\s*=\s*['"]([^'"]+)['"]/i) || s.match(/orderId\s*=\s*['"]([^'"]+)['"]/i);
+        if (orderIdMatch) {
+          orderId = orderIdMatch[1];
+        }
+      }
+      const order = orderId ? memoryDb.orders.get(orderId) : null;
       return { rows: order ? [order] : [] } as DBQueryResult<unknown>;
     }
 
@@ -213,8 +235,14 @@ export class FakePool {
     }
 
     if (s.toUpperCase().includes('FROM ORDER_ITEMS') || s.toUpperCase().includes('FROM "ORDER_ITEMS"')) {
-      const orderId = params && typeof params[0] === 'string' ? params[0] : 'ORD-98712';
-      const rows = memoryDb.orderItems.filter((item) => item.order_id === orderId);
+      let orderId = params && typeof params[0] === 'string' ? params[0] : '';
+      if (!orderId) {
+        const orderIdMatch = s.match(/order_id\s*=\s*['"]([^'"]+)['"]/i) || s.match(/orderId\s*=\s*['"]([^'"]+)['"]/i);
+        if (orderIdMatch) {
+          orderId = orderIdMatch[1];
+        }
+      }
+      const rows = orderId ? memoryDb.orderItems.filter((item) => item.order_id === orderId) : [];
       return { rows } as DBQueryResult<unknown>;
     }
 
@@ -434,12 +462,14 @@ export class FakePool {
       s.toUpperCase().includes('UPDATE') &&
       (s.toUpperCase().includes('ORDERS') || s.toUpperCase().includes('"ORDERS"'))
     ) {
-      const match = s.match(/WHERE\s+["']?orderId["']?\s*=\s*['"]([^'"]+)['"]/i);
-      const id = match ? match[1] : 'ORD-98712';
-      const order = memoryDb.orders.get(id);
-      if (order) {
-        order.status = 'refunded';
-        memoryDb.orders.set(id, order);
+      const match = s.match(/WHERE\s+["']?orderId["']?\s*=\s*['"]([^'"]+)['"]/i) || s.match(/WHERE\s+["']?order_id["']?\s*=\s*['"]([^'"]+)['"]/i);
+      const id = match ? match[1] : '';
+      if (id) {
+        const order = memoryDb.orders.get(id);
+        if (order) {
+          order.status = 'refunded';
+          memoryDb.orders.set(id, order);
+        }
       }
       return { rows: [] };
     }
