@@ -53,18 +53,49 @@ export async function executorNode(state: typeof AgentStateAnnotation.State) {
   }
 
   const prompt = `We are executing step: "${stepToRun.description}".
-Based on the conversation history below, extract and generate the correct parameters/arguments for the tool (e.g. orderId).
-Choose the correct tool to call from: ${JSON.stringify(allowedTools)}.
-If no tool is needed, return "NONE".
-Otherwise, return a JSON object with keys "toolName" and "args" (object of arguments).
-Return ONLY the raw JSON object or "NONE". Do not include markdown or backticks.
+
+CRITICAL INSTRUCTIONS FOR TOOL SELECTION:
+1. Determine if this step corresponds to executing an action or retrieving data from our systems.
+2. If the step description mentions retrieving, getting, fetching, checking, or tracking order details, status, or tracking numbers, you MUST select the "getOrderStatus" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
+3. If the step description mentions processing, performing, requesting, or initiating a refund, you MUST select the "processRefund" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
+4. If the step description mentions taking a screenshot, capturing a viewport, rendering, or checking a webpage, you MUST select the "takeScreenshot" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
+5. Do NOT skip tool execution (i.e. do NOT return "NONE") just because the information already seems to be mentioned in the conversation history! Real-time physical retrieval/verification from our database is ALWAYS strictly required to ground the execution.
+6. If a tool is selected, you must extract its arguments from the [CONVERSATION HISTORY] below:
+   - For "getOrderStatus" and "processRefund", extract the "orderId" (must look like ORD-XXXXX, e.g., ORD-98712).
+   - Carefully look at ALL past turns in the history. If the customer mentioned an order ID in a previous turn, carry it over and use it.
+   - Do NOT generate or hallucinate a dummy orderId like "12345" or "123456" if there is no real order ID in the history! If you absolutely cannot find any order ID in the history, return "NONE" so we can ask the customer for it.
+
+Output format:
+If no tool is applicable to this step at all, return "NONE".
+Otherwise, you must return a raw JSON object (with NO markdown backticks, NO "json" label, and NO text outside the JSON) in this exact format:
+{
+  "toolName": "toolName",
+  "args": {
+    "key": "value"
+  }
+}
+
+[CONVERSATION HISTORY]
 ${historyContext}`;
+
+  // 📝 深度调试日志：打印这一步实际传给 LLM 的 Messages/Prompt 内容
+  console.log(`\n[Executor Node Debug] ==========================================`);
+  console.log(`[Executor Node Debug] Current Step Index: ${currentIndex}`);
+  console.log(`[Executor Node Debug] Step Description: "${stepToRun.description}"`);
+  console.log(`[Executor Node Debug] Allowed Tools: ${JSON.stringify(allowedTools)}`);
+  console.log(`[Executor Node Debug] Prompt sent to LLM:\n${prompt}`);
+  console.log(`[Executor Node Debug] ------------------------------------------`);
 
   let resultData: any;
   try {
     const response = await llm.invoke(prompt);
     const content = typeof response === 'string' ? response : (response as any).content || '';
     const text = content.trim();
+
+    // 📝 深度调试日志：打印 LLM 返回的实际内容（是否返回了工具调用参数）
+    console.log(`[Executor Node Debug] Raw LLM Response Content:\n"${text}"`);
+    console.log(`[Executor Node Debug] ==========================================\n`);
+
     if (text === 'NONE') {
       resultData = { message: `Step execution completed without needing tools: ${stepToRun.description}` };
     } else {
