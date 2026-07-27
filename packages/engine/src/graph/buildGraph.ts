@@ -235,7 +235,7 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
       refund: { description: 'Process or request refunds.' },
       general_query: { description: 'General customer questions.' },
     },
-    tools: ['getOrderStatus', 'processRefund'],
+    tools: ['getOrderStatus', 'processRefund', 'takeScreenshot', 'listUserOrders'],
     executionMode: 'plan-and-execute',
     confidenceThresholds: { high: 0.85, mid: 0.6 },
     refundAutoApprovalLimit: 100, // 默认超过 $100 退款触发审批

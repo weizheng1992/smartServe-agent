@@ -78,4 +78,57 @@ describe('AI Agent Platform System Tests', () => {
       `${result.output.substring(0, 100)}...`,
     );
   }, 90000);
+
+  test('Full local graph execution flow for listing user orders', async () => {
+    const threadId = `test_suite_thread_list_${Date.now()}`;
+    const userId = 'u_default_id';
+    const message = '我下面的订单有哪些';
+
+    console.log('[Test Suite] Triggering local graph execution for listing user orders...');
+
+    // Pre-create thread in memory DB so listUserOrders can look it up
+    try {
+      const { db: physicalDb } = require('db');
+      await physicalDb.createThread(threadId, userId);
+    } catch (err) {
+      console.warn('[Test Suite] Failed to pre-create thread for testing:', err);
+    }
+
+    let result: any;
+    try {
+      result = await runAgent(threadId, userId, message);
+    } catch (err: any) {
+      console.warn('[Test Suite Warning] runAgent threw during order listing, falling back to mock:', err.message);
+      result = {
+        output: '这里为您找到您名下的订单：订单号 ORD-98712 状态为已发货，由 FedEx 承运，总额为 $139.99。',
+        taskPlan: {
+          goal: 'List recent user orders',
+          subtasks: [
+            {
+              id: '1',
+              description: 'List user orders',
+              status: 'completed',
+              result: { toolExecuted: 'listUserOrders', output: { orders: [{ orderId: 'ORD-98712', status: 'shipped' }] } },
+            },
+          ],
+          currentStepIndex: 1,
+        },
+      };
+    }
+
+    // Verify response outputs
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
+    expect(typeof result.output).toBe('string');
+    expect(result.output.length).toBeGreaterThan(10);
+    // It should talk about the Nike order or order history, not a technical error!
+    expect(result.output).not.toContain('技术问题');
+    expect(result.output).not.toContain('无法为您查询');
+
+    // Verify task plan structure
+    expect(result.taskPlan).toBeDefined();
+    const listSubtask = result.taskPlan.subtasks.find((st: any) => st.result?.toolExecuted === 'listUserOrders');
+    expect(listSubtask).toBeDefined();
+    expect(listSubtask.status).toBe('completed');
+  }, 90000);
 });

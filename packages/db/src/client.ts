@@ -98,6 +98,19 @@ const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
         total_amount: 139.99,
       },
     ],
+    [
+      'ORD-55555',
+      {
+        order_id: 'ORD-55555',
+        status: 'completed',
+        carrier: 'SF Express',
+        tracking_number: 'SF9876543210',
+        estimated_delivery: '2026-07-25',
+        user_id: 'u_default_id',
+        business_id: 'ecommerce',
+        total_amount: 49.99,
+      },
+    ],
   ]),
   products: new Map([
     [
@@ -163,6 +176,13 @@ const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
       product_id: 'prod_nike_1',
       quantity: 1,
       price_at_purchase: 139.99,
+    },
+    {
+      id: 'item_eco_1',
+      order_id: 'ORD-55555',
+      product_id: 'prod_eco_1',
+      quantity: 1,
+      price_at_purchase: 49.99,
     },
   ],
   messages: [],
@@ -435,7 +455,13 @@ export class FakePool {
     }
 
     if (s.toUpperCase().includes('FROM THREADS') || s.toUpperCase().includes('FROM "THREADS"')) {
-      const threadId = params && typeof params[0] === 'string' ? params[0] : '';
+      let threadId = params && typeof params[0] === 'string' ? params[0] : '';
+      if (!threadId) {
+        const threadIdMatch = s.match(/id\s*=\s*['"]([^'"]+)['"]/i);
+        if (threadIdMatch) {
+          threadId = threadIdMatch[1];
+        }
+      }
       const thread = memoryDb.threads.get(threadId);
       if (thread) {
         return {
