@@ -6,7 +6,7 @@
 
 ---
 
-## 4.1 图编排与状态上下文（Graph & State Context）
+## 3.1 图编排与状态上下文（Graph & State Context）
 
 ### 📂 核心文件：
 1. **状态定义**：`packages/engine/src/graph/state.ts`
@@ -22,7 +22,7 @@
 
 ---
 
-## 4.2 四种多维度记忆系统（Quad-Memory Architecture）
+## 3.2 四种多维度记忆系统（Quad-Memory Architecture）
 
 项目实现了四种不同生命周期与存储介质的记忆隔离，彻底解决了大模型客服“遗忘用户设定”或“上下文膨胀”的问题：
 
@@ -37,14 +37,14 @@
 5. **任务记忆（TaskMemory）**：`packages/engine/src/memory/taskMemory.ts`
    * *功能*：物理持久化当前正在执行的任务规划状态（`TaskState`），保障分布式环境下（如 Temporal）任务中断后可从上次 Checkpoint 精准恢复。
 
-### 🆕 4.2.1 自愈式短期记忆加载逻辑 (Self-Healing Short Memory)
+### 🆕 3.2.1 自愈式短期记忆加载逻辑 (Self-Healing Short Memory)
 在无状态执行（如 Temporal Activity 异步分流）或 Next.js 模块热更新等边缘复杂环境下，保存在大模型内存中的 `shortMemory` 极易由于进程中断而发生丢失，从而引发**多轮会话记忆断档失忆（Turn Amnesia）**。
 * **物理文件**: `src/graph/nodes/triage.node.ts`, `planner.node.ts`, `executor.node.ts`, `finish.node.ts`
 * **自愈机制**: 各执行节点内置了**数据库级别短期记忆强制反查与加载逻辑**。如果当前 LangGraph 内存里的 `shortMemory` 为空，节点会自动在底层调起 `ShortMemory.getMessages()` 从 PostgreSQL `messages` 数据表中反查加载，并秒级填充回运行时状态机，确保多轮提问无缝、绝对连贯地抓取先前上下文中的 Order ID。
 
 ---
 
-## 4.3 知识库 RAG 与算力优化
+## 3.3 知识库 RAG 与算力优化
 
 ### 📂 核心文件：
 1. **数据模型**：`packages/db/src/schema.ts` ➔ `ragDocuments` 表
@@ -58,7 +58,7 @@
 
 ---
 
-## 4.4 意图识别（Triage 三层过滤架构）
+## 3.4 意图识别（Triage 三层过滤架构）
 
 ### 📂 核心文件：
 * `packages/engine/src/graph/nodes/triage.node.ts` (核心行数 83 - 295)
@@ -72,12 +72,12 @@
 2. **第二层：物理向量余弦相似度匹配 (Semantic Embedding)**
    * 离线预缓存 `order_status`、`refund` 和 `out_of_scope`（超出业务范围，如天气、写代码、政治）的锚点句向量。
    * 计算用户提问与锚点的最大 Cosine Similarity：若相似度 $\ge 0.88$ 且与无关领域的差值 $\ge 0.08$，直接判定为对应意图，**完美避开大模型分类，提速 10 倍**！
-3. **第三层：大模型深度精戏分类 (LLM Deep Triage)**
+3. **第三层：大模型深度精细分类 (LLM Deep Triage)**
    * 当两两模糊（如既像查单又像退款）且向量得分都不高时，降级激活 Gemini 3.5 Flash 进行多轮深度解析，保障 100% 的意图捕获底线。
 
 ---
 
-## 4.5 多意图任务拆解与处理
+## 3.5 多意图任务拆解与处理
 
 ### 📂 核心文件：
 1. **意图承接**：`packages/engine/src/graph/nodes/triage.node.ts` 
@@ -92,7 +92,7 @@
 
 ---
 
-## 4.6 Agent 编排模式：Plan-and-Execute 深度实践
+## 3.6 Agent 编排模式：Plan-and-Execute 深度实践
 
 本项目废弃了在工业级场景中极难控制的 **ReAct (Reasoning and Acting)** 模式，全量采用了先进的 **Plan-and-Execute (规划-执行-核验) 架构**：
 
@@ -105,7 +105,7 @@
 
 ---
 
-## 4.7 生产级容错与熔断降级（防卡死/防穿透）
+## 3.7 生产级容错与熔断降级（防卡死/防穿透）
 
 系统在每一个底层通信与逻辑判断细节上都筑起了物理熔断层，确保服务在极端弱网或系统雪崩时依然保持可用：
 
@@ -121,7 +121,7 @@
 
 ---
 
-## 4.8 实时日志、可观测性与 Token 追踪（SSE & Metrics）
+## 3.8 实时日志、可观测性与 Token 追踪（SSE & Metrics）
 
 ### 📂 核心文件：
 1. **可观测基础**：`packages/observability` (内置 `pino` 日志和 `langfuse` 运行链物理追踪)
@@ -133,11 +133,11 @@
 ### 💡 架构解析：
 * **零入侵 Token 拦截收集**：在 `callLLMWithRetry.ts` 中，我们重写了 `ChatOpenAI` 实例的 `invoke` 方法。当单次 LLM 交互完成，拦截器解析出 `usage_metadata` 里的真实 `total_tokens`，并通过 `addTokens(jobId, tokens)` 计入会话。
 * **Server-Sent Events 物理实时流**：`eventEmitter.ts` 作为多实例安全的事件核心，在任务执行期间，将节点转移信息、步骤完成细节和当前累计的 Token 消耗量以 `event: status` 实时广播。
-* **前端双重监控屏**：前端 `page.tsx` 动态接收数据，不仅渲染出精美的 DAG 实时节点变迁卡片，并在监控头和右下角实时刷出**高画质的单次会话算力消耗 Token 总数**。
+* **前端双重监控屏**：前端 `page.tsx` 动态接收数据，不仅渲染出精美的 DAG 实时节点变迁卡片，并在监控头 and 右下角实时刷出**高画质的单次会话算力消耗 Token 总数**。
 
 ---
 
-## 4.9 🚀 新增：独家“并发防御纵深系统”（Singleflight & Short-TTL）
+## 3.9 🚀 新增：独家“并发防御纵深系统”（Singleflight & Short-TTL）
 
 这是项目最硬核的架构闪光点之一，专门用来应对用户手滑连击、高并发刷屏场景：
 
@@ -156,7 +156,7 @@
 
 ---
 
-## 4.10 🚀 新增：双线程分离与人工审批认知回溯环（HITL & Cognitive Backtracking）
+## 3.10 🚀 新增：双线程分离与人工审批认知回溯环（HITL & Cognitive Backtracking）
 
 针对客服退款等高风险支付流程，项目构建了金融级的确定性风险硬拦截与 AI 大脑认知回溯机制。
 
@@ -174,7 +174,7 @@
 
 ---
 
-## 4.11 🚀 新增：SaaS 多租户隔离与 Contextual RAG 知识库检索
+## 3.11 🚀 新增：SaaS 多租户隔离与 Contextual RAG 知识库检索
 
 针对托管多商户、多租户场景，实现了 100% 租户隔离的向量检索以及 Anthropic 标准的上下文增益检索（Contextual Retrieval）。
 
@@ -190,7 +190,7 @@
 
 ---
 
-## 4.12 🚀 新增：物理自愈代理与三阶指数退避 LLM 重试拦截
+## 3.12 🚀 新增：物理自愈代理与三阶指数退避 LLM 重试拦截
 
 在不改变节点调用的前提下，提供了高度健壮 of LLM 调用透明代理（Proxy Wrapper），极大提升分布式及并发调用下的链路高可用性（HA）。
 
@@ -203,7 +203,7 @@
 
 ---
 
-## 4.13 🚀 新增：双向会话同步与零 Fallback 级 UUID 会话管理
+## 3.13 🚀 新增：双向会话同步与零 Fallback 级 UUID 会话管理
 为彻底铲除系统状态流失及数据交叉泄露，系统完全剥离了硬编码和默认的 `thread_local_shared` 回退机制，实现了纯净安全的 UUID 会话控制：
 
 ### 📂 核心文件：
@@ -212,11 +212,11 @@
 
 ### 💡 架构解析：
 * **UUID v4 动态派发**: 新用户首次进入时，客户端直接利用 `crypto.randomUUID()` 动态派发一个合规的 UUID 并物理落盘，避免了多租户会话重合。
-* **URL 响应式双向同步**: 页面通过 `window.history.replaceState` 实现当前会话 ID 与地址栏 `?threadId=...` 的双新秒级绑定，使用户保存书签、双标签、刷新时能无损、秒级恢复完全一致的历史会话状态。
+* **URL 响应式双向同步**: 页面通过 `window.history.replaceState` 实现当前会话 ID 与地址栏 `?threadId=...` 的双秒级同步，使用户保存书签、双标签、刷新时能无损、秒级恢复完全一致的历史会话状态。
 
 ---
 
-## 4.14 🚀 新增：Rust 级极速代码校验格式化系统（Biome Engine）
+## 3.14 🚀 新增：Rust 级极速代码校验格式化系统（Biome Engine）
 
 引入了目前业界最前沿、基于 Rust 的超快格式化和静态代码校验引擎 Biome，替换耗时的 Prettier 与 ESLint，大幅缩短开发检查闭环时效。
 
@@ -229,7 +229,7 @@
 
 ---
 
-## 4.15 🚀 新增：E2E 浏览器用户旅程测试（Playwright）与 Prompt 质量评估（Promptfoo）
+## 3.15 🚀 新增：E2E 浏览器用户旅程测试（Playwright）与 Prompt 质量评估（Promptfoo）
 
 引入了端到端（E2E）真实的无头浏览器自动化测试，以及针对 Triage 和 Planner 大模型 Prompt 质量的回归判定、红线防注入评测框架。
 
