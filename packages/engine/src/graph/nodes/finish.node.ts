@@ -28,7 +28,16 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   let historyContext = '';
   if (state.shortMemory && state.shortMemory.length > 0) {
     const formattedHistory = state.shortMemory
-      .map((m: any) => `${m.role === 'user' ? 'Customer' : 'Agent'}: "${m.content}"`)
+      .map((m: any) => {
+        if (!m) return '';
+        const role = m.role === 'user' ? 'Customer' : 'Agent';
+        const content = m.content;
+        if (content === undefined || content === null || String(content).trim() === '' || String(content) === 'undefined' || String(content) === 'null') {
+          return '';
+        }
+        return `${role}: "${String(content).trim()}"`;
+      })
+      .filter((line: string) => line !== '')
       .join('\n');
     historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}`;
   }

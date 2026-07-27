@@ -79,7 +79,16 @@ Please replan and output an alternative approach that respects this rejection. D
   let historyContext = '';
   if (state.shortMemory && state.shortMemory.length > 0) {
     const formattedHistory = state.shortMemory
-      .map((m: any) => `${m.role === 'user' ? 'Customer' : 'Agent'}: "${m.content}"`)
+      .map((m: any) => {
+        if (!m) return '';
+        const role = m.role === 'user' ? 'Customer' : 'Agent';
+        const content = m.content;
+        if (content === undefined || content === null || String(content).trim() === '' || String(content) === 'undefined' || String(content) === 'null') {
+          return '';
+        }
+        return `${role}: "${String(content).trim()}"`;
+      })
+      .filter((line: string) => line !== '')
       .join('\n');
     historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}\n\n[CRITICAL DIRECTIVE]: Carefully read the conversation history above. If the customer is requesting a refund or action in their current input, and they have already provided a specific order ID in previous turns (or you have already queried it successfully), you MUST extract and use that order ID to formulate your subtasks (e.g. processRefund with orderId: ORD-98712). DO NOT plan to ask the customer for the order ID again if it was already mentioned or established in the history!`;
   }
