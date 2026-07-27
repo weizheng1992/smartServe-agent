@@ -313,6 +313,11 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
 
   // 🚀 获取最新的短期会话历史，无缝传递给状态图总线
   const historyMsgs = await shortMemory.getMessages();
+  console.log(
+    `\n[buildGraph Debug] Thread ${threadId} loaded historyMsgs:`,
+    JSON.stringify(historyMsgs, null, 2),
+    `\n`,
+  );
 
   // Build and execute compiled graph
   const graphApp = buildAgentGraph().compile();

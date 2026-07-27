@@ -26,8 +26,15 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
 
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型在总结生成最终答复时，能够完美串联多轮对话上下文脉络
   let historyContext = '';
-  if (state.shortMemory && state.shortMemory.length > 0) {
-    const formattedHistory = buildHistoryContext(state.shortMemory);
+  let shortMemory = state.shortMemory;
+  if (!shortMemory || shortMemory.length === 0) {
+    const { ShortMemory } = require('../../memory/shortMemory');
+    const sm = new ShortMemory(state.threadId);
+    shortMemory = await sm.getMessages();
+  }
+
+  if (shortMemory && shortMemory.length > 0) {
+    const formattedHistory = buildHistoryContext(shortMemory);
     if (formattedHistory) {
       historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}`;
     }
@@ -49,11 +56,12 @@ CRITICAL RULES (最高行为准则 - 严禁幻觉):
     const response = await llm.invoke(prompt);
     const content = typeof response === 'string' ? response : (response as any).content || '';
     logger.info({ threadId: state.threadId }, 'finishNode response formulated successfully');
-    return { output: content.trim() };
+    return { output: content.trim(), shortMemory };
   } catch (err: any) {
     logger.error({ threadId: state.threadId, err }, 'finishNode failed, using fallback summary');
     return {
       output: `Your request has been processed. Status details: ${JSON.stringify((plan.subtasks || []).map((s: any) => s.result))}`,
+      shortMemory,
     };
   }
 }

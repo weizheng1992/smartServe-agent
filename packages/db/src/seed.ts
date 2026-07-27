@@ -116,7 +116,6 @@ async function main() {
     await client.query(`
       INSERT INTO threads (id, user_id, business_id, status)
       VALUES
-        ('thread_local_shared', '${userId}', 'ecommerce', 'active'),
         ('thread_nike_demo', '${userId}', 'nike', 'active'),
         ('thread_adidas_demo', '${userId}', 'adidas', 'active')
       ON CONFLICT (id) DO NOTHING;
@@ -181,11 +180,11 @@ async function main() {
     await client.query(`
       INSERT INTO session_metrics (business_id, thread_id, total_tokens, calculated_cost_usd, node_transitions_count, resolution_status, avg_latency_ms, created_at)
       VALUES
-        ('ecommerce', 'thread_local_shared', 4500, 0.000675, 4, 'resolved_auto', 2800, NOW() - INTERVAL '1 hour'),
-        ('ecommerce', 'thread_local_shared', 12500, 0.001875, 7, 'waiting_approval', 5200, NOW() - INTERVAL '3 hours'),
-        ('ecommerce', 'thread_local_shared', 3800, 0.000570, 3, 'resolved_auto', 2100, NOW() - INTERVAL '5 hours'),
-        ('ecommerce', 'thread_local_shared', 9200, 0.001380, 5, 'rejected', 4100, NOW() - INTERVAL '8 hours'),
-        ('ecommerce', 'thread_local_shared', 5100, 0.000765, 4, 'cancelled', 3100, NOW() - INTERVAL '12 hours'),
+        ('nike', 'thread_nike_demo', 4500, 0.000675, 4, 'resolved_auto', 2800, NOW() - INTERVAL '1 hour'),
+        ('nike', 'thread_nike_demo', 12500, 0.001875, 7, 'waiting_approval', 5200, NOW() - INTERVAL '3 hours'),
+        ('nike', 'thread_nike_demo', 3800, 0.000570, 3, 'resolved_auto', 2100, NOW() - INTERVAL '5 hours'),
+        ('nike', 'thread_nike_demo', 9200, 0.001380, 5, 'rejected', 4100, NOW() - INTERVAL '8 hours'),
+        ('nike', 'thread_nike_demo', 5100, 0.000765, 4, 'cancelled', 3100, NOW() - INTERVAL '12 hours'),
         ('nike', 'thread_nike_demo', 6200, 0.000930, 5, 'resolved_auto', 3200, NOW() - INTERVAL '30 minutes'),
         ('nike', 'thread_nike_demo', 14200, 0.002130, 8, 'waiting_approval', 6100, NOW() - INTERVAL '2 hours'),
         ('adidas', 'thread_adidas_demo', 3100, 0.000465, 3, 'resolved_auto', 1800, NOW() - INTERVAL '15 minutes')

@@ -43,8 +43,15 @@ export async function executorNode(state: typeof AgentStateAnnotation.State) {
   const llm = getLLM(state.jobId);
 
   let historyContext = '';
-  if (state.shortMemory && state.shortMemory.length > 0) {
-    const formattedHistory = buildHistoryContext(state.shortMemory);
+  let shortMemory = state.shortMemory;
+  if (!shortMemory || shortMemory.length === 0) {
+    const { ShortMemory } = require('../../memory/shortMemory');
+    const sm = new ShortMemory(state.threadId);
+    shortMemory = await sm.getMessages();
+  }
+
+  if (shortMemory && shortMemory.length > 0) {
+    const formattedHistory = buildHistoryContext(shortMemory);
     if (formattedHistory) {
       historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}`;
     }
@@ -112,7 +119,10 @@ ${historyContext}`;
           parsedToolCall = { toolName: 'getOrderStatus', args: { orderId: '12345' } };
         } else if (stepToRun.description.toLowerCase().includes('refund') && allowedTools.includes('processRefund')) {
           parsedToolCall = { toolName: 'processRefund', args: { orderId: '12345', reason: 'Customer requested' } };
-        } else if (stepToRun.description.toLowerCase().includes('screenshot') && allowedTools.includes('takeScreenshot')) {
+        } else if (
+          stepToRun.description.toLowerCase().includes('screenshot') &&
+          allowedTools.includes('takeScreenshot')
+        ) {
           parsedToolCall = { toolName: 'takeScreenshot', args: { url: 'https://example.com' } };
         }
       }
@@ -427,5 +437,6 @@ ${historyContext}`;
 
   return {
     taskPlan: nextPlan,
+    shortMemory,
   };
 }

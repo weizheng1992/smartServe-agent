@@ -81,6 +81,10 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   const input = state.input ? state.input.trim() : '';
   logger.info({ threadId }, 'triageNode starting multi-tier intent classification pipeline');
 
+  // Load short memory at the beginning so it is always available and returned to populate the LangGraph state correctly
+  const shortMemory = new ShortMemory(threadId);
+  const historyMsgs = await shortMemory.getMessages();
+
   if (state.jobId) {
     agentEventEmitter.emit(`${state.jobId}:status`, {
       status: 'executing',
@@ -115,9 +119,6 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   // 🛡️ 重复提问/网络抖动拦截器 (First Shield: Semantic Duplicate Bypass)
   // =========================================================================
   try {
-    const shortMemory = new ShortMemory(threadId);
-    const historyMsgs = await shortMemory.getMessages();
-
     // 过滤出用户和助理的历史对话记录
     const userMsgs = historyMsgs.filter((m) => m.role === 'user');
     const assistantMsgs = historyMsgs.filter((m) => m.role === 'assistant');
@@ -245,7 +246,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
       console.log('[Triage Embedding Match] Auto-matched order_status intent via semantic similarity!');
       const intents = [{ intent: 'order_status', confidence: scoreOrder }];
       await logIntentToDB(threadId, input, intents, 'embedding', scoreOrder);
-      return { intents };
+      return { intents, shortMemory: historyMsgs };
     }
 
     // 判决 B: 高置信度退款意图直达
@@ -253,7 +254,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
       console.log('[Triage Embedding Match] Auto-matched refund intent via semantic similarity!');
       const intents = [{ intent: 'refund', confidence: scoreRefund }];
       await logIntentToDB(threadId, input, intents, 'embedding', scoreRefund);
-      return { intents };
+      return { intents, shortMemory: historyMsgs };
     }
 
     // 判决 C: 高置信度超出业务范围 (out_of_scope) 拦截
@@ -328,12 +329,12 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
       });
     }
 
-    return { intents: parsed };
+    return { intents: parsed, shortMemory: historyMsgs };
   } catch (err: any) {
     logger.error({ threadId, err }, 'triageNode Step 3 failed, falling back to general_query');
     const fallbackIntents = [{ intent: 'general_query', confidence: 0.5 }];
     await logIntentToDB(threadId, input, fallbackIntents, 'llm', 0.5);
-    return { intents: fallbackIntents };
+    return { intents: fallbackIntents, shortMemory: historyMsgs };
   }
 }
 

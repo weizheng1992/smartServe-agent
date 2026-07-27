@@ -77,8 +77,15 @@ Please replan and output an alternative approach that respects this rejection. D
 
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型即可敏捷关联上一轮提问中提到的核心要素（如订单号 ORD-98712 等）
   let historyContext = '';
-  if (state.shortMemory && state.shortMemory.length > 0) {
-    const formattedHistory = buildHistoryContext(state.shortMemory);
+  let shortMemory = state.shortMemory;
+  if (!shortMemory || shortMemory.length === 0) {
+    const { ShortMemory } = require('../../memory/shortMemory');
+    const sm = new ShortMemory(state.threadId);
+    shortMemory = await sm.getMessages();
+  }
+
+  if (shortMemory && shortMemory.length > 0) {
+    const formattedHistory = buildHistoryContext(shortMemory);
     if (formattedHistory) {
       historyContext = `\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n${formattedHistory}\n\n[CRITICAL DIRECTIVE]: Carefully read the conversation history above. If the customer is requesting a refund or action in their current input, and they have already provided a specific order ID in previous turns (or you have already queried it successfully), you MUST extract and use that order ID to formulate your subtasks (e.g. processRefund with orderId: ORD-98712). DO NOT plan to ask the customer for the order ID again if it was already mentioned or established in the history!`;
     }
@@ -87,6 +94,13 @@ Please replan and output an alternative approach that respects this rejection. D
   const llm = getLLM(state.jobId);
   const prompt = `System Instruction Context: "${systemPrompt}"
 Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}${historyContext}
+
+[CRITICAL MULTI-TURN MEMORY & RETRIEVAL DIRECTIVES]:
+1. Carefully inspect the [CONVERSATION HISTORY (PAST TURNS)] above. If the customer has already mentioned a specific Order ID (e.g., "ORD-98712") in previous turns, or if an Order ID was successfully checked earlier, you MUST assume the customer's current request (for refund, status query, or returns) is regarding that EXACT Order ID!
+2. Do NOT plan generic placeholder steps like "Retrieve the user's recent orders" or "Query order history" because there are no listing tools available in: ["getOrderStatus", "processRefund"].
+3. If an Order ID (like "ORD-98712") is present in the history, bypass any placeholder check steps, and directly plan a concrete step to execute the requested action. For example: "Call the processRefund tool with orderId 'ORD-98712' to initiate the return/refund in our systems."
+4. If NO Order ID exists anywhere in the conversation history, you MUST plan a step to politely ask the customer to provide their Order ID, rather than attempting to call tools with empty or dummy parameters.
+
 Return a JSON object with:
 - "goal": overall goal description
 - "subtasks": array of objects with keys "id" (unique string), "description" (what to do, e.g., call tool getOrderStatus, or ask user for confirmation).
@@ -137,7 +151,7 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
       });
     }
 
-    return { taskPlan };
+    return { taskPlan, shortMemory };
   } catch (err: any) {
     logger.error({ threadId: state.threadId, err }, 'plannerNode failed, falling back to default single-step plan');
     return {

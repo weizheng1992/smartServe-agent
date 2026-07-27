@@ -71,27 +71,19 @@ export interface MemoryDatabaseState {
   }>;
 }
 
+const globalForDb = global as unknown as {
+  memoryDb?: MemoryDatabaseState;
+};
+
 // 在内存中模拟一个完整的物理数据库表状态
-const memoryDb: MemoryDatabaseState = {
+const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
   users: new Map<string, { id: string; email: string; createdAt: string }>([
     ['u_default_id', { id: 'u_default_id', email: 'test@example.com', createdAt: new Date().toISOString() }],
   ]),
   threads: new Map<
     string,
     { id: string; userId: string; businessId: string; status: string; createdAt: string; updatedAt: string }
-  >([
-    [
-      'thread_local_shared',
-      {
-        id: 'thread_local_shared',
-        userId: 'u_default_id',
-        businessId: 'ecommerce',
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    ],
-  ]),
+  >(),
   orders: new Map([
     [
       'ORD-98712',
@@ -176,6 +168,10 @@ const memoryDb: MemoryDatabaseState = {
   messages: [],
   pendingApprovals: [],
 };
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForDb.memoryDb = memoryDb;
+}
 
 export class FakePool {
   async connect(): Promise<{
@@ -280,32 +276,36 @@ export class FakePool {
 
     if (s.toUpperCase().includes('FROM RAG_DOCUMENTS') || s.toUpperCase().includes('FROM "RAG_DOCUMENTS"')) {
       const businessId = params && typeof params[0] === 'string' ? params[0] : 'ecommerce';
+      const mockEmbedding = JSON.stringify(new Array(1536).fill(0.01)); // Mock 1536-dim standard embedding
       const fakeRags = [
         {
           id: 'fake_rag_1',
-          businessId: 'ecommerce',
-          chunkText:
+          business_id: 'ecommerce',
+          chunk_text:
             '对于我们电商主站的订单，普通用户享有自签收之日起 7 天无理由退换货权益。退回的商品必须保持吊牌完整、未拆封且不影响二次销售。非质量问题的退货由买家自行承担寄回运费。',
-          contextualSummary: '这段切片描述了电商主站（ecommerce）标准 7 天无理由退换货的前提条件与退货运费归属政策。',
+          contextual_summary: '这段切片描述了电商主站（ecommerce）标准 7 天无理由退换货的前提条件与退货运费归属政策。',
+          embedding: mockEmbedding,
         },
         {
           id: 'fake_rag_2',
-          businessId: 'nike',
-          chunkText:
+          business_id: 'nike',
+          chunk_text:
             'Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。',
-          contextualSummary:
+          contextual_summary:
             '这段切片详细说明了 Nike 会员尊享的 30 天无损无理由退货、已拆吊牌退货政策以及顺丰寄回服务。',
+          embedding: mockEmbedding,
         },
         {
           id: 'fake_rag_3',
-          businessId: 'adidas',
-          chunkText:
+          business_id: 'adidas',
+          chunk_text:
             'Adidas 支持签收后 14 天退换货。所有商品必须保留原始包装盒与防伪扣，试穿时请勿弄脏鞋底。退货需要通过官方微信小程序预约快递员上门取件，不支持自行寄送。',
-          contextualSummary:
+          contextual_summary:
             '这段切片详细规定了 Adidas 的 14 天退换货时效、原始防伪包装要求，以及微信小程序预约取件的硬性物流约束。',
+          embedding: mockEmbedding,
         },
       ];
-      const rows = fakeRags.filter((r) => r.businessId === businessId);
+      const rows = fakeRags.filter((r) => r.business_id === businessId);
       return { rows } as DBQueryResult<unknown>;
     }
 
@@ -389,7 +389,7 @@ export class FakePool {
       s.toUpperCase().includes('UPDATE') &&
       (s.toUpperCase().includes('PENDING_APPROVALS') || s.toUpperCase().includes('"PENDING_APPROVALS"'))
     ) {
-      const id = params && params.length > 0 ? params[params.length - 1] as string : '';
+      const id = params && params.length > 0 ? (params[params.length - 1] as string) : '';
       const approval = memoryDb.pendingApprovals.find((a) => a.id === id);
       if (approval) {
         if (params.length === 2) {
@@ -533,7 +533,9 @@ export const db: DBInterface = {
     const pool = getPgPool();
     if (isUsingRealDb) {
       try {
-        const selectRes = await pool.query('SELECT id, email FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
+        const selectRes = await pool.query('SELECT id, email FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [
+          email,
+        ]);
         if (selectRes.rows && selectRes.rows.length > 0) {
           const row = selectRes.rows[0] as any;
           return { id: row.id, email: row.email };
@@ -543,16 +545,6 @@ export const db: DBInterface = {
         const id = crypto.randomUUID ? crypto.randomUUID() : '83d67d4e-104c-4325-8aa7-10d4389fc725';
         await pool.query('INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW())', [id, email]);
         console.log(`[DB User PG] Registered physical user with email: ${email}, ID: ${id}`);
-
-        // Auto assign a default session thread for the registered user
-        const defaultThreadId = `thread_local_${id.substring(0, 8)}`;
-        await pool.query('INSERT INTO threads (id, user_id, business_id, status, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW()) ON CONFLICT (id) DO NOTHING', [
-          defaultThreadId,
-          id,
-          'ecommerce',
-          'active'
-        ]);
-        console.log(`[DB Thread PG] Created default thread ${defaultThreadId} for user ${id}`);
 
         return { id, email };
       } catch (err) {
@@ -573,17 +565,6 @@ export const db: DBInterface = {
     memoryDb.users.set(id, newUser);
     console.log(`[DB User] Registered new user with email: ${email}, ID: ${id}`);
 
-    // 自动为新注册用户初始分配一个默认会话，体验更加平滑！
-    const defaultThreadId = `thread_local_${id}`;
-    memoryDb.threads.set(defaultThreadId, {
-      id: defaultThreadId,
-      userId: id,
-      businessId: 'ecommerce',
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-
     return { id, email };
   },
 
@@ -593,7 +574,7 @@ export const db: DBInterface = {
       try {
         const res = await pool.query(
           'SELECT id, "user_id" AS "userId", "business_id" AS "businessId", status, "created_at" AS "createdAt", "updated_at" AS "updatedAt" FROM threads WHERE "user_id" = $1 ORDER BY "created_at" DESC',
-          [userId]
+          [userId],
         );
         return res.rows.map((row: any) => ({
           id: row.id,
@@ -636,7 +617,7 @@ export const db: DBInterface = {
 
         await pool.query(
           'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") VALUES ($1, $2, $3, $4, NOW(), NOW()) ON CONFLICT (id) DO NOTHING',
-          [threadId, pgUserId, 'ecommerce', 'active']
+          [threadId, pgUserId, 'ecommerce', 'active'],
         );
         console.log(`[DB Thread PG] Created/Ensured physical thread ${threadId} for mapped user ${pgUserId}`);
         return {

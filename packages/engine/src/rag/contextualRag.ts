@@ -89,11 +89,7 @@ interface DocRankItem {
 }
 
 // 🔀 倒数排名融合 (RRF - Reciprocal Rank Fusion)
-function reciprocalRankFusion(
-  vectorRank: DocRankItem[],
-  bm25Rank: DocRankItem[],
-  k = 60
-): Map<string, number> {
+function reciprocalRankFusion(vectorRank: DocRankItem[], bm25Rank: DocRankItem[], k = 60): Map<string, number> {
   const rrfScores = new Map<string, number>();
 
   const applyRank = (rankList: DocRankItem[]) => {
@@ -344,7 +340,12 @@ export class ContextualRAG {
       const queryLower = query.toLowerCase();
       if (queryLower.includes(this.businessId.toLowerCase())) {
         simulatedVectorSimilarity = 0.65;
-      } else if (queryLower.includes('退') || queryLower.includes('refund') || queryLower.includes('return') || queryLower.includes('换货')) {
+      } else if (
+        queryLower.includes('退') ||
+        queryLower.includes('refund') ||
+        queryLower.includes('return') ||
+        queryLower.includes('换货')
+      ) {
         simulatedVectorSimilarity = 0.55;
       }
 

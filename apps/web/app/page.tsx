@@ -104,7 +104,29 @@ export default function Home() {
   const [pendingApprovalsList, setPendingApprovalsList] = useState<any[]>([]);
   const [rejectionInput, setRejectionReason] = useState<string>('');
 
-  // 1. 周期性轮询获取与当前 ThreadID 相关且未审批的工单
+  // 1. Read initial threadId from URL search parameters on page mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlThreadId = params.get('threadId');
+      if (urlThreadId) {
+        setActiveThreadId(urlThreadId);
+      }
+    }
+  }, []);
+
+  // 2. Sync activeThreadId to URL search parameters whenever it changes
+  useEffect(() => {
+    if (activeThreadId && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('threadId') !== activeThreadId) {
+        params.set('threadId', activeThreadId);
+        window.history.replaceState(null, '', `?${params.toString()}`);
+      }
+    }
+  }, [activeThreadId]);
+
+  // 3. 周期性轮询获取与当前 ThreadID 相关且未审批的工单
   useEffect(() => {
     let intervalId: any;
     if (!activeThreadId) return;
@@ -235,8 +257,45 @@ export default function Home() {
       const data = await res.json();
       if (data.success && data.threads) {
         setThreads(data.threads);
-        if (data.threads.length > 0 && !activeThreadId) {
-          setActiveThreadId(data.threads[0].id);
+
+        // Prioritize loading the active thread ID from the URL query parameter on load
+        let initialActiveId = activeThreadId;
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          initialActiveId = params.get('threadId') || activeThreadId;
+        }
+
+        if (data.threads.length > 0) {
+          if (initialActiveId && data.threads.some((t) => t.id === initialActiveId)) {
+            setActiveThreadId(initialActiveId);
+          } else {
+            setActiveThreadId(data.threads[0].id);
+          }
+        } else {
+          // If no thread exists, automatically create a new unique one on first entry!
+          console.log('[Auto-Create Thread] No threads found for current user, generating a fresh unique session thread...');
+          const newThreadId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+          const createRes = await fetch('/api/chat/threads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUser.id, threadId: newThreadId }),
+          });
+          const createData = await createRes.json();
+          if (createData.success) {
+            const newThreadItem: ChatThread = {
+              id: newThreadId,
+              userId: currentUser.id,
+              businessId: 'ecommerce',
+              status: 'active',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            setThreads([newThreadItem]);
+            setActiveThreadId(newThreadId);
+            setRunningDetails([]);
+            setActivePlan(null);
+            setCurrentStepText('');
+          }
         }
       }
     } catch (err) {
@@ -249,7 +308,7 @@ export default function Home() {
   // Create a new chat session thread
   const handleCreateNewThread = async () => {
     if (!currentUser) return;
-    const newThreadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const newThreadId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     try {
       const res = await fetch('/api/chat/threads', {
         method: 'POST',
