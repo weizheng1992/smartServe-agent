@@ -344,8 +344,25 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     });
   }
 
+  let runId: string | undefined;
+  const config = {
+    callbacks: [
+      {
+        handleChainStart: (chain: any, inputs: any, id: string) => {
+          if (!runId) runId = id;
+        },
+        handleLLMStart: (llm: any, prompts: any, id: string) => {
+          if (!runId) runId = id;
+        },
+        handleToolStart: (tool: any, input: any, id: string) => {
+          if (!runId) runId = id;
+        },
+      },
+    ],
+  };
+
   const startTime = Date.now();
-  const result = await graphApp.invoke(initialState);
+  const result = await graphApp.invoke(initialState, config);
   const elapsedLatency = Date.now() - startTime;
 
   // 🪙 SaaS Telemetry: 物理记录本次会话的算力消耗、换算成本与图决策深度
@@ -355,12 +372,16 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     const nodeTransitions = result.loopCount || 3;
 
     let resolutionStatus = 'resolved_auto';
+    let isSuccess = true;
+    let feedbackComment = 'All planned subtasks completed successfully.';
+
     const plan = result.taskPlan;
     if (plan && plan.subtasks) {
       const hasPending = plan.subtasks.some((st: any) => st.result?.waitingForApproval);
       const hasCancelled = plan.subtasks.some((st: any) => st.result?.cancelledByUser);
       const hasExpired = plan.subtasks.some((st: any) => st.result?.expiredByTimeout);
       const hasRejected = plan.subtasks.some((st: any) => st.status === 'failed' && st.result?.rejectedByAdmin);
+      const hasFailed = plan.subtasks.some((st: any) => st.status === 'failed');
 
       if (hasPending) {
         resolutionStatus = 'waiting_approval';
@@ -370,7 +391,62 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
         resolutionStatus = 'expired';
       } else if (hasRejected) {
         resolutionStatus = 'rejected';
+      } else if (hasFailed) {
+        resolutionStatus = 'failed';
+        isSuccess = false;
+        feedbackComment = 'Some planned subtasks failed validation or execution.';
       }
+    }
+
+    // Report semantic feedback to LangSmith if runId is available and API key is set
+    if (runId && process.env.LANGCHAIN_API_KEY) {
+      const endpoint = process.env.LANGCHAIN_ENDPOINT || 'https://api.smith.langchain.com';
+      const apiKey = process.env.LANGCHAIN_API_KEY;
+
+      // Async background fire-and-forget reporting to avoid blocking main execution
+      (async () => {
+        try {
+          // Report 'correctness' feedback key
+          const resCorrectness = await fetch(`${endpoint}/feedback`, {
+            method: 'POST',
+            headers: {
+              'x-api-key': apiKey,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              run_id: runId,
+              key: 'correctness',
+              score: isSuccess ? 1.0 : 0.0,
+              value: isSuccess ? 'success' : 'failure',
+              comment: feedbackComment,
+            }),
+          });
+
+          // Report 'success' feedback key (for alternative dashboards views)
+          const resSuccess = await fetch(`${endpoint}/feedback`, {
+            method: 'POST',
+            headers: {
+              'x-api-key': apiKey,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              run_id: runId,
+              key: 'success',
+              score: isSuccess ? 1.0 : 0.0,
+              value: isSuccess ? 'success' : 'failure',
+              comment: feedbackComment,
+            }),
+          });
+
+          if (resCorrectness.ok && resSuccess.ok) {
+            console.log(`[LangSmith Telemetry] Successfully uploaded "correctness" and "success" feedback scores for run ${runId}`);
+          } else {
+            console.warn(`[LangSmith Telemetry] Failed to upload some feedback for run ${runId}. Correctness status: ${resCorrectness.status}, Success status: ${resSuccess.status}`);
+          }
+        } catch (telemetryErr) {
+          console.warn('[LangSmith Telemetry] Error uploading feedback to LangSmith:', telemetryErr);
+        }
+      })();
     }
 
     const { getDrizzle, sessionMetrics } = require('db');
