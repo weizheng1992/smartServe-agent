@@ -578,6 +578,35 @@ export interface DBInterface {
   createThread: (threadId: string, userId: string) => Promise<DBThread>;
 }
 
+async function resolveAndEnsurePgUserId(pool: any, userId: string): Promise<string> {
+  const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+  if (isValidUuid) {
+    return userId;
+  }
+
+  try {
+    const hash = require('crypto').createHash('md5').update(userId).digest('hex');
+    const detUuid = `${hash.substring(0, 8)}-${hash.substring(8, 12)}-${hash.substring(12, 16)}-${hash.substring(16, 20)}-${hash.substring(20, 32)}`;
+
+    await pool.query(
+      'INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (id) DO NOTHING',
+      [detUuid, `${userId}@guest.system`]
+    );
+    return detUuid;
+  } catch (err) {
+    console.warn('[DB] resolveAndEnsurePgUserId failed, falling back to first physical user:', err);
+    try {
+      const userRes = await pool.query('SELECT id FROM users LIMIT 1');
+      if (userRes.rows && userRes.rows.length > 0) {
+        return (userRes.rows[0] as any).id;
+      }
+    } catch (fallbackErr) {
+      console.error('[DB] Fallback user lookup failed:', fallbackErr);
+    }
+    return require('crypto').randomUUID();
+  }
+}
+
 export const db: DBInterface = {
   select: (): DBInterface => db,
   insert: (): DBInterface => db,
@@ -598,7 +627,7 @@ export const db: DBInterface = {
         }
 
         // Generate UUID for real user
-        const id = crypto.randomUUID ? crypto.randomUUID() : '83d67d4e-104c-4325-8aa7-10d4389fc725';
+        const id = crypto.randomUUID ? crypto.randomUUID() : require('crypto').randomUUID();
         await pool.query('INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW())', [id, email]);
         console.log(`[DB User PG] Registered physical user with email: ${email}, ID: ${id}`);
 
@@ -628,20 +657,7 @@ export const db: DBInterface = {
     const pool = getPgPool();
     if (isUsingRealDb) {
       try {
-        let pgUserId = userId;
-        const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-        if (!isValidUuid) {
-          try {
-            const userRes = await pool.query('SELECT id FROM users LIMIT 1');
-            if (userRes.rows && userRes.rows.length > 0) {
-              pgUserId = (userRes.rows[0] as any).id;
-            } else {
-              pgUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
-            }
-          } catch {
-            pgUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
-          }
-        }
+        const pgUserId = await resolveAndEnsurePgUserId(pool, userId);
 
         const res = await pool.query(
           'SELECT id, "user_id" AS "userId", "business_id" AS "businessId", status, "created_at" AS "createdAt", "updated_at" AS "updatedAt" FROM threads WHERE "user_id" = $1 ORDER BY "created_at" DESC',
@@ -670,21 +686,7 @@ export const db: DBInterface = {
     const pool = getPgPool();
     if (isUsingRealDb) {
       try {
-        let pgUserId = userId;
-        const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-        if (!isValidUuid) {
-          // If not a valid UUID (e.g. test_suite_user), map to a valid physical user
-          try {
-            const userRes = await pool.query('SELECT id FROM users LIMIT 1');
-            if (userRes.rows && userRes.rows.length > 0) {
-              pgUserId = (userRes.rows[0] as any).id;
-            } else {
-              pgUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
-            }
-          } catch {
-            pgUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
-          }
-        }
+        const pgUserId = await resolveAndEnsurePgUserId(pool, userId);
 
         await pool.query(
           'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") VALUES ($1, $2, $3, $4, NOW(), NOW()) ON CONFLICT (id) DO NOTHING',
