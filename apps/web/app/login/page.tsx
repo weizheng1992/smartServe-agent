@@ -72,9 +72,9 @@ export default function LoginPage() {
         <CardContent className="px-6 py-4">
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">
                 用户邮箱物理注册与登录
-              </label>
+              </span>
               <Input
                 type="email"
                 placeholder="name@example.com (例如: demo@test.com)"

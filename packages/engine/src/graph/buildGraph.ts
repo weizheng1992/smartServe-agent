@@ -159,32 +159,16 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
 
     console.log('[Quick Greeting Bypass] Trigerred 10ms lightning bypass response!');
 
-    // 保存对话到 PostgreSQL 会话记录表中（保障左侧历史和刷新能完美恢复）
-    const userMsgId = `msg_u_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-    const assistantMsgId = `msg_a_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    // 先确保物理会话在数据库中落盘（防止 messages 表中 thread_id 外键约束报错导致存储失败）
+    try {
+      const { db } = require('db');
+      await db.createThread(threadId, userId);
+    } catch (threadErr) {
+      console.warn('[DB] Failed to ensure thread exists for quick greeting:', threadErr);
+    }
 
     await shortMemory.addMessage('user', inputMessage);
     await shortMemory.addMessage('assistant', greetingText);
-
-    try {
-      const { db } = require('db');
-      await db.addMessage({
-        id: userMsgId,
-        threadId,
-        role: 'user',
-        content: inputMessage,
-        timestamp: new Date().toISOString(),
-      });
-      await db.addMessage({
-        id: assistantMsgId,
-        threadId,
-        role: 'assistant',
-        content: greetingText,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (msgErr) {
-      console.warn('[DB] Failed to persist quick greeting message in physical table:', msgErr);
-    }
 
     const mockResult = {
       output: greetingText,
@@ -316,7 +300,7 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
   console.log(
     `\n[buildGraph Debug] Thread ${threadId} loaded historyMsgs:`,
     JSON.stringify(historyMsgs, null, 2),
-    `\n`,
+    '\n',
   );
 
   // Build and execute compiled graph
@@ -376,7 +360,7 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     let feedbackComment = 'All planned subtasks completed successfully.';
 
     const plan = result.taskPlan;
-    if (plan && plan.subtasks) {
+    if (plan?.subtasks) {
       const hasPending = plan.subtasks.some((st: any) => st.result?.waitingForApproval);
       const hasCancelled = plan.subtasks.some((st: any) => st.result?.cancelledByUser);
       const hasExpired = plan.subtasks.some((st: any) => st.result?.expiredByTimeout);

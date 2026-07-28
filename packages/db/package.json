@@ -8,9 +8,6 @@
     "pg": "^8.11.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.0",
-    "bun-types": "latest",
-    "drizzle-kit": "^0.31.10",
-    "typescript": "^5.0.0"
+    "@types/pg": "^8.11.0"
   }
 }

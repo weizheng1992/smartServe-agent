@@ -40,13 +40,12 @@ export default function (output: string, context: any) {
         score: 1.0,
         reason: `Successfully called all expected tools: ${expectedTools.join(', ')}`,
       };
-    } else {
-      return {
-        pass: false,
-        score: 0.0,
-        reason: `Tool mismatch. Expected: [${expectedTools.join(', ')}], Called: [${calledTools.join(', ')}]`,
-      };
     }
+    return {
+      pass: false,
+      score: 0.0,
+      reason: `Tool mismatch. Expected: [${expectedTools.join(', ')}], Called: [${calledTools.join(', ')}]`,
+    };
   } catch (err: any) {
     return { pass: false, score: 0.0, reason: `Error in toolAccuracy scorer: ${err.message}` };
   }

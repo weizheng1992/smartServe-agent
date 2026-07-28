@@ -23,7 +23,7 @@ async function verifyDbIntegrity() {
 
     for (const table of tablesToAudit) {
       const res = await db.execute(`SELECT COUNT(*) AS count FROM "${table}"`);
-      const count = res.rows && res.rows[0] ? (res.rows[0] as any).count : 0;
+      const count = res.rows?.[0] ? (res.rows[0] as any).count : 0;
       console.log(`   - Table [${table}]: ${count} rows.`);
     }
   } catch (err: any) {
@@ -42,7 +42,7 @@ async function verifyDbIntegrity() {
       LEFT JOIN threads t ON m.thread_id = t.id
       WHERE t.id IS NULL
     `);
-    const danglingMsgs = resDanglingMsg.rows && resDanglingMsg.rows[0] ? (resDanglingMsg.rows[0] as any).count : 0;
+    const danglingMsgs = resDanglingMsg.rows?.[0] ? (resDanglingMsg.rows[0] as any).count : 0;
 
     if (Number(danglingMsgs) === 0) {
       console.log('   ✅ Relational integrity test passed: 0 dangling messages.');
@@ -58,8 +58,7 @@ async function verifyDbIntegrity() {
       LEFT JOIN users u ON t.user_id = u.id
       WHERE u.id IS NULL
     `);
-    const danglingThreads =
-      resDanglingThreads.rows && resDanglingThreads.rows[0] ? (resDanglingThreads.rows[0] as any).count : 0;
+    const danglingThreads = resDanglingThreads.rows?.[0] ? (resDanglingThreads.rows[0] as any).count : 0;
 
     if (Number(danglingThreads) === 0) {
       console.log('   ✅ Relational integrity test passed: 0 dangling threads.');

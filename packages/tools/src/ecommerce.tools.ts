@@ -168,7 +168,7 @@ export const processRefund = {
         const res = await physicalDb.execute('SELECT "business_id" AS "businessId" FROM threads WHERE id = $1', [
           threadId,
         ]);
-        if (res.rows && res.rows[0]) {
+        if (res.rows?.[0]) {
           const row = res.rows[0] as any;
           businessId = row.businessId || row.business_id || 'ecommerce';
         }
@@ -262,7 +262,7 @@ export const listUserOrders = {
         'SELECT "user_id" AS "userId", "business_id" AS "businessId" FROM threads WHERE id = $1',
         [threadId],
       );
-      if (res.rows && res.rows[0]) {
+      if (res.rows?.[0]) {
         const row = res.rows[0] as any;
         userId = row.userId || row.user_id;
         businessId = row.businessId || row.business_id;

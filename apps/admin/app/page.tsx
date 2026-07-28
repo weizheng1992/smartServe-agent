@@ -17,7 +17,7 @@ import {
   TrendingUp,
   XCircle,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface Approval {
   id: string;
@@ -51,7 +51,7 @@ export default function AdminDashboard() {
   const [rejectionReasons, setRejectionReasons] = useState<Record<string, string>>({});
   const [submittingActionId, setSubmittingActionId] = useState<string | null>(null);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     setIsRefreshing(true);
     try {
       // 1. Fetch approvals list
@@ -72,13 +72,13 @@ export default function AdminDashboard() {
     } finally {
       setIsRefreshing(false);
     }
-  };
+  }, [selectedMerchant]);
 
   useEffect(() => {
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, 5000); // Auto refresh every 5 seconds for high fidelity logs!
     return () => clearInterval(interval);
-  }, [selectedMerchant]);
+  }, [fetchDashboardData]);
 
   const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {
     setSubmittingActionId(approvalId);
@@ -137,6 +137,7 @@ export default function AdminDashboard() {
           <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
             {['ecommerce', 'nike', 'adidas', 'puma'].map((m) => (
               <button
+                type="button"
                 key={m}
                 onClick={() => setSelectedMerchant(m)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition ${
@@ -151,6 +152,7 @@ export default function AdminDashboard() {
           </div>
 
           <button
+            type="button"
             onClick={fetchDashboardData}
             className="h-9 w-9 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 transition"
           >
@@ -317,6 +319,7 @@ export default function AdminDashboard() {
 
                         <div className="flex gap-2 pt-1">
                           <button
+                            type="button"
                             onClick={() => handleApprovalAction(approval.id, 'approve')}
                             disabled={isSubmitting}
                             className="flex-1 h-8 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl transition flex items-center justify-center gap-1.5"
@@ -331,6 +334,7 @@ export default function AdminDashboard() {
                             )}
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleApprovalAction(approval.id, 'reject')}
                             disabled={isSubmitting}
                             className="flex-1 h-8 text-[11px] font-bold bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl transition flex items-center justify-center gap-1.5"

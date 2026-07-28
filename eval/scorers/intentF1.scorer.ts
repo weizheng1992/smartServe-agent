@@ -37,9 +37,9 @@ export default function (output: string, context: any) {
     const expSet = new Set(expectedIntents);
 
     let tp = 0;
-    predSet.forEach((p) => {
+    for (const p of predSet) {
       if (expSet.has(p)) tp++;
-    });
+    }
 
     const fp = predSet.size - tp;
     const fn = expSet.size - tp;

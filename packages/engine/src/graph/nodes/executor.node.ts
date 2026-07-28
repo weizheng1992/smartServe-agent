@@ -98,12 +98,12 @@ Otherwise, you must return a raw JSON object (with NO markdown backticks, NO "js
 ${historyContext}`;
 
   // 📝 深度调试日志：打印这一步实际传给 LLM 的 Messages/Prompt 内容
-  console.log(`\n[Executor Node Debug] ==========================================`);
+  console.log('\n[Executor Node Debug] ==========================================');
   console.log(`[Executor Node Debug] Current Step Index: ${currentIndex}`);
   console.log(`[Executor Node Debug] Step Description: "${stepToRun.description}"`);
   console.log(`[Executor Node Debug] Allowed Tools: ${JSON.stringify(allowedTools)}`);
   console.log(`[Executor Node Debug] Prompt sent to LLM:\n${prompt}`);
-  console.log(`[Executor Node Debug] ------------------------------------------`);
+  console.log('[Executor Node Debug] ------------------------------------------');
 
   let resultData: any;
   try {
@@ -113,7 +113,7 @@ ${historyContext}`;
 
     // 📝 深度调试日志：打印 LLM 返回的实际内容（是否返回了工具调用参数）
     console.log(`[Executor Node Debug] Raw LLM Response Content:\n"${text}"`);
-    console.log(`[Executor Node Debug] ==========================================\n`);
+    console.log('[Executor Node Debug] ==========================================\n');
 
     if (text === 'NONE') {
       resultData = { message: `Step execution completed without needing tools: ${stepToRun.description}` };
@@ -444,7 +444,7 @@ ${historyContext}`;
     } else if (resultData.toolExecuted === 'changeShippingAddress') {
       const addrInfo = resultData.output || {};
       friendlyMessage = addrInfo.waitingForApproval
-        ? `🛡️ changeShippingAddress 触发安全拦截门禁：高额/敏感订单地址修改请求已进入人工安全挂起审核流程，待主管核验。`
+        ? '🛡️ changeShippingAddress 触发安全拦截门禁：高额/敏感订单地址修改请求已进入人工安全挂起审核流程，待主管核验。'
         : `✅ changeShippingAddress 地址修改物理接口调用成功！订单 [${addrInfo.orderId}] 配送物理地址已成功变更为: [${addrInfo.newAddress}]。`;
     } else if (resultData.toolExecuted === 'generateInvoice') {
       const invInfo = resultData.output || {};

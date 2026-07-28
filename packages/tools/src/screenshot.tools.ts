@@ -54,7 +54,7 @@ export const takeScreenshot = {
     const physicalSavePath = path.join(publicScreenshotsDir, filename);
     const relativeUrlPath = `/screenshots/${filename}`;
 
-    let browser;
+    let browser: any = null;
     try {
       browser = await puppeteer.launch({
         executablePath: chromePath,

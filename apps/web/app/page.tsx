@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Avatar, AvatarFallback } from '../components/ui/avatar';
 import { Badge } from '../components/ui/badge';
@@ -132,8 +132,6 @@ export default function Home() {
 
   // 3. 周期性轮询获取与当前 ThreadID 相关且未审批的工单
   useEffect(() => {
-    let intervalId: any;
-
     const fetchApprovals = async () => {
       try {
         const res = await fetch('/api/chat/approvals');
@@ -155,10 +153,10 @@ export default function Home() {
     };
 
     fetchApprovals();
-    intervalId = setInterval(fetchApprovals, 2000); // 2秒轮询一次，高敏捷反馈！
+    const intervalId = setInterval(fetchApprovals, 2000); // 2秒轮询一次，高敏捷反馈！
 
     return () => clearInterval(intervalId);
-  }, [activeThreadId, isSubmitting]);
+  }, [activeThreadId]);
 
   // 2. 提交管理员审批决议（Approved / Rejected）并恢复 Agent 决策执行
   const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {
@@ -205,59 +203,29 @@ export default function Home() {
     }
   };
 
-  // Load user session from local storage on mount (keeping login persistent on browser refresh!)
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedUser = localStorage.getItem('agent_user_session');
-      if (savedUser) {
-        try {
-          const parsedUser = JSON.parse(savedUser);
-          setCurrentUser(parsedUser);
-        } catch (e) {
-          localStorage.removeItem('agent_user_session');
-          router.push('/login');
-        }
+  // Load past conversation records
+  const loadHistory = useCallback(async (threadIdToLoad: string) => {
+    try {
+      const res = await fetch(`/api/chat/messages?threadId=${threadIdToLoad}`);
+      const data = await res.json();
+      if (data.success && data.messages && data.messages.length > 0) {
+        setMessages(data.messages);
       } else {
-        // 未登录则强制重定向跳转至 /login 物理路由页面！
-        router.push('/login');
+        setMessages([
+          {
+            role: 'assistant',
+            content:
+              '您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？',
+          },
+        ]);
       }
-      setIsPageHydrated(true);
+    } catch (err) {
+      console.warn('[History Restore] 无法加载物理数据库的历史记录: ', err);
     }
-  }, [router]);
-
-  // Fetch thread list whenever currentUser changes
-  useEffect(() => {
-    if (currentUser) {
-      fetchThreads();
-    } else {
-      setThreads([]);
-      setActiveThreadId('');
-    }
-  }, [currentUser]);
-
-  // Fetch messages from physical messages table whenever activeThreadId changes
-  useEffect(() => {
-    if (activeThreadId) {
-      loadHistory(activeThreadId);
-    } else {
-      setMessages([
-        {
-          role: 'assistant',
-          content:
-            '您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？',
-        },
-      ]);
-    }
-  }, [activeThreadId]);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, activePlan, currentStepText, runningDetails]);
+  }, []);
 
   // Fetch threads API
-  const fetchThreads = async () => {
+  const fetchThreads = useCallback(async () => {
     if (!currentUser) return;
     setIsThreadsLoading(true);
     try {
@@ -274,7 +242,7 @@ export default function Home() {
         }
 
         if (data.threads.length > 0) {
-          if (initialActiveId && data.threads.some((t) => t.id === initialActiveId)) {
+          if (initialActiveId && data.threads.some((t: any) => t.id === initialActiveId)) {
             setActiveThreadId(initialActiveId);
           } else {
             setActiveThreadId(data.threads[0].id);
@@ -316,7 +284,60 @@ export default function Home() {
     } finally {
       setIsThreadsLoading(false);
     }
-  };
+  }, [currentUser, activeThreadId]);
+
+  // Load user session from local storage on mount (keeping login persistent on browser refresh!)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedUser = localStorage.getItem('agent_user_session');
+      if (savedUser) {
+        try {
+          const parsedUser = JSON.parse(savedUser);
+          setCurrentUser(parsedUser);
+        } catch (e) {
+          localStorage.removeItem('agent_user_session');
+          router.push('/login');
+        }
+      } else {
+        // 未登录则强制重定向跳转至 /login 物理路由页面！
+        router.push('/login');
+      }
+      setIsPageHydrated(true);
+    }
+  }, [router]);
+
+  // Fetch thread list whenever currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      fetchThreads();
+    } else {
+      setThreads([]);
+      setActiveThreadId('');
+    }
+  }, [currentUser, fetchThreads]);
+
+  // Fetch messages from physical messages table whenever activeThreadId changes
+  useEffect(() => {
+    if (activeThreadId) {
+      loadHistory(activeThreadId);
+    } else {
+      setMessages([
+        {
+          role: 'assistant',
+          content:
+            '您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？',
+        },
+      ]);
+    }
+  }, [activeThreadId, loadHistory]);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   // Create a new chat session thread
   const handleCreateNewThread = async () => {
@@ -360,27 +381,6 @@ export default function Home() {
     setActiveThreadId('');
     router.push('/login');
   };
-
-  // Load past conversation records
-  async function loadHistory(threadIdToLoad: string) {
-    try {
-      const res = await fetch(`/api/chat/messages?threadId=${threadIdToLoad}`);
-      const data = await res.json();
-      if (data.success && data.messages && data.messages.length > 0) {
-        setMessages(data.messages);
-      } else {
-        setMessages([
-          {
-            role: 'assistant',
-            content:
-              '您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？',
-          },
-        ]);
-      }
-    } catch (err) {
-      console.warn('[History Restore] 无法加载物理数据库的历史记录: ', err);
-    }
-  }
 
   const triggerStream = async (jobId: string) => {
     try {
@@ -711,6 +711,7 @@ export default function Home() {
 
               return (
                 <button
+                  type="button"
                   key={t.id}
                   onClick={() => {
                     if (isSubmitting) return;
@@ -864,9 +865,13 @@ export default function Home() {
                                           {isCompleted && (
                                             <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400 shadow-sm" />
                                           )}
-                                          {isExecuting && <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />}
+                                          {isExecuting && (
+                                            <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />
+                                          )}
                                           {isFailed && <XCircle className="h-4.5 w-4.5 text-rose-500" />}
-                                          {step.status === 'pending' && <Clock className="h-4.5 w-4.5 text-slate-600" />}
+                                          {step.status === 'pending' && (
+                                            <Clock className="h-4.5 w-4.5 text-slate-600" />
+                                          )}
                                         </div>
                                         <div>
                                           <h4
@@ -1032,7 +1037,10 @@ export default function Home() {
                         <CardContent className="p-3.5 space-y-3">
                           <div className="text-xs text-slate-300 leading-relaxed font-sans">
                             决策引擎拦截了高危动作：
-                            <strong className="text-amber-300 font-semibold">{pendingApprovalsList[0].actionType}</strong>。
+                            <strong className="text-amber-300 font-semibold">
+                              {pendingApprovalsList[0].actionType}
+                            </strong>
+                            。
                             <div className="mt-1.5 text-[10px] text-slate-400 font-mono bg-slate-950/40 p-2 rounded border border-slate-850 overflow-x-auto">
                               参数: {JSON.stringify(pendingApprovalsList[0].actionPayload?.args || {})}
                             </div>
@@ -1142,7 +1150,11 @@ export default function Home() {
                                       : 'border-slate-800 text-slate-500'
                                 }`}
                               >
-                                {step.status === 'completed' ? '已完成' : step.status === 'executing' ? '执行中' : '未开始'}
+                                {step.status === 'completed'
+                                  ? '已完成'
+                                  : step.status === 'executing'
+                                    ? '执行中'
+                                    : '未开始'}
                               </Badge>
                             </div>
                           ))}
@@ -1261,13 +1273,13 @@ export default function Home() {
                       });
 
                       const badgeStyle =
-                        ({
+                        {
                           waiting: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
                           approved: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
                           rejected: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
                           expired: 'bg-slate-800 text-slate-500 border-transparent',
                         }[item.status as 'waiting' | 'approved' | 'rejected' | 'expired'] ||
-                          'bg-slate-800 text-slate-400 border-transparent');
+                        'bg-slate-800 text-slate-400 border-transparent';
 
                       const statusTextMap = {
                         waiting: '待审批',
@@ -1334,12 +1346,12 @@ export default function Home() {
                   );
 
                   const statusBadges =
-                    ({
+                    {
                       waiting: 'bg-amber-500/10 text-amber-400 border-amber-500/30 shadow-lg shadow-amber-500/5',
                       approved: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
                       rejected: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
                       expired: 'bg-slate-800 text-slate-500 border-transparent',
-                    }[selectedApproval.status as 'waiting' | 'approved' | 'rejected' | 'expired'] || '');
+                    }[selectedApproval.status as 'waiting' | 'approved' | 'rejected' | 'expired'] || '';
 
                   return (
                     <div className="space-y-6">
@@ -1476,7 +1488,7 @@ export default function Home() {
                           </p>
                           {selectedApproval.actionPayload?.rejectionReason && (
                             <p className="text-xs text-slate-500 mt-2 font-mono">
-                              理由/说明: "{selectedApproval.actionPayload.rejectionReason}"
+                              理由/说明: &quot;{selectedApproval.actionPayload.rejectionReason}&quot;
                             </p>
                           )}
                         </div>
@@ -1489,7 +1501,7 @@ export default function Home() {
           </div>
         )}
       </div>
-      </div>selectedScreenshot && (
+      {selectedScreenshot && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center p-6">
           <Card className="bg-slate-900 border-slate-800 max-w-4xl w-full overflow-hidden shadow-2xl">
             <CardHeader className="px-6 py-4 border-b border-slate-800 flex flex-row justify-between items-center space-y-0">
@@ -1520,7 +1532,7 @@ export default function Home() {
             </CardFooter>
           </Card>
         </div>
-      )
+      )}
     </div>
   );
 }

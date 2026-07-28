@@ -439,7 +439,7 @@ export class FakePool {
     ) {
       const id = params && params.length > 0 ? (params[params.length - 1] as string) : '';
       const approval = memoryDb.pendingApprovals.find((a) => a.id === id);
-      if (approval) {
+      if (approval && params) {
         if (params.length === 2) {
           approval.status = String(params[0]);
         } else if (params.length === 3) {
@@ -590,7 +590,7 @@ async function resolveAndEnsurePgUserId(pool: any, userId: string): Promise<stri
   }
 
   try {
-    const hash = require('crypto').createHash('md5').update(userId).digest('hex');
+    const hash = require('node:crypto').createHash('md5').update(userId).digest('hex');
     const detUuid = `${hash.substring(0, 8)}-${hash.substring(8, 12)}-${hash.substring(12, 16)}-${hash.substring(16, 20)}-${hash.substring(20, 32)}`;
 
     await pool.query('INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (id) DO NOTHING', [
@@ -608,7 +608,7 @@ async function resolveAndEnsurePgUserId(pool: any, userId: string): Promise<stri
     } catch (fallbackErr) {
       console.error('[DB] Fallback user lookup failed:', fallbackErr);
     }
-    return require('crypto').randomUUID();
+    return require('node:crypto').randomUUID();
   }
 }
 
@@ -632,7 +632,7 @@ export const db: DBInterface = {
         }
 
         // Generate UUID for real user
-        const id = crypto.randomUUID ? crypto.randomUUID() : require('crypto').randomUUID();
+        const id = crypto.randomUUID ? crypto.randomUUID() : require('node:crypto').randomUUID();
         await pool.query('INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW())', [id, email]);
         console.log(`[DB User PG] Registered physical user with email: ${email}, ID: ${id}`);
 

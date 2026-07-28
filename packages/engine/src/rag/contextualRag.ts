@@ -14,9 +14,10 @@ function tokenize(text: string): string[] {
   const normalized = text.toLowerCase();
   const tokens: string[] = [];
   const regex = /[a-z0-9]+|[一-龥]/g;
-  let match;
-  while ((match = regex.exec(normalized)) !== null) {
+  let match = regex.exec(normalized);
+  while (match !== null) {
     tokens.push(match[0]);
+    match = regex.exec(normalized);
   }
   return tokens;
 }
