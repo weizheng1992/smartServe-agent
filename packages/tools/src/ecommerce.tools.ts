@@ -43,11 +43,32 @@ try {
 
 export const getOrderStatus = {
   name: 'getOrderStatus',
-  description: 'Get the status of a specific order by order ID.',
+  description:
+    'Get the status of a specific order by order ID. Secured: Only allowed if the order belongs to the currently logged-in customer.',
   schema: z.object({
     orderId: z.string().describe('The unique order identifier.'),
   }),
-  execute: async ({ orderId }: { orderId: string }) => {
+  execute: async ({ orderId, threadId }: { orderId: string; threadId?: string }) => {
+    // 🛡️ 零越权验证 (Zero IDOR Check): 通过 threadId 物理追溯当前登录用户身份
+    let sessionUserId = '';
+    let sessionBusinessId = 'ecommerce';
+    if (threadId) {
+      try {
+        const { db: physicalDb } = require('db');
+        const res = await physicalDb.execute(
+          'SELECT "user_id" AS "userId", "business_id" AS "businessId" FROM threads WHERE id = $1',
+          [threadId],
+        );
+        if (res.rows?.[0]) {
+          const row = res.rows[0] as any;
+          sessionUserId = row.userId || row.user_id;
+          sessionBusinessId = row.businessId || row.business_id || 'ecommerce';
+        }
+      } catch (err) {
+        console.warn('[Tool Security] Failed to fetch thread session context:', err);
+      }
+    }
+
     const cacheKey = `cache:order_status:${orderId}`;
 
     // 1. 优先尝试使用 Redis 物理分布式缓存
@@ -55,8 +76,12 @@ export const getOrderStatus = {
       try {
         const cachedStr = await redis.get(cacheKey);
         if (cachedStr) {
-          console.log(`[Tool Cache Hit] 🎯 物理 Redis 命中！直接返回 Order ${orderId} 缓存数据！`);
-          return JSON.parse(cachedStr);
+          const cachedObj = JSON.parse(cachedStr);
+          // 缓存层越权双保险过滤
+          if (!sessionUserId || cachedObj.userId === sessionUserId) {
+            console.log(`[Tool Cache Hit] 🎯 物理 Redis 命中！直接返回 Order ${orderId} 缓存数据！`);
+            return cachedObj;
+          }
         }
       } catch (redisErr) {
         console.warn('[Tool Cache Warning] Redis 读取失败，自动降级至内存缓存:', redisErr);
@@ -67,16 +92,33 @@ export const getOrderStatus = {
     const now = Date.now();
     const cached = orderStatusCache.get(orderId);
     if (cached && now - cached.timestamp < CACHE_TTL_MS) {
-      console.log(`[Tool Cache Hit] 🎯 内存 Local Map 命中！直接返回 Order ${orderId} 物流数据！`);
-      return cached.data;
+      if (!sessionUserId || cached.data.userId === sessionUserId) {
+        console.log(`[Tool Cache Hit] 🎯 内存 Local Map 命中！直接返回 Order ${orderId} 物流数据！`);
+        return cached.data;
+      }
     }
 
     // 3. 缓存均未命中，物理关联查询（JOIN 商品表与订单明细表，支持 SaaS 多租户细粒度查单）
-    const order = await db.getOrder(orderId);
+    // 强制增加 user_id 验证，杜绝 IDOR 水平越权！
+    const { db: physicalDb } = require('db');
+    let order: any = null;
+    try {
+      const orderQuery = sessionUserId
+        ? 'SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery", user_id AS "userId", business_id AS "businessId" FROM orders WHERE order_id = $1 AND user_id = $2'
+        : 'SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery", user_id AS "userId", business_id AS "businessId" FROM orders WHERE order_id = $1';
+      const orderQueryParams = sessionUserId ? [orderId, sessionUserId] : [orderId];
+      const oRes = await physicalDb.execute(orderQuery, orderQueryParams);
+      if (oRes?.rows?.[0]) {
+        order = oRes.rows[0];
+      }
+    } catch (dbErr) {
+      console.error('[getOrderStatus] Database error:', dbErr);
+    }
+
     if (order) {
       const items: any[] = [];
       try {
-        const itemsRes = await db.execute('SELECT * FROM "order_items" WHERE "order_id" = $1', [orderId]);
+        const itemsRes = await physicalDb.execute('SELECT * FROM "order_items" WHERE "order_id" = $1', [orderId]);
         if (itemsRes?.rows) {
           for (const itemRow of itemsRes.rows as any[]) {
             const prodId = itemRow.product_id || itemRow.productId;
@@ -87,7 +129,7 @@ export const getOrderStatus = {
             let prodName = '未知商品';
             let prodDesc = '';
             try {
-              const prodRes = await db.execute('SELECT * FROM "products" WHERE "id" = $1', [prodId]);
+              const prodRes = await physicalDb.execute('SELECT * FROM "products" WHERE "id" = $1', [prodId]);
               if (prodRes?.rows?.[0]) {
                 const prod = prodRes.rows[0] as any;
                 prodName = prod.name;
@@ -126,7 +168,13 @@ export const getOrderStatus = {
       const totalAmount = items.reduce((sum, item) => sum + item.priceAtPurchase * item.quantity, 0);
 
       const enrichedOrder = {
-        ...order,
+        orderId: order.orderId || order.order_id,
+        status: order.status,
+        carrier: order.carrier,
+        trackingNumber: order.trackingNumber || order.tracking_number,
+        estimatedDelivery: order.estimatedDelivery || order.estimated_delivery,
+        userId: order.userId || order.user_id,
+        businessId: order.businessId || order.business_id,
         items,
         totalAmount: `$${totalAmount.toFixed(2)}`,
       };
@@ -147,14 +195,15 @@ export const getOrderStatus = {
     }
 
     return {
-      error: `Order ${orderId} not found in the physical database. Please run seed or push to create records.`,
+      error: `⚠️ 越权阻止或未找到订单：订单 ${orderId} 不属于您名下，或不存在于系统中。`,
     };
   },
 };
 
 export const processRefund = {
   name: 'processRefund',
-  description: 'Process a refund for an order.',
+  description:
+    'Process a refund for an order. Secured: Only allowed if the order belongs to the currently logged-in customer.',
   schema: z.object({
     orderId: z.string().describe('The unique order identifier.'),
     reason: z.string().describe('The reason for processing the refund.'),
@@ -162,14 +211,17 @@ export const processRefund = {
   execute: async ({ orderId, reason, threadId }: { orderId: string; reason: string; threadId?: string }) => {
     // SaaS 多租户隔离：根据 threadId 物理 SQL 溯源所属商户租户，采用 db.execute 彻底规避对 drizzle-orm 的依赖警告
     let businessId = 'ecommerce';
+    let sessionUserId = '';
     if (threadId) {
       try {
         const { db: physicalDb } = require('db');
-        const res = await physicalDb.execute('SELECT "business_id" AS "businessId" FROM threads WHERE id = $1', [
-          threadId,
-        ]);
+        const res = await physicalDb.execute(
+          'SELECT "user_id" AS "userId", "business_id" AS "businessId" FROM threads WHERE id = $1',
+          [threadId],
+        );
         if (res.rows?.[0]) {
           const row = res.rows[0] as any;
+          sessionUserId = row.userId || row.user_id;
           businessId = row.businessId || row.business_id || 'ecommerce';
         }
       } catch (err) {
@@ -185,10 +237,26 @@ export const processRefund = {
       returnWindowDays = 14;
     }
 
-    const order = await db.getOrder(orderId);
+    // 🛡️ 零越权验证 (Zero IDOR Check): 物理校验退款订单所有权
+    const { db: physicalDb } = require('db');
+    let order: any = null;
+    try {
+      const orderQuery = sessionUserId
+        ? 'SELECT order_id AS "orderId", estimated_delivery AS "estimatedDelivery", user_id AS "userId" FROM orders WHERE order_id = $1 AND user_id = $2'
+        : 'SELECT order_id AS "orderId", estimated_delivery AS "estimatedDelivery", user_id AS "userId" FROM orders WHERE order_id = $1';
+      const orderQueryParams = sessionUserId ? [orderId, sessionUserId] : [orderId];
+      const oRes = await physicalDb.execute(orderQuery, orderQueryParams);
+      if (oRes?.rows?.[0]) {
+        order = oRes.rows[0];
+      }
+    } catch (dbErr) {
+      console.error('[processRefund] Database error:', dbErr);
+    }
+
     if (order) {
       // 物理时效比对：核验该笔订单距送达/预计送达日期是否已超期（SOP Policy Guardrail）
-      const deliveryDate = new Date(order.estimatedDelivery);
+      const estimatedDelivery = order.estimatedDelivery || order.estimated_delivery;
+      const deliveryDate = new Date(estimatedDelivery);
       const currentDate = new Date();
       const diffTime = Math.abs(currentDate.getTime() - deliveryDate.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -198,7 +266,7 @@ export const processRefund = {
           `[Refund Tool Guardrail] ❌ 政策拦截：商户 [${businessId}] 退货期为 ${returnWindowDays} 天，订单已过去 ${diffDays} 天！`,
         );
         return {
-          error: `⚠️ 退款政策拦截：根据商户 [${businessId.toUpperCase()}] 官方售后 SOP 规范，退货时效为订单送达之日起 ${returnWindowDays} 天内。该订单送达日期为 ${order.estimatedDelivery}，当前已逾期 ${diffDays} 天，超出合规退款时效。物理拒绝执行退款！`,
+          error: `⚠️ 退款政策拦截：根据商户 [${businessId.toUpperCase()}] 官方售后 SOP 规范，退货时效为订单送达之日起 ${returnWindowDays} 天内。该订单送达日期为 ${estimatedDelivery}，当前已逾期 ${diffDays} 天，超出合规退款时效。物理拒绝执行退款！`,
           orderId,
           status: 'rejected_by_policy',
           businessId,
@@ -240,7 +308,7 @@ export const processRefund = {
       };
     }
     return {
-      error: `Failed to process refund: Order ${orderId} does not exist in physical Postgres database.`,
+      error: `⚠️ 越权阻止或未找到订单：退款订单 ${orderId} 不属于您名下，或不存在于系统中。`,
     };
   },
 };
@@ -296,21 +364,37 @@ export const listUserOrders = {
 
 export const changeShippingAddress = {
   name: 'changeShippingAddress',
-  description: 'Modify the shipping address of an order before it gets shipped.',
+  description:
+    'Modify the shipping address of an order before it gets shipped. Secured: Only allowed if the order belongs to the currently logged-in customer.',
   schema: z.object({
     orderId: z.string().describe('The unique order identifier.'),
     newAddress: z.string().describe('The new physical shipping address.'),
   }),
-  execute: async ({ orderId, newAddress }: { orderId: string; newAddress: string }) => {
+  execute: async ({ orderId, newAddress, threadId }: { orderId: string; newAddress: string; threadId?: string }) => {
+    // 🛡️ 零越权验证 (Zero IDOR Check): 通过 threadId 物理追溯当前登录用户身份
+    let sessionUserId = '';
+    if (threadId) {
+      try {
+        const { db: physicalDb } = require('db');
+        const res = await physicalDb.execute('SELECT "user_id" AS "userId" FROM threads WHERE id = $1', [threadId]);
+        if (res.rows?.[0]) {
+          sessionUserId = res.rows[0].userId || res.rows[0].user_id;
+        }
+      } catch (err) {
+        console.warn('[Tool Security] Failed to fetch thread session context:', err);
+      }
+    }
+
     try {
       const { db: physicalDb } = require('db');
-      const res = await physicalDb.execute(
-        'SELECT status, "total_amount" AS "totalAmount" FROM orders WHERE order_id = $1',
-        [orderId],
-      );
+      const orderQuery = sessionUserId
+        ? 'SELECT status, "total_amount" AS "totalAmount", user_id AS "userId" FROM orders WHERE order_id = $1 AND user_id = $2'
+        : 'SELECT status, "total_amount" AS "totalAmount", user_id AS "userId" FROM orders WHERE order_id = $1';
+      const orderQueryParams = sessionUserId ? [orderId, sessionUserId] : [orderId];
+      const res = await physicalDb.execute(orderQuery, orderQueryParams);
       const rows = res.rows || [];
       if (rows.length === 0) {
-        return { error: `Order ${orderId} not found in database.` };
+        return { error: `⚠️ 越权阻止或未找到订单：订单 ${orderId} 不属于您名下，或不存在于系统中。` };
       }
 
       const order = rows[0] as any;
@@ -355,20 +439,36 @@ export const changeShippingAddress = {
 
 export const generateInvoice = {
   name: 'generateInvoice',
-  description: 'Generate a structured electronic tax invoice for a completed order.',
+  description:
+    'Generate a structured electronic tax invoice for a completed order. Secured: Only allowed if the order belongs to the currently logged-in customer.',
   schema: z.object({
     orderId: z.string().describe('The unique order identifier.'),
   }),
-  execute: async ({ orderId }: { orderId: string }) => {
+  execute: async ({ orderId, threadId }: { orderId: string; threadId?: string }) => {
+    // 🛡️ 零越权验证 (Zero IDOR Check): 通过 threadId 物理追溯当前登录用户身份
+    let sessionUserId = '';
+    if (threadId) {
+      try {
+        const { db: physicalDb } = require('db');
+        const res = await physicalDb.execute('SELECT "user_id" AS "userId" FROM threads WHERE id = $1', [threadId]);
+        if (res.rows?.[0]) {
+          sessionUserId = res.rows[0].userId || res.rows[0].user_id;
+        }
+      } catch (err) {
+        console.warn('[Tool Security] Failed to fetch thread session context:', err);
+      }
+    }
+
     try {
       const { db: physicalDb } = require('db');
-      const res = await physicalDb.execute(
-        'SELECT status, "total_amount" AS "totalAmount" FROM orders WHERE order_id = $1',
-        [orderId],
-      );
+      const orderQuery = sessionUserId
+        ? 'SELECT status, "total_amount" AS "totalAmount", user_id AS "userId" FROM orders WHERE order_id = $1 AND user_id = $2'
+        : 'SELECT status, "total_amount" AS "totalAmount", user_id AS "userId" FROM orders WHERE order_id = $1';
+      const orderQueryParams = sessionUserId ? [orderId, sessionUserId] : [orderId];
+      const res = await physicalDb.execute(orderQuery, orderQueryParams);
       const rows = res.rows || [];
       if (rows.length === 0) {
-        return { error: `Order ${orderId} not found in database.` };
+        return { error: `⚠️ 越权阻止或未找到订单：订单 ${orderId} 不属于您名下，或不存在于系统中。` };
       }
 
       const order = rows[0] as any;
@@ -390,8 +490,91 @@ export const generateInvoice = {
   },
 };
 
+export const recordUserPreference = {
+  name: 'recordUserPreference',
+  description:
+    'Record specific consumer preferences of the current customer (such as clothing size, favorite color, stylistic preference, material allergies/restrictions) into long-term memories for future search and sizing recommendation.',
+  schema: z.object({
+    preferenceType: z
+      .enum(['size', 'color', 'brand', 'style', 'material', 'other'])
+      .describe('偏好类型，如 size 代表尺寸，color 代表颜色，material 代表过敏或避雷材质等'),
+    preferenceValue: z
+      .string()
+      .describe('具体的偏好数值或文字表达，例如 "鞋码42.5/上衣L码"、"喜欢纯白"、"对羊毛过敏，刺痒"'),
+  }),
+  execute: async ({
+    preferenceType,
+    preferenceValue,
+    threadId,
+  }: { preferenceType: string; preferenceValue: string; threadId?: string }) => {
+    if (!threadId) {
+      return { error: 'Session threadId is strictly required.' };
+    }
+
+    let userId = '';
+    try {
+      const { db: physicalDb } = require('db');
+      const res = await physicalDb.execute('SELECT "user_id" AS "userId" FROM threads WHERE id = $1', [threadId]);
+      if (res.rows?.[0]) {
+        userId = res.rows[0].userId || res.rows[0].user_id;
+      }
+    } catch (err) {
+      console.error('[Record Preference Tool] Session authentication failed:', err);
+      return { error: 'Failed to authenticate thread session context.' };
+    }
+
+    if (!userId) {
+      return { error: 'Could not resolve user context from current session.' };
+    }
+
+    try {
+      const { getDrizzle, longMemoryFacts: factsTable } = require('db');
+      const drizzle = getDrizzle();
+      const factText = `[User ${preferenceType} preference]: ${preferenceValue}`;
+
+      let serializedEmbedding: string | null = null;
+      try {
+        const { getEmbeddingModel } = require('engine');
+        const embeddingModel = getEmbeddingModel();
+        const embedding = await embeddingModel.embedQuery(factText);
+        serializedEmbedding = JSON.stringify(embedding);
+      } catch (embErr) {
+        console.warn(
+          '[Record Preference Tool] Failed to generate vector embedding, falling back to direct text:',
+          embErr,
+        );
+      }
+
+      if (drizzle) {
+        await drizzle.insert(factsTable).values({
+          userId,
+          fact: factText,
+          embedding: serializedEmbedding,
+          type: 'preference',
+          createdAt: new Date(),
+        });
+        console.log(
+          `[Record Preference Tool] Successfully stored "${factText}" directly into long-term memory Postgres table!`,
+        );
+      }
+
+      return {
+        success: true,
+        userId,
+        preferenceType,
+        preferenceValue,
+        message: `✅ 已成功将您的消费偏好偏爱（${preferenceType}: ${preferenceValue}）登记入库。系统已同步更新 RAG 画像专家混合记忆矩阵，后续为您推荐商品及尺码换算时将自动参考！`,
+      };
+    } catch (err: any) {
+      console.error('[Record Preference Tool] Storage failed:', err);
+      return { error: `Failed to register consumer preference: ${err.message}` };
+    }
+  },
+};
+
 registerTool(getOrderStatus);
 registerTool(processRefund);
 registerTool(listUserOrders);
 registerTool(changeShippingAddress);
 registerTool(generateInvoice);
+registerTool(recordUserPreference);

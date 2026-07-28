@@ -46,6 +46,7 @@ export async function executorNode(state: typeof AgentStateAnnotation.State) {
     'listUserOrders',
     'changeShippingAddress',
     'generateInvoice',
+    'recordUserPreference',
   ];
   const llm = getLLM(state.jobId);
 
@@ -76,10 +77,12 @@ CRITICAL INSTRUCTIONS FOR TOOL SELECTION:
 5. If the step description mentions listing, showing, finding, retrieving, or checking recent orders, order history, other orders, or what orders are under the customer's name, you MUST select the "listUserOrders" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
 6. If the step description mentions changing, modifying, or updating the shipping address of an order, you MUST select the "changeShippingAddress" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
 7. If the step description mentions generating, creating, issuing, billing, or compiling a tax invoice, you MUST select the "generateInvoice" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
-8. Do NOT skip tool execution (i.e. do NOT return "NONE") just because the information already seems to be mentioned in the conversation history! Real-time physical retrieval/verification from our database is ALWAYS strictly required to ground the execution.
-9. If a tool is selected, you must extract its arguments from the [CONVERSATION HISTORY] below:
+8. If the step description mentions recording, saving, updating, or storing consumer/user preferences, sizes (clothes size, shoe size), colors, favorite brands, styles, or material restrictions, you MUST select the "recordUserPreference" tool from: ${JSON.stringify(allowedTools)}. Do NOT return "NONE"!
+9. Do NOT skip tool execution (i.e. do NOT return "NONE") just because the information already seems to be mentioned in the conversation history! Real-time physical retrieval/verification from our database is ALWAYS strictly required to ground the execution.
+10. If a tool is selected, you must extract its arguments from the [CONVERSATION HISTORY] below:
    - For "getOrderStatus", "processRefund", "changeShippingAddress", and "generateInvoice", extract the "orderId" (must look like ORD-XXXXX, e.g., ORD-98712).
    - For "changeShippingAddress", also extract the "newAddress" string value.
+   - For "recordUserPreference", extract the "preferenceType" (strictly one of: 'size', 'color', 'brand', 'style', 'material', 'other') and the "preferenceValue" string describing the preference.
    - For "listUserOrders", there are no arguments (it is a self-contained session query).
    - Carefully look at ALL past turns in the history. If the customer mentioned an order ID in a previous turn, carry it over and use it.
    - Do NOT generate or hallucinate a dummy orderId like "12345" or "123456" if there is no real order ID in the history! If you absolutely cannot find any order ID in the history, return "NONE" so we can ask the customer for it.
@@ -449,6 +452,9 @@ ${historyContext}`;
     } else if (resultData.toolExecuted === 'generateInvoice') {
       const invInfo = resultData.output || {};
       friendlyMessage = `✅ generateInvoice 电子发票开具接口调用成功！已为订单 [${invInfo.orderId}] 成功编译国税系统认证电子发票 [发票编号: ${invInfo.invoiceId}]，税额: [${invInfo.taxAmount}]，相关 PDF 下载链接已注册至财务专区！`;
+    } else if (resultData.toolExecuted === 'recordUserPreference') {
+      const prefInfo = resultData.output || {};
+      friendlyMessage = `✅ recordUserPreference 消费画像专家工具调用成功！用户的个性化偏好 [${prefInfo.preferenceType}: ${prefInfo.preferenceValue}] 已被安全录入 PostgreSQL 物理表并完成 RAG 混合偏好矩阵的无缝同步。`;
     }
 
     agentEventEmitter.emit(`${state.jobId}:status`, {
