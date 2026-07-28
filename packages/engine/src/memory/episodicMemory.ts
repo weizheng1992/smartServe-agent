@@ -40,10 +40,14 @@ export class EpisodicMemory {
     }
   }
 
-  async retrieveEvents(query: string, limit = 3): Promise<EpisodicEvent[]> {
+  async retrieveEvents(query: string, limit = 3, precomputedEmbedding?: number[]): Promise<EpisodicEvent[]> {
     console.log(`[EpisodicMemory] Retrieving episodic events for user ${this.userId} using query: ${query}`);
-    const embeddingModel = getEmbeddingModel();
-    const queryEmbedding = await embeddingModel.embedQuery(query);
+
+    let queryEmbedding = precomputedEmbedding;
+    if (!queryEmbedding || queryEmbedding.length === 0) {
+      const embeddingModel = getEmbeddingModel();
+      queryEmbedding = await embeddingModel.embedQuery(query);
+    }
 
     const dbInstance = getDrizzle();
     if (dbInstance) {

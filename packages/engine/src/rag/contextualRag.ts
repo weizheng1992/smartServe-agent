@@ -194,19 +194,21 @@ export class ContextualRAG {
     }
   }
 
-  async searchRelevantDocs(query: string, limit = 2): Promise<ScoredRAGDocument[]> {
+  async searchRelevantDocs(query: string, limit = 2, precomputedEmbedding?: number[]): Promise<ScoredRAGDocument[]> {
     console.log(`[RAG] 🔍 SaaS 租户隔离检索启动：租户 [${this.businessId}]，检索提问 [${query}]...`);
 
     // Ensure seed data exists in the database
     await this.ensureSeedData();
 
-    const embeddingModel = getEmbeddingModel();
-    let queryEmbedding: number[] = [];
-    try {
-      queryEmbedding = await embeddingModel.embedQuery(query);
-    } catch (err) {
-      console.error('[RAG] Failed to generate embedding for search query:', err);
-      return [];
+    let queryEmbedding = precomputedEmbedding;
+    if (!queryEmbedding || queryEmbedding.length === 0) {
+      const embeddingModel = getEmbeddingModel();
+      try {
+        queryEmbedding = await embeddingModel.embedQuery(query);
+      } catch (err) {
+        console.error('[RAG] Failed to generate embedding for search query:', err);
+        return [];
+      }
     }
 
     const drizzle = getDrizzle();

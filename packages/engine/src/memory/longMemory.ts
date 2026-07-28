@@ -205,10 +205,14 @@ ${JSON.stringify(pastOrders, null, 2)}
     }
   }
 
-  async searchRelevantFacts(query: string): Promise<LongMemoryFact[]> {
+  async searchRelevantFacts(query: string, precomputedEmbedding?: number[]): Promise<LongMemoryFact[]> {
     console.log(`[LongMemory] Searching relevant facts for user ${this.userId} using query: ${query}`);
-    const embeddingModel = getEmbeddingModel();
-    const queryEmbedding = await embeddingModel.embedQuery(query);
+
+    let queryEmbedding = precomputedEmbedding;
+    if (!queryEmbedding || queryEmbedding.length === 0) {
+      const embeddingModel = getEmbeddingModel();
+      queryEmbedding = await embeddingModel.embedQuery(query);
+    }
 
     const dbInstance = getDrizzle();
     if (dbInstance) {
