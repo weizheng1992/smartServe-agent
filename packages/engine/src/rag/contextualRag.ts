@@ -132,6 +132,7 @@ export class ContextualRAG {
             chunkText:
               '对于我们电商主站的订单，普通用户享有自签收之日起 7 天无理由退换货权益。退回的商品必须保持吊牌完整、未拆封且不影响二次销售。非质量问题的退货由买家自行承担寄回运费。',
             contextualSummary: '这段切片描述了电商主站（ecommerce）标准 7 天无理由退换货的前提条件与退货运费归属政策。',
+            category: 'refund_policy',
           },
           {
             businessId: 'nike',
@@ -139,6 +140,7 @@ export class ContextualRAG {
               'Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。',
             contextualSummary:
               '这段切片详细说明了 Nike 会员尊享的 30 天无损无理由退货、已拆吊牌退货政策以及顺丰寄回服务。',
+            category: 'refund_policy',
           },
           {
             businessId: 'adidas',
@@ -146,6 +148,29 @@ export class ContextualRAG {
               'Adidas 支持签收后 14 天退换货。所有商品必须保留原始包装盒与防伪扣，试穿时请勿弄脏鞋底。退货需要通过官方微信小程序预约快递员上门取件，不支持自行寄送。',
             contextualSummary:
               '这段切片详细规定了 Adidas 的 14 天退换货时效、原始防伪包装要求，以及微信小程序预约取件的硬性物流约束。',
+            category: 'refund_policy',
+          },
+          {
+            businessId: 'nike',
+            chunkText:
+              'Nike 官方鞋码对照与版型建议：Pegasus 飞马系列跑鞋版型紧凑、足弓包裹感极强。常规脚型建议选择比正装皮鞋大半码；高足弓或宽脚掌用户，强烈建议购买大一码（例如平时穿42码，建议选42.5码或43码），否则易出现脚趾顶红或严重的侧向挤压感。',
+            contextualSummary:
+              '这段切片详细规定了 Nike 运动鞋（特别是飞马系列跑鞋）的鞋码对照和版型偏小的尺码升级建议。',
+            category: 'size_chart',
+          },
+          {
+            businessId: 'adidas',
+            chunkText:
+              'Adidas 服饰尺码指南：Adidas 户外运动夹克、卫衣与连帽衫整体采用欧美版型剪裁，版型偏向宽松和落肩、Oversized 风格。如果您平时穿着 L 码（适合175cm-180cm），且偏好贴身或标准挺拔版型，建议选择比常规尺码小一号（即 M 码）。',
+            category: 'size_chart',
+            contextualSummary: '这段切片详细规定了 Adidas 衣服欧版偏宽松落肩的设计特征及建议买小一码的尺码指南。',
+          },
+          {
+            businessId: 'ecommerce',
+            chunkText:
+              '电商主站常规服饰尺码：通用针织衫、纯棉打底衫尺码为标准中国国标码。M 码适合身高 170cm 左右，L 码适合身高 175cm 左右，XL 码适合身高 180cm 左右。因纯棉材质存在正常 1.5% 的缩水率，建议身高卡在边缘或体型微胖的用户选择大一码。',
+            category: 'size_chart',
+            contextualSummary: '这段切片规定了电商主站针织衫等标准国标尺码对照，以及考虑纯棉缩水率后的微胖大一码推荐。',
           },
         ];
 
@@ -159,7 +184,7 @@ export class ContextualRAG {
             chunkText: doc.chunkText,
             contextualSummary: doc.contextualSummary,
             embedding: serializedEmbedding,
-            metadata: { category: 'refund_policy', version: '1.0' },
+            metadata: { category: doc.category, version: '1.0' },
           });
         }
         console.log('[RAG] ✅ Contextual RAG 演示数据自动注入成功！已永久落盘 Postgres 物理表。');

@@ -464,7 +464,7 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
       `Handled conversation thread: ${threadId}. Output summary: ${result.output.substring(0, 80)}`,
       5,
     );
-    await longMemory.extractAndStoreFact(result.output);
+    await longMemory.extractAndStoreFact(result.output, inputMessage);
   }
 
   // Persist structured task memory if plan exists

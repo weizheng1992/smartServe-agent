@@ -1,5 +1,5 @@
 import { getDrizzle, longMemoryFacts } from 'db';
-import { getEmbeddingModel } from '../llm/callLLMWithRetry';
+import { getEmbeddingModel, getLLM } from '../llm/callLLMWithRetry';
 
 export interface LongMemoryFact {
   id: string;
@@ -16,8 +16,23 @@ export class LongMemory {
     this.userId = userId;
   }
 
-  async extractAndStoreFact(conversationText: string): Promise<void> {
+  async extractAndStoreFact(conversationText: string, userQuery?: string): Promise<void> {
     console.log(`[LongMemory] Extracting facts from text for user ${this.userId}`);
+
+    // 🛡️ 启动大模型驱动的异步【专职画像 Agent（Dedicated User Profiler Agent）】
+    // 结合历史 SQL 订单购买流水 + 这一轮最新对话，自动提取非结构化尺寸与消费偏好并智能自愈落盘
+    if (userQuery) {
+      // 异步 Fire-and-forget 运行，绝不阻塞前端实时响应时效
+      (async () => {
+        try {
+          await this.runProfileAudit(userQuery, conversationText);
+        } catch (err: any) {
+          console.error('[Profiler Agent Error] 专职画像 Agent 执行偏好核查异常:', err.message || err);
+        }
+      })();
+    }
+
+    // 保留原有轻量级正则匹配，做双重容灾保障
     const lines = conversationText
       .split('\n')
       .map((l) => l.trim())
@@ -44,12 +59,121 @@ export class LongMemory {
               type: 'preference',
               createdAt: new Date(),
             });
-            console.log(`[LongMemory] Extracted and stored fact directly in PostgreSQL: "${factText}"`);
+            console.log(
+              `[LongMemory] [Fallback Regex] Extracted and stored fact directly in PostgreSQL: "${factText}"`,
+            );
           } catch (err) {
             console.warn('[LongMemory] Drizzle insertion bypassed due to offline/failed DB.');
           }
         }
       }
+    }
+  }
+
+  /**
+   * 🕵️ 专职画像 Agent (Dedicated Profiler Agent) 核心研判器
+   * 结合：SQL 结构化订单历史 + 本轮最新非结构化聊天上下文
+   */
+  private async runProfileAudit(userQuery: string, assistantResponse: string): Promise<void> {
+    console.log(`[Profiler Agent] 🕵️ 启动用户 ${this.userId} 的多模态消费画像提取...`);
+
+    const { db: physicalDb } = require('db');
+    let pastOrders: any[] = [];
+
+    // 1. [结构化数据装配 (SQL)]：实时拉取该用户在 PostgreSQL 中的最近购买明细
+    try {
+      const orderRes = await physicalDb.execute(
+        `
+        SELECT o.order_id AS "orderId", o.status, p.name AS "productName", o.total_amount AS "totalAmount"
+        FROM orders o
+        LEFT JOIN order_items oi ON o.order_id = oi.order_id
+        LEFT JOIN products p ON oi.product_id = p.id
+        WHERE o.user_id = $1 LIMIT 5
+      `,
+        [this.userId],
+      );
+      pastOrders = orderRes.rows || [];
+    } catch (sqlErr) {
+      console.warn('[Profiler Agent] Failed to fetch SQL transaction stream for audit:', sqlErr);
+    }
+
+    // 2. [画像大模型研判]：注入多模态画像提取 Prompts，输出极致规整的 JSONB 标签
+    const llm = getLLM();
+    const systemPrompt = `
+你是一位世界级的消费者行为学家与尺码换算专家。你的职责是通过分析【用户最新的对话细节】与【历史购买流水】，提炼出符合该用户特征的个性化消费画像标签。
+
+[CRITICAL INSTRUCTIONS]:
+请不要生成任何解释性废话。你必须只输出一个合规的 JSON 对象，包含以下字段：
+{
+  "hasNewPreference": boolean, // 本轮对话中是否展现出任何新的、值得记录的尺码偏好、颜色偏好或避雷标签？
+  "extractedFacts": string[] // 非结构化偏好事实描述列表。例如: ["用户上衣尺码为 L 码", "用户鞋子尺码为 42.5 码", "用户对羊毛材质过敏，皮肤刺痒", "Nike跑鞋偏小，需买大一码"]
+}
+
+注意：如果用户在聊天中提到了“长胖了衣服得穿XL”或“耐克鞋42有些挤脚下次买42.5”，或者通过 SQL 历史单据发现他大量购买了黑色运动卫衣，请敏锐地提取这些关键消费特征！
+不要胡编乱造，仅提炼用户明确流露或被历史购买记录证实的偏好标签。
+`;
+
+    const auditPrompt = `
+${systemPrompt}
+
+[INPUT CONTEXT]:
+1. 🛍️ 用户历史购买流水 (SQL Transaction Stream):
+${JSON.stringify(pastOrders, null, 2)}
+
+2. 💬 本轮最新聊天交互 (Conversational Context):
+- Customer: "${userQuery}"
+- Assistant: "${assistantResponse}"
+
+请进行画像分析并返回结果 JSON：
+`;
+
+    try {
+      const response = await llm.invoke(auditPrompt);
+      const content = typeof response === 'string' ? response : (response as any).content || '';
+
+      const cleanJson = content
+        .trim()
+        .replace(/^```json\s*/, '')
+        .replace(/```$/, '')
+        .trim();
+
+      const auditResult = JSON.parse(cleanJson);
+
+      if (!auditResult.hasNewPreference || !auditResult.extractedFacts || auditResult.extractedFacts.length === 0) {
+        console.log('[Profiler Agent] 🍃 画像审计完成：本轮会话未检测到新的偏好特征变动。');
+        return;
+      }
+
+      console.log(
+        `[Profiler Agent] 🎯 画像专家捕捉到 ${auditResult.extractedFacts.length} 条全新消费偏好！开始向量化归档 RAG 长期记忆...`,
+      );
+
+      const drizzle = getDrizzle();
+      if (!drizzle) return;
+
+      // 3. [非结构化偏好 RAG 落盘]：计算向量嵌入并同步落盘
+      const embeddingModel = getEmbeddingModel();
+      for (const fact of auditResult.extractedFacts) {
+        try {
+          const embedding = await embeddingModel.embedQuery(fact);
+          const serializedEmbedding = JSON.stringify(embedding);
+
+          await drizzle.insert(longMemoryFacts).values({
+            userId: this.userId,
+            fact: fact,
+            embedding: serializedEmbedding,
+            type: 'preference',
+            createdAt: new Date(),
+          });
+          console.log(`[Profiler Agent] 偏好 RAG 事实成功写入 longMemoryFacts: "${fact}"`);
+        } catch (ragErr) {
+          console.warn('[Profiler Agent] Failed to vectorise and store extracted fact:', ragErr);
+        }
+      }
+
+      console.log(`[Profiler Agent] ✅ 用户 ${this.userId} 的消费特征同步更新成功！`);
+    } catch (err: any) {
+      console.error('[Profiler Agent Error] 画像 Agent 提取偏好发生异常:', err.message || err);
     }
   }
 
