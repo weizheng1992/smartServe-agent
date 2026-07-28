@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { registerTool } from './registry';
 
 // 1-minute TTL Cache for getOrderStatus
-const orderStatusCache = new Map<string, { data: Order; timestamp: number }>();
+const orderStatusCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_TTL_MS = 60000; // 1 minute
 
 // Safe Redis initialization with automatic silent fallback to local Map

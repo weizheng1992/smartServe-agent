@@ -10,7 +10,7 @@ export async function validatorNode(state: typeof AgentStateAnnotation.State) {
 
   if (!step) {
     logger.warn({ threadId: state.threadId }, 'validatorNode validation skipped: no step found');
-    return {};
+    return { globalTransitionsCount: 1 };
   }
 
   // 如果执行步骤因为安全审批被拦截处于挂起状态，校验器不做任何操作，亦不累加索引，保留现场原封不动返回！
@@ -21,6 +21,7 @@ export async function validatorNode(state: typeof AgentStateAnnotation.State) {
         ...currentPlan,
         currentStepIndex: currentIndex,
       },
+      globalTransitionsCount: 1,
     };
   }
 
@@ -116,5 +117,7 @@ Return ONLY YES or NO.`;
       subtasks: updatedSubtasks,
       currentStepIndex: currentIndex + 1,
     },
+    globalTransitionsCount: 1,
+    toolErrorsCount: isValid ? 0 : 1, // 核验失败视为工具失败，累计错误次数
   };
 }

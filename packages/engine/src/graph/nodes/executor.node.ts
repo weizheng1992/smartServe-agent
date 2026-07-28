@@ -12,7 +12,7 @@ export async function executorNode(state: typeof AgentStateAnnotation.State) {
 
   if (!subtask) {
     logger.warn({ threadId: state.threadId }, 'executorNode execution skipped: no subtask at current index');
-    return {};
+    return { globalTransitionsCount: 1 };
   }
 
   logger.info({ threadId: state.threadId, subtask }, `executorNode executing step ${currentIndex}`);
@@ -225,6 +225,8 @@ ${historyContext}`;
 
                   return {
                     taskPlan: nextPlan,
+                    globalTransitionsCount: 1,
+                    toolErrorsCount: 1, // 审批超时视为执行故障，累计错误
                   };
                 }
               }
@@ -275,6 +277,7 @@ ${historyContext}`;
 
                 return {
                   taskPlan: nextPlan,
+                  globalTransitionsCount: 1,
                 };
               }
               if (latestApproval.status === 'cancelled') {
@@ -308,6 +311,7 @@ ${historyContext}`;
 
                 return {
                   taskPlan: nextPlan,
+                  globalTransitionsCount: 1,
                 };
               }
               if (latestApproval.status === 'rejected') {
@@ -340,6 +344,8 @@ ${historyContext}`;
 
                 return {
                   taskPlan: nextPlan,
+                  globalTransitionsCount: 1,
+                  toolErrorsCount: 1, // 被驳回也属于执行流退避故障，累计错误
                 };
               }
               if (latestApproval.status === 'approved') {
@@ -468,5 +474,7 @@ ${historyContext}`;
   return {
     taskPlan: nextPlan,
     shortMemory,
+    globalTransitionsCount: 1,
+    toolErrorsCount: resultData.error ? 1 : 0,
   };
 }

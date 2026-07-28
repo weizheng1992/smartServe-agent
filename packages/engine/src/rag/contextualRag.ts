@@ -233,6 +233,15 @@ export class ContextualRAG {
       const docsWithTokens: DocWithTokens[] = [];
 
       for (const row of rows) {
+        // 🔒 SaaS Multi-Tenant Dual-Lock Physical Sandbox Check:
+        // Double-verification at the application runtime layer to enforce strict tenant boundary
+        if (row.businessId !== this.businessId) {
+          console.error(
+            `[SECURITY ALERT] 🛑 MULTI-TENANT LEAK PREVENTED! Document [ID: ${row.id}] has tenant [${row.businessId}] but search query belongs to [${this.businessId}]. Skipping immediately!`
+          );
+          continue;
+        }
+
         let embeddingArray: number[] | null = null;
         if (row.embedding) {
           try {
@@ -346,8 +355,16 @@ export class ContextualRAG {
       },
     ];
 
-    // Filter by businessId
-    const filtered = fakeData.filter((d) => d.businessId === this.businessId);
+    // Filter by businessId with runtime multi-tenant verification check
+    const filtered = fakeData.filter((d) => {
+      if (d.businessId !== this.businessId) {
+        console.error(
+          `[SECURITY ALERT] 🛑 MULTI-TENANT LEAK PREVENTED (MOCK)! Document [ID: ${d.id}] has tenant [${d.businessId}] but search query belongs to [${this.businessId}].`
+        );
+        return false;
+      }
+      return true;
+    });
 
     // Compute high-fidelity BM25 scores on mock data for offline simulation
     const docsWithTokens = filtered.map((d) => ({

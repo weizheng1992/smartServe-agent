@@ -63,6 +63,20 @@ export function buildAgentGraph() {
       const plan = state.taskPlan;
       const nextIndex = plan.currentStepIndex;
 
+      // 🛡️ [图级别智能硬熔断保护器 (Graph-Level Smart Circuit Breaker)]:
+      // 1. 如果全局节点转移步数大于等于 10 (例如 Planner/Executor/Validator 陷入智商自旋)，
+      // 2. 或累计工具运行错误、核验失败次数达到 3 次，立刻强制物理触发【降级熔断】，直接返回 'finish'
+      const globalTransitions = state.globalTransitionsCount || 0;
+      const toolErrors = state.toolErrorsCount || 0;
+
+      if (globalTransitions >= 10 || toolErrors >= 3) {
+        logger.warn(
+          { threadId: state.threadId, globalTransitions, toolErrors },
+          '🛑 [CIRCUIT BREAKER TRIGGERED] Runaway loop or tool errors limit exceeded! Fusing execution to prevent API credit burn!'
+        );
+        return 'finish';
+      }
+
       // 1. 如果有任何子任务在等待审批，我们立刻提前终止 Graph 并路由到 finish 节点让其挂起！
       const hasWaitingStep = plan.subtasks.some((st) => st.result?.waitingForApproval);
       if (hasWaitingStep) {

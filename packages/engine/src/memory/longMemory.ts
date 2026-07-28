@@ -57,10 +57,13 @@ export class LongMemory {
               fact: factText,
               embedding: serializedEmbedding,
               type: 'preference',
+              confidence: 1.0,
+              status: 'approved',
+              source: 'regex_fallback',
               createdAt: new Date(),
             });
             console.log(
-              `[LongMemory] [Fallback Regex] Extracted and stored fact directly in PostgreSQL: "${factText}"`,
+              `[LongMemory] [Fallback Regex] Extracted and stored fact directly in PostgreSQL [Status: approved]: "${factText}"`,
             );
           } catch (err) {
             console.warn('[LongMemory] Drizzle insertion bypassed due to offline/failed DB.');
@@ -100,13 +103,19 @@ export class LongMemory {
     // 2. [画像大模型研判]：注入多模态画像提取 Prompts，输出极致规整的 JSONB 标签
     const llm = getLLM();
     const systemPrompt = `
-你是一位世界级的消费者行为学家与尺码换算专家。你的职责是通过分析【用户最新的对话细节】与【历史购买流水】，提炼出符合该用户特征的个性化消费画像标签。
+你是一位世界级的消费者行为学家与尺码换算专家。你的职责是通过分析【用户最新的对话细节】与【历史购买流水】，提炼出符合该用户特征的个性化消费画像标签并进行置信度（Confidence）评估。
 
 [CRITICAL INSTRUCTIONS]:
 请不要生成任何解释性废话。你必须只输出一个合规的 JSON 对象，包含以下字段：
 {
   "hasNewPreference": boolean, // 本轮对话中是否展现出任何新的、值得记录的尺码偏好、颜色偏好或避雷标签？
-  "extractedFacts": string[] // 非结构化偏好事实描述列表。例如: ["用户上衣尺码为 L 码", "用户鞋子尺码为 42.5 码", "用户对羊毛材质过敏，皮肤刺痒", "Nike跑鞋偏小，需买大一码"]
+  "extractedFacts": [
+    {
+      "fact": string, // 非结构化偏好事实描述。例如: "用户上衣尺码为 L 码", "用户鞋子尺码为 42.5 码"
+      "confidence": number, // 置信度评分 (0.0 - 1.0)。如果用户明确口头告知，置信度设为 0.90 - 1.00；如果通过购买历史推断，设为 0.70 - 0.85；如果是模糊语境推断，设为 0.50 - 0.69
+      "source": string // 画像数据来源描述。例如 "user_direct_statement" (用户直接表述), "purchase_history_inference" (购买历史推导), "contextual_inference" (语境模糊推导)
+    }
+  ]
 }
 
 注意：如果用户在聊天中提到了“长胖了衣服得穿XL”或“耐克鞋42有些挤脚下次买42.5”，或者通过 SQL 历史单据发现他大量购买了黑色运动卫衣，请敏锐地提取这些关键消费特征！
@@ -153,19 +162,38 @@ ${JSON.stringify(pastOrders, null, 2)}
 
       // 3. [非结构化偏好 RAG 落盘]：计算向量嵌入并同步落盘
       const embeddingModel = getEmbeddingModel();
-      for (const fact of auditResult.extractedFacts) {
+      for (const item of auditResult.extractedFacts) {
         try {
-          const embedding = await embeddingModel.embedQuery(fact);
+          const factText = typeof item === 'string' ? item : item.fact;
+          const confidence = typeof item === 'string' ? 1.0 : item.confidence || 1.0;
+          const source = typeof item === 'string' ? 'agent_audit_legacy' : item.source || 'agent_audit';
+
+          // 🧠 画像置信度过滤硬性红线（High/Mid Threshold Routing）：
+          // 1. 置信度 >= 0.85 的高级画像，直接赋予 'approved' 状态秒级投入对话生产使用。
+          // 2. 置信度在 [0.60, 0.85) 的中级画像，赋予 'pending' 状态，存入数据库但对前台 Agent 隐身，等待人工审批核签。
+          // 3. 置信度 < 0.60 的低置信度画像，直接丢弃，拦截模型幻觉。
+          if (confidence < 0.60) {
+            console.log(`[Profiler Agent Filter] 🚫 Fact low confidence (${confidence.toFixed(2)} < 0.60). Discarded: "${factText}"`);
+            continue;
+          }
+
+          const status = confidence >= 0.85 ? 'approved' : 'pending';
+          console.log(`[Profiler Agent Routing] 🎯 Fact "${factText}" rated ${confidence.toFixed(2)} confidence ➔ Routed to status [${status}]`);
+
+          const embedding = await embeddingModel.embedQuery(factText);
           const serializedEmbedding = JSON.stringify(embedding);
 
           await drizzle.insert(longMemoryFacts).values({
             userId: this.userId,
-            fact: fact,
+            fact: factText,
             embedding: serializedEmbedding,
             type: 'preference',
+            confidence: confidence,
+            status: status,
+            source: source,
             createdAt: new Date(),
           });
-          console.log(`[Profiler Agent] 偏好 RAG 事实成功写入 longMemoryFacts: "${fact}"`);
+          console.log(`[Profiler Agent] 偏好 RAG 事实成功写入 longMemoryFacts [Status: ${status}]: "${factText}"`);
         } catch (ragErr) {
           console.warn('[Profiler Agent] Failed to vectorise and store extracted fact:', ragErr);
         }
@@ -185,8 +213,9 @@ ${JSON.stringify(pastOrders, null, 2)}
     const dbInstance = getDrizzle();
     if (dbInstance) {
       try {
-        const { eq } = require('drizzle-orm');
+        const { eq, and } = require('drizzle-orm');
         // Retrieve all facts for the user and perform in-memory cosine similarity calculation in TS.
+        // 🔒 Only recall approved facts to prevent pending/rejected data leakage into the active prompt.
         const allFacts = await dbInstance
           .select({
             id: longMemoryFacts.id,
@@ -196,7 +225,12 @@ ${JSON.stringify(pastOrders, null, 2)}
             createdAt: longMemoryFacts.createdAt,
           })
           .from(longMemoryFacts)
-          .where(eq(longMemoryFacts.userId, this.userId));
+          .where(
+            and(
+              eq(longMemoryFacts.userId, this.userId),
+              eq(longMemoryFacts.status, 'approved')
+            )
+          );
 
         if (allFacts.length > 0) {
           const scoredFacts = allFacts.map((row: any) => {

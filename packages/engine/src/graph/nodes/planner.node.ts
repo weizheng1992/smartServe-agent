@@ -37,7 +37,7 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
       });
     }
 
-    return { taskPlan: directPlan };
+    return { taskPlan: directPlan, globalTransitionsCount: 1 };
   }
 
   if (state.jobId) {
@@ -151,7 +151,7 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
       });
     }
 
-    return { taskPlan, shortMemory };
+    return { taskPlan, shortMemory, globalTransitionsCount: 1 };
   } catch (err: any) {
     logger.error({ threadId: state.threadId, err }, 'plannerNode failed, falling back to default single-step plan');
     return {
@@ -160,6 +160,7 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
         subtasks: [{ id: 'step_fallback', description: 'Address request in fallback mode', status: 'pending' }],
         currentStepIndex: 0,
       },
+      globalTransitionsCount: 1,
     };
   }
 }

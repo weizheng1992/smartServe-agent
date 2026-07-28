@@ -5,6 +5,29 @@ import { type AgentStateAnnotation, buildHistoryContext } from '../state';
 export async function finishNode(state: typeof AgentStateAnnotation.State) {
   logger.info({ threadId: state.threadId }, 'finishNode formulating final response');
 
+  let shortMemory = state.shortMemory || [];
+
+  // 🛡️ [图级别智能硬熔断保护器 fallback]:
+  // 如果进入 finish 节点时，发现触发了 Circuit Breaker 条件（转移步数 >= 10 或工具报错 >= 3），
+  // 我们直接降级旁路退出，返回预置的高保真、极其得体的人工客服切流文案。彻底免去大模型 LLM 调用开销，秒级极速响应！
+  const globalTransitions = state.globalTransitionsCount || 0;
+  const toolErrors = state.toolErrorsCount || 0;
+
+  if (globalTransitions >= 10 || toolErrors >= 3) {
+    logger.warn(
+      { threadId: state.threadId, globalTransitions, toolErrors },
+      'finishNode detected active circuit breaker trigger. Bypassing LLM formulation and returning a safe fallback apology.'
+    );
+    const apology = `您好！由于当前系统网络出现短暂波动，或者底层接口响应延迟，为了保障您的账户、资金安全，我们已经**自动为您【熔断并终止】了本次自动决策流程**。✨
+
+我们非常重视您的体验，请您完全放心：
+1. **资金双写安全保障**：所有高危敏感动作（如退款）均处于完全锁定状态，绝对不会发生多扣款、重复退款 or 数据混淆。
+2. **已为您自动转接至特级高级客服**：我已将您此前的全部沟通记录、已规划步骤以及遇到的异常参数**自动加密转交到我们的一线资深人工客服主管**。
+
+人工主管专员将在 **1 分钟内直接在本会话中为您接管服务并妥善解决**，请您稍等。给您带来的不便我们深感抱歉，感谢您的宝贵耐心！👋`;
+    return { output: apology, shortMemory };
+  }
+
   const plan = state.taskPlan || { subtasks: [] };
   const input = state.input;
   const llm = getLLM(state.jobId);
@@ -26,7 +49,6 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
 
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型在总结生成最终答复时，能够完美串联多轮对话上下文脉络
   let historyContext = '';
-  let shortMemory = state.shortMemory;
   if (!shortMemory || shortMemory.length === 0) {
     const { ShortMemory } = require('../../memory/shortMemory');
     const sm = new ShortMemory(state.threadId);

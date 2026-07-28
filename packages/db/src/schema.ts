@@ -88,6 +88,9 @@ export const longMemoryFacts = pgTable('long_memory_facts', {
   fact: text('fact').notNull(), // "用户是前端工程师"
   embedding: text('embedding'),
   type: text('type').default('fact'), // fact / preference / instruction
+  confidence: real('confidence').default(1.0), // 智能画像提取置信度评分 (0.0 - 1.0)
+  status: text('status').default('approved'), // 状态: approved (已核准) / pending (待核准) / rejected (已驳回)
+  source: text('source').default('regex_fallback'), // 事实发现来源渠道
   createdAt: timestamp('created_at').defaultNow(),
   lastUsedAt: timestamp('last_used_at'), // 用于遗忘策略/权重衰减
 });
