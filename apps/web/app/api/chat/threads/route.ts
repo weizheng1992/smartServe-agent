@@ -33,3 +33,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const threadId = searchParams.get('threadId');
+
+    if (!threadId) {
+      return NextResponse.json({ success: false, error: 'threadId is required' }, { status: 400 });
+    }
+
+    const success = await db.deleteThread(threadId);
+    return NextResponse.json({ success, threadId });
+  } catch (err: any) {
+    console.error('[API Delete Thread Error]:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}

@@ -18,6 +18,7 @@ import {
   Send,
   Shield,
   Sparkles,
+  Trash2,
   User,
   X,
   XCircle,
@@ -381,6 +382,42 @@ export default function Home() {
       }
     } catch (err) {
       console.error('[Create Thread Error]:', err);
+    }
+  };
+
+  // Delete a chat session thread cascade style!
+  const handleDeleteThread = async (e: React.MouseEvent, threadIdToDelete: string) => {
+    e.stopPropagation(); // Prevent choosing this thread upon deleting
+    if (isSubmitting) return;
+
+    const confirmDelete = window.confirm(
+      '⚠️ 您确定要彻底删除该会话吗？\n该操作将物理抹除该会话下的所有聊天消息、审核单据、日志度量等关联记录，不可撤销！',
+    );
+    if (!confirmDelete) return;
+
+    try {
+      const res = await fetch(`/api/chat/threads?threadId=${threadIdToDelete}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setThreads((prev) => prev.filter((t) => t.id !== threadIdToDelete));
+
+        // If active thread got deleted, fall back to another one
+        if (activeThreadId === threadIdToDelete) {
+          const remainingThreads = threads.filter((t) => t.id !== threadIdToDelete);
+          if (remainingThreads.length > 0) {
+            setActiveThreadId(remainingThreads[0].id);
+          } else {
+            setActiveThreadId('');
+          }
+        }
+      } else {
+        alert(`删除失败: ${data.error || '未知数据库错误'}`);
+      }
+    } catch (err: any) {
+      console.error('[Delete Thread Client Error]:', err);
+      alert(`删除出错: ${err.message || '网络连接故障'}`);
     }
   };
 
@@ -754,34 +791,46 @@ export default function Home() {
                     if (isSubmitting) return;
                     setActiveThreadId(t.id);
                   }}
-                  className={`w-full text-left p-3 rounded-xl flex items-center gap-2.5 transition group border ${
+                  className={`w-full text-left p-3 rounded-xl flex items-center justify-between gap-2.5 transition group border ${
                     isActive
                       ? 'bg-indigo-600/10 border-indigo-500/30 text-indigo-200 font-medium'
                       : 'bg-transparent border-transparent text-slate-400 hover:bg-slate-950/30 hover:border-slate-800 hover:text-slate-200'
                   }`}
                 >
-                  <MessageSquare
-                    className={`h-4.5 w-4.5 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-600 group-hover:text-slate-400'}`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs truncate font-mono tracking-tight">{t.id}</p>
-                    <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
-                      <span className="font-mono">
-                        {friendlyDate} {friendlyTime}
-                      </span>
-                      <span
-                        className={`px-1.5 py-0.2 rounded text-[8px] font-bold uppercase tracking-wider ${
-                          t.businessId === 'nike'
-                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/10'
-                            : t.businessId === 'adidas'
-                              ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/10'
-                              : 'bg-slate-500/10 text-slate-400 border border-slate-800'
-                        }`}
-                      >
-                        {t.businessId === 'nike' ? 'Nike' : t.businessId === 'adidas' ? 'Adidas' : '主站'}
-                      </span>
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <MessageSquare
+                      className={`h-4.5 w-4.5 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-600 group-hover:text-slate-400'}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs truncate font-mono tracking-tight">{t.id}</p>
+                      <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
+                        <span className="font-mono">
+                          {friendlyDate} {friendlyTime}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[8px] font-bold uppercase tracking-wider ${
+                            t.businessId === 'nike'
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/10'
+                              : t.businessId === 'adidas'
+                                ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/10'
+                                : 'bg-slate-500/10 text-slate-400 border border-slate-800'
+                          }`}
+                        >
+                          {t.businessId === 'nike' ? 'Nike' : t.businessId === 'adidas' ? 'Adidas' : '主站'}
+                        </span>
+                      </div>
                     </div>
                   </div>
+
+                  {/* Delete button, shows up on hover */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteThread(e, t.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition shrink-0"
+                    title="删除会话"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
                 </button>
               );
             })

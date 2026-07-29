@@ -603,6 +603,12 @@ function getPgPool(): Pool {
 
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
+    // If we are in build/compilation phase, return a dummy pool to prevent compiler crash
+    if (process.env.NODE_ENV === 'production' || process.env.NEXT_PHASE === 'phase-production-build') {
+      console.warn('[DB Build Warning] DATABASE_URL is missing during compilation build phase. Providing mock pool.');
+      pgPool = new Pool();
+      return pgPool;
+    }
     throw new Error(
       '❌ [DATABASE ERROR] DATABASE_URL is not configured! Real PostgreSQL database is strictly required.',
     );
@@ -664,6 +670,7 @@ export interface DBInterface {
   findOrCreateUserByEmail: (email: string) => Promise<{ id: string; email: string }>;
   getUserThreads: (userId: string) => Promise<DBThread[]>;
   createThread: (threadId: string, userId: string, businessId?: string) => Promise<DBThread>;
+  deleteThread: (threadId: string) => Promise<boolean>;
 }
 
 async function resolveAndEnsurePgUserId(pool: any, userId: string): Promise<string> {
@@ -915,6 +922,38 @@ export const db: DBInterface = {
     } catch (e) {
       console.error('[DB] execute failed:', e);
       return { rows: [] };
+    }
+  },
+
+  deleteThread: async (threadId: string): Promise<boolean> => {
+    const pool = getPgPool();
+    try {
+      // 1. Cascade delete dependent tables first due to FK constraints
+      await pool.query('DELETE FROM messages WHERE thread_id = $1', [threadId]);
+      await pool.query('DELETE FROM pending_approvals WHERE thread_id = $1', [threadId]);
+      await pool.query('DELETE FROM session_metrics WHERE thread_id = $1', [threadId]);
+      await pool.query('DELETE FROM task_memory WHERE thread_id = $1', [threadId]);
+      await pool.query('DELETE FROM episodic_events WHERE thread_id = $1', [threadId]);
+      await pool.query('DELETE FROM agent_jobs WHERE thread_id = $1', [threadId]);
+      await pool.query('DELETE FROM intent_logs WHERE thread_id = $1', [threadId]);
+      await pool.query('DELETE FROM low_confidence_logs WHERE thread_id = $1', [threadId]);
+
+      // 2. Delete the thread itself
+      const res = await pool.query('DELETE FROM threads WHERE id = $1', [threadId]);
+
+      // 3. Keep memoryDb emulator state cleanly in sync
+      memoryDb.threads.delete(threadId);
+      memoryDb.messages = memoryDb.messages.filter((m) => m.thread_id !== threadId);
+      memoryDb.pendingApprovals = memoryDb.pendingApprovals.filter(
+        (a) => a.threadId !== threadId && a.thread_id !== threadId,
+      );
+
+      return (res.rowCount ?? 0) > 0;
+    } catch (err) {
+      console.error('[DB Delete Thread PG Error]:', err);
+      // Fallback local memory sync even if physical query failed
+      memoryDb.threads.delete(threadId);
+      return false;
     }
   },
 };
