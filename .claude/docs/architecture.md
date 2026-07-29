@@ -241,3 +241,58 @@
 ### 💡 架构解析：
 * **Playwright 真实浏览器旅程**：在测试前自动调起本地 `bun run dev`，通过真实的 Chromium/Firefox 无头浏览器模拟客服与用户，验证 API Session 隔离、实时 SSE 广播流解析等全链路渲染正常。
 * **Promptfoo 质量回归防护**：使用 `select-json` 与自定义 `javascript` 条件表达式，自动化判定在 Prompt 优化更新后，Triage 模型是否依旧能精准划分意图，Planner 模型在面对恶意欺骗/防注入攻击（Jailbreak）时是否依旧坚守 waiting 审核红线，保障模型逻辑的高度鲁棒。
+
+---
+
+## 3.16 🚀 新增：Monorepo 公共 UI 共享原语与轻量化 SVG 矢量图标包 (packages/ui)
+
+为了跨应用保持界面高还原度一致性，我们完全打破了跨项目相对路径 CSS 引入受限的问题，重构构建了私有的 Monorepo 物理共享包。
+
+### 📂 核心文件：
+1. **共享 UI 模块**：`packages/ui/`
+2. **轻量 SVG 图标包**：`packages/ui/src/components/icons.tsx`
+3. **主站依赖配置**：`apps/web/package.json`
+4. **管理端依赖配置**：`apps/admin/package.json`
+
+### 💡 架构解析：
+* **彻底卸载 `lucide-react`**：原框架中引入的整个 Lucide 图标组件库造成严重的打包树摇（Tree Shaking）异常、极高的浏览器编译耗时与体积膨胀。我们在 `icons.tsx` 中手动复刻并导出 27 个极简、全矢量的 SVG 渲染图标原语，将首屏图标加载时延物理降为零。
+* **Tailwind CSS 跨应用沙箱集成**：Next.js 禁止直接跨 workspace 引用全局 CSS 文件。我们在各应用（Web/Admin）的根节点保持相对隔离 of CSS 主文件，并在其内部通过 `@import "tailwindcss";` 结合共享 UI 库对组件进行原子样式装配，确保视觉和功能 100% 对齐。
+
+---
+
+## 3.17 🚀 新增：Next.js 反向代理转发中台（Admin Port Rewrite Proxy）
+
+在开发环境下，由于 3000（Web App）与 3001（Admin Dashboard）处于不同物理端口，直接请求会产生复杂的跨域（CORS）限制。
+
+### 📂 核心文件：
+* **反向代理网关**：`apps/admin/next.config.js`
+
+### 💡 架构解析：
+* **双向透明 Rewrites 代理**：管理端后台在 Next.js 的路由层内物理配置了 `rewrites` 代理重写。所有发送至 `http://localhost:3001/api/*` 的流量会被 Next.js 底层核心引擎透明、安全、极速地代理转发至主服务 `http://localhost:3000/api/*`，免去了重复编写 API controller，100% 杜绝跨域预检请求（Preflight）的 404 崩溃。
+
+---
+
+## 3.18 🚀 新增：物理订单防篡改 Grounding 数据安全核验机制 (Anti-Tampering Financial Gate)
+
+在人机协同（HITL）流程中，传统 LLM Agent 仅仅依赖模型抽取的 args 参数作为退款拦截的准绳，容易遭受客户端注入、参数非法篡改，从而突破审批门槛。
+
+### 📂 核心文件：
+* **决策图执行器**：`packages/engine/src/graph/nodes/executor.node.ts`
+
+### 💡 架构解析：
+* **安全核发 Grounding 核实**：在触发 `processRefund` 物理拦截卡点前，Executor 不再盲目信任大模型解析出的 amount。如果订单存在，系统会直接穿透并连物理 PostgreSQL 数据库，执行 `SELECT total_amount FROM orders WHERE order_id = $1` 反查真实订单的实付金额进行数据真伪校验（Data Grounding），以此金额作为安全退款额度。
+* **多租户 innerJoin 查询**：在 `/api/chat/approvals` 的 GET 接口中，通过 Drizzle 对 `pending_approvals` 和 `threads` 进行 `innerJoin` 操作，安全、物理地绑定所属商户标签（`businessId`），让管理端及统计大盘 100% 隔离和核实待审核记录，杜绝 SaaS 越权安全盲区。
+* **UUIDv4 格式物理强制约束**：将审批工单原先的自定义前缀（如 `appr_...`）生成重构为基于 `node:crypto.randomUUID()` 的标准 RFC 4122 UUIDv4 字符串，彻底解决了在 Postgres 物理表 UUID 强类型主键字段插入时的格式语法崩溃。
+
+---
+
+## 3.19 🚀 新增：HITL 敏捷审批状态同步与前端防断档感知器 (Approvals State Sensor)
+
+解决因人工审批完成与用户当前浏览器状态脱节，导致的会话“卡死”或不得不“开辟全新会话”从而发生对话拆分、断档分裂的 UX 致命短板。
+
+### 📂 核心文件：
+* **智能客服主屏**：`apps/web/app/page.tsx`
+
+### 💡 架构解析：
+* **敏捷同步检测器 (State Sync Detector)**：前端主屏建立了一个轻量、每 2s 极速轮询的审批工单感知器。它通过 `lastApprovalsStateRef` 缓存上一次轮询的工单状态，当感应到属于当前 `activeThreadId` 的工单其状态从 `waiting` 变为 `approved` / `rejected` 等完结状态时，立即在后台物理激活 `loadHistory()` 与 `fetchThreads()`。
+* **物理无感会话连贯**：此机制保证了管理员在 3001 端口大盘点击“核准通过”或“拒绝驳回”时，用户的 3000 端口主对话屏幕立刻、无缝地载入刚刚决策流向下执行的工具最新输出，彻底消除了由于“会话看起来卡住”导致用户主动开新窗口、开启新对话，导致会话分裂的体验顽疾，将多轮 HITL 对话物理完美串联在同一个会话窗口中。

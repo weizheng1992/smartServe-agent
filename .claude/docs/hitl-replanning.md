@@ -105,7 +105,8 @@
     if (!latestApproval || latestApproval.status === 'waiting') {
       let approvalId = latestApproval?.id;
       if (!latestApproval) {
-        approvalId = `appr_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        // 🔒 使用标准 RFC 4122 UUIDv4 替换 appr_... 自定义前缀，100% 避免 PostgreSQL UUID 强类型字段写入崩溃
+        approvalId = require('node:crypto').randomUUID();
         // 自动落盘插入一条物理工单，状态为 waiting，设置 24 小时超时
         await drizzle.insert(pendingApprovals).values({
           id: approvalId,
