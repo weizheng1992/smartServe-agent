@@ -131,6 +131,7 @@ export default function Home() {
   const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null);
   const [auditFilter, setAuditFilter] = useState<'ALL' | 'WAITING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'>('WAITING');
   const lastApprovalsStateRef = useRef<Record<string, string>>({});
+  const syncPollCountRef = useRef<number>(0);
 
   // 1. Read initial threadId from URL search parameters on page mount
   useEffect(() => {
@@ -209,6 +210,9 @@ export default function Home() {
 
   // 3. 周期性轮询获取与当前 ThreadID 相关且未审批的工单，并安全检测人机审核流程恢复
   useEffect(() => {
+    // 切换会话时，安全重置多轮静默同步计数器，防止历史残留跨会话触发
+    syncPollCountRef.current = 0;
+
     const fetchApprovals = async () => {
       try {
         const res = await fetch('/api/chat/approvals');
@@ -223,7 +227,7 @@ export default function Home() {
 
             // 🧠 审批流防脱节自动载入感应器：
             // 如果上一次状态记录中存在该 thread 的某个工单且状态为 waiting，而新拉取的数据中该工单状态变为了 approved / rejected / cancelled / expired，
-            // 说明该审批任务刚刚获得了决策解决。我们静默调用 loadHistory 与 fetchThreads 更新消息历史和 sidebar，确保对话连贯、防断档分裂！
+            // 说明该审批任务刚刚获得了决策解决。我们将触发连续 6 次的多轮高灵敏轮询，确保在后台 Agent（约耗时 2-5s）执行完结并写盘后，物理刷新出最新的最终消息！
             let stateChanged = false;
             const currentStatuses: Record<string, string> = {};
 
@@ -243,7 +247,13 @@ export default function Home() {
             };
 
             if (stateChanged) {
-              console.log('[HITL Sync Detector] 🩺 Detected active thread approval status change! Silent reloading messages & threads.');
+              console.log('[HITL Sync Detector] 🩺 Detected active thread approval status change! Initiating multi-turn polling (6 turns) to wait for agent response.');
+              syncPollCountRef.current = 6; // 连续 6 次（共 12 秒）高敏捷静默刷新
+              loadHistory(activeThreadId);
+              fetchThreads();
+            } else if (syncPollCountRef.current > 0) {
+              syncPollCountRef.current -= 1;
+              console.log(`[HITL Sync Detector] ⏳ Continuing multi-turn polling. Remaining turns: ${syncPollCountRef.current}`);
               loadHistory(activeThreadId);
               fetchThreads();
             }
