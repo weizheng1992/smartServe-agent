@@ -69,6 +69,21 @@ interface ChatThread {
   updatedAt: string;
 }
 
+// Safely format timestamps into MM-DD HH:mm format without hydration mismatches or invalid parsing
+const formatFriendlyDate = (dateStr: any) => {
+  if (!dateStr) return '未知时间';
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '未知时间';
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const month = pad(d.getMonth() + 1);
+  const date = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+
+  return `${month}-${date} ${hours}:${minutes}`;
+};
+
 export default function Home() {
   const router = useRouter();
 
@@ -779,19 +794,16 @@ export default function Home() {
           ) : (
             threads.map((t) => {
               const isActive = t.id === activeThreadId;
-              const dateObj = new Date(t.createdAt);
-              const friendlyTime = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              const friendlyDate = dateObj.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
 
               return (
-                <button
-                  type="button"
+                // biome-ignore lint/a11y/useKeyWithClickEvents: Thread card is clickable for chat switching
+                <div
                   key={t.id}
                   onClick={() => {
                     if (isSubmitting) return;
                     setActiveThreadId(t.id);
                   }}
-                  className={`w-full text-left p-3 rounded-xl flex items-center justify-between gap-2.5 transition group border ${
+                  className={`w-full text-left p-3 rounded-xl flex items-center justify-between gap-2.5 transition group border cursor-pointer ${
                     isActive
                       ? 'bg-indigo-600/10 border-indigo-500/30 text-indigo-200 font-medium'
                       : 'bg-transparent border-transparent text-slate-400 hover:bg-slate-950/30 hover:border-slate-800 hover:text-slate-200'
@@ -804,9 +816,7 @@ export default function Home() {
                     <div className="min-w-0 flex-1">
                       <p className="text-xs truncate font-mono tracking-tight">{t.id}</p>
                       <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
-                        <span className="font-mono">
-                          {friendlyDate} {friendlyTime}
-                        </span>
+                        <span className="font-mono">{formatFriendlyDate(t.createdAt)}</span>
                         <span
                           className={`px-1.5 py-0.2 rounded text-[8px] font-bold uppercase tracking-wider ${
                             t.businessId === 'nike'
@@ -831,7 +841,7 @@ export default function Home() {
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
-                </button>
+                </div>
               );
             })
           )}
