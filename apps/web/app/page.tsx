@@ -27,7 +27,6 @@ import {
   MessageSquare,
   Plus,
   RefreshCw,
-  ScrollArea,
   Send,
   Shield,
   Sparkles,
@@ -945,7 +944,7 @@ export default function Home() {
               </header>
 
               {/* Messaging Area */}
-              <ScrollArea className="flex-1 p-6">
+              <div className="flex-1 overflow-y-auto p-6 min-h-0">
                 <div className="max-w-3xl mx-auto space-y-6 pb-28">
                   {messages.map((m, idx) => (
                     <div key={idx} className={`flex gap-4 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -1118,7 +1117,7 @@ export default function Home() {
                   {/* 🌟 历史消息底座锚点：配合 useEffect 物理高稳定滚动对齐 */}
                   <div ref={messagesEndRef} />
                 </div>
-              </ScrollArea>
+              </div>
 
               {/* Input area */}
               <div className="p-4 border-t border-slate-800 bg-slate-900/40 backdrop-blur-sm absolute bottom-0 left-0 right-0 z-10">
@@ -1154,9 +1153,9 @@ export default function Home() {
             </main>
 
             {/* Right Execution Detail Logging Panel */}
-            <section className="w-full md:w-96 bg-slate-900/50 p-6 flex flex-col justify-between border-t md:border-t-0 border-slate-800 overflow-y-auto">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
+            <section className="w-full md:w-96 bg-slate-900/50 p-6 flex flex-col justify-between border-t md:border-t-0 border-slate-800 overflow-hidden">
+              <div className="space-y-6 flex-1 flex flex-col min-h-0 mb-4">
+                <div className="flex items-center justify-between shrink-0">
                   <div className="flex items-center space-x-2">
                     <Cpu className="h-4.5 w-4.5 text-indigo-400 animate-spin-slow shrink-0" />
                     <h2 className="text-sm font-bold tracking-wider text-slate-200 uppercase">
@@ -1173,7 +1172,7 @@ export default function Home() {
                   )}
                 </div>
 
-                <ScrollArea className="h-[70vh] pr-2">
+                <div className="flex-1 overflow-y-auto pr-2 min-h-0">
                   <div className="space-y-4">
                     {/* 🛡️ HUMAN-IN-THE-LOOP (HITL) 人工授权核准/模拟后台审批面板 */}
                     {pendingApprovalsList.length > 0 && (
@@ -1314,7 +1313,7 @@ export default function Home() {
                       </Card>
                     )}
                   </div>
-                </ScrollArea>
+                </div>
               </div>
 
               <div className="pt-4 border-t border-slate-800 space-y-3.5">

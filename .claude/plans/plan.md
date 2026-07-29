@@ -1,36 +1,19 @@
-# Implementation Plan - Human-in-the-Loop Conversation Split and Sync Timing Fix
+# Implementation Plan - Restoring Container Scrollability and Styles
 
-## 1. Problem Description & Root Cause
-In the multi-tenant SaaS customer support control panel:
-- When a refund is requested, the system suspends execution for administrator approval.
-- When an admin on port 3001 approves the refund, the backend database updates the approval status to `approved` and launches `runAgent` in the background (non-blocking) to finish the execution and write the final response.
-- The user's screen on port 3000 polls `/api/chat/approvals` every 2 seconds. When it detects a status change (e.g., `waiting` -> `approved`), it triggers `loadHistory(activeThreadId)` to fetch the updated messages.
-- **The Timing Race Condition**: Because `runAgent` takes 2–5 seconds to run (calling LLMs, processing the refund, formulating the final response), the frontend's single-turn fetch of message history occurs *before* the new message is physically written.
-- Since the status change is only detected once, the frontend never re-fetches history again. The screen remains stuck showing the old history and a spinner.
-- Users click "开启新一轮对话" (Start new conversation) or switch merchants out of confusion, splitting the conversation across multiple threads.
+To resolve container-level rendering and scrolling bugs inside the chat window and the APM monitor sidebar, we will:
 
----
+1. **Revert the global shared ScrollArea component** back to its original implementation. Changing global components can break layout assumptions elsewhere.
+2. **Replace ScrollArea in the main chat area with a native `div` using Tailwind CSS flexbox constraints (`flex-1 overflow-y-auto p-6 min-h-0`)**. This guarantees vertical scrolling, protects against browser box model height lock-ups, and is fully compatible with standard `scrollIntoView()` on our messages end anchor.
+3. **Refactor the right-side execution trace panel (`section`)** to avoid double scrollbars and ensure pixel-perfect scrollability on all screens:
+   - Change `overflow-y-auto` to `overflow-hidden` on the outer `section` container.
+   - Convert `<div className="space-y-6">` into a dynamic flexbox layout: `space-y-6 flex-1 flex flex-col min-h-0 mb-4`.
+   - Prevent the header elements from shrinking with `shrink-0`.
+   - Replace `<ScrollArea className="h-[70vh] pr-2">` with `<div className="flex-1 overflow-y-auto pr-2 min-h-0">` to allow dynamic native vertical scrolling.
+   - Retain the bottom status/billing card anchored perfectly at the bottom of the section.
 
-## 2. Solution Design
-We will introduce a **Multi-Turn State Sync Polling Sensor** in the React state:
-- Declare a mutable ref `syncPollCountRef = useRef<number>(0)` inside the `Home` component in `apps/web/app/page.tsx`.
-- When the 2-second interval poller detects a state transition (`stateChanged === true` from `waiting` to a complete status):
-  - Set `syncPollCountRef.current = 6;` (triggering 6 consecutive polls over the next 12 seconds).
-  - Call `loadHistory(activeThreadId)` and `fetchThreads()` immediately.
-- If `stateChanged` is false, but `syncPollCountRef.current > 0`:
-  - Decrement `syncPollCountRef.current -= 1`.
-  - Print a log: `[HITL Sync Detector] ⏳ Continuing silent reload of messages and threads. Remaining polls: {syncPollCountRef.current}`.
-  - Call `loadHistory(activeThreadId)` and `fetchThreads()`.
-- On thread selection changes, reset `syncPollCountRef.current = 0` to prevent cross-thread polling leaks.
+## Verification Checklist
 
----
-
-## 3. Implementation Steps
-### Step 1: Update `apps/web/app/page.tsx`
-- Add `const syncPollCountRef = useRef<number>(0);` inside `Home` component.
-- Update the approvals `useEffect` hook to implement the decremental polling ref.
-- Reset the ref when `activeThreadId` changes.
-
-### Step 2: Verification
-- Build and run workspace services.
-- Verify thread sync flow behaves smoothly without any timing gaps.
+- [ ] Revert `packages/ui/src/components/ui/scroll-area.tsx` and verify correct syntax.
+- [ ] Replace `ScrollArea` with native `div` in main chat area in `apps/web/app/page.tsx`.
+- [ ] Refactor Right Execution Detail Logging Panel to use native flexbox scrolling instead of h-[70vh] ScrollArea.
+- [ ] Run linter `bun run lint` to verify everything compiles cleanly without any errors.
