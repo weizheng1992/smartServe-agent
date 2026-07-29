@@ -752,6 +752,12 @@ export const db: DBInterface = {
       }
     }
 
+    if (memoryDb.threads.has(threadId)) {
+      // 🛡️ [FakePool Sim ON CONFLICT DO NOTHING]
+      // If thread already exists, preserve its current businessId and return it instead of overwriting!
+      return { ...memoryDb.threads.get(threadId)! };
+    }
+
     const newThread = {
       id: threadId,
       userId,
@@ -761,7 +767,7 @@ export const db: DBInterface = {
       updatedAt: new Date().toISOString(),
     };
     memoryDb.threads.set(threadId, newThread);
-    console.log(`[DB Thread] Created new session thread ${threadId} for user ${userId}`);
+    console.log(`[DB Thread] Created new session thread ${threadId} for user ${userId} with businessId ${activeBusinessId}`);
     return { ...newThread };
   },
 

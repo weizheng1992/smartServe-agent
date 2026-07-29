@@ -248,36 +248,6 @@ export default function Home() {
           } else {
             setActiveThreadId(data.threads[0].id);
           }
-        } else {
-          // If no thread exists, automatically create a new unique one on first entry!
-          console.log(
-            '[Auto-Create Thread] No threads found for current user, generating a fresh unique session thread...',
-          );
-          const newThreadId =
-            typeof crypto !== 'undefined' && crypto.randomUUID
-              ? crypto.randomUUID()
-              : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-          const createRes = await fetch('/api/chat/threads', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: currentUser.id, threadId: newThreadId }),
-          });
-          const createData = await createRes.json();
-          if (createData.success) {
-            const newThreadItem: ChatThread = {
-              id: newThreadId,
-              userId: currentUser.id,
-              businessId: 'ecommerce',
-              status: 'active',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            setThreads([newThreadItem]);
-            setActiveThreadId(newThreadId);
-            setRunningDetails([]);
-            setActivePlan(null);
-            setCurrentStepText('');
-          }
         }
       }
     } catch (err) {
