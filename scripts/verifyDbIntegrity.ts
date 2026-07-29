@@ -1,4 +1,4 @@
-import { db, getDrizzle } from 'db';
+import { db, getDrizzle } from '../packages/db/src/index';
 
 async function verifyDbIntegrity() {
   console.log('=====================================================');

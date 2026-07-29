@@ -239,7 +239,7 @@ export class ContextualRAG {
         // Double-verification at the application runtime layer to enforce strict tenant boundary
         if (row.businessId !== this.businessId) {
           console.error(
-            `[SECURITY ALERT] 🛑 MULTI-TENANT LEAK PREVENTED! Document [ID: ${row.id}] has tenant [${row.businessId}] but search query belongs to [${this.businessId}]. Skipping immediately!`
+            `[SECURITY ALERT] 🛑 MULTI-TENANT LEAK PREVENTED! Document [ID: ${row.id}] has tenant [${row.businessId}] but search query belongs to [${this.businessId}]. Skipping immediately!`,
           );
           continue;
         }
@@ -361,7 +361,7 @@ export class ContextualRAG {
     const filtered = fakeData.filter((d) => {
       if (d.businessId !== this.businessId) {
         console.error(
-          `[SECURITY ALERT] 🛑 MULTI-TENANT LEAK PREVENTED (MOCK)! Document [ID: ${d.id}] has tenant [${d.businessId}] but search query belongs to [${this.businessId}].`
+          `[SECURITY ALERT] 🛑 MULTI-TENANT LEAK PREVENTED (MOCK)! Document [ID: ${d.id}] has tenant [${d.businessId}] but search query belongs to [${this.businessId}].`,
         );
         return false;
       }

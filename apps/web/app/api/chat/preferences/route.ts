@@ -71,10 +71,7 @@ export async function POST(req: NextRequest) {
       nextStatus = 'approved';
     }
 
-    await drizzle
-      .update(longMemoryFacts)
-      .set({ status: nextStatus })
-      .where(eq(longMemoryFacts.id, preferenceId));
+    await drizzle.update(longMemoryFacts).set({ status: nextStatus }).where(eq(longMemoryFacts.id, preferenceId));
 
     console.log(`[Admin Preference API] 🔒 画像事实核签完成：ID: ${preferenceId} ➔ 状态变更为: [${nextStatus}]`);
 

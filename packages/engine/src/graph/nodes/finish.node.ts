@@ -16,7 +16,7 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   if (globalTransitions >= 10 || toolErrors >= 3) {
     logger.warn(
       { threadId: state.threadId, globalTransitions, toolErrors },
-      'finishNode detected active circuit breaker trigger. Bypassing LLM formulation and returning a safe fallback apology.'
+      'finishNode detected active circuit breaker trigger. Bypassing LLM formulation and returning a safe fallback apology.',
     );
     const apology = `您好！由于当前系统网络出现短暂波动，或者底层接口响应延迟，为了保障您的账户、资金安全，我们已经**自动为您【熔断并终止】了本次自动决策流程**。✨
 

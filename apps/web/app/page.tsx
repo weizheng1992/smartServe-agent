@@ -278,7 +278,9 @@ export default function Home() {
               });
               const checkData = await checkRes.json();
               if (checkData.success && checkData.user && checkData.user.id !== parsedUser.id) {
-                console.log(`[Session Self-Healing] 🩺 检测到用户 UUID 发生漂移 (原: ${parsedUser.id} ➔ 新: ${checkData.user.id})，启动静默自愈校准！`);
+                console.log(
+                  `[Session Self-Healing] 🩺 检测到用户 UUID 发生漂移 (原: ${parsedUser.id} ➔ 新: ${checkData.user.id})，启动静默自愈校准！`,
+                );
                 localStorage.setItem('agent_user_session', JSON.stringify(checkData.user));
                 setCurrentUser(checkData.user);
               }
@@ -286,7 +288,6 @@ export default function Home() {
               console.warn('[Session Self-Healing] Silent validation failed:', err);
             }
           })();
-
         } catch (e) {
           localStorage.removeItem('agent_user_session');
           router.push('/login');
@@ -768,13 +769,15 @@ export default function Home() {
                       <span className="font-mono">
                         {friendlyDate} {friendlyTime}
                       </span>
-                      <span className={`px-1.5 py-0.2 rounded text-[8px] font-bold uppercase tracking-wider ${
-                        t.businessId === 'nike'
-                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/10'
-                          : t.businessId === 'adidas'
-                            ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/10'
-                            : 'bg-slate-500/10 text-slate-400 border border-slate-800'
-                      }`}>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[8px] font-bold uppercase tracking-wider ${
+                          t.businessId === 'nike'
+                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/10'
+                            : t.businessId === 'adidas'
+                              ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/10'
+                              : 'bg-slate-500/10 text-slate-400 border border-slate-800'
+                        }`}
+                      >
                         {t.businessId === 'nike' ? 'Nike' : t.businessId === 'adidas' ? 'Adidas' : '主站'}
                       </span>
                     </div>

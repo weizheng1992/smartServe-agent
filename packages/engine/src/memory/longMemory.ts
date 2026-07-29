@@ -172,13 +172,17 @@ ${JSON.stringify(pastOrders, null, 2)}
           // 1. 置信度 >= 0.85 的高级画像，直接赋予 'approved' 状态秒级投入对话生产使用。
           // 2. 置信度在 [0.60, 0.85) 的中级画像，赋予 'pending' 状态，存入数据库但对前台 Agent 隐身，等待人工审批核签。
           // 3. 置信度 < 0.60 的低置信度画像，直接丢弃，拦截模型幻觉。
-          if (confidence < 0.60) {
-            console.log(`[Profiler Agent Filter] 🚫 Fact low confidence (${confidence.toFixed(2)} < 0.60). Discarded: "${factText}"`);
+          if (confidence < 0.6) {
+            console.log(
+              `[Profiler Agent Filter] 🚫 Fact low confidence (${confidence.toFixed(2)} < 0.60). Discarded: "${factText}"`,
+            );
             continue;
           }
 
           const status = confidence >= 0.85 ? 'approved' : 'pending';
-          console.log(`[Profiler Agent Routing] 🎯 Fact "${factText}" rated ${confidence.toFixed(2)} confidence ➔ Routed to status [${status}]`);
+          console.log(
+            `[Profiler Agent Routing] 🎯 Fact "${factText}" rated ${confidence.toFixed(2)} confidence ➔ Routed to status [${status}]`,
+          );
 
           const embedding = await embeddingModel.embedQuery(factText);
           const serializedEmbedding = JSON.stringify(embedding);
@@ -229,12 +233,7 @@ ${JSON.stringify(pastOrders, null, 2)}
             createdAt: longMemoryFacts.createdAt,
           })
           .from(longMemoryFacts)
-          .where(
-            and(
-              eq(longMemoryFacts.userId, this.userId),
-              eq(longMemoryFacts.status, 'approved')
-            )
-          );
+          .where(and(eq(longMemoryFacts.userId, this.userId), eq(longMemoryFacts.status, 'approved')));
 
         if (allFacts.length > 0) {
           const scoredFacts = allFacts.map((row: any) => {

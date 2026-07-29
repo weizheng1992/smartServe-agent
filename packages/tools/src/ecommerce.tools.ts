@@ -534,10 +534,26 @@ export const recordUserPreference = {
 
       let serializedEmbedding: string | null = null;
       try {
-        const { getEmbeddingModel } = require('engine');
-        const embeddingModel = getEmbeddingModel();
-        const embedding = await embeddingModel.embedQuery(factText);
-        serializedEmbedding = JSON.stringify(embedding);
+        const baseURL = process.env.AI_BASE_URL || 'http://localhost:11211/api/openai/v1';
+        const apiKey = process.env.AI_API_KEY || 'dummy';
+        const modelName = process.env.AI_EMBEDDING_MODEL || 'text-embedding-005:latest';
+
+        const embedRes = await fetch(`${baseURL}/embeddings`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            input: factText,
+            model: modelName,
+          }),
+        });
+        const embedData = await embedRes.json();
+        const embedding = embedData.data?.[0]?.embedding;
+        if (embedding) {
+          serializedEmbedding = JSON.stringify(embedding);
+        }
       } catch (embErr) {
         console.warn(
           '[Record Preference Tool] Failed to generate vector embedding, falling back to direct text:',

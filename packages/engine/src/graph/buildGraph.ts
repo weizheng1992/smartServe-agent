@@ -73,7 +73,7 @@ export function buildAgentGraph() {
       if (globalTransitions >= 10 || toolErrors >= 3) {
         logger.warn(
           { threadId: state.threadId, globalTransitions, toolErrors },
-          '🛑 [CIRCUIT BREAKER TRIGGERED] Runaway loop or tool errors limit exceeded! Fusing execution to prevent API credit burn!'
+          '🛑 [CIRCUIT BREAKER TRIGGERED] Runaway loop or tool errors limit exceeded! Fusing execution to prevent API credit burn!',
         );
         return 'finish';
       }

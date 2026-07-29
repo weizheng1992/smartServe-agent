@@ -401,7 +401,8 @@ export default function AdminDashboard() {
             <div className="flex items-center space-x-2">
               <Sparkles className="h-5 w-5 text-indigo-400 animate-pulse" />
               <h2 className="text-sm font-bold tracking-wider uppercase text-slate-300">
-                🧠 智能画像专家多租户动态审计核签中心 ({preferences.filter(p => p.businessId === selectedMerchant).length})
+                🧠 智能画像专家多租户动态审计核签中心 (
+                {preferences.filter((p) => p.businessId === selectedMerchant).length})
               </h2>
             </div>
             <span className="text-[10px] font-mono text-slate-500 uppercase">SaaS Autonomous User Profile Audit</span>
@@ -411,10 +412,11 @@ export default function AdminDashboard() {
             {/* Left: Pending review cards */}
             <div className="lg:col-span-7 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">
-                ⏳ 待核签消费者事实画像 ({preferences.filter(p => p.businessId === selectedMerchant && p.status === 'pending').length})
+                ⏳ 待核签消费者事实画像 (
+                {preferences.filter((p) => p.businessId === selectedMerchant && p.status === 'pending').length})
               </h3>
 
-              {preferences.filter(p => p.businessId === selectedMerchant && p.status === 'pending').length === 0 ? (
+              {preferences.filter((p) => p.businessId === selectedMerchant && p.status === 'pending').length === 0 ? (
                 <div className="py-12 text-center text-slate-500 text-xs font-mono space-y-2">
                   <CheckCircle2 className="h-8 w-8 text-emerald-500/60 mx-auto" />
                   <p>没有待处理的置信度审计工单，全部画像已平稳运行！</p>
@@ -422,11 +424,11 @@ export default function AdminDashboard() {
               ) : (
                 <div className="space-y-3 max-h-[450px] overflow-y-auto pr-2">
                   {preferences
-                    .filter(p => p.businessId === selectedMerchant && p.status === 'pending')
+                    .filter((p) => p.businessId === selectedMerchant && p.status === 'pending')
                     .map((pref) => {
                       const pct = Math.round(pref.confidence * 100);
                       const isHigh = pref.confidence >= 0.85;
-                      const isMid = pref.confidence >= 0.60 && pref.confidence < 0.85;
+                      const isMid = pref.confidence >= 0.6 && pref.confidence < 0.85;
 
                       return (
                         <div
@@ -438,11 +440,15 @@ export default function AdminDashboard() {
                               <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded font-semibold uppercase tracking-wider">
                                 {pref.source}
                               </span>
-                              <p className="text-xs text-slate-200 font-medium leading-relaxed">&quot;{pref.fact}&quot;</p>
+                              <p className="text-xs text-slate-200 font-medium leading-relaxed">
+                                &quot;{pref.fact}&quot;
+                              </p>
                             </div>
                             {/* Confidence rating */}
                             <div className="text-right shrink-0">
-                              <span className={`text-xs font-mono font-bold ${isHigh ? 'text-emerald-400' : isMid ? 'text-amber-400' : 'text-rose-400'}`}>
+                              <span
+                                className={`text-xs font-mono font-bold ${isHigh ? 'text-emerald-400' : isMid ? 'text-amber-400' : 'text-rose-400'}`}
+                              >
                                 {pct}%
                               </span>
                               <span className="text-[9px] text-slate-500 block">置信度</span>
@@ -488,17 +494,18 @@ export default function AdminDashboard() {
             {/* Right: History & Verified lists */}
             <div className="lg:col-span-5 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">
-                ✅ 已归档/生效消费者特征 ({preferences.filter(p => p.businessId === selectedMerchant && p.status !== 'pending').length})
+                ✅ 已归档/生效消费者特征 (
+                {preferences.filter((p) => p.businessId === selectedMerchant && p.status !== 'pending').length})
               </h3>
 
               <div className="space-y-2.5 max-h-[450px] overflow-y-auto pr-2">
-                {preferences.filter(p => p.businessId === selectedMerchant && p.status !== 'pending').length === 0 ? (
+                {preferences.filter((p) => p.businessId === selectedMerchant && p.status !== 'pending').length === 0 ? (
                   <div className="py-12 text-center text-slate-500 text-xs font-mono">
                     暂无已归档生效的用户画像数据。
                   </div>
                 ) : (
                   preferences
-                    .filter(p => p.businessId === selectedMerchant && p.status !== 'pending')
+                    .filter((p) => p.businessId === selectedMerchant && p.status !== 'pending')
                     .map((pref) => {
                       return (
                         <div
