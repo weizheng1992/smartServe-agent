@@ -1,12 +1,9 @@
 'use client';
 
-import { ArrowRight, Loader2, Sparkles, XCircle } from 'lucide-react';
+import { ArrowRight, Button, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Input, Loader2, Sparkles, XCircle } from 'ui';
 import { useRouter } from 'next/navigation';
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import { Button } from '../../components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../../components/ui/card';
-import { Input } from '../../components/ui/input';
 
 export default function LoginPage() {
   const router = useRouter();

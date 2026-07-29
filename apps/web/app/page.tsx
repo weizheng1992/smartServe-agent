@@ -3,10 +3,22 @@
 import {
   Activity,
   ArrowRight,
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
   CheckCircle2,
   Clock,
   Cpu,
-  Image as ImageIcon,
+  ImageIcon,
+  Input,
   Laptop,
   Layout,
   Loader2,
@@ -15,6 +27,7 @@ import {
   MessageSquare,
   Plus,
   RefreshCw,
+  ScrollArea,
   Send,
   Shield,
   Sparkles,
@@ -22,17 +35,10 @@ import {
   User,
   X,
   XCircle,
-} from 'lucide-react';
+} from 'ui';
 import { useRouter } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-
-import { Avatar, AvatarFallback } from '../components/ui/avatar';
-import { Badge } from '../components/ui/badge';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../components/ui/card';
-import { Input } from '../components/ui/input';
-import { ScrollArea } from '../components/ui/scroll-area';
 
 interface Subtask {
   id: string;

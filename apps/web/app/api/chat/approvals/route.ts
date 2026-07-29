@@ -1,4 +1,4 @@
-import { getDrizzle, pendingApprovals } from 'db';
+import { getDrizzle, pendingApprovals, threads } from 'db';
 import { desc, eq } from 'drizzle-orm';
 import { runAgent } from 'engine';
 import { type NextRequest, NextResponse } from 'next/server';
@@ -7,11 +7,24 @@ import { redis, useRedis } from 'tools';
 // 内存后备锁集合，用于 Redis 离线或异常时的降级锁防护
 const localLocks = new Set<string>();
 
-// GET /api/chat/approvals - 获取所有挂起的审批工单
+// GET /api/chat/approvals - 获取所有挂起的审批工单（带商户关联）
 export async function GET(req: NextRequest) {
   try {
     const drizzle = getDrizzle()!;
-    const list = await drizzle.select().from(pendingApprovals).orderBy(desc(pendingApprovals.createdAt));
+    const list = await drizzle
+      .select({
+        id: pendingApprovals.id,
+        threadId: pendingApprovals.threadId,
+        actionType: pendingApprovals.actionType,
+        actionPayload: pendingApprovals.actionPayload,
+        status: pendingApprovals.status,
+        deadline: pendingApprovals.deadline,
+        createdAt: pendingApprovals.createdAt,
+        businessId: threads.businessId,
+      })
+      .from(pendingApprovals)
+      .innerJoin(threads, eq(pendingApprovals.threadId, threads.id))
+      .orderBy(desc(pendingApprovals.createdAt));
     return NextResponse.json({ success: true, approvals: list });
   } catch (error: any) {
     console.error('Error fetching approvals:', error);

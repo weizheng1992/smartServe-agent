@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import '../../web/app/layout.tsx'; // Import global CSS from web workspace to reuse styling perfectly!
+import './globals.css';
 
 export const metadata: Metadata = {
   title: 'smartServe Admin Control & Audit Center',

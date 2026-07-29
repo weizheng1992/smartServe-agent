@@ -1,10 +1,7 @@
 'use client';
 
-import { ArrowRight, Loader2, Sparkles, XCircle } from 'lucide-react';
+import { ArrowRight, Button, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Input, Loader2, Sparkles, XCircle } from 'ui';
 import type React from 'react';
-import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './ui/card';
-import { Input } from './ui/input';
 
 interface LoginCardProps {
   email: string;

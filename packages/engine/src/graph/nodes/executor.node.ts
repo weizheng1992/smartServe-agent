@@ -148,9 +148,33 @@ ${historyContext}`;
         // =====================================================================
         if (parsedToolCall.toolName === 'processRefund') {
           try {
-            // 🪙 动态限额核免：检查退款金额是否在商户动态设定的免核准限额以内
-            const refundAmountStr = parsedToolCall.args?.refundAmount || parsedToolCall.args?.amount || '99.99';
-            const refundAmount = Number.parseFloat(String(refundAmountStr).replace(/[^0-9.]/g, '')) || 99.99;
+            // 🪙 动态限额核免：优先从数据库查询真实订单的总金额进行 Grounding，防止由于参数缺失默认降级为 $99.99 越过红线限制（金融资金防泄漏）
+            const orderId = parsedToolCall.args?.orderId;
+            let refundAmount = 99.99;
+            const refundAmountStr = parsedToolCall.args?.refundAmount || parsedToolCall.args?.amount;
+
+            if (refundAmountStr) {
+              refundAmount = Number.parseFloat(String(refundAmountStr).replace(/[^0-9.]/g, '')) || 99.99;
+            } else if (orderId) {
+              try {
+                const { db: physicalDb } = require('db');
+                const oRes = await physicalDb.execute(
+                  'SELECT total_amount AS "totalAmount" FROM orders WHERE order_id = $1',
+                  [orderId]
+                );
+                if (oRes?.rows?.[0]) {
+                  const row = oRes.rows[0] as any;
+                  const dbAmt = row.totalAmount || row.total_amount;
+                  if (dbAmt) {
+                    refundAmount = Number.parseFloat(String(dbAmt).replace(/[^0-9.]/g, '')) || 99.99;
+                    console.log(`[Approval Gate] Grounded real refund amount from database for order ${orderId}: $${refundAmount}`);
+                  }
+                }
+              } catch (dbErr) {
+                console.warn('[Approval Gate] Failed to fetch real order amount from database for grounding:', dbErr);
+              }
+            }
+
             const autoApprovalLimit = state.businessConfig?.refundAutoApprovalLimit ?? 100;
             const shouldAutoApprove = refundAmount <= autoApprovalLimit;
 
@@ -235,7 +259,7 @@ ${historyContext}`;
                 // 还没有审批记录，或者处于未超时的等待中，我们进行拦截并生成待审批记录！
                 let approvalId = latestApproval?.id;
                 if (!latestApproval) {
-                  approvalId = `appr_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+                  approvalId = require('node:crypto').randomUUID();
                   const deadline = new Date(Date.now() + 24 * 3600 * 1000); // 24小时超时
 
                   await drizzle.insert(pendingApprovals).values({

@@ -2,10 +2,19 @@
 
 import {
   Activity,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
   CheckCircle2,
   Clock,
   Cpu,
   DollarSign,
+  Input,
   Laptop,
   Layers,
   Loader2,
@@ -16,7 +25,7 @@ import {
   Sparkles,
   TrendingUp,
   XCircle,
-} from 'lucide-react';
+} from 'ui';
 import { useCallback, useEffect, useState } from 'react';
 
 interface Approval {
@@ -27,6 +36,7 @@ interface Approval {
   status: 'waiting' | 'approved' | 'rejected' | 'expired' | 'cancelled';
   deadline: string;
   createdAt: string;
+  businessId?: string;
 }
 
 interface PreferenceFact {
@@ -149,9 +159,13 @@ export default function AdminDashboard() {
     }
   };
 
-  // Filter approvals that are waiting or historical
-  const pendingApprovals = approvals.filter((a) => a.status === 'waiting');
-  const auditedApprovals = approvals.filter((a) => a.status !== 'waiting');
+  // Filter approvals that are waiting or historical, matching the selected merchant
+  const pendingApprovals = approvals.filter(
+    (a) => a.status === 'waiting' && (a.businessId || 'ecommerce') === selectedMerchant
+  );
+  const auditedApprovals = approvals.filter(
+    (a) => a.status !== 'waiting' && (a.businessId || 'ecommerce') === selectedMerchant
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased">
@@ -201,68 +215,78 @@ export default function AdminDashboard() {
       <main className="p-8 max-w-7xl mx-auto space-y-8">
         {/* 📊 SaaS Telemetry BI Metrics Cards */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group">
-            <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
-              <DollarSign className="h-14 w-14 text-white" />
-            </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
-              TOTAL ACCRUED COST
-            </span>
-            <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-bold font-mono text-emerald-400">${summary.totalCostUsd.toFixed(5)}</span>
-              <span className="text-[10px] text-slate-500 font-mono">USD</span>
-            </div>
-            <span className="text-[10px] text-slate-400 block mt-1">商户算力总损耗 (Gemini 3.5)</span>
-          </div>
+          <Card className="bg-slate-900/60 border-slate-800/80 relative overflow-hidden group">
+            <CardContent className="p-5 space-y-2">
+              <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
+                <DollarSign className="h-14 w-14 text-white" />
+              </div>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
+                TOTAL ACCRUED COST
+              </span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-bold font-mono text-emerald-400">${summary.totalCostUsd.toFixed(5)}</span>
+                <span className="text-[10px] text-slate-500 font-mono">USD</span>
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-1">商户算力总损耗 (Gemini 3.5)</span>
+            </CardContent>
+          </Card>
 
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group">
-            <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
-              <Layers className="h-14 w-14 text-white" />
-            </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
-              TOTAL CONVERSATIONS
-            </span>
-            <div className="text-2xl font-bold font-mono text-indigo-400">{summary.totalSessions}</div>
-            <span className="text-[10px] text-slate-400 block mt-1">会话线程物理总数</span>
-          </div>
+          <Card className="bg-slate-900/60 border-slate-800/80 relative overflow-hidden group">
+            <CardContent className="p-5 space-y-2">
+              <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
+                <Layers className="h-14 w-14 text-white" />
+              </div>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
+                TOTAL CONVERSATIONS
+              </span>
+              <div className="text-2xl font-bold font-mono text-indigo-400">{summary.totalSessions}</div>
+              <span className="text-[10px] text-slate-400 block mt-1">会话线程物理总数</span>
+            </CardContent>
+          </Card>
 
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group">
-            <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
-              <Clock className="h-14 w-14 text-white" />
-            </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
-              AVERAGE LATENCY
-            </span>
-            <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-bold font-mono text-amber-400">{summary.avgLatencyMs}</span>
-              <span className="text-[10px] text-slate-500 font-mono">MS</span>
-            </div>
-            <span className="text-[10px] text-slate-400 block mt-1">单次对话全图决策平均耗时</span>
-          </div>
+          <Card className="bg-slate-900/60 border-slate-800/80 relative overflow-hidden group">
+            <CardContent className="p-5 space-y-2">
+              <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
+                <Clock className="h-14 w-14 text-white" />
+              </div>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
+                AVERAGE LATENCY
+              </span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-bold font-mono text-amber-400">{summary.avgLatencyMs}</span>
+                <span className="text-[10px] text-slate-500 font-mono">MS</span>
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-1">单次对话全图决策平均耗时</span>
+            </CardContent>
+          </Card>
 
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group">
-            <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
-              <Cpu className="h-14 w-14 text-white" />
-            </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
-              AVERAGE TOKENS
-            </span>
-            <div className="text-2xl font-bold font-mono text-slate-200">{summary.avgTokens}</div>
-            <span className="text-[10px] text-slate-400 block mt-1">单会话大模型 Token 平均损耗</span>
-          </div>
+          <Card className="bg-slate-900/60 border-slate-800/80 relative overflow-hidden group">
+            <CardContent className="p-5 space-y-2">
+              <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
+                <Cpu className="h-14 w-14 text-white" />
+              </div>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
+                AVERAGE TOKENS
+              </span>
+              <div className="text-2xl font-bold font-mono text-slate-200">{summary.avgTokens}</div>
+              <span className="text-[10px] text-slate-400 block mt-1">单会话大模型 Token 平均损耗</span>
+            </CardContent>
+          </Card>
 
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2 relative overflow-hidden group col-span-1 sm:col-span-2 lg:col-span-1">
-            <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
-              <TrendingUp className="h-14 w-14 text-white" />
-            </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
-              AUTOPILOT SUCCESS
-            </span>
-            <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-bold font-mono text-emerald-400">{summary.autopilotRate}%</span>
-            </div>
-            <span className="text-[10px] text-slate-400 block mt-1">AI 自主解决率 / 免审批放行比</span>
-          </div>
+          <Card className="bg-slate-900/60 border-slate-800/80 relative overflow-hidden group col-span-1 sm:col-span-2 lg:col-span-1">
+            <CardContent className="p-5 space-y-2">
+              <div className="absolute right-4 top-4 opacity-5 group-hover:opacity-10 transition">
+                <TrendingUp className="h-14 w-14 text-white" />
+              </div>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
+                AUTOPILOT SUCCESS
+              </span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-bold font-mono text-emerald-400">{summary.autopilotRate}%</span>
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-1">AI 自主解决率 / 免审批放行比</span>
+            </CardContent>
+          </Card>
         </section>
 
         {/* 🛡️ Section 1: Active Pending Approvals Queue */}
@@ -289,27 +313,31 @@ export default function AdminDashboard() {
                 const isSubmitting = submittingActionId === approval.id;
 
                 return (
-                  <div
+                  <Card
                     key={approval.id}
-                    className="bg-slate-900 border border-amber-500/30 hover:border-amber-500/50 rounded-2xl overflow-hidden shadow-xl transition-all"
+                    className="bg-slate-900 border-amber-500/30 hover:border-amber-500/50 overflow-hidden shadow-xl transition-all"
                   >
                     {/* Header */}
-                    <div className="bg-amber-500/10 px-5 py-4 border-b border-amber-500/20 flex justify-between items-center">
+                    <CardHeader className="bg-amber-500/10 px-5 py-4 border-b border-amber-500/20 flex flex-row justify-between items-center space-y-0">
                       <div className="flex items-center space-x-2">
                         <Activity className="h-4 w-4 text-amber-400 animate-spin-slow" />
                         <span className="text-xs font-bold text-amber-300 uppercase tracking-wider font-mono">
                           {approval.actionType}
                         </span>
                       </div>
-                      <span className="text-[9px] font-mono text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded">
+                      <Badge variant="warning" className="text-[9px] font-mono bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border-transparent px-2 py-0.5">
                         Waiting Approval
-                      </span>
-                    </div>
+                      </Badge>
+                    </CardHeader>
 
                     {/* Content */}
-                    <div className="p-5 space-y-4">
+                    <CardContent className="p-5 space-y-4">
                       {/* Metadatas */}
                       <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">商户租户:</span>
+                          <span className="font-mono text-indigo-400 font-bold uppercase">{approval.businessId || 'ecommerce'}</span>
+                        </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">工单 ID:</span>
                           <span className="font-mono text-slate-300">{approval.id.substring(0, 8)}...</span>
@@ -346,20 +374,20 @@ export default function AdminDashboard() {
 
                       {/* Actions Form */}
                       <div className="space-y-2">
-                        <input
+                        <Input
                           type="text"
                           value={rejectionReasons[approval.id] || ''}
                           onChange={(e) => setRejectionReasons((prev) => ({ ...prev, [approval.id]: e.target.value }))}
                           placeholder="驳回请在此输入拒绝理由..."
-                          className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                          className="bg-slate-950 border-slate-850 text-slate-100 placeholder-slate-600 focus-visible:ring-indigo-500"
                         />
 
                         <div className="flex gap-2 pt-1">
-                          <button
+                          <Button
                             type="button"
                             onClick={() => handleApprovalAction(approval.id, 'approve')}
                             disabled={isSubmitting}
-                            className="flex-1 h-8 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl transition flex items-center justify-center gap-1.5"
+                            className="flex-1 h-8 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-1.5"
                           >
                             {isSubmitting ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -369,12 +397,12 @@ export default function AdminDashboard() {
                                 <span>核准通过</span>
                               </>
                             )}
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
                             onClick={() => handleApprovalAction(approval.id, 'reject')}
                             disabled={isSubmitting}
-                            className="flex-1 h-8 text-[11px] font-bold bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl transition flex items-center justify-center gap-1.5"
+                            className="flex-1 h-8 text-[11px] font-bold bg-rose-600 hover:bg-rose-500 text-white rounded-xl flex items-center justify-center gap-1.5"
                           >
                             {isSubmitting ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -384,11 +412,11 @@ export default function AdminDashboard() {
                                 <span>驳回申请</span>
                               </>
                             )}
-                          </button>
+                          </Button>
                         </div>
                       </div>
-                    </div>
-                  </div>
+                    </CardContent>
+                  </Card>
                 );
               })}
             </div>
@@ -586,7 +614,7 @@ export default function AdminDashboard() {
                           <td className="p-4 font-mono text-slate-300">{app.id.substring(0, 8)}...</td>
                           <td className="p-4 font-mono">
                             <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-850 text-slate-400 font-semibold uppercase tracking-wider text-[9px]">
-                              {app.threadId.startsWith('test_suite') ? 'test_suite' : 'ecommerce'}
+                              {app.businessId || 'ecommerce'}
                             </span>
                           </td>
                           <td className="p-4 font-bold text-slate-300">{app.actionType}</td>
