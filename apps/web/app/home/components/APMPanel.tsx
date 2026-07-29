@@ -10,8 +10,10 @@ import {
   Input,
   Loader2,
   XCircle,
+  Cpu,
+  Shield,
+  Clock,
 } from "ui";
-import { Cpu, Shield, Clock } from "lucide-react";
 import { TaskPlan } from "../hooks/types";
 
 interface APMPanelProps {

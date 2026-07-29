@@ -7,8 +7,9 @@ import {
   CardHeader,
   CardTitle,
   Loader2,
+  ImageIcon,
+  X,
 } from "ui";
-import { ImageIcon, X } from "lucide-react";
 
 // Local Hooks
 import {

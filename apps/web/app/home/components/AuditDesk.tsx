@@ -11,8 +11,10 @@ import {
   Input,
   Loader2,
   XCircle,
+  Shield,
+  ImageIcon,
+  X,
 } from "ui";
-import { Shield, ImageIcon, X } from "lucide-react";
 import { UserSession } from "../hooks/types";
 
 interface AuditDeskProps {

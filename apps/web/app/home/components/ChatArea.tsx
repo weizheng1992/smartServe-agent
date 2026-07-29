@@ -15,8 +15,10 @@ import {
   Maximize2,
   Send,
   XCircle,
+  Laptop,
+  RefreshCw,
+  ImageIcon,
 } from "ui";
-import { Laptop, RefreshCw, ImageIcon } from "lucide-react";
 import { Message } from "../hooks/types";
 
 interface ChatAreaProps {
