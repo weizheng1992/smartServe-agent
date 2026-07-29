@@ -35,44 +35,15 @@ import {
   X,
   XCircle,
 } from 'ui';
-import { useRouter } from 'next/navigation';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import { useAuth } from "../hooks/useAuth";
+import { useChatThreads } from "../hooks/useChatThreads";
+import { useChatMessages } from "../hooks/useChatMessages";
+import { useApprovals } from "../hooks/useApprovals";
+import { ChatThread, Message, TaskPlan } from "../hooks/types";
 
-interface Subtask {
-  id: string;
-  description: string;
-  status: 'pending' | 'executing' | 'completed' | 'failed';
-  result?: any;
-}
 
-interface TaskPlan {
-  goal: string;
-  subtasks: Subtask[];
-  currentStepIndex: number;
-}
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  plan?: TaskPlan;
-  jobId?: string;
-  isLoading?: boolean;
-}
-
-interface UserSession {
-  id: string;
-  email: string;
-}
-
-interface ChatThread {
-  id: string;
-  userId: string;
-  businessId: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-}
 
 // Safely format timestamps into MM-DD HH:mm format without hydration mismatches or invalid parsing
 const formatFriendlyDate = (dateStr: any) => {
@@ -90,617 +61,87 @@ const formatFriendlyDate = (dateStr: any) => {
 };
 
 export default function Home() {
-  const router = useRouter();
+  const { currentUser, isPageHydrated, handleLogout } = useAuth();
 
-  // Authentication & User state
-  const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
-  const [isPageHydrated, setIsPageHydrated] = useState(false);
-
-  // Threads list & current selected thread
-  const [threads, setThreads] = useState<ChatThread[]>([]);
-  const [activeThreadId, setActiveThreadId] = useState<string>('');
-  const [selectedNewThreadMerchant, setSelectedNewThreadMerchant] = useState<string>('ecommerce');
-  const [isThreadsLoading, setIsThreadsLoading] = useState(false);
-  const [tokensConsumed, setTokensConsumed] = useState<number>(0);
-
-  // Chat conversation
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content:
-        '您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？',
+  const {
+    threads,
+    setThreads,
+    activeThreadId,
+    setActiveThreadId,
+    selectedNewThreadMerchant,
+    setSelectedNewThreadMerchant,
+    isThreadsLoading,
+    fetchThreads,
+    handleCreateNewThread,
+    handleMerchantSwitch,
+    handleDeleteThread,
+  } = useChatThreads({
+    currentUser,
+    onThreadCreated: () => {
+      setRunningDetails([]);
+      setActivePlan(null);
+      setCurrentStepText("");
     },
-  ]);
-  const [input, setInput] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activePlan, setActivePlan] = useState<TaskPlan | null>(null);
-  const [currentStepText, setCurrentStepText] = useState('');
-  const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
+  });
 
-  // Active executing subtask detailed logger
-  const [runningDetails, setRunningDetails] = useState<{ node: string; desc: string; resultText: string }[]>([]);
+  const {
+    messages,
+    setMessages,
+    input,
+    setInput,
+    isSubmitting,
+    setIsSubmitting,
+    activePlan,
+    setActivePlan,
+    currentStepText,
+    setCurrentStepText,
+    selectedScreenshot,
+    setSelectedScreenshot,
+    tokensConsumed,
+    setTokensConsumed,
+    runningDetails,
+    setRunningDetails,
+    syncPollCountRef,
+    loadHistory,
+    triggerStream,
+    handleSend,
+  } = useChatMessages({
+    currentUser,
+    activeThreadId,
+    fetchThreads,
+  });
 
-  // =========================================================================
-  // 🛡️ HUMAN-IN-THE-LOOP (HITL) 人工审批流状态与动作处理器
-  // =========================================================================
-  const [pendingApprovalsList, setPendingApprovalsList] = useState<any[]>([]);
-  const [rejectionInput, setRejectionReason] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'CHAT_DESK' | 'AUDIT_DESK'>('CHAT_DESK');
-  const [allApprovals, setAllApprovals] = useState<any[]>([]);
-  const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null);
-  const [auditFilter, setAuditFilter] = useState<'ALL' | 'WAITING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'>('WAITING');
-  const lastApprovalsStateRef = useRef<Record<string, string>>({});
-  const syncPollCountRef = useRef<number>(0);
-
-  // 1. Read initial threadId from URL search parameters on page mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const urlThreadId = params.get('threadId');
-      if (urlThreadId) {
-        setActiveThreadId(urlThreadId);
-      }
-    }
-  }, []);
-
-  // 2. Sync activeThreadId to URL search parameters whenever it changes
-  useEffect(() => {
-    if (activeThreadId && typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('threadId') !== activeThreadId) {
-        params.set('threadId', activeThreadId);
-        window.history.replaceState(null, '', `?${params.toString()}`);
-      }
-    }
-  }, [activeThreadId]);
-
-  // Load past conversation records
-  const loadHistory = useCallback(async (threadIdToLoad: string) => {
-    try {
-      const res = await fetch(`/api/chat/messages?threadId=${threadIdToLoad}`);
-      const data = await res.json();
-      if (data.success && data.messages && data.messages.length > 0) {
-        setMessages(data.messages);
-      } else {
-        setMessages([
-          {
-            role: 'assistant',
-            content:
-              '您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？',
-          },
-        ]);
-      }
-    } catch (err) {
-      console.warn('[History Restore] 无法加载物理数据库的历史记录: ', err);
-    }
-  }, []);
-
-  // Fetch threads API
-  const fetchThreads = useCallback(async () => {
-    if (!currentUser) return;
-    setIsThreadsLoading(true);
-    try {
-      const res = await fetch(`/api/chat/threads?userId=${currentUser.id}`);
-      const data = await res.json();
-      if (data.success && data.threads) {
-        setThreads(data.threads);
-
-        // Prioritize loading the active thread ID from the URL query parameter on load
-        let initialActiveId = activeThreadId;
-        if (typeof window !== 'undefined') {
-          const params = new URLSearchParams(window.location.search);
-          initialActiveId = params.get('threadId') || activeThreadId;
-        }
-
-        if (data.threads.length > 0) {
-          if (initialActiveId && data.threads.some((t: any) => t.id === initialActiveId)) {
-            setActiveThreadId(initialActiveId);
-          } else {
-            setActiveThreadId(data.threads[0].id);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[Fetch Threads Error]:', err);
-    } finally {
-      setIsThreadsLoading(false);
-    }
-  }, [currentUser, activeThreadId]);
-
-  // 3. 周期性轮询获取与当前 ThreadID 相关且未审批的工单，并安全检测人机审核流程恢复
-  useEffect(() => {
-    // 切换会话时，安全重置多轮静默同步计数器，防止历史残留跨会话触发
-    syncPollCountRef.current = 0;
-
-    const fetchApprovals = async () => {
-      try {
-        const res = await fetch('/api/chat/approvals');
-        const data = await res.json();
-        if (data.success && data.approvals) {
-          setAllApprovals(data.approvals); // 全量存入大盘状态
-          if (activeThreadId) {
-            const activeApprovals = data.approvals.filter(
-              (a: any) => a.threadId === activeThreadId && a.status === 'waiting',
-            );
-            setPendingApprovalsList(activeApprovals);
-
-            // 🧠 审批流防脱节自动载入感应器：
-            // 如果上一次状态记录中存在该 thread 的某个工单且状态为 waiting，而新拉取的数据中该工单状态变为了 approved / rejected / cancelled / expired，
-            // 说明该审批任务刚刚获得了决策解决。我们将触发连续 6 次的多轮高灵敏轮询，确保在后台 Agent（约耗时 2-5s）执行完结并写盘后，物理刷新出最新的最终消息！
-            let stateChanged = false;
-            const currentStatuses: Record<string, string> = {};
-
-            for (const app of data.approvals) {
-              if (app.threadId === activeThreadId) {
-                currentStatuses[app.id] = app.status;
-                const prevStatus = lastApprovalsStateRef.current[app.id];
-                if (prevStatus === 'waiting' && app.status !== 'waiting') {
-                  stateChanged = true;
-                }
-              }
-            }
-
-            lastApprovalsStateRef.current = {
-              ...lastApprovalsStateRef.current,
-              ...currentStatuses
-            };
-
-            if (stateChanged) {
-              console.log('[HITL Sync Detector] 🩺 Detected active thread approval status change! Initiating multi-turn polling (6 turns) to wait for agent response.');
-              syncPollCountRef.current = 6; // 连续 6 次（共 12 秒）高敏捷静默刷新
-              loadHistory(activeThreadId);
-              fetchThreads();
-            } else if (syncPollCountRef.current > 0) {
-              syncPollCountRef.current -= 1;
-              console.log(`[HITL Sync Detector] ⏳ Continuing multi-turn polling. Remaining turns: ${syncPollCountRef.current}`);
-              loadHistory(activeThreadId);
-              fetchThreads();
-            }
-          } else {
-            setPendingApprovalsList([]);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch approvals:', err);
-      }
-    };
-
-    fetchApprovals();
-    const intervalId = setInterval(fetchApprovals, 2000); // 2秒轮询一次，高敏捷反馈！
-
-    return () => clearInterval(intervalId);
-  }, [activeThreadId, loadHistory, fetchThreads]);
-
-  // 2. 提交管理员审批决议（Approved / Rejected）并恢复 Agent 决策执行
-  const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {
-    setIsSubmitting(true);
-    setPendingApprovalsList([]); // 立即清空，提供瞬时界面反馈
-
-    const resumeLoaderMsg: Message = {
-      role: 'assistant',
-      content: '',
-      isLoading: true,
-      jobId: 'resume-pending-job',
-    };
-    setMessages((prev) => [...prev, resumeLoaderMsg]);
-
-    try {
-      const res = await fetch('/api/chat/approvals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          approvalId,
-          action,
-          rejectionReason: action === 'reject' ? rejectionInput || '退款申请不符合政策要求。' : '',
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.jobId) {
-        setRejectionReason(''); // 清空拒绝文本
-        setMessages((prev) => prev.map((m) => (m.jobId === 'resume-pending-job' ? { ...m, jobId: data.jobId } : m)));
-        // 重建 SSE 物理通道，无缝订阅新触发的恢复执行流
-        triggerStream(data.jobId);
-      } else {
-        throw new Error(data.error || '审批决议提交失败');
-      }
-    } catch (err: any) {
-      console.error(err);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.jobId === 'resume-pending-job'
-            ? { role: 'assistant', content: `审批流恢复出错: ${err.message || '内部处理异常'}` }
-            : m,
-        ),
-      );
-      setIsSubmitting(false);
-    }
-  };
-
-  // Load user session from local storage on mount (keeping login persistent on browser refresh!)
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedUser = localStorage.getItem('agent_user_session');
-      if (savedUser) {
-        try {
-          const parsedUser = JSON.parse(savedUser);
-          setCurrentUser(parsedUser);
-
-          // 🛡️ [会话自愈对齐防御锁]:
-          // 异步静默调用后端 /api/auth/login 校验当前 email 在物理库中的最新 UUID。
-          // 防止由于物理库重新 seeding 导致本地浏览器 localStorage 残留老 UUID（如 u_default_id）而产生多租户数据脱节与查单失败！
-          (async () => {
-            try {
-              const checkRes = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: parsedUser.email }),
-              });
-              const checkData = await checkRes.json();
-              if (checkData.success && checkData.user && checkData.user.id !== parsedUser.id) {
-                console.log(
-                  `[Session Self-Healing] 🩺 检测到用户 UUID 发生漂移 (原: ${parsedUser.id} ➔ 新: ${checkData.user.id})，启动静默自愈校准！`,
-                );
-                localStorage.setItem('agent_user_session', JSON.stringify(checkData.user));
-                setCurrentUser(checkData.user);
-              }
-            } catch (err) {
-              console.warn('[Session Self-Healing] Silent validation failed:', err);
-            }
-          })();
-        } catch (e) {
-          localStorage.removeItem('agent_user_session');
-          router.push('/login');
-        }
-      } else {
-        // 未登录则强制重定向跳转至 /login 物理路由页面！
-        router.push('/login');
-      }
-      setIsPageHydrated(true);
-    }
-  }, [router]);
-
-  // Fetch thread list whenever currentUser changes
-  useEffect(() => {
-    if (currentUser) {
-      fetchThreads();
-    } else {
-      setThreads([]);
-      setActiveThreadId('');
-    }
-  }, [currentUser, fetchThreads]);
-
-  // Fetch messages from physical messages table whenever activeThreadId changes
-  useEffect(() => {
-    if (activeThreadId) {
-      loadHistory(activeThreadId);
-    } else {
-      setMessages([
-        {
-          role: 'assistant',
-          content:
-            '您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？',
-        },
-      ]);
-    }
-  }, [activeThreadId, loadHistory]);
+  const {
+    allApprovals,
+    pendingApprovalsList,
+    rejectionInput,
+    setRejectionReason,
+    activeTab,
+    setActiveTab,
+    selectedApprovalId,
+    setSelectedApprovalId,
+    auditFilter,
+    setAuditFilter,
+    handleApprovalAction,
+  } = useApprovals({
+    currentUser,
+    activeThreadId,
+    loadHistory,
+    fetchThreads,
+    syncPollCountRef,
+    setMessages,
+    setIsSubmitting,
+    triggerStream,
+  });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // 🌟 Auto Scroll to Bottom effect
   useEffect(() => {
     if (messages.length > 0) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages]);
-
-  // 切换商户大脑并自动定位/创建对应的会话线程，彻底消除 UX 交互门槛与多租户隔离盲区！
-  const handleMerchantSwitch = async (merchantId: string) => {
-    setSelectedNewThreadMerchant(merchantId);
-    if (isSubmitting) return;
-
-    // 1. 在当前已加载的历史会话中，查找是否已存在属于该商户的会话线程
-    const existingThread = threads.find((t) => t.businessId === merchantId);
-
-    if (existingThread) {
-      console.log(`[Merchant Switch] 🎯 自动切换至已有的 ${merchantId} 会话: ${existingThread.id}`);
-      setActiveThreadId(existingThread.id);
-    } else {
-      console.log(`[Merchant Switch] 🚀 未找到已有的 ${merchantId} 会话，自动为您开辟全新会话通道...`);
-      await handleCreateNewThread(merchantId);
-    }
-  };
-
-  // Create a new chat session thread
-  const handleCreateNewThread = async (merchantId = 'ecommerce') => {
-    if (!currentUser) return;
-    const newThreadId =
-      typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-    try {
-      const res = await fetch('/api/chat/threads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, threadId: newThreadId, businessId: merchantId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const newThreadItem: ChatThread = {
-          id: newThreadId,
-          userId: currentUser.id,
-          businessId: merchantId,
-          status: 'active',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        setThreads((prev) => [newThreadItem, ...prev]);
-        setActiveThreadId(newThreadId);
-        setRunningDetails([]);
-        setActivePlan(null);
-        setCurrentStepText('');
-      }
-    } catch (err) {
-      console.error('[Create Thread Error]:', err);
-    }
-  };
-
-  // Delete a chat session thread cascade style!
-  const handleDeleteThread = async (e: React.MouseEvent, threadIdToDelete: string) => {
-    e.stopPropagation(); // Prevent choosing this thread upon deleting
-    if (isSubmitting) return;
-
-    const confirmDelete = window.confirm(
-      '⚠️ 您确定要彻底删除该会话吗？\n该操作将物理抹除该会话下的所有聊天消息、审核单据、日志度量等关联记录，不可撤销！',
-    );
-    if (!confirmDelete) return;
-
-    try {
-      const res = await fetch(`/api/chat/threads?threadId=${threadIdToDelete}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (data.success) {
-        setThreads((prev) => prev.filter((t) => t.id !== threadIdToDelete));
-
-        // If active thread got deleted, fall back to another one
-        if (activeThreadId === threadIdToDelete) {
-          const remainingThreads = threads.filter((t) => t.id !== threadIdToDelete);
-          if (remainingThreads.length > 0) {
-            setActiveThreadId(remainingThreads[0].id);
-          } else {
-            setActiveThreadId('');
-          }
-        }
-      } else {
-        alert(`删除失败: ${data.error || '未知数据库错误'}`);
-      }
-    } catch (err: any) {
-      console.error('[Delete Thread Client Error]:', err);
-      alert(`删除出错: ${err.message || '网络连接故障'}`);
-    }
-  };
-
-  // Logout handler
-  const handleLogout = () => {
-    localStorage.removeItem('agent_user_session');
-    setCurrentUser(null);
-    setThreads([]);
-    setActiveThreadId('');
-    router.push('/login');
-  };
-
-  const triggerStream = async (jobId: string) => {
-    try {
-      const eventSource = new EventSource(`/api/chat/${jobId}/stream`);
-      setRunningDetails([]); // Reset logger
-
-      eventSource.addEventListener('status', (event: any) => {
-        const data = JSON.parse(event.data);
-        if (data.tokens !== undefined) {
-          setTokensConsumed(data.tokens);
-        }
-        if (data.message) {
-          const zhMessage = data.message;
-          let nodeName = data.node || 'system';
-
-          if (data.node === 'triage') {
-            nodeName = 'Triage 节点';
-          } else if (data.node === 'planner') {
-            nodeName = 'Planner 节点';
-          } else if (data.node === 'executor') {
-            nodeName = 'Executor 节点';
-          } else if (data.node === 'validator') {
-            nodeName = 'Validator 节点';
-          }
-
-          setCurrentStepText(zhMessage);
-
-          setRunningDetails((prev) => {
-            const exists = prev.findIndex((log) => log.node === nodeName);
-            if (exists !== -1) {
-              const next = [...prev];
-              next[exists] = {
-                node: nodeName,
-                desc: data.message.includes('正在') || data.message.includes('检测') ? data.message : next[exists].desc,
-                resultText:
-                  !data.message.includes('正在') && !data.message.includes('检测')
-                    ? data.message
-                    : next[exists].resultText,
-              };
-              return next;
-            }
-            return [
-              ...prev,
-              {
-                node: nodeName,
-                desc: zhMessage,
-                resultText: '正在执行中...',
-              },
-            ];
-          });
-        }
-        if (data.plan) {
-          const zhSubtasks = data.plan.subtasks.map((st: any) => {
-            let zhDesc = st.description;
-            const descLower = st.description.toLowerCase();
-            if (
-              descLower.includes('order status') ||
-              descLower.includes('getorderstatus') ||
-              descLower.includes('shipping status') ||
-              descLower.includes('order')
-            ) {
-              zhDesc = '调起 getOrderStatus 接口查询订单最新物理物流详情';
-            } else if (descLower.includes('screenshot') || descLower.includes('takescreenshot')) {
-              zhDesc = '调起 takeScreenshot 看板截图工具进行界面快照核验';
-            } else if (descLower.includes('refund') || descLower.includes('processrefund')) {
-              zhDesc = '触发 processRefund 快速退款物理工作流';
-            } else if (descLower.includes('extract')) {
-              zhDesc = '智能捕获并定位文本中的业务关键字段与参数';
-            } else if (
-              descLower.includes('inform') ||
-              descLower.includes('communicate') ||
-              descLower.includes('tell')
-            ) {
-              zhDesc = '通过大模型提炼汇总信息反馈给用户';
-            }
-            return { ...st, description: zhDesc };
-          });
-          setActivePlan({
-            ...data.plan,
-            goal:
-              data.plan.goal.includes('Fulfill') || data.plan.goal.includes('Address')
-                ? '全自动履行客户业务及工具链诉求'
-                : data.plan.goal,
-            subtasks: zhSubtasks,
-          });
-        }
-      });
-
-      eventSource.addEventListener('result', (event: any) => {
-        const data = JSON.parse(event.data);
-        if (data.tokens !== undefined) {
-          setTokensConsumed(data.tokens);
-        }
-        eventSource.close();
-
-        setRunningDetails((prev) =>
-          prev.map((log) => {
-            if (log.resultText === '正在执行中...') {
-              return { ...log, resultText: '✅ 步骤已由有环图决策环成功履约。' };
-            }
-            return log;
-          }),
-        );
-
-        setMessages((prev) => {
-          const next = [...prev];
-          const loaderIdx = next.findIndex((m) => m.jobId === jobId);
-          if (loaderIdx !== -1) {
-            next[loaderIdx] = {
-              role: 'assistant',
-              content: data.output,
-              plan: data.taskPlan
-                ? {
-                    ...data.taskPlan,
-                    goal: '自动化履行客户业务诉求',
-                    subtasks: data.taskPlan.subtasks.map((sub: any) => {
-                      let zhDesc = sub.description;
-                      const descLower = sub.description.toLowerCase();
-                      if (descLower.includes('extract')) {
-                        zhDesc = '从用户文本中智能提取业务参数与实体 ID';
-                      } else if (
-                        descLower.includes('getorderstatus') ||
-                        descLower.includes('order status') ||
-                        descLower.includes('shipping status') ||
-                        descLower.includes('order')
-                      ) {
-                        zhDesc = '成功调起 getOrderStatus 接口，获取最新物流数据';
-                      } else if (descLower.includes('refund') || descLower.includes('processrefund')) {
-                        zhDesc = '成功调起 processRefund 接口，执行快速退款并修改物理表';
-                      } else if (descLower.includes('screenshot') || descLower.includes('takescreenshot')) {
-                        zhDesc = '成功调起 takeScreenshot 接口，生成目标看板快照';
-                      } else if (
-                        descLower.includes('inform') ||
-                        descLower.includes('communicate') ||
-                        descLower.includes('tell')
-                      ) {
-                        zhDesc = '通过大模型提炼汇总信息反馈给用户';
-                      }
-                      return { ...sub, description: zhDesc, result: sub.result };
-                    }),
-                  }
-                : undefined,
-              jobId,
-            };
-          }
-          return next;
-        });
-
-        fetchThreads();
-
-        setActivePlan(null);
-        setCurrentStepText('');
-        setIsSubmitting(false);
-      });
-
-      eventSource.addEventListener('error', (event: any) => {
-        console.error('SSE Error:', event);
-        eventSource.close();
-        setIsSubmitting(false);
-        setCurrentStepText('');
-        setActivePlan(null);
-      });
-    } catch (err) {
-      console.error('Failed to initialize stream', err);
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isSubmitting || !activeThreadId || !currentUser) return;
-
-    const userQuery = input;
-    setInput('');
-    setIsSubmitting(true);
-    setTokensConsumed(0);
-
-    const userMessage: Message = { role: 'user', content: userQuery };
-    const loaderMessage: Message = {
-      role: 'assistant',
-      content: '',
-      isLoading: true,
-      jobId: 'pending-job',
-    };
-
-    setMessages((prev) => [...prev, userMessage, loaderMessage]);
-
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userQuery, threadId: activeThreadId, userId: currentUser.id }),
-      });
-
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '创建执行链路失败');
-      }
-
-      setMessages((prev) => prev.map((m) => (m.jobId === 'pending-job' ? { ...m, jobId: data.jobId } : m)));
-
-      triggerStream(data.jobId);
-    } catch (err: any) {
-      console.error(err);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.jobId === 'pending-job'
-            ? { role: 'assistant', content: `执行出错: ${err.message || '内部处理异常，请重试'}` }
-            : m,
-        ),
-      );
-      setIsSubmitting(false);
-    }
-  };
 
   // 首屏渲染占位符，防止重定向闪烁
   if (!isPageHydrated || !currentUser) {
