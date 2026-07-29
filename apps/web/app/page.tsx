@@ -1115,6 +1115,8 @@ export default function Home() {
                       )}
                     </div>
                   ))}
+                  {/* 🌟 历史消息底座锚点：配合 useEffect 物理高稳定滚动对齐 */}
+                  <div ref={messagesEndRef} />
                 </div>
               </ScrollArea>
 
