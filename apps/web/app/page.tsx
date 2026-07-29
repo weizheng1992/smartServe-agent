@@ -340,6 +340,23 @@ export default function Home() {
     }
   }, [messages]);
 
+  // 切换商户大脑并自动定位/创建对应的会话线程，彻底消除 UX 交互门槛与多租户隔离盲区！
+  const handleMerchantSwitch = async (merchantId: string) => {
+    setSelectedNewThreadMerchant(merchantId);
+    if (isSubmitting) return;
+
+    // 1. 在当前已加载的历史会话中，查找是否已存在属于该商户的会话线程
+    const existingThread = threads.find((t) => t.businessId === merchantId);
+
+    if (existingThread) {
+      console.log(`[Merchant Switch] 🎯 自动切换至已有的 ${merchantId} 会话: ${existingThread.id}`);
+      setActiveThreadId(existingThread.id);
+    } else {
+      console.log(`[Merchant Switch] 🚀 未找到已有的 ${merchantId} 会话，自动为您开辟全新会话通道...`);
+      await handleCreateNewThread(merchantId);
+    }
+  };
+
   // Create a new chat session thread
   const handleCreateNewThread = async (merchantId = 'ecommerce') => {
     if (!currentUser) return;
@@ -660,7 +677,7 @@ export default function Home() {
                 <button
                   type="button"
                   key={m.id}
-                  onClick={() => setSelectedNewThreadMerchant(m.id)}
+                  onClick={() => handleMerchantSwitch(m.id)}
                   className={`py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition ${
                     selectedNewThreadMerchant === m.id
                       ? 'bg-indigo-600 text-white shadow-md'
