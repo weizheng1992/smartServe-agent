@@ -78,6 +78,7 @@ export default function Home() {
   // Threads list & current selected thread
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string>('');
+  const [selectedNewThreadMerchant, setSelectedNewThreadMerchant] = useState<string>('ecommerce');
   const [isThreadsLoading, setIsThreadsLoading] = useState(false);
   const [tokensConsumed, setTokensConsumed] = useState<number>(0);
 
@@ -340,7 +341,7 @@ export default function Home() {
   }, [messages]);
 
   // Create a new chat session thread
-  const handleCreateNewThread = async () => {
+  const handleCreateNewThread = async (merchantId = 'ecommerce') => {
     if (!currentUser) return;
     const newThreadId =
       typeof crypto !== 'undefined' && crypto.randomUUID
@@ -350,14 +351,14 @@ export default function Home() {
       const res = await fetch('/api/chat/threads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, threadId: newThreadId }),
+        body: JSON.stringify({ userId: currentUser.id, threadId: newThreadId, businessId: merchantId }),
       });
       const data = await res.json();
       if (data.success) {
         const newThreadItem: ChatThread = {
           id: newThreadId,
           userId: currentUser.id,
-          businessId: 'ecommerce',
+          businessId: merchantId,
           status: 'active',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -644,10 +645,36 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 新增会话操作按钮 */}
-        <div className="px-4 pt-4 pb-2">
+        {/* 新增会话选择与操作按钮 */}
+        <div className="px-4 pt-4 pb-2 space-y-2.5">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider font-mono px-1">
+              选择对话商户
+            </span>
+            <div className="grid grid-cols-3 gap-1 bg-slate-950/60 border border-slate-850/80 p-1 rounded-xl">
+              {[
+                { id: 'ecommerce', label: '主站' },
+                { id: 'nike', label: 'Nike' },
+                { id: 'adidas', label: 'Adidas' },
+              ].map((m) => (
+                <button
+                  type="button"
+                  key={m.id}
+                  onClick={() => setSelectedNewThreadMerchant(m.id)}
+                  className={`py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition ${
+                    selectedNewThreadMerchant === m.id
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/20'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <Button
-            onClick={handleCreateNewThread}
+            onClick={() => handleCreateNewThread(selectedNewThreadMerchant)}
             className="w-full bg-slate-950/40 hover:bg-slate-950/80 text-indigo-400 border border-indigo-500/20 hover:border-indigo-500/40 rounded-xl h-10 text-xs font-semibold flex items-center justify-center gap-2 transition"
           >
             <Plus className="h-4 w-4" />
@@ -732,7 +759,15 @@ export default function Home() {
                       <span className="font-mono">
                         {friendlyDate} {friendlyTime}
                       </span>
-                      <span className="uppercase text-[8px] tracking-widest font-bold font-mono">Active</span>
+                      <span className={`px-1.5 py-0.2 rounded text-[8px] font-bold uppercase tracking-wider ${
+                        t.businessId === 'nike'
+                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/10'
+                          : t.businessId === 'adidas'
+                            ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/10'
+                            : 'bg-slate-500/10 text-slate-400 border border-slate-800'
+                      }`}>
+                        {t.businessId === 'nike' ? 'Nike' : t.businessId === 'adidas' ? 'Adidas' : '主站'}
+                      </span>
                     </div>
                   </div>
                 </button>

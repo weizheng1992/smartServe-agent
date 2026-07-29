@@ -20,13 +20,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, threadId } = await req.json();
+    const { userId, threadId, businessId } = await req.json();
 
     if (!userId || !threadId) {
       return NextResponse.json({ success: false, error: 'userId and threadId are required' }, { status: 400 });
     }
 
-    const thread = await db.createThread(threadId, userId);
+    const thread = await db.createThread(threadId, userId, businessId);
     return NextResponse.json({ success: true, thread });
   } catch (err: any) {
     console.error('[API Create Thread Error]:', err);

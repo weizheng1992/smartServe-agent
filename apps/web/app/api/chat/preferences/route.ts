@@ -2,6 +2,8 @@ import { getDrizzle, longMemoryFacts } from 'db';
 import { desc, eq, sql } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/chat/preferences - 获取所有画像偏好数据，并动态关联最后会话的 business_id
 export async function GET(req: NextRequest) {
   try {

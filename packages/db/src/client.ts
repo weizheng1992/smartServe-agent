@@ -580,7 +580,7 @@ export interface DBInterface {
   // 新增：和用户关联的账户及会话管理接口
   findOrCreateUserByEmail: (email: string) => Promise<{ id: string; email: string }>;
   getUserThreads: (userId: string) => Promise<DBThread[]>;
-  createThread: (threadId: string, userId: string) => Promise<DBThread>;
+  createThread: (threadId: string, userId: string, businessId?: string) => Promise<DBThread>;
 }
 
 async function resolveAndEnsurePgUserId(pool: any, userId: string): Promise<string> {
@@ -687,21 +687,22 @@ export const db: DBInterface = {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   },
 
-  createThread: async (threadId: string, userId: string): Promise<DBThread> => {
+  createThread: async (threadId: string, userId: string, businessId?: string): Promise<DBThread> => {
     const pool = getPgPool();
+    const activeBusinessId = businessId || 'ecommerce';
     if (isUsingRealDb) {
       try {
         const pgUserId = await resolveAndEnsurePgUserId(pool, userId);
 
         await pool.query(
           'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") VALUES ($1, $2, $3, $4, NOW(), NOW()) ON CONFLICT (id) DO NOTHING',
-          [threadId, pgUserId, 'ecommerce', 'active'],
+          [threadId, pgUserId, activeBusinessId, 'active'],
         );
-        console.log(`[DB Thread PG] Created/Ensured physical thread ${threadId} for mapped user ${pgUserId}`);
+        console.log(`[DB Thread PG] Created/Ensured physical thread ${threadId} for mapped user ${pgUserId} with businessId ${activeBusinessId}`);
         return {
           id: threadId,
           userId: pgUserId,
-          businessId: 'ecommerce',
+          businessId: activeBusinessId,
           status: 'active',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -714,7 +715,7 @@ export const db: DBInterface = {
     const newThread = {
       id: threadId,
       userId,
-      businessId: 'ecommerce',
+      businessId: activeBusinessId,
       status: 'active',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
