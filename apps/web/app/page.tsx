@@ -37,11 +37,15 @@ import {
 } from 'ui';
 import type React from 'react';
 import { useEffect, useRef } from 'react';
-import { useAuth } from "../hooks/useAuth";
-import { useChatThreads } from "../hooks/useChatThreads";
-import { useChatMessages } from "../hooks/useChatMessages";
-import { useApprovals } from "../hooks/useApprovals";
-import { ChatThread, Message, TaskPlan } from "../hooks/types";
+import { 
+  useAuth, 
+  useChatThreads, 
+  useChatMessages, 
+  useApprovals,
+  ChatThread,
+  Message,
+  TaskPlan
+} from "../hooks/home";
 
 
 
