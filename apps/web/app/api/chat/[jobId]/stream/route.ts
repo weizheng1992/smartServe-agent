@@ -1,6 +1,8 @@
 import { agentEventEmitter, getTemporalClient, isUsingMockTemporal } from 'engine';
 import { type NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
 

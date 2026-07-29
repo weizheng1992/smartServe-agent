@@ -111,6 +111,32 @@ const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
         total_amount: 49.99,
       },
     ],
+    [
+      'ORD-ADIDAS-OK',
+      {
+        order_id: 'ORD-ADIDAS-OK',
+        status: 'delivered',
+        carrier: 'SF Express',
+        tracking_number: 'SF1234567',
+        estimated_delivery: '2026-07-22',
+        user_id: 'u_default_id',
+        business_id: 'adidas',
+        total_amount: 12.50,
+      },
+    ],
+    [
+      'ORD-ADIDAS-EXPIRED',
+      {
+        order_id: 'ORD-ADIDAS-EXPIRED',
+        status: 'delivered',
+        carrier: 'DHL',
+        tracking_number: 'DHL88712',
+        estimated_delivery: '2026-06-10',
+        user_id: 'u_default_id',
+        business_id: 'adidas',
+        total_amount: 179.99,
+      },
+    ],
   ]),
   products: new Map([
     [
@@ -183,6 +209,20 @@ const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
       product_id: 'prod_eco_1',
       quantity: 1,
       price_at_purchase: 49.99,
+    },
+    {
+      id: 'item_adidas_ok_1',
+      order_id: 'ORD-ADIDAS-OK',
+      product_id: 'prod_adidas_2',
+      quantity: 1,
+      price_at_purchase: 12.50,
+    },
+    {
+      id: 'item_adidas_exp_1',
+      order_id: 'ORD-ADIDAS-EXPIRED',
+      product_id: 'prod_adidas_1',
+      quantity: 1,
+      price_at_purchase: 179.99,
     },
   ],
   messages: [],
