@@ -37,5 +37,19 @@
         "value": "file://scorers/answerQuality.scorer.ts"
       }
     ]
+  },
+  {
+    "description": "意图分类 - 带有上下文的多轮对话澄清评估 (例如：我是男的)",
+    "vars": {
+      "context": "User: 我想买上衣，店里有多少种类\nAssistant: 我们店里有各种男士、女士上衣，比如夹克、T恤、衬衫等。",
+      "input": "我是男的",
+      "expectedIntents": ["general_query"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
   }
 ]
