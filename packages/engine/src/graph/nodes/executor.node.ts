@@ -148,26 +148,64 @@ ${historyContext}`;
         // =====================================================================
         if (parsedToolCall.toolName === 'processRefund') {
           try {
-            // 🪙 动态限额核免：优先从数据库查询真实订单的总金额进行 Grounding，防止由于参数缺失默认降级为 $99.99 越过红线限制（金融资金防泄漏）
+            // 🪙 动态限额核免：优先从数据库查询真实订单的总金额进行 Grounding，防止由于参数缺失默认降级为 $999999.99 越过红线限制（金融资金防泄漏）
             const orderId = parsedToolCall.args?.orderId;
-            let refundAmount = 99.99;
+            let refundAmount = 999999.99;
             const refundAmountStr = parsedToolCall.args?.refundAmount || parsedToolCall.args?.amount;
 
             if (refundAmountStr) {
-              refundAmount = Number.parseFloat(String(refundAmountStr).replace(/[^0-9.]/g, '')) || 99.99;
+              refundAmount = Number.parseFloat(String(refundAmountStr).replace(/[^0-9.]/g, '')) || 999999.99;
             } else if (orderId) {
               try {
                 const { db: physicalDb } = require('db');
                 const oRes = await physicalDb.execute(
-                  'SELECT total_amount AS "totalAmount" FROM orders WHERE order_id = $1',
-                  [orderId]
+                  'SELECT total_amount AS "totalAmount", status FROM orders WHERE order_id = $1',
+                  [orderId],
                 );
                 if (oRes?.rows?.[0]) {
                   const row = oRes.rows[0] as any;
+
+                  // 🛡️ Double-Refund Prevention Check: 拒绝重复退款拦截关卡
+                  if (row.status === 'refunded') {
+                    console.log(`[Approval Gate] 🛑 Double-Refund Blocked: Order ${orderId} is already refunded!`);
+                    const updatedStep = {
+                      ...stepToRun,
+                      status: 'failed' as const,
+                      result: {
+                        error: '该订单已经是已退款状态，禁止重复退款。',
+                        message: `⚠️ 退款流程拦截：系统检测到订单 [${orderId}] 的状态在数据库中已经是 [已退款] 状态，物理拒绝重复退款操作！`,
+                      },
+                    };
+                    updatedSubtasks[currentIndex] = updatedStep;
+
+                    const nextPlan = {
+                      ...currentPlan,
+                      subtasks: updatedSubtasks,
+                    };
+
+                    if (state.jobId) {
+                      agentEventEmitter.emit(`${state.jobId}:status`, {
+                        status: 'executing',
+                        node: 'executor',
+                        message: `🛑 拒绝重复退款：订单 [${orderId}] 已经是 [已退款] 状态，流程已物理终止。`,
+                        plan: nextPlan,
+                      });
+                    }
+
+                    return {
+                      taskPlan: nextPlan,
+                      shortMemory,
+                      globalTransitionsCount: 1,
+                      toolErrorsCount: 1,
+                    };
+                  }
+
                   const dbAmt = row.totalAmount || row.total_amount;
                   if (dbAmt) {
-                    refundAmount = Number.parseFloat(String(dbAmt).replace(/[^0-9.]/g, '')) || 99.99;
-                    console.log(`[Approval Gate] Grounded real refund amount from database for order ${orderId}: $${refundAmount}`);
+                    refundAmount = Number.parseFloat(String(dbAmt).replace(/[^0-9.]/g, '')) || 999999.99;
+                    console.log(
+                      `[Approval Gate] Grounded real refund amount from database for order ${orderId}: $${refundAmount}`,
+                    );
                   }
                 }
               } catch (dbErr) {

@@ -1,14 +1,6 @@
-import type React from "react";
-import {
-  Card,
-  CardContent,
-  DollarSign,
-  Layers,
-  Clock,
-  Cpu,
-  TrendingUp,
-} from "ui";
-import { AnalyticsSummary } from "../hooks/types";
+import type React from 'react';
+import { Card, CardContent, Clock, Cpu, DollarSign, Layers, TrendingUp } from 'ui';
+import type { AnalyticsSummary } from '../hooks/types';
 
 interface MetricsProps {
   summary: AnalyticsSummary;

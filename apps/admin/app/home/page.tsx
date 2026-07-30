@@ -1,16 +1,16 @@
-"use client";
+'use client';
 
-import React from "react";
+import React from 'react';
 
 // Local Hooks
-import { useAdminDashboardData } from "./hooks";
+import { useAdminDashboardData } from './hooks';
 
 // Local Components
-import { Header } from "./components/Header";
-import { Metrics } from "./components/Metrics";
-import { PendingApprovals } from "./components/PendingApprovals";
-import { PersonaAudit } from "./components/PersonaAudit";
-import { HistoricalAudits } from "./components/HistoricalAudits";
+import { Header } from './components/Header';
+import { HistoricalAudits } from './components/HistoricalAudits';
+import { Metrics } from './components/Metrics';
+import { PendingApprovals } from './components/PendingApprovals';
+import { PersonaAudit } from './components/PersonaAudit';
 
 export default function AdminDashboard() {
   const {

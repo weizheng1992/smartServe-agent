@@ -1,9 +1,22 @@
 'use client';
 
-import { ArrowRight, Button, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Input, Loader2, Sparkles, XCircle } from 'ui';
 import { useRouter } from 'next/navigation';
 import type React from 'react';
 import { useEffect, useState } from 'react';
+import {
+  ArrowRight,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+  Input,
+  Loader2,
+  Sparkles,
+  XCircle,
+} from 'ui';
 
 export default function LoginPage() {
   const router = useRouter();

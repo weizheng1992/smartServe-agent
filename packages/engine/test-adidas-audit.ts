@@ -1,5 +1,5 @@
-import { runAgent } from './src/graph/buildGraph';
 import { db } from 'db';
+import { runAgent } from './src/graph/buildGraph';
 
 async function testAdidasAudit() {
   console.log('=== Starting Test: Adidas Refund Exceeding Limit Interception ===');
@@ -23,12 +23,11 @@ async function testAdidasAudit() {
     // 3. Query pending_approvals to confirm it was successfully intercepted and written to Postgres!
     const approvalsRes = await db.execute(
       'SELECT id, thread_id, action_type, action_payload, status FROM pending_approvals WHERE thread_id = $1',
-      [threadId]
+      [threadId],
     );
 
     console.log('\n=== Database pending_approvals rows for this thread ===');
     console.log(JSON.stringify(approvalsRes.rows, null, 2));
-
   } catch (error: any) {
     console.error('\n❌ Execution Failed with Error:');
     console.error('Message:', error.message);

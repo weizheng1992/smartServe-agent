@@ -1,6 +1,7 @@
 export default function (output: string, context: any) {
   try {
-    const expectedIntents = context.vars.expectedIntents;
+    const expectedIntentsRaw = context.vars.expectedIntents;
+    const expectedIntents = Array.isArray(expectedIntentsRaw) ? expectedIntentsRaw : [expectedIntentsRaw];
     if (!expectedIntents) {
       return { pass: true, score: 1.0, reason: 'No expected intents defined to compute F1' };
     }

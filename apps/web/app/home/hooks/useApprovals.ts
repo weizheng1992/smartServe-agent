@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { UserSession, Message } from "./types";
+import { useEffect, useRef, useState } from 'react';
+import type { Message, UserSession } from './types';
 
 interface UseApprovalsProps {
   currentUser: UserSession | null;
@@ -24,10 +24,10 @@ export function useApprovals({
 }: UseApprovalsProps) {
   const [allApprovals, setAllApprovals] = useState<any[]>([]);
   const [pendingApprovalsList, setPendingApprovalsList] = useState<any[]>([]);
-  const [rejectionInput, setRejectionReason] = useState("");
-  const [activeTab, setActiveTab] = useState<"CHAT_DESK" | "AUDIT_DESK">("CHAT_DESK");
+  const [rejectionInput, setRejectionReason] = useState('');
+  const [activeTab, setActiveTab] = useState<'CHAT_DESK' | 'AUDIT_DESK'>('CHAT_DESK');
   const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(null);
-  const [auditFilter, setAuditFilter] = useState<"ALL" | "WAITING" | "APPROVED" | "REJECTED" | "EXPIRED">("WAITING");
+  const [auditFilter, setAuditFilter] = useState<'ALL' | 'WAITING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'>('WAITING');
 
   const lastApprovalsStateRef = useRef<Record<string, string>>({});
 
@@ -38,13 +38,13 @@ export function useApprovals({
 
     const fetchApprovals = async () => {
       try {
-        const res = await fetch("/api/chat/approvals");
+        const res = await fetch('/api/chat/approvals');
         const data = await res.json();
         if (data.success && data.approvals) {
           setAllApprovals(data.approvals); // 全量存入大盘状态
           if (activeThreadId) {
             const activeApprovals = data.approvals.filter(
-              (a: any) => a.threadId === activeThreadId && a.status === "waiting"
+              (a: any) => a.threadId === activeThreadId && a.status === 'waiting',
             );
             setPendingApprovalsList(activeApprovals);
 
@@ -58,7 +58,7 @@ export function useApprovals({
               if (app.threadId === activeThreadId) {
                 currentStatuses[app.id] = app.status;
                 const prevStatus = lastApprovalsStateRef.current[app.id];
-                if (prevStatus === "waiting" && app.status !== "waiting") {
+                if (prevStatus === 'waiting' && app.status !== 'waiting') {
                   stateChanged = true;
                 }
               }
@@ -70,13 +70,17 @@ export function useApprovals({
             };
 
             if (stateChanged) {
-              console.log("[HITL Sync Detector] 🩺 Detected active thread approval status change! Initiating multi-turn polling (6 turns) to wait for agent response.");
+              console.log(
+                '[HITL Sync Detector] 🩺 Detected active thread approval status change! Initiating multi-turn polling (6 turns) to wait for agent response.',
+              );
               syncPollCountRef.current = 6; // 连续 6 次（共 12 秒）高敏捷静默刷新
               loadHistory(activeThreadId);
               fetchThreads();
             } else if (syncPollCountRef.current > 0) {
               syncPollCountRef.current -= 1;
-              console.log(`[HITL Sync Detector] ⏳ Continuing multi-turn polling. Remaining turns: ${syncPollCountRef.current}`);
+              console.log(
+                `[HITL Sync Detector] ⏳ Continuing multi-turn polling. Remaining turns: ${syncPollCountRef.current}`,
+              );
               loadHistory(activeThreadId);
               fetchThreads();
             }
@@ -85,7 +89,7 @@ export function useApprovals({
           }
         }
       } catch (err) {
-        console.error("Failed to fetch approvals:", err);
+        console.error('Failed to fetch approvals:', err);
       }
     };
 
@@ -96,45 +100,45 @@ export function useApprovals({
   }, [activeThreadId, loadHistory, fetchThreads, syncPollCountRef]);
 
   // 2. 提交管理员审批决议（Approved / Rejected）并恢复 Agent 决策执行
-  const handleApprovalAction = async (approvalId: string, action: "approve" | "reject") => {
+  const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {
     setIsSubmitting(true);
     setPendingApprovalsList([]); // 立即清空，提供瞬时界面反馈
 
     const resumeLoaderMsg: Message = {
-      role: "assistant",
-      content: "",
+      role: 'assistant',
+      content: '',
       isLoading: true,
-      jobId: "resume-pending-job",
+      jobId: 'resume-pending-job',
     };
     setMessages((prev) => [...prev, resumeLoaderMsg]);
 
     try {
-      const res = await fetch("/api/chat/approvals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/chat/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           approvalId,
           action,
-          rejectionReason: action === "reject" ? rejectionInput || "退款申请不符合政策要求。" : "",
+          rejectionReason: action === 'reject' ? rejectionInput || '退款申请不符合政策要求。' : '',
         }),
       });
       const data = await res.json();
       if (data.success && data.jobId) {
-        setRejectionReason(""); // 清空拒绝文本
-        setMessages((prev) => prev.map((m) => (m.jobId === "resume-pending-job" ? { ...m, jobId: data.jobId } : m)));
+        setRejectionReason(''); // 清空拒绝文本
+        setMessages((prev) => prev.map((m) => (m.jobId === 'resume-pending-job' ? { ...m, jobId: data.jobId } : m)));
         // 重建 SSE 物理通道，无缝订阅新触发的恢复执行流
         await triggerStream(data.jobId);
       } else {
-        throw new Error(data.error || "审批决议提交失败");
+        throw new Error(data.error || '审批决议提交失败');
       }
     } catch (err: any) {
       console.error(err);
       setMessages((prev) =>
         prev.map((m) =>
-          m.jobId === "resume-pending-job"
-            ? { role: "assistant", content: `审批流恢复出错: ${err.message || "内部处理异常"}` }
-            : m
-        )
+          m.jobId === 'resume-pending-job'
+            ? { role: 'assistant', content: `审批流恢复出错: ${err.message || '内部处理异常'}` }
+            : m,
+        ),
       );
       setIsSubmitting(false);
     }

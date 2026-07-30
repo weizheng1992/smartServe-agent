@@ -3,7 +3,7 @@ export interface Approval {
   threadId: string;
   actionType: string;
   actionPayload: any;
-  status: "waiting" | "approved" | "rejected" | "expired" | "cancelled";
+  status: 'waiting' | 'approved' | 'rejected' | 'expired' | 'cancelled';
   deadline: string;
   createdAt: string;
   businessId?: string;
@@ -14,7 +14,7 @@ export interface PreferenceFact {
   userId: string;
   fact: string;
   confidence: number;
-  status: "approved" | "pending" | "rejected";
+  status: 'approved' | 'pending' | 'rejected';
   source: string;
   createdAt: string;
   businessId: string;

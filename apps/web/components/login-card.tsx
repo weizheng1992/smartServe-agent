@@ -1,7 +1,20 @@
 'use client';
 
-import { ArrowRight, Button, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Input, Loader2, Sparkles, XCircle } from 'ui';
 import type React from 'react';
+import {
+  ArrowRight,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+  Input,
+  Loader2,
+  Sparkles,
+  XCircle,
+} from 'ui';
 
 interface LoginCardProps {
   email: string;

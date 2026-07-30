@@ -1,6 +1,6 @@
-import type React from "react";
-import { CheckCircle2 } from "ui";
-import { Approval } from "../hooks/types";
+import type React from 'react';
+import { CheckCircle2 } from 'ui';
+import type { Approval } from '../hooks/types';
 
 interface HistoricalAuditsProps {
   auditedApprovals: Approval[];
@@ -39,14 +39,14 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
               ) : (
                 auditedApprovals.map((app) => {
                   const args = app.actionPayload?.args || {};
-                  const comment = app.actionPayload?.rejectionReason || "";
+                  const comment = app.actionPayload?.rejectionReason || '';
 
                   return (
                     <tr key={app.id} className="hover:bg-slate-950/20 transition-colors">
                       <td className="p-4 font-mono text-slate-300">{app.id.substring(0, 8)}...</td>
                       <td className="p-4 font-mono">
                         <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-850 text-slate-400 font-semibold uppercase tracking-wider text-[9px]">
-                          {app.businessId || "ecommerce"}
+                          {app.businessId || 'ecommerce'}
                         </span>
                       </td>
                       <td className="p-4 font-bold text-slate-300">{app.actionType}</td>
@@ -67,11 +67,11 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
                       <td className="p-4">
                         <span
                           className={`px-2.5 py-0.5 rounded-full font-bold text-[9px] uppercase tracking-wider inline-block ${
-                            app.status === "approved"
-                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/15"
-                              : app.status === "rejected"
-                                ? "bg-rose-500/10 text-rose-400 border border-rose-500/15"
-                                : "bg-slate-500/10 text-slate-400 border border-slate-800"
+                            app.status === 'approved'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15'
+                              : app.status === 'rejected'
+                                ? 'bg-rose-500/10 text-rose-400 border border-rose-500/15'
+                                : 'bg-slate-500/10 text-slate-400 border border-slate-800'
                           }`}
                         >
                           {app.status}
@@ -79,10 +79,10 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
                       </td>
                       <td className="p-4 font-mono text-slate-500">
                         {new Date(app.createdAt).toLocaleString([], {
-                          month: "2-digit",
-                          day: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
                         })}
                       </td>
                     </tr>

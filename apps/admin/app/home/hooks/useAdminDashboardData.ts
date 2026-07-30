@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
-import { Approval, PreferenceFact, AnalyticsSummary } from "./types";
+import { useCallback, useEffect, useState } from 'react';
+import type { AnalyticsSummary, Approval, PreferenceFact } from './types';
 
 export function useAdminDashboardData() {
-  const [selectedMerchant, setSelectedMerchant] = useState<string>("ecommerce");
+  const [selectedMerchant, setSelectedMerchant] = useState<string>('ecommerce');
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [preferences, setPreferences] = useState<PreferenceFact[]>([]);
   const [summary, setSummary] = useState<AnalyticsSummary>({
@@ -20,7 +20,7 @@ export function useAdminDashboardData() {
     setIsRefreshing(true);
     try {
       // 1. Fetch approvals list
-      const appRes = await fetch("/api/chat/approvals");
+      const appRes = await fetch('/api/chat/approvals');
       const appData = await appRes.json();
       if (appData.success && appData.approvals) {
         setApprovals(appData.approvals);
@@ -34,13 +34,13 @@ export function useAdminDashboardData() {
       }
 
       // 3. Fetch user preference facts list
-      const prefRes = await fetch("/api/chat/preferences");
+      const prefRes = await fetch('/api/chat/preferences');
       const prefData = await prefRes.json();
       if (prefData.success && prefData.preferences) {
         setPreferences(prefData.preferences);
       }
     } catch (err) {
-      console.error("[Dashboard Fetch Error]:", err);
+      console.error('[Dashboard Fetch Error]:', err);
     } finally {
       setIsRefreshing(false);
     }
@@ -52,17 +52,17 @@ export function useAdminDashboardData() {
     return () => clearInterval(interval);
   }, [fetchDashboardData]);
 
-  const handleApprovalAction = async (approvalId: string, action: "approve" | "reject") => {
+  const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {
     setSubmittingActionId(approvalId);
     try {
-      const reason = rejectionReasons[approvalId] || "";
-      const res = await fetch("/api/chat/approvals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const reason = rejectionReasons[approvalId] || '';
+      const res = await fetch('/api/chat/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           approvalId,
           action,
-          rejectionReason: action === "reject" ? reason || "退款申请不符合政策要求。" : "",
+          rejectionReason: action === 'reject' ? reason || '退款申请不符合政策要求。' : '',
         }),
       });
       const data = await res.json();
@@ -75,7 +75,7 @@ export function useAdminDashboardData() {
         });
         await fetchDashboardData();
       } else {
-        alert(data.error || "审批执行失败");
+        alert(data.error || '审批执行失败');
       }
     } catch (err: any) {
       alert(`审批流恢复出错: ${err.message || err}`);
@@ -84,18 +84,18 @@ export function useAdminDashboardData() {
     }
   };
 
-  const handlePreferenceAction = async (preferenceId: string, action: "approve" | "reject" | "delete") => {
+  const handlePreferenceAction = async (preferenceId: string, action: 'approve' | 'reject' | 'delete') => {
     try {
-      const res = await fetch("/api/chat/preferences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/chat/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preferenceId, action }),
       });
       const data = await res.json();
       if (data.success) {
         await fetchDashboardData();
       } else {
-        alert(data.error || "画像操作失败");
+        alert(data.error || '画像操作失败');
       }
     } catch (err: any) {
       alert(`画像操作异常: ${err.message || err}`);
@@ -104,10 +104,10 @@ export function useAdminDashboardData() {
 
   // Filter approvals that are waiting or historical, matching the selected merchant
   const pendingApprovals = approvals.filter(
-    (a) => a.status === "waiting" && (a.businessId || "ecommerce") === selectedMerchant
+    (a) => a.status === 'waiting' && (a.businessId || 'ecommerce') === selectedMerchant,
   );
   const auditedApprovals = approvals.filter(
-    (a) => a.status !== "waiting" && (a.businessId || "ecommerce") === selectedMerchant
+    (a) => a.status !== 'waiting' && (a.businessId || 'ecommerce') === selectedMerchant,
   );
 
   return {

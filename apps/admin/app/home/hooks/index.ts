@@ -1,2 +1,2 @@
-export * from "./types";
-export { useAdminDashboardData } from "./useAdminDashboardData";
+export * from './types';
+export { useAdminDashboardData } from './useAdminDashboardData';

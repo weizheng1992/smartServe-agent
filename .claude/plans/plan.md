@@ -1,25 +1,19 @@
-# Implementation Plan - Highly Optimizing Triage Node for Peak Performance
+# Implementation Plan - Fixing Order Status Leakage on Rejection and Bypassing Refund Approval
 
-To significantly improve the speed and responsiveness of the Triage execution stage, we will:
+To ensure that order refunds cannot bypass the human approval gate due to lookup fallbacks, and to prevent orders from appearing as "refunded" when an admin has explicitly rejected them, we will:
 
-1. **Optimize Anchor Pre-Caching (31x HTTP Request Reduction)**:
-   - Refactor `getAnchorVectors()` to batch-embed all 31 anchor phrases in a single LangChain API call using `embedModel.embedDocuments(allTexts)` instead of 31 parallel `embedQuery()` calls. This completely eliminates HTTP request pool blockages and connection establishment latencies.
+1. **Verify Current Order Status in `executor.node.ts` (Double-Refund Prevention)**:
+   - Query the current status of the order from the database before checking the amount or creating/evaluating approvals.
+   - If the order's status is already `'refunded'`, immediately halt and fail the step with an explicit error: `"该订单已经是已退款状态，禁止重复退款。"`. This prevents redundant tool executions and unnecessary pending approvals.
 
-2. **Establish a Global User Embedding Cache (Semantic Re-use)**:
-   - Create a global `Map<string, number[]>` in-memory cache inside `packages/engine/src/graph/nodes/triage.node.ts`.
-   - Introduce a wrapper `getEmbeddingWithCache(text: string): Promise<number[]>` to perform lookups and persist newly calculated embeddings.
-
-3. **Eliminate Redundant Embedding Calls (3x ➔ 1x Reduction)**:
-   - In the **Duplicate提问拦截 (Semantic Duplicate Shield)** block:
-     - Fetch current input's vector via `getEmbeddingWithCache(input)`.
-     - Fetch last user message's vector via `getEmbeddingWithCache(lastUserMsg.content)`. Since the previous user message was processed just prior, its embedding is already cached—resulting in a **100% cache hit** (0 extra network calls).
-   - In **Step 2 (Embedding Classifier)**:
-     - Fetch the user input's vector via `getEmbeddingWithCache(input)`—resulting in a **100% cache hit** (0 extra network calls).
-   - This changes the network embedding request pattern from:
-     - New queries: **3 network calls ➔ 1 network call**
-     - Repeated/Similar queries: **2 network calls ➔ 0 network calls**
+2. **Implement Fail-Secure Amount Defaulting (Under- Grounding Bypass Prevention)**:
+   - Change the default/fallback refund amount when the database lookup fails or parameters are missing from `99.99` to `999999.99` (fail-secure).
+   - This prevents any failed or un-grounded order checks from accidentally sliding under the automatic approval threshold (e.g., Nike: $150, Adidas: $120, Ecommerce: $100). Lookup failures will now always fail-secure and escalate to human audit.
 
 ## Verification Checklist
 
-- [ ] Modify `packages/engine/src/graph/nodes/triage.node.ts` to implement the caching and batching improvements.
-- [ ] Ensure full compilation and verify logic.
+- [ ] Query and check the order's current status in `executor.node.ts` before proceeding.
+- [ ] If status is already `'refunded'`, fail the subtask immediately and return early.
+- [ ] Change `let refundAmount = 99.99;` to `999999.99` as a fail-secure amount.
+- [ ] Ensure all fallbacks for amount parsing default to `999999.99` to prevent bypass.
+- [ ] Run standard linter `bun run lint` to verify clean compilation.

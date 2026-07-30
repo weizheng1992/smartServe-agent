@@ -1,39 +1,24 @@
 'use client';
 
-import { useEffect, useRef } from "react";
-import {
-  Button,
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-  Loader2,
-  ImageIcon,
-  X,
-} from "ui";
+import { useEffect, useRef } from 'react';
+import { Button, Card, CardContent, CardFooter, CardHeader, CardTitle, ImageIcon, Loader2, X } from 'ui';
 
 // Local Hooks
-import {
-  useAuth,
-  useChatThreads,
-  useChatMessages,
-  useApprovals,
-} from "./hooks";
+import { useApprovals, useAuth, useChatMessages, useChatThreads } from './hooks';
 
+import { APMPanel } from './components/APMPanel';
+import { AuditDesk } from './components/AuditDesk';
+import { ChatArea } from './components/ChatArea';
 // Local Components
-import { LeftSidebar } from "./components/LeftSidebar";
-import { ChatArea } from "./components/ChatArea";
-import { APMPanel } from "./components/APMPanel";
-import { AuditDesk } from "./components/AuditDesk";
+import { LeftSidebar } from './components/LeftSidebar';
 
 // Safely format timestamps into MM-DD HH:mm format without hydration mismatches or invalid parsing
 const formatFriendlyDate = (dateStr: any) => {
-  if (!dateStr) return "未知时间";
+  if (!dateStr) return '未知时间';
   const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return "未知时间";
+  if (Number.isNaN(d.getTime())) return '未知时间';
 
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const pad = (n: number) => String(n).padStart(2, '0');
   const month = pad(d.getMonth() + 1);
   const date = pad(d.getDate());
   const hours = pad(d.getHours());
@@ -62,7 +47,7 @@ export default function Home() {
     onThreadCreated: () => {
       setRunningDetails([]);
       setActivePlan(null);
-      setCurrentStepText("");
+      setCurrentStepText('');
     },
   });
 
@@ -121,7 +106,7 @@ export default function Home() {
   // 🌟 Auto Scroll to Bottom effect
   useEffect(() => {
     if (messages.length > 0) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
 
@@ -164,7 +149,7 @@ export default function Home() {
 
       {/* 中右侧大屏 */}
       <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
-        {activeTab === "CHAT_DESK" ? (
+        {activeTab === 'CHAT_DESK' ? (
           <>
             {/* Chatting window */}
             <ChatArea

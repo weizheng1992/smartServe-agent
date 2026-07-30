@@ -1,25 +1,25 @@
-import type React from "react";
+import type React from 'react';
 import {
-  Card,
-  CardHeader,
-  CardContent,
-  Badge,
-  Input,
-  Button,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  ShieldAlert,
   Activity,
-} from "ui";
-import { Approval } from "../hooks/types";
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CheckCircle2,
+  Input,
+  Loader2,
+  ShieldAlert,
+  XCircle,
+} from 'ui';
+import type { Approval } from '../hooks/types';
 
 interface PendingApprovalsProps {
   pendingApprovals: Approval[];
   rejectionReasons: Record<string, string>;
   setRejectionReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   submittingActionId: string | null;
-  handleApprovalAction: (approvalId: string, action: "approve" | "reject") => Promise<void>;
+  handleApprovalAction: (approvalId: string, action: 'approve' | 'reject') => Promise<void>;
 }
 
 export function PendingApprovals({
@@ -65,7 +65,10 @@ export function PendingApprovals({
                       {approval.actionType}
                     </span>
                   </div>
-                  <Badge variant="warning" className="text-[9px] font-mono bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border-transparent px-2 py-0.5">
+                  <Badge
+                    variant="warning"
+                    className="text-[9px] font-mono bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border-transparent px-2 py-0.5"
+                  >
                     Waiting Approval
                   </Badge>
                 </CardHeader>
@@ -76,7 +79,9 @@ export function PendingApprovals({
                   <div className="space-y-1 text-xs">
                     <div className="flex justify-between">
                       <span className="text-slate-500">商户租户:</span>
-                      <span className="font-mono text-indigo-400 font-bold uppercase">{approval.businessId || "ecommerce"}</span>
+                      <span className="font-mono text-indigo-400 font-bold uppercase">
+                        {approval.businessId || 'ecommerce'}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">工单 ID:</span>
@@ -90,8 +95,8 @@ export function PendingApprovals({
                       <span className="text-slate-500">截止日期:</span>
                       <span className="font-mono text-amber-400/80">
                         {new Date(approval.deadline).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
+                          hour: '2-digit',
+                          minute: '2-digit',
                         })}
                       </span>
                     </div>
@@ -116,7 +121,7 @@ export function PendingApprovals({
                   <div className="space-y-2">
                     <Input
                       type="text"
-                      value={rejectionReasons[approval.id] || ""}
+                      value={rejectionReasons[approval.id] || ''}
                       onChange={(e) => setRejectionReasons((prev) => ({ ...prev, [approval.id]: e.target.value }))}
                       placeholder="驳回请在此输入拒绝理由..."
                       className="bg-slate-950 border-slate-850 text-slate-100 placeholder-slate-600 focus-visible:ring-indigo-500"
@@ -125,7 +130,7 @@ export function PendingApprovals({
                     <div className="flex gap-2 pt-1">
                       <Button
                         type="button"
-                        onClick={() => handleApprovalAction(approval.id, "approve")}
+                        onClick={() => handleApprovalAction(approval.id, 'approve')}
                         disabled={isSubmitting}
                         className="flex-1 h-8 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-1.5"
                       >
@@ -140,7 +145,7 @@ export function PendingApprovals({
                       </Button>
                       <Button
                         type="button"
-                        onClick={() => handleApprovalAction(approval.id, "reject")}
+                        onClick={() => handleApprovalAction(approval.id, 'reject')}
                         disabled={isSubmitting}
                         className="flex-1 h-8 text-[11px] font-bold bg-rose-600 hover:bg-rose-500 text-white rounded-xl flex items-center justify-center gap-1.5"
                       >

@@ -1,7 +1,7 @@
 export interface Subtask {
   id: string;
   description: string;
-  status: "pending" | "executing" | "completed" | "failed";
+  status: 'pending' | 'executing' | 'completed' | 'failed';
   result?: any;
 }
 
@@ -12,7 +12,7 @@ export interface TaskPlan {
 }
 
 export interface Message {
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: string;
   plan?: TaskPlan;
   jobId?: string;
