@@ -329,6 +329,21 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     '\n',
   );
 
+  // Load saved task state (if any) to support stateless suspension & recovery
+  let savedTaskPlan: any = undefined;
+  const isResuming = inputMessage.startsWith('System:');
+  if (isResuming) {
+    try {
+      const state = await taskMemory.getTaskState();
+      if (state) {
+        savedTaskPlan = state;
+        console.log(`[buildGraph] 🔄 Resuming suspended flow, loaded saved taskPlan:`, JSON.stringify(savedTaskPlan));
+      }
+    } catch (err) {
+      console.warn('[buildGraph] Failed to load saved task plan from taskMemory:', err);
+    }
+  }
+
   // Build and execute compiled graph
   const graphApp = buildAgentGraph().compile();
 
@@ -342,6 +357,7 @@ export async function runAgent(threadId: string, userId: string, inputMessage: s
     ragDocuments: ragDocs,
     businessConfig: dynamicConfig,
     shortMemory: historyMsgs,
+    taskPlan: savedTaskPlan,
     loopCount: 0,
   };
 

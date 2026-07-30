@@ -48,8 +48,45 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
     });
   }
 
-  // 🧠 Cognitive State Backtracking: 检查是否有先前的被退款拒绝步骤，如果有，将管理员反馈作为关键上下文喂给 Planner 促其重新规划路径
+  // 🛡️ Plan-Preservation Bypass Check (HOT-RESUME):
+  // If we are resuming from a suspended taskPlan that was waiting for approval, and the administrator approved
+  // or user cancelled (meaning NOT rejected), we bypass LLM planning and reuse the existing plan entirely to preserve state!
   const priorPlan = state.taskPlan;
+  if (priorPlan && priorPlan.subtasks && priorPlan.subtasks.length > 0) {
+    const currentStep = priorPlan.subtasks[priorPlan.currentStepIndex];
+    if (currentStep && (currentStep.result?.waitingForApproval || currentStep.status === 'pending')) {
+      const { pendingApprovals: dbPendingApprovals, getDrizzle } = require('db');
+      const { eq, desc } = require('drizzle-orm');
+      const drizzle = getDrizzle();
+      if (drizzle) {
+        try {
+          const approvalsList = await drizzle
+            .select()
+            .from(dbPendingApprovals)
+            .where(eq(dbPendingApprovals.threadId, state.threadId))
+            .orderBy(desc(dbPendingApprovals.createdAt))
+            .limit(1);
+          const latestApproval = approvalsList[0];
+          if (latestApproval && (latestApproval.status === 'approved' || latestApproval.status === 'cancelled')) {
+            console.log(`[Planner Bypass] 🔄 Step is ${latestApproval.status}. Reusing the existing taskPlan.`);
+            if (state.jobId) {
+              agentEventEmitter.emit(`${state.jobId}:status`, {
+                status: 'executing',
+                node: 'planner',
+                message: `🔄 恢复计划：检测到历史执行工单已人工审核决议为 [${latestApproval.status === 'approved' ? '核准' : '取消'}]，跳过大模型规划，100% 物理复用历史步骤并精确恢复执行流！`,
+                plan: priorPlan,
+              });
+            }
+            return { taskPlan: priorPlan, globalTransitionsCount: 1 };
+          }
+        } catch (dbErr) {
+          console.warn('[Planner Bypass] Failed to check approval status for bypass:', dbErr);
+        }
+      }
+    }
+  }
+
+  // 🧠 Cognitive State Backtracking: 检查是否有先前的被退款拒绝步骤，如果有，将管理员反馈作为关键上下文喂给 Planner 促其重新规划路径
   let rejectionContext = '';
   if (priorPlan?.subtasks) {
     const rejectedStep = priorPlan.subtasks.find((st) => st.status === 'failed' && st.result?.rejectedByAdmin);

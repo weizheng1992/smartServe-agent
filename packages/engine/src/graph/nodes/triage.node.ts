@@ -105,6 +105,29 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   const shortMemory = new ShortMemory(threadId);
   const historyMsgs = await shortMemory.getMessages();
 
+  // 🛡️ System-Resume Bypass Check:
+  // If we are restoring/resuming a suspended execution flow, the input starts with "System:".
+  // We bypass the entire triage pipeline, skip duplicate/greeting checks, and route directly to the execution flow.
+  if (input.startsWith('System:')) {
+    console.log(`[Triage System-Resume] 🔄 Resuming suspended flow with input: "${input}"`);
+    // Determine intent from the loaded taskPlan if available, otherwise default to refund
+    const hasRefundTask = state.taskPlan?.subtasks?.some(
+      (st: any) => st.description.toLowerCase().includes('refund') || st.result?.approvalId,
+    );
+    const intent = hasRefundTask ? 'refund' : 'order_status';
+    const intents = [{ intent, confidence: 1.0 }];
+
+    if (state.jobId) {
+      agentEventEmitter.emit(`${state.jobId}:status`, {
+        status: 'executing',
+        node: 'triage',
+        message: `🔄 恢复执行流：检测到主管人工决议，正在快速解挂并拉起后续处理步骤...`,
+      });
+    }
+
+    return { intents, shortMemory: historyMsgs };
+  }
+
   if (state.jobId) {
     agentEventEmitter.emit(`${state.jobId}:status`, {
       status: 'executing',
@@ -168,7 +191,14 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
         }
       }
 
-      if (isExactlySame || isSemanticallySame) {
+      // 🛡️ 异常/熔断防污染机制 (Error/Circuit-Breaker Poisoning Prevention):
+      // 如果上一轮回答是系统熔断文案或故障文案，必须跳过重复提问拦截，允许用户全新重试，避免死锁在熔断界面！
+      const isLastResponseFailed = lastAssistantMsg.content.includes('熔断并终止') ||
+                                   lastAssistantMsg.content.includes('网络出现短暂波动') ||
+                                   lastAssistantMsg.content.includes('资金双写安全保障') ||
+                                   lastAssistantMsg.content.includes('接口响应延迟');
+
+      if ((isExactlySame || isSemanticallySame) && !isLastResponseFailed) {
         console.log('[Triage Duplicate Shield] 🎯 成功拦截重复提问！秒级复用历史答复。');
 
         const prefixMsg = isExactlySame
@@ -308,14 +338,14 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   const contextMsgs = historyMsgs.slice(0, -1);
   const recentHistory = contextMsgs
     .slice(-4) // Keep it small and lightweight for peak speed
-    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-    .join("\n");
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n');
 
   const prompt = `You are an expert intent classifier for an e-commerce support system.
 Your job is to determine the user\'s intents based on their latest input AND the recent conversation context.
 
 Recent Conversation Context:
-${recentHistory || "No previous history."}
+${recentHistory || 'No previous history.'}
 
 Latest User Input: "${input}"
 

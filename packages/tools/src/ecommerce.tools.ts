@@ -71,8 +71,12 @@ export const getOrderStatus = {
 
     const cacheKey = `cache:order_status:${orderId}`;
 
+    const isProd = process.env.NODE_ENV === 'production';
+    const cacheDisabled = process.env.DISABLE_TOOL_CACHE === 'true';
+    const shouldReadCache = isProd && !cacheDisabled;
+
     // 1. 优先尝试使用 Redis 物理分布式缓存
-    if (useRedis && redis) {
+    if (useRedis && redis && shouldReadCache) {
       try {
         const cachedStr = await redis.get(cacheKey);
         if (cachedStr) {
@@ -91,7 +95,7 @@ export const getOrderStatus = {
     // 2. 备用 Local Map 本地缓存
     const now = Date.now();
     const cached = orderStatusCache.get(orderId);
-    if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    if (cached && now - cached.timestamp < CACHE_TTL_MS && shouldReadCache) {
       if (!sessionUserId || cached.data.userId === sessionUserId) {
         console.log(`[Tool Cache Hit] 🎯 内存 Local Map 命中！直接返回 Order ${orderId} 物流数据！`);
         return cached.data;

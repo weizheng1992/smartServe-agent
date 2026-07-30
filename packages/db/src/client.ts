@@ -69,6 +69,15 @@ export interface MemoryDatabaseState {
     createdAt: string;
     created_at: string;
   }>;
+  taskMemory: Map<
+    string,
+    {
+      id: string;
+      threadId: string;
+      pendingIntents: any;
+      updatedAt: string;
+    }
+  >;
 }
 
 const globalForDb = global as unknown as {
@@ -230,6 +239,15 @@ const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
   ],
   messages: [],
   pendingApprovals: [],
+  taskMemory: new Map<
+    string,
+    {
+      id: string;
+      threadId: string;
+      pendingIntents: any;
+      updatedAt: string;
+    }
+  >(),
 };
 
 if (process.env.NODE_ENV !== 'production') {
@@ -485,6 +503,120 @@ export class FakePool {
 
     if (s.toUpperCase().includes('FROM PENDING_APPROVALS') || s.toUpperCase().includes('FROM "PENDING_APPROVALS"')) {
       return { rows: memoryDb.pendingApprovals } as DBQueryResult<unknown>;
+    }
+
+    if (s.toUpperCase().includes('FROM TASK_MEMORY') || s.toUpperCase().includes('FROM "TASK_MEMORY"')) {
+      let threadId = params && typeof params[0] === 'string' ? params[0] : '';
+      if (!threadId) {
+        const threadIdMatch =
+          s.match(/thread_id\s*=\s*['"]([^'"]+)['"]/i) || s.match(/threadId\s*=\s*['"]([^'"]+)['"]/i);
+        if (threadIdMatch) {
+          threadId = threadIdMatch[1];
+        }
+      }
+      const record = threadId ? memoryDb.taskMemory.get(threadId) : null;
+      const mappedRecord = record
+        ? {
+            id: record.id,
+            threadId: record.threadId,
+            thread_id: record.threadId,
+            pendingIntents: record.pendingIntents,
+            pending_intents: record.pendingIntents,
+            updatedAt: record.updatedAt,
+            updated_at: record.updatedAt,
+          }
+        : null;
+      return { rows: mappedRecord ? [mappedRecord] : [] } as DBQueryResult<unknown>;
+    }
+
+    if (s.toUpperCase().includes('INSERT INTO TASK_MEMORY') || s.toUpperCase().includes('INSERT INTO "TASK_MEMORY"')) {
+      let threadId = '';
+      let pendingIntents: any = null;
+      const fieldsMatch = s.match(/\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+      if (fieldsMatch && params) {
+        const fields = fieldsMatch[1].split(',').map((f) => f.trim().replace(/['"`]/g, ''));
+        const threadIdIdx = fields.findIndex((f) => f === 'thread_id' || f === 'threadId');
+        const pendingIntentsIdx = fields.findIndex((f) => f === 'pending_intents' || f === 'pendingIntents');
+        if (threadIdIdx !== -1) threadId = String(params[threadIdIdx]);
+        if (pendingIntentsIdx !== -1) {
+          const raw = params[pendingIntentsIdx];
+          pendingIntents = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        }
+      } else if (params) {
+        if (params.length === 3) {
+          threadId = String(params[0]);
+          const raw = params[1];
+          pendingIntents = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } else if (params.length === 4) {
+          threadId = String(params[1]);
+          const raw = params[2];
+          pendingIntents = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        }
+      }
+      if (threadId) {
+        memoryDb.taskMemory.set(threadId, {
+          id: require('node:crypto').randomUUID(),
+          threadId,
+          pendingIntents,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return { rows: [] };
+    }
+
+    if (
+      s.toUpperCase().includes('UPDATE') &&
+      (s.toUpperCase().includes('TASK_MEMORY') || s.toUpperCase().includes('"TASK_MEMORY"'))
+    ) {
+      let threadId = '';
+      let pendingIntents: any = null;
+      if (params) {
+        const setMatch = s.match(/SET\s+([^WHERE]+)/i);
+        const whereMatch = s.match(/WHERE\s+(.+)/i);
+        if (setMatch) {
+          const sets = setMatch[1].split(',').map((x) => x.trim().replace(/['"`]/g, ''));
+          const pendingIntentsIdx = sets.findIndex(
+            (x) => x.startsWith('pending_intents') || x.startsWith('pendingIntents'),
+          );
+          if (pendingIntentsIdx !== -1) {
+            const raw = params[pendingIntentsIdx];
+            pendingIntents = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          }
+        }
+        if (whereMatch) {
+          const match =
+            whereMatch[1].match(/thread_id\s*=\s*\$(\d+)/i) || whereMatch[1].match(/threadId\s*=\s*\$(\d+)/i);
+          if (match) {
+            const idx = Number.parseInt(match[1], 10) - 1;
+            if (idx >= 0 && idx < params.length) {
+              threadId = String(params[idx]);
+            }
+          }
+        }
+      }
+      if (!threadId) {
+        const match =
+          s.match(/WHERE\s+["']?thread_id["']?\s*=\s*['"]([^'"]+)['"]/i) ||
+          s.match(/WHERE\s+["']?threadId["']?\s*=\s*['"]([^'"]+)['"]/i);
+        if (match) threadId = match[1];
+      }
+      if (threadId) {
+        const record = memoryDb.taskMemory.get(threadId);
+        if (record) {
+          if (pendingIntents !== null) {
+            record.pendingIntents = pendingIntents;
+          }
+          record.updatedAt = new Date().toISOString();
+        } else {
+          memoryDb.taskMemory.set(threadId, {
+            id: require('node:crypto').randomUUID(),
+            threadId,
+            pendingIntents,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+      return { rows: [] };
     }
 
     if (
