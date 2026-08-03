@@ -1,11 +1,11 @@
-import { Annotation } from '@langchain/langgraph';
+import { Annotation } from "@langchain/langgraph";
 
 export interface TaskPlan {
   goal: string;
   subtasks: {
     id: string;
     description: string;
-    status: 'pending' | 'executing' | 'completed' | 'failed';
+    status: "pending" | "executing" | "completed" | "failed";
     result?: any;
   }[];
   currentStepIndex: number;
@@ -22,11 +22,15 @@ export const AgentStateAnnotation = Annotation.Root({
   userId: Annotation<string>(),
   jobId: Annotation<string>({
     reducer: (x, y) => y,
-    default: () => '',
+    default: () => "",
   }),
 
   // Current inputs and history
   input: Annotation<string>(),
+  inputEmbedding: Annotation<number[]>({
+    reducer: (x, y) => y,
+    default: () => [],
+  }),
   history: Annotation<any[]>({
     reducer: (x, y) => x.concat(y),
     default: () => [],
@@ -42,7 +46,7 @@ export const AgentStateAnnotation = Annotation.Root({
   taskPlan: Annotation<TaskPlan>({
     reducer: (x, y) => ({ ...x, ...y }),
     default: () => ({
-      goal: '',
+      goal: "",
       subtasks: [],
       currentStepIndex: 0,
     }),
@@ -68,16 +72,16 @@ export const AgentStateAnnotation = Annotation.Root({
   businessConfig: Annotation<any>({
     reducer: (x, y) => ({ ...x, ...y }),
     default: () => ({
-      businessId: 'ecommerce',
+      businessId: "ecommerce",
       systemPrompt:
-        'You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.',
+        "You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.",
       intents: {
-        order_status: { description: 'Track or check order delivery status.' },
-        refund: { description: 'Process or request refunds.' },
-        general_query: { description: 'General customer questions.' },
+        order_status: { description: "Track or check order delivery status." },
+        refund: { description: "Process or request refunds." },
+        general_query: { description: "General customer questions." },
       },
-      tools: ['getOrderStatus', 'processRefund', 'listUserOrders'],
-      executionMode: 'plan-and-execute',
+      tools: ["getOrderStatus", "processRefund", "listUserOrders"],
+      executionMode: "plan-and-execute",
       confidenceThresholds: { high: 0.85, mid: 0.6 },
       refundAutoApprovalLimit: 100, // 默认超过 $100 的退款必须人工审核，低于 $100 的自动放行
     }),
@@ -86,7 +90,7 @@ export const AgentStateAnnotation = Annotation.Root({
   // Final formulation output
   output: Annotation<string>({
     reducer: (x, y) => y,
-    default: () => '',
+    default: () => "",
   }),
 
   // Loop control counters
@@ -112,24 +116,29 @@ export const AgentStateAnnotation = Annotation.Root({
  * 彻底铲除 "Agent: undefined" / "Agent: null" 等隐形 Bug，确保大模型上下文 Prompt 绝对清爽。
  */
 export function buildHistoryContext(shortMemory: any[]): string {
-  if (!shortMemory || shortMemory.length === 0) return '';
+  if (!shortMemory || shortMemory.length === 0) return "";
 
   return shortMemory
     .map((m: any) => {
-      if (!m) return '';
-      const role = m.role === 'user' ? 'Customer' : m.role === 'system' ? 'System' : 'Agent';
+      if (!m) return "";
+      const role =
+        m.role === "user"
+          ? "Customer"
+          : m.role === "system"
+            ? "System"
+            : "Agent";
       const content = m.content;
       if (
         content === undefined ||
         content === null ||
-        String(content).trim() === '' ||
-        String(content) === 'undefined' ||
-        String(content) === 'null'
+        String(content).trim() === "" ||
+        String(content) === "undefined" ||
+        String(content) === "null"
       ) {
-        return '';
+        return "";
       }
       return `${role}: "${String(content).trim()}"`;
     })
-    .filter((line: string) => line !== '')
-    .join('\n');
+    .filter((line: string) => line !== "")
+    .join("\n");
 }

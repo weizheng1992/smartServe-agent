@@ -1,7 +1,7 @@
-import { type NodePgDatabase, drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-import type { Message, Order } from './schema';
-import * as schema from './schema';
+import { type NodePgDatabase, drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import type { Message, Order } from "./schema";
+import * as schema from "./schema";
 
 export interface DBQueryResult<T> {
   rows: T[];
@@ -16,7 +16,14 @@ export interface MemoryDatabaseState {
   users: Map<string, { id: string; email: string; createdAt: string }>;
   threads: Map<
     string,
-    { id: string; userId: string; businessId: string; status: string; createdAt: string; updatedAt: string }
+    {
+      id: string;
+      userId: string;
+      businessId: string;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+    }
   >;
   orders: Map<
     string,
@@ -88,120 +95,132 @@ const globalForDb = global as unknown as {
 const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
   users: new Map<string, { id: string; email: string; createdAt: string }>([
     [
-      '83d67d4e-104c-4325-8aa7-10d4389fc725',
-      { id: '83d67d4e-104c-4325-8aa7-10d4389fc725', email: 'test@example.com', createdAt: new Date().toISOString() },
+      "83d67d4e-104c-4325-8aa7-10d4389fc725",
+      {
+        id: "83d67d4e-104c-4325-8aa7-10d4389fc725",
+        email: "test@example.com",
+        createdAt: new Date().toISOString(),
+      },
     ],
   ]),
   threads: new Map<
     string,
-    { id: string; userId: string; businessId: string; status: string; createdAt: string; updatedAt: string }
+    {
+      id: string;
+      userId: string;
+      businessId: string;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+    }
   >(),
   orders: new Map([
     [
-      'ORD-98712',
+      "ORD-98712",
       {
-        order_id: 'ORD-98712',
-        status: 'shipped',
-        carrier: 'FedEx',
-        tracking_number: '1234567890',
-        estimated_delivery: '2026-07-20',
-        user_id: '83d67d4e-104c-4325-8aa7-10d4389fc725',
-        business_id: 'nike',
+        order_id: "ORD-98712",
+        status: "shipped",
+        carrier: "FedEx",
+        tracking_number: "1234567890",
+        estimated_delivery: "2026-07-20",
+        user_id: "83d67d4e-104c-4325-8aa7-10d4389fc725",
+        business_id: "nike",
         total_amount: 139.99,
       },
     ],
     [
-      'ORD-55555',
+      "ORD-55555",
       {
-        order_id: 'ORD-55555',
-        status: 'completed',
-        carrier: 'SF Express',
-        tracking_number: 'SF9876543210',
-        estimated_delivery: '2026-07-25',
-        user_id: '83d67d4e-104c-4325-8aa7-10d4389fc725',
-        business_id: 'ecommerce',
+        order_id: "ORD-55555",
+        status: "completed",
+        carrier: "SF Express",
+        tracking_number: "SF9876543210",
+        estimated_delivery: "2026-07-25",
+        user_id: "83d67d4e-104c-4325-8aa7-10d4389fc725",
+        business_id: "ecommerce",
         total_amount: 49.99,
       },
     ],
     [
-      'ORD-ADIDAS-OK',
+      "ORD-ADIDAS-OK",
       {
-        order_id: 'ORD-ADIDAS-OK',
-        status: 'delivered',
-        carrier: 'SF Express',
-        tracking_number: 'SF1234567',
-        estimated_delivery: '2026-07-22',
-        user_id: '83d67d4e-104c-4325-8aa7-10d4389fc725',
-        business_id: 'adidas',
+        order_id: "ORD-ADIDAS-OK",
+        status: "delivered",
+        carrier: "SF Express",
+        tracking_number: "SF1234567",
+        estimated_delivery: "2026-07-22",
+        user_id: "83d67d4e-104c-4325-8aa7-10d4389fc725",
+        business_id: "adidas",
         total_amount: 12.5,
       },
     ],
     [
-      'ORD-ADIDAS-EXPIRED',
+      "ORD-ADIDAS-EXPIRED",
       {
-        order_id: 'ORD-ADIDAS-EXPIRED',
-        status: 'delivered',
-        carrier: 'DHL',
-        tracking_number: 'DHL88712',
-        estimated_delivery: '2026-06-10',
-        user_id: '83d67d4e-104c-4325-8aa7-10d4389fc725',
-        business_id: 'adidas',
+        order_id: "ORD-ADIDAS-EXPIRED",
+        status: "delivered",
+        carrier: "DHL",
+        tracking_number: "DHL88712",
+        estimated_delivery: "2026-06-10",
+        user_id: "83d67d4e-104c-4325-8aa7-10d4389fc725",
+        business_id: "adidas",
         total_amount: 179.99,
       },
     ],
   ]),
   products: new Map([
     [
-      'prod_nike_1',
+      "prod_nike_1",
       {
-        id: 'prod_nike_1',
-        business_id: 'nike',
-        name: 'Nike Pegasus Trail 5 越野跑鞋',
-        description: '专为户外越野打造，搭载高强度 React 缓震泡棉，耐磨抓地橡胶大底。',
+        id: "prod_nike_1",
+        business_id: "nike",
+        name: "Nike Pegasus Trail 5 越野跑鞋",
+        description:
+          "专为户外越野打造，搭载高强度 React 缓震泡棉，耐磨抓地橡胶大底。",
         price: 139.99,
         stock: 45,
       },
     ],
     [
-      'prod_nike_2',
+      "prod_nike_2",
       {
-        id: 'prod_nike_2',
-        business_id: 'nike',
-        name: 'Nike Element 户外防风连帽衫',
-        description: '高透气防泼水面料，反光条设计保障夜间户外运动安全。',
+        id: "prod_nike_2",
+        business_id: "nike",
+        name: "Nike Element 户外防风连帽衫",
+        description: "高透气防泼水面料，反光条设计保障夜间户外运动安全。",
         price: 85.0,
         stock: 30,
       },
     ],
     [
-      'prod_adidas_1',
+      "prod_adidas_1",
       {
-        id: 'prod_adidas_1',
-        business_id: 'adidas',
-        name: 'Adidas Ultraboost 1.0 经典跑鞋',
-        description: '卓越的 Boost 能量回馈中底，Primeknit 贴合针织鞋面。',
+        id: "prod_adidas_1",
+        business_id: "adidas",
+        name: "Adidas Ultraboost 1.0 经典跑鞋",
+        description: "卓越的 Boost 能量回馈中底，Primeknit 贴合针织鞋面。",
         price: 179.99,
         stock: 50,
       },
     ],
     [
-      'prod_adidas_2',
+      "prod_adidas_2",
       {
-        id: 'prod_adidas_2',
-        business_id: 'adidas',
-        name: 'Adidas Multi-Pack 运动专业棉袜 (3双装)',
-        description: '吸湿排汗，足弓加厚减震缓冲。',
+        id: "prod_adidas_2",
+        business_id: "adidas",
+        name: "Adidas Multi-Pack 运动专业棉袜 (3双装)",
+        description: "吸湿排汗，足弓加厚减震缓冲。",
         price: 12.5,
         stock: 120,
       },
     ],
     [
-      'prod_eco_1',
+      "prod_eco_1",
       {
-        id: 'prod_eco_1',
-        business_id: 'ecommerce',
-        name: '电商主站极绒亲肤抗静电保暖毯',
-        description: '高克重复合超细纤维，环保防静电印染，居家车载必备。',
+        id: "prod_eco_1",
+        business_id: "ecommerce",
+        name: "电商主站极绒亲肤抗静电保暖毯",
+        description: "高克重复合超细纤维，环保防静电印染，居家车载必备。",
         price: 49.99,
         stock: 85,
       },
@@ -209,30 +228,30 @@ const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
   ]),
   orderItems: [
     {
-      id: 'item_nike_1',
-      order_id: 'ORD-98712',
-      product_id: 'prod_nike_1',
+      id: "item_nike_1",
+      order_id: "ORD-98712",
+      product_id: "prod_nike_1",
       quantity: 1,
       price_at_purchase: 139.99,
     },
     {
-      id: 'item_eco_1',
-      order_id: 'ORD-55555',
-      product_id: 'prod_eco_1',
+      id: "item_eco_1",
+      order_id: "ORD-55555",
+      product_id: "prod_eco_1",
       quantity: 1,
       price_at_purchase: 49.99,
     },
     {
-      id: 'item_adidas_ok_1',
-      order_id: 'ORD-ADIDAS-OK',
-      product_id: 'prod_adidas_2',
+      id: "item_adidas_ok_1",
+      order_id: "ORD-ADIDAS-OK",
+      product_id: "prod_adidas_2",
       quantity: 1,
       price_at_purchase: 12.5,
     },
     {
-      id: 'item_adidas_exp_1',
-      order_id: 'ORD-ADIDAS-EXPIRED',
-      product_id: 'prod_adidas_1',
+      id: "item_adidas_exp_1",
+      order_id: "ORD-ADIDAS-EXPIRED",
+      product_id: "prod_adidas_1",
       quantity: 1,
       price_at_purchase: 179.99,
     },
@@ -250,17 +269,23 @@ const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
   >(),
 };
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== "production") {
   globalForDb.memoryDb = memoryDb;
 }
 
 export class FakePool {
   async connect(): Promise<{
-    query: (queryStr: string | FakeQueryObject, params?: unknown[]) => Promise<DBQueryResult<unknown>>;
+    query: (
+      queryStr: string | FakeQueryObject,
+      params?: unknown[],
+    ) => Promise<DBQueryResult<unknown>>;
     release: () => void;
   }> {
     return {
-      query: async (queryStr: string | FakeQueryObject, params?: unknown[]): Promise<DBQueryResult<unknown>> => {
+      query: async (
+        queryStr: string | FakeQueryObject,
+        params?: unknown[],
+      ): Promise<DBQueryResult<unknown>> => {
         return this.query(queryStr, params);
       },
       release: (): void => {},
@@ -269,28 +294,43 @@ export class FakePool {
 
   on(event: string, cb: (...args: unknown[]) => void): void {}
 
-  async query(queryStr: string | FakeQueryObject, params?: unknown[]): Promise<DBQueryResult<unknown>> {
-    const sqlText = typeof queryStr === 'string' ? queryStr : queryStr.text || '';
-    const s = sqlText.trim().replace(/\s+/g, ' ');
+  async query(
+    queryStr: string | FakeQueryObject,
+    params?: unknown[],
+  ): Promise<DBQueryResult<unknown>> {
+    const sqlText =
+      typeof queryStr === "string" ? queryStr : queryStr.text || "";
+    const s = sqlText.trim().replace(/\s+/g, " ");
 
-    if (s.toUpperCase().includes('CREATE TABLE')) {
+    if (s.toUpperCase().includes("CREATE TABLE")) {
       return { rows: [] };
     }
 
-    if (s.toUpperCase().includes('INSERT INTO ORDERS') || s.toUpperCase().includes('INSERT INTO "ORDERS"')) {
+    if (
+      s.toUpperCase().includes("INSERT INTO ORDERS") ||
+      s.toUpperCase().includes('INSERT INTO "ORDERS"')
+    ) {
       return { rows: [] };
     }
 
-    if (s.toUpperCase().includes('FROM ORDERS') || s.toUpperCase().includes('FROM "ORDERS"')) {
+    if (
+      s.toUpperCase().includes("FROM ORDERS") ||
+      s.toUpperCase().includes('FROM "ORDERS"')
+    ) {
       // Check if querying by user_id
-      const userMatch = s.match(/user_id\s*=\s*['"]([^'"]+)['"]/i) || s.match(/["']?user_id["']?\s*=\s*\$1/i);
+      const userMatch =
+        s.match(/user_id\s*=\s*['"]([^'"]+)['"]/i) ||
+        s.match(/["']?user_id["']?\s*=\s*\$1/i);
       if (userMatch) {
-        const userId = params && typeof params[0] === 'string' ? params[0] : 'u_default_id';
-        let rows = Array.from(memoryDb.orders.values()).filter((o) => o.user_id === userId);
+        const userId =
+          params && typeof params[0] === "string" ? params[0] : "u_default_id";
+        let rows = Array.from(memoryDb.orders.values()).filter(
+          (o) => o.user_id === userId,
+        );
 
         // Also check if querying with business_id constraint (multi-tenant filtering in emulator!)
         const businessMatch = s.match(/["']?business_id["']?\s*=\s*\$2/i);
-        if (businessMatch && params && typeof params[1] === 'string') {
+        if (businessMatch && params && typeof params[1] === "string") {
           const businessId = params[1];
           rows = rows.filter((o) => o.business_id === businessId);
         }
@@ -313,7 +353,9 @@ export class FakePool {
       const rawUserMatch = s.match(/["']user_id["']\s*=\s*['"]([^'"]+)['"]/i);
       if (rawUserMatch) {
         const userId = rawUserMatch[1];
-        const rows = Array.from(memoryDb.orders.values()).filter((o) => o.user_id === userId);
+        const rows = Array.from(memoryDb.orders.values()).filter(
+          (o) => o.user_id === userId,
+        );
 
         // Map columns to include both camelCase and snake_case fields for bulletproof compatibility
         const mappedRows = rows.map((o) => ({
@@ -329,9 +371,11 @@ export class FakePool {
         return { rows: mappedRows } as DBQueryResult<unknown>;
       }
 
-      let orderId = params && typeof params[0] === 'string' ? params[0] : '';
+      let orderId = params && typeof params[0] === "string" ? params[0] : "";
       if (!orderId) {
-        const orderIdMatch = s.match(/order_id\s*=\s*['"]([^'"]+)['"]/i) || s.match(/orderId\s*=\s*['"]([^'"]+)['"]/i);
+        const orderIdMatch =
+          s.match(/order_id\s*=\s*['"]([^'"]+)['"]/i) ||
+          s.match(/orderId\s*=\s*['"]([^'"]+)['"]/i);
         if (orderIdMatch) {
           orderId = orderIdMatch[1];
         }
@@ -348,76 +392,95 @@ export class FakePool {
             businessId: order.business_id,
           }
         : null;
-      return { rows: mappedOrder ? [mappedOrder] : [] } as DBQueryResult<unknown>;
+      return {
+        rows: mappedOrder ? [mappedOrder] : [],
+      } as DBQueryResult<unknown>;
     }
 
-    if (s.toUpperCase().includes('FROM PRODUCTS') || s.toUpperCase().includes('FROM "PRODUCTS"')) {
-      const businessId = params && typeof params[0] === 'string' ? params[0] : 'nike';
-      const rows = Array.from(memoryDb.products.values()).filter((p) => p.business_id === businessId);
-      return { rows } as DBQueryResult<unknown>;
-    }
-
-    if (s.toUpperCase().includes('FROM ORDER_ITEMS') || s.toUpperCase().includes('FROM "ORDER_ITEMS"')) {
-      let orderId = params && typeof params[0] === 'string' ? params[0] : '';
-      if (!orderId) {
-        const orderIdMatch = s.match(/order_id\s*=\s*['"]([^'"]+)['"]/i) || s.match(/orderId\s*=\s*['"]([^'"]+)['"]/i);
-        if (orderIdMatch) {
-          orderId = orderIdMatch[1];
-        }
-      }
-      const rows = orderId ? memoryDb.orderItems.filter((item) => item.order_id === orderId) : [];
+    if (
+      s.toUpperCase().includes("FROM PRODUCTS") ||
+      s.toUpperCase().includes('FROM "PRODUCTS"')
+    ) {
+      const businessId =
+        params && typeof params[0] === "string" ? params[0] : "nike";
+      const rows = Array.from(memoryDb.products.values()).filter(
+        (p) => p.business_id === businessId,
+      );
       return { rows } as DBQueryResult<unknown>;
     }
 
     if (
-      s.toUpperCase().includes('INSERT INTO PRODUCTS') ||
+      s.toUpperCase().includes("FROM ORDER_ITEMS") ||
+      s.toUpperCase().includes('FROM "ORDER_ITEMS"')
+    ) {
+      let orderId = params && typeof params[0] === "string" ? params[0] : "";
+      if (!orderId) {
+        const orderIdMatch =
+          s.match(/order_id\s*=\s*['"]([^'"]+)['"]/i) ||
+          s.match(/orderId\s*=\s*['"]([^'"]+)['"]/i);
+        if (orderIdMatch) {
+          orderId = orderIdMatch[1];
+        }
+      }
+      const rows = orderId
+        ? memoryDb.orderItems.filter((item) => item.order_id === orderId)
+        : [];
+      return { rows } as DBQueryResult<unknown>;
+    }
+
+    if (
+      s.toUpperCase().includes("INSERT INTO PRODUCTS") ||
       s.toUpperCase().includes('INSERT INTO "PRODUCTS"') ||
-      s.toUpperCase().includes('INSERT INTO ORDER_ITEMS') ||
+      s.toUpperCase().includes("INSERT INTO ORDER_ITEMS") ||
       s.toUpperCase().includes('INSERT INTO "ORDER_ITEMS"')
     ) {
       return { rows: [] };
     }
 
     if (
-      s.toUpperCase().includes('INSERT INTO SESSION_METRICS') ||
+      s.toUpperCase().includes("INSERT INTO SESSION_METRICS") ||
       s.toUpperCase().includes('INSERT INTO "SESSION_METRICS"')
     ) {
       return { rows: [] };
     }
 
-    if (s.toUpperCase().includes('FROM SESSION_METRICS') || s.toUpperCase().includes('FROM "SESSION_METRICS"')) {
-      const businessId = params && typeof params[0] === 'string' ? params[0] : 'ecommerce';
+    if (
+      s.toUpperCase().includes("FROM SESSION_METRICS") ||
+      s.toUpperCase().includes('FROM "SESSION_METRICS"')
+    ) {
+      const businessId =
+        params && typeof params[0] === "string" ? params[0] : "ecommerce";
       const mockMetrics = [
         {
-          id: 'm_1',
+          id: "m_1",
           business_id: businessId,
-          thread_id: 't_1',
+          thread_id: "t_1",
           total_tokens: 4200,
           calculated_cost_usd: 0.00063,
           node_transitions_count: 5,
-          resolution_status: 'resolved_auto',
+          resolution_status: "resolved_auto",
           avg_latency_ms: 3200,
           created_at: new Date(Date.now() - 3600000).toISOString(),
         },
         {
-          id: 'm_2',
+          id: "m_2",
           business_id: businessId,
-          thread_id: 't_2',
+          thread_id: "t_2",
           total_tokens: 8900,
           calculated_cost_usd: 0.001335,
           node_transitions_count: 6,
-          resolution_status: 'waiting_approval',
+          resolution_status: "waiting_approval",
           avg_latency_ms: 4500,
           created_at: new Date(Date.now() - 7200000).toISOString(),
         },
         {
-          id: 'm_3',
+          id: "m_3",
           business_id: businessId,
-          thread_id: 't_3',
+          thread_id: "t_3",
           total_tokens: 3100,
           calculated_cost_usd: 0.000465,
           node_transitions_count: 4,
-          resolution_status: 'resolved_auto',
+          resolution_status: "resolved_auto",
           avg_latency_ms: 2800,
           created_at: new Date(Date.now() - 10800000).toISOString(),
         },
@@ -425,34 +488,39 @@ export class FakePool {
       return { rows: mockMetrics } as DBQueryResult<unknown>;
     }
 
-    if (s.toUpperCase().includes('FROM RAG_DOCUMENTS') || s.toUpperCase().includes('FROM "RAG_DOCUMENTS"')) {
-      const businessId = params && typeof params[0] === 'string' ? params[0] : 'ecommerce';
+    if (
+      s.toUpperCase().includes("FROM RAG_DOCUMENTS") ||
+      s.toUpperCase().includes('FROM "RAG_DOCUMENTS"')
+    ) {
+      const businessId =
+        params && typeof params[0] === "string" ? params[0] : "ecommerce";
       const mockEmbedding = JSON.stringify(new Array(1536).fill(0.01)); // Mock 1536-dim standard embedding
       const fakeRags = [
         {
-          id: 'fake_rag_1',
-          business_id: 'ecommerce',
+          id: "fake_rag_1",
+          business_id: "ecommerce",
           chunk_text:
-            '对于我们电商主站的订单，普通用户享有自签收之日起 7 天无理由退换货权益。退回的商品必须保持吊牌完整、未拆封且不影响二次销售。非质量问题的退货由买家自行承担寄回运费。',
-          contextual_summary: '这段切片描述了电商主站（ecommerce）标准 7 天无理由退换货的前提条件与退货运费归属政策。',
+            "对于我们电商主站的订单，普通用户享有自签收之日起 7 天无理由退换货权益。退回的商品必须保持吊牌完整、未拆封且不影响二次销售。非质量问题的退货由买家自行承担寄回运费。",
+          contextual_summary:
+            "这段切片描述了电商主站（ecommerce）标准 7 天无理由退换货的前提条件与退货运费归属政策。",
           embedding: mockEmbedding,
         },
         {
-          id: 'fake_rag_2',
-          business_id: 'nike',
+          id: "fake_rag_2",
+          business_id: "nike",
           chunk_text:
-            'Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。',
+            "Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。",
           contextual_summary:
-            '这段切片详细说明了 Nike 会员尊享的 30 天无损无理由退货、已拆吊牌退货政策以及顺丰寄回服务。',
+            "这段切片详细说明了 Nike 会员尊享的 30 天无损无理由退货、已拆吊牌退货政策以及顺丰寄回服务。",
           embedding: mockEmbedding,
         },
         {
-          id: 'fake_rag_3',
-          business_id: 'adidas',
+          id: "fake_rag_3",
+          business_id: "adidas",
           chunk_text:
-            'Adidas 支持签收后 14 天退换货。所有商品必须保留原始包装盒与防伪扣，试穿时请勿弄脏鞋底。退货需要通过官方微信小程序预约快递员上门取件，不支持自行寄送。',
+            "Adidas 支持签收后 14 天退换货。所有商品必须保留原始包装盒与防伪扣，试穿时请勿弄脏鞋底。退货需要通过官方微信小程序预约快递员上门取件，不支持自行寄送。",
           contextual_summary:
-            '这段切片详细规定了 Adidas 的 14 天退换货时效、原始防伪包装要求，以及微信小程序预约取件的硬性物流约束。',
+            "这段切片详细规定了 Adidas 的 14 天退换货时效、原始防伪包装要求，以及微信小程序预约取件的硬性物流约束。",
           embedding: mockEmbedding,
         },
       ];
@@ -461,25 +529,34 @@ export class FakePool {
     }
 
     if (
-      s.toUpperCase().includes('INSERT INTO RAG_DOCUMENTS') ||
+      s.toUpperCase().includes("INSERT INTO RAG_DOCUMENTS") ||
       s.toUpperCase().includes('INSERT INTO "RAG_DOCUMENTS"')
     ) {
       return { rows: [] };
     }
 
-    if (s.toUpperCase().includes('FROM MESSAGES') || s.toUpperCase().includes('FROM "MESSAGES"')) {
-      const threadId = params && typeof params[0] === 'string' ? params[0] : '';
+    if (
+      s.toUpperCase().includes("FROM MESSAGES") ||
+      s.toUpperCase().includes('FROM "MESSAGES"')
+    ) {
+      const threadId = params && typeof params[0] === "string" ? params[0] : "";
       const rows = memoryDb.messages.filter((m) => m.thread_id === threadId);
       return { rows } as DBQueryResult<unknown>;
     }
 
-    if (s.toUpperCase().includes('INSERT INTO MESSAGES') || s.toUpperCase().includes('INSERT INTO "MESSAGES"')) {
+    if (
+      s.toUpperCase().includes("INSERT INTO MESSAGES") ||
+      s.toUpperCase().includes('INSERT INTO "MESSAGES"')
+    ) {
       if (params && params.length >= 5) {
         const id = String(params[0]);
         const thread_id = String(params[1]);
         const role = String(params[2]);
         const rawContent = params[3];
-        const content = rawContent !== undefined && rawContent !== null ? String(rawContent) : '';
+        const content =
+          rawContent !== undefined && rawContent !== null
+            ? String(rawContent)
+            : "";
         const timestamp = String(params[4]);
         const msg = { id, thread_id, role, content, timestamp };
         if (!memoryDb.messages.some((m) => m.id === id)) {
@@ -490,26 +567,62 @@ export class FakePool {
         if (!memoryDb.threads.has(thread_id)) {
           memoryDb.threads.set(thread_id, {
             id: thread_id,
-            userId: 'u_default_id',
-            businessId: 'ecommerce',
-            status: 'active',
+            userId: "u_default_id",
+            businessId: "ecommerce",
+            status: "active",
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           });
+        } else {
+          const thread = memoryDb.threads.get(thread_id);
+          if (thread) {
+            thread.updatedAt = new Date().toISOString();
+          }
         }
       }
       return { rows: [] };
     }
 
-    if (s.toUpperCase().includes('FROM PENDING_APPROVALS') || s.toUpperCase().includes('FROM "PENDING_APPROVALS"')) {
-      return { rows: memoryDb.pendingApprovals } as DBQueryResult<unknown>;
-    }
-
-    if (s.toUpperCase().includes('FROM TASK_MEMORY') || s.toUpperCase().includes('FROM "TASK_MEMORY"')) {
-      let threadId = params && typeof params[0] === 'string' ? params[0] : '';
+    if (
+      s.toUpperCase().includes("FROM PENDING_APPROVALS") ||
+      s.toUpperCase().includes('FROM "PENDING_APPROVALS"')
+    ) {
+      let threadId = params && typeof params[0] === "string" ? params[0] : "";
       if (!threadId) {
         const threadIdMatch =
-          s.match(/thread_id\s*=\s*['"]([^'"]+)['"]/i) || s.match(/threadId\s*=\s*['"]([^'"]+)['"]/i);
+          s.match(/thread_id\s*=\s*['"]([^'"]+)['"]/i) ||
+          s.match(/threadId\s*=\s*['"]([^'"]+)['"]/i);
+        if (threadIdMatch) {
+          threadId = threadIdMatch[1];
+        }
+      }
+
+      let filtered = memoryDb.pendingApprovals;
+      if (threadId) {
+        filtered = filtered.filter(
+          (pa: any) => pa.threadId === threadId || pa.thread_id === threadId,
+        );
+      }
+
+      // 按照 createdAt 降序排序以正确模拟 ORDER BY created_at DESC 行为
+      const sorted = [...filtered].sort((a: any, b: any) => {
+        const dateA = new Date(a.createdAt || a.created_at || 0).getTime();
+        const dateB = new Date(b.createdAt || b.created_at || 0).getTime();
+        return dateB - dateA;
+      });
+
+      return { rows: sorted } as DBQueryResult<unknown>;
+    }
+
+    if (
+      s.toUpperCase().includes("FROM TASK_MEMORY") ||
+      s.toUpperCase().includes('FROM "TASK_MEMORY"')
+    ) {
+      let threadId = params && typeof params[0] === "string" ? params[0] : "";
+      if (!threadId) {
+        const threadIdMatch =
+          s.match(/thread_id\s*=\s*['"]([^'"]+)['"]/i) ||
+          s.match(/threadId\s*=\s*['"]([^'"]+)['"]/i);
         if (threadIdMatch) {
           threadId = threadIdMatch[1];
         }
@@ -526,36 +639,47 @@ export class FakePool {
             updated_at: record.updatedAt,
           }
         : null;
-      return { rows: mappedRecord ? [mappedRecord] : [] } as DBQueryResult<unknown>;
+      return {
+        rows: mappedRecord ? [mappedRecord] : [],
+      } as DBQueryResult<unknown>;
     }
 
-    if (s.toUpperCase().includes('INSERT INTO TASK_MEMORY') || s.toUpperCase().includes('INSERT INTO "TASK_MEMORY"')) {
-      let threadId = '';
+    if (
+      s.toUpperCase().includes("INSERT INTO TASK_MEMORY") ||
+      s.toUpperCase().includes('INSERT INTO "TASK_MEMORY"')
+    ) {
+      let threadId = "";
       let pendingIntents: any = null;
       const fieldsMatch = s.match(/\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
       if (fieldsMatch && params) {
-        const fields = fieldsMatch[1].split(',').map((f) => f.trim().replace(/['"`]/g, ''));
-        const threadIdIdx = fields.findIndex((f) => f === 'thread_id' || f === 'threadId');
-        const pendingIntentsIdx = fields.findIndex((f) => f === 'pending_intents' || f === 'pendingIntents');
+        const fields = fieldsMatch[1]
+          .split(",")
+          .map((f) => f.trim().replace(/['"`]/g, ""));
+        const threadIdIdx = fields.findIndex(
+          (f) => f === "thread_id" || f === "threadId",
+        );
+        const pendingIntentsIdx = fields.findIndex(
+          (f) => f === "pending_intents" || f === "pendingIntents",
+        );
         if (threadIdIdx !== -1) threadId = String(params[threadIdIdx]);
         if (pendingIntentsIdx !== -1) {
           const raw = params[pendingIntentsIdx];
-          pendingIntents = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          pendingIntents = typeof raw === "string" ? JSON.parse(raw) : raw;
         }
       } else if (params) {
         if (params.length === 3) {
           threadId = String(params[0]);
           const raw = params[1];
-          pendingIntents = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          pendingIntents = typeof raw === "string" ? JSON.parse(raw) : raw;
         } else if (params.length === 4) {
           threadId = String(params[1]);
           const raw = params[2];
-          pendingIntents = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          pendingIntents = typeof raw === "string" ? JSON.parse(raw) : raw;
         }
       }
       if (threadId) {
         memoryDb.taskMemory.set(threadId, {
-          id: require('node:crypto').randomUUID(),
+          id: require("node:crypto").randomUUID(),
           threadId,
           pendingIntents,
           updatedAt: new Date().toISOString(),
@@ -565,27 +689,32 @@ export class FakePool {
     }
 
     if (
-      s.toUpperCase().includes('UPDATE') &&
-      (s.toUpperCase().includes('TASK_MEMORY') || s.toUpperCase().includes('"TASK_MEMORY"'))
+      s.toUpperCase().includes("UPDATE") &&
+      (s.toUpperCase().includes("TASK_MEMORY") ||
+        s.toUpperCase().includes('"TASK_MEMORY"'))
     ) {
-      let threadId = '';
+      let threadId = "";
       let pendingIntents: any = null;
       if (params) {
         const setMatch = s.match(/SET\s+([^WHERE]+)/i);
         const whereMatch = s.match(/WHERE\s+(.+)/i);
         if (setMatch) {
-          const sets = setMatch[1].split(',').map((x) => x.trim().replace(/['"`]/g, ''));
+          const sets = setMatch[1]
+            .split(",")
+            .map((x) => x.trim().replace(/['"`]/g, ""));
           const pendingIntentsIdx = sets.findIndex(
-            (x) => x.startsWith('pending_intents') || x.startsWith('pendingIntents'),
+            (x) =>
+              x.startsWith("pending_intents") || x.startsWith("pendingIntents"),
           );
           if (pendingIntentsIdx !== -1) {
             const raw = params[pendingIntentsIdx];
-            pendingIntents = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            pendingIntents = typeof raw === "string" ? JSON.parse(raw) : raw;
           }
         }
         if (whereMatch) {
           const match =
-            whereMatch[1].match(/thread_id\s*=\s*\$(\d+)/i) || whereMatch[1].match(/threadId\s*=\s*\$(\d+)/i);
+            whereMatch[1].match(/thread_id\s*=\s*\$(\d+)/i) ||
+            whereMatch[1].match(/threadId\s*=\s*\$(\d+)/i);
           if (match) {
             const idx = Number.parseInt(match[1], 10) - 1;
             if (idx >= 0 && idx < params.length) {
@@ -609,7 +738,7 @@ export class FakePool {
           record.updatedAt = new Date().toISOString();
         } else {
           memoryDb.taskMemory.set(threadId, {
-            id: require('node:crypto').randomUUID(),
+            id: require("node:crypto").randomUUID(),
             threadId,
             pendingIntents,
             updatedAt: new Date().toISOString(),
@@ -620,7 +749,7 @@ export class FakePool {
     }
 
     if (
-      s.toUpperCase().includes('INSERT INTO PENDING_APPROVALS') ||
+      s.toUpperCase().includes("INSERT INTO PENDING_APPROVALS") ||
       s.toUpperCase().includes('INSERT INTO "PENDING_APPROVALS"')
     ) {
       if (params && params.length >= 6) {
@@ -628,7 +757,10 @@ export class FakePool {
         const threadId = String(params[1]);
         const actionType = String(params[2]);
         const actionPayloadRaw = params[3];
-        const actionPayload = typeof actionPayloadRaw === 'string' ? JSON.parse(actionPayloadRaw) : actionPayloadRaw;
+        const actionPayload =
+          typeof actionPayloadRaw === "string"
+            ? JSON.parse(actionPayloadRaw)
+            : actionPayloadRaw;
         const status = String(params[4]);
         const deadline = String(params[5]);
         const newApproval = {
@@ -645,16 +777,22 @@ export class FakePool {
           created_at: new Date().toISOString(),
         };
         memoryDb.pendingApprovals.push(newApproval);
-        console.log(`[DB Emulator] Inserted pending approval: ID ${id} for thread ${threadId}`);
+        console.log(
+          `[DB Emulator] Inserted pending approval: ID ${id} for thread ${threadId}`,
+        );
       }
       return { rows: [] };
     }
 
     if (
-      s.toUpperCase().includes('UPDATE') &&
-      (s.toUpperCase().includes('PENDING_APPROVALS') || s.toUpperCase().includes('"PENDING_APPROVALS"'))
+      s.toUpperCase().includes("UPDATE") &&
+      (s.toUpperCase().includes("PENDING_APPROVALS") ||
+        s.toUpperCase().includes('"PENDING_APPROVALS"'))
     ) {
-      const id = params && params.length > 0 ? (params[params.length - 1] as string) : '';
+      const id =
+        params && params.length > 0
+          ? (params[params.length - 1] as string)
+          : "";
       const approval = memoryDb.pendingApprovals.find((a) => a.id === id);
       if (approval && params) {
         if (params.length === 2) {
@@ -662,17 +800,25 @@ export class FakePool {
         } else if (params.length === 3) {
           approval.status = String(params[0]);
           const payloadRaw = params[1];
-          const payload = typeof payloadRaw === 'string' ? JSON.parse(payloadRaw) : payloadRaw;
+          const payload =
+            typeof payloadRaw === "string"
+              ? JSON.parse(payloadRaw)
+              : payloadRaw;
           approval.actionPayload = payload;
           approval.action_payload = payload;
         }
-        console.log(`[DB Emulator] Updated pending approval ID ${id} -> status: ${approval.status}`);
+        console.log(
+          `[DB Emulator] Updated pending approval ID ${id} -> status: ${approval.status}`,
+        );
       }
       return { rows: [] };
     }
 
-    if (s.toUpperCase().includes('FROM THREADS') || s.toUpperCase().includes('FROM "THREADS"')) {
-      let threadId = params && typeof params[0] === 'string' ? params[0] : '';
+    if (
+      s.toUpperCase().includes("FROM THREADS") ||
+      s.toUpperCase().includes('FROM "THREADS"')
+    ) {
+      let threadId = params && typeof params[0] === "string" ? params[0] : "";
       if (!threadId) {
         const threadIdMatch = s.match(/id\s*=\s*['"]([^'"]+)['"]/i);
         if (threadIdMatch) {
@@ -702,20 +848,21 @@ export class FakePool {
     }
 
     if (
-      s.toUpperCase().includes('UPDATE') &&
-      (s.toUpperCase().includes('ORDERS') || s.toUpperCase().includes('"ORDERS"'))
+      s.toUpperCase().includes("UPDATE") &&
+      (s.toUpperCase().includes("ORDERS") ||
+        s.toUpperCase().includes('"ORDERS"'))
     ) {
-      let id = params && typeof params[0] === 'string' ? params[0] : '';
+      let id = params && typeof params[0] === "string" ? params[0] : "";
       if (!id) {
         const match =
           s.match(/WHERE\s+["']?orderId["']?\s*=\s*['"]([^'"]+)['"]/i) ||
           s.match(/WHERE\s+["']?order_id["']?\s*=\s*['"]([^'"]+)['"]/i);
-        id = match ? match[1] : '';
+        id = match ? match[1] : "";
       }
       if (id) {
         const order = memoryDb.orders.get(id);
         if (order) {
-          order.status = 'refunded';
+          order.status = "refunded";
           memoryDb.orders.set(id, order);
         }
       }
@@ -736,27 +883,36 @@ function getPgPool(): Pool {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
     // If we are in build/compilation phase, return a dummy pool to prevent compiler crash
-    if (process.env.NODE_ENV === 'production' || process.env.NEXT_PHASE === 'phase-production-build') {
-      console.warn('[DB Build Warning] DATABASE_URL is missing during compilation build phase. Providing mock pool.');
+    if (
+      process.env.NODE_ENV === "production" ||
+      process.env.NEXT_PHASE === "phase-production-build"
+    ) {
+      console.warn(
+        "[DB Build Warning] DATABASE_URL is missing during compilation build phase. Providing mock pool.",
+      );
       pgPool = new Pool();
       return pgPool;
     }
     throw new Error(
-      '❌ [DATABASE ERROR] DATABASE_URL is not configured! Real PostgreSQL database is strictly required.',
+      "❌ [DATABASE ERROR] DATABASE_URL is not configured! Real PostgreSQL database is strictly required.",
     );
   }
 
   try {
-    console.log(`[DB] 正在尝试物理连接至 PostgreSQL 数据库: ${dbUrl.replace(/:([^:@]+)@/, ':****@')}...`);
+    console.log(
+      `[DB] 正在尝试物理连接至 PostgreSQL 数据库: ${dbUrl.replace(/:([^:@]+)@/, ":****@")}...`,
+    );
     pgPool = new Pool({
       connectionString: dbUrl,
       connectionTimeoutMillis: 5000, // 5秒快速连接超时
     });
-    console.log('[DB] ✅ 物理 PostgreSQL 数据库连接池初始化成功！');
+    console.log("[DB] ✅ 物理 PostgreSQL 数据库连接池初始化成功！");
     return pgPool;
   } catch (err: any) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    throw new Error(`❌ [DATABASE ERROR] Failed to initialize PostgreSQL pool: ${errMsg}`);
+    throw new Error(
+      `❌ [DATABASE ERROR] Failed to initialize PostgreSQL pool: ${errMsg}`,
+    );
   }
 }
 
@@ -765,10 +921,10 @@ export function getDrizzle(): NodePgDatabase<typeof schema> | null {
   const pool = getPgPool();
   if (pool) {
     try {
-      const { drizzle } = require('drizzle-orm/node-postgres');
+      const { drizzle } = require("drizzle-orm/node-postgres");
       drizzleDb = drizzle(pool as Pool, { schema });
     } catch (err) {
-      console.error('[DB] Failed to construct drizzle db:', err);
+      console.error("[DB] Failed to construct drizzle db:", err);
     }
   }
   return drizzleDb;
@@ -799,14 +955,26 @@ export interface DBInterface {
   execute: (queryStr: string, params?: unknown[]) => Promise<DBExecutorResult>;
 
   // 新增：和用户关联的账户及会话管理接口
-  findOrCreateUserByEmail: (email: string) => Promise<{ id: string; email: string }>;
+  findOrCreateUserByEmail: (
+    email: string,
+  ) => Promise<{ id: string; email: string }>;
   getUserThreads: (userId: string) => Promise<DBThread[]>;
-  createThread: (threadId: string, userId: string, businessId?: string) => Promise<DBThread>;
+  createThread: (
+    threadId: string,
+    userId: string,
+    businessId?: string,
+  ) => Promise<DBThread>;
   deleteThread: (threadId: string) => Promise<boolean>;
 }
 
-async function resolveAndEnsurePgUserId(pool: any, userId: string): Promise<string> {
-  const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+async function resolveAndEnsurePgUserId(
+  pool: any,
+  userId: string,
+): Promise<string> {
+  const isValidUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      userId,
+    );
   if (isValidUuid) {
     return userId;
   }
@@ -816,30 +984,36 @@ async function resolveAndEnsurePgUserId(pool: any, userId: string): Promise<stri
   // we align it to resolve directly to the real physical seeded UUID '83d67d4e-104c-4325-8aa7-10d4389fc725'
   // which owns the complete list of multi-tenant Nike, Adidas and Ecommerce orders.
   // This guarantees that both local emulation and unit tests walk on REAL data!
-  if (userId === 'u_default_id' || userId === 'test_suite_user') {
-    return '83d67d4e-104c-4325-8aa7-10d4389fc725';
+  if (userId === "u_default_id" || userId === "test_suite_user") {
+    return "83d67d4e-104c-4325-8aa7-10d4389fc725";
   }
 
   try {
-    const hash = require('node:crypto').createHash('md5').update(userId).digest('hex');
+    const hash = require("node:crypto")
+      .createHash("md5")
+      .update(userId)
+      .digest("hex");
     const detUuid = `${hash.substring(0, 8)}-${hash.substring(8, 12)}-${hash.substring(12, 16)}-${hash.substring(16, 20)}-${hash.substring(20, 32)}`;
 
-    await pool.query('INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (id) DO NOTHING', [
-      detUuid,
-      `${userId}@guest.system`,
-    ]);
+    await pool.query(
+      "INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW()) ON CONFLICT (id) DO NOTHING",
+      [detUuid, `${userId}@guest.system`],
+    );
     return detUuid;
   } catch (err) {
-    console.warn('[DB] resolveAndEnsurePgUserId failed, falling back to first physical user:', err);
+    console.warn(
+      "[DB] resolveAndEnsurePgUserId failed, falling back to first physical user:",
+      err,
+    );
     try {
-      const userRes = await pool.query('SELECT id FROM users LIMIT 1');
+      const userRes = await pool.query("SELECT id FROM users LIMIT 1");
       if (userRes.rows && userRes.rows.length > 0) {
         return (userRes.rows[0] as any).id;
       }
     } catch (fallbackErr) {
-      console.error('[DB] Fallback user lookup failed:', fallbackErr);
+      console.error("[DB] Fallback user lookup failed:", fallbackErr);
     }
-    return require('node:crypto').randomUUID();
+    return require("node:crypto").randomUUID();
   }
 }
 
@@ -850,26 +1024,39 @@ export const db: DBInterface = {
   delete: (): DBInterface => db,
   values: (): DBInterface => db,
 
-  findOrCreateUserByEmail: async (email: string): Promise<{ id: string; email: string }> => {
+  findOrCreateUserByEmail: async (
+    email: string,
+  ): Promise<{ id: string; email: string }> => {
     const pool = getPgPool();
     if (isUsingRealDb) {
       try {
-        const selectRes = await pool.query('SELECT id, email FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [
-          email,
-        ]);
+        const selectRes = await pool.query(
+          "SELECT id, email FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1",
+          [email],
+        );
         if (selectRes.rows && selectRes.rows.length > 0) {
           const row = selectRes.rows[0] as any;
           return { id: row.id, email: row.email };
         }
 
         // Generate UUID for real user
-        const id = crypto.randomUUID ? crypto.randomUUID() : require('node:crypto').randomUUID();
-        await pool.query('INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW())', [id, email]);
-        console.log(`[DB User PG] Registered physical user with email: ${email}, ID: ${id}`);
+        const id = crypto.randomUUID
+          ? crypto.randomUUID()
+          : require("node:crypto").randomUUID();
+        await pool.query(
+          "INSERT INTO users (id, email, created_at) VALUES ($1, $2, NOW())",
+          [id, email],
+        );
+        console.log(
+          `[DB User PG] Registered physical user with email: ${email}, ID: ${id}`,
+        );
 
         return { id, email };
       } catch (err) {
-        console.error('[DB User PG Error] Failed to find or create user, falling back to memory:', err);
+        console.error(
+          "[DB User PG Error] Failed to find or create user, falling back to memory:",
+          err,
+        );
       }
     }
 
@@ -882,12 +1069,14 @@ export const db: DBInterface = {
     }
     // 没找到则动态注册（在内存模式中也返回对应的 physical seed UUID 防止数据分裂）
     const id =
-      email.toLowerCase() === 'test@example.com'
-        ? '83d67d4e-104c-4325-8aa7-10d4389fc725'
+      email.toLowerCase() === "test@example.com"
+        ? "83d67d4e-104c-4325-8aa7-10d4389fc725"
         : `u_${Math.random().toString(36).substr(2, 9)}`;
     const newUser = { id, email, createdAt: new Date().toISOString() };
     memoryDb.users.set(id, newUser);
-    console.log(`[DB User] Registered new user with email: ${email}, ID: ${id}`);
+    console.log(
+      `[DB User] Registered new user with email: ${email}, ID: ${id}`,
+    );
 
     return { id, email };
   },
@@ -899,7 +1088,7 @@ export const db: DBInterface = {
         const pgUserId = await resolveAndEnsurePgUserId(pool, userId);
 
         const res = await pool.query(
-          'SELECT id, "user_id" AS "userId", "business_id" AS "businessId", status, "created_at" AS "createdAt", "updated_at" AS "updatedAt" FROM threads WHERE "user_id" = $1 ORDER BY "created_at" DESC',
+          'SELECT id, "user_id" AS "userId", "business_id" AS "businessId", status, "created_at" AS "createdAt", "updated_at" AS "updatedAt" FROM threads WHERE "user_id" = $1 ORDER BY "updated_at" DESC',
           [pgUserId],
         );
         return res.rows.map((row: any) => ({
@@ -911,26 +1100,36 @@ export const db: DBInterface = {
           updatedAt: row.updatedAt || row.updated_at,
         })) as DBThread[];
       } catch (err) {
-        console.error('[DB Thread PG Error] Failed to get user threads, falling back to memory:', err);
+        console.error(
+          "[DB Thread PG Error] Failed to get user threads, falling back to memory:",
+          err,
+        );
       }
     }
 
     const threadArray = Array.from(memoryDb.threads.values());
     const list = threadArray.filter((t) => t.userId === userId);
-    // 按照创建时间降序，保证最新的会话排在最上面！
-    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    // 按照最新活跃时间（更新时间）降序，保证最热的会话排在最上面！
+    return list.sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
   },
 
-  createThread: async (threadId: string, userId: string, businessId?: string): Promise<DBThread> => {
+  createThread: async (
+    threadId: string,
+    userId: string,
+    businessId?: string,
+  ): Promise<DBThread> => {
     const pool = getPgPool();
-    const activeBusinessId = businessId || 'ecommerce';
+    const activeBusinessId = businessId || "ecommerce";
     if (isUsingRealDb) {
       try {
         const pgUserId = await resolveAndEnsurePgUserId(pool, userId);
 
         await pool.query(
           'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") VALUES ($1, $2, $3, $4, NOW(), NOW()) ON CONFLICT (id) DO NOTHING',
-          [threadId, pgUserId, activeBusinessId, 'active'],
+          [threadId, pgUserId, activeBusinessId, "active"],
         );
         console.log(
           `[DB Thread PG] Created/Ensured physical thread ${threadId} for mapped user ${pgUserId} with businessId ${activeBusinessId}`,
@@ -939,12 +1138,15 @@ export const db: DBInterface = {
           id: threadId,
           userId: pgUserId,
           businessId: activeBusinessId,
-          status: 'active',
+          status: "active",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
       } catch (err) {
-        console.error('[DB Thread PG Error] Failed to create thread, falling back to memory:', err);
+        console.error(
+          "[DB Thread PG Error] Failed to create thread, falling back to memory:",
+          err,
+        );
       }
     }
 
@@ -958,7 +1160,7 @@ export const db: DBInterface = {
       id: threadId,
       userId,
       businessId: activeBusinessId,
-      status: 'active',
+      status: "active",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -986,13 +1188,13 @@ export const db: DBInterface = {
       }>;
       return rows.map((r) => ({
         id: r.id,
-        threadId: r.thread_id || r.threadId || '',
+        threadId: r.thread_id || r.threadId || "",
         role: r.role,
         content: r.content,
         timestamp: r.timestamp,
       })) as Message[];
     } catch (err) {
-      console.error('[DB] Failed to get messages:', err);
+      console.error("[DB] Failed to get messages:", err);
       return [];
     }
   },
@@ -1000,15 +1202,29 @@ export const db: DBInterface = {
   addMessage: async (message: Message): Promise<void> => {
     const pool = getPgPool();
     try {
-      await pool.query(`INSERT INTO messages (id, "thread_id", role, content, timestamp) VALUES ($1, $2, $3, $4, $5)`, [
-        message.id,
-        message.threadId,
-        message.role,
-        message.content,
-        message.timestamp,
-      ]);
+      await pool.query(
+        `INSERT INTO messages (id, "thread_id", role, content, timestamp) VALUES ($1, $2, $3, $4, $5)`,
+        [
+          message.id,
+          message.threadId,
+          message.role,
+          message.content,
+          message.timestamp,
+        ],
+      );
+      if (isUsingRealDb) {
+        await pool.query(
+          `UPDATE threads SET updated_at = NOW() WHERE id = $1`,
+          [message.threadId],
+        );
+      } else {
+        const thread = memoryDb.threads.get(message.threadId);
+        if (thread) {
+          thread.updatedAt = new Date().toISOString();
+        }
+      }
     } catch (err) {
-      console.error('[DB] Error inserting message:', err);
+      console.error("[DB] Error inserting message:", err);
     }
   },
 
@@ -1032,27 +1248,31 @@ export const db: DBInterface = {
       if (rows && rows.length > 0) {
         const row = rows[0];
         return {
-          orderId: row.order_id || row.orderId || '',
+          orderId: row.order_id || row.orderId || "",
           status: row.status,
           carrier: row.carrier,
-          trackingNumber: row.tracking_number || row.trackingNumber || '',
-          estimatedDelivery: row.estimated_delivery || row.estimatedDelivery || '',
+          trackingNumber: row.tracking_number || row.trackingNumber || "",
+          estimatedDelivery:
+            row.estimated_delivery || row.estimatedDelivery || "",
         } as Order;
       }
       return null;
     } catch (err) {
-      console.error('[DB] Failed to get order:', err);
+      console.error("[DB] Failed to get order:", err);
       return null;
     }
   },
 
-  execute: async (queryStr: string, params?: unknown[]): Promise<DBExecutorResult> => {
+  execute: async (
+    queryStr: string,
+    params?: unknown[],
+  ): Promise<DBExecutorResult> => {
     const pool = getPgPool();
     try {
       const res = await pool.query(queryStr, params);
       return { rows: res.rows as unknown[] };
     } catch (e) {
-      console.error('[DB] execute failed:', e);
+      console.error("[DB] execute failed:", e);
       return { rows: [] };
     }
   },
@@ -1061,28 +1281,46 @@ export const db: DBInterface = {
     const pool = getPgPool();
     try {
       // 1. Cascade delete dependent tables first due to FK constraints
-      await pool.query('DELETE FROM messages WHERE thread_id = $1', [threadId]);
-      await pool.query('DELETE FROM pending_approvals WHERE thread_id = $1', [threadId]);
-      await pool.query('DELETE FROM session_metrics WHERE thread_id = $1', [threadId]);
-      await pool.query('DELETE FROM task_memory WHERE thread_id = $1', [threadId]);
-      await pool.query('DELETE FROM episodic_events WHERE thread_id = $1', [threadId]);
-      await pool.query('DELETE FROM agent_jobs WHERE thread_id = $1', [threadId]);
-      await pool.query('DELETE FROM intent_logs WHERE thread_id = $1', [threadId]);
-      await pool.query('DELETE FROM low_confidence_logs WHERE thread_id = $1', [threadId]);
+      await pool.query("DELETE FROM messages WHERE thread_id = $1", [threadId]);
+      await pool.query("DELETE FROM pending_approvals WHERE thread_id = $1", [
+        threadId,
+      ]);
+      await pool.query("DELETE FROM session_metrics WHERE thread_id = $1", [
+        threadId,
+      ]);
+      await pool.query("DELETE FROM task_memory WHERE thread_id = $1", [
+        threadId,
+      ]);
+      await pool.query("DELETE FROM episodic_events WHERE thread_id = $1", [
+        threadId,
+      ]);
+      await pool.query("DELETE FROM agent_jobs WHERE thread_id = $1", [
+        threadId,
+      ]);
+      await pool.query("DELETE FROM intent_logs WHERE thread_id = $1", [
+        threadId,
+      ]);
+      await pool.query("DELETE FROM low_confidence_logs WHERE thread_id = $1", [
+        threadId,
+      ]);
 
       // 2. Delete the thread itself
-      const res = await pool.query('DELETE FROM threads WHERE id = $1', [threadId]);
+      const res = await pool.query("DELETE FROM threads WHERE id = $1", [
+        threadId,
+      ]);
 
       // 3. Keep memoryDb emulator state cleanly in sync
       memoryDb.threads.delete(threadId);
-      memoryDb.messages = memoryDb.messages.filter((m) => m.thread_id !== threadId);
+      memoryDb.messages = memoryDb.messages.filter(
+        (m) => m.thread_id !== threadId,
+      );
       memoryDb.pendingApprovals = memoryDb.pendingApprovals.filter(
         (a) => a.threadId !== threadId && a.thread_id !== threadId,
       );
 
       return (res.rowCount ?? 0) > 0;
     } catch (err) {
-      console.error('[DB Delete Thread PG Error]:', err);
+      console.error("[DB Delete Thread PG Error]:", err);
       // Fallback local memory sync even if physical query failed
       memoryDb.threads.delete(threadId);
       return false;

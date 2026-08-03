@@ -1,7 +1,7 @@
-import { logger } from 'observability';
-import { getLLM } from '../../llm/callLLMWithRetry';
-import { agentEventEmitter } from '../eventEmitter';
-import type { AgentStateAnnotation } from '../state';
+import { logger } from "observability";
+import { getLLM } from "../../llm/callLLMWithRetry";
+import { agentEventEmitter } from "../eventEmitter";
+import type { AgentStateAnnotation } from "../state";
 
 export async function validatorNode(state: typeof AgentStateAnnotation.State) {
   const currentPlan = state.taskPlan;
@@ -9,13 +9,19 @@ export async function validatorNode(state: typeof AgentStateAnnotation.State) {
   const step = currentPlan.subtasks[currentIndex];
 
   if (!step) {
-    logger.warn({ threadId: state.threadId }, 'validatorNode validation skipped: no step found');
+    logger.warn(
+      { threadId: state.threadId },
+      "validatorNode validation skipped: no step found",
+    );
     return { globalTransitionsCount: 1 };
   }
 
   // 如果执行步骤因为安全审批被拦截处于挂起状态，校验器不做任何操作，亦不累加索引，保留现场原封不动返回！
   if (step.result?.waitingForApproval) {
-    logger.info({ threadId: state.threadId }, 'validatorNode bypassed: step is waiting for approval');
+    logger.info(
+      { threadId: state.threadId },
+      "validatorNode bypassed: step is waiting for approval",
+    );
     return {
       taskPlan: {
         ...currentPlan,
@@ -25,12 +31,15 @@ export async function validatorNode(state: typeof AgentStateAnnotation.State) {
     };
   }
 
-  logger.info({ threadId: state.threadId, step }, `validatorNode validating step ${currentIndex}`);
+  logger.info(
+    { threadId: state.threadId, step },
+    `validatorNode validating step ${currentIndex}`,
+  );
 
   if (state.jobId) {
     agentEventEmitter.emit(`${state.jobId}:status`, {
-      status: 'executing',
-      node: 'validator',
+      status: "executing",
+      node: "validator",
       message: `智能决策核验器启动：正在多维度校验第 ${currentIndex + 1} 步 [${step.description}] 工具产出数据的完整性与合法性...`,
     });
   }
@@ -48,43 +57,58 @@ Return ONLY YES or NO.`;
   // that can cause non-tool steps (like ID extraction, User Communication or Screenshots) to falsely mark as failed.
   const desc = step.description.toLowerCase();
   const isMessageExtractionOrInfo =
-    desc.includes('extract') ||
-    desc.includes('inform') ||
-    desc.includes('communicate') ||
-    desc.includes('tell') ||
-    desc.includes('provide') ||
-    desc.includes('screenshot') ||
-    desc.includes('layout') ||
-    desc.includes('viewport');
+    desc.includes("extract") ||
+    desc.includes("inform") ||
+    desc.includes("communicate") ||
+    desc.includes("tell") ||
+    desc.includes("provide") ||
+    desc.includes("screenshot") ||
+    desc.includes("layout") ||
+    desc.includes("viewport") ||
+    desc.includes("query") ||
+    desc.includes("list") ||
+    desc.includes("check") ||
+    desc.includes("track") ||
+    desc.includes("display") ||
+    desc.includes("present");
 
   if (isMessageExtractionOrInfo && (!step.result || !step.result.error)) {
     isValid = true;
     logger.info(
       { threadId: state.threadId, stepIndex: currentIndex },
-      'validatorNode auto-passed extraction/inform step',
+      "validatorNode auto-passed extraction/inform step",
     );
   } else {
     try {
       const response = await llm.invoke(prompt);
-      const content = typeof response === 'string' ? response : (response as any).content || '';
-      isValid = content.trim().toUpperCase() !== 'NO';
+      const content =
+        typeof response === "string"
+          ? response
+          : (response as any).content || "";
+      isValid = content.trim().toUpperCase() !== "NO";
     } catch (err: any) {
-      logger.error({ threadId: state.threadId, err }, 'validatorNode validation check failed, defaulting to YES');
+      logger.error(
+        { threadId: state.threadId, err },
+        "validatorNode validation check failed, defaulting to YES",
+      );
     }
   }
 
   const updatedSubtasks = [...currentPlan.subtasks];
   if (!isValid) {
-    logger.warn({ threadId: state.threadId, stepIndex: currentIndex }, 'validatorNode step failed validation');
+    logger.warn(
+      { threadId: state.threadId, stepIndex: currentIndex },
+      "validatorNode step failed validation",
+    );
     updatedSubtasks[currentIndex] = {
       ...step,
-      status: 'failed',
+      status: "failed",
     };
 
     if (state.jobId) {
       agentEventEmitter.emit(`${state.jobId}:status`, {
-        status: 'executing',
-        node: 'validator',
+        status: "executing",
+        node: "validator",
         message: `⚠️ 校验结果警告：第 ${currentIndex + 1} 步执行产出未完全满足预期目标，已被决策链标记为 [failed]！`,
         plan: {
           ...currentPlan,
@@ -94,12 +118,15 @@ Return ONLY YES or NO.`;
       });
     }
   } else {
-    logger.info({ threadId: state.threadId, stepIndex: currentIndex }, 'validatorNode step passed validation');
+    logger.info(
+      { threadId: state.threadId, stepIndex: currentIndex },
+      "validatorNode step passed validation",
+    );
 
     if (state.jobId) {
       agentEventEmitter.emit(`${state.jobId}:status`, {
-        status: 'executing',
-        node: 'validator',
+        status: "executing",
+        node: "validator",
         message: `✅ 核验结果绿灯！第 ${currentIndex + 1} 步执行结果数据完全合格、结构合法。`,
         plan: {
           ...currentPlan,

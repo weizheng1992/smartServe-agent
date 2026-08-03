@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { ChatThread, UserSession } from './types';
+import { useCallback, useEffect, useState } from "react";
+import type { ChatThread, UserSession } from "./types";
 
 interface UseChatThreadsProps {
   currentUser: UserSession | null;
@@ -7,17 +7,22 @@ interface UseChatThreadsProps {
   onThreadCreated?: () => void;
 }
 
-export function useChatThreads({ currentUser, isSubmitting = false, onThreadCreated }: UseChatThreadsProps) {
+export function useChatThreads({
+  currentUser,
+  isSubmitting = false,
+  onThreadCreated,
+}: UseChatThreadsProps) {
   const [threads, setThreads] = useState<ChatThread[]>([]);
-  const [activeThreadId, setActiveThreadId] = useState<string>('');
-  const [selectedNewThreadMerchant, setSelectedNewThreadMerchant] = useState<string>('ecommerce');
+  const [activeThreadId, setActiveThreadId] = useState<string>("");
+  const [selectedNewThreadMerchant, setSelectedNewThreadMerchant] =
+    useState<string>("ecommerce");
   const [isThreadsLoading, setIsThreadsLoading] = useState(false);
 
   // 1. Read initial threadId from URL search parameters on page mount
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const urlThreadId = params.get('threadId');
+      const urlThreadId = params.get("threadId");
       if (urlThreadId) {
         setActiveThreadId(urlThreadId);
       }
@@ -26,14 +31,24 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
 
   // 2. Sync activeThreadId to URL search parameters whenever it changes
   useEffect(() => {
-    if (activeThreadId && typeof window !== 'undefined') {
+    if (activeThreadId && typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('threadId') !== activeThreadId) {
-        params.set('threadId', activeThreadId);
-        window.history.replaceState(null, '', `?${params.toString()}`);
+      if (params.get("threadId") !== activeThreadId) {
+        params.set("threadId", activeThreadId);
+        window.history.replaceState(null, "", `?${params.toString()}`);
       }
     }
   }, [activeThreadId]);
+
+  // 3. Synchronize selected merchant tab highlighted in UI with the active thread's merchant
+  useEffect(() => {
+    if (activeThreadId && threads.length > 0) {
+      const activeThread = threads.find((t) => t.id === activeThreadId);
+      if (activeThread && activeThread.businessId) {
+        setSelectedNewThreadMerchant(activeThread.businessId);
+      }
+    }
+  }, [activeThreadId, threads]);
 
   // Fetch threads API
   const fetchThreads = useCallback(async () => {
@@ -47,13 +62,16 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
 
         // Prioritize loading the active thread ID from the URL query parameter on load
         let initialActiveId = activeThreadId;
-        if (typeof window !== 'undefined') {
+        if (typeof window !== "undefined") {
           const params = new URLSearchParams(window.location.search);
-          initialActiveId = params.get('threadId') || activeThreadId;
+          initialActiveId = params.get("threadId") || activeThreadId;
         }
 
         if (data.threads.length > 0) {
-          if (initialActiveId && data.threads.some((t: any) => t.id === initialActiveId)) {
+          if (
+            initialActiveId &&
+            data.threads.some((t: any) => t.id === initialActiveId)
+          ) {
             setActiveThreadId(initialActiveId);
           } else {
             setActiveThreadId(data.threads[0].id);
@@ -61,24 +79,28 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
         }
       }
     } catch (err) {
-      console.error('[Fetch Threads Error]:', err);
+      console.error("[Fetch Threads Error]:", err);
     } finally {
       setIsThreadsLoading(false);
     }
   }, [currentUser, activeThreadId]);
 
   // Create a new chat session thread
-  const handleCreateNewThread = async (merchantId = 'ecommerce') => {
+  const handleCreateNewThread = async (merchantId = "ecommerce") => {
     if (!currentUser) return;
     const newThreadId =
-      typeof crypto !== 'undefined' && crypto.randomUUID
+      typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : `thread_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     try {
-      const res = await fetch('/api/chat/threads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, threadId: newThreadId, businessId: merchantId }),
+      const res = await fetch("/api/chat/threads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          threadId: newThreadId,
+          businessId: merchantId,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -86,7 +108,7 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
           id: newThreadId,
           userId: currentUser.id,
           businessId: merchantId,
-          status: 'active',
+          status: "active",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -97,7 +119,7 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
         }
       }
     } catch (err) {
-      console.error('[Create Thread Error]:', err);
+      console.error("[Create Thread Error]:", err);
     }
   };
 
@@ -110,10 +132,14 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
     const existingThread = threads.find((t) => t.businessId === merchantId);
 
     if (existingThread) {
-      console.log(`[Merchant Switch] 🎯 自动切换至已有的 ${merchantId} 会话: ${existingThread.id}`);
+      console.log(
+        `[Merchant Switch] 🎯 自动切换至已有的 ${merchantId} 会话: ${existingThread.id}`,
+      );
       setActiveThreadId(existingThread.id);
     } else {
-      console.log(`[Merchant Switch] 🚀 未找到已有的 ${merchantId} 会话，自动为您开辟全新会话通道...`);
+      console.log(
+        `[Merchant Switch] 🚀 未找到已有的 ${merchantId} 会话，自动为您开辟全新会话通道...`,
+      );
       await handleCreateNewThread(merchantId);
     }
   };
@@ -124,33 +150,38 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
     if (isSubmitting) return;
 
     const confirmDelete = window.confirm(
-      '⚠️ 您确定要彻底删除该会话吗？\n该操作将物理抹除该会话下的所有聊天消息、审核单据、日志度量等关联记录，不可撤销！',
+      "⚠️ 您确定要彻底删除该会话吗？\n该操作将物理抹除该会话下的所有聊天消息、审核单据、日志度量等关联记录，不可撤销！",
     );
     if (!confirmDelete) return;
 
     try {
-      const res = await fetch(`/api/chat/threads?threadId=${threadIdToDelete}`, {
-        method: 'DELETE',
-      });
+      const res = await fetch(
+        `/api/chat/threads?threadId=${threadIdToDelete}`,
+        {
+          method: "DELETE",
+        },
+      );
       const data = await res.json();
       if (data.success) {
         setThreads((prev) => prev.filter((t) => t.id !== threadIdToDelete));
 
         // If active thread got deleted, fall back to another one
         if (activeThreadId === threadIdToDelete) {
-          const remainingThreads = threads.filter((t) => t.id !== threadIdToDelete);
+          const remainingThreads = threads.filter(
+            (t) => t.id !== threadIdToDelete,
+          );
           if (remainingThreads.length > 0) {
             setActiveThreadId(remainingThreads[0].id);
           } else {
-            setActiveThreadId('');
+            setActiveThreadId("");
           }
         }
       } else {
-        alert(`删除失败: ${data.error || '未知数据库错误'}`);
+        alert(`删除失败: ${data.error || "未知数据库错误"}`);
       }
     } catch (err: any) {
-      console.error('[Delete Thread Client Error]:', err);
-      alert(`删除出错: ${err.message || '网络连接故障'}`);
+      console.error("[Delete Thread Client Error]:", err);
+      alert(`删除出错: ${err.message || "网络连接故障"}`);
     }
   };
 
@@ -159,7 +190,7 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
     if (currentUser) {
       fetchThreads();
     }
-  }, [currentUser]);
+  }, [currentUser, fetchThreads]);
 
   return {
     threads,
