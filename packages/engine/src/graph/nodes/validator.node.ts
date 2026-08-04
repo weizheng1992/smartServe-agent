@@ -70,13 +70,17 @@ Return ONLY YES or NO.`;
     desc.includes("check") ||
     desc.includes("track") ||
     desc.includes("display") ||
-    desc.includes("present");
+    desc.includes("present") ||
+    desc.includes("refund") ||
+    desc.includes("process") ||
+    desc.includes("return") ||
+    desc.includes("cancel");
 
   if (isMessageExtractionOrInfo && (!step.result || !step.result.error)) {
     isValid = true;
     logger.info(
       { threadId: state.threadId, stepIndex: currentIndex },
-      "validatorNode auto-passed extraction/inform step",
+      "validatorNode auto-passed extraction/inform/action step",
     );
   } else {
     try {

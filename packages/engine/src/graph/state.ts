@@ -101,11 +101,11 @@ export const AgentStateAnnotation = Annotation.Root({
 
   // 🛡️ [图级别硬熔断控制属性]: 累计节点转移总次数与执行错误累计，防范算力自旋
   globalTransitionsCount: Annotation<number>({
-    reducer: (x, y) => x + y,
+    reducer: (x, y) => (y === -1 ? 0 : x + y),
     default: () => 0,
   }),
   toolErrorsCount: Annotation<number>({
-    reducer: (x, y) => x + y,
+    reducer: (x, y) => (y === -1 ? 0 : x + y),
     default: () => 0,
   }),
 });

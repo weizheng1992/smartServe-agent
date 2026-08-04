@@ -147,7 +147,12 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
       });
     }
 
-    return { intents, shortMemory: historyMsgs };
+    return {
+      intents,
+      shortMemory: historyMsgs,
+      globalTransitionsCount: -1,
+      toolErrorsCount: -1,
+    };
   }
 
   if (state.jobId) {
@@ -442,7 +447,12 @@ Only return the final customer-facing Chinese text. No other text.`;
       );
       const intents = [{ intent: "order_status", confidence: scoreOrder }];
       await logIntentToDB(threadId, input, intents, "embedding", scoreOrder);
-      return { intents, shortMemory: historyMsgs };
+      return {
+        intents,
+        shortMemory: historyMsgs,
+        globalTransitionsCount: -1,
+        toolErrorsCount: -1,
+      };
     }
 
     // 判决 B: 高置信度退款意图直达
@@ -452,7 +462,12 @@ Only return the final customer-facing Chinese text. No other text.`;
       );
       const intents = [{ intent: "refund", confidence: scoreRefund }];
       await logIntentToDB(threadId, input, intents, "embedding", scoreRefund);
-      return { intents, shortMemory: historyMsgs };
+      return {
+        intents,
+        shortMemory: historyMsgs,
+        globalTransitionsCount: -1,
+        toolErrorsCount: -1,
+      };
     }
 
     // 判决 C: 高置信度超出业务范围 (out_of_scope) 拦截
@@ -556,7 +571,12 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
       });
     }
 
-    return { intents: parsed, shortMemory: historyMsgs };
+    return {
+      intents: parsed,
+      shortMemory: historyMsgs,
+      globalTransitionsCount: -1,
+      toolErrorsCount: -1,
+    };
   } catch (err: any) {
     logger.error(
       { threadId, err },
@@ -564,7 +584,12 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
     );
     const fallbackIntents = [{ intent: "general_query", confidence: 0.5 }];
     await logIntentToDB(threadId, input, fallbackIntents, "llm", 0.5);
-    return { intents: fallbackIntents, shortMemory: historyMsgs };
+    return {
+      intents: fallbackIntents,
+      shortMemory: historyMsgs,
+      globalTransitionsCount: -1,
+      toolErrorsCount: -1,
+    };
   }
 }
 
@@ -667,5 +692,7 @@ async function handleImmediateBypass(
   return {
     intents,
     output: replyText,
+    globalTransitionsCount: -1,
+    toolErrorsCount: -1,
   };
 }
