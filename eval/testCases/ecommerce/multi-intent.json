@@ -37,5 +37,32 @@
         "value": "file://scorers/answerQuality.scorer.ts"
       }
     ]
+  },
+  {
+    "description": "意图分类 - 拒签退货后的第二个退货申请意图识别",
+    "vars": {
+      "context": "User: 我想退款订单 ORD-98712\nAssistant: 很抱歉，您的退款申请金额 $139.99 超过了自动退款限制，已转交管理员进行审核。\nSystem: 管理员拒绝了本次退款申请，理由: [退款商品不符合30天无理由条件]。\nAssistant: 非常抱歉，您关于订单 ORD-98712 的退款已被管理员驳回。理由是商品不符退换政策。",
+      "input": "那我另一笔订单 ORD-55555 可以申请退款吗？",
+      "expectedIntents": ["refund"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "步骤规划 - 拒签退款后第二个退货申请的工具规划",
+    "vars": {
+      "input": "我刚才对订单 ORD-98712 申请退款被拒绝了，我想申请另外一笔订单 ORD-55555 的退款",
+      "expectedTools": ["processRefund"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
   }
 ]
