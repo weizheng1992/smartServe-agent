@@ -1,5 +1,5 @@
-import { getTemporalClient, isUsingMockTemporal, runAgent } from 'engine';
-import { type NextRequest, NextResponse } from 'next/server';
+import { getTemporalClient, isUsingMockTemporal, runAgent } from "engine";
+import { type NextRequest, NextResponse } from "next/server";
 
 interface CachedJob {
   jobId: string;
@@ -12,10 +12,12 @@ const globalForCache = global as unknown as {
   completedRequestsCache?: Map<string, CachedJob>; // threadId:cleanMessage -> CachedJob
 };
 
-const inFlightRequests = globalForCache.inFlightRequests ?? new Map<string, string>();
-const completedRequestsCache = globalForCache.completedRequestsCache ?? new Map<string, CachedJob>();
+const inFlightRequests =
+  globalForCache.inFlightRequests ?? new Map<string, string>();
+const completedRequestsCache =
+  globalForCache.completedRequestsCache ?? new Map<string, CachedJob>();
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== "production") {
   globalForCache.inFlightRequests = inFlightRequests;
   globalForCache.completedRequestsCache = completedRequestsCache;
 }
@@ -25,15 +27,24 @@ export async function POST(req: NextRequest) {
     const { message, threadId, userId } = await req.json();
 
     if (!message) {
-      return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "Message is required" },
+        { status: 400 },
+      );
     }
 
     // 🛡️ 最底层的多租户会话隔离防卫：无 threadId 或 userId 直接物理拒绝处理！
     if (!threadId) {
-      return NextResponse.json({ error: 'threadId is strictly required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "threadId is strictly required" },
+        { status: 400 },
+      );
     }
     if (!userId) {
-      return NextResponse.json({ error: 'userId is strictly required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "userId is strictly required" },
+        { status: 400 },
+      );
     }
 
     const cleanMessage = message.trim().toLowerCase();
@@ -44,7 +55,9 @@ export async function POST(req: NextRequest) {
     // =========================================================================
     if (inFlightRequests.has(cacheKey)) {
       const existingJobId = inFlightRequests.get(cacheKey)!;
-      console.log(`[Singleflight] 🎯 拦截到极速并发重复请求！直接合并至正在执行的 jobId: ${existingJobId}`);
+      console.log(
+        `[Singleflight] 🎯 拦截到极速并发重复请求！直接合并至正在执行的 jobId: ${existingJobId}`,
+      );
       return NextResponse.json({
         success: true,
         jobId: existingJobId,
@@ -61,7 +74,9 @@ export async function POST(req: NextRequest) {
     if (completedRequestsCache.has(cacheKey)) {
       const cached = completedRequestsCache.get(cacheKey)!;
       if (now - cached.timestamp < 5000) {
-        console.log(`[Exact Cache Hit] 🎯 5秒内重复提问精确哈希去重命中！直接复用 jobId: ${cached.jobId}`);
+        console.log(
+          `[Exact Cache Hit] 🎯 5秒内重复提问精确哈希去重命中！直接复用 jobId: ${cached.jobId}`,
+        );
         return NextResponse.json({
           success: true,
           jobId: cached.jobId,
@@ -83,9 +98,11 @@ export async function POST(req: NextRequest) {
     const isMock = isUsingMockTemporal();
 
     if (!isMock) {
-      console.log(`[Temporal] Connecting successfully. Starting workflow ${jobId} on queue 'agent-tasks'...`);
-      const workflowPromise = client.workflow.start('agentWorkflow', {
-        taskQueue: 'agent-tasks',
+      console.log(
+        `[Temporal] Connecting successfully. Starting workflow ${jobId} on queue 'agent-tasks'...`,
+      );
+      const workflowPromise = client.workflow.start("agentWorkflow", {
+        taskQueue: "agent-tasks",
         workflowId: jobId,
         args: [threadId, userId, message],
       });
@@ -96,17 +113,25 @@ export async function POST(req: NextRequest) {
             .result()
             .then(() => {
               inFlightRequests.delete(cacheKey);
-              completedRequestsCache.set(cacheKey, { jobId, timestamp: Date.now() });
-              console.log(`[Temporal Complete] ✅ Workflow ${jobId} completed. Registered in 5s short cache.`);
+              completedRequestsCache.set(cacheKey, {
+                jobId,
+                timestamp: Date.now(),
+              });
+              console.log(
+                `[Temporal Complete] ✅ Workflow ${jobId} completed. Registered in 5s short cache.`,
+              );
             })
             .catch((err) => {
               inFlightRequests.delete(cacheKey);
-              console.warn(`[Temporal Fail] Workflow ${jobId} execution failed:`, err);
+              console.warn(
+                `[Temporal Fail] Workflow ${jobId} execution failed:`,
+                err,
+              );
             });
         })
         .catch((err) => {
           inFlightRequests.delete(cacheKey);
-          console.error('[Temporal Start Fail] Failed to start workflow:', err);
+          console.error("[Temporal Start Fail] Failed to start workflow:", err);
         });
     } else {
       console.log(
@@ -115,7 +140,15 @@ export async function POST(req: NextRequest) {
       // Fallback: Trigger local graph execution and store the promise/state globally
       const executionPromise = runAgent(threadId, userId, message, jobId);
 
-      if (typeof global !== 'undefined') {
+      // 🛡️ Serverless container-freeze protection:
+      // If deployed on serverless environments (e.g. Vercel, Cloudflare, Next.js Edge),
+      // we must declare the promise to the request runtime context so the serverless container
+      // does not freeze or go to sleep mid-execution before the LangGraph completes.
+      if ((req as any).waitUntil) {
+        (req as any).waitUntil(executionPromise);
+      }
+
+      if (typeof global !== "undefined") {
         if (!(global as any).agentRuns) {
           (global as any).agentRuns = new Map();
         }
@@ -126,8 +159,13 @@ export async function POST(req: NextRequest) {
       executionPromise
         .then(() => {
           inFlightRequests.delete(cacheKey);
-          completedRequestsCache.set(cacheKey, { jobId, timestamp: Date.now() });
-          console.log(`[Local Complete] ✅ Local run ${jobId} completed. Registered in 5s short cache.`);
+          completedRequestsCache.set(cacheKey, {
+            jobId,
+            timestamp: Date.now(),
+          });
+          console.log(
+            `[Local Complete] ✅ Local run ${jobId} completed. Registered in 5s short cache.`,
+          );
         })
         .catch((err) => {
           inFlightRequests.delete(cacheKey);
@@ -143,7 +181,10 @@ export async function POST(req: NextRequest) {
       isTemporalMode: !isMock,
     });
   } catch (error: any) {
-    console.error('Error in POST /api/chat endpoint:', error);
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+    console.error("Error in POST /api/chat endpoint:", error);
+    return NextResponse.json(
+      { error: error.message || "Internal Server Error" },
+      { status: 500 },
+    );
   }
 }

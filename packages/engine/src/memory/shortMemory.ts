@@ -1,8 +1,8 @@
-import { db } from 'db';
-import { getEmbeddingModel } from '../llm/callLLMWithRetry';
+import { db } from "db";
+import { getEmbeddingModel } from "../llm/callLLMWithRetry";
 
 export interface ShortMemoryMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
@@ -18,20 +18,29 @@ export class ShortMemory {
   async getMessages(): Promise<ShortMemoryMessage[]> {
     try {
       const messages = await db.getMessages(this.threadId);
-      return messages.map((msg: any) => ({
-        role: msg.role as 'user' | 'assistant' | 'system',
+      // Implement a sliding context window to fetch only the latest (maxTurns * 2) messages,
+      // avoiding Context Window Bloat and reducing DB parsing and LLM token billing costs.
+      const sliced = messages.slice(-this.maxTurns * 2);
+      return sliced.map((msg: any) => ({
+        role: msg.role as "user" | "assistant" | "system",
         content: msg.content,
       }));
     } catch (err) {
-      console.error('[ShortMemory Error] Failed to get messages:', err);
+      console.error("[ShortMemory Error] Failed to get messages:", err);
       return [];
     }
   }
 
-  async addMessage(role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
-    const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+  async addMessage(
+    role: "user" | "assistant" | "system",
+    content: string,
+  ): Promise<void> {
+    const id = crypto.randomUUID
+      ? crypto.randomUUID()
+      : Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
-    const cleanContent = content !== undefined && content !== null ? String(content) : '';
+    const cleanContent =
+      content !== undefined && content !== null ? String(content) : "";
 
     try {
       await db.addMessage({
@@ -45,11 +54,11 @@ export class ShortMemory {
         `[ShortMemory] Added message for thread ${this.threadId}: [${role}] ${cleanContent.substring(0, 50)}`,
       );
     } catch (err) {
-      console.error('[ShortMemory Error] Failed to add message:', err);
+      console.error("[ShortMemory Error] Failed to add message:", err);
     }
   }
 
   async compress(messages: ShortMemoryMessage[]): Promise<string> {
-    return 'Summary of compressed conversation history';
+    return "Summary of compressed conversation history";
   }
 }
