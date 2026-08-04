@@ -256,10 +256,12 @@ export const processRefund = {
     orderId,
     reason,
     threadId,
+    amount,
   }: {
     orderId: string;
     reason: string;
     threadId?: string;
+    amount?: string;
   }) => {
     // SaaS 多租户隔离：根据 threadId 物理 SQL 溯源所属商户租户，采用 db.execute 彻底规避对 drizzle-orm 的依赖警告
     let businessId = "ecommerce";
@@ -453,10 +455,12 @@ export const changeShippingAddress = {
     orderId,
     newAddress,
     threadId,
+    isApproved,
   }: {
     orderId: string;
     newAddress: string;
     threadId?: string;
+    isApproved?: boolean;
   }) => {
     // 🛡️ 零越权验证 (Zero IDOR Check): 通过 threadId 物理追溯当前登录用户身份
     let sessionUserId = "";
@@ -505,7 +509,7 @@ export const changeShippingAddress = {
       }
 
       // Security risk rule: Large order changes require manual supervisor clearance (HITL)
-      if (totalAmount > 100.0) {
+      if (totalAmount > 100.0 && !isApproved) {
         console.log(
           `[Address Change Guardrail] 🛡️ High-value order address modification detected ($${totalAmount}). Flagging for human audit.`,
         );

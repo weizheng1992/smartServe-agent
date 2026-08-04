@@ -148,7 +148,10 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
         step.result = {
           ...step.result,
           rejectedByAdmin: true,
-          rejectionReason: latestApproval.reason || "No reason provided",
+          rejectionReason:
+            latestApproval.actionPayload?.rejectionReason ||
+            latestApproval.reason ||
+            "No reason provided",
         };
         console.log(
           `[Planner Rejection] Dynamically marked step ${step.id} as failed/rejected based on DB approval record`,

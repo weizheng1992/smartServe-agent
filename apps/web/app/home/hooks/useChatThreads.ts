@@ -61,21 +61,23 @@ export function useChatThreads({
         setThreads(data.threads);
 
         // Prioritize loading the active thread ID from the URL query parameter on load
-        let initialActiveId = activeThreadId;
+        let queryActiveId = "";
         if (typeof window !== "undefined") {
           const params = new URLSearchParams(window.location.search);
-          initialActiveId = params.get("threadId") || activeThreadId;
+          queryActiveId = params.get("threadId") || "";
         }
 
         if (data.threads.length > 0) {
-          if (
-            initialActiveId &&
-            data.threads.some((t: any) => t.id === initialActiveId)
-          ) {
-            setActiveThreadId(initialActiveId);
-          } else {
-            setActiveThreadId(data.threads[0].id);
-          }
+          setActiveThreadId((currentActiveId) => {
+            const initialActiveId = queryActiveId || currentActiveId;
+            if (
+              initialActiveId &&
+              data.threads.some((t: any) => t.id === initialActiveId)
+            ) {
+              return initialActiveId;
+            }
+            return data.threads[0].id;
+          });
         }
       }
     } catch (err) {
@@ -83,7 +85,7 @@ export function useChatThreads({
     } finally {
       setIsThreadsLoading(false);
     }
-  }, [currentUser, activeThreadId]);
+  }, [currentUser]);
 
   // Create a new chat session thread
   const handleCreateNewThread = async (merchantId = "ecommerce") => {

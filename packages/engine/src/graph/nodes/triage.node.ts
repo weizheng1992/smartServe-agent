@@ -4,7 +4,7 @@ import { logger } from "observability";
 const embeddingCache = new Map<string, number[]>();
 
 async function getEmbeddingWithCache(text: string): Promise<number[]> {
-  const cleanText = text.trim();
+  const cleanText = text.trim().toLowerCase();
   if (embeddingCache.has(cleanText)) {
     return embeddingCache.get(cleanText)!;
   }
@@ -111,7 +111,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   // 直接复用外层在 runAgent 处已经单次向量化计算过的 inputEmbedding 载入局部缓存中，
   // 完美避免 triageNode 重复通过网络计算相同输入向量的延迟！
   if (input && state.inputEmbedding && state.inputEmbedding.length > 0) {
-    embeddingCache.set(input, state.inputEmbedding);
+    embeddingCache.set(input.trim().toLowerCase(), state.inputEmbedding);
   }
 
   logger.info(
@@ -399,7 +399,7 @@ Only return the final customer-facing Chinese text. No other text.`;
         state,
         "fastpath_order_list",
         reply,
-        [{ intent: "order_status", confidence: 1.0 }],
+        [{ intent: "general_query", confidence: 1.0 }],
         "rule",
         1.0,
       );
@@ -644,6 +644,19 @@ async function handleImmediateBypass(
     confidence,
   );
 
+  const bypassPlan = {
+    goal: "Address quick bypass query",
+    subtasks: [
+      {
+        id: "bypass_step",
+        description: `Handle immediate bypass shortcut [${routeKey}]`,
+        status: "completed" as const,
+        result: { message: "Bypassed successfully" },
+      },
+    ],
+    currentStepIndex: 1,
+  };
+
   if (state.jobId) {
     const friendlyMsg = routeKey.includes("greeting")
       ? "极速通道：已秒级识别您所发送的日常打招呼，为您载入高画质欢迎界面..."
@@ -655,36 +668,14 @@ async function handleImmediateBypass(
       status: "executing",
       node: "triage",
       message: friendlyMsg,
-      plan: {
-        goal: "Address quick bypass query",
-        subtasks: [
-          {
-            id: "bypass_step",
-            description: `Handle immediate bypass shortcut [${routeKey}]`,
-            status: "completed" as const,
-            result: { message: "Bypassed successfully" },
-          },
-        ],
-        currentStepIndex: 1,
-      },
+      plan: bypassPlan,
     });
 
     // 延迟少许并广播 result 事件，让前端 Loading 进度条在毫秒级全绿关闭
     setTimeout(() => {
       agentEventEmitter.emit(`${state.jobId}:result`, {
         output: replyText,
-        taskPlan: {
-          goal: "Address quick bypass query",
-          subtasks: [
-            {
-              id: "bypass_step",
-              description: `Handle immediate bypass shortcut [${routeKey}]`,
-              status: "completed" as const,
-              result: { message: "Bypassed successfully" },
-            },
-          ],
-          currentStepIndex: 1,
-        },
+        taskPlan: bypassPlan,
       });
     }, 100);
   }
@@ -692,6 +683,7 @@ async function handleImmediateBypass(
   return {
     intents,
     output: replyText,
+    taskPlan: bypassPlan,
     globalTransitionsCount: -1,
     toolErrorsCount: -1,
   };

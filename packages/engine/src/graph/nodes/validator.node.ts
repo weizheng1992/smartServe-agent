@@ -17,7 +17,9 @@ export async function validatorNode(state: typeof AgentStateAnnotation.State) {
   }
 
   // 如果执行步骤因为安全审批被拦截处于挂起状态，校验器不做任何操作，亦不累加索引，保留现场原封不动返回！
-  if (step.result?.waitingForApproval) {
+  const isWaiting =
+    step.result?.waitingForApproval || step.result?.output?.waitingForApproval;
+  if (isWaiting) {
     logger.info(
       { threadId: state.threadId },
       "validatorNode bypassed: step is waiting for approval",

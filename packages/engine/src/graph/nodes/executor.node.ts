@@ -183,22 +183,18 @@ ${historyContext}`;
         // =====================================================================
         // 🛡️ ANTI-INJECTION GATEKEEPER: 硬核安全审核拦截关卡
         // =====================================================================
-        if (parsedToolCall.toolName === "processRefund") {
+        if (
+          parsedToolCall.toolName === "processRefund" ||
+          parsedToolCall.toolName === "changeShippingAddress"
+        ) {
           try {
-            // 🪙 动态限额核免：优先从数据库查询真实订单的总金额进行 Grounding，防止由于参数缺失默认降级为 $999999.99 越过红线限制（金融资金防泄漏）
             const orderId = parsedToolCall.args?.orderId;
-            let refundAmount = 999999.99;
-            const refundAmountStr =
-              parsedToolCall.args?.refundAmount || parsedToolCall.args?.amount;
+            let isHighValueAddressChange = false;
 
-            if (refundAmountStr) {
-              refundAmount =
-                Number.parseFloat(
-                  String(refundAmountStr).replace(/[^0-9.]/g, ""),
-                ) || 999999.99;
-            }
-
-            if (orderId) {
+            if (
+              parsedToolCall.toolName === "changeShippingAddress" &&
+              orderId
+            ) {
               try {
                 const { db: physicalDb } = require("db");
                 const oRes = await physicalDb.execute(
@@ -207,82 +203,141 @@ ${historyContext}`;
                 );
                 if (oRes?.rows?.[0]) {
                   const row = oRes.rows[0] as any;
-
-                  // 🛡️ Double-Refund Prevention Check: 拒绝重复退款拦截关卡
-                  if (row.status === "refunded") {
+                  const totalAmount = Number(
+                    row.totalAmount || row.total_amount || 0,
+                  );
+                  const status = row.status || "";
+                  if (status === "shipped" || status === "delivered") {
+                    // Let the physical tool handle standard delivery error messaging
+                  } else if (totalAmount > 100.0) {
+                    isHighValueAddressChange = true;
                     console.log(
-                      `[Approval Gate] 🛑 Double-Refund Blocked: Order ${orderId} is already refunded!`,
+                      `[Approval Gate] 🛡️ High-value order address modification detected ($${totalAmount}) in Executor Node.`,
                     );
-                    const updatedStep = {
-                      ...stepToRun,
-                      status: "failed" as const,
-                      result: {
-                        error: "该订单已经是已退款状态，禁止重复退款。",
-                        message: `⚠️ 退款流程拦截：系统检测到订单 [${orderId}] 的状态在数据库中已经是 [已退款] 状态，物理拒绝重复退款操作！`,
-                      },
-                    };
-                    updatedSubtasks[currentIndex] = updatedStep;
-
-                    const nextPlan = {
-                      ...currentPlan,
-                      subtasks: updatedSubtasks,
-                    };
-
-                    if (state.jobId) {
-                      agentEventEmitter.emit(`${state.jobId}:status`, {
-                        status: "executing",
-                        node: "executor",
-                        message: `🛑 拒绝重复退款：订单 [${orderId}] 已经是 [已退款] 状态，流程已物理终止。`,
-                        plan: nextPlan,
-                      });
-                    }
-
-                    return {
-                      taskPlan: nextPlan,
-                      shortMemory,
-                      globalTransitionsCount: 1,
-                      toolErrorsCount: 1,
-                    };
-                  }
-
-                  // 🪙 动态限额核免：如果参数中没有具体的 refundAmount，则使用数据库查询真实订单的总金额进行 Grounding
-                  if (!refundAmountStr) {
-                    const dbAmt = row.totalAmount || row.total_amount;
-                    if (dbAmt) {
-                      refundAmount =
-                        Number.parseFloat(
-                          String(dbAmt).replace(/[^0-9.]/g, ""),
-                        ) || 999999.99;
-                      console.log(
-                        `[Approval Gate] Grounded real refund amount from database for order ${orderId}: $${refundAmount}`,
-                      );
-                    }
                   }
                 }
-              } catch (dbErr) {
+              } catch (addrDbErr) {
                 console.warn(
-                  "[Approval Gate] Failed to fetch real order amount from database for grounding:",
-                  dbErr,
+                  "[Approval Gate] Failed to verify address change value grounding:",
+                  addrDbErr,
                 );
               }
             }
 
-            const autoApprovalLimit =
-              state.businessConfig?.refundAutoApprovalLimit ?? 100;
-            const shouldAutoApprove = refundAmount <= autoApprovalLimit;
+            if (parsedToolCall.toolName === "processRefund") {
+              try {
+                // 🪙 动态限额核免：优先从数据库查询真实订单的总金额进行 Grounding，防止由于参数缺失默认降级为 $999999.99 越过红线限制（金融资金防泄漏）
+                let refundAmount = 999999.99;
+                const refundAmountStr =
+                  parsedToolCall.args?.refundAmount ||
+                  parsedToolCall.args?.amount;
 
-            if (shouldAutoApprove) {
-              console.log(
-                `[Approval Gate] ✅ 额度免核签发：退款金额 $${refundAmount} 未超过该租户政策额度限制 ($${autoApprovalLimit})。执行引擎实施免审核直接放行！`,
-              );
-              if (state.jobId) {
-                agentEventEmitter.emit(`${state.jobId}:status`, {
-                  status: "executing",
-                  node: "executor",
-                  message: `✅ 政策放行：检测到本次退款金额 ($${refundAmount}) 在商户免签限额 ($${autoApprovalLimit}) 以内，已物理触发【额度免签直接放行】！`,
-                });
+                if (refundAmountStr) {
+                  refundAmount =
+                    Number.parseFloat(
+                      String(refundAmountStr).replace(/[^0-9.]/g, ""),
+                    ) || 999999.99;
+                }
+
+                if (orderId) {
+                  try {
+                    const { db: physicalDb } = require("db");
+                    const oRes = await physicalDb.execute(
+                      'SELECT total_amount AS "totalAmount", status FROM orders WHERE order_id = $1',
+                      [orderId],
+                    );
+                    if (oRes?.rows?.[0]) {
+                      const row = oRes.rows[0] as any;
+
+                      // 🛡️ Double-Refund Prevention Check: 拒绝重复退款拦截关卡
+                      if (row.status === "refunded") {
+                        console.log(
+                          `[Approval Gate] 🛑 Double-Refund Blocked: Order ${orderId} is already refunded!`,
+                        );
+                        const updatedStep = {
+                          ...stepToRun,
+                          status: "failed" as const,
+                          result: {
+                            error: "该订单已经是已退款状态，禁止重复退款。",
+                            message: `⚠️ 退款流程拦截：系统检测到订单 [${orderId}] 的状态在数据库中已经是 [已退款] 状态，物理拒绝重复退款操作！`,
+                          },
+                        };
+                        updatedSubtasks[currentIndex] = updatedStep;
+
+                        const nextPlan = {
+                          ...currentPlan,
+                          subtasks: updatedSubtasks,
+                        };
+
+                        if (state.jobId) {
+                          agentEventEmitter.emit(`${state.jobId}:status`, {
+                            status: "executing",
+                            node: "executor",
+                            message: `🛑 拒绝重复退款：订单 [${orderId}] 已经是 [已退款] 状态，流程已物理终止。`,
+                            plan: nextPlan,
+                          });
+                        }
+
+                        return {
+                          taskPlan: nextPlan,
+                          shortMemory,
+                          globalTransitionsCount: 1,
+                          toolErrorsCount: 1,
+                        };
+                      }
+
+                      // 🪙 动态限额核免：如果参数中没有具体的 refundAmount，则使用数据库查询真实订单的总金额进行 Grounding
+                      if (!refundAmountStr) {
+                        const dbAmt = row.totalAmount || row.total_amount;
+                        if (dbAmt) {
+                          refundAmount =
+                            Number.parseFloat(
+                              String(dbAmt).replace(/[^0-9.]/g, ""),
+                            ) || 999999.99;
+                          console.log(
+                            `[Approval Gate] Grounded real refund amount from database for order ${orderId}: $${refundAmount}`,
+                          );
+                        }
+                      }
+                    }
+                  } catch (dbErr) {
+                    console.warn(
+                      "[Approval Gate] Failed to fetch real order amount from database for grounding:",
+                      dbErr,
+                    );
+                  }
+                }
+
+                const autoApprovalLimit =
+                  state.businessConfig?.refundAutoApprovalLimit ?? 100;
+                const shouldAutoApprove = refundAmount <= autoApprovalLimit;
+
+                if (shouldAutoApprove) {
+                  console.log(
+                    `[Approval Gate] ✅ 额度免核签发：退款金额 $${refundAmount} 未超过该租户政策额度限制 ($${autoApprovalLimit})。执行引擎实施免审核直接放行！`,
+                  );
+                  if (state.jobId) {
+                    agentEventEmitter.emit(`${state.jobId}:status`, {
+                      status: "executing",
+                      node: "executor",
+                      message: `✅ 政策放行：检测到本次退款金额 ($${refundAmount}) 在商户免签限额 ($${autoApprovalLimit}) 以内，已物理触发【额度免签直接放行】！`,
+                    });
+                  }
+                  // Return to bypass processRefund check and continue executing
+                  throw new Error("AUTO_BYPASS_REFUND");
+                }
+              } catch (bypassErr: any) {
+                if (bypassErr?.message !== "AUTO_BYPASS_REFUND") {
+                  throw bypassErr;
+                }
               }
-            } else {
+            }
+
+            // Execute common pending approval check/insert logic for processRefund and changeShippingAddress (high-value)
+            if (
+              parsedToolCall.toolName === "processRefund" ||
+              isHighValueAddressChange
+            ) {
               const { pendingApprovals, getDrizzle } = require("db");
               const { eq, desc } = require("drizzle-orm");
               const drizzle = getDrizzle()!;
@@ -322,8 +377,13 @@ ${historyContext}`;
                     result: {
                       expiredByTimeout: true,
                       error:
-                        "人工审批已超时。大额资金退款未获得授权，暂未办理。",
-                      message: `⚠️ 安全核发超时：人工审核申请 (ID: ${latestApproval.id}) 已超过截止审批时间 (${new Date(latestApproval.deadline).toLocaleString()}) 仍未获得核准，系统已自动实施超时安全解挂熔断。退款暂未执行，请联系客服转人工处理。`,
+                        parsedToolCall.toolName === "processRefund"
+                          ? "人工审批已超时。大额资金退款未获得授权，暂未办理。"
+                          : "人工审批已超时。高价值订单地址修改申请未获得授权，暂未办理。",
+                      message:
+                        parsedToolCall.toolName === "processRefund"
+                          ? `⚠️ 安全核发超时：人工审核申请 (ID: ${latestApproval.id}) 已超过截止审批时间 (${new Date(latestApproval.deadline).toLocaleString()}) 仍未获得核准，系统已自动实施超时安全解挂熔断。退款暂未执行，请联系客服转人工处理。`
+                          : `⚠️ 安全核发超时：订单地址修改人工审核申请 (ID: ${latestApproval.id}) 已超过截止审批时间 (${new Date(latestApproval.deadline).toLocaleString()}) 仍未获得授权，系统已自动实施超时安全解挂熔断。修改暂未生效。`,
                       approvalId: latestApproval.id,
                     },
                   };
@@ -361,7 +421,7 @@ ${historyContext}`;
                   await drizzle.insert(pendingApprovals).values({
                     id: approvalId,
                     threadId: state.threadId,
-                    actionType: "processRefund",
+                    actionType: parsedToolCall.toolName,
                     actionPayload: {
                       description: stepToRun.description,
                       args: parsedToolCall.args,
@@ -371,7 +431,7 @@ ${historyContext}`;
                     deadline: deadline,
                   });
                   console.log(
-                    `[Approval Gate] ⚠️ 拦截成功！已成功创建高危物理退款人工审批工单 [ID: ${approvalId}]`,
+                    `[Approval Gate] ⚠️ 拦截成功！已成功创建高危物理审批工单 [ID: ${approvalId}] Action: ${parsedToolCall.toolName}`,
                   );
                 }
 
@@ -389,10 +449,15 @@ ${historyContext}`;
                 };
 
                 if (state.jobId) {
+                  const alertMsg =
+                    parsedToolCall.toolName === "processRefund"
+                      ? `⚠️ 安全拦截：系统检测到敏感支付操作 [退款金额: ${parsedToolCall.args?.refundAmount || "100% 原路退回"}]。已物理拦截并自动生成人工审批工单 (ID: ${approvalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`
+                      : `⚠️ 安全拦截：检测到高价值订单修改敏感操作 [申请更新配送地址为: ${parsedToolCall.args?.newAddress || "新地址"}]。已物理拦截并自动生成人工审批工单 (ID: ${approvalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`;
+
                   agentEventEmitter.emit(`${state.jobId}:status`, {
                     status: "executing",
                     node: "executor",
-                    message: `⚠️ 安全拦截：系统检测到敏感支付操作 [退款金额: ${parsedToolCall.args?.refundAmount || "100% 原路退回"}]。已物理拦截并自动生成人工审批工单 (ID: ${approvalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`,
+                    message: alertMsg,
                     plan: nextPlan,
                   });
                 }
@@ -404,7 +469,7 @@ ${historyContext}`;
               }
               if (latestApproval.status === "cancelled") {
                 console.log(
-                  `[Approval Gate] 🚫 该退款操作已被用户主动取消！工单 ID: ${latestApproval.id}`,
+                  `[Approval Gate] 🚫 该操作已被用户主动取消！工单 ID: ${latestApproval.id}`,
                 );
 
                 const updatedStep = {
@@ -414,7 +479,7 @@ ${historyContext}`;
                     cancelledByUser: true,
                     error: "用户已取消此项操作。",
                     message:
-                      "⚠️ 您已主动取消了此笔退款申请。相关操作已被物理终止。",
+                      "⚠️ 您已主动取消了此笔审批。相关操作已被物理终止。",
                     approvalId: latestApproval.id,
                   },
                 };
@@ -429,7 +494,7 @@ ${historyContext}`;
                   agentEventEmitter.emit(`${state.jobId}:status`, {
                     status: "executing",
                     node: "executor",
-                    message: `🚫 用户取消操作：检测到您已主动取消本次退款人工审批申请 (ID: ${latestApproval.id})。执行引擎实施无损流程终止与安全退避。`,
+                    message: `🚫 用户取消操作：检测到您已主动取消本次人工审批申请 (ID: ${latestApproval.id})。执行引擎实施无损流程终止与安全退避。`,
                     plan: nextPlan,
                   });
                 }
@@ -441,7 +506,7 @@ ${historyContext}`;
               }
               if (latestApproval.status === "rejected") {
                 console.log(
-                  `[Approval Gate] ❌ 该退款操作已被管理员拒绝！工单 ID: ${latestApproval.id}`,
+                  `[Approval Gate] ❌ 该操作已被管理员拒绝！工单 ID: ${latestApproval.id}`,
                 );
 
                 const updatedStep = {
@@ -451,7 +516,7 @@ ${historyContext}`;
                     rejectedByAdmin: true,
                     rejectionReason:
                       latestApproval.actionPayload?.rejectionReason ||
-                      "退款申请不符合政策要求。",
+                      "申请不符合政策要求。",
                     approvalId: latestApproval.id,
                   },
                 };
@@ -466,7 +531,7 @@ ${historyContext}`;
                   agentEventEmitter.emit(`${state.jobId}:status`, {
                     status: "executing",
                     node: "executor",
-                    message: `❌ 人工审核拒绝：管理员驳回了本次退款申请，理由: [${latestApproval.actionPayload?.rejectionReason || "不符政策要求"}]。决策引擎即将启动回溯重规划。`,
+                    message: `❌ 人工审核拒绝：管理员驳回了本次申请，理由: [${latestApproval.actionPayload?.rejectionReason || "不符政策要求"}]。决策引擎即将启动回溯重规划。`,
                     plan: nextPlan,
                   });
                 }
@@ -479,7 +544,7 @@ ${historyContext}`;
               }
               if (latestApproval.status === "approved") {
                 console.log(
-                  `[Approval Gate] ✅ 物理退款工单 [ID: ${latestApproval.id}] 已获得人工核准放行！真刀真枪执行扣款逻辑...`,
+                  `[Approval Gate] ✅ 物理工单 [ID: ${latestApproval.id}] 已获得人工核准放行！执行原有的工具调用...`,
                 );
                 // 放行，继续往下执行原有的工具调用
               }
@@ -513,9 +578,35 @@ ${historyContext}`;
             });
           }
 
+          // Check if there is an approved pending approval record for this thread and actionType to pass isApproved: true
+          let isApproved = false;
+          try {
+            const { getDrizzle, pendingApprovals } = require("db");
+            const { eq, desc } = require("drizzle-orm");
+            const drizzle = getDrizzle()!;
+            if (drizzle) {
+              const list = await drizzle
+                .select()
+                .from(pendingApprovals)
+                .where(eq(pendingApprovals.threadId, state.threadId))
+                .orderBy(desc(pendingApprovals.createdAt))
+                .limit(1);
+              if (
+                list[0] &&
+                list[0].status === "approved" &&
+                list[0].actionType === parsedToolCall.toolName
+              ) {
+                isApproved = true;
+              }
+            }
+          } catch (appCheckErr) {
+            console.warn("[Executor Approval Check] Error:", appCheckErr);
+          }
+
           const output = await toolDef.execute({
             ...parsedToolCall.args,
             threadId: state.threadId,
+            isApproved,
           });
           resultData = { toolExecuted: parsedToolCall.toolName, output };
 

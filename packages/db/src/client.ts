@@ -875,7 +875,8 @@ export class FakePool {
 
 let pgPool: Pool | null = null;
 let drizzleDb: NodePgDatabase<typeof schema> | null = null;
-const isUsingRealDb = true;
+const isUsingRealDb =
+  typeof process !== "undefined" && !!process.env.DATABASE_URL;
 
 function getPgPool(): Pool {
   if (pgPool) return pgPool;
@@ -918,6 +919,7 @@ function getPgPool(): Pool {
 
 export function getDrizzle(): NodePgDatabase<typeof schema> | null {
   if (drizzleDb) return drizzleDb;
+  if (!isUsingRealDb) return null;
   const pool = getPgPool();
   if (pool) {
     try {
@@ -1027,9 +1029,9 @@ export const db: DBInterface = {
   findOrCreateUserByEmail: async (
     email: string,
   ): Promise<{ id: string; email: string }> => {
-    const pool = getPgPool();
     if (isUsingRealDb) {
       try {
+        const pool = getPgPool();
         const selectRes = await pool.query(
           "SELECT id, email FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1",
           [email],
@@ -1082,9 +1084,9 @@ export const db: DBInterface = {
   },
 
   getUserThreads: async (userId: string): Promise<DBThread[]> => {
-    const pool = getPgPool();
     if (isUsingRealDb) {
       try {
+        const pool = getPgPool();
         const pgUserId = await resolveAndEnsurePgUserId(pool, userId);
 
         const res = await pool.query(
@@ -1121,10 +1123,10 @@ export const db: DBInterface = {
     userId: string,
     businessId?: string,
   ): Promise<DBThread> => {
-    const pool = getPgPool();
     const activeBusinessId = businessId || "ecommerce";
     if (isUsingRealDb) {
       try {
+        const pool = getPgPool();
         const pgUserId = await resolveAndEnsurePgUserId(pool, userId);
 
         await pool.query(
@@ -1172,158 +1174,210 @@ export const db: DBInterface = {
   },
 
   getMessages: async (threadId: string): Promise<Message[]> => {
-    const pool = getPgPool();
-    try {
-      const res = await pool.query(
-        'SELECT id, "thread_id" AS "threadId", role, content, timestamp FROM messages WHERE "thread_id" = $1 ORDER BY timestamp ASC',
-        [threadId],
-      );
-      const rows = res.rows as Array<{
-        id: string;
-        thread_id?: string;
-        threadId?: string;
-        role: string;
-        content: string;
-        timestamp: string;
-      }>;
-      return rows.map((r) => ({
-        id: r.id,
-        threadId: r.thread_id || r.threadId || "",
-        role: r.role,
-        content: r.content,
-        timestamp: r.timestamp,
-      })) as Message[];
-    } catch (err) {
-      console.error("[DB] Failed to get messages:", err);
-      return [];
+    if (isUsingRealDb) {
+      try {
+        const pool = getPgPool();
+        const res = await pool.query(
+          'SELECT id, "thread_id" AS "threadId", role, content, timestamp FROM messages WHERE "thread_id" = $1 ORDER BY timestamp ASC',
+          [threadId],
+        );
+        const rows = res.rows as Array<{
+          id: string;
+          thread_id?: string;
+          threadId?: string;
+          role: string;
+          content: string;
+          timestamp: string;
+        }>;
+        return rows.map((r) => ({
+          id: r.id,
+          threadId: r.thread_id || r.threadId || "",
+          role: r.role,
+          content: r.content,
+          timestamp: r.timestamp,
+        })) as Message[];
+      } catch (err) {
+        console.error("[DB] Failed to get messages:", err);
+        return [];
+      }
     }
+
+    return memoryDb.messages
+      .filter((m) => m.thread_id === threadId)
+      .map((m) => ({
+        id: m.id,
+        threadId: m.thread_id,
+        role: m.role as any,
+        content: m.content,
+        timestamp: m.timestamp,
+      }));
   },
 
   addMessage: async (message: Message): Promise<void> => {
-    const pool = getPgPool();
-    try {
-      await pool.query(
-        `INSERT INTO messages (id, "thread_id", role, content, timestamp) VALUES ($1, $2, $3, $4, $5)`,
-        [
-          message.id,
-          message.threadId,
-          message.role,
-          message.content,
-          message.timestamp,
-        ],
-      );
-      if (isUsingRealDb) {
+    if (isUsingRealDb) {
+      try {
+        const pool = getPgPool();
+        await pool.query(
+          `INSERT INTO messages (id, "thread_id", role, content, timestamp) VALUES ($1, $2, $3, $4, $5)`,
+          [
+            message.id,
+            message.threadId,
+            message.role,
+            message.content,
+            message.timestamp,
+          ],
+        );
         await pool.query(
           `UPDATE threads SET updated_at = NOW() WHERE id = $1`,
           [message.threadId],
         );
-      } else {
-        const thread = memoryDb.threads.get(message.threadId);
-        if (thread) {
-          thread.updatedAt = new Date().toISOString();
-        }
+      } catch (err) {
+        console.error("[DB] Error inserting message:", err);
       }
-    } catch (err) {
-      console.error("[DB] Error inserting message:", err);
+    } else {
+      const newMessage = {
+        id: message.id,
+        thread_id: message.threadId,
+        role: message.role,
+        content: message.content,
+        timestamp: message.timestamp,
+      };
+      memoryDb.messages.push(newMessage);
+      const thread = memoryDb.threads.get(message.threadId);
+      if (thread) {
+        thread.updatedAt = new Date().toISOString();
+      }
     }
   },
 
   getOrder: async (orderId: string): Promise<Order | null> => {
-    const pool = getPgPool();
-    try {
-      const res = await pool.query(
-        'SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery" FROM orders WHERE order_id = $1',
-        [orderId],
-      );
-      const rows = res.rows as Array<{
-        order_id?: string;
-        orderId?: string;
-        status: string;
-        carrier: string;
-        tracking_number?: string;
-        trackingNumber?: string;
-        estimated_delivery?: string;
-        estimatedDelivery?: string;
-      }>;
-      if (rows && rows.length > 0) {
-        const row = rows[0];
-        return {
-          orderId: row.order_id || row.orderId || "",
-          status: row.status,
-          carrier: row.carrier,
-          trackingNumber: row.tracking_number || row.trackingNumber || "",
-          estimatedDelivery:
-            row.estimated_delivery || row.estimatedDelivery || "",
-        } as Order;
+    if (isUsingRealDb) {
+      try {
+        const pool = getPgPool();
+        const res = await pool.query(
+          'SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery" FROM orders WHERE order_id = $1',
+          [orderId],
+        );
+        const rows = res.rows as Array<{
+          order_id?: string;
+          orderId?: string;
+          status: string;
+          carrier: string;
+          tracking_number?: string;
+          trackingNumber?: string;
+          estimated_delivery?: string;
+          estimatedDelivery?: string;
+        }>;
+        if (rows && rows.length > 0) {
+          const row = rows[0];
+          return {
+            orderId: row.order_id || row.orderId || "",
+            status: row.status,
+            carrier: row.carrier,
+            trackingNumber: row.tracking_number || row.trackingNumber || "",
+            estimatedDelivery:
+              row.estimated_delivery || row.estimatedDelivery || "",
+          } as Order;
+        }
+        return null;
+      } catch (err) {
+        console.error("[DB] Failed to get order:", err);
+        return null;
       }
-      return null;
-    } catch (err) {
-      console.error("[DB] Failed to get order:", err);
-      return null;
     }
+
+    const order = memoryDb.orders.get(orderId);
+    if (order) {
+      return {
+        orderId: order.order_id || order.id || "",
+        status: order.status,
+        carrier: order.carrier,
+        trackingNumber: order.tracking_number,
+        estimatedDelivery: order.estimated_delivery,
+      } as any;
+    }
+    return null;
   },
 
   execute: async (
     queryStr: string,
     params?: unknown[],
   ): Promise<DBExecutorResult> => {
-    const pool = getPgPool();
-    try {
-      const res = await pool.query(queryStr, params);
-      return { rows: res.rows as unknown[] };
-    } catch (e) {
-      console.error("[DB] execute failed:", e);
-      return { rows: [] };
+    if (isUsingRealDb) {
+      try {
+        const pool = getPgPool();
+        const res = await pool.query(queryStr, params);
+        return { rows: res.rows as unknown[] };
+      } catch (e) {
+        console.error("[DB] execute failed:", e);
+        return { rows: [] };
+      }
     }
+
+    return executeMemoryDbQuery(queryStr, params);
   },
 
   deleteThread: async (threadId: string): Promise<boolean> => {
-    const pool = getPgPool();
-    try {
-      // 1. Cascade delete dependent tables first due to FK constraints
-      await pool.query("DELETE FROM messages WHERE thread_id = $1", [threadId]);
-      await pool.query("DELETE FROM pending_approvals WHERE thread_id = $1", [
-        threadId,
-      ]);
-      await pool.query("DELETE FROM session_metrics WHERE thread_id = $1", [
-        threadId,
-      ]);
-      await pool.query("DELETE FROM task_memory WHERE thread_id = $1", [
-        threadId,
-      ]);
-      await pool.query("DELETE FROM episodic_events WHERE thread_id = $1", [
-        threadId,
-      ]);
-      await pool.query("DELETE FROM agent_jobs WHERE thread_id = $1", [
-        threadId,
-      ]);
-      await pool.query("DELETE FROM intent_logs WHERE thread_id = $1", [
-        threadId,
-      ]);
-      await pool.query("DELETE FROM low_confidence_logs WHERE thread_id = $1", [
-        threadId,
-      ]);
+    if (isUsingRealDb) {
+      try {
+        const pool = getPgPool();
+        // 1. Cascade delete dependent tables first due to FK constraints
+        await pool.query("DELETE FROM messages WHERE thread_id = $1", [
+          threadId,
+        ]);
+        await pool.query("DELETE FROM pending_approvals WHERE thread_id = $1", [
+          threadId,
+        ]);
+        await pool.query("DELETE FROM session_metrics WHERE thread_id = $1", [
+          threadId,
+        ]);
+        await pool.query("DELETE FROM task_memory WHERE thread_id = $1", [
+          threadId,
+        ]);
+        await pool.query("DELETE FROM episodic_events WHERE thread_id = $1", [
+          threadId,
+        ]);
+        await pool.query("DELETE FROM agent_jobs WHERE thread_id = $1", [
+          threadId,
+        ]);
+        await pool.query("DELETE FROM intent_logs WHERE thread_id = $1", [
+          threadId,
+        ]);
+        await pool.query(
+          "DELETE FROM low_confidence_logs WHERE thread_id = $1",
+          [threadId],
+        );
 
-      // 2. Delete the thread itself
-      const res = await pool.query("DELETE FROM threads WHERE id = $1", [
-        threadId,
-      ]);
+        // 2. Delete the thread itself
+        const res = await pool.query("DELETE FROM threads WHERE id = $1", [
+          threadId,
+        ]);
 
-      // 3. Keep memoryDb emulator state cleanly in sync
-      memoryDb.threads.delete(threadId);
-      memoryDb.messages = memoryDb.messages.filter(
-        (m) => m.thread_id !== threadId,
-      );
-      memoryDb.pendingApprovals = memoryDb.pendingApprovals.filter(
-        (a) => a.threadId !== threadId && a.thread_id !== threadId,
-      );
+        // 3. Keep memoryDb emulator state cleanly in sync
+        memoryDb.threads.delete(threadId);
+        memoryDb.messages = memoryDb.messages.filter(
+          (m) => m.thread_id !== threadId,
+        );
+        memoryDb.pendingApprovals = memoryDb.pendingApprovals.filter(
+          (a) => a.threadId !== threadId && a.thread_id !== threadId,
+        );
 
-      return (res.rowCount ?? 0) > 0;
-    } catch (err) {
-      console.error("[DB Delete Thread PG Error]:", err);
-      // Fallback local memory sync even if physical query failed
-      memoryDb.threads.delete(threadId);
-      return false;
+        return (res.rowCount ?? 0) > 0;
+      } catch (err) {
+        console.error("[DB Delete Thread PG Error]:", err);
+        // Fallback local memory sync even if physical query failed
+        memoryDb.threads.delete(threadId);
+        return false;
+      }
     }
+
+    memoryDb.threads.delete(threadId);
+    memoryDb.messages = memoryDb.messages.filter(
+      (m) => m.thread_id !== threadId,
+    );
+    memoryDb.pendingApprovals = memoryDb.pendingApprovals.filter(
+      (a) => a.threadId !== threadId && a.thread_id !== threadId,
+    );
+    return true;
   },
 };
