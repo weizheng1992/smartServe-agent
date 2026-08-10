@@ -29,6 +29,11 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
    - [4.7 SaaS 算力审计与财务账单度量系统](#47-saas-算力审计与财务账单度量系统)
    - [4.8 多轮会话物理自愈载入 (Self-Healing Short Memory)](#48-多轮会话物理自愈载入-self-healing-short-memory)
    - [4.9 双向会话同步与零 Fallback 级 UUID 会话管理](#49-双向会话同步与零-fallback-级-uuid-会话管理)
+   - [4.10 Multi-Tenant Grounding Guardrails (多租户接地守卫)](#410-multi-tenant-grounding-guardrails-多租户接地守卫)
+   - [4.11 Super Semantic Caching Layer (超级语义缓存层)](#411-super-semantic-caching-layer-超级语义缓存层)
+   - [4.12 Financial Audit Trail (金融级数字印鉴审计)](#412-financial-audit-trail-金融级数字印鉴审计)
+   - [4.13 High-Availability Reconnect Sync Queue (容灾回放对账队列)](#413-high-availability-reconnect-sync-queue-容灾回放对账队列)
+   - [4.14 Latency Optimization and Validator Bypass (校验器自动绿灯放行)](#414-latency-optimization-and-validator-bypass-校验器自动绿灯放行)
 5. [质量保障与评测体系 (Testing & Tooling)](#5-质量保障与评测体系-testing--tooling)
 6. [开发与部署命令](#6-开发与部署命令)
 
@@ -87,84 +92,114 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 ```
 .
 ├── apps/
-│   └── web/                         # Next.js 15 控制台与 Web 客服看板
+│   ├── web/                         # Next.js 15 主站用户聊天与客服交互系统
+│   │   ├── app/                     # App Router 核心路由
+│   │   │   ├── api/                 # 服务端 API 接口层
+│   │   │   │   ├── analytics/       # SaaS 财务算力 / BI 大盘统计端点
+│   │   │   │   ├── auth/login/      # 多商户隔离登录鉴权
+│   │   │   │   ├── chat/            # 智能对话核心流 (Singleflight 请求防刷)
+│   │   │   │   │   ├── approvals/   # 人工审核工单决策 API (带 SETNX 锁防重入)
+│   │   │   │   │   ├── messages/    # 物理会话历史记录同步拉取
+│   │   │   │   │   ├── preferences/ # 租户个性化用户偏好与长期事实卡片同步接口
+│   │   │   │   │   ├── threads/     # 物理会话线程自动创建与商户动态绑定
+│   │   │   │   │   └── route.ts     # 接收对话请求分发中转
+│   │   │   │   ├── health/          # 物理健康检查
+│   │   │   │   └── chat/[jobId]/stream/ # SSE 实时状态机节点日志广播管道
+│   │   │   ├── home/                # 核心控制台面板
+│   │   │   │   ├── components/      # ChatArea (对话区), APMPanel (性能面板), LeftSidebar (侧边栏), AuditDesk (核签面板)
+│   │   │   │   ├── hooks/           # useChatThreads, useChatMessages, useApprovals, useAuth 自定义数据同步 Hooks
+│   │   │   │   └── page.tsx         # 客服核心交互大屏 (URL 双向同步、UUID v4 自愈)
+│   │   │   ├── login/               # 多商户隔离登录前端页面
+│   │   │   ├── layout.tsx           # 全局暗黑布局骨架
+│   │   │   └── page.tsx             # 首页路由中转
+│   │   ├── e2e/                     # 浏览器端到端自动化测试
+│   │   │   └── chat-hitl.spec.ts    # 基于 Playwright 的全流程多轮人机交互模拟
+│   │   ├── package.json             # 依赖配置
+│   │   └── tsconfig.json            # TS 编译配置
+│   │
+│   └── admin/                       # Next.js 15 专属商户/系统级人工核签中台大屏 (3001 端口)
 │       ├── app/                     # App Router 核心路由
-│       │   ├── api/                 # 服务端 API 端点集合
-│       │   │   ├── analytics/       # SaaS 财务算力 BI 分析看板数据端点
-│       │   │   ├── auth/login/      # 多商户隔离登录鉴权
-│       │   │   ├── chat/            # POST 聊天中转 (Singleflight 与 5s 重复过滤防刷)
-│       │   │   ├── chat/approvals/  # 人工审批 GET/POST 端点 (带 SETNX 锁防重入)
-│       │   │   ├── chat/messages/   # 物理拉取会话历史记录
-│       │   │   ├── chat/threads/    # 会话线程自动创建与多商户绑定
-│       │   │   └── chat/[jobId]/stream/ # SSE 实时工作流状态机节点日志广播流
-│       │   ├── layout.tsx           # 全局高画质暗黑布局
-│       │   └── page.tsx             # 核心客服控制台 (双向 URL 同步、UUID v4 自愈装配)
-│       ├── components/              # 页面 React UI 交互组件
-│       │   ├── login-card.tsx       # 登录卡片
-│       │   └── ui/                  # 基础 Tailwind 按钮与弹窗等基础原子组件
-│       └── e2e/                     # 浏览器端到端自动化测试
-│           └── chat-hitl.spec.ts    # 物理模拟人工核签的全旅程 Playwright E2E 测试
+│       │   ├── home/                # 管理控制大盘
+│       │   │   ├── components/      # Metrics (BI 指标大盘), PendingApprovals (待核准工单), HistoricalAudits (历史审计痕迹), PersonaAudit (偏好审计)
+│       │   │   ├── hooks/           # useAdminDashboardData 管理端核心拉取及对齐 Hook
+│       │   │   └── page.tsx         # 统计大屏主控板
+│       │   ├── layout.tsx           # 全局暗黑布局骨架
+│       │   └── page.tsx             # 管理首页路由
+│       ├── next.config.js           # Next.js 反向代理转发中台 (Rewrites Proxy 规避跨域 CORS 拦截)
+│       ├── package.json             # 依赖配置
+│       └── tsconfig.json            # TS 编译配置
 │
 ├── packages/
-│   ├── engine/                      # 核心决策引擎 (LangGraph + Temporal 双模)
-│   │   ├── src/                     # 源代码目录
+│   ├── engine/                      # 核心 Agent 决策图与分布式工作流 (LangGraph + Temporal)
+│   │   ├── src/                     # 源码目录
 │   │   │   ├── graph/               # 决策图定义
-│   │   │   │   ├── nodes/           # Triage, Planner, Merge, Executor, Validator, Finish 节点
-│   │   │   │   ├── buildGraph.ts    # 编译 LangGraph，承接多路 RAG 聚合，Telemetry 物理账单 Flush
-│   │   │   │   ├── eventEmitter.ts  # EventEmitter 模拟流广播系统
-│   │   │   │   └── state.ts         # AgentStateAnnotation 状态归整，buildHistoryContext 洗涤清洗
-│   │   │   ├── llm/                 # 弹性调用代理
-│   │   │   │   └── callLLMWithRetry.ts # ResilientLLM 强自愈代理 (自旋指数退避重试，Token精准累加)
-│   │   │   ├── memory/              # 系统级 4 重高聚合物理记忆
-│   │   │   │   ├── index.ts         # 统一暴露出口
-│   │   │   │   ├── shortMemory.ts   # 短期历史记忆 (100% 反查 PostgreSQL 表自愈)
-│   │   │   │   ├── longMemory.ts    # 长期事实记忆 (持久化矢量 Facts 记忆)
-│   │   │   │   ├── episodicMemory.ts# 情境回忆 (提取相似事件)
-│   │   │   │   └── taskMemory.ts    # DAG 子步骤状态记忆
+│   │   │   │   ├── nodes/           # triage (分流), planner (计划), merge, executor (执行器与审批拦截), validator (自动绿灯旁路), finish (答复合成)
+│   │   │   │   ├── buildGraph.ts    # 编译 LangGraph 并集成死循环物理熔断器
+│   │   │   │   ├── eventEmitter.ts  # EventEmitter 单机高敏捷 SSE 流事件派发器
+│   │   │   │   └── state.ts         # AgentStateAnnotation 状态定义及多轮历史清洗器
+│   │   │   ├── llm/                 # 语言模型与 Embeddings
+│   │   │   │   └── callLLMWithRetry.ts # ResilientLLM 弹性重试代理及 HighFidelityEmbeddingModel 自愈封装
+│   │   │   ├── memory/              # 高可用 4 重多维度状态物理记忆体
+│   │   │   │   ├── shortMemory.ts   # 短期 SOP 客观对话记忆 (PostgreSQL 表数据防失忆自愈加载)
+│   │   │   │   ├── longMemory.ts    # 长期事实事实卡片记忆 (持久化矢量 Facts)
+│   │   │   │   ├── episodicMemory.ts# 真实情境回忆事件
+│   │   │   │   └── taskMemory.ts    # 物理 DAG 任务状态持久化层
 │   │   │   ├── rag/                 # 混合检索 RAG 模块
-│   │   │   │   └── contextualRag.ts # Anthropic Contextual RAG 混合双向比对重排引擎
-│   │   │   ├── temporal/            # 生产级分布式高并发工作流
-│   │   │   │   ├── client.ts        # Temporal 客户端连接句柄
-│   │   │   │   ├── worker.ts        # 物理 Worker 守护进程启动程序
-│   │   │   │   ├── workflows.ts     # 工作流注册 `agentWorkflow` 编排器
-│   │   │   │   └── activities.ts    # 活动层物理代理执行器 (`runAgentStateNode`)
-│   │   │   └── index.ts             # 统一暴露
+│   │   │   │   └── contextualRag.ts # Anthropic Contextual RAG 混合检索与双向余弦相似度匹配重排引擎
+│   │   │   ├── temporal/            # 分布式工作流编排
+│   │   │   │   ├── client.ts        # Temporal 连接句柄
+│   │   │   │   ├── worker.ts        # 物理活动与工作流 Worker 守护进程启动程序
+│   │   │   │   ├── workflows.ts     # 工作流注册 `agentWorkflow` 核心控制器
+│   │   │   │   └── activities.ts    # 执行活动层 `runAgentStateNode` 物理桥接器
+│   │   │   └── index.ts             # 统一模块暴露
 │   │   └── tests/                   # 自动化引擎测试
 │   │       ├── state-reducers.test.ts # 校验状态规整、历史清洗、状态图自旋单元测试
 │   │       └── system.test.ts       # 仿真端到端集成与多租户测试
 │   │
-│   ├── db/                          # 关系型数据层 (3NF 高规范 Drizzle ORM)
-│   │   ├── drizzle/                 # 迁移数据库 SQL 脚本
+│   ├── db/                          # 3NF 关系型规范数据层 (Drizzle ORM)
+│   │   ├── drizzle/                 # 物理数据库结构迁移 SQL 脚本集
 │   │   └── src/
-│   │       ├── client.ts            # 连接 pg 客户端与 FakePool 高保真离线仿真数据库
+│   │       ├── scripts/             # 数据库辅助维护管理脚本
+│   │       │   └── check-and-clean.ts # 物理向量自洁与健康治理维护工具 (清除损坏 embeddings)
+│   │       ├── client.ts            # Drizzle 连接 pg 客户端与 FakePool 高保真离线仿真关系型数据库
 │   │       ├── schema.ts            # 表定义 (threads, messages, orders, products, session_metrics, pending_approvals, eval_logs)
-│   │       ├── seed.ts              # 演示种子数据注入 (Nike/Adidas/主站，逾期/大额/小额件自愈注入)
+│   │       ├── seed.ts              # 演示种子数据注入 (Nike/Adidas/Puma 一键注入)
+│   │       └── index.ts             # 统一数据库对象暴露
+│   │
+│   ├── ui/                          # Monorepo 公共 UI 共享原语 (Tailwind CSS v4 + 0 依赖轻量图标包)
+│   │   └── src/
+│   │       ├── components/          # 共享 UI 原子组件 (card.tsx, button.tsx, badge.tsx 等)
+│   │       │   ├── ui/              # shadcn/ui 组件集合
+│   │       │   └── icons.tsx        # 27 个极简、全矢量 SVG 共享图标原语 (彻底移除 lucide-react 依赖 overhead)
+│   │       ├── lib/                 # 类名合并 utils 库
+│   │       ├── styles/              # CSS 根样式文件 globals.css
 │   │       └── index.ts             # 统一导出
 │   │
-│   ├── tools/                       # 外部原子工具集
+│   ├── tools/                       # 物理工具链与安全红线拦截器
 │   │   └── src/
 │   │       ├── registry.ts          # 工具库全局注册中心
 │   │       ├── screenshot.tools.ts  # takeScreenshot 网页核验快照工具 (Puppeteer 底层支持)
-│   │       ├── ecommerce.tools.ts   # getOrderStatus / processRefund / listUserOrders 查退查单
+│   │       ├── ecommerce.tools.ts   # getOrderStatus / processRefund / listUserOrders 查退查单 (防多重退款缓存)
 │   │       └── index.ts             # 统一导出
 │   │
-│   ├── observability/               # 分布式 APM 与链路跟踪
+│   ├── observability/               # 财务度量分析与 APM Trace 观测包
 │   │   └── src/
 │   │       ├── logger.ts            # pino 多级极速子日志流
 │   │       ├── metrics.ts           # 生产级指标度量
-│   │       └── langfuseClient.ts    # Langfuse 物理连接句柄
+│   │       └── langfuseClient.ts    # Langfuse 全链路物理跟踪 SDK
 │   │
-│   └── business-configs/            # SaaS 多商户 JSON 政策前置热载入
+│   └── business-configs/            # SaaS 多商户动态 JSON 政策热载入
 │       └── src/
-│           ├── ecommerce.config.ts  # Nike/Adidas/主站免签额度、提示词、工具授权、意图映射表
+│           ├── ecommerce.config.ts  # 动态配置热载入定义 (免签限额、系统提示词、授权工具清单)
 │           └── index.ts             # 统一导出
 │
-├── eval/                            # 🆕 Promptfoo 大模型提示词多意图分类、步骤规划与安全防注入评测平台
-├── scripts/                         # 🆕 数据库完整性审计与死任务扫描自愈工具集
-├── biome.json                       # 🆕 Biome Rust 级极速格式化/校验配置 (代替 Prettier/ESLint)
+├── eval/                            # Promptfoo 大模型评测平台 (提示词优化评测)
+├── scripts/                         # 数据库完整性审计与死任务扫描自愈工具集
+├── biome.json                       # Biome Rust 级极速格式化/校验配置 (代替 Prettier/ESLint)
 ├── package.json                     # Monorepo 全局依赖
 ├── turbo.json                       # Turborepo 并发构建拓扑流水线配置
-└── CLAUDE.md                        # Claude Code 本地热绑定开发/设计 SOP 规则
+├── CLAUDE.md                        # Claude Code 本地热绑定开发/设计 SOP 规则
+└── README.md                        # 智能客服系统主干指南自述文档
 ```
 
 ---
@@ -248,7 +283,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 - **无状态挂起 (Stateless Suspension)**：当 Executor 检测到敏感操作时，系统绝不阻塞 Worker 连接，而是生成 `waiting` 状态工单并将状态机 Yield 截断至 Finish，挂起期间**计算与连接零占用**。
 - **大脑打倒挡回溯 (Cognitive Backtracking)**：如果管理员点击驳回并填写修改意见，条件路由强制将指针**回退到 Planner 节点**。Planner 将人工建议作为 `[CRITICAL ADVISORY]` 强上下文喂给大模型重新规划子任务。
 - **自愈解挂熔断 (Timeout Auto-expiration)**：设置 24h 截止时间。若管理员长期无响应，系统检测超时后自动更新工单为 `'expired'` 并强制设当前步骤为 `failed`（解挂流通），由 finishNode 优雅宣告超时致歉。
-- **用户主动取消 (Cancellation Bypass)**：支持用户在中途发起 `'cancel'` 决议。Executor 检测到后，物理阻断后续扣款，直接安全退避。
+- **用户主动取消 (Cancellation Bypass)**：支持 user 在中途发起 `'cancel'` 决议。Executor 检测到后，物理阻断后续扣款，直接安全退避。
+- **跨请求审核状态隔离与精准防泄露 (Cross-Request Approval State Isolation)**：彻底解决同一会话线程（Thread）下后续退款/换货请求（如订单 2）因误拉取历史订单（如订单 1）的审批驳回记录而导致的级联报错与虚假审批放行。在 `executor.node.ts` 与 `planner.node.ts` 引入基于具体执行步骤的 `approvalId` 精确绑定。对于未携带特定工单 ID 的遗留审批，则采用**“工具名 (ActionType) + 关键参数 (如 OrderId)” 双重一致性校验**，实现多请求状态的物理隔离与审批权安全防漏。
 
 ### 4.2 SaaS 级多租户隔离与 Contextual RAG 检索
 
@@ -280,7 +316,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 - **Telemetry Flush 物理冲刷**：决策结束后，异步在 `session_metrics` 物理表中创建一条度量账单，统计 Token 消耗、耗时、图自旋深度以及结算状态。
 - **SaaS BI Analytics 仪表盘 API**：提供 `/api/analytics?businessId=nike` 的 GET 端点。高保真聚合导出**总成本、总会话数、平均耗时、平均 Token、以及 Autopilot 自动放行效率（%）**，BI 数据一目了然！
 
-### 4.8 多轮會话物理自愈载入 (Self-Healing Short Memory)
+### 4.8 多轮会话物理自愈载入 (Self-Healing Short Memory)
 
 - **自愈式短期记忆加载逻辑**: 在任何无状态执行或热重载下，如果状态机初始化丢失历史消息：
 
@@ -316,6 +352,10 @@ if (!shortMemory || shortMemory.length === 0) {
 
 - **网络抖动零漏单、防双花**: 物理 Postgres 闪断期间，写操作自动追加到 **Offline Mutation Queue**。检测重连成功后，事务块（Transaction）安全回放更新，并对退款执行 **Double-Refund Sanity Check**，彻底杜绝双花重复扣款隐患。
 
+### 4.14 Latency Optimization and Validator Bypass (校验器自动绿灯放行)
+
+- **黄金通路零大模型开销放行**：针对物理工具或核心接口成功执行完毕且没有任何错误返回（`!step.result || !step.result.error`）的黄金通路，校验节点（`validator.node.ts`）实施 100% 自动绿灯放行，彻底免除耗时（2-3秒）且高昂的大模型核验开销，响应时效提速 **80% 以上**。仅在执行遇到报错或含有 `error` 属性时，才弹性降级为大模型核验决策，在保障金融级稳健性的同时实现极致吞吐。
+
 ---
 
 ## 5. 质量保障与评测体系 (Testing & Tooling)
@@ -326,6 +366,8 @@ if (!shortMemory || shortMemory.length === 0) {
   自动化测试 `/apps/web/e2e` 下的用户登录跳转、LocalStorage 会话持久、侧栏历史渲染以及 Token 计数交互旅程。
 - **Promptfoo (Prompt 防守评测)**：
   在 `eval/promptfooconfig.yaml` 中配置大意图 F1 断言、工具调用准确度断言，以及专门模拟超级管理员口吻命令绕过安全拦截的 **Jailbreak 防注入评测与 LLM-as-a-judge 最终回复质量断言**，坚守提示词逻辑边界。
+- **物理向量自洁与健康治理 (Vector Database Maintenance)**：
+  提供专属 `packages/db/src/scripts/check-and-clean.ts` 物理脚本。能够全自动检测、隔离并强制清除 `long_memory_facts`、`episodic_events` 及 `rag_documents` 等 RAG 及记忆表中因网络抖动、三方服务闪断或开发环境 Mock 损坏导致的**无效/全零（`[0, 0, 0...]`）全虚向量**。该健康治理保障了余弦相似度计算与 Contextual RAG 的鲁棒性，杜绝任何图运行时的数学错误。
 
 ---
 

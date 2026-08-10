@@ -19,6 +19,7 @@
 smartServe 在 `business_configs` 物理表中以 JSON 格式动态热载入商户特定的退款限额、专属 Prompt 以及授权调用的底层工具清单。
 
 ### 1.1 SQL 注册模板
+
 连接至 PostgreSQL 物理数据库后，执行以下 INSERT 语句（以接入 `puma` 彪马品牌为例）：
 
 ```sql
@@ -41,7 +42,7 @@ VALUES (
   true,
   NOW()
 )
-ON CONFLICT (business_id) DO UPDATE 
+ON CONFLICT (business_id) DO UPDATE
 SET config = EXCLUDED.config, is_active = true;
 ```
 
@@ -52,11 +53,12 @@ SET config = EXCLUDED.config, is_active = true;
 为了彻底杜绝多租户之间政策混淆或 RAG 政策交叉感染（例如：Puma 会员误用 Nike 会员的 30 天超长试穿政策），我们必须为新商户独立生成 RAG 向量切片，并打上 `business_id` 物理隔离戳。
 
 ### 2.1 灌入操作代码
+
 在后台执行 RAG 注入或运行数据同步脚本，将政策切片与 Contextual Summary、向量嵌入同步存储：
 
 ```typescript
-import { getDrizzle, ragDocuments } from 'db';
-import { getEmbeddingModel } from 'engine/src/llm/callLLMWithRetry';
+import { getDrizzle, ragDocuments } from "db";
+import { getEmbeddingModel } from "engine/src/llm/callLLMWithRetry";
 
 async function onboardingPumaRAG() {
   const drizzle = getDrizzle();
@@ -64,10 +66,12 @@ async function onboardingPumaRAG() {
 
   const pumaPolicies = [
     {
-      businessId: 'puma',
-      chunkText: 'Puma (彪马) 官方保障：支持自商品签收之日起 14 天无理由退换货。所有鞋盒退回时请使用额外纸箱包装，严禁直接在 Puma 原装鞋盒上粘贴快递单面单，否则影响二次销售将予以扣除鞋盒包装费。',
-      contextualSummary: '这段切片规定了 Puma 14 天无理由退换货保障、退回时外包装保护要求以及原装鞋盒的硬性无损约束政策。'
-    }
+      businessId: "puma",
+      chunkText:
+        "Puma (彪马) 官方保障：支持自商品签收之日起 14 天无理由退换货。所有鞋盒退回时请使用额外纸箱包装，严禁直接在 Puma 原装鞋盒上粘贴快递单面单，否则影响二次销售将予以扣除鞋盒包装费。",
+      contextualSummary:
+        "这段切片规定了 Puma 14 天无理由退换货保障、退回时外包装保护要求以及原装鞋盒的硬性无损约束政策。",
+    },
   ];
 
   for (const doc of pumaPolicies) {
@@ -79,12 +83,29 @@ async function onboardingPumaRAG() {
       chunkText: doc.chunkText,
       contextualSummary: doc.contextualSummary,
       embedding: JSON.stringify(embedding),
-      metadata: { category: 'refund_policy', version: '1.0' }
+      metadata: { category: "refund_policy", version: "1.0" },
     });
   }
-  console.log('✅ Puma 专属政策 RAG 知识库切片灌入完毕，高保真隔离隔离成功！');
+  console.log("✅ Puma 专属政策 RAG 知识库切片灌入完毕，高保真隔离隔离成功！");
 }
 ```
+
+### 2.2 🛡️ RAG 向量健康安全核验（RAG Vector Sanity & DB Cleaning）
+
+在知识库切片和记忆灌入过程中，若遇到网络波动、第三方大模型服务异常、或测试环境使用了错误的 Mock 代理，可能会产生**无效/损坏向量**。其中最常见的是**全零向量（`[0, 0, 0...]`）**。
+这些全零向量和畸变向量写入数据库后，会在进行余弦相似度计算（Cosine Similarity）或 RAG 召回时产生严重的数据空值、数学计算崩溃。
+
+为了确保新接入商户数据的高保真与稳定性，系统配备了全自动向量自洁脚本：
+
+#### 2.2.1 运行向量自洁与健康治理
+
+您可以通过在项目根目录下执行以下命令，一键扫描并清理 `long_memory_facts`、`episodic_events` 及 `rag_documents` 物理表中所有无效的全零或 malformed 向量：
+
+```bash
+bun run db:clean
+```
+
+该脚本将安全地连接物理数据库，隔离并强力清除无用向量，保障图运行和向量计算的 100% 鲁棒。
 
 ---
 
@@ -93,6 +114,7 @@ async function onboardingPumaRAG() {
 新商户上线前，必须通过 **Promptfoo 评测平台** 跑批核验，确保大语言模型在应对 Puma 的真实客服提问时，其**多意图 F1 分数 >= 80%** 且**工具调起准确率 100%**。
 
 ### 3.1 编写商户回归测试数据集
+
 在 `eval/testCases/ecommerce/` 目录下新增专属的测试案例：
 
 ```json
@@ -119,10 +141,13 @@ async function onboardingPumaRAG() {
 ```
 
 ### 3.2 运行评测命令
+
 在根目录下，执行黄金指标大盘测试：
+
 ```bash
 bun run test:prompt
 ```
+
 控制台报告呈现 **GREEN PASS** 后，方可允许在生产环境放行激活！
 
 ---
@@ -131,7 +156,7 @@ bun run test:prompt
 
 1. 打开浏览器登录后台系统：`http://localhost:3000/`
 2. **多租户隔离体验**：当有新线程挂载至 Puma 商户、且用户发送“我想申请退款”时：
-   * 决策引擎会自动热加载刚才注册的 `puma` JSON 配置。
-   * **免签核准拦截线**将由 Nike 的 $150 自动调整为刚才配置 of Puma **$120**，超过该额度将完美触发 **Human-in-the-Loop 实时拦截挂起**，全自适应切换！
+   - 决策引擎会自动热加载刚才注册的 `puma` JSON 配置。
+   - **免签核准拦截线**将由 Nike 的 $150 自动调整为刚才配置 of Puma **$120**，超过该额度将完美触发 **Human-in-the-Loop 实时拦截挂起**，全自适应切换！
 
 祝您新业务接入顺畅！Forever Faster ⚡
