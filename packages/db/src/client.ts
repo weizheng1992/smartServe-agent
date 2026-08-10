@@ -917,6 +917,74 @@ function getPgPool(): Pool {
   }
 }
 
+interface OfflineMutation {
+  queryStr: string;
+  params: unknown[];
+  timestamp: string;
+}
+const offlineMutationLog: OfflineMutation[] = [];
+
+async function reconcileOfflineMutations(): Promise<void> {
+  if (offlineMutationLog.length === 0) return;
+  console.log(
+    `[HA Sync Queue] 🔄 Reconnect detected! Attempting to replay ${offlineMutationLog.length} offline mutations...`,
+  );
+
+  try {
+    const pool = getPgPool();
+    // Verify physical connection is fully functional
+    await pool.query("SELECT 1");
+
+    // Replay mutations in order
+    while (offlineMutationLog.length > 0) {
+      const mutation = offlineMutationLog[0];
+
+      // 🛡️ Double-Refund Sanity Check
+      const upperQuery = mutation.queryStr.toUpperCase();
+      if (
+        upperQuery.includes("UPDATE") &&
+        upperQuery.includes("ORDERS") &&
+        upperQuery.includes("REFUNDED")
+      ) {
+        const orderId = mutation.params?.[0];
+        if (typeof orderId === "string") {
+          const checkRes = await pool.query(
+            "SELECT status FROM orders WHERE order_id = $1",
+            [orderId],
+          );
+          if (
+            checkRes.rows?.[0] &&
+            (checkRes.rows[0] as any).status === "refunded"
+          ) {
+            console.log(
+              `[HA Sync Queue] [Sanity Guard Check] Order ${orderId} is ALREADY refunded in physical DB! Skipping replay to prevent double-spending.`,
+            );
+            offlineMutationLog.shift();
+            continue;
+          }
+        }
+      }
+
+      console.log(
+        `[HA Sync Queue] Replaying mutation: "${mutation.queryStr.substring(0, 50)}..." with params: ${JSON.stringify(mutation.params)}`,
+      );
+      await pool.query(mutation.queryStr, mutation.params);
+      offlineMutationLog.shift(); // remove processed mutation
+    }
+
+    console.log(
+      "[HA Sync Queue] ✅ All offline mutations successfully synchronized and committed to physical Postgres database!",
+    );
+  } catch (err) {
+    console.error(
+      "[HA Sync Queue Error] Replay failed. Database is still unreachable. Remaining queue size:",
+      offlineMutationLog.length,
+      err,
+    );
+    throw err; // rethrow to keep mutations in queue
+  }
+}
+
 export function getDrizzle(): NodePgDatabase<typeof schema> | null {
   if (drizzleDb) return drizzleDb;
   if (!isUsingRealDb) return null;
@@ -1017,6 +1085,14 @@ async function resolveAndEnsurePgUserId(
     }
     return require("node:crypto").randomUUID();
   }
+}
+
+async function executeMemoryDbQuery(
+  queryStr: string,
+  params?: unknown[],
+): Promise<DBExecutorResult> {
+  const pool = new FakePool();
+  return pool.query(queryStr, params);
 }
 
 export const db: DBInterface = {
@@ -1306,11 +1382,28 @@ export const db: DBInterface = {
     if (isUsingRealDb) {
       try {
         const pool = getPgPool();
+        // Try playing any pending offline mutations first to guarantee in-order consistency!
+        await reconcileOfflineMutations();
         const res = await pool.query(queryStr, params);
         return { rows: res.rows as unknown[] };
       } catch (e) {
-        console.error("[DB] execute failed:", e);
-        return { rows: [] };
+        console.error("[DB] execute failed, queueing offline mutation:", e);
+        const upper = queryStr.toUpperCase();
+        if (
+          upper.includes("INSERT") ||
+          upper.includes("UPDATE") ||
+          upper.includes("DELETE")
+        ) {
+          offlineMutationLog.push({
+            queryStr,
+            params: params || [],
+            timestamp: new Date().toISOString(),
+          });
+          console.log(
+            `[HA Sync Queue] Queue size: ${offlineMutationLog.length}`,
+          );
+        }
+        return executeMemoryDbQuery(queryStr, params);
       }
     }
 

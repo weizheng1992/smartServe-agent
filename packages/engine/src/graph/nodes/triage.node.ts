@@ -1,5 +1,35 @@
 import { logger } from "observability";
 
+interface CachedQuery {
+  query: string;
+  reply: string;
+  vector: number[];
+}
+const globalSemanticCache = new Map<string, CachedQuery[]>();
+
+export function addQueryToSemanticCache(
+  businessId: string,
+  query: string,
+  reply: string,
+  vector: number[],
+): void {
+  const cleanId = (businessId || "ecommerce").toLowerCase();
+  const list = globalSemanticCache.get(cleanId) || [];
+  // Avoid duplicating existing query
+  if (
+    list.some(
+      (q) => q.query.trim().toLowerCase() === query.trim().toLowerCase(),
+    )
+  ) {
+    return;
+  }
+  list.push({ query, reply, vector });
+  globalSemanticCache.set(cleanId, list);
+  console.log(
+    `[Semantic Cache] 💾 Added new query to cache for tenant [${cleanId}]: "${query.substring(0, 30)}..."`,
+  );
+}
+
 // Global cache to avoid redundant embedding calculations across turns
 const embeddingCache = new Map<string, number[]>();
 
@@ -424,6 +454,38 @@ Only return the final customer-facing Chinese text. No other text.`;
       getEmbeddingWithCache(input),
       getAnchorVectors(),
     ]);
+
+    // =========================================================================
+    // 🛡️ Super Semantic Cache Check
+    // =========================================================================
+    const tenantId = (
+      state.businessConfig?.businessId || "ecommerce"
+    ).toLowerCase();
+    const cachedItems = globalSemanticCache.get(tenantId) || [];
+    let bestCacheMatch: any = null;
+    let maxCacheSimilarity = 0;
+
+    for (const cached of cachedItems) {
+      const sim = cosineSimilarity(userVector, cached.vector);
+      if (sim > maxCacheSimilarity) {
+        maxCacheSimilarity = sim;
+        bestCacheMatch = cached;
+      }
+    }
+
+    if (maxCacheSimilarity >= 0.96 && bestCacheMatch) {
+      console.log(
+        `[Triage Semantic Cache] 🎯 Super Semantic Cache HIT! Similarity: ${maxCacheSimilarity.toFixed(3)}. Query: "${bestCacheMatch.query}"`,
+      );
+      return await handleImmediateBypass(
+        state,
+        "super_semantic_cache",
+        bestCacheMatch.reply,
+        [{ intent: "general_query", confidence: maxCacheSimilarity }],
+        "semantic_cache",
+        maxCacheSimilarity,
+      );
+    }
 
     // 计算与各个类别代表锚点句的最大余弦相似度
     scoreOrder = Math.max(

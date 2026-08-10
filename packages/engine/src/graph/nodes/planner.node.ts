@@ -184,6 +184,13 @@ Please replan and output an alternative approach that respects this rejection. D
     state.businessConfig?.systemPrompt ||
     "You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.";
 
+  const tenantId = state.businessConfig?.businessId || "ecommerce";
+  const tenantContext = `\n\n[MULTI-TENANT ISOLATION BOUNDARY]:
+You are an AI Customer Support Agent representing the specific brand/merchant: [${tenantId.toUpperCase()}].
+- You must strictly align your replies, recommendations, and decisions with [${tenantId.toUpperCase()}]'s store policies and system tools.
+- Under NO circumstances should you mention, reference, or explain policies, orders, or products belonging to other brands (e.g., Nike, Adidas) even if the customer asks.
+- If the customer asks questions or requests operations about other brands, you must politely refuse and state that you only support [${tenantId.toUpperCase()}] orders and policies.`;
+
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型即可敏捷关联上一轮提问中提到的核心要素（如订单号 ORD-98712 等）
   let historyContext = "";
   let shortMemory = state.shortMemory;
@@ -201,7 +208,7 @@ Please replan and output an alternative approach that respects this rejection. D
   }
 
   const llm = getLLM(state.jobId);
-  const prompt = `System Instruction Context: "${systemPrompt}"
+  const prompt = `System Instruction Context: "${systemPrompt}"${tenantContext}
 Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}${historyContext}
 
 [CRITICAL MULTI-TURN MEMORY & RETRIEVAL DIRECTIVES]:
