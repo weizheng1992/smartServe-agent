@@ -75,13 +75,24 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
       const drizzle = getDrizzle();
       if (drizzle) {
         try {
-          const approvalsList = await drizzle
-            .select()
-            .from(dbPendingApprovals)
-            .where(eq(dbPendingApprovals.threadId, state.threadId))
-            .orderBy(desc(dbPendingApprovals.createdAt))
-            .limit(1);
-          const latestApproval = approvalsList[0];
+          let latestApproval = null;
+          const currentStepApprovalId = currentStep.result?.approvalId;
+          if (currentStepApprovalId) {
+            const list = await drizzle
+              .select()
+              .from(dbPendingApprovals)
+              .where(eq(dbPendingApprovals.id, currentStepApprovalId))
+              .limit(1);
+            latestApproval = list[0];
+          } else {
+            const approvalsList = await drizzle
+              .select()
+              .from(dbPendingApprovals)
+              .where(eq(dbPendingApprovals.threadId, state.threadId))
+              .orderBy(desc(dbPendingApprovals.createdAt))
+              .limit(1);
+            latestApproval = approvalsList[0];
+          }
           if (
             latestApproval &&
             (latestApproval.status === "approved" ||
@@ -115,18 +126,31 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
   if (priorPlan?.subtasks) {
     // 🛡️ 如果检测到管理员最新的审批结果是 'rejected'，我们动态将当前步骤标记为 failed 并打上 rejectedByAdmin 标记，以便进行认知重规划
     let latestApproval: any = null;
+    const currentStepIndex = priorPlan.currentStepIndex;
+    const step = priorPlan.subtasks[currentStepIndex];
+    const stepApprovalId = step?.result?.approvalId;
+
     const { pendingApprovals: dbPendingApprovals, getDrizzle } = require("db");
     const { eq, desc } = require("drizzle-orm");
     const drizzle = getDrizzle();
     if (drizzle) {
       try {
-        const approvalsList = await drizzle
-          .select()
-          .from(dbPendingApprovals)
-          .where(eq(dbPendingApprovals.threadId, state.threadId))
-          .orderBy(desc(dbPendingApprovals.createdAt))
-          .limit(1);
-        latestApproval = approvalsList[0];
+        if (stepApprovalId) {
+          const list = await drizzle
+            .select()
+            .from(dbPendingApprovals)
+            .where(eq(dbPendingApprovals.id, stepApprovalId))
+            .limit(1);
+          latestApproval = list[0];
+        } else {
+          const approvalsList = await drizzle
+            .select()
+            .from(dbPendingApprovals)
+            .where(eq(dbPendingApprovals.threadId, state.threadId))
+            .orderBy(desc(dbPendingApprovals.createdAt))
+            .limit(1);
+          latestApproval = approvalsList[0];
+        }
       } catch (dbErr) {
         console.warn(
           "[Planner Rejection Check] Failed to check latest approval for backtracking:",
@@ -136,8 +160,6 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
     }
 
     if (latestApproval && latestApproval.status === "rejected") {
-      const currentStepIndex = priorPlan.currentStepIndex;
-      const step = priorPlan.subtasks[currentStepIndex];
       if (
         step &&
         (step.result?.waitingForApproval ||

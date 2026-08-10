@@ -342,15 +342,49 @@ ${historyContext}`;
               const { eq, desc } = require("drizzle-orm");
               const drizzle = getDrizzle()!;
 
-              // 查询当前会话最新的审批记录
-              const approvalsList = await drizzle
-                .select()
-                .from(pendingApprovals)
-                .where(eq(pendingApprovals.threadId, state.threadId))
-                .orderBy(desc(pendingApprovals.createdAt))
-                .limit(1);
+              let latestApproval: any = null;
+              const existingApprovalId = stepToRun.result?.approvalId;
 
-              const latestApproval = approvalsList[0];
+              if (existingApprovalId) {
+                // If the step already has an approvalId registered, look it up directly!
+                const approvalsList = await drizzle
+                  .select()
+                  .from(pendingApprovals)
+                  .where(eq(pendingApprovals.id, existingApprovalId))
+                  .limit(1);
+                latestApproval = approvalsList[0];
+              }
+
+              if (!latestApproval) {
+                // Otherwise, query all approvals for this thread and find the most recent one matching this specific tool and arguments
+                const approvalsList = await drizzle
+                  .select()
+                  .from(pendingApprovals)
+                  .where(eq(pendingApprovals.threadId, state.threadId))
+                  .orderBy(desc(pendingApprovals.createdAt));
+
+                // Find a matching approval
+                latestApproval = approvalsList.find((app: any) => {
+                  const actionPayload = app.actionPayload || {};
+                  const payloadArgs = actionPayload.args || {};
+                  const currentArgs = parsedToolCall.args || {};
+
+                  const isSameAction =
+                    app.actionType === parsedToolCall.toolName;
+                  if (!isSameAction) return false;
+
+                  if (currentArgs.orderId && payloadArgs.orderId) {
+                    return (
+                      String(currentArgs.orderId).trim().toLowerCase() ===
+                      String(payloadArgs.orderId).trim().toLowerCase()
+                    );
+                  }
+
+                  return (
+                    JSON.stringify(payloadArgs) === JSON.stringify(currentArgs)
+                  );
+                });
+              }
 
               // ⏰ 检查处于等待中的审批工单是否已经超过截止时间 (Deadline Check)
               if (latestApproval && latestApproval.status === "waiting") {
@@ -585,17 +619,46 @@ ${historyContext}`;
             const { eq, desc } = require("drizzle-orm");
             const drizzle = getDrizzle()!;
             if (drizzle) {
-              const list = await drizzle
-                .select()
-                .from(pendingApprovals)
-                .where(eq(pendingApprovals.threadId, state.threadId))
-                .orderBy(desc(pendingApprovals.createdAt))
-                .limit(1);
-              if (
-                list[0] &&
-                list[0].status === "approved" &&
-                list[0].actionType === parsedToolCall.toolName
-              ) {
+              let matchedApp = null;
+              const existingId = stepToRun.result?.approvalId;
+              if (existingId) {
+                const list = await drizzle
+                  .select()
+                  .from(pendingApprovals)
+                  .where(eq(pendingApprovals.id, existingId))
+                  .limit(1);
+                matchedApp = list[0];
+              }
+
+              if (!matchedApp) {
+                const list = await drizzle
+                  .select()
+                  .from(pendingApprovals)
+                  .where(eq(pendingApprovals.threadId, state.threadId))
+                  .orderBy(desc(pendingApprovals.createdAt));
+                matchedApp = list.find((app: any) => {
+                  const actionPayload = app.actionPayload || {};
+                  const payloadArgs = actionPayload.args || {};
+                  const currentArgs = parsedToolCall.args || {};
+
+                  const isSameAction =
+                    app.actionType === parsedToolCall.toolName;
+                  if (!isSameAction) return false;
+
+                  if (currentArgs.orderId && payloadArgs.orderId) {
+                    return (
+                      String(currentArgs.orderId).trim().toLowerCase() ===
+                      String(payloadArgs.orderId).trim().toLowerCase()
+                    );
+                  }
+
+                  return (
+                    JSON.stringify(payloadArgs) === JSON.stringify(currentArgs)
+                  );
+                });
+              }
+
+              if (matchedApp && matchedApp.status === "approved") {
                 isApproved = true;
               }
             }
