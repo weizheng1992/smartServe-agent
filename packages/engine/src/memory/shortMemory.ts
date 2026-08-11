@@ -21,7 +21,7 @@ export class ShortMemory {
       // Implement a sliding context window to fetch only the latest (maxTurns * 2) messages,
       // avoiding Context Window Bloat and reducing DB parsing and LLM token billing costs.
       const sliced = messages.slice(-this.maxTurns * 2);
-      return sliced.map((msg: any) => ({
+      return sliced.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content,
       }));

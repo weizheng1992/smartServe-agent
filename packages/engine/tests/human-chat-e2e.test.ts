@@ -60,7 +60,9 @@ describe("Human Support Operator Takeover & IM Chat Full E2E Lifecycle Test", ()
     expect(threadMessages).toBeDefined();
     expect(threadMessages.length).toBeGreaterThan(0);
 
-    const userMsg = threadMessages.find((m: any) => m.role === "user");
+    const userMsg = threadMessages.find(
+      (m: { role: string }) => m.role === "user",
+    );
     expect(userMsg).toBeDefined();
     expect(userMsg.content).toBe(userEscalationMessage);
 

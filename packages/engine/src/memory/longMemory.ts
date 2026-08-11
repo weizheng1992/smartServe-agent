@@ -1,5 +1,5 @@
-import { getDrizzle, longMemoryFacts } from 'db';
-import { getEmbeddingModel, getLLM } from '../llm/callLLMWithRetry';
+import { getDrizzle, longMemoryFacts } from "db";
+import { getEmbeddingModel, getLLM } from "../llm/callLLMWithRetry";
 
 export interface LongMemoryFact {
   id: string;
@@ -16,8 +16,13 @@ export class LongMemory {
     this.userId = userId;
   }
 
-  async extractAndStoreFact(conversationText: string, userQuery?: string): Promise<void> {
-    console.log(`[LongMemory] Extracting facts from text for user ${this.userId}`);
+  async extractAndStoreFact(
+    conversationText: string,
+    userQuery?: string,
+  ): Promise<void> {
+    console.log(
+      `[LongMemory] Extracting facts from text for user ${this.userId}`,
+    );
 
     // 🛡️ 启动大模型驱动的异步【专职画像 Agent（Dedicated User Profiler Agent）】
     // 结合历史 SQL 订单购买流水 + 这一轮最新对话，自动提取非结构化尺寸与消费偏好并智能自愈落盘
@@ -26,26 +31,30 @@ export class LongMemory {
       (async () => {
         try {
           await this.runProfileAudit(userQuery, conversationText);
-        } catch (err: any) {
-          console.error('[Profiler Agent Error] 专职画像 Agent 执行偏好核查异常:', err.message || err);
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error(
+            "[Profiler Agent Error] 专职画像 Agent 执行偏好核查异常:",
+            errMsg,
+          );
         }
       })();
     }
 
     // 保留原有轻量级正则匹配，做双重容灾保障
     const lines = conversationText
-      .split('\n')
+      .split("\n")
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
     const embeddingModel = getEmbeddingModel();
 
     for (const line of lines) {
       if (
-        line.toLowerCase().includes('user prefers') ||
-        line.toLowerCase().includes('prefers') ||
-        line.toLowerCase().includes('fact:')
+        line.toLowerCase().includes("user prefers") ||
+        line.toLowerCase().includes("prefers") ||
+        line.toLowerCase().includes("fact:")
       ) {
-        const factText = line.replace(/^(fact:)/i, '').trim();
+        const factText = line.replace(/^(fact:)/i, "").trim();
         const embedding = await embeddingModel.embedQuery(factText);
 
         const dbInstance = getDrizzle();
@@ -56,17 +65,19 @@ export class LongMemory {
               userId: this.userId,
               fact: factText,
               embedding: serializedEmbedding,
-              type: 'preference',
+              type: "preference",
               confidence: 1.0,
-              status: 'approved',
-              source: 'regex_fallback',
+              status: "approved",
+              source: "regex_fallback",
               createdAt: new Date(),
             });
             console.log(
               `[LongMemory] [Fallback Regex] Extracted and stored fact directly in PostgreSQL [Status: approved]: "${factText}"`,
             );
           } catch (err) {
-            console.warn('[LongMemory] Drizzle insertion bypassed due to offline/failed DB.');
+            console.warn(
+              "[LongMemory] Drizzle insertion bypassed due to offline/failed DB.",
+            );
           }
         }
       }
@@ -77,11 +88,16 @@ export class LongMemory {
    * 🕵️ 专职画像 Agent (Dedicated Profiler Agent) 核心研判器
    * 结合：SQL 结构化订单历史 + 本轮最新非结构化聊天上下文
    */
-  private async runProfileAudit(userQuery: string, assistantResponse: string): Promise<void> {
-    console.log(`[Profiler Agent] 🕵️ 启动用户 ${this.userId} 的多模态消费画像提取...`);
+  private async runProfileAudit(
+    userQuery: string,
+    assistantResponse: string,
+  ): Promise<void> {
+    console.log(
+      `[Profiler Agent] 🕵️ 启动用户 ${this.userId} 的多模态消费画像提取...`,
+    );
 
-    const { db: physicalDb } = require('db');
-    let pastOrders: any[] = [];
+    const { db: physicalDb } = require("db");
+    let pastOrders: Record<string, unknown>[] = [];
 
     // 1. [结构化数据装配 (SQL)]：实时拉取该用户在 PostgreSQL 中的最近购买明细
     try {
@@ -97,7 +113,10 @@ export class LongMemory {
       );
       pastOrders = orderRes.rows || [];
     } catch (sqlErr) {
-      console.warn('[Profiler Agent] Failed to fetch SQL transaction stream for audit:', sqlErr);
+      console.warn(
+        "[Profiler Agent] Failed to fetch SQL transaction stream for audit:",
+        sqlErr,
+      );
     }
 
     // 2. [画像大模型研判]：注入多模态画像提取 Prompts，输出极致规整的 JSONB 标签
@@ -138,18 +157,27 @@ ${JSON.stringify(pastOrders, null, 2)}
 
     try {
       const response = await llm.invoke(auditPrompt);
-      const content = typeof response === 'string' ? response : (response as any).content || '';
+      const content =
+        typeof response === "string"
+          ? response
+          : (response as any).content || "";
 
       const cleanJson = content
         .trim()
-        .replace(/^```json\s*/, '')
-        .replace(/```$/, '')
+        .replace(/^```json\s*/, "")
+        .replace(/```$/, "")
         .trim();
 
       const auditResult = JSON.parse(cleanJson);
 
-      if (!auditResult.hasNewPreference || !auditResult.extractedFacts || auditResult.extractedFacts.length === 0) {
-        console.log('[Profiler Agent] 🍃 画像审计完成：本轮会话未检测到新的偏好特征变动。');
+      if (
+        !auditResult.hasNewPreference ||
+        !auditResult.extractedFacts ||
+        auditResult.extractedFacts.length === 0
+      ) {
+        console.log(
+          "[Profiler Agent] 🍃 画像审计完成：本轮会话未检测到新的偏好特征变动。",
+        );
         return;
       }
 
@@ -164,9 +192,13 @@ ${JSON.stringify(pastOrders, null, 2)}
       const embeddingModel = getEmbeddingModel();
       for (const item of auditResult.extractedFacts) {
         try {
-          const factText = typeof item === 'string' ? item : item.fact;
-          const confidence = typeof item === 'string' ? 1.0 : item.confidence || 1.0;
-          const source = typeof item === 'string' ? 'agent_audit_legacy' : item.source || 'agent_audit';
+          const factText = typeof item === "string" ? item : item.fact;
+          const confidence =
+            typeof item === "string" ? 1.0 : item.confidence || 1.0;
+          const source =
+            typeof item === "string"
+              ? "agent_audit_legacy"
+              : item.source || "agent_audit";
 
           // 🧠 画像置信度过滤硬性红线（High/Mid Threshold Routing）：
           // 1. 置信度 >= 0.85 的高级画像，直接赋予 'approved' 状态秒级投入对话生产使用。
@@ -179,7 +211,7 @@ ${JSON.stringify(pastOrders, null, 2)}
             continue;
           }
 
-          const status = confidence >= 0.85 ? 'approved' : 'pending';
+          const status = confidence >= 0.85 ? "approved" : "pending";
           console.log(
             `[Profiler Agent Routing] 🎯 Fact "${factText}" rated ${confidence.toFixed(2)} confidence ➔ Routed to status [${status}]`,
           );
@@ -191,26 +223,42 @@ ${JSON.stringify(pastOrders, null, 2)}
             userId: this.userId,
             fact: factText,
             embedding: serializedEmbedding,
-            type: 'preference',
+            type: "preference",
             confidence: confidence,
             status: status,
             source: source,
             createdAt: new Date(),
           });
-          console.log(`[Profiler Agent] 偏好 RAG 事实成功写入 longMemoryFacts [Status: ${status}]: "${factText}"`);
+          console.log(
+            `[Profiler Agent] 偏好 RAG 事实成功写入 longMemoryFacts [Status: ${status}]: "${factText}"`,
+          );
         } catch (ragErr) {
-          console.warn('[Profiler Agent] Failed to vectorise and store extracted fact:', ragErr);
+          console.warn(
+            "[Profiler Agent] Failed to vectorise and store extracted fact:",
+            ragErr,
+          );
         }
       }
 
-      console.log(`[Profiler Agent] ✅ 用户 ${this.userId} 的消费特征同步更新成功！`);
-    } catch (err: any) {
-      console.error('[Profiler Agent Error] 画像 Agent 提取偏好发生异常:', err.message || err);
+      console.log(
+        `[Profiler Agent] ✅ 用户 ${this.userId} 的消费特征同步更新成功！`,
+      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(
+        "[Profiler Agent Error] 画像 Agent 提取偏好发生异常:",
+        errMsg,
+      );
     }
   }
 
-  async searchRelevantFacts(query: string, precomputedEmbedding?: number[]): Promise<LongMemoryFact[]> {
-    console.log(`[LongMemory] Searching relevant facts for user ${this.userId} using query: ${query}`);
+  async searchRelevantFacts(
+    query: string,
+    precomputedEmbedding?: number[],
+  ): Promise<LongMemoryFact[]> {
+    console.log(
+      `[LongMemory] Searching relevant facts for user ${this.userId} using query: ${query}`,
+    );
 
     let queryEmbedding = precomputedEmbedding;
     if (!queryEmbedding || queryEmbedding.length === 0) {
@@ -221,7 +269,7 @@ ${JSON.stringify(pastOrders, null, 2)}
     const dbInstance = getDrizzle();
     if (dbInstance) {
       try {
-        const { eq, and } = require('drizzle-orm');
+        const { eq, and } = require("drizzle-orm");
         // Retrieve all facts for the user and perform in-memory cosine similarity calculation in TS.
         // 🔒 Only recall approved facts to prevent pending/rejected data leakage into the active prompt.
         const allFacts = await dbInstance
@@ -233,21 +281,33 @@ ${JSON.stringify(pastOrders, null, 2)}
             createdAt: longMemoryFacts.createdAt,
           })
           .from(longMemoryFacts)
-          .where(and(eq(longMemoryFacts.userId, this.userId), eq(longMemoryFacts.status, 'approved')));
+          .where(
+            and(
+              eq(longMemoryFacts.userId, this.userId),
+              eq(longMemoryFacts.status, "approved"),
+            ),
+          );
 
         if (allFacts.length > 0) {
-          const scoredFacts = allFacts.map((row: any) => {
+          const scoredFacts = allFacts.map((row) => {
             let embeddingArray: number[] | null = null;
             if (row.embedding) {
               try {
-                embeddingArray = typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding;
+                embeddingArray =
+                  typeof row.embedding === "string"
+                    ? JSON.parse(row.embedding)
+                    : row.embedding;
               } catch (e) {
-                console.warn('[LongMemory] Failed to parse embedding JSON:', e);
+                console.warn("[LongMemory] Failed to parse embedding JSON:", e);
               }
             }
 
             let similarity = 0;
-            if (embeddingArray && Array.isArray(embeddingArray) && embeddingArray.length === queryEmbedding.length) {
+            if (
+              embeddingArray &&
+              Array.isArray(embeddingArray) &&
+              embeddingArray.length === queryEmbedding.length
+            ) {
               // cosine similarity = (A . B) / (||A|| * ||B||)
               let dotProduct = 0;
               let normA = 0;
@@ -265,8 +325,10 @@ ${JSON.stringify(pastOrders, null, 2)}
               fact: {
                 id: row.id,
                 fact: row.fact,
-                category: row.type || 'preference',
-                timestamp: row.createdAt ? row.createdAt.toISOString() : new Date().toISOString(),
+                category: row.type || "preference",
+                timestamp: row.createdAt
+                  ? row.createdAt.toISOString()
+                  : new Date().toISOString(),
                 embedding: embeddingArray || undefined,
               },
               similarity,
@@ -274,12 +336,12 @@ ${JSON.stringify(pastOrders, null, 2)}
           });
 
           // 按照余弦相似度（降序）排序
-          scoredFacts.sort((a: any, b: any) => b.similarity - a.similarity);
+          scoredFacts.sort((a, b) => b.similarity - a.similarity);
 
           // 🔍 性能与 Prompt 优化：建立相似度硬阈值过滤（最低 0.65），
           // 彻底拒绝无关的、低置信度事实被一股脑塞进 Prompt 混淆大模型认知并造成 Token 浪费！
           const SIMLIARITY_THRESHOLD = 0.65;
-          const filteredFacts = scoredFacts.filter((item: any) => {
+          const filteredFacts = scoredFacts.filter((item) => {
             const isPassed = item.similarity >= SIMLIARITY_THRESHOLD;
             if (!isPassed && item.similarity > 0) {
               console.log(
@@ -290,10 +352,13 @@ ${JSON.stringify(pastOrders, null, 2)}
           });
 
           // 限制返回最相关的 Top 5，保证 Prompt 极简、清爽
-          return filteredFacts.slice(0, 5).map((sf: any) => sf.fact);
+          return filteredFacts.slice(0, 5).map((sf) => sf.fact);
         }
       } catch (err) {
-        console.warn('[LongMemory] TS-based cosine similarity search bypassed due to offline/failed DB.', err);
+        console.warn(
+          "[LongMemory] TS-based cosine similarity search bypassed due to offline/failed DB.",
+          err,
+        );
       }
     }
 

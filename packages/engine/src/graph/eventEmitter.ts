@@ -1,9 +1,10 @@
-import { EventEmitter } from 'node:events';
+import { EventEmitter } from "node:events";
+import type { SSECallback } from "types";
 
 class AgentEventEmitter extends EventEmitter {
   // Store status updates and result of jobs in memory to support playback
-  private journal = new Map<string, { event: string; data: any }[]>();
-  private results = new Map<string, any>();
+  private journal = new Map<string, { event: string; data: unknown }[]>();
+  private results = new Map<string, unknown>();
   private tokenUsage = new Map<string, number>();
 
   addTokens(jobId: string, tokens: number) {
@@ -17,24 +18,24 @@ class AgentEventEmitter extends EventEmitter {
     return this.tokenUsage.get(jobId) || 0;
   }
 
-  emit(event: string, ...args: any[]): boolean {
-    const parts = event.split(':');
+  emit(event: string, ...args: unknown[]): boolean {
+    const parts = event.split(":");
     if (parts.length === 2) {
       const jobId = parts[0];
       const type = parts[1]; // 'status' or 'result'
 
-      if (type === 'status') {
+      if (type === "status") {
         if (!this.journal.has(jobId)) {
           this.journal.set(jobId, []);
         }
-        const data = args[0];
-        if (data && typeof data === 'object') {
+        const data = args[0] as Record<string, unknown> | undefined;
+        if (data && typeof data === "object") {
           data.tokens = this.getTokens(jobId);
         }
         this.journal.get(jobId)!.push({ event, data });
-      } else if (type === 'result') {
-        const data = args[0];
-        if (data && typeof data === 'object') {
+      } else if (type === "result") {
+        const data = args[0] as Record<string, unknown> | undefined;
+        if (data && typeof data === "object") {
           data.tokens = this.getTokens(jobId);
         }
         this.results.set(jobId, data);
@@ -44,7 +45,11 @@ class AgentEventEmitter extends EventEmitter {
   }
 
   // Playback all historical logs for a given jobId to a listener callback
-  playbackAndSubscribe(jobId: string, statusCallback: (data: any) => void, resultCallback: (data: any) => void) {
+  playbackAndSubscribe(
+    jobId: string,
+    statusCallback: SSECallback,
+    resultCallback: SSECallback,
+  ) {
     // 1. Playback historical status events in exact sequence
     const logs = this.journal.get(jobId) || [];
     for (const log of logs) {
@@ -58,8 +63,8 @@ class AgentEventEmitter extends EventEmitter {
     }
 
     // 3. Otherwise, subscribe to future events live
-    const statusHandler = (data: any) => statusCallback(data);
-    const resultHandler = (data: any) => resultCallback(data);
+    const statusHandler = (data: unknown) => statusCallback(data);
+    const resultHandler = (data: unknown) => resultCallback(data);
 
     this.on(`${jobId}:status`, statusHandler);
     this.on(`${jobId}:result`, resultHandler);
@@ -88,8 +93,9 @@ const globalForEmitter = global as unknown as {
   agentEventEmitter?: AgentEventEmitter;
 };
 
-export const agentEventEmitter = globalForEmitter.agentEventEmitter ?? new AgentEventEmitter();
+export const agentEventEmitter =
+  globalForEmitter.agentEventEmitter ?? new AgentEventEmitter();
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== "production") {
   globalForEmitter.agentEventEmitter = agentEventEmitter;
 }

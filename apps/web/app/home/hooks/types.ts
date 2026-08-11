@@ -1,8 +1,10 @@
+import type { SubTaskResult } from "types";
+
 export interface Subtask {
   id: string;
   description: string;
-  status: 'pending' | 'executing' | 'completed' | 'failed';
-  result?: any;
+  status: "pending" | "executing" | "completed" | "failed";
+  result?: SubTaskResult;
 }
 
 export interface TaskPlan {
@@ -12,7 +14,7 @@ export interface TaskPlan {
 }
 
 export interface Message {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
   plan?: TaskPlan;
   jobId?: string;

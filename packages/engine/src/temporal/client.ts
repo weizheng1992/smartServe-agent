@@ -1,4 +1,4 @@
-import { Client, Connection } from '@temporalio/client';
+import { Client, Connection } from "@temporalio/client";
 
 let clientPromise: Promise<Client> | null = null;
 let useMock = true; // 默认采用模拟模式
@@ -14,8 +14,10 @@ export async function getTemporalClient(): Promise<Client> {
   if (clientPromise) return clientPromise;
 
   clientPromise = (async () => {
-    const address = process.env.TEMPORAL_ADDRESS || '127.0.0.1:7239';
-    console.log(`[Temporal Client] 正在尝试物理连接至真实 Temporal Server: ${address}...`);
+    const address = process.env.TEMPORAL_ADDRESS || "127.0.0.1:7239";
+    console.log(
+      `[Temporal Client] 正在尝试物理连接至真实 Temporal Server: ${address}...`,
+    );
 
     try {
       // 尝试进行一次超快速的物理连接探针（1秒超时）
@@ -24,18 +26,21 @@ export async function getTemporalClient(): Promise<Client> {
         connectTimeout: 1500,
       });
 
-      console.log('[Temporal Client] ✅ 真实物理 Temporal 引擎连接成功！');
+      console.log("[Temporal Client] ✅ 真实物理 Temporal 引擎连接成功！");
       useMock = false;
       hasChecked = true;
 
       return new Client({
         connection,
-        namespace: process.env.TEMPORAL_NAMESPACE || 'default',
+        namespace: process.env.TEMPORAL_NAMESPACE || "default",
       });
-    } catch (err: any) {
-      console.warn(`[Temporal Client] ⚠️ 无法物理连接至 Temporal Server (${err.message || err})。`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.warn(
-        '[Temporal Client] 🚀 系统已自动无缝切换至: High-Fidelity Client-side simulator (LangGraph 本地直跑) 模式！',
+        `[Temporal Client] ⚠️ 无法物理连接至 Temporal Server (${errMsg})。`,
+      );
+      console.warn(
+        "[Temporal Client] 🚀 系统已自动无缝切换至: High-Fidelity Client-side simulator (LangGraph 本地直跑) 模式！",
       );
       useMock = true;
       hasChecked = true;

@@ -1,4 +1,4 @@
-import type React from 'react';
+import type React from "react";
 import {
   Avatar,
   AvatarFallback,
@@ -18,8 +18,9 @@ import {
   RefreshCw,
   Send,
   XCircle,
-} from 'ui';
-import type { Message } from '../hooks/types';
+} from "ui";
+import type { RunningDetail, TaskPlan } from "types";
+import type { Message } from "../hooks/types";
 
 interface ChatAreaProps {
   activeThreadId: string;
@@ -29,9 +30,11 @@ interface ChatAreaProps {
   isSubmitting: boolean;
   loadHistory: (id: string) => Promise<void>;
   handleSend: (e: React.FormEvent) => Promise<void>;
-  setActivePlan: (plan: any) => void;
+  setActivePlan: (plan: TaskPlan | null) => void;
   setCurrentStepText: (text: string) => void;
-  setRunningDetails: (details: any[]) => void;
+  setRunningDetails: (
+    details: RunningDetail[] | ((prev: RunningDetail[]) => RunningDetail[]),
+  ) => void;
   setSelectedScreenshot: (url: string | null) => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -57,7 +60,7 @@ export function ChatArea({
         <div className="flex items-center space-x-3 min-w-0">
           <div className="h-2.5 w-2.5 rounded-full bg-indigo-500 shadow-lg shadow-indigo-500/50 shrink-0" />
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono truncate">
-            会话: {activeThreadId || '未选择任何对话'}
+            会话: {activeThreadId || "未选择任何对话"}
           </span>
         </div>
         <div className="flex items-center space-x-3 shrink-0">
@@ -76,7 +79,7 @@ export function ChatArea({
                 loadHistory(activeThreadId);
               }
               setActivePlan(null);
-              setCurrentStepText('');
+              setCurrentStepText("");
               setRunningDetails([]);
             }}
           >
@@ -89,10 +92,15 @@ export function ChatArea({
       <div className="flex-1 overflow-y-auto p-6 min-h-0">
         <div className="max-w-3xl mx-auto space-y-6 pb-28">
           {messages.map((m, idx) => (
-            <div key={idx} className={`flex gap-4 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              {m.role === 'assistant' && (
+            <div
+              key={idx}
+              className={`flex gap-4 ${m.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              {m.role === "assistant" && (
                 <Avatar className="h-9 w-9 border border-slate-800 shadow-md shrink-0">
-                  <AvatarFallback className="bg-indigo-600/10 text-indigo-400 text-xs">AI</AvatarFallback>
+                  <AvatarFallback className="bg-indigo-600/10 text-indigo-400 text-xs">
+                    AI
+                  </AvatarFallback>
                 </Avatar>
               )}
 
@@ -100,9 +108,9 @@ export function ChatArea({
                 {/* Chat Message Box */}
                 <div
                   className={`rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-xl border ${
-                    m.role === 'user'
-                      ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-indigo-500/30'
-                      : 'bg-slate-900/90 text-slate-200 border-slate-800'
+                    m.role === "user"
+                      ? "bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-indigo-500/30"
+                      : "bg-slate-900/90 text-slate-200 border-slate-800"
                   }`}
                 >
                   {m.isLoading ? (
@@ -137,30 +145,38 @@ export function ChatArea({
 
                     <CardContent className="p-4 space-y-3">
                       {m.plan.subtasks.map((step) => {
-                        const isCompleted = step.status === 'completed';
-                        const isExecuting = step.status === 'executing';
-                        const isFailed = step.status === 'failed';
+                        const isCompleted = step.status === "completed";
+                        const isExecuting = step.status === "executing";
+                        const isFailed = step.status === "failed";
 
                         return (
                           <div
                             key={step.id}
                             className={`p-3.5 rounded-xl border transition-all ${
                               isExecuting
-                                ? 'bg-indigo-950/20 border-indigo-500/40 shadow-inner'
-                                : 'bg-slate-950/40 border-slate-800/60'
+                                ? "bg-indigo-950/20 border-indigo-500/40 shadow-inner"
+                                : "bg-slate-950/40 border-slate-800/60"
                             }`}
                           >
                             <div className="flex items-center justify-between gap-4">
                               <div className="flex items-center space-x-3">
                                 <div className="shrink-0">
-                                  {isCompleted && <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400 shadow-sm" />}
-                                  {isExecuting && <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />}
-                                  {isFailed && <XCircle className="h-4.5 w-4.5 text-rose-500" />}
-                                  {step.status === 'pending' && <Clock className="h-4.5 w-4.5 text-slate-600" />}
+                                  {isCompleted && (
+                                    <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400 shadow-sm" />
+                                  )}
+                                  {isExecuting && (
+                                    <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />
+                                  )}
+                                  {isFailed && (
+                                    <XCircle className="h-4.5 w-4.5 text-rose-500" />
+                                  )}
+                                  {step.status === "pending" && (
+                                    <Clock className="h-4.5 w-4.5 text-slate-600" />
+                                  )}
                                 </div>
                                 <div>
                                   <h4
-                                    className={`text-xs font-medium ${isExecuting ? 'text-indigo-200' : 'text-slate-300'}`}
+                                    className={`text-xs font-medium ${isExecuting ? "text-indigo-200" : "text-slate-300"}`}
                                   >
                                     {step.description}
                                   </h4>
@@ -169,30 +185,30 @@ export function ChatArea({
                               <Badge
                                 variant={
                                   isCompleted
-                                    ? 'success'
+                                    ? "success"
                                     : isExecuting
-                                      ? 'default'
+                                      ? "default"
                                       : isFailed
-                                        ? 'destructive'
-                                        : 'outline'
+                                        ? "destructive"
+                                        : "outline"
                                 }
                                 className={
                                   isExecuting
-                                    ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-none'
+                                    ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-none"
                                     : isCompleted
-                                      ? 'shadow-none bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                      ? "shadow-none bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                       : isFailed
-                                        ? 'shadow-none bg-rose-500/10 text-rose-400 border-rose-500/20'
-                                        : 'shadow-none border-slate-800 text-slate-500'
+                                        ? "shadow-none bg-rose-500/10 text-rose-400 border-rose-500/20"
+                                        : "shadow-none border-slate-800 text-slate-500"
                                 }
                               >
-                                {step.status === 'completed'
-                                  ? '已完成'
-                                  : step.status === 'executing'
-                                    ? '执行中'
-                                    : step.status === 'failed'
-                                      ? '执行失败'
-                                      : '待处理'}
+                                {step.status === "completed"
+                                  ? "已完成"
+                                  : step.status === "executing"
+                                    ? "执行中"
+                                    : step.status === "failed"
+                                      ? "执行失败"
+                                      : "待处理"}
                               </Badge>
                             </div>
 
@@ -202,13 +218,18 @@ export function ChatArea({
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center space-x-2">
                                     <span className="text-[11px] text-slate-300 font-medium flex items-center gap-1">
-                                      <ImageIcon className="h-3.5 w-3.5 text-indigo-400" />📷 真实物理看板快照已生成：
+                                      <ImageIcon className="h-3.5 w-3.5 text-indigo-400" />
+                                      📷 真实物理看板快照已生成：
                                     </span>
                                   </div>
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => setSelectedScreenshot(step.result.screenshotPath)}
+                                    onClick={() =>
+                                      setSelectedScreenshot(
+                                        step.result.screenshotPath,
+                                      )
+                                    }
                                     className="h-6 text-[10px] text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors px-2"
                                   >
                                     <span>查看高清原图</span>
@@ -225,7 +246,11 @@ export function ChatArea({
                                     <Button
                                       variant="secondary"
                                       size="sm"
-                                      onClick={() => setSelectedScreenshot(step.result.screenshotPath)}
+                                      onClick={() =>
+                                        setSelectedScreenshot(
+                                          step.result.screenshotPath,
+                                        )
+                                      }
                                       className="text-xs"
                                     >
                                       点击查看大图
@@ -242,9 +267,11 @@ export function ChatArea({
                 )}
               </div>
 
-              {m.role === 'user' && (
+              {m.role === "user" && (
                 <Avatar className="h-9 w-9 border border-indigo-500/30 shadow-md shrink-0">
-                  <AvatarFallback className="bg-indigo-600 text-white text-xs font-mono">U</AvatarFallback>
+                  <AvatarFallback className="bg-indigo-600 text-white text-xs font-mono">
+                    U
+                  </AvatarFallback>
                 </Avatar>
               )}
             </div>

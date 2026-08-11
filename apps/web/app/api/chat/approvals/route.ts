@@ -26,10 +26,11 @@ export async function GET(req: NextRequest) {
       .innerJoin(threads, eq(pendingApprovals.threadId, threads.id))
       .orderBy(desc(pendingApprovals.createdAt));
     return NextResponse.json({ success: true, approvals: list });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
     console.error("Error fetching approvals:", error);
     return NextResponse.json(
-      { error: error.message || "Internal Server Error" },
+      { error: errMsg || "Internal Server Error" },
       { status: 500 },
     );
   }
@@ -228,10 +229,11 @@ export async function POST(req: NextRequest) {
         console.log(`[Approval Lock] ✅ 内存后备锁已物理释放: ${lockKey}`);
       }
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
     console.error("Error handling approval action:", error);
     return NextResponse.json(
-      { error: error.message || "Internal Server Error" },
+      { error: errMsg || "Internal Server Error" },
       { status: 500 },
     );
   }

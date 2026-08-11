@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { db } from "db";
+import type { SubTask, TaskPlan } from "types";
 import { runAgent } from "../src/graph/buildGraph";
 
 describe("AI Agent Platform System Tests", () => {
@@ -13,13 +14,14 @@ describe("AI Agent Platform System Tests", () => {
 
     console.log("[Test Suite] Triggering local graph execution...");
 
-    let result: any;
+    let result: { output: string; taskPlan?: TaskPlan };
     try {
       result = await runAgent(threadId, userId, message);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.warn(
         "[Test Suite Warning] runAgent threw a DB-related exception but we graceful-fallback verify: ",
-        err.message,
+        errMsg,
       );
       // Construct a valid mock fallback for testing environment where physical network EPERM blocks standard Postgres
       result = {
@@ -51,7 +53,7 @@ describe("AI Agent Platform System Tests", () => {
 
     // Verify conversation was stored inside message database persistence (with exception safety bypass)
     console.log("[Test Suite] Checking message database persistence...");
-    let storedMessages: any[] = [];
+    let storedMessages: Record<string, unknown>[] = [];
     try {
       storedMessages = await db.getMessages(threadId);
     } catch (err) {
@@ -118,13 +120,14 @@ describe("AI Agent Platform System Tests", () => {
       );
     }
 
-    let result: any;
+    let result: { output: string; taskPlan?: TaskPlan };
     try {
       result = await runAgent(threadId, userId, message);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.warn(
         "[Test Suite Warning] runAgent threw during order listing, falling back to mock:",
-        err.message,
+        errMsg,
       );
       result = {
         output:
@@ -160,12 +163,12 @@ describe("AI Agent Platform System Tests", () => {
 
     // Verify task plan structure
     expect(result.taskPlan).toBeDefined();
-    const listSubtask = result.taskPlan.subtasks.find(
-      (st: any) =>
+    const listSubtask = result.taskPlan?.subtasks.find(
+      (st: SubTask) =>
         st.result?.toolExecuted === "listUserOrders" || st.id === "bypass_step",
     );
     expect(listSubtask).toBeDefined();
-    expect(listSubtask.status).toBe("completed");
+    expect(listSubtask?.status).toBe("completed");
   }, 150000);
 
   test("Human escalation flow creates pending approval ticket and responds politely", async () => {
@@ -175,13 +178,14 @@ describe("AI Agent Platform System Tests", () => {
 
     console.log("[Test Suite] Triggering human escalation flow...");
 
-    let result: any;
+    let result: { output: string; taskPlan?: TaskPlan };
     try {
       result = await runAgent(threadId, userId, message);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.warn(
         "[Test Suite Warning] runAgent threw during human escalation:",
-        err.message,
+        errMsg,
       );
       result = {
         output: "您好！已为您成功触发人工客服接入流程。",

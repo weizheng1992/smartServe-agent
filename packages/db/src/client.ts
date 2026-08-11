@@ -69,8 +69,8 @@ export interface MemoryDatabaseState {
     thread_id: string;
     actionType: string;
     action_type: string;
-    actionPayload: any;
-    action_payload: any;
+    actionPayload: unknown;
+    action_payload: unknown;
     status: string;
     deadline: string;
     createdAt: string;
@@ -81,7 +81,7 @@ export interface MemoryDatabaseState {
     {
       id: string;
       threadId: string;
-      pendingIntents: any;
+      pendingIntents: unknown;
       updatedAt: string;
     }
   >;
@@ -263,7 +263,7 @@ const memoryDb: MemoryDatabaseState = globalForDb.memoryDb ?? {
     {
       id: string;
       threadId: string;
-      pendingIntents: any;
+      pendingIntents: unknown;
       updatedAt: string;
     }
   >(),
@@ -600,16 +600,22 @@ export class FakePool {
       let filtered = memoryDb.pendingApprovals;
       if (threadId) {
         filtered = filtered.filter(
-          (pa: any) => pa.threadId === threadId || pa.thread_id === threadId,
+          (pa: { threadId?: string; thread_id?: string }) =>
+            pa.threadId === threadId || pa.thread_id === threadId,
         );
       }
 
       // 按照 createdAt 降序排序以正确模拟 ORDER BY created_at DESC 行为
-      const sorted = [...filtered].sort((a: any, b: any) => {
-        const dateA = new Date(a.createdAt || a.created_at || 0).getTime();
-        const dateB = new Date(b.createdAt || b.created_at || 0).getTime();
-        return dateB - dateA;
-      });
+      const sorted = [...filtered].sort(
+        (
+          a: { createdAt?: string; created_at?: string },
+          b: { createdAt?: string; created_at?: string },
+        ) => {
+          const dateA = new Date(a.createdAt || a.created_at || 0).getTime();
+          const dateB = new Date(b.createdAt || b.created_at || 0).getTime();
+          return dateB - dateA;
+        },
+      );
 
       return { rows: sorted } as DBQueryResult<unknown>;
     }
@@ -649,7 +655,7 @@ export class FakePool {
       s.toUpperCase().includes('INSERT INTO "TASK_MEMORY"')
     ) {
       let threadId = "";
-      let pendingIntents: any = null;
+      let pendingIntents: unknown = null;
       const fieldsMatch = s.match(/\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
       if (fieldsMatch && params) {
         const fields = fieldsMatch[1]
@@ -694,7 +700,7 @@ export class FakePool {
         s.toUpperCase().includes('"TASK_MEMORY"'))
     ) {
       let threadId = "";
-      let pendingIntents: any = null;
+      let pendingIntents: unknown = null;
       if (params) {
         const setMatch = s.match(/SET\s+([^WHERE]+)/i);
         const whereMatch = s.match(/WHERE\s+(.+)/i);
@@ -909,7 +915,7 @@ function getPgPool(): Pool {
     });
     console.log("[DB] ✅ 物理 PostgreSQL 数据库连接池初始化成功！");
     return pgPool;
-  } catch (err: any) {
+  } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     throw new Error(
       `❌ [DATABASE ERROR] Failed to initialize PostgreSQL pool: ${errMsg}`,
@@ -1038,7 +1044,12 @@ export interface DBInterface {
 }
 
 async function resolveAndEnsurePgUserId(
-  pool: any,
+  pool: {
+    query: (
+      q: string,
+      p?: unknown[],
+    ) => Promise<{ rows: Record<string, unknown>[] }>;
+  },
   userId: string,
 ): Promise<string> {
   const isValidUuid =
@@ -1078,7 +1089,7 @@ async function resolveAndEnsurePgUserId(
     try {
       const userRes = await pool.query("SELECT id FROM users LIMIT 1");
       if (userRes.rows && userRes.rows.length > 0) {
-        return (userRes.rows[0] as any).id;
+        return String((userRes.rows[0] as Record<string, unknown>).id);
       }
     } catch (fallbackErr) {
       console.error("[DB] Fallback user lookup failed:", fallbackErr);
@@ -1113,7 +1124,7 @@ export const db: DBInterface = {
           [email],
         );
         if (selectRes.rows && selectRes.rows.length > 0) {
-          const row = selectRes.rows[0] as any;
+          const row = selectRes.rows[0] as { id: string; email: string };
           return { id: row.id, email: row.email };
         }
 
@@ -1169,13 +1180,13 @@ export const db: DBInterface = {
           'SELECT id, "user_id" AS "userId", "business_id" AS "businessId", status, "created_at" AS "createdAt", "updated_at" AS "updatedAt" FROM threads WHERE "user_id" = $1 ORDER BY "updated_at" DESC',
           [pgUserId],
         );
-        return res.rows.map((row: any) => ({
-          id: row.id,
-          userId: row.userId || row.user_id,
-          businessId: row.businessId || row.business_id,
-          status: row.status,
-          createdAt: row.createdAt || row.created_at,
-          updatedAt: row.updatedAt || row.updated_at,
+        return res.rows.map((row: DatabaseThreadRow) => ({
+          id: (row.id || "") as string,
+          userId: (row.userId || row.user_id || "") as string,
+          businessId: (row.businessId || row.business_id || "") as string,
+          status: (row.status || "") as string,
+          createdAt: (row.createdAt || row.created_at || "") as string,
+          updatedAt: (row.updatedAt || row.updated_at || "") as string,
         })) as DBThread[];
       } catch (err) {
         console.error(

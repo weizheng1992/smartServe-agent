@@ -46,6 +46,7 @@
         "react-dom": "^19.0.0",
         "tailwindcss-animate": "^1.0.7",
         "tools": "workspace:*",
+        "types": "workspace:*",
         "ui": "workspace:*",
         "zustand": "^5.0.0",
       },
@@ -67,6 +68,7 @@
         "react-dom": "^19.0.0",
         "tailwindcss-animate": "^1.0.7",
         "tools": "workspace:*",
+        "types": "workspace:*",
         "ui": "workspace:*",
         "zustand": "^5.0.0",
       },
@@ -103,6 +105,7 @@
         "p-retry": "^6.2.0",
         "p-timeout": "^6.1.0",
         "tools": "workspace:*",
+        "types": "workspace:*",
         "zod": "^3.24.0",
       },
     },
@@ -122,6 +125,16 @@
         "ioredis": "^5.4.0",
         "puppeteer-core": "^22.12.0",
         "zod": "^3.24.0",
+      },
+    },
+    "packages/types": {
+      "name": "types",
+      "version": "0.1.0",
+      "dependencies": {
+        "zod": "^3.23.8",
+      },
+      "devDependencies": {
+        "@types/node": "^20.0.0",
       },
     },
     "packages/ui": {
@@ -2203,6 +2216,8 @@
     "typed-array-length": ["typed-array-length@1.0.8", "", { "dependencies": { "call-bind": "^1.0.9", "for-each": "^0.3.5", "gopd": "^1.2.0", "is-typed-array": "^1.1.15", "possible-typed-array-names": "^1.1.0", "reflect.getprototypeof": "^1.0.10" } }, "sha512-phPGCwqr2+Qo0fwniCE8e4pKnGu/yFb5nD5Y8bf0EEeiI5GklnACYA9GFy/DrAeRrKHXvHn+1SUsOWgJp6RO+g=="],
 
     "typed-function": ["typed-function@4.2.2", "", {}, "sha512-VwaXim9Gp1bngi/q3do8hgttYn2uC3MoT/gfuMWylnj1IeZBUAyPddHZlo1K05BDoj8DYPpMdiHqH1dDYdJf2A=="],
+
+    "types": ["types@workspace:packages/types"],
 
     "typescript": ["typescript@5.9.3", "https://npm.apple.com/typescript/-/typescript-5.9.3.tgz", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

@@ -180,10 +180,11 @@ export async function POST(req: NextRequest) {
       userId,
       isTemporalMode: !isMock,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
     console.error("Error in POST /api/chat endpoint:", error);
     return NextResponse.json(
-      { error: error.message || "Internal Server Error" },
+      { error: errMsg || "Internal Server Error" },
       { status: 500 },
     );
   }

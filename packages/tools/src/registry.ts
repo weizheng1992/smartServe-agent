@@ -1,10 +1,13 @@
-import type { z } from 'zod';
+import type { z } from "zod";
 
-export interface ToolDefinition {
+export interface ToolDefinition<
+  TArgs = Record<string, unknown>,
+  TResult = unknown,
+> {
   name: string;
   description: string;
-  schema: z.ZodObject<any>;
-  execute: (args: any) => Promise<any>;
+  schema: z.ZodObject<z.ZodRawShape>;
+  execute: (args: TArgs) => Promise<TResult>;
 }
 
 const registry = new Map<string, ToolDefinition>();

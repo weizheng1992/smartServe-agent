@@ -1,10 +1,20 @@
 import { type Order, db } from "db";
 import Redis from "ioredis";
+import type {
+  DatabaseOrderItemRow,
+  DatabaseOrderRow,
+  DatabaseProductRow,
+  DatabaseThreadRow,
+  ToolAuditTrail,
+} from "types";
 import { z } from "zod";
 import { registerTool } from "./registry";
 
 // 1-minute TTL Cache for getOrderStatus
-const orderStatusCache = new Map<string, { data: any; timestamp: number }>();
+const orderStatusCache = new Map<
+  string,
+  { data: Record<string, unknown>; timestamp: number }
+>();
 const CACHE_TTL_MS = 60000; // 1 minute
 
 // Safe Redis initialization with automatic silent fallback to local Map
@@ -74,9 +84,11 @@ export const getOrderStatus = {
           [threadId],
         );
         if (res.rows?.[0]) {
-          const row = res.rows[0] as any;
-          sessionUserId = row.userId || row.user_id;
-          sessionBusinessId = row.businessId || row.business_id || "ecommerce";
+          const row = res.rows[0] as DatabaseThreadRow;
+          sessionUserId = (row.userId || row.user_id || "") as string;
+          sessionBusinessId = (row.businessId ||
+            row.business_id ||
+            "ecommerce") as string;
         }
       } catch (err) {
         console.warn(
@@ -129,7 +141,7 @@ export const getOrderStatus = {
     // 3. 缓存均未命中，物理关联查询（JOIN 商品表与订单明细表，支持 SaaS 多租户细粒度查单）
     // 强制增加 user_id 验证，杜绝 IDOR 水平越权！
     const { db: physicalDb } = require("db");
-    let order: any = null;
+    let order: DatabaseOrderRow | null = null;
     try {
       const orderQuery = sessionUserId
         ? 'SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery", user_id AS "userId", business_id AS "businessId" FROM orders WHERE order_id = $1 AND user_id = $2'
@@ -139,25 +151,26 @@ export const getOrderStatus = {
         : [orderId];
       const oRes = await physicalDb.execute(orderQuery, orderQueryParams);
       if (oRes?.rows?.[0]) {
-        order = oRes.rows[0];
+        order = oRes.rows[0] as DatabaseOrderRow;
       }
     } catch (dbErr) {
       console.error("[getOrderStatus] Database error:", dbErr);
     }
 
     if (order) {
-      const items: any[] = [];
+      const items: DatabaseOrderItemRow[] = [];
       try {
         const itemsRes = await physicalDb.execute(
           'SELECT * FROM "order_items" WHERE "order_id" = $1',
           [orderId],
         );
         if (itemsRes?.rows) {
-          for (const itemRow of itemsRes.rows as any[]) {
-            const prodId = itemRow.product_id || itemRow.productId;
-            const quantity = itemRow.quantity;
-            const priceAtPurchase =
-              itemRow.price_at_purchase || itemRow.priceAtPurchase;
+          for (const itemRow of itemsRes.rows as DatabaseOrderItemRow[]) {
+            const prodId = (itemRow.product_id || itemRow.productId) as string;
+            const quantity = Number(itemRow.quantity || 1);
+            const priceAtPurchase = Number(
+              itemRow.price_at_purchase || itemRow.priceAtPurchase || 0,
+            );
 
             // 根据产品 ID 异步溯源商品物理详情
             let prodName = "未知商品";
@@ -168,9 +181,9 @@ export const getOrderStatus = {
                 [prodId],
               );
               if (prodRes?.rows?.[0]) {
-                const prod = prodRes.rows[0] as any;
-                prodName = prod.name;
-                prodDesc = prod.description || "";
+                const prod = prodRes.rows[0] as DatabaseProductRow;
+                prodName = (prod.name || "未知商品") as string;
+                prodDesc = (prod.description || "") as string;
               }
             } catch (pErr) {
               if (prodId === "prod_nike_1") {
@@ -274,9 +287,11 @@ export const processRefund = {
           [threadId],
         );
         if (res.rows?.[0]) {
-          const row = res.rows[0] as any;
-          sessionUserId = row.userId || row.user_id;
-          businessId = row.businessId || row.business_id || "ecommerce";
+          const row = res.rows[0] as DatabaseThreadRow;
+          sessionUserId = (row.userId || row.user_id || "") as string;
+          businessId = (row.businessId ||
+            row.business_id ||
+            "ecommerce") as string;
         }
       } catch (err) {
         console.warn(
@@ -296,7 +311,7 @@ export const processRefund = {
 
     // 🛡️ 零越权验证 (Zero IDOR Check): 物理校验退款订单所有权
     const { db: physicalDb } = require("db");
-    let order: any = null;
+    let order: DatabaseOrderRow | null = null;
     try {
       const orderQuery = sessionUserId
         ? 'SELECT order_id AS "orderId", estimated_delivery AS "estimatedDelivery", user_id AS "userId", total_amount AS "totalAmount" FROM orders WHERE order_id = $1 AND user_id = $2'
@@ -306,7 +321,7 @@ export const processRefund = {
         : [orderId];
       const oRes = await physicalDb.execute(orderQuery, orderQueryParams);
       if (oRes?.rows?.[0]) {
-        order = oRes.rows[0];
+        order = oRes.rows[0] as DatabaseOrderRow;
       }
     } catch (dbErr) {
       console.error("[processRefund] Database error:", dbErr);
@@ -369,7 +384,7 @@ export const processRefund = {
         refundAmountVal = amount.startsWith("$") ? amount : `$${amount}`;
       }
 
-      let auditTrail: any = null;
+      let auditTrail: ToolAuditTrail | null = null;
       if (threadId) {
         try {
           const { getDrizzle, pendingApprovals } = require("db");
@@ -466,9 +481,9 @@ export const listUserOrders = {
         [threadId],
       );
       if (res.rows?.[0]) {
-        const row = res.rows[0] as any;
-        userId = row.userId || row.user_id;
-        businessId = row.businessId || row.business_id;
+        const row = res.rows[0] as DatabaseThreadRow;
+        userId = (row.userId || row.user_id || "") as string;
+        businessId = (row.businessId || row.business_id || "") as string;
       }
     } catch (err) {
       console.error(
@@ -558,8 +573,8 @@ export const changeShippingAddress = {
         };
       }
 
-      const order = rows[0] as any;
-      const status = order.status || order.status;
+      const order = rows[0] as DatabaseOrderRow;
+      const status = (order.status || "") as string;
       const totalAmount = Number(order.totalAmount || order.total_amount || 0);
 
       if (status === "shipped" || status === "delivered") {
@@ -588,7 +603,7 @@ export const changeShippingAddress = {
         `[Address Change] ✅ Order ${orderId} address updated to: "${newAddress}"`,
       );
 
-      let auditTrail: any = null;
+      let auditTrail: ToolAuditTrail | null = null;
       if (totalAmount > 100.0 && isApproved && threadId) {
         try {
           const { getDrizzle, pendingApprovals } = require("db");
@@ -711,7 +726,7 @@ export const generateInvoice = {
         };
       }
 
-      const order = rows[0] as any;
+      const order = rows[0] as DatabaseOrderRow;
       const totalAmount = order.totalAmount || order.total_amount;
       const invoiceId = `INV-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 
@@ -839,10 +854,11 @@ export const recordUserPreference = {
         preferenceValue,
         message: `✅ 已成功将您的消费偏好偏爱（${preferenceType}: ${preferenceValue}）登记入库。系统已同步更新 RAG 画像专家混合记忆矩阵，后续为您推荐商品及尺码换算时将自动参考！`,
       };
-    } catch (err: any) {
-      console.error("[Record Preference Tool] Storage failed:", err);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error("[Record Preference Tool] Storage failed:", errorMessage);
       return {
-        error: `Failed to register consumer preference: ${err.message}`,
+        error: `Failed to register consumer preference: ${errorMessage}`,
       };
     }
   },

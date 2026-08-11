@@ -81,11 +81,10 @@ async function main() {
         } else {
           console.log(`No invalid embeddings found in ${table}.`);
         }
-      } catch (tableErr: any) {
-        console.error(
-          `Error processing table ${table}:`,
-          tableErr.message || tableErr,
-        );
+      } catch (tableErr: unknown) {
+        const tableMsg =
+          tableErr instanceof Error ? tableErr.message : String(tableErr);
+        console.error(`Error processing table ${table}:`, tableMsg);
       }
     }
 
@@ -93,8 +92,9 @@ async function main() {
       `\n🎉 [Embedding Cleaner] Finished cleanup! Total rows deleted across all tables: ${totalDeleted}`,
     );
     await client.end();
-  } catch (err: any) {
-    console.error("❌ Database connection failed:", err.message || err);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("❌ Database connection failed:", errMsg);
     try {
       await client.end();
     } catch {}

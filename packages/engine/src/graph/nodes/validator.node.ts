@@ -18,7 +18,9 @@ export async function validatorNode(state: typeof AgentStateAnnotation.State) {
 
   // 如果执行步骤因为安全审批被拦截处于挂起状态，校验器不做任何操作，亦不累加索引，保留现场原封不动返回！
   const isWaiting =
-    step.result?.waitingForApproval || step.result?.output?.waitingForApproval;
+    step.result?.waitingForApproval ||
+    (step.result?.output as Record<string, unknown> | undefined)
+      ?.waitingForApproval;
   if (isWaiting) {
     logger.info(
       { threadId: state.threadId },
@@ -69,9 +71,9 @@ Return ONLY YES or NO.`;
       const content =
         typeof response === "string"
           ? response
-          : (response as any).content || "";
+          : (response as { content?: string }).content || "";
       isValid = content.trim().toUpperCase() !== "NO";
-    } catch (err: any) {
+    } catch (err: unknown) {
       logger.error(
         { threadId: state.threadId, err },
         "validatorNode validation check failed, defaulting to YES",

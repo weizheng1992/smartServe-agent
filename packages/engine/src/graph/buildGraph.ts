@@ -1,5 +1,6 @@
 import { END, StateGraph } from "@langchain/langgraph";
 import { logger } from "observability";
+import type { RagDocument, SubTask, TaskPlan } from "types";
 import { getEmbeddingModel } from "../llm/callLLMWithRetry";
 import { EpisodicMemory, LongMemory, ShortMemory, TaskMemory } from "../memory";
 import { agentEventEmitter } from "./eventEmitter";
@@ -243,9 +244,9 @@ export async function runAgent(
 
   // 2. 🔍 性能与成本优化：如果是字数极少的非问候短文本（长度 <= 3），没有检索长期记忆和知识库 RAG 的业务必要，
   // 我们直接避开耗时的 Embedding 向量化与 RAG 检索调用（节省 1.5 秒以上首字响应延迟！）
-  let longFacts: any[] = [];
-  let episodicEvents: any[] = [];
-  let ragDocs: any[] = [];
+  let longFacts: string[] = [];
+  let episodicEvents: string[] = [];
+  let ragDocs: RagDocument[] = [];
 
   // SaaS 多租户隔离及高级动态政策热载入引擎
   let businessId = "ecommerce";
@@ -375,7 +376,7 @@ export async function runAgent(
   );
 
   // Load saved task state (if any) to support stateless suspension & recovery
-  let savedTaskPlan: any = undefined;
+  let savedTaskPlan: TaskPlan | undefined = undefined;
   const isResuming = inputMessage.startsWith("System:");
   if (isResuming) {
     try {
@@ -429,13 +430,13 @@ export async function runAgent(
   const config = {
     callbacks: [
       {
-        handleChainStart: (chain: any, inputs: any, id: string) => {
+        handleChainStart: (_chain: unknown, _inputs: unknown, id: string) => {
           if (!runId) runId = id;
         },
-        handleLLMStart: (llm: any, prompts: any, id: string) => {
+        handleLLMStart: (_llm: unknown, _prompts: unknown, id: string) => {
           if (!runId) runId = id;
         },
-        handleToolStart: (tool: any, input: any, id: string) => {
+        handleToolStart: (_tool: unknown, _input: unknown, id: string) => {
           if (!runId) runId = id;
         },
       },
@@ -459,18 +460,20 @@ export async function runAgent(
     const plan = result.taskPlan;
     if (plan?.subtasks) {
       const hasPending = plan.subtasks.some(
-        (st: any) => st.result?.waitingForApproval,
+        (st: SubTask) => st.result?.waitingForApproval,
       );
       const hasCancelled = plan.subtasks.some(
-        (st: any) => st.result?.cancelledByUser,
+        (st: SubTask) => st.result?.cancelledByUser,
       );
       const hasExpired = plan.subtasks.some(
-        (st: any) => st.result?.expiredByTimeout,
+        (st: SubTask) => st.result?.expiredByTimeout,
       );
       const hasRejected = plan.subtasks.some(
-        (st: any) => st.status === "failed" && st.result?.rejectedByAdmin,
+        (st: SubTask) => st.status === "failed" && st.result?.rejectedByAdmin,
       );
-      const hasFailed = plan.subtasks.some((st: any) => st.status === "failed");
+      const hasFailed = plan.subtasks.some(
+        (st: SubTask) => st.status === "failed",
+      );
 
       if (hasPending) {
         resolutionStatus = "waiting_approval";

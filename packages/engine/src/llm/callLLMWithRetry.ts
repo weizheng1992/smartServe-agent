@@ -12,7 +12,7 @@ class ResilientLLM {
     this.jobId = jobId;
   }
 
-  async invoke(input: any, options?: any) {
+  async invoke(input: unknown, options?: unknown) {
     let attempts = 0;
     const maxAttempts = 3;
     let delay = 1000; // 初始退避 1 秒
@@ -27,15 +27,24 @@ class ResilientLLM {
           });
         }
 
-        const response = await this.model.invoke(input, options);
+        const response = await this.model.invoke(
+          input as Parameters<ChatOpenAI["invoke"]>[0],
+          options as Parameters<ChatOpenAI["invoke"]>[1],
+        );
 
         // 无感拦截并累加 Token 消耗
         try {
           let tokens = 0;
-          if (response && (response as any).usage_metadata) {
-            tokens = (response as any).usage_metadata.total_tokens || 0;
-          } else if (response && (response as any).response_metadata) {
-            const meta = (response as any).response_metadata;
+          const respObj = response as unknown as Record<string, unknown>;
+          if (respObj && respObj.usage_metadata) {
+            tokens =
+              (respObj.usage_metadata as { total_tokens?: number })
+                .total_tokens || 0;
+          } else if (respObj && respObj.response_metadata) {
+            const meta = respObj.response_metadata as {
+              tokenUsage?: { totalTokens?: number };
+              usage?: { total_tokens?: number };
+            };
             if (meta.tokenUsage) {
               tokens = meta.tokenUsage.totalTokens || 0;
             } else if (meta.usage) {
@@ -50,11 +59,9 @@ class ResilientLLM {
         }
 
         return response;
-      } catch (err: any) {
-        console.warn(
-          `[LLM Resilient Attempt ${attempts} Failed]:`,
-          err.message || err,
-        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[LLM Resilient Attempt ${attempts} Failed]:`, errMsg);
         if (attempts >= maxAttempts) {
           throw err; // 达到最大尝试次数，最终向上抛出异常
         }
@@ -66,7 +73,7 @@ class ResilientLLM {
   }
 }
 
-export function getLLM(jobId?: string) {
+export function getLLM(jobId?: string): ResilientLLM {
   const llm = new ChatOpenAI({
     configuration: {
       baseURL: "http://localhost:11211/api/openai/v1",
@@ -77,7 +84,7 @@ export function getLLM(jobId?: string) {
   });
 
   // 返回鸭子类型的透明自愈代理，无缝平替原有的 ChatOpenAI，且 100% 只使用指定的物理模型
-  return new ResilientLLM(llm, jobId) as any;
+  return new ResilientLLM(llm, jobId);
 }
 
 class HighFidelityEmbeddingModel {
@@ -157,7 +164,7 @@ class HighFidelityEmbeddingModel {
   }
 }
 
-export function getEmbeddingModel() {
+export function getEmbeddingModel(): HighFidelityEmbeddingModel {
   const model = new OpenAIEmbeddings({
     configuration: {
       baseURL: "http://localhost:11211/api/openai/v1",
@@ -165,5 +172,5 @@ export function getEmbeddingModel() {
     apiKey: "dummy",
     modelName: "text-embedding-005:latest",
   });
-  return new HighFidelityEmbeddingModel(model) as any;
+  return new HighFidelityEmbeddingModel(model);
 }

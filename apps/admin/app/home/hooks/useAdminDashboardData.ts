@@ -87,8 +87,9 @@ export function useAdminDashboardData() {
       } else {
         alert(data.error || "审批执行失败");
       }
-    } catch (err: any) {
-      alert(`审批流恢复出错: ${err.message || err}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      alert(`审批流恢复出错: ${errMsg}`);
     } finally {
       setSubmittingActionId(null);
     }
@@ -115,8 +116,9 @@ export function useAdminDashboardData() {
       } else {
         alert(data.error || "人工介入回复失败");
       }
-    } catch (err: any) {
-      alert(`客服介入恢复出错: ${err.message || err}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      alert(`客服介入恢复出错: ${errMsg}`);
     } finally {
       setSubmittingActionId(null);
     }
@@ -138,8 +140,9 @@ export function useAdminDashboardData() {
       } else {
         alert(data.error || "画像操作失败");
       }
-    } catch (err: any) {
-      alert(`画像操作异常: ${err.message || err}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      alert(`画像操作异常: ${errMsg}`);
     }
   };
 

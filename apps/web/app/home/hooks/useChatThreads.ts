@@ -72,7 +72,7 @@ export function useChatThreads({
             const initialActiveId = queryActiveId || currentActiveId;
             if (
               initialActiveId &&
-              data.threads.some((t: any) => t.id === initialActiveId)
+              data.threads.some((t: ChatThread) => t.id === initialActiveId)
             ) {
               return initialActiveId;
             }
@@ -147,7 +147,10 @@ export function useChatThreads({
   };
 
   // Delete a chat session thread cascade style!
-  const handleDeleteThread = async (e: any, threadIdToDelete: string) => {
+  const handleDeleteThread = async (
+    e: React.MouseEvent,
+    threadIdToDelete: string,
+  ) => {
     e.stopPropagation(); // Prevent choosing this thread upon deleting
     if (isSubmitting) return;
 
@@ -181,9 +184,10 @@ export function useChatThreads({
       } else {
         alert(`删除失败: ${data.error || "未知数据库错误"}`);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[Delete Thread Client Error]:", err);
-      alert(`删除出错: ${err.message || "网络连接故障"}`);
+      alert(`删除出错: ${errMsg || "网络连接故障"}`);
     }
   };
 
