@@ -123,59 +123,157 @@ ${historyContext}`;
   );
 
   let resultData: any;
+  let parsedToolCall: any = null;
+  let isFastPath = false;
+
   try {
-    const response = await llm.invoke(prompt);
-    const content =
-      typeof response === "string" ? response : (response as any).content || "";
-    const text = content.trim();
+    let extractedOrderId: string | null = null;
+    const orderIdRegex = /\bORD-[A-Za-z0-9]+\b/i;
 
-    // 📝 深度调试日志：打印 LLM 返回的实际内容（是否返回了工具调用参数）
-    console.log(`[Executor Node Debug] Raw LLM Response Content:\n"${text}"`);
-    console.log(
-      "[Executor Node Debug] ==========================================\n",
-    );
+    // Try extracting from step description first
+    let match = stepToRun.description.match(orderIdRegex);
+    if (match) {
+      extractedOrderId = match[0].toUpperCase();
+    } else if (state.input) {
+      // Try from user current input
+      match = state.input.match(orderIdRegex);
+      if (match) {
+        extractedOrderId = match[0].toUpperCase();
+      }
+    }
 
-    if (text === "NONE") {
-      resultData = {
-        message: `Step execution completed without needing tools: ${stepToRun.description}`,
-      };
-    } else {
-      let parsedToolCall: any;
-      try {
-        const cleanText = text
-          .replace(/^```json\s*/, "")
-          .replace(/```$/, "")
-          .trim();
-        parsedToolCall = JSON.parse(cleanText);
-      } catch {
-        // Fallback checks
-        if (
-          stepToRun.description.toLowerCase().includes("status") &&
-          allowedTools.includes("getOrderStatus")
-        ) {
-          parsedToolCall = {
-            toolName: "getOrderStatus",
-            args: { orderId: "12345" },
-          };
-        } else if (
-          stepToRun.description.toLowerCase().includes("refund") &&
-          allowedTools.includes("processRefund")
-        ) {
-          parsedToolCall = {
-            toolName: "processRefund",
-            args: { orderId: "12345", reason: "Customer requested" },
-          };
-        } else if (
-          stepToRun.description.toLowerCase().includes("screenshot") &&
-          allowedTools.includes("takeScreenshot")
-        ) {
-          parsedToolCall = {
-            toolName: "takeScreenshot",
-            args: { url: "https://example.com" },
-          };
+    // Try from conversation history
+    if (!extractedOrderId && shortMemory && shortMemory.length > 0) {
+      for (let i = shortMemory.length - 1; i >= 0; i--) {
+        const msg = shortMemory[i];
+        if (msg && msg.content) {
+          match = msg.content.match(orderIdRegex);
+          if (match) {
+            extractedOrderId = match[0].toUpperCase();
+            break;
+          }
         }
       }
+    }
 
+    const descLower = stepToRun.description.toLowerCase();
+
+    if (
+      (descLower.includes("refund") ||
+        descLower.includes("processrefund") ||
+        descLower.includes("退款")) &&
+      allowedTools.includes("processRefund") &&
+      extractedOrderId
+    ) {
+      parsedToolCall = {
+        toolName: "processRefund",
+        args: {
+          orderId: extractedOrderId,
+          reason: "Customer requested refund via smartServe",
+        },
+      };
+      isFastPath = true;
+    } else if (
+      (descLower.includes("status") ||
+        descLower.includes("carrier") ||
+        descLower.includes("track") ||
+        descLower.includes("getorderstatus") ||
+        descLower.includes("物流") ||
+        descLower.includes("进度") ||
+        descLower.includes("发货")) &&
+      allowedTools.includes("getOrderStatus") &&
+      extractedOrderId
+    ) {
+      parsedToolCall = {
+        toolName: "getOrderStatus",
+        args: { orderId: extractedOrderId },
+      };
+      isFastPath = true;
+    } else if (
+      (descLower.includes("listuserorders") ||
+        descLower.includes("list orders") ||
+        descLower.includes("全部订单") ||
+        descLower.includes("历史订单") ||
+        descLower.includes("名下订单")) &&
+      allowedTools.includes("listUserOrders")
+    ) {
+      parsedToolCall = {
+        toolName: "listUserOrders",
+        args: {},
+      };
+      isFastPath = true;
+    }
+
+    if (isFastPath && parsedToolCall) {
+      console.log(
+        `[Executor Fast-Path] ⚡ Fast-path matched! Bypassing LLM tool selection and directly executing: ${JSON.stringify(parsedToolCall)}`,
+      );
+    }
+  } catch (fastPathErr) {
+    console.warn(
+      "[Executor Fast-Path Error] Failed to run fast-path logic:",
+      fastPathErr,
+    );
+  }
+
+  try {
+    if (!parsedToolCall) {
+      const response = await llm.invoke(prompt);
+      const content =
+        typeof response === "string"
+          ? response
+          : (response as any).content || "";
+      const text = content.trim();
+
+      // 📝 深度调试日志：打印 LLM 返回的实际内容（是否返回了工具调用参数）
+      console.log(`[Executor Node Debug] Raw LLM Response Content:\n"${text}"`);
+      console.log(
+        "[Executor Node Debug] ==========================================\n",
+      );
+
+      if (text === "NONE") {
+        resultData = {
+          message: `Step execution completed without needing tools: ${stepToRun.description}`,
+        };
+      } else {
+        try {
+          const cleanText = text
+            .replace(/^```json\s*/, "")
+            .replace(/```$/, "")
+            .trim();
+          parsedToolCall = JSON.parse(cleanText);
+        } catch {
+          // Fallback checks
+          if (
+            stepToRun.description.toLowerCase().includes("status") &&
+            allowedTools.includes("getOrderStatus")
+          ) {
+            parsedToolCall = {
+              toolName: "getOrderStatus",
+              args: { orderId: "12345" },
+            };
+          } else if (
+            stepToRun.description.toLowerCase().includes("refund") &&
+            allowedTools.includes("processRefund")
+          ) {
+            parsedToolCall = {
+              toolName: "processRefund",
+              args: { orderId: "12345", reason: "Customer requested" },
+            };
+          } else if (
+            stepToRun.description.toLowerCase().includes("screenshot") &&
+            allowedTools.includes("takeScreenshot")
+          ) {
+            parsedToolCall = {
+              toolName: "takeScreenshot",
+              args: { url: "https://example.com" },
+            };
+          }
+        }
+      }
+    }
+
+    if (parsedToolCall) {
       if (
         parsedToolCall?.toolName &&
         allowedTools.includes(parsedToolCall.toolName)
@@ -708,6 +806,10 @@ ${historyContext}`;
           };
         }
       } else {
+        resultData = { message: "No tool matched, step marked as executed" };
+      }
+    } else {
+      if (!resultData) {
         resultData = { message: "No tool matched, step marked as executed" };
       }
     }

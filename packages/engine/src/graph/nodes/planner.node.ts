@@ -142,7 +142,7 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
             .where(eq(dbPendingApprovals.id, stepApprovalId))
             .limit(1);
           latestApproval = list[0];
-        } else {
+        } else if (state.input?.startsWith("System:")) {
           const approvalsList = await drizzle
             .select()
             .from(dbPendingApprovals)

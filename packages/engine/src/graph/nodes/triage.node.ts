@@ -278,13 +278,21 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
         }
       }
 
-      // 🛡️ 异常/熔断防污染机制 (Error/Circuit-Breaker Poisoning Prevention):
-      // 如果上一轮回答是系统熔断文案或故障文案，必须跳过重复提问拦截，允许用户全新重试，避免死锁在熔断界面！
+      // 🛡️ 异常/熔断/拒绝/取消 防污染机制 (Error/Circuit-Breaker/Rejection/Cancellation Poisoning Prevention):
+      // 如果上一轮回答是系统熔断、故障文案、或者已被人工拒绝/取消/超时，必须跳过重复提问拦截，允许用户全新重试，避免死锁在旧状态中！
       const isLastResponseFailed =
         lastAssistantMsg.content.includes("熔断并终止") ||
         lastAssistantMsg.content.includes("网络出现短暂波动") ||
         lastAssistantMsg.content.includes("资金双写安全保障") ||
-        lastAssistantMsg.content.includes("接口响应延迟");
+        lastAssistantMsg.content.includes("接口响应延迟") ||
+        lastAssistantMsg.content.includes("拒绝") ||
+        lastAssistantMsg.content.includes("驳回") ||
+        lastAssistantMsg.content.includes("取消") ||
+        lastAssistantMsg.content.includes("超时") ||
+        lastAssistantMsg.content.includes("rejected") ||
+        lastAssistantMsg.content.includes("cancelled") ||
+        lastAssistantMsg.content.includes("expired") ||
+        lastAssistantMsg.content.includes("failed");
 
       if ((isExactlySame || isSemanticallySame) && !isLastResponseFailed) {
         console.log(
