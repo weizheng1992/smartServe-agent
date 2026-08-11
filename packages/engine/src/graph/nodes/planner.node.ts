@@ -229,6 +229,75 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
     }
   }
 
+  // ⚡ 极速直达通道 (Fast-Path Single-Step Plan Synthesizer):
+  // 对于单意图查询 (如纯 order_status 或纯 refund) 且无驳回上下文时，
+  // 尝试直接提取 Order ID 进行零 LLM 开销的物理单步计划组装，大幅削减 1.5 ~ 2 秒的首字生成延迟！
+  if (!rejectionContext && intents && intents.length === 1) {
+    const singleIntent = intents[0].intent;
+    let extractedOrderId: string | null = null;
+    const orderIdRegex = /\bORD-[A-Za-z0-9]+\b/i;
+
+    let match = input ? input.match(orderIdRegex) : null;
+    if (match) {
+      extractedOrderId = match[0].toUpperCase();
+    } else if (shortMemory && shortMemory.length > 0) {
+      for (let i = shortMemory.length - 1; i >= 0; i--) {
+        const msg = shortMemory[i];
+        if (msg && msg.content) {
+          match = msg.content.match(orderIdRegex);
+          if (match) {
+            extractedOrderId = match[0].toUpperCase();
+            break;
+          }
+        }
+      }
+    }
+
+    if (extractedOrderId) {
+      let fastPlan: any = null;
+      if (singleIntent === "order_status") {
+        fastPlan = {
+          goal: `Query status for order ${extractedOrderId}`,
+          subtasks: [
+            {
+              id: "step_fast_status",
+              description: `Call getOrderStatus for order ${extractedOrderId}`,
+              status: "pending" as const,
+            },
+          ],
+          currentStepIndex: 0,
+        };
+      } else if (singleIntent === "refund") {
+        fastPlan = {
+          goal: `Process refund for order ${extractedOrderId}`,
+          subtasks: [
+            {
+              id: "step_fast_refund",
+              description: `Call processRefund for order ${extractedOrderId}`,
+              status: "pending" as const,
+            },
+          ],
+          currentStepIndex: 0,
+        };
+      }
+
+      if (fastPlan) {
+        console.log(
+          `[Planner Fast-Path] ⚡ Fast-path single-step plan synthesized for order [${extractedOrderId}]! Bypassing LLM planning call.`,
+        );
+        if (state.jobId) {
+          agentEventEmitter.emit(`${state.jobId}:status`, {
+            status: "executing",
+            node: "planner",
+            message: `⚡ 极速规划直达：成功秒级关联订单号 [${extractedOrderId}]，绕过大模型规划消耗，精准推入执行链！`,
+            plan: fastPlan,
+          });
+        }
+        return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
+      }
+    }
+  }
+
   const llm = getLLM(state.jobId);
   const prompt = `System Instruction Context: "${systemPrompt}"${tenantContext}
 Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}${historyContext}
