@@ -1,16 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { plannerNode } from "../src/graph/nodes/planner.node";
+import type { AgentStateAnnotation, SubTask } from "../src/graph/state";
 
 describe("Planner Node Unit Tests", () => {
   test("General Query Fast-Path bypasses LLM and returns directPlan", async () => {
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId: "test_thread_general",
       intents: [{ intent: "general_query", confidence: 1.0 }],
       input: "你好",
       globalTransitionsCount: 0,
     };
 
-    const result = await plannerNode(state);
+    const result = await plannerNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
@@ -21,14 +24,16 @@ describe("Planner Node Unit Tests", () => {
   });
 
   test("Human Escalation Fast-Path bypasses LLM and returns fastPlan", async () => {
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId: "test_thread_escalation",
       intents: [{ intent: "human_escalation", confidence: 1.0 }],
       input: "帮我转接人工客服处理",
       globalTransitionsCount: 0,
     };
 
-    const result = await plannerNode(state);
+    const result = await plannerNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
@@ -41,14 +46,16 @@ describe("Planner Node Unit Tests", () => {
   });
 
   test("Order Status Fast-Path synthesizes single-step plan when Order ID is present", async () => {
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId: "test_thread_order_fast",
       intents: [{ intent: "order_status", confidence: 1.0 }],
       input: "查询订单 ORD-88888 物流信息",
       globalTransitionsCount: 0,
     };
 
-    const result = await plannerNode(state);
+    const result = await plannerNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
@@ -60,7 +67,7 @@ describe("Planner Node Unit Tests", () => {
   });
 
   test("Refund Fast-Path synthesizes single-step refund plan when Order ID is in shortMemory", async () => {
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId: "test_thread_refund_memory",
       intents: [{ intent: "refund", confidence: 1.0 }],
       input: "这个订单帮我退款",
@@ -71,7 +78,9 @@ describe("Planner Node Unit Tests", () => {
       globalTransitionsCount: 0,
     };
 
-    const result = await plannerNode(state);
+    const result = await plannerNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
@@ -82,20 +91,22 @@ describe("Planner Node Unit Tests", () => {
   });
 
   test("Inquiry about eligible return orders plans listUserOrders instead of processRefund", async () => {
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId: "test_thread_eligible_returns",
       intents: [{ intent: "order_status", confidence: 1.0 }],
       input: "我可以退货的订单有哪些",
       globalTransitionsCount: 0,
     };
 
-    const result = await plannerNode(state);
+    const result = await plannerNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
     expect(result.taskPlan.subtasks.length).toBeGreaterThan(0);
     // Ensure no step tries to execute processRefund without a specific order
-    const hasRefundStep = result.taskPlan.subtasks.some((st: any) =>
+    const hasRefundStep = result.taskPlan.subtasks.some((st: SubTask) =>
       st.description.includes("processRefund"),
     );
     expect(hasRefundStep).toBe(false);

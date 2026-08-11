@@ -1,7 +1,14 @@
 import { logger } from "observability";
 import { getLLM } from "../../llm/callLLMWithRetry";
 import { agentEventEmitter } from "../eventEmitter";
-import { type AgentStateAnnotation, buildHistoryContext } from "../state";
+import {
+  type AgentStateAnnotation,
+  buildHistoryContext,
+  type PendingApprovalRecord,
+  type RagDocument,
+  type SubTask,
+  type TaskPlan,
+} from "../state";
 import { extractOrderId } from "./utils";
 
 export async function plannerNode(state: typeof AgentStateAnnotation.State) {
@@ -126,7 +133,7 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
   let rejectionContext = "";
   if (priorPlan?.subtasks) {
     // 🛡️ 如果检测到管理员最新的审批结果是 'rejected'，我们动态将当前步骤标记为 failed 并打上 rejectedByAdmin 标记，以便进行认知重规划
-    let latestApproval: any = null;
+    let latestApproval: PendingApprovalRecord | null = null;
     const currentStepIndex = priorPlan.currentStepIndex;
     const step = priorPlan.subtasks[currentStepIndex];
     const stepApprovalId = step?.result?.approvalId;
@@ -196,8 +203,8 @@ Please replan and output an alternative approach that respects this rejection. D
   let ragContext = "";
   if (state.ragDocuments && state.ragDocuments.length > 0) {
     const formattedDocs = state.ragDocuments
-      .map((doc: any, idx: number) => {
-        return `[Store Policy Rule ${idx + 1}] (Context Summary: ${doc.contextualSummary}): "${doc.chunkText}"`;
+      .map((doc: RagDocument, idx: number) => {
+        return `[Store Policy Rule ${idx + 1}] (Context Summary: ${doc.contextualSummary || "N/A"}): "${doc.chunkText}"`;
       })
       .join("\n");
     ragContext = `\n\n[RELEVANT BUSINESS POLICIES & KNOWLEDGE BASE]:\n${formattedDocs}\nStrictly adhere to these store policies while making the plan. If a policy specifies return timelines, tag conditions, or shipping methods, make sure any proposed subtasks or user communication steps strictly follow these rules.`;
@@ -268,7 +275,7 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
     const extractedOrderId = extractOrderId(input, null, shortMemory);
 
     if (extractedOrderId) {
-      let fastPlan: any = null;
+      let fastPlan: TaskPlan | null = null;
       if (singleIntent === "order_status") {
         fastPlan = {
           goal: `Query status for order ${extractedOrderId}`,
@@ -331,8 +338,10 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
   try {
     const response = await llm.invoke(prompt);
     const content =
-      typeof response === "string" ? response : (response as any).content || "";
-    let plan: any;
+      typeof response === "string"
+        ? response
+        : (response as { content?: string }).content || "";
+    let plan: { goal?: string; subtasks?: SubTask[] };
     try {
       const cleanResponse = content
         .trim()
@@ -347,18 +356,17 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
         subtasks: intents.map((it, idx) => ({
           id: `step_${idx}`,
           description: `Handle ${it.intent} process`,
-          status: "pending",
+          status: "pending" as const,
         })),
-        currentStepIndex: 0,
       };
     }
 
-    const taskPlan = {
+    const taskPlan: TaskPlan = {
       goal: plan.goal || "Handle customer request",
-      subtasks: (plan.subtasks || []).map((sub: any) => ({
+      subtasks: (plan.subtasks || []).map((sub: SubTask) => ({
         id: sub.id,
         description: sub.description,
-        status: "pending",
+        status: "pending" as const,
       })),
       currentStepIndex: 0,
     };
@@ -378,7 +386,7 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
     }
 
     return { taskPlan, shortMemory, globalTransitionsCount: 1 };
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error(
       { threadId: state.threadId, err },
       "plannerNode failed, falling back to default single-step plan",

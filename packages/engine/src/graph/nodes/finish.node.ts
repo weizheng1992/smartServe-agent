@@ -1,6 +1,11 @@
 import { logger } from "observability";
 import { getLLM } from "../../llm/callLLMWithRetry";
-import { type AgentStateAnnotation, buildHistoryContext } from "../state";
+import {
+  type AgentStateAnnotation,
+  buildHistoryContext,
+  type RagDocument,
+  type SubTask,
+} from "../state";
 
 export async function finishNode(state: typeof AgentStateAnnotation.State) {
   logger.info(
@@ -36,7 +41,7 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   // 🛡️ [人工转接 / 人工审批挂起直达文案]:
   // 如果子步骤包含 waitingForApproval 且属于人工转接申请，返回高保真得体文案
   const approvalStep = plan.subtasks?.find(
-    (st: any) => st.result?.waitingForApproval,
+    (st: SubTask) => st.result?.waitingForApproval,
   );
   if (approvalStep) {
     const isHumanEscalation =
@@ -60,8 +65,8 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   let ragContext = "";
   if (state.ragDocuments && state.ragDocuments.length > 0) {
     const formattedDocs = state.ragDocuments
-      .map((doc: any, idx: number) => {
-        return `[Store Policy Rule ${idx + 1}] (Context Summary: ${doc.contextualSummary}): "${doc.chunkText}"`;
+      .map((doc: RagDocument, idx: number) => {
+        return `[Store Policy Rule ${idx + 1}] (Context Summary: ${doc.contextualSummary || "N/A"}): "${doc.chunkText}"`;
       })
       .join("\n");
     ragContext = `\n\n[RELEVANT STORE POLICIES & KNOWLEDGE BASE]:\n${formattedDocs}\nIf relevant, explain these policies politely to the customer in Chinese to justify why certain actions (like returns or shipping constraints) can or cannot be taken, and strictly ground your explanation on these rules.`;
@@ -109,7 +114,9 @@ CRITICAL RULES (最高行为准则 - 严禁幻觉与跨租户泄露):
   try {
     const response = await llm.invoke(prompt);
     const content =
-      typeof response === "string" ? response : (response as any).content || "";
+      typeof response === "string"
+        ? response
+        : (response as { content?: string }).content || "";
     logger.info(
       { threadId: state.threadId },
       "finishNode response formulated successfully",
@@ -139,13 +146,13 @@ CRITICAL RULES (最高行为准则 - 严禁幻觉与跨租户泄露):
     }
 
     return { output: content.trim(), shortMemory };
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error(
       { threadId: state.threadId, err },
       "finishNode failed, using fallback summary",
     );
     return {
-      output: `Your request has been processed. Status details: ${JSON.stringify((plan.subtasks || []).map((s: any) => s.result))}`,
+      output: `Your request has been processed. Status details: ${JSON.stringify((plan.subtasks || []).map((s: SubTask) => s.result))}`,
       shortMemory,
     };
   }

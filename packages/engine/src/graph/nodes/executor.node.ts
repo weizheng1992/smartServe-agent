@@ -3,7 +3,11 @@ import { logger } from "observability";
 import { getTool } from "tools";
 import { getLLM } from "../../llm/callLLMWithRetry";
 import { agentEventEmitter } from "../eventEmitter";
-import { type AgentStateAnnotation, buildHistoryContext } from "../state";
+import {
+  type AgentStateAnnotation,
+  buildHistoryContext,
+  type PendingApprovalRecord,
+} from "../state";
 import { extractOrderId } from "./utils";
 
 export async function executorNode(state: typeof AgentStateAnnotation.State) {
@@ -123,8 +127,11 @@ ${historyContext}`;
     "[Executor Node Debug] ------------------------------------------",
   );
 
-  let resultData: any;
-  let parsedToolCall: any = null;
+  let resultData: unknown;
+  let parsedToolCall: {
+    toolName: string;
+    args: Record<string, unknown>;
+  } | null = null;
   let isFastPath = false;
 
   try {
@@ -481,8 +488,11 @@ ${historyContext}`;
                   // Return to bypass processRefund check and continue executing
                   throw new Error("AUTO_BYPASS_REFUND");
                 }
-              } catch (bypassErr: any) {
-                if (bypassErr?.message !== "AUTO_BYPASS_REFUND") {
+              } catch (bypassErr: unknown) {
+                if (
+                  (bypassErr as { message?: string })?.message !==
+                  "AUTO_BYPASS_REFUND"
+                ) {
                   throw bypassErr;
                 }
               }
@@ -497,7 +507,7 @@ ${historyContext}`;
               const { eq, desc } = require("drizzle-orm");
               const drizzle = getDrizzle()!;
 
-              let latestApproval: any = null;
+              let latestApproval: PendingApprovalRecord | null = null;
               const existingApprovalId = stepToRun.result?.approvalId;
 
               if (existingApprovalId) {
@@ -519,26 +529,29 @@ ${historyContext}`;
                   .orderBy(desc(pendingApprovals.createdAt));
 
                 // Find a matching approval
-                latestApproval = approvalsList.find((app: any) => {
-                  const actionPayload = app.actionPayload || {};
-                  const payloadArgs = actionPayload.args || {};
-                  const currentArgs = parsedToolCall.args || {};
+                latestApproval = approvalsList.find(
+                  (app: PendingApprovalRecord) => {
+                    const actionPayload = app.actionPayload || {};
+                    const payloadArgs = actionPayload.args || {};
+                    const currentArgs = parsedToolCall.args || {};
 
-                  const isSameAction =
-                    app.actionType === parsedToolCall.toolName;
-                  if (!isSameAction) return false;
+                    const isSameAction =
+                      app.actionType === parsedToolCall.toolName;
+                    if (!isSameAction) return false;
 
-                  if (currentArgs.orderId && payloadArgs.orderId) {
+                    if (currentArgs.orderId && payloadArgs.orderId) {
+                      return (
+                        String(currentArgs.orderId).trim().toLowerCase() ===
+                        String(payloadArgs.orderId).trim().toLowerCase()
+                      );
+                    }
+
                     return (
-                      String(currentArgs.orderId).trim().toLowerCase() ===
-                      String(payloadArgs.orderId).trim().toLowerCase()
+                      JSON.stringify(payloadArgs) ===
+                      JSON.stringify(currentArgs)
                     );
-                  }
-
-                  return (
-                    JSON.stringify(payloadArgs) === JSON.stringify(currentArgs)
-                  );
-                });
+                  },
+                );
               }
 
               // ⏰ 检查处于等待中的审批工单是否已经超过截止时间 (Deadline Check)
@@ -791,7 +804,7 @@ ${historyContext}`;
                   .from(pendingApprovals)
                   .where(eq(pendingApprovals.threadId, state.threadId))
                   .orderBy(desc(pendingApprovals.createdAt));
-                matchedApp = list.find((app: any) => {
+                matchedApp = list.find((app: PendingApprovalRecord) => {
                   const actionPayload = app.actionPayload || {};
                   const payloadArgs = actionPayload.args || {};
                   const currentArgs = parsedToolCall.args || {};
@@ -870,12 +883,12 @@ ${historyContext}`;
         resultData = { message: "No tool matched, step marked as executed" };
       }
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error(
       { threadId: state.threadId, err },
       "executorNode tool resolution/execution failed",
     );
-    resultData = { error: err.message || "Execution error" };
+    resultData = { error: (err as Error).message || "Execution error" };
   }
 
   // Update subtask to completed or failed

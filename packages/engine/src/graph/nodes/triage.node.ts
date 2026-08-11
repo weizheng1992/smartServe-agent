@@ -2,7 +2,12 @@ import { logger } from "observability";
 import { getEmbeddingModel, getLLM } from "../../llm/callLLMWithRetry";
 import { ShortMemory } from "../../memory/shortMemory";
 import { agentEventEmitter } from "../eventEmitter";
-import type { AgentStateAnnotation } from "../state";
+import {
+  type AgentStateAnnotation,
+  type ChatMessage,
+  type IntentResult,
+  type SubTask,
+} from "../state";
 
 interface CachedQuery {
   query: string;
@@ -208,7 +213,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
       `[Triage System-Resume] 🔄 Resuming suspended flow with input: "${input}"`,
     );
     const hasRefundTask = state.taskPlan?.subtasks?.some(
-      (st: any) =>
+      (st: SubTask) =>
         st.description.toLowerCase().includes("refund") ||
         st.result?.approvalId,
     );
@@ -414,7 +419,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
       state.businessConfig?.businessId || "ecommerce"
     ).toLowerCase();
     const cachedItems = globalSemanticCache.get(tenantId) || [];
-    let bestCacheMatch: any = null;
+    let bestCacheMatch: CachedQuery | null = null;
     let maxCacheSimilarity = 0;
 
     for (const cached of cachedItems) {
@@ -544,8 +549,10 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
   try {
     const response = await llm.invoke(prompt);
     const content =
-      typeof response === "string" ? response : (response as any).content || "";
-    let parsed: any[] = [];
+      typeof response === "string"
+        ? response
+        : (response as { content?: string }).content || "";
+    let parsed: IntentResult[] = [];
     try {
       const cleanResponse = content
         .trim()
@@ -588,7 +595,7 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
       globalTransitionsCount: -1,
       toolErrorsCount: -1,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error(
       { threadId, err },
       "triageNode Step 3 failed, falling back to general_query",
@@ -608,26 +615,23 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
 async function logIntentToDB(
   threadId: string,
   inputText: string,
-  intents: any[],
+  intents: IntentResult[],
   method: string,
   confidence: number,
 ): Promise<void> {
   try {
-    const { db } = require("db");
-    await db.execute(`
-      INSERT INTO intent_logs (thread_id, input_text, predicted_intents, method, confidence, created_at)
-      VALUES (
-        '${threadId}',
-        '${inputText.replace(/'/g, "''")}',
-        '${JSON.stringify(intents)}',
-        '${method}',
-        ${confidence},
-        '${new Date().toISOString()}'
-      )
-    `);
-    console.log(
-      `[Triage Logging] Succesfully recorded intent log -> ${method} (confidence: ${confidence.toFixed(3)})`,
-    );
+    const { getDrizzle } = require("db");
+    const drizzle = getDrizzle();
+    if (drizzle) {
+      const { sql } = require("drizzle-orm");
+      await drizzle.execute(
+        sql`INSERT INTO intent_logs (thread_id, input_text, predicted_intents, method, confidence, created_at)
+            VALUES (${threadId}, ${inputText}, ${JSON.stringify(intents)}, ${method}, ${confidence}, ${new Date().toISOString()})`,
+      );
+      console.log(
+        `[Triage Logging] Succesfully recorded intent log -> ${method} (confidence: ${confidence.toFixed(3)})`,
+      );
+    }
   } catch (err) {
     console.warn("[Triage Logging Exception] Bypassed log persistence:", err);
   }
@@ -635,10 +639,10 @@ async function logIntentToDB(
 
 // 快速白名单/规则 Bypass 辅助响应函数
 async function handleImmediateBypass(
-  state: any,
+  state: typeof AgentStateAnnotation.State,
   routeKey: string,
   replyText: string,
-  intents: any[],
+  intents: IntentResult[],
   method: string,
   confidence: number,
 ) {

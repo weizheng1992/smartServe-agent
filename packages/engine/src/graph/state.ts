@@ -1,19 +1,75 @@
 import { Annotation } from "@langchain/langgraph";
 
+export interface SubTaskResult {
+  waitingForApproval?: boolean;
+  approvalId?: string;
+  actionType?: string;
+  cancelledByUser?: boolean;
+  expiredByTimeout?: boolean;
+  rejectedByAdmin?: boolean;
+  rejectionReason?: string;
+  output?: unknown;
+  [key: string]: unknown;
+}
+
+export interface SubTask {
+  id: string;
+  description: string;
+  status: "pending" | "executing" | "completed" | "failed";
+  result?: SubTaskResult;
+}
+
 export interface TaskPlan {
   goal: string;
-  subtasks: {
-    id: string;
-    description: string;
-    status: "pending" | "executing" | "completed" | "failed";
-    result?: any;
-  }[];
+  subtasks: SubTask[];
   currentStepIndex: number;
 }
 
 export interface IntentResult {
   intent: string;
   confidence: number;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant" | "system" | string;
+  content?: string | null;
+  [key: string]: unknown;
+}
+
+export interface RagDocument {
+  chunkText: string;
+  contextualSummary?: string;
+  score?: number;
+  [key: string]: unknown;
+}
+
+export interface BusinessConfig {
+  businessId: string;
+  systemPrompt?: string;
+  intents?: Record<string, { description: string }>;
+  tools?: string[];
+  executionMode?: string;
+  confidenceThresholds?: { high: number; mid: number };
+  refundAutoApprovalLimit?: number;
+  [key: string]: unknown;
+}
+
+export interface PendingApprovalRecord {
+  id: string;
+  threadId: string;
+  status:
+    "pending" | "approved" | "rejected" | "cancelled" | "expired" | string;
+  actionType?: string;
+  actionPayload?: {
+    orderId?: string;
+    refundAmount?: number;
+    rejectionReason?: string;
+    [key: string]: unknown;
+  } | null;
+  reason?: string;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+  [key: string]: unknown;
 }
 
 export const AgentStateAnnotation = Annotation.Root({
@@ -31,7 +87,7 @@ export const AgentStateAnnotation = Annotation.Root({
     reducer: (x, y) => y,
     default: () => [],
   }),
-  history: Annotation<any[]>({
+  history: Annotation<ChatMessage[]>({
     reducer: (x, y) => x.concat(y),
     default: () => [],
   }),
@@ -53,23 +109,23 @@ export const AgentStateAnnotation = Annotation.Root({
   }),
 
   // Memories loaded at start of loop
-  shortMemory: Annotation<any[]>({
+  shortMemory: Annotation<ChatMessage[]>({
     reducer: (x, y) => y,
     default: () => [],
   }),
-  longMemoryFacts: Annotation<any[]>({
+  longMemoryFacts: Annotation<unknown[]>({
     reducer: (x, y) => y,
     default: () => [],
   }),
-  episodicEvents: Annotation<any[]>({
+  episodicEvents: Annotation<unknown[]>({
     reducer: (x, y) => y,
     default: () => [],
   }),
-  ragDocuments: Annotation<any[]>({
+  ragDocuments: Annotation<RagDocument[]>({
     reducer: (x, y) => y,
     default: () => [],
   }),
-  businessConfig: Annotation<any>({
+  businessConfig: Annotation<BusinessConfig>({
     reducer: (x, y) => ({ ...x, ...y }),
     default: () => ({
       businessId: "ecommerce",
@@ -83,7 +139,7 @@ export const AgentStateAnnotation = Annotation.Root({
       tools: ["getOrderStatus", "processRefund", "listUserOrders"],
       executionMode: "plan-and-execute",
       confidenceThresholds: { high: 0.85, mid: 0.6 },
-      refundAutoApprovalLimit: 100, // 默认超过 $100 的退款必须人工审核，低于 $100 的自动放行
+      refundAutoApprovalLimit: 100, // 默认超过 $100 的退还必须人工审核，低于 $100 的自动放行
     }),
   }),
 
@@ -115,11 +171,11 @@ export const AgentStateAnnotation = Annotation.Root({
  * 完美过滤任何因工具调用 (无 content)、数据传输异常 (null/undefined) 或底层 Mock 降级产生的不合规历史记录，
  * 彻底铲除 "Agent: undefined" / "Agent: null" 等隐形 Bug，确保大模型上下文 Prompt 绝对清爽。
  */
-export function buildHistoryContext(shortMemory: any[]): string {
+export function buildHistoryContext(shortMemory: ChatMessage[]): string {
   if (!shortMemory || shortMemory.length === 0) return "";
 
   return shortMemory
-    .map((m: any) => {
+    .map((m: ChatMessage) => {
       if (!m) return "";
       const role =
         m.role === "user"

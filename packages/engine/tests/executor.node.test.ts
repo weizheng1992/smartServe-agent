@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { executorNode } from "../src/graph/nodes/executor.node";
+import type { AgentStateAnnotation } from "../src/graph/state";
 
 describe("Executor Node Unit Tests", () => {
   test("returns globalTransitionsCount 1 when no subtask exists at currentIndex", async () => {
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId: "test_thread_empty_subtask",
       taskPlan: {
         goal: "Test empty subtask",
@@ -13,7 +14,9 @@ describe("Executor Node Unit Tests", () => {
       globalTransitionsCount: 0,
     };
 
-    const result = await executorNode(state);
+    const result = await executorNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.globalTransitionsCount).toBe(1);
@@ -21,7 +24,7 @@ describe("Executor Node Unit Tests", () => {
 
   test("Fast-Path human escalation creates pending approval ticket and suspends", async () => {
     const threadId = `test_thread_exec_escalate_${Date.now()}`;
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId,
       userId: "test_user_exec",
       input: "我要找人工客服",
@@ -40,7 +43,9 @@ describe("Executor Node Unit Tests", () => {
       globalTransitionsCount: 0,
     };
 
-    const result = await executorNode(state);
+    const result = await executorNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
@@ -67,7 +72,7 @@ describe("Executor Node Unit Tests", () => {
 
   test("Fast-Path getOrderStatus executes physical tool without calling LLM", async () => {
     const threadId = `test_thread_exec_status_${Date.now()}`;
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId,
       userId: "test_user_exec",
       input: "查询 ORD-98712 物流进度",
@@ -85,7 +90,9 @@ describe("Executor Node Unit Tests", () => {
       globalTransitionsCount: 0,
     };
 
-    const result = await executorNode(state);
+    const result = await executorNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
@@ -100,7 +107,7 @@ describe("Executor Node Unit Tests", () => {
 
   test("Fast-Path listUserOrders executes tool directly for order listing", async () => {
     const threadId = `test_thread_exec_list_${Date.now()}`;
-    const state: any = {
+    const state: Partial<typeof AgentStateAnnotation.State> = {
       threadId,
       userId: "test_user_exec",
       input: "查下我名下的全部订单",
@@ -118,7 +125,9 @@ describe("Executor Node Unit Tests", () => {
       globalTransitionsCount: 0,
     };
 
-    const result = await executorNode(state);
+    const result = await executorNode(
+      state as typeof AgentStateAnnotation.State,
+    );
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
