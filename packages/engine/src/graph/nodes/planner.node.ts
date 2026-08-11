@@ -2,6 +2,7 @@ import { logger } from "observability";
 import { getLLM } from "../../llm/callLLMWithRetry";
 import { agentEventEmitter } from "../eventEmitter";
 import { type AgentStateAnnotation, buildHistoryContext } from "../state";
+import { extractOrderId } from "./utils";
 
 export async function plannerNode(state: typeof AgentStateAnnotation.State) {
   logger.info(
@@ -230,28 +231,41 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
   }
 
   // ⚡ 极速直达通道 (Fast-Path Single-Step Plan Synthesizer):
-  // 对于单意图查询 (如纯 order_status 或纯 refund) 且无驳回上下文时，
-  // 尝试直接提取 Order ID 进行零 LLM 开销的物理单步计划组装，大幅削减 1.5 ~ 2 秒的首字生成延迟！
+  // 对于单意图查询 (如纯 order_status、纯 refund 或转人工请求) 且无驳回上下文时，
+  // 进行零 LLM 开销的物理单步计划组装，大幅削减 1.5 ~ 2 秒的首字生成延迟！
   if (!rejectionContext && intents && intents.length === 1) {
     const singleIntent = intents[0].intent;
-    let extractedOrderId: string | null = null;
-    const orderIdRegex = /\bORD-[A-Za-z0-9]+\b/i;
 
-    let match = input ? input.match(orderIdRegex) : null;
-    if (match) {
-      extractedOrderId = match[0].toUpperCase();
-    } else if (shortMemory && shortMemory.length > 0) {
-      for (let i = shortMemory.length - 1; i >= 0; i--) {
-        const msg = shortMemory[i];
-        if (msg && msg.content) {
-          match = msg.content.match(orderIdRegex);
-          if (match) {
-            extractedOrderId = match[0].toUpperCase();
-            break;
-          }
-        }
+    if (singleIntent === "human_escalation") {
+      const fastPlan = {
+        goal: "Escalate conversation to human support operator",
+        subtasks: [
+          {
+            id: "step_fast_human_escalation",
+            description:
+              "Trigger human escalation and create pending approval ticket for customer support operator",
+            status: "pending" as const,
+          },
+        ],
+        currentStepIndex: 0,
+      };
+
+      console.log(
+        "[Planner Fast-Path] ⚡ Fast-path human escalation plan synthesized! Bypassing LLM planning call.",
+      );
+      if (state.jobId) {
+        agentEventEmitter.emit(`${state.jobId}:status`, {
+          status: "executing",
+          node: "planner",
+          message:
+            "⚡ 极速介入直达：检测到人工客服与熔断诉求，已物理生成人工转接步骤并推入执行链！",
+          plan: fastPlan,
+        });
       }
+      return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
     }
+
+    const extractedOrderId = extractOrderId(input, null, shortMemory);
 
     if (extractedOrderId) {
       let fastPlan: any = null;

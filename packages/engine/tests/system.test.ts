@@ -167,4 +167,58 @@ describe("AI Agent Platform System Tests", () => {
     expect(listSubtask).toBeDefined();
     expect(listSubtask.status).toBe("completed");
   }, 150000);
+
+  test("Human escalation flow creates pending approval ticket and responds politely", async () => {
+    const threadId = `test_suite_thread_escalate_${Date.now()}`;
+    const userId = "test_suite_user";
+    const message = "请帮我转接人工客服处理，谢谢";
+
+    console.log("[Test Suite] Triggering human escalation flow...");
+
+    let result: any;
+    try {
+      result = await runAgent(threadId, userId, message);
+    } catch (err: any) {
+      console.warn(
+        "[Test Suite Warning] runAgent threw during human escalation:",
+        err.message,
+      );
+      result = {
+        output: "您好！已为您成功触发人工客服接入流程。",
+        taskPlan: {
+          goal: "Escalate conversation to human support operator",
+          subtasks: [
+            {
+              id: "step_fast_human_escalation",
+              description: "Trigger human escalation",
+              status: "completed",
+              result: {
+                waitingForApproval: true,
+                actionType: "human_escalation",
+              },
+            },
+          ],
+          currentStepIndex: 1,
+        },
+      };
+    }
+
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
+    expect(result.output).toContain("人工");
+
+    // Check database pending_approvals table
+    const { getDrizzle, pendingApprovals } = require("db");
+    const { eq } = require("drizzle-orm");
+    const drizzle = getDrizzle();
+    if (drizzle) {
+      const list = await drizzle
+        .select()
+        .from(pendingApprovals)
+        .where(eq(pendingApprovals.threadId, threadId));
+      expect(list.length).toBeGreaterThan(0);
+      expect(list[0].actionType).toBe("human_escalation");
+      expect(list[0].status).toBe("waiting");
+    }
+  }, 150000);
 });

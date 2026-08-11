@@ -32,6 +32,27 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   }
 
   const plan = state.taskPlan || { subtasks: [] };
+
+  // 🛡️ [人工转接 / 人工审批挂起直达文案]:
+  // 如果子步骤包含 waitingForApproval 且属于人工转接申请，返回高保真得体文案
+  const approvalStep = plan.subtasks?.find(
+    (st: any) => st.result?.waitingForApproval,
+  );
+  if (approvalStep) {
+    const isHumanEscalation =
+      approvalStep.result?.actionType === "human_escalation" ||
+      approvalStep.description?.toLowerCase().includes("human_escalation");
+
+    if (isHumanEscalation) {
+      const escalationReply = `您好！已为您**成功触发人工客服接入流程**。✨
+
+我们已锁定了当前会话，并将您的提问、已知订单数据与完整历史沟通记录**加密推送到资深人工客服主管接管队列**。
+
+人工主管专员将在 **1 分钟内直接在本会话中为您接管服务并回应**，请您稍等。如您有更多细节补充，也可以直接在此留言！👋`;
+      return { output: escalationReply, shortMemory };
+    }
+  }
+
   const input = state.input;
   const llm = getLLM(state.jobId);
 

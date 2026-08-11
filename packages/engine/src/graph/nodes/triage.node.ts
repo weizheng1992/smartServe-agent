@@ -239,6 +239,25 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
     );
   }
 
+  // 人工客服/熔断申请直达规则拦截
+  const isHumanEscalationRequested =
+    /转人工|找客服|联系人工|人工客服|找人工|转接人工|转人工客服|human agent|talk to human|speak to agent|customer service representative/i.test(
+      input,
+    );
+
+  if (isHumanEscalationRequested) {
+    console.log(
+      `[Triage Escalation Rule] 🚨 User explicitly requested human escalation! Query: "${input}"`,
+    );
+    const intents = [{ intent: "human_escalation", confidence: 1.0 }];
+    return {
+      intents,
+      shortMemory: historyMsgs,
+      globalTransitionsCount: -1,
+      toolErrorsCount: -1,
+    };
+  }
+
   // =========================================================================
   // 🛡️ 重复提问/网络抖动拦截器 (First Shield: Semantic Duplicate Bypass)
   // =========================================================================

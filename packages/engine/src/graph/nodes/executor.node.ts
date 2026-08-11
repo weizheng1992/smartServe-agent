@@ -4,6 +4,7 @@ import { getTool } from "tools";
 import { getLLM } from "../../llm/callLLMWithRetry";
 import { agentEventEmitter } from "../eventEmitter";
 import { type AgentStateAnnotation, buildHistoryContext } from "../state";
+import { extractOrderId } from "./utils";
 
 export async function executorNode(state: typeof AgentStateAnnotation.State) {
   const currentPlan = state.taskPlan;
@@ -127,36 +128,92 @@ ${historyContext}`;
   let isFastPath = false;
 
   try {
-    let extractedOrderId: string | null = null;
-    const orderIdRegex = /\bORD-[A-Za-z0-9]+\b/i;
-
-    // Try extracting from step description first
-    let match = stepToRun.description.match(orderIdRegex);
-    if (match) {
-      extractedOrderId = match[0].toUpperCase();
-    } else if (state.input) {
-      // Try from user current input
-      match = state.input.match(orderIdRegex);
-      if (match) {
-        extractedOrderId = match[0].toUpperCase();
-      }
-    }
-
-    // Try from conversation history
-    if (!extractedOrderId && shortMemory && shortMemory.length > 0) {
-      for (let i = shortMemory.length - 1; i >= 0; i--) {
-        const msg = shortMemory[i];
-        if (msg && msg.content) {
-          match = msg.content.match(orderIdRegex);
-          if (match) {
-            extractedOrderId = match[0].toUpperCase();
-            break;
-          }
-        }
-      }
-    }
-
     const descLower = stepToRun.description.toLowerCase();
+    const stepId = (stepToRun.id || "").toLowerCase();
+
+    if (
+      stepId.includes("human_escalation") ||
+      descLower.includes("escalat") ||
+      descLower.includes("human") ||
+      descLower.includes("转人工") ||
+      descLower.includes("人工客服")
+    ) {
+      console.log("[Executor Node] 🚨 Handling human escalation step...");
+      const {
+        pendingApprovals: dbPendingApprovals,
+        getDrizzle,
+        db: physicalDb,
+      } = require("db");
+      const drizzle = getDrizzle()!;
+
+      try {
+        await physicalDb.createThread(
+          state.threadId,
+          state.userId || "83d67d4e-104c-4325-8aa7-10d4389fc725",
+        );
+      } catch (tErr) {
+        console.warn("[Executor Node] Thread ensure warning:", tErr);
+      }
+
+      const approvalId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).substring(2, 15);
+      const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await drizzle.insert(dbPendingApprovals).values({
+        id: approvalId,
+        threadId: state.threadId,
+        actionType: "human_escalation",
+        actionPayload: {
+          reason: "User requested human customer support intervention",
+          userInput: state.input,
+          triggerSource: "user_request",
+        },
+        status: "waiting",
+        deadline,
+      });
+
+      const updatedStep = {
+        ...stepToRun,
+        status: "completed" as const,
+        result: {
+          waitingForApproval: true,
+          approvalId,
+          actionType: "human_escalation",
+          message: "已成功创建人工客服接管工单，请等待客服主管接管回应。",
+        },
+      };
+
+      const updatedSubtasks = [...currentPlan.subtasks];
+      updatedSubtasks[currentIndex] = updatedStep;
+
+      const nextPlan = {
+        ...currentPlan,
+        subtasks: updatedSubtasks,
+        currentStepIndex: currentIndex + 1,
+      };
+
+      if (state.jobId) {
+        agentEventEmitter.emit(`${state.jobId}:status`, {
+          status: "executing",
+          node: "executor",
+          message: `🚨 人工介入接管：已成功建立工单号 [${approvalId}] 的转人工待接管工单，已暂停自动决策流程！`,
+          plan: nextPlan,
+        });
+      }
+
+      return {
+        taskPlan: nextPlan,
+        shortMemory,
+        globalTransitionsCount: 1,
+      };
+    }
+
+    const extractedOrderId = extractOrderId(
+      stepToRun.description,
+      state.input,
+      shortMemory,
+    );
 
     if (
       (descLower.includes("refund") ||
