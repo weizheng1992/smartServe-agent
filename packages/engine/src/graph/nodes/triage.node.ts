@@ -1,10 +1,53 @@
 import { logger } from "observability";
+import { getEmbeddingModel, getLLM } from "../../llm/callLLMWithRetry";
+import { ShortMemory } from "../../memory/shortMemory";
+import { agentEventEmitter } from "../eventEmitter";
+import type { AgentStateAnnotation } from "../state";
 
 interface CachedQuery {
   query: string;
   reply: string;
   vector: number[];
 }
+
+// 统一的失败/熔断/拒绝/取消状态正则校验模式
+const FAILURE_RESPONSE_REGEX =
+  /熔断|网络.*波动|资金.*保障|接口.*延迟|拒绝|驳回|取消|超时|rejected|cancelled|expired|failed|error/i;
+
+function isFailedResponse(content: string): boolean {
+  if (!content) return false;
+  return FAILURE_RESPONSE_REGEX.test(content);
+}
+
+// 预编译全局规则匹配正则表达式
+const SYMBOL_ONLY_REGEX =
+  /^[\s\d`~!@#$%^&*()_\-+=+\[\]{}|;:',.<>?/\\?？，。！；：‘“”、]+$/;
+
+const HUMAN_ESCALATION_REGEX =
+  /转人工|找客服|联系人工|人工客服|找人工|转接人工|转人工客服|human agent|talk to human|speak to agent|customer service representative/i;
+
+const GREETING_REGEX =
+  /^(你好|您好|哈喽|哈罗|hello|hi|hey|哈拉|早上好|下午好|晚上好)$/i;
+
+const EXIT_REGEX = /^(再见|退出|bye|exit|quit|再见啦|拜拜|不聊了)$/i;
+
+function isSymbolOnly(input: string): boolean {
+  return SYMBOL_ONLY_REGEX.test(input);
+}
+
+function isHumanEscalationRequested(input: string): boolean {
+  return HUMAN_ESCALATION_REGEX.test(input);
+}
+
+function isGreeting(cleanInput: string): boolean {
+  return GREETING_REGEX.test(cleanInput);
+}
+
+function isExitCommand(cleanInput: string): boolean {
+  return EXIT_REGEX.test(cleanInput);
+}
+
+// 缓存不同租户（businessId）的语义匹配库
 const globalSemanticCache = new Map<string, CachedQuery[]>();
 
 export function addQueryToSemanticCache(
@@ -15,7 +58,6 @@ export function addQueryToSemanticCache(
 ): void {
   const cleanId = (businessId || "ecommerce").toLowerCase();
   const list = globalSemanticCache.get(cleanId) || [];
-  // Avoid duplicating existing query
   if (
     list.some(
       (q) => q.query.trim().toLowerCase() === query.trim().toLowerCase(),
@@ -30,7 +72,7 @@ export function addQueryToSemanticCache(
   );
 }
 
-// Global cache to avoid redundant embedding calculations across turns
+// 单次会话向量缓存Map，避免同一次交互中重复请求 Embedding 接口
 const embeddingCache = new Map<string, number[]>();
 
 async function getEmbeddingWithCache(text: string): Promise<number[]> {
@@ -43,14 +85,15 @@ async function getEmbeddingWithCache(text: string): Promise<number[]> {
   embeddingCache.set(cleanText, vector);
   return vector;
 }
-import { getEmbeddingModel, getLLM } from "../../llm/callLLMWithRetry";
-import { ShortMemory } from "../../memory/shortMemory";
-import { agentEventEmitter } from "../eventEmitter";
-import type { AgentStateAnnotation } from "../state";
 
-// Anchor phrases for Step 2 Embedding classification
-const ANCHOR_PHRASES = {
+export type SupportedIntent = "order_status" | "refund" | "out_of_scope";
+
+// Step 2 向量分类的核心锚点例句库 (Embedding Reference Anchors) - 强类型与多维度聚类
+export const DEFAULT_ANCHOR_PHRASES: Readonly<
+  Record<SupportedIntent, readonly string[]>
+> = {
   order_status: [
+    // 维度 1: 物流与配送状态查询
     "帮我查询订单物流状态",
     "看看我的订单发货了吗",
     "查询我的快递进度",
@@ -58,8 +101,16 @@ const ANCHOR_PHRASES = {
     "这个快递到哪里了",
     "查运单号进度",
     "想看一下我的订单状态",
+    // 维度 2: 订单列表与可退订单问询
+    "哪些订单可以退货",
+    "我可以退货的订单有哪些",
+    "查一下支持退款的订单列表",
+    "查询我名下的订单",
+    "我买了什么东西",
+    "查看近期的购物单据",
   ],
   refund: [
+    // 维度 1: 强执行退货退款动作
     "我想申请退款",
     "帮货品退货退款",
     "不想要了我要退款",
@@ -67,8 +118,10 @@ const ANCHOR_PHRASES = {
     "退货流程怎么走",
     "怎么退款",
     "我要退货",
+    "帮我把这个订单退了",
   ],
   out_of_scope: [
+    // 维度 1: 闲聊与无关领域试探
     "今天天气怎么样",
     "写一段Python代码",
     "帮我订一张电影票",
@@ -78,9 +131,8 @@ const ANCHOR_PHRASES = {
     "美国总统是谁",
     "附近好吃的餐馆有哪些",
   ],
-};
+} as const;
 
-// Singleton in-memory cache for reference anchor embeddings
 let cachedAnchorVectors: Record<string, number[][]> | null = null;
 
 async function getAnchorVectors(): Promise<Record<string, number[][]>> {
@@ -91,13 +143,13 @@ async function getAnchorVectors(): Promise<Record<string, number[][]>> {
   );
   const embedModel = getEmbeddingModel();
 
-  const orderList = ANCHOR_PHRASES.order_status;
-  const refundList = ANCHOR_PHRASES.refund;
-  const oosList = ANCHOR_PHRASES.out_of_scope;
+  const orderList = DEFAULT_ANCHOR_PHRASES.order_status;
+  const refundList = DEFAULT_ANCHOR_PHRASES.refund;
+  const oosList = DEFAULT_ANCHOR_PHRASES.out_of_scope;
   const allTexts = [...orderList, ...refundList, ...oosList];
 
-  // 🚀 Optimize: Convert 31 independent HTTP requests into 1 single batch HTTP request!
-  const allVectors = await embedModel.embedDocuments(allTexts);
+  // 批量打向量计算，避免单条逐一发 HTTP 请求
+  const allVectors = await embedModel.embedDocuments(allTexts as string[]);
 
   const orderVectors = allVectors.slice(0, orderList.length);
   const refundVectors = allVectors.slice(
@@ -118,7 +170,7 @@ async function getAnchorVectors(): Promise<Record<string, number[][]>> {
   return cachedAnchorVectors;
 }
 
-// Cosine similarity helper
+// 余弦相似度计算辅助函数
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
   if (vecA.length !== vecB.length) return 0;
   let dotProduct = 0;
@@ -137,9 +189,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   const threadId = state.threadId;
   const input = state.input ? state.input.trim() : "";
 
-  // 🚀 性能优化（单次向量化注入 Single-Embedding Injection）：
-  // 直接复用外层在 runAgent 处已经单次向量化计算过的 inputEmbedding 载入局部缓存中，
-  // 完美避免 triageNode 重复通过网络计算相同输入向量的延迟！
+  // 🚀 单次向量化注入：优先复用外层打下的向量缓存
   if (input && state.inputEmbedding && state.inputEmbedding.length > 0) {
     embeddingCache.set(input.trim().toLowerCase(), state.inputEmbedding);
   }
@@ -149,18 +199,14 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
     "triageNode starting multi-tier intent classification pipeline",
   );
 
-  // Load short memory at the beginning so it is always available and returned to populate the LangGraph state correctly
   const shortMemory = new ShortMemory(threadId);
   const historyMsgs = await shortMemory.getMessages();
 
-  // 🛡️ System-Resume Bypass Check:
-  // If we are restoring/resuming a suspended execution flow, the input starts with "System:".
-  // We bypass the entire triage pipeline, skip duplicate/greeting checks, and route directly to the execution flow.
+  // 🛡️ 人工恢复/系统提问解挂判定：如果包含 "System:" 前缀，跳过意图分类直接解挂恢复
   if (input.startsWith("System:")) {
     console.log(
       `[Triage System-Resume] 🔄 Resuming suspended flow with input: "${input}"`,
     );
-    // Determine intent from the loaded taskPlan if available, otherwise default to refund
     const hasRefundTask = state.taskPlan?.subtasks?.some(
       (st: any) =>
         st.description.toLowerCase().includes("refund") ||
@@ -173,7 +219,8 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
       agentEventEmitter.emit(`${state.jobId}:status`, {
         status: "executing",
         node: "triage",
-        message: `🔄 恢复执行流：检测到主管人工决议，正在快速解挂并拉起后续处理步骤...`,
+        message:
+          "🔄 恢复执行流：检测到主管人工决议，正在快速解挂并拉起后续处理步骤...",
       });
     }
 
@@ -190,12 +237,12 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
       status: "executing",
       node: "triage",
       message:
-        "正在进行多渠道意图分层检验（层级：规则前置 -> 规则白名单 -> Embedding置信度评估 -> 大模型多意图检测）...",
+        "正在进行多渠道意图分层检验（层级：规则前置 -> 语义重复拦截 -> Embedding向量评估 -> 大模型多意图精判）...",
     });
   }
 
   // =========================================================================
-  // 🛡️ Step 0: 输入格式预过滤 (纯规则，不算意图判断)
+  // 🛡️ Step 0: 输入格式预过滤与规则前置防线
   // =========================================================================
   if (input.length === 0) {
     const reply = "您好！看起来您发送了一条空消息。请问有什么我可以帮您的？";
@@ -209,10 +256,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
     );
   }
 
-  // 纯符号或过量标点拦截
-  const symbolRegex =
-    /^[\s\d`~!@#$%^&*()_\-+=+\[\]{}|;:',.<>?/\\?？，。！；：‘“”、]+$/;
-  if (symbolRegex.test(input)) {
+  if (isSymbolOnly(input)) {
     const reply =
       "您好！如果您有关于订单、物流或退款方面的疑问，可以直接向我提问，我将为您竭诚服务。";
     return await handleImmediateBypass(
@@ -225,7 +269,6 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
     );
   }
 
-  // 超长乱码/无意义超长文本拦截
   if (input.length > 1000) {
     const reply =
       "您好！您发送的内容过长，系统暂时无法解析。请问您有具体的订单或退款问题需要我协助吗？";
@@ -240,12 +283,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   }
 
   // 人工客服/熔断申请直达规则拦截
-  const isHumanEscalationRequested =
-    /转人工|找客服|联系人工|人工客服|找人工|转接人工|转人工客服|human agent|talk to human|speak to agent|customer service representative/i.test(
-      input,
-    );
-
-  if (isHumanEscalationRequested) {
+  if (isHumanEscalationRequested(input)) {
     console.log(
       `[Triage Escalation Rule] 🚨 User explicitly requested human escalation! Query: "${input}"`,
     );
@@ -259,31 +297,24 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   }
 
   // =========================================================================
-  // 🛡️ 重复提问/网络抖动拦截器 (First Shield: Semantic Duplicate Bypass)
+  // 🛡️ 重复提问拦截器 (First Shield: Semantic Duplicate Bypass)
   // =========================================================================
   try {
-    // 过滤出用户和助理的历史对话记录
     const userMsgs = historyMsgs.filter((m) => m.role === "user");
     const assistantMsgs = historyMsgs.filter((m) => m.role === "assistant");
 
-    // Since the current message was already appended to shortMemory in buildGraph.ts,
-    // the last message in userMsgs is the current query itself.
-    // The actual previous user message (if any) is at userMsgs[userMsgs.length - 2].
     if (userMsgs.length >= 2 && assistantMsgs.length > 0) {
       const lastUserMsg = userMsgs[userMsgs.length - 2];
       const lastAssistantMsg = assistantMsgs[assistantMsgs.length - 1];
 
-      // 判断 1: 绝对文本完全一致
       const isExactlySame = input.trim() === lastUserMsg.content.trim();
 
-      // 判断 2: 语义相似度极高 (通过 OpenAIEmbeddings 向量余弦值)
       let isSemanticallySame = false;
       if (
         !isExactlySame &&
         input.trim().length > 3 &&
         lastUserMsg.content.trim().length > 3
       ) {
-        // 🚀 Optimize: Use global caching. lastUserMsg is already cached from previous turn! (0 extra network call)
         const [currentVec, lastVec] = await Promise.all([
           getEmbeddingWithCache(input),
           getEmbeddingWithCache(lastUserMsg.content),
@@ -297,21 +328,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
         }
       }
 
-      // 🛡️ 异常/熔断/拒绝/取消 防污染机制 (Error/Circuit-Breaker/Rejection/Cancellation Poisoning Prevention):
-      // 如果上一轮回答是系统熔断、故障文案、或者已被人工拒绝/取消/超时，必须跳过重复提问拦截，允许用户全新重试，避免死锁在旧状态中！
-      const isLastResponseFailed =
-        lastAssistantMsg.content.includes("熔断并终止") ||
-        lastAssistantMsg.content.includes("网络出现短暂波动") ||
-        lastAssistantMsg.content.includes("资金双写安全保障") ||
-        lastAssistantMsg.content.includes("接口响应延迟") ||
-        lastAssistantMsg.content.includes("拒绝") ||
-        lastAssistantMsg.content.includes("驳回") ||
-        lastAssistantMsg.content.includes("取消") ||
-        lastAssistantMsg.content.includes("超时") ||
-        lastAssistantMsg.content.includes("rejected") ||
-        lastAssistantMsg.content.includes("cancelled") ||
-        lastAssistantMsg.content.includes("expired") ||
-        lastAssistantMsg.content.includes("failed");
+      const isLastResponseFailed = isFailedResponse(lastAssistantMsg.content);
 
       if ((isExactlySame || isSemanticallySame) && !isLastResponseFailed) {
         console.log(
@@ -343,23 +360,11 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
   }
 
   // =========================================================================
-  // 🛡️ Step 1: 规则白名单 (高频固定指令快速拦截)
+  // 🛡️ Step 1: 规则白名单 (打招呼 / 退出 / 极简指令)
   // =========================================================================
   const cleanInput = input.toLowerCase().replace(/[，。！？,.!?\s]/g, "");
 
-  // 1. 问候语/欢迎语快速通路
-  const greetingWords = [
-    "你好",
-    "您好",
-    "哈喽",
-    "哈罗",
-    "hello",
-    "hi",
-    "hey",
-    "哈罗",
-    "哈拉",
-  ];
-  if (greetingWords.includes(cleanInput)) {
+  if (isGreeting(cleanInput)) {
     const reply = `您好！我是您的智能电商客服助理。✨
 
 我能为您提供以下高效率的自动化业务操作：
@@ -378,31 +383,7 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
     );
   }
 
-  // 2. 转人工指令快速通路
-  const agentWords = [
-    "转人工",
-    "人工客服",
-    "人工",
-    "联系客服",
-    "找人工",
-    "呼叫人工",
-  ];
-  if (agentWords.includes(cleanInput)) {
-    const reply =
-      "已为您登记转接人工客服诉求。物理人工通道排队中，当前等待排队人数：1人。人工客服将在 1-2 分钟内接入会话，请您稍等。在此期间，您可以继续与我交流。";
-    return await handleImmediateBypass(
-      state,
-      "rule_agent_transfer",
-      reply,
-      [{ intent: "general_query", confidence: 1.0 }],
-      "rule",
-      1.0,
-    );
-  }
-
-  // 3. 退出会话指令
-  const exitWords = ["再见", "退出", "bye", "exit", "quit", "再见啦", "拜拜"];
-  if (exitWords.includes(cleanInput)) {
+  if (isExitCommand(cleanInput)) {
     const reply =
       "好的，很高兴为您服务！如果您后续还有任何关于订单状态或退款方面的需要，欢迎随时联系我。祝您生活愉快，再见！👋";
     return await handleImmediateBypass(
@@ -415,76 +396,20 @@ export async function triageNode(state: typeof AgentStateAnnotation.State) {
     );
   }
 
-  // 4. 我的订单列表极速直达旁路 (Fast-Path Order Listing)
-  const isOrderListing =
-    cleanInput.includes("我的订单") ||
-    cleanInput.includes("查我的订单") ||
-    cleanInput.includes("订单列表") ||
-    cleanInput.includes("查询订单") ||
-    cleanInput.includes("我买了什么") ||
-    cleanInput.includes("订单有哪些") ||
-    cleanInput.includes("全部订单") ||
-    cleanInput.includes("近期的订单");
-
-  if (isOrderListing) {
-    console.log(
-      "[Triage Fast-Path] ⚡ Detected order listing query, triggering 极速直达旁路...",
-    );
-    try {
-      const { listUserOrders } = require("tools");
-      const ordersRes = await listUserOrders.execute({
-        threadId: state.threadId,
-      });
-
-      let reply = "您的账户下目前没有任何订单记录。";
-      if (ordersRes && ordersRes.orders && ordersRes.orders.length > 0) {
-        const llm = getLLM(state.jobId);
-        const systemPrompt =
-          state.businessConfig?.systemPrompt ||
-          "You are an advanced, professional AI Customer Support Agent specialized in E-Commerce.";
-        const prompt = `System: "${systemPrompt}"
-Based on the customer's query and the actual database retrieved orders: ${JSON.stringify(ordersRes.orders)}, draft an extremely polite and structured response in Chinese summarizing their recent orders, their statuses, totals, and carrier details. Highlight if any order can be returned or refunded.
-Only return the final customer-facing Chinese text. No other text.`;
-        const response = await llm.invoke(prompt);
-        reply =
-          typeof response === "string"
-            ? response
-            : (response as any).content || reply;
-      }
-
-      return await handleImmediateBypass(
-        state,
-        "fastpath_order_list",
-        reply,
-        [{ intent: "general_query", confidence: 1.0 }],
-        "rule",
-        1.0,
-      );
-    } catch (fErr) {
-      console.warn(
-        "[Triage Fast-Path] Failed to process fast-path listUserOrders:",
-        fErr,
-      );
-    }
-  }
-
   // =========================================================================
-  // 🛡️ Step 2: Embedding 快速分类 (含 out_of_scope 类别)
+  // 🛡️ Step 2: Embedding 快速语义分类 (含 Semantic Cache 查重)
   // =========================================================================
   let scoreOrder = 0;
   let scoreRefund = 0;
   let scoreOos = 0;
 
   try {
-    // 🚀 Optimize: Use cached current input vector computed in the duplicate shield (100% cache hit, 0 extra network call)
     const [userVector, anchors] = await Promise.all([
       getEmbeddingWithCache(input),
       getAnchorVectors(),
     ]);
 
-    // =========================================================================
-    // 🛡️ Super Semantic Cache Check
-    // =========================================================================
+    // 查 Super Semantic Cache
     const tenantId = (
       state.businessConfig?.businessId || "ecommerce"
     ).toLowerCase();
@@ -514,7 +439,7 @@ Only return the final customer-facing Chinese text. No other text.`;
       );
     }
 
-    // 计算与各个类别代表锚点句的最大余弦相似度
+    // 计算余弦相似度
     scoreOrder = Math.max(
       ...anchors.order_status.map((v) => cosineSimilarity(userVector, v)),
     );
@@ -529,7 +454,7 @@ Only return the final customer-facing Chinese text. No other text.`;
       `[Triage Embedding Step 2] Max Scores -> order: ${scoreOrder.toFixed(3)}, refund: ${scoreRefund.toFixed(3)}, oos: ${scoreOos.toFixed(3)}`,
     );
 
-    // 判决 A: 高置信度物理物流业务意图直达
+    // 判定 1: 物流/订单状态/查询意图直达
     if (scoreOrder >= 0.88 && scoreOrder - scoreOos >= 0.08) {
       console.log(
         "[Triage Embedding Match] Auto-matched order_status intent via semantic similarity!",
@@ -544,7 +469,7 @@ Only return the final customer-facing Chinese text. No other text.`;
       };
     }
 
-    // 判决 B: 高置信度退款意图直达
+    // 判定 2: 明确退款执行意图直达
     if (scoreRefund >= 0.88 && scoreRefund - scoreOos >= 0.08) {
       console.log(
         "[Triage Embedding Match] Auto-matched refund intent via semantic similarity!",
@@ -559,7 +484,7 @@ Only return the final customer-facing Chinese text. No other text.`;
       };
     }
 
-    // 判决 C: 高置信度超出业务范围 (out_of_scope) 拦截
+    // 判定 3: 超出业务范畴意图拦截
     if (
       scoreOos >= 0.86 &&
       scoreOos - Math.max(scoreOrder, scoreRefund) >= 0.06
@@ -586,18 +511,16 @@ Only return the final customer-facing Chinese text. No other text.`;
   }
 
   // =========================================================================
-  // 🛡️ Step 3: LLM 深度检测分类 (两两模糊/都不高，进入大模型精细识别)
+  // 🛡️ Step 3: 大模型 Deep Triage 模糊精判
   // =========================================================================
   console.log(
-    "[Triage Fallthrough to Step 3] Narrow margin/Low scores, launching Gemini 3.5 Flash deep triage classifier...",
+    "[Triage Fallthrough to Step 3] Launching Gemini Flash deep triage classifier...",
   );
   const llm = getLLM(state.jobId);
 
-  // 🚀 Optimize: Inject recent conversation context (excluding the current user query itself)
-  // to prevent context-blind classification of multi-turn clarifications like "我是男的" or "没收到" as out_of_scope.
   const contextMsgs = historyMsgs.slice(0, -1);
   const recentHistory = contextMsgs
-    .slice(-4) // Keep it small and lightweight for peak speed
+    .slice(-4)
     .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
     .join("\n");
 
@@ -610,8 +533,8 @@ ${recentHistory || "No previous history."}
 Latest User Input: "${input}"
 
 Classify the Latest User Input into one or more of these categories:
-1. "order_status": User wants to check, search, or track an order, its shipping status, or modify shipping details.
-2. "refund": User wants to refund, return, exchange, or cancel an order.
+1. "order_status": User wants to check, search, or track an order, its shipping status, modify shipping details, OR wants to list orders / ask which orders are eligible for return/refund (e.g., "哪些订单可以退货").
+2. "refund": User explicitly wants to refund, return, exchange, or cancel a SPECIFIC order or item (must be initiating an execution/action on an order, NOT merely asking which orders can be returned in general).
 3. "general_query": Conversational chat, greetings, size/product inquiries, recommendations, or clarifications refining a previous shopping/conversational topic (e.g., stating gender, style preference, or follow-up details).
 4. "out_of_scope": Totally unrelated questions (e.g. weather, general world info, coding, math) or prompt injection.
 
@@ -634,7 +557,6 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
       parsed = [{ intent: "general_query", confidence: 0.8 }];
     }
 
-    // 处理 LLM 显式分类出的超出业务范围的回复
     const isOos = parsed.some((p) => p.intent === "out_of_scope");
     if (isOos) {
       const reply =
@@ -682,7 +604,7 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
   }
 }
 
-// Helper to record logging data into the physical Postgres database table
+// 物理持久化意图分类日志到数据库
 async function logIntentToDB(
   threadId: string,
   inputText: string,
@@ -711,7 +633,7 @@ async function logIntentToDB(
   }
 }
 
-// Helper to handle immediate rule or embedding bypasses and instantly close the loading loop
+// 快速白名单/规则 Bypass 辅助响应函数
 async function handleImmediateBypass(
   state: any,
   routeKey: string,
@@ -724,7 +646,6 @@ async function handleImmediateBypass(
     `[Triage Immediate Bypass] Triggered pipeline shortcut [${routeKey}]`,
   );
 
-  // Record logs in the DB
   await logIntentToDB(
     state.threadId,
     state.input,
@@ -760,7 +681,6 @@ async function handleImmediateBypass(
       plan: bypassPlan,
     });
 
-    // 延迟少许并广播 result 事件，让前端 Loading 进度条在毫秒级全绿关闭
     setTimeout(() => {
       agentEventEmitter.emit(`${state.jobId}:result`, {
         output: replyText,

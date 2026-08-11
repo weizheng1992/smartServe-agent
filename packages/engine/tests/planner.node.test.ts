@@ -80,4 +80,24 @@ describe("Planner Node Unit Tests", () => {
     expect(result.taskPlan.subtasks[0].id).toBe("step_fast_refund");
     expect(result.globalTransitionsCount).toBe(1);
   });
+
+  test("Inquiry about eligible return orders plans listUserOrders instead of processRefund", async () => {
+    const state: any = {
+      threadId: "test_thread_eligible_returns",
+      intents: [{ intent: "order_status", confidence: 1.0 }],
+      input: "我可以退货的订单有哪些",
+      globalTransitionsCount: 0,
+    };
+
+    const result = await plannerNode(state);
+
+    expect(result).toBeDefined();
+    expect(result.taskPlan).toBeDefined();
+    expect(result.taskPlan.subtasks.length).toBeGreaterThan(0);
+    // Ensure no step tries to execute processRefund without a specific order
+    const hasRefundStep = result.taskPlan.subtasks.some((st: any) =>
+      st.description.includes("processRefund"),
+    );
+    expect(hasRefundStep).toBe(false);
+  }, 15000);
 });
