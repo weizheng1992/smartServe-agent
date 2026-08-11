@@ -1,76 +1,25 @@
 import { Annotation } from "@langchain/langgraph";
+import type {
+  BusinessConfig,
+  ChatMessage,
+  IntentResult,
+  PendingApprovalRecord,
+  RagDocument,
+  SubTask,
+  SubTaskResult,
+  TaskPlan,
+} from "types";
 
-export interface SubTaskResult {
-  waitingForApproval?: boolean;
-  approvalId?: string;
-  actionType?: string;
-  cancelledByUser?: boolean;
-  expiredByTimeout?: boolean;
-  rejectedByAdmin?: boolean;
-  rejectionReason?: string;
-  output?: unknown;
-  [key: string]: unknown;
-}
-
-export interface SubTask {
-  id: string;
-  description: string;
-  status: "pending" | "executing" | "completed" | "failed";
-  result?: SubTaskResult;
-}
-
-export interface TaskPlan {
-  goal: string;
-  subtasks: SubTask[];
-  currentStepIndex: number;
-}
-
-export interface IntentResult {
-  intent: string;
-  confidence: number;
-}
-
-export interface ChatMessage {
-  role: "user" | "assistant" | "system" | string;
-  content?: string | null;
-  [key: string]: unknown;
-}
-
-export interface RagDocument {
-  chunkText: string;
-  contextualSummary?: string;
-  score?: number;
-  [key: string]: unknown;
-}
-
-export interface BusinessConfig {
-  businessId: string;
-  systemPrompt?: string;
-  intents?: Record<string, { description: string }>;
-  tools?: string[];
-  executionMode?: string;
-  confidenceThresholds?: { high: number; mid: number };
-  refundAutoApprovalLimit?: number;
-  [key: string]: unknown;
-}
-
-export interface PendingApprovalRecord {
-  id: string;
-  threadId: string;
-  status:
-    "pending" | "approved" | "rejected" | "cancelled" | "expired" | string;
-  actionType?: string;
-  actionPayload?: {
-    orderId?: string;
-    refundAmount?: number;
-    rejectionReason?: string;
-    [key: string]: unknown;
-  } | null;
-  reason?: string;
-  createdAt?: Date | string;
-  updatedAt?: Date | string;
-  [key: string]: unknown;
-}
+export type {
+  BusinessConfig,
+  ChatMessage,
+  IntentResult,
+  PendingApprovalRecord,
+  RagDocument,
+  SubTask,
+  SubTaskResult,
+  TaskPlan,
+};
 
 export const AgentStateAnnotation = Annotation.Root({
   // Unique Thread & User metadata

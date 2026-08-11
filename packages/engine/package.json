@@ -20,6 +20,7 @@
     "p-retry": "^6.2.0",
     "p-timeout": "^6.1.0",
     "tools": "workspace:*",
+    "types": "workspace:*",
     "zod": "^3.24.0"
   },
   "devDependencies": {}
