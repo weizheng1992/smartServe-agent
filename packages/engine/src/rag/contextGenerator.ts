@@ -13,6 +13,10 @@ export async function generateContextualSummary(
 ): Promise<string> {
   const fallbackSummary = `本段切片出自商户 [${businessId}] 的文档《${fullDocumentTitle}》中“${headerPath}”章节，详细说明了相关业务规则与步骤。`;
 
+  if (process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test") {
+    return fallbackSummary;
+  }
+
   try {
     const llm = getLLM();
     const prompt = `You are a RAG contextual summary generator for e-commerce customer support.
