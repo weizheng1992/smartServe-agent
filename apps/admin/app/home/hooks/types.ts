@@ -1,13 +1,18 @@
+import type { PendingApprovalRecord } from "types";
+
 export interface Approval {
   id: string;
   threadId: string;
   actionType: string;
   actionPayload: Record<string, unknown> | null;
-  status: "waiting" | "approved" | "rejected" | "expired" | "cancelled";
+  status:
+    "pending" | "waiting" | "approved" | "rejected" | "expired" | "cancelled";
   deadline: string;
   createdAt: string;
   businessId?: string;
 }
+
+export type { PendingApprovalRecord };
 
 export interface PreferenceFact {
   id: string;

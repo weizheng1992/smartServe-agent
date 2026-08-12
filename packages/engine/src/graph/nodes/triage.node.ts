@@ -52,8 +52,9 @@ function isExitCommand(cleanInput: string): boolean {
   return EXIT_REGEX.test(cleanInput);
 }
 
-// 缓存不同租户（businessId）的语义匹配库
+// 缓存不同租户（businessId）的语义匹配库（每个租户上限 100 条）
 const globalSemanticCache = new Map<string, CachedQuery[]>();
+const MAX_TENANT_CACHE_SIZE = 100;
 
 export function addQueryToSemanticCache(
   businessId: string,
@@ -62,7 +63,7 @@ export function addQueryToSemanticCache(
   vector: number[],
 ): void {
   const cleanId = (businessId || "ecommerce").toLowerCase();
-  const list = globalSemanticCache.get(cleanId) || [];
+  let list = globalSemanticCache.get(cleanId) || [];
   if (
     list.some(
       (q) => q.query.trim().toLowerCase() === query.trim().toLowerCase(),
@@ -71,19 +72,29 @@ export function addQueryToSemanticCache(
     return;
   }
   list.push({ query, reply, vector });
+  if (list.length > MAX_TENANT_CACHE_SIZE) {
+    list = list.slice(list.length - MAX_TENANT_CACHE_SIZE);
+  }
   globalSemanticCache.set(cleanId, list);
   console.log(
     `[Semantic Cache] 💾 Added new query to cache for tenant [${cleanId}]: "${query.substring(0, 30)}..."`,
   );
 }
 
-// 单次会话向量缓存Map，避免同一次交互中重复请求 Embedding 接口
+// 单次会话向量缓存Map（上限 500 条），避免同一次交互中重复请求 Embedding 接口
 const embeddingCache = new Map<string, number[]>();
+const MAX_EMBEDDING_CACHE_SIZE = 500;
 
 async function getEmbeddingWithCache(text: string): Promise<number[]> {
   const cleanText = text.trim().toLowerCase();
   if (embeddingCache.has(cleanText)) {
     return embeddingCache.get(cleanText)!;
+  }
+  if (embeddingCache.size >= MAX_EMBEDDING_CACHE_SIZE) {
+    const firstKey = embeddingCache.keys().next().value;
+    if (firstKey) {
+      embeddingCache.delete(firstKey);
+    }
   }
   const embedModel = getEmbeddingModel();
   const vector = await embedModel.embedQuery(cleanText);
@@ -155,7 +166,7 @@ async function getAnchorVectors(): Promise<Record<string, number[][]>> {
 
   // 批量打向量计算，避免单条逐一发 HTTP 请求
   const allVectors = await embedModel.embedDocuments(allTexts as string[]);
- 
+
   const orderVectors = allVectors.slice(0, orderList.length);
   const refundVectors = allVectors.slice(
     orderList.length,

@@ -2,12 +2,15 @@ import { db } from "db";
 import { logger } from "observability";
 import { getTool } from "tools";
 import { getLLM } from "../../llm/callLLMWithRetry";
+import { ShortMemory } from "../../memory/shortMemory";
 import { agentEventEmitter } from "../eventEmitter";
 import {
   type AgentStateAnnotation,
   buildHistoryContext,
   type PendingApprovalRecord,
 } from "../state";
+import { createPendingApprovalTicket } from "./executorApprovals";
+import { tryMatchExecutorFastPath } from "./executorFastPath";
 import { extractOrderId } from "./utils";
 
 export async function executorNode(state: typeof AgentStateAnnotation.State) {
@@ -64,7 +67,6 @@ export async function executorNode(state: typeof AgentStateAnnotation.State) {
   let historyContext = "";
   let shortMemory = state.shortMemory;
   if (!shortMemory || shortMemory.length === 0) {
-    const { ShortMemory } = require("../../memory/shortMemory");
     const sm = new ShortMemory(state.threadId);
     shortMemory = await sm.getMessages();
   }
@@ -146,88 +148,20 @@ ${historyContext}`;
       descLower.includes("人工客服")
     ) {
       console.log("[Executor Node] 🚨 Handling human escalation step...");
-      const {
-        pendingApprovals: dbPendingApprovals,
-        getDrizzle,
-        db: physicalDb,
-      } = require("db");
-      const { eq, and } = require("drizzle-orm");
-      const drizzle = getDrizzle()!;
-
-      try {
-        await physicalDb.createThread(
-          state.threadId,
-          state.userId || "83d67d4e-104c-4325-8aa7-10d4389fc725",
-        );
-      } catch (tErr) {
-        console.warn("[Executor Node] Thread ensure warning:", tErr);
-      }
-
-      let approvalId = crypto.randomUUID
-        ? crypto.randomUUID()
-        : Math.random().toString(36).substring(2, 15);
-      const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-      // 🛡️ 防重复工单机制：查询该 ThreadID 是否已有处于 waiting 状态的人工接管工单
-      const existingApprovals = await drizzle
-        .select()
-        .from(dbPendingApprovals)
-        .where(
-          and(
-            eq(dbPendingApprovals.threadId, state.threadId),
-            eq(dbPendingApprovals.status, "waiting"),
-          ),
-        )
-        .limit(1);
-
-      if (existingApprovals.length > 0) {
-        approvalId = existingApprovals[0].id;
-        console.log(
-          `[Executor Node] 🎯 Thread ${state.threadId} 已存在挂起中的人工工单 (${approvalId})，无需重复创建！`,
-        );
-      } else {
-        await drizzle.insert(dbPendingApprovals).values({
-          id: approvalId,
-          threadId: state.threadId,
-          actionType: "human_escalation",
-          actionPayload: {
-            reason: "User requested human customer support intervention",
-            userInput: state.input,
-            triggerSource: "user_request",
-          },
-          status: "waiting",
-          deadline,
-        });
-      }
-
-      const updatedStep = {
-        ...stepToRun,
-        status: "completed" as const,
-        result: {
-          waitingForApproval: true,
-          approvalId,
-          actionType: "human_escalation",
-          message: "已成功创建人工客服接管工单，请等待客服主管接管回应。",
+      const { nextPlan } = await createPendingApprovalTicket({
+        threadId: state.threadId,
+        userId: state.userId,
+        actionType: "human_escalation",
+        actionPayload: {
+          reason: "User requested human customer support intervention",
+          userInput: state.input,
+          triggerSource: "user_request",
         },
-      };
-
-      const updatedSubtasks = [...currentPlan.subtasks];
-      updatedSubtasks[currentIndex] = updatedStep;
-
-      const nextPlan = {
-        ...currentPlan,
-        subtasks: updatedSubtasks,
-        currentStepIndex: currentIndex + 1,
-      };
-
-      if (state.jobId) {
-        agentEventEmitter.emit(`${state.jobId}:status`, {
-          status: "executing",
-          node: "executor",
-          message: `🚨 人工介入接管：已成功建立工单号 [${approvalId}] 的转人工待接管工单，已暂停自动决策流程！`,
-          plan: nextPlan,
-        });
-      }
+        jobId: state.jobId,
+        stepToRun,
+        currentPlan,
+        currentIndex,
+      });
 
       return {
         taskPlan: nextPlan,
@@ -236,55 +170,15 @@ ${historyContext}`;
       };
     }
 
-    const extractedOrderId = extractOrderId(
+    const matchedFastPath = tryMatchExecutorFastPath(
       stepToRun.description,
       state.input,
+      allowedTools,
       shortMemory,
     );
 
-    if (
-      (descLower.includes("refund") ||
-        descLower.includes("processrefund") ||
-        descLower.includes("退款")) &&
-      allowedTools.includes("processRefund") &&
-      extractedOrderId
-    ) {
-      parsedToolCall = {
-        toolName: "processRefund",
-        args: {
-          orderId: extractedOrderId,
-          reason: "Customer requested refund via smartServe",
-        },
-      };
-      isFastPath = true;
-    } else if (
-      (descLower.includes("status") ||
-        descLower.includes("carrier") ||
-        descLower.includes("track") ||
-        descLower.includes("getorderstatus") ||
-        descLower.includes("物流") ||
-        descLower.includes("进度") ||
-        descLower.includes("发货")) &&
-      allowedTools.includes("getOrderStatus") &&
-      extractedOrderId
-    ) {
-      parsedToolCall = {
-        toolName: "getOrderStatus",
-        args: { orderId: extractedOrderId },
-      };
-      isFastPath = true;
-    } else if (
-      (descLower.includes("listuserorders") ||
-        descLower.includes("list orders") ||
-        descLower.includes("全部订单") ||
-        descLower.includes("历史订单") ||
-        descLower.includes("名下订单")) &&
-      allowedTools.includes("listUserOrders")
-    ) {
-      parsedToolCall = {
-        toolName: "listUserOrders",
-        args: {},
-      };
+    if (matchedFastPath) {
+      parsedToolCall = matchedFastPath;
       isFastPath = true;
     }
 
@@ -378,8 +272,7 @@ ${historyContext}`;
               orderId
             ) {
               try {
-                const { db: physicalDb } = require("db");
-                const oRes = await physicalDb.execute(
+                const oRes = await db.execute(
                   'SELECT total_amount AS "totalAmount", status FROM orders WHERE order_id = $1',
                   [orderId],
                 );

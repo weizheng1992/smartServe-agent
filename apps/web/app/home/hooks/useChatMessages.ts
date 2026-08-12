@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SubTask } from "types";
-import type { Message, TaskPlan, UserSession } from "./types";
+import type { TaskPlan } from "types";
+import { translateTaskPlan } from "../utils/translateTaskPlan";
+import type { Message, UserSession } from "./types";
 
 interface UseChatMessagesProps {
   currentUser: UserSession | null;
@@ -145,46 +146,7 @@ export function useChatMessages({
             });
           }
           if (data.plan) {
-            const zhSubtasks = data.plan.subtasks.map((st: SubTask) => {
-              let zhDesc = st.description;
-              const descLower = st.description.toLowerCase();
-              if (
-                descLower.includes("order status") ||
-                descLower.includes("getorderstatus") ||
-                descLower.includes("shipping status") ||
-                descLower.includes("order")
-              ) {
-                zhDesc = "调起 getOrderStatus 接口查询订单最新物理物流详情";
-              } else if (
-                descLower.includes("screenshot") ||
-                descLower.includes("takescreenshot")
-              ) {
-                zhDesc = "调起 takeScreenshot 看板截图工具进行界面快照核验";
-              } else if (
-                descLower.includes("refund") ||
-                descLower.includes("processrefund")
-              ) {
-                zhDesc = "触发 processRefund 快速退款物理工作流";
-              } else if (descLower.includes("extract")) {
-                zhDesc = "智能捕获并定位文本中的业务关键字段与参数";
-              } else if (
-                descLower.includes("inform") ||
-                descLower.includes("communicate") ||
-                descLower.includes("tell")
-              ) {
-                zhDesc = "通过大模型提炼汇总信息反馈给用户";
-              }
-              return { ...st, description: zhDesc };
-            });
-            setActivePlan({
-              ...data.plan,
-              goal:
-                data.plan.goal.includes("Fulfill") ||
-                data.plan.goal.includes("Address")
-                  ? "全自动履行客户业务及工具链诉求"
-                  : data.plan.goal,
-              subtasks: zhSubtasks,
-            });
+            setActivePlan(translateTaskPlan(data.plan, false));
           }
         });
 
@@ -215,48 +177,7 @@ export function useChatMessages({
                 role: "assistant",
                 content: data.output,
                 plan: data.taskPlan
-                  ? {
-                      ...data.taskPlan,
-                      goal: "自动化履行客户业务诉求",
-                      subtasks: data.taskPlan.subtasks.map((sub: SubTask) => {
-                        let zhDesc = sub.description;
-                        const descLower = sub.description.toLowerCase();
-                        if (descLower.includes("extract")) {
-                          zhDesc = "从用户文本中智能提取业务参数与实体 ID";
-                        } else if (
-                          descLower.includes("getorderstatus") ||
-                          descLower.includes("order status") ||
-                          descLower.includes("shipping status") ||
-                          descLower.includes("order")
-                        ) {
-                          zhDesc =
-                            "成功调起 getOrderStatus 接口，获取最新物流数据";
-                        } else if (
-                          descLower.includes("refund") ||
-                          descLower.includes("processrefund")
-                        ) {
-                          zhDesc =
-                            "成功调起 processRefund 接口，执行快速退款并修改物理表";
-                        } else if (
-                          descLower.includes("screenshot") ||
-                          descLower.includes("takescreenshot")
-                        ) {
-                          zhDesc =
-                            "成功调起 takeScreenshot 接口，生成目标看板快照";
-                        } else if (
-                          descLower.includes("inform") ||
-                          descLower.includes("communicate") ||
-                          descLower.includes("tell")
-                        ) {
-                          zhDesc = "通过大模型提炼汇总信息反馈给用户";
-                        }
-                        return {
-                          ...sub,
-                          description: zhDesc,
-                          result: sub.result,
-                        };
-                      }),
-                    }
+                  ? translateTaskPlan(data.taskPlan, true)
                   : undefined,
                 jobId,
               };

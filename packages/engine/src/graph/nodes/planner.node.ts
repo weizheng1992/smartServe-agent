@@ -1,3 +1,5 @@
+import { getDrizzle, pendingApprovals as dbPendingApprovals } from "db";
+import { desc, eq } from "drizzle-orm";
 import { logger } from "observability";
 import { getLLM } from "../../llm/callLLMWithRetry";
 import { agentEventEmitter } from "../eventEmitter";
@@ -75,11 +77,6 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
       (currentStep.result?.waitingForApproval ||
         currentStep.status === "pending")
     ) {
-      const {
-        pendingApprovals: dbPendingApprovals,
-        getDrizzle,
-      } = require("db");
-      const { eq, desc } = require("drizzle-orm");
       const drizzle = getDrizzle();
       if (drizzle) {
         try {
@@ -138,8 +135,6 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
     const step = priorPlan.subtasks[currentStepIndex];
     const stepApprovalId = step?.result?.approvalId;
 
-    const { pendingApprovals: dbPendingApprovals, getDrizzle } = require("db");
-    const { eq, desc } = require("drizzle-orm");
     const drizzle = getDrizzle();
     if (drizzle) {
       try {

@@ -29,7 +29,22 @@ if (process.env.NODE_ENV !== "production") {
   globalForCache.completedRequestsCache = completedRequestsCache;
 }
 
+function pruneCaches() {
+  const now = Date.now();
+  const CACHE_TTL_MS = 5 * 60 * 1000;
+  for (const [key, value] of completedRequestsCache.entries()) {
+    if (now - value.timestamp > CACHE_TTL_MS) {
+      completedRequestsCache.delete(key);
+    }
+  }
+  if (completedRequestsCache.size > 1000) {
+    const firstKey = completedRequestsCache.keys().next().value;
+    if (firstKey) completedRequestsCache.delete(firstKey);
+  }
+}
+
 export async function POST(req: NextRequest) {
+  pruneCaches();
   try {
     const { message, threadId, userId } = await req.json();
 

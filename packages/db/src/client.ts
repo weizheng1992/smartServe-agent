@@ -1423,8 +1423,9 @@ export const db: DBInterface = {
 
   deleteThread: async (threadId: string): Promise<boolean> => {
     if (isUsingRealDb) {
+      const pool = getPgPool();
       try {
-        const pool = getPgPool();
+        await pool.query("BEGIN");
         // 1. Cascade delete dependent tables first due to FK constraints
         await pool.query("DELETE FROM messages WHERE thread_id = $1", [
           threadId,
@@ -1456,6 +1457,7 @@ export const db: DBInterface = {
         const res = await pool.query("DELETE FROM threads WHERE id = $1", [
           threadId,
         ]);
+        await pool.query("COMMIT");
 
         // 3. Keep memoryDb emulator state cleanly in sync
         memoryDb.threads.delete(threadId);
@@ -1468,6 +1470,7 @@ export const db: DBInterface = {
 
         return (res.rowCount ?? 0) > 0;
       } catch (err) {
+        await pool.query("ROLLBACK").catch(() => {});
         console.error("[DB Delete Thread PG Error]:", err);
         // Fallback local memory sync even if physical query failed
         memoryDb.threads.delete(threadId);

@@ -155,6 +155,9 @@ export async function POST(req: NextRequest) {
       }
       localLocks.add(lockKey);
       fallbackAcquired = true;
+      setTimeout(() => {
+        localLocks.delete(lockKey);
+      }, 10000);
     }
 
     try {
@@ -307,13 +310,11 @@ export async function POST(req: NextRequest) {
       // 🔍 物理关联所属用户 UUID，防止恢复时降级为 default_user 造成多租户长期记忆交叉污染
       let threadUserId = "83d67d4e-104c-4325-8aa7-10d4389fc725"; // Fallback seed user
       try {
-        const { threads: dbThreads, getDrizzle } = require("db");
-        const { eq: drizzleEq } = require("drizzle-orm");
         const dbInstance = getDrizzle()!;
         const threadRows = await dbInstance
-          .select({ userId: dbThreads.userId })
-          .from(dbThreads)
-          .where(drizzleEq(dbThreads.id, record.threadId))
+          .select({ userId: threads.userId })
+          .from(threads)
+          .where(eq(threads.id, record.threadId))
           .limit(1);
         if (threadRows[0]?.userId) {
           threadUserId = threadRows[0].userId;

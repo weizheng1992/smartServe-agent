@@ -1,17 +1,7 @@
-import type { SubTaskResult } from "types";
+import type { SubTask, SubTaskResult, TaskPlan } from "types";
 
-export interface Subtask {
-  id: string;
-  description: string;
-  status: "pending" | "executing" | "completed" | "failed";
-  result?: SubTaskResult;
-}
-
-export interface TaskPlan {
-  goal: string;
-  subtasks: Subtask[];
-  currentStepIndex: number;
-}
+export type { SubTaskResult, TaskPlan };
+export type Subtask = SubTask;
 
 export interface Message {
   role: "user" | "assistant";
