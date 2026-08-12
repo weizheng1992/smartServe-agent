@@ -155,7 +155,7 @@ async function getAnchorVectors(): Promise<Record<string, number[][]>> {
 
   // 批量打向量计算，避免单条逐一发 HTTP 请求
   const allVectors = await embedModel.embedDocuments(allTexts as string[]);
-
+ 
   const orderVectors = allVectors.slice(0, orderList.length);
   const refundVectors = allVectors.slice(
     orderList.length,

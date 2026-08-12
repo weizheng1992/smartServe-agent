@@ -30,7 +30,8 @@ interface PendingApprovalsProps {
   handleHumanReplyAction?: (
     approvalId: string,
     replyMessage: string,
-  ) => Promise<void>;
+    isFinish?: boolean,
+  ) => Promise<unknown>;
 }
 
 export function PendingApprovals({
@@ -212,9 +213,9 @@ export function PendingApprovals({
         approval={selectedChatApproval}
         isOpen={Boolean(selectedChatApproval)}
         onClose={() => setSelectedChatApproval(null)}
-        onSendReply={async (approvalId, replyMsg) => {
+        onSendReply={async (approvalId, replyMsg, isFinish) => {
           if (handleHumanReplyAction) {
-            await handleHumanReplyAction(approvalId, replyMsg);
+            await handleHumanReplyAction(approvalId, replyMsg, isFinish);
           }
         }}
       />

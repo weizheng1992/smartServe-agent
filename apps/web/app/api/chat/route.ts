@@ -1,4 +1,11 @@
-import { getTemporalClient, isUsingMockTemporal, runAgent } from "engine";
+import { db, getDrizzle, pendingApprovals } from "db";
+import { and, eq } from "drizzle-orm";
+import {
+  agentEventEmitter,
+  getTemporalClient,
+  isUsingMockTemporal,
+  runAgent,
+} from "engine";
 import { type NextRequest, NextResponse } from "next/server";
 
 interface CachedJob {
@@ -45,6 +52,55 @@ export async function POST(req: NextRequest) {
         { error: "userId is strictly required" },
         { status: 400 },
       );
+    }
+
+    // 🎧 人工客服接管状态校验：若当前线程处于人工客服接管（waiting 状态），消息直接写入 DB 推送给人工，不触发 AI Agent 图决策！
+    try {
+      const drizzle = getDrizzle();
+      if (drizzle) {
+        const activeApprovals = await drizzle
+          .select()
+          .from(pendingApprovals)
+          .where(
+            and(
+              eq(pendingApprovals.threadId, threadId),
+              eq(pendingApprovals.status, "waiting"),
+            ),
+          )
+          .limit(1);
+
+        if (activeApprovals.length > 0) {
+          const activeApp = activeApprovals[0];
+          const isHumanActive =
+            activeApp.actionType?.includes("human") ||
+            activeApp.actionType?.includes("escalat");
+
+          if (isHumanActive) {
+            console.log(
+              `[POST /api/chat] 🎧 Active human support session detected for thread ${threadId}. Writing message directly to DB.`,
+            );
+
+            await db.addMessage({
+              id: crypto.randomUUID
+                ? crypto.randomUUID()
+                : Math.random().toString(36).substring(2, 15),
+              threadId,
+              role: "user",
+              content: message,
+              timestamp: new Date().toISOString(),
+            });
+
+            return NextResponse.json({
+              success: true,
+              threadId,
+              userId,
+              isHumanActive: true,
+            });
+          }
+        }
+      }
+    } catch (hErr) {
+      console.warn("[POST /api/chat] Human takeover check warning:", hErr);
     }
 
     const cleanMessage = message.trim().toLowerCase();

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 
 // Local Hooks
 import { useAdminDashboardData } from "./hooks";
@@ -8,9 +8,11 @@ import { useAdminDashboardData } from "./hooks";
 // Local Components
 import { Header } from "./components/Header";
 import { HistoricalAudits } from "./components/HistoricalAudits";
+import { HumanChatModal } from "./components/HumanChatModal";
 import { Metrics } from "./components/Metrics";
 import { PendingApprovals } from "./components/PendingApprovals";
 import { PersonaAudit } from "./components/PersonaAudit";
+import type { Approval } from "./hooks/types";
 
 export default function AdminDashboard() {
   const {
@@ -25,10 +27,22 @@ export default function AdminDashboard() {
     handleApprovalAction,
     handleHumanReplyAction,
     handlePreferenceAction,
+    startActiveTakeover,
     pendingApprovals,
     auditedApprovals,
     preferences,
   } = useAdminDashboardData();
+
+  const [activeChatApproval, setActiveChatApproval] = useState<Approval | null>(
+    null,
+  );
+
+  const handleStartTakeover = async () => {
+    const approval = await startActiveTakeover("default_thread");
+    if (approval) {
+      setActiveChatApproval(approval);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased">
@@ -38,6 +52,7 @@ export default function AdminDashboard() {
         setSelectedMerchant={setSelectedMerchant}
         isRefreshing={isRefreshing}
         fetchDashboardData={fetchDashboardData}
+        onStartActiveTakeover={handleStartTakeover}
       />
 
       <main className="p-8 max-w-7xl mx-auto space-y-8">
@@ -64,6 +79,16 @@ export default function AdminDashboard() {
         {/* 📁 Section 2: Historical Audited Records */}
         <HistoricalAudits auditedApprovals={auditedApprovals} />
       </main>
+
+      {/* 💬 Active Takeover IM Chat Modal */}
+      <HumanChatModal
+        approval={activeChatApproval}
+        isOpen={Boolean(activeChatApproval)}
+        onClose={() => setActiveChatApproval(null)}
+        onSendReply={async (approvalId, replyMsg, isFinish) => {
+          await handleHumanReplyAction(approvalId, replyMsg, isFinish);
+        }}
+      />
     </div>
   );
 }

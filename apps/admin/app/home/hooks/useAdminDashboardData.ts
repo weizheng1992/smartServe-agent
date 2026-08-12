@@ -98,6 +98,7 @@ export function useAdminDashboardData() {
   const handleHumanReplyAction = async (
     approvalId: string,
     replyMessage: string,
+    isFinish = false,
   ) => {
     setSubmittingActionId(approvalId);
     try {
@@ -106,13 +107,15 @@ export function useAdminDashboardData() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           approvalId,
-          action: "human_reply",
+          action: isFinish ? "human_finish" : "human_message",
           humanReply: replyMessage,
+          isFinish,
         }),
       });
       const data = await res.json();
       if (data.success) {
         await fetchDashboardData();
+        return data;
       } else {
         alert(data.error || "人工介入回复失败");
       }
@@ -146,6 +149,28 @@ export function useAdminDashboardData() {
     }
   };
 
+  const startActiveTakeover = async (threadId = "default_thread") => {
+    try {
+      const res = await fetch("/api/chat/approvals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "start_human_takeover",
+          threadId,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.approval) {
+        await fetchDashboardData();
+        return data.approval as Approval;
+      }
+      return null;
+    } catch (err) {
+      console.error("[Start Active Takeover Error]:", err);
+      return null;
+    }
+  };
+
   // Filter approvals that are waiting or historical, matching the selected merchant
   const pendingApprovals = approvals.filter(
     (a) =>
@@ -172,6 +197,7 @@ export function useAdminDashboardData() {
     handleApprovalAction,
     handleHumanReplyAction,
     handlePreferenceAction,
+    startActiveTakeover,
     pendingApprovals,
     auditedApprovals,
   };

@@ -61,71 +61,98 @@ export function APMPanel({
 
         <div className="flex-1 overflow-y-auto pr-2 min-h-0">
           <div className="space-y-4">
-            {/* 🛡️ HUMAN-IN-THE-LOOP (HITL) 人工授权核准/模拟后台审批面板 */}
-            {pendingApprovalsList.length > 0 && (
-              <Card className="border-amber-500/50 bg-amber-950/20 shadow-2xl animate-pulse border-l-4 border-l-amber-500 rounded-xl overflow-hidden">
-                <CardHeader className="p-3.5 pb-2 border-b border-amber-500/15 bg-amber-500/5">
-                  <div className="flex items-center space-x-2">
-                    <Shield className="h-4.5 w-4.5 text-amber-400 animate-bounce shrink-0" />
-                    <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider">
-                      🛡️ 安全红线拦截：待人工核准放行
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-3.5 space-y-3">
-                  <div className="text-xs text-slate-300 leading-relaxed font-sans">
-                    决策引擎拦截了高危动作：
-                    <strong className="text-amber-300 font-semibold">
-                      {pendingApprovalsList[0].actionType}
-                    </strong>
-                    。
-                    <div className="mt-1.5 text-[10px] text-slate-400 font-mono bg-slate-950/40 p-2 rounded border border-slate-850 overflow-x-auto">
-                      参数:{" "}
-                      {JSON.stringify(
-                        pendingApprovalsList[0].actionPayload?.args || {},
-                      )}
-                    </div>
-                  </div>
+            {/* 🛡️ HUMAN-IN-THE-LOOP (HITL) 人工授权核准/客服介入面板 */}
+            {pendingApprovalsList.length > 0 &&
+              (() => {
+                const activeApp = pendingApprovalsList[0];
+                const isHumanSupport =
+                  activeApp.actionType?.includes("human") ||
+                  activeApp.actionType?.includes("escalat");
 
-                  <div className="space-y-2">
-                    <Input
-                      type="text"
-                      value={rejectionInput}
-                      onChange={(e) => setRejectionReason(e.target.value)}
-                      placeholder="若驳回，请在此处输入拒绝原因..."
-                      className="w-full bg-slate-950 text-xs py-1 border-slate-850 focus-visible:ring-amber-500 text-slate-100 rounded-lg placeholder-slate-600"
-                    />
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={() =>
-                          handleApprovalAction(
-                            pendingApprovalsList[0].id,
-                            "approve",
-                          )
-                        }
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg h-8 text-[10px] font-bold transition flex items-center justify-center space-x-1"
-                      >
-                        <CheckCircle2 className="h-3 w-3" />
-                        <span>核准放行 (Approve)</span>
-                      </Button>
-                      <Button
-                        onClick={() =>
-                          handleApprovalAction(
-                            pendingApprovalsList[0].id,
-                            "reject",
-                          )
-                        }
-                        variant="destructive"
-                        className="flex-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg h-8 text-[10px] font-bold transition flex items-center justify-center space-x-1"
-                      >
-                        <XCircle className="h-3 w-3" />
-                        <span>驳回申请 (Reject)</span>
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                if (isHumanSupport) {
+                  return (
+                    <Card className="border-indigo-500/50 bg-indigo-950/20 shadow-2xl border-l-4 border-l-indigo-500 rounded-xl overflow-hidden">
+                      <CardHeader className="p-3.5 pb-2 border-b border-indigo-500/15 bg-indigo-500/5">
+                        <div className="flex items-center space-x-2">
+                          <span className="relative flex h-2.5 w-2.5 shrink-0">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500" />
+                          </span>
+                          <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider">
+                            🎧 人工客服服务中 / 已接入
+                          </span>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-3.5 space-y-2">
+                        <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                          系统已为您成功转接人工客服。资深客服主管已接入当前对话队列，正在为您准备解答，请在左侧聊天界面中与客服实时沟通。
+                        </p>
+                        <div className="text-[10px] text-slate-400 font-mono bg-slate-950/40 p-2 rounded border border-slate-850 truncate">
+                          工单 ID: {activeApp.id.substring(0, 8)}... | 状态:
+                          客服在线服务中
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                }
+
+                return (
+                  <Card className="border-amber-500/50 bg-amber-950/20 shadow-2xl animate-pulse border-l-4 border-l-amber-500 rounded-xl overflow-hidden">
+                    <CardHeader className="p-3.5 pb-2 border-b border-amber-500/15 bg-amber-500/5">
+                      <div className="flex items-center space-x-2">
+                        <Shield className="h-4.5 w-4.5 text-amber-400 animate-bounce shrink-0" />
+                        <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider">
+                          🛡️ 安全红线拦截：待人工核准放行
+                        </span>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-3.5 space-y-3">
+                      <div className="text-xs text-slate-300 leading-relaxed font-sans">
+                        决策引擎拦截了高危动作：
+                        <strong className="text-amber-300 font-semibold">
+                          {activeApp.actionType}
+                        </strong>
+                        。
+                        <div className="mt-1.5 text-[10px] text-slate-400 font-mono bg-slate-950/40 p-2 rounded border border-slate-850 overflow-x-auto">
+                          参数:{" "}
+                          {JSON.stringify(activeApp.actionPayload?.args || {})}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Input
+                          type="text"
+                          value={rejectionInput}
+                          onChange={(e) => setRejectionReason(e.target.value)}
+                          placeholder="若驳回，请在此处输入拒绝原因..."
+                          className="w-full bg-slate-950 text-xs py-1 border-slate-850 focus-visible:ring-amber-500 text-slate-100 rounded-lg placeholder-slate-600"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() =>
+                              handleApprovalAction(activeApp.id, "approve")
+                            }
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg h-8 text-[10px] font-bold transition flex items-center justify-center space-x-1"
+                          >
+                            <CheckCircle2 className="h-3 w-3" />
+                            <span>核准放行 (Approve)</span>
+                          </Button>
+                          <Button
+                            onClick={() =>
+                              handleApprovalAction(activeApp.id, "reject")
+                            }
+                            variant="destructive"
+                            className="flex-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg h-8 text-[10px] font-bold transition flex items-center justify-center space-x-1"
+                          >
+                            <XCircle className="h-3 w-3" />
+                            <span>驳回申请 (Reject)</span>
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
 
             {runningDetails.length === 0 ? (
               <div className="py-20 text-center space-y-3">

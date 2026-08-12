@@ -56,6 +56,9 @@ export function useApprovals({
             );
             setPendingApprovalsList(activeApprovals);
 
+            // 实时感知人工客服追加发送的消息
+            loadHistory(activeThreadId);
+
             // 🧠 审批流防脱节自动载入感应器：
             // 如果上一次状态记录中存在该 thread 的某个工单且状态为 waiting，而新拉取的数据中该工单状态变为了 approved / rejected / cancelled / expired，
             // 说明该审批任务刚刚获得了决策解决。我们将触发连续 6 次的多轮高灵敏轮询，确保在后台 Agent（约耗时 2-5s）执行完结并写盘后，物理刷新出最新的最终消息！

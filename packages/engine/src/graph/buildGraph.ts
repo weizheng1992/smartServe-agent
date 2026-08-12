@@ -364,8 +364,12 @@ export async function runAgent(
     ragDocs = ragRes.status === "fulfilled" ? ragRes.value : [];
   }
 
-  // Record user query in short memory
-  await shortMemory.addMessage("user", inputMessage);
+  const isResuming = inputMessage.startsWith("System:");
+
+  // Record user query in short memory (only if not an internal System resume prompt)
+  if (!isResuming) {
+    await shortMemory.addMessage("user", inputMessage);
+  }
 
   // 🚀 获取最新的短期会话历史，无缝传递给状态图总线
   const historyMsgs = await shortMemory.getMessages();
@@ -377,7 +381,6 @@ export async function runAgent(
 
   // Load saved task state (if any) to support stateless suspension & recovery
   let savedTaskPlan: TaskPlan | undefined = undefined;
-  const isResuming = inputMessage.startsWith("System:");
   if (isResuming) {
     try {
       const state = await taskMemory.getTaskState();

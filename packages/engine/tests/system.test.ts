@@ -171,6 +171,35 @@ describe("AI Agent Platform System Tests", () => {
     expect(listSubtask?.status).toBe("completed");
   }, 150000);
 
+  test("Full local graph execution flow for Adidas brand order listing for test@example.com", async () => {
+    const threadId = `test_suite_thread_adidas_${Date.now()}`;
+    const userId = "83d67d4e-104c-4325-8aa7-10d4389fc725";
+    const message = "查询我的订单";
+
+    // Pre-create Adidas thread in DB
+    try {
+      const { db: physicalDb } = require("db");
+      await physicalDb.createThread(threadId, userId, "adidas");
+    } catch (err) {
+      console.warn("[Test Suite] Failed to pre-create Adidas thread:", err);
+    }
+
+    const result = await runAgent(threadId, userId, message);
+
+    expect(result).toBeDefined();
+    expect(result.output).toBeDefined();
+    expect(typeof result.output).toBe("string");
+    expect(result.output.length).toBeGreaterThan(10);
+    // Must NOT mistakenly complain about Nike order ORD-98712
+    expect(result.output).not.toContain("不属于 Adidas");
+    expect(result.taskPlan).toBeDefined();
+    const listSubtask = result.taskPlan?.subtasks.find(
+      (st: SubTask) => st.result?.toolExecuted === "listUserOrders",
+    );
+    expect(listSubtask).toBeDefined();
+    expect(listSubtask?.status).toBe("completed");
+  }, 150000);
+
   test("Human escalation flow creates pending approval ticket and responds politely", async () => {
     const threadId = `test_suite_thread_escalate_${Date.now()}`;
     const userId = "test_suite_user";

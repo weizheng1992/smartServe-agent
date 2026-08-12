@@ -272,6 +272,41 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
       return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
     }
 
+    // 🛡️ 优先识别泛订单列表查询诉求 (如 "查询我的订单"、"我有哪些订单"、"支持退款的订单有哪些")
+    const isExplicitOrderIdInInput = /\bORD-[A-Za-z0-9]+\b/i.test(input);
+    const isGeneralOrderListQuery =
+      /查询.*订单|查订单|我的订单|订单列表|名下.*订单|支持退货.*订单|支持退款.*订单|可退.*订单|哪些.*订单/i.test(
+        input,
+      ) && !isExplicitOrderIdInInput;
+
+    if (isGeneralOrderListQuery) {
+      const fastPlan: TaskPlan = {
+        goal: "List recent orders for customer",
+        subtasks: [
+          {
+            id: "step_fast_list_orders",
+            description: "Call listUserOrders to fetch recent orders",
+            status: "pending" as const,
+          },
+        ],
+        currentStepIndex: 0,
+      };
+
+      console.log(
+        "[Planner Fast-Path] ⚡ Fast-path listUserOrders plan synthesized! Bypassing LLM planning call.",
+      );
+      if (state.jobId) {
+        agentEventEmitter.emit(`${state.jobId}:status`, {
+          status: "executing",
+          node: "planner",
+          message:
+            "⚡ 极速规划直达：检测到客户订单列表查询诉求，秒级调度 listUserOrders 工具进行物理查单！",
+          plan: fastPlan,
+        });
+      }
+      return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
+    }
+
     const extractedOrderId = extractOrderId(input, null, shortMemory);
 
     if (extractedOrderId) {

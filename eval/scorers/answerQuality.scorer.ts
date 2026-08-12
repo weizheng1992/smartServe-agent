@@ -1,14 +1,16 @@
 export default async function (output: string, context: any) {
   try {
     const customerQuestion = context.vars.input;
-    const expectedRules = context.vars.expectedRules || 'Be polite, express in Chinese, follow standard support SOP.';
+    const expectedRules =
+      context.vars.expectedRules ||
+      "Be polite, express in Chinese, follow standard support SOP.";
 
     // Lightweight call to our local custom endpoint directly, avoiding complex ESM path resolution bugs with @langchain/core package subpaths
     const payload = {
-      model: 'gemini-3.5-flash:latest',
+      model: "gemini-3.5-flash:latest",
       messages: [
         {
-          role: 'system',
+          role: "user",
           content: `You are a meticulous Customer Support Quality Assurance (QA) Judge.
 Evaluate the following Customer Support Assistant's reply against the Customer's Question and the strictly enforced Business SOP Rules.
 
@@ -27,24 +29,26 @@ Do NOT include markdown backticks or text outside of the JSON.`,
         },
       ],
       temperature: 0,
-      response_format: { type: 'json_object' },
     };
 
-    const res = await fetch('http://localhost:11211/api/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer dummy',
+    const res = await fetch(
+      "http://127.0.0.1:11211/api/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer dummy",
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
+    );
 
     if (!res.ok) {
       throw new Error(`Local judge model API returned status: ${res.status}`);
     }
 
     const resData = await res.json();
-    const content = resData.choices?.[0]?.message?.content || '';
+    const content = resData.choices?.[0]?.message?.content || "";
 
     let parsedJudge: any;
     try {
@@ -66,9 +70,13 @@ Do NOT include markdown backticks or text outside of the JSON.`,
     return {
       pass: score >= 0.8,
       score,
-      reason: parsedJudge.reason || 'Evaluated by LLM Judge',
+      reason: parsedJudge.reason || "Evaluated by LLM Judge",
     };
   } catch (err: any) {
-    return { pass: false, score: 0.0, reason: `Error in answerQuality LLM-as-a-judge scorer: ${err.message}` };
+    return {
+      pass: false,
+      score: 0.0,
+      reason: `Error in answerQuality LLM-as-a-judge scorer: ${err.message}`,
+    };
   }
 }

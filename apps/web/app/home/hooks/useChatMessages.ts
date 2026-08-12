@@ -41,15 +41,28 @@ export function useChatMessages({
       const res = await fetch(`/api/chat/messages?threadId=${threadIdToLoad}`);
       const data = await res.json();
       if (data.success && data.messages && data.messages.length > 0) {
-        setMessages(data.messages);
-      } else {
-        setMessages([
-          {
-            role: "assistant",
-            content:
-              "您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？",
-          },
-        ]);
+        setMessages((prev) => {
+          // 正在等待 AI 节点响应或具有 loading 状态时，暂不覆盖本地 state
+          const hasPendingLoader = prev.some(
+            (m) => m.isLoading || m.jobId === "pending-job",
+          );
+          if (hasPendingLoader) return prev;
+
+          const currentSig = JSON.stringify(
+            prev.map((m) => ({ role: m.role, content: m.content })),
+          );
+          const newSig = JSON.stringify(
+            data.messages.map((m: { role: string; content: string }) => ({
+              role: m.role,
+              content: m.content,
+            })),
+          );
+
+          if (currentSig !== newSig) {
+            return data.messages;
+          }
+          return prev;
+        });
       }
     } catch (err) {
       console.warn("[History Restore] 无法加载物理数据库的历史记录: ", err);
@@ -307,6 +320,13 @@ export function useChatMessages({
       const data = await response.json();
       if (!response.ok || !data.success) {
         throw new Error(data.error || "创建执行链路失败");
+      }
+
+      if (data.isHumanActive) {
+        setMessages((prev) => prev.filter((m) => m.jobId !== "pending-job"));
+        setIsSubmitting(false);
+        await loadHistory(activeThreadId);
+        return;
       }
 
       setMessages((prev) =>

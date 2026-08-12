@@ -151,6 +151,7 @@ ${historyContext}`;
         getDrizzle,
         db: physicalDb,
       } = require("db");
+      const { eq, and } = require("drizzle-orm");
       const drizzle = getDrizzle()!;
 
       try {
@@ -162,23 +163,42 @@ ${historyContext}`;
         console.warn("[Executor Node] Thread ensure warning:", tErr);
       }
 
-      const approvalId = crypto.randomUUID
+      let approvalId = crypto.randomUUID
         ? crypto.randomUUID()
         : Math.random().toString(36).substring(2, 15);
       const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-      await drizzle.insert(dbPendingApprovals).values({
-        id: approvalId,
-        threadId: state.threadId,
-        actionType: "human_escalation",
-        actionPayload: {
-          reason: "User requested human customer support intervention",
-          userInput: state.input,
-          triggerSource: "user_request",
-        },
-        status: "waiting",
-        deadline,
-      });
+      // 🛡️ 防重复工单机制：查询该 ThreadID 是否已有处于 waiting 状态的人工接管工单
+      const existingApprovals = await drizzle
+        .select()
+        .from(dbPendingApprovals)
+        .where(
+          and(
+            eq(dbPendingApprovals.threadId, state.threadId),
+            eq(dbPendingApprovals.status, "waiting"),
+          ),
+        )
+        .limit(1);
+
+      if (existingApprovals.length > 0) {
+        approvalId = existingApprovals[0].id;
+        console.log(
+          `[Executor Node] 🎯 Thread ${state.threadId} 已存在挂起中的人工工单 (${approvalId})，无需重复创建！`,
+        );
+      } else {
+        await drizzle.insert(dbPendingApprovals).values({
+          id: approvalId,
+          threadId: state.threadId,
+          actionType: "human_escalation",
+          actionPayload: {
+            reason: "User requested human customer support intervention",
+            userInput: state.input,
+            triggerSource: "user_request",
+          },
+          status: "waiting",
+          deadline,
+        });
+      }
 
       const updatedStep = {
         ...stepToRun,

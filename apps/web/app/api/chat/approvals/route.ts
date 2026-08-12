@@ -1,4 +1,4 @@
-import { getDrizzle, pendingApprovals, threads } from "db";
+import { db, getDrizzle, pendingApprovals, threads } from "db";
 import { desc, eq } from "drizzle-orm";
 import { runAgent } from "engine";
 import { type NextRequest, NextResponse } from "next/server";
@@ -43,8 +43,82 @@ export async function POST(req: NextRequest) {
   let fallbackAcquired = false;
 
   try {
-    const { approvalId, action, rejectionReason, humanReply } =
-      await req.json();
+    const body = await req.json();
+    const {
+      approvalId,
+      threadId,
+      action,
+      rejectionReason,
+      humanReply,
+      isFinish,
+    } = body;
+
+    // 客服随时主动发起 IM 接管请求
+    if (action === "start_human_takeover") {
+      const activeThreadId = threadId || "default_thread";
+      const drizzle = getDrizzle()!;
+
+      // 1. 查找是否有已存在的挂起工单
+      const existing = await drizzle
+        .select()
+        .from(pendingApprovals)
+        .where(eq(pendingApprovals.threadId, activeThreadId))
+        .orderBy(desc(pendingApprovals.createdAt))
+        .limit(1);
+
+      if (existing[0] && existing[0].status === "waiting") {
+        return NextResponse.json({
+          success: true,
+          approvalId: existing[0].id,
+          approval: existing[0],
+        });
+      }
+
+      // 2. 物理创建主动接管工单
+      const newId = `app_takeover_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const deadline = new Date(Date.now() + 1800000).toISOString();
+      const payload = {
+        userInput: "客服随时主动接管实时对话",
+        reason: "客服主动发起 IM 实时接管",
+      };
+
+      await drizzle.insert(pendingApprovals).values({
+        id: newId,
+        threadId: activeThreadId,
+        actionType: "human_escalation",
+        actionPayload: payload,
+        status: "waiting",
+        deadline,
+      });
+
+      const sysMsgId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : require("node:crypto").randomUUID();
+      await db.addMessage({
+        id: sysMsgId,
+        threadId: activeThreadId,
+        role: "system",
+        content:
+          "【系统提示】人工客服已主动接入当前会话，您可以向客服发送消息进行实时沟通。",
+        timestamp: new Date().toISOString(),
+      });
+
+      const newApproval = {
+        id: newId,
+        threadId: activeThreadId,
+        actionType: "human_escalation",
+        actionPayload: payload,
+        status: "waiting",
+        deadline,
+        createdAt: new Date().toISOString(),
+      };
+
+      return NextResponse.json({
+        success: true,
+        approvalId: newId,
+        approval: newApproval,
+      });
+    }
 
     if (!approvalId || !action) {
       return NextResponse.json(
@@ -111,25 +185,79 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // 5. 更新审批状态
-      const updatedPayload = record.actionPayload
-        ? {
-            ...(record.actionPayload as any),
-            rejectionReason: rejectionReason || "",
-          }
-        : { rejectionReason };
+      // 5. 人工实时聊天模式 (human_message / isFinish === false)
+      if (
+        action === "human_message" ||
+        (action === "human_reply" && isFinish === false)
+      ) {
+        if (humanReply && humanReply.trim()) {
+          const msgId = crypto.randomUUID
+            ? crypto.randomUUID()
+            : require("node:crypto").randomUUID();
+          await db.addMessage({
+            id: msgId,
+            threadId: record.threadId,
+            role: "assistant",
+            content: `[人工客服] ${humanReply.trim()}`,
+            timestamp: new Date().toISOString(),
+          });
+          console.log(
+            `[Human IM Chat] 人工客服回复已实时写入 thread: ${record.threadId}`,
+          );
+        }
+        return NextResponse.json({
+          success: true,
+          isHumanActive: true,
+          threadId: record.threadId,
+        });
+      }
 
+      // 6. 更新审批状态 (结束人工会话/核准/驳回/取消)
       let nextStatus = "rejected";
       if (action === "approve") {
         nextStatus = "approved";
       } else if (action === "cancel") {
         nextStatus = "cancelled";
       } else if (
+        action === "human_finish" ||
         action === "human_reply" ||
         record.actionType === "human_escalation"
       ) {
         nextStatus = "resolved_by_human";
+
+        // 写入最终人工回复和系统切回提示
+        if (humanReply && humanReply.trim()) {
+          const msgId = crypto.randomUUID
+            ? crypto.randomUUID()
+            : require("node:crypto").randomUUID();
+          await db.addMessage({
+            id: msgId,
+            threadId: record.threadId,
+            role: "assistant",
+            content: `[人工客服] ${humanReply.trim()}`,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const sysMsgId = crypto.randomUUID
+          ? crypto.randomUUID()
+          : require("node:crypto").randomUUID();
+        await db.addMessage({
+          id: sysMsgId,
+          threadId: record.threadId,
+          role: "system",
+          content:
+            "【系统提示】人工客服服务已结束，已成功为您切回 AI 智能助手。",
+          timestamp: new Date().toISOString(),
+        });
       }
+
+      const updatedPayload = record.actionPayload
+        ? {
+            ...(record.actionPayload as any),
+            rejectionReason: rejectionReason || "",
+          }
+        : { rejectionReason };
 
       const finalPayload = {
         ...updatedPayload,
@@ -148,15 +276,21 @@ export async function POST(req: NextRequest) {
         `[Approval POST] 成功人工处理工单 [ID: ${approvalId}] ➔ 决议为 [${nextStatus}]`,
       );
 
+      // 人工服务结束模式：直接返回成功，无需重触发 AI Agent 执行图
+      if (nextStatus === "resolved_by_human") {
+        return NextResponse.json({
+          success: true,
+          threadId: record.threadId,
+          status: nextStatus,
+        });
+      }
+
       // 6. 产生一个新的 jobId，用于让前端订阅恢复决策流之后的 SSE 状态推送
       const jobId = `job_resume_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
 
-      // 7. 真正拉起并恢复 Agent 执行
+      // 7. 真正拉起并恢复 Agent 执行 (用于工具审批放行/驳回/取消等 HITL 流程)
       let systemPromptText = "";
-      if (nextStatus === "resolved_by_human") {
-        const replyText = humanReply || "人工客服已接管并处理了您的请求。";
-        systemPromptText = `System: Human support operator responded to the user: "${replyText}". Please present this response politely to the user in Chinese and resume normal support.`;
-      } else if (nextStatus === "approved") {
+      if (nextStatus === "approved") {
         systemPromptText =
           "System: Human approval granted. Please execute the requested action.";
       } else if (nextStatus === "cancelled") {

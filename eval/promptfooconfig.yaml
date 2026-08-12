@@ -7,7 +7,7 @@ prompts:
 providers:
   - id: "openai:chat:gemini-3.5-flash:latest"
     config:
-      apiBase: "http://localhost:11211/api/openai/v1"
+      apiBase: "http://127.0.0.1:11211/api/openai/v1"
       apiKey: "dummy"
       temperature: 0
 
