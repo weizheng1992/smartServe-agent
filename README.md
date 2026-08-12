@@ -96,55 +96,68 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 ```
 .
 ├── apps/
-│   ├── web/                         # Next.js 15 主站用户聊天与客服交互系统
+│   ├── web/                         # Next.js 15 主站用户聊天与客服交互系统 (3000 端口)
 │   │   ├── app/                     # App Router 核心路由
-│   │   │   ├── api/                 # 服务端 API 接口层
+│   │   │   ├── api/                 # 服务端 API 接口层 (轻量 Controller 层)
 │   │   │   │   ├── analytics/       # SaaS 财务算力 / BI 大盘统计端点
-│   │   │   │   ├── auth/login/      # 多商户隔离登录鉴权
+│   │   │   │   ├── auth/login/      # 多商户隔离登录鉴权 API
 │   │   │   │   ├── chat/            # 智能对话核心路由 (ChatSessionService & ApprovalService 领域服务)
-│   │   │   │   │   ├── approvals/   # 人工审核工单决策 API (轻量转发控制器)
+│   │   │   │   │   ├── approvals/   # 人工审核工单决策 API 控制器
 │   │   │   │   │   ├── services/    # ChatSessionService & ApprovalService 领域服务层
-│   │   │   │   │   └── route.ts     # 接收对话请求分发中转 (轻量控制器)
-│   │   │   │   └── chat/[jobId]/stream/ # SSE 实时状态机节点日志广播管道
+│   │   │   │   │   └── route.ts     # 接收对话请求分发中转控制器
+│   │   │   │   ├── chat/[jobId]/stream/ # SSE 实时状态机节点日志广播管道
+│   │   │   │   └── health/          # 系统健康检查轮询探针
 │   │   │   ├── home/                # 核心控制台面板
 │   │   │   │   ├── components/      # ChatArea, APMPanel, LeftSidebar, AuditDesk
-│   │   │   │   ├── hooks/           # useChatMessages (集成 AgentStreamClient), useChatThreads
+│   │   │   │   ├── hooks/           # useChatMessages (基于 AgentStreamClient), useChatThreads
 │   │   │   │   └── utils/           # AgentStreamClient (SSE 订阅客户端) & translateTaskPlan
-│   │   │   └── page.tsx             # 客服核心交互大屏
+│   │   │   ├── login/               # 商户登录界面
+│   │   │   └── page.tsx             # 客服核心交互大屏入口
+│   │   ├── components/              # 登录与通用组件
+│   │   ├── e2e/                     # Playwright 端到端 UI 自动化测试
 │   │   └── package.json
 │   │
 │   └── admin/                       # 商户/系统级人工核签中台大屏 (3001 端口)
+│       ├── app/                     # App Router 路由结构
+│       │   └── home/                # 工单流转与人工接管控制台
+│       └── package.json
 │
 ├── packages/
 │   ├── engine/                      # 核心 Agent 决策图与分布式工作流 (LangGraph + Temporal)
 │   │   ├── src/
 │   │   │   ├── graph/               # 决策图定义与节点
 │   │   │   │   ├── nodes/           # StepExecutionEngine, ApprovalPolicyEngine, triage, planner, validator, finish
+│   │   │   │   ├── eventEmitter.ts  # 本地直跑事件广播器
 │   │   │   │   └── buildGraph.ts    # 编译 LangGraph 并集成死循环物理熔断器
 │   │   │   ├── memory/              # AgentMemoryEngine 统一 4 重多维度状态记忆门面
 │   │   │   │   ├── agentMemoryEngine.ts # 统一 4 层记忆并行拉取与归档门面
-│   │   │   │   ├── shortMemory.ts   # 短期对话记忆
-│   │   │   │   ├── longMemory.ts    # 长期事实事实卡片记忆
-│   │   │   │   ├── episodicMemory.ts# 真实情境回忆事件
-│   │   │   │   └── taskMemory.ts    # 物理 DAG 任务状态持久化层
+│   │   │   │   ├── shortMemory.ts   # 短期对话历史记忆
+│   │   │   │   ├── longMemory.ts    # 长期事实卡片提取与向量记忆
+│   │   │   │   ├── episodicMemory.ts# 真实情境回忆事件记忆
+│   │   │   │   └── taskMemory.ts    # 物理 Task Plan 状态持久化层
 │   │   │   ├── rag/                 # KnowledgeEngine 统一 RAG 知识库门面
-│   │   │   │   ├── knowledgeEngine.ts # 统一混合检索、文件热替换、单切片维护与目录入库门面
+│   │   │   │   ├── knowledgeEngine.ts # 混合检索、文件热替换、单切片维护与目录入库门面
 │   │   │   │   └── contextualRag.ts # Anthropic Contextual RAG 混合检索引擎
 │   │   │   ├── orchestrator/        # WorkflowOrchestrator 统一工作流调度与降级防御层
 │   │   │   │   └── workflowOrchestrator.ts # 统一 Temporal 工作流与本地 LangGraph 调度
+│   │   │   ├── llm/                 # LLM 自愈重试与 CircuitBreaker 断路器
 │   │   │   └── temporal/            # 分布式工作流编排 (client, worker, workflows, activities)
 │   │   └── tests/                   # 46+ 全量单元与集成测试
 │   │
 │   ├── db/                          # 关系型范式数据层 (Drizzle ORM & Domain Repositories)
+│   │   ├── drizzle/                 # 数据库 Migration 自动生成 SQL
 │   │   └── src/
 │   │       ├── repositories/        # 强类型领域仓储接口 (IUserRepository, IThreadRepository, IMessageRepository, IOrderRepository)
 │   │       ├── client.ts            # Drizzle PostgreSQL 连接客户端
 │   │       ├── fakePool.ts          # 隔离的 FakePool 高保真离线仿真关系型数据库
-│   │       └── schema.ts            # 3NF 物理表定义
+│   │       ├── schema.ts            # 3NF 物理表定义
+│   │       └── seed.ts              # 种子数据与租户策略灌入脚本
 │   │
-│   ├── tools/                       # 物理工具链与安全红线拦截器
-│   ├── observability/               # 财务度量分析与 APM Trace 观测包
-│   └── business-configs/            # SaaS 多商户动态 JSON 策略配置
+│   ├── tools/                       # 物理工具链与安全红线拦截器 (ecommerce, screenshot, registry)
+│   ├── observability/               # 财务度量分析与 APM Trace 观测包 (Langfuse, Pino Logger, metrics)
+│   ├── business-configs/            # SaaS 多商户动态 JSON 策略配置 (ecommerce.config.ts)
+│   ├── types/                       # 全局强类型定义共享包 (agent, approval, config, db, event, observability, tool)
+│   └── ui/                          # 共享 UI 组件库与基础样式包 (Tailwind, Lucide Icons, Shadcn utils)
 │
 ├── CONTEXT.md                       # 领域上下文与深度模块规范名词表
 ├── CLAUDE.md                        # Claude Code 开发 SOP 指南
