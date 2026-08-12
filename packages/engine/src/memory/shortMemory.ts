@@ -43,6 +43,10 @@ export class ShortMemory {
       content !== undefined && content !== null ? String(content) : "";
 
     try {
+      await db.createThread(
+        this.threadId,
+        "83d67d4e-104c-4325-8aa7-10d4389fc725",
+      );
       await db.addMessage({
         id,
         threadId: this.threadId,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TaskPlan } from "types";
+import { AgentStreamClient } from "../utils/agentStreamClient";
 import { translateTaskPlan } from "../utils/translateTaskPlan";
 import type { Message, UserSession } from "./types";
 
@@ -43,7 +44,6 @@ export function useChatMessages({
       const data = await res.json();
       if (data.success && data.messages && data.messages.length > 0) {
         setMessages((prev) => {
-          // 正在等待 AI 节点响应或具有 loading 状态时，暂不覆盖本地 state
           const hasPendingLoader = prev.some(
             (m) => m.isLoading || m.jobId === "pending-job",
           );
@@ -83,7 +83,6 @@ export function useChatMessages({
         },
       ]);
     }
-    // Safe reset of details & plan on thread switch
     setRunningDetails([]);
     setActivePlan(null);
     setCurrentStepText("");
@@ -91,28 +90,17 @@ export function useChatMessages({
 
   const triggerStream = useCallback(
     async (jobId: string) => {
-      try {
-        const eventSource = new EventSource(`/api/chat/${jobId}/stream`);
-        setRunningDetails([]); // Reset logger
+      setRunningDetails([]);
+      const client = new AgentStreamClient(jobId);
 
-        eventSource.addEventListener("status", (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+      client.connect({
+        onStatus: (data) => {
           if (data.tokens !== undefined) {
             setTokensConsumed(data.tokens);
           }
           if (data.message) {
             const zhMessage = data.message;
-            let nodeName = data.node || "system";
-
-            if (data.node === "triage") {
-              nodeName = "Triage 节点";
-            } else if (data.node === "planner") {
-              nodeName = "Planner 节点";
-            } else if (data.node === "executor") {
-              nodeName = "Executor 节点";
-            } else if (data.node === "validator") {
-              nodeName = "Validator 节点";
-            }
+            const nodeName = data.nodeName || "system";
 
             setCurrentStepText(zhMessage);
 
@@ -146,16 +134,13 @@ export function useChatMessages({
             });
           }
           if (data.plan) {
-            setActivePlan(translateTaskPlan(data.plan, false));
+            setActivePlan(translateTaskPlan(data.plan as any, false));
           }
-        });
-
-        eventSource.addEventListener("result", (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
+        },
+        onResult: (data) => {
           if (data.tokens !== undefined) {
             setTokensConsumed(data.tokens);
           }
-          eventSource.close();
 
           setRunningDetails((prev) =>
             prev.map((log) => {
@@ -175,9 +160,9 @@ export function useChatMessages({
             if (loaderIdx !== -1) {
               next[loaderIdx] = {
                 role: "assistant",
-                content: data.output,
+                content: data.output || "",
                 plan: data.taskPlan
-                  ? translateTaskPlan(data.taskPlan, true)
+                  ? translateTaskPlan(data.taskPlan as any, true)
                   : undefined,
                 jobId,
               };
@@ -186,23 +171,17 @@ export function useChatMessages({
           });
 
           fetchThreads();
-
           setActivePlan(null);
           setCurrentStepText("");
           setIsSubmitting(false);
-        });
-
-        eventSource.addEventListener("error", (event: Event) => {
-          console.error("SSE Error:", event);
-          eventSource.close();
+        },
+        onError: (err) => {
+          console.error("[useChatMessages] SSE Stream error:", err);
           setIsSubmitting(false);
           setCurrentStepText("");
           setActivePlan(null);
-        });
-      } catch (err) {
-        console.error("Failed to initialize stream", err);
-        setIsSubmitting(false);
-      }
+        },
+      });
     },
     [fetchThreads],
   );

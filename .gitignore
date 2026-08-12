@@ -65,6 +65,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Claude Code worktrees
+.claude/worktrees/
+.claude/plans/
+
 # Turbo repo cache
 .turbo/
 
