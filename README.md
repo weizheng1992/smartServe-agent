@@ -36,6 +36,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
    - [4.14 Latency Optimization and Validator Bypass (校验器自动绿灯放行)](#414-latency-optimization-and-validator-bypass-校验器自动绿灯放行)
 5. [质量保障与评测体系 (Testing & Tooling)](#5-质量保障与评测体系-testing--tooling)
 6. [开发与部署命令](#6-开发与部署命令)
+7. [生产上线前 SOP 流程 (Pre-Launch Checklist)](#7-生产上线前-sop-流程-pre-launch-checklist)
 
 ---
 
@@ -419,6 +420,104 @@ bun run dev
 ```
 
 打开浏览器访问 [http://localhost:3000](http://localhost:3000) 即可自由开启一场极具科技美感的智能客服人机协同、自动回溯 and 知识 RAG 体验！
+
+---
+
+## 7. 生产上线前 SOP 流程 (Pre-Launch Checklist & Standard Operating Procedure)
+
+在将 **smartServe-agent** 智能客服决策中台平台正式部署至生产环境（Production）前，必须按照以下标准 SOP 步骤逐一核验与执行，以确保高可用性、金融级安全性与算力成本可控：
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        生产环境上线 SOP 标准流程                         │
+│                                                                        │
+│  [1. 基础设施与环境] ──► [2. 安全防护与脱敏] ──► [3. 全套自动化回归测试] │
+│                                                                  │     │
+│  [6. 可观测性与告警] ◄── [5. 熔断与防暴刷验证] ◄── [4. 高并发性能压测]   │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 7.1 基础设施与环境验证 (Environment & Infrastructure Setup)
+
+1. **数据库准备 (PostgreSQL & pgvector)**：
+   - 生产级 PostgreSQL 数据库（建议 15+）且必须安装 `pgvector` 向量扩展插件。
+   - 执行数据库 Migration 物理生成表结构：
+     ```bash
+     bun drizzle-kit generate
+     bun drizzle-kit push
+     ```
+   - 执行种子数据初始化与租户策略灌入：
+     ```bash
+     bun packages/db/src/seed.ts
+     ```
+2. **Redis 物理集群验证 (Redis Distributed Cache & Locks)**：
+   - 确认 Redis 连接地址、端口及鉴权密码配置（如 `REDIS_URL=redis://:password@redis-host:6379`）。
+   - 验证 Redis `SETNX` 分布式锁与缓存可用性（确保工单核准防重入与并发请求 Singleflight 能正常工作）。
+3. **Temporal 分布式工作流服务 (Temporal Engine)**：
+   - 部署 Temporal 生产级 Server（端口 `7239`），并启动 Temporal Worker 进程守护：
+     ```bash
+     bun --filter engine worker
+     ```
+
+### 7.2 安全防护与密钥脱敏 Check (Security & Secrets Management)
+
+1. **环境变量脱敏**：
+   - 检查生产环境 `.env` 文件，确保包含：`OPENAI_API_KEY` / `GEMINI_API_KEY`、`POSTGRES_URL`、`REDIS_URL`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` 等。
+   - **绝对禁止**将密钥、数据库密码或凭证直接硬编码写入 git 仓库提交。
+2. **SaaS 多租户物理隔离校验**：
+   - 确认 Drizzle ORM 查询物理附加了 `business_id` 条件隔离，防止跨商户数据透传与越权。
+3. **退款政策红线与金融印鉴校验 (Financial SOP & Audit Trail)**：
+   - 确认工具层 `processRefund` 绑定的商户时效限制（Nike 30天 / Adidas 14天 / Ecommerce 7天）与 SHA256 哈希印鉴签名已开启。
+
+### 7.3 质量验证与自动化测试全覆盖 (Automated Testing & Quality Gate)
+
+上线前必须通过 100% 的自动化测试流水线：
+
+```bash
+# 1. 运行全套单元测试与集成测试 (包含 CircuitBreaker、QuotaGuard、Planner、Executor、Memory 28+ 测试点)
+bun test
+
+# 2. 运行 Playwright 端到端浏览器对话测试
+bun run test:e2e
+
+# 3. 运行 Promptfoo 大模型提示词防越狱与意图准确率评测
+bun run test:prompt
+
+# 4. 运行 Biome 极速代码规范校验
+bun run biome:check
+```
+
+### 7.4 高并发性能压测 (High-Concurrency Load Testing)
+
+上线前使用内置的压测脚本测试系统吞吐量与延迟表现：
+
+```bash
+# 启动 20 并发线程、总计 100 笔请求的 SSE 吞吐量压测
+bun run test:load --concurrency 20 --total 100 --url https://your-production-domain.com
+```
+
+- **验证指标**：
+  - TTFB (首字节响应延迟) ≤ 300ms
+  - 成功率 (Success Rate) = 100%
+  - P90 延迟 ≤ 1500ms (基于 Fast-Path 旁路优化)
+
+### 7.5 熔断与配额防暴刷机制验证 (Circuit Breaker & Quota Guard)
+
+1. **租户级 QuotaGuard 配额保护**：
+   - 单用户/租户接口频率上限：**60 次/分钟**
+   - 算力 Token 每日上限：**500,000 Tokens/天**
+   - 超出限制时系统自动触发 `429 Too Many Requests`，保护系统不被恶意流量暴刷。
+2. **LLM 断路器熔断降级 (CircuitBreaker)**：
+   - 当上游大模型遭遇连续 5 次报错（如 5xx 或 429 速率限制）时，自动触发熔断状态（30 秒冷却）。
+   - 熔断期间系统自动降级，向用户推送友好自愈提示，防止集群因请求积压崩溃。
+
+### 7.6 可观测性与健康检查 (Observability & Health Checks)
+
+1. **APM 算力大盘与 Trace 跟踪**：
+   - 登录 Langsmith / Langfuse 控制台，确认所有 Agent 节点决策流、大模型输入输出及工具调用均可实时生成 Trace。
+   - 访问前端 `/api/analytics` 查看 SaaS BI 财务大盘数据。
+2. **健康检查轮询**：
+   - 配置 LB / K8s 存活探针轮询 `GET /api/health` 端口，实时监控系统健康状态。
 
 ---
 
