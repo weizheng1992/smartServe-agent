@@ -1,4 +1,5 @@
 import { db, getDrizzle, pendingApprovals } from "db";
+import { checkTenantQuotaGuard } from "./quotaGuard";
 import { and, eq } from "drizzle-orm";
 import {
   agentEventEmitter,
@@ -66,6 +67,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "userId is strictly required" },
         { status: 400 },
+      );
+    }
+
+    // 🛡️ Step 0.5: 租户级防暴刷速率限制与 Token 配额校验 (Quota Guard)
+    const quotaCheck = await checkTenantQuotaGuard(userId);
+    if (!quotaCheck.allowed) {
+      return NextResponse.json(
+        { error: quotaCheck.reason || "Quota limit exceeded" },
+        { status: 429 },
       );
     }
 

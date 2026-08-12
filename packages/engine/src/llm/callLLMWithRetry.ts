@@ -1,8 +1,62 @@
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { agentEventEmitter } from "../graph/eventEmitter";
 
+// 🛡️ 熔断降级状态机 (Circuit Breaker)
+export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
+
+export class CircuitBreaker {
+  private failureCount = 0;
+  private maxFailures = 5;
+  private cooldownMs = 30000; // 30 秒熔断冷却期
+  private state: CircuitState = "CLOSED";
+  private nextAttemptTime = 0;
+
+  public isOpen(): boolean {
+    if (this.state === "OPEN") {
+      if (Date.now() >= this.nextAttemptTime) {
+        this.state = "HALF_OPEN";
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  public recordSuccess(): void {
+    this.failureCount = 0;
+    this.state = "CLOSED";
+  }
+
+  public recordFailure(): void {
+    this.failureCount++;
+    if (this.failureCount >= this.maxFailures || this.state === "HALF_OPEN") {
+      this.state = "OPEN";
+      this.nextAttemptTime = Date.now() + this.cooldownMs;
+      console.warn(
+        `[CircuitBreaker] ⚠️ 连续调用失败达阈值 (${this.failureCount} 次)，已触发熔断拦截！状态置为 OPEN，冷却时间: ${this.cooldownMs / 1000} 秒`,
+      );
+    }
+  }
+
+  public getStatus() {
+    return {
+      state: this.state,
+      failureCount: this.failureCount,
+      nextAttemptInMs: Math.max(0, this.nextAttemptTime - Date.now()),
+    };
+  }
+
+  public reset(): void {
+    this.failureCount = 0;
+    this.state = "CLOSED";
+    this.nextAttemptTime = 0;
+  }
+}
+
+export const globalCircuitBreaker = new CircuitBreaker();
+
 // 🛡️ 物理自愈代理：在生产环境下，模型调用极易遭遇网络抖动或微服务瞬时延迟
-// 本代理对系统允许使用的 'gemini-3.5-flash:latest' 模型进行 3次指数退避自动重试，提供核心决策链路高可用保障！
+// 本代理对系统允许使用的 'gemini-3.5-flash:latest' 模型进行 3次指数退避自动重试，并结合全局 CircuitBreaker 提供核心决策链路高可用保障！
 class ResilientLLM {
   private model: ChatOpenAI;
   private jobId?: string;
@@ -13,6 +67,18 @@ class ResilientLLM {
   }
 
   async invoke(input: unknown, options?: unknown) {
+    if (globalCircuitBreaker.isOpen()) {
+      const status = globalCircuitBreaker.getStatus();
+      const errMsg = `⚠️ 上游 AI 服务处于熔断状态 (${status.state})，冷却剩余: ${Math.ceil(status.nextAttemptInMs / 1000)}s。`;
+      if (this.jobId) {
+        agentEventEmitter.emit(`${this.jobId}:status`, {
+          status: "circuit_breaker_open",
+          message: errMsg,
+        });
+      }
+      throw new Error(errMsg);
+    }
+
     let attempts = 0;
     const maxAttempts = 3;
     let delay = 1000; // 初始退避 1 秒
@@ -31,6 +97,9 @@ class ResilientLLM {
           input as Parameters<ChatOpenAI["invoke"]>[0],
           options as Parameters<ChatOpenAI["invoke"]>[1],
         );
+
+        // 调用成功，记录熔断器成功状态
+        globalCircuitBreaker.recordSuccess();
 
         // 无感拦截并累加 Token 消耗
         try {
@@ -62,7 +131,9 @@ class ResilientLLM {
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.warn(`[LLM Resilient Attempt ${attempts} Failed]:`, errMsg);
+
         if (attempts >= maxAttempts) {
+          globalCircuitBreaker.recordFailure();
           throw err; // 达到最大尝试次数，最终向上抛出异常
         }
         // 指数退避重试延迟

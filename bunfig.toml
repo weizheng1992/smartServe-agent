@@ -1,0 +1,3 @@
+[test]
+# Skip Playwright e2e tests during unit testing with bun test
+skip = ["**/e2e/**"]

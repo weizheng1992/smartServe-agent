@@ -14,6 +14,7 @@
     "biome:format": "biome format --write .",
     "biome:lint": "biome lint --write .",
     "biome:check": "biome check --write .",
+    "test:load": "bun scripts/load-test.ts",
     "test:e2e": "playwright test",
     "test:prompt": "promptfoo eval -c eval/promptfooconfig.yaml",
     "db:clean": "bun packages/db/src/scripts/check-and-clean.ts"
