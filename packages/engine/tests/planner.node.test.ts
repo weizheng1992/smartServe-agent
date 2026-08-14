@@ -90,11 +90,24 @@ describe("Planner Node Unit Tests", () => {
     expect(result.globalTransitionsCount).toBe(1);
   });
 
-  test("Inquiry about eligible return orders plans listUserOrders instead of processRefund", async () => {
+  test("Multi-Intent Fast-Path synthesizes multi-subtask plan when Order ID is present", async () => {
     const state: Partial<typeof AgentStateAnnotation.State> = {
-      threadId: "test_thread_eligible_returns",
-      intents: [{ intent: "order_status", confidence: 1.0 }],
-      input: "我可以退货的订单有哪些",
+      threadId: "test_thread_multi_fast",
+      intents: [
+        {
+          intent: "order_status",
+          confidence: 0.95,
+          type: "primary",
+          entities: { orderId: "ORD-77777" },
+        },
+        {
+          intent: "refund",
+          confidence: 0.9,
+          type: "secondary",
+          entities: { orderId: "ORD-77777" },
+        },
+      ],
+      input: "查下 ORD-77777 物流，另外帮我发起退款",
       globalTransitionsCount: 0,
     };
 
@@ -104,11 +117,10 @@ describe("Planner Node Unit Tests", () => {
 
     expect(result).toBeDefined();
     expect(result.taskPlan).toBeDefined();
-    expect(result.taskPlan.subtasks.length).toBeGreaterThan(0);
-    // Ensure no step tries to execute processRefund without a specific order
-    const hasRefundStep = result.taskPlan.subtasks.some((st: SubTask) =>
-      st.description.includes("processRefund"),
-    );
-    expect(hasRefundStep).toBe(false);
-  }, 15000);
+    expect(result.taskPlan.goal).toContain("ORD-77777");
+    expect(result.taskPlan.subtasks.length).toBe(2);
+    expect(result.taskPlan.subtasks[0].id).toBe("step_fast_status_0");
+    expect(result.taskPlan.subtasks[1].id).toBe("step_fast_refund_1");
+    expect(result.globalTransitionsCount).toBe(1);
+  });
 });

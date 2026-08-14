@@ -8,6 +8,8 @@ export type SupportedIntent =
 export interface IntentResult {
   intent: string;
   confidence: number;
+  type?: "primary" | "secondary";
+  entities?: Record<string, string>;
 }
 
 export interface SubTaskResult {

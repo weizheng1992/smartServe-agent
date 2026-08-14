@@ -232,10 +232,9 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
     }
   }
 
-  // ⚡ 极速直达通道 (Fast-Path Single-Step Plan Synthesizer):
-  // 对于单意图查询 (如纯 order_status、纯 refund 或转人工请求) 且无驳回上下文时，
-  // 进行零 LLM 开销的物理单步计划组装，大幅削减 1.5 ~ 2 秒的首字生成延迟！
-  if (!rejectionContext && intents && intents.length === 1) {
+  // ⚡ 极速直达通道 (Fast-Path Multi-Intent Plan Synthesizer):
+  // 支持单意图及多意图 (如同时查询订单与申请退款) 零 LLM 开销的物理直达计划组装！
+  if (!rejectionContext && intents && intents.length > 0) {
     const singleIntent = intents[0].intent;
 
     if (singleIntent === "human_escalation") {
@@ -274,7 +273,7 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
         input,
       ) && !isExplicitOrderIdInInput;
 
-    if (isGeneralOrderListQuery) {
+    if (isGeneralOrderListQuery && intents.length === 1) {
       const fastPlan: TaskPlan = {
         goal: "List recent orders for customer",
         subtasks: [
@@ -302,49 +301,60 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
       return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
     }
 
-    const extractedOrderId = extractOrderId(input, null, shortMemory);
+    // 优先提取意图槽位中的 orderId，其次正则及对话历史提取
+    const entityOrderId = intents.find((i) => i.entities?.orderId)?.entities
+      ?.orderId;
+    const extractedOrderId =
+      entityOrderId || extractOrderId(input, null, shortMemory);
 
     if (extractedOrderId) {
-      let fastPlan: TaskPlan | null = null;
-      if (singleIntent === "order_status") {
-        fastPlan = {
-          goal: `Query status for order ${extractedOrderId}`,
-          subtasks: [
-            {
-              id: "step_fast_status",
+      const actionIntents = intents.filter(
+        (i) => i.intent === "order_status" || i.intent === "refund",
+      );
+
+      if (actionIntents.length > 0) {
+        const subtasks: SubTask[] = [];
+
+        for (const [idx, item] of actionIntents.entries()) {
+          const suffix = actionIntents.length > 1 ? `_${idx}` : "";
+          if (item.intent === "order_status") {
+            subtasks.push({
+              id: `step_fast_status${suffix}`,
               description: `Call getOrderStatus for order ${extractedOrderId}`,
               status: "pending" as const,
-            },
-          ],
-          currentStepIndex: 0,
-        };
-      } else if (singleIntent === "refund") {
-        fastPlan = {
-          goal: `Process refund for order ${extractedOrderId}`,
-          subtasks: [
-            {
-              id: "step_fast_refund",
+            });
+          } else if (item.intent === "refund") {
+            subtasks.push({
+              id: `step_fast_refund${suffix}`,
               description: `Call processRefund for order ${extractedOrderId}`,
               status: "pending" as const,
-            },
-          ],
-          currentStepIndex: 0,
-        };
-      }
-
-      if (fastPlan) {
-        console.log(
-          `[Planner Fast-Path] ⚡ Fast-path single-step plan synthesized for order [${extractedOrderId}]! Bypassing LLM planning call.`,
-        );
-        if (state.jobId) {
-          agentEventEmitter.emit(`${state.jobId}:status`, {
-            status: "executing",
-            node: "planner",
-            message: `⚡ 极速规划直达：成功秒级关联订单号 [${extractedOrderId}]，绕过大模型规划消耗，精准推入执行链！`,
-            plan: fastPlan,
-          });
+            });
+          }
         }
-        return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
+
+        if (subtasks.length > 0) {
+          const fastPlan: TaskPlan = {
+            goal:
+              subtasks.length === 1
+                ? `${actionIntents[0].intent === "order_status" ? "Query status" : "Process refund"} for order ${extractedOrderId}`
+                : `Query status and process refund for order ${extractedOrderId}`,
+            subtasks,
+            currentStepIndex: 0,
+          };
+
+          console.log(
+            `[Planner Fast-Path] ⚡ Fast-path synthesized ${subtasks.length} subtask(s) for order [${extractedOrderId}]! Bypassing LLM planning call.`,
+          );
+          if (state.jobId) {
+            agentEventEmitter.emit(`${state.jobId}:status`, {
+              status: "executing",
+              node: "planner",
+              message: `⚡ 极速规划直达：关联订单号 [${extractedOrderId}]，快速生成 ${subtasks.length} 项多意图执行步骤，绕过大模型规划消耗！`,
+              plan: fastPlan,
+            });
+          }
+          return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
+        }
       }
     }
   }

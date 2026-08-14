@@ -107,4 +107,24 @@ describe("Triage Node Unit Tests", () => {
     expect(result.intents?.length).toBeGreaterThan(0);
     expect(result.intents?.[0].confidence).toBe(1.0);
   });
+
+  test("Multi-Intent Classifier: Combined order query and refund input with order ID", async () => {
+    const threadId = `test_triage_multi_intent_${Date.now()}`;
+    const state = {
+      threadId,
+      input: "帮我查询订单 ORD-88888 的物流状态，另外这笔订单我要申请退款",
+      intents: [],
+      globalTransitionsCount: 0,
+      toolErrorsCount: 0,
+    } as unknown as typeof AgentStateAnnotation.State;
+
+    const result = await triageNode(state);
+
+    expect(result).toBeDefined();
+    expect(result.intents).toBeDefined();
+    expect(result.intents?.length).toBeGreaterThanOrEqual(2);
+    expect(result.intents?.[0].type).toBe("primary");
+    expect(result.intents?.[1].type).toBe("secondary");
+    expect(result.intents?.[0].entities?.orderId).toBe("ORD-88888");
+  });
 });
