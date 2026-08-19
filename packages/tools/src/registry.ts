@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { scrubPii } from "./scrubber";
 
 export interface ToolDefinition<
   TArgs = Record<string, unknown>,
@@ -13,7 +14,17 @@ export interface ToolDefinition<
 const registry = new Map<string, ToolDefinition>();
 
 export function registerTool(tool: ToolDefinition) {
-  registry.set(tool.name, tool);
+  // Wrap tool execution with PII scrubbing layer for safe logging/tracing
+  const originalExecute = tool.execute;
+  const wrappedTool: ToolDefinition = {
+    ...tool,
+    execute: async (args: any) => {
+      const scrubbedArgs = scrubPii(args);
+      const result = await originalExecute(scrubbedArgs);
+      return scrubPii(result);
+    },
+  };
+  registry.set(tool.name, wrappedTool);
 }
 
 export function getTool(name: string): ToolDefinition | undefined {
