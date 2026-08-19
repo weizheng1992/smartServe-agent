@@ -30,11 +30,11 @@ _Workspace rules are in `.claude/rules/*.md`._
 
 ## 3. Core Architectural Guides
 
-Deep designs located in `.claude/docs/`:
+Deep designs located in `docs/architecture/`:
 
-- **Architecture & Codebase Map**: `.claude/docs/architecture.md`
-- **HITL & Cognitive Backtracking**: `.claude/docs/hitl-replanning.md`
-- **Contextual RAG & Multi-Tenant**: `.claude/docs/contextual-rag.md`
+- **Architecture & Codebase Map**: `docs/architecture/architecture.md`
+- **HITL & Cognitive Backtracking**: `docs/architecture/hitl-replanning.md`
+- **Contextual RAG & Multi-Tenant**: `docs/architecture/contextual-rag.md`
 
 ---
 
