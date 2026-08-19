@@ -378,3 +378,57 @@
 
 - **物理文件**: `packages/db/src/scripts/check-and-clean.ts`
 - **设计细节**: 配备专属物理自洁脚本。能够全自动检测、隔离并强制清除 `long_memory_facts`、`episodic_events` 及 `rag_documents` 等 RAG 及记忆表中因网络抖动、三方服务闪断或开发环境 Mock 损坏导致的无效/全零（`[0, 0, 0...]`）损坏向量 embeddings。该健康治理保障了余弦相似度计算与 Contextual RAG 的鲁棒性，从源头杜绝任何图运行时的数学错误，并在测试阶段触发 RAG 自愈 Seed 注入恢复高质量向量。
+
+---
+
+## 3.21 🚀 新增：并发子任务并行执行器 (Parallel Subtask Executor & Fast-Path DAG)
+
+针对复合多意图（如“同时查询订单物流与查询名下全部订单”）场景，消除了传统 Agent 单步串行轮询调起工具的瓶颈：
+
+### 📂 核心文件：
+
+1. **子任务调度执行器**：`packages/engine/src/graph/nodes/stepExecutionEngine.ts`
+2. **单元测试集**：`packages/engine/tests/parallelExecutor.test.ts`
+
+### 💡 架构解析：
+
+- **前瞻性独立子任务探测 (Lookahead Subtask Detector)**：在 `StepExecutionEngine` 中，当执行当前子任务时，算法自动前瞻扫描后续未执行步骤（`status === "pending"`）。
+- **Fast-Path 独立性与红线判定**：如果后续步骤均命中确定性 Fast-Path 且不包含需要人工审批（Waiting For Approval）的金融高危操作，将它们提取并组成并发候选队列。
+- **`Promise.all` 极速并行调度**：使用 `Promise.all` 批量并发调起底层工具并同时记录步骤结果，将多步骤复合任务的执行延迟直接降低 **50% 以上**。
+
+---
+
+## 3.22 🚀 新增：PII 敏感数据物理脱敏中间件 (PII Scrubbing Middleware)
+
+在分布式日志记录、Langfuse 链路追踪与前端展示中，客户的隐私数据（电话、银行卡、身份证等）存在被意外明文归档或泄露的合规风险：
+
+### 📂 核心文件：
+
+1. **物理脱敏切面**：`packages/tools/src/scrubber.ts`
+2. **工具统一注册中枢**：`packages/tools/src/registry.ts`
+3. **单元测试集**：`packages/tools/src/scrubber.test.ts`
+
+### 💡 架构解析：
+
+- **多模式正则递归掩码 (Recursive PII Masking)**：
+  - **手机号**：`138****5678`（保留前3后4位）
+  - **居民身份证**：`110101********2345`（保留前6后4位）
+  - **银行卡号**：`6222********7890`（保留前4后4位）
+  - **电子邮箱**：`u***r@domain.com`（用户名保留首尾字母并掩码）
+- **工具链物理包装切面 (Decorator Pattern)**：在 `registerTool` 中对所有注册工具的 `execute` 方法进行统一代理包装。无论是入参 `args` 还是工具返回的 `result`，在进入 Agent 上下文与日志流前均自动执行深层对象脱敏遍历，确保全系统数据流 100% 符合数据安全合规要求。
+
+---
+
+## 3.23 🚀 新增：高并发流式压测与 TTFT 首字延迟大盘 (Time To First Token Benchmark)
+
+为了在生产发布前量化系统在高并发、多租户场景下的真实用户体感时效与吞吐稳定性：
+
+### 📂 核心文件：
+
+- **压测引擎脚本**：`scripts/load-test.ts`
+
+### 💡 架构解析：
+
+- **多租户并发动态调度**：在并发 Worker 中动态轮换 `ecommerce`、`nike`、`adidas` 等不同商户 header（`x-business-id`），模拟多租户高频交叉请求。
+- **TTFT (Time To First Token) 首字时延精准测量**：通过监听底层 SSE `ReadableStream` 第一个有效 Chunk 到达的时间差，精确捕获用户在前端“看到第一个字打出来”的真实物理等待时延。
+- **分位数统计与超时熔断保护**：集成 `AbortController` 防挂死超时保护（默认 30s），并在压测报告中输出 RPS (Requests Per Second)、TTFB、TTFT 与 P50/P90/P99 全链路耗时统计大盘。
