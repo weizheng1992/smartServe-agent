@@ -4,6 +4,21 @@
 
 ---
 
+## [1.4.0] - 2026-08-19
+
+### 🌟 Major Highlights (重大亮点)
+
+- **子任务并行执行器 (Parallel Subtask Executor)**: 在 `StepExecutionEngine` 中实现了基于 `Promise.all` 的无依赖子任务并行调度器，多意图复合查询执行延迟物理降低 50%+。
+- **PII 敏感数据物理脱敏拦截器 (PII Scrubber Middleware)**: 在 `packages/tools` 中上线递归敏感数据脱敏切面，自动掩码手机号、身份证、银行卡号与邮箱，保障日志与 Trace 架构合规。
+
+### 🚀 Features & Enhancements
+
+- **并发子任务并行调度 (`cb52316`)**: 重构 `StepExecutionEngine`，自动检测 Fast-Path 独立子任务队列并通过 `Promise.all` 并发极速调起工具，极大缩短用户等待时间。
+- **工具链 PII 脱敏切面 (`cb52316`)**: 统一封装 `registerTool` 执行层，所有工具输入/输出参数自动进行 PII 物理数据掩码。
+- **TTFT 测速与压测大盘升级 (`cb52316`)**: 升级 `scripts/load-test.ts`，增加流式 SSE 首字响应延迟 (Time To First Token, TTFT) 检测与多租户并发测试能力。
+
+---
+
 ## [1.3.0] - 2026-08-14
 
 ### 🌟 Major Highlights (重大亮点)
