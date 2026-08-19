@@ -10,6 +10,8 @@ export interface RunningDetail {
   id?: string;
   node?: string;
   message?: string;
+  desc?: string;
+  resultText?: string;
   timestamp?: string;
   status?: "running" | "completed" | "failed" | string;
   output?: unknown;

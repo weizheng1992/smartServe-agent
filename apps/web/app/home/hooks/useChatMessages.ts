@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TaskPlan } from "types";
+import type { RunningDetail, TaskPlan } from "types";
 import { AgentStreamClient } from "../utils/agentStreamClient";
 import { translateTaskPlan } from "../utils/translateTaskPlan";
 import type { Message, UserSession } from "./types";
@@ -30,9 +30,7 @@ export function useChatMessages({
     null,
   );
   const [tokensConsumed, setTokensConsumed] = useState<number>(0);
-  const [runningDetails, setRunningDetails] = useState<
-    { node: string; desc: string; resultText: string }[]
-  >([]);
+  const [runningDetails, setRunningDetails] = useState<RunningDetail[]>([]);
 
   const syncPollCountRef = useRef<number>(0);
 
@@ -99,7 +97,8 @@ export function useChatMessages({
             setTokensConsumed(data.tokens);
           }
           if (data.message) {
-            const zhMessage = data.message;
+            const msgStr = String(data.message);
+            const zhMessage = msgStr;
             const nodeName = data.nodeName || "system";
 
             setCurrentStepText(zhMessage);
@@ -108,18 +107,14 @@ export function useChatMessages({
               const exists = prev.findIndex((log) => log.node === nodeName);
               if (exists !== -1) {
                 const next = [...prev];
+                const isProcessing =
+                  msgStr.includes("正在") || msgStr.includes("检测");
                 next[exists] = {
                   node: nodeName,
-                  desc:
-                    data.message.includes("正在") ||
-                    data.message.includes("检测")
-                      ? data.message
-                      : next[exists].desc,
-                  resultText:
-                    !data.message.includes("正在") &&
-                    !data.message.includes("检测")
-                      ? data.message
-                      : next[exists].resultText,
+                  desc: isProcessing ? msgStr : next[exists].desc || zhMessage,
+                  resultText: !isProcessing
+                    ? msgStr
+                    : next[exists].resultText || "正在执行中...",
                 };
                 return next;
               }

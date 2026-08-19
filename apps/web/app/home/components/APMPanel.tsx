@@ -179,16 +179,16 @@ export function APMPanel({
                   </CardHeader>
                   <CardContent className="p-3 pt-0 space-y-2">
                     <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                      {log.desc}
+                      {String(log.desc || log.message || "")}
                     </p>
                     <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-850/80">
                       <span className="text-[10px] text-slate-500 block font-mono uppercase tracking-wider mb-1">
                         执行反馈/输出
                       </span>
                       <span
-                        className={`text-xs font-mono leading-relaxed block whitespace-pre-wrap ${log.resultText.includes("❌") || log.resultText.includes("failed") ? "text-rose-400" : "text-emerald-400"}`}
+                        className={`text-xs font-mono leading-relaxed block whitespace-pre-wrap ${String(log.resultText || "").includes("❌") || String(log.resultText || "").includes("failed") ? "text-rose-400" : "text-emerald-400"}`}
                       >
-                        {log.resultText}
+                        {String(log.resultText || "")}
                       </span>
                     </div>
                   </CardContent>

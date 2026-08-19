@@ -1,5 +1,7 @@
 import type React from "react";
+import type { PendingApprovalRecord } from "types";
 import {
+  ApprovalRiskBadge,
   Button,
   Card,
   CardContent,
@@ -9,7 +11,6 @@ import {
   Shield,
   XCircle,
 } from "ui";
-import type { PendingApprovalRecord } from "types";
 
 interface ApprovalDetailViewProps {
   selectedApproval: PendingApprovalRecord | undefined;
@@ -59,17 +60,6 @@ export function ApprovalDetailView({
     2,
   );
 
-  const statusBadges =
-    {
-      waiting:
-        "bg-amber-500/10 text-amber-400 border-amber-500/30 shadow-lg shadow-amber-500/5",
-      approved: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-      rejected: "bg-rose-500/10 text-rose-400 border-rose-500/30",
-      expired: "bg-slate-800 text-slate-500 border-transparent",
-    }[
-      selectedApproval.status as "waiting" | "approved" | "rejected" | "expired"
-    ] || "";
-
   return (
     <div className="flex-1 bg-slate-900/20 border border-slate-900 rounded-2xl p-6 overflow-y-auto">
       <div className="space-y-6">
@@ -80,17 +70,10 @@ export function ApprovalDetailView({
               <span className="text-sm font-bold text-slate-100 font-mono">
                 工单: {selectedApproval.id}
               </span>
-              <span
-                className={`text-xs font-bold px-2.5 py-0.5 rounded border ${statusBadges}`}
-              >
-                {selectedApproval.status === "waiting"
-                  ? "待审批 (Waiting)"
-                  : selectedApproval.status === "approved"
-                    ? "已核准 (Approved)"
-                    : selectedApproval.status === "rejected"
-                      ? "已驳回 (Rejected)"
-                      : "已超时 (Expired)"}
-              </span>
+              <ApprovalRiskBadge
+                actionType={selectedApproval.actionType}
+                status={selectedApproval.status}
+              />
             </div>
             <p className="text-xs text-slate-500">
               拦截触发时间:{" "}
@@ -220,10 +203,10 @@ export function ApprovalDetailView({
               </strong>
               。
             </p>
-            {selectedApproval.actionPayload?.rejectionReason && (
+            {Boolean(selectedApproval.actionPayload?.rejectionReason) && (
               <p className="text-xs text-slate-500 mt-2 font-mono">
                 理由/说明: &quot;
-                {selectedApproval.actionPayload.rejectionReason as string}&quot;
+                {String(selectedApproval.actionPayload?.rejectionReason)}&quot;
               </p>
             )}
           </div>

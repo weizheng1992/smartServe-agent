@@ -5,7 +5,8 @@
   "main": "src/index.ts",
   "dependencies": {
     "pino": "^9.0.0",
-    "langfuse": "^3.0.0"
+    "langfuse": "^3.0.0",
+    "types": "workspace:*"
   },
   "devDependencies": {}
 }

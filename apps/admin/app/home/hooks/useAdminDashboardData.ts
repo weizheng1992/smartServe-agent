@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useApprovalMachine } from "ui";
 import type { AnalyticsSummary, Approval, PreferenceFact } from "./types";
 
 export function useAdminDashboardData() {
@@ -13,12 +14,14 @@ export function useAdminDashboardData() {
     autopilotRate: 100,
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [rejectionReasons, setRejectionReasons] = useState<
-    Record<string, string>
-  >({});
-  const [submittingActionId, setSubmittingActionId] = useState<string | null>(
-    null,
-  );
+
+  const {
+    submittingActionId,
+    rejectionReasons,
+    setRejectionReasons,
+    executeApprovalAction,
+    executeHumanReplyAction,
+  } = useApprovalMachine();
 
   const fetchDashboardData = useCallback(async () => {
     setIsRefreshing(true);
@@ -62,36 +65,14 @@ export function useAdminDashboardData() {
     approvalId: string,
     action: "approve" | "reject",
   ) => {
-    setSubmittingActionId(approvalId);
-    try {
-      const reason = rejectionReasons[approvalId] || "";
-      const res = await fetch("/api/chat/approvals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          approvalId,
-          action,
-          rejectionReason:
-            action === "reject" ? reason || "退款申请不符合政策要求。" : "",
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        // Clear input reason
-        setRejectionReasons((prev) => {
-          const next = { ...prev };
-          delete next[approvalId];
-          return next;
-        });
-        await fetchDashboardData();
-      } else {
-        alert(data.error || "审批执行失败");
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      alert(`审批流恢复出错: ${errMsg}`);
-    } finally {
-      setSubmittingActionId(null);
+    const result = await executeApprovalAction({
+      approvalId,
+      action,
+    });
+    if (result.success) {
+      await fetchDashboardData();
+    } else if (result.error) {
+      alert(result.error);
     }
   };
 
@@ -100,30 +81,17 @@ export function useAdminDashboardData() {
     replyMessage: string,
     isFinish = false,
   ) => {
-    setSubmittingActionId(approvalId);
-    try {
-      const res = await fetch("/api/chat/approvals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          approvalId,
-          action: isFinish ? "human_finish" : "human_message",
-          humanReply: replyMessage,
-          isFinish,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        await fetchDashboardData();
-        return data;
-      } else {
-        alert(data.error || "人工介入回复失败");
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      alert(`客服介入恢复出错: ${errMsg}`);
-    } finally {
-      setSubmittingActionId(null);
+    const result = await executeHumanReplyAction({
+      approvalId,
+      replyMessage,
+      isFinish,
+    });
+    if (result.success) {
+      await fetchDashboardData();
+      return result.data;
+    }
+    if (result.error) {
+      alert(result.error);
     }
   };
 

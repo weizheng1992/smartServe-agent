@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import {
   Activity,
+  ApprovalRiskBadge,
   Badge,
   Button,
   Card,
@@ -84,12 +85,10 @@ export function PendingApprovals({
                       {approval.actionType}
                     </span>
                   </div>
-                  <Badge
-                    variant="warning"
-                    className="text-[9px] font-mono bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border-transparent px-2 py-0.5"
-                  >
-                    Waiting Approval
-                  </Badge>
+                  <ApprovalRiskBadge
+                    actionType={approval.actionType}
+                    status={approval.status}
+                  />
                 </CardHeader>
 
                 {/* Content */}
@@ -117,10 +116,12 @@ export function PendingApprovals({
                     <div className="flex justify-between">
                       <span className="text-slate-500">截止日期:</span>
                       <span className="font-mono text-amber-400/80">
-                        {new Date(approval.deadline).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {approval.deadline
+                          ? new Date(approval.deadline).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "-"}
                       </span>
                     </div>
                   </div>

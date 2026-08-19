@@ -1,22 +1,19 @@
 import type { z } from "zod";
 import { scrubPii } from "./scrubber";
 
-export interface ToolDefinition<
-  TArgs = Record<string, unknown>,
-  TResult = unknown,
-> {
+export interface ToolDefinition<TArgs = any, TResult = any> {
   name: string;
   description: string;
   schema: z.ZodObject<z.ZodRawShape>;
   execute: (args: TArgs) => Promise<TResult>;
 }
 
-const registry = new Map<string, ToolDefinition>();
+const registry = new Map<string, ToolDefinition<any, any>>();
 
-export function registerTool(tool: ToolDefinition) {
+export function registerTool(tool: ToolDefinition<any, any>) {
   // Wrap tool execution with PII scrubbing layer for safe logging/tracing
   const originalExecute = tool.execute;
-  const wrappedTool: ToolDefinition = {
+  const wrappedTool: ToolDefinition<any, any> = {
     ...tool,
     execute: async (args: any) => {
       const scrubbedArgs = scrubPii(args);
@@ -27,10 +24,10 @@ export function registerTool(tool: ToolDefinition) {
   registry.set(tool.name, wrappedTool);
 }
 
-export function getTool(name: string): ToolDefinition | undefined {
+export function getTool(name: string): ToolDefinition<any, any> | undefined {
   return registry.get(name);
 }
 
-export function getAllTools(): ToolDefinition[] {
+export function getAllTools(): ToolDefinition<any, any>[] {
   return Array.from(registry.values());
 }

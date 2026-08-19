@@ -1,7 +1,8 @@
 import { db } from "db";
+import type { ChatMessage } from "types";
 import { getEmbeddingModel } from "../llm/callLLMWithRetry";
 
-export interface ShortMemoryMessage {
+export interface ShortMemoryMessage extends ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
 }

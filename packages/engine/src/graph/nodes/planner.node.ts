@@ -1,5 +1,3 @@
-import { getDrizzle, pendingApprovals as dbPendingApprovals } from "db";
-import { desc, eq } from "drizzle-orm";
 import { logger } from "observability";
 import { getLLM } from "../../llm/callLLMWithRetry";
 import { agentEventEmitter } from "../eventEmitter";
@@ -11,6 +9,7 @@ import {
   type SubTask,
   type TaskPlan,
 } from "../state";
+import { ApprovalPolicyEngine } from "./approvalPolicyEngine";
 import { extractOrderId } from "./utils";
 
 export async function plannerNode(state: typeof AgentStateAnnotation.State) {
@@ -77,51 +76,42 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
       (currentStep.result?.waitingForApproval ||
         currentStep.status === "pending")
     ) {
-      const drizzle = getDrizzle();
-      if (drizzle) {
-        try {
-          let latestApproval = null;
-          const currentStepApprovalId = currentStep.result?.approvalId;
-          if (currentStepApprovalId) {
-            const list = await drizzle
-              .select()
-              .from(dbPendingApprovals)
-              .where(eq(dbPendingApprovals.id, currentStepApprovalId))
-              .limit(1);
-            latestApproval = list[0];
-          } else {
-            const approvalsList = await drizzle
-              .select()
-              .from(dbPendingApprovals)
-              .where(eq(dbPendingApprovals.threadId, state.threadId))
-              .orderBy(desc(dbPendingApprovals.createdAt))
-              .limit(1);
-            latestApproval = approvalsList[0];
-          }
-          if (
-            latestApproval &&
-            (latestApproval.status === "approved" ||
-              latestApproval.status === "cancelled")
-          ) {
-            console.log(
-              `[Planner Bypass] 🔄 Step is ${latestApproval.status}. Reusing the existing taskPlan.`,
-            );
-            if (state.jobId) {
-              agentEventEmitter.emit(`${state.jobId}:status`, {
-                status: "executing",
-                node: "planner",
-                message: `🔄 恢复计划：检测到历史执行工单已人工审核决议为 [${latestApproval.status === "approved" ? "核准" : "取消"}]，跳过大模型规划，100% 物理复用历史步骤并精确恢复执行流！`,
-                plan: priorPlan,
-              });
-            }
-            return { taskPlan: priorPlan, globalTransitionsCount: 1 };
-          }
-        } catch (dbErr) {
-          console.warn(
-            "[Planner Bypass] Failed to check approval status for bypass:",
-            dbErr,
+      try {
+        let latestApproval: PendingApprovalRecord | null = null;
+        const currentStepApprovalId = currentStep.result?.approvalId;
+        if (currentStepApprovalId) {
+          latestApproval = await ApprovalPolicyEngine.findApprovalById(
+            currentStepApprovalId,
           );
+        } else {
+          latestApproval =
+            await ApprovalPolicyEngine.findLatestApprovalByThreadId(
+              state.threadId,
+            );
         }
+        if (
+          latestApproval &&
+          (latestApproval.status === "approved" ||
+            latestApproval.status === "cancelled")
+        ) {
+          console.log(
+            `[Planner Bypass] 🔄 Step is ${latestApproval.status}. Reusing the existing taskPlan.`,
+          );
+          if (state.jobId) {
+            agentEventEmitter.emit(`${state.jobId}:status`, {
+              status: "executing",
+              node: "planner",
+              message: `🔄 恢复计划：检测到历史执行工单已人工审核决议为 [${latestApproval.status === "approved" ? "核准" : "取消"}]，跳过大模型规划，100% 物理复用历史步骤并精确恢复执行流！`,
+              plan: priorPlan,
+            });
+          }
+          return { taskPlan: priorPlan, globalTransitionsCount: 1 };
+        }
+      } catch (dbErr) {
+        console.warn(
+          "[Planner Bypass] Failed to check approval status for bypass:",
+          dbErr,
+        );
       }
     }
   }
@@ -135,31 +125,21 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
     const step = priorPlan.subtasks[currentStepIndex];
     const stepApprovalId = step?.result?.approvalId;
 
-    const drizzle = getDrizzle();
-    if (drizzle) {
-      try {
-        if (stepApprovalId) {
-          const list = await drizzle
-            .select()
-            .from(dbPendingApprovals)
-            .where(eq(dbPendingApprovals.id, stepApprovalId))
-            .limit(1);
-          latestApproval = list[0];
-        } else if (state.input?.startsWith("System:")) {
-          const approvalsList = await drizzle
-            .select()
-            .from(dbPendingApprovals)
-            .where(eq(dbPendingApprovals.threadId, state.threadId))
-            .orderBy(desc(dbPendingApprovals.createdAt))
-            .limit(1);
-          latestApproval = approvalsList[0];
-        }
-      } catch (dbErr) {
-        console.warn(
-          "[Planner Rejection Check] Failed to check latest approval for backtracking:",
-          dbErr,
-        );
+    try {
+      if (stepApprovalId) {
+        latestApproval =
+          await ApprovalPolicyEngine.findApprovalById(stepApprovalId);
+      } else if (state.input?.startsWith("System:")) {
+        latestApproval =
+          await ApprovalPolicyEngine.findLatestApprovalByThreadId(
+            state.threadId,
+          );
       }
+    } catch (dbErr) {
+      console.warn(
+        "[Planner Rejection Check] Failed to check latest approval for backtracking:",
+        dbErr,
+      );
     }
 
     if (latestApproval && latestApproval.status === "rejected") {
@@ -174,7 +154,7 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
           ...step.result,
           rejectedByAdmin: true,
           rejectionReason:
-            latestApproval.actionPayload?.rejectionReason ||
+            (latestApproval.actionPayload?.rejectionReason as string) ||
             latestApproval.reason ||
             "No reason provided",
         };
@@ -315,7 +295,8 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
       if (actionIntents.length > 0) {
         const subtasks: SubTask[] = [];
 
-        for (const [idx, item] of actionIntents.entries()) {
+        for (let idx = 0; idx < actionIntents.length; idx++) {
+          const item = actionIntents[idx];
           const suffix = actionIntents.length > 1 ? `_${idx}` : "";
           if (item.intent === "order_status") {
             subtasks.push({
@@ -438,7 +419,7 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
           {
             id: "step_fallback",
             description: "Address request in fallback mode",
-            status: "pending",
+            status: "pending" as const,
           },
         ],
         currentStepIndex: 0,

@@ -9,6 +9,7 @@ import {
   Plus,
   Trash2,
 } from "ui";
+import type { PendingApprovalRecord } from "types";
 import type { ChatThread, UserSession } from "../hooks/types";
 
 interface LeftSidebarProps {
@@ -20,7 +21,7 @@ interface LeftSidebarProps {
   setSelectedNewThreadMerchant: (merchantId: string) => void;
   isThreadsLoading: boolean;
   isSubmitting: boolean;
-  allApprovals: unknown[];
+  allApprovals: PendingApprovalRecord[];
   activeTab: "CHAT_DESK" | "AUDIT_DESK";
   setActiveTab: (tab: "CHAT_DESK" | "AUDIT_DESK") => void;
   handleCreateNewThread: (merchantId?: string) => Promise<void>;

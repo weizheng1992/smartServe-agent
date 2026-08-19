@@ -1,5 +1,5 @@
 import type React from "react";
-import { Badge, Card, CheckCircle2, ScrollArea } from "ui";
+import { ApprovalRiskBadge, Badge, Card, CheckCircle2, ScrollArea } from "ui";
 import type { Approval } from "../hooks/types";
 
 interface HistoricalAuditsProps {
@@ -85,26 +85,20 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
                         </div>
                       </td>
                       <td className="p-4">
-                        <Badge
-                          variant={
-                            app.status === "approved"
-                              ? "success"
-                              : app.status === "rejected"
-                                ? "destructive"
-                                : "outline"
-                          }
-                          className="text-[9px] font-bold uppercase tracking-wider font-mono"
-                        >
-                          {app.status}
-                        </Badge>
+                        <ApprovalRiskBadge
+                          actionType={app.actionType}
+                          status={app.status}
+                        />
                       </td>
                       <td className="p-4 font-mono text-slate-500">
-                        {new Date(app.createdAt).toLocaleString([], {
-                          month: "2-digit",
-                          day: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {app.createdAt
+                          ? new Date(app.createdAt).toLocaleString([], {
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "-"}
                       </td>
                     </tr>
                   );

@@ -2,7 +2,7 @@ const ORDER_ID_REGEX = /\bORD-[A-Za-z0-9]+\b/i;
 
 export interface MessageLike {
   role?: string;
-  content?: string;
+  content?: string | null;
 }
 
 /**

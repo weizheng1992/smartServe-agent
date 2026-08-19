@@ -21,6 +21,8 @@ export type {
   TaskPlan,
 };
 
+export type AgentState = typeof AgentStateAnnotation.State;
+
 export const AgentStateAnnotation = Annotation.Root({
   // Unique Thread & User metadata
   threadId: Annotation<string>(),

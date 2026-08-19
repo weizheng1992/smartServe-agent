@@ -528,7 +528,8 @@ export async function executeStep(
 
   if (state.jobId) {
     let friendlyMessage = `步骤 [${subtask.description}] 履行完成。`;
-    const resOutput = singleResult.updatedStep.result?.output || {};
+    const resOutput =
+      (singleResult.updatedStep.result?.output as Record<string, any>) || {};
     const executedTool = singleResult.updatedStep.result?.toolExecuted;
 
     if (executedTool === "getOrderStatus") {

@@ -130,10 +130,10 @@ export async function agentWorkflow(
     if (executedSubtask?.result) {
       const res = executedSubtask.result;
       if (res.toolExecuted === "getOrderStatus") {
-        const orderInfo = res.output || {};
+        const orderInfo = (res.output as Record<string, any>) || {};
         currentStatus = `[物理工具 getOrderStatus 调用完成] 订单号: ${orderInfo.orderId || "ORD-98712"}, 状态: ${orderInfo.status || "已发货"}, 承运商: ${orderInfo.carrier || "FedEx"}`;
       } else if (res.toolExecuted === "processRefund") {
-        const refundInfo = res.output || {};
+        const refundInfo = (res.output as Record<string, any>) || {};
         currentStatus = `[物理工具 processRefund 调用完成] 订单号: ${refundInfo.orderId || "ORD-98712"}, 结果: ${refundInfo.message || "已自动原路退款"}`;
       } else if (res.toolExecuted === "takeScreenshot") {
         currentStatus =

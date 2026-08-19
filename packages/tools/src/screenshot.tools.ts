@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import puppeteer from "puppeteer-core";
+import puppeteer, { type Browser } from "puppeteer-core";
 import { z } from "zod";
 import { registerTool } from "./registry";
 
@@ -67,7 +67,7 @@ export const takeScreenshot = {
     const physicalSavePath = path.join(publicScreenshotsDir, filename);
     const relativeUrlPath = `/screenshots/${filename}`;
 
-    let browser: puppeteer.Browser | null = null;
+    let browser: Browser | null = null;
     try {
       browser = await puppeteer.launch({
         executablePath: chromePath,

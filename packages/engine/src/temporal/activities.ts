@@ -11,7 +11,7 @@ import type { AgentState } from "../graph/state";
 
 export async function runAgentStateNode(
   nodeName: string,
-  state: AgentState,
+  state: any,
 ): Promise<AgentState> {
   logger.info(
     { nodeName, threadId: state.threadId },

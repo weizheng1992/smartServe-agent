@@ -6,4 +6,7 @@ export * from "./components/ui/scroll-area";
 export * from "./components/ui/avatar";
 export * from "./components/ui/dialog";
 export * from "./components/icons";
+export * from "./components/approval/ApprovalRiskBadge";
+export * from "./components/approval/ApprovalActionButtons";
 export * from "./lib/utils";
+export * from "./hooks/useApprovalMachine";

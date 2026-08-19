@@ -213,7 +213,7 @@ export function ChatArea({
                             </div>
 
                             {/* Screenshot visual verification section */}
-                            {step.result?.screenshotPath && (
+                            {Boolean(step.result?.screenshotPath) && (
                               <div className="mt-3.5 pt-3.5 border-t border-slate-800/60 space-y-3 bg-slate-950/50 p-3.5 rounded-lg border border-slate-850">
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center space-x-2">
@@ -227,7 +227,9 @@ export function ChatArea({
                                     size="sm"
                                     onClick={() =>
                                       setSelectedScreenshot(
-                                        step.result.screenshotPath,
+                                        String(
+                                          step.result?.screenshotPath || "",
+                                        ),
                                       )
                                     }
                                     className="h-6 text-[10px] text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors px-2"
@@ -238,7 +240,9 @@ export function ChatArea({
                                 </div>
                                 <div className="relative group overflow-hidden rounded-xl border border-slate-800 bg-slate-900 aspect-video">
                                   <img
-                                    src={step.result.screenshotPath}
+                                    src={String(
+                                      step.result?.screenshotPath || "",
+                                    )}
                                     alt="物理界面快照"
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                   />
@@ -248,7 +252,9 @@ export function ChatArea({
                                       size="sm"
                                       onClick={() =>
                                         setSelectedScreenshot(
-                                          step.result.screenshotPath,
+                                          String(
+                                            step.result?.screenshotPath || "",
+                                          ),
                                         )
                                       }
                                       className="text-xs"

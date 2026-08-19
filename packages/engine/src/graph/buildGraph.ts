@@ -3,6 +3,8 @@ import { logger } from "observability";
 import type { RagDocument, SubTask, TaskPlan } from "types";
 import { getEmbeddingModel } from "../llm/callLLMWithRetry";
 import { EpisodicMemory, LongMemory, ShortMemory, TaskMemory } from "../memory";
+import type { EpisodicEvent } from "../memory/episodicMemory";
+import type { LongMemoryFact } from "../memory/longMemory";
 import { agentEventEmitter } from "./eventEmitter";
 import { executorNode } from "./nodes/executor.node";
 import { finishNode } from "./nodes/finish.node";
@@ -244,8 +246,8 @@ export async function runAgent(
 
   // 2. 🔍 性能与成本优化：如果是字数极少的非问候短文本（长度 <= 3），没有检索长期记忆和知识库 RAG 的业务必要，
   // 我们直接避开耗时的 Embedding 向量化与 RAG 检索调用（节省 1.5 秒以上首字响应延迟！）
-  let longFacts: string[] = [];
-  let episodicEvents: string[] = [];
+  let longFacts: LongMemoryFact[] = [];
+  let episodicEvents: EpisodicEvent[] = [];
   let ragDocs: RagDocument[] = [];
 
   // SaaS 多租户隔离及高级动态政策热载入引擎

@@ -1,5 +1,6 @@
 import { db, getDrizzle, pendingApprovals as dbPendingApprovals } from "db";
 import { desc, eq } from "drizzle-orm";
+import type { PendingApprovalRecord } from "../state";
 
 export interface ApprovalPolicyResult {
   state:
@@ -112,6 +113,77 @@ export async function evaluateAddressChangePolicy(
   }
 
   return { isHighValue: false, totalAmount: 0 };
+}
+
+/**
+ * 🔍 通过工单 ID 查询审批详情 (纯领域门面，不泄漏 ORM 查询构造器)
+ */
+export async function findApprovalById(
+  approvalId: string,
+): Promise<PendingApprovalRecord | null> {
+  try {
+    const res = await db.execute(
+      'SELECT id, thread_id AS "threadId", action_type AS "actionType", action_payload AS "actionPayload", status, deadline, created_at AS "createdAt" FROM pending_approvals WHERE id = $1 LIMIT 1',
+      [approvalId],
+    );
+    if (res.rows?.[0]) {
+      const row = res.rows[0] as any;
+      const parsedPayload =
+        typeof row.actionPayload === "string"
+          ? JSON.parse(row.actionPayload)
+          : row.actionPayload;
+      return {
+        id: row.id,
+        threadId: row.threadId,
+        actionType: row.actionType,
+        actionPayload: parsedPayload,
+        status: row.status,
+        reason: parsedPayload?.rejectionReason || parsedPayload?.reason,
+        deadline: row.deadline ? new Date(row.deadline) : undefined,
+        createdAt: row.createdAt ? new Date(row.createdAt) : undefined,
+      };
+    }
+  } catch (err) {
+    console.warn("[ApprovalPolicyEngine] findApprovalById DB error:", err);
+  }
+  return null;
+}
+
+/**
+ * 🔍 查询会话最新的待审核/已审核工单记录 (纯领域门面)
+ */
+export async function findLatestApprovalByThreadId(
+  threadId: string,
+): Promise<PendingApprovalRecord | null> {
+  try {
+    const res = await db.execute(
+      'SELECT id, thread_id AS "threadId", action_type AS "actionType", action_payload AS "actionPayload", status, deadline, created_at AS "createdAt" FROM pending_approvals WHERE thread_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [threadId],
+    );
+    if (res.rows?.[0]) {
+      const row = res.rows[0] as any;
+      const parsedPayload =
+        typeof row.actionPayload === "string"
+          ? JSON.parse(row.actionPayload)
+          : row.actionPayload;
+      return {
+        id: row.id,
+        threadId: row.threadId,
+        actionType: row.actionType,
+        actionPayload: parsedPayload,
+        status: row.status,
+        reason: parsedPayload?.rejectionReason || parsedPayload?.reason,
+        deadline: row.deadline ? new Date(row.deadline) : undefined,
+        createdAt: row.createdAt ? new Date(row.createdAt) : undefined,
+      };
+    }
+  } catch (err) {
+    console.warn(
+      "[ApprovalPolicyEngine] findLatestApprovalByThreadId DB error:",
+      err,
+    );
+  }
+  return null;
 }
 
 /**
@@ -270,4 +342,6 @@ export const ApprovalPolicyEngine = {
   evaluateRefundAutoApproval,
   evaluateAddressChangePolicy,
   evaluatePendingApprovalState,
+  findApprovalById,
+  findLatestApprovalByThreadId,
 };

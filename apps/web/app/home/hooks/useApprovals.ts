@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PendingApprovalRecord } from "types";
+import { useApprovalMachine } from "ui";
 import type { Message, UserSession } from "./types";
 
 interface UseApprovalsProps {
@@ -37,6 +38,7 @@ export function useApprovals({
   >("WAITING");
 
   const lastApprovalsStateRef = useRef<Record<string, string>>({});
+  const { executeApprovalAction } = useApprovalMachine();
 
   // 1. 周期性轮询获取与当前 ThreadID 相关且未审批的工单，并安全检测人机审核流程恢复
   useEffect(() => {
@@ -127,20 +129,14 @@ export function useApprovals({
     setMessages((prev) => [...prev, resumeLoaderMsg]);
 
     try {
-      const res = await fetch("/api/chat/approvals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          approvalId,
-          action,
-          rejectionReason:
-            action === "reject"
-              ? rejectionInput || "退款申请不符合政策要求。"
-              : "",
-        }),
+      const result = await executeApprovalAction({
+        approvalId,
+        action,
+        rejectionReason: rejectionInput,
       });
-      const data = await res.json();
-      if (data.success && data.jobId) {
+
+      const data = result.data as any;
+      if (result.success && data?.jobId) {
         setRejectionReason(""); // 清空拒绝文本
         setMessages((prev) =>
           prev.map((m) =>
@@ -150,7 +146,7 @@ export function useApprovals({
         // 重建 SSE 物理通道，无缝订阅新触发的恢复执行流
         await triggerStream(data.jobId);
       } else {
-        throw new Error(data.error || "审批决议提交失败");
+        throw new Error(result.error || "审批决议提交失败");
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);

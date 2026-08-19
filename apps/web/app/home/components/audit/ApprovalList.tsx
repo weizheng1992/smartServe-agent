@@ -1,6 +1,6 @@
 import type React from "react";
-import { CheckCircle2 } from "ui";
 import type { PendingApprovalRecord } from "types";
+import { ApprovalRiskBadge, CheckCircle2 } from "ui";
 import type { AuditFilterType } from "./ApprovalFilterHeader";
 
 interface ApprovalListProps {
@@ -44,23 +44,6 @@ export function ApprovalList({
               })
             : "";
 
-          const badgeStyle =
-            {
-              waiting: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-              approved:
-                "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-              rejected: "bg-rose-500/10 text-rose-400 border-rose-500/20",
-              expired: "bg-slate-800 text-slate-500 border-transparent",
-            }[item.status as "waiting" | "approved" | "rejected" | "expired"] ||
-            "bg-slate-800 text-slate-400 border-transparent";
-
-          const statusTextMap: Record<string, string> = {
-            waiting: "待审批",
-            approved: "已核准",
-            rejected: "已驳回",
-            expired: "已超时",
-          };
-
           return (
             <button
               key={item.id}
@@ -76,11 +59,10 @@ export function ApprovalList({
                 <span className="text-xs font-bold text-slate-200 truncate font-mono">
                   ID: {item.id.substring(0, 8)}...
                 </span>
-                <span
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${badgeStyle}`}
-                >
-                  {statusTextMap[item.status] || item.status}
-                </span>
+                <ApprovalRiskBadge
+                  actionType={item.actionType}
+                  status={item.status}
+                />
               </div>
               <div className="text-xs text-slate-300 font-semibold mb-1">
                 动作类别:{" "}
