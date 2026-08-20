@@ -1,11 +1,15 @@
-import { db } from 'db';
-import { logger } from 'observability';
-import { getLLM } from '../../../llm/callLLMWithRetry';
-import { ShortMemory } from '../../../memory/shortMemory';
-import { agentEventEmitter } from '../../eventEmitter';
-import type { AgentStateAnnotation, IntentResult, SubTask } from '../../state';
-import { TriageRuleMatchers } from './ruleMatchers';
-import { DEFAULT_ANCHOR_PHRASES, SemanticVectorCache, cosineSimilarity } from './semanticCache';
+import { db } from "db";
+import { logger } from "observability";
+import { getLLM } from "../../../llm/callLLMWithRetry";
+import { ShortMemory } from "../../../memory/shortMemory";
+import { agentEventEmitter } from "../../eventEmitter";
+import type { AgentStateAnnotation, IntentResult, SubTask } from "../../state";
+import { TriageRuleMatchers } from "./ruleMatchers";
+import {
+  DEFAULT_ANCHOR_PHRASES,
+  SemanticVectorCache,
+  cosineSimilarity,
+} from "./semanticCache";
 
 export class IntentTriageEngine {
   /**
@@ -20,14 +24,21 @@ export class IntentTriageEngine {
   ): Promise<void> {
     try {
       await db.execute(
-        'INSERT INTO intent_logs (thread_id, input_text, predicted_intents, method, confidence, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-        [threadId, inputText, JSON.stringify(intents), method, confidence, new Date().toISOString()],
+        "INSERT INTO intent_logs (thread_id, input_text, predicted_intents, method, confidence, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        [
+          threadId,
+          inputText,
+          JSON.stringify(intents),
+          method,
+          confidence,
+          new Date().toISOString(),
+        ],
       );
       console.log(
         `[Triage Logging] Successfully recorded intent log -> ${method} (confidence: ${confidence.toFixed(3)})`,
       );
     } catch (err) {
-      console.warn('[Triage Logging Exception] Bypassed log persistence:', err);
+      console.warn("[Triage Logging Exception] Bypassed log persistence:", err);
     }
   }
 
@@ -42,39 +53,41 @@ export class IntentTriageEngine {
     method: string,
     confidence: number,
   ) {
-    console.log(`[Triage Immediate Bypass] Triggered pipeline shortcut [${routeKey}]`);
+    console.log(
+      `[Triage Immediate Bypass] Triggered pipeline shortcut [${routeKey}]`,
+    );
 
     await this.logIntentToDB(
       state.threadId,
       state.input,
-      intents.length > 0 ? intents : [{ intent: 'general_query', confidence }],
+      intents.length > 0 ? intents : [{ intent: "general_query", confidence }],
       method,
       confidence,
     );
 
     const bypassPlan = {
-      goal: 'Address quick bypass query',
+      goal: "Address quick bypass query",
       subtasks: [
         {
-          id: 'bypass_step',
+          id: "bypass_step",
           description: `Handle immediate bypass shortcut [${routeKey}]`,
-          status: 'completed' as const,
-          result: { message: 'Bypassed successfully' },
+          status: "completed" as const,
+          result: { message: "Bypassed successfully" },
         },
       ],
       currentStepIndex: 1,
     };
 
     if (state.jobId) {
-      const friendlyMsg = routeKey.includes('greeting')
-        ? '极速通道：已秒级识别您所发送的日常打招呼，为您载入高画质欢迎界面...'
-        : routeKey.includes('out_of_scope')
-          ? '业务范围提示：识别到该咨询超出了当前电商客服的处理范畴，已为您生成智能指引...'
-          : '快速通道：检测到系统白名单指令，正在为您高速吐出专属答复...';
+      const friendlyMsg = routeKey.includes("greeting")
+        ? "极速通道：已秒级识别您所发送的日常打招呼，为您载入高画质欢迎界面..."
+        : routeKey.includes("out_of_scope")
+          ? "业务范围提示：识别到该咨询超出了当前电商客服的处理范畴，已为您生成智能指引..."
+          : "快速通道：检测到系统白名单指令，正在为您高速吐出专属答复...";
 
       agentEventEmitter.emit(`${state.jobId}:status`, {
-        status: 'executing',
-        node: 'triage',
+        status: "executing",
+        node: "triage",
         message: friendlyMsg,
         plan: bypassPlan,
       });
@@ -101,31 +114,39 @@ export class IntentTriageEngine {
    */
   static async process(state: typeof AgentStateAnnotation.State) {
     const threadId = state.threadId;
-    const input = state.input ? state.input.trim() : '';
+    const input = state.input ? state.input.trim() : "";
 
     if (input && state.inputEmbedding && state.inputEmbedding.length > 0) {
       SemanticVectorCache.injectInputEmbedding(input, state.inputEmbedding);
     }
 
-    logger.info({ threadId }, 'IntentTriageEngine starting multi-tier intent classification pipeline');
+    logger.info(
+      { threadId },
+      "IntentTriageEngine starting multi-tier intent classification pipeline",
+    );
 
     const shortMemory = new ShortMemory(threadId);
     const historyMsgs = await shortMemory.getMessages();
 
     // 🛡️ 人工恢复/系统提问解挂判定
-    if (input.startsWith('System:')) {
-      console.log(`[Triage System-Resume] 🔄 Resuming suspended flow with input: "${input}"`);
-      const hasRefundTask = state.taskPlan?.subtasks?.some(
-        (st: SubTask) => st.description.toLowerCase().includes('refund') || st.result?.approvalId,
+    if (input.startsWith("System:")) {
+      console.log(
+        `[Triage System-Resume] 🔄 Resuming suspended flow with input: "${input}"`,
       );
-      const intent = hasRefundTask ? 'refund' : 'order_status';
+      const hasRefundTask = state.taskPlan?.subtasks?.some(
+        (st: SubTask) =>
+          st.description.toLowerCase().includes("refund") ||
+          st.result?.approvalId,
+      );
+      const intent = hasRefundTask ? "refund" : "order_status";
       const intents = [{ intent, confidence: 1.0 }];
 
       if (state.jobId) {
         agentEventEmitter.emit(`${state.jobId}:status`, {
-          status: 'executing',
-          node: 'triage',
-          message: '🔄 恢复执行流：检测到主管人工决议，正在快速解挂并拉起后续处理步骤...',
+          status: "executing",
+          node: "triage",
+          message:
+            "🔄 恢复执行流：检测到主管人工决议，正在快速解挂并拉起后续处理步骤...",
         });
       }
 
@@ -139,10 +160,10 @@ export class IntentTriageEngine {
 
     if (state.jobId) {
       agentEventEmitter.emit(`${state.jobId}:status`, {
-        status: 'executing',
-        node: 'triage',
+        status: "executing",
+        node: "triage",
         message:
-          '正在进行多渠道意图分层检验（层级：规则前置 -> 语义重复拦截 -> Embedding向量评估 -> 大模型多意图精判）...',
+          "正在进行多渠道意图分层检验（层级：规则前置 -> 语义重复拦截 -> Embedding向量评估 -> 大模型多意图精判）...",
       });
     }
 
@@ -150,23 +171,48 @@ export class IntentTriageEngine {
     // 🛡️ Step 0: 输入格式预过滤与规则前置防线
     // =========================================================================
     if (input.length === 0) {
-      const reply = '您好！看起来您发送了一条空消息。请问有什么我可以帮您的？';
-      return await this.handleImmediateBypass(state, 'rule_empty', reply, [], 'rule', 1.0);
+      const reply = "您好！看起来您发送了一条空消息。请问有什么我可以帮您的？";
+      return await this.handleImmediateBypass(
+        state,
+        "rule_empty",
+        reply,
+        [],
+        "rule",
+        1.0,
+      );
     }
 
     if (TriageRuleMatchers.isSymbolOnly(input)) {
-      const reply = '您好！如果您有关于订单、物流或退款方面的疑问，可以直接向我提问，我将为您竭诚服务。';
-      return await this.handleImmediateBypass(state, 'rule_symbols', reply, [], 'rule', 1.0);
+      const reply =
+        "您好！如果您有关于订单、物流或退款方面的疑问，可以直接向我提问，我将为您竭诚服务。";
+      return await this.handleImmediateBypass(
+        state,
+        "rule_symbols",
+        reply,
+        [],
+        "rule",
+        1.0,
+      );
     }
 
     if (input.length > 1000) {
-      const reply = '您好！您发送的内容过长，系统暂时无法解析。请问您有具体的订单或退款问题需要我协助吗？';
-      return await this.handleImmediateBypass(state, 'rule_length_limit', reply, [], 'rule', 1.0);
+      const reply =
+        "您好！您发送的内容过长，系统暂时无法解析。请问您有具体的订单或退款问题需要我协助吗？";
+      return await this.handleImmediateBypass(
+        state,
+        "rule_length_limit",
+        reply,
+        [],
+        "rule",
+        1.0,
+      );
     }
 
     if (TriageRuleMatchers.isHumanEscalationRequested(input)) {
-      console.log(`[Triage Escalation Rule] 🚨 User explicitly requested human escalation! Query: "${input}"`);
-      const intents = [{ intent: 'human_escalation', confidence: 1.0 }];
+      console.log(
+        `[Triage Escalation Rule] 🚨 User explicitly requested human escalation! Query: "${input}"`,
+      );
+      const intents = [{ intent: "human_escalation", confidence: 1.0 }];
       return {
         intents,
         shortMemory: historyMsgs,
@@ -179,8 +225,8 @@ export class IntentTriageEngine {
     // 🛡️ 重复提问拦截器 (First Shield: Semantic Duplicate Bypass)
     // =========================================================================
     try {
-      const userMsgs = historyMsgs.filter((m) => m.role === 'user');
-      const assistantMsgs = historyMsgs.filter((m) => m.role === 'assistant');
+      const userMsgs = historyMsgs.filter((m) => m.role === "user");
+      const assistantMsgs = historyMsgs.filter((m) => m.role === "assistant");
 
       if (userMsgs.length >= 2 && assistantMsgs.length > 0) {
         const lastUserMsg = userMsgs[userMsgs.length - 2];
@@ -189,7 +235,11 @@ export class IntentTriageEngine {
         const isExactlySame = input.trim() === lastUserMsg.content.trim();
 
         let isSemanticallySame = false;
-        if (!isExactlySame && input.trim().length > 3 && lastUserMsg.content.trim().length > 3) {
+        if (
+          !isExactlySame &&
+          input.trim().length > 3 &&
+          lastUserMsg.content.trim().length > 3
+        ) {
           const [currentVec, lastVec] = await Promise.all([
             SemanticVectorCache.getEmbeddingWithCache(input),
             SemanticVectorCache.getEmbeddingWithCache(lastUserMsg.content),
@@ -197,33 +247,49 @@ export class IntentTriageEngine {
           const sim = cosineSimilarity(currentVec, lastVec);
           if (sim >= 0.98) {
             isSemanticallySame = true;
-            console.log(`[Triage Duplicate Shield] 🎯 检测到超高语义相似度重复提问: ${sim.toFixed(3)}`);
+            console.log(
+              `[Triage Duplicate Shield] 🎯 检测到超高语义相似度重复提问: ${sim.toFixed(3)}`,
+            );
           }
         }
 
-        const isLastResponseFailed = TriageRuleMatchers.isFailedResponse(lastAssistantMsg.content);
+        const isLastResponseFailed = TriageRuleMatchers.isFailedResponse(
+          lastAssistantMsg.content,
+        );
 
         if ((isExactlySame || isSemanticallySame) && !isLastResponseFailed) {
-          console.log('[Triage Duplicate Shield] 🎯 成功拦截重复提问！秒级复用历史答复。');
+          console.log(
+            "[Triage Duplicate Shield] 🎯 成功拦截重复提问！秒级复用历史答复。",
+          );
 
           const prefixMsg = isExactlySame
-            ? '您好！检测到您发送了与刚才相同的咨询。这是刚才为您查询的最新进度：\n\n'
-            : '您好！检测到您提问了相似的问题。这是刚才为您查询的最新进度：\n\n';
+            ? "您好！检测到您发送了与刚才相同的咨询。这是刚才为您查询的最新进度：\n\n"
+            : "您好！检测到您提问了相似的问题。这是刚才为您查询的最新进度：\n\n";
 
           const reply = `${prefixMsg}${lastAssistantMsg.content}`;
-          const finalIntents = [{ intent: 'general_query', confidence: 1.0 }];
+          const finalIntents = [{ intent: "general_query", confidence: 1.0 }];
 
-          return await this.handleImmediateBypass(state, 'duplicate_bypass', reply, finalIntents, 'rule', 1.0);
+          return await this.handleImmediateBypass(
+            state,
+            "duplicate_bypass",
+            reply,
+            finalIntents,
+            "rule",
+            1.0,
+          );
         }
       }
     } catch (shErr) {
-      console.warn('[Triage Duplicate Shield Exception] Bypassed duplicate check:', shErr);
+      console.warn(
+        "[Triage Duplicate Shield Exception] Bypassed duplicate check:",
+        shErr,
+      );
     }
 
     // =========================================================================
     // 🛡️ Step 1: 规则白名单 (打招呼 / 退出 / 极简指令)
     // =========================================================================
-    const cleanInput = input.toLowerCase().replace(/[，。！？,.!?\s]/g, '');
+    const cleanInput = input.toLowerCase().replace(/[，。！？,.!?\s]/g, "");
 
     if (TriageRuleMatchers.isGreeting(cleanInput)) {
       const reply = `您好！我是您的智能电商客服助理。✨
@@ -236,23 +302,23 @@ export class IntentTriageEngine {
 请告诉我您需要处理的业务，我将直接为您调起系统底层工具为您搞定！`;
       return await this.handleImmediateBypass(
         state,
-        'rule_greeting',
+        "rule_greeting",
         reply,
-        [{ intent: 'general_query', confidence: 1.0 }],
-        'rule',
+        [{ intent: "general_query", confidence: 1.0 }],
+        "rule",
         1.0,
       );
     }
 
     if (TriageRuleMatchers.isExitCommand(cleanInput)) {
       const reply =
-        '好的，很高兴为您服务！如果您后续还有任何关于订单状态或退款方面的需要，欢迎随时联系我。祝您生活愉快，再见！👋';
+        "好的，很高兴为您服务！如果您后续还有任何关于订单状态或退款方面的需要，欢迎随时联系我。祝您生活愉快，再见！👋";
       return await this.handleImmediateBypass(
         state,
-        'rule_exit_conversation',
+        "rule_exit_conversation",
         reply,
-        [{ intent: 'general_query', confidence: 1.0 }],
-        'rule',
+        [{ intent: "general_query", confidence: 1.0 }],
+        "rule",
         1.0,
       );
     }
@@ -270,8 +336,14 @@ export class IntentTriageEngine {
         SemanticVectorCache.getAnchorVectors(),
       ]);
 
-      const tenantId = (state.businessConfig?.businessId || 'ecommerce').toLowerCase();
-      const cacheHit = SemanticVectorCache.findBestSemanticMatch(tenantId, userVector, 0.96);
+      const tenantId = (
+        state.businessConfig?.businessId || "ecommerce"
+      ).toLowerCase();
+      const cacheHit = SemanticVectorCache.findBestSemanticMatch(
+        tenantId,
+        userVector,
+        0.96,
+      );
 
       if (cacheHit) {
         console.log(
@@ -279,10 +351,10 @@ export class IntentTriageEngine {
         );
         return await this.handleImmediateBypass(
           state,
-          'super_semantic_cache',
+          "super_semantic_cache",
           cacheHit.match.reply,
-          [{ intent: 'general_query', confidence: cacheHit.similarity }],
-          'semantic_cache',
+          [{ intent: "general_query", confidence: cacheHit.similarity }],
+          "semantic_cache",
           cacheHit.similarity,
         );
       }
@@ -305,25 +377,49 @@ export class IntentTriageEngine {
       );
 
       const matchedOrderId = input.match(/\bORD-[A-Za-z0-9]+\b/i)?.[0];
+      const hasOrderKeywords = /订单|发货|物流|查单|买的|快递|到哪/i.test(
+        input,
+      );
+      const hasRefundKeywords = /退款|退货|退钱|退单|退款申请|退货流程/i.test(
+        input,
+      );
 
-      // 判定 1: 复合意图直达
-      if (scoreOrder >= 0.85 && scoreRefund >= 0.85 && Math.abs(scoreOrder - scoreRefund) < 0.15) {
-        console.log('[Triage Embedding Match] Auto-matched multi-intent: order_status + refund!');
+      // 判定 1: 复合意图直达 (必须真实同时包含订单与退款关键词)
+      if (
+        scoreOrder >= 0.85 &&
+        scoreRefund >= 0.85 &&
+        Math.abs(scoreOrder - scoreRefund) < 0.15 &&
+        hasOrderKeywords &&
+        hasRefundKeywords
+      ) {
+        console.log(
+          "[Triage Embedding Match] Auto-matched multi-intent: order_status + refund!",
+        );
         const intents: IntentResult[] = [
           {
-            intent: 'order_status',
+            intent: "order_status",
             confidence: scoreOrder,
-            type: 'primary',
-            ...(matchedOrderId ? { entities: { orderId: matchedOrderId } } : {}),
+            type: "primary",
+            ...(matchedOrderId
+              ? { entities: { orderId: matchedOrderId } }
+              : {}),
           },
           {
-            intent: 'refund',
+            intent: "refund",
             confidence: scoreRefund,
-            type: 'secondary',
-            ...(matchedOrderId ? { entities: { orderId: matchedOrderId } } : {}),
+            type: "secondary",
+            ...(matchedOrderId
+              ? { entities: { orderId: matchedOrderId } }
+              : {}),
           },
         ];
-        await this.logIntentToDB(threadId, input, intents, 'embedding', intents[0].confidence);
+        await this.logIntentToDB(
+          threadId,
+          input,
+          intents,
+          "embedding",
+          intents[0].confidence,
+        );
         return {
           intents,
           shortMemory: historyMsgs,
@@ -333,17 +429,30 @@ export class IntentTriageEngine {
       }
 
       // 判定 2: 物流/订单状态/查询意图直达
-      if (scoreOrder >= 0.88 && scoreOrder - scoreOos >= 0.08) {
-        console.log('[Triage Embedding Match] Auto-matched order_status intent via semantic similarity!');
+      if (
+        (scoreOrder >= 0.88 && scoreOrder - scoreOos >= 0.08) ||
+        (hasOrderKeywords && !hasRefundKeywords)
+      ) {
+        console.log(
+          "[Triage Embedding Match] Auto-matched order_status intent via semantic similarity!",
+        );
         const intents: IntentResult[] = [
           {
-            intent: 'order_status',
-            confidence: scoreOrder,
-            type: 'primary',
-            ...(matchedOrderId ? { entities: { orderId: matchedOrderId } } : {}),
+            intent: "order_status",
+            confidence: Math.max(scoreOrder, 0.95),
+            type: "primary",
+            ...(matchedOrderId
+              ? { entities: { orderId: matchedOrderId } }
+              : {}),
           },
         ];
-        await this.logIntentToDB(threadId, input, intents, 'embedding', scoreOrder);
+        await this.logIntentToDB(
+          threadId,
+          input,
+          intents,
+          "embedding",
+          intents[0].confidence,
+        );
         return {
           intents,
           shortMemory: historyMsgs,
@@ -353,17 +462,30 @@ export class IntentTriageEngine {
       }
 
       // 判定 3: 明确退款执行意图直达
-      if (scoreRefund >= 0.88 && scoreRefund - scoreOos >= 0.08) {
-        console.log('[Triage Embedding Match] Auto-matched refund intent via semantic similarity!');
+      if (
+        (scoreRefund >= 0.88 && scoreRefund - scoreOos >= 0.08) ||
+        (hasRefundKeywords && !hasOrderKeywords)
+      ) {
+        console.log(
+          "[Triage Embedding Match] Auto-matched refund intent via semantic similarity!",
+        );
         const intents: IntentResult[] = [
           {
-            intent: 'refund',
-            confidence: scoreRefund,
-            type: 'primary',
-            ...(matchedOrderId ? { entities: { orderId: matchedOrderId } } : {}),
+            intent: "refund",
+            confidence: Math.max(scoreRefund, 0.95),
+            type: "primary",
+            ...(matchedOrderId
+              ? { entities: { orderId: matchedOrderId } }
+              : {}),
           },
         ];
-        await this.logIntentToDB(threadId, input, intents, 'embedding', scoreRefund);
+        await this.logIntentToDB(
+          threadId,
+          input,
+          intents,
+          "embedding",
+          intents[0].confidence,
+        );
         return {
           intents,
           shortMemory: historyMsgs,
@@ -373,40 +495,50 @@ export class IntentTriageEngine {
       }
 
       // 判定 4: 超出业务范畴意图拦截
-      if (scoreOos >= 0.86 && scoreOos - Math.max(scoreOrder, scoreRefund) >= 0.06) {
-        console.log('[Triage Embedding Match] Blocked out_of_scope query via semantic similarity!');
+      if (
+        scoreOos >= 0.86 &&
+        scoreOos - Math.max(scoreOrder, scoreRefund) >= 0.06
+      ) {
+        console.log(
+          "[Triage Embedding Match] Blocked out_of_scope query via semantic similarity!",
+        );
         const reply =
-          '您好！我是您的高级智能电商客服助理，主要负责协助处理订单、物流及退款相关业务。您刚才提到的问题超出了我的服务范围（属于日常咨询/外部问题）。请问有什么具体的电商订单问题需要我协助吗？';
+          "您好！我是您的高级智能电商客服助理，主要负责协助处理订单、物流及退款相关业务。您刚才提到的问题超出了我的服务范围（属于日常咨询/外部问题）。请问有什么具体的电商订单问题需要我协助吗？";
         return await this.handleImmediateBypass(
           state,
-          'embedding_out_of_scope',
+          "embedding_out_of_scope",
           reply,
-          [{ intent: 'general_query', confidence: scoreOos }],
-          'embedding',
+          [{ intent: "general_query", confidence: scoreOos }],
+          "embedding",
           scoreOos,
         );
       }
     } catch (embedErr) {
-      console.warn('[Triage Embedding Step 2 Exception] Bypassing Embedding Classifier:', embedErr);
+      console.warn(
+        "[Triage Embedding Step 2 Exception] Bypassing Embedding Classifier:",
+        embedErr,
+      );
     }
 
     // =========================================================================
     // 🛡️ Step 3: 大模型 Deep Triage 模糊精判
     // =========================================================================
-    console.log('[Triage Fallthrough to Step 3] Launching Gemini Flash deep triage classifier...');
+    console.log(
+      "[Triage Fallthrough to Step 3] Launching Gemini Flash deep triage classifier...",
+    );
     const llm = getLLM(state.jobId);
 
     const contextMsgs = historyMsgs.slice(0, -1);
     const recentHistory = contextMsgs
       .slice(-4)
-      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
-      .join('\n');
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n");
 
     const prompt = `You are an expert intent classifier for an e-commerce support system.
 Your job is to determine the user's intents based on their latest input AND the recent conversation context.
 
 Recent Conversation Context:
-${recentHistory || 'No previous history.'}
+${recentHistory || "No previous history."}
 
 Latest User Input: "${input}"
 
@@ -430,48 +562,55 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
 
     try {
       const response = await llm.invoke(prompt);
-      const content = typeof response === 'string' ? response : (response as { content?: string }).content || '';
+      const content =
+        typeof response === "string"
+          ? response
+          : (response as { content?: string }).content || "";
       let parsed: IntentResult[] = [];
       try {
         const cleanResponse = content
           .trim()
-          .replace(/^```json\s*/, '')
-          .replace(/```$/, '')
+          .replace(/^```json\s*/, "")
+          .replace(/```$/, "")
           .trim();
         parsed = JSON.parse(cleanResponse);
       } catch {
-        parsed = [{ intent: 'general_query', confidence: 0.8, type: 'primary' }];
+        parsed = [
+          { intent: "general_query", confidence: 0.8, type: "primary" },
+        ];
       }
 
       const fallbackOrderId = input.match(/\bORD-[A-Za-z0-9]+\b/i)?.[0];
       parsed = parsed.map((item, idx) => ({
         ...item,
-        type: item.type || (idx === 0 ? 'primary' : 'secondary'),
-        entities: item.entities || (fallbackOrderId ? { orderId: fallbackOrderId } : undefined),
+        type: item.type || (idx === 0 ? "primary" : "secondary"),
+        entities:
+          item.entities ||
+          (fallbackOrderId ? { orderId: fallbackOrderId } : undefined),
       }));
 
-      const isOos = parsed.some((p) => p.intent === 'out_of_scope');
+      const isOos = parsed.some((p) => p.intent === "out_of_scope");
       if (isOos) {
         const reply =
-          '您好！我是您的高级智能电商客服助理，主要负责协助处理订单、物流及退款相关业务。您刚才提到的问题超出了我的服务范围（属于外部或高风险意图）。请问有什么具体的电商订单问题需要我协助吗？';
+          "您好！我是您的高级智能电商客服助理，主要负责协助处理订单、物流及退款相关业务。您刚才提到的问题超出了我的服务范围（属于外部或高风险意图）。请问有什么具体的电商订单问题需要我协助吗？";
         return await this.handleImmediateBypass(
           state,
-          'llm_out_of_scope',
+          "llm_out_of_scope",
           reply,
-          [{ intent: 'general_query', confidence: 0.9 }],
-          'llm',
+          [{ intent: "general_query", confidence: 0.9 }],
+          "llm",
           0.9,
         );
       }
 
       const confidence = parsed[0]?.confidence || 0.8;
-      await this.logIntentToDB(threadId, input, parsed, 'llm', confidence);
+      await this.logIntentToDB(threadId, input, parsed, "llm", confidence);
 
       if (state.jobId) {
         agentEventEmitter.emit(`${state.jobId}:status`, {
-          status: 'executing',
-          node: 'triage',
-          message: `用户意图识别成功！检测到核心意图: ${parsed.map((p) => p.intent).join(', ')} (置信度: ${parsed.map((p) => p.confidence).join(', ')})`,
+          status: "executing",
+          node: "triage",
+          message: `用户意图识别成功！检测到核心意图: ${parsed.map((p) => p.intent).join(", ")} (置信度: ${parsed.map((p) => p.confidence).join(", ")})`,
         });
       }
 
@@ -482,9 +621,12 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
         toolErrorsCount: -1,
       };
     } catch (err: unknown) {
-      logger.error({ threadId, err }, 'IntentTriageEngine Step 3 failed, falling back to general_query');
-      const fallbackIntents = [{ intent: 'general_query', confidence: 0.5 }];
-      await this.logIntentToDB(threadId, input, fallbackIntents, 'llm', 0.5);
+      logger.error(
+        { threadId, err },
+        "IntentTriageEngine Step 3 failed, falling back to general_query",
+      );
+      const fallbackIntents = [{ intent: "general_query", confidence: 0.5 }];
+      await this.logIntentToDB(threadId, input, fallbackIntents, "llm", 0.5);
       return {
         intents: fallbackIntents,
         shortMemory: historyMsgs,

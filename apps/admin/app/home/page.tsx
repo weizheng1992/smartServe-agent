@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import React, { useState } from 'react';
+import React, { useState } from "react";
+import { HumanChatModal } from "ui";
 
 // Local Hooks
-import { useAdminDashboardData } from './hooks';
+import { useAdminDashboardData } from "./hooks";
 
 // Local Components
-import { Header } from './components/Header';
-import { HistoricalAudits } from './components/HistoricalAudits';
-import { HumanChatModal } from './components/HumanChatModal';
-import { Metrics } from './components/Metrics';
-import { PendingApprovals } from './components/PendingApprovals';
-import { PersonaAudit } from './components/PersonaAudit';
-import type { Approval } from './hooks/types';
+import { Header } from "./components/Header";
+import { HistoricalAudits } from "./components/HistoricalAudits";
+import { Metrics } from "./components/Metrics";
+import { PendingApprovals } from "./components/PendingApprovals";
+import { PersonaAudit } from "./components/PersonaAudit";
+import type { Approval } from "./hooks/types";
 
 export default function AdminDashboard() {
   const {
@@ -33,10 +33,16 @@ export default function AdminDashboard() {
     preferences,
   } = useAdminDashboardData();
 
-  const [activeChatApproval, setActiveChatApproval] = useState<Approval | null>(null);
+  const [activeChatApproval, setActiveChatApproval] = useState<Approval | null>(
+    null,
+  );
 
   const handleStartTakeover = async () => {
-    const approval = await startActiveTakeover('default_thread');
+    const targetThread =
+      pendingApprovals[0]?.threadId ||
+      auditedApprovals[0]?.threadId ||
+      "default_thread";
+    const approval = await startActiveTakeover(targetThread);
     if (approval) {
       setActiveChatApproval(approval);
     }
@@ -65,6 +71,7 @@ export default function AdminDashboard() {
           submittingActionId={submittingActionId}
           handleApprovalAction={handleApprovalAction}
           handleHumanReplyAction={handleHumanReplyAction}
+          onOpenChatModal={(app) => setActiveChatApproval(app)}
         />
 
         {/* 🧠 Section 1.5: User Preferences & Persona Dynamic Audit Center */}

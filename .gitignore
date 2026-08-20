@@ -76,3 +76,6 @@ Thumbs.db
 .temporal/
 *.db
 *.db-journal
+
+# Playwright MCP cache
+.playwright-mcp/

@@ -1,5 +1,5 @@
-import type React from 'react';
-import { useState } from 'react';
+import type React from "react";
+import { useState } from "react";
 import {
   Activity,
   ApprovalRiskBadge,
@@ -9,22 +9,32 @@ import {
   CardContent,
   CardHeader,
   CheckCircle2,
+  HumanChatModal,
   Input,
   Loader2,
   MessageSquare,
   ShieldAlert,
   XCircle,
-} from 'ui';
-import type { Approval } from '../hooks/types';
-import { HumanChatModal } from './HumanChatModal';
+} from "ui";
+import type { Approval } from "../hooks/types";
 
 interface PendingApprovalsProps {
   pendingApprovals: Approval[];
   rejectionReasons: Record<string, string>;
-  setRejectionReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setRejectionReasons: React.Dispatch<
+    React.SetStateAction<Record<string, string>>
+  >;
   submittingActionId: string | null;
-  handleApprovalAction: (approvalId: string, action: 'approve' | 'reject') => Promise<void>;
-  handleHumanReplyAction?: (approvalId: string, replyMessage: string, isFinish?: boolean) => Promise<unknown>;
+  handleApprovalAction: (
+    approvalId: string,
+    action: "approve" | "reject",
+  ) => Promise<void>;
+  handleHumanReplyAction?: (
+    approvalId: string,
+    replyMessage: string,
+    isFinish?: boolean,
+  ) => Promise<unknown>;
+  onOpenChatModal?: (approval: Approval) => void;
 }
 
 export function PendingApprovals({
@@ -34,8 +44,18 @@ export function PendingApprovals({
   submittingActionId,
   handleApprovalAction,
   handleHumanReplyAction,
+  onOpenChatModal,
 }: PendingApprovalsProps) {
-  const [selectedChatApproval, setSelectedChatApproval] = useState<Approval | null>(null);
+  const [selectedChatApproval, setSelectedChatApproval] =
+    useState<Approval | null>(null);
+
+  const handleOpenChat = (approval: Approval) => {
+    if (onOpenChatModal) {
+      onOpenChatModal(approval);
+    } else {
+      setSelectedChatApproval(approval);
+    }
+  };
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -45,13 +65,17 @@ export function PendingApprovals({
             🛡️ 安全红线拦截：待人工核准工单 ({pendingApprovals.length})
           </h2>
         </div>
-        <span className="text-[10px] font-mono text-slate-500 uppercase">Real-time approval dispatch queue</span>
+        <span className="text-[10px] font-mono text-slate-500 uppercase">
+          Real-time approval dispatch queue
+        </span>
       </div>
 
       {pendingApprovals.length === 0 ? (
         <div className="bg-slate-900/30 border border-slate-850 rounded-2xl py-14 text-center space-y-3">
           <CheckCircle2 className="h-10 w-10 text-emerald-500/80 mx-auto" />
-          <p className="text-xs text-slate-400">当前大盘一片绿灯！所有待审批工单已全部核签完成。</p>
+          <p className="text-xs text-slate-400">
+            当前大盘一片绿灯！所有待审批工单已全部核签完成。
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -72,7 +96,10 @@ export function PendingApprovals({
                       {approval.actionType}
                     </span>
                   </div>
-                  <ApprovalRiskBadge actionType={approval.actionType} status={approval.status} />
+                  <ApprovalRiskBadge
+                    actionType={approval.actionType}
+                    status={approval.status}
+                  />
                 </CardHeader>
 
                 {/* Content */}
@@ -82,26 +109,30 @@ export function PendingApprovals({
                     <div className="flex justify-between">
                       <span className="text-slate-500">商户租户:</span>
                       <span className="font-mono text-indigo-400 font-bold uppercase">
-                        {approval.businessId || 'ecommerce'}
+                        {approval.businessId || "ecommerce"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">工单 ID:</span>
-                      <span className="font-mono text-slate-300">{approval.id.substring(0, 8)}...</span>
+                      <span className="font-mono text-slate-300">
+                        {approval.id.substring(0, 8)}...
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Thread ID:</span>
-                      <span className="font-mono text-slate-300 truncate max-w-[150px]">{approval.threadId}</span>
+                      <span className="font-mono text-slate-300 truncate max-w-[150px]">
+                        {approval.threadId}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">截止日期:</span>
                       <span className="font-mono text-amber-400/80">
                         {approval.deadline
                           ? new Date(approval.deadline).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
+                              hour: "2-digit",
+                              minute: "2-digit",
                             })
-                          : '-'}
+                          : "-"}
                       </span>
                     </div>
                   </div>
@@ -125,7 +156,7 @@ export function PendingApprovals({
                   <div className="space-y-2">
                     <Button
                       type="button"
-                      onClick={() => setSelectedChatApproval(approval)}
+                      onClick={() => handleOpenChat(approval)}
                       className="w-full h-8 text-[11px] font-bold bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 rounded-xl flex items-center justify-center gap-1.5 transition"
                     >
                       <MessageSquare className="h-3.5 w-3.5 text-indigo-400" />
@@ -134,7 +165,7 @@ export function PendingApprovals({
 
                     <Input
                       type="text"
-                      value={rejectionReasons[approval.id] || ''}
+                      value={rejectionReasons[approval.id] || ""}
                       onChange={(e) =>
                         setRejectionReasons((prev) => ({
                           ...prev,
@@ -148,7 +179,9 @@ export function PendingApprovals({
                     <div className="flex gap-2 pt-1">
                       <Button
                         type="button"
-                        onClick={() => handleApprovalAction(approval.id, 'approve')}
+                        onClick={() =>
+                          handleApprovalAction(approval.id, "approve")
+                        }
                         disabled={isSubmitting}
                         className="flex-1 h-8 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-1.5"
                       >
@@ -163,7 +196,9 @@ export function PendingApprovals({
                       </Button>
                       <Button
                         type="button"
-                        onClick={() => handleApprovalAction(approval.id, 'reject')}
+                        onClick={() =>
+                          handleApprovalAction(approval.id, "reject")
+                        }
                         disabled={isSubmitting}
                         className="flex-1 h-8 text-[11px] font-bold bg-rose-600 hover:bg-rose-500 text-white rounded-xl flex items-center justify-center gap-1.5"
                       >
@@ -185,17 +220,19 @@ export function PendingApprovals({
         </div>
       )}
 
-      {/* Human Support Chat & Escalation Modal */}
-      <HumanChatModal
-        approval={selectedChatApproval}
-        isOpen={Boolean(selectedChatApproval)}
-        onClose={() => setSelectedChatApproval(null)}
-        onSendReply={async (approvalId, replyMsg, isFinish) => {
-          if (handleHumanReplyAction) {
-            await handleHumanReplyAction(approvalId, replyMsg, isFinish);
-          }
-        }}
-      />
+      {/* Human Support Chat & Escalation Modal (Fallback if no parent modal handler) */}
+      {!onOpenChatModal && (
+        <HumanChatModal
+          approval={selectedChatApproval}
+          isOpen={Boolean(selectedChatApproval)}
+          onClose={() => setSelectedChatApproval(null)}
+          onSendReply={async (approvalId, replyMsg, isFinish) => {
+            if (handleHumanReplyAction) {
+              await handleHumanReplyAction(approvalId, replyMsg, isFinish);
+            }
+          }}
+        />
+      )}
     </section>
   );
 }

@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@source "../**/*.{ts,tsx}";
+@source "../../**/*.{ts,tsx}";
+@source "../../../packages/ui/src/**/*.{ts,tsx}";
+@source "../../../apps/**/*.{ts,tsx}";
+
 @theme {
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
