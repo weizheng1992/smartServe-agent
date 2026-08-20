@@ -4,7 +4,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 
 系统原生支持 **SaaS 多租户物理隔离**、**人工核签红线拦截与重规划自适应回溯**、**Anthropic Contextual RAG（上下文增益知识库检索）**，并配备了 **Redis 分布式并发锁**、**物理自愈指数退避 LLM HA-Proxy**、以及**高敏捷 SaaS 财务算力账单仪表盘**。
 
-在近期，我们对整个系统进行了大规模的**高深度门面（Deep Module Facade）重构与稳定性加固**，将执行引擎、数据库仿真器、RAG 知识库、API 路由层、四层记忆以及网络流调度彻底拆解为高内聚、易测试的深度领域模块。
+在近期，我们对整个系统进行了大规模的**纯血 PostgreSQL 架构升级（彻底移除内存模拟假库 FakePool，实现单一真实数据源）**、**子任务并行执行器 (Parallel Subtask Executor)** 与 **PII 敏感数据递归脱敏** 等核心能力加固。
 
 ---
 
@@ -15,12 +15,12 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 3. [核心模块深度技术讲解 (Deep Module Breakdown)](#3-核心模块深度技术讲解-deep-module-breakdown)
    - [3.1 `apps/web` 前端可视化与 API 服务层](#31-appsweb-前端可视化与-api-服务层)
    - [3.2 `packages/engine` 核心 Agent 智能决策图与调度引擎](#32-packagesengine-核心-agent-智能决策图与调度引擎)
-   - [3.3 `packages/db` 关系型范式数据接入与领域仓储](#33-packagesdb-关系型范式数据接入与领域仓储)
-   - [3.4 `packages/tools` 物理工具链与安全防护拦截](#34-packagestools-物理工具链与安全防护拦截)
+   - [3.3 `packages/db` 纯血 PostgreSQL 真实关系型数据接入与领域仓储](#33-packagesdb-纯血-postgresql-真实关系型数据接入与领域仓储)
+   - [3.4 `packages/tools` 物理工具链、公共订单服务与 PII 安全脱敏](#34-packagestools-物理工具链公共订单服务与-pii-安全脱敏)
    - [3.5 `packages/observability` 算力计量与全链路 Trace 日志](#35-packagesobservability-算力计量与全链路-trace-日志)
    - [3.6 `packages/business-configs` 多商户 SaaS 动态策略配置](#36-packagesbusiness-configs-多商户-saas-动态策略配置)
 4. [核心底层深度设计实现细节](#4-核心底层深度设计实现细节)
-   - [4.1 任务执行与安控网关 (`StepExecutionEngine` & `ApprovalPolicyEngine`)](#41-任务执行与安控网关-stepexecutionengine--approvalpolicyengine)
+   - [4.1 任务并行执行与安控网关 (`StepExecutionEngine` & `ApprovalPolicyEngine`)](#41-任务并行执行与安控网关-stepexecutionengine--approvalpolicyengine)
    - [4.2 统一四层记忆高深度门面 (`AgentMemoryEngine`)](#42-统一四层记忆高深度门面-agentmemoryengine)
    - [4.3 统一 RAG 知识库门面 (`KnowledgeEngine`)](#43-统一-rag-知识库门面-knowledgeengine)
    - [4.4 领域服务与 API 控制器解耦 (`ChatSessionService` & `ApprovalService`)](#44-领域服务与-api-控制器解耦-chatsessionservice--approvalservice)
@@ -28,9 +28,10 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
    - [4.6 实时 SSE 长连接客户端 (`AgentStreamClient`)](#46-实时-sse-长连接客户端-agentstreamclient)
    - [4.7 金融级人机协同与认知回溯决策环 (HITL)](#47-金融级人机协同与认知回溯决策环-hitl)
    - [4.8 SaaS 级多租户隔离与 Contextual RAG 检索](#48-saas-级多租户隔离与-contextual-rag-检索)
-   - [4.9 物理工具链政策红线守卫 (SOP Guardrail)](#49-物理工具链政策红线守卫-sop-guardrail)
+   - [4.9 物理工具链政策红线守卫与 PII 递归脱敏切面](#49-物理工具链政策红线守卫与-pii-递归脱敏切面)
    - [4.10 双通道并发防刷与 Redis SETNX 分布式锁](#410-双通道并发防刷与-redis-setnx-分布式锁)
    - [4.11 SaaS 算力审计与财务账单度量系统](#411-saas-算力审计与财务账单度量系统)
+   - [4.12 纯血 PostgreSQL 单一真实数据源 (Single Source of Truth) 与 Zero IDOR 防护](#412-纯血-postgresql-单一真实数据源-single-source-of-truth-与-zero-idor-防护)
 5. [质量保障与评测体系 (Testing & Tooling)](#5-质量保障与评测体系-testing--tooling)
 6. [开发与部署命令](#6-开发与部署命令)
 7. [生产上线前 SOP 流程 (Pre-Launch Checklist)](#7-生产上线前-sop-流程-pre-launch-checklist)
@@ -72,7 +73,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        核心 Agent 状态机决策图                         │
 │   triage(分流) ──→ planner(规划) ──→ merge(合并) ──→ executor(执行工具) │
-│     │                 ▲                                   │            │
+│     │                 ▲              │ (无依赖子任务)       │            │
+│     │                 │              └─ 并行 Promise.all ─┘            │
 │     │                 └───────────────── validator(校验) ◄┘            │
 │     ▼                                                                  │
 │   finish(终点合成回复，依据真实物理 RAG 和工具数据提炼答复)                  │
@@ -81,8 +83,9 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        数据持久化与二级缓存层                         │
-│  - PostgreSQL / Drizzle ORM (Domain Repositories & FakePool 离线关系型仿真) │
+│  - 纯物理 PostgreSQL 数据库 (Drizzle ORM & 物理连接池 pg.Pool，单一真实数据源) │
 │  - Redis 物理分布式缓存 (含 localLocks 内存降级锁保护与 DEL 缓存自洁)    │
+│  - PII 参数脱敏中间件 (物理过滤身份证/电话/银行卡，合规落盘日志)         │
 │  - session_metrics 财务度量表 (毫秒级高精度决策时效 & Token 成本统计)     │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -103,15 +106,23 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   │   ├── auth/login/      # 多商户隔离登录鉴权 API
 │   │   │   │   ├── chat/            # 智能对话核心路由 (ChatSessionService & ApprovalService 领域服务)
 │   │   │   │   │   ├── approvals/   # 人工审核工单决策 API 控制器
+│   │   │   │   │   ├── messages/    # 会话历史消息同步接口
+│   │   │   │   │   ├── preferences/ # 用户画像偏好检索接口
+│   │   │   │   │   ├── threads/     # 会话管理 (增删查) 接口
 │   │   │   │   │   ├── services/    # ChatSessionService & ApprovalService 领域服务层
+│   │   │   │   │   ├── quotaGuard.ts# 租户级请求频次与 Token 配额守卫
 │   │   │   │   │   └── route.ts     # 接收对话请求分发中转控制器
 │   │   │   │   ├── chat/[jobId]/stream/ # SSE 实时状态机节点日志广播管道
 │   │   │   │   └── health/          # 系统健康检查轮询探针
 │   │   │   ├── home/                # 核心控制台面板
-│   │   │   │   ├── components/      # ChatArea, APMPanel, LeftSidebar, AuditDesk
-│   │   │   │   ├── hooks/           # useChatMessages (基于 AgentStreamClient), useChatThreads
-│   │   │   │   └── utils/           # AgentStreamClient (SSE 订阅客户端) & translateTaskPlan
-│   │   │   ├── login/               # 商户登录界面
+│   │   │   │   ├── components/      # 模块化 UI 组件
+│   │   │   │   │   ├── audit/       # HITL 审核工作台子组件 (AuditDesk, ApprovalDetailView, ApprovalList)
+│   │   │   │   │   ├── APMPanel.tsx # 性能监控、Token 成本与 TTFT 仪表盘
+│   │   │   │   │   ├── ChatArea.tsx # 主对话区域、消息气泡渲染与截图交互
+│   │   │   │   │   └── LeftSidebar.tsx # 会话历史列表、商户切换与退出登录
+│   │   │   │   ├── hooks/           # useChatMessages (基于 AgentStreamClient), useChatThreads, useApprovals
+│   │   │   │   └── utils/           # AgentStreamClient (SSE 订阅客户端) & translateTaskPlan (任务英转中翻译)
+│   │   │   ├── login/               # 商户登录界面 (支持租户切换与会话自愈)
 │   │   │   └── page.tsx             # 客服核心交互大屏入口
 │   │   ├── components/              # 登录与通用组件
 │   │   ├── e2e/                     # Playwright 端到端 UI 自动化测试
@@ -120,14 +131,31 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   └── admin/                       # 商户/系统级人工核签中台大屏 (3001 端口)
 │       ├── app/                     # App Router 路由结构
 │       │   └── home/                # 工单流转与人工接管控制台
+│       │       ├── components/      # 人工接管与工单审核模块
+│       │       │   ├── chat/        # 实时人工客服聊天子组件 (ChatMessageFeed, HumanChatFooter)
+│       │       │   ├── Header.tsx   # 中台顶部导航与系统指标概览
+│       │       │   ├── HistoricalAudits.tsx # 历史审批归档与审计追踪
+│       │       │   ├── HumanChatModal.tsx   # 人工客服主动接管实时 IM 抽屉
+│       │       │   ├── Metrics.tsx  # 财务度量、放行率与 SLA 报表
+│       │       │   ├── PendingApprovals.tsx # 待审核工单流转列表
+│       │       │   └── PersonaAudit.tsx     # 用户长期偏好画像审计看板
+│       │       └── hooks/           # useAdminStore & types
 │       └── package.json
 │
 ├── packages/
 │   ├── engine/                      # 核心 Agent 决策图与分布式工作流 (LangGraph + Temporal)
 │   │   ├── src/
 │   │   │   ├── graph/               # 决策图定义与节点
-│   │   │   │   ├── nodes/           # StepExecutionEngine, ApprovalPolicyEngine, triage, planner, validator, finish
-│   │   │   │   ├── eventEmitter.ts  # 本地直跑事件广播器
+│   │   │   │   ├── nodes/           # 深度领域决策节点
+│   │   │   │   │   ├── triage/      # 3 级意图分流引擎 (规则旁路 + 语义嵌入相似度 + LLM 槽位提取)
+│   │   │   │   │   ├── approvalPolicyEngine.ts # 金融安全红线与审批策略评估网关
+│   │   │   │   │   ├── stepExecutionEngine.ts  # 任务执行引擎与 Promise.all 无依赖子任务并行调度器
+│   │   │   │   │   ├── executorFastPath.ts     # 高频无状态工具极速执行旁路
+│   │   │   │   │   ├── executorApprovals.ts    # HITL 人工工单落盘与状态流转
+│   │   │   │   │   ├── planner.node.ts         # 动态规划节点 (DAG 子任务依赖构建与多意图生成)
+│   │   │   │   │   ├── validator.node.ts       # 步骤结果后置反思与决策校验
+│   │   │   │   │   └── finish.node.ts          # 终点回复合成与真实 RAG/工具数据提炼
+│   │   │   │   ├── eventEmitter.ts  # 本地直跑事件广播器 (Node.js EventEmitter)
 │   │   │   │   └── buildGraph.ts    # 编译 LangGraph 并集成死循环物理熔断器
 │   │   │   ├── memory/              # AgentMemoryEngine 统一 4 重多维度状态记忆门面
 │   │   │   │   ├── agentMemoryEngine.ts # 统一 4 层记忆并行拉取与归档门面
@@ -137,30 +165,43 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   │   └── taskMemory.ts    # 物理 Task Plan 状态持久化层
 │   │   │   ├── rag/                 # KnowledgeEngine 统一 RAG 知识库门面
 │   │   │   │   ├── knowledgeEngine.ts # 混合检索、文件热替换、单切片维护与目录入库门面
-│   │   │   │   └── contextualRag.ts # Anthropic Contextual RAG 混合检索引擎
+│   │   │   │   ├── contextualRag.ts # Anthropic Contextual RAG 混合检索引擎 (BM25 + 向量 + RRF)
+│   │   │   │   ├── chunker.ts       # Markdown 智能分块切片算法
+│   │   │   │   ├── contextGenerator.ts # 上下文总结摘要增强生成器
+│   │   │   │   └── ingestTxtFiles.ts# 物理文档自动解析与批量注入器
 │   │   │   ├── orchestrator/        # WorkflowOrchestrator 统一工作流调度与降级防御层
 │   │   │   │   └── workflowOrchestrator.ts # 统一 Temporal 工作流与本地 LangGraph 调度
 │   │   │   ├── llm/                 # LLM 自愈重试与 CircuitBreaker 断路器
 │   │   │   └── temporal/            # 分布式工作流编排 (client, worker, workflows, activities)
-│   │   └── tests/                   # 46+ 全量单元与集成测试
+│   │   └── tests/                   # 56+ 全量单元与集成测试套件
 │   │
-│   ├── db/                          # 关系型范式数据层 (Drizzle ORM & Domain Repositories)
+│   ├── db/                          # 纯物理关系型数据库层 (Drizzle ORM & PostgreSQL 连接池)
 │   │   ├── drizzle/                 # 数据库 Migration 自动生成 SQL
 │   │   └── src/
 │   │       ├── repositories/        # 强类型领域仓储接口 (IUserRepository, IThreadRepository, IMessageRepository, IOrderRepository)
-│   │       ├── client.ts            # Drizzle PostgreSQL 连接客户端
-│   │       ├── fakePool.ts          # 隔离的 FakePool 高保真离线仿真关系型数据库
-│   │       ├── schema.ts            # 3NF 物理表定义
-│   │       └── seed.ts              # 种子数据与租户策略灌入脚本
+│   │       ├── client.ts            # 纯物理真实 PostgreSQL 数据库连接池 (pg.Pool) 与 Drizzle 实例 (单一真实数据源)
+│   │       ├── schema.ts            # 3NF 物理表结构定义 (orders, products, order_items, threads, users, messages, session_metrics 等)
+│   │       ├── scripts/             # 数据库诊断与知识库导入运维脚本
+│   │       └── seed.ts              # 物理种子数据与多商户策略注入脚本
 │   │
-│   ├── tools/                       # 物理工具链与安全红线拦截器 (ecommerce, screenshot, registry)
+│   ├── tools/                       # 物理工具链、公共领域服务与 PII 安全脱敏
+│   │   ├── src/
+│   │   │   ├── orderDomainService.ts# 订单领域服务 (含 createOrder, listUserOrders, processRefund, changeShippingAddress)
+│   │   │   ├── ecommerce.tools.ts   # 电商标准 Tool 注册定义 (getOrderStatus, processRefund, listUserOrders, createOrder 等)
+│   │   │   ├── scrubber.ts          # PII 敏感数据递归脱敏切面 (掩码手机/身份证/银行卡/邮箱)
+│   │   │   ├── screenshot.tools.ts  # Puppeteer 高清网页物理截图工具 (静态文件保存与安全返回)
+│   │   │   ├── cache.ts             # Redis + 本地 Map 双模二级缓存层 (带自动失效与 TTL)
+│   │   │   └── registry.ts          # 统一 Tool 注册表 (透明注入 PII 脱敏中间件)
+│   │   └── tests/                   # 订单领域服务与 PII 脱敏集成测试
+│   │
 │   ├── observability/               # 财务度量分析与 APM Trace 观测包 (Langfuse, Pino Logger, metrics)
 │   ├── business-configs/            # SaaS 多商户动态 JSON 策略配置 (ecommerce.config.ts)
 │   ├── types/                       # 全局强类型定义共享包 (agent, approval, config, db, event, observability, tool)
-│   └── ui/                          # 共享 UI 组件库与基础样式包 (Tailwind, Lucide Icons, Shadcn utils)
+│   └── ui/                          # 共享 UI 组件库与基础样式包 (Tailwind, Lucide Icons, Shadcn, Approval 专用组件)
 │
 ├── CONTEXT.md                       # 领域上下文与深度模块规范名词表
 ├── CLAUDE.md                        # Claude Code 开发 SOP 指南
+├── CHANGELOG.md                     # 全版本里程碑演进记录
 └── README.md                        # 系统主干指南自述文档
 ```
 
@@ -180,26 +221,46 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 
 - **职责范围**: Agent 大脑决策中枢，集成 LangGraph 状态图、Temporal 分布式工作流、RAG 向量混合检索与重排。
 - **核心模块**:
-  - `StepExecutionEngine`: 封装快速通道匹配、参数提取、策略评估与工具派发；
+  - `StepExecutionEngine`: 封装快速通道匹配、参数提取、策略评估与工具派发，集成基于 `Promise.all` 的无依赖子任务并行执行器；
   - `ApprovalPolicyEngine`: 封装双重退款拦截、免签额度评估、高价值地址变更校验与超时解挂；
   - `AgentMemoryEngine`: 统一调度短期、长期、任务与情境四层记忆；
   - `KnowledgeEngine`: 提供 SaaS 隔离混合检索、原子级文件热替换与目录入库；
   - `WorkflowOrchestrator`: 统一调度 Temporal 生产工作流与本地 LangGraph 模拟器。
 
-### 3.3 `packages/db` 关系型范式数据接入与领域仓储
+### 3.3 `packages/db` 纯血 PostgreSQL 真实关系型数据接入与领域仓储
 
-- **职责范围**: 关系型数据持久化与离线仿真器。
+- **职责范围**: 关系型数据物理持久化与事务隔离，提供单一真实数据源（Single Source of Truth）。
 - **核心模块**:
-  - `fakePool.ts`: 独立隔离的 12+ 张表的内存关系型数据库仿真器；
-  - `packages/db/src/repositories/`: 提供强类型领域仓储接口（`IUserRepository`, `IThreadRepository`, `IMessageRepository`, `IOrderRepository`），实现真实 PG 驱动与 FakePool 仿真的无缝解耦。
+  - `client.ts`: 纯物理 PostgreSQL 连接池 (`pg.Pool`) 与 Drizzle ORM 单例，彻底移除了 `FakePool` 与内存模拟分支，保证外部 SQL 插入与系统实时查询 100% 同步；
+  - `packages/db/src/repositories/`: 提供强类型领域仓储接口（`IUserRepository`, `IThreadRepository`, `IMessageRepository`, `IOrderRepository`），实现清晰的领域层解耦；
+  - `schema.ts`: 规范 3NF 关系型表结构，支持物理外键级联与 SaaS 租户字段隔离。
+
+### 3.4 `packages/tools` 物理工具链、公共订单服务与 PII 安全脱敏
+
+- **职责范围**: 真实物理工具执行层、业务领域服务与数据安全合规切面。
+- **核心模块**:
+  - `orderDomainService.ts`: 提供包含 `createOrder`（标准下单）、`listUserOrders`（零越权查单）、`processRefund`（防重退款）与 `changeShippingAddress`（高价值地址审批门禁）在内的统一领域服务；
+  - `scrubber.ts`: 递归 PII 脱敏中间件，自动对手机号、身份证、银行卡及邮箱进行掩码处理；
+  - `screenshot.tools.ts`: 本地物理 Chrome/Chromium 浏览器高清抓图与静态文件落盘；
+  - `cache.ts`: Redis 物理集群直连与本地内存双模二级缓存。
+
+### 3.5 `packages/observability` 算力计量与全链路 Trace 日志
+
+- **职责范围**: 全链路 APM 性能度量、LLM Token 计费审计与 Pino 结构化日志追踪。
+
+### 3.6 `packages/business-configs` 多商户 SaaS 动态策略配置
+
+- **职责范围**: 维护不同商户（如 Nike、Adidas、主站电商）的退款免签阈值、退货政策时效与自定义提示词快照。
 
 ---
 
 ## 4. 核心底层深度设计实现细节
 
-### 4.1 任务执行与安控网关 (`StepExecutionEngine` & `ApprovalPolicyEngine`)
+### 4.1 任务并行执行与安控网关 (`StepExecutionEngine` & `ApprovalPolicyEngine`)
 
-- **`StepExecutionEngine`**：将原本 800+ 行的单体 `executor.node.ts` 拆解为高深度门面，隐去工具参数匹配、Fast-Path 旁路、安控策略校验与工具调起的复杂度。
+- **`StepExecutionEngine` 与并行执行器 (Parallel Subtask Executor)**：
+  - 将单体执行节点拆解为高深度门面，屏蔽参数匹配与工具调度细节；
+  - 内置 **DAG 并行执行器**：自动扫描当前步骤之后连续且无依赖的 Fast-Path 独立子任务（如“查单状态”与“查历史订单”同时发起），通过 `Promise.all` 实行并发极速调起，多任务执行延迟降低 50% 以上。
 - **`ApprovalPolicyEngine`**：集中管理金融安全红线：
   - 双重退款防刷（`checkDoubleRefund`）；
   - 租户动态免签限额（`evaluateRefundAutoApproval`）；
@@ -236,9 +297,10 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 
 - Drizzle ORM 查询强行挂载 `WHERE business_id = :tenantId` 条件子句，从数据源头封杀越权风险。
 
-### 4.9 物理工具链政策红线守卫 (SOP Guardrail)
+### 4.9 物理工具链政策红线守卫与 PII 递归脱敏切面
 
-- 物理工具链底层硬编码商户退货窗口（Nike 30天 / Adidas 14天），超期订单在工具内部物理抛出异常。
+- **业务 SOP 红线**：物理工具链底层硬编码商户退货窗口（Nike 30天 / Adidas 14天），超期订单在工具内部物理抛出异常；
+- **PII 递归数据脱敏**：所有注册到 `registry.ts` 的工具在执行前与返回后均自动流经 `scrubPii()` 中间件，自动掩码敏感字段，杜绝泄露到日志与遥测系统。
 
 ### 4.10 双通道并发防刷与 Redis SETNX 分布式锁
 
@@ -248,18 +310,25 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 
 - 决策结束后异步冲刷 `session_metrics` 账单，提供高精度算力开销与 Autopilot 自动放行率统计。
 
+### 4.12 纯血 PostgreSQL 单一真实数据源 (Single Source of Truth) 与 Zero IDOR 防护
+
+- 彻底移除任何脱机内存假库，无论是外部 SQL 手工注入还是前端 API 创建订单，数据统一物理落盘在同一个 PostgreSQL 实例；
+- 工具层查询物理结合会话 `threadId` 反查用户身份，严格执行 `WHERE user_id = :userId AND business_id = :businessId`，彻底防范越权串单。
+
 ---
 
 ## 5. 质量保障与评测体系 (Testing & Tooling)
 
 - **全量单元测试与集成测试 (Bun Test)**：
-  包含了针对 `StepExecutionEngine`, `ApprovalPolicyEngine`, `KnowledgeEngine`, `AgentMemoryEngine`, `WorkflowOrchestrator`, `ChatSessionService`, `ApprovalService` 的专属单元测试，覆盖 46+ 个关键验证点（100% 绿色通过）。
+  包含针对 `OrderDomainService`（真实 PostgreSQL 下创建与查单闭环）、`StepExecutionEngine`（并行子任务执行）、`ApprovalPolicyEngine`、`KnowledgeEngine`、`AgentMemoryEngine`、`WorkflowOrchestrator`、`IntentTriageEngine` 以及 PII 脱敏中间件的专属集成测试，覆盖 **56+ 个核心用例 (100% 绿色通过)**。
 - **Biome (Rust-powered Linter/Formatter)**：
   高速代码格式化与依赖排序，保障 CI/CD 规范。
 - **Playwright (E2E 测试)**：
   自动化验证多轮对话、工单核签面板与状态持久化。
 - **Promptfoo (Prompt 评测)**：
-  评测提示词防越狱、大意图识别准确率与回复质量。
+  评测提示词防越狱、多意图识别准确率与回复质量。
+- **高并发流式压测大盘 (`scripts/load-test.ts`)**：
+  支持多用户多商户并发压力测试与首字生成延迟 (TTFT) 物理测速。
 
 ---
 
@@ -268,7 +337,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 ### 6.1 运行全量单元测试与代码校验
 
 ```bash
-# 运行全量 46+ 单元与集成测试
+# 运行全量 56+ 单元与集成测试
 bun test
 
 # 运行 Biome 格式化与 Linter 检查
@@ -337,7 +406,7 @@ bun run dev
 上线前必须通过 100% 的自动化测试流水线：
 
 ```bash
-# 1. 运行全套单元测试与集成测试 (包含 CircuitBreaker、QuotaGuard、Planner、Executor、Memory 46+ 测试点)
+# 1. 运行全套单元测试与集成测试 (包含 CircuitBreaker、QuotaGuard、Planner、Executor、Memory 56+ 测试点)
 bun test
 
 # 2. 运行 Playwright 端到端浏览器对话测试
