@@ -9,13 +9,17 @@
 ### 🌟 Major Highlights (重大亮点)
 
 - **纯物理真实 PostgreSQL 数据库架构 (Single Source of Truth)**: 彻底移除了 600+ 行内存模拟库（`FakePool`）及复杂的 SQL 正则匹配与降级分支，系统所有读写操作均直连物理真实 PostgreSQL 数据库与 Drizzle ORM，彻底杜绝数据脱节与幽灵数据。
+- **聊天记录单调时序与会话级强隔离 (Message Ordering & Session Isolation)**:
+  - 在 `ShortMemory` 与 `AgentMemoryEngine` 中引入单调递增时间戳与严格串行入库，数据库查询增加 `ORDER BY timestamp ASC, id ASC`，彻底解决高频与并发写入下刷新页面消息时序颠倒混乱的问题。
+  - 重构前端 `useChatMessages` 与 `useChatThreads`，通过活跃会话 Ref 竞态防护拦截迟到异步响应，并在新建与切换会话时立即重置界面为默认欢迎语，彻底消除旧会话历史残留穿透。
 - **公共标准订单创建领域服务 (`createOrder`)**: 在 `OrderDomainService` 中新增并暴露了标准 `createOrder` 工具，自动关联用户会话、多租户（SaaS Tenant）归属与订单明细条目，并在落盘后自动同步清除 Redis/本地缓存。
-- **Zero IDOR 零越权与多租户查单优化**: 增强 `listUserOrders` 对用户会话与商户 ID 的查询适配，支持多商户及全局电商主站的订单物理归属查询。
+- **Admin 控制台客服介入 IM 工作台统一 (`HumanChatModal`)**: 抽离统一的 `packages/ui/src/components/chat/` 模块，配置 Tailwind CSS v4 `@source` Monorepo 扫描规则，彻底解决 Admin 工作台独立编译下的弹窗样式错位变形。
+- **意图分流防误拦截 (Zero False-Positive Refund Interception)**: 优化 `intentTriageEngine`、`executorFastPath` 与 `stepExecutionEngine`，消除纯订单查询被误拦截为退款流程的逻辑缺陷。
 
 ### 🏗️ Major Refactoring (重大重构)
 
 - **移除内存数据库模拟器 (`b05abd4`)**: 彻底删除了 `packages/db/src/fakePool.ts`，简化 `packages/db/src/client.ts` 使得所有 API、Agent 与工具直连真实 `pg.Pool` 连接池。
-- **统一 HITL 审批中台组件与领域服务 (`11127ff`)**: 对 HITL 审批工单、订单领域服务及跨包类型进行了全量模块化收敛与编译修复。
+- **统一 HITL 审批中台组件与领域服务 (`11127ff`, `abd1832`)**: 对 HITL 审批工单、人工客服 IM 接管弹窗、订单领域服务及跨包类型进行了全量模块化收敛与编译修复。
 
 ---
 
