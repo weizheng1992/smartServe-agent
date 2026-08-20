@@ -1,5 +1,5 @@
-import type React from "react";
-import { Button, Input, Loader2, Send, Sparkles } from "ui";
+import type React from 'react';
+import { Button, Input, Loader2, Send, Sparkles } from 'ui';
 
 interface HumanChatFooterProps {
   replyMessage: string;
@@ -47,9 +47,7 @@ export function HumanChatFooter({
       </form>
 
       <div className="flex items-center justify-between pt-2 border-t border-slate-900">
-        <span className="text-[11px] text-slate-500">
-          解答完毕后，点击右侧按钮结束人工对话并切回 AI 智能 Agent：
-        </span>
+        <span className="text-[11px] text-slate-500">解答完毕后，点击右侧按钮结束人工对话并切回 AI 智能 Agent：</span>
         <Button
           type="button"
           onClick={handleFinishHumanChat}

@@ -332,26 +332,70 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 
 ---
 
-## 6. 开发与部署命令
+## 6. 本地开发与启动指南 (Local Quick Start)
 
-### 6.1 运行全量单元测试与代码校验
+### 6.1 环境与依赖准备
 
-```bash
-# 运行全量 56+ 单元与集成测试
-bun test
+- **包管理器 / 运行时**：[Bun](https://bun.sh/) (>= 1.1.0)
+- **容器环境**：Docker & Docker Compose（用于一键拉起 PostgreSQL、Redis、Temporal）
 
-# 运行 Biome 格式化与 Linter 检查
-bun run lint
-```
-
-### 6.2 启动本地开发服务
+### 6.2 极速一键本地启动步骤
 
 ```bash
-# 启动全部服务 (Next.js 核心控制台 + Admin 管理端)
+# 1. 复制环境变量配置文件
+cp .env.example .env
+
+# 2. 一键启动本地核心基础设施容器 (PostgreSQL 5432 & Redis 6379)
+bun run docker:up
+
+# 3. 推送数据库 Schema 并注入多租户种子数据
+bun run db:push
+bun run db:seed
+
+# 4. 启动前端应用集群 (Next.js 用户前台 :3000 + Admin 审计管理后台 :3001)
 bun run dev
 ```
 
-访问 [http://localhost:3000](http://localhost:3000) 即可开启体验！
+> 💡 **关于 Temporal 工作流引擎**：
+>
+> - **默认模式**：未启动 Temporal 时，系统自动启用 **High-Fidelity LangGraph 仿真模式** 直跑（无需拉取 Temporal 镜像，开箱即用）。
+> - **生产级工作流模式**：若需启用分布式 Temporal Server，可执行：
+>   ```bash
+>   bun run docker:temporal   # 启动 Temporal Server 容器 (:7239 与 Web UI :8233)
+>   bun run worker            # 启动 Temporal Worker 进程
+>   ```
+
+---
+
+### 6.3 常用开发命令速查
+
+| 操作类别             | 命令                      | 说明                                                                   |
+| :------------------- | :------------------------ | :--------------------------------------------------------------------- |
+| **全量启动**         | `bun run dev`             | 并行启动 Next.js 前端 (`apps/web:3000`) 与管理后台 (`apps/admin:3001`) |
+| **核心基础设施容器** | `bun run docker:up`       | 一键启动本地 PostgreSQL (5432) 与 Redis (6379) 容器                    |
+| **Temporal 容器**    | `bun run docker:temporal` | 可选：启动 Temporal Dev Server 容器 (:7239 & Web UI :8233)             |
+| **Temporal Worker**  | `bun run worker`          | 可选：启动 `packages/engine` 的 Temporal 物理工作流 Worker 进程        |
+| **容器停止**         | `bun run docker:down`     | 停止并释放本地 Docker 容器资源                                         |
+| **数据库同步**       | `bun run db:push`         | 基于 Drizzle ORM 同步 Schema 结构至真实 PostgreSQL                     |
+| **数据种子灌入**     | `bun run db:seed`         | 初始化租户策略、商品与模拟订单基础数据                                 |
+| **单元与集成测试**   | `bun test`                | 运行全部 56+ 单元测试与集成测试用例 (100% 通过)                        |
+| **代码规范与格式化** | `bun run lint`            | 运行 Biome 极速代码检查与格式化                                        |
+| **端到端测试**       | `bun run test:e2e`        | 运行 Playwright 浏览器自动化交互测试                                   |
+| **提示词与意图评测** | `bun run test:prompt`     | 运行 Promptfoo 评测提示词与意图分流准确率                              |
+| **并发压测大盘**     | `bun run test:load`       | 压测 SSE 流式接口吞吐量与 TTFT 延迟                                    |
+
+---
+
+### 6.4 本地默认服务端口表
+
+| 服务名称                          | 端口   | 访问地址 / 连接说明                                                  |
+| :-------------------------------- | :----- | :------------------------------------------------------------------- |
+| **Web 智能客服对话前端**          | `3000` | [http://localhost:3000](http://localhost:3000)                       |
+| **Admin 人工核签与审计中台**      | `3001` | [http://localhost:3001](http://localhost:3001)                       |
+| **Temporal Web UI 管理控制台**    | `8233` | [http://localhost:8233](http://localhost:8233)                       |
+| **PostgreSQL 关系型数据库**       | `5432` | `postgres://agent_user:agent_password@localhost:5432/agent_platform` |
+| **Redis 分布式缓存与分布式锁**    | `6379` | `redis://:redis_password@127.0.0.1:6379`                             |
+| **Temporal gRPC Server 服务端口** | `7239` | `127.0.0.1:7239`                                                     |
 
 ---
 

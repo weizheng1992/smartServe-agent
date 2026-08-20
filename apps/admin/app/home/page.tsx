@@ -1,18 +1,18 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
+import React, { useState } from 'react';
 
 // Local Hooks
-import { useAdminDashboardData } from "./hooks";
+import { useAdminDashboardData } from './hooks';
 
 // Local Components
-import { Header } from "./components/Header";
-import { HistoricalAudits } from "./components/HistoricalAudits";
-import { HumanChatModal } from "./components/HumanChatModal";
-import { Metrics } from "./components/Metrics";
-import { PendingApprovals } from "./components/PendingApprovals";
-import { PersonaAudit } from "./components/PersonaAudit";
-import type { Approval } from "./hooks/types";
+import { Header } from './components/Header';
+import { HistoricalAudits } from './components/HistoricalAudits';
+import { HumanChatModal } from './components/HumanChatModal';
+import { Metrics } from './components/Metrics';
+import { PendingApprovals } from './components/PendingApprovals';
+import { PersonaAudit } from './components/PersonaAudit';
+import type { Approval } from './hooks/types';
 
 export default function AdminDashboard() {
   const {
@@ -33,12 +33,10 @@ export default function AdminDashboard() {
     preferences,
   } = useAdminDashboardData();
 
-  const [activeChatApproval, setActiveChatApproval] = useState<Approval | null>(
-    null,
-  );
+  const [activeChatApproval, setActiveChatApproval] = useState<Approval | null>(null);
 
   const handleStartTakeover = async () => {
-    const approval = await startActiveTakeover("default_thread");
+    const approval = await startActiveTakeover('default_thread');
     if (approval) {
       setActiveChatApproval(approval);
     }

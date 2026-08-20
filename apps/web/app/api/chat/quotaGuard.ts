@@ -1,10 +1,7 @@
-import { redis, useRedis } from "tools";
+import { redis, useRedis } from 'tools';
 
 // 内存滑动窗口降级存储（当 Redis 离线时使用）
-const localRequestCounts = new Map<
-  string,
-  { count: number; resetAt: number }
->();
+const localRequestCounts = new Map<string, { count: number; resetAt: number }>();
 const localTokenUsages = new Map<string, { total: number; dateStr: string }>();
 
 const MAX_REQUESTS_PER_MINUTE = 60; // 每分钟最多 60 次 API 请求
@@ -17,12 +14,9 @@ export interface QuotaCheckResult {
   remainingTokens?: number;
 }
 
-export async function checkTenantQuotaGuard(
-  userId: string,
-  businessId = "ecommerce",
-): Promise<QuotaCheckResult> {
+export async function checkTenantQuotaGuard(userId: string, businessId = 'ecommerce'): Promise<QuotaCheckResult> {
   const now = Date.now();
-  const dateStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const minuteKey = `rate:${businessId}:${userId}:${Math.floor(now / 60000)}`;
   const dailyTokenKey = `quota:${businessId}:${userId}:${dateStr}`;
 
@@ -44,9 +38,7 @@ export async function checkTenantQuotaGuard(
 
       // 检查每日 Token 配额
       const currentTokensStr = await redis.get(dailyTokenKey);
-      const currentTokens = currentTokensStr
-        ? parseInt(currentTokensStr, 10)
-        : 0;
+      const currentTokens = currentTokensStr ? Number.parseInt(currentTokensStr, 10) : 0;
       if (currentTokens >= MAX_DAILY_TOKENS) {
         return {
           allowed: false,
@@ -61,10 +53,7 @@ export async function checkTenantQuotaGuard(
         remainingTokens: MAX_DAILY_TOKENS - currentTokens,
       };
     } catch (err) {
-      console.warn(
-        "[QuotaGuard] Redis check failed, falling back to memory:",
-        err,
-      );
+      console.warn('[QuotaGuard] Redis check failed, falling back to memory:', err);
     }
   }
 
@@ -106,13 +95,9 @@ export async function checkTenantQuotaGuard(
   };
 }
 
-export async function recordTokenUsage(
-  userId: string,
-  tokensUsed: number,
-  businessId = "ecommerce",
-): Promise<void> {
+export async function recordTokenUsage(userId: string, tokensUsed: number, businessId = 'ecommerce'): Promise<void> {
   if (tokensUsed <= 0) return;
-  const dateStr = new Date().toISOString().split("T")[0];
+  const dateStr = new Date().toISOString().split('T')[0];
   const dailyTokenKey = `quota:${businessId}:${userId}:${dateStr}`;
 
   if (useRedis && redis) {
@@ -121,7 +106,7 @@ export async function recordTokenUsage(
       await redis.expire(dailyTokenKey, 86400 * 2); // 保留 2 天
       return;
     } catch (err) {
-      console.warn("[QuotaGuard] Redis incrby failed:", err);
+      console.warn('[QuotaGuard] Redis incrby failed:', err);
     }
   }
 

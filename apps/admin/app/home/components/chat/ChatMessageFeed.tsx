@@ -1,16 +1,8 @@
-import type React from "react";
-import {
-  Avatar,
-  AvatarFallback,
-  Badge,
-  Card,
-  Loader2,
-  Sparkles,
-  User,
-} from "ui";
+import type React from 'react';
+import { Avatar, AvatarFallback, Badge, Card, Loader2, Sparkles, User } from 'ui';
 
 export interface MessageItem {
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp?: string;
 }
@@ -21,31 +13,20 @@ interface ChatMessageFeedProps {
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }
 
-export function ChatMessageFeed({
-  isLoadingMessages,
-  messages,
-  scrollRef,
-}: ChatMessageFeedProps) {
+export function ChatMessageFeed({ isLoadingMessages, messages, scrollRef }: ChatMessageFeedProps) {
   return (
-    <div
-      ref={scrollRef}
-      className="p-6 space-y-4 h-[380px] overflow-y-auto bg-slate-950/60"
-    >
+    <div ref={scrollRef} className="p-6 space-y-4 h-[380px] overflow-y-auto bg-slate-950/60">
       {isLoadingMessages ? (
         <div className="flex items-center justify-center py-20 text-slate-500 space-x-2">
           <Loader2 className="h-5 w-5 animate-spin text-indigo-400" />
-          <span className="text-xs font-medium">
-            正在拉取 IM 实时对话记录...
-          </span>
+          <span className="text-xs font-medium">正在拉取 IM 实时对话记录...</span>
         </div>
       ) : messages.length === 0 ? (
-        <div className="text-center py-20 text-slate-500 text-xs">
-          暂无物理对话记录
-        </div>
+        <div className="text-center py-20 text-slate-500 text-xs">暂无物理对话记录</div>
       ) : (
         messages.map((msg, idx) => {
-          const isUser = msg.role === "user";
-          const isSystem = msg.role === "system";
+          const isUser = msg.role === 'user';
+          const isSystem = msg.role === 'system';
 
           if (isSystem) {
             return (
@@ -61,57 +42,38 @@ export function ChatMessageFeed({
           }
 
           return (
-            <div
-              key={idx}
-              className={`flex items-start gap-3 ${
-                isUser ? "flex-row-reverse" : "flex-row"
-              }`}
-            >
+            <div key={idx} className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
               <Avatar className="h-8 w-8 border border-slate-800 shrink-0">
                 <AvatarFallback
                   className={`text-[11px] font-bold ${
-                    isUser
-                      ? "bg-indigo-600 text-white"
-                      : "bg-amber-500/20 text-amber-400"
+                    isUser ? 'bg-indigo-600 text-white' : 'bg-amber-500/20 text-amber-400'
                   }`}
                 >
-                  {isUser ? (
-                    <User className="h-4 w-4" />
-                  ) : (
-                    <Sparkles className="h-4 w-4" />
-                  )}
+                  {isUser ? <User className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
                 </AvatarFallback>
               </Avatar>
 
               <div className="max-w-[80%] space-y-1">
-                <div
-                  className={`flex items-center gap-1.5 ${
-                    isUser ? "justify-end" : "justify-start"
-                  }`}
-                >
+                <div className={`flex items-center gap-1.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
                   <span className="text-[10px] text-slate-400 font-mono">
-                    {isUser
-                      ? "客户"
-                      : msg.content.startsWith("[人工客服]")
-                        ? "人工客服"
-                        : "AI Agent"}
+                    {isUser ? '客户' : msg.content.startsWith('[人工客服]') ? '人工客服' : 'AI Agent'}
                   </span>
                 </div>
 
                 <Card
                   className={`border p-3.5 text-xs leading-relaxed shadow-sm ${
                     isUser
-                      ? "bg-indigo-600 text-white border-indigo-500/30 rounded-tr-none"
-                      : "bg-slate-900 text-slate-200 border-slate-800 rounded-tl-none"
+                      ? 'bg-indigo-600 text-white border-indigo-500/30 rounded-tr-none'
+                      : 'bg-slate-900 text-slate-200 border-slate-800 rounded-tl-none'
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{msg.content}</p>
                   {msg.timestamp && (
                     <span className="text-[9px] text-slate-400 mt-1 block opacity-70 font-mono">
                       {new Date(msg.timestamp).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
                       })}
                     </span>
                   )}

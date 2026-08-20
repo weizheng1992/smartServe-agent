@@ -1,8 +1,8 @@
-import { getDrizzle, longMemoryFacts } from "db";
-import { desc, eq, sql } from "drizzle-orm";
-import { type NextRequest, NextResponse } from "next/server";
+import { getDrizzle, longMemoryFacts } from 'db';
+import { desc, eq, sql } from 'drizzle-orm';
+import { type NextRequest, NextResponse } from 'next/server';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 // GET /api/chat/preferences - 获取所有画像偏好数据，并动态关联最后会话的 business_id
 export async function GET(req: NextRequest) {
@@ -42,11 +42,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, preferences: facts });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error fetching preferences:", error);
-    return NextResponse.json(
-      { error: errMsg || "Internal Server Error" },
-      { status: 500 },
-    );
+    console.error('Error fetching preferences:', error);
+    return NextResponse.json({ error: errMsg || 'Internal Server Error' }, { status: 500 });
   }
 }
 
@@ -56,43 +53,28 @@ export async function POST(req: NextRequest) {
     const { preferenceId, action } = await req.json();
 
     if (!preferenceId || !action) {
-      return NextResponse.json(
-        { error: "preferenceId and action are required" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: 'preferenceId and action are required' }, { status: 400 });
     }
 
     const drizzle = getDrizzle();
     if (!drizzle) {
-      return NextResponse.json(
-        { error: "Database is offline" },
-        { status: 503 },
-      );
+      return NextResponse.json({ error: 'Database is offline' }, { status: 503 });
     }
 
-    if (action === "delete") {
-      await drizzle
-        .delete(longMemoryFacts)
-        .where(eq(longMemoryFacts.id, preferenceId));
-      console.log(
-        `[Admin Preference API] 🗑️ 成功物理删除偏好画像事实 ID: ${preferenceId}`,
-      );
-      return NextResponse.json({ success: true, action: "deleted" });
+    if (action === 'delete') {
+      await drizzle.delete(longMemoryFacts).where(eq(longMemoryFacts.id, preferenceId));
+      console.log(`[Admin Preference API] 🗑️ 成功物理删除偏好画像事实 ID: ${preferenceId}`);
+      return NextResponse.json({ success: true, action: 'deleted' });
     }
 
-    let nextStatus = "rejected";
-    if (action === "approve") {
-      nextStatus = "approved";
+    let nextStatus = 'rejected';
+    if (action === 'approve') {
+      nextStatus = 'approved';
     }
 
-    await drizzle
-      .update(longMemoryFacts)
-      .set({ status: nextStatus })
-      .where(eq(longMemoryFacts.id, preferenceId));
+    await drizzle.update(longMemoryFacts).set({ status: nextStatus }).where(eq(longMemoryFacts.id, preferenceId));
 
-    console.log(
-      `[Admin Preference API] 🔒 画像事实核签完成：ID: ${preferenceId} ➔ 状态变更为: [${nextStatus}]`,
-    );
+    console.log(`[Admin Preference API] 🔒 画像事实核签完成：ID: ${preferenceId} ➔ 状态变更为: [${nextStatus}]`);
 
     return NextResponse.json({
       success: true,
@@ -101,10 +83,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error updating preference:", error);
-    return NextResponse.json(
-      { error: errMsg || "Internal Server Error" },
-      { status: 500 },
-    );
+    console.error('Error updating preference:', error);
+    return NextResponse.json({ error: errMsg || 'Internal Server Error' }, { status: 500 });
   }
 }

@@ -20,18 +20,15 @@ export class MarkdownChunker {
   /**
    * 将 Markdown 格式的知识库文档智能切割为语义与步骤完整的 Chunk 切片
    */
-  public static splitMarkdown(
-    markdownText: string,
-    options: ChunkerOptions = {},
-  ): ChunkResult[] {
+  public static splitMarkdown(markdownText: string, options: ChunkerOptions = {}): ChunkResult[] {
     const maxChunkSize = options.maxChunkSize || 600;
-    const category = options.category || "general";
+    const category = options.category || 'general';
 
-    if (!markdownText || typeof markdownText !== "string") {
+    if (!markdownText || typeof markdownText !== 'string') {
       return [];
     }
 
-    const lines = markdownText.split("\n");
+    const lines = markdownText.split('\n');
     const results: ChunkResult[] = [];
 
     let currentHeaders: string[] = [];
@@ -40,9 +37,9 @@ export class MarkdownChunker {
 
     const flushChunk = () => {
       if (currentChunkLines.length === 0) return;
-      const text = currentChunkLines.join("\n").trim();
+      const text = currentChunkLines.join('\n').trim();
       if (text.length > 0) {
-        const headerPath = currentHeaders.join(" > ") || "通用说明";
+        const headerPath = currentHeaders.join(' > ') || '通用说明';
         const stepMatches = text.match(/^\s*\d+\.\s+/gm);
         results.push({
           chunkText: text,
@@ -71,10 +68,7 @@ export class MarkdownChunker {
       }
 
       // 检查加入当前行是否会超出 maxChunkSize
-      if (
-        currentLength + line.length > maxChunkSize &&
-        currentChunkLines.length > 0
-      ) {
+      if (currentLength + line.length > maxChunkSize && currentChunkLines.length > 0) {
         flushChunk();
       }
 

@@ -1,5 +1,5 @@
-import type React from "react";
-import { Badge, Button, Lock, RefreshCw } from "ui";
+import type React from 'react';
+import { Badge, Button, Lock, RefreshCw } from 'ui';
 
 interface HeaderProps {
   selectedMerchant: string;
@@ -24,9 +24,7 @@ export function Header({
         </div>
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-lg font-bold tracking-tight text-slate-200">
-              smartServe 客服大盘 & 安全核签中心
-            </h1>
+            <h1 className="text-lg font-bold tracking-tight text-slate-200">smartServe 客服大盘 & 安全核签中心</h1>
             <Badge
               variant="outline"
               className="border-indigo-500/30 text-indigo-400 bg-indigo-950/20 font-mono text-[10px] uppercase font-bold"
@@ -56,19 +54,19 @@ export function Header({
 
         {/* Merchant Selector using shadcn Buttons */}
         <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
-          {["ecommerce", "nike", "adidas", "puma"].map((m) => {
+          {['ecommerce', 'nike', 'adidas', 'puma'].map((m) => {
             const isSelected = selectedMerchant === m;
             return (
               <Button
                 type="button"
                 key={m}
                 size="sm"
-                variant={isSelected ? "default" : "ghost"}
+                variant={isSelected ? 'default' : 'ghost'}
                 onClick={() => setSelectedMerchant(m)}
                 className={`h-7 px-3 text-xs font-semibold uppercase tracking-wider rounded-lg transition-colors ${
                   isSelected
-                    ? "bg-indigo-600 text-white shadow-md hover:bg-indigo-500"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                    ? 'bg-indigo-600 text-white shadow-md hover:bg-indigo-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
                 {m}
@@ -85,9 +83,7 @@ export function Header({
           onClick={fetchDashboardData}
           className="h-9 w-9 rounded-xl bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800"
         >
-          <RefreshCw
-            className={`h-4 w-4 ${isRefreshing ? "animate-spin text-indigo-400" : ""}`}
-          />
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-indigo-400' : ''}`} />
         </Button>
       </div>
     </header>

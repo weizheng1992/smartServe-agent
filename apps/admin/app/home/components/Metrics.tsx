@@ -1,15 +1,6 @@
-import type React from "react";
-import {
-  Badge,
-  Card,
-  CardContent,
-  Clock,
-  Cpu,
-  DollarSign,
-  Layers,
-  TrendingUp,
-} from "ui";
-import type { AnalyticsSummary } from "../hooks/types";
+import type React from 'react';
+import { Badge, Card, CardContent, Clock, Cpu, DollarSign, Layers, TrendingUp } from 'ui';
+import type { AnalyticsSummary } from '../hooks/types';
 
 interface MetricsProps {
   summary: AnalyticsSummary;
@@ -35,14 +26,10 @@ export function Metrics({ summary }: MetricsProps) {
             </Badge>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold font-mono text-emerald-400">
-              ${summary.totalCostUsd.toFixed(5)}
-            </span>
+            <span className="text-2xl font-bold font-mono text-emerald-400">${summary.totalCostUsd.toFixed(5)}</span>
             <span className="text-[10px] text-slate-500 font-mono">USD</span>
           </div>
-          <span className="text-[10px] text-slate-400 block mt-1">
-            商户算力总损耗 (Gemini 3.5)
-          </span>
+          <span className="text-[10px] text-slate-400 block mt-1">商户算力总损耗 (Gemini 3.5)</span>
         </CardContent>
       </Card>
 
@@ -62,12 +49,8 @@ export function Metrics({ summary }: MetricsProps) {
               Session Count
             </Badge>
           </div>
-          <div className="text-2xl font-bold font-mono text-indigo-400">
-            {summary.totalSessions}
-          </div>
-          <span className="text-[10px] text-slate-400 block mt-1">
-            会话线程物理总数
-          </span>
+          <div className="text-2xl font-bold font-mono text-indigo-400">{summary.totalSessions}</div>
+          <span className="text-[10px] text-slate-400 block mt-1">会话线程物理总数</span>
         </CardContent>
       </Card>
 
@@ -88,14 +71,10 @@ export function Metrics({ summary }: MetricsProps) {
             </Badge>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold font-mono text-amber-400">
-              {summary.avgLatencyMs}
-            </span>
+            <span className="text-2xl font-bold font-mono text-amber-400">{summary.avgLatencyMs}</span>
             <span className="text-[10px] text-slate-500 font-mono">MS</span>
           </div>
-          <span className="text-[10px] text-slate-400 block mt-1">
-            单次对话全图决策平均耗时
-          </span>
+          <span className="text-[10px] text-slate-400 block mt-1">单次对话全图决策平均耗时</span>
         </CardContent>
       </Card>
 
@@ -108,19 +87,12 @@ export function Metrics({ summary }: MetricsProps) {
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block font-mono">
               AVERAGE TOKENS
             </span>
-            <Badge
-              variant="outline"
-              className="border-slate-700 text-slate-300 bg-slate-800/40 text-[9px] font-mono"
-            >
+            <Badge variant="outline" className="border-slate-700 text-slate-300 bg-slate-800/40 text-[9px] font-mono">
               Token Consumption
             </Badge>
           </div>
-          <div className="text-2xl font-bold font-mono text-slate-200">
-            {summary.avgTokens}
-          </div>
-          <span className="text-[10px] text-slate-400 block mt-1">
-            单会话大模型 Token 平均损耗
-          </span>
+          <div className="text-2xl font-bold font-mono text-slate-200">{summary.avgTokens}</div>
+          <span className="text-[10px] text-slate-400 block mt-1">单会话大模型 Token 平均损耗</span>
         </CardContent>
       </Card>
 
@@ -141,13 +113,9 @@ export function Metrics({ summary }: MetricsProps) {
             </Badge>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold font-mono text-emerald-400">
-              {summary.autopilotRate}%
-            </span>
+            <span className="text-2xl font-bold font-mono text-emerald-400">{summary.autopilotRate}%</span>
           </div>
-          <span className="text-[10px] text-slate-400 block mt-1">
-            AI 自主解决率 / 免审批放行比
-          </span>
+          <span className="text-[10px] text-slate-400 block mt-1">AI 自主解决率 / 免审批放行比</span>
         </CardContent>
       </Card>
     </section>

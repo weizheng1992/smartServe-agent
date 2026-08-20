@@ -1,14 +1,9 @@
-export type SupportedIntent =
-  | "order_status"
-  | "refund"
-  | "out_of_scope"
-  | "general_query"
-  | "human_escalation";
+export type SupportedIntent = 'order_status' | 'refund' | 'out_of_scope' | 'general_query' | 'human_escalation';
 
 export interface IntentResult {
   intent: string;
   confidence: number;
-  type?: "primary" | "secondary";
+  type?: 'primary' | 'secondary';
   entities?: Record<string, string>;
 }
 
@@ -29,7 +24,7 @@ export interface SubTaskResult {
 export interface SubTask {
   id: string;
   description: string;
-  status: "pending" | "executing" | "completed" | "failed";
+  status: 'pending' | 'executing' | 'completed' | 'failed';
   result?: SubTaskResult;
 }
 
@@ -40,7 +35,7 @@ export interface TaskPlan {
 }
 
 export interface ChatMessage {
-  role: "user" | "assistant" | "system" | string;
+  role: 'user' | 'assistant' | 'system' | string;
   content?: string | null;
   [key: string]: unknown;
 }

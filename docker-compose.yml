@@ -27,10 +27,23 @@ services:
     volumes:
       - shared_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping", "-a", "${REDIS_PASSWORD:-redis_password}"]
+      test:
+        ["CMD", "redis-cli", "ping", "-a", "${REDIS_PASSWORD:-redis_password}"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  temporal:
+    # 可选服务：默认处于 temporal profile，避免因网络问题拉取失败阻碍本地快速开发
+    # 启用方式：docker compose --profile temporal up -d
+    profiles: ["temporal", "all"]
+    image: temporalio/dev-server:latest
+    container_name: shared-temporal
+    command: ["--ip", "0.0.0.0", "--port", "7233", "--ui-port", "8233"]
+    ports:
+      - "7239:7233"
+      - "8233:8233"
+    restart: always
 
 volumes:
   shared_postgres_data:

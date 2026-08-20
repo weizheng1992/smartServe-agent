@@ -1,4 +1,4 @@
-import type { Approval, PendingApprovalRecord } from "types";
+import type { Approval, PendingApprovalRecord } from 'types';
 
 export type { Approval, PendingApprovalRecord };
 
@@ -7,7 +7,7 @@ export interface PreferenceFact {
   userId: string;
   fact: string;
   confidence: number;
-  status: "approved" | "pending" | "rejected";
+  status: 'approved' | 'pending' | 'rejected';
   source: string;
   createdAt: string;
   businessId: string;

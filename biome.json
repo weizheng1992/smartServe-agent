@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "ignore": ["node_modules", "dist", ".next", "bun.lock", "packages/db/drizzle"]
+    "ignore": ["node_modules", "dist", ".next", "bun.lock", "packages/db/drizzle", ".agents", ".remember"]
   },
   "formatter": {
     "enabled": true,

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState } from 'react';
 
 export interface ApprovalActionResult {
   success: boolean;
@@ -8,7 +8,7 @@ export interface ApprovalActionResult {
 
 export interface ExecuteApprovalActionOptions {
   approvalId: string;
-  action: "approve" | "reject" | "cancel";
+  action: 'approve' | 'reject' | 'cancel';
   rejectionReason?: string;
   apiEndpoint?: string;
 }
@@ -20,23 +20,16 @@ export interface ExecuteHumanReplyOptions {
   apiEndpoint?: string;
 }
 
-export function useApprovalMachine(defaultEndpoint = "/api/chat/approvals") {
-  const [submittingActionId, setSubmittingActionId] = useState<string | null>(
-    null,
-  );
-  const [rejectionReasons, setRejectionReasons] = useState<
-    Record<string, string>
-  >({});
+export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals') {
+  const [submittingActionId, setSubmittingActionId] = useState<string | null>(null);
+  const [rejectionReasons, setRejectionReasons] = useState<Record<string, string>>({});
 
-  const setRejectionReason = useCallback(
-    (approvalId: string, reason: string) => {
-      setRejectionReasons((prev) => ({
-        ...prev,
-        [approvalId]: reason,
-      }));
-    },
-    [],
-  );
+  const setRejectionReason = useCallback((approvalId: string, reason: string) => {
+    setRejectionReasons((prev) => ({
+      ...prev,
+      [approvalId]: reason,
+    }));
+  }, []);
 
   const clearRejectionReason = useCallback((approvalId: string) => {
     setRejectionReasons((prev) => {
@@ -55,19 +48,15 @@ export function useApprovalMachine(defaultEndpoint = "/api/chat/approvals") {
     }: ExecuteApprovalActionOptions): Promise<ApprovalActionResult> => {
       setSubmittingActionId(approvalId);
       try {
-        const reason =
-          rejectionReason !== undefined
-            ? rejectionReason
-            : rejectionReasons[approvalId] || "";
+        const reason = rejectionReason !== undefined ? rejectionReason : rejectionReasons[approvalId] || '';
 
         const res = await fetch(apiEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             approvalId,
             action,
-            rejectionReason:
-              action === "reject" ? reason || "退款申请不符合政策要求。" : "",
+            rejectionReason: action === 'reject' ? reason || '退款申请不符合政策要求。' : '',
           }),
         });
 
@@ -78,7 +67,7 @@ export function useApprovalMachine(defaultEndpoint = "/api/chat/approvals") {
         }
         return {
           success: false,
-          error: data.error || "审批执行失败，请稍后重试",
+          error: data.error || '审批执行失败，请稍后重试',
         };
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -100,11 +89,11 @@ export function useApprovalMachine(defaultEndpoint = "/api/chat/approvals") {
       setSubmittingActionId(approvalId);
       try {
         const res = await fetch(apiEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             approvalId,
-            action: isFinish ? "human_finish" : "human_message",
+            action: isFinish ? 'human_finish' : 'human_message',
             humanReply: replyMessage,
             replyMessage,
             isFinish,
@@ -117,7 +106,7 @@ export function useApprovalMachine(defaultEndpoint = "/api/chat/approvals") {
         }
         return {
           success: false,
-          error: data.error || "人工消息投递失败",
+          error: data.error || '人工消息投递失败',
         };
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);

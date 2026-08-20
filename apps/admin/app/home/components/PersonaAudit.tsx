@@ -1,4 +1,4 @@
-import type React from "react";
+import type React from 'react';
 import {
   Badge,
   Button,
@@ -10,29 +10,18 @@ import {
   ScrollArea,
   Sparkles,
   XCircle,
-} from "ui";
-import type { PreferenceFact } from "../hooks/types";
+} from 'ui';
+import type { PreferenceFact } from '../hooks/types';
 
 interface PersonaAuditProps {
   selectedMerchant: string;
   preferences: PreferenceFact[];
-  handlePreferenceAction: (
-    preferenceId: string,
-    action: "approve" | "reject" | "delete",
-  ) => Promise<void>;
+  handlePreferenceAction: (preferenceId: string, action: 'approve' | 'reject' | 'delete') => Promise<void>;
 }
 
-export function PersonaAudit({
-  selectedMerchant,
-  preferences,
-  handlePreferenceAction,
-}: PersonaAuditProps) {
-  const pendingPrefs = preferences.filter(
-    (p) => p.businessId === selectedMerchant && p.status === "pending",
-  );
-  const archivedPrefs = preferences.filter(
-    (p) => p.businessId === selectedMerchant && p.status !== "pending",
-  );
+export function PersonaAudit({ selectedMerchant, preferences, handlePreferenceAction }: PersonaAuditProps) {
+  const pendingPrefs = preferences.filter((p) => p.businessId === selectedMerchant && p.status === 'pending');
+  const archivedPrefs = preferences.filter((p) => p.businessId === selectedMerchant && p.status !== 'pending');
 
   return (
     <section className="space-y-4">
@@ -40,18 +29,11 @@ export function PersonaAudit({
         <div className="flex items-center space-x-2">
           <Sparkles className="h-5 w-5 text-indigo-400 animate-pulse" />
           <h2 className="text-sm font-bold tracking-wider uppercase text-slate-300">
-            🧠 智能画像专家多租户动态审计核签中心 (
-            {
-              preferences.filter((p) => p.businessId === selectedMerchant)
-                .length
-            }
+            🧠 智能画像专家多租户动态审计核签中心 ({preferences.filter((p) => p.businessId === selectedMerchant).length}
             )
           </h2>
         </div>
-        <Badge
-          variant="outline"
-          className="text-[10px] font-mono text-slate-500 border-slate-800 uppercase"
-        >
+        <Badge variant="outline" className="text-[10px] font-mono text-slate-500 border-slate-800 uppercase">
           SaaS Autonomous User Profile Audit
         </Badge>
       </div>
@@ -76,8 +58,7 @@ export function PersonaAudit({
                 {pendingPrefs.map((pref) => {
                   const pct = Math.round(pref.confidence * 100);
                   const isHigh = pref.confidence >= 0.85;
-                  const isMid =
-                    pref.confidence >= 0.6 && pref.confidence < 0.85;
+                  const isMid = pref.confidence >= 0.6 && pref.confidence < 0.85;
 
                   return (
                     <Card
@@ -92,26 +73,18 @@ export function PersonaAudit({
                           >
                             {pref.source}
                           </Badge>
-                          <p className="text-xs text-slate-200 font-medium leading-relaxed">
-                            &quot;{pref.fact}&quot;
-                          </p>
+                          <p className="text-xs text-slate-200 font-medium leading-relaxed">&quot;{pref.fact}&quot;</p>
                         </div>
                         {/* Confidence rating */}
                         <div className="text-right shrink-0">
                           <span
                             className={`text-xs font-mono font-bold ${
-                              isHigh
-                                ? "text-emerald-400"
-                                : isMid
-                                  ? "text-amber-400"
-                                  : "text-rose-400"
+                              isHigh ? 'text-emerald-400' : isMid ? 'text-amber-400' : 'text-rose-400'
                             }`}
                           >
                             {pct}%
                           </span>
-                          <span className="text-[9px] text-slate-500 block">
-                            置信度
-                          </span>
+                          <span className="text-[9px] text-slate-500 block">置信度</span>
                         </div>
                       </div>
 
@@ -119,11 +92,7 @@ export function PersonaAudit({
                       <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all ${
-                            isHigh
-                              ? "bg-emerald-500"
-                              : isMid
-                                ? "bg-amber-500"
-                                : "bg-rose-500"
+                            isHigh ? 'bg-emerald-500' : isMid ? 'bg-amber-500' : 'bg-rose-500'
                           }`}
                           style={{ width: `${pct}%` }}
                         />
@@ -131,19 +100,14 @@ export function PersonaAudit({
 
                       <div className="flex justify-between items-center text-[10px] pt-1 border-t border-slate-800/80">
                         <span className="text-slate-500 font-mono">
-                          User:{" "}
-                          <span className="text-slate-400">
-                            {pref.userId.substring(0, 8)}...
-                          </span>
+                          User: <span className="text-slate-400">{pref.userId.substring(0, 8)}...</span>
                         </span>
                         <div className="flex gap-2">
                           <Button
                             type="button"
                             size="sm"
                             variant="default"
-                            onClick={() =>
-                              handlePreferenceAction(pref.id, "approve")
-                            }
+                            onClick={() => handlePreferenceAction(pref.id, 'approve')}
                             className="h-7 text-[10px] font-bold bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/20 shadow-none px-2.5"
                           >
                             核准写入
@@ -152,9 +116,7 @@ export function PersonaAudit({
                             type="button"
                             size="sm"
                             variant="destructive"
-                            onClick={() =>
-                              handlePreferenceAction(pref.id, "reject")
-                            }
+                            onClick={() => handlePreferenceAction(pref.id, 'reject')}
                             className="h-7 text-[10px] font-bold bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/20 shadow-none px-2.5"
                           >
                             拒绝/废弃
@@ -180,9 +142,7 @@ export function PersonaAudit({
           <ScrollArea className="max-h-[450px] pr-2">
             <div className="space-y-2.5">
               {archivedPrefs.length === 0 ? (
-                <div className="py-12 text-center text-slate-500 text-xs font-mono">
-                  暂无已归档生效的用户画像数据。
-                </div>
+                <div className="py-12 text-center text-slate-500 text-xs font-mono">暂无已归档生效的用户画像数据。</div>
               ) : (
                 archivedPrefs.map((pref) => {
                   return (
@@ -193,31 +153,21 @@ export function PersonaAudit({
                       <div className="space-y-1 leading-relaxed">
                         <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
                           <Badge
-                            variant={
-                              pref.status === "approved"
-                                ? "success"
-                                : "destructive"
-                            }
+                            variant={pref.status === 'approved' ? 'success' : 'destructive'}
                             className="text-[9px] font-bold px-1.5 py-0.2"
                           >
-                            {pref.status === "approved" ? "已核准" : "已驳回"}
+                            {pref.status === 'approved' ? '已核准' : '已驳回'}
                           </Badge>
-                          <span className="text-[9px] font-mono text-slate-500">
-                            {pref.userId.substring(0, 8)}...
-                          </span>
+                          <span className="text-[9px] font-mono text-slate-500">{pref.userId.substring(0, 8)}...</span>
                         </div>
-                        <p className="text-slate-300 font-medium font-sans">
-                          &quot;{pref.fact}&quot;
-                        </p>
+                        <p className="text-slate-300 font-medium font-sans">&quot;{pref.fact}&quot;</p>
                       </div>
 
                       <Button
                         type="button"
                         size="icon"
                         variant="ghost"
-                        onClick={() =>
-                          handlePreferenceAction(pref.id, "delete")
-                        }
+                        onClick={() => handlePreferenceAction(pref.id, 'delete')}
                         className="h-7 w-7 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
                         title="删除此特征"
                       >

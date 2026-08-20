@@ -1,16 +1,16 @@
-import { z } from "zod";
-import { redis, toolCache, useRedis } from "./cache";
-import { OrderDomainService } from "./orderDomainService";
-import { registerTool } from "./registry";
+import { z } from 'zod';
+import { redis, toolCache, useRedis } from './cache';
+import { OrderDomainService } from './orderDomainService';
+import { registerTool } from './registry';
 
 export { redis, useRedis, toolCache };
 
 export const getOrderStatus = {
-  name: "getOrderStatus",
+  name: 'getOrderStatus',
   description:
-    "Get the status of a specific order by order ID. Secured: Only allowed if the order belongs to the currently logged-in customer.",
+    'Get the status of a specific order by order ID. Secured: Only allowed if the order belongs to the currently logged-in customer.',
   schema: z.object({
-    orderId: z.string().describe("The unique order identifier."),
+    orderId: z.string().describe('The unique order identifier.'),
   }),
   execute: async ({
     orderId,
@@ -24,12 +24,12 @@ export const getOrderStatus = {
 };
 
 export const processRefund = {
-  name: "processRefund",
+  name: 'processRefund',
   description:
-    "Process a refund for an order. Secured: Only allowed if the order belongs to the currently logged-in customer.",
+    'Process a refund for an order. Secured: Only allowed if the order belongs to the currently logged-in customer.',
   schema: z.object({
-    orderId: z.string().describe("The unique order identifier."),
-    reason: z.string().describe("The reason for processing the refund."),
+    orderId: z.string().describe('The unique order identifier.'),
+    reason: z.string().describe('The reason for processing the refund.'),
   }),
   execute: async ({
     orderId,
@@ -47,9 +47,8 @@ export const processRefund = {
 };
 
 export const listUserOrders = {
-  name: "listUserOrders",
-  description:
-    "List all recent orders and tracking status for the current customer.",
+  name: 'listUserOrders',
+  description: 'List all recent orders and tracking status for the current customer.',
   schema: z.object({}),
   execute: async ({ threadId }: { threadId?: string }) => {
     return OrderDomainService.listUserOrders(threadId);
@@ -57,12 +56,12 @@ export const listUserOrders = {
 };
 
 export const changeShippingAddress = {
-  name: "changeShippingAddress",
+  name: 'changeShippingAddress',
   description:
-    "Modify the shipping address of an order before it gets shipped. Secured: Only allowed if the order belongs to the currently logged-in customer.",
+    'Modify the shipping address of an order before it gets shipped. Secured: Only allowed if the order belongs to the currently logged-in customer.',
   schema: z.object({
-    orderId: z.string().describe("The unique order identifier."),
-    newAddress: z.string().describe("The new physical shipping address."),
+    orderId: z.string().describe('The unique order identifier.'),
+    newAddress: z.string().describe('The new physical shipping address.'),
   }),
   execute: async ({
     orderId,
@@ -75,21 +74,16 @@ export const changeShippingAddress = {
     threadId?: string;
     isApproved?: boolean;
   }) => {
-    return OrderDomainService.changeShippingAddress(
-      orderId,
-      newAddress,
-      threadId,
-      isApproved,
-    );
+    return OrderDomainService.changeShippingAddress(orderId, newAddress, threadId, isApproved);
   },
 };
 
 export const generateInvoice = {
-  name: "generateInvoice",
+  name: 'generateInvoice',
   description:
-    "Generate a structured electronic tax invoice for a completed order. Secured: Only allowed if the order belongs to the currently logged-in customer.",
+    'Generate a structured electronic tax invoice for a completed order. Secured: Only allowed if the order belongs to the currently logged-in customer.',
   schema: z.object({
-    orderId: z.string().describe("The unique order identifier."),
+    orderId: z.string().describe('The unique order identifier.'),
   }),
   execute: async ({
     orderId,
@@ -103,20 +97,16 @@ export const generateInvoice = {
 };
 
 export const recordUserPreference = {
-  name: "recordUserPreference",
+  name: 'recordUserPreference',
   description:
-    "Record specific consumer preferences of the current customer (such as clothing size, favorite color, stylistic preference, material allergies/restrictions) into long-term memories for future search and sizing recommendation.",
+    'Record specific consumer preferences of the current customer (such as clothing size, favorite color, stylistic preference, material allergies/restrictions) into long-term memories for future search and sizing recommendation.',
   schema: z.object({
     preferenceType: z
-      .enum(["size", "color", "brand", "style", "material", "other"])
-      .describe(
-        "偏好类型，如 size 代表尺寸，color 代表颜色，material 代表过敏或避雷材质等",
-      ),
+      .enum(['size', 'color', 'brand', 'style', 'material', 'other'])
+      .describe('偏好类型，如 size 代表尺寸，color 代表颜色，material 代表过敏或避雷材质等'),
     preferenceValue: z
       .string()
-      .describe(
-        '具体的偏好数值或文字表达，例如 "鞋码42.5/上衣L码"、"喜欢纯白"、"对羊毛过敏，刺痒"',
-      ),
+      .describe('具体的偏好数值或文字表达，例如 "鞋码42.5/上衣L码"、"喜欢纯白"、"对羊毛过敏，刺痒"'),
   }),
   execute: async ({
     preferenceType,
@@ -127,27 +117,19 @@ export const recordUserPreference = {
     preferenceValue: string;
     threadId?: string;
   }) => {
-    return OrderDomainService.recordUserPreference(
-      preferenceType,
-      preferenceValue,
-      threadId,
-    );
+    return OrderDomainService.recordUserPreference(preferenceType, preferenceValue, threadId);
   },
 };
 
 export const createOrder = {
-  name: "createOrder",
-  description:
-    "Create a new customer order. Automatically resolves user context and tenant ID.",
+  name: 'createOrder',
+  description: 'Create a new customer order. Automatically resolves user context and tenant ID.',
   schema: z.object({
-    userId: z.string().describe("The user ID to associate the order with."),
-    orderId: z.string().optional().describe("Optional custom order ID."),
-    businessId: z
-      .string()
-      .optional()
-      .describe("Optional merchant business ID."),
-    totalAmount: z.number().optional().describe("Total amount of the order."),
-    carrier: z.string().optional().describe("Shipping carrier name."),
+    userId: z.string().describe('The user ID to associate the order with.'),
+    orderId: z.string().optional().describe('Optional custom order ID.'),
+    businessId: z.string().optional().describe('Optional merchant business ID.'),
+    totalAmount: z.number().optional().describe('Total amount of the order.'),
+    carrier: z.string().optional().describe('Shipping carrier name.'),
   }),
   execute: async (args: {
     userId: string;

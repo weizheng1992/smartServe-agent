@@ -1,12 +1,10 @@
-import * as path from "node:path";
-import { NativeConnection, Worker } from "@temporalio/worker";
-import * as activities from "./activities";
+import * as path from 'node:path';
+import { NativeConnection, Worker } from '@temporalio/worker';
+import * as activities from './activities';
 
 async function run() {
-  const address = process.env.TEMPORAL_ADDRESS || "127.0.0.1:7239";
-  console.log(
-    `[Temporal Worker] 正在尝试物理连接至 Temporal Server: ${address}`,
-  );
+  const address = process.env.TEMPORAL_ADDRESS || '127.0.0.1:7239';
+  console.log(`[Temporal Worker] 正在尝试物理连接至 Temporal Server: ${address}`);
 
   try {
     // 强制 Worker 物理连接至 7239 端口的 Server
@@ -16,13 +14,11 @@ async function run() {
 
     const worker = await Worker.create({
       connection,
-      workflowsPath: path.resolve(__dirname, "./workflows.ts"),
+      workflowsPath: path.resolve(__dirname, './workflows.ts'),
       activities,
-      taskQueue: "agent-tasks",
+      taskQueue: 'agent-tasks',
     });
-    console.log(
-      'Temporal Worker started successfully, listening on queue: "agent-tasks"',
-    );
+    console.log('Temporal Worker started successfully, listening on queue: "agent-tasks"');
     await worker.run();
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);

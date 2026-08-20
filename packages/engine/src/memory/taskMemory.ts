@@ -1,5 +1,5 @@
-import { taskMemory as dbTaskMemory, getDrizzle } from "db";
-import type { SubTask } from "types";
+import { taskMemory as dbTaskMemory, getDrizzle } from 'db';
+import type { SubTask } from 'types';
 
 export type { SubTask };
 
@@ -20,7 +20,7 @@ export class TaskMemory {
     const dbInstance = getDrizzle();
     if (dbInstance) {
       try {
-        const { eq } = require("drizzle-orm");
+        const { eq } = require('drizzle-orm');
         const rows = await dbInstance
           .select()
           .from(dbTaskMemory)
@@ -31,20 +31,18 @@ export class TaskMemory {
           return record.pendingIntents as TaskState;
         }
       } catch (err) {
-        console.warn("[TaskMemory] Failed to get task state from DB:", err);
+        console.warn('[TaskMemory] Failed to get task state from DB:', err);
       }
     }
     return null;
   }
 
   async saveTaskState(state: TaskState): Promise<void> {
-    console.log(
-      `[TaskMemory] Saving state for thread ${this.threadId}: ${JSON.stringify(state)}`,
-    );
+    console.log(`[TaskMemory] Saving state for thread ${this.threadId}: ${JSON.stringify(state)}`);
     const dbInstance = getDrizzle();
     if (dbInstance) {
       try {
-        const { eq } = require("drizzle-orm");
+        const { eq } = require('drizzle-orm');
         // Check if there is an existing record
         const rows = await dbInstance
           .select()
@@ -69,11 +67,9 @@ export class TaskMemory {
             updatedAt: new Date(),
           });
         }
-        console.log(
-          `[TaskMemory] Successfully persisted state to DB for thread ${this.threadId}`,
-        );
+        console.log(`[TaskMemory] Successfully persisted state to DB for thread ${this.threadId}`);
       } catch (err) {
-        console.warn("[TaskMemory] Failed to save task state to DB:", err);
+        console.warn('[TaskMemory] Failed to save task state to DB:', err);
       }
     }
   }

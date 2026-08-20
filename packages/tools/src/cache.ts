@@ -1,12 +1,11 @@
-import Redis from "ioredis";
+import Redis from 'ioredis';
 
 // Safe Redis initialization with automatic silent fallback to local Map
 export let redis: Redis | null = null;
 export let useRedis = false;
 
 try {
-  const redisUrl =
-    process.env.REDIS_URL || "redis://:redis_password@127.0.0.1:6379";
+  const redisUrl = process.env.REDIS_URL || 'redis://:redis_password@127.0.0.1:6379';
   console.log(`[Cache Redis] 正在尝试物理连接至 Redis Server: ${redisUrl}...`);
 
   redis = new Redis(redisUrl, {
@@ -18,38 +17,28 @@ try {
     showFriendlyErrorStack: false,
   });
 
-  redis.on("ready", () => {
-    console.log(
-      "[Cache Redis] ✅ Redis 缓存物理连接并鉴权成功！启用分布式 TTL 缓存。",
-    );
+  redis.on('ready', () => {
+    console.log('[Cache Redis] ✅ Redis 缓存物理连接并鉴权成功！启用分布式 TTL 缓存。');
     useRedis = true;
   });
 
-  redis.on("error", () => {
+  redis.on('error', () => {
     if (useRedis) {
-      console.warn(
-        "[Cache Redis] ⚠️ Redis 连接异常，系统已自动无缝切换至: Local Map Cache 本地内存缓存模式！",
-      );
+      console.warn('[Cache Redis] ⚠️ Redis 连接异常，系统已自动无缝切换至: Local Map Cache 本地内存缓存模式！');
       useRedis = false;
     }
   });
 } catch (e) {
-  console.warn(
-    "[Cache Redis] ⚠️ Redis 初始化失败，默认降级至 Local Map 本地缓存:",
-    e,
-  );
+  console.warn('[Cache Redis] ⚠️ Redis 初始化失败，默认降级至 Local Map 本地缓存:', e);
 }
 
 // In-Memory fallback cache with TTL
-const localMemoryCache = new Map<
-  string,
-  { data: unknown; timestamp: number; ttlMs: number }
->();
+const localMemoryCache = new Map<string, { data: unknown; timestamp: number; ttlMs: number }>();
 
 export const toolCache = {
   async get<T>(key: string): Promise<T | null> {
-    const isProd = process.env.NODE_ENV === "production";
-    const cacheDisabled = process.env.DISABLE_TOOL_CACHE === "true";
+    const isProd = process.env.NODE_ENV === 'production';
+    const cacheDisabled = process.env.DISABLE_TOOL_CACHE === 'true';
     const shouldReadCache = isProd && !cacheDisabled;
     if (!shouldReadCache) return null;
 
@@ -60,10 +49,7 @@ export const toolCache = {
           return JSON.parse(cachedStr) as T;
         }
       } catch (redisErr) {
-        console.warn(
-          "[Tool Cache Warning] Redis 读取失败，自动降级至内存缓存:",
-          redisErr,
-        );
+        console.warn('[Tool Cache Warning] Redis 读取失败，自动降级至内存缓存:', redisErr);
       }
     }
 
@@ -87,12 +73,10 @@ export const toolCache = {
 
     if (useRedis && redis) {
       try {
-        await redis.set(key, JSON.stringify(value), "EX", ttlSeconds);
-        console.log(
-          `[Tool Cache Set] ✅ 数据已存入 Redis，TTL = ${ttlSeconds}s`,
-        );
+        await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+        console.log(`[Tool Cache Set] ✅ 数据已存入 Redis，TTL = ${ttlSeconds}s`);
       } catch (redisErr) {
-        console.warn("[Tool Cache Warning] Redis 写入失败:", redisErr);
+        console.warn('[Tool Cache Warning] Redis 写入失败:', redisErr);
       }
     }
   },
@@ -103,9 +87,9 @@ export const toolCache = {
     if (useRedis && redis) {
       try {
         await redis.del(key);
-        console.log("[Tool Cache Invalidate] 🧹 Redis 缓存已物理清除。");
+        console.log('[Tool Cache Invalidate] 🧹 Redis 缓存已物理清除。');
       } catch (redisErr) {
-        console.warn("[Tool Cache Warning] Redis 清除失败:", redisErr);
+        console.warn('[Tool Cache Warning] Redis 清除失败:', redisErr);
       }
     }
   },

@@ -1,7 +1,7 @@
-import { EpisodicMemory, type EpisodicEvent } from "./episodicMemory";
-import { LongMemory, type LongMemoryFact } from "./longMemory";
-import { ShortMemory, type ShortMemoryMessage } from "./shortMemory";
-import { TaskMemory, type TaskState } from "./taskMemory";
+import { type EpisodicEvent, EpisodicMemory } from './episodicMemory';
+import { LongMemory, type LongMemoryFact } from './longMemory';
+import { ShortMemory, type ShortMemoryMessage } from './shortMemory';
+import { TaskMemory, type TaskState } from './taskMemory';
 
 export interface GatheredContext {
   shortMessages: ShortMemoryMessage[];
@@ -42,21 +42,13 @@ export class AgentMemoryEngine {
   /**
    * 🧠 原子化拉取 4 层全量记忆上下文 (Gather All 4 Memory Tiers in Parallel)
    */
-  public async gatherContext(
-    query?: string,
-    precomputedEmbedding?: number[],
-  ): Promise<GatheredContext> {
-    const [shortMessages, taskState, longFacts, episodicEvents] =
-      await Promise.all([
-        this.short.getMessages(),
-        this.task.getTaskState(),
-        query
-          ? this.long.searchRelevantFacts(query, precomputedEmbedding)
-          : Promise.resolve([]),
-        query
-          ? this.episodic.retrieveEvents(query, 3, precomputedEmbedding)
-          : Promise.resolve([]),
-      ]);
+  public async gatherContext(query?: string, precomputedEmbedding?: number[]): Promise<GatheredContext> {
+    const [shortMessages, taskState, longFacts, episodicEvents] = await Promise.all([
+      this.short.getMessages(),
+      this.task.getTaskState(),
+      query ? this.long.searchRelevantFacts(query, precomputedEmbedding) : Promise.resolve([]),
+      query ? this.episodic.retrieveEvents(query, 3, precomputedEmbedding) : Promise.resolve([]),
+    ]);
 
     return {
       shortMessages,
@@ -73,11 +65,11 @@ export class AgentMemoryEngine {
     const tasks: Promise<unknown>[] = [];
 
     if (options.userQuery) {
-      tasks.push(this.short.addMessage("user", options.userQuery));
+      tasks.push(this.short.addMessage('user', options.userQuery));
     }
 
     if (options.assistantResponse) {
-      tasks.push(this.short.addMessage("assistant", options.assistantResponse));
+      tasks.push(this.short.addMessage('assistant', options.assistantResponse));
     }
 
     if (options.userQuery && options.assistantResponse) {
@@ -90,12 +82,7 @@ export class AgentMemoryEngine {
     }
 
     if (options.episodicEvent) {
-      tasks.push(
-        this.episodic.addEvent(
-          options.episodicEvent.content,
-          options.episodicEvent.importance,
-        ),
-      );
+      tasks.push(this.episodic.addEvent(options.episodicEvent.content, options.episodicEvent.importance));
     }
 
     await Promise.all(tasks);

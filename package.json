@@ -8,6 +8,13 @@
   ],
   "scripts": {
     "dev": "turbo run dev",
+    "dev:all": "turbo run dev",
+    "worker": "bun --filter engine worker",
+    "docker:up": "docker compose up -d",
+    "docker:temporal": "docker compose --profile temporal up -d",
+    "docker:down": "docker compose down",
+    "db:push": "bun drizzle-kit push",
+    "db:seed": "bun packages/db/src/seed.ts",
     "build": "turbo run build",
     "start": "turbo run start",
     "lint": "turbo run lint",

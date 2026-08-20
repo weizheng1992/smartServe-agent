@@ -1,4 +1,4 @@
-import type { Message, Order } from "../schema";
+import type { Message, Order } from '../schema';
 
 export interface DBThread {
   id: string;
@@ -10,18 +10,12 @@ export interface DBThread {
 }
 
 export interface IUserRepository {
-  findOrCreateUserByEmail(
-    email: string,
-  ): Promise<{ id: string; email: string }>;
+  findOrCreateUserByEmail(email: string): Promise<{ id: string; email: string }>;
 }
 
 export interface IThreadRepository {
   getUserThreads(userId: string): Promise<DBThread[]>;
-  createThread(
-    threadId: string,
-    userId: string,
-    businessId?: string,
-  ): Promise<DBThread>;
+  createThread(threadId: string, userId: string, businessId?: string): Promise<DBThread>;
   deleteThread(threadId: string): Promise<boolean>;
 }
 

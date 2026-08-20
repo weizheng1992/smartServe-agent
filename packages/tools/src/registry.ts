@@ -1,5 +1,5 @@
-import type { z } from "zod";
-import { scrubPii } from "./scrubber";
+import type { z } from 'zod';
+import { scrubPii } from './scrubber';
 
 export interface ToolDefinition<TArgs = any, TResult = any> {
   name: string;

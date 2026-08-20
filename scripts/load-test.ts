@@ -3,32 +3,32 @@
  * 用法: bun scripts/load-test.ts --concurrency 10 --total 30 --url http://localhost:3000 --tenant ecommerce
  */
 
-import { parseArgs } from "util";
+import { parseArgs } from 'util';
 
 const { values } = parseArgs({
   args: Bun.argv,
   options: {
-    concurrency: { type: "string", default: "5" },
-    total: { type: "string", default: "15" },
-    url: { type: "string", default: "http://localhost:3000" },
-    tenant: { type: "string", default: "ecommerce" },
-    timeout: { type: "string", default: "30000" },
+    concurrency: { type: 'string', default: '5' },
+    total: { type: 'string', default: '15' },
+    url: { type: 'string', default: 'http://localhost:3000' },
+    tenant: { type: 'string', default: 'ecommerce' },
+    timeout: { type: 'string', default: '30000' },
   },
   strict: false,
   allowPositionals: true,
 });
 
-const CONCURRENCY = parseInt(values.concurrency || "5", 10);
-const TOTAL_REQUESTS = parseInt(values.total || "15", 10);
-const BASE_URL = (values.url || "http://localhost:3000").replace(/\/$/, "");
-const TENANT_ID = values.tenant || "ecommerce";
-const REQUEST_TIMEOUT_MS = parseInt(values.timeout || "30000", 10);
+const CONCURRENCY = Number.parseInt(values.concurrency || '5', 10);
+const TOTAL_REQUESTS = Number.parseInt(values.total || '15', 10);
+const BASE_URL = (values.url || 'http://localhost:3000').replace(/\/$/, '');
+const TENANT_ID = values.tenant || 'ecommerce';
+const REQUEST_TIMEOUT_MS = Number.parseInt(values.timeout || '30000', 10);
 
 interface RequestMetric {
   id: number;
   jobId: string;
   tenantId: string;
-  status: "success" | "error";
+  status: 'success' | 'error';
   ttfbMs: number;
   ttftMs: number; // Time To First Token / SSE Chunk
   totalDurationMs: number;
@@ -37,14 +37,14 @@ interface RequestMetric {
 
 const metrics: RequestMetric[] = [];
 const sampleQueries = [
-  "你好，请问你们客服营业时间是几点？",
-  "帮我查询我的订单 ORD-98712 物流到哪了",
-  "推荐一款适合春季透气跑鞋",
-  "我想申请退款，订单号是 ORD-88888",
-  "衣服码数不合适，怎么修改收货地址？",
+  '你好，请问你们客服营业时间是几点？',
+  '帮我查询我的订单 ORD-98712 物流到哪了',
+  '推荐一款适合春季透气跑鞋',
+  '我想申请退款，订单号是 ORD-88888',
+  '衣服码数不合适，怎么修改收货地址？',
 ];
 
-const tenantList = ["ecommerce", "nike", "adidas"];
+const tenantList = ['ecommerce', 'nike', 'adidas'];
 
 async function runSingleRequest(id: number): Promise<RequestMetric> {
   const startTime = performance.now();
@@ -63,10 +63,10 @@ async function runSingleRequest(id: number): Promise<RequestMetric> {
   try {
     // 1. 发起 POST /api/chat
     const postRes = await fetch(`${BASE_URL}/api/chat`, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        "x-business-id": tenantId,
+        'Content-Type': 'application/json',
+        'x-business-id': tenantId,
       },
       body: JSON.stringify({ message: query, threadId, userId }),
       signal: controller.signal,
@@ -79,9 +79,9 @@ async function runSingleRequest(id: number): Promise<RequestMetric> {
       const errText = await postRes.text();
       return {
         id,
-        jobId: "unknown",
+        jobId: 'unknown',
         tenantId,
-        status: "error",
+        status: 'error',
         ttfbMs,
         ttftMs: ttfbMs,
         totalDurationMs: ttfbMs,
@@ -95,8 +95,8 @@ async function runSingleRequest(id: number): Promise<RequestMetric> {
     // 2. 模拟订阅 GET /api/chat/[jobId]/stream 获取 SSE 流并记录 TTFT
     const streamRes = await fetch(`${BASE_URL}/api/chat/${jobId}/stream`, {
       headers: {
-        Accept: "text/event-stream",
-        "x-business-id": tenantId,
+        Accept: 'text/event-stream',
+        'x-business-id': tenantId,
       },
       signal: controller.signal,
     });
@@ -116,10 +116,7 @@ async function runSingleRequest(id: number): Promise<RequestMetric> {
         }
 
         const chunk = decoder.decode(value);
-        if (
-          chunk.includes("data: [DONE]") ||
-          chunk.includes("status: finish")
-        ) {
+        if (chunk.includes('data: [DONE]') || chunk.includes('status: finish')) {
           break;
         }
       }
@@ -132,7 +129,7 @@ async function runSingleRequest(id: number): Promise<RequestMetric> {
       id,
       jobId,
       tenantId,
-      status: "success",
+      status: 'success',
       ttfbMs,
       ttftMs: ttftMs || ttfbMs,
       totalDurationMs,
@@ -143,9 +140,9 @@ async function runSingleRequest(id: number): Promise<RequestMetric> {
     const isAborted = controller.signal.aborted;
     return {
       id,
-      jobId: "failed",
+      jobId: 'failed',
       tenantId,
-      status: "error",
+      status: 'error',
       ttfbMs: totalDurationMs,
       ttftMs: totalDurationMs,
       totalDurationMs,
@@ -159,13 +156,11 @@ async function runSingleRequest(id: number): Promise<RequestMetric> {
 }
 
 async function main() {
-  console.log("=================================================");
-  console.log("🚀 Agent 平台并发性能压测启动");
+  console.log('=================================================');
+  console.log('🚀 Agent 平台并发性能压测启动');
   console.log(`目标地址: ${BASE_URL}`);
-  console.log(
-    `并发线程: ${CONCURRENCY} | 总请求数: ${TOTAL_REQUESTS} | 动态租户: [${tenantList.join(", ")}]`,
-  );
-  console.log("=================================================\n");
+  console.log(`并发线程: ${CONCURRENCY} | 总请求数: ${TOTAL_REQUESTS} | 动态租户: [${tenantList.join(', ')}]`);
+  console.log('=================================================\n');
 
   const startTime = performance.now();
   let currentIndex = 0;
@@ -176,9 +171,9 @@ async function main() {
       if (reqId >= TOTAL_REQUESTS) break;
       const metric = await runSingleRequest(reqId);
       metrics.push(metric);
-      const icon = metric.status === "success" ? "✅" : "❌";
+      const icon = metric.status === 'success' ? '✅' : '❌';
       console.log(
-        `[Req #${metric.id.toString().padStart(2, "0")}] ${icon} Tenant: ${metric.tenantId.padEnd(10)} | JobId: ${metric.jobId.padEnd(20)} | TTFB: ${metric.ttfbMs.toString().padStart(4)}ms | TTFT(首字): ${metric.ttftMs.toString().padStart(4)}ms | 总耗时: ${metric.totalDurationMs.toString().padStart(5)}ms`,
+        `[Req #${metric.id.toString().padStart(2, '0')}] ${icon} Tenant: ${metric.tenantId.padEnd(10)} | JobId: ${metric.jobId.padEnd(20)} | TTFB: ${metric.ttfbMs.toString().padStart(4)}ms | TTFT(首字): ${metric.ttftMs.toString().padStart(4)}ms | 总耗时: ${metric.totalDurationMs.toString().padStart(5)}ms`,
       );
     }
   }
@@ -187,55 +182,38 @@ async function main() {
   await Promise.all(workers);
 
   const totalTimeMs = performance.now() - startTime;
-  const successes = metrics.filter((m) => m.status === "success");
-  const failures = metrics.filter((m) => m.status === "error");
+  const successes = metrics.filter((m) => m.status === 'success');
+  const failures = metrics.filter((m) => m.status === 'error');
 
-  const totalDurations = successes
-    .map((m) => m.totalDurationMs)
-    .sort((a, b) => a - b);
+  const totalDurations = successes.map((m) => m.totalDurationMs).sort((a, b) => a - b);
   const ttftDurations = successes.map((m) => m.ttftMs).sort((a, b) => a - b);
 
   const p50Total = totalDurations[Math.floor(totalDurations.length * 0.5)] || 0;
   const p90Total = totalDurations[Math.floor(totalDurations.length * 0.9)] || 0;
-  const p99Total =
-    totalDurations[Math.floor(totalDurations.length * 0.99)] || 0;
+  const p99Total = totalDurations[Math.floor(totalDurations.length * 0.99)] || 0;
   const avgTotal = totalDurations.length
-    ? Math.round(
-        totalDurations.reduce((a, b) => a + b, 0) / totalDurations.length,
-      )
+    ? Math.round(totalDurations.reduce((a, b) => a + b, 0) / totalDurations.length)
     : 0;
 
   const p50Ttft = ttftDurations[Math.floor(ttftDurations.length * 0.5)] || 0;
   const p90Ttft = ttftDurations[Math.floor(ttftDurations.length * 0.9)] || 0;
   const avgTtft = ttftDurations.length
-    ? Math.round(
-        ttftDurations.reduce((a, b) => a + b, 0) / ttftDurations.length,
-      )
+    ? Math.round(ttftDurations.reduce((a, b) => a + b, 0) / ttftDurations.length)
     : 0;
 
-  console.log("\n=================================================");
-  console.log("📊 压测吞吐量与 TTFT 首字延迟统计报告 (Benchmark Summary)");
-  console.log("=================================================");
+  console.log('\n=================================================');
+  console.log('📊 压测吞吐量与 TTFT 首字延迟统计报告 (Benchmark Summary)');
+  console.log('=================================================');
   console.log(`⏱️ 总压测执行时间: ${(totalTimeMs / 1000).toFixed(2)}s`);
-  console.log(
-    `📈 完成请求总量: ${metrics.length} (成功: ${successes.length}, 失败: ${failures.length})`,
-  );
-  console.log(
-    `⚡ 物理吞吐量 (RPS): ${(metrics.length / (totalTimeMs / 1000)).toFixed(2)} req/s`,
-  );
-  console.log(
-    `🚀 TTFT (首字响应延迟): 平均 ${avgTtft} ms | P50 ${p50Ttft} ms | P90 ${p90Ttft} ms`,
-  );
-  console.log(
-    `🎯 总流程耗时: 平均 ${avgTotal} ms | P50 ${p50Total} ms | P90 ${p90Total} ms | P99 ${p99Total} ms`,
-  );
+  console.log(`📈 完成请求总量: ${metrics.length} (成功: ${successes.length}, 失败: ${failures.length})`);
+  console.log(`⚡ 物理吞吐量 (RPS): ${(metrics.length / (totalTimeMs / 1000)).toFixed(2)} req/s`);
+  console.log(`🚀 TTFT (首字响应延迟): 平均 ${avgTtft} ms | P50 ${p50Ttft} ms | P90 ${p90Ttft} ms`);
+  console.log(`🎯 总流程耗时: 平均 ${avgTotal} ms | P50 ${p50Total} ms | P90 ${p90Total} ms | P99 ${p99Total} ms`);
   if (failures.length > 0) {
-    console.log("\n⚠️ 失败请求错误例举:");
-    failures
-      .slice(0, 5)
-      .forEach((f) => console.log(`  - Req #${f.id}: ${f.error}`));
+    console.log('\n⚠️ 失败请求错误例举:');
+    failures.slice(0, 5).forEach((f) => console.log(`  - Req #${f.id}: ${f.error}`));
   }
-  console.log("=================================================\n");
+  console.log('=================================================\n');
 }
 
 main();

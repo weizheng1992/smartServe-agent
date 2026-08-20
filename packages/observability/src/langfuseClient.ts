@@ -1,4 +1,4 @@
-import type { SpanData, TraceData } from "types";
+import type { SpanData, TraceData } from 'types';
 
 // Mock Langfuse client for initialization
 export const langfuse = {

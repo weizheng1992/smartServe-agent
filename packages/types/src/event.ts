@@ -13,7 +13,7 @@ export interface RunningDetail {
   desc?: string;
   resultText?: string;
   timestamp?: string;
-  status?: "running" | "completed" | "failed" | string;
+  status?: 'running' | 'completed' | 'failed' | string;
   output?: unknown;
   [key: string]: unknown;
 }

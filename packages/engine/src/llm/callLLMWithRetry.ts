@@ -1,20 +1,20 @@
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
-import { agentEventEmitter } from "../graph/eventEmitter";
+import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
+import { agentEventEmitter } from '../graph/eventEmitter';
 
 // 🛡️ 熔断降级状态机 (Circuit Breaker)
-export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
+export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
 export class CircuitBreaker {
   private failureCount = 0;
   private maxFailures = 5;
   private cooldownMs = 30000; // 30 秒熔断冷却期
-  private state: CircuitState = "CLOSED";
+  private state: CircuitState = 'CLOSED';
   private nextAttemptTime = 0;
 
   public isOpen(): boolean {
-    if (this.state === "OPEN") {
+    if (this.state === 'OPEN') {
       if (Date.now() >= this.nextAttemptTime) {
-        this.state = "HALF_OPEN";
+        this.state = 'HALF_OPEN';
         return false;
       }
       return true;
@@ -24,13 +24,13 @@ export class CircuitBreaker {
 
   public recordSuccess(): void {
     this.failureCount = 0;
-    this.state = "CLOSED";
+    this.state = 'CLOSED';
   }
 
   public recordFailure(): void {
     this.failureCount++;
-    if (this.failureCount >= this.maxFailures || this.state === "HALF_OPEN") {
-      this.state = "OPEN";
+    if (this.failureCount >= this.maxFailures || this.state === 'HALF_OPEN') {
+      this.state = 'OPEN';
       this.nextAttemptTime = Date.now() + this.cooldownMs;
       console.warn(
         `[CircuitBreaker] ⚠️ 连续调用失败达阈值 (${this.failureCount} 次)，已触发熔断拦截！状态置为 OPEN，冷却时间: ${this.cooldownMs / 1000} 秒`,
@@ -48,7 +48,7 @@ export class CircuitBreaker {
 
   public reset(): void {
     this.failureCount = 0;
-    this.state = "CLOSED";
+    this.state = 'CLOSED';
     this.nextAttemptTime = 0;
   }
 }
@@ -72,7 +72,7 @@ class ResilientLLM {
       const errMsg = `⚠️ 上游 AI 服务处于熔断状态 (${status.state})，冷却剩余: ${Math.ceil(status.nextAttemptInMs / 1000)}s。`;
       if (this.jobId) {
         agentEventEmitter.emit(`${this.jobId}:status`, {
-          status: "circuit_breaker_open",
+          status: 'circuit_breaker_open',
           message: errMsg,
         });
       }
@@ -88,14 +88,14 @@ class ResilientLLM {
       try {
         if (attempts > 1 && this.jobId) {
           agentEventEmitter.emit(`${this.jobId}:status`, {
-            status: "executing",
+            status: 'executing',
             message: `⚠️ 大模型呼叫遭遇网络阻塞或短暂波动，执行引擎正在物理触发【自愈抗灾重试】：正在进行第 ${attempts} 次调用重试保障决策畅通...`,
           });
         }
 
         const response = await this.model.invoke(
-          input as Parameters<ChatOpenAI["invoke"]>[0],
-          options as Parameters<ChatOpenAI["invoke"]>[1],
+          input as Parameters<ChatOpenAI['invoke']>[0],
+          options as Parameters<ChatOpenAI['invoke']>[1],
         );
 
         // 调用成功，记录熔断器成功状态
@@ -106,9 +106,7 @@ class ResilientLLM {
           let tokens = 0;
           const respObj = response as unknown as Record<string, unknown>;
           if (respObj && respObj.usage_metadata) {
-            tokens =
-              (respObj.usage_metadata as { total_tokens?: number })
-                .total_tokens || 0;
+            tokens = (respObj.usage_metadata as { total_tokens?: number }).total_tokens || 0;
           } else if (respObj && respObj.response_metadata) {
             const meta = respObj.response_metadata as {
               tokenUsage?: { totalTokens?: number };
@@ -124,7 +122,7 @@ class ResilientLLM {
             agentEventEmitter.addTokens(this.jobId, tokens);
           }
         } catch (tokenErr) {
-          console.warn("[Token Tracking Error]:", tokenErr);
+          console.warn('[Token Tracking Error]:', tokenErr);
         }
 
         return response;
@@ -147,10 +145,10 @@ class ResilientLLM {
 export function getLLM(jobId?: string): ResilientLLM {
   const llm = new ChatOpenAI({
     configuration: {
-      baseURL: "http://localhost:11211/api/openai/v1",
+      baseURL: 'http://localhost:11211/api/openai/v1',
     },
-    apiKey: "dummy",
-    modelName: "gemini-3.5-flash:latest",
+    apiKey: 'dummy',
+    modelName: 'gemini-3.5-flash:latest',
     temperature: 0,
   });
 
@@ -169,13 +167,10 @@ class HighFidelityEmbeddingModel {
     return vector.length === 0 || vector.every((x) => x === 0);
   }
 
-  private generateDeterministicEmbedding(
-    text: string,
-    dimensions = 1536,
-  ): number[] {
-    const crypto = require("node:crypto");
-    const cleanText = typeof text === "string" ? text : String(text || "");
-    const hash = crypto.createHash("sha256").update(cleanText).digest();
+  private generateDeterministicEmbedding(text: string, dimensions = 1536): number[] {
+    const crypto = require('node:crypto');
+    const cleanText = typeof text === 'string' ? text : String(text || '');
+    const hash = crypto.createHash('sha256').update(cleanText).digest();
     const vector: number[] = [];
     let sumSq = 0;
     for (let i = 0; i < dimensions; i++) {
@@ -200,10 +195,7 @@ class HighFidelityEmbeddingModel {
       }
       return vector;
     } catch (err) {
-      console.warn(
-        `[HighFidelityEmbedding] Call failed, generating high-fidelity fallback:`,
-        err,
-      );
+      console.warn(`[HighFidelityEmbedding] Call failed, generating high-fidelity fallback:`, err);
       return this.generateDeterministicEmbedding(text, 1536);
     }
   }
@@ -215,22 +207,14 @@ class HighFidelityEmbeddingModel {
         vectors.map(async (vector, idx) => {
           if (this.isAllZeros(vector)) {
             const dimensions = vector.length > 0 ? vector.length : 1536;
-            return this.generateDeterministicEmbedding(
-              documents[idx],
-              dimensions,
-            );
+            return this.generateDeterministicEmbedding(documents[idx], dimensions);
           }
           return vector;
         }),
       );
     } catch (err) {
-      console.warn(
-        `[HighFidelityEmbedding] Call failed, generating high-fidelity fallback for documents:`,
-        err,
-      );
-      return documents.map((doc) =>
-        this.generateDeterministicEmbedding(doc, 1536),
-      );
+      console.warn(`[HighFidelityEmbedding] Call failed, generating high-fidelity fallback for documents:`, err);
+      return documents.map((doc) => this.generateDeterministicEmbedding(doc, 1536));
     }
   }
 }
@@ -238,10 +222,10 @@ class HighFidelityEmbeddingModel {
 export function getEmbeddingModel(): HighFidelityEmbeddingModel {
   const model = new OpenAIEmbeddings({
     configuration: {
-      baseURL: "http://localhost:11211/api/openai/v1",
+      baseURL: 'http://localhost:11211/api/openai/v1',
     },
-    apiKey: "dummy",
-    modelName: "text-embedding-005:latest",
+    apiKey: 'dummy',
+    modelName: 'text-embedding-005:latest',
   });
   return new HighFidelityEmbeddingModel(model);
 }
