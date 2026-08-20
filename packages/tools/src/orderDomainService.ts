@@ -329,6 +329,90 @@ export class OrderDomainService {
   }
 
   /**
+   * 🛒 创建新订单（公共领域服务方法）
+   */
+  static async createOrder(options: {
+    orderId?: string;
+    userId: string;
+    businessId?: string;
+    carrier?: string;
+    trackingNumber?: string;
+    estimatedDelivery?: string;
+    totalAmount?: number;
+    items?: Array<{
+      productId: string;
+      quantity: number;
+      priceAtPurchase?: number;
+    }>;
+  }): Promise<ToolExecutionResult> {
+    const {
+      orderId = `ORD-${Date.now().toString().slice(-6)}`,
+      userId,
+      businessId = "ecommerce",
+      carrier = "SF Express",
+      trackingNumber = `SF${Math.floor(1000000000 + Math.random() * 9000000000)}`,
+      estimatedDelivery = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0],
+      totalAmount = 99.0,
+      items = [],
+    } = options;
+
+    if (!userId) {
+      return { error: "userId is strictly required to create an order." };
+    }
+
+    try {
+      await db.execute(
+        "INSERT INTO orders (order_id, status, carrier, tracking_number, estimated_delivery, user_id, business_id, total_amount) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (order_id) DO UPDATE SET status = EXCLUDED.status, carrier = EXCLUDED.carrier, tracking_number = EXCLUDED.tracking_number, estimated_delivery = EXCLUDED.estimated_delivery, total_amount = EXCLUDED.total_amount",
+        [
+          orderId,
+          "shipped",
+          carrier,
+          trackingNumber,
+          estimatedDelivery,
+          userId,
+          businessId,
+          totalAmount,
+        ],
+      );
+
+      for (const item of items) {
+        const itemId = `item_${orderId}_${item.productId}`;
+        await db.execute(
+          "INSERT INTO order_items (id, order_id, product_id, quantity, price_at_purchase) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING",
+          [
+            itemId,
+            orderId,
+            item.productId,
+            item.quantity,
+            item.priceAtPurchase || 0,
+          ],
+        );
+      }
+
+      await toolCache.delete(orderId);
+
+      return {
+        success: true,
+        order: {
+          orderId,
+          status: "shipped",
+          carrier,
+          trackingNumber,
+          estimatedDelivery,
+          userId,
+          businessId,
+          totalAmount,
+        },
+      };
+    } catch (err) {
+      console.error("[OrderDomainService.createOrder] Failed:", err);
+      return { error: "Failed to create order in database." };
+    }
+  }
+
+  /**
    * 查询当前会话客户的历史订单列表
    */
   static async listUserOrders(threadId?: string): Promise<ToolExecutionResult> {
@@ -340,17 +424,17 @@ export class OrderDomainService {
     }
 
     const { userId, businessId } = await this.getThreadSessionContext(threadId);
-    if (!userId || !businessId) {
+    if (!userId) {
       return {
         error:
-          "Could not resolve valid user context or tenant from the current session thread.",
+          "Could not resolve valid user context from the current session thread.",
       };
     }
 
     try {
       const res = await db.execute(
-        'SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", "estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount" FROM orders WHERE "user_id" = $1 AND "business_id" = $2',
-        [userId, businessId],
+        'SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", "estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount", "business_id" AS "businessId" FROM orders WHERE "user_id" = $1 AND ("business_id" = $2 OR $2 = \'ecommerce\') ORDER BY "estimated_delivery" DESC',
+        [userId, businessId || "ecommerce"],
       );
       const rows = res.rows || [];
       if (rows.length === 0) {

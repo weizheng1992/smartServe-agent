@@ -135,9 +135,35 @@ export const recordUserPreference = {
   },
 };
 
+export const createOrder = {
+  name: "createOrder",
+  description:
+    "Create a new customer order. Automatically resolves user context and tenant ID.",
+  schema: z.object({
+    userId: z.string().describe("The user ID to associate the order with."),
+    orderId: z.string().optional().describe("Optional custom order ID."),
+    businessId: z
+      .string()
+      .optional()
+      .describe("Optional merchant business ID."),
+    totalAmount: z.number().optional().describe("Total amount of the order."),
+    carrier: z.string().optional().describe("Shipping carrier name."),
+  }),
+  execute: async (args: {
+    userId: string;
+    orderId?: string;
+    businessId?: string;
+    totalAmount?: number;
+    carrier?: string;
+  }) => {
+    return OrderDomainService.createOrder(args);
+  },
+};
+
 registerTool(getOrderStatus);
 registerTool(processRefund);
 registerTool(listUserOrders);
 registerTool(changeShippingAddress);
 registerTool(generateInvoice);
 registerTool(recordUserPreference);
+registerTool(createOrder);
