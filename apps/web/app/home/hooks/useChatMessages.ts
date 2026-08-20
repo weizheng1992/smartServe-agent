@@ -52,14 +52,10 @@ export function useChatMessages({
         return;
       }
       if (data.success && Array.isArray(data.messages)) {
-        const hasGreetingInDb =
-          data.messages.length > 0 &&
-          data.messages[0].role === "assistant" &&
-          data.messages[0].content === DEFAULT_ASSISTANT_MESSAGE.content;
-
-        const fullMessages: Message[] = hasGreetingInDb
-          ? data.messages
-          : [DEFAULT_ASSISTANT_MESSAGE, ...data.messages];
+        const fullMessages: Message[] =
+          data.messages.length > 0
+            ? data.messages
+            : [DEFAULT_ASSISTANT_MESSAGE];
 
         setMessages((prev) => {
           // 如果用户已经切换了会话，立即忽略
