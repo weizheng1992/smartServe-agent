@@ -1,4 +1,4 @@
-import type React from "react";
+import React, { useRef, useState } from "react";
 import type { RunningDetail, TaskPlan } from "types";
 import {
   Avatar,
@@ -17,8 +17,11 @@ import {
   Loader2,
   Maximize2,
   MessageSquare,
+  Paperclip,
   RefreshCw,
+  RichCardRenderer,
   Send,
+  X,
   XCircle,
 } from "ui";
 import type { Message } from "../hooks/types";
@@ -30,7 +33,11 @@ interface ChatAreaProps {
   setInput: (val: string) => void;
   isSubmitting: boolean;
   loadHistory: (id: string) => Promise<void>;
-  handleSend: (e: React.FormEvent) => Promise<void>;
+  handleSend: (
+    e?: React.FormEvent,
+    customText?: string,
+    customImages?: string[],
+  ) => Promise<void>;
   setActivePlan: (plan: TaskPlan | null) => void;
   setCurrentStepText: (text: string) => void;
   setRunningDetails: (
@@ -56,6 +63,74 @@ export function ChatArea({
   messagesEndRef,
   onStartHumanSupport,
 }: ChatAreaProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingImage(true);
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/chat/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (data.success && data.url) {
+        setAttachedImages((prev) => [...prev, data.url]);
+      } else {
+        alert(data.error || "图片上传失败");
+      }
+    } catch (err: unknown) {
+      console.error("Upload error:", err);
+      alert("上传失败，请检查网络连接");
+    } finally {
+      setUploadingImage(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting || (!input.trim() && attachedImages.length === 0)) return;
+    const images = [...attachedImages];
+    setAttachedImages([]);
+    handleSend(e, input, images);
+  };
+
+  const handleCardAction = (
+    action: string,
+    payload?: Record<string, unknown>,
+  ) => {
+    if (action === "send_message" && payload?.text) {
+      handleSend(undefined, String(payload.text), []);
+    } else if (action === "track_order" && payload?.orderId) {
+      handleSend(undefined, `帮我查一下 ${payload.orderId} 的物流轨迹`, []);
+    } else if (action === "request_refund" && payload?.orderId) {
+      handleSend(undefined, `帮我申请订单 ${payload.orderId} 的退款`, []);
+    } else if (action === "confirm_refund" && payload?.orderId) {
+      handleSend(
+        undefined,
+        `我已确认提交订单 ${payload.orderId} 的退款核签`,
+        [],
+      );
+    } else if (action === "trigger_upload") {
+      fileInputRef.current?.click();
+    }
+  };
+
   return (
     <main className="flex-1 flex flex-col h-full bg-slate-950 relative border-r border-slate-900">
       {/* Header */}
@@ -105,7 +180,7 @@ export function ChatArea({
 
       {/* Messaging Area */}
       <div className="flex-1 overflow-y-auto p-6 min-h-0">
-        <div className="max-w-3xl mx-auto space-y-6 pb-28">
+        <div className="max-w-3xl mx-auto space-y-6 pb-36">
           {messages.map((m, idx) => (
             <div
               key={m.id || `msg_${idx}`}
@@ -113,32 +188,61 @@ export function ChatArea({
             >
               {m.role === "assistant" && (
                 <Avatar className="h-9 w-9 border border-slate-800 shadow-md shrink-0">
-                  <AvatarFallback className="bg-indigo-600/10 text-indigo-400 text-xs">
+                  <AvatarFallback className="bg-indigo-600/10 text-indigo-400 text-xs font-bold">
                     AI
                   </AvatarFallback>
                 </Avatar>
               )}
 
-              <div className="space-y-3.5 max-w-[85%] shrink-0">
+              <div className="space-y-3 max-w-[85%] shrink-0">
+                {/* User Uploaded Images */}
+                {m.imageUrls && m.imageUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-2 justify-end">
+                    {m.imageUrls.map((url, i) => (
+                      <div
+                        key={i}
+                        className="relative overflow-hidden rounded-xl border border-indigo-500/30 shadow-md max-w-xs"
+                      >
+                        <img
+                          src={url}
+                          alt="User attachment"
+                          className="max-h-48 rounded-xl object-cover cursor-pointer hover:opacity-95"
+                          onClick={() => setSelectedScreenshot(url)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Chat Message Box */}
-                <div
-                  className={`rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-xl border ${
-                    m.role === "user"
-                      ? "bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-indigo-500/30"
-                      : "bg-slate-900/90 text-slate-200 border-slate-800"
-                  }`}
-                >
-                  {m.isLoading ? (
-                    <div className="flex items-center space-x-3 py-1">
-                      <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />
-                      <span className="text-slate-400 font-medium animate-pulse">
-                        正在全速运行本地有向有环图节点，智能调用工具链中...
-                      </span>
-                    </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap">{m.content}</p>
-                  )}
-                </div>
+                {(m.content || m.isLoading) && (
+                  <div
+                    className={`rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-xl border ${
+                      m.role === "user"
+                        ? "bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-indigo-500/30"
+                        : "bg-slate-900/90 text-slate-200 border-slate-800"
+                    }`}
+                  >
+                    {m.isLoading ? (
+                      <div className="flex items-center space-x-3 py-1">
+                        <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />
+                        <span className="text-slate-400 font-medium animate-pulse">
+                          正在全速运行多模态有向有环图节点，智能调用工具链中...
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{m.content}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Rich Interactive Cards */}
+                {m.cards && m.cards.length > 0 && (
+                  <RichCardRenderer
+                    cards={m.cards}
+                    onAction={handleCardAction}
+                  />
+                )}
 
                 {/* Task Plan steps visualization */}
                 {m.plan && (
@@ -261,22 +365,6 @@ export function ChatArea({
                                     alt="物理界面快照"
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                   />
-                                  <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-xs">
-                                    <Button
-                                      variant="secondary"
-                                      size="sm"
-                                      onClick={() =>
-                                        setSelectedScreenshot(
-                                          String(
-                                            step.result?.screenshotPath || "",
-                                          ),
-                                        )
-                                      }
-                                      className="text-xs"
-                                    >
-                                      点击查看大图
-                                    </Button>
-                                  </div>
                                 </div>
                               </div>
                             )}
@@ -297,27 +385,81 @@ export function ChatArea({
               )}
             </div>
           ))}
-          {/* 🌟 历史消息底座锚点：配合 useEffect 物理高稳定滚动对齐 */}
           <div ref={messagesEndRef} />
         </div>
       </div>
 
       {/* Input area */}
-      <div className="p-4 border-t border-slate-800 bg-slate-900/40 backdrop-blur-sm absolute bottom-0 left-0 right-0 z-10">
-        <form onSubmit={handleSend} className="max-w-3xl mx-auto">
+      <div className="p-4 border-t border-slate-800 bg-slate-900/50 backdrop-blur-md absolute bottom-0 left-0 right-0 z-10">
+        <form onSubmit={onSubmit} className="max-w-3xl mx-auto space-y-2">
+          {/* Attached image preview chips */}
+          {attachedImages.length > 0 && (
+            <div className="flex items-center gap-2 pb-1 overflow-x-auto">
+              {attachedImages.map((imgUrl, i) => (
+                <div
+                  key={i}
+                  className="relative group flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-slate-900 p-1 pr-2 text-xs text-slate-300"
+                >
+                  <img
+                    src={imgUrl}
+                    alt="attachment preview"
+                    className="h-8 w-8 rounded-md object-cover"
+                  />
+                  <span className="text-[11px] font-mono text-indigo-300">
+                    图片 {i + 1}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeImage(i)}
+                    className="rounded-full p-0.5 hover:bg-slate-800 text-slate-400 hover:text-rose-400"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="relative flex items-center">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={uploadingImage || isSubmitting || !activeThreadId}
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute left-2 h-8 w-8 text-slate-400 hover:text-indigo-400 hover:bg-slate-800/60 rounded-lg"
+              title="上传图片/面单/破损照片"
+            >
+              {uploadingImage ? (
+                <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
+              ) : (
+                <Paperclip className="h-4 w-4" />
+              )}
+            </Button>
+
             <Input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="发送您的业务诉求（例如：'帮我查下 ORD-98712 的发货状态'）..."
+              placeholder="发送您的业务诉求（例如：'帮我查下 ORD-98712' 或上传破损照片）..."
               disabled={isSubmitting || !activeThreadId}
-              className="w-full bg-slate-950/80 border-slate-850 text-slate-100 rounded-xl pl-4 pr-16 py-6 text-sm focus-visible:ring-indigo-500 transition-colors placeholder-slate-500 disabled:opacity-50 font-sans"
+              className="w-full bg-slate-950/80 border-slate-850 text-slate-100 rounded-xl pl-11 pr-16 py-6 text-sm focus-visible:ring-indigo-500 transition-colors placeholder-slate-500 disabled:opacity-50 font-sans"
             />
             <div className="absolute right-2">
               <Button
                 type="submit"
-                disabled={isSubmitting || !input.trim() || !activeThreadId}
+                disabled={
+                  isSubmitting ||
+                  (!input.trim() && attachedImages.length === 0) ||
+                  !activeThreadId
+                }
                 className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg h-9 px-4 text-xs font-semibold transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
               >
                 {isSubmitting ? (

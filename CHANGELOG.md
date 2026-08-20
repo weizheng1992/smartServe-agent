@@ -4,6 +4,22 @@
 
 ---
 
+## [1.7.0] - 2026-08-20
+
+### 🌟 Major Highlights (重大亮点)
+
+- **多模态视觉感知与智能破损定责系统 (Multimodal Vision & Damage Assessment)**:
+  - 引入 `VisionAnalyzerService`，在 Triage 首层直接支持图文多模态意图识别、快递面单 OCR 提取（运单号/订单号）与商品破损瑕疵智能定级（`negligible` / `minor` / `severe`）。
+  - 内置手机号、身份证、银行卡 PII 敏感信息脱敏过滤器，并具备 1500ms 视觉超时与启发式降级兜底。
+- **富交互结构化卡片与统一渲染引擎 (Rich Interactive Cards & Synthesizer)**:
+  - 新增 `CardSynthesizer` 引擎与统一协议标准（`order_card`、`tracking_timeline`、`refund_confirmation`、`damage_assessment`、`quick_replies`）。
+  - 在 `packages/ui` 中构建原生 SVG 图标的高保真卡片组件族与 `RichCardRenderer`，支持一键查看物流、申请退款、动态快捷回复胶囊交互。
+- **图片安全上传端点与客户端多图预览 (Safe Image Upload & Client Preview)**:
+  - 新增 `/api/chat/upload` 统一接口，强制校验 MIME Type（JPG/PNG/WebP/GIF）与 10MB 大小边界，落盘至持久化目录。
+  - 前端输入区集成“📎 图片上传/粘贴”预览条与快捷移除卡片。
+
+---
+
 ## [1.6.0] - 2026-08-20
 
 ### 🌟 Major Highlights (重大亮点)

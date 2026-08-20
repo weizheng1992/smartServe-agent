@@ -1,4 +1,4 @@
-import type { SubTask, SubTaskResult, TaskPlan } from "types";
+import type { RichCardBlock, SubTask, SubTaskResult, TaskPlan } from "types";
 
 export type { SubTaskResult, TaskPlan };
 export type Subtask = SubTask;
@@ -8,6 +8,8 @@ export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   plan?: TaskPlan;
+  cards?: RichCardBlock[];
+  imageUrls?: string[];
   jobId?: string;
   isLoading?: boolean;
   timestamp?: string;

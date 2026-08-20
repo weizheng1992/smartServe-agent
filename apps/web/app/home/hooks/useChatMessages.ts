@@ -167,6 +167,7 @@ export function useChatMessages({
                 plan: data.taskPlan
                   ? translateTaskPlan(data.taskPlan as any, true)
                   : undefined,
+                cards: data.cards,
                 jobId,
               };
             }
@@ -189,13 +190,28 @@ export function useChatMessages({
     [fetchThreads],
   );
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isSubmitting || !activeThreadId || !currentUser)
+  const handleSend = async (
+    e?: React.FormEvent,
+    customText?: string,
+    customImages?: string[],
+  ) => {
+    if (e) e.preventDefault();
+    const textToSend = (customText !== undefined ? customText : input).trim();
+    const imagesToSend = customImages || [];
+
+    if (
+      (!textToSend && imagesToSend.length === 0) ||
+      isSubmitting ||
+      !activeThreadId ||
+      !currentUser
+    )
       return;
 
-    const userQuery = input;
-    setInput("");
+    const userQuery =
+      textToSend || (imagesToSend.length > 0 ? "请查看我上传的图片" : "");
+    if (customText === undefined) {
+      setInput("");
+    }
     setIsSubmitting(true);
     setTokensConsumed(0);
 
@@ -203,6 +219,7 @@ export function useChatMessages({
       id: `opt_user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       role: "user",
       content: userQuery,
+      imageUrls: imagesToSend.length > 0 ? imagesToSend : undefined,
     };
     const loaderMessage: Message = {
       id: `opt_loader_${Date.now()}`,
@@ -222,6 +239,7 @@ export function useChatMessages({
           message: userQuery,
           threadId: activeThreadId,
           userId: currentUser.id,
+          imageUrls: imagesToSend.length > 0 ? imagesToSend : undefined,
         }),
       });
 

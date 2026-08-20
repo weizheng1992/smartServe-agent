@@ -79,3 +79,7 @@ Thumbs.db
 
 # Playwright MCP cache
 .playwright-mcp/
+
+# Uploaded images
+public/uploads/
+apps/web/public/uploads/

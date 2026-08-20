@@ -163,14 +163,52 @@ export class IntentTriageEngine {
         status: "executing",
         node: "triage",
         message:
-          "正在进行多渠道意图分层检验（层级：规则前置 -> 语义重复拦截 -> Embedding向量评估 -> 大模型多意图精判）...",
+          "正在进行多渠道意图分层检验（层级：多模态感知 -> 规则前置 -> 语义重复拦截 -> Embedding向量评估 -> 大模型多意图精判）...",
       });
+    }
+
+    // =========================================================================
+    // 📷 Step 0.5: 多模态视觉解析与面单 OCR / 破损定责感知 (Multimodal Vision Layer)
+    // =========================================================================
+    let visionAnalysis:
+      | {
+          visualSummary: string;
+          detectedObjects: string[];
+          extractedOrderId?: string;
+          extractedTrackingNumber?: string;
+          damageAssessment?: any;
+        }
+      | undefined;
+
+    if (state.imageUrls && state.imageUrls.length > 0) {
+      if (state.jobId) {
+        agentEventEmitter.emit(`${state.jobId}:status`, {
+          status: "executing",
+          node: "triage",
+          message:
+            "📷 多模态感知：正在进行图像 OCR、快递面单解析与商品破损瑕疵评级...",
+        });
+      }
+      try {
+        const { VisionAnalyzerService } =
+          await import("../../../vision/visionAnalyzerService");
+        visionAnalysis = await VisionAnalyzerService.analyzeImages(
+          state.imageUrls,
+          input,
+          state.jobId,
+        );
+      } catch (vErr) {
+        console.warn("[Triage Multimodal Vision Exception]:", vErr);
+      }
     }
 
     // =========================================================================
     // 🛡️ Step 0: 输入格式预过滤与规则前置防线
     // =========================================================================
-    if (input.length === 0) {
+    if (
+      input.length === 0 &&
+      (!state.imageUrls || state.imageUrls.length === 0)
+    ) {
       const reply = "您好！看起来您发送了一条空消息。请问有什么我可以帮您的？";
       return await this.handleImmediateBypass(
         state,
@@ -376,13 +414,16 @@ export class IntentTriageEngine {
         `[Triage Embedding Scores] Order: ${scoreOrder.toFixed(3)}, Refund: ${scoreRefund.toFixed(3)}, OutOfScope: ${scoreOos.toFixed(3)}`,
       );
 
-      const matchedOrderId = input.match(/\bORD-[A-Za-z0-9]+\b/i)?.[0];
-      const hasOrderKeywords = /订单|发货|物流|查单|买的|快递|到哪/i.test(
-        input,
-      );
-      const hasRefundKeywords = /退款|退货|退钱|退单|退款申请|退货流程/i.test(
-        input,
-      );
+      const matchedOrderId =
+        input.match(/\bORD-[A-Za-z0-9]+\b/i)?.[0] ||
+        visionAnalysis?.extractedOrderId;
+      const hasOrderKeywords =
+        /订单|发货|物流|查单|买的|快递|到哪|运单|面单/i.test(input) ||
+        !!visionAnalysis?.extractedTrackingNumber;
+      const hasRefundKeywords =
+        /退款|退货|退钱|退单|退款申请|退货流程|破损|坏了|碎了|瑕疵/i.test(
+          input,
+        ) || !!visionAnalysis?.damageAssessment;
 
       // 判定 1: 复合意图直达 (必须真实同时包含订单与退款关键词)
       if (
