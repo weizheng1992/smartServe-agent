@@ -4,6 +4,21 @@
 
 ---
 
+## [1.5.0] - 2026-08-20
+
+### 🌟 Major Highlights (重大亮点)
+
+- **纯物理真实 PostgreSQL 数据库架构 (Single Source of Truth)**: 彻底移除了 600+ 行内存模拟库（`FakePool`）及复杂的 SQL 正则匹配与降级分支，系统所有读写操作均直连物理真实 PostgreSQL 数据库与 Drizzle ORM，彻底杜绝数据脱节与幽灵数据。
+- **公共标准订单创建领域服务 (`createOrder`)**: 在 `OrderDomainService` 中新增并暴露了标准 `createOrder` 工具，自动关联用户会话、多租户（SaaS Tenant）归属与订单明细条目，并在落盘后自动同步清除 Redis/本地缓存。
+- **Zero IDOR 零越权与多租户查单优化**: 增强 `listUserOrders` 对用户会话与商户 ID 的查询适配，支持多商户及全局电商主站的订单物理归属查询。
+
+### 🏗️ Major Refactoring (重大重构)
+
+- **移除内存数据库模拟器 (`b05abd4`)**: 彻底删除了 `packages/db/src/fakePool.ts`，简化 `packages/db/src/client.ts` 使得所有 API、Agent 与工具直连真实 `pg.Pool` 连接池。
+- **统一 HITL 审批中台组件与领域服务 (`11127ff`)**: 对 HITL 审批工单、订单领域服务及跨包类型进行了全量模块化收敛与编译修复。
+
+---
+
 ## [1.4.0] - 2026-08-19
 
 ### 🌟 Major Highlights (重大亮点)
