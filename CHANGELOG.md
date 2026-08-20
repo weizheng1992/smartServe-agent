@@ -4,6 +4,26 @@
 
 ---
 
+## [1.6.0] - 2026-08-20
+
+### 🌟 Major Highlights (重大亮点)
+
+- **SaaS 商户自主入驻与配置中台 (Self-Service Tenant Hub & IAM)**:
+  - 引入 `tenants`、`tenant_members`、`tenant_configs` 与 `tenant_tools` 实体，规范单层商户模型 (`businessId` 命名空间) 与 `Owner` / `Admin` / `Agent` 三级 RBAC 权限隔离。
+  - 实现提示词与品牌心智配置的草稿调试（`draft`）与生产发布（`published`）双状态生命周期。
+- **商户 API 凭证安全加密与运行时 JIT 脱敏 (Secrets KMS & JIT Injection)**:
+  - 基于 Node.js 原生 `crypto` 与 RFC 5869 HKDF，利用主密钥与租户 ID 派生独立密钥，实施 `AES-256-GCM` (`iv:authTag:ciphertext`) 高强加密存储。
+  - 动态工具调用时实行 JIT 即时解密注入 Header，全链路脱敏 Pino 日志、Langfuse Span 与 SSE 推送流。
+- **OpenAPI 3.0 动态工具工厂与 SSRF 运行时安全沙箱 (Dynamic Tools & SSRF Guard)**:
+  - 动态解析 OpenAPI JSON 并生成 Zod Schema 校验器，自动将 `x-requires-approval` 与变更路径路由至 HITL 待审批队列。
+  - 内置 DNS 预解析与私网网段（`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.169.254`）硬拦截 SSRF 运行时沙箱，并施加 8 秒物理超时熔断。
+- **知识库多格式异步切片与 Contextual RAG 摄入流水线 (Document Ingestion Pipeline)**:
+  - 实现递归段落边界分块（~600 tokens 目标大小，100 tokens 重叠）并自动生成 Anthropic 标准情境摘要，批量注入 PostgreSQL `rag_documents`。
+- **租户管理与配置 REST API 路由**:
+  - 新增 `/api/tenant/onboard`、`/api/tenant/config`、`/api/tenant/tools` 与 `/api/tenant/knowledge/upload` 统一接口。
+
+---
+
 ## [1.5.0] - 2026-08-20
 
 ### 🌟 Major Highlights (重大亮点)

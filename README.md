@@ -113,7 +113,12 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   │   │   ├── quotaGuard.ts# 租户级请求频次与 Token 配额守卫
 │   │   │   │   │   └── route.ts     # 接收对话请求分发中转控制器
 │   │   │   │   ├── chat/[jobId]/stream/ # SSE 实时状态机节点日志广播管道
-│   │   │   │   └── health/          # 系统健康检查轮询探针
+│   │   │   │   ├── health/          # 系统健康检查轮询探针
+│   │   │   │   └── tenant/          # SaaS 商户自主入驻与配置中心 API
+│   │   │   │       ├── onboard/     # 商户自主注册与默认配置初始化
+│   │   │   │       ├── config/      # 品牌提示词/参数 Draft与Publish版本管理
+│   │   │   │       ├── tools/       # OpenAPI 动态工具注册与凭证加密
+│   │   │   │       └── knowledge/upload/ # 多格式文档切片与 Contextual RAG 批量摄入
 │   │   │   ├── home/                # 核心控制台面板
 │   │   │   │   ├── components/      # 模块化 UI 组件
 │   │   │   │   │   ├── audit/       # HITL 审核工作台子组件 (AuditDesk, ApprovalDetailView, ApprovalList)
@@ -166,6 +171,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   ├── rag/                 # KnowledgeEngine 统一 RAG 知识库门面
 │   │   │   │   ├── knowledgeEngine.ts # 混合检索、文件热替换、单切片维护与目录入库门面
 │   │   │   │   ├── contextualRag.ts # Anthropic Contextual RAG 混合检索引擎 (BM25 + 向量 + RRF)
+│   │   │   │   ├── documentIngestionService.ts # 多格式文档解析、递归边界切片与情境摘要提取服务
 │   │   │   │   ├── chunker.ts       # Markdown 智能分块切片算法
 │   │   │   │   ├── contextGenerator.ts # 上下文总结摘要增强生成器
 │   │   │   │   └── ingestTxtFiles.ts# 物理文档自动解析与批量注入器
@@ -173,14 +179,15 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   │   └── workflowOrchestrator.ts # 统一 Temporal 工作流与本地 LangGraph 调度
 │   │   │   ├── llm/                 # LLM 自愈重试与 CircuitBreaker 断路器
 │   │   │   └── temporal/            # 分布式工作流编排 (client, worker, workflows, activities)
-│   │   └── tests/                   # 56+ 全量单元与集成测试套件
+│   │   └── tests/                   # 80+ 全量单元与集成测试套件
 │   │
 │   ├── db/                          # 纯物理关系型数据库层 (Drizzle ORM & PostgreSQL 连接池)
 │   │   ├── drizzle/                 # 数据库 Migration 自动生成 SQL
 │   │   └── src/
 │   │       ├── repositories/        # 强类型领域仓储接口 (IUserRepository, IThreadRepository, IMessageRepository, IOrderRepository)
+│   │       ├── services/            # 领域服务 (tenantService: 租户 IAM、成员角色、版本化配置与动态工具)
 │   │       ├── client.ts            # 纯物理真实 PostgreSQL 数据库连接池 (pg.Pool) 与 Drizzle 实例 (单一真实数据源)
-│   │       ├── schema.ts            # 3NF 物理表结构定义 (orders, products, order_items, threads, users, messages, session_metrics 等)
+│   │       ├── schema.ts            # 3NF 物理表结构定义 (tenants, tenant_members, tenant_configs, tenant_tools, orders, messages 等)
 │   │       ├── scripts/             # 数据库诊断与知识库导入运维脚本
 │   │       └── seed.ts              # 物理种子数据与多商户策略注入脚本
 │   │
@@ -188,11 +195,13 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   ├── src/
 │   │   │   ├── orderDomainService.ts# 订单领域服务 (含 createOrder, listUserOrders, processRefund, changeShippingAddress)
 │   │   │   ├── ecommerce.tools.ts   # 电商标准 Tool 注册定义 (getOrderStatus, processRefund, listUserOrders, createOrder 等)
+│   │   │   ├── openapi/             # OpenAPI 3.0 动态工具工厂 (dynamicToolFactory) 与 SSRF 运行时安全沙箱 (ssrfGuard)
+│   │   │   ├── crypto/              # 商户 API 凭证安全中心 (secrets: 基于 HKDF 租户派生密钥的 AES-256-GCM 加密与脱敏)
 │   │   │   ├── scrubber.ts          # PII 敏感数据递归脱敏切面 (掩码手机/身份证/银行卡/邮箱)
 │   │   │   ├── screenshot.tools.ts  # Puppeteer 高清网页物理截图工具 (静态文件保存与安全返回)
 │   │   │   ├── cache.ts             # Redis + 本地 Map 双模二级缓存层 (带自动失效与 TTL)
 │   │   │   └── registry.ts          # 统一 Tool 注册表 (透明注入 PII 脱敏中间件)
-│   │   └── tests/                   # 订单领域服务与 PII 脱敏集成测试
+│   │   └── tests/                   # 订单领域服务、加密中心、动态工具与 PII 脱敏集成测试
 │   │
 │   ├── observability/               # 财务度量分析与 APM Trace 观测包 (Langfuse, Pino Logger, metrics)
 │   ├── business-configs/            # SaaS 多商户动态 JSON 策略配置 (ecommerce.config.ts)

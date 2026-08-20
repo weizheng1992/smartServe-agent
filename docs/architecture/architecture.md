@@ -432,3 +432,24 @@
 - **多租户并发动态调度**：在并发 Worker 中动态轮换 `ecommerce`、`nike`、`adidas` 等不同商户 header（`x-business-id`），模拟多租户高频交叉请求。
 - **TTFT (Time To First Token) 首字时延精准测量**：通过监听底层 SSE `ReadableStream` 第一个有效 Chunk 到达的时间差，精确捕获用户在前端“看到第一个字打出来”的真实物理等待时延。
 - **分位数统计与超时熔断保护**：集成 `AbortController` 防挂死超时保护（默认 30s），并在压测报告中输出 RPS (Requests Per Second)、TTFB、TTFT 与 P50/P90/P99 全链路耗时统计大盘。
+
+---
+
+## 3.24 🚀 新增：SaaS 商户自主入驻中心、动态 OpenAPI 工具与 KMS 密钥加密中台 (Tenant Hub & KMS)
+
+为了支持商户自主注册入驻、在线导入私有业务文档、动态接入外部 OpenAPI 3.0 系统并保障密钥绝对安全：
+
+### 📂 核心文件：
+
+1. **租户数据模型与领域服务**：`packages/db/src/schema.ts` (`tenants`, `tenant_members`, `tenant_configs`, `tenant_tools`) 与 `packages/db/src/services/tenantService.ts`
+2. **KMS 密钥加密与 JIT 脱敏**：`packages/tools/src/crypto/secrets.ts`
+3. **动态 HTTP 工具工厂与 SSRF 网关**：`packages/tools/src/openapi/dynamicToolFactory.ts` 与 `packages/tools/src/openapi/ssrfGuard.ts`
+4. **多格式文档解析与异步切片服务**：`packages/engine/src/rag/documentIngestionService.ts`
+5. **租户配置 REST API 路由**：`apps/web/app/api/tenant/` (`onboard`, `config`, `tools`, `knowledge/upload`)
+
+### 💡 架构解析：
+
+- **单层商户模型与三级 RBAC 权限体系**：支持租户以 `businessId` 为命名空间进行注册，内置 `owner`（所有者/账单）、`admin`（管理员/配置/审批）与 `agent`（坐席/会话接管）三级权限，并通过 Drizzle 强制施加行级隔离。
+- **AES-256-GCM 结合 HKDF 租户派生密钥**：基于环境变量主密钥与租户 ID 盐值派生各租户独立的 32 字节密钥，以 `iv:authTag:ciphertext` 密文落盘；在发起外部 HTTP 请求时执行 JIT 即时解密，并自动在日志与 Trace 流中掩码脱敏。
+- **SSRF 运行时安全沙箱**：内置 DNS 预解析拦截器，硬拦截私网网段（`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`）、本地回环（`127.0.0.0/8`）与云元数据端点（`169.254.169.254`）。
+- **Anthropic Contextual RAG 摄入流水线**：支持 Markdown/TXT/规整文本解析，按 ~600 tokens 递归边界切片与 100 tokens 重叠，并为切片自动生成全局情境摘要，批量注入 `rag_documents` 物理知识库。
