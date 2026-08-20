@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { db, getDrizzle, pendingApprovals, threads } from "db";
 import { desc, eq } from "drizzle-orm";
 import { WorkflowOrchestrator } from "engine";
@@ -89,10 +90,7 @@ export async function processApprovalAction(
       };
     }
 
-    const newId =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : require("node:crypto").randomUUID();
+    const newId = randomUUID();
     const deadline = new Date(Date.now() + 1800000);
     const payload = {
       userInput: "客服随时主动接管实时对话",
@@ -108,10 +106,7 @@ export async function processApprovalAction(
       deadline,
     });
 
-    const sysMsgId =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : require("node:crypto").randomUUID();
+    const sysMsgId = randomUUID();
 
     await db.addMessage({
       id: sysMsgId,

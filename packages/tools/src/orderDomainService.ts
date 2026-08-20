@@ -61,13 +61,44 @@ export class OrderDomainService {
   }
 
   /**
+   * 🛡️ 统一多租户与用户归属订单安全查询
+   */
+  static async findOrderById(
+    orderId: string,
+    userId?: string,
+    businessId?: string,
+  ): Promise<DatabaseOrderRow | null> {
+    try {
+      const conditions = ["order_id = $1"];
+      const params: (string | number)[] = [orderId];
+
+      if (userId) {
+        params.push(userId);
+        conditions.push(`user_id = $${params.length}`);
+      }
+
+      if (businessId && businessId !== "ecommerce") {
+        params.push(businessId);
+        conditions.push(`business_id = $${params.length}`);
+      }
+
+      const orderQuery = `SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery", user_id AS "userId", business_id AS "businessId", total_amount AS "totalAmount" FROM orders WHERE ${conditions.join(" AND ")}`;
+      const res = await db.execute(orderQuery, params);
+      return (res?.rows?.[0] as DatabaseOrderRow) || null;
+    } catch (err) {
+      console.error("[OrderDomainService.findOrderById] Database error:", err);
+      return null;
+    }
+  }
+
+  /**
    * 查询订单状态与物流详情（具备二级多级缓存防护）
    */
   static async getOrderStatus(
     orderId: string,
     threadId?: string,
   ): Promise<ToolExecutionResult> {
-    const { userId: sessionUserId } =
+    const { userId: sessionUserId, businessId } =
       await this.getThreadSessionContext(threadId);
     const cacheKey = `cache:order_status:${orderId}`;
 
@@ -83,24 +114,7 @@ export class OrderDomainService {
     }
 
     // 2. 数据库物理关联查询
-    let order: DatabaseOrderRow | null = null;
-    try {
-      const orderQuery = sessionUserId
-        ? 'SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery", user_id AS "userId", business_id AS "businessId" FROM orders WHERE order_id = $1 AND user_id = $2'
-        : 'SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery", user_id AS "userId", business_id AS "businessId" FROM orders WHERE order_id = $1';
-      const orderQueryParams = sessionUserId
-        ? [orderId, sessionUserId]
-        : [orderId];
-      const oRes = await db.execute(orderQuery, orderQueryParams);
-      if (oRes?.rows?.[0]) {
-        order = oRes.rows[0] as DatabaseOrderRow;
-      }
-    } catch (dbErr) {
-      console.error(
-        "[OrderDomainService.getOrderStatus] Database error:",
-        dbErr,
-      );
-    }
+    const order = await this.findOrderById(orderId, sessionUserId, businessId);
 
     if (!order) {
       return {
@@ -201,24 +215,7 @@ export class OrderDomainService {
       await this.getThreadSessionContext(threadId);
     const returnWindowDays = this.getReturnWindowDays(businessId);
 
-    let order: DatabaseOrderRow | null = null;
-    try {
-      const orderQuery = sessionUserId
-        ? 'SELECT order_id AS "orderId", estimated_delivery AS "estimatedDelivery", user_id AS "userId", total_amount AS "totalAmount" FROM orders WHERE order_id = $1 AND user_id = $2'
-        : 'SELECT order_id AS "orderId", estimated_delivery AS "estimatedDelivery", user_id AS "userId", total_amount AS "totalAmount" FROM orders WHERE order_id = $1';
-      const orderQueryParams = sessionUserId
-        ? [orderId, sessionUserId]
-        : [orderId];
-      const oRes = await db.execute(orderQuery, orderQueryParams);
-      if (oRes?.rows?.[0]) {
-        order = oRes.rows[0] as DatabaseOrderRow;
-      }
-    } catch (dbErr) {
-      console.error(
-        "[OrderDomainService.processRefund] Database error:",
-        dbErr,
-      );
-    }
+    const order = await this.findOrderById(orderId, sessionUserId, businessId);
 
     if (!order) {
       return {
@@ -333,7 +330,7 @@ export class OrderDomainService {
    */
   static async createOrder(options: {
     orderId?: string;
-    userId: string;
+    userId?: string;
     businessId?: string;
     carrier?: string;
     trackingNumber?: string;
@@ -344,11 +341,12 @@ export class OrderDomainService {
       quantity: number;
       priceAtPurchase?: number;
     }>;
+    threadId?: string;
   }): Promise<ToolExecutionResult> {
-    const {
+    let {
       orderId = `ORD-${Date.now().toString().slice(-6)}`,
       userId,
-      businessId = "ecommerce",
+      businessId,
       carrier = "SF Express",
       trackingNumber = `SF${Math.floor(1000000000 + Math.random() * 9000000000)}`,
       estimatedDelivery = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
@@ -356,10 +354,22 @@ export class OrderDomainService {
         .split("T")[0],
       totalAmount = 99.0,
       items = [],
+      threadId,
     } = options;
 
+    if ((!userId || !businessId) && threadId) {
+      const ctx = await this.getThreadSessionContext(threadId);
+      if (!userId && ctx.userId) userId = ctx.userId;
+      if (!businessId && ctx.businessId) businessId = ctx.businessId;
+    }
+
+    businessId = businessId || "ecommerce";
+
     if (!userId) {
-      return { error: "userId is strictly required to create an order." };
+      return {
+        error:
+          "userId is strictly required to create an order (or provide valid session threadId).",
+      };
     }
 
     try {
