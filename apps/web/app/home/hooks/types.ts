@@ -1,14 +1,16 @@
-import type { SubTask, SubTaskResult, TaskPlan } from 'types';
+import type { SubTask, SubTaskResult, TaskPlan } from "types";
 
 export type { SubTaskResult, TaskPlan };
 export type Subtask = SubTask;
 
 export interface Message {
-  role: 'user' | 'assistant';
+  id?: string;
+  role: "user" | "assistant" | "system";
   content: string;
   plan?: TaskPlan;
   jobId?: string;
   isLoading?: boolean;
+  timestamp?: string;
 }
 
 export interface UserSession {

@@ -5,6 +5,7 @@ import { translateTaskPlan } from "../utils/translateTaskPlan";
 import type { Message, UserSession } from "./types";
 
 export const DEFAULT_ASSISTANT_MESSAGE: Message = {
+  id: "default_welcome",
   role: "assistant",
   content:
     "您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？",
@@ -68,20 +69,7 @@ export function useChatMessages({
           );
           if (hasPendingLoader) return prev;
 
-          const currentSig = JSON.stringify(
-            prev.map((m) => ({ role: m.role, content: m.content })),
-          );
-          const newSig = JSON.stringify(
-            fullMessages.map((m: { role: string; content: string }) => ({
-              role: m.role,
-              content: m.content,
-            })),
-          );
-
-          if (currentSig !== newSig) {
-            return fullMessages;
-          }
-          return prev;
+          return fullMessages;
         });
       }
     } catch (err) {
@@ -211,8 +199,13 @@ export function useChatMessages({
     setIsSubmitting(true);
     setTokensConsumed(0);
 
-    const userMessage: Message = { role: "user", content: userQuery };
+    const userMessage: Message = {
+      id: `opt_user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      role: "user",
+      content: userQuery,
+    };
     const loaderMessage: Message = {
+      id: `opt_loader_${Date.now()}`,
       role: "assistant",
       content: "",
       isLoading: true,
@@ -238,7 +231,6 @@ export function useChatMessages({
       }
 
       if (data.isHumanActive) {
-        setMessages((prev) => prev.filter((m) => m.jobId !== "pending-job"));
         setIsSubmitting(false);
         await loadHistory(activeThreadId);
         return;

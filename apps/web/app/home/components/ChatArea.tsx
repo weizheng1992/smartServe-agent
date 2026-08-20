@@ -108,7 +108,7 @@ export function ChatArea({
         <div className="max-w-3xl mx-auto space-y-6 pb-28">
           {messages.map((m, idx) => (
             <div
-              key={idx}
+              key={m.id || `msg_${idx}`}
               className={`flex gap-4 ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
               {m.role === "assistant" && (
