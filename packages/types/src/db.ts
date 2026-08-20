@@ -55,3 +55,44 @@ export interface AnalyticsSummaryRow {
   estimatedCostUsd?: number;
   [key: string]: unknown;
 }
+
+export interface TenantRow {
+  id: string;
+  businessId: string;
+  name: string;
+  planTier: "free" | "pro" | "enterprise";
+  status: "active" | "suspended";
+  createdAt?: string | Date;
+}
+
+export interface TenantMemberRow {
+  id: string;
+  tenantId: string;
+  userId: string;
+  role: "owner" | "admin" | "agent";
+  createdAt?: string | Date;
+}
+
+export interface TenantConfigRow {
+  id: string;
+  businessId: string;
+  systemPrompt?: string | null;
+  welcomeMessage?: string | null;
+  temperature?: number | null;
+  status: "draft" | "published";
+  version: number;
+  updatedAt?: string | Date;
+}
+
+export interface TenantToolRow {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string | null;
+  schema: Record<string, unknown>;
+  authType: "none" | "bearer" | "basic" | "custom_header";
+  encryptedCredentials?: string | null;
+  requiresApproval: boolean;
+  enabled: boolean;
+  createdAt?: string | Date;
+}
