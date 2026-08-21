@@ -2,7 +2,10 @@
   "name": "agent-platform",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "turbo run dev",
     "dev:all": "turbo run dev",
@@ -20,7 +23,7 @@
     "biome:check": "biome check --write .",
     "test:load": "bun scripts/load-test.ts",
     "test:e2e": "playwright test",
-    "test:prompt": "promptfoo eval -c eval/promptfooconfig.yaml",
+    "test:prompt": "promptfoo eval -c eval/promptfooconfig.yaml --no-write",
     "db:clean": "bun packages/db/src/scripts/check-and-clean.ts"
   },
   "devDependencies": {
