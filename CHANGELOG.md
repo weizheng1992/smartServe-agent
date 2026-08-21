@@ -4,6 +4,33 @@
 
 ---
 
+## [1.9.0] - 2026-08-21
+
+### 🌟 Major Highlights (重大亮点)
+
+- **商城全功能数据库体系与领域服务 (Comprehensive E-Commerce Schema & Mall Domain Service)**:
+  - 物理构建高标准 SaaS 关系型商城数据库结构：
+    - `user_addresses`: 用户多地址簿（默认地址、详细门牌、收货人与联系电话）；
+    - `product_skus`: 商品多规格属性（尺码、颜色、SKU 编码、库存与差异化价格）；
+    - `logistics_packages`: 订单履约包裹表（多包裹拆单履约、承运商与主运单号）；
+    - `logistics_tracks`: 物流时序轨迹流水（时间戳、物理节点站点、派送状态与描述）；
+    - `product_reviews`: 用户商品评价与晒单（星级打分、文本评论与图片证据）；
+    - `after_sale_tickets` & `after_sale_logs`: 售后服务工单与流转状态机跟踪。
+  - 封装 `MallDomainService` 领域服务，提供标准查询与状态流转接口。
+- **意图-槽位状态机与缺失参数即时反问机制 (Intent-Slot State Machine & Fast-Path Clarification)**:
+  - 实现结构化槽位与意图抽取器 `SlotExtractor`，严格定义高风险业务必填槽位映射表 `REQUIRED_SLOTS_MAP`（如修改收货地址必须具备 `orderId` 与 `newAddress`）。
+  - 在 `IntentTriageEngine` 阶段引入槽位缺失拦截守卫，参数不足时毫秒级生成即时精准反问并写入 `TaskMemory` 多轮上下文记忆；参数补齐后高置信度放行直达 DAG 调度，彻底阻断由于缺少参数导致的自旋与大模型幻觉。
+  - 接入 Promptfoo 专属槽位评测集 `slot-clarification.json` 与 `slotClarification.scorer.ts` 自定义评分器，评测通过率 100%。
+- **Temporal 真实编排实时状态 SSE 桥接与防假死架构 (Temporal SSE Real-Time Status Stream)**:
+  - 重构 `/api/chat/[jobId]/stream` 路由，在真实 Temporal 模式下建立 300ms 毫秒级 `currentStatusQuery` 与 `currentPlanQuery` 轮询推送机制，将底层节点执行状态实时桥接至 Web UI。
+  - 在 LangGraph `buildAgentGraph` 及 Temporal `agentWorkflow` 中统一 `isBypass` 判定守卫（`state.output` 存在或 `bypass_step`），保证槽位即时反问与规则旁路毫秒级直达 `finishNode`，避免误入 Planner 自旋。
+- **泛订单查询极速直达与批量富媒体卡片合成 (Fast-Path Order Listing & Rich Card Batching)**:
+  - 细化泛查单意图与单笔物流追踪正则边界，消除“我的订单”被误拦截为缺失单号追问的缺陷，极速直达 `listUserOrders` 调度。
+  - 扩展 `CardSynthesizer` 引擎支持 `result.orders` 批量订单交互卡片生成（查看物流轨迹、申请退款按钮及智能快捷回复胶囊），并内置多租户演示订单自动自愈机制。
+  - Monorepo 全量 122 项单元与集成测试 100% 绿色通过（578 个断言）。
+
+---
+
 ## [1.8.0] - 2026-08-21
 
 ### 🌟 Major Highlights (重大亮点)

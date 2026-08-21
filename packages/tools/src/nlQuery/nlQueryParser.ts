@@ -1,13 +1,10 @@
-import {
-  METRIC_SEMANTIC_REGISTRY,
-  MetricSemanticResolver,
-} from "../metricRegistry";
-import { DimensionResolver } from "./dimensionResolver";
-import { FilterResolver } from "./filterResolver";
-import { OrderLimitResolver } from "./orderLimitResolver";
-import { TextNormalizer } from "./textNormalizer";
-import { TimeRangeResolver } from "./timeRangeResolver";
-import type { NLQueryAST } from "./types";
+import { METRIC_SEMANTIC_REGISTRY, MetricSemanticResolver } from '../metricRegistry';
+import { DimensionResolver } from './dimensionResolver';
+import { FilterResolver } from './filterResolver';
+import { OrderLimitResolver } from './orderLimitResolver';
+import { TextNormalizer } from './textNormalizer';
+import { TimeRangeResolver } from './timeRangeResolver';
+import type { NLQueryAST } from './types';
 
 /**
  * 🌟 自然语言统一查询语法树解析器 (NLQuery Parser)

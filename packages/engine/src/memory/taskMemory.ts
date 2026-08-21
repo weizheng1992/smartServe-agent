@@ -7,6 +7,8 @@ export interface TaskState {
   goal: string;
   subtasks: SubTask[];
   currentStepIndex: number;
+  activeIntent?: string;
+  slots?: Record<string, unknown>;
 }
 
 export class TaskMemory {

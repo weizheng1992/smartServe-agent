@@ -63,6 +63,31 @@ export function tryMatchExecutorFastPath(
   }
 
   if (
+    (descLower.includes('changeshippingaddress') ||
+      descLower.includes('modify_shipping_address') ||
+      descLower.includes('修改地址') ||
+      descLower.includes('改地址') ||
+      descLower.includes('收货地址')) &&
+    allowedTools.includes('changeShippingAddress') &&
+    extractedOrderId
+  ) {
+    let newAddress = '';
+    const addrMatch = `${description} ${userInput}`.match(
+      /(?:with new address|改成|改到|送至|送去|寄到|地址为|地址是)\s*([^,，!！?？\n]+)/i,
+    );
+    if (addrMatch && addrMatch[1]) {
+      newAddress = addrMatch[1].trim();
+    }
+    return {
+      toolName: 'changeShippingAddress',
+      args: {
+        orderId: extractedOrderId,
+        newAddress: newAddress || '客户指定新地址',
+      },
+    };
+  }
+
+  if (
     (descLower.includes('listuserorders') ||
       descLower.includes('list orders') ||
       descLower.includes('全部订单') ||

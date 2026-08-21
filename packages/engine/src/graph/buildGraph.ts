@@ -32,17 +32,19 @@ export function buildAgentGraph() {
     'triage',
     (state) => {
       // 🧠 极致提速优化（Bypass Loop Logic）：
-      // 如果没有检测到任何意图，或者识别出的唯一意图是纯日常咨询/打招呼（general_query），
+      // 如果没有检测到任何意图，或者识别出的唯一意图是纯日常咨询/打招呼（general_query），或命中前置槽位追问/规则旁路直达，
       // 证明本次会话不需要物理数据库或截图工具链的编排。我们直接切入 Finish 终点，彻底省去 Planner -> Executor -> Validator 重置循环！
-      if (state.intents.length === 0) {
+      if (!state.intents || state.intents.length === 0) {
         return 'finish';
       }
 
       const isOnlyGeneralQuery = state.intents.length === 1 && state.intents[0].intent === 'general_query';
-      if (isOnlyGeneralQuery) {
+      const isBypass = !!state.output || state.taskPlan?.subtasks?.[0]?.id === 'bypass_step';
+
+      if (isOnlyGeneralQuery || isBypass) {
         logger.info(
           { threadId: state.threadId },
-          'Detected pure general_query, bypassing planner loop to finishNode directly.',
+          'Detected bypass or pure general_query, bypassing planner loop to finishNode directly.',
         );
         return 'finish';
       }

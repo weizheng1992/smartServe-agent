@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { redis, toolCache, useRedis } from './cache';
+import { MallDomainService } from './mallDomainService';
 import { OrderDomainService } from './orderDomainService';
 import { registerTool } from './registry';
 
-export { redis, useRedis, toolCache };
+export { redis, useRedis, toolCache, MallDomainService };
 
 export const getOrderStatus = {
   name: 'getOrderStatus',
@@ -206,6 +207,129 @@ export const queryProductRanking = {
   },
 };
 
+export const getUserAddresses = {
+  name: 'getUserAddresses',
+  description: 'Get all saved recipient delivery addresses for the current user, including tags and default flags.',
+  schema: z.object({
+    userId: z.string().optional().describe('User identifier. Resolved automatically from context if omitted.'),
+  }),
+  execute: async (args: { userId?: string; threadId?: string }) => {
+    return MallDomainService.getUserAddresses(args.userId, undefined, args.threadId);
+  },
+};
+
+export const saveUserAddress = {
+  name: 'saveUserAddress',
+  description: 'Save or create a new delivery address for the current customer.',
+  schema: z.object({
+    receiverName: z.string().describe('Recipient name.'),
+    receiverPhone: z.string().describe('Recipient phone number.'),
+    province: z.string().describe('Province or state.'),
+    city: z.string().describe('City name.'),
+    district: z.string().describe('District or county.'),
+    detailAddress: z.string().describe('Street address and door number.'),
+    tag: z.enum(['home', 'company', 'school', 'other']).optional().describe('Address category tag.'),
+    isDefault: z.boolean().optional().describe('Whether to set this address as default.'),
+  }),
+  execute: async (args: {
+    receiverName: string;
+    receiverPhone: string;
+    province: string;
+    city: string;
+    district: string;
+    detailAddress: string;
+    tag?: 'home' | 'company' | 'school' | 'other';
+    isDefault?: boolean;
+    threadId?: string;
+  }) => {
+    return MallDomainService.saveUserAddress(args);
+  },
+};
+
+export const queryProductSkus = {
+  name: 'queryProductSkus',
+  description:
+    'Query detailed product SKU specifications (color, size, edition) along with real-time stock and prices.',
+  schema: z.object({
+    productId: z.string().optional().describe('Product unique identifier.'),
+    color: z.string().optional().describe("Color name filter (e.g. '极夜黑', '白')."),
+    size: z.string().optional().describe("Shoe or apparel size filter (e.g. '42', '42.5', 'L')."),
+    inStockOnly: z.boolean().optional().describe('Filter only SKUs that are currently in stock.'),
+  }),
+  execute: async (args: {
+    productId?: string;
+    color?: string;
+    size?: string;
+    inStockOnly?: boolean;
+    threadId?: string;
+  }) => {
+    return MallDomainService.queryProductSkus(args);
+  },
+};
+
+export const queryPackageTracking = {
+  name: 'queryPackageTracking',
+  description: 'Query real-time parcel delivery tracking status, courier details, and chronological timeline nodes.',
+  schema: z.object({
+    orderId: z.string().optional().describe('Order ID to look up package tracking.'),
+    trackingNumber: z.string().optional().describe('Specific express tracking number (SF, JD, ZTO, etc.).'),
+  }),
+  execute: async (args: {
+    orderId?: string;
+    trackingNumber?: string;
+    threadId?: string;
+  }) => {
+    return MallDomainService.queryPackageTracking(args);
+  },
+};
+
+export const queryProductReviews = {
+  name: 'queryProductReviews',
+  description: 'Query customer feedback, ratings, sentiment summary, and sizing/fit consensus for a product.',
+  schema: z.object({
+    productId: z.string().optional().describe('Product ID to inspect reviews for.'),
+    fitFeedback: z
+      .enum(['true_to_size', 'runs_small', 'runs_large'])
+      .optional()
+      .describe('Filter reviews by specific fit feedback.'),
+    sentiment: z.enum(['positive', 'neutral', 'negative']).optional().describe('Sentiment filter.'),
+    limit: z.number().optional().describe('Maximum number of reviews to return.'),
+  }),
+  execute: async (args: {
+    productId?: string;
+    fitFeedback?: 'true_to_size' | 'runs_small' | 'runs_large';
+    sentiment?: 'positive' | 'neutral' | 'negative';
+    limit?: number;
+    threadId?: string;
+  }) => {
+    return MallDomainService.queryProductReviews(args);
+  },
+};
+
+export const applyAfterSale = {
+  name: 'applyAfterSale',
+  description: 'Submit an after-sale customer service ticket (refund only, return and refund, or exchange).',
+  schema: z.object({
+    orderId: z.string().describe('The order ID to apply after-sale for.'),
+    type: z.enum(['refund_only', 'return_and_refund', 'exchange']).describe('After-sale type.'),
+    reason: z
+      .enum(['wrong_size', 'quality_issue', 'not_as_described', 'no_reason_7d'])
+      .describe('Structured return/refund reason code.'),
+    reasonDescription: z.string().optional().describe('Optional text explanation of the issue.'),
+    refundAmount: z.number().optional().describe('Requested refund amount.'),
+  }),
+  execute: async (args: {
+    orderId: string;
+    type: 'refund_only' | 'return_and_refund' | 'exchange';
+    reason: 'wrong_size' | 'quality_issue' | 'not_as_described' | 'no_reason_7d';
+    reasonDescription?: string;
+    refundAmount?: number;
+    threadId?: string;
+  }) => {
+    return MallDomainService.applyAfterSale(args);
+  },
+};
+
 registerTool(getOrderStatus);
 registerTool(processRefund);
 registerTool(listUserOrders);
@@ -214,3 +338,9 @@ registerTool(generateInvoice);
 registerTool(recordUserPreference);
 registerTool(createOrder);
 registerTool(queryProductRanking);
+registerTool(getUserAddresses);
+registerTool(saveUserAddress);
+registerTool(queryProductSkus);
+registerTool(queryPackageTracking);
+registerTool(queryProductReviews);
+registerTool(applyAfterSale);

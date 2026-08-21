@@ -1,4 +1,4 @@
-import type { FilterCondition } from "./types";
+import type { FilterCondition } from './types';
 
 /**
  * 🌟 动态过滤条件解析器 (Filter Resolver)
@@ -18,7 +18,7 @@ export class FilterResolver {
       const val = Number.parseInt(stockMatch[2], 10);
       const op = this.normalizeOperator(opRaw);
       filters.push({
-        field: "p.stock",
+        field: 'p.stock',
         op,
         value: val,
         sqlClause: `p.stock ${op} ${val}`,
@@ -34,7 +34,7 @@ export class FilterResolver {
       const val = Number.parseFloat(priceMatch[2]);
       const op = this.normalizeOperator(opRaw);
       filters.push({
-        field: "p.price",
+        field: 'p.price',
         op,
         value: val,
         sqlClause: `p.price ${op} ${val}`,
@@ -42,16 +42,14 @@ export class FilterResolver {
     }
 
     // 3. 品类过滤解析 (如：品类是 shoes, 分类为 零食, 品类等于 shoes)
-    const categoryMatch = text.match(
-      /(?:品类|分类)\s*(?:是|为|等于|=|:)\s*([a-zA-Z0-9_一-龥]+)/i,
-    );
+    const categoryMatch = text.match(/(?:品类|分类)\s*(?:是|为|等于|=|:)\s*([a-zA-Z0-9_一-龥]+)/i);
     if (categoryMatch && categoryMatch[1]) {
       const categoryVal = categoryMatch[1].trim();
       // 防止误匹配词
-      if (!["看", "统计", "维度"].includes(categoryVal)) {
+      if (!['看', '统计', '维度'].includes(categoryVal)) {
         filters.push({
-          field: "p.category",
-          op: "=",
+          field: 'p.category',
+          op: '=',
           value: categoryVal,
           sqlClause: `p.category = '${categoryVal.replace(/'/g, "''")}'`,
         });
@@ -61,15 +59,11 @@ export class FilterResolver {
     return filters;
   }
 
-  private static normalizeOperator(
-    raw: string,
-  ): ">" | ">=" | "<" | "<=" | "=" | "!=" {
-    if (raw === ">=" || raw.includes("大于等于") || raw.includes("高于等于"))
-      return ">=";
-    if (raw === "<=" || raw.includes("小于等于") || raw.includes("低于等于"))
-      return "<=";
-    if (raw === ">" || raw.includes("大于") || raw.includes("高于")) return ">";
-    if (raw === "<" || raw.includes("小于") || raw.includes("低于")) return "<";
-    return "=";
+  private static normalizeOperator(raw: string): '>' | '>=' | '<' | '<=' | '=' | '!=' {
+    if (raw === '>=' || raw.includes('大于等于') || raw.includes('高于等于')) return '>=';
+    if (raw === '<=' || raw.includes('小于等于') || raw.includes('低于等于')) return '<=';
+    if (raw === '>' || raw.includes('大于') || raw.includes('高于')) return '>';
+    if (raw === '<' || raw.includes('小于') || raw.includes('低于')) return '<';
+    return '=';
   }
 }

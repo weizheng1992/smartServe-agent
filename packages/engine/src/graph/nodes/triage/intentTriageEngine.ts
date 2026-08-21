@@ -3,10 +3,12 @@ import { logger } from 'observability';
 import type { DamageAssessmentData } from 'types';
 import { getLLM } from '../../../llm/callLLMWithRetry';
 import { ShortMemory } from '../../../memory/shortMemory';
+import { TaskMemory } from '../../../memory/taskMemory';
 import { agentEventEmitter } from '../../eventEmitter';
 import type { AgentStateAnnotation, IntentResult, SubTask } from '../../state';
 import { TriageRuleMatchers } from './ruleMatchers';
 import { DEFAULT_ANCHOR_PHRASES, SemanticVectorCache, cosineSimilarity } from './semanticCache';
+import { SlotExtractor } from './slotExtractor';
 
 export class IntentTriageEngine {
   /**
@@ -292,6 +294,93 @@ export class IntentTriageEngine {
         'rule',
         1.0,
       );
+    }
+
+    // =========================================================================
+    // 🛡️ Step 1.5: 意图与槽位完整性拦截 (Slot Clarification & Fast-Path Shield)
+    // =========================================================================
+    try {
+      const taskMemory = new TaskMemory(threadId);
+      const existingTaskState = await taskMemory.getTaskState();
+      const activeIntent = existingTaskState?.activeIntent;
+      const existingSlots = (existingTaskState?.slots || {}) as Record<string, unknown>;
+
+      const taskSpec = SlotExtractor.extract(input, activeIntent, existingSlots);
+
+      // 如果属于订单履约类高风险/多参数意图，且必填槽位存在缺失，直接拦截并向用户追问，阻断死循环自旋！
+      if (taskSpec.missingSlots.length > 0 && taskSpec.clarificationMessage) {
+        console.log(
+          `[Triage Slot-Clarification] ⚠️ 拦截缺失槽位意图 [${taskSpec.intentType}], 缺失参数: [${taskSpec.missingSlots.join(', ')}]，触发即时追问！`,
+        );
+
+        await taskMemory.saveTaskState({
+          goal: `Fulfill ${taskSpec.intentType}`,
+          subtasks: [],
+          currentStepIndex: 0,
+          activeIntent: taskSpec.intentType,
+          slots: taskSpec.slots,
+        });
+
+        return await this.handleImmediateBypass(
+          state,
+          'slot_clarification_fastpath',
+          taskSpec.clarificationMessage,
+          [
+            {
+              intent: taskSpec.intentType,
+              confidence: taskSpec.confidence,
+              taskSpec,
+            },
+          ],
+          'slot_extractor',
+          taskSpec.confidence,
+          damageAssessment,
+        );
+      }
+
+      const isMultiIntentCandidate =
+        /(?:另外|同时|并且|顺便|还有|然后再|接着|以及)/.test(input) ||
+        ((input.includes('查') || input.includes('物流') || input.includes('状态')) &&
+          (input.includes('退') || input.includes('改') || input.includes('换')));
+
+      // 如果参数已经完全补齐（missingSlots 为空）且非复合多意图，直接高置信度放行，送入 Planner 调度！
+      if (
+        !isMultiIntentCandidate &&
+        taskSpec.intentType !== 'chat' &&
+        taskSpec.missingSlots.length === 0 &&
+        taskSpec.confidence >= 0.8
+      ) {
+        console.log(
+          `[Triage Slot-Matched] ✅ 槽位参数完整就绪 [${taskSpec.intentType}], 结构化参数: ${JSON.stringify(taskSpec.slots)}，快速送入 DAG 调度！`,
+        );
+        const intents = [
+          {
+            intent: taskSpec.intentType,
+            confidence: taskSpec.confidence,
+            taskSpec,
+          },
+        ];
+        await this.logIntentToDB(threadId, input, intents, 'slot_extractor', taskSpec.confidence);
+
+        // 成功提取后清除已完成的 activeIntent 记忆
+        await taskMemory.saveTaskState({
+          goal: `Completed ${taskSpec.intentType}`,
+          subtasks: [],
+          currentStepIndex: 0,
+          activeIntent: undefined,
+          slots: taskSpec.slots,
+        });
+
+        return {
+          intents,
+          shortMemory: historyMsgs,
+          damageAssessment,
+          globalTransitionsCount: -1,
+          toolErrorsCount: -1,
+        };
+      }
+    } catch (slotErr) {
+      console.warn('[Triage Slot-Clarification Exception]:', slotErr);
     }
 
     // =========================================================================

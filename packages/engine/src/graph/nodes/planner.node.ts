@@ -248,7 +248,14 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
     const extractedOrderId = entityOrderId || extractOrderId(input, null, shortMemory);
 
     if (extractedOrderId) {
-      const actionIntents = intents.filter((i) => i.intent === 'order_status' || i.intent === 'refund');
+      const actionIntents = intents.filter(
+        (i) =>
+          i.intent === 'order_status' ||
+          i.intent === 'refund' ||
+          i.intent === 'order_modify_address' ||
+          i.intent === 'order_query' ||
+          i.intent === 'order_return',
+      );
 
       if (actionIntents.length > 0) {
         const subtasks: SubTask[] = [];
@@ -256,27 +263,45 @@ You are an AI Customer Support Agent representing the specific brand/merchant: [
         for (let idx = 0; idx < actionIntents.length; idx++) {
           const item = actionIntents[idx];
           const suffix = actionIntents.length > 1 ? `_${idx}` : '';
-          if (item.intent === 'order_status') {
+          if (item.intent === 'order_status' || item.intent === 'order_query') {
             subtasks.push({
               id: `step_fast_status${suffix}`,
               description: `Call getOrderStatus for order ${extractedOrderId}`,
               status: 'pending' as const,
             });
-          } else if (item.intent === 'refund') {
+          } else if (item.intent === 'refund' || item.intent === 'order_return') {
             subtasks.push({
               id: `step_fast_refund${suffix}`,
               description: `Call processRefund for order ${extractedOrderId}`,
+              status: 'pending' as const,
+            });
+          } else if (item.intent === 'order_modify_address') {
+            const taskSpec = item.taskSpec;
+            const targetAddress = taskSpec?.slots?.newAddress || '客户指定新地址';
+            subtasks.push({
+              id: `step_fast_change_address${suffix}`,
+              description: `Call changeShippingAddress for order ${extractedOrderId} with new address ${targetAddress}`,
               status: 'pending' as const,
             });
           }
         }
 
         if (subtasks.length > 0) {
+          const firstIntent = actionIntents[0].intent;
+          const goalAction =
+            firstIntent === 'order_status' || firstIntent === 'order_query'
+              ? 'Query status'
+              : firstIntent === 'refund' || firstIntent === 'order_return'
+                ? 'Process refund'
+                : firstIntent === 'order_modify_address'
+                  ? 'Change shipping address'
+                  : firstIntent;
+
           const fastPlan: TaskPlan = {
             goal:
               subtasks.length === 1
-                ? `${actionIntents[0].intent === 'order_status' ? 'Query status' : 'Process refund'} for order ${extractedOrderId}`
-                : `Query status and process refund for order ${extractedOrderId}`,
+                ? `${goalAction} for order ${extractedOrderId}`
+                : `Execute multiple subtasks for order ${extractedOrderId}`,
             subtasks,
             currentStepIndex: 0,
           };

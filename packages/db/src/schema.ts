@@ -308,6 +308,178 @@ export const tenantTools = pgTable('tenant_tools', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// ============ User Addresses (用户收货地址薄 - 支持智能选址与改派) ============
+
+export const userAddresses = pgTable(
+  'user_addresses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: text('business_id').notNull(), // SaaS 租户隔离
+    userId: text('user_id').notNull(), // 用户 ID
+    receiverName: text('receiver_name').notNull(), // 收件人姓名
+    receiverPhone: text('receiver_phone').notNull(), // 联系电话
+    province: text('province').notNull(), // 省份
+    city: text('city').notNull(), // 城市
+    district: text('district').notNull(), // 区县
+    detailAddress: text('detail_address').notNull(), // 详细地址
+    fullAddress: text('full_address').notNull(), // 完整拼接地址（便于向量化检索与LLM直读）
+    tag: text('tag').default('home'), // 'home' | 'company' | 'school' | 'other'
+    isDefault: boolean('is_default').default(false), // 是否为默认地址
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    userBizIdx: index('user_address_biz_user_idx').on(table.businessId, table.userId),
+  }),
+);
+
+// ============ Product SKUs (商品多规格物理库存表 - SKU/Spec) ============
+
+export const productSkus = pgTable(
+  'product_skus',
+  {
+    id: text('id').primaryKey(), // SKU 唯一标识，如 sku_nike_pegasus_blk_42
+    businessId: text('business_id').notNull(), // 租户隔离
+    productId: text('product_id')
+      .references(() => products.id, { onDelete: 'cascade' })
+      .notNull(),
+    skuCode: text('sku_code').notNull(), // 物料条码
+    specAttributes: jsonb('spec_attributes').notNull(), // 规格键值对，例如 {"color": "极夜黑", "size": "42"}
+    price: real('price').notNull(), // SKU 独立售价
+    costPrice: real('cost_price').default(0.0), // SKU 成本价
+    stock: integer('stock').default(0), // SKU 独立物理库存
+    imageUrl: text('image_url'), // 规格专属主图
+    status: text('status').default('active'), // 'active' | 'out_of_stock' | 'discontinued'
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    productSkuBizIdx: index('product_skus_biz_product_idx').on(table.businessId, table.productId),
+    skuCodeIdx: index('product_skus_code_idx').on(table.skuCode),
+  }),
+);
+
+// ============ Logistics Packages (包裹主表 - 支持一单多包履约) ============
+
+export const logisticsPackages = pgTable(
+  'logistics_packages',
+  {
+    id: text('id').primaryKey(), // 包裹编号，如 pkg_sf_9876543210
+    businessId: text('business_id').notNull(),
+    orderId: text('order_id')
+      .references(() => orders.orderId, { onDelete: 'cascade' })
+      .notNull(),
+    carrier: text('carrier').notNull(), // 承运商名称，如 '顺丰速运', '京东快递'
+    carrierCode: text('carrier_code').notNull(), // 'SF' | 'JD' | 'ZTO' | 'EMS'
+    trackingNumber: text('tracking_number').notNull(), // 快递运单号
+    status: text('status').default('in_transit').notNull(), // 'pending_pickup' | 'in_transit' | 'delivering' | 'delivered' | 'exception' | 'rejected'
+    currentLocation: text('current_location'), // 当前中转站/分拨中心
+    courierName: text('courier_name'), // 派件快递员姓名
+    courierPhone: text('courier_phone'), // 快递员联系电话
+    estimatedDelivery: timestamp('estimated_delivery'), // 预计到达时间
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    orderPackageIdx: index('logistics_pkg_biz_order_idx').on(table.businessId, table.orderId),
+    trackingIdx: index('logistics_pkg_tracking_idx').on(table.trackingNumber),
+  }),
+);
+
+// ============ Logistics Tracks (物流时序节点流水表) ============
+
+export const logisticsTracks = pgTable(
+  'logistics_tracks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    packageId: text('package_id')
+      .references(() => logisticsPackages.id, { onDelete: 'cascade' })
+      .notNull(),
+    occurredAt: timestamp('occurred_at').notNull(), // 轨迹发生时间戳
+    location: text('location').notNull(), // 所在城市/网点
+    status: text('status').notNull(), // 'picked_up' | 'transporting' | 'dispatching' | 'signed' | 'problem'
+    description: text('description').notNull(), // 轨迹详细描述信息
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    pkgTrackTimeIdx: index('logistics_tracks_pkg_time_idx').on(table.packageId, table.occurredAt),
+  }),
+);
+
+// ============ Product Reviews (商品真实评价与口碑库) ============
+
+export const productReviews = pgTable(
+  'product_reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: text('business_id').notNull(),
+    productId: text('product_id')
+      .references(() => products.id, { onDelete: 'cascade' })
+      .notNull(),
+    skuId: text('sku_id'), // 关联的具体规格
+    orderId: text('order_id'), // 关联的订单
+    userId: text('user_id').notNull(),
+    userName: text('user_name'),
+    userAvatar: text('user_avatar'),
+    rating: integer('rating').notNull(), // 评分 1-5 星
+    content: text('content').notNull(), // 评价文本
+    images: jsonb('images'), // 晒单图片数组 string[]
+    fitFeedback: text('fit_feedback'), // 'true_to_size' (正码) | 'runs_small' (偏小) | 'runs_large' (偏大)
+    sentiment: text('sentiment').default('positive'), // 'positive' | 'neutral' | 'negative'
+    merchantReply: text('merchant_reply'), // 商家回复内容
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    productReviewBizIdx: index('product_reviews_biz_product_idx').on(table.businessId, table.productId),
+  }),
+);
+
+// ============ After-Sale Tickets (售后退款与退换货工单) ============
+
+export const afterSaleTickets = pgTable(
+  'after_sale_tickets',
+  {
+    id: text('id').primaryKey(), // 售后工单号，如 as_20260821001
+    businessId: text('business_id').notNull(),
+    orderId: text('order_id')
+      .references(() => orders.orderId)
+      .notNull(),
+    orderItemId: text('order_item_id'),
+    userId: text('user_id').notNull(),
+    type: text('type').notNull(), // 'refund_only' | 'return_and_refund' | 'exchange'
+    reason: text('reason').notNull(), // 'wrong_size' | 'quality_issue' | 'not_as_described' | 'no_reason_7d'
+    reasonDescription: text('reason_description'),
+    refundAmount: real('refund_amount').notNull(),
+    status: text('status').default('pending_review').notNull(), // 'pending_review' | 'approved' | 'rejected' | 'waiting_user_ship' | 'merchant_inspecting' | 'completed' | 'cancelled'
+    returnTrackingNumber: text('return_tracking_number'), // 退货物流运单号
+    humanApprovalId: uuid('human_approval_id'), // 关联 pendingApprovals.id
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    afterSaleBizOrderIdx: index('after_sale_biz_order_idx').on(table.businessId, table.orderId),
+    afterSaleBizUserIdx: index('after_sale_biz_user_idx').on(table.businessId, table.userId),
+  }),
+);
+
+// ============ After-Sale Logs (售后状态流转流水日志) ============
+
+export const afterSaleLogs = pgTable(
+  'after_sale_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ticketId: text('ticket_id')
+      .references(() => afterSaleTickets.id, { onDelete: 'cascade' })
+      .notNull(),
+    action: text('action').notNull(), // 'created' | 'approved' | 'rejected' | 'shipped_back' | 'refunded'
+    operator: text('operator').notNull(), // 'user' | 'agent_autopilot' | 'admin:staff_12'
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    ticketLogIdx: index('after_sale_logs_ticket_idx').on(table.ticketId),
+  }),
+);
+
 // Keep standard TypeScript Interfaces compatible with other calling workspaces
 export interface Message {
   id: string;

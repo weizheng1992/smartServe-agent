@@ -1,4 +1,10 @@
-import { agentEventEmitter, getTemporalClient, isUsingMockTemporal } from 'engine';
+import {
+  agentEventEmitter,
+  currentPlanQuery,
+  currentStatusQuery,
+  getTemporalClient,
+  isUsingMockTemporal,
+} from 'engine';
 import { type NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -27,19 +33,48 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ jobI
         };
 
         if (!isMock) {
-          // Real Temporal connection Mode
+          // Real Temporal connection Mode with live status polling
+          let pollInterval: NodeJS.Timeout | null = null;
+          let lastStatus = '';
           try {
             sendSSE('status', {
               status: 'running',
-              message: 'Workflow picked up by Temporal',
+              message: 'Temporal 工作流引擎已接管调度，正在初始化...',
             });
             const client = await getTemporalClient();
             const handle = client.workflow.getHandle(jobId);
+
+            // 周期性 Query 物理 Temporal 工作流状态并实时通过 SSE 推送给前端
+            pollInterval = setInterval(async () => {
+              try {
+                const [status, plan] = await Promise.all([
+                  handle.query(currentStatusQuery).catch(() => null),
+                  handle.query(currentPlanQuery).catch(() => null),
+                ]);
+
+                if (status && status !== lastStatus) {
+                  lastStatus = status;
+                  sendSSE('status', {
+                    status: 'executing',
+                    message: status,
+                    plan: plan || undefined,
+                  });
+                }
+              } catch {
+                // Ignore query errors during transition or completion
+              }
+            }, 300);
+
             const result = await handle.result();
+            if (pollInterval) clearInterval(pollInterval);
             sendSSE('result', result);
             controller.close();
           } catch (err) {
+            if (pollInterval) clearInterval(pollInterval);
             console.error('[Temporal SSE] failed:', err);
+            sendSSE('error', {
+              message: err instanceof Error ? err.message : 'Temporal workflow execution failed',
+            });
             controller.close();
           }
           return;

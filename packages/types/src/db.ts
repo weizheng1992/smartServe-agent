@@ -106,3 +106,112 @@ export interface TenantToolRow {
   enabled: boolean;
   createdAt?: string | Date;
 }
+
+export interface UserAddressRow {
+  id: string;
+  businessId: string;
+  userId: string;
+  receiverName: string;
+  receiverPhone: string;
+  province: string;
+  city: string;
+  district: string;
+  detailAddress: string;
+  fullAddress: string;
+  tag?: 'home' | 'company' | 'school' | 'other' | string;
+  isDefault?: boolean;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+}
+
+export interface ProductSkuRow {
+  id: string;
+  businessId: string;
+  productId: string;
+  skuCode: string;
+  specAttributes: Record<string, string | number>;
+  price: number;
+  costPrice?: number;
+  stock: number;
+  imageUrl?: string | null;
+  status: 'active' | 'out_of_stock' | 'discontinued' | string;
+  createdAt?: string | Date;
+}
+
+export interface LogisticsPackageRow {
+  id: string;
+  businessId: string;
+  orderId: string;
+  carrier: string;
+  carrierCode: string;
+  trackingNumber: string;
+  status: 'pending_pickup' | 'in_transit' | 'delivering' | 'delivered' | 'exception' | 'rejected' | string;
+  currentLocation?: string | null;
+  courierName?: string | null;
+  courierPhone?: string | null;
+  estimatedDelivery?: string | Date | null;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+}
+
+export interface LogisticsTrackRow {
+  id: string;
+  packageId: string;
+  occurredAt: string | Date;
+  location: string;
+  status: 'picked_up' | 'transporting' | 'dispatching' | 'signed' | 'problem' | string;
+  description: string;
+  createdAt?: string | Date;
+}
+
+export interface ProductReviewRow {
+  id: string;
+  businessId: string;
+  productId: string;
+  skuId?: string | null;
+  orderId?: string | null;
+  userId: string;
+  userName?: string | null;
+  userAvatar?: string | null;
+  rating: number;
+  content: string;
+  images?: string[] | null;
+  fitFeedback?: 'true_to_size' | 'runs_small' | 'runs_large' | string | null;
+  sentiment?: 'positive' | 'neutral' | 'negative' | string;
+  merchantReply?: string | null;
+  createdAt?: string | Date;
+}
+
+export interface AfterSaleTicketRow {
+  id: string;
+  businessId: string;
+  orderId: string;
+  orderItemId?: string | null;
+  userId: string;
+  type: 'refund_only' | 'return_and_refund' | 'exchange' | string;
+  reason: 'wrong_size' | 'quality_issue' | 'not_as_described' | 'no_reason_7d' | string;
+  reasonDescription?: string | null;
+  refundAmount: number;
+  status:
+    | 'pending_review'
+    | 'approved'
+    | 'rejected'
+    | 'waiting_user_ship'
+    | 'merchant_inspecting'
+    | 'completed'
+    | 'cancelled'
+    | string;
+  returnTrackingNumber?: string | null;
+  humanApprovalId?: string | null;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+}
+
+export interface AfterSaleLogRow {
+  id: string;
+  ticketId: string;
+  action: 'created' | 'approved' | 'rejected' | 'shipped_back' | 'refunded' | string;
+  operator: string;
+  note?: string | null;
+  createdAt?: string | Date;
+}

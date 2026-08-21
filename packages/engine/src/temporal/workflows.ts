@@ -60,13 +60,14 @@ export async function agentWorkflow(
   }
 
   // 🧠 极致提速优化（Bypass Loop Logic）：
-  // 如果没有明确意图，或者识别出的唯一意图是纯日常咨询（general_query），证明本轮会话绝对不需要工具编排！
+  // 如果没有明确意图，或者识别出的唯一意图是纯日常咨询（general_query），或命中前置槽位追问/规则旁路直达（isBypass），
   // 我们直接绕过后续的规划（Planner）与自旋（Executor -> Validator）执行链路，闪电直达 Finish 节点，降低 70% 响应延迟！
   const isOnlyGeneralQuery =
     triageState.intents && triageState.intents.length === 1 && triageState.intents[0].intent === 'general_query';
+  const isBypass = !!triageState.output || triageState.taskPlan?.subtasks?.[0]?.id === 'bypass_step';
 
-  if (!triageState.intents || triageState.intents.length === 0 || isOnlyGeneralQuery) {
-    currentStatus = '[Finish] 直接接入日常咨询兜底应答生成...';
+  if (!triageState.intents || triageState.intents.length === 0 || isOnlyGeneralQuery || isBypass) {
+    currentStatus = '[Finish] 直接接入快速响应生成...';
     const finishedState = await runAgentStateNode('finish', triageState);
     currentStatus = '[已完成] 回复已生成。';
     chatHistory.push({

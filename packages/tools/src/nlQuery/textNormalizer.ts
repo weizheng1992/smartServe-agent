@@ -9,18 +9,18 @@ export class TextNormalizer {
   ];
 
   public static normalize(input: string): string {
-    if (!input) return "";
+    if (!input) return '';
     let text = input.trim();
 
     // 1. 过滤多余标点符号
-    text = text.replace(/[？?！!，,。；;]/g, " ");
+    text = text.replace(/[？?！!，,。；;]/g, ' ');
 
     // 2. 依次过滤虚词引导词与停用词
     for (const pattern of this.STOP_WORDS) {
-      text = text.replace(pattern, " ");
+      text = text.replace(pattern, ' ');
     }
 
     // 3. 压缩多余空格
-    return text.replace(/\s+/g, " ").trim();
+    return text.replace(/\s+/g, ' ').trim();
   }
 }
