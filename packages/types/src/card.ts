@@ -3,7 +3,33 @@ export type RichCardType =
   | "tracking_timeline"
   | "refund_confirmation"
   | "quick_replies"
-  | "damage_assessment";
+  | "damage_assessment"
+  | "product_ranking";
+
+export interface RankedProductItem {
+  rank: number;
+  productId: string;
+  name: string;
+  category: string;
+  price: number;
+  costPrice?: number;
+  stock?: number;
+  totalVolume: number;
+  totalGmv: number;
+  grossProfit: number;
+  marginRate: string;
+  metricScore: number;
+  metricDisplay: string;
+}
+
+export interface ProductRankingCardData {
+  rankingMetric: string;
+  metricLabel: string;
+  metricUnit: string;
+  itemCount: number;
+  summary?: string;
+  products: RankedProductItem[];
+}
 
 export interface OrderItem {
   id?: string;
@@ -79,7 +105,8 @@ export type RichCardBlock =
   | { type: "tracking_timeline"; data: TrackingTimelineData }
   | { type: "refund_confirmation"; data: RefundConfirmationData }
   | { type: "quick_replies"; data: QuickRepliesData }
-  | { type: "damage_assessment"; data: DamageAssessmentData };
+  | { type: "damage_assessment"; data: DamageAssessmentData }
+  | { type: "product_ranking"; data: ProductRankingCardData };
 
 export interface MultimodalMessagePayload {
   message: string;

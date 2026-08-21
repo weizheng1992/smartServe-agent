@@ -701,4 +701,134 @@ export class OrderDomainService {
       };
     }
   }
+
+  /**
+   * 📊 商品多维度排行与销售分析 (Dynamic Metric-Driven Product Ranking & Analytics)
+   * 完全由 METRIC_REGISTRY 元数据注册表驱动，零硬编码 if/else，支持任意新增维度的即插即用！
+   */
+  static async queryProductRanking(options: {
+    rankingMetric?: string;
+    managerOnly?: boolean;
+    businessId?: string;
+    category?: string;
+    limit?: number;
+    threadId?: string;
+  }): Promise<Record<string, unknown>> {
+    const {
+      rankingMetric = "gmv",
+      managerOnly = true,
+      category,
+      limit = 5,
+      threadId,
+    } = options;
+
+    const { METRIC_SEMANTIC_REGISTRY, MetricSemanticResolver } =
+      await import("./metricRegistry");
+
+    const session = await this.getThreadSessionContext(threadId);
+    const businessId = options.businessId || session.businessId || "nike";
+    const userId = session.userId || "4c9ce5e9-eb44-4988-b9f4-ec75ec9d8444";
+
+    const resolved = MetricSemanticResolver.resolve(rankingMetric, "gmv");
+    const targetMetric = resolved.primaryMetric;
+
+    console.log(
+      `[OrderDomainService.queryProductRanking] Metric: ${targetMetric.key} (${targetMetric.label}), Domain: ${targetMetric.domain}, Tenant: ${businessId}, User: ${userId}`,
+    );
+
+    try {
+      const queryParams: (string | number | boolean)[] = [businessId];
+      let whereClause = `WHERE p.business_id = $1`;
+
+      if (managerOnly && userId) {
+        queryParams.push(userId);
+        whereClause += ` AND p.manager_id = $${queryParams.length}`;
+      }
+
+      if (category) {
+        queryParams.push(category);
+        whereClause += ` AND p.category = $${queryParams.length}`;
+      }
+
+      queryParams.push(limit);
+      const limitParamIndex = queryParams.length;
+
+      const dimensions = [
+        'p.id AS "productId"',
+        "p.name",
+        "p.category",
+        "p.price",
+        "p.stock",
+        'COALESCE(p.cost_price, 0) AS "costPrice"',
+        'COALESCE(SUM(oi.quantity), 0)::int AS "totalVolume"',
+        'COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0)::float AS "totalGmv"',
+        'COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase, p.cost_price, 0)), 0)::float AS "totalCost"',
+        '(COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) - COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase, p.cost_price, 0)), 0))::float AS "grossProfit"',
+      ];
+
+      // 🌟 使用 MetricSemanticResolver 动态编译 SQL 模板
+      const sql = MetricSemanticResolver.renderSql({
+        metric: targetMetric,
+        dimensions,
+        groupBy: [
+          "p.id",
+          "p.name",
+          "p.category",
+          "p.price",
+          "p.stock",
+          "p.cost_price",
+        ],
+        filters: whereClause,
+        limit: `$${limitParamIndex}`,
+      });
+
+      const result = await db.execute(sql, queryParams);
+      const rows = (result.rows || []) as Record<string, unknown>[];
+
+      const rankedProducts = rows.map((r, idx) => {
+        const totalGmv = Number(r.totalGmv || 0);
+        const grossProfit = Number(r.grossProfit || 0);
+        const marginRate =
+          totalGmv > 0
+            ? `${((grossProfit / totalGmv) * 100).toFixed(1)}%`
+            : "0.0%";
+
+        return {
+          rank: idx + 1,
+          productId: String(r.productId),
+          name: String(r.name),
+          category: String(r.category || "general"),
+          price: Number(r.price || 0),
+          costPrice: Number(r.costPrice || 0),
+          stock: Number(r.stock || 0),
+          totalVolume: Number(r.totalVolume || 0),
+          totalGmv,
+          grossProfit,
+          marginRate,
+          metricScore: Number(r.computedMetricValue || 0),
+          metricDisplay: `${Number(r.computedMetricValue || 0).toLocaleString()} ${targetMetric.unit}`,
+        };
+      });
+
+      return {
+        success: true,
+        rankingMetric: targetMetric.key,
+        metricLabel: targetMetric.label,
+        metricUnit: targetMetric.unit,
+        businessId,
+        managerId: managerOnly ? userId : undefined,
+        itemCount: rankedProducts.length,
+        products: rankedProducts,
+        summary: `已为您完成${managerOnly ? "名下负责商品" : "全商户商品"}的排行检索，排序口径：【${targetMetric.label}】，共返回 ${rankedProducts.length} 款商品。`,
+      };
+    } catch (err) {
+      console.error(
+        "[OrderDomainService.queryProductRanking] Query failed:",
+        err,
+      );
+      return {
+        error: `Failed to query product ranking: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
 }

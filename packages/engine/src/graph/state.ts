@@ -2,6 +2,7 @@ import { Annotation } from "@langchain/langgraph";
 import type {
   BusinessConfig,
   ChatMessage,
+  DamageAssessmentData,
   IntentResult,
   PendingApprovalRecord,
   RagDocument,
@@ -14,6 +15,7 @@ import type {
 export type {
   BusinessConfig,
   ChatMessage,
+  DamageAssessmentData,
   IntentResult,
   PendingApprovalRecord,
   RagDocument,
@@ -39,6 +41,10 @@ export const AgentStateAnnotation = Annotation.Root({
   imageUrls: Annotation<string[]>({
     reducer: (x, y) => (y !== undefined ? y : x),
     default: () => [],
+  }),
+  damageAssessment: Annotation<DamageAssessmentData | undefined>({
+    reducer: (x, y) => (y !== undefined ? y : x),
+    default: () => undefined,
   }),
   inputEmbedding: Annotation<number[]>({
     reducer: (x, y) => y,

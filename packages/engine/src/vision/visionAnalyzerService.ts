@@ -25,6 +25,31 @@ function scrubSensitiveInfo(text: string): string {
     .replace(/\b(?:\d{4}[ -]?){3}\d{4}\b/g, "[BANK_CARD_REDACTED]"); // 银行卡
 }
 
+/**
+ * 提取并构建启发式破损定责评估对象 (Unified Heuristic Assessment Helper)
+ */
+function buildHeuristicDamageAssessment(
+  combinedQuery: string,
+  primaryUrl: string,
+): DamageAssessmentData | undefined {
+  const isDamage =
+    /破损|坏了|碎了|裂开|漏液|划痕|撕裂|瑕疵|damage|broken|crack|stain|defect/i.test(
+      combinedQuery,
+    );
+  if (!isDamage) return undefined;
+
+  const isSevere = /严重|彻底|全碎|碎裂|severe|crushed/i.test(combinedQuery);
+  return {
+    damageLevel: isSevere ? "severe" : "minor",
+    summary: isSevere
+      ? "用户上传了商品严重破损/碎裂照片"
+      : "用户上传了商品瑕疵/局部破损凭证照片",
+    confidence: 0.88,
+    suggestedAction: isSevere ? "auto_refund" : "human_review",
+    imageUrl: primaryUrl,
+  };
+}
+
 export class VisionAnalyzerService {
   /**
    * 视觉与多模态核心解析：提取破损定责评估、OCR面单文本与订单运单实体
@@ -53,11 +78,6 @@ export class VisionAnalyzerService {
       .match(/\b(SF|YTO|ZTO|EMS|TRACK)[\d\w]{8,14}\b/i)?.[0]
       ?.toUpperCase();
 
-    const isDamageContext =
-      /破损|坏了|碎了|裂开|漏液|划痕|撕裂|瑕疵|damage|broken|crack|stain|defect/i.test(
-        combinedQuery,
-      );
-
     // 2. 多模态大模型视觉精判
     try {
       const llm = getLLM(jobId);
@@ -77,6 +97,7 @@ Your tasks:
    - "detectedObjects": string[]
    - "extractedOrderId": string or null
    - "extractedTrackingNumber": string or null
+   - "ocrText": string or null
    - "damageAssessment": { "damageLevel": "negligible"|"minor"|"severe", "summary": string, "confidence": number, "suggestedAction": "auto_refund"|"require_inspection"|"human_review" } or null
 
 Return ONLY valid raw JSON without markdown markers.`;
@@ -127,15 +148,7 @@ Return ONLY valid raw JSON without markdown markers.`;
                 parsed.damageAssessment.suggestedAction || "human_review",
               imageUrl: primaryUrl,
             }
-          : isDamageContext
-            ? {
-                damageLevel: "minor",
-                summary: "用户上传了商品瑕疵/破损凭证照片",
-                confidence: 0.88,
-                suggestedAction: "human_review",
-                imageUrl: primaryUrl,
-              }
-            : undefined;
+          : buildHeuristicDamageAssessment(combinedQuery, primaryUrl);
 
       return {
         visualSummary: scrubSensitiveInfo(parsed.visualSummary || ""),
@@ -143,6 +156,7 @@ Return ONLY valid raw JSON without markdown markers.`;
         extractedOrderId: parsed.extractedOrderId || orderMatch,
         extractedTrackingNumber:
           parsed.extractedTrackingNumber || trackingMatch,
+        ocrText: scrubSensitiveInfo(parsed.ocrText || ""),
         damageAssessment,
       };
     } catch (visionErr) {
@@ -151,26 +165,18 @@ Return ONLY valid raw JSON without markdown markers.`;
         visionErr,
       );
 
-      // 降级兜底：基于启发式规则返回结构化视觉分析
-      const damageAssessment: DamageAssessmentData | undefined = isDamageContext
-        ? {
-            damageLevel: /严重|彻底|全碎|碎裂|severe/i.test(combinedQuery)
-              ? "severe"
-              : "minor",
-            summary: "用户已上传商品实物破损/瑕疵凭证照片进行核验",
-            confidence: 0.85,
-            suggestedAction: /严重|全碎/i.test(combinedQuery)
-              ? "auto_refund"
-              : "human_review",
-            imageUrl: primaryUrl,
-          }
-        : undefined;
+      // 降级兜底：基于统一启发式规则返回结构化视觉分析
+      const damageAssessment = buildHeuristicDamageAssessment(
+        combinedQuery,
+        primaryUrl,
+      );
 
       return {
         visualSummary: "已接收并解析用户上传的商品与物流凭证图片",
         detectedObjects: ["product_image", "receipt"],
         extractedOrderId: orderMatch,
         extractedTrackingNumber: trackingMatch,
+        ocrText: orderMatch || trackingMatch || "",
         damageAssessment,
       };
     }

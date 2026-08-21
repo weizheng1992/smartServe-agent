@@ -22,6 +22,8 @@ export interface DatabaseOrderItemRow {
   quantity?: number;
   priceAtPurchase?: number;
   price_at_purchase?: number;
+  costAtPurchase?: number;
+  cost_at_purchase?: number;
   name?: string;
   description?: string;
   [key: string]: unknown;
@@ -30,8 +32,16 @@ export interface DatabaseOrderItemRow {
 export interface DatabaseProductRow {
   id?: string;
   name?: string;
+  businessId?: string;
+  business_id?: string;
+  managerId?: string;
+  manager_id?: string;
+  category?: string;
   description?: string;
   price?: number;
+  costPrice?: number;
+  cost_price?: number;
+  stock?: number;
   [key: string]: unknown;
 }
 

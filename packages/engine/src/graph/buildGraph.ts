@@ -600,6 +600,7 @@ export async function runAgent(
   const synthesizedCards = CardSynthesizer.synthesizeCards({
     taskPlan: result.taskPlan,
     intents: result.intents,
+    damageAssessment: (result as any).damageAssessment,
   });
 
   const finalResult = {

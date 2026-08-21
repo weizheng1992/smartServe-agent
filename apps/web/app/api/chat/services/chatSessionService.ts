@@ -145,7 +145,11 @@ export async function dispatchChatRequest(
   }
 
   const cleanMessage = message.trim().toLowerCase();
-  const cacheKey = `${threadId}:${cleanMessage}`;
+  const imageHash =
+    imageUrls && imageUrls.length > 0
+      ? `:[images:${imageUrls.sort().join(",")}]`
+      : "";
+  const cacheKey = `${threadId}:${cleanMessage}${imageHash}`;
 
   if (inFlightRequests.has(cacheKey)) {
     const existingJobId = inFlightRequests.get(cacheKey)!;

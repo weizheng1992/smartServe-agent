@@ -1,5 +1,6 @@
 import { db } from "db";
 import { logger } from "observability";
+import type { DamageAssessmentData } from "types";
 import { getLLM } from "../../../llm/callLLMWithRetry";
 import { ShortMemory } from "../../../memory/shortMemory";
 import { agentEventEmitter } from "../../eventEmitter";
@@ -52,6 +53,7 @@ export class IntentTriageEngine {
     intents: IntentResult[],
     method: string,
     confidence: number,
+    damageAssessment?: DamageAssessmentData,
   ) {
     console.log(
       `[Triage Immediate Bypass] Triggered pipeline shortcut [${routeKey}]`,
@@ -96,6 +98,7 @@ export class IntentTriageEngine {
         agentEventEmitter.emit(`${state.jobId}:result`, {
           output: replyText,
           taskPlan: bypassPlan,
+          cards: [],
         });
       }, 100);
     }
@@ -104,6 +107,7 @@ export class IntentTriageEngine {
       intents,
       output: replyText,
       taskPlan: bypassPlan,
+      damageAssessment,
       globalTransitionsCount: -1,
       toolErrorsCount: -1,
     };
@@ -153,6 +157,7 @@ export class IntentTriageEngine {
       return {
         intents,
         shortMemory: historyMsgs,
+        damageAssessment: state.damageAssessment,
         globalTransitionsCount: -1,
         toolErrorsCount: -1,
       };
@@ -176,7 +181,7 @@ export class IntentTriageEngine {
           detectedObjects: string[];
           extractedOrderId?: string;
           extractedTrackingNumber?: string;
-          damageAssessment?: any;
+          damageAssessment?: DamageAssessmentData;
         }
       | undefined;
 
@@ -201,6 +206,9 @@ export class IntentTriageEngine {
         console.warn("[Triage Multimodal Vision Exception]:", vErr);
       }
     }
+
+    const damageAssessment =
+      visionAnalysis?.damageAssessment || state.damageAssessment;
 
     // =========================================================================
     // 🛡️ Step 0: 输入格式预过滤与规则前置防线
@@ -254,6 +262,7 @@ export class IntentTriageEngine {
       return {
         intents,
         shortMemory: historyMsgs,
+        damageAssessment,
         globalTransitionsCount: -1,
         toolErrorsCount: -1,
       };
@@ -464,6 +473,7 @@ export class IntentTriageEngine {
         return {
           intents,
           shortMemory: historyMsgs,
+          damageAssessment,
           globalTransitionsCount: -1,
           toolErrorsCount: -1,
         };
@@ -497,6 +507,7 @@ export class IntentTriageEngine {
         return {
           intents,
           shortMemory: historyMsgs,
+          damageAssessment,
           globalTransitionsCount: -1,
           toolErrorsCount: -1,
         };
@@ -530,6 +541,7 @@ export class IntentTriageEngine {
         return {
           intents,
           shortMemory: historyMsgs,
+          damageAssessment,
           globalTransitionsCount: -1,
           toolErrorsCount: -1,
         };
@@ -658,6 +670,7 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
       return {
         intents: parsed,
         shortMemory: historyMsgs,
+        damageAssessment,
         globalTransitionsCount: -1,
         toolErrorsCount: -1,
       };
@@ -671,6 +684,7 @@ Return ONLY the raw JSON array. Do not include markdown or backticks.`;
       return {
         intents: fallbackIntents,
         shortMemory: historyMsgs,
+        damageAssessment,
         globalTransitionsCount: -1,
         toolErrorsCount: -1,
       };

@@ -53,10 +53,13 @@ export const orders = pgTable("orders", {
 export const products = pgTable("products", {
   id: text("id").primaryKey(),
   businessId: text("business_id").notNull(), // 隔离控制，确保 Adidas 无法查到 Nike 的货
+  managerId: text("manager_id"), // 负责人 / 运营专家 ID，支持“我负责的商品”精细化数据权限
   name: text("name").notNull(), // 商品名称
+  category: text("category").default("general"), // 商品品类 (如 shoes, apparel, equipment)
   description: text("description"), // 详细描述
-  price: real("price").notNull(), // 商品单价
-  stock: integer("stock").default(99), // 商品库存
+  price: real("price").notNull(), // 商品销售单价 (Revenue Price)
+  costPrice: real("cost_price").default(0.0), // 商品进货/物料成本单价 (Cost Price，用于利润核算)
+  stock: integer("stock").default(99), // 商品物理库存
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -71,7 +74,8 @@ export const orderItems = pgTable("order_items", {
     .references(() => products.id)
     .notNull(),
   quantity: integer("quantity").notNull(), // 购买数量
-  priceAtPurchase: real("price_at_purchase").notNull(), // 下单时单价快照
+  priceAtPurchase: real("price_at_purchase").notNull(), // 下单时售价快照
+  costAtPurchase: real("cost_at_purchase").default(0.0), // 下单时成本价快照 (防止调价导致历史毛利失真)
 });
 
 // ============ SaaS Billing & Conversational Telemetry (租户账单与分析度量表) ============

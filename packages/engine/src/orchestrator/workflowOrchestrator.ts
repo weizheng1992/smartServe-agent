@@ -40,7 +40,7 @@ export class WorkflowOrchestrator {
       const workflowPromise = client.workflow.start("agentWorkflow", {
         taskQueue: "agent-tasks",
         workflowId: jobId,
-        args: [threadId, userId, message],
+        args: [threadId, userId, message, options.imageUrls || []],
       });
 
       promise = workflowPromise

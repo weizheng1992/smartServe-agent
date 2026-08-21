@@ -198,6 +198,45 @@ export const createOrder = {
   },
 };
 
+export const queryProductRanking = {
+  name: "queryProductRanking",
+  description:
+    "Query and rank mall products across multi-dimensional metrics (GMV sales revenue, shipment volume, gross profit, margin rate, or stock risk) with tenant isolation and manager ownership security.",
+  schema: z.object({
+    rankingMetric: z
+      .string()
+      .optional()
+      .describe(
+        "Ranking metric identifier: 'gmv' (total sales revenue), 'volume' (sales count), 'gross_profit' (net gross profit), 'margin_rate' (profit margin %), 'stock_risk' (stagnant inventory). Default is 'gmv'.",
+      ),
+    managerOnly: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether to filter products specifically managed by the current user ('我负责的商品'). Defaults to true.",
+      ),
+    category: z
+      .string()
+      .optional()
+      .describe(
+        "Optional product category filter (e.g. 'shoes', 'apparel', 'accessories').",
+      ),
+    limit: z
+      .number()
+      .optional()
+      .describe("Maximum number of ranked products to return. Defaults to 5."),
+  }),
+  execute: async (args: {
+    rankingMetric?: string;
+    managerOnly?: boolean;
+    category?: string;
+    limit?: number;
+    threadId?: string;
+  }) => {
+    return OrderDomainService.queryProductRanking(args);
+  },
+};
+
 registerTool(getOrderStatus);
 registerTool(processRefund);
 registerTool(listUserOrders);
@@ -205,3 +244,4 @@ registerTool(changeShippingAddress);
 registerTool(generateInvoice);
 registerTool(recordUserPreference);
 registerTool(createOrder);
+registerTool(queryProductRanking);

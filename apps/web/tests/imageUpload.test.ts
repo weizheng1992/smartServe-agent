@@ -59,4 +59,28 @@ describe("📸 Image Upload API Endpoint", () => {
     expect(json.url).toMatch(/^\/uploads\/upload_\d+_[a-f0-9]+\.png$/);
     expect(json.filename).toContain(".png");
   });
+
+  it("应正常支持并保存 GIF 图片", async () => {
+    const formData = new FormData();
+    const fakeGif = new File(
+      [new Uint8Array([71, 73, 70, 56, 57, 97])],
+      "damage_anim.gif",
+      {
+        type: "image/gif",
+      },
+    );
+    formData.append("file", fakeGif);
+
+    const req = new NextRequest("http://localhost:3000/api/chat/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.url).toMatch(/^\/uploads\/upload_\d+_[a-f0-9]+\.gif$/);
+    expect(json.filename).toContain(".gif");
+  });
 });

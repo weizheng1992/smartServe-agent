@@ -98,4 +98,24 @@ describe("📷 Multimodal Vision & Rich Cards Suite", () => {
     expect(quickReplies).toBeDefined();
     expect((quickReplies?.data as any).options.length).toBeGreaterThan(0);
   });
+
+  it("triageNode: 接收 imageUrls 并在 AgentState 中透传 damageAssessment", async () => {
+    const { triageNode } = await import("../src/graph/nodes/triage.node");
+    const threadId = `test_multimodal_triage_${Date.now()}`;
+
+    const state = {
+      threadId,
+      userId: "test_user_multimodal",
+      input: "鞋底完全断裂脱胶了，申请退款 ORD-88888",
+      imageUrls: ["https://cdn.store.com/broken.jpg"],
+      intents: [],
+      globalTransitionsCount: 0,
+      toolErrorsCount: 0,
+    } as any;
+
+    const res = await triageNode(state);
+    expect(res.damageAssessment).toBeDefined();
+    expect(res.damageAssessment?.damageLevel).toBeOneOf(["minor", "severe"]);
+    expect(res.intents.some((i: any) => i.intent === "refund")).toBeTrue();
+  });
 });

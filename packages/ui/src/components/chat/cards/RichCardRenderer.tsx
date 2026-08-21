@@ -6,6 +6,7 @@ import { OrderCard } from "./OrderCard";
 import { TrackingTimeline } from "./TrackingTimeline";
 import { RefundConfirmationCard } from "./RefundConfirmationCard";
 import { DamageAssessmentCard } from "./DamageAssessmentCard";
+import { ProductRankingCard } from "./ProductRankingCard";
 import { QuickReplies } from "./QuickReplies";
 
 export interface RichCardRendererProps {
@@ -41,6 +42,8 @@ export const RichCardRenderer: React.FC<RichCardRendererProps> = ({
             );
           case "damage_assessment":
             return <DamageAssessmentCard key={idx} data={card.data} />;
+          case "product_ranking":
+            return <ProductRankingCard key={idx} data={card.data} />;
           case "quick_replies":
             return (
               <QuickReplies
