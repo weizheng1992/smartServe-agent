@@ -1,3 +1,4 @@
+import { getMerchantDisplayName } from "types";
 import { logger } from "observability";
 import { getLLM } from "../../llm/callLLMWithRetry";
 import {
@@ -85,12 +86,16 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
     state.businessConfig?.systemPrompt ||
     "You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.";
 
-  const tenantId = state.businessConfig?.businessId || "ecommerce";
+  const tenantId = (
+    state.businessConfig?.businessId || "ecommerce"
+  ).toLowerCase();
+  const brandName = getMerchantDisplayName(tenantId);
   const tenantContext = `\n\n[MULTI-TENANT ISOLATION BOUNDARY]:
-You are an AI Customer Support Agent representing the specific brand/merchant: [${tenantId.toUpperCase()}].
-- You must strictly align your replies, recommendations, and decisions with [${tenantId.toUpperCase()}]'s store policies and system tools.
-- Under NO circumstances should you mention, reference, or explain policies, orders, or products belonging to other brands (e.g., Nike, Adidas) even if the customer asks.
-- If the customer asks questions or requests operations about other brands, you must politely refuse and state that you only support [${tenantId.toUpperCase()}] orders and policies.`;
+You are an AI Customer Support Agent representing: [${brandName}] (Merchant ID: ${tenantId}).
+- Always address yourself naturally and politely as the customer service assistant for ${brandName}.
+- You must strictly align your replies, recommendations, and decisions with ${brandName}'s store policies and real system tool results.
+- Never output raw bracket IDs like "[ECOMMERCE]" or "[ADIDAS]" in the final output text. Always use the natural brand name "${brandName}".
+- If the customer explicitly asks to query or operate on unrelated external brands/stores that you do not represent, politely explain that you are the dedicated customer assistant for ${brandName} and only handle ${brandName} orders and services.`;
 
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型在总结生成最终答复时，能够完美串联多轮对话上下文脉络
   let historyContext = "";
@@ -119,7 +124,7 @@ CRITICAL RULES (最高行为准则 - 严禁幻觉与跨租户泄露):
 4. If the tool executed successfully and returned the order details (status, carrier, etc.), you summarize them accurately.
 5. If the executed tool was "listUserOrders" and returned an array of orders in "orders", summarize and present the found orders clearly with their Order IDs, status, and amounts. Inform the customer they can click on the cards below or provide a specific order number to view logistics tracking or apply for a refund.
 6. Keep the output professional, polite, and fully in Chinese.
-7. Under NO circumstances should you reveal or discuss policies, orders, or specifications belonging to other brands (such as Nike, Adidas, etc.). If the user asks about another brand, politely reply that you only support [${tenantId.toUpperCase()}] orders and policies.`;
+7. Under NO circumstances should you hallucinate or fabricate information about other brands. If the customer explicitly asks to query an external brand/store, politely reply that you only represent ${brandName}.`;
 
   try {
     const response = await llm.invoke(prompt);

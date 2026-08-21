@@ -46,7 +46,7 @@ export class SlotExtractor {
       /(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)/i.test(
         text,
       ) ||
-      /改派/i.test(text);
+      /(?:改到|改成|送至|送往|寄到|寄往|改派|改送)/i.test(text);
 
     const isReturnOrRefund = /(?:退货|退款|退单|申请售后|退钱|不想要了)/i.test(
       text,
@@ -55,10 +55,10 @@ export class SlotExtractor {
     const isCancelOrder = /(?:取消订单|撤销订单|退订)/i.test(text);
 
     const isOrderQuery =
-      /(?:查物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪)/i.test(
+      /(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递)/i.test(
         text,
       ) ||
-      (/(?:查订单|查下订单|查询订单)/i.test(text) &&
+      (/(?:查订单|查下订单|查询订单|查单|查下)/i.test(text) &&
         this.ORDER_ID_REGEX.test(text));
 
     const isMetricQuery =
