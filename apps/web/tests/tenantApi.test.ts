@@ -1,20 +1,16 @@
-import { describe, expect, it, beforeAll } from "bun:test";
+import { beforeAll, describe, expect, it } from 'bun:test';
 import {
   createTenant,
-  getTenant,
-  saveTenantConfig,
-  getTenantConfig,
-  saveTenantTool,
-  getTenantTools,
   getPgPool,
-} from "db";
-import {
-  parseDocumentText,
-  chunkDocumentText,
-  prepareRagDocumentRecords,
-} from "engine";
+  getTenant,
+  getTenantConfig,
+  getTenantTools,
+  saveTenantConfig,
+  saveTenantTool,
+} from 'db';
+import { chunkDocumentText, parseDocumentText, prepareRagDocumentRecords } from 'engine';
 
-describe("Phase 5: Tenant Hub End-to-End API Logic (TDD)", () => {
+describe('Phase 5: Tenant Hub End-to-End API Logic (TDD)', () => {
   const businessId = `brand_${Date.now()}`;
   let tenantId: string;
 
@@ -55,54 +51,54 @@ describe("Phase 5: Tenant Hub End-to-End API Logic (TDD)", () => {
     `);
   });
 
-  it("should complete self-service tenant onboarding flow", async () => {
+  it('should complete self-service tenant onboarding flow', async () => {
     // 1. Onboard tenant
     const tenant = await createTenant({
       businessId,
-      name: "Acme Super Store",
-      planTier: "enterprise",
+      name: 'Acme Super Store',
+      planTier: 'enterprise',
     });
 
     expect(tenant.id).toBeDefined();
     expect(tenant.businessId).toBe(businessId);
-    expect(tenant.planTier).toBe("enterprise");
+    expect(tenant.planTier).toBe('enterprise');
     tenantId = tenant.id;
 
     // 2. Initialize default draft prompt config
     const config = await saveTenantConfig({
       businessId,
-      systemPrompt: "You are the helpful AI concierge for Acme Super Store.",
-      welcomeMessage: "Hello! How can Acme help you today?",
+      systemPrompt: 'You are the helpful AI concierge for Acme Super Store.',
+      welcomeMessage: 'Hello! How can Acme help you today?',
       temperature: 0.5,
-      status: "draft",
+      status: 'draft',
     });
 
-    expect(config.status).toBe("draft");
+    expect(config.status).toBe('draft');
     expect(config.version).toBe(1);
 
     // 3. Register custom ERP dynamic tool
     const tool = await saveTenantTool({
       tenantId,
-      name: "query_acme_inventory",
-      description: "Checks real-time inventory in Acme warehouse",
+      name: 'query_acme_inventory',
+      description: 'Checks real-time inventory in Acme warehouse',
       schema: {
-        type: "object",
-        properties: { sku: { type: "string" } },
-        required: ["sku"],
+        type: 'object',
+        properties: { sku: { type: 'string' } },
+        required: ['sku'],
       },
-      authType: "custom_header",
-      encryptedCredentials: "iv:tag:cipher",
+      authType: 'custom_header',
+      encryptedCredentials: 'iv:tag:cipher',
       requiresApproval: false,
     });
 
     expect(tool.id).toBeDefined();
-    expect(tool.name).toBe("query_acme_inventory");
+    expect(tool.name).toBe('query_acme_inventory');
 
     // 4. Ingest SOP knowledge document
-    const rawDoc = "# Acme Return SOP\nItems can be returned within 14 days.";
+    const rawDoc = '# Acme Return SOP\nItems can be returned within 14 days.';
     const parsed = await parseDocumentText({
       content: rawDoc,
-      filename: "acme-sop.md",
+      filename: 'acme-sop.md',
     });
     const chunks = chunkDocumentText({
       text: parsed.rawText,
@@ -111,23 +107,22 @@ describe("Phase 5: Tenant Hub End-to-End API Logic (TDD)", () => {
     const ragRecords = prepareRagDocumentRecords({
       businessId,
       chunks,
-      contextualSummaries: ["Acme SOP explaining 14-day return rule."],
+      contextualSummaries: ['Acme SOP explaining 14-day return rule.'],
     });
 
     expect(ragRecords).toHaveLength(1);
     expect(ragRecords[0].businessId).toBe(businessId);
-    expect(ragRecords[0].contextualSummary).toContain("14-day");
+    expect(ragRecords[0].contextualSummary).toContain('14-day');
 
     // 5. Publish config to live
     const published = await saveTenantConfig({
       businessId,
-      systemPrompt:
-        "You are the helpful AI concierge for Acme Super Store (LIVE v2).",
-      status: "published",
+      systemPrompt: 'You are the helpful AI concierge for Acme Super Store (LIVE v2).',
+      status: 'published',
     });
 
-    expect(published.status).toBe("published");
-    const activeLive = await getTenantConfig(businessId, "published");
-    expect(activeLive?.systemPrompt).toContain("LIVE v2");
+    expect(published.status).toBe('published');
+    const activeLive = await getTenantConfig(businessId, 'published');
+    expect(activeLive?.systemPrompt).toContain('LIVE v2');
   });
 });

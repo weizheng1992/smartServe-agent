@@ -1,11 +1,11 @@
-import type { RichCardBlock, SubTask, SubTaskResult, TaskPlan } from "types";
+import type { RichCardBlock, SubTask, SubTaskResult, TaskPlan } from 'types';
 
 export type { SubTaskResult, TaskPlan };
 export type Subtask = SubTask;
 
 export interface Message {
   id?: string;
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: string;
   plan?: TaskPlan;
   cards?: RichCardBlock[];

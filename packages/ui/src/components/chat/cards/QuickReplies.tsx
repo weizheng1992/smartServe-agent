@@ -1,18 +1,15 @@
-"use client";
+'use client';
 
-import React from "react";
-import type { QuickRepliesData } from "types";
-import { Sparkles } from "../../icons";
+import type React from 'react';
+import type { QuickRepliesData } from 'types';
+import { Sparkles } from '../../icons';
 
 export interface QuickRepliesProps {
   data: QuickRepliesData;
   onSelectOption?: (action: string, payload?: Record<string, unknown>) => void;
 }
 
-export const QuickReplies: React.FC<QuickRepliesProps> = ({
-  data,
-  onSelectOption,
-}) => {
+export const QuickReplies: React.FC<QuickRepliesProps> = ({ data, onSelectOption }) => {
   if (!data?.options || data.options.length === 0) return null;
 
   return (

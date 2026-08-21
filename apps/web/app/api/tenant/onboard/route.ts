@@ -1,22 +1,13 @@
-import { createTenant, saveTenantConfig } from "db";
-import { type NextRequest, NextResponse } from "next/server";
+import { createTenant, saveTenantConfig } from 'db';
+import { type NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      businessId,
-      name,
-      planTier = "free",
-      systemPrompt,
-      welcomeMessage,
-    } = body;
+    const { businessId, name, planTier = 'free', systemPrompt, welcomeMessage } = body;
 
     if (!businessId || !name) {
-      return NextResponse.json(
-        { success: false, error: "businessId and name are required" },
-        { status: 400 },
-      );
+      return NextResponse.json({ success: false, error: 'businessId and name are required' }, { status: 400 });
     }
 
     // 1. 创建租户主体
@@ -33,10 +24,9 @@ export async function POST(req: NextRequest) {
         systemPrompt ||
         `You are the professional AI customer service assistant for ${name}. Assist customers with order status, returns, and store policy queries politely and efficiently.`,
       welcomeMessage:
-        welcomeMessage ||
-        `您好！欢迎联系【${name}】客户服务。我是您的智能客服助手，请问有什么可以帮您的？`,
+        welcomeMessage || `您好！欢迎联系【${name}】客户服务。我是您的智能客服助手，请问有什么可以帮您的？`,
       temperature: 0.7,
-      status: "draft",
+      status: 'draft',
     });
 
     return NextResponse.json({
@@ -46,10 +36,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error during tenant onboarding:", error);
-    return NextResponse.json(
-      { success: false, error: errMsg },
-      { status: 500 },
-    );
+    console.error('Error during tenant onboarding:', error);
+    return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }

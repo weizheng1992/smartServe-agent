@@ -29,7 +29,13 @@ _(原 KAFKA_AND_BOTTLENECK_GUIDE 升级重构版)_
   - [2. 堆积归因判定（流量型 vs 阻塞型 vs 数据倾斜）](#2-堆积归因判定流量型-vs-阻塞型-vs-数据倾斜)
   - [3. 消费端系统瓶颈深挖（CPU / IO Block / 网络）](#3-消费端系统瓶颈深挖cpu--io-block--网络)
   - [4. 五大高并发核心问题（堆积、延迟、重复、乱序、幂等）](#4-五大高并发核心问题堆积延迟重复乱序幂等)
-- [六、本项目实战落地与核心源码路径对照表](#六本项目实战落地与核心源码路径对照表)
+- [六、Text-to-SQL 与 Headless BI 指标语义层消歧体系（Agent-NL2SQL 实战）](#六text-to-sql-与-headless-bi-指标语义层消歧体系agent-nl2sql-实战)
+  - [1. 工业级 Text-to-SQL 架构演进与口径幻觉治理](#1-工业级-text-to-sql-架构演进与口径幻觉治理)
+  - [2. Metric Semantic Registry v2 元数据契约设计](#2-metric-semantic-registry-v2-元数据契约设计)
+  - [3. 声明式槽位消歧引擎与冲突组（Conflict Group）检测](#3-声明式槽位消歧引擎与冲突组conflict-group检测)
+  - [4. 动态 SQL 模板编译与多租户 Zero IDOR 隔离](#4-动态-sql-模板编译与多租户-zero-idor-隔离)
+  - [5. 富交互卡片与 Quick Replies 决策闭环](#5-富交互卡片与-quick-replies-决策闭环)
+- [七、本项目实战落地与核心源码路径对照表](#七本项目实战落地与核心源码路径对照表)
 
 ---
 
@@ -533,9 +539,150 @@ export async function executeStepWithSelfHealing(
 
 ---
 
-## 六、本项目实战落地与核心源码路径对照表
+## 六、Text-to-SQL 与 Headless BI 指标语义层消歧体系（Agent-NL2SQL 实战）
 
-在大模型 Agent 与复杂业务编排系统中，本项目采用 **Temporal 分布式工作流引擎 + Redis 分布式锁/Singleflight + LangGraph 状态机 + PostgreSQL 关系型持久化**，全面落地了上述设计：
+在现实商业与多租户 SaaS 场景中，运营与管理人员常抛出高度模糊的自然语言提问（如 _“帮我查一下我负责商品里面卖得最好的几个”_）。如果采用传统的 Prompt 直推 SQL 方案，系统极易陷入**口径幻觉**、**SQL 语法报错**与**硬编码 if/else 膨胀**的泥潭。
+
+本项目引入工业级 **Headless BI 指标语义注册表（Metric Semantic Registry v2）** 与 **声明式槽位消歧引擎（Slot Disambiguation Engine）**，实现了从模糊自然语言到物理高精度 SQL 的确定性闭环。
+
+```
+                               ┌────────────────────────┐
+                               │ 用户自然语言模糊提问   │
+                               │ "查我负责卖得最好的"   │
+                               └───────────┬────────────┘
+                                           │
+                                           ▼
+       ┌───────────────────────────────────────────────────────────────────────┐
+       │ 1. 语义解析与冲突组检测 (MetricSemanticResolver & SlotDisambiguation)  │
+       │    - 词表/同义词精准命中: "卖得好" ──► 默认对齐 GMV (总销售额)         │
+       │    - 冲突组检测: conflictGroup: ["sales_performance_ranking"]          │
+       │    - 歧义判定: hasAmbiguity = true (销量 vs 销售额 vs 毛利润)          │
+       └───────────────────────────────────┬───────────────────────────────────┘
+                                           │
+                                           ▼
+       ┌───────────────────────────────────────────────────────────────────────┐
+       │ 2. 指标语义注册表 (Metric Semantic Registry v2)                       │
+       │    - 声明式计算公式: expression: SUM(oi.quantity * oi.price_at_purchase) │
+       │    - 动态模板: SELECT {dimensions}, {formula} AS "metricValue" ...    │
+       │    - 业务规则注入: "排除未付款订单", "采用下单成本快照防失真"         │
+       └───────────────────────────────────┬───────────────────────────────────┘
+                                           │
+                                           ▼
+       ┌───────────────────────────────────────────────────────────────────────┐
+       │ 3. 动态 SQL 编译引擎 (OrderDomainService.queryProductRanking)         │
+       │    - 动态组装 {dimensions}, {groupBy}, {filters}, {direction}, {limit}│
+       │    - 强制租户隔离与权限约束: WHERE p.business_id = 'xxx' AND manager_id│
+       │    - 物理单库零 IDOR 直连查询 (PostgreSQL)                            │
+       └───────────────────────────────────┬───────────────────────────────────┘
+                                           │
+                                           ▼
+       ┌───────────────────────────────────────────────────────────────────────┐
+       │ 4. 富交互卡片与消歧胶囊挂载 (CardSynthesizer & RichCardRenderer)      │
+       │    - 前端渲染 ProductRankingCard (冠亚季军徽章、毛利、GMV、出货量)     │
+       │    - 挂载 Quick Replies 一键切换胶囊 (📦 按出货销量 / 📈 按净毛利润)  │
+       └───────────────────────────────────────────────────────────────────────┘
+```
+
+### 1. 工业级 Text-to-SQL 架构演进与口径幻觉治理
+
+| 架构阶段                                        | 实现机制                                                                 | 痛点与局限                                                                                      | 本项目演进定位      |
+| :---------------------------------------------- | :----------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------- | :------------------ |
+| **阶段 1：Naive Prompt 直连**                   | 将整个 DDL 贴入 Prompt，要求 LLM 直接写 SQL。                            | **口径严重失真**。LLM 无法区分流水（GMV）与利润；表多时 Token 爆炸；易发生 SQL 注入与除零崩溃。 | ❌ 彻底摒弃         |
+| **阶段 2：Few-Shot RAG 检索**                   | 建立 SQL 样例库，基于相似度检索相似 SQL 辅助生成。                       | 稍有改善，但面对多表 JOIN、嵌套聚合与动态过滤条件仍极不稳定。                                   | ⚠️ 仅做参考辅助     |
+| **阶段 3：Headless BI 指标语义层 (本项目落地)** | **指标计算公式、动态模板、同义词、冲突组、业务规则全部结构化声明配置**。 | **100% 杜绝口径幻觉**。LLM/Resolver 仅负责对齐指标元数据并填参，物理 SQL 由编译器绝对受控渲染。 | ✅ **核心标准实践** |
+
+### 2. Metric Semantic Registry v2 元数据契约设计
+
+核心接口定义位于 `packages/tools/src/metricRegistry.ts`：
+
+```typescript
+export type MetricDefinition = {
+  key: string; // 唯一标识 (如 gmv, volume, gross_profit)
+  label: string; // 业务展示名称
+  description: string; // 完整业务口径 (供 LLM 消除口径幻觉)
+  domain: "sales" | "profit" | "inventory"; // 业务域
+  sourceTables: string[]; // 来源物理表 (products, order_items, orders)
+
+  // SQL 执行层
+  expression: string; // 纯聚合公式: COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0)::float
+  sqlTemplate: string; // 完整 SQL 动态模板 (含 {dimensions}, {groupBy}, {formula}, {filters})
+  businessRules: string[]; // 业务强制约束 (如下单快照优先、分母防除零)
+
+  // 排序与表现
+  direction: "ASC" | "DESC";
+  unit: "元" | "件" | "%" | "";
+  icon: string;
+
+  // 语义消歧层
+  aliases: string[]; // 系统内部英文别名
+  synonyms: string[]; // 中文自然语言同义词 ("卖得好", "流水", "最赚钱", "走量")
+  conflictGroup?: string[]; // 冲突组 (sales_performance_ranking)
+  sampleQueries: string[]; // Few-shot 评测与 RAG 样例
+  availableDimensions: string[]; // 允许参与 GROUP BY 的物理列
+  permissionTag: string; // SaaS 访问鉴权角色
+  verifiedConfidence: number; // 校验置信度 (0-1)
+};
+```
+
+### 3. 声明式槽位消歧引擎与冲突组（Conflict Group）检测
+
+当用户输入 _“查查卖得最好的”_ 时：
+
+1. `MetricSemanticResolver` 扫描词表同义词，主指标初筛命中 `gmv`；
+2. 检测到 `gmv.conflictGroup = ["sales_performance_ranking"]`，同组包含 `volume`（销量）、`gross_profit`（毛利润）、`margin_rate`（毛利率）；
+3. 判定用户未显式限定单位（如未指定“金额”或“件数”），标记 `hasAmbiguity: true`；
+4. `SlotDisambiguationEngine` 自动生成推荐决策，并在返回中挂载冲突组动态切换 Quick Replies，用户可一键纠偏，无需重新打字。
+
+### 4. 动态 SQL 模板编译与多租户 Zero IDOR 隔离
+
+在 `OrderDomainService.queryProductRanking` 中，SQL 采用模板替换而非拼接自由文本，同时强制注入租户物理过滤：
+
+```typescript
+// packages/tools/src/orderDomainService.ts
+const sql = MetricSemanticResolver.renderSql({
+  metric,
+  dimensions: [
+    "p.id",
+    "p.name",
+    "p.category",
+    "p.price",
+    "p.cost_price",
+    "p.stock",
+  ],
+  groupBy: [
+    "p.id",
+    "p.name",
+    "p.category",
+    "p.price",
+    "p.cost_price",
+    "p.stock",
+  ],
+  filters: `WHERE p.business_id = '${businessId}' ${managerFilter}`,
+  limit: options.limit || 5,
+});
+
+// 动态编译后的物理 SQL (以净毛利润 gross_profit 降序为例):
+// SELECT p.id, p.name, p.category, p.price, p.cost_price, p.stock,
+//        (COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) - COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase, p.cost_price, 0)), 0))::float AS "metricValue"
+// FROM products p
+// LEFT JOIN order_items oi ON p.id = oi.product_id
+// WHERE p.business_id = 'nike' AND p.manager_id = 'mgr_wei'
+// GROUP BY p.id, p.name, p.category, p.price, p.cost_price, p.stock
+// ORDER BY "metricValue" DESC
+// LIMIT 5;
+```
+
+### 5. 富交互卡片与 Quick Replies 决策闭环
+
+- **物理数据库扩展**：在 `products` 表增加 `manager_id`, `category`, `cost_price`，在 `order_items` 表增加 `cost_at_purchase`（下单成本快照）。
+- **前端富卡片呈现**：`ProductRankingCard.tsx` 自动渲染带有金银铜牌徽章、商品分类、单价、累计销量、GMV 流水、净利润与毛利率的交互卡片。
+- **消歧快捷操作**：卡片下方自动挂载 `💰 按总销售额`、`📦 按出货销量`、`📈 按净毛利润`、`🎯 按单品毛利率`、`⚠️ 排查滞销库存` 快捷胶囊，实现大模型数据分析与人机协同的完美闭环。
+
+---
+
+## 七、本项目实战落地与核心源码路径对照表
+
+在大模型 Agent 与复杂业务编排系统中，本项目采用 **Temporal 分布式工作流引擎 + Redis 分布式锁/Singleflight + LangGraph 状态机 + PostgreSQL 关系型持久化 + Metric Semantic Registry v2 指标语义层**，全面落地了上述设计：
 
 ```
 [前端 Web / API Route]
@@ -554,20 +701,30 @@ export async function executeStepWithSelfHealing(
                     │                                     │
                     │                             (带超时/熔断沙箱)
                     │                             [tools / PostgreSQL]
+                    │                                     │
+                    │                    ┌────────────────┴────────────────┐
+                    │                    ▼                                 ▼
+                    │          【订单履约与售后】                【指标语义分析与消歧】
+                    │       [getOrderStatus / Refund]       [MetricSemanticResolver]
+                    │                                       [orderDomainService]
                     └──────────────────┬──────────────────┘
                                        │
                                        ▼ (3) 审批幂等与状态机跃迁 (Redis SETNX + 唯一约束)
                               [approvalService.ts] ──► [pendingApprovals 表]
 ```
 
-| 核心功能模块             | 文件路径                                                   | 核心机制与作用                                                   |
-| :----------------------- | :--------------------------------------------------------- | :--------------------------------------------------------------- |
-| **请求去重 & 5s 短缓存** | `apps/web/app/api/chat/services/chatSessionService.ts`     | Singleflight 并发合并，图片哈希组合键拦截重复请求                |
-| **分布式锁与工单幂等**   | `apps/web/app/api/chat/services/approvalService.ts`        | Redis `SETNX` 互斥锁 + 状态机 `waiting` 单向跃迁校验             |
-| **数据库唯一键硬保证**   | `packages/db/src/schema.ts`                                | 主键/唯一索引（`orders`, `users`, `tenants`, `businessConfigs`） |
-| **任务分发与调度队列**   | `packages/engine/src/orchestrator/workflowOrchestrator.ts` | 统一分发器，对接 Temporal `agent-tasks` 生产队列与重试退避       |
-| **分布式工作流状态透传** | `packages/engine/src/temporal/workflows.ts`                | Temporal `agentWorkflow`，具备 Query 状态穿透与重试退避          |
-| **算力削峰 Bypass 通道** | `packages/engine/src/graph/nodes/executorFastPath.ts`      | 识别轻量请求，跳过复杂自旋循环，削减 70% 推理耗时                |
-| **APM 监控大盘**         | `apps/web/app/home/components/APMPanel.tsx`                | 实时观测系统吞吐量、延迟分布（P95/P99）与 Token 消耗             |
-| **工具执行与超时隔离**   | `packages/engine/src/graph/nodes/stepExecutionEngine.ts`   | 隔离执行外部 API / DB / Puppeteer 工具，防止单点阻塞             |
-| **多模态大文件解耦**     | `apps/web/app/api/chat/services/imageUploadService.ts`     | 独立文件服务持久化并返回轻量 URL，避免网卡带宽被打满             |
+| 核心功能模块              | 文件路径                                                         | 核心机制与作用                                                    |
+| :------------------------ | :--------------------------------------------------------------- | :---------------------------------------------------------------- |
+| **请求去重 & 5s 短缓存**  | `apps/web/app/api/chat/services/chatSessionService.ts`           | Singleflight 并发合并，图片哈希组合键拦截重复请求                 |
+| **分布式锁与工单幂等**    | `apps/web/app/api/chat/services/approvalService.ts`              | Redis `SETNX` 互斥锁 + 状态机 `waiting` 单向跃迁校验              |
+| **数据库唯一键硬保证**    | `packages/db/src/schema.ts`                                      | 主键/唯一索引（`orders`, `users`, `products`, `businessConfigs`） |
+| **任务分发与调度队列**    | `packages/engine/src/orchestrator/workflowOrchestrator.ts`       | 统一分发器，对接 Temporal `agent-tasks` 生产队列与重试退避        |
+| **分布式工作流状态透传**  | `packages/engine/src/temporal/workflows.ts`                      | Temporal `agentWorkflow`，具备 Query 状态穿透与重试退避           |
+| **算力削峰 Bypass 通道**  | `packages/engine/src/graph/nodes/executorFastPath.ts`            | 识别轻量请求，跳过复杂自旋循环，削减 70% 推理耗时                 |
+| **指标语义注册表 (v2)**   | `packages/tools/src/metricRegistry.ts`                           | 声明式指标公式、同义词、冲突组与动态 SQL 模板，杜绝口径幻觉       |
+| **槽位消歧与推荐引擎**    | `packages/engine/src/disambiguation/slotDisambiguationEngine.ts` | 冲突组歧义识别，自动生成推荐偏好与快捷切换胶囊                    |
+| **动态 SQL 排行物理分析** | `packages/tools/src/orderDomainService.ts`                       | 多表动态聚合、下单快照成本防失真与多租户 Zero IDOR 隔离           |
+| **富排行榜卡片渲染**      | `packages/ui/src/components/chat/cards/ProductRankingCard.tsx`   | 渲染销量/销售额/毛利榜单、金银铜牌徽章与指标切换胶囊              |
+| **APM 监控大盘**          | `apps/web/app/home/components/APMPanel.tsx`                      | 实时观测系统吞吐量、延迟分布（P95/P99）与 Token 消耗              |
+| **工具执行与超时隔离**    | `packages/engine/src/graph/nodes/stepExecutionEngine.ts`         | 隔离执行外部 API / DB / Puppeteer 工具，防止单点阻塞              |
+| **多模态大文件解耦**      | `apps/web/app/api/chat/services/imageUploadService.ts`           | 独立文件服务持久化并返回轻量 URL，避免网卡带宽被打满              |

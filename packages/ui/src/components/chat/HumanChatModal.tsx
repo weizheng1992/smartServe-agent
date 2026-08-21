@@ -1,17 +1,11 @@
-import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../ui/dialog";
-import { MessageSquare, RefreshCw, ShieldAlert, X } from "../icons";
-import { ChatMessageFeed, type MessageItem } from "./ChatMessageFeed";
-import { HumanChatFooter } from "./HumanChatFooter";
+import type React from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { MessageSquare, RefreshCw, ShieldAlert, X } from '../icons';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
+import { ChatMessageFeed, type MessageItem } from './ChatMessageFeed';
+import { HumanChatFooter } from './HumanChatFooter';
 
 export interface ChatApprovalRecord {
   id: string;
@@ -32,22 +26,13 @@ export interface HumanChatModalProps {
   approval: ChatApprovalRecord | null;
   isOpen: boolean;
   onClose: () => void;
-  onSendReply: (
-    approvalId: string,
-    replyMessage: string,
-    isFinish?: boolean,
-  ) => Promise<unknown>;
+  onSendReply: (approvalId: string, replyMessage: string, isFinish?: boolean) => Promise<unknown>;
 }
 
-export function HumanChatModal({
-  approval,
-  isOpen,
-  onClose,
-  onSendReply,
-}: HumanChatModalProps) {
+export function HumanChatModal({ approval, isOpen, onClose, onSendReply }: HumanChatModalProps) {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [replyMessage, setReplyMessage] = useState("");
+  const [replyMessage, setReplyMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -55,15 +40,13 @@ export function HumanChatModal({
   const fetchHistory = useCallback(async () => {
     if (!approval?.threadId) return;
     try {
-      const res = await fetch(
-        `/api/chat/messages?threadId=${encodeURIComponent(approval.threadId)}`,
-      );
+      const res = await fetch(`/api/chat/messages?threadId=${encodeURIComponent(approval.threadId)}`);
       const data = await res.json();
       if (data.success && data.messages) {
         setMessages(data.messages);
       }
     } catch (err) {
-      console.error("[HumanChatModal] Failed to fetch message history:", err);
+      console.error('[HumanChatModal] Failed to fetch message history:', err);
     }
   }, [approval?.threadId]);
 
@@ -71,7 +54,7 @@ export function HumanChatModal({
     if (isOpen && approval) {
       setIsLoadingMessages(true);
       fetchHistory().finally(() => setIsLoadingMessages(false));
-      setReplyMessage("");
+      setReplyMessage('');
 
       const interval = setInterval(fetchHistory, 2000);
       return () => clearInterval(interval);
@@ -93,11 +76,11 @@ export function HumanChatModal({
     setIsSubmitting(true);
     try {
       const text = replyMessage.trim();
-      setReplyMessage("");
+      setReplyMessage('');
       await onSendReply(approval.id, text, false);
       await fetchHistory();
     } catch (err) {
-      console.error("[HumanChatModal] Error sending human message:", err);
+      console.error('[HumanChatModal] Error sending human message:', err);
     } finally {
       setIsSubmitting(false);
     }
@@ -106,25 +89,18 @@ export function HumanChatModal({
   const handleFinishHumanChat = async () => {
     setIsEnding(true);
     try {
-      const text =
-        replyMessage.trim() ||
-        "人工客服为您服务完毕。现已为您重新对接 AI 智能助手！";
+      const text = replyMessage.trim() || '人工客服为您服务完毕。现已为您重新对接 AI 智能助手！';
       await onSendReply(approval.id, text, true);
       onClose();
     } catch (err) {
-      console.error(
-        "[HumanChatModal] Error finishing human chat session:",
-        err,
-      );
+      console.error('[HumanChatModal] Error finishing human chat session:', err);
     } finally {
       setIsEnding(false);
     }
   };
 
   const triggerReason =
-    approval.actionPayload?.reason ||
-    approval.actionPayload?.userInput ||
-    "用户请求人工客服或触发系统安全熔断";
+    approval.actionPayload?.reason || approval.actionPayload?.userInput || '用户请求人工客服或触发系统安全熔断';
 
   return (
     <Dialog open={isOpen}>
@@ -137,14 +113,12 @@ export function HumanChatModal({
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <DialogTitle className="text-sm font-bold text-slate-100">
-                  人工客服 IM 实时工作台
-                </DialogTitle>
+                <DialogTitle className="text-sm font-bold text-slate-100">人工客服 IM 实时工作台</DialogTitle>
                 <Badge
                   variant="outline"
                   className="border-indigo-500/30 text-indigo-300 bg-indigo-950/20 font-mono text-[10px] uppercase font-bold"
                 >
-                  {approval.businessId || "ecommerce"}
+                  {approval.businessId || 'ecommerce'}
                 </Badge>
               </div>
               <DialogDescription className="text-[11px] font-mono text-slate-400 truncate max-w-md mt-0.5">
@@ -167,8 +141,7 @@ export function HumanChatModal({
           <div className="flex items-center space-x-2.5 min-w-0">
             <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0 animate-pulse" />
             <span className="text-xs text-amber-200 font-medium truncate">
-              <strong className="text-amber-400">熔断/介入原因:</strong>{" "}
-              {String(triggerReason)}
+              <strong className="text-amber-400">熔断/介入原因:</strong> {String(triggerReason)}
             </span>
           </div>
           <Button
@@ -183,11 +156,7 @@ export function HumanChatModal({
         </div>
 
         {/* Chat Feed */}
-        <ChatMessageFeed
-          isLoadingMessages={isLoadingMessages}
-          messages={messages}
-          scrollRef={scrollRef}
-        />
+        <ChatMessageFeed isLoadingMessages={isLoadingMessages} messages={messages} scrollRef={scrollRef} />
 
         {/* Footer */}
         <HumanChatFooter

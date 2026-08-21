@@ -51,20 +51,15 @@ export interface PreparedRagDocument {
 /**
  * 解析并提取文档纯文本与元数据（支持 Markdown, TXT, 规整文本）
  */
-export async function parseDocumentText(
-  params: ParseDocumentParams,
-): Promise<ParsedDocument> {
+export async function parseDocumentText(params: ParseDocumentParams): Promise<ParsedDocument> {
   const { content, filename } = params;
-  const rawText =
-    typeof content === "string" ? content : content.toString("utf8");
+  const rawText = typeof content === 'string' ? content : content.toString('utf8');
 
   // 提取首个 Markdown 一级标题或文件名作为文档标题
   const titleMatch = rawText.match(/^#\s+(.+)$/m);
-  const title = titleMatch
-    ? titleMatch[1].trim()
-    : filename.replace(/\.[^/.]+$/, "");
+  const title = titleMatch ? titleMatch[1].trim() : filename.replace(/\.[^/.]+$/, '');
 
-  const lines = rawText.split("\n");
+  const lines = rawText.split('\n');
 
   return {
     title,
@@ -91,14 +86,11 @@ export function chunkDocumentText(params: ChunkDocumentParams): ChunkResult[] {
     .filter(Boolean);
   const chunks: ChunkResult[] = [];
 
-  let currentChunk = "";
+  let currentChunk = '';
   let chunkIdx = 0;
 
   for (const paragraph of paragraphs) {
-    if (
-      (currentChunk + "\n\n" + paragraph).length > targetChunkSize &&
-      currentChunk.length > 0
-    ) {
+    if ((currentChunk + '\n\n' + paragraph).length > targetChunkSize && currentChunk.length > 0) {
       chunks.push({
         chunkIndex: chunkIdx++,
         chunkText: currentChunk.trim(),
@@ -106,11 +98,9 @@ export function chunkDocumentText(params: ChunkDocumentParams): ChunkResult[] {
 
       // 保留 overlap 长度的尾部
       const overlapText = currentChunk.slice(-overlap);
-      currentChunk = overlapText + "\n\n" + paragraph;
+      currentChunk = overlapText + '\n\n' + paragraph;
     } else {
-      currentChunk = currentChunk
-        ? `${currentChunk}\n\n${paragraph}`
-        : paragraph;
+      currentChunk = currentChunk ? `${currentChunk}\n\n${paragraph}` : paragraph;
     }
   }
 
@@ -127,15 +117,8 @@ export function chunkDocumentText(params: ChunkDocumentParams): ChunkResult[] {
 /**
  * 构建 Anthropic 标准的 Contextual Retrieval 提示词
  */
-export function buildContextualSummaryPrompt(
-  params: BuildContextualPromptParams,
-): string {
-  const {
-    fullDocumentText,
-    chunkText,
-    businessId,
-    brandName = businessId,
-  } = params;
+export function buildContextualSummaryPrompt(params: BuildContextualPromptParams): string {
+  const { fullDocumentText, chunkText, businessId, brandName = businessId } = params;
 
   return `<document>
 ${fullDocumentText}
@@ -152,16 +135,8 @@ Please give a concise 50-80 words situated context summary in Chinese or English
 /**
  * 组装与 Drizzle ORM ragDocuments 表对齐的实体记录
  */
-export function prepareRagDocumentRecords(
-  params: PrepareRagRecordsParams,
-): PreparedRagDocument[] {
-  const {
-    businessId,
-    sourceUrl,
-    chunks,
-    contextualSummaries = [],
-    metadata = {},
-  } = params;
+export function prepareRagDocumentRecords(params: PrepareRagRecordsParams): PreparedRagDocument[] {
+  const { businessId, sourceUrl, chunks, contextualSummaries = [], metadata = {} } = params;
 
   return chunks.map((chunk, idx) => ({
     businessId,

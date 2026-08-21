@@ -70,8 +70,8 @@ export interface TenantRow {
   id: string;
   businessId: string;
   name: string;
-  planTier: "free" | "pro" | "enterprise";
-  status: "active" | "suspended";
+  planTier: 'free' | 'pro' | 'enterprise';
+  status: 'active' | 'suspended';
   createdAt?: string | Date;
 }
 
@@ -79,7 +79,7 @@ export interface TenantMemberRow {
   id: string;
   tenantId: string;
   userId: string;
-  role: "owner" | "admin" | "agent";
+  role: 'owner' | 'admin' | 'agent';
   createdAt?: string | Date;
 }
 
@@ -89,7 +89,7 @@ export interface TenantConfigRow {
   systemPrompt?: string | null;
   welcomeMessage?: string | null;
   temperature?: number | null;
-  status: "draft" | "published";
+  status: 'draft' | 'published';
   version: number;
   updatedAt?: string | Date;
 }
@@ -100,7 +100,7 @@ export interface TenantToolRow {
   name: string;
   description?: string | null;
   schema: Record<string, unknown>;
-  authType: "none" | "bearer" | "basic" | "custom_header";
+  authType: 'none' | 'bearer' | 'basic' | 'custom_header';
   encryptedCredentials?: string | null;
   requiresApproval: boolean;
   enabled: boolean;

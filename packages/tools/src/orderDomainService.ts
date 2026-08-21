@@ -708,32 +708,35 @@ export class OrderDomainService {
    */
   static async queryProductRanking(options: {
     rankingMetric?: string;
+    query?: string;
+    naturalQuery?: string;
     managerOnly?: boolean;
     businessId?: string;
     category?: string;
     limit?: number;
     threadId?: string;
   }): Promise<Record<string, unknown>> {
-    const {
-      rankingMetric = "gmv",
-      managerOnly = true,
-      category,
-      limit = 5,
-      threadId,
-    } = options;
-
+    const { NLQueryParser } = await import("./nlQuery");
     const { METRIC_SEMANTIC_REGISTRY, MetricSemanticResolver } =
       await import("./metricRegistry");
 
-    const session = await this.getThreadSessionContext(threadId);
+    const rawInput =
+      options.query || options.naturalQuery || options.rankingMetric || "gmv";
+    const ast = NLQueryParser.parse(rawInput);
+
+    const session = await this.getThreadSessionContext(options.threadId);
     const businessId = options.businessId || session.businessId || "nike";
     const userId = session.userId || "4c9ce5e9-eb44-4988-b9f4-ec75ec9d8444";
 
-    const resolved = MetricSemanticResolver.resolve(rankingMetric, "gmv");
-    const targetMetric = resolved.primaryMetric;
+    const targetMetric =
+      METRIC_SEMANTIC_REGISTRY[ast.metricKey] || METRIC_SEMANTIC_REGISTRY.gmv;
+    const finalLimit = options.limit || ast.limit || 5;
+    const finalDirection = ast.directionOverride || targetMetric.direction;
+    const managerOnly =
+      options.managerOnly !== undefined ? options.managerOnly : true;
 
     console.log(
-      `[OrderDomainService.queryProductRanking] Metric: ${targetMetric.key} (${targetMetric.label}), Domain: ${targetMetric.domain}, Tenant: ${businessId}, User: ${userId}`,
+      `[OrderDomainService.queryProductRanking] Metric: ${targetMetric.key} (${targetMetric.label}), Direction: ${finalDirection}, Tenant: ${businessId}, User: ${userId}`,
     );
 
     try {
@@ -745,12 +748,27 @@ export class OrderDomainService {
         whereClause += ` AND p.manager_id = $${queryParams.length}`;
       }
 
-      if (category) {
-        queryParams.push(category);
+      const explicitCategory =
+        options.category ||
+        (ast.filters.find((f) => f.field === "p.category")?.value as string);
+      if (explicitCategory) {
+        queryParams.push(explicitCategory);
         whereClause += ` AND p.category = $${queryParams.length}`;
       }
 
-      queryParams.push(limit);
+      // 附加数值过滤 (如 stock / price)
+      for (const filter of ast.filters) {
+        if (filter.field !== "p.category") {
+          whereClause += ` AND ${filter.sqlClause}`;
+        }
+      }
+
+      // 附加时间过滤 (如 o.created_at)
+      if (ast.timeRange?.sqlFilter) {
+        whereClause += ` AND ${ast.timeRange.sqlFilter}`;
+      }
+
+      queryParams.push(finalLimit);
       const limitParamIndex = queryParams.length;
 
       const dimensions = [
@@ -780,6 +798,7 @@ export class OrderDomainService {
         ],
         filters: whereClause,
         limit: `$${limitParamIndex}`,
+        direction: finalDirection,
       });
 
       const result = await db.execute(sql, queryParams);

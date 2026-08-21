@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import crypto from "node:crypto";
+import crypto from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 export interface ImageUploadResult {
   success: boolean;
@@ -16,23 +16,16 @@ export interface ImageUploadResult {
 
 export class ImageUploadService {
   public static readonly MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-  public static readonly ALLOWED_MIME_TYPES = new Set([
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/gif",
-  ]);
+  public static readonly ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
   /**
    * 校验并安全持久化图片文件
    */
-  public static async uploadImage(
-    file: File | null,
-  ): Promise<ImageUploadResult> {
+  public static async uploadImage(file: File | null): Promise<ImageUploadResult> {
     if (!file) {
       return {
         success: false,
-        error: "No image file provided in form-data",
+        error: 'No image file provided in form-data',
         statusCode: 400,
       };
     }
@@ -57,17 +50,11 @@ export class ImageUploadService {
     const buffer = Buffer.from(arrayBuffer);
 
     // 计算哈希并确定文件后缀
-    const hash = crypto
-      .createHash("sha256")
-      .update(buffer)
-      .digest("hex")
-      .slice(0, 12);
-    const ext =
-      file.name.split(".").pop()?.toLowerCase() ||
-      (file.type === "image/png" ? "png" : "jpg");
+    const hash = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 12);
+    const ext = file.name.split('.').pop()?.toLowerCase() || (file.type === 'image/png' ? 'png' : 'jpg');
     const uniqueFileName = `upload_${Date.now()}_${hash}.${ext}`;
 
-    const uploadsDir = path.join(process.cwd(), "public", "uploads");
+    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
     if (!existsSync(uploadsDir)) {
       await mkdir(uploadsDir, { recursive: true });
     }

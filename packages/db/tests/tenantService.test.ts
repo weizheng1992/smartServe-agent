@@ -1,24 +1,18 @@
-import { describe, expect, it, beforeAll } from "bun:test";
+import { beforeAll, describe, expect, it } from 'bun:test';
+import { getPgPool } from '../src/client';
+import { tenantConfigs, tenantMembers, tenantTools, tenants, users } from '../src/schema';
 import {
-  tenants,
-  tenantMembers,
-  tenantConfigs,
-  tenantTools,
-  users,
-} from "../src/schema";
-import {
+  addTenantMember,
   createTenant,
   getTenant,
-  addTenantMember,
-  getTenantMembers,
-  saveTenantConfig,
   getTenantConfig,
-  saveTenantTool,
+  getTenantMembers,
   getTenantTools,
-} from "../src/services/tenantService";
-import { getPgPool } from "../src/client";
+  saveTenantConfig,
+  saveTenantTool,
+} from '../src/services/tenantService';
 
-describe("Phase 1: Tenant Management & IAM Service (TDD)", () => {
+describe('Phase 1: Tenant Management & IAM Service (TDD)', () => {
   const testBusinessId = `test_biz_${Date.now()}`;
   let createdTenantId: string;
   let testUserId: string;
@@ -75,107 +69,102 @@ describe("Phase 1: Tenant Management & IAM Service (TDD)", () => {
     testUserId = userRes.rows[0].id;
   });
 
-  it("should create a new tenant with businessId and default free plan", async () => {
+  it('should create a new tenant with businessId and default free plan', async () => {
     const tenant = await createTenant({
       businessId: testBusinessId,
-      name: "Test Tenant Store",
-      planTier: "pro",
+      name: 'Test Tenant Store',
+      planTier: 'pro',
     });
 
     expect(tenant).toBeDefined();
     expect(tenant.id).toBeDefined();
     expect(tenant.businessId).toBe(testBusinessId);
-    expect(tenant.name).toBe("Test Tenant Store");
-    expect(tenant.planTier).toBe("pro");
-    expect(tenant.status).toBe("active");
+    expect(tenant.name).toBe('Test Tenant Store');
+    expect(tenant.planTier).toBe('pro');
+    expect(tenant.status).toBe('active');
 
     createdTenantId = tenant.id;
   });
 
-  it("should retrieve tenant by businessId", async () => {
+  it('should retrieve tenant by businessId', async () => {
     const tenant = await getTenant(testBusinessId);
     expect(tenant).not.toBeNull();
     expect(tenant?.id).toBe(createdTenantId);
     expect(tenant?.businessId).toBe(testBusinessId);
   });
 
-  it("should add a tenant member with owner role and query members", async () => {
+  it('should add a tenant member with owner role and query members', async () => {
     const membership = await addTenantMember({
       tenantId: createdTenantId,
       userId: testUserId,
-      role: "owner",
+      role: 'owner',
     });
 
     expect(membership).toBeDefined();
     expect(membership.tenantId).toBe(createdTenantId);
     expect(membership.userId).toBe(testUserId);
-    expect(membership.role).toBe("owner");
+    expect(membership.role).toBe('owner');
 
     const members = await getTenantMembers(createdTenantId);
     expect(members.length).toBeGreaterThanOrEqual(1);
-    expect(
-      members.some((m) => m.userId === testUserId && m.role === "owner"),
-    ).toBe(true);
+    expect(members.some((m) => m.userId === testUserId && m.role === 'owner')).toBe(true);
   });
 
-  it("should save draft config and retrieve published vs draft config", async () => {
+  it('should save draft config and retrieve published vs draft config', async () => {
     // 1. Save draft config
     const draftConfig = await saveTenantConfig({
       businessId: testBusinessId,
-      systemPrompt: "You are an elite Nike customer support assistant.",
-      welcomeMessage: "Welcome to Nike official customer support!",
+      systemPrompt: 'You are an elite Nike customer support assistant.',
+      welcomeMessage: 'Welcome to Nike official customer support!',
       temperature: 0.3,
-      status: "draft",
+      status: 'draft',
     });
 
-    expect(draftConfig.status).toBe("draft");
-    expect(draftConfig.systemPrompt).toContain("Nike");
+    expect(draftConfig.status).toBe('draft');
+    expect(draftConfig.systemPrompt).toContain('Nike');
 
     // 2. Query draft config
-    const fetchedDraft = await getTenantConfig(testBusinessId, "draft");
+    const fetchedDraft = await getTenantConfig(testBusinessId, 'draft');
     expect(fetchedDraft).not.toBeNull();
-    expect(fetchedDraft?.systemPrompt).toBe(
-      "You are an elite Nike customer support assistant.",
-    );
+    expect(fetchedDraft?.systemPrompt).toBe('You are an elite Nike customer support assistant.');
 
     // 3. Publish config
     const publishedConfig = await saveTenantConfig({
       businessId: testBusinessId,
-      systemPrompt:
-        "You are an elite Nike customer support assistant (PUBLISHED).",
-      welcomeMessage: "Welcome to Nike official customer support!",
+      systemPrompt: 'You are an elite Nike customer support assistant (PUBLISHED).',
+      welcomeMessage: 'Welcome to Nike official customer support!',
       temperature: 0.3,
-      status: "published",
+      status: 'published',
     });
 
-    expect(publishedConfig.status).toBe("published");
+    expect(publishedConfig.status).toBe('published');
 
     // 4. Query published config
-    const fetchedPublished = await getTenantConfig(testBusinessId, "published");
-    expect(fetchedPublished?.systemPrompt).toContain("PUBLISHED");
+    const fetchedPublished = await getTenantConfig(testBusinessId, 'published');
+    expect(fetchedPublished?.systemPrompt).toContain('PUBLISHED');
   });
 
-  it("should register dynamic tenant tools and retrieve them", async () => {
+  it('should register dynamic tenant tools and retrieve them', async () => {
     const tool = await saveTenantTool({
       tenantId: createdTenantId,
-      name: "fetch_custom_erp_order",
-      description: "Queries order status from custom merchant ERP",
+      name: 'fetch_custom_erp_order',
+      description: 'Queries order status from custom merchant ERP',
       schema: {
-        type: "object",
-        properties: { orderId: { type: "string" } },
-        required: ["orderId"],
+        type: 'object',
+        properties: { orderId: { type: 'string' } },
+        required: ['orderId'],
       },
-      authType: "bearer",
-      encryptedCredentials: "iv_hex:tag_hex:cipher_hex",
+      authType: 'bearer',
+      encryptedCredentials: 'iv_hex:tag_hex:cipher_hex',
       requiresApproval: false,
     });
 
     expect(tool.id).toBeDefined();
-    expect(tool.name).toBe("fetch_custom_erp_order");
+    expect(tool.name).toBe('fetch_custom_erp_order');
     expect(tool.requiresApproval).toBe(false);
 
     const tools = await getTenantTools(createdTenantId);
     expect(tools.length).toBeGreaterThanOrEqual(1);
-    expect(tools.some((t) => t.name === "fetch_custom_erp_order")).toBe(true);
+    expect(tools.some((t) => t.name === 'fetch_custom_erp_order')).toBe(true);
   });
 });

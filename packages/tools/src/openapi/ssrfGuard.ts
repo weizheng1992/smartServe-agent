@@ -1,4 +1,4 @@
-import dns from "node:dns/promises";
+import dns from 'node:dns/promises';
 
 const PRIVATE_IP_REGEX = [
   /^127\./, // 127.0.0.0/8 (Loopback)
@@ -19,20 +19,18 @@ function isPrivateIp(ip: string): boolean {
 /**
  * 校验目标 URL 是否安全（防御 SSRF 攻击、私有 IP 嗅探及元数据端点穿透）
  */
-export async function isSafeUrl(
-  urlStr: string,
-): Promise<{ safe: boolean; reason?: string }> {
+export async function isSafeUrl(urlStr: string): Promise<{ safe: boolean; reason?: string }> {
   try {
     const parsed = new URL(urlStr);
 
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return { safe: false, reason: `Disallowed protocol: ${parsed.protocol}` };
     }
 
     const hostname = parsed.hostname.toLowerCase();
 
-    if (hostname === "localhost" || hostname.endsWith(".localhost")) {
-      return { safe: false, reason: "Blocking localhost loopback access." };
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      return { safe: false, reason: 'Blocking localhost loopback access.' };
     }
 
     // Direct IP check

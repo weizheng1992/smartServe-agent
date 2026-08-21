@@ -4,6 +4,34 @@
 
 ---
 
+## [1.8.0] - 2026-08-21
+
+### 🌟 Major Highlights (重大亮点)
+
+- **Text-to-SQL 与 Headless BI 指标语义注册表体系 (Metric Semantic Registry v2)**:
+  - 落地 `MetricDefinition v2` 契约标准，将 SQL 聚合公式、动态模板、业务规则约束、口语同义词、歧义冲突组（`conflictGroup`）、排序及展示单位结构化声明配置，从根源上杜绝大模型口径幻觉与硬编码 `if/else`。
+  - 预置商场多维指标元数据字典（GMV 总销售额、出货销量件数、净毛利润收益、单品毛利率、滞销积压库存预警）。
+  - 实现 `MetricSemanticResolver` 智能指标匹配器，自动识别自然语言同义词与冲突组（如 GMV 流水 vs 出货件数 vs 净毛利润 vs 毛利率）。
+- **六大正交解耦 NL2SQL 查询语法树解析与动态编译器 (`packages/tools/src/nlQuery/`)**:
+  - `TextNormalizer`：入口前置清洗语气词与虚词（“帮我/麻烦看一下/给我展示/对比看看”等），保护语义纯净度。
+  - `TimeRangeResolver`：独立解析时序范围（“近30天/上个月/近7天/今年”），自动输出参数化 PostgreSQL 时间过滤子句。
+  - `OrderLimitResolver`：解析“销售额最低/倒数/最少”等反向排序指令并动态改写 `directionOverride`，同时精准提取 TopN 数量限制。
+  - `DimensionResolver`：动态解析分组维度（“按品类看/按商品维度”），解耦指标与 GROUP BY 物理列。
+  - `FilterResolver`：解析“库存大于500/价格低于200/品类是鞋类”等多维数值与枚举过滤条件。
+  - `NLQueryCompiler`：结合多租户上下文、负责人 `managerId` 与 AST 语法树动态安全渲染参数化物理 PostgreSQL 语句，支持防除零安全保护。
+- **商场物理数据库扩展与多维分析服务 (`OrderDomainService.queryProductRanking`)**:
+  - PostgreSQL 物理迁移：`products` 表扩充 `manager_id`、`category`、`cost_price` 字段，`order_items` 表扩充 `cost_at_purchase`（下单成本快照，防后续商品改价失真）。
+  - 注入高保真商场种子数据（覆盖 Vaporfly 顶级竞速鞋、飞马跑鞋、长筒袜等不同销量/流水/毛利特性的商品与订单）。
+- **声明式槽位消歧引擎与富交互卡片闭环 (`SlotDisambiguationEngine` & `ProductRankingCard`)**:
+  - 实现通用槽位消歧引擎，结合 LongMemory 用户画像与 Default 策略推荐最佳指标。
+  - `CardSynthesizer` 自动合成带有金银铜牌徽章、单价、累计销量、GMV 流水、净毛利润与毛利率的 `ProductRankingCard`。
+  - 在卡片底部自动挂载 Quick Replies 一键切换口径胶囊（💰 按总销售额 / 📦 按出货销量 / 📈 按净毛利润 / 🎯 按单品毛利率 / ⚠️ 排查滞销库存），实现人机交互与口径切换闭环。
+- **Promptfoo 质量评测与 Monorepo 全量测试保障**:
+  - 新增 `eval/scorers/metricDisambiguation.scorer.ts` 与 `eval/testCases/ecommerce/metric-disambiguation.json` 评测用例集并在 `promptfooconfig.yaml` 中注册；
+  - Monorepo 全量 100 个单元与集成测试 100% 绿色通过（494 个断言）。
+
+---
+
 ## [1.7.0] - 2026-08-20
 
 ### 🌟 Major Highlights (重大亮点)

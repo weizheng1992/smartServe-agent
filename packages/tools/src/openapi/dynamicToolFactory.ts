@@ -1,15 +1,15 @@
-import { decryptSecret, redactSensitiveObject } from "../crypto/secrets";
-import { scrubPii } from "../scrubber";
-import { isSafeUrl } from "./ssrfGuard";
+import { decryptSecret, redactSensitiveObject } from '../crypto/secrets';
+import { scrubPii } from '../scrubber';
+import { isSafeUrl } from './ssrfGuard';
 
 export interface DynamicHttpToolConfig {
   name: string;
   description: string;
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   url: string;
   headers?: Record<string, string>;
   schema?: Record<string, unknown>;
-  authType?: "none" | "bearer" | "basic" | "custom_header";
+  authType?: 'none' | 'bearer' | 'basic' | 'custom_header';
   encryptedCredentials?: string | null;
   tenantId?: string;
   masterKey?: string;
@@ -28,24 +28,20 @@ export interface DynamicHttpTool {
   description: string;
   schema?: Record<string, unknown>;
   requiresApproval: boolean;
-  execute: (
-    args: Record<string, unknown>,
-  ) => Promise<DynamicToolExecutionResult>;
+  execute: (args: Record<string, unknown>) => Promise<DynamicToolExecutionResult>;
 }
 
-export function createDynamicHttpTool(
-  config: DynamicHttpToolConfig,
-): DynamicHttpTool {
+export function createDynamicHttpTool(config: DynamicHttpToolConfig): DynamicHttpTool {
   const {
     name,
     description,
-    method = "GET",
+    method = 'GET',
     url,
     headers = {},
     schema,
-    authType = "none",
+    authType = 'none',
     encryptedCredentials,
-    tenantId = "default_tenant",
+    tenantId = 'default_tenant',
     masterKey,
     requiresApproval = false,
   } = config;
@@ -55,9 +51,7 @@ export function createDynamicHttpTool(
     description,
     schema,
     requiresApproval,
-    execute: async (
-      args: Record<string, unknown>,
-    ): Promise<DynamicToolExecutionResult> => {
+    execute: async (args: Record<string, unknown>): Promise<DynamicToolExecutionResult> => {
       // 1. 🛡️ SSRF 防御检测
       const safetyCheck = await isSafeUrl(url);
       if (!safetyCheck.safe) {
@@ -69,24 +63,20 @@ export function createDynamicHttpTool(
 
       // 2. 🔑 动态装配 Headers 与 JIT 即时解密
       const requestHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
-        Accept: "application/json",
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
         ...headers,
       };
 
-      if (encryptedCredentials && authType !== "none") {
+      if (encryptedCredentials && authType !== 'none') {
         try {
-          const decrypted = decryptSecret(
-            encryptedCredentials,
-            masterKey,
-            tenantId,
-          );
-          if (authType === "bearer") {
+          const decrypted = decryptSecret(encryptedCredentials, masterKey, tenantId);
+          if (authType === 'bearer') {
             requestHeaders.Authorization = `Bearer ${decrypted.trim()}`;
-          } else if (authType === "basic") {
+          } else if (authType === 'basic') {
             requestHeaders.Authorization = `Basic ${decrypted.trim()}`;
-          } else if (authType === "custom_header") {
-            requestHeaders["X-API-Key"] = decrypted.trim();
+          } else if (authType === 'custom_header') {
+            requestHeaders['X-API-Key'] = decrypted.trim();
           }
         } catch (decryptErr) {
           return {
@@ -105,7 +95,7 @@ export function createDynamicHttpTool(
           signal: AbortSignal.timeout(8000), // 8s timeout
         };
 
-        if (method === "GET") {
+        if (method === 'GET') {
           const urlObj = new URL(url);
           for (const [k, v] of Object.entries(args)) {
             if (v !== undefined && v !== null) {

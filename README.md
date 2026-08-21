@@ -4,7 +4,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 
 系统原生支持 **SaaS 多租户物理隔离**、**人工核签红线拦截与重规划自适应回溯**、**Anthropic Contextual RAG（上下文增益知识库检索）**，并配备了 **Redis 分布式并发锁**、**物理自愈指数退避 LLM HA-Proxy**、以及**高敏捷 SaaS 财务算力账单仪表盘**。
 
-在近期，我们对整个系统进行了大规模的**多模态视觉感知与智能破损定责 (Multimodal Vision & Damage Assessment)**、**JSON Blocks 结构化富交互卡片中台 (`CardSynthesizer` & `RichCardRenderer`)**、**图片安全上传流水线** 以及 **纯血 PostgreSQL 架构升级（彻底移除内存模拟假库 FakePool，实现单一真实数据源）** 等核心能力加固。
+在近期，我们对整个系统进行了大规模的**多模态视觉感知与智能破损定责 (Multimodal Vision & Damage Assessment)**、**JSON Blocks 结构化富交互卡片中台 (`CardSynthesizer` & `RichCardRenderer`)**、**图片安全上传流水线**、**纯血 PostgreSQL 架构升级（彻底移除内存模拟假库 FakePool，实现单一真实数据源）** 以及 **工业级 Text-to-SQL 指标语义注册表与槽位消歧中台 (`Metric Semantic Registry v2`)** 等核心能力加固。
 
 ---
 
@@ -34,6 +34,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
    - [4.11 SaaS 算力审计与财务账单度量系统](#411-saas-算力审计与财务账单度量系统)
    - [4.12 纯血 PostgreSQL 单一真实数据源 (Single Source of Truth) 与 Zero IDOR 防护](#412-纯血-postgresql-单一真实数据源-single-source-of-truth-与-zero-idor-防护)
    - [4.13 多模态视觉感知、面单 OCR 与富交互卡片协议体系](#413-多模态视觉感知面单-ocr-与富交互卡片协议体系)
+   - [4.14 Text-to-SQL 与 Headless BI 指标语义注册表消歧中台](#414-text-to-sql-与-headless-bi-指标语义注册表消歧中台)
 5. [质量保障与评测体系 (Testing & Tooling)](#5-质量保障与评测体系-testing--tooling)
 6. [开发与部署命令](#6-开发与部署命令)
 7. [生产上线前 SOP 流程 (Pre-Launch Checklist)](#7-生产上线前-sop-流程-pre-launch-checklist)
@@ -342,18 +343,26 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 - **零外部图标依赖 UI 渲染体系**：基于原生 SVG 矢量图标封装高保真组件，支持订单快速追踪、一键申请退款与快捷回复气泡联动。
 - **安全图片上传流水线**：`/api/chat/upload` 接口校验 MIME Type（JPEG/PNG/WebP/GIF）与 10MB 物理上限，通过随机 UUID 物理落盘并派发安全访问 URL。
 
+### 4.14 Text-to-SQL 与 Headless BI 指标语义注册表消歧中台
+
+- **指标语义注册表规范 (`MetricDefinition v2`)**：将指标公式 (`expression`)、动态模板 (`sqlTemplate`)、业务规则 (`businessRules`)、同义词库 (`synonyms`)、冲突组 (`conflictGroup`)、排序与展示单位配置化，实现零 `if/else` 硬编码的 SQL 动态编译。
+- **声明式槽位消歧引擎 (`SlotDisambiguationEngine`)**：通过自然语言同义词匹配、LongMemory 用户偏好覆盖与 Default 兜底，自动检测 `conflictGroup`（如销售业绩冲突组），为候选口径生成推荐决策并在卡片挂载 Quick Replies 快捷胶囊。
+- **动态 SQL 模板渲染与防除零保障**：动态替换 `{dimensions}`, `{groupBy}`, `{formula}`, `{filters}`, `{direction}`, `{limit}`，使用 `NULLIF`/`CASE WHEN` 规避毛利率计算时的除零异常。
+- **多租户 Zero IDOR 与个人数据权限隔离**：在 SQL 渲染层强制注入 `WHERE p.business_id = 'xxx'` 与 `p.manager_id = 'xxx'`，实现物理级多租户与负责人数据隔离。
+- **富交互数据看板 (`ProductRankingCard`)**：前端渲染带有金银铜牌徽章、商品分类、单价、累计销量、GMV 流水、净利润与毛利率的交互卡片，并支持一键切换其他统计口径。
+
 ---
 
 ## 5. 质量保障与评测体系 (Testing & Tooling)
 
 - **全量单元测试与集成测试 (Bun Test)**：
-  包含针对 `OrderDomainService`、`StepExecutionEngine`（并行子任务执行）、`ApprovalPolicyEngine`、`KnowledgeEngine`、`AgentMemoryEngine`、`VisionAnalyzerService`（多模态感知与 OCR 实体提取）、`CardSynthesizer`（富交互卡片合成）、图片安全上传以及 PII 脱敏中间件的专属集成测试，覆盖 **86+ 个核心用例 (100% 绿色通过)**。
+  包含针对 `OrderDomainService`、`StepExecutionEngine`（并行子任务执行）、`ApprovalPolicyEngine`、`KnowledgeEngine`、`AgentMemoryEngine`、`VisionAnalyzerService`（多模态感知与 OCR 实体提取）、`CardSynthesizer`（富交互卡片合成）、`MetricSemanticResolver` 与消歧套件、图片安全上传以及 PII 脱敏中间件的专属集成测试，覆盖 **93+ 个核心用例 (100% 绿色通过，436+ 断言)**。
 - **Biome (Rust-powered Linter/Formatter)**：
   高速代码格式化与依赖排序，保障 CI/CD 规范。
 - **Playwright (E2E 测试)**：
   自动化验证多轮对话、工单核签面板与状态持久化。
 - **Promptfoo (Prompt 评测)**：
-  评测提示词防越狱、多意图识别准确率与回复质量。
+  评测提示词防越狱、多意图识别准确率、Text-to-SQL 指标消歧与回复质量。
 - **高并发流式压测大盘 (`scripts/load-test.ts`)**：
   支持多用户多商户并发压力测试与首字生成延迟 (TTFT) 物理测速。
 

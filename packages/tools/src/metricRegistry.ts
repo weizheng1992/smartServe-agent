@@ -358,16 +358,18 @@ export class MetricSemanticResolver {
     groupBy?: string[];
     filters: string;
     limit: number | string;
+    direction?: "ASC" | "DESC";
   }): string {
-    const { metric, dimensions, groupBy, filters, limit } = options;
+    const { metric, dimensions, groupBy, filters, limit, direction } = options;
     const dimStr = dimensions.join(", ");
     const groupStr = (groupBy || dimensions).join(", ");
+    const finalDirection = direction || metric.direction;
     return metric.sqlTemplate
       .replace(/\{dimensions\}/g, dimStr)
       .replace(/\{groupBy\}/g, groupStr)
       .replace(/\{formula\}/g, metric.expression)
       .replace(/\{filters\}/g, filters)
-      .replace(/\{direction\}/g, metric.direction)
+      .replace(/\{direction\}/g, finalDirection)
       .replace(/\{limit\}/g, String(limit));
   }
 }

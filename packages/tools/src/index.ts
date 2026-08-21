@@ -8,3 +8,4 @@ export * from "./scrubber";
 export * from "./crypto/secrets";
 export * from "./openapi/ssrfGuard";
 export * from "./openapi/dynamicToolFactory";
+export * from "./nlQuery";

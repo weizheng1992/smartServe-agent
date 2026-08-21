@@ -1,17 +1,17 @@
-import { and, desc, eq } from "drizzle-orm";
-import { getDrizzle, getPgPool } from "../client";
-import { tenants, tenantMembers, tenantConfigs, tenantTools } from "../schema";
+import { and, desc, eq } from 'drizzle-orm';
+import { getDrizzle, getPgPool } from '../client';
+import { tenantConfigs, tenantMembers, tenantTools, tenants } from '../schema';
 
 export interface CreateTenantParams {
   businessId: string;
   name: string;
-  planTier?: "free" | "pro" | "enterprise";
+  planTier?: 'free' | 'pro' | 'enterprise';
 }
 
 export interface AddTenantMemberParams {
   tenantId: string;
   userId: string;
-  role: "owner" | "admin" | "agent";
+  role: 'owner' | 'admin' | 'agent';
 }
 
 export interface SaveTenantConfigParams {
@@ -19,7 +19,7 @@ export interface SaveTenantConfigParams {
   systemPrompt?: string;
   welcomeMessage?: string;
   temperature?: number;
-  status: "draft" | "published";
+  status: 'draft' | 'published';
 }
 
 export interface SaveTenantToolParams {
@@ -27,7 +27,7 @@ export interface SaveTenantToolParams {
   name: string;
   description?: string;
   schema: Record<string, unknown>;
-  authType?: "none" | "bearer" | "basic" | "custom_header";
+  authType?: 'none' | 'bearer' | 'basic' | 'custom_header';
   encryptedCredentials?: string;
   requiresApproval?: boolean;
   enabled?: boolean;
@@ -40,8 +40,8 @@ export async function createTenant(params: CreateTenantParams) {
     .values({
       businessId: params.businessId,
       name: params.name,
-      planTier: params.planTier || "free",
-      status: "active",
+      planTier: params.planTier || 'free',
+      status: 'active',
     })
     .returning();
   return created;
@@ -49,11 +49,7 @@ export async function createTenant(params: CreateTenantParams) {
 
 export async function getTenant(businessId: string) {
   const db = getDrizzle();
-  const rows = await db
-    .select()
-    .from(tenants)
-    .where(eq(tenants.businessId, businessId))
-    .limit(1);
+  const rows = await db.select().from(tenants).where(eq(tenants.businessId, businessId)).limit(1);
   return rows.length > 0 ? rows[0] : null;
 }
 
@@ -72,10 +68,7 @@ export async function addTenantMember(params: AddTenantMemberParams) {
 
 export async function getTenantMembers(tenantId: string) {
   const db = getDrizzle();
-  return await db
-    .select()
-    .from(tenantMembers)
-    .where(eq(tenantMembers.tenantId, tenantId));
+  return await db.select().from(tenantMembers).where(eq(tenantMembers.tenantId, tenantId));
 }
 
 export async function saveTenantConfig(params: SaveTenantConfigParams) {
@@ -85,12 +78,7 @@ export async function saveTenantConfig(params: SaveTenantConfigParams) {
   const existing = await db
     .select()
     .from(tenantConfigs)
-    .where(
-      and(
-        eq(tenantConfigs.businessId, params.businessId),
-        eq(tenantConfigs.status, params.status),
-      ),
-    )
+    .where(and(eq(tenantConfigs.businessId, params.businessId), eq(tenantConfigs.status, params.status)))
     .orderBy(desc(tenantConfigs.version))
     .limit(1);
 
@@ -99,18 +87,9 @@ export async function saveTenantConfig(params: SaveTenantConfigParams) {
     const [updated] = await db
       .update(tenantConfigs)
       .set({
-        systemPrompt:
-          params.systemPrompt !== undefined
-            ? params.systemPrompt
-            : existing[0].systemPrompt,
-        welcomeMessage:
-          params.welcomeMessage !== undefined
-            ? params.welcomeMessage
-            : existing[0].welcomeMessage,
-        temperature:
-          params.temperature !== undefined
-            ? params.temperature
-            : existing[0].temperature,
+        systemPrompt: params.systemPrompt !== undefined ? params.systemPrompt : existing[0].systemPrompt,
+        welcomeMessage: params.welcomeMessage !== undefined ? params.welcomeMessage : existing[0].welcomeMessage,
+        temperature: params.temperature !== undefined ? params.temperature : existing[0].temperature,
         version: nextVersion,
         updatedAt: new Date(),
       })
@@ -133,20 +112,12 @@ export async function saveTenantConfig(params: SaveTenantConfigParams) {
   return created;
 }
 
-export async function getTenantConfig(
-  businessId: string,
-  status: "draft" | "published" = "published",
-) {
+export async function getTenantConfig(businessId: string, status: 'draft' | 'published' = 'published') {
   const db = getDrizzle();
   const rows = await db
     .select()
     .from(tenantConfigs)
-    .where(
-      and(
-        eq(tenantConfigs.businessId, businessId),
-        eq(tenantConfigs.status, status),
-      ),
-    )
+    .where(and(eq(tenantConfigs.businessId, businessId), eq(tenantConfigs.status, status)))
     .orderBy(desc(tenantConfigs.version))
     .limit(1);
 
@@ -162,7 +133,7 @@ export async function saveTenantTool(params: SaveTenantToolParams) {
       name: params.name,
       description: params.description || null,
       schema: params.schema,
-      authType: params.authType || "none",
+      authType: params.authType || 'none',
       encryptedCredentials: params.encryptedCredentials || null,
       requiresApproval: params.requiresApproval ?? false,
       enabled: params.enabled ?? true,
@@ -173,8 +144,5 @@ export async function saveTenantTool(params: SaveTenantToolParams) {
 
 export async function getTenantTools(tenantId: string) {
   const db = getDrizzle();
-  return await db
-    .select()
-    .from(tenantTools)
-    .where(eq(tenantTools.tenantId, tenantId));
+  return await db.select().from(tenantTools).where(eq(tenantTools.tenantId, tenantId));
 }

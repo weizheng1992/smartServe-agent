@@ -1,11 +1,11 @@
-import { getTenant, getTenantTools, saveTenantTool } from "db";
-import { type NextRequest, NextResponse } from "next/server";
-import { encryptSecret } from "tools";
+import { getTenant, getTenantTools, saveTenantTool } from 'db';
+import { type NextRequest, NextResponse } from 'next/server';
+import { encryptSecret } from 'tools';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const businessId = searchParams.get("businessId") || "ecommerce";
+    const businessId = searchParams.get('businessId') || 'ecommerce';
 
     const tenant = await getTenant(businessId);
     if (!tenant) {
@@ -28,11 +28,8 @@ export async function GET(req: NextRequest) {
     });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error fetching tenant tools:", error);
-    return NextResponse.json(
-      { success: false, error: errMsg },
-      { status: 500 },
-    );
+    console.error('Error fetching tenant tools:', error);
+    return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }
 
@@ -44,34 +41,24 @@ export async function POST(req: NextRequest) {
       name,
       description,
       schema,
-      authType = "none",
+      authType = 'none',
       credentials,
       requiresApproval = false,
       enabled = true,
     } = body;
 
     if (!businessId || !name || !schema) {
-      return NextResponse.json(
-        { success: false, error: "businessId, name and schema are required" },
-        { status: 400 },
-      );
+      return NextResponse.json({ success: false, error: 'businessId, name and schema are required' }, { status: 400 });
     }
 
     const tenant = await getTenant(businessId);
     if (!tenant) {
-      return NextResponse.json(
-        { success: false, error: `Tenant ${businessId} not found` },
-        { status: 404 },
-      );
+      return NextResponse.json({ success: false, error: `Tenant ${businessId} not found` }, { status: 404 });
     }
 
     let encryptedCredentials: string | undefined;
-    if (credentials && authType !== "none") {
-      encryptedCredentials = encryptSecret(
-        credentials,
-        process.env.ENCRYPTION_MASTER_KEY,
-        businessId,
-      );
+    if (credentials && authType !== 'none') {
+      encryptedCredentials = encryptSecret(credentials, process.env.ENCRYPTION_MASTER_KEY, businessId);
     }
 
     const created = await saveTenantTool({
@@ -99,10 +86,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error saving tenant tool:", error);
-    return NextResponse.json(
-      { success: false, error: errMsg },
-      { status: 500 },
-    );
+    console.error('Error saving tenant tool:', error);
+    return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }

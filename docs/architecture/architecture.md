@@ -477,3 +477,26 @@
 - **JSON Blocks 结构化卡片协议**：标准化 `order_card`、`tracking_timeline`、`refund_confirmation`、`damage_assessment` 与 `quick_replies` 协议，并通过 SSE 随流式消息挂载返回。
 - **零外部图标依赖 UI 渲染体系**：基于原生 SVG 矢量图标封装高保真组件，支持订单快速追踪、一键申请退款与快捷回复气泡联动。
 - **图片安全上传防线**：限制 10MB 物理上限，白名单校验 MIME Type（JPEG/PNG/WebP/GIF），通过随机 UUID 安全落盘并分发访问 URL。
+
+---
+
+## 3.26 🚀 新增：Text-to-SQL 与 Headless BI 指标语义注册表消歧中台 (Metric Semantic Registry v2)
+
+针对真实多租户商业运营场景中模糊提问（如 _“查查我负责商品里卖得最好的几个”_）引发的**口径歧义（销量 vs 销售额 vs 净利润）**、**SQL 注入**与**多表 JOIN 聚合幻觉**，本项目落地了工业级指标语义层架构：
+
+### 📂 核心文件：
+
+1. **指标语义注册表规范与元数据字典**：`packages/tools/src/metricRegistry.ts` (`MetricDefinition`, `METRIC_SEMANTIC_REGISTRY`, `MetricSemanticResolver`)
+2. **声明式通用槽位消歧引擎**：`packages/engine/src/disambiguation/slotDisambiguationEngine.ts` (`SlotDisambiguationEngine`, `PRODUCT_RANKING_METRIC_SLOT`)
+3. **商场物理聚合与动态 SQL 分析服务**：`packages/tools/src/orderDomainService.ts` (`OrderDomainService.queryProductRanking`)
+4. **排行榜卡片与消歧胶囊合成**：`packages/engine/src/cards/cardSynthesizer.ts` 与 `packages/ui/src/components/chat/cards/ProductRankingCard.tsx`
+5. **物理数据库与种子数据迁移**：`packages/db/src/schema.ts` (`products.manager_id`, `products.cost_price`, `order_items.cost_at_purchase`) 与 `packages/db/src/seedMall.ts`
+6. **自动化回归与消歧测试套件**：`packages/engine/tests/metricDisambiguationMall.test.ts`
+
+### 💡 架构解析：
+
+- **Metric Semantic Registry v2 契约规范**：将指标公式 (`expression`)、动态模板 (`sqlTemplate`)、业务规则 (`businessRules`)、同义词库 (`synonyms`)、冲突组 (`conflictGroup`)、排序与展示单位配置化，实现零 `if/else` 硬编码的 SQL 动态编译。
+- **声明式槽位消歧引擎 (Slot Disambiguation Engine)**：通过自然语言同义词匹配、LongMemory 用户偏好覆盖与 Default 兜底，自动检测 `conflictGroup`（如销售业绩冲突组），为候选口径生成推荐决策并在卡片挂载 Quick Replies 快捷胶囊。
+- **动态 SQL 模板渲染与防除零保障**：动态替换 `{dimensions}`, `{groupBy}`, `{formula}`, `{filters}`, `{direction}`, `{limit}`，使用 `NULLIF`/`CASE WHEN` 规避毛利率计算时的除零异常。
+- **多租户 Zero IDOR 与个人数据权限隔离**：在 SQL 渲染层强制注入 `WHERE p.business_id = 'xxx'` 与 `p.manager_id = 'xxx'`，实现物理级多租户与负责人数据隔离。
+- **富交互数据看板 (ProductRankingCard)**：前端渲染带有金银铜牌徽章、商品分类、单价、累计销量、GMV 流水、净利润与毛利率的交互卡片，并支持一键切换其他统计口径。

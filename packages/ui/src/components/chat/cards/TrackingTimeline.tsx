@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import React from "react";
-import type { TrackingTimelineData } from "types";
-import { Truck } from "../../icons";
+import type React from 'react';
+import type { TrackingTimelineData } from 'types';
+import { Truck } from '../../icons';
 
 export interface TrackingTimelineProps {
   data: TrackingTimelineData;
@@ -18,12 +18,8 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ data }) => {
             <Truck className="h-4 w-4" />
           </div>
           <div>
-            <div className="text-xs font-semibold text-slate-400">
-              {data.carrier} 实时物流追踪
-            </div>
-            <div className="font-mono text-sm font-bold text-blue-300">
-              {data.trackingNumber}
-            </div>
+            <div className="text-xs font-semibold text-slate-400">{data.carrier} 实时物流追踪</div>
+            <div className="font-mono text-sm font-bold text-blue-300">{data.trackingNumber}</div>
           </div>
         </div>
         <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-400 ring-1 ring-inset ring-blue-500/20">
@@ -39,27 +35,17 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ data }) => {
             <div key={idx} className="relative flex items-start gap-3">
               <div
                 className={`relative z-10 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full ${
-                  isLatest
-                    ? "bg-blue-500 ring-4 ring-blue-500/20"
-                    : "bg-slate-600"
+                  isLatest ? 'bg-blue-500 ring-4 ring-blue-500/20' : 'bg-slate-600'
                 }`}
               />
               <div className="flex-1 text-xs">
                 <div className="flex items-center justify-between">
-                  <span
-                    className={`font-semibold ${
-                      isLatest ? "text-blue-300" : "text-slate-300"
-                    }`}
-                  >
-                    {node.location || "转运中心"}
+                  <span className={`font-semibold ${isLatest ? 'text-blue-300' : 'text-slate-300'}`}>
+                    {node.location || '转运中心'}
                   </span>
-                  <span className="font-mono text-[11px] text-slate-500">
-                    {node.time}
-                  </span>
+                  <span className="font-mono text-[11px] text-slate-500">{node.time}</span>
                 </div>
-                <p className="mt-1 text-slate-400 leading-relaxed">
-                  {node.description}
-                </p>
+                <p className="mt-1 text-slate-400 leading-relaxed">{node.description}</p>
               </div>
             </div>
           );

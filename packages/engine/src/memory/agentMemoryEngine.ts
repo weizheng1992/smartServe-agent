@@ -1,7 +1,7 @@
-import { type EpisodicEvent, EpisodicMemory } from "./episodicMemory";
-import { LongMemory, type LongMemoryFact } from "./longMemory";
-import { ShortMemory, type ShortMemoryMessage } from "./shortMemory";
-import { TaskMemory, type TaskState } from "./taskMemory";
+import { type EpisodicEvent, EpisodicMemory } from './episodicMemory';
+import { LongMemory, type LongMemoryFact } from './longMemory';
+import { ShortMemory, type ShortMemoryMessage } from './shortMemory';
+import { TaskMemory, type TaskState } from './taskMemory';
 
 export interface GatheredContext {
   shortMessages: ShortMemoryMessage[];
@@ -42,21 +42,13 @@ export class AgentMemoryEngine {
   /**
    * 🧠 原子化拉取 4 层全量记忆上下文 (Gather All 4 Memory Tiers in Parallel)
    */
-  public async gatherContext(
-    query?: string,
-    precomputedEmbedding?: number[],
-  ): Promise<GatheredContext> {
-    const [shortMessages, taskState, longFacts, episodicEvents] =
-      await Promise.all([
-        this.short.getMessages(),
-        this.task.getTaskState(),
-        query
-          ? this.long.searchRelevantFacts(query, precomputedEmbedding)
-          : Promise.resolve([]),
-        query
-          ? this.episodic.retrieveEvents(query, 3, precomputedEmbedding)
-          : Promise.resolve([]),
-      ]);
+  public async gatherContext(query?: string, precomputedEmbedding?: number[]): Promise<GatheredContext> {
+    const [shortMessages, taskState, longFacts, episodicEvents] = await Promise.all([
+      this.short.getMessages(),
+      this.task.getTaskState(),
+      query ? this.long.searchRelevantFacts(query, precomputedEmbedding) : Promise.resolve([]),
+      query ? this.episodic.retrieveEvents(query, 3, precomputedEmbedding) : Promise.resolve([]),
+    ]);
 
     return {
       shortMessages,
@@ -72,11 +64,11 @@ export class AgentMemoryEngine {
   public async recordTurn(options: RecordTurnOptions): Promise<void> {
     // 1. 严格按时间序列写入短期会话（先 user 提问，后 assistant 回答，杜绝并发写入时序颠倒）
     if (options.userQuery) {
-      await this.short.addMessage("user", options.userQuery);
+      await this.short.addMessage('user', options.userQuery);
     }
 
     if (options.assistantResponse) {
-      await this.short.addMessage("assistant", options.assistantResponse);
+      await this.short.addMessage('assistant', options.assistantResponse);
     }
 
     // 2. 其它记忆层可安全并发落盘
@@ -92,12 +84,7 @@ export class AgentMemoryEngine {
     }
 
     if (options.episodicEvent) {
-      tasks.push(
-        this.episodic.addEvent(
-          options.episodicEvent.content,
-          options.episodicEvent.importance,
-        ),
-      );
+      tasks.push(this.episodic.addEvent(options.episodicEvent.content, options.episodicEvent.importance));
     }
 
     await Promise.all(tasks);

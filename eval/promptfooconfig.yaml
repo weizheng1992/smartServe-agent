@@ -15,6 +15,7 @@ tests:
   - testCases/ecommerce/single-intent.json
   - testCases/ecommerce/multi-intent.json
   - testCases/ecommerce/multimodal-damage.json
+  - testCases/ecommerce/metric-disambiguation.json
   - testCases/legal/single-intent.json
   - testCases/security/injection.json
   - testCases/ecommerce/rag-evaluation.json

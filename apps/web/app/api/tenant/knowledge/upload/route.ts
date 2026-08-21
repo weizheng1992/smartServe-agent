@@ -1,11 +1,6 @@
-import { getDrizzle, ragDocuments } from "db";
-import {
-  buildContextualSummaryPrompt,
-  chunkDocumentText,
-  parseDocumentText,
-  prepareRagDocumentRecords,
-} from "engine";
-import { type NextRequest, NextResponse } from "next/server";
+import { getDrizzle, ragDocuments } from 'db';
+import { buildContextualSummaryPrompt, chunkDocumentText, parseDocumentText, prepareRagDocumentRecords } from 'engine';
+import { type NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,17 +8,14 @@ export async function POST(req: NextRequest) {
     const {
       businessId,
       content,
-      filename = "document.md",
-      mimeType = "text/markdown",
+      filename = 'document.md',
+      mimeType = 'text/markdown',
       sourceUrl,
-      category = "store_policy",
+      category = 'store_policy',
     } = body;
 
     if (!businessId || !content) {
-      return NextResponse.json(
-        { success: false, error: "businessId and content are required" },
-        { status: 400 },
-      );
+      return NextResponse.json({ success: false, error: 'businessId and content are required' }, { status: 400 });
     }
 
     // 1. 解析文档
@@ -37,10 +29,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (chunks.length === 0) {
-      return NextResponse.json(
-        { success: false, error: "Document text produced 0 valid chunks." },
-        { status: 400 },
-      );
+      return NextResponse.json({ success: false, error: 'Document text produced 0 valid chunks.' }, { status: 400 });
     }
 
     // 3. 生成基础情境摘要（Anthropic Contextual Summary）
@@ -79,15 +68,12 @@ export async function POST(req: NextRequest) {
       chunks: inserted.map((doc) => ({
         id: doc.id,
         contextualSummary: doc.contextualSummary,
-        preview: doc.chunkText.substring(0, 80) + "...",
+        preview: doc.chunkText.substring(0, 80) + '...',
       })),
     });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error uploading and ingesting knowledge document:", error);
-    return NextResponse.json(
-      { success: false, error: errMsg },
-      { status: 500 },
-    );
+    console.error('Error uploading and ingesting knowledge document:', error);
+    return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }
