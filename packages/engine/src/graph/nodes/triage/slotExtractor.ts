@@ -19,10 +19,10 @@ export class SlotExtractor {
     /(?:ORD(?:[-_][A-Z0-9]+)+|\b[A-Z]{2,4}[-_]?\d{4,}\b|\b\d{8,}\b)/i;
 
   private static readonly ADDRESS_KEYWORDS_REGEX =
-    /(?:改成|改到|送至|送往|送去|寄到|寄往|新地址[是为:：]?|地址[是为:：])\s*([^,，!！?？\n]+)/i;
+    /(?:改成|改到|送至|送往|送去|寄到|寄往|改派到|改派|改送|新地址[是为:：]?|地址[是为:：])\s*([^,，!！?？\n]+)/i;
 
   private static readonly PROVINCE_CITY_REGEX =
-    /(?:北京市|上海市|天津市|重庆市|广东省|浙江省|江苏省|四川省|湖北省|山东省|河南省|河北省|陕西省|福建省|湖南省|安徽省|辽宁省|江西省|广西|海南省|贵州省|云南省|山西省|吉林省|黑龙江省|内蒙古|新疆|西藏|青海|宁夏|海淀区|朝阳区|西城区|东城区|浦东新区|黄浦区|徐汇区|静安区)[^\s,，。!！?？]+/i;
+    /(?:北京市|上海市|天津市|重庆市|广东省|浙江省|江苏省|四川省|湖北省|山东省|河南省|河北省|陕西省|福建省|湖南省|安徽省|辽宁省|江西省|广西|海南省|贵州省|云南省|山西省|吉林省|黑龙江省|内蒙古|新疆|西藏|青海|宁夏|海淀区|朝阳区|西城区|东城区|浦东新区|黄浦区|徐汇区|静安区)[^\s,，。!！?？\n]+/i;
 
   /**
    * 结构化槽位与意图抽取器
@@ -39,6 +39,8 @@ export class SlotExtractor {
     let intentType: AgentIntentType = AgentIntentType.CHAT;
     let confidence = 0.9;
 
+    const isCancelOrder = /(?:取消订单|撤销订单|退订|取消.*单)/i.test(text);
+
     const isModifyAddress =
       /(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)/i.test(
         text,
@@ -51,8 +53,6 @@ export class SlotExtractor {
     const isReturnOrRefund = /(?:退货|退款|退单|申请售后|退钱|不想要了)/i.test(
       text,
     );
-
-    const isCancelOrder = /(?:取消订单|撤销订单|退订)/i.test(text);
 
     const isOrderQuery =
       /(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递)/i.test(
@@ -69,12 +69,12 @@ export class SlotExtractor {
     if (isModifyAddress) {
       intentType = AgentIntentType.ORDER_MODIFY_ADDRESS;
       confidence = 0.95;
-    } else if (isReturnOrRefund) {
-      intentType = AgentIntentType.ORDER_RETURN;
-      confidence = 0.95;
     } else if (isCancelOrder) {
       intentType = AgentIntentType.ORDER_CANCEL;
       confidence = 0.92;
+    } else if (isReturnOrRefund) {
+      intentType = AgentIntentType.ORDER_RETURN;
+      confidence = 0.95;
     } else if (isOrderQuery) {
       intentType = AgentIntentType.ORDER_QUERY;
       confidence = 0.92;

@@ -11,6 +11,22 @@ providers:
       apiKey: "dummy"
       temperature: 0
 
+defaultTest:
+  options:
+    provider:
+      id: "openai:chat:gemini-3.7-flash:latest"
+      config:
+        apiBaseUrl: "http://127.0.0.1:11211/api/openai/v1"
+        apiKey: "dummy"
+        temperature: 0
+
+grader:
+  id: "openai:chat:gemini-3.7-flash:latest"
+  config:
+    apiBaseUrl: "http://127.0.0.1:11211/api/openai/v1"
+    apiKey: "dummy"
+    temperature: 0
+
 tests:
   - testCases/ecommerce/single-intent.json
   - testCases/ecommerce/multi-intent.json
