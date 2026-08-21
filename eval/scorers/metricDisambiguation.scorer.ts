@@ -1,4 +1,4 @@
-import { MetricSemanticResolver } from 'tools';
+import { MetricSemanticResolver } from "../../packages/tools/src/metricRegistry";
 
 export default function (output: string, context: any) {
   try {
@@ -11,16 +11,20 @@ export default function (output: string, context: any) {
       return {
         pass: true,
         score: 1.0,
-        reason: 'No input or expectedMetric specified, skipping metric disambiguation check',
+        reason:
+          "No input or expectedMetric specified, skipping metric disambiguation check",
       };
     }
 
     const resolution = MetricSemanticResolver.resolve(input);
 
     const isMetricMatch = resolution.primaryMetric.key === expectedMetric;
-    const isAmbiguityMatch = expectedAmbiguity === undefined || resolution.hasAmbiguity === expectedAmbiguity;
+    const isAmbiguityMatch =
+      expectedAmbiguity === undefined ||
+      resolution.hasAmbiguity === expectedAmbiguity;
     const isConflictGroupMatch =
-      expectedConflictGroup === undefined || resolution.conflictMetrics.some((m) => m.key === expectedConflictGroup);
+      expectedConflictGroup === undefined ||
+      resolution.conflictMetrics.some((m) => m.key === expectedConflictGroup);
 
     if (isMetricMatch && isAmbiguityMatch && isConflictGroupMatch) {
       return {
