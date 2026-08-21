@@ -453,3 +453,27 @@
 - **AES-256-GCM 结合 HKDF 租户派生密钥**：基于环境变量主密钥与租户 ID 盐值派生各租户独立的 32 字节密钥，以 `iv:authTag:ciphertext` 密文落盘；在发起外部 HTTP 请求时执行 JIT 即时解密，并自动在日志与 Trace 流中掩码脱敏。
 - **SSRF 运行时安全沙箱**：内置 DNS 预解析拦截器，硬拦截私网网段（`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`）、本地回环（`127.0.0.0/8`）与云元数据端点（`169.254.169.254`）。
 - **Anthropic Contextual RAG 摄入流水线**：支持 Markdown/TXT/规整文本解析，按 ~600 tokens 递归边界切片与 100 tokens 重叠，并为切片自动生成全局情境摘要，批量注入 `rag_documents` 物理知识库。
+
+---
+
+## 3.25 🚀 新增：多模态视觉感知、智能破损定责与富交互卡片体系 (Multimodal Vision & Rich Cards)
+
+为了支持图文多模态交互、快递面单智能 OCR 解析、商品破损瑕疵评级与高保真 JSON Blocks 结构化卡片渲染：
+
+### 📂 核心文件：
+
+1. **视觉分析与 OCR 引擎**：`packages/engine/src/vision/visionAnalyzerService.ts`
+2. **结构化卡片合成引擎**：`packages/engine/src/cards/cardSynthesizer.ts`
+3. **卡片协议与多模态类型定义**：`packages/types/src/card.ts`
+4. **共享 UI 富卡片组件库**：`packages/ui/src/components/chat/cards/` (`OrderCard`, `TrackingTimeline`, `RefundConfirmationCard`, `DamageAssessmentCard`, `QuickReplies`, `RichCardRenderer`)
+5. **图片安全上传端点**：`apps/web/app/api/chat/upload/route.ts`
+6. **前端对话交互与预览**：`apps/web/app/home/components/ChatArea.tsx` 与 `apps/web/app/home/hooks/useChatMessages.ts`
+
+### 💡 架构解析：
+
+- **Triage 视觉感知与 1500ms 超时熔断**：用户上传图片时优先执行视觉与 OCR 感知，提取订单号与承运单号并自动注入意图分类与规划节点；内置 1500ms 超时竞速与规则降级机制，杜绝视觉模型阻塞主对话流。
+- **商品破损瑕疵三级定责与建议处置**：支持 `negligible`（无损）、`minor`（轻损）、`severe`（重损）智能定责评级，自动联动安控审批网关决策快速赔付或人工复核。
+- **PII 隐私脱敏切面**：视觉与 OCR 输出物理过滤手机号、身份证与银行卡敏感信息。
+- **JSON Blocks 结构化卡片协议**：标准化 `order_card`、`tracking_timeline`、`refund_confirmation`、`damage_assessment` 与 `quick_replies` 协议，并通过 SSE 随流式消息挂载返回。
+- **零外部图标依赖 UI 渲染体系**：基于原生 SVG 矢量图标封装高保真组件，支持订单快速追踪、一键申请退款与快捷回复气泡联动。
+- **图片安全上传防线**：限制 10MB 物理上限，白名单校验 MIME Type（JPEG/PNG/WebP/GIF），通过随机 UUID 安全落盘并分发访问 URL。

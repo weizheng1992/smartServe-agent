@@ -1,0 +1,43 @@
+[
+  {
+    "description": "多模态视觉评测 - 快递面单 OCR 识别与订单状态查询",
+    "vars": {
+      "input": "请帮我查一下这张包裹面单上的订单到哪了 [image: SF1234567890 ORD-88888]",
+      "expectedIntents": ["order_status"],
+      "expectedTools": ["getOrderStatus"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "多模态视觉评测 - 商品严重破损照片定损与退款申请",
+    "vars": {
+      "input": "收到的鞋子鞋底完全开胶断裂了，看我拍的照片，申请退款 ORD-77777 [image: severe_damage_shoe.jpg]",
+      "expectedIntents": ["refund"],
+      "expectedTools": ["processRefund"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "多模态视觉评测 - 破损评级与富交互卡片回复质量",
+    "vars": {
+      "input": "收到商品有严重破损，申请退款 ORD-77777",
+      "expectedRules": "必须为中文回复，包含对破损情况的核验与退款流程的处理说明，包含退款金额或审核提示。"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/answerQuality.scorer.ts"
+      }
+    ]
+  }
+]

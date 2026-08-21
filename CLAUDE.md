@@ -19,10 +19,12 @@ Monorepo powered by Turborepo & Bun workspaces:
 
 - `apps/web`: Next.js 15 App Router. Connects via `/api/chat` and `/api/chat/[jobId]/stream` (SSE).
 - `packages/engine`: LangGraph agent graph (`triage` → `planner` → `merge` → loop [`executor` ⇄ `validator`] → `finish`) and Temporal workflow orchestration (`agentWorkflow`). Falls back to local simulator when Temporal is offline.
-- `packages/db`: Drizzle ORM PostgreSQL client with in-memory `FakePool` fallback when offline.
-- `packages/tools`: External tools (`getOrderStatus`, `processRefund`, Puppeteer `takeScreenshot`, `listUserOrders`).
+- `packages/db`: Drizzle ORM PostgreSQL client connecting directly to physical PostgreSQL instance.
+- `packages/tools`: External tools (`getOrderStatus`, `processRefund`, Puppeteer `takeScreenshot`, `listUserOrders`, `createOrder`, OpenAPI dynamic tools).
 - `packages/observability`: Pino logger and Langfuse tracing.
 - `packages/business-configs`: Multi-tenant business schema configurations.
+- `packages/types`: Monorepo shared type definitions (cards, agent, approval, config, tool, etc.).
+- `packages/ui`: Zero-external-dependency shared UI components, SVG icons, and rich interactive card family.
 
 _Workspace rules are in `.claude/rules/*.md`._
 
@@ -35,6 +37,7 @@ Deep designs located in `docs/architecture/`:
 - **Architecture & Codebase Map**: `docs/architecture/architecture.md`
 - **HITL & Cognitive Backtracking**: `docs/architecture/hitl-replanning.md`
 - **Contextual RAG & Multi-Tenant**: `docs/architecture/contextual-rag.md`
+- **Multimodal Vision & Rich Cards**: `docs/architecture/multimodal-and-rich-cards.md`
 
 ---
 

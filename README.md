@@ -4,7 +4,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 
 系统原生支持 **SaaS 多租户物理隔离**、**人工核签红线拦截与重规划自适应回溯**、**Anthropic Contextual RAG（上下文增益知识库检索）**，并配备了 **Redis 分布式并发锁**、**物理自愈指数退避 LLM HA-Proxy**、以及**高敏捷 SaaS 财务算力账单仪表盘**。
 
-在近期，我们对整个系统进行了大规模的**纯血 PostgreSQL 架构升级（彻底移除内存模拟假库 FakePool，实现单一真实数据源）**、**子任务并行执行器 (Parallel Subtask Executor)** 与 **PII 敏感数据递归脱敏** 等核心能力加固。
+在近期，我们对整个系统进行了大规模的**多模态视觉感知与智能破损定责 (Multimodal Vision & Damage Assessment)**、**JSON Blocks 结构化富交互卡片中台 (`CardSynthesizer` & `RichCardRenderer`)**、**图片安全上传流水线** 以及 **纯血 PostgreSQL 架构升级（彻底移除内存模拟假库 FakePool，实现单一真实数据源）** 等核心能力加固。
 
 ---
 
@@ -19,6 +19,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
    - [3.4 `packages/tools` 物理工具链、公共订单服务与 PII 安全脱敏](#34-packagestools-物理工具链公共订单服务与-pii-安全脱敏)
    - [3.5 `packages/observability` 算力计量与全链路 Trace 日志](#35-packagesobservability-算力计量与全链路-trace-日志)
    - [3.6 `packages/business-configs` 多商户 SaaS 动态策略配置](#36-packagesbusiness-configs-多商户-saas-动态策略配置)
+   - [3.7 `packages/ui` 共享 UI 组件库与零依赖富卡片族](#37-packagesui-共享-ui-组件库与零依赖富卡片族)
 4. [核心底层深度设计实现细节](#4-核心底层深度设计实现细节)
    - [4.1 任务并行执行与安控网关 (`StepExecutionEngine` & `ApprovalPolicyEngine`)](#41-任务并行执行与安控网关-stepexecutionengine--approvalpolicyengine)
    - [4.2 统一四层记忆高深度门面 (`AgentMemoryEngine`)](#42-统一四层记忆高深度门面-agentmemoryengine)
@@ -32,6 +33,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
    - [4.10 双通道并发防刷与 Redis SETNX 分布式锁](#410-双通道并发防刷与-redis-setnx-分布式锁)
    - [4.11 SaaS 算力审计与财务账单度量系统](#411-saas-算力审计与财务账单度量系统)
    - [4.12 纯血 PostgreSQL 单一真实数据源 (Single Source of Truth) 与 Zero IDOR 防护](#412-纯血-postgresql-单一真实数据源-single-source-of-truth-与-zero-idor-防护)
+   - [4.13 多模态视觉感知、面单 OCR 与富交互卡片协议体系](#413-多模态视觉感知面单-ocr-与富交互卡片协议体系)
 5. [质量保障与评测体系 (Testing & Tooling)](#5-质量保障与评测体系-testing--tooling)
 6. [开发与部署命令](#6-开发与部署命令)
 7. [生产上线前 SOP 流程 (Pre-Launch Checklist)](#7-生产上线前-sop-流程-pre-launch-checklist)
@@ -109,6 +111,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   │   │   ├── messages/    # 会话历史消息同步接口
 │   │   │   │   │   ├── preferences/ # 用户画像偏好检索接口
 │   │   │   │   │   ├── threads/     # 会话管理 (增删查) 接口
+│   │   │   │   │   ├── upload/      # 多模态图片安全上传端点 (10MB 限制 & MIME 白名单)
 │   │   │   │   │   ├── services/    # ChatSessionService & ApprovalService 领域服务层
 │   │   │   │   │   ├── quotaGuard.ts# 租户级请求频次与 Token 配额守卫
 │   │   │   │   │   └── route.ts     # 接收对话请求分发中转控制器
@@ -123,7 +126,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   │   ├── components/      # 模块化 UI 组件
 │   │   │   │   │   ├── audit/       # HITL 审核工作台子组件 (AuditDesk, ApprovalDetailView, ApprovalList)
 │   │   │   │   │   ├── APMPanel.tsx # 性能监控、Token 成本与 TTFT 仪表盘
-│   │   │   │   │   ├── ChatArea.tsx # 主对话区域、消息气泡渲染与截图交互
+│   │   │   │   │   ├── ChatArea.tsx # 主对话区域、多模态图片上传/预览条与卡片交互
 │   │   │   │   │   └── LeftSidebar.tsx # 会话历史列表、商户切换与退出登录
 │   │   │   │   ├── hooks/           # useChatMessages (基于 AgentStreamClient), useChatThreads, useApprovals
 │   │   │   │   └── utils/           # AgentStreamClient (SSE 订阅客户端) & translateTaskPlan (任务英转中翻译)
@@ -162,6 +165,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   │   │   └── finish.node.ts          # 终点回复合成与真实 RAG/工具数据提炼
 │   │   │   │   ├── eventEmitter.ts  # 本地直跑事件广播器 (Node.js EventEmitter)
 │   │   │   │   └── buildGraph.ts    # 编译 LangGraph 并集成死循环物理熔断器
+│   │   │   ├── vision/              # 多模态视觉感知与智能破损定责服务 (VisionAnalyzerService)
+│   │   │   ├── cards/               # 统一结构化卡片合成引擎 (CardSynthesizer)
 │   │   │   ├── memory/              # AgentMemoryEngine 统一 4 重多维度状态记忆门面
 │   │   │   │   ├── agentMemoryEngine.ts # 统一 4 层记忆并行拉取与归档门面
 │   │   │   │   ├── shortMemory.ts   # 短期对话历史记忆
@@ -179,7 +184,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │   │   │   └── workflowOrchestrator.ts # 统一 Temporal 工作流与本地 LangGraph 调度
 │   │   │   ├── llm/                 # LLM 自愈重试与 CircuitBreaker 断路器
 │   │   │   └── temporal/            # 分布式工作流编排 (client, worker, workflows, activities)
-│   │   └── tests/                   # 80+ 全量单元与集成测试套件
+│   │   └── tests/                   # 86+ 全量单元与集成测试套件
 │   │
 │   ├── db/                          # 纯物理关系型数据库层 (Drizzle ORM & PostgreSQL 连接池)
 │   │   ├── drizzle/                 # 数据库 Migration 自动生成 SQL
@@ -205,8 +210,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 │   │
 │   ├── observability/               # 财务度量分析与 APM Trace 观测包 (Langfuse, Pino Logger, metrics)
 │   ├── business-configs/            # SaaS 多商户动态 JSON 策略配置 (ecommerce.config.ts)
-│   ├── types/                       # 全局强类型定义共享包 (agent, approval, config, db, event, observability, tool)
-│   └── ui/                          # 共享 UI 组件库与基础样式包 (Tailwind, Lucide Icons, Shadcn, Approval 专用组件)
+│   ├── types/                       # 全局强类型定义共享包 (card, agent, approval, config, db, event, observability, tool)
+│   └── ui/                          # 共享 UI 组件库、原生 SVG 图标与富交互卡片族 (OrderCard, TrackingTimeline, RefundConfirmationCard, DamageAssessmentCard, QuickReplies)
 │
 ├── CONTEXT.md                       # 领域上下文与深度模块规范名词表
 ├── CLAUDE.md                        # Claude Code 开发 SOP 指南
@@ -260,6 +265,10 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 ### 3.6 `packages/business-configs` 多商户 SaaS 动态策略配置
 
 - **职责范围**: 维护不同商户（如 Nike、Adidas、主站电商）的退款免签阈值、退货政策时效与自定义提示词快照。
+
+### 3.7 `packages/ui` 共享 UI 组件库与零依赖富卡片族
+
+- **职责范围**: 提供跨 Web 与 Admin 端的高保真设计语言、原生 SVG 可缩放矢量图标库与 JSON Blocks 富交互卡片组件族（`OrderCard`、`TrackingTimeline`、`RefundConfirmationCard`、`DamageAssessmentCard`、`QuickReplies` 与 `RichCardRenderer`）。
 
 ---
 
@@ -324,12 +333,21 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境** �
 - 彻底移除任何脱机内存假库，无论是外部 SQL 手工注入还是前端 API 创建订单，数据统一物理落盘在同一个 PostgreSQL 实例；
 - 工具层查询物理结合会话 `threadId` 反查用户身份，严格执行 `WHERE user_id = :userId AND business_id = :businessId`，彻底防范越权串单。
 
+### 4.13 多模态视觉感知、面单 OCR 与富交互卡片协议体系
+
+- **Triage 视觉感知与 1500ms 超时熔断**：用户上传图片时优先于文本通过 `VisionAnalyzerService` 进行图文多模态分析，提取面单订单号（`ORD-XXXXX`）与快递单号（`SFXXXXXXXX`）并自动注入意图分类；内置 1500ms 竞争超时，网络波动时秒级降级至本地规则提取。
+- **商品破损瑕疵三级智能定损**：支持 `negligible`（完好）、`minor`（轻微瑕疵/外包装损）、`severe`（严重破损）定责评级，自动联动审批策略网关决策秒级赔付或人工复核。
+- **PII 隐私脱敏切面**：视觉分析与 OCR 输出自动对手机号（`138****5678`）、身份证（`[ID_CARD_REDACTED]`）与银行卡（`[BANK_CARD_REDACTED]`）强制掩码。
+- **JSON Blocks 结构化卡片协议**：标准化 `order_card`、`tracking_timeline`、`refund_confirmation`、`damage_assessment` 与 `quick_replies` 协议，并通过 SSE 随流式消息挂载返回。
+- **零外部图标依赖 UI 渲染体系**：基于原生 SVG 矢量图标封装高保真组件，支持订单快速追踪、一键申请退款与快捷回复气泡联动。
+- **安全图片上传流水线**：`/api/chat/upload` 接口校验 MIME Type（JPEG/PNG/WebP/GIF）与 10MB 物理上限，通过随机 UUID 物理落盘并派发安全访问 URL。
+
 ---
 
 ## 5. 质量保障与评测体系 (Testing & Tooling)
 
 - **全量单元测试与集成测试 (Bun Test)**：
-  包含针对 `OrderDomainService`（真实 PostgreSQL 下创建与查单闭环）、`StepExecutionEngine`（并行子任务执行）、`ApprovalPolicyEngine`、`KnowledgeEngine`、`AgentMemoryEngine`、`WorkflowOrchestrator`、`IntentTriageEngine` 以及 PII 脱敏中间件的专属集成测试，覆盖 **56+ 个核心用例 (100% 绿色通过)**。
+  包含针对 `OrderDomainService`、`StepExecutionEngine`（并行子任务执行）、`ApprovalPolicyEngine`、`KnowledgeEngine`、`AgentMemoryEngine`、`VisionAnalyzerService`（多模态感知与 OCR 实体提取）、`CardSynthesizer`（富交互卡片合成）、图片安全上传以及 PII 脱敏中间件的专属集成测试，覆盖 **86+ 个核心用例 (100% 绿色通过)**。
 - **Biome (Rust-powered Linter/Formatter)**：
   高速代码格式化与依赖排序，保障 CI/CD 规范。
 - **Playwright (E2E 测试)**：
@@ -387,7 +405,7 @@ bun run dev
 | **容器停止**         | `bun run docker:down`     | 停止并释放本地 Docker 容器资源                                         |
 | **数据库同步**       | `bun run db:push`         | 基于 Drizzle ORM 同步 Schema 结构至真实 PostgreSQL                     |
 | **数据种子灌入**     | `bun run db:seed`         | 初始化租户策略、商品与模拟订单基础数据                                 |
-| **单元与集成测试**   | `bun test`                | 运行全部 56+ 单元测试与集成测试用例 (100% 通过)                        |
+| **单元与集成测试**   | `bun test`                | 运行全部 86+ 单元测试与集成测试用例 (100% 通过)                        |
 | **代码规范与格式化** | `bun run lint`            | 运行 Biome 极速代码检查与格式化                                        |
 | **端到端测试**       | `bun run test:e2e`        | 运行 Playwright 浏览器自动化交互测试                                   |
 | **提示词与意图评测** | `bun run test:prompt`     | 运行 Promptfoo 评测提示词与意图分流准确率                              |
