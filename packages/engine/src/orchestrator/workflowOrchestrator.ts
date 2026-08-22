@@ -1,5 +1,5 @@
-import { runAgent } from "../graph/buildGraph";
-import { getTemporalClient, isUsingMockTemporal } from "../temporal/client";
+import { runAgent } from '../graph/buildGraph';
+import { getTemporalClient, isUsingMockTemporal } from '../temporal/client';
 
 export interface DispatchJobOptions {
   jobId: string;
@@ -25,9 +25,7 @@ export class WorkflowOrchestrator {
   /**
    * 🚀 统一分发与调度 Agent 执行 Job (Unified Job Dispatcher)
    */
-  public static async dispatchJob(
-    options: DispatchJobOptions,
-  ): Promise<DispatchJobResult> {
+  public static async dispatchJob(options: DispatchJobOptions): Promise<DispatchJobResult> {
     const { jobId, threadId, userId, message, req } = options;
     const client = await getTemporalClient();
     const isMock = isUsingMockTemporal();
@@ -38,8 +36,8 @@ export class WorkflowOrchestrator {
       console.log(
         `[WorkflowOrchestrator] Connecting to Temporal. Starting workflow ${jobId} on queue 'agent-tasks'...`,
       );
-      const workflowPromise = client.workflow.start("agentWorkflow", {
-        taskQueue: "agent-tasks",
+      const workflowPromise = client.workflow.start('agentWorkflow', {
+        taskQueue: 'agent-tasks',
         workflowId: jobId,
         args: [threadId, userId, message, options.imageUrls || []],
       });
@@ -47,32 +45,22 @@ export class WorkflowOrchestrator {
       promise = workflowPromise
         .then((handle) => handle.result())
         .catch((err) => {
-          console.error(
-            `[WorkflowOrchestrator] Temporal workflow ${jobId} failed:`,
-            err,
-          );
+          console.error(`[WorkflowOrchestrator] Temporal workflow ${jobId} failed:`, err);
           throw err;
         });
     } else {
       console.log(
         `[WorkflowOrchestrator] Temporal offline/mock mode. Dispatching to local LangGraph simulator with jobId: ${jobId}...`,
       );
-      promise = runAgent(
-        threadId,
-        userId,
-        message,
-        jobId,
-        options.imageUrls,
-        options.businessId,
-      );
+      promise = runAgent(threadId, userId, message, jobId, options.imageUrls, options.businessId);
 
-      if (req && typeof (req as any).waitUntil === "function") {
+      if (req && typeof (req as any).waitUntil === 'function') {
         (req as any).waitUntil(promise);
       }
     }
 
     this.agentRuns.set(jobId, promise);
-    if (typeof global !== "undefined") {
+    if (typeof global !== 'undefined') {
       if (!(global as any).agentRuns) {
         (global as any).agentRuns = new Map();
       }
@@ -96,9 +84,6 @@ export class WorkflowOrchestrator {
    * 🔍 获取正在运行的 Job 执行 Promise
    */
   public static getJobExecution(jobId: string): Promise<unknown> | undefined {
-    return (
-      this.agentRuns.get(jobId) ||
-      (typeof global !== "undefined" && (global as any).agentRuns?.get(jobId))
-    );
+    return this.agentRuns.get(jobId) || (typeof global !== 'undefined' && (global as any).agentRuns?.get(jobId));
   }
 }

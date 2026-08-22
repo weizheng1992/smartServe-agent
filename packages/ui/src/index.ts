@@ -8,6 +8,8 @@ export * from './components/ui/dialog';
 export * from './components/icons';
 export * from './components/approval/ApprovalRiskBadge';
 export * from './components/approval/ApprovalActionButtons';
+export * from './components/approval/PendingApprovalCard';
+export * from './components/approval/approvalUtils';
 export * from './components/chat/HumanChatModal';
 export * from './components/chat/ChatMessageFeed';
 export * from './components/chat/HumanChatFooter';
