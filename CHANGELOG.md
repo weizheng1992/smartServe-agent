@@ -12,7 +12,7 @@
   - 彻底根除刷新页面后对话历史次序颠倒（AI 回复跑到用户提问前）的顽疾。
   - 在 `packages/db/src/client.ts` 物理查询层引入确定性角色权重排序：`ORDER BY timestamp ASC, CASE role WHEN 'system' THEN 1 WHEN 'user' THEN 2 WHEN 'assistant' THEN 3 ELSE 4 END ASC, id ASC`，消除同一毫秒并发写入导致 UUID 字典序随机颠倒的缺陷。
   - 在 `packages/engine/src/memory/shortMemory.ts` 引入基于逻辑时钟的角色单调递增时间戳生成机制（`getMonotonicTimestamp`），保证 `assistant` 响应在时钟逻辑上严格晚于 `user` 提问。
-  - 新增 `packages/engine/tests/messageOrdering.test.ts` 并发时序测试，确保全场景历史记录 100% 严格按先后交互顺序呈现。
+  - 通过 `packages/engine/tests/messageOrdering.test.ts` 并发时序验证，确保全场景历史记录 100% 严格按先后交互顺序呈现。
 - **SaaS 多租户品牌身份物理锚定与动态脱敏 (Multi-Tenant Brand Identity Anchor & JIT Sanitization)**:
   - 修复多租户会话中商户品牌（如 Nike、Adidas）在历史消息中被降级为 `[ECOMMERCE]` 占位符的问题。
   - 强化 `db.createThread` 租户保护屏障：现有商户会话拒绝被未指定或默认的 `ecommerce` 身份覆盖。

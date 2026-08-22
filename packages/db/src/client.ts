@@ -30,6 +30,7 @@ export interface DBInterface {
     email: string,
   ) => Promise<{ id: string; email: string }>;
   getUserThreads: (userId: string) => Promise<DBThread[]>;
+  getThread: (threadId: string) => Promise<DBThread | null>;
   createThread: (
     threadId: string,
     userId: string,
@@ -186,6 +187,32 @@ export const db: DBInterface = {
         row.updated_at ||
         new Date().toISOString()) as string,
     })) as DBThread[];
+  },
+
+  getThread: async (threadId: string): Promise<DBThread | null> => {
+    const pool = getPgPool();
+    const res = await pool.query(
+      'SELECT id, "user_id" AS "userId", "business_id" AS "businessId", status, "created_at" AS "createdAt", "updated_at" AS "updatedAt" FROM threads WHERE id = $1 LIMIT 1',
+      [threadId],
+    );
+    if (res.rows && res.rows.length > 0) {
+      const row = res.rows[0] as any;
+      return {
+        id: (row.id || "") as string,
+        userId: (row.userId || row.user_id || "") as string,
+        businessId: (row.businessId ||
+          row.business_id ||
+          "ecommerce") as string,
+        status: (row.status || "active") as string,
+        createdAt: (row.createdAt ||
+          row.created_at ||
+          new Date().toISOString()) as string,
+        updatedAt: (row.updatedAt ||
+          row.updated_at ||
+          new Date().toISOString()) as string,
+      };
+    }
+    return null;
   },
 
   createThread: async (

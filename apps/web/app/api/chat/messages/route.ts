@@ -1,5 +1,4 @@
-import { db, getDrizzle, threads } from "db";
-import { eq } from "drizzle-orm";
+import { db } from "db";
 import { sanitizeTenantResponse } from "engine";
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -13,19 +12,12 @@ export async function GET(req: NextRequest) {
     );
     const messages = await db.getMessages(threadId);
 
-    // Resolve thread's tenant identity
-    let businessId = "ecommerce";
+    // Resolve thread's tenant identity via DB encapsulation
+    let businessId: string | undefined;
     try {
-      const drizzle = getDrizzle();
-      if (drizzle) {
-        const threadRows = await drizzle
-          .select()
-          .from(threads)
-          .where(eq(threads.id, threadId))
-          .limit(1);
-        if (threadRows[0]?.businessId) {
-          businessId = threadRows[0].businessId;
-        }
+      const thread = await db.getThread(threadId);
+      if (thread?.businessId) {
+        businessId = thread.businessId;
       }
     } catch (tErr) {
       console.warn(
@@ -40,7 +32,7 @@ export async function GET(req: NextRequest) {
         id: m.id,
         role: m.role,
         content:
-          m.role === "assistant"
+          m.role === "assistant" && businessId
             ? sanitizeTenantResponse(m.content, businessId)
             : m.content,
         timestamp: m.timestamp,
