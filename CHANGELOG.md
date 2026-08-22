@@ -4,6 +4,32 @@
 
 ---
 
+## [1.10.0] - 2026-08-22
+
+### 🌟 Major Highlights (重大亮点)
+
+- **PostgreSQL 确定性角色时序排序与历史对话防错乱引擎 (Deterministic Message Ordering & Monotonic Clock)**:
+  - 彻底根除刷新页面后对话历史次序颠倒（AI 回复跑到用户提问前）的顽疾。
+  - 在 `packages/db/src/client.ts` 物理查询层引入确定性角色权重排序：`ORDER BY timestamp ASC, CASE role WHEN 'system' THEN 1 WHEN 'user' THEN 2 WHEN 'assistant' THEN 3 ELSE 4 END ASC, id ASC`，消除同一毫秒并发写入导致 UUID 字典序随机颠倒的缺陷。
+  - 在 `packages/engine/src/memory/shortMemory.ts` 引入基于逻辑时钟的角色单调递增时间戳生成机制（`getMonotonicTimestamp`），保证 `assistant` 响应在时钟逻辑上严格晚于 `user` 提问。
+  - 新增 `packages/engine/tests/messageOrdering.test.ts` 并发时序测试，确保全场景历史记录 100% 严格按先后交互顺序呈现。
+- **SaaS 多租户品牌身份物理锚定与动态脱敏 (Multi-Tenant Brand Identity Anchor & JIT Sanitization)**:
+  - 修复多租户会话中商户品牌（如 Nike、Adidas）在历史消息中被降级为 `[ECOMMERCE]` 占位符的问题。
+  - 强化 `db.createThread` 租户保护屏障：现有商户会话拒绝被未指定或默认的 `ecommerce` 身份覆盖。
+  - 在 `/api/chat/messages` 接口层引入 `sanitizeTenantResponse`，在历史记录拉取阶段结合会话所属商户动态清洗品牌心智。
+- **输入框生命周期管理与即时清空机制 (Chat Input State Lifecycle & Instant Clearing)**:
+  - 修复发送消息后输入框依然残留上一轮文本的交互缺陷，解耦表单提交与发送逻辑。
+  - 在 `ChatArea.tsx` 的 `onSubmit` 与 `useChatMessages.ts` 的 `handleSend` 中实现状态无条件清空，并清空附件图片列表。
+  - 增加 `apps/web/tests/chatInputState.test.ts` 单元测试验证输入状态生命周期。
+- **人工客服接管生命周期与乐观加载态隔离 (HITL Takeover Lifecycle & State Isolation)**:
+  - 修复转人工后用户继续提问导致界面永久卡在“正在全速运行多模态有向有环图节点，智能调用工具链中...”以及 AI 错误抢答的缺陷。
+  - 在 `useChatMessages.ts` 收到 `isHumanActive: true` 时立即清理乐观加载态（`isLoading: true` / `pending-job`），并调用 `loadHistory(force=true)` 同步真实数据库消息。
+  - 严格保障人工客服接管期间（`status = 'waiting'`）用户消息直通数据库并实时同步，直到人工专员明确点击“🏁 结束人工服务 (切回 AI)”（`status = 'resolved_by_human'`）后才平滑恢复 AI 智能调度。
+- **运行时连接池单例化与 HMR 缓存防护 (GlobalThis Singleton Pool Management)**:
+  - 修复 Next.js 热重载（HMR）过程中反复建立物理 PostgreSQL 连接池、Redis 客户端和 Temporal Client Promise 的问题，统一通过 `globalThis` 实现单例生命周期管理。
+
+---
+
 ## [1.9.0] - 2026-08-21
 
 ### 🌟 Major Highlights (重大亮点)
