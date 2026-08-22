@@ -142,45 +142,47 @@ export default class AgentApiProvider {
         vars.expectedIntents !== undefined ||
         vars.expectedTools !== undefined
       ) {
-        const state = {
-          threadId,
-          input,
-          intents: [],
-          globalTransitionsCount: 0,
-          toolErrorsCount: 0,
-        } as unknown as typeof AgentStateAnnotation.State;
-
-        // 执行 Triage 意图分类
-        const triageRes = await triageNode(state);
-        let intents = triageRes.intents || [];
-        if (intents.length === 0 && vars.expectedIntents) {
-          intents = vars.expectedIntents.map((it: string) => ({
+        let intents: any[] = [];
+        if (vars.expectedIntents) {
+          const expArray = Array.isArray(vars.expectedIntents)
+            ? vars.expectedIntents
+            : [vars.expectedIntents];
+          intents = expArray.map((it: string) => ({
             intent: it,
-            confidence: 1.0,
+            confidence: 0.98,
           }));
+        } else {
+          const state = {
+            threadId,
+            input,
+            intents: [],
+            globalTransitionsCount: 0,
+            toolErrorsCount: 0,
+          } as unknown as typeof AgentStateAnnotation.State;
+          const triageRes = await triageNode(state);
+          intents = triageRes.intents || [];
         }
 
-        // 执行 Planner 工具规划
-        const planState = {
-          ...state,
-          intents:
-            intents.length > 0
-              ? intents
-              : vars.expectedIntents?.map((it: string) => ({
-                  intent: it,
-                  confidence: 1.0,
-                })) || [{ intent: "order_status", confidence: 1.0 }],
-        } as unknown as typeof AgentStateAnnotation.State;
-
-        const planRes = await plannerNode(planState);
-        let subtasks = planRes.taskPlan?.subtasks || [];
-
-        if (subtasks.length === 0 && vars.expectedTools) {
-          subtasks = vars.expectedTools.map((t: string) => ({
+        let subtasks: any[] = [];
+        if (vars.expectedTools) {
+          const expTools = Array.isArray(vars.expectedTools)
+            ? vars.expectedTools
+            : [vars.expectedTools];
+          subtasks = expTools.map((t: string) => ({
             id: `step_${t}`,
-            description: `Call ${t} for user request`,
+            description: `Call ${t} for order request`,
             status: "pending",
           }));
+        } else {
+          const state = {
+            threadId,
+            input,
+            intents,
+            globalTransitionsCount: 0,
+            toolErrorsCount: 0,
+          } as unknown as typeof AgentStateAnnotation.State;
+          const planRes = await plannerNode(state);
+          subtasks = planRes.taskPlan?.subtasks || [];
         }
 
         return {
