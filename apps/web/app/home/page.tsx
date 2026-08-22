@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from "react";
 import {
   Button,
   Card,
@@ -12,24 +12,30 @@ import {
   ImageIcon,
   Loader2,
   X,
-} from 'ui';
+} from "ui";
 
 // Local Hooks
-import { DEFAULT_ASSISTANT_MESSAGE, useApprovals, useAuth, useChatMessages, useChatThreads } from './hooks';
+import {
+  DEFAULT_ASSISTANT_MESSAGE,
+  useApprovals,
+  useAuth,
+  useChatMessages,
+  useChatThreads,
+} from "./hooks";
 
-import { APMPanel } from './components/APMPanel';
-import { AuditDesk } from './components/AuditDesk';
-import { ChatArea } from './components/ChatArea';
+import { APMPanel } from "./components/APMPanel";
+import { AuditDesk } from "./components/AuditDesk";
+import { ChatArea } from "./components/ChatArea";
 // Local Components
-import { LeftSidebar } from './components/LeftSidebar';
+import { LeftSidebar } from "./components/LeftSidebar";
 
 // Safely format timestamps into MM-DD HH:mm format without hydration mismatches or invalid parsing
 const formatFriendlyDate = (dateStr: string | Date | undefined | null) => {
-  if (!dateStr) return '未知时间';
+  if (!dateStr) return "未知时间";
   const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return '未知时间';
+  if (Number.isNaN(d.getTime())) return "未知时间";
 
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, "0");
   const month = pad(d.getMonth() + 1);
   const date = pad(d.getDate());
   const hours = pad(d.getHours());
@@ -58,12 +64,16 @@ export default function Home() {
     onThreadCreated: () => {
       setRunningDetails([]);
       setActivePlan(null);
-      setCurrentStepText('');
+      setCurrentStepText("");
       setTokensConsumed(0);
-      setActiveTab('CHAT_DESK');
+      setActiveTab("CHAT_DESK");
       setMessages([DEFAULT_ASSISTANT_MESSAGE]);
     },
   });
+
+  const activeThread = threads.find((t) => t.id === activeThreadId);
+  const currentBusinessId =
+    activeThread?.businessId || selectedNewThreadMerchant || "ecommerce";
 
   const {
     messages,
@@ -89,7 +99,7 @@ export default function Home() {
   } = useChatMessages({
     currentUser,
     activeThreadId,
-    activeBusinessId: selectedNewThreadMerchant,
+    activeBusinessId: currentBusinessId,
     fetchThreads,
   });
 
@@ -125,7 +135,7 @@ export default function Home() {
   // 🌟 Auto Scroll to Bottom effect
   useEffect(() => {
     if (messages.length > 0) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages]);
 
@@ -168,7 +178,7 @@ export default function Home() {
 
       {/* 中右侧大屏 */}
       <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
-        {activeTab === 'CHAT_DESK' ? (
+        {activeTab === "CHAT_DESK" ? (
           <>
             {/* Chatting window */}
             <ChatArea
@@ -236,7 +246,9 @@ export default function Home() {
             <CardHeader className="px-6 py-4 border-b border-slate-800 flex flex-row justify-between items-center space-y-0">
               <div className="flex items-center space-x-2.5">
                 <ImageIcon className="h-4.5 w-4.5 text-indigo-400" />
-                <CardTitle className="text-sm font-semibold text-slate-200">网页看板・快照渲染核验大图</CardTitle>
+                <CardTitle className="text-sm font-semibold text-slate-200">
+                  网页看板・快照渲染核验大图
+                </CardTitle>
               </div>
               <Button
                 variant="ghost"
@@ -255,7 +267,11 @@ export default function Home() {
               />
             </CardContent>
             <CardFooter className="px-6 py-3 border-t border-slate-800 flex justify-end">
-              <Button onClick={() => setSelectedScreenshot(null)} variant="secondary" size="sm">
+              <Button
+                onClick={() => setSelectedScreenshot(null)}
+                variant="secondary"
+                size="sm"
+              >
                 关闭大图
               </Button>
             </CardFooter>

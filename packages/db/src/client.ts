@@ -194,7 +194,13 @@ export const db: DBInterface = {
       const existingBizId = (row.businessId ||
         row.business_id ||
         "ecommerce") as string;
-      const finalBusinessId = businessId ? businessId : existingBizId;
+      // 🛡️ 多租户身份不被默认 fallback 降级覆盖：如果已有会话属于特定商户（如 adidas/nike），默认传入的 ecommerce 或 undefined 不能冲掉商户身份
+      let finalBusinessId = existingBizId;
+      if (businessId && businessId !== "ecommerce") {
+        finalBusinessId = businessId;
+      } else if (!existingBizId || existingBizId === "ecommerce") {
+        finalBusinessId = businessId || "ecommerce";
+      }
       await pool.query(
         'UPDATE threads SET "updated_at" = NOW(), "business_id" = $2 WHERE id = $1',
         [threadId, finalBusinessId],

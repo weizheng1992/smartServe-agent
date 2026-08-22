@@ -18,8 +18,35 @@ export async function runAgentStateNode(
     `Temporal activity starting for node: ${nodeName}`,
   );
 
-  const businessId =
+  let businessId =
     state.businessConfig?.businessId || state.businessId || "ecommerce";
+
+  if (state.threadId && (businessId === "ecommerce" || !businessId)) {
+    try {
+      const { getDrizzle, threads } = require("db");
+      const { eq } = require("drizzle-orm");
+      const drizzle = getDrizzle();
+      if (drizzle) {
+        const threadRows = await drizzle
+          .select()
+          .from(threads)
+          .where(eq(threads.id, state.threadId))
+          .limit(1);
+        if (threadRows[0]?.businessId) {
+          businessId = threadRows[0].businessId;
+          state.businessId = businessId;
+          if (state.businessConfig) {
+            state.businessConfig.businessId = businessId;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "[Temporal Activities] Failed to resolve thread businessId:",
+        err,
+      );
+    }
+  }
 
   // Fetch memories if this is the start of execution (or prepare memories on the state object)
   if (!state.longMemoryFacts || !state.episodicEvents) {
@@ -41,10 +68,12 @@ export async function runAgentStateNode(
     if (businessId === "nike") defaultLimit = 150;
     else if (businessId === "adidas") defaultLimit = 120;
 
+    const { getMerchantDisplayName } = require("types");
+    const brandName = getMerchantDisplayName(businessId);
+
     state.businessConfig = {
       businessId,
-      systemPrompt:
-        "You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.",
+      systemPrompt: `You are an advanced, professional AI Customer Support Agent representing ${brandName}. Help users resolve order, shipping, and refund queries.`,
       intents: {
         order_status: { description: "Track or check order delivery status." },
         refund: { description: "Process or request refunds." },
