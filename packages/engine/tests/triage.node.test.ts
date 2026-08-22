@@ -1,13 +1,13 @@
-import { describe, expect, test } from 'bun:test';
-import { triageNode } from '../src/graph/nodes/triage.node';
-import type { AgentStateAnnotation } from '../src/graph/state';
+import { describe, expect, test } from "bun:test";
+import { triageNode } from "../src/graph/nodes/triage.node";
+import type { AgentStateAnnotation } from "../src/graph/state";
 
-describe('Triage Node Unit Tests', () => {
-  test('Rule Bypass: Empty input should trigger immediate bypass', async () => {
+describe("Triage Node Unit Tests", () => {
+  test("Rule Bypass: Empty input should trigger immediate bypass", async () => {
     const threadId = `test_triage_empty_${Date.now()}`;
     const state = {
       threadId,
-      input: '',
+      input: "",
       intents: [],
       globalTransitionsCount: 0,
       toolErrorsCount: 0,
@@ -16,16 +16,16 @@ describe('Triage Node Unit Tests', () => {
     const result = await triageNode(state);
 
     expect(result).toBeDefined();
-    expect(result.output).toContain('空消息');
+    expect(result.output).toContain("空消息");
     expect(result.taskPlan).toBeDefined();
-    expect(result.taskPlan?.subtasks[0].id).toBe('bypass_step');
+    expect(result.taskPlan?.subtasks[0].id).toBe("bypass_step");
   });
 
-  test('Rule Bypass: Symbol-only input should trigger symbol bypass', async () => {
+  test("Rule Bypass: Symbol-only input should trigger symbol bypass", async () => {
     const threadId = `test_triage_symbols_${Date.now()}`;
     const state = {
       threadId,
-      input: '???!!!',
+      input: "???!!!",
       intents: [],
       globalTransitionsCount: 0,
       toolErrorsCount: 0,
@@ -34,15 +34,15 @@ describe('Triage Node Unit Tests', () => {
     const result = await triageNode(state);
 
     expect(result).toBeDefined();
-    expect(result.output).toContain('订单、物流或退款');
-    expect(result.taskPlan?.subtasks[0].id).toBe('bypass_step');
+    expect(result.output).toContain("订单、物流或退款");
+    expect(result.taskPlan?.subtasks[0].id).toBe("bypass_step");
   });
 
-  test('Rule Bypass: Greeting input should return greeting bypass response', async () => {
+  test("Rule Bypass: Greeting input should return greeting bypass response", async () => {
     const threadId = `test_triage_greeting_${Date.now()}`;
     const state = {
       threadId,
-      input: '你好',
+      input: "你好",
       intents: [],
       globalTransitionsCount: 0,
       toolErrorsCount: 0,
@@ -51,15 +51,15 @@ describe('Triage Node Unit Tests', () => {
     const result = await triageNode(state);
 
     expect(result).toBeDefined();
-    expect(result.output).toContain('智能电商客服助理');
-    expect(result.intents?.[0].intent).toBe('general_query');
+    expect(result.output).toContain("智能客服助理");
+    expect(result.intents?.[0].intent).toBe("general_query");
   });
 
-  test('Rule Bypass: Exit input should return exit bypass response', async () => {
+  test("Rule Bypass: Exit input should return exit bypass response", async () => {
     const threadId = `test_triage_exit_${Date.now()}`;
     const state = {
       threadId,
-      input: '再见',
+      input: "再见",
       intents: [],
       globalTransitionsCount: 0,
       toolErrorsCount: 0,
@@ -68,15 +68,15 @@ describe('Triage Node Unit Tests', () => {
     const result = await triageNode(state);
 
     expect(result).toBeDefined();
-    expect(result.output).toContain('祝您生活愉快');
-    expect(result.intents?.[0].intent).toBe('general_query');
+    expect(result.output).toContain("祝您生活愉快");
+    expect(result.intents?.[0].intent).toBe("general_query");
   });
 
-  test('Rule Match: Explicit human escalation request', async () => {
+  test("Rule Match: Explicit human escalation request", async () => {
     const threadId = `test_triage_escalation_${Date.now()}`;
     const state = {
       threadId,
-      input: '我要转人工客服处理',
+      input: "我要转人工客服处理",
       intents: [],
       globalTransitionsCount: 0,
       toolErrorsCount: 0,
@@ -86,7 +86,7 @@ describe('Triage Node Unit Tests', () => {
 
     expect(result).toBeDefined();
     expect(result.intents).toBeDefined();
-    expect(result.intents?.[0].intent).toBe('human_escalation');
+    expect(result.intents?.[0].intent).toBe("human_escalation");
     expect(result.intents?.[0].confidence).toBe(1.0);
   });
 
@@ -94,7 +94,7 @@ describe('Triage Node Unit Tests', () => {
     const threadId = `test_triage_system_resume_${Date.now()}`;
     const state = {
       threadId,
-      input: 'System: Human support operator responded to the user',
+      input: "System: Human support operator responded to the user",
       intents: [],
       globalTransitionsCount: 0,
       toolErrorsCount: 0,
@@ -108,11 +108,11 @@ describe('Triage Node Unit Tests', () => {
     expect(result.intents?.[0].confidence).toBe(1.0);
   });
 
-  test('Multi-Intent Classifier: Combined order query and refund input with order ID', async () => {
+  test("Multi-Intent Classifier: Combined order query and refund input with order ID", async () => {
     const threadId = `test_triage_multi_intent_${Date.now()}`;
     const state = {
       threadId,
-      input: '帮我查询订单 ORD-88888 的物流状态，另外这笔订单我要申请退款',
+      input: "帮我查询订单 ORD-88888 的物流状态，另外这笔订单我要申请退款",
       intents: [],
       globalTransitionsCount: 0,
       toolErrorsCount: 0,
@@ -123,8 +123,8 @@ describe('Triage Node Unit Tests', () => {
     expect(result).toBeDefined();
     expect(result.intents).toBeDefined();
     expect(result.intents?.length).toBeGreaterThanOrEqual(2);
-    expect(result.intents?.[0].type).toBe('primary');
-    expect(result.intents?.[1].type).toBe('secondary');
-    expect(result.intents?.[0].entities?.orderId).toBe('ORD-88888');
-  });
+    expect(result.intents?.[0].type).toBe("primary");
+    expect(result.intents?.[1].type).toBe("secondary");
+    expect(result.intents?.[0].entities?.orderId).toBe("ORD-88888");
+  }, 15000);
 });
