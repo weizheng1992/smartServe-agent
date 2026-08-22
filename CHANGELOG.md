@@ -4,6 +4,27 @@
 
 ---
 
+## [1.11.0] - 2026-08-22
+
+### 🌟 Major Highlights (重大亮点)
+
+- **工单审核全链路客户身份穿透与长期画像偏好展示 (Approval Identity Resolution & Customer Persona)**:
+  - 解决工单列表、工单审核详情抽屉与独立 IM 弹窗中客户身份缺失及画像无法获取的问题。
+  - 在 `approvalService.ts` 中通过 `leftJoin(users, eq(threads.userId, users.id))` 实现会话与用户账户的物理关联合并投影，直接透传 `userEmail` 与 `userId`。
+  - 扩展 `/api/chat/preferences` 接口支持 `?userId=...` 参数化精准过滤，并关联用户邮箱。
+  - 全面升级工单详情抽屉（`ApprovalDetailView`）、人工客服 IM 实时工作台（`HumanChatModal`）与工单列表（`ApprovalList`）：直观展示实名客户邮箱、UUID、商户标识，并动态渲染客户在 `long_memory_facts` 中沉淀的长期画像偏好标签（如尺码偏好、材质避雷、品牌偏好及提取置信度）。
+- **RAG 知识库切片物理去重与幂等入库体系 (RAG Ingestion Idempotency & Deduplication Engine)**:
+  - 彻底根除 `rag_documents` 物理表中由于反复执行测试与导入导致的切片数据与 Embedding 向量冗余污染（通过 `check-and-clean.ts` 物理清理 574 条重复记录）。
+  - 在全链路知识库入库管道（`ingestTxtFiles.ts`、`updateRag.ts`、`seed-rag.ts` 及 `/api/tenant/knowledge/upload`）落地原子化预清理与唯一键检查策略，确保知识入库全流程具备 100% 幂等性。
+  - 新增 `packages/engine/tests/ragDeduplication.test.ts` 专属去重与幂等入库防回归测试套件。
+- **细粒度 LLM 算力调用审计与低置信度意图主动学习归档 (Granular LLM Telemetry & Active Learning Logging)**:
+  - 激活 `llm_call_logs` 物理审计追踪：在 `callLLMWithRetry.ts` 中深度捕获单次 LLM 调用的 Prompt Tokens、Completion Tokens、单次调用耗时（`latencyMs`）、财务成本换算（`costUsd`）、LangGraph 节点名称（`triage`, `planner`, `executor`, `validator`, `finish`）、模型 ID 及 `threadId`。
+  - 激活 `low_confidence_logs` 主动学习归档：在 `intentTriageEngine.ts` 中当意图置信度 $<0.65$ 时自动归档用户原始输入与候选意图概率分布，用于线上意图漂移分析与提示词调优。
+- **全链路自动化测试套件回归 (Full Test Suite Regression)**:
+  - 全量 161 个测试用例（覆盖 47 个测试文件、786 个断言）全部 100% 绿色通过。
+
+---
+
 ## [1.10.0] - 2026-08-22
 
 ### 🌟 Major Highlights (重大亮点)
