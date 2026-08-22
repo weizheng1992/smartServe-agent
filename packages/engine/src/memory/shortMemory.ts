@@ -9,12 +9,13 @@ export interface ShortMemoryMessage extends ChatMessage {
 
 let lastGlobalTimestamp = 0;
 
-function getMonotonicTimestamp(): string {
+function getMonotonicTimestamp(role?: "user" | "assistant" | "system"): string {
   const now = Date.now();
+  const roleOffset = role === "assistant" ? 10 : role === "system" ? 0 : 5;
   if (now <= lastGlobalTimestamp) {
-    lastGlobalTimestamp += 1;
+    lastGlobalTimestamp += roleOffset > 0 ? roleOffset : 1;
   } else {
-    lastGlobalTimestamp = now;
+    lastGlobalTimestamp = now + roleOffset;
   }
   return new Date(lastGlobalTimestamp).toISOString();
 }
@@ -75,7 +76,7 @@ export class ShortMemory {
     const id = crypto.randomUUID
       ? crypto.randomUUID()
       : Math.random().toString(36).substring(2, 15);
-    const timestamp = getMonotonicTimestamp();
+    const timestamp = getMonotonicTimestamp(role);
     const cleanContent =
       content !== undefined && content !== null ? String(content) : "";
 

@@ -1,5 +1,15 @@
 import type React from 'react';
-import { ApprovalRiskBadge, Badge, Card, CheckCircle2, ScrollArea } from 'ui';
+import {
+  ApprovalRiskBadge,
+  ArrowRight,
+  Badge,
+  Card,
+  CheckCircle2,
+  DollarSign,
+  Package,
+  ScrollArea,
+  getApprovalContextData,
+} from 'ui';
 import type { Approval } from '../hooks/types';
 
 interface HistoricalAuditsProps {
@@ -24,7 +34,7 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
                 <th className="p-4">工单 ID</th>
                 <th className="p-4">业务场景</th>
                 <th className="p-4">操作类型</th>
-                <th className="p-4">数据详情</th>
+                <th className="p-4">业务上下文与数据详情</th>
                 <th className="p-4">完成状态</th>
                 <th className="p-4">审计时间</th>
               </tr>
@@ -38,7 +48,7 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
                 </tr>
               ) : (
                 auditedApprovals.map((app) => {
-                  const args = app.actionPayload?.args || {};
+                  const context = getApprovalContextData(app);
                   const commentRaw = app.actionPayload?.rejectionReason || '';
                   const comment = typeof commentRaw === 'string' ? commentRaw : JSON.stringify(commentRaw);
 
@@ -48,21 +58,58 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
                       <td className="p-4 font-mono">
                         <Badge
                           variant="outline"
-                          className="bg-slate-950 border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[9px]"
+                          className="bg-slate-950 border-slate-850 text-indigo-400 font-semibold uppercase tracking-wider text-[9px]"
                         >
                           {app.businessId || 'ecommerce'}
                         </Badge>
                       </td>
-                      <td className="p-4 font-bold text-slate-300">{app.actionType}</td>
-                      <td className="p-4 max-w-[250px]">
-                        <div className="font-mono text-[10px] text-slate-400 bg-slate-950/40 border border-slate-800/60 p-2 rounded-lg space-y-1">
-                          {Object.entries(args).map(([k, v]) => (
-                            <div key={k} className="truncate">
-                              {k}: <span className="text-slate-200">{String(v)}</span>
+                      <td className="p-4 font-bold text-slate-300">
+                        <div className="space-y-1">
+                          <span>{app.actionType}</span>
+                          {context.orderId && (
+                            <div className="font-mono text-[10px] text-slate-500">{context.orderId}</div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4 max-w-[320px]">
+                        <div className="font-mono text-[10px] text-slate-400 bg-slate-950/60 border border-slate-850 p-2.5 rounded-lg space-y-1.5">
+                          {/* Type specific highlight */}
+                          {context.category === 'refund' && context.refundAmount !== undefined && (
+                            <div className="text-rose-400 font-bold flex items-center gap-1 font-mono">
+                              <DollarSign className="h-3 w-3" />
+                              <span>退款金额: ¥ {Number(context.refundAmount).toFixed(2)}</span>
                             </div>
-                          ))}
+                          )}
+
+                          {context.category === 'address' && context.newAddress && (
+                            <div className="text-amber-300 font-bold flex items-center gap-1">
+                              <Package className="h-3 w-3 shrink-0" />
+                              <span className="truncate">新地址: {context.newAddress}</span>
+                            </div>
+                          )}
+
+                          {context.userInput && (
+                            <div className="text-slate-300 font-sans text-[11px] bg-slate-900/80 p-1.5 rounded border border-slate-800">
+                              <span className="text-slate-500 text-[9px] block">用户提问/诉求:</span>
+                              <span className="line-clamp-2">&quot;{context.userInput}&quot;</span>
+                            </div>
+                          )}
+
+                          {context.reason && (
+                            <div className="text-amber-400/90 font-sans text-[10px]">原因: {context.reason}</div>
+                          )}
+
+                          {/* Remaining extra args */}
+                          {Object.entries(context.extraArgs)
+                            .slice(0, 3)
+                            .map(([k, v]) => (
+                              <div key={k} className="truncate text-slate-500">
+                                {k}: <span className="text-slate-300">{String(v)}</span>
+                              </div>
+                            ))}
+
                           {comment && (
-                            <div className="border-t border-slate-800/60 pt-1 text-rose-400 font-sans truncate">
+                            <div className="border-t border-slate-800 pt-1 text-rose-400 font-sans truncate">
                               驳回理由: {comment}
                             </div>
                           )}

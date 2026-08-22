@@ -4,7 +4,8 @@
   "private": true,
   "main": "src/index.ts",
   "scripts": {
-    "worker": "bun run src/temporal/worker.ts"
+    "dev": "bun --watch src/temporal/worker.ts",
+    "worker": "bun --watch src/temporal/worker.ts"
   },
   "dependencies": {
     "@langchain/langgraph": "^0.2.0",

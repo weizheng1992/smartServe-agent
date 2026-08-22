@@ -38,8 +38,14 @@ export interface DBInterface {
   deleteThread: (threadId: string) => Promise<boolean>;
 }
 
-let pgPool: Pool | null = null;
-let drizzleDb: NodePgDatabase<typeof schema> | null = null;
+const globalForDb = globalThis as unknown as {
+  __pgPool?: Pool | null;
+  __drizzleDb?: NodePgDatabase<typeof schema> | null;
+};
+
+let pgPool: Pool | null = globalForDb.__pgPool || null;
+let drizzleDb: NodePgDatabase<typeof schema> | null =
+  globalForDb.__drizzleDb || null;
 
 export function getPgPool(): Pool {
   if (pgPool) return pgPool;
@@ -58,6 +64,9 @@ export function getPgPool(): Pool {
       max: 20,
       idleTimeoutMillis: 30000,
     });
+    if (process.env.NODE_ENV !== "production") {
+      globalForDb.__pgPool = pgPool;
+    }
     return pgPool;
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -71,6 +80,9 @@ export function getDrizzle(): NodePgDatabase<typeof schema> {
   if (drizzleDb) return drizzleDb;
   const pool = getPgPool();
   drizzleDb = drizzle(pool, { schema });
+  if (process.env.NODE_ENV !== "production") {
+    globalForDb.__drizzleDb = drizzleDb;
+  }
   return drizzleDb;
 }
 
@@ -235,7 +247,18 @@ export const db: DBInterface = {
   getMessages: async (threadId: string): Promise<Message[]> => {
     const pool = getPgPool();
     const res = await pool.query(
-      'SELECT id, "thread_id" AS "threadId", role, content, timestamp FROM messages WHERE "thread_id" = $1 ORDER BY timestamp ASC, id ASC',
+      `SELECT id, "thread_id" AS "threadId", role, content, timestamp
+       FROM messages
+       WHERE "thread_id" = $1
+       ORDER BY
+         timestamp ASC,
+         CASE role
+           WHEN 'system' THEN 1
+           WHEN 'user' THEN 2
+           WHEN 'assistant' THEN 3
+           ELSE 4
+         END ASC,
+         id ASC`,
       [threadId],
     );
     const rows = res.rows as Array<{
