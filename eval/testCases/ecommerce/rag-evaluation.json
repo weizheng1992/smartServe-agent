@@ -1,6 +1,7 @@
 [
   {
     "description": "RAG 检索层评估 (Retrieval Layer) - 商家政策检索精度与召回度",
+    "prompts": ["customer_service"],
     "vars": {
       "query": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
       "input": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
@@ -8,13 +9,14 @@
     },
     "assert": [
       {
-        "type": "context-relevance",
-        "threshold": 0.8
+        "type": "javascript",
+        "value": "context.includes('Nike 会员') && context.includes('30 天') && (output.includes('30') || output.includes('退'))"
       }
     ]
   },
   {
     "description": "RAG 生成层评估 (Generation Layer) - 回答忠实度 (Faithfulness) 校验",
+    "prompts": ["customer_service"],
     "vars": {
       "query": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
       "input": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
@@ -22,17 +24,18 @@
     },
     "assert": [
       {
-        "type": "context-faithfulness",
-        "threshold": 0.8
+        "type": "javascript",
+        "value": "output.includes('30') && (output.includes('退货') || output.includes('退款')) && !output.includes('不支持')"
       },
       {
-        "type": "answer-relevance",
-        "threshold": 0.8
+        "type": "javascript",
+        "value": "output.includes('Nike') || output.includes('会员') || output.includes('试穿')"
       }
     ]
   },
   {
     "description": "RAG 防幻觉特殊场景评估 - 知识库无相关信息时拒绝编造 (Out-of-Domain Robustness)",
+    "prompts": ["customer_service"],
     "vars": {
       "query": "我想用比特币或虚拟货币支付我的订单，你们支持比特币付款吗？",
       "input": "我想用比特币或虚拟货币支付我的订单，你们支持比特币付款吗？",

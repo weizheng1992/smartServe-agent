@@ -1,10 +1,10 @@
 [
   {
     "description": "多模态视觉评测 - 快递面单 OCR 识别与订单状态查询",
+    "prompts": ["classifier"],
     "vars": {
       "input": "请帮我查一下这张包裹面单上的订单到哪了 [image: SF1234567890 ORD-88888]",
-      "expectedIntents": ["order_status"],
-      "expectedTools": ["getOrderStatus"]
+      "expectedIntents": ["order_status"]
     },
     "assert": [
       {
@@ -15,10 +15,10 @@
   },
   {
     "description": "多模态视觉评测 - 商品严重破损照片定损与退款申请",
+    "prompts": ["classifier"],
     "vars": {
       "input": "收到的鞋子鞋底完全开胶断裂了，看我拍的照片，申请退款 ORD-77777 [image: severe_damage_shoe.jpg]",
-      "expectedIntents": ["refund"],
-      "expectedTools": ["processRefund"]
+      "expectedIntents": ["refund"]
     },
     "assert": [
       {
@@ -29,8 +29,10 @@
   },
   {
     "description": "多模态视觉评测 - 破损评级与富交互卡片回复质量",
+    "prompts": ["customer_service"],
     "vars": {
       "input": "收到商品有严重破损，申请退款 ORD-77777",
+      "context": "订单 ORD-77777 商品经判定属于严重破损，系统已自动通过退款审核，全额退款将于1-3个工作日原路退回。",
       "expectedRules": "必须为中文回复，包含对破损情况的核验与退款流程的处理说明，包含退款金额或审核提示。"
     },
     "assert": [

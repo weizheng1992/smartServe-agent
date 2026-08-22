@@ -1,0 +1,32 @@
+[
+  {
+    "description": "多租户品牌自识别 - Adidas 官方旗舰店查单自称与隔离",
+    "vars": {
+      "input": "我的订单",
+      "businessId": "adidas",
+      "expectedBrand": "Adidas 官方旗舰店",
+      "expectedTools": ["listUserOrders"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "output.includes('Adidas') && !output.includes('[ECOMMERCE]') && !output.includes('无法为您提供')"
+      }
+    ]
+  },
+  {
+    "description": "多租户品牌自识别 - Nike 官方专营店查单自称与隔离",
+    "vars": {
+      "input": "我的订单",
+      "businessId": "nike",
+      "expectedBrand": "Nike 官方旗舰店",
+      "expectedTools": ["listUserOrders"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "output.includes('Nike') && !output.includes('[ECOMMERCE]') && !output.includes('无法为您提供')"
+      }
+    ]
+  }
+]

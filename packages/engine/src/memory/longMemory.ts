@@ -22,10 +22,12 @@ export class LongMemory {
     // 🛡️ 启动大模型驱动的异步【专职画像 Agent（Dedicated User Profiler Agent）】
     // 结合历史 SQL 订单购买流水 + 这一轮最新对话，自动提取非结构化尺寸与消费偏好并智能自愈落盘
     if (userQuery) {
-      // 异步 Fire-and-forget 运行，绝不阻塞前端实时响应时效
       (async () => {
         try {
-          await this.runProfileAudit(userQuery, conversationText);
+          // 不等待后台审计，完全不阻塞主链路
+          this.runProfileAudit(userQuery, conversationText).catch((e) => {
+            console.warn('[Profiler Agent Async Warn]:', e);
+          });
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           console.error('[Profiler Agent Error] 专职画像 Agent 执行偏好核查异常:', errMsg);

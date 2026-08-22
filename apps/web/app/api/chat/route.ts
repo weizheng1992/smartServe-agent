@@ -1,5 +1,5 @@
-import { type NextRequest, NextResponse } from "next/server";
-import { ChatSessionService } from "./services/chatSessionService";
+import { type NextRequest, NextResponse } from 'next/server';
+import { ChatSessionService } from './services/chatSessionService';
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,19 +16,13 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.error) {
-      return NextResponse.json(
-        { error: result.error },
-        { status: result.statusCode || 500 },
-      );
+      return NextResponse.json({ error: result.error }, { status: result.statusCode || 500 });
     }
 
     return NextResponse.json(result);
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error in POST /api/chat endpoint:", error);
-    return NextResponse.json(
-      { error: errMsg || "Internal Server Error" },
-      { status: 500 },
-    );
+    console.error('Error in POST /api/chat endpoint:', error);
+    return NextResponse.json({ error: errMsg || 'Internal Server Error' }, { status: 500 });
   }
 }

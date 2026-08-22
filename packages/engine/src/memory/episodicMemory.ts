@@ -52,8 +52,8 @@ export class EpisodicMemory {
     const dbInstance = getDrizzle();
     if (dbInstance) {
       try {
-        const { eq } = require('drizzle-orm');
-        // Retrieve all episodic events for the user and perform in-memory cosine similarity calculation in TS.
+        const { eq, desc } = require('drizzle-orm');
+        // 限制最多只读取最近的 50 条事件，避免历史会话过多时进行海量全表扫描与无谓的日志打印
         const allEvents = await dbInstance
           .select({
             id: episodicEvents.id,
@@ -63,7 +63,9 @@ export class EpisodicMemory {
             timestamp: episodicEvents.timestamp,
           })
           .from(episodicEvents)
-          .where(eq(episodicEvents.userId, this.userId));
+          .where(eq(episodicEvents.userId, this.userId))
+          .orderBy(desc(episodicEvents.timestamp))
+          .limit(50);
 
         if (allEvents.length > 0) {
           const scoredEvents = allEvents.map((row) => {

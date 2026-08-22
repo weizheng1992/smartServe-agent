@@ -8,7 +8,28 @@ export default function (output: string, context: any) {
         reason: 'No expected intents defined to compute F1',
       };
     }
-    const expectedIntents = Array.isArray(expectedIntentsRaw) ? expectedIntentsRaw : [expectedIntentsRaw];
+
+    let expectedIntents: string[] = [];
+    if (typeof expectedIntentsRaw === 'string') {
+      try {
+        const parsed = JSON.parse(expectedIntentsRaw);
+        if (Array.isArray(parsed)) {
+          expectedIntents = parsed.map((s: any) => String(s).trim());
+        } else {
+          expectedIntents = expectedIntentsRaw
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      } catch {
+        expectedIntents = expectedIntentsRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    } else if (Array.isArray(expectedIntentsRaw)) {
+      expectedIntents = expectedIntentsRaw.flat().map((s: any) => String(s).trim());
+    }
 
     let parsed: any;
     try {

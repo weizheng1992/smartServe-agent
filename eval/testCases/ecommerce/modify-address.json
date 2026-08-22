@@ -1,0 +1,46 @@
+[
+  {
+    "description": "修改地址 - 全缺槽位即时反问",
+    "vars": {
+      "input": "我想修改一下收货地址",
+      "expectedIntent": "order_modify_address",
+      "expectedMissingSlots": ["orderId", "newAddress"],
+      "expectClarification": true
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/slotClarification.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "修改地址 - 缺新地址即时反问",
+    "vars": {
+      "input": "订单 ORD-ECOM-889901 帮我改下地址",
+      "expectedIntent": "order_modify_address",
+      "expectedMissingSlots": ["newAddress"],
+      "expectClarification": true
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/slotClarification.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "修改地址 - 槽位完整即时执行 (改到/改成/送至)",
+    "vars": {
+      "input": "请帮我把订单 ORD-ECOM-889901 的收货地址改成 北京市海淀区中关村南大街1号院3号楼802室",
+      "expectedIntent": "order_modify_address",
+      "expectedMissingSlots": []
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/slotClarification.scorer.ts"
+      }
+    ]
+  }
+]

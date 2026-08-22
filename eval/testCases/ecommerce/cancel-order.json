@@ -1,0 +1,31 @@
+[
+  {
+    "description": "取消订单 - 有单号取消意图识别",
+    "vars": {
+      "input": "帮我取消订单 ORD-ECOM-889901",
+      "expectedIntent": "order_cancel",
+      "expectedMissingSlots": []
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/slotClarification.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "取消订单 - 缺单号取消意图追问",
+    "vars": {
+      "input": "我不想要了，帮我取消订单",
+      "expectedIntent": "order_cancel",
+      "expectedMissingSlots": ["orderId"],
+      "expectClarification": true
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/slotClarification.scorer.ts"
+      }
+    ]
+  }
+]

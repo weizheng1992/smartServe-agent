@@ -1,0 +1,31 @@
+[
+  {
+    "description": "物流查询 - 精确单号查询与承运商物流跟踪",
+    "vars": {
+      "input": "帮我查一下我的订单 ORD-98712 的快递寄到哪里了？",
+      "expectedIntents": ["order_status"],
+      "expectedTools": ["getOrderStatus"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "物流查询 - 缺单号物流状态追问",
+    "vars": {
+      "input": "我的快递到哪了？发货了吗",
+      "expectedIntent": "order_query",
+      "expectedMissingSlots": ["orderId"],
+      "expectClarification": true
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/slotClarification.scorer.ts"
+      }
+    ]
+  }
+]

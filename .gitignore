@@ -76,6 +76,7 @@ Thumbs.db
 .temporal/
 *.db
 *.db-journal
+eval-res.json
 
 # Playwright MCP cache
 .playwright-mcp/

@@ -1,35 +1,23 @@
-description: "智能客服平台: Triage, Planner & Answer Quality 全量回归评测大盘"
+description: "智能客服平台: 意图分类、任务规划、槽位反问与端到端回答质量 全量统一评测大盘"
 
 prompts:
-  - "prompts/classify_prompt.txt"
-  - "prompts/planner_prompt.txt"
+  - "{{input}}"
 
 providers:
-  - id: "openai:chat:gemini-3.7-flash:latest"
-    config:
-      apiBaseUrl: "http://127.0.0.1:11211/api/openai/v1"
-      apiKey: "dummy"
-      temperature: 0
+  - "file://providers/agentProvider.ts"
 
 defaultTest:
   options:
-    provider:
-      id: "openai:chat:gemini-3.7-flash:latest"
-      config:
-        apiBaseUrl: "http://127.0.0.1:11211/api/openai/v1"
-        apiKey: "dummy"
-        temperature: 0
-
-grader:
-  id: "openai:chat:gemini-3.7-flash:latest"
-  config:
-    apiBaseUrl: "http://127.0.0.1:11211/api/openai/v1"
-    apiKey: "dummy"
-    temperature: 0
+    provider: "file://providers/agentProvider.ts"
 
 tests:
   - testCases/ecommerce/single-intent.json
   - testCases/ecommerce/multi-intent.json
+  - testCases/ecommerce/order-query.json
+  - testCases/ecommerce/logistics.json
+  - testCases/ecommerce/refund-return.json
+  - testCases/ecommerce/modify-address.json
+  - testCases/ecommerce/cancel-order.json
   - testCases/ecommerce/slot-clarification.json
   - testCases/ecommerce/multimodal-damage.json
   - testCases/ecommerce/metric-disambiguation.json

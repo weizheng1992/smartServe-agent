@@ -1,0 +1,77 @@
+description: "工具规划提示词 (Planner Prompt) 回归评测"
+
+prompts:
+  - "prompts/planner_prompt.txt"
+
+providers:
+  - id: "openai:chat:gemini-3.7-flash:latest"
+    config:
+      apiBaseUrl: "http://127.0.0.1:11211/api/openai/v1"
+      apiKey: "dummy"
+      temperature: 0
+      timeoutMs: 60000
+
+tests:
+  - description: "查单规划 - 泛查单列表 (我的订单)"
+    vars:
+      input: "我的订单"
+      expectedTools: "listUserOrders"
+    assert:
+      - type: javascript
+        value: "file://scorers/toolAccuracy.scorer.ts"
+
+  - description: "查单规划 - 泛查单口语表达 (看看我买了啥)"
+    vars:
+      input: "看看我买了啥，列一下我的购买记录"
+      expectedTools: "listUserOrders"
+    assert:
+      - type: javascript
+        value: "file://scorers/toolAccuracy.scorer.ts"
+
+  - description: "查单规划 - 精确单号查询 (ORD-98712)"
+    vars:
+      input: "帮我查一下订单 ORD-98712 的状态"
+      expectedTools: "getOrderStatus"
+    assert:
+      - type: javascript
+        value: "file://scorers/toolAccuracy.scorer.ts"
+
+  - description: "物流规划 - 快递承运商与轨迹追踪"
+    vars:
+      input: "帮我查一下我的订单 ORD-98712 的快递寄到哪里了？"
+      expectedTools: "getOrderStatus"
+    assert:
+      - type: javascript
+        value: "file://scorers/toolAccuracy.scorer.ts"
+
+  - description: "退款规划 - 单号退款流转"
+    vars:
+      input: "订单 ORD-ADIDAS-OK 帮我退款，我不想要了"
+      expectedTools: "processRefund"
+    assert:
+      - type: javascript
+        value: "file://scorers/toolAccuracy.scorer.ts"
+
+  - description: "退款规划 - 逾期订单退款流转"
+    vars:
+      input: "订单 ORD-ADIDAS-EXPIRED 我想申请退款"
+      expectedTools: "processRefund"
+    assert:
+      - type: javascript
+        value: "file://scorers/toolAccuracy.scorer.ts"
+
+  - description: "多任务规划 - 查物流与退款双重意图"
+    vars:
+      input: "我想看看我买的跑鞋 ORD-98712 到了没，顺便我想把上一笔订单申请退款了"
+      expectedTools: '["getOrderStatus", "processRefund"]'
+    assert:
+      - type: javascript
+        value: "file://scorers/toolAccuracy.scorer.ts"
+
+  - description: "指标规划 - 爆款与出货量查询"
+    vars:
+      input: "出货量走量最多的爆款是哪件"
+      expectedTools: "queryProductRanking"
+    assert:
+      - type: javascript
+        value: "file://scorers/toolAccuracy.scorer.ts"

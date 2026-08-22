@@ -1,0 +1,70 @@
+description: "意图分类提示词 (Classify Prompt) 回归评测"
+
+prompts:
+  - "prompts/classify_prompt.txt"
+
+providers:
+  - id: "openai:chat:gemini-3.7-flash:latest"
+    config:
+      apiBaseUrl: "http://127.0.0.1:11211/api/openai/v1"
+      apiKey: "dummy"
+      temperature: 0
+
+tests:
+  - description: "查单意图 - 基础查单"
+    vars:
+      input: "我的订单"
+      expectedIntents: "order_status"
+    assert:
+      - type: javascript
+        value: "file://scorers/intentF1.scorer.ts"
+
+  - description: "查单意图 - 口语化查单"
+    vars:
+      input: "看看我买了啥，列一下我的购买记录"
+      expectedIntents: "order_status"
+    assert:
+      - type: javascript
+        value: "file://scorers/intentF1.scorer.ts"
+
+  - description: "物流意图 - 快递状态查询"
+    vars:
+      input: "帮我查一下我的订单 ORD-98712 的快递寄到哪里了？"
+      expectedIntents: "order_status"
+    assert:
+      - type: javascript
+        value: "file://scorers/intentF1.scorer.ts"
+
+  - description: "通用意图 - 多轮对话偏好补充"
+    vars:
+      context: "User: 我想买上衣，店里有多少种类\nAssistant: 我们店里有各种男士、女士上衣，比如夹克、T恤、衬衫等。"
+      input: "我是男的"
+      expectedIntents: "general_query"
+    assert:
+      - type: javascript
+        value: "file://scorers/intentF1.scorer.ts"
+
+  - description: "多意图组合 - 查物流 + 申请退款"
+    vars:
+      input: "我想看看我买的跑鞋 ORD-98712 到了没，顺便我想把上一笔订单申请退款了"
+      expectedIntents: '["order_status", "refund"]'
+    assert:
+      - type: javascript
+        value: "file://scorers/intentF1.scorer.ts"
+
+  - description: "退款意图 - 追问另一笔退款"
+    vars:
+      context: "User: 我想退款订单 ORD-98712\nAssistant: 很抱歉，您的退款申请金额 $139.99 超过了自动退款限制，已转交管理员进行审核。\nSystem: 管理员拒绝了本次退款申请，理由: [退款商品不符合30天无理由条件]。\nAssistant: 非常抱歉，您关于订单 ORD-98712 的退款已被管理员驳回。理由是商品不符退换政策。"
+      input: "那我另一笔订单 ORD-55555 可以申请退款吗？"
+      expectedIntents: "refund"
+    assert:
+      - type: javascript
+        value: "file://scorers/intentF1.scorer.ts"
+
+  - description: "法律政策咨询 - 7天无理由退货法规"
+    vars:
+      input: "如果我想退货，法律规定的无理由退货时效是多久？"
+      expectedIntents: "general_query"
+    assert:
+      - type: javascript
+        value: "file://scorers/intentF1.scorer.ts"

@@ -1,0 +1,44 @@
+[
+  {
+    "description": "查订单 - 泛查单意图识别与订单列表 (我的订单)",
+    "vars": {
+      "input": "我的订单",
+      "expectedIntents": ["order_status"],
+      "expectedTools": ["listUserOrders"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "查订单 - 泛查单口语化表达 (看看我买了啥)",
+    "vars": {
+      "input": "看看我买了啥，列一下我的购买记录",
+      "expectedIntents": ["order_status"],
+      "expectedTools": ["listUserOrders"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "查订单 - 精确订单号查询 (ORD-98712)",
+    "vars": {
+      "input": "帮我查一下订单 ORD-98712 的状态",
+      "expectedIntents": ["order_status"],
+      "expectedTools": ["getOrderStatus"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  }
+]

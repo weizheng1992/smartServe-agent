@@ -1,4 +1,4 @@
-const ORDER_ID_REGEX = /\bORD-[A-Za-z0-9]+\b/i;
+const ORDER_ID_REGEX = /\bORD-[A-Za-z0-9_-]+\b/i;
 
 export interface MessageLike {
   role?: string;

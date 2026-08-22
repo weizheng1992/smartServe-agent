@@ -1,0 +1,45 @@
+[
+  {
+    "description": "退货与退款 - 缺单号售后追问反问话术",
+    "vars": {
+      "input": "我要申请退货退款",
+      "expectedIntent": "order_return",
+      "expectedMissingSlots": ["orderId"],
+      "expectClarification": true
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/slotClarification.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "退货与退款 - 有单号合规退款与免签规则流转",
+    "vars": {
+      "input": "订单 ORD-ADIDAS-OK 帮我退款，我不想要了",
+      "expectedIntents": ["refund"],
+      "expectedTools": ["processRefund"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "退货与退款 - 逾期订单退款时效拦截",
+    "vars": {
+      "input": "订单 ORD-ADIDAS-EXPIRED 我想申请退款",
+      "expectedIntents": ["refund"],
+      "expectedTools": ["processRefund"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  }
+]
