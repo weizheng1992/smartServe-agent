@@ -1,5 +1,5 @@
-import { episodicEvents, getDrizzle } from 'db';
-import { getEmbeddingModel } from '../llm/callLLMWithRetry';
+import { episodicEvents, getDrizzle } from "db";
+import { getEmbeddingModel } from "../llm/callLLMWithRetry";
 
 export interface EpisodicEvent {
   id: string;
@@ -11,13 +11,21 @@ export interface EpisodicEvent {
 
 export class EpisodicMemory {
   private userId: string;
+  private businessId?: string;
 
-  constructor(userId: string) {
+  constructor(userId: string, businessId?: string) {
     this.userId = userId;
+    this.businessId = businessId;
   }
 
   async addEvent(event: string, importanceScore: number): Promise<void> {
-    console.log(`[EpisodicMemory] Added event for user ${this.userId}: "${event}" with importance: ${importanceScore}`);
+    if (!this.userId) {
+      console.warn("[EpisodicMemory] Cannot add event without userId");
+      return;
+    }
+    console.log(
+      `[EpisodicMemory] Added event for user ${this.userId}: "${event}" with importance: ${importanceScore}`,
+    );
     const embeddingModel = getEmbeddingModel();
     const embedding = await embeddingModel.embedQuery(event);
 
@@ -32,16 +40,29 @@ export class EpisodicMemory {
           importance: importanceScore,
           timestamp: new Date(),
         });
-        console.log(`[EpisodicMemory] Stored event directly in PostgreSQL: "${event}"`);
+        console.log(
+          `[EpisodicMemory] Stored event directly in PostgreSQL: "${event}"`,
+        );
         return;
       } catch (err) {
-        console.warn('[EpisodicMemory] Drizzle insertion bypassed due to offline/failed DB.');
+        console.warn(
+          "[EpisodicMemory] Drizzle insertion bypassed due to offline/failed DB.",
+        );
       }
     }
   }
 
-  async retrieveEvents(query: string, limit = 3, precomputedEmbedding?: number[]): Promise<EpisodicEvent[]> {
-    console.log(`[EpisodicMemory] Retrieving episodic events for user ${this.userId} using query: ${query}`);
+  async retrieveEvents(
+    query: string,
+    limit = 3,
+    precomputedEmbedding?: number[],
+  ): Promise<EpisodicEvent[]> {
+    if (!this.userId) {
+      return [];
+    }
+    console.log(
+      `[EpisodicMemory] Retrieving episodic events for user ${this.userId} using query: ${query}`,
+    );
 
     let queryEmbedding = precomputedEmbedding;
     if (!queryEmbedding || queryEmbedding.length === 0) {
@@ -52,7 +73,7 @@ export class EpisodicMemory {
     const dbInstance = getDrizzle();
     if (dbInstance) {
       try {
-        const { eq } = require('drizzle-orm');
+        const { eq } = require("drizzle-orm");
         // Retrieve all episodic events for the user and perform in-memory cosine similarity calculation in TS.
         const allEvents = await dbInstance
           .select({
@@ -70,14 +91,24 @@ export class EpisodicMemory {
             let embeddingArray: number[] | null = null;
             if (row.embedding) {
               try {
-                embeddingArray = typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding;
+                embeddingArray =
+                  typeof row.embedding === "string"
+                    ? JSON.parse(row.embedding)
+                    : row.embedding;
               } catch (e) {
-                console.warn('[EpisodicMemory] Failed to parse embedding JSON:', e);
+                console.warn(
+                  "[EpisodicMemory] Failed to parse embedding JSON:",
+                  e,
+                );
               }
             }
 
             let similarity = 0;
-            if (embeddingArray && Array.isArray(embeddingArray) && embeddingArray.length === queryEmbedding.length) {
+            if (
+              embeddingArray &&
+              Array.isArray(embeddingArray) &&
+              embeddingArray.length === queryEmbedding.length
+            ) {
               // cosine similarity = (A . B) / (||A|| * ||B||)
               let dotProduct = 0;
               let normA = 0;
@@ -123,7 +154,10 @@ export class EpisodicMemory {
           return filteredEvents.slice(0, limit).map((se) => se.event);
         }
       } catch (err) {
-        console.warn('[EpisodicMemory] TS-based cosine similarity search bypassed due to offline/failed DB.', err);
+        console.warn(
+          "[EpisodicMemory] TS-based cosine similarity search bypassed due to offline/failed DB.",
+          err,
+        );
       }
     }
 

@@ -182,9 +182,7 @@ export async function runAgent(
 ) {
   // Initialize memories
   const shortMemory = new ShortMemory(threadId);
-  const longMemory = new LongMemory(userId);
   const taskMemory = new TaskMemory(threadId);
-  const episodicMemory = new EpisodicMemory(userId);
 
   // 1. 🚀 毫秒级极速直达旁路：如果用户输入纯问候语/打招呼，跳过所有 LLM、向量数据库 RAG 检索！
   // 零模型开销，10毫秒瞬间完美响应！
@@ -338,6 +336,9 @@ export async function runAgent(
       err,
     );
   }
+
+  const longMemory = new LongMemory(userId, businessId);
+  const episodicMemory = new EpisodicMemory(userId, businessId);
 
   let precomputedEmbedding: number[] | undefined;
 

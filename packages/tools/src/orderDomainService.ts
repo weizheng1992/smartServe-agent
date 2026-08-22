@@ -374,7 +374,7 @@ export class OrderDomainService {
 
     try {
       await db.execute(
-        "INSERT INTO orders (order_id, status, carrier, tracking_number, estimated_delivery, user_id, business_id, total_amount) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (order_id) DO UPDATE SET status = EXCLUDED.status, carrier = EXCLUDED.carrier, tracking_number = EXCLUDED.tracking_number, estimated_delivery = EXCLUDED.estimated_delivery, total_amount = EXCLUDED.total_amount",
+        "INSERT INTO orders (order_id, status, carrier, tracking_number, estimated_delivery, user_id, business_id, total_amount) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (order_id) DO UPDATE SET status = EXCLUDED.status, carrier = EXCLUDED.carrier, tracking_number = EXCLUDED.tracking_number, estimated_delivery = EXCLUDED.estimated_delivery, total_amount = EXCLUDED.total_amount, user_id = EXCLUDED.user_id, business_id = EXCLUDED.business_id",
         [
           orderId,
           "shipped",
