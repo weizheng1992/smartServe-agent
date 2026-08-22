@@ -1,20 +1,20 @@
-import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
-import { agentEventEmitter } from '../graph/eventEmitter';
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { agentEventEmitter } from "../graph/eventEmitter";
 
 // 🛡️ 熔断降级状态机 (Circuit Breaker)
-export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
 
 export class CircuitBreaker {
   private failureCount = 0;
   private maxFailures = 5;
   private cooldownMs = 30000; // 30 秒熔断冷却期
-  private state: CircuitState = 'CLOSED';
+  private state: CircuitState = "CLOSED";
   private nextAttemptTime = 0;
 
   public isOpen(): boolean {
-    if (this.state === 'OPEN') {
+    if (this.state === "OPEN") {
       if (Date.now() >= this.nextAttemptTime) {
-        this.state = 'HALF_OPEN';
+        this.state = "HALF_OPEN";
         return false;
       }
       return true;
@@ -24,13 +24,13 @@ export class CircuitBreaker {
 
   public recordSuccess(): void {
     this.failureCount = 0;
-    this.state = 'CLOSED';
+    this.state = "CLOSED";
   }
 
   public recordFailure(): void {
     this.failureCount++;
-    if (this.failureCount >= this.maxFailures || this.state === 'HALF_OPEN') {
-      this.state = 'OPEN';
+    if (this.failureCount >= this.maxFailures || this.state === "HALF_OPEN") {
+      this.state = "OPEN";
       this.nextAttemptTime = Date.now() + this.cooldownMs;
       console.warn(
         `[CircuitBreaker] ⚠️ 连续调用失败达阈值 (${this.failureCount} 次)，已触发熔断拦截！状态置为 OPEN，冷却时间: ${this.cooldownMs / 1000} 秒`,
@@ -48,7 +48,7 @@ export class CircuitBreaker {
 
   public reset(): void {
     this.failureCount = 0;
-    this.state = 'CLOSED';
+    this.state = "CLOSED";
     this.nextAttemptTime = 0;
   }
 }
@@ -60,10 +60,19 @@ export const globalCircuitBreaker = new CircuitBreaker();
 class ResilientLLM {
   private model: ChatOpenAI;
   private jobId?: string;
+  private threadId?: string;
+  private node?: string;
 
-  constructor(model: ChatOpenAI, jobId?: string) {
+  constructor(
+    model: ChatOpenAI,
+    jobId?: string,
+    threadId?: string,
+    node?: string,
+  ) {
     this.model = model;
     this.jobId = jobId;
+    this.threadId = threadId;
+    this.node = node;
   }
 
   async invoke(input: unknown, options?: unknown) {
@@ -72,7 +81,7 @@ class ResilientLLM {
       const errMsg = `⚠️ 上游 AI 服务处于熔断状态 (${status.state})，冷却剩余: ${Math.ceil(status.nextAttemptInMs / 1000)}s。`;
       if (this.jobId) {
         agentEventEmitter.emit(`${this.jobId}:status`, {
-          status: 'circuit_breaker_open',
+          status: "circuit_breaker_open",
           message: errMsg,
         });
       }
@@ -85,44 +94,102 @@ class ResilientLLM {
 
     while (attempts < maxAttempts) {
       attempts++;
+      const startTime = Date.now();
       try {
         if (attempts > 1 && this.jobId) {
           agentEventEmitter.emit(`${this.jobId}:status`, {
-            status: 'executing',
+            status: "executing",
             message: `⚠️ 大模型呼叫遭遇网络阻塞或短暂波动，执行引擎正在物理触发【自愈抗灾重试】：正在进行第 ${attempts} 次调用重试保障决策畅通...`,
           });
         }
 
         const response = await this.model.invoke(
-          input as Parameters<ChatOpenAI['invoke']>[0],
-          options as Parameters<ChatOpenAI['invoke']>[1],
+          input as Parameters<ChatOpenAI["invoke"]>[0],
+          options as Parameters<ChatOpenAI["invoke"]>[1],
         );
+        const latencyMs = Date.now() - startTime;
 
         // 调用成功，记录熔断器成功状态
         globalCircuitBreaker.recordSuccess();
 
-        // 无感拦截并累加 Token 消耗
+        // 无感拦截并累加 Token 消耗与成本，落盘至 llm_call_logs
         try {
-          let tokens = 0;
+          let tokensIn = 0;
+          let tokensOut = 0;
+          let totalTokens = 0;
+
           const respObj = response as unknown as Record<string, unknown>;
           if (respObj && respObj.usage_metadata) {
-            tokens = (respObj.usage_metadata as { total_tokens?: number }).total_tokens || 0;
+            const u = respObj.usage_metadata as {
+              input_tokens?: number;
+              output_tokens?: number;
+              total_tokens?: number;
+            };
+            tokensIn = u.input_tokens || 0;
+            tokensOut = u.output_tokens || 0;
+            totalTokens = u.total_tokens || tokensIn + tokensOut;
           } else if (respObj && respObj.response_metadata) {
             const meta = respObj.response_metadata as {
-              tokenUsage?: { totalTokens?: number };
-              usage?: { total_tokens?: number };
+              tokenUsage?: {
+                promptTokens?: number;
+                completionTokens?: number;
+                totalTokens?: number;
+              };
+              usage?: {
+                prompt_tokens?: number;
+                completion_tokens?: number;
+                total_tokens?: number;
+              };
             };
             if (meta.tokenUsage) {
-              tokens = meta.tokenUsage.totalTokens || 0;
+              tokensIn = meta.tokenUsage.promptTokens || 0;
+              tokensOut = meta.tokenUsage.completionTokens || 0;
+              totalTokens = meta.tokenUsage.totalTokens || tokensIn + tokensOut;
             } else if (meta.usage) {
-              tokens = meta.usage.total_tokens || 0;
+              tokensIn = meta.usage.prompt_tokens || 0;
+              tokensOut = meta.usage.completion_tokens || 0;
+              totalTokens = meta.usage.total_tokens || tokensIn + tokensOut;
             }
           }
-          if (tokens > 0 && this.jobId) {
-            agentEventEmitter.addTokens(this.jobId, tokens);
+
+          if (totalTokens > 0 && this.jobId) {
+            agentEventEmitter.addTokens(this.jobId, totalTokens);
           }
+
+          // 按照 Gemini Flash 计价估算单次调用成本 (USD)
+          const costUsd = (tokensIn * 0.075 + tokensOut * 0.3) / 1_000_000;
+
+          // 异步持久化至 PostgreSQL llm_call_logs 表
+          try {
+            const { getDrizzle, llmCallLogs } = require("db");
+            const drizzle = getDrizzle();
+            if (drizzle) {
+              const opts =
+                options && typeof options === "object"
+                  ? (options as Record<string, unknown>)
+                  : {};
+              const threadId =
+                this.threadId || (opts.threadId as string) || undefined;
+              const node = this.node || (opts.node as string) || "llm_call";
+
+              drizzle
+                .insert(llmCallLogs)
+                .values({
+                  threadId: threadId || null,
+                  node: node,
+                  model: "gemini-3.5-flash:latest",
+                  tokensIn,
+                  tokensOut,
+                  costUsd,
+                  latencyMs,
+                })
+                .catch(() => {
+                  // 抑制外键未就绪等非阻塞异常
+                });
+            }
+          } catch {}
         } catch (tokenErr) {
-          console.warn('[Token Tracking Error]:', tokenErr);
+          console.warn("[Token Tracking Error]:", tokenErr);
         }
 
         return response;
@@ -142,18 +209,22 @@ class ResilientLLM {
   }
 }
 
-export function getLLM(jobId?: string): ResilientLLM {
+export function getLLM(
+  jobId?: string,
+  threadId?: string,
+  node?: string,
+): ResilientLLM {
   const llm = new ChatOpenAI({
     configuration: {
-      baseURL: 'http://localhost:11211/api/openai/v1',
+      baseURL: "http://localhost:11211/api/openai/v1",
     },
-    apiKey: 'dummy',
-    modelName: 'gemini-3.5-flash:latest',
+    apiKey: "dummy",
+    modelName: "gemini-3.5-flash:latest",
     temperature: 0,
   });
 
   // 返回鸭子类型的透明自愈代理，无缝平替原有的 ChatOpenAI，且 100% 只使用指定的物理模型
-  return new ResilientLLM(llm, jobId);
+  return new ResilientLLM(llm, jobId, threadId, node);
 }
 
 class HighFidelityEmbeddingModel {
@@ -167,10 +238,13 @@ class HighFidelityEmbeddingModel {
     return vector.length === 0 || vector.every((x) => x === 0);
   }
 
-  private generateDeterministicEmbedding(text: string, dimensions = 1536): number[] {
-    const crypto = require('node:crypto');
-    const cleanText = typeof text === 'string' ? text : String(text || '');
-    const hash = crypto.createHash('sha256').update(cleanText).digest();
+  private generateDeterministicEmbedding(
+    text: string,
+    dimensions = 1536,
+  ): number[] {
+    const crypto = require("node:crypto");
+    const cleanText = typeof text === "string" ? text : String(text || "");
+    const hash = crypto.createHash("sha256").update(cleanText).digest();
     const vector: number[] = [];
     let sumSq = 0;
     for (let i = 0; i < dimensions; i++) {
@@ -195,7 +269,10 @@ class HighFidelityEmbeddingModel {
       }
       return vector;
     } catch (err) {
-      console.warn(`[HighFidelityEmbedding] Call failed, generating high-fidelity fallback:`, err);
+      console.warn(
+        `[HighFidelityEmbedding] Call failed, generating high-fidelity fallback:`,
+        err,
+      );
       return this.generateDeterministicEmbedding(text, 1536);
     }
   }
@@ -207,14 +284,22 @@ class HighFidelityEmbeddingModel {
         vectors.map(async (vector, idx) => {
           if (this.isAllZeros(vector)) {
             const dimensions = vector.length > 0 ? vector.length : 1536;
-            return this.generateDeterministicEmbedding(documents[idx], dimensions);
+            return this.generateDeterministicEmbedding(
+              documents[idx],
+              dimensions,
+            );
           }
           return vector;
         }),
       );
     } catch (err) {
-      console.warn(`[HighFidelityEmbedding] Call failed, generating high-fidelity fallback for documents:`, err);
-      return documents.map((doc) => this.generateDeterministicEmbedding(doc, 1536));
+      console.warn(
+        `[HighFidelityEmbedding] Call failed, generating high-fidelity fallback for documents:`,
+        err,
+      );
+      return documents.map((doc) =>
+        this.generateDeterministicEmbedding(doc, 1536),
+      );
     }
   }
 }
@@ -222,10 +307,10 @@ class HighFidelityEmbeddingModel {
 export function getEmbeddingModel(): HighFidelityEmbeddingModel {
   const model = new OpenAIEmbeddings({
     configuration: {
-      baseURL: 'http://localhost:11211/api/openai/v1',
+      baseURL: "http://localhost:11211/api/openai/v1",
     },
-    apiKey: 'dummy',
-    modelName: 'text-embedding-005:latest',
+    apiKey: "dummy",
+    modelName: "text-embedding-005:latest",
   });
   return new HighFidelityEmbeddingModel(model);
 }

@@ -41,8 +41,42 @@ export class IntentTriageEngine {
       console.log(
         `[Triage Logging] Successfully recorded intent log -> ${method} (confidence: ${confidence.toFixed(3)})`,
       );
+
+      // 当意图置信度低于 0.65 时，自动归档至 low_confidence_logs 表供后续人工复核与样本微调
+      if (confidence < 0.65) {
+        await this.logLowConfidenceToDB(threadId, inputText, intents);
+      }
     } catch (err) {
       console.warn("[Triage Logging Exception] Bypassed log persistence:", err);
+    }
+  }
+
+  /**
+   * 记录低置信度/模糊意图日志供运营标注与人工复核
+   */
+  static async logLowConfidenceToDB(
+    threadId: string,
+    inputText: string,
+    candidates: unknown,
+  ): Promise<void> {
+    try {
+      await db.execute(
+        "INSERT INTO low_confidence_logs (thread_id, input_text, candidates, reviewed, created_at) VALUES ($1, $2, $3, false, $4)",
+        [
+          threadId,
+          inputText,
+          JSON.stringify(candidates),
+          new Date().toISOString(),
+        ],
+      );
+      console.log(
+        `[Low Confidence Logging] ⚠️ Recorded low confidence query for human review -> thread: ${threadId}`,
+      );
+    } catch (err) {
+      console.warn(
+        "[Low Confidence Logging Exception] Bypassed log persistence:",
+        err,
+      );
     }
   }
 
@@ -707,7 +741,7 @@ export class IntentTriageEngine {
     console.log(
       "[Triage Fallthrough to Step 3] Launching Gemini Flash deep triage classifier...",
     );
-    const llm = getLLM(state.jobId);
+    const llm = getLLM(state.jobId, state.threadId, "triage");
 
     const contextMsgs = historyMsgs.slice(0, -1);
     const recentHistory = contextMsgs

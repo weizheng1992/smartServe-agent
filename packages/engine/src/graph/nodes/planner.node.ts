@@ -383,7 +383,7 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
     }
   }
 
-  const llm = getLLM(state.jobId);
+  const llm = getLLM(state.jobId, state.threadId, "planner");
   const prompt = `System Instruction Context: "${systemPrompt}"${tenantContext}
 Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}${historyContext}
 

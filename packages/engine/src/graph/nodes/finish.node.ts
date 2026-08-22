@@ -151,7 +151,7 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   }
 
   const input = state.input;
-  const llm = getLLM(state.jobId);
+  const llm = getLLM(state.jobId, state.threadId, "finish");
 
   // 📦 SaaS Contextual RAG: 将多租户隔离检索出的企业知识库和标准业务政策（SOP）注入 Prompt，使回复回答完全匹配对应商户规则，彻底杜绝多租户政策幻觉混淆
   let ragContext = "";
