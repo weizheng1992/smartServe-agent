@@ -4,12 +4,34 @@ This document serves as the single source of truth for domain vocabulary and mod
 
 ## Execution & Gatekeeping Subsystem
 
+### ApprovalGatekeeper (`packages/engine/src/approval/approvalGatekeeper.ts`)
+
+A deep domain gatekeeper subsystem unifying security policy evaluation, pending approval lifecycle management, and execution resumption:
+
+- **Security & Policy Rules**: Encapsulates double-refund checks against physical database status, refund auto-approval threshold evaluation against tenant business configs, and high-value shipping address change interception.
+- **Ticket Lifecycle & Concurrency**: Manages pending ticket creation (`waiting`), timeout auto-expiration (`expired`), distributed Redis SETNX / In-Memory mutual exclusion locks, and決议状态机迁移 (`approved`, `rejected`, `cancelled`, `resolved_by_human`).
+- **Resumption & IM Takeover**: Dispatches instant human IM takeover notifications and resumes suspended LangGraph Agent executions via `WorkflowOrchestrator.dispatchJob`.
+
 ### AgentMemoryEngine (`packages/engine/src/memory/agentMemoryEngine.ts`)
 
 A unified 4-tier memory facade that encapsulates `ShortMemory`, `LongMemory`, `TaskMemory`, and `EpisodicMemory`:
 
 - **Atomic Multi-Tier Gathering (`gatherContext`)**: Parallelly fetches sliding conversation history, approved long-term facts, task state, and episodic events in a single call.
 - **Turn Recording (`recordTurn`)**: Structured, non-blocking turn persistence across short messages, profile facts, task plans, and episodic events.
+
+### ContextAssemblyPipeline (`packages/engine/src/memory/contextAssemblyPipeline.ts`)
+
+A deep context assembly and token budgeting engine:
+
+- **Structured Context Bundling**: Assembles sliding short memory history, RAG knowledge slices, long-term customer persona facts, and episodic memory into structured prompt sections.
+- **Relevance & Token Budget Pruning**: Dynamically prunes facts and history based on confidence and target token budgets.
+
+### NLMetricQueryEngine (`packages/tools/src/nlQuery/nlMetricQueryEngine.ts`)
+
+A deep, consolidated Natural Language to SQL analytics compiler engine:
+
+- **Orthogonal AST Parsing**: Normalizes customer colloquialisms, extracts time windows (`TimeRangeResult`), resolves dimensions and group-by columns, parses dynamic value/category filters, and determines top-N / order directions.
+- **Parameterized SQL Compilation**: Safely compiles ASTs into PostgreSQL physical queries respecting multi-tenant boundaries (`business_id`) and store manager scopes without risking SQL injection.
 
 ### StepExecutionEngine
 
@@ -66,14 +88,15 @@ A unified deep module facade class for all RAG operations across multi-tenant kn
 
 ## API & Service Layer Subsystem
 
-### ChatSessionService (`apps/web/app/api/chat/services/chatSessionService.ts`)
+### ChatSessionOrchestrator (`apps/web/app/api/chat/services/chatSessionOrchestrator.ts`)
 
-A domain service that decouples chat session initiation, concurrency control, and human support detection from HTTP route handlers:
+A deep domain service that decouples chat session initiation, concurrency control, human support detection, and SSE streaming from HTTP route handlers:
 
 - **Tenant Quota Guard Enforcement**: Verifies rate limits and token usage bounds before processing requests.
 - **Human Support Session Bypass**: Intercepts queries when an active human takeover (`waiting`) ticket exists and routes messages directly to persistence without triggering AI Agent graph execution.
 - **Request Collapsing & Deduplication**: Employs singleflight request collapsing for in-flight queries and 5-second exact text hash deduplication caching.
 - **Execution Engine Dispatching**: Seamlessly dispatches work to Temporal workflow orchestration or falls back to local LangGraph state graph.
+- **Unified SSE Event Streaming (`createEventStream`)**: Encapsulates Temporal polling loops, LangGraph event journal playback, and heartbeat keepalive frames for client streams.
 
 ### ApprovalService (`apps/web/app/api/chat/services/approvalService.ts`)
 
