@@ -45,3 +45,28 @@ export interface ApprovalDecisionRequest {
   replyMessage?: string;
   isFinish?: boolean;
 }
+
+export interface OrderItemSummary {
+  productName: string;
+  price: number;
+  quantity: number;
+  imageUrl?: string;
+}
+
+export interface UserOrderRecord {
+  orderId: string;
+  status: string;
+  totalAmount: number;
+  currency?: string;
+  carrier?: string;
+  trackingNumber?: string;
+  addressId?: string;
+  addressTag?: string;
+  recipientName?: string;
+  phone?: string;
+  shippingAddress?: string;
+  estimatedDelivery?: string;
+  createdAt?: string;
+  businessId?: string;
+  items?: OrderItemSummary[];
+}

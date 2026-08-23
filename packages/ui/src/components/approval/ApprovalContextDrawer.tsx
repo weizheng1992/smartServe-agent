@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useState } from "react";
-import type { Approval } from "types";
+import type { Approval, OrderItemSummary, UserOrderRecord } from "types";
 import {
   Activity,
   AlertTriangle,
@@ -49,24 +49,6 @@ export interface UserProfileData {
     content: string;
     timestamp?: string;
   }>;
-}
-
-export interface OrderItemSummary {
-  productName: string;
-  price: number;
-  quantity: number;
-  imageUrl?: string;
-}
-
-export interface UserOrderRecord {
-  orderId: string;
-  status: string;
-  totalAmount: number;
-  currency?: string;
-  carrier?: string;
-  trackingNumber?: string;
-  createdAt?: string;
-  items?: OrderItemSummary[];
 }
 
 export interface ChatMessageRecord {
@@ -208,8 +190,19 @@ export function ApprovalContextDrawer({
               .catch(() => ({ success: false }))
           : Promise.resolve({ success: false });
 
-        Promise.all([fetchMessages, fetchPreferences])
-          .then(([msgData, prefData]) => {
+        const orderParams = new URLSearchParams();
+        if (targetUserId) orderParams.set("userId", targetUserId);
+        if (targetUserEmail) orderParams.set("userEmail", targetUserEmail);
+        if (approval.threadId) orderParams.set("threadId", approval.threadId);
+        if (approval.businessId)
+          orderParams.set("businessId", approval.businessId);
+
+        const fetchOrders = fetch(`/api/chat/orders?${orderParams.toString()}`)
+          .then((res) => res.json())
+          .catch(() => ({ success: false }));
+
+        Promise.all([fetchMessages, fetchPreferences, fetchOrders])
+          .then(([msgData, prefData, ordData]) => {
             setDetail((prev) => {
               if (!prev) return prev;
               const nextDetail = { ...prev };
@@ -236,6 +229,13 @@ export function ApprovalContextDrawer({
                     }),
                   );
                 }
+              }
+              if (
+                ordData.success &&
+                Array.isArray(ordData.orders) &&
+                ordData.orders.length > 0
+              ) {
+                nextDetail.orders = ordData.orders;
               }
               return nextDetail;
             });
@@ -616,7 +616,7 @@ export function ApprovalContextDrawer({
             </div>
           )}
 
-          {/* 3. 📦 TAB 3: 购买记录与历史订单 */}
+          {/* 3. 📦 TAB 3: 购买记录与历史订单 (包含正规化地址薄与商品明细) */}
           {activeTab === "PURCHASE_HISTORY" && (
             <div className="space-y-3">
               {!detail?.orders || detail.orders.length === 0 ? (
@@ -637,11 +637,12 @@ export function ApprovalContextDrawer({
                           : "border-slate-800"
                       }`}
                     >
-                      <CardContent className="p-4 space-y-3">
+                      <CardContent className="p-4 space-y-3.5">
+                        {/* 顶部订单号与金额 */}
                         <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-xs font-bold text-slate-100">
-                              订单: {ord.orderId}
+                              订单号: {ord.orderId}
                             </span>
                             {isTarget && (
                               <Badge className="bg-indigo-600 text-white text-[9px] font-bold">
@@ -662,16 +663,53 @@ export function ApprovalContextDrawer({
                           </div>
                         </div>
 
-                        {/* Order Items */}
+                        {/* 收货地址薄 (Normalized User Address) */}
+                        <div className="bg-slate-950/70 border border-slate-850 p-2.5 rounded-lg space-y-1.5 text-xs font-mono">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-slate-300">
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1.5 py-0 bg-indigo-500/10 text-indigo-300 border-indigo-500/30"
+                              >
+                                {ord.addressTag === "company"
+                                  ? "公司地址"
+                                  : ord.addressTag === "school"
+                                    ? "学校地址"
+                                    : "家庭/常用地址"}
+                              </Badge>
+                              <span className="font-bold text-slate-200">
+                                {ord.recipientName || "收货人"}
+                              </span>
+                              <span className="text-slate-400">
+                                ({ord.phone || "138****0000"})
+                              </span>
+                            </div>
+                            {ord.addressId && (
+                              <span className="text-[9px] text-slate-500 truncate max-w-[120px]">
+                                AddrID: {ord.addressId.slice(0, 8)}...
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                            📍 配送地址: {ord.shippingAddress || "标准配送地址"}
+                          </div>
+                        </div>
+
+                        {/* 订单商品明细 (Order Items) */}
                         {ord.items && ord.items.length > 0 && (
                           <div className="space-y-1.5">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase font-mono block">
+                              商品采购明细
+                            </span>
                             {ord.items.map((it, i) => (
                               <div
                                 key={i}
-                                className="flex justify-between items-center text-xs text-slate-300 bg-slate-950/60 p-2 rounded-lg"
+                                className="flex justify-between items-center text-xs text-slate-300 bg-slate-950/40 p-2 rounded-lg border border-slate-850"
                               >
-                                <span>{it.productName}</span>
-                                <span className="font-mono text-slate-400">
+                                <span className="font-medium text-slate-200 truncate pr-2">
+                                  {it.productName}
+                                </span>
+                                <span className="font-mono text-slate-400 shrink-0">
                                   ¥ {it.price.toFixed(2)} × {it.quantity}
                                 </span>
                               </div>
@@ -679,12 +717,17 @@ export function ApprovalContextDrawer({
                           </div>
                         )}
 
-                        <div className="flex justify-between text-[11px] font-mono text-slate-500 pt-1">
+                        {/* 物流与时间 */}
+                        <div className="flex justify-between text-[11px] font-mono text-slate-500 pt-1 border-t border-slate-850">
                           <span>
-                            快递: {ord.carrier || "顺丰速运"} (
+                            承运物流: {ord.carrier || "顺丰速运"} (
                             {ord.trackingNumber || "暂无单号"})
                           </span>
-                          <span>下单时间: {ord.createdAt || "-"}</span>
+                          <span>
+                            {ord.createdAt?.includes("T")
+                              ? new Date(ord.createdAt).toLocaleDateString()
+                              : ord.createdAt || "-"}
+                          </span>
                         </div>
                       </CardContent>
                     </Card>

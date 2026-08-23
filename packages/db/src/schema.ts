@@ -46,6 +46,8 @@ export const orders = pgTable("orders", {
   userId: text("user_id"), // 关联用户，支持 SaaS 级归属权控制
   businessId: text("business_id").notNull(), // 关联商户（SaaS 租户隔离，如 nike / adidas）
   totalAmount: real("total_amount"), // 订单总金额
+  addressId: uuid("address_id"), // 外键严格指向 user_addresses.id 收货地址薄
+  createdAt: timestamp("created_at").defaultNow(), // 订单创建时间
 });
 
 // ============ Products (商品物理表 - SaaS 租户级管理) ============

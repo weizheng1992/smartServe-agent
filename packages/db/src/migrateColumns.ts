@@ -10,6 +10,13 @@ async function migrateColumns() {
     ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price real DEFAULT 0.0;
     ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cost_at_purchase real DEFAULT 0.0;
 
+    -- Orders additional delivery fields and address relationship
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS address_id uuid;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_address text;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS recipient_name text;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone text;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at timestamp DEFAULT NOW();
+
     -- Dual-tier scoped persona columns
     ALTER TABLE long_memory_facts ADD COLUMN IF NOT EXISTS business_id text;
     ALTER TABLE long_memory_facts ADD COLUMN IF NOT EXISTS scope text DEFAULT 'global';

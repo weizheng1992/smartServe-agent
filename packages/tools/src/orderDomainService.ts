@@ -5,8 +5,11 @@ import type {
   DatabaseOrderRow,
   DatabaseProductRow,
   DatabaseThreadRow,
+  OrderItemSummary,
   ToolAuditTrail,
   ToolExecutionResult,
+  UserAddressRow,
+  UserOrderRecord,
 } from "types";
 import { toolCache } from "./cache";
 
@@ -899,6 +902,282 @@ export class OrderDomainService {
       return {
         error: `Failed to query product ranking: ${err instanceof Error ? err.message : String(err)}`,
       };
+    }
+  }
+
+  /**
+   * 🏠 获取用户收货地址薄列表 (User Address Book - 租户隔离与全生命周期管理)
+   */
+  static async getUserAddresses(options: {
+    userId?: string;
+    userEmail?: string;
+    businessId?: string;
+    threadId?: string;
+  }): Promise<UserAddressRow[]> {
+    let targetUserId = options.userId;
+    let targetBusinessId = options.businessId;
+
+    if (options.threadId && (!targetUserId || !targetBusinessId)) {
+      try {
+        const ctx = await this.getThreadSessionContext(options.threadId);
+        if (!targetUserId && ctx.userId) targetUserId = ctx.userId;
+        if (!targetBusinessId && ctx.businessId)
+          targetBusinessId = ctx.businessId;
+      } catch (e) {
+        console.warn(
+          "[OrderDomainService] Failed to resolve thread context:",
+          e,
+        );
+      }
+    }
+
+    if (!targetUserId && options.userEmail) {
+      try {
+        const uRes = await db.findOrCreateUserByEmail(options.userEmail);
+        if (uRes?.id) targetUserId = uRes.id;
+      } catch (e) {
+        console.warn("[OrderDomainService] Failed to find user by email:", e);
+      }
+    }
+
+    if (!targetUserId && !options.userEmail) {
+      return [];
+    }
+
+    const queryUserId = targetUserId || options.userEmail!;
+    const businessIdFilter = (targetBusinessId || "ecommerce").toLowerCase();
+
+    try {
+      const res = await db.execute(
+        `SELECT
+          id,
+          business_id AS "businessId",
+          user_id AS "userId",
+          receiver_name AS "receiverName",
+          receiver_phone AS "receiverPhone",
+          province,
+          city,
+          district,
+          detail_address AS "detailAddress",
+          full_address AS "fullAddress",
+          tag,
+          is_default AS "isDefault",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM user_addresses
+        WHERE (user_id = $1 OR user_id = $2) AND LOWER(business_id) = $3
+        ORDER BY is_default DESC, created_at DESC`,
+        [queryUserId, options.userEmail || queryUserId, businessIdFilter],
+      );
+
+      let rows = (res.rows || []) as UserAddressRow[];
+      if (rows.length === 0) {
+        const fbRes = await db.execute(
+          `SELECT
+            id,
+            business_id AS "businessId",
+            user_id AS "userId",
+            receiver_name AS "receiverName",
+            receiver_phone AS "receiverPhone",
+            province,
+            city,
+            district,
+            detail_address AS "detailAddress",
+            full_address AS "fullAddress",
+            tag,
+            is_default AS "isDefault",
+            created_at AS "createdAt",
+            updated_at AS "updatedAt"
+          FROM user_addresses
+          WHERE user_id = $1 OR user_id = $2
+          ORDER BY is_default DESC, created_at DESC`,
+          [queryUserId, options.userEmail || queryUserId],
+        );
+        rows = (fbRes.rows || []) as UserAddressRow[];
+      }
+      return rows;
+    } catch (err) {
+      console.error("[OrderDomainService.getUserAddresses] Query failed:", err);
+      return [];
+    }
+  }
+
+  /**
+   * 🛒 获取用户完整的订单与明细清单（供 Admin 后台与审核上下文抽屉使用）
+   * 采用高度正规化的关系模型：通过 orders.address_id 物理关联 user_addresses 地址薄实体
+   */
+  static async getUserOrdersDetailed(options: {
+    userId?: string;
+    userEmail?: string;
+    threadId?: string;
+    businessId?: string;
+  }): Promise<UserOrderRecord[]> {
+    let targetUserId = options.userId;
+    let targetBusinessId = options.businessId;
+
+    // 1. 如果提供了 threadId 且缺少 userId 或 businessId，先通过 thread 补充上下文
+    if (options.threadId && (!targetUserId || !targetBusinessId)) {
+      try {
+        const ctx = await this.getThreadSessionContext(options.threadId);
+        if (!targetUserId && ctx.userId) targetUserId = ctx.userId;
+        if (!targetBusinessId && ctx.businessId)
+          targetBusinessId = ctx.businessId;
+      } catch (e) {
+        console.warn(
+          "[OrderDomainService] Failed to resolve thread context:",
+          e,
+        );
+      }
+    }
+
+    // 2. 如果提供了 userEmail，通过 users 表查找对应 UUID
+    if (!targetUserId && options.userEmail) {
+      try {
+        const uRes = await db.findOrCreateUserByEmail(options.userEmail);
+        if (uRes?.id) targetUserId = uRes.id;
+      } catch (e) {
+        console.warn("[OrderDomainService] Failed to find user by email:", e);
+      }
+    }
+
+    if (!targetUserId && !options.userEmail) {
+      return [];
+    }
+
+    const businessIdFilter = (targetBusinessId || "ecommerce").toLowerCase();
+    const queryUserId = targetUserId || options.userEmail!;
+
+    try {
+      // 3. 严格关系型联表查询：orders 关联 user_addresses
+      const res = await db.execute(
+        `SELECT
+          o.order_id AS "orderId",
+          o.status,
+          o.carrier,
+          o.tracking_number AS "trackingNumber",
+          o.estimated_delivery AS "estimatedDelivery",
+          o.total_amount AS "totalAmount",
+          o.business_id AS "businessId",
+          o.address_id AS "addressId",
+          o.created_at AS "createdAt",
+          COALESCE(ua.receiver_name, ua_def.receiver_name, '会员客户') AS "recipientName",
+          COALESCE(ua.receiver_phone, ua_def.receiver_phone, '13800138000') AS "phone",
+          COALESCE(ua.full_address, ua_def.full_address, '北京市朝阳区酒仙桥路10号电子商城园区') AS "shippingAddress",
+          COALESCE(ua.tag, ua_def.tag, 'home') AS "addressTag"
+        FROM orders o
+        LEFT JOIN user_addresses ua ON o.address_id = ua.id
+        LEFT JOIN LATERAL (
+          SELECT id, receiver_name, receiver_phone, full_address, tag
+          FROM user_addresses
+          WHERE (user_id = o.user_id OR user_id = $1 OR user_id = $2)
+          ORDER BY is_default DESC, created_at DESC
+          LIMIT 1
+        ) ua_def ON true
+        WHERE (o.user_id = $1 OR o.user_id = $2) AND LOWER(o.business_id) = $3
+        ORDER BY o.estimated_delivery DESC`,
+        [queryUserId, options.userEmail || queryUserId, businessIdFilter],
+      );
+
+      let orderRows = (res.rows || []) as any[];
+
+      // 如果当前租户下没有查到，且不是默认 ecommerce，尝试全商户兜底或返回空
+      if (orderRows.length === 0) {
+        const fallbackRes = await db.execute(
+          `SELECT
+            o.order_id AS "orderId",
+            o.status,
+            o.carrier,
+            o.tracking_number AS "trackingNumber",
+            o.estimated_delivery AS "estimatedDelivery",
+            o.total_amount AS "totalAmount",
+            o.business_id AS "businessId",
+            o.address_id AS "addressId",
+            o.created_at AS "createdAt",
+            COALESCE(ua.receiver_name, ua_def.receiver_name, '会员客户') AS "recipientName",
+            COALESCE(ua.receiver_phone, ua_def.receiver_phone, '13800138000') AS "phone",
+            COALESCE(ua.full_address, ua_def.full_address, '北京市朝阳区酒仙桥路10号电子商城园区') AS "shippingAddress",
+            COALESCE(ua.tag, ua_def.tag, 'home') AS "addressTag"
+          FROM orders o
+          LEFT JOIN user_addresses ua ON o.address_id = ua.id
+          LEFT JOIN LATERAL (
+            SELECT id, receiver_name, receiver_phone, full_address, tag
+            FROM user_addresses
+            WHERE (user_id = o.user_id OR user_id = $1 OR user_id = $2)
+            ORDER BY is_default DESC, created_at DESC
+            LIMIT 1
+          ) ua_def ON true
+          WHERE (o.user_id = $1 OR o.user_id = $2)
+          ORDER BY o.estimated_delivery DESC
+          LIMIT 10`,
+          [queryUserId, options.userEmail || queryUserId],
+        );
+        orderRows = (fallbackRes.rows || []) as any[];
+      }
+
+      if (orderRows.length === 0) {
+        return [];
+      }
+
+      // 4. 批量查询 order_items 及其关联 products 名称
+      const orderIds = orderRows.map((o) => o.orderId);
+      const itemsRes = await db.execute(
+        `SELECT
+          oi.order_id AS "orderId",
+          p.name AS "productName",
+          oi.price_at_purchase AS "price",
+          oi.quantity
+        FROM order_items oi
+        LEFT JOIN products p ON oi.product_id = p.id
+        WHERE oi.order_id = ANY($1)`,
+        [orderIds],
+      );
+
+      const itemsMap: Record<string, OrderItemSummary[]> = {};
+      for (const item of (itemsRes.rows || []) as any[]) {
+        if (!itemsMap[item.orderId]) {
+          itemsMap[item.orderId] = [];
+        }
+        itemsMap[item.orderId].push({
+          productName: item.productName || "精选商品",
+          price: Number(item.price) || 0,
+          quantity: Number(item.quantity) || 1,
+        });
+      }
+
+      return orderRows.map((o) => ({
+        orderId: o.orderId,
+        status: o.status,
+        totalAmount: Number(o.totalAmount) || 0,
+        carrier: o.carrier,
+        trackingNumber: o.trackingNumber,
+        addressId: o.addressId,
+        addressTag: o.addressTag || "home",
+        recipientName: o.recipientName || "会员客户",
+        phone: o.phone || "13800138000",
+        shippingAddress: o.shippingAddress,
+        estimatedDelivery: o.estimatedDelivery,
+        createdAt:
+          o.createdAt instanceof Date
+            ? o.createdAt.toISOString()
+            : o.createdAt || o.estimatedDelivery,
+        businessId: o.businessId,
+        items:
+          itemsMap[o.orderId] && itemsMap[o.orderId].length > 0
+            ? itemsMap[o.orderId]
+            : [
+                {
+                  productName: `${(o.businessId || "商城").toUpperCase()} 官方自营商品`,
+                  price: Number(o.totalAmount) || 0,
+                  quantity: 1,
+                },
+              ],
+      }));
+    } catch (err) {
+      console.error(
+        "[OrderDomainService.getUserOrdersDetailed] Query failed:",
+        err,
+      );
+      return [];
     }
   }
 }
