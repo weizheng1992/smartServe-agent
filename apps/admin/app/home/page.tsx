@@ -6,9 +6,11 @@ import { HumanChatModal } from 'ui';
 // Local Hooks
 import { useAdminDashboardData } from './hooks';
 
+import { ConversationsExplorer } from './components/ConversationsExplorer';
 // Local Components
 import { Header } from './components/Header';
 import { HistoricalAudits } from './components/HistoricalAudits';
+import { LiveDesk } from './components/LiveDesk';
 import { Metrics } from './components/Metrics';
 import { PendingApprovals } from './components/PendingApprovals';
 import { PersonaAudit } from './components/PersonaAudit';
@@ -33,6 +35,8 @@ export default function AdminDashboard() {
     preferences,
   } = useAdminDashboardData();
 
+  const [activeTab, setActiveTab] = useState<'approvals' | 'conversations' | 'live-desk'>('approvals');
+  const [liveDeskThreadId, setLiveDeskThreadId] = useState<string | undefined>(undefined);
   const [activeChatApproval, setActiveChatApproval] = useState<Approval | null>(null);
 
   const handleStartTakeover = async () => {
@@ -43,41 +47,63 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleSelectForLiveDesk = (threadId: string) => {
+    setLiveDeskThreadId(threadId);
+    setActiveTab('live-desk');
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased">
       {/* 🚀 Header */}
       <Header
         selectedMerchant={selectedMerchant}
         setSelectedMerchant={setSelectedMerchant}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
         isRefreshing={isRefreshing}
         fetchDashboardData={fetchDashboardData}
         onStartActiveTakeover={handleStartTakeover}
       />
 
       <main className="p-8 max-w-7xl mx-auto space-y-8">
-        {/* 📊 SaaS Telemetry BI Metrics Cards */}
-        <Metrics summary={summary} />
+        {/* 📊 Section: Approvals & HITL Mode */}
+        {activeTab === 'approvals' && (
+          <>
+            {/* 📊 SaaS Telemetry BI Metrics Cards */}
+            <Metrics summary={summary} />
 
-        {/* 🛡️ Section 1: Active Pending Approvals Queue */}
-        <PendingApprovals
-          pendingApprovals={pendingApprovals}
-          rejectionReasons={rejectionReasons}
-          setRejectionReasons={setRejectionReasons}
-          submittingActionId={submittingActionId}
-          handleApprovalAction={handleApprovalAction}
-          handleHumanReplyAction={handleHumanReplyAction}
-          onOpenChatModal={(app) => setActiveChatApproval(app)}
-        />
+            {/* 🛡️ Section 1: Active Pending Approvals Queue */}
+            <PendingApprovals
+              pendingApprovals={pendingApprovals}
+              rejectionReasons={rejectionReasons}
+              setRejectionReasons={setRejectionReasons}
+              submittingActionId={submittingActionId}
+              handleApprovalAction={handleApprovalAction}
+              handleHumanReplyAction={handleHumanReplyAction}
+              onOpenChatModal={(app) => setActiveChatApproval(app)}
+            />
 
-        {/* 🧠 Section 1.5: User Preferences & Persona Dynamic Audit Center */}
-        <PersonaAudit
-          selectedMerchant={selectedMerchant}
-          preferences={preferences}
-          handlePreferenceAction={handlePreferenceAction}
-        />
+            {/* 🧠 Section 1.5: User Preferences & Persona Dynamic Audit Center */}
+            <PersonaAudit
+              selectedMerchant={selectedMerchant}
+              preferences={preferences}
+              handlePreferenceAction={handlePreferenceAction}
+            />
 
-        {/* 📁 Section 2: Historical Audited Records */}
-        <HistoricalAudits auditedApprovals={auditedApprovals} />
+            {/* 📁 Section 2: Historical Audited Records */}
+            <HistoricalAudits auditedApprovals={auditedApprovals} />
+          </>
+        )}
+
+        {/* 💬 Section: Full-Spectrum Multi-Tenant Conversations Explorer */}
+        {activeTab === 'conversations' && (
+          <ConversationsExplorer selectedMerchant={selectedMerchant} onSelectForLiveDesk={handleSelectForLiveDesk} />
+        )}
+
+        {/* ⚡ Section: Realtime Live Desk & Takeover Console */}
+        {activeTab === 'live-desk' && (
+          <LiveDesk selectedMerchant={selectedMerchant} initialThreadId={liveDeskThreadId} />
+        )}
       </main>
 
       {/* 💬 Active Takeover IM Chat Modal */}

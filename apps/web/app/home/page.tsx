@@ -66,8 +66,7 @@ export default function Home() {
   });
 
   const activeThread = threads.find((t) => t.id === activeThreadId);
-  const currentBusinessId =
-    activeThread?.businessId || selectedNewThreadMerchant || "ecommerce";
+  const currentBusinessId = activeThread?.businessId || selectedNewThreadMerchant || 'ecommerce';
 
   const {
     messages,

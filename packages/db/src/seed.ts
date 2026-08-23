@@ -1,20 +1,16 @@
-import { Client } from "pg";
+import { Client } from 'pg';
 
 async function main() {
-  const dbUrl =
-    process.env.DATABASE_URL ||
-    "postgres://agent_user:agent_password@localhost:5432/agent_platform";
-  console.log(
-    "🚀 [PG Seed] 启动 100% 纯血 PostgreSQL 多租户 SaaS 关系型数据物理注入...",
-  );
-  console.log("[PG Seed] 目标连接 URL:", dbUrl);
+  const dbUrl = process.env.DATABASE_URL || 'postgres://agent_user:agent_password@localhost:5432/agent_platform';
+  console.log('🚀 [PG Seed] 启动 100% 纯血 PostgreSQL 多租户 SaaS 关系型数据物理注入...');
+  console.log('[PG Seed] 目标连接 URL:', dbUrl);
 
   const client = new Client({ connectionString: dbUrl });
 
   try {
     await client.connect();
 
-    console.log("[PG Seed] 正在清理物理 PostgreSQL 历史表冲突结构...");
+    console.log('[PG Seed] 正在清理物理 PostgreSQL 历史表冲突结构...');
     // 清除历史旧结构以防字段/约束冲突导致 Seeding 报错
     await client.query(`
       DROP TABLE IF EXISTS "session_metrics" CASCADE;
@@ -28,7 +24,7 @@ async function main() {
     `);
 
     // 1. 创建基础核心表
-    console.log("[PG Seed] 正在重新物理创建多租户 SaaS 精密关系型表结构...");
+    console.log('[PG Seed] 正在重新物理创建多租户 SaaS 精密关系型表结构...');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -109,12 +105,12 @@ async function main() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
-    console.log("[PG Seed] 表结构创建成功！开始灌入高保真演示业务数据...");
+    console.log('[PG Seed] 表结构创建成功！开始灌入高保真演示业务数据...');
 
     // 2. 注入 Users & Threads
-    const userEmail = "test@example.com";
+    const userEmail = 'test@example.com';
     const userRes = await client.query(
-      "INSERT INTO users (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id",
+      'INSERT INTO users (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id',
       [userEmail],
     );
     const userId = userRes.rows[0].id;
@@ -128,7 +124,7 @@ async function main() {
         ('thread_adidas_demo', '${userId}', 'adidas', 'active')
       ON CONFLICT (id) DO NOTHING;
     `);
-    console.log("[PG Seed] ✅ 物理多租户 threads 会话注入成功！");
+    console.log('[PG Seed] ✅ 物理多租户 threads 会话注入成功！');
 
     // 3. 注入 Products 商品数据
     await client.query(`
@@ -141,7 +137,7 @@ async function main() {
         ('prod_eco_1', 'ecommerce', '电商主站极绒亲肤抗静电保暖毯', '高克重复合超细纤维，环保防静电印染，居家车载必备。', 49.99, 85)
       ON CONFLICT (id) DO NOTHING;
     `);
-    console.log("[PG Seed] ✅ 物理 products 商品条目注入成功！");
+    console.log('[PG Seed] ✅ 物理 products 商品条目注入成功！');
 
     // 4. 注入 Orders & Order Items
     // 注入4笔极具演示冲突的精妙订单，完美演示小额免签放行 vs 超过时效拦截 vs 大额挂起审核
@@ -171,9 +167,7 @@ async function main() {
         ('item_eco_large_1', 'ORD-ECO-LARGE', 'prod_eco_1', 4, 49.99)
       ON CONFLICT (id) DO NOTHING;
     `);
-    console.log(
-      "[PG Seed] ✅ 物理 orders 及关系型 order_items 明细明细树注入成功！",
-    );
+    console.log('[PG Seed] ✅ 物理 orders 及关系型 order_items 明细明细树注入成功！');
 
     // 5. 注入 SaaS 商户活跃热加载配置规则快照 (Business Configs)
     await client.query(`
@@ -184,7 +178,7 @@ async function main() {
         ('adidas', 1, '{"systemPrompt": "You are an energetic Adidas assistant. Impossible is nothing! Autopilot refund limit is $120.", "refundAutoApprovalLimit": 120}', true, 'admin')
       ON CONFLICT (id) DO NOTHING;
     `);
-    console.log("[PG Seed] ✅ 物理 SaaS 商户热加载配置快照注入成功！");
+    console.log('[PG Seed] ✅ 物理 SaaS 商户热加载配置快照注入成功！');
 
     // 6. 注入会话度量历史数据，使后台 Analytics BI 面板瞬间具备精美的统计走势！
     await client.query(`
@@ -200,22 +194,16 @@ async function main() {
         ('adidas', 'thread_adidas_demo', 3100, 0.000465, 3, 'resolved_auto', 1800, NOW() - INTERVAL '15 minutes')
       ON CONFLICT (id) DO NOTHING;
     `);
-    console.log("[PG Seed] ✅ 物理历史 session_metrics BI 度量数据成功注入！");
+    console.log('[PG Seed] ✅ 物理历史 session_metrics BI 度量数据成功注入！');
 
-    console.log(
-      "\n🌟 =================================================================",
-    );
-    console.log(
-      "✅ [PG Seed] PostgreSQL 物理多租户多商户种子数据注入大圆满完成！",
-    );
-    console.log(
-      "🌟 =================================================================\n",
-    );
+    console.log('\n🌟 =================================================================');
+    console.log('✅ [PG Seed] PostgreSQL 物理多租户多商户种子数据注入大圆满完成！');
+    console.log('🌟 =================================================================\n');
 
     await client.end();
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error("❌ [PG Seed] PostgreSQL Seeding 失败:", errorMessage);
+    console.error('❌ [PG Seed] PostgreSQL Seeding 失败:', errorMessage);
     try {
       await client.end();
     } catch {}

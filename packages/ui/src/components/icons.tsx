@@ -247,6 +247,46 @@ export const Package = createIcon(
   </>,
 );
 
+export const Bot = createIcon(
+  'Bot',
+  <>
+    <path d="M12 8V4H8" />
+    <rect width="16" height="12" x="4" y="8" rx="2" />
+    <path d="M2 14h2" />
+    <path d="M20 14h2" />
+    <path d="M15 13v2" />
+    <path d="M9 13v2" />
+  </>,
+);
+
+export const UserCheck = createIcon(
+  'UserCheck',
+  <>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <polyline points="16 11 18 13 22 9" />
+  </>,
+);
+
+export const ShieldAlert = createIcon(
+  'ShieldAlert',
+  <>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+    <path d="M12 8v4" />
+    <path d="M12 16h.01" />
+  </>,
+);
+
+export const Search = createIcon(
+  'Search',
+  <>
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </>,
+);
+
+export const ChevronRight = createIcon('ChevronRight', <polyline points="9 18 15 12 9 6" />);
+
 export const Truck = createIcon(
   'Truck',
   <>
@@ -294,23 +334,6 @@ export const AlertOctagon = createIcon(
 export const Paperclip = createIcon(
   'Paperclip',
   <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />,
-);
-
-export const Search = createIcon(
-  'Search',
-  <>
-    <circle cx="11" cy="11" r="8" />
-    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-  </>,
-);
-
-export const ShieldAlert = createIcon(
-  'ShieldAlert',
-  <>
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-    <line x1="12" y1="8" x2="12" y2="12" />
-    <line x1="12" y1="16" x2="12.01" y2="16" />
-  </>,
 );
 
 export const TrendingUp = createIcon(

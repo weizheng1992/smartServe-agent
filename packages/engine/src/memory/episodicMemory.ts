@@ -1,5 +1,5 @@
-import { episodicEvents, getDrizzle } from "db";
-import { getEmbeddingModel } from "../llm/callLLMWithRetry";
+import { episodicEvents, getDrizzle } from 'db';
+import { getEmbeddingModel } from '../llm/callLLMWithRetry';
 
 export interface EpisodicEvent {
   id: string;
@@ -7,7 +7,7 @@ export interface EpisodicEvent {
   importanceScore: number; // 1-10
   timestamp: Date;
   embedding?: number[];
-  scope?: "global" | "tenant";
+  scope?: 'global' | 'tenant';
   businessId?: string;
 }
 
@@ -23,15 +23,14 @@ export class EpisodicMemory {
   async addEvent(
     event: string,
     importanceScore: number,
-    scope: "global" | "tenant" = "tenant",
+    scope: 'global' | 'tenant' = 'tenant',
     businessId?: string,
   ): Promise<void> {
     if (!this.userId) {
-      console.warn("[EpisodicMemory] Cannot add event without userId");
+      console.warn('[EpisodicMemory] Cannot add event without userId');
       return;
     }
-    const targetBizId =
-      scope === "tenant" ? businessId || this.businessId || "ecommerce" : null;
+    const targetBizId = scope === 'tenant' ? businessId || this.businessId || 'ecommerce' : null;
 
     console.log(
       `[EpisodicMemory] Added event for user ${this.userId} (Scope: ${scope}, Biz: ${targetBizId}): "${event}" with importance: ${importanceScore}`,
@@ -52,29 +51,19 @@ export class EpisodicMemory {
           importance: importanceScore,
           timestamp: new Date(),
         });
-        console.log(
-          `[EpisodicMemory] Stored event directly in PostgreSQL [Scope: ${scope}]: "${event}"`,
-        );
+        console.log(`[EpisodicMemory] Stored event directly in PostgreSQL [Scope: ${scope}]: "${event}"`);
         return;
       } catch (err) {
-        console.warn(
-          "[EpisodicMemory] Drizzle insertion bypassed due to offline/failed DB.",
-        );
+        console.warn('[EpisodicMemory] Drizzle insertion bypassed due to offline/failed DB.');
       }
     }
   }
 
-  async retrieveEvents(
-    query: string,
-    limit = 3,
-    precomputedEmbedding?: number[],
-  ): Promise<EpisodicEvent[]> {
+  async retrieveEvents(query: string, limit = 3, precomputedEmbedding?: number[]): Promise<EpisodicEvent[]> {
     if (!this.userId) {
       return [];
     }
-    console.log(
-      `[EpisodicMemory] Retrieving episodic events for user ${this.userId} using query: ${query}`,
-    );
+    console.log(`[EpisodicMemory] Retrieving episodic events for user ${this.userId} using query: ${query}`);
 
     let queryEmbedding = precomputedEmbedding;
     if (!queryEmbedding || queryEmbedding.length === 0) {
@@ -85,7 +74,7 @@ export class EpisodicMemory {
     const dbInstance = getDrizzle();
     if (dbInstance) {
       try {
-        const { eq, desc } = require("drizzle-orm");
+        const { eq, desc } = require('drizzle-orm');
         // 限制最多只读取最近的 50 条事件，避免历史会话过多时进行海量全表扫描与无谓的日志打印
         const allEvents = await dbInstance
           .select({
@@ -104,18 +93,14 @@ export class EpisodicMemory {
 
         // 🛡️ 多租户情景隔离与防投毒 (Dual-Tier Scoped Episodic Isolation)
         const tenantEvents = allEvents.filter((row: any) => {
-          if (!row.scope || row.scope === "global") {
+          if (!row.scope || row.scope === 'global') {
             return true;
           }
-          if (row.scope === "tenant") {
-            if (this.businessId && this.businessId !== "ecommerce") {
+          if (row.scope === 'tenant') {
+            if (this.businessId && this.businessId !== 'ecommerce') {
               return row.businessId === this.businessId;
             }
-            return (
-              !row.businessId ||
-              row.businessId === "ecommerce" ||
-              row.businessId === this.businessId
-            );
+            return !row.businessId || row.businessId === 'ecommerce' || row.businessId === this.businessId;
           }
           return false;
         });
@@ -125,24 +110,14 @@ export class EpisodicMemory {
             let embeddingArray: number[] | null = null;
             if (row.embedding) {
               try {
-                embeddingArray =
-                  typeof row.embedding === "string"
-                    ? JSON.parse(row.embedding)
-                    : row.embedding;
+                embeddingArray = typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding;
               } catch (e) {
-                console.warn(
-                  "[EpisodicMemory] Failed to parse embedding JSON:",
-                  e,
-                );
+                console.warn('[EpisodicMemory] Failed to parse embedding JSON:', e);
               }
             }
 
             let similarity = 0;
-            if (
-              embeddingArray &&
-              Array.isArray(embeddingArray) &&
-              embeddingArray.length === queryEmbedding.length
-            ) {
+            if (embeddingArray && Array.isArray(embeddingArray) && embeddingArray.length === queryEmbedding.length) {
               // cosine similarity = (A . B) / (||A|| * ||B||)
               let dotProduct = 0;
               let normA = 0;
@@ -167,10 +142,7 @@ export class EpisodicMemory {
                 keywordMatches++;
               }
             }
-            const keywordScore =
-              queryTokens.length > 0
-                ? (keywordMatches / queryTokens.length) * 0.95
-                : 0;
+            const keywordScore = queryTokens.length > 0 ? (keywordMatches / queryTokens.length) * 0.95 : 0;
             const effectiveScore = Math.max(similarity, keywordScore);
 
             return {
@@ -180,7 +152,7 @@ export class EpisodicMemory {
                 importanceScore: row.importance || 3,
                 timestamp: row.timestamp || new Date(),
                 embedding: embeddingArray || undefined,
-                scope: row.scope || "global",
+                scope: row.scope || 'global',
                 businessId: row.businessId || undefined,
               },
               similarity: effectiveScore,
@@ -207,10 +179,7 @@ export class EpisodicMemory {
           return filteredEvents.slice(0, limit).map((se: any) => se.event);
         }
       } catch (err) {
-        console.warn(
-          "[EpisodicMemory] TS-based cosine similarity search bypassed due to offline/failed DB.",
-          err,
-        );
+        console.warn('[EpisodicMemory] TS-based cosine similarity search bypassed due to offline/failed DB.', err);
       }
     }
 

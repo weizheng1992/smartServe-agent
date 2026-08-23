@@ -1,8 +1,4 @@
-import {
-  ApprovalGatekeeper,
-  type ProcessApprovalActionOptions,
-  type ProcessApprovalActionResult,
-} from "engine";
+import { ApprovalGatekeeper, type ProcessApprovalActionOptions, type ProcessApprovalActionResult } from 'engine';
 
 export type { ProcessApprovalActionOptions, ProcessApprovalActionResult };
 

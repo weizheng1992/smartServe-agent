@@ -1,5 +1,5 @@
-import type React from "react";
-import type { Approval } from "types";
+import type React from 'react';
+import type { Approval } from 'types';
 import {
   Activity,
   AlertTriangle,
@@ -15,13 +15,13 @@ import {
   Truck,
   User,
   XCircle,
-} from "../icons";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardHeader } from "../ui/card";
-import { Input } from "../ui/input";
-import { ApprovalRiskBadge } from "./ApprovalRiskBadge";
-import { getApprovalContextData } from "./approvalUtils";
+} from '../icons';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Card, CardContent, CardHeader } from '../ui/card';
+import { Input } from '../ui/input';
+import { ApprovalRiskBadge } from './ApprovalRiskBadge';
+import { getApprovalContextData } from './approvalUtils';
 
 export interface PendingApprovalCardProps {
   approval: Approval;
@@ -37,63 +37,56 @@ export interface PendingApprovalCardProps {
 
 export function PendingApprovalCard({
   approval,
-  rejectionReason = "",
+  rejectionReason = '',
   setRejectionReason,
   isSubmitting = false,
   onApprove,
   onReject,
   onOpenChat,
   onInspect,
-  className = "",
+  className = '',
 }: PendingApprovalCardProps) {
   const context = getApprovalContextData(approval);
   const { category } = context;
 
   const headerConfig = {
     refund: {
-      border: "border-rose-500/40 hover:border-rose-500/60",
-      headerBg: "bg-rose-500/10 border-rose-500/20 text-rose-300",
+      border: 'border-rose-500/40 hover:border-rose-500/60',
+      headerBg: 'bg-rose-500/10 border-rose-500/20 text-rose-300',
       icon: <DollarSign className="h-4 w-4 text-rose-400 animate-pulse" />,
-      typeLabel: "资金退款审核 (Refund Gate)",
+      typeLabel: '资金退款审核 (Refund Gate)',
     },
     address: {
-      border: "border-amber-500/40 hover:border-amber-500/60",
-      headerBg: "bg-amber-500/10 border-amber-500/20 text-amber-300",
+      border: 'border-amber-500/40 hover:border-amber-500/60',
+      headerBg: 'bg-amber-500/10 border-amber-500/20 text-amber-300',
       icon: <Truck className="h-4 w-4 text-amber-400 animate-pulse" />,
-      typeLabel: "地址变更审核 (Address Change)",
+      typeLabel: '地址变更审核 (Address Change)',
     },
     human: {
-      border: "border-indigo-500/40 hover:border-indigo-500/60",
-      headerBg: "bg-indigo-500/10 border-indigo-500/20 text-indigo-300",
+      border: 'border-indigo-500/40 hover:border-indigo-500/60',
+      headerBg: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-300',
       icon: <MessageSquare className="h-4 w-4 text-indigo-400 animate-pulse" />,
-      typeLabel: "人工客服接管 (Human Support)",
+      typeLabel: '人工客服接管 (Human Support)',
     },
     generic: {
-      border: "border-slate-800 hover:border-slate-700",
-      headerBg: "bg-slate-900 border-slate-800 text-slate-300",
+      border: 'border-slate-800 hover:border-slate-700',
+      headerBg: 'bg-slate-900 border-slate-800 text-slate-300',
       icon: <Activity className="h-4 w-4 text-slate-400" />,
-      typeLabel: approval.actionType || "安全操作核准",
+      typeLabel: approval.actionType || '安全操作核准',
     },
   }[category];
 
   return (
-    <Card
-      className={`bg-slate-900 overflow-hidden shadow-xl transition-all ${headerConfig.border} ${className}`}
-    >
+    <Card className={`bg-slate-900 overflow-hidden shadow-xl transition-all ${headerConfig.border} ${className}`}>
       {/* 🏷️ Header */}
       <CardHeader
         className={`px-5 py-3.5 border-b flex flex-row justify-between items-center space-y-0 ${headerConfig.headerBg}`}
       >
         <div className="flex items-center space-x-2">
           {headerConfig.icon}
-          <span className="text-xs font-bold uppercase tracking-wider font-mono">
-            {headerConfig.typeLabel}
-          </span>
+          <span className="text-xs font-bold uppercase tracking-wider font-mono">{headerConfig.typeLabel}</span>
         </div>
-        <ApprovalRiskBadge
-          actionType={approval.actionType}
-          status={approval.status}
-        />
+        <ApprovalRiskBadge actionType={approval.actionType} status={approval.status} />
       </CardHeader>
 
       {/* 📦 Main Body */}
@@ -101,34 +94,23 @@ export function PendingApprovalCard({
         {/* 🌐 Base Context Metadata */}
         <div className="grid grid-cols-2 gap-2 text-xs bg-slate-950/60 border border-slate-850/80 p-3 rounded-xl">
           <div>
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-mono">
-              商户租户
-            </span>
-            <span className="font-mono text-indigo-300 font-bold uppercase">
-              {approval.businessId || "ecommerce"}
-            </span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-mono">商户租户</span>
+            <span className="font-mono text-indigo-300 font-bold uppercase">{approval.businessId || 'ecommerce'}</span>
           </div>
           <div>
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-mono">
-              工单 ID
-            </span>
-            <span className="font-mono text-slate-300">
-              {approval.id.substring(0, 10)}...
-            </span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-mono">工单 ID</span>
+            <span className="font-mono text-slate-300">{approval.id.substring(0, 10)}...</span>
           </div>
           <div className="col-span-2 flex justify-between items-center pt-1 border-t border-slate-850/60">
             <span className="text-[10px] text-slate-500 font-mono">
-              Thread:{" "}
-              <span className="text-slate-400 font-mono">
-                {approval.threadId}
-              </span>
+              Thread: <span className="text-slate-400 font-mono">{approval.threadId}</span>
             </span>
             {approval.deadline && (
               <span className="text-[10px] text-amber-400/90 font-mono flex items-center gap-1">
                 <Clock className="h-3 w-3" />
                 {new Date(approval.deadline).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
+                  hour: '2-digit',
+                  minute: '2-digit',
                 })}
               </span>
             )}
@@ -142,12 +124,8 @@ export function PendingApprovalCard({
               <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
                 <div className="text-xs">
-                  <span className="font-bold text-amber-300 block mb-0.5">
-                    拦截与风控原因
-                  </span>
-                  <span className="text-slate-300 leading-relaxed">
-                    {context.reason}
-                  </span>
+                  <span className="font-bold text-amber-300 block mb-0.5">拦截与风控原因</span>
+                  <span className="text-slate-300 leading-relaxed">{context.reason}</span>
                 </div>
               </div>
             )}
@@ -155,8 +133,7 @@ export function PendingApprovalCard({
             {context.userInput && (
               <div className="bg-slate-950 border border-slate-850 rounded-xl p-3 space-y-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                  <User className="h-3 w-3 text-slate-400" /> 用户原始诉求 /
-                  上下文
+                  <User className="h-3 w-3 text-slate-400" /> 用户原始诉求 / 上下文
                 </span>
                 <p className="text-xs text-indigo-200 font-mono bg-indigo-950/20 p-2 rounded-lg border border-indigo-500/20">
                   &quot;{context.userInput}&quot;
@@ -167,7 +144,7 @@ export function PendingApprovalCard({
         )}
 
         {/* 🎨 Type-Specific Specialized Details */}
-        {category === "refund" && (
+        {category === 'refund' && (
           <div className="bg-rose-950/20 border border-rose-500/30 rounded-xl p-3.5 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1 font-mono">
@@ -193,7 +170,7 @@ export function PendingApprovalCard({
           </div>
         )}
 
-        {category === "address" && (
+        {category === 'address' && (
           <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-3.5 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1 font-mono">
@@ -225,18 +202,12 @@ export function PendingApprovalCard({
                 <div className="text-[11px] text-slate-400 pt-1 flex gap-3">
                   {context.recipientName && (
                     <span>
-                      收件人:{" "}
-                      <strong className="text-slate-200">
-                        {context.recipientName}
-                      </strong>
+                      收件人: <strong className="text-slate-200">{context.recipientName}</strong>
                     </span>
                   )}
                   {context.phone && (
                     <span>
-                      电话:{" "}
-                      <strong className="text-slate-200">
-                        {context.phone}
-                      </strong>
+                      电话: <strong className="text-slate-200">{context.phone}</strong>
                     </span>
                   )}
                 </div>
@@ -245,14 +216,13 @@ export function PendingApprovalCard({
           </div>
         )}
 
-        {category === "human" && (
+        {category === 'human' && (
           <div className="bg-indigo-950/20 border border-indigo-500/30 rounded-xl p-3.5 space-y-2.5">
             <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1 font-mono">
               <MessageSquare className="h-3.5 w-3.5" /> 人工客服工单接管状态
             </span>
             <p className="text-xs text-slate-300 leading-relaxed">
-              AI 智能助理已暂停自动答复。您可以点击下方按钮进入独立 IM
-              聊天室，或直接核准/驳回。
+              AI 智能助理已暂停自动答复。您可以点击下方按钮进入独立 IM 聊天室，或直接核准/驳回。
             </p>
           </div>
         )}
@@ -267,9 +237,7 @@ export function PendingApprovalCard({
               {Object.entries(context.extraArgs).map(([k, v]) => (
                 <div key={k} className="flex gap-2">
                   <span className="text-slate-500">{k}:</span>
-                  <span className="text-indigo-300">
-                    {typeof v === "object" ? JSON.stringify(v) : String(v)}
-                  </span>
+                  <span className="text-indigo-300">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
                 </div>
               ))}
             </div>

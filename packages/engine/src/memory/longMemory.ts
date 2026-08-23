@@ -1,5 +1,5 @@
-import { getDrizzle, longMemoryFacts } from "db";
-import { getEmbeddingModel, getLLM } from "../llm/callLLMWithRetry";
+import { getDrizzle, longMemoryFacts } from 'db';
+import { getEmbeddingModel, getLLM } from '../llm/callLLMWithRetry';
 
 export interface LongMemoryFact {
   id: string;
@@ -7,7 +7,7 @@ export interface LongMemoryFact {
   category: string;
   timestamp: string;
   embedding?: number[];
-  scope?: "global" | "tenant";
+  scope?: 'global' | 'tenant';
   businessId?: string;
   confidence?: number;
   status?: string;
@@ -25,16 +25,14 @@ export class LongMemory {
   async extractAndStoreFact(
     conversationText: string,
     userQuery?: string,
-    explicitScope?: "global" | "tenant",
+    explicitScope?: 'global' | 'tenant',
     explicitBusinessId?: string,
   ): Promise<void> {
     if (!this.userId) {
-      console.warn("[LongMemory] Cannot extract or store facts without userId");
+      console.warn('[LongMemory] Cannot extract or store facts without userId');
       return;
     }
-    console.log(
-      `[LongMemory] Extracting facts from text for user ${this.userId}`,
-    );
+    console.log(`[LongMemory] Extracting facts from text for user ${this.userId}`);
 
     // 🛡️ 启动大模型驱动的异步【专职画像 Agent（Dedicated User Profiler Agent）】
     // 结合历史 SQL 订单购买流水 + 这一轮最新对话，自动提取非结构化尺寸与消费偏好并智能自愈落盘
@@ -42,59 +40,46 @@ export class LongMemory {
       (async () => {
         try {
           // 不等待后台审计，完全不阻塞主链路
-          this.runProfileAudit(
-            userQuery,
-            conversationText,
-            explicitScope,
-            explicitBusinessId,
-          ).catch((e) => {
-            console.warn("[Profiler Agent Async Warn]:", e);
+          this.runProfileAudit(userQuery, conversationText, explicitScope, explicitBusinessId).catch((e) => {
+            console.warn('[Profiler Agent Async Warn]:', e);
           });
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(
-            "[Profiler Agent Error] 专职画像 Agent 执行偏好核查异常:",
-            errMsg,
-          );
+          console.error('[Profiler Agent Error] 专职画像 Agent 执行偏好核查异常:', errMsg);
         }
       })();
     }
 
     // 保留原有轻量级正则匹配，做双重容灾保障
     const lines = conversationText
-      .split("\n")
+      .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
     const embeddingModel = getEmbeddingModel();
 
     for (const line of lines) {
       if (
-        line.toLowerCase().includes("user prefers") ||
-        line.toLowerCase().includes("prefers") ||
-        line.toLowerCase().includes("fact:")
+        line.toLowerCase().includes('user prefers') ||
+        line.toLowerCase().includes('prefers') ||
+        line.toLowerCase().includes('fact:')
       ) {
-        const factText = line.replace(/^(fact:)/i, "").trim();
+        const factText = line.replace(/^(fact:)/i, '').trim();
         const embedding = await embeddingModel.embedQuery(factText);
 
         const dbInstance = getDrizzle();
         if (dbInstance) {
           try {
-            const isPhysiological =
-              /脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size/i.test(
-                factText,
-              );
-            const calculatedScope: "global" | "tenant" = explicitScope
+            const isPhysiological = /脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size/i.test(factText);
+            const calculatedScope: 'global' | 'tenant' = explicitScope
               ? explicitScope
               : isPhysiological
-                ? "global"
-                : this.businessId && this.businessId !== "ecommerce"
-                  ? "tenant"
-                  : "global";
+                ? 'global'
+                : this.businessId && this.businessId !== 'ecommerce'
+                  ? 'tenant'
+                  : 'global';
 
             const calculatedBizId =
-              calculatedScope === "tenant"
-                ? explicitBusinessId || this.businessId || "ecommerce"
-                : null;
+              calculatedScope === 'tenant' ? explicitBusinessId || this.businessId || 'ecommerce' : null;
 
             const serializedEmbedding = JSON.stringify(embedding);
             await dbInstance.insert(longMemoryFacts).values({
@@ -103,19 +88,17 @@ export class LongMemory {
               scope: calculatedScope,
               fact: factText,
               embedding: serializedEmbedding,
-              type: "preference",
+              type: 'preference',
               confidence: 1.0,
-              status: "approved",
-              source: "regex_fallback",
+              status: 'approved',
+              source: 'regex_fallback',
               createdAt: new Date(),
             });
             console.log(
               `[LongMemory] [Fallback Regex] Extracted and stored fact directly in PostgreSQL [Scope: ${calculatedScope}, Status: approved]: "${factText}"`,
             );
           } catch (err) {
-            console.warn(
-              "[LongMemory] Drizzle insertion bypassed due to offline/failed DB.",
-            );
+            console.warn('[LongMemory] Drizzle insertion bypassed due to offline/failed DB.');
           }
         }
       }
@@ -129,20 +112,18 @@ export class LongMemory {
   private async runProfileAudit(
     userQuery: string,
     assistantResponse: string,
-    explicitScope?: "global" | "tenant",
+    explicitScope?: 'global' | 'tenant',
     explicitBusinessId?: string,
   ): Promise<void> {
-    console.log(
-      `[Profiler Agent] 🕵️ 启动用户 ${this.userId} 的多模态消费画像提取...`,
-    );
+    console.log(`[Profiler Agent] 🕵️ 启动用户 ${this.userId} 的多模态消费画像提取...`);
 
-    const { db: physicalDb } = require("db");
+    const { db: physicalDb } = require('db');
     let pastOrders: Record<string, unknown>[] = [];
 
     // 1. [结构化数据装配 (SQL)]：实时拉取该用户在 PostgreSQL 中的最近购买明细
     try {
       const orderQuery =
-        this.businessId && this.businessId !== "ecommerce"
+        this.businessId && this.businessId !== 'ecommerce'
           ? `
         SELECT o.order_id AS "orderId", o.status, p.name AS "productName", o.total_amount AS "totalAmount"
         FROM orders o
@@ -158,17 +139,12 @@ export class LongMemory {
         WHERE o.user_id = $1 LIMIT 5
       `;
       const orderQueryParams =
-        this.businessId && this.businessId !== "ecommerce"
-          ? [this.userId, this.businessId]
-          : [this.userId];
+        this.businessId && this.businessId !== 'ecommerce' ? [this.userId, this.businessId] : [this.userId];
 
       const orderRes = await physicalDb.execute(orderQuery, orderQueryParams);
       pastOrders = orderRes.rows || [];
     } catch (sqlErr) {
-      console.warn(
-        "[Profiler Agent] Failed to fetch SQL transaction stream for audit:",
-        sqlErr,
-      );
+      console.warn('[Profiler Agent] Failed to fetch SQL transaction stream for audit:', sqlErr);
     }
 
     // 2. [画像大模型研判]：注入双层画像提取 Prompts，严格判别 global 与 tenant 作用域
@@ -215,27 +191,18 @@ ${JSON.stringify(pastOrders, null, 2)}
 
     try {
       const response = await llm.invoke(auditPrompt);
-      const content =
-        typeof response === "string"
-          ? response
-          : (response as any).content || "";
+      const content = typeof response === 'string' ? response : (response as any).content || '';
 
       const cleanJson = content
         .trim()
-        .replace(/^```json\s*/, "")
-        .replace(/```$/, "")
+        .replace(/^```json\s*/, '')
+        .replace(/```$/, '')
         .trim();
 
       const auditResult = JSON.parse(cleanJson);
 
-      if (
-        !auditResult.hasNewPreference ||
-        !auditResult.extractedFacts ||
-        auditResult.extractedFacts.length === 0
-      ) {
-        console.log(
-          "[Profiler Agent] 🍃 画像审计完成：本轮会话未检测到新的偏好特征变动。",
-        );
+      if (!auditResult.hasNewPreference || !auditResult.extractedFacts || auditResult.extractedFacts.length === 0) {
+        console.log('[Profiler Agent] 🍃 画像审计完成：本轮会话未检测到新的偏好特征变动。');
         return;
       }
 
@@ -250,13 +217,9 @@ ${JSON.stringify(pastOrders, null, 2)}
       const embeddingModel = getEmbeddingModel();
       for (const item of auditResult.extractedFacts) {
         try {
-          const factText = typeof item === "string" ? item : item.fact;
-          const confidence =
-            typeof item === "string" ? 1.0 : item.confidence || 1.0;
-          const source =
-            typeof item === "string"
-              ? "agent_audit_legacy"
-              : item.source || "agent_audit";
+          const factText = typeof item === 'string' ? item : item.fact;
+          const confidence = typeof item === 'string' ? 1.0 : item.confidence || 1.0;
+          const source = typeof item === 'string' ? 'agent_audit_legacy' : item.source || 'agent_audit';
 
           // 🧠 画像置信度过滤硬性红线（High/Mid Threshold Routing）：
           // 1. 置信度 >= 0.85 的高级画像，直接赋予 'approved' 状态秒级投入对话生产使用。
@@ -269,26 +232,20 @@ ${JSON.stringify(pastOrders, null, 2)}
             continue;
           }
 
-          const status = confidence >= 0.85 ? "approved" : "pending";
+          const status = confidence >= 0.85 ? 'approved' : 'pending';
 
-          const isPhysiological =
-            /脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size/i.test(
-              factText,
-            );
-          const itemScope: "global" | "tenant" =
+          const isPhysiological = /脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size/i.test(factText);
+          const itemScope: 'global' | 'tenant' =
             explicitScope ||
-            (item.scope === "global" || item.scope === "tenant"
+            (item.scope === 'global' || item.scope === 'tenant'
               ? item.scope
               : isPhysiological
-                ? "global"
-                : this.businessId && this.businessId !== "ecommerce"
-                  ? "tenant"
-                  : "global");
+                ? 'global'
+                : this.businessId && this.businessId !== 'ecommerce'
+                  ? 'tenant'
+                  : 'global');
 
-          const itemBizId =
-            itemScope === "tenant"
-              ? explicitBusinessId || this.businessId || "ecommerce"
-              : null;
+          const itemBizId = itemScope === 'tenant' ? explicitBusinessId || this.businessId || 'ecommerce' : null;
 
           console.log(
             `[Profiler Agent Routing] 🎯 Fact "${factText}" (Scope: ${itemScope}, Biz: ${itemBizId}) rated ${confidence.toFixed(2)} confidence ➔ Routed to status [${status}]`,
@@ -303,7 +260,7 @@ ${JSON.stringify(pastOrders, null, 2)}
             scope: itemScope,
             fact: factText,
             embedding: serializedEmbedding,
-            type: "preference",
+            type: 'preference',
             confidence: confidence,
             status: status,
             source: source,
@@ -313,35 +270,22 @@ ${JSON.stringify(pastOrders, null, 2)}
             `[Profiler Agent] 偏好 RAG 事实成功写入 longMemoryFacts [Scope: ${itemScope}, Status: ${status}]: "${factText}"`,
           );
         } catch (ragErr) {
-          console.warn(
-            "[Profiler Agent] Failed to vectorise and store extracted fact:",
-            ragErr,
-          );
+          console.warn('[Profiler Agent] Failed to vectorise and store extracted fact:', ragErr);
         }
       }
 
-      console.log(
-        `[Profiler Agent] ✅ 用户 ${this.userId} 的消费特征同步更新成功！`,
-      );
+      console.log(`[Profiler Agent] ✅ 用户 ${this.userId} 的消费特征同步更新成功！`);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(
-        "[Profiler Agent Error] 画像 Agent 提取偏好发生异常:",
-        errMsg,
-      );
+      console.error('[Profiler Agent Error] 画像 Agent 提取偏好发生异常:', errMsg);
     }
   }
 
-  async searchRelevantFacts(
-    query: string,
-    precomputedEmbedding?: number[],
-  ): Promise<LongMemoryFact[]> {
+  async searchRelevantFacts(query: string, precomputedEmbedding?: number[]): Promise<LongMemoryFact[]> {
     if (!this.userId) {
       return [];
     }
-    console.log(
-      `[LongMemory] Searching relevant facts for user ${this.userId} using query: ${query}`,
-    );
+    console.log(`[LongMemory] Searching relevant facts for user ${this.userId} using query: ${query}`);
 
     let queryEmbedding = precomputedEmbedding;
     if (!queryEmbedding || queryEmbedding.length === 0) {
@@ -352,7 +296,7 @@ ${JSON.stringify(pastOrders, null, 2)}
     const dbInstance = getDrizzle();
     if (dbInstance) {
       try {
-        const { eq, and } = require("drizzle-orm");
+        const { eq, and } = require('drizzle-orm');
         // Retrieve all facts for the user and perform in-memory cosine similarity calculation in TS.
         // 🔒 Only recall approved facts to prevent pending/rejected data leakage into the active prompt.
         const allFacts = await dbInstance
@@ -368,28 +312,19 @@ ${JSON.stringify(pastOrders, null, 2)}
             status: longMemoryFacts.status,
           })
           .from(longMemoryFacts)
-          .where(
-            and(
-              eq(longMemoryFacts.userId, this.userId),
-              eq(longMemoryFacts.status, "approved"),
-            ),
-          );
+          .where(and(eq(longMemoryFacts.userId, this.userId), eq(longMemoryFacts.status, 'approved')));
 
         // 🛡️ 多租户画像隔离与防投毒 (Dual-Tier Scoped Persona Isolation):
         // 严格限定召回为: (scope = 'global' OR business_id = currentTenant)
         const tenantFacts = allFacts.filter((row: any) => {
-          if (!row.scope || row.scope === "global") {
+          if (!row.scope || row.scope === 'global') {
             return true;
           }
-          if (row.scope === "tenant") {
-            if (this.businessId && this.businessId !== "ecommerce") {
+          if (row.scope === 'tenant') {
+            if (this.businessId && this.businessId !== 'ecommerce') {
               return row.businessId === this.businessId;
             }
-            return (
-              !row.businessId ||
-              row.businessId === "ecommerce" ||
-              row.businessId === this.businessId
-            );
+            return !row.businessId || row.businessId === 'ecommerce' || row.businessId === this.businessId;
           }
           return false;
         });
@@ -399,21 +334,14 @@ ${JSON.stringify(pastOrders, null, 2)}
             let embeddingArray: number[] | null = null;
             if (row.embedding) {
               try {
-                embeddingArray =
-                  typeof row.embedding === "string"
-                    ? JSON.parse(row.embedding)
-                    : row.embedding;
+                embeddingArray = typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding;
               } catch (e) {
-                console.warn("[LongMemory] Failed to parse embedding JSON:", e);
+                console.warn('[LongMemory] Failed to parse embedding JSON:', e);
               }
             }
 
             let similarity = 0;
-            if (
-              embeddingArray &&
-              Array.isArray(embeddingArray) &&
-              embeddingArray.length === queryEmbedding.length
-            ) {
+            if (embeddingArray && Array.isArray(embeddingArray) && embeddingArray.length === queryEmbedding.length) {
               // cosine similarity = (A . B) / (||A|| * ||B||)
               let dotProduct = 0;
               let normA = 0;
@@ -429,9 +357,7 @@ ${JSON.stringify(pastOrders, null, 2)}
 
             // 结合关键词重合度做混合打分（包含英文单词与中文词元提取）
             const clean = query.toLowerCase();
-            const segments = clean
-              .split(/[\s,，、。!！?？\-_]+/)
-              .filter((s) => s.length > 0);
+            const segments = clean.split(/[\s,，、。!！?？\-_]+/).filter((s) => s.length > 0);
             const queryTokens: string[] = [];
             for (const seg of segments) {
               if (/[a-z0-9]/i.test(seg)) {
@@ -455,24 +381,20 @@ ${JSON.stringify(pastOrders, null, 2)}
               }
             }
             const keywordScore =
-              queryTokens.length > 0 && keywordMatches > 0
-                ? 0.55 + (keywordMatches / queryTokens.length) * 0.45
-                : 0;
+              queryTokens.length > 0 && keywordMatches > 0 ? 0.55 + (keywordMatches / queryTokens.length) * 0.45 : 0;
             const effectiveScore = Math.max(similarity, keywordScore);
 
             return {
               fact: {
                 id: row.id,
                 fact: row.fact,
-                category: row.type || "preference",
-                timestamp: row.createdAt
-                  ? row.createdAt.toISOString()
-                  : new Date().toISOString(),
+                category: row.type || 'preference',
+                timestamp: row.createdAt ? row.createdAt.toISOString() : new Date().toISOString(),
                 embedding: embeddingArray || undefined,
-                scope: row.scope || "global",
+                scope: row.scope || 'global',
                 businessId: row.businessId || undefined,
                 confidence: row.confidence ?? 1.0,
-                status: row.status || "approved",
+                status: row.status || 'approved',
               },
               similarity: effectiveScore,
             };
@@ -498,10 +420,7 @@ ${JSON.stringify(pastOrders, null, 2)}
           return filteredFacts.slice(0, 5).map((sf) => sf.fact);
         }
       } catch (err) {
-        console.warn(
-          "[LongMemory] TS-based cosine similarity search bypassed due to offline/failed DB.",
-          err,
-        );
+        console.warn('[LongMemory] TS-based cosine similarity search bypassed due to offline/failed DB.', err);
       }
     }
 

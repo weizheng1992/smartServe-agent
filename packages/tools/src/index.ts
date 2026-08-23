@@ -10,3 +10,4 @@ export * from './crypto/secrets';
 export * from './openapi/ssrfGuard';
 export * from './openapi/dynamicToolFactory';
 export * from './nlQuery';
+export * from './connectors';

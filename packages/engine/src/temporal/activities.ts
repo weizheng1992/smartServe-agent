@@ -1,37 +1,26 @@
-import { logger } from "observability";
-import { executorNode } from "../graph/nodes/executor.node";
-import { finishNode } from "../graph/nodes/finish.node";
-import { mergeNode } from "../graph/nodes/merge.node";
-import { plannerNode } from "../graph/nodes/planner.node";
-import { triageNode } from "../graph/nodes/triage.node";
-import { validatorNode } from "../graph/nodes/validator.node";
-import { EpisodicMemory, LongMemory, ShortMemory, TaskMemory } from "../memory";
+import { logger } from 'observability';
+import { executorNode } from '../graph/nodes/executor.node';
+import { finishNode } from '../graph/nodes/finish.node';
+import { mergeNode } from '../graph/nodes/merge.node';
+import { plannerNode } from '../graph/nodes/planner.node';
+import { triageNode } from '../graph/nodes/triage.node';
+import { validatorNode } from '../graph/nodes/validator.node';
+import { EpisodicMemory, LongMemory, ShortMemory, TaskMemory } from '../memory';
 
-import type { AgentState } from "../graph/state";
+import type { AgentState } from '../graph/state';
 
-export async function runAgentStateNode(
-  nodeName: string,
-  state: any,
-): Promise<AgentState> {
-  logger.info(
-    { nodeName, threadId: state.threadId },
-    `Temporal activity starting for node: ${nodeName}`,
-  );
+export async function runAgentStateNode(nodeName: string, state: any): Promise<AgentState> {
+  logger.info({ nodeName, threadId: state.threadId }, `Temporal activity starting for node: ${nodeName}`);
 
-  let businessId =
-    state.businessConfig?.businessId || state.businessId || "ecommerce";
+  let businessId = state.businessConfig?.businessId || state.businessId || 'ecommerce';
 
-  if (state.threadId && (businessId === "ecommerce" || !businessId)) {
+  if (state.threadId && (businessId === 'ecommerce' || !businessId)) {
     try {
-      const { getDrizzle, threads } = require("db");
-      const { eq } = require("drizzle-orm");
+      const { getDrizzle, threads } = require('db');
+      const { eq } = require('drizzle-orm');
       const drizzle = getDrizzle();
       if (drizzle) {
-        const threadRows = await drizzle
-          .select()
-          .from(threads)
-          .where(eq(threads.id, state.threadId))
-          .limit(1);
+        const threadRows = await drizzle.select().from(threads).where(eq(threads.id, state.threadId)).limit(1);
         if (threadRows[0]?.businessId) {
           businessId = threadRows[0].businessId;
           state.businessId = businessId;
@@ -41,10 +30,7 @@ export async function runAgentStateNode(
         }
       }
     } catch (err) {
-      console.warn(
-        "[Temporal Activities] Failed to resolve thread businessId:",
-        err,
-      );
+      console.warn('[Temporal Activities] Failed to resolve thread businessId:', err);
     }
   }
 
@@ -65,27 +51,22 @@ export async function runAgentStateNode(
   // Ensure dynamicConfig / businessConfig is initialized
   if (!state.businessConfig || !state.businessConfig.systemPrompt) {
     let defaultLimit = 100;
-    if (businessId === "nike") defaultLimit = 150;
-    else if (businessId === "adidas") defaultLimit = 120;
+    if (businessId === 'nike') defaultLimit = 150;
+    else if (businessId === 'adidas') defaultLimit = 120;
 
-    const { getMerchantDisplayName } = require("types");
+    const { getMerchantDisplayName } = require('types');
     const brandName = getMerchantDisplayName(businessId);
 
     state.businessConfig = {
       businessId,
       systemPrompt: `You are an advanced, professional AI Customer Support Agent representing ${brandName}. Help users resolve order, shipping, and refund queries.`,
       intents: {
-        order_status: { description: "Track or check order delivery status." },
-        refund: { description: "Process or request refunds." },
-        general_query: { description: "General customer questions." },
+        order_status: { description: 'Track or check order delivery status.' },
+        refund: { description: 'Process or request refunds.' },
+        general_query: { description: 'General customer questions.' },
       },
-      tools: [
-        "getOrderStatus",
-        "processRefund",
-        "takeScreenshot",
-        "listUserOrders",
-      ],
-      executionMode: "plan-and-execute",
+      tools: ['getOrderStatus', 'processRefund', 'takeScreenshot', 'listUserOrders'],
+      executionMode: 'plan-and-execute',
       confidenceThresholds: { high: 0.85, mid: 0.6 },
       refundAutoApprovalLimit: defaultLimit,
       ...(state.businessConfig || {}),
@@ -95,32 +76,32 @@ export async function runAgentStateNode(
   let resultState = { ...state };
 
   switch (nodeName) {
-    case "triage": {
+    case 'triage': {
       const updates = await triageNode(state);
       resultState = { ...resultState, ...updates };
       break;
     }
-    case "planner": {
+    case 'planner': {
       const updates = await plannerNode(state);
       resultState = { ...resultState, ...updates };
       break;
     }
-    case "merge": {
+    case 'merge': {
       const updates = await mergeNode(state);
       resultState = { ...resultState, ...updates };
       break;
     }
-    case "executor": {
+    case 'executor': {
       const updates = await executorNode(state);
       resultState = { ...resultState, ...updates };
       break;
     }
-    case "validator": {
+    case 'validator': {
       const updates = await validatorNode(state);
       resultState = { ...resultState, ...updates };
       break;
     }
-    case "finish": {
+    case 'finish': {
       const updates = await finishNode(state);
       resultState = { ...resultState, ...updates };
 
@@ -130,8 +111,8 @@ export async function runAgentStateNode(
         const episodicMemory = new EpisodicMemory(state.userId, businessId);
         const longMemory = new LongMemory(state.userId, businessId);
 
-        await shortMemory.addMessage("user", state.input);
-        await shortMemory.addMessage("assistant", resultState.output);
+        await shortMemory.addMessage('user', state.input);
+        await shortMemory.addMessage('assistant', resultState.output);
 
         await Promise.all([
           episodicMemory.addEvent(
@@ -152,9 +133,6 @@ export async function runAgentStateNode(
       throw new Error(`Unknown node: ${nodeName}`);
   }
 
-  logger.info(
-    { nodeName, threadId: state.threadId },
-    `Temporal activity finished for node: ${nodeName}`,
-  );
+  logger.info({ nodeName, threadId: state.threadId }, `Temporal activity finished for node: ${nodeName}`);
   return resultState;
 }

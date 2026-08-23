@@ -39,21 +39,30 @@ export class WorkflowOrchestrator {
       const workflowPromise = client.workflow.start('agentWorkflow', {
         taskQueue: 'agent-tasks',
         workflowId: jobId,
-        args: [
-          threadId,
-          userId,
-          message,
-          options.imageUrls || [],
-          options.businessId,
-        ],
+        args: [threadId, userId, message, options.imageUrls || [], options.businessId],
       });
 
-      promise = workflowPromise
+      const temporalExecPromise = workflowPromise
         .then((handle) => handle.result())
         .catch((err) => {
           console.error(`[WorkflowOrchestrator] Temporal workflow ${jobId} failed:`, err);
           throw err;
         });
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('TEMPORAL_WORKER_TIMEOUT')), 3500),
+      );
+
+      promise = Promise.race([temporalExecPromise, timeoutPromise]).catch(async (err: any) => {
+        if (err?.message === 'TEMPORAL_WORKER_TIMEOUT') {
+          console.warn(
+            `[WorkflowOrchestrator] ⚠️ Temporal 工作流 ${jobId} 等待 Worker 消费超时，自动无缝回退至本地 LangGraph 执行引擎！`,
+          );
+        } else {
+          console.warn(`[WorkflowOrchestrator] ⚠️ Temporal 异常，降级至本地执行:`, err);
+        }
+        return runAgent(threadId, userId, message, jobId, options.imageUrls, options.businessId);
+      });
     } else {
       console.log(
         `[WorkflowOrchestrator] Temporal offline/mock mode. Dispatching to local LangGraph simulator with jobId: ${jobId}...`,

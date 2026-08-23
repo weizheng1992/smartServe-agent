@@ -1,18 +1,16 @@
-import { Client } from "pg";
+import { Client } from 'pg';
 
 export interface CleanResult {
   invalidEmbeddingsDeleted: number;
   duplicateRagDocsDeleted: number;
 }
 
-export async function cleanDatabase(
-  connectionString?: string,
-): Promise<CleanResult> {
+export async function cleanDatabase(connectionString?: string): Promise<CleanResult> {
   const dbUrl =
     connectionString ||
     process.env.DATABASE_URL ||
-    "postgres://agent_user:agent_password@localhost:5432/agent_platform";
-  console.log("🔍 [Database Cleaner] Connecting to database:", dbUrl);
+    'postgres://agent_user:agent_password@localhost:5432/agent_platform';
+  console.log('🔍 [Database Cleaner] Connecting to database:', dbUrl);
 
   const client = new Client({ connectionString: dbUrl });
   let invalidEmbeddingsDeleted = 0;
@@ -20,16 +18,16 @@ export async function cleanDatabase(
 
   try {
     await client.connect();
-    console.log("✅ Connected to database.");
+    console.log('✅ Connected to database.');
 
-    const tables = ["long_memory_facts", "episodic_events", "rag_documents"];
+    const tables = ['long_memory_facts', 'episodic_events', 'rag_documents'];
 
     // 1. 清理全 0 或格式损坏的非法 embedding
     for (const table of tables) {
       console.log(`\n=== Checking invalid embeddings in table: ${table} ===`);
       try {
         const tableCheck = await client.query(
-          "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)",
+          'SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)',
           [table],
         );
 
@@ -52,45 +50,33 @@ export async function cleanDatabase(
           try {
             const vector = JSON.parse(embeddingStr);
             if (Array.isArray(vector)) {
-              const isAllZeros =
-                vector.length === 0 || vector.every((x) => x === 0);
+              const isAllZeros = vector.length === 0 || vector.every((x) => x === 0);
               if (isAllZeros) {
                 idsToDelete.push(row.id);
               }
             }
           } catch {
-            console.log(
-              `Malformed embedding JSON for row ID ${row.id}:`,
-              embeddingStr.substring(0, 50),
-            );
+            console.log(`Malformed embedding JSON for row ID ${row.id}:`, embeddingStr.substring(0, 50));
             idsToDelete.push(row.id);
           }
         }
 
         if (idsToDelete.length > 0) {
-          console.log(
-            `Deleting ${idsToDelete.length} invalid rows from ${table}...`,
-          );
-          const deleteRes = await client.query(
-            `DELETE FROM ${table} WHERE id = ANY($1::uuid[])`,
-            [idsToDelete],
-          );
-          console.log(
-            `✅ Successfully deleted ${deleteRes.rowCount} rows from ${table}.`,
-          );
+          console.log(`Deleting ${idsToDelete.length} invalid rows from ${table}...`);
+          const deleteRes = await client.query(`DELETE FROM ${table} WHERE id = ANY($1::uuid[])`, [idsToDelete]);
+          console.log(`✅ Successfully deleted ${deleteRes.rowCount} rows from ${table}.`);
           invalidEmbeddingsDeleted += deleteRes.rowCount || 0;
         } else {
           console.log(`No invalid embeddings found in ${table}.`);
         }
       } catch (tableErr: unknown) {
-        const tableMsg =
-          tableErr instanceof Error ? tableErr.message : String(tableErr);
+        const tableMsg = tableErr instanceof Error ? tableErr.message : String(tableErr);
         console.error(`Error checking embeddings in table ${table}:`, tableMsg);
       }
     }
 
     // 2. 清理 rag_documents 表中的重复数据 (按 business_id 与 chunk_text 分组去重)
-    console.log("\n=== Checking duplicate rows in rag_documents ===");
+    console.log('\n=== Checking duplicate rows in rag_documents ===');
     try {
       const dupQuery = `
         SELECT business_id, chunk_text, count(*) as cnt,
@@ -105,9 +91,7 @@ export async function cleanDatabase(
         HAVING count(*) > 1
       `;
       const dupRes = await client.query(dupQuery);
-      console.log(
-        `Found ${dupRes.rows.length} groups of duplicate chunk_text in rag_documents.`,
-      );
+      console.log(`Found ${dupRes.rows.length} groups of duplicate chunk_text in rag_documents.`);
 
       const dupIdsToDelete: string[] = [];
       for (const row of dupRes.rows) {
@@ -120,23 +104,18 @@ export async function cleanDatabase(
       }
 
       if (dupIdsToDelete.length > 0) {
-        console.log(
-          `Deleting ${dupIdsToDelete.length} duplicate rows from rag_documents...`,
-        );
-        const deleteDupRes = await client.query(
-          "DELETE FROM rag_documents WHERE id = ANY($1::uuid[])",
-          [dupIdsToDelete],
-        );
-        console.log(
-          `✅ Successfully deleted ${deleteDupRes.rowCount} duplicate rows from rag_documents.`,
-        );
+        console.log(`Deleting ${dupIdsToDelete.length} duplicate rows from rag_documents...`);
+        const deleteDupRes = await client.query('DELETE FROM rag_documents WHERE id = ANY($1::uuid[])', [
+          dupIdsToDelete,
+        ]);
+        console.log(`✅ Successfully deleted ${deleteDupRes.rowCount} duplicate rows from rag_documents.`);
         duplicateRagDocsDeleted += deleteDupRes.rowCount || 0;
       } else {
-        console.log("No duplicate rows found in rag_documents.");
+        console.log('No duplicate rows found in rag_documents.');
       }
     } catch (dupErr: unknown) {
       const dupMsg = dupErr instanceof Error ? dupErr.message : String(dupErr);
-      console.error("Error deduplicating rag_documents:", dupMsg);
+      console.error('Error deduplicating rag_documents:', dupMsg);
     }
 
     console.log(
@@ -146,7 +125,7 @@ export async function cleanDatabase(
     return { invalidEmbeddingsDeleted, duplicateRagDocsDeleted };
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error("❌ Database connection failed:", errMsg);
+    console.error('❌ Database connection failed:', errMsg);
     try {
       await client.end();
     } catch {}

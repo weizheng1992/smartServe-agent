@@ -1,27 +1,14 @@
-import { randomUUID } from "node:crypto";
-import {
-  approvalOutboxEvents,
-  db,
-  getDrizzle,
-  pendingApprovals as dbPendingApprovals,
-  threads,
-  users,
-} from "db";
-import { and, desc, eq } from "drizzle-orm";
-import { redis, useRedis } from "tools";
-import type { PendingApprovalRecord } from "types";
-import { agentEventEmitter } from "../graph/eventEmitter";
-import type { SubTask, TaskPlan } from "../graph/state";
-import { WorkflowOrchestrator } from "../orchestrator/workflowOrchestrator";
+import { randomUUID } from 'node:crypto';
+import { approvalOutboxEvents, db, pendingApprovals as dbPendingApprovals, getDrizzle, threads, users } from 'db';
+import { and, desc, eq } from 'drizzle-orm';
+import { redis, useRedis } from 'tools';
+import type { PendingApprovalRecord } from 'types';
+import { agentEventEmitter } from '../graph/eventEmitter';
+import type { SubTask, TaskPlan } from '../graph/state';
+import { WorkflowOrchestrator } from '../orchestrator/workflowOrchestrator';
 
 export interface ApprovalPolicyResult {
-  state:
-    | "approved"
-    | "waiting"
-    | "rejected"
-    | "cancelled"
-    | "expired"
-    | "double_refund_blocked";
+  state: 'approved' | 'waiting' | 'rejected' | 'cancelled' | 'expired' | 'double_refund_blocked';
   approvalId?: string;
   message?: string;
   error?: string;
@@ -76,23 +63,20 @@ export class ApprovalGatekeeper {
   /**
    * 🛡️ 校验重复退款防护 (Double-Refund Prevention)
    */
-  public static async checkDoubleRefund(
-    orderId: string,
-  ): Promise<{ isDoubleRefund: boolean; status?: string }> {
+  public static async checkDoubleRefund(orderId: string): Promise<{ isDoubleRefund: boolean; status?: string }> {
     try {
-      const oRes = await db.execute(
-        'SELECT total_amount AS "totalAmount", status FROM orders WHERE order_id = $1',
-        [orderId],
-      );
+      const oRes = await db.execute('SELECT total_amount AS "totalAmount", status FROM orders WHERE order_id = $1', [
+        orderId,
+      ]);
       if (oRes?.rows?.[0]) {
         const row = oRes.rows[0] as any;
-        if (row.status === "refunded") {
+        if (row.status === 'refunded') {
           return { isDoubleRefund: true, status: row.status };
         }
         return { isDoubleRefund: false, status: row.status };
       }
     } catch (err) {
-      console.warn("[ApprovalGatekeeper] Double refund check DB error:", err);
+      console.warn('[ApprovalGatekeeper] Double refund check DB error:', err);
     }
     return { isDoubleRefund: false };
   }
@@ -109,26 +93,22 @@ export class ApprovalGatekeeper {
     const amountStr = refundAmountArg ? String(refundAmountArg) : undefined;
 
     if (amountStr) {
-      refundAmount =
-        Number.parseFloat(amountStr.replace(/[^0-9.]/g, "")) || 999999.99;
+      refundAmount = Number.parseFloat(amountStr.replace(/[^0-9.]/g, '')) || 999999.99;
     }
 
     if (orderId && !amountStr) {
       try {
-        const oRes = await db.execute(
-          'SELECT total_amount AS "totalAmount" FROM orders WHERE order_id = $1',
-          [orderId],
-        );
+        const oRes = await db.execute('SELECT total_amount AS "totalAmount" FROM orders WHERE order_id = $1', [
+          orderId,
+        ]);
         if (oRes?.rows?.[0]) {
           const dbAmt = (oRes.rows[0] as any).totalAmount;
           if (dbAmt) {
-            refundAmount =
-              Number.parseFloat(String(dbAmt).replace(/[^0-9.]/g, "")) ||
-              999999.99;
+            refundAmount = Number.parseFloat(String(dbAmt).replace(/[^0-9.]/g, '')) || 999999.99;
           }
         }
       } catch (err) {
-        console.warn("[ApprovalGatekeeper] Grounding order amount error:", err);
+        console.warn('[ApprovalGatekeeper] Grounding order amount error:', err);
       }
     }
 
@@ -147,25 +127,20 @@ export class ApprovalGatekeeper {
     if (!orderId) return { isHighValue: false, totalAmount: 0 };
 
     try {
-      const oRes = await db.execute(
-        'SELECT total_amount AS "totalAmount", status FROM orders WHERE order_id = $1',
-        [orderId],
-      );
+      const oRes = await db.execute('SELECT total_amount AS "totalAmount", status FROM orders WHERE order_id = $1', [
+        orderId,
+      ]);
       if (oRes?.rows?.[0]) {
         const row = oRes.rows[0] as any;
         const totalAmount = Number(row.totalAmount || row.total_amount || 0);
-        const status = row.status || "";
+        const status = row.status || '';
 
-        if (
-          status !== "shipped" &&
-          status !== "delivered" &&
-          totalAmount > 100.0
-        ) {
+        if (status !== 'shipped' && status !== 'delivered' && totalAmount > 100.0) {
           return { isHighValue: true, totalAmount };
         }
       }
     } catch (err) {
-      console.warn("[ApprovalGatekeeper] Address policy DB error:", err);
+      console.warn('[ApprovalGatekeeper] Address policy DB error:', err);
     }
 
     return { isHighValue: false, totalAmount: 0 };
@@ -174,9 +149,7 @@ export class ApprovalGatekeeper {
   /**
    * 🔍 通过工单 ID 查询审批详情 (纯领域门面)
    */
-  public static async findApprovalById(
-    approvalId: string,
-  ): Promise<PendingApprovalRecord | null> {
+  public static async findApprovalById(approvalId: string): Promise<PendingApprovalRecord | null> {
     try {
       const res = await db.execute(
         'SELECT id, thread_id AS "threadId", action_type AS "actionType", action_payload AS "actionPayload", status, deadline, created_at AS "createdAt" FROM pending_approvals WHERE id = $1 LIMIT 1',
@@ -184,10 +157,7 @@ export class ApprovalGatekeeper {
       );
       if (res.rows?.[0]) {
         const row = res.rows[0] as any;
-        const parsedPayload =
-          typeof row.actionPayload === "string"
-            ? JSON.parse(row.actionPayload)
-            : row.actionPayload;
+        const parsedPayload = typeof row.actionPayload === 'string' ? JSON.parse(row.actionPayload) : row.actionPayload;
         return {
           id: row.id,
           threadId: row.threadId,
@@ -200,7 +170,7 @@ export class ApprovalGatekeeper {
         };
       }
     } catch (err) {
-      console.warn("[ApprovalGatekeeper] findApprovalById DB error:", err);
+      console.warn('[ApprovalGatekeeper] findApprovalById DB error:', err);
     }
     return null;
   }
@@ -208,9 +178,7 @@ export class ApprovalGatekeeper {
   /**
    * 🔍 查询会话最新的待审核/已审核工单记录
    */
-  public static async findLatestApprovalByThreadId(
-    threadId: string,
-  ): Promise<PendingApprovalRecord | null> {
+  public static async findLatestApprovalByThreadId(threadId: string): Promise<PendingApprovalRecord | null> {
     try {
       const res = await db.execute(
         'SELECT id, thread_id AS "threadId", action_type AS "actionType", action_payload AS "actionPayload", status, deadline, created_at AS "createdAt" FROM pending_approvals WHERE thread_id = $1 ORDER BY created_at DESC LIMIT 1',
@@ -218,10 +186,7 @@ export class ApprovalGatekeeper {
       );
       if (res.rows?.[0]) {
         const row = res.rows[0] as any;
-        const parsedPayload =
-          typeof row.actionPayload === "string"
-            ? JSON.parse(row.actionPayload)
-            : row.actionPayload;
+        const parsedPayload = typeof row.actionPayload === 'string' ? JSON.parse(row.actionPayload) : row.actionPayload;
         return {
           id: row.id,
           threadId: row.threadId,
@@ -234,10 +199,7 @@ export class ApprovalGatekeeper {
         };
       }
     } catch (err) {
-      console.warn(
-        "[ApprovalGatekeeper] findLatestApprovalByThreadId DB error:",
-        err,
-      );
+      console.warn('[ApprovalGatekeeper] findLatestApprovalByThreadId DB error:', err);
     }
     return null;
   }
@@ -255,7 +217,7 @@ export class ApprovalGatekeeper {
   }): Promise<ApprovalPolicyResult> {
     const drizzle = getDrizzle();
     if (!drizzle) {
-      return { state: "approved", isApproved: false };
+      return { state: 'approved', isApproved: false };
     }
 
     let latestApproval: any = null;
@@ -286,8 +248,7 @@ export class ApprovalGatekeeper {
 
           if (currentArgs.orderId && payloadArgs.orderId) {
             return (
-              String(currentArgs.orderId).trim().toLowerCase() ===
-              String(payloadArgs.orderId).trim().toLowerCase()
+              String(currentArgs.orderId).trim().toLowerCase() === String(payloadArgs.orderId).trim().toLowerCase()
             );
           }
 
@@ -296,27 +257,25 @@ export class ApprovalGatekeeper {
     }
 
     // 1. 超时解挂检测 (Deadline Check)
-    if (latestApproval && latestApproval.status === "waiting") {
+    if (latestApproval && latestApproval.status === 'waiting') {
       const now = new Date();
-      const deadlineDate = latestApproval.deadline
-        ? new Date(latestApproval.deadline)
-        : null;
+      const deadlineDate = latestApproval.deadline ? new Date(latestApproval.deadline) : null;
       const isExpired = deadlineDate && now > deadlineDate;
 
       if (isExpired) {
         await drizzle
           .update(dbPendingApprovals)
-          .set({ status: "expired" })
+          .set({ status: 'expired' })
           .where(eq(dbPendingApprovals.id, latestApproval.id));
 
-        const isRefund = opts.toolName === "processRefund";
-        const dateStr = deadlineDate ? deadlineDate.toLocaleString() : "未知";
+        const isRefund = opts.toolName === 'processRefund';
+        const dateStr = deadlineDate ? deadlineDate.toLocaleString() : '未知';
         return {
-          state: "expired",
+          state: 'expired',
           approvalId: latestApproval.id,
           error: isRefund
-            ? "人工审批已超时。大额资金退款未获得授权，暂未办理。"
-            : "人工审批已超时。高价值订单地址修改申请未获得授权，暂未办理。",
+            ? '人工审批已超时。大额资金退款未获得授权，暂未办理。'
+            : '人工审批已超时。高价值订单地址修改申请未获得授权，暂未办理。',
           message: isRefund
             ? `⚠️ 安全核发超时：人工审核申请 (ID: ${latestApproval.id}) 已超过截止审批时间 (${dateStr}) 仍未获得核准，系统已自动实施超时安全解挂熔断。退款暂未执行，请联系客服转人工处理。`
             : `⚠️ 安全核发超时：订单地址修改人工审核申请 (ID: ${latestApproval.id}) 已超过截止审批时间 (${dateStr}) 仍未获得授权，系统已自动实施超时安全解挂熔断。修改暂未生效。`,
@@ -338,45 +297,45 @@ export class ApprovalGatekeeper {
           args: opts.args,
           stepIndex: opts.stepIndex,
         },
-        status: "waiting",
+        status: 'waiting',
         deadline,
       });
 
       return {
-        state: "waiting",
+        state: 'waiting',
         approvalId: newApprovalId,
         message:
-          opts.toolName === "processRefund"
-            ? `⚠️ 安全拦截：系统检测到敏感支付操作 [退款金额: ${opts.args?.refundAmount || "100% 原路退回"}]。已物理拦截并自动生成人工审批工单 (ID: ${newApprovalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`
-            : `⚠️ 安全拦截：检测到高价值订单修改敏感操作 [申请更新配送地址为: ${opts.args?.newAddress || "新地址"}]。已物理拦截并自动生成人工审批工单 (ID: ${newApprovalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`,
+          opts.toolName === 'processRefund'
+            ? `⚠️ 安全拦截：系统检测到敏感支付操作 [退款金额: ${opts.args?.refundAmount || '100% 原路退回'}]。已物理拦截并自动生成人工审批工单 (ID: ${newApprovalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`
+            : `⚠️ 安全拦截：检测到高价值订单修改敏感操作 [申请更新配送地址为: ${opts.args?.newAddress || '新地址'}]。已物理拦截并自动生成人工审批工单 (ID: ${newApprovalId})。后台执行处于无阻塞安全挂起中，请管理员点击页面右上角【人工授权模拟面板】进行核发或驳回。`,
       };
     }
 
     // 3. 状态已为 waiting
-    if (latestApproval.status === "waiting") {
+    if (latestApproval.status === 'waiting') {
       return {
-        state: "waiting",
+        state: 'waiting',
         approvalId: latestApproval.id,
-        message: "审批工单审核中，任务保持挂起。",
+        message: '审批工单审核中，任务保持挂起。',
       };
     }
 
     // 4. 被用户取消
-    if (latestApproval.status === "cancelled") {
+    if (latestApproval.status === 'cancelled') {
       return {
-        state: "cancelled",
+        state: 'cancelled',
         approvalId: latestApproval.id,
-        error: "用户已取消此项操作。",
-        message: "⚠️ 您已主动取消了此笔审批。相关操作已被物理终止。",
+        error: '用户已取消此项操作。',
+        message: '⚠️ 您已主动取消了此笔审批。相关操作已被物理终止。',
       };
     }
 
     // 5. 被管理员驳回
-    if (latestApproval.status === "rejected") {
+    if (latestApproval.status === 'rejected') {
       const payload = (latestApproval.actionPayload as any) || {};
-      const reason = payload.rejectionReason || "申请不符合政策要求。";
+      const reason = payload.rejectionReason || '申请不符合政策要求。';
       return {
-        state: "rejected",
+        state: 'rejected',
         approvalId: latestApproval.id,
         rejectionReason: reason,
         message: `❌ 人工审核拒绝：管理员驳回了本次申请，理由: [${reason}]。决策引擎即将启动回溯重规划。`,
@@ -385,7 +344,7 @@ export class ApprovalGatekeeper {
 
     // 6. 已核准放行
     return {
-      state: "approved",
+      state: 'approved',
       approvalId: latestApproval.id,
       isApproved: true,
     };
@@ -431,12 +390,9 @@ export class ApprovalGatekeeper {
     currentIndex,
   }: CreateApprovalParams) {
     try {
-      await db.createThread(
-        threadId,
-        userId || "83d67d4e-104c-4325-8aa7-10d4389fc725",
-      );
+      await db.createThread(threadId, userId || '83d67d4e-104c-4325-8aa7-10d4389fc725');
     } catch (tErr) {
-      console.warn("[ApprovalGatekeeper] Thread ensure warning:", tErr);
+      console.warn('[ApprovalGatekeeper] Thread ensure warning:', tErr);
     }
 
     let approvalId: string = randomUUID();
@@ -447,41 +403,34 @@ export class ApprovalGatekeeper {
     const existingApprovals = await drizzle
       .select()
       .from(dbPendingApprovals)
-      .where(
-        and(
-          eq(dbPendingApprovals.threadId, threadId),
-          eq(dbPendingApprovals.status, "waiting"),
-        ),
-      )
+      .where(and(eq(dbPendingApprovals.threadId, threadId), eq(dbPendingApprovals.status, 'waiting')))
       .limit(1);
 
     if (existingApprovals.length > 0) {
       approvalId = existingApprovals[0].id;
-      console.log(
-        `[ApprovalGatekeeper] 🎯 Thread ${threadId} 已存在挂起中的人工工单 (${approvalId})，无需重复创建！`,
-      );
+      console.log(`[ApprovalGatekeeper] 🎯 Thread ${threadId} 已存在挂起中的人工工单 (${approvalId})，无需重复创建！`);
     } else {
       await drizzle.insert(dbPendingApprovals).values({
         id: approvalId,
         threadId,
         actionType,
         actionPayload,
-        status: "waiting",
+        status: 'waiting',
         deadline,
       });
     }
 
     const updatedStep: SubTask = {
       ...stepToRun,
-      status: "completed",
+      status: 'completed',
       result: {
         waitingForApproval: true,
         approvalId,
         actionType,
         message:
-          actionType === "human_escalation"
-            ? "已成功创建人工客服接管工单，请等待客服主管接管回应。"
-            : "安全红线拦截：当前属于资金或敏感高危操作，必须等待管理员人工核准放行。",
+          actionType === 'human_escalation'
+            ? '已成功创建人工客服接管工单，请等待客服主管接管回应。'
+            : '安全红线拦截：当前属于资金或敏感高危操作，必须等待管理员人工核准放行。',
       },
     };
 
@@ -496,10 +445,10 @@ export class ApprovalGatekeeper {
 
     if (jobId) {
       agentEventEmitter.emit(`${jobId}:status`, {
-        status: "executing",
-        node: "executor",
+        status: 'executing',
+        node: 'executor',
         message:
-          actionType === "human_escalation"
+          actionType === 'human_escalation'
             ? `🚨 人工介入接管：已成功建立工单号 [${approvalId}] 的转人工待接管工单，已暂停自动决策流程！`
             : `🛡️ 人工审核拦截：已生成审批工单 [${approvalId}]，暂停自动决策流。`,
         plan: nextPlan,
@@ -513,8 +462,8 @@ export class ApprovalGatekeeper {
    * 🎧 发起人工客服即时接管 (Start Human Support Takeover)
    */
   public static async startHumanTakeover(
-    threadId = "default_thread",
-    defaultUserId = "83d67d4e-104c-4325-8aa7-10d4389fc725",
+    threadId = 'default_thread',
+    defaultUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725',
   ): Promise<ProcessApprovalActionResult> {
     await db.createThread(threadId, defaultUserId);
     const drizzle = getDrizzle()!;
@@ -537,11 +486,11 @@ export class ApprovalGatekeeper {
       .where(eq(threads.id, threadId))
       .limit(1);
 
-    const businessId = threadRow[0]?.businessId || "ecommerce";
+    const businessId = threadRow[0]?.businessId || 'ecommerce';
     const threadUserId = threadRow[0]?.userId || undefined;
     const threadUserEmail = threadRow[0]?.userEmail || undefined;
 
-    if (existing[0] && existing[0].status === "waiting") {
+    if (existing[0] && existing[0].status === 'waiting') {
       return {
         success: true,
         approvalId: existing[0].id,
@@ -557,16 +506,16 @@ export class ApprovalGatekeeper {
     const newId = randomUUID();
     const deadline = new Date(Date.now() + 1800000);
     const payload = {
-      userInput: "客服随时主动接管实时对话",
-      reason: "客服主动发起 IM 实时接管",
+      userInput: '客服随时主动接管实时对话',
+      reason: '客服主动发起 IM 实时接管',
     };
 
     await drizzle.insert(dbPendingApprovals).values({
       id: newId,
       threadId,
-      actionType: "human_escalation",
+      actionType: 'human_escalation',
       actionPayload: payload,
-      status: "waiting",
+      status: 'waiting',
       deadline,
     });
 
@@ -574,9 +523,8 @@ export class ApprovalGatekeeper {
     await db.addMessage({
       id: sysMsgId,
       threadId,
-      role: "system",
-      content:
-        "【系统提示】人工客服已主动接入当前会话，您可以向客服发送消息进行实时沟通。",
+      role: 'system',
+      content: '【系统提示】人工客服已主动接入当前会话，您可以向客服发送消息进行实时沟通。',
       timestamp: new Date().toISOString(),
     });
 
@@ -586,9 +534,9 @@ export class ApprovalGatekeeper {
       businessId,
       userId: threadUserId,
       userEmail: threadUserEmail,
-      actionType: "human_escalation",
+      actionType: 'human_escalation',
       actionPayload: payload,
-      status: "waiting",
+      status: 'waiting',
       deadline,
       createdAt: new Date().toISOString(),
     };
@@ -606,22 +554,15 @@ export class ApprovalGatekeeper {
   public static async processApprovalAction(
     options: ProcessApprovalActionOptions,
   ): Promise<ProcessApprovalActionResult> {
-    const {
-      approvalId,
-      threadId,
-      action,
-      rejectionReason,
-      humanReply,
-      isFinish,
-    } = options;
+    const { approvalId, threadId, action, rejectionReason, humanReply, isFinish } = options;
 
-    if (action === "start_human_takeover") {
+    if (action === 'start_human_takeover') {
       return this.startHumanTakeover(threadId);
     }
 
     if (!approvalId || !action) {
       return {
-        error: "approvalId and action are required",
+        error: 'approvalId and action are required',
         statusCode: 400,
       };
     }
@@ -632,23 +573,18 @@ export class ApprovalGatekeeper {
 
     if (useRedis && redis) {
       try {
-        const result = await redis.set(lockKey, "locked", "PX", 5000, "NX");
-        lockAcquired = result === "OK";
+        const result = await redis.set(lockKey, 'locked', 'PX', 5000, 'NX');
+        lockAcquired = result === 'OK';
       } catch (err) {
-        console.warn(
-          "[ApprovalGatekeeper Lock] Redis SETNX failed, falling back to memory lock:",
-          err,
-        );
+        console.warn('[ApprovalGatekeeper Lock] Redis SETNX failed, falling back to memory lock:', err);
       }
     }
 
     if (!lockAcquired) {
       if (localLocks.has(lockKey)) {
-        console.log(
-          `[ApprovalGatekeeper Lock] 🎯 锁冲突拦截：工单 ${approvalId} 正在处理中...`,
-        );
+        console.log(`[ApprovalGatekeeper Lock] 🎯 锁冲突拦截：工单 ${approvalId} 正在处理中...`);
         return {
-          error: "请勿重复提交，审批正在处理中...",
+          error: '请勿重复提交，审批正在处理中...',
           statusCode: 409,
         };
       }
@@ -676,29 +612,24 @@ export class ApprovalGatekeeper {
         };
       }
 
-      if (record.status !== "waiting") {
+      if (record.status !== 'waiting') {
         return {
           error: `工单 ${approvalId} 已经处理过，当前状态为: ${record.status}`,
           statusCode: 400,
         };
       }
 
-      if (
-        action === "human_message" ||
-        (action === "human_reply" && isFinish === false)
-      ) {
+      if (action === 'human_message' || (action === 'human_reply' && isFinish === false)) {
         if (humanReply && humanReply.trim()) {
           const msgId = randomUUID();
           await db.addMessage({
             id: msgId,
             threadId: record.threadId,
-            role: "assistant",
+            role: 'assistant',
             content: `[人工客服] ${humanReply.trim()}`,
             timestamp: new Date().toISOString(),
           });
-          console.log(
-            `[Human IM Chat] 人工客服回复已实时写入 thread: ${record.threadId}`,
-          );
+          console.log(`[Human IM Chat] 人工客服回复已实时写入 thread: ${record.threadId}`);
         }
         return {
           success: true,
@@ -707,39 +638,34 @@ export class ApprovalGatekeeper {
         };
       }
 
-      let nextStatus = "rejected";
-      if (action === "approve") {
-        if (record.actionType === "human_escalation") {
-          nextStatus = "resolved_by_human";
+      let nextStatus = 'rejected';
+      if (action === 'approve') {
+        if (record.actionType === 'human_escalation') {
+          nextStatus = 'resolved_by_human';
           const msgId = randomUUID();
           const replyContent =
-            (humanReply && humanReply.trim()) ||
-            "您好！人工客服专员已接入当前会话为您服务。请问有什么可以帮您？";
+            (humanReply && humanReply.trim()) || '您好！人工客服专员已接入当前会话为您服务。请问有什么可以帮您？';
           await db.addMessage({
             id: msgId,
             threadId: record.threadId,
-            role: "assistant",
+            role: 'assistant',
             content: `[人工客服] ${replyContent}`,
             timestamp: new Date().toISOString(),
           });
         } else {
-          nextStatus = "approved";
+          nextStatus = 'approved';
         }
-      } else if (action === "cancel") {
-        nextStatus = "cancelled";
-      } else if (
-        action === "human_finish" ||
-        action === "human_reply" ||
-        record.actionType === "human_escalation"
-      ) {
-        nextStatus = "resolved_by_human";
+      } else if (action === 'cancel') {
+        nextStatus = 'cancelled';
+      } else if (action === 'human_finish' || action === 'human_reply' || record.actionType === 'human_escalation') {
+        nextStatus = 'resolved_by_human';
 
         if (humanReply && humanReply.trim()) {
           const msgId = randomUUID();
           await db.addMessage({
             id: msgId,
             threadId: record.threadId,
-            role: "assistant",
+            role: 'assistant',
             content: `[人工客服] ${humanReply.trim()}`,
             timestamp: new Date().toISOString(),
           });
@@ -749,9 +675,8 @@ export class ApprovalGatekeeper {
         await db.addMessage({
           id: sysMsgId,
           threadId: record.threadId,
-          role: "system",
-          content:
-            "【系统提示】人工客服服务已结束，已成功为您切回 AI 智能助手。",
+          role: 'system',
+          content: '【系统提示】人工客服服务已结束，已成功为您切回 AI 智能助手。',
           timestamp: new Date().toISOString(),
         });
       }
@@ -759,13 +684,13 @@ export class ApprovalGatekeeper {
       const updatedPayload = record.actionPayload
         ? {
             ...(record.actionPayload as Record<string, unknown>),
-            rejectionReason: rejectionReason || "",
+            rejectionReason: rejectionReason || '',
           }
         : { rejectionReason };
 
       const finalPayload = {
         ...updatedPayload,
-        humanReply: humanReply || "",
+        humanReply: humanReply || '',
       };
 
       // 🎯 确定性 Job ID 生成 (Deterministic Job ID Resumption):
@@ -773,18 +698,17 @@ export class ApprovalGatekeeper {
       const deterministicJobId = `job_resume_${approvalId}`;
       const outboxEventId = randomUUID();
 
-      let systemPromptText = "";
-      if (nextStatus === "approved") {
+      let systemPromptText = '';
+      if (nextStatus === 'approved') {
+        systemPromptText = 'System: Human approval granted. Please execute the requested action.';
+      } else if (nextStatus === 'cancelled') {
         systemPromptText =
-          "System: Human approval granted. Please execute the requested action.";
-      } else if (nextStatus === "cancelled") {
-        systemPromptText =
-          "System: Human approval cancelled by the user. Please stop the requested action, abort any tool calls for this refund, and explain to the user that the action has been successfully cancelled per their request.";
+          'System: Human approval cancelled by the user. Please stop the requested action, abort any tool calls for this refund, and explain to the user that the action has been successfully cancelled per their request.';
       } else {
-        systemPromptText = `System: Human approval rejected. Reason: ${rejectionReason || "Not policy compliant"}. Please replan alternative path.`;
+        systemPromptText = `System: Human approval rejected. Reason: ${rejectionReason || 'Not policy compliant'}. Please replan alternative path.`;
       }
 
-      let threadUserId = "83d67d4e-104c-4325-8aa7-10d4389fc725";
+      let threadUserId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
       try {
         const threadRows = await drizzle
           .select({ userId: threads.userId })
@@ -796,17 +720,17 @@ export class ApprovalGatekeeper {
         }
       } catch (err) {
         console.warn(
-          "[ApprovalGatekeeper] Failed to fetch thread userId via Drizzle, using record user_id fallback:",
+          '[ApprovalGatekeeper] Failed to fetch thread userId via Drizzle, using record user_id fallback:',
           err,
         );
       }
 
       const eventType =
-        nextStatus === "approved"
-          ? "resume_execution"
-          : nextStatus === "cancelled"
-            ? "cancel_execution"
-            : "reject_execution";
+        nextStatus === 'approved'
+          ? 'resume_execution'
+          : nextStatus === 'cancelled'
+            ? 'cancel_execution'
+            : 'reject_execution';
 
       const outboxPayload = {
         jobId: deterministicJobId,
@@ -827,14 +751,14 @@ export class ApprovalGatekeeper {
           })
           .where(eq(dbPendingApprovals.id, approvalId));
 
-        if (nextStatus !== "resolved_by_human") {
+        if (nextStatus !== 'resolved_by_human') {
           await tx.insert(approvalOutboxEvents).values({
             id: outboxEventId,
             approvalId,
             threadId: record.threadId,
             eventType,
             payload: outboxPayload,
-            status: "pending",
+            status: 'pending',
             retryCount: 0,
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -846,7 +770,7 @@ export class ApprovalGatekeeper {
         `[ApprovalGatekeeper] 成功人工处理工单 [ID: ${approvalId}] ➔ 决议为 [${nextStatus}] (Outbox Event: ${outboxEventId})`,
       );
 
-      if (nextStatus === "resolved_by_human") {
+      if (nextStatus === 'resolved_by_human') {
         return {
           success: true,
           threadId: record.threadId,
@@ -870,7 +794,7 @@ export class ApprovalGatekeeper {
         await drizzle
           .update(approvalOutboxEvents)
           .set({
-            status: "completed",
+            status: 'completed',
             updatedAt: new Date(),
           })
           .where(eq(approvalOutboxEvents.id, outboxEventId));
@@ -882,7 +806,7 @@ export class ApprovalGatekeeper {
         await drizzle
           .update(approvalOutboxEvents)
           .set({
-            status: "pending",
+            status: 'pending',
             errorMessage: dispatchErr?.message || String(dispatchErr),
             updatedAt: new Date(),
           })
@@ -899,18 +823,14 @@ export class ApprovalGatekeeper {
       if (useRedis && redis && lockAcquired) {
         try {
           await redis.del(lockKey);
-          console.log(
-            `[ApprovalGatekeeper Lock] ✅ Redis 分布式锁已物理释放: ${lockKey}`,
-          );
+          console.log(`[ApprovalGatekeeper Lock] ✅ Redis 分布式锁已物理释放: ${lockKey}`);
         } catch (err) {
-          console.warn("[ApprovalGatekeeper Lock] Redis DEL failed:", err);
+          console.warn('[ApprovalGatekeeper Lock] Redis DEL failed:', err);
         }
       }
       if (fallbackAcquired) {
         localLocks.delete(lockKey);
-        console.log(
-          `[ApprovalGatekeeper Lock] ✅ 内存后备锁已物理释放: ${lockKey}`,
-        );
+        console.log(`[ApprovalGatekeeper Lock] ✅ 内存后备锁已物理释放: ${lockKey}`);
       }
     }
   }

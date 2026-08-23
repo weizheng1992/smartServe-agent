@@ -1,0 +1,295 @@
+import { getPgPool } from '../client';
+
+export interface ListConversationsFilter {
+  businessId: string;
+  status?: string;
+  tag?: string;
+  searchKeyword?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ConversationSummary {
+  threadId: string;
+  businessId: string;
+  userId?: string;
+  status: string;
+  assignedOperatorId?: string;
+  unreadCount: number;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageSnippet?: string;
+  lastMessageRole?: string;
+  lastMessageTime?: string;
+}
+
+export interface AppendMessagePayload {
+  id?: string;
+  threadId: string;
+  businessId: string;
+  role: 'user' | 'assistant' | 'system' | 'operator';
+  content: string;
+  thoughtSteps?: Array<{ step: string; status: string }>;
+  toolCalls?: Array<{ name: string; args: any; result?: any }>;
+  cards?: Array<{ cardType: string; payload: any }>;
+  operatorInfo?: { operatorId: string; operatorName: string };
+  timestamp?: string;
+}
+
+export class ConversationRepository {
+  /**
+   * 按租户查询聚合会话列表 (支持状态过滤、意图标签检索与全文模糊搜索)
+   */
+  public static async listConversations(
+    filter: ListConversationsFilter,
+  ): Promise<{ items: ConversationSummary[]; total: number }> {
+    const pool = getPgPool();
+    const cleanBizId = filter.businessId.toLowerCase().trim();
+    const limit = Math.max(1, Math.min(100, filter.limit ?? 20));
+    const offset = Math.max(0, filter.offset ?? 0);
+
+    const conditions: string[] = ['t.business_id = $1'];
+    const params: any[] = [cleanBizId];
+    let paramIndex = 2;
+
+    if (filter.status && filter.status !== 'all') {
+      conditions.push(`t.status = $${paramIndex}`);
+      params.push(filter.status);
+      paramIndex++;
+    }
+
+    if (filter.tag) {
+      conditions.push(`t.tags @> $${paramIndex}::jsonb`);
+      params.push(JSON.stringify([filter.tag]));
+      paramIndex++;
+    }
+
+    if (filter.searchKeyword && filter.searchKeyword.trim() !== '') {
+      const keyword = `%${filter.searchKeyword.trim()}%`;
+      conditions.push(`(
+        t.id ILIKE $${paramIndex} OR
+        EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.thread_id = t.id AND m.content ILIKE $${paramIndex}
+        )
+      )`);
+      params.push(keyword);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // 1. 获取总记录数
+    const countQuery = `SELECT COUNT(*) as count FROM threads t WHERE ${whereClause}`;
+    const countRes = await pool.query(countQuery, params);
+    const total = Number.parseInt(countRes.rows[0]?.count || '0', 10);
+
+    // 2. 分页拉取列表及最新一条消息
+    const listQuery = `
+      SELECT
+        t.id as thread_id,
+        t.business_id,
+        t.user_id,
+        t.status,
+        t.assigned_operator_id,
+        COALESCE(t.unread_count, 0) as unread_count,
+        COALESCE(t.tags, '[]'::jsonb) as tags,
+        COALESCE(t.metadata, '{}'::jsonb) as metadata,
+        t.created_at,
+        t.updated_at,
+        m.content as last_msg_content,
+        m.role as last_msg_role,
+        m.timestamp as last_msg_time
+      FROM threads t
+      LEFT JOIN LATERAL (
+        SELECT content, role, timestamp
+        FROM messages
+        WHERE thread_id = t.id
+        ORDER BY created_at DESC, timestamp DESC
+        LIMIT 1
+      ) m ON true
+      WHERE ${whereClause}
+      ORDER BY t.updated_at DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+    const listParams = [...params, limit, offset];
+    const res = await pool.query(listQuery, listParams);
+
+    const items: ConversationSummary[] = res.rows.map((r) => ({
+      threadId: r.thread_id,
+      businessId: r.business_id,
+      userId: r.user_id,
+      status: r.status || 'active',
+      assignedOperatorId: r.assigned_operator_id,
+      unreadCount: r.unread_count,
+      tags: Array.isArray(r.tags) ? r.tags : [],
+      metadata: r.metadata || {},
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+      lastMessageSnippet: r.last_msg_content
+        ? r.last_msg_content.length > 80
+          ? r.last_msg_content.slice(0, 80) + '...'
+          : r.last_msg_content
+        : undefined,
+      lastMessageRole: r.last_msg_role,
+      lastMessageTime: r.last_msg_time,
+    }));
+
+    return { items, total };
+  }
+
+  /**
+   * 获取单会话完整消息时序与上下文
+   */
+  public static async getConversationTimeline(threadId: string, businessId?: string) {
+    const pool = getPgPool();
+    const cleanThreadId = threadId.trim();
+
+    // 1. 查询会话基础信息
+    let threadQuery = 'SELECT * FROM threads WHERE id = $1';
+    const threadParams: any[] = [cleanThreadId];
+    if (businessId) {
+      threadQuery += ' AND business_id = $2';
+      threadParams.push(businessId.toLowerCase().trim());
+    }
+
+    const threadRes = await pool.query(threadQuery, threadParams);
+    if (!threadRes.rows[0]) return null;
+
+    const thread = threadRes.rows[0];
+
+    // 2. 查询消息列表
+    const msgQuery = `
+      SELECT id, role, content, thought_steps, tool_calls, cards, operator_info, timestamp, created_at
+      FROM messages
+      WHERE thread_id = $1
+      ORDER BY created_at ASC, timestamp ASC
+    `;
+    const msgRes = await pool.query(msgQuery, [cleanThreadId]);
+
+    return {
+      thread: {
+        threadId: thread.id,
+        businessId: thread.business_id,
+        userId: thread.user_id,
+        status: thread.status,
+        assignedOperatorId: thread.assigned_operator_id,
+        unreadCount: thread.unread_count || 0,
+        tags: thread.tags || [],
+        metadata: thread.metadata || {},
+        createdAt: thread.created_at,
+        updatedAt: thread.updated_at,
+      },
+      messages: msgRes.rows.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        thoughtSteps: m.thought_steps || undefined,
+        toolCalls: m.tool_calls || undefined,
+        cards: m.cards || undefined,
+        operatorInfo: m.operator_info || undefined,
+        timestamp: m.timestamp,
+        createdAt: m.created_at,
+      })),
+    };
+  }
+
+  /**
+   * 更新会话状态机 (如转人工接管、归档等)
+   */
+  public static async updateConversationStatus(params: {
+    threadId: string;
+    businessId: string;
+    status: string;
+    assignedOperatorId?: string | null;
+    tags?: string[];
+    metadata?: Record<string, unknown>;
+  }) {
+    const pool = getPgPool();
+    const cleanBizId = params.businessId.toLowerCase().trim();
+    const cleanThreadId = params.threadId.trim();
+
+    // Ensure thread row exists before updating
+    await pool.query(
+      `INSERT INTO threads (id, business_id, status, created_at, updated_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       ON CONFLICT (id) DO UPDATE SET business_id = EXCLUDED.business_id`,
+      [cleanThreadId, cleanBizId, params.status],
+    );
+
+    const updates: string[] = ['status = $3', 'updated_at = NOW()'];
+    const queryParams: any[] = [cleanThreadId, cleanBizId, params.status];
+    let pIdx = 4;
+
+    if (params.assignedOperatorId !== undefined) {
+      updates.push(`assigned_operator_id = $${pIdx}`);
+      queryParams.push(params.assignedOperatorId);
+      pIdx++;
+    }
+
+    if (params.tags !== undefined) {
+      updates.push(`tags = $${pIdx}::jsonb`);
+      queryParams.push(JSON.stringify(params.tags));
+      pIdx++;
+    }
+
+    if (params.metadata !== undefined) {
+      updates.push(`metadata = COALESCE(metadata, '{}'::jsonb) || $${pIdx}::jsonb`);
+      queryParams.push(JSON.stringify(params.metadata));
+      pIdx++;
+    }
+
+    const query = `
+      UPDATE threads
+      SET ${updates.join(', ')}
+      WHERE id = $1 AND business_id = $2
+      RETURNING *
+    `;
+
+    const res = await pool.query(query, queryParams);
+    return res.rows[0] || null;
+  }
+
+  /**
+   * 写入一条新消息并更新会话 updatedAt
+   */
+  public static async appendMessage(payload: AppendMessagePayload) {
+    const pool = getPgPool();
+    const msgId = payload.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const timestamp = payload.timestamp || new Date().toISOString();
+    const cleanBizId = payload.businessId.toLowerCase().trim();
+
+    // 1. 保证 thread 存在
+    await pool.query(
+      `INSERT INTO threads (id, business_id, status, created_at, updated_at)
+       VALUES ($1, $2, 'active', NOW(), NOW())
+       ON CONFLICT (id) DO UPDATE SET updated_at = NOW(), business_id = EXCLUDED.business_id`,
+      [payload.threadId, cleanBizId],
+    );
+
+    // 2. 插入消息
+    const msgRes = await pool.query(
+      `INSERT INTO messages (
+        id, thread_id, business_id, role, content, thought_steps, tool_calls, cards, operator_info, timestamp, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+      RETURNING *`,
+      [
+        msgId,
+        payload.threadId,
+        cleanBizId,
+        payload.role,
+        payload.content,
+        payload.thoughtSteps ? JSON.stringify(payload.thoughtSteps) : null,
+        payload.toolCalls ? JSON.stringify(payload.toolCalls) : null,
+        payload.cards ? JSON.stringify(payload.cards) : null,
+        payload.operatorInfo ? JSON.stringify(payload.operatorInfo) : null,
+        timestamp,
+      ],
+    );
+
+    return msgRes.rows[0];
+  }
+}

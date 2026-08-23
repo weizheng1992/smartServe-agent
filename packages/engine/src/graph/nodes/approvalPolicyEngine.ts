@@ -1,1 +1,1 @@
-export * from "../../approval/approvalGatekeeper";
+export * from '../../approval/approvalGatekeeper';

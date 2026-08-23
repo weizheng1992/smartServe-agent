@@ -1,5 +1,5 @@
-import type React from "react";
-import { useState } from "react";
+import type React from 'react';
+import { useState } from 'react';
 import {
   ApprovalContextDrawer,
   ApprovalRiskBadge,
@@ -13,8 +13,8 @@ import {
   Package,
   ScrollArea,
   getApprovalContextData,
-} from "ui";
-import type { Approval } from "../hooks/types";
+} from 'ui';
+import type { Approval } from '../hooks/types';
 
 interface HistoricalAuditsProps {
   auditedApprovals: Approval[];
@@ -54,21 +54,15 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
             <tbody className="divide-y divide-slate-800/80">
               {auditedApprovals.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="p-8 text-center text-slate-500 font-mono"
-                  >
+                  <td colSpan={7} className="p-8 text-center text-slate-500 font-mono">
                     No historical audit records found.
                   </td>
                 </tr>
               ) : (
                 auditedApprovals.map((app) => {
                   const context = getApprovalContextData(app);
-                  const commentRaw = app.actionPayload?.rejectionReason || "";
-                  const comment =
-                    typeof commentRaw === "string"
-                      ? commentRaw
-                      : JSON.stringify(commentRaw);
+                  const commentRaw = app.actionPayload?.rejectionReason || '';
+                  const comment = typeof commentRaw === 'string' ? commentRaw : JSON.stringify(commentRaw);
 
                   return (
                     <tr
@@ -84,58 +78,43 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
                           variant="outline"
                           className="bg-slate-950 border-slate-850 text-indigo-400 font-semibold uppercase tracking-wider text-[9px]"
                         >
-                          {app.businessId || "ecommerce"}
+                          {app.businessId || 'ecommerce'}
                         </Badge>
                       </td>
                       <td className="p-4 font-bold text-slate-300">
                         <div className="space-y-1">
                           <span>{app.actionType}</span>
                           {context.orderId && (
-                            <div className="font-mono text-[10px] text-slate-500">
-                              {context.orderId}
-                            </div>
+                            <div className="font-mono text-[10px] text-slate-500">{context.orderId}</div>
                           )}
                         </div>
                       </td>
                       <td className="p-4 max-w-[320px]">
                         <div className="font-mono text-[10px] text-slate-400 bg-slate-950/60 border border-slate-850 p-2.5 rounded-lg space-y-1.5">
                           {/* Type specific highlight */}
-                          {context.category === "refund" &&
-                            context.refundAmount !== undefined && (
-                              <div className="text-rose-400 font-bold flex items-center gap-1 font-mono">
-                                <DollarSign className="h-3 w-3" />
-                                <span>
-                                  退款金额: ¥{" "}
-                                  {Number(context.refundAmount).toFixed(2)}
-                                </span>
-                              </div>
-                            )}
+                          {context.category === 'refund' && context.refundAmount !== undefined && (
+                            <div className="text-rose-400 font-bold flex items-center gap-1 font-mono">
+                              <DollarSign className="h-3 w-3" />
+                              <span>退款金额: ¥ {Number(context.refundAmount).toFixed(2)}</span>
+                            </div>
+                          )}
 
-                          {context.category === "address" &&
-                            context.newAddress && (
-                              <div className="text-amber-300 font-bold flex items-center gap-1">
-                                <Package className="h-3 w-3 shrink-0" />
-                                <span className="truncate">
-                                  新地址: {context.newAddress}
-                                </span>
-                              </div>
-                            )}
+                          {context.category === 'address' && context.newAddress && (
+                            <div className="text-amber-300 font-bold flex items-center gap-1">
+                              <Package className="h-3 w-3 shrink-0" />
+                              <span className="truncate">新地址: {context.newAddress}</span>
+                            </div>
+                          )}
 
                           {context.userInput && (
                             <div className="text-slate-300 font-sans text-[11px] bg-slate-900/80 p-1.5 rounded border border-slate-800">
-                              <span className="text-slate-500 text-[9px] block">
-                                用户诉求/提问:
-                              </span>
-                              <span className="line-clamp-2">
-                                &quot;{context.userInput}&quot;
-                              </span>
+                              <span className="text-slate-500 text-[9px] block">用户诉求/提问:</span>
+                              <span className="line-clamp-2">&quot;{context.userInput}&quot;</span>
                             </div>
                           )}
 
                           {context.reason && (
-                            <div className="text-amber-400/90 font-sans text-[10px]">
-                              原因: {context.reason}
-                            </div>
+                            <div className="text-amber-400/90 font-sans text-[10px]">原因: {context.reason}</div>
                           )}
 
                           {comment && (
@@ -146,20 +125,17 @@ export function HistoricalAudits({ auditedApprovals }: HistoricalAuditsProps) {
                         </div>
                       </td>
                       <td className="p-4">
-                        <ApprovalRiskBadge
-                          actionType={app.actionType}
-                          status={app.status}
-                        />
+                        <ApprovalRiskBadge actionType={app.actionType} status={app.status} />
                       </td>
                       <td className="p-4 font-mono text-slate-500">
                         {app.createdAt
                           ? new Date(app.createdAt).toLocaleString([], {
-                              month: "2-digit",
-                              day: "2-digit",
-                              hour: "2-digit",
-                              minute: "2-digit",
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
                             })
-                          : "-"}
+                          : '-'}
                       </td>
                       <td className="p-4 text-right">
                         <Button

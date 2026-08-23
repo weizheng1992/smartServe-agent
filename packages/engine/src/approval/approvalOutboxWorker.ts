@@ -1,6 +1,6 @@
-import { approvalOutboxEvents, getDrizzle } from "db";
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
-import { WorkflowOrchestrator } from "../orchestrator/workflowOrchestrator";
+import { approvalOutboxEvents, getDrizzle } from 'db';
+import { and, desc, eq, inArray, lt } from 'drizzle-orm';
+import { WorkflowOrchestrator } from '../orchestrator/workflowOrchestrator';
 
 export interface OutboxProcessSummary {
   processedCount: number;
@@ -23,9 +23,7 @@ export class ApprovalOutboxWorker {
    * 执行一次对账补偿扫描 (Reconciliation Pass)
    * @param olderThanMs 仅补偿生成时间超过该阈值的事件（默认 10 秒，避免与同步 Fast-Path 竞争）
    */
-  public static async processPendingEvents(
-    olderThanMs = 10000,
-  ): Promise<OutboxProcessSummary> {
+  public static async processPendingEvents(olderThanMs = 10000): Promise<OutboxProcessSummary> {
     const drizzle = getDrizzle();
     if (!drizzle) {
       return { processedCount: 0, successCount: 0, failedCount: 0 };
@@ -42,12 +40,7 @@ export class ApprovalOutboxWorker {
       const events = await drizzle
         .select()
         .from(approvalOutboxEvents)
-        .where(
-          and(
-            inArray(approvalOutboxEvents.status, ["pending", "failed"]),
-            lt(approvalOutboxEvents.retryCount, 5),
-          ),
-        )
+        .where(and(inArray(approvalOutboxEvents.status, ['pending', 'failed']), lt(approvalOutboxEvents.retryCount, 5)))
         .orderBy(desc(approvalOutboxEvents.createdAt))
         .limit(20);
 
@@ -65,18 +58,17 @@ export class ApprovalOutboxWorker {
         await drizzle
           .update(approvalOutboxEvents)
           .set({
-            status: "processing",
+            status: 'processing',
             retryCount: (event.retryCount || 0) + 1,
             updatedAt: new Date(),
           })
           .where(eq(approvalOutboxEvents.id, event.id));
 
         const payload = (event.payload as any) || {};
-        const deterministicJobId =
-          payload.jobId || `job_resume_${event.approvalId}`;
+        const deterministicJobId = payload.jobId || `job_resume_${event.approvalId}`;
         const threadId = payload.threadId || event.threadId;
-        const userId = payload.userId || "83d67d4e-104c-4325-8aa7-10d4389fc725";
-        const message = payload.systemPromptText || "System: Resume execution.";
+        const userId = payload.userId || '83d67d4e-104c-4325-8aa7-10d4389fc725';
+        const message = payload.systemPromptText || 'System: Resume execution.';
 
         try {
           console.log(
@@ -94,27 +86,22 @@ export class ApprovalOutboxWorker {
           await drizzle
             .update(approvalOutboxEvents)
             .set({
-              status: "completed",
+              status: 'completed',
               errorMessage: null,
               updatedAt: new Date(),
             })
             .where(eq(approvalOutboxEvents.id, event.id));
 
           summary.successCount++;
-          console.log(
-            `[ApprovalOutboxWorker] ✅ 发件箱事件 [ID: ${event.id}] 补偿恢复成功！`,
-          );
+          console.log(`[ApprovalOutboxWorker] ✅ 发件箱事件 [ID: ${event.id}] 补偿恢复成功！`);
         } catch (dispatchErr: any) {
           const errMsg = dispatchErr?.message || String(dispatchErr);
-          console.warn(
-            `[ApprovalOutboxWorker] ❌ 发件箱事件 [ID: ${event.id}] 补偿执行失败:`,
-            errMsg,
-          );
+          console.warn(`[ApprovalOutboxWorker] ❌ 发件箱事件 [ID: ${event.id}] 补偿执行失败:`, errMsg);
 
           await drizzle
             .update(approvalOutboxEvents)
             .set({
-              status: "failed",
+              status: 'failed',
               errorMessage: errMsg,
               updatedAt: new Date(),
             })
@@ -124,7 +111,7 @@ export class ApprovalOutboxWorker {
         }
       }
     } catch (err) {
-      console.error("[ApprovalOutboxWorker] 扫描发件箱异常:", err);
+      console.error('[ApprovalOutboxWorker] 扫描发件箱异常:', err);
     }
 
     return summary;
@@ -144,9 +131,7 @@ export class ApprovalOutboxWorker {
         this.isRunning = false;
       }
     }, intervalMs);
-    console.log(
-      `[ApprovalOutboxWorker] 🚀 发件箱补偿 Worker 已就绪 (轮询间隔: ${intervalMs}ms)`,
-    );
+    console.log(`[ApprovalOutboxWorker] 🚀 发件箱补偿 Worker 已就绪 (轮询间隔: ${intervalMs}ms)`);
   }
 
   /**

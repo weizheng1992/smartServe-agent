@@ -6,4 +6,6 @@ export * from './db';
 export * from './event';
 export * from './log';
 export * from './observability';
+export * from './skill';
+export * from './spi';
 export * from './tool';

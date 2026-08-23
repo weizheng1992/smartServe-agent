@@ -1,5 +1,5 @@
-import { db, getDrizzle, pendingApprovals, threads } from "db";
-import { and, eq } from "drizzle-orm";
+import { db, getDrizzle, pendingApprovals, threads } from 'db';
+import { and, eq } from 'drizzle-orm';
 import {
   WorkflowOrchestrator,
   agentEventEmitter,
@@ -7,16 +7,18 @@ import {
   currentStatusQuery,
   getTemporalClient,
   isUsingMockTemporal,
-} from "engine";
-import type { NextRequest } from "next/server";
-import { checkTenantQuotaGuard } from "../quotaGuard";
+} from 'engine';
+import type { NextRequest } from 'next/server';
+import { checkTenantQuotaGuard } from '../quotaGuard';
 
 export interface ChatDispatchRequest {
   message?: string;
+  input?: string;
   threadId?: string;
   userId?: string;
   businessId?: string;
   imageUrls?: string[];
+  sync?: boolean;
   req?: NextRequest;
 }
 
@@ -25,6 +27,9 @@ export interface ChatDispatchResult {
   jobId?: string;
   threadId?: string;
   userId?: string;
+  output?: string;
+  result?: string;
+  cards?: any[];
   isCached?: boolean;
   isHumanActive?: boolean;
   isTemporalMode?: boolean;
@@ -42,12 +47,10 @@ const globalForCache = global as unknown as {
   completedRequestsCache?: Map<string, CachedJob>;
 };
 
-const inFlightRequests =
-  globalForCache.inFlightRequests ?? new Map<string, string>();
-const completedRequestsCache =
-  globalForCache.completedRequestsCache ?? new Map<string, CachedJob>();
+const inFlightRequests = globalForCache.inFlightRequests ?? new Map<string, string>();
+const completedRequestsCache = globalForCache.completedRequestsCache ?? new Map<string, CachedJob>();
 
-if (process.env.NODE_ENV !== "production") {
+if (process.env.NODE_ENV !== 'production') {
   globalForCache.inFlightRequests = inFlightRequests;
   globalForCache.completedRequestsCache = completedRequestsCache;
 }
@@ -80,10 +83,7 @@ export class ChatSessionOrchestrator {
   /**
    * 🎧 校验会话是否存在活跃人工接管并直接持久化消息
    */
-  public static async checkHumanTakeoverActive(
-    threadId: string,
-    message: string,
-  ): Promise<boolean> {
+  public static async checkHumanTakeoverActive(threadId: string, message: string): Promise<boolean> {
     try {
       const drizzle = getDrizzle();
       if (!drizzle) return false;
@@ -91,20 +91,13 @@ export class ChatSessionOrchestrator {
       const activeApprovals = await drizzle
         .select()
         .from(pendingApprovals)
-        .where(
-          and(
-            eq(pendingApprovals.threadId, threadId),
-            eq(pendingApprovals.status, "waiting"),
-          ),
-        )
+        .where(and(eq(pendingApprovals.threadId, threadId), eq(pendingApprovals.status, 'waiting')))
         .limit(1);
 
       if (activeApprovals.length === 0) return false;
 
       const activeApp = activeApprovals[0];
-      const isHumanActive =
-        activeApp.actionType?.includes("human") ||
-        activeApp.actionType?.includes("escalat");
+      const isHumanActive = activeApp.actionType?.includes('human') || activeApp.actionType?.includes('escalat');
 
       if (isHumanActive) {
         console.log(
@@ -113,11 +106,11 @@ export class ChatSessionOrchestrator {
 
         await db.addMessage({
           id:
-            typeof crypto !== "undefined" && crypto.randomUUID
+            typeof crypto !== 'undefined' && crypto.randomUUID
               ? crypto.randomUUID()
               : Math.random().toString(36).substring(2, 15),
           threadId,
-          role: "user",
+          role: 'user',
           content: message,
           timestamp: new Date().toISOString(),
         });
@@ -125,10 +118,7 @@ export class ChatSessionOrchestrator {
         return true;
       }
     } catch (hErr) {
-      console.warn(
-        "[ChatSessionOrchestrator] Human takeover check warning:",
-        hErr,
-      );
+      console.warn('[ChatSessionOrchestrator] Human takeover check warning:', hErr);
     }
 
     return false;
@@ -137,61 +127,54 @@ export class ChatSessionOrchestrator {
   /**
    * 🚀 分发用户对话请求
    */
-  public static async dispatchChatRequest(
-    payload: ChatDispatchRequest,
-  ): Promise<ChatDispatchResult> {
+  public static async dispatchChatRequest(payload: ChatDispatchRequest): Promise<ChatDispatchResult> {
     pruneCaches();
 
-    const { message, threadId, userId, businessId, imageUrls, req } = payload;
+    const effectiveMessage = (payload.message || payload.input || '').trim();
+    const effectiveThreadId = payload.threadId || `thread_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const effectiveUserId = payload.userId || 'CUST-8801';
+    const { businessId, imageUrls, req, sync } = payload;
 
-    if (!message) {
-      return { error: "Message is required", statusCode: 400 };
+    if (!effectiveMessage) {
+      return { error: 'Message is required', statusCode: 400 };
     }
-    if (!threadId) {
-      return { error: "threadId is strictly required", statusCode: 400 };
+    if (!payload.threadId) {
+      return { error: 'threadId is strictly required', statusCode: 400 };
     }
-    if (!userId) {
-      return { error: "userId is strictly required", statusCode: 400 };
+    if (!payload.userId) {
+      return { error: 'userId is strictly required', statusCode: 400 };
     }
 
-    const quotaCheck = await checkTenantQuotaGuard(userId);
+    const quotaCheck = await checkTenantQuotaGuard(effectiveUserId);
     if (!quotaCheck.allowed) {
       return {
-        error: quotaCheck.reason || "Quota limit exceeded",
+        error: quotaCheck.reason || 'Quota limit exceeded',
         statusCode: 429,
       };
     }
 
-    const isHumanActive = await this.checkHumanTakeoverActive(
-      threadId,
-      message,
-    );
+    const isHumanActive = await this.checkHumanTakeoverActive(effectiveThreadId, effectiveMessage);
     if (isHumanActive) {
       return {
         success: true,
-        threadId,
-        userId,
+        threadId: effectiveThreadId,
+        userId: effectiveUserId,
         isHumanActive: true,
       };
     }
 
-    const cleanMessage = message.trim().toLowerCase();
-    const imageHash =
-      imageUrls && imageUrls.length > 0
-        ? `:[images:${imageUrls.sort().join(",")}]`
-        : "";
-    const cacheKey = `${threadId}:${cleanMessage}${imageHash}`;
+    const cleanMessage = effectiveMessage.toLowerCase();
+    const imageHash = imageUrls && imageUrls.length > 0 ? `:[images:${imageUrls.sort().join(',')}]` : '';
+    const cacheKey = `${effectiveThreadId}:${cleanMessage}${imageHash}`;
 
     if (inFlightRequests.has(cacheKey)) {
       const existingJobId = inFlightRequests.get(cacheKey)!;
-      console.log(
-        `[Singleflight] 🎯 拦截到极速并发重复请求！直接合并至正在执行的 jobId: ${existingJobId}`,
-      );
+      console.log(`[Singleflight] 🎯 拦截到极速并发重复请求！直接合并至正在执行的 jobId: ${existingJobId}`);
       return {
         success: true,
         jobId: existingJobId,
-        threadId,
-        userId,
+        threadId: effectiveThreadId,
+        userId: effectiveUserId,
         isCached: true,
       };
     }
@@ -200,14 +183,12 @@ export class ChatSessionOrchestrator {
     if (completedRequestsCache.has(cacheKey)) {
       const cached = completedRequestsCache.get(cacheKey)!;
       if (now - cached.timestamp < 5000) {
-        console.log(
-          `[Exact Cache Hit] 🎯 5秒内重复提问精确哈希去重命中！直接复用 jobId: ${cached.jobId}`,
-        );
+        console.log(`[Exact Cache Hit] 🎯 5秒内重复提问精确哈希去重命中！直接复用 jobId: ${cached.jobId}`);
         return {
           success: true,
           jobId: cached.jobId,
-          threadId,
-          userId,
+          threadId: effectiveThreadId,
+          userId: effectiveUserId,
           isCached: true,
         };
       }
@@ -218,33 +199,26 @@ export class ChatSessionOrchestrator {
     inFlightRequests.set(cacheKey, jobId);
 
     // 🛡️ 多租户物理锚定：优先溯源数据库中该会话绑定的真实商户身份
-    let effectiveBusinessId = businessId;
-    if (threadId) {
+    let effectiveBusinessId = businessId || 'aurora';
+    if (effectiveThreadId) {
       try {
         const drizzle = getDrizzle();
         if (drizzle) {
-          const threadRows = await drizzle
-            .select()
-            .from(threads)
-            .where(eq(threads.id, threadId))
-            .limit(1);
+          const threadRows = await drizzle.select().from(threads).where(eq(threads.id, effectiveThreadId)).limit(1);
           if (threadRows[0]?.businessId) {
             effectiveBusinessId = threadRows[0].businessId;
           }
         }
       } catch (err) {
-        console.warn(
-          "[ChatSessionOrchestrator] Failed to resolve thread businessId:",
-          err,
-        );
+        console.warn('[ChatSessionOrchestrator] Failed to resolve thread businessId:', err);
       }
     }
 
     const dispatchRes = await WorkflowOrchestrator.dispatchJob({
       jobId,
-      threadId,
-      userId,
-      message,
+      threadId: effectiveThreadId,
+      userId: effectiveUserId,
+      message: effectiveMessage,
       businessId: effectiveBusinessId,
       imageUrls,
       req,
@@ -257,20 +231,40 @@ export class ChatSessionOrchestrator {
           jobId,
           timestamp: Date.now(),
         });
-        console.log(
-          `[Job Complete] ✅ Run ${jobId} completed. Registered in 5s short cache.`,
-        );
+        console.log(`[Job Complete] ✅ Run ${jobId} completed. Registered in 5s short cache.`);
       })
       .catch((err) => {
         inFlightRequests.delete(cacheKey);
         console.warn(`[Job Fail] Run ${jobId} failed:`, err);
       });
 
+    // 如果客户端请求同步返回结果 (如第三方商户 SDK / Widget 简易对接)
+    if (sync) {
+      try {
+        const finalState = (await dispatchRes.promise) as any;
+        return {
+          success: true,
+          jobId,
+          threadId: effectiveThreadId,
+          userId: effectiveUserId,
+          output: finalState?.output || finalState?.result || '智能客服已为您处理完毕。',
+          result: finalState?.output || finalState?.result || '智能客服已为您处理完毕。',
+          cards: finalState?.cards || [],
+          isTemporalMode: dispatchRes.isTemporalMode,
+        };
+      } catch (execErr: any) {
+        return {
+          error: execErr?.message || 'Agent execution failed',
+          statusCode: 500,
+        };
+      }
+    }
+
     return {
       success: true,
       jobId,
-      threadId,
-      userId,
+      threadId: effectiveThreadId,
+      userId: effectiveUserId,
       isTemporalMode: dispatchRes.isTemporalMode,
     };
   }
@@ -289,9 +283,7 @@ export class ChatSessionOrchestrator {
       async start(controller) {
         const sendSSE = (event: string, data: unknown) => {
           try {
-            controller.enqueue(
-              `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
-            );
+            controller.enqueue(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
           } catch {
             // Controller might be closed
           }
@@ -299,11 +291,11 @@ export class ChatSessionOrchestrator {
 
         if (!isMock) {
           let pollInterval: NodeJS.Timeout | null = null;
-          let lastStatus = "";
+          let lastStatus = '';
           try {
-            sendSSE("status", {
-              status: "running",
-              message: "Temporal 工作流引擎已接管调度，正在初始化...",
+            sendSSE('status', {
+              status: 'running',
+              message: 'Temporal 工作流引擎已接管调度，正在初始化...',
             });
             const client = await getTemporalClient();
             const handle = client.workflow.getHandle(jobId);
@@ -317,8 +309,8 @@ export class ChatSessionOrchestrator {
 
                 if (status && status !== lastStatus) {
                   lastStatus = status;
-                  sendSSE("status", {
-                    status: "executing",
+                  sendSSE('status', {
+                    status: 'executing',
                     message: status,
                     plan: plan || undefined,
                   });
@@ -330,16 +322,13 @@ export class ChatSessionOrchestrator {
 
             const result = await handle.result();
             if (pollInterval) clearInterval(pollInterval);
-            sendSSE("result", result);
+            sendSSE('result', result);
             controller.close();
           } catch (err) {
             if (pollInterval) clearInterval(pollInterval);
-            console.error("[Temporal SSE] failed:", err);
-            sendSSE("error", {
-              message:
-                err instanceof Error
-                  ? err.message
-                  : "Temporal workflow execution failed",
+            console.error('[Temporal SSE] failed:', err);
+            sendSSE('error', {
+              message: err instanceof Error ? err.message : 'Temporal workflow execution failed',
             });
             controller.close();
           }
@@ -353,10 +342,10 @@ export class ChatSessionOrchestrator {
           unsubscribe = agentEventEmitter.playbackAndSubscribe(
             jobId,
             (statusData) => {
-              sendSSE("status", statusData);
+              sendSSE('status', statusData);
             },
             (resultData) => {
-              sendSSE("result", resultData);
+              sendSSE('result', resultData);
               unsubscribe();
               agentEventEmitter.clearJob(jobId);
               try {
@@ -368,14 +357,14 @@ export class ChatSessionOrchestrator {
 
         const heartbeat = setInterval(() => {
           try {
-            controller.enqueue(": heartbeat\n\n");
+            controller.enqueue(': heartbeat\n\n');
           } catch {
             clearInterval(heartbeat);
           }
         }, 15000);
 
         if (signal) {
-          signal.addEventListener("abort", () => {
+          signal.addEventListener('abort', () => {
             clearTimeout(subscriptionTimeout);
             clearInterval(heartbeat);
             unsubscribe();
@@ -387,9 +376,5 @@ export class ChatSessionOrchestrator {
 }
 
 export const ChatSessionService = ChatSessionOrchestrator;
-export const checkHumanTakeoverActive =
-  ChatSessionOrchestrator.checkHumanTakeoverActive.bind(
-    ChatSessionOrchestrator,
-  );
-export const dispatchChatRequest =
-  ChatSessionOrchestrator.dispatchChatRequest.bind(ChatSessionOrchestrator);
+export const checkHumanTakeoverActive = ChatSessionOrchestrator.checkHumanTakeoverActive.bind(ChatSessionOrchestrator);
+export const dispatchChatRequest = ChatSessionOrchestrator.dispatchChatRequest.bind(ChatSessionOrchestrator);

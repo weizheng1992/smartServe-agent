@@ -1,11 +1,4 @@
-export type ApprovalStatus =
-  | "pending"
-  | "waiting"
-  | "approved"
-  | "rejected"
-  | "cancelled"
-  | "expired"
-  | string;
+export type ApprovalStatus = 'pending' | 'waiting' | 'approved' | 'rejected' | 'cancelled' | 'expired' | string;
 
 export interface ApprovalActionPayload {
   orderId?: string;
@@ -40,7 +33,7 @@ export type Approval = PendingApprovalRecord;
 
 export interface ApprovalDecisionRequest {
   approvalId: string;
-  action: "approve" | "reject" | "cancel" | "reply";
+  action: 'approve' | 'reject' | 'cancel' | 'reply';
   rejectionReason?: string;
   replyMessage?: string;
   isFinish?: boolean;

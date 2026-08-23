@@ -1,18 +1,18 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { getDrizzle, ragDocuments } from "db";
-import { and, eq } from "drizzle-orm";
-import { getEmbeddingModel, getLLM } from "../llm/callLLMWithRetry";
-import { MarkdownChunker } from "./chunker";
-import { generateContextualSummary } from "./contextGenerator";
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { getDrizzle, ragDocuments } from 'db';
+import { and, eq } from 'drizzle-orm';
+import { getEmbeddingModel, getLLM } from '../llm/callLLMWithRetry';
+import { MarkdownChunker } from './chunker';
+import { generateContextualSummary } from './contextGenerator';
 
 export type RAGCategory =
-  | "store_info"
-  | "product_knowledge"
-  | "operation_guide"
-  | "refund_policy"
-  | "size_chart"
-  | "general";
+  | 'store_info'
+  | 'product_knowledge'
+  | 'operation_guide'
+  | 'refund_policy'
+  | 'size_chart'
+  | 'general';
 
 export interface IngestResult {
   filePath: string;
@@ -32,17 +32,17 @@ export function parseFrontmatter(rawContent: string): {
     return { frontmatter: {}, body: rawContent };
   }
 
-  const yamlLines = match[1].split("\n");
+  const yamlLines = match[1].split('\n');
   const frontmatter: Record<string, string> = {};
   for (const line of yamlLines) {
-    const parts = line.split(":");
+    const parts = line.split(':');
     if (parts.length >= 2) {
       const key = parts[0].trim();
       const val = parts
         .slice(1)
-        .join(":")
+        .join(':')
         .trim()
-        .replace(/^["']|["']$/g, "");
+        .replace(/^["']|["']$/g, '');
       frontmatter[key] = val;
     }
   }
@@ -59,23 +59,20 @@ export async function classifyChunkCategory(
   explicitCategory?: string,
 ): Promise<RAGCategory> {
   const validCategories: RAGCategory[] = [
-    "store_info",
-    "product_knowledge",
-    "operation_guide",
-    "refund_policy",
-    "size_chart",
-    "general",
+    'store_info',
+    'product_knowledge',
+    'operation_guide',
+    'refund_policy',
+    'size_chart',
+    'general',
   ];
 
-  if (
-    explicitCategory &&
-    validCategories.includes(explicitCategory as RAGCategory)
-  ) {
+  if (explicitCategory && validCategories.includes(explicitCategory as RAGCategory)) {
     return explicitCategory as RAGCategory;
   }
 
-  if (process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test") {
-    return (explicitCategory as RAGCategory) || "general";
+  if (process.env.NODE_ENV === 'test' || process.env.BUN_ENV === 'test') {
+    return (explicitCategory as RAGCategory) || 'general';
   }
 
   try {
@@ -95,34 +92,26 @@ Chunk Content: "${chunkText}"
 Return ONLY the category string (e.g. store_info). Do NOT include extra formatting or quotes.`;
 
     const res = await llm.invoke(prompt);
-    let cat =
-      res && typeof res.content === "string"
-        ? res.content.trim().toLowerCase()
-        : "";
-    cat = cat.replace(/[^a-z_]/g, "");
+    let cat = res && typeof res.content === 'string' ? res.content.trim().toLowerCase() : '';
+    cat = cat.replace(/[^a-z_]/g, '');
 
     if (validCategories.includes(cat as RAGCategory)) {
       return cat as RAGCategory;
     }
   } catch (err) {
-    console.warn(
-      "[CategoryClassifier] LLM classification failed, falling back to general:",
-      err,
-    );
+    console.warn('[CategoryClassifier] LLM classification failed, falling back to general:', err);
   }
 
-  return "general";
+  return 'general';
 }
 
 /**
  * 自动化读取指定 TXT / Markdown 知识库目录并智能向量化切片入库
  */
-export async function ingestTxtDirectory(
-  knowledgeDir: string,
-): Promise<IngestResult[]> {
+export async function ingestTxtDirectory(knowledgeDir: string): Promise<IngestResult[]> {
   const drizzle = getDrizzle();
   if (!drizzle) {
-    console.warn("[IngestTxt] PostgreSQL 连接不可用，跳过物理入库。");
+    console.warn('[IngestTxt] PostgreSQL 连接不可用，跳过物理入库。');
     return [];
   }
 
@@ -131,32 +120,30 @@ export async function ingestTxtDirectory(
     return [];
   }
 
-  const files = fs
-    .readdirSync(knowledgeDir)
-    .filter((f) => f.endsWith(".txt") || f.endsWith(".md"));
+  const files = fs.readdirSync(knowledgeDir).filter((f) => f.endsWith('.txt') || f.endsWith('.md'));
   const results: IngestResult[] = [];
   const embeddingModel = getEmbeddingModel();
 
   for (const file of files) {
     const filePath = path.join(knowledgeDir, file);
-    const rawContent = fs.readFileSync(filePath, "utf-8");
+    const rawContent = fs.readFileSync(filePath, 'utf-8');
 
     // 1. 解析 YAML Frontmatter 元数据
     const { frontmatter, body } = parseFrontmatter(rawContent);
 
     // 优先读取 Frontmatter 中的 businessId，无则根据文件名或默认补全
-    let businessId = frontmatter.businessId || "ecommerce";
+    let businessId = frontmatter.businessId || 'ecommerce';
     if (!frontmatter.businessId) {
       const lowerFile = file.toLowerCase();
-      if (lowerFile.includes("nike")) businessId = "nike";
-      else if (lowerFile.includes("adidas")) businessId = "adidas";
+      if (lowerFile.includes('nike')) businessId = 'nike';
+      else if (lowerFile.includes('adidas')) businessId = 'adidas';
     }
 
     // 优先读取 Frontmatter 中的 title，无则提取 H1 标题
-    let docTitle = frontmatter.title || "";
+    let docTitle = frontmatter.title || '';
     if (!docTitle) {
-      const firstLine = body.split("\n")[0] || "";
-      docTitle = firstLine.replace(/^#+\s*/, "").trim() || file;
+      const firstLine = body.split('\n')[0] || '';
+      docTitle = firstLine.replace(/^#+\s*/, '').trim() || file;
     }
 
     const explicitCategory = frontmatter.category;
@@ -169,18 +156,9 @@ export async function ingestTxtDirectory(
 
     // 3. 并行并发生成分类、Contextual Summary 与算力 Embeddings
     const chunkPromises = chunks.map(async (chunk) => {
-      const category = await classifyChunkCategory(
-        chunk.headerPath,
-        chunk.chunkText,
-        explicitCategory,
-      );
+      const category = await classifyChunkCategory(chunk.headerPath, chunk.chunkText, explicitCategory);
 
-      const summary = await generateContextualSummary(
-        docTitle,
-        chunk.headerPath,
-        chunk.chunkText,
-        businessId,
-      );
+      const summary = await generateContextualSummary(docTitle, chunk.headerPath, chunk.chunkText, businessId);
 
       const combinedText = `[Context] ${summary}\n\n[Content] ${chunk.chunkText}`;
       const embedding = await embeddingModel.embedQuery(combinedText);
@@ -207,31 +185,18 @@ export async function ingestTxtDirectory(
     // 幂等入库：先清理同商户同文件的历史切片，防止重复累加
     await drizzle
       .delete(ragDocuments)
-      .where(
-        and(
-          eq(ragDocuments.businessId, businessId),
-          eq(ragDocuments.sourceUrl, file),
-        ),
-      );
+      .where(and(eq(ragDocuments.businessId, businessId), eq(ragDocuments.sourceUrl, file)));
 
     for (const record of recordsToInsert) {
       // 检查是否已有相同租户且相同文本的切片（例如早期无 sourceUrl 的种子数据），有则更新无则新增
       const existing = await drizzle
         .select({ id: ragDocuments.id })
         .from(ragDocuments)
-        .where(
-          and(
-            eq(ragDocuments.businessId, record.businessId),
-            eq(ragDocuments.chunkText, record.chunkText),
-          ),
-        )
+        .where(and(eq(ragDocuments.businessId, record.businessId), eq(ragDocuments.chunkText, record.chunkText)))
         .limit(1);
 
       if (existing.length > 0) {
-        await drizzle
-          .update(ragDocuments)
-          .set(record)
-          .where(eq(ragDocuments.id, existing[0].id));
+        await drizzle.update(ragDocuments).set(record).where(eq(ragDocuments.id, existing[0].id));
       } else {
         await drizzle.insert(ragDocuments).values(record);
       }
@@ -245,9 +210,7 @@ export async function ingestTxtDirectory(
       chunksIngested: count,
     });
 
-    console.log(
-      `[IngestTxt] ✅ 成功入库文件 ${file} (商户: ${businessId}, 切片数: ${count})`,
-    );
+    console.log(`[IngestTxt] ✅ 成功入库文件 ${file} (商户: ${businessId}, 切片数: ${count})`);
   }
 
   return results;

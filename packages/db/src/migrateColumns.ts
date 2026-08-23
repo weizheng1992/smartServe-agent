@@ -1,8 +1,8 @@
-import { getPgPool } from "./client";
+import { getPgPool } from './client';
 
 async function migrateColumns() {
   const pool = getPgPool();
-  console.log("[DB Migration] 正在更新 products 与 order_items 物理表字段...");
+  console.log('[DB Migration] 正在更新 products 与 order_items 物理表字段...');
 
   await pool.query(`
     ALTER TABLE products ADD COLUMN IF NOT EXISTS manager_id text;
@@ -26,6 +26,23 @@ async function migrateColumns() {
     ALTER TABLE episodic_events ADD COLUMN IF NOT EXISTS scope text DEFAULT 'global';
     CREATE INDEX IF NOT EXISTS episodic_user_scope_biz_idx ON episodic_events (user_id, scope, business_id);
 
+    -- Multi-tenant Conversation & Messages extension
+    ALTER TABLE threads ADD COLUMN IF NOT EXISTS assigned_operator_id text;
+    ALTER TABLE threads ADD COLUMN IF NOT EXISTS unread_count integer DEFAULT 0;
+    ALTER TABLE threads ADD COLUMN IF NOT EXISTS tags jsonb DEFAULT '[]'::jsonb;
+    ALTER TABLE threads ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb;
+    CREATE INDEX IF NOT EXISTS threads_biz_status_idx ON threads (business_id, status);
+    CREATE INDEX IF NOT EXISTS threads_updated_at_idx ON threads (updated_at);
+
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS business_id text;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS thought_steps jsonb;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_calls jsonb;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS cards jsonb;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS operator_info jsonb;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at timestamp DEFAULT NOW();
+    CREATE INDEX IF NOT EXISTS messages_thread_idx ON messages (thread_id);
+    CREATE INDEX IF NOT EXISTS messages_biz_thread_idx ON messages (business_id, thread_id);
+
     -- Transactional outbox table
     CREATE TABLE IF NOT EXISTS approval_outbox_events (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -43,12 +60,12 @@ async function migrateColumns() {
     CREATE INDEX IF NOT EXISTS approval_outbox_approval_idx ON approval_outbox_events (approval_id);
   `);
 
-  console.log("✅ [DB Migration] 物理表列字段扩展完成！");
+  console.log('✅ [DB Migration] 物理表列字段扩展完成！');
 }
 
 migrateColumns()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error("❌ [DB Migration] Failed:", err);
+    console.error('❌ [DB Migration] Failed:', err);
     process.exit(1);
   });
