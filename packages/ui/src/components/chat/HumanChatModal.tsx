@@ -23,11 +23,11 @@ import { HumanChatFooter } from "./HumanChatFooter";
 export interface ChatApprovalRecord {
   id: string;
   threadId: string;
-  userId?: string;
-  userEmail?: string;
-  businessId?: string;
-  status?: string;
-  actionType?: string;
+  userId?: string | null;
+  userEmail?: string | null;
+  businessId?: string | null;
+  status?: string | null;
+  actionType?: string | null;
   actionPayload?: {
     reason?: string;
     userInput?: string;

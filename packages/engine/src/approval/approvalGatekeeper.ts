@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  approvalOutboxEvents,
   db,
   getDrizzle,
   pendingApprovals as dbPendingApprovals,
@@ -395,7 +396,7 @@ export class ApprovalGatekeeper {
    */
   public static async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
     const drizzle = getDrizzle()!;
-    return drizzle
+    const rows = await drizzle
       .select({
         id: dbPendingApprovals.id,
         threadId: dbPendingApprovals.threadId,
@@ -412,6 +413,8 @@ export class ApprovalGatekeeper {
       .innerJoin(threads, eq(dbPendingApprovals.threadId, threads.id))
       .leftJoin(users, eq(threads.userId, users.id))
       .orderBy(desc(dbPendingApprovals.createdAt));
+
+    return rows as PendingApprovalRecord[];
   }
 
   /**
@@ -436,7 +439,7 @@ export class ApprovalGatekeeper {
       console.warn("[ApprovalGatekeeper] Thread ensure warning:", tErr);
     }
 
-    let approvalId = randomUUID();
+    let approvalId: string = randomUUID();
     const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const drizzle = getDrizzle()!;
@@ -765,27 +768,10 @@ export class ApprovalGatekeeper {
         humanReply: humanReply || "",
       };
 
-      await drizzle
-        .update(dbPendingApprovals)
-        .set({
-          status: nextStatus,
-          actionPayload: finalPayload,
-        })
-        .where(eq(dbPendingApprovals.id, approvalId));
-
-      console.log(
-        `[ApprovalGatekeeper] 成功人工处理工单 [ID: ${approvalId}] ➔ 决议为 [${nextStatus}]`,
-      );
-
-      if (nextStatus === "resolved_by_human") {
-        return {
-          success: true,
-          threadId: record.threadId,
-          status: nextStatus,
-        };
-      }
-
-      const jobId = `job_resume_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      // 🎯 确定性 Job ID 生成 (Deterministic Job ID Resumption):
+      // 格式: job_resume_${approvalId}，确保重试和重放具备物理防重幂等性
+      const deterministicJobId = `job_resume_${approvalId}`;
+      const outboxEventId = randomUUID();
 
       let systemPromptText = "";
       if (nextStatus === "approved") {
@@ -798,14 +784,9 @@ export class ApprovalGatekeeper {
         systemPromptText = `System: Human approval rejected. Reason: ${rejectionReason || "Not policy compliant"}. Please replan alternative path.`;
       }
 
-      console.log(
-        `[ApprovalGatekeeper] 正在恢复 thread ${record.threadId} 的 Agent 执行流... 新 jobId: ${jobId}`,
-      );
-
       let threadUserId = "83d67d4e-104c-4325-8aa7-10d4389fc725";
       try {
-        const dbInstance = getDrizzle()!;
-        const threadRows = await dbInstance
+        const threadRows = await drizzle
           .select({ userId: threads.userId })
           .from(threads)
           .where(eq(threads.id, record.threadId))
@@ -820,16 +801,97 @@ export class ApprovalGatekeeper {
         );
       }
 
-      await WorkflowOrchestrator.dispatchJob({
-        jobId,
+      const eventType =
+        nextStatus === "approved"
+          ? "resume_execution"
+          : nextStatus === "cancelled"
+            ? "cancel_execution"
+            : "reject_execution";
+
+      const outboxPayload = {
+        jobId: deterministicJobId,
         threadId: record.threadId,
         userId: threadUserId,
-        message: systemPromptText,
+        systemPromptText,
+        nextStatus,
+      };
+
+      // 🔒 事务发件箱 (Transactional Outbox Pattern)：
+      // 将【工单状态更新】与【发件箱事件插入】封装在单一本地数据库事务中原子提交，杜绝幽灵审批
+      await drizzle.transaction(async (tx) => {
+        await tx
+          .update(dbPendingApprovals)
+          .set({
+            status: nextStatus,
+            actionPayload: finalPayload,
+          })
+          .where(eq(dbPendingApprovals.id, approvalId));
+
+        if (nextStatus !== "resolved_by_human") {
+          await tx.insert(approvalOutboxEvents).values({
+            id: outboxEventId,
+            approvalId,
+            threadId: record.threadId,
+            eventType,
+            payload: outboxPayload,
+            status: "pending",
+            retryCount: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
       });
+
+      console.log(
+        `[ApprovalGatekeeper] 成功人工处理工单 [ID: ${approvalId}] ➔ 决议为 [${nextStatus}] (Outbox Event: ${outboxEventId})`,
+      );
+
+      if (nextStatus === "resolved_by_human") {
+        return {
+          success: true,
+          threadId: record.threadId,
+          status: nextStatus,
+        };
+      }
+
+      console.log(
+        `[ApprovalGatekeeper] 正在快速通道恢复 thread ${record.threadId} 的 Agent 执行流... 确定性 JobID: ${deterministicJobId}`,
+      );
+
+      // ⚡ Fast-Path 同步派发：若成功则将 Outbox 事件标记为 completed；若失败则保留 pending 由对账 Worker 自动重试
+      try {
+        await WorkflowOrchestrator.dispatchJob({
+          jobId: deterministicJobId,
+          threadId: record.threadId,
+          userId: threadUserId,
+          message: systemPromptText,
+        });
+
+        await drizzle
+          .update(approvalOutboxEvents)
+          .set({
+            status: "completed",
+            updatedAt: new Date(),
+          })
+          .where(eq(approvalOutboxEvents.id, outboxEventId));
+      } catch (dispatchErr: any) {
+        console.warn(
+          `[ApprovalGatekeeper Outbox] Fast-path dispatch failed for ${approvalId}, kept in pending status for reconciliation worker:`,
+          dispatchErr?.message || String(dispatchErr),
+        );
+        await drizzle
+          .update(approvalOutboxEvents)
+          .set({
+            status: "pending",
+            errorMessage: dispatchErr?.message || String(dispatchErr),
+            updatedAt: new Date(),
+          })
+          .where(eq(approvalOutboxEvents.id, outboxEventId));
+      }
 
       return {
         success: true,
-        jobId,
+        jobId: deterministicJobId,
         threadId: record.threadId,
         status: nextStatus,
       };

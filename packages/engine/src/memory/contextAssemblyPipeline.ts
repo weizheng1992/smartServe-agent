@@ -113,7 +113,7 @@ export class ContextAssemblyPipeline {
     }
 
     const sliced = events.slice(0, maxCount);
-    return sliced.map((e) => `• [历史交互]: ${e.content}`).join("\n");
+    return sliced.map((e) => `• [历史交互]: ${e.event}`).join("\n");
   }
 
   /**
@@ -126,6 +126,7 @@ export class ContextAssemblyPipeline {
       threadId,
       userId,
       query,
+      businessId,
       shortMessages: inputShortMessages,
       ragDocs,
       maxShortMessages = 10,
@@ -133,7 +134,12 @@ export class ContextAssemblyPipeline {
       minFactConfidence = 0.5,
     } = options;
 
-    const memoryEngine = new AgentMemoryEngine(threadId, userId);
+    const memoryEngine = new AgentMemoryEngine(
+      threadId,
+      userId,
+      10,
+      businessId,
+    );
     let gathered: GatheredContext | undefined;
 
     let activeShortMessages = inputShortMessages;

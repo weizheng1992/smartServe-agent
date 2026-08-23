@@ -77,4 +77,53 @@ describe("🏢 Multi-Tenant Context & Memory Isolation Suite", () => {
     const emptyFacts = await longEmpty.searchRelevantFacts("任何偏好");
     expect(emptyFacts).toEqual([]);
   });
+
+  it("🛡️ 双层画像隔离拓扑 (Dual-Tier Scoped Persona): 全局身体事实共享，商户专属私域画像100%物理阻断", async () => {
+    const userId = `user_scoped_persona_${Date.now()}`;
+    const longNike = new LongMemory(userId, "nike");
+    const longAdidas = new LongMemory(userId, "adidas");
+
+    // 1. 沉淀全局生理事实 (Scope: global)
+    await longNike.extractAndStoreFact(
+      "fact: 用户脚长为 270mm，对羊毛材质过敏",
+      "我脚长270mm对羊毛严重过敏",
+      "global",
+    );
+
+    // 2. 沉淀 Nike 私域专属偏好 (Scope: tenant, businessId: nike)
+    await longNike.extractAndStoreFact(
+      "fact: 用户在耐克店铺酷爱 Nike Flyknit 飞线系列并持有黑金专属折扣卷",
+      "我特别喜欢耐克Flyknit飞线鞋",
+      "tenant",
+      "nike",
+    );
+
+    // 3. 沉淀 Adidas 私域专属偏好 (Scope: tenant, businessId: adidas)
+    await longAdidas.extractAndStoreFact(
+      "fact: 用户在阿迪达斯店铺偏好 Ultraboost 缓震跑鞋",
+      "我平时在阿迪只看Ultraboost",
+      "tenant",
+      "adidas",
+    );
+
+    // 4. 在 Adidas 店铺中进行画像检索
+    const factsInAdidas =
+      await longAdidas.searchRelevantFacts("脚长 270mm 跑鞋偏好");
+    const factsTextInAdidas = JSON.stringify(factsInAdidas);
+
+    // 验证：成功召回全局身体事实与 Adidas 专属偏好
+    expect(factsTextInAdidas).toContain("270mm");
+    // 验证：绝不包含 Nike 私域专属偏好（防跨租户投毒与泄密）
+    expect(factsTextInAdidas).not.toContain("Nike Flyknit");
+    expect(factsTextInAdidas).not.toContain("黑金专属折扣卷");
+
+    // 5. 在 Nike 店铺中进行画像检索
+    const factsInNike = await longNike.searchRelevantFacts("Nike 跑鞋偏好");
+    const factsTextInNike = JSON.stringify(factsInNike);
+
+    // 验证：成功召回 Nike 专属偏好
+    expect(factsTextInNike).toContain("Nike Flyknit");
+    // 验证：绝不包含 Adidas 私域专属偏好
+    expect(factsTextInNike).not.toContain("Ultraboost");
+  });
 });

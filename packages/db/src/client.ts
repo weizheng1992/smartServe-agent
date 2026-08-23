@@ -7,6 +7,11 @@ export interface DBExecutorResult {
   rows: unknown[];
 }
 
+export interface CompiledSQL {
+  text: string;
+  values: unknown[];
+}
+
 export interface DBThread {
   id: string;
   userId: string;
@@ -26,6 +31,9 @@ export interface DBInterface {
   addMessage: (message: Message) => Promise<void>;
   getOrder: (orderId: string) => Promise<Order | null>;
   execute: (queryStr: string, params?: unknown[]) => Promise<DBExecutorResult>;
+  executeReadOnlyAnalyticsQuery: <T = Record<string, unknown>>(
+    compiled: CompiledSQL | { text: string; values: unknown[] },
+  ) => Promise<T[]>;
   findOrCreateUserByEmail: (
     email: string,
   ) => Promise<{ id: string; email: string }>;
@@ -85,6 +93,35 @@ export function getDrizzle(): NodePgDatabase<typeof schema> {
     globalForDb.__drizzleDb = drizzleDb;
   }
   return drizzleDb;
+}
+
+/**
+ * 🛡️ 执行只读分析型 SQL 查询沙箱 (Read-Only Analytics Sandbox)
+ * 1. 强制只读事务: SET TRANSACTION READ ONLY
+ * 2. 3000ms 硬超时防死锁与慢查询: SET LOCAL statement_timeout = '3000ms'
+ * 3. 预编译参数防注入绑定: client.query(compiled.text, compiled.values)
+ */
+export async function executeReadOnlyAnalyticsQuery<
+  T = Record<string, unknown>,
+>(compiled: CompiledSQL | { text: string; values: unknown[] }): Promise<T[]> {
+  const pool = getPgPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN TRANSACTION READ ONLY");
+    await client.query("SET LOCAL statement_timeout = '3000ms'");
+    const res = await client.query(compiled.text, compiled.values);
+    await client.query("COMMIT");
+    return (res.rows || []) as T[];
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) {
+      // ignore rollback errors
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -359,6 +396,12 @@ export const db: DBInterface = {
     const pool = getPgPool();
     const res = await pool.query(queryStr, params);
     return { rows: res.rows as unknown[] };
+  },
+
+  executeReadOnlyAnalyticsQuery: async <T = Record<string, unknown>>(
+    compiled: CompiledSQL | { text: string; values: unknown[] },
+  ): Promise<T[]> => {
+    return executeReadOnlyAnalyticsQuery<T>(compiled);
   },
 
   deleteThread: async (threadId: string): Promise<boolean> => {

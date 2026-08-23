@@ -1,4 +1,5 @@
 export * from "./approval/approvalGatekeeper";
+export * from "./approval/approvalOutboxWorker";
 export * from "./graph/buildGraph";
 export * from "./graph/eventEmitter";
 export * from "./graph/nodes/executor.node";

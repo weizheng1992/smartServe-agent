@@ -23,16 +23,16 @@ export interface ApprovalActionPayload {
 export interface PendingApprovalRecord {
   id: string;
   threadId: string;
-  userId?: string;
-  userEmail?: string;
-  businessId?: string;
+  userId?: string | null;
+  userEmail?: string | null;
+  businessId?: string | null;
   status: ApprovalStatus;
-  actionType?: string;
+  actionType?: string | null;
   actionPayload?: ApprovalActionPayload | Record<string, unknown> | null;
-  reason?: string;
-  deadline?: Date | string;
-  createdAt?: Date | string;
-  updatedAt?: Date | string;
+  reason?: string | null;
+  deadline?: Date | string | null;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
   [key: string]: unknown;
 }
 

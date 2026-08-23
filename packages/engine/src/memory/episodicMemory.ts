@@ -7,6 +7,8 @@ export interface EpisodicEvent {
   importanceScore: number; // 1-10
   timestamp: Date;
   embedding?: number[];
+  scope?: "global" | "tenant";
+  businessId?: string;
 }
 
 export class EpisodicMemory {
@@ -18,13 +20,21 @@ export class EpisodicMemory {
     this.businessId = businessId;
   }
 
-  async addEvent(event: string, importanceScore: number): Promise<void> {
+  async addEvent(
+    event: string,
+    importanceScore: number,
+    scope: "global" | "tenant" = "tenant",
+    businessId?: string,
+  ): Promise<void> {
     if (!this.userId) {
       console.warn("[EpisodicMemory] Cannot add event without userId");
       return;
     }
+    const targetBizId =
+      scope === "tenant" ? businessId || this.businessId || "ecommerce" : null;
+
     console.log(
-      `[EpisodicMemory] Added event for user ${this.userId}: "${event}" with importance: ${importanceScore}`,
+      `[EpisodicMemory] Added event for user ${this.userId} (Scope: ${scope}, Biz: ${targetBizId}): "${event}" with importance: ${importanceScore}`,
     );
     const embeddingModel = getEmbeddingModel();
     const embedding = await embeddingModel.embedQuery(event);
@@ -35,13 +45,15 @@ export class EpisodicMemory {
         const serializedEmbedding = JSON.stringify(embedding);
         await dbInstance.insert(episodicEvents).values({
           userId: this.userId,
+          businessId: targetBizId,
+          scope: scope,
           content: event,
           embedding: serializedEmbedding,
           importance: importanceScore,
           timestamp: new Date(),
         });
         console.log(
-          `[EpisodicMemory] Stored event directly in PostgreSQL: "${event}"`,
+          `[EpisodicMemory] Stored event directly in PostgreSQL [Scope: ${scope}]: "${event}"`,
         );
         return;
       } catch (err) {
@@ -82,14 +94,34 @@ export class EpisodicMemory {
             importance: episodicEvents.importance,
             embedding: episodicEvents.embedding,
             timestamp: episodicEvents.timestamp,
+            scope: episodicEvents.scope,
+            businessId: episodicEvents.businessId,
           })
           .from(episodicEvents)
           .where(eq(episodicEvents.userId, this.userId))
           .orderBy(desc(episodicEvents.timestamp))
           .limit(50);
 
-        if (allEvents.length > 0) {
-          const scoredEvents = allEvents.map((row) => {
+        // 🛡️ 多租户情景隔离与防投毒 (Dual-Tier Scoped Episodic Isolation)
+        const tenantEvents = allEvents.filter((row: any) => {
+          if (!row.scope || row.scope === "global") {
+            return true;
+          }
+          if (row.scope === "tenant") {
+            if (this.businessId && this.businessId !== "ecommerce") {
+              return row.businessId === this.businessId;
+            }
+            return (
+              !row.businessId ||
+              row.businessId === "ecommerce" ||
+              row.businessId === this.businessId
+            );
+          }
+          return false;
+        });
+
+        if (tenantEvents.length > 0) {
+          const scoredEvents = tenantEvents.map((row: any) => {
             let embeddingArray: number[] | null = null;
             if (row.embedding) {
               try {
@@ -124,6 +156,23 @@ export class EpisodicMemory {
               similarity = denominator === 0 ? 0 : dotProduct / denominator;
             }
 
+            // 结合关键词重合度做混合打分
+            const queryTokens = query
+              .toLowerCase()
+              .split(/[\s,，、。!！?？]+/)
+              .filter((t) => t.length >= 2);
+            let keywordMatches = 0;
+            for (const token of queryTokens) {
+              if (row.content.toLowerCase().includes(token)) {
+                keywordMatches++;
+              }
+            }
+            const keywordScore =
+              queryTokens.length > 0
+                ? (keywordMatches / queryTokens.length) * 0.95
+                : 0;
+            const effectiveScore = Math.max(similarity, keywordScore);
+
             return {
               event: {
                 id: row.id,
@@ -131,18 +180,20 @@ export class EpisodicMemory {
                 importanceScore: row.importance || 3,
                 timestamp: row.timestamp || new Date(),
                 embedding: embeddingArray || undefined,
+                scope: row.scope || "global",
+                businessId: row.businessId || undefined,
               },
-              similarity,
+              similarity: effectiveScore,
             };
           });
 
           // Sort descending by similarity
           scoredEvents.sort((a, b) => b.similarity - a.similarity);
 
-          // 🔍 性能与 Prompt 优化：建立相似度硬阈值过滤（最低 0.60），
+          // 🔍 性能与 Prompt 优化：建立相似度硬阈值过滤（最低 0.55），
           // 剔除风马牛不相及的事件流落入 Prompt 造成上下文膨胀、延迟飙升
-          const SIMILARITY_THRESHOLD = 0.6;
-          const filteredEvents = scoredEvents.filter((item) => {
+          const SIMILARITY_THRESHOLD = 0.55;
+          const filteredEvents = scoredEvents.filter((item: any) => {
             const isPassed = item.similarity >= SIMILARITY_THRESHOLD;
             if (!isPassed && item.similarity > 0) {
               console.log(
@@ -153,7 +204,7 @@ export class EpisodicMemory {
           });
 
           // Limit and return top limit
-          return filteredEvents.slice(0, limit).map((se) => se.event);
+          return filteredEvents.slice(0, limit).map((se: any) => se.event);
         }
       } catch (err) {
         console.warn(

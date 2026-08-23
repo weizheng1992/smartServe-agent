@@ -7,6 +7,10 @@ export interface LongMemoryFact {
   category: string;
   timestamp: string;
   embedding?: number[];
+  scope?: "global" | "tenant";
+  businessId?: string;
+  confidence?: number;
+  status?: string;
 }
 
 export class LongMemory {
@@ -21,6 +25,8 @@ export class LongMemory {
   async extractAndStoreFact(
     conversationText: string,
     userQuery?: string,
+    explicitScope?: "global" | "tenant",
+    explicitBusinessId?: string,
   ): Promise<void> {
     if (!this.userId) {
       console.warn("[LongMemory] Cannot extract or store facts without userId");
@@ -36,8 +42,13 @@ export class LongMemory {
       (async () => {
         try {
           // 不等待后台审计，完全不阻塞主链路
-          this.runProfileAudit(userQuery, conversationText).catch((e) => {
-            console.warn('[Profiler Agent Async Warn]:', e);
+          this.runProfileAudit(
+            userQuery,
+            conversationText,
+            explicitScope,
+            explicitBusinessId,
+          ).catch((e) => {
+            console.warn("[Profiler Agent Async Warn]:", e);
           });
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -68,9 +79,28 @@ export class LongMemory {
         const dbInstance = getDrizzle();
         if (dbInstance) {
           try {
+            const isPhysiological =
+              /脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size/i.test(
+                factText,
+              );
+            const calculatedScope: "global" | "tenant" = explicitScope
+              ? explicitScope
+              : isPhysiological
+                ? "global"
+                : this.businessId && this.businessId !== "ecommerce"
+                  ? "tenant"
+                  : "global";
+
+            const calculatedBizId =
+              calculatedScope === "tenant"
+                ? explicitBusinessId || this.businessId || "ecommerce"
+                : null;
+
             const serializedEmbedding = JSON.stringify(embedding);
             await dbInstance.insert(longMemoryFacts).values({
               userId: this.userId,
+              businessId: calculatedBizId,
+              scope: calculatedScope,
               fact: factText,
               embedding: serializedEmbedding,
               type: "preference",
@@ -80,7 +110,7 @@ export class LongMemory {
               createdAt: new Date(),
             });
             console.log(
-              `[LongMemory] [Fallback Regex] Extracted and stored fact directly in PostgreSQL [Status: approved]: "${factText}"`,
+              `[LongMemory] [Fallback Regex] Extracted and stored fact directly in PostgreSQL [Scope: ${calculatedScope}, Status: approved]: "${factText}"`,
             );
           } catch (err) {
             console.warn(
@@ -94,11 +124,13 @@ export class LongMemory {
 
   /**
    * 🕵️ 专职画像 Agent (Dedicated Profiler Agent) 核心研判器
-   * 结合：SQL 结构化订单历史 + 本轮最新非结构化聊天上下文
+   * 结合：SQL 结构化订单历史 + 本轮最新非结构化聊天上下文 + 自动判定双层作用域 (global/tenant)
    */
   private async runProfileAudit(
     userQuery: string,
     assistantResponse: string,
+    explicitScope?: "global" | "tenant",
+    explicitBusinessId?: string,
   ): Promise<void> {
     console.log(
       `[Profiler Agent] 🕵️ 启动用户 ${this.userId} 的多模态消费画像提取...`,
@@ -139,10 +171,18 @@ export class LongMemory {
       );
     }
 
-    // 2. [画像大模型研判]：注入多模态画像提取 Prompts，输出极致规整的 JSONB 标签
+    // 2. [画像大模型研判]：注入双层画像提取 Prompts，严格判别 global 与 tenant 作用域
     const llm = getLLM();
     const systemPrompt = `
-你是一位世界级的消费者行为学家与尺码换算专家。你的职责是通过分析【用户最新的对话细节】与【历史购买流水】，提炼出符合该用户特征的个性化消费画像标签并进行置信度（Confidence）评估。
+你是一位世界级的消费者行为学家与多租户用户画像专家。你的职责是通过分析【用户最新的对话细节】与【历史购买流水】，提炼出符合该用户特征的个性化消费画像标签，严格判定画像的生效作用域 (scope: 'global' | 'tenant')，并进行置信度（Confidence）评估。
+
+[CRITICAL DUAL-TIER SCOPE RULES]:
+1. 'global'（全局生理/客观事实）：
+   - 用户客观生理特征，例如：脚长(如 270mm/265mm)、身高、体重、衣服标准尺码(如 XL/L)、布料过敏原(如 羊毛过敏、聚酯纤维过敏)、常用快递偏好(如 优先顺丰)。
+   - 这类事实跨所有商户通用，不涉及具体商户私域利益。
+2. 'tenant'（特定商户私域偏好）：
+   - 特定品牌/商户专属的偏好或历史，例如：耐克 Flyknit/Air Jordan 偏好、阿迪达斯椰子鞋偏好、商户专享优惠券使用习惯、特定店铺客服互动偏好。
+   - 这类事实严格归属于当前商户，严禁泄漏给其它竞品商户。
 
 [CRITICAL INSTRUCTIONS]:
 请不要生成任何解释性废话。你必须只输出一个合规的 JSON 对象，包含以下字段：
@@ -150,15 +190,13 @@ export class LongMemory {
   "hasNewPreference": boolean, // 本轮对话中是否展现出任何新的、值得记录的尺码偏好、颜色偏好或避雷标签？
   "extractedFacts": [
     {
-      "fact": string, // 非结构化偏好事实描述。例如: "用户上衣尺码为 L 码", "用户鞋子尺码为 42.5 码"
+      "fact": string, // 非结构化偏好事实描述。例如: "用户脚长为 270mm", "用户偏好耐克 Flyknit 系列鞋款"
+      "scope": "global" | "tenant", // 画像作用域判别 ('global' 为通用身体/过敏事实, 'tenant' 为商户私域偏好)
       "confidence": number, // 置信度评分 (0.0 - 1.0)。如果用户明确口头告知，置信度设为 0.90 - 1.00；如果通过购买历史推断，设为 0.70 - 0.85；如果是模糊语境推断，设为 0.50 - 0.69
       "source": string // 画像数据来源描述。例如 "user_direct_statement" (用户直接表述), "purchase_history_inference" (购买历史推导), "contextual_inference" (语境模糊推导)
     }
   ]
 }
-
-注意：如果用户在聊天中提到了“长胖了衣服得穿XL”或“耐克鞋42有些挤脚下次买42.5”，或者通过 SQL 历史单据发现他大量购买了黑色运动卫衣，请敏锐地提取这些关键消费特征！
-不要胡编乱造，仅提炼用户明确流露或被历史购买记录证实的偏好标签。
 `;
 
     const auditPrompt = `
@@ -232,8 +270,28 @@ ${JSON.stringify(pastOrders, null, 2)}
           }
 
           const status = confidence >= 0.85 ? "approved" : "pending";
+
+          const isPhysiological =
+            /脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size/i.test(
+              factText,
+            );
+          const itemScope: "global" | "tenant" =
+            explicitScope ||
+            (item.scope === "global" || item.scope === "tenant"
+              ? item.scope
+              : isPhysiological
+                ? "global"
+                : this.businessId && this.businessId !== "ecommerce"
+                  ? "tenant"
+                  : "global");
+
+          const itemBizId =
+            itemScope === "tenant"
+              ? explicitBusinessId || this.businessId || "ecommerce"
+              : null;
+
           console.log(
-            `[Profiler Agent Routing] 🎯 Fact "${factText}" rated ${confidence.toFixed(2)} confidence ➔ Routed to status [${status}]`,
+            `[Profiler Agent Routing] 🎯 Fact "${factText}" (Scope: ${itemScope}, Biz: ${itemBizId}) rated ${confidence.toFixed(2)} confidence ➔ Routed to status [${status}]`,
           );
 
           const embedding = await embeddingModel.embedQuery(factText);
@@ -241,6 +299,8 @@ ${JSON.stringify(pastOrders, null, 2)}
 
           await drizzle.insert(longMemoryFacts).values({
             userId: this.userId,
+            businessId: itemBizId,
+            scope: itemScope,
             fact: factText,
             embedding: serializedEmbedding,
             type: "preference",
@@ -250,7 +310,7 @@ ${JSON.stringify(pastOrders, null, 2)}
             createdAt: new Date(),
           });
           console.log(
-            `[Profiler Agent] 偏好 RAG 事实成功写入 longMemoryFacts [Status: ${status}]: "${factText}"`,
+            `[Profiler Agent] 偏好 RAG 事实成功写入 longMemoryFacts [Scope: ${itemScope}, Status: ${status}]: "${factText}"`,
           );
         } catch (ragErr) {
           console.warn(
@@ -302,6 +362,10 @@ ${JSON.stringify(pastOrders, null, 2)}
             type: longMemoryFacts.type,
             embedding: longMemoryFacts.embedding,
             createdAt: longMemoryFacts.createdAt,
+            scope: longMemoryFacts.scope,
+            businessId: longMemoryFacts.businessId,
+            confidence: longMemoryFacts.confidence,
+            status: longMemoryFacts.status,
           })
           .from(longMemoryFacts)
           .where(
@@ -311,8 +375,27 @@ ${JSON.stringify(pastOrders, null, 2)}
             ),
           );
 
-        if (allFacts.length > 0) {
-          const scoredFacts = allFacts.map((row) => {
+        // 🛡️ 多租户画像隔离与防投毒 (Dual-Tier Scoped Persona Isolation):
+        // 严格限定召回为: (scope = 'global' OR business_id = currentTenant)
+        const tenantFacts = allFacts.filter((row: any) => {
+          if (!row.scope || row.scope === "global") {
+            return true;
+          }
+          if (row.scope === "tenant") {
+            if (this.businessId && this.businessId !== "ecommerce") {
+              return row.businessId === this.businessId;
+            }
+            return (
+              !row.businessId ||
+              row.businessId === "ecommerce" ||
+              row.businessId === this.businessId
+            );
+          }
+          return false;
+        });
+
+        if (tenantFacts.length > 0) {
+          const scoredFacts = tenantFacts.map((row: any) => {
             let embeddingArray: number[] | null = null;
             if (row.embedding) {
               try {
@@ -344,6 +427,39 @@ ${JSON.stringify(pastOrders, null, 2)}
               similarity = denominator === 0 ? 0 : dotProduct / denominator;
             }
 
+            // 结合关键词重合度做混合打分（包含英文单词与中文词元提取）
+            const clean = query.toLowerCase();
+            const segments = clean
+              .split(/[\s,，、。!！?？\-_]+/)
+              .filter((s) => s.length > 0);
+            const queryTokens: string[] = [];
+            for (const seg of segments) {
+              if (/[a-z0-9]/i.test(seg)) {
+                queryTokens.push(seg);
+              } else {
+                if (seg.length <= 2) {
+                  queryTokens.push(seg);
+                } else {
+                  for (let i = 0; i < seg.length - 1; i++) {
+                    queryTokens.push(seg.substring(i, i + 2));
+                  }
+                }
+              }
+            }
+
+            let keywordMatches = 0;
+            const factLower = row.fact.toLowerCase();
+            for (const token of queryTokens) {
+              if (factLower.includes(token)) {
+                keywordMatches++;
+              }
+            }
+            const keywordScore =
+              queryTokens.length > 0 && keywordMatches > 0
+                ? 0.55 + (keywordMatches / queryTokens.length) * 0.45
+                : 0;
+            const effectiveScore = Math.max(similarity, keywordScore);
+
             return {
               fact: {
                 id: row.id,
@@ -353,17 +469,21 @@ ${JSON.stringify(pastOrders, null, 2)}
                   ? row.createdAt.toISOString()
                   : new Date().toISOString(),
                 embedding: embeddingArray || undefined,
+                scope: row.scope || "global",
+                businessId: row.businessId || undefined,
+                confidence: row.confidence ?? 1.0,
+                status: row.status || "approved",
               },
-              similarity,
+              similarity: effectiveScore,
             };
           });
 
           // 按照余弦相似度（降序）排序
           scoredFacts.sort((a, b) => b.similarity - a.similarity);
 
-          // 🔍 性能与 Prompt 优化：建立相似度硬阈值过滤（最低 0.65），
+          // 🔍 性能与 Prompt 优化：建立相似度硬阈值过滤（最低 0.55），
           // 彻底拒绝无关的、低置信度事实被一股脑塞进 Prompt 混淆大模型认知并造成 Token 浪费！
-          const SIMLIARITY_THRESHOLD = 0.65;
+          const SIMLIARITY_THRESHOLD = 0.55;
           const filteredFacts = scoredFacts.filter((item) => {
             const isPassed = item.similarity >= SIMLIARITY_THRESHOLD;
             if (!isPassed && item.similarity > 0) {

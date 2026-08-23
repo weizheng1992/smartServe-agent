@@ -27,6 +27,11 @@ export interface OrderLimitResult {
   limit: number;
 }
 
+export interface CompiledSQL {
+  text: string;
+  values: unknown[];
+}
+
 export interface NLQueryAST {
   rawInput: string;
   cleanInput: string;
@@ -352,23 +357,41 @@ export class NLMetricQueryEngine {
   }
 
   /**
-   * 7. 动态安全 SQL 编译
+   * 7. 动态安全参数化 SQL 编译 (Parameterized Prepared Statement Compilation)
    */
-  public static compile(options: CompileOptions): string {
+  public static compile(options: CompileOptions): CompiledSQL {
     const { ast, businessId, managerId } = options;
     const metric =
       METRIC_SEMANTIC_REGISTRY[ast.metricKey] || METRIC_SEMANTIC_REGISTRY.gmv;
 
-    const whereClauses: string[] = [
-      `p.business_id = '${businessId.replace(/'/g, "''")}'`,
-    ];
+    const values: unknown[] = [];
+    const addParam = (val: unknown): string => {
+      values.push(val);
+      return `$${values.length}`;
+    };
+
+    const whereClauses: string[] = [`p.business_id = ${addParam(businessId)}`];
 
     if (managerId) {
-      whereClauses.push(`p.manager_id = '${managerId.replace(/'/g, "''")}'`);
+      whereClauses.push(`p.manager_id = ${addParam(managerId)}`);
     }
 
+    const ALLOWED_FIELDS = new Set([
+      "p.stock",
+      "p.price",
+      "p.category",
+      "p.cost_price",
+      "p.id",
+      "p.name",
+      "p.manager_id",
+      "p.business_id",
+    ]);
+    const ALLOWED_OPS = new Set([">", ">=", "<", "<=", "=", "!="]);
+
     for (const filter of ast.filters) {
-      whereClauses.push(filter.sqlClause);
+      const op = ALLOWED_OPS.has(filter.op) ? filter.op : "=";
+      const field = ALLOWED_FIELDS.has(filter.field) ? filter.field : "p.id";
+      whereClauses.push(`${field} ${op} ${addParam(filter.value)}`);
     }
 
     if (ast.timeRange?.sqlFilter) {
@@ -377,17 +400,27 @@ export class NLMetricQueryEngine {
 
     const filtersStr =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-    const finalDirection = ast.directionOverride || metric.direction;
+    const finalDirection =
+      ast.directionOverride === "ASC" || ast.directionOverride === "DESC"
+        ? ast.directionOverride
+        : metric.direction;
     const dimStr = ast.dimensions.join(", ");
     const groupStr = ast.groupBy.join(", ");
+    const safeLimit = Math.min(Math.max(1, ast.limit || 5), 50);
 
-    return metric.sqlTemplate
+    const text = metric.sqlTemplate
       .replace(/\{dimensions\}/g, dimStr)
       .replace(/\{groupBy\}/g, groupStr)
       .replace(/\{formula\}/g, metric.expression)
       .replace(/\{filters\}/g, filtersStr)
       .replace(/\{direction\}/g, finalDirection)
-      .replace(/\{limit\}/g, String(ast.limit));
+      .replace(/\{limit\}/g, addParam(safeLimit))
+      .trim();
+
+    return {
+      text,
+      values,
+    };
   }
 }
 

@@ -29,7 +29,9 @@ export interface TriggerDiagnosis {
   rawPayload: Record<string, unknown>;
 }
 
-export function getApprovalCategory(actionType?: string): ApprovalCategory {
+export function getApprovalCategory(
+  actionType?: string | null,
+): ApprovalCategory {
   if (!actionType) return "generic";
   const lower = actionType.toLowerCase();
 
