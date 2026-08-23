@@ -18,6 +18,7 @@
 Monorepo powered by Turborepo & Bun workspaces:
 
 - `apps/web`: Next.js 15 App Router. Connects via `/api/chat` and `/api/chat/[jobId]/stream` (SSE).
+- `apps/admin`: Next.js 15 App Router. HITL approval audit desk, multi-tab context drawer, and telemetry dashboard.
 - `packages/engine`: LangGraph agent graph (`triage` → `planner` → `merge` → loop [`executor` ⇄ `validator`] → `finish`) and Temporal workflow orchestration (`agentWorkflow`). Falls back to local simulator when Temporal is offline.
 - `packages/db`: Drizzle ORM PostgreSQL client connecting directly to physical PostgreSQL instance.
 - `packages/tools`: External tools (`getOrderStatus`, `processRefund`, Puppeteer `takeScreenshot`, `listUserOrders`, `createOrder`, OpenAPI dynamic tools).
