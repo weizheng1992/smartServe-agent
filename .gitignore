@@ -84,3 +84,9 @@ eval-res.json
 # Uploaded images
 public/uploads/
 apps/web/public/uploads/
+
+# Test reports and scratch
+playwright-report/
+test-results/
+.scratch/
+

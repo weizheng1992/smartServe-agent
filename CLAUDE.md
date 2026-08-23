@@ -6,7 +6,8 @@
 - **Build All Workspaces:** `bun run build`
 - **Start Production App:** `bun run start`
 - **Lint Codebase:** `bun run lint`
-- **Run Next.js Web App:** `bun --filter web dev`
+- **Run Web App:** `bun --filter web dev`
+- **Run Admin App:** `bun --filter admin dev`
 - **Run Temporal Worker:** `bun --filter engine worker`
 - **Generate DB Migrations:** `bun drizzle-kit generate`
 - **Push Schema changes to DB:** `bun drizzle-kit push`
@@ -17,8 +18,8 @@
 
 Monorepo powered by Turborepo & Bun workspaces:
 
-- `apps/web`: Next.js 15 App Router. Connects via `/api/chat` and `/api/chat/[jobId]/stream` (SSE).
-- `apps/admin`: Next.js 15 App Router. HITL approval audit desk, multi-tab context drawer, and telemetry dashboard.
+- `apps/web`: Vite 6 + React 19 SPA. Connects via `/api/chat` and `/api/chat/[jobId]/stream` (SSE).
+- `apps/admin`: Vite 6 + React 19 SPA. HITL approval audit desk, multi-tab context drawer, and telemetry dashboard.
 - `packages/engine`: LangGraph agent graph (`triage` → `planner` → `merge` → loop [`executor` ⇄ `validator`] → `finish`) and Temporal workflow orchestration (`agentWorkflow`). Falls back to local simulator when Temporal is offline.
 - `packages/db`: Drizzle ORM PostgreSQL client connecting directly to physical PostgreSQL instance.
 - `packages/tools`: External tools (`getOrderStatus`, `processRefund`, Puppeteer `takeScreenshot`, `listUserOrders`, `createOrder`, OpenAPI dynamic tools).
