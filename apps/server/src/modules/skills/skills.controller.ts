@@ -1,10 +1,28 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Put, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsNumber, IsOptional, IsString } from 'class-validator';
 import { CurrentTenant, TenantGuard } from '../../common/guards/tenant.guard';
 import type { TenantContextPayload } from '../../common/tenant/tenant.context';
 import { SkillsService } from './skills.service';
 
 export class UpdateTenantSkillDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  approvalThresholdAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  customPolicyPrompt?: string;
+}
+
+export class BulkUpdateSkillsConfigDto {
+  @IsOptional()
+  @IsString()
+  skillId?: string;
+
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
@@ -34,7 +52,44 @@ export class SkillsController {
   }
 
   /**
-   * 获取租户视角下的技能状态与阈值配置
+   * 获取租户视角下的技能状态与阈值配置 (符合 RESTful /api/skills/config 规范)
+   */
+  @Get('config')
+  @UseGuards(TenantGuard)
+  async getSkillsConfig(@CurrentTenant() tenant: TenantContextPayload) {
+    const skills = await this.skillsService.getTenantSkills(tenant.tenantId);
+    return {
+      success: true,
+      tenantId: tenant.tenantId,
+      skills,
+    };
+  }
+
+  /**
+   * 更新指定租户的技能配置 (符合 RESTful PUT /api/skills/config 规范)
+   */
+  @Put('config')
+  @UseGuards(TenantGuard)
+  async updateSkillsConfig(@CurrentTenant() tenant: TenantContextPayload, @Body() body: BulkUpdateSkillsConfigDto) {
+    if (body.skillId) {
+      const updated = await this.skillsService.updateTenantSkillConfig(tenant.tenantId, body.skillId, body);
+      return {
+        success: true,
+        tenantId: tenant.tenantId,
+        skillId: body.skillId,
+        config: updated,
+      };
+    }
+    const skills = await this.skillsService.getTenantSkills(tenant.tenantId);
+    return {
+      success: true,
+      tenantId: tenant.tenantId,
+      skills,
+    };
+  }
+
+  /**
+   * 获取租户视角下的技能状态与阈值配置 (兼容别名路由)
    */
   @Get('tenant')
   @UseGuards(TenantGuard)
@@ -48,7 +103,7 @@ export class SkillsController {
   }
 
   /**
-   * 更新指定租户的技能参数与风控阈值
+   * 更新指定租户的技能参数与风控阈值 (兼容别名路由)
    */
   @Patch('tenant/:skillId')
   @UseGuards(TenantGuard)

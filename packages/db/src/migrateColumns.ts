@@ -49,6 +49,9 @@ async function migrateColumns() {
     ALTER TABLE tenant_configs ADD COLUMN IF NOT EXISTS enabled_skills jsonb;
     ALTER TABLE tenant_configs ADD COLUMN IF NOT EXISTS skills_config jsonb;
 
+    DROP INDEX IF EXISTS tenant_configs_business_id_idx;
+    CREATE INDEX IF NOT EXISTS tenant_configs_business_id_version_idx ON tenant_configs (business_id, version);
+
     -- Transactional outbox table
     CREATE TABLE IF NOT EXISTS approval_outbox_events (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

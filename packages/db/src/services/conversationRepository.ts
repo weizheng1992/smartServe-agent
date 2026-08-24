@@ -143,33 +143,35 @@ export class ConversationRepository {
   }
 
   /**
-   * 获取单会话完整消息时序与上下文
+   * 获取单会话完整消息时序与上下文 (强制租户物理隔离)
    */
   public static async getConversationTimeline(threadId: string, businessId?: string) {
     const pool = getPgPool();
     const cleanThreadId = threadId.trim();
+    const cleanBizId = (businessId || '').toLowerCase().trim();
 
-    // 1. 查询会话基础信息
+    // 1. 查询会话基础信息 (若提供 businessId 则严格限制，否则仅查 thread)
     let threadQuery = 'SELECT * FROM threads WHERE id = $1';
     const threadParams: any[] = [cleanThreadId];
-    if (businessId) {
+    if (cleanBizId) {
       threadQuery += ' AND business_id = $2';
-      threadParams.push(businessId.toLowerCase().trim());
+      threadParams.push(cleanBizId);
     }
 
     const threadRes = await pool.query(threadQuery, threadParams);
     if (!threadRes.rows[0]) return null;
 
     const thread = threadRes.rows[0];
+    const actualBizId = thread.business_id;
 
-    // 2. 查询消息列表
+    // 2. 查询消息列表 (使用绑定的 business_id 进行物理隔离过滤)
     const msgQuery = `
       SELECT id, role, content, thought_steps, tool_calls, cards, operator_info, timestamp, created_at
       FROM messages
-      WHERE thread_id = $1
+      WHERE thread_id = $1 AND (business_id = $2 OR business_id IS NULL)
       ORDER BY created_at ASC, timestamp ASC
     `;
-    const msgRes = await pool.query(msgQuery, [cleanThreadId]);
+    const msgRes = await pool.query(msgQuery, [cleanThreadId, actualBizId]);
 
     return {
       thread: {

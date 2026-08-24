@@ -166,20 +166,12 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
     }
 
     // 分布式 Redis 广播通知
-    if (useRedis && redis) {
-      try {
-        await redis.publish(
-          'ws:events',
-          JSON.stringify({
-            event: 'peer_joined',
-            room,
-            data: { socketId: client.id, role, operatorId, operatorName },
-          }),
-        );
-      } catch (err) {
-        logger.warn({ err }, '[WS] Failed to publish redis ws event');
-      }
-    }
+    await this.publishWsEvent('peer_joined', room, {
+      socketId: client.id,
+      role,
+      operatorId,
+      operatorName,
+    });
   }
 
   /**
@@ -218,25 +210,12 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
       });
     }
 
-    if (useRedis && redis) {
-      try {
-        await redis.publish(
-          'ws:events',
-          JSON.stringify({
-            event: 'conversation_state_changed',
-            room,
-            data: {
-              threadId,
-              status: 'human_takeover',
-              operatorId,
-              operatorName,
-            },
-          }),
-        );
-      } catch (err) {
-        logger.warn({ err }, '[WS] Failed to publish redis ws event');
-      }
-    }
+    await this.publishWsEvent('conversation_state_changed', room, {
+      threadId,
+      status: 'human_takeover',
+      operatorId,
+      operatorName,
+    });
   }
 
   /**
@@ -269,20 +248,10 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
       });
     }
 
-    if (useRedis && redis) {
-      try {
-        await redis.publish(
-          'ws:events',
-          JSON.stringify({
-            event: 'conversation_state_changed',
-            room,
-            data: { threadId, status: 'active' },
-          }),
-        );
-      } catch (err) {
-        logger.warn({ err }, '[WS] Failed to publish redis ws event');
-      }
-    }
+    await this.publishWsEvent('conversation_state_changed', room, {
+      threadId,
+      status: 'active',
+    });
   }
 
   /**
@@ -318,22 +287,29 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
       this.server.to(room).emit('new_message', msgPayload);
     }
 
+    await this.publishWsEvent('new_message', room, msgPayload);
+
+    return { success: true, messageId: savedMsg.id };
+  }
+
+  /**
+   * 辅助方法：统一向分布式 Redis 通道发布 WebSocket 事件
+   */
+  private async publishWsEvent(event: string, room: string, data: any) {
     if (useRedis && redis) {
       try {
         await redis.publish(
           'ws:events',
           JSON.stringify({
-            event: 'new_message',
+            event,
             room,
-            data: msgPayload,
+            data,
           }),
         );
       } catch (err) {
-        logger.warn({ err }, '[WS] Failed to publish redis ws event');
+        logger.warn({ err, event, room }, '[WS] Failed to publish redis ws event');
       }
     }
-
-    return { success: true, messageId: savedMsg.id };
   }
 
   /**

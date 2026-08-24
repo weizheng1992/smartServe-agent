@@ -5,12 +5,12 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenantId') || 'aurora';
-    const allApprovals = await ApprovalGatekeeper.listPendingApprovals();
+    const status = searchParams.get('status') || undefined;
 
-    // 筛选归属于本商户或待审批的工单
-    const merchantApprovals = allApprovals.filter(
-      (app) => !app.businessId || app.businessId === tenantId || app.businessId === 'ecommerce' || tenantId === 'all',
-    );
+    const merchantApprovals = await ApprovalGatekeeper.listPendingApprovals({
+      tenantId: tenantId === 'all' ? undefined : tenantId,
+      status: status === 'all' ? undefined : status,
+    });
 
     return NextResponse.json({
       success: true,

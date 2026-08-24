@@ -43,8 +43,90 @@ export class DispatchChatDto {
   sync?: boolean;
 }
 
+export interface SseEventItem {
+  id: number;
+  event: string;
+  data: any;
+  timestamp: number;
+}
+
+interface JobEventBuffer {
+  seq: number;
+  events: SseEventItem[];
+  lastAccessedAt: number;
+  completed?: boolean;
+  activeResponses: Set<Response>;
+}
+
 @Injectable()
 export class ChatService {
+  /**
+   * 跨连接共享的 Job 级 SSE 事件缓存池 (用于支持 Last-Event-ID 断线续传)
+   */
+  private static readonly jobEventStore = new Map<string, JobEventBuffer>();
+
+  /**
+   * 获取或初始化 Job 的事件缓存队列
+   */
+  private static getOrCreateJobBuffer(jobId: string): JobEventBuffer {
+    ChatService.pruneOldJobBuffers();
+    let buffer = ChatService.jobEventStore.get(jobId);
+    if (!buffer) {
+      buffer = {
+        seq: 0,
+        events: [],
+        lastAccessedAt: Date.now(),
+        activeResponses: new Set<Response>(),
+      };
+      ChatService.jobEventStore.set(jobId, buffer);
+    } else {
+      buffer.lastAccessedAt = Date.now();
+    }
+    return buffer;
+  }
+
+  /**
+   * 记录事件到 Job 缓存并广播给所有当前在线的连接
+   */
+  public static recordEvent(jobId: string, event: string, data: any): SseEventItem {
+    const jobBuffer = ChatService.getOrCreateJobBuffer(jobId);
+    jobBuffer.seq++;
+    const currentSeq = jobBuffer.seq;
+    const payload: SseEventItem = {
+      id: currentSeq,
+      event,
+      data,
+      timestamp: Date.now(),
+    };
+    jobBuffer.events.push(payload);
+    // 保留最近 100 条事件以备断线补发
+    if (jobBuffer.events.length > 100) jobBuffer.events.shift();
+
+    const chunk = `id: ${currentSeq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const res of jobBuffer.activeResponses) {
+      try {
+        res.write(chunk);
+      } catch (err) {
+        logger.warn({ err, jobId }, '[ChatService] SSE active write error');
+      }
+    }
+
+    return payload;
+  }
+
+  /**
+   * 定期清理超过 10 分钟无访问的 Job 缓存
+   */
+  private static pruneOldJobBuffers() {
+    const now = Date.now();
+    const TTL = 10 * 60 * 1000;
+    for (const [jid, buf] of ChatService.jobEventStore.entries()) {
+      if (now - buf.lastAccessedAt > TTL && buf.activeResponses.size === 0) {
+        ChatService.jobEventStore.delete(jid);
+      }
+    }
+  }
+
   /**
    * 分发 Agent 对话任务
    */
@@ -127,28 +209,13 @@ export class ChatService {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders?.();
 
-    let seq = 0;
-    const eventHistory: Array<{ id: number; event: string; data: any }> = [];
-
-    const sendSSE = (event: string, data: any) => {
-      try {
-        seq++;
-        const payload = { id: seq, event, data };
-        eventHistory.push(payload);
-        // 保留最近 100 条事件以备断线补发
-        if (eventHistory.length > 100) eventHistory.shift();
-
-        res.write(`id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-      } catch (err) {
-        logger.warn({ err, jobId }, '[ChatService] SSE write error');
-      }
-    };
+    const jobBuffer = ChatService.getOrCreateJobBuffer(jobId);
 
     // 检查断线重连回放 (Replay missed events if client provides lastEventId)
     if (lastEventId) {
       const lastIdNum = Number.parseInt(lastEventId, 10);
       if (!Number.isNaN(lastIdNum)) {
-        const missedEvents = eventHistory.filter((e) => e.id > lastIdNum);
+        const missedEvents = jobBuffer.events.filter((e) => e.id > lastIdNum);
         for (const missed of missedEvents) {
           try {
             res.write(`id: ${missed.id}\nevent: ${missed.event}\ndata: ${JSON.stringify(missed.data)}\n\n`);
@@ -159,56 +226,45 @@ export class ChatService {
       }
     }
 
+    jobBuffer.activeResponses.add(res);
+
     const isMock = isUsingMockTemporal();
     let isClosed = false;
+
+    const sendSSE = (event: string, data: any) => {
+      ChatService.recordEvent(jobId, event, data);
+    };
 
     // 15 秒心跳保活
     const heartbeatTimer = setInterval(() => {
       if (isClosed) return;
-      sendSSE('heartbeat', { timestamp: Date.now() });
+      try {
+        res.write(`event: heartbeat\ndata: ${JSON.stringify({ timestamp: Date.now() })}\n\n`);
+      } catch {
+        // ignore
+      }
     }, 15000);
 
     const cleanup = () => {
       if (isClosed) return;
       isClosed = true;
       clearInterval(heartbeatTimer);
+      jobBuffer.activeResponses.delete(res);
       res.end();
     };
 
     res.on('close', cleanup);
 
-    // 注册本地 / 模拟器事件发射器监听
-    const onThought = (data: any) => {
-      if (data.jobId === jobId && !isClosed) sendSSE('thought', data);
-    };
-    const onTool = (data: any) => {
-      if (data.jobId === jobId && !isClosed) sendSSE('tool', data);
-    };
-    const onApproval = (data: any) => {
-      if (data.jobId === jobId && !isClosed) sendSSE('approval_required', data);
-    };
+    // 监听完成事件触发优雅关闭
     const onResult = (data: any) => {
       if (data.jobId === jobId && !isClosed) {
-        if (data.cards && Array.isArray(data.cards) && data.cards.length > 0) {
-          sendSSE('cards', { cards: data.cards });
-        }
-        sendSSE('result', data);
         setTimeout(cleanup, 200);
       }
     };
 
-    agentEventEmitter.on('thought', onThought);
-    agentEventEmitter.on('tool', onTool);
-    agentEventEmitter.on('approval_required', onApproval);
     agentEventEmitter.on('result', onResult);
-
-    const origCleanup = cleanup;
     res.on('close', () => {
-      agentEventEmitter.off('thought', onThought);
-      agentEventEmitter.off('tool', onTool);
-      agentEventEmitter.off('approval_required', onApproval);
       agentEventEmitter.off('result', onResult);
-      origCleanup();
     });
 
     if (!isMock) {
@@ -288,4 +344,26 @@ export class ChatService {
     const res = await pool.query(query, [businessId.toLowerCase().trim(), userId]);
     return res.rows;
   }
+}
+
+// 注册全局事件监听器，实现 Job 级别的全生命周期事件录入与多客户端广播
+if (!(globalThis as any).__chatServiceEmitterAttached) {
+  (globalThis as any).__chatServiceEmitterAttached = true;
+  agentEventEmitter.on('thought', (data: any) => {
+    if (data?.jobId) ChatService.recordEvent(data.jobId, 'thought', data);
+  });
+  agentEventEmitter.on('tool', (data: any) => {
+    if (data?.jobId) ChatService.recordEvent(data.jobId, 'tool', data);
+  });
+  agentEventEmitter.on('approval_required', (data: any) => {
+    if (data?.jobId) ChatService.recordEvent(data.jobId, 'approval_required', data);
+  });
+  agentEventEmitter.on('result', (data: any) => {
+    if (data?.jobId) {
+      if (data.cards && Array.isArray(data.cards) && data.cards.length > 0) {
+        ChatService.recordEvent(data.jobId, 'cards', { cards: data.cards });
+      }
+      ChatService.recordEvent(data.jobId, 'result', data);
+    }
+  });
 }

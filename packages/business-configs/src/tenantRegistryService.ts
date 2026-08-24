@@ -109,19 +109,28 @@ export class TenantRegistryService {
 
     const pool = getPgPool();
     try {
-      await pool.query(
-        `INSERT INTO tenant_configs (business_id, system_prompt, spi_config, enabled_skills, skills_config, version)
-         VALUES ($1, $2, $3, $4, $5, 1)
-         ON CONFLICT (business_id)
-         DO UPDATE SET skills_config = $5, updated_at = NOW()`,
-        [
-          cleanId,
-          currentConfig.systemPrompt || '',
-          JSON.stringify(currentConfig.spiConnector || { mode: 'local_db' }),
-          JSON.stringify(currentConfig.enabledSkills || []),
-          JSON.stringify(updatedSkillsConfig),
-        ],
+      const existing = await pool.query(
+        'SELECT id FROM tenant_configs WHERE LOWER(business_id) = $1 ORDER BY version DESC LIMIT 1',
+        [cleanId],
       );
+      if (existing.rows[0]) {
+        await pool.query('UPDATE tenant_configs SET skills_config = $1, updated_at = NOW() WHERE id = $2', [
+          JSON.stringify(updatedSkillsConfig),
+          existing.rows[0].id,
+        ]);
+      } else {
+        await pool.query(
+          `INSERT INTO tenant_configs (business_id, system_prompt, spi_config, enabled_skills, skills_config, version, status)
+           VALUES ($1, $2, $3, $4, $5, 1, 'published')`,
+          [
+            cleanId,
+            currentConfig.systemPrompt || '',
+            JSON.stringify(currentConfig.spiConnector || { mode: 'local_db' }),
+            JSON.stringify(currentConfig.enabledSkills || []),
+            JSON.stringify(updatedSkillsConfig),
+          ],
+        );
+      }
     } catch (err) {
       console.warn(`[TenantRegistryService] Failed to persist tenant skill config for ${cleanId}:`, err);
     }

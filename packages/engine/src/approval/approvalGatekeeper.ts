@@ -351,11 +351,26 @@ export class ApprovalGatekeeper {
   }
 
   /**
-   * 📋 查询全量工单清单（联合 threads 及 users 穿透客户身份）
+   * 📋 查询工单清单（联合 threads 及 users 穿透客户身份，支持 SQL 级租户与状态下推过滤）
    */
-  public static async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
+  public static async listPendingApprovals(filter?: {
+    tenantId?: string;
+    businessId?: string;
+    status?: string;
+  }): Promise<PendingApprovalRecord[]> {
     const drizzle = getDrizzle()!;
-    const rows = await drizzle
+    const conditions = [];
+    const targetTenant = (filter?.tenantId || filter?.businessId || '').toLowerCase().trim();
+
+    if (targetTenant && targetTenant !== 'all' && targetTenant !== 'admin') {
+      conditions.push(eq(threads.businessId, targetTenant));
+    }
+
+    if (filter?.status && filter.status !== 'all') {
+      conditions.push(eq(dbPendingApprovals.status, filter.status));
+    }
+
+    const baseQuery = drizzle
       .select({
         id: dbPendingApprovals.id,
         threadId: dbPendingApprovals.threadId,
@@ -370,8 +385,12 @@ export class ApprovalGatekeeper {
       })
       .from(dbPendingApprovals)
       .leftJoin(threads, eq(dbPendingApprovals.threadId, threads.id))
-      .leftJoin(users, sql`${threads.userId} = ${users.id}::text`)
-      .orderBy(desc(dbPendingApprovals.createdAt));
+      .leftJoin(users, sql`${threads.userId} = ${users.id}::text`);
+
+    const rows =
+      conditions.length > 0
+        ? await baseQuery.where(and(...conditions)).orderBy(desc(dbPendingApprovals.createdAt))
+        : await baseQuery.orderBy(desc(dbPendingApprovals.createdAt));
 
     return rows as PendingApprovalRecord[];
   }
