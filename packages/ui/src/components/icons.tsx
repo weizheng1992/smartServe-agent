@@ -386,3 +386,9 @@ export const TrendingUp = createIcon(
     <polyline points="17 6 23 6 23 12" />
   </>,
 );
+
+export const Check = createIcon('Check', <path d="M20 6 9 17l-5-5" />);
+
+export const ChevronDown = createIcon('ChevronDown', <path d="m6 9 6 6 6-6" />);
+
+export const ChevronsUpDown = createIcon('ChevronsUpDown', <path d="m7 15 5 5 5-5M7 9l5-5 5 5" />);

@@ -45,6 +45,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
    - [4.12 实时协同接管与 SSE 流式弹性回放 (Live Desk Takeover & SSE Resiliency)](#412-实时协同接管与-sse-流式弹性回放-live-desk-takeover--sse-resiliency)
 5. [质量保障与全自动化测试 (Quality & Automation)](#5-质量保障与全自动化测试-quality--automation)
 6. [开发与部署命令 (Quick Start)](#6-开发与部署命令-quick-start)
+7. [新商户接入与配置使用手册 (Merchant Onboarding & SPI Guide)](#7-新商户接入与配置使用手册-merchant-onboarding--spi-guide)
 
 ---
 
@@ -327,6 +328,36 @@ bun run build
 # 5. 代码风格检测与格式化
 bun run lint
 ```
+
+---
+
+## 7. 新商户接入与配置使用手册 (Merchant Onboarding & SPI Guide)
+
+关于如何在 smartServe SaaS 平台中接入全新商户、配置远程 SPI 服务端点、设置风控审批策略并在 Admin 3001 控制台全生命周期管理的完整指南，请查阅专门的操作手册：
+
+👉 **[📖 新商户接入与配置操作手册 (docs/merchant-onboarding-guide.md)](docs/merchant-onboarding-guide.md)**
+
+### 核心接入流程速览
+
+```text
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│ 1. 注册商户档案  │  ───► │ 2. 配置业务技能  │  ───► │ 3. 灌入 RAG 知识 │  ───► │ 4. Admin 联调验证│
+│ /tenants 页面录入 │       │ /skills-tools   │       │ /rag-studio     │       │ /conversations  │
+│ (ID, SPI, 阈值) │       │ (SOP, 审批门禁)  │       │ (切片与政策)     │       │ (接管与审批流)  │
+└─────────────────┘       └─────────────────┘       └─────────────────┘       └─────────────────┘
+```
+
+1. **Admin 界面可视化入驻**：访问 `http://localhost:3001/tenants`，点击「新增商户入驻」，录入 `businessId`、商户名称、SPI Webhook 端点与退款免审阈值。
+2. **技能与 SOP 策略重载**：在 `http://localhost:3001/skills-tools` 为商户定制专属退款上限与改地址审批规则。
+3. **第三方系统标准 SPI 对接**：商户实现标准 RESTful 接口（`/spi/v1/orders/:id`、`/spi/v1/orders/:id/refund` 等）并配置 HMAC-SHA256 验签。
+4. **内置模拟商城快速演练**：
+   ```bash
+   # 注入独立商户数据与平台 SPI 配置
+   bun apps/merchant/src/db/seed.ts && bun packages/db/src/seedThirdPartyMerchant.ts
+
+   # 启动服务并在 http://localhost:3005 发起咨询，在 http://localhost:3001 进行接管与审批
+   bun run dev:all
+   ```
 
 ---
 

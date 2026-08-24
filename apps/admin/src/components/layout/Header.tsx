@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation } from 'react-router';
-import { SUPPORTED_TENANTS, useAdminTenantStore } from '../../store/tenantStore';
+import { Combobox } from 'ui';
+import { useAdminTenantStore } from '../../store/tenantStore';
 
 const PAGE_TITLE_MAP: Record<string, { title: string; subtitle: string }> = {
   '/tenants': {
@@ -47,7 +48,7 @@ const PAGE_TITLE_MAP: Record<string, { title: string; subtitle: string }> = {
 
 export function Header() {
   const location = useLocation();
-  const { selectedTenantId, setSelectedTenantId, getSelectedTenant } = useAdminTenantStore();
+  const { selectedTenantId, setSelectedTenantId, getSelectedTenant, tenants } = useAdminTenantStore();
   const activeTenant = getSelectedTenant();
 
   const currentPath = Object.keys(PAGE_TITLE_MAP).find((p) => location.pathname.startsWith(p)) || '/tenants';
@@ -72,28 +73,21 @@ export function Header() {
 
       {/* 右侧全局租户切换器与操作 */}
       <div className="flex items-center gap-3">
-        {/* 全局租户穿透选择器 */}
-        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">
-          <span className="text-[11px] font-medium text-slate-500">全局租户穿透:</span>
-          <select
-            value={selectedTenantId}
-            onChange={(e) => setSelectedTenantId(e.target.value)}
-            className="text-xs font-semibold text-slate-800 bg-transparent focus:outline-hidden cursor-pointer"
-          >
-            {SUPPORTED_TENANTS.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <span
-            className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono border ${
-              activeTenant.badgeColor || 'bg-slate-100 text-slate-600 border-slate-300'
-            }`}
-          >
-            {activeTenant.id}
-          </span>
-        </div>
+        {/* 全局租户穿透选择器 (Shadcn/UI Combobox) */}
+        <Combobox
+          label="全局租户穿透:"
+          value={selectedTenantId}
+          onChange={(val) => setSelectedTenantId(val)}
+          searchPlaceholder="搜索商户名或租户 ID..."
+          emptyText="未找到匹配的商户"
+          options={tenants.map((t) => ({
+            value: t.id,
+            label: t.name,
+            badge: t.id,
+            badgeColor: t.badgeColor,
+          }))}
+          compact
+        />
 
         {/* 平台管理员身份 */}
         <div className="flex items-center gap-2 pl-3 border-l border-slate-200">

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAdminTenantStore } from '../store/tenantStore';
 
 export interface UseAdminCrudOptions<T> {
@@ -6,6 +6,10 @@ export interface UseAdminCrudOptions<T> {
   filterFn?: (item: T, query: string, status: string, tenantId: string) => boolean;
   defaultPageSize?: number;
   tenantKey?: keyof T;
+  storageKey?: string;
+  onItemCreated?: (item: T) => void;
+  onItemUpdated?: (item: T) => void;
+  onItemDeleted?: (idValue: any) => void;
 }
 
 export function useAdminCrud<T extends Record<string, any>>({
@@ -13,8 +17,28 @@ export function useAdminCrud<T extends Record<string, any>>({
   filterFn,
   defaultPageSize = 10,
   tenantKey = 'businessId' as keyof T,
+  storageKey,
+  onItemCreated,
+  onItemUpdated,
+  onItemDeleted,
 }: UseAdminCrudOptions<T> = {}) {
-  const [data, setData] = useState<T[]>(initialData);
+  const [data, setData] = useState<T[]>(() => {
+    if (typeof window !== 'undefined' && storageKey) {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch (err) {
+        console.warn(`[useAdminCrud] Failed to load localStorage data for ${storageKey}:`, err);
+      }
+    }
+    return initialData;
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -30,6 +54,20 @@ export function useAdminCrud<T extends Record<string, any>>({
 
   // 全局租户穿透状态
   const { selectedTenantId } = useAdminTenantStore();
+
+  // 持久化到 localStorage
+  const persistData = useCallback(
+    (nextData: T[]) => {
+      if (typeof window !== 'undefined' && storageKey) {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(nextData));
+        } catch (err) {
+          console.warn(`[useAdminCrud] Failed to persist data for ${storageKey}:`, err);
+        }
+      }
+    },
+    [storageKey],
+  );
 
   // 综合过滤数据
   const filteredData = useMemo(() => {
@@ -78,32 +116,50 @@ export function useAdminCrud<T extends Record<string, any>>({
   }, []);
 
   // CRUD 操作方法
-  const createItem = useCallback((newItem: T) => {
-    setData((prev) => [newItem, ...prev]);
-    setIsCreateOpen(false);
-  }, []);
+  const createItem = useCallback(
+    (newItem: T) => {
+      setData((prev) => {
+        const next = [newItem, ...prev];
+        persistData(next);
+        return next;
+      });
+      setIsCreateOpen(false);
+      onItemCreated?.(newItem);
+    },
+    [persistData, onItemCreated],
+  );
 
   const updateItem = useCallback(
     (idKey: keyof T, updatedItem: T) => {
-      setData((prev) => prev.map((item) => (item[idKey] === updatedItem[idKey] ? { ...item, ...updatedItem } : item)));
+      setData((prev) => {
+        const next = prev.map((item) => (item[idKey] === updatedItem[idKey] ? { ...item, ...updatedItem } : item));
+        persistData(next);
+        return next;
+      });
       setIsEditOpen(false);
       if (selectedItem && selectedItem[idKey] === updatedItem[idKey]) {
         setSelectedItem(updatedItem);
       }
+      onItemUpdated?.(updatedItem);
     },
-    [selectedItem],
+    [persistData, selectedItem, onItemUpdated],
   );
 
   const deleteItem = useCallback(
     (idKey: keyof T, idValue: any) => {
-      setData((prev) => prev.filter((item) => item[idKey] !== idValue));
+      setData((prev) => {
+        const next = prev.filter((item) => item[idKey] !== idValue);
+        persistData(next);
+        return next;
+      });
       setItemToDelete(null);
       if (selectedItem && selectedItem[idKey] === idValue) {
         setIsDrawerOpen(false);
         setSelectedItem(null);
       }
+      onItemDeleted?.(idValue);
     },
-    [selectedItem],
+    [persistData, selectedItem, onItemDeleted],
   );
 
   const openDrawer = useCallback((item: T) => {

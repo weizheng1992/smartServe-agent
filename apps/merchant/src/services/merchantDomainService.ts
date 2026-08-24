@@ -10,8 +10,13 @@ import type {
 import { ensureMerchantDatabaseAndTables, getMerchantPgPool } from '../db/merchantDb';
 
 export class MerchantDomainService {
-  public static readonly MERCHANT_ID = 'aurora';
-  public static readonly API_SECRET = 'aurora_secret_key_8899';
+  public static get MERCHANT_ID(): string {
+    return process.env.MERCHANT_ID || 'aurora';
+  }
+
+  public static get API_SECRET(): string {
+    return process.env.MERCHANT_API_SECRET || process.env.API_SECRET || 'aurora_secret_key_8899';
+  }
 
   /**
    * 确保数据库与表结构就绪

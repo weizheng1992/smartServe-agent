@@ -1,7 +1,8 @@
 import type React from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { useAdminTenantStore } from '../../store/tenantStore';
 import { TenantFormModal } from './components/TenantFormModal';
 import type { TenantRecord } from './types';
 
@@ -47,7 +48,11 @@ const INITIAL_TENANTS: TenantRecord[] = [
 ];
 
 export function TenantsPage() {
+  const { addOrUpdateTenant, removeTenant } = useAdminTenantStore();
+
   const {
+    data,
+    setData,
     paginatedData,
     total,
     currentPage,
@@ -71,6 +76,7 @@ export function TenantsPage() {
     deleteItem,
   } = useAdminCrud<TenantRecord>({
     initialData: INITIAL_TENANTS,
+    storageKey: 'smartserve_admin_tenants',
     tenantKey: 'id' as keyof TenantRecord,
     filterFn: (item, query, status) => {
       if (status && item.status !== status) return false;
@@ -84,7 +90,75 @@ export function TenantsPage() {
       }
       return true;
     },
+    onItemCreated: (item) => {
+      addOrUpdateTenant({
+        id: item.id,
+        name: item.name,
+        badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      });
+      // 异步尝试同步至服务端
+      fetch('/api/tenant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      }).catch(() => {});
+    },
+    onItemUpdated: (item) => {
+      addOrUpdateTenant({
+        id: item.id,
+        name: item.name,
+        badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
+      });
+      fetch('/api/tenant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      }).catch(() => {});
+    },
+    onItemDeleted: (id) => {
+      removeTenant(id);
+      fetch(`/api/tenant/${id}`, {
+        method: 'DELETE',
+      }).catch(() => {});
+    },
   });
+
+  // 页面挂载时尝试拉取服务端已注册租户列表进行合并
+  useEffect(() => {
+    let isMounted = true;
+    fetch('/api/tenant/list')
+      .then((res) => res.json())
+      .then((res) => {
+        if (!isMounted || !res || !res.success || !Array.isArray(res.tenants)) return;
+        setData((prev) => {
+          const merged = [...prev];
+          for (const sTenant of res.tenants) {
+            const idx = merged.findIndex((t) => t.id.toLowerCase() === sTenant.id.toLowerCase());
+            if (idx >= 0) {
+              merged[idx] = { ...merged[idx], ...sTenant };
+            } else {
+              merged.push(sTenant);
+            }
+            addOrUpdateTenant({
+              id: sTenant.id,
+              name: sTenant.name,
+              badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+            });
+          }
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('smartserve_admin_tenants', JSON.stringify(merged));
+            } catch {}
+          }
+          return merged;
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [setData, addOrUpdateTenant]);
 
   const [formData, setFormData] = useState<Partial<TenantRecord>>({});
 
@@ -189,14 +263,14 @@ export function TenantsPage() {
           <button
             type="button"
             onClick={() => handleOpenEdit(row)}
-            className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors"
+            className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
           >
             编辑配置
           </button>
           <button
             type="button"
             onClick={() => setItemToDelete(row)}
-            className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors"
+            className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
           >
             删除
           </button>
@@ -268,4 +342,5 @@ export function TenantsPage() {
     </div>
   );
 }
+
 export default TenantsPage;

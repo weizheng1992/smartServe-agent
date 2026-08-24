@@ -1,5 +1,6 @@
 import type React from 'react';
-import { SUPPORTED_TENANTS, useAdminTenantStore } from '../../store/tenantStore';
+import { Combobox } from 'ui';
+import { useAdminTenantStore } from '../../store/tenantStore';
 
 export interface FilterOption {
   label: string;
@@ -35,7 +36,7 @@ export function FilterBar({
   extraFilters,
   actions,
 }: FilterBarProps) {
-  const { selectedTenantId, setSelectedTenantId } = useAdminTenantStore();
+  const { selectedTenantId, setSelectedTenantId, tenants } = useAdminTenantStore();
   const activeTenant = tenantFilter !== undefined ? tenantFilter : selectedTenantId;
   const handleTenantSelect = (val: string) => {
     if (onTenantChange) {
@@ -93,22 +94,22 @@ export function FilterBar({
           </div>
         )}
 
-        {/* 商户租户筛选 */}
+        {/* 商户租户筛选 (Shadcn/UI Combobox) */}
         {showTenantFilter && (
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <span>租户:</span>
-            <select
-              value={activeTenant}
-              onChange={(e) => handleTenantSelect(e.target.value)}
-              className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium focus:outline-hidden focus:border-slate-400 transition-colors"
-            >
-              {SUPPORTED_TENANTS.map((tenant) => (
-                <option key={tenant.id} value={tenant.id}>
-                  {tenant.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Combobox
+            label="租户:"
+            value={activeTenant}
+            onChange={(val) => handleTenantSelect(val)}
+            searchPlaceholder="搜索商户名或租户 ID..."
+            emptyText="未找到匹配的商户"
+            options={tenants.map((t) => ({
+              value: t.id,
+              label: t.name,
+              badge: t.id,
+              badgeColor: t.badgeColor,
+            }))}
+            triggerClassName="h-7 text-xs"
+          />
         )}
 
         {extraFilters}
