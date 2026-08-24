@@ -19,7 +19,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
 | **审批事务与可靠性**                     | 内存与直接异步调度，存在幽灵工单 (Ghost Approval) 隐患 | **Transactional Outbox 事务一致性**：审批流状态变更与 Outbox 事件原子写入，配合后台异步对账与确定性幂等调度恢复机制。                                                                              |
 | **客户画像与记忆系统**                   | 扁平用户偏好，缺乏租户边界，存在跨品牌数据泄露 (IDOR)  | **双层画像物理隔离体系 (`Dual-Tier Persona`)**：生理基础属性（如鞋码/过敏源）归属 `global` 全局共享；品牌消费习惯/特权优惠严格隔离至 `tenant` 租户级别。                                           |
 | **BI 与 Text-to-SQL 安全**               | 字符串拼接 SQL 模板，存在注入风险与超时卡顿            | **参数化 AST 编译器与只读事务沙箱**：强制参数化占位符 (`$1`, `$2`) 绑定，`SET TRANSACTION READ ONLY` + 3000ms 强制超时熔断守护。                                                                   |
-| **商户开放集成能力**                     | 静态内置工具与预设店铺规则                             | **开放商户 SPI 对接标准 & OpenAPI 动态工具**：支持商户通过 Webhook/SPI 接入私有订单/物流系统，AES-256-GCM + HKDF 密钥派生安全管理。                                                                |
+| **商户开放集成与技能生态**               | 静态内置工具与预设店铺规则                             | **开放商户 SPI 对接标准 & SOP 技能体系**：支持商户通过 Webhook/SPI 接入私有订单/物流系统，AES-256-GCM + HKDF 密钥派生，标准 RESTful `/api/skills/config` 动态重载与 MCP 复合生态。                 |
+| **实时协同与流式推流弹性**               | 简单的 SSE 传输，断线重连丢失事件，缺乏坐席接管机制    | **双向实时接管网关与 Last-Event-ID 弹性回放**：基于 Socket.io + Redis Pub/Sub 实现毫秒级人工客服协同接管，`ChatService` 具备跨连接 Job 级事件缓存与断线增量重放。                                  |
 | **质量保障与自动化测试**                 | 少量零散单元测试                                       | **全自动化测试流水线**：单测、集成测试、Playwright 真实浏览器 E2E 自动化测试全覆盖，Monorepo 一键验证。                                                                                            |
 
 ---
@@ -40,6 +41,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
    - [4.8 Agent Harness 运行底座与四层记忆体系 (Quad-Memory Hierarchy)](#48-agent-harness-运行底座与四层记忆体系-quad-memory-hierarchy)
    - [4.9 生产级大模型综合安全风险评估与纵深防御 (Security & Guardrails)](#49-生产级大模型综合安全风险评估与纵深防御-security--guardrails)
    - [4.10 领域专职子智能体与隔离状态总线 (Multi-Agent Sub-Agents & State Bus)](#410-领域专职子智能体与隔离状态总线-multi-agent-sub-agents--state-bus)
+   - [4.11 多租户 SQL 物理层下推隔离与越权防御 (SQL Push-Down Tenant Isolation)](#411-多租户-sql-物理层下推隔离与越权防御-sql-push-down-tenant-isolation)
+   - [4.12 实时协同接管与 SSE 流式弹性回放 (Live Desk Takeover & SSE Resiliency)](#412-实时协同接管与-sse-流式弹性回放-live-desk-takeover--sse-resiliency)
 5. [质量保障与全自动化测试 (Quality & Automation)](#5-质量保障与全自动化测试-quality--automation)
 6. [开发与部署命令 (Quick Start)](#6-开发与部署命令-quick-start)
 
@@ -266,6 +269,18 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
   当用户在导购 Agent 推荐多款商品后说“把第2件加入购物车”时，购物车 Agent 无需重读全量长文本，直接从 `guideContext.candidateProductIds` 确定性解析出目标 SkuId 并调用 `addToCart` 完成闭环。
 - **Fast-Track 毫秒级直达与 BaseSkill 管线**：
   各领域 Agent 基于 `BaseSkill` 生命周期（`canHandle` ➔ `validate` ➔ `execute` ➔ `postExecute`），在命中高置信意图时毫秒级旁路直达，直接输出富文本卡片（`RichCardBlock`）。
+
+### 4.11 多租户 SQL 物理层下推隔离与越权防御 (SQL Push-Down Tenant Isolation)
+
+- **物理下推而非内存过滤**：全平台所有底层数据仓储与风控核签方法（如 `ConversationRepository.getConversationTimeline`、`ApprovalGatekeeper.listPendingApprovals` 等）强制将 `business_id` 参数下推至 PostgreSQL 物理 SQL 约束（`WHERE business_id = $1`），彻底杜绝无限制全表加载后在应用层做 JavaScript 过滤带来的越权漏洞（IDOR）与内存泄漏风险。
+- **租户参数白名单校验与防御**：NestJS 全局管道开启 `ValidationPipe({ forbidNonWhitelisted: true, whitelist: true, transform: true })`，严格阻断未知参数与租户伪造，保障多租户物理与逻辑边界的绝对安全。
+
+### 4.12 实时协同接管与 SSE 流式弹性回放 (Live Desk Takeover & SSE Resiliency)
+
+- **WebSocket 双向即时坐席接管网关 (`ConversationGateway`)**：
+  基于 NestJS WebSocket 与 Redis Pub/Sub 实现分布式会话接管。坐席端一键发起 `takeover_conversation`，会话状态机原子跃迁至 `human_takeover` 并暂停 AI 自动回复；释放时通过 `release_takeover` 瞬间无缝归还 AI 托管。
+- **SSE 断线重连与 `Last-Event-ID` 跨连接精准回放**：
+  `ChatService` 引入跨连接的 Job 级事件缓存队列（`jobEventStore`）。当客户端在流式传输过程中因网络波动重连并携带 `Last-Event-ID: <seq>` 时，网关自动从持久化缓冲池中重放掉线期间遗漏的思考步骤（`thought`）、工具调用（`tool`）、富卡片（`cards`）与最终结果（`result`），保障多模态对话流的 100% 幂等与无缝连续性。
 
 ---
 

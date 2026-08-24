@@ -4,6 +4,46 @@
 
 ---
 
+## [2.0.0] - 2026-08-24 (重大架构重构与 SaaS 平台升级)
+
+### 🌟 Major Highlights (重大亮点)
+
+- **NestJS 企业级 API 网关与标准化契约 (`apps/server`)**:
+  - 彻底解耦传统单体服务，构建基于 NestJS 核心框架的企业级 API Gateway，统一管理路由分发、依赖注入（DI）、全局异常过滤器与日志切面。
+  - 规范 RESTful API 路由设计（涵盖 `/api/chat`、`/api/skills`、`/api/tenants`、`/api/tools` 等）。
+  - 全局启用 `ValidationPipe({ forbidNonWhitelisted: true, whitelist: true, transform: true })`，严格阻断未知字段与参数注入，建立坚实的多租户物理与逻辑边界。
+- **多租户 SQL 物理层下推隔离与越权防御 (Physical SQL Push-Down Tenant Isolation)**:
+  - 彻底改造底层数据仓储与审批流核心方法（如 `ConversationRepository.getConversationTimeline`、`ApprovalGatekeeper.listPendingApprovals` 等），强制将 `business_id` 参数下推至 PostgreSQL 物理 SQL 约束（`WHERE business_id = $1`），彻底杜绝全表加载后在应用层 JavaScript 内存过滤带来的越权风险（IDOR）与内存泄漏隐患。
+  - 重构 `TenantRegistryService.updateTenantSkillConfig`，采用安全的物理主键查更机制取代脆弱的 `ON CONFLICT` 语法，完美兼容版本化多租户配置表。
+- **实时协同坐席接管与 SSE 流式弹性回放机制 (Live Desk Takeover & SSE Stream Resiliency)**:
+  - 落地 WebSocket 双向即时坐席接管网关（`ConversationGateway`），基于 Socket.io 与 Redis Pub/Sub 实现分布式会话接管。坐席端一键发起 `takeover_conversation`，会话状态机原子跃迁至 `human_takeover` 并即时暂停 AI 自动回复；释放时通过 `release_takeover` 毫秒级归还 AI 托管。
+  - 在 `ChatService` 中构建跨连接 Job 级事件缓存队列（`jobEventStore`）与单调递增序列号体系（`id: ${seq}`）。当客户端因网络抖动重连并携带 `Last-Event-ID` 请求头时，服务端精准回放掉线期间丢失的思考步骤（`thought`）、工具调用（`tool`）、富媒体卡片（`cards`）与最终结果（`result`），保障多模态对话流 100% 幂等与无缝连续。
+- **Admin SaaS 控制台全面重构与 10 大路由 CRUD 模块 (`apps/admin`)**:
+  - 基于 React Router 7 + `@agent-all/ui` 纯组件重构企业级 SaaS 控制台，完整落地 10 大标准业务管理子系统：
+    1. **商户入驻与管理 (Tenants)**：多租户生命周期与品牌心智配置；
+    2. **技能编排中心 (Skills)**：SOP 技能启闭、审批阈值与自定义 Prompt 动态生效；
+    3. **工具注册中心 (Tools)**：OpenAPI 动态工具工厂与 MCP/SPI 插件元数据治理；
+    4. **HITL 审批工作台 (Approvals)**：敏感业务操作人机协同核签抽屉与状态机流转；
+    5. **全渠道会话工作台 (Conversations)**：多租户会话全景树、深层链路 Trace 追溯与实时坐席接管；
+    6. **双层用户画像中心 (Personas)**：全局基础生理偏好与租户专有消费习惯分层管理；
+    7. **RAG 知识库工坊 (RAG Studio)**：分块检索演练场、切片预览与幂等入库管理；
+    8. **安全合规护栏 (Guardrails)**：Prompt 注入防御策略、PII 脱敏规则与风控红线配置；
+    9. **大模型评测中心 (Evals)**：自动化 Promptfoo 评测集管理与指标准确率矩阵看板；
+    10. **用量与账单中心 (Billing)**：租户级 Token 算力消耗明细、换算成本与财务配额限制。
+  - 提炼标准化、零外部组件库依赖的通用 CRUD 套件（`useAdminCrud`、`DataTable`、`FilterBar`、`DetailDrawer`、`FormModal`、`ConfirmDialog`），无缝对接 NestJS API Gateway。
+- **BaseSkill 领域技能编排与开放集成生态 (`packages/engine`, `packages/tools`)**:
+  - 所有领域技能统一继承 `BaseSkill` 标准抽象类，实现 `canHandle` ➔ `validate` ➔ `execute` ➔ `postExecute` 四阶段标准流水线。
+  - 支持商户针对不同技能单独配置启用状态（`enabled`）、免签核准阈值（`approvalThresholdAmount`）以及定制化 SOP 提示词（`customPolicyPrompt`），实现零代码热更新。
+- **AST 参数化 NL2SQL 沙箱、双层用户画像与 Transactional Outbox (Security, Persona & Outbox)**:
+  - NL2SQL 采用 AST 抽象语法树校验，硬性限制仅允许执行 `SELECT` 查询，强制注入租户物理边界与 `LIMIT 50` 分页保护，并在只读短事务内执行。
+  - 落地 Dual-Tier Persona 架构：物理区分 `scope = 'global'`（跨商户通用客户画像）与 `scope = 'tenant'`（品牌私有画像），兼顾个性化服务与商户数据隔离合规。
+  - 引入金融级 Transactional Outbox 机制 (`approval_outbox_events`)，保障人机协同审批状态变更与异步工作流恢复的严格原子性与最终一致性。
+- **标准化自动化测试套件与持续回归保障**:
+  - 新增 `codeReviewFixes.test.ts` 专项测试，针对多租户物理 SQL 下推隔离、SSE 断线重放机制、Skills RESTful 配置 API 进行全量断言验证。
+  - Monorepo 全量单元测试、集成测试及 Admin 控制台自动化套件持续保持 100% 绿色通过。
+
+---
+
 ## [1.11.0] - 2026-08-22
 
 ### 🌟 Major Highlights (重大亮点)
