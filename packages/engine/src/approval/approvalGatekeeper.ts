@@ -649,6 +649,17 @@ export class ApprovalGatekeeper {
       };
     }
 
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        approvalId,
+      );
+    if (!isUuid) {
+      return {
+        error: `Approval工单 ${approvalId} 格式无效或未找到`,
+        statusCode: 404,
+      };
+    }
+
     const lockKey = `lock:approval:${approvalId}`;
     let lockAcquired = false;
     let fallbackAcquired = false;
