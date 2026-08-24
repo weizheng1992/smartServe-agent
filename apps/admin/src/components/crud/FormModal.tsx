@@ -1,5 +1,13 @@
-import type React from 'react';
-import { useEffect } from 'react';
+import type React from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  Button,
+} from "ui";
 
 export interface FormModalProps {
   isOpen: boolean;
@@ -20,69 +28,67 @@ export function FormModal({
   title,
   subtitle,
   children,
-  submitText = '保存提交',
+  submitText = "保存提交",
   isSubmitting = false,
-  width = 'max-w-lg',
+  width = "max-w-lg",
 }: FormModalProps) {
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen && !isSubmitting) {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, isSubmitting]);
-
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4">
-      <div
-        className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
-        onClick={() => !isSubmitting && onClose()}
-      />
-
-      <div
-        className={`relative w-full ${width} bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden z-10`}
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => !open && !isSubmitting && onClose()}
+    >
+      <DialogContent
+        className={`w-full ${width} bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden p-0 gap-0 z-50`}
       >
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
+        <DialogHeader className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 text-left space-y-0">
           <div>
-            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-            {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+            <DialogTitle className="text-base font-semibold text-slate-900">
+              {title}
+            </DialogTitle>
+            {subtitle && (
+              <DialogDescription className="text-xs text-slate-500 mt-0.5">
+                {subtitle}
+              </DialogDescription>
+            )}
           </div>
-          <button
-            type="button"
-            disabled={isSubmitting}
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+        </DialogHeader>
 
         <form onSubmit={onSubmit}>
-          <div className="px-6 py-5 max-h-[70vh] overflow-y-auto space-y-4 text-sm text-slate-700">{children}</div>
+          <div className="px-6 py-5 max-h-[70vh] overflow-y-auto space-y-4 text-sm text-slate-700">
+            {children}
+          </div>
 
-          <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-end gap-2.5">
-            <button
+          <DialogFooter className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-end gap-2.5 sm:space-x-0">
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               disabled={isSubmitting}
               onClick={onClose}
-              className="px-3.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+              className="text-xs font-medium text-slate-600 hover:bg-slate-100"
             >
               取消
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
+              size="sm"
               disabled={isSubmitting}
-              className="px-4 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 disabled:opacity-50"
+              className="text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white shadow-xs flex items-center gap-1.5"
             >
               {isSubmitting && (
-                <svg className="animate-spin w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <svg
+                  className="animate-spin w-3.5 h-3.5 text-white"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
                   <path
                     className="opacity-75"
                     fill="currentColor"
@@ -91,10 +97,10 @@ export function FormModal({
                 </svg>
               )}
               {submitText}
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

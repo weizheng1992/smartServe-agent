@@ -1,4 +1,5 @@
-import React from 'react';
+import React from "react";
+import { Input, Button, Badge } from "ui";
 
 export interface RagPlaygroundProps {
   selectedTenantId: string;
@@ -27,42 +28,58 @@ export function RagPlayground({
           </h3>
         </div>
         <span className="text-[11px] text-slate-400">
-          隔离租户: <strong className="text-slate-700 font-mono">{selectedTenantId}</strong>
+          隔离租户:{" "}
+          <strong className="text-slate-700 font-mono">
+            {selectedTenantId}
+          </strong>
         </span>
       </div>
 
       <div className="flex items-center gap-2">
-        <input
+        <Input
           type="text"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && onSearch()}
+          onKeyDown={(e) => e.key === "Enter" && onSearch()}
           placeholder="输入自然语言测试 Query，如：退货需要满足什么条件？ZoomX 跑鞋特点？"
-          className="flex-1 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:bg-white focus:border-indigo-500 transition-colors"
+          className="flex-1 h-8 text-xs bg-slate-50 border-slate-200 focus:bg-white transition-colors"
         />
-        <button
+        <Button
           type="button"
+          size="sm"
           disabled={isSearching || !query.trim()}
           onClick={onSearch}
-          className="px-4 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          className="h-8 px-4 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs flex items-center gap-1.5"
         >
-          {isSearching ? '检索中...' : '发起检索测试'}
-        </button>
+          {isSearching ? "检索中..." : "发起检索测试"}
+        </Button>
       </div>
 
       {results.length > 0 && (
         <div className="mt-3.5 space-y-2 pt-3 border-t border-slate-100">
-          <div className="text-[11px] font-semibold text-slate-500">召回 Top-{results.length} 相关切片:</div>
+          <div className="text-[11px] font-semibold text-slate-500">
+            召回 Top-{results.length} 相关切片:
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
             {results.map((hit) => (
-              <div key={hit.id} className="p-3 bg-slate-50/80 border border-slate-200 rounded-lg text-xs space-y-1.5">
+              <div
+                key={hit.id}
+                className="p-3 bg-slate-50/80 border border-slate-200 rounded-lg text-xs space-y-1.5"
+              >
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-800">{hit.title}</span>
-                  <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                    Score: {(hit.score * 100).toFixed(1)}%
+                  <span className="font-semibold text-slate-800">
+                    {hit.title}
                   </span>
+                  <Badge
+                    variant="outline"
+                    className="font-mono text-[10px] font-bold bg-emerald-50 text-emerald-800 border-emerald-200"
+                  >
+                    Score: {(hit.score * 100).toFixed(1)}%
+                  </Badge>
                 </div>
-                <p className="text-slate-600 text-[11px] leading-relaxed line-clamp-3">{hit.content}</p>
+                <p className="text-slate-600 text-[11px] leading-relaxed line-clamp-3">
+                  {hit.content}
+                </p>
               </div>
             ))}
           </div>

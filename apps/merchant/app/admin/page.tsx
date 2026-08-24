@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApprovalContextDrawer,
   CheckCircle2,
@@ -8,7 +8,15 @@ import {
   RichCardRenderer,
   ShieldAlert,
   useApprovalMachine,
-} from 'ui';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Button,
+  Input,
+  Badge,
+} from "ui";
 
 interface OrderRow {
   order_id: string;
@@ -95,7 +103,7 @@ interface ConversationItem {
 
 interface MessageItem {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'operator';
+  role: "user" | "assistant" | "system" | "operator";
   content: string;
   cards?: any[];
   operatorInfo?: { operatorId: string; operatorName: string };
@@ -103,9 +111,9 @@ interface MessageItem {
 }
 
 export default function MerchantAdminPage() {
-  const [activeTab, setActiveTab] = useState<'orders' | 'approvals' | 'live_desk' | 'spus' | 'skus' | 'spi_logs'>(
-    'orders',
-  );
+  const [activeTab, setActiveTab] = useState<
+    "orders" | "approvals" | "live_desk" | "spus" | "skus" | "spi_logs"
+  >("orders");
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [spus, setSpus] = useState<SpuRow[]>([]);
@@ -113,25 +121,35 @@ export default function MerchantAdminPage() {
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [activeThreadMessages, setActiveThreadMessages] = useState<MessageItem[]>([]);
-  const [inputMessage, setInputMessage] = useState('');
+  const [activeThreadMessages, setActiveThreadMessages] = useState<
+    MessageItem[]
+  >([]);
+  const [inputMessage, setInputMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [shippingOrderId, setShippingOrderId] = useState<string | null>(null);
-  const [trackingNumberInput, setTrackingNumberInput] = useState('');
-  const [carrierInput, setCarrierInput] = useState('SF');
+  const [trackingNumberInput, setTrackingNumberInput] = useState("");
+  const [carrierInput, setCarrierInput] = useState("SF");
   const [selectedLog, setSelectedLog] = useState<AuditLogRow | null>(null);
-  const [inspectingApproval, setInspectingApproval] = useState<ApprovalItem | null>(null);
+  const [inspectingApproval, setInspectingApproval] =
+    useState<ApprovalItem | null>(null);
   const [isTakingOver, setIsTakingOver] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { submittingActionId, rejectionReasons, setRejectionReasons, executeApprovalAction, executeHumanReplyAction } =
-    useApprovalMachine('/api/admin/approvals');
+  const {
+    submittingActionId,
+    rejectionReasons,
+    setRejectionReasons,
+    executeApprovalAction,
+    executeHumanReplyAction,
+  } = useApprovalMachine("/api/admin/approvals");
 
   const loadConversationMessages = useCallback(async (threadId: string) => {
     if (!threadId) return;
     try {
-      const resp = await fetch(`/api/admin/conversations/${threadId}?tenantId=aurora`);
+      const resp = await fetch(
+        `/api/admin/conversations/${threadId}?tenantId=aurora`,
+      );
       if (resp.ok) {
         const json = await resp.json();
         if (json.success && json.data) {
@@ -139,7 +157,7 @@ export default function MerchantAdminPage() {
         }
       }
     } catch (err) {
-      console.error('Failed to fetch thread timeline:', err);
+      console.error("Failed to fetch thread timeline:", err);
     }
   }, []);
 
@@ -147,9 +165,9 @@ export default function MerchantAdminPage() {
     try {
       setLoading(true);
       const [orderResp, appResp, convResp] = await Promise.all([
-        fetch('/api/admin/orders').catch(() => null),
-        fetch('/api/admin/approvals?tenantId=aurora').catch(() => null),
-        fetch('/api/admin/conversations?tenantId=aurora').catch(() => null),
+        fetch("/api/admin/orders").catch(() => null),
+        fetch("/api/admin/approvals?tenantId=aurora").catch(() => null),
+        fetch("/api/admin/conversations?tenantId=aurora").catch(() => null),
       ]);
 
       if (orderResp && orderResp.ok) {
@@ -188,7 +206,7 @@ export default function MerchantAdminPage() {
         }
       }
     } catch (err) {
-      console.error('Failed to fetch merchant admin data:', err);
+      console.error("Failed to fetch merchant admin data:", err);
     } finally {
       setLoading(false);
     }
@@ -203,22 +221,28 @@ export default function MerchantAdminPage() {
   useEffect(() => {
     if (activeThreadId) {
       loadConversationMessages(activeThreadId);
-      const interval = setInterval(() => loadConversationMessages(activeThreadId), 3000);
+      const interval = setInterval(
+        () => loadConversationMessages(activeThreadId),
+        3000,
+      );
       return () => clearInterval(interval);
     }
   }, [activeThreadId, loadConversationMessages]);
 
   useEffect(() => {
-    if (activeTab === 'live_desk') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (activeTab === "live_desk") {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [activeThreadMessages, activeTab]);
 
-  const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {
+  const handleApprovalAction = async (
+    approvalId: string,
+    action: "approve" | "reject",
+  ) => {
     const result = await executeApprovalAction({
       approvalId,
       action,
-      apiEndpoint: '/api/admin/approvals',
+      apiEndpoint: "/api/admin/approvals",
     });
     if (result.success) {
       await fetchDashboardData();
@@ -230,12 +254,16 @@ export default function MerchantAdminPage() {
     }
   };
 
-  const handleHumanReply = async (approvalId: string, replyMessage: string, isFinish = false) => {
+  const handleHumanReply = async (
+    approvalId: string,
+    replyMessage: string,
+    isFinish = false,
+  ) => {
     const result = await executeHumanReplyAction({
       approvalId,
       replyMessage,
       isFinish,
-      apiEndpoint: '/api/admin/approvals',
+      apiEndpoint: "/api/admin/approvals",
     });
     if (result.success) {
       await fetchDashboardData();
@@ -247,12 +275,12 @@ export default function MerchantAdminPage() {
   const handleTakeover = async (threadId: string) => {
     setIsTakingOver(true);
     try {
-      await fetch('/api/admin/approvals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await fetch("/api/admin/approvals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           threadId,
-          action: 'start_human_takeover',
+          action: "start_human_takeover",
         }),
       });
       await fetchDashboardData();
@@ -260,7 +288,7 @@ export default function MerchantAdminPage() {
         await loadConversationMessages(activeThreadId);
       }
     } catch (err) {
-      console.error('Takeover failed:', err);
+      console.error("Takeover failed:", err);
     } finally {
       setIsTakingOver(false);
     }
@@ -269,12 +297,12 @@ export default function MerchantAdminPage() {
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !activeThreadId) return;
     const msg = inputMessage.trim();
-    setInputMessage('');
+    setInputMessage("");
 
     // Optimistic append
     const optMsg: MessageItem = {
       id: `opt_${Date.now()}`,
-      role: 'assistant',
+      role: "assistant",
       content: `[商户客服] ${msg}`,
       timestamp: new Date().toISOString(),
     };
@@ -282,22 +310,24 @@ export default function MerchantAdminPage() {
 
     try {
       // Find active approval or trigger resolve
-      const app = approvals.find((a) => a.threadId === activeThreadId && a.status === 'waiting');
+      const app = approvals.find(
+        (a) => a.threadId === activeThreadId && a.status === "waiting",
+      );
       if (app) {
         await executeHumanReplyAction({
           approvalId: app.id,
           replyMessage: msg,
           isFinish: false,
-          apiEndpoint: '/api/admin/approvals',
+          apiEndpoint: "/api/admin/approvals",
         });
       } else {
         // Direct start takeover and send message
-        const res = await fetch('/api/admin/approvals', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const res = await fetch("/api/admin/approvals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             threadId: activeThreadId,
-            action: 'start_human_takeover',
+            action: "start_human_takeover",
           }),
         });
         const d = await res.json();
@@ -306,26 +336,26 @@ export default function MerchantAdminPage() {
             approvalId: d.approvalId,
             replyMessage: msg,
             isFinish: false,
-            apiEndpoint: '/api/admin/approvals',
+            apiEndpoint: "/api/admin/approvals",
           });
         }
       }
       await loadConversationMessages(activeThreadId);
     } catch (err) {
-      console.error('Failed to send live message:', err);
+      console.error("Failed to send live message:", err);
     }
   };
 
   const handleShipOrder = async (orderId: string) => {
     if (!trackingNumberInput.trim()) {
-      alert('请填写快递运单号');
+      alert("请填写快递运单号");
       return;
     }
 
     try {
-      const resp = await fetch('/api/admin/orders/ship', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const resp = await fetch("/api/admin/orders/ship", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderId,
           carrierCode: carrierInput,
@@ -334,19 +364,21 @@ export default function MerchantAdminPage() {
       });
       const data = await resp.json();
       if (data.success) {
-        alert('🎉 发货成功！已流转为已发货状态并锁定收货地址');
+        alert("🎉 发货成功！已流转为已发货状态并锁定收货地址");
         setShippingOrderId(null);
-        setTrackingNumberInput('');
+        setTrackingNumberInput("");
         fetchDashboardData();
       } else {
-        alert(`发货失败: ${data.message || '未知错误'}`);
+        alert(`发货失败: ${data.message || "未知错误"}`);
       }
     } catch (err) {
-      alert('网络请求失败');
+      alert("网络请求失败");
     }
   };
 
-  const pendingApprovalsCount = approvals.filter((a) => a.status === 'waiting').length;
+  const pendingApprovalsCount = approvals.filter(
+    (a) => a.status === "waiting",
+  ).length;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
@@ -364,19 +396,22 @@ export default function MerchantAdminPage() {
               </span>
             </div>
             <div className="text-[11px] text-slate-400">
-              独立物理隔离 · SPU/SKU 多规格电商 · HITL 审批中枢 · LiveDesk 在线客服
+              独立物理隔离 · SPU/SKU 多规格电商 · HITL 审批中枢 · LiveDesk
+              在线客服
             </div>
           </div>
         </div>
 
         <div className="flex items-center space-x-4 text-xs">
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={fetchDashboardData}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center space-x-1 cursor-pointer"
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 h-8"
           >
             <span>🔄 刷新数据</span>
-          </button>
+          </Button>
           <a
             href="/"
             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded transition flex items-center space-x-1 shadow-xs"
@@ -392,23 +427,29 @@ export default function MerchantAdminPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
             <div>
-              <div className="text-xs text-slate-500 font-medium">累计订单总数</div>
-              <div className="text-2xl font-bold text-slate-900 mt-1">{orders.length} 笔</div>
+              <div className="text-xs text-slate-500 font-medium">
+                累计订单总数
+              </div>
+              <div className="text-2xl font-bold text-slate-900 mt-1">
+                {orders.length} 笔
+              </div>
             </div>
             <div className="text-3xl text-slate-300">📋</div>
           </div>
 
           <div
-            onClick={() => setActiveTab('approvals')}
+            onClick={() => setActiveTab("approvals")}
             className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between cursor-pointer hover:border-amber-400 transition"
           >
             <div>
               <div className="text-xs text-slate-500 font-medium flex items-center space-x-1">
                 <span>待人工审核工单</span>
-                {pendingApprovalsCount > 0 && <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />}
+                {pendingApprovalsCount > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                )}
               </div>
               <div
-                className={`text-2xl font-bold mt-1 ${pendingApprovalsCount > 0 ? 'text-amber-600' : 'text-slate-900'}`}
+                className={`text-2xl font-bold mt-1 ${pendingApprovalsCount > 0 ? "text-amber-600" : "text-slate-900"}`}
               >
                 {pendingApprovalsCount} 笔
               </div>
@@ -417,20 +458,28 @@ export default function MerchantAdminPage() {
           </div>
 
           <div
-            onClick={() => setActiveTab('live_desk')}
+            onClick={() => setActiveTab("live_desk")}
             className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between cursor-pointer hover:border-blue-400 transition"
           >
             <div>
-              <div className="text-xs text-slate-500 font-medium">活跃在线会话</div>
-              <div className="text-2xl font-bold text-blue-600 mt-1">{conversations.length} 组</div>
+              <div className="text-xs text-slate-500 font-medium">
+                活跃在线会话
+              </div>
+              <div className="text-2xl font-bold text-blue-600 mt-1">
+                {conversations.length} 组
+              </div>
             </div>
             <div className="text-3xl text-blue-300">💬</div>
           </div>
 
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
             <div>
-              <div className="text-xs text-slate-500 font-medium">接收 AI SPI 履约调用</div>
-              <div className="text-2xl font-bold text-emerald-600 mt-1">{auditLogs.length} 次</div>
+              <div className="text-xs text-slate-500 font-medium">
+                接收 AI SPI 履约调用
+              </div>
+              <div className="text-2xl font-bold text-emerald-600 mt-1">
+                {auditLogs.length} 次
+              </div>
             </div>
             <div className="text-3xl text-slate-300">⚡</div>
           </div>
@@ -440,30 +489,34 @@ export default function MerchantAdminPage() {
         <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-3 gap-6 shadow-2xs overflow-x-auto">
           <button
             type="button"
-            onClick={() => setActiveTab('orders')}
+            onClick={() => setActiveTab("orders")}
             className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
-              activeTab === 'orders'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
+              activeTab === "orders"
+                ? "border-emerald-600 text-emerald-700"
+                : "border-transparent text-slate-600 hover:text-slate-900"
             }`}
           >
             <span>📋 订单中心</span>
-            <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">{orders.length}</span>
+            <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">
+              {orders.length}
+            </span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('approvals')}
+            onClick={() => setActiveTab("approvals")}
             className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
-              activeTab === 'approvals'
-                ? 'border-amber-500 text-amber-700'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
+              activeTab === "approvals"
+                ? "border-amber-500 text-amber-700"
+                : "border-transparent text-slate-600 hover:text-slate-900"
             }`}
           >
             <span>🛡️ 待办审核 (HITL)</span>
             <span
               className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                pendingApprovalsCount > 0 ? 'bg-amber-100 text-amber-800 animate-pulse' : 'bg-slate-100 text-slate-600'
+                pendingApprovalsCount > 0
+                  ? "bg-amber-100 text-amber-800 animate-pulse"
+                  : "bg-slate-100 text-slate-600"
               }`}
             >
               {pendingApprovalsCount}
@@ -472,11 +525,11 @@ export default function MerchantAdminPage() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('live_desk')}
+            onClick={() => setActiveTab("live_desk")}
             className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
-              activeTab === 'live_desk'
-                ? 'border-blue-600 text-blue-700'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
+              activeTab === "live_desk"
+                ? "border-blue-600 text-blue-700"
+                : "border-transparent text-slate-600 hover:text-slate-900"
             }`}
           >
             <span>💬 在线客服工作台</span>
@@ -487,37 +540,41 @@ export default function MerchantAdminPage() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('spus')}
+            onClick={() => setActiveTab("spus")}
             className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
-              activeTab === 'spus'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
+              activeTab === "spus"
+                ? "border-emerald-600 text-emerald-700"
+                : "border-transparent text-slate-600 hover:text-slate-900"
             }`}
           >
             <span>🏷️ SPU 商品库</span>
-            <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">{spus.length}</span>
+            <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">
+              {spus.length}
+            </span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('skus')}
+            onClick={() => setActiveTab("skus")}
             className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
-              activeTab === 'skus'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
+              activeTab === "skus"
+                ? "border-emerald-600 text-emerald-700"
+                : "border-transparent text-slate-600 hover:text-slate-900"
             }`}
           >
             <span>📦 SKU 规格库存</span>
-            <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">{skus.length}</span>
+            <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">
+              {skus.length}
+            </span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('spi_logs')}
+            onClick={() => setActiveTab("spi_logs")}
             className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
-              activeTab === 'spi_logs'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
+              activeTab === "spi_logs"
+                ? "border-emerald-600 text-emerald-700"
+                : "border-transparent text-slate-600 hover:text-slate-900"
             }`}
           >
             <span>🔌 SPI 开放审计流水</span>
@@ -528,12 +585,15 @@ export default function MerchantAdminPage() {
         </div>
 
         {/* Tab 1: 订单中心 */}
-        {activeTab === 'orders' && (
+        {activeTab === "orders" && (
           <div className="bg-white rounded-b-xl border border-slate-200 shadow-2xs overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <span className="text-xs text-slate-600">
                 实时展示商户订单。
-                <strong>如果用户通过 AI 客服成功修改了地址或退款，此处将实时展示最新变更！</strong>
+                <strong>
+                  如果用户通过 AI
+                  客服成功修改了地址或退款，此处将实时展示最新变更！
+                </strong>
               </span>
             </div>
 
@@ -553,60 +613,83 @@ export default function MerchantAdminPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
                   {orders.map((o) => (
-                    <tr key={o.order_id} className="hover:bg-slate-50/80 transition">
-                      <td className="p-3.5 font-semibold text-slate-900 font-mono">{o.order_id}</td>
+                    <tr
+                      key={o.order_id}
+                      className="hover:bg-slate-50/80 transition"
+                    >
+                      <td className="p-3.5 font-semibold text-slate-900 font-mono">
+                        {o.order_id}
+                      </td>
                       <td className="p-3.5 text-slate-500">{o.customer_id}</td>
                       <td className="p-3.5">
-                        <span
-                          className={`px-2 py-0.5 rounded-full font-semibold ${
-                            o.status === 'PAID'
-                              ? 'bg-amber-100 text-amber-800'
-                              : o.status === 'SHIPPED'
-                                ? 'bg-blue-100 text-blue-800'
-                                : o.status === 'REFUNDED'
-                                  ? 'bg-purple-100 text-purple-800'
-                                  : 'bg-slate-100 text-slate-800'
-                          }`}
+                        <Badge
+                          variant="outline"
+                          className={
+                            o.status === "PAID"
+                              ? "bg-amber-100 text-amber-800 border-amber-200"
+                              : o.status === "SHIPPED"
+                                ? "bg-blue-100 text-blue-800 border-blue-200"
+                                : o.status === "REFUNDED"
+                                  ? "bg-purple-100 text-purple-800 border-purple-200"
+                                  : "bg-slate-100 text-slate-800 border-slate-200"
+                          }
                         >
-                          {o.status === 'PAID' && '待发货'}
-                          {o.status === 'SHIPPED' && '已发货'}
-                          {o.status === 'REFUNDED' && '已退款'}
-                          {!['PAID', 'SHIPPED', 'REFUNDED'].includes(o.status) && o.status}
-                        </span>
+                          {o.status === "PAID" && "待发货"}
+                          {o.status === "SHIPPED" && "已发货"}
+                          {o.status === "REFUNDED" && "已退款"}
+                          {!["PAID", "SHIPPED", "REFUNDED"].includes(
+                            o.status,
+                          ) && o.status}
+                        </Badge>
                       </td>
-                      <td className="p-3.5 font-bold text-slate-900">¥{Number(o.total_amount).toFixed(2)}</td>
+                      <td className="p-3.5 font-bold text-slate-900">
+                        ¥{Number(o.total_amount).toFixed(2)}
+                      </td>
                       <td className="p-3.5">
-                        <div className="font-medium text-slate-800">{o.shipping_address?.recipientName || '张伟'}</div>
-                        <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '13800138000'}</div>
+                        <div className="font-medium text-slate-800">
+                          {o.shipping_address?.recipientName || "张伟"}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          {o.shipping_address?.phone || "13800138000"}
+                        </div>
                       </td>
                       <td className="p-3.5 max-w-xs">
-                        <span className="text-slate-800 line-clamp-2" title={o.shipping_address?.fullAddress}>
+                        <span
+                          className="text-slate-800 line-clamp-2"
+                          title={o.shipping_address?.fullAddress}
+                        >
                           {o.shipping_address?.fullAddress}
                         </span>
                       </td>
                       <td className="p-3.5">
                         {o.tracking_info ? (
                           <span className="text-blue-600 font-mono text-[11px]">
-                            {o.tracking_info.carrier} {o.tracking_info.trackingNumber}
+                            {o.tracking_info.carrier}{" "}
+                            {o.tracking_info.trackingNumber}
                           </span>
                         ) : (
                           <span className="text-slate-400 italic">未发货</span>
                         )}
                       </td>
                       <td className="p-3.5 text-right">
-                        {o.status === 'PAID' ? (
-                          <button
+                        {o.status === "PAID" ? (
+                          <Button
                             type="button"
+                            size="sm"
                             onClick={() => {
                               setShippingOrderId(o.order_id);
-                              setTrackingNumberInput(`SF${Math.floor(10000000000 + Math.random() * 90000000000)}`);
+                              setTrackingNumberInput(
+                                `SF${Math.floor(10000000000 + Math.random() * 90000000000)}`,
+                              );
                             }}
-                            className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 transition font-medium cursor-pointer"
+                            className="bg-blue-600 text-white hover:bg-blue-500 h-7 text-xs font-medium"
                           >
                             一键发货
-                          </button>
+                          </Button>
                         ) : (
-                          <span className="text-slate-400 text-[11px]">不可操作</span>
+                          <span className="text-slate-400 text-[11px]">
+                            不可操作
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -618,7 +701,7 @@ export default function MerchantAdminPage() {
         )}
 
         {/* Tab 2: 待办审核中心 (HITL) */}
-        {activeTab === 'approvals' && (
+        {activeTab === "approvals" && (
           <div className="space-y-4">
             <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -633,20 +716,25 @@ export default function MerchantAdminPage() {
                   </p>
                 </div>
               </div>
-              <button
+              <Button
                 type="button"
+                size="sm"
                 onClick={fetchDashboardData}
-                className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 transition cursor-pointer shrink-0"
+                className="bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 shrink-0 h-8"
               >
                 刷新工单
-              </button>
+              </Button>
             </div>
 
             {approvals.length === 0 ? (
               <div className="bg-white rounded-xl border border-slate-200 p-12 text-center space-y-3 shadow-2xs">
                 <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
-                <h4 className="text-sm font-bold text-slate-800">当前大盘一片绿灯</h4>
-                <p className="text-xs text-slate-400">暂无待审核任务。当顾客在商城发起超阈值退款时将在此展示。</p>
+                <h4 className="text-sm font-bold text-slate-800">
+                  当前大盘一片绿灯
+                </h4>
+                <p className="text-xs text-slate-400">
+                  暂无待审核任务。当顾客在商城发起超阈值退款时将在此展示。
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -654,7 +742,7 @@ export default function MerchantAdminPage() {
                   <PendingApprovalCard
                     key={approval.id}
                     approval={approval as any}
-                    rejectionReason={rejectionReasons[approval.id] || ''}
+                    rejectionReason={rejectionReasons[approval.id] || ""}
                     setRejectionReason={(val) =>
                       setRejectionReasons((prev) => ({
                         ...prev,
@@ -662,11 +750,11 @@ export default function MerchantAdminPage() {
                       }))
                     }
                     isSubmitting={submittingActionId === approval.id}
-                    onApprove={(id) => handleApprovalAction(id, 'approve')}
-                    onReject={(id) => handleApprovalAction(id, 'reject')}
+                    onApprove={(id) => handleApprovalAction(id, "approve")}
+                    onReject={(id) => handleApprovalAction(id, "reject")}
                     onOpenChat={() => {
                       setActiveThreadId(approval.threadId);
-                      setActiveTab('live_desk');
+                      setActiveTab("live_desk");
                     }}
                     onInspect={() => setInspectingApproval(approval)}
                   />
@@ -677,14 +765,18 @@ export default function MerchantAdminPage() {
         )}
 
         {/* Tab 3: 在线客服工作台 (Live Desk Takeover) */}
-        {activeTab === 'live_desk' && (
+        {activeTab === "live_desk" && (
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col md:flex-row h-[700px]">
             {/* 左侧会话列表 */}
             <div className="w-full md:w-80 border-r border-slate-200 flex flex-col bg-slate-50">
               <div className="p-3.5 border-b border-slate-200 bg-white flex items-center justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900">💬 客服会话队列</h3>
-                  <span className="text-[10px] text-slate-500">商户专属客户会话实时接入</span>
+                  <h3 className="text-xs font-bold text-slate-900">
+                    💬 客服会话队列
+                  </h3>
+                  <span className="text-[10px] text-slate-500">
+                    商户专属客户会话实时接入
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -697,12 +789,14 @@ export default function MerchantAdminPage() {
 
               <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
                 {conversations.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-400">暂无会话记录</div>
+                  <div className="p-8 text-center text-xs text-slate-400">
+                    暂无会话记录
+                  </div>
                 ) : (
                   conversations.map((c) => {
                     const threadId = c.threadId || c.id;
                     const isSelected = activeThreadId === threadId;
-                    const isTakeover = c.status === 'human_takeover';
+                    const isTakeover = c.status === "human_takeover";
                     return (
                       <div
                         key={threadId}
@@ -711,29 +805,39 @@ export default function MerchantAdminPage() {
                           loadConversationMessages(threadId);
                         }}
                         className={`p-3.5 cursor-pointer transition flex flex-col space-y-1.5 ${
-                          isSelected ? 'bg-blue-50/80 border-l-4 border-blue-600' : 'hover:bg-slate-100/70'
+                          isSelected
+                            ? "bg-blue-50/80 border-l-4 border-blue-600"
+                            : "hover:bg-slate-100/70"
                         }`}
                       >
                         <div className="flex items-center justify-between">
                           <span className="font-semibold text-xs text-slate-900 truncate">
-                            {c.userId || '顾客 CUST-8801'}
+                            {c.userId || "顾客 CUST-8801"}
                           </span>
                           <span
                             className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
-                              isTakeover ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                              isTakeover
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-emerald-100 text-emerald-800"
                             }`}
                           >
-                            {isTakeover ? '👨‍💼 人工接管中' : '🤖 AI 托管中'}
+                            {isTakeover ? "👨‍💼 人工接管中" : "🤖 AI 托管中"}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-500 truncate font-mono">{threadId}</p>
+                        <p className="text-[11px] text-slate-500 truncate font-mono">
+                          {threadId}
+                        </p>
                         {c.lastMessage && (
                           <p className="text-[11px] text-slate-600 truncate bg-slate-100/80 px-2 py-0.5 rounded">
                             {c.lastMessage}
                           </p>
                         )}
                         <div className="text-[10px] text-slate-400 flex justify-between">
-                          <span>{new Date(c.updatedAt || c.createdAt).toLocaleTimeString()}</span>
+                          <span>
+                            {new Date(
+                              c.updatedAt || c.createdAt,
+                            ).toLocaleTimeString()}
+                          </span>
                         </div>
                       </div>
                     );
@@ -750,7 +854,9 @@ export default function MerchantAdminPage() {
                   <div className="p-3.5 bg-white border-b border-slate-200 flex items-center justify-between">
                     <div>
                       <div className="flex items-center space-x-2">
-                        <span className="font-bold text-xs text-slate-900">会话: {activeThreadId}</span>
+                        <span className="font-bold text-xs text-slate-900">
+                          会话: {activeThreadId}
+                        </span>
                         <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
                           Tenant: aurora
                         </span>
@@ -761,31 +867,38 @@ export default function MerchantAdminPage() {
                     </div>
 
                     <div className="flex items-center space-x-2">
-                      <button
+                      <Button
                         type="button"
+                        size="sm"
                         onClick={() => handleTakeover(activeThreadId)}
                         disabled={isTakingOver}
-                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs flex items-center space-x-1"
+                        className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold h-8"
                       >
                         <span>🚨 主动接管会话</span>
-                      </button>
+                      </Button>
                     </div>
                   </div>
 
                   {/* 消息流 */}
                   <div className="flex-1 p-4 overflow-y-auto space-y-3">
                     {activeThreadMessages.length === 0 ? (
-                      <div className="p-12 text-center text-xs text-slate-400">正在等待消息流接入...</div>
+                      <div className="p-12 text-center text-xs text-slate-400">
+                        正在等待消息流接入...
+                      </div>
                     ) : (
                       activeThreadMessages.map((msg, idx) => {
-                        const isUser = msg.role === 'user';
-                        const isSystem = msg.role === 'system';
+                        const isUser = msg.role === "user";
+                        const isSystem = msg.role === "system";
                         const isOperator =
-                          msg.content?.startsWith('[人工客服]') || msg.content?.startsWith('[商户客服]');
+                          msg.content?.startsWith("[人工客服]") ||
+                          msg.content?.startsWith("[商户客服]");
 
                         if (isSystem) {
                           return (
-                            <div key={msg.id || idx} className="text-center my-2">
+                            <div
+                              key={msg.id || idx}
+                              className="text-center my-2"
+                            >
                               <span className="text-[10px] bg-slate-200/80 text-slate-600 px-3 py-1 rounded-full font-medium">
                                 {msg.content}
                               </span>
@@ -794,28 +907,38 @@ export default function MerchantAdminPage() {
                         }
 
                         return (
-                          <div key={msg.id || idx} className={`flex flex-col ${isUser ? 'items-start' : 'items-end'}`}>
+                          <div
+                            key={msg.id || idx}
+                            className={`flex flex-col ${isUser ? "items-start" : "items-end"}`}
+                          >
                             <span className="text-[10px] text-slate-400 mb-1 px-1">
-                              {isUser ? '👤 顾客' : isOperator ? '👨‍💼 商户客服' : '🤖 AI 助手'} ·{' '}
-                              {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
+                              {isUser
+                                ? "👤 顾客"
+                                : isOperator
+                                  ? "👨‍💼 商户客服"
+                                  : "🤖 AI 助手"}{" "}
+                              ·{" "}
+                              {msg.timestamp
+                                ? new Date(msg.timestamp).toLocaleTimeString()
+                                : ""}
                             </span>
                             <div
                               className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs shadow-2xs leading-relaxed ${
                                 isUser
-                                  ? 'bg-white text-slate-800 border border-slate-200'
+                                  ? "bg-white text-slate-800 border border-slate-200"
                                   : isOperator
-                                    ? 'bg-amber-600 text-white font-medium'
-                                    : 'bg-emerald-600 text-white'
+                                    ? "bg-amber-600 text-white font-medium"
+                                    : "bg-emerald-600 text-white"
                               }`}
                             >
-                              <div className="whitespace-pre-wrap">{msg.content}</div>
+                              <div className="whitespace-pre-wrap">
+                                {msg.content}
+                              </div>
 
                               {/* 卡片渲染 */}
                               {msg.cards && msg.cards.length > 0 && (
                                 <div className="mt-2 pt-2 border-t border-white/20 space-y-2">
-                                  {msg.cards.map((c, cIdx) => (
-                                    <RichCardRenderer key={cIdx} card={c} />
-                                  ))}
+                                  <RichCardRenderer cards={msg.cards} />
                                 </div>
                               )}
                             </div>
@@ -828,27 +951,28 @@ export default function MerchantAdminPage() {
 
                   {/* 输入框 Footer */}
                   <div className="p-3 bg-white border-t border-slate-200 flex items-center space-x-2">
-                    <input
+                    <Input
                       type="text"
                       value={inputMessage}
                       onChange={(e) => setInputMessage(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();
                           handleSendMessage();
                         }
                       }}
                       placeholder="以商户客服身份发送消息并直接与顾客沟通..."
-                      className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      className="text-xs h-9 bg-white"
                     />
-                    <button
+                    <Button
                       type="button"
+                      size="sm"
                       onClick={handleSendMessage}
                       disabled={!inputMessage.trim()}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs"
+                      className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white text-xs font-semibold h-9 px-4"
                     >
                       发送
-                    </button>
+                    </Button>
                   </div>
                 </>
               ) : (
@@ -861,33 +985,45 @@ export default function MerchantAdminPage() {
         )}
 
         {/* Tab 4: SPU 商品库 */}
-        {activeTab === 'spus' && (
+        {activeTab === "spus" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {spus.map((spu) => (
-              <div key={spu.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3">
+              <div
+                key={spu.id}
+                className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3"
+              >
                 <div className="flex items-start justify-between">
                   <div>
                     <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
                       {spu.spu_code}
                     </span>
-                    <h4 className="font-bold text-slate-900 text-sm mt-1">{spu.title}</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">{spu.subtitle}</p>
+                    <h4 className="font-bold text-slate-900 text-sm mt-1">
+                      {spu.title}
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {spu.subtitle}
+                    </p>
                   </div>
-                  <span className="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold">
+                  <Badge
+                    variant="outline"
+                    className="text-xs bg-emerald-100 text-emerald-800 border-emerald-200 font-semibold"
+                  >
                     {spu.category}
-                  </span>
+                  </Badge>
                 </div>
 
                 {/* 规格维度 */}
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
-                  <span className="text-[11px] font-bold text-slate-700 block">📐 规格维度矩阵 (Dimensions)</span>
+                  <span className="text-[11px] font-bold text-slate-700 block">
+                    📐 规格维度矩阵 (Dimensions)
+                  </span>
                   <div className="flex flex-wrap gap-2 pt-1">
                     {spu.spec_dimensions?.map((dim) => (
                       <span
                         key={dim.name}
                         className="text-xs bg-white text-slate-700 px-2 py-1 rounded border border-slate-200"
                       >
-                        <strong>{dim.name}:</strong> {dim.values.join(' / ')}
+                        <strong>{dim.name}:</strong> {dim.values.join(" / ")}
                       </span>
                     ))}
                   </div>
@@ -895,7 +1031,9 @@ export default function MerchantAdminPage() {
 
                 {/* 参数 Specs */}
                 <div className="text-xs space-y-1 border-t border-slate-100 pt-2">
-                  <span className="font-semibold text-slate-700">🔬 材质与技术参数:</span>
+                  <span className="font-semibold text-slate-700">
+                    🔬 材质与技术参数:
+                  </span>
                   <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600">
                     {Object.entries(spu.specs || {}).map(([k, v]) => (
                       <div key={k}>
@@ -910,7 +1048,7 @@ export default function MerchantAdminPage() {
         )}
 
         {/* Tab 5: SKU 规格库存管理 */}
-        {activeTab === 'skus' && (
+        {activeTab === "skus" && (
           <div className="bg-white rounded-b-xl border border-slate-200 shadow-2xs overflow-hidden">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
@@ -925,24 +1063,37 @@ export default function MerchantAdminPage() {
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {skus.map((item) => (
-                  <tr key={item.sku_code} className="hover:bg-slate-50/80 transition">
-                    <td className="p-3.5 font-mono text-slate-600 font-semibold">{item.sku_code}</td>
-                    <td className="p-3.5 font-bold text-slate-900">{item.sku_title}</td>
+                  <tr
+                    key={item.sku_code}
+                    className="hover:bg-slate-50/80 transition"
+                  >
+                    <td className="p-3.5 font-mono text-slate-600 font-semibold">
+                      {item.sku_code}
+                    </td>
+                    <td className="p-3.5 font-bold text-slate-900">
+                      {item.sku_title}
+                    </td>
                     <td className="p-3.5 text-slate-500">{item.spu_title}</td>
                     <td className="p-3.5">
                       <div className="flex flex-wrap gap-1">
-                        {Object.entries(item.spec_attributes || {}).map(([k, v]) => (
-                          <span
-                            key={k}
-                            className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200"
-                          >
-                            {k}: {v}
-                          </span>
-                        ))}
+                        {Object.entries(item.spec_attributes || {}).map(
+                          ([k, v]) => (
+                            <span
+                              key={k}
+                              className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200"
+                            >
+                              {k}: {v}
+                            </span>
+                          ),
+                        )}
                       </div>
                     </td>
-                    <td className="p-3.5 font-extrabold text-emerald-600">¥{Number(item.price).toFixed(2)}</td>
-                    <td className="p-3.5 font-semibold text-slate-800">{item.stock} 件</td>
+                    <td className="p-3.5 font-extrabold text-emerald-600">
+                      ¥{Number(item.price).toFixed(2)}
+                    </td>
+                    <td className="p-3.5 font-semibold text-slate-800">
+                      {item.stock} 件
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -951,24 +1102,34 @@ export default function MerchantAdminPage() {
         )}
 
         {/* Tab 6: AI 客服对接配置与 SPI 审计流水 */}
-        {activeTab === 'spi_logs' && (
+        {activeTab === "spi_logs" && (
           <div className="space-y-6">
             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-bold text-slate-900">🔌 商户 SPI 开放接入参数 (Aurora SPI Specs)</h3>
+                <h3 className="text-sm font-bold text-slate-900">
+                  🔌 商户 SPI 开放接入参数 (Aurora SPI Specs)
+                </h3>
                 <span className="text-xs bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded font-medium">
                   在线就绪 (Ready)
                 </span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                  <div className="text-slate-500 font-medium">SPI 基础服务 URL (spiBaseUrl)</div>
-                  <div className="font-mono text-slate-900 font-bold mt-1">http://localhost:3005</div>
+                  <div className="text-slate-500 font-medium">
+                    SPI 基础服务 URL (spiBaseUrl)
+                  </div>
+                  <div className="font-mono text-slate-900 font-bold mt-1">
+                    http://localhost:3005
+                  </div>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                  <div className="text-slate-500 font-medium">API 签名密钥 (HMAC-SHA256 Secret)</div>
-                  <div className="font-mono text-slate-900 font-bold mt-1">aurora_secret_key_8899</div>
+                  <div className="text-slate-500 font-medium">
+                    API 签名密钥 (HMAC-SHA256 Secret)
+                  </div>
+                  <div className="font-mono text-slate-900 font-bold mt-1">
+                    aurora_secret_key_8899
+                  </div>
                 </div>
               </div>
             </div>
@@ -976,14 +1137,18 @@ export default function MerchantAdminPage() {
             <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
               <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-900">
-                  📥 来自 Agent 平台的实时 SPI 调度审计流水 (merchant_audit_logs)
+                  📥 来自 Agent 平台的实时 SPI 调度审计流水
+                  (merchant_audit_logs)
                 </span>
-                <span className="text-xs text-slate-500">物理落盘于商户独立数据库，自动记录幂等防重 Token 与签名</span>
+                <span className="text-xs text-slate-500">
+                  物理落盘于商户独立数据库，自动记录幂等防重 Token 与签名
+                </span>
               </div>
 
               {auditLogs.length === 0 ? (
                 <div className="p-12 text-center text-slate-400 text-xs">
-                  暂无 SPI 变更记录。请在商城前台拉起 AI 客服发起改地址或退款进行测试！
+                  暂无 SPI 变更记录。请在商城前台拉起 AI
+                  客服发起改地址或退款进行测试！
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -1000,26 +1165,40 @@ export default function MerchantAdminPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
                       {auditLogs.map((log) => (
-                        <tr key={log.id} className="hover:bg-slate-50/80 transition">
-                          <td className="p-3.5 font-mono text-slate-900">{log.id.slice(0, 8)}...</td>
-                          <td className="p-3.5 font-semibold text-slate-800">{log.order_id}</td>
+                        <tr
+                          key={log.id}
+                          className="hover:bg-slate-50/80 transition"
+                        >
+                          <td className="p-3.5 font-mono text-slate-900">
+                            {log.id.slice(0, 8)}...
+                          </td>
+                          <td className="p-3.5 font-semibold text-slate-800">
+                            {log.order_id}
+                          </td>
                           <td className="p-3.5">
-                            <span className="px-2 py-0.5 rounded-full font-bold bg-blue-100 text-blue-800">
+                            <Badge
+                              variant="outline"
+                              className="bg-blue-100 text-blue-800 border-blue-200 font-bold"
+                            >
                               {log.action_type}
-                            </span>
+                            </Badge>
                           </td>
                           <td className="p-3.5 font-mono text-[11px] text-slate-500">
                             {log.idempotency_key?.slice(0, 16)}...
                           </td>
-                          <td className="p-3.5 text-slate-500">{new Date(log.created_at).toLocaleTimeString()}</td>
+                          <td className="p-3.5 text-slate-500">
+                            {new Date(log.created_at).toLocaleTimeString()}
+                          </td>
                           <td className="p-3.5 text-right">
-                            <button
+                            <Button
                               type="button"
+                              variant="secondary"
+                              size="sm"
                               onClick={() => setSelectedLog(log)}
-                              className="px-2.5 py-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded font-medium transition cursor-pointer"
+                              className="text-xs h-7 px-2.5 font-medium bg-slate-100 hover:bg-slate-200 text-slate-700"
                             >
                               查看 Payload
-                            </button>
+                            </Button>
                           </td>
                         </tr>
                       ))}
@@ -1038,13 +1217,13 @@ export default function MerchantAdminPage() {
         onClose={() => setInspectingApproval(null)}
         approval={inspectingApproval as any}
         onApprove={async (id) => {
-          await handleApprovalAction(id, 'approve');
+          await handleApprovalAction(id, "approve");
         }}
         onReject={async (id, reason) => {
           if (reason) {
             setRejectionReasons((prev) => ({ ...prev, [id]: reason }));
           }
-          await handleApprovalAction(id, 'reject');
+          await handleApprovalAction(id, "reject");
         }}
         onHumanReply={async (id, replyMsg, isFinish) => {
           await handleHumanReply(id, replyMsg, isFinish);
@@ -1052,90 +1231,104 @@ export default function MerchantAdminPage() {
       />
 
       {/* 发货弹窗 */}
-      {shippingOrderId && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-sm w-full p-5 shadow-xl border border-slate-200">
-            <h3 className="text-base font-bold text-slate-900 mb-3">订单一键发货</h3>
-            <p className="text-xs text-slate-500 mb-4">订单号: {shippingOrderId}</p>
+      <Dialog
+        open={Boolean(shippingOrderId)}
+        onOpenChange={(open) => !open && setShippingOrderId(null)}
+      >
+        <DialogContent className="max-w-sm p-5">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-slate-900">
+              订单一键发货
+            </DialogTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              订单号: {shippingOrderId}
+            </p>
+          </DialogHeader>
 
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">承运快递公司</label>
-                <select
-                  value={carrierInput}
-                  onChange={(e) => setCarrierInput(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white"
-                >
-                  <option value="SF">顺丰速运 (SF Express)</option>
-                  <option value="JD">京东快递 (JD Logistics)</option>
-                  <option value="ZTO">中通快递 (ZTO)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">快递运单号</label>
-                <input
-                  type="text"
-                  value={trackingNumberInput}
-                  onChange={(e) => setTrackingNumberInput(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-blue-500"
-                />
-              </div>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                承运快递公司
+              </label>
+              <select
+                value={carrierInput}
+                onChange={(e) => setCarrierInput(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="SF">顺丰速运 (SF Express)</option>
+                <option value="JD">京东快递 (JD Logistics)</option>
+                <option value="ZTO">中通快递 (ZTO)</option>
+              </select>
             </div>
 
-            <div className="mt-5 flex justify-end space-x-2">
-              <button
-                type="button"
-                onClick={() => setShippingOrderId(null)}
-                className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => handleShipOrder(shippingOrderId)}
-                className="px-4 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-500 cursor-pointer"
-              >
-                确认发货并锁定地址
-              </button>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                快递运单号
+              </label>
+              <Input
+                type="text"
+                value={trackingNumberInput}
+                onChange={(e) => setTrackingNumberInput(e.target.value)}
+                className="text-xs h-9 bg-white"
+                placeholder="请输入运单号..."
+              />
             </div>
           </div>
-        </div>
-      )}
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShippingOrderId(null)}
+              className="text-xs"
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() =>
+                shippingOrderId && handleShipOrder(shippingOrderId)
+              }
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold"
+            >
+              确认发货并锁定地址
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 报文查看抽屉 */}
-      {selectedLog && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full p-5 shadow-xl border border-slate-200">
-            <div className="flex justify-between items-center pb-3 border-b border-slate-100">
-              <h3 className="text-sm font-bold text-slate-900">SPI 调用结果 Payload</h3>
-              <button
-                type="button"
-                onClick={() => setSelectedLog(null)}
-                className="text-slate-400 hover:text-slate-600 text-lg font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
+      <Dialog
+        open={Boolean(selectedLog)}
+        onOpenChange={(open) => !open && setSelectedLog(null)}
+      >
+        <DialogContent className="max-w-lg p-5">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold text-slate-900">
+              SPI 调用结果 Payload
+            </DialogTitle>
+          </DialogHeader>
 
-            <div className="py-3">
-              <pre className="bg-slate-900 text-emerald-400 p-3 rounded-lg text-xs overflow-x-auto max-h-64 font-mono">
-                {JSON.stringify(selectedLog.payload, null, 2)}
-              </pre>
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setSelectedLog(null)}
-                className="px-4 py-1.5 text-xs font-semibold bg-slate-900 text-white rounded-lg cursor-pointer"
-              >
-                关闭
-              </button>
-            </div>
+          <div className="py-2">
+            <pre className="bg-slate-900 text-emerald-400 p-3 rounded-lg text-xs overflow-x-auto max-h-64 font-mono">
+              {JSON.stringify(selectedLog?.payload, null, 2)}
+            </pre>
           </div>
-        </div>
-      )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setSelectedLog(null)}
+              className="bg-slate-900 text-white text-xs font-semibold"
+            >
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

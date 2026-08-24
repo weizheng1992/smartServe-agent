@@ -1,6 +1,6 @@
-import type React from 'react';
-import { Combobox } from 'ui';
-import { useAdminTenantStore } from '../../store/tenantStore';
+import type React from "react";
+import { Combobox, Input, Button } from "ui";
+import { useAdminTenantStore } from "../../store/tenantStore";
 
 export interface FilterOption {
   label: string;
@@ -25,7 +25,7 @@ export interface FilterBarProps {
 export function FilterBar({
   searchQuery,
   onSearchChange,
-  searchPlaceholder = '输入关键字搜索...',
+  searchPlaceholder = "输入关键字搜索...",
   statusFilter,
   onStatusChange,
   statusOptions,
@@ -36,8 +36,10 @@ export function FilterBar({
   extraFilters,
   actions,
 }: FilterBarProps) {
-  const { selectedTenantId, setSelectedTenantId, tenants } = useAdminTenantStore();
-  const activeTenant = tenantFilter !== undefined ? tenantFilter : selectedTenantId;
+  const { selectedTenantId, setSelectedTenantId, tenants } =
+    useAdminTenantStore();
+  const activeTenant =
+    tenantFilter !== undefined ? tenantFilter : selectedTenantId;
   const handleTenantSelect = (val: string) => {
     if (onTenantChange) {
       onTenantChange(val);
@@ -65,12 +67,12 @@ export function FilterBar({
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
               />
             </svg>
-            <input
+            <Input
               type="text"
-              value={searchQuery ?? ''}
+              value={searchQuery ?? ""}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:border-slate-400 transition-colors"
+              className="w-full pl-9 pr-3 h-8 text-xs bg-slate-50 border-slate-200 text-slate-700 placeholder-slate-400 focus:bg-white transition-colors"
             />
           </div>
         )}
@@ -80,9 +82,9 @@ export function FilterBar({
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <span>状态:</span>
             <select
-              value={statusFilter ?? ''}
+              value={statusFilter ?? ""}
               onChange={(e) => onStatusChange(e.target.value)}
-              className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-hidden focus:border-slate-400 transition-colors"
+              className="h-8 px-2.5 text-xs bg-slate-50 border border-slate-200 rounded-md text-slate-700 focus:outline-hidden focus:border-slate-400 transition-colors"
             >
               <option value="">全部状态</option>
               {statusOptions.map((opt) => (
@@ -108,20 +110,22 @@ export function FilterBar({
               badge: t.id,
               badgeColor: t.badgeColor,
             }))}
-            triggerClassName="h-7 text-xs"
+            triggerClassName="h-8 text-xs"
           />
         )}
 
         {extraFilters}
 
         {onReset && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={onReset}
-            className="px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+            className="h-8 px-2.5 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100"
           >
             重置筛选
-          </button>
+          </Button>
         )}
       </div>
 
