@@ -1,17 +1,9 @@
-"use client";
+'use client';
 
-import type React from "react";
-import { useState } from "react";
-import type { ThirdPartyOrder } from "types";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Button,
-  Badge,
-} from "ui";
+import type React from 'react';
+import { useState } from 'react';
+import type { ThirdPartyOrder } from 'types';
+import { Badge, Button, Dialog, DialogContent, DialogHeader, DialogTitle, Input } from 'ui';
 
 interface OrdersListModalProps {
   isOpen: boolean;
@@ -36,14 +28,14 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
   onFilterStatus,
   currentStatus,
 }) => {
-  const [searchKeyword, setSearchKeyword] = useState("");
+  const [searchKeyword, setSearchKeyword] = useState('');
 
   const tabs = [
-    { key: "ALL", label: "全部订单" },
-    { key: "PAID", label: "待发货" },
-    { key: "SHIPPED", label: "已发货" },
-    { key: "DELIVERED", label: "已完成" },
-    { key: "REFUNDED", label: "已退款" },
+    { key: 'ALL', label: '全部订单' },
+    { key: 'PAID', label: '待发货' },
+    { key: 'SHIPPED', label: '已发货' },
+    { key: 'DELIVERED', label: '已完成' },
+    { key: 'REFUNDED', label: '已退款' },
   ];
 
   const filteredOrders = orders.filter((o) => {
@@ -53,38 +45,37 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
       o.orderId.toLowerCase().includes(kw) ||
       o.items.some(
         (item) =>
-          item.title.toLowerCase().includes(kw) ||
-          (item.specSummary && item.specSummary.toLowerCase().includes(kw)),
+          item.title.toLowerCase().includes(kw) || (item.specSummary && item.specSummary.toLowerCase().includes(kw)),
       )
     );
   });
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "PAID":
+      case 'PAID':
         return {
-          label: "待发货",
-          color: "bg-blue-100 text-blue-800 border-blue-200",
+          label: '待发货',
+          color: 'bg-blue-100 text-blue-800 border-blue-200',
         };
-      case "SHIPPED":
+      case 'SHIPPED':
         return {
-          label: "已发货",
-          color: "bg-emerald-100 text-emerald-800 border-emerald-200",
+          label: '已发货',
+          color: 'bg-emerald-100 text-emerald-800 border-emerald-200',
         };
-      case "DELIVERED":
+      case 'DELIVERED':
         return {
-          label: "已完成",
-          color: "bg-slate-100 text-slate-800 border-slate-200",
+          label: '已完成',
+          color: 'bg-slate-100 text-slate-800 border-slate-200',
         };
-      case "REFUNDED":
+      case 'REFUNDED':
         return {
-          label: "已退款",
-          color: "bg-purple-100 text-purple-800 border-purple-200",
+          label: '已退款',
+          color: 'bg-purple-100 text-purple-800 border-purple-200',
         };
       default:
         return {
           label: status,
-          color: "bg-slate-100 text-slate-800 border-slate-200",
+          color: 'bg-slate-100 text-slate-800 border-slate-200',
         };
     }
   };
@@ -97,12 +88,8 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
           <DialogTitle className="flex items-center space-x-2 text-base font-bold text-slate-900">
             <span className="text-xl">📋</span>
             <div>
-              <div className="text-base font-bold text-slate-900">
-                我的订单中心
-              </div>
-              <p className="text-xs font-normal text-slate-500">
-                顾客账户: CUST-8801 (张伟)
-              </p>
+              <div className="text-base font-bold text-slate-900">我的订单中心</div>
+              <p className="text-xs font-normal text-slate-500">顾客账户: CUST-8801 (张伟)</p>
             </div>
           </DialogTitle>
         </DialogHeader>
@@ -119,8 +106,8 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
                   onClick={() => onFilterStatus(tab.key)}
                   className={`px-3 py-2 text-xs font-semibold whitespace-nowrap border-b-2 transition cursor-pointer ${
                     active
-                      ? "border-emerald-600 text-emerald-700"
-                      : "border-transparent text-slate-500 hover:text-slate-800"
+                      ? 'border-emerald-600 text-emerald-700'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
                 >
                   {tab.label}
@@ -137,32 +124,23 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
               placeholder="输入订单编号或商品名称快速搜索..."
               className="text-xs pl-8 bg-slate-50 focus:bg-white h-9"
             />
-            <span className="absolute left-2.5 top-2.5 text-slate-400 text-xs">
-              🔍
-            </span>
+            <span className="absolute left-2.5 top-2.5 text-slate-400 text-xs">🔍</span>
           </div>
         </div>
 
         {/* 订单卡片列表 */}
         <div className="flex-1 overflow-y-auto py-2 space-y-3.5 pr-1">
           {loading ? (
-            <div className="py-16 text-center text-slate-400 text-xs">
-              正在加载订单列表...
-            </div>
+            <div className="py-16 text-center text-slate-400 text-xs">正在加载订单列表...</div>
           ) : filteredOrders.length === 0 ? (
             <div className="py-16 text-center text-slate-400">
               <div className="text-4xl mb-2">📦</div>
-              <p className="text-xs font-medium text-slate-600">
-                暂无相关订单记录
-              </p>
+              <p className="text-xs font-medium text-slate-600">暂无相关订单记录</p>
             </div>
           ) : (
             filteredOrders.map((order) => {
               const badge = getStatusBadge(order.status);
-              const itemsCount = order.items.reduce(
-                (s, i) => s + i.quantity,
-                0,
-              );
+              const itemsCount = order.items.reduce((s, i) => s + i.quantity, 0);
 
               return (
                 <div
@@ -172,18 +150,13 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
                   {/* 订单 Header */}
                   <div className="flex items-center justify-between text-xs pb-2.5 border-b border-slate-100">
                     <div className="flex items-center space-x-2">
-                      <span className="font-mono font-bold text-slate-900">
-                        {order.orderId}
-                      </span>
+                      <span className="font-mono font-bold text-slate-900">{order.orderId}</span>
                       <span className="text-[11px] text-slate-400">
                         {new Date(order.createdAt).toLocaleDateString()}
                       </span>
                     </div>
 
-                    <Badge
-                      variant="outline"
-                      className={`text-[11px] font-bold ${badge.color}`}
-                    >
+                    <Badge variant="outline" className={`text-[11px] font-bold ${badge.color}`}>
                       {badge.label}
                     </Badge>
                   </div>
@@ -191,10 +164,7 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
                   {/* 商品列表 */}
                   <div className="space-y-2">
                     {order.items.map((item, idx) => (
-                      <div
-                        key={(item.skuId || item.title || "") + idx}
-                        className="flex items-center gap-3"
-                      >
+                      <div key={(item.skuId || item.title || '') + idx} className="flex items-center gap-3">
                         {item.imageUrl ? (
                           <img
                             src={item.imageUrl}
@@ -208,23 +178,15 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
                         )}
 
                         <div className="flex-1 min-w-0">
-                          <h4 className="text-xs font-semibold text-slate-900 truncate">
-                            {item.title}
-                          </h4>
+                          <h4 className="text-xs font-semibold text-slate-900 truncate">{item.title}</h4>
                           {item.specSummary && (
-                            <p className="text-[11px] text-slate-500 truncate">
-                              {item.specSummary}
-                            </p>
+                            <p className="text-[11px] text-slate-500 truncate">{item.specSummary}</p>
                           )}
                         </div>
 
                         <div className="text-right shrink-0 text-xs">
-                          <div className="font-bold text-slate-900">
-                            ¥{Number(item.price).toFixed(2)}
-                          </div>
-                          <div className="text-[11px] text-slate-400">
-                            × {item.quantity}
-                          </div>
+                          <div className="font-bold text-slate-900">¥{Number(item.price).toFixed(2)}</div>
+                          <div className="text-[11px] text-slate-400">× {item.quantity}</div>
                         </div>
                       </div>
                     ))}
@@ -233,9 +195,7 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
                   {/* 底部结算与动作栏 */}
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                     <div className="text-slate-500">
-                      共{" "}
-                      <strong className="text-slate-800">{itemsCount}</strong>{" "}
-                      件，实付：
+                      共 <strong className="text-slate-800">{itemsCount}</strong> 件，实付：
                       <strong className="text-emerald-700 text-sm font-extrabold ml-1">
                         ¥{Number(order.totalAmount).toFixed(2)}
                       </strong>
@@ -255,7 +215,7 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
                         详情
                       </Button>
 
-                      {order.status === "SHIPPED" && (
+                      {order.status === 'SHIPPED' && (
                         <Button
                           type="button"
                           variant="outline"

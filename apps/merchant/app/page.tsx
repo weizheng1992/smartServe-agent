@@ -1,25 +1,13 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from "react";
-import type { ThirdPartyOrder, ThirdPartyProduct, ThirdPartySku } from "types";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  Button,
-  Input,
-  Badge,
-} from "ui";
-import {
-  AddressModal,
-  type CustomerAddress,
-} from "./components/address/AddressModal";
-import { CartDrawer, type CartItem } from "./components/cart/CartDrawer";
-import { LogisticsModal } from "./components/orders/LogisticsModal";
-import { OrderDetailModal } from "./components/orders/OrderDetailModal";
-import { OrdersListModal } from "./components/orders/OrdersListModal";
+import React, { useEffect, useState } from 'react';
+import type { ThirdPartyOrder, ThirdPartyProduct, ThirdPartySku } from 'types';
+import { Badge, Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input } from 'ui';
+import { AddressModal, type CustomerAddress } from './components/address/AddressModal';
+import { CartDrawer, type CartItem } from './components/cart/CartDrawer';
+import { LogisticsModal } from './components/orders/LogisticsModal';
+import { OrderDetailModal } from './components/orders/OrderDetailModal';
+import { OrdersListModal } from './components/orders/OrdersListModal';
 
 export default function StorefrontPage() {
   // 数据源
@@ -28,7 +16,7 @@ export default function StorefrontPage() {
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [loading, setLoading] = useState(true);
   const [ordersLoading, setOrdersLoading] = useState(false);
-  const [orderFilterStatus, setOrderFilterStatus] = useState("ALL");
+  const [orderFilterStatus, setOrderFilterStatus] = useState('ALL');
 
   // 购物车状态
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -36,43 +24,33 @@ export default function StorefrontPage() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   // 地址状态
-  const [selectedAddress, setSelectedAddress] =
-    useState<CustomerAddress | null>(null);
+  const [selectedAddress, setSelectedAddress] = useState<CustomerAddress | null>(null);
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
 
   // 订单弹窗与物流弹窗
   const [isOrdersListModalOpen, setIsOrdersListModalOpen] = useState(false);
-  const [selectedDetailOrder, setSelectedDetailOrder] =
-    useState<ThirdPartyOrder | null>(null);
+  const [selectedDetailOrder, setSelectedDetailOrder] = useState<ThirdPartyOrder | null>(null);
   const [isOrderDetailModalOpen, setIsOrderDetailModalOpen] = useState(false);
-  const [selectedLogisticsOrder, setSelectedLogisticsOrder] =
-    useState<ThirdPartyOrder | null>(null);
+  const [selectedLogisticsOrder, setSelectedLogisticsOrder] = useState<ThirdPartyOrder | null>(null);
   const [isLogisticsModalOpen, setIsLogisticsModalOpen] = useState(false);
 
   // 选规格购买/加购弹窗
-  const [buyingProduct, setBuyingProduct] = useState<ThirdPartyProduct | null>(
-    null,
-  );
+  const [buyingProduct, setBuyingProduct] = useState<ThirdPartyProduct | null>(null);
   const [selectedSku, setSelectedSku] = useState<ThirdPartySku | null>(null);
-  const [selectedAttrs, setSelectedAttrs] = useState<Record<string, string>>(
-    {},
-  );
+  const [selectedAttrs, setSelectedAttrs] = useState<Record<string, string>>({});
   const [buyQuantity, setBuyQuantity] = useState(1);
-  const [showSpecsModal, setShowSpecsModal] =
-    useState<ThirdPartyProduct | null>(null);
+  const [showSpecsModal, setShowSpecsModal] = useState<ThirdPartyProduct | null>(null);
 
   // 智能客服 Chat
   const [showChatModal, setShowChatModal] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<
-    Array<{ role: "user" | "assistant"; text: string; time: string }>
-  >([
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string; time: string }>>([
     {
-      role: "assistant",
-      text: "您好！我是极光潮品官方智能客服。请问有什么可以帮您？支持多订单查询、极速修改收货地址、售后退换货与物流进度追踪。",
+      role: 'assistant',
+      text: '您好！我是极光潮品官方智能客服。请问有什么可以帮您？支持多订单查询、极速修改收货地址、售后退换货与物流进度追踪。',
       time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
+        hour: '2-digit',
+        minute: '2-digit',
       }),
     },
   ]);
@@ -82,11 +60,11 @@ export default function StorefrontPage() {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const prodRes = await fetch("/api/store/products");
+      const prodRes = await fetch('/api/store/products');
       const prodJson = await prodRes.json();
       if (prodJson.success) setProducts(prodJson.products || []);
     } catch (err) {
-      console.error("Failed to load products:", err);
+      console.error('Failed to load products:', err);
     } finally {
       setLoading(false);
     }
@@ -95,34 +73,32 @@ export default function StorefrontPage() {
   // 获取地址簿
   const fetchAddresses = async () => {
     try {
-      const res = await fetch("/api/store/addresses?customerId=CUST-8801");
+      const res = await fetch('/api/store/addresses?customerId=CUST-8801');
       const data = await res.json();
       if (data.success && data.addresses) {
         setAddresses(data.addresses);
         if (!selectedAddress && data.addresses.length > 0) {
-          const defaultAddr =
-            data.addresses.find((a: CustomerAddress) => a.isDefault) ||
-            data.addresses[0];
+          const defaultAddr = data.addresses.find((a: CustomerAddress) => a.isDefault) || data.addresses[0];
           setSelectedAddress(defaultAddr);
         }
       }
     } catch (err) {
-      console.error("Failed to load addresses:", err);
+      console.error('Failed to load addresses:', err);
     }
   };
 
   // 获取订单列表
-  const fetchOrders = async (status = "ALL") => {
+  const fetchOrders = async (status = 'ALL') => {
     try {
       setOrdersLoading(true);
-      const query = status && status !== "ALL" ? `&status=${status}` : "";
+      const query = status && status !== 'ALL' ? `&status=${status}` : '';
       const res = await fetch(`/api/store/orders?userId=CUST-8801${query}`);
       const data = await res.json();
       if (data.success) {
         setOrders(data.orders || []);
       }
     } catch (err) {
-      console.error("Failed to load orders:", err);
+      console.error('Failed to load orders:', err);
     } finally {
       setOrdersLoading(false);
     }
@@ -131,7 +107,7 @@ export default function StorefrontPage() {
   useEffect(() => {
     fetchProducts();
     fetchAddresses();
-    fetchOrders("ALL");
+    fetchOrders('ALL');
   }, []);
 
   // 打开选规格弹窗
@@ -155,17 +131,13 @@ export default function StorefrontPage() {
     setSelectedAttrs(nextAttrs);
 
     const matched = buyingProduct.skus.find((sku) => {
-      return Object.entries(nextAttrs).every(
-        ([k, v]) => sku.specAttributes[k] === v,
-      );
+      return Object.entries(nextAttrs).every(([k, v]) => sku.specAttributes[k] === v);
     });
 
     if (matched) {
       setSelectedSku(matched);
     } else {
-      const partial = buyingProduct.skus.find(
-        (sku) => sku.specAttributes[dimName] === val,
-      );
+      const partial = buyingProduct.skus.find((sku) => sku.specAttributes[dimName] === val);
       if (partial) {
         setSelectedSku(partial);
         setSelectedAttrs(partial.specAttributes);
@@ -178,9 +150,7 @@ export default function StorefrontPage() {
     if (!buyingProduct || !selectedSku) return;
 
     setCart((prevCart) => {
-      const existingIdx = prevCart.findIndex(
-        (item) => item.skuCode === selectedSku.skuCode,
-      );
+      const existingIdx = prevCart.findIndex((item) => item.skuCode === selectedSku.skuCode);
       if (existingIdx >= 0) {
         const next = [...prevCart];
         const item = next[existingIdx];
@@ -195,7 +165,7 @@ export default function StorefrontPage() {
         skuCode: selectedSku.skuCode,
         title: buyingProduct.title,
         skuTitle: selectedSku.skuTitle,
-        imageUrl: selectedSku.imageUrl || buyingProduct.imageUrl || "",
+        imageUrl: selectedSku.imageUrl || buyingProduct.imageUrl || '',
         price: Number(selectedSku.price),
         quantity: buyQuantity,
         stock: selectedSku.stock,
@@ -214,10 +184,7 @@ export default function StorefrontPage() {
     setCart((prev) =>
       prev.map((item) => {
         if (item.skuCode === skuCode) {
-          const nextQty = Math.max(
-            1,
-            Math.min(item.stock, item.quantity + delta),
-          );
+          const nextQty = Math.max(1, Math.min(item.stock, item.quantity + delta));
           return { ...item, quantity: nextQty };
         }
         return item;
@@ -226,18 +193,12 @@ export default function StorefrontPage() {
   };
 
   const handleToggleSelectCartItem = (skuCode: string) => {
-    setCart((prev) =>
-      prev.map((item) =>
-        item.skuCode === skuCode ? { ...item, selected: !item.selected } : item,
-      ),
-    );
+    setCart((prev) => prev.map((item) => (item.skuCode === skuCode ? { ...item, selected: !item.selected } : item)));
   };
 
   const handleToggleSelectAllCart = () => {
     const allSelected = cart.every((i) => i.selected);
-    setCart((prev) =>
-      prev.map((item) => ({ ...item, selected: !allSelected })),
-    );
+    setCart((prev) => prev.map((item) => ({ ...item, selected: !allSelected })));
   };
 
   const handleRemoveCartItem = (skuCode: string) => {
@@ -258,11 +219,11 @@ export default function StorefrontPage() {
     detailAddress: string;
     isDefault: boolean;
   }) => {
-    const res = await fetch("/api/store/addresses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const res = await fetch('/api/store/addresses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        customerId: "CUST-8801",
+        customerId: 'CUST-8801',
         ...newAddr,
       }),
     });
@@ -271,7 +232,7 @@ export default function StorefrontPage() {
       await fetchAddresses();
       setSelectedAddress(data.address);
     } else {
-      throw new Error(data.message || "新增收货地址失败");
+      throw new Error(data.message || '新增收货地址失败');
     }
   };
 
@@ -282,11 +243,11 @@ export default function StorefrontPage() {
 
     try {
       setIsCheckingOut(true);
-      const res = await fetch("/api/store/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/store/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerId: "CUST-8801",
+          customerId: 'CUST-8801',
           items: selectedItems.map((item) => ({
             skuCode: item.skuCode,
             quantity: item.quantity,
@@ -310,10 +271,10 @@ export default function StorefrontPage() {
 
         alert(`🎉 下单成功！订单号: ${data.orderId}`);
       } else {
-        alert(`结算失败: ${data.message || "请稍后重试"}`);
+        alert(`结算失败: ${data.message || '请稍后重试'}`);
       }
     } catch (err) {
-      alert("网络异常，结算失败");
+      alert('网络异常，结算失败');
     } finally {
       setIsCheckingOut(false);
     }
@@ -324,11 +285,11 @@ export default function StorefrontPage() {
     if (!buyingProduct || !selectedSku || !selectedAddress) return;
     try {
       setIsCheckingOut(true);
-      const res = await fetch("/api/store/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/store/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerId: "CUST-8801",
+          customerId: 'CUST-8801',
           items: [{ skuCode: selectedSku.skuCode, quantity: buyQuantity }],
           shippingAddress: selectedAddress.fullAddress,
           recipientName: selectedAddress.recipientName,
@@ -343,10 +304,10 @@ export default function StorefrontPage() {
         await fetchOrders(orderFilterStatus);
         alert(`🎉 下单成功！订单号: ${data.orderId}`);
       } else {
-        alert(`下单失败: ${data.message || "请稍后重试"}`);
+        alert(`下单失败: ${data.message || '请稍后重试'}`);
       }
     } catch (err) {
-      alert("网络异常，下单失败");
+      alert('网络异常，下单失败');
     } finally {
       setIsCheckingOut(false);
     }
@@ -363,46 +324,42 @@ export default function StorefrontPage() {
   const handleSendChatMessage = async () => {
     if (!chatInput.trim() || isChatSending) return;
     const userMsg = chatInput.trim();
-    setChatInput("");
+    setChatInput('');
     const nowTime = new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
+      hour: '2-digit',
+      minute: '2-digit',
     });
 
-    setChatMessages((prev) => [
-      ...prev,
-      { role: "user", text: userMsg, time: nowTime },
-    ]);
+    setChatMessages((prev) => [...prev, { role: 'user', text: userMsg, time: nowTime }]);
     setIsChatSending(true);
 
     try {
-      const gatewayUrl =
-        process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:4000";
+      const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:4000';
       const targetUrl = `${gatewayUrl}/api/chat`;
       const resp = await fetch(targetUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userMsg,
           input: userMsg,
-          businessId: "aurora",
-          userId: "CUST-8801",
-          userEmail: "zhangwei@example.com",
+          businessId: 'aurora',
+          userId: 'CUST-8801',
+          userEmail: 'zhangwei@example.com',
           sync: true,
         }),
       });
 
       const data = await resp.json();
-      const replyText = data.output || data.result || "已为您处理完毕。";
+      const replyText = data.output || data.result || '已为您处理完毕。';
 
       setChatMessages((prev) => [
         ...prev,
         {
-          role: "assistant",
+          role: 'assistant',
           text: replyText,
           time: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
+            hour: '2-digit',
+            minute: '2-digit',
           }),
         },
       ]);
@@ -412,11 +369,11 @@ export default function StorefrontPage() {
       setChatMessages((prev) => [
         ...prev,
         {
-          role: "assistant",
-          text: "系统已接收到您的请求，正在通过极光潮品 SPI 远程处理中...",
+          role: 'assistant',
+          text: '系统已接收到您的请求，正在通过极光潮品 SPI 远程处理中...',
           time: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
+            hour: '2-digit',
+            minute: '2-digit',
           }),
         },
       ]);
@@ -443,9 +400,7 @@ export default function StorefrontPage() {
                   独立自研商城
                 </span>
               </div>
-              <div className="text-xs text-slate-500">
-                独立数据库物理隔离 · SPU / SKU 多规格电商体系 (Port 3005)
-              </div>
+              <div className="text-xs text-slate-500">独立数据库物理隔离 · SPU / SKU 多规格电商体系 (Port 3005)</div>
             </div>
           </div>
 
@@ -453,8 +408,7 @@ export default function StorefrontPage() {
             {/* 顾客标识 */}
             <div className="hidden md:flex items-center text-xs text-slate-600 bg-slate-100 px-3 py-1.5 rounded-full">
               <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
-              当前顾客:{" "}
-              <strong className="ml-1 text-slate-800">张伟 (黑金SVIP)</strong>
+              当前顾客: <strong className="ml-1 text-slate-800">张伟 (黑金SVIP)</strong>
             </div>
 
             {/* 收货地址快捷入口 */}
@@ -516,12 +470,10 @@ export default function StorefrontPage() {
             <span className="text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold">
               2026 SPU + SKU 多规格旗舰首发
             </span>
-            <h1 className="text-3xl sm:text-4xl font-extrabold mt-3 tracking-tight">
-              极简机能 · 严选面料与多维规格
-            </h1>
+            <h1 className="text-3xl sm:text-4xl font-extrabold mt-3 tracking-tight">极简机能 · 严选面料与多维规格</h1>
             <p className="text-slate-300 text-sm mt-2 max-w-xl">
-              全系采用独立商品 SPU 建模，提供详尽材质技术参数、多颜色尺码 SKU
-              矩阵与智能库存同步。支持通过 AI 智能客服极速改单。
+              全系采用独立商品 SPU 建模，提供详尽材质技术参数、多颜色尺码 SKU 矩阵与智能库存同步。支持通过 AI
+              智能客服极速改单。
             </p>
           </div>
           <div className="flex gap-3">
@@ -545,18 +497,13 @@ export default function StorefrontPage() {
               {products.length} 个 SPU 单元
             </span>
           </h2>
-          <span className="text-xs text-slate-500">
-            读写商户独立数据库 merchant_spus & merchant_skus
-          </span>
+          <span className="text-xs text-slate-500">读写商户独立数据库 merchant_spus & merchant_skus</span>
         </div>
 
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[1, 2, 3, 4].map((n) => (
-              <div
-                key={n}
-                className="bg-white rounded-xl border border-slate-200 p-4 h-80 animate-pulse"
-              ></div>
+              <div key={n} className="bg-white rounded-xl border border-slate-200 p-4 h-80 animate-pulse"></div>
             ))}
           </div>
         ) : (
@@ -579,49 +526,40 @@ export default function StorefrontPage() {
                       <span className="text-4xl">🛍️</span>
                     )}
                     <span className="absolute top-2 left-2 bg-slate-900/80 text-white text-[10px] px-2 py-0.5 rounded backdrop-blur-xs">
-                      {product.brand || "AURORA"}
+                      {product.brand || 'AURORA'}
                     </span>
                   </div>
 
                   <span className="text-[11px] uppercase tracking-wider text-emerald-600 font-semibold mb-1">
-                    {product.category || "潮流单品"}
+                    {product.category || '潮流单品'}
                   </span>
-                  <h3 className="font-bold text-slate-900 text-sm line-clamp-2 leading-snug">
-                    {product.title}
-                  </h3>
+                  <h3 className="font-bold text-slate-900 text-sm line-clamp-2 leading-snug">{product.title}</h3>
                   {product.subtitle && (
-                    <p className="text-[11px] text-slate-500 line-clamp-1 mt-1">
-                      {product.subtitle}
-                    </p>
+                    <p className="text-[11px] text-slate-500 line-clamp-1 mt-1">{product.subtitle}</p>
                   )}
 
                   {/* 规格标签 */}
-                  {product.specDimensions &&
-                    product.specDimensions.length > 0 && (
-                      <div className="mt-2.5 flex flex-wrap gap-1">
-                        {product.specDimensions.map((dim) => (
-                          <span
-                            key={dim.name}
-                            className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200"
-                          >
-                            {dim.name}: {dim.values.slice(0, 2).join("/")}
-                            {dim.values.length > 2 && "..."}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                  {product.specDimensions && product.specDimensions.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-1">
+                      {product.specDimensions.map((dim) => (
+                        <span
+                          key={dim.name}
+                          className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200"
+                        >
+                          {dim.name}: {dim.values.slice(0, 2).join('/')}
+                          {dim.values.length > 2 && '...'}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="mt-auto pt-3 flex items-center justify-between">
                     <div>
                       <span className="text-[10px] text-slate-400">起售价</span>
-                      <div className="text-lg font-extrabold text-emerald-600">
-                        ¥{Number(product.price).toFixed(2)}
-                      </div>
+                      <div className="text-lg font-extrabold text-emerald-600">¥{Number(product.price).toFixed(2)}</div>
                     </div>
                     <div className="text-right">
-                      <span className="text-[10px] text-slate-400 block">
-                        总库存
-                      </span>
+                      <span className="text-[10px] text-slate-400 block">总库存</span>
                       <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
                         {product.stock} 件
                       </span>
@@ -652,16 +590,11 @@ export default function StorefrontPage() {
       </main>
 
       {/* SPU / SKU 选规格购买与加购弹窗 */}
-      <Dialog
-        open={Boolean(buyingProduct)}
-        onOpenChange={(open) => !open && setBuyingProduct(null)}
-      >
+      <Dialog open={Boolean(buyingProduct)} onOpenChange={(open) => !open && setBuyingProduct(null)}>
         {buyingProduct && (
           <DialogContent className="max-w-lg p-6 max-h-[90vh] flex flex-col">
             <DialogHeader className="pb-3 border-b border-slate-100">
-              <DialogTitle className="text-base font-bold text-slate-900">
-                选择商品规格与数量
-              </DialogTitle>
+              <DialogTitle className="text-base font-bold text-slate-900">选择商品规格与数量</DialogTitle>
             </DialogHeader>
 
             <div className="py-2 space-y-4 flex-1 overflow-y-auto">
@@ -671,7 +604,7 @@ export default function StorefrontPage() {
                   src={
                     selectedSku?.imageUrl ||
                     buyingProduct.imageUrl ||
-                    "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=200"
+                    'https://images.unsplash.com/photo-1551028719-00167b16eac5?w=200'
                   }
                   alt="SKU"
                   className="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-white"
@@ -681,21 +614,13 @@ export default function StorefrontPage() {
                     {selectedSku?.skuTitle || buyingProduct.title}
                   </div>
                   <div className="text-emerald-700 font-extrabold text-lg mt-0.5">
-                    ¥
-                    {selectedSku
-                      ? Number(selectedSku.price).toFixed(2)
-                      : Number(buyingProduct.price).toFixed(2)}
+                    ¥{selectedSku ? Number(selectedSku.price).toFixed(2) : Number(buyingProduct.price).toFixed(2)}
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    SKU 编号:{" "}
-                    <span className="font-mono font-medium text-slate-700">
-                      {selectedSku?.skuCode || "请选择规格"}
-                    </span>{" "}
-                    · 剩余库存:{" "}
-                    <strong className="text-emerald-600">
-                      {selectedSku?.stock ?? buyingProduct.stock}
-                    </strong>{" "}
-                    件
+                    SKU 编号:{' '}
+                    <span className="font-mono font-medium text-slate-700">{selectedSku?.skuCode || '请选择规格'}</span>{' '}
+                    · 剩余库存:{' '}
+                    <strong className="text-emerald-600">{selectedSku?.stock ?? buyingProduct.stock}</strong> 件
                   </div>
                 </div>
               </div>
@@ -703,9 +628,7 @@ export default function StorefrontPage() {
               {/* 规格维度选择器 (Color, Size, etc.) */}
               {buyingProduct.specDimensions?.map((dim) => (
                 <div key={dim.name} className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700">
-                    {dim.name}
-                  </label>
+                  <label className="block text-xs font-bold text-slate-700">{dim.name}</label>
                   <div className="flex flex-wrap gap-2">
                     {dim.values.map((val) => {
                       const isSelected = selectedAttrs[dim.name] === val;
@@ -716,8 +639,8 @@ export default function StorefrontPage() {
                           onClick={() => handleSelectAttr(dim.name, val)}
                           className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
                             isSelected
-                              ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
-                              : "bg-white text-slate-700 border-slate-200 hover:border-slate-400"
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
                           }`}
                         >
                           {val}
@@ -730,9 +653,7 @@ export default function StorefrontPage() {
 
               {/* 数量选择 */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                <span className="text-xs font-bold text-slate-700">
-                  购买数量
-                </span>
+                <span className="text-xs font-bold text-slate-700">购买数量</span>
                 <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-2xs">
                   <button
                     type="button"
@@ -742,22 +663,11 @@ export default function StorefrontPage() {
                   >
                     -
                   </button>
-                  <span className="px-3 py-1 text-xs font-bold text-slate-800 min-w-8 text-center">
-                    {buyQuantity}
-                  </span>
+                  <span className="px-3 py-1 text-xs font-bold text-slate-800 min-w-8 text-center">{buyQuantity}</span>
                   <button
                     type="button"
-                    onClick={() =>
-                      setBuyQuantity((q) =>
-                        Math.min(
-                          selectedSku?.stock ?? buyingProduct.stock,
-                          q + 1,
-                        ),
-                      )
-                    }
-                    disabled={
-                      buyQuantity >= (selectedSku?.stock ?? buyingProduct.stock)
-                    }
+                    onClick={() => setBuyQuantity((q) => Math.min(selectedSku?.stock ?? buyingProduct.stock, q + 1))}
+                    disabled={buyQuantity >= (selectedSku?.stock ?? buyingProduct.stock)}
                     className="px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-30"
                   >
                     +
@@ -772,12 +682,9 @@ export default function StorefrontPage() {
                   <div className="text-slate-700">
                     配送至：
                     <strong className="text-slate-900 ml-1">
-                      {selectedAddress ? selectedAddress.recipientName : "张伟"}
-                    </strong>{" "}
-                    (
-                    {selectedAddress?.fullAddress ||
-                      "北京市海淀区中关村南大街1号院8号楼1201室"}
-                    )
+                      {selectedAddress ? selectedAddress.recipientName : '张伟'}
+                    </strong>{' '}
+                    ({selectedAddress?.fullAddress || '北京市海淀区中关村南大街1号院8号楼1201室'})
                   </div>
                 </div>
                 <button
@@ -814,12 +721,10 @@ export default function StorefrontPage() {
                 type="button"
                 size="sm"
                 onClick={handleInstantBuy}
-                disabled={
-                  isCheckingOut || !selectedSku || selectedSku.stock <= 0
-                }
+                disabled={isCheckingOut || !selectedSku || selectedSku.stock <= 0}
                 className="bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 shadow-xs"
               >
-                {isCheckingOut ? "正在提交..." : "⚡ 立即购买"}
+                {isCheckingOut ? '正在提交...' : '⚡ 立即购买'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -827,19 +732,12 @@ export default function StorefrontPage() {
       </Dialog>
 
       {/* 参数规格查看抽屉 (Specs Modal) */}
-      <Dialog
-        open={Boolean(showSpecsModal)}
-        onOpenChange={(open) => !open && setShowSpecsModal(null)}
-      >
+      <Dialog open={Boolean(showSpecsModal)} onOpenChange={(open) => !open && setShowSpecsModal(null)}>
         {showSpecsModal && (
           <DialogContent className="max-w-md p-6">
             <DialogHeader className="pb-3 border-b border-slate-100">
-              <DialogTitle className="text-base font-bold text-slate-900">
-                {showSpecsModal.title}
-              </DialogTitle>
-              <p className="text-[11px] text-emerald-600 font-medium">
-                {showSpecsModal.brand} · 材质与技术参数
-              </p>
+              <DialogTitle className="text-base font-bold text-slate-900">{showSpecsModal.title}</DialogTitle>
+              <p className="text-[11px] text-emerald-600 font-medium">{showSpecsModal.brand} · 材质与技术参数</p>
             </DialogHeader>
 
             <div className="py-3 space-y-3">
@@ -850,16 +748,12 @@ export default function StorefrontPage() {
               <div className="border border-slate-200 rounded-lg overflow-hidden">
                 <table className="w-full text-left text-xs">
                   <tbody className="divide-y divide-slate-100">
-                    {Object.entries(showSpecsModal.specs || {}).map(
-                      ([key, value]) => (
-                        <tr key={key} className="bg-white">
-                          <td className="p-2.5 bg-slate-50 text-slate-500 font-semibold w-28">
-                            {key}
-                          </td>
-                          <td className="p-2.5 text-slate-800">{value}</td>
-                        </tr>
-                      ),
-                    )}
+                    {Object.entries(showSpecsModal.specs || {}).map(([key, value]) => (
+                      <tr key={key} className="bg-white">
+                        <td className="p-2.5 bg-slate-50 text-slate-500 font-semibold w-28">{key}</td>
+                        <td className="p-2.5 text-slate-800">{value}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -978,9 +872,7 @@ export default function StorefrontPage() {
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-300 animate-pulse"></span>
               <div>
                 <div className="font-bold text-sm">极光潮品 AI 智能客服</div>
-                <div className="text-xs text-emerald-200">
-                  已连接外部商户 SPI 协议
-                </div>
+                <div className="text-xs text-emerald-200">已连接外部商户 SPI 协议</div>
               </div>
             </div>
             <button
@@ -994,22 +886,17 @@ export default function StorefrontPage() {
 
           <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-slate-50 text-sm">
             {chatMessages.map((msg, idx) => (
-              <div
-                key={idx}
-                className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
-              >
+              <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                 <div
                   className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${
-                    msg.role === "user"
-                      ? "bg-emerald-600 text-white rounded-tr-xs"
-                      : "bg-white text-slate-800 border border-slate-200 shadow-2xs rounded-tl-xs whitespace-pre-wrap"
+                    msg.role === 'user'
+                      ? 'bg-emerald-600 text-white rounded-tr-xs'
+                      : 'bg-white text-slate-800 border border-slate-200 shadow-2xs rounded-tl-xs whitespace-pre-wrap'
                   }`}
                 >
                   {msg.text}
                 </div>
-                <span className="text-[10px] text-slate-400 mt-1 px-1">
-                  {msg.time}
-                </span>
+                <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.time}</span>
               </div>
             ))}
             {isChatSending && (
@@ -1023,18 +910,14 @@ export default function StorefrontPage() {
           <div className="p-2 bg-white border-t border-slate-100 flex gap-1.5 overflow-x-auto text-xs">
             <button
               type="button"
-              onClick={() =>
-                setChatInput("帮我把刚才的订单地址改成朝阳区望京SOHO T1 1508室")
-              }
+              onClick={() => setChatInput('帮我把刚才的订单地址改成朝阳区望京SOHO T1 1508室')}
               className="px-2 py-1 bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 rounded whitespace-nowrap transition cursor-pointer"
             >
               🚀 帮我改地址为望京SOHO
             </button>
             <button
               type="button"
-              onClick={() =>
-                setChatInput("我想把订单 AURORA-ORD-2026-9081 申请退款")
-              }
+              onClick={() => setChatInput('我想把订单 AURORA-ORD-2026-9081 申请退款')}
               className="px-2 py-1 bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 rounded whitespace-nowrap transition cursor-pointer"
             >
               💸 申请退款
@@ -1046,7 +929,7 @@ export default function StorefrontPage() {
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSendChatMessage()}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendChatMessage()}
               placeholder="输入您的问题（如改地址、查单、退款）..."
               className="flex-1 text-sm px-3 py-2 border border-slate-300 rounded-lg focus:outline-emerald-500"
             />
