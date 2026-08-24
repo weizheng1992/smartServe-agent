@@ -7,6 +7,6 @@ export interface TenantRecord {
   refundLimit: number;
   autoEscalation: boolean;
   webhookUrl: string;
-  status: "active" | "disabled";
+  status: 'active' | 'disabled';
   createdAt: string;
 }

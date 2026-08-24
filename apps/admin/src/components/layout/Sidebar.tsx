@@ -1,5 +1,5 @@
-import React from "react";
-import { Link, useLocation } from "react-router";
+import type React from 'react';
+import { Link, useLocation } from 'react-router';
 
 interface NavItem {
   name: string;
@@ -15,18 +15,13 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    title: "业务运营 (Operations)",
+    title: '业务运营 (Operations)',
     items: [
       {
-        name: "商户租户管理",
-        path: "/tenants",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '商户租户管理',
+        path: '/tenants',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -37,15 +32,10 @@ const NAV_GROUPS: NavGroup[] = [
         ),
       },
       {
-        name: "全景会话回放",
-        path: "/conversations",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '全景会话回放',
+        path: '/conversations',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -56,16 +46,11 @@ const NAV_GROUPS: NavGroup[] = [
         ),
       },
       {
-        name: "审批与风控审计",
-        path: "/audits",
-        badge: "HITL",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '审批与风控审计',
+        path: '/audits',
+        badge: 'HITL',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -76,15 +61,10 @@ const NAV_GROUPS: NavGroup[] = [
         ),
       },
       {
-        name: "人物画像事实素描",
-        path: "/personas",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '人物画像事实素描',
+        path: '/personas',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -97,18 +77,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "智能体与知识 (Agent & RAG)",
+    title: '智能体与知识 (Agent & RAG)',
     items: [
       {
-        name: "知识库与检索演练",
-        path: "/rag-studio",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '知识库与检索演练',
+        path: '/rag-studio',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -119,15 +94,10 @@ const NAV_GROUPS: NavGroup[] = [
         ),
       },
       {
-        name: "技能与 MCP 工具市场",
-        path: "/skills-tools",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '技能与 MCP 工具市场',
+        path: '/skills-tools',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -138,15 +108,10 @@ const NAV_GROUPS: NavGroup[] = [
         ),
       },
       {
-        name: "评测与 Prompt 实验",
-        path: "/evals",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '评测与 Prompt 实验',
+        path: '/evals',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -159,18 +124,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "平台与治理 (Platform)",
+    title: '平台与治理 (Platform)',
     items: [
       {
-        name: "计量计费与配额",
-        path: "/billing",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '计量计费与配额',
+        path: '/billing',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -181,15 +141,10 @@ const NAV_GROUPS: NavGroup[] = [
         ),
       },
       {
-        name: "安全合规与围栏",
-        path: "/guardrails",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
+        name: '安全合规与围栏',
+        path: '/guardrails',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -200,21 +155,11 @@ const NAV_GROUPS: NavGroup[] = [
         ),
       },
       {
-        name: "系统与 LLM 日志",
-        path: "/system-logs",
-        icon: ({ className = "w-4 h-4" }) => (
-          <svg
-            className={className}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 6h16M4 10h16M4 14h16M4 18h16"
-            />
+        name: '系统与 LLM 日志',
+        path: '/system-logs',
+        icon: ({ className = 'w-4 h-4' }) => (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
           </svg>
         ),
       },
@@ -233,12 +178,8 @@ export function Sidebar() {
           CP
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-slate-900 leading-tight">
-            Agent Control Plane
-          </h1>
-          <p className="text-[10px] text-slate-400 font-medium">
-            SaaS 多租户管理中台
-          </p>
+          <h1 className="text-sm font-semibold text-slate-900 leading-tight">Agent Control Plane</h1>
+          <p className="text-[10px] text-slate-400 font-medium">SaaS 多租户管理中台</p>
         </div>
       </div>
 
@@ -252,9 +193,7 @@ export function Sidebar() {
             <div className="space-y-0.5">
               {group.items.map((item) => {
                 const isActive =
-                  item.path === "/"
-                    ? location.pathname === "/"
-                    : location.pathname.startsWith(item.path);
+                  item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path);
 
                 return (
                   <Link
@@ -262,14 +201,12 @@ export function Sidebar() {
                     to={item.path}
                     className={`flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-colors ${
                       isActive
-                        ? "bg-slate-100 text-slate-900 font-semibold"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                        ? 'bg-slate-100 text-slate-900 font-semibold'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <item.icon
-                        className={`w-4 h-4 ${isActive ? "text-slate-900" : "text-slate-400"}`}
-                      />
+                      <item.icon className={`w-4 h-4 ${isActive ? 'text-slate-900' : 'text-slate-400'}`} />
                       <span>{item.name}</span>
                     </div>
                     {item.badge && (
@@ -289,13 +226,9 @@ export function Sidebar() {
       <div className="p-3.5 border-t border-slate-200 bg-slate-50/50 flex items-center justify-between text-xs text-slate-500">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[11px] font-medium text-slate-600">
-            Engine v2.4 运行中
-          </span>
+          <span className="text-[11px] font-medium text-slate-600">Engine v2.4 运行中</span>
         </div>
-        <span className="text-[10px] text-slate-400 font-mono">
-          10 Nodes Active
-        </span>
+        <span className="text-[10px] text-slate-400 font-mono">10 Nodes Active</span>
       </div>
     </aside>
   );

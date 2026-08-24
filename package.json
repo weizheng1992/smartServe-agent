@@ -2,10 +2,7 @@
   "name": "agent-platform",
   "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "turbo run dev --filter=web --filter=merchant",
     "dev:server": "bun --filter server dev",

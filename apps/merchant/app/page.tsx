@@ -2,31 +2,51 @@
 
 import React, { useEffect, useState } from 'react';
 import type { ThirdPartyOrder, ThirdPartyProduct, ThirdPartySku } from 'types';
+import { AddressModal, type CustomerAddress } from './components/address/AddressModal';
+import { CartDrawer, type CartItem } from './components/cart/CartDrawer';
+import { LogisticsModal } from './components/orders/LogisticsModal';
+import { OrderDetailModal } from './components/orders/OrderDetailModal';
+import { OrdersListModal } from './components/orders/OrdersListModal';
 
 export default function StorefrontPage() {
+  // 数据源
   const [products, setProducts] = useState<ThirdPartyProduct[]>([]);
   const [orders, setOrders] = useState<ThirdPartyOrder[]>([]);
+  const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [loading, setLoading] = useState(true);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [orderFilterStatus, setOrderFilterStatus] = useState('ALL');
 
-  // 下单与多规格选购状态
+  // 购物车状态
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+
+  // 地址状态
+  const [selectedAddress, setSelectedAddress] = useState<CustomerAddress | null>(null);
+  const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
+
+  // 订单弹窗与物流弹窗
+  const [isOrdersListModalOpen, setIsOrdersListModalOpen] = useState(false);
+  const [selectedDetailOrder, setSelectedDetailOrder] = useState<ThirdPartyOrder | null>(null);
+  const [isOrderDetailModalOpen, setIsOrderDetailModalOpen] = useState(false);
+  const [selectedLogisticsOrder, setSelectedLogisticsOrder] = useState<ThirdPartyOrder | null>(null);
+  const [isLogisticsModalOpen, setIsLogisticsModalOpen] = useState(false);
+
+  // 选规格购买/加购弹窗
   const [buyingProduct, setBuyingProduct] = useState<ThirdPartyProduct | null>(null);
   const [selectedSku, setSelectedSku] = useState<ThirdPartySku | null>(null);
   const [selectedAttrs, setSelectedAttrs] = useState<Record<string, string>>({});
-  const [selectedAddress, setSelectedAddress] = useState('北京市海淀区中关村南大街1号院8号楼1201室');
-  const [recipientName, setRecipientName] = useState('张伟');
-  const [recipientPhone, setRecipientPhone] = useState('13800138000');
-  const [submittingOrder, setSubmittingOrder] = useState(false);
-
-  // 弹窗与抽屉
-  const [showOrdersModal, setShowOrdersModal] = useState(false);
+  const [buyQuantity, setBuyQuantity] = useState(1);
   const [showSpecsModal, setShowSpecsModal] = useState<ThirdPartyProduct | null>(null);
+
+  // 智能客服 Chat
   const [showChatModal, setShowChatModal] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string; time: string }>>([
     {
       role: 'assistant',
-      text: '您好！我是极光潮品官方智能客服。请问有什么可以帮您？支持查询订单、极速修改收货地址、办理退换货或咨询现货规格库存。',
+      text: '您好！我是极光潮品官方智能客服。请问有什么可以帮您？支持多订单查询、极速修改收货地址、售后退换货与物流进度追踪。',
       time: new Date().toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',
@@ -35,6 +55,7 @@ export default function StorefrontPage() {
   ]);
   const [isChatSending, setIsChatSending] = useState(false);
 
+  // 获取商品列表
   const fetchProducts = async () => {
     try {
       setLoading(true);
@@ -48,12 +69,33 @@ export default function StorefrontPage() {
     }
   };
 
-  const fetchOrders = async () => {
+  // 获取地址簿
+  const fetchAddresses = async () => {
+    try {
+      const res = await fetch('/api/store/addresses?customerId=CUST-8801');
+      const data = await res.json();
+      if (data.success && data.addresses) {
+        setAddresses(data.addresses);
+        if (!selectedAddress && data.addresses.length > 0) {
+          const defaultAddr = data.addresses.find((a: CustomerAddress) => a.isDefault) || data.addresses[0];
+          setSelectedAddress(defaultAddr);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load addresses:', err);
+    }
+  };
+
+  // 获取订单列表
+  const fetchOrders = async (status = 'ALL') => {
     try {
       setOrdersLoading(true);
-      const orderRes = await fetch('/api/store/orders?userId=CUST-8801');
-      const orderJson = await orderRes.json();
-      if (orderJson.success) setOrders(orderJson.orders || []);
+      const query = status && status !== 'ALL' ? `&status=${status}` : '';
+      const res = await fetch(`/api/store/orders?userId=CUST-8801${query}`);
+      const data = await res.json();
+      if (data.success) {
+        setOrders(data.orders || []);
+      }
     } catch (err) {
       console.error('Failed to load orders:', err);
     } finally {
@@ -61,18 +103,16 @@ export default function StorefrontPage() {
     }
   };
 
-  const handleOpenOrdersModal = () => {
-    setShowOrdersModal(true);
-    fetchOrders();
-  };
-
   useEffect(() => {
     fetchProducts();
+    fetchAddresses();
+    fetchOrders('ALL');
   }, []);
 
-  // 打开购买弹窗时自动选中首个可用 SKU
+  // 打开选规格弹窗
   const handleOpenBuyModal = (product: ThirdPartyProduct) => {
     setBuyingProduct(product);
+    setBuyQuantity(1);
     if (product.skus && product.skus.length > 0) {
       const firstSku = product.skus[0];
       setSelectedSku(firstSku);
@@ -83,13 +123,12 @@ export default function StorefrontPage() {
     }
   };
 
-  // 选择规格维度属性 (如切换颜色或尺码)
+  // 切换规格属性
   const handleSelectAttr = (dimName: string, val: string) => {
     if (!buyingProduct || !buyingProduct.skus) return;
     const nextAttrs = { ...selectedAttrs, [dimName]: val };
     setSelectedAttrs(nextAttrs);
 
-    // 匹配对应的 SKU
     const matched = buyingProduct.skus.find((sku) => {
       return Object.entries(nextAttrs).every(([k, v]) => sku.specAttributes[k] === v);
     });
@@ -97,7 +136,6 @@ export default function StorefrontPage() {
     if (matched) {
       setSelectedSku(matched);
     } else {
-      // 找不到完全匹配的则尝试寻找部分匹配
       const partial = buyingProduct.skus.find((sku) => sku.specAttributes[dimName] === val);
       if (partial) {
         setSelectedSku(partial);
@@ -106,42 +144,182 @@ export default function StorefrontPage() {
     }
   };
 
-  const handlePlaceOrder = async () => {
-    if (!buyingProduct) return;
-    const targetSkuCode = selectedSku?.skuCode || buyingProduct.skus?.[0]?.skuCode || buyingProduct.productId;
+  // 加入购物车
+  const handleAddToCart = () => {
+    if (!buyingProduct || !selectedSku) return;
 
-    setSubmittingOrder(true);
+    setCart((prevCart) => {
+      const existingIdx = prevCart.findIndex((item) => item.skuCode === selectedSku.skuCode);
+      if (existingIdx >= 0) {
+        const next = [...prevCart];
+        const item = next[existingIdx];
+        const newQty = Math.min(item.quantity + buyQuantity, item.stock);
+        next[existingIdx] = { ...item, quantity: newQty };
+        return next;
+      }
+
+      const newItem: CartItem = {
+        id: selectedSku.skuCode,
+        spuId: buyingProduct.productId,
+        skuCode: selectedSku.skuCode,
+        title: buyingProduct.title,
+        skuTitle: selectedSku.skuTitle,
+        imageUrl: selectedSku.imageUrl || buyingProduct.imageUrl || '',
+        price: Number(selectedSku.price),
+        quantity: buyQuantity,
+        stock: selectedSku.stock,
+        specAttributes: selectedSku.specAttributes || selectedAttrs,
+        selected: true,
+      };
+      return [...prevCart, newItem];
+    });
+
+    setBuyingProduct(null);
+    setIsCartOpen(true);
+  };
+
+  // 购物车数量更新
+  const handleUpdateCartQuantity = (skuCode: string, delta: number) => {
+    setCart((prev) =>
+      prev.map((item) => {
+        if (item.skuCode === skuCode) {
+          const nextQty = Math.max(1, Math.min(item.stock, item.quantity + delta));
+          return { ...item, quantity: nextQty };
+        }
+        return item;
+      }),
+    );
+  };
+
+  const handleToggleSelectCartItem = (skuCode: string) => {
+    setCart((prev) => prev.map((item) => (item.skuCode === skuCode ? { ...item, selected: !item.selected } : item)));
+  };
+
+  const handleToggleSelectAllCart = () => {
+    const allSelected = cart.every((i) => i.selected);
+    setCart((prev) => prev.map((item) => ({ ...item, selected: !allSelected })));
+  };
+
+  const handleRemoveCartItem = (skuCode: string) => {
+    setCart((prev) => prev.filter((item) => item.skuCode !== skuCode));
+  };
+
+  const handleClearCart = () => {
+    setCart([]);
+  };
+
+  // 新增收货地址
+  const handleAddNewAddress = async (newAddr: {
+    recipientName: string;
+    phone: string;
+    province: string;
+    city: string;
+    district: string;
+    detailAddress: string;
+    isDefault: boolean;
+  }) => {
+    const res = await fetch('/api/store/addresses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerId: 'CUST-8801',
+        ...newAddr,
+      }),
+    });
+    const data = await res.json();
+    if (data.success && data.address) {
+      await fetchAddresses();
+      setSelectedAddress(data.address);
+    } else {
+      throw new Error(data.message || '新增收货地址失败');
+    }
+  };
+
+  // 购物车批量结算
+  const handleCartCheckout = async () => {
+    const selectedItems = cart.filter((i) => i.selected);
+    if (selectedItems.length === 0 || !selectedAddress) return;
+
     try {
-      const resp = await fetch('/api/store/orders', {
+      setIsCheckingOut(true);
+      const res = await fetch('/api/store/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: 'CUST-8801',
-          skuCode: targetSkuCode,
-          quantity: 1,
-          shippingAddress: selectedAddress,
-          recipientName,
-          recipientPhone,
+          items: selectedItems.map((item) => ({
+            skuCode: item.skuCode,
+            quantity: item.quantity,
+          })),
+          shippingAddress: selectedAddress.fullAddress,
+          recipientName: selectedAddress.recipientName,
+          recipientPhone: selectedAddress.phone,
         }),
       });
-      const data = await resp.json();
+
+      const data = await res.json();
       if (data.success) {
-        alert(`🎉 下单成功！订单编号: ${data.orderId}`);
-        setBuyingProduct(null);
-        fetchProducts();
-        if (showOrdersModal) {
-          fetchOrders();
-        }
+        // 移除已结算条目
+        const selectedCodes = new Set(selectedItems.map((i) => i.skuCode));
+        setCart((prev) => prev.filter((i) => !selectedCodes.has(i.skuCode)));
+        setIsCartOpen(false);
+
+        // 刷新列表并打开订单详情
+        await fetchProducts();
+        await fetchOrders(orderFilterStatus);
+
+        alert(`🎉 下单成功！订单号: ${data.orderId}`);
       } else {
-        alert(`下单失败: ${data.message || '系统繁忙'}`);
+        alert(`结算失败: ${data.message || '请稍后重试'}`);
+      }
+    } catch (err) {
+      alert('网络异常，结算失败');
+    } finally {
+      setIsCheckingOut(false);
+    }
+  };
+
+  // 单件商品立即购买
+  const handleInstantBuy = async () => {
+    if (!buyingProduct || !selectedSku || !selectedAddress) return;
+    try {
+      setIsCheckingOut(true);
+      const res = await fetch('/api/store/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: 'CUST-8801',
+          items: [{ skuCode: selectedSku.skuCode, quantity: buyQuantity }],
+          shippingAddress: selectedAddress.fullAddress,
+          recipientName: selectedAddress.recipientName,
+          recipientPhone: selectedAddress.phone,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setBuyingProduct(null);
+        await fetchProducts();
+        await fetchOrders(orderFilterStatus);
+        alert(`🎉 下单成功！订单号: ${data.orderId}`);
+      } else {
+        alert(`下单失败: ${data.message || '请稍后重试'}`);
       }
     } catch (err) {
       alert('网络异常，下单失败');
     } finally {
-      setSubmittingOrder(false);
+      setIsCheckingOut(false);
     }
   };
 
+  // 咨询客服联动
+  const handleOpenChatWithOrder = (orderId: string, initialPrompt?: string) => {
+    const prompt = initialPrompt || `我想咨询关于订单 ${orderId} 的相关信息`;
+    setShowChatModal(true);
+    setChatInput(prompt);
+  };
+
+  // 发送客服对话
   const handleSendChatMessage = async () => {
     if (!chatInput.trim() || isChatSending) return;
     const userMsg = chatInput.trim();
@@ -155,7 +333,9 @@ export default function StorefrontPage() {
     setIsChatSending(true);
 
     try {
-      const resp = await fetch('http://localhost:3000/api/chat', {
+      const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:4000';
+      const targetUrl = `${gatewayUrl}/api/chat`;
+      const resp = await fetch(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -182,6 +362,8 @@ export default function StorefrontPage() {
           }),
         },
       ]);
+      // 如果触发了改地址或退款，实时刷新订单
+      fetchOrders(orderFilterStatus);
     } catch (err) {
       setChatMessages((prev) => [
         ...prev,
@@ -198,6 +380,8 @@ export default function StorefrontPage() {
       setIsChatSending(false);
     }
   };
+
+  const totalCartCount = cart.reduce((s, i) => s + i.quantity, 0);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
@@ -219,30 +403,60 @@ export default function StorefrontPage() {
             </div>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <div className="hidden sm:flex items-center text-xs text-slate-600 bg-slate-100 px-3 py-1.5 rounded-full">
+          <div className="flex items-center space-x-3">
+            {/* 顾客标识 */}
+            <div className="hidden md:flex items-center text-xs text-slate-600 bg-slate-100 px-3 py-1.5 rounded-full">
               <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
               当前顾客: <strong className="ml-1 text-slate-800">张伟 (黑金SVIP)</strong>
             </div>
 
+            {/* 收货地址快捷入口 */}
             <button
               type="button"
-              onClick={handleOpenOrdersModal}
-              className="px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition shadow-xs flex items-center space-x-1 cursor-pointer"
+              onClick={() => setIsAddressModalOpen(true)}
+              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition shadow-2xs flex items-center space-x-1.5 cursor-pointer"
+            >
+              <span>📍 地址簿</span>
+              <span className="text-slate-400">({addresses.length})</span>
+            </button>
+
+            {/* 我的订单入口 */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsOrdersListModalOpen(true);
+                fetchOrders(orderFilterStatus);
+              }}
+              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition shadow-2xs flex items-center space-x-1.5 cursor-pointer"
             >
               <span>📋 我的订单</span>
               {orders.length > 0 && (
-                <span className="bg-emerald-600 text-white text-xs px-1.5 py-0.2 rounded-full ml-1 font-bold">
+                <span className="bg-emerald-600 text-white text-[11px] px-1.5 py-0.2 rounded-full font-bold">
                   {orders.length}
                 </span>
               )}
             </button>
 
+            {/* 购物车入口 */}
+            <button
+              type="button"
+              onClick={() => setIsCartOpen(true)}
+              className="px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition shadow-2xs flex items-center space-x-1.5 cursor-pointer"
+            >
+              <span>🛒 购物车</span>
+              {totalCartCount > 0 && (
+                <span className="bg-emerald-600 text-white text-[11px] px-1.5 py-0.2 rounded-full font-bold">
+                  {totalCartCount}
+                </span>
+              )}
+            </button>
+
+            {/* 管理后台跳转 */}
             <a
               href="/admin"
-              className="px-3 py-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition flex items-center space-x-1"
+              className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition hidden sm:inline-flex items-center space-x-1"
             >
-              <span>⚙️ 商户后台管理</span>
+              <span>⚙️ 商户后台</span>
             </a>
           </div>
         </div>
@@ -374,12 +588,12 @@ export default function StorefrontPage() {
         )}
       </main>
 
-      {/* SPU / SKU 选规格下单弹窗 */}
+      {/* SPU / SKU 选规格购买与加购弹窗 */}
       {buyingProduct && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 max-h-[90vh] overflow-y-auto flex flex-col">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900">选择商品规格与收货地址</h3>
+              <h3 className="text-base font-bold text-slate-900">选择商品规格与数量</h3>
               <button
                 type="button"
                 onClick={() => setBuyingProduct(null)}
@@ -389,9 +603,9 @@ export default function StorefrontPage() {
               </button>
             </div>
 
-            <div className="py-4 space-y-4">
+            <div className="py-4 space-y-4 flex-1">
               {/* 商品概览 */}
-              <div className="bg-slate-50 p-3 rounded-xl flex items-center space-x-3 border border-slate-200">
+              <div className="bg-slate-50 p-3.5 rounded-xl flex items-center space-x-3.5 border border-slate-200">
                 <img
                   src={
                     selectedSku?.imageUrl ||
@@ -401,11 +615,11 @@ export default function StorefrontPage() {
                   alt="SKU"
                   className="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-white"
                 />
-                <div className="flex-1">
-                  <div className="font-semibold text-slate-900 text-xs line-clamp-1">
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-slate-900 text-xs truncate">
                     {selectedSku?.skuTitle || buyingProduct.title}
                   </div>
-                  <div className="text-emerald-600 font-extrabold text-lg mt-0.5">
+                  <div className="text-emerald-700 font-extrabold text-lg mt-0.5">
                     ¥{selectedSku ? Number(selectedSku.price).toFixed(2) : Number(buyingProduct.price).toFixed(2)}
                   </div>
                   <div className="text-[11px] text-slate-500">
@@ -443,46 +657,54 @@ export default function StorefrontPage() {
                 </div>
               ))}
 
-              {/* 收件人与地址 */}
-              <div className="pt-2 border-t border-slate-100 space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">收货人姓名 & 联系电话</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      value={recipientName}
-                      onChange={(e) => setRecipientName(e.target.value)}
-                      className="px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-emerald-500"
-                    />
-                    <input
-                      type="text"
-                      value={recipientPhone}
-                      onChange={(e) => setRecipientPhone(e.target.value)}
-                      className="px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-emerald-500"
-                    />
+              {/* 数量选择 */}
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-xs font-bold text-slate-700">购买数量</span>
+                <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setBuyQuantity((q) => Math.max(1, q - 1))}
+                    disabled={buyQuantity <= 1}
+                    className="px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-30"
+                  >
+                    -
+                  </button>
+                  <span className="px-3 py-1 text-xs font-bold text-slate-800 min-w-8 text-center">{buyQuantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => setBuyQuantity((q) => Math.min(selectedSku?.stock ?? buyingProduct.stock, q + 1))}
+                    disabled={buyQuantity >= (selectedSku?.stock ?? buyingProduct.stock)}
+                    className="px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-30"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* 当前默认配送地址预览 */}
+              <div className="bg-emerald-50/60 p-3 rounded-xl border border-emerald-200 flex items-center justify-between text-xs">
+                <div className="flex items-center space-x-2">
+                  <span className="text-emerald-700">📍</span>
+                  <div className="text-slate-700">
+                    配送至：
+                    <strong className="text-slate-900 ml-1">
+                      {selectedAddress ? selectedAddress.recipientName : '张伟'}
+                    </strong>{' '}
+                    ({selectedAddress?.fullAddress || '北京市海淀区中关村南大街1号院8号楼1201室'})
                   </div>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">配送地址簿</label>
-                  <select
-                    value={selectedAddress}
-                    onChange={(e) => setSelectedAddress(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-emerald-500 bg-white"
-                  >
-                    <option value="北京市海淀区中关村南大街1号院8号楼1201室">
-                      北京市海淀区中关村南大街1号院8号楼1201室 (默认)
-                    </option>
-                    <option value="北京市朝阳区建国门外大街1号国贸大厦A座 3801室">
-                      北京市朝阳区建国门外大街1号国贸大厦A座 3801室 (国贸)
-                    </option>
-                    <option value="北京市朝阳区望京SOHO T1座 1508室">北京市朝阳区望京SOHO T1座 1508室 (公司)</option>
-                  </select>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddressModalOpen(true)}
+                  className="text-emerald-700 font-semibold hover:underline shrink-0 ml-2"
+                >
+                  修改
+                </button>
               </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">
+            {/* 弹窗底部双操作按钮 (加入购物车 / 立即购买) */}
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-2.5">
               <button
                 type="button"
                 onClick={() => setBuyingProduct(null)}
@@ -492,15 +714,19 @@ export default function StorefrontPage() {
               </button>
               <button
                 type="button"
-                onClick={handlePlaceOrder}
-                disabled={submittingOrder || !selectedSku || selectedSku.stock <= 0}
-                className="px-5 py-2 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 transition shadow-xs disabled:opacity-50 cursor-pointer"
+                onClick={handleAddToCart}
+                disabled={!selectedSku || selectedSku.stock <= 0}
+                className="px-4 py-2 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-white rounded-lg transition shadow-xs disabled:opacity-50 cursor-pointer"
               >
-                {submittingOrder
-                  ? '正在提交订单...'
-                  : selectedSku && selectedSku.stock <= 0
-                    ? '该规格已售罄'
-                    : '确认支付并下单'}
+                🛒 加入购物车
+              </button>
+              <button
+                type="button"
+                onClick={handleInstantBuy}
+                disabled={isCheckingOut || !selectedSku || selectedSku.stock <= 0}
+                className="px-5 py-2 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 transition shadow-xs disabled:opacity-50 cursor-pointer"
+              >
+                {isCheckingOut ? '正在提交...' : '⚡ 立即购买'}
               </button>
             </div>
           </div>
@@ -559,108 +785,93 @@ export default function StorefrontPage() {
         </div>
       )}
 
-      {/* 我的订单抽屉 (Orders Modal) */}
-      {showOrdersModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-200 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">我的订单列表</h3>
-                <p className="text-xs text-slate-500 mt-0.5">顾客 ID: 张伟 (CUST-8801)</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowOrdersModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-xl font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
+      {/* 购物车抽屉 */}
+      <CartDrawer
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        cart={cart}
+        onUpdateQuantity={handleUpdateCartQuantity}
+        onToggleSelect={handleToggleSelectCartItem}
+        onToggleSelectAll={handleToggleSelectAllCart}
+        onRemoveItem={handleRemoveCartItem}
+        onClearCart={handleClearCart}
+        selectedAddress={selectedAddress}
+        onOpenAddressModal={() => setIsAddressModalOpen(true)}
+        onCheckout={handleCartCheckout}
+        isCheckingOut={isCheckingOut}
+      />
 
-            <div className="py-4 overflow-y-auto flex-1 space-y-4">
-              {ordersLoading ? (
-                <div className="space-y-3 py-6">
-                  <div className="h-24 bg-slate-100 rounded-xl animate-pulse" />
-                  <div className="h-24 bg-slate-100 rounded-xl animate-pulse" />
-                </div>
-              ) : orders.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-sm">暂无订单记录，去商城挑选一件吧！</div>
-              ) : (
-                orders.map((order) => (
-                  <div key={order.orderId} className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
-                    <div className="flex items-center justify-between text-xs text-slate-500 border-b border-slate-100 pb-2">
-                      <div className="flex items-center space-x-2">
-                        <span>
-                          订单号: <strong className="text-slate-800">{order.orderId}</strong>
-                        </span>
-                        <span>·</span>
-                        <span>{new Date(order.createdAt).toLocaleDateString()}</span>
-                      </div>
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full font-semibold ${
-                          order.status === 'PAID'
-                            ? 'bg-amber-100 text-amber-800'
-                            : order.status === 'SHIPPED'
-                              ? 'bg-blue-100 text-blue-800'
-                              : order.status === 'REFUNDED'
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-slate-100 text-slate-800'
-                        }`}
-                      >
-                        {order.status === 'PAID' && '待发货'}
-                        {order.status === 'SHIPPED' && '已发货'}
-                        {order.status === 'REFUNDED' && '已退款'}
-                        {!['PAID', 'SHIPPED', 'REFUNDED'].includes(order.status) && order.status}
-                      </span>
-                    </div>
+      {/* 地址簿管理弹窗 */}
+      <AddressModal
+        isOpen={isAddressModalOpen}
+        onClose={() => setIsAddressModalOpen(false)}
+        addresses={addresses}
+        selectedAddressId={selectedAddress?.id}
+        onSelectAddress={(addr) => setSelectedAddress(addr)}
+        onAddAddress={handleAddNewAddress}
+      />
 
-                    <div className="space-y-2">
-                      {order.items.map((item, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-xs">
-                          <div>
-                            <span className="text-slate-900 font-medium">{item.title}</span>
-                            {item.specSummary && (
-                              <span className="text-[11px] text-slate-500 bg-slate-200 px-1.5 py-0.2 rounded ml-2">
-                                {item.specSummary}
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-slate-600 font-semibold">
-                            x{item.quantity} · ¥{Number(item.price).toFixed(2)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+      {/* 订单列表中心弹窗 */}
+      <OrdersListModal
+        isOpen={isOrdersListModalOpen}
+        onClose={() => setIsOrdersListModalOpen(false)}
+        orders={orders}
+        loading={ordersLoading}
+        currentStatus={orderFilterStatus}
+        onFilterStatus={(status) => {
+          setOrderFilterStatus(status);
+          fetchOrders(status);
+        }}
+        onSelectOrder={(order) => {
+          setSelectedDetailOrder(order);
+          setIsOrderDetailModalOpen(true);
+        }}
+        onOpenLogistics={(order) => {
+          setSelectedLogisticsOrder(order);
+          setIsLogisticsModalOpen(true);
+        }}
+        onOpenChatWithOrder={handleOpenChatWithOrder}
+      />
 
-                    <div className="pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-1">
-                      <div>
-                        📍 配送地址: <strong className="text-slate-800">{order.shippingAddress.fullAddress}</strong>
-                      </div>
-                      <div>
-                        👤 收件人: {order.shippingAddress.recipientName} ({order.shippingAddress.phone})
-                      </div>
-                      {order.tracking && (
-                        <div className="text-blue-600 font-medium">
-                          🚚 物流单号: {order.tracking.carrier} - {order.tracking.trackingNumber}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 订单详情快照弹窗 */}
+      <OrderDetailModal
+        isOpen={isOrderDetailModalOpen}
+        onClose={() => setIsOrderDetailModalOpen(false)}
+        order={selectedDetailOrder}
+        onOpenLogistics={(order) => {
+          setSelectedLogisticsOrder(order);
+          setIsLogisticsModalOpen(true);
+        }}
+        onOpenChatWithOrder={handleOpenChatWithOrder}
+      />
 
-      {/* 右下角悬浮在线客服入口 */}
-      <div className="fixed bottom-6 right-6 z-40">
+      {/* 物流实时轨迹弹窗 */}
+      <LogisticsModal
+        isOpen={isLogisticsModalOpen}
+        onClose={() => setIsLogisticsModalOpen(false)}
+        order={selectedLogisticsOrder}
+        onOpenChatWithOrder={handleOpenChatWithOrder}
+      />
+
+      {/* 右下角悬浮客服与购物车气泡 */}
+      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end space-y-3">
+        {totalCartCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setIsCartOpen(true)}
+            className="px-4 py-3 bg-amber-500 text-white font-bold rounded-full shadow-lg hover:bg-amber-400 hover:shadow-xl transition-all flex items-center space-x-2 text-xs border-2 border-white cursor-pointer"
+          >
+            <span className="text-base">🛒</span>
+            <span>购物车 ({totalCartCount})</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => setShowChatModal(!showChatModal)}
-          className="px-4 py-3 bg-emerald-600 text-white font-semibold rounded-full shadow-lg hover:bg-emerald-500 hover:shadow-xl transition-all flex items-center space-x-2 text-sm border-2 border-white cursor-pointer"
+          className="px-4 py-3 bg-emerald-600 text-white font-semibold rounded-full shadow-lg hover:bg-emerald-500 hover:shadow-xl transition-all flex items-center space-x-2 text-xs border-2 border-white cursor-pointer"
         >
-          <span className="text-lg">💬</span>
+          <span className="text-base">💬</span>
           <span>极光智能客服</span>
         </button>
       </div>

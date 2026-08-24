@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { approvalOutboxEvents, db, pendingApprovals as dbPendingApprovals, getDrizzle, threads, users } from 'db';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { redis, useRedis } from 'tools';
 import type { PendingApprovalRecord } from 'types';
 import { agentEventEmitter } from '../graph/eventEmitter';
@@ -369,8 +369,8 @@ export class ApprovalGatekeeper {
         businessId: threads.businessId,
       })
       .from(dbPendingApprovals)
-      .innerJoin(threads, eq(dbPendingApprovals.threadId, threads.id))
-      .leftJoin(users, eq(threads.userId, users.id))
+      .leftJoin(threads, eq(dbPendingApprovals.threadId, threads.id))
+      .leftJoin(users, sql`${threads.userId} = ${users.id}::text`)
       .orderBy(desc(dbPendingApprovals.createdAt));
 
     return rows as PendingApprovalRecord[];
@@ -482,7 +482,7 @@ export class ApprovalGatekeeper {
         userEmail: users.email,
       })
       .from(threads)
-      .leftJoin(users, eq(threads.userId, users.id))
+      .leftJoin(users, sql`${threads.userId} = ${users.id}::text`)
       .where(eq(threads.id, threadId))
       .limit(1);
 
@@ -818,6 +818,12 @@ export class ApprovalGatekeeper {
         jobId: deterministicJobId,
         threadId: record.threadId,
         status: nextStatus,
+      };
+    } catch (err: any) {
+      console.warn('[ApprovalGatekeeper] Approval processing error:', err);
+      return {
+        error: `审批执行失败: ${err?.message || String(err)}`,
+        statusCode: 500,
       };
     } finally {
       if (useRedis && redis && lockAcquired) {

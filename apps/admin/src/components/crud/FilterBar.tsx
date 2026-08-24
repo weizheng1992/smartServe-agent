@@ -1,8 +1,5 @@
-import React from "react";
-import {
-  useAdminTenantStore,
-  SUPPORTED_TENANTS,
-} from "../../store/tenantStore";
+import type React from 'react';
+import { SUPPORTED_TENANTS, useAdminTenantStore } from '../../store/tenantStore';
 
 export interface FilterOption {
   label: string;
@@ -27,7 +24,7 @@ export interface FilterBarProps {
 export function FilterBar({
   searchQuery,
   onSearchChange,
-  searchPlaceholder = "输入关键字搜索...",
+  searchPlaceholder = '输入关键字搜索...',
   statusFilter,
   onStatusChange,
   statusOptions,
@@ -39,8 +36,7 @@ export function FilterBar({
   actions,
 }: FilterBarProps) {
   const { selectedTenantId, setSelectedTenantId } = useAdminTenantStore();
-  const activeTenant =
-    tenantFilter !== undefined ? tenantFilter : selectedTenantId;
+  const activeTenant = tenantFilter !== undefined ? tenantFilter : selectedTenantId;
   const handleTenantSelect = (val: string) => {
     if (onTenantChange) {
       onTenantChange(val);
@@ -70,7 +66,7 @@ export function FilterBar({
             </svg>
             <input
               type="text"
-              value={searchQuery ?? ""}
+              value={searchQuery ?? ''}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder={searchPlaceholder}
               className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:border-slate-400 transition-colors"
@@ -83,7 +79,7 @@ export function FilterBar({
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <span>状态:</span>
             <select
-              value={statusFilter ?? ""}
+              value={statusFilter ?? ''}
               onChange={(e) => onStatusChange(e.target.value)}
               className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-hidden focus:border-slate-400 transition-colors"
             >

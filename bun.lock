@@ -166,6 +166,7 @@
       "name": "tools",
       "version": "0.1.0",
       "dependencies": {
+        "business-configs": "workspace:*",
         "db": "workspace:*",
         "ioredis": "^5.4.0",
         "puppeteer-core": "^22.12.0",

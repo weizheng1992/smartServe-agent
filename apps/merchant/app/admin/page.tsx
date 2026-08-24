@@ -1,6 +1,14 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ApprovalContextDrawer,
+  CheckCircle2,
+  PendingApprovalCard,
+  RichCardRenderer,
+  ShieldAlert,
+  useApprovalMachine,
+} from 'ui';
 
 interface OrderRow {
   order_id: string;
@@ -58,39 +66,255 @@ interface SpuRow {
   specs: Record<string, string>;
 }
 
+interface ApprovalItem {
+  id: string;
+  threadId: string;
+  businessId?: string;
+  userId?: string;
+  userEmail?: string;
+  actionType: string;
+  actionPayload: any;
+  status: string;
+  reason?: string;
+  deadline?: string;
+  createdAt: string;
+}
+
+interface ConversationItem {
+  id: string;
+  threadId?: string;
+  businessId: string;
+  userId?: string;
+  status: string;
+  assignedOperatorId?: string;
+  lastMessage?: string;
+  lastMessageSnippet?: string;
+  updatedAt: string;
+  createdAt: string;
+}
+
+interface MessageItem {
+  id: string;
+  role: 'user' | 'assistant' | 'system' | 'operator';
+  content: string;
+  cards?: any[];
+  operatorInfo?: { operatorId: string; operatorName: string };
+  timestamp: string;
+}
+
 export default function MerchantAdminPage() {
-  const [activeTab, setActiveTab] = useState<'orders' | 'spus' | 'skus' | 'spi_logs'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'approvals' | 'live_desk' | 'spus' | 'skus' | 'spi_logs'>(
+    'orders',
+  );
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [spus, setSpus] = useState<SpuRow[]>([]);
   const [skus, setSkus] = useState<SkuRow[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [activeThreadMessages, setActiveThreadMessages] = useState<MessageItem[]>([]);
+  const [inputMessage, setInputMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [shippingOrderId, setShippingOrderId] = useState<string | null>(null);
   const [trackingNumberInput, setTrackingNumberInput] = useState('');
   const [carrierInput, setCarrierInput] = useState('SF');
   const [selectedLog, setSelectedLog] = useState<AuditLogRow | null>(null);
+  const [inspectingApproval, setInspectingApproval] = useState<ApprovalItem | null>(null);
+  const [isTakingOver, setIsTakingOver] = useState(false);
 
-  const fetchDashboardData = async () => {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { submittingActionId, rejectionReasons, setRejectionReasons, executeApprovalAction, executeHumanReplyAction } =
+    useApprovalMachine('/api/admin/approvals');
+
+  const loadConversationMessages = useCallback(async (threadId: string) => {
+    if (!threadId) return;
+    try {
+      const resp = await fetch(`/api/admin/conversations/${threadId}?tenantId=aurora`);
+      if (resp.ok) {
+        const json = await resp.json();
+        if (json.success && json.data) {
+          setActiveThreadMessages(json.data.messages || []);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch thread timeline:', err);
+    }
+  }, []);
+
+  const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      const resp = await fetch('/api/admin/orders');
-      const data = await resp.json();
-      if (data.success) {
-        setOrders(data.orders || []);
-        setAuditLogs(data.auditLogs || []);
-        setSpus(data.spus || []);
-        setSkus(data.skus || []);
+      const [orderResp, appResp, convResp] = await Promise.all([
+        fetch('/api/admin/orders').catch(() => null),
+        fetch('/api/admin/approvals?tenantId=aurora').catch(() => null),
+        fetch('/api/admin/conversations?tenantId=aurora').catch(() => null),
+      ]);
+
+      if (orderResp && orderResp.ok) {
+        const data = await orderResp.json();
+        if (data.success) {
+          setOrders(data.orders || []);
+          setAuditLogs(data.auditLogs || []);
+          setSpus(data.spus || []);
+          setSkus(data.skus || []);
+        }
+      }
+
+      if (appResp && appResp.ok) {
+        const appData = await appResp.json();
+        if (appData.success) {
+          setApprovals(appData.approvals || []);
+        }
+      }
+
+      if (convResp && convResp.ok) {
+        const convData = await convResp.json();
+        if (convData.success) {
+          const rawList = convData.conversations || [];
+          const convList: ConversationItem[] = rawList.map((item: any) => ({
+            ...item,
+            id: item.id || item.threadId,
+            threadId: item.threadId || item.id,
+            lastMessage: item.lastMessage || item.lastMessageSnippet,
+          }));
+          setConversations(convList);
+          if (convList.length > 0 && !activeThreadId) {
+            const initialId = convList[0].threadId || convList[0].id;
+            setActiveThreadId(initialId);
+            loadConversationMessages(initialId);
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to fetch merchant admin data:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeThreadId, loadConversationMessages]);
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+    const interval = setInterval(fetchDashboardData, 8000);
+    return () => clearInterval(interval);
+  }, [fetchDashboardData]);
+
+  useEffect(() => {
+    if (activeThreadId) {
+      loadConversationMessages(activeThreadId);
+      const interval = setInterval(() => loadConversationMessages(activeThreadId), 3000);
+      return () => clearInterval(interval);
+    }
+  }, [activeThreadId, loadConversationMessages]);
+
+  useEffect(() => {
+    if (activeTab === 'live_desk') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [activeThreadMessages, activeTab]);
+
+  const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {
+    const result = await executeApprovalAction({
+      approvalId,
+      action,
+      apiEndpoint: '/api/admin/approvals',
+    });
+    if (result.success) {
+      await fetchDashboardData();
+      if (inspectingApproval?.id === approvalId) {
+        setInspectingApproval(null);
+      }
+    } else if (result.error) {
+      alert(result.error);
+    }
+  };
+
+  const handleHumanReply = async (approvalId: string, replyMessage: string, isFinish = false) => {
+    const result = await executeHumanReplyAction({
+      approvalId,
+      replyMessage,
+      isFinish,
+      apiEndpoint: '/api/admin/approvals',
+    });
+    if (result.success) {
+      await fetchDashboardData();
+    } else if (result.error) {
+      alert(result.error);
+    }
+  };
+
+  const handleTakeover = async (threadId: string) => {
+    setIsTakingOver(true);
+    try {
+      await fetch('/api/admin/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId,
+          action: 'start_human_takeover',
+        }),
+      });
+      await fetchDashboardData();
+      if (activeThreadId) {
+        await loadConversationMessages(activeThreadId);
+      }
+    } catch (err) {
+      console.error('Takeover failed:', err);
+    } finally {
+      setIsTakingOver(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim() || !activeThreadId) return;
+    const msg = inputMessage.trim();
+    setInputMessage('');
+
+    // Optimistic append
+    const optMsg: MessageItem = {
+      id: `opt_${Date.now()}`,
+      role: 'assistant',
+      content: `[商户客服] ${msg}`,
+      timestamp: new Date().toISOString(),
+    };
+    setActiveThreadMessages((prev) => [...prev, optMsg]);
+
+    try {
+      // Find active approval or trigger resolve
+      const app = approvals.find((a) => a.threadId === activeThreadId && a.status === 'waiting');
+      if (app) {
+        await executeHumanReplyAction({
+          approvalId: app.id,
+          replyMessage: msg,
+          isFinish: false,
+          apiEndpoint: '/api/admin/approvals',
+        });
+      } else {
+        // Direct start takeover and send message
+        const res = await fetch('/api/admin/approvals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            threadId: activeThreadId,
+            action: 'start_human_takeover',
+          }),
+        });
+        const d = await res.json();
+        if (d.approvalId) {
+          await executeHumanReplyAction({
+            approvalId: d.approvalId,
+            replyMessage: msg,
+            isFinish: false,
+            apiEndpoint: '/api/admin/approvals',
+          });
+        }
+      }
+      await loadConversationMessages(activeThreadId);
+    } catch (err) {
+      console.error('Failed to send live message:', err);
+    }
+  };
 
   const handleShipOrder = async (orderId: string) => {
     if (!trackingNumberInput.trim()) {
@@ -122,21 +346,25 @@ export default function MerchantAdminPage() {
     }
   };
 
+  const pendingApprovalsCount = approvals.filter((a) => a.status === 'waiting').length;
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
       {/* 顶部商户后台 Header */}
       <header className="bg-slate-900 text-white border-b border-slate-800 h-16 flex items-center justify-between px-6 sticky top-0 z-20">
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded bg-emerald-600 flex items-center justify-center font-bold text-white">A</div>
+          <div className="w-8 h-8 rounded bg-emerald-600 flex items-center justify-center font-bold text-white shadow-sm">
+            A
+          </div>
           <div>
             <div className="font-bold text-base tracking-tight flex items-center space-x-2">
               <span>极光潮品商户后台管理系统</span>
-              <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded">
-                Merchant Admin
+              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono">
+                Aurora Merchant Port 3005
               </span>
             </div>
             <div className="text-[11px] text-slate-400">
-              独立数据库物理隔离 · SPU / SKU 多规格电商领域模型 (Port 3005)
+              独立物理隔离 · SPU/SKU 多规格电商 · HITL 审批中枢 · LiveDesk 在线客服
             </div>
           </div>
         </div>
@@ -151,7 +379,7 @@ export default function MerchantAdminPage() {
           </button>
           <a
             href="/"
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded transition flex items-center space-x-1"
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded transition flex items-center space-x-1 shadow-xs"
           >
             <span>🛍️ 返回商城前台</span>
           </a>
@@ -170,20 +398,33 @@ export default function MerchantAdminPage() {
             <div className="text-3xl text-slate-300">📋</div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div
+            onClick={() => setActiveTab('approvals')}
+            className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between cursor-pointer hover:border-amber-400 transition"
+          >
             <div>
-              <div className="text-xs text-slate-500 font-medium">SPU 商品主体</div>
-              <div className="text-2xl font-bold text-slate-900 mt-1">{spus.length} 个</div>
+              <div className="text-xs text-slate-500 font-medium flex items-center space-x-1">
+                <span>待人工审核工单</span>
+                {pendingApprovalsCount > 0 && <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />}
+              </div>
+              <div
+                className={`text-2xl font-bold mt-1 ${pendingApprovalsCount > 0 ? 'text-amber-600' : 'text-slate-900'}`}
+              >
+                {pendingApprovalsCount} 笔
+              </div>
             </div>
-            <div className="text-3xl text-slate-300">🏷️</div>
+            <div className="text-3xl text-amber-300">🛡️</div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div
+            onClick={() => setActiveTab('live_desk')}
+            className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between cursor-pointer hover:border-blue-400 transition"
+          >
             <div>
-              <div className="text-xs text-slate-500 font-medium">SKU 规格库存单元</div>
-              <div className="text-2xl font-bold text-slate-900 mt-1">{skus.length} 款</div>
+              <div className="text-xs text-slate-500 font-medium">活跃在线会话</div>
+              <div className="text-2xl font-bold text-blue-600 mt-1">{conversations.length} 组</div>
             </div>
-            <div className="text-3xl text-slate-300">📦</div>
+            <div className="text-3xl text-blue-300">💬</div>
           </div>
 
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
@@ -196,11 +437,11 @@ export default function MerchantAdminPage() {
         </div>
 
         {/* 标签栏导航 */}
-        <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-3 gap-6 shadow-2xs">
+        <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-3 gap-6 shadow-2xs overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('orders')}
-            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition cursor-pointer ${
+            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
               activeTab === 'orders'
                 ? 'border-emerald-600 text-emerald-700'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -212,8 +453,42 @@ export default function MerchantAdminPage() {
 
           <button
             type="button"
+            onClick={() => setActiveTab('approvals')}
+            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
+              activeTab === 'approvals'
+                ? 'border-amber-500 text-amber-700'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span>🛡️ 待办审核 (HITL)</span>
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                pendingApprovalsCount > 0 ? 'bg-amber-100 text-amber-800 animate-pulse' : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {pendingApprovalsCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('live_desk')}
+            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
+              activeTab === 'live_desk'
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span>💬 在线客服工作台</span>
+            <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">
+              {conversations.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('spus')}
-            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition cursor-pointer ${
+            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
               activeTab === 'spus'
                 ? 'border-emerald-600 text-emerald-700'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -226,7 +501,7 @@ export default function MerchantAdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('skus')}
-            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition cursor-pointer ${
+            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
               activeTab === 'skus'
                 ? 'border-emerald-600 text-emerald-700'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -239,7 +514,7 @@ export default function MerchantAdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('spi_logs')}
-            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition cursor-pointer ${
+            className={`pb-3 text-sm font-semibold flex items-center space-x-2 border-b-2 transition whitespace-nowrap cursor-pointer ${
               activeTab === 'spi_logs'
                 ? 'border-emerald-600 text-emerald-700'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -342,7 +617,250 @@ export default function MerchantAdminPage() {
           </div>
         )}
 
-        {/* Tab 2: SPU 商品库 */}
+        {/* Tab 2: 待办审核中心 (HITL) */}
+        {activeTab === 'approvals' && (
+          <div className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <ShieldAlert className="w-6 h-6 text-amber-600 shrink-0" />
+                <div>
+                  <h4 className="text-sm font-bold text-amber-900">
+                    商户待办安全审核中心 (Human-in-the-Loop Safe Approvals)
+                  </h4>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    展示 AI
+                    决策引擎拦截的高危操作（如大额退款、发货前改地址等）。商户审核决议后，系统将通过事务发件箱自动恢复工作流执行。
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={fetchDashboardData}
+                className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 transition cursor-pointer shrink-0"
+              >
+                刷新工单
+              </button>
+            </div>
+
+            {approvals.length === 0 ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-12 text-center space-y-3 shadow-2xs">
+                <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
+                <h4 className="text-sm font-bold text-slate-800">当前大盘一片绿灯</h4>
+                <p className="text-xs text-slate-400">暂无待审核任务。当顾客在商城发起超阈值退款时将在此展示。</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {approvals.map((approval) => (
+                  <PendingApprovalCard
+                    key={approval.id}
+                    approval={approval as any}
+                    rejectionReason={rejectionReasons[approval.id] || ''}
+                    setRejectionReason={(val) =>
+                      setRejectionReasons((prev) => ({
+                        ...prev,
+                        [approval.id]: val,
+                      }))
+                    }
+                    isSubmitting={submittingActionId === approval.id}
+                    onApprove={(id) => handleApprovalAction(id, 'approve')}
+                    onReject={(id) => handleApprovalAction(id, 'reject')}
+                    onOpenChat={() => {
+                      setActiveThreadId(approval.threadId);
+                      setActiveTab('live_desk');
+                    }}
+                    onInspect={() => setInspectingApproval(approval)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: 在线客服工作台 (Live Desk Takeover) */}
+        {activeTab === 'live_desk' && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col md:flex-row h-[700px]">
+            {/* 左侧会话列表 */}
+            <div className="w-full md:w-80 border-r border-slate-200 flex flex-col bg-slate-50">
+              <div className="p-3.5 border-b border-slate-200 bg-white flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900">💬 客服会话队列</h3>
+                  <span className="text-[10px] text-slate-500">商户专属客户会话实时接入</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchDashboardData}
+                  className="text-xs text-slate-500 hover:text-slate-800 cursor-pointer"
+                >
+                  🔄
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                {conversations.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400">暂无会话记录</div>
+                ) : (
+                  conversations.map((c) => {
+                    const threadId = c.threadId || c.id;
+                    const isSelected = activeThreadId === threadId;
+                    const isTakeover = c.status === 'human_takeover';
+                    return (
+                      <div
+                        key={threadId}
+                        onClick={() => {
+                          setActiveThreadId(threadId);
+                          loadConversationMessages(threadId);
+                        }}
+                        className={`p-3.5 cursor-pointer transition flex flex-col space-y-1.5 ${
+                          isSelected ? 'bg-blue-50/80 border-l-4 border-blue-600' : 'hover:bg-slate-100/70'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-xs text-slate-900 truncate">
+                            {c.userId || '顾客 CUST-8801'}
+                          </span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                              isTakeover ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            {isTakeover ? '👨‍💼 人工接管中' : '🤖 AI 托管中'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate font-mono">{threadId}</p>
+                        {c.lastMessage && (
+                          <p className="text-[11px] text-slate-600 truncate bg-slate-100/80 px-2 py-0.5 rounded">
+                            {c.lastMessage}
+                          </p>
+                        )}
+                        <div className="text-[10px] text-slate-400 flex justify-between">
+                          <span>{new Date(c.updatedAt || c.createdAt).toLocaleTimeString()}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* 右侧实时聊天与接管面板 */}
+            <div className="flex-1 flex flex-col bg-slate-100/50">
+              {activeThreadId ? (
+                <>
+                  {/* 对话 Header */}
+                  <div className="p-3.5 bg-white border-b border-slate-200 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-xs text-slate-900">会话: {activeThreadId}</span>
+                        <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
+                          Tenant: aurora
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        支持客服实时监听、主动发送消息或一键接管会话
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTakeover(activeThreadId)}
+                        disabled={isTakingOver}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs flex items-center space-x-1"
+                      >
+                        <span>🚨 主动接管会话</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 消息流 */}
+                  <div className="flex-1 p-4 overflow-y-auto space-y-3">
+                    {activeThreadMessages.length === 0 ? (
+                      <div className="p-12 text-center text-xs text-slate-400">正在等待消息流接入...</div>
+                    ) : (
+                      activeThreadMessages.map((msg, idx) => {
+                        const isUser = msg.role === 'user';
+                        const isSystem = msg.role === 'system';
+                        const isOperator =
+                          msg.content?.startsWith('[人工客服]') || msg.content?.startsWith('[商户客服]');
+
+                        if (isSystem) {
+                          return (
+                            <div key={msg.id || idx} className="text-center my-2">
+                              <span className="text-[10px] bg-slate-200/80 text-slate-600 px-3 py-1 rounded-full font-medium">
+                                {msg.content}
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div key={msg.id || idx} className={`flex flex-col ${isUser ? 'items-start' : 'items-end'}`}>
+                            <span className="text-[10px] text-slate-400 mb-1 px-1">
+                              {isUser ? '👤 顾客' : isOperator ? '👨‍💼 商户客服' : '🤖 AI 助手'} ·{' '}
+                              {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
+                            </span>
+                            <div
+                              className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs shadow-2xs leading-relaxed ${
+                                isUser
+                                  ? 'bg-white text-slate-800 border border-slate-200'
+                                  : isOperator
+                                    ? 'bg-amber-600 text-white font-medium'
+                                    : 'bg-emerald-600 text-white'
+                              }`}
+                            >
+                              <div className="whitespace-pre-wrap">{msg.content}</div>
+
+                              {/* 卡片渲染 */}
+                              {msg.cards && msg.cards.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-white/20 space-y-2">
+                                  {msg.cards.map((c, cIdx) => (
+                                    <RichCardRenderer key={cIdx} card={c} />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
+
+                  {/* 输入框 Footer */}
+                  <div className="p-3 bg-white border-t border-slate-200 flex items-center space-x-2">
+                    <input
+                      type="text"
+                      value={inputMessage}
+                      onChange={(e) => setInputMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      placeholder="以商户客服身份发送消息并直接与顾客沟通..."
+                      className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSendMessage}
+                      disabled={!inputMessage.trim()}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold transition cursor-pointer shadow-xs"
+                    >
+                      发送
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
+                  请在左侧选择一个会话以开始监控与客服接管
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 4: SPU 商品库 */}
         {activeTab === 'spus' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {spus.map((spu) => (
@@ -391,7 +909,7 @@ export default function MerchantAdminPage() {
           </div>
         )}
 
-        {/* Tab 3: SKU 规格库存管理 */}
+        {/* Tab 5: SKU 规格库存管理 */}
         {activeTab === 'skus' && (
           <div className="bg-white rounded-b-xl border border-slate-200 shadow-2xs overflow-hidden">
             <table className="w-full text-left text-xs">
@@ -432,7 +950,7 @@ export default function MerchantAdminPage() {
           </div>
         )}
 
-        {/* Tab 4: AI 客服对接配置与 SPI 审计流水 */}
+        {/* Tab 6: AI 客服对接配置与 SPI 审计流水 */}
         {activeTab === 'spi_logs' && (
           <div className="space-y-6">
             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs space-y-4">
@@ -513,6 +1031,25 @@ export default function MerchantAdminPage() {
           </div>
         )}
       </div>
+
+      {/* 审核上下文抽屉 */}
+      <ApprovalContextDrawer
+        isOpen={Boolean(inspectingApproval)}
+        onClose={() => setInspectingApproval(null)}
+        approval={inspectingApproval as any}
+        onApprove={async (id) => {
+          await handleApprovalAction(id, 'approve');
+        }}
+        onReject={async (id, reason) => {
+          if (reason) {
+            setRejectionReasons((prev) => ({ ...prev, [id]: reason }));
+          }
+          await handleApprovalAction(id, 'reject');
+        }}
+        onHumanReply={async (id, replyMsg, isFinish) => {
+          await handleHumanReply(id, replyMsg, isFinish);
+        }}
+      />
 
       {/* 发货弹窗 */}
       {shippingOrderId && (

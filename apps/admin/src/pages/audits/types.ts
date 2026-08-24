@@ -4,7 +4,7 @@ export interface AuditRecord {
   businessId: string;
   actionType: string;
   actionPayload: Record<string, any>;
-  status: "waiting" | "approved" | "rejected" | "timed_out";
+  status: 'waiting' | 'approved' | 'rejected' | 'timed_out';
   reviewerId?: string;
   rejectionReason?: string;
   createdAt: string;

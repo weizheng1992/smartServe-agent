@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from 'react';
 import {
   Bot,
   Button,
@@ -14,7 +14,7 @@ import {
   Sparkles,
   User,
   X,
-} from "ui";
+} from 'ui';
 
 export interface ChatWidgetProps {
   businessId?: string;
@@ -26,53 +26,45 @@ export interface ChatWidgetProps {
 }
 
 export function ChatWidget({
-  businessId = "ecommerce",
-  themeColor = "#4f46e5",
-  brandName = "官方智能客服",
+  businessId = 'ecommerce',
+  themeColor = '#4f46e5',
+  brandName = '官方智能客服',
   brandLogoUrl,
-  welcomeText = "您好！我是您的专属智能客服助手，请问有什么可以帮您？",
+  welcomeText = '您好！我是您的专属智能客服助手，请问有什么可以帮您？',
   initialOpen = false,
 }: ChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(initialOpen);
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<
-    Array<{ id: string; role: string; content: string; cards?: any[] }>
-  >([
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<Array<{ id: string; role: string; content: string; cards?: any[] }>>([
     {
-      id: "welcome",
-      role: "assistant",
+      id: 'welcome',
+      role: 'assistant',
       content: welcomeText,
     },
   ]);
   const [isLoading, setIsLoading] = useState(false);
-  const [threadId] = useState(
-    () =>
-      `widget_thread_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-  );
+  const [threadId] = useState(() => `widget_thread_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
 
   // 动态注入商户 CSS 主题变量
   useEffect(() => {
-    document.documentElement.style.setProperty(
-      "--widget-theme-color",
-      themeColor,
-    );
+    document.documentElement.style.setProperty('--widget-theme-color', themeColor);
   }, [themeColor]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
     const text = input.trim();
-    setInput("");
+    setInput('');
 
-    const userMsg = { id: `u_${Date.now()}`, role: "user", content: text };
+    const userMsg = { id: `u_${Date.now()}`, role: 'user', content: text };
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
     try {
-      const res = await fetch("http://localhost:4000/api/chat", {
-        method: "POST",
+      const res = await fetch('http://localhost:4000/api/chat', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          "x-tenant-id": businessId,
+          'Content-Type': 'application/json',
+          'x-tenant-id': businessId,
         },
         body: JSON.stringify({
           message: text,
@@ -88,8 +80,8 @@ export function ChatWidget({
           ...prev,
           {
             id: `a_${Date.now()}`,
-            role: "assistant",
-            content: data.output || data.result || "已为您处理完毕。",
+            role: 'assistant',
+            content: data.output || data.result || '已为您处理完毕。',
             cards: data.cards || [],
           },
         ]);
@@ -98,8 +90,8 @@ export function ChatWidget({
           ...prev,
           {
             id: `err_${Date.now()}`,
-            role: "assistant",
-            content: "抱歉，当前网络异常，请稍后重试。",
+            role: 'assistant',
+            content: '抱歉，当前网络异常，请稍后重试。',
           },
         ]);
       }
@@ -108,8 +100,8 @@ export function ChatWidget({
         ...prev,
         {
           id: `err_${Date.now()}`,
-          role: "assistant",
-          content: "连接网关失败，请确保本地服务正常运行。",
+          role: 'assistant',
+          content: '连接网关失败，请确保本地服务正常运行。',
         },
       ]);
     } finally {
@@ -130,11 +122,7 @@ export function ChatWidget({
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center font-bold text-white shadow-inner">
                 {brandLogoUrl ? (
-                  <img
-                    src={brandLogoUrl}
-                    alt={brandName}
-                    className="w-6 h-6 rounded-full"
-                  />
+                  <img src={brandLogoUrl} alt={brandName} className="w-6 h-6 rounded-full" />
                 ) : (
                   <Bot className="w-5 h-5" />
                 )}
@@ -162,17 +150,14 @@ export function ChatWidget({
           {/* Message Feed */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950/60">
             {messages.map((m) => {
-              const isUser = m.role === "user";
+              const isUser = m.role === 'user';
               return (
-                <div
-                  key={m.id}
-                  className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}
-                >
+                <div key={m.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
                   <div
                     className={`max-w-[85%] p-3 rounded-2xl text-xs leading-relaxed ${
                       isUser
-                        ? "text-white rounded-tr-sm shadow-md"
-                        : "bg-slate-800 text-slate-200 border border-slate-700/80 rounded-tl-sm"
+                        ? 'text-white rounded-tr-sm shadow-md'
+                        : 'bg-slate-800 text-slate-200 border border-slate-700/80 rounded-tl-sm'
                     }`}
                     style={isUser ? { backgroundColor: themeColor } : undefined}
                   >
@@ -201,7 +186,7 @@ export function ChatWidget({
               placeholder="输入您的问题..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               className="h-9 text-xs bg-slate-950 border-slate-800 rounded-xl focus:border-indigo-500"
             />
             <Button
@@ -224,11 +209,7 @@ export function ChatWidget({
         className="h-14 w-14 rounded-full text-white shadow-2xl flex items-center justify-center transition-all transform hover:scale-105 active:scale-95 border-2 border-white/20"
         style={{ backgroundColor: themeColor }}
       >
-        {isOpen ? (
-          <X className="w-6 h-6" />
-        ) : (
-          <MessageSquare className="w-6 h-6" />
-        )}
+        {isOpen ? <X className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}
       </button>
     </div>
   );

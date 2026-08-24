@@ -3,6 +3,7 @@ import { logger } from 'observability';
 import { getTool } from 'tools';
 import { getLLM } from '../../llm/callLLMWithRetry';
 import { ShortMemory } from '../../memory/shortMemory';
+import { SkillRegistry } from '../../skills';
 import { agentEventEmitter } from '../eventEmitter';
 import { type AgentStateAnnotation, type SubTask, type TaskPlan, buildHistoryContext } from '../state';
 import { ApprovalPolicyEngine } from './approvalPolicyEngine';
@@ -239,46 +240,90 @@ ${historyContext}`;
       }
     }
 
-    // 5. 工具物理调度与执行 (Physical Tool Execution)
-    const toolDef = getTool(parsedToolCall.toolName);
-    if (toolDef) {
+    // 5. 工具/技能物理调度与执行 (Physical Tool & Skill Execution)
+    const skillDef = SkillRegistry.getSkill(parsedToolCall.toolName);
+    if (skillDef) {
       if (state.jobId) {
         agentEventEmitter.emit(`${state.jobId}:status`, {
           status: 'executing',
           node: 'executor',
-          message: `正在真实调起物理工具接口 [${parsedToolCall.toolName}]，传入参数: ${JSON.stringify(parsedToolCall.args)}...`,
+          message: `正在调起业务技能 [${skillDef.metadata.name}]，执行 SOP 闭环...`,
         });
       }
 
-      const output = await toolDef.execute({
-        ...parsedToolCall.args,
+      const tenantId = (state.businessConfig?.businessId || (state as any).businessId || 'ecommerce').toLowerCase();
+      const skillResult = await skillDef.execute({
         threadId: state.threadId,
-        isApproved: true,
+        tenantId,
+        userId: state.userId,
+        input: state.input,
+        slots: {
+          ...parsedToolCall.args,
+          activeIntent: (state.intents && state.intents[0]?.intent) || '',
+        },
+        imageUrls: state.imageUrls,
+        extra: {
+          isApproved: true,
+          damageAssessment: state.damageAssessment,
+        },
       });
-      resultData = { toolExecuted: parsedToolCall.toolName, output };
 
-      // 插入评估分析日志
-      if (state.threadId) {
-        try {
-          const runId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
-          await db.execute(`
+      resultData = {
+        toolExecuted: parsedToolCall.toolName,
+        output: skillResult.output,
+        cards: skillResult.cards,
+        success: skillResult.success,
+        error: skillResult.error,
+      };
+
+      if (skillResult.cards && skillResult.cards.length > 0) {
+        state.cards = (state.cards || []).concat(skillResult.cards);
+      }
+    } else {
+      const toolDef = getTool(parsedToolCall.toolName);
+      if (toolDef) {
+        if (state.jobId) {
+          agentEventEmitter.emit(`${state.jobId}:status`, {
+            status: 'executing',
+            node: 'executor',
+            message: `正在真实调起物理工具接口 [${parsedToolCall.toolName}]，传入参数: ${JSON.stringify(parsedToolCall.args)}...`,
+          });
+        }
+
+        const tenantId = (state.businessConfig?.businessId || (state as any).businessId || 'ecommerce').toLowerCase();
+        const output = await toolDef.execute({
+          ...parsedToolCall.args,
+          threadId: state.threadId,
+          userId: state.userId,
+          businessId: tenantId,
+          tenantId,
+          isApproved: true,
+        });
+        resultData = { toolExecuted: parsedToolCall.toolName, output };
+
+        // 插入评估分析日志
+        if (state.threadId) {
+          try {
+            const runId = '83d67d4e-104c-4325-8aa7-10d4389fc725';
+            await db.execute(`
             INSERT INTO eval_runs (id, business_id, git_commit, avg_answer_quality, avg_latency_ms, total_cost_usd)
             VALUES ('${runId}', 'ecommerce', 'dev', 5.0, 100, 0.0)
             ON CONFLICT (id) DO NOTHING
           `);
-          const resultId = crypto.randomUUID ? crypto.randomUUID() : 'c9b14668-eab8-4a55-8ad5-fb5d211eb3bd';
-          await db.execute(`
+            const resultId = crypto.randomUUID ? crypto.randomUUID() : 'c9b14668-eab8-4a55-8ad5-fb5d211eb3bd';
+            await db.execute(`
             INSERT INTO eval_results (id, run_id, case_name, passed, metrics)
             VALUES ('${resultId}', '${runId}', 'Tool: ${parsedToolCall.toolName}', true, '{"input": ${JSON.stringify(JSON.stringify(parsedToolCall.args))}, "output": ${JSON.stringify(JSON.stringify(output))}}')
           `);
-        } catch (evalErr) {
-          console.warn('[StepExecutionEngine] Failed to insert logging data:', evalErr);
+          } catch (evalErr) {
+            console.warn('[StepExecutionEngine] Failed to insert logging data:', evalErr);
+          }
         }
+      } else {
+        resultData = {
+          error: `Tool or Skill ${parsedToolCall.toolName} not found in registry.`,
+        };
       }
-    } else {
-      resultData = {
-        error: `Tool ${parsedToolCall.toolName} not found in tools registry.`,
-      };
     }
   } else {
     resultData = {

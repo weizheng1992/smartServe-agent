@@ -27,6 +27,8 @@ async function migrateColumns() {
     CREATE INDEX IF NOT EXISTS episodic_user_scope_biz_idx ON episodic_events (user_id, scope, business_id);
 
     -- Multi-tenant Conversation & Messages extension
+    ALTER TABLE threads DROP CONSTRAINT IF EXISTS threads_user_id_fkey;
+    ALTER TABLE threads ALTER COLUMN user_id TYPE text USING user_id::text;
     ALTER TABLE threads ADD COLUMN IF NOT EXISTS assigned_operator_id text;
     ALTER TABLE threads ADD COLUMN IF NOT EXISTS unread_count integer DEFAULT 0;
     ALTER TABLE threads ADD COLUMN IF NOT EXISTS tags jsonb DEFAULT '[]'::jsonb;
@@ -42,6 +44,10 @@ async function migrateColumns() {
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at timestamp DEFAULT NOW();
     CREATE INDEX IF NOT EXISTS messages_thread_idx ON messages (thread_id);
     CREATE INDEX IF NOT EXISTS messages_biz_thread_idx ON messages (business_id, thread_id);
+
+    -- Tenant configs extension
+    ALTER TABLE tenant_configs ADD COLUMN IF NOT EXISTS enabled_skills jsonb;
+    ALTER TABLE tenant_configs ADD COLUMN IF NOT EXISTS skills_config jsonb;
 
     -- Transactional outbox table
     CREATE TABLE IF NOT EXISTS approval_outbox_events (

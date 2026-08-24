@@ -1,6 +1,6 @@
-import type React from "react";
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import type React from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
   ArrowRight,
   Button,
@@ -14,49 +14,49 @@ import {
   Loader2,
   Sparkles,
   XCircle,
-} from "ui";
+} from 'ui';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
 
   // 如果已经登录，直接跳到主控制台，体验更优
   useEffect(() => {
-    const savedUser = localStorage.getItem("agent_user_session");
+    const savedUser = localStorage.getItem('agent_user_session');
     if (savedUser) {
-      navigate("/");
+      navigate('/');
     }
   }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !email.includes("@")) {
-      setError("请输入有效的邮箱地址");
+    if (!email.trim() || !email.includes('@')) {
+      setError('请输入有效的邮箱地址');
       return;
     }
 
     setIsLoading(true);
-    setError("");
+    setError('');
 
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
       const data = await res.json();
       if (data.success && data.user) {
         // 保存本地 Session，持久化登录
-        localStorage.setItem("agent_user_session", JSON.stringify(data.user));
+        localStorage.setItem('agent_user_session', JSON.stringify(data.user));
         // 编排跳转到主控制台页面
-        navigate("/");
+        navigate('/');
       } else {
-        setError(data.error || "登录失败，请重试");
+        setError(data.error || '登录失败，请重试');
       }
     } catch {
-      setError("网络连接错误，请稍后重试");
+      setError('网络连接错误，请稍后重试');
     } finally {
       setIsLoading(false);
     }

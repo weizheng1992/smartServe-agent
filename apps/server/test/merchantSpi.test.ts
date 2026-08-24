@@ -1,31 +1,31 @@
-import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "bun:test";
-import { db, getDrizzle, pendingApprovals } from "db";
-import { eq } from "drizzle-orm";
-import { MerchantSpiService } from "../src/modules/spi/merchant-spi.controller";
+import { describe, expect, it } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+import { db, getDrizzle, pendingApprovals } from 'db';
+import { eq } from 'drizzle-orm';
+import { MerchantSpiService } from '../src/modules/spi/merchant-spi.controller';
 
-describe("🌟 Merchant SPI Open Gateway Suite (Direct Service Test)", () => {
+describe('🌟 Merchant SPI Open Gateway Suite (Direct Service Test)', () => {
   const service = new MerchantSpiService();
 
-  describe("1. 商户安全审批决议 (Resolve Approval)", () => {
-    it("should allow merchant to resolve pending approval via service", async () => {
+  describe('1. 商户安全审批决议 (Resolve Approval)', () => {
+    it('should allow merchant to resolve pending approval via service', async () => {
       const threadId = `spi_app_${Date.now()}`;
       const approvalId = randomUUID();
-      const businessId = "nike";
+      const businessId = 'nike';
 
-      await db.createThread(threadId, "u_spi_user", businessId);
+      await db.createThread(threadId, 'u_spi_user', businessId);
 
       const drizzle = getDrizzle();
       if (drizzle) {
         await drizzle.insert(pendingApprovals).values({
           id: approvalId,
           threadId,
-          status: "waiting",
-          actionType: "processRefund",
+          status: 'waiting',
+          actionType: 'processRefund',
           actionPayload: {
-            orderId: "ORD-TEST-999",
+            orderId: 'ORD-TEST-999',
             amount: 500,
-            reason: "超额退款待商户核验",
+            reason: '超额退款待商户核验',
           },
           deadline: new Date(Date.now() + 3600000),
         });
@@ -35,53 +35,44 @@ describe("🌟 Merchant SPI Open Gateway Suite (Direct Service Test)", () => {
       const res = await service.resolveApproval(
         approvalId,
         {
-          action: "approve",
-          reviewerId: "nike_manager_01",
+          action: 'approve',
+          reviewerId: 'nike_manager_01',
         },
-        "nike",
+        'nike',
       );
 
       expect(res.success).toBe(true);
-      expect(res.status).toBe("approved");
+      expect(res.status).toBe('approved');
 
       // 验证物理数据库已更新为 approved
       if (drizzle) {
-        const rows = await drizzle
-          .select()
-          .from(pendingApprovals)
-          .where(eq(pendingApprovals.id, approvalId));
+        const rows = await drizzle.select().from(pendingApprovals).where(eq(pendingApprovals.id, approvalId));
         expect(rows.length).toBe(1);
-        expect(rows[0].status).toBe("approved");
+        expect(rows[0].status).toBe('approved');
       }
     });
 
-    it("should reject invalid action or cross-merchant approval access", async () => {
-      expect(
-        service.resolveApproval(
-          "any_id",
-          { action: "invalid_action" as any },
-          "nike",
-        ),
-      ).rejects.toThrow();
+    it('should reject invalid action or cross-merchant approval access', async () => {
+      expect(service.resolveApproval('any_id', { action: 'invalid_action' as any }, 'nike')).rejects.toThrow();
     });
   });
 
-  describe("2. 商户人工客服消息回复与结单 (Escalation Bridge)", () => {
-    it("should bridge merchant operator reply directly into customer thread", async () => {
+  describe('2. 商户人工客服消息回复与结单 (Escalation Bridge)', () => {
+    it('should bridge merchant operator reply directly into customer thread', async () => {
       const threadId = `spi_chat_${Date.now()}`;
-      const businessId = "adidas";
+      const businessId = 'adidas';
 
-      await db.createThread(threadId, "u_adi_user", businessId);
+      await db.createThread(threadId, 'u_adi_user', businessId);
 
       // 商户客服通过 API 回复消息
       const replyRes = await service.replyEscalation(
         threadId,
         {
-          message: "您好，我是 Adidas 售后专员，已为您核实到该款跑鞋有现货。",
-          operatorId: "adi_rep_102",
-          operatorName: "Adidas客服小李",
+          message: '您好，我是 Adidas 售后专员，已为您核实到该款跑鞋有现货。',
+          operatorId: 'adi_rep_102',
+          operatorName: 'Adidas客服小李',
         },
-        "adidas",
+        'adidas',
       );
 
       expect(replyRes.success).toBe(true);
@@ -89,14 +80,12 @@ describe("🌟 Merchant SPI Open Gateway Suite (Direct Service Test)", () => {
 
       // 验证消息已存入物理数据库
       const messages = await db.getMessages(threadId);
-      const repMsg = messages.find((m) =>
-        m.content.includes("我是 Adidas 售后专员"),
-      );
+      const repMsg = messages.find((m) => m.content.includes('我是 Adidas 售后专员'));
       expect(repMsg).toBeDefined();
-      expect(repMsg?.role).toBe("assistant");
+      expect(repMsg?.role).toBe('assistant');
 
       // 商户客服结单
-      const closeRes = await service.closeEscalation(threadId, "adidas");
+      const closeRes = await service.closeEscalation(threadId, 'adidas');
       expect(closeRes.success).toBe(true);
     });
   });

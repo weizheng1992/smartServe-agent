@@ -1,25 +1,33 @@
-import { Annotation } from '@langchain/langgraph';
+import { Annotation } from "@langchain/langgraph";
 import type {
+  AgentDomainRole,
   BusinessConfig,
+  CartContext,
   ChatMessage,
   DamageAssessmentData,
   IntentResult,
+  OrderContext,
   PendingApprovalRecord,
   RagDocument,
   RichCardBlock,
+  ShoppingGuideContext,
   SubTask,
   SubTaskResult,
   TaskPlan,
-} from 'types';
+} from "types";
 
 export type {
+  AgentDomainRole,
   BusinessConfig,
+  CartContext,
   ChatMessage,
   DamageAssessmentData,
   IntentResult,
+  OrderContext,
   PendingApprovalRecord,
   RagDocument,
   RichCardBlock,
+  ShoppingGuideContext,
   SubTask,
   SubTaskResult,
   TaskPlan,
@@ -33,7 +41,7 @@ export const AgentStateAnnotation = Annotation.Root({
   userId: Annotation<string>(),
   jobId: Annotation<string>({
     reducer: (x, y) => y,
-    default: () => '',
+    default: () => "",
   }),
 
   // Current inputs and history
@@ -61,6 +69,24 @@ export const AgentStateAnnotation = Annotation.Root({
     default: () => [],
   }),
 
+  // 🎯 Multi-Agent 专属角色与领域上下文总线
+  activeDomainRole: Annotation<AgentDomainRole | undefined>({
+    reducer: (x, y) => (y !== undefined ? y : x),
+    default: () => undefined,
+  }),
+  guideContext: Annotation<ShoppingGuideContext | undefined>({
+    reducer: (x, y) => (y !== undefined ? { ...x, ...y } : x),
+    default: () => undefined,
+  }),
+  cartContext: Annotation<CartContext | undefined>({
+    reducer: (x, y) => (y !== undefined ? { ...x, ...y } : x),
+    default: () => undefined,
+  }),
+  orderContext: Annotation<OrderContext | undefined>({
+    reducer: (x, y) => (y !== undefined ? { ...x, ...y } : x),
+    default: () => undefined,
+  }),
+
   // Structured Rich Cards Output
   cards: Annotation<RichCardBlock[]>({
     reducer: (x, y) => (y !== undefined ? y : x),
@@ -71,7 +97,7 @@ export const AgentStateAnnotation = Annotation.Root({
   taskPlan: Annotation<TaskPlan>({
     reducer: (x, y) => ({ ...x, ...y }),
     default: () => ({
-      goal: '',
+      goal: "",
       subtasks: [],
       currentStepIndex: 0,
     }),
@@ -97,16 +123,16 @@ export const AgentStateAnnotation = Annotation.Root({
   businessConfig: Annotation<BusinessConfig>({
     reducer: (x, y) => ({ ...x, ...y }),
     default: () => ({
-      businessId: 'ecommerce',
+      businessId: "ecommerce",
       systemPrompt:
-        'You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.',
+        "You are an advanced, professional AI Customer Support Agent specialized in E-Commerce. Help users resolve order, shipping, and refund queries.",
       intents: {
-        order_status: { description: 'Track or check order delivery status.' },
-        refund: { description: 'Process or request refunds.' },
-        general_query: { description: 'General customer questions.' },
+        order_status: { description: "Track or check order delivery status." },
+        refund: { description: "Process or request refunds." },
+        general_query: { description: "General customer questions." },
       },
-      tools: ['getOrderStatus', 'processRefund', 'listUserOrders'],
-      executionMode: 'plan-and-execute',
+      tools: ["getOrderStatus", "processRefund", "listUserOrders"],
+      executionMode: "plan-and-execute",
       confidenceThresholds: { high: 0.85, mid: 0.6 },
       refundAutoApprovalLimit: 100, // 默认超过 $100 的退还必须人工审核，低于 $100 的自动放行
     }),
@@ -115,7 +141,7 @@ export const AgentStateAnnotation = Annotation.Root({
   // Final formulation output
   output: Annotation<string>({
     reducer: (x, y) => y,
-    default: () => '',
+    default: () => "",
   }),
 
   // Loop control counters
@@ -141,24 +167,29 @@ export const AgentStateAnnotation = Annotation.Root({
  * 彻底铲除 "Agent: undefined" / "Agent: null" 等隐形 Bug，确保大模型上下文 Prompt 绝对清爽。
  */
 export function buildHistoryContext(shortMemory: ChatMessage[]): string {
-  if (!shortMemory || shortMemory.length === 0) return '';
+  if (!shortMemory || shortMemory.length === 0) return "";
 
   return shortMemory
     .map((m: ChatMessage) => {
-      if (!m) return '';
-      const role = m.role === 'user' ? 'Customer' : m.role === 'system' ? 'System' : 'Agent';
+      if (!m) return "";
+      const role =
+        m.role === "user"
+          ? "Customer"
+          : m.role === "system"
+            ? "System"
+            : "Agent";
       const content = m.content;
       if (
         content === undefined ||
         content === null ||
-        String(content).trim() === '' ||
-        String(content) === 'undefined' ||
-        String(content) === 'null'
+        String(content).trim() === "" ||
+        String(content) === "undefined" ||
+        String(content) === "null"
       ) {
-        return '';
+        return "";
       }
       return `${role}: "${String(content).trim()}"`;
     })
-    .filter((line: string) => line !== '')
-    .join('\n');
+    .filter((line: string) => line !== "")
+    .join("\n");
 }

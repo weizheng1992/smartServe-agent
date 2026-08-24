@@ -1,18 +1,18 @@
-import React from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router";
-import { AdminLayout } from "./components/layout";
+import React from 'react';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
+import { AdminLayout } from './components/layout';
 import {
-  TenantsPage,
-  ConversationsPage,
   AuditsPage,
+  BillingPage,
+  ConversationsPage,
+  EvalsPage,
+  GuardrailsPage,
   PersonasPage,
   RagStudioPage,
   SkillsToolsPage,
-  EvalsPage,
-  BillingPage,
-  GuardrailsPage,
   SystemLogsPage,
-} from "./pages";
+  TenantsPage,
+} from './pages';
 
 export function App() {
   return (

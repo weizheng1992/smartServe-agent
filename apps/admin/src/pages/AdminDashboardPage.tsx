@@ -1,16 +1,16 @@
-import { useState } from "react";
-import { HumanChatModal } from "ui";
+import { useState } from 'react';
+import { HumanChatModal } from 'ui';
 
 // Local Hooks & Components
-import { ConversationsExplorer } from "../components/ConversationsExplorer";
-import { Header } from "../components/Header";
-import { HistoricalAudits } from "../components/HistoricalAudits";
-import { LiveDesk } from "../components/LiveDesk";
-import { Metrics } from "../components/Metrics";
-import { PendingApprovals } from "../components/PendingApprovals";
-import { PersonaAudit } from "../components/PersonaAudit";
-import { useAdminDashboardData } from "../hooks";
-import type { Approval } from "../hooks/types";
+import { ConversationsExplorer } from '../components/ConversationsExplorer';
+import { Header } from '../components/Header';
+import { HistoricalAudits } from '../components/HistoricalAudits';
+import { LiveDesk } from '../components/LiveDesk';
+import { Metrics } from '../components/Metrics';
+import { PendingApprovals } from '../components/PendingApprovals';
+import { PersonaAudit } from '../components/PersonaAudit';
+import { useAdminDashboardData } from '../hooks';
+import type { Approval } from '../hooks/types';
 
 export function AdminDashboardPage() {
   const {
@@ -31,21 +31,12 @@ export function AdminDashboardPage() {
     preferences,
   } = useAdminDashboardData();
 
-  const [activeTab, setActiveTab] = useState<
-    "approvals" | "conversations" | "live-desk"
-  >("approvals");
-  const [liveDeskThreadId, setLiveDeskThreadId] = useState<string | undefined>(
-    undefined,
-  );
-  const [activeChatApproval, setActiveChatApproval] = useState<Approval | null>(
-    null,
-  );
+  const [activeTab, setActiveTab] = useState<'approvals' | 'conversations' | 'live-desk'>('approvals');
+  const [liveDeskThreadId, setLiveDeskThreadId] = useState<string | undefined>(undefined);
+  const [activeChatApproval, setActiveChatApproval] = useState<Approval | null>(null);
 
   const handleStartTakeover = async () => {
-    const targetThread =
-      pendingApprovals[0]?.threadId ||
-      auditedApprovals[0]?.threadId ||
-      "default_thread";
+    const targetThread = pendingApprovals[0]?.threadId || auditedApprovals[0]?.threadId || 'default_thread';
     const approval = await startActiveTakeover(targetThread);
     if (approval) {
       setActiveChatApproval(approval);
@@ -54,7 +45,7 @@ export function AdminDashboardPage() {
 
   const handleSelectForLiveDesk = (threadId: string) => {
     setLiveDeskThreadId(threadId);
-    setActiveTab("live-desk");
+    setActiveTab('live-desk');
   };
 
   return (
@@ -72,7 +63,7 @@ export function AdminDashboardPage() {
 
       <main className="p-8 max-w-7xl mx-auto space-y-8">
         {/* 📊 Section: Approvals & HITL Mode */}
-        {activeTab === "approvals" && (
+        {activeTab === 'approvals' && (
           <>
             {/* 📊 SaaS Telemetry BI Metrics Cards */}
             <Metrics summary={summary} />
@@ -101,19 +92,13 @@ export function AdminDashboardPage() {
         )}
 
         {/* 💬 Section: Full-Spectrum Multi-Tenant Conversations Explorer */}
-        {activeTab === "conversations" && (
-          <ConversationsExplorer
-            selectedMerchant={selectedMerchant}
-            onSelectForLiveDesk={handleSelectForLiveDesk}
-          />
+        {activeTab === 'conversations' && (
+          <ConversationsExplorer selectedMerchant={selectedMerchant} onSelectForLiveDesk={handleSelectForLiveDesk} />
         )}
 
         {/* ⚡ Section: Realtime Live Desk & Takeover Console */}
-        {activeTab === "live-desk" && (
-          <LiveDesk
-            selectedMerchant={selectedMerchant}
-            initialThreadId={liveDeskThreadId}
-          />
+        {activeTab === 'live-desk' && (
+          <LiveDesk selectedMerchant={selectedMerchant} initialThreadId={liveDeskThreadId} />
         )}
       </main>
 

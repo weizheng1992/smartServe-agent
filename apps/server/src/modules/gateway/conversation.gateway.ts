@@ -1,3 +1,4 @@
+import { BadRequestException, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -7,36 +8,83 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ConversationRepository } from 'db';
 import { logger } from 'observability';
 import type { Server, Socket } from 'socket.io';
+import { redis, useRedis } from 'tools';
 
-export interface JoinThreadDto {
+export class JoinThreadDto {
+  @IsNotEmpty()
+  @IsString()
   threadId: string;
+
+  @IsNotEmpty()
+  @IsString()
   tenantId: string;
+
+  @IsNotEmpty()
+  @IsIn(['user', 'operator'])
   role: 'user' | 'operator';
+
+  @IsOptional()
+  @IsString()
   operatorId?: string;
+
+  @IsOptional()
+  @IsString()
   operatorName?: string;
 }
 
-export interface TakeoverDto {
+export class TakeoverDto {
+  @IsNotEmpty()
+  @IsString()
   threadId: string;
+
+  @IsNotEmpty()
+  @IsString()
   tenantId: string;
+
+  @IsNotEmpty()
+  @IsString()
   operatorId: string;
+
+  @IsNotEmpty()
+  @IsString()
   operatorName: string;
 }
 
-export interface ReleaseTakeoverDto {
+export class ReleaseTakeoverDto {
+  @IsNotEmpty()
+  @IsString()
   threadId: string;
+
+  @IsNotEmpty()
+  @IsString()
   tenantId: string;
 }
 
-export interface ChatMessageDto {
+export class ChatMessageDto {
+  @IsNotEmpty()
+  @IsString()
   threadId: string;
+
+  @IsNotEmpty()
+  @IsString()
   tenantId: string;
-  role: 'user' | 'operator' | 'assistant';
+
+  @IsNotEmpty()
+  @IsIn(['user', 'operator', 'assistant', 'system'])
+  role: 'user' | 'operator' | 'assistant' | 'system';
+
+  @IsNotEmpty()
+  @IsString()
   content: string;
+
+  @IsOptional()
   cards?: any[];
+
+  @IsOptional()
   operatorInfo?: { operatorId: string; operatorName: string };
 }
 
@@ -53,18 +101,39 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
 
   private connectedClients = new Map<string, { threadId?: string; tenantId?: string; role?: string }>();
 
-  handleConnection(client: Socket) {
-    logger.info({ socketId: client.id }, '[WS] Client connected');
+  async handleConnection(client: Socket) {
+    const auth = client.handshake?.auth || {};
+    const headers = client.handshake?.headers || {};
+    const query = client.handshake?.query || {};
+
+    const rawTenantId =
+      (auth.tenantId as string) ||
+      (headers['x-tenant-id'] as string) ||
+      (headers['x-business-id'] as string) ||
+      (query.tenantId as string) ||
+      'ecommerce';
+
+    const cleanTenantId = rawTenantId.trim();
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(cleanTenantId)) {
+      logger.warn({ socketId: client.id, tenantId: cleanTenantId }, '[WS] Rejected connection with invalid tenant');
+      client.disconnect(true);
+      return;
+    }
+
+    logger.info({ socketId: client.id, tenantId: cleanTenantId }, '[WS] Client connected and authenticated');
   }
 
   handleDisconnect(client: Socket) {
     const meta = this.connectedClients.get(client.id);
     if (meta?.threadId && meta?.tenantId) {
       const room = `tenant:${meta.tenantId}:thread:${meta.threadId}`;
-      this.server.to(room).emit('peer_disconnected', {
-        socketId: client.id,
-        role: meta.role,
-      });
+      if (this.server) {
+        this.server.to(room).emit('peer_disconnected', {
+          socketId: client.id,
+          role: meta.role,
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
     this.connectedClients.delete(client.id);
     logger.info({ socketId: client.id }, '[WS] Client disconnected');
@@ -86,13 +155,31 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
     client.emit('joined_room', { room, threadId, tenantId });
 
     // 广播房间内有新人接入
-    this.server.to(room).emit('peer_joined', {
-      socketId: client.id,
-      role,
-      operatorId,
-      operatorName,
-      timestamp: new Date().toISOString(),
-    });
+    if (this.server) {
+      this.server.to(room).emit('peer_joined', {
+        socketId: client.id,
+        role,
+        operatorId,
+        operatorName,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // 分布式 Redis 广播通知
+    if (useRedis && redis) {
+      try {
+        await redis.publish(
+          'ws:events',
+          JSON.stringify({
+            event: 'peer_joined',
+            room,
+            data: { socketId: client.id, role, operatorId, operatorName },
+          }),
+        );
+      } catch (err) {
+        logger.warn({ err }, '[WS] Failed to publish redis ws event');
+      }
+    }
   }
 
   /**
@@ -121,13 +208,35 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
     });
 
     // 广播房间状态变更
-    this.server.to(room).emit('conversation_state_changed', {
-      threadId,
-      status: 'human_takeover',
-      operatorId,
-      operatorName,
-      systemMessage: sysMsg,
-    });
+    if (this.server) {
+      this.server.to(room).emit('conversation_state_changed', {
+        threadId,
+        status: 'human_takeover',
+        operatorId,
+        operatorName,
+        systemMessage: sysMsg,
+      });
+    }
+
+    if (useRedis && redis) {
+      try {
+        await redis.publish(
+          'ws:events',
+          JSON.stringify({
+            event: 'conversation_state_changed',
+            room,
+            data: {
+              threadId,
+              status: 'human_takeover',
+              operatorId,
+              operatorName,
+            },
+          }),
+        );
+      } catch (err) {
+        logger.warn({ err }, '[WS] Failed to publish redis ws event');
+      }
+    }
   }
 
   /**
@@ -152,11 +261,28 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
       content: '人工客服已结束接管，已重新切换为 AI 智能助手为您服务。',
     });
 
-    this.server.to(room).emit('conversation_state_changed', {
-      threadId,
-      status: 'active',
-      systemMessage: sysMsg,
-    });
+    if (this.server) {
+      this.server.to(room).emit('conversation_state_changed', {
+        threadId,
+        status: 'active',
+        systemMessage: sysMsg,
+      });
+    }
+
+    if (useRedis && redis) {
+      try {
+        await redis.publish(
+          'ws:events',
+          JSON.stringify({
+            event: 'conversation_state_changed',
+            room,
+            data: { threadId, status: 'active' },
+          }),
+        );
+      } catch (err) {
+        logger.warn({ err }, '[WS] Failed to publish redis ws event');
+      }
+    }
   }
 
   /**
@@ -176,8 +302,7 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
       operatorInfo,
     });
 
-    // 全房间广播新消息
-    this.server.to(room).emit('new_message', {
+    const msgPayload = {
       id: savedMsg.id,
       threadId,
       tenantId,
@@ -186,7 +311,27 @@ export class ConversationGateway implements OnGatewayConnection, OnGatewayDiscon
       cards,
       operatorInfo,
       timestamp: savedMsg.timestamp || new Date().toISOString(),
-    });
+    };
+
+    // 全房间广播新消息
+    if (this.server) {
+      this.server.to(room).emit('new_message', msgPayload);
+    }
+
+    if (useRedis && redis) {
+      try {
+        await redis.publish(
+          'ws:events',
+          JSON.stringify({
+            event: 'new_message',
+            room,
+            data: msgPayload,
+          }),
+        );
+      } catch (err) {
+        logger.warn({ err }, '[WS] Failed to publish redis ws event');
+      }
+    }
 
     return { success: true, messageId: savedMsg.id };
   }

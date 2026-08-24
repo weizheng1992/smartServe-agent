@@ -1,41 +1,42 @@
-import React, { useState } from "react";
-import { DataTable, FilterBar, ConfirmDialog } from "../../components/crud";
-import { useAdminCrud } from "../../hooks/useAdminCrud";
-import { GuardrailFormModal } from "./components/GuardrailFormModal";
-import type { GuardrailRuleRecord } from "./types";
+import type React from 'react';
+import { useState } from 'react';
+import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
+import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { GuardrailFormModal } from './components/GuardrailFormModal';
+import type { GuardrailRuleRecord } from './types';
 
-export * from "./types";
+export * from './types';
 
 const INITIAL_GUARDRAILS: GuardrailRuleRecord[] = [
   {
-    id: "gr_01",
-    ruleName: "支付敏感信息脱敏 (银行卡/身份证)",
-    ruleType: "sensitive_keyword",
-    pattern: "(\\d{16,19})|(\\d{18}[0-9xX])",
-    action: "mask",
-    severity: "high",
+    id: 'gr_01',
+    ruleName: '支付敏感信息脱敏 (银行卡/身份证)',
+    ruleType: 'sensitive_keyword',
+    pattern: '(\\d{16,19})|(\\d{18}[0-9xX])',
+    action: 'mask',
+    severity: 'high',
     isEnabled: true,
-    updatedAt: "2026-02-10",
+    updatedAt: '2026-02-10',
   },
   {
-    id: "gr_02",
-    ruleName: "SQL 注入与危险 DDL 拦截沙箱",
-    ruleType: "sql_injection",
-    pattern: "(DROP|ALTER|TRUNCATE|DELETE|UPDATE|INSERT)\\s+TABLE",
-    action: "block",
-    severity: "high",
+    id: 'gr_02',
+    ruleName: 'SQL 注入与危险 DDL 拦截沙箱',
+    ruleType: 'sql_injection',
+    pattern: '(DROP|ALTER|TRUNCATE|DELETE|UPDATE|INSERT)\\s+TABLE',
+    action: 'block',
+    severity: 'high',
     isEnabled: true,
-    updatedAt: "2026-02-12",
+    updatedAt: '2026-02-12',
   },
   {
-    id: "gr_03",
-    ruleName: "系统 Prompt 提示词防泄露拦截",
-    ruleType: "prompt_leakage",
-    pattern: "(repeat\\s+system\\s+prompt|输出你的系统提示词|忽略之前的指示)",
-    action: "block",
-    severity: "medium",
+    id: 'gr_03',
+    ruleName: '系统 Prompt 提示词防泄露拦截',
+    ruleType: 'prompt_leakage',
+    pattern: '(repeat\\s+system\\s+prompt|输出你的系统提示词|忽略之前的指示)',
+    action: 'block',
+    severity: 'medium',
     isEnabled: true,
-    updatedAt: "2026-02-14",
+    updatedAt: '2026-02-14',
   },
 ];
 
@@ -82,11 +83,11 @@ export function GuardrailsPage() {
   const handleOpenCreate = () => {
     setFormData({
       id: `gr_${Date.now()}`,
-      ruleName: "",
-      ruleType: "sensitive_keyword",
-      pattern: "",
-      action: "block",
-      severity: "high",
+      ruleName: '',
+      ruleType: 'sensitive_keyword',
+      pattern: '',
+      action: 'block',
+      severity: 'high',
       isEnabled: true,
     });
     setIsCreateOpen(true);
@@ -103,41 +104,37 @@ export function GuardrailsPage() {
       if (!formData.ruleName || !formData.pattern) return;
       createItem({
         ...(formData as GuardrailRuleRecord),
-        updatedAt: new Date().toISOString().split("T")[0],
+        updatedAt: new Date().toISOString().split('T')[0],
       });
     } else if (isEditOpen && formData.id) {
-      updateItem("id", {
+      updateItem('id', {
         ...(formData as GuardrailRuleRecord),
-        updatedAt: new Date().toISOString().split("T")[0],
+        updatedAt: new Date().toISOString().split('T')[0],
       });
     }
   };
 
   const columns = [
     {
-      key: "ruleName",
-      header: "规则名称 / 标识",
+      key: 'ruleName',
+      header: '规则名称 / 标识',
       render: (row: GuardrailRuleRecord) => (
         <div>
-          <div className="font-semibold text-slate-900 text-xs">
-            {row.ruleName}
-          </div>
+          <div className="font-semibold text-slate-900 text-xs">{row.ruleName}</div>
           <div className="text-xs text-slate-400 font-mono">ID: {row.id}</div>
         </div>
       ),
     },
     {
-      key: "ruleType",
-      header: "防护类型",
+      key: 'ruleType',
+      header: '防护类型',
       render: (row: GuardrailRuleRecord) => (
-        <span className="text-xs font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
-          {row.ruleType}
-        </span>
+        <span className="text-xs font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded">{row.ruleType}</span>
       ),
     },
     {
-      key: "pattern",
-      header: "匹配规则 / 正则特征",
+      key: 'pattern',
+      header: '匹配规则 / 正则特征',
       render: (row: GuardrailRuleRecord) => (
         <span className="text-xs font-mono bg-slate-50 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
           {row.pattern}
@@ -145,56 +142,54 @@ export function GuardrailsPage() {
       ),
     },
     {
-      key: "action",
-      header: "拦截响应动作",
+      key: 'action',
+      header: '拦截响应动作',
       render: (row: GuardrailRuleRecord) => {
         const actionMap = {
           block: {
-            label: "直接拦截 (Block)",
-            cls: "bg-rose-50 text-rose-700 border-rose-200",
+            label: '直接拦截 (Block)',
+            cls: 'bg-rose-50 text-rose-700 border-rose-200',
           },
           mask: {
-            label: "脱敏替换 (Mask)",
-            cls: "bg-amber-50 text-amber-700 border-amber-200",
+            label: '脱敏替换 (Mask)',
+            cls: 'bg-amber-50 text-amber-700 border-amber-200',
           },
           warn: {
-            label: "安全告警 (Warn)",
-            cls: "bg-blue-50 text-blue-700 border-blue-200",
+            label: '安全告警 (Warn)',
+            cls: 'bg-blue-50 text-blue-700 border-blue-200',
           },
           escalate_hitl: {
-            label: "升级人工 (HITL)",
-            cls: "bg-purple-50 text-purple-700 border-purple-200",
+            label: '升级人工 (HITL)',
+            cls: 'bg-purple-50 text-purple-700 border-purple-200',
           },
         };
         const act = actionMap[row.action] || actionMap.block;
         return (
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${act.cls}`}
-          >
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${act.cls}`}>
             {act.label}
           </span>
         );
       },
     },
     {
-      key: "isEnabled",
-      header: "启用状态",
+      key: 'isEnabled',
+      header: '启用状态',
       render: (row: GuardrailRuleRecord) => (
         <span
           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
             row.isEnabled
-              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-              : "bg-slate-100 text-slate-500 border border-slate-200"
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              : 'bg-slate-100 text-slate-500 border border-slate-200'
           }`}
         >
-          {row.isEnabled ? "已启用" : "已停用"}
+          {row.isEnabled ? '已启用' : '已停用'}
         </span>
       ),
     },
     {
-      key: "actions",
-      header: "操作",
-      align: "right" as const,
+      key: 'actions',
+      header: '操作',
+      align: 'right' as const,
       render: (row: GuardrailRuleRecord) => (
         <div className="flex items-center justify-end gap-2">
           <button
@@ -225,9 +220,9 @@ export function GuardrailsPage() {
         statusFilter={statusFilter}
         onStatusChange={setStatusFilter}
         statusOptions={[
-          { label: "敏感词/隐私", value: "sensitive_keyword" },
-          { label: "SQL 注入防御", value: "sql_injection" },
-          { label: "提示词防泄露", value: "prompt_leakage" },
+          { label: '敏感词/隐私', value: 'sensitive_keyword' },
+          { label: 'SQL 注入防御', value: 'sql_injection' },
+          { label: '提示词防泄露', value: 'prompt_leakage' },
         ]}
         onReset={handleResetFilters}
         actions={
@@ -236,18 +231,8 @@ export function GuardrailsPage() {
             onClick={handleOpenCreate}
             className="px-3.5 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
           >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             添加安全围栏规则
           </button>
@@ -282,7 +267,7 @@ export function GuardrailsPage() {
       <ConfirmDialog
         isOpen={Boolean(itemToDelete)}
         onClose={() => setItemToDelete(null)}
-        onConfirm={() => itemToDelete && deleteItem("id", itemToDelete.id)}
+        onConfirm={() => itemToDelete && deleteItem('id', itemToDelete.id)}
         title="确认删除该安全合规规则？"
         description={`删除规则 [${itemToDelete?.ruleName}] 后，系统将不再对此类输入特征进行拦截或脱敏。`}
         confirmText="确认删除"

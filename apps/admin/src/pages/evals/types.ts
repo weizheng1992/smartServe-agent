@@ -6,6 +6,6 @@ export interface EvalRunRecord {
   toolAccuracy: number;
   ragFaithfulness: number;
   hitlTriggerRate: number;
-  status: "completed" | "running" | "failed";
+  status: 'completed' | 'running' | 'failed';
   createdAt: string;
 }

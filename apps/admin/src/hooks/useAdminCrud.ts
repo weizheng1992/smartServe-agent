@@ -1,14 +1,9 @@
-import { useState, useMemo, useCallback } from "react";
-import { useAdminTenantStore } from "../store/tenantStore";
+import { useCallback, useMemo, useState } from 'react';
+import { useAdminTenantStore } from '../store/tenantStore';
 
 export interface UseAdminCrudOptions<T> {
   initialData?: T[];
-  filterFn?: (
-    item: T,
-    query: string,
-    status: string,
-    tenantId: string,
-  ) => boolean;
+  filterFn?: (item: T, query: string, status: string, tenantId: string) => boolean;
   defaultPageSize?: number;
   tenantKey?: keyof T;
 }
@@ -17,11 +12,11 @@ export function useAdminCrud<T extends Record<string, any>>({
   initialData = [],
   filterFn,
   defaultPageSize = 10,
-  tenantKey = "businessId" as keyof T,
+  tenantKey = 'businessId' as keyof T,
 }: UseAdminCrudOptions<T> = {}) {
   const [data, setData] = useState<T[]>(initialData);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(defaultPageSize);
 
@@ -40,8 +35,8 @@ export function useAdminCrud<T extends Record<string, any>>({
   const filteredData = useMemo(() => {
     return data.filter((item) => {
       // 1. 全局租户穿透过滤
-      if (selectedTenantId !== "all" && item[tenantKey] !== undefined) {
-        if (item[tenantKey] !== selectedTenantId && item[tenantKey] !== "all") {
+      if (selectedTenantId !== 'all' && item[tenantKey] !== undefined) {
+        if (item[tenantKey] !== selectedTenantId && item[tenantKey] !== 'all') {
           return false;
         }
       }
@@ -55,17 +50,13 @@ export function useAdminCrud<T extends Record<string, any>>({
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
         const matchesAnyString = Object.values(item).some((val) =>
-          typeof val === "string" ? val.toLowerCase().includes(query) : false,
+          typeof val === 'string' ? val.toLowerCase().includes(query) : false,
         );
         if (!matchesAnyString) return false;
       }
 
       // 4. 默认状态过滤
-      if (
-        statusFilter &&
-        item.status !== undefined &&
-        item.status !== statusFilter
-      ) {
+      if (statusFilter && item.status !== undefined && item.status !== statusFilter) {
         return false;
       }
 
@@ -81,8 +72,8 @@ export function useAdminCrud<T extends Record<string, any>>({
 
   // 重置筛选
   const handleResetFilters = useCallback(() => {
-    setSearchQuery("");
-    setStatusFilter("");
+    setSearchQuery('');
+    setStatusFilter('');
     setCurrentPage(1);
   }, []);
 
@@ -94,13 +85,7 @@ export function useAdminCrud<T extends Record<string, any>>({
 
   const updateItem = useCallback(
     (idKey: keyof T, updatedItem: T) => {
-      setData((prev) =>
-        prev.map((item) =>
-          item[idKey] === updatedItem[idKey]
-            ? { ...item, ...updatedItem }
-            : item,
-        ),
-      );
+      setData((prev) => prev.map((item) => (item[idKey] === updatedItem[idKey] ? { ...item, ...updatedItem } : item)));
       setIsEditOpen(false);
       if (selectedItem && selectedItem[idKey] === updatedItem[idKey]) {
         setSelectedItem(updatedItem);

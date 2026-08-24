@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Req, Res, UseGuards } from '
 import { ConversationRepository } from 'db';
 import type { Request, Response } from 'express';
 import { TenantGuard } from '../../common/guards/tenant.guard';
-import type { ChatService, DispatchChatDto } from './chat.service';
+import { ChatService, type DispatchChatDto } from './chat.service';
 
 @Controller('api/chat')
 export class ChatController {
@@ -20,8 +20,9 @@ export class ChatController {
   }
 
   @Get(':jobId/stream')
-  stream(@Param('jobId') jobId: string, @Res() res: Response) {
-    this.chatService.pipeSSE(jobId, res);
+  stream(@Param('jobId') jobId: string, @Res() res: Response, @Req() req: Request) {
+    const lastEventId = (req.headers['last-event-id'] as string) || (req.query?.lastEventId as string);
+    this.chatService.pipeSSE(jobId, res, lastEventId);
   }
 
   @Get('messages')

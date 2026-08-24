@@ -12,7 +12,7 @@ export const threads = pgTable(
   'threads',
   {
     id: text('id').primaryKey(), // 对应LangGraph的thread_id
-    userId: uuid('user_id').references(() => users.id),
+    userId: text('user_id'),
     businessId: text('business_id').notNull(), // 对应哪个业务场景(ecommerce/legal...)
     status: text('status').default('active'), // active / pending_approval / human_takeover / resolved / closed
     assignedOperatorId: text('assigned_operator_id'), // 人工坐席 ID
@@ -352,6 +352,7 @@ export const tenantConfigs = pgTable(
     version: integer('version').default(1).notNull(),
     spiConfig: jsonb('spi_config'), // 开放 SPI 对接配置 (mode, spiBaseUrl, apiSecret, timeoutMs)
     enabledSkills: jsonb('enabled_skills'), // 启用的业务 SOP 技能清单 string[]
+    skillsConfig: jsonb('skills_config'), // 技能风控阈值与个性化提示词配置 Record<string, SkillConfig>
     updatedAt: timestamp('updated_at').defaultNow(),
   },
   (table) => ({

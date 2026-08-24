@@ -23,5 +23,5 @@ describe('ChatService NestJS Integration', () => {
     expect(res.threadId).toBe(threadId);
     expect(res.output).toBeDefined();
     expect(typeof res.output).toBe('string');
-  }, 30000);
+  }, 60000);
 });

@@ -1,7 +1,23 @@
 import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ConversationRepository } from 'db';
 import type { Request } from 'express';
 import { TenantGuard } from '../../common/guards/tenant.guard';
+
+export class UpdateConversationStatusDto {
+  @IsNotEmpty()
+  @IsString()
+  status: string;
+
+  @IsOptional()
+  @IsString()
+  assignedOperatorId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+}
 
 @Controller('api/conversations')
 @UseGuards(TenantGuard)
@@ -56,7 +72,7 @@ export class ConversationsController {
   async updateStatus(
     @Param('threadId') threadId: string,
     @Body()
-    body: { status: string; assignedOperatorId?: string; tags?: string[] },
+    body: UpdateConversationStatusDto,
     @Req() req?: Request,
   ) {
     const tenantId =

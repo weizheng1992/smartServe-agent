@@ -6,5 +6,5 @@ export interface TenantBillingRecord {
   costUsd: number;
   sessionsCount: number;
   autopilotRate: number;
-  billingStatus: "normal" | "warning" | "exceeded";
+  billingStatus: 'normal' | 'warning' | 'exceeded';
 }

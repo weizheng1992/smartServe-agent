@@ -1,7 +1,7 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { CurrentTenant, TenantGuard } from '../../common/guards/tenant.guard';
 import type { TenantContextPayload } from '../../common/tenant/tenant.context';
-import type { TenantService } from './tenant.service';
+import { TenantService } from './tenant.service';
 
 @Controller('api/tenant')
 @UseGuards(TenantGuard)

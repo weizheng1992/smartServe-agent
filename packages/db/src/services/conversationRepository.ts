@@ -29,6 +29,7 @@ export interface AppendMessagePayload {
   id?: string;
   threadId: string;
   businessId: string;
+  userId?: string;
   role: 'user' | 'assistant' | 'system' | 'operator';
   content: string;
   thoughtSteps?: Array<{ step: string; status: string }>;
@@ -261,13 +262,17 @@ export class ConversationRepository {
     const msgId = payload.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const timestamp = payload.timestamp || new Date().toISOString();
     const cleanBizId = payload.businessId.toLowerCase().trim();
+    const cleanUserId = payload.userId?.trim() || null;
 
-    // 1. 保证 thread 存在
+    // 1. 保证 thread 存在并关联用户
     await pool.query(
-      `INSERT INTO threads (id, business_id, status, created_at, updated_at)
-       VALUES ($1, $2, 'active', NOW(), NOW())
-       ON CONFLICT (id) DO UPDATE SET updated_at = NOW(), business_id = EXCLUDED.business_id`,
-      [payload.threadId, cleanBizId],
+      `INSERT INTO threads (id, business_id, user_id, status, created_at, updated_at)
+       VALUES ($1, $2, $3, 'active', NOW(), NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         updated_at = NOW(),
+         business_id = EXCLUDED.business_id,
+         user_id = COALESCE(EXCLUDED.user_id, threads.user_id)`,
+      [payload.threadId, cleanBizId, cleanUserId],
     );
 
     // 2. 插入消息

@@ -1,6 +1,6 @@
 import { TenantRegistryService } from 'business-configs';
 import { SpiConnectorFactory, type ThirdPartySpiClient } from 'tools';
-import type { AgentSkill, SkillExecutionContext, SkillExecutionResult, SkillMetadata } from 'types';
+import type { AgentSkill, SkillExecutionContext, SkillExecutionResult, SkillMetadata, TenantSkillConfig } from 'types';
 
 export abstract class BaseSkill implements AgentSkill {
   public abstract metadata: SkillMetadata;
@@ -9,8 +9,36 @@ export abstract class BaseSkill implements AgentSkill {
    * 判断当前上下文是否由该 Skill 承接
    */
   public canHandle(context: SkillExecutionContext): boolean {
-    const activeIntent = (context.slots?.activeIntent as string) || '';
+    const activeIntent = (context.slots?.activeIntent as string) || (context.extra?.intent as string) || '';
     return this.metadata.triggerIntents.includes(activeIntent);
+  }
+
+  /**
+   * 获取租户针对当前 Skill 的个性化覆盖配置
+   */
+  public async getEffectiveConfig(tenantId: string): Promise<TenantSkillConfig | null> {
+    const tenantConfig = await TenantRegistryService.getTenantConfig(tenantId);
+    if (tenantConfig.skillsConfig && tenantConfig.skillsConfig[this.metadata.id]) {
+      return tenantConfig.skillsConfig[this.metadata.id];
+    }
+    // 默认回落配置
+    const isEnabled = !tenantConfig.enabledSkills || tenantConfig.enabledSkills.includes(this.metadata.id);
+    return {
+      skillId: this.metadata.id,
+      enabled: isEnabled,
+      approvalThresholdAmount: this.metadata.approvalThresholdAmount,
+    };
+  }
+
+  /**
+   * 获取当前生效的风控审批拦截金额阈值
+   */
+  public async getEffectiveApprovalThreshold(tenantId: string): Promise<number> {
+    const config = await this.getEffectiveConfig(tenantId);
+    if (config?.approvalThresholdAmount !== undefined) {
+      return config.approvalThresholdAmount;
+    }
+    return this.metadata.approvalThresholdAmount ?? 50;
   }
 
   /**

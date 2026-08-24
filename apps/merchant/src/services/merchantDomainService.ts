@@ -489,17 +489,30 @@ export class MerchantDomainService {
     trackingNo: string;
   }): Promise<{ success: boolean; message?: string }> {
     const pool = await this.ensureDb();
+    const now = new Date();
     const trackingInfo = {
-      carrier: params.carrierCode || 'SF',
+      carrier: params.carrierCode === 'SF' ? '顺丰速运' : params.carrierCode || '顺丰速运',
       trackingNumber: params.trackingNo,
       status: 'IN_TRANSIT',
-      latestLocation: '北京顺丰分拨中心',
+      latestLocation: '北京市朝阳区三里屯派件部',
       timeline: [
         {
-          time: new Date().toISOString(),
+          time: new Date(now.getTime() - 1000 * 60 * 60 * 4).toISOString(),
           status: '揽收成功',
-          location: '极光潮品华北一号仓',
-          description: '包裹已由顺丰速运揽收并发出',
+          location: '极光潮品华北智能一号仓',
+          description: '包裹已由顺丰速运揽收并打包出库',
+        },
+        {
+          time: new Date(now.getTime() - 1000 * 60 * 60 * 2).toISOString(),
+          status: '运输中',
+          location: '北京顺丰转运中心',
+          description: '快件已到达北京顺丰转运中心，正发往朝阳区三里屯营业点',
+        },
+        {
+          time: now.toISOString(),
+          status: '派送中',
+          location: '北京市朝阳区三里屯派件部',
+          description: '顺丰快递员已接单，正在派送途中 (联系电话: 95338)',
         },
       ],
     };
@@ -553,5 +566,223 @@ export class MerchantDomainService {
       })),
       skus: skusRes.rows,
     };
+  }
+
+  /**
+   * 9. 获取顾客收货地址列表 (Get Customer Addresses)
+   */
+  public static async getCustomerAddresses(customerId = 'CUST-8801') {
+    const pool = await this.ensureDb();
+    const res = await pool.query('SELECT addresses FROM merchant_customers WHERE customer_id = $1 LIMIT 1', [
+      customerId,
+    ]);
+
+    if (!res.rows?.[0] || !Array.isArray(res.rows[0].addresses)) {
+      return [];
+    }
+
+    return res.rows[0].addresses as Array<{
+      id: string;
+      recipientName: string;
+      phone: string;
+      province?: string;
+      city?: string;
+      district?: string;
+      detailAddress?: string;
+      fullAddress: string;
+      isDefault?: boolean;
+    }>;
+  }
+
+  /**
+   * 10. 新增或更新顾客收货地址 (Save Customer Address)
+   */
+  public static async saveCustomerAddress(
+    customerId = 'CUST-8801',
+    addrData: {
+      id?: string;
+      recipientName: string;
+      phone: string;
+      province?: string;
+      city?: string;
+      district?: string;
+      detailAddress?: string;
+      fullAddress?: string;
+      isDefault?: boolean;
+    },
+  ) {
+    const pool = await this.ensureDb();
+    const currentList = await this.getCustomerAddresses(customerId);
+
+    const fullAddr =
+      addrData.fullAddress ||
+      `${addrData.province || ''}${addrData.city || ''}${addrData.district || ''}${addrData.detailAddress || ''}`.trim() ||
+      '北京市海淀区中关村南大街1号院';
+
+    const targetId = addrData.id || `ADDR_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const shouldBeDefault = Boolean(addrData.isDefault || currentList.length === 0);
+
+    const formattedItem = {
+      id: targetId,
+      recipientName: addrData.recipientName,
+      phone: addrData.phone,
+      province: addrData.province,
+      city: addrData.city,
+      district: addrData.district,
+      detailAddress: addrData.detailAddress,
+      fullAddress: fullAddr,
+      isDefault: shouldBeDefault,
+    };
+
+    let updatedList = [...currentList];
+    if (shouldBeDefault) {
+      updatedList = updatedList.map((a) => ({ ...a, isDefault: false }));
+    }
+
+    const existingIndex = updatedList.findIndex((a) => a.id === targetId);
+    if (existingIndex >= 0) {
+      updatedList[existingIndex] = formattedItem;
+    } else {
+      if (shouldBeDefault) {
+        updatedList.unshift(formattedItem);
+      } else {
+        updatedList.push(formattedItem);
+      }
+    }
+
+    await pool.query('UPDATE merchant_customers SET addresses = $1 WHERE customer_id = $2', [
+      JSON.stringify(updatedList),
+      customerId,
+    ]);
+
+    return {
+      success: true,
+      address: formattedItem,
+      addresses: updatedList,
+    };
+  }
+
+  /**
+   * 11. 购物车合并多 SKU 批量结算下单 (Cart Multi-Item Checkout)
+   */
+  public static async createOrderFromCart(params: {
+    customerId: string;
+    items: Array<{ skuCode: string; quantity: number }>;
+    shippingAddress: {
+      recipientName: string;
+      phone: string;
+      fullAddress: string;
+    };
+  }): Promise<{
+    success: boolean;
+    orderId?: string;
+    totalAmount?: number;
+    message?: string;
+  }> {
+    if (!params.items || params.items.length === 0) {
+      return { success: false, message: '结算购物车条目不能为空' };
+    }
+
+    const pool = await this.ensureDb();
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      let totalAmount = 0;
+      const orderId = `AURORA-ORD-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+      const orderItemsToInsert: Array<{
+        spuId: string;
+        skuCode: string;
+        spuTitle: string;
+        skuTitle: string;
+        quantity: number;
+        price: number;
+        imageUrl: string;
+        specSummary: string;
+      }> = [];
+
+      // 1. 逐项核验并准备明细
+      for (const item of params.items) {
+        const skuRes = await client.query(
+          `
+          SELECT s.*, p.title as spu_title, p.main_image as spu_image, p.id as spu_id
+          FROM merchant_skus s
+          JOIN merchant_spus p ON s.spu_id = p.id
+          WHERE s.sku_code = $1
+          FOR UPDATE
+        `,
+          [item.skuCode],
+        );
+
+        if (!skuRes.rows?.[0]) {
+          await client.query('ROLLBACK');
+          return {
+            success: false,
+            message: `商品规格 [${item.skuCode}] 不存在`,
+          };
+        }
+
+        const sku = skuRes.rows[0];
+        if (sku.stock < item.quantity) {
+          await client.query('ROLLBACK');
+          return {
+            success: false,
+            message: `商品 [${sku.sku_title}] 库存不足，当前仅剩 ${sku.stock} 件`,
+          };
+        }
+
+        // 扣减库存
+        await client.query('UPDATE merchant_skus SET stock = stock - $1 WHERE sku_code = $2', [
+          item.quantity,
+          item.skuCode,
+        ]);
+
+        const itemTotal = Number(sku.price) * item.quantity;
+        totalAmount += itemTotal;
+
+        const specSummary = Object.entries(sku.spec_attributes || {})
+          .map(([k, v]) => `${k}:${v}`)
+          .join(' / ');
+
+        orderItemsToInsert.push({
+          spuId: sku.spu_id,
+          skuCode: sku.sku_code,
+          spuTitle: sku.spu_title,
+          skuTitle: sku.sku_title,
+          quantity: item.quantity,
+          price: Number(sku.price),
+          imageUrl: sku.image_url || sku.spu_image,
+          specSummary,
+        });
+      }
+
+      // 2. 插入主订单
+      await client.query(
+        `INSERT INTO merchant_orders (
+          order_id, customer_id, status, total_amount, currency, shipping_address, is_returnable, is_address_modifiable
+        ) VALUES ($1, $2, 'PAID', $3, 'CNY', $4, TRUE, TRUE)`,
+        [orderId, params.customerId, totalAmount, JSON.stringify(params.shippingAddress)],
+      );
+
+      // 3. 批量插入订单明细
+      for (const oi of orderItemsToInsert) {
+        await client.query(
+          `INSERT INTO merchant_order_items (
+            order_id, spu_id, sku_code, title, sku_title, quantity, price, image_url, spec_summary
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [orderId, oi.spuId, oi.skuCode, oi.spuTitle, oi.skuTitle, oi.quantity, oi.price, oi.imageUrl, oi.specSummary],
+        );
+      }
+
+      await client.query('COMMIT');
+      return { success: true, orderId, totalAmount };
+    } catch (err: unknown) {
+      await client.query('ROLLBACK');
+      const errMsg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: errMsg };
+    } finally {
+      client.release();
+    }
   }
 }

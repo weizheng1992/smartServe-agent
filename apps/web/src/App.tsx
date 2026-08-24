@@ -1,6 +1,6 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router";
-import { HomePage } from "./pages/HomePage";
-import { LoginPage } from "./pages/LoginPage";
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
+import { HomePage } from './pages/HomePage';
+import { LoginPage } from './pages/LoginPage';
 
 export function App() {
   return (

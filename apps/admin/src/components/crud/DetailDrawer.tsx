@@ -1,4 +1,5 @@
-import React, { useEffect } from "react";
+import type React from 'react';
+import { useEffect } from 'react';
 
 export interface DetailDrawerProps {
   isOpen: boolean;
@@ -19,16 +20,16 @@ export function DetailDrawer({
   badge,
   children,
   footer,
-  width = "max-w-2xl",
+  width = 'max-w-2xl',
 }: DetailDrawerProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
+      if (e.key === 'Escape' && isOpen) {
         onClose();
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -50,14 +51,10 @@ export function DetailDrawer({
           <div className="flex items-center gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-semibold text-slate-900">
-                  {title}
-                </h3>
+                <h3 className="text-base font-semibold text-slate-900">{title}</h3>
                 {badge}
               </div>
-              {subtitle && (
-                <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
-              )}
+              {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
             </div>
           </div>
           <button
@@ -66,26 +63,14 @@ export function DetailDrawer({
             className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
             title="关闭 (Esc)"
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
         {/* 抽屉内容区 */}
-        <div className="flex-1 overflow-y-auto p-5 text-sm text-slate-700 bg-white">
-          {children}
-        </div>
+        <div className="flex-1 overflow-y-auto p-5 text-sm text-slate-700 bg-white">{children}</div>
 
         {/* 底部操作区 */}
         {footer && (

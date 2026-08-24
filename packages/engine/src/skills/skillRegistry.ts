@@ -1,7 +1,9 @@
-import type { AgentSkill, SkillExecutionContext } from 'types';
-import { OrderAddressModificationSkill } from './orderAddressModificationSkill';
-import { OrderRefundSkill } from './orderRefundSkill';
-import { ProductInquirySkill } from './productInquirySkill';
+import type { AgentSkill, SkillExecutionContext } from "types";
+import { CartManageSkill } from "./cartManageSkill";
+import { OrderAddressModificationSkill } from "./orderAddressModificationSkill";
+import { OrderRefundSkill } from "./orderRefundSkill";
+import { ProductInquirySkill } from "./productInquirySkill";
+import { ShoppingGuideSkill } from "./shoppingGuideSkill";
 
 export class SkillRegistry {
   private static readonly skills = new Map<string, AgentSkill>();
@@ -11,6 +13,8 @@ export class SkillRegistry {
     SkillRegistry.register(new OrderAddressModificationSkill());
     SkillRegistry.register(new OrderRefundSkill());
     SkillRegistry.register(new ProductInquirySkill());
+    SkillRegistry.register(new ShoppingGuideSkill());
+    SkillRegistry.register(new CartManageSkill());
   }
 
   /**
@@ -37,7 +41,9 @@ export class SkillRegistry {
   /**
    * 根据当前执行上下文自动匹配最佳承接 Skill
    */
-  public static findMatchingSkill(context: SkillExecutionContext): AgentSkill | null {
+  public static findMatchingSkill(
+    context: SkillExecutionContext,
+  ): AgentSkill | null {
     const allSkills = Array.from(SkillRegistry.skills.values());
     for (const skill of allSkills) {
       if (skill.canHandle(context)) {

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
 import { ConversationRepository, getPgPool } from 'db';
 import {
   WorkflowOrchestrator,
@@ -11,13 +12,34 @@ import {
 import type { Response } from 'express';
 import { logger } from 'observability';
 
-export interface DispatchChatDto {
+export class DispatchChatDto {
+  @IsOptional()
+  @IsString()
   message?: string;
+
+  @IsOptional()
+  @IsString()
   input?: string;
+
+  @IsOptional()
+  @IsString()
   threadId?: string;
+
+  @IsOptional()
+  @IsString()
   userId?: string;
+
+  @IsOptional()
+  @IsString()
   businessId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   imageUrls?: string[];
+
+  @IsOptional()
+  @IsBoolean()
   sync?: boolean;
 }
 
@@ -41,6 +63,7 @@ export class ChatService {
     await ConversationRepository.appendMessage({
       threadId: effectiveThreadId,
       businessId: effectiveBusinessId,
+      userId: effectiveUserId,
       role: 'user',
       content: effectiveMessage,
     });
@@ -95,22 +118,46 @@ export class ChatService {
   }
 
   /**
-   * 管道化处理 SSE 实时推流
+   * 管道化处理 SSE 实时推流（支持 EventId 序列号递增与 Last-Event-ID 重放）
    */
-  pipeSSE(jobId: string, res: Response) {
+  pipeSSE(jobId: string, res: Response, lastEventId?: string) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders?.();
 
+    let seq = 0;
+    const eventHistory: Array<{ id: number; event: string; data: any }> = [];
+
     const sendSSE = (event: string, data: any) => {
       try {
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        seq++;
+        const payload = { id: seq, event, data };
+        eventHistory.push(payload);
+        // 保留最近 100 条事件以备断线补发
+        if (eventHistory.length > 100) eventHistory.shift();
+
+        res.write(`id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       } catch (err) {
         logger.warn({ err, jobId }, '[ChatService] SSE write error');
       }
     };
+
+    // 检查断线重连回放 (Replay missed events if client provides lastEventId)
+    if (lastEventId) {
+      const lastIdNum = Number.parseInt(lastEventId, 10);
+      if (!Number.isNaN(lastIdNum)) {
+        const missedEvents = eventHistory.filter((e) => e.id > lastIdNum);
+        for (const missed of missedEvents) {
+          try {
+            res.write(`id: ${missed.id}\nevent: ${missed.event}\ndata: ${JSON.stringify(missed.data)}\n\n`);
+          } catch (err) {
+            logger.warn({ err, jobId }, '[ChatService] SSE replay write error');
+          }
+        }
+      }
+    }
 
     const isMock = isUsingMockTemporal();
     let isClosed = false;
@@ -130,40 +177,41 @@ export class ChatService {
 
     res.on('close', cleanup);
 
-    if (isMock) {
-      const onThought = (data: any) => {
-        if (data.jobId === jobId && !isClosed) sendSSE('thought', data);
-      };
-      const onTool = (data: any) => {
-        if (data.jobId === jobId && !isClosed) sendSSE('tool', data);
-      };
-      const onApproval = (data: any) => {
-        if (data.jobId === jobId && !isClosed) sendSSE('approval_required', data);
-      };
-      const onResult = (data: any) => {
-        if (data.jobId === jobId && !isClosed) {
-          if (data.cards && Array.isArray(data.cards) && data.cards.length > 0) {
-            sendSSE('cards', { cards: data.cards });
-          }
-          sendSSE('result', data);
-          setTimeout(cleanup, 200);
+    // 注册本地 / 模拟器事件发射器监听
+    const onThought = (data: any) => {
+      if (data.jobId === jobId && !isClosed) sendSSE('thought', data);
+    };
+    const onTool = (data: any) => {
+      if (data.jobId === jobId && !isClosed) sendSSE('tool', data);
+    };
+    const onApproval = (data: any) => {
+      if (data.jobId === jobId && !isClosed) sendSSE('approval_required', data);
+    };
+    const onResult = (data: any) => {
+      if (data.jobId === jobId && !isClosed) {
+        if (data.cards && Array.isArray(data.cards) && data.cards.length > 0) {
+          sendSSE('cards', { cards: data.cards });
         }
-      };
+        sendSSE('result', data);
+        setTimeout(cleanup, 200);
+      }
+    };
 
-      agentEventEmitter.on('thought', onThought);
-      agentEventEmitter.on('tool', onTool);
-      agentEventEmitter.on('approval_required', onApproval);
-      agentEventEmitter.on('result', onResult);
+    agentEventEmitter.on('thought', onThought);
+    agentEventEmitter.on('tool', onTool);
+    agentEventEmitter.on('approval_required', onApproval);
+    agentEventEmitter.on('result', onResult);
 
-      const origCleanup = cleanup;
-      res.on('close', () => {
-        agentEventEmitter.off('thought', onThought);
-        agentEventEmitter.off('tool', onTool);
-        agentEventEmitter.off('approval_required', onApproval);
-        agentEventEmitter.off('result', onResult);
-        origCleanup();
-      });
-    } else {
+    const origCleanup = cleanup;
+    res.on('close', () => {
+      agentEventEmitter.off('thought', onThought);
+      agentEventEmitter.off('tool', onTool);
+      agentEventEmitter.off('approval_required', onApproval);
+      agentEventEmitter.off('result', onResult);
+      origCleanup();
+    });
+
+    if (!isMock) {
       // Temporal 轮询模式
       (async () => {
         try {

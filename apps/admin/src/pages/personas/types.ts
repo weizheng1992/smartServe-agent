@@ -5,6 +5,6 @@ export interface PersonaRecord {
   fact: string;
   confidence: number;
   source: string;
-  status: "approved" | "pending" | "rejected";
+  status: 'approved' | 'pending' | 'rejected';
   createdAt: string;
 }

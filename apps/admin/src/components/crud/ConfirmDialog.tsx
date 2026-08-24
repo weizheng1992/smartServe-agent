@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 export interface ConfirmDialogProps {
   isOpen: boolean;
@@ -18,8 +18,8 @@ export function ConfirmDialog({
   onConfirm,
   title,
   description,
-  confirmText = "确认执行",
-  cancelText = "取消",
+  confirmText = '确认执行',
+  cancelText = '取消',
   isDestructive = true,
   isLoading = false,
 }: ConfirmDialogProps) {
@@ -36,17 +36,10 @@ export function ConfirmDialog({
         <div className="flex items-start gap-4">
           <div
             className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-              isDestructive
-                ? "bg-rose-100 text-rose-600"
-                : "bg-amber-100 text-amber-600"
+              isDestructive ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'
             }`}
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -57,9 +50,7 @@ export function ConfirmDialog({
           </div>
           <div>
             <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              {description}
-            </p>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed">{description}</p>
           </div>
         </div>
 
@@ -77,25 +68,12 @@ export function ConfirmDialog({
             disabled={isLoading}
             onClick={onConfirm}
             className={`px-4 py-1.5 text-xs font-medium text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 disabled:opacity-50 ${
-              isDestructive
-                ? "bg-rose-600 hover:bg-rose-700"
-                : "bg-slate-900 hover:bg-slate-800"
+              isDestructive ? 'bg-rose-600 hover:bg-rose-700' : 'bg-slate-900 hover:bg-slate-800'
             }`}
           >
             {isLoading && (
-              <svg
-                className="animate-spin w-3.5 h-3.5 text-white"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
+              <svg className="animate-spin w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path
                   className="opacity-75"
                   fill="currentColor"

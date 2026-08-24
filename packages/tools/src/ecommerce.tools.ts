@@ -1,17 +1,17 @@
-import { z } from 'zod';
-import { redis, toolCache, useRedis } from './cache';
-import { MallDomainService } from './mallDomainService';
-import { OrderDomainService } from './orderDomainService';
-import { registerTool } from './registry';
+import { z } from "zod";
+import { redis, toolCache, useRedis } from "./cache";
+import { MallDomainService } from "./mallDomainService";
+import { OrderDomainService } from "./orderDomainService";
+import { registerTool } from "./registry";
 
 export { redis, useRedis, toolCache, MallDomainService };
 
 export const getOrderStatus = {
-  name: 'getOrderStatus',
+  name: "getOrderStatus",
   description:
-    'Get the status of a specific order by order ID. Secured: Only allowed if the order belongs to the currently logged-in customer.',
+    "Get the status of a specific order by order ID. Secured: Only allowed if the order belongs to the currently logged-in customer.",
   schema: z.object({
-    orderId: z.string().describe('The unique order identifier.'),
+    orderId: z.string().describe("The unique order identifier."),
   }),
   execute: async ({
     orderId,
@@ -25,12 +25,12 @@ export const getOrderStatus = {
 };
 
 export const processRefund = {
-  name: 'processRefund',
+  name: "processRefund",
   description:
-    'Process a refund for an order. Secured: Only allowed if the order belongs to the currently logged-in customer.',
+    "Process a refund for an order. Secured: Only allowed if the order belongs to the currently logged-in customer.",
   schema: z.object({
-    orderId: z.string().describe('The unique order identifier.'),
-    reason: z.string().describe('The reason for processing the refund.'),
+    orderId: z.string().describe("The unique order identifier."),
+    reason: z.string().describe("The reason for processing the refund."),
   }),
   execute: async ({
     orderId,
@@ -48,21 +48,36 @@ export const processRefund = {
 };
 
 export const listUserOrders = {
-  name: 'listUserOrders',
-  description: 'List all recent orders and tracking status for the current customer.',
+  name: "listUserOrders",
+  description:
+    "List all recent orders and tracking status for the current customer.",
   schema: z.object({}),
-  execute: async ({ threadId }: { threadId?: string }) => {
-    return OrderDomainService.listUserOrders(threadId);
+  execute: async ({
+    threadId,
+    userId,
+    businessId,
+    tenantId,
+  }: {
+    threadId?: string;
+    userId?: string;
+    businessId?: string;
+    tenantId?: string;
+  }) => {
+    return OrderDomainService.listUserOrders(
+      threadId,
+      userId,
+      businessId || tenantId,
+    );
   },
 };
 
 export const changeShippingAddress = {
-  name: 'changeShippingAddress',
+  name: "changeShippingAddress",
   description:
-    'Modify the shipping address of an order before it gets shipped. Secured: Only allowed if the order belongs to the currently logged-in customer.',
+    "Modify the shipping address of an order before it gets shipped. Secured: Only allowed if the order belongs to the currently logged-in customer.",
   schema: z.object({
-    orderId: z.string().describe('The unique order identifier.'),
-    newAddress: z.string().describe('The new physical shipping address.'),
+    orderId: z.string().describe("The unique order identifier."),
+    newAddress: z.string().describe("The new physical shipping address."),
   }),
   execute: async ({
     orderId,
@@ -75,16 +90,21 @@ export const changeShippingAddress = {
     threadId?: string;
     isApproved?: boolean;
   }) => {
-    return OrderDomainService.changeShippingAddress(orderId, newAddress, threadId, isApproved);
+    return OrderDomainService.changeShippingAddress(
+      orderId,
+      newAddress,
+      threadId,
+      isApproved,
+    );
   },
 };
 
 export const generateInvoice = {
-  name: 'generateInvoice',
+  name: "generateInvoice",
   description:
-    'Generate a structured electronic tax invoice for a completed order. Secured: Only allowed if the order belongs to the currently logged-in customer.',
+    "Generate a structured electronic tax invoice for a completed order. Secured: Only allowed if the order belongs to the currently logged-in customer.",
   schema: z.object({
-    orderId: z.string().describe('The unique order identifier.'),
+    orderId: z.string().describe("The unique order identifier."),
   }),
   execute: async ({
     orderId,
@@ -98,16 +118,20 @@ export const generateInvoice = {
 };
 
 export const recordUserPreference = {
-  name: 'recordUserPreference',
+  name: "recordUserPreference",
   description:
-    'Record specific consumer preferences of the current customer (such as clothing size, favorite color, stylistic preference, material allergies/restrictions) into long-term memories for future search and sizing recommendation.',
+    "Record specific consumer preferences of the current customer (such as clothing size, favorite color, stylistic preference, material allergies/restrictions) into long-term memories for future search and sizing recommendation.",
   schema: z.object({
     preferenceType: z
-      .enum(['size', 'color', 'brand', 'style', 'material', 'other'])
-      .describe('偏好类型，如 size 代表尺寸，color 代表颜色，material 代表过敏或避雷材质等'),
+      .enum(["size", "color", "brand", "style", "material", "other"])
+      .describe(
+        "偏好类型，如 size 代表尺寸，color 代表颜色，material 代表过敏或避雷材质等",
+      ),
     preferenceValue: z
       .string()
-      .describe('具体的偏好数值或文字表达，例如 "鞋码42.5/上衣L码"、"喜欢纯白"、"对羊毛过敏，刺痒"'),
+      .describe(
+        '具体的偏好数值或文字表达，例如 "鞋码42.5/上衣L码"、"喜欢纯白"、"对羊毛过敏，刺痒"',
+      ),
   }),
   execute: async ({
     preferenceType,
@@ -118,32 +142,45 @@ export const recordUserPreference = {
     preferenceValue: string;
     threadId?: string;
   }) => {
-    return OrderDomainService.recordUserPreference(preferenceType, preferenceValue, threadId);
+    return OrderDomainService.recordUserPreference(
+      preferenceType,
+      preferenceValue,
+      threadId,
+    );
   },
 };
 
 export const createOrder = {
-  name: 'createOrder',
-  description: 'Create a new customer order. Automatically resolves user context and tenant ID.',
+  name: "createOrder",
+  description:
+    "Create a new customer order. Automatically resolves user context and tenant ID.",
   schema: z.object({
     userId: z
       .string()
       .optional()
-      .describe('The user ID to associate the order with. If omitted, resolved from session thread context.'),
-    orderId: z.string().optional().describe('Optional custom order ID.'),
-    businessId: z.string().optional().describe('Optional merchant business ID.'),
-    totalAmount: z.number().optional().describe('Total amount of the order.'),
-    carrier: z.string().optional().describe('Shipping carrier name.'),
+      .describe(
+        "The user ID to associate the order with. If omitted, resolved from session thread context.",
+      ),
+    orderId: z.string().optional().describe("Optional custom order ID."),
+    businessId: z
+      .string()
+      .optional()
+      .describe("Optional merchant business ID."),
+    totalAmount: z.number().optional().describe("Total amount of the order."),
+    carrier: z.string().optional().describe("Shipping carrier name."),
     items: z
       .array(
         z.object({
-          productId: z.string().describe('The product unique ID.'),
-          quantity: z.number().describe('Quantity of the product.'),
-          priceAtPurchase: z.number().optional().describe('Purchase unit price.'),
+          productId: z.string().describe("The product unique ID."),
+          quantity: z.number().describe("Quantity of the product."),
+          priceAtPurchase: z
+            .number()
+            .optional()
+            .describe("Purchase unit price."),
         }),
       )
       .optional()
-      .describe('List of order items included in this order.'),
+      .describe("List of order items included in this order."),
   }),
   execute: async (args: {
     userId?: string;
@@ -161,22 +198,25 @@ export const createOrder = {
     let effectiveUserId = args.userId;
     let effectiveBusinessId = args.businessId;
     if ((!effectiveUserId || !effectiveBusinessId) && args.threadId) {
-      const ctx = await OrderDomainService.getThreadSessionContext(args.threadId);
+      const ctx = await OrderDomainService.getThreadSessionContext(
+        args.threadId,
+      );
       if (!effectiveUserId && ctx.userId) effectiveUserId = ctx.userId;
-      if (!effectiveBusinessId && ctx.businessId) effectiveBusinessId = ctx.businessId;
+      if (!effectiveBusinessId && ctx.businessId)
+        effectiveBusinessId = ctx.businessId;
     }
     return OrderDomainService.createOrder({
       ...args,
-      userId: effectiveUserId || '',
-      businessId: effectiveBusinessId || 'ecommerce',
+      userId: effectiveUserId || "",
+      businessId: effectiveBusinessId || "ecommerce",
     });
   },
 };
 
 export const queryProductRanking = {
-  name: 'queryProductRanking',
+  name: "queryProductRanking",
   description:
-    'Query and rank mall products across multi-dimensional metrics (GMV sales revenue, shipment volume, gross profit, margin rate, or stock risk) with tenant isolation and manager ownership security.',
+    "Query and rank mall products across multi-dimensional metrics (GMV sales revenue, shipment volume, gross profit, margin rate, or stock risk) with tenant isolation and manager ownership security.",
   schema: z.object({
     rankingMetric: z
       .string()
@@ -193,8 +233,13 @@ export const queryProductRanking = {
     category: z
       .string()
       .optional()
-      .describe("Optional product category filter (e.g. 'shoes', 'apparel', 'accessories')."),
-    limit: z.number().optional().describe('Maximum number of ranked products to return. Defaults to 5.'),
+      .describe(
+        "Optional product category filter (e.g. 'shoes', 'apparel', 'accessories').",
+      ),
+    limit: z
+      .number()
+      .optional()
+      .describe("Maximum number of ranked products to return. Defaults to 5."),
   }),
   execute: async (args: {
     rankingMetric?: string;
@@ -208,28 +253,45 @@ export const queryProductRanking = {
 };
 
 export const getUserAddresses = {
-  name: 'getUserAddresses',
-  description: 'Get all saved recipient delivery addresses for the current user, including tags and default flags.',
+  name: "getUserAddresses",
+  description:
+    "Get all saved recipient delivery addresses for the current user, including tags and default flags.",
   schema: z.object({
-    userId: z.string().optional().describe('User identifier. Resolved automatically from context if omitted.'),
+    userId: z
+      .string()
+      .optional()
+      .describe(
+        "User identifier. Resolved automatically from context if omitted.",
+      ),
   }),
   execute: async (args: { userId?: string; threadId?: string }) => {
-    return MallDomainService.getUserAddresses(args.userId, undefined, args.threadId);
+    return MallDomainService.getUserAddresses(
+      args.userId,
+      undefined,
+      args.threadId,
+    );
   },
 };
 
 export const saveUserAddress = {
-  name: 'saveUserAddress',
-  description: 'Save or create a new delivery address for the current customer.',
+  name: "saveUserAddress",
+  description:
+    "Save or create a new delivery address for the current customer.",
   schema: z.object({
-    receiverName: z.string().describe('Recipient name.'),
-    receiverPhone: z.string().describe('Recipient phone number.'),
-    province: z.string().describe('Province or state.'),
-    city: z.string().describe('City name.'),
-    district: z.string().describe('District or county.'),
-    detailAddress: z.string().describe('Street address and door number.'),
-    tag: z.enum(['home', 'company', 'school', 'other']).optional().describe('Address category tag.'),
-    isDefault: z.boolean().optional().describe('Whether to set this address as default.'),
+    receiverName: z.string().describe("Recipient name."),
+    receiverPhone: z.string().describe("Recipient phone number."),
+    province: z.string().describe("Province or state."),
+    city: z.string().describe("City name."),
+    district: z.string().describe("District or county."),
+    detailAddress: z.string().describe("Street address and door number."),
+    tag: z
+      .enum(["home", "company", "school", "other"])
+      .optional()
+      .describe("Address category tag."),
+    isDefault: z
+      .boolean()
+      .optional()
+      .describe("Whether to set this address as default."),
   }),
   execute: async (args: {
     receiverName: string;
@@ -238,7 +300,7 @@ export const saveUserAddress = {
     city: string;
     district: string;
     detailAddress: string;
-    tag?: 'home' | 'company' | 'school' | 'other';
+    tag?: "home" | "company" | "school" | "other";
     isDefault?: boolean;
     threadId?: string;
   }) => {
@@ -247,14 +309,23 @@ export const saveUserAddress = {
 };
 
 export const queryProductSkus = {
-  name: 'queryProductSkus',
+  name: "queryProductSkus",
   description:
-    'Query detailed product SKU specifications (color, size, edition) along with real-time stock and prices.',
+    "Query detailed product SKU specifications (color, size, edition) along with real-time stock and prices.",
   schema: z.object({
-    productId: z.string().optional().describe('Product unique identifier.'),
-    color: z.string().optional().describe("Color name filter (e.g. '极夜黑', '白')."),
-    size: z.string().optional().describe("Shoe or apparel size filter (e.g. '42', '42.5', 'L')."),
-    inStockOnly: z.boolean().optional().describe('Filter only SKUs that are currently in stock.'),
+    productId: z.string().optional().describe("Product unique identifier."),
+    color: z
+      .string()
+      .optional()
+      .describe("Color name filter (e.g. '极夜黑', '白')."),
+    size: z
+      .string()
+      .optional()
+      .describe("Shoe or apparel size filter (e.g. '42', '42.5', 'L')."),
+    inStockOnly: z
+      .boolean()
+      .optional()
+      .describe("Filter only SKUs that are currently in stock."),
   }),
   execute: async (args: {
     productId?: string;
@@ -268,11 +339,18 @@ export const queryProductSkus = {
 };
 
 export const queryPackageTracking = {
-  name: 'queryPackageTracking',
-  description: 'Query real-time parcel delivery tracking status, courier details, and chronological timeline nodes.',
+  name: "queryPackageTracking",
+  description:
+    "Query real-time parcel delivery tracking status, courier details, and chronological timeline nodes.",
   schema: z.object({
-    orderId: z.string().optional().describe('Order ID to look up package tracking.'),
-    trackingNumber: z.string().optional().describe('Specific express tracking number (SF, JD, ZTO, etc.).'),
+    orderId: z
+      .string()
+      .optional()
+      .describe("Order ID to look up package tracking."),
+    trackingNumber: z
+      .string()
+      .optional()
+      .describe("Specific express tracking number (SF, JD, ZTO, etc.)."),
   }),
   execute: async (args: {
     orderId?: string;
@@ -284,21 +362,31 @@ export const queryPackageTracking = {
 };
 
 export const queryProductReviews = {
-  name: 'queryProductReviews',
-  description: 'Query customer feedback, ratings, sentiment summary, and sizing/fit consensus for a product.',
+  name: "queryProductReviews",
+  description:
+    "Query customer feedback, ratings, sentiment summary, and sizing/fit consensus for a product.",
   schema: z.object({
-    productId: z.string().optional().describe('Product ID to inspect reviews for.'),
-    fitFeedback: z
-      .enum(['true_to_size', 'runs_small', 'runs_large'])
+    productId: z
+      .string()
       .optional()
-      .describe('Filter reviews by specific fit feedback.'),
-    sentiment: z.enum(['positive', 'neutral', 'negative']).optional().describe('Sentiment filter.'),
-    limit: z.number().optional().describe('Maximum number of reviews to return.'),
+      .describe("Product ID to inspect reviews for."),
+    fitFeedback: z
+      .enum(["true_to_size", "runs_small", "runs_large"])
+      .optional()
+      .describe("Filter reviews by specific fit feedback."),
+    sentiment: z
+      .enum(["positive", "neutral", "negative"])
+      .optional()
+      .describe("Sentiment filter."),
+    limit: z
+      .number()
+      .optional()
+      .describe("Maximum number of reviews to return."),
   }),
   execute: async (args: {
     productId?: string;
-    fitFeedback?: 'true_to_size' | 'runs_small' | 'runs_large';
-    sentiment?: 'positive' | 'neutral' | 'negative';
+    fitFeedback?: "true_to_size" | "runs_small" | "runs_large";
+    sentiment?: "positive" | "neutral" | "negative";
     limit?: number;
     threadId?: string;
   }) => {
@@ -307,26 +395,125 @@ export const queryProductReviews = {
 };
 
 export const applyAfterSale = {
-  name: 'applyAfterSale',
-  description: 'Submit an after-sale customer service ticket (refund only, return and refund, or exchange).',
+  name: "applyAfterSale",
+  description:
+    "Submit an after-sale customer service ticket (refund only, return and refund, or exchange).",
   schema: z.object({
-    orderId: z.string().describe('The order ID to apply after-sale for.'),
-    type: z.enum(['refund_only', 'return_and_refund', 'exchange']).describe('After-sale type.'),
+    orderId: z.string().describe("The order ID to apply after-sale for."),
+    type: z
+      .enum(["refund_only", "return_and_refund", "exchange"])
+      .describe("After-sale type."),
     reason: z
-      .enum(['wrong_size', 'quality_issue', 'not_as_described', 'no_reason_7d'])
-      .describe('Structured return/refund reason code.'),
-    reasonDescription: z.string().optional().describe('Optional text explanation of the issue.'),
-    refundAmount: z.number().optional().describe('Requested refund amount.'),
+      .enum(["wrong_size", "quality_issue", "not_as_described", "no_reason_7d"])
+      .describe("Structured return/refund reason code."),
+    reasonDescription: z
+      .string()
+      .optional()
+      .describe("Optional text explanation of the issue."),
+    refundAmount: z.number().optional().describe("Requested refund amount."),
   }),
   execute: async (args: {
     orderId: string;
-    type: 'refund_only' | 'return_and_refund' | 'exchange';
-    reason: 'wrong_size' | 'quality_issue' | 'not_as_described' | 'no_reason_7d';
+    type: "refund_only" | "return_and_refund" | "exchange";
+    reason:
+      "wrong_size" | "quality_issue" | "not_as_described" | "no_reason_7d";
     reasonDescription?: string;
     refundAmount?: number;
     threadId?: string;
   }) => {
     return MallDomainService.applyAfterSale(args);
+  },
+};
+
+export const searchProducts = {
+  name: "searchProducts",
+  description:
+    "Search products by keywords, category, or price range for shopping recommendations.",
+  schema: z.object({
+    query: z
+      .string()
+      .optional()
+      .describe("Search keywords (e.g., 跑步鞋, 连帽卫衣)."),
+    category: z.string().optional().describe("Category identifier."),
+    maxPrice: z.number().optional().describe("Maximum budget filter."),
+    limit: z
+      .number()
+      .optional()
+      .describe("Maximum number of products to return (default 4)."),
+  }),
+  execute: async (args: {
+    query?: string;
+    category?: string;
+    maxPrice?: number;
+    limit?: number;
+    threadId?: string;
+  }) => {
+    return MallDomainService.searchProducts(args);
+  },
+};
+
+export const compareProducts = {
+  name: "compareProducts",
+  description:
+    "Compare detailed features, specs, and prices across multiple selected product IDs.",
+  schema: z.object({
+    productIds: z.array(z.string()).describe("List of product IDs to compare."),
+  }),
+  execute: async (args: { productIds: string[]; threadId?: string }) => {
+    return MallDomainService.compareProducts(args);
+  },
+};
+
+export const addToCart = {
+  name: "addToCart",
+  description:
+    "Add a product SKU to user shopping cart with quantity and options.",
+  schema: z.object({
+    skuId: z.string().describe("Target SKU or Product ID to add."),
+    quantity: z.number().optional().describe("Quantity to add (default 1)."),
+    title: z.string().optional().describe("Product display title."),
+    price: z.number().optional().describe("Unit price."),
+    spec: z
+      .string()
+      .optional()
+      .describe("Selected specs (e.g. 42码 / 极夜黑)."),
+  }),
+  execute: async (args: {
+    skuId: string;
+    quantity?: number;
+    title?: string;
+    price?: number;
+    spec?: string;
+    threadId?: string;
+  }) => {
+    return MallDomainService.addToCart(args);
+  },
+};
+
+export const getCartSummary = {
+  name: "getCartSummary",
+  description:
+    "Get current user shopping cart items, total quantity, and calculated amount.",
+  schema: z.object({}),
+  execute: async (args: { threadId?: string }) => {
+    return MallDomainService.getCartSummary(args);
+  },
+};
+
+export const updateCartItem = {
+  name: "updateCartItem",
+  description:
+    "Update quantity of an item in shopping cart, or remove if quantity is 0.",
+  schema: z.object({
+    skuId: z.string().describe("Target SKU ID to modify."),
+    quantity: z.number().describe("New quantity (0 to remove)."),
+  }),
+  execute: async (args: {
+    skuId: string;
+    quantity: number;
+    threadId?: string;
+  }) => {
+    return MallDomainService.updateCartItem(args);
   },
 };
 
@@ -344,3 +531,8 @@ registerTool(queryProductSkus);
 registerTool(queryPackageTracking);
 registerTool(queryProductReviews);
 registerTool(applyAfterSale);
+registerTool(searchProducts);
+registerTool(compareProducts);
+registerTool(addToCart);
+registerTool(getCartSummary);
+registerTool(updateCartItem);

@@ -5,6 +5,14 @@
 
 import type { RichCardBlock } from './card';
 
+export interface TenantSkillConfig {
+  skillId: string;
+  enabled: boolean;
+  approvalThresholdAmount?: number;
+  customPolicyPrompt?: string;
+  updatedAt?: string;
+}
+
 export interface SkillMetadata {
   id: string;
   name: string;
