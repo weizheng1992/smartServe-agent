@@ -1,7 +1,7 @@
-import type React from "react";
-import { FormModal } from "../../../components/crud";
-import { Input, Label } from "ui";
-import type { TenantBillingRecord } from "../types";
+import type React from 'react';
+import { Input, Label } from 'ui';
+import { FormModal } from '../../../components/crud';
+import type { TenantBillingRecord } from '../types';
 
 export interface QuotaFormModalProps {
   isOpen: boolean;
@@ -30,20 +30,16 @@ export function QuotaFormModal({
     >
       <div className="space-y-3.5">
         <div>
-          <Label className="block text-xs font-semibold text-slate-700 mb-1">
-            商户租户
-          </Label>
+          <Label className="block text-xs font-semibold text-slate-700 mb-1">商户租户</Label>
           <Input
             type="text"
             disabled
-            value={selectedItem?.tenantName || ""}
+            value={selectedItem?.tenantName || ''}
             className="w-full h-8 text-xs bg-slate-100 border-slate-200 text-slate-600"
           />
         </div>
         <div>
-          <Label className="block text-xs font-semibold text-slate-700 mb-1">
-            月度 Token 配额上限 (Tokens)
-          </Label>
+          <Label className="block text-xs font-semibold text-slate-700 mb-1">月度 Token 配额上限 (Tokens)</Label>
           <Input
             type="number"
             step="500000"

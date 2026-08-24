@@ -1,6 +1,6 @@
-import type React from "react";
-import { Combobox, Input, Button } from "ui";
-import { useAdminTenantStore } from "../../store/tenantStore";
+import type React from 'react';
+import { Button, Combobox, Input } from 'ui';
+import { useAdminTenantStore } from '../../store/tenantStore';
 
 export interface FilterOption {
   label: string;
@@ -25,7 +25,7 @@ export interface FilterBarProps {
 export function FilterBar({
   searchQuery,
   onSearchChange,
-  searchPlaceholder = "输入关键字搜索...",
+  searchPlaceholder = '输入关键字搜索...',
   statusFilter,
   onStatusChange,
   statusOptions,
@@ -36,10 +36,8 @@ export function FilterBar({
   extraFilters,
   actions,
 }: FilterBarProps) {
-  const { selectedTenantId, setSelectedTenantId, tenants } =
-    useAdminTenantStore();
-  const activeTenant =
-    tenantFilter !== undefined ? tenantFilter : selectedTenantId;
+  const { selectedTenantId, setSelectedTenantId, tenants } = useAdminTenantStore();
+  const activeTenant = tenantFilter !== undefined ? tenantFilter : selectedTenantId;
   const handleTenantSelect = (val: string) => {
     if (onTenantChange) {
       onTenantChange(val);
@@ -69,7 +67,7 @@ export function FilterBar({
             </svg>
             <Input
               type="text"
-              value={searchQuery ?? ""}
+              value={searchQuery ?? ''}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder={searchPlaceholder}
               className="w-full pl-9 pr-3 h-8 text-xs bg-slate-50 border-slate-200 text-slate-700 placeholder-slate-400 focus:bg-white transition-colors"
@@ -82,7 +80,7 @@ export function FilterBar({
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <span>状态:</span>
             <select
-              value={statusFilter ?? ""}
+              value={statusFilter ?? ''}
               onChange={(e) => onStatusChange(e.target.value)}
               className="h-8 px-2.5 text-xs bg-slate-50 border border-slate-200 rounded-md text-slate-700 focus:outline-hidden focus:border-slate-400 transition-colors"
             >

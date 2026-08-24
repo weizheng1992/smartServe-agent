@@ -1,12 +1,5 @@
-import type React from "react";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
-} from "ui";
+import type React from 'react';
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from 'ui';
 
 export interface DetailDrawerProps {
   isOpen: boolean;
@@ -27,7 +20,7 @@ export function DetailDrawer({
   badge,
   children,
   footer,
-  width = "sm:max-w-2xl",
+  width = 'sm:max-w-2xl',
 }: DetailDrawerProps) {
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -40,24 +33,16 @@ export function DetailDrawer({
           <div className="flex items-center gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <SheetTitle className="text-base font-semibold text-slate-900">
-                  {title}
-                </SheetTitle>
+                <SheetTitle className="text-base font-semibold text-slate-900">{title}</SheetTitle>
                 {badge}
               </div>
-              {subtitle && (
-                <SheetDescription className="text-xs text-slate-500 mt-0.5">
-                  {subtitle}
-                </SheetDescription>
-              )}
+              {subtitle && <SheetDescription className="text-xs text-slate-500 mt-0.5">{subtitle}</SheetDescription>}
             </div>
           </div>
         </SheetHeader>
 
         {/* 抽屉内容区 */}
-        <div className="flex-1 overflow-y-auto p-5 text-sm text-slate-700 bg-white">
-          {children}
-        </div>
+        <div className="flex-1 overflow-y-auto p-5 text-sm text-slate-700 bg-white">{children}</div>
 
         {/* 底部操作区 */}
         {footer && (

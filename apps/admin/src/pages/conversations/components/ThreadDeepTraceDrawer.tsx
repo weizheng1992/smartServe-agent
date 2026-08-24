@@ -1,7 +1,7 @@
-import React, { useState } from "react";
-import { DetailDrawer } from "../../../components/crud";
-import { Tabs, TabsList, TabsTrigger, TabsContent, Badge } from "ui";
-import type { ConversationRecord } from "../types";
+import React, { useState } from 'react';
+import { Badge, Tabs, TabsContent, TabsList, TabsTrigger } from 'ui';
+import { DetailDrawer } from '../../../components/crud';
+import type { ConversationRecord } from '../types';
 
 export interface ThreadDeepTraceDrawerProps {
   isOpen: boolean;
@@ -9,14 +9,8 @@ export interface ThreadDeepTraceDrawerProps {
   conversation: ConversationRecord | null;
 }
 
-export function ThreadDeepTraceDrawer({
-  isOpen,
-  onClose,
-  conversation,
-}: ThreadDeepTraceDrawerProps) {
-  const [activeTab, setActiveTab] = useState<"dialogue" | "trace" | "metrics">(
-    "dialogue",
-  );
+export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation }: ThreadDeepTraceDrawerProps) {
+  const [activeTab, setActiveTab] = useState<'dialogue' | 'trace' | 'metrics'>('dialogue');
 
   if (!conversation) return null;
 
@@ -28,11 +22,8 @@ export function ThreadDeepTraceDrawer({
       title={`会话决策透视: ${conversation.threadId}`}
       subtitle={`用户: ${conversation.userId} | 商户: ${conversation.businessId.toUpperCase()} | 渠道: ${conversation.channel}`}
       badge={
-        conversation.status === "waiting_approval" ? (
-          <Badge
-            variant="outline"
-            className="bg-amber-50 text-amber-800 border-amber-200"
-          >
+        conversation.status === 'waiting_approval' ? (
+          <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200">
             待风控审批
           </Badge>
         ) : (
@@ -40,11 +31,7 @@ export function ThreadDeepTraceDrawer({
         )
       }
     >
-      <Tabs
-        value={activeTab}
-        onValueChange={(val) => setActiveTab(val as any)}
-        className="w-full space-y-4"
-      >
+      <Tabs value={activeTab} onValueChange={(val) => setActiveTab(val as any)} className="w-full space-y-4">
         {/* Tab 导航 */}
         <TabsList className="grid grid-cols-3 w-full bg-slate-100">
           <TabsTrigger value="dialogue" className="text-xs font-semibold">
@@ -66,9 +53,7 @@ export function ThreadDeepTraceDrawer({
                 U
               </div>
               <div>
-                <div className="text-[11px] font-semibold text-slate-700">
-                  用户提问
-                </div>
+                <div className="text-[11px] font-semibold text-slate-700">用户提问</div>
                 <div className="text-xs text-slate-800 mt-0.5 bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
                   {conversation.lastMessage}
                 </div>
@@ -80,9 +65,7 @@ export function ThreadDeepTraceDrawer({
                 AI
               </div>
               <div>
-                <div className="text-[11px] font-semibold text-slate-700">
-                  Agent 响应
-                </div>
+                <div className="text-[11px] font-semibold text-slate-700">Agent 响应</div>
                 <div className="text-xs text-slate-800 mt-0.5 bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
                   已为您检索到订单状态并触发合规风控策略，正在安全沙箱中处理中...
                 </div>
@@ -97,16 +80,13 @@ export function ThreadDeepTraceDrawer({
               ▶ [TriageNode] 意图分类: {conversation.intent} (Confidence: 0.98)
             </div>
             <div className="text-blue-300">
-              ↳ [PlannerNode] 生成执行计划: [1. queryOrder, 2.
-              checkRefundPolicy, 3. approvalGate]
+              ↳ [PlannerNode] 生成执行计划: [1. queryOrder, 2. checkRefundPolicy, 3. approvalGate]
             </div>
             <div className="text-amber-300">
               ↳ [ApprovalPolicyEngine] 检查阈值: 金额超限 (¥500 &gt; 阈值 ¥
-              {conversation.businessId === "nike" ? "500" : "300"})
+              {conversation.businessId === 'nike' ? '500' : '300'})
             </div>
-            <div className="text-purple-300">
-              ↳ [ApprovalGatekeeper] 挂起状态机，向商户 SPI 发送 Webhook 通知
-            </div>
+            <div className="text-purple-300">↳ [ApprovalGatekeeper] 挂起状态机，向商户 SPI 发送 Webhook 通知</div>
           </div>
         </TabsContent>
 
@@ -114,21 +94,15 @@ export function ThreadDeepTraceDrawer({
           <div className="grid grid-cols-3 gap-3">
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
               <div className="text-[11px] text-slate-500">累计 Token 消耗</div>
-              <div className="text-base font-bold text-slate-900 mt-1">
-                {conversation.totalTokens}
-              </div>
+              <div className="text-base font-bold text-slate-900 mt-1">{conversation.totalTokens}</div>
             </div>
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
               <div className="text-[11px] text-slate-500">预估费用 (USD)</div>
-              <div className="text-base font-bold text-emerald-600 mt-1">
-                ${conversation.costUsd.toFixed(4)}
-              </div>
+              <div className="text-base font-bold text-emerald-600 mt-1">${conversation.costUsd.toFixed(4)}</div>
             </div>
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
               <div className="text-[11px] text-slate-500">消息交互轮次</div>
-              <div className="text-base font-bold text-slate-900 mt-1">
-                {conversation.messageCount} 轮
-              </div>
+              <div className="text-base font-bold text-slate-900 mt-1">{conversation.messageCount} 轮</div>
             </div>
           </div>
         </TabsContent>

@@ -1,13 +1,5 @@
-import type React from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-  Button,
-} from "ui";
+import type React from 'react';
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from 'ui';
 
 export interface FormModalProps {
   isOpen: boolean;
@@ -28,35 +20,24 @@ export function FormModal({
   title,
   subtitle,
   children,
-  submitText = "保存提交",
+  submitText = '保存提交',
   isSubmitting = false,
-  width = "max-w-lg",
+  width = 'max-w-lg',
 }: FormModalProps) {
   return (
-    <Dialog
-      open={isOpen}
-      onOpenChange={(open) => !open && !isSubmitting && onClose()}
-    >
+    <Dialog open={isOpen} onOpenChange={(open) => !open && !isSubmitting && onClose()}>
       <DialogContent
         className={`w-full ${width} bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden p-0 gap-0 z-50`}
       >
         <DialogHeader className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 text-left space-y-0">
           <div>
-            <DialogTitle className="text-base font-semibold text-slate-900">
-              {title}
-            </DialogTitle>
-            {subtitle && (
-              <DialogDescription className="text-xs text-slate-500 mt-0.5">
-                {subtitle}
-              </DialogDescription>
-            )}
+            <DialogTitle className="text-base font-semibold text-slate-900">{title}</DialogTitle>
+            {subtitle && <DialogDescription className="text-xs text-slate-500 mt-0.5">{subtitle}</DialogDescription>}
           </div>
         </DialogHeader>
 
         <form onSubmit={onSubmit}>
-          <div className="px-6 py-5 max-h-[70vh] overflow-y-auto space-y-4 text-sm text-slate-700">
-            {children}
-          </div>
+          <div className="px-6 py-5 max-h-[70vh] overflow-y-auto space-y-4 text-sm text-slate-700">{children}</div>
 
           <DialogFooter className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-end gap-2.5 sm:space-x-0">
             <Button
@@ -76,19 +57,8 @@ export function FormModal({
               className="text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white shadow-xs flex items-center gap-1.5"
             >
               {isSubmitting && (
-                <svg
-                  className="animate-spin w-3.5 h-3.5 text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
+                <svg className="animate-spin w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path
                     className="opacity-75"
                     fill="currentColor"
