@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ApprovalContextDrawer,
+  ApprovalRiskBadge,
   Badge,
   Button,
   CheckCircle2,
@@ -12,9 +13,12 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  PendingApprovalCard,
   RichCardRenderer,
   ShieldAlert,
+  Textarea,
+  diagnoseApprovalTrigger,
+  getApprovalCategory,
+  getApprovalContextData,
   useApprovalMachine,
 } from 'ui';
 
@@ -130,6 +134,11 @@ export default function MerchantAdminPage() {
   const [selectedLog, setSelectedLog] = useState<AuditLogRow | null>(null);
   const [inspectingApproval, setInspectingApproval] = useState<ApprovalItem | null>(null);
   const [isTakingOver, setIsTakingOver] = useState(false);
+  const [approvalStatusFilter, setApprovalStatusFilter] = useState<string>('waiting');
+  const [approvalActionFilter, setApprovalActionFilter] = useState<string>('all');
+  const [approvalSearchQuery, setApprovalSearchQuery] = useState<string>('');
+  const [rejectingApprovalId, setRejectingApprovalId] = useState<string | null>(null);
+  const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -651,41 +660,339 @@ export default function MerchantAdminPage() {
                 onClick={fetchDashboardData}
                 className="bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 shrink-0 h-8"
               >
-                刷新工单
+                🔄 刷新工单
               </Button>
             </div>
 
-            {approvals.length === 0 ? (
-              <div className="bg-white rounded-xl border border-slate-200 p-12 text-center space-y-3 shadow-2xs">
-                <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
-                <h4 className="text-sm font-bold text-slate-800">当前大盘一片绿灯</h4>
-                <p className="text-xs text-slate-400">暂无待审核任务。当顾客在商城发起超阈值退款时将在此展示。</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {approvals.map((approval) => (
-                  <PendingApprovalCard
-                    key={approval.id}
-                    approval={approval as any}
-                    rejectionReason={rejectionReasons[approval.id] || ''}
-                    setRejectionReason={(val) =>
-                      setRejectionReasons((prev) => ({
-                        ...prev,
-                        [approval.id]: val,
-                      }))
-                    }
-                    isSubmitting={submittingActionId === approval.id}
-                    onApprove={(id) => handleApprovalAction(id, 'approve')}
-                    onReject={(id) => handleApprovalAction(id, 'reject')}
-                    onOpenChat={() => {
-                      setActiveThreadId(approval.threadId);
-                      setActiveTab('live_desk');
-                    }}
-                    onInspect={() => setInspectingApproval(approval)}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+              {/* 工具栏: 状态筛选 Tab + 类型下拉 + 关键词搜索 */}
+              <div className="p-3.5 border-b border-slate-100 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setApprovalStatusFilter('waiting')}
+                      className={`px-3 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                        approvalStatusFilter === 'waiting'
+                          ? 'bg-white text-slate-900 shadow-xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>⏳ 待审核</span>
+                      {approvals.filter((a) => a.status === 'waiting').length > 0 && (
+                        <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                          {approvals.filter((a) => a.status === 'waiting').length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setApprovalStatusFilter('approved')}
+                      className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                        approvalStatusFilter === 'approved'
+                          ? 'bg-white text-slate-900 shadow-xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      ✅ 已核准
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setApprovalStatusFilter('rejected')}
+                      className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                        approvalStatusFilter === 'rejected'
+                          ? 'bg-white text-slate-900 shadow-xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      ❌ 已驳回
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setApprovalStatusFilter('all')}
+                      className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                        approvalStatusFilter === 'all'
+                          ? 'bg-white text-slate-900 shadow-xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      全部记录
+                    </button>
+                  </div>
+
+                  <select
+                    value={approvalActionFilter}
+                    onChange={(e) => setApprovalActionFilter(e.target.value)}
+                    aria-label="筛选业务操作类型"
+                    className="px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="all">全部业务类型</option>
+                    <option value="refund">💰 退款审核 (processRefund)</option>
+                    <option value="address">🚚 修改地址 (changeAddress)</option>
+                    <option value="human">🎧 升级人工 (human_escalation)</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    placeholder="搜索单号 / 会话 / 顾客 / 原因..."
+                    value={approvalSearchQuery}
+                    onChange={(e) => setApprovalSearchQuery(e.target.value)}
+                    className="text-xs h-8 w-64 bg-white"
                   />
-                ))}
+                </div>
               </div>
-            )}
+
+              {/* 表格内容与空状态 */}
+              {(() => {
+                const filteredList = approvals.filter((item) => {
+                  if (approvalStatusFilter !== 'all' && item.status !== approvalStatusFilter) {
+                    return false;
+                  }
+                  if (approvalActionFilter !== 'all') {
+                    const cat = getApprovalCategory(item.actionType);
+                    if (approvalActionFilter === 'refund' && cat !== 'refund') return false;
+                    if (approvalActionFilter === 'address' && cat !== 'address') return false;
+                    if (approvalActionFilter === 'human' && cat !== 'human') return false;
+                  }
+                  if (approvalSearchQuery.trim()) {
+                    const q = approvalSearchQuery.toLowerCase().trim();
+                    const ctx = getApprovalContextData(item as any);
+                    const str =
+                      `${item.id} ${item.threadId} ${item.userId || ''} ${item.userEmail || ''} ${ctx.orderId || ''} ${ctx.reason || ''} ${ctx.userInput || ''} ${item.actionType || ''}`.toLowerCase();
+                    if (!str.includes(q)) return false;
+                  }
+                  return true;
+                });
+
+                if (filteredList.length === 0) {
+                  return (
+                    <div className="p-12 text-center space-y-3">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
+                      <h4 className="text-sm font-bold text-slate-800">
+                        {approvalStatusFilter === 'waiting'
+                          ? '当前大盘一片绿灯，暂无待审核任务'
+                          : '未找到符合筛选条件的审核记录'}
+                      </h4>
+                      <p className="text-xs text-slate-400">
+                        {approvalStatusFilter === 'waiting'
+                          ? '当顾客在前台商城触发超阈值退款或关键地址变更时将在此排队待办。'
+                          : '建议调整状态标签或清空搜索关键字重新查询。'}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                        <tr>
+                          <th className="p-3.5">工单信息</th>
+                          <th className="p-3.5">触发动作 / 风控诊断</th>
+                          <th className="p-3.5">业务核心参数</th>
+                          <th className="p-3.5">关联顾客 / 会话</th>
+                          <th className="p-3.5">状态</th>
+                          <th className="p-3.5 text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {filteredList.map((approval) => {
+                          const diag = diagnoseApprovalTrigger(approval as any);
+                          const ctx = getApprovalContextData(approval as any);
+                          const isWaiting = approval.status === 'waiting';
+                          const isSubmitting = submittingActionId === approval.id;
+
+                          return (
+                            <tr key={approval.id} className="hover:bg-slate-50/80 transition">
+                              <td className="p-3.5">
+                                <div className="font-mono font-bold text-slate-900">{approval.id.slice(0, 8)}...</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                  {approval.createdAt
+                                    ? new Date(approval.createdAt).toLocaleString('zh-CN', {
+                                        month: '2-digit',
+                                        day: '2-digit',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : '-'}
+                                </div>
+                              </td>
+
+                              <td className="p-3.5">
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <ApprovalRiskBadge riskLevel={diag.riskLevel} />
+                                  <span className="font-semibold text-slate-900">{diag.title.split(' (')[0]}</span>
+                                </div>
+                                <div className="text-[11px] text-slate-500 max-w-xs truncate" title={diag.triggerCause}>
+                                  {diag.triggerCause}
+                                </div>
+                              </td>
+
+                              <td className="p-3.5">
+                                {ctx.category === 'refund' && (
+                                  <div className="space-y-0.5">
+                                    <div className="font-bold text-rose-600">
+                                      ¥{ctx.refundAmount ? Number(ctx.refundAmount).toFixed(2) : '0.00'}
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 font-mono">
+                                      单号: {ctx.orderId || '未提供'}
+                                    </div>
+                                  </div>
+                                )}
+                                {ctx.category === 'address' && (
+                                  <div className="space-y-0.5 max-w-xs">
+                                    <div className="font-medium text-slate-900 truncate" title={ctx.newAddress || ''}>
+                                      新: {ctx.newAddress || '未填写'}
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">
+                                      收件人: {ctx.recipientName || '顾客'} ({ctx.phone || '-'})
+                                    </div>
+                                  </div>
+                                )}
+                                {ctx.category === 'human' && (
+                                  <div className="space-y-0.5 max-w-xs">
+                                    <div
+                                      className="font-medium text-slate-800 line-clamp-1"
+                                      title={ctx.userInput || ctx.reason || ''}
+                                    >
+                                      诉求: {ctx.userInput || ctx.reason || '转接人工客服'}
+                                    </div>
+                                    <div className="text-[11px] text-amber-600">
+                                      来源: {ctx.triggerSource || 'AI 对话智能升级'}
+                                    </div>
+                                  </div>
+                                )}
+                                {ctx.category === 'generic' && (
+                                  <div className="text-[11px] text-slate-600 font-mono">{approval.actionType}</div>
+                                )}
+                              </td>
+
+                              <td className="p-3.5">
+                                <div className="font-medium text-slate-900">{approval.userId || '顾客'}</div>
+                                <div
+                                  className="text-[10px] text-slate-400 font-mono truncate max-w-[130px]"
+                                  title={approval.threadId}
+                                >
+                                  {approval.threadId}
+                                </div>
+                              </td>
+
+                              <td className="p-3.5">
+                                {approval.status === 'waiting' && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-amber-100 text-amber-800 border-amber-300 font-bold flex items-center gap-1 w-fit"
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                    待审核
+                                  </Badge>
+                                )}
+                                {approval.status === 'approved' && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-emerald-100 text-emerald-800 border-emerald-300 font-bold w-fit"
+                                  >
+                                    ✅ 已核准
+                                  </Badge>
+                                )}
+                                {approval.status === 'rejected' && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-rose-100 text-rose-800 border-rose-300 font-bold w-fit"
+                                    title={approval.reason || ''}
+                                  >
+                                    ❌ 已驳回
+                                  </Badge>
+                                )}
+                                {approval.status === 'resolved_by_human' && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-purple-100 text-purple-800 border-purple-300 font-bold w-fit"
+                                  >
+                                    👨‍💼 人工已结
+                                  </Badge>
+                                )}
+                                {approval.status === 'expired' && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-slate-100 text-slate-600 border-slate-300 font-bold w-fit"
+                                  >
+                                    ⚠️ 已超时
+                                  </Badge>
+                                )}
+                                {!['waiting', 'approved', 'rejected', 'resolved_by_human', 'expired'].includes(
+                                  approval.status,
+                                ) && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-slate-100 text-slate-700 border-slate-200 w-fit"
+                                  >
+                                    {approval.status}
+                                  </Badge>
+                                )}
+                              </td>
+
+                              <td className="p-3.5 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {isWaiting && (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        disabled={isSubmitting}
+                                        onClick={() => handleApprovalAction(approval.id, 'approve')}
+                                        className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-7 px-2.5 font-bold shadow-2xs cursor-pointer"
+                                      >
+                                        通过
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        disabled={isSubmitting}
+                                        onClick={() => {
+                                          setRejectingApprovalId(approval.id);
+                                          setRejectReasonInput('');
+                                        }}
+                                        className="bg-rose-600 hover:bg-rose-500 text-white text-xs h-7 px-2.5 font-bold shadow-2xs cursor-pointer"
+                                      >
+                                        驳回
+                                      </Button>
+                                    </>
+                                  )}
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setInspectingApproval(approval)}
+                                    className="text-xs h-7 px-2.5 font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                                  >
+                                    详情
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setActiveThreadId(approval.threadId);
+                                      setActiveTab('live_desk');
+                                    }}
+                                    className="text-xs h-7 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200 font-medium cursor-pointer"
+                                  >
+                                    进会话
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
 
@@ -1146,6 +1453,82 @@ export default function MerchantAdminPage() {
               className="bg-slate-900 text-white text-xs font-semibold"
             >
               关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 驳回原因输入弹窗 */}
+      <Dialog open={Boolean(rejectingApprovalId)} onOpenChange={(open) => !open && setRejectingApprovalId(null)}>
+        <DialogContent className="max-w-md p-5">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-slate-900">驳回审批工单</DialogTitle>
+            <p className="text-xs text-slate-500 mt-1">工单 ID: {rejectingApprovalId}</p>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <label className="block text-xs font-semibold text-slate-700">
+              请输入驳回原因 (将通知顾客并载入会话工作流)
+            </label>
+            <Textarea
+              value={rejectReasonInput}
+              onChange={(e) => setRejectReasonInput(e.target.value)}
+              rows={3}
+              placeholder="例如：物流轨迹显示已由本人签收，不符合退款条件..."
+              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white"
+            />
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <span className="text-[11px] text-slate-400">常用快捷模板:</span>
+              {[
+                '物流已签收，驳回退款诉求',
+                '已超过售后服务有效退款窗口',
+                '商品已拆封使用，不满足退货条件',
+                '请提供清晰的商品破损照片后再试',
+              ].map((tpl) => (
+                <button
+                  key={tpl}
+                  type="button"
+                  onClick={() => setRejectReasonInput(tpl)}
+                  className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded cursor-pointer transition"
+                >
+                  {tpl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRejectingApprovalId(null);
+                setRejectReasonInput('');
+              }}
+              className="text-xs"
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={submittingActionId === rejectingApprovalId}
+              onClick={async () => {
+                if (!rejectingApprovalId) return;
+                if (rejectReasonInput) {
+                  setRejectionReasons((prev) => ({
+                    ...prev,
+                    [rejectingApprovalId]: rejectReasonInput,
+                  }));
+                }
+                await handleApprovalAction(rejectingApprovalId, 'reject');
+                setRejectingApprovalId(null);
+                setRejectReasonInput('');
+              }}
+              className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold"
+            >
+              确认驳回
             </Button>
           </DialogFooter>
         </DialogContent>

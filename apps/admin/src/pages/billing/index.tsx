@@ -1,7 +1,7 @@
-import type React from 'react';
-import { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { billingApi } from '../../lib/api';
 import { BillingStatsSummary } from './components/BillingStatsSummary';
 import { QuotaFormModal } from './components/QuotaFormModal';
 import type { TenantBillingRecord } from './types';
@@ -42,6 +42,23 @@ const INITIAL_BILLING: TenantBillingRecord[] = [
 ];
 
 export function BillingPage() {
+  const fetchBillingList = useCallback(async () => {
+    try {
+      const res = await billingApi.listTenantUsages();
+      if (res.success && Array.isArray(res.data)) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch remote billing usages:', err);
+    }
+    return INITIAL_BILLING;
+  }, []);
+
+  const updateQuotaApi = useCallback(async (item: TenantBillingRecord) => {
+    await billingApi.updateQuota(item.businessId, item.monthlyLimitTokens);
+    return item;
+  }, []);
+
   const {
     paginatedData,
     total,
@@ -60,6 +77,8 @@ export function BillingPage() {
     updateItem,
   } = useAdminCrud<TenantBillingRecord>({
     initialData: INITIAL_BILLING,
+    fetchList: fetchBillingList,
+    updateApi: updateQuotaApi,
     tenantKey: 'businessId' as keyof TenantBillingRecord,
     filterFn: (item, query, status, tenantId) => {
       if (tenantId !== 'all' && item.businessId !== tenantId) return false;

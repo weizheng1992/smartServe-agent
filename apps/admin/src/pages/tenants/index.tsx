@@ -1,7 +1,8 @@
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { tenantsApi } from '../../lib/api';
 import { useAdminTenantStore } from '../../store/tenantStore';
 import { TenantFormModal } from './components/TenantFormModal';
 import type { TenantRecord } from './types';
@@ -50,9 +51,64 @@ const INITIAL_TENANTS: TenantRecord[] = [
 export function TenantsPage() {
   const { addOrUpdateTenant, removeTenant } = useAdminTenantStore();
 
+  const fetchTenantsList = useCallback(async () => {
+    try {
+      const res = await tenantsApi.list();
+      if (res.success && Array.isArray(res.tenants)) {
+        const mergedTenants: TenantRecord[] = res.tenants.map((t: any) => ({
+          id: t.id || t.businessId,
+          name: t.name,
+          industry: t.industry || '综合电商',
+          channel: t.channel || 'Web Widget',
+          apiKey: t.apiKey || `key_${t.id}_sec`,
+          refundLimit: t.refundLimit || 300,
+          autoEscalation: t.autoEscalation ?? true,
+          webhookUrl: t.webhookUrl || `https://api.${t.id}.com/webhook`,
+          status: (t.status as any) || 'active',
+          createdAt: t.createdAt ? new Date(t.createdAt).toISOString().split('T')[0] : '2026-01-01',
+        }));
+        return mergedTenants;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch remote tenants, using initial list:', err);
+    }
+    return INITIAL_TENANTS;
+  }, []);
+
+  const createTenantApi = useCallback(
+    async (item: Partial<TenantRecord>) => {
+      await tenantsApi.create({
+        id: item.id || '',
+        name: item.name || '',
+        apiKey: item.apiKey,
+        config: {
+          industry: item.industry,
+          channel: item.channel,
+          refundLimit: item.refundLimit,
+          autoEscalation: item.autoEscalation,
+          webhookUrl: item.webhookUrl,
+        },
+      });
+      addOrUpdateTenant({
+        id: item.id || '',
+        name: item.name || '',
+        badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      });
+      return item as TenantRecord;
+    },
+    [addOrUpdateTenant],
+  );
+
+  const deleteTenantApi = useCallback(
+    async (id: string) => {
+      await tenantsApi.delete(id);
+      removeTenant(id);
+      return true;
+    },
+    [removeTenant],
+  );
+
   const {
-    data,
-    setData,
     paginatedData,
     total,
     currentPage,
@@ -77,6 +133,9 @@ export function TenantsPage() {
   } = useAdminCrud<TenantRecord>({
     initialData: INITIAL_TENANTS,
     storageKey: 'smartserve_admin_tenants',
+    fetchList: fetchTenantsList,
+    createApi: createTenantApi,
+    deleteApi: deleteTenantApi,
     tenantKey: 'id' as keyof TenantRecord,
     filterFn: (item, query, status) => {
       if (status && item.status !== status) return false;
@@ -90,75 +149,7 @@ export function TenantsPage() {
       }
       return true;
     },
-    onItemCreated: (item) => {
-      addOrUpdateTenant({
-        id: item.id,
-        name: item.name,
-        badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      });
-      // 异步尝试同步至服务端
-      fetch('/api/tenant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item),
-      }).catch(() => {});
-    },
-    onItemUpdated: (item) => {
-      addOrUpdateTenant({
-        id: item.id,
-        name: item.name,
-        badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
-      });
-      fetch('/api/tenant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item),
-      }).catch(() => {});
-    },
-    onItemDeleted: (id) => {
-      removeTenant(id);
-      fetch(`/api/tenant/${id}`, {
-        method: 'DELETE',
-      }).catch(() => {});
-    },
   });
-
-  // 页面挂载时尝试拉取服务端已注册租户列表进行合并
-  useEffect(() => {
-    let isMounted = true;
-    fetch('/api/tenant/list')
-      .then((res) => res.json())
-      .then((res) => {
-        if (!isMounted || !res || !res.success || !Array.isArray(res.tenants)) return;
-        setData((prev) => {
-          const merged = [...prev];
-          for (const sTenant of res.tenants) {
-            const idx = merged.findIndex((t) => t.id.toLowerCase() === sTenant.id.toLowerCase());
-            if (idx >= 0) {
-              merged[idx] = { ...merged[idx], ...sTenant };
-            } else {
-              merged.push(sTenant);
-            }
-            addOrUpdateTenant({
-              id: sTenant.id,
-              name: sTenant.name,
-              badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-            });
-          }
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('smartserve_admin_tenants', JSON.stringify(merged));
-            } catch {}
-          }
-          return merged;
-        });
-      })
-      .catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
-  }, [setData, addOrUpdateTenant]);
 
   const [formData, setFormData] = useState<Partial<TenantRecord>>({});
 

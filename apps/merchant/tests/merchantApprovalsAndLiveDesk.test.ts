@@ -16,7 +16,7 @@ describe('🛡️ Merchant Approvals & LiveDesk Integration Suite', () => {
     expect(typeof json.total).toBe('number');
   });
 
-  it('2. 应该能发起人工客服接管会话', async () => {
+  it('2. 应该能发起人工客服接管会话且不产生待办审核堆积', async () => {
     const threadId = `merchant_test_thread_${Date.now()}`;
     const req = new NextRequest('http://localhost:3005/api/admin/approvals', {
       method: 'POST',
@@ -33,6 +33,9 @@ describe('🛡️ Merchant Approvals & LiveDesk Integration Suite', () => {
     const json = await res.json();
     expect(json.success).toBe(true);
     expect(json.approvalId).toBeDefined();
+
+    // 验证主动接管工单状态不是 waiting（不会出现在待办审核列表中）
+    expect(json.approval?.status).toBe('resolved_by_human');
 
     // 校验回复人工消息
     const replyReq = new NextRequest('http://localhost:3005/api/admin/approvals', {

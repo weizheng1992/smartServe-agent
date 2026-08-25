@@ -1,7 +1,7 @@
-import type React from 'react';
-import { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { guardrailsApi } from '../../lib/api';
 import { GuardrailFormModal } from './components/GuardrailFormModal';
 import type { GuardrailRuleRecord } from './types';
 
@@ -41,6 +41,23 @@ const INITIAL_GUARDRAILS: GuardrailRuleRecord[] = [
 ];
 
 export function GuardrailsPage() {
+  const fetchGuardrailsList = useCallback(async ({ tenantId }: { tenantId: string }) => {
+    try {
+      const res = await guardrailsApi.list(tenantId === 'all' ? undefined : tenantId);
+      if (res.success && Array.isArray(res.data)) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch remote guardrails, fallback to local:', err);
+    }
+    return INITIAL_GUARDRAILS;
+  }, []);
+
+  const updateGuardrailApi = useCallback(async (item: GuardrailRuleRecord, tenantId: string) => {
+    const res = await guardrailsApi.update(item.id, item, tenantId);
+    return res.data || item;
+  }, []);
+
   const {
     paginatedData,
     total,
@@ -64,6 +81,8 @@ export function GuardrailsPage() {
     deleteItem,
   } = useAdminCrud<GuardrailRuleRecord>({
     initialData: INITIAL_GUARDRAILS,
+    fetchList: fetchGuardrailsList,
+    updateApi: updateGuardrailApi,
     filterFn: (item, query, type) => {
       if (type && item.ruleType !== type) return false;
       if (query.trim()) {

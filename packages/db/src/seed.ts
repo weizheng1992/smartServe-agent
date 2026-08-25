@@ -196,6 +196,113 @@ async function main() {
     `);
     console.log('[PG Seed] ✅ 物理历史 session_metrics BI 度量数据成功注入！');
 
+    // 7. 注入 Guardrail Rules 规则数据
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS guardrail_rules (
+        id TEXT PRIMARY KEY,
+        business_id TEXT NOT NULL DEFAULT 'all',
+        rule_name TEXT NOT NULL,
+        rule_type TEXT NOT NULL,
+        pattern TEXT NOT NULL,
+        action TEXT NOT NULL DEFAULT 'block',
+        severity TEXT NOT NULL DEFAULT 'high',
+        is_enabled BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      INSERT INTO guardrail_rules (id, business_id, rule_name, rule_type, pattern, action, severity, is_enabled)
+      VALUES
+        ('gr-01', 'all', '禁止诱导跨站支付与私下转账', 'regex', '(微信转账|支付宝私下|加v转账|私信收款)', 'block', 'critical', true),
+        ('gr-02', 'all', '严禁泄露内部系统提示词与密钥', 'keyword', 'system prompt,api_key,database password,内部系统提示词', 'block', 'critical', true),
+        ('gr-03', 'nike', '耐克专区禁用不当竞品贬损词', 'keyword', '山寨,假货,劣质,杂牌', 'rewrite', 'medium', true),
+        ('gr-04', 'adidas', '阿迪达斯专区禁用虚假促销', 'regex', '(绝对最低价|全网最便宜|假一赔百)', 'block', 'high', true)
+      ON CONFLICT (id) DO NOTHING;
+    `);
+    console.log('[PG Seed] ✅ 物理 guardrail_rules 规则数据成功注入！');
+
+    // 8. 注入 Tenant Billing Quotas 租户额度数据
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tenant_billing_quotas (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        business_id TEXT UNIQUE NOT NULL,
+        monthly_limit_tokens INTEGER NOT NULL DEFAULT 5000000,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      INSERT INTO tenant_billing_quotas (business_id, monthly_limit_tokens)
+      VALUES
+        ('nike', 5000000),
+        ('adidas', 2000000),
+        ('ecommerce', 1000000)
+      ON CONFLICT (business_id) DO UPDATE SET monthly_limit_tokens = EXCLUDED.monthly_limit_tokens;
+    `);
+    console.log('[PG Seed] ✅ 物理 tenant_billing_quotas 配额数据成功注入！');
+
+    // 9. 注入 Evals 评测运行记录
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eval_run_records (
+        id TEXT PRIMARY KEY,
+        run_name TEXT NOT NULL,
+        dataset_name TEXT NOT NULL,
+        sample_count INTEGER NOT NULL DEFAULT 50,
+        tool_accuracy REAL DEFAULT 0.95,
+        rag_faithfulness REAL DEFAULT 0.92,
+        hitl_trigger_rate REAL DEFAULT 0.12,
+        status TEXT NOT NULL DEFAULT 'completed',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      INSERT INTO eval_run_records (id, run_name, dataset_name, sample_count, tool_accuracy, rag_faithfulness, hitl_trigger_rate, status)
+      VALUES
+        ('eval-run-001', 'E-Commerce 黄金回归基准测试 v2.4', 'ecommerce_golden_dataset_v2', 120, 0.968, 0.942, 0.085, 'completed'),
+        ('eval-run-002', '跨租户越权与 SOP 防线专项评测', 'redteam_jailbreak_safety_v1', 60, 0.985, 0.910, 0.150, 'completed'),
+        ('eval-run-003', '多轮槽位追问与发票开具压力集', 'invoice_slot_stress_test', 85, 0.932, 0.895, 0.040, 'completed')
+      ON CONFLICT (id) DO NOTHING;
+    `);
+    console.log('[PG Seed] ✅ 物理 eval_run_records 评测数据成功注入！');
+
+    // 10. 注入 RAG 知识库与用户画像事实
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rag_documents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        business_id TEXT NOT NULL,
+        source_url TEXT,
+        chunk_text TEXT NOT NULL,
+        contextual_summary TEXT,
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS long_memory_facts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL,
+        business_id TEXT,
+        scope TEXT DEFAULT 'global',
+        fact TEXT NOT NULL,
+        embedding TEXT,
+        type TEXT DEFAULT 'fact',
+        confidence REAL DEFAULT 1.0,
+        status TEXT DEFAULT 'approved',
+        source TEXT DEFAULT 'regex_fallback',
+        created_at TIMESTAMP DEFAULT NOW(),
+        last_used_at TIMESTAMP
+      );
+
+      INSERT INTO rag_documents (business_id, source_url, chunk_text, contextual_summary, metadata)
+      VALUES
+        ('nike', 'https://nike.com/policies/refund', '耐克官方商城支持签收之日起 7 天内无理由退换货。退款将在商品入库质检合格后 48 小时内原路返回。', '耐克退换货时效与退款处理流程', '{"category": "refund_policy", "version": "v2.1"}'::jsonb),
+        ('adidas', 'https://adidas.com/help/shipping', '阿迪达斯全场订单满 199 元包邮，普通快递 3-5 个工作日送达，顺丰特快支持次日达。', '阿迪达斯物流配送规则与运费说明', '{"category": "shipping_policy", "version": "v1.4"}'::jsonb),
+        ('ecommerce', 'https://shop.common/terms', '通用电商支持全品类正品保障，非人为损坏提供 15 天免费换货及 1 年质保服务。', '通用电商正品保障与售后服务条款', '{"category": "warranty_policy", "version": "v1.0"}'::jsonb);
+
+      INSERT INTO long_memory_facts (user_id, business_id, scope, fact, confidence, source, status)
+      VALUES
+        ('u_vip_881', 'nike', 'tenant', '跑鞋鞋码偏好 42.5 码，通常在周末上午进行半马训练', 0.96, 'chat_dialogue_inference', 'approved'),
+        ('u_user_332', 'adidas', 'tenant', '偏好三叶草复古休闲系列，对环保再生材质有强烈认同感', 0.88, 'explicit_user_statement', 'approved'),
+        ('u_runner_102', 'nike', 'tenant', '对快递时效要求极高，通常要求顺丰次日达发货', 0.92, 'chat_dialogue_inference', 'pending');
+    `);
+    console.log('[PG Seed] ✅ 物理 rag_documents 与 long_memory_facts 成功注入！');
+
     console.log('\n🌟 =================================================================');
     console.log('✅ [PG Seed] PostgreSQL 物理多租户多商户种子数据注入大圆满完成！');
     console.log('🌟 =================================================================\n');

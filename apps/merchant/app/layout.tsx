@@ -1,5 +1,8 @@
 import type { Metadata } from 'next';
+import React from 'react';
 import 'ui/src/styles/globals.css';
+import { FloatingChatWidget } from './components/chat/FloatingChatWidget';
+import { UserProvider } from './context/UserContext';
 
 export const metadata: Metadata = {
   title: '极光潮品官方旗舰店 - Aurora Luxe Store',
@@ -13,7 +16,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body className="bg-slate-50 text-slate-900 font-sans antialiased min-h-screen">{children}</body>
+      <body className="bg-slate-50 text-slate-900 font-sans antialiased min-h-screen">
+        <UserProvider>
+          {children}
+          <FloatingChatWidget />
+        </UserProvider>
+      </body>
     </html>
   );
 }

@@ -6,10 +6,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenantId') || 'aurora';
     const status = searchParams.get('status') || undefined;
+    const actionType = searchParams.get('actionType') || undefined;
 
     const merchantApprovals = await ApprovalGatekeeper.listPendingApprovals({
       tenantId: tenantId === 'all' ? undefined : tenantId,
       status: status === 'all' ? undefined : status,
+      actionType: actionType === 'all' ? undefined : actionType,
     });
 
     return NextResponse.json({

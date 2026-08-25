@@ -13,6 +13,11 @@ export class TenantGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const ctx = getTenantContext();
     if (!ctx || !ctx.tenantId || ctx.tenantId.trim() === '') {
+      // 若携带 admin 角色，允许作为平台全局视角通过
+      if (ctx && ctx.role === 'admin') {
+        ctx.tenantId = 'all';
+        return true;
+      }
       throw new UnauthorizedException({
         code: 'TENANT_CONTEXT_MISSING',
         message: 'Missing or invalid tenant identifier (x-tenant-id / x-business-id header required)',

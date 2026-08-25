@@ -547,6 +547,50 @@ export const afterSaleLogs = pgTable(
   }),
 );
 
+// ============ Guardrail Rules (安全合规与防御规则) ============
+
+export const guardrailRules = pgTable(
+  'guardrail_rules',
+  {
+    id: text('id').primaryKey(),
+    businessId: text('business_id').notNull().default('all'),
+    ruleName: text('rule_name').notNull(),
+    ruleType: text('rule_type').notNull(),
+    pattern: text('pattern').notNull(),
+    action: text('action').notNull().default('block'),
+    severity: text('severity').notNull().default('high'),
+    isEnabled: boolean('is_enabled').default(true),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => ({
+    guardrailBizIdx: index('guardrail_rules_biz_idx').on(table.businessId),
+  }),
+);
+
+// ============ Tenant Billing Quotas (租户月度算力配额) ============
+
+export const tenantBillingQuotas = pgTable('tenant_billing_quotas', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  businessId: text('business_id').unique().notNull(),
+  monthlyLimitTokens: integer('monthly_limit_tokens').default(5000000).notNull(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// ============ Eval Runs (评测历史运行记录) ============
+
+export const evalRunRecords = pgTable('eval_run_records', {
+  id: text('id').primaryKey(),
+  runName: text('run_name').notNull(),
+  datasetName: text('dataset_name').notNull(),
+  sampleCount: integer('sample_count').notNull().default(50),
+  toolAccuracy: real('tool_accuracy').default(0.95),
+  ragFaithfulness: real('rag_faithfulness').default(0.92),
+  hitlTriggerRate: real('hitl_trigger_rate').default(0.12),
+  status: text('status').default('completed').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Keep standard TypeScript Interfaces compatible with other calling workspaces
 export interface Message {
   id: string;

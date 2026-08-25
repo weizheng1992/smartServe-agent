@@ -1,7 +1,7 @@
-import type React from 'react';
-import { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { ragApi } from '../../lib/api';
 import { useAdminTenantStore } from '../../store/tenantStore';
 import { KnowledgeFormModal } from './components/KnowledgeFormModal';
 import { RagPlayground } from './components/RagPlayground';
@@ -41,6 +41,47 @@ const INITIAL_CHUNKS: KnowledgeChunkRecord[] = [
 ];
 
 export function RagStudioPage() {
+  const { selectedTenantId } = useAdminTenantStore();
+
+  const fetchChunks = useCallback(async ({ tenantId }: { tenantId: string }) => {
+    try {
+      const res = await ragApi.list(tenantId === 'all' ? undefined : tenantId);
+      if (res.success && Array.isArray(res.data)) {
+        const records: KnowledgeChunkRecord[] = res.data.map((d: any) => ({
+          id: d.id,
+          businessId: d.businessId || tenantId || 'ecommerce',
+          docTitle: d.docTitle || d.title || d.metadata?.title || d.sourceUrl || '知识切片',
+          category: d.category || d.metadata?.category || '通用政策',
+          content: d.content || d.chunkText || '',
+          tokenCount: d.tokenCount || Math.ceil((d.content || d.chunkText || '').length * 1.3),
+          updatedAt: d.updatedAt || (d.createdAt ? d.createdAt.split('T')[0] : '2026-02-23'),
+        }));
+        return records;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch remote chunks, fallback to local:', err);
+    }
+    return INITIAL_CHUNKS;
+  }, []);
+
+  const createDocApi = useCallback(async (item: Partial<KnowledgeChunkRecord>, tenantId: string) => {
+    const res = await ragApi.createDoc(
+      {
+        title: item.docTitle || '新知识切片',
+        category: item.category || '通用政策',
+        content: item.content || '',
+        tenantId: item.businessId || tenantId,
+      },
+      tenantId,
+    );
+    return res.data || item;
+  }, []);
+
+  const deleteDocApi = useCallback(async (id: string, tenantId: string) => {
+    await ragApi.deleteDoc(id, tenantId);
+    return true;
+  }, []);
+
   const {
     paginatedData,
     total,
@@ -64,6 +105,9 @@ export function RagStudioPage() {
     deleteItem,
   } = useAdminCrud<KnowledgeChunkRecord>({
     initialData: INITIAL_CHUNKS,
+    fetchList: fetchChunks,
+    createApi: createDocApi,
+    deleteApi: deleteDocApi,
     tenantKey: 'businessId' as keyof KnowledgeChunkRecord,
     filterFn: (item, query, category, tenantId) => {
       if (tenantId !== 'all' && item.businessId !== tenantId) return false;
@@ -79,8 +123,6 @@ export function RagStudioPage() {
       return true;
     },
   });
-
-  const { selectedTenantId } = useAdminTenantStore();
 
   const [playQuery, setPlayQuery] = useState('');
   const [playResults, setPlayResults] = useState<Array<{ id: string; title: string; score: number; content: string }>>(
@@ -125,27 +167,37 @@ export function RagStudioPage() {
     }
   };
 
-  const handleRunSearch = () => {
+  const handleRunSearch = async () => {
     if (!playQuery.trim()) return;
     setIsSearching(true);
-    setTimeout(() => {
-      const q = playQuery.toLowerCase();
-      const hits = INITIAL_CHUNKS.filter((c) => selectedTenantId === 'all' || c.businessId === selectedTenantId)
-        .map((c) => {
-          let score = 0.65;
-          if (c.content.includes(q) || c.docTitle.includes(q)) score = 0.94;
-          return {
-            id: c.id,
-            title: c.docTitle,
-            score,
-            content: c.content,
-          };
-        })
-        .sort((a, b) => b.score - a.score);
+    try {
+      const res = await ragApi.search(playQuery, selectedTenantId === 'all' ? 'ecommerce' : selectedTenantId);
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        setPlayResults(res.data);
+        setIsSearching(false);
+        return;
+      }
+    } catch (err) {
+      console.warn('Search API fallback to local keyword matching:', err);
+    }
 
-      setPlayResults(hits);
-      setIsSearching(false);
-    }, 300);
+    // 本地匹配回退
+    const q = playQuery.toLowerCase();
+    const hits = INITIAL_CHUNKS.filter((c) => selectedTenantId === 'all' || c.businessId === selectedTenantId)
+      .map((c) => {
+        let score = 0.65;
+        if (c.content.includes(q) || c.docTitle.includes(q)) score = 0.94;
+        return {
+          id: c.id,
+          title: c.docTitle,
+          score,
+          content: c.content,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    setPlayResults(hits);
+    setIsSearching(false);
   };
 
   const columns = [

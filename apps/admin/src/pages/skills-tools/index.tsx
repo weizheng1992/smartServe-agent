@@ -1,7 +1,7 @@
-import type React from 'react';
-import { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { skillsApi } from '../../lib/api';
 import { ToolFormModal } from './components/ToolFormModal';
 import type { SkillToolRecord } from './types';
 
@@ -92,6 +92,42 @@ const INITIAL_TOOLS: SkillToolRecord[] = [
 ];
 
 export function SkillsToolsPage() {
+  const fetchSkillsList = useCallback(async ({ tenantId }: { tenantId: string }) => {
+    try {
+      const res = await skillsApi.getConfig(tenantId === 'all' ? 'ecommerce' : tenantId);
+      if (res.success && Array.isArray(res.skills)) {
+        // 合并后端技能与基础工具列表
+        const remoteSkills: SkillToolRecord[] = res.skills.map((s: any) => ({
+          id: s.id,
+          name: s.name || s.id,
+          type: 'skill',
+          description: s.description || 'SOP 业务技能',
+          riskLevel: s.requiresApproval ? 'high' : 'low',
+          requiresHitl: Boolean(s.requiresApproval),
+          tenantScope: tenantId,
+          status: s.enabled ? 'enabled' : 'disabled',
+          approvalThresholdAmount: s.approvalThresholdAmount,
+        }));
+
+        const nonSkillTools = INITIAL_TOOLS.filter((t) => t.type !== 'skill');
+        return [...remoteSkills, ...nonSkillTools];
+      }
+    } catch (err) {
+      console.warn('Failed to fetch remote skills, using initial list:', err);
+    }
+    return INITIAL_TOOLS;
+  }, []);
+
+  const updateSkillApi = useCallback(async (tool: SkillToolRecord, tenantId: string) => {
+    if (tool.type === 'skill') {
+      await skillsApi.updateConfig(tenantId === 'all' ? 'ecommerce' : tenantId, tool.id, {
+        enabled: tool.status === 'enabled',
+        approvalThresholdAmount: tool.approvalThresholdAmount,
+      });
+    }
+    return tool;
+  }, []);
+
   const {
     paginatedData,
     total,
@@ -115,6 +151,9 @@ export function SkillsToolsPage() {
     deleteItem,
   } = useAdminCrud<SkillToolRecord>({
     initialData: INITIAL_TOOLS,
+    fetchList: fetchSkillsList,
+    updateApi: updateSkillApi,
+    tenantKey: 'tenantScope' as keyof SkillToolRecord,
     filterFn: (item, query, type) => {
       if (type && item.type !== type) return false;
       if (query.trim()) {

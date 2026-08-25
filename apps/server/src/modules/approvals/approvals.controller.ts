@@ -44,6 +44,7 @@ export class ApprovalsController {
     @Query('tenantId') queryTenantId?: string,
     @Query('businessId') queryBusinessId?: string,
     @Query('status') status?: string,
+    @Query('actionType') actionType?: string,
     @Req() req?: Request,
   ) {
     const tenantId =
@@ -52,7 +53,7 @@ export class ApprovalsController {
       (req?.headers['x-tenant-id'] as string) ||
       (req?.headers['x-business-id'] as string);
 
-    const approvals = await this.approvalsService.listApprovals(tenantId, status);
+    const approvals = await this.approvalsService.listApprovals(tenantId, status, actionType);
 
     return {
       success: true,

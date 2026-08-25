@@ -47,13 +47,19 @@ export class ConversationRepository {
     filter: ListConversationsFilter,
   ): Promise<{ items: ConversationSummary[]; total: number }> {
     const pool = getPgPool();
-    const cleanBizId = filter.businessId.toLowerCase().trim();
+    const cleanBizId = (filter.businessId || '').toLowerCase().trim();
     const limit = Math.max(1, Math.min(100, filter.limit ?? 20));
     const offset = Math.max(0, filter.offset ?? 0);
 
-    const conditions: string[] = ['t.business_id = $1'];
-    const params: any[] = [cleanBizId];
-    let paramIndex = 2;
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (cleanBizId && cleanBizId !== 'all') {
+      conditions.push(`t.business_id = $${paramIndex}`);
+      params.push(cleanBizId);
+      paramIndex++;
+    }
 
     if (filter.status && filter.status !== 'all') {
       conditions.push(`t.status = $${paramIndex}`);
@@ -80,10 +86,10 @@ export class ConversationRepository {
       paramIndex++;
     }
 
-    const whereClause = conditions.join(' AND ');
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // 1. 获取总记录数
-    const countQuery = `SELECT COUNT(*) as count FROM threads t WHERE ${whereClause}`;
+    const countQuery = `SELECT COUNT(*) as count FROM threads t ${whereClause}`;
     const countRes = await pool.query(countQuery, params);
     const total = Number.parseInt(countRes.rows[0]?.count || '0', 10);
 
@@ -111,7 +117,7 @@ export class ConversationRepository {
         ORDER BY created_at DESC, timestamp DESC
         LIMIT 1
       ) m ON true
-      WHERE ${whereClause}
+      ${whereClause}
       ORDER BY t.updated_at DESC
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
@@ -153,7 +159,7 @@ export class ConversationRepository {
     // 1. 查询会话基础信息 (若提供 businessId 则严格限制，否则仅查 thread)
     let threadQuery = 'SELECT * FROM threads WHERE id = $1';
     const threadParams: any[] = [cleanThreadId];
-    if (cleanBizId) {
+    if (cleanBizId && cleanBizId !== 'all') {
       threadQuery += ' AND business_id = $2';
       threadParams.push(cleanBizId);
     }

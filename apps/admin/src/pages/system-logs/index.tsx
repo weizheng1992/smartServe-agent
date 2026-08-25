@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { systemLogsApi } from '../../lib/api';
 import { LogDetailDrawer } from './components/LogDetailDrawer';
 import type { SystemLogRecord } from './types';
 
@@ -65,6 +66,22 @@ const INITIAL_LOGS: SystemLogRecord[] = [
 ];
 
 export function SystemLogsPage() {
+  const fetchLogsList = useCallback(async ({ tenantId, status }: { tenantId: string; status?: string }) => {
+    try {
+      const res = await systemLogsApi.list({
+        tenantId: tenantId === 'all' ? undefined : tenantId,
+        level: status || undefined,
+        limit: 50,
+      });
+      if (res.success && Array.isArray(res.data)) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch remote system logs, fallback to local:', err);
+    }
+    return INITIAL_LOGS;
+  }, []);
+
   const {
     paginatedData,
     total,
@@ -82,6 +99,7 @@ export function SystemLogsPage() {
     closeDrawer,
   } = useAdminCrud<SystemLogRecord>({
     initialData: INITIAL_LOGS,
+    fetchList: fetchLogsList,
     tenantKey: 'businessId' as keyof SystemLogRecord,
     filterFn: (item, query, logType, tenantId) => {
       if (tenantId !== 'all' && item.businessId !== tenantId) return false;

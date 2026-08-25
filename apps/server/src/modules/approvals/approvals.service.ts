@@ -6,13 +6,14 @@ import type { PendingApprovalRecord } from 'types';
 @Injectable()
 export class ApprovalsService {
   /**
-   * 拉取待审批工单列表（支持按租户过滤下推至 SQL）
+   * 拉取待审批工单列表（支持按租户、状态与操作类型过滤下推至 SQL）
    */
-  async listApprovals(tenantId?: string, status?: string): Promise<PendingApprovalRecord[]> {
+  async listApprovals(tenantId?: string, status?: string, actionType?: string): Promise<PendingApprovalRecord[]> {
     try {
       return await ApprovalGatekeeper.listPendingApprovals({
         tenantId,
         status,
+        actionType,
       });
     } catch (err) {
       logger.error({ err, tenantId }, '[ApprovalsService] Failed to list approvals');

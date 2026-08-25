@@ -1,19 +1,16 @@
-import { WorkflowOrchestrator } from "engine";
-import { type NextRequest, NextResponse } from "next/server";
+import { WorkflowOrchestrator } from 'engine';
+import { type NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const effectiveMessage = (body.message || body.input || "").trim();
+    const effectiveMessage = (body.message || body.input || '').trim();
     if (!effectiveMessage) {
-      return NextResponse.json(
-        { success: false, error: "消息内容不能为空" },
-        { status: 400 },
-      );
+      return NextResponse.json({ success: false, error: '消息内容不能为空' }, { status: 400 });
     }
 
-    const businessId = body.businessId || "aurora";
-    const userId = body.userId || "CUST-8801";
+    const businessId = body.businessId || 'aurora';
+    const userId = body.userId || 'CUST-8801';
     const threadId = body.threadId || `merchant_thread_${userId}_${businessId}`;
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
@@ -28,10 +25,7 @@ export async function POST(req: NextRequest) {
 
     // 等待同步返回结果
     const finalState: any = await dispatchRes.promise;
-    const output =
-      finalState?.output ||
-      finalState?.result ||
-      "极光潮品智能客服已为您处理完毕。";
+    const output = finalState?.output || finalState?.result || '极光潮品智能客服已为您处理完毕。';
 
     return NextResponse.json({
       success: true,
@@ -44,9 +38,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { success: false, error: errMsg },
-      { status: 500 },
-    );
+    return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }

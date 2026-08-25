@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { approvalsApi } from '../../lib/api';
 import { AuditDetailDrawer } from './components/AuditDetailDrawer';
 import type { AuditRecord } from './types';
 
@@ -53,6 +54,38 @@ const INITIAL_AUDITS: AuditRecord[] = [
 ];
 
 export function AuditsPage() {
+  const fetchApprovals = useCallback(async ({ tenantId, status }: { tenantId: string; status?: string }) => {
+    const res = await approvalsApi.list({
+      tenantId,
+      status: status || undefined,
+    });
+
+    if (res.success && Array.isArray(res.approvals)) {
+      const records: AuditRecord[] = res.approvals.map((item: any) => ({
+        id: item.id || item.approvalId,
+        threadId: item.threadId,
+        businessId: item.businessId || tenantId || 'ecommerce',
+        actionType: item.toolName || item.actionType || 'executeAction',
+        actionPayload:
+          typeof item.actionPayload === 'object' && item.actionPayload !== null
+            ? item.actionPayload
+            : typeof item.toolInput === 'object' && item.toolInput !== null
+              ? item.toolInput
+              : { raw: item.toolInput || item.actionPayload },
+        status: item.status || 'waiting',
+        reviewerId: item.operatorId || item.reviewerId,
+        rejectionReason: item.rejectionReason,
+        createdAt: item.createdAt
+          ? new Date(item.createdAt).toLocaleString('zh-CN')
+          : new Date().toLocaleString('zh-CN'),
+        resolvedAt: item.resolvedAt ? new Date(item.resolvedAt).toLocaleString('zh-CN') : undefined,
+      }));
+      return { data: records, total: records.length };
+    }
+
+    return { data: INITIAL_AUDITS, total: INITIAL_AUDITS.length };
+  }, []);
+
   const {
     paginatedData,
     total,
@@ -68,9 +101,11 @@ export function AuditsPage() {
     selectedItem,
     openDrawer,
     closeDrawer,
+    refetch,
     updateItem,
   } = useAdminCrud<AuditRecord>({
     initialData: INITIAL_AUDITS,
+    fetchList: fetchApprovals,
     tenantKey: 'businessId' as keyof AuditRecord,
     filterFn: (item, query, status, tenantId): boolean => {
       if (tenantId !== 'all' && item.businessId !== tenantId) return false;
@@ -90,21 +125,34 @@ export function AuditsPage() {
 
   const [isActing, setIsActing] = useState(false);
 
-  // 平台介入人工决议
-  const handleResolveAction = (action: 'approved' | 'rejected') => {
+  // 平台介入人工决议 (对接真实 approvalsApi.resolve)
+  const handleResolveAction = async (action: 'approved' | 'rejected') => {
     if (!selectedItem) return;
     setIsActing(true);
-    setTimeout(() => {
-      updateItem('id', {
+    try {
+      const apiAction = action === 'approved' ? 'approve' : 'reject';
+      await approvalsApi.resolve({
+        approvalId: selectedItem.id,
+        threadId: selectedItem.threadId,
+        action: apiAction,
+        rejectionReason: action === 'rejected' ? '平台管理员依据风控策略驳回' : undefined,
+        tenantId: selectedItem.businessId,
+      });
+
+      await updateItem('id', {
         ...selectedItem,
         status: action,
         reviewerId: 'platform_admin_override',
         resolvedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
         rejectionReason: action === 'rejected' ? '平台管理员依据风控策略驳回' : undefined,
       });
-      setIsActing(false);
+      await refetch();
       closeDrawer();
-    }, 300);
+    } catch (err) {
+      console.error('Failed to resolve approval:', err);
+    } finally {
+      setIsActing(false);
+    }
   };
 
   const columns = [

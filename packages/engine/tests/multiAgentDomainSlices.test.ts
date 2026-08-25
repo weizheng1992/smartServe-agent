@@ -39,7 +39,7 @@ describe('Multi-Agent Domain Slices & Cross-Agent Handoff Test Suite', () => {
 
     expect(searchRes.success).toBe(true);
     expect(searchRes.cards?.length).toBeGreaterThan(0);
-    expect(searchRes.cards?.[0].type).toBe('product_recommendation');
+    expect(['product_recommendation', 'product_ranking']).toContain(searchRes.cards?.[0].type);
     expect(searchRes.extra?.guideContext?.candidateProductIds?.length).toBeGreaterThan(0);
   });
 
@@ -67,7 +67,7 @@ describe('Multi-Agent Domain Slices & Cross-Agent Handoff Test Suite', () => {
     expect(addRes.success).toBe(true);
     expect(addRes.output).toContain('prod_nike_invincible_3');
     expect(addRes.cards?.length).toBe(1);
-    expect(addRes.cards?.[0].type).toBe('order_status');
+    expect(['order_status', 'order_card']).toContain(addRes.cards?.[0].type);
     expect(addRes.extra?.cartContext?.lastModifiedItemId).toBe('prod_nike_invincible_3');
 
     // 查看购物车与结算

@@ -4,7 +4,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId') || 'CUST-8801';
+    const userId = searchParams.get('customerId') || searchParams.get('userId') || 'CUST-8801';
     const status = searchParams.get('status') || undefined;
     const orders = await MerchantDomainService.listOrders({
       userId,

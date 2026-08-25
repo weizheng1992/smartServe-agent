@@ -1,7 +1,7 @@
-import type React from 'react';
-import { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { personasApi } from '../../lib/api';
 import { PersonaFormModal } from './components/PersonaFormModal';
 import type { PersonaRecord } from './types';
 
@@ -41,6 +41,33 @@ const INITIAL_PERSONAS: PersonaRecord[] = [
 ];
 
 export function PersonasPage() {
+  const fetchPersonasList = useCallback(async ({ tenantId }: { tenantId: string }) => {
+    try {
+      const res = await personasApi.list(tenantId === 'all' ? undefined : tenantId);
+      if (res.success && Array.isArray(res.data)) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch remote personas:', err);
+    }
+    return INITIAL_PERSONAS;
+  }, []);
+
+  const createPersonaApi = useCallback(async (item: Partial<PersonaRecord>, tenantId: string) => {
+    const res = await personasApi.create(item, tenantId);
+    return res.data || item;
+  }, []);
+
+  const updatePersonaApi = useCallback(async (item: PersonaRecord, tenantId: string) => {
+    const res = await personasApi.update(item.id, item, tenantId);
+    return res.data || item;
+  }, []);
+
+  const deletePersonaApi = useCallback(async (id: string, tenantId: string) => {
+    await personasApi.delete(id, tenantId);
+    return true;
+  }, []);
+
   const {
     paginatedData,
     total,
@@ -64,6 +91,10 @@ export function PersonasPage() {
     deleteItem,
   } = useAdminCrud<PersonaRecord>({
     initialData: INITIAL_PERSONAS,
+    fetchList: fetchPersonasList,
+    createApi: createPersonaApi,
+    updateApi: updatePersonaApi,
+    deleteApi: deletePersonaApi,
     tenantKey: 'businessId' as keyof PersonaRecord,
     filterFn: (item, query, status, tenantId) => {
       if (tenantId !== 'all' && item.businessId !== tenantId) return false;

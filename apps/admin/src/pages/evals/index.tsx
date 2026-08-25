@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Badge, Progress } from 'ui';
 import { DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { evalsApi } from '../../lib/api';
 import { EvalMetricsSummary } from './components/EvalMetricsSummary';
 import type { EvalRunRecord } from './types';
 
@@ -44,6 +45,18 @@ const INITIAL_EVALS: EvalRunRecord[] = [
 ];
 
 export function EvalsPage() {
+  const fetchEvalsList = useCallback(async () => {
+    try {
+      const res = await evalsApi.getResults();
+      if (res.success && Array.isArray(res.data)) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch remote evals, fallback to local:', err);
+    }
+    return INITIAL_EVALS;
+  }, []);
+
   const {
     paginatedData,
     total,
@@ -57,6 +70,7 @@ export function EvalsPage() {
     handleResetFilters,
   } = useAdminCrud<EvalRunRecord>({
     initialData: INITIAL_EVALS,
+    fetchList: fetchEvalsList,
     filterFn: (item, query, status) => {
       if (status && item.status !== status) return false;
       if (query.trim()) {

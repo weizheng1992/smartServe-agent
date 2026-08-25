@@ -386,6 +386,60 @@ export class MerchantDomainService {
   }
 
   /**
+   * 5.1 获取单个商品 (SPU/Product) 详情
+   */
+  public static async getProductDetail(productIdOrId: string): Promise<ThirdPartyProduct | null> {
+    const pool = await this.ensureDb();
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(productIdOrId);
+
+    const spuRes = isUuid
+      ? await pool.query(`SELECT * FROM merchant_spus WHERE id = $1 OR spu_code = $1 LIMIT 1`, [productIdOrId])
+      : await pool.query(`SELECT * FROM merchant_spus WHERE spu_code = $1 LIMIT 1`, [productIdOrId]);
+
+    const spu = spuRes.rows?.[0];
+    if (!spu) return null;
+
+    const skusRes = await pool.query('SELECT * FROM merchant_skus WHERE spu_id = $1 ORDER BY price ASC', [spu.id]);
+
+    const skus: ThirdPartySku[] = skusRes.rows.map((row) => ({
+      skuCode: row.sku_code,
+      skuTitle: row.sku_title,
+      specAttributes: row.spec_attributes,
+      price: Number(row.price),
+      originalPrice: row.original_price ? Number(row.original_price) : undefined,
+      stock: row.stock,
+      imageUrl: row.image_url || spu.main_image,
+      barCode: row.barcode,
+    }));
+
+    const totalStock = skus.reduce((sum, s) => sum + s.stock, 0);
+    const minPrice = skus.length > 0 ? Math.min(...skus.map((s) => s.price)) : 0;
+    const minOrigPrice =
+      skus.length > 0 && skus[0].originalPrice
+        ? Math.min(...skus.filter((s) => s.originalPrice).map((s) => s.originalPrice!))
+        : undefined;
+
+    return {
+      productId: spu.spu_code,
+      spuId: spu.id,
+      title: spu.title,
+      subtitle: spu.subtitle,
+      description: spu.description,
+      price: minPrice,
+      originalPrice: minOrigPrice,
+      stock: totalStock,
+      category: spu.category,
+      brand: spu.brand,
+      imageUrl: spu.main_image,
+      detailImages: spu.banner_images || [],
+      specDimensions: spu.spec_dimensions || [],
+      skus,
+      specs: spu.specs || {},
+      isAvailable: totalStock > 0,
+    };
+  }
+
+  /**
    * 6. 前台用户模拟多规格一键下单 (Storefront Spec Selected Purchase)
    */
   public static async placeOrder(params: {

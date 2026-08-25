@@ -67,6 +67,42 @@ async function migrateColumns() {
     );
     CREATE INDEX IF NOT EXISTS approval_outbox_status_idx ON approval_outbox_events (status, created_at);
     CREATE INDEX IF NOT EXISTS approval_outbox_approval_idx ON approval_outbox_events (approval_id);
+
+    -- Guardrail rules table
+    CREATE TABLE IF NOT EXISTS guardrail_rules (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL DEFAULT 'all',
+      rule_name TEXT NOT NULL,
+      rule_type TEXT NOT NULL,
+      pattern TEXT NOT NULL,
+      action TEXT NOT NULL DEFAULT 'block',
+      severity TEXT NOT NULL DEFAULT 'high',
+      is_enabled BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS guardrail_rules_biz_idx ON guardrail_rules (business_id);
+
+    -- Tenant billing quotas table
+    CREATE TABLE IF NOT EXISTS tenant_billing_quotas (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      business_id TEXT UNIQUE NOT NULL,
+      monthly_limit_tokens INTEGER NOT NULL DEFAULT 5000000,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Evaluation run records table
+    CREATE TABLE IF NOT EXISTS eval_run_records (
+      id TEXT PRIMARY KEY,
+      run_name TEXT NOT NULL,
+      dataset_name TEXT NOT NULL,
+      sample_count INTEGER NOT NULL DEFAULT 50,
+      tool_accuracy REAL DEFAULT 0.95,
+      rag_faithfulness REAL DEFAULT 0.92,
+      hitl_trigger_rate REAL DEFAULT 0.12,
+      status TEXT NOT NULL DEFAULT 'completed',
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
 
   console.log('✅ [DB Migration] 物理表列字段扩展完成！');
