@@ -1,30 +1,43 @@
-import { logger } from 'observability';
-import { getMerchantDisplayName } from 'types';
-import { getLLM } from '../../llm/callLLMWithRetry';
-import { type AgentStateAnnotation, type RagDocument, type SubTask, buildHistoryContext } from '../state';
+import { logger } from "observability";
+import { getMerchantDisplayName } from "types";
+import { getLLM } from "../../llm/callLLMWithRetry";
+import { ShortMemory } from "../../memory/shortMemory";
+import {
+  type AgentStateAnnotation,
+  type RagDocument,
+  type SubTask,
+  buildHistoryContext,
+} from "../state";
+import { addQueryToSemanticCache } from "./triage.node";
 
-export function sanitizeTenantResponse(rawContent: string, tenantId: string): string {
-  if (!rawContent) return '';
+export function sanitizeTenantResponse(
+  rawContent: string,
+  tenantId: string,
+): string {
+  if (!rawContent) return "";
   const brandName = getMerchantDisplayName(tenantId);
-  const isSpecificMerchant = tenantId === 'adidas' || tenantId === 'nike';
+  const isSpecificMerchant = tenantId === "adidas" || tenantId === "nike";
 
-  let sanitized = rawContent.replace(/\[([a-zA-Z0-9_-]+)\]/g, (match, capturedId) => {
-    const lower = capturedId.toLowerCase();
-    if (
-      lower === 'ecommerce' ||
-      lower === 'brand' ||
-      lower === 'store' ||
-      lower === 'merchant' ||
-      lower === 'shop' ||
-      lower === tenantId
-    ) {
-      return brandName;
-    }
-    if (lower === 'adidas' || lower === 'nike') {
-      return getMerchantDisplayName(lower);
-    }
-    return match;
-  });
+  let sanitized = rawContent.replace(
+    /\[([a-zA-Z0-9_-]+)\]/g,
+    (match, capturedId) => {
+      const lower = capturedId.toLowerCase();
+      if (
+        lower === "ecommerce" ||
+        lower === "brand" ||
+        lower === "store" ||
+        lower === "merchant" ||
+        lower === "shop" ||
+        lower === tenantId
+      ) {
+        return brandName;
+      }
+      if (lower === "adidas" || lower === "nike") {
+        return getMerchantDisplayName(lower);
+      }
+      return match;
+    },
+  );
 
   // 🛡️ 如果当前租户是特定专营商户（如 Adidas / Nike），将所有可能残存的通用 [ECOMMERCE] 或 "官方综合商城" 强制自愈替换为当前专营品牌
   if (isSpecificMerchant) {
@@ -36,33 +49,46 @@ export function sanitizeTenantResponse(rawContent: string, tenantId: string): st
       .replace(/\[SHOP\]/gi, brandName)
       .replace(/官方综合商城/g, brandName);
   } else {
-    sanitized = sanitized.replace(/\[ECOMMERCE\]/gi, '官方综合商城').replace(/\[BRAND\]/gi, '官方综合商城');
+    sanitized = sanitized
+      .replace(/\[ECOMMERCE\]/gi, "官方综合商城")
+      .replace(/\[BRAND\]/gi, "官方综合商城");
   }
 
   return sanitized;
 }
 
 export async function finishNode(state: typeof AgentStateAnnotation.State) {
-  logger.info({ threadId: state.threadId }, 'finishNode formulating final response');
+  logger.info(
+    { threadId: state.threadId },
+    "finishNode formulating final response",
+  );
 
   let shortMemory = state.shortMemory || [];
 
-  let tenantId = (state.businessConfig?.businessId || (state as any).businessId || 'ecommerce').toLowerCase();
+  let tenantId = (
+    state.businessConfig?.businessId ||
+    (state as any).businessId ||
+    "ecommerce"
+  ).toLowerCase();
 
   // 🛡️ 物理库商户身份兜底核验
-  if (state.threadId && (tenantId === 'ecommerce' || !tenantId)) {
+  if (state.threadId && (tenantId === "ecommerce" || !tenantId)) {
     try {
-      const { getDrizzle, threads } = require('db');
-      const { eq } = require('drizzle-orm');
+      const { getDrizzle, threads } = require("db");
+      const { eq } = require("drizzle-orm");
       const drizzle = getDrizzle();
       if (drizzle) {
-        const threadRows = await drizzle.select().from(threads).where(eq(threads.id, state.threadId)).limit(1);
+        const threadRows = await drizzle
+          .select()
+          .from(threads)
+          .where(eq(threads.id, state.threadId))
+          .limit(1);
         if (threadRows[0]?.businessId) {
           tenantId = threadRows[0].businessId.toLowerCase();
         }
       }
     } catch (err) {
-      console.warn('[FinishNode] Failed to resolve thread tenantId:', err);
+      console.warn("[FinishNode] Failed to resolve thread tenantId:", err);
     }
   }
 
@@ -77,7 +103,7 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   if (globalTransitions >= 10 || toolErrors >= 3) {
     logger.warn(
       { threadId: state.threadId, globalTransitions, toolErrors },
-      'finishNode detected active circuit breaker trigger. Bypassing LLM formulation and returning a safe fallback apology.',
+      "finishNode detected active circuit breaker trigger. Bypassing LLM formulation and returning a safe fallback apology.",
     );
     const apology = `您好！我是 ${brandName} 的智能客服助手。由于当前系统网络出现短暂波动，或者底层接口响应延迟，为了保障您的账户、资金安全，我们已经**自动为您【熔断并终止】了本次自动决策流程**。✨
 
@@ -93,11 +119,13 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
 
   // 🛡️ [人工转接 / 人工审批挂起直达文案]:
   // 如果子步骤包含 waitingForApproval 且属于人工转接申请，返回高保真得体文案
-  const approvalStep = plan.subtasks?.find((st: SubTask) => st.result?.waitingForApproval);
+  const approvalStep = plan.subtasks?.find(
+    (st: SubTask) => st.result?.waitingForApproval,
+  );
   if (approvalStep) {
     const isHumanEscalation =
-      approvalStep.result?.actionType === 'human_escalation' ||
-      approvalStep.description?.toLowerCase().includes('human_escalation');
+      approvalStep.result?.actionType === "human_escalation" ||
+      approvalStep.description?.toLowerCase().includes("human_escalation");
 
     if (isHumanEscalation) {
       const escalationReply = `您好！我是 ${brandName} 的智能客服助手。已为您**成功触发人工客服接入流程**。✨
@@ -116,7 +144,7 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   if (state.output && !approvalStep && globalTransitions <= 0) {
     logger.info(
       { threadId: state.threadId },
-      'finishNode detected pre-formulated output from bypass, returning directly after tenant sanitization.',
+      "finishNode detected pre-formulated output from bypass, returning directly after tenant sanitization.",
     );
     return {
       output: sanitizeTenantResponse(state.output, tenantId),
@@ -125,22 +153,23 @@ export async function finishNode(state: typeof AgentStateAnnotation.State) {
   }
 
   const input = state.input;
-  const llm = getLLM(state.jobId, state.threadId, 'finish');
+  const llm = getLLM(state.jobId, state.threadId, "finish");
 
   // 📦 SaaS Contextual RAG: 将多租户隔离检索出的企业知识库和标准业务政策（SOP）注入 Prompt，使回复回答完全匹配对应商户规则，彻底杜绝多租户政策幻觉混淆
-  let ragContext = '';
+  let ragContext = "";
   if (state.ragDocuments && state.ragDocuments.length > 0) {
     const formattedDocs = state.ragDocuments
       .map((doc: RagDocument, idx: number) => {
-        return `[Store Policy Rule ${idx + 1}] (Context Summary: ${doc.contextualSummary || 'N/A'}): "${doc.chunkText}"`;
+        return `[Store Policy Rule ${idx + 1}] (Context Summary: ${doc.contextualSummary || "N/A"}): "${doc.chunkText}"`;
       })
-      .join('\n');
+      .join("\n");
     ragContext = `\n\n[RELEVANT STORE POLICIES & KNOWLEDGE BASE]:\n${formattedDocs}\nIf relevant, explain these policies politely to the customer in Chinese to justify why certain actions (like returns or shipping constraints) can or cannot be taken, and strictly ground your explanation on these rules.`;
   }
 
   const defaultSystemPrompt = `You are an advanced, professional AI Customer Support Agent representing ${brandName}. Help users resolve order, shipping, and refund queries.`;
   const systemPrompt =
-    state.businessConfig?.systemPrompt && state.businessConfig.systemPrompt.includes(brandName)
+    state.businessConfig?.systemPrompt &&
+    state.businessConfig.systemPrompt.includes(brandName)
       ? state.businessConfig.systemPrompt
       : defaultSystemPrompt;
 
@@ -154,9 +183,8 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
 - If the customer explicitly asks to query or operate on unrelated external brands/stores that you do not represent, politely explain that you are the dedicated customer assistant for ${brandName} and only handle ${brandName} orders and services.`;
 
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型在总结生成最终答复时，能够完美串联多轮对话上下文脉络
-  let historyContext = '';
+  let historyContext = "";
   if (!shortMemory || shortMemory.length === 0) {
-    const { ShortMemory } = require('../../memory/shortMemory');
     const sm = new ShortMemory(state.threadId);
     shortMemory = await sm.getMessages();
   }
@@ -184,25 +212,45 @@ CRITICAL RULES (最高行为准则 - 严禁幻觉与跨租户泄露):
 
   try {
     const response = await llm.invoke(prompt);
-    const rawContent = typeof response === 'string' ? response : (response as { content?: string }).content || '';
+    const rawContent =
+      typeof response === "string"
+        ? response
+        : (response as { content?: string }).content || "";
     const sanitizedContent = sanitizeTenantResponse(rawContent, tenantId);
 
-    logger.info({ threadId: state.threadId }, 'finishNode response formulated successfully');
+    logger.info(
+      { threadId: state.threadId },
+      "finishNode response formulated successfully",
+    );
 
     // 🚀 Populate semantic cache if it is a general_query
-    const isOnlyGeneral = state.intents?.length === 1 && state.intents[0].intent === 'general_query';
-    if (isOnlyGeneral && state.input && state.inputEmbedding && state.inputEmbedding.length > 0) {
+    const isOnlyGeneral =
+      state.intents?.length === 1 &&
+      state.intents[0].intent === "general_query";
+    if (
+      isOnlyGeneral &&
+      state.input &&
+      state.inputEmbedding &&
+      state.inputEmbedding.length > 0
+    ) {
       try {
-        const { addQueryToSemanticCache } = require('./triage.node');
-        addQueryToSemanticCache(tenantId, state.input, sanitizedContent.trim(), state.inputEmbedding);
+        addQueryToSemanticCache(
+          tenantId,
+          state.input,
+          sanitizedContent.trim(),
+          state.inputEmbedding,
+        );
       } catch (cErr) {
-        console.warn('[Finish Cache] Failed to cache general query:', cErr);
+        console.warn("[Finish Cache] Failed to cache general query:", cErr);
       }
     }
 
     return { output: sanitizedContent.trim(), shortMemory };
   } catch (err: unknown) {
-    logger.error({ threadId: state.threadId, err }, 'finishNode failed, using fallback summary');
+    logger.error(
+      { threadId: state.threadId, err },
+      "finishNode failed, using fallback summary",
+    );
     return {
       output: `您好！您的请求已由 ${brandName} 客服系统处理。执行详情：${JSON.stringify((plan.subtasks || []).map((s: SubTask) => s.result))}`,
       shortMemory,
