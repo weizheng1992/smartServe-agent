@@ -545,11 +545,18 @@ export class ApprovalGatekeeper {
     });
 
     const sysMsgId = randomUUID();
+    const sysMsgContent = '【系统提示】人工客服已主动接入当前会话，您可以向客服发送消息进行实时沟通。';
     await db.addMessage({
       id: sysMsgId,
       threadId,
       role: 'system',
-      content: '【系统提示】人工客服已主动接入当前会话，您可以向客服发送消息进行实时沟通。',
+      content: sysMsgContent,
+      timestamp: new Date().toISOString(),
+    });
+    agentEventEmitter.emit(`thread:${threadId}:message`, {
+      id: sysMsgId,
+      role: 'system',
+      content: sysMsgContent,
       timestamp: new Date().toISOString(),
     });
 
@@ -648,11 +655,18 @@ export class ApprovalGatekeeper {
       if (action === 'human_message' || (action === 'human_reply' && isFinish === false)) {
         if (humanReply && humanReply.trim()) {
           const msgId = randomUUID();
+          const replyContent = `[人工客服] ${humanReply.trim()}`;
           await db.addMessage({
             id: msgId,
             threadId: record.threadId,
             role: 'assistant',
-            content: `[人工客服] ${humanReply.trim()}`,
+            content: replyContent,
+            timestamp: new Date().toISOString(),
+          });
+          agentEventEmitter.emit(`thread:${record.threadId}:message`, {
+            id: msgId,
+            role: 'assistant',
+            content: replyContent,
             timestamp: new Date().toISOString(),
           });
           console.log(`[Human IM Chat] 人工客服回复已实时写入 thread: ${record.threadId}`);

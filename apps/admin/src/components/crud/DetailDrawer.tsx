@@ -1,1 +1,1 @@
-export { DetailDrawer, Drawer, type DetailDrawerProps } from "ui";
+export { DetailDrawer, Drawer, type DetailDrawerProps } from 'ui';

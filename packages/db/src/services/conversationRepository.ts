@@ -1,4 +1,4 @@
-import { getPgPool } from "../client";
+import { getPgPool } from '../client';
 
 export interface ListConversationsFilter {
   businessId: string;
@@ -30,7 +30,7 @@ export interface AppendMessagePayload {
   threadId: string;
   businessId: string;
   userId?: string;
-  role: "user" | "assistant" | "system" | "operator";
+  role: 'user' | 'assistant' | 'system' | 'operator';
   content: string;
   thoughtSteps?: Array<{ step: string; status: string }>;
   toolCalls?: Array<{ name: string; args: any; result?: any }>;
@@ -47,7 +47,7 @@ export class ConversationRepository {
     filter: ListConversationsFilter,
   ): Promise<{ items: ConversationSummary[]; total: number }> {
     const pool = getPgPool();
-    const cleanBizId = (filter.businessId || "").toLowerCase().trim();
+    const cleanBizId = (filter.businessId || '').toLowerCase().trim();
     const limit = Math.max(1, Math.min(100, filter.limit ?? 20));
     const offset = Math.max(0, filter.offset ?? 0);
 
@@ -55,13 +55,13 @@ export class ConversationRepository {
     const params: any[] = [];
     let paramIndex = 1;
 
-    if (cleanBizId && cleanBizId !== "all") {
+    if (cleanBizId && cleanBizId !== 'all') {
       conditions.push(`t.business_id = $${paramIndex}`);
       params.push(cleanBizId);
       paramIndex++;
     }
 
-    if (filter.status && filter.status !== "all") {
+    if (filter.status && filter.status !== 'all') {
       conditions.push(`t.status = $${paramIndex}`);
       params.push(filter.status);
       paramIndex++;
@@ -73,7 +73,7 @@ export class ConversationRepository {
       paramIndex++;
     }
 
-    if (filter.searchKeyword && filter.searchKeyword.trim() !== "") {
+    if (filter.searchKeyword && filter.searchKeyword.trim() !== '') {
       const keyword = `%${filter.searchKeyword.trim()}%`;
       conditions.push(`(
         t.id ILIKE $${paramIndex} OR
@@ -86,13 +86,12 @@ export class ConversationRepository {
       paramIndex++;
     }
 
-    const whereClause =
-      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // 1. 获取总记录数
     const countQuery = `SELECT COUNT(*) as count FROM threads t ${whereClause}`;
     const countRes = await pool.query(countQuery, params);
-    const total = Number.parseInt(countRes.rows[0]?.count || "0", 10);
+    const total = Number.parseInt(countRes.rows[0]?.count || '0', 10);
 
     // 2. 分页拉取列表及最新一条消息
     const listQuery = `
@@ -130,20 +129,16 @@ export class ConversationRepository {
       threadId: r.thread_id,
       businessId: r.business_id,
       userId: r.user_id,
-      status: r.status || "active",
+      status: r.status || 'active',
       assignedOperatorId: r.assigned_operator_id,
       unreadCount: r.unread_count,
       tags: Array.isArray(r.tags) ? r.tags : [],
       metadata: r.metadata || {},
-      createdAt: r.created_at
-        ? new Date(r.created_at).toISOString()
-        : new Date().toISOString(),
-      updatedAt: r.updated_at
-        ? new Date(r.updated_at).toISOString()
-        : new Date().toISOString(),
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
       lastMessageSnippet: r.last_msg_content
         ? r.last_msg_content.length > 80
-          ? r.last_msg_content.slice(0, 80) + "..."
+          ? r.last_msg_content.slice(0, 80) + '...'
           : r.last_msg_content
         : undefined,
       lastMessageRole: r.last_msg_role,
@@ -156,35 +151,26 @@ export class ConversationRepository {
   /**
    * 获取单会话完整消息时序与上下文 (强制租户物理隔离与智能自愈)
    */
-  public static async getConversationTimeline(
-    threadId: string,
-    businessId?: string,
-  ) {
+  public static async getConversationTimeline(threadId: string, businessId?: string) {
     const pool = getPgPool();
     const cleanThreadId = threadId.trim();
-    const cleanBizId = (businessId || "").toLowerCase().trim();
+    const cleanBizId = (businessId || '').toLowerCase().trim();
 
     // 1. 查询会话基础信息
-    const threadQuery = "SELECT * FROM threads WHERE id = $1";
+    const threadQuery = 'SELECT * FROM threads WHERE id = $1';
     const threadRes = await pool.query(threadQuery, [cleanThreadId]);
     if (!threadRes.rows[0]) return null;
 
     const thread = threadRes.rows[0];
-    let actualBizId = (thread.business_id || "ecommerce").toLowerCase();
+    let actualBizId = (thread.business_id || 'ecommerce').toLowerCase();
 
     // 🛡️ 多租户身份校验与自愈补全：
     // 如果当前会话处于默认 'ecommerce' 或者 threadId 明显归属当前商户，且客户端以指定商户（如 aurora）查询，自动自愈升级会话归属
-    if (cleanBizId && cleanBizId !== "all") {
+    if (cleanBizId && cleanBizId !== 'all') {
       if (actualBizId === cleanBizId) {
         // 完全匹配
-      } else if (
-        actualBizId === "ecommerce" ||
-        cleanThreadId.includes(cleanBizId)
-      ) {
-        await pool.query("UPDATE threads SET business_id = $2 WHERE id = $1", [
-          cleanThreadId,
-          cleanBizId,
-        ]);
+      } else if (actualBizId === 'ecommerce' || cleanThreadId.includes(cleanBizId)) {
+        await pool.query('UPDATE threads SET business_id = $2 WHERE id = $1', [cleanThreadId, cleanBizId]);
         actualBizId = cleanBizId;
         thread.business_id = cleanBizId;
       } else {
@@ -252,7 +238,7 @@ export class ConversationRepository {
       [cleanThreadId, cleanBizId, params.status],
     );
 
-    const updates: string[] = ["status = $3", "updated_at = NOW()"];
+    const updates: string[] = ['status = $3', 'updated_at = NOW()'];
     const queryParams: any[] = [cleanThreadId, cleanBizId, params.status];
     let pIdx = 4;
 
@@ -269,16 +255,14 @@ export class ConversationRepository {
     }
 
     if (params.metadata !== undefined) {
-      updates.push(
-        `metadata = COALESCE(metadata, '{}'::jsonb) || $${pIdx}::jsonb`,
-      );
+      updates.push(`metadata = COALESCE(metadata, '{}'::jsonb) || $${pIdx}::jsonb`);
       queryParams.push(JSON.stringify(params.metadata));
       pIdx++;
     }
 
     const query = `
       UPDATE threads
-      SET ${updates.join(", ")}
+      SET ${updates.join(', ')}
       WHERE id = $1 AND business_id = $2
       RETURNING *
     `;
@@ -292,9 +276,7 @@ export class ConversationRepository {
    */
   public static async appendMessage(payload: AppendMessagePayload) {
     const pool = getPgPool();
-    const msgId =
-      payload.id ||
-      `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const msgId = payload.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const timestamp = payload.timestamp || new Date().toISOString();
     const cleanBizId = payload.businessId.toLowerCase().trim();
     const cleanUserId = payload.userId?.trim() || null;

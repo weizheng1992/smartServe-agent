@@ -1,17 +1,14 @@
-"use client";
+'use client';
 
-import { usePathname } from "next/navigation";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Input } from "ui";
-import { useCurrentUser } from "../../context/UserContext";
-import {
-  type RouteGreetingContext,
-  getGreetingForRoute,
-} from "./routeGreetingConfig";
+import { usePathname } from 'next/navigation';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Button, Input } from 'ui';
+import { useCurrentUser } from '../../context/UserContext';
+import { type RouteGreetingContext, getGreetingForRoute } from './routeGreetingConfig';
 
 interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   text: string;
   time: string;
 }
@@ -24,8 +21,8 @@ export function FloatingChatWidget({
   const pathname = usePathname();
   const { user } = useCurrentUser();
   const [isOpen, setIsOpen] = useState(false);
-  const [input, setInput] = useState("");
-  const [threadId, setThreadId] = useState<string>("");
+  const [input, setInput] = useState('');
+  const [threadId, setThreadId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userThreads, setUserThreads] = useState<any[]>([]);
   const [showHistoryList, setShowHistoryList] = useState(false);
@@ -33,117 +30,131 @@ export function FloatingChatWidget({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasInitializedRef = useRef(false);
 
-  // 初始化对应用户的 threadId
+  // 初始化对应用户的全新会话 threadId (每次刷新或新会话均以清新路由问候语开始，不被旧会话强行霸屏)
   useEffect(() => {
     if (!user?.id) return;
-    const storageKey = `aurora_store_thread_id_${user.id}`;
-    let tid = localStorage.getItem(storageKey);
-    if (!tid) {
-      tid = `merchant_thread_${user.id}_aurora_${Date.now()}`;
-      localStorage.setItem(storageKey, tid);
-    }
-    setThreadId(tid);
-    hasInitializedRef.current = false;
-  }, [user?.id]);
+    const newTid = `merchant_thread_${user.id}_aurora_${Date.now()}`;
+    setThreadId(newTid);
+    const greetingText = getGreetingForRoute({
+      pathname,
+      ...contextOverride,
+    });
+    setMessages([
+      {
+        id: `msg_init_${Date.now()}`,
+        role: 'assistant',
+        text: greetingText,
+        time: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      },
+    ]);
+  }, [user?.id, pathname, contextOverride]);
 
-  // 从服务端拉取真实历史消息
+  // 按需从服务端拉取用户历史会话列表或指定历史会话的消息
   const fetchHistory = useCallback(
-    async (currentTid: string) => {
-      if (!currentTid) return false;
+    async (targetThreadId?: string) => {
+      if (!user?.id) return;
       try {
-        const res = await fetch(
-          `/api/store/chat/messages?threadId=${currentTid}&userId=${user?.id || ""}&tenantId=aurora`,
-        );
+        const queryTid = targetThreadId || '';
+        const res = await fetch(`/api/store/chat/messages?threadId=${queryTid}&userId=${user.id}&tenantId=aurora`);
         const data = await res.json();
         if (data.success) {
           if (Array.isArray(data.userThreads)) {
             setUserThreads(data.userThreads);
           }
-          // 如果后端发现当前会话为空但有更匹配的历史会话并返回了纠正后的 threadId
-          if (data.threadId && data.threadId !== currentTid && user?.id) {
-            setThreadId(data.threadId);
-            localStorage.setItem(
-              `aurora_store_thread_id_${user.id}`,
-              data.threadId,
-            );
-          }
-
-          if (Array.isArray(data.messages) && data.messages.length > 0) {
-            const formattedMsgs: ChatMessage[] = data.messages.map(
-              (m: any, idx: number) => ({
-                id: m.id || `msg_hist_${idx}`,
-                role: m.role === "user" ? "user" : "assistant",
-                text: m.content || m.text || "",
-                time: m.createdAt
-                  ? new Date(m.createdAt).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  : new Date().toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    }),
-              }),
-            );
+          if (targetThreadId && Array.isArray(data.messages) && data.messages.length > 0) {
+            const formattedMsgs: ChatMessage[] = data.messages.map((m: any, idx: number) => ({
+              id: m.id || `msg_hist_${idx}`,
+              role: m.role === 'user' ? 'user' : 'assistant',
+              text: m.content || m.text || '',
+              time: m.createdAt
+                ? new Date(m.createdAt).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : new Date().toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
+            }));
             setMessages(formattedMsgs);
-            return true;
           }
         }
       } catch (err) {
-        console.error("Failed to load chat history:", err);
+        console.error('Failed to load chat history:', err);
       }
-      return false;
     },
     [user?.id],
   );
 
-  // 挂载与 threadId 变更时加载历史记录，若为空则呈现路由感知问候语
+  // 方案 B：基于 SSE (Server-Sent Events) 的实时事件流，替代无节制的 3 秒 HTTP 轮询
   useEffect(() => {
-    if (!threadId) return;
-    let isMounted = true;
+    if (!threadId || !isOpen) return;
 
-    const initChat = async () => {
-      const hasHistory = await fetchHistory(threadId);
-      if (!hasHistory && isMounted) {
-        const greetingText = getGreetingForRoute({
-          pathname,
-          ...contextOverride,
-        });
-        setMessages([
-          {
-            id: `msg_init_${Date.now()}`,
-            role: "assistant",
-            text: greetingText,
-            time: new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          },
-        ]);
-      }
-      hasInitializedRef.current = true;
-    };
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource(`/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}`);
 
-    initChat();
+      eventSource.addEventListener('message', (e) => {
+        try {
+          const msgData = JSON.parse(e.data);
+          if (msgData && msgData.content) {
+            const incomingText = String(msgData.content).trim();
+            const incomingId = msgData.id || `sse_${Date.now()}`;
+            const incomingRole = msgData.role === 'user' ? 'user' : 'assistant';
+
+            setMessages((prev) => {
+              // 避免与已有的消息重复添加
+              const alreadyExists = prev.some(
+                (m) => m.id === incomingId || (m.role === incomingRole && m.text === incomingText),
+              );
+              if (alreadyExists) return prev;
+
+              return [
+                ...prev,
+                {
+                  id: incomingId,
+                  role: incomingRole,
+                  text: incomingText,
+                  time: msgData.timestamp
+                    ? new Date(msgData.timestamp).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : new Date().toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      }),
+                },
+              ];
+            });
+          }
+        } catch (err) {
+          console.warn('[SSE] Failed to parse SSE message event:', err);
+        }
+      });
+
+      eventSource.onerror = (err) => {
+        // SSE 断线将由浏览器 EventSource 机制自动安全重连
+        console.debug('[SSE] EventSource connection info:', err);
+      };
+    } catch (err) {
+      console.warn('[SSE] Failed to initialize EventSource:', err);
+    }
 
     return () => {
-      isMounted = false;
+      if (eventSource) {
+        eventSource.close();
+      }
     };
-  }, [threadId, fetchHistory, pathname, contextOverride]);
-
-  // 开启定期轮询，实时同步后台人工客服（Live Desk）回复
-  useEffect(() => {
-    if (!threadId) return;
-    const interval = setInterval(() => {
-      fetchHistory(threadId);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [threadId, fetchHistory]);
+  }, [threadId, isOpen]);
 
   // 滚动到底部
   useEffect(() => {
     if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isOpen]);
 
@@ -151,8 +162,6 @@ export function FloatingChatWidget({
   const handleStartNewThread = () => {
     if (!user?.id) return;
     const newTid = `merchant_thread_${user.id}_aurora_${Date.now()}`;
-    const storageKey = `aurora_store_thread_id_${user.id}`;
-    localStorage.setItem(storageKey, newTid);
     setThreadId(newTid);
     const greetingText = getGreetingForRoute({
       pathname,
@@ -161,11 +170,11 @@ export function FloatingChatWidget({
     setMessages([
       {
         id: `msg_new_${Date.now()}`,
-        role: "assistant",
+        role: 'assistant',
         text: greetingText,
         time: new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
+          hour: '2-digit',
+          minute: '2-digit',
         }),
       },
     ]);
@@ -177,30 +186,30 @@ export function FloatingChatWidget({
     if (!msgToSend || isSending) return;
 
     const userTime = new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
+      hour: '2-digit',
+      minute: '2-digit',
     });
 
     const newMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
-      role: "user",
+      role: 'user',
       text: msgToSend,
       time: userTime,
     };
 
     setMessages((prev) => [...prev, newMsg]);
-    if (!customMsg) setInput("");
+    if (!customMsg) setInput('');
     setIsSending(true);
 
     try {
-      const res = await fetch("/api/store/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/store/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: msgToSend,
           threadId,
           userId: user.id,
-          businessId: "aurora",
+          businessId: 'aurora',
           routeContext: {
             pathname,
             ...contextOverride,
@@ -209,20 +218,17 @@ export function FloatingChatWidget({
       });
 
       const data = await res.json();
-      const replyText =
-        data.output ||
-        data.result ||
-        "抱歉，客服服务遇到一点小问题，请稍候再试。";
+      const replyText = data.output || data.result || '抱歉，客服服务遇到一点小问题，请稍候再试。';
 
       setMessages((prev) => [
         ...prev,
         {
           id: `ast_${Date.now()}`,
-          role: "assistant",
+          role: 'assistant',
           text: replyText,
           time: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
+            hour: '2-digit',
+            minute: '2-digit',
           }),
         },
       ]);
@@ -231,11 +237,11 @@ export function FloatingChatWidget({
         ...prev,
         {
           id: `ast_err_${Date.now()}`,
-          role: "assistant",
-          text: "网络通信异常，请检查商户后端服务连接。",
+          role: 'assistant',
+          text: '网络通信异常，请检查商户后端服务连接。',
           time: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
+            hour: '2-digit',
+            minute: '2-digit',
           }),
         },
       ]);
@@ -268,30 +274,30 @@ export function FloatingChatWidget({
               <div>
                 <div className="font-bold text-xs flex items-center space-x-1">
                   <span>极光潮品 AI 智能助理</span>
-                  <span className="text-[10px] bg-emerald-800 text-emerald-200 px-1.5 py-0.2 rounded">
-                    {user.name}
-                  </span>
+                  <span className="text-[10px] bg-emerald-800 text-emerald-200 px-1.5 py-0.2 rounded">{user.name}</span>
                 </div>
-                <div className="text-[10px] text-emerald-200 truncate max-w-[200px]">
-                  {pathname} · 历史记录已同步
-                </div>
+                <div className="text-[10px] text-emerald-200 truncate max-w-[200px]">{pathname} · 历史记录已同步</div>
               </div>
             </div>
             <div className="flex items-center space-x-1.5">
-              {userThreads.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowHistoryList(!showHistoryList)}
-                  title="查看历史对话"
-                  className={`text-[11px] px-2 py-0.5 rounded cursor-pointer transition ${
-                    showHistoryList
-                      ? "bg-emerald-900 text-white font-semibold"
-                      : "bg-emerald-800/80 hover:bg-emerald-800 text-emerald-100"
-                  }`}
-                >
-                  📜 历史 ({userThreads.length})
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextState = !showHistoryList;
+                  setShowHistoryList(nextState);
+                  if (nextState) {
+                    fetchHistory();
+                  }
+                }}
+                title="查看历史对话"
+                className={`text-[11px] px-2 py-0.5 rounded cursor-pointer transition ${
+                  showHistoryList
+                    ? 'bg-emerald-900 text-white font-semibold'
+                    : 'bg-emerald-800/80 hover:bg-emerald-800 text-emerald-100'
+                }`}
+              >
+                📜 历史 {userThreads.length > 0 ? `(${userThreads.length})` : ''}
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -318,9 +324,7 @@ export function FloatingChatWidget({
             <div className="bg-slate-50 border-b border-slate-200 p-2 max-h-48 overflow-y-auto space-y-1 z-10 shadow-inner">
               <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 px-1 mb-1">
                 <span>我的历史会话列表</span>
-                <span className="text-[10px] text-slate-400">
-                  点击切换继续对话
-                </span>
+                <span className="text-[10px] text-slate-400">点击切换继续对话</span>
               </div>
               {userThreads.map((t) => {
                 const isActive = t.threadId === threadId;
@@ -331,22 +335,18 @@ export function FloatingChatWidget({
                     onClick={() => {
                       if (!user?.id) return;
                       setThreadId(t.threadId);
-                      localStorage.setItem(
-                        `aurora_store_thread_id_${user.id}`,
-                        t.threadId,
-                      );
                       fetchHistory(t.threadId);
                       setShowHistoryList(false);
                     }}
                     className={`w-full text-left p-2 rounded-lg text-xs transition border flex flex-col space-y-0.5 cursor-pointer ${
                       isActive
-                        ? "bg-emerald-50 border-emerald-300 text-emerald-900 shadow-xs"
-                        : "bg-white border-slate-200 hover:border-emerald-200 hover:bg-slate-100 text-slate-700"
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-emerald-200 hover:bg-slate-100 text-slate-700'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium truncate max-w-[200px]">
-                        {t.lastMessageSnippet || t.title || "咨询对话"}
+                        {t.lastMessageSnippet || t.title || '咨询对话'}
                       </span>
                       {isActive && (
                         <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.2 rounded-full">
@@ -356,11 +356,7 @@ export function FloatingChatWidget({
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-slate-400">
                       <span>ID: {t.threadId.slice(-12)}</span>
-                      <span>
-                        {t.updatedAt
-                          ? new Date(t.updatedAt).toLocaleDateString()
-                          : ""}
-                      </span>
+                      <span>{t.updatedAt ? new Date(t.updatedAt).toLocaleDateString() : ''}</span>
                     </div>
                   </button>
                 );
@@ -373,21 +369,21 @@ export function FloatingChatWidget({
             <span className="font-semibold shrink-0">快捷提问:</span>
             <button
               type="button"
-              onClick={() => handleSendMessage("查询我的全部订单")}
+              onClick={() => handleSendMessage('查询我的全部订单')}
               className="px-2 py-0.5 bg-white rounded border border-emerald-200 hover:bg-emerald-100 shrink-0 cursor-pointer"
             >
               📦 查所有订单
             </button>
             <button
               type="button"
-              onClick={() => handleSendMessage("推荐当季热销机能外套")}
+              onClick={() => handleSendMessage('推荐当季热销机能外套')}
               className="px-2 py-0.5 bg-white rounded border border-emerald-200 hover:bg-emerald-100 shrink-0 cursor-pointer"
             >
               🧥 推荐热销
             </button>
             <button
               type="button"
-              onClick={() => handleSendMessage("修改未发货订单地址")}
+              onClick={() => handleSendMessage('修改未发货订单地址')}
               className="px-2 py-0.5 bg-white rounded border border-emerald-200 hover:bg-emerald-100 shrink-0 cursor-pointer"
             >
               📍 改收货地址
@@ -397,22 +393,17 @@ export function FloatingChatWidget({
           {/* 对话消息流 */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
             {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
-              >
+              <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
                 <div
                   className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
-                    m.role === "user"
-                      ? "bg-emerald-600 text-white rounded-br-none"
-                      : "bg-white text-slate-800 border border-slate-200 rounded-bl-none"
+                    m.role === 'user'
+                      ? 'bg-emerald-600 text-white rounded-br-none'
+                      : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
                   }`}
                 >
                   {m.text}
                 </div>
-                <span className="text-[10px] text-slate-400 mt-1 px-1">
-                  {m.time}
-                </span>
+                <span className="text-[10px] text-slate-400 mt-1 px-1">{m.time}</span>
               </div>
             ))}
             {isSending && (
@@ -431,7 +422,7 @@ export function FloatingChatWidget({
               placeholder="请输入您的问题或指令..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
               disabled={isSending}
               className="text-xs flex-1 h-9"
             />

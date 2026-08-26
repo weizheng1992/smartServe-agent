@@ -1,24 +1,21 @@
-import { ConversationRepository, getPgPool } from "db";
-import { type NextRequest, NextResponse } from "next/server";
+import { ConversationRepository, getPgPool } from 'db';
+import { type NextRequest, NextResponse } from 'next/server';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const tenantId =
-      searchParams.get("businessId") ||
-      searchParams.get("tenantId") ||
-      "aurora";
-    let threadId = searchParams.get("threadId");
-    const userId = searchParams.get("userId");
+    const tenantId = searchParams.get('businessId') || searchParams.get('tenantId') || 'aurora';
+    let threadId = searchParams.get('threadId');
+    const userId = searchParams.get('userId');
 
     const pool = getPgPool();
     let pgUserId: string | null = null;
     if (userId) {
       try {
-        const userRes = await pool.query(
-          "SELECT id FROM users WHERE LOWER(email) = LOWER($1) OR id = $2 LIMIT 1",
-          [`${userId}@example.com`, userId],
-        );
+        const userRes = await pool.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1) OR id = $2 LIMIT 1', [
+          `${userId}@example.com`,
+          userId,
+        ]);
         if (userRes.rows?.[0]) {
           pgUserId = userRes.rows[0].id;
         }
@@ -48,9 +45,7 @@ export async function GET(req: NextRequest) {
 
     // 如果前端未指定 threadId，且当前用户有历史会话，则自动定位到该用户最近的会话
     if (!threadId && userThreads.length > 0) {
-      const activeThreadWithMsgs = userThreads.find((t) =>
-        Boolean(t.lastMessageSnippet),
-      );
+      const activeThreadWithMsgs = userThreads.find((t) => Boolean(t.lastMessageSnippet));
       threadId = activeThreadWithMsgs?.threadId || userThreads[0].threadId;
     }
 
@@ -64,10 +59,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const timeline = await ConversationRepository.getConversationTimeline(
-      threadId,
-      tenantId,
-    );
+    const timeline = await ConversationRepository.getConversationTimeline(threadId, tenantId);
 
     return NextResponse.json({
       success: true,
@@ -78,9 +70,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { success: false, error: errMsg },
-      { status: 500 },
-    );
+    return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }

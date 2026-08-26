@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import crypto from 'node:crypto';
 import type {
   SpiConnectorConfig,
   SpiResponse,
@@ -7,10 +7,10 @@ import type {
   ThirdPartyOrderActionResult,
   ThirdPartyProduct,
   ThirdPartyUser,
-} from "types";
-import { isSafeUrl } from "../openapi/ssrfGuard";
-import { HmacSigner } from "./hmacSigner";
-import type { ThirdPartySpiClient } from "./types";
+} from 'types';
+import { isSafeUrl } from '../openapi/ssrfGuard';
+import { HmacSigner } from './hmacSigner';
+import type { ThirdPartySpiClient } from './types';
 
 /**
  * 远程标准 HTTP SPI 连接器 (Remote HTTP SPI Adapter)
@@ -26,11 +26,9 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
   constructor(config: SpiConnectorConfig) {
     const rawUrl = process.env.SPI_BASE_URL_OVERRIDE || config.spiBaseUrl;
     if (!rawUrl) {
-      throw new Error(
-        "[RemoteHttpSpiAdapter] spiBaseUrl is required for remote SPI mode.",
-      );
+      throw new Error('[RemoteHttpSpiAdapter] spiBaseUrl is required for remote SPI mode.');
     }
-    this.baseUrl = (config.spiBaseUrl || rawUrl).replace(/\/+$/, "");
+    this.baseUrl = (config.spiBaseUrl || rawUrl).replace(/\/+$/, '');
     this.apiSecret = config.apiSecret;
     this.timeoutMs = config.timeoutMs || 8000;
     this.customHeaders = config.customHeaders || {};
@@ -40,18 +38,18 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
   private getEffectiveBaseUrl(): string {
     const override = process.env.SPI_BASE_URL_OVERRIDE;
     if (override) {
-      return override.replace(/\/+$/, "");
+      return override.replace(/\/+$/, '');
     }
     return this.baseUrl;
   }
 
   private async request<T>(
-    method: "GET" | "POST" | "PUT" | "DELETE",
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     query?: Record<string, string | number | undefined>,
     body?: unknown,
     idempotencyKey?: string,
-    tenantId = "ecommerce",
+    tenantId = 'ecommerce',
   ): Promise<T> {
     const effectiveBaseUrl = this.getEffectiveBaseUrl();
     const urlObj = new URL(`${effectiveBaseUrl}${path}`);
@@ -64,33 +62,30 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
     }
 
     const fullUrl = urlObj.toString();
-    const isDev = process.env.NODE_ENV !== "production";
-    const isLocalhost =
-      urlObj.hostname === "localhost" || urlObj.hostname === "127.0.0.1";
+    const isDev = process.env.NODE_ENV !== 'production';
+    const isLocalhost = urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1';
 
     if (!isDev || !isLocalhost) {
       const check = await isSafeUrl(fullUrl);
       if (!check.safe) {
-        throw new Error(
-          `[RemoteHttpSpiAdapter] SSRF Blocked: Target URL ${fullUrl} is not permitted.`,
-        );
+        throw new Error(`[RemoteHttpSpiAdapter] SSRF Blocked: Target URL ${fullUrl} is not permitted.`);
       }
     }
 
     const timestamp = Date.now();
     const nonce = crypto.randomUUID();
-    const bodyStr = body ? JSON.stringify(body) : "";
+    const bodyStr = body ? JSON.stringify(body) : '';
 
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "X-Tenant-Id": tenantId,
-      "X-Timestamp": timestamp.toString(),
-      "X-Nonce": nonce,
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': tenantId,
+      'X-Timestamp': timestamp.toString(),
+      'X-Nonce': nonce,
       ...this.customHeaders,
     };
 
     if (idempotencyKey) {
-      headers["X-Idempotency-Key"] = idempotencyKey;
+      headers['X-Idempotency-Key'] = idempotencyKey;
     }
 
     if (this.enableHmacSign && this.apiSecret) {
@@ -102,7 +97,7 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
         body: bodyStr,
         secret: this.apiSecret,
       });
-      headers["X-Signature"] = signature;
+      headers['X-Signature'] = signature;
     }
 
     const controller = new AbortController();
@@ -117,25 +112,16 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
       });
 
       if (!resp.ok) {
-        const errorText = await resp.text().catch(() => "");
-        throw new Error(
-          `HTTP ${resp.status} - ${errorText || resp.statusText}`,
-        );
+        const errorText = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status} - ${errorText || resp.statusText}`);
       }
 
       const json = (await resp.json()) as SpiResponse<T>;
-      if (
-        json &&
-        typeof json === "object" &&
-        "success" in json &&
-        !json.success
-      ) {
-        throw new Error(
-          json.message || "Third-party SPI returned unsuccessful response",
-        );
+      if (json && typeof json === 'object' && 'success' in json && !json.success) {
+        throw new Error(json.message || 'Third-party SPI returned unsuccessful response');
       }
 
-      return (json && "data" in json ? json.data : json) as T;
+      return (json && 'data' in json ? json.data : json) as T;
     } finally {
       clearTimeout(timer);
     }
@@ -149,8 +135,8 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
   }): Promise<ThirdPartyUser | null> {
     try {
       return await this.request<ThirdPartyUser>(
-        "GET",
-        "/spi/v1/user/info",
+        'GET',
+        '/spi/v1/user/info',
         {
           userId: params.userId,
           userEmail: params.userEmail,
@@ -161,7 +147,7 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
         params.tenantId,
       );
     } catch (err) {
-      console.error("[RemoteHttpSpiAdapter] getUserInfo failed:", err);
+      console.error('[RemoteHttpSpiAdapter] getUserInfo failed:', err);
       return null;
     }
   }
@@ -176,8 +162,8 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
   }): Promise<ThirdPartyOrder[]> {
     try {
       const res = await this.request<ThirdPartyOrder[]>(
-        "GET",
-        "/spi/v1/orders/list",
+        'GET',
+        '/spi/v1/orders/list',
         {
           userId: params.userId,
           userEmail: params.userEmail,
@@ -191,7 +177,7 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
       );
       return Array.isArray(res) ? res : [];
     } catch (err) {
-      console.error("[RemoteHttpSpiAdapter] listOrders failed:", err);
+      console.error('[RemoteHttpSpiAdapter] listOrders failed:', err);
       return [];
     }
   }
@@ -202,15 +188,15 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
   }): Promise<ThirdPartyOrder | null> {
     try {
       return await this.request<ThirdPartyOrder>(
-        "GET",
-        "/spi/v1/orders/detail",
+        'GET',
+        '/spi/v1/orders/detail',
         { orderId: params.orderId },
         undefined,
         undefined,
         params.tenantId,
       );
     } catch (err) {
-      console.error("[RemoteHttpSpiAdapter] getOrderDetail failed:", err);
+      console.error('[RemoteHttpSpiAdapter] getOrderDetail failed:', err);
       return null;
     }
   }
@@ -219,8 +205,8 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
     req: ThirdPartyOrderActionRequest & { tenantId: string },
   ): Promise<ThirdPartyOrderActionResult> {
     return await this.request<ThirdPartyOrderActionResult>(
-      "POST",
-      "/spi/v1/orders/action",
+      'POST',
+      '/spi/v1/orders/action',
       undefined,
       req,
       req.idempotencyKey,
@@ -236,8 +222,8 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
   }): Promise<ThirdPartyProduct[]> {
     try {
       const res = await this.request<ThirdPartyProduct[]>(
-        "GET",
-        "/spi/v1/products/search",
+        'GET',
+        '/spi/v1/products/search',
         { query: params.query, category: params.category, limit: params.limit },
         undefined,
         undefined,
@@ -245,7 +231,7 @@ export class RemoteHttpSpiAdapter implements ThirdPartySpiClient {
       );
       return Array.isArray(res) ? res : [];
     } catch (err) {
-      console.error("[RemoteHttpSpiAdapter] searchProducts failed:", err);
+      console.error('[RemoteHttpSpiAdapter] searchProducts failed:', err);
       return [];
     }
   }

@@ -1,17 +1,8 @@
-"use client";
+'use client';
 
-import type React from "react";
-import { useState } from "react";
-import {
-  Button,
-  Checkbox,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Label,
-} from "ui";
+import type React from 'react';
+import { useState } from 'react';
+import { Button, Checkbox, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label } from 'ui';
 
 export interface CustomerAddress {
   id: string;
@@ -55,25 +46,25 @@ export const AddressModal: React.FC<AddressModalProps> = ({
   const [saving, setSaving] = useState(false);
 
   // 表单输入
-  const [recipientName, setRecipientName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [province, setProvince] = useState("北京市");
-  const [city, setCity] = useState("北京市");
-  const [district, setDistrict] = useState("朝阳区");
-  const [detailAddress, setDetailAddress] = useState("");
+  const [recipientName, setRecipientName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [province, setProvince] = useState('北京市');
+  const [city, setCity] = useState('北京市');
+  const [district, setDistrict] = useState('朝阳区');
+  const [detailAddress, setDetailAddress] = useState('');
   const [isDefault, setIsDefault] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleSaveNewAddress = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!recipientName.trim() || !phone.trim() || !detailAddress.trim()) {
-      setErrorMsg("请完整填写收货人姓名、联系电话与详细地址");
+      setErrorMsg('请完整填写收货人姓名、联系电话与详细地址');
       return;
     }
 
     try {
       setSaving(true);
-      setErrorMsg("");
+      setErrorMsg('');
       await onAddAddress({
         recipientName: recipientName.trim(),
         phone: phone.trim(),
@@ -85,14 +76,14 @@ export const AddressModal: React.FC<AddressModalProps> = ({
       });
 
       // 重置表单
-      setRecipientName("");
-      setPhone("");
-      setDetailAddress("");
+      setRecipientName('');
+      setPhone('');
+      setDetailAddress('');
       setIsDefault(false);
       setShowAddForm(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setErrorMsg(msg || "保存地址失败");
+      setErrorMsg(msg || '保存地址失败');
     } finally {
       setSaving(false);
     }
@@ -111,9 +102,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
         {/* 内容区域 */}
         <div className="flex-1 overflow-y-auto py-2 space-y-4">
           {errorMsg && (
-            <div className="bg-red-50 text-red-700 text-xs p-3 rounded-lg border border-red-200">
-              ⚠️ {errorMsg}
-            </div>
+            <div className="bg-red-50 text-red-700 text-xs p-3 rounded-lg border border-red-200">⚠️ {errorMsg}</div>
           )}
 
           {!showAddForm ? (
@@ -131,8 +120,8 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                       }}
                       className={`border rounded-xl p-4 cursor-pointer transition-all flex items-start justify-between gap-3 ${
                         isSelected
-                          ? "border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-500/20"
-                          : "border-slate-200 hover:border-emerald-300 bg-white"
+                          ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 hover:border-emerald-300 bg-white'
                       }`}
                     >
                       <div className="flex items-start space-x-3">
@@ -145,26 +134,20 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                         />
                         <div>
                           <div className="flex items-center space-x-2">
-                            <span className="font-bold text-sm text-slate-900">
-                              {addr.recipientName}
-                            </span>
-                            <span className="text-xs text-slate-500 font-mono">
-                              {addr.phone}
-                            </span>
+                            <span className="font-bold text-sm text-slate-900">{addr.recipientName}</span>
+                            <span className="text-xs text-slate-500 font-mono">{addr.phone}</span>
                             {addr.isDefault && (
                               <span className="bg-emerald-100 text-emerald-800 text-[10px] font-semibold px-2 py-0.5 rounded-full">
                                 默认
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                            {addr.fullAddress}
-                          </p>
+                          <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">{addr.fullAddress}</p>
                         </div>
                       </div>
 
                       <span className="text-xs font-semibold text-emerald-600 shrink-0 mt-1">
-                        {isSelected ? "已选定" : "选择"}
+                        {isSelected ? '已选定' : '选择'}
                       </span>
                     </div>
                   );
@@ -186,15 +169,11 @@ export const AddressModal: React.FC<AddressModalProps> = ({
               onSubmit={handleSaveNewAddress}
               className="space-y-3.5 bg-slate-50 p-4 rounded-xl border border-slate-200"
             >
-              <h4 className="text-sm font-bold text-slate-900">
-                填写新收货地址
-              </h4>
+              <h4 className="text-sm font-bold text-slate-900">填写新收货地址</h4>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium text-slate-700">
-                    收货人姓名 *
-                  </Label>
+                  <Label className="text-xs font-medium text-slate-700">收货人姓名 *</Label>
                   <Input
                     type="text"
                     required
@@ -205,9 +184,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium text-slate-700">
-                    联系电话 *
-                  </Label>
+                  <Label className="text-xs font-medium text-slate-700">联系电话 *</Label>
                   <Input
                     type="tel"
                     required
@@ -221,9 +198,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
 
               <div className="grid grid-cols-3 gap-2">
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium text-slate-700">
-                    省份
-                  </Label>
+                  <Label className="text-xs font-medium text-slate-700">省份</Label>
                   <Input
                     type="text"
                     value={province}
@@ -232,9 +207,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium text-slate-700">
-                    城市
-                  </Label>
+                  <Label className="text-xs font-medium text-slate-700">城市</Label>
                   <Input
                     type="text"
                     value={city}
@@ -243,9 +216,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium text-slate-700">
-                    区/县
-                  </Label>
+                  <Label className="text-xs font-medium text-slate-700">区/县</Label>
                   <Input
                     type="text"
                     value={district}
@@ -256,9 +227,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
               </div>
 
               <div className="space-y-1">
-                <Label className="text-xs font-medium text-slate-700">
-                  详细地址 *
-                </Label>
+                <Label className="text-xs font-medium text-slate-700">详细地址 *</Label>
                 <textarea
                   required
                   rows={2}
@@ -275,10 +244,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                   checked={isDefault}
                   onCheckedChange={(checked) => setIsDefault(!!checked)}
                 />
-                <Label
-                  htmlFor="modal-default-addr"
-                  className="text-xs text-slate-700 cursor-pointer"
-                >
+                <Label htmlFor="modal-default-addr" className="text-xs text-slate-700 cursor-pointer">
                   设为默认收货地址
                 </Label>
               </div>
@@ -297,7 +263,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                   disabled={saving}
                   className="flex-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white"
                 >
-                  {saving ? "正在保存..." : "保存并使用"}
+                  {saving ? '正在保存...' : '保存并使用'}
                 </Button>
               </div>
             </form>

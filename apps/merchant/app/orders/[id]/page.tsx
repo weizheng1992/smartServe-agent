@@ -1,27 +1,27 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import React, { useEffect, useState } from "react";
-import type { ThirdPartyOrder } from "types";
-import { StorefrontHeader } from "../../components/navbar/StorefrontHeader";
-import { LogisticsModal } from "../../components/orders/LogisticsModal";
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
+import type { ThirdPartyOrder } from 'types';
+import { StorefrontHeader } from '../../components/navbar/StorefrontHeader';
+import { LogisticsModal } from '../../components/orders/LogisticsModal';
 
 function parseAddress(addr: any) {
   if (!addr) {
     return {
-      recipientName: "张伟",
-      phone: "13800138000",
-      fullAddress: "北京市海淀区中关村南大街1号院8号楼1201室",
+      recipientName: '张伟',
+      phone: '13800138000',
+      fullAddress: '北京市海淀区中关村南大街1号院8号楼1201室',
     };
   }
-  if (typeof addr === "string") {
+  if (typeof addr === 'string') {
     try {
       const parsed = JSON.parse(addr);
-      if (typeof parsed === "object" && parsed !== null) {
+      if (typeof parsed === 'object' && parsed !== null) {
         return {
-          recipientName: parsed.recipientName || "张伟",
-          phone: parsed.phone || "13800138000",
+          recipientName: parsed.recipientName || '张伟',
+          phone: parsed.phone || '13800138000',
           fullAddress: parsed.fullAddress || addr,
         };
       }
@@ -29,15 +29,15 @@ function parseAddress(addr: any) {
       // plain text string
     }
     return {
-      recipientName: "张伟",
-      phone: "13800138000",
+      recipientName: '张伟',
+      phone: '13800138000',
       fullAddress: addr,
     };
   }
   return {
-    recipientName: addr.recipientName || "张伟",
-    phone: addr.phone || "13800138000",
-    fullAddress: addr.fullAddress || "北京市海淀区中关村南大街1号院8号楼1201室",
+    recipientName: addr.recipientName || '张伟',
+    phone: addr.phone || '13800138000',
+    fullAddress: addr.fullAddress || '北京市海淀区中关村南大街1号院8号楼1201室',
   };
 }
 
@@ -60,10 +60,10 @@ export default function SingleOrderDetailPage() {
         if (data.success && data.order) {
           setOrder(data.order);
         } else {
-          setError(data.error || "未找到该订单");
+          setError(data.error || '未找到该订单');
         }
       } catch {
-        setError("获取订单详情失败");
+        setError('获取订单详情失败');
       } finally {
         setLoading(false);
       }
@@ -92,9 +92,7 @@ export default function SingleOrderDetailPage() {
         <div className="max-w-xl mx-auto my-12 p-8 bg-white rounded-2xl border border-slate-200 text-center">
           <div className="text-4xl mb-2">📋</div>
           <h2 className="text-base font-bold text-slate-800">订单未找到</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            {error || "该订单不存在或已被删除"}
-          </p>
+          <p className="text-xs text-slate-500 mt-1">{error || '该订单不存在或已被删除'}</p>
           <div className="mt-6">
             <Link
               href="/orders"
@@ -123,10 +121,7 @@ export default function SingleOrderDetailPage() {
               <span className="font-mono text-slate-700">{order.orderId}</span>
             </div>
             <h1 className="text-xl font-bold text-slate-900">
-              订单详情 ·{" "}
-              <span className="font-mono text-emerald-700">
-                {order.orderId}
-              </span>
+              订单详情 · <span className="font-mono text-emerald-700">{order.orderId}</span>
             </h1>
           </div>
           <button
@@ -140,30 +135,19 @@ export default function SingleOrderDetailPage() {
 
         {/* 订单明细清单 */}
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">
-            商品清单与规格
-          </h2>
+          <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">商品清单与规格</h2>
           <div className="divide-y divide-slate-100">
             {order.items?.map((item, idx) => (
               <div key={idx} className="py-3 flex items-center space-x-4">
                 <img
-                  src={
-                    item.imageUrl ||
-                    "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=200"
-                  }
+                  src={item.imageUrl || 'https://images.unsplash.com/photo-1551028719-00167b16eac5?w=200'}
                   alt={item.title}
                   className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0"
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-bold text-slate-900">
-                    {item.title}
-                  </div>
+                  <div className="text-xs font-bold text-slate-900">{item.title}</div>
                   <div className="text-[11px] text-slate-500 mt-0.5">
-                    规格:{" "}
-                    {item.specSummary ||
-                      item.skuTitle ||
-                      item.skuCode ||
-                      "标准规格"}
+                    规格: {item.specSummary || item.skuTitle || item.skuCode || '标准规格'}
                   </div>
                   <div className="text-xs font-semibold text-slate-700 mt-1">
                     ¥{Number(item.price).toFixed(2)} × {item.quantity} 件
@@ -175,9 +159,7 @@ export default function SingleOrderDetailPage() {
 
           <div className="pt-3 border-t border-slate-100 flex justify-between items-baseline text-xs">
             <span className="text-slate-500">实付总金额</span>
-            <span className="text-lg font-extrabold text-emerald-700">
-              ¥{Number(order.totalAmount).toFixed(2)}
-            </span>
+            <span className="text-lg font-extrabold text-emerald-700">¥{Number(order.totalAmount).toFixed(2)}</span>
           </div>
         </div>
 
@@ -186,20 +168,13 @@ export default function SingleOrderDetailPage() {
           const addrInfo = parseAddress(order.shippingAddress);
           return (
             <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xs space-y-3">
-              <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">
-                📍 配送收货信息
-              </h2>
+              <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">📍 配送收货信息</h2>
               <div className="text-xs space-y-1">
                 <div className="text-slate-700">
-                  收货人:{" "}
-                  <strong className="text-slate-900">
-                    {addrInfo.recipientName}
-                  </strong>{" "}
-                  (<span className="font-mono">{addrInfo.phone}</span>)
+                  收货人: <strong className="text-slate-900">{addrInfo.recipientName}</strong> (
+                  <span className="font-mono">{addrInfo.phone}</span>)
                 </div>
-                <div className="text-slate-600 leading-relaxed">
-                  {addrInfo.fullAddress}
-                </div>
+                <div className="text-slate-600 leading-relaxed">{addrInfo.fullAddress}</div>
               </div>
             </div>
           );

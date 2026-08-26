@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect } from 'react';
 
 export interface DetailDrawerProps {
   isOpen: boolean;
@@ -20,23 +20,23 @@ export function DetailDrawer({
   badge,
   children,
   footer,
-  width = "max-w-2xl sm:max-w-3xl lg:max-w-4xl",
-  className = "",
+  width = 'max-w-2xl sm:max-w-3xl lg:max-w-4xl',
+  className = '',
 }: DetailDrawerProps) {
   // 监听 ESC 按键关闭抽屉 & 锁定页面滚动
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
+      if (e.key === 'Escape' && isOpen) {
         onClose();
       }
     };
     if (isOpen) {
-      document.body.style.overflow = "hidden";
-      window.addEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = 'hidden';
+      window.addEventListener('keydown', handleKeyDown);
     }
     return () => {
-      document.body.style.overflow = "unset";
-      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = 'unset';
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, onClose]);
 
@@ -60,9 +60,7 @@ export function DetailDrawer({
           <div className="px-6 py-4.5 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between shrink-0">
             <div className="space-y-1">
               <div className="flex items-center gap-2.5">
-                <h3 className="text-base font-semibold text-slate-900">
-                  {title}
-                </h3>
+                <h3 className="text-base font-semibold text-slate-900">{title}</h3>
                 {badge}
               </div>
               {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
@@ -74,26 +72,14 @@ export function DetailDrawer({
               className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors cursor-pointer"
               aria-label="关闭抽屉"
             >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
 
           {/* 抽屉内容主体滚动区 */}
-          <div className="flex-1 overflow-y-auto p-6 text-sm text-slate-700 bg-white">
-            {children}
-          </div>
+          <div className="flex-1 overflow-y-auto p-6 text-sm text-slate-700 bg-white">{children}</div>
 
           {/* 底部操作工具栏 */}
           {footer && (

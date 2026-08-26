@@ -1,4 +1,4 @@
-import { WorkflowOrchestrator } from 'engine';
+import { WorkflowOrchestrator, agentEventEmitter } from 'engine';
 import { type NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
@@ -26,6 +26,15 @@ export async function POST(req: NextRequest) {
     // 等待同步返回结果
     const finalState: any = await dispatchRes.promise;
     const output = finalState?.output || finalState?.result || '极光潮品智能客服已为您处理完毕。';
+
+    // 触发 SSE 实时推送
+    agentEventEmitter.emit(`thread:${threadId}:message`, {
+      id: `ast_${Date.now()}`,
+      role: 'assistant',
+      content: output,
+      cards: finalState?.cards || [],
+      timestamp: new Date().toISOString(),
+    });
 
     return NextResponse.json({
       success: true,
