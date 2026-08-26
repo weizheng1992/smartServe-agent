@@ -1,11 +1,55 @@
 # 🚀 smartServe-agent: 分布式多租户 SaaS 智能客服与控制平面中台 (v2 Architecture)
 
-smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**、**NestJS 高性能网关** 与 **LangGraph 决策图** 构建的生产级、高弹性、金融安全级智能客服与多租户管理中台平台。
+smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**、**NestJS 高性能网关** 与 **LangGraph 决策图** 构建的生产级、高弹性、金融安全级智能客服与多租户管理中台平台。支持多渠道客户触达、商户独立业务运营、SaaS 统一控制平面、人机协同（HITL）风控审批与全链路可观测性。
 
 > 💡 **版本与架构演进说明**：
 >
-> - **v2 (当前分支 / feat/open-integration-skills-mcp)**：完成了从全单体 Next.js 到现代化分层中台的**彻底重构**。包含高内聚现代化 SaaS 控制平面（`apps/admin`）、全功能 NestJS 微服务网关（`apps/server`）、极速响应轻量客户端（`apps/web`）、参数化 SQL 沙箱、双层画像隔离与 Transactional Outbox 事务可靠机制。
+> - **v2 (当前版本)**：完成了从全单体 Next.js 到现代化分层中台的**彻底重构**。包含高内聚现代化 SaaS 控制平面（`apps/admin`）、独立商户商城与运营工作台（`apps/merchant`）、全功能 NestJS 微服务网关（`apps/server`）、极速响应轻量客户端（`apps/web`）、参数化 SQL 沙箱、双层画像隔离、四层金字塔记忆体系与 Transactional Outbox 事务可靠机制。
 > - **v1 (分支 `v1-main`)**：为初代单体 Next.js 15 App Router 实现（包含早期的单页暗色客服与简单审批流）。
+
+---
+
+## 📸 核心系统界面与全景功能展示 (System Showcase)
+
+平台由 **SaaS 统一控制平面**、**客户触达端智能助理** 与 **商户独立运营工作台** 三大核心终端紧密协同构成：
+
+### 1. SaaS 控制平面中台 (`apps/admin` - Port: 3001)
+
+> 面向 SaaS 平台运维与全局多租户管理者，提供跨租户统一监控、10 大管控模块、全链路决策 Trace、会话实时接管与 HITL 审批流。
+
+![SaaS 控制平面中台](public/admin.png)
+
+- **10 大管控模块体系**：租户配置、决策拓扑、风控审批、多租户会话与接管、Contextual RAG 知识库、技能与 SOP 插件、工具沙箱、双层画像与记忆、全链路可观测性、计量计费。
+- **全局指标大盘**：实时透视活跃租户数、在线客服坐席、待处理 HITL 审批工单、Token 累计消耗/成本折算，以及高达 **94.2%+** 的 AI 自动解决率（Autopilot Rate）。
+- **实时会话看板与人工接管 (Live Desk Takeover)**：支持全局跨租户会话检索、状态过滤、查看完整消息时间线，管理员可随时「一键接入人工客服」挂起 AI 自动回复，或「释放接管」瞬间无缝归还 AI 托管。
+
+---
+
+### 2. 客户触达端与 AI 智能助理 (`apps/merchant` - Port: 3005 / `apps/web` - Port: 3000)
+
+> 面向终端消费者的现代化电商购物场景与常驻浮窗智能客服，支持上下文感知、多轮历史检索与富交互卡片。
+
+![客户触达端与智能客服](public/merchant-shop.png)
+
+- **极光智能客服悬浮窗 (`FloatingChatWidget.tsx`)**：右下角常驻唤起，具备实时响应指示灯、快捷指令胶囊与流式响应动效。
+- **路由感知上下文问候 (Route-Aware Contextual Greeting)**：根据用户当前所在页面路径（如商品详情页 `/product/[id]`、购物车 `/cart`、订单列表 `/orders`）自动装配针对性首问语与场景化操作建议。
+- **隔离式多会话管理与历史抽屉 (`📜 历史 (N)` & `+ 新对话`)**：
+  - 用户可随时查看并无缝切换名下多条历史咨询记录；
+  - 点击「+ 新对话」生成全新独立 `threadId`，物理级杜绝历史消息混淆与篡改。
+- **多身份模拟与多模态富卡片 (Rich Cards)**：支持切换演示用户（如张伟、李雷），直观呈现订单卡片、商品瀑布流、物流轨迹与退款状态。
+
+---
+
+### 3. 商户端独立运营中台与客服工作台 (`apps/merchant/admin`)
+
+> 面向入驻独立品牌（如极光潮品 `aurora`）的商户运营人员，提供订单生命周期履约、售后工单管控与双向客服工作台。
+
+![商户独立运营与客服工作台](public/metchant-admin.png)
+
+- **商户级数据物理隔离**：严格按 `businessId / tenantId` 隔离订单、商品、用户画像与会话数据。
+- **订单生命周期全景管控**：实时查看商户名下所有交易订单、付款/发货/履约状态，提供地址变更核验与退款审批介入通道。
+- **标准 SPI 端点对接**：基于 OpenAPI / RESTful 标准规范（`/spi/v1/orders` 等）无缝对接商户私有 ERP / WMS 物流系统。
+- **双向实时同步**：商户客服在后台回复消息，毫秒级推送至终端用户悬浮聊天窗，保持全渠道通信一致。
 
 ---
 
@@ -14,14 +58,15 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
 | 核心维度                                 | ❌ v1-main (旧版本)                                    | ✨ v2 当前版本 (Enterprise SaaS Control Plane)                                                                                                                                                     |
 | :--------------------------------------- | :----------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **中台控制平面 (`apps/admin`)**          | 单页暗色堆叠界面、模板代码冗余、缺乏模块化与通用 CRUD  | **全新现代简约 SaaS 中台**：10 大独立路由子模块，封装高复用 CRUD UI 套件 (`DataTable`, `FilterBar`, `DetailDrawer`, `FormModal`, `ConfirmDialog`) 与 `useAdminCrud` 状态流，集成全局租户实时穿透。 |
+| **独立商户门户 (`apps/merchant`)**       | 无独立商户体系，数据与平台混杂                         | **独立商户电商与客服运营中台**：集成极光潮品示范商城、路由感知悬浮会话窗、历史会话隔离管理、商户订单管控与实时客服工作台。                                                                         |
 | **服务端网关 (`apps/server`)**           | Next.js API Routes 充当轻量接口，领域服务与控制器耦合  | **NestJS 工业级微服务网关**：模块化 Controller/Service 架构，内置开放商户 SPI 协议、全局异常过滤器、生命周期守护与强类型 DTO 校验。                                                                |
 | **前端架构 (`apps/web` & `apps/admin`)** | Next.js 15 SSR/Node 运行时绑定                         | **Vite 6 + React 19 纯 SPA 高性能架构**：秒级冷启动、零死锁构建、首屏资源体积大幅降低。                                                                                                            |
 | **审批事务与可靠性**                     | 内存与直接异步调度，存在幽灵工单 (Ghost Approval) 隐患 | **Transactional Outbox 事务一致性**：审批流状态变更与 Outbox 事件原子写入，配合后台异步对账与确定性幂等调度恢复机制。                                                                              |
-| **客户画像与记忆系统**                   | 扁平用户偏好，缺乏租户边界，存在跨品牌数据泄露 (IDOR)  | **双层画像物理隔离体系 (`Dual-Tier Persona`)**：生理基础属性（如鞋码/过敏源）归属 `global` 全局共享；品牌消费习惯/特权优惠严格隔离至 `tenant` 租户级别。                                           |
-| **BI 与 Text-to-SQL 安全**               | 字符串拼接 SQL 模板，存在注入风险与超时卡顿            | **参数化 AST 编译器与只读事务沙箱**：强制参数化占位符 (`$1`, `$2`) 绑定，`SET TRANSACTION READ ONLY` + 3000ms 强制超时熔断守护。                                                                   |
+| **客户画像与记忆系统**                   | 扁平用户偏好，缺乏租户边界，存在跨品牌数据泄露 (IDOR)  | **双层画像物理隔离体系 (`Dual-Tier Persona`) + 四层记忆金字塔**：生理基础属性归属 `global`；品牌消费偏好严格隔离至 `tenant`；集成 L0~L3 全生命周期记忆检索。                                       |
+| **BI 与 Text-to-SQL 安全**               | 字符串拼接 SQL 模板，存在注入风险与超时卡顿            | **参数化 AST 编译器与只读事务沙箱**：强制参数化占位符 (`$1`, `$2`) 绑定，`SET TRANSACTION READ ONLY` + 3000ms 强制超时熔断守护与 `LIMIT 50` 约束。                                                 |
 | **商户开放集成与技能生态**               | 静态内置工具与预设店铺规则                             | **开放商户 SPI 对接标准 & SOP 技能体系**：支持商户通过 Webhook/SPI 接入私有订单/物流系统，AES-256-GCM + HKDF 密钥派生，标准 RESTful `/api/skills/config` 动态重载与 MCP 复合生态。                 |
 | **实时协同与流式推流弹性**               | 简单的 SSE 传输，断线重连丢失事件，缺乏坐席接管机制    | **双向实时接管网关与 Last-Event-ID 弹性回放**：基于 Socket.io + Redis Pub/Sub 实现毫秒级人工客服协同接管，`ChatService` 具备跨连接 Job 级事件缓存与断线增量重放。                                  |
-| **质量保障与自动化测试**                 | 少量零散单元测试                                       | **全自动化测试流水线**：单测、集成测试、Playwright 真实浏览器 E2E 自动化测试全覆盖，Monorepo 一键验证。                                                                                            |
+| **质量保障与自动化测试**                 | 少量零散单元测试                                       | **全自动化测试流水线**：单测、集成测试、Playwright 真实浏览器 E2E 与 Promptfoo Prompt 评估全覆盖，Monorepo 一键验证。                                                                              |
 
 ---
 
@@ -54,8 +99,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                                   前端接入层 (Frontend)                                  │
-│   [apps/web (Port: 3000)]                                 [apps/admin (Port: 3001)]    │
-│   用户多模态客服会话 / 富卡片 / 实时 SSE 流订阅              SaaS 现代化中台控制平面 (10 大模块)│
+│   [apps/web (Port: 3000)]          [apps/admin (Port: 3001)]     [apps/merchant (Port: 3005)]
+│   轻量客服会话 / 富卡片渲染           SaaS 现代化中台控制平面        极光潮品独立商城 & 运营后台 │
 └──────────────────────────────────────────┬─────────────────────────────────────────────┘
                                            │ HTTP / SSE / WebSocket 代理
                                            ▼
@@ -113,16 +158,21 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
 │   │   ├── tests/                  # 管理端集成测试套件
 │   │   └── e2e/                    # Playwright 管理端端到端自动化测试
 │   │
+│   ├── merchant/                   # 独立电商示范商城 & 商户运营工作台 (Next.js 15 App Router)
+│   │   ├── app/
+│   │   │   ├── admin/              # 商户专属控制台 (订单履约、实时人工工作台)
+│   │   │   ├── api/store/          # 独立商城 BFF 接口 (/chat, /chat/messages, /orders)
+│   │   │   ├── components/chat/    # 悬浮客服挂件 (FloatingChatWidget, 历史抽屉, 路由感知问候)
+│   │   │   └── (shop routes)/      # 商城货架、商品详情、购物车、订单中心
+│   │   └── tests/                  # 商户端历史回溯与新会话隔离测试
+│   │
 │   ├── server/                     # NestJS 工业级后端网关 (HTTP / SSE / WebSocket / SPI)
 │   │   ├── src/modules/spi/        # 开放商户 SPI 标准实现与鉴权守卫
 │   │   └── test/                   # NestJS E2E 与单元测试套件
 │   │
-│   ├── web/                        # 用户端客服对话系统 (Vite 6 + React 19 + SSE 长连接)
-│   │   ├── src/components/         # 聊天区、富交互卡片、多模态上传
-│   │   ├── src/hooks/              # 会话管理、流式接收、工单感知
-│   │   └── tests/                  # 客户端对话场景与样式测试
-│   │
-│   └── merchant/                   # 独立电商示范商城 (Next.js 15)
+│   └── web/                        # 用户端轻量客服对话系统 (Vite 6 + React 19 + SSE 长连接)
+│       ├── src/components/         # 聊天区、富交互卡片、多模态上传
+│       └── src/hooks/              # 会话管理、流式接收、工单感知
 │
 ├── packages/
 │   ├── engine/                     # LangGraph 决策图、节点状态机、审批网关、双层画像装配
@@ -287,45 +337,79 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
 
 ## 5. 质量保障与全自动化测试 (Quality & Automation)
 
-项目采用金字塔型测试架构，全面覆盖单测、集成测试与端到端自动化：
+项目采用金字塔型测试架构，全面覆盖单测、集成测试、端到端自动化与 Promptfoo 评估：
 
 ```bash
-# 运行全部单测与集成测试
+# 1. 运行全部单测与集成测试
 bun test
 
-# 运行 admin 控制平面独立单元与集成测试
+# 2. 运行商户端新会话隔离与历史回溯测试
+bun test apps/merchant/tests/
+
+# 3. 运行 admin 控制平面独立单元与集成测试
 bun test apps/admin/tests/
 
-# 运行 server 网关 SPI 接口测试
+# 4. 运行 server 网关 SPI 接口测试
 bun test apps/server/test/
 
-# 运行 Playwright 浏览器端到端 E2E 自动化测试
+# 5. 运行 Playwright 真实浏览器 E2E 自动化测试
 bun run test:e2e
+
+# 6. 运行 Promptfoo 意图分类与规划器评估 (Promptfoo Evals)
+bun run test:prompt
+bun run test:prompt:planner
+bun run test:eval
 ```
 
 ---
 
 ## 6. 开发与部署命令 (Quick Start)
 
-### 快速启动开发环境
+### 6.1 快速启动完整环境
 
 ```bash
 # 1. 安装依赖
 bun install
 
-# 2. 启动所有服务 (Web, Admin, Server, Engine, Merchant)
-bun run dev
+# 2. 启动核心 Docker 服务 (PostgreSQL + Redis)
+bun run docker:up
 
-# 3. 独立启动各应用
-bun --filter admin dev    # 启动 SaaS 控制平面 (http://localhost:3001)
-bun --filter web dev      # 启动用户客服前端 (http://localhost:3000)
-bun --filter server dev   # 启动 NestJS 后端网关 (http://localhost:4000)
-bun --filter merchant dev # 启动独立演示商城 (http://localhost:3002)
+# 3. 推送数据库 Schema 并注入种子数据
+bun run db:push
+bun run db:seed
 
-# 4. 全量代码编译与类型检查
+# 4. 一键启动所有应用与服务 (Web, Admin, Server, Merchant)
+bun run dev:all
+```
+
+服务启动后各端口分布如下：
+
+| 应用 / 服务                                | 访问地址                                       | 说明                                                |
+| :----------------------------------------- | :--------------------------------------------- | :-------------------------------------------------- |
+| **SaaS 控制平面 (`apps/admin`)**           | [http://localhost:3001](http://localhost:3001) | 10 大模块、HITL 审批流、全链路 Trace、实时接管      |
+| **独立商户商城与工作台 (`apps/merchant`)** | [http://localhost:3005](http://localhost:3005) | 极光潮品商城、常驻悬浮客服、商户订单后台 (`/admin`) |
+| **用户端轻量会话应用 (`apps/web`)**        | [http://localhost:3000](http://localhost:3000) | 纯净版客户端多模态聊天界面 (SSE 流式)               |
+| **NestJS 核心后端网关 (`apps/server`)**    | [http://localhost:4000](http://localhost:4000) | 统一微服务网关、WebSocket 协同、开放商户 SPI        |
+
+### 6.2 独立应用启动命令
+
+```bash
+bun run dev:admin    # 启动 SaaS 控制平面 (Port 3001)
+bun run dev:merchant # 启动独立商户商城与工作台 (Port 3005)
+bun run dev:web      # 启动轻量客服前端 (Port 3000)
+bun run dev:server   # 启动 NestJS 后端网关 (Port 4000)
+bun run worker       # 启动 Temporal 任务后台 Worker
+```
+
+### 6.3 编译、代码检查与格式化
+
+```bash
+# 全量代码编译与类型检查
 bun run build
 
-# 5. 代码风格检测与格式化
+# Biome 代码格式与 Lint 检查
+bun run biome:check
+bun run biome:format
 bun run lint
 ```
 
