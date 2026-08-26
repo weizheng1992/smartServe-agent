@@ -24,7 +24,9 @@ export class CartManageSkill extends BaseSkill {
     const intent = (context.slots?.activeIntent as string) || (context.extra?.intent as string) || '';
     if (this.metadata.triggerIntents.includes(intent)) return true;
     const input = (context.input || '').toLowerCase();
-    return /(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|买第|件加入|放入购物车)/i.test(input);
+    return /(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|买第|件加入|款加入|放入购物车|第[一二三四五12345两几][件款个双]|买第|要第)/i.test(
+      input,
+    );
   }
 
   public async execute(context: SkillExecutionContext): Promise<SkillExecutionResult> {
@@ -34,8 +36,8 @@ export class CartManageSkill extends BaseSkill {
 
     // 1. 查看购物车与算价结算 (View Cart & Settlement)
     const isViewOnly =
-      /(?:查看购物车|看下购物车|购物车里|购物车有什么|多少钱|算下总价|结算|去买单)/i.test(input) &&
-      !/(?:加|买|放)/i.test(input);
+      /(?:查看购物车|看下购物车|购物车总价|看购物车|购物车里|购物车有什么|多少钱|算下总价|结算|去买单)/i.test(input) &&
+      !/(?:加购物车|加入购物车|放进购物车|放入购物车|加购|买第|要第|改成|修改)/i.test(input);
 
     if (isViewOnly) {
       const summaryRes = await MallDomainService.getCartSummary({
@@ -79,6 +81,7 @@ export class CartManageSkill extends BaseSkill {
             items: cartData.items,
             totalAmount: cartData.totalAmount,
           },
+          guideContext,
         },
       };
     }
@@ -100,18 +103,84 @@ export class CartManageSkill extends BaseSkill {
         skillId: this.metadata.id,
         output: updateRes.message || `已成功将商品数量调整为 ${newQty} 件。`,
         nextAction: 'finish',
+        extra: {
+          cartContext: {
+            lastModifiedItemId: targetSku,
+            items: (updateRes.cart as any)?.items,
+            totalAmount: (updateRes.cart as any)?.totalAmount,
+          },
+          guideContext,
+        },
       };
     }
 
-    // 3. 加购执行 (Add To Cart & Cross-Agent Coreference Resolution)
+    // 3. 用户直接发送问句/复制提示词："把第几件加入购物车"
+    const isVagueOrdinal = /(?:第几|哪件|哪款|哪一个)/i.test(input);
+    if (isVagueOrdinal) {
+      const candidates = guideContext.candidateProducts || [];
+      if (candidates.length > 0) {
+        const listText = candidates.map((c, i) => `${i + 1}. 【${c.name}】 ¥${c.price}`).join('\n');
+        return {
+          success: true,
+          skillId: this.metadata.id,
+          output: `请问您想将哪一款推荐商品加入购物车呢？\n\n${listText}\n\n您可以直接对我说“把第1件加入购物车”或“把第2件加入购物车”，我立即为您办理！🛒`,
+          nextAction: 'finish',
+          extra: { guideContext, cartContext: existingCart },
+        };
+      }
+      return {
+        success: true,
+        skillId: this.metadata.id,
+        output:
+          '请问您想将哪一款商品加入购物车呢？您可以直接对我说“把第1件加入购物车”或“把第2件加入购物车”，我立即为您办理！🛒',
+        nextAction: 'finish',
+        extra: { guideContext, cartContext: existingCart },
+      };
+    }
+
+    // 4. 加购执行 (Add To Cart & Cross-Agent Coreference Resolution)
     let targetSkuId = (context.slots?.skuId as string) || (context.slots?.productId as string) || '';
     let targetTitle = '精选推荐商品';
-    const targetPrice = 899.0;
+    let targetPrice = 899.0;
 
-    // 指代消解 (Coreference Resolution): 例如 "把第2件加入购物车", "买第一款"
-    const ordinalMatch = input.match(/第\s*([一二三四五12345两])\s*[件款个双双]/);
-    if (ordinalMatch && ordinalMatch[1]) {
-      const ordinalChar = ordinalMatch[1];
+    let candidateProducts = guideContext.candidateProducts || [];
+    let candidateList = guideContext.candidateProductIds || [];
+
+    // 若 guideContext 为空，尝试从近期对话历史中智能回溯已推荐商品候选列表
+    const shortMem = (context.extra?.shortMemory as any[]) || [];
+    if (candidateList.length === 0 && shortMem.length > 0) {
+      for (let i = shortMem.length - 1; i >= 0; i--) {
+        const msg = shortMem[i];
+        if (msg.role === 'assistant' && typeof msg.content === 'string' && msg.content.includes('推荐商品')) {
+          const itemRegex = /(\d+)\.\s*【([^】]+)】\s*¥?(\d+(?:\.\d+)?)/g;
+          let match: RegExpExecArray | null;
+          const parsedProducts: Array<{
+            id: string;
+            name: string;
+            price: number;
+          }> = [];
+          while ((match = itemRegex.exec(msg.content)) !== null) {
+            parsedProducts.push({
+              id: `prod_recommend_${match[1]}`,
+              name: match[2],
+              price: Number(match[3]),
+            });
+          }
+          if (parsedProducts.length > 0) {
+            candidateProducts = parsedProducts;
+            candidateList = parsedProducts.map((p) => p.id);
+            break;
+          }
+        }
+      }
+    }
+
+    // 指代消解 (Coreference Resolution): 例如 "把第2件加入购物车", "买第一款", "第1件", "把第一款买了"
+    const ordinalMatch = input.match(
+      /(?:把)?第\s*([一二三四五12345两])\s*[件款个双]|买第\s*([一二三四五12345两])|第\s*([一二三四五12345两])\s*款/,
+    );
+    if (ordinalMatch) {
+      const ordinalChar = ordinalMatch[1] || ordinalMatch[2] || ordinalMatch[3];
       const indexMap: Record<string, number> = {
         一: 0,
         '1': 0,
@@ -126,20 +195,35 @@ export class CartManageSkill extends BaseSkill {
         '5': 4,
       };
       const targetIndex = indexMap[ordinalChar] ?? 0;
-      const candidateList = guideContext.candidateProductIds || [];
-      if (candidateList[targetIndex]) {
+      if (candidateProducts[targetIndex]) {
+        const prod = candidateProducts[targetIndex];
+        targetSkuId = prod.id;
+        targetTitle = prod.name;
+        targetPrice = prod.price || 899.0;
+      } else if (candidateList[targetIndex]) {
         targetSkuId = candidateList[targetIndex];
         targetTitle = `推荐商品 #${targetIndex + 1} (${targetSkuId})`;
       }
     }
 
     if (!targetSkuId) {
-      // 默认兜底添加热销款
-      targetSkuId = guideContext.candidateProductIds?.[0] || 'prod_nike_air_pegasus_41';
-      targetTitle = 'Nike Air Zoom Pegasus 41 极速轻量透气跑鞋';
+      if (candidateProducts.length > 0) {
+        const prod = candidateProducts[0];
+        targetSkuId = prod.id;
+        targetTitle = prod.name;
+        targetPrice = prod.price || 899.0;
+      } else if (candidateList.length > 0) {
+        targetSkuId = candidateList[0];
+        targetTitle = `推荐商品 #1 (${targetSkuId})`;
+      } else {
+        // 默认兜底添加热销款
+        targetSkuId = 'prod_nike_air_pegasus_41';
+        targetTitle = 'Nike Air Zoom Pegasus 41 极速轻量透气跑鞋';
+        targetPrice = 899.0;
+      }
     }
 
-    const qtyMatch = input.match(/(?:数量|买|要|加)\s*(\d+)\s*件?/);
+    const qtyMatch = input.match(/(?:数量|买|要|加|购)\s*(\d+)\s*件?/);
     const quantity = qtyMatch && qtyMatch[1] ? Number(qtyMatch[1]) : 1;
 
     const addRes = await MallDomainService.addToCart({
@@ -183,7 +267,14 @@ export class CartManageSkill extends BaseSkill {
       output: `🎉 已成功将【${targetTitle}】(x${quantity}) 加入购物车！\n当前购物车共有 ${updatedCart.totalQuantity || quantity} 件商品，总金额 ¥${updatedCart.totalAmount || targetPrice * quantity} 元。\n\n如需结算买单或调整数量，请随时告诉我！`,
       cards: [card],
       nextAction: 'finish',
-      extra: { cartContext: newCartContext },
+      extra: {
+        cartContext: newCartContext,
+        guideContext: {
+          ...guideContext,
+          candidateProductIds: candidateList,
+          candidateProducts,
+        },
+      },
     };
   }
 }

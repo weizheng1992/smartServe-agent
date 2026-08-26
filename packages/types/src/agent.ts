@@ -34,6 +34,15 @@ export type AgentDomainRole = 'router' | 'shopping_guide' | 'cart' | 'order_serv
 // 🛍️ 导购专有上下文 (Shopping Guide Context)
 export interface ShoppingGuideContext {
   candidateProductIds?: string[]; // 当前向用户推荐的候选商品 ID 列表（用于下文指代消解）
+  candidateProducts?: Array<{
+    id: string;
+    name: string;
+    price: number;
+    stock?: number;
+    description?: string;
+    specs?: Record<string, string>;
+    imageUrl?: string;
+  }>;
   extractedPreferences?: Record<string, string>; // 已探明的用户画像偏好（如风格、预算、尺码、颜色）
   activeCategory?: string; // 当前关注的类目
   clarificationRound?: number; // 已进行的探问澄清轮数

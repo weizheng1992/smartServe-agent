@@ -146,6 +146,15 @@ export class ShoppingGuideSkill extends BaseSkill {
 
     const guideContext: ShoppingGuideContext = {
       candidateProductIds,
+      candidateProducts: products.map((p) => ({
+        id: p.id,
+        name: p.name,
+        price: Number(p.price || 0),
+        stock: Number(p.stock || 0),
+        description: p.description,
+        specs: p.specs,
+        imageUrl: p.imageUrl,
+      })),
       extractedPreferences: extractedPrefs,
       clarificationRound: clarificationRound + 1,
       lastSearchQuery: input,

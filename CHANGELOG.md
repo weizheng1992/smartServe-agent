@@ -4,6 +4,28 @@
 
 ---
 
+## [2.1.0] - 2026-08-26 (多轮导购序号指代消解与商户端实时流式会话升级)
+
+### 🌟 Major Highlights (重大亮点)
+
+- **多轮导购序号指代消解与购物车上下文跨轮次持久化 (Multi-Turn Shopping Guide Ordinal Resolution & Cart Coreference)**:
+  - 彻底打通从“导购推荐商品”到“把第1件加入购物车”、“买第2款”、“把第几件加入购物车”等多轮自然语言指代消解与加购闭环。
+  - 在 `ShoppingGuideContext` 中引入 `candidateProducts` 结构化元数据（包含真实商品 ID、名称、单价、库存、规格与配图），解决上下文仅有基础 ID 缺乏商品快照的问题。
+  - 强化 `TaskMemory` 跨请求任务状态管理，将 `guideContext`、`cartContext`、`orderContext` 深度持久化至 PostgreSQL `pending_intents`，并在图构建启动时自愈恢复，根除无状态 HTTP 导致的跨轮次推荐上下文丢失。
+  - 升级 `CartManageSkill` 与 `slotExtractor.ts`：
+    - 支持精准提取中文及阿拉伯数字序号（“第1件”、“第一款”、“第二件”等），自动映射到 `guideContext.candidateProducts` 并调用 `MallDomainService.addToCart`；
+    - 支持短期对话历史（`shortMemory`）回溯兜底，若上下文丢失可自愈解析历史推荐消息；
+    - 针对用户原样输入或复制引导语“把第几件加入购物车”提供智能友好提示与候选列表引导。
+  - 新增 `packages/engine/tests/shoppingToCartMultiTurn.test.ts` 5 轮端到端全链路自动化集成测试。
+- **商户端实时 SSE 流式推送与会话隔离优化 (Merchant SSE Stream & Session Isolation)**:
+  - 彻底移除商户端前端浮窗 3 秒高频 HTTP 轮询，改用基于 Server-Sent Events (SSE) 协议的实时事件流（`/api/store/chat/stream`），大幅降低服务端无谓开销并提升交互即时性。
+  - 优化新会话初始化与隔离逻辑：刷新或新建会话时展示专属路由问候语，隔离旧会话霸屏，同时支持通过历史记录面板按需恢复与回放既往对话。
+- **多段式订单编号支持与会话回放增强 (Multi-Segment Order IDs & Timeline Playback)**:
+  - 增强订单编号正则与提取器，支持包含多段横杠与复杂前缀的真实商户订单号。
+  - 优化控制台全景会话工作台的实时坐席同步与抽屉历史流式回放。
+
+---
+
 ## [2.0.0] - 2026-08-24 (重大架构重构与 SaaS 平台升级)
 
 ### 🌟 Major Highlights (重大亮点)

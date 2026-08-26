@@ -1,5 +1,5 @@
 import { taskMemory as dbTaskMemory, getDrizzle } from 'db';
-import type { SubTask } from 'types';
+import type { CartContext, OrderContext, ShoppingGuideContext, SubTask } from 'types';
 
 export type { SubTask };
 
@@ -9,6 +9,9 @@ export interface TaskState {
   currentStepIndex: number;
   activeIntent?: string;
   slots?: Record<string, unknown>;
+  guideContext?: ShoppingGuideContext;
+  cartContext?: CartContext;
+  orderContext?: OrderContext;
 }
 
 export class TaskMemory {

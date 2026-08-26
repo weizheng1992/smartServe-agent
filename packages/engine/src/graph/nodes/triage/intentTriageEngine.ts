@@ -457,6 +457,7 @@ export class IntentTriageEngine {
             guideContext: state.guideContext,
             cartContext: state.cartContext,
             orderContext: state.orderContext,
+            shortMemory: historyMsgs,
           },
         });
 
@@ -479,6 +480,7 @@ export class IntentTriageEngine {
               guideContext: state.guideContext,
               cartContext: state.cartContext,
               orderContext: state.orderContext,
+              shortMemory: historyMsgs,
             },
           });
 
@@ -509,6 +511,7 @@ export class IntentTriageEngine {
             );
             return {
               ...bypassRes,
+              cards: state.cards,
               guideContext: state.guideContext,
               cartContext: state.cartContext,
             };

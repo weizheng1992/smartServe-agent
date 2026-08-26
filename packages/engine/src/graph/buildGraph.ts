@@ -363,18 +363,25 @@ export async function runAgent(
     '\n',
   );
 
-  // Load saved task state (if any) to support stateless suspension & recovery
+  // Load saved task state (if any) to support stateless suspension & recovery & domain contexts
   let savedTaskPlan: TaskPlan | undefined = undefined;
-  if (isResuming) {
-    try {
-      const state = await taskMemory.getTaskState();
-      if (state) {
-        savedTaskPlan = state;
+  let savedGuideContext: any = undefined;
+  let savedCartContext: any = undefined;
+  let savedOrderContext: any = undefined;
+
+  try {
+    const savedState = await taskMemory.getTaskState();
+    if (savedState) {
+      if (isResuming) {
+        savedTaskPlan = savedState;
         console.log(`[buildGraph] 🔄 Resuming suspended flow, loaded saved taskPlan:`, JSON.stringify(savedTaskPlan));
       }
-    } catch (err) {
-      console.warn('[buildGraph] Failed to load saved task plan from taskMemory:', err);
+      if (savedState.guideContext) savedGuideContext = savedState.guideContext;
+      if (savedState.cartContext) savedCartContext = savedState.cartContext;
+      if (savedState.orderContext) savedOrderContext = savedState.orderContext;
     }
+  } catch (err) {
+    console.warn('[buildGraph] Failed to load saved task plan from taskMemory:', err);
   }
 
   // Build and execute compiled graph
@@ -393,6 +400,9 @@ export async function runAgent(
     businessConfig: dynamicConfig,
     shortMemory: historyMsgs,
     taskPlan: savedTaskPlan,
+    guideContext: savedGuideContext,
+    cartContext: savedCartContext,
+    orderContext: savedOrderContext,
     loopCount: 0,
   };
 
@@ -544,10 +554,23 @@ export async function runAgent(
     await longMemory.extractAndStoreFact(result.output, inputMessage);
   }
 
-  // Persist structured task memory if plan exists
-  if (result.taskPlan) {
-    await taskMemory.saveTaskState(result.taskPlan);
-  }
+  // Persist structured task memory and domain contexts (guideContext, cartContext, orderContext)
+  const finalGuideContext = (result as any).guideContext || initialState.guideContext;
+  const finalCartContext = (result as any).cartContext || initialState.cartContext;
+  const finalOrderContext = (result as any).orderContext || initialState.orderContext;
+
+  const taskPlanToSave = result.taskPlan || {
+    goal: 'Multi-turn conversational assistance',
+    subtasks: [],
+    currentStepIndex: 0,
+  };
+
+  await taskMemory.saveTaskState({
+    ...taskPlanToSave,
+    guideContext: finalGuideContext,
+    cartContext: finalCartContext,
+    orderContext: finalOrderContext,
+  });
 
   // 🗂️ 自动合成并挂载富媒体交互卡片 (Rich Cards)
   const { CardSynthesizer } = await import('../cards/cardSynthesizer');
@@ -557,9 +580,12 @@ export async function runAgent(
     damageAssessment: (result as any).damageAssessment,
   });
 
+  const existingCards = (result as any).cards || [];
+  const finalCards = existingCards.length > 0 ? existingCards : synthesizedCards;
+
   const finalResult = {
     ...result,
-    cards: synthesizedCards,
+    cards: finalCards,
   };
 
   if (jobId) {
