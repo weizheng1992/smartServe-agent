@@ -46,28 +46,12 @@ export async function GET(req: NextRequest) {
       );
     });
 
-    // 如果传入的 threadId 为空，或者传入的 threadId 经检查没有任何消息，则尝试自动恢复该用户最近有消息的会话
+    // 如果前端未指定 threadId，且当前用户有历史会话，则自动定位到该用户最近的会话
     if (!threadId && userThreads.length > 0) {
       const activeThreadWithMsgs = userThreads.find((t) =>
         Boolean(t.lastMessageSnippet),
       );
       threadId = activeThreadWithMsgs?.threadId || userThreads[0].threadId;
-    } else if (threadId && userId && userThreads.length > 0) {
-      // 检查当前 threadId 是否有消息
-      const currentTimeline =
-        await ConversationRepository.getConversationTimeline(
-          threadId,
-          tenantId,
-        );
-      if (!currentTimeline || currentTimeline.messages.length === 0) {
-        // 如果当前 threadId 是空白的，但该用户有其他带历史消息的会话，优先恢复带消息的最近会话
-        const activeThreadWithMsgs = userThreads.find((t) =>
-          Boolean(t.lastMessageSnippet),
-        );
-        if (activeThreadWithMsgs) {
-          threadId = activeThreadWithMsgs.threadId;
-        }
-      }
     }
 
     if (!threadId) {
@@ -76,7 +60,7 @@ export async function GET(req: NextRequest) {
         threadId: null,
         thread: null,
         messages: [],
-        userThreads: [],
+        userThreads,
       });
     }
 
