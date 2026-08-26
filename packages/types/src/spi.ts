@@ -28,6 +28,8 @@ export interface ThirdPartyUser {
 
 export interface ThirdPartyOrderItem {
   skuId?: string;
+  skuCode?: string;
+  skuTitle?: string;
   productId: string;
   title: string;
   quantity: number;
@@ -46,7 +48,13 @@ export interface ThirdPartyTrackingTimelineItem {
 export interface ThirdPartyTrackingInfo {
   carrier: string;
   trackingNumber: string;
-  status: 'PENDING' | 'SHIPPED' | 'IN_TRANSIT' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'EXCEPTION';
+  status:
+    | "PENDING"
+    | "SHIPPED"
+    | "IN_TRANSIT"
+    | "OUT_FOR_DELIVERY"
+    | "DELIVERED"
+    | "EXCEPTION";
   latestLocation?: string;
   timeline?: ThirdPartyTrackingTimelineItem[];
 }
@@ -54,7 +62,14 @@ export interface ThirdPartyTrackingInfo {
 export interface ThirdPartyOrder {
   orderId: string;
   userId: string;
-  status: 'PENDING' | 'PAID' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'REFUNDED';
+  status:
+    | "PENDING"
+    | "PAID"
+    | "PROCESSING"
+    | "SHIPPED"
+    | "DELIVERED"
+    | "CANCELLED"
+    | "REFUNDED";
   totalAmount: string | number;
   currency?: string;
   createdAt: string;
@@ -100,7 +115,8 @@ export interface ThirdPartyProduct {
   isAvailable?: boolean;
 }
 
-export type ThirdPartyOrderActionType = 'MODIFY_ADDRESS' | 'CANCEL_ORDER' | 'REQUEST_REFUND' | 'CONFIRM_RECEIVED';
+export type ThirdPartyOrderActionType =
+  "MODIFY_ADDRESS" | "CANCEL_ORDER" | "REQUEST_REFUND" | "CONFIRM_RECEIVED";
 
 export interface ThirdPartyOrderActionRequest {
   actionType: ThirdPartyOrderActionType;
@@ -135,7 +151,7 @@ export interface SpiResponse<T = unknown> {
   timestamp?: number;
 }
 
-export type IntegrationMode = 'local_db' | 'remote_spi' | 'mcp_server';
+export type IntegrationMode = "local_db" | "remote_spi" | "mcp_server";
 
 export interface SpiConnectorConfig {
   mode: IntegrationMode;

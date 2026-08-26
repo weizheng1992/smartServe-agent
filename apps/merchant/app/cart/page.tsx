@@ -1,20 +1,24 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import React, { useEffect, useState } from 'react';
-import { Button } from 'ui';
-import { AddressModal, type CustomerAddress } from '../components/address/AddressModal';
-import type { CartItem } from '../components/cart/CartDrawer';
-import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
-import { useCurrentUser } from '../context/UserContext';
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
+import { Button } from "ui";
+import {
+  AddressModal,
+  type CustomerAddress,
+} from "../components/address/AddressModal";
+import type { CartItem } from "../components/cart/CartDrawer";
+import { StorefrontHeader } from "../components/navbar/StorefrontHeader";
+import { useCurrentUser } from "../context/UserContext";
 
 export default function CartPage() {
   const router = useRouter();
   const { user } = useCurrentUser();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
-  const [selectedAddress, setSelectedAddress] = useState<CustomerAddress | null>(null);
+  const [selectedAddress, setSelectedAddress] =
+    useState<CustomerAddress | null>(null);
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [checkoutResult, setCheckoutResult] = useState<{
@@ -25,7 +29,7 @@ export default function CartPage() {
   // 加载购物车和地址数据
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('aurora_store_cart');
+      const stored = localStorage.getItem("aurora_store_cart");
       if (stored) {
         setCart(JSON.parse(stored));
       }
@@ -35,11 +39,13 @@ export default function CartPage() {
 
     const fetchAddresses = async () => {
       try {
-        const res = await fetch('/api/store/addresses');
+        const res = await fetch("/api/store/addresses");
         const data = await res.json();
         if (data.success && data.addresses) {
           setAddresses(data.addresses);
-          const defaultAddr = data.addresses.find((a: CustomerAddress) => a.isDefault) || data.addresses[0];
+          const defaultAddr =
+            data.addresses.find((a: CustomerAddress) => a.isDefault) ||
+            data.addresses[0];
           setSelectedAddress(defaultAddr || null);
         }
       } catch {
@@ -51,13 +57,13 @@ export default function CartPage() {
 
   const saveCart = (newCart: CartItem[]) => {
     setCart(newCart);
-    localStorage.setItem('aurora_store_cart', JSON.stringify(newCart));
+    localStorage.setItem("aurora_store_cart", JSON.stringify(newCart));
   };
 
   const handleUpdateQuantity = (skuCode: string, delta: number) => {
     const updated = cart.map((item) => {
-      if (item.sku.skuCode === skuCode) {
-        const newQty = Math.max(1, Math.min(item.sku.stock, item.quantity + delta));
+      if (item.skuCode === skuCode) {
+        const newQty = Math.max(1, Math.min(item.stock, item.quantity + delta));
         return { ...item, quantity: newQty };
       }
       return item;
@@ -66,7 +72,9 @@ export default function CartPage() {
   };
 
   const handleToggleSelect = (skuCode: string) => {
-    const updated = cart.map((item) => (item.sku.skuCode === skuCode ? { ...item, selected: !item.selected } : item));
+    const updated = cart.map((item) =>
+      item.skuCode === skuCode ? { ...item, selected: !item.selected } : item,
+    );
     saveCart(updated);
   };
 
@@ -77,7 +85,7 @@ export default function CartPage() {
   };
 
   const handleRemoveItem = (skuCode: string) => {
-    const updated = cart.filter((item) => item.sku.skuCode !== skuCode);
+    const updated = cart.filter((item) => item.skuCode !== skuCode);
     saveCart(updated);
   };
 
@@ -86,7 +94,10 @@ export default function CartPage() {
   };
 
   const selectedItems = cart.filter((it) => it.selected);
-  const totalPrice = selectedItems.reduce((sum, it) => sum + Number(it.sku.price) * it.quantity, 0);
+  const totalPrice = selectedItems.reduce(
+    (sum, it) => sum + Number(it.price) * it.quantity,
+    0,
+  );
   const totalCount = selectedItems.reduce((sum, it) => sum + it.quantity, 0);
 
   const handleCheckout = async () => {
@@ -97,12 +108,12 @@ export default function CartPage() {
       // 循环结算选中的商品项
       const orderIds: string[] = [];
       for (const item of selectedItems) {
-        const res = await fetch('/api/store/orders', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const res = await fetch("/api/store/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             customerId: user.id,
-            skuCode: item.sku.skuCode,
+            skuCode: item.skuCode,
             quantity: item.quantity,
             shippingAddress: selectedAddress.fullAddress,
             recipientName: selectedAddress.recipientName || user.name,
@@ -120,11 +131,11 @@ export default function CartPage() {
       saveCart(remainCart);
 
       setCheckoutResult({
-        orderId: orderIds.join(', '),
-        message: `结算成功！已生成订单：${orderIds.join(', ')}`,
+        orderId: orderIds.join(", "),
+        message: `结算成功！已生成订单：${orderIds.join(", ")}`,
       });
     } catch {
-      alert('下单结算出现异常，请重试');
+      alert("下单结算出现异常，请重试");
     } finally {
       setIsCheckingOut(false);
     }
@@ -138,7 +149,9 @@ export default function CartPage() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center space-x-2">
             <span>🛒 购物车</span>
-            <span className="text-xs font-normal text-slate-500">({cart.length} 款商品)</span>
+            <span className="text-xs font-normal text-slate-500">
+              ({cart.length} 款商品)
+            </span>
           </h1>
           {cart.length > 0 && (
             <button
@@ -154,7 +167,9 @@ export default function CartPage() {
         {checkoutResult && (
           <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl flex items-center justify-between">
             <div>
-              <div className="font-bold text-sm">🎉 {checkoutResult.message}</div>
+              <div className="font-bold text-sm">
+                🎉 {checkoutResult.message}
+              </div>
               <div className="text-xs text-emerald-600 mt-0.5">
                 智能客服已为您同步该订单信息，可随时咨询物流或申请改单！
               </div>
@@ -171,8 +186,12 @@ export default function CartPage() {
         {cart.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 border border-slate-200 text-center max-w-xl mx-auto my-8">
             <div className="text-5xl mb-3">🛒</div>
-            <h2 className="text-base font-bold text-slate-800">购物车空空如也</h2>
-            <p className="text-xs text-slate-400 mt-1">快去挑选心仪的机能服饰与配件吧！</p>
+            <h2 className="text-base font-bold text-slate-800">
+              购物车空空如也
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              快去挑选心仪的机能服饰与配件吧！
+            </p>
             <div className="mt-6">
               <Link
                 href="/"
@@ -196,36 +215,40 @@ export default function CartPage() {
                   />
                   <span>全选所有商品</span>
                 </label>
-                <span className="text-xs text-slate-400">已选 {totalCount} 件商品</span>
+                <span className="text-xs text-slate-400">
+                  已选 {totalCount} 件商品
+                </span>
               </div>
 
               <div className="space-y-3">
                 {cart.map((item) => (
                   <div
-                    key={item.sku.skuCode}
+                    key={item.skuCode}
                     className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex items-center space-x-4"
                   >
                     <input
                       type="checkbox"
                       checked={item.selected}
-                      onChange={() => handleToggleSelect(item.sku.skuCode)}
+                      onChange={() => handleToggleSelect(item.skuCode)}
                       className="w-4 h-4 text-emerald-600 rounded shrink-0 cursor-pointer"
                     />
                     <img
-                      src={item.sku.imageUrl || item.product.imageUrl}
-                      alt={item.product.title}
+                      src={item.imageUrl}
+                      alt={item.title}
                       className="w-20 h-20 rounded-xl object-cover border border-slate-200 shrink-0"
                     />
                     <div className="flex-1 min-w-0">
                       <Link
-                        href={`/products/${item.product.productId || item.product.spuId}`}
+                        href={`/products/${item.spuId}`}
                         className="text-xs font-bold text-slate-900 hover:text-emerald-700 truncate block"
                       >
-                        {item.product.title}
+                        {item.title}
                       </Link>
-                      <div className="text-[11px] text-slate-500 mt-0.5">规格: {item.sku.skuTitle}</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        规格: {item.skuTitle}
+                      </div>
                       <div className="text-emerald-700 font-extrabold text-sm mt-1">
-                        ¥{Number(item.sku.price).toFixed(2)}
+                        ¥{Number(item.price).toFixed(2)}
                       </div>
                     </div>
 
@@ -233,7 +256,7 @@ export default function CartPage() {
                     <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shrink-0">
                       <button
                         type="button"
-                        onClick={() => handleUpdateQuantity(item.sku.skuCode, -1)}
+                        onClick={() => handleUpdateQuantity(item.skuCode, -1)}
                         disabled={item.quantity <= 1}
                         className="px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-30"
                       >
@@ -244,8 +267,8 @@ export default function CartPage() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => handleUpdateQuantity(item.sku.skuCode, 1)}
-                        disabled={item.quantity >= item.sku.stock}
+                        onClick={() => handleUpdateQuantity(item.skuCode, 1)}
+                        disabled={item.quantity >= item.stock}
                         className="px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-30"
                       >
                         +
@@ -254,7 +277,7 @@ export default function CartPage() {
 
                     <button
                       type="button"
-                      onClick={() => handleRemoveItem(item.sku.skuCode)}
+                      onClick={() => handleRemoveItem(item.skuCode)}
                       className="text-slate-400 hover:text-rose-600 text-xs p-1 cursor-pointer shrink-0"
                     >
                       🗑️
@@ -269,7 +292,9 @@ export default function CartPage() {
               {/* 配送地址选择卡片 */}
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800">📍 配送收货地址</span>
+                  <span className="text-xs font-bold text-slate-800">
+                    📍 配送收货地址
+                  </span>
                   <button
                     type="button"
                     onClick={() => setIsAddressModalOpen(true)}
@@ -281,13 +306,19 @@ export default function CartPage() {
                 {selectedAddress ? (
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs space-y-1">
                     <div className="font-bold text-slate-900">
-                      {selectedAddress.recipientName}{' '}
-                      <span className="font-normal text-slate-500 font-mono">{selectedAddress.phone}</span>
+                      {selectedAddress.recipientName}{" "}
+                      <span className="font-normal text-slate-500 font-mono">
+                        {selectedAddress.phone}
+                      </span>
                     </div>
-                    <div className="text-slate-600 leading-relaxed">{selectedAddress.fullAddress}</div>
+                    <div className="text-slate-600 leading-relaxed">
+                      {selectedAddress.fullAddress}
+                    </div>
                   </div>
                 ) : (
-                  <div className="text-xs text-slate-400">暂无选中的配送地址</div>
+                  <div className="text-xs text-slate-400">
+                    暂无选中的配送地址
+                  </div>
                 )}
               </div>
 
@@ -304,17 +335,25 @@ export default function CartPage() {
                   </div>
                   <div className="border-t border-slate-100 pt-2 flex justify-between items-baseline">
                     <span className="font-bold text-slate-900">实付总金额</span>
-                    <span className="text-xl font-extrabold text-emerald-700">¥{totalPrice.toFixed(2)}</span>
+                    <span className="text-xl font-extrabold text-emerald-700">
+                      ¥{totalPrice.toFixed(2)}
+                    </span>
                   </div>
                 </div>
 
                 <Button
                   type="button"
                   onClick={handleCheckout}
-                  disabled={selectedItems.length === 0 || !selectedAddress || isCheckingOut}
+                  disabled={
+                    selectedItems.length === 0 ||
+                    !selectedAddress ||
+                    isCheckingOut
+                  }
                   className="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs"
                 >
-                  {isCheckingOut ? '正在提交结算...' : `⚡ 立即结算 (${totalCount} 件)`}
+                  {isCheckingOut
+                    ? "正在提交结算..."
+                    : `⚡ 立即结算 (${totalCount} 件)`}
                 </Button>
               </div>
             </div>
@@ -328,9 +367,24 @@ export default function CartPage() {
         addresses={addresses}
         selectedAddressId={selectedAddress?.id}
         onSelectAddress={(addr) => setSelectedAddress(addr)}
-        onAddAddress={(newAddr) => {
-          setAddresses((prev) => [newAddr, ...prev]);
-          setSelectedAddress(newAddr);
+        onAddAddress={async (newAddr) => {
+          try {
+            const res = await fetch("/api/store/addresses", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                customerId: user.id || "CUST-8801",
+                ...newAddr,
+              }),
+            });
+            const data = await res.json();
+            if (data.success && data.address) {
+              setAddresses((prev) => [data.address, ...prev]);
+              setSelectedAddress(data.address);
+            }
+          } catch {
+            // ignore
+          }
         }}
       />
     </div>
