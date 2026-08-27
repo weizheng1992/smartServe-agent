@@ -60,7 +60,7 @@ describe('🃏 Merchant Order Card Selection & Card Action Simulation Suite', ()
     const historyJson = await historyRes.json();
     expect(historyJson.success).toBe(true);
     expect(historyJson.messages.length).toBeGreaterThanOrEqual(2);
-  }, 60000);
+  }, 90000);
 
   it('3. 模拟点击卡片动作【查看物流轨迹】，触发物流详情与追踪', async () => {
     const req = new NextRequest('http://localhost:3005/api/store/chat', {

@@ -216,7 +216,7 @@ export function FloatingChatWidget({
   };
 
   // 发送消息到后端决策引擎
-  const handleSendMessage = async (customMsg?: string) => {
+  const handleSendMessage = async (customMsg?: string, cardsToSend?: RichCardBlock[]) => {
     const msgToSend = (customMsg || input).trim();
     if (!msgToSend || isSending) return;
 
@@ -229,7 +229,7 @@ export function FloatingChatWidget({
       id: `usr_${Date.now()}`,
       role: 'user',
       text: msgToSend,
-      cards: [],
+      cards: cardsToSend || [],
       time: userTime,
     };
 
@@ -331,19 +331,7 @@ export function FloatingChatWidget({
             },
           ];
 
-      const userSelectMsg: ChatMessage = {
-        id: `msg_select_${Date.now()}`,
-        role: 'user',
-        text: `已选择订单：${orderIdStr}`,
-        cards: orderCards,
-        time: new Date().toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      };
-
-      setMessages((prev) => [...prev, userSelectMsg]);
-      handleSendMessage(`已选定订单 ${orderIdStr}，请帮我查询该订单的具体信息和最新物流进度。`);
+      handleSendMessage(`已选定订单 ${orderIdStr}，请帮我查询该订单的具体信息和最新物流进度。`, orderCards);
     } else if (action === 'send_message' && payload?.text) {
       handleSendMessage(String(payload.text));
     } else if (action === 'track_order' && payload?.orderId) {

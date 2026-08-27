@@ -1,4 +1,4 @@
-import { getDrizzle, longMemoryFacts } from 'db';
+import { db, getDrizzle, longMemoryFacts } from 'db';
 import { getEmbeddingModel, getLLM } from '../llm/callLLMWithRetry';
 
 export interface LongMemoryFact {
@@ -117,7 +117,6 @@ export class LongMemory {
   ): Promise<void> {
     console.log(`[Profiler Agent] 🕵️ 启动用户 ${this.userId} 的多模态消费画像提取...`);
 
-    const { db: physicalDb } = require('db');
     let pastOrders: Record<string, unknown>[] = [];
 
     // 1. [结构化数据装配 (SQL)]：实时拉取该用户在 PostgreSQL 中的最近购买明细
@@ -141,8 +140,8 @@ export class LongMemory {
       const orderQueryParams =
         this.businessId && this.businessId !== 'ecommerce' ? [this.userId, this.businessId] : [this.userId];
 
-      const orderRes = await physicalDb.execute(orderQuery, orderQueryParams);
-      pastOrders = orderRes.rows || [];
+      const orderRes = await db.execute(orderQuery, orderQueryParams);
+      pastOrders = (orderRes?.rows as Record<string, unknown>[]) || [];
     } catch (sqlErr) {
       console.warn('[Profiler Agent] Failed to fetch SQL transaction stream for audit:', sqlErr);
     }

@@ -10,6 +10,15 @@ export interface OrderPickerCardProps {
   onAction?: (action: string, payload?: Record<string, unknown>) => void;
 }
 
+function formatAmount(val: unknown): string {
+  if (typeof val === 'number') return val.toFixed(2);
+  if (typeof val === 'string') {
+    const num = Number.parseFloat(val.replace(/[^0-9.-]/g, ''));
+    return Number.isNaN(num) ? '0.00' : num.toFixed(2);
+  }
+  return '0.00';
+}
+
 export const OrderPickerCard: React.FC<OrderPickerCardProps> = ({ data, onAction }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const orders = data.orders || [];
@@ -18,6 +27,22 @@ export const OrderPickerCard: React.FC<OrderPickerCardProps> = ({ data, onAction
   const handleSelectOrder = (order: OrderCardData) => {
     setIsModalOpen(false);
     onAction?.('select_order', {
+      orderId: order.orderId,
+      order,
+    });
+  };
+
+  const handleTrackOrder = (order: OrderCardData) => {
+    setIsModalOpen(false);
+    onAction?.('track_order', {
+      orderId: order.orderId,
+      order,
+    });
+  };
+
+  const handleRefundOrder = (order: OrderCardData) => {
+    setIsModalOpen(false);
+    onAction?.('request_refund', {
       orderId: order.orderId,
       order,
     });
@@ -62,7 +87,7 @@ export const OrderPickerCard: React.FC<OrderPickerCardProps> = ({ data, onAction
               <div className="flex items-center gap-2">
                 <span className="font-mono text-emerald-400 font-medium">
                   {ord.currency === 'USD' ? '$' : '¥'}
-                  {ord.totalAmount?.toFixed(2) || '0.00'}
+                  {formatAmount(ord.totalAmount)}
                 </span>
                 <span className="rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] text-slate-300">{ord.status}</span>
               </div>
@@ -139,7 +164,7 @@ export const OrderPickerCard: React.FC<OrderPickerCardProps> = ({ data, onAction
                         <span>订单金额：</span>
                         <span className="font-mono font-bold text-emerald-400">
                           {ord.currency === 'USD' ? '$' : '¥'}
-                          {ord.totalAmount?.toFixed(2) || '0.00'}
+                          {formatAmount(ord.totalAmount)}
                         </span>
                       </div>
                       <div>
@@ -156,14 +181,29 @@ export const OrderPickerCard: React.FC<OrderPickerCardProps> = ({ data, onAction
                     </div>
                   </div>
 
-                  <div className="flex items-center sm:self-center shrink-0">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:self-center shrink-0">
                     <button
                       type="button"
                       onClick={() => handleSelectOrder(ord)}
-                      className="w-full sm:w-auto flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 text-xs font-semibold shadow transition-all cursor-pointer"
+                      className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-xs font-semibold shadow transition-all cursor-pointer"
                     >
-                      <CheckCircle2 className="h-4 w-4" />
-                      <span>选择此订单</span>
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>选择</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTrackOrder(ord)}
+                      className="flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 px-3 py-1.5 text-xs font-semibold shadow transition-all cursor-pointer"
+                    >
+                      <Truck className="h-3.5 w-3.5" />
+                      <span>查物流</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRefundOrder(ord)}
+                      className="flex items-center justify-center gap-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3 py-1.5 text-xs font-semibold shadow transition-all cursor-pointer"
+                    >
+                      <span>退款</span>
                     </button>
                   </div>
                 </div>

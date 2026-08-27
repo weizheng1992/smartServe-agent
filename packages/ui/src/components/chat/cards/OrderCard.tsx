@@ -9,6 +9,15 @@ export interface OrderCardProps {
   onAction?: (action: string, payload?: Record<string, unknown>) => void;
 }
 
+function formatAmount(val: unknown): string {
+  if (typeof val === 'number') return val.toFixed(2);
+  if (typeof val === 'string') {
+    const num = Number.parseFloat(val.replace(/[^0-9.-]/g, ''));
+    return Number.isNaN(num) ? '0.00' : num.toFixed(2);
+  }
+  return '0.00';
+}
+
 export const OrderCard: React.FC<OrderCardProps> = ({ data, onAction }) => {
   return (
     <div className="my-2 max-w-md overflow-hidden rounded-xl border border-slate-700/60 bg-gradient-to-b from-slate-850 to-slate-900/90 p-4 text-slate-100 shadow-xl backdrop-blur-md transition-all hover:border-slate-600">
@@ -40,7 +49,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ data, onAction }) => {
           <span className="text-slate-400">订单总金额:</span>
           <span className="font-mono text-sm font-semibold text-emerald-300">
             {data.currency === 'USD' ? '$' : '¥'}
-            {data.totalAmount.toFixed(2)}
+            {formatAmount(data.totalAmount)}
           </span>
         </div>
       </div>
@@ -49,7 +58,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ data, onAction }) => {
       <div className="mt-3.5 flex flex-wrap gap-2 border-t border-slate-750/70 pt-3">
         <button
           type="button"
-          onClick={() => onAction?.('select_order', { orderId: data.orderId })}
+          onClick={() => onAction?.('select_order', { orderId: data.orderId, order: data })}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600/20 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-600/30 hover:text-emerald-200 cursor-pointer"
         >
           <CheckCircle2 className="h-3.5 w-3.5" />
@@ -57,7 +66,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ data, onAction }) => {
         </button>
         <button
           type="button"
-          onClick={() => onAction?.('track_order', { orderId: data.orderId })}
+          onClick={() => onAction?.('track_order', { orderId: data.orderId, order: data })}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600/20 px-2.5 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-600/30 hover:text-indigo-200 cursor-pointer"
         >
           <Truck className="h-3.5 w-3.5" />
@@ -65,7 +74,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ data, onAction }) => {
         </button>
         <button
           type="button"
-          onClick={() => onAction?.('request_refund', { orderId: data.orderId })}
+          onClick={() => onAction?.('request_refund', { orderId: data.orderId, order: data })}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-rose-500/10 px-2.5 py-1.5 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/20 hover:text-rose-200 cursor-pointer"
         >
           <ShieldCheck className="h-3.5 w-3.5" />

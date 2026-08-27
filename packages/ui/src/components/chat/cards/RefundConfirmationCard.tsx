@@ -9,6 +9,15 @@ export interface RefundConfirmationCardProps {
   onConfirm?: () => void;
 }
 
+function formatAmount(val: unknown): string {
+  if (typeof val === 'number') return val.toFixed(2);
+  if (typeof val === 'string') {
+    const num = Number.parseFloat(val.replace(/[^0-9.-]/g, ''));
+    return Number.isNaN(num) ? '0.00' : num.toFixed(2);
+  }
+  return '0.00';
+}
+
 export const RefundConfirmationCard: React.FC<RefundConfirmationCardProps> = ({ data, onConfirm }) => {
   const isApproved = data.status === 'approved';
   const isPending = data.status === 'pending_confirmation';
@@ -45,7 +54,7 @@ export const RefundConfirmationCard: React.FC<RefundConfirmationCardProps> = ({ 
           <span className="text-slate-400">核定退款金额:</span>
           <span className="font-mono text-base font-bold text-rose-400">
             {data.currency === 'USD' ? '$' : '¥'}
-            {data.refundAmount.toFixed(2)}
+            {formatAmount(data.refundAmount)}
           </span>
         </div>
         <div className="flex justify-between text-slate-300">

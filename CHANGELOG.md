@@ -4,6 +4,20 @@
 
 ---
 
+## [2.2.1] - 2026-08-27 (意图去重旁路与画像审计自愈、富交互卡片闭环修复)
+
+### 🌟 Major Highlights (重大亮点)
+
+- **意图去重拦截器旁路修复与卡片透传保证 (`intentTriageEngine.ts`)**:
+  - 在意图分流层的语义去重拦截器（`Triage Duplicate Shield`）中增加业务操作类指令（订单、物流、退款、导购等）豁免规则，杜绝连续/重复订单查询被静态缓存拦截而丢失富交互卡片。
+  - 增强 `handleImmediateBypass` 逻辑，透传并保留现有卡片数据（`effectiveCards`），确保快速直达通道与前台 UI 卡片渲染不脱节。
+- **画像审计专职 Agent 异步加载自愈 (`longMemory.ts`)**:
+  - 修复 `LongMemory.runProfileAudit` 中动态加载 `db` 模块在 ESM/TS 运行时的 undefined 异常，改为静态顶层安全导入并执行 PostgreSQL 订单流水查询。
+- **多模态卡片交互分发与选单链路闭环 (`FloatingChatWidget.tsx`, `ChatWidget.tsx`)**:
+  - 在商户端与主站客户端浮窗中完善 `select_order`、`track_order`、`request_refund` 等富卡片交互事件派发与自动对话触发。
+
+---
+
 ## [2.2.0] - 2026-08-27 (多模态订单选择弹窗、SPI 独立商户查单与状态回退增强)
 
 ### 🌟 Major Highlights (重大亮点)

@@ -97,11 +97,13 @@ export class IntentTriageEngine {
     method: string,
     confidence: number,
     damageAssessment?: DamageAssessmentData,
+    cards?: any[],
   ) {
     console.log(`[Triage Immediate Bypass] Triggered pipeline shortcut [${routeKey}]`);
 
     const tenantId = (state.businessConfig?.businessId || (state as any).businessId || 'ecommerce').toLowerCase();
     const sanitizedReply = sanitizeTenantResponse(replyText, tenantId);
+    const effectiveCards = cards || state.cards || [];
 
     await this.logIntentToDB(
       state.threadId,
@@ -142,7 +144,7 @@ export class IntentTriageEngine {
         agentEventEmitter.emit(`${state.jobId}:result`, {
           output: sanitizedReply,
           taskPlan: bypassPlan,
-          cards: [],
+          cards: effectiveCards,
         });
       }, 100);
     }
@@ -155,6 +157,7 @@ export class IntentTriageEngine {
       activeDomainRole: domainRole,
       output: sanitizedReply,
       taskPlan: bypassPlan,
+      cards: effectiveCards,
       damageAssessment,
       globalTransitionsCount: -1,
       toolErrorsCount: -1,
@@ -284,7 +287,13 @@ export class IntentTriageEngine {
       const userMsgs = historyMsgs.filter((m) => m.role === 'user');
       const assistantMsgs = historyMsgs.filter((m) => m.role === 'assistant');
 
-      if (userMsgs.length >= 2 && assistantMsgs.length > 0) {
+      // 业务操作类意图（订单查询/物流追踪/退款退货/加购导购）严禁走静态重复拦截，必须执行实时查询与富卡片合成！
+      const isOperationalAction =
+        /(?:订单|物流|快递|发货|退款|退货|买|购物车|加购|商品|推荐|款|件|排查|查|ord|track|refund|cart|order)/i.test(
+          input,
+        );
+
+      if (!isOperationalAction && userMsgs.length >= 2 && assistantMsgs.length > 0) {
         const lastUserMsg = userMsgs[userMsgs.length - 2];
         const lastAssistantMsg = assistantMsgs[assistantMsgs.length - 1];
 
@@ -318,7 +327,16 @@ export class IntentTriageEngine {
           const reply = `${prefixMsg}${lastAssistantMsg.content}`;
           const finalIntents = [{ intent: 'general_query', confidence: 1.0 }];
 
-          return await this.handleImmediateBypass(state, 'duplicate_bypass', reply, finalIntents, 'rule', 1.0);
+          return await this.handleImmediateBypass(
+            state,
+            'duplicate_bypass',
+            reply,
+            finalIntents,
+            'rule',
+            1.0,
+            undefined,
+            (lastAssistantMsg as any).cards,
+          );
         }
       }
     } catch (shErr) {

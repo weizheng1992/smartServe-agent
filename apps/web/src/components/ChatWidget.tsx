@@ -110,7 +110,9 @@ export function ChatWidget({
   };
 
   const handleCardAction = (action: string, payload?: Record<string, unknown>) => {
-    if (action === 'send_message' && payload?.text) {
+    if (action === 'select_order' && payload?.orderId) {
+      handleSend(`已选定订单 ${payload.orderId}，请帮我查询该订单的具体信息和最新物流进度。`);
+    } else if (action === 'send_message' && payload?.text) {
       handleSend(String(payload.text));
     } else if (action === 'track_order' && payload?.orderId) {
       handleSend(`帮我查一下订单 ${payload.orderId} 的物流轨迹`);
