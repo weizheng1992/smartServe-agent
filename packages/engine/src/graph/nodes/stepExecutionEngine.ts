@@ -51,6 +51,7 @@ async function executeSingleStepCore(
   if (stepToRun.condition) {
     const { field, operator, expectedValue } = stepToRun.condition;
     let actualValue: any = undefined;
+
     for (const st of currentPlan.subtasks) {
       if (st.status === "completed" && st.result?.output) {
         const out = st.result.output as Record<string, any>;
@@ -62,18 +63,35 @@ async function executeSingleStepCore(
           actualValue = out.order[field];
           break;
         }
+        if (out.data && out.data[field] !== undefined) {
+          actualValue = out.data[field];
+          break;
+        }
+        if (out.details && out.details[field] !== undefined) {
+          actualValue = out.details[field];
+          break;
+        }
       }
     }
 
     let isConditionMet = false;
+    const normalize = (val: any) =>
+      typeof val === "string" ? val.trim().toLowerCase() : val;
+
+    const normActual = normalize(actualValue);
+    const normExpected = normalize(expectedValue);
+
     if (operator === "equals") {
-      isConditionMet = actualValue === expectedValue;
+      isConditionMet = normActual === normExpected;
     } else if (operator === "not_equals") {
-      isConditionMet = actualValue !== expectedValue;
+      isConditionMet = normActual !== normExpected;
     } else if (operator === "exists") {
       isConditionMet = actualValue !== undefined && actualValue !== null;
     } else if (operator === "in" && Array.isArray(expectedValue)) {
-      isConditionMet = expectedValue.includes(actualValue);
+      const normArray = expectedValue.map(normalize);
+      isConditionMet = normArray.includes(normActual);
+    } else if (operator === "greater_than") {
+      isConditionMet = Number(actualValue) > Number(expectedValue);
     } else {
       isConditionMet = true;
     }
