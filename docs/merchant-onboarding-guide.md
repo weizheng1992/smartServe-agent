@@ -13,7 +13,15 @@
   - [方式 3：第三方独立商户系统 SPI 标准对接](#方式-3第三方独立商户系统-spi-标准对接)
 - [三、在 Admin 3001 控制台中的全链路查看与管理](#三在-admin-3001-控制台中的全链路查看与管理)
 - [四、内置模拟商户（Aurora 极光潮品）快速实战演练](#四内置模拟商户aurora-极光潮品快速实战演练)
-- [五、常见问题排查与 FAQ](#五常见问题排查与-faq)
+- [五、商户专属业务技能 (SOP Skills) 的扩展、开发与使用教程](#五商户专属业务技能-sop-skills-的扩展开发与使用教程)
+  - [5.1 Tool（原子工具）与 Skill（业务技能）的本质区别](#51-tool原子工具与-skill业务技能的本质区别)
+  - [5.2 Skill 执行架构与生命周期管线](#52-skill-执行架构与生命周期管线)
+  - [5.3 实战示例：添加电子发票开具 SOP 技能 (`OrderInvoiceSkill`)](#53-实战示例添加电子发票开具-sop-技能-orderinvoiceskill)
+  - [5.4 商户端 SPI 接口对接与 HMAC 验签守卫](#54-商户端-spi-接口对接与-hmac-验签守卫)
+  - [5.5 在 Admin 控制台与数据库中动态配置 Skill](#55-在-admin-控制台与数据库中动态配置-skill)
+  - [5.6 在商户商城前端使用与验证](#56-在商户商城前端使用与验证)
+  - [5.7 编写自动化测试验证](#57-编写自动化测试验证)
+- [六、常见问题排查与 FAQ](#六常见问题排查与-faq)
 
 ---
 
@@ -226,7 +234,357 @@ bun run dev:admin
 
 ---
 
-## 五、常见问题排查与 FAQ
+## 五、商户专属业务技能 (SOP Skills) 的扩展、开发与使用教程
+
+在 smartServe 平台中，**Skill（业务技能）** 是将业务规则、参数校验、风控门禁、第三方 SPI 接口调用以及多模态卡片渲染完整闭环的高阶抽象层。
+
+---
+
+### 5.1 Tool（原子工具）与 Skill（业务技能）的本质区别
+
+> **一句话总结**：**Tool 是“手和脚”（负责单纯的技术操作），Skill 是“业务 SOP 大脑”（负责端到端的业务流程控制与风控合规）。**
+
+| 核心维度       | 🛠️ 原子工具 (Tool)                                   | 🧩 业务技能 (Skill / SOP)                                  |
+| :------------- | :--------------------------------------------------- | :--------------------------------------------------------- |
+| **功能定位**   | **纯技术操作**（只负责发起 HTTP 请求或查询数据库表） | **面向业务闭环的标准作业程序**（SOP 状态机与业务生命周期） |
+| **业务规则**   | ❌ **无**（给什么参数就执行什么，不校验业务合理性）  | ✅ **内聚全套 SOP**（发货状态拦截、时效校验、合规判断）    |
+| **风控与审批** | ❌ **无**（无法自主决定是否需要人工审核）            | ✅ **HITL 门禁**（动态根据商户免审阈值自动挂起审批）       |
+| **参数缺失**   | ❌ 报错崩溃或由 LLM 盲目猜测                         | ✅ **自愈追问**（精准拦截缺失槽位，引导用户补充）          |
+| **多租户策略** | ❌ 静态固定                                          | ✅ **动态重载**（不同商户可自由重载免审额度与提示词）      |
+| **输出形式**   | 原始 JSON / 字符串数据                               | 业务友好话术 + **多模态交互富卡片 (Rich Cards)**           |
+
+#### 为什么不能只有 Tool？
+
+1. **资金防损**：若仅暴露 `executeOrderAction` 工具，用户说“帮我退款 10 万元”，LLM 将直接调用接口产生严重资损；而 Skill 会根据商户动态配置进行风控阈值拦截与人工审批挂起；
+2. **状态防越权**：若订单状态为已发货（`SHIPPED`），Skill 会在调用工具前直接拦截改地址请求；
+3. **多租户隔离**：不同商户的免审额度和政策各不相同（A 商户 100 元免审，B 商户 500 元免审），只有 Skill 能结合 `tenant_configs` 动态做出差异化决策。
+
+---
+
+### 5.2 Skill 执行架构与生命周期管线
+
+```text
+[用户输入: "帮我把订单 AURORA-ORD-2026-9081 开发票"]
+                        │
+                        ▼
+            【IntentTriageEngine 意图分流】
+                        │ (识别 intent: 'APPLY_INVOICE')
+                        ▼
+            【SkillRegistry 技能注册中心】
+                        │ (匹配到 OrderInvoiceSkill)
+                        ▼
+      ┌──────────────────────────────────────────────────┐
+      │          🧩 OrderInvoiceSkill (BaseSkill)         │
+      │                                                  │
+      │  1. canHandle: 命中 APPLY_INVOICE 意图            │
+      │  2. 槽位前置校验: 检查 orderId 是否提供           │
+      │  3. 读取商户策略: 获取当前商户开票免审阈值        │
+      │  4. 风控判断: 是否超过免审上限？                   │
+      │     ├─ 超过: 挂起 require_approval 写入 Outbox    │
+      │     └─ 未超: 调用底层 SPI 执行开票                │
+      │  5. 组装发票确认富卡片 (RichCardBlock)            │
+      └────────────────────────┬─────────────────────────┘
+                               │
+                               ▼
+      ┌──────────────────────────────────────────────────┐
+      │         🛠️ ThirdPartySpiTool (原子工具层)         │
+      │  - 自动计算 HMAC-SHA256 签名与时间戳              │
+      │  - POST http://localhost:3005/spi/v1/orders/action│
+      └──────────────────────────────────────────────────┘
+```
+
+---
+
+### 5.3 实战示例：添加电子发票开具 SOP 技能 (`OrderInvoiceSkill`)
+
+下面以一个真实高频业务——**「电子发票申请与开具」** 为例，完整演示如何新增并接入自定义 Skill：
+
+#### 步骤 1：在决策引擎中创建 Skill 类
+
+新建 `packages/engine/src/skills/orderInvoiceSkill.ts`，继承 `BaseSkill`：
+
+```typescript
+// packages/engine/src/skills/orderInvoiceSkill.ts
+import crypto from "node:crypto";
+import { BaseSkill } from "./baseSkill";
+import type {
+  SkillMetadata,
+  SkillExecutionContext,
+  SkillExecutionResult,
+  RichCardBlock,
+} from "types";
+
+export class OrderInvoiceSkill extends BaseSkill {
+  // 1. 定义技能元数据与触发规则
+  public metadata: SkillMetadata = {
+    id: "skill_order_invoice",
+    name: "电子发票极速开具 SOP",
+    description:
+      "核验订单支付状态与税号信息，自动开具电子发票并支持超额人工审核",
+    category: "after_sale",
+    triggerIntents: ["APPLY_INVOICE", "order_invoice", "request_invoice"],
+    requiredTools: ["getOrderDetail", "executeOrderAction"],
+    requiresApproval: true,
+    approvalThresholdAmount: 2000, // 默认 2000 元以上开票需人工财务审批
+    version: "1.0.0",
+  };
+
+  // 2. 意图与前置承接判定
+  public canHandle(context: SkillExecutionContext): boolean {
+    const intent =
+      (context.slots?.activeIntent as string) ||
+      (context.extra?.intent as string) ||
+      "";
+    if (this.metadata.triggerIntents.includes(intent)) return true;
+    return /开发票|电子发票|开票|补开发票/i.test(context.input || "");
+  }
+
+  // 3. 核心业务 SOP 执行
+  public async execute(
+    context: SkillExecutionContext,
+  ): Promise<SkillExecutionResult> {
+    const orderId = (context.slots?.orderId as string) || "";
+    const invoiceTitle =
+      (context.slots?.invoiceTitle as string) ||
+      (context.slots?.title as string) ||
+      "个人";
+
+    // 前置槽位校验
+    if (!orderId) {
+      return {
+        success: false,
+        skillId: this.metadata.id,
+        output: "申请开具发票需要提供订单编号，请补充您的订单号。",
+        error: "Missing required slot: orderId",
+      };
+    }
+
+    // 动态获取当前商户绑定的 SPI 客户端 (自动组装 HMAC-SHA256 签名)
+    const spiClient = await this.getSpiClient(context.tenantId);
+
+    // Step A: 查验订单履约状态
+    const order = await spiClient.getOrderDetail({
+      orderId,
+      tenantId: context.tenantId,
+    });
+
+    if (!order) {
+      return {
+        success: false,
+        skillId: this.metadata.id,
+        output: `未查询到订单 [${orderId}]，请核对订单编号。`,
+      };
+    }
+
+    if (
+      order.status !== "PAID" &&
+      order.status !== "SHIPPED" &&
+      order.status !== "DELIVERED"
+    ) {
+      return {
+        success: false,
+        skillId: this.metadata.id,
+        output: `订单 [${orderId}] 当前状态为【${order.status}】，仅已付款或已发货的订单支持开具发票。`,
+      };
+    }
+
+    const totalAmount = Number(order.totalAmount) || 0;
+
+    // Step B: HITL 风控门禁检查 (动态读取商户针对此 Skill 的自定义阈值)
+    const threshold = await this.getEffectiveApprovalThreshold(
+      context.tenantId,
+    );
+    const isApproved = Boolean(context.extra?.isApproved);
+
+    if (totalAmount > threshold && !isApproved) {
+      return {
+        success: true,
+        skillId: this.metadata.id,
+        output: `您的发票开具金额为 ¥${totalAmount.toFixed(2)}（超过免审上限 ¥${threshold}），已为您提交至财务专员复核，请稍候。`,
+        nextAction: "require_approval",
+        approvalPayload: {
+          actionType: "applyInvoice",
+          amount: totalAmount,
+          reason: `大额开票申请: ${invoiceTitle}`,
+          details: {
+            orderId,
+            invoiceTitle,
+            tenantId: context.tenantId,
+            userId: context.userId,
+          },
+        },
+      };
+    }
+
+    // Step C: 免审或审批通过后调用商户 SPI 执行开票
+    const idempotencyKey = crypto.randomUUID();
+    await spiClient.executeOrderAction({
+      actionType: "APPLY_INVOICE" as any,
+      orderId,
+      userId: context.userId,
+      idempotencyKey,
+      tenantId: context.tenantId,
+    });
+
+    // Step D: 组装开票凭证卡片
+    const cards: RichCardBlock[] = [
+      {
+        type: "refund_confirmation",
+        data: {
+          orderId,
+          refundAmount: totalAmount,
+          currency: "CNY",
+          refundReason: `发票抬头：${invoiceTitle}`,
+          refundMethod: "ELECTRONIC_INVOICE_PDF",
+          status: "issued",
+        },
+      },
+    ];
+
+    return {
+      success: true,
+      skillId: this.metadata.id,
+      output: `已成功为您开具订单 [${orderId}] 的电子普通发票（抬头：${invoiceTitle}），发票金额：¥${totalAmount.toFixed(2)}。`,
+      cards,
+      nextAction: "finish",
+    };
+  }
+}
+```
+
+---
+
+#### 步骤 2：在技能注册中心注册该 Skill
+
+编辑 `packages/engine/src/skills/skillRegistry.ts`：
+
+```typescript
+import { OrderInvoiceSkill } from "./orderInvoiceSkill";
+
+// 在静态注册块中注册
+SkillRegistry.register(new OrderInvoiceSkill());
+```
+
+---
+
+### 5.4 商户端 SPI 接口对接与 HMAC 验签守卫
+
+商户端（`apps/merchant`）在 `/spi/v1/orders/action` 接收来自平台的调用，并校验数字签名：
+
+```typescript
+// apps/merchant/app/spi/v1/orders/action/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { verifySpiRequest } from "@/services/spiAuthGuard";
+import { MerchantDomainService } from "@/services/merchantDomainService";
+
+export async function POST(req: NextRequest) {
+  const bodyText = await req.text();
+
+  // 1. 严格校验 HMAC-SHA256 签名与 5 分钟时间戳时效窗口
+  const auth = await verifySpiRequest(req, bodyText, {
+    requireSignature: true,
+  });
+  if (!auth.isValid) {
+    return NextResponse.json(
+      { success: false, error: auth.error },
+      { status: 401 },
+    );
+  }
+
+  const payload = JSON.parse(bodyText);
+  const signature = req.headers.get("x-signature") || "";
+
+  // 2. 执行商户端业务逻辑 (带幂等防重)
+  const result = await MerchantDomainService.executeOrderAction(
+    payload,
+    signature,
+  );
+  return NextResponse.json({ success: result.success, data: result });
+}
+```
+
+---
+
+### 5.5 在 Admin 控制台与数据库中动态配置 Skill
+
+商户入驻后，可在 **Admin 控制台（`http://localhost:3001/skills-tools`）** 对技能进行个性化配置：
+
+- **可视化开启/关闭**：在技能列表勾选 `skill_order_invoice`；
+- **配置免审额度**：将该商户的开票免审阈值调整为 `¥3000.00`；
+- **自定义 Prompt 规则**：如 `“开票抬头包含‘分公司’时请提示用户补充统一社会信用代码”`。
+
+也可以通过 SQL 批量配置：
+
+```sql
+UPDATE tenant_configs
+SET enabled_skills = array_append(enabled_skills, 'skill_order_invoice'),
+    skills_config = jsonb_set(
+      COALESCE(skills_config, '{}'::jsonb),
+      '{skill_order_invoice}',
+      '{"enabled": true, "approvalThresholdAmount": 3000}'
+    )
+WHERE business_id = 'aurora';
+```
+
+---
+
+### 5.6 在商户商城前端使用与验证
+
+1. **启动所有服务**：`bun run dev:all`；
+2. **打开商城前端**：浏览器访问 `http://localhost:3005`；
+3. **发起提问**：点击右下角极光智能客服悬浮窗，发送：
+   > _“帮我把订单 AURORA-ORD-2026-9081 开一张电子发票，抬头写【极光科技】”_
+4. **验证响应**：
+   - AI 自动识别开票诉求并命中 `OrderInvoiceSkill`；
+   - 订单金额 `¥1299.00` 未超过设定的 `¥3000.00` 阈值，直接调用商户 SPI 成功开票；
+   - 聊天界面输出结构化卡片与成功通知。
+
+---
+
+### 5.7 编写自动化测试验证
+
+在 `packages/engine/tests/` 中编写针对该 Skill 的测试用例：
+
+```typescript
+import { describe, expect, it } from "bun:test";
+import { SkillRegistry } from "../src/skills";
+import { OrderInvoiceSkill } from "../src/skills/orderInvoiceSkill";
+
+describe("OrderInvoiceSkill Test Suite", () => {
+  it("should find matching skill for invoice intent", () => {
+    const skill = SkillRegistry.findMatchingSkill({
+      threadId: "t_test",
+      tenantId: "aurora",
+      input: "帮我开发票",
+      slots: { activeIntent: "APPLY_INVOICE" },
+    });
+    expect(skill?.metadata.id).toBe("skill_order_invoice");
+  });
+
+  it("should intercept missing slots in OrderInvoiceSkill", async () => {
+    const skill = new OrderInvoiceSkill();
+    const result = await skill.execute({
+      threadId: "t_test",
+      tenantId: "aurora",
+      input: "帮我开票",
+      slots: { activeIntent: "APPLY_INVOICE" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.output).toContain("请补充您的订单号");
+  });
+});
+```
+
+运行测试：
+
+```bash
+bun test packages/engine/tests/skillsRegistry.test.ts
+bun test packages/engine/tests/openSpiMerchant.test.ts
+```
+
+---
+
+## 六、常见问题排查与 FAQ
 
 ### Q1: 在 Admin 控制台添加了新商户，为什么顶部租户下拉菜单里没有出现？
 

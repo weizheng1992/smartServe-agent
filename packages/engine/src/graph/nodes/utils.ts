@@ -1,4 +1,4 @@
-const ORDER_ID_REGEX = /\bORD-[A-Za-z0-9_-]+\b/i;
+const ORDER_ID_REGEX = /(?:[A-Za-z0-9]+-)*ORD-[A-Za-z0-9_-]+/i;
 
 export interface MessageLike {
   role?: string;
@@ -26,7 +26,7 @@ export function extractOrderId(
   if (shortMemory && shortMemory.length > 0) {
     for (let i = shortMemory.length - 1; i >= 0; i--) {
       const msg = shortMemory[i];
-      if (msg && msg.role === 'user' && msg.content) {
+      if (msg && msg.role === "user" && msg.content) {
         const match = msg.content.match(ORDER_ID_REGEX);
         if (match) return match[0].toUpperCase();
       }

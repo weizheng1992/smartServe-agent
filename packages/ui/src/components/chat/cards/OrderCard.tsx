@@ -1,8 +1,14 @@
-'use client';
+"use client";
 
-import type React from 'react';
-import type { OrderCardData } from 'types';
-import { ArrowRight, Package, ShieldCheck, Truck } from '../../icons';
+import type React from "react";
+import type { OrderCardData } from "types";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Package,
+  ShieldCheck,
+  Truck,
+} from "../../icons";
 
 export interface OrderCardProps {
   data: OrderCardData;
@@ -19,8 +25,12 @@ export const OrderCard: React.FC<OrderCardProps> = ({ data, onAction }) => {
             <Package className="h-4 w-4" />
           </div>
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">订单编号</span>
-            <div className="font-mono text-sm font-bold text-indigo-300">{data.orderId}</div>
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              订单编号
+            </span>
+            <div className="font-mono text-sm font-bold text-indigo-300">
+              {data.orderId}
+            </div>
           </div>
         </div>
         <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
@@ -33,35 +43,45 @@ export const OrderCard: React.FC<OrderCardProps> = ({ data, onAction }) => {
         <div className="flex justify-between text-slate-300">
           <span className="text-slate-400">承运商 & 运单:</span>
           <span className="font-mono text-slate-200">
-            {data.carrier || 'SF Express'} ({data.trackingNumber || 'N/A'})
+            {data.carrier || "SF Express"} ({data.trackingNumber || "N/A"})
           </span>
         </div>
         <div className="flex justify-between text-slate-300">
           <span className="text-slate-400">订单总金额:</span>
           <span className="font-mono text-sm font-semibold text-emerald-300">
-            {data.currency === 'USD' ? '$' : '¥'}
+            {data.currency === "USD" ? "$" : "¥"}
             {data.totalAmount.toFixed(2)}
           </span>
         </div>
       </div>
 
       {/* Action Buttons */}
-      <div className="mt-3.5 flex gap-2 border-t border-slate-750/70 pt-3">
+      <div className="mt-3.5 flex flex-wrap gap-2 border-t border-slate-750/70 pt-3">
         <button
           type="button"
-          onClick={() => onAction?.('track_order', { orderId: data.orderId })}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600/20 px-3 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-600/30 hover:text-indigo-200"
+          onClick={() => onAction?.("select_order", { orderId: data.orderId })}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600/20 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-600/30 hover:text-emerald-200 cursor-pointer"
         >
-          <Truck className="h-3.5 w-3.5" />
-          查看物流轨迹
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          选择此订单
         </button>
         <button
           type="button"
-          onClick={() => onAction?.('request_refund', { orderId: data.orderId })}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/20 hover:text-rose-200"
+          onClick={() => onAction?.("track_order", { orderId: data.orderId })}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600/20 px-2.5 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-600/30 hover:text-indigo-200 cursor-pointer"
+        >
+          <Truck className="h-3.5 w-3.5" />
+          查看物流
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onAction?.("request_refund", { orderId: data.orderId })
+          }
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-rose-500/10 px-2.5 py-1.5 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/20 hover:text-rose-200 cursor-pointer"
         >
           <ShieldCheck className="h-3.5 w-3.5" />
-          申请退款/退货
+          申请售后
         </button>
       </div>
     </div>

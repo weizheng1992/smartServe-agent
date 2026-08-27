@@ -50,10 +50,10 @@ export function ChatWidget({
     document.documentElement.style.setProperty('--widget-theme-color', themeColor);
   }, [themeColor]);
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-    const text = input.trim();
-    setInput('');
+  const handleSend = async (customText?: string) => {
+    const text = (customText || input).trim();
+    if (!text || isLoading) return;
+    if (!customText) setInput('');
 
     const userMsg = { id: `u_${Date.now()}`, role: 'user', content: text };
     setMessages((prev) => [...prev, userMsg]);
@@ -106,6 +106,20 @@ export function ChatWidget({
       ]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCardAction = (action: string, payload?: Record<string, unknown>) => {
+    if (action === 'send_message' && payload?.text) {
+      handleSend(String(payload.text));
+    } else if (action === 'track_order' && payload?.orderId) {
+      handleSend(`帮我查一下订单 ${payload.orderId} 的物流轨迹`);
+    } else if (action === 'request_refund' && payload?.orderId) {
+      handleSend(`帮我申请订单 ${payload.orderId} 的退款`);
+    } else if (action === 'confirm_refund' && payload?.orderId) {
+      handleSend(`我已确认提交订单 ${payload.orderId} 的退款核签`);
+    } else if (typeof payload?.query === 'string') {
+      handleSend(payload.query);
     }
   };
 
@@ -164,7 +178,7 @@ export function ChatWidget({
                     {m.content}
                     {m.cards && m.cards.length > 0 && (
                       <div className="mt-2 space-y-2">
-                        <RichCardRenderer cards={m.cards} />
+                        <RichCardRenderer cards={m.cards} onAction={handleCardAction} />
                       </div>
                     )}
                   </div>

@@ -12,6 +12,7 @@ describe('Open Merchant Integration Architecture (SPI & Skills)', () => {
   let mockServer: any;
 
   beforeAll(async () => {
+    TenantRegistryService.invalidateCache();
     // 0. 初始化商户独立数据库种子数据
     await seedMerchantData();
 
@@ -60,6 +61,7 @@ describe('Open Merchant Integration Architecture (SPI & Skills)', () => {
   afterAll(() => {
     mockServer?.stop();
     delete process.env.SPI_BASE_URL_OVERRIDE;
+    TenantRegistryService.invalidateCache();
   });
 
   describe('1. HMAC-SHA256 Signer & Verification', () => {

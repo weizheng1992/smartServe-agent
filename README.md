@@ -91,6 +91,10 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Bun 运行环境**�
 5. [质量保障与全自动化测试 (Quality & Automation)](#5-质量保障与全自动化测试-quality--automation)
 6. [开发与部署命令 (Quick Start)](#6-开发与部署命令-quick-start)
 7. [新商户接入与配置使用手册 (Merchant Onboarding & SPI Guide)](#7-新商户接入与配置使用手册-merchant-onboarding--spi-guide)
+8. [Agent SOP 业务技能开发、商户对接与测试实战指南 (Agent Skills Guide)](#8-agent-sop-业务技能开发商户对接与测试实战指南-agent-skills-guide)
+   - [8.1 什么是 Agent Skill 与工作原理](#81-什么是-agent-skill-与工作原理)
+   - [8.2 如何测试系统内置的 Skills](#82-如何测试系统内置的-skills)
+   - [8.3 商户端添加与使用自定义 Skill 完整实战教程](#83-商户端添加与使用自定义-skill-完整实战教程)
 
 ---
 
@@ -442,6 +446,377 @@ bun run lint
    # 启动服务并在 http://localhost:3005 发起咨询，在 http://localhost:3001 进行接管与审批
    bun run dev:all
    ```
+
+---
+
+## 8. Agent SOP 业务技能开发、商户对接与测试实战指南 (Agent Skills Guide)
+
+在 smartServe SaaS 平台中，**Skill（业务技能）** 是将业务规则、参数校验、风控门禁、SPI 外部调用以及多模态卡片渲染有机结合的高阶业务抽象层。
+
+---
+
+### 8.1 什么是 Agent Skill 与工作原理
+
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 用户提问 / 意图分流与消歧                                │
+│                              IntentTriageEngine / Fast-Track                           │
+└──────────────────────────────────────────┬─────────────────────────────────────────────┘
+                                           │
+                                           ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                              SkillRegistry 注册中心动态匹配                             │
+│       SkillRegistry.findMatchingSkill(context) -> BaseSkill 继承实例                    │
+└──────────────────────────────────────────┬─────────────────────────────────────────────┘
+                                           │
+                                           ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                             BaseSkill 标准作业程序 (SOP Pipeline)                       │
+│  1. canHandle(context): 意图与前置槽位判定                                              │
+│  2. getEffectiveConfig(tenantId): 动态读取租户级配置重载                                │
+│  3. validatePreconditions(context): 必要槽位/前置条件检查                               │
+│  4. HITL 风控门禁判定: 金额/高危动作 > 阈值 ➔ 挂起审批 (require_approval)                 │
+│  5. SpiConnectorFactory: 动态装配 Remote SPI / Local DB Client (HMAC-SHA256 签名)       │
+│  6. execute(context): 执行商户业务动作 ➔ 组装 RichCardBlock 富卡片 ➔ 产出响应           │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 8.1.1 Tool（原子工具）与 Skill（业务技能）的本质区别
+
+> **一句话总结**：**Tool 是“手和脚”（纯底层操作），Skill 是“业务 SOP 大脑”（业务闭环与风控决策）。**
+
+| 核心维度       | 🛠️ 原子工具 (Tool)                                  | 🧩 业务技能 (Skill / SOP)                            |
+| :------------- | :-------------------------------------------------- | :--------------------------------------------------- |
+| **功能定位**   | **纯技术操作**（只负责发 HTTP 请求或查数据库表）    | **面向业务闭环的标准作业程序**（SOP 状态机）         |
+| **业务规则**   | ❌ **无**（给什么参数就执行什么，不关心业务合理性） | ✅ **内聚全套 SOP**（时效校验、状态拦截、合规判断）  |
+| **风控与审批** | ❌ **无**（无法自主决定是否需要人工审核）           | ✅ **HITL 门禁**（动态根据商户免审阈值自动挂起审批） |
+| **参数缺失**   | ❌ 报错崩溃或由 LLM 盲目猜测                        | ✅ **自愈追问**（精准拦截缺失槽位，引导用户补充）    |
+| **多租户策略** | ❌ 静态固定                                         | ✅ **动态重载**（不同商户可重载免审额度与提示词）    |
+| **输出形式**   | 原始 JSON / 字符串数据                              | 业务话术 + **多模态交互富卡片 (Rich Cards)**         |
+
+```text
+[用户输入: "帮我把订单 123 退款 ¥500"]
+                    │
+                    ▼
+          【IntentTriageEngine】(意图分流)
+                    │
+                    ▼
+          ┌────────────────────────────────────────┐
+          │      🧩 OrderRefundSkill (业务技能)     │
+          │                                        │
+          │  1. 槽位检查: orderId 存在？理由存在？  │
+          │  2. 租户规则: 当前商户免审额度是 ¥300？ │
+          │  3. 风控判定: ¥500 > ¥300 ➔ 阻断执行！ │
+          │  4. 审批流: 写入 Transactional Outbox  │
+          │  5. 状态机: 挂起 require_approval      │
+          └──────────────────┬─────────────────────┘
+                             │ 如果在免审额度内，才去调用:
+                             ▼
+          ┌────────────────────────────────────────┐
+          │      🛠️ ThirdPartySpiTool (原子工具)   │
+          │  - 计算 HMAC-SHA256 签名               │
+          │  - POST /spi/v1/orders/action          │
+          └────────────────────────────────────────┘
+```
+
+#### 为什么不能只有 Tool？
+
+1. **防范资金风险**：若只有 Tool，LLM 拿到工具后用户说“退款 10 万元”就会直接调用底层接口导致资损；而 Skill 会基于商户策略进行风控拦截；
+2. **防范状态越权**：订单若已发货（`SHIPPED`），Skill 会在调用工具前直接拦截改地址请求；
+3. **多租户差异化**：A 商户 100 元免审，B 商户 500 元免审，只有 Skill 层能动态识别租户并自适应决策。
+
+---
+
+### 8.2 如何测试系统内置的 Skills
+
+项目提供多层级自动化测试用例，覆盖 Skill 注册、SOP 逻辑、参数拦截与商户远程 SPI 端到端联调：
+
+```bash
+# 1. 运行 SkillRegistry 注册中心与 SOP 业务规则单测
+bun test packages/engine/tests/skillsRegistry.test.ts
+
+# 2. 运行 商户开放 SPI 连接与 Remote Skill 端到端集成测试 (含 HMAC 签名验签)
+bun test packages/engine/tests/openSpiMerchant.test.ts
+
+# 3. 运行 独立商户商城端所有路由、会话与多轮交互测试
+bun test apps/merchant/tests/
+
+# 4. 运行 决策引擎全量自动化测试套件
+bun test packages/engine/tests/
+```
+
+**测试覆盖重点**：
+
+- ✅ **内置技能全量注册**：`OrderRefundSkill`、`OrderAddressModificationSkill`、`ProductInquirySkill`、`ShoppingGuideSkill`、`CartManageSkill`。
+- ✅ **槽位缺失防御与即时追问**：退款缺少 `orderId`、改地址缺少 `newAddress` 时自动返回合规提示。
+- ✅ **HMAC-SHA256 验签防篡改**：伪造 payload 或时间戳过期时精准拒绝。
+- ✅ **幂等防重机制**：携带相同 `idempotencyKey` 的重复业务动作由商户服务安全拦截。
+
+---
+
+### 8.3 商户端添加与使用自定义 Skill 完整实战教程
+
+下面以新增一个 **「极速物流查询与催件 SOP (`OrderLogisticsTrackingSkill`)」** 为例，演示如何在平台中创建 Skill、对接商户端并进行测试：
+
+#### 步骤 1：在决策引擎中创建 Skill 类 (`packages/engine/src/skills/orderLogisticsTrackingSkill.ts`)
+
+```typescript
+import { BaseSkill } from "./baseSkill";
+import type {
+  SkillMetadata,
+  SkillExecutionContext,
+  SkillExecutionResult,
+  RichCardBlock,
+} from "types";
+
+export class OrderLogisticsTrackingSkill extends BaseSkill {
+  public metadata: SkillMetadata = {
+    id: "skill_order_logistics_tracking",
+    name: "极速物流查询与催件 SOP",
+    description: "查询订单实时物流轨迹、快递承运商与预估送达时间，支持一键催单",
+    category: "after_sale",
+    triggerIntents: ["ORDER_TRACKING", "LOGISTICS_INQUIRY", "order_status"],
+    requiredTools: ["getOrderDetail"],
+    version: "1.0.0",
+  };
+
+  public canHandle(context: SkillExecutionContext): boolean {
+    const intent =
+      (context.slots?.activeIntent as string) ||
+      (context.extra?.intent as string) ||
+      "";
+    return this.metadata.triggerIntents.includes(intent);
+  }
+
+  public async execute(
+    context: SkillExecutionContext,
+  ): Promise<SkillExecutionResult> {
+    const orderId = (context.slots?.orderId as string) || "";
+    if (!orderId) {
+      return {
+        success: false,
+        skillId: this.metadata.id,
+        output: "查询物流需要提供订单编号，请补充您的订单号。",
+        error: "Missing required slot: orderId",
+      };
+    }
+
+    // 动态获取当前租户绑定的 SPI 客户端 (自动适配商户 HTTP SPI 端点并附带 HMAC 签名)
+    const spiClient = await this.getSpiClient(context.tenantId);
+    const order = await spiClient.getOrderDetail({
+      orderId,
+      tenantId: context.tenantId,
+    });
+
+    if (!order) {
+      return {
+        success: false,
+        skillId: this.metadata.id,
+        output: `未查询到订单 [${orderId}] 的物流信息，请核对单号。`,
+      };
+    }
+
+    // 组装多模态卡片 (订单与物流状态)
+    const cards: RichCardBlock[] = [
+      {
+        type: "order_card",
+        data: {
+          orderId: order.orderId,
+          status: order.status,
+          totalAmount: Number(order.totalAmount),
+          currency: "CNY",
+          carrier: order.carrier || "顺丰速运",
+          trackingNumber: order.trackingNumber || "SF10829384729",
+          estimatedDelivery: order.estimatedDelivery || "预计明日送达",
+          items: order.items,
+        },
+      },
+    ];
+
+    return {
+      success: true,
+      skillId: this.metadata.id,
+      output: `订单 [${orderId}] 当前状态为【${order.status}】，承运快递：${order.carrier || "顺丰速运"}，运单号：${order.trackingNumber || "暂无"}。`,
+      cards,
+      nextAction: "finish",
+    };
+  }
+}
+```
+
+#### 步骤 2：在 `SkillRegistry` 中注册该 Skill (`packages/engine/src/skills/skillRegistry.ts`)
+
+```typescript
+import { OrderLogisticsTrackingSkill } from "./orderLogisticsTrackingSkill";
+
+// 在 static 初始化块中注册
+SkillRegistry.register(new OrderLogisticsTrackingSkill());
+```
+
+#### 步骤 3：在商户端暴露对应的 SPI 端点与 HMAC 验签 (`apps/merchant/app/spi/v1/orders/detail/route.ts`)
+
+```typescript
+import { NextRequest, NextResponse } from "next/server";
+import { verifySpiRequest } from "@/services/spiAuthGuard";
+import { MerchantDomainService } from "@/services/merchantDomainService";
+
+export async function GET(req: NextRequest) {
+  // 1. 校验来自智能客服中台的 HMAC-SHA256 签名与时间戳
+  const auth = await verifySpiRequest(req, "", { requireSignature: false });
+  if (!auth.isValid) {
+    return NextResponse.json(
+      { success: false, error: auth.error },
+      { status: 401 },
+    );
+  }
+
+  // 2. 查验商户私有数据库/ERP 订单与物流状态
+  const orderId = req.nextUrl.searchParams.get("orderId") || "";
+  const order = await MerchantDomainService.getOrderDetail(orderId);
+
+  return NextResponse.json({ success: true, data: order });
+}
+```
+
+#### 步骤 4：在商户配置中启用技能与设置策略
+
+商户可在 **Admin 控制台（`http://localhost:3001/skills-tools`）** 或通过数据库 `tenant_configs` 动态覆盖该 Skill 的策略参数：
+
+```sql
+UPDATE tenant_configs
+SET enabled_skills = array_append(enabled_skills, 'skill_order_logistics_tracking'),
+    skills_config = jsonb_set(
+      COALESCE(skills_config, '{}'::jsonb),
+      '{skill_order_logistics_tracking}',
+      '{"enabled": true, "approvalThresholdAmount": 100, "customPolicyPrompt": "优先引导客户使用顺丰同城急送"}'
+    )
+WHERE business_id = 'aurora';
+```
+
+#### 步骤 5：商户端前台对话与联调验证
+
+1. 启动服务：`bun run dev:all`；
+2. 打开极光潮品商城 `http://localhost:3005`，点击右下角智能客服；
+3. 发送消息：`“帮我查一下订单 AURORA-ORD-2026-9081 的物流信息”`；
+4. 智能体自动匹配 `skill_order_logistics_tracking` ➔ 调用商户 SPI ➔ 渲染物流卡片与实时进度。
+
+---
+
+#### 案例 2：电子发票开具与风控审批 SOP 实战 (`OrderInvoiceSkill`)
+
+本案例展示了**带有风控审批门禁 (HITL) 与商户动态免审额度**的高阶 Skill 开发全流程：
+
+```typescript
+// packages/engine/src/skills/orderInvoiceSkill.ts
+import crypto from "node:crypto";
+import { BaseSkill } from "./baseSkill";
+import type {
+  SkillMetadata,
+  SkillExecutionContext,
+  SkillExecutionResult,
+  RichCardBlock,
+} from "types";
+
+export class OrderInvoiceSkill extends BaseSkill {
+  public metadata: SkillMetadata = {
+    id: "skill_order_invoice",
+    name: "电子发票开具 SOP",
+    description: "核验订单支付状态与税号，自动开具电子发票并支持超额人工审核",
+    category: "after_sale",
+    triggerIntents: ["APPLY_INVOICE", "order_invoice", "request_invoice"],
+    requiredTools: ["getOrderDetail", "executeOrderAction"],
+    requiresApproval: true,
+    approvalThresholdAmount: 2000, // 默认 2000 元以上开票需人工财务审批
+    version: "1.0.0",
+  };
+
+  public canHandle(context: SkillExecutionContext): boolean {
+    const intent =
+      (context.slots?.activeIntent as string) ||
+      (context.extra?.intent as string) ||
+      "";
+    if (this.metadata.triggerIntents.includes(intent)) return true;
+    return /开发票|电子发票|开票|补开发票/i.test(context.input || "");
+  }
+
+  public async execute(
+    context: SkillExecutionContext,
+  ): Promise<SkillExecutionResult> {
+    const orderId = (context.slots?.orderId as string) || "";
+    const invoiceTitle =
+      (context.slots?.invoiceTitle as string) ||
+      (context.slots?.title as string) ||
+      "个人";
+
+    if (!orderId) {
+      return {
+        success: false,
+        skillId: this.metadata.id,
+        output: "申请开具发票需要提供订单编号，请补充您的订单号。",
+        error: "Missing required slot: orderId",
+      };
+    }
+
+    const spiClient = await this.getSpiClient(context.tenantId);
+    const order = await spiClient.getOrderDetail({
+      orderId,
+      tenantId: context.tenantId,
+    });
+
+    if (!order) {
+      return {
+        success: false,
+        skillId: this.metadata.id,
+        output: `未查询到订单 [${orderId}]，请核对订单编号。`,
+      };
+    }
+
+    const totalAmount = Number(order.totalAmount) || 0;
+    const threshold = await this.getEffectiveApprovalThreshold(
+      context.tenantId,
+    );
+    const isApproved = Boolean(context.extra?.isApproved);
+
+    // 超过商户配置阈值时自动挂起 HITL 审批
+    if (totalAmount > threshold && !isApproved) {
+      return {
+        success: true,
+        skillId: this.metadata.id,
+        output: `您的发票开具金额为 ¥${totalAmount.toFixed(2)}（超过免审上限 ¥${threshold}），已为您提交至财务专员复核，请稍候。`,
+        nextAction: "require_approval",
+        approvalPayload: {
+          actionType: "applyInvoice",
+          amount: totalAmount,
+          reason: `大额开票申请: ${invoiceTitle}`,
+          details: {
+            orderId,
+            invoiceTitle,
+            tenantId: context.tenantId,
+            userId: context.userId,
+          },
+        },
+      };
+    }
+
+    // 免审或审批通过，直接调用商户端 SPI 执行开票
+    const idempotencyKey = crypto.randomUUID();
+    await spiClient.executeOrderAction({
+      actionType: "APPLY_INVOICE" as any,
+      orderId,
+      userId: context.userId,
+      idempotencyKey,
+      tenantId: context.tenantId,
+    });
+
+    return {
+      success: true,
+      skillId: this.metadata.id,
+      output: `已成功为您开具订单 [${orderId}] 的电子普通发票（抬头：${invoiceTitle}），发票金额：¥${totalAmount.toFixed(2)}。`,
+      nextAction: "finish",
+    };
+  }
+}
+```
 
 ---
 
