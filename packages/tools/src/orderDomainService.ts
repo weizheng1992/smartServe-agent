@@ -1,5 +1,5 @@
-import crypto from "crypto";
-import { type Order, db, getDrizzle, longMemoryFacts } from "db";
+import crypto from 'crypto';
+import { type Order, db, getDrizzle, longMemoryFacts } from 'db';
 import type {
   DatabaseOrderItemRow,
   DatabaseOrderRow,
@@ -10,9 +10,9 @@ import type {
   ToolExecutionResult,
   UserAddressRow,
   UserOrderRecord,
-} from "types";
-import { TenantRegistryService } from "../../business-configs/src";
-import { toolCache } from "./cache";
+} from 'types';
+import { TenantRegistryService } from '../../business-configs/src';
+import { toolCache } from './cache';
 
 export interface ThreadSessionContext {
   userId: string;
@@ -23,11 +23,9 @@ export class OrderDomainService {
   /**
    * 🛡️ 零越权验证 (Zero IDOR): 通过 threadId 物理追溯当前登录用户身份及所属商户
    */
-  static async getThreadSessionContext(
-    threadId?: string,
-  ): Promise<ThreadSessionContext> {
+  static async getThreadSessionContext(threadId?: string): Promise<ThreadSessionContext> {
     if (!threadId) {
-      return { userId: "", businessId: "ecommerce" };
+      return { userId: '', businessId: 'ecommerce' };
     }
 
     try {
@@ -38,94 +36,76 @@ export class OrderDomainService {
       if (res.rows?.[0]) {
         const row = res.rows[0] as DatabaseThreadRow;
         return {
-          userId: (row.userId || row.user_id || "") as string,
-          businessId: (row.businessId ||
-            row.business_id ||
-            "ecommerce") as string,
+          userId: (row.userId || row.user_id || '') as string,
+          businessId: (row.businessId || row.business_id || 'ecommerce') as string,
         };
       }
     } catch (err) {
-      console.warn(
-        "[OrderDomainService] Failed to fetch thread session context:",
-        err,
-      );
+      console.warn('[OrderDomainService] Failed to fetch thread session context:', err);
     }
 
-    return { userId: "", businessId: "ecommerce" };
+    return { userId: '', businessId: 'ecommerce' };
   }
 
   /**
    * 获取商户售后 SOP 退货时效规定（Nike 30天，Adidas 14天，电商主站 7天）
    */
   static getReturnWindowDays(businessId: string): number {
-    const cleanId = (businessId || "").toLowerCase();
-    if (cleanId === "nike") return 30;
-    if (cleanId === "adidas") return 14;
+    const cleanId = (businessId || '').toLowerCase();
+    if (cleanId === 'nike') return 30;
+    if (cleanId === 'adidas') return 14;
     return 7;
   }
 
   /**
    * 🛡️ 统一多租户与用户归属订单安全查询
    */
-  static async findOrderById(
-    orderId: string,
-    userId?: string,
-    businessId?: string,
-  ): Promise<DatabaseOrderRow | null> {
+  static async findOrderById(orderId: string, userId?: string, businessId?: string): Promise<DatabaseOrderRow | null> {
     try {
       // 1. 先从主 orders 表查询
-      const conditions = ["(order_id = $1 OR order_id ILIKE $1)"];
+      const conditions = ['(order_id = $1 OR order_id ILIKE $1)'];
       const params: (string | number)[] = [orderId];
 
       if (userId) {
         params.push(userId);
-        conditions.push(
-          `(user_id = $${params.length} OR user_id = 'CUST-8801')`,
-        );
+        conditions.push(`(user_id = $${params.length} OR user_id = 'CUST-8801')`);
       }
 
-      if (businessId && businessId !== "ecommerce") {
+      if (businessId && businessId !== 'ecommerce') {
         params.push(businessId);
         conditions.push(`business_id = $${params.length}`);
       }
 
-      const orderQuery = `SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery", user_id AS "userId", business_id AS "businessId", total_amount AS "totalAmount" FROM orders WHERE ${conditions.join(" AND ")}`;
+      const orderQuery = `SELECT order_id AS "orderId", status, carrier, tracking_number AS "trackingNumber", estimated_delivery AS "estimatedDelivery", user_id AS "userId", business_id AS "businessId", total_amount AS "totalAmount" FROM orders WHERE ${conditions.join(' AND ')}`;
       const res = await db.execute(orderQuery, params);
       if (res?.rows?.[0]) {
         return res.rows[0] as DatabaseOrderRow;
       }
 
       // 2. 尝试从 third_party_orders 独立商户 SPI 订单表回退查询
-      const tpConditions = [
-        "(ext_order_sn = $1 OR ext_order_sn ILIKE $1 OR ext_order_sn ILIKE '%' || $1)",
-      ];
+      const tpConditions = ["(ext_order_sn = $1 OR ext_order_sn ILIKE $1 OR ext_order_sn ILIKE '%' || $1)"];
       const tpParams: (string | number)[] = [orderId];
 
       if (userId) {
         tpParams.push(userId);
-        tpConditions.push(
-          `(customer_id = $${tpParams.length} OR customer_id = 'CUST-8801')`,
-        );
+        tpConditions.push(`(customer_id = $${tpParams.length} OR customer_id = 'CUST-8801')`);
       }
 
-      if (businessId && businessId !== "ecommerce") {
+      if (businessId && businessId !== 'ecommerce') {
         tpParams.push(businessId);
         tpConditions.push(`merchant_id = $${tpParams.length}`);
       }
 
-      const tpQuery = `SELECT ext_order_sn AS "orderId", order_status AS "status", carrier_code AS "carrier", tracking_no AS "trackingNumber", shipping_address AS "shippingAddress", customer_id AS "userId", merchant_id AS "businessId", pay_amount AS "totalAmount" FROM third_party_orders WHERE ${tpConditions.join(" AND ")}`;
+      const tpQuery = `SELECT ext_order_sn AS "orderId", order_status AS "status", carrier_code AS "carrier", tracking_no AS "trackingNumber", shipping_address AS "shippingAddress", customer_id AS "userId", merchant_id AS "businessId", pay_amount AS "totalAmount" FROM third_party_orders WHERE ${tpConditions.join(' AND ')}`;
       const tpRes = await db.execute(tpQuery, tpParams);
       if (tpRes?.rows?.[0]) {
         const row = tpRes.rows[0] as Record<string, any>;
         return {
           orderId: row.orderId,
           status: row.status,
-          carrier: row.carrier || "顺丰速运 (SF Express)",
-          trackingNumber:
-            row.trackingNumber ||
-            `SF${Math.floor(1000000000 + Math.random() * 9000000000)}`,
-          estimatedDelivery:
-            row.estimatedDelivery || new Date().toISOString().split("T")[0],
+          carrier: row.carrier || '顺丰速运 (SF Express)',
+          trackingNumber: row.trackingNumber || `SF${Math.floor(1000000000 + Math.random() * 9000000000)}`,
+          estimatedDelivery: row.estimatedDelivery || new Date().toISOString().split('T')[0],
           userId: row.userId,
           businessId: row.businessId,
           totalAmount: row.totalAmount,
@@ -135,7 +115,7 @@ export class OrderDomainService {
 
       return null;
     } catch (err) {
-      console.error("[OrderDomainService.findOrderById] Database error:", err);
+      console.error('[OrderDomainService.findOrderById] Database error:', err);
       return null;
     }
   }
@@ -143,21 +123,15 @@ export class OrderDomainService {
   /**
    * 查询订单状态与物流详情（具备二级多级缓存防护）
    */
-  static async getOrderStatus(
-    orderId: string,
-    threadId?: string,
-  ): Promise<ToolExecutionResult> {
-    const { userId: sessionUserId, businessId } =
-      await this.getThreadSessionContext(threadId);
+  static async getOrderStatus(orderId: string, threadId?: string): Promise<ToolExecutionResult> {
+    const { userId: sessionUserId, businessId } = await this.getThreadSessionContext(threadId);
     const cacheKey = `cache:order_status:${orderId}`;
 
     // 1. 尝试从多级缓存中读取
     const cached = await toolCache.get<Record<string, unknown>>(cacheKey);
     if (cached) {
       if (!sessionUserId || cached.userId === sessionUserId) {
-        console.log(
-          `[Tool Cache Hit] 🎯 缓存命中！直接返回 Order ${orderId} 物流数据！`,
-        );
+        console.log(`[Tool Cache Hit] 🎯 缓存命中！直接返回 Order ${orderId} 物流数据！`);
         return cached as ToolExecutionResult;
       }
     }
@@ -173,29 +147,23 @@ export class OrderDomainService {
 
     const items: DatabaseOrderItemRow[] = [];
     try {
-      const itemsRes = await db.execute(
-        'SELECT * FROM "order_items" WHERE "order_id" = $1',
-        [order.orderId || orderId],
-      );
+      const itemsRes = await db.execute('SELECT * FROM "order_items" WHERE "order_id" = $1', [
+        order.orderId || orderId,
+      ]);
       if (itemsRes?.rows && itemsRes.rows.length > 0) {
         for (const itemRow of itemsRes.rows as DatabaseOrderItemRow[]) {
           const prodId = (itemRow.product_id || itemRow.productId) as string;
           const quantity = Number(itemRow.quantity || 1);
-          const priceAtPurchase = Number(
-            itemRow.price_at_purchase || itemRow.priceAtPurchase || 0,
-          );
+          const priceAtPurchase = Number(itemRow.price_at_purchase || itemRow.priceAtPurchase || 0);
 
-          let prodName = "未知商品";
-          let prodDesc = "";
+          let prodName = '未知商品';
+          let prodDesc = '';
           try {
-            const prodRes = await db.execute(
-              'SELECT * FROM "products" WHERE "id" = $1',
-              [prodId],
-            );
+            const prodRes = await db.execute('SELECT * FROM "products" WHERE "id" = $1', [prodId]);
             if (prodRes?.rows?.[0]) {
               const prod = prodRes.rows[0] as DatabaseProductRow;
-              prodName = (prod.name || "未知商品") as string;
-              prodDesc = (prod.description || "") as string;
+              prodName = (prod.name || '未知商品') as string;
+              prodDesc = (prod.description || '') as string;
             }
           } catch {
             // 查询商品详情失败时保持默认值
@@ -211,16 +179,15 @@ export class OrderDomainService {
         }
       } else {
         // 尝试从 third_party_order_items 检索商品明细
-        const tpItemsRes = await db.execute(
-          'SELECT * FROM "third_party_order_items" WHERE "ext_order_sn" = $1',
-          [order.orderId || orderId],
-        );
+        const tpItemsRes = await db.execute('SELECT * FROM "third_party_order_items" WHERE "ext_order_sn" = $1', [
+          order.orderId || orderId,
+        ]);
         if (tpItemsRes?.rows && tpItemsRes.rows.length > 0) {
           for (const tpItem of tpItemsRes.rows as any[]) {
             items.push({
               productId: tpItem.sku_code || tpItem.item_id,
-              name: tpItem.item_title || "商户商品",
-              description: "",
+              name: tpItem.item_title || '商户商品',
+              description: '',
               quantity: Number(tpItem.buy_qty || 1),
               priceAtPurchase: Number(tpItem.unit_price || 0),
             });
@@ -228,26 +195,18 @@ export class OrderDomainService {
         }
       }
     } catch (err) {
-      console.warn(
-        "[OrderDomainService] Failed to fetch relational order items:",
-        err,
-      );
+      console.warn('[OrderDomainService] Failed to fetch relational order items:', err);
     }
 
-    const computedTotal = items.reduce(
-      (sum, item) => sum + (item.priceAtPurchase ?? 0) * (item.quantity ?? 1),
-      0,
-    );
+    const computedTotal = items.reduce((sum, item) => sum + (item.priceAtPurchase ?? 0) * (item.quantity ?? 1), 0);
 
-    let totalAmountFormatted = "$0.00";
+    let totalAmountFormatted = '$0.00';
     if (computedTotal > 0) {
       totalAmountFormatted = `$${computedTotal.toFixed(2)}`;
     } else if (order.totalAmount || order.total_amount) {
       const rawVal = String(order.totalAmount || order.total_amount);
-      const numVal = Number.parseFloat(rawVal.replace(/[^0-9.]/g, ""));
-      totalAmountFormatted = Number.isNaN(numVal)
-        ? "$0.00"
-        : `$${numVal.toFixed(2)}`;
+      const numVal = Number.parseFloat(rawVal.replace(/[^0-9.]/g, ''));
+      totalAmountFormatted = Number.isNaN(numVal) ? '$0.00' : `$${numVal.toFixed(2)}`;
     }
 
     const enrichedOrder: Record<string, unknown> = {
@@ -277,8 +236,7 @@ export class OrderDomainService {
     threadId?: string,
     amount?: string,
   ): Promise<ToolExecutionResult> {
-    const { userId: sessionUserId, businessId } =
-      await this.getThreadSessionContext(threadId);
+    const { userId: sessionUserId, businessId } = await this.getThreadSessionContext(threadId);
     const returnWindowDays = this.getReturnWindowDays(businessId);
 
     const order = await this.findOrderById(orderId, sessionUserId, businessId);
@@ -291,8 +249,7 @@ export class OrderDomainService {
 
     // 物理时效比对（SOP Policy Guardrail）
     let diffDays = 0;
-    const estimatedDelivery =
-      order.estimatedDelivery || order.estimated_delivery;
+    const estimatedDelivery = order.estimatedDelivery || order.estimated_delivery;
     if (estimatedDelivery) {
       const deliveryDate = new Date(estimatedDelivery);
       const currentDate = new Date();
@@ -306,7 +263,7 @@ export class OrderDomainService {
         return {
           error: `⚠️ 退款政策拦截：根据商户 [${businessId.toUpperCase()}] 官方售后 SOP 规范，退货时效为订单送达之日起 ${returnWindowDays} 天内。该订单送达日期为 ${estimatedDelivery}，当前已逾期 ${diffDays} 天，超出合规退款时效。物理拒绝执行退款！`,
           orderId,
-          status: "rejected_by_policy",
+          status: 'rejected_by_policy',
           businessId,
           returnWindowDays,
           elapsedDays: diffDays,
@@ -315,15 +272,11 @@ export class OrderDomainService {
     }
 
     // 更新数据库订单状态为 refunded
-    await db.execute(
-      'UPDATE "orders" SET status = \'refunded\' WHERE "order_id" = $1',
-      [order.orderId || orderId],
-    );
+    await db.execute('UPDATE "orders" SET status = \'refunded\' WHERE "order_id" = $1', [order.orderId || orderId]);
     try {
-      await db.execute(
-        'UPDATE "third_party_orders" SET order_status = \'REFUNDED\' WHERE "ext_order_sn" = $1',
-        [order.orderId || orderId],
-      );
+      await db.execute('UPDATE "third_party_orders" SET order_status = \'REFUNDED\' WHERE "ext_order_sn" = $1', [
+        order.orderId || orderId,
+      ]);
     } catch {
       // 忽略第三方表不存在等异常
     }
@@ -334,12 +287,12 @@ export class OrderDomainService {
       `[Tool Cache Invalidate] 🧹 因退款发起，已全渠道物理清除 Order ${orderId} 的物流缓存，确保缓存强一致性！`,
     );
 
-    let refundAmountVal = "$99.99";
+    let refundAmountVal = '$99.99';
     const totalAmountVal = order.totalAmount || order.total_amount;
     if (totalAmountVal) {
       refundAmountVal = `$${totalAmountVal}`;
     } else if (amount) {
-      refundAmountVal = amount.startsWith("$") ? amount : `$${amount}`;
+      refundAmountVal = amount.startsWith('$') ? amount : `$${amount}`;
     }
 
     let auditTrail: ToolAuditTrail | null = null;
@@ -347,54 +300,46 @@ export class OrderDomainService {
       try {
         const appRes = await db.execute(
           'SELECT id, "created_at" AS "createdAt", status FROM pending_approvals WHERE thread_id = $1 AND action_type = $2 ORDER BY created_at DESC LIMIT 1',
-          [threadId, "processRefund"],
+          [threadId, 'processRefund'],
         );
         const firstRow = appRes.rows?.[0] as Record<string, any> | undefined;
-        if (firstRow && firstRow.status === "approved") {
+        if (firstRow && firstRow.status === 'approved') {
           const appRecord = firstRow;
           const verHash = crypto
-            .createHash("sha256")
+            .createHash('sha256')
             .update(`${appRecord.id}:${orderId}:refunded:${refundAmountVal}`)
-            .digest("hex");
+            .digest('hex');
           auditTrail = {
             approvalId: appRecord.id,
-            approvedAt: appRecord.createdAt
-              ? new Date(appRecord.createdAt).toISOString()
-              : new Date().toISOString(),
+            approvedAt: appRecord.createdAt ? new Date(appRecord.createdAt).toISOString() : new Date().toISOString(),
             policyMatched: `SOP Window Check: Passed (${diffDays} days elapsed of allowed ${returnWindowDays} days)`,
-            actionVerifier: "supervisor_approval_gate",
+            actionVerifier: 'supervisor_approval_gate',
             verifiableHash: verHash,
           };
         }
       } catch (auditErr) {
-        console.warn(
-          "[Refund Tool Audit] Failed to generate physical audit trail:",
-          auditErr,
-        );
+        console.warn('[Refund Tool Audit] Failed to generate physical audit trail:', auditErr);
       }
     }
 
     if (!auditTrail) {
-      const verHash = crypto
-        .createHash("sha256")
-        .update(`auto-approved:${orderId}:${refundAmountVal}`)
-        .digest("hex");
+      const verHash = crypto.createHash('sha256').update(`auto-approved:${orderId}:${refundAmountVal}`).digest('hex');
       auditTrail = {
-        approvalId: "AUTO_APPROVED",
+        approvalId: 'AUTO_APPROVED',
         approvedAt: new Date().toISOString(),
         policyMatched: `SOP Auto-Approval Limit Check: Passed ($${totalAmountVal || 0} <= $100 limit; ${diffDays} days elapsed of allowed ${returnWindowDays} days)`,
-        actionVerifier: "system_auto_approval_engine",
+        actionVerifier: 'system_auto_approval_engine',
         verifiableHash: verHash,
       };
     }
 
     return {
       orderId,
-      status: "refunded",
+      status: 'refunded',
       refundAmount: refundAmountVal,
       reason,
       transactionId: `TXN_${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      message: "Physical refund process initiated in Postgres database.",
+      message: 'Physical refund process initiated in Postgres database.',
       auditTrail,
     };
   }
@@ -421,11 +366,9 @@ export class OrderDomainService {
       orderId = `ORD-${Date.now().toString().slice(-6)}`,
       userId,
       businessId,
-      carrier = "SF Express",
+      carrier = 'SF Express',
       trackingNumber = `SF${Math.floor(1000000000 + Math.random() * 9000000000)}`,
-      estimatedDelivery = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0],
+      estimatedDelivery = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       totalAmount = 99.0,
       items = [],
       threadId,
@@ -437,41 +380,25 @@ export class OrderDomainService {
       if (!businessId && ctx.businessId) businessId = ctx.businessId;
     }
 
-    businessId = businessId || "ecommerce";
+    businessId = businessId || 'ecommerce';
 
     if (!userId) {
       return {
-        error:
-          "userId is strictly required to create an order (or provide valid session threadId).",
+        error: 'userId is strictly required to create an order (or provide valid session threadId).',
       };
     }
 
     try {
       await db.execute(
-        "INSERT INTO orders (order_id, status, carrier, tracking_number, estimated_delivery, user_id, business_id, total_amount) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (order_id) DO UPDATE SET status = EXCLUDED.status, carrier = EXCLUDED.carrier, tracking_number = EXCLUDED.tracking_number, estimated_delivery = EXCLUDED.estimated_delivery, total_amount = EXCLUDED.total_amount, user_id = EXCLUDED.user_id, business_id = EXCLUDED.business_id",
-        [
-          orderId,
-          "shipped",
-          carrier,
-          trackingNumber,
-          estimatedDelivery,
-          userId,
-          businessId,
-          totalAmount,
-        ],
+        'INSERT INTO orders (order_id, status, carrier, tracking_number, estimated_delivery, user_id, business_id, total_amount) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (order_id) DO UPDATE SET status = EXCLUDED.status, carrier = EXCLUDED.carrier, tracking_number = EXCLUDED.tracking_number, estimated_delivery = EXCLUDED.estimated_delivery, total_amount = EXCLUDED.total_amount, user_id = EXCLUDED.user_id, business_id = EXCLUDED.business_id',
+        [orderId, 'shipped', carrier, trackingNumber, estimatedDelivery, userId, businessId, totalAmount],
       );
 
       for (const item of items) {
         const itemId = `item_${orderId}_${item.productId}`;
         await db.execute(
-          "INSERT INTO order_items (id, order_id, product_id, quantity, price_at_purchase) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING",
-          [
-            itemId,
-            orderId,
-            item.productId,
-            item.quantity,
-            item.priceAtPurchase || 0,
-          ],
+          'INSERT INTO order_items (id, order_id, product_id, quantity, price_at_purchase) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING',
+          [itemId, orderId, item.productId, item.quantity, item.priceAtPurchase || 0],
         );
       }
 
@@ -481,7 +408,7 @@ export class OrderDomainService {
         success: true,
         order: {
           orderId,
-          status: "shipped",
+          status: 'shipped',
           carrier,
           trackingNumber,
           estimatedDelivery,
@@ -491,43 +418,33 @@ export class OrderDomainService {
         },
       };
     } catch (err) {
-      console.error("[OrderDomainService.createOrder] Failed:", err);
-      return { error: "Failed to create order in database." };
+      console.error('[OrderDomainService.createOrder] Failed:', err);
+      return { error: 'Failed to create order in database.' };
     }
   }
 
   /**
    * 查询当前会话客户的历史订单列表 (支持直接入参、Thread 上下文透传与多租户 SPI 远程查单)
    */
-  static async listUserOrders(
-    threadId?: string,
-    userId?: string,
-    businessId?: string,
-  ): Promise<ToolExecutionResult> {
+  static async listUserOrders(threadId?: string, userId?: string, businessId?: string): Promise<ToolExecutionResult> {
     let targetUserId = userId;
     let targetBusinessId = businessId;
 
     if ((!targetUserId || !targetBusinessId) && threadId) {
       const ctx = await this.getThreadSessionContext(threadId);
       if (!targetUserId && ctx.userId) targetUserId = ctx.userId;
-      if (!targetBusinessId && ctx.businessId)
-        targetBusinessId = ctx.businessId;
+      if (!targetBusinessId && ctx.businessId) targetBusinessId = ctx.businessId;
     }
 
-    targetUserId = targetUserId || "CUST-8801";
-    targetBusinessId = (targetBusinessId || "ecommerce").toLowerCase();
+    targetUserId = targetUserId || 'CUST-8801';
+    targetBusinessId = (targetBusinessId || 'ecommerce').toLowerCase();
 
     // 1. 优先尝试通过商户 SPI 连接器拉取第三方独立系统订单
     try {
-      const tenantConfig =
-        await TenantRegistryService.getTenantConfig(targetBusinessId);
+      const tenantConfig = await TenantRegistryService.getTenantConfig(targetBusinessId);
       if (tenantConfig && tenantConfig.spiConnector) {
-        const { SpiConnectorFactory } =
-          await import("./connectors/spiConnectorFactory");
-        const spiClient = SpiConnectorFactory.getClient(
-          tenantConfig.spiConnector,
-          targetBusinessId,
-        );
+        const { SpiConnectorFactory } = await import('./connectors/spiConnectorFactory');
+        const spiClient = SpiConnectorFactory.getClient(tenantConfig.spiConnector, targetBusinessId);
         const spiOrders = await spiClient.listOrders({
           userId: targetUserId,
           tenantId: targetBusinessId,
@@ -539,17 +456,13 @@ export class OrderDomainService {
             orders: spiOrders.map((o) => ({
               orderId: o.orderId,
               status: o.status,
-              carrier: o.tracking?.carrier || "顺丰速运 (SF Express)",
-              trackingNumber:
-                o.tracking?.trackingNumber ||
-                `SF${Math.floor(1000000000 + Math.random() * 9000000000)}`,
+              carrier: o.tracking?.carrier || '顺丰速运 (SF Express)',
+              trackingNumber: o.tracking?.trackingNumber || `SF${Math.floor(1000000000 + Math.random() * 9000000000)}`,
               estimatedDelivery: o.createdAt
-                ? String(o.createdAt).split("T")[0]
-                : new Date().toISOString().split("T")[0],
+                ? String(o.createdAt).split('T')[0]
+                : new Date().toISOString().split('T')[0],
               totalAmount:
-                typeof o.totalAmount === "number"
-                  ? `$${o.totalAmount.toFixed(2)}`
-                  : String(o.totalAmount || "$0.00"),
+                typeof o.totalAmount === 'number' ? `$${o.totalAmount.toFixed(2)}` : String(o.totalAmount || '$0.00'),
               businessId: targetBusinessId,
               items: o.items || [],
             })),
@@ -557,10 +470,7 @@ export class OrderDomainService {
         }
       }
     } catch (spiErr) {
-      console.warn(
-        "[OrderDomainService.listUserOrders] SPI client lookup warning:",
-        spiErr,
-      );
+      console.warn('[OrderDomainService.listUserOrders] SPI client lookup warning:', spiErr);
     }
 
     // 2. 本地 PostgreSQL 物理表关联查询
@@ -574,13 +484,7 @@ export class OrderDomainService {
         // 自动自愈注入示例订单（保障多租户与新用户演示体验）
         const activeBiz = targetBusinessId;
         const prefix =
-          activeBiz === "nike"
-            ? "NIKE"
-            : activeBiz === "adidas"
-              ? "ADIDAS"
-              : activeBiz === "aurora"
-                ? "AURORA"
-                : "ECO";
+          activeBiz === 'nike' ? 'NIKE' : activeBiz === 'adidas' ? 'ADIDAS' : activeBiz === 'aurora' ? 'AURORA' : 'ECO';
         const demoOrderId1 = `ORD-${prefix}-${Date.now().toString().slice(-4)}1`;
         const demoOrderId2 = `ORD-${prefix}-${Date.now().toString().slice(-4)}2`;
 
@@ -589,11 +493,9 @@ export class OrderDomainService {
             orderId: demoOrderId1,
             userId: targetUserId,
             businessId: activeBiz,
-            carrier: "SF Express (顺丰速运)",
+            carrier: 'SF Express (顺丰速运)',
             trackingNumber: `SF${Math.floor(1000000000 + Math.random() * 9000000000)}`,
-            estimatedDelivery: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
-              .toISOString()
-              .split("T")[0],
+            estimatedDelivery: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             totalAmount: 199.0,
             threadId,
           });
@@ -601,11 +503,9 @@ export class OrderDomainService {
             orderId: demoOrderId2,
             userId: targetUserId,
             businessId: activeBiz,
-            carrier: "JD Logistics (京东物流)",
+            carrier: 'JD Logistics (京东物流)',
             trackingNumber: `JD${Math.floor(1000000000 + Math.random() * 9000000000)}`,
-            estimatedDelivery: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
-              .toISOString()
-              .split("T")[0],
+            estimatedDelivery: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             totalAmount: 89.0,
             threadId,
           });
@@ -618,18 +518,15 @@ export class OrderDomainService {
             return { orders: seededRes.rows } as ToolExecutionResult;
           }
         } catch (seedErr) {
-          console.warn(
-            "[OrderDomainService] Auto-seed demo orders fallback warning:",
-            seedErr,
-          );
+          console.warn('[OrderDomainService] Auto-seed demo orders fallback warning:', seedErr);
         }
 
-        return { message: "No orders found for this customer." };
+        return { message: 'No orders found for this customer.' };
       }
       return { orders: rows } as ToolExecutionResult;
     } catch (err) {
-      console.error("[OrderDomainService.listUserOrders] Failed:", err);
-      return { error: "Failed to retrieve orders from database." };
+      console.error('[OrderDomainService.listUserOrders] Failed:', err);
+      return { error: 'Failed to retrieve orders from database.' };
     }
   }
 
@@ -642,29 +539,20 @@ export class OrderDomainService {
     threadId?: string,
     isApproved?: boolean,
   ): Promise<ToolExecutionResult> {
-    const { userId: sessionUserId, businessId } =
-      await this.getThreadSessionContext(threadId);
+    const { userId: sessionUserId, businessId } = await this.getThreadSessionContext(threadId);
 
     try {
-      const order = await this.findOrderById(
-        orderId,
-        sessionUserId,
-        businessId,
-      );
+      const order = await this.findOrderById(orderId, sessionUserId, businessId);
       if (!order) {
         return {
           error: `⚠️ 越权阻止或未找到订单：订单 ${orderId} 不属于您名下，或不存在于系统中。`,
         };
       }
 
-      const status = (order.status || "") as string;
+      const status = (order.status || '') as string;
       const totalAmount = Number(order.totalAmount || order.total_amount || 0);
 
-      if (
-        status === "shipped" ||
-        status === "delivered" ||
-        status === "SHIPPED"
-      ) {
+      if (status === 'shipped' || status === 'delivered' || status === 'SHIPPED') {
         return {
           error: `⚠️ Address modification blocked: Order ${orderId} is currently [${status.toUpperCase()}] and has already left our logistics centers. Physical modification is impossible.`,
         };
@@ -676,7 +564,7 @@ export class OrderDomainService {
         );
         return {
           waitingForApproval: true,
-          actionType: "changeShippingAddress",
+          actionType: 'changeShippingAddress',
           actionPayload: {
             args: { orderId, newAddress },
           },
@@ -684,19 +572,17 @@ export class OrderDomainService {
         };
       }
 
-      console.log(
-        `[Address Change] ✅ Order ${orderId} address updated to: "${newAddress}"`,
-      );
+      console.log(`[Address Change] ✅ Order ${orderId} address updated to: "${newAddress}"`);
 
-      await db.execute(
-        'UPDATE "orders" SET address = $1 WHERE "order_id" = $2',
-        [newAddress, order.orderId || orderId],
-      );
+      await db.execute('UPDATE "orders" SET address = $1 WHERE "order_id" = $2', [
+        newAddress,
+        order.orderId || orderId,
+      ]);
       try {
-        await db.execute(
-          'UPDATE "third_party_orders" SET shipping_address = $1 WHERE "ext_order_sn" = $2',
-          [newAddress, order.orderId || orderId],
-        );
+        await db.execute('UPDATE "third_party_orders" SET shipping_address = $1 WHERE "ext_order_sn" = $2', [
+          newAddress,
+          order.orderId || orderId,
+        ]);
       } catch {
         // 忽略第三方表异常
       }
@@ -706,79 +592,66 @@ export class OrderDomainService {
         try {
           const appRes = await db.execute(
             'SELECT id, "created_at" AS "createdAt", status FROM pending_approvals WHERE thread_id = $1 AND action_type = $2 ORDER BY created_at DESC LIMIT 1',
-            [threadId, "changeShippingAddress"],
+            [threadId, 'changeShippingAddress'],
           );
           const firstRow = appRes.rows?.[0] as Record<string, any> | undefined;
-          if (firstRow && firstRow.status === "approved") {
+          if (firstRow && firstRow.status === 'approved') {
             const appRecord = firstRow;
             const verHash = crypto
-              .createHash("sha256")
-              .update(
-                `${appRecord.id}:${orderId}:address_updated:${newAddress}`,
-              )
-              .digest("hex");
+              .createHash('sha256')
+              .update(`${appRecord.id}:${orderId}:address_updated:${newAddress}`)
+              .digest('hex');
             auditTrail = {
               approvalId: appRecord.id,
-              approvedAt: appRecord.createdAt
-                ? new Date(appRecord.createdAt).toISOString()
-                : new Date().toISOString(),
+              approvedAt: appRecord.createdAt ? new Date(appRecord.createdAt).toISOString() : new Date().toISOString(),
               policyMatched: `SOP Address Change Check: High-Value Approved ($${totalAmount} > $100)`,
-              actionVerifier: "supervisor_approval_gate",
+              actionVerifier: 'supervisor_approval_gate',
               verifiableHash: verHash,
             };
           }
         } catch (auditErr) {
-          console.warn(
-            "[Address Tool Audit] Failed to generate physical audit trail:",
-            auditErr,
-          );
+          console.warn('[Address Tool Audit] Failed to generate physical audit trail:', auditErr);
         }
       }
 
       if (!auditTrail) {
         const verHash = crypto
-          .createHash("sha256")
+          .createHash('sha256')
           .update(`auto-approved-address:${orderId}:${totalAmount}`)
-          .digest("hex");
+          .digest('hex');
         auditTrail = {
-          approvalId: "AUTO_APPROVED",
+          approvalId: 'AUTO_APPROVED',
           approvedAt: new Date().toISOString(),
           policyMatched: `SOP Address Change Check: Standard Auto-Approval ($${totalAmount} <= $100 limit)`,
-          actionVerifier: "system_auto_approval_engine",
+          actionVerifier: 'system_auto_approval_engine',
           verifiableHash: verHash,
         };
       }
 
       return {
         orderId,
-        status: "address_updated",
+        status: 'address_updated',
         newAddress,
         message: `✅ Shipping address for order ${orderId} has been successfully updated to: ${newAddress}.`,
         auditTrail,
       };
     } catch (err) {
-      console.error("[OrderDomainService.changeShippingAddress] Failure:", err);
-      return { error: "Failed to process address change." };
+      console.error('[OrderDomainService.changeShippingAddress] Failure:', err);
+      return { error: 'Failed to process address change.' };
     }
   }
 
   /**
    * 生成电子发票
    */
-  static async generateInvoice(
-    orderId: string,
-    threadId?: string,
-  ): Promise<ToolExecutionResult> {
-    const { userId: sessionUserId } =
-      await this.getThreadSessionContext(threadId);
+  static async generateInvoice(orderId: string, threadId?: string): Promise<ToolExecutionResult> {
+    const { userId: sessionUserId } = await this.getThreadSessionContext(threadId);
 
     try {
       const orderQuery = sessionUserId
         ? 'SELECT status, "total_amount" AS "totalAmount", user_id AS "userId" FROM orders WHERE order_id = $1 AND user_id = $2'
         : 'SELECT status, "total_amount" AS "totalAmount", user_id AS "userId" FROM orders WHERE order_id = $1';
-      const orderQueryParams = sessionUserId
-        ? [orderId, sessionUserId]
-        : [orderId];
+      const orderQueryParams = sessionUserId ? [orderId, sessionUserId] : [orderId];
       const res = await db.execute(orderQuery, orderQueryParams);
       const rows = res.rows || [];
       if (rows.length === 0) {
@@ -791,9 +664,7 @@ export class OrderDomainService {
       const totalAmount = order.totalAmount || order.total_amount;
       const invoiceId = `INV-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 
-      console.log(
-        `[Invoice Tool] ✅ Invoice ${invoiceId} compiled for order ${orderId}`,
-      );
+      console.log(`[Invoice Tool] ✅ Invoice ${invoiceId} compiled for order ${orderId}`);
       return {
         invoiceId,
         orderId,
@@ -802,8 +673,8 @@ export class OrderDomainService {
         message: `✅ Electronic Tax Invoice ${invoiceId} has been successfully compiled and registered with financial tax administrations. Download PDF: /invoices/${invoiceId}.pdf`,
       };
     } catch (err) {
-      console.error("[OrderDomainService.generateInvoice] Failure:", err);
-      return { error: "Failed to generate tax invoice." };
+      console.error('[OrderDomainService.generateInvoice] Failure:', err);
+      return { error: 'Failed to generate tax invoice.' };
     }
   }
 
@@ -816,12 +687,12 @@ export class OrderDomainService {
     threadId?: string,
   ): Promise<ToolExecutionResult> {
     if (!threadId) {
-      return { error: "Session threadId is strictly required." };
+      return { error: 'Session threadId is strictly required.' };
     }
 
     const { userId } = await this.getThreadSessionContext(threadId);
     if (!userId) {
-      return { error: "Could not resolve user context from current session." };
+      return { error: 'Could not resolve user context from current session.' };
     }
 
     try {
@@ -830,16 +701,14 @@ export class OrderDomainService {
 
       let serializedEmbedding: string | null = null;
       try {
-        const baseURL =
-          process.env.AI_BASE_URL || "http://localhost:11211/api/openai/v1";
-        const apiKey = process.env.AI_API_KEY || "dummy";
-        const modelName =
-          process.env.AI_EMBEDDING_MODEL || "text-embedding-005:latest";
+        const baseURL = process.env.AI_BASE_URL || 'http://localhost:11211/api/openai/v1';
+        const apiKey = process.env.AI_API_KEY || 'dummy';
+        const modelName = process.env.AI_EMBEDDING_MODEL || 'text-embedding-005:latest';
 
         const embedRes = await fetch(`${baseURL}/embeddings`, {
-          method: "POST",
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
@@ -853,10 +722,7 @@ export class OrderDomainService {
           serializedEmbedding = JSON.stringify(embedding);
         }
       } catch (embErr) {
-        console.warn(
-          "[OrderDomainService.recordUserPreference] Embedding generation fallback:",
-          embErr,
-        );
+        console.warn('[OrderDomainService.recordUserPreference] Embedding generation fallback:', embErr);
       }
 
       if (drizzle) {
@@ -864,12 +730,10 @@ export class OrderDomainService {
           userId,
           fact: factText,
           embedding: serializedEmbedding,
-          type: "preference",
+          type: 'preference',
           createdAt: new Date(),
         });
-        console.log(
-          `[OrderDomainService] Successfully stored "${factText}" into longMemoryFacts!`,
-        );
+        console.log(`[OrderDomainService] Successfully stored "${factText}" into longMemoryFacts!`);
       }
 
       return {
@@ -881,10 +745,7 @@ export class OrderDomainService {
       };
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error(
-        "[OrderDomainService.recordUserPreference] Storage failed:",
-        errorMessage,
-      );
+      console.error('[OrderDomainService.recordUserPreference] Storage failed:', errorMessage);
       return {
         error: `Failed to register consumer preference: ${errorMessage}`,
       };
@@ -905,24 +766,20 @@ export class OrderDomainService {
     limit?: number;
     threadId?: string;
   }): Promise<Record<string, unknown>> {
-    const { NLQueryParser } = await import("./nlQuery");
-    const { METRIC_SEMANTIC_REGISTRY, MetricSemanticResolver } =
-      await import("./metricRegistry");
+    const { NLQueryParser } = await import('./nlQuery');
+    const { METRIC_SEMANTIC_REGISTRY, MetricSemanticResolver } = await import('./metricRegistry');
 
-    const rawInput =
-      options.query || options.naturalQuery || options.rankingMetric || "gmv";
+    const rawInput = options.query || options.naturalQuery || options.rankingMetric || 'gmv';
     const ast = NLQueryParser.parse(rawInput);
 
     const session = await this.getThreadSessionContext(options.threadId);
-    const businessId = options.businessId || session.businessId || "nike";
-    const userId = session.userId || "4c9ce5e9-eb44-4988-b9f4-ec75ec9d8444";
+    const businessId = options.businessId || session.businessId || 'nike';
+    const userId = session.userId || '4c9ce5e9-eb44-4988-b9f4-ec75ec9d8444';
 
-    const targetMetric =
-      METRIC_SEMANTIC_REGISTRY[ast.metricKey] || METRIC_SEMANTIC_REGISTRY.gmv;
+    const targetMetric = METRIC_SEMANTIC_REGISTRY[ast.metricKey] || METRIC_SEMANTIC_REGISTRY.gmv;
     const finalLimit = options.limit || ast.limit || 5;
     const finalDirection = ast.directionOverride || targetMetric.direction;
-    const managerOnly =
-      options.managerOnly !== undefined ? options.managerOnly : true;
+    const managerOnly = options.managerOnly !== undefined ? options.managerOnly : true;
 
     console.log(
       `[OrderDomainService.queryProductRanking] Metric: ${targetMetric.key} (${targetMetric.label}), Direction: ${finalDirection}, Tenant: ${businessId}, User: ${userId}`,
@@ -937,9 +794,7 @@ export class OrderDomainService {
         whereClause += ` AND p.manager_id = $${queryParams.length}`;
       }
 
-      const explicitCategory =
-        options.category ||
-        (ast.filters.find((f) => f.field === "p.category")?.value as string);
+      const explicitCategory = options.category || (ast.filters.find((f) => f.field === 'p.category')?.value as string);
       if (explicitCategory) {
         queryParams.push(explicitCategory);
         whereClause += ` AND p.category = $${queryParams.length}`;
@@ -947,7 +802,7 @@ export class OrderDomainService {
 
       // 附加数值过滤 (如 stock / price)
       for (const filter of ast.filters) {
-        if (filter.field !== "p.category") {
+        if (filter.field !== 'p.category') {
           whereClause += ` AND ${filter.sqlClause}`;
         }
       }
@@ -962,10 +817,10 @@ export class OrderDomainService {
 
       const dimensions = [
         'p.id AS "productId"',
-        "p.name",
-        "p.category",
-        "p.price",
-        "p.stock",
+        'p.name',
+        'p.category',
+        'p.price',
+        'p.stock',
         'COALESCE(p.cost_price, 0) AS "costPrice"',
         'COALESCE(SUM(oi.quantity), 0)::int AS "totalVolume"',
         'COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0)::float AS "totalGmv"',
@@ -977,14 +832,7 @@ export class OrderDomainService {
       const sql = MetricSemanticResolver.renderSql({
         metric: targetMetric,
         dimensions,
-        groupBy: [
-          "p.id",
-          "p.name",
-          "p.category",
-          "p.price",
-          "p.stock",
-          "p.cost_price",
-        ],
+        groupBy: ['p.id', 'p.name', 'p.category', 'p.price', 'p.stock', 'p.cost_price'],
         filters: whereClause,
         limit: `$${limitParamIndex}`,
         direction: finalDirection,
@@ -996,16 +844,13 @@ export class OrderDomainService {
       const rankedProducts = rows.map((r, idx) => {
         const totalGmv = Number(r.totalGmv || 0);
         const grossProfit = Number(r.grossProfit || 0);
-        const marginRate =
-          totalGmv > 0
-            ? `${((grossProfit / totalGmv) * 100).toFixed(1)}%`
-            : "0.0%";
+        const marginRate = totalGmv > 0 ? `${((grossProfit / totalGmv) * 100).toFixed(1)}%` : '0.0%';
 
         return {
           rank: idx + 1,
           productId: String(r.productId),
           name: String(r.name),
-          category: String(r.category || "general"),
+          category: String(r.category || 'general'),
           price: Number(r.price || 0),
           costPrice: Number(r.costPrice || 0),
           stock: Number(r.stock || 0),
@@ -1027,13 +872,10 @@ export class OrderDomainService {
         managerId: managerOnly ? userId : undefined,
         itemCount: rankedProducts.length,
         products: rankedProducts,
-        summary: `已为您完成${managerOnly ? "名下负责商品" : "全商户商品"}的排行检索，排序口径：【${targetMetric.label}】，共返回 ${rankedProducts.length} 款商品。`,
+        summary: `已为您完成${managerOnly ? '名下负责商品' : '全商户商品'}的排行检索，排序口径：【${targetMetric.label}】，共返回 ${rankedProducts.length} 款商品。`,
       };
     } catch (err) {
-      console.error(
-        "[OrderDomainService.queryProductRanking] Query failed:",
-        err,
-      );
+      console.error('[OrderDomainService.queryProductRanking] Query failed:', err);
       return {
         error: `Failed to query product ranking: ${err instanceof Error ? err.message : String(err)}`,
       };
@@ -1056,13 +898,9 @@ export class OrderDomainService {
       try {
         const ctx = await this.getThreadSessionContext(options.threadId);
         if (!targetUserId && ctx.userId) targetUserId = ctx.userId;
-        if (!targetBusinessId && ctx.businessId)
-          targetBusinessId = ctx.businessId;
+        if (!targetBusinessId && ctx.businessId) targetBusinessId = ctx.businessId;
       } catch (e) {
-        console.warn(
-          "[OrderDomainService] Failed to resolve thread context:",
-          e,
-        );
+        console.warn('[OrderDomainService] Failed to resolve thread context:', e);
       }
     }
 
@@ -1071,7 +909,7 @@ export class OrderDomainService {
         const uRes = await db.findOrCreateUserByEmail(options.userEmail);
         if (uRes?.id) targetUserId = uRes.id;
       } catch (e) {
-        console.warn("[OrderDomainService] Failed to find user by email:", e);
+        console.warn('[OrderDomainService] Failed to find user by email:', e);
       }
     }
 
@@ -1080,7 +918,7 @@ export class OrderDomainService {
     }
 
     const queryUserId = targetUserId || options.userEmail!;
-    const businessIdFilter = (targetBusinessId || "ecommerce").toLowerCase();
+    const businessIdFilter = (targetBusinessId || 'ecommerce').toLowerCase();
 
     try {
       const res = await db.execute(
@@ -1132,7 +970,7 @@ export class OrderDomainService {
       }
       return rows;
     } catch (err) {
-      console.error("[OrderDomainService.getUserAddresses] Query failed:", err);
+      console.error('[OrderDomainService.getUserAddresses] Query failed:', err);
       return [];
     }
   }
@@ -1155,13 +993,9 @@ export class OrderDomainService {
       try {
         const ctx = await this.getThreadSessionContext(options.threadId);
         if (!targetUserId && ctx.userId) targetUserId = ctx.userId;
-        if (!targetBusinessId && ctx.businessId)
-          targetBusinessId = ctx.businessId;
+        if (!targetBusinessId && ctx.businessId) targetBusinessId = ctx.businessId;
       } catch (e) {
-        console.warn(
-          "[OrderDomainService] Failed to resolve thread context:",
-          e,
-        );
+        console.warn('[OrderDomainService] Failed to resolve thread context:', e);
       }
     }
 
@@ -1171,7 +1005,7 @@ export class OrderDomainService {
         const uRes = await db.findOrCreateUserByEmail(options.userEmail);
         if (uRes?.id) targetUserId = uRes.id;
       } catch (e) {
-        console.warn("[OrderDomainService] Failed to find user by email:", e);
+        console.warn('[OrderDomainService] Failed to find user by email:', e);
       }
     }
 
@@ -1179,7 +1013,7 @@ export class OrderDomainService {
       return [];
     }
 
-    const businessIdFilter = (targetBusinessId || "ecommerce").toLowerCase();
+    const businessIdFilter = (targetBusinessId || 'ecommerce').toLowerCase();
     const queryUserId = targetUserId || options.userEmail!;
 
     try {
@@ -1273,7 +1107,7 @@ export class OrderDomainService {
           itemsMap[item.orderId] = [];
         }
         itemsMap[item.orderId].push({
-          productName: item.productName || "精选商品",
+          productName: item.productName || '精选商品',
           price: Number(item.price) || 0,
           quantity: Number(item.quantity) || 1,
         });
@@ -1286,32 +1120,26 @@ export class OrderDomainService {
         carrier: o.carrier,
         trackingNumber: o.trackingNumber,
         addressId: o.addressId,
-        addressTag: o.addressTag || "home",
-        recipientName: o.recipientName || "会员客户",
-        phone: o.phone || "13800138000",
+        addressTag: o.addressTag || 'home',
+        recipientName: o.recipientName || '会员客户',
+        phone: o.phone || '13800138000',
         shippingAddress: o.shippingAddress,
         estimatedDelivery: o.estimatedDelivery,
-        createdAt:
-          o.createdAt instanceof Date
-            ? o.createdAt.toISOString()
-            : o.createdAt || o.estimatedDelivery,
+        createdAt: o.createdAt instanceof Date ? o.createdAt.toISOString() : o.createdAt || o.estimatedDelivery,
         businessId: o.businessId,
         items:
           itemsMap[o.orderId] && itemsMap[o.orderId].length > 0
             ? itemsMap[o.orderId]
             : [
                 {
-                  productName: `${(o.businessId || "商城").toUpperCase()} 官方自营商品`,
+                  productName: `${(o.businessId || '商城').toUpperCase()} 官方自营商品`,
                   price: Number(o.totalAmount) || 0,
                   quantity: 1,
                 },
               ],
       }));
     } catch (err) {
-      console.error(
-        "[OrderDomainService.getUserOrdersDetailed] Query failed:",
-        err,
-      );
+      console.error('[OrderDomainService.getUserOrdersDetailed] Query failed:', err);
       return [];
     }
   }

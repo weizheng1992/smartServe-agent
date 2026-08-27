@@ -26,10 +26,11 @@ export async function POST(req: NextRequest) {
     // 等待同步返回结果
     const finalState: any = await dispatchRes.promise;
     const output = finalState?.output || finalState?.result || '极光潮品智能客服已为您处理完毕。';
+    const messageId = `ast_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     // 触发 SSE 实时推送
     agentEventEmitter.emit(`thread:${threadId}:message`, {
-      id: `ast_${Date.now()}`,
+      id: messageId,
       role: 'assistant',
       content: output,
       cards: finalState?.cards || [],
@@ -38,6 +39,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      messageId,
       jobId,
       threadId,
       userId,

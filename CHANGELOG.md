@@ -12,6 +12,9 @@
   - 新增 `OrderPickerCard` 组件与弹窗选择交互模式，当用户查询多个订单时，以结构化弹窗形式完整展示订单编号、金额、承运商、运单号及履约状态。
   - 修复 `cardSynthesizer.ts` 中订单编号被错误截断（如 `ordId.slice(-8)` 导致 `AURORA-ORD-2026-9082` 变为 `026-9082`）的缺陷，确保全格式订单号展示与回调。
   - 移除冗余重复的快捷回复胶囊，统一由弹窗交互驱动选单与状态下钻。
+- **SSE 流式通道与 HTTP 响应消息双向去重与卡片文本协同优化 (`FloatingChatWidget.tsx`, `finish.node.ts`)**:
+  - 在商户端 API 路由统一 `messageId` 标识，并在客户端聊天浮窗中建立 SSE 流式推送与同步 HTTP fetch 响应的双重去重屏障，彻底解决“查询我的全部订单”等高频场景下出现重复两条气泡回复的竞态问题。
+  - 优化 `finishNode` 总结生成规则，当交互式订单选择卡片已挂载时，避免在文本中冗余重复输出全量订单 Markdown 列表，实现图文协同轻量化。
 - **多租户/SPI 独立商户订单查询与越权防御增强 (`orderDomainService.ts`)**:
   - 在 `findOrderById` 与 `getOrderStatus` 中建立从主站 `orders` 表到第三方独立商户 SPI 数据表 `third_party_orders` 的平滑回退检索机制，彻底解决商户独立订单查询时被误判为“越权阻止或未找到订单”的 IDOR 假阳性问题。
   - 完善订单商品明细关联（`third_party_order_items`），自动补全商品名称、单价及数量。

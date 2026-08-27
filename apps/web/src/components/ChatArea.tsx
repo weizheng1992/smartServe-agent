@@ -1,6 +1,6 @@
-import type React from "react";
-import { useRef, useState } from "react";
-import type { RunningDetail, TaskPlan } from "types";
+import type React from 'react';
+import { useRef, useState } from 'react';
+import type { RunningDetail, TaskPlan } from 'types';
 import {
   Avatar,
   AvatarFallback,
@@ -24,8 +24,8 @@ import {
   Send,
   X,
   XCircle,
-} from "ui";
-import type { Message } from "../hooks/types";
+} from 'ui';
+import type { Message } from '../hooks/types';
 
 interface ChatAreaProps {
   activeThreadId: string;
@@ -34,16 +34,10 @@ interface ChatAreaProps {
   setInput: (val: string) => void;
   isSubmitting: boolean;
   loadHistory: (id: string, force?: boolean) => Promise<void>;
-  handleSend: (
-    e?: React.FormEvent,
-    customText?: string,
-    customImages?: string[],
-  ) => Promise<void>;
+  handleSend: (e?: React.FormEvent, customText?: string, customImages?: string[]) => Promise<void>;
   setActivePlan: (plan: TaskPlan | null) => void;
   setCurrentStepText: (text: string) => void;
-  setRunningDetails: (
-    details: RunningDetail[] | ((prev: RunningDetail[]) => RunningDetail[]),
-  ) => void;
+  setRunningDetails: (details: RunningDetail[] | ((prev: RunningDetail[]) => RunningDetail[])) => void;
   setSelectedScreenshot: (url: string | null) => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   onStartHumanSupport?: () => void;
@@ -75,10 +69,10 @@ export function ChatArea({
     try {
       setUploadingImage(true);
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append('file', file);
 
-      const res = await fetch("/api/chat/upload", {
-        method: "POST",
+      const res = await fetch('/api/chat/upload', {
+        method: 'POST',
         body: formData,
       });
 
@@ -86,15 +80,15 @@ export function ChatArea({
       if (data.success && data.url) {
         setAttachedImages((prev) => [...prev, data.url]);
       } else {
-        alert(data.error || "图片上传失败");
+        alert(data.error || '图片上传失败');
       }
     } catch (err: unknown) {
-      console.error("Upload error:", err);
-      alert("上传失败，请检查网络连接");
+      console.error('Upload error:', err);
+      alert('上传失败，请检查网络连接');
     } finally {
       setUploadingImage(false);
       if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+        fileInputRef.current.value = '';
       }
     }
   };
@@ -108,34 +102,23 @@ export function ChatArea({
     if (isSubmitting || (!input.trim() && attachedImages.length === 0)) return;
     const currentInput = input;
     const images = [...attachedImages];
-    setInput("");
+    setInput('');
     setAttachedImages([]);
     handleSend(e, currentInput, images);
   };
 
-  const handleCardAction = (
-    action: string,
-    payload?: Record<string, unknown>,
-  ) => {
-    if (action === "send_message" && payload?.text) {
+  const handleCardAction = (action: string, payload?: Record<string, unknown>) => {
+    if (action === 'send_message' && payload?.text) {
       handleSend(undefined, String(payload.text), []);
-    } else if (action === "select_order" && payload?.orderId) {
-      handleSend(
-        undefined,
-        `查询订单 ${payload.orderId} 的详细信息与可选业务`,
-        [],
-      );
-    } else if (action === "track_order" && payload?.orderId) {
+    } else if (action === 'select_order' && payload?.orderId) {
+      handleSend(undefined, `查询订单 ${payload.orderId} 的详细信息与可选业务`, []);
+    } else if (action === 'track_order' && payload?.orderId) {
       handleSend(undefined, `帮我查一下 ${payload.orderId} 的物流轨迹`, []);
-    } else if (action === "request_refund" && payload?.orderId) {
+    } else if (action === 'request_refund' && payload?.orderId) {
       handleSend(undefined, `帮我申请订单 ${payload.orderId} 的退款`, []);
-    } else if (action === "confirm_refund" && payload?.orderId) {
-      handleSend(
-        undefined,
-        `我已确认提交订单 ${payload.orderId} 的退款核签`,
-        [],
-      );
-    } else if (action === "trigger_upload") {
+    } else if (action === 'confirm_refund' && payload?.orderId) {
+      handleSend(undefined, `我已确认提交订单 ${payload.orderId} 的退款核签`, []);
+    } else if (action === 'trigger_upload') {
       fileInputRef.current?.click();
     }
   };
@@ -147,7 +130,7 @@ export function ChatArea({
         <div className="flex items-center space-x-3 min-w-0">
           <div className="h-2.5 w-2.5 rounded-full bg-indigo-500 shadow-lg shadow-indigo-500/50 shrink-0" />
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono truncate">
-            会话: {activeThreadId || "未选择任何对话"}
+            会话: {activeThreadId || '未选择任何对话'}
           </span>
         </div>
         <div className="flex items-center space-x-2.5 shrink-0">
@@ -178,7 +161,7 @@ export function ChatArea({
                 loadHistory(activeThreadId);
               }
               setActivePlan(null);
-              setCurrentStepText("");
+              setCurrentStepText('');
               setRunningDetails([]);
             }}
           >
@@ -193,13 +176,11 @@ export function ChatArea({
           {messages.map((m, idx) => (
             <div
               key={m.id || `msg_${idx}`}
-              className={`flex gap-4 ${m.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex gap-4 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              {m.role === "assistant" && (
+              {m.role === 'assistant' && (
                 <Avatar className="h-9 w-9 border border-slate-800 shadow-md shrink-0">
-                  <AvatarFallback className="bg-indigo-600/10 text-indigo-400 text-xs font-bold">
-                    AI
-                  </AvatarFallback>
+                  <AvatarFallback className="bg-indigo-600/10 text-indigo-400 text-xs font-bold">AI</AvatarFallback>
                 </Avatar>
               )}
 
@@ -227,9 +208,9 @@ export function ChatArea({
                 {(m.content || m.isLoading) && (
                   <div
                     className={`rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-xl border ${
-                      m.role === "user"
-                        ? "bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-indigo-500/30"
-                        : "bg-slate-900/90 text-slate-200 border-slate-800"
+                      m.role === 'user'
+                        ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-indigo-500/30'
+                        : 'bg-slate-900/90 text-slate-200 border-slate-800'
                     }`}
                   >
                     {m.isLoading ? (
@@ -246,12 +227,7 @@ export function ChatArea({
                 )}
 
                 {/* Rich Interactive Cards */}
-                {m.cards && m.cards.length > 0 && (
-                  <RichCardRenderer
-                    cards={m.cards}
-                    onAction={handleCardAction}
-                  />
-                )}
+                {m.cards && m.cards.length > 0 && <RichCardRenderer cards={m.cards} onAction={handleCardAction} />}
 
                 {/* Task Plan steps visualization */}
                 {m.plan && (
@@ -273,38 +249,30 @@ export function ChatArea({
 
                     <CardContent className="p-4 space-y-3">
                       {m.plan.subtasks.map((step) => {
-                        const isCompleted = step.status === "completed";
-                        const isExecuting = step.status === "executing";
-                        const isFailed = step.status === "failed";
+                        const isCompleted = step.status === 'completed';
+                        const isExecuting = step.status === 'executing';
+                        const isFailed = step.status === 'failed';
 
                         return (
                           <div
                             key={step.id}
                             className={`p-3.5 rounded-xl border transition-all ${
                               isExecuting
-                                ? "bg-indigo-950/20 border-indigo-500/40 shadow-inner"
-                                : "bg-slate-950/40 border-slate-800/60"
+                                ? 'bg-indigo-950/20 border-indigo-500/40 shadow-inner'
+                                : 'bg-slate-950/40 border-slate-800/60'
                             }`}
                           >
                             <div className="flex items-center justify-between gap-4">
                               <div className="flex items-center space-x-3">
                                 <div className="shrink-0">
-                                  {isCompleted && (
-                                    <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400 shadow-sm" />
-                                  )}
-                                  {isExecuting && (
-                                    <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />
-                                  )}
-                                  {isFailed && (
-                                    <XCircle className="h-4.5 w-4.5 text-rose-500" />
-                                  )}
-                                  {step.status === "pending" && (
-                                    <Clock className="h-4.5 w-4.5 text-slate-600" />
-                                  )}
+                                  {isCompleted && <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400 shadow-sm" />}
+                                  {isExecuting && <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />}
+                                  {isFailed && <XCircle className="h-4.5 w-4.5 text-rose-500" />}
+                                  {step.status === 'pending' && <Clock className="h-4.5 w-4.5 text-slate-600" />}
                                 </div>
                                 <div>
                                   <h4
-                                    className={`text-xs font-medium ${isExecuting ? "text-indigo-200" : "text-slate-300"}`}
+                                    className={`text-xs font-medium ${isExecuting ? 'text-indigo-200' : 'text-slate-300'}`}
                                   >
                                     {step.description}
                                   </h4>
@@ -313,30 +281,30 @@ export function ChatArea({
                               <Badge
                                 variant={
                                   isCompleted
-                                    ? "success"
+                                    ? 'success'
                                     : isExecuting
-                                      ? "default"
+                                      ? 'default'
                                       : isFailed
-                                        ? "destructive"
-                                        : "outline"
+                                        ? 'destructive'
+                                        : 'outline'
                                 }
                                 className={
                                   isExecuting
-                                    ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-none"
+                                    ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-none'
                                     : isCompleted
-                                      ? "shadow-none bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                      ? 'shadow-none bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                                       : isFailed
-                                        ? "shadow-none bg-rose-500/10 text-rose-400 border-rose-500/20"
-                                        : "shadow-none border-slate-800 text-slate-500"
+                                        ? 'shadow-none bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                        : 'shadow-none border-slate-800 text-slate-500'
                                 }
                               >
-                                {step.status === "completed"
-                                  ? "已完成"
-                                  : step.status === "executing"
-                                    ? "执行中"
-                                    : step.status === "failed"
-                                      ? "执行失败"
-                                      : "待处理"}
+                                {step.status === 'completed'
+                                  ? '已完成'
+                                  : step.status === 'executing'
+                                    ? '执行中'
+                                    : step.status === 'failed'
+                                      ? '执行失败'
+                                      : '待处理'}
                               </Badge>
                             </div>
 
@@ -346,20 +314,13 @@ export function ChatArea({
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center space-x-2">
                                     <span className="text-[11px] text-slate-300 font-medium flex items-center gap-1">
-                                      <ImageIcon className="h-3.5 w-3.5 text-indigo-400" />
-                                      📷 真实物理看板快照已生成：
+                                      <ImageIcon className="h-3.5 w-3.5 text-indigo-400" />📷 真实物理看板快照已生成：
                                     </span>
                                   </div>
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() =>
-                                      setSelectedScreenshot(
-                                        String(
-                                          step.result?.screenshotPath || "",
-                                        ),
-                                      )
-                                    }
+                                    onClick={() => setSelectedScreenshot(String(step.result?.screenshotPath || ''))}
                                     className="h-6 text-[10px] text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors px-2"
                                   >
                                     <span>查看高清原图</span>
@@ -368,9 +329,7 @@ export function ChatArea({
                                 </div>
                                 <div className="relative group overflow-hidden rounded-xl border border-slate-800 bg-slate-900 aspect-video">
                                   <img
-                                    src={String(
-                                      step.result?.screenshotPath || "",
-                                    )}
+                                    src={String(step.result?.screenshotPath || '')}
                                     alt="物理界面快照"
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                   />
@@ -385,11 +344,9 @@ export function ChatArea({
                 )}
               </div>
 
-              {m.role === "user" && (
+              {m.role === 'user' && (
                 <Avatar className="h-9 w-9 border border-indigo-500/30 shadow-md shrink-0">
-                  <AvatarFallback className="bg-indigo-600 text-white text-xs font-mono">
-                    U
-                  </AvatarFallback>
+                  <AvatarFallback className="bg-indigo-600 text-white text-xs font-mono">U</AvatarFallback>
                 </Avatar>
               )}
             </div>
@@ -409,14 +366,8 @@ export function ChatArea({
                   key={i}
                   className="relative group flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-slate-900 p-1 pr-2 text-xs text-slate-300"
                 >
-                  <img
-                    src={imgUrl}
-                    alt="attachment preview"
-                    className="h-8 w-8 rounded-md object-cover"
-                  />
-                  <span className="text-[11px] font-mono text-indigo-300">
-                    图片 {i + 1}
-                  </span>
+                  <img src={imgUrl} alt="attachment preview" className="h-8 w-8 rounded-md object-cover" />
+                  <span className="text-[11px] font-mono text-indigo-300">图片 {i + 1}</span>
                   <button
                     type="button"
                     onClick={() => removeImage(i)}
@@ -464,11 +415,7 @@ export function ChatArea({
             <div className="absolute right-2">
               <Button
                 type="submit"
-                disabled={
-                  isSubmitting ||
-                  (!input.trim() && attachedImages.length === 0) ||
-                  !activeThreadId
-                }
+                disabled={isSubmitting || (!input.trim() && attachedImages.length === 0) || !activeThreadId}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg h-9 px-4 text-xs font-semibold transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
               >
                 {isSubmitting ? (
