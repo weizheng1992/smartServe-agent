@@ -4,6 +4,26 @@
 
 ---
 
+## [2.2.0] - 2026-08-27 (多模态订单选择弹窗、SPI 独立商户查单与状态回退增强)
+
+### 🌟 Major Highlights (重大亮点)
+
+- **多模态订单选择弹窗与富卡片交互 (`OrderPickerCard` & `cardSynthesizer.ts`)**:
+  - 新增 `OrderPickerCard` 组件与弹窗选择交互模式，当用户查询多个订单时，以结构化弹窗形式完整展示订单编号、金额、承运商、运单号及履约状态。
+  - 修复 `cardSynthesizer.ts` 中订单编号被错误截断（如 `ordId.slice(-8)` 导致 `AURORA-ORD-2026-9082` 变为 `026-9082`）的缺陷，确保全格式订单号展示与回调。
+  - 移除冗余重复的快捷回复胶囊，统一由弹窗交互驱动选单与状态下钻。
+- **多租户/SPI 独立商户订单查询与越权防御增强 (`orderDomainService.ts`)**:
+  - 在 `findOrderById` 与 `getOrderStatus` 中建立从主站 `orders` 表到第三方独立商户 SPI 数据表 `third_party_orders` 的平滑回退检索机制，彻底解决商户独立订单查询时被误判为“越权阻止或未找到订单”的 IDOR 假阳性问题。
+  - 完善订单商品明细关联（`third_party_order_items`），自动补全商品名称、单价及数量。
+  - 同步适配 `changeShippingAddress` 与 `processRefund` 在三方商户订单表中的状态变更。
+- **全格式订单编号正则与意图消歧提取修复 (`utils.ts`, `intentTriageEngine.ts`, `planner.node.ts`)**:
+  - 升级订单号正则识别规则（匹配带有品牌前缀与多段横杠的订单号，如 `AURORA-ORD-2026-9081`），确保意图分流、槽位提取及规划节点准确提取实体。
+- **文档与测试套件完善**:
+  - 新增 `apps/merchant/tests/merchantCardInteractionFlow.test.ts` 订单卡片选择与物流查询端到端全链路测试套件。
+  - 在 `README.md` 与 `docs/merchant-onboarding-guide.md` 中补充 Agent SOP 业务技能开发、商户对接与测试实战指南。
+
+---
+
 ## [2.1.0] - 2026-08-26 (多轮导购序号指代消解与商户端实时流式会话升级)
 
 ### 🌟 Major Highlights (重大亮点)
