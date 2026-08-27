@@ -1,4 +1,4 @@
-import { MallDomainService } from 'tools';
+import { MallDomainService } from "tools";
 import type {
   CartContext,
   RichCardBlock,
@@ -6,39 +6,48 @@ import type {
   SkillExecutionContext,
   SkillExecutionResult,
   SkillMetadata,
-} from 'types';
-import { BaseSkill } from './baseSkill';
+} from "types";
+import { BaseSkill } from "./baseSkill";
 
 export class CartManageSkill extends BaseSkill {
   public metadata: SkillMetadata = {
-    id: 'skill_cart_manage',
-    name: '交易与购物车管理 Agent SOP',
-    description: '参数核验、加购、商品规格变更、购物车结算与优惠汇总',
-    category: 'in_sale',
-    triggerIntents: ['cart_manage', 'cart_add', 'cart_update'],
-    requiredTools: ['addToCart', 'getCartSummary', 'updateCartItem'],
-    version: '1.0.0',
+    id: "skill_cart_manage",
+    name: "交易与购物车管理 Agent SOP",
+    description: "参数核验、加购、商品规格变更、购物车结算与优惠汇总",
+    category: "in_sale",
+    triggerIntents: ["cart_manage", "cart_add", "cart_update"],
+    requiredTools: ["addToCart", "getCartSummary", "updateCartItem"],
+    version: "1.0.0",
   };
 
   public canHandle(context: SkillExecutionContext): boolean {
-    const intent = (context.slots?.activeIntent as string) || (context.extra?.intent as string) || '';
+    const intent =
+      (context.slots?.activeIntent as string) ||
+      (context.extra?.intent as string) ||
+      "";
     if (this.metadata.triggerIntents.includes(intent)) return true;
-    const input = (context.input || '').toLowerCase();
+    const input = (context.input || "").toLowerCase();
     return /(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|买第|件加入|款加入|放入购物车|第[一二三四五12345两几][件款个双]|买第|要第|删除|移除|删掉|清空|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+)/i.test(
       input,
     );
   }
 
-  public async execute(context: SkillExecutionContext): Promise<SkillExecutionResult> {
-    const input = (context.input || '').trim();
-    const guideContext = (context.extra?.guideContext as ShoppingGuideContext) || {};
+  public async execute(
+    context: SkillExecutionContext,
+  ): Promise<SkillExecutionResult> {
+    const input = (context.input || "").trim();
+    const guideContext =
+      (context.extra?.guideContext as ShoppingGuideContext) || {};
     const existingCart = (context.extra?.cartContext as CartContext) || {};
 
     // 1. 查看购物车与算价结算 (View Cart & Settlement)
     const isViewOnly =
       /(?:查看购物车|看下购物车|购物车总价|看购物车|购物车里|购物车有什么|多少钱|算下总价|结算|去买单|去结算)/i.test(
         input,
-      ) && !/(?:加购物车|加入购物车|放进购物车|放入购物车|加购|买第|要第|改成|修改|删除|移除|删掉)/i.test(input);
+      ) &&
+      !/(?:加购物车|加入购物车|放进购物车|放入购物车|加购|买第|要第|改成|修改|删除|移除|删掉)/i.test(
+        input,
+      );
 
     if (isViewOnly) {
       const summaryRes = await MallDomainService.getCartSummary({
@@ -51,13 +60,14 @@ export class CartManageSkill extends BaseSkill {
         totalAmount: 0,
       };
       const card: RichCardBlock = {
-        type: 'cart_card',
+        type: "cart_card",
         data: {
-          actionType: 'view',
+          actionType: "view",
           title: `购物车明细 (${cartData.totalQuantity || (cartData.items || []).length} 件)`,
-          totalQuantity: cartData.totalQuantity || (cartData.items || []).length,
+          totalQuantity:
+            cartData.totalQuantity || (cartData.items || []).length,
           totalAmount: cartData.payableAmount || cartData.totalAmount || 0,
-          currency: 'CNY',
+          currency: "CNY",
           items: (cartData.items || []).map((i: any) => ({
             id: i.skuId || i.id,
             skuId: i.skuId || i.id,
@@ -68,22 +78,25 @@ export class CartManageSkill extends BaseSkill {
             specSummary: i.specSummary,
           })),
           actions: [
-            { label: '去结算', action: 'checkout_cart' },
-            { label: '清空购物车', action: 'clear_cart' },
+            { label: "去结算", action: "checkout_cart" },
+            { label: "清空购物车", action: "clear_cart" },
           ],
         },
       };
 
       const itemsText = (cartData.items || [])
-        .map((i: any, idx: number) => `${idx + 1}. ${i.title} x${i.quantity} (¥${i.price})`)
-        .join('\n');
+        .map(
+          (i: any, idx: number) =>
+            `${idx + 1}. ${i.title} x${i.quantity} (¥${i.price})`,
+        )
+        .join("\n");
 
       return {
         success: true,
         skillId: this.metadata.id,
-        output: `您的购物车目前共有 ${cartData.totalQuantity || 0} 件商品：\n\n${itemsText || '（暂无商品）'}\n\n💰 商品总价: ¥${cartData.totalAmount || 0}元\n🎁 预估优惠: -¥${cartData.discount || 0}元\n💵 实付预估: ¥${cartData.payableAmount || 0}元`,
+        output: `您的购物车目前共有 ${cartData.totalQuantity || 0} 件商品：\n\n${itemsText || "（暂无商品）"}\n\n💰 商品总价: ¥${cartData.totalAmount || 0}元\n🎁 预估优惠: -¥${cartData.discount || 0}元\n💵 实付预估: ¥${cartData.payableAmount || 0}元`,
         cards: [card],
-        nextAction: 'finish',
+        nextAction: "finish",
         extra: {
           cartContext: {
             items: cartData.items,
@@ -104,7 +117,8 @@ export class CartManageSkill extends BaseSkill {
         userId: context.userId,
         threadId: context.threadId,
       });
-      const currentItems: any[] = (summaryRes.cart as any)?.items || existingCart.items || [];
+      const currentItems: any[] =
+        (summaryRes.cart as any)?.items || existingCart.items || [];
 
       if (/(?:清空|全部删除|全删)/i.test(input)) {
         for (const item of currentItems) {
@@ -118,8 +132,9 @@ export class CartManageSkill extends BaseSkill {
         return {
           success: true,
           skillId: this.metadata.id,
-          output: '已成功清空购物车中的所有商品。如需重新选购，请随时告诉我！🛒',
-          nextAction: 'finish',
+          output:
+            "已成功清空购物车中的所有商品。如需重新选购，请随时告诉我！🛒",
+          nextAction: "finish",
           extra: {
             cartContext: { items: [], totalAmount: 0 },
             guideContext,
@@ -127,27 +142,31 @@ export class CartManageSkill extends BaseSkill {
         };
       }
 
-      const ordinalMatch = input.match(/(?:把)?第\s*([一二三四五12345两])\s*[件款个双]?/);
+      const ordinalMatch = input.match(
+        /(?:把)?第\s*([一二三四五12345两])\s*[件款个双]?/,
+      );
       const indexMap: Record<string, number> = {
         一: 0,
-        '1': 0,
+        "1": 0,
         二: 1,
-        '2': 1,
+        "2": 1,
         两: 1,
         三: 2,
-        '3': 2,
+        "3": 2,
         四: 3,
-        '4': 3,
+        "4": 3,
         五: 4,
-        '5': 4,
+        "5": 4,
       };
 
-      let targetItem = null;
+      let targetItem: any = null;
       if (ordinalMatch) {
         const targetIndex = indexMap[ordinalMatch[1]] ?? 0;
         targetItem = currentItems[targetIndex];
       } else if (existingCart.lastModifiedItemId) {
-        targetItem = currentItems.find((i) => i.skuId === existingCart.lastModifiedItemId);
+        targetItem = currentItems.find(
+          (i) => i.skuId === existingCart.lastModifiedItemId,
+        );
       }
       if (!targetItem && currentItems.length > 0) {
         targetItem = currentItems[0];
@@ -165,7 +184,7 @@ export class CartManageSkill extends BaseSkill {
           success: true,
           skillId: this.metadata.id,
           output: `🗑️ 已成功将【${targetItem.title}】从购物车中移除！\n当前购物车共有 ${updatedCart.totalQuantity || 0} 件商品，总金额 ¥${updatedCart.totalAmount || 0} 元。`,
-          nextAction: 'finish',
+          nextAction: "finish",
           extra: {
             cartContext: {
               lastModifiedItemId: undefined,
@@ -180,49 +199,59 @@ export class CartManageSkill extends BaseSkill {
       return {
         success: true,
         skillId: this.metadata.id,
-        output: '购物车中暂无该商品或已为空，无需重复移除。',
-        nextAction: 'finish',
+        output: "购物车中暂无该商品或已为空，无需重复移除。",
+        nextAction: "finish",
         extra: { guideContext, cartContext: existingCart },
       };
     }
 
     // 3. 数量修改 (Update Quantity)
-    const updateMatch = input.match(/(?:改成|修改为|数量设为|变成|改为|调整为|增加到|减少到)\s*(\d+)\s*件?/);
+    const updateMatch = input.match(
+      /(?:改成|修改为|数量设为|变成|改为|调整为|增加到|减少到)\s*(\d+)\s*件?/,
+    );
     if (updateMatch && updateMatch[1]) {
       const newQty = Number(updateMatch[1]);
       const summaryRes = await MallDomainService.getCartSummary({
         userId: context.userId,
         threadId: context.threadId,
       });
-      const currentItems: any[] = (summaryRes.cart as any)?.items || existingCart.items || [];
+      const currentItems: any[] =
+        (summaryRes.cart as any)?.items || existingCart.items || [];
 
-      const ordinalMatch = input.match(/(?:把)?第\s*([一二三四五12345两])\s*[件款个双]?/);
+      const ordinalMatch = input.match(
+        /(?:把)?第\s*([一二三四五12345两])\s*[件款个双]?/,
+      );
       const indexMap: Record<string, number> = {
         一: 0,
-        '1': 0,
+        "1": 0,
         二: 1,
-        '2': 1,
+        "2": 1,
         两: 1,
         三: 2,
-        '3': 2,
+        "3": 2,
         四: 3,
-        '4': 3,
+        "4": 3,
         五: 4,
-        '5': 4,
+        "5": 4,
       };
 
-      let targetItem = null;
+      let targetItem: any = null;
       if (ordinalMatch) {
         const targetIndex = indexMap[ordinalMatch[1]] ?? 0;
         targetItem = currentItems[targetIndex];
       } else if (existingCart.lastModifiedItemId) {
-        targetItem = currentItems.find((i) => i.skuId === existingCart.lastModifiedItemId);
+        targetItem = currentItems.find(
+          (i) => i.skuId === existingCart.lastModifiedItemId,
+        );
       }
       if (!targetItem && currentItems.length > 0) {
         targetItem = currentItems[0];
       }
 
-      const targetSku = targetItem?.skuId || existingCart.lastModifiedItemId || 'sku_nike_aj1_blk_425';
+      const targetSku =
+        targetItem?.skuId ||
+        existingCart.lastModifiedItemId ||
+        "sku_nike_aj1_blk_425";
       const updateRes = await MallDomainService.updateCartItem({
         skuId: targetSku,
         quantity: newQty,
@@ -235,8 +264,8 @@ export class CartManageSkill extends BaseSkill {
       return {
         success: true,
         skillId: this.metadata.id,
-        output: `✏️ 已成功将【${targetItem?.title || '商品'}】数量调整为 ${newQty} 件！\n当前购物车共有 ${updatedCart.totalQuantity || newQty} 件商品，总金额 ¥${updatedCart.totalAmount || 0} 元。`,
-        nextAction: 'finish',
+        output: `✏️ 已成功将【${targetItem?.title || "商品"}】数量调整为 ${newQty} 件！\n当前购物车共有 ${updatedCart.totalQuantity || newQty} 件商品，总金额 ¥${updatedCart.totalAmount || 0} 元。`,
+        nextAction: "finish",
         extra: {
           cartContext: {
             lastModifiedItemId: targetSku,
@@ -253,12 +282,14 @@ export class CartManageSkill extends BaseSkill {
     if (isVagueOrdinal) {
       const candidates = guideContext.candidateProducts || [];
       if (candidates.length > 0) {
-        const listText = candidates.map((c, i) => `${i + 1}. 【${c.name}】 ¥${c.price}`).join('\n');
+        const listText = candidates
+          .map((c, i) => `${i + 1}. 【${c.name}】 ¥${c.price}`)
+          .join("\n");
         return {
           success: true,
           skillId: this.metadata.id,
           output: `请问您想将哪一款推荐商品加入购物车呢？\n\n${listText}\n\n您可以直接对我说“把第1件加入购物车”或“把第2件加入购物车”，我立即为您办理！🛒`,
-          nextAction: 'finish',
+          nextAction: "finish",
           extra: { guideContext, cartContext: existingCart },
         };
       }
@@ -266,15 +297,18 @@ export class CartManageSkill extends BaseSkill {
         success: true,
         skillId: this.metadata.id,
         output:
-          '请问您想将哪一款商品加入购物车呢？您可以直接对我说“把第1件加入购物车”或“把第2件加入购物车”，我立即为您办理！🛒',
-        nextAction: 'finish',
+          "请问您想将哪一款商品加入购物车呢？您可以直接对我说“把第1件加入购物车”或“把第2件加入购物车”，我立即为您办理！🛒",
+        nextAction: "finish",
         extra: { guideContext, cartContext: existingCart },
       };
     }
 
     // 4. 加购执行 (Add To Cart & Cross-Agent Coreference Resolution)
-    let targetSkuId = (context.slots?.skuId as string) || (context.slots?.productId as string) || '';
-    let targetTitle = '精选推荐商品';
+    let targetSkuId =
+      (context.slots?.skuId as string) ||
+      (context.slots?.productId as string) ||
+      "";
+    let targetTitle = "精选推荐商品";
     let targetPrice = 899.0;
 
     let candidateProducts = guideContext.candidateProducts || [];
@@ -285,7 +319,11 @@ export class CartManageSkill extends BaseSkill {
     if (candidateList.length === 0 && shortMem.length > 0) {
       for (let i = shortMem.length - 1; i >= 0; i--) {
         const msg = shortMem[i];
-        if (msg.role === 'assistant' && typeof msg.content === 'string' && msg.content.includes('推荐商品')) {
+        if (
+          msg.role === "assistant" &&
+          typeof msg.content === "string" &&
+          msg.content.includes("推荐商品")
+        ) {
           const itemRegex = /(\d+)\.\s*【([^】]+)】\s*¥?(\d+(?:\.\d+)?)/g;
           let match: RegExpExecArray | null;
           const parsedProducts: Array<{
@@ -317,16 +355,16 @@ export class CartManageSkill extends BaseSkill {
       const ordinalChar = ordinalMatch[1] || ordinalMatch[2] || ordinalMatch[3];
       const indexMap: Record<string, number> = {
         一: 0,
-        '1': 0,
+        "1": 0,
         二: 1,
-        '2': 1,
+        "2": 1,
         两: 1,
         三: 2,
-        '3': 2,
+        "3": 2,
         四: 3,
-        '4': 3,
+        "4": 3,
         五: 4,
-        '5': 4,
+        "5": 4,
       };
       const targetIndex = indexMap[ordinalChar] ?? 0;
       if (candidateProducts[targetIndex]) {
@@ -351,8 +389,8 @@ export class CartManageSkill extends BaseSkill {
         targetTitle = `推荐商品 #1 (${targetSkuId})`;
       } else {
         // 默认兜底添加热销款
-        targetSkuId = 'prod_nike_air_pegasus_41';
-        targetTitle = 'Nike Air Zoom Pegasus 41 极速轻量透气跑鞋';
+        targetSkuId = "prod_nike_air_pegasus_41";
+        targetTitle = "Nike Air Zoom Pegasus 41 极速轻量透气跑鞋";
         targetPrice = 899.0;
       }
     }
@@ -372,13 +410,13 @@ export class CartManageSkill extends BaseSkill {
     const updatedCart = (addRes.cart as any) || {};
 
     const card: RichCardBlock = {
-      type: 'cart_card',
+      type: "cart_card",
       data: {
-        actionType: 'added',
+        actionType: "added",
         title: `已加入购物车: ${targetTitle}`,
         totalQuantity: updatedCart.totalQuantity || quantity,
         totalAmount: updatedCart.totalAmount || targetPrice * quantity,
-        currency: 'CNY',
+        currency: "CNY",
         items:
           updatedCart.items && updatedCart.items.length > 0
             ? updatedCart.items.map((it: any) => ({
@@ -400,8 +438,8 @@ export class CartManageSkill extends BaseSkill {
                 },
               ],
         actions: [
-          { label: '去结算', action: 'checkout_cart' },
-          { label: '查看购物车', action: 'view_cart' },
+          { label: "去结算", action: "checkout_cart" },
+          { label: "查看购物车", action: "view_cart" },
         ],
       },
     };
@@ -417,7 +455,7 @@ export class CartManageSkill extends BaseSkill {
       skillId: this.metadata.id,
       output: `🎉 已成功将【${targetTitle}】(x${quantity}) 加入购物车！\n当前购物车共有 ${updatedCart.totalQuantity || quantity} 件商品，总金额 ¥${updatedCart.totalAmount || targetPrice * quantity} 元。\n\n如需结算买单或调整数量，请随时告诉我！`,
       cards: [card],
-      nextAction: 'finish',
+      nextAction: "finish",
       extra: {
         cartContext: newCartContext,
         guideContext: {
