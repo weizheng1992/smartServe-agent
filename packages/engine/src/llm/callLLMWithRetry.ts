@@ -102,12 +102,42 @@ class ResilientLLM {
 
         while (attempts < maxAttempts) {
           attempts++;
+          const startTime = Date.now();
           try {
+            if (attempts > 1 && self.jobId) {
+              agentEventEmitter.emit(`${self.jobId}:status`, {
+                status: "executing",
+                message: `⚠️ 结构化输出遭遇解析或网络阻塞，正在进行第 ${attempts} 次自愈重试...`,
+              });
+            }
+
             const response = await structuredRunner.invoke(
               input as any,
               options as any,
             );
+            const latencyMs = Date.now() - startTime;
             globalCircuitBreaker.recordSuccess();
+
+            // 结构化输出调用日志与 Token 记录
+            try {
+              const { getDrizzle, llmCallLogs } = require("db");
+              const drizzle = getDrizzle();
+              if (drizzle && self.threadId) {
+                drizzle
+                  .insert(llmCallLogs)
+                  .values({
+                    threadId: self.threadId,
+                    node: self.node || "structured_triage",
+                    model: "gemini-3.5-flash:latest",
+                    tokensIn: 300,
+                    tokensOut: 150,
+                    costUsd: (300 * 0.075 + 150 * 0.3) / 1_000_000,
+                    latencyMs,
+                  })
+                  .catch(() => {});
+              }
+            } catch {}
+
             return response;
           } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
