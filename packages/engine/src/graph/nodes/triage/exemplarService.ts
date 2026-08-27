@@ -11,6 +11,37 @@ export interface ExemplarItem {
   similarity?: number;
 }
 
+function calculateTextOverlap(query: string, text: string): number {
+  const q = query.trim().toLowerCase();
+  const t = text.trim().toLowerCase();
+  if (!q || !t) return 0;
+  if (q.includes(t) || t.includes(q)) return 0.8;
+
+  // 针对中英文字符生成 2-gram 子片段进行重叠度匹配
+  const getNGrams = (str: string, n = 2) => {
+    const clean = str.replace(/[\s,，。！？!?.、:：;；_—\-/]+/g, "");
+    const ngrams = new Set<string>();
+    for (let i = 0; i <= clean.length - n; i++) {
+      ngrams.add(clean.slice(i, i + n));
+    }
+    return ngrams;
+  };
+
+  const ngramsA = getNGrams(q, 2);
+  const ngramsB = getNGrams(t, 2);
+  if (ngramsA.size === 0 || ngramsB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const gram of ngramsA) {
+    if (ngramsB.has(gram)) {
+      intersection++;
+    }
+  }
+
+  const minSize = Math.min(ngramsA.size, ngramsB.size);
+  return minSize === 0 ? 0 : (intersection / minSize) * 0.8;
+}
+
 export class ExemplarService {
   /**
    * 租户物理隔离的动态 Few-Shot 样本召回
@@ -56,13 +87,7 @@ export class ExemplarService {
               row.embedding as number[],
             );
           }
-          const textOverlap =
-            query.includes(row.exampleText) ||
-            row.exampleText.includes(query) ||
-            (query.includes("防伪") && row.exampleText.includes("防伪")) ||
-            (query.includes("保养") && row.exampleText.includes("保养"))
-              ? 0.7
-              : 0;
+          const textOverlap = calculateTextOverlap(query, row.exampleText);
           const finalSim = Math.max(vecSim, textOverlap);
           return {
             id: row.id,

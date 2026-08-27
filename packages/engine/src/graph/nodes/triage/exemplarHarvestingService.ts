@@ -106,16 +106,33 @@ export class ExemplarHarvestingService {
   /**
    * 获取样本自愈飞轮统计数据
    */
-  static async getHarvestStats() {
+  static async getHarvestStats(tenantId?: string) {
     const drizzle = getDrizzle();
     if (!drizzle) return { totalPending: 0, totalExemplars: 0 };
 
-    const pendingRows = await drizzle
-      .select()
-      .from(lowConfidenceLogs)
-      .where(eq(lowConfidenceLogs.reviewed, false));
+    const cleanTenantId = tenantId ? tenantId.toLowerCase() : undefined;
 
-    const exemplarRows = await drizzle.select().from(intentExemplars);
+    const pendingQuery = cleanTenantId
+      ? drizzle
+          .select()
+          .from(lowConfidenceLogs)
+          .where(eq(lowConfidenceLogs.reviewed, false))
+      : drizzle
+          .select()
+          .from(lowConfidenceLogs)
+          .where(eq(lowConfidenceLogs.reviewed, false));
+
+    const exemplarQuery = cleanTenantId
+      ? drizzle
+          .select()
+          .from(intentExemplars)
+          .where(eq(intentExemplars.businessId, cleanTenantId))
+      : drizzle.select().from(intentExemplars);
+
+    const [pendingRows, exemplarRows] = await Promise.all([
+      pendingQuery,
+      exemplarQuery,
+    ]);
 
     return {
       totalPending: pendingRows.length,
