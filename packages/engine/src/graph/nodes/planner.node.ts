@@ -105,7 +105,8 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
 
   // 🧠 Cognitive State Backtracking: 检查是否有先前的被退款拒绝步骤，如果有，将管理员反馈作为关键上下文喂给 Planner 促其重新规划路径
   let rejectionContext = '';
-  if (priorPlan?.subtasks) {
+  const isSystemResume = typeof state.input === 'string' && state.input.startsWith('System:');
+  if (isSystemResume && priorPlan?.subtasks) {
     // 🛡️ 如果检测到管理员最新的审批结果是 'rejected'，我们动态将当前步骤标记为 failed 并打上 rejectedByAdmin 标记，以便进行认知重规划
     let latestApproval: PendingApprovalRecord | null = null;
     const currentStepIndex = priorPlan.currentStepIndex;
@@ -115,7 +116,7 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
     try {
       if (stepApprovalId) {
         latestApproval = await ApprovalPolicyEngine.findApprovalById(stepApprovalId);
-      } else if (state.input?.startsWith('System:')) {
+      } else {
         latestApproval = await ApprovalPolicyEngine.findLatestApprovalByThreadId(state.threadId);
       }
     } catch (dbErr) {
@@ -209,6 +210,51 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
           status: 'executing',
           node: 'planner',
           message: '⚡ 极速介入直达：检测到人工客服与熔断诉求，已物理生成人工转接步骤并推入执行链！',
+          plan: fastPlan,
+        });
+      }
+      return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
+    }
+
+    const hasShoppingGuide = intents.some((i) => i.intent === 'shopping_guide');
+    const hasCartManage = intents.some((i) => i.intent === 'cart_manage');
+    const hasOrderList = intents.some((i) => i.intent === 'order_status' || i.intent === 'order_query');
+
+    if ((hasShoppingGuide || hasCartManage) && hasOrderList && intents.length >= 2) {
+      const subtasks: SubTask[] = [];
+      if (hasCartManage) {
+        subtasks.push({
+          id: 'step_fast_cart_0',
+          description: `Execute CartSkill for input: ${input}`,
+          status: 'pending' as const,
+        });
+      } else if (hasShoppingGuide) {
+        subtasks.push({
+          id: 'step_fast_guide_0',
+          description: `Execute ShoppingGuideSkill for input: ${input}`,
+          status: 'pending' as const,
+        });
+      }
+      subtasks.push({
+        id: 'step_fast_list_orders_1',
+        description: 'Call listUserOrders to fetch recent orders',
+        status: 'pending' as const,
+      });
+
+      const fastPlan: TaskPlan = {
+        goal: 'Execute composite shopping and order query subtasks',
+        subtasks,
+        currentStepIndex: 0,
+      };
+
+      console.log(
+        `[Planner Fast-Path] ⚡ Fast-path synthesized ${subtasks.length} composite subtasks for shopping & orders! Bypassing LLM planning call.`,
+      );
+      if (state.jobId) {
+        agentEventEmitter.emit(`${state.jobId}:status`, {
+          status: 'executing',
+          node: 'planner',
+          message: `⚡ 极速规划直达：识别到复合诉求，已智能组装 ${subtasks.length} 项子任务流并投入执行引擎！`,
           plan: fastPlan,
         });
       }

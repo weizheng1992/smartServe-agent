@@ -5,7 +5,35 @@ export type RichCardType =
   | 'refund_confirmation'
   | 'quick_replies'
   | 'damage_assessment'
-  | 'product_ranking';
+  | 'product_ranking'
+  | 'cart_card';
+
+export interface CartItemData {
+  id?: string;
+  skuId?: string;
+  skuCode?: string;
+  spuId?: string;
+  title: string;
+  skuTitle?: string;
+  price: number;
+  quantity: number;
+  imageUrl?: string;
+  specSummary?: string;
+}
+
+export interface CartCardData {
+  actionType: 'added' | 'view' | 'updated' | 'cleared' | 'checkout';
+  title: string;
+  items: CartItemData[];
+  totalQuantity: number;
+  totalAmount: number;
+  currency?: string;
+  actions?: Array<{
+    label: string;
+    action: string;
+    payload?: Record<string, unknown>;
+  }>;
+}
 
 export interface RankedProductItem {
   rank: number;
@@ -114,7 +142,8 @@ export type RichCardBlock =
   | { type: 'refund_confirmation'; data: RefundConfirmationData }
   | { type: 'quick_replies'; data: QuickRepliesData }
   | { type: 'damage_assessment'; data: DamageAssessmentData }
-  | { type: 'product_ranking'; data: ProductRankingCardData };
+  | { type: 'product_ranking'; data: ProductRankingCardData }
+  | { type: 'cart_card'; data: CartCardData };
 
 export interface MultimodalMessagePayload {
   message: string;

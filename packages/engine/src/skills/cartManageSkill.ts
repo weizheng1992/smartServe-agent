@@ -24,7 +24,7 @@ export class CartManageSkill extends BaseSkill {
     const intent = (context.slots?.activeIntent as string) || (context.extra?.intent as string) || '';
     if (this.metadata.triggerIntents.includes(intent)) return true;
     const input = (context.input || '').toLowerCase();
-    return /(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|买第|件加入|款加入|放入购物车|第[一二三四五12345两几][件款个双]|买第|要第)/i.test(
+    return /(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|买第|件加入|款加入|放入购物车|第[一二三四五12345两几][件款个双]|买第|要第|删除|移除|删掉|清空|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+)/i.test(
       input,
     );
   }
@@ -36,8 +36,9 @@ export class CartManageSkill extends BaseSkill {
 
     // 1. 查看购物车与算价结算 (View Cart & Settlement)
     const isViewOnly =
-      /(?:查看购物车|看下购物车|购物车总价|看购物车|购物车里|购物车有什么|多少钱|算下总价|结算|去买单)/i.test(input) &&
-      !/(?:加购物车|加入购物车|放进购物车|放入购物车|加购|买第|要第|改成|修改)/i.test(input);
+      /(?:查看购物车|看下购物车|购物车总价|看购物车|购物车里|购物车有什么|多少钱|算下总价|结算|去买单|去结算)/i.test(
+        input,
+      ) && !/(?:加购物车|加入购物车|放进购物车|放入购物车|加购|买第|要第|改成|修改|删除|移除|删掉)/i.test(input);
 
     if (isViewOnly) {
       const summaryRes = await MallDomainService.getCartSummary({
@@ -50,19 +51,26 @@ export class CartManageSkill extends BaseSkill {
         totalAmount: 0,
       };
       const card: RichCardBlock = {
-        type: 'order_card',
+        type: 'cart_card',
         data: {
-          orderId: 'CART-PREVIEW',
-          status: '购物车结算预估',
+          actionType: 'view',
+          title: `购物车明细 (${cartData.totalQuantity || (cartData.items || []).length} 件)`,
+          totalQuantity: cartData.totalQuantity || (cartData.items || []).length,
           totalAmount: cartData.payableAmount || cartData.totalAmount || 0,
           currency: 'CNY',
           items: (cartData.items || []).map((i: any) => ({
             id: i.skuId || i.id,
+            skuId: i.skuId || i.id,
             title: i.title || i.name,
             price: Number(i.price || 0),
             quantity: Number(i.quantity || 1),
             imageUrl: i.imageUrl,
+            specSummary: i.specSummary,
           })),
+          actions: [
+            { label: '去结算', action: 'checkout_cart' },
+            { label: '清空购物车', action: 'clear_cart' },
+          ],
         },
       };
 
@@ -86,11 +94,135 @@ export class CartManageSkill extends BaseSkill {
       };
     }
 
-    // 2. 数量修改与移除 (Update or Remove)
-    const updateMatch = input.match(/(?:改成|修改为|数量设为|变成|改为)\s*(\d+)\s*件?/);
+    // 2. 购物车商品删除与清空 (Delete or Clear Cart)
+    const isDelete =
+      /(?:删除|移除|删掉|去掉|不要了|清空)/i.test(input) &&
+      !/(?:加购物车|加入购物车|放进购物车|放入购物车|加购)/i.test(input);
+
+    if (isDelete) {
+      const summaryRes = await MallDomainService.getCartSummary({
+        userId: context.userId,
+        threadId: context.threadId,
+      });
+      const currentItems: any[] = (summaryRes.cart as any)?.items || existingCart.items || [];
+
+      if (/(?:清空|全部删除|全删)/i.test(input)) {
+        for (const item of currentItems) {
+          await MallDomainService.updateCartItem({
+            skuId: item.skuId,
+            quantity: 0,
+            userId: context.userId,
+            threadId: context.threadId,
+          });
+        }
+        return {
+          success: true,
+          skillId: this.metadata.id,
+          output: '已成功清空购物车中的所有商品。如需重新选购，请随时告诉我！🛒',
+          nextAction: 'finish',
+          extra: {
+            cartContext: { items: [], totalAmount: 0 },
+            guideContext,
+          },
+        };
+      }
+
+      const ordinalMatch = input.match(/(?:把)?第\s*([一二三四五12345两])\s*[件款个双]?/);
+      const indexMap: Record<string, number> = {
+        一: 0,
+        '1': 0,
+        二: 1,
+        '2': 1,
+        两: 1,
+        三: 2,
+        '3': 2,
+        四: 3,
+        '4': 3,
+        五: 4,
+        '5': 4,
+      };
+
+      let targetItem = null;
+      if (ordinalMatch) {
+        const targetIndex = indexMap[ordinalMatch[1]] ?? 0;
+        targetItem = currentItems[targetIndex];
+      } else if (existingCart.lastModifiedItemId) {
+        targetItem = currentItems.find((i) => i.skuId === existingCart.lastModifiedItemId);
+      }
+      if (!targetItem && currentItems.length > 0) {
+        targetItem = currentItems[0];
+      }
+
+      if (targetItem) {
+        const updateRes = await MallDomainService.updateCartItem({
+          skuId: targetItem.skuId,
+          quantity: 0,
+          userId: context.userId,
+          threadId: context.threadId,
+        });
+        const updatedCart = (updateRes.cart as any) || {};
+        return {
+          success: true,
+          skillId: this.metadata.id,
+          output: `🗑️ 已成功将【${targetItem.title}】从购物车中移除！\n当前购物车共有 ${updatedCart.totalQuantity || 0} 件商品，总金额 ¥${updatedCart.totalAmount || 0} 元。`,
+          nextAction: 'finish',
+          extra: {
+            cartContext: {
+              lastModifiedItemId: undefined,
+              items: updatedCart.items,
+              totalAmount: updatedCart.totalAmount,
+            },
+            guideContext,
+          },
+        };
+      }
+
+      return {
+        success: true,
+        skillId: this.metadata.id,
+        output: '购物车中暂无该商品或已为空，无需重复移除。',
+        nextAction: 'finish',
+        extra: { guideContext, cartContext: existingCart },
+      };
+    }
+
+    // 3. 数量修改 (Update Quantity)
+    const updateMatch = input.match(/(?:改成|修改为|数量设为|变成|改为|调整为|增加到|减少到)\s*(\d+)\s*件?/);
     if (updateMatch && updateMatch[1]) {
       const newQty = Number(updateMatch[1]);
-      const targetSku = existingCart.lastModifiedItemId || 'sku_nike_aj1_blk_425';
+      const summaryRes = await MallDomainService.getCartSummary({
+        userId: context.userId,
+        threadId: context.threadId,
+      });
+      const currentItems: any[] = (summaryRes.cart as any)?.items || existingCart.items || [];
+
+      const ordinalMatch = input.match(/(?:把)?第\s*([一二三四五12345两])\s*[件款个双]?/);
+      const indexMap: Record<string, number> = {
+        一: 0,
+        '1': 0,
+        二: 1,
+        '2': 1,
+        两: 1,
+        三: 2,
+        '3': 2,
+        四: 3,
+        '4': 3,
+        五: 4,
+        '5': 4,
+      };
+
+      let targetItem = null;
+      if (ordinalMatch) {
+        const targetIndex = indexMap[ordinalMatch[1]] ?? 0;
+        targetItem = currentItems[targetIndex];
+      } else if (existingCart.lastModifiedItemId) {
+        targetItem = currentItems.find((i) => i.skuId === existingCart.lastModifiedItemId);
+      }
+      if (!targetItem && currentItems.length > 0) {
+        targetItem = currentItems[0];
+      }
+
+      const targetSku = targetItem?.skuId || existingCart.lastModifiedItemId || 'sku_nike_aj1_blk_425';
       const updateRes = await MallDomainService.updateCartItem({
         skuId: targetSku,
         quantity: newQty,
@@ -98,16 +230,18 @@ export class CartManageSkill extends BaseSkill {
         threadId: context.threadId,
       });
 
+      const updatedCart = (updateRes.cart as any) || {};
+
       return {
         success: true,
         skillId: this.metadata.id,
-        output: updateRes.message || `已成功将商品数量调整为 ${newQty} 件。`,
+        output: `✏️ 已成功将【${targetItem?.title || '商品'}】数量调整为 ${newQty} 件！\n当前购物车共有 ${updatedCart.totalQuantity || newQty} 件商品，总金额 ¥${updatedCart.totalAmount || 0} 元。`,
         nextAction: 'finish',
         extra: {
           cartContext: {
             lastModifiedItemId: targetSku,
-            items: (updateRes.cart as any)?.items,
-            totalAmount: (updateRes.cart as any)?.totalAmount,
+            items: updatedCart.items,
+            totalAmount: updatedCart.totalAmount,
           },
           guideContext,
         },
@@ -238,19 +372,36 @@ export class CartManageSkill extends BaseSkill {
     const updatedCart = (addRes.cart as any) || {};
 
     const card: RichCardBlock = {
-      type: 'order_card',
+      type: 'cart_card',
       data: {
-        orderId: 'CART-ADDED',
-        status: '已加入购物车',
+        actionType: 'added',
+        title: `已加入购物车: ${targetTitle}`,
+        totalQuantity: updatedCart.totalQuantity || quantity,
         totalAmount: updatedCart.totalAmount || targetPrice * quantity,
         currency: 'CNY',
-        items: [
-          {
-            id: targetSkuId,
-            title: targetTitle,
-            price: targetPrice,
-            quantity,
-          },
+        items:
+          updatedCart.items && updatedCart.items.length > 0
+            ? updatedCart.items.map((it: any) => ({
+                id: it.skuId || it.id,
+                skuId: it.skuId || it.id,
+                title: it.title || it.name || targetTitle,
+                price: Number(it.price || targetPrice),
+                quantity: Number(it.quantity || quantity),
+                imageUrl: it.imageUrl,
+                specSummary: it.specSummary,
+              }))
+            : [
+                {
+                  id: targetSkuId,
+                  skuId: targetSkuId,
+                  title: targetTitle,
+                  price: targetPrice,
+                  quantity,
+                },
+              ],
+        actions: [
+          { label: '去结算', action: 'checkout_cart' },
+          { label: '查看购物车', action: 'view_cart' },
         ],
       },
     };

@@ -265,6 +265,8 @@ ${historyContext}`;
         extra: {
           isApproved: true,
           damageAssessment: state.damageAssessment,
+          guideContext: state.guideContext,
+          cartContext: state.cartContext,
         },
       });
 
@@ -275,6 +277,13 @@ ${historyContext}`;
         success: skillResult.success,
         error: skillResult.error,
       };
+
+      if (skillResult.extra?.guideContext) {
+        state.guideContext = skillResult.extra.guideContext;
+      }
+      if (skillResult.extra?.cartContext) {
+        state.cartContext = skillResult.extra.cartContext;
+      }
 
       if (skillResult.cards && skillResult.cards.length > 0) {
         state.cards = (state.cards || []).concat(skillResult.cards);
@@ -367,15 +376,29 @@ export async function executeStep(state: typeof AgentStateAnnotation.State): Pro
 
   logger.info({ threadId: state.threadId, subtask }, `StepExecutionEngine executing step ${currentIndex}`);
 
-  const allowedTools = state.businessConfig?.tools || [
-    'getOrderStatus',
-    'processRefund',
-    'takeScreenshot',
-    'listUserOrders',
-    'changeShippingAddress',
-    'generateInvoice',
-    'recordUserPreference',
-  ];
+  const allowedTools =
+    state.businessConfig?.tools && state.businessConfig.tools.length > 0
+      ? Array.from(
+          new Set([
+            ...state.businessConfig.tools,
+            'getOrderStatus',
+            'processRefund',
+            'takeScreenshot',
+            'listUserOrders',
+            'changeShippingAddress',
+            'generateInvoice',
+            'recordUserPreference',
+          ]),
+        )
+      : [
+          'getOrderStatus',
+          'processRefund',
+          'takeScreenshot',
+          'listUserOrders',
+          'changeShippingAddress',
+          'generateInvoice',
+          'recordUserPreference',
+        ];
 
   let historyContext = '';
   let shortMemory = state.shortMemory;

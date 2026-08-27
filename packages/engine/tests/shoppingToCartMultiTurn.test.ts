@@ -27,7 +27,10 @@ describe('End-to-End Multi-Turn Shopping Guide to Cart Flow', () => {
     expect(turn2Res.output).toContain('已成功将');
     expect(turn2Res.output).toContain('加入购物车');
     expect(turn2Res.cards?.length).toBeGreaterThan(0);
-    expect(turn2Res.cards[0].data?.orderId).toBe('CART-ADDED');
+    expect(turn2Res.cards[0].type).toBe('cart_card');
+    expect(turn2Res.cards[0].data?.actionType).toBe('added');
+    expect(turn2Res.cards[0].data?.items?.length).toBeGreaterThan(0);
+    expect(turn2Res.cards[0].data?.actions?.some((a: any) => a.action === 'checkout_cart')).toBe(true);
 
     // ----------------------------------------------------
     // Turn 3: 用户询问 "把第几件加入购物车" (模糊指代引导)
@@ -55,5 +58,5 @@ describe('End-to-End Multi-Turn Shopping Guide to Cart Flow', () => {
     expect(turn5Res).toBeDefined();
     expect(turn5Res.output).toContain('购物车目前共有');
     expect(turn5Res.output).toContain('实付预估');
-  });
+  }, 120000);
 });

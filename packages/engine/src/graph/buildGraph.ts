@@ -1,81 +1,73 @@
-import { END, StateGraph } from "@langchain/langgraph";
-import { businessConfigs, db, getDrizzle, sessionMetrics, threads } from "db";
-import { and, eq } from "drizzle-orm";
-import { logger } from "observability";
-import {
-  type RagDocument,
-  type SubTask,
-  type TaskPlan,
-  getMerchantDisplayName,
-} from "types";
-import { getEmbeddingModel } from "../llm/callLLMWithRetry";
-import { EpisodicMemory, LongMemory, ShortMemory, TaskMemory } from "../memory";
-import type { EpisodicEvent } from "../memory/episodicMemory";
-import type { LongMemoryFact } from "../memory/longMemory";
-import { ContextualRAG, type ScoredRAGDocument } from "../rag/contextualRag";
-import { agentEventEmitter } from "./eventEmitter";
-import { executorNode } from "./nodes/executor.node";
-import { finishNode } from "./nodes/finish.node";
-import { mergeNode } from "./nodes/merge.node";
-import { plannerNode } from "./nodes/planner.node";
-import { triageNode } from "./nodes/triage.node";
-import { validatorNode } from "./nodes/validator.node";
-import { AgentStateAnnotation } from "./state";
+import { END, StateGraph } from '@langchain/langgraph';
+import { businessConfigs, db, getDrizzle, sessionMetrics, threads } from 'db';
+import { and, eq } from 'drizzle-orm';
+import { logger } from 'observability';
+import { type RagDocument, type SubTask, type TaskPlan, getMerchantDisplayName } from 'types';
+import { getEmbeddingModel } from '../llm/callLLMWithRetry';
+import { EpisodicMemory, LongMemory, ShortMemory, TaskMemory } from '../memory';
+import type { EpisodicEvent } from '../memory/episodicMemory';
+import type { LongMemoryFact } from '../memory/longMemory';
+import { ContextualRAG, type ScoredRAGDocument } from '../rag/contextualRag';
+import { agentEventEmitter } from './eventEmitter';
+import { executorNode } from './nodes/executor.node';
+import { finishNode } from './nodes/finish.node';
+import { mergeNode } from './nodes/merge.node';
+import { plannerNode } from './nodes/planner.node';
+import { triageNode } from './nodes/triage.node';
+import { validatorNode } from './nodes/validator.node';
+import { AgentStateAnnotation } from './state';
 
 export function buildAgentGraph() {
   const workflow = new StateGraph(AgentStateAnnotation)
     // Add nodes
-    .addNode("triage", triageNode)
-    .addNode("planner", plannerNode)
-    .addNode("merge", mergeNode)
-    .addNode("executor", executorNode)
-    .addNode("validator", validatorNode)
-    .addNode("finish", finishNode);
+    .addNode('triage', triageNode)
+    .addNode('planner', plannerNode)
+    .addNode('merge', mergeNode)
+    .addNode('executor', executorNode)
+    .addNode('validator', validatorNode)
+    .addNode('finish', finishNode);
 
   // Setup workflow flow starting with triage
-  workflow.addEdge("__start__", "triage");
+  workflow.addEdge('__start__', 'triage');
 
   // Route after triage
   workflow.addConditionalEdges(
-    "triage",
+    'triage',
     (state) => {
       // 🧠 极致提速优化（Bypass Loop Logic）：
       // 如果没有检测到任何意图，或者识别出的唯一意图是纯日常咨询/打招呼（general_query），或命中前置槽位追问/规则旁路直达，
       // 证明本次会话不需要物理数据库或截图工具链的编排。我们直接切入 Finish 终点，彻底省去 Planner -> Executor -> Validator 重置循环！
       if (!state.intents || state.intents.length === 0) {
-        return "finish";
+        return 'finish';
       }
 
-      const isOnlyGeneralQuery =
-        state.intents.length === 1 &&
-        state.intents[0].intent === "general_query";
-      const isBypass =
-        !!state.output || state.taskPlan?.subtasks?.[0]?.id === "bypass_step";
+      const isOnlyGeneralQuery = state.intents.length === 1 && state.intents[0].intent === 'general_query';
+      const isBypass = !!state.output || state.taskPlan?.subtasks?.[0]?.id === 'bypass_step';
 
       if (isOnlyGeneralQuery || isBypass) {
         logger.info(
           { threadId: state.threadId },
-          "Detected bypass or pure general_query, bypassing planner loop to finishNode directly.",
+          'Detected bypass or pure general_query, bypassing planner loop to finishNode directly.',
         );
-        return "finish";
+        return 'finish';
       }
 
-      return "planner";
+      return 'planner';
     },
     {
-      planner: "planner",
-      finish: "finish",
+      planner: 'planner',
+      finish: 'finish',
     },
   );
 
   // After planner, merge/validate task structure
-  workflow.addEdge("planner", "merge");
-  workflow.addEdge("merge", "executor");
-  workflow.addEdge("executor", "validator");
+  workflow.addEdge('planner', 'merge');
+  workflow.addEdge('merge', 'executor');
+  workflow.addEdge('executor', 'validator');
 
   // Condition routing after validator to continue executor loop, replan, or finish
   workflow.addConditionalEdges(
-    "validator",
+    'validator',
     (state) => {
       const plan = state.taskPlan;
       const nextIndex = plan.currentStepIndex;
@@ -89,68 +81,57 @@ export function buildAgentGraph() {
       if (globalTransitions >= 10 || toolErrors >= 3) {
         logger.warn(
           { threadId: state.threadId, globalTransitions, toolErrors },
-          "🛑 [CIRCUIT BREAKER TRIGGERED] Runaway loop or tool errors limit exceeded! Fusing execution to prevent API credit burn!",
+          '🛑 [CIRCUIT BREAKER TRIGGERED] Runaway loop or tool errors limit exceeded! Fusing execution to prevent API credit burn!',
         );
-        return "finish";
+        return 'finish';
       }
 
       // 1. 如果有任何子任务在等待审批，我们立刻提前终止 Graph 并路由到 finish 节点让其挂起！
-      const hasWaitingStep = plan.subtasks.some(
-        (st) => st.result?.waitingForApproval,
-      );
+      const hasWaitingStep = plan.subtasks.some((st) => st.result?.waitingForApproval);
       if (hasWaitingStep) {
         logger.info(
           { threadId: state.threadId },
-          "Detected pending approval, routing to finish early to safely suspend.",
+          'Detected pending approval, routing to finish early to safely suspend.',
         );
-        return "finish";
+        return 'finish';
       }
 
       // 2. 如果有任何子任务被管理员驳回（status === 'failed' 且 result 里面有 rejectedByAdmin: true），
       // 且我们还没有进行重规划（即当前处于刚刚拒绝的那一步），我们选择【回溯】路由到 planner 重新进行决策规划！
       const hasJustBeenRejected = plan.subtasks.some(
-        (st) =>
-          st.status === "failed" &&
-          st.result?.rejectedByAdmin &&
-          !st.result?.replanned,
+        (st) => st.status === 'failed' && st.result?.rejectedByAdmin && !st.result?.replanned,
       );
       if (hasJustBeenRejected) {
         logger.info(
           { threadId: state.threadId },
-          "Detected administrator rejection, routing BACK to planner for cognitive re-planning!",
+          'Detected administrator rejection, routing BACK to planner for cognitive re-planning!',
         );
         // 标记该拒绝步骤已被重规划受理，防止无限循环
         plan.subtasks = plan.subtasks.map((st) =>
-          st.status === "failed" && st.result?.rejectedByAdmin
+          st.status === 'failed' && st.result?.rejectedByAdmin
             ? { ...st, result: { ...st.result, replanned: true } }
             : st,
         );
-        return "planner";
+        return 'planner';
       }
 
       // 3. Loop circuit breaker / safety check to avoid infinite loops
       if (nextIndex >= plan.subtasks.length || nextIndex >= 10) {
-        logger.info(
-          { threadId: state.threadId },
-          "Plan steps completed, routing to finish",
-        );
-        return "finish";
+        logger.info({ threadId: state.threadId }, 'Plan steps completed, routing to finish');
+        return 'finish';
       }
 
-      logger.info(
-        { threadId: state.threadId, nextIndex },
-        "Routing back to executor for next step",
-      );
-      return "executor";
+      logger.info({ threadId: state.threadId, nextIndex }, 'Routing back to executor for next step');
+      return 'executor';
     },
     {
-      executor: "executor",
-      planner: "planner",
-      finish: "finish",
+      executor: 'executor',
+      planner: 'planner',
+      finish: 'finish',
     },
   );
 
-  workflow.addEdge("finish", END);
+  workflow.addEdge('finish', END);
 
   return workflow;
 }
@@ -160,21 +141,21 @@ function isQuickGreeting(msg: string): boolean {
   const clean = msg
     .trim()
     .toLowerCase()
-    .replace(/[，。！？,.!?\s]/g, "");
+    .replace(/[，。！？,.!?\s]/g, '');
   const greetings = [
-    "你好",
-    "您好",
-    "哈喽",
-    "哈罗",
-    "hello",
-    "hi",
-    "hey",
-    "你是谁",
-    "你是哪个",
-    "你是AI吗",
-    "你是机器人吗",
-    "who are you",
-    "how are you",
+    '你好',
+    '您好',
+    '哈喽',
+    '哈罗',
+    'hello',
+    'hi',
+    'hey',
+    '你是谁',
+    '你是哪个',
+    '你是AI吗',
+    '你是机器人吗',
+    'who are you',
+    'how are you',
   ];
   return greetings.includes(clean);
 }
@@ -195,24 +176,17 @@ export async function runAgent(
   // 1. 🚀 毫秒级极速直达旁路：如果用户输入纯问候语/打招呼，跳过所有 LLM、向量数据库 RAG 检索！
   // 零模型开销，10毫秒瞬间完美响应！
   if (isQuickGreeting(inputMessage)) {
-    let resolvedBizId = overrideBusinessId || "ecommerce";
+    let resolvedBizId = overrideBusinessId || 'ecommerce';
     try {
       const drizzle = getDrizzle();
       if (drizzle) {
-        const threadRows = await drizzle
-          .select()
-          .from(threads)
-          .where(eq(threads.id, threadId))
-          .limit(1);
+        const threadRows = await drizzle.select().from(threads).where(eq(threads.id, threadId)).limit(1);
         if (threadRows[0]?.businessId) {
           resolvedBizId = threadRows[0].businessId;
         }
       }
     } catch (gErr) {
-      console.warn(
-        "[Quick Greeting] Failed to resolve thread businessId:",
-        gErr,
-      );
+      console.warn('[Quick Greeting] Failed to resolve thread businessId:', gErr);
     }
 
     const brandName = getMerchantDisplayName(resolvedBizId);
@@ -225,34 +199,29 @@ export async function runAgent(
 
 请告诉我您需要处理的业务，我将真刀真枪为您调起系统底层工具为您搞定！`;
 
-    console.log(
-      "[Quick Greeting Bypass] Triggered 10ms lightning bypass response!",
-    );
+    console.log('[Quick Greeting Bypass] Triggered 10ms lightning bypass response!');
 
     // 先确保物理会话在数据库中落盘（防止 messages 表中 thread_id 外键约束报错导致存储失败）
     try {
-      const { db } = require("db");
+      const { db } = require('db');
       await db.createThread(threadId, userId, overrideBusinessId);
     } catch (threadErr) {
-      console.warn(
-        "[DB] Failed to ensure thread exists for quick greeting:",
-        threadErr,
-      );
+      console.warn('[DB] Failed to ensure thread exists for quick greeting:', threadErr);
     }
 
-    await shortMemory.addMessage("user", inputMessage);
-    await shortMemory.addMessage("assistant", greetingText);
+    await shortMemory.addMessage('user', inputMessage);
+    await shortMemory.addMessage('assistant', greetingText);
 
     const mockResult = {
       output: greetingText,
       taskPlan: {
-        goal: "Bypass planner loop and respond to quick greeting directly",
+        goal: 'Bypass planner loop and respond to quick greeting directly',
         subtasks: [
           {
-            id: "respond_greeting",
-            description: "Lightning bypass welcome message",
-            status: "completed" as const,
-            result: { message: "Bypassed successfully" },
+            id: 'respond_greeting',
+            description: 'Lightning bypass welcome message',
+            status: 'completed' as const,
+            result: { message: 'Bypassed successfully' },
           },
         ],
         currentStepIndex: 1,
@@ -261,10 +230,9 @@ export async function runAgent(
 
     if (jobId) {
       agentEventEmitter.emit(`${jobId}:status`, {
-        status: "executing",
-        node: "triage",
-        message:
-          "极速通道：已秒级识别您所发送的日常打招呼，为您载入高画质欢迎界面...",
+        status: 'executing',
+        node: 'triage',
+        message: '极速通道：已秒级识别您所发送的日常打招呼，为您载入高画质欢迎界面...',
         plan: mockResult.taskPlan,
       });
       // 延迟极微小时间给 SSE 握手
@@ -283,23 +251,18 @@ export async function runAgent(
   let ragDocs: ScoredRAGDocument[] = [];
 
   // SaaS 多租户隔离及高级动态政策热载入引擎
-  let businessId = overrideBusinessId || "ecommerce";
+  let businessId = overrideBusinessId || 'ecommerce';
   const initialBrandName = getMerchantDisplayName(businessId);
   let dynamicConfig = {
     businessId,
     systemPrompt: `You are an advanced, professional AI Customer Support Agent representing ${initialBrandName}. Help users resolve order, shipping, and refund queries.`,
     intents: {
-      order_status: { description: "Track or check order delivery status." },
-      refund: { description: "Process or request refunds." },
-      general_query: { description: "General customer questions." },
+      order_status: { description: 'Track or check order delivery status.' },
+      refund: { description: 'Process or request refunds.' },
+      general_query: { description: 'General customer questions.' },
     },
-    tools: [
-      "getOrderStatus",
-      "processRefund",
-      "takeScreenshot",
-      "listUserOrders",
-    ],
-    executionMode: "plan-and-execute",
+    tools: ['getOrderStatus', 'processRefund', 'takeScreenshot', 'listUserOrders'],
+    executionMode: 'plan-and-execute',
     confidenceThresholds: { high: 0.85, mid: 0.6 },
     refundAutoApprovalLimit: 100, // 默认超过 $100 退款触发审批
   };
@@ -311,11 +274,7 @@ export async function runAgent(
       // 🛡️ 最底层的多租户外键一致性保障：强行确保物理 threads 行在 messages 写入前已真实落盘
       await db.createThread(threadId, userId, overrideBusinessId);
 
-      const threadRows = await drizzle
-        .select()
-        .from(threads)
-        .where(eq(threads.id, threadId))
-        .limit(1);
+      const threadRows = await drizzle.select().from(threads).where(eq(threads.id, threadId)).limit(1);
       if (threadRows[0]?.businessId) {
         businessId = threadRows[0].businessId;
       }
@@ -324,12 +283,7 @@ export async function runAgent(
       const configRows = await drizzle
         .select()
         .from(businessConfigs)
-        .where(
-          and(
-            eq(businessConfigs.businessId, businessId),
-            eq(businessConfigs.isActive, true),
-          ),
-        )
+        .where(and(eq(businessConfigs.businessId, businessId), eq(businessConfigs.isActive, true)))
         .limit(1);
 
       if (configRows[0]?.config) {
@@ -344,8 +298,8 @@ export async function runAgent(
       } else {
         // 自愈装配（Nike: $150, Adidas: $120, 主站: $100）
         let defaultLimit = 100;
-        if (businessId === "nike") defaultLimit = 150;
-        else if (businessId === "adidas") defaultLimit = 120;
+        if (businessId === 'nike') defaultLimit = 150;
+        else if (businessId === 'adidas') defaultLimit = 120;
 
         dynamicConfig = {
           ...dynamicConfig,
@@ -358,10 +312,7 @@ export async function runAgent(
       }
     }
   } catch (err) {
-    console.warn(
-      "[SaaS Config Engine] Failed to dynamically load business config:",
-      err,
-    );
+    console.warn('[SaaS Config Engine] Failed to dynamically load business config:', err);
   }
 
   const longMemory = new LongMemory(userId, businessId);
@@ -380,10 +331,7 @@ export async function runAgent(
     try {
       precomputedEmbedding = await embeddingModel.embedQuery(inputMessage);
     } catch (embedErr) {
-      console.error(
-        "[runAgent] Failed to precompute embedding for Single-Embedding Injection:",
-        embedErr,
-      );
+      console.error('[runAgent] Failed to precompute embedding for Single-Embedding Injection:', embedErr);
     }
 
     // 🚀 三路高度并行化 RAG 检索（长期事实记忆、情境记忆、多租户 Contextual 知识库检索）
@@ -393,16 +341,16 @@ export async function runAgent(
       contextualRag.searchRelevantDocs(inputMessage, 2, precomputedEmbedding),
     ]);
 
-    longFacts = factsRes.status === "fulfilled" ? factsRes.value : [];
-    episodicEvents = eventsRes.status === "fulfilled" ? eventsRes.value : [];
-    ragDocs = ragRes.status === "fulfilled" ? ragRes.value : [];
+    longFacts = factsRes.status === 'fulfilled' ? factsRes.value : [];
+    episodicEvents = eventsRes.status === 'fulfilled' ? eventsRes.value : [];
+    ragDocs = ragRes.status === 'fulfilled' ? ragRes.value : [];
   }
 
-  const isResuming = inputMessage.startsWith("System:");
+  const isResuming = inputMessage.startsWith('System:');
 
   // Record user query in short memory (only if not an internal System resume prompt)
   if (!isResuming) {
-    await shortMemory.addMessage("user", inputMessage);
+    await shortMemory.addMessage('user', inputMessage);
   }
 
   // 🚀 获取最新的短期会话历史，无缝传递给状态图总线
@@ -410,7 +358,7 @@ export async function runAgent(
   console.log(
     `\n[buildGraph Debug] Thread ${threadId} loaded historyMsgs:`,
     JSON.stringify(historyMsgs, null, 2),
-    "\n",
+    '\n',
   );
 
   // Load saved task state (if any) to support stateless suspension & recovery & domain contexts
@@ -424,20 +372,14 @@ export async function runAgent(
     if (savedState) {
       if (isResuming) {
         savedTaskPlan = savedState;
-        console.log(
-          `[buildGraph] 🔄 Resuming suspended flow, loaded saved taskPlan:`,
-          JSON.stringify(savedTaskPlan),
-        );
+        console.log(`[buildGraph] 🔄 Resuming suspended flow, loaded saved taskPlan:`, JSON.stringify(savedTaskPlan));
       }
       if (savedState.guideContext) savedGuideContext = savedState.guideContext;
       if (savedState.cartContext) savedCartContext = savedState.cartContext;
       if (savedState.orderContext) savedOrderContext = savedState.orderContext;
     }
   } catch (err) {
-    console.warn(
-      "[buildGraph] Failed to load saved task plan from taskMemory:",
-      err,
-    );
+    console.warn('[buildGraph] Failed to load saved task plan from taskMemory:', err);
   }
 
   // Build and execute compiled graph
@@ -462,15 +404,12 @@ export async function runAgent(
     loopCount: 0,
   };
 
-  logger.info(
-    { threadId, userId, jobId: initialState.jobId },
-    "Invoking Agent StateGraph execution",
-  );
+  logger.info({ threadId, userId, jobId: initialState.jobId }, 'Invoking Agent StateGraph execution');
 
   if (jobId) {
     agentEventEmitter.emit(`${jobId}:status`, {
-      status: "running",
-      message: "Local LangGraph execution engine initialized",
+      status: 'running',
+      message: 'Local LangGraph execution engine initialized',
     });
   }
 
@@ -501,48 +440,36 @@ export async function runAgent(
     const costUsd = (totalTokens / 1000000) * 0.15; // 按照每百万 Token $0.15 换算
     const nodeTransitions = result.loopCount || 3;
 
-    let resolutionStatus = "resolved_auto";
+    let resolutionStatus = 'resolved_auto';
     let isSuccess = true;
-    let feedbackComment = "All planned subtasks completed successfully.";
+    let feedbackComment = 'All planned subtasks completed successfully.';
 
     const plan = result.taskPlan;
     if (plan?.subtasks) {
-      const hasPending = plan.subtasks.some(
-        (st: SubTask) => st.result?.waitingForApproval,
-      );
-      const hasCancelled = plan.subtasks.some(
-        (st: SubTask) => st.result?.cancelledByUser,
-      );
-      const hasExpired = plan.subtasks.some(
-        (st: SubTask) => st.result?.expiredByTimeout,
-      );
-      const hasRejected = plan.subtasks.some(
-        (st: SubTask) => st.status === "failed" && st.result?.rejectedByAdmin,
-      );
-      const hasFailed = plan.subtasks.some(
-        (st: SubTask) => st.status === "failed",
-      );
+      const hasPending = plan.subtasks.some((st: SubTask) => st.result?.waitingForApproval);
+      const hasCancelled = plan.subtasks.some((st: SubTask) => st.result?.cancelledByUser);
+      const hasExpired = plan.subtasks.some((st: SubTask) => st.result?.expiredByTimeout);
+      const hasRejected = plan.subtasks.some((st: SubTask) => st.status === 'failed' && st.result?.rejectedByAdmin);
+      const hasFailed = plan.subtasks.some((st: SubTask) => st.status === 'failed');
 
       if (hasPending) {
-        resolutionStatus = "waiting_approval";
+        resolutionStatus = 'waiting_approval';
       } else if (hasCancelled) {
-        resolutionStatus = "cancelled";
+        resolutionStatus = 'cancelled';
       } else if (hasExpired) {
-        resolutionStatus = "expired";
+        resolutionStatus = 'expired';
       } else if (hasRejected) {
-        resolutionStatus = "rejected";
+        resolutionStatus = 'rejected';
       } else if (hasFailed) {
-        resolutionStatus = "failed";
+        resolutionStatus = 'failed';
         isSuccess = false;
-        feedbackComment =
-          "Some planned subtasks failed validation or execution.";
+        feedbackComment = 'Some planned subtasks failed validation or execution.';
       }
     }
 
     // Report semantic feedback to LangSmith if runId is available and API key is set
     if (runId && process.env.LANGCHAIN_API_KEY) {
-      const endpoint =
-        process.env.LANGCHAIN_ENDPOINT || "https://api.smith.langchain.com";
+      const endpoint = process.env.LANGCHAIN_ENDPOINT || 'https://api.smith.langchain.com';
       const apiKey = process.env.LANGCHAIN_API_KEY;
 
       // Async background fire-and-forget reporting to avoid blocking main execution
@@ -550,32 +477,32 @@ export async function runAgent(
         try {
           // Report 'correctness' feedback key
           const resCorrectness = await fetch(`${endpoint}/feedback`, {
-            method: "POST",
+            method: 'POST',
             headers: {
-              "x-api-key": apiKey,
-              "Content-Type": "application/json",
+              'x-api-key': apiKey,
+              'Content-Type': 'application/json',
             },
             body: JSON.stringify({
               run_id: runId,
-              key: "correctness",
+              key: 'correctness',
               score: isSuccess ? 1.0 : 0.0,
-              value: isSuccess ? "success" : "failure",
+              value: isSuccess ? 'success' : 'failure',
               comment: feedbackComment,
             }),
           });
 
           // Report 'success' feedback key (for alternative dashboards views)
           const resSuccess = await fetch(`${endpoint}/feedback`, {
-            method: "POST",
+            method: 'POST',
             headers: {
-              "x-api-key": apiKey,
-              "Content-Type": "application/json",
+              'x-api-key': apiKey,
+              'Content-Type': 'application/json',
             },
             body: JSON.stringify({
               run_id: runId,
-              key: "success",
+              key: 'success',
               score: isSuccess ? 1.0 : 0.0,
-              value: isSuccess ? "success" : "failure",
+              value: isSuccess ? 'success' : 'failure',
               comment: feedbackComment,
             }),
           });
@@ -590,10 +517,7 @@ export async function runAgent(
             );
           }
         } catch (telemetryErr) {
-          console.warn(
-            "[LangSmith Telemetry] Error uploading feedback to LangSmith:",
-            telemetryErr,
-          );
+          console.warn('[LangSmith Telemetry] Error uploading feedback to LangSmith:', telemetryErr);
         }
       })();
     }
@@ -614,14 +538,11 @@ export async function runAgent(
       );
     }
   } catch (metricsErr) {
-    console.warn(
-      "[SaaS Telemetry] Failed to persist session metrics in physical table:",
-      metricsErr,
-    );
+    console.warn('[SaaS Telemetry] Failed to persist session metrics in physical table:', metricsErr);
   }
 
   // 🗂️ 自动合成并挂载富媒体交互卡片 (Rich Cards)
-  const { CardSynthesizer } = await import("../cards/cardSynthesizer");
+  const { CardSynthesizer } = await import('../cards/cardSynthesizer');
   const synthesizedCards = CardSynthesizer.synthesizeCards({
     taskPlan: result.taskPlan,
     intents: result.intents,
@@ -629,12 +550,11 @@ export async function runAgent(
   });
 
   const existingCards = (result as any).cards || [];
-  const finalCards =
-    existingCards.length > 0 ? existingCards : synthesizedCards;
+  const finalCards = existingCards.length > 0 ? existingCards : synthesizedCards;
 
   // Store assistant response back into memories
   if (result.output) {
-    await shortMemory.addMessage("assistant", result.output, finalCards);
+    await shortMemory.addMessage('assistant', result.output, finalCards);
     await episodicMemory.addEvent(
       `Handled conversation thread: ${threadId}. Output summary: ${result.output.substring(0, 80)}`,
       5,
@@ -643,15 +563,12 @@ export async function runAgent(
   }
 
   // Persist structured task memory and domain contexts (guideContext, cartContext, orderContext)
-  const finalGuideContext =
-    (result as any).guideContext || initialState.guideContext;
-  const finalCartContext =
-    (result as any).cartContext || initialState.cartContext;
-  const finalOrderContext =
-    (result as any).orderContext || initialState.orderContext;
+  const finalGuideContext = (result as any).guideContext || initialState.guideContext;
+  const finalCartContext = (result as any).cartContext || initialState.cartContext;
+  const finalOrderContext = (result as any).orderContext || initialState.orderContext;
 
   const taskPlanToSave = result.taskPlan || {
-    goal: "Multi-turn conversational assistance",
+    goal: 'Multi-turn conversational assistance',
     subtasks: [],
     currentStepIndex: 0,
   };

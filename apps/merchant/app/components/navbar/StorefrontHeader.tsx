@@ -19,10 +19,34 @@ export function StorefrontHeader({
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [customName, setCustomName] = useState('');
   const [isCustomLoginOpen, setIsCustomLoginOpen] = useState(false);
+  const [syncedCartCount, setSyncedCartCount] = useState(cartCount);
+
+  React.useEffect(() => {
+    setSyncedCartCount(cartCount);
+  }, [cartCount]);
+
+  React.useEffect(() => {
+    const updateCount = () => {
+      try {
+        const stored = JSON.parse(localStorage.getItem('aurora_store_cart') || '[]');
+        const total = stored.reduce((sum: number, it: any) => sum + (it.quantity || 1), 0);
+        setSyncedCartCount(total);
+      } catch {
+        // ignore
+      }
+    };
+    updateCount();
+    window.addEventListener('cart_updated', updateCount);
+    window.addEventListener('storage', updateCount);
+    return () => {
+      window.removeEventListener('cart_updated', updateCount);
+      window.removeEventListener('storage', updateCount);
+    };
+  }, []);
 
   const navLinks = [
     { label: '🏬 选购首页', href: '/' },
-    { label: '🛒 购物车', href: '/cart', count: cartCount },
+    { label: '🛒 购物车', href: '/cart', count: syncedCartCount },
     { label: '📋 我的订单', href: '/orders', count: ordersCount },
     { label: '📍 地址簿', href: '/addresses', count: addressCount },
   ];

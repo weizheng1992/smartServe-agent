@@ -16,6 +16,80 @@ interface ChatMessage {
   text: string;
   time: string;
   cards?: RichCardBlock[];
+  isDivider?: boolean;
+}
+
+// 辅助函数：将对话中的购物车卡片物理同步到浏览器端 localStorage，并广播 cart_updated 事件
+function syncCartToLocalStorage(cards?: RichCardBlock[]) {
+  if (typeof window === "undefined" || !cards || cards.length === 0) return;
+  const cartCard = cards.find((c) => c.type === "cart_card");
+  if (!cartCard || !("items" in cartCard.data)) return;
+
+  try {
+    const rawStored = localStorage.getItem("aurora_store_cart");
+    const existingCart: any[] = rawStored ? JSON.parse(rawStored) : [];
+    const actionType = cartCard.data.actionType;
+
+    if (actionType === "cleared") {
+      localStorage.setItem("aurora_store_cart", JSON.stringify([]));
+      window.dispatchEvent(new Event("cart_updated"));
+      window.dispatchEvent(new Event("storage"));
+      return;
+    }
+
+    const items = cartCard.data.items || [];
+    for (const item of items) {
+      const skuCode = item.skuCode || item.skuId || item.id;
+      if (!skuCode) continue;
+
+      const idx = existingCart.findIndex(
+        (it: any) => (it.skuCode || it.sku?.skuCode || it.id) === skuCode,
+      );
+
+      if (idx >= 0) {
+        if (actionType === "added") {
+          existingCart[idx].quantity =
+            (existingCart[idx].quantity || 0) + (item.quantity || 1);
+        } else {
+          existingCart[idx].quantity = item.quantity || 1;
+        }
+      } else {
+        existingCart.push({
+          id: skuCode,
+          spuId: item.spuId || "SPU-AURORA-001",
+          skuCode: skuCode,
+          title: item.title,
+          skuTitle: item.specSummary || item.skuTitle || "官方精选规格",
+          imageUrl:
+            item.imageUrl ||
+            "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=800&auto=format&fit=crop&q=60",
+          price: Number(item.price || 899.0),
+          quantity: Number(item.quantity || 1),
+          stock: 99,
+          specAttributes: {},
+          selected: true,
+          sku: {
+            skuCode: skuCode,
+            skuTitle: item.specSummary || item.skuTitle || "官方精选规格",
+            price: Number(item.price || 899.0),
+          },
+          product: {
+            id: item.spuId || "SPU-AURORA-001",
+            title: item.title,
+          },
+        });
+      }
+    }
+
+    localStorage.setItem("aurora_store_cart", JSON.stringify(existingCart));
+    window.dispatchEvent(new Event("cart_updated"));
+    window.dispatchEvent(new Event("storage"));
+  } catch (err) {
+    console.warn(
+      "[FloatingChatWidget] Failed to sync cart to localStorage:",
+      err,
+    );
+  }
 }
 
 export function FloatingChatWidget({
@@ -32,8 +106,27 @@ export function FloatingChatWidget({
   const [userThreads, setUserThreads] = useState<any[]>([]);
   const [showHistoryList, setShowHistoryList] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const hasInitializedRef = useRef(false);
+  const messageContainerRef = useRef<HTMLDivElement>(null);
+  const prevScrollHeightRef = useRef<number>(0);
+  const isInitialLoadRef = useRef(true);
+
+  // 消息变动时自动持久化至本地缓存 (按用户与会话隔离)
+  useEffect(() => {
+    if (typeof window === "undefined" || !user?.id || !threadId) return;
+    if (messages.length > 0) {
+      try {
+        localStorage.setItem(
+          `aurora_chat_msgs_${user.id}_${threadId}`,
+          JSON.stringify(messages),
+        );
+      } catch {
+        // ignore
+      }
+    }
+  }, [messages, user?.id, threadId]);
 
   // 按需从服务端拉取用户历史会话列表或指定历史会话的消息
   const fetchHistory = useCallback(
@@ -81,53 +174,235 @@ export function FloatingChatWidget({
     [user?.id],
   );
 
-  // 初始化对应用户的会话并在切换路由时保持当前活跃会话状态
+  // 下拉 / 触顶加载更早的历史聊天记录 (跨轮次与全量历史会话)
+  const loadOlderHistory = useCallback(async () => {
+    if (!user?.id || isLoadingOlder || !hasMoreOlder) return;
+    setIsLoadingOlder(true);
+    try {
+      const container = messageContainerRef.current;
+      if (container) {
+        prevScrollHeightRef.current = container.scrollHeight;
+      }
+
+      const res = await fetch(
+        `/api/store/chat/messages?userId=${user.id}&tenantId=aurora&includeOlder=true`,
+      );
+      const data = await res.json();
+      if (data.success && Array.isArray(data.allHistoricalMessages)) {
+        const allMsgs = data.allHistoricalMessages;
+        const currentTexts = new Set(
+          messages.map((m) => `${m.role}:${m.text.trim()}`),
+        );
+        const olderToAdd = allMsgs.filter(
+          (m: any) =>
+            !currentTexts.has(
+              `${m.role === "user" ? "user" : "assistant"}:${(m.content || m.text || "").trim()}`,
+            ),
+        );
+
+        if (olderToAdd.length === 0) {
+          setHasMoreOlder(false);
+        } else {
+          const formattedOlder: ChatMessage[] = olderToAdd.map(
+            (m: any, idx: number) => ({
+              id: m.id || `hist_old_${idx}`,
+              role: m.role === "user" ? "user" : "assistant",
+              text: m.content || m.text || "",
+              cards: Array.isArray(m.cards) ? m.cards : [],
+              time: m.createdAt
+                ? new Date(m.createdAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : new Date().toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }),
+            }),
+          );
+
+          setMessages((prev) => [
+            {
+              id: `sep_${Date.now()}`,
+              role: "assistant",
+              text: `🕒 更早的历史会话记录 (${formattedOlder.length}条)`,
+              time: "",
+              isDivider: true,
+            },
+            ...formattedOlder,
+            ...prev,
+          ]);
+          setHasMoreOlder(false);
+        }
+      } else {
+        setHasMoreOlder(false);
+      }
+    } catch (err) {
+      console.error("Failed to load older chat history:", err);
+    } finally {
+      setIsLoadingOlder(false);
+      setTimeout(() => {
+        const container = messageContainerRef.current;
+        if (container && prevScrollHeightRef.current) {
+          container.scrollTop =
+            container.scrollHeight - prevScrollHeightRef.current;
+        }
+      }, 60);
+    }
+  }, [user?.id, isLoadingOlder, hasMoreOlder, messages]);
+
+  // 监听向上滚动触顶触发下拉加载历史
+  const handleScroll = () => {
+    if (!messageContainerRef.current) return;
+    if (
+      messageContainerRef.current.scrollTop === 0 &&
+      hasMoreOlder &&
+      !isLoadingOlder
+    ) {
+      loadOlderHistory();
+    }
+  };
+
+  // 初始化对应用户的会话：优先从本地缓存或后端恢复活跃会话，避免切换路由时冲掉记录
   useEffect(() => {
     if (!user?.id) return;
 
-    // 1. 若当前会话已有用户交流内容，切换页面时不销毁当前会话
-    const hasUserMsg = messages.some((m) => m.role === "user");
-    if (hasUserMsg && threadId) {
-      return;
-    }
-
-    // 2. 检查 sessionStorage 中是否有该用户的活跃会话记录
     let activeTid = threadId;
     if (!activeTid && typeof window !== "undefined") {
       activeTid =
-        sessionStorage.getItem(`aurora_active_thread_${user.id}`) || "";
+        localStorage.getItem(`aurora_active_thread_${user.id}`) ||
+        sessionStorage.getItem(`aurora_active_thread_${user.id}`) ||
+        "";
     }
 
-    // 若无活跃会话，生成全新会话标识
-    if (!activeTid) {
-      activeTid = `merchant_thread_${user.id}_aurora_${Date.now()}`;
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem(`aurora_active_thread_${user.id}`, activeTid);
+    // 1. 如果已有本地缓存的消息，秒级呈现
+    if (activeTid && typeof window !== "undefined") {
+      const cached = localStorage.getItem(
+        `aurora_chat_msgs_${user.id}_${activeTid}`,
+      );
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setThreadId(activeTid);
+            setMessages(parsed);
+            fetchHistory(activeTid);
+            return;
+          }
+        } catch {
+          // ignore
+        }
       }
     }
-    setThreadId(activeTid);
 
-    // 3. 若尚未产生真实交互，根据当前路由更新专属首句欢迎语
-    const greetingText = getGreetingForRoute({
-      pathname,
-      ...contextOverride,
-    });
-    setMessages([
-      {
-        id: `msg_init_${Date.now()}`,
-        role: "assistant",
-        text: greetingText,
-        cards: [],
-        time: new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      },
-    ]);
+    // 2. 若无本地缓存，向后端查询该用户最新活跃会话
+    fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=aurora`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (
+          data.success &&
+          data.threadId &&
+          Array.isArray(data.messages) &&
+          data.messages.length > 0
+        ) {
+          setThreadId(data.threadId);
+          if (typeof window !== "undefined") {
+            localStorage.setItem(
+              `aurora_active_thread_${user.id}`,
+              data.threadId,
+            );
+          }
+          const formattedMsgs: ChatMessage[] = data.messages.map(
+            (m: any, idx: number) => ({
+              id: m.id || `msg_hist_${idx}`,
+              role: m.role === "user" ? "user" : "assistant",
+              text: m.content || m.text || "",
+              cards: Array.isArray(m.cards) ? m.cards : [],
+              time: m.createdAt
+                ? new Date(m.createdAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : new Date().toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }),
+            }),
+          );
+          setMessages(formattedMsgs);
+          if (Array.isArray(data.userThreads)) {
+            setUserThreads(data.userThreads);
+          }
+        } else {
+          // 纯新会话：注入路由首句欢迎语
+          const freshTid =
+            activeTid || `merchant_thread_${user.id}_aurora_${Date.now()}`;
+          setThreadId(freshTid);
+          if (typeof window !== "undefined") {
+            localStorage.setItem(`aurora_active_thread_${user.id}`, freshTid);
+          }
+          const greetingText = getGreetingForRoute({
+            pathname,
+            ...contextOverride,
+          });
+          setMessages([
+            {
+              id: `msg_init_${Date.now()}`,
+              role: "assistant",
+              text: greetingText,
+              cards: [],
+              time: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
+          ]);
+        }
+      })
+      .catch(() => {
+        const freshTid =
+          activeTid || `merchant_thread_${user.id}_aurora_${Date.now()}`;
+        setThreadId(freshTid);
+        const greetingText = getGreetingForRoute({
+          pathname,
+          ...contextOverride,
+        });
+        setMessages([
+          {
+            id: `msg_init_${Date.now()}`,
+            role: "assistant",
+            text: greetingText,
+            cards: [],
+            time: new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          },
+        ]);
+      });
+  }, [user?.id]);
 
-    // 4. 主动静默预拉取历史会话记录数
-    fetchHistory();
-  }, [user?.id, pathname, contextOverride, fetchHistory]);
+  // 路由切换时仅在会话为空时更新欢迎语，不覆盖已有聊天记录
+  useEffect(() => {
+    if (messages.length === 1 && messages[0].id.startsWith("msg_init_")) {
+      const greetingText = getGreetingForRoute({
+        pathname,
+        ...contextOverride,
+      });
+      setMessages([
+        {
+          id: `msg_init_${Date.now()}`,
+          role: "assistant",
+          text: greetingText,
+          cards: [],
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        },
+      ]);
+    }
+  }, [pathname]);
 
   // 方案 B：基于 SSE (Server-Sent Events) 的实时事件流，替代无节制的 3 秒 HTTP 轮询
   useEffect(() => {
@@ -149,6 +424,10 @@ export function FloatingChatWidget({
             const incomingCards = Array.isArray(msgData.cards)
               ? msgData.cards
               : [];
+
+            if (incomingCards.length > 0) {
+              syncCartToLocalStorage(incomingCards);
+            }
 
             setMessages((prev) => {
               // 避免与已有的消息重复添加
@@ -199,19 +478,21 @@ export function FloatingChatWidget({
     };
   }, [threadId, isOpen]);
 
-  // 滚动到底部
+  // 滚动到底部 (仅在用户主动发信或接收新回复时平滑滚动)
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !isLoadingOlder) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, isOpen]);
+  }, [messages.length, isOpen, isLoadingOlder]);
 
   // 开启新会话
   const handleStartNewThread = () => {
     if (!user?.id) return;
     const newTid = `merchant_thread_${user.id}_aurora_${Date.now()}`;
     setThreadId(newTid);
+    setHasMoreOlder(true);
     if (typeof window !== "undefined") {
+      localStorage.setItem(`aurora_active_thread_${user.id}`, newTid);
       sessionStorage.setItem(`aurora_active_thread_${user.id}`, newTid);
     }
     const greetingText = getGreetingForRoute({
@@ -280,6 +561,10 @@ export function FloatingChatWidget({
         "抱歉，客服服务遇到一点小问题，请稍候再试。";
       const replyCards = Array.isArray(data.cards) ? data.cards : [];
       const msgId = data.messageId || `ast_${Date.now()}`;
+
+      if (replyCards.length > 0) {
+        syncCartToLocalStorage(replyCards);
+      }
 
       setMessages((prev) => {
         // 🛡️ 防御式去重与卡片同步：若 SSE 流式推送已经抢先注入了文本，补充注入卡片并去重
@@ -376,6 +661,12 @@ export function FloatingChatWidget({
         `已选定订单 ${orderIdStr}，请帮我查询该订单的具体信息和最新物流进度。`,
         orderCards,
       );
+    } else if (action === "checkout_cart" || action === "go_to_checkout") {
+      window.location.href = "/cart";
+    } else if (action === "view_cart") {
+      window.location.href = "/cart";
+    } else if (action === "clear_cart") {
+      handleSendMessage("清空购物车");
     } else if (action === "send_message" && payload?.text) {
       handleSendMessage(String(payload.text));
     } else if (action === "track_order" && payload?.orderId) {
@@ -546,35 +837,82 @@ export function FloatingChatWidget({
             </button>
           </div>
 
-          {/* 对话消息流 */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
-                    m.role === "user"
-                      ? "bg-emerald-600 text-white rounded-br-none"
-                      : "bg-white text-slate-800 border border-slate-200 rounded-bl-none"
-                  }`}
-                >
-                  {m.text}
+          {/* 对话消息流 (支持向下/触顶滚动加载更早历史消息) */}
+          <div
+            ref={messageContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50"
+          >
+            {/* 顶部触顶/下拉加载历史记录指示器 */}
+            <div className="flex justify-center pb-2">
+              {isLoadingOlder ? (
+                <div className="flex items-center space-x-1.5 text-[11px] text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                  <span>正在加载更早历史记录...</span>
                 </div>
-                {m.cards && m.cards.length > 0 && (
-                  <div className="w-full max-w-[95%]">
-                    <RichCardRenderer
-                      cards={m.cards}
-                      onAction={handleCardAction}
-                    />
+              ) : hasMoreOlder ? (
+                <button
+                  type="button"
+                  onClick={loadOlderHistory}
+                  className="text-[11px] text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1 rounded-full transition shadow-2xs cursor-pointer flex items-center space-x-1"
+                >
+                  <span>📜 下拉或点击加载更早历史记录</span>
+                </button>
+              ) : (
+                messages.length > 2 && (
+                  <span className="text-[10px] text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                    已加载全部历史消息
+                  </span>
+                )
+              )}
+            </div>
+
+            {messages.map((m) => {
+              if (m.isDivider) {
+                return (
+                  <div
+                    key={m.id}
+                    className="flex items-center my-3 text-[10px] text-slate-400 select-none"
+                  >
+                    <div className="flex-grow border-t border-slate-200" />
+                    <span className="px-2.5 bg-slate-100 rounded-full py-0.5 font-medium">
+                      {m.text}
+                    </span>
+                    <div className="flex-grow border-t border-slate-200" />
                   </div>
-                )}
-                <span className="text-[10px] text-slate-400 mt-1 px-1">
-                  {m.time}
-                </span>
-              </div>
-            ))}
+                );
+              }
+
+              return (
+                <div
+                  key={m.id}
+                  className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
+                >
+                  <div
+                    className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
+                      m.role === "user"
+                        ? "bg-emerald-600 text-white rounded-br-none"
+                        : "bg-white text-slate-800 border border-slate-200 rounded-bl-none"
+                    }`}
+                  >
+                    {m.text}
+                  </div>
+                  {m.cards && m.cards.length > 0 && (
+                    <div className="w-full max-w-[95%]">
+                      <RichCardRenderer
+                        cards={m.cards}
+                        onAction={handleCardAction}
+                      />
+                    </div>
+                  )}
+                  {m.time && (
+                    <span className="text-[10px] text-slate-400 mt-1 px-1">
+                      {m.time}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
             {isSending && (
               <div className="flex items-center space-x-2 text-xs text-slate-400 bg-white p-2.5 rounded-xl border border-slate-200 w-fit">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />

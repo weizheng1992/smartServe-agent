@@ -2,6 +2,7 @@
 
 import type React from 'react';
 import type { RichCardBlock } from 'types';
+import { CartCard } from './CartCard';
 import { DamageAssessmentCard } from './DamageAssessmentCard';
 import { OrderCard } from './OrderCard';
 import { OrderPickerCard } from './OrderPickerCard';
@@ -44,6 +45,8 @@ export const RichCardRenderer: React.FC<RichCardRendererProps> = ({ cards, onAct
             return <DamageAssessmentCard key={idx} data={card.data} />;
           case 'product_ranking':
             return <ProductRankingCard key={idx} data={card.data} />;
+          case 'cart_card':
+            return <CartCard key={idx} data={card.data} onAction={onAction} />;
           case 'quick_replies':
             return <QuickReplies key={idx} data={card.data} onSelectOption={onAction} />;
           default:

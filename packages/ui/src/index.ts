@@ -38,6 +38,7 @@ export * from './components/chat/cards/TrackingTimeline';
 export * from './components/chat/cards/RefundConfirmationCard';
 export * from './components/chat/cards/DamageAssessmentCard';
 export * from './components/chat/cards/ProductRankingCard';
+export * from './components/chat/cards/CartCard';
 export * from './components/chat/cards/QuickReplies';
 export * from './components/chat/cards/RichCardRenderer';
 export * from './lib/utils';

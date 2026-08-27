@@ -9,7 +9,7 @@ import { agentEventEmitter } from '../../eventEmitter';
 import type { AgentStateAnnotation, IntentResult, SubTask } from '../../state';
 import { sanitizeTenantResponse } from '../finish.node';
 import { TriageRuleMatchers } from './ruleMatchers';
-import { DEFAULT_ANCHOR_PHRASES, SemanticVectorCache, cosineSimilarity } from './semanticCache';
+import { SemanticVectorCache, cosineSimilarity } from './semanticCache';
 import { SlotExtractor } from './slotExtractor';
 
 /**
@@ -18,7 +18,12 @@ import { SlotExtractor } from './slotExtractor';
  */
 export function resolveDomainRole(intents: IntentResult[], input?: string): AgentDomainRole {
   const primaryIntent = intents.find((i) => i.type === 'primary')?.intent || intents[0]?.intent || '';
-  if (primaryIntent === 'cart_manage' || /(?:加购|购物车|结算|买它|加入购物车)/i.test(input || '')) {
+  if (
+    primaryIntent === 'cart_manage' ||
+    /(?:加购|购物车|结算|去结算|买它|加入购物车|移出购物车|清空购物车|删除第|改成\s*\d+|修改为\s*\d+)/i.test(
+      input || '',
+    )
+  ) {
     return 'cart';
   }
   if (
@@ -390,8 +395,61 @@ export class IntentTriageEngine {
       const existingTaskState = await taskMemory.getTaskState();
       const activeIntent = existingTaskState?.activeIntent;
       const existingSlots = (existingTaskState?.slots || {}) as Record<string, unknown>;
+      const existingOrderContext = existingTaskState?.orderContext || state.orderContext;
 
-      const taskSpec = SlotExtractor.extract(input, activeIntent, existingSlots);
+      // 1.5.1 复合多意图并行提取判定
+      const allSpecs = SlotExtractor.extractAll(input, activeIntent, existingSlots, {
+        orderContext: existingOrderContext,
+        shortMemory: state.shortMemory,
+        historyMsgs,
+      });
+
+      if (allSpecs.length >= 2) {
+        console.log(
+          `[Triage Multi-Intent Matched] 🎯 提取到 ${allSpecs.length} 个复合多意图: ${allSpecs.map((s) => s.intentType).join(' + ')}`,
+        );
+        const multiIntents: IntentResult[] = allSpecs.map((spec, idx) => ({
+          intent: spec.intentType,
+          confidence: spec.confidence,
+          type: idx === 0 ? ('primary' as const) : ('secondary' as const),
+          taskSpec: spec,
+          ...(spec.slots.orderId ? { entities: { orderId: String(spec.slots.orderId) } } : {}),
+        }));
+
+        const primaryOrderId = allSpecs.find((s) => s.slots.orderId)?.slots.orderId;
+        if (primaryOrderId) {
+          state.orderContext = {
+            ...(state.orderContext || {}),
+            targetOrderId: String(primaryOrderId),
+          };
+        }
+
+        await IntentTriageEngine.logIntentToDB(threadId, input, multiIntents, 'slot_extractor_multi', 0.95);
+
+        return {
+          intents: multiIntents,
+          activeDomainRole: resolveDomainRole(multiIntents, input),
+          shortMemory: historyMsgs,
+          damageAssessment,
+          globalTransitionsCount: -1,
+          toolErrorsCount: -1,
+        };
+      }
+
+      const taskSpec =
+        allSpecs[0] ||
+        SlotExtractor.extract(input, activeIntent, existingSlots, {
+          orderContext: existingOrderContext,
+          shortMemory: state.shortMemory,
+          historyMsgs,
+        });
+
+      if (taskSpec.slots.orderId) {
+        state.orderContext = {
+          ...(state.orderContext || {}),
+          targetOrderId: String(taskSpec.slots.orderId),
+        };
+      }
 
       // 如果属于订单履约类高风险/多参数意图，且必填槽位存在缺失，直接拦截并向用户追问，阻断死循环自旋！
       if (taskSpec.missingSlots.length > 0 && taskSpec.clarificationMessage) {
@@ -405,6 +463,9 @@ export class IntentTriageEngine {
           currentStepIndex: 0,
           activeIntent: taskSpec.intentType,
           slots: taskSpec.slots,
+          orderContext: state.orderContext,
+          guideContext: state.guideContext,
+          cartContext: state.cartContext,
         });
 
         return await this.handleImmediateBypass(
@@ -448,13 +509,16 @@ export class IntentTriageEngine {
         ];
         await this.logIntentToDB(threadId, input, intents, 'slot_extractor', taskSpec.confidence);
 
-        // 成功提取后清除已完成的 activeIntent 记忆
+        // 成功提取后清除已完成的 activeIntent 记忆并持久化最新 orderContext 与 slots
         await taskMemory.saveTaskState({
           goal: `Completed ${taskSpec.intentType}`,
           subtasks: [],
           currentStepIndex: 0,
           activeIntent: undefined,
           slots: taskSpec.slots,
+          orderContext: state.orderContext,
+          guideContext: state.guideContext,
+          cartContext: state.cartContext,
         });
 
         // 🎯 [Skill Fast-Track 直达极速执行]:
@@ -516,6 +580,12 @@ export class IntentTriageEngine {
               state.cartContext = {
                 ...(state.cartContext || {}),
                 ...(skillResult.extra.cartContext as any),
+              };
+            }
+            if (skillResult.extra?.orderContext) {
+              state.orderContext = {
+                ...(state.orderContext || {}),
+                ...(skillResult.extra.orderContext as any),
               };
             }
             const bypassRes = await this.handleImmediateBypass(

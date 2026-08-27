@@ -72,11 +72,14 @@ export function tryMatchExecutorFastPath(
     extractedOrderId
   ) {
     let newAddress = '';
-    const addrMatch = `${description} ${userInput}`.match(
-      /(?:with new address|改成|改到|送至|送去|寄到|地址为|地址是)\s*([^,，!！?？\n]+)/i,
-    );
-    if (addrMatch && addrMatch[1]) {
-      newAddress = addrMatch[1].trim();
+    const descAddrMatch = description.match(/with new address\s*([^\n]+)/i);
+    if (descAddrMatch?.[1]) {
+      newAddress = descAddrMatch[1].trim();
+    } else {
+      const addrMatch = userInput.match(/(?:改成|改到|送至|送去|寄到|地址为|地址是)\s*([^,，!！?？\n]+)/i);
+      if (addrMatch?.[1]) {
+        newAddress = addrMatch[1].trim();
+      }
     }
     return {
       toolName: 'changeShippingAddress',
@@ -88,8 +91,42 @@ export function tryMatchExecutorFastPath(
   }
 
   if (
+    descLower.includes('cart') ||
+    descLower.includes('加购物车') ||
+    descLower.includes('加入购物车') ||
+    descLower.includes('加购') ||
+    descLower.includes('购物车') ||
+    descLower.includes('结算') ||
+    descLower.includes('改数量') ||
+    descLower.includes('删商品')
+  ) {
+    return {
+      toolName: 'cart_manage',
+      args: {
+        userInput,
+      },
+    };
+  }
+
+  if (
+    descLower.includes('shopping_guide') ||
+    descLower.includes('recommend') ||
+    descLower.includes('推荐') ||
+    descLower.includes('导购') ||
+    descLower.includes('选品')
+  ) {
+    return {
+      toolName: 'shopping_guide',
+      args: {
+        userInput,
+      },
+    };
+  }
+
+  if (
     (descLower.includes('listuserorders') ||
       descLower.includes('list orders') ||
+      descLower.includes('fetch recent orders') ||
       descLower.includes('全部订单') ||
       descLower.includes('历史订单') ||
       descLower.includes('名下订单')) &&

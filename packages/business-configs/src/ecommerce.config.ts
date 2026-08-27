@@ -16,7 +16,15 @@ export const ecommerceConfig: BusinessConfig = {
     refund: { description: 'Process or request refunds.' },
     general_query: { description: 'General customer questions.' },
   },
-  tools: ['getOrderStatus', 'processRefund'],
+  tools: [
+    'getOrderStatus',
+    'processRefund',
+    'takeScreenshot',
+    'listUserOrders',
+    'changeShippingAddress',
+    'generateInvoice',
+    'recordUserPreference',
+  ],
   executionMode: 'plan-and-execute',
   confidenceThresholds: { high: 0.85, mid: 0.6 },
 };
