@@ -271,7 +271,7 @@ export const db: DBInterface = {
   getMessages: async (threadId: string): Promise<Message[]> => {
     const pool = getPgPool();
     const res = await pool.query(
-      `SELECT id, "thread_id" AS "threadId", role, content, timestamp
+      `SELECT id, "thread_id" AS "threadId", role, content, cards, timestamp
        FROM messages
        WHERE "thread_id" = $1
        ORDER BY
@@ -291,15 +291,33 @@ export const db: DBInterface = {
       threadId?: string;
       role: string;
       content: string;
+      cards?: any;
       timestamp: string;
     }>;
-    return rows.map((r) => ({
-      id: r.id,
-      threadId: r.thread_id || r.threadId || '',
-      role: r.role as any,
-      content: r.content,
-      timestamp: r.timestamp,
-    }));
+    return rows.map((r) => {
+      let parsedCards: any[] | null = null;
+      if (r.cards) {
+        if (typeof r.cards === 'string') {
+          try {
+            parsedCards = JSON.parse(r.cards);
+          } catch {
+            parsedCards = null;
+          }
+        } else if (Array.isArray(r.cards)) {
+          parsedCards = r.cards;
+        } else if (typeof r.cards === 'object') {
+          parsedCards = [r.cards];
+        }
+      }
+      return {
+        id: r.id,
+        threadId: r.thread_id || r.threadId || '',
+        role: r.role as any,
+        content: r.content,
+        cards: parsedCards,
+        timestamp: r.timestamp,
+      };
+    });
   },
 
   addMessage: async (message: Message & { businessId?: string }): Promise<void> => {
@@ -311,9 +329,15 @@ export const db: DBInterface = {
       else if (lowerTid.includes('nike')) bizId = 'nike';
       else if (lowerTid.includes('adidas')) bizId = 'adidas';
     }
+    const serializedCards =
+      message.cards && Array.isArray(message.cards) && message.cards.length > 0 ? JSON.stringify(message.cards) : null;
     await pool.query(
-      `INSERT INTO messages (id, "thread_id", business_id, role, content, timestamp) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING`,
-      [message.id, message.threadId, bizId, message.role, message.content, message.timestamp],
+      `INSERT INTO messages (id, "thread_id", business_id, role, content, cards, timestamp)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO UPDATE SET
+         cards = COALESCE(EXCLUDED.cards, messages.cards),
+         content = EXCLUDED.content`,
+      [message.id, message.threadId, bizId, message.role, message.content, serializedCards, message.timestamp],
     );
     await pool.query(`UPDATE threads SET updated_at = NOW() WHERE id = $1`, [message.threadId]);
   },

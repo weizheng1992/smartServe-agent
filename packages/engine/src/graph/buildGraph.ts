@@ -544,9 +544,20 @@ export async function runAgent(
     console.warn('[SaaS Telemetry] Failed to persist session metrics in physical table:', metricsErr);
   }
 
+  // 🗂️ 自动合成并挂载富媒体交互卡片 (Rich Cards)
+  const { CardSynthesizer } = await import('../cards/cardSynthesizer');
+  const synthesizedCards = CardSynthesizer.synthesizeCards({
+    taskPlan: result.taskPlan,
+    intents: result.intents,
+    damageAssessment: (result as any).damageAssessment,
+  });
+
+  const existingCards = (result as any).cards || [];
+  const finalCards = existingCards.length > 0 ? existingCards : synthesizedCards;
+
   // Store assistant response back into memories
   if (result.output) {
-    await shortMemory.addMessage('assistant', result.output);
+    await shortMemory.addMessage('assistant', result.output, finalCards);
     await episodicMemory.addEvent(
       `Handled conversation thread: ${threadId}. Output summary: ${result.output.substring(0, 80)}`,
       5,
@@ -571,17 +582,6 @@ export async function runAgent(
     cartContext: finalCartContext,
     orderContext: finalOrderContext,
   });
-
-  // 🗂️ 自动合成并挂载富媒体交互卡片 (Rich Cards)
-  const { CardSynthesizer } = await import('../cards/cardSynthesizer');
-  const synthesizedCards = CardSynthesizer.synthesizeCards({
-    taskPlan: result.taskPlan,
-    intents: result.intents,
-    damageAssessment: (result as any).damageAssessment,
-  });
-
-  const existingCards = (result as any).cards || [];
-  const finalCards = existingCards.length > 0 ? existingCards : synthesizedCards;
 
   const finalResult = {
     ...result,

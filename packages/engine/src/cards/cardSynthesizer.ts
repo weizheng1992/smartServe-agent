@@ -92,49 +92,55 @@ export class CardSynthesizer {
           synthesizedOrderCards.push(orderCard);
         }
 
-        if (synthesizedOrderCards.length > 1) {
-          // 当返回多笔订单时，合成订单列表选择弹窗卡片 (Order Picker Modal Card)
-          cards.push({
-            type: 'order_picker',
-            data: {
-              title: `为您查询到 ${synthesizedOrderCards.length} 笔订单记录`,
-              totalCount: synthesizedOrderCards.length,
-              orders: synthesizedOrderCards,
-            },
-          });
-        } else if (synthesizedOrderCards.length === 1) {
-          const singleOrder = synthesizedOrderCards[0];
-          cards.push({ type: 'order_card', data: singleOrder });
+        if (synthesizedOrderCards.length > 0) {
+          if (synthesizedOrderCards.length === 1) {
+            // 单笔订单：直接展示完整的详细 OrderCard
+            cards.push({ type: 'order_card', data: synthesizedOrderCards[0] });
+          } else {
+            // 多笔订单（>= 2 笔）：聚合为 OrderPickerCard 列表卡片，用户可直接点击条目或点击主按钮唤起弹窗进行选单
+            cards.push({
+              type: 'order_picker',
+              data: {
+                title: `为您查询到 ${synthesizedOrderCards.length} 笔订单记录`,
+                totalCount: synthesizedOrderCards.length,
+                orders: synthesizedOrderCards,
+              },
+            });
+          }
 
-          if (singleOrder.trackingNumber || singleOrder.carrier) {
-            const rawTimeline = Array.isArray(ordersList[0]?.timeline)
-              ? (ordersList[0].timeline as TrackingTimelineData['timeline'])
-              : [
-                  {
-                    time: new Date().toISOString().replace('T', ' ').slice(0, 16),
-                    location: `${singleOrder.carrier || '顺丰速运'} 派送中`,
-                    description: `包裹正在运送中，状态：${singleOrder.status}`,
-                    status: 'in_transit' as const,
-                  },
-                  {
-                    time: '订单发货',
-                    location: '发货仓库',
-                    description: '商品已完成质检并打包装箱出库',
-                    status: 'completed' as const,
-                  },
-                ];
+          // 如果单笔订单且有物流信息，附带物流轨迹卡片
+          if (synthesizedOrderCards.length === 1) {
+            const singleOrder = synthesizedOrderCards[0];
+            if (singleOrder.trackingNumber || singleOrder.carrier) {
+              const rawTimeline = Array.isArray(ordersList[0]?.timeline)
+                ? (ordersList[0].timeline as TrackingTimelineData['timeline'])
+                : [
+                    {
+                      time: new Date().toISOString().replace('T', ' ').slice(0, 16),
+                      location: `${singleOrder.carrier || '顺丰速运'} 派送中`,
+                      description: `包裹正在运送中，状态：${singleOrder.status}`,
+                      status: 'in_transit' as const,
+                    },
+                    {
+                      time: '订单发货',
+                      location: '发货仓库',
+                      description: '商品已完成质检并打包装箱出库',
+                      status: 'completed' as const,
+                    },
+                  ];
 
-            const timelineCard: TrackingTimelineData = {
-              trackingNumber: singleOrder.trackingNumber || '',
-              carrier: singleOrder.carrier || '顺丰速运',
-              currentStatus: singleOrder.status,
-              estimatedDelivery:
-                (ordersList[0]?.estimatedDelivery as string) ||
-                (ordersList[0]?.estimated_delivery as string) ||
-                '预计 1-3 个工作日内送达',
-              timeline: rawTimeline,
-            };
-            cards.push({ type: 'tracking_timeline', data: timelineCard });
+              const timelineCard: TrackingTimelineData = {
+                trackingNumber: singleOrder.trackingNumber || '',
+                carrier: singleOrder.carrier || '顺丰速运',
+                currentStatus: singleOrder.status,
+                estimatedDelivery:
+                  (ordersList[0]?.estimatedDelivery as string) ||
+                  (ordersList[0]?.estimated_delivery as string) ||
+                  '预计 1-3 个工作日内送达',
+                timeline: rawTimeline,
+              };
+              cards.push({ type: 'tracking_timeline', data: timelineCard });
+            }
           }
         }
 

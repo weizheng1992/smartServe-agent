@@ -6,6 +6,7 @@ import { getEmbeddingModel } from '../llm/callLLMWithRetry';
 export interface ShortMemoryMessage extends ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  cards?: any[] | null;
 }
 
 let lastGlobalTimestamp = 0;
@@ -61,9 +62,10 @@ export class ShortMemory {
       // Implement a sliding context window to fetch only the latest (maxTurns * 2) messages,
       // avoiding Context Window Bloat and reducing DB parsing and LLM token billing costs.
       const sliced = messages.slice(-this.maxTurns * 2);
-      return sliced.map((msg: { role: string; content: string }) => ({
+      return sliced.map((msg: { role: string; content: string; cards?: any[] | null }) => ({
         role: msg.role as 'user' | 'assistant' | 'system',
         content: msg.role === 'assistant' ? sanitizeTenantResponse(msg.content, businessId) : msg.content,
+        cards: msg.cards || undefined,
       }));
     } catch (err) {
       console.error('[ShortMemory Error] Failed to get messages:', err);
@@ -71,7 +73,7 @@ export class ShortMemory {
     }
   }
 
-  async addMessage(role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
+  async addMessage(role: 'user' | 'assistant' | 'system', content: string, cards?: any[] | null): Promise<void> {
     const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
     const timestamp = getMonotonicTimestamp(role);
     const cleanContent = content !== undefined && content !== null ? String(content) : '';
@@ -84,6 +86,7 @@ export class ShortMemory {
         businessId: this.businessId,
         role,
         content: cleanContent,
+        cards: cards || undefined,
         timestamp,
       } as any);
       console.log(

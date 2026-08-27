@@ -105,6 +105,16 @@ export async function runAgentStateNode(nodeName: string, state: any): Promise<A
       const updates = await finishNode(state);
       resultState = { ...resultState, ...updates };
 
+      // 🗂️ 自动合成并挂载富媒体交互卡片 (Rich Cards)
+      const { CardSynthesizer } = await import('../cards/cardSynthesizer');
+      const synthesizedCards = CardSynthesizer.synthesizeCards({
+        taskPlan: resultState.taskPlan,
+        intents: resultState.intents,
+        damageAssessment: (resultState as any).damageAssessment,
+      });
+      const finalCards = resultState.cards && resultState.cards.length > 0 ? resultState.cards : synthesizedCards;
+      resultState.cards = finalCards;
+
       // Commit memory updates and physically write chat records to Postgres messages table via ShortMemory!
       if (resultState.output) {
         const shortMemory = new ShortMemory(state.threadId);
@@ -112,7 +122,7 @@ export async function runAgentStateNode(nodeName: string, state: any): Promise<A
         const longMemory = new LongMemory(state.userId, businessId);
 
         await shortMemory.addMessage('user', state.input);
-        await shortMemory.addMessage('assistant', resultState.output);
+        await shortMemory.addMessage('assistant', resultState.output, finalCards);
 
         await Promise.all([
           episodicMemory.addEvent(
