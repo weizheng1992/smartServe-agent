@@ -1,10 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { getDrizzle, ragDocuments } from 'db';
-import { and, eq } from 'drizzle-orm';
-import { getEmbeddingModel, getLLM } from '../llm/callLLMWithRetry';
-import { MarkdownChunker } from './chunker';
-import { generateContextualSummary } from './contextGenerator';
+import { getDrizzle } from 'db';
+import { getLLM } from '../llm/callLLMWithRetry';
+import { syncKnowledgeDocument } from './updateRag';
 
 export type RAGCategory =
   | 'store_info'
@@ -18,6 +16,7 @@ export interface IngestResult {
   filePath: string;
   businessId: string;
   chunksIngested: number;
+  unchanged?: number;
 }
 
 /**
@@ -107,6 +106,7 @@ Return ONLY the category string (e.g. store_info). Do NOT include extra formatti
 
 /**
  * 自动化读取指定 TXT / Markdown 知识库目录并智能向量化切片入库
+ * 采用高性能增量同步与受控并发流水线
  */
 export async function ingestTxtDirectory(knowledgeDir: string): Promise<IngestResult[]> {
   const drizzle = getDrizzle();
@@ -122,95 +122,17 @@ export async function ingestTxtDirectory(knowledgeDir: string): Promise<IngestRe
 
   const files = fs.readdirSync(knowledgeDir).filter((f) => f.endsWith('.txt') || f.endsWith('.md'));
   const results: IngestResult[] = [];
-  const embeddingModel = getEmbeddingModel();
 
   for (const file of files) {
     const filePath = path.join(knowledgeDir, file);
-    const rawContent = fs.readFileSync(filePath, 'utf-8');
-
-    // 1. 解析 YAML Frontmatter 元数据
-    const { frontmatter, body } = parseFrontmatter(rawContent);
-
-    // 优先读取 Frontmatter 中的 businessId，无则根据文件名或默认补全
-    let businessId = frontmatter.businessId || 'ecommerce';
-    if (!frontmatter.businessId) {
-      const lowerFile = file.toLowerCase();
-      if (lowerFile.includes('nike')) businessId = 'nike';
-      else if (lowerFile.includes('adidas')) businessId = 'adidas';
-    }
-
-    // 优先读取 Frontmatter 中的 title，无则提取 H1 标题
-    let docTitle = frontmatter.title || '';
-    if (!docTitle) {
-      const firstLine = body.split('\n')[0] || '';
-      docTitle = firstLine.replace(/^#+\s*/, '').trim() || file;
-    }
-
-    const explicitCategory = frontmatter.category;
-
-    // 2. 结构化 Markdown 切片
-    const chunks = MarkdownChunker.splitMarkdown(body, {
-      maxChunkSize: 500,
-      category: explicitCategory,
-    });
-
-    // 3. 并行并发生成分类、Contextual Summary 与算力 Embeddings
-    const chunkPromises = chunks.map(async (chunk) => {
-      const category = await classifyChunkCategory(chunk.headerPath, chunk.chunkText, explicitCategory);
-
-      const summary = await generateContextualSummary(docTitle, chunk.headerPath, chunk.chunkText, businessId);
-
-      const combinedText = `[Context] ${summary}\n\n[Content] ${chunk.chunkText}`;
-      const embedding = await embeddingModel.embedQuery(combinedText);
-      const serializedEmbedding = JSON.stringify(embedding);
-
-      return {
-        businessId,
-        sourceUrl: file,
-        chunkText: chunk.chunkText,
-        contextualSummary: summary,
-        embedding: serializedEmbedding,
-        metadata: {
-          category,
-          docTitle,
-          headerPath: chunk.headerPath,
-          sourceFile: file,
-          ingestedAt: new Date().toISOString(),
-        },
-      };
-    });
-
-    const recordsToInsert = await Promise.all(chunkPromises);
-
-    // 幂等入库：先清理同商户同文件的历史切片，防止重复累加
-    await drizzle
-      .delete(ragDocuments)
-      .where(and(eq(ragDocuments.businessId, businessId), eq(ragDocuments.sourceUrl, file)));
-
-    for (const record of recordsToInsert) {
-      // 检查是否已有相同租户且相同文本的切片（例如早期无 sourceUrl 的种子数据），有则更新无则新增
-      const existing = await drizzle
-        .select({ id: ragDocuments.id })
-        .from(ragDocuments)
-        .where(and(eq(ragDocuments.businessId, record.businessId), eq(ragDocuments.chunkText, record.chunkText)))
-        .limit(1);
-
-      if (existing.length > 0) {
-        await drizzle.update(ragDocuments).set(record).where(eq(ragDocuments.id, existing[0].id));
-      } else {
-        await drizzle.insert(ragDocuments).values(record);
-      }
-    }
-
-    const count = recordsToInsert.length;
+    const syncRes = await syncKnowledgeDocument(filePath);
 
     results.push({
       filePath,
-      businessId,
-      chunksIngested: count,
+      businessId: syncRes.businessId,
+      chunksIngested: syncRes.totalChunks,
+      unchanged: syncRes.unchanged,
     });
-
-    console.log(`[IngestTxt] ✅ 成功入库文件 ${file} (商户: ${businessId}, 切片数: ${count})`);
   }
 
   return results;
