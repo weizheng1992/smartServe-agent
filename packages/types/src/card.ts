@@ -6,7 +6,62 @@ export type RichCardType =
   | 'quick_replies'
   | 'damage_assessment'
   | 'product_ranking'
-  | 'cart_card';
+  | 'cart_card'
+  | 'step_progress'
+  | 'interactive_product';
+
+export type CardHydrationState = 'skeleton' | 'hydrating' | 'ready' | 'action_pending' | 'settled';
+
+export interface StepProgressItem {
+  stepIndex: number;
+  title: string;
+  description?: string;
+  status: 'upcoming' | 'current' | 'completed' | 'error';
+  actionRequired?: {
+    actionType: 'input_text' | 'select_option' | 'upload_evidence' | 'confirm_button';
+    placeholder?: string;
+    options?: Array<{ label: string; value: string }>;
+    submitAction: string;
+    buttonLabel?: string;
+  };
+}
+
+export interface StepProgressCardData {
+  ticketId?: string;
+  orderId?: string;
+  title: string;
+  currentStep: number;
+  totalSteps: number;
+  steps: StepProgressItem[];
+  metadata?: Record<string, unknown>;
+  settledSummary?: string;
+}
+
+export interface ProductSkuSpec {
+  skuId: string;
+  title: string;
+  color?: string;
+  size?: string;
+  price: number;
+  stock: number;
+  imageUrl?: string;
+}
+
+export interface InteractiveProductCardData {
+  productId: string;
+  title: string;
+  subtitle?: string;
+  imageUrl?: string;
+  basePrice: number;
+  skus: ProductSkuSpec[];
+  selectedSkuId?: string;
+  selectedQuantity?: number;
+  actions?: Array<{
+    label: string;
+    action: string;
+    payload?: Record<string, unknown>;
+  }>;
+}
 
 export interface CartItemData {
   id?: string;
@@ -135,7 +190,10 @@ export interface OrderPickerCardData {
   orders: OrderCardData[];
 }
 
-export type RichCardBlock =
+export type RichCardBlock = {
+  id?: string;
+  hydrationState?: CardHydrationState;
+} & (
   | { type: 'order_card'; data: OrderCardData }
   | { type: 'order_picker'; data: OrderPickerCardData }
   | { type: 'tracking_timeline'; data: TrackingTimelineData }
@@ -143,7 +201,10 @@ export type RichCardBlock =
   | { type: 'quick_replies'; data: QuickRepliesData }
   | { type: 'damage_assessment'; data: DamageAssessmentData }
   | { type: 'product_ranking'; data: ProductRankingCardData }
-  | { type: 'cart_card'; data: CartCardData };
+  | { type: 'cart_card'; data: CartCardData }
+  | { type: 'step_progress'; data: StepProgressCardData }
+  | { type: 'interactive_product'; data: InteractiveProductCardData }
+);
 
 export interface MultimodalMessagePayload {
   message: string;

@@ -1,8 +1,8 @@
-import { logger } from "observability";
-import { getMerchantDisplayName } from "types";
-import { getLLM } from "../../llm/callLLMWithRetry";
-import { ShortMemory } from "../../memory/shortMemory";
-import { agentEventEmitter } from "../eventEmitter";
+import { logger } from 'observability';
+import { getMerchantDisplayName } from 'types';
+import { getLLM } from '../../llm/callLLMWithRetry';
+import { ShortMemory } from '../../memory/shortMemory';
+import { agentEventEmitter } from '../eventEmitter';
 import {
   type AgentStateAnnotation,
   type PendingApprovalRecord,
@@ -10,15 +10,12 @@ import {
   type SubTask,
   type TaskPlan,
   buildHistoryContext,
-} from "../state";
-import { ApprovalPolicyEngine } from "./approvalPolicyEngine";
-import { extractOrderId } from "./utils";
+} from '../state';
+import { ApprovalPolicyEngine } from './approvalPolicyEngine';
+import { extractOrderId } from './utils';
 
 export async function plannerNode(state: typeof AgentStateAnnotation.State) {
-  logger.info(
-    { threadId: state.threadId },
-    "plannerNode starting step planning",
-  );
+  logger.info({ threadId: state.threadId }, 'plannerNode starting step planning');
 
   const intents = state.intents;
   const input = state.input;
@@ -26,32 +23,27 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
   // 🧠 极致性能加速与直达：
   // 如果在 Triage 阶段或前置拦截中已经确定是单纯的日常问询/打招呼（general_query），
   // 我们在 Planner 阶段直接对 subtasks 进行硬性旁路截断，规划一个最极简的 Null 步骤，使其瞬间穿透并跳转到 Finish 阶段！
-  const isOnlyGeneralQuery =
-    intents.length === 1 && intents[0].intent === "general_query";
+  const isOnlyGeneralQuery = intents.length === 1 && intents[0].intent === 'general_query';
   if (isOnlyGeneralQuery) {
     const directPlan = {
-      goal: "Bypass planner loop and respond to general query directly",
+      goal: 'Bypass planner loop and respond to general query directly',
       subtasks: [
         {
-          id: "respond_general",
-          description: "Present general query response to user",
-          status: "pending" as const,
+          id: 'respond_general',
+          description: 'Present general query response to user',
+          status: 'pending' as const,
         },
       ],
       currentStepIndex: 0,
     };
 
-    logger.info(
-      { threadId: state.threadId },
-      "Bypassing complex planning for pure general_query.",
-    );
+    logger.info({ threadId: state.threadId }, 'Bypassing complex planning for pure general_query.');
 
     if (state.jobId) {
       agentEventEmitter.emit(`${state.jobId}:status`, {
-        status: "executing",
-        node: "planner",
-        message:
-          "检测到日常问询或欢迎语诉求，系统已完美启用【极速直达旁路】，无需进入复杂的工具规划与自旋校验环...",
+        status: 'executing',
+        node: 'planner',
+        message: '检测到日常问询或欢迎语诉求，系统已完美启用【极速直达旁路】，无需进入复杂的工具规划与自旋校验环...',
         plan: directPlan,
       });
     }
@@ -61,9 +53,9 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
 
   if (state.jobId) {
     agentEventEmitter.emit(`${state.jobId}:status`, {
-      status: "executing",
-      node: "planner",
-      message: "正在根据分类意图，由大模型动态生成高精准子步骤执行规划...",
+      status: 'executing',
+      node: 'planner',
+      message: '正在根据分类意图，由大模型动态生成高精准子步骤执行规划...',
     });
   }
 
@@ -73,43 +65,32 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
   const priorPlan = state.taskPlan;
   if (priorPlan && priorPlan.subtasks && priorPlan.subtasks.length > 0) {
     const currentStep = priorPlan.subtasks[priorPlan.currentStepIndex];
-    if (
-      currentStep &&
-      (currentStep.result?.waitingForApproval ||
-        currentStep.status === "pending")
-    ) {
+    if (currentStep && (currentStep.result?.waitingForApproval || currentStep.status === 'pending')) {
       try {
         let latestApproval: PendingApprovalRecord | null = null;
         const currentStepApprovalId = currentStep.result?.approvalId;
         if (currentStepApprovalId) {
-          latestApproval = await ApprovalPolicyEngine.findApprovalById(
-            currentStepApprovalId,
-          );
+          latestApproval = await ApprovalPolicyEngine.findApprovalById(currentStepApprovalId);
         } else {
-          latestApproval =
-            await ApprovalPolicyEngine.findLatestApprovalByThreadId(
-              state.threadId,
-            );
+          latestApproval = await ApprovalPolicyEngine.findLatestApprovalByThreadId(state.threadId);
         }
         if (
           latestApproval &&
-          (latestApproval.status === "approved" ||
-            latestApproval.status === "cancelled" ||
-            latestApproval.status === "resolved_by_human")
+          (latestApproval.status === 'approved' ||
+            latestApproval.status === 'cancelled' ||
+            latestApproval.status === 'resolved_by_human')
         ) {
-          console.log(
-            `[Planner Bypass] 🔄 Step is ${latestApproval.status}. Reusing the existing taskPlan.`,
-          );
+          console.log(`[Planner Bypass] 🔄 Step is ${latestApproval.status}. Reusing the existing taskPlan.`);
           if (state.jobId) {
             agentEventEmitter.emit(`${state.jobId}:status`, {
-              status: "executing",
-              node: "planner",
+              status: 'executing',
+              node: 'planner',
               message: `🔄 恢复计划：检测到历史执行工单已人工审核决议为 [${
-                latestApproval.status === "approved"
-                  ? "核准"
-                  : latestApproval.status === "resolved_by_human"
-                    ? "人工接管办结"
-                    : "取消"
+                latestApproval.status === 'approved'
+                  ? '核准'
+                  : latestApproval.status === 'resolved_by_human'
+                    ? '人工接管办结'
+                    : '取消'
               }]，跳过大模型规划，100% 物理复用历史步骤并精确恢复执行流！`,
               plan: priorPlan,
             });
@@ -117,18 +98,14 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
           return { taskPlan: priorPlan, globalTransitionsCount: 1 };
         }
       } catch (dbErr) {
-        console.warn(
-          "[Planner Bypass] Failed to check approval status for bypass:",
-          dbErr,
-        );
+        console.warn('[Planner Bypass] Failed to check approval status for bypass:', dbErr);
       }
     }
   }
 
   // 🧠 Cognitive State Backtracking: 检查是否有先前的被退款拒绝步骤，如果有，将管理员反馈作为关键上下文喂给 Planner 促其重新规划路径
-  let rejectionContext = "";
-  const isSystemResume =
-    typeof state.input === "string" && state.input.startsWith("System:");
+  let rejectionContext = '';
+  const isSystemResume = typeof state.input === 'string' && state.input.startsWith('System:');
   if (isSystemResume && priorPlan?.subtasks) {
     // 🛡️ 如果检测到管理员最新的审批结果是 'rejected'，我们动态将当前步骤标记为 failed 并打上 rejectedByAdmin 标记，以便进行认知重规划
     let latestApproval: PendingApprovalRecord | null = null;
@@ -138,36 +115,22 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
 
     try {
       if (stepApprovalId) {
-        latestApproval =
-          await ApprovalPolicyEngine.findApprovalById(stepApprovalId);
+        latestApproval = await ApprovalPolicyEngine.findApprovalById(stepApprovalId);
       } else {
-        latestApproval =
-          await ApprovalPolicyEngine.findLatestApprovalByThreadId(
-            state.threadId,
-          );
+        latestApproval = await ApprovalPolicyEngine.findLatestApprovalByThreadId(state.threadId);
       }
     } catch (dbErr) {
-      console.warn(
-        "[Planner Rejection Check] Failed to check latest approval for backtracking:",
-        dbErr,
-      );
+      console.warn('[Planner Rejection Check] Failed to check latest approval for backtracking:', dbErr);
     }
 
-    if (latestApproval && latestApproval.status === "rejected") {
-      if (
-        step &&
-        (step.result?.waitingForApproval ||
-          step.status === "pending" ||
-          step.status === "executing")
-      ) {
-        step.status = "failed";
+    if (latestApproval && latestApproval.status === 'rejected') {
+      if (step && (step.result?.waitingForApproval || step.status === 'pending' || step.status === 'executing')) {
+        step.status = 'failed';
         step.result = {
           ...step.result,
           rejectedByAdmin: true,
           rejectionReason:
-            (latestApproval.actionPayload?.rejectionReason as string) ||
-            latestApproval.reason ||
-            "No reason provided",
+            (latestApproval.actionPayload?.rejectionReason as string) || latestApproval.reason || 'No reason provided',
         };
         console.log(
           `[Planner Rejection] Dynamically marked step ${step.id} as failed/rejected based on DB approval record`,
@@ -175,35 +138,30 @@ export async function plannerNode(state: typeof AgentStateAnnotation.State) {
       }
     }
 
-    const rejectedStep = priorPlan.subtasks.find(
-      (st) => st.status === "failed" && st.result?.rejectedByAdmin,
-    );
+    const rejectedStep = priorPlan.subtasks.find((st) => st.status === 'failed' && st.result?.rejectedByAdmin);
     if (rejectedStep) {
       rejectionContext = `\n\n[CRITICAL ADVISORY]: A previous step "${rejectedStep.description}" was REJECTED by the Administrator.
-Rejection feedback/reason: "${rejectedStep.result?.rejectionReason || "No reason provided"}".
+Rejection feedback/reason: "${rejectedStep.result?.rejectionReason || 'No reason provided'}".
 Please replan and output an alternative approach that respects this rejection. Do NOT suggest the same rejected action. If a smaller refund was suggested, adjust the amount. If the user request cannot be fulfilled, generate a step to explain the reason politely to the user.`;
     }
   }
 
   // 📦 SaaS Contextual RAG: 将多租户隔离检索出的企业知识库和标准业务政策（SOP）注入 Prompt，强制 Planner 遵守对应商户退还时效
-  let ragContext = "";
+  let ragContext = '';
   if (state.ragDocuments && state.ragDocuments.length > 0) {
     const formattedDocs = state.ragDocuments
       .map((doc: RagDocument, idx: number) => {
-        return `[Store Policy Rule ${idx + 1}] (Context Summary: ${doc.contextualSummary || "N/A"}): "${doc.chunkText}"`;
+        return `[Store Policy Rule ${idx + 1}] (Context Summary: ${doc.contextualSummary || 'N/A'}): "${doc.chunkText}"`;
       })
-      .join("\n");
+      .join('\n');
     ragContext = `\n\n[RELEVANT BUSINESS POLICIES & KNOWLEDGE BASE]:\n${formattedDocs}\nStrictly adhere to these store policies while making the plan. If a policy specifies return timelines, tag conditions, or shipping methods, make sure any proposed subtasks or user communication steps strictly follow these rules.`;
   }
 
-  const tenantId = (
-    state.businessConfig?.businessId || "ecommerce"
-  ).toLowerCase();
+  const tenantId = (state.businessConfig?.businessId || 'ecommerce').toLowerCase();
   const brandName = getMerchantDisplayName(tenantId);
   const defaultSystemPrompt = `You are an advanced, professional AI Customer Support Agent representing ${brandName}. Help users resolve order, shipping, and refund queries.`;
   const systemPrompt =
-    state.businessConfig?.systemPrompt &&
-    state.businessConfig.systemPrompt.includes(brandName)
+    state.businessConfig?.systemPrompt && state.businessConfig.systemPrompt.includes(brandName)
       ? state.businessConfig.systemPrompt
       : defaultSystemPrompt;
   const tenantContext = `\n\n[MULTI-TENANT ISOLATION BOUNDARY]:
@@ -214,7 +172,7 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
 - If the customer explicitly asks to query or operate on unrelated external brands/stores, plan to politely refuse and clarify that you only support ${brandName}.`;
 
   // 🚀 会话上下文记忆：将历史消息拼装注入，大模型即可敏捷关联上一轮提问中提到的核心要素（如订单号 ORD-98712 等）
-  let historyContext = "";
+  let historyContext = '';
   let shortMemory = state.shortMemory;
   if (!shortMemory || shortMemory.length === 0) {
     const sm = new ShortMemory(state.threadId);
@@ -233,68 +191,58 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
   if (!rejectionContext && intents && intents.length > 0) {
     const singleIntent = intents[0].intent;
 
-    if (singleIntent === "human_escalation") {
+    if (singleIntent === 'human_escalation') {
       const fastPlan = {
-        goal: "Escalate conversation to human support operator",
+        goal: 'Escalate conversation to human support operator',
         subtasks: [
           {
-            id: "step_fast_human_escalation",
-            description:
-              "Trigger human escalation and create pending approval ticket for customer support operator",
-            status: "pending" as const,
+            id: 'step_fast_human_escalation',
+            description: 'Trigger human escalation and create pending approval ticket for customer support operator',
+            status: 'pending' as const,
           },
         ],
         currentStepIndex: 0,
       };
 
-      console.log(
-        "[Planner Fast-Path] ⚡ Fast-path human escalation plan synthesized! Bypassing LLM planning call.",
-      );
+      console.log('[Planner Fast-Path] ⚡ Fast-path human escalation plan synthesized! Bypassing LLM planning call.');
       if (state.jobId) {
         agentEventEmitter.emit(`${state.jobId}:status`, {
-          status: "executing",
-          node: "planner",
-          message:
-            "⚡ 极速介入直达：检测到人工客服与熔断诉求，已物理生成人工转接步骤并推入执行链！",
+          status: 'executing',
+          node: 'planner',
+          message: '⚡ 极速介入直达：检测到人工客服与熔断诉求，已物理生成人工转接步骤并推入执行链！',
           plan: fastPlan,
         });
       }
       return { taskPlan: fastPlan, shortMemory, globalTransitionsCount: 1 };
     }
 
-    const hasShoppingGuide = intents.some((i) => i.intent === "shopping_guide");
-    const hasCartManage = intents.some((i) => i.intent === "cart_manage");
-    const hasOrderList = intents.some(
-      (i) => i.intent === "order_status" || i.intent === "order_query",
-    );
+    const hasShoppingGuide = intents.some((i) => i.intent === 'shopping_guide');
+    const hasCartManage = intents.some((i) => i.intent === 'cart_manage');
+    const hasOrderList = intents.some((i) => i.intent === 'order_status' || i.intent === 'order_query');
 
-    if (
-      (hasShoppingGuide || hasCartManage) &&
-      hasOrderList &&
-      intents.length >= 2
-    ) {
+    if ((hasShoppingGuide || hasCartManage) && hasOrderList && intents.length >= 2) {
       const subtasks: SubTask[] = [];
       if (hasCartManage) {
         subtasks.push({
-          id: "step_fast_cart_0",
+          id: 'step_fast_cart_0',
           description: `Execute CartSkill for input: ${input}`,
-          status: "pending" as const,
+          status: 'pending' as const,
         });
       } else if (hasShoppingGuide) {
         subtasks.push({
-          id: "step_fast_guide_0",
+          id: 'step_fast_guide_0',
           description: `Execute ShoppingGuideSkill for input: ${input}`,
-          status: "pending" as const,
+          status: 'pending' as const,
         });
       }
       subtasks.push({
-        id: "step_fast_list_orders_1",
-        description: "Call listUserOrders to fetch recent orders",
-        status: "pending" as const,
+        id: 'step_fast_list_orders_1',
+        description: 'Call listUserOrders to fetch recent orders',
+        status: 'pending' as const,
       });
 
       const fastPlan: TaskPlan = {
-        goal: "Execute composite shopping and order query subtasks",
+        goal: 'Execute composite shopping and order query subtasks',
         subtasks,
         currentStepIndex: 0,
       };
@@ -304,8 +252,8 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
       );
       if (state.jobId) {
         agentEventEmitter.emit(`${state.jobId}:status`, {
-          status: "executing",
-          node: "planner",
+          status: 'executing',
+          node: 'planner',
           message: `⚡ 极速规划直达：识别到复合诉求，已智能组装 ${subtasks.length} 项子任务流并投入执行引擎！`,
           plan: fastPlan,
         });
@@ -314,10 +262,9 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
     }
 
     // 🛡️ 优先识别泛订单列表查询诉求 (如 "查询我的订单"、"我有哪些订单"、"支持退款的订单有哪些"、"问订单")
-    const isExplicitOrderIdInInput =
-      /(?:[A-Za-z0-9]+-)*ORD-[A-Za-z0-9_-]+/i.test(input);
+    const isExplicitOrderIdInInput = /(?:[A-Za-z0-9]+-)*ORD-[A-Za-z0-9_-]+/i.test(input);
     const isGeneralOrderListQuery =
-      (singleIntent === "order_status" || singleIntent === "order_query") &&
+      (singleIntent === 'order_status' || singleIntent === 'order_query') &&
       /查询.*订单|查订单|我的订单|订单列表|名下.*订单|支持退货.*订单|支持退款.*订单|可退.*订单|哪些.*订单|订单|我问订单/i.test(
         input,
       ) &&
@@ -325,26 +272,23 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
 
     if (isGeneralOrderListQuery && intents.length === 1) {
       const fastPlan: TaskPlan = {
-        goal: "List recent orders for customer",
+        goal: 'List recent orders for customer',
         subtasks: [
           {
-            id: "step_fast_list_orders",
-            description: "Call listUserOrders to fetch recent orders",
-            status: "pending" as const,
+            id: 'step_fast_list_orders',
+            description: 'Call listUserOrders to fetch recent orders',
+            status: 'pending' as const,
           },
         ],
         currentStepIndex: 0,
       };
 
-      console.log(
-        "[Planner Fast-Path] ⚡ Fast-path listUserOrders plan synthesized! Bypassing LLM planning call.",
-      );
+      console.log('[Planner Fast-Path] ⚡ Fast-path listUserOrders plan synthesized! Bypassing LLM planning call.');
       if (state.jobId) {
         agentEventEmitter.emit(`${state.jobId}:status`, {
-          status: "executing",
-          node: "planner",
-          message:
-            "⚡ 极速规划直达：检测到客户订单列表查询诉求，秒级调度 listUserOrders 工具进行物理查单！",
+          status: 'executing',
+          node: 'planner',
+          message: '⚡ 极速规划直达：检测到客户订单列表查询诉求，秒级调度 listUserOrders 工具进行物理查单！',
           plan: fastPlan,
         });
       }
@@ -352,19 +296,17 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
     }
 
     // 优先提取意图槽位中的 orderId，其次正则及对话历史提取
-    const entityOrderId = intents.find((i) => i.entities?.orderId)?.entities
-      ?.orderId;
-    const extractedOrderId =
-      entityOrderId || extractOrderId(input, null, shortMemory);
+    const entityOrderId = intents.find((i) => i.entities?.orderId)?.entities?.orderId;
+    const extractedOrderId = entityOrderId || extractOrderId(input, null, shortMemory);
 
     if (extractedOrderId) {
       const actionIntents = intents.filter(
         (i) =>
-          i.intent === "order_status" ||
-          i.intent === "refund" ||
-          i.intent === "order_modify_address" ||
-          i.intent === "order_query" ||
-          i.intent === "order_return",
+          i.intent === 'order_status' ||
+          i.intent === 'refund' ||
+          i.intent === 'order_modify_address' ||
+          i.intent === 'order_query' ||
+          i.intent === 'order_return',
       );
 
       if (actionIntents.length > 0) {
@@ -372,32 +314,28 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
 
         for (let idx = 0; idx < actionIntents.length; idx++) {
           const item = actionIntents[idx];
-          const suffix = actionIntents.length > 1 ? `_${idx}` : "";
-          if (item.intent === "order_status" || item.intent === "order_query") {
+          const suffix = actionIntents.length > 1 ? `_${idx}` : '';
+          if (item.intent === 'order_status' || item.intent === 'order_query') {
             subtasks.push({
               id: `step_fast_status${suffix}`,
               description: `Call getOrderStatus for order ${extractedOrderId}`,
-              status: "pending" as const,
+              status: 'pending' as const,
               condition: item.condition,
             });
-          } else if (
-            item.intent === "refund" ||
-            item.intent === "order_return"
-          ) {
+          } else if (item.intent === 'refund' || item.intent === 'order_return') {
             subtasks.push({
               id: `step_fast_refund${suffix}`,
               description: `Call processRefund for order ${extractedOrderId}`,
-              status: "pending" as const,
+              status: 'pending' as const,
               condition: item.condition,
             });
-          } else if (item.intent === "order_modify_address") {
+          } else if (item.intent === 'order_modify_address') {
             const taskSpec = item.taskSpec;
-            const targetAddress =
-              taskSpec?.slots?.newAddress || "客户指定新地址";
+            const targetAddress = taskSpec?.slots?.newAddress || '客户指定新地址';
             subtasks.push({
               id: `step_fast_change_address${suffix}`,
               description: `Call changeShippingAddress for order ${extractedOrderId} with new address ${targetAddress}`,
-              status: "pending" as const,
+              status: 'pending' as const,
               condition: item.condition,
             });
           }
@@ -405,26 +343,24 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
 
         // 如果包含条件子任务且尚未包含前置查询步骤，自动在队首注入状态查询前置步骤
         const hasConditionalStep = subtasks.some((st) => !!st.condition);
-        const hasStatusQuery = subtasks.some((st) =>
-          st.id.includes("step_fast_status"),
-        );
+        const hasStatusQuery = subtasks.some((st) => st.id.includes('step_fast_status'));
         if (hasConditionalStep && !hasStatusQuery) {
           subtasks.unshift({
-            id: "step_fast_status_pre",
+            id: 'step_fast_status_pre',
             description: `Call getOrderStatus for order ${extractedOrderId}`,
-            status: "pending" as const,
+            status: 'pending' as const,
           });
         }
 
         if (subtasks.length > 0) {
           const firstIntent = actionIntents[0].intent;
           const goalAction =
-            firstIntent === "order_status" || firstIntent === "order_query"
-              ? "Query status"
-              : firstIntent === "refund" || firstIntent === "order_return"
-                ? "Process refund"
-                : firstIntent === "order_modify_address"
-                  ? "Change shipping address"
+            firstIntent === 'order_status' || firstIntent === 'order_query'
+              ? 'Query status'
+              : firstIntent === 'refund' || firstIntent === 'order_return'
+                ? 'Process refund'
+                : firstIntent === 'order_modify_address'
+                  ? 'Change shipping address'
                   : firstIntent;
 
           const fastPlan: TaskPlan = {
@@ -441,8 +377,8 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
           );
           if (state.jobId) {
             agentEventEmitter.emit(`${state.jobId}:status`, {
-              status: "executing",
-              node: "planner",
+              status: 'executing',
+              node: 'planner',
               message: `⚡ 极速规划直达：关联订单号 [${extractedOrderId}]，快速生成 ${subtasks.length} 项多意图执行步骤，绕过大模型规划消耗！`,
               plan: fastPlan,
             });
@@ -453,7 +389,7 @@ You are an AI Customer Support Agent representing: ${brandName} (Merchant identi
     }
   }
 
-  const llm = getLLM(state.jobId, state.threadId, "planner");
+  const llm = getLLM(state.jobId, state.threadId, 'planner');
   const prompt = `System Instruction Context: "${systemPrompt}"${tenantContext}
 Based on the intents: ${JSON.stringify(intents)} and input: "${input}", generate a sequence of structured steps (a plan) to satisfy the request.${rejectionContext}${ragContext}${historyContext}
 
@@ -471,49 +407,43 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
 
   try {
     const response = await llm.invoke(prompt);
-    const content =
-      typeof response === "string"
-        ? response
-        : (response as { content?: string }).content || "";
+    const content = typeof response === 'string' ? response : (response as { content?: string }).content || '';
     let plan: { goal?: string; subtasks?: SubTask[] };
     try {
       const cleanResponse = content
         .trim()
-        .replace(/^```json\s*/, "")
-        .replace(/```$/, "")
+        .replace(/^```json\s*/, '')
+        .replace(/```$/, '')
         .trim();
       plan = JSON.parse(cleanResponse);
     } catch {
       // Fallback
       plan = {
-        goal: "Address customer request",
+        goal: 'Address customer request',
         subtasks: intents.map((it, idx) => ({
           id: `step_${idx}`,
           description: `Handle ${it.intent} process`,
-          status: "pending" as const,
+          status: 'pending' as const,
         })),
       };
     }
 
     const taskPlan: TaskPlan = {
-      goal: plan.goal || "Handle customer request",
+      goal: plan.goal || 'Handle customer request',
       subtasks: (plan.subtasks || []).map((sub: SubTask) => ({
         id: sub.id,
         description: sub.description,
-        status: "pending" as const,
+        status: 'pending' as const,
       })),
       currentStepIndex: 0,
     };
 
-    logger.info(
-      { threadId: state.threadId, taskPlan },
-      "plannerNode step planning completed",
-    );
+    logger.info({ threadId: state.threadId, taskPlan }, 'plannerNode step planning completed');
 
     if (state.jobId) {
       agentEventEmitter.emit(`${state.jobId}:status`, {
-        status: "executing",
-        node: "planner",
+        status: 'executing',
+        node: 'planner',
         message: `子步骤物理规划成功！目标：${taskPlan.goal}，拆解为 ${taskPlan.subtasks.length} 个子任务。`,
         plan: taskPlan,
       });
@@ -521,18 +451,15 @@ Return ONLY the raw JSON object. Do not include markdown or backticks.`;
 
     return { taskPlan, shortMemory, globalTransitionsCount: 1 };
   } catch (err: unknown) {
-    logger.error(
-      { threadId: state.threadId, err },
-      "plannerNode failed, falling back to default single-step plan",
-    );
+    logger.error({ threadId: state.threadId, err }, 'plannerNode failed, falling back to default single-step plan');
     return {
       taskPlan: {
-        goal: "Answer customer queries",
+        goal: 'Answer customer queries',
         subtasks: [
           {
-            id: "step_fallback",
-            description: "Address request in fallback mode",
-            status: "pending" as const,
+            id: 'step_fallback',
+            description: 'Address request in fallback mode',
+            status: 'pending' as const,
           },
         ],
         currentStepIndex: 0,

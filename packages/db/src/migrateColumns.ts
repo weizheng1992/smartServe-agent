@@ -1,8 +1,8 @@
-import { getPgPool } from "./client";
+import { getPgPool } from './client';
 
 async function migrateColumns() {
   const pool = getPgPool();
-  console.log("[DB Migration] 正在更新 products 与 order_items 物理表字段...");
+  console.log('[DB Migration] 正在更新 products 与 order_items 物理表字段...');
 
   await pool.query(`
     ALTER TABLE products ADD COLUMN IF NOT EXISTS manager_id text;
@@ -118,12 +118,12 @@ async function migrateColumns() {
     CREATE INDEX IF NOT EXISTS intent_exemplars_biz_idx ON intent_exemplars (business_id, intent_name);
   `);
 
-  console.log("✅ [DB Migration] 物理表列字段扩展完成！");
+  console.log('✅ [DB Migration] 物理表列字段扩展完成！');
 }
 
 migrateColumns()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error("❌ [DB Migration] Failed:", err);
+    console.error('❌ [DB Migration] Failed:', err);
     process.exit(1);
   });

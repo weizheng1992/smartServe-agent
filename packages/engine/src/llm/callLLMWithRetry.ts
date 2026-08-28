@@ -1,20 +1,20 @@
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
-import { agentEventEmitter } from "../graph/eventEmitter";
+import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai';
+import { agentEventEmitter } from '../graph/eventEmitter';
 
 // 🛡️ 熔断降级状态机 (Circuit Breaker)
-export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
+export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
 export class CircuitBreaker {
   private failureCount = 0;
   private maxFailures = 5;
   private cooldownMs = 30000; // 30 秒熔断冷却期
-  private state: CircuitState = "CLOSED";
+  private state: CircuitState = 'CLOSED';
   private nextAttemptTime = 0;
 
   public isOpen(): boolean {
-    if (this.state === "OPEN") {
+    if (this.state === 'OPEN') {
       if (Date.now() >= this.nextAttemptTime) {
-        this.state = "HALF_OPEN";
+        this.state = 'HALF_OPEN';
         return false;
       }
       return true;
@@ -24,13 +24,13 @@ export class CircuitBreaker {
 
   public recordSuccess(): void {
     this.failureCount = 0;
-    this.state = "CLOSED";
+    this.state = 'CLOSED';
   }
 
   public recordFailure(): void {
     this.failureCount++;
-    if (this.failureCount >= this.maxFailures || this.state === "HALF_OPEN") {
-      this.state = "OPEN";
+    if (this.failureCount >= this.maxFailures || this.state === 'HALF_OPEN') {
+      this.state = 'OPEN';
       this.nextAttemptTime = Date.now() + this.cooldownMs;
       console.warn(
         `[CircuitBreaker] ⚠️ 连续调用失败达阈值 (${this.failureCount} 次)，已触发熔断拦截！状态置为 OPEN，冷却时间: ${this.cooldownMs / 1000} 秒`,
@@ -48,7 +48,7 @@ export class CircuitBreaker {
 
   public reset(): void {
     this.failureCount = 0;
-    this.state = "CLOSED";
+    this.state = 'CLOSED';
     this.nextAttemptTime = 0;
   }
 }
@@ -63,12 +63,7 @@ class ResilientLLM {
   private threadId?: string;
   private node?: string;
 
-  constructor(
-    model: ChatOpenAI,
-    jobId?: string,
-    threadId?: string,
-    node?: string,
-  ) {
+  constructor(model: ChatOpenAI, jobId?: string, threadId?: string, node?: string) {
     this.model = model;
     this.jobId = jobId;
     this.threadId = threadId;
@@ -89,7 +84,7 @@ class ResilientLLM {
           const errMsg = `⚠️ 上游 AI 服务处于熔断状态 (${status.state})，冷却剩余: ${Math.ceil(status.nextAttemptInMs / 1000)}s。`;
           if (self.jobId) {
             agentEventEmitter.emit(`${self.jobId}:status`, {
-              status: "circuit_breaker_open",
+              status: 'circuit_breaker_open',
               message: errMsg,
             });
           }
@@ -106,29 +101,26 @@ class ResilientLLM {
           try {
             if (attempts > 1 && self.jobId) {
               agentEventEmitter.emit(`${self.jobId}:status`, {
-                status: "executing",
+                status: 'executing',
                 message: `⚠️ 结构化输出遭遇解析或网络阻塞，正在进行第 ${attempts} 次自愈重试...`,
               });
             }
 
-            const response = await structuredRunner.invoke(
-              input as any,
-              options as any,
-            );
+            const response = await structuredRunner.invoke(input as any, options as any);
             const latencyMs = Date.now() - startTime;
             globalCircuitBreaker.recordSuccess();
 
             // 结构化输出调用日志与 Token 记录
             try {
-              const { getDrizzle, llmCallLogs } = require("db");
+              const { getDrizzle, llmCallLogs } = require('db');
               const drizzle = getDrizzle();
               if (drizzle && self.threadId) {
                 drizzle
                   .insert(llmCallLogs)
                   .values({
                     threadId: self.threadId,
-                    node: self.node || "structured_triage",
-                    model: "gemini-3.5-flash:latest",
+                    node: self.node || 'structured_triage',
+                    model: 'gemini-3.5-flash:latest',
                     tokensIn: 300,
                     tokensOut: 150,
                     costUsd: (300 * 0.075 + 150 * 0.3) / 1_000_000,
@@ -141,10 +133,7 @@ class ResilientLLM {
             return response;
           } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
-            console.warn(
-              `[Structured LLM Attempt ${attempts} Failed]:`,
-              errMsg,
-            );
+            console.warn(`[Structured LLM Attempt ${attempts} Failed]:`, errMsg);
             if (attempts >= maxAttempts) {
               globalCircuitBreaker.recordFailure();
               throw err;
@@ -163,7 +152,7 @@ class ResilientLLM {
       const errMsg = `⚠️ 上游 AI 服务处于熔断状态 (${status.state})，冷却剩余: ${Math.ceil(status.nextAttemptInMs / 1000)}s。`;
       if (this.jobId) {
         agentEventEmitter.emit(`${this.jobId}:status`, {
-          status: "circuit_breaker_open",
+          status: 'circuit_breaker_open',
           message: errMsg,
         });
       }
@@ -180,14 +169,14 @@ class ResilientLLM {
       try {
         if (attempts > 1 && this.jobId) {
           agentEventEmitter.emit(`${this.jobId}:status`, {
-            status: "executing",
+            status: 'executing',
             message: `⚠️ 大模型呼叫遭遇网络阻塞或短暂波动，执行引擎正在物理触发【自愈抗灾重试】：正在进行第 ${attempts} 次调用重试保障决策畅通...`,
           });
         }
 
         const response = await this.model.invoke(
-          input as Parameters<ChatOpenAI["invoke"]>[0],
-          options as Parameters<ChatOpenAI["invoke"]>[1],
+          input as Parameters<ChatOpenAI['invoke']>[0],
+          options as Parameters<ChatOpenAI['invoke']>[1],
         );
         const latencyMs = Date.now() - startTime;
 
@@ -243,23 +232,19 @@ class ResilientLLM {
 
           // 异步持久化至 PostgreSQL llm_call_logs 表
           try {
-            const { getDrizzle, llmCallLogs } = require("db");
+            const { getDrizzle, llmCallLogs } = require('db');
             const drizzle = getDrizzle();
             if (drizzle) {
-              const opts =
-                options && typeof options === "object"
-                  ? (options as Record<string, unknown>)
-                  : {};
-              const threadId =
-                this.threadId || (opts.threadId as string) || undefined;
-              const node = this.node || (opts.node as string) || "llm_call";
+              const opts = options && typeof options === 'object' ? (options as Record<string, unknown>) : {};
+              const threadId = this.threadId || (opts.threadId as string) || undefined;
+              const node = this.node || (opts.node as string) || 'llm_call';
 
               drizzle
                 .insert(llmCallLogs)
                 .values({
                   threadId: threadId || null,
                   node: node,
-                  model: "gemini-3.5-flash:latest",
+                  model: 'gemini-3.5-flash:latest',
                   tokensIn,
                   tokensOut,
                   costUsd,
@@ -271,7 +256,7 @@ class ResilientLLM {
             }
           } catch {}
         } catch (tokenErr) {
-          console.warn("[Token Tracking Error]:", tokenErr);
+          console.warn('[Token Tracking Error]:', tokenErr);
         }
 
         return response;
@@ -291,17 +276,13 @@ class ResilientLLM {
   }
 }
 
-export function getLLM(
-  jobId?: string,
-  threadId?: string,
-  node?: string,
-): ResilientLLM {
+export function getLLM(jobId?: string, threadId?: string, node?: string): ResilientLLM {
   const llm = new ChatOpenAI({
     configuration: {
-      baseURL: "http://localhost:11211/api/openai/v1",
+      baseURL: 'http://localhost:11211/api/openai/v1',
     },
-    apiKey: "dummy",
-    modelName: "gemini-3.5-flash:latest",
+    apiKey: 'dummy',
+    modelName: 'gemini-3.5-flash:latest',
     temperature: 0,
   });
 
@@ -320,13 +301,10 @@ class HighFidelityEmbeddingModel {
     return vector.length === 0 || vector.every((x) => x === 0);
   }
 
-  private generateDeterministicEmbedding(
-    text: string,
-    dimensions = 1536,
-  ): number[] {
-    const crypto = require("node:crypto");
-    const cleanText = typeof text === "string" ? text : String(text || "");
-    const hash = crypto.createHash("sha256").update(cleanText).digest();
+  private generateDeterministicEmbedding(text: string, dimensions = 1536): number[] {
+    const crypto = require('node:crypto');
+    const cleanText = typeof text === 'string' ? text : String(text || '');
+    const hash = crypto.createHash('sha256').update(cleanText).digest();
     const vector: number[] = [];
     let sumSq = 0;
     for (let i = 0; i < dimensions; i++) {
@@ -351,10 +329,7 @@ class HighFidelityEmbeddingModel {
       }
       return vector;
     } catch (err) {
-      console.warn(
-        `[HighFidelityEmbedding] Call failed, generating high-fidelity fallback:`,
-        err,
-      );
+      console.warn(`[HighFidelityEmbedding] Call failed, generating high-fidelity fallback:`, err);
       return this.generateDeterministicEmbedding(text, 1536);
     }
   }
@@ -366,22 +341,14 @@ class HighFidelityEmbeddingModel {
         vectors.map(async (vector, idx) => {
           if (this.isAllZeros(vector)) {
             const dimensions = vector.length > 0 ? vector.length : 1536;
-            return this.generateDeterministicEmbedding(
-              documents[idx],
-              dimensions,
-            );
+            return this.generateDeterministicEmbedding(documents[idx], dimensions);
           }
           return vector;
         }),
       );
     } catch (err) {
-      console.warn(
-        `[HighFidelityEmbedding] Call failed, generating high-fidelity fallback for documents:`,
-        err,
-      );
-      return documents.map((doc) =>
-        this.generateDeterministicEmbedding(doc, 1536),
-      );
+      console.warn(`[HighFidelityEmbedding] Call failed, generating high-fidelity fallback for documents:`, err);
+      return documents.map((doc) => this.generateDeterministicEmbedding(doc, 1536));
     }
   }
 }
@@ -389,10 +356,10 @@ class HighFidelityEmbeddingModel {
 export function getEmbeddingModel(): HighFidelityEmbeddingModel {
   const model = new OpenAIEmbeddings({
     configuration: {
-      baseURL: "http://localhost:11211/api/openai/v1",
+      baseURL: 'http://localhost:11211/api/openai/v1',
     },
-    apiKey: "dummy",
-    modelName: "text-embedding-005:latest",
+    apiKey: 'dummy',
+    modelName: 'text-embedding-005:latest',
   });
   return new HighFidelityEmbeddingModel(model);
 }

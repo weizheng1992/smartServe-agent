@@ -1,15 +1,11 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { getDrizzle, ragDocuments } from "db";
-import { and, eq, inArray } from "drizzle-orm";
-import { getEmbeddingModel } from "../llm/callLLMWithRetry";
-import { MarkdownChunker } from "./chunker";
-import { generateContextualSummary } from "./contextGenerator";
-import {
-  type RAGCategory,
-  classifyChunkCategory,
-  parseFrontmatter,
-} from "./ingestTxtFiles";
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { getDrizzle, ragDocuments } from 'db';
+import { and, eq, inArray } from 'drizzle-orm';
+import { getEmbeddingModel } from '../llm/callLLMWithRetry';
+import { MarkdownChunker } from './chunker';
+import { generateContextualSummary } from './contextGenerator';
+import { type RAGCategory, classifyChunkCategory, parseFrontmatter } from './ingestTxtFiles';
 
 export interface UpsertChunkOptions {
   businessId: string;
@@ -44,15 +40,12 @@ export async function mapConcurrent<T, R>(
   const results: R[] = new Array(items.length);
   let currentIndex = 0;
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    async () => {
-      while (currentIndex < items.length) {
-        const idx = currentIndex++;
-        results[idx] = await fn(items[idx], idx);
-      }
-    },
-  );
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (currentIndex < items.length) {
+      const idx = currentIndex++;
+      results[idx] = await fn(items[idx], idx);
+    }
+  });
 
   await Promise.all(workers);
   return results;
@@ -62,18 +55,12 @@ export async function mapConcurrent<T, R>(
  * 物理单切片更新/覆盖 (Upsert Single Chunk)
  * 若同商户、同文件且同章节路径已存在，则覆盖更新文本与向量，否则插入新记录
  */
-export async function upsertDocumentChunk(
-  opts: UpsertChunkOptions,
-): Promise<string> {
+export async function upsertDocumentChunk(opts: UpsertChunkOptions): Promise<string> {
   const drizzle = getDrizzle();
-  if (!drizzle) throw new Error("Database connection not ready");
+  if (!drizzle) throw new Error('Database connection not ready');
 
   const embeddingModel = getEmbeddingModel();
-  const category = await classifyChunkCategory(
-    opts.headerPath,
-    opts.chunkText,
-    opts.category,
-  );
+  const category = await classifyChunkCategory(opts.headerPath, opts.chunkText, opts.category);
   const summary = await generateContextualSummary({
     fullDocumentTitle: opts.docTitle,
     headerPath: opts.headerPath,
@@ -86,21 +73,13 @@ export async function upsertDocumentChunk(
   const combinedText = `[Context] ${summary}\n\n[Content] ${opts.chunkText}`;
   const embedding = await embeddingModel.embedQuery(combinedText);
   const serializedEmbedding = JSON.stringify(embedding);
-  const contentHash = MarkdownChunker.computeHash(
-    opts.headerPath,
-    opts.chunkText,
-  );
+  const contentHash = MarkdownChunker.computeHash(opts.headerPath, opts.chunkText);
 
   // 检查是否存在现有同源或同内容切片（防止产生重复数据）
   const existing = await drizzle
     .select({ id: ragDocuments.id })
     .from(ragDocuments)
-    .where(
-      and(
-        eq(ragDocuments.businessId, opts.businessId),
-        eq(ragDocuments.chunkText, opts.chunkText),
-      ),
-    )
+    .where(and(eq(ragDocuments.businessId, opts.businessId), eq(ragDocuments.chunkText, opts.chunkText)))
     .limit(1);
 
   const matched = existing[0];
@@ -150,21 +129,13 @@ export async function upsertDocumentChunk(
 /**
  * 物理删除源文件对应的所有历史 RAG 切片 (Delete Chunks By Source)
  */
-export async function deleteChunksBySource(
-  businessId: string,
-  sourceUrl: string,
-): Promise<number> {
+export async function deleteChunksBySource(businessId: string, sourceUrl: string): Promise<number> {
   const drizzle = getDrizzle();
   if (!drizzle) return 0;
 
   const result = await drizzle
     .delete(ragDocuments)
-    .where(
-      and(
-        eq(ragDocuments.businessId, businessId),
-        eq(ragDocuments.sourceUrl, sourceUrl),
-      ),
-    );
+    .where(and(eq(ragDocuments.businessId, businessId), eq(ragDocuments.sourceUrl, sourceUrl)));
 
   return result.rowCount ?? 0;
 }
@@ -186,7 +157,7 @@ export async function syncKnowledgeDocument(
   if (!drizzle) {
     return {
       filePath,
-      businessId: overrideBusinessId || "ecommerce",
+      businessId: overrideBusinessId || 'ecommerce',
       totalChunks: 0,
       inserted: 0,
       updated: 0,
@@ -196,20 +167,20 @@ export async function syncKnowledgeDocument(
   }
 
   const fileName = path.basename(filePath);
-  const rawContent = fs.readFileSync(filePath, "utf-8");
+  const rawContent = fs.readFileSync(filePath, 'utf-8');
   const { frontmatter, body } = parseFrontmatter(rawContent);
 
-  let businessId = overrideBusinessId || frontmatter.businessId || "ecommerce";
+  let businessId = overrideBusinessId || frontmatter.businessId || 'ecommerce';
   if (!frontmatter.businessId && !overrideBusinessId) {
     const lower = fileName.toLowerCase();
-    if (lower.includes("nike")) businessId = "nike";
-    else if (lower.includes("adidas")) businessId = "adidas";
+    if (lower.includes('nike')) businessId = 'nike';
+    else if (lower.includes('adidas')) businessId = 'adidas';
   }
 
-  let docTitle = frontmatter.title || "";
+  let docTitle = frontmatter.title || '';
   if (!docTitle) {
-    const firstLine = body.split("\n")[0] || "";
-    docTitle = firstLine.replace(/^#+\s*/, "").trim() || fileName;
+    const firstLine = body.split('\n')[0] || '';
+    docTitle = firstLine.replace(/^#+\s*/, '').trim() || fileName;
   }
 
   const explicitCategory = frontmatter.category as RAGCategory | undefined;
@@ -232,22 +203,14 @@ export async function syncKnowledgeDocument(
       metadata: ragDocuments.metadata,
     })
     .from(ragDocuments)
-    .where(
-      and(
-        eq(ragDocuments.businessId, businessId),
-        eq(ragDocuments.sourceUrl, fileName),
-      ),
-    );
+    .where(and(eq(ragDocuments.businessId, businessId), eq(ragDocuments.sourceUrl, fileName)));
 
   const existingMap = new Map<string, (typeof existingRows)[0]>();
   for (const row of existingRows) {
-    let rowHash = "";
+    let rowHash = '';
     if (row.metadata) {
-      const meta =
-        typeof row.metadata === "string"
-          ? JSON.parse(row.metadata)
-          : (row.metadata as Record<string, any>);
-      rowHash = meta.contentHash || "";
+      const meta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata as Record<string, any>);
+      rowHash = meta.contentHash || '';
     }
     // 以 contentHash 为主键，若无则以 chunkText 降级比对
     const key = rowHash || row.chunkText;
@@ -270,8 +233,7 @@ export async function syncKnowledgeDocument(
   const tasksToProcess: PendingTask[] = [];
 
   for (const chunk of chunks) {
-    const existing =
-      existingMap.get(chunk.contentHash) || existingMap.get(chunk.chunkText);
+    const existing = existingMap.get(chunk.contentHash) || existingMap.get(chunk.chunkText);
     if (existing && existing.embedding) {
       // 完全一致，直接标记复用
       matchedRowIds.add(existing.id);
@@ -285,11 +247,7 @@ export async function syncKnowledgeDocument(
   if (tasksToProcess.length > 0) {
     await mapConcurrent(tasksToProcess, concurrency, async (task) => {
       const { chunk, existingId } = task;
-      const category = await classifyChunkCategory(
-        chunk.headerPath,
-        chunk.chunkText,
-        explicitCategory,
-      );
+      const category = await classifyChunkCategory(chunk.headerPath, chunk.chunkText, explicitCategory);
 
       const summary = await generateContextualSummary({
         fullDocumentTitle: docTitle,
@@ -316,25 +274,17 @@ export async function syncKnowledgeDocument(
           headerPath: chunk.headerPath,
           sourceFile: fileName,
           contentHash: chunk.contentHash,
-          parentChunk: chunk.parentChunk
-            ? chunk.parentChunk.slice(0, 500)
-            : undefined,
+          parentChunk: chunk.parentChunk ? chunk.parentChunk.slice(0, 500) : undefined,
           updatedAt: new Date().toISOString(),
         },
       };
 
       if (existingId) {
-        await drizzle
-          .update(ragDocuments)
-          .set(record)
-          .where(eq(ragDocuments.id, existingId));
+        await drizzle.update(ragDocuments).set(record).where(eq(ragDocuments.id, existingId));
         matchedRowIds.add(existingId);
         updatedCount++;
       } else {
-        const [ins] = await drizzle
-          .insert(ragDocuments)
-          .values(record)
-          .returning({ id: ragDocuments.id });
+        const [ins] = await drizzle.insert(ragDocuments).values(record).returning({ id: ragDocuments.id });
         matchedRowIds.add(ins.id);
         insertedCount++;
       }
@@ -342,19 +292,12 @@ export async function syncKnowledgeDocument(
   }
 
   // 5. 清理已废弃的旧切片（严格附带租户隔离约束）
-  const obsoleteIds = existingRows
-    .map((r) => r.id)
-    .filter((id) => !matchedRowIds.has(id));
+  const obsoleteIds = existingRows.map((r) => r.id).filter((id) => !matchedRowIds.has(id));
   let deletedCount = 0;
   if (obsoleteIds.length > 0) {
     const delResult = await drizzle
       .delete(ragDocuments)
-      .where(
-        and(
-          eq(ragDocuments.businessId, businessId),
-          inArray(ragDocuments.id, obsoleteIds),
-        ),
-      );
+      .where(and(eq(ragDocuments.businessId, businessId), inArray(ragDocuments.id, obsoleteIds)));
     deletedCount = delResult.rowCount ?? obsoleteIds.length;
   }
 
@@ -376,10 +319,7 @@ export async function syncKnowledgeDocument(
 /**
  * 热替换整个知识库文件 (Replace Full Knowledge File) - 兼容既有接口
  */
-export async function replaceKnowledgeFile(
-  filePath: string,
-  overrideBusinessId?: string,
-): Promise<number> {
+export async function replaceKnowledgeFile(filePath: string, overrideBusinessId?: string): Promise<number> {
   const result = await syncKnowledgeDocument(filePath, overrideBusinessId);
   return result.totalChunks;
 }

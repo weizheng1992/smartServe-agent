@@ -1,18 +1,13 @@
-import {
-  AgentIntentType,
-  type AgentTaskSpec,
-  type OrderContext,
-  type OrderTaskSlots,
-} from "types";
+import { AgentIntentType, type AgentTaskSpec, type OrderContext, type OrderTaskSlots } from 'types';
 
 /**
  * 必填槽位映射表
  */
 export const REQUIRED_SLOTS_MAP: Record<string, string[]> = {
-  [AgentIntentType.ORDER_MODIFY_ADDRESS]: ["orderId", "newAddress"],
-  [AgentIntentType.ORDER_RETURN]: ["orderId"],
-  [AgentIntentType.ORDER_CANCEL]: ["orderId"],
-  [AgentIntentType.ORDER_QUERY]: ["orderId"],
+  [AgentIntentType.ORDER_MODIFY_ADDRESS]: ['orderId', 'newAddress'],
+  [AgentIntentType.ORDER_RETURN]: ['orderId'],
+  [AgentIntentType.ORDER_CANCEL]: ['orderId'],
+  [AgentIntentType.ORDER_QUERY]: ['orderId'],
 };
 
 export interface SlotExtractionContext {
@@ -43,10 +38,7 @@ export class SlotExtractor {
   /**
    * 纯实体识别提取器 (Pure Entity Extractor)
    */
-  public static extractEntities(
-    input: string,
-    context?: SlotExtractionContext,
-  ): Partial<OrderTaskSlots> {
+  public static extractEntities(input: string, context?: SlotExtractionContext): Partial<OrderTaskSlots> {
     const text = input.trim();
     const entities: Partial<OrderTaskSlots> = {};
 
@@ -61,8 +53,8 @@ export class SlotExtractor {
       if (Array.isArray(msgs) && msgs.length > 0) {
         for (let i = msgs.length - 1; i >= 0; i--) {
           const msg = msgs[i];
-          const content = typeof msg === "string" ? msg : msg?.content;
-          if (content && typeof content === "string") {
+          const content = typeof msg === 'string' ? msg : msg?.content;
+          if (content && typeof content === 'string') {
             const histOrderMatch = content.match(this.ORDER_ID_REGEX);
             if (histOrderMatch && histOrderMatch[0]) {
               entities.orderId = histOrderMatch[0].toUpperCase();
@@ -85,32 +77,14 @@ export class SlotExtractor {
     }
 
     // 3. 提取 returnReason
-    if (
-      text.includes("尺码") ||
-      text.includes("穿不上") ||
-      text.includes("大") ||
-      text.includes("小")
-    ) {
-      entities.returnReason = "wrong_size";
-    } else if (
-      text.includes("质量") ||
-      text.includes("坏") ||
-      text.includes("破") ||
-      text.includes("瑕疵")
-    ) {
-      entities.returnReason = "quality_issue";
-    } else if (
-      text.includes("不符合") ||
-      text.includes("不一样") ||
-      text.includes("虚假")
-    ) {
-      entities.returnReason = "not_as_described";
-    } else if (
-      text.includes("七天") ||
-      text.includes("不喜欢") ||
-      text.includes("不想要")
-    ) {
-      entities.returnReason = "no_reason_7d";
+    if (text.includes('尺码') || text.includes('穿不上') || text.includes('大') || text.includes('小')) {
+      entities.returnReason = 'wrong_size';
+    } else if (text.includes('质量') || text.includes('坏') || text.includes('破') || text.includes('瑕疵')) {
+      entities.returnReason = 'quality_issue';
+    } else if (text.includes('不符合') || text.includes('不一样') || text.includes('虚假')) {
+      entities.returnReason = 'not_as_described';
+    } else if (text.includes('七天') || text.includes('不喜欢') || text.includes('不想要')) {
+      entities.returnReason = 'no_reason_7d';
     }
 
     return entities;
@@ -145,32 +119,16 @@ export class SlotExtractor {
     const isOrderQuery =
       /(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递|寄到哪|送至哪|到了没|查一下.*订单|查订单状态|查询.*订单|物流查询|查下订单|查订单|我的订单|名下.*订单|全部订单)/i.test(
         text,
-      ) &&
-      !/(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i.test(
-        text,
-      );
+      ) && !/(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i.test(text);
 
     const isModifyAddress =
-      (/(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)/i.test(
-        text,
-      ) ||
-        /(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)/i.test(
-          text,
-        ) ||
-        /(?:改到|改成|送至|送往|改派到|改派|改送)\s*[^?？哪里哪儿\n]+/i.test(
-          text,
-        )) &&
-      !/(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i.test(
-        text,
-      );
+      (/(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)/i.test(text) ||
+        /(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)/i.test(text) ||
+        /(?:改到|改成|送至|送往|改派到|改派|改送)\s*[^?？哪里哪儿\n]+/i.test(text)) &&
+      !/(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i.test(text);
 
-    const isReturnOrRefund = /(?:退货|退款|退单|申请售后|退钱|不想要了)/i.test(
-      text,
-    );
-    const isMetricQuery =
-      /(?:销售额|销量|出货量|毛利|利润率|gmv|滞销|排行|最卖钱|最赚钱)/i.test(
-        text,
-      );
+    const isReturnOrRefund = /(?:退货|退款|退单|申请售后|退钱|不想要了)/i.test(text);
+    const isMetricQuery = /(?:销售额|销量|出货量|毛利|利润率|gmv|滞销|排行|最卖钱|最赚钱)/i.test(text);
 
     if (activeIntentContext) {
       intentType = activeIntentContext as AgentIntentType;
@@ -211,15 +169,11 @@ export class SlotExtractor {
 
     const isGeneralOrderList =
       intentType === AgentIntentType.ORDER_QUERY &&
-      /(?:我的订单|全部订单|名下.*订单|所有订单|历史订单|查订单|查询.*订单|查下订单|订单列表)/i.test(
-        text,
-      ) &&
-      !/(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递)/i.test(
-        text,
-      );
+      /(?:我的订单|全部订单|名下.*订单|所有订单|历史订单|查订单|查询.*订单|查下订单|订单列表)/i.test(text) &&
+      !/(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递)/i.test(text);
 
     for (const reqSlot of required) {
-      if (reqSlot === "orderId" && isGeneralOrderList) {
+      if (reqSlot === 'orderId' && isGeneralOrderList) {
         continue;
       }
       if (!slots[reqSlot as keyof OrderTaskSlots]) {
@@ -232,29 +186,25 @@ export class SlotExtractor {
 
     if (missingSlots.length > 0) {
       if (intentType === AgentIntentType.ORDER_MODIFY_ADDRESS) {
-        if (
-          missingSlots.includes("orderId") &&
-          missingSlots.includes("newAddress")
-        ) {
+        if (missingSlots.includes('orderId') && missingSlots.includes('newAddress')) {
           clarificationMessage =
-            "好的，请问您需要修改哪笔订单的收货地址？请提供您的【订单编号】（如 ORD-889901）以及【新的收货地址】。";
-        } else if (missingSlots.includes("newAddress")) {
+            '好的，请问您需要修改哪笔订单的收货地址？请提供您的【订单编号】（如 ORD-889901）以及【新的收货地址】。';
+        } else if (missingSlots.includes('newAddress')) {
           clarificationMessage = `已为您定位到订单 [${slots.orderId}]，请问您需要将收货地址变更为哪个新的收货地址？`;
-        } else if (missingSlots.includes("orderId")) {
+        } else if (missingSlots.includes('orderId')) {
           clarificationMessage = `收到您的新地址 [${slots.newAddress}]，请问您需要修改哪笔【订单编号】的收货地址？`;
         }
       } else if (intentType === AgentIntentType.ORDER_RETURN) {
-        if (missingSlots.includes("orderId")) {
-          clarificationMessage =
-            "请问您需要为哪笔订单申请退款/退货？请提供您的【订单编号】。";
+        if (missingSlots.includes('orderId')) {
+          clarificationMessage = '请问您需要为哪笔订单申请退款/退货？请提供您的【订单编号】。';
         }
       } else if (intentType === AgentIntentType.ORDER_CANCEL) {
-        if (missingSlots.includes("orderId")) {
-          clarificationMessage = "请问您需要取消哪笔订单？请提供【订单编号】。";
+        if (missingSlots.includes('orderId')) {
+          clarificationMessage = '请问您需要取消哪笔订单？请提供【订单编号】。';
         }
       } else if (intentType === AgentIntentType.ORDER_QUERY) {
-        if (missingSlots.includes("orderId")) {
-          clarificationMessage = "请提供您需要查询的【订单编号】或【运单号】。";
+        if (missingSlots.includes('orderId')) {
+          clarificationMessage = '请提供您需要查询的【订单编号】或【运单号】。';
         }
       }
     }
@@ -293,55 +243,30 @@ export class SlotExtractor {
     const isOrderQuery =
       /(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递|寄到哪|送至哪|到了没|查一下.*订单|查订单状态|查询.*订单|物流查询|查下订单|查订单|我的订单|名下.*订单|全部订单)/i.test(
         text,
-      ) &&
-      !/(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i.test(
-        text,
-      );
+      ) && !/(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i.test(text);
 
     const isModifyAddress =
-      (/(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)/i.test(
-        text,
-      ) ||
-        /(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)/i.test(
-          text,
-        ) ||
-        /(?:改到|改成|送至|送往|改派到|改派|改送)\s*[^?？哪里哪儿\n]+/i.test(
-          text,
-        )) &&
-      !/(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i.test(
-        text,
-      );
+      (/(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)/i.test(text) ||
+        /(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)/i.test(text) ||
+        /(?:改到|改成|送至|送往|改派到|改派|改送)\s*[^?？哪里哪儿\n]+/i.test(text)) &&
+      !/(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i.test(text);
 
-    const isReturnOrRefund =
-      /(?:退货|退款|退单|申请售后|退钱|不想要了|申请退款)/i.test(text);
-    const isMetricQuery =
-      /(?:销售额|销量|出货量|毛利|利润率|gmv|滞销|排行|最卖钱|最赚钱)/i.test(
-        text,
-      );
+    const isReturnOrRefund = /(?:退货|退款|退单|申请售后|退钱|不想要了|申请退款)/i.test(text);
+    const isMetricQuery = /(?:销售额|销量|出货量|毛利|利润率|gmv|滞销|排行|最卖钱|最赚钱)/i.test(text);
 
     const detectedIntents: AgentIntentType[] = [];
     if (isShoppingGuide) detectedIntents.push(AgentIntentType.SHOPPING_GUIDE);
     if (isCartManage) detectedIntents.push(AgentIntentType.CART_MANAGE);
     if (isOrderQuery) detectedIntents.push(AgentIntentType.ORDER_QUERY);
-    if (isModifyAddress)
-      detectedIntents.push(AgentIntentType.ORDER_MODIFY_ADDRESS);
+    if (isModifyAddress) detectedIntents.push(AgentIntentType.ORDER_MODIFY_ADDRESS);
     if (isReturnOrRefund) detectedIntents.push(AgentIntentType.ORDER_RETURN);
     if (isCancelOrder) detectedIntents.push(AgentIntentType.ORDER_CANCEL);
     if (isMetricQuery) detectedIntents.push(AgentIntentType.METRIC_QUERY);
 
     if (detectedIntents.length <= 1) {
-      return [
-        SlotExtractor.extract(
-          input,
-          activeIntentContext,
-          existingSlots,
-          context,
-        ),
-      ];
+      return [SlotExtractor.extract(input, activeIntentContext, existingSlots, context)];
     }
 
-    return detectedIntents.map((it) =>
-      SlotExtractor.extract(input, it, existingSlots, context),
-    );
+    return detectedIntents.map((it) => SlotExtractor.extract(input, it, existingSlots, context));
   }
 }

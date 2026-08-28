@@ -133,6 +133,20 @@ export function ChatWidget({
       handleSend(`帮我申请订单 ${payload.orderId} 的退款`);
     } else if (action === "confirm_refund" && payload?.orderId) {
       handleSend(`我已确认提交订单 ${payload.orderId} 的退款核签`);
+    } else if (action === "submit_return_tracking" && payload?.value) {
+      handleSend(
+        `我已寄出商品，寄件快递单号为 ${payload.value}，请跟进质检验收`,
+      );
+    } else if (action === "submit_step_action" && payload?.value) {
+      handleSend(`我已提交业务步骤信息：${payload.value}`);
+    } else if (action === "add_to_cart_interactive" && payload) {
+      handleSend(
+        `我想将 ${payload.title}（规格: ${payload.skuTitle || payload.skuId}）购买 ${payload.quantity} 件加入购物车`,
+      );
+    } else if (action === "buy_now_interactive" && payload) {
+      handleSend(
+        `我想立即购买 ${payload.title}（规格: ${payload.skuTitle || payload.skuId}）共 ${payload.quantity} 件`,
+      );
     } else if (typeof payload?.query === "string") {
       handleSend(payload.query);
     }

@@ -1,7 +1,7 @@
-import { getDrizzle, intentExemplars } from "db";
-import { and, eq } from "drizzle-orm";
-import { getEmbeddingModel } from "../../../llm/callLLMWithRetry";
-import { cosineSimilarity } from "./semanticCache";
+import { getDrizzle, intentExemplars } from 'db';
+import { and, eq } from 'drizzle-orm';
+import { getEmbeddingModel } from '../../../llm/callLLMWithRetry';
+import { cosineSimilarity } from './semanticCache';
 
 export interface ExemplarItem {
   id: string;
@@ -19,7 +19,7 @@ function calculateTextOverlap(query: string, text: string): number {
 
   // 针对中英文字符生成 2-gram 子片段进行重叠度匹配
   const getNGrams = (str: string, n = 2) => {
-    const clean = str.replace(/[\s,，。！？!?.、:：;；_—\-/]+/g, "");
+    const clean = str.replace(/[\s,，。！？!?.、:：;；_—\-/]+/g, '');
     const ngrams = new Set<string>();
     for (let i = 0; i <= clean.length - n; i++) {
       ngrams.add(clean.slice(i, i + n));
@@ -52,7 +52,7 @@ export class ExemplarService {
     queryEmbedding?: number[],
     limit = 3,
   ): Promise<ExemplarItem[]> {
-    const cleanTenantId = (tenantId || "ecommerce").toLowerCase();
+    const cleanTenantId = (tenantId || 'ecommerce').toLowerCase();
     try {
       const drizzle = getDrizzle();
       if (!drizzle) return [];
@@ -60,12 +60,7 @@ export class ExemplarService {
       const rows = await drizzle
         .select()
         .from(intentExemplars)
-        .where(
-          and(
-            eq(intentExemplars.businessId, cleanTenantId),
-            eq(intentExemplars.isActive, true),
-          ),
-        )
+        .where(and(eq(intentExemplars.businessId, cleanTenantId), eq(intentExemplars.isActive, true)))
         .limit(50);
 
       if (!rows || rows.length === 0) {
@@ -82,10 +77,7 @@ export class ExemplarService {
         .map((row) => {
           let vecSim = 0;
           if (row.embedding && Array.isArray(row.embedding)) {
-            vecSim = cosineSimilarity(
-              targetVec as number[],
-              row.embedding as number[],
-            );
+            vecSim = cosineSimilarity(targetVec as number[], row.embedding as number[]);
           }
           const textOverlap = calculateTextOverlap(query, row.exampleText);
           const finalSim = Math.max(vecSim, textOverlap);
@@ -103,10 +95,7 @@ export class ExemplarService {
 
       return scored;
     } catch (err) {
-      console.warn(
-        `[ExemplarService] Failed to retrieve exemplars for tenant [${cleanTenantId}]:`,
-        err,
-      );
+      console.warn(`[ExemplarService] Failed to retrieve exemplars for tenant [${cleanTenantId}]:`, err);
       return [];
     }
   }
@@ -115,13 +104,10 @@ export class ExemplarService {
    * 格式化 Few-Shot 样本为 Prompt 文本
    */
   static formatExemplarsForPrompt(exemplars: ExemplarItem[]): string {
-    if (!exemplars || exemplars.length === 0) return "";
+    if (!exemplars || exemplars.length === 0) return '';
     return exemplars
-      .map(
-        (ex, idx) =>
-          `Sample ${idx + 1}: Query "${ex.exampleText}" -> Intent: "${ex.intentName}"`,
-      )
-      .join("\n");
+      .map((ex, idx) => `Sample ${idx + 1}: Query "${ex.exampleText}" -> Intent: "${ex.intentName}"`)
+      .join('\n');
   }
 
   /**
@@ -133,9 +119,9 @@ export class ExemplarService {
     exampleText: string,
     embedding?: number[],
   ): Promise<string> {
-    const cleanTenantId = (tenantId || "ecommerce").toLowerCase();
+    const cleanTenantId = (tenantId || 'ecommerce').toLowerCase();
     const drizzle = getDrizzle();
-    if (!drizzle) throw new Error("Database connection unavailable");
+    if (!drizzle) throw new Error('Database connection unavailable');
 
     let vec = embedding;
     if (!vec || vec.length === 0) {
@@ -154,6 +140,6 @@ export class ExemplarService {
       })
       .returning({ id: intentExemplars.id });
 
-    return inserted[0]?.id || "unknown";
+    return inserted[0]?.id || 'unknown';
   }
 }

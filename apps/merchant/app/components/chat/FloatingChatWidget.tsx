@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import { usePathname } from 'next/navigation';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { OrderCardData, RichCardBlock } from 'types';
-import { Button, Input, RichCardRenderer } from 'ui';
-import { useCurrentUser } from '../../context/UserContext';
+import { usePathname } from "next/navigation";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import type { OrderCardData, RichCardBlock } from "types";
+import { Button, Input, RichCardRenderer } from "ui";
+import { useCurrentUser } from "../../context/UserContext";
 import {
   type RouteGreetingContext,
   getGreetingForRoute,
-} from './routeGreetingConfig';
+} from "./routeGreetingConfig";
 
 interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   text: string;
   time: string;
   cards?: RichCardBlock[];
@@ -21,19 +21,19 @@ interface ChatMessage {
 
 // 辅助函数：将对话中的购物车卡片物理同步到浏览器端 localStorage，并广播 cart_updated 事件
 function syncCartToLocalStorage(cards?: RichCardBlock[]) {
-  if (typeof window === 'undefined' || !cards || cards.length === 0) return;
-  const cartCard = cards.find((c) => c.type === 'cart_card');
-  if (!cartCard || !('items' in cartCard.data)) return;
+  if (typeof window === "undefined" || !cards || cards.length === 0) return;
+  const cartCard = cards.find((c) => c.type === "cart_card");
+  if (!cartCard || !("items" in cartCard.data)) return;
 
   try {
-    const rawStored = localStorage.getItem('aurora_store_cart');
+    const rawStored = localStorage.getItem("aurora_store_cart");
     const existingCart: any[] = rawStored ? JSON.parse(rawStored) : [];
     const actionType = cartCard.data.actionType;
 
-    if (actionType === 'cleared') {
-      localStorage.setItem('aurora_store_cart', JSON.stringify([]));
-      window.dispatchEvent(new Event('cart_updated'));
-      window.dispatchEvent(new Event('storage'));
+    if (actionType === "cleared") {
+      localStorage.setItem("aurora_store_cart", JSON.stringify([]));
+      window.dispatchEvent(new Event("cart_updated"));
+      window.dispatchEvent(new Event("storage"));
       return;
     }
 
@@ -42,24 +42,27 @@ function syncCartToLocalStorage(cards?: RichCardBlock[]) {
       const skuCode = item.skuCode || item.skuId || item.id;
       if (!skuCode) continue;
 
-      const idx = existingCart.findIndex((it: any) => (it.skuCode || it.sku?.skuCode || it.id) === skuCode);
+      const idx = existingCart.findIndex(
+        (it: any) => (it.skuCode || it.sku?.skuCode || it.id) === skuCode,
+      );
 
       if (idx >= 0) {
-        if (actionType === 'added') {
-          existingCart[idx].quantity = (existingCart[idx].quantity || 0) + (item.quantity || 1);
+        if (actionType === "added") {
+          existingCart[idx].quantity =
+            (existingCart[idx].quantity || 0) + (item.quantity || 1);
         } else {
           existingCart[idx].quantity = item.quantity || 1;
         }
       } else {
         existingCart.push({
           id: skuCode,
-          spuId: item.spuId || 'SPU-AURORA-001',
+          spuId: item.spuId || "SPU-AURORA-001",
           skuCode: skuCode,
           title: item.title,
-          skuTitle: item.specSummary || item.skuTitle || '官方精选规格',
+          skuTitle: item.specSummary || item.skuTitle || "官方精选规格",
           imageUrl:
             item.imageUrl ||
-            'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=800&auto=format&fit=crop&q=60',
+            "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=800&auto=format&fit=crop&q=60",
           price: Number(item.price || 899.0),
           quantity: Number(item.quantity || 1),
           stock: 99,
@@ -67,22 +70,25 @@ function syncCartToLocalStorage(cards?: RichCardBlock[]) {
           selected: true,
           sku: {
             skuCode: skuCode,
-            skuTitle: item.specSummary || item.skuTitle || '官方精选规格',
+            skuTitle: item.specSummary || item.skuTitle || "官方精选规格",
             price: Number(item.price || 899.0),
           },
           product: {
-            id: item.spuId || 'SPU-AURORA-001',
+            id: item.spuId || "SPU-AURORA-001",
             title: item.title,
           },
         });
       }
     }
 
-    localStorage.setItem('aurora_store_cart', JSON.stringify(existingCart));
-    window.dispatchEvent(new Event('cart_updated'));
-    window.dispatchEvent(new Event('storage'));
+    localStorage.setItem("aurora_store_cart", JSON.stringify(existingCart));
+    window.dispatchEvent(new Event("cart_updated"));
+    window.dispatchEvent(new Event("storage"));
   } catch (err) {
-    console.warn('[FloatingChatWidget] Failed to sync cart to localStorage:', err);
+    console.warn(
+      "[FloatingChatWidget] Failed to sync cart to localStorage:",
+      err,
+    );
   }
 }
 
@@ -94,8 +100,8 @@ export function FloatingChatWidget({
   const pathname = usePathname();
   const { user } = useCurrentUser();
   const [isOpen, setIsOpen] = useState(false);
-  const [input, setInput] = useState('');
-  const [threadId, setThreadId] = useState<string>('');
+  const [input, setInput] = useState("");
+  const [threadId, setThreadId] = useState<string>("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userThreads, setUserThreads] = useState<any[]>([]);
   const [showHistoryList, setShowHistoryList] = useState(false);
@@ -109,10 +115,13 @@ export function FloatingChatWidget({
 
   // 消息变动时自动持久化至本地缓存 (按用户与会话隔离)
   useEffect(() => {
-    if (typeof window === 'undefined' || !user?.id || !threadId) return;
+    if (typeof window === "undefined" || !user?.id || !threadId) return;
     if (messages.length > 0) {
       try {
-        localStorage.setItem(`aurora_chat_msgs_${user.id}_${threadId}`, JSON.stringify(messages));
+        localStorage.setItem(
+          `aurora_chat_msgs_${user.id}_${threadId}`,
+          JSON.stringify(messages),
+        );
       } catch {
         // ignore
       }
@@ -124,34 +133,42 @@ export function FloatingChatWidget({
     async (targetThreadId?: string) => {
       if (!user?.id) return;
       try {
-        const queryTid = targetThreadId || '';
-        const res = await fetch(`/api/store/chat/messages?threadId=${queryTid}&userId=${user.id}&tenantId=aurora`);
+        const queryTid = targetThreadId || "";
+        const res = await fetch(
+          `/api/store/chat/messages?threadId=${queryTid}&userId=${user.id}&tenantId=aurora`,
+        );
         const data = await res.json();
         if (data.success) {
           if (Array.isArray(data.userThreads)) {
             setUserThreads(data.userThreads);
           }
-          if (targetThreadId && Array.isArray(data.messages) && data.messages.length > 0) {
-            const formattedMsgs: ChatMessage[] = data.messages.map((m: any, idx: number) => ({
-              id: m.id || `msg_hist_${idx}`,
-              role: m.role === 'user' ? 'user' : 'assistant',
-              text: m.content || m.text || '',
-              cards: Array.isArray(m.cards) ? m.cards : [],
-              time: m.createdAt
-                ? new Date(m.createdAt).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : new Date().toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }),
-            }));
+          if (
+            targetThreadId &&
+            Array.isArray(data.messages) &&
+            data.messages.length > 0
+          ) {
+            const formattedMsgs: ChatMessage[] = data.messages.map(
+              (m: any, idx: number) => ({
+                id: m.id || `msg_hist_${idx}`,
+                role: m.role === "user" ? "user" : "assistant",
+                text: m.content || m.text || "",
+                cards: Array.isArray(m.cards) ? m.cards : [],
+                time: m.createdAt
+                  ? new Date(m.createdAt).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : new Date().toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+              }),
+            );
             setMessages(formattedMsgs);
           }
         }
       } catch (err) {
-        console.error('Failed to load chat history:', err);
+        console.error("Failed to load chat history:", err);
       }
     },
     [user?.id],
@@ -167,41 +184,49 @@ export function FloatingChatWidget({
         prevScrollHeightRef.current = container.scrollHeight;
       }
 
-      const res = await fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=aurora&includeOlder=true`);
+      const res = await fetch(
+        `/api/store/chat/messages?userId=${user.id}&tenantId=aurora&includeOlder=true`,
+      );
       const data = await res.json();
       if (data.success && Array.isArray(data.allHistoricalMessages)) {
         const allMsgs = data.allHistoricalMessages;
-        const currentTexts = new Set(messages.map((m) => `${m.role}:${m.text.trim()}`));
+        const currentTexts = new Set(
+          messages.map((m) => `${m.role}:${m.text.trim()}`),
+        );
         const olderToAdd = allMsgs.filter(
           (m: any) =>
-            !currentTexts.has(`${m.role === 'user' ? 'user' : 'assistant'}:${(m.content || m.text || '').trim()}`),
+            !currentTexts.has(
+              `${m.role === "user" ? "user" : "assistant"}:${(m.content || m.text || "").trim()}`,
+            ),
         );
 
         if (olderToAdd.length === 0) {
           setHasMoreOlder(false);
         } else {
-          const formattedOlder: ChatMessage[] = olderToAdd.map((m: any, idx: number) => ({
-            id: m.id || `hist_old_${idx}`,
-            role: m.role === 'user' ? 'user' : 'assistant',
-            text: m.content || m.text || '',
-            cards: Array.isArray(m.cards) ? m.cards : [],
-            time: m.createdAt
-              ? new Date(m.createdAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : new Date().toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-          }));
+          const formattedOlder: ChatMessage[] = olderToAdd.map(
+            (m: any, idx: number) => ({
+              id: m.id || `hist_old_${idx}`,
+              role: m.role === "user" ? "user" : "assistant",
+              text: m.content || m.text || "",
+              cards: Array.isArray(m.cards) ? m.cards : [],
+              time: m.createdAt
+                ? new Date(m.createdAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : new Date().toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }),
+            }),
+          );
 
           setMessages((prev) => [
             {
               id: `sep_${Date.now()}`,
-              role: 'assistant',
+              role: "assistant",
               text: `🕒 更早的历史会话记录 (${formattedOlder.length}条)`,
-              time: '',
+              time: "",
               isDivider: true,
             },
             ...formattedOlder,
@@ -213,13 +238,14 @@ export function FloatingChatWidget({
         setHasMoreOlder(false);
       }
     } catch (err) {
-      console.error('Failed to load older chat history:', err);
+      console.error("Failed to load older chat history:", err);
     } finally {
       setIsLoadingOlder(false);
       setTimeout(() => {
         const container = messageContainerRef.current;
         if (container && prevScrollHeightRef.current) {
-          container.scrollTop = container.scrollHeight - prevScrollHeightRef.current;
+          container.scrollTop =
+            container.scrollHeight - prevScrollHeightRef.current;
         }
       }, 60);
     }
@@ -228,7 +254,11 @@ export function FloatingChatWidget({
   // 监听向上滚动触顶触发下拉加载历史
   const handleScroll = () => {
     if (!messageContainerRef.current) return;
-    if (messageContainerRef.current.scrollTop === 0 && hasMoreOlder && !isLoadingOlder) {
+    if (
+      messageContainerRef.current.scrollTop === 0 &&
+      hasMoreOlder &&
+      !isLoadingOlder
+    ) {
       loadOlderHistory();
     }
   };
@@ -238,16 +268,18 @@ export function FloatingChatWidget({
     if (!user?.id) return;
 
     let activeTid = threadId;
-    if (!activeTid && typeof window !== 'undefined') {
+    if (!activeTid && typeof window !== "undefined") {
       activeTid =
         localStorage.getItem(`aurora_active_thread_${user.id}`) ||
         sessionStorage.getItem(`aurora_active_thread_${user.id}`) ||
-        '';
+        "";
     }
 
     // 1. 如果已有本地缓存的消息，秒级呈现
-    if (activeTid && typeof window !== 'undefined') {
-      const cached = localStorage.getItem(`aurora_chat_msgs_${user.id}_${activeTid}`);
+    if (activeTid && typeof window !== "undefined") {
+      const cached = localStorage.getItem(
+        `aurora_chat_msgs_${user.id}_${activeTid}`,
+      );
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
@@ -267,35 +299,46 @@ export function FloatingChatWidget({
     fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=aurora`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && data.threadId && Array.isArray(data.messages) && data.messages.length > 0) {
+        if (
+          data.success &&
+          data.threadId &&
+          Array.isArray(data.messages) &&
+          data.messages.length > 0
+        ) {
           setThreadId(data.threadId);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem(`aurora_active_thread_${user.id}`, data.threadId);
+          if (typeof window !== "undefined") {
+            localStorage.setItem(
+              `aurora_active_thread_${user.id}`,
+              data.threadId,
+            );
           }
-          const formattedMsgs: ChatMessage[] = data.messages.map((m: any, idx: number) => ({
-            id: m.id || `msg_hist_${idx}`,
-            role: m.role === 'user' ? 'user' : 'assistant',
-            text: m.content || m.text || '',
-            cards: Array.isArray(m.cards) ? m.cards : [],
-            time: m.createdAt
-              ? new Date(m.createdAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : new Date().toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-          }));
+          const formattedMsgs: ChatMessage[] = data.messages.map(
+            (m: any, idx: number) => ({
+              id: m.id || `msg_hist_${idx}`,
+              role: m.role === "user" ? "user" : "assistant",
+              text: m.content || m.text || "",
+              cards: Array.isArray(m.cards) ? m.cards : [],
+              time: m.createdAt
+                ? new Date(m.createdAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : new Date().toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }),
+            }),
+          );
           setMessages(formattedMsgs);
           if (Array.isArray(data.userThreads)) {
             setUserThreads(data.userThreads);
           }
         } else {
           // 纯新会话：注入路由首句欢迎语
-          const freshTid = activeTid || `merchant_thread_${user.id}_aurora_${Date.now()}`;
+          const freshTid =
+            activeTid || `merchant_thread_${user.id}_aurora_${Date.now()}`;
           setThreadId(freshTid);
-          if (typeof window !== 'undefined') {
+          if (typeof window !== "undefined") {
             localStorage.setItem(`aurora_active_thread_${user.id}`, freshTid);
           }
           const greetingText = getGreetingForRoute({
@@ -305,19 +348,20 @@ export function FloatingChatWidget({
           setMessages([
             {
               id: `msg_init_${Date.now()}`,
-              role: 'assistant',
+              role: "assistant",
               text: greetingText,
               cards: [],
               time: new Date().toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
+                hour: "2-digit",
+                minute: "2-digit",
               }),
             },
           ]);
         }
       })
       .catch(() => {
-        const freshTid = activeTid || `merchant_thread_${user.id}_aurora_${Date.now()}`;
+        const freshTid =
+          activeTid || `merchant_thread_${user.id}_aurora_${Date.now()}`;
         setThreadId(freshTid);
         const greetingText = getGreetingForRoute({
           pathname,
@@ -326,12 +370,12 @@ export function FloatingChatWidget({
         setMessages([
           {
             id: `msg_init_${Date.now()}`,
-            role: 'assistant',
+            role: "assistant",
             text: greetingText,
             cards: [],
             time: new Date().toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
+              hour: "2-digit",
+              minute: "2-digit",
             }),
           },
         ]);
@@ -340,7 +384,7 @@ export function FloatingChatWidget({
 
   // 路由切换时仅在会话为空时更新欢迎语，不覆盖已有聊天记录
   useEffect(() => {
-    if (messages.length === 1 && messages[0].id.startsWith('msg_init_')) {
+    if (messages.length === 1 && messages[0].id.startsWith("msg_init_")) {
       const greetingText = getGreetingForRoute({
         pathname,
         ...contextOverride,
@@ -348,12 +392,12 @@ export function FloatingChatWidget({
       setMessages([
         {
           id: `msg_init_${Date.now()}`,
-          role: 'assistant',
+          role: "assistant",
           text: greetingText,
           cards: [],
           time: new Date().toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
+            hour: "2-digit",
+            minute: "2-digit",
           }),
         },
       ]);
@@ -366,16 +410,20 @@ export function FloatingChatWidget({
 
     let eventSource: EventSource | null = null;
     try {
-      eventSource = new EventSource(`/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}`);
+      eventSource = new EventSource(
+        `/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}`,
+      );
 
-      eventSource.addEventListener('message', (e) => {
+      eventSource.addEventListener("message", (e) => {
         try {
           const msgData = JSON.parse(e.data);
           if (msgData && msgData.content) {
             const incomingText = String(msgData.content).trim();
             const incomingId = msgData.id || `sse_${Date.now()}`;
-            const incomingRole = msgData.role === 'user' ? 'user' : 'assistant';
-            const incomingCards = Array.isArray(msgData.cards) ? msgData.cards : [];
+            const incomingRole = msgData.role === "user" ? "user" : "assistant";
+            const incomingCards = Array.isArray(msgData.cards)
+              ? msgData.cards
+              : [];
 
             if (incomingCards.length > 0) {
               syncCartToLocalStorage(incomingCards);
@@ -385,7 +433,8 @@ export function FloatingChatWidget({
               // 避免与已有的消息重复添加
               const alreadyExists = prev.some(
                 (m) =>
-                  (incomingId && m.id === incomingId) || (m.role === incomingRole && m.text.trim() === incomingText),
+                  (incomingId && m.id === incomingId) ||
+                  (m.role === incomingRole && m.text.trim() === incomingText),
               );
               if (alreadyExists) return prev;
 
@@ -398,28 +447,28 @@ export function FloatingChatWidget({
                   cards: incomingCards,
                   time: msgData.timestamp
                     ? new Date(msgData.timestamp).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
+                        hour: "2-digit",
+                        minute: "2-digit",
                       })
                     : new Date().toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
+                        hour: "2-digit",
+                        minute: "2-digit",
                       }),
                 },
               ];
             });
           }
         } catch (err) {
-          console.warn('[SSE] Failed to parse SSE message event:', err);
+          console.warn("[SSE] Failed to parse SSE message event:", err);
         }
       });
 
       eventSource.onerror = (err) => {
         // SSE 断线将由浏览器 EventSource 机制自动安全重连
-        console.debug('[SSE] EventSource connection info:', err);
+        console.debug("[SSE] EventSource connection info:", err);
       };
     } catch (err) {
-      console.warn('[SSE] Failed to initialize EventSource:', err);
+      console.warn("[SSE] Failed to initialize EventSource:", err);
     }
 
     return () => {
@@ -432,7 +481,7 @@ export function FloatingChatWidget({
   // 滚动到底部 (仅在用户主动发信或接收新回复时平滑滚动)
   useEffect(() => {
     if (isOpen && !isLoadingOlder) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages.length, isOpen, isLoadingOlder]);
 
@@ -442,7 +491,7 @@ export function FloatingChatWidget({
     const newTid = `merchant_thread_${user.id}_aurora_${Date.now()}`;
     setThreadId(newTid);
     setHasMoreOlder(true);
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       localStorage.setItem(`aurora_active_thread_${user.id}`, newTid);
       sessionStorage.setItem(`aurora_active_thread_${user.id}`, newTid);
     }
@@ -453,48 +502,51 @@ export function FloatingChatWidget({
     setMessages([
       {
         id: `msg_new_${Date.now()}`,
-        role: 'assistant',
+        role: "assistant",
         text: greetingText,
         cards: [],
         time: new Date().toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
+          hour: "2-digit",
+          minute: "2-digit",
         }),
       },
     ]);
   };
 
   // 发送消息到后端决策引擎
-  const handleSendMessage = async (customMsg?: string, cardsToSend?: RichCardBlock[]) => {
+  const handleSendMessage = async (
+    customMsg?: string,
+    cardsToSend?: RichCardBlock[],
+  ) => {
     const msgToSend = (customMsg || input).trim();
     if (!msgToSend || isSending) return;
 
     const userTime = new Date().toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
+      hour: "2-digit",
+      minute: "2-digit",
     });
 
     const newMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
-      role: 'user',
+      role: "user",
       text: msgToSend,
       cards: cardsToSend || [],
       time: userTime,
     };
 
     setMessages((prev) => [...prev, newMsg]);
-    if (!customMsg) setInput('');
+    if (!customMsg) setInput("");
     setIsSending(true);
 
     try {
-      const res = await fetch('/api/store/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/store/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: msgToSend,
           threadId,
           userId: user.id,
-          businessId: 'aurora',
+          businessId: "aurora",
           routeContext: {
             pathname,
             ...contextOverride,
@@ -503,7 +555,10 @@ export function FloatingChatWidget({
       });
 
       const data = await res.json();
-      const replyText = data.output || data.result || '抱歉，客服服务遇到一点小问题，请稍候再试。';
+      const replyText =
+        data.output ||
+        data.result ||
+        "抱歉，客服服务遇到一点小问题，请稍候再试。";
       const replyCards = Array.isArray(data.cards) ? data.cards : [];
       const msgId = data.messageId || `ast_${Date.now()}`;
 
@@ -514,11 +569,17 @@ export function FloatingChatWidget({
       setMessages((prev) => {
         // 🛡️ 防御式去重与卡片同步：若 SSE 流式推送已经抢先注入了文本，补充注入卡片并去重
         const existingIdx = prev.findIndex(
-          (m) => m.id === msgId || (m.role === 'assistant' && m.text.trim() === replyText.trim()),
+          (m) =>
+            m.id === msgId ||
+            (m.role === "assistant" && m.text.trim() === replyText.trim()),
         );
         if (existingIdx !== -1) {
           const updated = [...prev];
-          if ((!updated[existingIdx].cards || updated[existingIdx].cards.length === 0) && replyCards.length > 0) {
+          if (
+            (!updated[existingIdx].cards ||
+              updated[existingIdx].cards.length === 0) &&
+            replyCards.length > 0
+          ) {
             updated[existingIdx] = {
               ...updated[existingIdx],
               cards: replyCards,
@@ -531,12 +592,12 @@ export function FloatingChatWidget({
           ...prev,
           {
             id: msgId,
-            role: 'assistant',
+            role: "assistant",
             text: replyText,
             cards: replyCards,
             time: new Date().toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
+              hour: "2-digit",
+              minute: "2-digit",
             }),
           },
         ];
@@ -547,12 +608,12 @@ export function FloatingChatWidget({
         ...prev,
         {
           id: `ast_err_${Date.now()}`,
-          role: 'assistant',
-          text: '网络通信异常，请检查商户后端服务连接。',
+          role: "assistant",
+          text: "网络通信异常，请检查商户后端服务连接。",
           cards: [],
           time: new Date().toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
+            hour: "2-digit",
+            minute: "2-digit",
           }),
         },
       ]);
@@ -562,30 +623,33 @@ export function FloatingChatWidget({
   };
 
   // 卡片点击交互回调 (支持查看物流、申请退款、快速问答等)
-  const handleCardAction = (action: string, payload?: Record<string, unknown>) => {
-    if (action === 'select_order' && payload?.orderId) {
+  const handleCardAction = (
+    action: string,
+    payload?: Record<string, unknown>,
+  ) => {
+    if (action === "select_order" && payload?.orderId) {
       const orderIdStr = String(payload.orderId);
       const orderData = payload.order as OrderCardData | undefined;
 
       // 在对话记录中展示已选中的单一订单卡片
       const orderCards: RichCardBlock[] = orderData
-        ? [{ type: 'order_card', data: orderData }]
+        ? [{ type: "order_card", data: orderData }]
         : [
             {
-              type: 'order_card',
+              type: "order_card",
               data: {
                 orderId: orderIdStr,
-                status: '已选择',
+                status: "已选择",
                 totalAmount: 0,
                 actions: [
                   {
-                    label: '查看物流轨迹',
-                    action: 'track_order',
+                    label: "查看物流轨迹",
+                    action: "track_order",
                     payload: { orderId: orderIdStr },
                   },
                   {
-                    label: '申请退款',
-                    action: 'request_refund',
+                    label: "申请退款",
+                    action: "request_refund",
                     payload: { orderId: orderIdStr },
                   },
                 ],
@@ -593,22 +657,39 @@ export function FloatingChatWidget({
             },
           ];
 
-      handleSendMessage(`已选定订单 ${orderIdStr}，请帮我查询该订单的具体信息和最新物流进度。`, orderCards);
-    } else if (action === 'checkout_cart' || action === 'go_to_checkout') {
-      window.location.href = '/cart';
-    } else if (action === 'view_cart') {
-      window.location.href = '/cart';
-    } else if (action === 'clear_cart') {
-      handleSendMessage('清空购物车');
-    } else if (action === 'send_message' && payload?.text) {
+      handleSendMessage(
+        `已选定订单 ${orderIdStr}，请帮我查询该订单的具体信息和最新物流进度。`,
+        orderCards,
+      );
+    } else if (action === "checkout_cart" || action === "go_to_checkout") {
+      window.location.href = "/cart";
+    } else if (action === "view_cart") {
+      window.location.href = "/cart";
+    } else if (action === "clear_cart") {
+      handleSendMessage("清空购物车");
+    } else if (action === "send_message" && payload?.text) {
       handleSendMessage(String(payload.text));
-    } else if (action === 'track_order' && payload?.orderId) {
+    } else if (action === "track_order" && payload?.orderId) {
       handleSendMessage(`帮我查一下订单 ${payload.orderId} 的物流轨迹`);
-    } else if (action === 'request_refund' && payload?.orderId) {
+    } else if (action === "request_refund" && payload?.orderId) {
       handleSendMessage(`帮我申请订单 ${payload.orderId} 的退款`);
-    } else if (action === 'confirm_refund' && payload?.orderId) {
+    } else if (action === "confirm_refund" && payload?.orderId) {
       handleSendMessage(`我已确认提交订单 ${payload.orderId} 的退款核签`);
-    } else if (typeof payload?.query === 'string') {
+    } else if (action === "submit_return_tracking" && payload?.value) {
+      handleSendMessage(
+        `我已寄出商品，寄件快递单号为 ${payload.value}，请跟进质检验收`,
+      );
+    } else if (action === "submit_step_action" && payload?.value) {
+      handleSendMessage(`我已提交业务步骤信息：${payload.value}`);
+    } else if (action === "add_to_cart_interactive" && payload) {
+      handleSendMessage(
+        `我想将 ${payload.title}（规格: ${payload.skuTitle || payload.skuId}）购买 ${payload.quantity} 件加入购物车`,
+      );
+    } else if (action === "buy_now_interactive" && payload) {
+      handleSendMessage(
+        `我想立即购买 ${payload.title}（规格: ${payload.skuTitle || payload.skuId}）共 ${payload.quantity} 件`,
+      );
+    } else if (typeof payload?.query === "string") {
       handleSendMessage(payload.query);
     }
   };
@@ -637,9 +718,13 @@ export function FloatingChatWidget({
               <div>
                 <div className="font-bold text-xs flex items-center space-x-1">
                   <span>极光潮品 AI 智能助理</span>
-                  <span className="text-[10px] bg-emerald-800 text-emerald-200 px-1.5 py-0.2 rounded">{user.name}</span>
+                  <span className="text-[10px] bg-emerald-800 text-emerald-200 px-1.5 py-0.2 rounded">
+                    {user.name}
+                  </span>
                 </div>
-                <div className="text-[10px] text-emerald-200 truncate max-w-[200px]">{pathname} · 历史记录已同步</div>
+                <div className="text-[10px] text-emerald-200 truncate max-w-[200px]">
+                  {pathname} · 历史记录已同步
+                </div>
               </div>
             </div>
             <div className="flex items-center space-x-1.5">
@@ -655,11 +740,12 @@ export function FloatingChatWidget({
                 title="查看历史对话"
                 className={`text-[11px] px-2 py-0.5 rounded cursor-pointer transition ${
                   showHistoryList
-                    ? 'bg-emerald-900 text-white font-semibold'
-                    : 'bg-emerald-800/80 hover:bg-emerald-800 text-emerald-100'
+                    ? "bg-emerald-900 text-white font-semibold"
+                    : "bg-emerald-800/80 hover:bg-emerald-800 text-emerald-100"
                 }`}
               >
-                📜 历史 {userThreads.length > 0 ? `(${userThreads.length})` : ''}
+                📜 历史{" "}
+                {userThreads.length > 0 ? `(${userThreads.length})` : ""}
               </button>
               <button
                 type="button"
@@ -687,7 +773,9 @@ export function FloatingChatWidget({
             <div className="bg-slate-50 border-b border-slate-200 p-2 max-h-48 overflow-y-auto space-y-1 z-10 shadow-inner">
               <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 px-1 mb-1">
                 <span>我的历史会话列表</span>
-                <span className="text-[10px] text-slate-400">点击切换继续对话</span>
+                <span className="text-[10px] text-slate-400">
+                  点击切换继续对话
+                </span>
               </div>
               {userThreads.map((t) => {
                 const isActive = t.threadId === threadId;
@@ -698,21 +786,24 @@ export function FloatingChatWidget({
                     onClick={() => {
                       if (!user?.id) return;
                       setThreadId(t.threadId);
-                      if (typeof window !== 'undefined') {
-                        sessionStorage.setItem(`aurora_active_thread_${user.id}`, t.threadId);
+                      if (typeof window !== "undefined") {
+                        sessionStorage.setItem(
+                          `aurora_active_thread_${user.id}`,
+                          t.threadId,
+                        );
                       }
                       fetchHistory(t.threadId);
                       setShowHistoryList(false);
                     }}
                     className={`w-full text-left p-2 rounded-lg text-xs transition border flex flex-col space-y-0.5 cursor-pointer ${
                       isActive
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-xs'
-                        : 'bg-white border-slate-200 hover:border-emerald-200 hover:bg-slate-100 text-slate-700'
+                        ? "bg-emerald-50 border-emerald-300 text-emerald-900 shadow-xs"
+                        : "bg-white border-slate-200 hover:border-emerald-200 hover:bg-slate-100 text-slate-700"
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium truncate max-w-[200px]">
-                        {t.lastMessageSnippet || t.title || '咨询对话'}
+                        {t.lastMessageSnippet || t.title || "咨询对话"}
                       </span>
                       {isActive && (
                         <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.2 rounded-full">
@@ -722,7 +813,11 @@ export function FloatingChatWidget({
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-slate-400">
                       <span>ID: {t.threadId.slice(-12)}</span>
-                      <span>{t.updatedAt ? new Date(t.updatedAt).toLocaleDateString() : ''}</span>
+                      <span>
+                        {t.updatedAt
+                          ? new Date(t.updatedAt).toLocaleDateString()
+                          : ""}
+                      </span>
                     </div>
                   </button>
                 );
@@ -735,21 +830,21 @@ export function FloatingChatWidget({
             <span className="font-semibold shrink-0">快捷提问:</span>
             <button
               type="button"
-              onClick={() => handleSendMessage('查询我的全部订单')}
+              onClick={() => handleSendMessage("查询我的全部订单")}
               className="px-2 py-0.5 bg-white rounded border border-emerald-200 hover:bg-emerald-100 shrink-0 cursor-pointer"
             >
               📦 查所有订单
             </button>
             <button
               type="button"
-              onClick={() => handleSendMessage('推荐当季热销机能外套')}
+              onClick={() => handleSendMessage("推荐当季热销机能外套")}
               className="px-2 py-0.5 bg-white rounded border border-emerald-200 hover:bg-emerald-100 shrink-0 cursor-pointer"
             >
               🧥 推荐热销
             </button>
             <button
               type="button"
-              onClick={() => handleSendMessage('修改未发货订单地址')}
+              onClick={() => handleSendMessage("修改未发货订单地址")}
               className="px-2 py-0.5 bg-white rounded border border-emerald-200 hover:bg-emerald-100 shrink-0 cursor-pointer"
             >
               📍 改收货地址
@@ -789,31 +884,46 @@ export function FloatingChatWidget({
             {messages.map((m) => {
               if (m.isDivider) {
                 return (
-                  <div key={m.id} className="flex items-center my-3 text-[10px] text-slate-400 select-none">
+                  <div
+                    key={m.id}
+                    className="flex items-center my-3 text-[10px] text-slate-400 select-none"
+                  >
                     <div className="flex-grow border-t border-slate-200" />
-                    <span className="px-2.5 bg-slate-100 rounded-full py-0.5 font-medium">{m.text}</span>
+                    <span className="px-2.5 bg-slate-100 rounded-full py-0.5 font-medium">
+                      {m.text}
+                    </span>
                     <div className="flex-grow border-t border-slate-200" />
                   </div>
                 );
               }
 
               return (
-                <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div
+                  key={m.id}
+                  className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
+                >
                   <div
                     className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
-                      m.role === 'user'
-                        ? 'bg-emerald-600 text-white rounded-br-none'
-                        : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
+                      m.role === "user"
+                        ? "bg-emerald-600 text-white rounded-br-none"
+                        : "bg-white text-slate-800 border border-slate-200 rounded-bl-none"
                     }`}
                   >
                     {m.text}
                   </div>
                   {m.cards && m.cards.length > 0 && (
                     <div className="w-full max-w-[95%]">
-                      <RichCardRenderer cards={m.cards} onAction={handleCardAction} />
+                      <RichCardRenderer
+                        cards={m.cards}
+                        onAction={handleCardAction}
+                      />
                     </div>
                   )}
-                  {m.time && <span className="text-[10px] text-slate-400 mt-1 px-1">{m.time}</span>}
+                  {m.time && (
+                    <span className="text-[10px] text-slate-400 mt-1 px-1">
+                      {m.time}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -833,7 +943,7 @@ export function FloatingChatWidget({
               placeholder="请输入您的问题或指令..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+              onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
               disabled={isSending}
               className="text-xs flex-1 h-9"
             />

@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import type React from "react";
-import type { CartCardData } from "types";
-import { ArrowRight, CheckCircle2, ShoppingCart, Trash2 } from "../../icons";
+import type React from 'react';
+import type { CartCardData } from 'types';
+import { ArrowRight, CheckCircle2, ShoppingCart, Trash2 } from '../../icons';
 
 export interface CartCardProps {
   data: CartCardData;
@@ -10,35 +10,34 @@ export interface CartCardProps {
 }
 
 function formatAmount(val: unknown): string {
-  if (typeof val === "number") return val.toFixed(2);
-  if (typeof val === "string") {
-    const num = Number.parseFloat(val.replace(/[^0-9.-]/g, ""));
-    return Number.isNaN(num) ? "0.00" : num.toFixed(2);
+  if (typeof val === 'number') return val.toFixed(2);
+  if (typeof val === 'string') {
+    const num = Number.parseFloat(val.replace(/[^0-9.-]/g, ''));
+    return Number.isNaN(num) ? '0.00' : num.toFixed(2);
   }
-  return "0.00";
+  return '0.00';
 }
 
 export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {
   const items = data.items || [];
-  const currencySymbol = data.currency === "USD" ? "$" : "¥";
+  const currencySymbol = data.currency === 'USD' ? '$' : '¥';
 
   const defaultActions = [
     {
-      label: "去结算",
-      action: "checkout_cart",
-      icon: "arrow",
-      variant: "primary" as const,
+      label: '去结算',
+      action: 'checkout_cart',
+      icon: 'arrow',
+      variant: 'primary' as const,
     },
     {
-      label: "查看购物车",
-      action: "view_cart",
-      icon: "cart",
-      variant: "secondary" as const,
+      label: '查看购物车',
+      action: 'view_cart',
+      icon: 'cart',
+      variant: 'secondary' as const,
     },
   ];
 
-  const effectiveActions =
-    data.actions && data.actions.length > 0 ? data.actions : defaultActions;
+  const effectiveActions = data.actions && data.actions.length > 0 ? data.actions : defaultActions;
 
   return (
     <div className="my-2 max-w-md overflow-hidden rounded-xl border border-emerald-800/40 bg-gradient-to-b from-slate-900 via-slate-850 to-slate-900 p-4 text-slate-100 shadow-xl backdrop-blur-md transition-all hover:border-emerald-600/60">
@@ -50,18 +49,15 @@ export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {
           </div>
           <div>
             <span className="text-xs font-semibold tracking-wider text-slate-400">
-              {data.actionType === "added"
-                ? "已成功加入购物车"
-                : "购物车商品清单"}
+              {data.actionType === 'added' ? '已成功加入购物车' : '购物车商品清单'}
             </span>
             <div className="text-sm font-bold text-emerald-300">
-              {data.title ||
-                `共 ${data.totalQuantity || items.reduce((s, i) => s + (i.quantity || 1), 0)} 件商品`}
+              {data.title || `共 ${data.totalQuantity || items.reduce((s, i) => s + (i.quantity || 1), 0)} 件商品`}
             </div>
           </div>
         </div>
         <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
-          {data.actionType === "checkout" ? "待结算" : "购物车"}
+          {data.actionType === 'checkout' ? '待结算' : '购物车'}
         </span>
       </div>
 
@@ -81,19 +77,12 @@ export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {
                 />
               )}
               <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-slate-200 truncate">
-                  {item.title}
-                </div>
+                <div className="text-xs font-semibold text-slate-200 truncate">{item.title}</div>
                 {item.specSummary && (
-                  <div className="text-[11px] text-slate-400 truncate">
-                    规格: {item.specSummary}
-                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">规格: {item.specSummary}</div>
                 )}
                 <div className="text-[11px] text-slate-400">
-                  数量:{" "}
-                  <span className="text-slate-200 font-semibold">
-                    {item.quantity}
-                  </span>
+                  数量: <span className="text-slate-200 font-semibold">{item.quantity}</span>
                 </div>
               </div>
             </div>
@@ -108,10 +97,7 @@ export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {
       {/* Details & Total */}
       <div className="my-3 flex items-center justify-between border-t border-slate-800/70 pt-2 text-xs text-slate-300">
         <span className="text-slate-400">
-          商品总计 (
-          {data.totalQuantity ||
-            items.reduce((s, i) => s + (i.quantity || 1), 0)}{" "}
-          件):
+          商品总计 ({data.totalQuantity || items.reduce((s, i) => s + (i.quantity || 1), 0)} 件):
         </span>
         <span className="font-mono text-base font-extrabold text-emerald-300">
           {currencySymbol}
@@ -122,10 +108,7 @@ export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {
       {/* Action Buttons */}
       <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-750/70 pt-3">
         {effectiveActions.map((btn, idx) => {
-          const isPrimary =
-            btn.action === "checkout_cart" ||
-            btn.action === "go_to_checkout" ||
-            idx === 0;
+          const isPrimary = btn.action === 'checkout_cart' || btn.action === 'go_to_checkout' || idx === 0;
           return (
             <button
               key={idx}
@@ -133,22 +116,18 @@ export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {
               onClick={() =>
                 onAction?.(
                   btn.action,
-                  ("payload" in btn ? (btn as any).payload : undefined) || {
+                  ('payload' in btn ? (btn as any).payload : undefined) || {
                     cartData: data,
                   },
                 )
               }
               className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
                 isPrimary
-                  ? "bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm"
-                  : "bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700"
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm'
+                  : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700'
               }`}
             >
-              {isPrimary ? (
-                <ArrowRight className="h-3.5 w-3.5" />
-              ) : (
-                <ShoppingCart className="h-3.5 w-3.5" />
-              )}
+              {isPrimary ? <ArrowRight className="h-3.5 w-3.5" /> : <ShoppingCart className="h-3.5 w-3.5" />}
               {btn.label}
             </button>
           );

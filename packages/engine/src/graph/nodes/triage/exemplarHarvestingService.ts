@@ -1,7 +1,7 @@
-import { getDrizzle, intentExemplars, lowConfidenceLogs } from "db";
-import { and, desc, eq } from "drizzle-orm";
-import { ExemplarService } from "./exemplarService";
-import { cosineSimilarity } from "./semanticCache";
+import { getDrizzle, intentExemplars, lowConfidenceLogs } from 'db';
+import { and, desc, eq } from 'drizzle-orm';
+import { ExemplarService } from './exemplarService';
+import { cosineSimilarity } from './semanticCache';
 
 export class ExemplarHarvestingService {
   /**
@@ -32,36 +32,25 @@ export class ExemplarHarvestingService {
   }): Promise<{ success: boolean; exemplarId?: string; message: string }> {
     const { logId, tenantId, confirmedIntentName, customExampleText } = options;
     const drizzle = getDrizzle();
-    if (!drizzle) throw new Error("Database connection unavailable");
+    if (!drizzle) throw new Error('Database connection unavailable');
 
-    const cleanTenantId = (tenantId || "ecommerce").toLowerCase();
+    const cleanTenantId = (tenantId || 'ecommerce').toLowerCase();
 
     // 1. 获取目标日志记录
-    const logRows = await drizzle
-      .select()
-      .from(lowConfidenceLogs)
-      .where(eq(lowConfidenceLogs.id, logId))
-      .limit(1);
+    const logRows = await drizzle.select().from(lowConfidenceLogs).where(eq(lowConfidenceLogs.id, logId)).limit(1);
 
     const logRecord = logRows[0];
     const rawText = customExampleText || logRecord?.inputText;
 
     if (!rawText) {
-      return { success: false, message: "Log record or input text not found" };
+      return { success: false, message: 'Log record or input text not found' };
     }
 
     // 2. 查重保护：避免高相似度（>= 0.95）重复样本冗余堆叠
-    const existingExemplars = await ExemplarService.searchRelevantExemplars(
-      cleanTenantId,
-      rawText,
-      undefined,
-      5,
-    );
+    const existingExemplars = await ExemplarService.searchRelevantExemplars(cleanTenantId, rawText, undefined, 5);
 
-    let exemplarId = "";
-    const duplicate = existingExemplars.find(
-      (ex) => (ex.similarity || 0) >= 0.95,
-    );
+    let exemplarId = '';
+    const duplicate = existingExemplars.find((ex) => (ex.similarity || 0) >= 0.95);
 
     if (duplicate) {
       // 存在高度重合样本，更新其意图名称即可
@@ -78,14 +67,8 @@ export class ExemplarHarvestingService {
       );
     } else {
       // 创建新样本
-      exemplarId = await ExemplarService.addExemplar(
-        cleanTenantId,
-        confirmedIntentName,
-        rawText,
-      );
-      console.log(
-        `[Exemplar Harvesting] ✨ Harvested new exemplar [${exemplarId}] for tenant [${cleanTenantId}]`,
-      );
+      exemplarId = await ExemplarService.addExemplar(cleanTenantId, confirmedIntentName, rawText);
+      console.log(`[Exemplar Harvesting] ✨ Harvested new exemplar [${exemplarId}] for tenant [${cleanTenantId}]`);
     }
 
     // 3. 标记该条日志已被审核
@@ -99,7 +82,7 @@ export class ExemplarHarvestingService {
     return {
       success: true,
       exemplarId,
-      message: "Successfully harvested log into tenant exemplar bank",
+      message: 'Successfully harvested log into tenant exemplar bank',
     };
   }
 
@@ -113,26 +96,14 @@ export class ExemplarHarvestingService {
     const cleanTenantId = tenantId ? tenantId.toLowerCase() : undefined;
 
     const pendingQuery = cleanTenantId
-      ? drizzle
-          .select()
-          .from(lowConfidenceLogs)
-          .where(eq(lowConfidenceLogs.reviewed, false))
-      : drizzle
-          .select()
-          .from(lowConfidenceLogs)
-          .where(eq(lowConfidenceLogs.reviewed, false));
+      ? drizzle.select().from(lowConfidenceLogs).where(eq(lowConfidenceLogs.reviewed, false))
+      : drizzle.select().from(lowConfidenceLogs).where(eq(lowConfidenceLogs.reviewed, false));
 
     const exemplarQuery = cleanTenantId
-      ? drizzle
-          .select()
-          .from(intentExemplars)
-          .where(eq(intentExemplars.businessId, cleanTenantId))
+      ? drizzle.select().from(intentExemplars).where(eq(intentExemplars.businessId, cleanTenantId))
       : drizzle.select().from(intentExemplars);
 
-    const [pendingRows, exemplarRows] = await Promise.all([
-      pendingQuery,
-      exemplarQuery,
-    ]);
+    const [pendingRows, exemplarRows] = await Promise.all([pendingQuery, exemplarQuery]);
 
     return {
       totalPending: pendingRows.length,
