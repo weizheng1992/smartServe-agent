@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ConversationRepository, db, getDrizzle, pendingApprovals, threads } from 'db';
-import { eq } from 'drizzle-orm';
+import { ConversationRepository, db, eq, getDrizzle, pendingApprovals, threads } from 'db';
 import { ApprovalGatekeeper, runAgent } from 'engine';
 
 describe('全链路多轮对话与状态机自动化流程测试 (Chat Dialogue Scenario & State Machine Suite)', () => {

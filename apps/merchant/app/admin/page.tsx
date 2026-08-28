@@ -128,21 +128,41 @@ export default function MerchantAdminPage() {
   const [activeThreadMessages, setActiveThreadMessages] = useState<MessageItem[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Filters & Searches
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('ALL');
+  const [orderSearchQuery, setOrderSearchQuery] = useState<string>('');
+
+  const [approvalStatusFilter, setApprovalStatusFilter] = useState<string>('waiting');
+  const [approvalActionFilter, setApprovalActionFilter] = useState<string>('all');
+  const [approvalSearchQuery, setApprovalSearchQuery] = useState<string>('');
+
+  const [liveDeskStatusFilter, setLiveDeskStatusFilter] = useState<'ALL' | 'takeover' | 'ai'>('ALL');
+  const [liveDeskSearchQuery, setLiveDeskSearchQuery] = useState<string>('');
+
+  const [spuCategoryFilter, setSpuCategoryFilter] = useState<string>('ALL');
+  const [spuSearchQuery, setSpuSearchQuery] = useState<string>('');
+
+  const [skuStockFilter, setSkuStockFilter] = useState<'ALL' | 'low' | 'normal'>('ALL');
+  const [skuSearchQuery, setSkuSearchQuery] = useState<string>('');
+
+  const [spiActionFilter, setSpiActionFilter] = useState<string>('ALL');
+  const [spiSearchQuery, setSpiSearchQuery] = useState<string>('');
+
+  // Modals & Drawers state
   const [shippingOrderId, setShippingOrderId] = useState<string | null>(null);
   const [trackingNumberInput, setTrackingNumberInput] = useState('');
   const [carrierInput, setCarrierInput] = useState('SF');
   const [selectedLog, setSelectedLog] = useState<AuditLogRow | null>(null);
+  const [copiedLog, setCopiedLog] = useState(false);
   const [inspectingApproval, setInspectingApproval] = useState<ApprovalItem | null>(null);
   const [isTakingOver, setIsTakingOver] = useState(false);
-  const [approvalStatusFilter, setApprovalStatusFilter] = useState<string>('waiting');
-  const [approvalActionFilter, setApprovalActionFilter] = useState<string>('all');
-  const [approvalSearchQuery, setApprovalSearchQuery] = useState<string>('');
   const [rejectingApprovalId, setRejectingApprovalId] = useState<string | null>(null);
   const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { submittingActionId, rejectionReasons, setRejectionReasons, executeApprovalAction, executeHumanReplyAction } =
+  const { submittingActionId, setRejectionReasons, executeApprovalAction, executeHumanReplyAction } =
     useApprovalMachine('/api/admin/approvals');
 
   const loadConversationMessages = useCallback(async (threadId: string) => {
@@ -283,10 +303,12 @@ export default function MerchantAdminPage() {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !activeThreadId) return;
-    const msg = inputMessage.trim();
-    setInputMessage('');
+  const handleSendMessage = async (customText?: string) => {
+    const msg = (customText || inputMessage).trim();
+    if (!msg || !activeThreadId) return;
+    if (!customText) {
+      setInputMessage('');
+    }
 
     // Optimistic append
     const optMsg: MessageItem = {
@@ -298,7 +320,6 @@ export default function MerchantAdminPage() {
     setActiveThreadMessages((prev) => [...prev, optMsg]);
 
     try {
-      // Find active approval or trigger resolve
       const app = approvals.find((a) => a.threadId === activeThreadId && a.status === 'waiting');
       if (app) {
         await executeHumanReplyAction({
@@ -308,7 +329,6 @@ export default function MerchantAdminPage() {
           apiEndpoint: '/api/admin/approvals',
         });
       } else {
-        // Direct start takeover and send message
         const res = await fetch('/api/admin/approvals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -358,19 +378,84 @@ export default function MerchantAdminPage() {
       } else {
         alert(`发货失败: ${data.message || '未知错误'}`);
       }
-    } catch (err) {
+    } catch {
       alert('网络请求失败');
     }
   };
 
+  // Status counts
   const pendingApprovalsCount = approvals.filter((a) => a.status === 'waiting').length;
+  const paidOrdersCount = orders.filter((o) => o.status === 'PAID').length;
+  const shippedOrdersCount = orders.filter((o) => o.status === 'SHIPPED').length;
+  const refundedOrdersCount = orders.filter((o) => o.status === 'REFUNDED').length;
+  const lowStockCount = skus.filter((s) => s.stock < 50).length;
+
+  // Filtered Orders
+  const filteredOrders = orders.filter((o) => {
+    if (orderStatusFilter !== 'ALL' && o.status !== orderStatusFilter) return false;
+    if (orderSearchQuery.trim()) {
+      const q = orderSearchQuery.toLowerCase().trim();
+      const str =
+        `${o.order_id} ${o.customer_id} ${o.shipping_address?.recipientName || ''} ${o.shipping_address?.phone || ''} ${o.shipping_address?.fullAddress || ''} ${o.tracking_info?.trackingNumber || ''}`.toLowerCase();
+      if (!str.includes(q)) return false;
+    }
+    return true;
+  });
+
+  // Filtered Conversations
+  const filteredConversations = conversations.filter((c) => {
+    const isTakeover = c.status === 'human_takeover';
+    if (liveDeskStatusFilter === 'takeover' && !isTakeover) return false;
+    if (liveDeskStatusFilter === 'ai' && isTakeover) return false;
+    if (liveDeskSearchQuery.trim()) {
+      const q = liveDeskSearchQuery.toLowerCase().trim();
+      const str = `${c.threadId || c.id} ${c.userId || ''} ${c.lastMessage || ''}`.toLowerCase();
+      if (!str.includes(q)) return false;
+    }
+    return true;
+  });
+
+  // Categories list for SPU
+  const spuCategories = Array.from(new Set(spus.map((s) => s.category))).filter(Boolean);
+  const filteredSpus = spus.filter((s) => {
+    if (spuCategoryFilter !== 'ALL' && s.category !== spuCategoryFilter) return false;
+    if (spuSearchQuery.trim()) {
+      const q = spuSearchQuery.toLowerCase().trim();
+      const str = `${s.spu_code} ${s.title} ${s.subtitle} ${s.brand} ${s.category}`.toLowerCase();
+      if (!str.includes(q)) return false;
+    }
+    return true;
+  });
+
+  // Filtered SKUs
+  const filteredSkus = skus.filter((s) => {
+    if (skuStockFilter === 'low' && s.stock >= 50) return false;
+    if (skuStockFilter === 'normal' && s.stock < 50) return false;
+    if (skuSearchQuery.trim()) {
+      const q = skuSearchQuery.toLowerCase().trim();
+      const str = `${s.sku_code} ${s.sku_title} ${s.spu_title} ${s.brand} ${s.category}`.toLowerCase();
+      if (!str.includes(q)) return false;
+    }
+    return true;
+  });
+
+  // Filtered SPI logs
+  const filteredAuditLogs = auditLogs.filter((log) => {
+    if (spiActionFilter !== 'ALL' && log.action_type !== spiActionFilter) return false;
+    if (spiSearchQuery.trim()) {
+      const q = spiSearchQuery.toLowerCase().trim();
+      const str = `${log.id} ${log.order_id} ${log.action_type} ${log.idempotency_key}`.toLowerCase();
+      if (!str.includes(q)) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
       {/* 顶部商户后台 Header */}
       <header className="bg-slate-900 text-white border-b border-slate-800 h-16 flex items-center justify-between px-6 sticky top-0 z-20">
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded bg-emerald-600 flex items-center justify-center font-bold text-white shadow-sm">
+          <div className="w-8 h-8 rounded bg-emerald-600 flex items-center justify-center font-bold text-white shadow-xs">
             A
           </div>
           <div>
@@ -392,13 +477,13 @@ export default function MerchantAdminPage() {
             variant="outline"
             size="sm"
             onClick={fetchDashboardData}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 h-8"
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 h-8 cursor-pointer"
           >
             <span>🔄 刷新数据</span>
           </Button>
           <a
             href="/"
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded transition flex items-center space-x-1 shadow-xs"
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded transition flex items-center space-x-1 shadow-xs cursor-pointer"
           >
             <span>🛍️ 返回商城前台</span>
           </a>
@@ -407,12 +492,19 @@ export default function MerchantAdminPage() {
 
       {/* 主体工作台 */}
       <div className="max-w-7xl w-full mx-auto p-6 flex-1 flex flex-col space-y-6">
-        {/* 顶部四栏指标卡 */}
+        {/* 顶部四栏核心指标看板 */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div
+            onClick={() => setActiveTab('orders')}
+            className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between cursor-pointer hover:border-emerald-400 transition"
+          >
             <div>
               <div className="text-xs text-slate-500 font-medium">累计订单总数</div>
               <div className="text-2xl font-bold text-slate-900 mt-1">{orders.length} 笔</div>
+              <div className="text-[11px] text-slate-400 mt-1 flex gap-2">
+                <span>待发: {paidOrdersCount}</span>
+                <span>已发: {shippedOrdersCount}</span>
+              </div>
             </div>
             <div className="text-3xl text-slate-300">📋</div>
           </div>
@@ -431,6 +523,9 @@ export default function MerchantAdminPage() {
               >
                 {pendingApprovalsCount} 笔
               </div>
+              <div className="text-[11px] text-amber-600/80 mt-1">
+                {pendingApprovalsCount > 0 ? '需及时核决以放行流程' : '大盘运转平稳'}
+              </div>
             </div>
             <div className="text-3xl text-amber-300">🛡️</div>
           </div>
@@ -442,16 +537,31 @@ export default function MerchantAdminPage() {
             <div>
               <div className="text-xs text-slate-500 font-medium">活跃在线会话</div>
               <div className="text-2xl font-bold text-blue-600 mt-1">{conversations.length} 组</div>
+              <div className="text-[11px] text-blue-500/80 mt-1">
+                接管: {conversations.filter((c) => c.status === 'human_takeover').length} · 托管:{' '}
+                {conversations.filter((c) => c.status !== 'human_takeover').length}
+              </div>
             </div>
             <div className="text-3xl text-blue-300">💬</div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div
+            onClick={() => setActiveTab('skus')}
+            className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between cursor-pointer hover:border-purple-400 transition"
+          >
             <div>
-              <div className="text-xs text-slate-500 font-medium">接收 AI SPI 履约调用</div>
-              <div className="text-2xl font-bold text-emerald-600 mt-1">{auditLogs.length} 次</div>
+              <div className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                <span>SKU 库存监控</span>
+                {lowStockCount > 0 && (
+                  <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.2 rounded font-bold">
+                    {lowStockCount} 低库存
+                  </span>
+                )}
+              </div>
+              <div className="text-2xl font-bold text-slate-900 mt-1">{skus.length} 款</div>
+              <div className="text-[11px] text-slate-400 mt-1">SPU 库: {spus.length} 款商品</div>
             </div>
-            <div className="text-3xl text-slate-300">⚡</div>
+            <div className="text-3xl text-purple-300">📦</div>
           </div>
         </div>
 
@@ -548,93 +658,144 @@ export default function MerchantAdminPage() {
 
         {/* Tab 1: 订单中心 */}
         {activeTab === 'orders' && (
-          <div className="bg-white rounded-b-xl border border-slate-200 shadow-2xs overflow-hidden">
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <span className="text-xs text-slate-600">
-                实时展示商户订单。
-                <strong>如果用户通过 AI 客服成功修改了地址或退款，此处将实时展示最新变更！</strong>
-              </span>
+          <div className="bg-white rounded-b-xl border border-slate-200 shadow-2xs overflow-hidden space-y-0">
+            {/* 订单筛选与搜索工具条 */}
+            <div className="p-4 border-b border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-semibold">
+                  {[
+                    { key: 'ALL', label: '全部订单', count: orders.length },
+                    { key: 'PAID', label: '待发货', count: paidOrdersCount },
+                    {
+                      key: 'SHIPPED',
+                      label: '已发货',
+                      count: shippedOrdersCount,
+                    },
+                    {
+                      key: 'REFUNDED',
+                      label: '已退款',
+                      count: refundedOrdersCount,
+                    },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setOrderStatusFilter(tab.key)}
+                      className={`px-3 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                        orderStatusFilter === tab.key
+                          ? 'bg-white text-slate-900 shadow-xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className="text-[10px] text-slate-400">({tab.count})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  placeholder="搜索订单号 / 顾客 / 收货人 / 手机..."
+                  value={orderSearchQuery}
+                  onChange={(e) => setOrderSearchQuery(e.target.value)}
+                  className="text-xs h-8 w-64 bg-white"
+                />
+              </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
-                  <tr>
-                    <th className="p-3.5">订单流水号</th>
-                    <th className="p-3.5">顾客 ID</th>
-                    <th className="p-3.5">订单状态</th>
-                    <th className="p-3.5">实付金额</th>
-                    <th className="p-3.5">收货人 & 联系方式</th>
-                    <th className="p-3.5">配送收货地址</th>
-                    <th className="p-3.5">物流单号</th>
-                    <th className="p-3.5 text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {orders.map((o) => (
-                    <tr key={o.order_id} className="hover:bg-slate-50/80 transition">
-                      <td className="p-3.5 font-semibold text-slate-900 font-mono">{o.order_id}</td>
-                      <td className="p-3.5 text-slate-500">{o.customer_id}</td>
-                      <td className="p-3.5">
-                        <Badge
-                          variant="outline"
-                          className={
-                            o.status === 'PAID'
-                              ? 'bg-amber-100 text-amber-800 border-amber-200'
-                              : o.status === 'SHIPPED'
-                                ? 'bg-blue-100 text-blue-800 border-blue-200'
-                                : o.status === 'REFUNDED'
-                                  ? 'bg-purple-100 text-purple-800 border-purple-200'
-                                  : 'bg-slate-100 text-slate-800 border-slate-200'
-                          }
-                        >
-                          {o.status === 'PAID' && '待发货'}
-                          {o.status === 'SHIPPED' && '已发货'}
-                          {o.status === 'REFUNDED' && '已退款'}
-                          {!['PAID', 'SHIPPED', 'REFUNDED'].includes(o.status) && o.status}
-                        </Badge>
-                      </td>
-                      <td className="p-3.5 font-bold text-slate-900">¥{Number(o.total_amount).toFixed(2)}</td>
-                      <td className="p-3.5">
-                        <div className="font-medium text-slate-800">{o.shipping_address?.recipientName || '张伟'}</div>
-                        <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '13800138000'}</div>
-                      </td>
-                      <td className="p-3.5 max-w-xs">
-                        <span className="text-slate-800 line-clamp-2" title={o.shipping_address?.fullAddress}>
-                          {o.shipping_address?.fullAddress}
-                        </span>
-                      </td>
-                      <td className="p-3.5">
-                        {o.tracking_info ? (
-                          <span className="text-blue-600 font-mono text-[11px]">
-                            {o.tracking_info.carrier} {o.tracking_info.trackingNumber}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 italic">未发货</span>
-                        )}
-                      </td>
-                      <td className="p-3.5 text-right">
-                        {o.status === 'PAID' ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => {
-                              setShippingOrderId(o.order_id);
-                              setTrackingNumberInput(`SF${Math.floor(10000000000 + Math.random() * 90000000000)}`);
-                            }}
-                            className="bg-blue-600 text-white hover:bg-blue-500 h-7 text-xs font-medium"
-                          >
-                            一键发货
-                          </Button>
-                        ) : (
-                          <span className="text-slate-400 text-[11px]">不可操作</span>
-                        )}
-                      </td>
+            {filteredOrders.length === 0 ? (
+              <div className="p-12 text-center space-y-2">
+                <div className="text-3xl">📦</div>
+                <h4 className="text-sm font-bold text-slate-800">暂无符合条件的订单记录</h4>
+                <p className="text-xs text-slate-400">可调整筛选状态或清空搜索关键词后重试。</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                    <tr>
+                      <th className="p-3.5">订单流水号</th>
+                      <th className="p-3.5">顾客 ID</th>
+                      <th className="p-3.5">订单状态</th>
+                      <th className="p-3.5">实付金额</th>
+                      <th className="p-3.5">收货人 & 联系方式</th>
+                      <th className="p-3.5">配送收货地址</th>
+                      <th className="p-3.5">物流单号</th>
+                      <th className="p-3.5 text-right">操作</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {filteredOrders.map((o) => (
+                      <tr key={o.order_id} className="hover:bg-slate-50/80 transition">
+                        <td className="p-3.5 font-semibold text-slate-900 font-mono">{o.order_id}</td>
+                        <td className="p-3.5 text-slate-500">{o.customer_id}</td>
+                        <td className="p-3.5">
+                          <Badge
+                            variant="outline"
+                            className={
+                              o.status === 'PAID'
+                                ? 'bg-amber-100 text-amber-800 border-amber-200 font-bold'
+                                : o.status === 'SHIPPED'
+                                  ? 'bg-blue-100 text-blue-800 border-blue-200 font-bold'
+                                  : o.status === 'REFUNDED'
+                                    ? 'bg-purple-100 text-purple-800 border-purple-200 font-bold'
+                                    : 'bg-slate-100 text-slate-800 border-slate-200 font-bold'
+                            }
+                          >
+                            {o.status === 'PAID' && '待发货'}
+                            {o.status === 'SHIPPED' && '已发货'}
+                            {o.status === 'REFUNDED' && '已退款'}
+                            {!['PAID', 'SHIPPED', 'REFUNDED'].includes(o.status) && o.status}
+                          </Badge>
+                        </td>
+                        <td className="p-3.5 font-bold text-slate-900">¥{Number(o.total_amount).toFixed(2)}</td>
+                        <td className="p-3.5">
+                          <div className="font-medium text-slate-800">
+                            {o.shipping_address?.recipientName || '张伟'}
+                          </div>
+                          <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '13800138000'}</div>
+                        </td>
+                        <td className="p-3.5 max-w-xs">
+                          <span className="text-slate-800 line-clamp-2" title={o.shipping_address?.fullAddress}>
+                            {o.shipping_address?.fullAddress}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          {o.tracking_info ? (
+                            <span className="text-blue-600 font-mono text-[11px]">
+                              {o.tracking_info.carrier} {o.tracking_info.trackingNumber}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic">未发货</span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          {o.status === 'PAID' ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => {
+                                setShippingOrderId(o.order_id);
+                                setTrackingNumberInput(`SF${Math.floor(10000000000 + Math.random() * 90000000000)}`);
+                              }}
+                              className="bg-blue-600 text-white hover:bg-blue-500 h-7 text-xs font-semibold cursor-pointer"
+                            >
+                              一键发货
+                            </Button>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">
+                              {o.status === 'SHIPPED' ? '运输中' : '已归档'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -658,7 +819,7 @@ export default function MerchantAdminPage() {
                 type="button"
                 size="sm"
                 onClick={fetchDashboardData}
-                className="bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 shrink-0 h-8"
+                className="bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 shrink-0 h-8 cursor-pointer"
               >
                 🔄 刷新工单
               </Button>
@@ -724,7 +885,7 @@ export default function MerchantAdminPage() {
                     value={approvalActionFilter}
                     onChange={(e) => setApprovalActionFilter(e.target.value)}
                     aria-label="筛选业务操作类型"
-                    className="px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 font-medium focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="all">全部业务类型</option>
                     <option value="refund">💰 退款审核 (processRefund)</option>
@@ -1001,25 +1162,56 @@ export default function MerchantAdminPage() {
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col md:flex-row h-[700px]">
             {/* 左侧会话列表 */}
             <div className="w-full md:w-80 border-r border-slate-200 flex flex-col bg-slate-50">
-              <div className="p-3.5 border-b border-slate-200 bg-white flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-900">💬 客服会话队列</h3>
-                  <span className="text-[10px] text-slate-500">商户专属客户会话实时接入</span>
+              <div className="p-3.5 border-b border-slate-200 bg-white space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-900">💬 客服会话队列</h3>
+                    <span className="text-[10px] text-slate-500">商户专属客户会话实时接入</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchDashboardData}
+                    className="text-xs text-slate-500 hover:text-slate-800 cursor-pointer"
+                  >
+                    🔄
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={fetchDashboardData}
-                  className="text-xs text-slate-500 hover:text-slate-800 cursor-pointer"
-                >
-                  🔄
-                </button>
+
+                <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg text-[11px]">
+                  {[
+                    { key: 'ALL', label: '全部' },
+                    { key: 'takeover', label: '人工接管' },
+                    { key: 'ai', label: 'AI 托管' },
+                  ].map((f) => (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => setLiveDeskStatusFilter(f.key as any)}
+                      className={`flex-1 py-1 rounded text-center font-medium transition cursor-pointer ${
+                        liveDeskStatusFilter === f.key
+                          ? 'bg-white text-slate-900 shadow-xs font-bold'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <Input
+                  type="text"
+                  placeholder="搜索客户 / 会话 / 摘要..."
+                  value={liveDeskSearchQuery}
+                  onChange={(e) => setLiveDeskSearchQuery(e.target.value)}
+                  className="text-xs h-7 bg-white"
+                />
               </div>
 
               <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-                {conversations.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-400">暂无会话记录</div>
+                {filteredConversations.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-400">暂无匹配会话记录</div>
                 ) : (
-                  conversations.map((c) => {
+                  filteredConversations.map((c) => {
                     const threadId = c.threadId || c.id;
                     const isSelected = activeThreadId === threadId;
                     const isTakeover = c.status === 'human_takeover';
@@ -1086,7 +1278,7 @@ export default function MerchantAdminPage() {
                         size="sm"
                         onClick={() => handleTakeover(activeThreadId)}
                         disabled={isTakingOver}
-                        className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold h-8"
+                        className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold h-8 cursor-pointer"
                       >
                         <span>🚨 主动接管会话</span>
                       </Button>
@@ -1145,6 +1337,26 @@ export default function MerchantAdminPage() {
                     <div ref={messagesEndRef} />
                   </div>
 
+                  {/* 快捷常用话术栏 */}
+                  <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-200 flex items-center gap-1.5 overflow-x-auto text-[11px]">
+                    <span className="text-slate-400 shrink-0">快捷回复:</span>
+                    {[
+                      '您好！极光潮品商户客服为您服务，请问有什么可以协助您？',
+                      '已为您核实订单状态，商品正在仓库质检出库中。',
+                      '您的退款诉求已转交售后专员核实，请耐心等候。',
+                      '收货地址已为您记录，出库前均可为您办理变更。',
+                    ].map((reply) => (
+                      <button
+                        key={reply}
+                        type="button"
+                        onClick={() => handleSendMessage(reply)}
+                        className="bg-white hover:bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md border border-slate-200 whitespace-nowrap cursor-pointer transition"
+                      >
+                        {reply.slice(0, 16)}...
+                      </button>
+                    ))}
+                  </div>
+
                   {/* 输入框 Footer */}
                   <div className="p-3 bg-white border-t border-slate-200 flex items-center space-x-2">
                     <Input
@@ -1163,9 +1375,9 @@ export default function MerchantAdminPage() {
                     <Button
                       type="button"
                       size="sm"
-                      onClick={handleSendMessage}
+                      onClick={() => handleSendMessage()}
                       disabled={!inputMessage.trim()}
-                      className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white text-xs font-semibold h-9 px-4"
+                      className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white text-xs font-semibold h-9 px-4 cursor-pointer"
                     >
                       发送
                     </Button>
@@ -1182,94 +1394,221 @@ export default function MerchantAdminPage() {
 
         {/* Tab 4: SPU 商品库 */}
         {activeTab === 'spus' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {spus.map((spu) => (
-              <div key={spu.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
-                      {spu.spu_code}
-                    </span>
-                    <h4 className="font-bold text-slate-900 text-sm mt-1">{spu.title}</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">{spu.subtitle}</p>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className="text-xs bg-emerald-100 text-emerald-800 border-emerald-200 font-semibold"
+          <div className="space-y-4">
+            {/* 筛选与搜索 */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setSpuCategoryFilter('ALL')}
+                    className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                      spuCategoryFilter === 'ALL'
+                        ? 'bg-white text-slate-900 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
                   >
-                    {spu.category}
-                  </Badge>
-                </div>
-
-                {/* 规格维度 */}
-                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
-                  <span className="text-[11px] font-bold text-slate-700 block">📐 规格维度矩阵 (Dimensions)</span>
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {spu.spec_dimensions?.map((dim) => (
-                      <span
-                        key={dim.name}
-                        className="text-xs bg-white text-slate-700 px-2 py-1 rounded border border-slate-200"
-                      >
-                        <strong>{dim.name}:</strong> {dim.values.join(' / ')}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 参数 Specs */}
-                <div className="text-xs space-y-1 border-t border-slate-100 pt-2">
-                  <span className="font-semibold text-slate-700">🔬 材质与技术参数:</span>
-                  <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600">
-                    {Object.entries(spu.specs || {}).map(([k, v]) => (
-                      <div key={k}>
-                        <span className="text-slate-400">{k}:</span> {v}
-                      </div>
-                    ))}
-                  </div>
+                    全部品类 ({spus.length})
+                  </button>
+                  {spuCategories.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSpuCategoryFilter(cat)}
+                      className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                        spuCategoryFilter === cat
+                          ? 'bg-white text-slate-900 shadow-xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {cat} ({spus.filter((s) => s.category === cat).length})
+                    </button>
+                  ))}
                 </div>
               </div>
-            ))}
+
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  placeholder="搜索 SPU 编码 / 名称 / 品牌..."
+                  value={spuSearchQuery}
+                  onChange={(e) => setSpuSearchQuery(e.target.value)}
+                  className="text-xs h-8 w-64 bg-white"
+                />
+              </div>
+            </div>
+
+            {filteredSpus.length === 0 ? (
+              <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-2">
+                <div className="text-3xl">🏷️</div>
+                <h4 className="text-sm font-bold text-slate-800">暂无匹配 SPU 商品</h4>
+                <p className="text-xs text-slate-400">请尝试切换分类或调整搜索关键字。</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredSpus.map((spu) => (
+                  <div key={spu.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
+                          {spu.spu_code}
+                        </span>
+                        <h4 className="font-bold text-slate-900 text-sm mt-1">{spu.title}</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">{spu.subtitle}</p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className="text-xs bg-emerald-100 text-emerald-800 border-emerald-200 font-semibold shrink-0"
+                      >
+                        {spu.category}
+                      </Badge>
+                    </div>
+
+                    {/* 规格维度 */}
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
+                      <span className="text-[11px] font-bold text-slate-700 block">📐 规格维度矩阵 (Dimensions)</span>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {spu.spec_dimensions?.map((dim) => (
+                          <span
+                            key={dim.name}
+                            className="text-xs bg-white text-slate-700 px-2 py-1 rounded border border-slate-200"
+                          >
+                            <strong>{dim.name}:</strong> {dim.values.join(' / ')}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 参数 Specs */}
+                    <div className="text-xs space-y-1 border-t border-slate-100 pt-2">
+                      <span className="font-semibold text-slate-700">🔬 材质与技术参数:</span>
+                      <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600">
+                        {Object.entries(spu.specs || {}).map(([k, v]) => (
+                          <div key={k}>
+                            <span className="text-slate-400">{k}:</span> {v}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {/* Tab 5: SKU 规格库存管理 */}
         {activeTab === 'skus' && (
-          <div className="bg-white rounded-b-xl border border-slate-200 shadow-2xs overflow-hidden">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
-                <tr>
-                  <th className="p-3.5">SKU 编码</th>
-                  <th className="p-3.5">SKU 规格名称</th>
-                  <th className="p-3.5">所属 SPU</th>
-                  <th className="p-3.5">规格属性快照</th>
-                  <th className="p-3.5">独立售价</th>
-                  <th className="p-3.5">当前可用库存</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
-                {skus.map((item) => (
-                  <tr key={item.sku_code} className="hover:bg-slate-50/80 transition">
-                    <td className="p-3.5 font-mono text-slate-600 font-semibold">{item.sku_code}</td>
-                    <td className="p-3.5 font-bold text-slate-900">{item.sku_title}</td>
-                    <td className="p-3.5 text-slate-500">{item.spu_title}</td>
-                    <td className="p-3.5">
-                      <div className="flex flex-wrap gap-1">
-                        {Object.entries(item.spec_attributes || {}).map(([k, v]) => (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden space-y-0">
+            {/* 筛选与搜索 */}
+            <div className="p-4 border-b border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setSkuStockFilter('ALL')}
+                    className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                      skuStockFilter === 'ALL'
+                        ? 'bg-white text-slate-900 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    全部 SKU ({skus.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSkuStockFilter('low')}
+                    className={`px-3 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                      skuStockFilter === 'low'
+                        ? 'bg-white text-rose-700 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span>⚠️ 低库存预警 (&lt;50)</span>
+                    <span className="bg-rose-100 text-rose-700 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                      {lowStockCount}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSkuStockFilter('normal')}
+                    className={`px-3 py-1 rounded-md transition cursor-pointer ${
+                      skuStockFilter === 'normal'
+                        ? 'bg-white text-slate-900 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    充足库存 (≥50)
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  placeholder="搜索 SKU 编码 / 规格 / SPU 标题..."
+                  value={skuSearchQuery}
+                  onChange={(e) => setSkuSearchQuery(e.target.value)}
+                  className="text-xs h-8 w-64 bg-white"
+                />
+              </div>
+            </div>
+
+            {filteredSkus.length === 0 ? (
+              <div className="p-12 text-center space-y-2">
+                <div className="text-3xl">📦</div>
+                <h4 className="text-sm font-bold text-slate-800">暂无匹配的 SKU 记录</h4>
+                <p className="text-xs text-slate-400">请调整搜索关键词或库存状态过滤条件。</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                    <tr>
+                      <th className="p-3.5">SKU 编码</th>
+                      <th className="p-3.5">SKU 规格名称</th>
+                      <th className="p-3.5">所属 SPU</th>
+                      <th className="p-3.5">规格属性快照</th>
+                      <th className="p-3.5">独立售价</th>
+                      <th className="p-3.5">当前可用库存</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {filteredSkus.map((item) => (
+                      <tr key={item.sku_code} className="hover:bg-slate-50/80 transition">
+                        <td className="p-3.5 font-mono text-slate-600 font-semibold">{item.sku_code}</td>
+                        <td className="p-3.5 font-bold text-slate-900">{item.sku_title}</td>
+                        <td className="p-3.5 text-slate-500">{item.spu_title}</td>
+                        <td className="p-3.5">
+                          <div className="flex flex-wrap gap-1">
+                            {Object.entries(item.spec_attributes || {}).map(([k, v]) => (
+                              <span
+                                key={k}
+                                className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200"
+                              >
+                                {k}: {v}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="p-3.5 font-extrabold text-emerald-600">¥{Number(item.price).toFixed(2)}</td>
+                        <td className="p-3.5">
                           <span
-                            key={k}
-                            className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200"
+                            className={`font-semibold px-2 py-0.5 rounded text-xs ${
+                              item.stock < 50
+                                ? 'bg-rose-100 text-rose-700 font-bold border border-rose-200'
+                                : 'text-slate-800'
+                            }`}
                           >
-                            {k}: {v}
+                            {item.stock} 件
                           </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-3.5 font-extrabold text-emerald-600">¥{Number(item.price).toFixed(2)}</td>
-                    <td className="p-3.5 font-semibold text-slate-800">{item.stock} 件</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -1296,17 +1635,31 @@ export default function MerchantAdminPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
-              <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900">
-                  📥 来自 Agent 平台的实时 SPI 调度审计流水 (merchant_audit_logs)
-                </span>
-                <span className="text-xs text-slate-500">物理落盘于商户独立数据库，自动记录幂等防重 Token 与签名</span>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden space-y-0">
+              <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-bold text-slate-900">
+                    📥 来自 Agent 平台的实时 SPI 调度审计流水 (merchant_audit_logs)
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    物理落盘于商户独立数据库，自动记录幂等防重 Token 与签名
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    placeholder="搜索流水 ID / 订单号 / 动作..."
+                    value={spiSearchQuery}
+                    onChange={(e) => setSpiSearchQuery(e.target.value)}
+                    className="text-xs h-8 w-64 bg-white"
+                  />
+                </div>
               </div>
 
-              {auditLogs.length === 0 ? (
+              {filteredAuditLogs.length === 0 ? (
                 <div className="p-12 text-center text-slate-400 text-xs">
-                  暂无 SPI 变更记录。请在商城前台拉起 AI 客服发起改地址或退款进行测试！
+                  暂无匹配的 SPI 变更记录。可在前台拉起 AI 客服发起改地址或退款进行测试。
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -1322,7 +1675,7 @@ export default function MerchantAdminPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {auditLogs.map((log) => (
+                      {filteredAuditLogs.map((log) => (
                         <tr key={log.id} className="hover:bg-slate-50/80 transition">
                           <td className="p-3.5 font-mono text-slate-900">{log.id.slice(0, 8)}...</td>
                           <td className="p-3.5 font-semibold text-slate-800">{log.order_id}</td>
@@ -1341,7 +1694,7 @@ export default function MerchantAdminPage() {
                               variant="secondary"
                               size="sm"
                               onClick={() => setSelectedLog(log)}
-                              className="text-xs h-7 px-2.5 font-medium bg-slate-100 hover:bg-slate-200 text-slate-700"
+                              className="text-xs h-7 px-2.5 font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
                             >
                               查看 Payload
                             </Button>
@@ -1378,23 +1731,24 @@ export default function MerchantAdminPage() {
 
       {/* 发货弹窗 */}
       <Dialog open={Boolean(shippingOrderId)} onOpenChange={(open) => !open && setShippingOrderId(null)}>
-        <DialogContent className="max-w-sm p-5">
-          <DialogHeader>
+        <DialogContent className="max-w-sm p-6 bg-white text-slate-900 border-slate-200">
+          <DialogHeader className="pb-3 border-b border-slate-100">
             <DialogTitle className="text-base font-bold text-slate-900">订单一键发货</DialogTitle>
-            <p className="text-xs text-slate-500 mt-1">订单号: {shippingOrderId}</p>
+            <p className="text-xs text-slate-500 mt-1 font-mono">订单号: {shippingOrderId}</p>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
+          <div className="space-y-3 py-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">承运快递公司</label>
               <select
                 value={carrierInput}
                 onChange={(e) => setCarrierInput(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
               >
                 <option value="SF">顺丰速运 (SF Express)</option>
                 <option value="JD">京东快递 (JD Logistics)</option>
                 <option value="ZTO">中通快递 (ZTO)</option>
+                <option value="EMS">邮政 EMS</option>
               </select>
             </div>
 
@@ -1404,19 +1758,19 @@ export default function MerchantAdminPage() {
                 type="text"
                 value={trackingNumberInput}
                 onChange={(e) => setTrackingNumberInput(e.target.value)}
-                className="text-xs h-9 bg-white"
+                className="text-xs h-9 bg-white font-mono"
                 placeholder="请输入运单号..."
               />
             </div>
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-slate-100">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => setShippingOrderId(null)}
-              className="text-xs"
+              className="text-xs cursor-pointer"
             >
               取消
             </Button>
@@ -1424,7 +1778,7 @@ export default function MerchantAdminPage() {
               type="button"
               size="sm"
               onClick={() => shippingOrderId && handleShipOrder(shippingOrderId)}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold"
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer"
             >
               确认发货并锁定地址
             </Button>
@@ -1432,25 +1786,47 @@ export default function MerchantAdminPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 报文查看抽屉 */}
+      {/* 报文查看弹窗 */}
       <Dialog open={Boolean(selectedLog)} onOpenChange={(open) => !open && setSelectedLog(null)}>
-        <DialogContent className="max-w-lg p-5">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-bold text-slate-900">SPI 调用结果 Payload</DialogTitle>
+        <DialogContent className="max-w-lg p-6 bg-white text-slate-900 border-slate-200">
+          <DialogHeader className="pb-3 border-b border-slate-100">
+            <DialogTitle className="text-sm font-bold text-slate-900 flex items-center justify-between">
+              <span>SPI 调用结果 Payload</span>
+              {selectedLog && (
+                <span className="text-xs font-mono font-normal text-slate-500">
+                  {selectedLog.action_type} · {selectedLog.order_id}
+                </span>
+              )}
+            </DialogTitle>
           </DialogHeader>
 
-          <div className="py-2">
-            <pre className="bg-slate-900 text-emerald-400 p-3 rounded-lg text-xs overflow-x-auto max-h-64 font-mono">
+          <div className="py-3">
+            <pre className="bg-slate-900 text-emerald-400 p-3.5 rounded-xl text-xs overflow-x-auto max-h-72 font-mono leading-relaxed border border-slate-800">
               {JSON.stringify(selectedLog?.payload, null, 2)}
             </pre>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="pt-3 border-t border-slate-100 flex items-center justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (selectedLog?.payload) {
+                  navigator.clipboard.writeText(JSON.stringify(selectedLog.payload, null, 2));
+                  setCopiedLog(true);
+                  setTimeout(() => setCopiedLog(false), 2000);
+                }
+              }}
+              className="text-xs cursor-pointer"
+            >
+              {copiedLog ? '✓ 已复制 JSON' : '📋 复制 JSON'}
+            </Button>
             <Button
               type="button"
               size="sm"
               onClick={() => setSelectedLog(null)}
-              className="bg-slate-900 text-white text-xs font-semibold"
+              className="bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 cursor-pointer"
             >
               关闭
             </Button>
@@ -1460,13 +1836,13 @@ export default function MerchantAdminPage() {
 
       {/* 驳回原因输入弹窗 */}
       <Dialog open={Boolean(rejectingApprovalId)} onOpenChange={(open) => !open && setRejectingApprovalId(null)}>
-        <DialogContent className="max-w-md p-5">
-          <DialogHeader>
+        <DialogContent className="max-w-md p-6 bg-white text-slate-900 border-slate-200">
+          <DialogHeader className="pb-3 border-b border-slate-100">
             <DialogTitle className="text-base font-bold text-slate-900">驳回审批工单</DialogTitle>
-            <p className="text-xs text-slate-500 mt-1">工单 ID: {rejectingApprovalId}</p>
+            <p className="text-xs text-slate-500 mt-1 font-mono">工单 ID: {rejectingApprovalId}</p>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
+          <div className="space-y-3 py-3">
             <label className="block text-xs font-semibold text-slate-700">
               请输入驳回原因 (将通知顾客并载入会话工作流)
             </label>
@@ -1475,7 +1851,7 @@ export default function MerchantAdminPage() {
               onChange={(e) => setRejectReasonInput(e.target.value)}
               rows={3}
               placeholder="例如：物流轨迹显示已由本人签收，不符合退款条件..."
-              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white"
+              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
             />
             <div className="flex flex-wrap gap-1.5 pt-1">
               <span className="text-[11px] text-slate-400">常用快捷模板:</span>
@@ -1497,7 +1873,7 @@ export default function MerchantAdminPage() {
             </div>
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-slate-100">
             <Button
               type="button"
               variant="outline"
@@ -1506,7 +1882,7 @@ export default function MerchantAdminPage() {
                 setRejectingApprovalId(null);
                 setRejectReasonInput('');
               }}
-              className="text-xs"
+              className="text-xs cursor-pointer"
             >
               取消
             </Button>
@@ -1526,7 +1902,7 @@ export default function MerchantAdminPage() {
                 setRejectingApprovalId(null);
                 setRejectReasonInput('');
               }}
-              className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold"
+              className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
             >
               确认驳回
             </Button>
