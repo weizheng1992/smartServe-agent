@@ -1,35 +1,36 @@
 export type SupportedIntent =
-  | 'order_status'
-  | 'refund'
-  | 'out_of_scope'
-  | 'general_query'
-  | 'human_escalation'
-  | 'order_modify_address'
-  | 'order_query'
-  | 'order_return'
-  | 'order_cancel'
-  | 'metric_query'
-  | 'shopping_guide'
-  | 'cart_manage'
-  | 'faq'
-  | 'chat';
+  | "order_status"
+  | "refund"
+  | "out_of_scope"
+  | "general_query"
+  | "human_escalation"
+  | "order_modify_address"
+  | "order_query"
+  | "order_return"
+  | "order_cancel"
+  | "metric_query"
+  | "shopping_guide"
+  | "cart_manage"
+  | "faq"
+  | "chat";
 
 // 一级意图标准枚举
 export enum AgentIntentType {
-  METRIC_QUERY = 'metric_query', // 指标查询（走 metric registry）
-  ORDER_QUERY = 'order_status', // 查询订单、物流
-  ORDER_RETURN = 'refund', // 申请退款/退货
-  ORDER_MODIFY_ADDRESS = 'order_modify_address', // 修改收货地址
-  ORDER_CANCEL = 'order_cancel', // 取消订单
-  SHOPPING_GUIDE = 'shopping_guide', // 商品导购/多轮选品
-  CART_MANAGE = 'cart_manage', // 购物车/加购/改规格
-  FAQ = 'faq',
-  CHAT = 'chat',
-  HUMAN_ESCALATION = 'human_escalation',
+  METRIC_QUERY = "metric_query", // 指标查询（走 metric registry）
+  ORDER_QUERY = "order_status", // 查询订单、物流
+  ORDER_RETURN = "refund", // 申请退款/退货
+  ORDER_MODIFY_ADDRESS = "order_modify_address", // 修改收货地址
+  ORDER_CANCEL = "order_cancel", // 取消订单
+  SHOPPING_GUIDE = "shopping_guide", // 商品导购/多轮选品
+  CART_MANAGE = "cart_manage", // 购物车/加购/改规格
+  FAQ = "faq",
+  CHAT = "chat",
+  HUMAN_ESCALATION = "human_escalation",
 }
 
 // 🎯 专职 Agent 领域角色定义 (Domain-specific Agent Roles)
-export type AgentDomainRole = 'router' | 'shopping_guide' | 'cart' | 'order_service' | 'chitchat';
+export type AgentDomainRole =
+  "router" | "shopping_guide" | "cart" | "order_service" | "chitchat";
 
 // 🛍️ 导购专有上下文 (Shopping Guide Context)
 export interface ShoppingGuideContext {
@@ -67,7 +68,7 @@ export interface OrderContext {
   targetOrderId?: string;
   pendingApprovalId?: string;
   orderStatus?: string;
-  actionType?: 'status_query' | 'modify_address' | 'refund' | 'cancel';
+  actionType?: "status_query" | "modify_address" | "refund" | "cancel";
 }
 
 // 槽位：每个订单类意图必须抽取的参数
@@ -89,12 +90,19 @@ export interface AgentTaskSpec {
   clarificationMessage?: string;
 }
 
+export interface IntentCondition {
+  field: string;
+  operator: "equals" | "not_equals" | "exists" | "in" | "greater_than";
+  expectedValue?: unknown;
+}
+
 export interface IntentResult {
   intent: string;
   confidence: number;
-  type?: 'primary' | 'secondary';
+  type?: "primary" | "secondary";
   entities?: Record<string, string>;
   taskSpec?: AgentTaskSpec;
+  condition?: IntentCondition;
 }
 
 export interface SubTaskResult {
@@ -108,13 +116,16 @@ export interface SubTaskResult {
   output?: unknown;
   toolExecuted?: string;
   message?: string;
+  skippedReason?: string;
   [key: string]: unknown;
 }
 
 export interface SubTask {
   id: string;
   description: string;
-  status: 'pending' | 'executing' | 'completed' | 'failed';
+  status: "pending" | "executing" | "completed" | "failed" | "skipped";
+  dependencies?: string[];
+  condition?: IntentCondition;
   result?: SubTaskResult;
 }
 
@@ -125,7 +136,7 @@ export interface TaskPlan {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system' | string;
+  role: "user" | "assistant" | "system" | string;
   content?: string | null;
   [key: string]: unknown;
 }

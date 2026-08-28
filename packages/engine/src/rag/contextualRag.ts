@@ -8,6 +8,11 @@ export interface ScoredRAGDocument extends RagDocument {
   chunkText: string;
   contextualSummary: string;
   similarity: number;
+  category?: string;
+  headerPath?: string;
+  docTitle?: string;
+  sourceUrl?: string;
+  parentChunk?: string;
 }
 
 // 🧠 混合检索分词器 (Hybrid Tokenizer): 英文/数字按词拆分，CJK 中文字符按单字（unigram）拆分，完美适配多语言无摩擦全文检索
@@ -200,6 +205,7 @@ export class ContextualRAG {
     limit = 2,
     precomputedEmbedding?: number[],
     category?: string,
+    minScore = 0.4,
   ): Promise<ScoredRAGDocument[]> {
     console.log(
       `[RAG] 🔍 SaaS 租户隔离检索启动：租户 [${this.businessId}]，类别 [${category || '全部'}]，检索提问 [${query}]...`,
@@ -232,6 +238,7 @@ export class ContextualRAG {
         .select({
           id: ragDocuments.id,
           businessId: ragDocuments.businessId,
+          sourceUrl: ragDocuments.sourceUrl,
           chunkText: ragDocuments.chunkText,
           contextualSummary: ragDocuments.contextualSummary,
           embedding: ragDocuments.embedding,
@@ -242,6 +249,7 @@ export class ContextualRAG {
 
       const docEmbeddings = new Map<string, number>();
       const docsWithTokens: DocWithTokens[] = [];
+      const rowMetaMap = new Map<string, Record<string, any>>();
 
       for (const row of rows) {
         // 🔒 SaaS Multi-Tenant Dual-Lock Physical Sandbox Check:
@@ -253,16 +261,18 @@ export class ContextualRAG {
           continue;
         }
 
-        // 分类前置过滤
-        if (category && row.metadata) {
-          let rowMeta: Record<string, any> = {};
+        let rowMeta: Record<string, any> = {};
+        if (row.metadata) {
           try {
             rowMeta =
               typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata as Record<string, any>);
           } catch (e) {}
-          if (rowMeta.category && rowMeta.category !== category) {
-            continue;
-          }
+        }
+        rowMetaMap.set(row.id, rowMeta);
+
+        // 分类前置过滤
+        if (category && rowMeta.category && rowMeta.category !== category) {
+          continue;
         }
 
         let embeddingArray: number[] | null = null;
@@ -292,7 +302,9 @@ export class ContextualRAG {
         docEmbeddings.set(row.id, similarity);
         docsWithTokens.push({
           id: row.id,
-          tokens: tokenize(`${row.contextualSummary || ''} ${row.chunkText}`),
+          tokens: tokenize(
+            `${rowMeta.docTitle || ''} ${rowMeta.headerPath || ''} ${row.contextualSummary || ''} ${row.chunkText}`,
+          ),
         });
       }
 
@@ -315,21 +327,29 @@ export class ContextualRAG {
       const scoredDocs: ScoredRAGDocument[] = [];
 
       for (const row of rows) {
+        if (!docEmbeddings.has(row.id)) continue;
+
         const similarity = docEmbeddings.get(row.id) || 0;
         const bm25Score = bm25Scores.get(row.id) || 0;
+        const meta = rowMetaMap.get(row.id) || {};
 
         // 🧠 混合断路阀：对无界的 BM25 进行规范化映射 [0, inf) -> [0, 1)，再以向量相似度 (80%) 与精确关键词 (20%) 混合
         const normalizedBM25 = bm25Score / (bm25Score + 1);
         const hybridScore = similarity * 0.8 + normalizedBM25 * 0.2;
 
-        // 严格断路阀：仅当混合评分 >= 0.40 时予以召回，防止无关噪音垃圾数据污染
-        if (hybridScore >= 0.4) {
+        // 严格断路阀：仅当混合评分 >= minScore 时予以召回，防止无关噪音垃圾数据污染
+        if (hybridScore >= minScore) {
           scoredDocs.push({
             id: row.id,
             businessId: row.businessId,
+            sourceUrl: row.sourceUrl || undefined,
             chunkText: row.chunkText,
             contextualSummary: row.contextualSummary || '',
             similarity: hybridScore, // 保持 similarity 为混合得分
+            category: meta.category,
+            headerPath: meta.headerPath,
+            docTitle: meta.docTitle,
+            parentChunk: meta.parentChunk,
           });
         }
       }
@@ -343,7 +363,7 @@ export class ContextualRAG {
         })
         .slice(0, limit);
 
-      console.log(`[RAG] PostgreSQL 物理混合检索检索完成，经 BM25 + RRF 重排筛选出 ${sorted.length} 个相关切片。`);
+      console.log(`[RAG] PostgreSQL 物理混合检索完成，经 BM25 + RRF 重排筛选出 ${sorted.length} 个相关切片。`);
       return sorted;
     } catch (dbErr) {
       console.warn('[RAG] PostgreSQL query failed, falling back to Local Fake RAG:', dbErr);

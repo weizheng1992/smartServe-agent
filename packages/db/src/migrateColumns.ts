@@ -1,8 +1,8 @@
-import { getPgPool } from './client';
+import { getPgPool } from "./client";
 
 async function migrateColumns() {
   const pool = getPgPool();
-  console.log('[DB Migration] 正在更新 products 与 order_items 物理表字段...');
+  console.log("[DB Migration] 正在更新 products 与 order_items 物理表字段...");
 
   await pool.query(`
     ALTER TABLE products ADD COLUMN IF NOT EXISTS manager_id text;
@@ -103,14 +103,27 @@ async function migrateColumns() {
       status TEXT NOT NULL DEFAULT 'completed',
       created_at TIMESTAMP DEFAULT NOW()
     );
+
+    -- Intent exemplars table (Tenant-isolated Few-Shot Examples)
+    CREATE TABLE IF NOT EXISTS intent_exemplars (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      business_id TEXT NOT NULL,
+      intent_name TEXT NOT NULL,
+      example_text TEXT NOT NULL,
+      embedding JSONB,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS intent_exemplars_biz_idx ON intent_exemplars (business_id, intent_name);
   `);
 
-  console.log('✅ [DB Migration] 物理表列字段扩展完成！');
+  console.log("✅ [DB Migration] 物理表列字段扩展完成！");
 }
 
 migrateColumns()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error('❌ [DB Migration] Failed:', err);
+    console.error("❌ [DB Migration] Failed:", err);
     process.exit(1);
   });

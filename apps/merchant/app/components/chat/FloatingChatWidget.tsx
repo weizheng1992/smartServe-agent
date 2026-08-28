@@ -2,10 +2,13 @@
 
 import { usePathname } from 'next/navigation';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { RichCardBlock } from 'types';
+import type { OrderCardData, RichCardBlock } from 'types';
 import { Button, Input, RichCardRenderer } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
-import { type RouteGreetingContext, getGreetingForRoute } from './routeGreetingConfig';
+import {
+  type RouteGreetingContext,
+  getGreetingForRoute,
+} from './routeGreetingConfig';
 
 interface ChatMessage {
   id: string;

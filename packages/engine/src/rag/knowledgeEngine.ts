@@ -1,12 +1,20 @@
 import * as path from 'node:path';
 import { ContextualRAG, type ScoredRAGDocument } from './contextualRag';
 import { type IngestResult, type RAGCategory, ingestTxtDirectory } from './ingestTxtFiles';
-import { type UpsertChunkOptions, deleteChunksBySource, replaceKnowledgeFile, upsertDocumentChunk } from './updateRag';
+import {
+  type SyncFileResult,
+  type UpsertChunkOptions,
+  deleteChunksBySource,
+  replaceKnowledgeFile,
+  syncKnowledgeDocument,
+  upsertDocumentChunk,
+} from './updateRag';
 
 export interface KnowledgeSearchOptions {
   limit?: number;
   category?: RAGCategory | string;
   precomputedEmbedding?: number[];
+  minScore?: number;
 }
 
 export class KnowledgeEngine {
@@ -23,7 +31,20 @@ export class KnowledgeEngine {
    */
   public async search(query: string, options: KnowledgeSearchOptions = {}): Promise<ScoredRAGDocument[]> {
     const limit = options.limit || 2;
-    return this.rag.searchRelevantDocs(query, limit, options.precomputedEmbedding, options.category);
+    return this.rag.searchRelevantDocs(
+      query,
+      limit,
+      options.precomputedEmbedding,
+      options.category,
+      options.minScore ?? 0.4,
+    );
+  }
+
+  /**
+   * ⚡ 高性能增量差量同步单文件 (Incremental Diff Sync with Hash Matching)
+   */
+  public async syncFile(filePath: string, concurrency = 5): Promise<SyncFileResult> {
+    return syncKnowledgeDocument(filePath, this.businessId, concurrency);
   }
 
   /**
