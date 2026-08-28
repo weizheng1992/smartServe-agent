@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from 'react';
 import {
   Bot,
   Button,
@@ -14,7 +14,7 @@ import {
   Sparkles,
   User,
   X,
-} from "ui";
+} from 'ui';
 
 export interface ChatWidgetProps {
   businessId?: string;
@@ -25,54 +25,59 @@ export interface ChatWidgetProps {
   initialOpen?: boolean;
 }
 
+// 🎯 声明式卡片交互动作处理器映射表 (Table-Driven Dispatcher)
+const CARD_ACTION_HANDLERS: Record<string, (payload: Record<string, any>) => string | null> = {
+  select_order: (p) => (p.orderId ? `已选定订单 ${p.orderId}，请帮我查询该订单的具体信息和最新物流进度。` : null),
+  send_message: (p) => (p.text ? String(p.text) : null),
+  track_order: (p) => (p.orderId ? `帮我查一下订单 ${p.orderId} 的物流轨迹` : null),
+  request_refund: (p) => (p.orderId ? `帮我申请订单 ${p.orderId} 的退款` : null),
+  confirm_refund: (p) => (p.orderId ? `我已确认提交订单 ${p.orderId} 的退款核签` : null),
+  submit_return_tracking: (p) => (p.value ? `我已寄出商品，寄件快递单号为 ${p.value}，请跟进质检验收` : null),
+  submit_step_action: (p) => (p.value ? `我已提交业务步骤信息：${p.value}` : null),
+  add_to_cart_interactive: (p) => `我想将 ${p.title}（规格: ${p.skuTitle || p.skuId}）购买 ${p.quantity} 件加入购物车`,
+  buy_now_interactive: (p) => `我想立即购买 ${p.title}（规格: ${p.skuTitle || p.skuId}）共 ${p.quantity} 件`,
+};
+
 export function ChatWidget({
-  businessId = "ecommerce",
-  themeColor = "#4f46e5",
-  brandName = "官方智能客服",
+  businessId = 'ecommerce',
+  themeColor = '#4f46e5',
+  brandName = '官方智能客服',
   brandLogoUrl,
-  welcomeText = "您好！我是您的专属智能客服助手，请问有什么可以帮您？",
+  welcomeText = '您好！我是您的专属智能客服助手，请问有什么可以帮您？',
   initialOpen = false,
 }: ChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(initialOpen);
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<
-    Array<{ id: string; role: string; content: string; cards?: any[] }>
-  >([
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<Array<{ id: string; role: string; content: string; cards?: any[] }>>([
     {
-      id: "welcome",
-      role: "assistant",
+      id: 'welcome',
+      role: 'assistant',
       content: welcomeText,
     },
   ]);
   const [isLoading, setIsLoading] = useState(false);
-  const [threadId] = useState(
-    () =>
-      `widget_thread_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-  );
+  const [threadId] = useState(() => `widget_thread_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
 
   // 动态注入商户 CSS 主题变量
   useEffect(() => {
-    document.documentElement.style.setProperty(
-      "--widget-theme-color",
-      themeColor,
-    );
+    document.documentElement.style.setProperty('--widget-theme-color', themeColor);
   }, [themeColor]);
 
   const handleSend = async (customText?: string) => {
     const text = (customText || input).trim();
     if (!text || isLoading) return;
-    if (!customText) setInput("");
+    if (!customText) setInput('');
 
-    const userMsg = { id: `u_${Date.now()}`, role: "user", content: text };
+    const userMsg = { id: `u_${Date.now()}`, role: 'user', content: text };
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
     try {
-      const res = await fetch("http://localhost:4000/api/chat", {
-        method: "POST",
+      const res = await fetch('http://localhost:4000/api/chat', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          "x-tenant-id": businessId,
+          'Content-Type': 'application/json',
+          'x-tenant-id': businessId,
         },
         body: JSON.stringify({
           message: text,
@@ -88,8 +93,8 @@ export function ChatWidget({
           ...prev,
           {
             id: `a_${Date.now()}`,
-            role: "assistant",
-            content: data.output || data.result || "已为您处理完毕。",
+            role: 'assistant',
+            content: data.output || data.result || '已为您处理完毕。',
             cards: data.cards || [],
           },
         ]);
@@ -98,8 +103,8 @@ export function ChatWidget({
           ...prev,
           {
             id: `err_${Date.now()}`,
-            role: "assistant",
-            content: "抱歉，当前网络异常，请稍后重试。",
+            role: 'assistant',
+            content: '抱歉，当前网络异常，请稍后重试。',
           },
         ]);
       }
@@ -108,8 +113,8 @@ export function ChatWidget({
         ...prev,
         {
           id: `err_${Date.now()}`,
-          role: "assistant",
-          content: "连接网关失败，请确保本地服务正常运行。",
+          role: 'assistant',
+          content: '连接网关失败，请确保本地服务正常运行。',
         },
       ]);
     } finally {
@@ -117,38 +122,12 @@ export function ChatWidget({
     }
   };
 
-  const handleCardAction = (
-    action: string,
-    payload?: Record<string, unknown>,
-  ) => {
-    if (action === "select_order" && payload?.orderId) {
-      handleSend(
-        `已选定订单 ${payload.orderId}，请帮我查询该订单的具体信息和最新物流进度。`,
-      );
-    } else if (action === "send_message" && payload?.text) {
-      handleSend(String(payload.text));
-    } else if (action === "track_order" && payload?.orderId) {
-      handleSend(`帮我查一下订单 ${payload.orderId} 的物流轨迹`);
-    } else if (action === "request_refund" && payload?.orderId) {
-      handleSend(`帮我申请订单 ${payload.orderId} 的退款`);
-    } else if (action === "confirm_refund" && payload?.orderId) {
-      handleSend(`我已确认提交订单 ${payload.orderId} 的退款核签`);
-    } else if (action === "submit_return_tracking" && payload?.value) {
-      handleSend(
-        `我已寄出商品，寄件快递单号为 ${payload.value}，请跟进质检验收`,
-      );
-    } else if (action === "submit_step_action" && payload?.value) {
-      handleSend(`我已提交业务步骤信息：${payload.value}`);
-    } else if (action === "add_to_cart_interactive" && payload) {
-      handleSend(
-        `我想将 ${payload.title}（规格: ${payload.skuTitle || payload.skuId}）购买 ${payload.quantity} 件加入购物车`,
-      );
-    } else if (action === "buy_now_interactive" && payload) {
-      handleSend(
-        `我想立即购买 ${payload.title}（规格: ${payload.skuTitle || payload.skuId}）共 ${payload.quantity} 件`,
-      );
-    } else if (typeof payload?.query === "string") {
-      handleSend(payload.query);
+  const handleCardAction = (action: string, payload: Record<string, unknown> = {}) => {
+    const handler = CARD_ACTION_HANDLERS[action];
+    const message = handler ? handler(payload) : typeof payload.query === 'string' ? payload.query : null;
+
+    if (message) {
+      handleSend(message);
     }
   };
 
@@ -165,11 +144,7 @@ export function ChatWidget({
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center font-bold text-white shadow-inner">
                 {brandLogoUrl ? (
-                  <img
-                    src={brandLogoUrl}
-                    alt={brandName}
-                    className="w-6 h-6 rounded-full"
-                  />
+                  <img src={brandLogoUrl} alt={brandName} className="w-6 h-6 rounded-full" />
                 ) : (
                   <Bot className="w-5 h-5" />
                 )}
@@ -197,27 +172,21 @@ export function ChatWidget({
           {/* Message Feed */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950/60">
             {messages.map((m) => {
-              const isUser = m.role === "user";
+              const isUser = m.role === 'user';
               return (
-                <div
-                  key={m.id}
-                  className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}
-                >
+                <div key={m.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
                   <div
                     className={`max-w-[85%] p-3 rounded-2xl text-xs leading-relaxed ${
                       isUser
-                        ? "text-white rounded-tr-sm shadow-md"
-                        : "bg-slate-800 text-slate-200 border border-slate-700/80 rounded-tl-sm"
+                        ? 'text-white rounded-tr-sm shadow-md'
+                        : 'bg-slate-800 text-slate-200 border border-slate-700/80 rounded-tl-sm'
                     }`}
                     style={isUser ? { backgroundColor: themeColor } : undefined}
                   >
                     {m.content}
                     {m.cards && m.cards.length > 0 && (
                       <div className="mt-2 space-y-2">
-                        <RichCardRenderer
-                          cards={m.cards}
-                          onAction={handleCardAction}
-                        />
+                        <RichCardRenderer cards={m.cards} onAction={handleCardAction} />
                       </div>
                     )}
                   </div>
@@ -239,7 +208,7 @@ export function ChatWidget({
               placeholder="输入您的问题..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               className="h-9 text-xs bg-slate-950 border-slate-800 rounded-xl focus:border-indigo-500"
             />
             <Button
@@ -262,11 +231,7 @@ export function ChatWidget({
         className="h-14 w-14 rounded-full text-white shadow-2xl flex items-center justify-center transition-all transform hover:scale-105 active:scale-95 border-2 border-white/20"
         style={{ backgroundColor: themeColor }}
       >
-        {isOpen ? (
-          <X className="w-6 h-6" />
-        ) : (
-          <MessageSquare className="w-6 h-6" />
-        )}
+        {isOpen ? <X className="w-6 h-6" /> : <MessageSquare className="w-6 h-6" />}
       </button>
     </div>
   );
