@@ -1,44 +1,31 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
-import type { StepProgressCardData, StepProgressItem } from "types";
-import {
-  AlertCircle,
-  CheckCircle2,
-  ChevronRight,
-  Clock,
-  FileText,
-  Send,
-} from "../../icons";
+import React, { useState } from 'react';
+import type { StepProgressCardData, StepProgressItem } from 'types';
+import { AlertCircle, CheckCircle2, ChevronRight, Clock, FileText, Send } from '../../icons';
 
 export interface StepProgressCardProps {
   data: StepProgressCardData;
   onAction?: (action: string, payload?: Record<string, unknown>) => void;
 }
 
-export const StepProgressCard: React.FC<StepProgressCardProps> = ({
-  data,
-  onAction,
-}) => {
+export const StepProgressCard: React.FC<StepProgressCardProps> = ({ data, onAction }) => {
   const steps = data.steps || [];
   const currentStepIdx = data.currentStep ?? 0;
-  const [inputValue, setInputValue] = useState("");
-  const [selectedOption, setSelectedOption] = useState("");
+  const [inputValue, setInputValue] = useState('');
+  const [selectedOption, setSelectedOption] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmitStepAction = (item: StepProgressItem) => {
     if (!item.actionRequired) return;
     setIsSubmitting(true);
-    const action = item.actionRequired.submitAction || "submit_step_action";
+    const action = item.actionRequired.submitAction || 'submit_step_action';
     const payload: Record<string, unknown> = {
       ticketId: data.ticketId,
       orderId: data.orderId,
       stepIndex: item.stepIndex,
       actionType: item.actionRequired.actionType,
-      value:
-        item.actionRequired.actionType === "input_text"
-          ? inputValue
-          : selectedOption,
+      value: item.actionRequired.actionType === 'input_text' ? inputValue : selectedOption,
     };
 
     onAction?.(action, payload);
@@ -57,21 +44,12 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-indigo-300">
-                {data.title || "服务业务流程追踪"}
-              </span>
-              {data.orderId && (
-                <span className="font-mono text-[11px] text-slate-400">
-                  ({data.orderId})
-                </span>
-              )}
+              <span className="text-sm font-bold text-indigo-300">{data.title || '服务业务流程追踪'}</span>
+              {data.orderId && <span className="font-mono text-[11px] text-slate-400">({data.orderId})</span>}
             </div>
             <div className="text-xs text-slate-400">
-              当前进行至第{" "}
-              <span className="font-semibold text-indigo-400">
-                {currentStepIdx + 1}
-              </span>{" "}
-              / {data.totalSteps || steps.length} 步
+              当前进行至第 <span className="font-semibold text-indigo-400">{currentStepIdx + 1}</span> /{' '}
+              {data.totalSteps || steps.length} 步
             </div>
           </div>
         </div>
@@ -83,21 +61,20 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({
       {/* Steps List */}
       <div className="my-3 space-y-3">
         {steps.map((item, idx) => {
-          const isCompleted =
-            item.status === "completed" || idx < currentStepIdx;
-          const isCurrent = item.status === "current" || idx === currentStepIdx;
+          const isCompleted = item.status === 'completed' || idx < currentStepIdx;
+          const isCurrent = item.status === 'current' || idx === currentStepIdx;
           const isUpcoming = !isCompleted && !isCurrent;
-          const isError = item.status === "error";
+          const isError = item.status === 'error';
 
           return (
             <div
               key={`step_${idx}`}
               className={`relative flex items-start gap-3 rounded-lg p-2.5 transition-all ${
                 isCurrent
-                  ? "bg-indigo-950/40 border border-indigo-700/50 shadow-inner"
+                  ? 'bg-indigo-950/40 border border-indigo-700/50 shadow-inner'
                   : isCompleted
-                    ? "bg-slate-800/30 border border-slate-700/30"
-                    : "bg-slate-900/40 border border-slate-800/20 opacity-60"
+                    ? 'bg-slate-800/30 border border-slate-700/30'
+                    : 'bg-slate-900/40 border border-slate-800/20 opacity-60'
               }`}
             >
               {/* Step Icon */}
@@ -126,47 +103,34 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({
                 <div className="flex items-center justify-between">
                   <span
                     className={`text-xs font-semibold ${
-                      isCurrent
-                        ? "text-indigo-200"
-                        : isCompleted
-                          ? "text-slate-300"
-                          : "text-slate-500"
+                      isCurrent ? 'text-indigo-200' : isCompleted ? 'text-slate-300' : 'text-slate-500'
                     }`}
                   >
                     {item.title}
                   </span>
                   <span
                     className={`text-[10px] ${
-                      isCompleted
-                        ? "text-emerald-400"
-                        : isCurrent
-                          ? "text-indigo-400 font-medium"
-                          : "text-slate-500"
+                      isCompleted ? 'text-emerald-400' : isCurrent ? 'text-indigo-400 font-medium' : 'text-slate-500'
                     }`}
                   >
-                    {isCompleted ? "已完成" : isCurrent ? "处理中" : "待进行"}
+                    {isCompleted ? '已完成' : isCurrent ? '处理中' : '待进行'}
                   </span>
                 </div>
 
                 {item.description && (
-                  <p className="mt-0.5 text-[11px] text-slate-400 leading-relaxed">
-                    {item.description}
-                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-400 leading-relaxed">{item.description}</p>
                 )}
 
                 {/* Interactive Action Field on Current Step */}
                 {isCurrent && item.actionRequired && (
                   <div className="mt-2.5 pt-2 border-t border-indigo-900/60 flex flex-col gap-2">
-                    {item.actionRequired.actionType === "input_text" && (
+                    {item.actionRequired.actionType === 'input_text' && (
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
                           value={inputValue}
                           onChange={(e) => setInputValue(e.target.value)}
-                          placeholder={
-                            item.actionRequired.placeholder ||
-                            "请输入相关单号或信息..."
-                          }
+                          placeholder={item.actionRequired.placeholder || '请输入相关单号或信息...'}
                           className="flex-1 rounded-md bg-slate-900/90 px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 border border-indigo-700/50 focus:outline-none focus:border-indigo-400"
                         />
                         <button
@@ -176,41 +140,40 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({
                           className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
                         >
                           <Send className="h-3 w-3" />
-                          {item.actionRequired.buttonLabel || "提交"}
+                          {item.actionRequired.buttonLabel || '提交'}
                         </button>
                       </div>
                     )}
 
-                    {item.actionRequired.actionType === "select_option" &&
-                      item.actionRequired.options && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {item.actionRequired.options.map((opt) => (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              onClick={() => {
-                                setSelectedOption(opt.value);
-                                handleSubmitStepAction({
-                                  ...item,
-                                  actionRequired: {
-                                    ...item.actionRequired!,
-                                    actionType: "select_option",
-                                  },
-                                });
-                              }}
-                              className={`rounded-md px-2.5 py-1 text-xs border transition-colors cursor-pointer ${
-                                selectedOption === opt.value
-                                  ? "bg-indigo-600 text-white border-indigo-500"
-                                  : "bg-slate-800 text-slate-300 border-slate-700 hover:border-indigo-500/50"
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                    {item.actionRequired.actionType === 'select_option' && item.actionRequired.options && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {item.actionRequired.options.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              setSelectedOption(opt.value);
+                              handleSubmitStepAction({
+                                ...item,
+                                actionRequired: {
+                                  ...item.actionRequired!,
+                                  actionType: 'select_option',
+                                },
+                              });
+                            }}
+                            className={`rounded-md px-2.5 py-1 text-xs border transition-colors cursor-pointer ${
+                              selectedOption === opt.value
+                                ? 'bg-indigo-600 text-white border-indigo-500'
+                                : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-indigo-500/50'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
-                    {item.actionRequired.actionType === "confirm_button" && (
+                    {item.actionRequired.actionType === 'confirm_button' && (
                       <button
                         type="button"
                         disabled={isSubmitting}
@@ -218,7 +181,7 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({
                         className="flex items-center justify-center gap-1.5 rounded-md bg-indigo-600 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 cursor-pointer"
                       >
                         <ChevronRight className="h-3.5 w-3.5" />
-                        {item.actionRequired.buttonLabel || "确认并继续"}
+                        {item.actionRequired.buttonLabel || '确认并继续'}
                       </button>
                     )}
                   </div>

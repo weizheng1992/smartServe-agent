@@ -1,17 +1,17 @@
-"use client";
+'use client';
 
-import type React from "react";
-import type { RichCardBlock } from "types";
-import { CartCard } from "./CartCard";
-import { DamageAssessmentCard } from "./DamageAssessmentCard";
-import { InteractiveProductCard } from "./InteractiveProductCard";
-import { OrderCard } from "./OrderCard";
-import { OrderPickerCard } from "./OrderPickerCard";
-import { ProductRankingCard } from "./ProductRankingCard";
-import { QuickReplies } from "./QuickReplies";
-import { RefundConfirmationCard } from "./RefundConfirmationCard";
-import { StepProgressCard } from "./StepProgressCard";
-import { TrackingTimeline } from "./TrackingTimeline";
+import type React from 'react';
+import type { RichCardBlock } from 'types';
+import { CartCard } from './CartCard';
+import { DamageAssessmentCard } from './DamageAssessmentCard';
+import { InteractiveProductCard } from './InteractiveProductCard';
+import { OrderCard } from './OrderCard';
+import { OrderPickerCard } from './OrderPickerCard';
+import { ProductRankingCard } from './ProductRankingCard';
+import { QuickReplies } from './QuickReplies';
+import { RefundConfirmationCard } from './RefundConfirmationCard';
+import { StepProgressCard } from './StepProgressCard';
+import { TrackingTimeline } from './TrackingTimeline';
 
 export interface RichCardRendererProps {
   cards?: RichCardBlock[];
@@ -39,71 +39,48 @@ const CardSkeleton: React.FC<{ title?: string }> = ({ title }) => (
   </div>
 );
 
-export const RichCardRenderer: React.FC<RichCardRendererProps> = ({
-  cards,
-  onAction,
-}) => {
+export const RichCardRenderer: React.FC<RichCardRendererProps> = ({ cards, onAction }) => {
   if (!cards || cards.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2.5 my-2">
       {cards.map((card, idx) => {
         const key = card.id || `card_item_${idx}`;
-        if (card.hydrationState === "skeleton") {
+        if (card.hydrationState === 'skeleton') {
           return <CardSkeleton key={key} title={card.type} />;
         }
 
         switch (card.type) {
-          case "order_card":
+          case 'order_card':
             return <OrderCard key={key} data={card.data} onAction={onAction} />;
-          case "order_picker":
-            return (
-              <OrderPickerCard key={key} data={card.data} onAction={onAction} />
-            );
-          case "tracking_timeline":
+          case 'order_picker':
+            return <OrderPickerCard key={key} data={card.data} onAction={onAction} />;
+          case 'tracking_timeline':
             return <TrackingTimeline key={key} data={card.data} />;
-          case "refund_confirmation":
+          case 'refund_confirmation':
             return (
               <RefundConfirmationCard
                 key={key}
                 data={card.data}
                 onConfirm={() =>
-                  onAction?.("confirm_refund", {
+                  onAction?.('confirm_refund', {
                     orderId: card.data.orderId,
                   })
                 }
               />
             );
-          case "damage_assessment":
+          case 'damage_assessment':
             return <DamageAssessmentCard key={key} data={card.data} />;
-          case "product_ranking":
+          case 'product_ranking':
             return <ProductRankingCard key={key} data={card.data} />;
-          case "cart_card":
+          case 'cart_card':
             return <CartCard key={key} data={card.data} onAction={onAction} />;
-          case "step_progress":
-            return (
-              <StepProgressCard
-                key={key}
-                data={card.data}
-                onAction={onAction}
-              />
-            );
-          case "interactive_product":
-            return (
-              <InteractiveProductCard
-                key={key}
-                data={card.data}
-                onAction={onAction}
-              />
-            );
-          case "quick_replies":
-            return (
-              <QuickReplies
-                key={key}
-                data={card.data}
-                onSelectOption={onAction}
-              />
-            );
+          case 'step_progress':
+            return <StepProgressCard key={key} data={card.data} onAction={onAction} />;
+          case 'interactive_product':
+            return <InteractiveProductCard key={key} data={card.data} onAction={onAction} />;
+          case 'quick_replies':
+            return <QuickReplies key={key} data={card.data} onSelectOption={onAction} />;
           default:
             return null;
         }
