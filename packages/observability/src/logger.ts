@@ -9,6 +9,23 @@ const isBundledOrServerless =
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
+  redact: {
+    paths: [
+      'password',
+      'token',
+      'apiKey',
+      'api_key',
+      'secret',
+      'authorization',
+      'headers.authorization',
+      'phone',
+      'phoneNumber',
+      'idCard',
+      'creditCard',
+      'cardNumber',
+    ],
+    censor: '[REDACTED]',
+  },
   ...(!isBundledOrServerless && typeof window === 'undefined' && process.env.NODE_ENV !== 'production'
     ? {
         transport: {
@@ -20,3 +37,19 @@ export const logger = pino({
       }
     : {}),
 });
+
+export interface TenantLoggerContext {
+  tenantId?: string;
+  threadId?: string;
+  nodeName?: string;
+  stepId?: string;
+  requestId?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * 🏷️ 创建带有租户和会话执行上下文的结构化子日志器 (Tenant Context Logger)
+ */
+export function createTenantLogger(context: TenantLoggerContext): pino.Logger {
+  return logger.child(context);
+}

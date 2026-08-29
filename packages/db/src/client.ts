@@ -84,19 +84,38 @@ export function getDrizzle(): NodePgDatabase<typeof schema> {
 
 /**
  * 🛡️ 执行只读分析型 SQL 查询沙箱 (Read-Only Analytics Sandbox)
- * 1. 强制只读事务: SET TRANSACTION READ ONLY
- * 2. 3000ms 硬超时防死锁与慢查询: SET LOCAL statement_timeout = '3000ms'
- * 3. 预编译参数防注入绑定: client.query(compiled.text, compiled.values)
+ * 1. 语法检查: 强制仅允许 SELECT / WITH 读查询，严格阻断 DDL/DML
+ * 2. 强制只读事务: SET TRANSACTION READ ONLY
+ * 3. 3000ms 硬超时防死锁与慢查询: SET LOCAL statement_timeout = '3000ms'
+ * 4. 强制注入安全分页: LIMIT 50
+ * 5. 预编译参数防注入绑定: client.query(safeText, compiled.values)
  */
 export async function executeReadOnlyAnalyticsQuery<T = Record<string, unknown>>(
   compiled: CompiledSQL | { text: string; values: unknown[] },
 ): Promise<T[]> {
+  const queryText = (compiled.text || '').trim();
+  const normalized = queryText.replace(/\/\*[\s\S]*?\*\/|--.*$/gm, '').trim();
+  const upper = normalized.toUpperCase();
+
+  if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
+    throw new Error('Security Violation: Only SELECT or WITH queries are permitted in read-only analytics sandbox.');
+  }
+
+  if (/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|EXECUTE|CALL|VACUUM|CREATE)\b/i.test(normalized)) {
+    throw new Error('Security Violation: Data modification or DDL statements are strictly prohibited.');
+  }
+
+  let safeText = normalized;
+  if (!/\bLIMIT\s+\d+/i.test(safeText)) {
+    safeText = `${safeText.replace(/;+\s*$/, '')} LIMIT 50`;
+  }
+
   const pool = getPgPool();
   const client = await pool.connect();
   try {
     await client.query('BEGIN TRANSACTION READ ONLY');
     await client.query("SET LOCAL statement_timeout = '3000ms'");
-    const res = await client.query(compiled.text, compiled.values);
+    const res = await client.query(safeText, compiled.values);
     await client.query('COMMIT');
     return (res.rows || []) as T[];
   } catch (err) {
@@ -322,12 +341,24 @@ export const db: DBInterface = {
 
   addMessage: async (message: Message): Promise<void> => {
     const pool = getPgPool();
-    const lowerTid = (message.threadId || '').toLowerCase();
     let bizId = message.businessId || null;
-    if (!bizId) {
-      if (lowerTid.includes('aurora')) bizId = 'aurora';
-      else if (lowerTid.includes('nike')) bizId = 'nike';
-      else if (lowerTid.includes('adidas')) bizId = 'adidas';
+    if (!bizId && message.threadId) {
+      try {
+        const threadRow = await pool.query('SELECT "business_id" FROM threads WHERE id = $1 LIMIT 1', [
+          message.threadId,
+        ]);
+        if (threadRow.rows && threadRow.rows.length > 0) {
+          bizId = threadRow.rows[0].business_id || null;
+        }
+      } catch {
+        // fallback
+      }
+      if (!bizId) {
+        const lowerTid = (message.threadId || '').toLowerCase();
+        if (lowerTid.includes('aurora')) bizId = 'aurora';
+        else if (lowerTid.includes('nike')) bizId = 'nike';
+        else if (lowerTid.includes('adidas')) bizId = 'adidas';
+      }
     }
     const serializedCards =
       message.cards && Array.isArray(message.cards) && message.cards.length > 0 ? JSON.stringify(message.cards) : null;

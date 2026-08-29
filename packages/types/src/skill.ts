@@ -9,6 +9,7 @@ export interface TenantSkillConfig {
   skillId: string;
   enabled: boolean;
   approvalThresholdAmount?: number;
+  maxRefundDays?: number;
   customPolicyPrompt?: string;
   updatedAt?: string;
 }

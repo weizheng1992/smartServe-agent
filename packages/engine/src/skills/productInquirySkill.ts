@@ -12,11 +12,6 @@ export class ProductInquirySkill extends BaseSkill {
     version: '1.0.0',
   };
 
-  public canHandle(context: SkillExecutionContext): boolean {
-    const intent = (context.slots?.activeIntent as string) || (context.extra?.intent as string) || '';
-    return this.metadata.triggerIntents.includes(intent);
-  }
-
   public async execute(context: SkillExecutionContext): Promise<SkillExecutionResult> {
     const query = (context.slots?.query as string) || context.input || '';
     const category = (context.slots?.category as string) || undefined;

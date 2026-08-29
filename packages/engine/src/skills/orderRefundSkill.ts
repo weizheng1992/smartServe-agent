@@ -15,11 +15,6 @@ export class OrderRefundSkill extends BaseSkill {
     version: '1.0.0',
   };
 
-  public canHandle(context: SkillExecutionContext): boolean {
-    const intent = (context.slots?.activeIntent as string) || (context.extra?.intent as string) || '';
-    return this.metadata.triggerIntents.includes(intent);
-  }
-
   public async execute(context: SkillExecutionContext): Promise<SkillExecutionResult> {
     const orderId = (context.slots?.orderId as string) || '';
     const reason = (context.slots?.reason as string) || (context.slots?.returnReason as string) || '客户申请退款';

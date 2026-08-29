@@ -48,10 +48,22 @@ export class OrderDomainService {
   }
 
   /**
-   * 获取商户售后 SOP 退货时效规定（Nike 30天，Adidas 14天，电商主站 7天）
+   * 动态获取商户售后 SOP 退货时效规定 (优先读取租户配置中心，降级使用商户基准)
    */
-  static getReturnWindowDays(businessId: string): number {
-    const cleanId = (businessId || '').toLowerCase();
+  static async getReturnWindowDays(businessId: string): Promise<number> {
+    const cleanId = (businessId || '').toLowerCase().trim();
+    try {
+      const config = await TenantRegistryService.getTenantConfig(cleanId);
+      const skillConfig = config.skillsConfig?.['skill_order_refund'];
+      if (typeof skillConfig?.maxRefundDays === 'number') {
+        return skillConfig.maxRefundDays;
+      }
+      if (typeof config.maxRefundDays === 'number') {
+        return config.maxRefundDays;
+      }
+    } catch {
+      // 容灾回退
+    }
     if (cleanId === 'nike') return 30;
     if (cleanId === 'adidas') return 14;
     return 7;
@@ -237,7 +249,7 @@ export class OrderDomainService {
     amount?: string,
   ): Promise<ToolExecutionResult> {
     const { userId: sessionUserId, businessId } = await this.getThreadSessionContext(threadId);
-    const returnWindowDays = this.getReturnWindowDays(businessId);
+    const returnWindowDays = await this.getReturnWindowDays(businessId);
 
     const order = await this.findOrderById(orderId, sessionUserId, businessId);
 

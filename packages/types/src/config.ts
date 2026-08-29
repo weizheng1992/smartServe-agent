@@ -43,5 +43,6 @@ export interface BusinessConfig {
   executionMode?: string;
   confidenceThresholds?: { high: number; mid: number };
   refundAutoApprovalLimit?: number;
+  maxRefundDays?: number;
   [key: string]: unknown;
 }
