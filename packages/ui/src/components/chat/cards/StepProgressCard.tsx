@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { StepProgressCardData, StepProgressItem } from 'types';
 import { AlertCircle, CheckCircle2, ChevronRight, Clock, FileText, Send } from '../../icons';
 
@@ -15,21 +15,37 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({ data, onActi
   const [inputValue, setInputValue] = useState('');
   const [selectedOption, setSelectedOption] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleSubmitStepAction = (item: StepProgressItem) => {
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  const handleSubmitStepAction = (item: StepProgressItem, overrideValue?: string) => {
     if (!item.actionRequired) return;
     setIsSubmitting(true);
     const action = item.actionRequired.submitAction || 'submit_step_action';
+    const actionValue =
+      overrideValue !== undefined
+        ? overrideValue
+        : item.actionRequired.actionType === 'input_text'
+          ? inputValue
+          : selectedOption;
+
     const payload: Record<string, unknown> = {
       ticketId: data.ticketId,
       orderId: data.orderId,
       stepIndex: item.stepIndex,
       actionType: item.actionRequired.actionType,
-      value: item.actionRequired.actionType === 'input_text' ? inputValue : selectedOption,
+      value: actionValue,
     };
 
     onAction?.(action, payload);
-    setTimeout(() => {
+    timerRef.current = setTimeout(() => {
       setIsSubmitting(false);
     }, 400);
   };
@@ -153,13 +169,7 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({ data, onActi
                             type="button"
                             onClick={() => {
                               setSelectedOption(opt.value);
-                              handleSubmitStepAction({
-                                ...item,
-                                actionRequired: {
-                                  ...item.actionRequired!,
-                                  actionType: 'select_option',
-                                },
-                              });
+                              handleSubmitStepAction(item, opt.value);
                             }}
                             className={`rounded-md px-2.5 py-1 text-xs border transition-colors cursor-pointer ${
                               selectedOption === opt.value
@@ -170,6 +180,29 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({ data, onActi
                             {opt.label}
                           </button>
                         ))}
+                      </div>
+                    )}
+
+                    {item.actionRequired.actionType === 'upload_evidence' && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={inputValue}
+                          onChange={(e) => setInputValue(e.target.value)}
+                          placeholder={
+                            item.actionRequired.placeholder || '粘贴商品破损/包装凭证图片 URL 或输入凭证说明...'
+                          }
+                          className="flex-1 rounded-md bg-slate-900/90 px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 border border-indigo-700/50 focus:outline-none focus:border-indigo-400"
+                        />
+                        <button
+                          type="button"
+                          disabled={isSubmitting || !inputValue.trim()}
+                          onClick={() => handleSubmitStepAction(item, inputValue)}
+                          className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
+                        >
+                          <Send className="h-3 w-3" />
+                          {item.actionRequired.buttonLabel || '上传凭证'}
+                        </button>
                       </div>
                     )}
 

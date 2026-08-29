@@ -50,40 +50,63 @@ export const RichCardRenderer: React.FC<RichCardRendererProps> = ({ cards, onAct
           return <CardSkeleton key={key} title={card.type} />;
         }
 
-        switch (card.type) {
-          case 'order_card':
-            return <OrderCard key={key} data={card.data} onAction={onAction} />;
-          case 'order_picker':
-            return <OrderPickerCard key={key} data={card.data} onAction={onAction} />;
-          case 'tracking_timeline':
-            return <TrackingTimeline key={key} data={card.data} />;
-          case 'refund_confirmation':
-            return (
-              <RefundConfirmationCard
-                key={key}
-                data={card.data}
-                onConfirm={() =>
-                  onAction?.('confirm_refund', {
-                    orderId: card.data.orderId,
-                  })
-                }
-              />
-            );
-          case 'damage_assessment':
-            return <DamageAssessmentCard key={key} data={card.data} />;
-          case 'product_ranking':
-            return <ProductRankingCard key={key} data={card.data} />;
-          case 'cart_card':
-            return <CartCard key={key} data={card.data} onAction={onAction} />;
-          case 'step_progress':
-            return <StepProgressCard key={key} data={card.data} onAction={onAction} />;
-          case 'interactive_product':
-            return <InteractiveProductCard key={key} data={card.data} onAction={onAction} />;
-          case 'quick_replies':
-            return <QuickReplies key={key} data={card.data} onSelectOption={onAction} />;
-          default:
-            return null;
+        const renderCardContent = () => {
+          switch (card.type) {
+            case 'order_card':
+              return <OrderCard data={card.data} onAction={onAction} />;
+            case 'order_picker':
+              return <OrderPickerCard data={card.data} onAction={onAction} />;
+            case 'tracking_timeline':
+              return <TrackingTimeline data={card.data} />;
+            case 'refund_confirmation':
+              return (
+                <RefundConfirmationCard
+                  data={card.data}
+                  onConfirm={() =>
+                    onAction?.('confirm_refund', {
+                      orderId: card.data.orderId,
+                    })
+                  }
+                />
+              );
+            case 'damage_assessment':
+              return <DamageAssessmentCard data={card.data} />;
+            case 'product_ranking':
+              return <ProductRankingCard data={card.data} />;
+            case 'cart_card':
+              return <CartCard data={card.data} onAction={onAction} />;
+            case 'step_progress':
+              return <StepProgressCard data={card.data} onAction={onAction} />;
+            case 'interactive_product':
+              return <InteractiveProductCard data={card.data} onAction={onAction} />;
+            case 'quick_replies':
+              return <QuickReplies data={card.data} onSelectOption={onAction} />;
+            default:
+              return null;
+          }
+        };
+
+        if (card.hydrationState === 'action_pending') {
+          return (
+            <div key={key} className="relative opacity-80 pointer-events-none transition-opacity">
+              <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-full bg-indigo-950/80 px-2 py-0.5 text-[10px] font-medium text-indigo-300 border border-indigo-500/30 backdrop-blur-xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-ping" />
+                <span>处理中...</span>
+              </div>
+              {renderCardContent()}
+            </div>
+          );
         }
+
+        if (card.hydrationState === 'hydrating') {
+          return (
+            <div key={key} className="relative animate-pulse transition-all">
+              {renderCardContent()}
+            </div>
+          );
+        }
+
+        return <div key={key}>{renderCardContent()}</div>;
       })}
     </div>
   );

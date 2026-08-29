@@ -1,9 +1,4 @@
-import {
-  AgentIntentType,
-  type AgentTaskSpec,
-  type OrderContext,
-  type OrderTaskSlots,
-} from "types";
+import { AgentIntentType, type AgentTaskSpec, type OrderContext, type OrderTaskSlots } from 'types';
 
 export interface SlotExtractionContext {
   orderContext?: OrderContext;
@@ -28,16 +23,13 @@ export class EntityExtractors {
     reason: string;
     keywords: string[];
   }> = [
-    { reason: "wrong_size", keywords: ["尺码", "穿不上", "大", "小"] },
-    { reason: "quality_issue", keywords: ["质量", "坏", "破", "瑕疵"] },
-    { reason: "not_as_described", keywords: ["不符合", "不一样", "虚假"] },
-    { reason: "no_reason_7d", keywords: ["七天", "不喜欢", "不想要"] },
+    { reason: 'wrong_size', keywords: ['尺码', '穿不上', '大', '小'] },
+    { reason: 'quality_issue', keywords: ['质量', '坏', '破', '瑕疵'] },
+    { reason: 'not_as_described', keywords: ['不符合', '不一样', '虚假'] },
+    { reason: 'no_reason_7d', keywords: ['七天', '不喜欢', '不想要'] },
   ];
 
-  public static extractOrderId(
-    text: string,
-    context?: SlotExtractionContext,
-  ): string | undefined {
+  public static extractOrderId(text: string, context?: SlotExtractionContext): string | undefined {
     const match = text.match(this.ORDER_ID_REGEX);
     if (match?.[0]) {
       return match[0].toUpperCase();
@@ -49,8 +41,8 @@ export class EntityExtractors {
     if (Array.isArray(msgs) && msgs.length > 0) {
       for (let i = msgs.length - 1; i >= 0; i--) {
         const msg = msgs[i];
-        const content = typeof msg === "string" ? msg : msg?.content;
-        if (content && typeof content === "string") {
+        const content = typeof msg === 'string' ? msg : msg?.content;
+        if (content && typeof content === 'string') {
           const histMatch = content.match(this.ORDER_ID_REGEX);
           if (histMatch?.[0]) {
             return histMatch[0].toUpperCase();
@@ -105,16 +97,14 @@ export const INTENT_DETECTION_RULES: IntentRule[] = [
     confidence: 0.95,
     pattern:
       /(?:推荐|买什么|有什么好看|有没有|挑一款|选一款|适合.*的|找一找|推荐一款|介绍一下|哪款好|选鞋|选衣服|看商品|导购|什么牌子|款式|推荐几件|推荐几款)/i,
-    negativePattern:
-      /(?:加购物车|加入购物车|放进购物车|加购|移出购物车|清空购物车)/i,
+    negativePattern: /(?:加购物车|加入购物车|放进购物车|加购|移出购物车|清空购物车)/i,
   },
   {
     intent: AgentIntentType.ORDER_MODIFY_ADDRESS,
     confidence: 0.95,
     pattern:
       /(?:(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)|(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)|(?:改到|改成|送至|送往|改派到|改派|改送)\s*[^?？哪里哪儿\n]+)/i,
-    negativePattern:
-      /(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i,
+    negativePattern: /(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i,
   },
   {
     intent: AgentIntentType.ORDER_CANCEL,
@@ -131,8 +121,7 @@ export const INTENT_DETECTION_RULES: IntentRule[] = [
     confidence: 0.92,
     pattern:
       /(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递|寄到哪|送至哪|到了没|查一下.*订单|查订单状态|查询.*订单|物流查询|查下订单|查订单|我的订单|名下.*订单|全部订单)/i,
-    negativePattern:
-      /(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i,
+    negativePattern: /(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)/i,
   },
   {
     intent: AgentIntentType.METRIC_QUERY,
@@ -147,50 +136,41 @@ export const INTENT_DETECTION_RULES: IntentRule[] = [
 export interface SlotDefinition {
   name: keyof OrderTaskSlots;
   isRequired: (text: string) => boolean;
-  extractor: (
-    text: string,
-    context?: SlotExtractionContext,
-  ) => string | undefined;
+  extractor: (text: string, context?: SlotExtractionContext) => string | undefined;
 }
 
 export interface IntentSchema {
   slots: SlotDefinition[];
-  buildClarificationMessage?: (
-    slots: OrderTaskSlots,
-    missing: string[],
-  ) => string | undefined;
+  buildClarificationMessage?: (slots: OrderTaskSlots, missing: string[]) => string | undefined;
 }
 
 const isGeneralOrderListQuery = (text: string) =>
   /(?:我的订单|全部订单|名下.*订单|所有订单|历史订单|查订单|查询.*订单|查下订单|订单列表|看看我买了啥|我有哪些订单|历史购买记录|查下我买的东西)/i.test(
     text,
-  ) &&
-  !/(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递)/i.test(
-    text,
-  );
+  ) && !/(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递)/i.test(text);
 
 export const INTENT_SCHEMAS: Partial<Record<AgentIntentType, IntentSchema>> = {
   [AgentIntentType.ORDER_MODIFY_ADDRESS]: {
     slots: [
       {
-        name: "orderId",
+        name: 'orderId',
         isRequired: () => true,
         extractor: (t, ctx) => EntityExtractors.extractOrderId(t, ctx),
       },
       {
-        name: "newAddress",
+        name: 'newAddress',
         isRequired: () => true,
         extractor: (t) => EntityExtractors.extractNewAddress(t),
       },
     ],
     buildClarificationMessage: (slots, missing) => {
-      if (missing.includes("orderId") && missing.includes("newAddress")) {
-        return "好的，请问您需要修改哪笔订单的收货地址？请提供您的【订单编号】（如 ORD-889901）以及【新的收货地址】。";
+      if (missing.includes('orderId') && missing.includes('newAddress')) {
+        return '好的，请问您需要修改哪笔订单的收货地址？请提供您的【订单编号】（如 ORD-889901）以及【新的收货地址】。';
       }
-      if (missing.includes("newAddress")) {
+      if (missing.includes('newAddress')) {
         return `已为您定位到订单 [${slots.orderId}]，请问您需要将收货地址变更为哪个新的收货地址？`;
       }
-      if (missing.includes("orderId")) {
+      if (missing.includes('orderId')) {
         return `收到您的新地址 [${slots.newAddress}]，请问您需要修改哪笔【订单编号】的收货地址？`;
       }
       return undefined;
@@ -199,19 +179,19 @@ export const INTENT_SCHEMAS: Partial<Record<AgentIntentType, IntentSchema>> = {
   [AgentIntentType.ORDER_RETURN]: {
     slots: [
       {
-        name: "orderId",
+        name: 'orderId',
         isRequired: () => true,
         extractor: (t, ctx) => EntityExtractors.extractOrderId(t, ctx),
       },
       {
-        name: "returnReason",
+        name: 'returnReason',
         isRequired: () => false,
         extractor: (t) => EntityExtractors.extractReturnReason(t),
       },
     ],
     buildClarificationMessage: (_slots, missing) => {
-      if (missing.includes("orderId")) {
-        return "请问您需要为哪笔订单申请退款/退货？请提供您的【订单编号】。";
+      if (missing.includes('orderId')) {
+        return '请问您需要为哪笔订单申请退款/退货？请提供您的【订单编号】。';
       }
       return undefined;
     },
@@ -219,14 +199,14 @@ export const INTENT_SCHEMAS: Partial<Record<AgentIntentType, IntentSchema>> = {
   [AgentIntentType.ORDER_CANCEL]: {
     slots: [
       {
-        name: "orderId",
+        name: 'orderId',
         isRequired: () => true,
         extractor: (t, ctx) => EntityExtractors.extractOrderId(t, ctx),
       },
     ],
     buildClarificationMessage: (_slots, missing) => {
-      if (missing.includes("orderId")) {
-        return "请问您需要取消哪笔订单？请提供【订单编号】。";
+      if (missing.includes('orderId')) {
+        return '请问您需要取消哪笔订单？请提供【订单编号】。';
       }
       return undefined;
     },
@@ -234,14 +214,14 @@ export const INTENT_SCHEMAS: Partial<Record<AgentIntentType, IntentSchema>> = {
   [AgentIntentType.ORDER_QUERY]: {
     slots: [
       {
-        name: "orderId",
+        name: 'orderId',
         isRequired: (text) => !isGeneralOrderListQuery(text),
         extractor: (t, ctx) => EntityExtractors.extractOrderId(t, ctx),
       },
     ],
     buildClarificationMessage: (_slots, missing) => {
-      if (missing.includes("orderId")) {
-        return "请提供您需要查询的【订单编号】或【运单号】。";
+      if (missing.includes('orderId')) {
+        return '请提供您需要查询的【订单编号】或【运单号】。';
       }
       return undefined;
     },
@@ -252,10 +232,10 @@ export const INTENT_SCHEMAS: Partial<Record<AgentIntentType, IntentSchema>> = {
  * 必填槽位映射表 (向后兼容导出)
  */
 export const REQUIRED_SLOTS_MAP: Record<string, string[]> = {
-  [AgentIntentType.ORDER_MODIFY_ADDRESS]: ["orderId", "newAddress"],
-  [AgentIntentType.ORDER_RETURN]: ["orderId"],
-  [AgentIntentType.ORDER_CANCEL]: ["orderId"],
-  [AgentIntentType.ORDER_QUERY]: ["orderId"],
+  [AgentIntentType.ORDER_MODIFY_ADDRESS]: ['orderId', 'newAddress'],
+  [AgentIntentType.ORDER_RETURN]: ['orderId'],
+  [AgentIntentType.ORDER_CANCEL]: ['orderId'],
+  [AgentIntentType.ORDER_QUERY]: ['orderId'],
 };
 
 /**
@@ -263,18 +243,13 @@ export const REQUIRED_SLOTS_MAP: Record<string, string[]> = {
  */
 export class SlotExtractor {
   public static readonly ORDER_ID_REGEX = EntityExtractors.ORDER_ID_REGEX;
-  public static readonly ADDRESS_KEYWORDS_REGEX =
-    EntityExtractors.ADDRESS_KEYWORDS_REGEX;
-  public static readonly PROVINCE_CITY_REGEX =
-    EntityExtractors.PROVINCE_CITY_REGEX;
+  public static readonly ADDRESS_KEYWORDS_REGEX = EntityExtractors.ADDRESS_KEYWORDS_REGEX;
+  public static readonly PROVINCE_CITY_REGEX = EntityExtractors.PROVINCE_CITY_REGEX;
 
   /**
    * 纯实体识别提取器 (Pure Entity Extractor)
    */
-  public static extractEntities(
-    input: string,
-    context?: SlotExtractionContext,
-  ): Partial<OrderTaskSlots> {
+  public static extractEntities(input: string, context?: SlotExtractionContext): Partial<OrderTaskSlots> {
     const text = input.trim();
     const entities: Partial<OrderTaskSlots> = {};
 
@@ -324,10 +299,7 @@ export class SlotExtractor {
       confidence = 0.95;
     } else if (primaryMatched) {
       // 特殊处理：泛查单（如“我的订单”）在顶层应归为 CHAT/通用查询，不强行进入 ORDER_QUERY
-      if (
-        primaryMatched.intent === AgentIntentType.ORDER_QUERY &&
-        isGeneralOrderListQuery(text)
-      ) {
+      if (primaryMatched.intent === AgentIntentType.ORDER_QUERY && isGeneralOrderListQuery(text)) {
         intentType = AgentIntentType.CHAT;
         confidence = 0.9;
       } else {
@@ -357,9 +329,7 @@ export class SlotExtractor {
 
     // 4. 调度 Schema 反问话术生成器
     const clarificationMessage =
-      missingSlots.length > 0
-        ? schema?.buildClarificationMessage?.(slots, missingSlots)
-        : undefined;
+      missingSlots.length > 0 ? schema?.buildClarificationMessage?.(slots, missingSlots) : undefined;
 
     return {
       intentType,
@@ -386,8 +356,6 @@ export class SlotExtractor {
       return [this.extract(input, activeIntentContext, existingSlots, context)];
     }
 
-    return detected.map((rule) =>
-      this.extract(input, rule.intent, existingSlots, context),
-    );
+    return detected.map((rule) => this.extract(input, rule.intent, existingSlots, context));
   }
 }

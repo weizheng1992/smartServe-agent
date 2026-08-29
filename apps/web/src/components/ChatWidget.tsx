@@ -63,17 +63,26 @@ export function ChatWidget({
     document.documentElement.style.setProperty('--widget-theme-color', themeColor);
   }, [themeColor]);
 
-  const handleSend = async (customText?: string) => {
+  const handleSend = async (customText?: string, customCards?: any[]) => {
     const text = (customText || input).trim();
     if (!text || isLoading) return;
     if (!customText) setInput('');
 
-    const userMsg = { id: `u_${Date.now()}`, role: 'user', content: text };
+    const userMsg = {
+      id: `u_${Date.now()}`,
+      role: 'user',
+      content: text,
+      cards: customCards || [],
+    };
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
+    const apiBase =
+      (typeof process !== 'undefined' && (process.env.NEXT_PUBLIC_API_URL || process.env.API_URL)) ||
+      'http://localhost:4000';
+
     try {
-      const res = await fetch('http://localhost:4000/api/chat', {
+      const res = await fetch(`${apiBase}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -127,7 +136,8 @@ export function ChatWidget({
     const message = handler ? handler(payload) : typeof payload.query === 'string' ? payload.query : null;
 
     if (message) {
-      handleSend(message);
+      const cardPayload = payload.order ? [{ type: 'order_card', data: payload.order }] : undefined;
+      handleSend(message, cardPayload);
     }
   };
 

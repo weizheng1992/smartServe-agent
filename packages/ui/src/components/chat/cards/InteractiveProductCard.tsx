@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { InteractiveProductCardData, ProductSkuSpec } from 'types';
 import { CheckCircle2, Minus, Plus, ShoppingCart, Zap } from '../../icons';
 
@@ -14,6 +14,15 @@ export const InteractiveProductCard: React.FC<InteractiveProductCardProps> = ({ 
   const [selectedSkuId, setSelectedSkuId] = useState<string>(data.selectedSkuId || (skus[0]?.skuId ?? ''));
   const [quantity, setQuantity] = useState<number>(data.selectedQuantity || 1);
   const [isAdded, setIsAdded] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
 
   const currentSku: ProductSkuSpec | undefined = skus.find((s) => s.skuId === selectedSkuId) || skus[0];
   const unitPrice = currentSku ? currentSku.price : data.basePrice;
@@ -32,7 +41,7 @@ export const InteractiveProductCard: React.FC<InteractiveProductCardProps> = ({ 
       title: data.title,
       imageUrl: displayImage,
     });
-    setTimeout(() => {
+    timerRef.current = setTimeout(() => {
       setIsAdded(false);
     }, 1500);
   };
