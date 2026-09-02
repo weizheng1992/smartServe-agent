@@ -1,12 +1,40 @@
-import { describe, expect, it, mock } from 'bun:test';
-import { ConversationRepository } from 'db';
-import { ApprovalGatekeeper, agentEventEmitter } from 'engine';
-import { ApprovalsService } from '../src/modules/approvals/approvals.service';
-import { ChatService } from '../src/modules/chat/chat.service';
-import { SkillsController } from '../src/modules/skills/skills.controller';
-import { SkillsService } from '../src/modules/skills/skills.service';
+/**
+ * 🛡️ Code Review Fixes Validation Suite(密封版)
+ *
+ * Phase 0 改造:db / engine / src 服务全部延迟到容器 env 注入后动态导入;
+ * 断言与原版完全一致。原版顶层未使用的 ApprovalGatekeeper 导入不再保留
+ * (engine 模块已随 agentEventEmitter 动态导入完成加载)。
+ */
+import { beforeAll, describe, expect, it, mock } from 'bun:test';
+import { type SealedEnv, initSealedEnv, loadDb, loadEngine } from './helpers/sealedEnv';
+
+let sealed: SealedEnv;
+let ConversationRepository: typeof import('db')['ConversationRepository'];
+let agentEventEmitter: typeof import('engine')['agentEventEmitter'];
+let ApprovalsService: typeof import('../src/modules/approvals/approvals.service')['ApprovalsService'];
+let ChatService: typeof import('../src/modules/chat/chat.service')['ChatService'];
+let SkillsController: typeof import('../src/modules/skills/skills.controller')['SkillsController'];
+let SkillsService: typeof import('../src/modules/skills/skills.service')['SkillsService'];
 
 describe('🛡️ Code Review Fixes Validation Suite', () => {
+  beforeAll(async () => {
+    sealed = await initSealedEnv();
+    // 测试 4 使用 aurora 租户,需随最小 fixture 一并就位
+    await sealed.seedTenants([
+      { businessId: 'ecommerce', name: '默认电商租户' },
+      { businessId: 'nike', name: 'Nike 官方旗舰店' },
+      { businessId: 'adidas', name: 'Adidas 官方旗舰店' },
+      { businessId: 'aurora', name: 'Aurora 精品百货' },
+    ]);
+
+    ({ ConversationRepository } = await loadDb());
+    ({ agentEventEmitter } = await loadEngine());
+    ({ ApprovalsService } = await import('../src/modules/approvals/approvals.service'));
+    ({ ChatService } = await import('../src/modules/chat/chat.service'));
+    ({ SkillsController } = await import('../src/modules/skills/skills.controller'));
+    ({ SkillsService } = await import('../src/modules/skills/skills.service'));
+  });
+
   describe('1. ConversationRepository Tenant Isolation', () => {
     it('should strictly isolate timeline queries by tenant businessId', async () => {
       const threadId = `test_thread_isolation_${Date.now()}`;

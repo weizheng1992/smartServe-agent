@@ -29,7 +29,7 @@ describe('⚡ Resilient SSE Stream Pipeline & Sequence IDs Suite', () => {
 
     expect(headers['Content-Type']).toBe('text/event-stream');
     expect(headers['Cache-Control']).toContain('no-cache');
-    expect(headers['Connection']).toBe('keep-alive');
+    expect(headers.Connection).toBe('keep-alive');
 
     // Emit thoughts & results via agentEventEmitter
     agentEventEmitter.emit('thought', {

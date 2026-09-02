@@ -1,24 +1,46 @@
+/**
+ * 🌟 Merchant SPI Open Gateway E2E Suite(密封版)
+ *
+ * Phase 0 改造:由"直连本机常驻 Postgres"改为 testcontainers 一次性容器。
+ * db / AppModule / supertest 均延迟到容器 env 注入后再动态导入,
+ * 测试断言与原版保持完全一致。
+ */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import type { INestApplication } from '@nestjs/common';
-import { Test, type TestingModule } from '@nestjs/testing';
-import { db, getDrizzle, pendingApprovals } from 'db';
-import { eq } from 'drizzle-orm';
-import request from 'supertest';
-import { AppModule } from '../src/app.module';
+import { type SealedEnv, initSealedEnv, loadDb } from './helpers/sealedEnv';
+
+type DbModule = typeof import('db');
+
+let sealed: SealedEnv;
+let db: DbModule['db'];
+let getDrizzle: DbModule['getDrizzle'];
+let pendingApprovals: DbModule['pendingApprovals'];
+let eq: typeof import('drizzle-orm')['eq'];
+let request: typeof import('supertest')['default'];
+let app: import('@nestjs/common').INestApplication;
 
 describe('🌟 Merchant SPI Open Gateway E2E Suite', () => {
-  let app: INestApplication;
-
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    sealed = await initSealedEnv();
+    await sealed.seedTenants();
+
+    const dbMod = await loadDb();
+    db = dbMod.db;
+    getDrizzle = dbMod.getDrizzle;
+    pendingApprovals = dbMod.pendingApprovals;
+    ({ eq } = await import('drizzle-orm'));
+    ({ default: request } = await import('supertest'));
+
+    const { AppModule } = await import('../src/app.module');
+    const { Test } = await import('@nestjs/testing');
+    const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
-
     app = moduleFixture.createNestApplication();
     await app.init();
   });
 
   afterAll(async () => {
+    // 注意:sealed.pg 故意不 end —— 容器与连接池为整个 bun test 进程共享
     await app.close();
   });
 

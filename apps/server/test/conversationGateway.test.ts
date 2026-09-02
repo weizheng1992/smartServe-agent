@@ -1,8 +1,23 @@
-import { describe, expect, it, mock } from 'bun:test';
-import { ConversationRepository } from 'db';
-import { ConversationGateway } from '../src/modules/gateway/conversation.gateway';
+/**
+ * ConversationGateway WebSocket & Takeover State Machine(密封版)
+ *
+ * Phase 0 改造:ConversationRepository / ConversationGateway 延迟到
+ * 容器 env 注入后动态导入;断言与原版完全一致。
+ */
+import { beforeAll, describe, expect, it, mock } from 'bun:test';
+import { type SealedEnv, initSealedEnv, loadDb } from './helpers/sealedEnv';
+
+let sealed: SealedEnv;
+let ConversationRepository: typeof import('db')['ConversationRepository'];
+let ConversationGateway: typeof import('../src/modules/gateway/conversation.gateway')['ConversationGateway'];
 
 describe('ConversationGateway WebSocket & Takeover State Machine', () => {
+  beforeAll(async () => {
+    sealed = await initSealedEnv();
+    ({ ConversationRepository } = await loadDb());
+    ({ ConversationGateway } = await import('../src/modules/gateway/conversation.gateway'));
+  });
+
   it('should process takeover_conversation and broadcast state change', async () => {
     const gateway = new ConversationGateway();
     const mockEmittedEvents: Array<{ event: string; data: any }> = [];

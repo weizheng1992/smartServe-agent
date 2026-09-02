@@ -1,11 +1,36 @@
-import { describe, expect, it } from 'bun:test';
+/**
+ * 🌟 Merchant SPI Open Gateway Suite (Direct Service Test)(密封版)
+ *
+ * Phase 0 改造:db 与被测 Service 延迟到容器 env 注入后动态导入;
+ * 断言与原版完全一致(包括 pendingApprovals 不带 businessId 的原始写法)。
+ */
+import { beforeAll, describe, expect, it } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { db, getDrizzle, pendingApprovals } from 'db';
-import { eq } from 'drizzle-orm';
-import { MerchantSpiService } from '../src/modules/spi/merchant-spi.controller';
+import { type SealedEnv, initSealedEnv, loadDb } from './helpers/sealedEnv';
+
+type DbModule = typeof import('db');
+
+let sealed: SealedEnv;
+let db: DbModule['db'];
+let getDrizzle: DbModule['getDrizzle'];
+let pendingApprovals: DbModule['pendingApprovals'];
+let eq: typeof import('drizzle-orm')['eq'];
+let MerchantSpiService: typeof import('../src/modules/spi/merchant-spi.controller')['MerchantSpiService'];
+let service: InstanceType<typeof MerchantSpiService>;
 
 describe('🌟 Merchant SPI Open Gateway Suite (Direct Service Test)', () => {
-  const service = new MerchantSpiService();
+  beforeAll(async () => {
+    sealed = await initSealedEnv();
+
+    const dbMod = await loadDb();
+    db = dbMod.db;
+    getDrizzle = dbMod.getDrizzle;
+    pendingApprovals = dbMod.pendingApprovals;
+    ({ eq } = await import('drizzle-orm'));
+
+    ({ MerchantSpiService } = await import('../src/modules/spi/merchant-spi.controller'));
+    service = new MerchantSpiService();
+  });
 
   describe('1. 商户安全审批决议 (Resolve Approval)', () => {
     it('should allow merchant to resolve pending approval via service', async () => {
