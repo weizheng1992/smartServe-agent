@@ -210,5 +210,6 @@ class ApprovalOutboxEvent(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"), nullable=False)
     retry_count: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
+    error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
