@@ -27,17 +27,18 @@ else:
     config.set_main_option("sqlalchemy.url", settings.database_url)
 
 # asyncpg URL(asyncpg+postgresql://)归一为 alembic 可用的 postgresql+asyncpg
+# 注意:str(URL) 会把密码脱敏为 ***,必须用 render_as_string(hide_password=False)
 parsed: URL = make_url(config.get_main_option("sqlalchemy.url"))
 if parsed.drivername in {"postgresql", "postgres"}:
     parsed = parsed.set(drivername="postgresql+asyncpg")
-config.set_main_option("sqlalchemy.url", str(parsed))
+config.set_main_option("sqlalchemy.url", parsed.render_as_string(hide_password=False))
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=str(parsed),
+        url=parsed.render_as_string(hide_password=False),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},

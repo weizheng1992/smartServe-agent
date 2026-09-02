@@ -17,9 +17,22 @@ def _env(key: str, default: str) -> str:
     return value if value else default
 
 
+def _database_url() -> str:
+    """DATABASE_URL 归一:TS 遗留的 postgres:// 方言串转 SQLAlchemy 可用的 postgresql+asyncpg。
+
+    显式带驱动的 URL(postgresql+psycopg2:// 等)原样保留,便于测试容器换驱动。
+    """
+    url = _env("DATABASE_URL", "postgres://agent_user:agent_password@localhost:5432/agent_platform")
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
 @dataclass(frozen=True)
 class Settings:
-    database_url: str = field(default_factory=lambda: _env("DATABASE_URL", "postgres://agent_user:agent_password@localhost:5432/agent_platform"))
+    database_url: str = field(default_factory=_database_url)
     redis_url: str = field(default_factory=lambda: _env("REDIS_URL", "redis://:redis_password@127.0.0.1:6379"))
 
     temporal_address: str = field(default_factory=lambda: _env("TEMPORAL_ADDRESS", "127.0.0.1:7239"))

@@ -137,7 +137,10 @@ async def ensure_merchant_tables() -> None:
         return
     try:
         async with _engine.begin() as conn:
-            await conn.execute(text(_MERCHANT_DDL))
+            # _MERCHANT_DDL 为多语句脚本;asyncpg 预编译协议不支持,
+            # 走原始连接 simple-query 协议执行
+            raw = (await conn.get_raw_connection()).driver_connection
+            await raw.execute(_MERCHANT_DDL)
     except Exception as err:  # noqa: BLE001 - 自愈分支需捕获驱动特定错误
         if "3D000" not in repr(err) and "InvalidCatalogName" not in type(err).__name__:
             raise

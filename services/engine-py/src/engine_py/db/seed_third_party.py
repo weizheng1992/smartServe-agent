@@ -137,8 +137,11 @@ _ADDRESSES = [
 async def seed_third_party_merchant() -> None:
     print("[SeedMerchant] Initializing third-party merchant physical tables and seed data...")
     async with _engine.begin() as conn:
-        await conn.execute(text(_DDL))
-        await conn.execute(text(_TENANT_SQL))
+        # _DDL/_TENANT_SQL 为多语句脚本;asyncpg 预编译协议不支持,走原始连接的
+        # simple-query 协议逐批执行
+        raw = (await conn.get_raw_connection()).driver_connection
+        await raw.execute(_DDL)
+        await raw.execute(_TENANT_SQL)
 
         for sku_code, merchant_id, item_title, category_name, selling_price, available_qty in _PRODUCTS:
             await conn.execute(
