@@ -26,7 +26,7 @@
     "biome:check": "biome check --write .",
     "test:load": "bun scripts/load-test.ts",
     "test:e2e": "playwright test",
-    "test:eval": "bun eval/run-full-e2e-eval.ts",
+    "test:eval": "cd services/gateway-py && uv run pytest",
     "test:prompt": "promptfoo eval -c eval/promptfooconfig.yaml --no-write --no-cache",
     "test:prompt:planner": "promptfoo eval -c eval/promptfoo.planner.yaml --no-write --no-cache",
     "test:prompt:pin": "bun eval/pinBaselines.ts",

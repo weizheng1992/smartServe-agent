@@ -4,11 +4,11 @@ prompts:
   - "{{input}}"
 
 providers:
-  - "file://providers/agentProvider.ts"
+  - "file://providers/agent_provider.py:call_api"
 
 defaultTest:
   options:
-    provider: "file://providers/agentProvider.ts"
+    provider: "file://providers/agent_provider.py:call_api"
 
 tests:
   - testCases/ecommerce/single-intent.json
