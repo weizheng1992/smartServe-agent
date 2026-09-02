@@ -22,7 +22,7 @@ _JSON_FENCE_START_RE = re.compile(r"^```json\s*")
 
 def _try_import_skills():
     try:
-        from ..skills import SkillRegistry  # noqa: PLC0415 — skills 包落地前优雅缺位
+        from ...skills import SkillRegistry  # noqa: PLC0415 — 延迟导入防环;本模块位于 graph/nodes,需三个点
 
         return SkillRegistry
     except ImportError:
@@ -31,7 +31,7 @@ def _try_import_skills():
 
 def _try_import_tools():
     try:
-        from ..tools_registry import get_tool  # noqa: PLC0415 — 工具注册表落地前优雅缺位
+        from ...tools_registry import get_tool  # noqa: PLC0415 — 延迟导入防环;本模块位于 graph/nodes,需三个点
 
         return get_tool
     except ImportError:

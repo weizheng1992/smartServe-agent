@@ -16,7 +16,7 @@ import time
 import uuid as _uuid
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import text
 
 from engine_py.approvals.gatekeeper import ApprovalGatekeeper
@@ -512,7 +512,7 @@ async def store_chat_stream(threadId: str | None = Query(None)):
                 except Exception:  # noqa: BLE001
                     pass
 
-    return Response(
+    return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={

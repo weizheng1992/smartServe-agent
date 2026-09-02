@@ -4,6 +4,21 @@
 
 ---
 
+## [2.2.2] - 2026-09-03 (Python 后端运行时修复包: 商户 SSE 流 500、工具注册表解析失效、.env 环境注入)
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **商户端 SSE 流式通道 500 修复 (`gateway-py/src/gateway_py/routers/merchant.py`)**:
+  - `/api/store/chat/stream` 曾以普通 `Response` 包装 async generator,Starlette `render()` 对非 bytes 内容调用 `.encode` 触发构造期 `AttributeError`,请求未写出任何响应头即 500。改用 `StreamingResponse`(与 `/api/chat/{jobId}/stream` 的既有惯例一致)。
+  - 契约套件新增 `TestMerchantStoreChatStream` 回归钉:断言 200 + `text/event-stream` + `event: connected` 首帧 + Redis pub/sub 频道 `thread:{threadId}:message` 消息转发(此前该路由无任何契约覆盖)。
+- **工具注册表解析失效修复 (`engine-py/src/engine_py/graph/nodes/step_execution_engine.py`)**:
+  - 延迟导入 `..skills` / `..tools_registry` 相对深度少写一个点,实际解析到不存在的 `engine_py.graph.*` → `ImportError` 被优雅缺位逻辑吞掉 → Skills/Tools 解析器为 `None` → **全部 20 个电商工具**经执行引擎调度时一律落入 `"Tool or Skill ... not found in registry."`(症状首见于 `listUserOrders`)。修正为三个点(`...skills` / `...tools_registry`),恢复 Skills 优先、Tools 回退的调度链。
+- **开发脚本 .env 环境注入修复 (`package.json`)**:
+  - `dev:server` / `worker` / `db:push` / `db:seed` 统一改为 `uv run --env-file ../../.env ...`。此前 gateway 进程拿不到任何 `AI_*` 环境变量(`config.py` 只读 `os.environ`,dev 脚本也不注入),LLM base_url 回落到缺省的 `http://127.0.0.1:11211/...`(无服务监听),导致 validatorNode / finishNode / 画像 Profiler Agent 全线 `Connection error`;数据库与 Redis 仅因代码缺省值恰好与 dev 容器一致而"看似正常"。
+  - README 快速启动章节补充 `.env` 准备步骤与环境变量自动加载说明。
+
+---
+
 ## [2.2.1] - 2026-08-27 (意图去重旁路与画像审计自愈、富交互卡片闭环修复)
 
 ### 🌟 Major Highlights (重大亮点)

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from .conftest import CONTRACT_APPROVAL, CONTRACT_THREAD, _TS
+from .conftest import _TS, CONTRACT_APPROVAL, CONTRACT_THREAD
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -330,3 +330,53 @@ class TestLogs:
         res = await client.get("/api/logs", params={"tenantId": "nike"})
         assert res.status_code == 200
         assert res.json()["success"] is True
+
+
+class TestMerchantStoreChatStream:
+    """SSE 通道 thread:{threadId}:message — 回归钉:stream 路由必须真正以 SSE 流式返回。
+
+    历史缺陷:曾用普通 ``Response(async_generator)`` 返回,Starlette ``render()``
+    对非 bytes 内容调用 ``.encode`` → 构造期 AttributeError → 500。
+
+    自建 ASGI client 而不复用 session 级 ``client`` fixture:SSE 通道不依赖
+    种子租户数据,且外部直连模式下开发库 schema 可能与迁移头存在漂移。
+    """
+
+    async def test_stream_returns_sse_and_relays_pubsub(self):
+        import asyncio
+        import json as _json
+
+        import httpx
+        from engine_py.event_bus import get_client as get_redis_client
+
+        from gateway_py.main import app as asgi_app
+
+        thread_id = f"merchant_stream_{_TS}"
+        transport = httpx.ASGITransport(app=asgi_app)
+
+        async with (
+            httpx.AsyncClient(transport=transport, base_url="http://testserver") as client,
+            client.stream("GET", "/api/store/chat/stream", params={"threadId": thread_id}) as res,
+        ):
+                assert res.status_code == 200
+                assert "text/event-stream" in res.headers["content-type"]
+
+                buf = ""
+                async for chunk in res.aiter_text():
+                    buf += chunk
+                    if "event: connected" in buf:
+                        break
+                assert "event: connected" in buf
+                assert f'"threadId": "{thread_id}"' in buf
+
+                # 订阅建立后,经由 Redis pub/sub 频道发布的消息应被原样转发
+                await asyncio.sleep(0.2)
+                redis = await get_redis_client()
+                await redis.publish(f"thread:{thread_id}:message", _json.dumps({"text": "contract-relay"}))
+                relayed = buf
+                async for chunk in res.aiter_text():
+                    relayed += chunk
+                    if "event: message" in relayed:
+                        break
+                assert "event: message" in relayed
+                assert '"text": "contract-relay"' in relayed

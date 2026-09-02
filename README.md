@@ -400,20 +400,25 @@ bun run test:prompt:compare
 bun install
 uv sync                                # 在 services/ 下执行, 或进入各服务目录单独 uv sync
 
-# 2. 启动核心 Docker 服务 (PostgreSQL + Redis)
+# 2. 准备环境变量 (LLM / 数据库 / Redis 连接, 必需)
+cp .env.example .env                   # 填入 AI_API_KEY 等真实凭据
+
+# 3. 启动核心 Docker 服务 (PostgreSQL + Redis)
 bun run docker:up
 
-# 3. 应用数据库迁移 (Alembic upgrade head) 并注入种子数据
+# 4. 应用数据库迁移 (Alembic upgrade head) 并注入种子数据
 bun run db:push
 bun run db:seed
 
-# 4. (可选) 启动 Temporal 集群与 Python Worker
+# 5. (可选) 启动 Temporal 集群与 Python Worker
 bun run docker:temporal
 bun run worker
 
-# 5. 一键启动所有应用与服务 (Web, Admin, Gateway, Merchant)
+# 6. 一键启动所有应用与服务 (Web, Admin, Gateway, Merchant)
 bun run dev:all
 ```
+
+> **环境变量说明**:`dev:server` / `worker` / `db:push` / `db:seed` 均通过 `uv run --env-file ../../.env` 自动加载仓库根目录的 `.env`(`config.py` 只读 `os.environ`,不自行解析 .env 文件)。缺省值仅供无 LLM 的离线场景兜底,若 `.env` 缺失,LLM 调用会连接到无效的缺省地址并以 `Connection error` 失败。
 
 服务启动后各端口分布如下：
 
