@@ -1,0 +1,30 @@
+[project]
+name = "gateway-py"
+version = "0.1.0"
+description = "NestJS API 网关的 Python 参考重写(Phase 2,39 路由 1:1)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-socketio>=5.11",
+    "engine-py",
+    "sqlglot>=25.0",
+    "structlog>=24.4",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gateway_py"]
+
+[tool.uv.sources]
+engine-py = { workspace = true }
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"

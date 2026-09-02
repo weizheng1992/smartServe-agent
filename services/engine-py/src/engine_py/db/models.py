@@ -67,6 +67,46 @@ class RagDocumentRow(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
+class GuardrailRule(Base):
+    __tablename__ = "guardrail_rules"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'all'"))
+    rule_name: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_type: Mapped[str] = mapped_column(Text, nullable=False)
+    pattern: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'block'"))
+    severity: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'high'"))
+    is_enabled: Mapped[bool | None] = mapped_column(Boolean, server_default=text("true"))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+class EvalRunRecordRow(Base):
+    __tablename__ = "eval_run_records"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    run_name: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_name: Mapped[str] = mapped_column(Text, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("50"))
+    tool_accuracy: Mapped[float | None] = mapped_column(Float, server_default=text("0.95"))
+    rag_faithfulness: Mapped[float | None] = mapped_column(Float, server_default=text("0.92"))
+    hitl_trigger_rate: Mapped[float | None] = mapped_column(Float, server_default=text("0.12"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'completed'"))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+class TenantBillingQuota(Base):
+    __tablename__ = "tenant_billing_quotas"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    business_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    monthly_limit_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("5000000")
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
 class SessionMetric(Base):
     __tablename__ = "session_metrics"
 

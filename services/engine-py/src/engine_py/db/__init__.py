@@ -4,6 +4,8 @@ from .models import (
     Base,
     BusinessConfigRow,
     EpisodicEventRow,
+    EvalRunRecordRow,
+    GuardrailRule,
     IntentExemplar,
     IntentLog,
     LongMemoryFact,
@@ -14,6 +16,7 @@ from .models import (
     RagDocumentRow,
     SessionMetric,
     TaskMemoryRow,
+    TenantBillingQuota,
     Thread,
 )
 from .session import get_session
@@ -32,5 +35,8 @@ __all__ = [
     "RagDocumentRow",
     "PendingApproval",
     "ApprovalOutboxEvent",
+    "GuardrailRule",
+    "EvalRunRecordRow",
+    "TenantBillingQuota",
     "get_session",
 ]
