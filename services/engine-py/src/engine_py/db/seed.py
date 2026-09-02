@@ -8,10 +8,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from sqlalchemy import text
 
+from ..llm import get_embedding_model
 from .session import _engine
+
+
+async def _embed(text_value: str) -> str | None:
+    """向量化(走统一入口,随 AI_EMBEDDING_PROVIDER 切换);失败降级为 NULL 不阻断种子。"""
+    try:
+        return json.dumps(await get_embedding_model().aembed_query(text_value))
+    except Exception as err:  # noqa: BLE001
+        print(f"[PG Seed] 向量化降级(存 NULL,后续可回填): {err}")
+        return None
 
 
 async def main() -> None:
@@ -151,36 +162,70 @@ async def main() -> None:
         )
         print("[PG Seed] guardrail_rules / tenant_billing_quotas / eval_run_records 注入成功")
 
-        # 7. RAG 知识库与长期画像事实
-        await conn.execute(
-            text(
-                "INSERT INTO rag_documents (business_id, source_url, chunk_text, contextual_summary, metadata) VALUES "
-                "('nike', 'https://nike.com/policies/refund', "
-                "'耐克官方商城支持签收之日起 7 天内无理由退换货。退款将在商品入库质检合格后 48 小时内原路返回。', "
-                "'耐克退换货时效与退款处理流程', "
-                "'{\"category\": \"refund_policy\", \"version\": \"v2.1\"}'::jsonb), "
-                "('adidas', 'https://adidas.com/help/shipping', "
-                "'阿迪达斯全场订单满 199 元包邮，普通快递 3-5 个工作日送达，顺丰特快支持次日达。', "
-                "'阿迪达斯物流配送规则与运费说明', "
-                "'{\"category\": \"shipping_policy\", \"version\": \"v1.4\"}'::jsonb), "
-                "('ecommerce', 'https://shop.common/terms', "
-                "'通用电商支持全品类正品保障，非人为损坏提供 15 天免费换货及 1 年质保服务。', "
-                "'通用电商正品保障与售后服务条款', "
-                "'{\"category\": \"warranty_policy\", \"version\": \"v1.0\"}'::jsonb)"
+        # 7. RAG 知识库与长期画像事实(入库即向量化,组装口径与 contextual_rag / long_memory 一致)
+        rag_docs = [
+            (
+                "nike",
+                "https://nike.com/policies/refund",
+                "耐克官方商城支持签收之日起 7 天内无理由退换货。退款将在商品入库质检合格后 48 小时内原路返回。",
+                "耐克退换货时效与退款处理流程",
+                '{"category": "refund_policy", "version": "v2.1"}',
+            ),
+            (
+                "adidas",
+                "https://adidas.com/help/shipping",
+                "阿迪达斯全场订单满 199 元包邮，普通快递 3-5 个工作日送达，顺丰特快支持次日达。",
+                "阿迪达斯物流配送规则与运费说明",
+                '{"category": "shipping_policy", "version": "v1.4"}',
+            ),
+            (
+                "ecommerce",
+                "https://shop.common/terms",
+                "通用电商支持全品类正品保障，非人为损坏提供 15 天免费换货及 1 年质保服务。",
+                "通用电商正品保障与售后服务条款",
+                '{"category": "warranty_policy", "version": "v1.0"}',
+            ),
+        ]
+        for business_id, source_url, chunk_text, summary, metadata_json in rag_docs:
+            await conn.execute(
+                text(
+                    "INSERT INTO rag_documents "
+                    "(business_id, source_url, chunk_text, contextual_summary, metadata, embedding) "
+                    "VALUES (:b, :u, :c, :s, :m::jsonb, :e)"
+                ),
+                {
+                    "b": business_id,
+                    "u": source_url,
+                    "c": chunk_text,
+                    "s": summary,
+                    "m": metadata_json,
+                    "e": await _embed(f"[Context] {summary}\n\n[Content] {chunk_text}"),
+                },
             )
-        )
-        await conn.execute(
-            text(
-                "INSERT INTO long_memory_facts (user_id, business_id, scope, fact, confidence, source, status) VALUES "
-                "('u_vip_881', 'nike', 'tenant', '跑鞋鞋码偏好 42.5 码，通常在周末上午进行半马训练', "
-                "0.96, 'chat_dialogue_inference', 'approved'), "
-                "('u_user_332', 'adidas', 'tenant', '偏好三叶草复古休闲系列，对环保再生材质有强烈认同感', "
-                "0.88, 'explicit_user_statement', 'approved'), "
-                "('u_runner_102', 'nike', 'tenant', '对快递时效要求极高，通常要求顺丰次日达发货', "
-                "0.92, 'chat_dialogue_inference', 'pending')"
+        memory_facts = [
+            ("u_vip_881", "nike", "tenant", "跑鞋鞋码偏好 42.5 码，通常在周末上午进行半马训练", 0.96, "chat_dialogue_inference", "approved"),
+            ("u_user_332", "adidas", "tenant", "偏好三叶草复古休闲系列，对环保再生材质有强烈认同感", 0.88, "explicit_user_statement", "approved"),
+            ("u_runner_102", "nike", "tenant", "对快递时效要求极高，通常要求顺丰次日达发货", 0.92, "chat_dialogue_inference", "pending"),
+        ]
+        for fact_user_id, fact_business_id, scope, fact_text, confidence, source, status in memory_facts:
+            await conn.execute(
+                text(
+                    "INSERT INTO long_memory_facts "
+                    "(user_id, business_id, scope, fact, confidence, source, status, embedding) "
+                    "VALUES (:u, :b, :s, :f, :c, :src, :st, :e)"
+                ),
+                {
+                    "u": fact_user_id,
+                    "b": fact_business_id,
+                    "s": scope,
+                    "f": fact_text,
+                    "c": confidence,
+                    "src": source,
+                    "st": status,
+                    "e": await _embed(fact_text),
+                },
             )
-        )
-        print("[PG Seed] rag_documents + long_memory_facts 注入成功")
+        print("[PG Seed] rag_documents + long_memory_facts 注入成功(含向量)")
 
     await _engine.dispose()
     print("[PG Seed] 种子数据注入完成")

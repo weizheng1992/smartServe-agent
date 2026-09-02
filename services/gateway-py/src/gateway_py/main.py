@@ -7,12 +7,13 @@
 
 from __future__ import annotations
 
+from engine_py.llm import warm_embedding_model_in_background
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from socketio import ASGIApp
 
-from .routers import admin, chat, crud, merchant, spi
 from .realtime import sio
+from .routers import admin, chat, crud, merchant, spi
 from .tenant_context import TenantContextMiddleware, _PermissionError
 
 fastapi_app = FastAPI(title="agent-all gateway-py", version="0.1.0")
@@ -44,3 +45,7 @@ fastapi_app.include_router(merchant.router)
 
 # socket.io 挂载在默认 path /socket.io,namespace /ws/chat;其余路径回落到 FastAPI
 app = ASGIApp(sio, other_asgi_app=fastapi_app)
+
+# 本地 embedding 预热:首次构造含 torch 加载与网络回退,交由后台线程承担,
+# 避免首个向量化请求在事件循环线程同步执行(受限网络下曾致网关整体冻结)
+warm_embedding_model_in_background()

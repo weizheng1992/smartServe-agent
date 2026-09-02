@@ -40,10 +40,13 @@ class Settings:
     # 影子期独立队列;切流后与 TS 共用 agent-tasks
     temporal_task_queue: str = field(default_factory=lambda: _env("TEMPORAL_TASK_QUEUE", "agent-tasks-py"))
 
-    llm_base_url: str = field(default_factory=lambda: _env("LLM_BASE_URL", "http://127.0.0.1:11211/api/openai/v1"))
-    llm_api_key: str = field(default_factory=lambda: _env("LLM_API_KEY", "dummy"))
-    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", "gemini-3.5-flash:latest"))
-    embedding_model: str = field(default_factory=lambda: _env("EMBEDDING_MODEL", "text-embedding-005:latest"))
+    # 环境变量名与 .env.example / turbo.json globalEnv 对齐为 AI_* 前缀
+    llm_base_url: str = field(default_factory=lambda: _env("AI_BASE_URL", "http://127.0.0.1:11211/api/openai/v1"))
+    llm_api_key: str = field(default_factory=lambda: _env("AI_API_KEY", "dummy"))
+    llm_model: str = field(default_factory=lambda: _env("AI_MODEL", "gemini-3.5-flash:latest"))
+    # embedding 提供方:local = 进程内免费本地推理(默认,离线可用);openai = 走 AI_BASE_URL 的 /embeddings(需付费资源包)
+    embedding_provider: str = field(default_factory=lambda: _env("AI_EMBEDDING_PROVIDER", "local"))
+    embedding_model: str = field(default_factory=lambda: _env("AI_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"))
 
 
 settings = Settings()

@@ -16,10 +16,10 @@ import re
 import time
 import uuid
 
-import httpx
 from sqlalchemy import text
 
 from ..db import get_session
+from ..llm import get_embedding_model
 from ..tenant_config import get_tenant_config
 from .cache import tool_cache
 
@@ -665,24 +665,13 @@ class OrderDomainService:
             return {"error": "Could not resolve user context from current session."}
 
         try:
-            import os
-
             fact_text = f"[User {preference_type} preference]: {preference_value}"
             serialized_embedding = None
             try:
-                base_url = os.environ.get("AI_BASE_URL", "http://localhost:11211/api/openai/v1")
-                api_key = os.environ.get("AI_API_KEY", "dummy")
-                model_name = os.environ.get("AI_EMBEDDING_MODEL", "text-embedding-005:latest")
-                async with httpx.AsyncClient() as client:
-                    embed_res = await client.post(
-                        f"{base_url}/embeddings",
-                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        json={"input": fact_text, "model": model_name},
-                    )
-                    embed_data = embed_res.json()
-                    embedding = (embed_data.get("data") or [{}])[0].get("embedding")
-                    if embedding:
-                        serialized_embedding = json.dumps(embedding)
+                # 统一走 llm/chat.py 入口,随 AI_EMBEDDING_PROVIDER 切换本地/远端
+                embedding = await get_embedding_model().aembed_query(fact_text)
+                if embedding:
+                    serialized_embedding = json.dumps(embedding)
             except Exception as emb_err:  # noqa: BLE001
                 print(f"[OrderDomainService.recordUserPreference] Embedding generation fallback: {emb_err}")
 
