@@ -8,6 +8,8 @@ dependencies = [
     "langchain-openai>=0.2",
     "redis>=5.0",
     "pydantic>=2.7",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
 ]
 
 [project.optional-dependencies]

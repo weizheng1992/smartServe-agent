@@ -1,19 +1,23 @@
-"""build_graph — 六节点 DAG,拓扑逐边对齐 packages/engine/src/graph/buildGraph.ts。
+"""build_graph — 六节点 DAG,路由判定逐边对齐 packages/engine/src/graph/buildGraph.ts。
 
 ::
 
     START → triage
-    triage    →(条件) planner | finish    # 无意图 / 仅寒暄 / bypass_step → finish
+    triage    →(条件) planner | finish
     planner   → merge → executor → validator
     validator →(条件) executor | planner | finish
     finish    → END
 
-validator 路由(与 TS 条件边同序判定):
-1. 熔断:global_transitions ≥ 10 或 tool_errors ≥ 3 → finish
-2. HITL 挂起:waiting_for_approval → finish(经 approval outbox 确定性恢复)
-3. 子任务耗尽:next_index ≥ len(subtasks) 或 ≥ 10 → finish
-4. 认知回溯:rejected_by_admin 且尚未重规划 → planner
-5. 其余 → executor(继续执行下一子任务)
+triage 路由:无意图 / 唯一意图为 general_query / output 已置(旁路直达)/
+taskPlan.subtasks[0].id === 'bypass_step' → finish。
+
+validator 路由(与 TS 同序判定):
+1. 熔断:globalTransitionsCount ≥ 10 或 toolErrorsCount ≥ 3 → finish
+2. 任一子任务 waitingForApproval → finish(HITL 安全挂起)
+3. 任一子任务 failed + rejectedByAdmin 且未 replanned → planner(认知回溯;
+   replanned 标记由 planner 节点完成 —— Python 图路由不可变更状态)
+4. currentStepIndex ≥ len(subtasks) 或 ≥ 10 → finish
+5. 其余 → executor
 """
 
 from __future__ import annotations
@@ -25,29 +29,40 @@ from .state import AgentState
 
 CIRCUIT_BREAKER_TRANSITIONS = 10
 CIRCUIT_BREAKER_TOOL_ERRORS = 3
-MAX_SUBTASKS = 10
+MAX_PLAN_STEPS = 10
 
 
 def route_after_triage(state: AgentState) -> str:
     intents = state.get("intents") or []
-    bypass = bool(state.get("bypass_step")) or bool(state.get("general_query_only"))
-    if not intents or bypass:
+    if not intents:
+        return "finish"
+    if len(intents) == 1 and intents[0].get("intent") == "general_query":
+        return "finish"
+    subtasks = (state.get("task_plan") or {}).get("subtasks") or []
+    if state.get("output") or (subtasks and subtasks[0].get("id") == "bypass_step"):
         return "finish"
     return "planner"
 
 
 def route_after_validator(state: AgentState) -> str:
-    if state.get("global_transitions", 0) >= CIRCUIT_BREAKER_TRANSITIONS:
+    subtasks = (state.get("task_plan") or {}).get("subtasks") or []
+    next_index = (state.get("task_plan") or {}).get("currentStepIndex", 0)
+
+    if (state.get("global_transitions_count") or 0) >= CIRCUIT_BREAKER_TRANSITIONS:
         return "finish"
-    if state.get("tool_errors", 0) >= CIRCUIT_BREAKER_TOOL_ERRORS:
+    if (state.get("tool_errors_count") or 0) >= CIRCUIT_BREAKER_TOOL_ERRORS:
         return "finish"
-    if state.get("waiting_for_approval"):
+    if any((st.get("result") or {}).get("waitingForApproval") for st in subtasks):
         return "finish"
-    subtasks = state.get("subtasks") or []
-    if state.get("next_index", 0) >= len(subtasks) or state.get("next_index", 0) >= MAX_SUBTASKS:
-        return "finish"
-    if state.get("rejected_by_admin") and not state.get("replanned_after_rejection"):
+    if any(
+        st.get("status") == "failed"
+        and (st.get("result") or {}).get("rejectedByAdmin")
+        and not (st.get("result") or {}).get("replanned")
+        for st in subtasks
+    ):
         return "planner"
+    if next_index >= len(subtasks) or next_index >= MAX_PLAN_STEPS:
+        return "finish"
     return "executor"
 
 

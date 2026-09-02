@@ -69,3 +69,20 @@ async def emit(job_id: str, event: str, payload: Any) -> None:
         if isinstance(cards, list) and len(cards) > 0:
             await publish_agent_event(job_id, "cards", {"cards": cards})
     await publish_agent_event(job_id, event, payload)
+
+
+async def emit_status(job_id: str, message: str, node: str = "triage", plan: Any = None) -> None:
+    """镜像名称空间事件 ``${jobId}:status`` 词汇:{status, node, message, plan?}。"""
+    payload: dict[str, Any] = {"status": "executing", "node": node, "message": message}
+    if plan is not None:
+        payload["plan"] = plan
+    await publish_agent_event(job_id, "status", payload)
+
+
+async def emit_job_result(job_id: str, output: str, task_plan: Any = None, cards: Any = None) -> None:
+    """镜像名称空间事件 ``${jobId}:result`` 词汇:{output, taskPlan, cards}(不拆 cards)。"""
+    await publish_agent_event(
+        job_id,
+        "result",
+        {"output": output, "taskPlan": task_plan, "cards": cards},
+    )

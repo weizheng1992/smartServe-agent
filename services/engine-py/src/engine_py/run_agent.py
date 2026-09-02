@@ -1,13 +1,14 @@
 """run_agent — TS 侧 runAgent()(packages/engine/src/graph/buildGraph.ts)的 Python 入口。
 
 TODO(Phase 1b) — runAgent 隐性行为移植清单(影子等价性的关键,缺一即不等价):
-1. 零 LLM 欢迎语快路径(硬编码 greeting 直接 finish)
+1. 零 LLM 欢迎语快路径(硬编码 greeting 直接 finish,10ms 闪电旁路)
 2. 租户配置热加载(business_configs 表;fallback 阈值:nike $150 / adidas $120 / 默认 $100)
 3. 单 embedding 注入 + 三路并取(LongMemory / EpisodicMemory / ContextualRAG,
    TS 侧为 Promise.allSettled 并发,任意失败不阻断)
 4. session_metrics 遥测写入
 5. LangSmith feedback POST 回传
 6. CardSynthesizer 卡片合成
+7. 终态 `${jobId}:result` 事件收口发布
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from .event_bus import emit
 from .graph import build_graph
-from .graph.state import AgentState, to_ts_dict
+from .graph.state import DEFAULT_BUSINESS_CONFIG, DEFAULT_TASK_PLAN, AgentState, to_ts_dict
 
 
 class AgentJobInput(BaseModel):
@@ -35,19 +36,19 @@ class AgentJobInput(BaseModel):
 async def run_agent(job: AgentJobInput) -> dict:
     """执行一次完整 Agent 决策流水线,返回 camelCase 化的终态(影子 diff 格式)。"""
     initial: AgentState = {
-        "job_id": job.job_id,
         "thread_id": job.thread_id,
         "user_id": job.user_id,
-        "business_id": job.business_id,
-        "message": job.message,
-        "image_urls": job.image_urls,
-        "global_transitions": 0,
-        "tool_errors": 0,
-        "next_index": 0,
-        "tokens": 0,
+        "job_id": job.job_id,
+        "input": job.message,
+        "image_urls": list(job.image_urls),
+        "task_plan": dict(DEFAULT_TASK_PLAN),
+        "business_config": {**DEFAULT_BUSINESS_CONFIG, "businessId": job.business_id},
+        "global_transitions_count": 0,
+        "tool_errors_count": 0,
+        "loop_count": 0,
     }
 
-    # TODO(Phase 1b):此处按上述清单插入欢迎语快路径与三路记忆并取
+    # TODO(Phase 1b):此处按模块 docstring 清单插入欢迎语快路径与三路记忆并取
     graph = build_graph()
     final_state = await graph.ainvoke(initial)
 
