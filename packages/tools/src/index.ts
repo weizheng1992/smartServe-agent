@@ -1,5 +1,6 @@
 export * from './registry';
 export * from './cache';
+export * from './eventBus';
 export * from './metricRegistry';
 export * from './orderDomainService';
 export * from './mallDomainService';

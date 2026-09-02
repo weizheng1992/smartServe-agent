@@ -18,6 +18,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { type SealedEnv, initSealedEnv, loadDb, loadEngine } from '../helpers/sealedEnv';
+import { waitFor } from '../helpers/waitFor';
 
 let sealed: SealedEnv;
 let db: typeof import('db')['db'];
@@ -28,16 +29,6 @@ let io: typeof import('socket.io-client')['io'];
 
 const TS = Date.now();
 const RT_THREAD = `rt_contract_thread_${TS}`;
-
-/** 等待谓词为真或超时(ms) */
-async function waitFor(predicate: () => boolean, timeoutMs = 5000, stepMs = 25): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((r) => setTimeout(r, stepMs));
-  }
-  throw new Error(`waitFor 超时(${timeoutMs}ms)`);
-}
 
 beforeAll(async () => {
   sealed = await initSealedEnv();

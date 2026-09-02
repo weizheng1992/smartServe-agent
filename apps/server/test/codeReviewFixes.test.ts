@@ -7,6 +7,7 @@
  */
 import { beforeAll, describe, expect, it, mock } from 'bun:test';
 import { type SealedEnv, initSealedEnv, loadDb, loadEngine } from './helpers/sealedEnv';
+import { waitFor } from './helpers/waitFor';
 
 let sealed: SealedEnv;
 let ConversationRepository: typeof import('db')['ConversationRepository'];
@@ -101,11 +102,12 @@ describe('🛡️ Code Review Fixes Validation Suite', () => {
       // Connection 1 connects
       service.pipeSSE(jobId, mockRes1);
 
-      // Emit 3 events on conn1
+      // Emit 3 events on conn1。Phase 1 起 Redis 可用时走事件流路径,毫秒级异步投递。
       agentEventEmitter.emit('thought', { jobId, step: 'Step 1' });
       agentEventEmitter.emit('thought', { jobId, step: 'Step 2' });
       agentEventEmitter.emit('thought', { jobId, step: 'Step 3' });
 
+      await waitFor(() => conn1Chunks.length >= 3);
       expect(conn1Chunks.length).toBe(3);
       expect(conn1Chunks[0]).toContain('id: 1');
       expect(conn1Chunks[1]).toContain('id: 2');
@@ -132,6 +134,8 @@ describe('🛡️ Code Review Fixes Validation Suite', () => {
       };
 
       service.pipeSSE(jobId, mockRes2, '2');
+
+      await waitFor(() => conn2Chunks.some((c) => c.includes('id: 4')));
 
       // Verify that events with id > 2 (i.e. id 3 and id 4) were replayed immediately on reconnect
       expect(conn2Chunks.length).toBeGreaterThanOrEqual(2);

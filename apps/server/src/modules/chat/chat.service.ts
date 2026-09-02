@@ -11,6 +11,7 @@ import {
 } from 'engine';
 import type { Response } from 'express';
 import { logger } from 'observability';
+import { eventBusAvailable, readAgentEvents, watchAgentEvents } from 'tools';
 
 export class DispatchChatDto {
   @IsOptional()
@@ -209,6 +210,14 @@ export class ChatService {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders?.();
 
+    // Phase 1 事件主干:Redis 可用时逐连接直连事件流(流即缓冲,天然跨进程,
+    // Temporal worker / engine-py 发布的事件同样可达);不可用时回退下方
+    // 进程内缓冲路径,行为与 Phase 1 之前完全一致。
+    if (eventBusAvailable()) {
+      this.pipeSSEFromStream(jobId, res, lastEventId);
+      return;
+    }
+
     const jobBuffer = ChatService.getOrCreateJobBuffer(jobId);
 
     // 检查断线重连回放 (Replay missed events if client provides lastEventId)
@@ -267,7 +276,9 @@ export class ChatService {
       agentEventEmitter.off('result', onResult);
     });
 
-    if (!isMock) {
+    // Temporal 轮询仅在事件总线不可用时兜底;流路径下 worker 侧事件
+    // 已直接进入 Redis Streams,无需 600ms 轮询合成。
+    if (!isMock && !eventBusAvailable()) {
       // Temporal 轮询模式
       (async () => {
         try {
@@ -285,7 +296,7 @@ export class ChatService {
               }
 
               const plan = (await handle.query(currentPlanQuery)) as any;
-              if (plan && plan.steps && plan.steps.length > lastPlanIndex) {
+              if (plan?.steps && plan.steps.length > lastPlanIndex) {
                 for (let i = lastPlanIndex; i < plan.steps.length; i++) {
                   sendSSE('thought', { step: plan.steps[i], stepIndex: i });
                 }
@@ -316,6 +327,78 @@ export class ChatService {
         }
       })();
     }
+  }
+
+  /**
+   * Redis Streams 消费路径(Phase 1 事件主干)
+   *
+   * 流即缓冲:重放(XRANGE 全量 + seq > lastEventId 过滤)与实时消费
+   * (XREAD BLOCK)逐连接独立进行;SSE id 沿用发布端写入的单调整数 seq,
+   * 与 Last-Event-ID 断线重连语义完全兼容。result 事件后延迟 200ms 优雅
+   * 关闭,与进程内路径一致。
+   */
+  private pipeSSEFromStream(jobId: string, res: Response, lastEventId?: string): void {
+    let isClosed = false;
+    const lastSeq = Number.parseInt(lastEventId ?? '0', 10) || 0;
+    let lastEntryId = '0';
+
+    const writeFrame = (seq: number, event: string, data: any) => {
+      if (isClosed) return;
+      try {
+        res.write(`id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      } catch (err) {
+        logger.warn({ err, jobId }, '[ChatService] SSE stream write error');
+      }
+    };
+
+    // 15 秒心跳保活(与进程内路径相同)
+    const heartbeatTimer = setInterval(() => {
+      if (isClosed) return;
+      try {
+        res.write(`event: heartbeat\ndata: ${JSON.stringify({ timestamp: Date.now() })}\n\n`);
+      } catch {
+        // ignore
+      }
+    }, 15000);
+
+    const cleanup = () => {
+      if (isClosed) return;
+      isClosed = true;
+      clearInterval(heartbeatTimer);
+      res.end();
+    };
+
+    res.on('close', cleanup);
+
+    (async () => {
+      try {
+        const history = await readAgentEvents(jobId);
+        for (const e of history) {
+          lastEntryId = e.entryId;
+          if (e.seq > lastSeq) {
+            writeFrame(e.seq, e.type, e.data);
+            if (e.type === 'result') setTimeout(cleanup, 200);
+          }
+        }
+        if (isClosed) return;
+
+        await watchAgentEvents(
+          jobId,
+          lastEntryId,
+          (batch) => {
+            for (const e of batch) {
+              writeFrame(e.seq, e.type, e.data);
+              if (e.type === 'result') setTimeout(cleanup, 200);
+            }
+          },
+          { shouldStop: () => isClosed },
+        );
+      } catch (err) {
+        logger.warn({ err, jobId }, '[ChatService] SSE stream feed error');
+      } finally {
+        cleanup();
+      }
+    })();
   }
 
   /**

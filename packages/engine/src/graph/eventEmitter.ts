@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { publishAgentEvent } from 'tools';
 import type { SSECallback } from 'types';
 
 class AgentEventEmitter extends EventEmitter {
@@ -41,7 +42,38 @@ class AgentEventEmitter extends EventEmitter {
         this.results.set(jobId, data);
       }
     }
+
+    // Phase 1 事件主干:job 级事件同步镜像发布到 Redis Streams,使跨进程
+    // (Temporal worker / 未来的 engine-py)消费方与本地监听者看到同一事件流。
+    // Redis 不可用时 publishAgentEvent 内部静默跳过,进程内行为不变。
+    this.mirrorToEventBus(event, args[0]);
+
     return super.emit(event, ...args);
+  }
+
+  /**
+   * 将 job 级事件镜像到 Redis Streams 总线。两种既有事件词汇均覆盖:
+   * - 名称空间式 `jobId:status` / `jobId:result`
+   * - 载荷式 `thought` / `tool` / `result` / ...({ jobId, ... })
+   * result 事件先发布 cards 拆分事件再发布自身,保持
+   * "cards → result" 的线上顺序与递增 id 序列(与原服务端拆分逻辑一致)。
+   */
+  private mirrorToEventBus(event: string, arg0: unknown): void {
+    const namespaced = event.split(':');
+    if (namespaced.length === 2) {
+      void publishAgentEvent(namespaced[0], namespaced[1], arg0);
+      return;
+    }
+    const payload = arg0 as { jobId?: string; cards?: unknown[] } | undefined;
+    if (!payload || typeof payload !== 'object' || typeof payload.jobId !== 'string' || !payload.jobId) {
+      return;
+    }
+    void (async () => {
+      if (event === 'result' && Array.isArray(payload.cards) && payload.cards.length > 0) {
+        await publishAgentEvent(payload.jobId, 'cards', { cards: payload.cards });
+      }
+      await publishAgentEvent(payload.jobId, event, payload);
+    })();
   }
 
   // Playback all historical logs for a given jobId to a listener callback
