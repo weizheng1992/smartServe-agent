@@ -60,6 +60,27 @@ async def publish_agent_event(job_id: str, event_type: str, data: Any) -> int | 
         return None
 
 
+async def read_agent_events(job_id: str) -> list[dict]:
+    """读取 job 事件流全部历史条目(SSE 断线重连按 Last-Event-ID 回放用)。"""
+    client = await get_client()
+    try:
+        entries = await client.xrange(_stream_key(job_id), min="-", max="+")
+    except Exception:
+        return []
+    events: list[dict] = []
+    for entry_id, fields in entries:
+        try:
+            seq = int(fields.get("seq", "0"))
+        except ValueError:
+            continue
+        try:
+            data = json.loads(fields.get("data", "null"))
+        except Exception:
+            data = fields.get("data")
+        events.append({"entryId": entry_id, "seq": seq, "type": fields.get("type", ""), "data": data})
+    return events
+
+
 async def emit(job_id: str, event: str, payload: Any) -> None:
     """按 TS 侧 eventEmitter.mirrorToEventBus 的语义发布:
     ``result`` 事件携带非空 cards 时,先发 ``cards``(独立 seq)再发 ``result``。

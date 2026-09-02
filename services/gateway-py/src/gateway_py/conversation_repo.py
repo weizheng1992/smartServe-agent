@@ -173,12 +173,16 @@ async def get_conversation_timeline(thread_id: str, business_id: str | None = No
 
 
 async def update_conversation_status(
-    thread_id: str, business_id: str, status: str, assigned_operator_id: str | None = None, tags: list | None = None
+    thread_id: str,
+    business_id: str,
+    status: str,
+    assigned_operator_id: object = "__unset__",
+    tags: list | None = None,
 ) -> dict | None:
     async with get_session() as session:
         sets = ["status = :status", "updated_at = NOW()"]
         params: dict = {"tid": thread_id, "bid": business_id, "status": status}
-        if assigned_operator_id is not None:
+        if assigned_operator_id != "__unset__":
             sets.append("assigned_operator_id = :op")
             params["op"] = assigned_operator_id
         if tags is not None:
