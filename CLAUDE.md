@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Start Web App:** `bun run dev:web` (Port 3000, Vite 6 SPA)
 - **Start Admin Control Plane:** `bun run dev:admin` (Port 3001, Vite 6 SPA)
 - **Start FastAPI Gateway:** `bun run dev:server` (Port 4000, `uv run uvicorn gateway_py.main:app --reload`)
-- **Start Standalone Merchant App:** `bun run dev:merchant` (Port 3002, Next.js; `/api/*` and `/spi/*` proxied to gateway-py)
+- **Start Standalone Merchant App:** `bun run dev:merchant` (Port 3005, Next.js; `/api/*` and `/spi/*` proxied to gateway-py)
 - **Start Temporal Worker:** `bun run worker` (`uv run python -m engine_py.temporal.worker`, task queue `agent-tasks-py`)
 
 ### 1.2 Build, Lint & Format
