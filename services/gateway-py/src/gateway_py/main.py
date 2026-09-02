@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from socketio import ASGIApp
 
-from .routers import admin, chat, crud, spi
+from .routers import admin, chat, crud, merchant, spi
 from .realtime import sio
 from .tenant_context import TenantContextMiddleware, _PermissionError
 
@@ -40,6 +40,7 @@ fastapi_app.include_router(admin.router)
 fastapi_app.include_router(admin.approvals_router)
 fastapi_app.include_router(chat.router)
 fastapi_app.include_router(spi.router)
+fastapi_app.include_router(merchant.router)
 
 # socket.io 挂载在默认 path /socket.io,namespace /ws/chat;其余路径回落到 FastAPI
 app = ASGIApp(sio, other_asgi_app=fastapi_app)
