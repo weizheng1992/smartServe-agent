@@ -3,10 +3,16 @@
 from .models import (
     Base,
     BusinessConfigRow,
+    EpisodicEventRow,
     IntentExemplar,
     IntentLog,
+    LongMemoryFact,
     LowConfidenceLog,
     Message,
+    PendingApproval,
+    ApprovalOutboxEvent,
+    RagDocumentRow,
+    SessionMetric,
     TaskMemoryRow,
     Thread,
 )
@@ -21,5 +27,10 @@ __all__ = [
     "LowConfidenceLog",
     "IntentExemplar",
     "BusinessConfigRow",
+    "LongMemoryFact",
+    "EpisodicEventRow",
+    "RagDocumentRow",
+    "PendingApproval",
+    "ApprovalOutboxEvent",
     "get_session",
 ]
