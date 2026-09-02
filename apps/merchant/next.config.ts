@@ -6,7 +6,7 @@ const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:4000';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  transpilePackages: ['db', 'types', 'tools', 'ui'],
+  transpilePackages: ['types', 'ui'],
   async rewrites() {
     return [
       { source: '/api/:path*', destination: `${GATEWAY_URL}/api/:path*` },

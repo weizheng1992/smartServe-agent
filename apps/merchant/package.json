@@ -9,14 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "db": "workspace:*",
     "types": "workspace:*",
-    "tools": "workspace:*",
     "ui": "workspace:*",
-    "engine": "workspace:*",
-    "business-configs": "workspace:*",
-    "drizzle-orm": "^0.38.3",
-    "pg": "^8.13.1",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -25,7 +19,6 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/pg": "^8.11.10",
     "@types/react": "19.0.0",
     "@types/react-dom": "19.0.0",
     "typescript": "^5.0.0"

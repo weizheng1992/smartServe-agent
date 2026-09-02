@@ -125,3 +125,22 @@ Refer to `docs/architecture/` for comprehensive designs:
 - **HITL & Cognitive Backtracking**: `docs/architecture/hitl-replanning.md`
 - **Contextual RAG & Multi-Tenant**: `docs/architecture/contextual-rag.md`
 - **Multimodal Vision & Rich Cards**: `docs/architecture/multimodal-and-rich-cards.md`
+
+
+当上下文占用超过 60% 时，主动提醒我执行 `/compact` 压缩。
+压缩时保留：代码变更记录、待办清单、核心问题定位、测试结果；丢弃探索过程和冗余解释。
+
+
+## 模型档位使用规则
+1. 简单任务（格式调整、代码注释、单文件小修改、运行命令、查日志）：
+   主动提醒我切换到 Haiku 档，执行命令：/model claude-haiku-4-5
+   对应 glm-5.3-flash，节省积分。
+
+2. 常规任务（功能开发、普通调试、多文件修改）：
+   保持默认 Sonnet 档即可，对应 glm-5.3。
+
+3. 复杂任务（架构设计、深度重构、复杂bug排查）：
+   主动提醒我切换到 Opus 档，执行命令：/model claude-opus-4-6
+   用最强推理策略。
+
+4. 切换档位尽量在任务开始前切换，中途不要频繁切换，避免破坏提示缓存。

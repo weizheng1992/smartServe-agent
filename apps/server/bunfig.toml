@@ -1,3 +1,0 @@
-# bun test 配置:测试进程启动时先拉起密封容器环境(见 test/preload.ts)
-[test]
-preload = ["./test/preload.ts"]
