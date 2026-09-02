@@ -1,4 +1,4 @@
-"""异步 SQLAlchemy 会话 — Drizzle 仍是 schema 唯一所有者,本层只是投影(禁止建表/迁移)。"""
+"""异步 SQLAlchemy 会话 — schema 由 Alembic 管(见 services/engine-py/alembic)。"""
 
 from __future__ import annotations
 
