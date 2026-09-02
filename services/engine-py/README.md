@@ -35,8 +35,24 @@
 见 `run_agent.py` 顶部注释:欢迎语快路径、租户配置热加载、三路记忆/RAG
 并取、session_metrics 埋点、LangSmith 回传。
 
-## 影子双跑(规划)
+## 影子双跑
 
-回放 `threads`/`messages` 真实会话 → TS/Python 双引擎执行 → 对比
-triage 意图、planner 工具序列、最终输出;门禁 = promptfoo 三套基线
-无回归(`bun run test:prompt:compare`)+ 影子差异清零。
+```bash
+# 1. 安装(uv):uv sync --extra worker
+# 2. 把 DATABASE_URL 指向影子库(生产副本/容器),避免回放写库污染
+# 3. Python 侧回放:
+python -m engine_py.shadow.replay --limit 50 --out py_results.jsonl
+# 4. TS 侧等价回放(产出同格式 ts_results.jsonl,eval/ 批次补齐)
+# 5. 对比:
+python -m engine_py.shadow.diff --ts ts_results.jsonl --py py_results.jsonl
+```
+
+门禁 = promptfoo 三套基线无回归(`bun run test:prompt:compare`)+
+影子差异清零(intentMatchRate / toolMatchRate = 100%,错误清零)。
+
+## Temporal Worker
+
+```bash
+# 影子期独立队列 agent-tasks-py(与 TS 的 agent-tasks 物理隔离)
+python -m engine_py.temporal.worker
+```
