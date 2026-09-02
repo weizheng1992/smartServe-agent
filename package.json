@@ -29,6 +29,8 @@
     "test:eval": "bun eval/run-full-e2e-eval.ts",
     "test:prompt": "promptfoo eval -c eval/promptfooconfig.yaml --no-write --no-cache",
     "test:prompt:planner": "promptfoo eval -c eval/promptfoo.planner.yaml --no-write --no-cache",
+    "test:prompt:pin": "bun eval/pinBaselines.ts",
+    "test:prompt:compare": "bun eval/compareBaselines.ts",
     "db:clean": "bun packages/db/src/scripts/check-and-clean.ts"
   },
   "devDependencies": {
