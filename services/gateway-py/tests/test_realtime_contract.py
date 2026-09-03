@@ -23,7 +23,7 @@ import re
 import pytest
 import pytest_asyncio
 
-from .conftest import RT_THREAD, _TS, create_thread, wait_for
+from .conftest import _TS, RT_THREAD, create_thread, wait_for
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -36,12 +36,24 @@ async def rt_thread(seeded):
 
 
 class TestSseStream:
-    async def test_headers_frame_format_and_id_sequence(self, client, contract_fixtures):
+    async def test_headers_frame_format_and_id_sequence(self, live_server):
+        """SSE 契约必须走真网络栈(live_server)。
+
+        httpx ASGITransport 会把整个 ASGI app 跑到完成才进入 stream 上下文,
+        "连接建立后灌入事件"在 in-process 传输下结构性死锁(app 等事件、
+        测试等 app);真 TCP 下响应头立即返回、服务端与测试体并发运行,
+        才能还原 TS 基线(supertest over real HTTP)的时序。
+        """
+        import httpx
         from engine_py.event_bus import emit
 
         job_id = f"job_rt_{_TS}"
         raw = ""
-        async with client.stream("GET", f"/api/chat/{job_id}/stream") as res:
+        timeout = httpx.Timeout(10.0, read=30.0)
+        async with (
+            httpx.AsyncClient(base_url=live_server, timeout=timeout) as client,
+            client.stream("GET", f"/api/chat/{job_id}/stream") as res,
+        ):
             assert res.status_code == 200
             assert "text/event-stream" in res.headers["content-type"]
             assert "no-cache" in res.headers["cache-control"]
@@ -64,7 +76,10 @@ class TestSseStream:
         assert re.match(r"^id: 2\nevent: thought\ndata: \{.*\}$", event_blocks[1])
         assert re.match(r"^id: 3\nevent: (cards|result)\ndata: \{.*\}$", event_blocks[2])
 
-    async def test_last_event_id_replay_only_missing(self, client, contract_fixtures):
+    async def test_last_event_id_replay_only_missing(self, live_server):
+        # 与 test 1 同理走真网络栈:重放后无 result,流会持续心跳等待,
+        # in-process 传输下(app 必须跑完)永不结束。
+        import httpx
         from engine_py.event_bus import emit
 
         job_id = f"job_rt_replay_{_TS}"
@@ -75,9 +90,13 @@ class TestSseStream:
         await asyncio.sleep(0.1)
 
         raw = ""
-        async with client.stream(
-            "GET", f"/api/chat/{job_id}/stream", headers={"last-event-id": "1"}
-        ) as res2:
+        timeout = httpx.Timeout(10.0, read=30.0)
+        async with (
+            httpx.AsyncClient(base_url=live_server, timeout=timeout) as client,
+            client.stream(
+                "GET", f"/api/chat/{job_id}/stream", headers={"last-event-id": "1"}
+            ) as res2,
+        ):
             assert res2.status_code == 200
             async for chunk in res2.aiter_text():
                 raw += chunk

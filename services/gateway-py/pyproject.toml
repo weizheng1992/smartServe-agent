@@ -19,6 +19,8 @@ dev = [
     "pytest-asyncio>=1.0",
     "httpx>=0.27",
     "testcontainers[postgres,redis]>=4.8",
+    # python-socketio AsyncClient 的 websocket 传输依赖 aiohttp(契约测试 transports=["websocket"])
+    "aiohttp>=3.9",
 ]
 
 [tool.pytest.ini_options]

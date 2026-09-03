@@ -11,7 +11,10 @@ DATABASE_URL / REDIS_URL(用于无 Docker 的 CI)。
 from __future__ import annotations
 
 import asyncio
+import atexit
+import contextlib
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -32,8 +35,22 @@ RT_THREAD = f"rt_contract_thread_{_TS}"
 _CONTAINERS: list = []
 
 
+def _stop_containers() -> None:
+    """ryuk 禁用时的兜底回收(正常退出路径;SIGKILL 仍会泄漏,重跑前 docker rm 即可)。"""
+    for c in _CONTAINERS:
+        with contextlib.suppress(Exception):
+            c.stop()
+    _CONTAINERS.clear()
+
+
 def _bootstrap_sealed_env() -> None:
     if not _CONTAINERS and os.environ.get("AGENT_ALL_TEST_USE_EXTERNAL") != "1":
+        # Docker Desktop(macOS)默认 context 指向 ~/.docker/run/docker.sock,该路径挂进
+        # ryuk 容器不通(Desktop 仅对 /var/run/docker.sock 做特权 socket 转发)→ ryuk
+        # 启动即死:轻则容器泄漏无人回收,重则 Reaper 竞态失败直接 ConnectionError。
+        # 此时禁用 ryuk,由 atexit 兜底回收;Linux / 已启用默认 socket 的机器不受影响。
+        if sys.platform == "darwin" and not os.path.exists("/var/run/docker.sock"):
+            os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
         from testcontainers.postgres import PostgresContainer
         from testcontainers.redis import RedisContainer
 
@@ -42,6 +59,7 @@ def _bootstrap_sealed_env() -> None:
         redis = RedisContainer("redis:7-alpine")
         redis.start()
         _CONTAINERS.extend([pg, redis])
+        atexit.register(_stop_containers)
         os.environ["DATABASE_URL"] = pg.get_connection_url().replace("postgresql+psycopg2", "postgresql+asyncpg")
         os.environ["REDIS_URL"] = f"redis://{redis.get_container_host_ip()}:{redis.get_exposed_port(6379)}/0"
         # 商户独立库(agent_merchant)由 merchant_db 自愈建库,与平台库同实例,无需单独容器
@@ -73,7 +91,7 @@ async def seed_tenants() -> None:
             await session.execute(
                 text(
                     "INSERT INTO tenants (id, business_id, name, plan_tier, status) "
-                    "VALUES (:id, :bid, :name, 'free', 'active') ON CONFLICT (business_id) DO NOTHING"
+                    "VALUES (CAST(:id AS uuid), :bid, :name, 'free', 'active') ON CONFLICT (business_id) DO NOTHING"
                 ).bindparams(id=str(uuid.uuid4()), bid=business_id, name=name)
             )
         await session.commit()

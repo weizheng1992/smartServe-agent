@@ -14,6 +14,7 @@ import uuid
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
 from engine_py.db import get_session
@@ -119,7 +120,13 @@ async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Qu
                 return
             try:
                 res = await client.xread({stream_key: last_entry_id}, count=50, block=15000)
-            except Exception:  # noqa: BLE001 — 总线异常终止,客户端将带 Last-Event-ID 重连
+            except RedisTimeoutError:
+                # 客户端读超时先于 BLOCK 到期(redis-py socket_timeout 配置过小等):
+                # 按一次轮询到期处理,发心跳续命而不是掐断整个流。
+                yield f"event: heartbeat\ndata: {json.dumps({'timestamp': int(time.time() * 1000)})}\n\n"
+                continue
+            except Exception as err:  # noqa: BLE001 — 总线异常终止,客户端将带 Last-Event-ID 重连
+                print(f"[ChatSSE] event bus read failed, closing stream: {err}")
                 return
             if not res:
                 yield f"event: heartbeat\ndata: {json.dumps({'timestamp': int(time.time() * 1000)})}\n\n"
@@ -169,7 +176,10 @@ async def chat_orders(userId: str = "CUST-8801", businessId: str = "ecommerce"):
                 await session.execute(
                     text(
                         'SELECT o.order_id, o.status, o.carrier, o.tracking_number, o.estimated_delivery, '
-                        'o.total_amount, o.created_at, ua.recipient_name, ua.phone, ua.full_address '
+                        'o.total_amount, o.created_at, '
+                        "COALESCE(o.recipient_name, ua.receiver_name) AS recipient_name, "
+                        "COALESCE(o.phone, ua.receiver_phone) AS phone, "
+                        "COALESCE(o.shipping_address, ua.full_address) AS full_address "
                         "FROM orders o LEFT JOIN user_addresses ua ON o.address_id = ua.id "
                         "WHERE o.business_id = :bid AND (o.user_id = :uid OR :uid = 'all') "
                         "ORDER BY o.created_at DESC LIMIT 20"

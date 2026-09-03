@@ -33,7 +33,12 @@ async def value_error_handler(request: Request, exc: ValueError):
 
 @fastapi_app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "gateway-py", "timestamp": __import__("datetime").datetime.now().isoformat()}
+    return {
+        "success": True,
+        "status": "ok",
+        "service": "gateway-py",
+        "timestamp": __import__("datetime").datetime.now().isoformat(),
+    }
 
 
 fastapi_app.include_router(crud.router)

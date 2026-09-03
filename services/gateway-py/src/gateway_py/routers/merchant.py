@@ -17,6 +17,7 @@ import uuid as _uuid
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
 from engine_py.approvals.gatekeeper import ApprovalGatekeeper
@@ -492,9 +493,12 @@ async def store_chat_stream(threadId: str | None = Query(None)):
         try:
             while True:
                 if pubsub is not None:
+                    # 阻塞式等待(客户端 socket_timeout 需 > timeout,见 event_bus.get_client):
+                    # 非阻塞轮询 + sleep 的写法会让每条消息延迟 15~30s 才转发——
+                    # get_message(timeout=0) 首轮吞不掉已到达的消息,须下一轮才可见。
                     try:
-                        msg = await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=True), timeout=15.0)
-                    except asyncio.TimeoutError:
+                        msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
+                    except (asyncio.TimeoutError, RedisTimeoutError):
                         msg = None
                     if msg and msg.get("type") == "message":
                         data = msg.get("data")
@@ -502,13 +506,14 @@ async def store_chat_stream(threadId: str | None = Query(None)):
                             data = data.decode()
                         yield f"event: message\ndata: {data}\n\n"
                         continue
-                await asyncio.sleep(15.0)
+                else:
+                    await asyncio.sleep(15.0)
                 yield f"event: heartbeat\ndata: {json.dumps({'timestamp': _ts_ms()})}\n\n"
         finally:
             if pubsub is not None:
                 try:
                     await pubsub.unsubscribe(channel)
-                    await pubsub.close()
+                    await pubsub.aclose()
                 except Exception:  # noqa: BLE001
                     pass
 

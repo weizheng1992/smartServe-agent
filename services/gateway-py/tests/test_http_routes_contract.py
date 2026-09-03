@@ -338,45 +338,47 @@ class TestMerchantStoreChatStream:
     历史缺陷:曾用普通 ``Response(async_generator)`` 返回,Starlette ``render()``
     对非 bytes 内容调用 ``.encode`` → 构造期 AttributeError → 500。
 
-    自建 ASGI client 而不复用 session 级 ``client`` fixture:SSE 通道不依赖
-    种子租户数据,且外部直连模式下开发库 schema 可能与迁移头存在漂移。
+    走 live_server 而非 session 级 ``client``(ASGITransport):SSE 通道不依赖
+    种子租户数据,且 in-process 传输下"订阅后 publish"结构性死锁(见用例内注释)。
     """
 
-    async def test_stream_returns_sse_and_relays_pubsub(self):
+    async def test_stream_returns_sse_and_relays_pubsub(self, live_server):
         import asyncio
         import json as _json
 
         import httpx
         from engine_py.event_bus import get_client as get_redis_client
 
-        from gateway_py.main import app as asgi_app
-
+        # SSE 必须走真网络栈:ASGITransport 把 app 跑完才进 stream 上下文,
+        # "订阅后 publish、断言转发"在 in-process 传输下结构性死锁。
         thread_id = f"merchant_stream_{_TS}"
-        transport = httpx.ASGITransport(app=asgi_app)
+        timeout = httpx.Timeout(10.0, read=30.0)
 
         async with (
-            httpx.AsyncClient(transport=transport, base_url="http://testserver") as client,
+            httpx.AsyncClient(base_url=live_server, timeout=timeout) as client,
             client.stream("GET", "/api/store/chat/stream", params={"threadId": thread_id}) as res,
         ):
                 assert res.status_code == 200
                 assert "text/event-stream" in res.headers["content-type"]
 
                 buf = ""
+                published = False
                 async for chunk in res.aiter_text():
+                    # httpx 流式响应只能迭代一次:connected 落地后即可发布,
+                    # 继续在同一迭代里等待 pub/sub 转发
+                    if not published and "event: connected" in buf:
+                        published = True
+                        await asyncio.sleep(0.2)  # 等服务端 subscribe 完成
+                        redis = await get_redis_client()
+                        await redis.publish(
+                            f"thread:{thread_id}:message", _json.dumps({"text": "contract-relay"})
+                        )
                     buf += chunk
-                    if "event: connected" in buf:
+                    if "event: message" in buf:
                         break
+
                 assert "event: connected" in buf
                 assert f'"threadId": "{thread_id}"' in buf
-
                 # 订阅建立后,经由 Redis pub/sub 频道发布的消息应被原样转发
-                await asyncio.sleep(0.2)
-                redis = await get_redis_client()
-                await redis.publish(f"thread:{thread_id}:message", _json.dumps({"text": "contract-relay"}))
-                relayed = buf
-                async for chunk in res.aiter_text():
-                    relayed += chunk
-                    if "event: message" in relayed:
-                        break
-                assert "event: message" in relayed
-                assert '"text": "contract-relay"' in relayed
+                assert "event: message" in buf
+                assert '"text": "contract-relay"' in buf

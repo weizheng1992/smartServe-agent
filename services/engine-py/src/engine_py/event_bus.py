@@ -34,7 +34,10 @@ def _seq_key(job_id: str) -> str:
 async def get_client() -> aioredis.Redis:
     global _client
     if _client is None:
-        _client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        # redis-py asyncio 默认 socket_timeout=5(redis/_defaults.py),而 SSE 消费端
+        # XREAD BLOCK 15000 会让服务端挂起 15s —— 客户端 5s 先炸 TimeoutError,
+        # 网关 SSE 就会在空闲 5s 后静默断流。读超时必须 > 最大 BLOCK 时长(+ 余量)。
+        _client = aioredis.from_url(settings.redis_url, decode_responses=True, socket_timeout=20)
     return _client
 
 
