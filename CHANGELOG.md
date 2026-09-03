@@ -4,6 +4,38 @@
 
 ---
 
+## [2.3.1] - 2026-09-04 (契约测试套件首次全绿:SSE 静默断流、审批恢复跨租户搬家、商户中继延迟三大生产缺陷修复)
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **SSE 流空闲 5 秒必静默断流 (`engine_py/event_bus.py` + `gateway-py/routers/chat.py`)**:
+  - 根因:redis-py asyncio 默认 `socket_timeout=5`(`redis/_defaults.py`),小于 `XREAD BLOCK 15000` 的服务端阻塞时长 → 空闲 5s 后 `xread` 必抛 `TimeoutError`(注意 `redis.exceptions.TimeoutError` 不继承内建 `TimeoutError`),chat 路由 `except Exception: return` 将其吞成空响应。生产环境一直靠浏览器 `Last-Event-ID` 自动重连掩盖。
+  - 修复:`get_client` 显式 `socket_timeout=20`(> 最大 BLOCK 时长 + 余量,阻塞命令上线必检不变量);chat SSE 对 `RedisTimeoutError` 降级为心跳续命而非断流,其他总线异常 print 不吞错。
+- **审批恢复把线程跨租户"搬家"(违反架构不变量 #1 多租户隔离,`engine_py/run_agent.py` + `approvals/`)**:
+  - 根因:`_ensure_thread` 的 `ON CONFLICT DO UPDATE` 会覆盖已有线程的 `business_id`;而审批恢复派发(gatekeeper 同步 Fast-Path 与 outbox_worker 对账补偿)均未携带 `businessId` → 默认 `ecommerce` 直接改写 nike 租户线程归属,品牌配置、画像、会话列表全部错位。
+  - 修复:upsert 只续 `updated_at`,线程租户归属创建时冻结;两处恢复派发显式携带审批单的 `record.business_id`,outbox payload 补 `businessId` 字段。
+- **商户 SSE 中继消息延迟 15~30s (`gateway-py/routers/merchant.py`)**:
+  - 根因:`get_message()`(默认 `timeout=0.0`)非阻塞轮询实测会吞一轮消息——消息已到达,第一次轮询仍返回 None,须下一轮才可见;叠加 `sleep(15)` 心跳节拍,每条 pub/sub 转发被拖一个完整周期。
+  - 修复:改阻塞式 `get_message(timeout=15.0)`(客户端 socket_timeout=20 > 15 保证不误杀),实测转发 30.08s → 0.30s;顺带 `pubsub.close()` → `aclose()` 消除弃用告警。
+- **asyncpg 对 uuid 列 raw SQL 绑定缺 CAST(审批 resolve 500 根因)**:gatekeeper ×3(含超时解挂的潜伏同类 bug)与 outbox_worker ×2 的 `UPDATE ... WHERE id = :id` 全部补 `CAST(:id AS uuid)`。
+- **Alembic 0002 在全新库 `DuplicateTable`**:0001 基线是动态 `Base.metadata.create_all`(非冻结快照),后续迁移必须幂等 → 加 inspector 守卫,并固化约定。
+- **健康路由缺统一包络**:`/api/health` 补 `success: true`。
+
+### 🧪 Testing (测试基建)
+
+- **契约套件首次全绿:29 passed / ~5s**(起点为迁移直接报错、整套跑不完;亦说明移植后从未完整执行过,本次等于把冻结契约真正钉死)。全程密封 testcontainers(PG 15 + Redis 7),任一裸机可复跑 `bun run test:eval`。
+- **SSE 类测试统一切 `live_server` 真网络栈**:httpx `ASGITransport` 会把整个 ASGI app 跑到完成才进入 stream 上下文(body 全缓冲),"连接后灌事件/订阅后 publish"在 in-process 传输下结构性死锁——此前一次 22 分钟挂死即源于此。
+- 商户流测试修复 httpx 流式响应二次迭代(`StreamConsumed`),改为单迭代内"connected → publish → 断言转发"。
+- **macOS Docker Desktop 下 ryuk 必死**:默认 context 指向 `~/.docker/run/docker.sock`,该路径挂进 ryuk 容器不通 → 启动竞态与容器泄漏;conftest 按平台探测禁用 ryuk + atexit 兜底回收。
+- gateway-py dev 依赖补 `aiohttp`(python-socketio AsyncClient websocket 传输前置,契约测试 `transports=["websocket"]` 所需)。
+
+### ⚠️ Notes (注意事项)
+
+- 涉及文件 ruff 检查与 HEAD 基线持平(仅自动整理 2 处新增 import 排序);存量告警(DTZ005/S110 等)未动。
+- 阻塞命令使用约定:任何 `XREAD BLOCK` / `BLPOP` 类调用的 BLOCK 时长必须 < 客户端 `socket_timeout`(现 20s),新增阻塞调用前先核对该不变量。
+
+---
+
 ## [2.3.0] - 2026-09-03 (坏例候选池闭环 v1、outbox 对账补偿修复、网关数据真实性清理)
 
 ### 🌟 Major Highlights (重大亮点)
