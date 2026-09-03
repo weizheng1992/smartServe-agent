@@ -1,5 +1,3 @@
-'use client';
-
 import type React from 'react';
 import { Button, Checkbox, Sheet, SheetContent, SheetHeader, SheetTitle } from 'ui';
 import type { CustomerAddress } from '../address/AddressModal';

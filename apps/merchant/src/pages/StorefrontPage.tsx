@@ -1,11 +1,9 @@
-'use client';
-
-import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import type { ThirdPartyOrder, ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from 'ui';
-import { StorefrontHeader } from './components/navbar/StorefrontHeader';
-import { useCurrentUser } from './context/UserContext';
+import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
+import { useCurrentUser } from '../context/UserContext';
 
 export default function StorefrontPage() {
   const { user } = useCurrentUser();
@@ -129,7 +127,7 @@ export default function StorefrontPage() {
           </div>
           <div className="flex gap-3">
             <Link
-              href="/orders"
+              to="/orders"
               className="px-5 py-2.5 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-500 transition shadow-sm flex items-center space-x-2 text-sm"
             >
               <span>📋 订单中心</span>
@@ -146,7 +144,7 @@ export default function StorefrontPage() {
               <span>✅</span>
               <span>{cartSuccessNotice}</span>
             </div>
-            <Link href="/cart" className="underline hover:text-emerald-950 font-bold">
+            <Link to="/cart" className="underline hover:text-emerald-950 font-bold">
               去购物车结算 →
             </Link>
           </div>
@@ -181,7 +179,7 @@ export default function StorefrontPage() {
                 <div className="p-4 flex-1 flex flex-col">
                   {/* SPU 主图 */}
                   <Link
-                    href={`/products/${product.productId}`}
+                    to={`/products/${product.productId}`}
                     className="w-full h-44 bg-slate-100 rounded-lg overflow-hidden mb-3 relative flex items-center justify-center block"
                   >
                     {product.imageUrl ? (
@@ -202,7 +200,7 @@ export default function StorefrontPage() {
                     {product.category || '潮流单品'}
                   </span>
                   <Link
-                    href={`/products/${product.productId}`}
+                    to={`/products/${product.productId}`}
                     className="font-bold text-slate-900 text-sm line-clamp-2 leading-snug hover:text-emerald-700 transition"
                   >
                     {product.title}
@@ -242,7 +240,7 @@ export default function StorefrontPage() {
 
                 <div className="p-3 bg-slate-50 border-t border-slate-100 flex gap-2">
                   <Link
-                    href={`/products/${product.productId}`}
+                    to={`/products/${product.productId}`}
                     className="flex-1 py-1.5 text-center bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-100 transition cursor-pointer"
                   >
                     详情与参数

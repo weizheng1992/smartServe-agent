@@ -1,11 +1,9 @@
-'use client';
-
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router';
+import { useParams } from 'react-router';
 import type { ThirdPartyOrder } from 'types';
-import { StorefrontHeader } from '../../components/navbar/StorefrontHeader';
-import { LogisticsModal } from '../../components/orders/LogisticsModal';
+import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
+import { LogisticsModal } from '../components/orders/LogisticsModal';
 
 function parseAddress(addr: any) {
   if (!addr) {
@@ -95,7 +93,7 @@ export default function SingleOrderDetailPage() {
           <p className="text-xs text-slate-500 mt-1">{error || '该订单不存在或已被删除'}</p>
           <div className="mt-6">
             <Link
-              href="/orders"
+              to="/orders"
               className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-500 transition"
             >
               返回我的订单中心
@@ -114,7 +112,7 @@ export default function SingleOrderDetailPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center space-x-2 text-xs text-slate-500 mb-1">
-              <Link href="/orders" className="hover:text-emerald-700">
+              <Link to="/orders" className="hover:text-emerald-700">
                 我的订单
               </Link>
               <span>/</span>

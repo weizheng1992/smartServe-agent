@@ -10,7 +10,7 @@
 - **启动 Web 应用:** `bun run dev:web`(端口 3000,Vite 6 SPA)
 - **启动 Admin 管控台:** `bun run dev:admin`(端口 3001,Vite 6 SPA)
 - **启动 FastAPI 网关:** `bun run dev:server`(端口 4000,`uv run uvicorn gateway_py.main:app --reload`)
-- **启动独立商户应用:** `bun run dev:merchant`(端口 3005,Next.js;`/api/*` 与 `/spi/*` 代理至 gateway-py)
+- **启动独立商户应用:** `bun run dev:merchant`(端口 3005,Vite 6 SPA;`/api/*` 与 `/spi/*` 由 Vite proxy 代理至 gateway-py)
 - **启动 Temporal Worker:** `bun run worker`(`uv run python -m engine_py.temporal.worker`,任务队列 `agent-tasks-py`)
 
 ### 1.2 构建、Lint 与格式化
@@ -47,7 +47,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 │                      前端应用 (apps/, TypeScript)                      │
 │  - apps/web:      Vite 6 + React 19 客户端聊天 SPA(SSE、卡片)         │
 │  - apps/admin:    Vite 6 + React 19 SaaS 管控台(10 大模块)           │
-│  - apps/merchant: 独立商户门户(Next.js;代理至 Python 网关)           │
+│  - apps/merchant: 独立商户门户(Vite 6 SPA;代理至 Python 网关)       │
 └───────────────────────────┬────────────────────────────────────────────┘
                             │ HTTP / SSE / socket.io
                             ▼

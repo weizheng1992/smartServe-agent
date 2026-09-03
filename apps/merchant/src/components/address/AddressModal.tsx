@@ -1,5 +1,3 @@
-'use client';
-
 import type React from 'react';
 import { useState } from 'react';
 import { Button, Checkbox, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label } from 'ui';

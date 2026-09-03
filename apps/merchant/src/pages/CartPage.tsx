@@ -1,8 +1,5 @@
-'use client';
-
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 import { Button } from 'ui';
 import { AddressModal, type CustomerAddress } from '../components/address/AddressModal';
 import type { CartItem } from '../components/cart/CartDrawer';
@@ -10,7 +7,7 @@ import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { useCurrentUser } from '../context/UserContext';
 
 export default function CartPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { user } = useCurrentUser();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
@@ -160,7 +157,7 @@ export default function CartPage() {
               </div>
             </div>
             <Link
-              href="/orders"
+              to="/orders"
               className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-500 transition"
             >
               前往我的订单 →
@@ -175,7 +172,7 @@ export default function CartPage() {
             <p className="text-xs text-slate-400 mt-1">快去挑选心仪的机能服饰与配件吧！</p>
             <div className="mt-6">
               <Link
-                href="/"
+                to="/"
                 className="px-5 py-2.5 bg-emerald-600 text-white text-xs font-semibold rounded-xl hover:bg-emerald-500 shadow-xs transition"
               >
                 前往选购
@@ -218,7 +215,7 @@ export default function CartPage() {
                     />
                     <div className="flex-1 min-w-0">
                       <Link
-                        href={`/products/${item.spuId}`}
+                        to={`/products/${item.spuId}`}
                         className="text-xs font-bold text-slate-900 hover:text-emerald-700 truncate block"
                       >
                         {item.title}

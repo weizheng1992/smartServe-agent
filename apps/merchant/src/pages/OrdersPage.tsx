@@ -1,7 +1,5 @@
-'use client';
-
-import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import type { ThirdPartyOrder } from 'types';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { LogisticsModal } from '../components/orders/LogisticsModal';
@@ -164,7 +162,7 @@ export default function OrdersPage() {
             <p className="text-xs text-slate-400 mt-1">您还没有符合该状态筛选的订单记录</p>
             <div className="mt-6">
               <Link
-                href="/"
+                to="/"
                 className="px-5 py-2.5 bg-emerald-600 text-white text-xs font-semibold rounded-xl hover:bg-emerald-500 shadow-xs transition"
               >
                 去商城选购

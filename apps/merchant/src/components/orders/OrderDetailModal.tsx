@@ -1,5 +1,3 @@
-'use client';
-
 import type React from 'react';
 import type { ThirdPartyOrder } from 'types';
 import { Badge, Button, Dialog, DialogContent, DialogHeader, DialogTitle } from 'ui';

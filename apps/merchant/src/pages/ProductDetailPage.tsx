@@ -1,15 +1,13 @@
-'use client';
-
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import type { ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button } from 'ui';
-import { StorefrontHeader } from '../../components/navbar/StorefrontHeader';
+import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 
 export default function ProductDetailPage() {
   const params = useParams();
-  const router = useRouter();
+  const navigate = useNavigate();
   const productId = params?.id as string;
 
   const [product, setProduct] = useState<ThirdPartyProduct | null>(null);
@@ -96,7 +94,7 @@ export default function ProductDetailPage() {
   const handleInstantBuy = () => {
     if (!product || !selectedSku) return;
     handleAddToCart();
-    router.push('/cart');
+    navigate('/cart');
   };
 
   if (loading) {
@@ -123,7 +121,7 @@ export default function ProductDetailPage() {
           <p className="text-xs text-slate-500 mt-1">{error || '商品可能已下架或链接错误'}</p>
           <div className="mt-6">
             <Link
-              href="/"
+              to="/"
               className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-500 transition"
             >
               返回商城首页
@@ -144,7 +142,7 @@ export default function ProductDetailPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
         {/* 顶部面包屑 */}
         <div className="flex items-center space-x-2 text-xs text-slate-500 mb-6">
-          <Link href="/" className="hover:text-emerald-700">
+          <Link to="/" className="hover:text-emerald-700">
             首页
           </Link>
           <span>/</span>
@@ -159,7 +157,7 @@ export default function ProductDetailPage() {
               <span>✅</span>
               <span>{cartSuccessMessage}</span>
             </div>
-            <Link href="/cart" className="underline hover:text-emerald-950 font-bold">
+            <Link to="/cart" className="underline hover:text-emerald-950 font-bold">
               去购物车结算 →
             </Link>
           </div>

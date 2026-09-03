@@ -1,7 +1,5 @@
-'use client';
-
-import { usePathname } from 'next/navigation';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router';
 import type { OrderCardData, RichCardBlock } from 'types';
 import { Button, Input, RichCardRenderer } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
@@ -163,7 +161,7 @@ export function FloatingChatWidget({
 }: {
   contextOverride?: Partial<RouteGreetingContext>;
 }) {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const { user } = useCurrentUser();
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');

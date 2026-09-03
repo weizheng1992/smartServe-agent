@@ -1,7 +1,5 @@
-'use client';
-
-import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { Button, Input } from 'ui';
 import type { CustomerAddress } from '../components/address/AddressModal';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
