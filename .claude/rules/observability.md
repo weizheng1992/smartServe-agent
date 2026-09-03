@@ -26,6 +26,7 @@ paths: ["services/engine-py/src/engine_py/run_agent.py", "services/engine-py/src
 - **自动驾驶解决率 (Autopilot Resolution Ratio)**：
   - 统计无需人工接管直接在智能体生命周期内闭环完成的会话比例。
   - 实时监控低置信度回退率、HITL 触发率与平均执行轮次（Step Count）。
+- **熔断落盘（2026-09-03 起）**：会话命中熔断（全局转移 ≥10 次或工具错误 ≥3 次，阈值见 `graph/build_graph.py`）时，`run_agent` 以 `resolution_status='circuit_breaker'` 落盘 `session_metrics` 并同步计入 `global_transitions_count` / `tool_errors_count`；`/api/logs` 的 `rawDetail` 透出这两个计数，坏例候选池据此单独立案。
 
 ---
 

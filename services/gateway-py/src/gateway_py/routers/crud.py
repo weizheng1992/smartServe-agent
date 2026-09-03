@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, select, text
 
+from engine_py.badcase.pool import SOURCE_PERSONA_FACT_DELETED, record_badcase_signal
 from engine_py.db import (
     EvalRunRecordRow,
     GuardrailRule,
@@ -208,8 +209,18 @@ async def delete_persona(fact_id: str, x_tenant_id: str | None = Header(None)):
         ).scalar_one_or_none()
         if not row:
             raise HTTPException(404, f"Persona memory fact '{fact_id}' not found in database")
+        # 📥 Bad-Case 信号上下文:删除前捕获引用(事实原文不复制入池)
+        fact_user_id = row.user_id
+        fact_business_id = row.business_id or "ecommerce"
         await session.delete(row)
         await session.commit()
+    # 📥 删除偏好事实 → 疑似记忆管道缺陷(suspected_defect 先验)
+    await record_badcase_signal(
+        SOURCE_PERSONA_FACT_DELETED,
+        conversation_ref=f"fact:{fact_id}",
+        business_id=fact_business_id,
+        note=f"画像事实被人工删除(user={fact_user_id})",
+    )
     return {"success": True, "message": f"Persona fact {fact_id} deleted successfully"}
 
 
@@ -327,6 +338,9 @@ def _eval_item(r: EvalRunRecordRow) -> dict:
         "ragFaithfulness": 0.92 if r.rag_faithfulness is None else r.rag_faithfulness,
         "hitlTriggerRate": 0.12 if r.hitl_trigger_rate is None else r.hitl_trigger_rate,
         "status": r.status or "completed",
+        # 显式标注:eval_run_records 全部由本地随机生成器写入,非真实评测。
+        # 坏例看板 / BI 数据源必须依此排除;真实评测走 bun run test:prompt。
+        "isMock": True,
         "createdAt": created_str,
     }
 
@@ -346,7 +360,7 @@ class TriggerEvalIn(BaseModel):
 
 @router.post("/api/evals/run")
 async def trigger_eval(body: TriggerEvalIn):
-    # 与 TS 一致:本地随机指标生成(非真实评测)
+    # 与 TS 一致:本地随机指标生成(非真实评测)——响应经 _eval_item 显式携带 isMock: true
     tool_accuracy = round(0.95 + (random.random() * 0.04 - 0.02), 3)
     rag_faithfulness = round(0.92 + (random.random() * 0.05 - 0.02), 3)
     hitl_rate = round(0.1 + (random.random() * 0.05 - 0.02), 3)
@@ -393,10 +407,11 @@ async def system_logs(
                 "traceId": f"tr_{l.thread_id or 'sys'}",
                 "businessId": tenantId if tenantId and tenantId != "all" else "ecommerce",
                 "model": "text-embedding-3-small" if l.method == "embedding" else "gpt-4o-mini",
-                "promptTokens": 350,
-                "completionTokens": 45,
-                "totalTokens": 395,
-                "latencyMs": 280,
+                # intent_logs 无 token/延迟遥测(llm_call_logs 未接线),返回真实值 0 而非假数
+                "promptTokens": 0,
+                "completionTokens": 0,
+                "totalTokens": 0,
+                "latencyMs": 0,
                 "statusCode": 200,
                 "logType": "intent_triage",
                 "rawDetail": {
@@ -408,23 +423,26 @@ async def system_logs(
             }
         )
     for m in metric_rows:
-        total_tokens = m.total_tokens or 1000
+        # 真实值来自 session_metrics;prompt/completion 拆分暂无数据源,统一为 0 不造假数
+        total_tokens = m.total_tokens or 0
         logs.append(
             {
                 "id": f"log_metric_{str(m.id)[:8]}",
                 "traceId": f"tr_{m.thread_id}",
                 "businessId": m.business_id,
                 "model": "gpt-4o-mini-2024-07-18",
-                "promptTokens": int(total_tokens * 0.8),
-                "completionTokens": int(total_tokens * 0.2),
+                "promptTokens": 0,
+                "completionTokens": 0,
                 "totalTokens": total_tokens,
-                "latencyMs": round(m.avg_latency_ms or 500),
+                "latencyMs": round(m.avg_latency_ms or 0),
                 "statusCode": 200,
                 "logType": "llm_call",
                 "rawDetail": {
                     "resolutionStatus": m.resolution_status,
                     "costUsd": m.calculated_cost_usd,
                     "nodeTransitionsCount": m.node_transitions_count,
+                    "globalTransitionsCount": m.global_transitions_count or 0,
+                    "toolErrorsCount": m.tool_errors_count or 0,
                 },
                 "timestamp": m.created_at.strftime("%Y-%m-%d %H:%M:%S") if m.created_at else "2026-02-23 18:00:00",
             }

@@ -20,6 +20,7 @@ import uuid
 from sqlalchemy import desc, select, text
 
 from ..config import settings
+from ..badcase.pool import SOURCE_APPROVAL_REJECTED, SOURCE_HUMAN_TAKEOVER, record_badcase_signal
 from ..db import ApprovalOutboxEvent, Message, PendingApproval, get_session
 from ..event_bus import emit_status, get_client, publish_agent_event
 from ..memory.short_memory import _FALLBACK_USER_ID
@@ -235,9 +236,9 @@ class ApprovalGatekeeper:
                     is_expired = bool(latest_approval.deadline and now > latest_approval.deadline)
                     if is_expired:
                         await session.execute(
-                            text("UPDATE pending_approvals SET status = 'expired' WHERE id = :aid").bindparams(
-                                aid=latest_approval.id
-                            )
+                            text(
+                                "UPDATE pending_approvals SET status = 'expired' WHERE id = CAST(:aid AS uuid)"
+                            ).bindparams(aid=latest_approval.id)
                         )
                         await session.commit()
                         is_refund = opts.get("toolName") == "processRefund"
@@ -487,6 +488,14 @@ class ApprovalGatekeeper:
             )
             await session.commit()
 
+        # 📥 Bad-Case 信号入池:转人工(中性先验,仅新建工单时记录,重复呼叫不重复入池)
+        await record_badcase_signal(
+            SOURCE_HUMAN_TAKEOVER,
+            conversation_ref=f"thread:{thread_id}",
+            business_id=business_id,
+            note="实时人工接管被发起",
+        )
+
         await _add_system_message(
             thread_id, "system", "【系统提示】人工客服已主动接入当前会话，您可以向客服发送消息进行实时沟通。"
         )
@@ -630,6 +639,7 @@ class ApprovalGatekeeper:
                     "jobId": deterministic_job_id,
                     "threadId": record.thread_id,
                     "userId": thread_user_id,
+                    "businessId": record.business_id,
                     "systemPromptText": system_prompt_text,
                     "nextStatus": next_status,
                 }
@@ -652,6 +662,15 @@ class ApprovalGatekeeper:
                         )
                 await session.commit()
 
+            # 📥 Bad-Case 信号入池:驳回退款(默认设计行为先验;Fast-Path 派发与信号互不影响)
+            if next_status == "rejected":
+                await record_badcase_signal(
+                    SOURCE_APPROVAL_REJECTED,
+                    conversation_ref=f"approval:{approval_id}",
+                    business_id=str(getattr(record, "business_id", None) or "ecommerce"),
+                    note=f"审批驳回,原因: {rejection_reason or '未填写'}",
+                )
+
             if next_status == "resolved_by_human":
                 return {"success": True, "threadId": thread_id or record.thread_id, "status": next_status}
 
@@ -665,6 +684,7 @@ class ApprovalGatekeeper:
                             jobId=deterministic_job_id,
                             threadId=record.thread_id,
                             userId=thread_user_id,
+                            businessId=record.business_id,
                             message=system_prompt_text,
                         )
                     )
@@ -673,7 +693,7 @@ class ApprovalGatekeeper:
                     await session.execute(
                         text(
                             "UPDATE approval_outbox_events SET status = 'completed', updated_at = NOW() "
-                            "WHERE id = :eid"
+                            "WHERE id = CAST(:eid AS uuid)"
                         ).bindparams(eid=outbox_event_id)
                     )
                     await session.commit()
@@ -682,7 +702,7 @@ class ApprovalGatekeeper:
                     await session.execute(
                         text(
                             "UPDATE approval_outbox_events SET status = 'pending', error_message = :err, "
-                            "updated_at = NOW() WHERE id = :eid"
+                            "updated_at = NOW() WHERE id = CAST(:eid AS uuid)"
                         ).bindparams(err=str(dispatch_err), eid=outbox_event_id)
                     )
                     await session.commit()

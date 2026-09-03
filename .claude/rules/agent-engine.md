@@ -53,11 +53,19 @@ paths: ["services/engine-py/**/*"]
 
 - **HITL 安全挂起**：退款、改地址等高危动作触发挂起，记录写入 `pending_approvals`（ID 必须为 UUID 格式，网关校验）。
 - **事务发件箱（Transactional Outbox）**：审批动作与 `approval_outbox_events` 事件在同一数据库事务中原子提交。
-- **确定性去重恢复**：恢复任务采用确定性标识 `job_resume_${approvalId}`，结合 `outbox_worker` 轮询重试机制，彻底杜绝丢单与重复退款。
+- **确定性去重恢复**：恢复任务采用确定性标识 `job_resume_${approvalId}`。恢复由 `process_approval_action` 的同步 Fast-Path 派发（派发失败事件留 `pending`）；`outbox_worker.process_pending_events` 为失败事件的对账补偿（`FOR UPDATE SKIP LOCKED` 防多实例重复、10s 年龄阈值避开与 Fast-Path 竞争、`processing` 停滞 >5min 重入队），由 `scheduler.py` 周期调度（30s 间隔，随 Temporal worker 入口启动，单实例假设，`ENGINE_SCHEDULER_ENABLED=0` 关闭；2026-09-03 修复接入）。
 
 ### 1.7 影子双跑与回放 (`shadow/diff.py` & `shadow/replay.py`)
 
 - 迁移验收期工具：对冻结的 TS 基线输出做逐字段 diff 与历史流量回放；基线钉死后仅作回归参考。
+
+### 1.8 坏例候选池与周期任务调度 (`badcase/` & `scheduler.py`,2026-09-03 第五阶段 v1)
+
+- **半自动闭环**：信号收集/用例起草自动化，triage 定夺与入集人工化——信号**永不直接成为回归断言**。
+- **信号源与先验**（`badcase/pool.py`）：人工接管 `human_takeover` / 画像事实删除 `persona_fact_deleted`（→ `suspected_defect`）/ 审批驳回 `approval_rejected`（→ `expected_behavior`）+ 熔断（`run_agent` 落盘，暂未入池）。入池接口 `record_badcase_signal` 失败静默降级（print 不吞错），**严禁阻断宿主事务**。
+- **脱敏两层管道**（`badcase/redaction.py`）：库内已知值精确替换（地址/收件人/邮箱）➔ `scrubber` 正则兜底；`show` 输出"原文 vs 脱敏对照"，回归用例输入必须取脱敏侧（仓库零原始数据）。
+- **triage CLI**：`python -m engine_py.badcase.cli`（list/show/triage/draft/expire）；`draft` 只产 `expectedTools`/`not-contains` 断言（断言最小化，禁整句黄金答案），带 `origin: badcase:{id}` 溯源，人工并入 `eval/testCases/` 后标 `converted`。
+- **周期任务**（`scheduler.py`，随 Temporal worker 入口启动，Temporal 离线仍独立运行）：outbox 对账（30s）+ 坏例池摘要/保留期（6h）；**单实例假设**，`ENGINE_SCHEDULER_ENABLED=0` 关闭。
 
 ---
 

@@ -246,7 +246,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 ### 4.2 事务型发件箱与幂等重试 (Transactional Outbox)
 
 - **原子事务保障**：管理员审批动作与 `approval_outbox_events` 事件写入处于同一个 PostgreSQL 本地事务中，彻底消除网络断开导致的“已审核但后台未唤醒”幽灵工单。
-- **确定性幂等恢复**：后台 Worker 对超期未分发的事件进行指数退避自动重试，采用 `job_resume_${approvalId}` 确定性任务 ID 杜绝重复扣款。
+- **确定性幂等恢复**：审批决议后由同步 Fast-Path 立即派发恢复任务（确定性任务 ID `job_resume_${approvalId}` 杜绝重复扣款）；派发失败的事件由周期调度器每 30s 对账补偿（`FOR UPDATE SKIP LOCKED` 防多实例重复捞取），停滞事件自动重入队。
 
 ### 4.3 双层用户画像与多租户上下文装配 (Dual-Tier Persona)
 

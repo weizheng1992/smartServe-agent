@@ -17,6 +17,8 @@ paths: ["services/gateway-py/**/*"]
    - 会话消息持久化与历史拉取（多租户过滤）。
 3. **`routers/admin.py` / `crud.py`**：
    - 会话历史、审批单（Approve / Reject，触发事务发件箱与幂等恢复）、Skills 配置（`GET/PUT /api/skills/config`）、RAG 文档、画像、护栏、计费配额、日志等管理端 CRUD。
+   - 数据真实性约定（2026-09-03 起）：`/api/evals/*` 记录由本地随机生成器写入，响应显式携带 `isMock: true`（坏例看板/BI 须据此排除）；`/api/logs` 消费 `session_metrics`/`intent_logs` 真实值，无遥测数据处返回真实 0，**严禁编造 token/延迟数字**。
+   - 画像事实删除（`DELETE /api/personas/{id}`）在删除成功后调用 `engine_py.badcase.pool.record_badcase_signal` 入坏例候选池（失败静默降级，不影响删除响应）。
 4. **`routers/merchant.py` + `merchant_domain.py` / `merchant_db.py`**：商户门户店铺端与管理端路由及领域逻辑（原 Next.js Route Handlers 移植）。
 5. **`routers/spi.py` + `hmac_signer.py`**：三方 SPI v1 开放接口（HMAC-SHA256 签名 + 时间戳防重放校验）。
 

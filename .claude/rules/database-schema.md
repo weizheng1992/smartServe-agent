@@ -30,7 +30,8 @@ paths: ["services/engine-py/src/engine_py/db/**/*", "services/engine-py/alembic/
 6. **审批与事务发件箱 (HITL & Outbox)**：
    - `pending_approvals`：待人工审核记录（`approval_id`（UUID）、`business_id`、`job_id`、`tool_name`、`status`）。
    - `approval_outbox_events`：事务发件箱事件表（`event_type`、`payload`、`status: 'pending' | 'processing' | 'completed' | 'failed'`、`retry_count`）。
-7. **遥测**：`session_metrics` 会话成本遥测（Token 用量与 USD 成本换算落盘）。
+7. **遥测**：`session_metrics` 会话成本遥测（Token 用量与 USD 成本换算落盘）；2026-09-03 起新增 `global_transitions_count` / `tool_errors_count` 熔断计数列，`resolution_status` 取值增加 `'circuit_breaker'`（熔断挂起落盘）。
+8. **坏例候选池（2026-09-03，第五阶段 v1）**：`badcase_candidates`（`signal_source`、`conversation_ref` 引用、`business_id`、`suggested_class` 信号先验、`status: 'candidate' | 'confirmed' | 'dismissed' | 'converted'`、`note`）。设计原则：**仓库零原始数据**——只存引用（`thread:{id}` / `approval:{id}` / `fact:{id}`）不存对话/画像原文；保留期 candidate 90 天、dismissed 30 天（`badcase/digest.py` 周期执行）。
 
 ### 1.2 多租户物理隔离约束
 

@@ -4,6 +4,38 @@
 
 ---
 
+## [2.3.0] - 2026-09-03 (坏例候选池闭环 v1、outbox 对账补偿修复、网关数据真实性清理)
+
+### 🌟 Major Highlights (重大亮点)
+
+- **坏例候选池与半自动闭环 (`engine_py/badcase/`,测试生命周期第五阶段 v1,2026-09-03 评审锁定 23 项决策)**:
+  - 新表 `badcase_candidates`(Alembic `0002`):信号源、会话引用(`thread:` / `approval:` / `fact:`)、租户、先验类别、状态机 `candidate → confirmed/dismissed → converted`。**仓库零原始数据**——只存引用不存对话/画像原文。
+  - 信号挂接(零契约变更):人工接管发起、审批驳回(`approvals/gatekeeper.py`)、画像事实删除(`gateway-py/routers/crud.py`)实时入池,携带信号先验(删除→`suspected_defect`、驳回→`expected_behavior`、接管→中性);入池失败静默降级不阻断宿主事务。
+  - 熔断落盘:`run_agent` 检测全局转移 ≥10 或工具错误 ≥3 触发熔断时,以 `resolution_status='circuit_breaker'` 写入 `session_metrics`(新增 `global_transitions_count` / `tool_errors_count` 列),子任务指标不再计入。
+  - 已知值脱敏(`badcase/redaction.py`):库内已知 PII(地址/收件人/手机号/邮箱)精确替换 ➔ `scrubber` 正则兜底的两层管道。
+  - triage CLI(`python -m engine_py.badcase.cli`):`list / show(原文 vs 脱敏对照) / triage / draft / expire`;`draft` 只产 `expectedTools` / `not-contains` 断言(断言最小化,禁整句黄金答案),带 `origin: badcase:{id}` 溯源标记。
+  - 保留期:candidate 90 天自动转 dismissed、dismissed 30 天清除(`badcase/digest.py`)。
+- **周期任务框架与 outbox 对账补偿修复 (`engine_py/scheduler.py` + `approvals/outbox_worker.py`)**:
+  - 原 outbox worker 为死代码(全仓无调用点)且旧实现存在"事件循环未运行静默返回"与"create_task 后立刻标 completed 的假完成"两个缺陷。重构为 `process_pending_events`:`FOR UPDATE SKIP LOCKED` 防多实例重复捞取、10s 年龄阈值避开与 gatekeeper 同步 Fast-Path 竞争、`processing` 停滞 >5min 重入队(重试上限 5)、派发任务自身回写终态(真完成)。
+  - 新增 `scheduler.py` 单进程 asyncio 周期调度(间隔 + 抖动、逐 tick 容错):outbox 对账(30s)+ 坏例池摘要/保留期(6h);随 Temporal worker 入口启动,Temporal 离线时进程退化为纯周期任务进程仍在线。**单实例假设**,`ENGINE_SCHEDULER_ENABLED=0` 可整体关闭。
+- **网关数据真实性清理 (`gateway-py/routers/crud.py`,契约增量字段、无路由变更)**:
+  - `/api/logs` 接真实数据:intent 分支不再编造 `350/45/395/280` token/延迟假数(返回真实 0);metric 分支去掉 `or 1000` / `or 500` 兜底与虚构的 0.8/0.2 拆分;`rawDetail` 增量透出 `globalTransitionsCount` / `toolErrorsCount`。
+  - `/api/evals/*` 响应显式携带 `isMock: true`(记录全部来自本地随机生成器),坏例看板/BI 数据源据此排除。
+
+### 📝 Docs (文档同步)
+
+- CLAUDE.md 不变量 #3、`.claude/rules/agent-engine.md` §1.6:outbox worker 表述由"从未被任何入口启动(技术债)"修正为"scheduler 每 30s 对账补偿"。
+- `.claude/rules/agent-engine.md` 新增 §1.8(坏例候选池与周期任务);`database-schema.md` 补 `badcase_candidates` 表与 `session_metrics` 熔断列;`observability.md` 补熔断落盘;`server-gateway.md` 补 isMock/真实值约定与画像删除入池挂接。
+- README §4.2 发件箱恢复机制描述与实现对齐(Fast-Path + 30s 对账,替代此前的"指数退避"误述)。
+- `docs/agent-lifecycle-testing.md` 第五阶段落地批次:前置清理与 v1 标记已落地;附录技术债 #1(outbox 死代码)标记已修复。
+
+### ⚠️ Notes (注意事项)
+
+- pytest 契约套件按仓库约定未自动执行,需人工运行 `bun run test:eval`;`isMock` / `rawDetail` 增量字段如有精确匹配断言需同步契约测试。
+- `docs/architecture/*.md` 仍整体为 TS 时代路径(77 处 `packages/` 引用),系迁移遗留债务,本次未零散修订,建议单独立案整体重写。
+
+---
+
 ## [2.2.2] - 2026-09-03 (Python 后端运行时修复包: 商户 SSE 流 500、工具注册表解析失效、.env 环境注入)
 
 ### 🐛 Bug Fixes (缺陷修复)

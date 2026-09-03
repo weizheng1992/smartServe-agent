@@ -28,6 +28,7 @@ from .cards import CardSynthesizer
 from .db import BusinessConfigRow, SessionMetric, Thread, get_session
 from .event_bus import emit_job_result, emit_status, publish_agent_event
 from .graph import build_graph
+from .graph.build_graph import CIRCUIT_BREAKER_TOOL_ERRORS, CIRCUIT_BREAKER_TRANSITIONS
 from .graph.state import DEFAULT_TASK_PLAN, AgentState, to_ts_dict
 from .llm import get_embedding_model
 from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
@@ -71,13 +72,18 @@ class AgentJobInput(BaseModel):
 
 
 async def _ensure_thread(thread_id: str, user_id: str, business_id: str | None) -> None:
-    """多租户外键一致性保障:确保物理 threads 行在 messages 写入前已落盘。"""
+    """多租户外键一致性保障:确保物理 threads 行在 messages 写入前已落盘。
+
+    ON CONFLICT 只续租 updated_at,绝不覆盖已有线程的 business_id ——
+    线程的租户归属在其创建时即冻结(架构不变量 #1),防止缺省派发方
+    (如审批恢复未携带 businessId)把线程静默"搬家"到默认租户。
+    """
     async with get_session() as session:
         await session.execute(
             text(
                 'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") '
                 "VALUES (:tid, :uid, :bid, 'active', NOW(), NOW()) "
-                'ON CONFLICT (id) DO UPDATE SET "updated_at" = NOW(), "business_id" = EXCLUDED."business_id"'
+                'ON CONFLICT (id) DO UPDATE SET "updated_at" = NOW()'
             ).bindparams(tid=thread_id, uid=user_id, bid=business_id or "ecommerce")
         )
         await session.commit()
@@ -319,13 +325,24 @@ async def run_agent(job: AgentJobInput) -> dict:
         cost_usd = (total_tokens / 1_000_000) * 0.15
         node_transitions = result.get("loop_count") or 3
 
-        resolution_status = "resolved_auto"
-        is_success = True
-        feedback_comment = "All planned subtasks completed successfully."
+        # 🛡️ 图级熔断落盘:10 步/3 错触发时 resolution_status = circuit_breaker(终态优先于子任务状态)
+        global_transitions = result.get("global_transitions_count") or 0
+        tool_errors = result.get("tool_errors_count") or 0
+        breaker_fired = (
+            global_transitions >= CIRCUIT_BREAKER_TRANSITIONS or tool_errors >= CIRCUIT_BREAKER_TOOL_ERRORS
+        )
+
+        resolution_status = "circuit_breaker" if breaker_fired else "resolved_auto"
+        is_success = not breaker_fired
+        feedback_comment = (
+            "Circuit breaker tripped: hard degradation with apology fallback."
+            if breaker_fired
+            else "All planned subtasks completed successfully."
+        )
 
         plan = result.get("task_plan") or {}
         subtasks = plan.get("subtasks") or []
-        if subtasks:
+        if subtasks and not breaker_fired:
             has_pending = any((st.get("result") or {}).get("waitingForApproval") for st in subtasks)
             has_cancelled = any((st.get("result") or {}).get("cancelledByUser") for st in subtasks)
             has_expired = any((st.get("result") or {}).get("expiredByTimeout") for st in subtasks)
@@ -359,6 +376,8 @@ async def run_agent(job: AgentJobInput) -> dict:
                     total_tokens=total_tokens,
                     calculated_cost_usd=cost_usd,
                     node_transitions_count=node_transitions,
+                    global_transitions_count=global_transitions,
+                    tool_errors_count=tool_errors,
                     resolution_status=resolution_status,
                     avg_latency_ms=elapsed_latency_ms,
                 )

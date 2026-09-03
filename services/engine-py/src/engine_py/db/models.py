@@ -133,9 +133,31 @@ class SessionMetric(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
     calculated_cost_usd: Mapped[float | None] = mapped_column(Float, server_default=text("0.0"))
     node_transitions_count: Mapped[int | None] = mapped_column(Integer, server_default=text("1"))
+    global_transitions_count: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
+    tool_errors_count: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
     resolution_status: Mapped[str] = mapped_column(Text, nullable=False)
     avg_latency_ms: Mapped[float | None] = mapped_column(Float, server_default=text("0"))
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+class BadcaseCandidate(Base):
+    """Bad-Case 候选池(第五阶段半自动闭环)。
+
+    只存信号引用,不复制原始会话;一切信号经人工 triage 定性后才可能转为回归 case。
+    """
+
+    __tablename__ = "badcase_candidates"
+    __table_args__ = (Index("ix_badcase_candidates_status_created", "status", "created_at"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    signal_source: Mapped[str] = mapped_column(Text, nullable=False)
+    conversation_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    business_id: Mapped[str] = mapped_column(Text, nullable=False)
+    suggested_class: Mapped[str | None] = mapped_column(Text, server_default=text("'neutral'"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'candidate'"))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
 class LongMemoryFact(Base):
