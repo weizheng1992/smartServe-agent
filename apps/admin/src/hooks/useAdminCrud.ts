@@ -36,8 +36,10 @@ export function useAdminCrud<T extends Record<string, any>>({
   onItemUpdated,
   onItemDeleted,
 }: UseAdminCrudOptions<T> = {}) {
+  // 仅本地模式(未提供 fetchList)才从 localStorage 恢复缓存;服务端模式下始终以接口数据为准,
+  // 避免历史遗留的本地缓存(含演示假数据)在接口失败时覆盖真实空态
   const [data, setData] = useState<T[]>(() => {
-    if (typeof window !== 'undefined' && storageKey) {
+    if (!fetchList && typeof window !== 'undefined' && storageKey) {
       try {
         const saved = localStorage.getItem(storageKey);
         if (saved) {
@@ -73,10 +75,10 @@ export function useAdminCrud<T extends Record<string, any>>({
   // 全局租户穿透状态
   const { selectedTenantId } = useAdminTenantStore();
 
-  // 持久化到 localStorage
+  // 持久化到 localStorage(仅本地模式;服务端模式下写缓存没有意义且会残留脏数据)
   const persistData = useCallback(
     (nextData: T[]) => {
-      if (typeof window !== 'undefined' && storageKey) {
+      if (!fetchList && typeof window !== 'undefined' && storageKey) {
         try {
           localStorage.setItem(storageKey, JSON.stringify(nextData));
         } catch (err) {
@@ -84,7 +86,7 @@ export function useAdminCrud<T extends Record<string, any>>({
         }
       }
     },
-    [storageKey],
+    [storageKey, fetchList],
   );
 
   // 远程拉取数据

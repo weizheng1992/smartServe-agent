@@ -7,96 +7,11 @@ import type { SkillToolRecord } from './types';
 
 export * from './types';
 
-const INITIAL_TOOLS: SkillToolRecord[] = [
-  {
-    id: 'getOrderStatus',
-    name: '查询订单履约状态',
-    type: 'native',
-    description: '从业务数据库实时查询订单支付、发货、物流单号及配送轨迹状态',
-    riskLevel: 'low',
-    requiresHitl: false,
-    tenantScope: 'all',
-    status: 'enabled',
-  },
-  {
-    id: 'processRefund',
-    name: '退款申请与执行',
-    type: 'native',
-    description: '对符合退款时效的订单执行退款流水操作，超过商户阈值自动进入风控审批',
-    riskLevel: 'high',
-    requiresHitl: true,
-    tenantScope: 'all',
-    status: 'enabled',
-  },
-  {
-    id: 'takeScreenshot',
-    name: '无头浏览器截图',
-    type: 'native',
-    description: '使用 Puppeteer 无头浏览器渲染商品落地页或物流官网并生成截图',
-    riskLevel: 'medium',
-    requiresHitl: false,
-    tenantScope: 'all',
-    status: 'enabled',
-  },
-  {
-    id: 'nikeVipDiscountApi',
-    name: 'Nike 专属会员折扣计算器',
-    type: 'openapi',
-    description: '通过 OpenAPI 协议对接 Nike 外部会员中台计算复合券后价',
-    riskLevel: 'low',
-    requiresHitl: false,
-    tenantScope: 'nike',
-    status: 'enabled',
-  },
-  {
-    id: 'mcpPostgresQuery',
-    name: 'MCP Postgres 只读数据探查',
-    type: 'mcp',
-    description: '通过标准 MCP 协议安全只读执行数据统计与结构化聚合',
-    riskLevel: 'medium',
-    requiresHitl: false,
-    tenantScope: 'all',
-    status: 'enabled',
-  },
-  {
-    id: 'skill_order_refund',
-    name: '售后退款与理赔 SOP Skill',
-    type: 'skill',
-    description: '全流程履约时效校验、多模态破损阶梯赔付、动态审批门禁与退款卡片渲染',
-    riskLevel: 'high',
-    requiresHitl: true,
-    tenantScope: 'all',
-    status: 'enabled',
-    approvalThresholdAmount: 50,
-  },
-  {
-    id: 'skill_order_address_modification',
-    name: '极速改地址 SOP Skill',
-    type: 'skill',
-    description: '校验订单履约发货状态并执行地址变更，支持三级地址合规格式化与变更卡片渲染',
-    riskLevel: 'low',
-    requiresHitl: false,
-    tenantScope: 'all',
-    status: 'enabled',
-  },
-  {
-    id: 'skill_product_inquiry',
-    name: '商品导购与现货库存查询 SOP Skill',
-    type: 'skill',
-    description: '穿透查询第三方商品目录、实时 SKU 现货库存及智能导购推荐',
-    riskLevel: 'low',
-    requiresHitl: false,
-    tenantScope: 'all',
-    status: 'enabled',
-  },
-];
-
 export function SkillsToolsPage() {
   const fetchSkillsList = useCallback(async ({ tenantId }: { tenantId: string }) => {
     try {
       const res = await skillsApi.getConfig(tenantId === 'all' ? 'ecommerce' : tenantId);
       if (res.success && Array.isArray(res.skills)) {
-        // 合并后端技能与基础工具列表
         const remoteSkills: SkillToolRecord[] = res.skills.map((s: any) => ({
           id: s.id,
           name: s.name || s.id,
@@ -109,13 +24,12 @@ export function SkillsToolsPage() {
           approvalThresholdAmount: s.approvalThresholdAmount,
         }));
 
-        const nonSkillTools = INITIAL_TOOLS.filter((t) => t.type !== 'skill');
-        return [...remoteSkills, ...nonSkillTools];
+        return remoteSkills;
       }
     } catch (err) {
-      console.warn('Failed to fetch remote skills, using initial list:', err);
+      console.warn('Failed to fetch remote skills:', err);
     }
-    return INITIAL_TOOLS;
+    return [];
   }, []);
 
   const updateSkillApi = useCallback(async (tool: SkillToolRecord, tenantId: string) => {
@@ -150,7 +64,6 @@ export function SkillsToolsPage() {
     updateItem,
     deleteItem,
   } = useAdminCrud<SkillToolRecord>({
-    initialData: INITIAL_TOOLS,
     fetchList: fetchSkillsList,
     updateApi: updateSkillApi,
     tenantKey: 'tenantScope' as keyof SkillToolRecord,

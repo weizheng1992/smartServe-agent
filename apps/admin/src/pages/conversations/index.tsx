@@ -7,61 +7,6 @@ import type { ConversationRecord } from './types';
 
 export * from './types';
 
-const INITIAL_CONVERSATIONS: ConversationRecord[] = [
-  {
-    threadId: 't_nike_90214',
-    userId: 'u_vip_881',
-    businessId: 'nike',
-    channel: 'Web Widget',
-    status: 'waiting_approval',
-    intent: 'order_refund',
-    messageCount: 8,
-    totalTokens: 3420,
-    costUsd: 0.0142,
-    lastMessage: '申请对订单 ORD-2026-9901 进行退款 500 元（超额审核中）',
-    updatedAt: '2026-02-23 16:45:10',
-  },
-  {
-    threadId: 't_adi_40112',
-    userId: 'u_user_332',
-    businessId: 'adidas',
-    channel: 'Mobile App',
-    status: 'resolved',
-    intent: 'product_inquiry',
-    messageCount: 5,
-    totalTokens: 1890,
-    costUsd: 0.0078,
-    lastMessage: 'Ultraboost Light 跑鞋尺码建议与库存查询已完成',
-    updatedAt: '2026-02-23 15:30:22',
-  },
-  {
-    threadId: 't_ecom_11094',
-    userId: 'u_buyer_554',
-    businessId: 'ecommerce',
-    channel: 'WeChat MiniApp',
-    status: 'active',
-    intent: 'order_status',
-    messageCount: 3,
-    totalTokens: 1100,
-    costUsd: 0.0045,
-    lastMessage: '包裹当前正在【上海转运中心】分拨发出',
-    updatedAt: '2026-02-23 17:02:40',
-  },
-  {
-    threadId: 't_nike_88710',
-    userId: 'u_runner_102',
-    businessId: 'nike',
-    channel: 'Web Widget',
-    status: 'resolved',
-    intent: 'faq_shipping',
-    messageCount: 4,
-    totalTokens: 1420,
-    costUsd: 0.0059,
-    lastMessage: '顺丰特快默认包邮，次日达服务说明',
-    updatedAt: '2026-02-23 14:15:00',
-  },
-];
-
 export function ConversationsPage() {
   const fetchConversations = useCallback(
     async ({
@@ -104,11 +49,7 @@ export function ConversationsPage() {
         return { data: records, total: res.total ?? records.length };
       }
 
-      // 如果后端接口通信异常或无数据，回退到本地数据
-      return {
-        data: INITIAL_CONVERSATIONS,
-        total: INITIAL_CONVERSATIONS.length,
-      };
+      return { data: [], total: 0 };
     },
     [],
   );
@@ -131,7 +72,6 @@ export function ConversationsPage() {
     openDrawer,
     closeDrawer,
   } = useAdminCrud<ConversationRecord>({
-    initialData: INITIAL_CONVERSATIONS,
     fetchList: fetchConversations,
     tenantKey: 'businessId' as keyof ConversationRecord,
     filterFn: (item, query, status, tenantId) => {

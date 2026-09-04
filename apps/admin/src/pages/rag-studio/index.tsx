@@ -9,37 +9,6 @@ import type { KnowledgeChunkRecord } from './types';
 
 export * from './types';
 
-const INITIAL_CHUNKS: KnowledgeChunkRecord[] = [
-  {
-    id: 'chunk_nike_01',
-    businessId: 'nike',
-    docTitle: 'Nike 官方退换货与质保 SOP',
-    category: '售后政策',
-    content:
-      '支持 7 天无理由退换货（需商品未经穿着、吊牌齐全）。超出 300 元退款需人工安全审批接入；质量问题 3 个月内免费换新。',
-    tokenCount: 88,
-    updatedAt: '2026-02-15',
-  },
-  {
-    id: 'chunk_nike_02',
-    businessId: 'nike',
-    docTitle: 'Nike 跑鞋矩阵与科技说明',
-    category: '商品知识',
-    content: 'ZoomX 泡棉提供高达 85% 的能量回馈；Vaporfly 竞速系列内置全掌铲型碳纤维板，专为半马及全马比赛破速设计。',
-    tokenCount: 75,
-    updatedAt: '2026-02-18',
-  },
-  {
-    id: 'chunk_adi_01',
-    businessId: 'adidas',
-    docTitle: 'Adidas 会员积分与兑换规则',
-    category: '会员权益',
-    content: 'AdiClub 尊享金卡会员每月可领取一张 50 元无门槛优惠券；生日当月享双倍积分与免费洗鞋服务一次。',
-    tokenCount: 65,
-    updatedAt: '2026-02-10',
-  },
-];
-
 export function RagStudioPage() {
   const { selectedTenantId } = useAdminTenantStore();
 
@@ -59,9 +28,9 @@ export function RagStudioPage() {
         return records;
       }
     } catch (err) {
-      console.warn('Failed to fetch remote chunks, fallback to local:', err);
+      console.warn('Failed to fetch remote chunks:', err);
     }
-    return INITIAL_CHUNKS;
+    return [];
   }, []);
 
   const createDocApi = useCallback(async (item: Partial<KnowledgeChunkRecord>, tenantId: string) => {
@@ -104,7 +73,6 @@ export function RagStudioPage() {
     updateItem,
     deleteItem,
   } = useAdminCrud<KnowledgeChunkRecord>({
-    initialData: INITIAL_CHUNKS,
     fetchList: fetchChunks,
     createApi: createDocApi,
     deleteApi: deleteDocApi,
@@ -178,25 +146,10 @@ export function RagStudioPage() {
         return;
       }
     } catch (err) {
-      console.warn('Search API fallback to local keyword matching:', err);
+      console.warn('RAG search API failed:', err);
     }
 
-    // 本地匹配回退
-    const q = playQuery.toLowerCase();
-    const hits = INITIAL_CHUNKS.filter((c) => selectedTenantId === 'all' || c.businessId === selectedTenantId)
-      .map((c) => {
-        let score = 0.65;
-        if (c.content.includes(q) || c.docTitle.includes(q)) score = 0.94;
-        return {
-          id: c.id,
-          title: c.docTitle,
-          score,
-          content: c.content,
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    setPlayResults(hits);
+    setPlayResults([]);
     setIsSearching(false);
   };
 

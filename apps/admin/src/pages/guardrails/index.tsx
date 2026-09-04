@@ -7,39 +7,6 @@ import type { GuardrailRuleRecord } from './types';
 
 export * from './types';
 
-const INITIAL_GUARDRAILS: GuardrailRuleRecord[] = [
-  {
-    id: 'gr_01',
-    ruleName: '支付敏感信息脱敏 (银行卡/身份证)',
-    ruleType: 'sensitive_keyword',
-    pattern: '(\\d{16,19})|(\\d{18}[0-9xX])',
-    action: 'mask',
-    severity: 'high',
-    isEnabled: true,
-    updatedAt: '2026-02-10',
-  },
-  {
-    id: 'gr_02',
-    ruleName: 'SQL 注入与危险 DDL 拦截沙箱',
-    ruleType: 'sql_injection',
-    pattern: '(DROP|ALTER|TRUNCATE|DELETE|UPDATE|INSERT)\\s+TABLE',
-    action: 'block',
-    severity: 'high',
-    isEnabled: true,
-    updatedAt: '2026-02-12',
-  },
-  {
-    id: 'gr_03',
-    ruleName: '系统 Prompt 提示词防泄露拦截',
-    ruleType: 'prompt_leakage',
-    pattern: '(repeat\\s+system\\s+prompt|输出你的系统提示词|忽略之前的指示)',
-    action: 'block',
-    severity: 'medium',
-    isEnabled: true,
-    updatedAt: '2026-02-14',
-  },
-];
-
 export function GuardrailsPage() {
   const fetchGuardrailsList = useCallback(async ({ tenantId }: { tenantId: string }) => {
     try {
@@ -48,9 +15,9 @@ export function GuardrailsPage() {
         return res.data;
       }
     } catch (err) {
-      console.warn('Failed to fetch remote guardrails, fallback to local:', err);
+      console.warn('Failed to fetch remote guardrails:', err);
     }
-    return INITIAL_GUARDRAILS;
+    return [];
   }, []);
 
   const updateGuardrailApi = useCallback(async (item: GuardrailRuleRecord, tenantId: string) => {
@@ -80,7 +47,6 @@ export function GuardrailsPage() {
     updateItem,
     deleteItem,
   } = useAdminCrud<GuardrailRuleRecord>({
-    initialData: INITIAL_GUARDRAILS,
     fetchList: fetchGuardrailsList,
     updateApi: updateGuardrailApi,
     filterFn: (item, query, type) => {

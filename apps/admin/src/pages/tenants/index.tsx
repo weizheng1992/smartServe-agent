@@ -9,45 +9,6 @@ import type { TenantRecord } from './types';
 
 export * from './types';
 
-const INITIAL_TENANTS: TenantRecord[] = [
-  {
-    id: 'nike',
-    name: 'Nike 官方旗舰店',
-    industry: '运动服饰',
-    channel: 'Web + Mobile + WeChat',
-    apiKey: 'key_nike_sec_9942a',
-    refundLimit: 500,
-    autoEscalation: true,
-    webhookUrl: 'https://api.nike.com/webhooks/agent',
-    status: 'active',
-    createdAt: '2026-01-10',
-  },
-  {
-    id: 'adidas',
-    name: 'Adidas 运动专营',
-    industry: '运动鞋履',
-    channel: 'Web Widget',
-    apiKey: 'key_adi_sec_8112b',
-    refundLimit: 300,
-    autoEscalation: true,
-    webhookUrl: 'https://spi.adidas.com/v1/approvals',
-    status: 'active',
-    createdAt: '2026-02-01',
-  },
-  {
-    id: 'ecommerce',
-    name: '通用电商主站 (Default)',
-    industry: '综合零售',
-    channel: 'All Open Channels',
-    apiKey: 'key_ecom_sec_1001x',
-    refundLimit: 200,
-    autoEscalation: false,
-    webhookUrl: 'https://internal.ecommerce.com/spi',
-    status: 'active',
-    createdAt: '2025-11-20',
-  },
-];
-
 export function TenantsPage() {
   const { addOrUpdateTenant, removeTenant } = useAdminTenantStore();
 
@@ -70,9 +31,9 @@ export function TenantsPage() {
         return mergedTenants;
       }
     } catch (err) {
-      console.warn('Failed to fetch remote tenants, using initial list:', err);
+      console.warn('Failed to fetch remote tenants:', err);
     }
-    return INITIAL_TENANTS;
+    return [];
   }, []);
 
   const createTenantApi = useCallback(
@@ -131,8 +92,6 @@ export function TenantsPage() {
     updateItem,
     deleteItem,
   } = useAdminCrud<TenantRecord>({
-    initialData: INITIAL_TENANTS,
-    storageKey: 'smartserve_admin_tenants',
     fetchList: fetchTenantsList,
     createApi: createTenantApi,
     deleteApi: deleteTenantApi,

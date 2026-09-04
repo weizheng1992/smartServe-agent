@@ -7,52 +7,6 @@ import type { AuditRecord } from './types';
 
 export * from './types';
 
-const INITIAL_AUDITS: AuditRecord[] = [
-  {
-    id: 'app_nike_001',
-    threadId: 't_nike_90214',
-    businessId: 'nike',
-    actionType: 'processRefund',
-    actionPayload: {
-      orderId: 'ORD-2026-9901',
-      amount: 500,
-      reason: '尺码不合申请退货退款',
-    },
-    status: 'waiting',
-    createdAt: '2026-02-23 16:45:10',
-  },
-  {
-    id: 'app_adi_002',
-    threadId: 't_adi_40112',
-    businessId: 'adidas',
-    actionType: 'human_escalation',
-    actionPayload: {
-      userQuery: '申请特殊VIP定制礼品兑换',
-      queueName: 'vip_support_desk',
-    },
-    status: 'approved',
-    reviewerId: 'adi_manager_01',
-    createdAt: '2026-02-23 15:20:00',
-    resolvedAt: '2026-02-23 15:24:12',
-  },
-  {
-    id: 'app_ecom_003',
-    threadId: 't_ecom_11094',
-    businessId: 'ecommerce',
-    actionType: 'processRefund',
-    actionPayload: {
-      orderId: 'ORD-ECOM-8821',
-      amount: 1200,
-      reason: '未收到货物退款',
-    },
-    status: 'rejected',
-    reviewerId: 'risk_system_auto',
-    rejectionReason: '物流轨迹显示已由本人签收，驳回退款诉求',
-    createdAt: '2026-02-23 13:10:00',
-    resolvedAt: '2026-02-23 13:12:00',
-  },
-];
-
 export function AuditsPage() {
   const fetchApprovals = useCallback(async ({ tenantId, status }: { tenantId: string; status?: string }) => {
     const res = await approvalsApi.list({
@@ -83,7 +37,7 @@ export function AuditsPage() {
       return { data: records, total: records.length };
     }
 
-    return { data: INITIAL_AUDITS, total: INITIAL_AUDITS.length };
+    return { data: [], total: 0 };
   }, []);
 
   const {
@@ -104,7 +58,6 @@ export function AuditsPage() {
     refetch,
     updateItem,
   } = useAdminCrud<AuditRecord>({
-    initialData: INITIAL_AUDITS,
     fetchList: fetchApprovals,
     tenantKey: 'businessId' as keyof AuditRecord,
     filterFn: (item, query, status, tenantId): boolean => {

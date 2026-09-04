@@ -8,42 +8,6 @@ import type { EvalRunRecord } from './types';
 
 export * from './types';
 
-const INITIAL_EVALS: EvalRunRecord[] = [
-  {
-    id: 'eval_run_20260223_v3',
-    runName: 'Engine v2.4 对话策略金标回归评测',
-    datasetName: 'ecommerce_golden_dialogue_v2',
-    sampleCount: 150,
-    toolAccuracy: 0.98,
-    ragFaithfulness: 0.95,
-    hitlTriggerRate: 0.12,
-    status: 'completed',
-    createdAt: '2026-02-23 14:00:00',
-  },
-  {
-    id: 'eval_run_20260222_v2',
-    runName: 'Prompt 深度思考链消融实验 (ReAct vs Graph)',
-    datasetName: 'refund_edge_cases_100',
-    sampleCount: 100,
-    toolAccuracy: 0.92,
-    ragFaithfulness: 0.89,
-    hitlTriggerRate: 0.25,
-    status: 'completed',
-    createdAt: '2026-02-22 18:30:00',
-  },
-  {
-    id: 'eval_run_20260221_v1',
-    runName: '多语言与多商户意图分发鲁棒性测试',
-    datasetName: 'multilingual_intent_test_50',
-    sampleCount: 50,
-    toolAccuracy: 0.96,
-    ragFaithfulness: 0.94,
-    hitlTriggerRate: 0.08,
-    status: 'completed',
-    createdAt: '2026-02-21 10:15:00',
-  },
-];
-
 export function EvalsPage() {
   const fetchEvalsList = useCallback(async () => {
     try {
@@ -52,9 +16,9 @@ export function EvalsPage() {
         return res.data;
       }
     } catch (err) {
-      console.warn('Failed to fetch remote evals, fallback to local:', err);
+      console.warn('Failed to fetch remote evals:', err);
     }
-    return INITIAL_EVALS;
+    return [];
   }, []);
 
   const {
@@ -69,7 +33,6 @@ export function EvalsPage() {
     setStatusFilter,
     handleResetFilters,
   } = useAdminCrud<EvalRunRecord>({
-    initialData: INITIAL_EVALS,
     fetchList: fetchEvalsList,
     filterFn: (item, query, status) => {
       if (status && item.status !== status) return false;

@@ -80,29 +80,10 @@ async def tenant_list():
                     }
                 )
             return {"success": True, "tenants": tenants}
-    except Exception as err:  # noqa: BLE001 — 与 TS 一致回退演示数据
+        return {"success": True, "tenants": []}
+    except Exception as err:  # noqa: BLE001 — 查询失败返回真实空列表，不编造演示数据
         print(f"[TenantService] Failed to query PostgreSQL tenants table: {err}")
-
-    return {
-        "success": True,
-        "tenants": [
-            {
-                "id": "nike", "name": "Nike 官方旗舰店", "industry": "运动服饰", "channel": "Web + Mobile + WeChat",
-                "apiKey": "key_nike_sec_9942a", "refundLimit": 500, "autoEscalation": True,
-                "webhookUrl": "https://api.nike.com/webhooks/agent", "status": "active", "createdAt": "2026-01-10",
-            },
-            {
-                "id": "adidas", "name": "Adidas 运动专营", "industry": "运动鞋履", "channel": "Web Widget",
-                "apiKey": "key_adi_sec_8112b", "refundLimit": 300, "autoEscalation": True,
-                "webhookUrl": "https://spi.adidas.com/v1/approvals", "status": "active", "createdAt": "2026-02-01",
-            },
-            {
-                "id": "ecommerce", "name": "通用电商主站 (Default)", "industry": "综合零售", "channel": "All Open Channels",
-                "apiKey": "key_ecom_sec_1001x", "refundLimit": 200, "autoEscalation": False,
-                "webhookUrl": "https://internal.ecommerce.com/spi", "status": "active", "createdAt": "2025-11-20",
-            },
-        ],
-    }
+        return {"success": True, "tenants": [], "message": "租户注册表暂不可用，请稍后重试"}
 
 
 class TenantCreateIn(BaseModel):

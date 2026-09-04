@@ -8,39 +8,6 @@ import type { TenantBillingRecord } from './types';
 
 export * from './types';
 
-const INITIAL_BILLING: TenantBillingRecord[] = [
-  {
-    businessId: 'nike',
-    tenantName: 'Nike 官方旗舰店',
-    totalTokens: 1420500,
-    monthlyLimitTokens: 5000000,
-    costUsd: 5.682,
-    sessionsCount: 382,
-    autopilotRate: 0.94,
-    billingStatus: 'normal',
-  },
-  {
-    businessId: 'adidas',
-    tenantName: 'Adidas 运动专营',
-    totalTokens: 892000,
-    monthlyLimitTokens: 2000000,
-    costUsd: 3.568,
-    sessionsCount: 215,
-    autopilotRate: 0.91,
-    billingStatus: 'normal',
-  },
-  {
-    businessId: 'ecommerce',
-    tenantName: '通用电商主站',
-    totalTokens: 420000,
-    monthlyLimitTokens: 1000000,
-    costUsd: 1.68,
-    sessionsCount: 120,
-    autopilotRate: 0.88,
-    billingStatus: 'normal',
-  },
-];
-
 export function BillingPage() {
   const fetchBillingList = useCallback(async () => {
     try {
@@ -51,7 +18,7 @@ export function BillingPage() {
     } catch (err) {
       console.warn('Failed to fetch remote billing usages:', err);
     }
-    return INITIAL_BILLING;
+    return [];
   }, []);
 
   const updateQuotaApi = useCallback(async (item: TenantBillingRecord) => {
@@ -76,7 +43,6 @@ export function BillingPage() {
     openEdit,
     updateItem,
   } = useAdminCrud<TenantBillingRecord>({
-    initialData: INITIAL_BILLING,
     fetchList: fetchBillingList,
     updateApi: updateQuotaApi,
     tenantKey: 'businessId' as keyof TenantBillingRecord,

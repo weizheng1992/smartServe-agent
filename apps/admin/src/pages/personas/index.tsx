@@ -7,39 +7,6 @@ import type { PersonaRecord } from './types';
 
 export * from './types';
 
-const INITIAL_PERSONAS: PersonaRecord[] = [
-  {
-    id: 'fact_001',
-    userId: 'u_vip_881',
-    businessId: 'nike',
-    fact: '跑鞋鞋码偏好 42.5 码，通常在周末上午进行半马训练',
-    confidence: 0.96,
-    source: 'chat_dialogue_inference',
-    status: 'approved',
-    createdAt: '2026-02-20',
-  },
-  {
-    id: 'fact_002',
-    userId: 'u_user_332',
-    businessId: 'adidas',
-    fact: '偏好三叶草复古休闲系列，对环保再生材质有强烈认同感',
-    confidence: 0.88,
-    source: 'explicit_user_statement',
-    status: 'approved',
-    createdAt: '2026-02-21',
-  },
-  {
-    id: 'fact_003',
-    userId: 'u_runner_102',
-    businessId: 'nike',
-    fact: '对快递时效要求极高，通常要求顺丰次日达发货',
-    confidence: 0.92,
-    source: 'chat_dialogue_inference',
-    status: 'pending',
-    createdAt: '2026-02-22',
-  },
-];
-
 export function PersonasPage() {
   const fetchPersonasList = useCallback(async ({ tenantId }: { tenantId: string }) => {
     try {
@@ -50,7 +17,7 @@ export function PersonasPage() {
     } catch (err) {
       console.warn('Failed to fetch remote personas:', err);
     }
-    return INITIAL_PERSONAS;
+    return [];
   }, []);
 
   const createPersonaApi = useCallback(async (item: Partial<PersonaRecord>, tenantId: string) => {
@@ -90,7 +57,6 @@ export function PersonasPage() {
     updateItem,
     deleteItem,
   } = useAdminCrud<PersonaRecord>({
-    initialData: INITIAL_PERSONAS,
     fetchList: fetchPersonasList,
     createApi: createPersonaApi,
     updateApi: updatePersonaApi,

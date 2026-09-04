@@ -7,64 +7,6 @@ import type { SystemLogRecord } from './types';
 
 export * from './types';
 
-const INITIAL_LOGS: SystemLogRecord[] = [
-  {
-    id: 'log_llm_001',
-    traceId: 'tr_nike_991823',
-    businessId: 'nike',
-    model: 'gpt-4o-mini-2024-07-18',
-    promptTokens: 820,
-    completionTokens: 145,
-    totalTokens: 965,
-    latencyMs: 642,
-    statusCode: 200,
-    logType: 'llm_call',
-    rawDetail: {
-      provider: 'openai',
-      temperature: 0.1,
-      finishReason: 'tool_calls',
-      selectedTool: 'processRefund',
-    },
-    timestamp: '2026-02-23 16:45:12',
-  },
-  {
-    id: 'log_intent_002',
-    traceId: 'tr_adi_110294',
-    businessId: 'adidas',
-    model: 'gemini-1.5-pro',
-    promptTokens: 420,
-    completionTokens: 35,
-    totalTokens: 455,
-    latencyMs: 380,
-    statusCode: 200,
-    logType: 'intent_triage',
-    rawDetail: {
-      detectedIntent: 'product_inquiry',
-      confidence: 0.985,
-      fallbackTriggered: false,
-    },
-    timestamp: '2026-02-23 15:30:24',
-  },
-  {
-    id: 'log_tool_003',
-    traceId: 'tr_ecom_771822',
-    businessId: 'ecommerce',
-    model: 'internal-sandbox',
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
-    latencyMs: 120,
-    statusCode: 200,
-    logType: 'tool_execution',
-    rawDetail: {
-      toolName: 'getOrderStatus',
-      params: { orderId: 'ORD-ECOM-8821' },
-      resultStatus: 'success',
-    },
-    timestamp: '2026-02-23 17:02:41',
-  },
-];
-
 export function SystemLogsPage() {
   const fetchLogsList = useCallback(async ({ tenantId, status }: { tenantId: string; status?: string }) => {
     try {
@@ -77,9 +19,9 @@ export function SystemLogsPage() {
         return res.data;
       }
     } catch (err) {
-      console.warn('Failed to fetch remote system logs, fallback to local:', err);
+      console.warn('Failed to fetch remote system logs:', err);
     }
-    return INITIAL_LOGS;
+    return [];
   }, []);
 
   const {
@@ -98,7 +40,6 @@ export function SystemLogsPage() {
     openDrawer,
     closeDrawer,
   } = useAdminCrud<SystemLogRecord>({
-    initialData: INITIAL_LOGS,
     fetchList: fetchLogsList,
     tenantKey: 'businessId' as keyof SystemLogRecord,
     filterFn: (item, query, logType, tenantId) => {
