@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { tenantsApi } from '../lib/api';
 
 export interface TenantOption {
   id: string;
@@ -6,101 +7,71 @@ export interface TenantOption {
   badgeColor?: string;
 }
 
+/** 唯一内置选项:全平台上帝视角;真实租户列表由 /api/tenant/list 动态加载 */
 export const SUPPORTED_TENANTS: TenantOption[] = [
   {
     id: 'all',
     name: '全平台多租户 (上帝视角)',
     badgeColor: 'bg-slate-100 text-slate-700 border-slate-300',
   },
-  {
-    id: 'nike',
-    name: 'Nike 官方旗舰店',
-    badgeColor: 'bg-rose-50 text-rose-700 border-rose-200',
-  },
-  {
-    id: 'adidas',
-    name: 'Adidas 运动专营',
-    badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
-  },
-  {
-    id: 'ecommerce',
-    name: '通用电商主站',
-    badgeColor: 'bg-amber-50 text-amber-700 border-amber-200',
-  },
 ];
 
-const STORAGE_KEY_TENANT_OPTIONS = 'smartserve_admin_supported_tenants';
-
-function getInitialTenants(): TenantOption[] {
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY_TENANT_OPTIONS);
-      if (stored) {
-        const parsed: TenantOption[] = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const merged = [...SUPPORTED_TENANTS];
-          for (const item of parsed) {
-            if (!merged.some((t) => t.id === item.id)) {
-              merged.push(item);
-            }
-          }
-          return merged;
-        }
-      }
-    } catch (err) {
-      console.warn('[tenantStore] Failed to load custom tenants from localStorage:', err);
-    }
-  }
-  return SUPPORTED_TENANTS;
-}
-
-function persistTenants(tenants: TenantOption[]) {
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(STORAGE_KEY_TENANT_OPTIONS, JSON.stringify(tenants));
-    } catch (err) {
-      console.warn('[tenantStore] Failed to persist custom tenants to localStorage:', err);
-    }
-  }
-}
+const TENANT_BADGE_PALETTE = [
+  'bg-rose-50 text-rose-700 border-rose-200',
+  'bg-blue-50 text-blue-700 border-blue-200',
+  'bg-amber-50 text-amber-700 border-amber-200',
+];
 
 interface AdminTenantState {
   selectedTenantId: string;
   tenants: TenantOption[];
   setSelectedTenantId: (tenantId: string) => void;
   getSelectedTenant: () => TenantOption;
+  loadTenantsFromServer: () => Promise<void>;
   addOrUpdateTenant: (tenant: TenantOption) => void;
   removeTenant: (tenantId: string) => void;
 }
 
 export const useAdminTenantStore = create<AdminTenantState>((set, get) => ({
   selectedTenantId: 'all',
-  tenants: getInitialTenants(),
+  tenants: SUPPORTED_TENANTS,
   setSelectedTenantId: (tenantId: string) => set({ selectedTenantId: tenantId }),
   getSelectedTenant: () => {
     const current = get().selectedTenantId;
     const list = get().tenants;
     return list.find((t) => t.id === current) || list[0] || SUPPORTED_TENANTS[0];
   },
+  // 从 /api/tenant/list 加载真实注册租户;失败时保持现有列表(仅"全平台"选项)
+  loadTenantsFromServer: async () => {
+    try {
+      const res = await tenantsApi.list();
+      if (res.success && Array.isArray(res.tenants)) {
+        const remote: TenantOption[] = res.tenants
+          .filter((t: any) => t.id && (t.status || 'active') === 'active')
+          .map((t: any, idx: number) => ({
+            id: String(t.id),
+            name: t.name || String(t.id),
+            badgeColor: TENANT_BADGE_PALETTE[idx % TENANT_BADGE_PALETTE.length],
+          }));
+        set({ tenants: [...SUPPORTED_TENANTS, ...remote] });
+      }
+    } catch (err) {
+      console.warn('[tenantStore] Failed to load tenants from server:', err);
+    }
+  },
   addOrUpdateTenant: (newTenant: TenantOption) => {
     const list = get().tenants;
     const exists = list.some((t) => t.id === newTenant.id);
-    let updated: TenantOption[];
-    if (exists) {
-      updated = list.map((t) => (t.id === newTenant.id ? { ...t, ...newTenant } : t));
-    } else {
-      updated = [...list, newTenant];
-    }
-    persistTenants(updated);
+    const updated = exists
+      ? list.map((t) => (t.id === newTenant.id ? { ...t, ...newTenant } : t))
+      : [...list, newTenant];
     set({ tenants: updated });
   },
   removeTenant: (tenantId: string) => {
-    if (tenantId === 'all' || tenantId === 'ecommerce') return;
+    if (tenantId === 'all') return;
     const list = get().tenants;
-    const updated = list.filter((t) => t.id !== tenantId);
-    persistTenants(updated);
     set({
-      tenants: updated,
+      tenants: list.filter((t) => t.id !== tenantId),
       selectedTenantId: get().selectedTenantId === tenantId ? 'all' : get().selectedTenantId,
     });
   },

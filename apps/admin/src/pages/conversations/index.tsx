@@ -30,8 +30,8 @@ export function ConversationsPage() {
         offset: (page - 1) * pageSize,
       });
 
-      if (res.success && res.items) {
-        const records: ConversationRecord[] = res.items.map((item: any) => ({
+      if (res.success && Array.isArray(res.conversations)) {
+        const records: ConversationRecord[] = res.conversations.map((item: any) => ({
           threadId: item.threadId,
           userId: item.userId || 'anonymous_user',
           businessId: item.businessId || tenantId || 'ecommerce',

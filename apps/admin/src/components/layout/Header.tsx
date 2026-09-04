@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { Combobox } from 'ui';
 import { useAdminTenantStore } from '../../store/tenantStore';
@@ -48,8 +48,14 @@ const PAGE_TITLE_MAP: Record<string, { title: string; subtitle: string }> = {
 
 export function Header() {
   const location = useLocation();
-  const { selectedTenantId, setSelectedTenantId, getSelectedTenant, tenants } = useAdminTenantStore();
+  const { selectedTenantId, setSelectedTenantId, getSelectedTenant, tenants, loadTenantsFromServer } =
+    useAdminTenantStore();
   const activeTenant = getSelectedTenant();
+
+  // 应用启动时从 /api/tenant/list 加载真实注册租户(替代历史硬编码演示列表)
+  useEffect(() => {
+    loadTenantsFromServer();
+  }, [loadTenantsFromServer]);
 
   const currentPath = Object.keys(PAGE_TITLE_MAP).find((p) => location.pathname.startsWith(p)) || '/tenants';
 
