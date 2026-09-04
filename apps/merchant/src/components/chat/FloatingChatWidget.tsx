@@ -14,9 +14,18 @@ interface ChatMessage {
   isDivider?: boolean;
 }
 
+// 已同步过购物车卡片的消息 id(SSE 推送与 POST 响应两路携带同一 messageId,
+// 不做幂等会双路累加,导致加购 1 件购物车显示 2 件)
+const _syncedCartMsgIds = new Set<string>();
+
 // 辅助函数：将对话中的购物车卡片物理同步到浏览器端 localStorage，并广播 cart_updated 事件
-function syncCartToLocalStorage(cards?: RichCardBlock[]) {
+function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
   if (typeof window === 'undefined' || !cards || cards.length === 0) return;
+  if (messageId) {
+    if (_syncedCartMsgIds.has(messageId)) return;
+    if (_syncedCartMsgIds.size > 200) _syncedCartMsgIds.clear();
+    _syncedCartMsgIds.add(messageId);
+  }
   const cartCard = cards.find((c) => c.type === 'cart_card');
   if (!cartCard || !('items' in cartCard.data)) return;
 
@@ -40,11 +49,9 @@ function syncCartToLocalStorage(cards?: RichCardBlock[]) {
       const idx = existingCart.findIndex((it: any) => (it.skuCode || it.sku?.skuCode || it.id) === skuCode);
 
       if (idx >= 0) {
-        if (actionType === 'added') {
-          existingCart[idx].quantity = (existingCart[idx].quantity || 0) + (item.quantity || 1);
-        } else {
-          existingCart[idx].quantity = item.quantity || 1;
-        }
+        // 服务端 cart_card 的 items 是加购/改量后的全量快照(该 SKU 当前总数),
+        // 一律覆盖而非累加——engine 侧已按 userId 维度累加,前端再累加会翻倍。
+        existingCart[idx].quantity = Number(item.quantity || 1);
       } else {
         existingCart.push({
           id: skuCode,
@@ -448,15 +455,15 @@ export function FloatingChatWidget({
             const incomingCards = Array.isArray(msgData.cards) ? msgData.cards : [];
 
             if (incomingCards.length > 0) {
-              syncCartToLocalStorage(incomingCards);
+              // 幂等键用服务端 messageId(msgData.id);无 id 的兜底消息跳过幂等直接同步
+              syncCartToLocalStorage(incomingCards, msgData.id);
             }
 
             setMessages((prev) => {
-              // 避免与已有的消息重复添加
-              const alreadyExists = prev.some(
-                (m) =>
-                  (incomingId && m.id === incomingId) || (m.role === incomingRole && m.text.trim() === incomingText),
-              );
+              // 幂等去重仅按 id(SSE payload 的 id 与 POST 响应的 messageId 同源)。
+              // 不能按文本匹配:同一问题的模板化回复逐字节相同,文本去重会吞掉
+              // 后续轮次的合法回复(表现为"无实时返回,刷新后才出现")。
+              const alreadyExists = incomingId && prev.some((m) => m.id === incomingId);
               if (alreadyExists) return prev;
 
               return [
@@ -578,14 +585,13 @@ export function FloatingChatWidget({
       const msgId = data.messageId || `ast_${Date.now()}`;
 
       if (replyCards.length > 0) {
-        syncCartToLocalStorage(replyCards);
+        syncCartToLocalStorage(replyCards, msgId);
       }
 
       setMessages((prev) => {
-        // 🛡️ 防御式去重与卡片同步：若 SSE 流式推送已经抢先注入了文本，补充注入卡片并去重
-        const existingIdx = prev.findIndex(
-          (m) => m.id === msgId || (m.role === 'assistant' && m.text.trim() === replyText.trim()),
-        );
+        // 🛡️ 幂等去重仅按 id:若 SSE 流式推送已抢先注入同一 messageId,只补充注入卡片。
+        // 不做文本匹配——同文本 ≠ 同消息(快捷胶囊重复提问、模板化回复都会逐字相同)。
+        const existingIdx = prev.findIndex((m) => m.id === msgId);
         if (existingIdx !== -1) {
           const updated = [...prev];
           if ((!updated[existingIdx].cards || updated[existingIdx].cards.length === 0) && replyCards.length > 0) {

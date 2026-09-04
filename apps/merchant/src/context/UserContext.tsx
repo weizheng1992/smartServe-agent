@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 
 export interface MerchantUser {
   id: string; // e.g. "CUST-8801"
@@ -45,22 +45,23 @@ const UserContext = createContext<UserContextValue | null>(null);
 const STORAGE_KEY = 'aurora_merchant_current_user';
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<MerchantUser>(PRESET_USERS[0]);
-
-  // 从 localStorage 初始化当前用户
-  useEffect(() => {
+  // 从 localStorage 同步初始化当前用户:若延迟到 useEffect 再恢复,首帧会以预设
+  // 用户(张伟/CUST-8801)渲染,聊天挂件等子组件将用错误身份发起请求,并把该
+  // 预设用户的活跃线程劫持进当前视图(身份竞态)。
+  const [user, setUser] = useState<MerchantUser>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed?.id && parsed?.name) {
-          setUser(parsed);
+          return parsed;
         }
       }
     } catch {
       // ignore
     }
-  }, []);
+    return PRESET_USERS[0];
+  });
 
   const switchUser = (newUser: MerchantUser) => {
     setUser(newUser);
