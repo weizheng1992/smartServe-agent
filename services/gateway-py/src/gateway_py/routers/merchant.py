@@ -21,6 +21,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
 from engine_py.approvals.gatekeeper import ApprovalGatekeeper
+from engine_py.db import get_session
 from engine_py.event_bus import get_client as get_redis
 from engine_py.run_agent import AgentJobInput, run_agent
 
@@ -39,6 +40,49 @@ def _err_msg(err: BaseException) -> str:
 
 def _ts_ms() -> int:
     return int(time.time() * 1000)
+
+
+# ---------------------------------------------------------------------------
+# 商户注册门禁(A档,2026-09-04)
+# ---------------------------------------------------------------------------
+
+
+async def check_tenant_registered(business_id: str | None) -> JSONResponse | None:
+    """校验客户端自报的 businessId/tenantId 已在 ``tenants`` 注册表登记且 ``status='active'``。
+
+    背景:此前商户服务路径(门店聊天/会话读取/运营台)从不咨询注册表 —— 任意自报
+    租户(实测 ghost-tenant-999)可获全套引擎服务,并以"X 官方商城"品牌扮演作出
+    回复。本门禁仅约束商户路径;平台主站 ``/api/chat`` 通路不受限(内置租户
+    ecommerce/nike/adidas 不走商户入驻)。
+
+    返回 ``None`` = 放行;返回 ``JSONResponse`` = 调用方直接透出
+    (403 未注册/已停用,503 注册表不可用 —— fail-closed:宁可拒绝服务,
+    不可放行未注册租户)。"all" 为聚合视图参数,非单租户扮演,直接放行。
+    """
+    clean = (business_id or "").strip().lower()
+    if clean == "all":
+        return None
+    try:
+        async with get_session() as session:
+            row = (
+                await session.execute(
+                    text("SELECT status FROM tenants WHERE LOWER(business_id) = :bid LIMIT 1"),
+                    {"bid": clean},
+                )
+            ).first()
+    except Exception as err:  # noqa: BLE001
+        print(f"[TenantGate] tenants 注册表查询失败(fail-closed 拒绝请求): {err}")
+        return JSONResponse(
+            status_code=503,
+            content={"success": False, "error": "租户注册表暂不可用，请稍后重试"},
+        )
+    if row is None or str(row[0] or "").lower() != "active":
+        print(f"[TenantGate] 拒绝未注册/已停用商户租户: {business_id!r}")
+        return JSONResponse(
+            status_code=403,
+            content={"success": False, "error": f"商户 '{business_id}' 未入驻或已停用，请联系平台完成商户注册"},
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +131,9 @@ async def admin_conversations(
 ):
     try:
         tenant_id = tenantId or "aurora"
+        gate = await check_tenant_registered(tenant_id)
+        if gate is not None:
+            return gate
         res = await list_conversations(
             business_id=tenant_id,
             status=None if status == "all" else status,
@@ -104,6 +151,9 @@ async def admin_conversations(
 async def admin_conversation_detail(thread_id: str, tenantId: str | None = Query(None)):
     try:
         tenant_id = tenantId or "aurora"
+        gate = await check_tenant_registered(tenant_id)
+        if gate is not None:
+            return gate
         timeline = await get_conversation_timeline(thread_id, tenant_id)
         now = _dt.datetime.now().isoformat()
         data = timeline or {
@@ -156,6 +206,9 @@ async def admin_approvals(
 ):
     try:
         tenant = tenantId or "aurora"
+        gate = await check_tenant_registered(tenant)
+        if gate is not None:
+            return gate
         approvals = await ApprovalGatekeeper.list_pending_approvals(
             {
                 "tenantId": None if tenant == "all" else tenant,
@@ -335,6 +388,10 @@ async def store_chat(body: dict):
         thread_id = body.get("threadId") or f"merchant_thread_{user_id}_{business_id}"
         job_id = f"job_{_ts_ms()}_{uuid4_hex(7)}"
 
+        gate = await check_tenant_registered(business_id)
+        if gate is not None:
+            return gate
+
         final_state = await run_agent(
             AgentJobInput(
                 jobId=job_id,
@@ -389,6 +446,9 @@ async def store_chat_messages(
 ):
     try:
         tenant = businessId or tenantId or "aurora"
+        gate = await check_tenant_registered(tenant)
+        if gate is not None:
+            return gate
 
         pg_user_id: str | None = None
         if userId:

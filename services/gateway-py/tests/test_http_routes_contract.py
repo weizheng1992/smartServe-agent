@@ -58,6 +58,42 @@ class TestTenant:
         assert del_res.json()["success"] is True
 
 
+class TestMerchantTenantGate:
+    """商户注册门禁(A档,2026-09-04):客户端自报 businessId/tenantId 必须在 tenants
+    注册表登记且 active 方可使用商户服务路径。此前任意自报租户可获全套引擎服务
+    并收到品牌扮演回复(实测 ghost 租户 200 + "X 官方商城"角色扮演 + 线程落库)。"""
+
+    async def test_store_chat_rejects_unregistered_tenant(self, client, contract_fixtures):
+        res = await client.post(
+            "/api/store/chat",
+            json={"message": "你们支持哪些支付方式", "businessId": f"ghost_{_TS}", "userId": "CUST-CONTRACT-GHOST"},
+        )
+        assert res.status_code == 403
+        assert res.json()["success"] is False
+
+    async def test_store_chat_messages_rejects_unregistered_tenant(self, client, contract_fixtures):
+        res = await client.get("/api/store/chat/messages", params={"businessId": f"ghost_{_TS}", "userId": "u_ghost"})
+        assert res.status_code == 403
+        assert res.json()["success"] is False
+
+    async def test_store_chat_messages_allows_registered_tenant(self, client, contract_fixtures):
+        # nike 为 conftest seed_tenants 落库的 active 注册租户;过闸后走纯 DB 会话读取(无 LLM)
+        res = await client.get("/api/store/chat/messages", params={"businessId": "nike", "userId": "u_contract"})
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+
+    async def test_admin_conversations_rejects_unregistered_tenant(self, client, contract_fixtures):
+        res = await client.get("/api/admin/conversations", params={"tenantId": f"ghost_{_TS}"})
+        assert res.status_code == 403
+        assert res.json()["success"] is False
+
+    async def test_admin_conversations_all_aggregate_view_passes(self, client, contract_fixtures):
+        # "all" 为聚合视图参数,非单租户扮演,不受门禁拦截
+        res = await client.get("/api/admin/conversations", params={"tenantId": "all"})
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+
+
 class TestSkills:
     async def test_registry(self, client, contract_fixtures):
         res = await client.get("/api/skills/registry")

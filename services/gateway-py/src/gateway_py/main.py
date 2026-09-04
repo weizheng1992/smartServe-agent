@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from engine_py.llm import warm_embedding_model_in_background
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from socketio import ASGIApp
 
@@ -19,6 +20,18 @@ from .tenant_context import TenantContextMiddleware, _PermissionError
 fastapi_app = FastAPI(title="agent-all gateway-py", version="0.1.0")
 
 fastapi_app.add_middleware(TenantContextMiddleware)
+# CORS:对齐 TS 基线 AppModule 与 server-gateway.md §1.1(移植时遗失)。
+# web(3000)/admin(3001)/merchant(3005) 为独立 origin 的 SPA,api 客户端默认绝对地址
+# http://localhost:4000(绕过各自 Vite proxy),预检与响应须由网关放行;缺失时浏览器侧
+# 全部 fetch 失败、前端静默回退演示假数据(tenants 页 INITIAL_TENANTS 即此症状)。
+# 后注册使 CORS 位于最外层,TenantContextMiddleware 的 403 响应也带 CORS 头。
+fastapi_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3005"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @fastapi_app.exception_handler(_PermissionError)
