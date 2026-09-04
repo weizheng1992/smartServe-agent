@@ -9,6 +9,7 @@ import json
 
 from ...llm import get_chat_model
 from ...memory import ShortMemory
+from ...skills import is_action_query
 from ...tenant import get_merchant_display_name, sanitize_tenant_response
 from ...triage import add_query_to_semantic_cache
 from ..state import AgentState, build_history_context
@@ -177,10 +178,19 @@ async def finish_node(state: AgentState) -> dict:
         sanitized_content = sanitize_tenant_response(raw_content, tenant_id)
 
         # 🚀 general_query 结果回填语义缓存
+        # 🛡️ 写闸(防缓存投毒,2026-09-04 幻觉加购 bug 加固):技能可处理的"动作形"
+        # 输入禁止回填 —— 走到 LLM 终稿分支的 general_query 回复没有任何工具执行
+        # 结果背书,一旦写入,后续相似请求将以 ≥0.96 相似度永久命中缓存、绕过
+        # 真实技能执行(正是"已成功加购"幻觉扩散的机制)。
         intents = state.get("intents") or []
         is_only_general = len(intents) == 1 and intents[0].get("intent") == "general_query"
         input_embedding = state.get("input_embedding") or []
-        if is_only_general and state.get("input") and len(input_embedding) > 0:
+        if (
+            is_only_general
+            and state.get("input")
+            and len(input_embedding) > 0
+            and not is_action_query(state["input"], tenant_id)
+        ):
             try:
                 add_query_to_semantic_cache(tenant_id, state["input"], sanitized_content.strip(), input_embedding)
             except Exception as cache_err:  # noqa: BLE001

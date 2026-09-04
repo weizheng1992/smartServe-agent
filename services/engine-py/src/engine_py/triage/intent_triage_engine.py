@@ -13,6 +13,7 @@ from typing import Any
 from ..db import IntentLog, LowConfidenceLog, get_session
 from ..event_bus import emit_job_result, emit_status
 from ..memory import ShortMemory, TaskMemory
+from ..skills import is_action_query
 from ..tenant import get_merchant_display_name, sanitize_tenant_response
 from . import rule_matchers
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
@@ -479,17 +480,23 @@ class IntentTriageEngine:
                 SemanticVectorCache.get_anchor_vectors(),
             )
 
+            # 🛡️ 读闸(防缓存投毒,2026-09-04 幻觉加购 bug 加固):动作形输入(任一
+            # 技能声明可处理)不得命中回复缓存 —— 即使缓存已被历史投毒,动作也必须
+            # 落到下方锚点判定 / Step 3 精判的真实执行管道。
             cache_tenant = _tenant_of(state)
-            cache_hit = SemanticVectorCache.find_best_semantic_match(cache_tenant, user_vector, 0.96)
-            if cache_hit:
-                return await IntentTriageEngine.handle_immediate_bypass(
-                    state,
-                    "super_semantic_cache",
-                    cache_hit["match"]["reply"],
-                    [{"intent": "general_query", "confidence": cache_hit["similarity"]}],
-                    "semantic_cache",
-                    cache_hit["similarity"],
-                )
+            if is_action_query(input_text, cache_tenant):
+                print(f"[Triage Semantic Cache] Action-shaped input skips reply cache: {input_text[:50]}")
+            else:
+                cache_hit = SemanticVectorCache.find_best_semantic_match(cache_tenant, user_vector, 0.96)
+                if cache_hit:
+                    return await IntentTriageEngine.handle_immediate_bypass(
+                        state,
+                        "super_semantic_cache",
+                        cache_hit["match"]["reply"],
+                        [{"intent": "general_query", "confidence": cache_hit["similarity"]}],
+                        "semantic_cache",
+                        cache_hit["similarity"],
+                    )
 
             for v in anchors["order_status"]:
                 score_order = max(score_order, cosine_similarity(user_vector, v))

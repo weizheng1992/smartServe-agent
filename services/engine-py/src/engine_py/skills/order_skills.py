@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 
 from .base_skill import BaseSkill
@@ -19,6 +20,16 @@ class OrderRefundSkill(BaseSkill):
         "approvalThresholdAmount": 50,
         "version": "1.0.0",
     }
+
+    # 与 triage REFUND_KEYWORDS_RE 对齐的文本兜底(仅用于动作嗅探/无槽位匹配,
+    # fast-track 上下文必带 activeIntent,此正则在该路径不生效)
+    _FALLBACK_RE = re.compile(r"(?:退款|退货|退钱|退单|不想要了|破损|瑕疵)", re.IGNORECASE)
+
+    def can_handle(self, context: dict) -> bool:
+        if super().can_handle(context):
+            return True
+        user_input = (context.get("input") or "").lower()
+        return bool(self._FALLBACK_RE.search(user_input))
 
     async def execute(self, context: dict) -> dict:
         slots = context.get("slots") or {}
@@ -147,6 +158,15 @@ class OrderAddressModificationSkill(BaseSkill):
         "requiredTools": ["getOrderDetail", "executeOrderAction"],
         "version": "1.0.0",
     }
+
+    # 同上:仅用于动作嗅探的文本兜底
+    _FALLBACK_RE = re.compile(r"(?:改地址|修改地址|更改地址|换地址|改收货|修改收货|收货地址改|新的收货地址)")
+
+    def can_handle(self, context: dict) -> bool:
+        if super().can_handle(context):
+            return True
+        user_input = (context.get("input") or "").lower()
+        return bool(self._FALLBACK_RE.search(user_input))
 
     async def execute(self, context: dict) -> dict:
         slots = context.get("slots") or {}
