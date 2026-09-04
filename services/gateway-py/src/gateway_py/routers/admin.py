@@ -65,6 +65,13 @@ async def tenant_list():
             tenants = []
             for row in rows:
                 spi = row["spi_config"] if isinstance(row["spi_config"], dict) else {}
+                skills_cfg = row["skills_config"] if isinstance(row["skills_config"], dict) else {}
+                refund_cfg = skills_cfg.get("skill_order_refund")
+                refund_limit = (
+                    refund_cfg.get("approvalThresholdAmount")
+                    if isinstance(refund_cfg, dict) and refund_cfg.get("approvalThresholdAmount") is not None
+                    else None
+                )
                 tenants.append(
                     {
                         "id": row["business_id"],
@@ -72,7 +79,7 @@ async def tenant_list():
                         "industry": "综合零售",
                         "channel": "Web + Mobile + SPI",
                         "apiKey": spi.get("apiSecret") or f"key_{row['business_id']}_sec",
-                        "refundLimit": 300,
+                        "refundLimit": refund_limit or 300,
                         "autoEscalation": True,
                         "webhookUrl": spi.get("spiBaseUrl") or "http://localhost:3005",
                         "status": row["status"] or "active",
@@ -88,6 +95,14 @@ async def tenant_list():
 
 class TenantCreateIn(BaseModel):
     id: str
+    name: str
+    status: str | None = None
+    webhookUrl: str | None = None
+    apiKey: str | None = None
+    refundLimit: int | None = None
+
+
+class TenantUpdateIn(BaseModel):
     name: str
     status: str | None = None
     webhookUrl: str | None = None
@@ -143,6 +158,79 @@ async def create_tenant(body: TenantCreateIn):
                         ["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]
                     ),
                     skills=json.dumps(skills_config),
+                )
+            )
+        await session.commit()
+    invalidate_cache(clean_id)
+    return {"success": True, "businessId": clean_id}
+
+
+@router.put("/api/tenant/{business_id}")
+async def update_tenant(business_id: str, body: TenantUpdateIn):
+    clean_id = business_id.lower().strip()
+    if not body.name:
+        raise HTTPException(400, "Tenant Name is required")
+
+    async with get_session() as session:
+        existing = (
+            await session.execute(
+                text("SELECT id FROM tenants WHERE LOWER(business_id) = :bid LIMIT 1").bindparams(bid=clean_id)
+            )
+        ).scalar_one_or_none()
+        if not existing:
+            raise HTTPException(404, f"Tenant '{business_id}' not found")
+
+        await session.execute(
+            text("UPDATE tenants SET name = :name, status = :status WHERE LOWER(business_id) = :bid").bindparams(
+                name=body.name, status=body.status or "active", bid=clean_id
+            )
+        )
+
+        # 合并式覆写 tenant_configs:仅更新请求显式携带的字段,避免整份覆写丢失既有配置
+        cfg_row = (
+            await session.execute(
+                text(
+                    "SELECT id, spi_config, skills_config FROM tenant_configs WHERE LOWER(business_id) = :bid LIMIT 1"
+                ).bindparams(bid=clean_id)
+            )
+        ).mappings().first()
+        spi = dict(cfg_row["spi_config"]) if isinstance(cfg_row and cfg_row["spi_config"], dict) else {}
+        skills = dict(cfg_row["skills_config"]) if isinstance(cfg_row and cfg_row["skills_config"], dict) else {}
+        if body.webhookUrl:
+            spi["spiBaseUrl"] = body.webhookUrl
+        if body.apiKey:
+            spi["apiSecret"] = body.apiKey
+        spi.setdefault("mode", "remote_spi")
+        spi.setdefault("timeoutMs", 5000)
+        if body.refundLimit is not None:
+            refund_cfg = skills.get("skill_order_refund")
+            refund_cfg = dict(refund_cfg) if isinstance(refund_cfg, dict) else {}
+            refund_cfg["enabled"] = refund_cfg.get("enabled", True)
+            refund_cfg["approvalThresholdAmount"] = body.refundLimit
+            skills["skill_order_refund"] = refund_cfg
+
+        if cfg_row:
+            await session.execute(
+                text(
+                    "UPDATE tenant_configs SET spi_config = CAST(:spi AS jsonb), skills_config = CAST(:skills AS jsonb), "
+                    "updated_at = NOW() WHERE id = :cid"
+                ).bindparams(spi=json.dumps(spi), skills=json.dumps(skills), cid=cfg_row["id"])
+            )
+        else:
+            await session.execute(
+                text(
+                    "INSERT INTO tenant_configs (business_id, system_prompt, welcome_message, status, version, "
+                    "spi_config, enabled_skills, skills_config) "
+                    "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), CAST(:skills AS jsonb))"
+                ).bindparams(
+                    bid=clean_id,
+                    prompt=f"You are the official AI Customer Support Agent for {body.name}.",
+                    welcome=f"您好！欢迎来到 {body.name}，请问有什么可以帮您？",
+                    spi=json.dumps(spi),
+                    skills_arr=json.dumps(
+                        ["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]
+                    ),
+                    skills=json.dumps(skills),
                 )
             )
         await session.commit()

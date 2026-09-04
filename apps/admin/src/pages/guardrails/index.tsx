@@ -20,9 +20,29 @@ export function GuardrailsPage() {
     return [];
   }, []);
 
+  const createGuardrailApi = useCallback(async (item: Partial<GuardrailRuleRecord>, tenantId: string) => {
+    const res = await guardrailsApi.create(
+      {
+        ruleName: item.ruleName,
+        ruleType: item.ruleType,
+        pattern: item.pattern,
+        action: item.action,
+        severity: item.severity,
+        isEnabled: item.isEnabled,
+      },
+      tenantId,
+    );
+    return res.data || item;
+  }, []);
+
   const updateGuardrailApi = useCallback(async (item: GuardrailRuleRecord, tenantId: string) => {
     const res = await guardrailsApi.update(item.id, item, tenantId);
     return res.data || item;
+  }, []);
+
+  const deleteGuardrailApi = useCallback(async (id: string, tenantId: string) => {
+    await guardrailsApi.delete(id, tenantId);
+    return true;
   }, []);
 
   const {
@@ -48,7 +68,9 @@ export function GuardrailsPage() {
     deleteItem,
   } = useAdminCrud<GuardrailRuleRecord>({
     fetchList: fetchGuardrailsList,
+    createApi: createGuardrailApi,
     updateApi: updateGuardrailApi,
+    deleteApi: deleteGuardrailApi,
     filterFn: (item, query, type) => {
       if (type && item.ruleType !== type) return false;
       if (query.trim()) {

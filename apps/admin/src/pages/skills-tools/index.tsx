@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
+import { DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
 import { skillsApi } from '../../lib/api';
 import { ToolFormModal } from './components/ToolFormModal';
@@ -53,16 +53,10 @@ export function SkillsToolsPage() {
     statusFilter,
     setStatusFilter,
     handleResetFilters,
-    isCreateOpen,
-    setIsCreateOpen,
     isEditOpen,
     setIsEditOpen,
     selectedItem,
-    itemToDelete,
-    setItemToDelete,
-    createItem,
     updateItem,
-    deleteItem,
   } = useAdminCrud<SkillToolRecord>({
     fetchList: fetchSkillsList,
     updateApi: updateSkillApi,
@@ -83,19 +77,8 @@ export function SkillsToolsPage() {
 
   const [formData, setFormData] = useState<Partial<SkillToolRecord>>({});
 
-  const handleOpenCreate = () => {
-    setFormData({
-      id: '',
-      name: '',
-      type: 'openapi',
-      description: '',
-      riskLevel: 'low',
-      requiresHitl: false,
-      tenantScope: 'all',
-      status: 'enabled',
-    });
-    setIsCreateOpen(true);
-  };
+  // Skills 由引擎代码注册表定义(SkillRegistry),控制台仅支持配置编辑(启用/阈值),
+  // 不提供创建与注销 —— 此前的本地假创建/假删除在刷新后即回滚,已移除。
 
   const handleOpenEdit = (tool: SkillToolRecord) => {
     setFormData({ ...tool });
@@ -104,10 +87,7 @@ export function SkillsToolsPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isCreateOpen) {
-      if (!formData.id || !formData.name) return;
-      createItem(formData as SkillToolRecord);
-    } else if (isEditOpen && formData.id) {
+    if (isEditOpen && formData.id) {
       updateItem('id', formData as SkillToolRecord);
     }
   };
@@ -221,13 +201,6 @@ export function SkillsToolsPage() {
           >
             配置
           </button>
-          <button
-            type="button"
-            onClick={() => setItemToDelete(row)}
-            className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-          >
-            移除
-          </button>
         </div>
       ),
     },
@@ -248,18 +221,6 @@ export function SkillsToolsPage() {
           { label: 'MCP Server', value: 'mcp' },
         ]}
         onReset={handleResetFilters}
-        actions={
-          <button
-            type="button"
-            onClick={handleOpenCreate}
-            className="px-3.5 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            注册外部/MCP 工具
-          </button>
-        }
       />
 
       <DataTable<SkillToolRecord>
@@ -275,24 +236,14 @@ export function SkillsToolsPage() {
       />
 
       <ToolFormModal
-        isOpen={isCreateOpen || isEditOpen}
+        isOpen={isEditOpen}
         onClose={() => {
-          setIsCreateOpen(false);
           setIsEditOpen(false);
         }}
         onSubmit={handleSubmit}
-        isCreate={isCreateOpen}
+        isCreate={false}
         formData={formData}
         setFormData={setFormData}
-      />
-
-      <ConfirmDialog
-        isOpen={Boolean(itemToDelete)}
-        onClose={() => setItemToDelete(null)}
-        onConfirm={() => itemToDelete && deleteItem('id', itemToDelete.id)}
-        title="确认注销该工具/技能？"
-        description={`注销工具 [${itemToDelete?.name}] 后，Agent 规划器将不再允许调用该技能。`}
-        confirmText="确认注销"
       />
     </div>
   );

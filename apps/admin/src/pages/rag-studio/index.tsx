@@ -23,7 +23,7 @@ export function RagStudioPage() {
           category: d.category || d.metadata?.category || '通用政策',
           content: d.content || d.chunkText || '',
           tokenCount: d.tokenCount || Math.ceil((d.content || d.chunkText || '').length * 1.3),
-          updatedAt: d.updatedAt || (d.createdAt ? d.createdAt.split('T')[0] : '2026-02-23'),
+          updatedAt: d.updatedAt || (d.createdAt ? d.createdAt.split('T')[0] : new Date().toISOString().split('T')[0]),
         }));
         return records;
       }
@@ -64,13 +64,10 @@ export function RagStudioPage() {
     handleResetFilters,
     isCreateOpen,
     setIsCreateOpen,
-    isEditOpen,
-    setIsEditOpen,
     selectedItem,
     itemToDelete,
     setItemToDelete,
     createItem,
-    updateItem,
     deleteItem,
   } = useAdminCrud<KnowledgeChunkRecord>({
     fetchList: fetchChunks,
@@ -112,22 +109,11 @@ export function RagStudioPage() {
     setIsCreateOpen(true);
   };
 
-  const handleOpenEdit = (chunk: KnowledgeChunkRecord) => {
-    setFormData({ ...chunk });
-    setIsEditOpen(true);
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isCreateOpen) {
       if (!formData.docTitle || !formData.content) return;
       createItem({
-        ...(formData as KnowledgeChunkRecord),
-        tokenCount: Math.ceil((formData.content?.length || 0) * 1.3),
-        updatedAt: new Date().toISOString().split('T')[0],
-      });
-    } else if (isEditOpen && formData.id) {
-      updateItem('id', {
         ...(formData as KnowledgeChunkRecord),
         tokenCount: Math.ceil((formData.content?.length || 0) * 1.3),
         updatedAt: new Date().toISOString().split('T')[0],
@@ -140,8 +126,17 @@ export function RagStudioPage() {
     setIsSearching(true);
     try {
       const res = await ragApi.search(playQuery, selectedTenantId === 'all' ? 'ecommerce' : selectedTenantId);
-      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
-        setPlayResults(res.data);
+      // 契约:POST /api/rag/query → {success, data: {matches: [{id, chunkText, contextualSummary, score}]}}
+      const matches = res.success ? res.data?.matches : undefined;
+      if (Array.isArray(matches)) {
+        setPlayResults(
+          matches.map((m: any) => ({
+            id: m.id,
+            title: m.contextualSummary || (m.chunkText || '').slice(0, 40),
+            score: m.score,
+            content: m.chunkText,
+          })),
+        );
         setIsSearching(false);
         return;
       }
@@ -204,13 +199,6 @@ export function RagStudioPage() {
       align: 'right' as const,
       render: (row: KnowledgeChunkRecord) => (
         <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => handleOpenEdit(row)}
-            className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-          >
-            编辑
-          </button>
           <button
             type="button"
             onClick={() => setItemToDelete(row)}
@@ -278,10 +266,9 @@ export function RagStudioPage() {
       </div>
 
       <KnowledgeFormModal
-        isOpen={isCreateOpen || isEditOpen}
+        isOpen={isCreateOpen}
         onClose={() => {
           setIsCreateOpen(false);
-          setIsEditOpen(false);
         }}
         onSubmit={handleSubmit}
         isCreate={isCreateOpen}

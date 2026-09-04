@@ -57,6 +57,32 @@ class TestTenant:
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
 
+    async def test_update_tenant_roundtrip(self, client, contract_fixtures):
+        ut_id = f"ut_{_TS}"
+        create_res = await client.post("/api/tenant", json={"id": ut_id, "name": "契约测试租户", "refundLimit": 300})
+        assert create_res.status_code in (200, 201)
+
+        upd_res = await client.put(
+            f"/api/tenant/{ut_id}",
+            json={"name": "契约测试租户V2", "refundLimit": 500, "webhookUrl": "https://spi.example.com/hook"},
+        )
+        assert upd_res.status_code == 200
+        body = upd_res.json()
+        assert body["success"] is True
+        assert body["businessId"] == ut_id
+
+        # 名称与退款阈值应反映更新后的真实值(refundLimit 从 tenant_configs.skills_config 读取)
+        list_res = await client.get("/api/tenant/list")
+        updated = next((t for t in list_res.json()["tenants"] if t["id"] == ut_id), None)
+        assert updated is not None
+        assert updated["name"] == "契约测试租户V2"
+        assert updated["refundLimit"] == 500
+
+        ghost_res = await client.put(f"/api/tenant/ghost_{_TS}", json={"name": "幽灵租户"})
+        assert ghost_res.status_code == 404
+
+        await client.delete(f"/api/tenant/{ut_id}")
+
 
 class TestMerchantTenantGate:
     """商户注册门禁(A档,2026-09-04):客户端自报 businessId/tenantId 必须在 tenants

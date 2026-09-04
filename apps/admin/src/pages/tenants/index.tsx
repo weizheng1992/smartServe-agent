@@ -60,6 +60,17 @@ export function TenantsPage() {
     [addOrUpdateTenant],
   );
 
+  const updateTenantApi = useCallback(async (item: TenantRecord) => {
+    await tenantsApi.update(item.id, {
+      name: item.name,
+      status: item.status,
+      webhookUrl: item.webhookUrl,
+      apiKey: item.apiKey,
+      refundLimit: item.refundLimit,
+    });
+    return item;
+  }, []);
+
   const deleteTenantApi = useCallback(
     async (id: string) => {
       await tenantsApi.delete(id);
@@ -94,7 +105,9 @@ export function TenantsPage() {
   } = useAdminCrud<TenantRecord>({
     fetchList: fetchTenantsList,
     createApi: createTenantApi,
+    updateApi: updateTenantApi,
     deleteApi: deleteTenantApi,
+    onItemUpdated: (item) => addOrUpdateTenant({ id: item.id, name: item.name }),
     tenantKey: 'id' as keyof TenantRecord,
     filterFn: (item, query, status) => {
       if (status && item.status !== status) return false;

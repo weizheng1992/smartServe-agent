@@ -206,6 +206,19 @@ export const tenantsApi = {
   delete: (id: string) => {
     return adminApi.delete(`/api/tenant/${id}`);
   },
+
+  update: (
+    id: string,
+    body: {
+      name: string;
+      status?: string;
+      webhookUrl?: string;
+      apiKey?: string;
+      refundLimit?: number;
+    },
+  ) => {
+    return adminApi.put(`/api/tenant/${id}`, body);
+  },
 };
 
 /** 5. RAG 知识库 API */
@@ -231,7 +244,7 @@ export const ragApi = {
   },
 
   search: (query: string, tenantId?: string, category?: string) => {
-    return adminApi.post('/api/rag/search', { query, category, tenantId }, tenantId);
+    return adminApi.post('/api/rag/query', { query, category, tenantId }, tenantId);
   },
 };
 
@@ -260,8 +273,16 @@ export const guardrailsApi = {
     return adminApi.get('/api/guardrails', tenantId);
   },
 
+  create: (body: any, tenantId?: string) => {
+    return adminApi.post('/api/guardrails', body, tenantId);
+  },
+
   update: (id: string, body: any, tenantId?: string) => {
     return adminApi.put(`/api/guardrails/${id}`, body, tenantId);
+  },
+
+  delete: (id: string, tenantId?: string) => {
+    return adminApi.delete(`/api/guardrails/${id}`, tenantId);
   },
 };
 
@@ -276,7 +297,8 @@ export const billingApi = {
   },
 
   updateQuota: (tenantId: string, quota: number) => {
-    return adminApi.post('/api/billing/quota', { tenantId, quota }, tenantId);
+    // 契约:PUT /api/billing/quota,body 为 {businessId, monthlyLimitTokens}
+    return adminApi.put('/api/billing/quota', { businessId: tenantId, monthlyLimitTokens: quota }, tenantId);
   },
 };
 
