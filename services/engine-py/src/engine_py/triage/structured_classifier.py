@@ -37,6 +37,65 @@ class StructuredTriageOutput(BaseModel):
     isOutOfScope: bool = Field(default=False)
 
 
+# ── LLM 输出自修复(纯函数,供 classify 与回归测试复用)─────────────────
+# 2026-09-04 生产日志两类漂移:围栏 JSON(```json ... ```)与字段漂移
+# (executionMode='single'、缺失 intents 改用顶层 category 平铺单意图)。
+
+_VALID_EXECUTION_MODES = {"parallel", "sequential", "conditional"}
+_EXECUTION_MODE_ALIASES = {
+    "single": "sequential",
+    "single_intent": "sequential",
+    "single_step": "sequential",
+    "auto": "parallel",
+    "none": "parallel",
+}
+
+
+def strip_code_fences(text: str) -> str:
+    """剥离 LLM 输出常见的 markdown 代码围栏(```json ... ```)。"""
+    clean = text.strip()
+    clean = re.sub(r"^```(?:json|JSON)?\s*", "", clean)
+    clean = re.sub(r"```\s*$", "", clean)
+    return clean.strip()
+
+
+def coerce_structured_payload(data: dict[str, Any]) -> dict[str, Any]:
+    """将 LM 常见字段漂移归一到 StructuredTriageOutput 形状(原地修改并返回)。"""
+    if not isinstance(data, dict):
+        raise TypeError(f"expected dict payload, got {type(data).__name__}")
+
+    mode = str(data.get("executionMode") or "parallel").strip().lower()
+    if mode not in _VALID_EXECUTION_MODES:
+        mode = _EXECUTION_MODE_ALIASES.get(mode, "parallel")
+    data["executionMode"] = mode
+
+    intents = data.get("intents")
+    if not (isinstance(intents, list) and intents):
+        # 单意图形状:顶层平铺 intent/category + IntentNode 槽位字段 → 包成列表
+        intent_name = data.get("intent") or data.get("category")
+        if intent_name:
+            node: dict[str, Any] = {"intent": str(intent_name)}
+            for key in ("confidence", "type", "entities", "slots", "missingSlots", "condition"):
+                if data.get(key) is not None:
+                    node[key] = data[key]
+            node.setdefault("confidence", 0.9)
+            data["intents"] = [node]
+    for node in data.get("intents") or []:
+        if isinstance(node, dict) and "intent" not in node and node.get("category"):
+            node["intent"] = str(node.pop("category"))
+    return data
+
+
+def parse_structured_output_text(text: str) -> StructuredTriageOutput:
+    """从 LLM 原始文本解析:剥围栏 → 截取首个 JSON 对象 → 归一漂移 → 校验。"""
+    clean = strip_code_fences(text)
+    start, end = clean.find("{"), clean.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError("no JSON object found in LLM output")
+    payload = json.loads(clean[start : end + 1])
+    return StructuredTriageOutput.model_validate(coerce_structured_payload(payload))
+
+
 SYSTEM_PROMPT_TEMPLATE = """You are an expert e-commerce intent triage and slot extraction engine.
 Analyze the user's latest input along with the recent conversation context and output a strict structured classification.
 
@@ -82,19 +141,52 @@ async def classify(
     )
 
     try:
-        structured_llm = llm.with_structured_output(StructuredTriageOutput)
-        return await structured_llm.ainvoke(system_prompt)
+        structured_llm = llm.with_structured_output(StructuredTriageOutput, include_raw=True)
+        result = await structured_llm.ainvoke(system_prompt)
+        parsed = result.get("parsed") if isinstance(result, dict) else result
+        if parsed is not None:
+            return parsed
+        # 解析层失败(如 provider 返回围栏 JSON):取原始文本自修复,免二次 LLM 调用
+        raw = result.get("raw") if isinstance(result, dict) else None
+        raw_text = getattr(raw, "content", None)
+        if isinstance(raw_text, list):  # 多模态 content 分片
+            raw_text = "".join(str(part) for part in raw_text)
+        if raw_text:
+            return parse_structured_output_text(str(raw_text))
+        raise ValueError("structured output returned neither parsed result nor raw text")
     except Exception as err:
         print(
             "[StructuredClassifier] Structured output invocation failed, "
             f"falling back to prompt-guided JSON parsing: {err}"
         )
+        # fallback prompt 内嵌真实 JSON Schema 与示例,避免模型凭名字猜测字段
+        schema_json = json.dumps(StructuredTriageOutput.model_json_schema(), ensure_ascii=False)
+        example_json = json.dumps(
+            {
+                "executionMode": "sequential",
+                "intents": [
+                    {
+                        "intent": "cart_manage",
+                        "confidence": 0.9,
+                        "type": "primary",
+                        "entities": {},
+                        "slots": {},
+                        "missingSlots": [],
+                    }
+                ],
+                "clarificationMessage": None,
+                "isOutOfScope": False,
+            },
+            ensure_ascii=False,
+        )
         raw_prompt = (
-            f"{system_prompt}\n\nReturn ONLY a valid JSON object strictly matching the "
-            "StructuredTriageOutputSchema without backticks or markdown:"
+            f"{system_prompt}\n\n"
+            "Return ONLY one valid JSON object. No backticks, no markdown, no commentary. "
+            "It must strictly match this JSON Schema:\n"
+            f"{schema_json}\n"
+            "Example shape:\n"
+            f"{example_json}"
         )
         response = await llm.ainvoke(raw_prompt)
         text = response.content if hasattr(response, "content") else str(response)
-        clean = re.sub(r"^```json\s*", "", text.strip())
-        clean = re.sub(r"```$", "", clean).strip()
-        return StructuredTriageOutput.model_validate(json.loads(clean))
+        return parse_structured_output_text(str(text))

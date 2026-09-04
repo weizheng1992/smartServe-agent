@@ -52,8 +52,8 @@ class CartManageSkill(BaseSkill):
         guide_context = extra.get("guideContext") or {}
         existing_cart = extra.get("cartContext") or {}
 
-        # 1. 查看购物车与算价结算
-        if self._VIEW_ONLY_RE.search(user_input) and not self._VIEW_EXCLUDE_RE.search(user_input):
+        # 1. 查看购物车与算价结算(_VIEW_ONLY_RE 等均为模块级常量,不可经 self. 访问)
+        if _VIEW_ONLY_RE.search(user_input) and not _VIEW_EXCLUDE_RE.search(user_input):
             summary_res = await MallDomainService.get_cart_summary(
                 {"userId": context.get("userId"), "threadId": context.get("threadId")}
             )
@@ -104,13 +104,13 @@ class CartManageSkill(BaseSkill):
             }
 
         # 2. 购物车删除与清空
-        if self._DELETE_RE.search(user_input) and not self._ADD_RE.search(user_input):
+        if _DELETE_RE.search(user_input) and not _ADD_RE.search(user_input):
             summary_res = await MallDomainService.get_cart_summary(
                 {"userId": context.get("userId"), "threadId": context.get("threadId")}
             )
             current_items = (summary_res.get("cart") or {}).get("items") or existing_cart.get("items") or []
 
-            if self._CLEAR_RE.search(user_input):
+            if _CLEAR_RE.search(user_input):
                 for item in current_items:
                     await MallDomainService.update_cart_item(
                         {"skuId": item["skuId"], "quantity": 0, "userId": context.get("userId"), "threadId": context.get("threadId")}
