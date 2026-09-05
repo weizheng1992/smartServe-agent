@@ -4,6 +4,31 @@
 
 ---
 
+## [2.3.7] - 2026-09-05 (双退款事故三层旁路封死 + SPI 技能链路线程上下文透传)
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **未指明订单号的退款申请静默重退历史已退款订单 (`b355170`,三层修复)**:
+  - 事故(2026-09-05 19:08,线程 `merchant_thread_CUST-8801_aurora_*`):用户「我想申请退款」想退 9081,系统把旧回合(04:16)已退款的 9082 物理重退,且全程未发新审批工单。
+  - 根因链(DB 证据钉死):线程无已存任务状态 → 槽位提取器全历史反向扫描(含 assistant 消息)回填 9082 → missingSlots=[] 不澄清 → planner fast-path 零 LLM 单步计划 → `check_double_refund` 只查 engine orders 表(商户真单在 `agent_merchant` 库,全盲)→ 线程扫描复用 03:07 旧 `approved` 工单绕过 HITL → `process_refund` 无 REFUNDED 幂等校验 → 商户真单物理重退。
+  - 修复(三层防线,自上游到底线):③ 资金类意图(order_return/refund)订单号禁历史回填——只认当前输入与用户已确认 orderContext,缺失强制追问澄清(`slot_extractor` 严格提取 + planner fast-path 降级门 + 深度规划 prompt 例外指令);② HITL 旁路封死——线程扫描只认领 `waiting` 工单,`approved` 等终态只能经 existingApprovalId(审批恢复路径)复用;① 幂等底线——`process_refund` 对任何来源(engine/merchant/third_party)已 REFUNDED 订单拒绝物理重退,`check_double_refund` 改三源判定并按用户归属匹配。
+  - 回归:`test_double_refund_replay.py` 3 例红灯转绿(密封 testcontainers PG + 商户镜像表回放事故执行链:重退物理指纹守卫 / 陈旧 approved 工单必须重开 waiting 票 / 缺单号必须澄清)。
+- **SPI 技能链路丢弃线程上下文,商户真单被 third_party 过期数据遮蔽 (`25aea43`)**:
+  - 根因:triage Skill Fast-Track 与执行器技能派发都把 threadId/userId 传入 `skill.execute(context)`,但 `OrderRefundSkill` 调 `LocalDbSpiAdapter` 时丢弃——`get_order_detail` 硬编码 user_id=None 跳过商户真单回退(`find_order_by_id` 按 user_id 严格归属匹配),拿到 third_party 过期种子状态(事故后 11:09 回复展示错误订单状态即此因);`execute_order_action` 硬编码 thread_id=None,使归属校验(IDOR)、REFUNDED 幂等守卫(2.3.7 上一条新增)、商户写穿透在技能链路全部失效——退款只假写 third_party/engine 表,商户真单纹丝不动。附带发现:adapter success 计算误读 `refundedAmount`(`process_refund` 返回键为 `refundAmount`),物理退款成功却向技能上报失败。
+  - 修复:`OrderRefundSkill` / `OrderAddressModificationSkill` 把 context 中的 userId+threadId 透传进 `get_order_detail` 与 `execute_order_action`;adapter 侧 `process_refund` / `change_shipping_address` 改收 `req.threadId`,success/refundedAmount 键名对齐。
+  - 回归:`test_spi_client_thread_context.py` 3 例红灯转绿(带身份详情必须读商户真单 / 已退款单经技能链路不再发生任何物理退款写,含 third_party 双侧指纹断言 / 合法退款必须写穿商户真单)。其中"盲退"断言曾因键名错配假绿(物理退款发生但恰好上报失败),补 third_party 物理指纹断言后真红——双断言必要性的一手案例。
+
+### ✅ 验证 (Verification)
+
+- engine-py 65 passed(62 存量 + 6 新增,含双退款回放与 SPI 上下文)/ gateway 契约 69 passed / ruff clean / 无 DEBUG 残留。
+
+### ⚠️ Notes (注意事项)
+
+- 运行中的 dev 网关需重启 `dev:server` 方可生效(uvicorn reload 不监视 engine-py,见 docs/deployment.md 踩坑清单)。
+- 退款意图的订单号现强制"当前输入或已确认 orderContext"——多单用户说「我要退款」会收到追问,属预期行为变化(此前静默回填历史订单正是事故根因)。
+
+---
+
 ## [2.3.6] - 2026-09-05 (启动与部署指南:dev Temporal 流程与线上部署 runbook 成文)
 
 ### 📝 Docs (文档同步)
