@@ -20,6 +20,7 @@ _CLEAR_RE = re.compile(r"(?:清空|全部删除|全删)")
 _QTY_UPDATE_RE = re.compile(r"(?:改成|修改为|数量设为|变成|改为|调整为|增加到|减少到)\s*(\d+)\s*件?")
 _VAGUE_RE = re.compile(r"(?:第几|哪件|哪款|哪一个)")
 _ORDINAL_FULL_RE = re.compile(r"(?:把)?第\s*([一二三四五12345两])\s*[件款个双]|买第\s*([一二三四五12345两])|第\s*([一二三四五12345两])\s*款")
+_ADD_ALL_RE = re.compile(r"(?:全部|所有|都)")
 _QTY_BUY_RE = re.compile(r"(?:数量|买|要|加|购)\s*(\d+)\s*件?")
 _HISTORY_ITEM_RE = re.compile(r"(\d+)\.\s*【([^】]+)】\s*¥?(\d+(?:\.\d+)?)")
 
@@ -248,6 +249,83 @@ class CartManageSkill(BaseSkill):
                         candidate_products = parsed_products
                         candidate_list = [p["id"] for p in parsed_products]
                         break
+
+        # 4a. 全量加购(2026-09-06 修复):"全部/所有/都" + 多候选且无序数词 → 逐一入车。
+        # 此前该措辞落到 candidate[0] 兜底,导购推荐 3 款用户说"3个全部加入购物车"仅 1 款入车。
+        # 序数词共存("第1件和第2件都加入")仍走下方单目标指代解析,不误扩为全量。
+        if (
+            _ADD_ALL_RE.search(user_input)
+            and not _ORDINAL_FULL_RE.search(user_input)
+            and len(candidate_products) > 1
+        ):
+            qty_match_all = _QTY_BUY_RE.search(user_input)
+            per_qty = int(qty_match_all.group(1)) if qty_match_all else 1
+            updated_cart = {}
+            for prod in candidate_products:
+                add_res = await MallDomainService.add_to_cart(
+                    {
+                        "skuId": prod["id"],
+                        "quantity": per_qty,
+                        "title": prod.get("name") or "精选推荐商品",
+                        "price": prod.get("price") or 0,
+                        "userId": context.get("userId"),
+                        "threadId": context.get("threadId"),
+                    }
+                )
+                updated_cart = add_res.get("cart") or {}
+            added_titles = "、".join(str(p.get("name") or p["id"]) for p in candidate_products)
+            card = {
+                "type": "cart_card",
+                "data": {
+                    "actionType": "added",
+                    "title": f"已全部加入购物车 ({len(candidate_products)} 款)",
+                    "totalQuantity": updated_cart.get("totalQuantity") or len(candidate_products) * per_qty,
+                    "totalAmount": updated_cart.get("totalAmount") or sum(
+                        (p.get("price") or 0) * per_qty for p in candidate_products
+                    ),
+                    "currency": "CNY",
+                    "items": [
+                        {
+                            "id": it.get("skuId") or it.get("id"),
+                            "skuId": it.get("skuId") or it.get("id"),
+                            "title": it.get("title") or it.get("name"),
+                            "price": float(it.get("price") or 0),
+                            "quantity": int(it.get("quantity") or per_qty),
+                            "imageUrl": it.get("imageUrl"),
+                            "specSummary": it.get("specSummary"),
+                        }
+                        for it in (updated_cart.get("items") or [])
+                    ],
+                    "actions": [
+                        {"label": "去结算", "action": "checkout_cart"},
+                        {"label": "查看购物车", "action": "view_cart"},
+                    ],
+                },
+            }
+            return {
+                "success": True,
+                "skillId": self.metadata["id"],
+                "output": (
+                    f"🎉 已成功将 {len(candidate_products)} 款商品全部加入购物车：{added_titles}！\n"
+                    f"当前购物车共有 {updated_cart.get('totalQuantity') or len(candidate_products) * per_qty} 件商品，"
+                    f"总金额 ¥{updated_cart.get('totalAmount') or 0} 元。\n\n"
+                    "如需结算买单或调整数量，请随时告诉我！"
+                ),
+                "cards": [card],
+                "nextAction": "finish",
+                "extra": {
+                    "cartContext": {
+                        "lastModifiedItemId": candidate_products[-1]["id"],
+                        "items": updated_cart.get("items"),
+                        "totalAmount": updated_cart.get("totalAmount"),
+                    },
+                    "guideContext": {
+                        **guide_context,
+                        "candidateProductIds": candidate_list,
+                        "candidateProducts": candidate_products,
+                    },
+                },
+            }
 
         ordinal_match = _ORDINAL_FULL_RE.search(user_input)
         if ordinal_match:
