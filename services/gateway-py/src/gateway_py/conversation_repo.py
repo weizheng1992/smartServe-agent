@@ -6,9 +6,8 @@ import datetime as _dt
 import json
 import uuid
 
-from sqlalchemy import text
-
 from engine_py.db import get_session
+from sqlalchemy import text
 
 
 async def list_conversations(
@@ -144,7 +143,7 @@ async def get_conversation_timeline(thread_id: str, business_id: str | None = No
         if isinstance(cards, str):
             try:
                 cards = json.loads(cards)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 cards = None
         parsed_messages.append(
             {

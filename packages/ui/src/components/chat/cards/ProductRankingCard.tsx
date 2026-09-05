@@ -37,6 +37,7 @@ export const ProductRankingCard: React.FC<ProductRankingCardProps> = ({ data, on
             const isTop3 = p.rank === 3;
 
             return (
+              // biome-ignore lint/a11y/useKeyWithClickEvents: 榜单行点击为快捷跳转增强,非唯一交互路径
               <div
                 key={p.productId}
                 className="py-2.5 first:pt-1 last:pb-0 flex items-center justify-between gap-3 hover:bg-slate-800/30 px-1 rounded-md transition-colors"

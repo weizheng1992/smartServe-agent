@@ -41,7 +41,7 @@ async def _publish_ws_event(event: str, room: str, data) -> None:
             import json
 
             await client.publish("ws:events", json.dumps({"event": event, "room": room, "data": data}, ensure_ascii=False, default=str))
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[WS] Failed to publish redis ws event: {err}")
 
 

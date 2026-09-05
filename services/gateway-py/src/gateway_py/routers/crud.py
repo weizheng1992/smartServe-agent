@@ -6,20 +6,21 @@ import datetime as _dt
 import random
 import time
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
-from pydantic import BaseModel
-from sqlalchemy import desc, select, text
-
 from engine_py.badcase.pool import SOURCE_PERSONA_FACT_DELETED, record_badcase_signal
 from engine_py.db import (
     EvalRunRecordRow,
     GuardrailRule,
     IntentLog,
+    LlmCallLog,
     LongMemoryFact,
     SessionMetric,
     TenantBillingQuota,
+    Thread,
     get_session,
 )
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from pydantic import BaseModel
+from sqlalchemy import desc, select, text
 
 router = APIRouter()
 
@@ -392,22 +393,61 @@ async def system_logs(
     limit: int = 50,
 ):
     async with get_session() as session:
+        # LLM 调用日志:真实每次调用一行(engine_py/llm/telemetry.py 统一落盘),
+        # 租户归因优先取 business_id 列,历史行/图外调用回退 join threads
+        llm_rows = (
+            await session.execute(
+                select(LlmCallLog, Thread)
+                .outerjoin(Thread, LlmCallLog.thread_id == Thread.id)
+                .order_by(desc(LlmCallLog.created_at))
+                .limit(limit)
+            )
+        ).all()
         intent_rows = (
-            await session.execute(select(IntentLog).order_by(desc(IntentLog.created_at)).limit(limit))
-        ).scalars().all()
+            await session.execute(
+                select(IntentLog, Thread)
+                .outerjoin(Thread, IntentLog.thread_id == Thread.id)
+                .order_by(desc(IntentLog.created_at))
+                .limit(limit)
+            )
+        ).all()
         metric_rows = (
             await session.execute(select(SessionMetric).order_by(desc(SessionMetric.created_at)).limit(limit))
         ).scalars().all()
 
     logs = []
-    for l in intent_rows:
+    for l, thread_row in llm_rows:
+        # usage 缺失处(None)透传为 0 供前端渲染 —— 数字均为真实值,不造假数
+        tokens_in = l.tokens_in or 0
+        tokens_out = l.tokens_out or 0
+        logs.append(
+            {
+                "id": f"log_llm_{str(l.id)[:8]}",
+                "traceId": f"tr_{l.thread_id or 'sys'}",
+                "businessId": l.business_id or (thread_row.business_id if thread_row else None) or "system",
+                "model": l.model,
+                "promptTokens": tokens_in,
+                "completionTokens": tokens_out,
+                "totalTokens": tokens_in + tokens_out,
+                "latencyMs": l.latency_ms or 0,
+                "statusCode": 200,
+                "logType": "llm_call",
+                "rawDetail": {
+                    "node": l.node,
+                    "costUsd": l.cost_usd,
+                },
+                "timestamp": l.created_at.strftime("%Y-%m-%d %H:%M:%S") if l.created_at else "2026-02-23 18:00:00",
+            }
+        )
+    for l, thread_row in intent_rows:
         logs.append(
             {
                 "id": f"log_intent_{str(l.id)[:8]}",
                 "traceId": f"tr_{l.thread_id or 'sys'}",
-                "businessId": tenantId if tenantId and tenantId != "all" else "ecommerce",
+                # intent_logs 无租户列,经 threads 归因(此前硬编码 'ecommerce' 为拼装值)
+                "businessId": (thread_row.business_id if thread_row else None) or "system",
                 "model": "text-embedding-3-small" if l.method == "embedding" else "gpt-4o-mini",
-                # intent_logs 无 token/延迟遥测(llm_call_logs 未接线),返回真实值 0 而非假数
+                # intent_logs 无 token/延迟遥测,返回真实值 0 而非假数
                 "promptTokens": 0,
                 "completionTokens": 0,
                 "totalTokens": 0,
@@ -423,20 +463,20 @@ async def system_logs(
             }
         )
     for m in metric_rows:
-        # 真实值来自 session_metrics;prompt/completion 拆分暂无数据源,统一为 0 不造假数
-        total_tokens = m.total_tokens or 0
+        # 会话级遥测汇总(resolution/熔断计数),token 为本次运行真实 usage 总和;
+        # prompt/completion 拆分属逐调用明细(见 llm_call 类型),此处统一为 0 不造假数
         logs.append(
             {
                 "id": f"log_metric_{str(m.id)[:8]}",
                 "traceId": f"tr_{m.thread_id}",
                 "businessId": m.business_id,
-                "model": "gpt-4o-mini-2024-07-18",
+                "model": "session-summary",
                 "promptTokens": 0,
                 "completionTokens": 0,
-                "totalTokens": total_tokens,
+                "totalTokens": m.total_tokens or 0,
                 "latencyMs": round(m.avg_latency_ms or 0),
                 "statusCode": 200,
-                "logType": "llm_call",
+                "logType": "session_metric",
                 "rawDetail": {
                     "resolutionStatus": m.resolution_status,
                     "costUsd": m.calculated_cost_usd,

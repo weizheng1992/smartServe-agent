@@ -58,6 +58,7 @@ export default function StorefrontPage() {
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 组件内取数函数,挂载拉取商品与角标计数
   useEffect(() => {
     fetchProducts();
     fetchCounts(user.id);
@@ -296,7 +297,7 @@ export default function StorefrontPage() {
 
               {buyingProduct.specDimensions?.map((dim) => (
                 <div key={dim.name} className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700">{dim.name}</label>
+                  <span className="block text-xs font-bold text-slate-700">{dim.name}</span>
                   <div className="flex flex-wrap gap-2">
                     {dim.values.map((val) => {
                       const isSelected = selectedAttrs[dim.name] === val;

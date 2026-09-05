@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "ignore": ["node_modules", "dist", "bun.lock", "packages/db/drizzle", ".agents", ".remember"]
+    "ignore": ["node_modules", "dist", "bun.lock", "packages/db/drizzle", ".agents", ".remember", "services"]
   },
   "formatter": {
     "enabled": true,
@@ -33,6 +33,9 @@
         "noConsole": "off",
         "noConsoleLog": "off",
         "noArrayIndexKey": "warn"
+      },
+      "a11y": {
+        "useSemanticElements": "off"
       }
     }
   },

@@ -193,12 +193,14 @@ export function ChatArea({
                         key={i}
                         className="relative overflow-hidden rounded-xl border border-indigo-500/30 shadow-md max-w-xs"
                       >
-                        <img
-                          src={url}
-                          alt="User attachment"
-                          className="max-h-48 rounded-xl object-cover cursor-pointer hover:opacity-95"
+                        <button
+                          type="button"
                           onClick={() => setSelectedScreenshot(url)}
-                        />
+                          className="block max-h-48 rounded-xl cursor-pointer hover:opacity-95"
+                          aria-label="查看大图"
+                        >
+                          <img src={url} alt="User attachment" className="max-h-48 rounded-xl object-cover" />
+                        </button>
                       </div>
                     ))}
                   </div>

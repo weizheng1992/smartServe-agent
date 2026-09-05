@@ -57,7 +57,7 @@ export function FormModal({
               className="text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white shadow-xs flex items-center gap-1.5"
             >
               {isSubmitting && (
-                <svg className="animate-spin w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                <svg aria-hidden="true" className="animate-spin w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path
                     className="opacity-75"

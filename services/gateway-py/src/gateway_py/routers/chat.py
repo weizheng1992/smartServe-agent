@@ -11,15 +11,15 @@ import json
 import time
 import uuid
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from engine_py.db import get_session
+from engine_py.event_bus import get_client, read_agent_events
+from engine_py.run_agent import AgentJobInput, run_agent
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
-from engine_py.db import get_session
-from engine_py.event_bus import get_client, read_agent_events
-from engine_py.run_agent import AgentJobInput, run_agent
 from .. import conversation_repo
 
 router = APIRouter(prefix="/api/chat")
@@ -125,7 +125,7 @@ async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Qu
                 # 按一次轮询到期处理,发心跳续命而不是掐断整个流。
                 yield f"event: heartbeat\ndata: {json.dumps({'timestamp': int(time.time() * 1000)})}\n\n"
                 continue
-            except Exception as err:  # noqa: BLE001 — 总线异常终止,客户端将带 Last-Event-ID 重连
+            except Exception as err:
                 print(f"[ChatSSE] event bus read failed, closing stream: {err}")
                 return
             if not res:
@@ -141,7 +141,7 @@ async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Qu
                     event_type = fields.get("type", "")
                     try:
                         data = json.loads(fields.get("data", "null"))
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         data = fields.get("data")
                     yield await _sse_frame(seq, event_type, data)
                     if event_type == "result":

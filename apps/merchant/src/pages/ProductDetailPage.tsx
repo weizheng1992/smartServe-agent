@@ -230,7 +230,7 @@ export default function ProductDetailPage() {
               {/* 多维规格选择 */}
               {product.specDimensions?.map((dim) => (
                 <div key={dim.name} className="space-y-2">
-                  <label className="block text-xs font-bold text-slate-700">{dim.name}</label>
+                  <span className="block text-xs font-bold text-slate-700">{dim.name}</span>
                   <div className="flex flex-wrap gap-2">
                     {dim.values.map((val) => {
                       const isSelected = selectedAttrs[dim.name] === val;

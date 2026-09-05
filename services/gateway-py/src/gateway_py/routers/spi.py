@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+from engine_py.approvals import ApprovalGatekeeper
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from engine_py.approvals import ApprovalGatekeeper
-from .. import conversation_repo
-from .. import hmac_signer
+from .. import conversation_repo, hmac_signer
 
 router = APIRouter(prefix="/api/v1/spi")
 

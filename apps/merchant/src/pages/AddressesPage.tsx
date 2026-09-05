@@ -35,6 +35,7 @@ export default function AddressesPage() {
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 挂载时拉取一次地址列表
   useEffect(() => {
     fetchAddresses();
   }, []);
@@ -155,8 +156,11 @@ export default function AddressesPage() {
 
               <form onSubmit={handleAddAddress} className="space-y-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">收货人姓名</label>
+                  <label htmlFor="addr-recipient-name" className="block text-xs font-semibold text-slate-700 mb-1">
+                    收货人姓名
+                  </label>
                   <Input
+                    id="addr-recipient-name"
                     type="text"
                     placeholder="如：张伟"
                     value={recipientName}
@@ -167,8 +171,11 @@ export default function AddressesPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">联系电话</label>
+                  <label htmlFor="addr-phone" className="block text-xs font-semibold text-slate-700 mb-1">
+                    联系电话
+                  </label>
                   <Input
+                    id="addr-phone"
                     type="tel"
                     placeholder="如：13800138000"
                     value={phone}
@@ -180,8 +187,11 @@ export default function AddressesPage() {
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">省份</label>
+                    <label htmlFor="addr-province" className="block text-xs font-semibold text-slate-700 mb-1">
+                      省份
+                    </label>
                     <Input
+                      id="addr-province"
                       type="text"
                       value={province}
                       onChange={(e) => setProvince(e.target.value)}
@@ -189,12 +199,23 @@ export default function AddressesPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">城市</label>
-                    <Input type="text" value={city} onChange={(e) => setCity(e.target.value)} className="text-xs" />
+                    <label htmlFor="addr-city" className="block text-xs font-semibold text-slate-700 mb-1">
+                      城市
+                    </label>
+                    <Input
+                      id="addr-city"
+                      type="text"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      className="text-xs"
+                    />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">区县</label>
+                    <label htmlFor="addr-district" className="block text-xs font-semibold text-slate-700 mb-1">
+                      区县
+                    </label>
                     <Input
+                      id="addr-district"
                       type="text"
                       value={district}
                       onChange={(e) => setDistrict(e.target.value)}
@@ -204,8 +225,11 @@ export default function AddressesPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">详细街道门牌地址</label>
+                  <label htmlFor="addr-street" className="block text-xs font-semibold text-slate-700 mb-1">
+                    详细街道门牌地址
+                  </label>
                   <Input
+                    id="addr-street"
                     type="text"
                     placeholder="如：中关村南大街1号院8号楼1201室"
                     value={detailAddress}

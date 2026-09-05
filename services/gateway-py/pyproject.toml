@@ -42,3 +42,17 @@ engine-py = { workspace = true }
 [tool.ruff]
 line-length = 110
 target-version = "py312"
+
+[tool.ruff.lint]
+# 2026-09-05 存量豁免(CI 门禁立起前的显式还债清单,修复后逐条移除):
+# - DTZ005/DTZ011:datetime.now()/date.today() 补 tz 属时间语义变更,影响落库时间戳,须逐处评审
+# - S110/BLE001:吞错点须补结构化日志后才能消除(观测性红线,禁止直接删 except)
+# - TRY004:sandbox 安全拒绝用 ValueError 与上层捕获/契约测试钉死的异常类型耦合,不可单点换 TypeError
+ignore = [
+  "DTZ005",
+  "DTZ011",
+  "S110",
+  "BLE001",
+  "TRY004",
+  "SIM102",
+]

@@ -311,6 +311,7 @@ export function FloatingChatWidget({
   };
 
   // 初始化对应用户的会话：优先从本地缓存或后端恢复活跃会话，避免切换路由时冲掉记录
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖刻意最小化——补全 messages/pathname 会在路由切换时重置会话
   useEffect(() => {
     if (!user?.id) return;
 
@@ -416,6 +417,7 @@ export function FloatingChatWidget({
   }, [user?.id]);
 
   // 路由切换时仅在会话为空时更新欢迎语，不覆盖已有聊天记录
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖刻意最小化——仅在用户切换时执行,防消息流触发欢迎语覆盖
   useEffect(() => {
     if (messages.length === 1 && messages[0].id.startsWith('msg_init_')) {
       const greetingText = getGreetingForRoute({
@@ -448,7 +450,7 @@ export function FloatingChatWidget({
       eventSource.addEventListener('message', (e) => {
         try {
           const msgData = JSON.parse(e.data);
-          if (msgData && msgData.content) {
+          if (msgData?.content) {
             const incomingText = String(msgData.content).trim();
             const incomingId = msgData.id || `sse_${Date.now()}`;
             const incomingRole = msgData.role === 'user' ? 'user' : 'assistant';
@@ -507,6 +509,7 @@ export function FloatingChatWidget({
   }, [threadId, isOpen]);
 
   // 滚动到底部 (仅在用户主动发信或接收新回复时平滑滚动)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: messages.length 为滚动触发器,体内不直接读取
   useEffect(() => {
     if (isOpen && !isLoadingOlder) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

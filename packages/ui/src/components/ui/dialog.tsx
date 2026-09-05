@@ -50,6 +50,7 @@ const Dialog: React.FC<DialogProps> = ({ open = false, onOpenChange, children })
 
   const content = (
     <DialogContext.Provider value={{ open, onOpenChange }}>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: 点外关闭惯例,键盘关闭由 Esc 承担 */}
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
         onClick={(e) => {

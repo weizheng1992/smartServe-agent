@@ -9,10 +9,9 @@ from __future__ import annotations
 import os
 import re
 
+from engine_py.config import settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from engine_py.config import settings
 
 _MERCHANT_DDL = """
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -116,6 +115,10 @@ def _merchant_db_url() -> str:
 
 
 def _platform_db_url() -> str:
+    # 平台库真实 URL 优先取 settings(测试容器库名由 testcontainers 生成,并非
+    # agent_platform;2026-09-05 前硬编码字面量导致自愈在全新实例上必败)
+    if settings.database_url:
+        return settings.database_url
     return re.sub(r"/[^/]+$", "/agent_platform", _merchant_db_url())
 
 
@@ -141,20 +144,25 @@ async def ensure_merchant_tables() -> None:
             # 走原始连接 simple-query 协议执行
             raw = (await conn.get_raw_connection()).driver_connection
             await raw.execute(_MERCHANT_DDL)
-    except Exception as err:  # noqa: BLE001 - 自愈分支需捕获驱动特定错误
+    except Exception as err:
         if "3D000" not in repr(err) and "InvalidCatalogName" not in type(err).__name__:
             raise
-        bootstrap = create_async_engine(_normalize(_platform_db_url()))
+        # CREATE DATABASE 不能在事务块内执行:引擎必须 AUTOCOMMIT,否则
+        # ActiveSQLTransactionError 会被下面的 except 吞掉、库始终建不成,
+        # 自愈形同虚设(2026-09-05 于全新测试容器上首次暴露)
+        bootstrap = create_async_engine(_normalize(_platform_db_url()), isolation_level="AUTOCOMMIT")
         try:
             async with bootstrap.connect() as conn:
                 await conn.execute(text("CREATE DATABASE agent_merchant"))
-                await conn.commit()
-        except Exception:  # noqa: BLE001 - 已存在则忽略
-            pass
+        except Exception as err:
+            print(f"[MerchantDB] 自愈建库跳过(通常为库已存在): {err!r}")
         finally:
             await bootstrap.dispose()
         async with _engine.begin() as conn:
-            await conn.execute(text(_MERCHANT_DDL))
+            # 与首尝试一致:多语句 DDL 须走 simple-query 协议,
+            # prepared protocol 不接受多命令(2026-09-05 修复)
+            raw = (await conn.get_raw_connection()).driver_connection
+            await raw.execute(_MERCHANT_DDL)
     _tables_initialized = True
 
 

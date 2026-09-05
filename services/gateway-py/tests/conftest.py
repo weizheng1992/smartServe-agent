@@ -82,9 +82,8 @@ SEED_TENANTS = [
 
 
 async def seed_tenants() -> None:
-    from sqlalchemy import text
-
     from engine_py.db import get_session
+    from sqlalchemy import text
 
     async with get_session() as session:
         for business_id, name in SEED_TENANTS:
@@ -98,9 +97,8 @@ async def seed_tenants() -> None:
 
 
 async def create_thread(thread_id: str, user_id: str, business_id: str) -> None:
-    from sqlalchemy import text
-
     from engine_py.db import get_session
+    from sqlalchemy import text
 
     async with get_session() as session:
         await session.execute(
@@ -120,7 +118,6 @@ _upgrade_schema()
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def seeded():
     await seed_tenants()
-    return None
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
@@ -137,9 +134,9 @@ async def contract_fixtures(seeded):
     """契约 fixtures:contract 线程 + 消息 + 待审批单(等价 TS beforeAll 尾段)。"""
     import json
 
+    from engine_py.db import get_session
     from sqlalchemy import text
 
-    from engine_py.db import get_session
     from gateway_py import conversation_repo
 
     await create_thread(CONTRACT_THREAD, "u_contract", "nike")
@@ -167,7 +164,6 @@ async def contract_fixtures(seeded):
             )
         )
         await session.commit()
-    return None
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")

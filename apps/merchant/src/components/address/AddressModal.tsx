@@ -110,6 +110,7 @@ export const AddressModal: React.FC<AddressModalProps> = ({
                 {addresses.map((addr) => {
                   const isSelected = addr.id === selectedAddressId;
                   return (
+                    // biome-ignore lint/a11y/useKeyWithClickEvents: 键盘可达由内部 radio 承担;外层点击为整卡选中增强
                     <div
                       key={addr.id}
                       onClick={() => {

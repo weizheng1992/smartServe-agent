@@ -9,9 +9,11 @@
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
-from .conftest import _TS, CONTRACT_APPROVAL, CONTRACT_THREAD
+from .conftest import _TS, CONTRACT_APPROVAL, CONTRACT_THREAD, create_thread
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -314,11 +316,14 @@ class TestApprovalResumeDispatch:
         # 2) 拦截 run_agent(AgentJobInput 仍在 gatekeeper 内真实构造,校验语义保留)
         captured: dict = {}
 
-        async def _fake_run_agent(job):  # noqa: ANN001 — 仅捕获派发载荷
+        async def _fake_run_agent(job):
             captured["businessId"] = job.business_id
             return {"output": "resumed"}
 
-        monkeypatch.setattr("engine_py.run_agent.run_agent", _fake_run_agent)
+        # engine_py/__init__.py re-export 了 run_agent 函数,包属性遮蔽同名子模块,
+        # 字符串路径会解析到函数上;须 import_module 取真子模块再 patch
+        # (消费方为函数内延迟 from ..run_agent import run_agent,patch 子模块属性即生效)
+        monkeypatch.setattr(importlib.import_module("engine_py.run_agent"), "run_agent", _fake_run_agent)
 
         result = await ApprovalGatekeeper.process_approval_action({"approvalId": approval_id, "action": "approve"})
         assert result.get("status") == "approved"
@@ -331,7 +336,7 @@ class TestApprovalResumeDispatch:
                 await session.execute(
                     text(
                         "SELECT status, payload->'businessId' FROM approval_outbox_events "
-                        "WHERE approval_id = CAST(:i AS uuid)"
+                        "WHERE approval_id = :i"
                     ).bindparams(i=approval_id)
                 )
             ).first()
@@ -531,6 +536,63 @@ class TestLogs:
         res = await client.get("/api/logs", params={"tenantId": "nike"})
         assert res.status_code == 200
         assert res.json()["success"] is True
+
+    async def test_llm_call_rows_come_from_llm_call_logs(self, client, contract_fixtures):
+        """回归钉:llm_call 类型必须来自真实 llm_call_logs 行(2026-09-05 接线)。
+
+        此前 llm_call 行由 session_metrics 会话汇总拼装(token 记 0、模型名硬编码);
+        现在模型名 / tokens / 延迟逐字段透传,租户归因经 business_id 列(缺省回退
+        join threads),不造假数。
+        """
+        import uuid as _uuid
+
+        from engine_py.db import get_session
+        from sqlalchemy import text as _text
+
+        llm_thread = f"llm_log_thread_{_TS}"
+        await create_thread(llm_thread, "u_llm_log", "nike")
+        row_id = _uuid.uuid4()
+        async with get_session() as session:
+            await session.execute(
+                _text(
+                    "INSERT INTO llm_call_logs (id, thread_id, business_id, node, model, "
+                    "tokens_in, tokens_out, cost_usd, latency_ms) "
+                    "VALUES (CAST(:id AS uuid), :tid, :bid, :node, :model, :tin, :tout, :cost, :latency)"
+                ).bindparams(
+                    id=str(row_id),
+                    tid=llm_thread,
+                    bid="nike",
+                    node="planner",
+                    model="glm-4.7",
+                    tin=120,
+                    tout=35,
+                    cost=0.00002325,
+                    latency=842,
+                )
+            )
+            await session.commit()
+
+        res = await client.get("/api/logs", params={"tenantId": "nike", "level": "llm_call", "limit": 50})
+        assert res.status_code == 200
+        rows = res.json()["data"]
+        match = next((r for r in rows if r["id"] == f"log_llm_{str(row_id)[:8]}"), None)
+        assert match is not None, "种子 llm_call_logs 行未出现在 /api/logs 响应中"
+        assert match["logType"] == "llm_call"
+        assert match["model"] == "glm-4.7"
+        assert match["businessId"] == "nike"
+        assert match["promptTokens"] == 120
+        assert match["completionTokens"] == 35
+        assert match["totalTokens"] == 155
+        assert match["latencyMs"] == 842
+        assert match["rawDetail"]["node"] == "planner"
+
+    async def test_session_metrics_rows_labeled_session_metric(self, client, contract_fixtures):
+        """回归钉:会话遥测汇总不再冒充 llm_call —— logType 必须为 session_metric。"""
+        res = await client.get("/api/logs", params={"level": "llm_call", "limit": 50})
+        assert res.status_code == 200
+        for row in res.json()["data"]:
+            assert row["logType"] == "llm_call"
+            assert not row["id"].startswith("log_metric_")
 
 
 class TestMerchantStoreChatStream:

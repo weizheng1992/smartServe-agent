@@ -41,23 +41,29 @@ describe('Admin CRUD Component Suite Integration Tests', () => {
   });
 
   it('renders FormModal in closed and open states', () => {
-    const modal = React.createElement(FormModal, {
-      isOpen: true,
-      onClose: () => {},
-      onSubmit: () => {},
-      title: '新建实体',
-      children: React.createElement('div', null, 'Form Content'),
-    });
+    const modal = React.createElement(
+      FormModal,
+      {
+        isOpen: true,
+        onClose: () => {},
+        onSubmit: () => {},
+        title: '新建实体',
+      },
+      React.createElement('div', null, 'Form Content'),
+    );
     expect(modal).toBeDefined();
   });
 
   it('renders DetailDrawer in open state', () => {
-    const drawer = React.createElement(DetailDrawer, {
-      isOpen: true,
-      onClose: () => {},
-      title: '详情抽屉',
-      children: React.createElement('div', null, 'Drawer Content'),
-    });
+    const drawer = React.createElement(
+      DetailDrawer,
+      {
+        isOpen: true,
+        onClose: () => {},
+        title: '详情抽屉',
+      },
+      React.createElement('div', null, 'Drawer Content'),
+    );
     expect(drawer).toBeDefined();
   });
 

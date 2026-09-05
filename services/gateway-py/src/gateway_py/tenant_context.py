@@ -37,7 +37,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 body = await request.json()
                 if isinstance(body, dict):
                     raw_tenant_id = body.get("tenantId") or body.get("businessId")
-            except Exception:  # noqa: BLE001 — 非 JSON body 忽略
+            except Exception:
                 pass
         if not raw_tenant_id and raw_role == "admin":
             raw_tenant_id = "all"

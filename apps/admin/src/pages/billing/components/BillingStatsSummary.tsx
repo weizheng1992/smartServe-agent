@@ -23,9 +23,7 @@ export function BillingStatsSummary() {
             totalTokens: rows.reduce((sum, r) => sum + (r.totalTokens || 0), 0),
             totalCostUsd: rows.reduce((sum, r) => sum + (r.costUsd || 0), 0),
             autopilotRate:
-              rows.length === 0
-                ? 0
-                : rows.reduce((sum, r) => sum + (r.autopilotRate ?? 0), 0) / rows.length,
+              rows.length === 0 ? 0 : rows.reduce((sum, r) => sum + (r.autopilotRate ?? 0), 0) / rows.length,
           });
         }
       } catch (err) {

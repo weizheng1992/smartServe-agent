@@ -5,7 +5,7 @@ test.describe('🛍️ 极光潮品商户商城与管理后台端到端测试 (M
 
   test.beforeEach(async ({ page }) => {
     page.on('console', (msg) => console.log(`[Browser Console] ${msg.type()}: ${msg.text()}`));
-    page.on('pageerror', (err) => console.error(`[Browser PageError]`, err));
+    page.on('pageerror', (err) => console.error('[Browser PageError]', err));
     page.on('response', (resp) => {
       if (resp.status() >= 400) {
         console.log(`[HTTP ERROR] ${resp.status()} ${resp.url()}`);

@@ -21,7 +21,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '商户租户管理',
         path: '/tenants',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -35,7 +35,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '全景会话回放',
         path: '/conversations',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -50,7 +50,7 @@ const NAV_GROUPS: NavGroup[] = [
         path: '/audits',
         badge: 'HITL',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -64,7 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '人物画像事实素描',
         path: '/personas',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -83,7 +83,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '知识库与检索演练',
         path: '/rag-studio',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -97,7 +97,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '技能与 MCP 工具市场',
         path: '/skills-tools',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -111,7 +111,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '评测与 Prompt 实验',
         path: '/evals',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -130,7 +130,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '计量计费与配额',
         path: '/billing',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -144,7 +144,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '安全合规与围栏',
         path: '/guardrails',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -158,7 +158,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: '系统与 LLM 日志',
         path: '/system-logs',
         icon: ({ className = 'w-4 h-4' }) => (
-          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
           </svg>
         ),

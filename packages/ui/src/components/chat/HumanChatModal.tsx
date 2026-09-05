@@ -80,6 +80,7 @@ export function HumanChatModal({ approval, isOpen, onClose, onSendReply }: Human
     }
   }, [isOpen, approval, fetchHistory]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: messages 为滚动触发器,体内经 ref 操作 DOM 不直接读取
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;

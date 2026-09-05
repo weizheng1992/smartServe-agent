@@ -31,7 +31,7 @@ export function LogDetailDrawer({ isOpen, onClose, log }: LogDetailDrawerProps) 
         </div>
 
         <div className="bg-slate-900 text-slate-200 rounded-xl p-4 font-mono text-xs">
-          <div className="text-slate-400 mb-2">// Raw Payload / Execution Detail</div>
+          <div className="text-slate-400 mb-2">{'// Raw Payload / Execution Detail'}</div>
           <pre className="overflow-x-auto text-emerald-400">{JSON.stringify(log.rawDetail, null, 2)}</pre>
         </div>
       </div>

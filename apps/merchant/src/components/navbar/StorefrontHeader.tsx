@@ -163,6 +163,7 @@ export function StorefrontHeader({
                         onChange={(e) => setCustomName(e.target.value)}
                         placeholder="输入自定义用户名"
                         className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-emerald-500"
+                        // biome-ignore lint/a11y/noAutofocus: 搜索弹层打开即聚焦,刻意 UX
                         autoFocus
                       />
                       <div className="flex justify-end gap-1.5">

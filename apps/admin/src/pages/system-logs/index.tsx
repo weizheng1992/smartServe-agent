@@ -136,6 +136,7 @@ export function SystemLogsPage() {
         statusOptions={[
           { label: 'LLM 调用日志', value: 'llm_call' },
           { label: '意图分类日志', value: 'intent_triage' },
+          { label: '会话遥测汇总', value: 'session_metric' },
           { label: '工具执行日志', value: 'tool_execution' },
           { label: '系统异常告警', value: 'system_error' },
         ]}

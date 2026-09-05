@@ -134,7 +134,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         className="text-slate-400 hover:text-red-500 p-0.5 rounded transition cursor-pointer"
                         title="删除"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg
+                          aria-hidden="true"
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
                           <path
                             strokeLinecap="round"
                             strokeLinejoin="round"
@@ -188,10 +194,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         {cart.length > 0 && (
           <div className="p-4 border-t border-slate-200 bg-white space-y-3">
             <div className="flex items-center justify-between text-xs text-slate-600">
-              <label className="flex items-center space-x-2 cursor-pointer select-none">
+              <div className="flex items-center space-x-2 cursor-pointer select-none">
                 <Checkbox checked={isAllSelected} onCheckedChange={onToggleSelectAll} />
                 <span>全选 ({cart.length})</span>
-              </label>
+              </div>
 
               <div className="text-right">
                 <span className="text-xs text-slate-500">已选 {totalCount} 件，合计：</span>

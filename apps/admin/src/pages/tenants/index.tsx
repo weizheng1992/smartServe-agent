@@ -224,6 +224,7 @@ export function TenantsPage() {
       header: '操作',
       align: 'right' as const,
       render: (row: TenantRecord) => (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: 仅吞点击冒泡防误触行点击,非交互元素
         <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
@@ -264,7 +265,7 @@ export function TenantsPage() {
             onClick={handleOpenCreate}
             className="px-3.5 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             新增商户入驻

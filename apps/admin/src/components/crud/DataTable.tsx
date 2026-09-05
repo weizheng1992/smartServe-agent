@@ -71,7 +71,13 @@ export function DataTable<T extends Record<string, any>>({
               <TableRow>
                 <TableCell colSpan={columns.length} className="py-12 text-center text-slate-400 text-sm">
                   <div className="flex flex-col items-center justify-center gap-2">
-                    <svg className="w-8 h-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg
+                      aria-hidden="true"
+                      className="w-8 h-8 text-slate-300"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"

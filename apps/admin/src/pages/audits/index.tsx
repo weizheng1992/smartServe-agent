@@ -69,7 +69,7 @@ export function AuditsPage() {
           item.id.toLowerCase().includes(q) ||
             item.threadId.toLowerCase().includes(q) ||
             item.actionType.toLowerCase().includes(q) ||
-            (item.reviewerId && item.reviewerId.toLowerCase().includes(q)),
+            item.reviewerId?.toLowerCase().includes(q),
         );
       }
       return true;

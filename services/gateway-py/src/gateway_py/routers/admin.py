@@ -6,15 +6,15 @@ import datetime as _dt
 import json
 import math
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
-from pydantic import BaseModel
-from sqlalchemy import desc, select, text
-
 from engine_py.approvals import ApprovalGatekeeper
 from engine_py.db import RagDocumentRow, get_session
 from engine_py.rag import ContextualRAG
 from engine_py.skills import SkillRegistry
 from engine_py.tenant_config import get_tenant_config, invalidate_cache, update_tenant_skill_config
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from pydantic import BaseModel
+from sqlalchemy import desc, select, text
+
 from .. import conversation_repo
 from ..tenant_context import get_tenant_context
 
@@ -88,7 +88,7 @@ async def tenant_list():
                 )
             return {"success": True, "tenants": tenants}
         return {"success": True, "tenants": []}
-    except Exception as err:  # noqa: BLE001 — 查询失败返回真实空列表，不编造演示数据
+    except Exception as err:
         print(f"[TenantService] Failed to query PostgreSQL tenants table: {err}")
         return {"success": True, "tenants": [], "message": "租户注册表暂不可用，请稍后重试"}
 
@@ -360,7 +360,7 @@ async def list_approvals(
         approvals = await ApprovalGatekeeper.list_pending_approvals(
             {"tenantId": effective_tenant, "status": status, "actionType": actionType}
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[ApprovalsService] Failed to list approvals: {err}")
         approvals = []
     return {"success": True, "approvals": approvals, "total": len(approvals), "tenantId": effective_tenant}
@@ -368,7 +368,6 @@ async def list_approvals(
 
 @approvals_router.post("/api/approvals")
 async def resolve_approval(body: dict, request: Request):
-    ctx = get_tenant_context()
     options = {
         "approvalId": body.get("approvalId"),
         "threadId": body.get("threadId"),
@@ -498,7 +497,8 @@ async def rag_query(body: RagQueryIn, x_tenant_id: str | None = Header(None)):
                 ],
             },
         }
-    docs = await rag_documents(tenantId, x_tenant_id)
+    # 无向量命中时回退列出文档;此前误引用未定义的 tenantId,一进本分支即 NameError
+    docs = await rag_documents(tenant_id, x_tenant_id)
     return {
         "success": True,
         "data": {

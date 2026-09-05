@@ -15,15 +15,14 @@ import os
 import time
 import uuid as _uuid
 
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
-from redis.exceptions import TimeoutError as RedisTimeoutError
-from sqlalchemy import text
-
 from engine_py.approvals.gatekeeper import ApprovalGatekeeper
 from engine_py.db import get_session
 from engine_py.event_bus import get_client as get_redis
 from engine_py.run_agent import AgentJobInput, run_agent
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from redis.exceptions import TimeoutError as RedisTimeoutError
+from sqlalchemy import text
 
 from .. import merchant_domain as mds
 from ..conversation_repo import get_conversation_timeline, list_conversations
@@ -70,7 +69,7 @@ async def check_tenant_registered(business_id: str | None) -> JSONResponse | Non
                     {"bid": clean},
                 )
             ).first()
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[TenantGate] tenants 注册表查询失败(fail-closed 拒绝请求): {err}")
         return JSONResponse(
             status_code=503,
@@ -143,7 +142,7 @@ async def admin_conversations(
         )
         conversations = [{**item, "id": item.get("threadId"), "lastMessage": item.get("lastMessageSnippet")} for item in (res.get("items") or [])]
         return {"success": True, "tenantId": tenant_id, "conversations": conversations, "total": res.get("total")}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -170,7 +169,7 @@ async def admin_conversation_detail(thread_id: str, tenantId: str | None = Query
             "messages": [],
         }
         return {"success": True, "data": data}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -179,7 +178,7 @@ async def admin_orders():
     try:
         data = await mds.get_admin_dashboard_data()
         return {"success": True, **data}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -194,7 +193,7 @@ async def admin_orders_ship(body: dict):
             body["orderId"], body.get("carrierCode") or "SF", body["trackingNo"]
         )
         return result
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
 
 
@@ -217,7 +216,7 @@ async def admin_approvals(
             }
         )
         return {"success": True, "approvals": approvals, "total": len(approvals)}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -240,7 +239,7 @@ async def admin_approvals_action(body: dict):
                 content={"success": False, "error": result["error"]},
             )
         return {"success": True, **result}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -254,7 +253,7 @@ async def store_products():
     try:
         products = await mds.search_products(limit=20)
         return {"success": True, "products": products}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -267,7 +266,7 @@ async def store_product_detail(product_id: str):
                 status_code=404, content={"success": False, "error": f"商品 [{product_id}] 未找到或已下架"}
             )
         return {"success": True, "product": product}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -276,7 +275,7 @@ async def store_addresses(userId: str | None = Query(None)):
     try:
         addresses = await mds.get_customer_addresses(userId or "CUST-8801")
         return {"success": True, "addresses": addresses}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -290,7 +289,7 @@ async def store_save_address(body: dict):
             )
         result = await mds.save_customer_address(user_id, body)
         return result
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -306,7 +305,7 @@ async def store_orders(
             {"userId": uid, "status": None if (status in (None, "ALL")) else status, "limit": 50}
         )
         return {"success": True, "orders": orders}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -347,7 +346,7 @@ async def store_place_order(body: dict):
             }
         )
         return result
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -358,7 +357,7 @@ async def store_order_detail(order_id: str):
         if order is None:
             return JSONResponse(status_code=404, content={"success": False, "error": f"未找到订单 [{order_id}]"})
         return {"success": True, "order": order}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -372,7 +371,7 @@ async def publish_thread_message(thread_id: str, payload: dict) -> None:
         client = await get_redis()
         if client is not None:
             await client.publish(THREAD_CHANNEL.format(thread_id=thread_id), json.dumps(payload, ensure_ascii=False))
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[MerchantChat] Redis publish thread message failed: {err}")
 
 
@@ -425,7 +424,7 @@ async def store_chat(body: dict):
             "result": output,
             "cards": final_state.get("cards") or [],
         }
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -466,7 +465,7 @@ async def store_chat_messages(
                     ).first()
                     if row:
                         pg_user_id = str(row[0])
-            except Exception:  # noqa: BLE001 — 用户解析失败不阻断消息读取
+            except Exception:
                 pass
 
         list_res = await list_conversations(business_id=tenant, user_id=userId, limit=50, offset=0)
@@ -512,7 +511,8 @@ async def store_chat_messages(
             def _ts_of(m: dict) -> float:
                 raw = m.get("createdAt") or m.get("timestamp") or 0
                 try:
-                    return _dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
+                    # py3.11+ fromisoformat 已原生支持 "Z" 后缀,无需再替换
+                    return _dt.datetime.fromisoformat(str(raw)).timestamp()
                 except ValueError:
                     return 0.0
 
@@ -527,7 +527,7 @@ async def store_chat_messages(
             "userThreads": user_threads,
             "allHistoricalMessages": all_historical_messages,
         }
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
@@ -547,7 +547,7 @@ async def store_chat_stream(threadId: str | None = Query(None)):
             if client is not None:
                 pubsub = client.pubsub()
                 await pubsub.subscribe(channel)
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[MerchantChatStream] Redis subscribe failed: {err}")
 
         try:
@@ -558,7 +558,7 @@ async def store_chat_stream(threadId: str | None = Query(None)):
                     # get_message(timeout=0) 首轮吞不掉已到达的消息,须下一轮才可见。
                     try:
                         msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
-                    except (asyncio.TimeoutError, RedisTimeoutError):
+                    except (TimeoutError, RedisTimeoutError):
                         msg = None
                     if msg and msg.get("type") == "message":
                         data = msg.get("data")
@@ -574,7 +574,7 @@ async def store_chat_stream(threadId: str | None = Query(None)):
                 try:
                     await pubsub.unsubscribe(channel)
                     await pubsub.aclose()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
 
     return StreamingResponse(
@@ -611,7 +611,7 @@ async def spi_products_search(
             query=query or None, category=category or None, limit=int(limit) if limit else 10
         )
         return {"success": True, "data": products, "timestamp": _ts_ms()}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[SPI] GET /spi/v1/products/search failed: {err}")
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
 
@@ -627,7 +627,7 @@ async def spi_user_info(request: Request, userId: str | None = Query(None), user
             return JSONResponse(status_code=401, content={"success": False, "message": error})
         user = await mds.get_user_info({"userId": userId, "userEmail": userEmail})
         return {"success": True, "data": user, "timestamp": _ts_ms()}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[SPI] GET /spi/v1/user/info failed: {err}")
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
 
@@ -650,7 +650,7 @@ async def spi_orders_list(
             {"userId": userId or None, "status": status or None, "limit": int(limit) if limit else 10}
         )
         return {"success": True, "data": orders, "timestamp": _ts_ms()}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[SPI] GET /spi/v1/orders/list failed: {err}")
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
 
@@ -672,7 +672,7 @@ async def spi_orders_detail(request: Request, orderId: str | None = Query(None))
                 status_code=404, content={"success": False, "message": f"Order {orderId} not found"}
             )
         return {"success": True, "data": order, "timestamp": _ts_ms()}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[SPI] GET /spi/v1/orders/detail failed: {err}")
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
 
@@ -698,6 +698,6 @@ async def spi_orders_action(request: Request):
 
         result = await mds.execute_order_action(payload, signature)
         return {"success": result.get("success"), "data": result, "timestamp": _ts_ms()}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[SPI] POST /spi/v1/orders/action failed: {err}")
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})

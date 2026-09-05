@@ -536,7 +536,6 @@ async def save_customer_address(customer_id: str, addr: dict) -> dict:
         or f"{addr.get('province') or ''}{addr.get('city') or ''}{addr.get('district') or ''}{addr.get('detailAddress') or ''}".strip()
         or "北京市海淀区中关村南大街1号院"
     )
-    import time
 
     target_id = addr.get("id") or f"ADDR_{_now_ms()}_{secrets.token_hex(2)}"
     should_be_default = bool(addr.get("isDefault") or not current)

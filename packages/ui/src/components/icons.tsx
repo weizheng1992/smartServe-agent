@@ -6,6 +6,7 @@ export interface IconProps extends React.SVGProps<SVGSVGElement> {
 
 const createIcon = (displayName: string, paths: React.ReactNode, viewBox = '0 0 24 24') => {
   const Component = React.forwardRef<SVGSVGElement, IconProps>(({ size = '1em', className, ...props }, ref) => (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: 图标库组件,装饰性;可访问名由使用方以文本或 aria-label 提供
     <svg
       ref={ref}
       xmlns="http://www.w3.org/2000/svg"
@@ -140,6 +141,7 @@ export const Layout = createIcon(
 );
 
 export const Loader2 = React.forwardRef<SVGSVGElement, IconProps>(({ size = '1em', className, ...props }, ref) => (
+  // biome-ignore lint/a11y/noSvgWithoutTitle: 加载指示为纯装饰动画
   <svg
     ref={ref}
     xmlns="http://www.w3.org/2000/svg"

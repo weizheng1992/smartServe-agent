@@ -21,9 +21,7 @@ export function EvalMetricsSummary() {
         if (!cancelled && res.success && Array.isArray(res.data)) {
           const rows = res.data as any[];
           const avg = (pick: (r: any) => number | undefined) =>
-            rows.length === 0
-              ? 0
-              : rows.reduce((sum, r) => sum + (pick(r) ?? 0), 0) / rows.length;
+            rows.length === 0 ? 0 : rows.reduce((sum, r) => sum + (pick(r) ?? 0), 0) / rows.length;
           setStats({
             toolAccuracy: avg((r) => r.toolAccuracy),
             ragFaithfulness: avg((r) => r.ragFaithfulness),

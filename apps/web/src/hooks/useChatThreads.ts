@@ -39,7 +39,7 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
   useEffect(() => {
     if (activeThreadId && threads.length > 0) {
       const activeThread = threads.find((t) => t.id === activeThreadId);
-      if (activeThread && activeThread.businessId) {
+      if (activeThread?.businessId) {
         setSelectedNewThreadMerchant(activeThread.businessId);
       }
     }

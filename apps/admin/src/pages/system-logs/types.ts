@@ -8,7 +8,7 @@ export interface SystemLogRecord {
   totalTokens: number;
   latencyMs: number;
   statusCode: number;
-  logType: 'llm_call' | 'intent_triage' | 'tool_execution' | 'system_error';
+  logType: 'llm_call' | 'intent_triage' | 'session_metric' | 'tool_execution' | 'system_error';
   rawDetail: Record<string, any>;
   timestamp: string;
 }

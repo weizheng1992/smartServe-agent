@@ -41,10 +41,7 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
     const kw = searchKeyword.toLowerCase();
     return (
       o.orderId.toLowerCase().includes(kw) ||
-      o.items.some(
-        (item) =>
-          item.title.toLowerCase().includes(kw) || (item.specSummary && item.specSummary.toLowerCase().includes(kw)),
-      )
+      o.items.some((item) => item.title.toLowerCase().includes(kw) || item.specSummary?.toLowerCase().includes(kw))
     );
   });
 
