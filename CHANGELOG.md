@@ -4,6 +4,36 @@
 
 ---
 
+## [2.3.2] - 2026-09-05 (商户聊天查单与订单列表双库统一、租户注册门禁、语义缓存防投毒双闸门、admin 十大模块全面接真实后端)
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **商户聊天查单与订单列表展示不一致 (`engine_py/tools_registry/order_domain.py` + `gateway-py/merchant_domain.py`)**:
+  - 根因:订单数据三个物理存储物理隔离——商城下单只写 `agent_merchant.merchant_orders`(列表页数据源),而聊天 `listUserOrders` 只读 engine 本地 `agent_platform.orders`;后者空结果时还会**自愈播种 2 笔虚构演示订单**(¥199/¥89),且两侧查询均带 `OR user_id='CUST-8801'` 跨用户回退,任何用户都会混入演示用户订单 → 两视图永久发散。
+  - 修复:order_domain 新增 `_merchant_reader_engine`(URL 推导对齐 gateway `merchant_db`,lru_cache 单例)直读商户库,聊天列表商户真单优先、严格 `customer_id` 归属、绝不播种;按单号查询 engine → merchant → third_party 三级回退(全链严格归属);退款/改地址**写穿透**商户库(聊天侧退款后 `merchant_orders.status` 真实翻转);商户库不可达时优雅降级 engine 本地表。列表页 `/api/store/orders` 同步移除 OR CUST-8801。
+  - 回归:engine 侧 4 用例(商户源优先/空不播种/兜底 SQL 严格归属/按号查询回退+防跨用户泄漏)+ gateway 契约 `TestStoreOrdersStrictScoping` 2 例;反馈回路脚本 `scripts/debug/order-view-diff.sh` 保留(三演示用户全 GREEN)。
+- **admin 会话列表恒空 (`apps/admin/conversations`)**:`/api/conversations` 契约返回 `{conversations, total}`,页面却判断 `res.items` —— 字段名错配使真实数据永远走不进渲染分支,此前被假数据掩盖,清空假数据后暴露。
+
+### 🔐 安全加固 (Security Hardening)
+
+- **商户路径租户注册门禁 A 档 (`gateway-py/routers/merchant.py`)**:商户服务路径从不咨询 tenants 注册表,自报 `businessId`(如 ghost-tenant-999)即可获全套引擎服务并收到品牌扮演回复。新增 `check_tenant_registered`:tenants 表须存在且 `status='active'` 否则 403;注册表不可用 503(fail-closed);"all" 聚合视图放行。覆盖 `/api/store/chat`、`/api/store/chat/messages`、`/api/admin/conversations{,/{id}}`、`/api/admin/approvals` 五个客户端可传租户身份的入口。
+- **补遗失的 CORS 中间件 (`gateway-py/main.py`)**:TS 基线 AppModule 有、Python 移植遗失。此前 admin(3001) 直连 4000 被浏览器预检拦截,`/tenants` 页静默回退前端硬编码假租户,掩盖真实注册行。
+- **语义缓存防投毒双闸门 (`engine-py/skills/` + `graph/nodes/finish.py` + `triage/`)**:幻觉"已成功 XX"回复会无条件回填语义缓存,相似请求以 ≥0.96 相似度永久命中、绕过真实技能执行。新增 `is_action_query()` 动作嗅探(任一技能 `can_handle` 即动作形,嗅探失败按动作处理——宁可缓存失效,不可放行投毒):动作形输入**禁写**(finish 无工具背书的终稿不得回填)且**禁读**(triage 不查缓存,必须落真实执行管道)。12 用例钉死双闸门。
+
+### 🧹 数据真实性清理 (Data Truthfulness)
+
+- **admin 十大模块全面接真实后端 (`apps/admin` + `gateway-py`)**,三连修:
+  - 清空 10 页(tenants/skills-tools/conversations/audits/rag-studio/evals/guardrails/personas/billing/system-logs)`INITIAL_*` 硬编码演示数据与 fetch 兜底假数据;`useAdminCrud` localStorage 持久化仅限本地模式;网关 `/api/tenant/list` 移除硬编码演示租户兜底(空表返回空列表)。
+  - 租户筛选器改为 `loadTenantsFromServer()` 从真实注册表动态加载(仅 active),移除最后一处硬编码演示租户。
+  - tenants 不可编辑修复:网关新增 `PUT /api/tenant/{id}`(tenant_configs 合并式覆写 + jsonb 显式 CAST);`api.ts` 对齐冻结契约(ragApi.search→`POST /api/rag/query`、billing 配额→`PUT`、补 tenants.update / guardrails.create / delete);移除 skills-tools 与 rag-studio 的假创建/假编辑;billing/evals 统计卡改真实接口汇总。浏览器实弹验证 10 页全过。
+
+### ⚠️ Notes (注意事项)
+
+- 本批次 pytest 契约套件新增用例(`TestMerchantTenantGate` 5 例、`TestStoreOrdersStrictScoping` 2 例、语义缓存 12 例)按仓库约定由人工触发 `bun run test:eval` 验证;engine 侧单测已实跑全绿(32/32)。
+- 订单三库约定:商户租户订单读写必须经 order_domain 的 merchant reader,不要往 engine orders 表加同步副本;聊天退款已写穿透商户库,但**改地址仅更新 shipping_address 快照**,不触发商户侧物流系统。
+
+---
+
 ## [2.3.1] - 2026-09-04 (契约测试套件首次全绿:SSE 静默断流、审批恢复跨租户搬家、商户中继延迟三大生产缺陷修复)
 
 ### 🐛 Bug Fixes (缺陷修复)
