@@ -1,6 +1,8 @@
 # 🚀 smartServe-agent: 分布式多租户 SaaS 智能客服与控制平面中台 (v3 Architecture)
 
-smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网关** 与 **LangGraph 决策图** 构建的生产级、高弹性、金融安全级智能客服与多租户管理中台平台。前端采用 Bun + Vite/Next.js TypeScript 工作区，后端为 uv 管理的 Python 双服务（`services/gateway-py` + `services/engine-py`）。支持多渠道客户触达、商户独立业务运营、SaaS 统一控制平面、人机协同（HITL）风控审批与全链路可观测性。
+[![CI](https://github.com/weizheng1992/smartServe-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/weizheng1992/smartServe-agent/actions/workflows/ci.yml)
+
+smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网关** 与 **LangGraph 决策图** 构建的生产级、高弹性、金融安全级智能客服与多租户管理中台平台。前端采用 Bun + Vite 6 + React 19 TypeScript 工作区，后端为 uv 管理的 Python 双服务（`services/gateway-py` + `services/engine-py`）。支持多渠道客户触达、商户独立业务运营、SaaS 统一控制平面、人机协同（HITL）风控审批与全链路可观测性。
 
 > 💡 **版本与架构演进说明**：
 >
@@ -38,7 +40,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
   - 用户可随时查看并无缝切换名下多条历史咨询记录；
   - 点击「+ 新对话」生成全新独立 `threadId`，物理级杜绝历史消息混淆与篡改。
 - **多身份模拟与多模态富卡片 (Rich Cards)**：支持切换演示用户（如张伟、李雷），直观呈现订单卡片、商品瀑布流、物流轨迹与退款状态。
-- **纯前端化 BFF**：`apps/merchant` 的 `/api/*` 与 `/spi/*` 通过 `next.config.ts` rewrites 全量代理至 FastAPI 网关（Port 4000），自身不再承载任何服务端路由。
+- **纯前端化 BFF**：`apps/merchant` 的 `/api/*` 与 `/spi/*` 通过 `vite.config.ts` proxy 全量代理至 FastAPI 网关（Port 4000），自身不再承载任何服务端路由。
 
 ---
 
@@ -168,12 +170,13 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 │   │   ├── tests/                      # 管理端集成测试套件
 │   │   └── e2e/                        # Playwright 管理端端到端自动化测试
 │   │
-│   ├── merchant/                       # 独立电商示范商城 & 商户运营工作台 (Next.js 15 App Router)
-│   │   ├── app/
-│   │   │   ├── admin/                  # 商户专属控制台 (订单履约、实时人工工作台)
+│   ├── merchant/                       # 独立电商示范商城 & 商户运营工作台 (Vite 6 + React 19 SPA)
+│   │   ├── src/
 │   │   │   ├── components/chat/        # 悬浮客服挂件 (FloatingChatWidget, 历史抽屉, 路由感知问候)
-│   │   │   └── (shop routes)/          # 商城货架、商品详情、购物车、订单中心
-│   │   └── next.config.ts              # /api/* 与 /spi/* rewrites 代理至 FastAPI 网关
+│   │   │   ├── components/{cart,orders,address,navbar}/   # 购物车/订单/地址/门店域组件
+│   │   │   └── pages/                  # 商城货架、商品详情、订单中心、地址簿与商户后台 (/admin)
+│   │   ├── e2e/                        # Playwright 商户端 E2E
+│   │   └── vite.config.ts              # /api/* 与 /spi/* proxy 代理至 FastAPI 网关
 │   │
 │   └── web/                            # 用户端轻量客服对话系统 (Vite 6 + React 19 + SSE 长连接)
 │       ├── src/components/             # 聊天区、富交互卡片、多模态上传
@@ -195,7 +198,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 │   │   │   ├── shadow/                 # 影子双跑 diff/replay 验收底座
 │   │   │   ├── event_bus.py            # Redis Streams 事件主干 (INCR seq + XADD maxlen)
 │   │   │   └── run_agent.py            # 智能体作业入口 (AgentJobInput → run_agent)
-│   │   └── alembic/                    # 数据库迁移唯一所有权 (bun run db:push)
+│   │   ├── alembic/                    # 数据库迁移唯一所有权 (bun run db:push)
+│   │   └── tests/                      # pytest 套件 59 例 (密封 PG 夹具: outbox 对账/双层画像隔离/scheduler)
 │   │
 │   └── gateway-py/                     # FastAPI API 网关 (Port 4000)
 │       ├── src/gateway_py/
@@ -204,7 +208,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 │       │   ├── sandbox.py              # sqlglot AST 只读 SQL 沙箱
 │       │   ├── hmac_signer.py          # SPI HMAC-SHA256 签名与防重放
 │       │   └── merchant_domain.py      # 商户门户领域逻辑与 merchant_db
-│       └── tests/                      # pytest 契约套件 (密封 testcontainers, 34 HTTP + 实时线格式)
+│       └── tests/                      # pytest 套件 69 例 (密封 testcontainers: 40 HTTP/SSE/socket.io 契约 + 29 AST 沙箱)
 │
 ├── packages/                           # 前端共享包 (TypeScript)
 │   ├── types/                          # 冻结前端契约类型 (Cards, Agent, Config, Tools, Approval, zod)
@@ -232,7 +236,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 7. **评测实验 (`/evals`)**：意图识别准确率、工具调用准度、安全防注入合规率与 Prompt 质量回归看板。
 8. **计量计费 (`/billing`)**：多租户 Token 消耗统计、模型调用成本折算、充值额度与日限额熔断守卫。
 9. **安全合规围栏 (`/guardrails`)**：动态配置 PII 隐私脱敏规则、敏感违禁词库、恶意提问检测与越权阻断策略。
-10. **系统与 LLM 日志 (`/system-logs`)**：全链路 TraceID 关联、大模型调用耗时（Latency）、Token 详细构成与异常错误追踪。
+10. **系统与 LLM 日志 (`/system-logs`)**：全链路 TraceID 关联、大模型调用耗时（Latency）、Token 详细构成与异常错误追踪；底层由 LLM 逐调用遥测（`llm/telemetry.py`）将真实 usage 落盘 `llm_call_logs` 支撑。
 
 ---
 
@@ -366,28 +370,37 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 
 ## 5. 质量保障与全自动化测试 (Quality & Automation)
 
-项目采用金字塔型测试架构，全面覆盖契约测试、端到端自动化与 Promptfoo 评估：
+项目采用金字塔型测试架构,全面覆盖契约测试、单元测试、端到端自动化与 Promptfoo 评估;GitHub Actions 双 job CI(`.github/workflows/ci.yml`)在每次推送时全量执行——前端 biome 检查 + 单测 + 构建,后端 uv 环境下 ruff×2 + engine/gateway 全部 pytest:
 
 ```bash
-# 1. 运行网关契约套件 (密封 testcontainers PostgreSQL + Redis, 无需本地起库)
+# 1. 网关套件: 69 例 = 40 HTTP/SSE/socket.io 契约 + 29 AST 沙箱
+#    (密封 testcontainers PostgreSQL + Redis, 无需本地起库)
 bun run test:eval
 
-# 2. 运行单个契约文件
-cd services/gateway-py && uv run pytest tests/test_http_routes_contract.py
+# 2. 决策引擎套件: 59 例 = outbox 对账 8 + 双层画像租户隔离 10 + scheduler 8 + 既有 33
+#    (DB 语义用例共享 session 级密封 PG 夹具: 容器 + Alembic 真实 schema + NullPool 会话工厂)
+bun run test:engine
 
-# 3. 运行 Playwright 真实浏览器 E2E 自动化测试
+# 3. 前端单元测试 (admin CRUD 套件 + web hooks)
+bun run test:unit
+
+# 4. 运行单个测试文件
+cd services/gateway-py && uv run pytest tests/test_http_routes_contract.py
+cd services/engine-py && uv run pytest tests/test_approval_outbox_worker.py
+
+# 5. 运行 Playwright 真实浏览器 E2E 自动化测试 (手动触发)
 bun run test:e2e
 
-# 4. 运行 Promptfoo 意图分类与规划器评估 (Python Provider)
+# 6. 运行 Promptfoo 意图分类与规划器评估 (Python Provider, 读 .env AI_*)
 bun run test:prompt
 bun run test:prompt:planner
 
-# 5. 钉死 / 对比 Promptfoo 基线
+# 7. 钉死 / 对比 Promptfoo 基线 (eval/baselines/ 含 gitSha, 机器无关对比)
 bun run test:prompt:pin
 bun run test:prompt:compare
 ```
 
-**契约冻结承诺**：39 条 HTTP 路由、SSE 事件线格式与 socket.io 事件名与退役的 TS 基线 1:1 冻结；`services/gateway-py/tests/` 下的 pytest 契约套件（34 个 HTTP 用例 + SSE 流/回放 + socket.io 双客户端协同）是唯一真实来源，任何契约改动必须同步更新测试与前端 `packages/types`。
+**契约冻结承诺**：39 条 HTTP 路由、SSE 事件线格式与 socket.io 事件名与退役的 TS 基线 1:1 冻结；`services/gateway-py/tests/` 下的 pytest 契约套件（40 个 HTTP/SSE/socket.io 用例 + 29 个 AST 沙箱用例）是唯一真实来源，任何契约改动必须同步更新测试与前端 `packages/types`。
 
 ---
 
