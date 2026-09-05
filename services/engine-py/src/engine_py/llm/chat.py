@@ -20,6 +20,7 @@ token 统计上报(TS: agentEventEmitter.addTokens)。
 
 from __future__ import annotations
 
+import asyncio
 import os
 import threading
 from functools import lru_cache
@@ -28,6 +29,36 @@ from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from ..config import settings
+
+
+class _SerializedEmbeddings(Embeddings):
+    """本地 embedding 并发护栏(2026-09-05 段错误事故)。
+
+    本地 torch 推理(sentence-transformers)在两个线程同时 encode 时进程级
+    SIGSEGV(exit 139)——网关任意两个并发聊天请求的 triage 向量化即可触雷,
+    整个进程连同全部 SSE 连接一起死。以进程内 asyncio.Lock 串行化异步推理;
+    同步方法保持透传(引擎全链路仅走 aembed_*)。
+
+    openai 提供方为网络客户端,线程安全,不经本包装。
+    """
+
+    def __init__(self, inner: Embeddings) -> None:
+        self._inner = inner
+        self._lock = asyncio.Lock()
+
+    async def aembed_query(self, text: str) -> list[float]:
+        async with self._lock:
+            return await self._inner.aembed_query(text)
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        async with self._lock:
+            return await self._inner.aembed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._inner.embed_query(text)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._inner.embed_documents(texts)
 
 
 @lru_cache(maxsize=1)
@@ -49,16 +80,18 @@ def get_embedding_model() -> Embeddings:
         from langchain_huggingface import HuggingFaceEmbeddings
 
         try:
-            return HuggingFaceEmbeddings(
-                model_name=settings.embedding_model,
-                model_kwargs={"local_files_only": True},
+            return _SerializedEmbeddings(
+                HuggingFaceEmbeddings(
+                    model_name=settings.embedding_model,
+                    model_kwargs={"local_files_only": True},
+                )
             )
         except Exception as cache_err:  # noqa: BLE001 — 缓存未命中回退镜像在线拉取
             print(
                 f"[LLM] 本地权重缓存未命中({cache_err}),"
                 f"经 {os.environ['HF_ENDPOINT']} 在线拉取 {settings.embedding_model}"
             )
-            return HuggingFaceEmbeddings(model_name=settings.embedding_model)
+            return _SerializedEmbeddings(HuggingFaceEmbeddings(model_name=settings.embedding_model))
     return OpenAIEmbeddings(
         model=settings.embedding_model,
         api_key=settings.llm_api_key,

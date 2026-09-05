@@ -4,6 +4,29 @@
 
 ---
 
+## [2.3.4] - 2026-09-05 (worker 兼容 temporalio 新 API;本地 embedding 并发推理段错误串行化护栏)
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **`bun run worker` 启动即退 (`engine_py/temporal/worker.py`)**:
+  - 症状:报"temporalio 未安装"误导信息,实为 `ImportError: cannot import name 'Connection'`——`uv sync --extra worker` 解析到 temporalio 1.32.0,该版本把 `Connection` 并入 `Client`(classmethod `connect`),Worker 首参即 `Client`。
+  - 修复:改用 `Client.connect(address)`;验证:worker 正常启动,Temporal Server 离线时按设计退化为纯周期任务进程。
+- **本地 embedding 并发推理段错误 (`engine_py/llm/chat.py`)**:
+  - 症状:两个线程同时经本地 torch embedding(sentence-transformers)encode → 进程级 SIGSEGV(exit 139)。触发面极广:网关任意两个并发聊天请求的 triage 向量化、审批恢复与新聊天同跑、worker 一轮对账派发多条事件;进程连同全部 SSE 连接一起死。最小复现:`asyncio.gather` 两个 `aembed_query` 即崩(与 temporalio 无关,单独加载模型正常)。
+  - 修复:`get_embedding_model()` 本地分支包 `_SerializedEmbeddings`——进程内 `asyncio.Lock` 串行化 `aembed_query/aembed_documents`(openai 提供方为网络客户端不经包装;同步方法透传)。锁可在线程中构造(预热线程)、loop 中使用,3.14 验证通过。
+  - 回归:engine 侧新增 `test_embedding_concurrency.py`(3 并发 aembed 钉死;修复前 pytest 进程直接被 SIGSEGV 杀死),套件 33/33 绿。
+
+### ✅ 验证 (Verification)
+
+- **发件箱对账兜底实跑验证**(2.3.3 修复的补偿路径):启动 worker 后,scheduler 首轮扫描即捞出 2 条滞留事件(processedCount=2, dispatchedCount=2);重派发经真实 run_agent 执行后双双落 `completed`(retry 2 = 一次段错误尝试 + 一次兜底成功),商户订单幂等无损。修复前滞留的 2 条事件(含用户原始工单)已全部闭环。
+
+### ⚠️ Notes (注意事项)
+
+- engine 侧新增用例已实跑全绿(33/33);gateway 契约套件无涉改,按约定仍由人工 `bun run test:eval`。
+- dev 环境如需对账兜底常驻,单独跑 `bun run worker`(scheduler 随其启动);`dev:all` 不含 worker。
+
+---
+
 ## [2.3.3] - 2026-09-05 (商户退款审批通过后店铺无变化:HITL 恢复派发链路断裂修复)
 
 ### 🐛 Bug Fixes (缺陷修复)
