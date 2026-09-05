@@ -1,0 +1,67 @@
+{
+  "suite": "planner",
+  "pinnedAt": "2026-09-05T09:31:40.837Z",
+  "gitSha": "d0c2d14db160a1ed1e6dd74e1f3828eaab20a0f5",
+  "config": {
+    "path": "eval/promptfoo.planner.yaml",
+    "sha256": "ccb0e91fd7b84e93c353e825c297e4de8a08a75dd70ca8ebb39c9ccb37622170"
+  },
+  "promptfooVersion": "0.111.1",
+  "summary": {
+    "total": 8,
+    "pass": 8,
+    "fail": 0,
+    "errors": 0,
+    "meanScore": 1,
+    "scorers": {
+      "unknown": {
+        "count": 8,
+        "pass": 8,
+        "fail": 0,
+        "meanScore": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "description": "查单规划 - 泛查单列表 (我的订单)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "查单规划 - 泛查单口语表达 (看看我买了啥)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "查单规划 - 精确单号查询 (ORD-98712)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "物流规划 - 快递承运商与轨迹追踪",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "退款规划 - 单号退款流转",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "退款规划 - 逾期订单退款流转",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "指标规划 - 爆款与出货量查询",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "多任务规划 - 查物流与退款双重意图",
+      "success": true,
+      "score": 1
+    }
+  ]
+}

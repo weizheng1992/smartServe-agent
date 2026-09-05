@@ -1,0 +1,62 @@
+{
+  "suite": "classify",
+  "pinnedAt": "2026-09-05T09:31:40.837Z",
+  "gitSha": "d0c2d14db160a1ed1e6dd74e1f3828eaab20a0f5",
+  "config": {
+    "path": "eval/promptfoo.classify.yaml",
+    "sha256": "64d8ea03a819a7eb87e5ee6847afde5b82492b090482272337257debeff72371"
+  },
+  "promptfooVersion": "0.111.1",
+  "summary": {
+    "total": 7,
+    "pass": 7,
+    "fail": 0,
+    "errors": 0,
+    "meanScore": 1,
+    "scorers": {
+      "unknown": {
+        "count": 7,
+        "pass": 7,
+        "fail": 0,
+        "meanScore": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "description": "通用意图 - 多轮对话偏好补充",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "查单意图 - 基础查单",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "物流意图 - 快递状态查询",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "多意图组合 - 查物流 + 申请退款",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "查单意图 - 口语化查单",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "法律政策咨询 - 7天无理由退货法规",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "退款意图 - 追问另一笔退款",
+      "success": true,
+      "score": 1
+    }
+  ]
+}

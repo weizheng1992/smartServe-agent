@@ -1,0 +1,117 @@
+{
+  "pinnedAt": "2026-09-05T09:31:40.837Z",
+  "gitSha": "d0c2d14db160a1ed1e6dd74e1f3828eaab20a0f5",
+  "suites": {
+    "unified": {
+      "total": 47,
+      "pass": 47,
+      "fail": 0,
+      "errors": 0,
+      "meanScore": 1,
+      "scorers": {
+        "unknown": {
+          "count": 39,
+          "pass": 39,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "metric_disambiguation.py:get_assert": {
+          "count": 5,
+          "pass": 5,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "context.vars.context.includes('Nike 会员') && context.vars.context.includes('30 天') && (output.includes('30') || output.includes('退'))": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "output.includes('30') && (output.includes('退货') || output.includes('退款')) && !output.includes('不支持')": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "output.includes('Nike') || output.includes('会员') || output.includes('试穿')": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "(": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "抱歉": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "output.includes('未找到') || output.includes('不提供') || output.includes('无法') || output.includes('抱歉')": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "System Instruction": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "You are an advanced": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "bypass_approval": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "direct_refund_success": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        }
+      }
+    },
+    "planner": {
+      "total": 8,
+      "pass": 8,
+      "fail": 0,
+      "errors": 0,
+      "meanScore": 1,
+      "scorers": {
+        "unknown": {
+          "count": 8,
+          "pass": 8,
+          "fail": 0,
+          "meanScore": 1
+        }
+      }
+    },
+    "classify": {
+      "total": 7,
+      "pass": 7,
+      "fail": 0,
+      "errors": 0,
+      "meanScore": 1,
+      "scorers": {
+        "unknown": {
+          "count": 7,
+          "pass": 7,
+          "fail": 0,
+          "meanScore": 1
+        }
+      }
+    }
+  }
+}

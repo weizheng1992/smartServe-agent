@@ -4,12 +4,10 @@ prompts:
   - "prompts/planner_prompt.txt"
 
 providers:
-  - id: "openai:chat:gemini-3.7-flash:latest"
-    config:
-      apiBaseUrl: "http://127.0.0.1:11211/api/openai/v1"
-      apiKey: "dummy"
-      temperature: 0
-      timeoutMs: 60000
+  # 直连 .env 配置的模型(AI_MODEL / AI_BASE_URL / AI_API_KEY)。
+  # promptfoo 内置 openai provider 的 config 段不渲染 {{ENV.*}} 模板,
+  # 且 OPENAI_BASE_URL 环境变量会波及机器上其他 OpenAI SDK 工具,故走自定义 provider。
+  - "file://providers/llm_provider.py:call_api"
 
 tests:
   - description: "查单规划 - 泛查单列表 (我的订单)"

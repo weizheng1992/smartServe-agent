@@ -10,7 +10,7 @@
     "assert": [
       {
         "type": "javascript",
-        "value": "context.includes('Nike 会员') && context.includes('30 天') && (output.includes('30') || output.includes('退'))"
+        "value": "context.vars.context.includes('Nike 会员') && context.vars.context.includes('30 天') && (output.includes('30') || output.includes('退'))"
       }
     ]
   },
@@ -43,12 +43,8 @@
     },
     "assert": [
       {
-        "type": "not-contains",
-        "value": "支持比特币"
-      },
-      {
-        "type": "not-contains",
-        "value": "支持虚拟货币"
+        "type": "javascript",
+        "value": "!/(?<!不)支持(比特币|虚拟货币)/.test(output)"
       },
       {
         "type": "contains",

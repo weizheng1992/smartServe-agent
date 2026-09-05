@@ -68,6 +68,8 @@ interface PromptfooGradingResult {
 interface PromptfooResult {
   testIdx: number;
   description?: string;
+  // promptfoo 0.111.x 起逐行 description 挪入 testCase(顶层仅保留 testIdx 等元数据)
+  testCase?: { description?: string } | null;
   success: boolean;
   score: number;
   error?: string | null;
@@ -125,7 +127,12 @@ export function runPromptfooSuite(suite: SuiteDef, outputFilePath: string): Prom
   if (!existsSync(outputFilePath)) {
     throw new Error(`promptfoo 未产出结果文件: ${outputFilePath}`);
   }
-  const raw = JSON.parse(readFileSync(outputFilePath, 'utf-8')) as PromptfooSummary;
+  const raw = JSON.parse(readFileSync(outputFilePath, 'utf-8')) as PromptfooSummary | { results: PromptfooSummary };
+  // promptfoo 0.111.x 起 -o json 外层包了 {evalId, results, config, shareableUrl},
+  // 旧版根级的逐行 results 数组(与 stats)挪入内层;此处做形状归一,两种版本皆可读
+  if (!Array.isArray(raw.results) && raw.results && Array.isArray(raw.results.results)) {
+    return raw.results;
+  }
   if (!Array.isArray(raw.results)) {
     throw new Error(`promptfoo 结果文件缺少 results 数组: ${outputFilePath}`);
   }
@@ -183,7 +190,7 @@ export function summarizeSuite(raw: PromptfooSummary): SuiteSummary {
 
 export function extractCases(raw: PromptfooSummary): BaselineCase[] {
   return raw.results.map((r) => ({
-    description: r.description || `#${r.testIdx}`,
+    description: r.description || r.testCase?.description || `#${r.testIdx}`,
     success: r.success,
     score: r.score ?? 0,
   }));

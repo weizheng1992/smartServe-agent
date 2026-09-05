@@ -3,9 +3,23 @@ export default async function (output: string, context: any) {
     const customerQuestion = context.vars.input;
     const expectedRules = context.vars.expectedRules || 'Be polite, express in Chinese, follow standard support SOP.';
 
-    // Lightweight call to our local custom endpoint directly, avoiding complex ESM path resolution bugs with @langchain/core package subpaths
+    // Judge model/endpoint/key come from repo .env (AI_MODEL / AI_BASE_URL / AI_API_KEY,
+    // loaded into process.env by promptfoo). Fail loudly when missing instead of
+    // falling back to an unreachable default (the old 127.0.0.1:11211 gateway is gone).
+    const judgeModel = process.env.AI_MODEL;
+    const judgeBase = process.env.AI_BASE_URL;
+    const judgeKey = process.env.AI_API_KEY;
+    if (!judgeModel || !judgeBase || !judgeKey) {
+      return {
+        pass: false,
+        score: 0.0,
+        reason: 'answerQuality judge misconfigured: AI_MODEL / AI_BASE_URL / AI_API_KEY missing from environment',
+      };
+    }
+
+    // Lightweight call to the OpenAI-compatible endpoint directly, avoiding complex ESM path resolution bugs with @langchain/core package subpaths
     const payload = {
-      model: 'gemini-3.5-flash:latest',
+      model: judgeModel,
       messages: [
         {
           role: 'user',
@@ -29,11 +43,11 @@ Do NOT include markdown backticks or text outside of the JSON.`,
       temperature: 0,
     };
 
-    const res = await fetch('http://127.0.0.1:11211/api/openai/v1/chat/completions', {
+    const res = await fetch(`${judgeBase.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer dummy',
+        Authorization: `Bearer ${judgeKey}`,
       },
       body: JSON.stringify(payload),
     });

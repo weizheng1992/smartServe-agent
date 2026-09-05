@@ -90,3 +90,8 @@ playwright-report/
 test-results/
 .scratch/
 
+
+# python 字节码缓存
+eval/providers/__pycache__/
+eval/scorers/__pycache__/
+__pycache__/

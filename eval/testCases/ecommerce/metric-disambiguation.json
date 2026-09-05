@@ -3,15 +3,11 @@
     "description": "指标语义消歧与Text-to-SQL - 模糊综合提问 (卖得最好/多维冲突组消歧)",
     "vars": {
       "input": "帮我查一下我负责商品里面卖得最好的几个",
-      "expectedIntents": [
-        "general_query"
-      ],
+      "expectedIntents": ["general_query"],
       "expectedMetric": "gmv",
       "expectedAmbiguity": true,
       "expectedConflictGroup": "gross_profit",
-      "expectedTools": [
-        "queryProductRanking"
-      ]
+      "expectedTools": ["queryProductRanking"]
     },
     "assert": [
       {
@@ -24,14 +20,10 @@
     "description": "指标语义消歧与Text-to-SQL - 明确净毛利润提问 (最赚钱/净收益)",
     "vars": {
       "input": "哪几款商品最赚钱，净毛利润最高",
-      "expectedIntents": [
-        "general_query"
-      ],
+      "expectedIntents": ["general_query"],
       "expectedMetric": "gross_profit",
       "expectedAmbiguity": false,
-      "expectedTools": [
-        "queryProductRanking"
-      ]
+      "expectedTools": ["queryProductRanking"]
     },
     "assert": [
       {
@@ -44,14 +36,10 @@
     "description": "指标语义消歧与Text-to-SQL - 明确出货销量提问 (走量最多/出货爆款)",
     "vars": {
       "input": "出货量走量最多的爆款是哪件",
-      "expectedIntents": [
-        "general_query"
-      ],
+      "expectedIntents": ["general_query"],
       "expectedMetric": "volume",
       "expectedAmbiguity": false,
-      "expectedTools": [
-        "queryProductRanking"
-      ]
+      "expectedTools": ["queryProductRanking"]
     },
     "assert": [
       {
@@ -64,14 +52,10 @@
     "description": "指标语义消歧与Text-to-SQL - 滞销库存积压预警 (排查压货)",
     "vars": {
       "input": "仓库里积压最多、滞销的是哪几款",
-      "expectedIntents": [
-        "general_query"
-      ],
+      "expectedIntents": ["general_query"],
       "expectedMetric": "stock_risk",
       "expectedAmbiguity": false,
-      "expectedTools": [
-        "queryProductRanking"
-      ]
+      "expectedTools": ["queryProductRanking"]
     },
     "assert": [
       {
@@ -84,14 +68,10 @@
     "description": "指标语义消歧与Text-to-SQL - 单品毛利率与溢价率提问 (性价比/利润率)",
     "vars": {
       "input": "哪些商品毛利率最高，溢价空间最大",
-      "expectedIntents": [
-        "general_query"
-      ],
+      "expectedIntents": ["general_query"],
       "expectedMetric": "margin_rate",
       "expectedAmbiguity": false,
-      "expectedTools": [
-        "queryProductRanking"
-      ]
+      "expectedTools": ["queryProductRanking"]
     },
     "assert": [
       {
