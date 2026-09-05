@@ -4,6 +4,24 @@
 
 ---
 
+## [2.3.3] - 2026-09-05 (商户退款审批通过后店铺无变化:HITL 恢复派发链路断裂修复)
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **审批通过后退款不执行、店铺订单无变化 (`engine_py/approvals/gatekeeper.py`)**:
+  - 症状:商户门店聊天申请退款 → admin 审批通过(接口返回 success)→ 商户库 `merchant_orders` 状态永不翻转,顾客与店铺侧均"没反应"。
+  - 根因(用户复现工单 + 发件箱错误信息直接钉死):工单创建路径(`evaluate_pending_approval_state` / `create_pending_approval_ticket`)不写 `pending_approvals.business_id`(NULL);审批 Fast-Path 把 `record.business_id`(None)显式传入 `AgentJobInput(businessId=...)`,**显式 None 绕过 pydantic 默认值**直接校验崩溃 → resume 任务永不派发,事件滞留 `approval_outbox_events.status='pending'`(error: `AgentJobInput businessId Input should be a valid string, input_value=None`)。对账 Worker 本可 10s 后兜底重放(payload 侧有 `or "ecommerce"` 回退),但其随 Temporal worker 入口启动,`dev:all` 不含 worker → 兜底也不在场,链路彻底断裂。
+  - 修复:① 新增 `_thread_owner_context` 助手(threads 表事实源),两个工单创建点落库 `business_id`;② 派发点 `process_approval_action` 以 `record.business_id → 线程归属租户 → "ecommerce"` 三级回退构造派发载荷与 `AgentJobInput`(存量 NULL 旧工单同样可恢复);③ outbox payload 同步携带真实租户。
+  - 回归:gateway 契约新增 `TestApprovalResumeDispatch`(走执行器真实创建分支 → 断言工单落租户、Fast-Path 派发后 outbox `completed` 且载荷携带真实租户;修复前断言 `pending`+校验错误)。旧用例 `test_resolve_fixture_approval` 之所以从未拦住:fixture 直插 SQL 自带 business_id,绕过了出问题的创建分支,且断言只看 HTTP success——派发崩溃恰好也返回 success。反馈回路脚本 `scripts/debug/refund-approval-e2e.sh` 保留(红→绿实测:审批后 3s `PAID→REFUNDED`)。
+
+### ⚠️ Notes (注意事项)
+
+- 新增 pytest 用例按仓库约定由人工触发 `bun run test:eval` 验证。
+- 开发环境若依赖发件箱对账兜底,需单独启动 `bun run worker`(scheduler 随其启动);仅跑 `dev:all` 时兜底不在场,Fast-Path 是唯一派发路径——本次修复后 Fast-Path 已可靠。
+- 修复前创建的存量工单 `business_id` 仍为 NULL(派发点回退已兼容,无需数据迁移);历史"已批准未执行"的订单可由顾客重新发起退款走新链路。
+
+---
+
 ## [2.3.2] - 2026-09-05 (商户聊天查单与订单列表双库统一、租户注册门禁、语义缓存防投毒双闸门、admin 十大模块全面接真实后端)
 
 ### 🐛 Bug Fixes (缺陷修复)

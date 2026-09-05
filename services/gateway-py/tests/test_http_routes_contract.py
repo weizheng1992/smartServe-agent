@@ -271,6 +271,76 @@ class TestApprovals:
         assert body.get("status") == "approved" or body.get("success") is True
 
 
+class TestApprovalResumeDispatch:
+    """回归(2026-09-05):商户退款审批通过后店铺无变化。
+
+    根因:工单创建路径不写 pending_approvals.business_id(NULL),审批 Fast-Path 把
+    None 显式传入 AgentJobInput(businessId=None) 绕过 pydantic 默认值直接校验崩溃,
+    resume 永不派发,outbox 事件滞留 pending。fixture 直插 SQL 带 business_id,
+    从未覆盖真实创建分支 —— 本用例走执行器真实路径钉死。
+    """
+
+    async def test_ticket_created_with_tenant_and_dispatch_completes(self, contract_fixtures, monkeypatch):
+        import asyncio
+
+        from engine_py.approvals.gatekeeper import ApprovalGatekeeper
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        # 1) 执行器真实挂起路径创建工单(修复前 business_id 落 NULL)
+        created = await ApprovalGatekeeper.evaluate_pending_approval_state(
+            {
+                "threadId": CONTRACT_THREAD,
+                "toolName": "processRefund",
+                "args": {"orderId": "ORD-RESUME-1", "reason": "quality issue"},
+                "stepDescription": "Process the refund for the order",
+                "stepIndex": 0,
+            }
+        )
+        assert created["state"] == "waiting"
+        approval_id = created["approvalId"]
+
+        async with get_session() as session:
+            row = (
+                await session.execute(
+                    text("SELECT business_id FROM pending_approvals WHERE id = CAST(:i AS uuid)").bindparams(
+                        i=approval_id
+                    )
+                )
+            ).first()
+        assert row is not None
+        assert row[0] == "nike"  # 修复前为 None → 派发崩溃的直接根因
+
+        # 2) 拦截 run_agent(AgentJobInput 仍在 gatekeeper 内真实构造,校验语义保留)
+        captured: dict = {}
+
+        async def _fake_run_agent(job):  # noqa: ANN001 — 仅捕获派发载荷
+            captured["businessId"] = job.business_id
+            return {"output": "resumed"}
+
+        monkeypatch.setattr("engine_py.run_agent.run_agent", _fake_run_agent)
+
+        result = await ApprovalGatekeeper.process_approval_action({"approvalId": approval_id, "action": "approve"})
+        assert result.get("status") == "approved"
+
+        await asyncio.sleep(0.1)  # 让 create_task 里的协程让步执行
+
+        # 3) Fast-Path 派发成功 → completed;修复前 pending + "AgentJobInput ... businessId" 校验错误
+        async with get_session() as session:
+            ev = (
+                await session.execute(
+                    text(
+                        "SELECT status, payload->'businessId' FROM approval_outbox_events "
+                        "WHERE approval_id = CAST(:i AS uuid)"
+                    ).bindparams(i=approval_id)
+                )
+            ).first()
+        assert ev is not None
+        assert ev[0] == "completed"
+        assert ev[1] == "nike"
+        assert captured.get("businessId") == "nike"
+
+
 class TestChatNonLlm:
     async def test_messages_thread_and_history(self, client, contract_fixtures):
         res = await client.get(

@@ -58,6 +58,26 @@ async def _add_system_message(thread_id: str, role: str, content: str) -> str:
     return msg_id
 
 
+async def _thread_owner_context(session, thread_id: str) -> dict:
+    """追溯线程归属用户与租户 —— 工单落库与恢复派发 businessId 的事实源。
+
+    历史缺陷(2026-09-05):工单创建不写 business_id(NULL),审批通过后 Fast-Path
+    把 None 显式传入 AgentJobInput(businessId=None),绕过 pydantic 默认值直接
+    校验崩溃 → resume 永不派发 → 退款批了但店铺订单无变化。
+    """
+    row = (
+        await session.execute(
+            text(
+                'SELECT user_id AS "userId", business_id AS "businessId" FROM threads WHERE id = :tid LIMIT 1'
+            ).bindparams(tid=thread_id)
+        )
+    ).mappings().first()
+    return {
+        "userId": (row["userId"] if row else None),
+        "businessId": (row["businessId"] if row else None),
+    }
+
+
 class ApprovalGatekeeper:
     @staticmethod
     async def check_double_refund(order_id: str) -> dict:
@@ -264,10 +284,12 @@ class ApprovalGatekeeper:
                 if latest_approval is None:
                     new_approval_id = str(uuid.uuid4())
                     deadline = _dt.datetime.now() + _dt.timedelta(hours=24)
+                    thread_ctx = await _thread_owner_context(session, opts["threadId"])
                     session.add(
                         PendingApproval(
                             id=new_approval_id,
                             thread_id=opts["threadId"],
+                            business_id=thread_ctx["businessId"] or "ecommerce",
                             action_type=opts["toolName"],
                             action_payload={
                                 "description": opts.get("stepDescription"),
@@ -383,10 +405,12 @@ class ApprovalGatekeeper:
                 approval_id = str(existing.id)
             else:
                 approval_id = str(uuid.uuid4())
+                thread_ctx = await _thread_owner_context(session, thread_id)
                 session.add(
                     PendingApproval(
                         id=approval_id,
                         thread_id=thread_id,
+                        business_id=thread_ctx["businessId"] or "ecommerce",
                         action_type=params["actionType"],
                         action_payload=params["actionPayload"],
                         status="waiting",
@@ -618,15 +642,11 @@ class ApprovalGatekeeper:
                     )
 
                 thread_user_id = _FALLBACK_USER_ID
-                thread_row = (
-                    await session.execute(
-                        text('SELECT user_id AS "userId" FROM threads WHERE id = :tid LIMIT 1').bindparams(
-                            tid=record.thread_id
-                        )
-                    )
-                ).mappings().first()
-                if thread_row and thread_row["userId"]:
-                    thread_user_id = thread_row["userId"]
+                thread_ctx = await _thread_owner_context(session, record.thread_id)
+                if thread_ctx["userId"]:
+                    thread_user_id = thread_ctx["userId"]
+                # 旧工单 business_id 为 NULL(修复前创建):以线程归属租户回退,严防 None 击穿派发
+                dispatch_business_id = record.business_id or thread_ctx["businessId"] or "ecommerce"
 
                 event_type = (
                     "resume_execution"
@@ -639,7 +659,7 @@ class ApprovalGatekeeper:
                     "jobId": deterministic_job_id,
                     "threadId": record.thread_id,
                     "userId": thread_user_id,
-                    "businessId": record.business_id,
+                    "businessId": dispatch_business_id,
                     "systemPromptText": system_prompt_text,
                     "nextStatus": next_status,
                 }
@@ -684,7 +704,7 @@ class ApprovalGatekeeper:
                             jobId=deterministic_job_id,
                             threadId=record.thread_id,
                             userId=thread_user_id,
-                            businessId=record.business_id,
+                            businessId=dispatch_business_id,
                             message=system_prompt_text,
                         )
                     )
