@@ -4,6 +4,14 @@
 
 ---
 
+## [2.3.5] - 2026-09-05 (多实例部署指南:单实例假设盘点与迁移方案成文)
+
+### 📝 Docs (文档同步)
+
+- **新增 `docs/architecture/multi-instance-deployment.md`**:兑现不变量 #3 挂账的"多实例部署前需分布式锁或迁移 Temporal Schedule"。盘点存量组件就绪度(SSE 裸 XREAD 天然安全、outbox SKIP LOCKED 行级安全、审批 Redis SETNX 跨实例互斥、embedding 串行护栏按进程设计无需改、Temporal worker 原生扩容),钉死两个硬缺口:① scheduler 单实例假设(三方案:环境变量止损 → Temporal Schedule 目标态);② socket.io 房间为进程内存态,须加 `AsyncRedisManager` 跨实例广播,否则人工接管双端失联。附扩容前置清单(Redis 升硬依赖、PG 连接池预算、uvicorn 单 worker 假设)与多实例开发约定(新周期任务幂等、进程内存态仅限降级)。CLAUDE.md §5 挂载索引。
+
+---
+
 ## [2.3.4] - 2026-09-05 (worker 兼容 temporalio 新 API;本地 embedding 并发推理段错误串行化护栏)
 
 ### 🐛 Bug Fixes (缺陷修复)
