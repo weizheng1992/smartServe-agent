@@ -62,7 +62,7 @@ def is_action_query(input_text: str, tenant_id: str = "") -> bool:
             )
             is not None
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[SkillRegistry] Action-query sniff failed, treating as action: {err}")
         return True
 

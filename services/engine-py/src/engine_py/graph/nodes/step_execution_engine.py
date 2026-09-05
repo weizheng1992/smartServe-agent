@@ -5,12 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import uuid
-
-from sqlalchemy import text
 
 from ...approvals.gatekeeper import ApprovalPolicyEngine
-from ...db import get_session
 from ...event_bus import emit_status
 from ...llm import get_chat_model
 from ...memory import ShortMemory
@@ -22,7 +18,7 @@ _JSON_FENCE_START_RE = re.compile(r"^```json\s*")
 
 def _try_import_skills():
     try:
-        from ...skills import SkillRegistry  # noqa: PLC0415 — 延迟导入防环;本模块位于 graph/nodes,需三个点
+        from ...skills import SkillRegistry
 
         return SkillRegistry
     except ImportError:
@@ -31,7 +27,7 @@ def _try_import_skills():
 
 def _try_import_tools():
     try:
-        from ...tools_registry import get_tool  # noqa: PLC0415 — 延迟导入防环;本模块位于 graph/nodes,需三个点
+        from ...tools_registry import get_tool
 
         return get_tool
     except ImportError:
@@ -167,7 +163,7 @@ async def _execute_single_step_core(
                 clean = _JSON_FENCE_START_RE.sub("", clean)
                 clean = re.sub(r"```$", "", clean).strip()
                 parsed_tool_call = json.loads(clean)
-            except Exception:  # noqa: BLE001 — 解析失败不得发明 mock 工具调用
+            except Exception:
                 parsed_tool_call = None
 
     result_data = None
@@ -322,39 +318,12 @@ async def _execute_single_step_core(
                 )
                 result_data = {"toolExecuted": tool_name, "output": output}
 
-                # 插入评估分析日志
-                if state.get("thread_id"):
-                    try:
-                        run_id = "83d67d4e-104c-4325-8aa7-10d4389fc725"
-                        result_id = str(uuid.uuid4())
-                        async with get_session() as session:
-                            await session.execute(
-                                text(
-                                    "INSERT INTO eval_runs (id, business_id, git_commit, avg_answer_quality, avg_latency_ms, total_cost_usd) "
-                                    "VALUES (:rid, 'ecommerce', 'dev', 5.0, 100, 0.0) ON CONFLICT (id) DO NOTHING"
-                                ).bindparams(rid=run_id)
-                            )
-                            await session.execute(
-                                text(
-                                    "INSERT INTO eval_results (id, run_id, case_name, passed, metrics) "
-                                    "VALUES (:resid, :rid, :case_name, true, CAST(:metrics AS jsonb))"
-                                ).bindparams(
-                                    resid=result_id,
-                                    rid=run_id,
-                                    case_name=f"Tool: {tool_name}",
-                                    metrics=json.dumps(
-                                        {
-                                            "input": json.dumps(args, ensure_ascii=False, default=str),
-                                            "output": output,
-                                        },
-                                        ensure_ascii=False,
-                                        default=str,
-                                    ),
-                                )
-                            )
-                            await session.commit()
-                    except Exception as eval_err:  # noqa: BLE001
-                        print(f"[StepExecutionEngine] Failed to insert logging data: {eval_err}")
+                # 此处原有「工具执行 → eval_runs/eval_results 评估日志」写入块,已于
+                # 2026-09-05 整体移除:UUID 主键传 VARCHAR 导致从未成功写入过一行
+                # (每次工具执行必报 DatatypeMismatchError),且写入值为硬编码假指标
+                # (quality=5.0 / latency=100 / 固定 run_id / 固定 'ecommerce' 租户),
+                # 违反数据真实性约定与多租户不变量;真实遥测走 llm_call_logs(逐调用)
+                # 与 session_metrics(会话汇总),真实评测走 bun run test:prompt。
             else:
                 result_data = {"error": f"Tool or Skill {tool_name} not found in registry."}
     else:

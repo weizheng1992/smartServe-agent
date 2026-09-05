@@ -19,7 +19,6 @@ import uuid
 
 from sqlalchemy import desc, select, text
 
-from ..config import settings
 from ..badcase.pool import SOURCE_APPROVAL_REJECTED, SOURCE_HUMAN_TAKEOVER, record_badcase_signal
 from ..db import ApprovalOutboxEvent, Message, PendingApproval, get_session
 from ..event_bus import emit_status, get_client, publish_agent_event
@@ -94,7 +93,7 @@ class ApprovalGatekeeper:
                     if row["status"] == "refunded":
                         return {"isDoubleRefund": True, "status": row["status"]}
                     return {"isDoubleRefund": False, "status": row["status"]}
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[ApprovalGatekeeper] Double refund check DB error: {err}")
         return {"isDoubleRefund": False}
 
@@ -126,7 +125,7 @@ class ApprovalGatekeeper:
                             refund_amount = float(_AMOUNT_STRIP_RE.sub("", str(row["totalAmount"]))) or 999999.99
                         except ValueError:
                             pass
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 print(f"[ApprovalGatekeeper] Grounding order amount error: {err}")
 
         return {
@@ -152,7 +151,7 @@ class ApprovalGatekeeper:
                     status = row["status"] or ""
                     if status not in ("shipped", "delivered") and total_amount > 100.0:
                         return {"isHighValue": True, "totalAmount": total_amount}
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[ApprovalGatekeeper] Address policy DB error: {err}")
         return {"isHighValue": False, "totalAmount": 0}
 
@@ -177,7 +176,7 @@ class ApprovalGatekeeper:
                         "deadline": row.deadline,
                         "createdAt": row.created_at,
                     }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[ApprovalGatekeeper] findApprovalById DB error: {err}")
         return None
 
@@ -205,7 +204,7 @@ class ApprovalGatekeeper:
                         "deadline": row.deadline,
                         "createdAt": row.created_at,
                     }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[ApprovalGatekeeper] findLatestApprovalByThreadId DB error: {err}")
         return None
 
@@ -336,7 +335,7 @@ class ApprovalGatekeeper:
                         "message": f"❌ 人工审核拒绝：管理员驳回了本次申请，理由: [{reason}]。决策引擎即将启动回溯重规划。",
                     }
                 return {"state": "approved", "approvalId": str(latest_approval.id), "isApproved": True}
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[ApprovalGatekeeper] evaluatePendingApprovalState error: {err}")
             return {"state": "approved", "isApproved": False}
 
@@ -389,7 +388,7 @@ class ApprovalGatekeeper:
         thread_id = params["threadId"]
         try:
             await _ensure_thread_exists(thread_id, params.get("userId"))
-        except Exception as t_err:  # noqa: BLE001
+        except Exception as t_err:
             print(f"[ApprovalGatekeeper] Thread ensure warning: {t_err}")
 
         async with get_session() as session:
@@ -563,13 +562,13 @@ class ApprovalGatekeeper:
 
         try:
             client = await get_client()
-        except Exception:  # noqa: BLE001 — Redis 不可用时回退内存锁
+        except Exception:
             client = None
         if client is not None:
             try:
                 result = await client.set(lock_key, "locked", px=5000, nx=True)
                 lock_acquired = result is not None and str(result).upper() == "OK"
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 print(f"[ApprovalGatekeeper Lock] Redis SETNX failed, falling back to memory lock: {err}")
 
         if not lock_acquired:
@@ -717,7 +716,7 @@ class ApprovalGatekeeper:
                         ).bindparams(eid=outbox_event_id)
                     )
                     await session.commit()
-            except Exception as dispatch_err:  # noqa: BLE001
+            except Exception as dispatch_err:
                 async with get_session() as session:
                     await session.execute(
                         text(
@@ -733,14 +732,14 @@ class ApprovalGatekeeper:
                 "threadId": record.thread_id,
                 "status": next_status,
             }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[ApprovalGatekeeper] Approval processing error: {err}")
             return {"error": f"审批执行失败: {err}", "statusCode": 500}
         finally:
             if lock_acquired and client is not None:
                 try:
                     await client.delete(lock_key)
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     print(f"[ApprovalGatekeeper Lock] Redis DEL failed: {err}")
             if fallback_acquired:
                 _local_locks.discard(lock_key)

@@ -80,7 +80,7 @@ async def search_relevant_exemplars(
         scored = [item for item in scored if item["similarity"] >= 0.05]
         scored.sort(key=lambda item: item["similarity"], reverse=True)
         return scored[:limit]
-    except Exception as err:  # noqa: BLE001 — 与 TS 一致:榜样召回失败静默降级
+    except Exception as err:
         print(f"[ExemplarService] Failed to retrieve exemplars for tenant [{clean_tenant_id}]: {err}")
         return []
 

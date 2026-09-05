@@ -120,7 +120,7 @@ class LocalDbSpiAdapter:
                     .mappings()
                     .all()
                 )
-        except Exception:  # noqa: BLE001
+        except Exception:
             item_rows = []
 
         status = str(order.get("status") or "PENDING")
@@ -217,7 +217,7 @@ class LocalDbSpiAdapter:
                     }
                     for r in rows
                 ]
-        except Exception:  # noqa: BLE001
+        except Exception:
             return []
 
 

@@ -84,7 +84,7 @@ async def process_pending_events(older_than_ms: int = 10_000) -> dict:
                     _dispatch_and_settle(str(event.id), job_id, thread_id, user_id, message, business_id)
                 )
                 summary["dispatchedCount"] += 1
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[ApprovalOutboxWorker] 扫描发件箱异常: {err}")
     return summary
 
@@ -109,7 +109,7 @@ async def _dispatch_and_settle(
                 ).bindparams(eid=event_id)
             )
             await session.commit()
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         async with get_session() as session:
             await session.execute(
                 text(

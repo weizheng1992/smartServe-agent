@@ -92,7 +92,7 @@ async def planner_node(state: AgentState) -> dict:
                             plan=prior_plan,
                         )
                     return {"task_plan": prior_plan, "global_transitions_count": 1}
-            except Exception as db_err:  # noqa: BLE001
+            except Exception as db_err:
                 print(f"[Planner Bypass] Failed to check approval status for bypass: {db_err}")
 
     # 🧠 Cognitive State Backtracking:管理员驳回 → failed/rejectedByAdmin 标记 + 重规划上下文
@@ -110,7 +110,7 @@ async def planner_node(state: AgentState) -> dict:
                 if step_approval_id
                 else await find_latest_approval_by_thread_id(state.get("thread_id", ""))
             )
-        except Exception as db_err:  # noqa: BLE001
+        except Exception as db_err:
             print(f"[Planner Rejection Check] Failed to check latest approval for backtracking: {db_err}")
 
         if latest_approval and latest_approval["status"] == "rejected":
@@ -419,7 +419,7 @@ async def planner_node(state: AgentState) -> dict:
             clean_response = re.sub(r"^```json\s*", "", clean_response)
             clean_response = re.sub(r"```$", "", clean_response).strip()
             plan = json.loads(clean_response)
-        except Exception:  # noqa: BLE001 — JSON 解析失败回退逐意图步骤
+        except Exception:
             plan = {
                 "goal": "Address customer request",
                 "subtasks": [
@@ -445,7 +445,7 @@ async def planner_node(state: AgentState) -> dict:
                 plan=task_plan,
             )
         return {"task_plan": task_plan, "short_memory": short_memory, "global_transitions_count": 1}
-    except Exception as err:  # noqa: BLE001 — LLM 失败回退单步计划
+    except Exception as err:
         print(f"plannerNode failed, falling back to default single-step plan: {err}")
         return {
             "task_plan": {

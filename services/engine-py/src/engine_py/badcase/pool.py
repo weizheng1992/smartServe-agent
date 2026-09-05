@@ -53,6 +53,6 @@ async def record_badcase_signal(
                 f"ref={conversation_ref} class={prior}"
             )
             return str(row.id)
-    except Exception as err:  # noqa: BLE001 — 旁路信号,严禁阻断业务主链路
+    except Exception as err:
         print(f"[BadcasePool] Failed to record badcase signal ({signal_source}/{conversation_ref}): {err}")
         return None

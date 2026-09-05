@@ -105,7 +105,7 @@ async def replay_threads(limit: int = 50, out_path: str = "py_results.jsonl") ->
                     "signature": extract_signature(result),
                 }
                 ok_count += 1
-            except Exception as err:  # noqa: BLE001 — 单会话失败不中断回放
+            except Exception as err:
                 record = {"threadId": item["threadId"], "input": item["message"], "engine": "python", "error": str(err)}
             fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 

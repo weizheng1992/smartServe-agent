@@ -5,4 +5,4 @@ from .long_memory import LongMemory
 from .short_memory import ShortMemory
 from .task_memory import TaskMemory
 
-__all__ = ["ShortMemory", "TaskMemory", "LongMemory", "EpisodicMemory"]
+__all__ = ["EpisodicMemory", "LongMemory", "ShortMemory", "TaskMemory"]

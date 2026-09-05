@@ -18,7 +18,7 @@ from ..tenant import get_merchant_display_name, sanitize_tenant_response
 from . import rule_matchers
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
-from .slot_extractor import ORDER_ID_RE, AgentIntentType, SlotExtractor
+from .slot_extractor import ORDER_ID_RE, SlotExtractor
 from .structured_classifier import classify
 
 OPERATIONAL_ACTION_RE = re.compile(
@@ -90,7 +90,7 @@ class IntentTriageEngine:
                 await session.commit()
             if confidence < 0.65:
                 await IntentTriageEngine.log_low_confidence_to_db(thread_id, input_text, intents)
-        except Exception as err:  # noqa: BLE001 — 日志持久化失败旁路,不阻断分流
+        except Exception as err:
             print(f"[Triage Logging Exception] Bypassed log persistence: {err}")
 
     @staticmethod
@@ -106,7 +106,7 @@ class IntentTriageEngine:
                     )
                 )
                 await session.commit()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[Low Confidence Logging Exception] Bypassed log persistence: {err}")
 
     @staticmethod
@@ -295,7 +295,7 @@ class IntentTriageEngine:
                         None,
                         last_assistant_msg.get("cards"),
                     )
-        except Exception as sh_err:  # noqa: BLE001
+        except Exception as sh_err:
             print(f"[Triage Duplicate Shield Exception] Bypassed duplicate check: {sh_err}")
 
         # 🛡️ Step 1: 规则白名单
@@ -466,7 +466,7 @@ class IntentTriageEngine:
                     "global_transitions_count": -1,
                     "tool_errors_count": -1,
                 }
-        except Exception as slot_err:  # noqa: BLE001
+        except Exception as slot_err:
             print(f"[Triage Slot-Clarification Exception]: {slot_err}")
 
         # 🛡️ Step 2: Embedding 快速语义分类
@@ -607,7 +607,7 @@ class IntentTriageEngine:
                     "embedding",
                     score_oos,
                 )
-        except Exception as embed_err:  # noqa: BLE001
+        except Exception as embed_err:
             print(f"[Triage Embedding Step 2 Exception] Bypassing Embedding Classifier: {embed_err}")
 
         # 🛡️ Step 3: 大模型结构化联合精判
@@ -627,7 +627,7 @@ class IntentTriageEngine:
                 )
                 if matched_exemplars:
                     exemplars_prompt = format_exemplars_for_prompt(matched_exemplars)
-            except Exception as ex_err:  # noqa: BLE001
+            except Exception as ex_err:
                 print(f"[Triage Exemplars Retrieval Exception]: {ex_err}")
 
             structured_res = await classify(
@@ -721,7 +721,7 @@ class IntentTriageEngine:
                 "global_transitions_count": -1,
                 "tool_errors_count": -1,
             }
-        except Exception as err:  # noqa: BLE001 — 结构化分类失败兜底 general_query
+        except Exception as err:
             print(f"IntentTriageEngine Step 3 structured classifier failed: {err}")
             fallback_intents = [{"intent": "general_query", "confidence": 0.5}]
             await IntentTriageEngine.log_intent_to_db(
@@ -752,7 +752,7 @@ class IntentTriageEngine:
         行为等价于「无匹配 Skill」的 TS 分支。
         """
         try:
-            from ..skills import SkillRegistry  # noqa: PLC0415 — 延迟导入,未落地时优雅跳过
+            from ..skills import SkillRegistry
         except ImportError:
             return None
 

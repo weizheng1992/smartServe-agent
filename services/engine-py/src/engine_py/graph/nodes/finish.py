@@ -33,7 +33,7 @@ async def _resolve_tenant_id(state: dict) -> str:
                 ).scalar_one_or_none()
                 if row and row.business_id:
                     tenant_id = row.business_id.lower()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[FinishNode] Failed to resolve thread tenantId: {err}")
     return tenant_id
 
@@ -193,11 +193,11 @@ async def finish_node(state: AgentState) -> dict:
         ):
             try:
                 add_query_to_semantic_cache(tenant_id, state["input"], sanitized_content.strip(), input_embedding)
-            except Exception as cache_err:  # noqa: BLE001
+            except Exception as cache_err:
                 print(f"[Finish Cache] Failed to cache general query: {cache_err}")
 
         return {"output": sanitized_content.strip(), "short_memory": short_memory}
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"finishNode failed, using fallback summary: {err}")
         fallback_details = json.dumps(
             [st.get("result") for st in subtasks], ensure_ascii=False, default=str

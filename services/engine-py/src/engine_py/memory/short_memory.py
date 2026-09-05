@@ -28,7 +28,7 @@ def _monotonic_timestamp(role: str | None) -> str:
         _last_global_timestamp_ms += role_offset if role_offset > 0 else 1
     else:
         _last_global_timestamp_ms = now + role_offset
-    return _dt.datetime.fromtimestamp(_last_global_timestamp_ms / 1000, tz=_dt.timezone.utc).isoformat()
+    return _dt.datetime.fromtimestamp(_last_global_timestamp_ms / 1000, tz=_dt.UTC).isoformat()
 
 
 def _infer_business_id(thread_id: str, explicit: str | None = None) -> str:
@@ -86,7 +86,7 @@ class ShortMemory:
                     }
                     for m in sliced
                 ]
-        except Exception as err:  # noqa: BLE001 — 与 TS 侧一致:记忆失败不阻断状态机
+        except Exception as err:
             print(f"[ShortMemory Error] Failed to get messages: {err}")
             return []
 
@@ -116,7 +116,7 @@ class ShortMemory:
                     )
                 )
                 await session.commit()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[ShortMemory Error] Failed to add message: {err}")
 
     async def compress(self, messages: list[dict]) -> str:

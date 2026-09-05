@@ -10,8 +10,8 @@
 6. CardSynthesizer 卡片合成
 7. 终态 `${jobId}:result` 事件收口发布
 
-TODO(Phase 1b):token 累计统计依赖 callLLMWithRetry 的 addTokens 语义移植,
-当前遥测 total_tokens 记 0(llm/chat.py 已留 TODO)。
+TODO(Phase 1b):token 累计已由 llm/telemetry.py 落盘 llm_call_logs 并聚合
+(2026-09-05 起,total_tokens 为本次运行真实 usage 总和);熔断/退避仍待移植。
 """
 
 from __future__ import annotations
@@ -30,7 +30,12 @@ from .event_bus import emit_job_result, emit_status, publish_agent_event
 from .graph import build_graph
 from .graph.build_graph import CIRCUIT_BREAKER_TOOL_ERRORS, CIRCUIT_BREAKER_TRANSITIONS
 from .graph.state import DEFAULT_TASK_PLAN, AgentState, to_ts_dict
-from .llm import get_embedding_model
+from .llm import (
+    bind_llm_call_context,
+    drain_llm_call_writes,
+    get_embedding_model,
+    take_thread_token_total,
+)
 from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
@@ -138,7 +143,7 @@ async def _resolve_business_context(
                 # 自愈装配(Nike $150 / Adidas $120 / 主站 $100)
                 default_limit = 150 if business_id == "nike" else 120 if business_id == "adidas" else 100
                 dynamic_config = {**dynamic_config, "businessId": business_id, "refundAutoApprovalLimit": default_limit}
-    except Exception as err:  # noqa: BLE001 — 配置热载失败回退默认
+    except Exception as err:
         print(f"[SaaS Config Engine] Failed to dynamically load business config: {err}")
 
     return business_id, dynamic_config
@@ -165,7 +170,7 @@ async def _report_langsmith_feedback(is_success: bool, comment: str) -> None:
                         "comment": comment,
                     },
                 )
-    except Exception as telemetry_err:  # noqa: BLE001
+    except Exception as telemetry_err:
         print(f"[LangSmith Telemetry] Error uploading feedback to LangSmith: {telemetry_err}")
 
 
@@ -188,7 +193,7 @@ async def run_agent(job: AgentJobInput) -> dict:
                 ).scalar_one_or_none()
                 if thread_row and thread_row.business_id:
                     resolved_biz_id = thread_row.business_id
-        except Exception as g_err:  # noqa: BLE001
+        except Exception as g_err:
             print(f"[Quick Greeting] Failed to resolve thread businessId: {g_err}")
 
         brand_name = get_merchant_display_name(resolved_biz_id)
@@ -203,7 +208,7 @@ async def run_agent(job: AgentJobInput) -> dict:
 
         try:
             await _ensure_thread(thread_id, user_id, job.business_id)
-        except Exception as thread_err:  # noqa: BLE001
+        except Exception as thread_err:
             print(f"[DB] Failed to ensure thread exists for quick greeting: {thread_err}")
 
         await short_memory.add_message("user", input_message)
@@ -245,6 +250,10 @@ async def run_agent(job: AgentJobInput) -> dict:
 
     business_id, dynamic_config = await _resolve_business_context(thread_id, user_id, job.business_id)
 
+    # LLM 调用归因:本次运行内全部模型调用(图节点 + 后台画像审计任务)据此
+    # 落盘 llm_call_logs 的 thread_id / business_id(见 llm/telemetry.py)
+    bind_llm_call_context(thread_id=thread_id, business_id=business_id)
+
     long_memory = LongMemory(user_id, business_id)
     episodic_memory = EpisodicMemory(user_id, business_id)
 
@@ -252,7 +261,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         contextual_rag = ContextualRAG(business_id)
         try:
             precomputed_embedding = await get_embedding_model().aembed_query(input_message)
-        except Exception as embed_err:  # noqa: BLE001
+        except Exception as embed_err:
             print(f"[runAgent] Failed to precompute embedding for Single-Embedding Injection: {embed_err}")
 
         facts_res, events_res, rag_res = await asyncio.gather(
@@ -284,7 +293,7 @@ async def run_agent(job: AgentJobInput) -> dict:
             saved_guide_context = saved_state.get("guideContext")
             saved_cart_context = saved_state.get("cartContext")
             saved_order_context = saved_state.get("orderContext")
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[buildGraph] Failed to load saved task plan from taskMemory: {err}")
 
     initial_state: AgentState = {
@@ -321,7 +330,9 @@ async def run_agent(job: AgentJobInput) -> dict:
 
     # 🪙 SaaS 遥测:算力消耗 / 成本换算 / 图决策深度 / 解挂状态
     try:
-        total_tokens = 0  # TODO(Phase 1b):token 统计随 callLLMWithRetry 移植接入
+        # 等待本运行派发的 llm_call_logs 落盘任务收口,再取真实 usage 累计
+        await drain_llm_call_writes(thread_id)
+        total_tokens = take_thread_token_total(thread_id)
         cost_usd = (total_tokens / 1_000_000) * 0.15
         node_transitions = result.get("loop_count") or 3
 
@@ -383,7 +394,7 @@ async def run_agent(job: AgentJobInput) -> dict:
                 )
             )
             await session.commit()
-    except Exception as metrics_err:  # noqa: BLE001
+    except Exception as metrics_err:
         print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
 
     # 🗂️ 富媒体卡片合成(已有卡片优先)

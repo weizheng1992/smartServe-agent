@@ -25,7 +25,7 @@ class ToolCache:
             raw = await client.get(f"toolcache:{key}")
             if raw:
                 return json.loads(raw)
-        except Exception:  # noqa: BLE001 — Redis 异常静默降级
+        except Exception:
             pass
 
         entry = self._local.get(key)
@@ -39,7 +39,7 @@ class ToolCache:
 
             client = await get_client()
             await client.set(f"toolcache:{key}", serialized, ex=ttl_seconds)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     async def delete(self, key: str) -> None:
@@ -49,7 +49,7 @@ class ToolCache:
 
             client = await get_client()
             await client.delete(f"toolcache:{key}")
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 

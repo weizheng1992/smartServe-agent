@@ -45,7 +45,7 @@ async def _run_task(task: PeriodicTask) -> None:
     while True:
         try:
             await task.func()
-        except Exception as err:  # noqa: BLE001 — 单次失败不影响后续 tick
+        except Exception as err:
             print(f"[Scheduler] 任务 {task.name} 执行异常(将继续下一轮): {err}")
         await asyncio.sleep(task.interval_seconds + random.uniform(0, task.interval_seconds * 0.1))
 

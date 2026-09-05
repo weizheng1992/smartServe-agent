@@ -5,7 +5,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from .scrubber import scrub_pii
 
@@ -41,4 +42,4 @@ def get_all_tools() -> list[ToolDefinition]:
 
 
 # 导入即注册(镜像 TS 的模块顶层 registerTool 调用)
-from . import ecommerce_tools as _ecommerce_tools  # noqa: E402,F401
+from . import ecommerce_tools as _ecommerce_tools  # noqa: F401

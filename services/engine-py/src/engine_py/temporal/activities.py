@@ -6,10 +6,10 @@ from sqlalchemy import select
 
 from ..cards import CardSynthesizer
 from ..db import Thread, get_session
+from ..graph.nodes import executor_node, finish_node, merge_node, planner_node, triage_node, validator_node
 from ..graph.state import AgentState, to_ts_dict
 from ..memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from ..tenant import get_merchant_display_name
-from ..graph.nodes import executor_node, finish_node, merge_node, planner_node, triage_node, validator_node
 
 _NODE_HANDLERS = {
     "triage": triage_node,
@@ -36,7 +36,7 @@ async def run_agent_state_node(node_name: str, ts_state: dict) -> dict:
                 ).scalar_one_or_none()
                 if row and row.business_id:
                     business_id = row.business_id
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[Temporal Activities] Failed to resolve thread businessId: {err}")
 
     if not state.get("longMemoryFacts") or not state.get("episodicEvents"):

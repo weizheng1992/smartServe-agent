@@ -96,7 +96,7 @@ async def _list_merchant_orders(user_id: str) -> list[dict] | None:
                 .all()
             )
             return [_merchant_row_to_order(r) for r in rows]
-    except Exception as err:  # noqa: BLE001 - 商户库离线不得阻断状态机
+    except Exception as err:
         print(f"[OrderDomainService] merchant reader unavailable: {err}")
         return None
 
@@ -117,7 +117,7 @@ async def _find_merchant_order(order_id: str, user_id: str) -> dict | None:
                 .first()
             )
             return _merchant_row_to_order(row) if row else None
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[OrderDomainService] merchant reader unavailable: {err}")
         return None
 
@@ -144,7 +144,7 @@ async def _fetch_merchant_order_items(order_id: str) -> list[dict]:
                 }
                 for r in rows
             ]
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[OrderDomainService] merchant items unavailable: {err}")
         return []
 
@@ -163,7 +163,7 @@ async def _update_merchant_order(order_id: str, *, status: str | None = None, sh
                     text("UPDATE merchant_orders SET shipping_address = CAST(:addr AS JSONB), updated_at = NOW() WHERE order_id = :oid")
                     .bindparams(addr=json.dumps(shipping_address, ensure_ascii=False), oid=order_id)
                 )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[OrderDomainService] merchant write-through failed: {err}")
 
 
@@ -187,7 +187,7 @@ class OrderDomainService:
                         "userId": row["userId"] or "",
                         "businessId": row["businessId"] or "ecommerce",
                     }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService] Failed to fetch thread session context: {err}")
         return {"userId": "", "businessId": "ecommerce"}
 
@@ -202,7 +202,7 @@ class OrderDomainService:
                 return int(skill_config["maxRefundDays"])
             if isinstance(config.get("maxRefundDays"), (int, float)):
                 return int(config["maxRefundDays"])
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         if clean_id == "nike":
             return 30
@@ -275,7 +275,7 @@ class OrderDomainService:
                         "shippingAddress": tp_row["shippingAddress"],
                     }
                 return None
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService.findOrderById] Database error: {err}")
             return None
 
@@ -322,7 +322,7 @@ class OrderDomainService:
                             if prod:
                                 prod_name = prod.get("name") or "未知商品"
                                 prod_desc = prod.get("description") or ""
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             pass
                         items.append(
                             {
@@ -351,7 +351,7 @@ class OrderDomainService:
                                 "priceAtPurchase": float(tp_item.get("unit_price") or 0),
                             }
                         )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService] Failed to fetch relational order items: {err}")
 
         computed_total = sum((item["priceAtPurchase"] or 0) * (item["quantity"] or 1) for item in items)
@@ -435,7 +435,7 @@ class OrderDomainService:
                         "UPDATE \"third_party_orders\" SET order_status = 'REFUNDED' WHERE \"ext_order_sn\" = :oid"
                     ).bindparams(oid=effective_order_id)
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             await session.commit()
 
@@ -479,7 +479,7 @@ class OrderDomainService:
                             "actionVerifier": "supervisor_approval_gate",
                             "verifiableHash": ver_hash,
                         }
-            except Exception as audit_err:  # noqa: BLE001
+            except Exception as audit_err:
                 print(f"[Refund Tool Audit] Failed to generate physical audit trail: {audit_err}")
 
         if audit_trail is None:
@@ -570,7 +570,7 @@ class OrderDomainService:
                     "totalAmount": total_amount,
                 },
             }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService.createOrder] Failed: {err}")
             return {"error": "Failed to create order in database."}
 
@@ -619,7 +619,7 @@ class OrderDomainService:
                     )
                     if rows:
                         return {"orders": [dict(row) for row in rows]}
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 print(f"[OrderDomainService.listUserOrders] Failed: {err}")
                 return {"error": "Failed to retrieve orders from database."}
         return {"orders": [], "message": "No orders found for this customer."}
@@ -675,7 +675,7 @@ class OrderDomainService:
                             'UPDATE "third_party_orders" SET shipping_address = :addr WHERE "ext_order_sn" = :oid'
                         ).bindparams(addr=new_address, oid=effective_order_id)
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
                 await session.commit()
 
@@ -715,7 +715,7 @@ class OrderDomainService:
                                 "actionVerifier": "supervisor_approval_gate",
                                 "verifiableHash": ver_hash,
                             }
-                except Exception as audit_err:  # noqa: BLE001
+                except Exception as audit_err:
                     print(f"[Address Tool Audit] Failed to generate physical audit trail: {audit_err}")
 
             if audit_trail is None:
@@ -736,7 +736,7 @@ class OrderDomainService:
                 "message": f"✅ Shipping address for order {order_id} has been successfully updated to: {new_address}.",
                 "auditTrail": audit_trail,
             }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService.changeShippingAddress] Failure: {err}")
             return {"error": "Failed to process address change."}
 
@@ -785,7 +785,7 @@ class OrderDomainService:
                         f"with financial tax administrations. Download PDF: /invoices/{invoice_id}.pdf"
                     ),
                 }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService.generateInvoice] Failure: {err}")
             return {"error": "Failed to generate tax invoice."}
 
@@ -807,7 +807,7 @@ class OrderDomainService:
                 embedding = await get_embedding_model().aembed_query(fact_text)
                 if embedding:
                     serialized_embedding = json.dumps(embedding)
-            except Exception as emb_err:  # noqa: BLE001
+            except Exception as emb_err:
                 print(f"[OrderDomainService.recordUserPreference] Embedding generation fallback: {emb_err}")
 
             from ..db import LongMemoryFact
@@ -833,7 +833,7 @@ class OrderDomainService:
                     "系统已同步更新 RAG 画像专家混合记忆矩阵，后续为您推荐商品及尺码换算时将自动参考！"
                 ),
             }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService.recordUserPreference] Storage failed: {err}")
             return {"error": f"Failed to register consumer preference: {err}"}
 
@@ -942,7 +942,7 @@ class OrderDomainService:
                     f"排序口径：【{target_metric['label']}】，共返回 {len(ranked_products)} 款商品。"
                 ),
             }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService.queryProductRanking] Query failed: {err}")
             return {"error": f"Failed to query product ranking: {err}"}
 
@@ -967,7 +967,7 @@ class OrderDomainService:
                 )
                 await session.commit()
                 return {"id": new_id, "email": email}
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     _ADDR_COLUMNS = (
@@ -986,7 +986,7 @@ class OrderDomainService:
                 ctx = await OrderDomainService.get_thread_session_context(options["threadId"])
                 target_user_id = target_user_id or ctx["userId"]
                 target_business_id = target_business_id or ctx["businessId"]
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"[OrderDomainService] Failed to resolve thread context: {e}")
 
         if not target_user_id and options.get("userEmail"):
@@ -1032,7 +1032,7 @@ class OrderDomainService:
                     {**dict(row), "id": str(row["id"]), "createdAt": str(row.get("createdAt") or "")}
                     for row in rows
                 ]
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService.getUserAddresses] Query failed: {err}")
             return []
 
@@ -1046,7 +1046,7 @@ class OrderDomainService:
                 ctx = await OrderDomainService.get_thread_session_context(options["threadId"])
                 target_user_id = target_user_id or ctx["userId"]
                 target_business_id = target_business_id or ctx["businessId"]
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"[OrderDomainService] Failed to resolve thread context: {e}")
 
         if not target_user_id and options.get("userEmail"):
@@ -1161,6 +1161,6 @@ class OrderDomainService:
                         }
                     )
                 return result
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[OrderDomainService.getUserOrdersDetailed] Query failed: {err}")
             return []

@@ -7,8 +7,9 @@ clarificationMessage):该对象会进入事件载荷与 planner 输入,属于内
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 
 class AgentIntentType:

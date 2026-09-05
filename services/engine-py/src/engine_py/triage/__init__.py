@@ -5,8 +5,8 @@ from .semantic_cache import SemanticVectorCache, add_query_to_semantic_cache, co
 
 __all__ = [
     "IntentTriageEngine",
-    "resolve_domain_role",
     "SemanticVectorCache",
     "add_query_to_semantic_cache",
     "cosine_similarity",
+    "resolve_domain_role",
 ]

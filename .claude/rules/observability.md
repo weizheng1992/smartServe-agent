@@ -18,7 +18,8 @@ paths: ["services/engine-py/src/engine_py/run_agent.py", "services/engine-py/src
 
 - **端到端 Trace 上报**：从 `triage` 意图识别、`planner` 步骤生成到子工具执行的链路遥测；当前实现为 LangSmith feedback 上报（`run_agent.py`）。
 - **Prompt 版本治理与 Metadata**：记录模型版本、Prompt 模板版本及输入输出 Token 计数（`llm/chat.py` 承载统一入口）。
-- **迁移缺口**：TS 侧 Langfuse 深度集成与 `callLLMWithRetry` 的熔断/退避/token 汇总为未完成 TODO，补齐前禁止删除现有 print 降级路径。
+- **逐调用遥测落盘（2026-09-05 起）**：`llm/telemetry.py` 的 `LlmCallTelemetryHandler` 把每次对话模型调用的真实 `usage_metadata` / 延迟 / 模型名 / 归因（`thread_id`、`business_id`、`langgraph_node`）写入 `llm_call_logs`；挂点为 `_TelemetryChatOpenAI` 覆写公共 `invoke/ainvoke` 统一注入 `config.callbacks`——构造期 callbacks 不随 `with_structured_output` 组合传播（实测漏采 triage）。`run_agent` 聚合前 `drain_llm_call_writes` 收口，`session_metrics.total_tokens` 取 `take_thread_token_total` 真值；`/api/logs` 的 `llm_call` 类型逐字段透传该表。已知边界：结构化输出在 SDK 侧解析抛错（GLM 围栏 JSON）的调用不触发 `on_llm_end`，此类消耗只经 fallback 的补救 `ainvoke` 落盘。
+- **迁移缺口**：TS 侧 Langfuse 深度集成与 `callLLMWithRetry` 的熔断/退避为未完成 TODO，补齐前禁止删除现有 print 降级路径。
 
 ### 1.3 SaaS 计费模型与自动驾驶遥测
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 
@@ -74,7 +74,7 @@ async def get_tenant_config(business_id: str = "ecommerce") -> dict:
                     enabled_skills = config_row["enabled_skills"]
                 if isinstance(config_row["skills_config"], dict):
                     skills_config = config_row["skills_config"]
-    except Exception as err:  # noqa: BLE001 — 容灾回退默认配置
+    except Exception as err:
         print(f"[TenantRegistryService] Failed to load tenant config for {clean_id} from DB: {err}")
 
     result = {
@@ -106,7 +106,7 @@ async def update_tenant_skill_config(business_id: str, skill_id: str, skill_conf
             "enabled": True if skill_config.get("enabled") is None else skill_config.get("enabled"),
             "approvalThresholdAmount": skill_config.get("approvalThresholdAmount"),
             "customPolicyPrompt": skill_config.get("customPolicyPrompt"),
-            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "updatedAt": datetime.now(UTC).isoformat(),
         },
     }
 
@@ -143,7 +143,7 @@ async def update_tenant_skill_config(business_id: str, skill_id: str, skill_conf
                     )
                 )
             await session.commit()
-    except Exception as err:  # noqa: BLE001 — 与 TS 基线一致,落盘失败仅告警不阻断
+    except Exception as err:
         print(f"[TenantRegistryService] Failed to persist tenant skill config for {clean_id}: {err}")
 
     invalidate_cache(clean_id)

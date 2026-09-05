@@ -81,7 +81,7 @@ def _parse_embedding(raw) -> list[float] | None:
     try:
         value = json.loads(raw) if isinstance(raw, str) else raw
         return value if isinstance(value, list) else None
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -151,7 +151,7 @@ class ContextualRAG:
                         )
                     )
                 await session.commit()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[RAG] Self-healing seed failed (possibly due to offline/mocked DB): {err}")
 
     async def search_relevant_docs(
@@ -168,7 +168,7 @@ class ContextualRAG:
         if not query_embedding:
             try:
                 query_embedding = await get_embedding_model().aembed_query(query)
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 print(f"[RAG] Failed to generate embedding for search query: {err}")
                 return []
 
@@ -183,7 +183,7 @@ class ContextualRAG:
                     .scalars()
                     .all()
                 )
-        except Exception as db_err:  # noqa: BLE001
+        except Exception as db_err:
             print(f"[RAG] PostgreSQL query failed, falling back to Local Fake RAG: {db_err}")
             return self._search_local_fake_docs(query)
 

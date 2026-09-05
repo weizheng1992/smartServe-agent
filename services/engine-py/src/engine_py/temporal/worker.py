@@ -47,7 +47,7 @@ async def main() -> None:
         )
         print(f"[Temporal Worker] started, listening on queue: {settings.temporal_task_queue!r}")
         await worker.run()
-    except Exception as err:  # noqa: BLE001 — 与 TS 行为一致:连接失败仅告警退出
+    except Exception as err:
         print(f"[Temporal Worker Warn] ⚠️ 无法建立 Temporal 连接 ({err})。请检查 Server 是否在线。")
 
     # Temporal 离线时不再直接退出:保持周期任务(对账/摘要)持续运行

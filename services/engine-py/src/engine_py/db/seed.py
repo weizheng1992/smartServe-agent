@@ -20,7 +20,7 @@ async def _embed(text_value: str) -> str | None:
     """向量化(走统一入口,随 AI_EMBEDDING_PROVIDER 切换);失败降级为 NULL 不阻断种子。"""
     try:
         return json.dumps(await get_embedding_model().aembed_query(text_value))
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         print(f"[PG Seed] 向量化降级(存 NULL,后续可回填): {err}")
         return None
 

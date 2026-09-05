@@ -9,11 +9,11 @@ from __future__ import annotations
 import asyncio
 import os
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine.url import URL, make_url
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from engine_py.db import Base
 
 config = context.config
@@ -48,7 +48,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def do_run_migrations(connection) -> None:  # noqa: ANN001 - sqlalchemy Connection
+def do_run_migrations(connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()

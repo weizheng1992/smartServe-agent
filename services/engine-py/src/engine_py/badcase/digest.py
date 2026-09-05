@@ -55,6 +55,6 @@ async def run_badcase_digest() -> dict:
             summary["purged"] = int(purged.rowcount or 0)
             await session.commit()
         print(f"[BadcaseDigest] 池分布={summary['distribution']} 过期转dismissed={summary['expired']} 清理={summary['purged']}")
-    except Exception as err:  # noqa: BLE001 — 摘要失败不影响调度框架
+    except Exception as err:
         print(f"[BadcaseDigest] 摘要/保留期执行异常: {err}")
     return summary

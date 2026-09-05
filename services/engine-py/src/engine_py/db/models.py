@@ -322,6 +322,9 @@ class LlmCallLog(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     thread_id: Mapped[str | None] = mapped_column(Text, ForeignKey("threads.id"))
+    # 租户归因:多租户遥测按 business_id 过滤(架构不变量 #1),写入方为
+    # llm/telemetry.py 的统一捕获 handler;历史行与图外调用可空。
+    business_id: Mapped[str | None] = mapped_column(Text)
     node: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str] = mapped_column(Text, nullable=False)
     tokens_in: Mapped[int | None] = mapped_column(Integer)
@@ -332,6 +335,7 @@ class LlmCallLog(Base):
 
 
 Index("llm_log_thread_idx", LlmCallLog.thread_id)
+Index("llm_log_biz_created_idx", LlmCallLog.business_id, LlmCallLog.created_at)
 
 
 class AgentJob(Base):

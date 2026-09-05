@@ -28,7 +28,7 @@ def _parse_embedding(raw) -> list[float] | None:
     try:
         value = json.loads(raw) if isinstance(raw, str) else raw
         return value if isinstance(value, list) else None
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -62,7 +62,7 @@ class EpisodicMemory:
                     )
                 )
                 await session.commit()
-        except Exception:  # noqa: BLE001
+        except Exception:
             print("[EpisodicMemory] Insertion bypassed due to offline/failed DB.")
 
     async def retrieve_events(
@@ -89,7 +89,7 @@ class EpisodicMemory:
                     .scalars()
                     .all()
                 )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[EpisodicMemory] cosine similarity search bypassed due to offline/failed DB: {err}")
             return []
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 import random
 import time
 
@@ -73,7 +72,7 @@ class MallDomainService:
                             for r in rows
                         ],
                     }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[MallDomainService.getUserAddresses] Database query error: {err}")
 
         # 默认高保真种子数据兜底
@@ -155,7 +154,7 @@ class MallDomainService:
                     "tag": params.get("tag") or "home",
                     "isDefault": bool(params.get("isDefault")),
                 }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[MallDomainService.saveUserAddress] Database insert fallback: {err}")
             return {
                 "success": True,
@@ -244,7 +243,7 @@ class MallDomainService:
                             for r in rows
                         ],
                     }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[MallDomainService.queryProductSkus] Error querying SKUs: {err}")
 
         mock_skus = [
@@ -356,7 +355,7 @@ class MallDomainService:
                             for t in tracks
                         ],
                     }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[MallDomainService.queryPackageTracking] Database tracking error: {err}")
 
         return {
@@ -460,7 +459,7 @@ class MallDomainService:
                             for r in rows
                         ],
                     }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[MallDomainService.queryProductReviews] Database error: {err}")
 
         return {
@@ -541,7 +540,7 @@ class MallDomainService:
                     ).bindparams(tid=ticket_id, note=f"用户申请【{params['type']}】，原因: {params['reason']}")
                 )
                 await session.commit()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[MallDomainService.applyAfterSale] Database insert failed, returning fallback ticket: {err}")
 
         await tool_cache.delete(f"cache:order_status:{params['orderId']}")
@@ -655,7 +654,7 @@ class MallDomainService:
                             for r in rows
                         ],
                     }
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[MallDomainService.searchProducts] Database query fallback: {err}")
 
         def _matches(p: dict) -> bool:

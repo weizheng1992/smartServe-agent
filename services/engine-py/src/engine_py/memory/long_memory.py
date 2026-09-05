@@ -32,7 +32,7 @@ def _parse_embedding(raw) -> list[float] | None:
     try:
         value = json.loads(raw) if isinstance(raw, str) else raw
         return value if isinstance(value, list) else None
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -111,7 +111,7 @@ class LongMemory:
                             )
                         )
                         await session.commit()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     print("[LongMemory] Insertion bypassed due to offline/failed DB.")
 
     async def _run_profile_audit(
@@ -142,7 +142,7 @@ class LongMemory:
                     ).bindparams(uid=self.user_id)
                 result = await session.execute(sql)
                 past_orders = [dict(row) for row in result.mappings()]
-        except Exception as sql_err:  # noqa: BLE001
+        except Exception as sql_err:
             print(f"[Profiler Agent] Failed to fetch SQL transaction stream for audit: {sql_err}")
 
         system_prompt = """
@@ -233,9 +233,9 @@ class LongMemory:
                             )
                         )
                         await session.commit()
-                except Exception as rag_err:  # noqa: BLE001
+                except Exception as rag_err:
                     print(f"[Profiler Agent] Failed to vectorise and store extracted fact: {rag_err}")
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[Profiler Agent Error] 画像 Agent 提取偏好发生异常: {err}")
 
     async def search_relevant_facts(self, query: str, precomputed_embedding: list[float] | None = None) -> list[dict]:
@@ -262,7 +262,7 @@ class LongMemory:
                     .scalars()
                     .all()
                 )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[LongMemory] cosine similarity search bypassed due to offline/failed DB: {err}")
             return []
 

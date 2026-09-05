@@ -1,9 +1,9 @@
 """DB 层(SQLAlchemy async + Alembic migrations)。"""
 
 from .models import (
-    AgentJob,
     AfterSaleLog,
     AfterSaleTicket,
+    AgentJob,
     ApprovalOutboxEvent,
     BadcaseCandidate,
     Base,
@@ -42,12 +42,12 @@ from .models import (
 from .session import get_session
 
 __all__ = [
-    "Base",
-    "AgentJob",
     "AfterSaleLog",
     "AfterSaleTicket",
+    "AgentJob",
     "ApprovalOutboxEvent",
     "BadcaseCandidate",
+    "Base",
     "BusinessConfigRow",
     "EpisodicEventRow",
     "EvalResult",

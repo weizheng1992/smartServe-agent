@@ -22,7 +22,7 @@ class TaskMemory:
                     )
                 ).scalar_one_or_none()
                 return row.pending_intents if row else None
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[TaskMemory] Failed to get task state from DB: {err}")
             return None
 
@@ -46,5 +46,5 @@ class TaskMemory:
                         )
                     )
                 await session.commit()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             print(f"[TaskMemory] Failed to save task state to DB: {err}")

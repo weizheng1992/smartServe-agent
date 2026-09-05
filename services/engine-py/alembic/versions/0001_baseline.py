@@ -20,7 +20,6 @@ depends_on = None
 
 def upgrade() -> None:
     from alembic import op
-
     from engine_py.db import Base
 
     Base.metadata.create_all(bind=op.get_bind())
@@ -28,7 +27,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     from alembic import op
-
     from engine_py.db import Base
 
     Base.metadata.drop_all(bind=op.get_bind())

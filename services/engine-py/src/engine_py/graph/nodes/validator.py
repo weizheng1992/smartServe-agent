@@ -50,7 +50,7 @@ async def validator_node(state: AgentState) -> dict:
             response = await get_chat_model().ainvoke(prompt)
             content = response.content if hasattr(response, "content") else str(response)
             is_valid = content.strip().upper() != "NO"
-        except Exception as err:  # noqa: BLE001 — 校验失败默认放行
+        except Exception as err:
             print(f"validatorNode validation check failed, defaulting to YES: {err}")
 
     updated_subtasks = list(subtasks)
