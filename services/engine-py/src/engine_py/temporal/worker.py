@@ -24,7 +24,8 @@ async def main() -> None:
     scheduler_task = asyncio.create_task(start_scheduler())
 
     try:
-        from temporalio.client import Connection
+        # temporalio >=1.32:Connection 并入 Client(classmethod connect),Worker 首参即 Client
+        from temporalio.client import Client
         from temporalio.worker import Worker
 
         from .activities import run_agent_state_node
@@ -37,7 +38,7 @@ async def main() -> None:
     address = settings.temporal_address
     print(f"[Temporal Worker] 正在尝试物理连接至 Temporal Server: {address}")
     try:
-        connection = await Connection.connect(address)
+        connection = await Client.connect(address)
         worker = Worker(
             connection,
             task_queue=settings.temporal_task_queue,
