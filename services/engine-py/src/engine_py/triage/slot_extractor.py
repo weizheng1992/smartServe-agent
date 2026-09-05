@@ -69,6 +69,19 @@ def extract_order_id(text: str, context: dict | None = None) -> str | None:
     return None
 
 
+def extract_explicit_order_id(text: str, context: dict | None = None) -> str | None:
+    """资金类动作(退款/退货)专用:只认当前输入与用户已确认的 orderContext,
+    严禁历史回填 —— 历史最后提及的订单未必是本次想操作的订单
+    (2026-09-05 双退款事故:用户想退 9081,槽位回填旧回合的 9082 被静默重退)。"""
+    match = ORDER_ID_RE.search(text)
+    if match:
+        return match.group(0).upper()
+    order_context = (context or {}).get("orderContext") or {}
+    if order_context.get("targetOrderId"):
+        return str(order_context["targetOrderId"]).upper()
+    return None
+
+
 def extract_new_address(text: str) -> str | None:
     kw_match = ADDRESS_KEYWORDS_RE.search(text)
     if kw_match and kw_match.group(1):
@@ -199,7 +212,8 @@ INTENT_SCHEMAS: dict[str, IntentSchema] = {
     ),
     AgentIntentType.ORDER_RETURN: IntentSchema(
         slots=[
-            SlotDefinition(name="orderId", required_fn=lambda _t: True, extractor=lambda t, ctx: extract_order_id(t, ctx)),
+            # 资金动作只认当前输入/已确认上下文的订单号,防历史回填错单(2026-09-05 双退款事故)
+            SlotDefinition(name="orderId", required_fn=lambda _t: True, extractor=lambda t, ctx: extract_explicit_order_id(t, ctx)),
             SlotDefinition(name="returnReason", required_fn=lambda _t: False, extractor=lambda t, _ctx: extract_return_reason(t)),
         ],
         clarification_builder=lambda _slots, missing: (
@@ -293,6 +307,15 @@ class SlotExtractor:
                 confidence = primary_matched.confidence
 
         extracted = SlotExtractor.extract_entities(text, context)
+        # 资金类动作(order_return/refund)订单号禁历史回填:extract_entities 的通用
+        # 扫描会回填历史最后提及的订单,常是旧回合已退款的错单(2026-09-05 双退款
+        # 事故);此处强制只认当前输入/已确认 orderContext,缺失即触发追问澄清。
+        if intent_type in (AgentIntentType.ORDER_RETURN, AgentIntentType.REFUND):
+            strict_order_id = extract_explicit_order_id(text, context)
+            if strict_order_id:
+                extracted["orderId"] = strict_order_id
+            else:
+                extracted.pop("orderId", None)
         slots: dict[str, Any] = {**(existing_slots or {}), **extracted}
 
         schema = INTENT_SCHEMAS.get(intent_type)

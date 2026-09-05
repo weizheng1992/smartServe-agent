@@ -79,20 +79,18 @@ async def _thread_owner_context(session, thread_id: str) -> dict:
 
 class ApprovalGatekeeper:
     @staticmethod
-    async def check_double_refund(order_id: str) -> dict:
+    async def check_double_refund(order_id: str, user_id: str | None = None) -> dict:
+        """重复退款检测 —— 三源判定(engine orders / merchant 真单 / third_party)。
+
+        2026-09-05 双退款事故:旧实现只查 engine orders 表,AURORA 等商户真单
+        不在其中,已退款订单照常放行;现统一经 find_order_by_id 按真实归属查询。
+        """
         try:
-            async with get_session() as session:
-                row = (
-                    await session.execute(
-                        text('SELECT total_amount AS "totalAmount", status FROM orders WHERE order_id = :oid').bindparams(
-                            oid=order_id
-                        )
-                    )
-                ).mappings().first()
-                if row:
-                    if row["status"] == "refunded":
-                        return {"isDoubleRefund": True, "status": row["status"]}
-                    return {"isDoubleRefund": False, "status": row["status"]}
+            from ..tools_registry.order_domain import OrderDomainService
+
+            order = await OrderDomainService.find_order_by_id(order_id, user_id)
+            if order and str(order.get("status") or "").strip().lower() == "refunded":
+                return {"isDoubleRefund": True, "status": order.get("status")}
         except Exception as err:
             print(f"[ApprovalGatekeeper] Double refund check DB error: {err}")
         return {"isDoubleRefund": False}
@@ -240,12 +238,21 @@ class ApprovalGatekeeper:
                         if approval.action_type != opts.get("toolName"):
                             continue
                         if current_args.get("orderId") and payload_args.get("orderId"):
-                            if str(current_args["orderId"]).strip().lower() == str(payload_args["orderId"]).strip().lower():
-                                latest_approval = approval
-                                break
-                        elif json.dumps(payload_args, sort_keys=True, default=str) == json.dumps(
-                            current_args, sort_keys=True, default=str
-                        ):
+                            matched = (
+                                str(current_args["orderId"]).strip().lower()
+                                == str(payload_args["orderId"]).strip().lower()
+                            )
+                        else:
+                            matched = json.dumps(payload_args, sort_keys=True, default=str) == json.dumps(
+                                current_args, sort_keys=True, default=str
+                            )
+                        if not matched:
+                            continue
+                        # 线程扫描只认领 waiting 工单(幂等挂起,避免重复开票);
+                        # approved 等终态工单只能经 existingApprovalId(审批恢复路径)
+                        # 复用 —— 否则历史已批工单会被当作本次执行的授权,静默绕过
+                        # HITL 人工审核(2026-09-05 双退款事故旁路)。
+                        if approval.status == "waiting":
                             latest_approval = approval
                             break
 

@@ -289,6 +289,14 @@ async def planner_node(state: AgentState) -> dict:
         )
         extracted_order_id = entity_order_id or extract_order_id(input_text, None, short_memory)
 
+        # 资金动作(退款/退货)禁止经历史回填拿订单号直达 fast-path:历史最后提及
+        # 的订单常是旧回合已退款的订单(2026-09-05 双退款事故)。当前输入未指明
+        # 订单号时降级到 LLM 深度规划,由其规划向用户澄清退哪一单。
+        if any(i.get("intent") in ("refund", "order_return") for i in intents) and not (
+            entity_order_id or _EXPLICIT_ORDER_ID_RE.search(input_text)
+        ):
+            extracted_order_id = None
+
         if extracted_order_id:
             action_intents = [
                 i
@@ -403,7 +411,12 @@ async def planner_node(state: AgentState) -> dict:
         "unavailable or returns nothing.\n"
         '5. DO NOT plan a step to call "processRefund" when the customer is merely asking which orders are '
         'eligible for return! Only plan "processRefund" when the customer specifies a concrete order to be '
-        "refunded.\n\n"
+        "refunded.\n"
+        "6. EXCEPTION to rule 1 for refunds: the history-inheritance MUST NOT apply to refund/return "
+        "(processRefund) steps. Only plan a processRefund step when the customer's CURRENT request names a "
+        "specific order ID, or they explicitly confirm one in this turn. If the current request contains no "
+        "order ID, plan a step to ASK the customer which order to refund instead — the last-mentioned order "
+        "in history may be a stale one that was already refunded.\n\n"
         "Return a JSON object with:\n"
         '- "goal": overall goal description\n'
         '- "subtasks": array of objects with keys "id" (unique string), "description" (what to do, e.g., '

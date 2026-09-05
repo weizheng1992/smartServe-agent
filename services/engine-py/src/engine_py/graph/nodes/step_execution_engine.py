@@ -173,9 +173,9 @@ async def _execute_single_step_core(
         args = parsed_tool_call.get("args") or {}
         order_id = args.get("orderId")
 
-        # 4.1 重复退款防护拦截
+        # 4.1 重复退款防护拦截(三源判定,商户真单按用户归属匹配)
         if tool_name == "processRefund" and order_id:
-            double_check = await ApprovalPolicyEngine.check_double_refund(order_id)
+            double_check = await ApprovalPolicyEngine.check_double_refund(order_id, state.get("user_id"))
             if double_check.get("isDoubleRefund"):
                 failed_step = {
                     **step_to_run,

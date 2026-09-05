@@ -399,6 +399,15 @@ class OrderDomainService:
         if order.get("source") == "merchant" and not order.get("isReturnable", True):
             return {"error": f"⚠️ 退款拦截：订单 {order_id} 已被商户标记为不可退货。", "orderId": order_id}
 
+        # 幂等底线:任何来源(engine/merchant/third_party)的已退款订单禁止物理重退
+        # (2026-09-05 双退款事故:上游守卫曾只查 engine orders 表,商户真单全盲)
+        if str(order.get("status") or "").strip().lower() == "refunded":
+            return {
+                "error": f"⚠️ 退款拦截：订单 {order_id} 已处于【已退款】状态，禁止重复退款。",
+                "orderId": order_id,
+                "status": "already_refunded",
+            }
+
         # SOP Policy Guardrail 物理时效比对
         diff_days = 0
         estimated_delivery = order.get("estimatedDelivery")
