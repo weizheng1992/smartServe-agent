@@ -27,9 +27,9 @@ paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/gatewa
 - **AST 语法树只读审计**：通过 SQL Parser（sqlglot）将 LLM 生成的 SQL 解析为抽象语法树（AST）。
 - **硬性安全防护**：
   - 严禁包含 `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `GRANT` 等写语句。
-  - 强制注入多租户隔离条件：`AND business_id = :tenantId`。
   - 强制注入只读保护：`LIMIT 50`。
-  - 阻断系统表穿透（`information_schema`, `pg_catalog` 等）。
+  - 阻断系统表穿透（`information_schema`, `pg_catalog` 等，限定名 catalog/db/name 逐段比对）。
+- **租户边界注入：未实现（2026-09-05 盘点）**：沙箱当前**不注入** `AND business_id = :tenantId`（TS 基线亦无此行为，属文档先行于实现）。沙箱零调用方；NL2SQL 真正接入时必须先补齐——需按表内省 `business_id` 列后改写 WHERE,届时调用方以参数化绑定传租户值，严禁字符串拼接。在此之前任何调用方必须自行携带租户过滤条件。
 
 ### 1.4 指标语义注册表 (`tools_registry/metric_registry.py`)
 
