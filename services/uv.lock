@@ -523,7 +523,9 @@ worker = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "testcontainers" },
 ]
 
 [package.metadata]
@@ -545,7 +547,9 @@ provides-extras = ["worker"]
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "testcontainers", extras = ["postgres"], specifier = ">=4" },
 ]
 
 [[package]]

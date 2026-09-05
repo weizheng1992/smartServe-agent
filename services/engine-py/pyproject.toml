@@ -21,7 +21,8 @@ dependencies = [
 worker = ["temporalio>=1.4"]
 
 [dependency-groups]
-dev = ["ruff>=0.6", "pytest>=8.0"]
+# outbox 对账等 DB 语义测试经 testcontainers 起 PG(镜像 gateway-py 密封测试模式;Docker 不可用时自动 skip)
+dev = ["ruff>=0.6", "pytest>=8.0", "pytest-asyncio>=1.0", "testcontainers[postgres]>=4"]
 
 [build-system]
 requires = ["hatchling"]
@@ -33,3 +34,19 @@ packages = ["src/engine_py"]
 [tool.ruff]
 line-length = 110
 target-version = "py312"
+
+[tool.ruff.lint]
+# 2026-09-05 存量豁免(CI 门禁立起前的显式还债清单,新代码同样适用,修复后逐条移除):
+# - DTZ005/DTZ011:datetime.now()/date.today() 补 tz 属时间语义变更,影响落库时间戳,须逐处评审
+# - RUF012:skills/registry 可变类默认在运行时被实例级覆写,加 ClassVar 反而破坏契约
+# - S110/BLE001:吞错点须补结构化日志后才能消除(观测性红线,禁止直接删 except)
+ignore = [
+  "DTZ005",
+  "DTZ011",
+  "RUF012",
+  "S110",
+  "BLE001",
+  "ASYNC230",
+  "SIM102",
+  "SIM103",
+]
