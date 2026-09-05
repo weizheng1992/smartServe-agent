@@ -198,6 +198,7 @@ export const tenantsApi = {
     id: string;
     name: string;
     apiKey?: string;
+    industry?: string;
     config?: Record<string, any>;
   }) => {
     return adminApi.post('/api/tenant', body);
@@ -215,6 +216,7 @@ export const tenantsApi = {
       webhookUrl?: string;
       apiKey?: string;
       refundLimit?: number;
+      industry?: string;
     },
   ) => {
     return adminApi.put(`/api/tenant/${id}`, body);

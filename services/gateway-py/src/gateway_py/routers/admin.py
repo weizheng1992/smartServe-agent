@@ -52,7 +52,7 @@ async def tenant_list():
                 (
                     await session.execute(
                         text(
-                            "SELECT t.business_id, t.name, t.status, t.created_at, tc.spi_config, tc.skills_config "
+                            "SELECT t.business_id, t.name, t.status, t.industry, t.created_at, tc.spi_config, tc.skills_config "
                             "FROM tenants t LEFT JOIN tenant_configs tc ON LOWER(t.business_id) = LOWER(tc.business_id) "
                             "ORDER BY t.created_at DESC"
                         )
@@ -76,7 +76,7 @@ async def tenant_list():
                     {
                         "id": row["business_id"],
                         "name": row["name"],
-                        "industry": "综合零售",
+                        "industry": row["industry"] or "综合零售",
                         "channel": "Web + Mobile + SPI",
                         "apiKey": spi.get("apiSecret") or f"key_{row['business_id']}_sec",
                         "refundLimit": refund_limit or 300,
@@ -100,6 +100,9 @@ class TenantCreateIn(BaseModel):
     webhookUrl: str | None = None
     apiKey: str | None = None
     refundLimit: int | None = None
+    industry: str | None = None
+    # 前端 create 以嵌套 config 携带行业/阈值/回调,与平铺字段取并集(平铺优先)
+    config: dict | None = None
 
 
 class TenantUpdateIn(BaseModel):
@@ -108,6 +111,7 @@ class TenantUpdateIn(BaseModel):
     webhookUrl: str | None = None
     apiKey: str | None = None
     refundLimit: int | None = None
+    industry: str | None = None
 
 
 @router.post("/api/tenant")
@@ -116,21 +120,27 @@ async def create_tenant(body: TenantCreateIn):
     if not clean_id or not body.name:
         raise HTTPException(400, "Tenant ID and Name are required")
 
+    cfg = body.config or {}
+    industry = body.industry or cfg.get("industry")
+    webhook_url = body.webhookUrl or cfg.get("webhookUrl")
+    refund_limit = body.refundLimit if body.refundLimit is not None else cfg.get("refundLimit")
+
     spi_config = {
         "mode": "remote_spi",
-        "spiBaseUrl": body.webhookUrl or "http://localhost:3005",
+        "spiBaseUrl": webhook_url or "http://localhost:3005",
         "apiSecret": body.apiKey or f"key_{clean_id}_sec",
         "timeoutMs": 5000,
     }
-    skills_config = {"skill_order_refund": {"enabled": True, "approvalThresholdAmount": body.refundLimit or 300}}
+    skills_config = {"skill_order_refund": {"enabled": True, "approvalThresholdAmount": refund_limit or 300}}
 
     async with get_session() as session:
         await session.execute(
             text(
-                "INSERT INTO tenants (business_id, name, plan_tier, status) "
-                "VALUES (:bid, :name, 'enterprise', :status) "
-                "ON CONFLICT (business_id) DO UPDATE SET name = EXCLUDED.name, status = EXCLUDED.status"
-            ).bindparams(bid=clean_id, name=body.name, status=body.status or "active")
+                "INSERT INTO tenants (business_id, name, plan_tier, status, industry) "
+                "VALUES (:bid, :name, 'enterprise', :status, :industry) "
+                "ON CONFLICT (business_id) DO UPDATE SET name = EXCLUDED.name, status = EXCLUDED.status, "
+                "industry = COALESCE(EXCLUDED.industry, tenants.industry)"
+            ).bindparams(bid=clean_id, name=body.name, status=body.status or "active", industry=industry)
         )
         existing = (
             await session.execute(
@@ -181,9 +191,10 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
             raise HTTPException(404, f"Tenant '{business_id}' not found")
 
         await session.execute(
-            text("UPDATE tenants SET name = :name, status = :status WHERE LOWER(business_id) = :bid").bindparams(
-                name=body.name, status=body.status or "active", bid=clean_id
-            )
+            text(
+                "UPDATE tenants SET name = :name, status = :status, industry = COALESCE(:industry, industry) "
+                "WHERE LOWER(business_id) = :bid"
+            ).bindparams(name=body.name, status=body.status or "active", industry=body.industry, bid=clean_id)
         )
 
         # 合并式覆写 tenant_configs:仅更新请求显式携带的字段,避免整份覆写丢失既有配置

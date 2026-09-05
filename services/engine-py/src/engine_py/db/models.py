@@ -354,6 +354,7 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     plan_tier: Mapped[str] = mapped_column(Text, server_default=text("'free'"), nullable=False)
     status: Mapped[str] = mapped_column(Text, server_default=text("'active'"), nullable=False)
+    industry: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 

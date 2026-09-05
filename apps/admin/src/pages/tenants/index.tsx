@@ -42,6 +42,7 @@ export function TenantsPage() {
         id: item.id || '',
         name: item.name || '',
         apiKey: item.apiKey,
+        industry: item.industry,
         config: {
           industry: item.industry,
           channel: item.channel,
@@ -67,6 +68,7 @@ export function TenantsPage() {
       webhookUrl: item.webhookUrl,
       apiKey: item.apiKey,
       refundLimit: item.refundLimit,
+      industry: item.industry,
     });
     return item;
   }, []);
