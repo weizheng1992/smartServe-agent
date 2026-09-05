@@ -136,6 +136,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - **Contextual RAG 与多租户**:`docs/architecture/contextual-rag.md`
 - **多模态视觉与富卡片**:`docs/architecture/multimodal-and-rich-cards.md`
 - **多实例部署指南**:`docs/architecture/multi-instance-deployment.md`(单实例假设盘点、socket.io 跨实例广播与 scheduler 单例化方案、扩容前置清单)
+- **启动与部署指南**:`docs/deployment.md`(dev Temporal 启动流程与踩坑、线上部署步骤/就绪检查/环境变量矩阵、Temporal 执行路线启用步骤)
 
 
 当上下文占用超过 60% 时，主动提醒我执行 `/compact` 压缩。

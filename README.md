@@ -410,7 +410,7 @@ bun run docker:up
 bun run db:push
 bun run db:seed
 
-# 5. (可选) 启动 Temporal 集群与 Python Worker
+# 5. (可选) Temporal dev 集群;worker 建议 dev 常驻(承载审批发件箱对账等周期任务)
 bun run docker:temporal
 bun run worker
 
@@ -428,7 +428,7 @@ bun run dev:all
 | **独立商户商城与工作台 (`apps/merchant`)**   | [http://localhost:3005](http://localhost:3005) | 极光潮品商城、常驻悬浮客服、商户订单后台 (`/admin`)      |
 | **用户端轻量会话应用 (`apps/web`)**          | [http://localhost:3000](http://localhost:3000) | 纯净版客户端多模态聊天界面 (SSE 流式)                    |
 | **FastAPI 核心后端网关 (`services/gateway-py`)** | [http://localhost:4000](http://localhost:4000) | 统一 API 网关、39 条契约路由、socket.io 协同、商户 SPI   |
-| **Temporal Worker (`services/engine-py`)**   | —                                              | `agent-tasks-py` 任务队列, Temporal 离线时本地仿真回退   |
+| **Temporal Worker (`services/engine-py`)**   | —                                              | 周期任务调度(审批对账/坏例摘要)+ `agent-tasks-py` 队列注册;Temporal 不在请求关键路径(见 `docs/deployment.md` §0) |
 
 ### 6.2 独立应用启动命令
 

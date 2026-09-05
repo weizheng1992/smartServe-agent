@@ -4,6 +4,15 @@
 
 ---
 
+## [2.3.6] - 2026-09-05 (启动与部署指南:dev Temporal 流程与线上部署 runbook 成文)
+
+### 📝 Docs (文档同步)
+
+- **新增 `docs/deployment.md`**:dev 启动流程(基础设施/启动顺序/四种踩坑:dev:all 无 worker、engine 改动不热重载、uv workspace 精确 sync 互剥依赖、7239 端口映射)与线上部署 runbook(部署形态矩阵、Temporal 三路线[暂不部署/Cloud/自托管]、发布步骤、就绪验收、env 矩阵、排障入口)。
+- **澄清拓扑真相**:Python 网关从不向 Temporal 提交工作流(全仓无 `start_workflow` 调用方,请求路径为网关进程内 `run_agent` 直跑);worker 的现实角色是 scheduler 载体 + 休眠的 workflow 注册。README §6 服务表"Temporal 离线时本地仿真回退"的 TS 时代表述已修正,并补 §3 未来启用 Temporal 编排的演进步骤(submitter、幂等续跑、SSE 桥接、Schedule 迁移)。CLAUDE.md §5 挂载索引。
+
+---
+
 ## [2.3.5] - 2026-09-05 (多实例部署指南:单实例假设盘点与迁移方案成文)
 
 ### 📝 Docs (文档同步)
