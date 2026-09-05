@@ -1,0 +1,56 @@
+# 最小 CI(2026-09-05 立):前端 lint/单测/构建 + Python ruff/engine 单测/gateway 契约测试。
+# 刻意不进 CI 的部分:
+# - Playwright E2E:依赖全栈 dev 环境,保持人工/夜间触发
+# - promptfoo 评测:调真实 LLM 产生费用,走 bun run test:prompt:* 人工触发
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: 前端 (biome / 单测 / 构建)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      # biome 存量仍在还债(noArrayIndexKey warn 等),先可见不阻断;清零后去掉 continue-on-error
+      - name: Biome lint 与格式检查
+        run: bunx biome check .
+        continue-on-error: true
+      - name: 前端单测 (web + admin)
+        run: bun run test:unit
+      - name: 构建 (web / admin / merchant)
+        run: bun run build
+
+  python:
+    name: Python (ruff / engine 单测 / gateway 契约)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # 与本地开发 venv 保持同版本(services/.venv 为 3.14)
+      - run: uv python install 3.14
+        working-directory: services
+      - run: uv sync --all-extras
+        working-directory: services
+      - name: Ruff (engine-py)
+        run: uv run ruff check .
+        working-directory: services/engine-py
+      - name: Ruff (gateway-py)
+        run: uv run ruff check .
+        working-directory: services/gateway-py
+      - name: engine-py 单元测试
+        run: uv run pytest
+        working-directory: services/engine-py
+      # gateway 契约测试经 testcontainers 起 PG+Redis,runner 自带 Docker
+      - name: gateway-py 契约测试 (testcontainers)
+        run: uv run pytest
+        working-directory: services/gateway-py

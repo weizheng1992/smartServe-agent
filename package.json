@@ -2,10 +2,7 @@
   "name": "agent-platform",
   "version": "2.0.0",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "turbo run dev --filter=web --filter=merchant",
     "dev:server": "cd services/gateway-py && uv run --env-file ../../.env uvicorn gateway_py.main:app --port 4000 --reload",
@@ -29,6 +26,8 @@
     "biome:check": "biome check --write .",
     "test:e2e": "playwright test",
     "test:eval": "cd services/gateway-py && uv run pytest",
+    "test:engine": "cd services/engine-py && uv run pytest",
+    "test:unit": "turbo run test",
     "test:prompt": "promptfoo eval -c eval/promptfooconfig.yaml --no-write --no-cache",
     "test:prompt:planner": "promptfoo eval -c eval/promptfoo.planner.yaml --no-write --no-cache",
     "test:prompt:pin": "bun eval/pinBaselines.ts",
