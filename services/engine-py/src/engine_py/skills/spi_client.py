@@ -100,7 +100,10 @@ class LocalDbSpiAdapter:
         ]
 
     async def get_order_detail(self, params: dict) -> dict | None:
-        order = await OrderDomainService.find_order_by_id(params["orderId"], None, params["tenantId"])
+        # 必须携带用户身份:find_order_by_id 的商户真单回退按 user_id 严格归属匹配,
+        # 传 None 会跳过商户库而拿到 third_party 过期种子数据(2026-09-05 双退款
+        # 事故遗留:技能侧把已退款单显示为已付款)
+        order = await OrderDomainService.find_order_by_id(params["orderId"], params.get("userId"), params["tenantId"])
         if not order:
             return None
 
@@ -150,24 +153,28 @@ class LocalDbSpiAdapter:
         if req["actionType"] == "REQUEST_REFUND":
             refund_amount = req.get("refundAmount")
             refund_amount_str = f"{refund_amount:.2f}" if isinstance(refund_amount, (int, float)) else refund_amount
+            # threadId 必传:process_refund 经线程归属解析 user_id,传 None 会使
+            # 商户真单的归属校验/REFUNDED 幂等守卫/写穿透全部失效(2026-09-05 修复)
             res = await OrderDomainService.process_refund(
-                req["orderId"], req.get("reason") or "SOP 标准退款申请", None, refund_amount_str
+                req["orderId"], req.get("reason") or "SOP 标准退款申请", req.get("threadId"), refund_amount_str
             )
             message = res.get("error") or res.get("message") or "退款处理成功"
             return {
-                "success": bool(res.get("refundedAmount") or "成功" in str(message)),
+                # process_refund 返回键为 refundAmount(此前误读 refundedAmount,
+                # 导致物理退款成功却向技能上报失败)
+                "success": bool(res.get("refundAmount") or "成功" in str(message)),
                 "actionType": "REQUEST_REFUND",
                 "orderId": req["orderId"],
                 "actionId": req.get("idempotencyKey"),
                 "refundId": (res.get("auditTrail") or {}).get("approvalId") or f"REFUND_{int(_dt.datetime.now().timestamp() * 1000)}",
-                "refundedAmount": res.get("refundedAmount") or req.get("refundAmount"),
+                "refundedAmount": res.get("refundAmount") or req.get("refundAmount"),
                 "message": message,
             }
 
         if req["actionType"] == "MODIFY_ADDRESS":
             new_address = req.get("newAddress")
             new_address_str = new_address if isinstance(new_address, str) else (new_address or {}).get("fullAddress", "")
-            res = await OrderDomainService.change_shipping_address(req["orderId"], new_address_str, None, True)
+            res = await OrderDomainService.change_shipping_address(req["orderId"], new_address_str, req.get("threadId"), True)
             return {
                 "success": not res.get("error"),
                 "actionType": "MODIFY_ADDRESS",

@@ -45,7 +45,14 @@ class OrderRefundSkill(BaseSkill):
             }
 
         spi_client = await self.get_spi_client(context.get("tenantId", "ecommerce"))
-        order = await spi_client.get_order_detail({"orderId": order_id, "tenantId": context.get("tenantId", "ecommerce")})
+        order = await spi_client.get_order_detail(
+            {
+                "orderId": order_id,
+                "userId": context.get("userId"),
+                "threadId": context.get("threadId"),
+                "tenantId": context.get("tenantId", "ecommerce"),
+            }
+        )
         if not order:
             return {
                 "success": False,
@@ -96,12 +103,13 @@ class OrderRefundSkill(BaseSkill):
                 },
             }
 
-        # Step 3: 执行退款动作
+        # Step 3: 执行退款动作(threadId 透传:process_refund 靠它解析归属用户)
         action_result = await spi_client.execute_order_action(
             {
                 "actionType": "REQUEST_REFUND",
                 "orderId": order_id,
                 "userId": context.get("userId"),
+                "threadId": context.get("threadId"),
                 "refundAmount": requested_amount,
                 "reason": reason,
                 "idempotencyKey": str(uuid.uuid4()),
@@ -182,7 +190,14 @@ class OrderAddressModificationSkill(BaseSkill):
             }
 
         spi_client = await self.get_spi_client(context.get("tenantId", "ecommerce"))
-        order = await spi_client.get_order_detail({"orderId": order_id, "tenantId": context.get("tenantId", "ecommerce")})
+        order = await spi_client.get_order_detail(
+            {
+                "orderId": order_id,
+                "userId": context.get("userId"),
+                "threadId": context.get("threadId"),
+                "tenantId": context.get("tenantId", "ecommerce"),
+            }
+        )
         if not order:
             return {
                 "success": False,
@@ -206,6 +221,7 @@ class OrderAddressModificationSkill(BaseSkill):
                 "actionType": "MODIFY_ADDRESS",
                 "orderId": order_id,
                 "userId": context.get("userId"),
+                "threadId": context.get("threadId"),
                 "newAddress": new_address,
                 "idempotencyKey": str(uuid.uuid4()),
                 "tenantId": context.get("tenantId", "ecommerce"),
