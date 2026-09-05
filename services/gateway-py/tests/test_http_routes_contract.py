@@ -120,6 +120,60 @@ class TestMerchantTenantGate:
         assert res.json()["success"] is True
 
 
+class TestStoreOrdersStrictScoping:
+    """商户订单列表严格归属(2026-09-05):/api/store/orders 不得再 OR CUST-8801
+    混入演示用户订单。背景 bug:任何 customerId 查询都会带出张伟(CUST-8801)
+    的订单,与聊天侧视图永久不一致且跨用户泄漏。"""
+
+    async def test_store_orders_scoped_to_requested_customer(self, client, contract_fixtures):
+        import json as _json
+
+        from sqlalchemy import text
+
+        from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
+
+        await ensure_merchant_tables()
+        async with merchant_engine().begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, "
+                    "shipping_address) VALUES (:oid, :cid, 'PAID', 100, CAST(:addr AS jsonb)) "
+                    "ON CONFLICT (order_id) DO NOTHING"
+                ).bindparams(
+                    oid="CT-ORD-SCOPE-A",
+                    cid="CUST-CT-SCOPE-A",
+                    addr=_json.dumps({"fullAddress": "契约测试地址"}),
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, "
+                    "shipping_address) VALUES (:oid, :cid, 'PAID', 200, CAST(:addr AS jsonb)) "
+                    "ON CONFLICT (order_id) DO NOTHING"
+                ).bindparams(
+                    oid="CT-ORD-SCOPE-8801",
+                    cid="CUST-8801",
+                    addr=_json.dumps({"fullAddress": "契约测试地址"}),
+                )
+            )
+
+        res = await client.get("/api/store/orders", params={"customerId": "CUST-CT-SCOPE-A"})
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        order_ids = [o["orderId"] for o in body["orders"]]
+        assert order_ids == ["CT-ORD-SCOPE-A"], (
+            f"严格归属被破坏:查询 CUST-CT-SCOPE-A 却返回 {order_ids}(不应混入 CUST-8801 演示单)"
+        )
+
+    async def test_store_orders_default_user_returns_own_orders(self, client, contract_fixtures):
+        res = await client.get("/api/store/orders")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert all(o["userId"] == "CUST-8801" for o in body["orders"])
+
+
 class TestSkills:
     async def test_registry(self, client, contract_fixtures):
         res = await client.get("/api/skills/registry")

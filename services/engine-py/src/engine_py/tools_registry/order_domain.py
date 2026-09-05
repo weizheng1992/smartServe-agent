@@ -11,13 +11,17 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import os
 import random
 import re
 import time
 import uuid
+from functools import lru_cache
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
+from ..config import settings
 from ..db import get_session
 from ..llm import get_embedding_model
 from ..tenant_config import get_tenant_config
@@ -28,6 +32,139 @@ _AMOUNT_STRIP_RE = re.compile(r"[^0-9.]")
 
 def _sf_tracking() -> str:
     return f"SF{random.randint(1_000_000_000, 9_999_999_999)}"
+
+
+# ---------------------------------------------------------------------------
+# 商户门户独立库(agent_merchant)只读直连 —— 商户真单的事实源。
+# 商城下单只写 merchant_orders;聊天查单若仅看 engine 本地 orders 表,
+# 将与商户门户"我的订单"列表视图永久不一致(2026-09-05 修复)。
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _merchant_reader_engine():
+    url = os.environ.get("MERCHANT_DATABASE_URL")
+    if not url:
+        base = settings.database_url or "postgres://agent_user:agent_password@localhost:5432/agent_platform"
+        url = re.sub(r"/[^/]+$", "/agent_merchant", base)
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return create_async_engine(url, pool_size=5, max_overflow=0, pool_pre_ping=True)
+
+
+def _merchant_row_to_order(row) -> dict:
+    tracking = row.get("tracking_info") if isinstance(row.get("tracking_info"), dict) else {}
+    shipping = row.get("shipping_address") if isinstance(row.get("shipping_address"), dict) else {}
+    return {
+        "orderId": row["order_id"],
+        "status": row["status"],
+        "carrier": tracking.get("carrier") or tracking.get("company") or "顺丰速运 (SF Express)",
+        "trackingNumber": (
+            tracking.get("trackingNumber") or tracking.get("trackingNo") or tracking.get("no") or "暂无运单号"
+        ),
+        "estimatedDelivery": None,
+        "userId": row["customer_id"],
+        "businessId": "aurora",
+        "totalAmount": float(row.get("total_amount") or 0),
+        "currency": row.get("currency") or "CNY",
+        "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
+        "shippingAddress": shipping,
+        "isReturnable": bool(row.get("is_returnable", True)),
+        "isAddressModifiable": bool(row.get("is_address_modifiable", True)),
+        "source": "merchant",
+    }
+
+
+async def _list_merchant_orders(user_id: str) -> list[dict] | None:
+    """商户库查单;库不可达返回 None 供调用方降级 engine 本地表。"""
+    if not user_id:
+        return []
+    try:
+        async with _merchant_reader_engine().connect() as conn:
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT * FROM merchant_orders WHERE customer_id = :uid "
+                            "ORDER BY created_at DESC LIMIT 50"
+                        ).bindparams(uid=user_id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            return [_merchant_row_to_order(r) for r in rows]
+    except Exception as err:  # noqa: BLE001 - 商户库离线不得阻断状态机
+        print(f"[OrderDomainService] merchant reader unavailable: {err}")
+        return None
+
+
+async def _find_merchant_order(order_id: str, user_id: str) -> dict | None:
+    if not user_id:
+        return None
+    try:
+        async with _merchant_reader_engine().connect() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text("SELECT * FROM merchant_orders WHERE order_id = :oid AND customer_id = :uid LIMIT 1")
+                        .bindparams(oid=order_id, uid=user_id)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return _merchant_row_to_order(row) if row else None
+    except Exception as err:  # noqa: BLE001
+        print(f"[OrderDomainService] merchant reader unavailable: {err}")
+        return None
+
+
+async def _fetch_merchant_order_items(order_id: str) -> list[dict]:
+    try:
+        async with _merchant_reader_engine().connect() as conn:
+            rows = (
+                (
+                    await conn.execute(
+                        text("SELECT * FROM merchant_order_items WHERE order_id = :oid").bindparams(oid=order_id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            return [
+                {
+                    "productId": r.get("spu_id") or r.get("sku_code"),
+                    "name": r.get("title") or "商户商品",
+                    "description": r.get("spec_summary") or "",
+                    "quantity": int(r.get("quantity") or 1),
+                    "priceAtPurchase": float(r.get("price") or 0),
+                }
+                for r in rows
+            ]
+    except Exception as err:  # noqa: BLE001
+        print(f"[OrderDomainService] merchant items unavailable: {err}")
+        return []
+
+
+async def _update_merchant_order(order_id: str, *, status: str | None = None, shipping_address: dict | None = None) -> None:
+    """聊天侧对商户真单的写穿透(退款状态 / 收货地址),与商户门户视图保持一致。"""
+    try:
+        async with _merchant_reader_engine().begin() as conn:
+            if status is not None:
+                await conn.execute(
+                    text("UPDATE merchant_orders SET status = :st, updated_at = NOW() WHERE order_id = :oid")
+                    .bindparams(st=status, oid=order_id)
+                )
+            if shipping_address is not None:
+                await conn.execute(
+                    text("UPDATE merchant_orders SET shipping_address = CAST(:addr AS JSONB), updated_at = NOW() WHERE order_id = :oid")
+                    .bindparams(addr=json.dumps(shipping_address, ensure_ascii=False), oid=order_id)
+                )
+    except Exception as err:  # noqa: BLE001
+        print(f"[OrderDomainService] merchant write-through failed: {err}")
 
 
 class OrderDomainService:
@@ -81,7 +218,7 @@ class OrderDomainService:
                 conditions = ["(order_id = :order_id OR order_id ILIKE :order_id)"]
                 params: dict = {"order_id": order_id}
                 if user_id:
-                    conditions.append("(user_id = :uid OR user_id = 'CUST-8801')")
+                    conditions.append("user_id = :uid")
                     params["uid"] = user_id
                 if business_id and business_id != "ecommerce":
                     conditions.append("business_id = :bid")
@@ -99,11 +236,18 @@ class OrderDomainService:
                 if row:
                     return dict(row)
 
-                # 三方商户订单表回退
+            # 商户门户真单回退(agent_merchant.merchant_orders,严格归属匹配)
+            if user_id:
+                merchant_order = await _find_merchant_order(order_id, user_id)
+                if merchant_order:
+                    return merchant_order
+
+            # 三方商户订单表回退
+            async with get_session() as session:
                 tp_conditions = ["(ext_order_sn = :order_id OR ext_order_sn ILIKE :order_id)"]
                 tp_params: dict = {"order_id": order_id}
                 if user_id:
-                    tp_conditions.append("(customer_id = :uid OR customer_id = 'CUST-8801')")
+                    tp_conditions.append("customer_id = :uid")
                     tp_params["uid"] = user_id
                 if business_id and business_id != "ecommerce":
                     tp_conditions.append("merchant_id = :bid")
@@ -152,6 +296,8 @@ class OrderDomainService:
             return {"error": f"⚠️ 越权阻止或未找到订单：订单 {order_id} 不属于您名下，或不存在于系统中。"}
 
         items: list[dict] = []
+        if order.get("source") == "merchant":
+            items = await _fetch_merchant_order_items(order.get("orderId") or order_id)
         try:
             async with get_session() as session:
                 item_rows = (
@@ -209,14 +355,15 @@ class OrderDomainService:
             print(f"[OrderDomainService] Failed to fetch relational order items: {err}")
 
         computed_total = sum((item["priceAtPurchase"] or 0) * (item["quantity"] or 1) for item in items)
-        total_amount_formatted = "$0.00"
+        currency_prefix = "¥" if (order.get("currency") or "USD") == "CNY" else "$"
+        total_amount_formatted = f"{currency_prefix}0.00"
         if computed_total > 0:
-            total_amount_formatted = f"${computed_total:.2f}"
+            total_amount_formatted = f"{currency_prefix}{computed_total:.2f}"
         elif order.get("totalAmount"):
             raw_val = str(order["totalAmount"])
             try:
                 num_val = float(_AMOUNT_STRIP_RE.sub("", raw_val))
-                total_amount_formatted = f"${num_val:.2f}"
+                total_amount_formatted = f"{currency_prefix}{num_val:.2f}"
             except ValueError:
                 pass
 
@@ -247,6 +394,10 @@ class OrderDomainService:
         order = await OrderDomainService.find_order_by_id(order_id, session_user_id, business_id)
         if not order:
             return {"error": f"⚠️ 越权阻止或未找到订单：退款订单 {order_id} 不属于您名下，或不存在于系统中。"}
+
+        # 商户真单:以门户侧可退货标记为准
+        if order.get("source") == "merchant" and not order.get("isReturnable", True):
+            return {"error": f"⚠️ 退款拦截：订单 {order_id} 已被商户标记为不可退货。", "orderId": order_id}
 
         # SOP Policy Guardrail 物理时效比对
         diff_days = 0
@@ -287,6 +438,9 @@ class OrderDomainService:
             except Exception:  # noqa: BLE001
                 pass
             await session.commit()
+
+        if order.get("source") == "merchant":
+            await _update_merchant_order(effective_order_id, status="REFUNDED")
 
         await tool_cache.delete(f"cache:order_status:{order_id}")
 
@@ -422,7 +576,11 @@ class OrderDomainService:
 
     @staticmethod
     async def list_user_orders(thread_id: str | None = None, user_id: str | None = None, business_id: str | None = None) -> dict:
-        """历史订单列表(空结果时自动自愈注入演示订单,保障多租户体验)。"""
+        """历史订单列表:商户门户真单优先(agent_merchant.merchant_orders),engine 本地表兜底。
+
+        2026-09-05 起:与商户门户"我的订单"列表页同源,严格按当前用户归属匹配;
+        不再回退 CUST-8801 演示单,也不再空结果自愈注入虚构订单。
+        """
         target_user_id = user_id
         target_business_id = business_id
         if (not target_user_id or not target_business_id) and thread_id:
@@ -430,60 +588,27 @@ class OrderDomainService:
             target_user_id = target_user_id or ctx["userId"]
             target_business_id = target_business_id or ctx["businessId"]
 
-        target_user_id = target_user_id or "CUST-8801"
         target_business_id = (target_business_id or "ecommerce").lower()
 
         # TODO(Phase 1b): 租户配置 spiConnector.remote 时经 SPI 连接器远程查单(connectors/ 批次)
 
-        orders_sql = (
-            'SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", '
-            '"estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount", '
-            '"business_id" AS "businessId" FROM orders '
-            "WHERE (\"user_id\" = :uid OR \"user_id\" = 'CUST-8801') AND \"business_id\" = :bid "
-            'ORDER BY "estimated_delivery" DESC'
-        )
-        try:
-            async with get_session() as session:
-                rows = (
-                    (
-                        await session.execute(
-                            text(orders_sql).bindparams(uid=target_user_id, bid=target_business_id)
-                        )
-                    )
-                    .mappings()
-                    .all()
-                )
-                if not rows:
-                    # 自动自愈注入演示订单
-                    prefix = {"nike": "NIKE", "adidas": "ADIDAS", "aurora": "AURORA"}.get(
-                        target_business_id, "ECO"
-                    )
-                    ts_suffix = str(int(time.time() * 1000))[-4:]
-                    await OrderDomainService.create_order(
-                        {
-                            "orderId": f"ORD-{prefix}-{ts_suffix}1",
-                            "userId": target_user_id,
-                            "businessId": target_business_id,
-                            "carrier": "SF Express (顺丰速运)",
-                            "trackingNumber": _sf_tracking(),
-                            "estimatedDelivery": (_dt.date.today() + _dt.timedelta(days=2)).isoformat(),
-                            "totalAmount": 199.0,
-                            "threadId": thread_id,
-                        }
-                    )
-                    await OrderDomainService.create_order(
-                        {
-                            "orderId": f"ORD-{prefix}-{ts_suffix}2",
-                            "userId": target_user_id,
-                            "businessId": target_business_id,
-                            "carrier": "JD Logistics (京东物流)",
-                            "trackingNumber": f"JD{random.randint(1_000_000_000, 9_999_999_999)}",
-                            "estimatedDelivery": (_dt.date.today() - _dt.timedelta(days=3)).isoformat(),
-                            "totalAmount": 89.0,
-                            "threadId": thread_id,
-                        }
-                    )
-                    seeded = (
+        # 1) 商户门户真单 —— 与列表页同源,严格归属匹配;库不可达(None)时静默降级
+        merchant_orders = await _list_merchant_orders(target_user_id or "")
+        if merchant_orders:
+            return {"orders": merchant_orders}
+
+        # 2) engine 本地表兜底(非商户租户演示单,或商户库离线)
+        if target_user_id:
+            orders_sql = (
+                'SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", '
+                '"estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount", '
+                '"business_id" AS "businessId" FROM orders '
+                'WHERE "user_id" = :uid AND "business_id" = :bid '
+                'ORDER BY "estimated_delivery" DESC'
+            )
+            try:
+                async with get_session() as session:
+                    rows = (
                         (
                             await session.execute(
                                 text(orders_sql).bindparams(uid=target_user_id, bid=target_business_id)
@@ -492,14 +617,12 @@ class OrderDomainService:
                         .mappings()
                         .all()
                     )
-                    if seeded:
-                        return {"orders": [dict(row) for row in seeded]}
-                else:
-                    return {"orders": [dict(row) for row in rows]}
-                return {"message": "No orders found for this customer."}
-        except Exception as err:  # noqa: BLE001
-            print(f"[OrderDomainService.listUserOrders] Failed: {err}")
-            return {"error": "Failed to retrieve orders from database."}
+                    if rows:
+                        return {"orders": [dict(row) for row in rows]}
+            except Exception as err:  # noqa: BLE001
+                print(f"[OrderDomainService.listUserOrders] Failed: {err}")
+                return {"error": "Failed to retrieve orders from database."}
+        return {"orders": [], "message": "No orders found for this customer."}
 
     @staticmethod
     async def change_shipping_address(
@@ -515,7 +638,7 @@ class OrderDomainService:
             status = str(order.get("status") or "")
             total_amount = float(order.get("totalAmount") or 0)
 
-            if status in ("shipped", "delivered", "SHIPPED"):
+            if status.lower() in ("shipped", "delivered"):
                 return {
                     "error": (
                         f"⚠️ Address modification blocked: Order {order_id} is currently "
@@ -523,6 +646,10 @@ class OrderDomainService:
                         "Physical modification is impossible."
                     )
                 }
+
+            # 商户真单:以门户侧可改性标记为准
+            if order.get("source") == "merchant" and not order.get("isAddressModifiable", True):
+                return {"error": f"⚠️ 地址修改拦截：订单 {order_id} 已被商户标记为不可修改收货地址。", "orderId": order_id}
 
             if total_amount > 100.0 and not is_approved:
                 return {
@@ -551,6 +678,14 @@ class OrderDomainService:
                 except Exception:  # noqa: BLE001
                     pass
                 await session.commit()
+
+            if order.get("source") == "merchant":
+                existing_shipping = (
+                    order.get("shippingAddress") if isinstance(order.get("shippingAddress"), dict) else {}
+                )
+                await _update_merchant_order(
+                    effective_order_id, shipping_address={**existing_shipping, "fullAddress": new_address}
+                )
 
             audit_trail = None
             if total_amount > 100.0 and is_approved and thread_id:

@@ -148,8 +148,9 @@ async def list_orders(params: dict) -> list[dict]:
     await ensure_merchant_tables()
     cust_id = params.get("userId") or "CUST-8801"
     async with merchant_engine().connect() as conn:
-        conditions = ["(customer_id = :c1 OR customer_id = :c2)"]
-        q: dict = {"c1": cust_id, "c2": "CUST-8801"}
+        # 2026-09-05:严格归属匹配——不再 OR CUST-8801 混入演示用户的订单
+        conditions = ["customer_id = :c1"]
+        q: dict = {"c1": cust_id}
         if params.get("status"):
             q["status"] = params["status"].upper()
             conditions.append("status = :status")
