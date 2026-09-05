@@ -8,10 +8,9 @@
 from __future__ import annotations
 
 import sqlglot
-from sqlglot import exp
-from sqlalchemy import text
-
 from engine_py.db import get_session
+from sqlalchemy import text
+from sqlglot import exp
 
 _FORBIDDEN_NODE_TYPES = (
     exp.Insert,
@@ -52,8 +51,11 @@ def validate_readonly_sql(sql_text: str) -> str:
         if isinstance(node, _FORBIDDEN_NODE_TYPES):
             raise ValueError("Security Violation: Data modification or DDL statements are strictly prohibited.")
         if isinstance(node, exp.Table):
-            table_name = (node.name or "").lower()
-            if any(table_name.startswith(prefix) for prefix in _FORBIDDEN_TABLE_PREFIXES):
+            # 限定名逐段检查:information_schema.tables 的 node.name 只有叶名 "tables",
+            # catalog/db 限定段必须一并比对,否则限定名可绕写穿透目录拦截
+            qualifiers = (node.args.get("catalog"), node.args.get("db"), node.name)
+            lowered = [str(q).lower() for q in qualifiers if q]
+            if any(q.startswith(prefix) for q in lowered for prefix in _FORBIDDEN_TABLE_PREFIXES):
                 raise ValueError("Security Violation: system catalog access is blocked.")
 
     # 注入 LIMIT 50(TS:无 LIMIT 时追加)
@@ -66,10 +68,10 @@ async def execute_readonly_analytics_query(sql_text: str, params: list | None = 
     """只读事务 + 3s 超时执行(镜像 TS 沙箱执行语义)。"""
     safe_sql = validate_readonly_sql(sql_text)
     async with get_session() as session:
+        # session.connection() 即自动开启事务,不得再 session.begin()(二次开启必抛
+        # InvalidRequestError,原实现从未真正执行过);SET TRANSACTION 须为事务首条语句
         conn = await session.connection()
-        async with session.begin():
-            await conn.execute(text("SET TRANSACTION READ ONLY"))
-            await conn.execute(text("SET LOCAL statement_timeout = '3000ms'"))
-            result = await conn.execute(text(safe_sql), params or [])
-            rows = [dict(r) for r in result.mappings()]
-        return rows
+        await conn.execute(text("SET TRANSACTION READ ONLY"))
+        await conn.execute(text("SET LOCAL statement_timeout = '3000ms'"))
+        result = await conn.execute(text(safe_sql), params or [])
+        return [dict(r) for r in result.mappings()]
