@@ -1,50 +1,56 @@
 import { expect, test } from '@playwright/test';
 
-test.describe('智能客服平台前端 E2E 用户旅程测试', () => {
-  test.beforeEach(async ({ page }) => {
-    // 每次测试前访问首页 (会自愈路由至 login 页面进行授权拦截)
-    await page.goto('/');
-  });
+import { E2E_ACCOUNT_EMAIL, E2E_ACCOUNT_PASSWORD, loginViaUi } from './helpers/auth';
 
-  test('未登录用户应被正确重定向到登录页面并可成功登录', async ({ page }) => {
-    // 校验 URL 是否重定向到 /login
+// 前置:后端 + 种子就绪(docker:up / db:push / db:seed / dev:server),
+// playwright webServer 只负责前端(3000)。
+// 注:真正的 HITL 审批挂起→核签流程 E2E 由 wayfinder ticket 004 补齐,
+// 本文件先钉死真实登录链路(auth 真实化)与主屏布局渲染。
+test.describe('智能客服平台前端 E2E 用户旅程测试', () => {
+  test('未登录用户应被重定向到登录页,凭种子账号真实登录成功', async ({ page }) => {
+    // 未登录访问首页 → 授权拦截重定向 /login
+    await page.goto('/');
     await expect(page).toHaveURL(/\/login/);
 
-    // 验证登录卡片、标语和按钮是否渲染
-    await expect(page.locator('h1')).toContainText('智能客服大模型决策控制台');
-    const loginButton = page.locator('button:has-text("安全登录系统")');
-    await expect(loginButton).toBeVisible();
+    // 登录卡片渲染(标题 + 邮箱/密码双输入 + 提交按钮)
+    await expect(page.getByText('分布式智能客服控制中心')).toBeVisible();
+    await expect(page.locator('input[type="email"]')).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toBeVisible();
 
-    // 自动输入测试邮箱并登录
-    const emailInput = page.locator('input[type="email"]');
-    await emailInput.fill('developer@example.com');
-    await loginButton.click();
+    // 走真实 /api/auth/login(密码来自 engine seed)
+    await page.locator('input[type="email"]').fill(E2E_ACCOUNT_EMAIL);
+    await page.locator('input[type="password"]').fill(E2E_ACCOUNT_PASSWORD);
+    await page.locator('button[type="submit"]').click();
 
-    // 验证登录成功，正确回到主聊面板 `/`
+    // 登录成功,回到主聊面板 `/`
     await expect(page).toHaveURL('/');
   });
 
-  test('登录用户进入主聊天屏应能看到历史会话、Token 看板与人工审批面板', async ({ page }) => {
-    // 先进行极速登录
+  test('错误密码登录被拒绝并提示统一文案', async ({ page }) => {
     await page.goto('/login');
-    await page.locator('input[type="email"]').fill('developer@example.com');
-    await page.locator('button:has-text("安全登录系统")').click();
-    await expect(page).toHaveURL('/');
+    await page.locator('input[type="email"]').fill(E2E_ACCOUNT_EMAIL);
+    await page.locator('input[type="password"]').fill('wrong-password');
+    await page.locator('button[type="submit"]').click();
 
-    // 1. 验证左侧历史会话面板
+    // 网关统一 401 文案(防账号枚举),且不发生跳转
+    await expect(page.getByText('邮箱或密码错误')).toBeVisible();
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test('登录用户进入主聊天屏应能看到历史会话面板与对话输入框', async ({ page }) => {
+    await loginViaUi(page);
+
+    // 1. 左侧历史会话面板
     const leftSidebar = page.locator('aside');
     await expect(leftSidebar).toBeVisible();
 
-    // 2. 验证右侧 Token 看板
-    const rightPanel = page.locator('div:has-text("算力消耗总览")');
-    await expect(rightPanel).toBeVisible();
-
-    // 3. 验证顶部 Token 动态指示器
-    const tokenHeader = page.locator('header');
-    await expect(tokenHeader).toContainText('Token');
-
-    // 4. 验证聊天对话窗
-    const messageInput = page.locator('textarea[placeholder*="输入您的问题"]');
+    // 2. 聊天输入框(极速问候旁路同款入口)
+    const messageInput = page.locator('input[placeholder*="发送您的业务诉求"]');
     await expect(messageInput).toBeVisible();
+
+    // 3. 顶部人工接管入口(header 稳定品牌与 IM 呼叫按钮)
+    const tokenHeader = page.locator('header');
+    await expect(tokenHeader).toContainText('E-COMMERCE CORE');
+    await expect(tokenHeader).toContainText('呼叫人工客服');
   });
 });

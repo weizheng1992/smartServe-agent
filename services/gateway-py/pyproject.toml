@@ -10,6 +10,8 @@ dependencies = [
     "engine-py",
     "sqlglot>=25.0",
     "structlog>=24.4",
+    "pyjwt>=2.9",
+    "bcrypt>=4.2",
 ]
 
 [dependency-groups]

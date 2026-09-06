@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test';
 
+import { loginViaUi } from './helpers/auth';
+
+// 前置:后端 + 种子就绪(docker:up / db:push / db:seed / dev:server)。
+// 登录走真实 /api/auth/login(种子账号 test@example.com,ORD-98712 归属该账号)。
 test.describe('智能客服多轮对话自动化测试 (E2E Automated Dialog Tests)', () => {
   test.beforeEach(async ({ page }) => {
-    // 每次测试前，首先进行安全登录
-    await page.goto('/login');
-    await page.locator('input[type="email"]').fill('tester_dialog@example.com');
-    await page.locator('button:has-text("安全登录系统")').click();
+    // 每次测试前，首先进行安全登录（真实凭证，经网关校验）
+    await loginViaUi(page);
     await expect(page).toHaveURL('/');
   });
 
@@ -29,7 +31,7 @@ test.describe('智能客服多轮对话自动化测试 (E2E Automated Dialog Tes
     const messageInput = page.locator('input[placeholder*="发送您的业务诉求"]');
     await expect(messageInput).toBeVisible();
 
-    // 发送查单意图，要求查询属于 tester_dialog@example.com (对应 default_user) 下的订单
+    // 发送查单意图，要求查询属于种子账号 test@example.com 下的订单（seed 中 ORD-98712 归属该用户）
     await messageInput.fill('帮我查询一下我的订单 ORD-98712 的发货状态');
     await page.locator('button:has-text("发送")').click();
 

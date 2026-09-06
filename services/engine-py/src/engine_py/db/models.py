@@ -32,6 +32,9 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     email: Mapped[str | None] = mapped_column(Text, unique=True)
+    # 登录凭证(gateway /api/auth/login bcrypt 校验,2026-09-06 auth 真实化);
+    # NULL = 未设密码账号,不可密码登录
+    password_hash: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 

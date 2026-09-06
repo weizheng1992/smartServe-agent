@@ -645,3 +645,107 @@ class TestMerchantStoreChatStream:
                 # 订阅建立后,经由 Redis pub/sub 频道发布的消息应被原样转发
                 assert "event: message" in buf
                 assert '"text": "contract-relay"' in buf
+
+
+class TestAuth:
+    """/api/auth/login|logout|me 契约(auth 真实化新增路由,不在 39 条冻结集内)。
+
+    前置:直接落库一个带 bcrypt 凭证的用户(等价 engine seed 的
+    E2E_ACCOUNT_PASSWORD 路径,不经 embedding 种子以便密封环境复用)。
+    """
+
+    EMAIL = "auth_contract@example.com"
+    PASSWORD = "contract-pass-123"
+
+    async def _ensure_user(self) -> None:
+        import bcrypt
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO users (email, password_hash) VALUES (:email, :pwd) "
+                    "ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash"
+                ).bindparams(
+                    email=self.EMAIL,
+                    pwd=bcrypt.hashpw(self.PASSWORD.encode(), bcrypt.gensalt()).decode(),
+                )
+            )
+            await session.commit()
+
+    async def test_login_success_returns_user_and_jwt(self, client, contract_fixtures):
+        await self._ensure_user()
+        res = await client.post("/api/auth/login", json={"email": self.EMAIL, "password": self.PASSWORD})
+        assert res.status_code == 200
+        body = res.json()
+        # 成功载荷走统一信封 {success, data:{user, token}}
+        assert body["success"] is True
+        assert body["data"]["user"]["email"] == self.EMAIL
+        assert body["data"]["user"]["id"]
+        assert body["data"]["token"]
+
+        import jwt as pyjwt
+
+        claims = pyjwt.decode(body["data"]["token"], options={"verify_signature": False})
+        assert claims["sub"] == body["data"]["user"]["id"]
+        assert claims["email"] == self.EMAIL
+        assert claims["jti"]
+
+    async def test_login_wrong_password_401(self, client, contract_fixtures):
+        await self._ensure_user()
+        res = await client.post("/api/auth/login", json={"email": self.EMAIL, "password": "wrong-pass"})
+        assert res.status_code == 401
+        assert res.json() == {"success": False, "error": "邮箱或密码错误"}
+
+    async def test_login_unknown_email_same_401_shape(self, client, contract_fixtures):
+        res = await client.post(
+            "/api/auth/login", json={"email": "nobody@example.com", "password": "whatever"}
+        )
+        assert res.status_code == 401
+        # 与密码错误同文案同形状(防账号枚举)
+        assert res.json() == {"success": False, "error": "邮箱或密码错误"}
+
+    async def test_login_user_without_password_cannot_login(self, client, contract_fixtures):
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        async with get_session() as session:
+            await session.execute(
+                text("INSERT INTO users (email) VALUES ('nopass@example.com') ON CONFLICT (email) DO NOTHING")
+            )
+            await session.commit()
+
+        res = await client.post(
+            "/api/auth/login", json={"email": "nopass@example.com", "password": "anything"}
+        )
+        assert res.status_code == 401
+
+    async def test_me_roundtrip_and_logout_revocation(self, client, contract_fixtures):
+        await self._ensure_user()
+        login = (
+            await client.post("/api/auth/login", json={"email": self.EMAIL, "password": self.PASSWORD})
+        ).json()
+        headers = {"Authorization": f"Bearer {login['data']['token']}"}
+
+        me = await client.get("/api/auth/me", headers=headers)
+        assert me.status_code == 200
+        assert me.json() == {
+            "success": True,
+            "data": {"user": {"id": login["data"]["user"]["id"], "email": self.EMAIL}},
+        }
+
+        out = await client.post("/api/auth/logout", headers=headers)
+        assert out.status_code == 200
+        assert out.json() == {"success": True}
+
+        # 登出后 jti 进黑名单,me 必须拒绝同一 token
+        me_after = await client.get("/api/auth/me", headers=headers)
+        assert me_after.status_code == 401
+        assert me_after.json()["success"] is False
+
+    async def test_me_without_or_garbage_token_401(self, client, contract_fixtures):
+        missing = await client.get("/api/auth/me")
+        assert missing.status_code == 401
+        garbage = await client.get("/api/auth/me", headers={"Authorization": "Bearer not.a.jwt"})
+        assert garbage.status_code == 401

@@ -2,55 +2,91 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { UserSession } from './types';
 
+// 登录会话与 JWT 凭证的 localStorage 键名(登录页与 E2E 共用,勿散落硬编码)
+export const SESSION_KEY = 'agent_user_session';
+export const TOKEN_KEY = 'agent_auth_token';
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(TOKEN_KEY);
+}
+
 export function useAuth() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [isPageHydrated, setIsPageHydrated] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedUser = localStorage.getItem('agent_user_session');
-      if (savedUser) {
-        try {
-          const parsedUser = JSON.parse(savedUser);
-          setCurrentUser(parsedUser);
+    if (typeof window === 'undefined') return;
 
-          // 🛡️ [会话自愈对齐防御锁]:
-          // 异步静默调用后端 /api/auth/login 校验当前 email 在物理库中的最新 UUID。
-          // 防止由于物理库重新 seeding 导致本地浏览器 localStorage 残留老 UUID（如 u_default_id）而产生多租户数据脱节与查单失败！
-          (async () => {
-            try {
-              const checkRes = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: parsedUser.email }),
-              });
-              const checkData = await checkRes.json();
-              if (checkData.success && checkData.user && checkData.user.id !== parsedUser.id) {
-                console.log(
-                  `[Session Self-Healing] 🩺 检测到用户 UUID 发生漂移 (原: ${parsedUser.id} ➔ 新: ${checkData.user.id})，启动静默自愈校准！`,
-                );
-                localStorage.setItem('agent_user_session', JSON.stringify(checkData.user));
-                setCurrentUser(checkData.user);
-              }
-            } catch (err) {
-              console.warn('[Session Self-Healing] Silent validation failed:', err);
-            }
-          })();
-        } catch (e) {
-          localStorage.removeItem('agent_user_session');
+    const savedUser = localStorage.getItem(SESSION_KEY);
+    const token = localStorage.getItem(TOKEN_KEY);
+
+    // 会话与凭证缺一即视为未登录,清残留后强制重定向 /login
+    if (!savedUser || !token) {
+      clearSession();
+      navigate('/login');
+      setIsPageHydrated(true);
+      return;
+    }
+
+    let parsedUser: UserSession;
+    try {
+      parsedUser = JSON.parse(savedUser) as UserSession;
+      setCurrentUser(parsedUser);
+    } catch {
+      clearSession();
+      navigate('/login');
+      setIsPageHydrated(true);
+      return;
+    }
+
+    // 🛡️ 静默会话校验:GET /api/auth/me(Bearer JWT)。
+    // 服务端按 email 回查当前真实记录 —— 物理库重新 seeding 导致的 UUID 漂移在此自愈;
+    // 401(凭证无效/已登出/账号不存在)则清除本地会话并强制重新登录。
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        const payload = data.data;
+        if (res.ok && data.success && payload?.user) {
+          if (payload.user.id !== parsedUser.id) {
+            console.log(
+              `[Session Self-Healing] 🩺 检测到用户 UUID 发生漂移 (原: ${parsedUser.id} ➔ 新: ${payload.user.id})，启动静默自愈校准！`,
+            );
+            localStorage.setItem(SESSION_KEY, JSON.stringify(payload.user));
+            setCurrentUser(payload.user);
+          }
+        } else {
+          clearSession();
+          setCurrentUser(null);
           navigate('/login');
         }
-      } else {
-        // 未登录则强制重定向跳转至 /login 物理路由页面！
-        navigate('/login');
+      } catch (err) {
+        // 网络不可达 ≠ 凭证失效:保留本地会话,由后续业务请求自然暴露错误
+        console.warn('[Session Validation] 静默校验网络失败,保留本地会话:', err);
       }
-      setIsPageHydrated(true);
-    }
+    })();
+
+    setIsPageHydrated(true);
   }, [navigate]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('agent_user_session');
+  const handleLogout = async () => {
+    // 服务端吊销(jti 黑名单)尽力而为;本地清除无条件执行
+    const token = localStorage.getItem(TOKEN_KEY);
+    try {
+      if (token) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch (err) {
+      console.warn('[Auth] 登出请求失败(本地会话仍将清除):', err);
+    }
+    clearSession();
     setCurrentUser(null);
     navigate('/login');
   };

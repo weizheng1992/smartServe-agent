@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from socketio import ASGIApp
 
 from .realtime import sio
-from .routers import admin, chat, crud, merchant, spi
+from .routers import admin, auth, chat, crud, merchant, spi
 from .tenant_context import TenantContextMiddleware, _PermissionError
 
 fastapi_app = FastAPI(title="agent-all gateway-py", version="0.1.0")
@@ -57,6 +57,7 @@ async def health():
 fastapi_app.include_router(crud.router)
 fastapi_app.include_router(admin.router)
 fastapi_app.include_router(admin.approvals_router)
+fastapi_app.include_router(auth.router)
 fastapi_app.include_router(chat.router)
 fastapi_app.include_router(spi.router)
 fastapi_app.include_router(merchant.router)

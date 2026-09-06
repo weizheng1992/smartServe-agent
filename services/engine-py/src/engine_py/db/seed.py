@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
+import bcrypt
 from sqlalchemy import text
 
 from ..llm import get_embedding_model
@@ -25,20 +27,28 @@ async def _embed(text_value: str) -> str | None:
         return None
 
 
+def _seed_password_hash() -> str:
+    """种子账号登录凭证:E2E 与本地登录依赖;E2E_ACCOUNT_PASSWORD 可覆写。"""
+    return bcrypt.hashpw(
+        os.environ.get("E2E_ACCOUNT_PASSWORD", "agent-all-dev").encode(), bcrypt.gensalt()
+    ).decode()
+
+
 async def main() -> None:
     print("[PG Seed] 启动多租户 SaaS 种子数据注入(表结构请先 alembic upgrade head)")
     async with _engine.begin() as conn:
-        # 1. 用户与多租户会话
+        # 1. 用户与多租户会话(密码随种子幂等覆写,保证 E2E 凭证确定可复现)
         user_id = (
             await conn.execute(
                 text(
-                    "INSERT INTO users (email) VALUES (:email) "
-                    "ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id"
+                    "INSERT INTO users (email, password_hash) VALUES (:email, :pwd) "
+                    "ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email, "
+                    "password_hash = EXCLUDED.password_hash RETURNING id"
                 ),
-                {"email": "test@example.com"},
+                {"email": "test@example.com", "pwd": _seed_password_hash()},
             )
         ).scalar_one()
-        print(f"[PG Seed] 用户注册成功: test@example.com ({user_id})")
+        print(f"[PG Seed] 用户注册成功: test@example.com ({user_id},密码登录已启用)")
 
         await conn.execute(
             text(

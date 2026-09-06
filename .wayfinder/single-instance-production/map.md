@@ -22,10 +22,11 @@ created: 2026-09-06
 
 ## Decisions so far
 
-(尚无已关闭 ticket)
+- [auth/login 真实登录链路](tickets/001-auth-login.md): bcrypt + JWT(30 天无刷新)+ Redis jti 登出黑名单;静默重校验新增 `/api/auth/me`(UUID 漂移自愈);删 localStorage 假兜底,E2E 切真实凭证。
 
 ## Not yet specified
 
+- **admin 侧发券/改密入口**(001 遗留):目前仅种子账号可登录(其余 `password_hash = NULL` 安全缺省);真实运营需要至少"管理员设密码"端点/入口,等限流(002)落地看清 admin 动作面后再决定立票形状。
 - evals 真数据落库后,admin evals 页的展示形态演进(运行对比、失败下钻、趋势)——等真实数据落库、看清形状后再决定是否立票。
 - 熔断信号入池后,坏例池是否需要 CLI 之外的最小运营入口——入池跑起来后视消费频率决定(v3.1 全量 admin 坏例池模块仍在不做的范围)。
 

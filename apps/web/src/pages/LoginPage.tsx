@@ -16,16 +16,20 @@ import {
   XCircle,
 } from 'ui';
 
+import { SESSION_KEY, TOKEN_KEY } from '../hooks/useAuth';
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // 如果已经登录，直接跳到主控制台，体验更优
+  // 如果已经登录（含有效凭证），直接跳到主控制台，体验更优
   useEffect(() => {
-    const savedUser = localStorage.getItem('agent_user_session');
-    if (savedUser) {
+    const savedUser = localStorage.getItem(SESSION_KEY);
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (savedUser && token) {
       navigate('/');
     }
   }, [navigate]);
@@ -36,6 +40,10 @@ export function LoginPage() {
       setError('请输入有效的邮箱地址');
       return;
     }
+    if (!password) {
+      setError('请输入密码');
+      return;
+    }
 
     setIsLoading(true);
     setError('');
@@ -44,12 +52,14 @@ export function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (data.success && data.user) {
-        // 保存本地 Session，持久化登录
-        localStorage.setItem('agent_user_session', JSON.stringify(data.user));
+      const payload = data.data;
+      if (res.ok && data.success && payload?.user && payload?.token) {
+        // 保存用户会话与登录凭证（JWT），持久化登录
+        localStorage.setItem(SESSION_KEY, JSON.stringify(payload.user));
+        localStorage.setItem(TOKEN_KEY, payload.token);
         // 编排跳转到主控制台页面
         navigate('/');
       } else {
@@ -80,14 +90,23 @@ export function LoginPage() {
         <CardContent className="px-6 py-4">
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">
-                用户邮箱物理注册与登录
-              </span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">账号登录</span>
               <Input
                 type="email"
-                placeholder="name@example.com (例如: demo@test.com)"
+                placeholder="name@example.com (例如: test@example.com)"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                className="bg-slate-950 border-slate-800 text-slate-100 placeholder-slate-600 focus-visible:ring-indigo-500 h-11 font-sans"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">密码</span>
+              <Input
+                type="password"
+                placeholder="请输入登录密码"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="bg-slate-950 border-slate-800 text-slate-100 placeholder-slate-600 focus-visible:ring-indigo-500 h-11 font-sans"
                 required
               />
@@ -115,9 +134,7 @@ export function LoginPage() {
           </form>
         </CardContent>
         <CardFooter className="pb-8 pt-2 px-6 border-t border-slate-800/60 flex justify-center text-center">
-          <div className="text-[11px] text-slate-500 font-mono">
-            ⚡ 系统处于高保真沙箱环境 • 自动创建物理隔离账户与会话
-          </div>
+          <div className="text-[11px] text-slate-500 font-mono">⚡ 账号由管理端开通 • 登录凭证经网关 JWT 校验</div>
         </CardFooter>
       </Card>
     </div>
