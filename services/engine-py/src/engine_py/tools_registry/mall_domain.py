@@ -776,5 +776,12 @@ class MallDomainService:
         return {
             "success": True,
             "message": "商品已从购物车移除" if quantity <= 0 else f"商品数量已更新为 {quantity} 件",
-            "cart": {"itemCount": len(items), "totalAmount": total_amount, "items": items},
+            # totalQuantity 与 add_to_cart 对齐:删除/改量后技能侧据此播报件数,
+            # 缺键时 `or 0` 回退曾致"0 件商品,总金额 ¥2198"自相矛盾(2026-09-06)
+            "cart": {
+                "itemCount": len(items),
+                "totalQuantity": sum(i["quantity"] for i in items),
+                "totalAmount": total_amount,
+                "items": items,
+            },
         }

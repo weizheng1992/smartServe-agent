@@ -21,6 +21,32 @@ _QTY_UPDATE_RE = re.compile(r"(?:改成|修改为|数量设为|变成|改为|调
 _VAGUE_RE = re.compile(r"(?:第几|哪件|哪款|哪一个)")
 _ORDINAL_FULL_RE = re.compile(r"(?:把)?第\s*([一二三四五12345两])\s*[件款个双]|买第\s*([一二三四五12345两])|第\s*([一二三四五12345两])\s*款")
 _ADD_ALL_RE = re.compile(r"(?:全部|所有|都)")
+_NAME_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z]{2,}")
+# 品牌与通用款型词不计分:点名"A款"不得因共享 Nike/Run 等泛词误中"B款"
+_GENERIC_NAME_TOKENS = {"nike", "run", "air"}
+
+
+def _match_cart_item_by_name(user_input: str, items: list[dict]) -> dict | None:
+    """按商品名定位购物车条目:标题整串包含优先,否则拉丁特征词得分匹配。
+
+    - 仅取拉丁词(≥3字母)且忽略大小写;数字串不参与:改量/序数词指令中的
+      数字("数量改成3"/"第2件")会与标题款号("Invincible Run 3")撞分致歧义。
+    - 得分 <1 返回 None(如纯中文泛称"跑鞋"无法区分多款),交回原兜底链。
+    """
+    for item in items:
+        title = str(item.get("title") or item.get("name") or "")
+        if title and title in user_input:
+            return item
+    input_tokens = {t.lower() for t in _NAME_TOKEN_RE.findall(user_input)}
+    best_item: dict | None = None
+    best_score = 0
+    for item in items:
+        title = str(item.get("title") or item.get("name") or "")
+        title_tokens = {t.lower() for t in _NAME_TOKEN_RE.findall(title)}
+        score = len((title_tokens & input_tokens) - _GENERIC_NAME_TOKENS)
+        if score > best_score:
+            best_item, best_score = item, score
+    return best_item if best_score >= 1 else None
 _QTY_BUY_RE = re.compile(r"(?:数量|买|要|加|购)\s*(\d+)\s*件?")
 _HISTORY_ITEM_RE = re.compile(r"(\d+)\.\s*【([^】]+)】\s*¥?(\d+(?:\.\d+)?)")
 
@@ -124,12 +150,16 @@ class CartManageSkill(BaseSkill):
                     "extra": {"cartContext": {"items": [], "totalAmount": 0}, "guideContext": guide_context},
                 }
 
+            # 目标解析链:序数词 → 商品名匹配(2026-09-06 修复:此前点名商品被忽略,
+            # 兜底 lastModifiedItemId/items[0] 误删他款)→ lastModifiedItemId → 首款
             ordinal_match = _ORDINAL_RE.search(user_input)
             target_item = None
             if ordinal_match:
                 target_index = _INDEX_MAP.get(ordinal_match.group(1), 0)
                 target_item = current_items[target_index] if target_index < len(current_items) else None
-            elif existing_cart.get("lastModifiedItemId"):
+            else:
+                target_item = _match_cart_item_by_name(user_input, current_items)
+            if target_item is None and existing_cart.get("lastModifiedItemId"):
                 target_item = next((i for i in current_items if i.get("skuId") == existing_cart["lastModifiedItemId"]), None)
             if target_item is None and current_items:
                 target_item = current_items[0]
@@ -170,12 +200,15 @@ class CartManageSkill(BaseSkill):
             )
             current_items = (summary_res.get("cart") or {}).get("items") or existing_cart.get("items") or []
 
+            # 目标解析链与删除分支对齐:序数词 → 商品名匹配 → lastModifiedItemId → 首款
             ordinal_match = _ORDINAL_RE.search(user_input)
             target_item = None
             if ordinal_match:
                 target_index = _INDEX_MAP.get(ordinal_match.group(1), 0)
                 target_item = current_items[target_index] if target_index < len(current_items) else None
-            elif existing_cart.get("lastModifiedItemId"):
+            else:
+                target_item = _match_cart_item_by_name(user_input, current_items)
+            if target_item is None and existing_cart.get("lastModifiedItemId"):
                 target_item = next((i for i in current_items if i.get("skuId") == existing_cart["lastModifiedItemId"]), None)
             if target_item is None and current_items:
                 target_item = current_items[0]
@@ -258,10 +291,44 @@ class CartManageSkill(BaseSkill):
             and not _ORDINAL_FULL_RE.search(user_input)
             and len(candidate_products) > 1
         ):
+            # 重复分区(2026-09-06 产品语义):新款入车;已在车的不自动累量,列表提示
+            summary_res = await MallDomainService.get_cart_summary(
+                {"userId": context.get("userId"), "threadId": context.get("threadId")}
+            )
+            existing_map = {i.get("skuId"): i for i in ((summary_res.get("cart") or {}).get("items") or [])}
+            new_products = [p for p in candidate_products if p["id"] not in existing_map]
+            dup_items = [existing_map[p["id"]] for p in candidate_products if p["id"] in existing_map]
+            dup_notice = ""
+            if dup_items:
+                dup_text = "、".join(f"【{i.get('title')}】x{i.get('quantity') or 1}" for i in dup_items)
+                dup_notice = f"\n\n🛎️ 以下 {len(dup_items)} 款已在购物车,未重复加入:{dup_text}"
+
+            if not new_products:
+                return {
+                    "success": True,
+                    "skillId": self.metadata["id"],
+                    "output": (
+                        f"🛎️ 这 {len(dup_items)} 款商品都已在购物车中,本次未重复加入:{dup_text}\n"
+                        "如需增加数量,请说\"把第1件数量改成2\";如需查看,可说\"查看购物车\"。"
+                    ),
+                    "nextAction": "finish",
+                    "extra": {
+                        "cartContext": {
+                            "items": (summary_res.get("cart") or {}).get("items") or [],
+                            "totalAmount": (summary_res.get("cart") or {}).get("totalAmount"),
+                        },
+                        "guideContext": {
+                            **guide_context,
+                            "candidateProductIds": candidate_list,
+                            "candidateProducts": candidate_products,
+                        },
+                    },
+                }
+
             qty_match_all = _QTY_BUY_RE.search(user_input)
             per_qty = int(qty_match_all.group(1)) if qty_match_all else 1
             updated_cart = {}
-            for prod in candidate_products:
+            for prod in new_products:
                 add_res = await MallDomainService.add_to_cart(
                     {
                         "skuId": prod["id"],
@@ -273,15 +340,15 @@ class CartManageSkill(BaseSkill):
                     }
                 )
                 updated_cart = add_res.get("cart") or {}
-            added_titles = "、".join(str(p.get("name") or p["id"]) for p in candidate_products)
+            added_titles = "、".join(str(p.get("name") or p["id"]) for p in new_products)
             card = {
                 "type": "cart_card",
                 "data": {
                     "actionType": "added",
-                    "title": f"已全部加入购物车 ({len(candidate_products)} 款)",
-                    "totalQuantity": updated_cart.get("totalQuantity") or len(candidate_products) * per_qty,
+                    "title": f"已加入购物车 ({len(new_products)} 款)",
+                    "totalQuantity": updated_cart.get("totalQuantity") or len(new_products) * per_qty,
                     "totalAmount": updated_cart.get("totalAmount") or sum(
-                        (p.get("price") or 0) * per_qty for p in candidate_products
+                        (p.get("price") or 0) * per_qty for p in new_products
                     ),
                     "currency": "CNY",
                     "items": [
@@ -306,11 +373,11 @@ class CartManageSkill(BaseSkill):
                 "success": True,
                 "skillId": self.metadata["id"],
                 "output": (
-                    f"🎉 已成功将 {len(candidate_products)} 款商品全部加入购物车：{added_titles}！\n"
-                    f"当前购物车共有 {updated_cart.get('totalQuantity') or len(candidate_products) * per_qty} 件商品，"
+                    f"🎉 已成功将 {len(new_products)} 款商品加入购物车：{added_titles}！\n"
+                    f"当前购物车共有 {updated_cart.get('totalQuantity') or len(new_products) * per_qty} 件商品，"
                     f"总金额 ¥{updated_cart.get('totalAmount') or 0} 元。\n\n"
                     "如需结算买单或调整数量，请随时告诉我！"
-                ),
+                ) + dup_notice,
                 "cards": [card],
                 "nextAction": "finish",
                 "extra": {
@@ -356,6 +423,38 @@ class CartManageSkill(BaseSkill):
 
         qty_match = _QTY_BUY_RE.search(user_input)
         quantity = int(qty_match.group(1)) if qty_match else 1
+
+        # 已在车拦截(2026-09-06 产品语义):重复加购不自动累量,提示当前数量与改量入口
+        pre_summary = await MallDomainService.get_cart_summary(
+            {"userId": context.get("userId"), "threadId": context.get("threadId")}
+        )
+        pre_cart = pre_summary.get("cart") or {}
+        dup_item = next((i for i in (pre_cart.get("items") or []) if i.get("skuId") == target_sku_id), None)
+        if dup_item:
+            dup_title = str(dup_item.get("title") or target_title)
+            cur_qty = int(dup_item.get("quantity") or 1)
+            return {
+                "success": True,
+                "skillId": self.metadata["id"],
+                "output": (
+                    f"🛒 【{dup_title}】已在购物车中(x{cur_qty} 件),本次未重复加入。\n"
+                    f'如需增加数量,请说"把 {dup_title} 数量改成{cur_qty + 1}";'
+                    '如需查看明细,可说"查看购物车"。'
+                ),
+                "nextAction": "finish",
+                "extra": {
+                    "cartContext": {
+                        "lastModifiedItemId": target_sku_id,
+                        "items": pre_cart.get("items") or [],
+                        "totalAmount": pre_cart.get("totalAmount"),
+                    },
+                    "guideContext": {
+                        **guide_context,
+                        "candidateProductIds": candidate_list,
+                        "candidateProducts": candidate_products,
+                    },
+                },
+            }
 
         add_res = await MallDomainService.add_to_cart(
             {
