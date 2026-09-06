@@ -153,3 +153,92 @@ def test_qty_guidance_phrase_actually_routes_and_updates() -> None:
     assert "数量改成2" in res1["output"]
     _run("u_loop", f"把 {_WIND['title']} 数量改成 2", last_modified=_WIND["skuId"])
     assert _cart("u_loop") == {_WIND["skuId"]: 2}, "指引话术执行后数量应为 2"
+
+
+# ---------------------------------------------------------------- 盲区补测(2026-09-06 第二批)
+
+def test_vague_reference_asks_which_candidate() -> None:
+    """3b 模糊指代:无明确目标时反问并列出候选,不臆测执行。"""
+    _seed("u_vague", [_PEG])
+    res = _run("u_vague", "哪款比较好")
+    assert "哪一款" in res["output"]
+    for c in _CANDIDATES:
+        assert c["name"] in res["output"], "候选清单须完整列出"
+    assert _cart("u_vague") == {_PEG["skuId"]: 1}, "模糊指代不得误触发加购"
+
+
+def test_history_backtrack_fills_candidates_from_short_memory() -> None:
+    """guideContext 为空时,从短期记忆的推荐列表回溯候选。"""
+    _seed("u_hist", [])
+    MallDomainService._cart_storage.pop("u_hist", None)
+    ctx = {
+        "threadId": "t_hist",
+        "tenantId": "ecommerce",
+        "userId": "u_hist",
+        "input": "把第2件加入购物车",
+        "slots": {"activeIntent": "cart_manage"},
+        "extra": {
+            "guideContext": {},
+            "shortMemory": [
+                {"role": "user", "content": "推荐跑鞋"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "为您精选推荐商品：\n"
+                        "1. 【Nike Air Zoom Pegasus 41 极速轻量透气跑鞋】 ¥899.0 (现货)\n"
+                        "2. 【Nike ZoomX Invincible Run 3 旗舰缓震跑鞋】 ¥1299.0 (现货)\n"
+                    ),
+                },
+            ],
+        },
+    }
+    res = asyncio.run(CartManageSkill().execute(ctx))
+    cart = _cart("u_hist")
+    assert list(cart) == ["prod_recommend_2"], "第2件应取自历史回溯候选"
+    assert "Invincible" in res["output"]
+
+
+def test_single_add_with_explicit_quantity() -> None:
+    """单品加购显式数量:"买2件"字样不得丢量。"""
+    _seed("u_qty_buy", [])
+    MallDomainService._cart_storage.pop("u_qty_buy", None)
+    _run("u_qty_buy", "把第1件买2件")
+    assert _cart("u_qty_buy") == {_PEG["skuId"]: 2}
+
+
+def test_delete_ordinal_out_of_range_is_noop() -> None:
+    """序数越界:购物车仅 2 件,说删第5件不得误删任何商品。"""
+    _seed("u_oor_del", [_PEG, _INV])
+    res = _run("u_oor_del", "删除第5件")
+    assert _cart("u_oor_del") == {_PEG["skuId"]: 1, _INV["skuId"]: 1}, "越界序数不得触发删除"
+    assert "第5" in res["output"] or "没有" in res["output"] or "暂无" in res["output"]
+
+
+def test_qty_ordinal_out_of_range_is_noop() -> None:
+    """序数越界(改量):不得把数量错加到首款/lastModified 上。"""
+    _seed("u_oor_qty", [_PEG, _INV])
+    res = _run("u_oor_qty", "把第5件数量改成3")
+    assert _cart("u_oor_qty") == {_PEG["skuId"]: 1, _INV["skuId"]: 1}, "越界序数不得触发改量"
+    assert "第5" in res["output"] or "没有" in res["output"] or "暂无" in res["output"]
+
+
+def test_delete_on_empty_cart_does_not_claim_phantom_removal() -> None:
+    """空车删除:get_cart_summary 对空 storage 返回默认 AJ1 幻影车,
+    技能不得据此播报"已移除"。"""
+    MallDomainService._cart_storage.pop("u_empty_del", None)
+    res = _run("u_empty_del", "删除第1件")
+    assert "已成功" not in res["output"], "空车不得播报移除成功"
+    assert _cart("u_empty_del") == {}
+
+
+def test_qty_on_empty_cart_does_not_claim_phantom_update() -> None:
+    MallDomainService._cart_storage.pop("u_empty_qty", None)
+    res = _run("u_empty_qty", "把第1件数量改成3")
+    assert "已成功" not in res["output"], "空车不得播报改量成功"
+    assert _cart("u_empty_qty") == {}
+
+
+def test_can_handle_positive_and_negative() -> None:
+    skill = CartManageSkill()
+    assert skill.can_handle({"input": "把第2件加入购物车", "slots": {"activeIntent": "cart_manage"}}) is True
+    assert skill.can_handle({"input": "今天天气怎么样"}) is False

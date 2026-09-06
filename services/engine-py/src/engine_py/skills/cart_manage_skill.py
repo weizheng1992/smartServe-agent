@@ -137,6 +137,17 @@ class CartManageSkill(BaseSkill):
             )
             current_items = (summary_res.get("cart") or {}).get("items") or existing_cart.get("items") or []
 
+            # 空车守卫(2026-09-06):summary 对空 storage 返回演示默认车,
+            # 不可据此播报移除;以 has_cart 真值为准
+            if not await MallDomainService.has_cart({"userId": context.get("userId"), "threadId": context.get("threadId")}):
+                return {
+                    "success": True,
+                    "skillId": self.metadata["id"],
+                    "output": "购物车还是空的，没有可移除的商品。如需选购，可对我说“推荐跑鞋”或“查看购物车”。",
+                    "nextAction": "finish",
+                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                }
+
             if _CLEAR_RE.search(user_input):
                 for item in current_items:
                     await MallDomainService.update_cart_item(
@@ -156,7 +167,19 @@ class CartManageSkill(BaseSkill):
             target_item = None
             if ordinal_match:
                 target_index = _INDEX_MAP.get(ordinal_match.group(1), 0)
-                target_item = current_items[target_index] if target_index < len(current_items) else None
+                if target_index >= len(current_items):
+                    # 越界守卫(2026-09-06):此前越界序数静默落兜底链误删首款
+                    return {
+                        "success": True,
+                        "skillId": self.metadata["id"],
+                        "output": (
+                            f"购物车中没有第{target_index + 1}件商品（当前共 {len(current_items)} 件），未做任何移除。\n"
+                            "如需查看明细，可说“查看购物车”。"
+                        ),
+                        "nextAction": "finish",
+                        "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                    }
+                target_item = current_items[target_index]
             else:
                 target_item = _match_cart_item_by_name(user_input, current_items)
             if target_item is None and existing_cart.get("lastModifiedItemId"):
@@ -200,12 +223,34 @@ class CartManageSkill(BaseSkill):
             )
             current_items = (summary_res.get("cart") or {}).get("items") or existing_cart.get("items") or []
 
+            # 空车守卫(2026-09-06):与删除分支同理,防幻影改量播报
+            if not await MallDomainService.has_cart({"userId": context.get("userId"), "threadId": context.get("threadId")}):
+                return {
+                    "success": True,
+                    "skillId": self.metadata["id"],
+                    "output": "购物车还是空的，先加入商品后再调整数量。如需选购，可对我说“推荐跑鞋”。",
+                    "nextAction": "finish",
+                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                }
+
             # 目标解析链与删除分支对齐:序数词 → 商品名匹配 → lastModifiedItemId → 首款
             ordinal_match = _ORDINAL_RE.search(user_input)
             target_item = None
             if ordinal_match:
                 target_index = _INDEX_MAP.get(ordinal_match.group(1), 0)
-                target_item = current_items[target_index] if target_index < len(current_items) else None
+                if target_index >= len(current_items):
+                    # 越界守卫(2026-09-06):越界序数不得错改首款/lastModified
+                    return {
+                        "success": True,
+                        "skillId": self.metadata["id"],
+                        "output": (
+                            f"购物车中没有第{target_index + 1}件商品（当前共 {len(current_items)} 件），数量未调整。\n"
+                            "如需查看明细，可说“查看购物车”。"
+                        ),
+                        "nextAction": "finish",
+                        "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                    }
+                target_item = current_items[target_index]
             else:
                 target_item = _match_cart_item_by_name(user_input, current_items)
             if target_item is None and existing_cart.get("lastModifiedItemId"):

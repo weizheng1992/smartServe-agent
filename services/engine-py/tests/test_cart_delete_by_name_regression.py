@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from engine_py.skills.cart_manage_skill import CartManageSkill
 from engine_py.tools_registry.mall_domain import MallDomainService
 

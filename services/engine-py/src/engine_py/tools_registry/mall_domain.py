@@ -732,6 +732,16 @@ class MallDomainService:
         }
 
     @staticmethod
+    async def has_cart(params: dict) -> bool:
+        """购物车是否真实存在(storage 有键且非空)。
+
+        get_cart_summary 对缺失键返回演示默认车(AJ1),调用方不可据其判空,
+        否则会对空车播报幻影移除/改量(2026-09-06 修复)。
+        """
+        cart_key = params.get("userId") or params.get("threadId") or "default_user"
+        return bool(MallDomainService._cart_storage.get(cart_key))
+
+    @staticmethod
     async def get_cart_summary(params: dict) -> dict:
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
         items = MallDomainService._cart_storage.get(cart_key) or [
