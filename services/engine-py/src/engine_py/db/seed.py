@@ -191,7 +191,7 @@ async def main() -> None:
                 text(
                     "INSERT INTO rag_documents "
                     "(business_id, source_url, chunk_text, contextual_summary, metadata, embedding) "
-                    "VALUES (:b, :u, :c, :s, :m::jsonb, :e)"
+                    "VALUES (:b, :u, :c, :s, CAST(:m AS jsonb), :e)"
                 ),
                 {
                     "b": business_id,
