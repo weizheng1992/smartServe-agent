@@ -23,6 +23,7 @@ created: 2026-09-06
 ## Decisions so far
 
 - [auth/login 真实登录链路](tickets/001-auth-login.md): bcrypt + JWT(30 天无刷新)+ Redis jti 登出黑名单;静默重校验新增 `/api/auth/me`(UUID 漂移自愈);删 localStorage 假兜底,E2E 切真实凭证。
+- [租户+IP 滑动窗口限流](tickets/002-rate-limiting.md): RateLimitMiddleware(ZSET 滑窗 + 多键 all-or-nothing Lua)挂 /api/chat 与 /api/v1/spi;XFF 仅可信反代采信最右跳;admin "all" 跳租户桶;Redis 故障 fail-open。
 
 ## Not yet specified
 

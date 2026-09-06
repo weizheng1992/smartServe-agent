@@ -749,3 +749,25 @@ class TestAuth:
         assert missing.status_code == 401
         garbage = await client.get("/api/auth/me", headers={"Authorization": "Bearer not.a.jwt"})
         assert garbage.status_code == 401
+
+
+class TestRateLimitContract:
+    """限流让冻结路由出现 429 新形状 —— 契约套件钉死(CLAUDE.md 不变量 #6)。
+
+    细粒度行为(窗口滑动/维度独立/SPI 配额)见 tests/test_rate_limit.py;
+    此处只钉契约事实:正常路径形状不变,超载返回统一 429 + Retry-After。
+    """
+
+    async def test_frozen_route_over_limit_returns_unified_429(self, client, monkeypatch):
+        monkeypatch.setenv("RATE_LIMIT_KEY_PREFIX", "contract-rl")
+        monkeypatch.setenv("RATE_LIMIT_CHAT_TENANT_MAX", "1")
+        monkeypatch.setenv("RATE_LIMIT_CHAT_IP_MAX", "1")
+        headers = {"x-tenant-id": "contract-rl"}
+
+        first = await client.get("/api/chat/messages", headers=headers)
+        assert first.status_code != 429  # 未超限时冻结路由形状原样
+
+        second = await client.get("/api/chat/messages", headers=headers)
+        assert second.status_code == 429
+        assert second.json() == {"success": False, "error": "请求过于频繁，请稍后再试"}
+        assert int(second.headers["retry-after"]) >= 1

@@ -13,12 +13,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from socketio import ASGIApp
 
+from .rate_limit import RateLimitMiddleware
 from .realtime import sio
 from .routers import admin, auth, chat, crud, merchant, spi
 from .tenant_context import TenantContextMiddleware, _PermissionError
 
 fastapi_app = FastAPI(title="agent-all gateway-py", version="0.1.0")
 
+# 限流最先注册 → 位于最内层:须在 TenantContextMiddleware 解析完 request.state.tenant
+# 之后运行,与 guard 同一租户口径;只挂 /api/chat 与 /api/v1/spi 高频入口。
+fastapi_app.add_middleware(RateLimitMiddleware)
 fastapi_app.add_middleware(TenantContextMiddleware)
 # CORS:对齐 TS 基线 AppModule 与 server-gateway.md §1.1(移植时遗失)。
 # web(3000)/admin(3001)/merchant(3005) 为独立 origin 的 SPA,api 客户端默认绝对地址
