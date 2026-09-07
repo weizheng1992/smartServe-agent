@@ -26,6 +26,7 @@ created: 2026-09-06
 - [租户+IP 滑动窗口限流](tickets/002-rate-limiting.md): RateLimitMiddleware(ZSET 滑窗 + 多键 all-or-nothing Lua)挂 /api/chat 与 /api/v1/spi;XFF 仅可信反代采信最右跳;admin "all" 跳租户桶;Redis 故障 fail-open。
 - [LLM 熔断/指数退避/超时移植](tickets/003-llm-circuit-breaker.md): 全局 CircuitBreaker 单例(TS 1:1)+ 3 次指数退避 + wait_for 超时,挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖;熔断中断的会话落 `resolution_status='llm_circuit_breaker'`(006 数据源);4 节点兜底前置熔断豁免上抛。
 - [熔断信号入坏例池](tickets/006-circuit-breaker-badcase.md): run_agent 收口处两路熔断(LLM 级+图级)入池(先验 suspected_defect);挂点定案会话级而非状态机翻转处;`record_badcase_signal` 增 opt-in dedupe 幂等护栏;摘要按 source 分组自动收纳。
+- [HITL 审批流与熔断器 E2E 覆盖](tickets/004-hitl-e2e.md): E2E 钉出三真缺陷并修复(挂起计划不落库竞态、POST /api/chat/threads 契约缺失→补齐且契约 39→40、tz-aware 送达炸退款+镜像表裸 except 连坐);globalSetup 幂等种子 + webServer 四服务数组化;熔断 spec 关键发现——确定性旁路输入零 LLM 调用永不触发熔断,须价保咨询类输入;admin 陈旧 spec 修缮;全量 playwright 本环境未收口(25/18,残余=firefox 二进制+选择器,均已修待复跑)。
 - [evals 真数据入库](tickets/005-eval-real-data.md): promptfoo 结果经 `engine_py.evals.promptfoo_import` 单事务写三表(`test:prompt:record` 链式 + `evals:import` 独立);`POST /api/evals/run` 410 退役,随机生成器降级为契约测试 fixture;isMock 全链路消失;CLI `__main__` 守卫缺失曾致零入库,已补测钉死。
 
 ## Not yet specified
