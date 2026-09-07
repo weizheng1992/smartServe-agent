@@ -3,7 +3,7 @@ id: single-instance-production
 title: 单实例真实可运营
 type: map
 labels: [wayfinder:map]
-status: open
+status: closed
 created: 2026-09-06
 ---
 
