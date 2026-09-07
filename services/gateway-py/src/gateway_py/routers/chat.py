@@ -35,13 +35,18 @@ class DispatchChatIn(BaseModel):
     sync: bool | None = None
 
 
+def _generate_thread_id() -> str:
+    """客户端未带 threadId 时的服务端生成器(dispatch 与显式建线程共用同一形状)。"""
+    return f"thread_{int(time.time() * 1000)}_{uuid.uuid4().hex[:5]}"
+
+
 @router.post("")
 async def dispatch_chat(body: DispatchChatIn, request: Request):
     effective_message = (body.message or body.input or "").strip()
     if not effective_message:
         raise HTTPException(400, "Message is required")
 
-    effective_thread_id = body.threadId or f"thread_{int(time.time() * 1000)}_{uuid.uuid4().hex[:5]}"
+    effective_thread_id = body.threadId or _generate_thread_id()
     effective_user_id = body.userId or "CUST-8801"
     tenant_header = request.headers.get("x-tenant-id") or request.headers.get("x-business-id")
     effective_business_id = body.businessId or tenant_header or "ecommerce"
@@ -87,6 +92,30 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
         "userId": effective_user_id,
         "isTemporalMode": False,
     }
+
+
+class CreateThreadIn(BaseModel):
+    threadId: str | None = None
+    userId: str | None = None
+    businessId: str | None = None
+
+
+@router.post("/threads")
+async def create_chat_thread(body: CreateThreadIn, request: Request):
+    """建线程(web「开启新一轮对话」前置)。TS 基线服务端缺失此路由,前端
+    静默吞 404 导致按钮长期失效 —— wayfinder 004 E2E 钉出后补齐。幂等可重放;
+    同 id 异主(他租户/他用户)冲突返回 409,绝不回显他人线程元数据。"""
+    thread_id = body.threadId or _generate_thread_id()
+    tenant_header = request.headers.get("x-tenant-id") or request.headers.get("x-business-id")
+    business_id = (body.businessId or tenant_header or "ecommerce").lower().strip()
+    thread = await conversation_repo.create_thread(
+        thread_id=thread_id,
+        business_id=business_id,
+        user_id=body.userId,
+    )
+    if thread is None:
+        raise HTTPException(409, "Thread ID conflicts with an existing thread under another owner")
+    return {"success": True, "thread": thread}
 
 
 async def _sse_frame(seq: int, event: str, data) -> str:

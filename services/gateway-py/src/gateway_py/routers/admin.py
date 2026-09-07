@@ -366,7 +366,11 @@ async def list_approvals(
     return {"success": True, "approvals": approvals, "total": len(approvals), "tenantId": effective_tenant}
 
 
+# TS 基线 @Controller(['api/approvals', 'api/chat/approvals']) 双路径别名:
+# 前端 useApprovalMachine / useApprovals(发起接管)均 POST /api/chat/approvals,
+# Python 移植期曾漏挂该别名致核签按钮 405(wayfinder 004 修复)。
 @approvals_router.post("/api/approvals")
+@approvals_router.post("/api/chat/approvals")
 async def resolve_approval(body: dict, request: Request):
     options = {
         "approvalId": body.get("approvalId"),

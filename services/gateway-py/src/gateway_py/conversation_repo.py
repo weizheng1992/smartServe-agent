@@ -206,6 +206,55 @@ async def update_conversation_status(
         }
 
 
+async def create_thread(thread_id: str, business_id: str, user_id: str | None = None) -> dict | None:
+    """显式建线程(web 左栏「开启新一轮对话」/ 商户切换都先建后聊)。
+
+    TS 基线服务端从未实现 POST /api/chat/threads,前端 fetch 404 后静默吞掉,
+    「开启新一轮对话」按钮从未真正可用(wayfinder 004 E2E 钉出);此处补齐契约:
+    幂等 upsert(ON CONFLICT DO NOTHING),重复点按不报错、不重置既有元数据。
+
+    归属守卫:同 id 线程若属他租户(business_id 不符)或已有属主且与调用者
+    user_id 不符,返回 None(路由层转 409)——绝不回显他人线程元数据;
+    旧线程无属主时自愈认领给调用者。
+    """
+    async with get_session() as session:
+        await session.execute(
+            text(
+                'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") '
+                "VALUES (:tid, :uid, :bid, 'active', NOW(), NOW()) ON CONFLICT (id) DO NOTHING"
+            ).bindparams(tid=thread_id, uid=user_id, bid=business_id)
+        )
+        row = (
+            await session.execute(
+                text(
+                    "SELECT id, user_id, business_id, status, created_at, updated_at "
+                    "FROM threads WHERE id = :tid AND business_id = :bid"
+                ).bindparams(tid=thread_id, bid=business_id)
+            )
+        ).mappings().first()
+        if row is None:
+            return None  # 同 id 线程属他租户 → 拒绝回显
+        if user_id and row["user_id"] and row["user_id"] != user_id:
+            return None  # 同 id 线程已有属主且非调用者 → 拒绝回显
+        if user_id and row["user_id"] is None:
+            # 旧线程无属主 → 自愈认领(dispatch_chat 自愈建线程的补全路径)
+            await session.execute(
+                text('UPDATE threads SET "user_id" = :uid, updated_at = NOW() WHERE id = :tid').bindparams(
+                    uid=user_id, tid=thread_id
+                )
+            )
+            row = {**row, "user_id": user_id}
+        await session.commit()
+    return {
+        "id": row["id"],
+        "userId": row["user_id"],
+        "businessId": row["business_id"],
+        "status": row["status"] or "active",
+        "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
+        "updatedAt": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
 async def append_message(payload: dict) -> dict:
     """镜像 ConversationRepository.appendMessage(含线程自愈与 operator 角色落库)。"""
     thread_id = payload["threadId"]

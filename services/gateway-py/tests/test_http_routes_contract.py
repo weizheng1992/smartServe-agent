@@ -262,6 +262,16 @@ class TestApprovals:
         assert body["success"] is True
         assert isinstance(body["approvals"], list)
 
+    async def test_chat_prefix_post_alias(self, client, contract_fixtures):
+        """回归钉(wayfinder 004):TS 基线双路径控制器含 POST 别名,Python 移植
+        只挂了 GET 致前端核签按钮 405;POST /api/chat/approvals 必须可达。"""
+        res = await client.post(
+            "/api/chat/approvals",
+            json={"approvalId": "not-a-uuid", "action": "approve"},
+        )
+        assert res.status_code == 200  # 路由可达(405 即回归);错误体透传
+        assert "格式无效" in str(res.json())
+
     async def test_resolve_fixture_approval(self, client, contract_fixtures):
         res = await client.post(
             "/api/approvals",
@@ -272,6 +282,60 @@ class TestApprovals:
         body = res.json()
         # process_approval_action 透传结果:status 推进为 approved 或显式 success
         assert body.get("status") == "approved" or body.get("success") is True
+
+
+class TestChatThreads:
+    """回归钉(wayfinder 004):POST /api/chat/threads。
+
+    TS 基线服务端从未实现此路由(前端 useChatThreads 发起后静默吞 404,
+    「开启新一轮对话」从未真正可用);Python 侧补齐契约 —— 幂等建线程,
+    重复调用不报错、不重置既有行。
+    """
+
+    async def test_create_thread_roundtrip(self, client, contract_fixtures):
+        res = await client.post(
+            "/api/chat/threads",
+            json={"userId": "CUST-E2E-1", "threadId": "thread_contract_create_1", "businessId": "nike"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert body["thread"]["id"] == "thread_contract_create_1"
+        assert body["thread"]["userId"] == "CUST-E2E-1"
+        assert body["thread"]["businessId"] == "nike"
+        assert body["thread"]["status"] == "active"
+
+    async def test_create_thread_idempotent_replay(self, client, contract_fixtures):
+        payload = {"userId": "CUST-E2E-1", "threadId": "thread_contract_create_2", "businessId": "nike"}
+        first = (await client.post("/api/chat/threads", json=payload)).json()
+        second = (await client.post("/api/chat/threads", json=payload)).json()
+        assert first["success"] is True and second["success"] is True
+        assert second["thread"]["id"] == payload["threadId"]
+
+    async def test_create_thread_conflicting_owner_returns_409(self, client, contract_fixtures):
+        """同 id 异主冲突:他租户 / 他用户重放同 id,必须 409 且不回显他人元数据。
+
+        回归钉(评审 HARD):修复前 SELECT 不带归属谓词,冲突重放会把
+        既有线程的 userId/businessId 原样回显给调用者(跨用户信息泄漏)。
+        """
+        await client.post(
+            "/api/chat/threads",
+            json={"userId": "CUST-E2E-OWNER", "threadId": "thread_contract_conflict_1", "businessId": "nike"},
+        )
+        # 1) 他租户重放同 id
+        cross_tenant = await client.post(
+            "/api/chat/threads",
+            json={"userId": "CUST-E2E-INTRUDER", "threadId": "thread_contract_conflict_1", "businessId": "aurora"},
+        )
+        assert cross_tenant.status_code == 409
+        assert "CUST-E2E-OWNER" not in cross_tenant.text
+        # 2) 同租户他用户重放同 id
+        cross_user = await client.post(
+            "/api/chat/threads",
+            json={"userId": "CUST-E2E-INTRUDER", "threadId": "thread_contract_conflict_1", "businessId": "nike"},
+        )
+        assert cross_user.status_code == 409
+        assert "CUST-E2E-OWNER" not in cross_user.text
 
 
 class TestApprovalResumeDispatch:
