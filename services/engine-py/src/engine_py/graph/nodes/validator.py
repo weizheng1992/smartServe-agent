@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from ...event_bus import emit_status
-from ...llm import get_chat_model
+from ...llm import CircuitBreakerOpenError, get_chat_model
 from ..state import AgentState
 
 
@@ -50,6 +50,9 @@ async def validator_node(state: AgentState) -> dict:
             response = await get_chat_model().ainvoke(prompt)
             content = response.content if hasattr(response, "content") else str(response)
             is_valid = content.strip().upper() != "NO"
+        except CircuitBreakerOpenError:
+            # 上游 LLM 熔断非节点级可恢复:上抛 run_agent 走 job 级降级(见 finish 同款注释)
+            raise
         except Exception as err:
             print(f"validatorNode validation check failed, defaulting to YES: {err}")
 

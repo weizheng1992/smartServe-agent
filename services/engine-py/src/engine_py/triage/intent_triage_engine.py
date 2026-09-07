@@ -12,6 +12,7 @@ from typing import Any
 
 from ..db import IntentLog, LowConfidenceLog, get_session
 from ..event_bus import emit_job_result, emit_status
+from ..llm import CircuitBreakerOpenError
 from ..memory import ShortMemory, TaskMemory
 from ..skills import is_action_query
 from ..tenant import get_merchant_display_name, sanitize_tenant_response
@@ -721,6 +722,9 @@ class IntentTriageEngine:
                 "global_transitions_count": -1,
                 "tool_errors_count": -1,
             }
+        except CircuitBreakerOpenError:
+            # 上游 LLM 熔断非节点级可恢复:上抛 run_agent 走 job 级降级(兜底 intent 仅面向分类输出类失败)
+            raise
         except Exception as err:
             print(f"IntentTriageEngine Step 3 structured classifier failed: {err}")
             fallback_intents = [{"intent": "general_query", "confidence": 0.5}]

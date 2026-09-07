@@ -11,7 +11,7 @@ import re
 
 from ...approvals import find_approval_by_id, find_latest_approval_by_thread_id
 from ...event_bus import emit_status
-from ...llm import get_chat_model
+from ...llm import CircuitBreakerOpenError, get_chat_model
 from ...memory import ShortMemory
 from ...tenant import get_merchant_display_name
 from ..state import AgentState, build_history_context
@@ -458,6 +458,9 @@ async def planner_node(state: AgentState) -> dict:
                 plan=task_plan,
             )
         return {"task_plan": task_plan, "short_memory": short_memory, "global_transitions_count": 1}
+    except CircuitBreakerOpenError:
+        # 上游 LLM 熔断非节点级可恢复:上抛 run_agent 走 job 级降级(兜底计划仅面向规划输出类失败)
+        raise
     except Exception as err:
         print(f"plannerNode failed, falling back to default single-step plan: {err}")
         return {

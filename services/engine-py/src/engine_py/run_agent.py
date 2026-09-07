@@ -11,7 +11,8 @@
 7. 终态 `${jobId}:result` 事件收口发布
 
 TODO(Phase 1b):token 累计已由 llm/telemetry.py 落盘 llm_call_logs 并聚合
-(2026-09-05 起,total_tokens 为本次运行真实 usage 总和);熔断/退避仍待移植。
+(2026-09-05 起,total_tokens 为本次运行真实 usage 总和);熔断/退避/超时已由
+llm/resilience.py 承担(2026-09-07,wayfinder 003)。
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from .graph import build_graph
 from .graph.build_graph import CIRCUIT_BREAKER_TOOL_ERRORS, CIRCUIT_BREAKER_TRANSITIONS
 from .graph.state import DEFAULT_TASK_PLAN, AgentState, to_ts_dict
 from .llm import (
+    CircuitBreakerOpenError,
     bind_llm_call_context,
     drain_llm_call_writes,
     get_embedding_model,
@@ -149,6 +151,24 @@ async def _resolve_business_context(
     return business_id, dynamic_config
 
 
+def _degraded_llm_breaker_result() -> dict:
+    """上游 LLM 熔断时的降级结果:道歉回复 + 空计划,沿用图终态消费链路。
+
+    run_agent 主流程(metrics 落盘 / 任务记忆 / result 事件)继续走通,
+    仅 resolution_status 落 ``llm_circuit_breaker``。
+    """
+    return {
+        "output": (
+            "非常抱歉,智能服务当前遇到上游模型波动,暂时无法处理您的请求。"
+            "请稍后再试,或选择人工客服协助。"
+        ),
+        "task_plan": dict(DEFAULT_TASK_PLAN),
+        "loop_count": 0,
+        "global_transitions_count": 0,
+        "tool_errors_count": 0,
+    }
+
+
 async def _report_langsmith_feedback(is_success: bool, comment: str) -> None:
     """后台 fire-and-forget 上报 LangSmith 语义反馈(TS 侧无 runId 桥接,标记简化)。"""
     api_key = os.environ.get("LANGCHAIN_API_KEY")
@@ -251,8 +271,9 @@ async def run_agent(job: AgentJobInput) -> dict:
     business_id, dynamic_config = await _resolve_business_context(thread_id, user_id, job.business_id)
 
     # LLM 调用归因:本次运行内全部模型调用(图节点 + 后台画像审计任务)据此
-    # 落盘 llm_call_logs 的 thread_id / business_id(见 llm/telemetry.py)
-    bind_llm_call_context(thread_id=thread_id, business_id=business_id)
+    # 落盘 llm_call_logs 的 thread_id / business_id(见 llm/telemetry.py);
+    # job_id 供韧性层发布 ${jobId}:status 状态事件(见 llm/resilience.py)
+    bind_llm_call_context(thread_id=thread_id, business_id=business_id, job_id=job_id)
 
     long_memory = LongMemory(user_id, business_id)
     episodic_memory = EpisodicMemory(user_id, business_id)
@@ -325,7 +346,16 @@ async def run_agent(job: AgentJobInput) -> dict:
 
     start_time = time.time()
     graph_app = build_graph()
-    result = await graph_app.ainvoke(initial_state)
+    llm_breaker_fired = False
+    try:
+        result = await graph_app.ainvoke(initial_state)
+    except CircuitBreakerOpenError as breaker_err:
+        # 🛡️ 上游 LLM 熔断(连续失败达阈值,见 llm/resilience.py):全图中止,
+        # 降级为道歉回复;session_metrics 落 resolution_status='llm_circuit_breaker'
+        # (ticket 006 熔断信号入池的数据源)。韧性层已发布 circuit_breaker_open 状态事件。
+        print(f"[runAgent] ⚠️ 上游 LLM 熔断,降级道歉回复: {breaker_err}")
+        llm_breaker_fired = True
+        result = _degraded_llm_breaker_result()
     elapsed_latency_ms = (time.time() - start_time) * 1000
 
     # 🪙 SaaS 遥测:算力消耗 / 成本换算 / 图决策深度 / 解挂状态
@@ -343,13 +373,19 @@ async def run_agent(job: AgentJobInput) -> dict:
             global_transitions >= CIRCUIT_BREAKER_TRANSITIONS or tool_errors >= CIRCUIT_BREAKER_TOOL_ERRORS
         )
 
-        resolution_status = "circuit_breaker" if breaker_fired else "resolved_auto"
-        is_success = not breaker_fired
-        feedback_comment = (
-            "Circuit breaker tripped: hard degradation with apology fallback."
-            if breaker_fired
-            else "All planned subtasks completed successfully."
-        )
+        # 🛡️ LLM 熔断落盘(resilience.py 全局熔断器拦截):job 级终态,优先于图级判定
+        if llm_breaker_fired:
+            resolution_status = "llm_circuit_breaker"
+            is_success = False
+            feedback_comment = "Upstream LLM circuit breaker open; job degraded with apology fallback."
+        else:
+            resolution_status = "circuit_breaker" if breaker_fired else "resolved_auto"
+            is_success = not breaker_fired
+            feedback_comment = (
+                "Circuit breaker tripped: hard degradation with apology fallback."
+                if breaker_fired
+                else "All planned subtasks completed successfully."
+            )
 
         plan = result.get("task_plan") or {}
         subtasks = plan.get("subtasks") or []

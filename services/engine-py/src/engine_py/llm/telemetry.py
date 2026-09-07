@@ -40,18 +40,26 @@ class CallContext:
 
     thread_id: str | None
     business_id: str | None
+    job_id: str | None = None  # 韧性层状态事件(${jobId}:status)的发布目标
 
 
 _call_context: ContextVar[CallContext | None] = ContextVar("llm_call_context", default=None)
 
 
-def bind_llm_call_context(thread_id: str | None, business_id: str | None) -> None:
+def bind_llm_call_context(
+    thread_id: str | None, business_id: str | None, job_id: str | None = None
+) -> None:
     """为当前任务设置调用归因上下文(run_agent 主链路、RAG 摄取等入口调用)。
 
     无需显式 reset:每个入口在任何 LLM 调用发生前都会重设本值,跨运行串味
     不可能发生;create_task 派生的后台任务(画像审计)在创建时刻快照继承。
     """
-    _call_context.set(CallContext(thread_id=thread_id, business_id=business_id))
+    _call_context.set(CallContext(thread_id=thread_id, business_id=business_id, job_id=job_id))
+
+
+def current_llm_call_context() -> CallContext | None:
+    """当前任务的 LLM 调用归因上下文(韧性层状态事件发布用)。"""
+    return _call_context.get()
 
 
 # ---- 落盘任务登记:run_agent 聚合前可等待写完(同进程内同源) ----

@@ -14,8 +14,9 @@ local 构造策略(防事件循环冻结):
 - 缓存未命中才回退在线拉取,默认镜像 hf-mirror.com(HF_ENDPOINT 须在
   huggingface_hub 导入前设置才生效;用户已显式配置则不覆盖)。
 
-TODO(Phase 1b):移植 CircuitBreaker 熔断、指数退避重试、p-timeout 超时。
-token 统计上报已由 telemetry.py 的 LlmCallTelemetryHandler 承担
+韧性三件套(熔断/指数退避/超时)已由 resilience.py 承担(2026-09-07,
+wayfinder 003),经 _ResilientChatOpenAI 公共 invoke/ainvoke 全覆盖注入;
+token 统计上报由 telemetry.py 的 LlmCallTelemetryHandler 承担
 (2026-09-05 起,每次调用真实 usage 落盘 llm_call_logs)。
 """
 
@@ -32,6 +33,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from ..config import settings
+from .resilience import resilient_ainvoke, resilient_invoke
 from .telemetry import LlmCallTelemetryHandler
 
 
@@ -87,25 +89,29 @@ def _inject_telemetry(config: Any) -> dict:
     return merged
 
 
-class _TelemetryChatOpenAI(ChatOpenAI):
-    """usage 遥测注入层 —— 覆写公共 invoke 入口,直调与组合调用全覆盖。
+class _ResilientChatOpenAI(ChatOpenAI):
+    """usage 遥测注入 + 熔断/退避/超时韧性层 —— 覆写公共 invoke 入口,直调与组合调用全覆盖。
 
     构造期 callbacks 仅在该实例为顶层调用对象时生效;被 with_structured_output
     等外层 Runnable 组合后不会向子运行传播(实测 triage 的 classify 调用漏采,
     2026-09-05)。RunnableSequence 调度子步骤同样走公共 invoke/ainvoke,故在
-    此统一注入 config.callbacks 是唯一全覆盖挂点。
+    此统一注入 config.callbacks 是唯一全覆盖挂点。韧性层(resilience.py)挂
+    同一入口:结构化调用的模型子步骤与直调获得同等的熔断拦截/退避/超时。
     """
 
     def invoke(self, input, config=None, **kwargs):
-        return super().invoke(input, _inject_telemetry(config), **kwargs)
+        # 零参 super() 不进 lambda 帧(无 __class__ cell)——须先在方法体内绑定代理
+        sup = super()
+        return resilient_invoke(lambda: sup.invoke(input, _inject_telemetry(config), **kwargs))
 
     async def ainvoke(self, input, config=None, **kwargs):
-        return await super().ainvoke(input, _inject_telemetry(config), **kwargs)
+        sup = super()
+        return await resilient_ainvoke(lambda: sup.ainvoke(input, _inject_telemetry(config), **kwargs))
 
 
 @lru_cache(maxsize=1)
 def get_chat_model() -> ChatOpenAI:
-    return _TelemetryChatOpenAI(
+    return _ResilientChatOpenAI(
         model=settings.llm_model,
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url,

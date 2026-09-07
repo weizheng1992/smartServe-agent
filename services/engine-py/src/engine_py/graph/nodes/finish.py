@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from ...llm import get_chat_model
+from ...llm import CircuitBreakerOpenError, get_chat_model
 from ...memory import ShortMemory
 from ...skills import is_action_query
 from ...tenant import get_merchant_display_name, sanitize_tenant_response
@@ -197,6 +197,10 @@ async def finish_node(state: AgentState) -> dict:
                 print(f"[Finish Cache] Failed to cache general query: {cache_err}")
 
         return {"output": sanitized_content.strip(), "short_memory": short_memory}
+    except CircuitBreakerOpenError:
+        # 上游 LLM 熔断非节点级可恢复:上抛 run_agent 走 job 级降级道歉
+        # + session_metrics 落 llm_circuit_breaker(兜底仅面向解析/输出类失败)
+        raise
     except Exception as err:
         print(f"finishNode failed, using fallback summary: {err}")
         fallback_details = json.dumps(

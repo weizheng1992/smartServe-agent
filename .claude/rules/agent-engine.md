@@ -72,7 +72,7 @@ paths: ["services/engine-py/**/*"]
 ## 2. 编码与维护准则
 
 1. **确定性拓扑**：修改 `graph/nodes/planner.py` 时必须严格声明 `dependencies` 依赖数组，供 `step_execution_engine.py` 并行调度。
-2. **统一调用入口**：所有 LLM 与向量 Embedding 调用必须统一走 `llm/chat.py`（`get_chat_model` / `get_embedding_model`，lru_cache 单例）；熔断与重试为未完成 TODO。
+2. **统一调用入口**：所有 LLM 与向量 Embedding 调用必须统一走 `llm/chat.py`（`get_chat_model` / `get_embedding_model`，lru_cache 单例）；熔断/退避/超时由 `llm/resilience.py` 的全局 CircuitBreaker 承担（2026-09-07 起，挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖），阈值经 `LLM_CIRCUIT_*` / `LLM_RETRY_*` / `LLM_TIMEOUT_SECONDS` env 可调。
 3. **中文本地化日志**：Temporal Activity 与执行节点产生的所有用户态进度事件必须使用标准中文本地化文本。
 4. **无异常冷启动**：记忆检索、租户配置加载等底层逻辑必须兼容空数据与冷启动，严禁未捕获抛错阻断状态机。
 5. **环境自读取**：`config.py` 在导入时读取环境变量；任何测试基建必须先注入 `DATABASE_URL` / `REDIS_URL` 再导入 engine_py 模块。
