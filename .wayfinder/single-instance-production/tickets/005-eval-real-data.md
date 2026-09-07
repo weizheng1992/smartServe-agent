@@ -5,8 +5,8 @@ map: single-instance-production
 type: ticket
 labels: [wayfinder:task]
 mode: AFK
-assignee: ""
-status: open
+assignee: "weizheng"
+status: in_progress
 blocked-by: []
 blocks: []
 created: 2026-09-06

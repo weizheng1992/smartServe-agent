@@ -157,20 +157,9 @@ async def main() -> None:
                 "ON CONFLICT (business_id) DO UPDATE SET monthly_limit_tokens = EXCLUDED.monthly_limit_tokens"
             )
         )
-        await conn.execute(
-            text(
-                "INSERT INTO eval_run_records (id, run_name, dataset_name, sample_count, "
-                "tool_accuracy, rag_faithfulness, hitl_trigger_rate, status) VALUES "
-                "('eval-run-001', 'E-Commerce 黄金回归基准测试 v2.4', 'ecommerce_golden_dataset_v2', "
-                "120, 0.968, 0.942, 0.085, 'completed'), "
-                "('eval-run-002', '跨租户越权与 SOP 防线专项评测', 'redteam_jailbreak_safety_v1', "
-                "60, 0.985, 0.910, 0.150, 'completed'), "
-                "('eval-run-003', '多轮槽位追问与发票开具压力集', 'invoice_slot_stress_test', "
-                "85, 0.932, 0.895, 0.040, 'completed') "
-                "ON CONFLICT (id) DO NOTHING"
-            )
-        )
-        print("[PG Seed] guardrail_rules / tenant_billing_quotas / eval_run_records 注入成功")
+        # eval_run_records 不再播种假数据(wayfinder 005):真实评测经
+        # bun run test:prompt:record 由 engine_py.evals.promptfoo_import 入库
+        print("[PG Seed] guardrail_rules / tenant_billing_quotas 注入成功")
 
         # 7. RAG 知识库与长期画像事实(入库即向量化,组装口径与 contextual_rag / long_memory 一致)
         rag_docs = [

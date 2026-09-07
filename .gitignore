@@ -95,3 +95,6 @@ test-results/
 eval/providers/__pycache__/
 eval/scorers/__pycache__/
 __pycache__/
+
+# 真实评测运行记录(test:prompt:record 产物,本地入库后即弃)
+eval/.records/

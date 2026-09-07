@@ -9,7 +9,7 @@ interface EvalStats {
 }
 
 /** 顶部指标卡:从 /api/evals/results 记录求均值。
- *  注意:评测记录由本地随机生成器写入(isMock: true),非真实评测 —— 真实评测走 bun run test:prompt。 */
+ *  数据源为真实 promptfoo 运行(bun run test:prompt:record 自动入库,wayfinder 005)。 */
 export function EvalMetricsSummary() {
   const [stats, setStats] = useState<EvalStats | null>(null);
 
@@ -59,7 +59,7 @@ export function EvalMetricsSummary() {
         <CardContent className="p-0">
           <div className="text-xs font-semibold text-slate-500">自动拦截/HITL 触发率</div>
           <div className="text-2xl font-bold text-amber-600 mt-1">{pct(stats?.hitlTriggerRate)}</div>
-          <div className="text-[11px] text-slate-400 font-medium mt-1">数据源 isMock,真实评测走 test:prompt</div>
+          <div className="text-[11px] text-slate-400 font-medium mt-1">真实评测:test:prompt:record 入库</div>
         </CardContent>
       </Card>
     </div>

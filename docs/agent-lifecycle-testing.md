@@ -231,7 +231,7 @@ Agent 发布完成后,必须进行端到端的**分布式链路追踪(Distribute
 
 | 批次 | 内容 | 契约影响 |
 |---|---|---|
-| **前置清理** ✅ 已落地(2026-09-03) | `/api/logs` 接 `session_metrics` 真实值(无数据处返回真实 0,不再编造 token/延迟);`/api/evals/run` 响应显式携带 `isMock: true` 并从坏例看板数据源排除 | 无 |
+| **前置清理** ✅ 已落地(2026-09-03) | `/api/logs` 接 `session_metrics` 真实值(无数据处返回真实 0,不再编造 token/延迟);`/api/evals/run` 响应显式携带 `isMock: true` 并从坏例看板数据源排除(该 isMock 方案已于 2026-09-07 被 wayfinder 005 取代:路由 410 退役,见附录 2) | 无 |
 | **v1** ✅ 已落地(2026-09-03) | `badcase_candidates` 表(Alembic `0002`)+ 三信号点挂接入池 + 熔断落盘 `session_metrics` + `scheduler.py` 周期任务框架(outbox 对账修复 + 坏例池摘要/保留期)+ 已知值脱敏 + triage CLI(`python -m engine_py.badcase.cli`) | **零**(不动 39 路由冻结契约) |
 | **v3.1** | 踩/赞 UI + feedback 路由 + Admin 坏例池 CRUD 模块 + 补 pytest 契约测试 + 更新 `.claude/rules/server-gateway.md` 路由计数 | 显式契约修订 |
 | **二期** | 隐式信号(首位:"答后即转人工",信噪比高于踩)、Playwright 自动补签(待 E2E 基建修复)、周期任务迁移 Temporal Schedule(多实例部署前) | 随批评估 |
@@ -241,6 +241,6 @@ Agent 发布完成后,必须进行端到端的**分布式链路追踪(Distribute
 ## 📎 附录:技术债与独立立案(2026-09-03 摸底)
 
 1.  ~~**outbox worker 死代码(不变量级失实,单独立案)**~~ **已修复(2026-09-03,随第五阶段 v1 周期任务框架一并落地)**:原 `outbox_worker` 从未被任何入口启动、且旧实现存在"假完成"缺陷;现重构为 `process_pending_events`(SKIP LOCKED + 10s 年龄阈值 + 停滞重入队),由 `scheduler.py` 每 30s 对账补偿,并同步修正 CLAUDE.md 不变量 #3 与 `.claude/rules/agent-engine.md` §1.6 表述。
-2.  **死表**:`eval_runs` / `eval_results` 定义后无任何读写,暂留;实际在用的 `eval_run_records` 数据为随机数(见第四阶段前置清理)。
+2.  ~~**死表**~~ **已接通(2026-09-07,wayfinder 005)**:`eval_runs` / `eval_results` 由 `engine_py/evals/promptfoo_import.py` 从真实 promptfoo 运行写入(`bun run test:prompt:record` 三套件自动入库);`eval_run_records` 的随机数生成器已下线(`POST /api/evals/run` 410 指引真实通道),admin 评测页展示真实汇总行。
 3.  **E2E 基建**:`/api/auth/login` 路由不存在(测试靠 localStorage 兜底)、无 globalSetup 种子、HITL/熔断零覆盖(见第一阶段)。
 4.  **失效测试**:`apps/web/tests/chatDialogueScenario.test.ts` 仍 import 已退役的 `db` / `engine` workspace 包。

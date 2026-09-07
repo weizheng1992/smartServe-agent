@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import importlib
+import random
 
 import pytest
 
@@ -513,22 +514,82 @@ class TestBilling:
 
 
 class TestEvals:
-    async def test_results_total_and_data(self, client, contract_fixtures):
+    @pytest.fixture
+    def seed_random_eval_rows(self):
+        """随机评测行播种器 — 降级自 crud.py 生产随机生成器(wayfinder 005),
+        生产路由已 410 退役,生成逻辑留在测试侧供列表/分页类契约测试复用;
+        固定种子保证可复现。"""
+
+        rng = random.Random(20260907)
+
+        async def _seed(count: int, dataset: str = "random_suite") -> list[str]:
+            from engine_py.db import EvalRunRecordRow, get_session
+
+            ids = [f"contract_eval_rand_{_TS}_{i}" for i in range(count)]
+            async with get_session() as session:
+                for row_id in ids:
+                    session.add(
+                        EvalRunRecordRow(
+                            id=row_id,
+                            run_name=f"promptfoo {dataset} @ rand{rng.randint(0, 999)}",
+                            dataset_name=dataset,
+                            sample_count=rng.randint(5, 60),
+                            tool_accuracy=round(rng.uniform(0.6, 1.0), 4),
+                            rag_faithfulness=round(rng.uniform(0.5, 1.0), 4),
+                            hitl_trigger_rate=0.0,
+                            status="completed",
+                        )
+                    )
+                await session.commit()
+            return ids
+
+        return _seed
+
+    async def test_results_lists_real_rows_without_mock_marker(
+        self, client, contract_fixtures, seed_random_eval_rows
+    ):
+        """随机生成器已下线(wayfinder 005):列表来自 promptfoo_import 写入的真实
+        汇总行,响应不再携带 isMock;此处播种确定性一行 + 随机多行钉死透传口径。"""
+        from engine_py.db import EvalRunRecordRow, get_session
+
+        row_id = f"contract_eval_{_TS}"
+        async with get_session() as session:
+            session.add(
+                EvalRunRecordRow(
+                    id=row_id,
+                    run_name=f"promptfoo unified @ contract{_TS}",
+                    dataset_name="unified",
+                    sample_count=47,
+                    tool_accuracy=1.0,
+                    rag_faithfulness=0.99,
+                    hitl_trigger_rate=0.0,
+                    status="completed",
+                )
+            )
+            await session.commit()
+        random_ids = await seed_random_eval_rows(3)
+
         res = await client.get("/api/evals/results")
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
         assert isinstance(body["total"], (int, float))
         assert isinstance(body["data"], list)
+        listed = {d["id"] for d in body["data"]}
+        assert row_id in listed
+        assert set(random_ids) <= listed  # 随机播种行同样透传
+        mine = [d for d in body["data"] if d["id"] == row_id]
+        assert len(mine) == 1
+        assert mine[0]["datasetName"] == "unified"
+        assert mine[0]["sampleCount"] == 47
+        assert mine[0]["toolAccuracy"] == 1.0
+        assert "isMock" not in mine[0]  # 假数据标注随真实链路移除
 
-    async def test_run_local_random_metrics(self, client, contract_fixtures):
-        res = await client.post(
-            "/api/evals/run", json={"datasetName": "contract_dataset", "runName": f"contract_{_TS}"}
-        )
-        assert res.status_code == 200
-        body = res.json()
-        assert body["success"] is True
-        assert body["data"] is not None
+    async def test_run_endpoint_retired(self, client, contract_fixtures):
+        """POST /api/evals/run 不再产出随机指标:410 指引真实评测通道。"""
+        res = await client.post("/api/evals/run", json={"datasetName": "contract_dataset"})
+        assert res.status_code == 410
+        assert "test:prompt:record" in res.json()["detail"]
 
 
 class TestLogs:

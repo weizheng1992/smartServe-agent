@@ -314,13 +314,9 @@ export const systemLogsApi = {
   },
 };
 
-/** 10. 评测与自动化基准 API */
+/** 10. 评测与自动化基准 API(随机评测生成器已退役 410,真实评测走 test:prompt:record) */
 export const evalsApi = {
   getResults: () => {
     return adminApi.get('/api/evals/results');
-  },
-
-  runEval: (suiteName: string) => {
-    return adminApi.post('/api/evals/run', { suiteName });
   },
 };

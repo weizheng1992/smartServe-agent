@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as _dt
-import random
 import time
 
 from engine_py.badcase.pool import SOURCE_PERSONA_FACT_DELETED, record_badcase_signal
@@ -328,20 +327,22 @@ async def update_quota(body: QuotaIn):
 # evals
 # ---------------------------------------------------------------------------
 def _eval_item(r: EvalRunRecordRow) -> dict:
+    """eval_run_records → admin DTO。
+
+    行由 ``engine_py.evals.promptfoo_import`` 从真实 promptfoo 运行写入
+    (wayfinder 005);随机生成器已下线,缺省指标诚实置 0,不再造数。
+    """
     created = r.created_at
-    created_str = created.strftime("%Y-%m-%d %H:%M:%S") if created else "2026-02-23 14:00:00"
+    created_str = created.strftime("%Y-%m-%d %H:%M:%S") if created else ""
     return {
         "id": r.id,
         "runName": r.run_name,
         "datasetName": r.dataset_name,
         "sampleCount": r.sample_count,
-        "toolAccuracy": 0.95 if r.tool_accuracy is None else r.tool_accuracy,
-        "ragFaithfulness": 0.92 if r.rag_faithfulness is None else r.rag_faithfulness,
-        "hitlTriggerRate": 0.12 if r.hitl_trigger_rate is None else r.hitl_trigger_rate,
+        "toolAccuracy": 0.0 if r.tool_accuracy is None else r.tool_accuracy,
+        "ragFaithfulness": 0.0 if r.rag_faithfulness is None else r.rag_faithfulness,
+        "hitlTriggerRate": 0.0 if r.hitl_trigger_rate is None else r.hitl_trigger_rate,
         "status": r.status or "completed",
-        # 显式标注:eval_run_records 全部由本地随机生成器写入,非真实评测。
-        # 坏例看板 / BI 数据源必须依此排除;真实评测走 bun run test:prompt。
-        "isMock": True,
         "createdAt": created_str,
     }
 
@@ -361,25 +362,16 @@ class TriggerEvalIn(BaseModel):
 
 @router.post("/api/evals/run")
 async def trigger_eval(body: TriggerEvalIn):
-    # 与 TS 一致:本地随机指标生成(非真实评测)——响应经 _eval_item 显式携带 isMock: true
-    tool_accuracy = round(0.95 + (random.random() * 0.04 - 0.02), 3)
-    rag_faithfulness = round(0.92 + (random.random() * 0.05 - 0.02), 3)
-    hitl_rate = round(0.1 + (random.random() * 0.05 - 0.02), 3)
-    async with get_session() as session:
-        row = EvalRunRecordRow(
-            id=f"eval_run_{int(time.time() * 1000)}",
-            run_name=body.runName or f"自动化回归评测 - {body.datasetName}",
-            dataset_name=body.datasetName,
-            sample_count=50,
-            tool_accuracy=tool_accuracy,
-            rag_faithfulness=rag_faithfulness,
-            hitl_trigger_rate=hitl_rate,
-            status="completed",
-        )
-        session.add(row)
-        await session.commit()
-        await session.refresh(row)
-    return {"success": True, "data": _eval_item(row)}
+    """评测随机生成器已下线(wayfinder 005):不再产出假指标。
+
+    真实评测由 ``bun run test:prompt:record`` 执行 promptfoo 三套件并自动入库
+    (eval_runs / eval_results + 本表展示汇总行)。路由形状保留(契约冻结),
+    行为改为显式指引。
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="评测随机生成器已停用:请运行 bun run test:prompt:record,真实结果将自动写入 eval_runs/eval_results。",
+    )
 
 
 # ---------------------------------------------------------------------------
