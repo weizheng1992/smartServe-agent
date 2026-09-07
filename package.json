@@ -24,7 +24,7 @@
     "biome:format": "biome format --write .",
     "biome:lint": "biome lint --write .",
     "biome:check": "biome check --write .",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test && playwright test -c playwright.breaker.config.ts",
     "test:eval": "cd services/gateway-py && uv run pytest",
     "test:engine": "cd services/engine-py && uv run pytest",
     "test:unit": "turbo run test",

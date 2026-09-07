@@ -15,11 +15,15 @@ export default defineConfig({
     cors: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        // E2E_GATEWAY_TARGET:熔断 E2E 用独立网关(死 LLM 注入)时覆写代理目标
+        target: process.env.E2E_GATEWAY_TARGET ?? 'http://localhost:4000',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:4000',
+        target: (process.env.E2E_GATEWAY_TARGET ?? 'http://localhost:4000').replace(
+          'http',
+          'ws',
+        ),
         ws: true,
       },
     },
