@@ -25,6 +25,7 @@ created: 2026-09-06
 - [auth/login 真实登录链路](tickets/001-auth-login.md): bcrypt + JWT(30 天无刷新)+ Redis jti 登出黑名单;静默重校验新增 `/api/auth/me`(UUID 漂移自愈);删 localStorage 假兜底,E2E 切真实凭证。
 - [租户+IP 滑动窗口限流](tickets/002-rate-limiting.md): RateLimitMiddleware(ZSET 滑窗 + 多键 all-or-nothing Lua)挂 /api/chat 与 /api/v1/spi;XFF 仅可信反代采信最右跳;admin "all" 跳租户桶;Redis 故障 fail-open。
 - [LLM 熔断/指数退避/超时移植](tickets/003-llm-circuit-breaker.md): 全局 CircuitBreaker 单例(TS 1:1)+ 3 次指数退避 + wait_for 超时,挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖;熔断中断的会话落 `resolution_status='llm_circuit_breaker'`(006 数据源);4 节点兜底前置熔断豁免上抛。
+- [熔断信号入坏例池](tickets/006-circuit-breaker-badcase.md): run_agent 收口处两路熔断(LLM 级+图级)入池(先验 suspected_defect);挂点定案会话级而非状态机翻转处;`record_badcase_signal` 增 opt-in dedupe 幂等护栏;摘要按 source 分组自动收纳。
 
 ## Not yet specified
 
