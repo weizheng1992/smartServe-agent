@@ -71,7 +71,12 @@ class ShoppingGuideSkill(BaseSkill):
         "version": "1.0.0",
     }
 
-    _FALLBACK_RE = re.compile(r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好|跑步鞋|卫衣|夹克)", re.IGNORECASE)
+    # 与 slot_extractor 的 SHOPPING_GUIDE 规则同源补词(2026-09-07):热门/爆款类
+    # 措辞也须被 is_action_query 视作动作形输入,拒绝命中语义回复缓存。
+    _FALLBACK_RE = re.compile(
+        r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好|跑步鞋|卫衣|夹克|热门|爆款|热销|热卖|畅销|上新|新品)",
+        re.IGNORECASE,
+    )
 
     def can_handle(self, context: dict) -> bool:
         if super().can_handle(context):

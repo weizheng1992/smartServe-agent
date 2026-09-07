@@ -70,11 +70,18 @@ def try_match_executor_fast_path(
             "args": {"orderId": extracted_order_id, "newAddress": new_address or "客户指定新地址"},
         }
 
+    # 2026-09-07:返回 SkillsRegistry 真实技能 id(带 skill_ 前缀)。TS 基线此处
+    # 返回伪名 cart_manage/shopping_guide —— 既不在 allowed_tools 白名单、也查不到
+    # 注册表技能,分发门槛整段跳过,商品/购物车子任务空转至道歉降级(继承缺陷)。
     if any(kw in desc_lower for kw in ("cart", "加购物车", "加入购物车", "加购", "购物车", "结算", "改数量", "删商品")):
-        return {"toolName": "cart_manage", "args": {"userInput": user_input}}
+        return {"toolName": "skill_cart_manage", "args": {"userInput": user_input}}
 
-    if any(kw in desc_lower for kw in ("shopping_guide", "recommend", "推荐", "导购", "选品")):
-        return {"toolName": "shopping_guide", "args": {"userInput": user_input}}
+    # 子串匹配(非正则):裸 "hot" 会误中 what/shot,故用完整词 popular/trending/best seller。
+    if any(
+        kw in desc_lower
+        for kw in ("shopping_guide", "recommend", "推荐", "导购", "选品", "popular", "trending", "best seller", "bestseller")
+    ):
+        return {"toolName": "skill_shopping_guide", "args": {"userInput": user_input}}
 
     if (
         any(kw in desc_lower for kw in ("listuserorders", "list orders", "fetch recent orders", "全部订单", "历史订单", "名下订单"))

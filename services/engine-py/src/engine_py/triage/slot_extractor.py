@@ -122,8 +122,12 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
     IntentRule(
         intent=AgentIntentType.SHOPPING_GUIDE,
         confidence=0.95,
+        # 2026-09-07:补入 热门/爆款/热销/热卖/畅销/上新/新品 —— 此前"查询热门商品"
+        # 类措辞不命中任何规则,落入 LLM 精判→planner→executor,又被 allowed_tools
+        # 白名单拦掉商品工具,空转至 finish 道歉降级。命中本规则即走 Triage 快轨
+        # 直达 ShoppingGuideSkill(无 LLM 参与毫秒级返回)。
         pattern=re.compile(
-            r"(?:推荐|买什么|有什么好看|有没有|挑一款|选一款|适合.*的|找一找|推荐一款|介绍一下|哪款好|选鞋|选衣服|看商品|导购|什么牌子|款式|推荐几件|推荐几款)",
+            r"(?:推荐|买什么|有什么好看|有没有|挑一款|选一款|适合.*的|找一找|推荐一款|介绍一下|哪款好|选鞋|选衣服|看商品|导购|什么牌子|款式|推荐几件|推荐几款|热门|爆款|热销|热卖|畅销|上新|新品)",
             re.IGNORECASE,
         ),
         negative_pattern=re.compile(r"(?:加购物车|加入购物车|放进购物车|加购|移出购物车|清空购物车)", re.IGNORECASE),

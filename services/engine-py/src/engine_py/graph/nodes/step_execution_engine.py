@@ -151,7 +151,11 @@ async def _execute_single_step_core(
             '6. If the step description mentions changing shipping address, select "changeShippingAddress".\n'
             '7. If the step description mentions generating an invoice, select "generateInvoice".\n'
             '8. If the step description mentions recording user preferences, select "recordUserPreference".\n'
-            "9. Extract arguments from CONVERSATION HISTORY below.\n\n"
+            '9. If the step description mentions searching, recommending or ranking products, comparing '
+            'products, or checking SKU stock and reviews, select the matching product tool '
+            '(e.g. "searchProducts", "compareProducts", "queryProductSkus", "queryProductReviews", '
+            '"queryProductRanking").\n'
+            "10. Extract arguments from CONVERSATION HISTORY below.\n\n"
             'Output raw JSON object or "NONE":\n{"toolName": "toolName", "args": {"key": "value"}}\n\n'
             f"[CONVERSATION HISTORY]\n{history_context}"
         )
@@ -374,6 +378,11 @@ async def execute_step(state: dict) -> dict:
         return {"taskPlan": current_plan, "globalTransitionsCount": 1}
 
     business_config = state.get("business_config") or {}
+    # 2026-09-07:TS 基线白名单仅含订单/退款 7 工具,商品查询/导购类子任务在下方
+    # dispatch 门槛被整段跳过 → "Step execution completed without needing tools"
+    # 空转至 finish 道歉降级。现纳入:导购/购物车技能(executor_fast_path 直呼其
+    # 注册表 id)+ 只读商品工具。写操作购物车工具(addToCart/updateCartItem)仍不
+    # 入白名单 —— 加购/改量必须走技能 SOP 管道,不允许 LLM 兜底直调。
     base_tools = [
         "getOrderStatus",
         "processRefund",
@@ -382,6 +391,14 @@ async def execute_step(state: dict) -> dict:
         "changeShippingAddress",
         "generateInvoice",
         "recordUserPreference",
+        "skill_shopping_guide",
+        "skill_cart_manage",
+        "searchProducts",
+        "compareProducts",
+        "queryProductSkus",
+        "queryProductReviews",
+        "queryProductRanking",
+        "getCartSummary",
     ]
     allowed_tools = list(dict.fromkeys([*(business_config.get("tools") or []), *base_tools])) if business_config.get(
         "tools"
