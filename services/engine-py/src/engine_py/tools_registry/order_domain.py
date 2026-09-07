@@ -202,8 +202,8 @@ class OrderDomainService:
                 return int(skill_config["maxRefundDays"])
             if isinstance(config.get("maxRefundDays"), (int, float)):
                 return int(config["maxRefundDays"])
-        except Exception:
-            pass
+        except Exception as cfg_err:
+            print(f"[售后时效] 租户配置读取失败,降级商户基准 business={clean_id}: {cfg_err}")
         if clean_id == "nike":
             return 30
         if clean_id == "adidas":
@@ -314,16 +314,19 @@ class OrderDomainService:
                         prod_name = "未知商品"
                         prod_desc = ""
                         try:
-                            prod = (
-                                await session.execute(
-                                    text('SELECT * FROM "products" WHERE "id" = :pid').bindparams(pid=prod_id)
-                                )
-                            ).mappings().first()
-                            if prod:
-                                prod_name = prod.get("name") or "未知商品"
-                                prod_desc = prod.get("description") or ""
-                        except Exception:
-                            pass
+                            # SAVEPOINT 隔离:单条商品补全失败不中止外层事务,
+                            # 否则循环内后续查询连坐 InFailedSqlTransaction
+                            async with session.begin_nested():
+                                prod = (
+                                    await session.execute(
+                                        text('SELECT * FROM "products" WHERE "id" = :pid').bindparams(pid=prod_id)
+                                    )
+                                ).mappings().first()
+                                if prod:
+                                    prod_name = prod.get("name") or "未知商品"
+                                    prod_desc = prod.get("description") or ""
+                        except Exception as prod_err:
+                            print(f"[订单详情] 商品信息补全失败 product={prod_id}: {prod_err}")
                         items.append(
                             {
                                 "productId": prod_id,
@@ -416,6 +419,10 @@ class OrderDomainService:
                 delivery_date = _dt.datetime.fromisoformat(str(estimated_delivery))
             except ValueError:
                 delivery_date = _dt.datetime.now()
+            # 送达时间可能带时区偏移(PG timestamptz 落 text 列 / 商户 SPI ISO 串),
+            # 与 naive 的 datetime.now() 直接相减会 TypeError 炸掉整次退款(wayfinder 004)
+            if delivery_date.tzinfo is not None:
+                delivery_date = delivery_date.astimezone().replace(tzinfo=None)
             diff_days = abs((_dt.datetime.now() - delivery_date).days)
             if diff_days > return_window_days:
                 return {
@@ -438,14 +445,18 @@ class OrderDomainService:
                     oid=effective_order_id
                 )
             )
+            # 三方镜像表为旁路,以 SAVEPOINT 隔离:表缺失(未跑三方种子)/更新异常
+            # 只回滚自身 —— 此前裸 except 吞掉异常但事务已中止,主退款 UPDATE
+            # 随后的 commit 静默失效,工具却照报"退款成功"(wayfinder 004 密封容器实测)
             try:
-                await session.execute(
-                    text(
-                        "UPDATE \"third_party_orders\" SET order_status = 'REFUNDED' WHERE \"ext_order_sn\" = :oid"
-                    ).bindparams(oid=effective_order_id)
-                )
-            except Exception:
-                pass
+                async with session.begin_nested():
+                    await session.execute(
+                        text(
+                            "UPDATE \"third_party_orders\" SET order_status = 'REFUNDED' WHERE \"ext_order_sn\" = :oid"
+                        ).bindparams(oid=effective_order_id)
+                    )
+            except Exception as tp_err:
+                print(f"[退款执行] 三方镜像表更新失败(SAVEPOINT 已隔离,主退款继续) order={effective_order_id}: {tp_err}")
             await session.commit()
 
         if order.get("source") == "merchant":
@@ -679,13 +690,15 @@ class OrderDomainService:
                     )
                 )
                 try:
-                    await session.execute(
-                        text(
-                            'UPDATE "third_party_orders" SET shipping_address = :addr WHERE "ext_order_sn" = :oid'
-                        ).bindparams(addr=new_address, oid=effective_order_id)
-                    )
-                except Exception:
-                    pass
+                    # 同退款路径:三方镜像表为旁路,SAVEPOINT 隔离防事务中止连坐主地址更新
+                    async with session.begin_nested():
+                        await session.execute(
+                            text(
+                                'UPDATE "third_party_orders" SET shipping_address = :addr WHERE "ext_order_sn" = :oid'
+                            ).bindparams(addr=new_address, oid=effective_order_id)
+                        )
+                except Exception as tp_err:
+                    print(f"[地址更新] 三方镜像表更新失败(SAVEPOINT 已隔离,主更新继续) order={effective_order_id}: {tp_err}")
                 await session.commit()
 
             if order.get("source") == "merchant":

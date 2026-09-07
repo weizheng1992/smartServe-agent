@@ -105,6 +105,9 @@ async def _teardown(engine, merchant_engine, original):
     order_domain._merchant_reader_engine = original
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM pending_approvals WHERE thread_id = :t").bindparams(t=REPRO_THREAD))
+        # 挂起即落库(wayfinder 004)后 execute_step 也会写 task_memory,
+        # 须先清子行否则 threads 删除触发外键
+        await conn.execute(text("DELETE FROM task_memory WHERE thread_id = :t").bindparams(t=REPRO_THREAD))
         await conn.execute(text("DELETE FROM threads WHERE id = :t").bindparams(t=REPRO_THREAD))
     await merchant_engine.dispose()
 
@@ -262,6 +265,57 @@ async def _approval_count(engine) -> int:
         ).scalar()
 
 
+def test_refund_survives_timezone_aware_delivery_date(pg_factory):
+    """回归钉(wayfinder 004):estimated_delivery 为带时区偏移的文本
+    (PG NOW() 写入 text 列 / 商户 SPI ISO 串)时,时效比对不得 TypeError 炸掉退款。
+
+    修复前:fromisoformat 解析出 aware datetime,与 naive 的 datetime.now() 相减
+    直接崩溃,HITL 核签通过后的退款恢复执行整段静默死亡(消息永不落库)。
+    """
+    asyncio.run(_tz_aware_delivery_scenario(pg_factory))
+
+
+async def _tz_aware_delivery_scenario(pg_factory):
+    from engine_py.tools_registry.order_domain import OrderDomainService
+
+    engine = pg_factory.kw["bind"]
+    tz_thread, tz_user, tz_order = "dbg_tz_thread_refund", "CUST-TZ-1", "ORD-TZ-WINDOW"
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO threads (id, user_id, business_id, status) VALUES (:t, :u, 'ecommerce', 'active') "
+                    "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id"
+                ).bindparams(t=tz_thread, u=tz_user)
+            )
+            # NOW() 写入 text 列 → 值形如 '2026-09-04 09:56:12.123+00'(带偏移),复现种子事故形态
+            await conn.execute(
+                text(
+                    "INSERT INTO orders (order_id, status, carrier, tracking_number, estimated_delivery, "
+                    "user_id, business_id, total_amount) VALUES (:oid, 'delivered', 'FedEx', 'TRK-TZ', "
+                    "CAST((NOW() - INTERVAL '3 days') AS text), :u, 'ecommerce', 199.96) "
+                    "ON CONFLICT (order_id) DO UPDATE SET status = 'delivered', "
+                    "estimated_delivery = EXCLUDED.estimated_delivery, user_id = EXCLUDED.user_id"
+                ).bindparams(oid=tz_order, u=tz_user)
+            )
+
+        result = await OrderDomainService.process_refund(tz_order, "商品质量问题", tz_thread)
+
+        assert "error" not in result, f"带时区送达日期不得炸退款: {result}"
+        async with engine.connect() as conn:
+            status = (
+                await conn.execute(
+                    text("SELECT status FROM orders WHERE order_id = :oid").bindparams(oid=tz_order)
+                )
+            ).scalar()
+        assert status == "refunded", f"3 天 < 7 天时效窗口,应真实执行退款,实际状态: {status}"
+    finally:
+        # 断言失败也要清理本用例私有线程/订单,避免残留行污染同库后续回放
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM orders WHERE order_id = :oid").bindparams(oid=tz_order))
+            await conn.execute(text("DELETE FROM threads WHERE id = :tid").bindparams(tid=tz_thread))
+
+
 def test_refund_intent_without_order_id_must_clarify():
     """回放事故槽位提取:当前输入无订单号 + 用户有多笔订单 → 必须追问,不得回填历史订单号。
 
@@ -282,3 +336,85 @@ def test_refund_intent_without_order_id_must_clarify():
     assert "orderId" in result["missingSlots"], (
         f"应追问订单号,实际 missingSlots={result['missingSlots']}"
     )
+
+
+def test_suspension_persists_task_plan_immediately(pg_factory):
+    """回归钉(wayfinder 004):步骤挂起等待审批的瞬间,挂起计划必须已写入 task_memory。
+
+    事故形态:审批工单创建后对前端 2s 轮询立即可见,人工秒级核签派发的
+    job_resume_* 在挂起运行收口(save_task_state)之前启动 → 恢复读到空计划,
+    triage 的 System: 分支误判 order_status 直接查单,退款永不执行。
+    计划持久化必须与审批可见性同一时刻成立,不得依赖运行收口。
+    """
+    asyncio.run(_suspension_persist_plan_scenario(pg_factory))
+
+
+async def _suspension_persist_plan_scenario(pg_factory):
+    from engine_py.memory.task_memory import TaskMemory
+
+    engine, merchant_engine, original = await _setup(pg_factory)
+    thread = "dbg_suspend_persist_thread"
+    order = "AURORA-ORD-2026-9083"
+    try:
+        async with merchant_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, currency, "
+                    "is_returnable, is_address_modifiable, created_at, updated_at) "
+                    "VALUES (:o, :u, 'PAID', 1299, 'CNY', TRUE, TRUE, "
+                    "'2026-09-04 10:00:00+00', '2026-09-05 04:00:00+00')"
+                ).bindparams(o=order, u=REPRO_USER)
+            )
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM pending_approvals WHERE thread_id = :t").bindparams(t=thread))
+            await conn.execute(text("DELETE FROM task_memory WHERE thread_id = :t").bindparams(t=thread))
+            await conn.execute(
+                text(
+                    "INSERT INTO threads (id, user_id, business_id, status, created_at, updated_at) "
+                    "VALUES (:t, :u, 'aurora', 'active', now(), now()) "
+                    "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id, updated_at = now()"
+                ).bindparams(t=thread, u=REPRO_USER)
+            )
+
+        state = {
+            "thread_id": thread,
+            "user_id": REPRO_USER,
+            "job_id": None,
+            "input": f"帮我申请订单 {order} 的退款",
+            "business_config": {"businessId": "aurora", "refundAutoApprovalLimit": 100},
+            "intents": [{"intent": "order_return", "confidence": 0.95}],
+            "short_memory": [{"role": "user", "content": f"帮我申请订单 {order} 的退款"}],
+            "task_plan": {
+                "goal": f"Process refund for order {order}",
+                "subtasks": [
+                    {
+                        "id": "step_fast_refund",
+                        "description": f"Call processRefund for order {order}",
+                        "status": "pending",
+                    }
+                ],
+                "currentStepIndex": 0,
+            },
+        }
+        result = await execute_step(state)
+        step = (result.get("taskPlan") or {}).get("subtasks", [{}])[0]
+        assert (step.get("result") or {}).get("waitingForApproval") is True, (
+            f"前置失败:步骤未挂起(需先复现 waiting 挂起才可断言计划落库),实际:{step}"
+        )
+
+        # 核心断言:挂起瞬间(未等运行收口)task_memory 已持有可恢复的挂起计划
+        saved = await TaskMemory(thread).get_task_state()
+        assert saved and saved.get("subtasks"), (
+            f"挂起时 task_memory 为空({saved}),秒级核签的恢复将以空计划降级为查单"
+        )
+        saved_step = saved["subtasks"][0]
+        assert (saved_step.get("result") or {}).get("waitingForApproval") is True
+        assert (saved_step.get("result") or {}).get("approvalId"), "挂起计划须带 approvalId 供恢复匹配"
+        assert "processRefund" in (saved_step.get("description") or "")
+        assert saved.get("currentStepIndex") == 0
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM pending_approvals WHERE thread_id = :t").bindparams(t=thread))
+            await conn.execute(text("DELETE FROM task_memory WHERE thread_id = :t").bindparams(t=thread))
+            await conn.execute(text("DELETE FROM threads WHERE id = :t").bindparams(t=thread))
+        await _teardown(engine, merchant_engine, original)

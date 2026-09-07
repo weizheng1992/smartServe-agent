@@ -54,11 +54,11 @@ async def main() -> None:
             text(
                 "INSERT INTO threads (id, user_id, business_id, status) VALUES "
                 "(:t1, :uid, 'nike', 'active'), (:t2, :uid, 'adidas', 'active') "
-                "ON CONFLICT (id) DO NOTHING"
+                "ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id"
             ),
             {"t1": "thread_nike_demo", "t2": "thread_adidas_demo", "uid": str(user_id)},
         )
-        print("[PG Seed] 多租户 threads 注入成功")
+        print("[PG Seed] 多租户 threads 注入成功(含归属重绑)")
 
         # 2. 商品
         await conn.execute(
@@ -80,6 +80,10 @@ async def main() -> None:
         print("[PG Seed] products 注入成功")
 
         # 3. 订单与明细(四笔演示单:免签放行 / 时效拦截 / 大额 HITL)
+        #    归属与状态 DO UPDATE 重绑:种子账号重插后 UUID 会变,DO NOTHING 会让
+        #    历史订单指向幽灵用户(查单/退款被判"不属于您名下");ORD-ECO-LARGE 送达
+        #    日期取相对近期(NOW()-3d),HITL 审批通过后退款可在 7 天时效内真实执行,
+        #    且每次重播种子重置 refunded 状态,保证 E2E 可重复(wayfinder 004)。
         await conn.execute(
             text(
                 "INSERT INTO orders (order_id, status, carrier, tracking_number, "
@@ -87,8 +91,9 @@ async def main() -> None:
                 "('ORD-98712', 'shipped', 'FedEx', '1234567890', '2026-07-20', :uid, 'nike', 139.99), "
                 "('ORD-ADIDAS-OK', 'delivered', 'SF Express', 'SF1234567', '2026-07-22', :uid, 'adidas', 12.50), "
                 "('ORD-ADIDAS-EXPIRED', 'delivered', 'DHL', 'DHL88712', '2026-06-10', :uid, 'adidas', 179.99), "
-                "('ORD-ECO-LARGE', 'delivered', 'FedEx', 'FEDEX3332', '2026-07-23', :uid, 'ecommerce', 199.96) "
-                "ON CONFLICT (order_id) DO NOTHING"
+                "('ORD-ECO-LARGE', 'delivered', 'FedEx', 'FEDEX3332', NOW() - INTERVAL '3 days', :uid, 'ecommerce', 199.96) "
+                "ON CONFLICT (order_id) DO UPDATE SET user_id = EXCLUDED.user_id, "
+                "status = EXCLUDED.status, estimated_delivery = EXCLUDED.estimated_delivery"
             ),
             {"uid": str(user_id)},
         )

@@ -9,7 +9,7 @@ import re
 from ...approvals.gatekeeper import ApprovalPolicyEngine
 from ...event_bus import emit_status
 from ...llm import get_chat_model
-from ...memory import ShortMemory
+from ...memory import ShortMemory, TaskMemory
 from ..state import build_history_context
 from .executor_fast_path import try_match_executor_fast_path
 
@@ -235,6 +235,29 @@ async def _execute_single_step_core(
                             "approvalId": approval_result.get("approvalId"),
                         },
                     }
+                    # 🛡️ 挂起即落库(wayfinder 004):审批工单创建后对前端 2s 轮询
+                    # 立即可见,而挂起计划此前要等运行收口才 save_task_state —— 窗口期
+                    # 内核签派发的 job_resume_* 读到空计划,triage 的 System: 分支
+                    # 误判 order_status 直接查单,退款永不执行。计划持久化必须与
+                    # 审批可见性同一时刻成立(运行收口会用完整版含领域上下文覆写)。
+                    suspended_plan = {
+                        **current_plan,
+                        "subtasks": [
+                            *current_plan["subtasks"][:index_to_run],
+                            pending_step,
+                            *current_plan["subtasks"][index_to_run + 1 :],
+                        ],
+                        "currentStepIndex": index_to_run,
+                    }
+                    thread_id = state.get("thread_id") or ""
+                    if thread_id:
+                        try:
+                            await TaskMemory(thread_id).save_task_state(suspended_plan)
+                        except Exception as tm_err:
+                            print(f"[执行引擎] 挂起计划落库任务记忆失败 thread={thread_id}: {tm_err}")
+                    else:
+                        # 空 thread_id 会命中 TaskMemory("") 的共享键,污染其他会话的任务记忆
+                        print("[执行引擎] 挂起计划落库跳过:thread_id 为空,拒绝写入共享键")
                     return {"updatedStep": pending_step, "toolErrorsCount": 0, "waitingForApproval": True}
 
                 if approval_result.get("state") in ("expired", "cancelled", "rejected"):
