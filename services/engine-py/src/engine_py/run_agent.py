@@ -25,6 +25,7 @@ import time
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
+from .badcase.pool import SOURCE_CIRCUIT_BREAKER, record_badcase_signal
 from .cards import CardSynthesizer
 from .db import BusinessConfigRow, SessionMetric, Thread, get_session
 from .event_bus import emit_job_result, emit_status, publish_agent_event
@@ -430,6 +431,25 @@ async def run_agent(job: AgentJobInput) -> dict:
                 )
             )
             await session.commit()
+
+        # 📥 熔断信号入坏例池(wayfinder 006):被熔断打断的会话以会话为评审
+        # 单位入池(先验 suspected_defect,人审定性,见 badcase/pool.py)。
+        # 挂点定案:run_agent 会话收口处而非状态机翻转处 —— 翻转可能发生在
+        # 无会话归属的后台调用,而池以会话为评审单位,与 session_metrics
+        # 熔断落盘(003 数据源)同位;dedupe=True 使 OPEN 窗口内同一会话多次
+        # 回合只入池一次;入池失败静默降级不阻断主流程(内建)。
+        if llm_breaker_fired or breaker_fired:
+            await record_badcase_signal(
+                SOURCE_CIRCUIT_BREAKER,
+                conversation_ref=f"thread:{thread_id}",
+                business_id=dynamic_config["businessId"],
+                dedupe=True,
+                note=(
+                    "上游 LLM 熔断(OPEN)拦截,会话降级道歉回复"
+                    if llm_breaker_fired
+                    else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
+                ),
+            )
     except Exception as metrics_err:
         print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
 

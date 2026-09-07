@@ -62,7 +62,7 @@ paths: ["services/engine-py/**/*"]
 ### 1.8 坏例候选池与周期任务调度 (`badcase/` & `scheduler.py`,2026-09-03 第五阶段 v1)
 
 - **半自动闭环**：信号收集/用例起草自动化，triage 定夺与入集人工化——信号**永不直接成为回归断言**。
-- **信号源与先验**（`badcase/pool.py`）：人工接管 `human_takeover` / 画像事实删除 `persona_fact_deleted`（→ `suspected_defect`）/ 审批驳回 `approval_rejected`（→ `expected_behavior`）+ 熔断（`run_agent` 落盘，暂未入池）。入池接口 `record_badcase_signal` 失败静默降级（print 不吞错），**严禁阻断宿主事务**。
+- **信号源与先验**（`badcase/pool.py`）：人工接管 `human_takeover` / 画像事实删除 `persona_fact_deleted`（→ `suspected_defect`）/ 审批驳回 `approval_rejected`（→ `expected_behavior`）/ 熔断 `circuit_breaker`（→ `suspected_defect`；2026-09-07 起接入，挂 `run_agent` 会话收口处 —— 上游 LLM 熔断与图级熔断（转移 ≥10 / 工具错误 ≥3）两路均入池，挂点与 `session_metrics` 熔断落盘同位）。入池接口 `record_badcase_signal` 失败静默降级（print 不吞错），**严禁阻断宿主事务**。
 - **脱敏两层管道**（`badcase/redaction.py`）：库内已知值精确替换（地址/收件人/邮箱）➔ `scrubber` 正则兜底；`show` 输出"原文 vs 脱敏对照"，回归用例输入必须取脱敏侧（仓库零原始数据）。
 - **triage CLI**：`python -m engine_py.badcase.cli`（list/show/triage/draft/expire）；`draft` 只产 `expectedTools`/`not-contains` 断言（断言最小化，禁整句黄金答案），带 `origin: badcase:{id}` 溯源，人工并入 `eval/testCases/` 后标 `converted`。
 - **周期任务**（`scheduler.py`，随 Temporal worker 入口启动，Temporal 离线仍独立运行）：outbox 对账（30s）+ 坏例池摘要/保留期（6h）；**单实例假设**，`ENGINE_SCHEDULER_ENABLED=0` 关闭。

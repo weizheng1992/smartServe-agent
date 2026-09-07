@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from ..db import BadcaseCandidate, get_session
 
 SOURCE_HUMAN_TAKEOVER = "human_takeover"
@@ -30,14 +32,34 @@ async def record_badcase_signal(
     business_id: str,
     suggested_class: str | None = None,
     note: str | None = None,
+    *,
+    dedupe: bool = False,
 ) -> str | None:
     """写入一条候选池记录(事件驱动实时入池)。
 
-    Returns: 新记录 ID;失败时返回 None(仅 print,不上抛)。
+    ``dedupe=True``:同 (signal_source, conversation_ref) 已有 candidate 在池则
+    跳过(熔断 OPEN 窗口内同一会话多次回合只入池一次,对齐 gatekeeper 转人工
+    挂点"重复呼叫不重复入池"的结构性去重语义)。
+
+    Returns: 新记录 ID;dedupe 命中返回既有记录 ID;失败时返回 None(仅 print,不上抛)。
     """
     prior = suggested_class or SOURCE_PRIORS.get(signal_source, "neutral")
     try:
         async with get_session() as session:
+            if dedupe:
+                existing = (
+                    await session.execute(
+                        select(BadcaseCandidate.id)
+                        .where(
+                            BadcaseCandidate.signal_source == signal_source,
+                            BadcaseCandidate.conversation_ref == conversation_ref,
+                            BadcaseCandidate.status == "candidate",
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    return str(existing)
             row = BadcaseCandidate(
                 signal_source=signal_source,
                 conversation_ref=conversation_ref,
