@@ -4,6 +4,30 @@
 
 ---
 
+## [2.4.1] - 2026-09-07 (「查询热门商品」类措辞空转道歉修复:快轨补词 + 执行器白名单扩容)
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **「查询热门商品/爆款」类措辞空转 5 分钟后道歉降级 (`852e06c`)**:
+  - 事故形态:用户说「查询热门商品」→ 不命中任何意图规则 → LLM 精判 → planner → executor,而 executor 的 `allowed_tools` 白名单继承 TS 基线仅含订单/退款 7 工具,商品工具与快轨伪名 `cart_manage`/`shopping_guide` 全被分发门槛拦截,子任务空转 "without needing tools" 直至 finish 道歉降级(实测一轮 5 分钟)。
+  - 修复(四件):
+    - `slot_extractor` SHOPPING_GUIDE 规则补入 热门/爆款/热销/热卖/畅销/上新/新品——该类措辞于 Triage 快轨直达 `ShoppingGuideSkill`(实测决策链 35ms、零 LLM 调用);
+    - `guide_skills._FALLBACK_RE` 同源补词,动作形嗅探(`is_action_query`)据此拒绝热门类输入命中语义回复缓存;
+    - `executor_fast_path` 快轨返回伪名改为 SkillsRegistry 真实技能 id(`skill_cart_manage`/`skill_shopping_guide`)——伪名既不在白名单也查不到注册表,自 TS 移植以来即为永不触发的死路;子串匹配同步修正(裸 `hot` 会误中 what/shot,改用完整词 popular/trending/best seller);
+    - `step_execution_engine` base_tools 白名单纳入导购/购物车技能与只读商品工具(`searchProducts`/`compareProducts`/`queryProductSkus`/`queryProductReviews`/`queryProductRanking`/`getCartSummary`),LLM 兜底选择器补第 9 条商品工具指引。
+  - **安全边界保持**:写操作购物车工具(`addToCart`/`updateCartItem`)仍不入白名单——加购/改量必须走技能 SOP 管道,不允许 LLM 兜底直调。
+
+### 📝 Docs (文档同步)
+
+- **新增 Git 提交规范 (`01513ef`,CLAUDE.md §6)**:提交作者固定 `weizheng1992`(仓库局部 git config 已覆盖,推送走 SSH key);提交信息只写说明本身,不加 `Co-Authored-By` / `Generated with` 之类的尾注或署名。
+
+### ✅ 验证 (Verification,如实)
+
+- ruff 双服务 clean;功能实测记录(提交时):快轨决策链 35ms、零 LLM 调用;修复前空转 5 分钟道歉路径已复现确认。
+- promptfoo 基线未随本提交复跑——SHOPPING_GUIDE 规则扩词理论上可影响 Classify 分册判定,建议下次 `bun run test:prompt:compare` 复验。
+
+---
+
 ## [2.4.0] - 2026-09-07 (wayfinder「单实例真实可运营」收官:mock/假兜底全量换成真能力)
 
 六张执行票全部关闭(见 `.wayfinder/single-instance-production/`),平台在单实例部署下真实可运营:真实登录、真实限流、真实熔断、评测真实入库、熔断信号真实入池。

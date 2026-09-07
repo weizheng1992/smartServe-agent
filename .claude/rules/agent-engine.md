@@ -25,6 +25,7 @@ paths: ["services/engine-py/**/*"]
 - **执行器调度 (`graph/nodes/step_execution_engine.py`)**：
   - 优先通过 Skills 注册表检索匹配的 Skill 实例执行业务逻辑；
   - 若无特定 Skill，则回退至标准 Tool 工具分发执行（`asyncio.gather` 并行调度依赖无关节点）。
+  - 工具白名单（`base_tools`）范围（2026-09-07 扩容）：订单/退款基础工具 + 导购/购物车技能（须用注册表真实 id `skill_shopping_guide`/`skill_cart_manage`，TS 基线伪名是死路）+ 只读商品工具（`searchProducts`/`compareProducts`/`queryProductSkus`/`queryProductReviews`/`queryProductRanking`/`getCartSummary`）；**写操作购物车工具严禁入白名单**——加购/改量必须走技能 SOP 管道，不允许 LLM 兜底直调。
 - **租户级技能配置重载 (Tenant Skill Config Overrides)**：
   - 支持多租户在 `TenantBusinessConfig` 中动态覆写技能参数（启用/禁用、退款限额阈值 `maxAutoRefundAmount`、退款有效窗口 `maxRefundDays`、强制人工审核开关 `requireApproval`、自定义通知 Webhook 等）。
 
