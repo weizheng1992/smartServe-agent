@@ -24,7 +24,7 @@
 
 - **运行网关契约测试:** `bun run test:eval`(pytest 于 `services/gateway-py`,密封 testcontainers PG+Redis)
 - **运行单个测试文件:** `cd services/gateway-py && uv run pytest tests/test_http_routes_contract.py`
-- **运行 Playwright E2E 测试:** `bun run test:e2e`
+- **运行 Playwright E2E 测试:** `bun run test:e2e`(主套件 + 熔断独立配置 `playwright.breaker.config.ts` 链式)
 - **运行 Promptfoo 评测:** `bun run test:prompt`(Classify)/ `bun run test:prompt:planner`(Planner)
 - **钉死 / 对比 Promptfoo 基线:** `bun run test:prompt:pin` / `bun run test:prompt:compare`
 
@@ -53,9 +53,10 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
                             ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │              API 网关 (services/gateway-py,Python/FastAPI)             │
-│  - 39 条契约冻结路由:tenants、skills、approvals、聊天 SSE、           │
-│    conversations、RAG 文档、personas、guardrails、billing、logs、      │
-│    商户 store/admin、SPI v1(HMAC 签名)                                │
+│  - 41 条契约路由(39 条 TS 基线冻结 + auth/me、chat/threads):        │
+│    tenants、skills、approvals、聊天 SSE、conversations、RAG 文档、    │
+│    personas、guardrails、billing、logs、商户 store/admin、            │
+│    SPI v1(HMAC 签名)                                                 │
 │  - 实时:SSE(Redis Streams 事件源)+ python-socketio                  │
 │    人工接管房间(joined_room / peer_joined / typing / ...)            │
 └───────────────────────────┬────────────────────────────────────────────┘
@@ -108,7 +109,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 5. **零依赖共享 UI**:
    - `apps/web` 与 `apps/admin` 使用 `@agent-all/ui` + Tailwind CSS,不得引入重型外部组件框架。
 6. **契约冻结**:
-   - 39 条 HTTP 路由、SSE 线格式与 socket.io 事件冻结于 TS 基线;pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
+   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(现有 `/api/auth/me`、`POST /api/chat/threads`,合计 41 条)。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
 
 ---
 

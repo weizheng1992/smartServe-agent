@@ -49,7 +49,7 @@
 
 ### 2. 物理与安全性回归 (Playwright E2E)
 
-ℹ️现状(诚实标注):`apps/web/e2e/` 仅 5 条测试。Anti-IDOR 有覆盖但断言较弱(仅 UI 文本断言);名为 HITL 的 `chat-hitl.e2e.ts` 实际只测登录重定向与布局渲染。**下方三项验证要点中,目前只有第一项部分成立**,HITL 审批挂起→核签流程与熔断器 E2E 为待补技术债(见附录)。另:E2E 的 webServer 只拉起前端,后端/DB 需手工就绪;登录依赖的 `/api/auth/login` 路由在 gateway-py 中不存在(靠 localStorage 兜底)。
+ℹ️现状(2026-09-07 更新,wayfinder 004 收官):E2E 基建补齐——`e2e/globalSetup.ts` 幂等拉齐后端/DB/种子(docker:up → db:push → db:seed),webServer 显式数组化(gateway 4000 / web 3000 / admin 3001 / merchant 3005);登录走真实 `/api/auth/login`(bcrypt + JWT,种子账号 `test@example.com`)。**三项验证要点全部有对应覆盖**:Anti-IDOR(既有 spec,真实凭证);HITL 审批挂起→核签(`chat-approval-flow.e2e.ts`,超阈值退款挂起 → 审批卡 → 核签 → 真实物理退款 → 会话落定);熔断器(`circuit-breaker.e2e.ts`,独立 `playwright.breaker.config.ts` 死 LLM 注入——注意问候/订单/退款输入走 triage 确定性旁路零 LLM 调用,须价保咨询类输入才能触达真实模型调用)。诚实标注:HITL 与熔断两条 spec 单独跑均绿(19.7s/18.7s),但全量套件在本环境未收口(25 passed/18 failed,残余为 firefox 二进制与 admin spec 选择器,均已修待复跑)。
 
 *   **验证要点(目标态)**:
     *   **安全拦截(Anti-IDOR)**:验证用户只能查到或修改属于自己 `userId` 归属下的订单。
@@ -242,5 +242,5 @@ Agent 发布完成后,必须进行端到端的**分布式链路追踪(Distribute
 
 1.  ~~**outbox worker 死代码(不变量级失实,单独立案)**~~ **已修复(2026-09-03,随第五阶段 v1 周期任务框架一并落地)**:原 `outbox_worker` 从未被任何入口启动、且旧实现存在"假完成"缺陷;现重构为 `process_pending_events`(SKIP LOCKED + 10s 年龄阈值 + 停滞重入队),由 `scheduler.py` 每 30s 对账补偿,并同步修正 CLAUDE.md 不变量 #3 与 `.claude/rules/agent-engine.md` §1.6 表述。
 2.  ~~**死表**~~ **已接通(2026-09-07,wayfinder 005)**:`eval_runs` / `eval_results` 由 `engine_py/evals/promptfoo_import.py` 从真实 promptfoo 运行写入(`bun run test:prompt:record` 三套件自动入库);`eval_run_records` 的随机数生成器已下线(`POST /api/evals/run` 410 指引真实通道),admin 评测页展示真实汇总行。
-3.  **E2E 基建**:`/api/auth/login` 路由不存在(测试靠 localStorage 兜底)、无 globalSetup 种子、HITL/熔断零覆盖(见第一阶段)。
+3.  ~~**E2E 基建**~~ **已修复(2026-09-07,wayfinder 004)**:`/api/auth/login` 真实化(bcrypt + JWT,localStorage 兜底已删);`e2e/globalSetup.ts` 幂等种子就绪;HITL 审批流与 LLM 熔断 E2E 落地(见第一阶段现状段)。全量套件修复后待一次完整复跑收口。
 4.  **失效测试**:`apps/web/tests/chatDialogueScenario.test.ts` 仍 import 已退役的 `db` / `engine` workspace 包。

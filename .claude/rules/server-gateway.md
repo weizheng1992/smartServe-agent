@@ -5,22 +5,24 @@ paths: ["services/gateway-py/**/*"]
 
 # 服务端多租户网关与实时协同规范 (Server Gateway)
 
-本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送与审计追踪。39 条 HTTP 路由与 SSE/socket.io 线格式已冻结（pytest 契约测试为唯一真实来源）。
+本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（现有 `/api/auth/me`、`POST /api/chat/threads`，合计 41 条；pytest 契约测试为唯一真实来源）。
 
 ## 1. 核心模块与架构规范
 
 ### 1.1 模块职责划分
 
-1. **`main.py`**：FastAPI 应用装配（CORS、路由注册、socketio ASGI 挂载、lifespan 连接池管理）。
+1. **`main.py`**：FastAPI 应用装配（CORS、路由注册、socketio ASGI 挂载、lifespan 连接池管理、本地 embedding 后台预热）；中间件栈 `RateLimitMiddleware`（租户+IP 滑动窗口,仅 `/api/chat` 与 `/api/v1/spi`,Redis 故障 fail-open）+ `TenantContextMiddleware`（最外层 CORS）。
 2. **`routers/chat.py`**：
    - 智能体作业受理（入队 Redis Stream / 直跑）与 SSE 事件流端点（`Last-Event-ID` 断线重连回放，事件源为 Redis Streams 本身）。
    - 会话消息持久化与历史拉取（多租户过滤）。
+   - 显式建线程 `POST /api/chat/threads`（幂等 upsert;同 id 异租户/异用户冲突 409 不回显他人元数据,无主线程自愈认领——web「开启新一轮对话」前置,wayfinder 004 补齐）。
 3. **`routers/admin.py` / `crud.py`**：
    - 会话历史、审批单（Approve / Reject，触发事务发件箱与幂等恢复）、Skills 配置（`GET/PUT /api/skills/config`）、RAG 文档、画像、护栏、计费配额、日志等管理端 CRUD。
    - 数据真实性约定（2026-09-07 起，wayfinder 005）：`/api/evals/results` 读取 `engine_py.evals.promptfoo_import` 从真实 promptfoo 运行写入的汇总行（`bun run test:prompt:record` 三套件自动入库 `eval_runs`/`eval_results` + 展示表；随机生成器已下线，`POST /api/evals/run` 返回 410 指引真实通道，响应不再携带 `isMock`）；`/api/logs` 消费 `session_metrics`/`intent_logs` 真实值，无遥测数据处返回真实 0，**严禁编造 token/延迟数字**。
    - 画像事实删除（`DELETE /api/personas/{id}`）在删除成功后调用 `engine_py.badcase.pool.record_badcase_signal` 入坏例候选池（失败静默降级，不影响删除响应）。
 4. **`routers/merchant.py` + `merchant_domain.py` / `merchant_db.py`**：商户门户店铺端与管理端路由及领域逻辑（原 Next.js Route Handlers 移植）。
 5. **`routers/spi.py` + `hmac_signer.py`**：三方 SPI v1 开放接口（HMAC-SHA256 签名 + 时间戳防重放校验）。
+6. **`routers/auth.py`**（wayfinder 001 真实化）：`POST /api/auth/login`（bcrypt 凭证校验）+ `POST /api/auth/logout`（Redis jti 黑名单）+ `GET /api/auth/me`（静默重校验,用户 UUID 漂移自愈）；JWT 30 天无刷新,`AUTH_JWT_SECRET` 生产必须显式配置（缺省密钥仅限开发）。
 
 ### 1.2 实时协同 (realtime.py)
 

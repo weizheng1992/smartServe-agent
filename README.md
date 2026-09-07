@@ -6,7 +6,8 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 
 > 💡 **版本与架构演进说明**：
 >
-> - **v3 (当前版本)**：后端整体 Python 化（2026-09 完成）——NestJS 网关翻转为 **FastAPI**（`services/gateway-py`），决策引擎移植为 **Python LangGraph**（`services/engine-py`），数据库所有权由 Drizzle 翻转为 **SQLAlchemy + Alembic**。39 条 HTTP 路由、SSE 线格式与 socket.io 事件 1:1 冻结契约，行为由 pytest 契约套件钉死。
+> - **v3 (当前版本)**：后端整体 Python 化（2026-09 完成）——NestJS 网关翻转为 **FastAPI**（`services/gateway-py`），决策引擎移植为 **Python LangGraph**（`services/engine-py`），数据库所有权由 Drizzle 翻转为 **SQLAlchemy + Alembic**。39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件 1:1 冻结契约（后新增 `/api/auth/me`、`POST /api/chat/threads`，现 41 条，均带 pytest 契约钉死），行为由 pytest 契约套件钉死。
+> - **v3.1 运营真实化（2026-09-07，wayfinder「单实例真实可运营」收官）**：真实登录（bcrypt + JWT + jti 黑名单）、租户+IP 滑动窗口限流、LLM 熔断/退避/超时、评测真实入库、熔断信号入坏例池——mock 与假兜底全量换成真能力（详见 CHANGELOG 2.4.0）。
 > - **v2**：从全单体 Next.js 到分层中台的彻底重构——SaaS 控制平面（`apps/admin`）、独立商户商城（`apps/merchant`）、轻量客户端（`apps/web`）、参数化 SQL 沙箱、双层画像隔离、四层记忆体系与 Transactional Outbox。
 > - **v1 (分支 `v1-main`)**：初代单体 Next.js 15 App Router 实现（包含早期的单页暗色客服与简单审批流）。
 
@@ -39,7 +40,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 - **隔离式多会话管理与历史抽屉 (`📜 历史 (N)` & `+ 新对话`)**：
   - 用户可随时查看并无缝切换名下多条历史咨询记录；
   - 点击「+ 新对话」生成全新独立 `threadId`，物理级杜绝历史消息混淆与篡改。
-- **多身份模拟与多模态富卡片 (Rich Cards)**：支持切换演示用户（如张伟、李雷），直观呈现订单卡片、商品瀑布流、物流轨迹与退款状态。
+- **真实登录与多模态富卡片 (Rich Cards)**：bcrypt + JWT 真实凭证登录（种子账号 `test@example.com`），直观呈现订单卡片、商品瀑布流、物流轨迹与退款状态。
 - **纯前端化 BFF**：`apps/merchant` 的 `/api/*` 与 `/spi/*` 通过 `vite.config.ts` proxy 全量代理至 FastAPI 网关（Port 4000），自身不再承载任何服务端路由。
 
 ---
@@ -63,7 +64,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 | :--------------------------------------- | :----------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **中台控制平面 (`apps/admin`)**          | 单页暗色堆叠界面、模板代码冗余、缺乏模块化与通用 CRUD  | **全新现代简约 SaaS 中台**：10 大独立路由子模块，封装高复用 CRUD UI 套件 (`DataTable`, `FilterBar`, `DetailDrawer`, `FormModal`, `ConfirmDialog`) 与 `useAdminCrud` 状态流，集成全局租户实时穿透。         |
 | **独立商户门户 (`apps/merchant`)**       | 无独立商户体系，数据与平台混杂                         | **独立商户电商与客服运营中台**：集成极光潮品示范商城、路由感知悬浮会话窗、历史会话隔离管理、商户订单管控与实时客服工作台；服务端路由全部代理网关。                                                       |
-| **服务端网关 (`services/gateway-py`)**   | Next.js API Routes 充当轻量接口，领域服务与控制器耦合  | **FastAPI 工业级 API 网关**：39 条契约冻结路由（crud/admin/chat/spi 四路由组），Pydantic 强类型 DTO 校验，开放商户 SPI 协议，python-socketio 实时坐席协同通道。                                      |
+| **服务端网关 (`services/gateway-py`)**   | Next.js API Routes 充当轻量接口，领域服务与控制器耦合  | **FastAPI 工业级 API 网关**：41 条契约路由（crud/admin/chat/spi 四路由组 + `/api/auth/me`、`POST /api/chat/threads`），Pydantic 强类型 DTO 校验，租户+IP 滑动窗口限流，开放商户 SPI 协议，python-socketio 实时坐席协同通道。                                      |
 | **决策引擎 (`services/engine-py`)**      | 领域逻辑散落在 API 路由内                              | **Python LangGraph 核心决策图**：triage ➔ planner ➔ merge ➔ executor ⇄ validator 状态机，Quad-Memory 记忆体系、Contextual RAG、ApprovalGatekeeper 与 Temporal 分布式编排。                          |
 | **前端架构 (`apps/web` & `apps/admin`)** | Next.js 15 SSR/Node 运行时绑定                         | **Vite 6 + React 19 纯 SPA 高性能架构**：秒级冷启动、零死锁构建、首屏资源体积大幅降低。                                                                                                            |
 | **审批事务与可靠性**                     | 内存与直接异步调度，存在幽灵工单 (Ghost Approval) 隐患 | **Transactional Outbox 事务一致性**：审批流状态变更与 Outbox 事件原子写入，配合后台异步对账与确定性幂等调度恢复机制。                                                                              |
@@ -116,7 +117,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
                                            ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                     FastAPI 网关与后端控制层 (services/gateway-py, Port: 4000)            │
-│  - 39 条契约冻结路由: tenants / skills / approvals / conversations / RAG / billing     │
+│  - 41 条契约路由(39 冻结 + auth/me、chat/threads): tenants/skills/approvals/RAG/billing │
 │  - 开放商户 SPI 合同 (/spi/v1/orders, /spi/v1/products, /spi/v1/user, HMAC 验签)        │
 │  - SSE 流式分发(Redis Streams 事件源 + Last-Event-ID 回放) / socket.io 坐席协同通道     │
 │  - sqlglot AST 只读 SQL 沙箱 / 商户门户 BFF (/api/store, /api/admin)                    │
@@ -400,7 +401,7 @@ bun run test:prompt:pin
 bun run test:prompt:compare
 ```
 
-**契约冻结承诺**：39 条 HTTP 路由、SSE 事件线格式与 socket.io 事件名与退役的 TS 基线 1:1 冻结；`services/gateway-py/tests/` 下的 pytest 契约套件（40 个 HTTP/SSE/socket.io 用例 + 29 个 AST 沙箱用例）是唯一真实来源，任何契约改动必须同步更新测试与前端 `packages/types`。
+**契约冻结承诺**：39 条 TS 基线 HTTP 路由、SSE 事件线格式与 socket.io 事件名 1:1 冻结；冻结集合之外的新增路由（`/api/auth/me`、`POST /api/chat/threads`，现合计 41 条）必须同批补契约测试。`services/gateway-py/tests/` 下的 pytest 契约套件（91 个用例，2026-09-07，含 HTTP/SSE/socket.io/AST 沙箱）是唯一真实来源，任何契约改动必须同步更新测试与前端 `packages/types`。
 
 ---
 
@@ -440,7 +441,7 @@ bun run dev:all
 | **SaaS 控制平面 (`apps/admin`)**             | [http://localhost:3001](http://localhost:3001) | 10 大模块、HITL 审批流、全链路 Trace、实时接管           |
 | **独立商户商城与工作台 (`apps/merchant`)**   | [http://localhost:3005](http://localhost:3005) | 极光潮品商城、常驻悬浮客服、商户订单后台 (`/admin`)      |
 | **用户端轻量会话应用 (`apps/web`)**          | [http://localhost:3000](http://localhost:3000) | 纯净版客户端多模态聊天界面 (SSE 流式)                    |
-| **FastAPI 核心后端网关 (`services/gateway-py`)** | [http://localhost:4000](http://localhost:4000) | 统一 API 网关、39 条契约路由、socket.io 协同、商户 SPI   |
+| **FastAPI 核心后端网关 (`services/gateway-py`)** | [http://localhost:4000](http://localhost:4000) | 统一 API 网关、41 条契约路由、socket.io 协同、商户 SPI   |
 | **Temporal Worker (`services/engine-py`)**   | —                                              | 周期任务调度(审批对账/坏例摘要)+ `agent-tasks-py` 队列注册;Temporal 不在请求关键路径(见 `docs/deployment.md` §0) |
 
 ### 6.2 独立应用启动命令
@@ -584,7 +585,7 @@ cd services/gateway-py && uv run ruff check .
 项目提供多层级自动化测试用例，覆盖 Skill 注册、SOP 逻辑、参数拦截与商户远程 SPI 端到端联调：
 
 ```bash
-# 1. 运行网关契约套件 (39 条路由 + SSE/socket.io 线格式, 密封容器)
+# 1. 运行网关契约套件 (41 条路由 + SSE/socket.io 线格式, 密封容器)
 bun run test:eval
 
 # 2. 运行单个契约文件 (HTTP 路由 / 实时协议)

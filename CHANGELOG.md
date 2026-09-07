@@ -4,6 +4,43 @@
 
 ---
 
+## [2.4.0] - 2026-09-07 (wayfinder「单实例真实可运营」收官:mock/假兜底全量换成真能力)
+
+六张执行票全部关闭(见 `.wayfinder/single-instance-production/`),平台在单实例部署下真实可运营:真实登录、真实限流、真实熔断、评测真实入库、熔断信号真实入池。
+
+### 🚀 Features (功能演进)
+
+- **auth/login 真实化 (`31e844d`,票 001)**:bcrypt 凭证校验 + JWT 会话(30 天无刷新)+ Redis jti 登出黑名单;新增 `GET /api/auth/me` 静默重校验(用户 UUID 漂移自愈);前端 localStorage 假兜底删除,E2E 切真实凭证。其余用户 `password_hash = NULL` 安全缺省,仅种子账号可登录(admin 侧发券/改密入口为地图遗留 fog)。
+- **租户+IP 双维 Redis 滑动窗口限流 (`8742b55`,票 002)**:`RateLimitMiddleware`(ZSET 滑动窗口 + 多键 all-or-nothing Lua 原子扣减)挂 `/api/chat` 与 `/api/v1/spi` 高频入口;XFF 仅可信反代采信最右跳;admin `all` 视图跳租户桶只按 IP 计;Redis 故障 fail-open 不阻断业务。
+- **LLM 熔断/指数退避/超时三件套 (`36ded04`,票 003,TS 1:1 移植)**:全局 CircuitBreaker 单例 + 3 次指数退避 + `wait_for` 超时,挂 `_ResilientChatOpenAI` 公共 `invoke/ainvoke` 全覆盖(构造期 callbacks 不穿透 `with_structured_output` 的坑已绕开);熔断中断的会话 job 级降级道歉并落 `resolution_status='llm_circuit_breaker'`;4 节点兜底前置熔断豁免上抛。阈值经 `LLM_CIRCUIT_*` / `LLM_RETRY_*` / `LLM_TIMEOUT_SECONDS` env 可调。
+- **promptfoo 评测真实结果入库 (`d66a86f`,票 005)**:结果经 `engine_py.evals.promptfoo_import` 单事务写 `eval_runs`/`eval_results` 三表(`bun run test:prompt:record` 三套件链式自动入库 + `evals:import` 独立通道);`POST /api/evals/run` 返回 410 指引真实通道,随机评测生成器退役为契约测试 fixture,`isMock` 全链路消失;admin `/api/evals/results` 与 `/api/logs` 只消费真值,无数据处返回真实 0。CLI `__main__` 守卫缺失曾致零入库,已补测钉死。
+- **熔断信号入坏例候选池 (`844302d`,票 006)**:`run_agent` 会话收口处两路熔断(上游 LLM 级 + 图级转移≥10/工具错误≥3)入池,先验 `suspected_defect`;`record_badcase_signal` 增 opt-in dedupe 幂等护栏;摘要按 source 分组自动收纳。
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **HITL 挂起计划不落库竞态(`584b1f8`,票 004 E2E 钉出)**:审批工单创建后前端 2s 轮询立即可见,而挂起计划要等运行收口才 `save_task_state` —— 核签窗口内 `job_resume_*` 读到空计划,triage 误判查单,退款永不执行。修复:挂起即落库 + 空 thread_id 拒写 TaskMemory("") 共享键。
+- **`POST /api/chat/threads` 契约缺失(`cc7a5d4`,票 004)**:TS 基线服务端从未实现,web「开启新一轮对话」fetch 404 被静默吞掉,按钮长期失效。补齐幂等建线程路由;归属守卫:同 id 异租户/异用户重放 409 不回显他人元数据,无主线程自愈认领。**契约路由 39 → 41**(另含票 001 的 `/api/auth/me`;新增路由均同批补 pytest 契约钉死,冻结 carve-out 见地图 Notes)。
+- **tz-aware 送达日期炸退款 + 三方镜像表裸 except 连坐(`584b1f8`,票 004)**:`estimated_delivery` 为 text 列,`NOW()` 写入带时区偏移直接炸日期解析;镜像表更新失败但事务已中止,主退款 UPDATE 的 commit 静默失效、工具照报成功。修复:tz 归一 + 退款/改址/商品补全三处 `begin_nested` SAVEPOINT 隔离 + 显式中文日志。
+- **种子 `rag_documents` 绑定参数 `:m::jsonb` 语法炸库(`41fe4ca`)**:改 `CAST(:m AS jsonb)`。
+
+### 🧪 E2E 基建 (票 004)
+
+- 新增 `chat-approval-flow.e2e.ts`(超阈值退款挂起 → 审批卡 → 核签 → 真实物理退款 → 会话落定)与 `circuit-breaker.e2e.ts`(独立 `playwright.breaker.config.ts`,死 LLM 注入 + 阈值 1)。**熔断 spec 关键发现**:问候/订单/退款输入全走 triage 确定性旁路零 LLM 调用,熔断永不触发——须价保咨询类输入必达 Step 3 精判。
+- `e2e/globalSetup.ts` 幂等就绪(docker:up → db:push → db:seed,种子 DO UPDATE 重置可重复执行);webServer 显式数组化(gateway 4000 / web 3000 / admin 3001 / merchant 3005);`testIgnore` 围栏(breaker 独占运行 + `.claude/worktrees` 幽灵 spec);admin 陈旧 spec 全量修缮(Combobox 按 cmdk `role="option"` 交互、`getByRole('link')` 防同名撞车);webkit/firefox 浏览器二进制补装。
+
+### ✅ 验证 (Verification,如实)
+
+- gateway 契约 **91 passed**(密封 testcontainers);engine 回放 **5 passed**(含挂起落库回归);HITL/熔断两 E2E spec 单独绿(19.7s / 18.7s);ruff 双服务 clean、biome e2e clean。
+- **全量 `playwright test` 未收口**:修复已知根因后 25 passed / 18 failed —— 14 个 firefox 二进制缺失(已补装)、4 个 admin spec 选择器缺陷(已修,基于组件源码静态核对),均待下次全量跑复验。`test:prompt:compare` 未跑(engine 改动仅 HITL 挂起路径,不触 Classify/Planner 提示词)。
+
+### ⚠️ Notes (注意事项)
+
+- 运行中的 dev 网关需重启 `dev:server` 方可生效(uvicorn reload 不监视 engine-py)。
+- E2E 全量套件的既有用例回归待一次完整复跑收口(本环境按指示停止测试)。
+- 仅种子账号(`test@example.com` / `agent-all-dev`)可登录;真实运营的 admin 侧改密/发券入口未做(地图 fog 记录,立票另议)。
+
+---
+
 ## [2.3.7] - 2026-09-05 (双退款事故三层旁路封死 + SPI 技能链路线程上下文透传)
 
 ### 🐛 Bug Fixes (缺陷修复)

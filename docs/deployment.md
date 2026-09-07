@@ -123,6 +123,11 @@ python -m engine_py.temporal.worker                                  # worker(�
 | `TEMPORAL_TASK_QUEUE` | `agent-tasks-py` | Python worker 专属队列(与 TS 基线 `agent-tasks` 物理隔离) |
 | `ENGINE_SCHEDULER_ENABLED` | `1` | 多实例下单实例保留、其余置 0(方案 A 止损) |
 | `AI_*` 系列 | 无有效缺省 | LLM/Embedding 必填;embedding 默认本地 bge-small-zh(进程内 torch,注意冷启动与内存预算) |
+| `AUTH_JWT_SECRET` | 开发缺省密钥 | **生产必须显式注入**(JWT 签发);缺省仅限本地/E2E,注入后无告警(wayfinder 001) |
+| `RATE_LIMIT_WINDOW_SECONDS` / `RATE_LIMIT_{CHAT,SPI}_{TENANT,IP}_MAX` | 60 / 60·120·300·600 | 滑动窗口秒数与租户/IP 双维阈值,只挂 `/api/chat` 与 `/api/v1/spi`(wayfinder 002) |
+| `RATE_LIMIT_TRUSTED_PROXIES` / `RATE_LIMIT_KEY_PREFIX` | `127.0.0.1,::1` / `ratelimit` | XFF 采信的可信反代清单(逗号分隔);共享 Redis 隔离环境换键前缀 |
+| `LLM_CIRCUIT_MAX_FAILURES` / `LLM_CIRCUIT_COOLDOWN_SECONDS` | 5 / 30 | 上游 LLM 全局熔断阈值与冷却(wayfinder 003);E2E 熔断注入用 1/任意 |
+| `LLM_RETRY_MAX_ATTEMPTS` / `LLM_RETRY_INITIAL_DELAY_MS` / `LLM_TIMEOUT_SECONDS` | 3 / 1000 / 120 | 指数退避次数、初始退避与单次尝试超时(`wait_for` 包裹) |
 
 ### 2.6 发布后观测与排障入口
 
