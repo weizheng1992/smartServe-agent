@@ -140,6 +140,12 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - **启动与部署指南**:`docs/deployment.md`(dev Temporal 启动流程与踩坑、线上部署步骤/就绪检查/环境变量矩阵、Temporal 执行路线启用步骤)
 
 
+## 6. Git 提交规范
+
+- **提交身份**：提交作者固定使用 GitHub 账号 `weizheng1992`（`740977067@qq.com`，仓库局部 git config 已覆盖，推送走 SSH key），不得临时改动身份。
+- **提交信息**：只写提交说明本身，不添加任何其他内容——不加 `Co-Authored-By`、`Generated with Claude Code` 之类的尾注或署名。
+
+
 当上下文占用超过 60% 时，主动提醒我执行 `/compact` 压缩。
 压缩时保留：代码变更记录、待办清单、核心问题定位、测试结果；丢弃探索过程和冗余解释。
 
