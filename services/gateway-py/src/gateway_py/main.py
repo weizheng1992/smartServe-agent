@@ -11,6 +11,7 @@ from engine_py.llm import warm_embedding_model_in_background
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from socketio import ASGIApp
 
 from .rate_limit import RateLimitMiddleware
@@ -65,6 +66,10 @@ fastapi_app.include_router(auth.router)
 fastapi_app.include_router(chat.router)
 fastapi_app.include_router(spi.router)
 fastapi_app.include_router(merchant.router)
+
+# 聊天图片静态服务(wayfinder multimodal-image-chat 002):上传端点回 /api/uploads/ URL,
+# 前端经既有 /api 代理直达;目录由 chat 模块导入时确保存在
+fastapi_app.mount("/api/uploads", StaticFiles(directory=str(chat.UPLOADS_DIR)), name="chat-uploads")
 
 # socket.io 挂载在默认 path /socket.io,namespace /ws/chat;其余路径回落到 FastAPI
 app = ASGIApp(sio, other_asgi_app=fastapi_app)

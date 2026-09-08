@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib
 import random
 
@@ -336,6 +337,56 @@ class TestChatThreads:
         )
         assert cross_user.status_code == 409
         assert "CUST-E2E-OWNER" not in cross_user.text
+
+
+class TestChatUpload:
+    """POST /api/chat/upload(wayfinder multimodal-image-chat 002,路由计数 41→42)。
+
+    前端 ChatArea.tsx 依赖的响应形状:顶层 {success, url},失败顶层 error
+    (alert 展示)。MIME 白名单、10MB 流式限长(不信任 client 声明)、UUID 文件名、
+    经 /api/uploads/ 静态服务回读字节。
+    """
+
+    # 1x1 透明 PNG
+    PNG_1PX = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+
+    async def test_upload_png_returns_url_and_serves_bytes(self, client, contract_fixtures):
+        res = await client.post(
+            "/api/chat/upload", files={"file": ("shot.png", self.PNG_1PX, "image/png")}
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert body["url"].startswith("/api/uploads/")
+        assert body["url"].endswith(".png")
+        # UUID 文件名,不回显客户端可控的原始文件名
+        assert "shot" not in body["url"]
+
+        served = await client.get(body["url"])
+        assert served.status_code == 200
+        assert served.content == self.PNG_1PX
+
+    async def test_upload_rejects_non_image_mime(self, client, contract_fixtures):
+        res = await client.post(
+            "/api/chat/upload", files={"file": ("note.txt", b"hello", "text/plain")}
+        )
+        assert res.status_code == 400
+        body = res.json()
+        assert body["success"] is False
+        assert body["error"]
+
+    async def test_upload_rejects_oversize_by_streamed_length(self, client, contract_fixtures):
+        # 10MB + 1 字节,MIME 合法 —— 限长必须读流实测,不信任声明
+        payload = self.PNG_1PX + b"\0" * (10 * 1024 * 1024)
+        res = await client.post(
+            "/api/chat/upload", files={"file": ("big.png", payload, "image/png")}
+        )
+        assert res.status_code == 413
+        body = res.json()
+        assert body["success"] is False
+        assert body["error"]
 
 
 class TestApprovalResumeDispatch:

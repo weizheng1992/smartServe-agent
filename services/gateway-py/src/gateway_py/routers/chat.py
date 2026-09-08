@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import uuid
+from pathlib import Path
 
 from engine_py.db import get_session
 from engine_py.event_bus import get_client, read_agent_events
 from engine_py.run_agent import AgentJobInput, run_agent
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
@@ -23,6 +25,61 @@ from sqlalchemy import text
 from .. import conversation_repo
 
 router = APIRouter(prefix="/api/chat")
+
+# ---- 图片上传(wayfinder multimodal-image-chat 002)----
+# 白名单 MIME → 扩展名:不信任客户端文件名,扩展名由服务端从 MIME 反推,
+# UUID 命名落盘天然免疫路径穿越(文件名不含任何客户端可控成分)
+_ALLOWED_IMAGE_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 256 * 1024
+
+# 默认仓库根 public/uploads(TS 原版同址,已在 .gitignore);env 可覆写(测试隔离用)
+UPLOADS_DIR = Path(
+    os.environ.get("UPLOADS_DIR")
+    or (Path(__file__).resolve().parents[5] / "public" / "uploads")
+)
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.post("/upload")
+async def upload_chat_image(file: UploadFile = File(...)):  # noqa: B008 — FastAPI 依赖注入惯用法
+    """接收聊天图片,UUID 落盘本地 uploads 目录,回 /api/uploads/ 静态 URL。
+
+    前端契约(ChatArea.tsx):成功顶层 {success, url} 直接入 attachedImages;
+    失败顶层 {success: false, error} 供 alert 精确展示。大小以读流实测为准,
+    不信任 client 声明的 Content-Length。
+    """
+    ext = _ALLOWED_IMAGE_TYPES.get(file.content_type or "")
+    if ext is None:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": f"不支持的图片类型 {file.content_type or '(未知)'},仅限 jpeg/png/webp/gif",
+            },
+        )
+    dest = UPLOADS_DIR / f"{uuid.uuid4().hex}{ext}"
+    try:
+        with dest.open("wb") as out:
+            written = 0
+            while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+                written += len(chunk)
+                if written > _MAX_UPLOAD_BYTES:
+                    out.close()
+                    dest.unlink(missing_ok=True)
+                    return JSONResponse(
+                        status_code=413,
+                        content={"success": False, "error": "图片超过 10MB 上限"},
+                    )
+                out.write(chunk)
+    finally:
+        await file.close()
+    return {"success": True, "url": f"/api/uploads/{dest.name}"}
 
 
 class DispatchChatIn(BaseModel):

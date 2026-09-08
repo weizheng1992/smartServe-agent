@@ -12,6 +12,7 @@ dependencies = [
     "structlog>=24.4",
     "pyjwt>=2.9",
     "bcrypt>=4.2",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]

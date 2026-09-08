@@ -15,6 +15,7 @@ import atexit
 import contextlib
 import os
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -44,6 +45,9 @@ def _stop_containers() -> None:
 
 
 def _bootstrap_sealed_env() -> None:
+    # 上传契约隔离(wayfinder multimodal-image-chat 002):默认目录是仓库 public/uploads,
+    # 测试写入会污染工作区,统一重定向临时目录;须先于 gateway_py 导入生效
+    os.environ.setdefault("UPLOADS_DIR", tempfile.mkdtemp(prefix="agent_all_uploads_"))
     if not _CONTAINERS and os.environ.get("AGENT_ALL_TEST_USE_EXTERNAL") != "1":
         # Docker Desktop(macOS)默认 context 指向 ~/.docker/run/docker.sock,该路径挂进
         # ryuk 容器不通(Desktop 仅对 /var/run/docker.sock 做特权 socket 转发)→ ryuk
