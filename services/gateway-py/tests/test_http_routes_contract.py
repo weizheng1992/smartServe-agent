@@ -139,6 +139,75 @@ class TestMerchantTenantGate:
         assert res.json()["success"] is True
 
 
+class TestStoreChatMultimodal:
+    """商户聊天多模态(2026-09-09):store_chat 接收 imageUrls 透传引擎并以用户行
+    落库(005 治理后引擎零写用户行,store_chat 漏写会导致 merchant 用户消息不落库)。"""
+
+    async def test_store_chat_with_images_persists_and_restores(self, client, contract_fixtures, monkeypatch):
+        # 拦截 run_agent:merchant.py 顶层 `from engine_py.run_agent import run_agent`,
+        # 必须补丁 router 命名空间的引用;且 store_chat 会解引用 final_state,桩须返回 dict
+        async def _fake_run_agent(job):
+            return {"output": "已收到您的图片(测试桩)", "cards": []}
+
+        monkeypatch.setattr("gateway_py.routers.merchant.run_agent", _fake_run_agent)
+
+        thread_id = f"merchant_thread_img_{random.randint(10**6, 10**7)}"
+        image_urls = ["/api/uploads/contract_store_a.png", "/api/uploads/contract_store_b.png"]
+        res = await client.post(
+            "/api/store/chat",
+            json={
+                "message": "请查看我上传的图片",
+                "threadId": thread_id,
+                "userId": "CUST-STORE-IMG",
+                "businessId": "nike",
+                "imageUrls": image_urls,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+
+        # 刷新还原语义:GET /api/store/chat/messages 带回 imageUrls
+        res2 = await client.get(
+            "/api/store/chat/messages", params={"businessId": "nike", "threadId": thread_id, "userId": "CUST-STORE-IMG"}
+        )
+        assert res2.status_code == 200
+        body = res2.json()
+        user_msgs = [m for m in body["messages"] if m["role"] == "user"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0]["imageUrls"] == image_urls
+
+    async def test_store_chat_plain_message_persists_single_user_row(self, client, contract_fixtures, monkeypatch):
+        # 纯文本(无图)也须落库且仅一行用户行——钉死 005 治理后的回归修复
+        async def _fake_run_agent(job):
+            return {"output": "已收到您的咨询(测试桩)", "cards": []}
+
+        monkeypatch.setattr("gateway_py.routers.merchant.run_agent", _fake_run_agent)
+
+        thread_id = f"merchant_thread_plain_{random.randint(10**6, 10**7)}"
+        res = await client.post(
+            "/api/store/chat",
+            json={"message": "你们支持哪些支付方式", "threadId": thread_id, "userId": "CUST-STORE-PLAIN", "businessId": "nike"},
+        )
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+
+        res2 = await client.get(
+            "/api/store/chat/messages",
+            params={"businessId": "nike", "threadId": thread_id, "userId": "CUST-STORE-PLAIN"},
+        )
+        user_msgs = [m for m in res2.json()["messages"] if m["role"] == "user"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0]["imageUrls"] is None
+
+    async def test_store_chat_rejects_empty_message_without_images(self, client, contract_fixtures):
+        res = await client.post(
+            "/api/store/chat",
+            json={"message": "   ", "businessId": "nike", "userId": "CUST-STORE-EMPTY"},
+        )
+        assert res.status_code == 400
+        assert res.json()["success"] is False
+
+
 class TestStoreOrdersStrictScoping:
     """商户订单列表严格归属(2026-09-05):/api/store/orders 不得再 OR CUST-8801
     混入演示用户订单。背景 bug:任何 customerId 查询都会带出张伟(CUST-8801)

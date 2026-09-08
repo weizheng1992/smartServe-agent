@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 import type { OrderCardData, RichCardBlock } from 'types';
-import { Button, Input, RichCardRenderer } from 'ui';
+import { Button, Input, Loader2, Paperclip, RichCardRenderer, X } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
 import { type RouteGreetingContext, getGreetingForRoute } from './routeGreetingConfig';
 
@@ -11,6 +11,7 @@ interface ChatMessage {
   text: string;
   time: string;
   cards?: RichCardBlock[];
+  imageUrls?: string[];
   isDivider?: boolean;
 }
 
@@ -99,6 +100,21 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
   } catch (err) {
     console.warn('[FloatingChatWidget] Failed to sync cart to localStorage:', err);
   }
+}
+
+// 服务端历史消息 → UI 消息统一映射(3 处拉取路径共用;id 兜底前缀区分来源)
+function toChatMessage(m: any, idx: number, idPrefix: string): ChatMessage {
+  const time = m.createdAt
+    ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return {
+    id: m.id || `${idPrefix}_${idx}`,
+    role: m.role === 'user' ? 'user' : 'assistant',
+    text: m.content || m.text || '',
+    cards: Array.isArray(m.cards) ? m.cards : [],
+    imageUrls: Array.isArray(m.imageUrls) ? m.imageUrls : [],
+    time,
+  };
 }
 
 // 🎯 声明式卡片动作调度策略 (Table-Driven Action Strategies)
@@ -192,6 +208,11 @@ export function FloatingChatWidget({
   const [isSending, setIsSending] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const lightboxRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>(0);
@@ -222,21 +243,9 @@ export function FloatingChatWidget({
             setUserThreads(data.userThreads);
           }
           if (targetThreadId && Array.isArray(data.messages) && data.messages.length > 0) {
-            const formattedMsgs: ChatMessage[] = data.messages.map((m: any, idx: number) => ({
-              id: m.id || `msg_hist_${idx}`,
-              role: m.role === 'user' ? 'user' : 'assistant',
-              text: m.content || m.text || '',
-              cards: Array.isArray(m.cards) ? m.cards : [],
-              time: m.createdAt
-                ? new Date(m.createdAt).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : new Date().toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }),
-            }));
+            const formattedMsgs: ChatMessage[] = data.messages.map((m: any, idx: number) =>
+              toChatMessage(m, idx, 'msg_hist'),
+            );
             setMessages(formattedMsgs);
           }
         }
@@ -270,21 +279,9 @@ export function FloatingChatWidget({
         if (olderToAdd.length === 0) {
           setHasMoreOlder(false);
         } else {
-          const formattedOlder: ChatMessage[] = olderToAdd.map((m: any, idx: number) => ({
-            id: m.id || `hist_old_${idx}`,
-            role: m.role === 'user' ? 'user' : 'assistant',
-            text: m.content || m.text || '',
-            cards: Array.isArray(m.cards) ? m.cards : [],
-            time: m.createdAt
-              ? new Date(m.createdAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : new Date().toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-          }));
+          const formattedOlder: ChatMessage[] = olderToAdd.map((m: any, idx: number) =>
+            toChatMessage(m, idx, 'hist_old'),
+          );
 
           setMessages((prev) => [
             {
@@ -363,21 +360,9 @@ export function FloatingChatWidget({
           if (typeof window !== 'undefined') {
             localStorage.setItem(`aurora_active_thread_${user.id}`, data.threadId);
           }
-          const formattedMsgs: ChatMessage[] = data.messages.map((m: any, idx: number) => ({
-            id: m.id || `msg_hist_${idx}`,
-            role: m.role === 'user' ? 'user' : 'assistant',
-            text: m.content || m.text || '',
-            cards: Array.isArray(m.cards) ? m.cards : [],
-            time: m.createdAt
-              ? new Date(m.createdAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : new Date().toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-          }));
+          const formattedMsgs: ChatMessage[] = data.messages.map((m: any, idx: number) =>
+            toChatMessage(m, idx, 'msg_hist'),
+          );
           setMessages(formattedMsgs);
           if (Array.isArray(data.userThreads)) {
             setUserThreads(data.userThreads);
@@ -521,6 +506,11 @@ export function FloatingChatWidget({
     };
   }, [threadId, isOpen]);
 
+  // 灯箱打开时聚焦遮罩本身:div 默认不可聚焦,不聚焦则 onKeyDown 的 Escape 关闭永不触发
+  useEffect(() => {
+    if (selectedImage) lightboxRef.current?.focus();
+  }, [selectedImage]);
+
   // 滚动到底部 (仅在用户主动发信或接收新回复时平滑滚动)
   // biome-ignore lint/correctness/useExhaustiveDependencies: messages.length 为滚动触发器,体内不直接读取
   useEffect(() => {
@@ -557,10 +547,46 @@ export function FloatingChatWidget({
     ]);
   };
 
+  // 上传图片至网关(与 web 端 ChatArea 同一端点),返回 /api/uploads/* URL 供消息携带
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingImage(true);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/chat/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (data.success && data.url) {
+        setAttachedImages((prev) => [...prev, data.url]);
+      } else {
+        alert(data.error || '图片上传失败');
+      }
+    } catch {
+      alert('上传失败，请检查网络连接');
+    } finally {
+      setUploadingImage(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   // 发送消息到后端决策引擎
-  const handleSendMessage = async (customMsg?: string, cardsToSend?: RichCardBlock[]) => {
-    const msgToSend = (customMsg || input).trim();
-    if (!msgToSend || isSending) return;
+  const handleSendMessage = async (customMsg?: string, cardsToSend?: RichCardBlock[], customImages?: string[]) => {
+    const imagesToSend = customImages ?? (customMsg ? [] : [...attachedImages]);
+    const msgToSend = (customMsg || input).trim() || (imagesToSend.length > 0 ? '请查看我上传的图片' : '');
+    if ((!msgToSend && imagesToSend.length === 0) || isSending) return;
 
     const userTime = new Date().toLocaleTimeString([], {
       hour: '2-digit',
@@ -572,11 +598,13 @@ export function FloatingChatWidget({
       role: 'user',
       text: msgToSend,
       cards: cardsToSend || [],
+      imageUrls: imagesToSend,
       time: userTime,
     };
 
     setMessages((prev) => [...prev, newMsg]);
     if (!customMsg) setInput('');
+    if (!customMsg && !customImages) setAttachedImages([]);
     setIsSending(true);
 
     try {
@@ -588,6 +616,7 @@ export function FloatingChatWidget({
           threadId,
           userId: user.id,
           businessId: 'aurora',
+          imageUrls: imagesToSend.length > 0 ? imagesToSend : undefined,
           routeContext: {
             pathname,
             ...contextOverride,
@@ -655,6 +684,13 @@ export function FloatingChatWidget({
 
   // 卡片点击交互回调 (声明式策略分发)
   const handleCardAction = (action: string, payload: Record<string, unknown> = {}) => {
+    // trigger_upload 需要组件内 fileInputRef,不入模块级策略表(与 web ChatArea 同型);
+    // 引擎 quick_replies 卡片的"上传商品瑕疵照片"即此动作,缺失时点击静默无反应
+    if (action === 'trigger_upload') {
+      fileInputRef.current?.click();
+      return;
+    }
+
     const strategy = CARD_ACTION_STRATEGIES[action];
     const result = strategy
       ? strategy(payload)
@@ -856,15 +892,32 @@ export function FloatingChatWidget({
 
               return (
                 <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
-                      m.role === 'user'
-                        ? 'bg-emerald-600 text-white rounded-br-none'
-                        : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
-                    }`}
-                  >
-                    {m.text}
-                  </div>
+                  {m.imageUrls && m.imageUrls.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 justify-end mb-1 max-w-[85%]">
+                      {m.imageUrls.map((url) => (
+                        <button
+                          key={url}
+                          type="button"
+                          onClick={() => setSelectedImage(url)}
+                          className="block overflow-hidden rounded-xl border border-emerald-500/30 shadow-2xs cursor-pointer hover:opacity-90 transition"
+                          aria-label="查看大图"
+                        >
+                          <img src={url} alt="用户上传图片" className="max-h-28 max-w-full rounded-xl object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {m.text && (
+                    <div
+                      className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
+                        m.role === 'user'
+                          ? 'bg-emerald-600 text-white rounded-br-none'
+                          : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
+                      }`}
+                    >
+                      {m.text}
+                    </div>
+                  )}
                   {m.cards && m.cards.length > 0 && (
                     <div className="w-full max-w-[95%]">
                       <RichCardRenderer cards={m.cards} onAction={handleCardAction} />
@@ -884,26 +937,92 @@ export function FloatingChatWidget({
           </div>
 
           {/* 底部输入框 */}
-          <div className="p-3 bg-white border-t border-slate-200 flex items-center space-x-2">
-            <Input
-              type="text"
-              placeholder="请输入您的问题或指令..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              disabled={isSending}
-              className="text-xs flex-1 h-9"
-            />
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => handleSendMessage()}
-              disabled={!input.trim() || isSending}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-9 px-3 shrink-0"
-            >
-              发送
-            </Button>
+          <div className="p-3 bg-white border-t border-slate-200 space-y-2">
+            {attachedImages.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {attachedImages.map((url, i) => (
+                  <div
+                    key={url}
+                    className="relative w-12 h-12 rounded-lg overflow-hidden border border-emerald-500/30 shadow-2xs group"
+                  >
+                    <img src={url} alt="待发送图片" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(i)}
+                      className="absolute top-0 right-0 bg-black/60 text-white rounded-bl-lg p-0.5 cursor-pointer hover:bg-black/80"
+                      aria-label="移除图片"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center space-x-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingImage || isSending}
+                title="上传图片/面单/破损照片"
+                className="h-9 w-9 shrink-0 text-slate-500 hover:text-emerald-600"
+              >
+                {uploadingImage ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
+              </Button>
+              <Input
+                type="text"
+                placeholder="请输入您的问题或指令..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                disabled={isSending}
+                className="text-xs flex-1 h-9"
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handleSendMessage()}
+                disabled={(!input.trim() && attachedImages.length === 0) || isSending}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-9 px-3 shrink-0"
+              >
+                发送
+              </Button>
+            </div>
           </div>
+        </div>
+      )}
+
+      {/* 图片放大预览遮罩(点击任意处关闭) */}
+      {selectedImage && (
+        <div
+          ref={lightboxRef}
+          tabIndex={-1}
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6 cursor-pointer outline-none"
+          onClick={() => setSelectedImage(null)}
+          onKeyDown={(e) => e.key === 'Escape' && setSelectedImage(null)}
+          role="presentation"
+        >
+          <img
+            src={selectedImage}
+            alt="放大查看"
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+          />
+          <button
+            type="button"
+            className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 cursor-pointer"
+            onClick={() => setSelectedImage(null)}
+            aria-label="关闭大图"
+          >
+            <X size={18} />
+          </button>
         </div>
       )}
     </>

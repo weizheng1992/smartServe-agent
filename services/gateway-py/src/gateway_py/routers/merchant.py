@@ -25,7 +25,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
 from .. import merchant_domain as mds
-from ..conversation_repo import get_conversation_timeline, list_conversations
+from ..conversation_repo import append_message, get_conversation_timeline, list_conversations
 from ..hmac_signer import verify as hmac_verify
 
 router = APIRouter()
@@ -379,7 +379,9 @@ async def publish_thread_message(thread_id: str, payload: dict) -> None:
 async def store_chat(body: dict):
     try:
         effective_message = (body.get("message") or body.get("input") or "").strip()
-        if not effective_message:
+        image_urls = [u for u in (body.get("imageUrls") or []) if isinstance(u, str) and u.strip()]
+        # 空文本但有图放行(兜底文案由前端补,对齐 /api/chat 语义);两者皆空才拒
+        if not effective_message and not image_urls:
             return JSONResponse(status_code=400, content={"success": False, "error": "消息内容不能为空"})
 
         business_id = body.get("businessId") or "aurora"
@@ -391,6 +393,19 @@ async def store_chat(body: dict):
         if gate is not None:
             return gate
 
+        # 用户行持久化归网关(005 治理:引擎零写用户行)——store_chat 此前漏写,
+        # 005 后 merchant 用户消息不落库、历史恢复缺用户行;多模态 imageUrls 一并入库
+        await append_message(
+            {
+                "threadId": thread_id,
+                "businessId": business_id,
+                "userId": user_id,
+                "role": "user",
+                "content": effective_message,
+                "imageUrls": image_urls or None,
+            }
+        )
+
         final_state = await run_agent(
             AgentJobInput(
                 jobId=job_id,
@@ -398,6 +413,7 @@ async def store_chat(body: dict):
                 userId=user_id,
                 businessId=business_id,
                 message=effective_message,
+                imageUrls=image_urls,
             )
         )
         output = final_state.get("output") or final_state.get("result") or "极光潮品智能客服已为您处理完毕。"
