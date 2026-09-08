@@ -67,6 +67,7 @@ class Message(Base):
     business_id: Mapped[str | None] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    image_urls: Mapped[list | None] = mapped_column(JSONB)
     thought_steps: Mapped[dict | None] = mapped_column(JSONB)
     tool_calls: Mapped[dict | None] = mapped_column(JSONB)
     cards: Mapped[list | None] = mapped_column(JSONB)

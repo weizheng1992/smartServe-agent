@@ -127,7 +127,7 @@ async def get_conversation_timeline(thread_id: str, business_id: str | None = No
             (
                 await session.execute(
                     text(
-                        "SELECT id, role, content, cards, timestamp FROM messages WHERE thread_id = :tid "
+                        "SELECT id, role, content, cards, image_urls, timestamp FROM messages WHERE thread_id = :tid "
                         "ORDER BY timestamp ASC, CASE role WHEN 'system' THEN 1 WHEN 'user' THEN 2 "
                         "WHEN 'assistant' THEN 3 ELSE 4 END ASC, id ASC"
                     ).bindparams(tid=clean_thread_id)
@@ -151,6 +151,7 @@ async def get_conversation_timeline(thread_id: str, business_id: str | None = No
                 "role": m["role"],
                 "content": m["content"],
                 "cards": cards,
+                "imageUrls": m["image_urls"] if isinstance(m["image_urls"], list) else None,
                 "timestamp": m["timestamp"],
             }
         )
@@ -274,8 +275,9 @@ async def append_message(payload: dict) -> dict:
         timestamp = payload.get("timestamp") or _dt.datetime.now().isoformat()
         await session.execute(
             text(
-                "INSERT INTO messages (id, thread_id, business_id, role, content, cards, operator_info, timestamp) "
-                "VALUES (:mid, :tid, :bid, :role, :content, CAST(:cards AS jsonb), CAST(:opinfo AS jsonb), :ts) "
+                "INSERT INTO messages (id, thread_id, business_id, role, content, cards, operator_info, image_urls, timestamp) "
+                "VALUES (:mid, :tid, :bid, :role, :content, CAST(:cards AS jsonb), CAST(:opinfo AS jsonb), "
+                "CAST(:imgurls AS jsonb), :ts) "
                 "ON CONFLICT (id) DO NOTHING"
             ).bindparams(
                 mid=msg_id,
@@ -285,9 +287,17 @@ async def append_message(payload: dict) -> dict:
                 content=payload["content"],
                 cards=json.dumps(payload["cards"], ensure_ascii=False) if payload.get("cards") else None,
                 opinfo=json.dumps(payload.get("operatorInfo"), ensure_ascii=False) if payload.get("operatorInfo") else None,
+                imgurls=json.dumps(payload.get("imageUrls"), ensure_ascii=False) if payload.get("imageUrls") else None,
                 ts=timestamp,
             )
         )
         await session.execute(text("UPDATE threads SET updated_at = NOW() WHERE id = :tid").bindparams(tid=thread_id))
         await session.commit()
-    return {"id": msg_id, "threadId": thread_id, "role": payload["role"], "content": payload["content"], "timestamp": timestamp}
+    return {
+        "id": msg_id,
+        "threadId": thread_id,
+        "role": payload["role"],
+        "content": payload["content"],
+        "imageUrls": payload.get("imageUrls"),
+        "timestamp": timestamp,
+    }

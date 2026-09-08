@@ -116,6 +116,7 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             "userId": effective_user_id,
             "role": "user",
             "content": effective_message,
+            "imageUrls": body.imageUrls,
         }
     )
 

@@ -486,6 +486,48 @@ class TestChatNonLlm:
         assert isinstance(body["orders"], list)
 
 
+class TestChatImagePersistence:
+    """wayfinder multimodal 004:发图消息落库 imageUrls 引用,历史读取原样带回。"""
+
+    async def test_dispatch_with_images_persists_and_restores(self, client, contract_fixtures, monkeypatch):
+        # 拦截 run_agent(与 TestApprovalResumeDispatch 同一 patch 位):落库断言不依赖引擎
+        async def _fake_run_agent(job):
+            return None
+
+        monkeypatch.setattr(importlib.import_module("engine_py.run_agent"), "run_agent", _fake_run_agent)
+
+        thread_id = f"thread_img_{random.randint(10**6, 10**7)}"
+        image_urls = ["/api/uploads/contract_img_a.png", "/api/uploads/contract_img_b.png"]
+        res = await client.post(
+            "/api/chat",
+            json={
+                "message": "请查看我上传的图片",
+                "threadId": thread_id,
+                "userId": "CUST-8801",
+                "businessId": "nike",
+                "imageUrls": image_urls,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+
+        # 刷新还原语义:GET /api/chat/messages 带回 imageUrls
+        res2 = await client.get("/api/chat/messages", params={"threadId": thread_id, "businessId": "nike"})
+        assert res2.status_code == 200
+        body = res2.json()
+        user_msgs = [m for m in body["messages"] if m["role"] == "user"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0]["imageUrls"] == image_urls
+
+    async def test_history_without_images_has_null_imageurls(self, client, contract_fixtures):
+        res = await client.get(
+            "/api/chat/messages", params={"threadId": CONTRACT_THREAD, "businessId": "nike"}
+        )
+        assert res.status_code == 200
+        for m in res.json()["messages"]:
+            assert m.get("imageUrls") is None
+
+
 class TestConversations:
     async def test_list_pagination_contains_fixture(self, client, contract_fixtures):
         res = await client.get(
