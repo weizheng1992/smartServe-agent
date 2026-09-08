@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import time
 
@@ -13,8 +14,44 @@ from .order_domain import OrderDomainService
 
 
 class MallDomainService:
-    # 购物车进程内存态(与 TS cartStorage 一致,单实例假设)
+    # 购物车存储(2026-09-08 重构):_cart_storage 降级为进程一级读缓存,真实
+    # 状态写穿透 Redis(agent:cart:{userId})。此前纯进程内存,网关重启即失忆,
+    # 与浏览器 localStorage 购物车分裂 —— 引擎对已遗忘的车重新播报「已成功
+    # 加入」,前端按 skuCode 合并发现条目都在,quantity 原值覆盖原值,计数
+    # 纹丝不动(用户症状:「说成功了但没加入」)。Redis 不可用时降级纯内存。
     _cart_storage: dict[str, list[dict]] = {}
+    _CART_REDIS_PREFIX = "agent:cart:"
+
+    @staticmethod
+    async def _load_cart(cart_key: str) -> list[dict] | None:
+        """读购物车:进程缓存命中优先,否则回源 Redis。None 表示两处皆无。"""
+        if cart_key in MallDomainService._cart_storage:
+            return MallDomainService._cart_storage[cart_key]
+        try:
+            from ..event_bus import get_client
+
+            raw = await (await get_client()).get(f"{MallDomainService._CART_REDIS_PREFIX}{cart_key}")
+            if raw is None:
+                return None
+            items = json.loads(raw)
+            MallDomainService._cart_storage[cart_key] = items
+            return items
+        except Exception as err:
+            print(f"[MallDomain] Cart Redis load degraded to memory view: {err}")
+            return None
+
+    @staticmethod
+    async def _save_cart(cart_key: str, items: list[dict]) -> None:
+        """写购物车:进程缓存与 Redis 同步写穿透;Redis 故障静默降级纯内存。"""
+        MallDomainService._cart_storage[cart_key] = items
+        try:
+            from ..event_bus import get_client
+
+            await (await get_client()).set(
+                f"{MallDomainService._CART_REDIS_PREFIX}{cart_key}", json.dumps(items, ensure_ascii=False)
+            )
+        except Exception as err:
+            print(f"[MallDomain] Cart Redis persist degraded to memory only: {err}")
 
     @staticmethod
     async def get_user_addresses(user_id: str | None = None, business_id: str | None = None, thread_id: str | None = None) -> dict:
@@ -710,13 +747,13 @@ class MallDomainService:
         price = params.get("price") if params.get("price") is not None else 899.0
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
 
-        items = MallDomainService._cart_storage.get(cart_key, [])
+        items = (await MallDomainService._load_cart(cart_key)) or []
         existing = next((i for i in items if i["skuId"] == sku_id), None)
         if existing:
             existing["quantity"] += quantity
         else:
             items.append({"skuId": sku_id, "quantity": quantity, "title": title, "price": price, "spec": params.get("spec")})
-        MallDomainService._cart_storage[cart_key] = items
+        await MallDomainService._save_cart(cart_key, items)
 
         total_amount = sum(i["price"] * i["quantity"] for i in items)
         return {
@@ -739,12 +776,12 @@ class MallDomainService:
         否则会对空车播报幻影移除/改量(2026-09-06 修复)。
         """
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
-        return bool(MallDomainService._cart_storage.get(cart_key))
+        return bool(await MallDomainService._load_cart(cart_key))
 
     @staticmethod
     async def get_cart_summary(params: dict) -> dict:
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
-        items = MallDomainService._cart_storage.get(cart_key) or [
+        items = (await MallDomainService._load_cart(cart_key)) or [
             {
                 "skuId": "sku_nike_aj1_blk_425",
                 "title": "Air Jordan 1 Retro High OG (42.5码 / 黑白芝加哥)",
@@ -772,7 +809,7 @@ class MallDomainService:
         sku_id = params["skuId"]
         quantity = params["quantity"]
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
-        items = MallDomainService._cart_storage.get(cart_key, [])
+        items = (await MallDomainService._load_cart(cart_key)) or []
 
         if quantity <= 0:
             items = [i for i in items if i["skuId"] != sku_id]
@@ -781,7 +818,7 @@ class MallDomainService:
             if target:
                 target["quantity"] = quantity
 
-        MallDomainService._cart_storage[cart_key] = items
+        await MallDomainService._save_cart(cart_key, items)
         total_amount = sum(i["price"] * i["quantity"] for i in items)
         return {
             "success": True,

@@ -51,7 +51,20 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
       if (idx >= 0) {
         // 服务端 cart_card 的 items 是加购/改量后的全量快照(该 SKU 当前总数),
         // 一律覆盖而非累加——engine 侧已按 userId 维度累加,前端再累加会翻倍。
+        // 标题/规格/价格同样以服务端快照为准:若只覆盖 quantity,localStorage 里
+        // 陈旧占位标题(如历史演示数据)会在车页永久残留(2026-09-08 同步修复)。
         existingCart[idx].quantity = Number(item.quantity || 1);
+        if (item.title) existingCart[idx].title = item.title;
+        const specTitle = item.specSummary || item.skuTitle;
+        if (specTitle) {
+          existingCart[idx].skuTitle = specTitle;
+          if (existingCart[idx].sku) existingCart[idx].sku.skuTitle = specTitle;
+        }
+        if (item.price !== undefined && item.price !== null) {
+          existingCart[idx].price = Number(item.price);
+          if (existingCart[idx].sku) existingCart[idx].sku.price = Number(item.price);
+        }
+        if (item.imageUrl) existingCart[idx].imageUrl = item.imageUrl;
       } else {
         existingCart.push({
           id: skuCode,

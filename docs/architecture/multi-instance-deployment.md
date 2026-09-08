@@ -6,12 +6,13 @@
 
 ## 1. 为什么现在不能直接多实例
 
-两个**硬缺口**会在第二个实例上线的那一刻静默断裂,其余组件要么天然安全、要么幂等空转:
+两个**硬缺口**会在第二个实例上线的那一刻静默断裂,另有一个**软缺口**(数据陈旧化,不致失联),其余组件要么天然安全、要么幂等空转:
 
 | # | 缺口 | 位置 | 断裂表现 |
 |---|------|------|----------|
 | 1 | 周期任务调度单实例假设 | `engine_py/scheduler.py`(随 `bun run worker` 入口启动) | 每个实例都跑 outbox 对账(30s)+ 坏例池摘要(6h);对账因行锁不重复派发,但摘要/保留期任务重复空转,日志与摘要统计失真 |
 | 2 | socket.io 房间为进程内存态 | `gateway_py/realtime.py:25`(`AsyncServer` 未配 `client_manager`) | 坐席连实例 A、顾客连实例 B 时同处 `thread:{id}` 房间却互不可见——`peer_joined`/`typing`/`new_message` 不跨实例广播,**人工接管双端失联** |
+| 3 | 购物车 L1 进程缓存无跨实例失效 | `engine_py/tools_registry/mall_domain.py`(`_cart_storage` 读缓存 + Redis 写穿透,2026-09-08 起) | 实例 A 缓存某用户车后,实例 B 的写入只落 Redis 不清 A 的缓存:A 侧播报陈旧车况;更糟是**丢失更新**——A 基于陈旧快照追加后整表覆盖 Redis,B 在窗口内的累量被冲掉 |
 
 ## 2. 已就绪组件盘点(无需改动)
 
@@ -22,6 +23,7 @@
 - **Temporal worker 本体**:同 task queue(`agent-tasks-py`)多 worker 是 Temporal 原生水平扩容模型,活动天然分摊。缺的只是挂在 worker 入口的 scheduler(见缺口 #1)。
 - **Fast-Path 恢复派发**:审批动作发生在处理 admin HTTP 请求的那个 gateway 实例上,`run_agent` 就地执行、事件走 Redis Streams 广播——任意实例处理等价。
 - **确定性 JobId** `job_resume_${approvalId}`:跨实例幂等锚点不变。
+- **购物车持久性**(`engine_py/tools_registry/mall_domain.py`,2026-09-08 起):真实状态写穿透 Redis(`agent:cart:{userId}`),进程缓存仅一级读缓存、Redis 故障静默降级纯内存。**单实例重启不失忆**已由 `tests/test_cart_persistence_regression.py` 钉死;跨实例陈旧读见上表缺口 #3(多实例前须给缓存加短 TTL 或直读)。
 
 ## 3. 迁移方案
 
@@ -76,3 +78,4 @@ sio = socketio.AsyncServer(
 
 - 2026-09-05:盘点成文;方案 A(环境变量单实例)为多实例上线日止损预案,C(Temporal Schedule)为目标态。
 - socket.io `AsyncRedisManager` 为缺口 #2 唯一候选方案,无需自研。
+- 2026-09-08:购物车由纯进程内存改为 Redis 写穿透(单实例重启失忆曾致「播报成功但购物车计数不变」——引擎失忆后重加,前端按 skuCode 合并时 quantity 原值覆盖原值);同时登记缺口 #3(L1 缓存跨实例陈旧读)。
