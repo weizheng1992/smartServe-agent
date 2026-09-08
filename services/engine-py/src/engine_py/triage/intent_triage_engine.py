@@ -20,6 +20,7 @@ from ..tenant import get_merchant_display_name, sanitize_tenant_response
 from ..vision import analyze_images
 from . import rule_matchers
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
+from .product_disambiguator import AFTER_SALE_INTENTS, build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
 from .slot_extractor import ORDER_ID_RE, SlotExtractor
 from .structured_classifier import classify
@@ -220,6 +221,7 @@ class IntentTriageEngine:
 
         # 📷 Step 0.5: 多模态视觉解析(wayfinder multimodal 003,移植 visionAnalyzerService)
         damage_assessment = state.get("damage_assessment")
+        vision_analysis: dict | None = None  # Step 1.6 商品归属消歧消费(摘要/物体)
         if state.get("image_urls"):
             if state.get("job_id"):
                 await emit_status(
@@ -396,6 +398,61 @@ class IntentTriageEngine:
                     **(state.get("order_context") or {}),
                     "targetOrderId": str(task_spec["slots"]["orderId"]),
                 }
+
+            # 📷 Step 1.6: 破损图商品归属消歧(grilling 2026-09-09)——售后意图
+            # 带图但缺 orderId(图内也无单号,OCR 通道失效)时,用 vision 摘要 ×
+            # 近单商品行做 LLM 消歧,替代机械"请提供订单号"澄清:
+            #   唯一高置信命中 → 注入 targetOrderId 并重跑槽位抽取(退款严格
+            #     抽取器只认输入正则与该键,slot_extractor.py:72-82);
+            #   多候选/低置信/模型失败 → 商品选择 quick_replies 卡片问用户;
+            #   无候选订单 → 明示指引。消歧失败绝不炸会话,最坏多问一次。
+            if (
+                state.get("image_urls")
+                and vision_analysis
+                and task_spec["intentType"] in AFTER_SALE_INTENTS
+                and not task_spec["slots"].get("orderId")
+                and not (existing_order_context or {}).get("targetOrderId")
+            ):
+                disambig = await disambiguate_product(
+                    vision_analysis, state.get("user_id"), tenant_id
+                )
+                if disambig["status"] == "matched":
+                    state["order_context"] = {
+                        **(state.get("order_context") or {}),
+                        "targetOrderId": disambig["orderId"],
+                    }
+                    context["orderContext"] = state["order_context"]
+                    if state.get("job_id"):
+                        await emit_status(
+                            state["job_id"],
+                            f"📷 已根据照片自动关联订单 {disambig['orderId']} 的 {disambig['productName']}"
+                            "(如识别有误,请直接告知正确订单号)",
+                            node="triage",
+                        )
+                    # 重跑槽位抽取:targetOrderId 已就位,本轮 slots 直接带上
+                    # orderId,免二次"请提供订单号"澄清;仍取不到则走下方正常澄清兜底
+                    task_spec = SlotExtractor.extract(input_text, active_intent, existing_slots, context)
+                elif not disambig["candidates"]:
+                    return await IntentTriageEngine.handle_immediate_bypass(
+                        state,
+                        "image_product_no_orders",
+                        "未能找到您可用的订单信息。请提供订单编号,或输入「转人工」联系人工客服为您处理。",
+                        [{"intent": task_spec["intentType"], "confidence": task_spec["confidence"]}],
+                        "vision_disambig",
+                        0.9,
+                        damage_assessment,
+                    )
+                else:
+                    return await IntentTriageEngine.handle_immediate_bypass(
+                        state,
+                        "image_product_select",
+                        "收到您的照片 📷 为准确定位商品,请选择破损的是哪件商品:",
+                        [{"intent": task_spec["intentType"], "confidence": task_spec["confidence"]}],
+                        "vision_disambig",
+                        0.9,
+                        damage_assessment,
+                        [build_select_card(disambig["candidates"])],
+                    )
 
             # 高风险/多参数意图缺失必填槽位 → 即时追问,阻断死循环自旋
             if task_spec["missingSlots"] and task_spec["clarificationMessage"]:
