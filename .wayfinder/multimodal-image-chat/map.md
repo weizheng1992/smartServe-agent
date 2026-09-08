@@ -29,6 +29,7 @@ created: 2026-09-08
 - [gateway 上传端点 + 本地存储](tickets/002-upload-endpoint.md): `POST /api/chat/upload` 落地(MIME 白名单、10MB 读流实测、UUID 落盘 `public/uploads`、`/api/uploads` StaticFiles 回读),新增 `python-multipart` 依赖;契约三用例入册,路由计数 41→42 三处文档同步;uploads 公开读=UUID capability URL,单实例运营期接受。
 - [engine vision 模块(移植+改良)](tickets/003-vision-module.md): `engine_py/vision/analyzer.py` 落地并挂 triage Step 0.5 —— 结构化输出走 function_calling、超时可配(默认 15s)、本地图转 base64 Data URL 直传、LLM 失败降级启发式;`get_vision_model()` 入 `llm/chat.py` 统一入口(`AI_VISION_MODEL` 默认 glm-4.6v);七用例 + engine 162 / gateway 95 全绿。
 - [图片持久化与会话还原](tickets/004-image-persistence.md): Alembic 0006 `messages.image_urls`(JSONB 引用、幂等守卫)+ append_message 透传 + timeline 带回;前端零改动(002 已备渲染),dispatch 带图落库→刷新还原闭环;gateway 97 / engine 162 全绿。
+- [图片治理与全链路验收](tickets/005-governance-and-e2e.md): `normalize_image_urls` ≤3 图/条 + E2E 实测三修(超时 30s / 词表补开胶断裂 / uploads 目录层级);**用户消息双插治理——网关=用户行唯一写入方**(imageUrls 只在入口可得),引擎三处拔除;E2E chromium 全链绿(48.7s,真实 GLM-4.6V severe 定责 + 刷新还原);eval 维持文本模拟基线;存量缺口入册(GET threads 405 / bypass 丢定责 / 网关侧遥测盲区)。
 
 ## Not yet specified
 

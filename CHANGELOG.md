@@ -4,6 +4,39 @@
 
 ---
 
+## [2.5.0] - 2026-09-09 (多模态图片客服:上传→看图定责→卡片回复→刷新还原全链贯通)
+
+wayfinder 执行图 `multimodal-image-chat` 收官(001-005 五票):回收 TS 退役时留下的四个断点——上传端点 404、triage 视觉 TODO、messages 无图列、历史不还原图。用户在 web 聊天发物流面单/破损商品图,平台真实"看图办事"。
+
+### ✨ Features (新功能)
+
+- **图片上传端点 `POST /api/chat/upload` (`52d87ed`+`ae64ac6`,wayfinder 002)**:
+  - MIME 白名单(jpeg/png/webp/gif)、流式读取实测 10MB 上限(超限删半成品返 413)、UUID 文件名落盘 `public/uploads`(path-traversal 免疫)、StaticFiles `/api/uploads` 回读;契约三用例入册,契约路由 41→42 三处文档同步;新增 `python-multipart` 依赖。
+- **engine 视觉模块 `vision/analyzer.py` (`7c31510`+`2047521`,wayfinder 003)**:
+  - 移植 TS visionAnalyzerService(考古基准 f71f7fa / b75fb78^)并修三大 TS 缺陷:①手写 ```json 围栏剥离 → `with_structured_output(method="function_calling")`(GLM-4.6V 无 response_format);②1500ms 硬超时 → `AI_VISION_TIMEOUT_SECONDS` 可配(默认 15s);③本地图 `/api/uploads/` 引用 → base64 Data URL 直传(bigmodel 拉不到 localhost)。
+  - 挂 triage Step 0.5(📷 状态播报 + try/except 保险带,视觉失败绝不炸分流);OCR 单号正则(ORD-/SF/YTO/ZTO/EMS/TRACK)、破损三级定责(negligible/minor/severe)、LLM 失败降级启发式(confidence 0.88)、PII 脱敏复用 scrubber;`get_vision_model()` 入 `llm/chat.py` 统一入口(`AI_VISION_MODEL` 默认 glm-4.6v,刻意不入韧性层——视觉失败域独立)。
+- **图片持久化与会话还原 (`8647697`,wayfinder 004)**:
+  - Alembic 0006 增列 `messages.image_urls`(JSONB 引用,inspection 幂等守卫,只存 URL 不存 blob);gateway `append_message` 透传落库、dispatch 用户消息带图入库(此前 AgentJobInput 带图但落库丢弃)、`get_conversation_timeline` 带出 camelCase `imageUrls`(web 聊天历史与 admin 会话时间线共用);前端零改动(002 已备 `Message.imageUrls` 与缩略图渲染),发图→刷新→图与对话俱在。
+- **入图归一化与限额治理(wayfinder 005)**:
+  - `normalize_image_urls` 收口(剔非字符串/空白、去重保序、**≤3 图/条**截断),挂 `run_agent` 初始状态构建;与网关单张 10MB 限额对齐;垃圾输入只少看图不抛错。E2E 夹具 + `chat-multimodal-damage.e2e.ts`(选图上传→破损图→damage_assessment 卡→刷新还原,chromium)。
+  - E2E 实测三修:①`AI_VISION_TIMEOUT_SECONDS` 默认 15s→30s(GLM-4.6V 真实请求可超 15s,超时即降级启发式丢定责);②启发式破损词表补 `断裂|开胶|脱胶`(「鞋底开胶断裂」原全不命中,降级后连兜底定责都丢);③`_uploads_dir()` 默认路径 `parents[4]`→`parents[5]`(原解析到不存在的 `services/public/uploads`,本地图全被跳过)。
+- **用户消息单次落库治理(wayfinder 005)**:
+  - 双插考古:网关 dispatch/SPI 持久化用户消息(带 imageUrls),`run_agent` 又沿 TS 基线 `shortMemory.addMessage` 盲插无图副本——TS 树里 `appendMessage` 并不存在,网关侧插入系 Python 移植新增,叠加后每条消息时间线 user×2(一行带图一行不带)。裁决:**用户行唯一写入方归网关**(imageUrls 只在入口可得),引擎三处(run_agent 主链/问候旁路/Temporal activity)拔除,assistant 行仍归引擎;`test_user_message_single_write.py` 两用例钉死所有权边界。
+
+### 📝 Docs (文档同步)
+
+- `docs/architecture/multimodal-and-rich-cards.md` TS 残留引用清账(源码路径、1500ms 超时叙述、上传路由位置全部对齐 Python 实况);`.claude/rules/agent-engine.md` §1.3 补入图治理条目;`.env.example` 补 `AI_VISION_MODEL`/`AI_VISION_TIMEOUT_SECONDS`。
+- 评测裁决:`eval/testCases/ecommerce/multimodal-damage.json` 维持 `[image: ...]` 文本模拟基线不升级——promptfoo 供给方是文本 LLM 无图片输入位,真实图片链路已由 vision 单测 + E2E 覆盖;基线零改动零重钉。
+
+### ✅ 验证 (Verification,如实)
+
+- engine 169(vision 治理 +3、用户单写 +2)全绿;gateway 97(含图片持久化契约 +2)全绿;ruff 双服务干净。
+- E2E chromium:选图上传→真实 GLM-4.6V 定责(severe / 0.95 /「鞋底开胶断裂，完全不能穿」)→damage_assessment 卡渲染→刷新 `?threadId=` 自愈还原图与卡,全链绿;健康链路端到端 ~26s。期间实证:上游 bigmodel 深度限流时链路可拖至 16 分钟(隔夜自愈),vision 超时降级启发式(0.88)仍出卡——双通道容灾按设计工作。
+- 已知存量缺口(非本图引入,记录不修):侧栏历史列表依赖 `GET /api/chat/threads`,网关仅实现 POST/DELETE 返 405,刷新后列表恒空(当前线程靠 URL 自愈恢复)。
+- `test:prompt:compare` 未跑:文本路径 prompt 零改动(vision 仅带图分支触发,归一化只影响入图数量),基线不可能漂移。
+
+---
+
 ## [2.4.1] - 2026-09-07 (「查询热门商品」类措辞空转道歉修复:快轨补词 + 执行器白名单扩容)
 
 ### 🐛 Bug Fixes (缺陷修复)

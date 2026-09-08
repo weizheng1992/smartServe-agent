@@ -33,11 +33,12 @@ paths: ["services/engine-py/**/*"]
 
 - **第一道防线（语义去重旁路）**：`triage/semantic_cache.py` 计算与前序查询的余弦相似度（≥ 0.98），直接命中缓存返回。
 - **低置信度归档与槽位消歧**：分类置信度不足时，自动写入 `low_confidence_logs` 表，并触发 `triage/slot_extractor.py` 引导用户补充缺失关键槽位。
-- **多模态视觉定责**（`vision/analyzer.py`，2026-09-08 移植 TS visionAnalyzerService）：挂 triage Step 0.5，视觉 LLM 精判 + 启发式规则双通道（模型失败降级启发式，绝不炸会话）；快递面单/包装条形码 OCR 实体提取（如 `ORD-XXXXX`、`SFXXX`），商品成色与破损智能定责评级（`negligible` / `minor` / `severe`）；容灾超时 `AI_VISION_TIMEOUT_SECONDS` 可调（默认 15s，TS 的 1500ms 硬超时已废）。本地图（`/api/uploads/` 引用）以 base64 Data URL 直传（bigmodel 拉不到 localhost），模型独立经 `get_vision_model()` 配置（`AI_VISION_MODEL`，默认 glm-4.6v，结构化输出走 function_calling）。
+- **多模态视觉定责**（`vision/analyzer.py`，2026-09-08 移植 TS visionAnalyzerService）：挂 triage Step 0.5，视觉 LLM 精判 + 启发式规则双通道（模型失败降级启发式，绝不炸会话）；快递面单/包装条形码 OCR 实体提取（如 `ORD-XXXXX`、`SFXXX`），商品成色与破损智能定责评级（`negligible` / `minor` / `severe`）；容灾超时 `AI_VISION_TIMEOUT_SECONDS` 可调（默认 30s，E2E 实测 GLM-4.6V 真实请求可超 15s，TS 的 1500ms 硬超时已废）。本地图（`/api/uploads/` 引用）以 base64 Data URL 直传（bigmodel 拉不到 localhost），模型独立经 `get_vision_model()` 配置（`AI_VISION_MODEL`，默认 glm-4.6v，结构化输出走 function_calling）。入图治理（005）：`run_agent` 构建初始状态时经 `normalize_image_urls` 收口 —— 剔除垃圾项、去重保序、**≤3 图/条**截断（与网关上传单张 10MB 限额对齐）；垃圾输入只少看图不抛错。
 
 ### 1.4 四象限记忆与双层画像隔离 (Quad-Memory & Dual-Tier Persona)
 
 - **短期记忆 (`memory/short_memory.py`)**：基于 `messages` 物理表读取最近 10 轮对话，内存为空时触发自愈补全。
+- **消息写所有权(multimodal 005 治理)**：用户行唯一由**网关**写入(dispatch/SPI,唯一持有 `imageUrls` 的入口);引擎侧零写用户行(`run_agent` 主链/问候旁路/Temporal activity 均不插,历史经 `short_memory.get_messages` 读网关副本),否则时间线双插 user×2(一行带图一行不带)。assistant 行仍归引擎(`short_memory.add_message`),由 `test_user_message_single_write.py` 钉死。
 - **长期偏好记忆 (`memory/long_memory.py`)**：大模型提取用户习惯，向量化存储至 `long_memory_facts`，检索时基于余弦相似度（硬阈值 ≥ 0.65）召回 Top-5。
 - **情境记忆 (`memory/episodic_memory.py`)**：关键业务事件按重要性（1-10分）向量化落盘。
 - **任务记忆 (`memory/task_memory.py`)**：持久化保存挂起和未完成的任务规划步骤。

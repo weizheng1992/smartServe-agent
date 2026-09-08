@@ -20,14 +20,14 @@
                                                       │ POST /api/chat { message, imageUrls }
                                                       ▼
                        ┌─────────────────────────────────────────────────────────────┐
-                       │           LangGraph 智能多模态状态机 (packages/engine)       │
+                       │        LangGraph 智能多模态状态机 (services/engine-py)       │
                        │                                                             │
-                       │  1. [Triage 多模态视觉感知首层 (`VisionAnalyzerService`)]     │
-                       │     ├─ 视觉大模型 (Vision LLM) 与启发式规则双通道并发精判     │
+                       │  1. [Triage 多模态视觉感知首层 (`vision/analyzer.py`)]      │
+                       │     ├─ 视觉大模型精判 + 启发式规则降级兜底(双通道容灾)      │
                        │     ├─ 快递面单/包装条形码 OCR 实体提取 (`ORD-XXXXX`, `SFXXX`)│
                        │     ├─ 商品破损/瑕疵智能评级 (`negligible`/`minor`/`severe`) │
                        │     ├─ PII 隐私数据脱敏过滤器 (手机/身份证/银行卡号物理掩码) │
-                       │     └─ 1500ms Promise.race 超时快速降级容灾熔断               │
+                       │     └─ 模型级超时可配(默认 30s)+ 入图限额治理(≤3 图/条)    │
                        │                                                             │
                        │  2. [任务规划与执行引擎 (`StepExecutionEngine`)]            │
                        │     └─ 承接 OCR 提取实体，快速组装工具链入参                  │
@@ -42,36 +42,37 @@
 
 ---
 
-## 2. 多模态视觉感知流水线 (`VisionAnalyzerService`)
+## 2. 多模态视觉感知流水线 (`vision/analyzer.py`)
 
-- **源码路径**: `packages/engine/src/vision/visionAnalyzerService.ts`
+- **源码路径**: `services/engine-py/src/engine_py/vision/analyzer.py`（2026-09 移植自 TS `visionAnalyzerService.ts`，原 TS 后端已退役）
 - **核心职能**: 在用户发送图片或图文混合消息时，优先于文本分流执行视觉感知。
+- **模型接入**: `llm/chat.py` 的 `get_vision_model()` 统一工厂（`AI_VISION_MODEL`，默认 `glm-4.6v`；结构化输出走 `with_structured_output(method="function_calling")` —— 视觉模型不支持 `response_format`）。
 
-### 2.1 双轨感知与 1500ms 超时熔断降级
+### 2.1 双轨感知与可配超时降级
 
-为避免多模态大模型在高延迟、离线测试或模型限流时阻塞主聊天链路，系统设计了 **1500ms 竞争超时降级机制**：
+为避免多模态大模型在高延迟、离线测试或模型限流时阻塞主聊天链路，视觉调用挂在**模型级 `request_timeout`（`AI_VISION_TIMEOUT_SECONDS` 可调，默认 30s——E2E 实测 GLM-4.6V 真实请求可超 15s）+ `max_retries=0`** 上，失败即刻降级：
 
-```typescript
-const timeoutPromise = new Promise<VisionAnalysisResult>((resolve) => {
-  setTimeout(() => {
-    resolve({
-      detectedEntities: fallbackEntities,
-      damageAssessment: fallbackDamage,
-      summary: "视觉分析服务响应超时，已平滑降级至本地规则提取",
-    });
-  }, 1500);
-});
-
-return await Promise.race([visionPromise, timeoutPromise]);
+```python
+# 失败即降级 —— 启发式正则兜底(纯函数),绝不炸主链路
+try:
+    parsed = await structured.ainvoke([HumanMessage(content=content)])
+except Exception:
+    return _fallback_result(order_id, tracking_no, user_prompt, primary_url)
 ```
 
-### 2.2 OCR 实体提取与标准化
+TS 时代的 1500ms `Promise.race` 硬超时已废弃（真实多模态请求 1.5s 内几乎必超时，等于永久降级）；本地图（`/api/uploads/` 引用）经 **base64 Data URL 直传**（bigmodel 拉不到 localhost，亦免本地文件服务出网暴露）。
+
+### 2.2 入图归一化与限额治理
+
+TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `normalize_image_urls` 统一收口（剔除非字符串/空白项、去重保序、截断至 **≤3 图/条**）。网关上传端点另钳制单张 ≤10MB，两侧限额对齐；垃圾输入最多变少图，绝不抛错 —— 治理目标是"少看图"，不是"失败会话"。
+
+### 2.3 OCR 实体提取与标准化
 
 - **订单号识别**: 自动提取 `ORD-[A-Za-z0-9]+` 模式，并自动归一化为大写字符串（如 `ORD-77889`）。
 - **快递单号识别**: 自动匹配主流承运商单号规则（如顺丰 `SF1234567890`、圆通 `YTO...`、中通 `ZTO...`、邮政 `EMS...`、通用 `TRACK...`）。
 - **提取实体自动注入上下文**: 提取出的订单号直接传递至后续 `triage` 意图分流与 `planner` 任务规划，实现“发一张面单截图即可秒级查单”。
 
-### 2.3 PII 敏感隐私数据脱敏切面 (PII Redaction)
+### 2.4 PII 敏感隐私数据脱敏切面 (PII Redaction)
 
 在面单图像 OCR 提取与文本摘要生成过程中，内置正则表达式安全切面，自动执行敏感信息脱敏：
 
@@ -79,7 +80,7 @@ return await Promise.race([visionPromise, timeoutPromise]);
 - **身份证号**: 统一替换为 `[ID_CARD_REDACTED]`。
 - **银行卡号**: 统一替换为 `[BANK_CARD_REDACTED]`。
 
-### 2.4 商品破损瑕疵智能定责评级
+### 2.5 商品破损瑕疵智能定责评级
 
 根据多模态模型对用户上传商品实物图的视觉判定，输出 3 级定责评级及建议处置策略：
 
@@ -91,8 +92,8 @@ return await Promise.race([visionPromise, timeoutPromise]);
 
 ## 3. 结构化富交互卡片协议与合成引擎
 
-- **协议定义**: `packages/types/src/card.ts`
-- **合成引擎**: `packages/engine/src/cards/cardSynthesizer.ts`
+- **协议定义**: `packages/types/src/card.ts`（冻结的前端契约，TS 退役后保留）
+- **合成引擎**: `services/engine-py/src/engine_py/cards/card_synthesizer.py`
 
 ### 3.1 核心卡片类型规范 (JSON Blocks Schema)
 
@@ -108,7 +109,7 @@ return await Promise.race([visionPromise, timeoutPromise]);
 
 ### 3.2 动态卡片合成逻辑 (`CardSynthesizer`)
 
-`finish.node.ts` 在合成最终文本答复的同时调用 `CardSynthesizer.synthesize({ taskPlan, intentResult, visionResult, message })`：
+`finish` 节点在合成最终文本答复的同时调用 `CardSynthesizer.synthesize_cards({ taskPlan, damageAssessment, ... })`：
 
 1. 若执行计划中包含 `getOrderStatus`，自动解析输出 payload 并构建 `OrderCard` 与 `TrackingTimeline`；
 2. 若执行计划中包含 `processRefund`，自动解析退款金额与流水构建 `RefundConfirmationCard`；
@@ -135,10 +136,11 @@ return await Promise.race([visionPromise, timeoutPromise]);
 
 ## 5. 安全图片上传流水线 (`/api/chat/upload`)
 
-- **源码路径**: `apps/web/app/api/chat/upload/route.ts`
+- **源码路径**: `services/gateway-py/src/gateway_py/routers/chat.py`（FastAPI 网关；2026-09 自 TS 路由 `apps/web/app/api/chat/upload/route.ts` 移植）
 
 ### 5.1 安全防线
 
 1. **MIME Type 白名单拦截**: 仅允许 `image/jpeg`、`image/png`、`image/webp`、`image/gif`，硬拦截非图片文件与潜在恶意可执行脚本。
-2. **物理大小边界**: 严格限制最大 10MB，超出立即返回 HTTP 413。
-3. **安全落盘与 URL 派发**: 自动持久化落盘至 `apps/web/public/uploads/`，生成带随机 UUID 的唯一文件名，避免文件名覆盖与目录遍历攻击。
+2. **物理大小边界**: 流式读取实测累计，严格限制最大 10MB，超出立即删除半成品文件并返回 HTTP 413。
+3. **安全落盘与 URL 派发**: 持久化落盘至 `public/uploads/`（`UPLOADS_DIR` 可覆写），生成带随机 UUID 的唯一文件名，避免文件名覆盖与目录遍历攻击；经网关 StaticFiles 以 `/api/uploads/` 回读（搭 Vite `/api` 代理便车，web 与引擎同源可达）。
+4. **引用持久化**: 用户消息的 `imageUrls` 引用以 JSONB 落 `messages.image_urls`（Alembic 0006），会话刷新按引用还原缩略图与卡片。**网关是用户行的唯一写入方**（dispatch/SPI 入口；引擎 `run_agent`/Temporal activity 零写用户行——双插会使时间线出现一行带图一行不带的重复 user 气泡,multimodal 005 治理）。
