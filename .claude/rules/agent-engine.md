@@ -33,7 +33,7 @@ paths: ["services/engine-py/**/*"]
 
 - **第一道防线（语义去重旁路）**：`triage/semantic_cache.py` 计算与前序查询的余弦相似度（≥ 0.98），直接命中缓存返回。
 - **低置信度归档与槽位消歧**：分类置信度不足时，自动写入 `low_confidence_logs` 表，并触发 `triage/slot_extractor.py` 引导用户补充缺失关键槽位。
-- **多模态视觉定责**：视觉 LLM 与启发式规则双通道并发判断；快递面单/包装条形码 OCR 实体提取（如 `ORD-XXXXX`、`SFXXX`），商品成色与破损智能定责评级（`negligible` / `minor` / `severe`），内置 1500ms 容灾超时自动降级。
+- **多模态视觉定责**（`vision/analyzer.py`，2026-09-08 移植 TS visionAnalyzerService）：挂 triage Step 0.5，视觉 LLM 精判 + 启发式规则双通道（模型失败降级启发式，绝不炸会话）；快递面单/包装条形码 OCR 实体提取（如 `ORD-XXXXX`、`SFXXX`），商品成色与破损智能定责评级（`negligible` / `minor` / `severe`）；容灾超时 `AI_VISION_TIMEOUT_SECONDS` 可调（默认 15s，TS 的 1500ms 硬超时已废）。本地图（`/api/uploads/` 引用）以 base64 Data URL 直传（bigmodel 拉不到 localhost），模型独立经 `get_vision_model()` 配置（`AI_VISION_MODEL`，默认 glm-4.6v，结构化输出走 function_calling）。
 
 ### 1.4 四象限记忆与双层画像隔离 (Quad-Memory & Dual-Tier Persona)
 
@@ -73,7 +73,7 @@ paths: ["services/engine-py/**/*"]
 ## 2. 编码与维护准则
 
 1. **确定性拓扑**：修改 `graph/nodes/planner.py` 时必须严格声明 `dependencies` 依赖数组，供 `step_execution_engine.py` 并行调度。
-2. **统一调用入口**：所有 LLM 与向量 Embedding 调用必须统一走 `llm/chat.py`（`get_chat_model` / `get_embedding_model`，lru_cache 单例）；熔断/退避/超时由 `llm/resilience.py` 的全局 CircuitBreaker 承担（2026-09-07 起，挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖），阈值经 `LLM_CIRCUIT_*` / `LLM_RETRY_*` / `LLM_TIMEOUT_SECONDS` env 可调。
+2. **统一调用入口**：所有 LLM 与向量 Embedding 调用必须统一走 `llm/chat.py`（`get_chat_model` / `get_embedding_model` / `get_vision_model`，lru_cache 单例）；熔断/退避/超时由 `llm/resilience.py` 的全局 CircuitBreaker 承担（2026-09-07 起，挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖），阈值经 `LLM_CIRCUIT_*` / `LLM_RETRY_*` / `LLM_TIMEOUT_SECONDS` env 可调。例外：`get_vision_model` 刻意不入韧性层 —— 视觉失败域独立，自带启发式兜底（wayfinder multimodal 003）。
 3. **中文本地化日志**：Temporal Activity 与执行节点产生的所有用户态进度事件必须使用标准中文本地化文本。
 4. **无异常冷启动**：记忆检索、租户配置加载等底层逻辑必须兼容空数据与冷启动，严禁未捕获抛错阻断状态机。
 5. **环境自读取**：`config.py` 在导入时读取环境变量；任何测试基建必须先注入 `DATABASE_URL` / `REDIS_URL` 再导入 engine_py 模块。

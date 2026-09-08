@@ -119,6 +119,21 @@ def get_chat_model() -> ChatOpenAI:
 
 
 @lru_cache(maxsize=1)
+def get_vision_model() -> ChatOpenAI:
+    """视觉模型工厂(wayfinder multimodal 003):独立模型名/超时,复用 AI_* 的
+    base_url 与 key。刻意不走 _ResilientChatOpenAI —— vision 失败域独立,自带
+    启发式兜底,不入全局熔断与逐调用遥测。"""
+    return ChatOpenAI(
+        model=settings.vision_model,
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
+        temperature=0.1,
+        request_timeout=settings.vision_timeout_seconds,
+        max_retries=0,  # 失败即降级启发式,上游重试只会放大首响延迟
+    )
+
+
+@lru_cache(maxsize=1)
 def get_embedding_model() -> Embeddings:
     if settings.embedding_provider == "local":
         # huggingface_hub 在导入时读取 HF_ENDPOINT,须在 import 前设置;

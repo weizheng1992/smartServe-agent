@@ -47,6 +47,10 @@ class Settings:
     # embedding 提供方:local = 进程内免费本地推理(默认,离线可用);openai = 走 AI_BASE_URL 的 /embeddings(需付费资源包)
     embedding_provider: str = field(default_factory=lambda: _env("AI_EMBEDDING_PROVIDER", "local"))
     embedding_model: str = field(default_factory=lambda: _env("AI_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"))
+    # 视觉模型(wayfinder multimodal 001/003):独立模型配置,base_url/key 复用上方;
+    # GLM-4.6V 无 response_format,结构化输出须 method="function_calling"(tools 白名单)
+    vision_model: str = field(default_factory=lambda: _env("AI_VISION_MODEL", "glm-4.6v"))
+    vision_timeout_seconds: float = field(default_factory=lambda: float(_env("AI_VISION_TIMEOUT_SECONDS", "15")))
 
 
 settings = Settings()

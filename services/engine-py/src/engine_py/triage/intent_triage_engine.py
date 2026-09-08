@@ -1,7 +1,8 @@
 """多层级意图分流引擎 — 镜像 triage/intentTriageEngine.ts(913 LOC)。
 
-分流层级:多模态感知(TODO)→ 规则前置 → 语义重复拦截 → Embedding 向量评估
-→ 大模型结构化联合精判。所有旁路统一经 handle_immediate_bypass 收口。
+分流层级:多模态感知(vision,2026-09-08 wayfinder multimodal 003 移植)→ 规则前置
+→ 语义重复拦截 → Embedding 向量评估 → 大模型结构化联合精判。所有旁路统一经
+handle_immediate_bypass 收口。
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from ..llm import CircuitBreakerOpenError
 from ..memory import ShortMemory, TaskMemory
 from ..skills import is_action_query
 from ..tenant import get_merchant_display_name, sanitize_tenant_response
+from ..vision import analyze_images
 from . import rule_matchers
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
@@ -216,12 +218,20 @@ class IntentTriageEngine:
                 node="triage",
             )
 
-        # 📷 Step 0.5: 多模态视觉解析
-        # TODO(Phase 1b): 移植 vision/visionAnalyzerService.ts(OCR 面单/破损定责,
-        # 1500ms Promise.race 容灾)。当前带图输入仅记录告警,不阻断分流。
+        # 📷 Step 0.5: 多模态视觉解析(wayfinder multimodal 003,移植 visionAnalyzerService)
         damage_assessment = state.get("damage_assessment")
         if state.get("image_urls"):
-            print("[Triage Multimodal Vision] TODO(Phase 1b): visionAnalyzerService 尚未移植,跳过图像解析")
+            if state.get("job_id"):
+                await emit_status(
+                    state["job_id"],
+                    "📷 多模态感知：正在进行图像 OCR、快递面单解析与商品破损瑕疵评级...",
+                    node="triage",
+                )
+            try:
+                vision_analysis = await analyze_images(state["image_urls"], input_text)
+                damage_assessment = vision_analysis.get("damageAssessment") or damage_assessment
+            except Exception as vision_err:
+                print(f"[Triage Multimodal Vision Exception]: {vision_err}")
 
         # 🛡️ Step 0: 输入格式预过滤
         if not input_text and not state.get("image_urls"):
