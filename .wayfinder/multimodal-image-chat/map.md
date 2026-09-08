@@ -28,6 +28,7 @@ created: 2026-09-08
 - [视觉模型选型与接入形状(research)](tickets/001-research-vision-model.md): 主力 **GLM-4.6V**(1/3 元/M token、128K 上下文、原生工具调用、base64 Data URL 直传、≤50 图/请求),免费兜底 GLM-4.6V-Flash,严格 schema 切 GLM-5.3-Flash;新增 `AI_VISION_MODEL` env 复用现有 `AI_*`;结构化输出只能 function_calling 式(`response_format` 仅文本模型支持)。
 - [gateway 上传端点 + 本地存储](tickets/002-upload-endpoint.md): `POST /api/chat/upload` 落地(MIME 白名单、10MB 读流实测、UUID 落盘 `public/uploads`、`/api/uploads` StaticFiles 回读),新增 `python-multipart` 依赖;契约三用例入册,路由计数 41→42 三处文档同步;uploads 公开读=UUID capability URL,单实例运营期接受。
 - [engine vision 模块(移植+改良)](tickets/003-vision-module.md): `engine_py/vision/analyzer.py` 落地并挂 triage Step 0.5 —— 结构化输出走 function_calling、超时可配(默认 15s)、本地图转 base64 Data URL 直传、LLM 失败降级启发式;`get_vision_model()` 入 `llm/chat.py` 统一入口(`AI_VISION_MODEL` 默认 glm-4.6v);七用例 + engine 162 / gateway 95 全绿。
+- [图片持久化与会话还原](tickets/004-image-persistence.md): Alembic 0006 `messages.image_urls`(JSONB 引用、幂等守卫)+ append_message 透传 + timeline 带回;前端零改动(002 已备渲染),dispatch 带图落库→刷新还原闭环;gateway 97 / engine 162 全绿。
 
 ## Not yet specified
 
