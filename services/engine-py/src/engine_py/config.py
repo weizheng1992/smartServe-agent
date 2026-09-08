@@ -50,7 +50,7 @@ class Settings:
     # 视觉模型(wayfinder multimodal 001/003):独立模型配置,base_url/key 复用上方;
     # GLM-4.6V 无 response_format,结构化输出须 method="function_calling"(tools 白名单)
     vision_model: str = field(default_factory=lambda: _env("AI_VISION_MODEL", "glm-4.6v"))
-    vision_timeout_seconds: float = field(default_factory=lambda: float(_env("AI_VISION_TIMEOUT_SECONDS", "15")))
+    vision_timeout_seconds: float = field(default_factory=lambda: float(_env("AI_VISION_TIMEOUT_SECONDS", "30")))
 
 
 settings = Settings()

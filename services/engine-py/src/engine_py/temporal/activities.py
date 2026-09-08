@@ -95,7 +95,7 @@ async def run_agent_state_node(node_name: str, ts_state: dict) -> dict:
             short_memory = ShortMemory(state.get("threadId", ""))
             episodic_memory = EpisodicMemory(state.get("userId", ""), business_id)
             long_memory = LongMemory(state.get("userId", ""), business_id)
-            await short_memory.add_message("user", state.get("input", ""))
+            # 用户行归网关持久化(005 治理):Temporal 路径同样零写用户行
             await short_memory.add_message("assistant", py_state["output"], final_cards)
             await __import__("asyncio").gather(
                 episodic_memory.add_event(

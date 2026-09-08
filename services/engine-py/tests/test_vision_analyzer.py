@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from engine_py.vision import analyze_images
+from engine_py.vision import analyze_images, normalize_image_urls
 from engine_py.vision.analyzer import DamageAssessment, VisionAnalysis
 
 _PNG_1PX = bytes.fromhex(
@@ -151,3 +151,42 @@ class TestVisionAnalyzer:
         assert res["damageAssessment"] is not None
         assert res["damageAssessment"]["imageUrl"] == "/api/uploads/missing.png"
         assert res["extractedOrderId"] == "ORD-2"
+
+
+class TestNormalizeImageUrls:
+    """wayfinder multimodal 005:入图归一化与限额(TS 时代零防护)。"""
+
+    def test_caps_at_three_preserving_order(self):
+        assert normalize_image_urls(["/a.png", "/b.png", "/c.png", "/d.png", "/e.png"]) == [
+            "/a.png",
+            "/b.png",
+            "/c.png",
+        ]
+
+    def test_dedupes_and_drops_garbage(self):
+        assert normalize_image_urls(
+            ["  /a.png  ", "/a.png", None, "", 123, "https://cdn.example.com/b.jpg", "/a.png"]
+        ) == ["/a.png", "https://cdn.example.com/b.jpg"]
+
+    def test_none_and_empty_yield_empty_list(self):
+        assert normalize_image_urls(None) == []
+        assert normalize_image_urls([]) == []
+
+    def test_default_uploads_dir_matches_gateway_layout(self, monkeypatch):
+        # 默认分支必须落在仓库根 public/uploads(与 gateway 落盘同约定);
+        # E2E 实测踩过 parents[4] 差一层 → services/public/uploads 偏移,图全被跳过
+        import pathlib
+
+        from engine_py.vision.analyzer import _uploads_dir
+
+        monkeypatch.delenv("UPLOADS_DIR", raising=False)
+        assert _uploads_dir() == pathlib.Path(__file__).resolve().parents[3] / "public" / "uploads"
+
+    def test_heuristic_matches_glue_split_phrasing(self):
+        # E2E 实测:「鞋底开胶断裂」不中 TS 原版词表,LLM 超时降级后定责全丢(005 修复)
+        runnable = _FakeStructuredRunnable(exc=TimeoutError("vision timeout"))
+        res = asyncio.run(
+            analyze_images(["/api/uploads/x.png"], "鞋底开胶断裂了", model=_FakeModel(runnable))
+        )
+        assert res["damageAssessment"] is not None
+        assert res["damageAssessment"]["damageLevel"] == "minor"

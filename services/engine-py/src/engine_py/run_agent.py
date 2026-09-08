@@ -42,6 +42,7 @@ from .llm import (
 from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
+from .vision import normalize_image_urls
 
 _QUICK_GREETINGS = [
     "你好",
@@ -232,7 +233,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         except Exception as thread_err:
             print(f"[DB] Failed to ensure thread exists for quick greeting: {thread_err}")
 
-        await short_memory.add_message("user", input_message)
+        # 用户行归网关持久化(005 治理):旁路只落问候 assistant 行
         await short_memory.add_message("assistant", greeting_text)
 
         mock_result = {
@@ -297,9 +298,8 @@ async def run_agent(job: AgentJobInput) -> dict:
         rag_docs = [] if isinstance(rag_res, Exception) else rag_res
 
     is_resuming = input_message.startswith("System:")
-    if not is_resuming:
-        await short_memory.add_message("user", input_message)
-
+    # 用户行持久化归网关(dispatch/SPI,带 imageUrls;005 治理)——引擎零写用户行,
+    # 否则每条消息时间线双插(user×2,一行带图一行不带)
     history_msgs = await short_memory.get_messages()
 
     # 恢复挂起任务状态与领域上下文
@@ -323,7 +323,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         "user_id": user_id,
         "job_id": job_id or f"job_local_{int(time.time() * 1000)}",
         "input": input_message,
-        "image_urls": list(job.image_urls),
+        "image_urls": normalize_image_urls(job.image_urls),
         "input_embedding": precomputed_embedding or [],
         "long_memory_facts": long_facts,
         "episodic_events": episodic_events,
