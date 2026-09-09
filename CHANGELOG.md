@@ -4,6 +4,32 @@
 
 ---
 
+## [2.6.3] - 2026-09-09 (破损图 OCR 单号消费 + 消歧闸门意图浮现点补全 + 幽灵单前置拦截)
+
+诊断起点（/diagnosing-bugs）:用户上传破损鞋图（图内印有「破损投诉 ORD-77777」字样）+「坏了」，机器人却回问"是 9081 还是 9082 哪笔订单出了问题"。vision 实弹输出完全正确（`extractedOrderId=ORD-77777` / ocrText / severe 0.95）——错在引擎把识别结果丢掉了，三层缺陷连环：
+
+1. **OCR 单号算完即丢**：`vision_analysis["extractedOrderId"]` 全链零消费，不进 intents.entities / order_context / 槽位 → 引擎"看不到"图内单号 → 回问订单（intent_logs 佐证 entities 恒空）。
+2. **消歧闸门时序错位**：2.6.0 的商品归属消歧只挂 Step 1.6（认 SlotExtractor 阶段的 intentType），而「坏了」这类模糊损坏词槽位阶段判 `chat`，售后意图要到 Step 2 判定 3 才由 `damage_assessment` 浮现 → 为本场景造的选择卡对典型措辞**永不触发** → planner 深规划 ~50s 由 finish 自由发挥。
+3. **幽灵单直达 HITL（连带发现的存量缺陷）**：OCR 出的或随手敲的单号（ORD-77777 / ORD-99999 三库查无此单）直接开 waiting 审批工单，finish 终稿还谎称"已为您发起退款申请"——文本路径同样中招（实测「帮我退款 ORD-99999」），非本次回归。
+
+### 🐛 Fixes
+
+- **OCR 单号消费（`triage/intent_triage_engine.py`）**：Step 0.5 计算 `vision_order_id`；Step 1.5 同步已确认上下文（TaskMemory.orderContext）进 state（此前已确认单号在轮间丢失）+ OCR 注入后重跑槽位抽取（退款严格抽取器经 `orderContext.targetOrderId` 取到，与消歧 matched 注入同型）。消费优先级 **文本显式 > 已确认上下文 > 图内 OCR**，OCR 永不覆盖已确认单号。Step 2 各判定单号融合 `matched_order_id or confirmed_order_id or vision_order_id`，判定 1/2/3 返回透传 `order_context`。
+- **消歧闸门补到全部意图浮现点（同文件）**：Step 2 判定 3（模糊损坏词由 damage_assessment 浮现）与 Step 3（分类器精判浮现）带图缺单号同样过 `disambiguate_product`；Step 3 侧 `vision_disambig_matched` 令注入前的陈旧 `missingSlots` 澄清让位（结构化输出的 missingSlots 是注入前的快照）。两态收口统一走新增 `_vision_disambig_bypass`（无候选明示指引 / 多候选商品选择卡），与 Step 1.6 共用。
+- **幽灵单前置拦截（`approvals/gatekeeper.py` + `graph/nodes/step_execution_engine.py`）**：`check_double_refund` 补 `orderFound` 契约（经 `find_order_by_id` 三源按归属查询；查询异常 fail-open，物理分发层兜底）；执行器 4.1.1 在审批门（4.4）**之前**对查无此单诚实失败（"未查询到订单 [X]，或该订单不属于当前账户，请核对订单号"），不开 HITL 工单、不虚构退款进度。技能 fast-track 路径本就有同款校验（`order_skills.py`），执行器在此对齐。
+
+### ✅ 验证 (Verification，如实)
+
+- 新增 `tests/test_vision_order_consumption.py` 5 用例（事故回放：实弹 vision 输出 + 锚向量定向 refund——OCR 单号流入实体/上下文、已确认单号不被 OCR 覆盖、模糊损坏词出选择卡、OCR 有单号跳过消歧、Step 3 浮现同样出选择卡）；`tests/test_double_refund_replay.py` 补幽灵单用例（红→绿：修复前 `status=pending` 开工单，修复后 `failed` 且工单数不变）。engine 全量 **234 passed**（2.6.2 基线 227 + 7），ruff 干净。
+- 实弹矩阵（dev 网关 + GLM-4.6V，全部绿）：
+  - **OCR 路径**：事故原图（带 ORD-77777 字样）+「坏了」→ OCR 单号被消费 → 幽灵单拦截诚实失败"未查询到订单 [ORD-77777]，或该订单不属于当前账户"，幽灵工单 0 新增；
+  - **选择卡路径**：裁掉文字的破损鞋图（OCR 无单号）+「坏了」→ `vision_disambig` 路由（intent_logs 钉死）→ 商品选择卡（9081 冲锋衣 / 9082 工装裤，点选载荷带单号下一轮走 `ORDER_ID_RE` 正则闭环）。
+- dev 库 8 张 ORD-77777/ORD-99999 waiting 幽灵工单系修复前实弹测试残留，已清理（现 0 张）。
+- 网关契约套件由人工 `bun run test:eval` 复验（本次改动均在 engine 侧，不触网关契约）。
+- 文档同步：`.claude/rules/agent-engine.md` §1.3（消歧浮现点 + OCR 消费条目）/ §1.6（幽灵单前置拦截）；`docs/architecture/multimodal-and-rich-cards.md` §2.3（OCR 消费语义落地）/ §6.0（闸门时序表）/ §6.3（幽灵单拦截）；README 商户悬浮窗能力描述。
+
+---
+
 ## [2.6.2] - 2026-09-09 (商户聊天分钟级延迟治理:思维链关闭 + planner 封顶 + 咨询类 RAG 直答快轨)
 
 诊断起点:「查询等了好几分钟没有回复」。根因非 db:seed(RAG 空有冷启动自愈),而是 glm-4.7 **默认开 thinking**——每次调用先吐大量 reasoning token(裸测同题 79.9s vs 关闭 7.5-18s),而客服管线一次提问串行 3-4 次调用(triage 分类 → planner 深度规划 → executor → finish 终稿),叠加即 57-114s。政策类问题还有额外病灶:planner 曾对「退货政策」生成 5163 token(73.7s),且咨询类在意图体系里没有独立档位,按措辞随机误落三处(反问订单号 / 误判 refund 动作进深规划 / general_query 两跳)。按用户「按顺序解决」三刀切:

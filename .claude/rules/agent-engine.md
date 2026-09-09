@@ -35,7 +35,8 @@ paths: ["services/engine-py/**/*"]
 - **第一道防线（语义去重旁路）**：`triage/semantic_cache.py` 计算与前序查询的余弦相似度（≥ 0.98），直接命中缓存返回。
 - **低置信度归档与槽位消歧**：分类置信度不足时，自动写入 `low_confidence_logs` 表，并触发 `triage/slot_extractor.py` 引导用户补充缺失关键槽位。
 - **多模态视觉定责**（`vision/analyzer.py`，2026-09-08 移植 TS visionAnalyzerService）：挂 triage Step 0.5，视觉 LLM 精判 + 启发式规则双通道（模型失败降级启发式，绝不炸会话）；快递面单/包装条形码 OCR 实体提取（如 `ORD-XXXXX`、`SFXXX`），商品成色与破损智能定责评级（`negligible` / `minor` / `severe`）；容灾超时 `AI_VISION_TIMEOUT_SECONDS` 可调（默认 30s，E2E 实测 GLM-4.6V 真实请求可超 15s，TS 的 1500ms 硬超时已废）。本地图（`/api/uploads/` 引用）以 base64 Data URL 直传（bigmodel 拉不到 localhost），模型独立经 `get_vision_model()` 配置（`AI_VISION_MODEL`，默认 glm-4.6v，结构化输出走 function_calling）。入图治理（005）：`run_agent` 构建初始状态时经 `normalize_image_urls` 收口 —— 剔除垃圾项、去重保序、**≤3 图/条**截断（与网关上传单张 10MB 限额对齐）；垃圾输入只少看图不抛错。
-- **破损图商品归属消歧**（`triage/product_disambiguator.py`，2026-09-09）：挂 triage Step 1.6 —— 售后意图（`order_return`/`refund`）带图且缺 `orderId`（图内亦无单号）时，vision 摘要 × 近单商品行交 LLM 消歧，替代机械"请提供订单号"。三态：`matched`（置信度 ≥0.8 且命中项原样在候选集内，防幻觉键集校验）注入 `order_context.targetOrderId` 并重跑槽位抽取；`ambiguous`（多候选/低置信/模型失败）出商品选择 `quick_replies` 卡，点选文本带单号下一轮走 `ORDER_ID_RE` 正则闭环；`no_orders` 明示指引。候选池走 `OrderDomainService.get_recent_product_lines` 门面 —— **商户真单（`agent_merchant.merchant_orders`）优先、engine 本地表兜底**（两库优先级与订单列表同源；商户用户在 engine 表无单，直查 detailed 永远空候选）。消歧失败绝不炸会话，最坏多问一次。
+- **破损图商品归属消歧**（`triage/product_disambiguator.py`，2026-09-09）：闸门挂在**售后意图实际浮现的位置**而非固定某步——「坏了」这类模糊词槽位阶段判 `chat`，售后意图要靠 `damage_assessment` 在 Step 2 判定 3 才浮现（2026-09-09 事故：只挂 Step 1.6 时对典型措辞永不触发，退回 planner 深规划自由发挥）。三处生效：Step 1.6（槽位阶段已判售后）/ Step 2 判定 3（damage_assessment 令关键词成立）/ Step 3（分类器精判，`vision_disambig_matched` 令注入前的陈旧 missingSlots 澄清让位）；无候选/多候选统一经 `_vision_disambig_bypass` 收口。触发前提：带图 + 售后意图（`order_return`/`refund`）+ 缺 `orderId`（文本/已确认上下文/图内 OCR 三通道皆无）。三态：`matched`（置信度 ≥0.8 且命中项原样在候选集内，防幻觉键集校验）注入 `order_context.targetOrderId` 并重跑槽位抽取；`ambiguous`（多候选/低置信/模型失败）出商品选择 `quick_replies` 卡，点选文本带单号下一轮走 `ORDER_ID_RE` 正则闭环；`no_orders` 明示指引。候选池走 `OrderDomainService.get_recent_product_lines` 门面 —— **商户真单（`agent_merchant.merchant_orders`）优先、engine 本地表兜底**（两库优先级与订单列表同源；商户用户在 engine 表无单，直查 detailed 永远空候选）。消歧失败绝不炸会话，最坏多问一次。
+- **图内 OCR 单号消费**（2026-09-09 事故收口）：`vision_analysis.extractedOrderId` 与文本单号同语义消费（Step 0.5 计算 `vision_order_id`，Step 1.5 注入后重跑槽位抽取）——此前算完即丢，图内明示单号对流程零贡献。优先级 **文本显式 > 已确认上下文（TaskMemory.orderContext，Step 1.5 同步进 state）> 图内 OCR**，OCR 永不覆盖已确认单号；Step 2 各判定单号融合 `matched_order_id or confirmed_order_id or vision_order_id`，判定返回透传 `order_context`。OCR/文本单号三库查无此单时由执行器幽灵单前置拦截（§1.6）诚实报错。
 
 ### 1.4 四象限记忆与双层画像隔离 (Quad-Memory & Dual-Tier Persona)
 
@@ -56,6 +57,7 @@ paths: ["services/engine-py/**/*"]
 ### 1.6 审批门禁与事务发件箱 (`approvals/gatekeeper.py` & `approvals/outbox_worker.py`)
 
 - **HITL 安全挂起**：退款、改地址等高危动作触发挂起，记录写入 `pending_approvals`（ID 必须为 UUID 格式，网关校验）。
+- **幽灵单前置拦截**（执行器 4.1.1，2026-09-09 OCR 事故收口）：`processRefund` 开 HITL 工单**之前**，经 `check_double_refund` 的 `orderFound` 契约（`find_order_by_id` 三源按归属查询，异常 fail-open）对三库查无此单（或非本人归属）的单号诚实失败（"未查询到订单 [X]，或该订单不属于当前账户"）——旧行为直达 waiting 工单且 finish 终稿谎称"已为您发起退款申请"（图内 OCR 与文本敲错单号同罪）。技能 fast-track 路径本就有同款校验（`order_skills.py`），执行器在此对齐。
 - **事务发件箱（Transactional Outbox）**：审批动作与 `approval_outbox_events` 事件在同一数据库事务中原子提交。
 - **确定性去重恢复**：恢复任务采用确定性标识 `job_resume_${approvalId}`。恢复由 `process_approval_action` 的同步 Fast-Path 派发（派发失败事件留 `pending`）；`outbox_worker.process_pending_events` 为失败事件的对账补偿（`FOR UPDATE SKIP LOCKED` 防多实例重复、10s 年龄阈值避开与 Fast-Path 竞争、`processing` 停滞 >5min 重入队），由 `scheduler.py` 周期调度（30s 间隔，随 Temporal worker 入口启动，单实例假设，`ENGINE_SCHEDULER_ENABLED=0` 关闭；2026-09-03 修复接入）。
 

@@ -84,16 +84,20 @@ class ApprovalGatekeeper:
 
         2026-09-05 双退款事故:旧实现只查 engine orders 表,AURORA 等商户真单
         不在其中,已退款订单照常放行;现统一经 find_order_by_id 按真实归属查询。
+        2026-09-09 补 ``orderFound``:三库查无此单(或非本人归属)时调用方可在
+        审批门前对幽灵单诚实失败;查询异常 fail-open(orderFound=True),物理
+        分发层兜底。
         """
         try:
             from ..tools_registry.order_domain import OrderDomainService
 
             order = await OrderDomainService.find_order_by_id(order_id, user_id)
             if order and str(order.get("status") or "").strip().lower() == "refunded":
-                return {"isDoubleRefund": True, "status": order.get("status")}
+                return {"isDoubleRefund": True, "orderFound": True, "status": order.get("status")}
+            return {"isDoubleRefund": False, "orderFound": order is not None}
         except Exception as err:
             print(f"[ApprovalGatekeeper] Double refund check DB error: {err}")
-        return {"isDoubleRefund": False}
+        return {"isDoubleRefund": False, "orderFound": True}
 
     @staticmethod
     async def evaluate_refund_auto_approval(

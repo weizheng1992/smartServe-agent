@@ -194,6 +194,24 @@ async def _execute_single_step_core(
                 }
                 return {"updatedStep": failed_step, "toolErrorsCount": 1}
 
+            # 4.1.1 幽灵单前置拦截(2026-09-09 OCR 事故收口):随手图片 OCR 出的
+            # 或文本里敲的单号,三库查无此单(或非本人归属)时审批门直接诚实失败
+            # —— 旧行为是直达 HITL 开 waiting 工单,finish 终稿还谎称"已为您
+            # 发起退款申请"。技能 fast-track 路径本就有同款校验,此处对齐。
+            if not double_check.get("orderFound", True):
+                failed_step = {
+                    **step_to_run,
+                    "status": "failed",
+                    "result": {
+                        "error": f"Order {order_id} not found",
+                        "message": (
+                            f"⚠️ 未查询到订单 [{order_id}]，或该订单不属于当前账户。请核对订单号后重试；"
+                            "如需帮助可输入「转人工」联系人工客服。"
+                        ),
+                    },
+                }
+                return {"updatedStep": failed_step, "toolErrorsCount": 1}
+
             # 4.2 免签限额判定
             tenant_limit = (state.get("business_config") or {}).get("refundAutoApprovalLimit") or 100
             auto_check = await ApprovalPolicyEngine.evaluate_refund_auto_approval(

@@ -180,6 +180,61 @@ def _as_iso(ts: str) -> str:
     return datetime.fromisoformat(ts).isoformat()
 
 
+def test_ghost_order_refund_fails_honestly_without_ticket(pg_factory):
+    """幽灵单前置拦截(2026-09-09 OCR 事故收口):随手图片里 OCR 出的 ORD-XXXXX
+    或文本里随手敲的单号,若三库查无此单,审批门前必须诚实失败 —— 旧行为是
+    直接开 waiting 工单并谎称"已为您发起退款申请"(实弹:ORD-77777/ORD-99999
+    均落幽灵工单)。"""
+    asyncio.run(_ghost_order_scenario(pg_factory))
+
+
+async def _ghost_order_scenario(pg_factory):
+    engine, merchant_engine, original = await _setup(pg_factory)
+    try:
+        # 清掉 _setup 播种的旧 approved 工单,保证计数口径干净
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM pending_approvals WHERE thread_id = :t").bindparams(t=REPRO_THREAD)
+            )
+        before_count = await _approval_count(engine)
+
+        state = {
+            "thread_id": REPRO_THREAD,
+            "user_id": REPRO_USER,
+            "job_id": None,  # 关闭 emit_status,不依赖 Redis
+            "input": "坏了",
+            "business_config": {"businessId": "aurora", "refundAutoApprovalLimit": 100},
+            "intents": [{"intent": "refund", "confidence": 0.95}],
+            "short_memory": [],
+            "task_plan": {
+                "goal": "Process refund for order ORD-77777",
+                "subtasks": [
+                    {
+                        "id": "step_refund",
+                        "description": "Call processRefund for order ORD-77777",
+                        "status": "pending",
+                    }
+                ],
+                "currentStepIndex": 0,
+            },
+        }
+
+        result = await execute_step(state)
+        step = (result.get("taskPlan") or {}).get("subtasks", [{}])[0]
+        result_msg = str((step.get("result") or {}).get("message") or "")
+        after_count = await _approval_count(engine)
+
+        assert step.get("status") == "failed", (
+            f"幽灵单必须诚实失败,实际 status={step.get('status')} message={result_msg!r}"
+        )
+        assert "ORD-77777" in result_msg, f"失败话术须带单号便于用户核对:{result_msg!r}"
+        assert after_count == before_count, (
+            f"幽灵单不得开审批工单:before={before_count} after={after_count}"
+        )
+    finally:
+        await _teardown(engine, merchant_engine, original)
+
+
 def test_stale_approved_ticket_must_not_authorize_new_refund(pg_factory):
     """钉住 HITL 旁路封死:同线程同订单的旧 approved 工单(已批准但从未执行的残余)
     不得授权新一次退款 —— 必须重新开 waiting 工单走人工审核。"""

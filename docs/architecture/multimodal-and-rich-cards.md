@@ -28,7 +28,7 @@
                        │     ├─ 商品破损/瑕疵智能评级 (`negligible`/`minor`/`severe`) │
                        │     ├─ PII 隐私数据脱敏过滤器 (手机/身份证/银行卡号物理掩码) │
                        │     ├─ 模型级超时可配(默认 30s)+ 入图限额治理(≤3 图/条)    │
-                       │     └─ 破损图商品归属消歧 (Step 1.6, §6)                    │
+                       │     └─ 破损图商品归属消歧 (意图浮现点×3, §6)                │
                        │                                                             │
                        │  2. [任务规划与执行引擎 (`StepExecutionEngine`)]            │
                        │     └─ 承接 OCR 提取实体，快速组装工具链入参                  │
@@ -71,7 +71,7 @@ TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `n
 
 - **订单号识别**: 自动提取 `ORD-[A-Za-z0-9]+` 模式，并自动归一化为大写字符串（如 `ORD-77889`）。
 - **快递单号识别**: 自动匹配主流承运商单号规则（如顺丰 `SF1234567890`、圆通 `YTO...`、中通 `ZTO...`、邮政 `EMS...`、通用 `TRACK...`）。
-- **提取实体自动注入上下文**: 提取出的订单号直接传递至后续 `triage` 意图分流与 `planner` 任务规划，实现“发一张面单截图即可秒级查单”。
+- **提取实体自动注入上下文**: 提取出的订单号直接传递至后续 `triage` 意图分流与 `planner` 任务规划，实现“发一张面单截图即可秒级查单”。2026-09-09 前该描述仅是愿景——`extractedOrderId` 全链零消费（算完即丢，OCR 单号对流程零贡献，实弹事故：图内明示 `ORD-77777` 仍回问哪笔订单）；现于 triage Step 1.5 注入，消费优先级 **文本显式单号 > 已确认上下文（`TaskMemory.orderContext`）> 图内 OCR**，OCR 永不覆盖已确认单号；查无此单由执行器幽灵单拦截诚实报错（§6.3）。
 
 ### 2.4 PII 敏感隐私数据脱敏切面 (PII Redaction)
 
@@ -152,9 +152,21 @@ TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `n
 
 ---
 
-## 6. 破损图商品归属消歧（triage Step 1.6，2026-09-09）
+## 6. 破损图商品归属消歧（triage 意图浮现点，2026-09-09）
 
-- **源码路径**: `services/engine-py/src/engine_py/triage/product_disambiguator.py`（挂载于 `intent_triage_engine.py` Step 1.6）
+- **源码路径**: `services/engine-py/src/engine_py/triage/product_disambiguator.py`（挂载于 `intent_triage_engine.py`）
+
+### 6.0 闸门时序：三个意图浮现点
+
+消歧闸门挂在**售后意图实际浮现的位置**，而非固定某一步——「坏了」这类模糊损坏词在槽位阶段判 `chat`，售后意图要靠 `damage_assessment` 在 Step 2 判定 3 才浮现（2026-09-09 事故：闸门只挂 Step 1.6 时对该典型措辞永不触发，退回 planner 深规划自由发挥）。三处生效：
+
+| 浮现点 | 售后意图从何而来 | 闸门位置 |
+| ------ | ---------------- | -------- |
+| Step 1.6 | SlotExtractor 阶段即判出 `order_return`/`refund` | 槽位完整性拦截前 |
+| Step 2 判定 3 | `damage_assessment` 令 `has_refund_keywords=True` | 意图直达返回前 |
+| Step 3 | 分类器结构化精判 | 澄清分支前（`vision_disambig_matched` 令注入前的陈旧 `missingSlots` 澄清让位） |
+
+无候选/多候选两态统一经 `_vision_disambig_bypass` 收口（无候选明示指引 / 多候选商品选择卡）。
 
 ### 6.1 触发条件与三态裁决
 
@@ -171,6 +183,13 @@ TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `n
 ### 6.2 候选池：两库优先级门面
 
 候选来自 `OrderDomainService.get_recent_product_lines(user_id, business_id, limit=5)`（近 5 单商品行拍平为 `{orderId, productName, quantity}`），数据优先级与订单列表同源：**商户门户真单（`agent_merchant.merchant_orders`）优先，engine 本地表兜底**（商户库不可达或空单时）。先截断再拉商品行（超限单不白查 items）；空用户短路返回。2026-09-09 冒烟暴露：商户用户在 engine 表无单，直查 `get_user_orders_detailed` 永远空候选——消歧三态里的 `matched`/`ambiguous` 对商户用户从未成立过，此门面即治该缺陷。
+
+### 6.3 下游兜底：幽灵单前置拦截（执行器 4.1.1，2026-09-09）
+
+OCR 或文本给出的单号可能三库查无此单（随手图片 OCR 出的、用户敲错的）。旧行为：直达 HITL 开 `waiting` 审批工单，finish 终稿还谎称"已为您发起退款申请"（实弹：`ORD-77777` / 文本 `ORD-99999` 均落幽灵工单——文本路径同样中招的存量缺陷）。现在：
+
+- `ApprovalGatekeeper.check_double_refund` 补 `orderFound` 契约（经 `find_order_by_id` 三源按归属查询；查询异常 fail-open，物理分发层兜底）；
+- 执行器 4.1.1 在审批门（4.4）**之前**对 `orderFound=False` 诚实失败（"未查询到订单 [X]，或该订单不属于当前账户，请核对订单号"），不开工单、不虚构进度。技能 fast-track 路径本就有同款校验（`order_skills.py`），此处对齐。
 
 ---
 
