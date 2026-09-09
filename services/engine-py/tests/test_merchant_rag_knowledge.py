@@ -227,3 +227,30 @@ def test_ensure_seed_data_cold_start_reads_knowledge_files(pg_factory, monkeypat
         )
 
     asyncio.run(_scenario())
+
+
+def test_ensure_seed_data_cold_start_skips_without_knowledge_files(pg_factory, monkeypatch):
+    """空表冷启动 × 知识文件不可用/目录空:跳过自愈播种,不得以内联写死切片
+    (TS 旧文案 SEED_DOCS)兜底 —— 种子与冷启动降级同源,知识只有 docs/knowledge
+    一个来源(2026-09-09 评审修复;旧行为降级路径与种子漂移成两套知识)。"""
+
+    async def _scenario() -> None:
+        from engine_py.rag import contextual_rag as cr
+
+        monkeypatch.setattr(cr, "load_knowledge_chunks", lambda *args, **kwargs: [])
+
+        async with pg_factory.begin() as conn:
+            await conn.execute(text("DELETE FROM rag_documents"))
+
+        results = await cr.ContextualRAG("ecommerce").search_relevant_docs(
+            "退货政策", limit=2, precomputed_embedding=[1.0, 0.0]
+        )
+        assert results == [], "无知识文件时不得检索出内联兜底切片"
+
+        async with pg_factory.begin() as conn:
+            total = (
+                await conn.execute(text("SELECT COUNT(*) FROM rag_documents"))
+            ).scalar_one()
+        assert total == 0, "冷启动降级不得写入内联 SEED_DOCS 行"
+
+    asyncio.run(_scenario())

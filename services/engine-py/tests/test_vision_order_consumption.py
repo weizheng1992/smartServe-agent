@@ -203,6 +203,42 @@ class TestDisambiguationGateAtIntentEmergence:
             "'跳过消歧'必须是因为单号已被消费,而非链路没接:entities 应携带 ORD-77777"
         )
 
+    def test_consult_shaped_wording_with_image_not_hijacked_by_fast_path(self, monkeypatch):
+        """评审修复钉子(2026-09-09):「这鞋坏了怎么退货」是咨询形措辞
+        (is_consult_query 无图=True),带破损图时不得被 consult 快轨截胡回落
+        general_query —— 带图闸在 is_consult_query 本体,此类输入必须走视觉
+        定责管道出商品选择卡(旧行为绕过三个消歧浮现点,图内 OCR 单号在此
+        子集重新算完即丢)。"""
+        from engine_py.triage.consult_fast_path import is_consult_query
+
+        assert is_consult_query("这鞋坏了怎么退货"), "前置 sanity:该措辞确为咨询形"
+        assert not is_consult_query("这鞋坏了怎么退货", has_image=True)
+
+        _patch_common(monkeypatch, _VISION_NO_OCR)
+
+        async def _fake_disambig(vision, user_id, business_id, **kwargs):
+            return {
+                "status": "ambiguous",
+                "candidates": [
+                    {"orderId": "AURORA-ORD-2026-9081", "productName": "极光风暴冲锋衣", "quantity": 1},
+                    {"orderId": "AURORA-ORD-2026-9082", "productName": "极光工装裤", "quantity": 1},
+                ],
+            }
+
+        monkeypatch.setattr(triage_mod, "disambiguate_product", _fake_disambig)
+
+        state = _incident_state()
+        state["input"] = "这鞋坏了怎么退货"
+        result = asyncio.run(triage_mod.IntentTriageEngine.process(state))
+
+        assert "破损的是哪件商品" in (result.get("output") or ""), (
+            f"带图咨询形措辞必须出商品选择卡,实际 output={ (result.get('output') or '')[:80]!r }"
+        )
+        assert any(c.get("type") == "quick_replies" for c in (result.get("cards") or []))
+        assert "general_query" not in str(result.get("intents")), (
+            f"不得被快轨空弱回落截胡为 general_query:intents={result.get('intents')!r}"
+        )
+
     def test_step3_classifier_intent_also_disambiguates(self, monkeypatch):
         """Step 3 浮现点:无关键词输入(「请看看这个」)+ 无定责图,售后意图由
         分类器判定才浮现 → 必须同样过消歧出选择卡,而非被注入前的陈旧

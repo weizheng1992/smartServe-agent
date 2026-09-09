@@ -69,6 +69,14 @@ class TestIsConsultQuery:
     def test_action_or_offtopic_do_not_match(self, text: str):
         assert not is_consult_query(text), f"非咨询输入不得命中: {text}"
 
+    def test_image_gate_lives_in_is_consult_query_itself(self):
+        """带图闸在 is_consult_query 本体(2026-09-09 评审修复):咨询形措辞 × 带图
+        → False。旧行为是快轨内部拒答后由 Step 1.4 回落 general_query 截胡,
+        绕过视觉定责消歧与图内 OCR 单号消费;现带图输入根本不入快轨。"""
+        assert is_consult_query("这鞋坏了怎么退货"), "同措辞无图仍应命中快轨"
+        assert not is_consult_query("这鞋坏了怎么退货", has_image=True), "带图售后走视觉定责管道"
+        assert not is_consult_query("退货政策是什么", has_image=True)
+
 
 def _consult_state(similarity: float = 0.72) -> dict:
     return {

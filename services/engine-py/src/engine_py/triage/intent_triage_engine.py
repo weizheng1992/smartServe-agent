@@ -16,7 +16,7 @@ from ..event_bus import emit_job_result, emit_status
 from ..llm import CircuitBreakerOpenError
 from ..memory import ShortMemory, TaskMemory
 from ..skills import is_action_query
-from ..tenant import get_merchant_display_name, sanitize_tenant_response
+from ..tenant import get_merchant_display_name, sanitize_tenant_response, tenant_of_state
 from ..vision import analyze_images
 from . import rule_matchers
 from .consult_fast_path import is_consult_query, run_consult_direct_answer
@@ -69,11 +69,21 @@ def resolve_domain_role(intents: list[dict], input_text: str | None = None) -> s
     return "chitchat"
 
 
-def _tenant_of(state: dict) -> str:
-    business_config = state.get("business_config") or {}
-    return str(
-        business_config.get("businessId") or state.get("business_id") or "ecommerce"
-    ).lower()
+def _set_target_order_id(state: dict, order_id: str) -> None:
+    """已确认单号注入 state.order_context(文本/已确认上下文/图内 OCR/消歧
+    matched 同型,2026-09-09 收口 —— 此前全文件 8 处逐字重复的合并形状)。"""
+    state["order_context"] = {**(state.get("order_context") or {}), "targetOrderId": str(order_id)}
+
+
+async def _emit_vision_order_linked(job_id: str | None, order_id: str, product_name: str) -> None:
+    """消歧 matched 的订单关联播报(三个意图浮现点共用同一文案)。"""
+    if job_id:
+        await emit_status(
+            job_id,
+            f"📷 已根据照片自动关联订单 {order_id} 的 {product_name}"
+            "(如识别有误,请直接告知正确订单号)",
+            node="triage",
+        )
 
 
 class IntentTriageEngine:
@@ -125,7 +135,7 @@ class IntentTriageEngine:
         damage_assessment: dict | None = None,
         cards: list | None = None,
     ) -> dict:
-        tenant_id = _tenant_of(state)
+        tenant_id = tenant_of_state(state)
         sanitized_reply = sanitize_tenant_response(reply_text, tenant_id)
         effective_cards = cards if cards is not None else (state.get("cards") or [])
 
@@ -173,6 +183,20 @@ class IntentTriageEngine:
             "global_transitions_count": -1,
             "tool_errors_count": -1,
         }
+
+    @staticmethod
+    async def _run_vision_disambig(state: dict, vision_analysis: dict, tenant_id: str) -> dict:
+        """带图售后缺单号时的商品归属消歧核心(Step 1.6 / Step 2 判定 3 / Step 3
+        三个意图浮现点共用,2026-09-09 收口):matched 时注入 targetOrderId 并播报
+        订单关联;其余状态原样返回,由调用方经 _vision_disambig_bypass 收口。
+        闸门条件(带图 × 售后意图 × 全链无单号)随各浮现点的单号来源不同留在调用方。"""
+        disambig = await disambiguate_product(vision_analysis, state.get("user_id"), tenant_id)
+        if disambig["status"] == "matched":
+            _set_target_order_id(state, disambig["orderId"])
+            await _emit_vision_order_linked(
+                state.get("job_id"), disambig["orderId"], disambig["productName"]
+            )
+        return disambig
 
     @staticmethod
     async def _vision_disambig_bypass(
@@ -348,7 +372,7 @@ class IntentTriageEngine:
 
         # 🛡️ Step 1: 规则白名单
         clean_input = strip_punctuation_for_greeting(input_text)
-        tenant_id = _tenant_of(state)
+        tenant_id = tenant_of_state(state)
         brand_name = get_merchant_display_name(tenant_id)
 
         if rule_matchers.is_greeting(clean_input):
@@ -379,8 +403,11 @@ class IntentTriageEngine:
         # refund 动作进 planner 深度规划 / general_query 两跳),咨询回复
         # 57-114s 的大头即源于此。此处复用 run_agent 预取的 RAG 切片单次调用
         # 直答;RAG 空弱/直答失败回落 general_query 零规划旁路(finish 终稿
-        # 诚实作答),严防下游把咨询误判成动作形。
-        if is_consult_query(input_text):
+        # 诚实作答),严防下游把咨询误判成动作形。带图闸在 is_consult_query
+        # 本体:咨询形措辞 × 带图(「这鞋坏了怎么退货」+ 破损图)不入快轨,
+        # 走 Step 1.5 起的 OCR 单号消费与视觉定责消歧管道(若在快轨内拒答再
+        # 回落 general_query,会截胡消歧并令图内单号重新算完即丢)。
+        if is_consult_query(input_text, has_image=bool(state.get("image_urls"))):
             consult_hit = await run_consult_direct_answer(state, history_msgs)
             if consult_hit is not None:
                 consult_answer, consult_intents, consult_confidence = consult_hit
@@ -420,10 +447,7 @@ class IntentTriageEngine:
             if (existing_order_context or {}).get("targetOrderId") and not (
                 (state.get("order_context") or {}).get("targetOrderId")
             ):
-                state["order_context"] = {
-                    **(state.get("order_context") or {}),
-                    "targetOrderId": existing_order_context["targetOrderId"],
-                }
+                _set_target_order_id(state, existing_order_context["targetOrderId"])
 
             context = {
                 "orderContext": existing_order_context,
@@ -450,10 +474,7 @@ class IntentTriageEngine:
                     (s["slots"]["orderId"] for s in all_specs if s["slots"].get("orderId")), None
                 )
                 if primary_order_id:
-                    state["order_context"] = {
-                        **(state.get("order_context") or {}),
-                        "targetOrderId": str(primary_order_id),
-                    }
+                    _set_target_order_id(state, primary_order_id)
 
                 await IntentTriageEngine.log_intent_to_db(
                     thread_id, input_text, multi_intents, "slot_extractor_multi", 0.95
@@ -473,10 +494,7 @@ class IntentTriageEngine:
             )
 
             if task_spec["slots"].get("orderId"):
-                state["order_context"] = {
-                    **(state.get("order_context") or {}),
-                    "targetOrderId": str(task_spec["slots"]["orderId"]),
-                }
+                _set_target_order_id(state, task_spec["slots"]["orderId"])
 
             # 图内 OCR 单号注入(2026-09-09 事故:ORD-77777 算完即丢)——文本单号
             # 与已确认订单上下文优先,OCR 不得覆盖;注入后重跑槽位抽取,退款严格
@@ -486,10 +504,7 @@ class IntentTriageEngine:
                 and not task_spec["slots"].get("orderId")
                 and not (existing_order_context or {}).get("targetOrderId")
             ):
-                state["order_context"] = {
-                    **(state.get("order_context") or {}),
-                    "targetOrderId": vision_order_id,
-                }
+                _set_target_order_id(state, vision_order_id)
                 context["orderContext"] = state["order_context"]
                 task_spec = SlotExtractor.extract(input_text, active_intent, existing_slots, context)
 
@@ -508,22 +523,9 @@ class IntentTriageEngine:
                 and not vision_order_id
                 and not (existing_order_context or {}).get("targetOrderId")
             ):
-                disambig = await disambiguate_product(
-                    vision_analysis, state.get("user_id"), tenant_id
-                )
+                disambig = await IntentTriageEngine._run_vision_disambig(state, vision_analysis, tenant_id)
                 if disambig["status"] == "matched":
-                    state["order_context"] = {
-                        **(state.get("order_context") or {}),
-                        "targetOrderId": disambig["orderId"],
-                    }
                     context["orderContext"] = state["order_context"]
-                    if state.get("job_id"):
-                        await emit_status(
-                            state["job_id"],
-                            f"📷 已根据照片自动关联订单 {disambig['orderId']} 的 {disambig['productName']}"
-                            "(如识别有误,请直接告知正确订单号)",
-                            node="triage",
-                        )
                     # 重跑槽位抽取:targetOrderId 已就位,本轮 slots 直接带上
                     # orderId,免二次"请提供订单号"澄清;仍取不到则走下方正常澄清兜底
                     task_spec = SlotExtractor.extract(input_text, active_intent, existing_slots, context)
@@ -630,7 +632,7 @@ class IntentTriageEngine:
             # 🛡️ 读闸(防缓存投毒,2026-09-04 幻觉加购 bug 加固):动作形输入(任一
             # 技能声明可处理)不得命中回复缓存 —— 即使缓存已被历史投毒,动作也必须
             # 落到下方锚点判定 / Step 3 精判的真实执行管道。
-            cache_tenant = _tenant_of(state)
+            cache_tenant = tenant_of_state(state)
             if is_action_query(input_text, cache_tenant):
                 print(f"[Triage Semantic Cache] Action-shaped input skips reply cache: {input_text[:50]}")
             else:
@@ -654,8 +656,10 @@ class IntentTriageEngine:
 
             matched_order_id_match = ORDER_ID_RE.search(input_text)
             matched_order_id = matched_order_id_match.group(0) if matched_order_id_match else None
-            # 单号融合优先级:文本显式 > 已确认上下文 > 图内 OCR(2026-09-09)
+            # 单号融合优先级:文本显式 > 已确认上下文 > 图内 OCR(2026-09-09),
+            # 判定 1/2/3 同一融合口径,一次算定共用
             confirmed_order_id = (state.get("order_context") or {}).get("targetOrderId")
+            fused_order_id = matched_order_id or confirmed_order_id or vision_order_id
             has_order_keywords = bool(ORDER_KEYWORDS_RE.search(input_text))
             has_refund_keywords = bool(REFUND_KEYWORDS_RE.search(input_text)) or bool(damage_assessment)
 
@@ -667,7 +671,6 @@ class IntentTriageEngine:
                 and has_order_keywords
                 and has_refund_keywords
             ):
-                fused_order_id = matched_order_id or confirmed_order_id or vision_order_id
                 intents = [
                     {
                         "intent": "order_status",
@@ -699,7 +702,6 @@ class IntentTriageEngine:
             if (score_order >= 0.88 and score_order - score_oos >= 0.08) or (
                 has_order_keywords and not has_refund_keywords
             ):
-                fused_order_id = matched_order_id or confirmed_order_id or vision_order_id
                 intents = [
                     {
                         "intent": "order_status",
@@ -725,7 +727,7 @@ class IntentTriageEngine:
             if (score_refund >= 0.88 and score_refund - score_oos >= 0.08) or (
                 has_refund_keywords and not has_order_keywords
             ):
-                refund_order_id = matched_order_id or confirmed_order_id or vision_order_id
+                refund_order_id = fused_order_id
                 # 📷 意图浮现点消歧(2026-09-09):模糊损坏词(「坏了」)的售后意图
                 # 由 damage_assessment 在此浮现,SlotExtractor 阶段还是 chat —— Step 1.6
                 # 闸门因此永不触发。此处带图缺单号必须同样过消歧,否则为本场景
@@ -736,22 +738,9 @@ class IntentTriageEngine:
                     and not refund_order_id
                     and not (state.get("order_context") or {}).get("targetOrderId")
                 ):
-                    disambig = await disambiguate_product(
-                        vision_analysis, state.get("user_id"), tenant_id
-                    )
+                    disambig = await IntentTriageEngine._run_vision_disambig(state, vision_analysis, tenant_id)
                     if disambig["status"] == "matched":
                         refund_order_id = disambig["orderId"]
-                        state["order_context"] = {
-                            **(state.get("order_context") or {}),
-                            "targetOrderId": disambig["orderId"],
-                        }
-                        if state.get("job_id"):
-                            await emit_status(
-                                state["job_id"],
-                                f"📷 已根据照片自动关联订单 {disambig['orderId']} 的 {disambig['productName']}"
-                                "(如识别有误,请直接告知正确订单号)",
-                                node="triage",
-                            )
                     else:
                         return await IntentTriageEngine._vision_disambig_bypass(
                             state, "refund", max(score_refund, 0.95), damage_assessment, disambig
@@ -803,7 +792,7 @@ class IntentTriageEngine:
         )
 
         try:
-            active_tenant_id = _tenant_of(state)
+            active_tenant_id = tenant_of_state(state)
 
             exemplars_prompt = ""
             try:
@@ -864,10 +853,7 @@ class IntentTriageEngine:
                 (p["entities"]["orderId"] for p in parsed if p["entities"].get("orderId")), None
             )
             if primary_order_id:
-                state["order_context"] = {
-                    **(state.get("order_context") or {}),
-                    "targetOrderId": str(primary_order_id),
-                }
+                _set_target_order_id(state, primary_order_id)
 
             # 📷 意图浮现点消歧 · Step 3(2026-09-09):分类器判出售后意图、带图
             # 且全链无单号(文本/OCR/上下文)时同样过商品消歧 —— 与判定 3 同理,
@@ -888,25 +874,14 @@ class IntentTriageEngine:
                 and not vision_order_id
                 and not (state.get("order_context") or {}).get("targetOrderId")
             ):
-                disambig = await disambiguate_product(
-                    vision_analysis, state.get("user_id"), active_tenant_id
+                disambig = await IntentTriageEngine._run_vision_disambig(
+                    state, vision_analysis, active_tenant_id
                 )
                 if disambig["status"] == "matched":
                     vision_disambig_matched = True
-                    state["order_context"] = {
-                        **(state.get("order_context") or {}),
-                        "targetOrderId": disambig["orderId"],
-                    }
                     for p in parsed:
                         if p["intent"] in AFTER_SALE_INTENTS:
                             p["entities"]["orderId"] = disambig["orderId"]
-                    if state.get("job_id"):
-                        await emit_status(
-                            state["job_id"],
-                            f"📷 已根据照片自动关联订单 {disambig['orderId']} 的 {disambig['productName']}"
-                            "(如识别有误,请直接告知正确订单号)",
-                            node="triage",
-                        )
                 else:
                     return await IntentTriageEngine._vision_disambig_bypass(
                         state,

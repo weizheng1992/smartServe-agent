@@ -1,10 +1,22 @@
-"""租户品牌展示与响应清洗 — 对齐 packages/types/src/config.ts 与 finish.node.ts。"""
+"""租户身份推导、品牌展示与响应清洗 — 对齐 packages/types/src/config.ts 与 finish.node.ts。"""
 
 from __future__ import annotations
 
 import re
 
 _PLACEHOLDER_RE = re.compile(r"\[([a-zA-Z0-9_-]+)\]")
+
+
+def tenant_of_state(state: dict) -> str:
+    """从 AgentState 推导租户 ID:business_config.businessId > state.business_id > 默认 ecommerce。
+
+    租户边界推导只允许这一份实现(triage 引擎与 consult 快轨共用,2026-09-09 收口),
+    任何副本漂移都是多租户隔离风险。
+    """
+    business_config = state.get("business_config") or {}
+    return str(
+        business_config.get("businessId") or state.get("business_id") or "ecommerce"
+    ).lower()
 
 
 def get_merchant_display_name(business_id: str | None) -> str:

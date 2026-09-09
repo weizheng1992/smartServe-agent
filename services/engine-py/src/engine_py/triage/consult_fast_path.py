@@ -24,7 +24,7 @@ import re
 
 from ..event_bus import emit_status
 from ..llm import CircuitBreakerOpenError, get_chat_model
-from ..tenant import get_merchant_display_name
+from ..tenant import get_merchant_display_name, tenant_of_state
 from .semantic_cache import SemanticVectorCache, add_query_to_semantic_cache
 from .slot_extractor import ORDER_ID_RE, AgentIntentType
 
@@ -66,15 +66,22 @@ _CONSULT_ACTION_RE = re.compile(
 _CONSULT_BARE_TOPIC_RE = re.compile(r"(?:政策|规定|流程|尺码|运费|发票|保修|保养|退换)")
 
 
-def is_consult_query(text: str) -> bool:
+def is_consult_query(text: str, has_image: bool = False) -> bool:
     """咨询形判定:问店铺知识,非要求执行动作。
 
     三重否定闸:显式订单号(冲具体订单而来)、动作形/复合意图措辞、带图
     (走视觉定责管道)。信任模型:本判定同时是语义缓存读写两侧的防投毒闸
     —— 动作形输入永远进不了本快轨,缓存里只可能有 RAG 直答。
+
+    带图闸必须在本判定本体而非 run_consult_direct_answer 内部单独拒答:
+    快轨挂载点(Step 1.4)对 None 一律回落 general_query 早退,若带图输入
+    是进了快轨才被拒,咨询形措辞 × 破损图会被截胡绕过视觉定责与商品消歧
+    (2026-09-09 评审修复)。
     """
     stripped = (text or "").strip()
     if not stripped:
+        return False
+    if has_image:
         return False
     if ORDER_ID_RE.search(stripped):
         return False
@@ -141,9 +148,7 @@ async def run_consult_direct_answer(state: dict, history_msgs: list[dict]) -> tu
     if not input_text or state.get("image_urls"):
         return None
 
-    tenant_id = str(
-        (state.get("business_config") or {}).get("businessId") or state.get("business_id") or "ecommerce"
-    ).lower()
+    tenant_id = tenant_of_state(state)
     brand_name = get_merchant_display_name(tenant_id)
 
     # 语义缓存先查(≥0.96,先于 RAG 闸):同题近题上次直答秒回,且纯 FAQ 缓存

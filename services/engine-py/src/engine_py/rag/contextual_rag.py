@@ -86,6 +86,8 @@ def _parse_embedding(raw) -> list[float] | None:
         return None
 
 
+# 仅 _search_local_fake_docs 离线兜底(PG 不可用时镜像 TS 基线三条演示切片)使用;
+# 自愈播种(_ensure_seed_data)自 2026-09-09 起同源读 docs/knowledge/*.md,不再回退此处
 SEED_DOCS = [
     {
         "businessId": "ecommerce",
@@ -131,8 +133,9 @@ class ContextualRAG:
         self.business_id = business_id
 
     async def _ensure_seed_data(self) -> None:
-        """知识库为空时自愈播种:优先摄取 docs/knowledge/*.md(与 db.seed 同源,知识不写死),
-        文件不可用时回退 TS 基线内联演示切片(SEED_DOCS)。"""
+        """知识库为空时自愈播种:与 db.seed 同源读 docs/knowledge/*.md(知识不写死,
+        单一来源);文件不可用/目录空则跳过播种 —— 不回退内联写死内容,否则冷启动
+        降级路径会与种子漂移成两套知识(2026-09-09 评审修复)。"""
         try:
             async with get_session() as session:
                 existing = (
@@ -140,39 +143,27 @@ class ContextualRAG:
                 ).scalar_one_or_none()
                 if existing is not None:
                     return
-                rows: list[RagDocumentRow] = []
                 try:
                     chunks = load_knowledge_chunks()
                 except Exception as files_err:
-                    print(f"[RAG] Knowledge files unreadable, falling back to inline SEED_DOCS: {files_err}")
-                    chunks = []
-                if chunks:
-                    for chunk in chunks:
-                        embedding = await get_embedding_model().aembed_query(chunk.embedding_input())
-                        rows.append(
-                            RagDocumentRow(
-                                business_id=chunk.business_id,
-                                source_url=chunk.source_url,
-                                chunk_text=chunk.chunk_text,
-                                contextual_summary=chunk.contextual_summary(),
-                                embedding=json.dumps(embedding),
-                                metadata=chunk.metadata_dict(),
-                            )
+                    print(f"[RAG] Knowledge files unreadable, skip self-healing seed: {files_err}")
+                    return
+                if not chunks:
+                    print("[RAG] docs/knowledge 无可摄取切片,跳过自愈播种(不回退内联写死内容)")
+                    return
+                rows: list[RagDocumentRow] = []
+                for chunk in chunks:
+                    embedding = await get_embedding_model().aembed_query(chunk.embedding_input())
+                    rows.append(
+                        RagDocumentRow(
+                            business_id=chunk.business_id,
+                            source_url=chunk.source_url,
+                            chunk_text=chunk.chunk_text,
+                            contextual_summary=chunk.contextual_summary(),
+                            embedding=json.dumps(embedding),
+                            metadata=chunk.metadata_dict(),
                         )
-                else:
-                    print("[RAG] Knowledge dir empty/unreadable, seeding inline SEED_DOCS baseline")
-                    for doc in SEED_DOCS:
-                        combined_text = f"[Context] {doc['contextualSummary']}\n\n[Content] {doc['chunkText']}"
-                        embedding = await get_embedding_model().aembed_query(combined_text)
-                        rows.append(
-                            RagDocumentRow(
-                                business_id=doc["businessId"],
-                                chunk_text=doc["chunkText"],
-                                contextual_summary=doc["contextualSummary"],
-                                embedding=json.dumps(embedding),
-                                metadata={"category": doc["category"], "version": "1.0"},
-                            )
-                        )
+                    )
                 session.add_all(rows)
                 await session.commit()
         except Exception as err:
