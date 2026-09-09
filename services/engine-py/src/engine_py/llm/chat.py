@@ -108,6 +108,24 @@ class _ResilientChatOpenAI(ChatOpenAI):
         sup = super()
         return await resilient_ainvoke(lambda: sup.ainvoke(input, _inject_telemetry(config), **kwargs))
 
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        # bigmodel 兼容(实测 glm-4.7,2026-09-09;glm-4.6v 均收,vision 通路幸免):
+        # - parallel_tool_calls → 任意组合 400 code 1210;
+        # - stream: false 与 tools 同现 → 400 code 1210(单独出现无害);
+        # - tool_choice 对象形式({"type":"function",...} 与 {"type":"auto"})
+        #   → 400 code 1210;字符串 "required"/"auto" 均收 —— 改写为
+        #   "required" 保住 with_structured_output 的强制调用语义(实测
+        #   直接剥除时模型遇闲聊 prompt 不调工具,结构化解析即失败)。
+        # with_structured_output(function_calling) 三者皆发,此前 triage
+        # 分类器/商品消歧等全部结构化调用 400,被关键词兜底静默掩盖。
+        payload.pop("parallel_tool_calls", None)
+        if payload.get("stream") is False:
+            payload.pop("stream")
+        if isinstance(payload.get("tool_choice"), dict):
+            payload["tool_choice"] = "required"
+        return payload
+
 
 @lru_cache(maxsize=1)
 def get_chat_model() -> ChatOpenAI:
