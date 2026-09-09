@@ -11,7 +11,8 @@ LLM 调用消歧 → 唯一高置信命中注入 ``order_context.targetOrderId``
 - 触发 = 带图 + 售后意图(order_return/refund)+ 无 targetOrderId
 - 自动注入阈值 confidence ≥ 0.8,且 order_id 必须在候选集内(防幻觉)
 - 匹配粒度 = 商品名级(订单链路无 skuCode/spuId 独立字段,事实如此)
-- 候选池 = 最近 MAX_CANDIDATE_ORDERS 单,按商品行拍平
+- 候选池 = 最近 MAX_CANDIDATE_ORDERS 单的商品行拍平,数据优先级与
+  订单列表同源:商户真单(agent_merchant)优先,engine 本地表兜底
 """
 
 from __future__ import annotations
@@ -117,33 +118,15 @@ async def disambiguate_product(
 
 
 async def _build_candidates_async(user_id: str | None, business_id: str | None) -> list[dict]:
-    """候选池构建(async 真身);查询失败返回空列表,不抛出。"""
-    if not user_id:
-        return []
+    """候选池构建:近单商品行走 OrderDomainService.get_recent_product_lines
+    (商户真单优先/引擎本地表兜底,两库优先级与订单列表同源);失败返回空列表,不抛出。"""
     try:
-        orders = await OrderDomainService.get_user_orders_detailed(
-            {"userId": user_id, "businessId": business_id}
+        return await OrderDomainService.get_recent_product_lines(
+            user_id, business_id, limit=MAX_CANDIDATE_ORDERS
         )
     except Exception as err:
         print(f"[ProductDisambiguator] 候选订单查询失败: {err}")
         return []
-
-    candidates: list[dict] = []
-    for order in orders[:MAX_CANDIDATE_ORDERS]:
-        order_id = order.get("orderId")
-        if not order_id:
-            continue
-        for item in order.get("items") or []:
-            product_name = item.get("productName")
-            if product_name:
-                candidates.append(
-                    {
-                        "orderId": str(order_id),
-                        "productName": str(product_name),
-                        "quantity": int(item.get("quantity") or 1),
-                    }
-                )
-    return candidates
 
 
 def build_select_card(candidates: list[dict]) -> dict:

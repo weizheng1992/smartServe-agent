@@ -1186,3 +1186,57 @@ class OrderDomainService:
         except Exception as err:
             print(f"[OrderDomainService.getUserOrdersDetailed] Query failed: {err}")
             return []
+
+    @staticmethod
+    async def get_recent_product_lines(
+        user_id: str | None, business_id: str | None = None, limit: int = 5
+    ) -> list[dict]:
+        """近单商品行拍平({orderId, productName, quantity}):破损图商品归属消歧等
+        "图 × 账户数据"场景的候选池。
+
+        数据优先级与 list_user_orders 同源(2026-09-05 修聊天/列表不一致):
+        商户门户真单(agent_merchant.merchant_orders)优先 —— 商户用户在 engine
+        本地表无单,直查 get_user_orders_detailed 会永远空;商户库不可达(None)
+        或空单时降级 engine 本地表。
+        """
+        if not user_id:
+            return []
+
+        # 1) 商户门户真单(先截断再拉商品行,避免超限单白查 items)
+        merchant_orders = await _list_merchant_orders(user_id)
+        if merchant_orders:
+            lines: list[dict] = []
+            for order in merchant_orders[:limit]:
+                oid = order.get("orderId")
+                if not oid:
+                    continue
+                for item in await _fetch_merchant_order_items(str(oid)):
+                    if item.get("name"):
+                        lines.append(
+                            {
+                                "orderId": str(oid),
+                                "productName": str(item["name"]),
+                                "quantity": int(item.get("quantity") or 1),
+                            }
+                        )
+            return lines
+
+        # 2) engine 本地表兜底(非商户租户演示单,或商户库离线)
+        detailed = await OrderDomainService.get_user_orders_detailed(
+            {"userId": user_id, "businessId": business_id}
+        )
+        fallback: list[dict] = []
+        for order in detailed[:limit]:
+            oid = order.get("orderId")
+            if not oid:
+                continue
+            for item in order.get("items") or []:
+                if item.get("productName"):
+                    fallback.append(
+                        {
+                            "orderId": str(oid),
+                            "productName": str(item["productName"]),
+                            "quantity": int(item.get("quantity") or 1),
+                        }
+                    )
+        return fallback
