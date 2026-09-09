@@ -8,7 +8,7 @@
 
 ```
                        ┌─────────────────────────────────────────────────────────────┐
-                       │                     用户前端 (apps/web)                       │
+                       │              用户前端 (apps/web / apps/merchant 悬浮窗)      │
                        │   - [📎 图片上传/多图预览] ──(POST)──> /api/chat/upload      │
                        │   - [RichCardRenderer 统一渲染容器]                           │
                        │     ├─ 📦 订单/商品卡片 (`OrderCard`)                         │
@@ -17,7 +17,7 @@
                        │     ├─ 📷 AI 视觉成色与破损定责卡 (`DamageAssessmentCard`)   │
                        │     └─ 💊 快捷回复与操作胶囊 (`QuickReplies`)                │
                        └──────────────────────────────┬──────────────────────────────┘
-                                                      │ POST /api/chat { message, imageUrls }
+                                                      │ POST /api/chat·/api/store/chat { message, imageUrls }
                                                       ▼
                        ┌─────────────────────────────────────────────────────────────┐
                        │        LangGraph 智能多模态状态机 (services/engine-py)       │
@@ -27,7 +27,8 @@
                        │     ├─ 快递面单/包装条形码 OCR 实体提取 (`ORD-XXXXX`, `SFXXX`)│
                        │     ├─ 商品破损/瑕疵智能评级 (`negligible`/`minor`/`severe`) │
                        │     ├─ PII 隐私数据脱敏过滤器 (手机/身份证/银行卡号物理掩码) │
-                       │     └─ 模型级超时可配(默认 30s)+ 入图限额治理(≤3 图/条)    │
+                       │     ├─ 模型级超时可配(默认 30s)+ 入图限额治理(≤3 图/条)    │
+                       │     └─ 破损图商品归属消歧 (Step 1.6, §6)                    │
                        │                                                             │
                        │  2. [任务规划与执行引擎 (`StepExecutionEngine`)]            │
                        │     └─ 承接 OCR 提取实体，快速组装工具链入参                  │
@@ -143,4 +144,44 @@ TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `n
 1. **MIME Type 白名单拦截**: 仅允许 `image/jpeg`、`image/png`、`image/webp`、`image/gif`，硬拦截非图片文件与潜在恶意可执行脚本。
 2. **物理大小边界**: 流式读取实测累计，严格限制最大 10MB，超出立即删除半成品文件并返回 HTTP 413。
 3. **安全落盘与 URL 派发**: 持久化落盘至 `public/uploads/`（`UPLOADS_DIR` 可覆写），生成带随机 UUID 的唯一文件名，避免文件名覆盖与目录遍历攻击；经网关 StaticFiles 以 `/api/uploads/` 回读（搭 Vite `/api` 代理便车，web 与引擎同源可达）。
-4. **引用持久化**: 用户消息的 `imageUrls` 引用以 JSONB 落 `messages.image_urls`（Alembic 0006），会话刷新按引用还原缩略图与卡片。**网关是用户行的唯一写入方**（dispatch/SPI 入口；引擎 `run_agent`/Temporal activity 零写用户行——双插会使时间线出现一行带图一行不带的重复 user 气泡,multimodal 005 治理）。
+4. **引用持久化**: 用户消息的 `imageUrls` 引用以 JSONB 落 `messages.image_urls`（Alembic 0006），会话刷新按引用还原缩略图与卡片。**网关是用户行的唯一写入方**（dispatch/SPI/商户 `store_chat` 三个入口——store_chat 补写系 2026-09-09 修复，此前商户用户消息完全不落库；引擎 `run_agent`/Temporal activity 零写用户行——双插会使时间线出现一行带图一行不带的重复 user 气泡,multimodal 005 治理）。
+
+### 5.2 商户悬浮客服多模态接入（2026-09-09）
+
+`apps/merchant` 悬浮窗（`FloatingChatWidget.tsx`）与 web 端共享同一上传链路与消息契约：回形针按钮 → `POST /api/chat/upload`（MIME 白名单 + 10MB 限额同 §5.1）→ chips 缩略预览（可移除）→ `POST /api/store/chat` 携带 `imageUrls` → 引擎 vision 分析 → 气泡上方缩略图渲染 + 点击放大遮罩。空文本有图以兜底文案发送；历史接口 `imageUrls` 三处映射还原（localStorage 缓存随消息对象整体序列化，自动兼容）。网关侧 `store_chat` 对齐 `dispatch_chat` 语义：读取 `imageUrls`、透传 `AgentJobInput`、并显式落库用户行（§5.1 第 4 条）。
+
+---
+
+## 6. 破损图商品归属消歧（triage Step 1.6，2026-09-09）
+
+- **源码路径**: `services/engine-py/src/engine_py/triage/product_disambiguator.py`（挂载于 `intent_triage_engine.py` Step 1.6）
+
+### 6.1 触发条件与三态裁决
+
+用户发破损图 + 售后意图（`order_return`/`refund`）但缺订单号（图内 OCR 亦无单号）时，用 **vision 视觉摘要 × 近单商品行** 交 LLM 消歧，替代机械"请提供订单号"澄清：
+
+| 状态 | 条件 | 行为 |
+| ---- | ---- | ---- |
+| `matched` | 置信度 ≥ 0.8 且 `(orderId, productName)` 原样在候选集内（防幻觉键集校验——模型编造单号即便 0.95 也拒绝） | 注入 `order_context.targetOrderId` + SSE 播报"已根据照片自动关联订单…" + 重跑槽位抽取（本轮 `slots.orderId` 直接就位，退款严格抽取器只认输入正则与该键） |
+| `ambiguous` | 多候选 / 低置信 / LLM 失败 / 无视觉摘要 | 商品选择 `quick_replies` 卡（≤8 项，候选超出卡片上限时用户可手输单号兜底）；点选文本携带订单号，下一轮经 `ORDER_ID_RE` 正则通道闭环 |
+| `no_orders` | 候选池为空 | 明示指引（提供订单号或转人工） |
+
+消歧失败绝不炸会话——最坏退化多问一次。
+
+### 6.2 候选池：两库优先级门面
+
+候选来自 `OrderDomainService.get_recent_product_lines(user_id, business_id, limit=5)`（近 5 单商品行拍平为 `{orderId, productName, quantity}`），数据优先级与订单列表同源：**商户门户真单（`agent_merchant.merchant_orders`）优先，engine 本地表兜底**（商户库不可达或空单时）。先截断再拉商品行（超限单不白查 items）；空用户短路返回。2026-09-09 冒烟暴露：商户用户在 engine 表无单，直查 `get_user_orders_detailed` 永远空候选——消歧三态里的 `matched`/`ambiguous` 对商户用户从未成立过，此门面即治该缺陷。
+
+---
+
+## 7. bigmodel 结构化调用参数兼容（chat 模型收口，2026-09-09）
+
+`_ResilientChatOpenAI._get_request_payload`（`llm/chat.py`）是 chat 模型所有请求的单一漏斗（invoke/ainvoke/stream 全走此路径），在此收口 bigmodel 与 OpenAI 专有参数的兼容差异：
+
+| 参数 | glm-4.7 实测 | glm-4.6v 实测 | 处置 |
+| ---- | ----------- | ------------ | ---- |
+| `parallel_tool_calls` | 任意组合 400 (code 1210) | 收 | 剥除 |
+| `stream: false` + `tools` 同现 | 400 (code 1210)（单独出现无害） | 收 | 剥除 |
+| `tool_choice` 对象形式（`{"type":"function",...}` 与 `{"type":"auto"}`） | 400 (code 1210) | 收 | **改写**为字符串 `"required"` |
+
+langchain-openai 1.6.0 的 `with_structured_output(method="function_calling")` 恰好三者皆发——修复前 triage 意图分类器、商品归属消歧等**全部结构化调用 400**，并被关键词兜底静默掩盖（会话"看起来正常"，实则意图判定长期降级）。`tool_choice` 必须改写而非剥除：实测完全去掉后模型遇闲聊 prompt 即不调工具，结构化解析随之失败；`"required"` 的强制调用语义与对象形式等价且 bigmodel 接受。vision 模型（glm-4.6v）三参数均收且独立于 `_ResilientChatOpenAI`，通路不受影响。契约由 `tests/test_llm_chat_model.py`（echo 服务器抓真实请求体）钉死。

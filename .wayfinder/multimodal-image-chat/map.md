@@ -31,11 +31,16 @@ created: 2026-09-08
 - [图片持久化与会话还原](tickets/004-image-persistence.md): Alembic 0006 `messages.image_urls`(JSONB 引用、幂等守卫)+ append_message 透传 + timeline 带回;前端零改动(002 已备渲染),dispatch 带图落库→刷新还原闭环;gateway 97 / engine 162 全绿。
 - [图片治理与全链路验收](tickets/005-governance-and-e2e.md): `normalize_image_urls` ≤3 图/条 + E2E 实测三修(超时 30s / 词表补开胶断裂 / uploads 目录层级);**用户消息双插治理——网关=用户行唯一写入方**(imageUrls 只在入口可得),引擎三处拔除;E2E chromium 全链绿(48.7s,真实 GLM-4.6V severe 定责 + 刷新还原);eval 维持文本模拟基线;存量缺口入册(GET threads 405 / bypass 丢定责 / 网关侧遥测盲区)。
 
+### 收官后追加(map 外直接交付,2026-09-09)
+
+- **商户悬浮客服多模态接入**(`83acb98`,原"Not yet specified"立项观察项,grilling 共识后直接实现): `FloatingChatWidget` 回形针上传/chips 预览/放大遮罩/历史三处映射还原;网关 `store_chat` 补写用户行(治 005 回归——商户用户消息此前完全不落库);契约两用例入册,gateway 100 全绿。
+- **破损图商品归属消歧**(`aed3238`+`ba05718`+`1b15979`,grilling→implement→tdd→code-review 全流程): triage Step 1.6 vision 摘要×近单商品行 LLM 消歧,matched≥0.8 注入 targetOrderId/ambiguous 出选择卡/no_orders 指引;候选池 `get_recent_product_lines` 门面商户真单优先(治商户用户永远空候选);连带挖出 **bigmodel glm-4.7 结构化调用全量 400(code 1210)**——`parallel_tool_calls`/`stream:false`×tools/`tool_choice` 对象三参数拒收,`_get_request_payload` 单点收口(剥前两者+改写 `"required"`),triage 意图分类器恢复真实 LLM 判定。三态冒烟实证(牛仔裤图诚实降级 ambiguous/工装裤摘要 matched 0.85)。
+
 ## Not yet specified
 
 - **粘贴/拖拽上传**:前端输入增强(现仅文件选择器),等基本链路打通后视手感立票。
 - **severe 定责 → HITL 审批**:TS 文档承诺但从未实现(suggestedAction 只是数据字段);等定责链路真实跑起来、看过真实分布再决定是否兑现。
-- **商户端图片输入**:`apps/merchant` 聊天浮窗无 imageUrls 入口,等 web 端验证价值后再议。
+- **消歧把用户文本并入 prompt**:挂载点现只传 vision 摘要与候选,"这条裤子"类文本线索未进消歧 prompt(端到端真图措辞保守时提前降级 ambiguous);等真实分布看是否值得加。
 - **通用看图对话**(非 OCR/定责场景,视觉摘要直接进 planner 上下文):TS 亦无,超出回收范围,雾里观望。
 
 ## Out of scope

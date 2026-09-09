@@ -4,6 +4,39 @@
 
 ---
 
+## [2.6.0] - 2026-09-09 (商户端多模态 + 破损图商品归属消歧:发破损图自动关联订单)
+
+2.5.0 收官后的两个追加交付(grilling 共识→直接实现):商户悬浮客服接入图片链路;破损图不再机械追问订单号——vision 摘要 × 近单商品行 LLM 消歧,高置信自动关联。期间连带挖出并修复 **bigmodel glm-4.7 结构化调用全量 400** 的管线级缺陷。
+
+### ✨ Features (新功能)
+
+- **商户悬浮客服多模态接入 (`83acb98`)**:
+  - `FloatingChatWidget` 补齐图片能力:回形针上传(复用 `POST /api/chat/upload`)→ chips 缩略预览(可移除)→ `POST /api/store/chat` 携带 `imageUrls` → 气泡上方缩略图渲染 + 点击放大遮罩;空文本有图以兜底文案发送;历史接口 `imageUrls` 三处映射还原(localStorage 缓存随消息对象整体序列化,自动兼容)。
+  - **网关 `store_chat` 补写用户行(治 005 回归)**:web 的 `dispatch_chat` 落库用户行而 merchant 的 `store_chat` 从未落库——005 治理把引擎侧用户行写入拔除后,商户用户消息完全不落库、历史恢复缺用户行;对齐 dispatch 语义(读 `imageUrls`/透传 `AgentJobInput`/显式落库),契约两用例入册(带图持久化还原 + 空文本无图 400)。
+- **破损图商品归属消歧 (`aed3238`)**:
+  - triage Step 1.6(`triage/product_disambiguator.py`):售后意图带图但缺订单号(图内 OCR 亦无单号)时,vision 视觉摘要 × 近单商品行交 LLM 消歧,替代机械"请提供订单号"。三态:**matched**(置信度 ≥0.8 且命中项原样在候选集内,防幻觉键集校验)注入 `targetOrderId` + SSE 播报 + 重跑槽位抽取(本轮直接带上 orderId,免二次澄清);**ambiguous**(多候选/低置信/模型失败)出商品选择 `quick_replies` 卡,点选文本带单号下一轮走 `ORDER_ID_RE` 正则闭环;**no_orders** 明示指引。消歧失败绝不炸会话。
+
+### 🐛 Bug Fixes (缺陷修复)
+
+- **消歧候选源查错库 (`ba05718`)**:候选池原直查 engine 本地表 `get_user_orders_detailed`——商户用户真单在 `agent_merchant.merchant_orders`,engine 表无单,**永远空候选**,消歧三态里的 matched/ambiguous 对商户用户从未成立(冒烟实证 no_orders 假象)。修复:`OrderDomainService.get_recent_product_lines` 门面,商户真单优先(先截断再拉商品行)、engine 本地表兜底,两库优先级与订单列表同源(2026-09-05 同源裁决的延伸)。
+- **bigmodel glm-4.7 结构化调用全量 400 (`1b15979`)**:langchain-openai 1.6.0 的 `with_structured_output(function_calling)` 固定发送三个 OpenAI 专有参数,glm-4.7 全部拒收(HTTP 400 code 1210)——`parallel_tool_calls`(任意组合)、`stream:false` 与 tools 同现、`tool_choice` 对象形式;glm-4.6v 均收,vision 通路因此幸免。后果:triage 意图分类器、商品消歧等全部结构化调用失败,**被关键词兜底静默掩盖**(会话看似正常,意图判定长期降级)。修复:`_ResilientChatOpenAI._get_request_payload` 单点收口(invoke/ainvoke/stream 全路径)——剥前两者、`tool_choice` 对象**改写**为 `"required"`(不能剥除:实测去掉后模型遇闲聊 prompt 不调工具,结构化解析即失败;`"required"` 强制语义等价且 bigmodel 收)。诊断链:echo 服务器抓真实请求体 + curl 参数矩阵逐项二分。
+
+### 📝 Docs (文档同步)
+
+- `docs/architecture/multimodal-and-rich-cards.md`:总览图补 merchant 入口与消歧挂点;§5.1 写入方三入口;新增 §5.2 商户多模态接入、§6 消歧三态与候选池门面、§7 bigmodel 参数兼容矩阵。
+- `.claude/rules/agent-engine.md`:§1.3 补消歧条目、§1.4 消息写所有权补 store 入口、§2 规则 2 补 bigmodel 参数兼容事实。
+- `.wayfinder/multimodal-image-chat/map.md`:商户端图片输入从"Not yet specified"移入收官后追加;"消歧并入用户文本 prompt"立为新的观察项。
+- `README.md` 商户悬浮窗特性清单补多模态图片上传。
+
+### ✅ 验证 (Verification,如实)
+
+- engine 三套件 36/36 全绿(消歧 13 + payload 卫生 2 + 韧性 21);gateway 契约 100/100(含 store_chat 带图两用例);ruff 双服务干净。
+- 真实 bigmodel 实弹:`with_structured_output` 返回 `ok=True`(修复前 1210)。
+- 端到端冒烟(上传真图 → store/chat):选择卡候选已来自商户真单(9081 冲锋衣/9082 工装裤)——候选源修复实锤;matched 分支真实 LLM 判 0.85 自动关联 9082 工装裤;端到端走 ambiguous 系 glm-4.6v 诚实判定(测试图为牛仔裤,与候选确实不符),非 bug。
+- promptfoo 基线未复跑:triage 分类器此前一直走关键词兜底,结构化判定恢复后 Classify 分册判定理论上有变化空间,建议下次 `bun run test:prompt:compare` 复验后视漂移重钉。
+
+---
+
 ## [2.5.0] - 2026-09-09 (多模态图片客服:上传→看图定责→卡片回复→刷新还原全链贯通)
 
 wayfinder 执行图 `multimodal-image-chat` 收官(001-005 五票):回收 TS 退役时留下的四个断点——上传端点 404、triage 视觉 TODO、messages 无图列、历史不还原图。用户在 web 聊天发物流面单/破损商品图,平台真实"看图办事"。

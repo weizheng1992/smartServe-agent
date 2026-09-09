@@ -35,7 +35,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 
 ![客户触达端与智能客服](public/merchant-shop.png)
 
-- **极光智能客服悬浮窗 (`FloatingChatWidget.tsx`)**：右下角常驻唤起，具备实时响应指示灯、快捷指令胶囊与流式响应动效。
+- **极光智能客服悬浮窗 (`FloatingChatWidget.tsx`)**：右下角常驻唤起，具备实时响应指示灯、快捷指令胶囊与流式响应动效；支持**多模态图片上传**（破损商品图 → GLM-4.6V 视觉定责 → 商品归属消歧自动关联订单），刷新后图片随会话还原。
 - **路由感知上下文问候 (Route-Aware Contextual Greeting)**：根据用户当前所在页面路径（如商品详情页 `/product/[id]`、购物车 `/cart`、订单列表 `/orders`）自动装配针对性首问语与场景化操作建议。
 - **隔离式多会话管理与历史抽屉 (`📜 历史 (N)` & `+ 新对话`)**：
   - 用户可随时查看并无缝切换名下多条历史咨询记录；

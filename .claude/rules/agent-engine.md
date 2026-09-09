@@ -34,11 +34,12 @@ paths: ["services/engine-py/**/*"]
 - **第一道防线（语义去重旁路）**：`triage/semantic_cache.py` 计算与前序查询的余弦相似度（≥ 0.98），直接命中缓存返回。
 - **低置信度归档与槽位消歧**：分类置信度不足时，自动写入 `low_confidence_logs` 表，并触发 `triage/slot_extractor.py` 引导用户补充缺失关键槽位。
 - **多模态视觉定责**（`vision/analyzer.py`，2026-09-08 移植 TS visionAnalyzerService）：挂 triage Step 0.5，视觉 LLM 精判 + 启发式规则双通道（模型失败降级启发式，绝不炸会话）；快递面单/包装条形码 OCR 实体提取（如 `ORD-XXXXX`、`SFXXX`），商品成色与破损智能定责评级（`negligible` / `minor` / `severe`）；容灾超时 `AI_VISION_TIMEOUT_SECONDS` 可调（默认 30s，E2E 实测 GLM-4.6V 真实请求可超 15s，TS 的 1500ms 硬超时已废）。本地图（`/api/uploads/` 引用）以 base64 Data URL 直传（bigmodel 拉不到 localhost），模型独立经 `get_vision_model()` 配置（`AI_VISION_MODEL`，默认 glm-4.6v，结构化输出走 function_calling）。入图治理（005）：`run_agent` 构建初始状态时经 `normalize_image_urls` 收口 —— 剔除垃圾项、去重保序、**≤3 图/条**截断（与网关上传单张 10MB 限额对齐）；垃圾输入只少看图不抛错。
+- **破损图商品归属消歧**（`triage/product_disambiguator.py`，2026-09-09）：挂 triage Step 1.6 —— 售后意图（`order_return`/`refund`）带图且缺 `orderId`（图内亦无单号）时，vision 摘要 × 近单商品行交 LLM 消歧，替代机械"请提供订单号"。三态：`matched`（置信度 ≥0.8 且命中项原样在候选集内，防幻觉键集校验）注入 `order_context.targetOrderId` 并重跑槽位抽取；`ambiguous`（多候选/低置信/模型失败）出商品选择 `quick_replies` 卡，点选文本带单号下一轮走 `ORDER_ID_RE` 正则闭环；`no_orders` 明示指引。候选池走 `OrderDomainService.get_recent_product_lines` 门面 —— **商户真单（`agent_merchant.merchant_orders`）优先、engine 本地表兜底**（两库优先级与订单列表同源；商户用户在 engine 表无单，直查 detailed 永远空候选）。消歧失败绝不炸会话，最坏多问一次。
 
 ### 1.4 四象限记忆与双层画像隔离 (Quad-Memory & Dual-Tier Persona)
 
 - **短期记忆 (`memory/short_memory.py`)**：基于 `messages` 物理表读取最近 10 轮对话，内存为空时触发自愈补全。
-- **消息写所有权(multimodal 005 治理)**：用户行唯一由**网关**写入(dispatch/SPI,唯一持有 `imageUrls` 的入口);引擎侧零写用户行(`run_agent` 主链/问候旁路/Temporal activity 均不插,历史经 `short_memory.get_messages` 读网关副本),否则时间线双插 user×2(一行带图一行不带)。assistant 行仍归引擎(`short_memory.add_message`),由 `test_user_message_single_write.py` 钉死。
+- **消息写所有权(multimodal 005 治理)**：用户行唯一由**网关**写入(dispatch/SPI/商户 store_chat 三个入口,唯一持有 `imageUrls` 的位置;store_chat 补写系 2026-09-09 修复——商户用户消息此前完全不落库,历史恢复缺用户行);引擎侧零写用户行(`run_agent` 主链/问候旁路/Temporal activity 均不插,历史经 `short_memory.get_messages` 读网关副本),否则时间线双插 user×2(一行带图一行不带)。assistant 行仍归引擎(`short_memory.add_message`),由 `test_user_message_single_write.py` 钉死。
 - **长期偏好记忆 (`memory/long_memory.py`)**：大模型提取用户习惯，向量化存储至 `long_memory_facts`，检索时基于余弦相似度（硬阈值 ≥ 0.65）召回 Top-5。
 - **情境记忆 (`memory/episodic_memory.py`)**：关键业务事件按重要性（1-10分）向量化落盘。
 - **任务记忆 (`memory/task_memory.py`)**：持久化保存挂起和未完成的任务规划步骤。
@@ -74,7 +75,7 @@ paths: ["services/engine-py/**/*"]
 ## 2. 编码与维护准则
 
 1. **确定性拓扑**：修改 `graph/nodes/planner.py` 时必须严格声明 `dependencies` 依赖数组，供 `step_execution_engine.py` 并行调度。
-2. **统一调用入口**：所有 LLM 与向量 Embedding 调用必须统一走 `llm/chat.py`（`get_chat_model` / `get_embedding_model` / `get_vision_model`，lru_cache 单例）；熔断/退避/超时由 `llm/resilience.py` 的全局 CircuitBreaker 承担（2026-09-07 起，挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖），阈值经 `LLM_CIRCUIT_*` / `LLM_RETRY_*` / `LLM_TIMEOUT_SECONDS` env 可调。例外：`get_vision_model` 刻意不入韧性层 —— 视觉失败域独立，自带启发式兜底（wayfinder multimodal 003）。
+2. **统一调用入口**：所有 LLM 与向量 Embedding 调用必须统一走 `llm/chat.py`（`get_chat_model` / `get_embedding_model` / `get_vision_model`，lru_cache 单例）；熔断/退避/超时由 `llm/resilience.py` 的全局 CircuitBreaker 承担（2026-09-07 起，挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖），阈值经 `LLM_CIRCUIT_*` / `LLM_RETRY_*` / `LLM_TIMEOUT_SECONDS` env 可调。例外：`get_vision_model` 刻意不入韧性层 —— 视觉失败域独立，自带启发式兜底（wayfinder multimodal 003）。**bigmodel 参数兼容（2026-09-09，`_get_request_payload` 单点收口）**：glm-4.7 拒收 OpenAI 专有参数 —— `parallel_tool_calls`（任意组合 400 code 1210）、`stream:false` 与 tools 同现、`tool_choice` 对象形式；langchain `with_structured_output(function_calling)` 三者皆发，故 chat 模型统一剥前两者、把 `tool_choice` 对象**改写**为字符串 `"required"`（不能剥除——实测闲聊 prompt 下模型即不调工具，结构化解析失败；`"required"` 强制调用语义等价）。glm-4.6v 均收，vision 通路不受影响。契约由 `tests/test_llm_chat_model.py` 钉死。
 3. **中文本地化日志**：Temporal Activity 与执行节点产生的所有用户态进度事件必须使用标准中文本地化文本。
 4. **无异常冷启动**：记忆检索、租户配置加载等底层逻辑必须兼容空数据与冷启动，严禁未捕获抛错阻断状态机。
 5. **环境自读取**：`config.py` 在导入时读取环境变量；任何测试基建必须先注入 `DATABASE_URL` / `REDIS_URL` 再导入 engine_py 模块。
