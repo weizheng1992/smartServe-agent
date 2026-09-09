@@ -4,6 +4,32 @@
 
 ---
 
+## [2.6.2] - 2026-09-09 (商户聊天分钟级延迟治理:思维链关闭 + planner 封顶 + 咨询类 RAG 直答快轨)
+
+诊断起点:「查询等了好几分钟没有回复」。根因非 db:seed(RAG 空有冷启动自愈),而是 glm-4.7 **默认开 thinking**——每次调用先吐大量 reasoning token(裸测同题 79.9s vs 关闭 7.5-18s),而客服管线一次提问串行 3-4 次调用(triage 分类 → planner 深度规划 → executor → finish 终稿),叠加即 57-114s。政策类问题还有额外病灶:planner 曾对「退货政策」生成 5163 token(73.7s),且咨询类在意图体系里没有独立档位,按措辞随机误落三处(反问订单号 / 误判 refund 动作进深规划 / general_query 两跳)。按用户「按顺序解决」三刀切:
+
+### ✨ Features (新功能)
+
+- **思维链关闭(`llm/chat.py` `_get_request_payload` 单点收口)**:`AI_THINKING=disabled`(默认)时统一经 `extra_body` 注入 `{"thinking":{"type":"disabled"}}`——thinking 非 openai SDK 标准参数,顶层直塞 create() 即炸 `unexpected keyword argument`,必须走 extra_body 通道;`setdefault` 尊重调用方覆写;`enabled` 不注入(换不支持该参数的提供方时规避 400)。finish/executor 等全部聊天调用默认受益,4-10 倍延迟改善。契约由 `tests/test_llm_chat_model.py::TestThinkingDisabled` 钉死。
+- **planner 输出封顶(`graph/nodes/planner.py` `planner_llm()` 工厂)**:`bind(max_tokens=AI_PLANNER_MAX_TOKENS)`,默认 2000——封顶防失控,截断 JSON 落 planner 兜底单步计划(降级不炸会话);bind 仍包 `_ResilientChatOpenAI`,熔断/遥测不丢失。契约由 `tests/test_planner_token_cap.py` 钉死。
+- **咨询类直答快轨(`triage/consult_fast_path.py`,挂 triage Step 1.4)**:政策/尺码/物流时效等「问知识」型输入单次 LLM 调用直答,旁路 planner/executor/finish 终稿全程(3-4 次串行调用 → 1 次;重复问 → 0 次):
+  - `is_consult_query` 咨询形判定:咨询话题 × 疑问语气,三重否定闸(显式订单号 / 动作形与复合意图措辞 / 带图——带图售后走视觉定责管道);≤12 字裸话题(「退货政策」)省略式也算。
+  - 编排 `run_consult_direct_answer`:语义缓存先查(≥0.96 秒回,先于 RAG 闸使 FAQ 复放不受知识库空弱影响)→ 复用 run_agent 预取的 RAG 切片(零额外检索,top 相似度 ≥0.55 才直答)→ 单次调用(品牌人设 + 切片 + 近期历史)strictly grounded 直答 → 答案回填语义缓存;熔断穿透,其余失败回落。
+  - RAG 空弱/直答失败回落 general_query 零规划旁路(finish 诚实作答),**严防旧误路由**:Step 1.5「退货」字样误判动作形反问订单号、Step 2 判定 3 关键词误判 refund 动作进 planner 深度规划。
+  - 意图体系同步补 `consult` 档位:`AgentIntentType.CONSULT` + structured_classifier 类目 10(问知识非办事、永不与订单号共存),分类器判 consult 时走同一快轨。
+  - 缓存信任模型:`is_consult_query` 的动作形否定模式即读写两侧防投毒闸,刻意不过 `is_action_query`(「退货政策」会被 OrderRefundSkill 兜底正则嗅探成动作形,对咨询形输入是误报)。
+
+### 🔍 Findings (核查结论,未动代码)
+
+- **商户悬浮窗等待期无 thought 播报(#7)**:widget 仅订阅 Redis pubsub `thread:{id}:message`(终稿回复),引擎 `${jobId}:status` 进度事件走 Redis Streams 网关 SSE,商户侧从未订阅——等待期只有静态 spinner。属产品决策(要不要接进度流),本次未接线。
+
+### ✅ 验证 (Verification,如实)
+
+- 新增 `tests/test_consult_fast_path.py` 33 用例:咨询形判定 11 正例 × 13 反例(动作形/订单号/复合意图/域外全覆盖)、直答编排(RAG 过线单次调用 + 缓存回填/弱相关不发调用/空 RAG/带图守卫/异常回落/熔断穿透/缓存命中 0 调用)、triage 接线(直答命中旁路 output + 空弱回落 general_query 不再误判动作形反问订单号)。
+- engine 全量 227 passed(含 #5/#6 套件 7 用例),零回归;ruff 干净;`.env.example` 补 `AI_THINKING` / `AI_PLANNER_MAX_TOKENS` 注释条目;`.claude/rules/agent-engine.md` §1.3/§2 同步。
+
+---
+
 ## [2.6.1] - 2026-09-09 (商户 aurora RAG 知识库:docs/knowledge 文档驱动摄取,种子不再写死)
 
 商户门户(极光潮品,businessId `aurora`)此前在 `rag_documents` 无任何切片——商户聊天问退换货/尺码/保养,ContextualRAG 检索恒空,只能靠 LLM 通识硬答。本次补齐知识,且按用户要求**知识不写死在种子里**:文档即数据源,种子与冷启动自愈同源读取 `docs/knowledge/*.md` 切片入库。

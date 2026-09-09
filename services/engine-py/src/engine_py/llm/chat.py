@@ -124,6 +124,15 @@ class _ResilientChatOpenAI(ChatOpenAI):
             payload.pop("stream")
         if isinstance(payload.get("tool_choice"), dict):
             payload["tool_choice"] = "required"
+        # 思维链关闭(2026-09-09):glm-4.7 默认开 thinking,琐碎调用也先生成大量
+        # reasoning token(裸测"只回复ok" 131-239 token,同题 79.9s vs 关闭 7.5-18s),
+        # 客服管线 3 次串行调用即 1-2 分钟回复。thinking 非 openai SDK 标准参数,
+        # 顶层直塞 create(**payload) 即炸"unexpected keyword argument",必须经
+        # extra_body 通道由 SDK 合并进请求体;setdefault 尊重调用方显式覆写。
+        if settings.llm_thinking == "disabled":
+            extra_body = payload.get("extra_body") or {}
+            extra_body.setdefault("thinking", {"type": "disabled"})
+            payload["extra_body"] = extra_body
         return payload
 
 

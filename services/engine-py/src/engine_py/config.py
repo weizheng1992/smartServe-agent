@@ -52,5 +52,14 @@ class Settings:
     vision_model: str = field(default_factory=lambda: _env("AI_VISION_MODEL", "glm-4.6v"))
     vision_timeout_seconds: float = field(default_factory=lambda: float(_env("AI_VISION_TIMEOUT_SECONDS", "30")))
 
+    # glm-4.7 每次调用默认开思维链(reasoning_content):裸测"只回复ok"也先生成 131-239
+    # 推理 token,管线单次调用 11-74s(2026-09-09 实测,商户咨询类回复 57-114s 的大头)。
+    # 客服管线不需要深度推理,默认关闭换 4-10 倍延迟;disabled=注入 thinking 关闭参数,
+    # enabled=不注入(模型默认);换不支持 thinking 参数的提供方时置 enabled 规避 400。
+    llm_thinking: str = field(default_factory=lambda: _env("AI_THINKING", "disabled"))
+    # planner 深度规划输出上限:曾对「退货政策」类简单问题生成 5163 token(73.7s),
+    # 封顶防失控;截断 JSON 会落 planner 兜底单步计划(功能降级不炸会话)
+    planner_max_tokens: int = field(default_factory=lambda: int(_env("AI_PLANNER_MAX_TOKENS", "2000")))
+
 
 settings = Settings()

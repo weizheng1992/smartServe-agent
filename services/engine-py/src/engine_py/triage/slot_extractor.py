@@ -25,6 +25,8 @@ class AgentIntentType:
     METRIC_QUERY = "metric_query"
     HUMAN_ESCALATION = "human_escalation"
     GENERAL_QUERY = "general_query"
+    # 咨询类(2026-09-09):问店铺知识(政策/尺码/时效等)非动作,走 RAG 直答快轨
+    CONSULT = "consult"
     OUT_OF_SCOPE = "out_of_scope"
 
 

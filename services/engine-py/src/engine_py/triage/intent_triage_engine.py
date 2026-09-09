@@ -19,10 +19,11 @@ from ..skills import is_action_query
 from ..tenant import get_merchant_display_name, sanitize_tenant_response
 from ..vision import analyze_images
 from . import rule_matchers
+from .consult_fast_path import is_consult_query, run_consult_direct_answer
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
 from .product_disambiguator import AFTER_SALE_INTENTS, build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
-from .slot_extractor import ORDER_ID_RE, SlotExtractor
+from .slot_extractor import ORDER_ID_RE, AgentIntentType, SlotExtractor
 from .structured_classifier import classify
 
 OPERATIONAL_ACTION_RE = re.compile(
@@ -337,6 +338,39 @@ class IntentTriageEngine:
             return await IntentTriageEngine.handle_immediate_bypass(
                 state, "rule_exit_conversation", reply, [{"intent": "general_query", "confidence": 1.0}], "rule", 1.0
             )
+
+        # 🛣️ Step 1.4: 咨询类直答快轨(2026-09-09)—— 政策/尺码/物流时效等
+        # 「问知识」型输入在此闭环。此前咨询无独立意图档位,按措辞随机误落三处
+        # (Step 1.5 退货字样误判动作形反问订单号 / Step 2 判定 3 关键词误判
+        # refund 动作进 planner 深度规划 / general_query 两跳),咨询回复
+        # 57-114s 的大头即源于此。此处复用 run_agent 预取的 RAG 切片单次调用
+        # 直答;RAG 空弱/直答失败回落 general_query 零规划旁路(finish 终稿
+        # 诚实作答),严防下游把咨询误判成动作形。
+        if is_consult_query(input_text):
+            consult_hit = await run_consult_direct_answer(state, history_msgs)
+            if consult_hit is not None:
+                consult_answer, consult_intents, consult_confidence = consult_hit
+                return await IntentTriageEngine.handle_immediate_bypass(
+                    state,
+                    "rag_consult_direct",
+                    consult_answer,
+                    consult_intents,
+                    "rag_direct",
+                    consult_confidence,
+                    damage_assessment,
+                )
+            consult_intents = [{"intent": AgentIntentType.GENERAL_QUERY, "confidence": 0.9, "type": "primary"}]
+            await IntentTriageEngine.log_intent_to_db(
+                thread_id, input_text, consult_intents, "consult_no_rag", 0.9
+            )
+            return {
+                "intents": consult_intents,
+                "active_domain_role": "chitchat",
+                "short_memory": history_msgs,
+                "damage_assessment": damage_assessment,
+                "global_transitions_count": -1,
+                "tool_errors_count": -1,
+            }
 
         # 🛡️ Step 1.5: 意图与槽位完整性拦截
         try:
@@ -765,6 +799,23 @@ class IntentTriageEngine:
                     parsed[0]["confidence"] if parsed else 0.9,
                     damage_assessment,
                 )
+
+            # 🛣️ 分类器判 consult(规则层漏网的咨询措辞)× RAG 非空 → 直答快轨;
+            # RAG 空弱降级 general_query,免得 planner 对未知咨询意图深度规划失控
+            if parsed and parsed[0].get("intent") == AgentIntentType.CONSULT:
+                consult_hit = await run_consult_direct_answer(state, history_msgs)
+                if consult_hit is not None:
+                    consult_answer, _, consult_confidence = consult_hit
+                    return await IntentTriageEngine.handle_immediate_bypass(
+                        state,
+                        "rag_consult_direct_llm",
+                        consult_answer,
+                        parsed,
+                        "rag_direct",
+                        consult_confidence,
+                        damage_assessment,
+                    )
+                parsed = [{**p, "intent": AgentIntentType.GENERAL_QUERY} for p in parsed]
 
             confidence = parsed[0]["confidence"] if parsed else 0.85
             await IntentTriageEngine.log_intent_to_db(thread_id, input_text, parsed, "structured_llm", confidence)

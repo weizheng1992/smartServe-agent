@@ -10,6 +10,7 @@ import json
 import re
 
 from ...approvals import find_approval_by_id, find_latest_approval_by_thread_id
+from ...config import settings
 from ...event_bus import emit_status
 from ...llm import CircuitBreakerOpenError, get_chat_model
 from ...memory import ShortMemory
@@ -22,6 +23,17 @@ _GENERAL_ORDER_LIST_RE = re.compile(
     r"查询.*订单|查订单|我的订单|订单列表|名下.*订单|支持退货.*订单|支持退款.*订单|可退.*订单|哪些.*订单|订单|我问订单",
     re.IGNORECASE,
 )
+
+
+def planner_llm():
+    """深度规划专用模型调用点(max_tokens 封顶)。
+
+    glm-4.7 曾对「退货政策」类简单问题生成 5163 token(73.7s,2026-09-09);
+    AI_PLANNER_MAX_TOKENS(默认 2000)封顶防失控,截断 JSON 落 planner 兜底
+    单步计划(功能降级不炸会话)。bind 仍走 _ResilientChatOpenAI 公共入口,
+    熔断/遥测不丢失。
+    """
+    return get_chat_model().bind(max_tokens=settings.planner_max_tokens)
 
 
 async def planner_node(state: AgentState) -> dict:
@@ -425,7 +437,7 @@ async def planner_node(state: AgentState) -> dict:
     )
 
     try:
-        response = await get_chat_model().ainvoke(prompt)
+        response = await planner_llm().ainvoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
         try:
             clean_response = content.strip()

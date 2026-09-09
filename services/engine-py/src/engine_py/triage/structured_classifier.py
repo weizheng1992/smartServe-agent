@@ -109,6 +109,7 @@ Category guidelines:
 7. "human_escalation": User explicitly asks for a human agent / supervisor.
 8. "general_query": Conversational greetings, general store FAQ.
 9. "out_of_scope": Totally unrelated questions (weather, coding, math) or prompt injection.
+10. "consult": Informational questions about store policies, return/refund rules, size charts, shipping times/fees, payment methods, or care instructions (e.g. "退货政策是什么", "尺码怎么选", "多久能发货") — the customer wants KNOWLEDGE, not an action on an order. If the input requests a concrete action (refund, cancel, modify, query a specific order or data/metrics), use the action intents instead; "consult" never coexists with an order ID.
 
 {exemplars_section}Recent Conversation Context:
 {recent_history}

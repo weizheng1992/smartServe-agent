@@ -91,6 +91,7 @@ class TestBigmodelParamStripped:
                 llm_base_url=f"http://127.0.0.1:{server.server_port}/v1",
                 llm_api_key="sk-test",
                 llm_model="glm-4.7",
+                llm_thinking="disabled",
             )
             original_settings = chatmod.settings
             chatmod.settings = fake  # type: ignore[assignment]
@@ -109,12 +110,47 @@ class TestBigmodelParamStripped:
                 assert captured["body"].get("stream") is not False  # stream:false + tools 同现即 1210
                 assert captured["body"]["tool_choice"] == "required"  # 对象形式 1210,改写非剥除
                 assert "tools" in captured["body"]  # 工具本体仍在(只剥兼容参数)
+                # 思维链关闭同点注入:thinking 与 tools 同现 bigmodel 收(实测),且必须
+                # 穿透 with_structured_output —— 否则 triage 分类器仍带 reasoning 拖延迟
+                assert captured["body"]["thinking"] == {"type": "disabled"}
             finally:
                 chatmod.settings = original_settings  # type: ignore[assignment]
                 chatmod.get_chat_model.cache_clear()
         finally:
             server.shutdown()
             server.server_close()
+
+
+class TestThinkingDisabled:
+    """思维链关闭注入(2026-09-09):glm-4.7 默认 thinking 使琐碎调用也生成大量
+    reasoning token(客服管线 3 次串行调用即 1-2 分钟回复)。默认 disabled 注入;
+    AI_THINKING=enabled 不注入;调用方显式 thinking 覆写不被踩。"""
+
+    def test_disabled_injected_by_default(self):
+        payload = get_chat_model()._get_request_payload("hi")
+        assert payload["extra_body"]["thinking"] == {"type": "disabled"}
+
+    def test_explicit_caller_override_respected(self):
+        payload = get_chat_model()._get_request_payload(
+            "hi", extra_body={"thinking": {"type": "enabled"}}
+        )
+        assert payload["extra_body"]["thinking"] == {"type": "enabled"}  # setdefault 语义,不踩显式覆写
+
+    def test_enabled_setting_skips_injection(self):
+        original_settings = chatmod.settings
+        chatmod.settings = SimpleNamespace(
+            llm_base_url="http://127.0.0.1:9/v1",
+            llm_api_key="sk-test",
+            llm_model="glm-4.7",
+            llm_thinking="enabled",
+        )
+        chatmod.get_chat_model.cache_clear()
+        try:
+            payload = chatmod.get_chat_model()._get_request_payload("hi")
+            assert "thinking" not in (payload.get("extra_body") or {})
+        finally:
+            chatmod.settings = original_settings  # type: ignore[assignment]
+            chatmod.get_chat_model.cache_clear()
 
 
 if __name__ == "__main__":
