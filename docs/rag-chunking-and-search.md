@@ -73,80 +73,48 @@
 
 ## 5. RAG 知识库更新、替换与删除操作指南 (SOP)
 
-当商家更新了店铺地址、改动了退货政策或发布了新商品保养手册时，按以下 SOP 操作：
+当商家更新了店铺地址、改动了退货政策或发布了新商品保养手册时，按以下 SOP 操作。
+知识源为 `docs/knowledge/` 下的 Markdown 文档（frontmatter 声明 `businessId` 归属租户），
+摄取器为 `services/engine-py/src/engine_py/rag/knowledge_files.py`（TS `updateRag.ts` 已随 TS 后端退役，
+其职责由 Python 侧承接，切片/替换语义保持一致）。
 
-### 5.1 方式一：命令行一键热更新（推荐）
-
-直接运行内置的 RAG 热更新脚本：
+### 5.1 方式一：编辑知识文档 + 重跑种子（推荐）
 
 ```bash
-# 1. 全量扫描并热更新 docs/knowledge/ 目录下的所有 Markdown / TXT 文档
-bun packages/db/src/scripts/update-rag.ts
-
-# 2. 单文件指定替换（例如商家仅更新了 Nike 的文档）
-bun packages/db/src/scripts/update-rag.ts docs/knowledge/nike_store_and_products.md
+# 1. 编辑 docs/knowledge/<tenant>_xxx.md（或新增文档,frontmatter 必须带 businessId）
+# 2. 重跑种子：按 (businessId, 文件名) 整组替换旧切片（管理端人工新增行不受影响）
+bun run db:seed
 ```
 
-### 5.2 方式二：调用代码物理替换全量文件 (`replaceKnowledgeFile`)
+目录位置可用 `RAG_KNOWLEDGE_DIR` 环境变量覆写（容器部署 docs/ 不随包分发时使用）。
 
-适用于后台管理系统（`apps/admin`）收到文件上传或修改请求时：
+### 5.2 方式二：后台管理系统单切片增删
 
-```typescript
-import { replaceKnowledgeFile } from "engine/src/rag/updateRag";
+`apps/admin` 知识库模块走网关 CRUD 路由（`POST/DELETE /api/rag/documents`），
+直接对 `rag_documents` 单行增删，不经过文件摄取管道。
 
-// 物理清空该文件对应的旧切片，并重新执行切片、Contextual Summary 和 Vector 写入
-const insertedChunks = await replaceKnowledgeFile(
-  "docs/knowledge/nike_store_and_products.md",
-  "nike",
-);
-console.log(`成功覆盖更新 ${insertedChunks} 个切片`);
-```
+### 5.3 方式三：空库冷启动自愈
 
-### 5.3 方式三：单切片增量覆盖与更新 (`upsertDocumentChunk`)
+知识表为空时，`ContextualRAG` 首次检索会自动摄取 `docs/knowledge/` 全量文档播种
+（与种子同一数据源）；目录缺失/不可读则回退内置演示切片（`contextual_rag.py` 的 `SEED_DOCS`）。
 
-适用于仅修改某一特定章节或细则的场景：
+### 5.4 上下文摘要说明
 
-```typescript
-import { upsertDocumentChunk } from "engine/src/rag/updateRag";
-
-const chunkId = await upsertDocumentChunk({
-  businessId: "nike",
-  sourceUrl: "nike_store_and_products.md",
-  docTitle: "Nike 淮海中路旗舰店与商品保养指南",
-  headerPath: "门店信息 > 上海淮海中路店",
-  chunkText: "Nike 淮海中路旗舰店最新营业时间调整为：每日 09:30 - 22:30...",
-  category: "store_info",
-});
-```
-
-### 5.4 方式四：已作废文件的物理清除 (`deleteChunksBySource`)
-
-当某份知识文档下架或彻底删除时：
-
-```typescript
-import { deleteChunksBySource } from "engine/src/rag/updateRag";
-
-const deletedCount = await deleteChunksBySource(
-  "nike",
-  "old_discontinued_policy.md",
-);
-console.log(`已成功清理 ${deletedCount} 条物理废弃切片`);
-```
+文件摄取管道的 Contextual Summary 为确定性模板（零 LLM 调用、可重复）：
+`本段切片出自商户 [businessId] 的文档《docTitle》中「headerPath」章节`；
+检索时的 `[Context] … [Content] …` 拼接口径与 §3 一致。
 
 ---
 
 ## 6. 验证与健康治理 (Testing & Vector Maintenance)
 
-1. **运行全套 RAG 测试**：
+1. **运行 RAG 摄取与检索测试**（文件切片/播种幂等/租户隔离/冷启动自愈）：
 
    ```bash
-   bun test packages/engine/tests/ragChunker.test.ts
-   bun test packages/engine/tests/ingestTxtFiles.test.ts
-   bun test packages/engine/tests/updateRag.test.ts
+   cd services/engine-py && uv run pytest tests/test_merchant_rag_knowledge.py
    ```
 
-2. **向量数据库物理自洁**：
-   若因网络闪断导致个别向量变为全零，运行物理自洁脚本修复：
-   ```bash
-   bun packages/db/src/scripts/check-and-clean.ts
-   ```
+2. **向量缺失自愈**：
+   种子播种与冷启动自愈均为"整组替换"语义 —— 若因网络闪断导致个别向量缺失，
+   重跑 `bun run db:seed` 即按文件重切重建；向量化失败的单行会落 NULL（BM25 仍可召回，
+   余弦权重为 0），下次重播种子自动修复。

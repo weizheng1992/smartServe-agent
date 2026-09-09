@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from ..db import RagDocumentRow, get_session
 from ..llm import get_embedding_model
+from .knowledge_files import load_knowledge_chunks
 
 _TOKENIZE_RE = re.compile(r"[a-z0-9]+|[一-龥]")
 
@@ -130,7 +131,8 @@ class ContextualRAG:
         self.business_id = business_id
 
     async def _ensure_seed_data(self) -> None:
-        """知识库为空时自动注入高保真演示数据(与 TS 自愈逻辑一致)。"""
+        """知识库为空时自愈播种:优先摄取 docs/knowledge/*.md(与 db.seed 同源,知识不写死),
+        文件不可用时回退 TS 基线内联演示切片(SEED_DOCS)。"""
         try:
             async with get_session() as session:
                 existing = (
@@ -138,18 +140,40 @@ class ContextualRAG:
                 ).scalar_one_or_none()
                 if existing is not None:
                     return
-                for doc in SEED_DOCS:
-                    combined_text = f"[Context] {doc['contextualSummary']}\n\n[Content] {doc['chunkText']}"
-                    embedding = await get_embedding_model().aembed_query(combined_text)
-                    session.add(
-                        RagDocumentRow(
-                            business_id=doc["businessId"],
-                            chunk_text=doc["chunkText"],
-                            contextual_summary=doc["contextualSummary"],
-                            embedding=json.dumps(embedding),
-                            metadata={"category": doc["category"], "version": "1.0"},
+                rows: list[RagDocumentRow] = []
+                try:
+                    chunks = load_knowledge_chunks()
+                except Exception as files_err:
+                    print(f"[RAG] Knowledge files unreadable, falling back to inline SEED_DOCS: {files_err}")
+                    chunks = []
+                if chunks:
+                    for chunk in chunks:
+                        embedding = await get_embedding_model().aembed_query(chunk.embedding_input())
+                        rows.append(
+                            RagDocumentRow(
+                                business_id=chunk.business_id,
+                                source_url=chunk.source_url,
+                                chunk_text=chunk.chunk_text,
+                                contextual_summary=chunk.contextual_summary(),
+                                embedding=json.dumps(embedding),
+                                metadata=chunk.metadata_dict(),
+                            )
                         )
-                    )
+                else:
+                    print("[RAG] Knowledge dir empty/unreadable, seeding inline SEED_DOCS baseline")
+                    for doc in SEED_DOCS:
+                        combined_text = f"[Context] {doc['contextualSummary']}\n\n[Content] {doc['chunkText']}"
+                        embedding = await get_embedding_model().aembed_query(combined_text)
+                        rows.append(
+                            RagDocumentRow(
+                                business_id=doc["businessId"],
+                                chunk_text=doc["chunkText"],
+                                contextual_summary=doc["contextualSummary"],
+                                embedding=json.dumps(embedding),
+                                metadata={"category": doc["category"], "version": "1.0"},
+                            )
+                        )
+                session.add_all(rows)
                 await session.commit()
         except Exception as err:
             print(f"[RAG] Self-healing seed failed (possibly due to offline/mocked DB): {err}")

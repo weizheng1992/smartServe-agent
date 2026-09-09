@@ -4,6 +4,26 @@
 
 ---
 
+## [2.6.1] - 2026-09-09 (商户 aurora RAG 知识库:docs/knowledge 文档驱动摄取,种子不再写死)
+
+商户门户(极光潮品,businessId `aurora`)此前在 `rag_documents` 无任何切片——商户聊天问退换货/尺码/保养,ContextualRAG 检索恒空,只能靠 LLM 通识硬答。本次补齐知识,且按用户要求**知识不写死在种子里**:文档即数据源,种子与冷启动自愈同源读取 `docs/knowledge/*.md` 切片入库。
+
+### ✨ Features (新功能)
+
+- **知识文档驱动摄取 (`rag/knowledge_files.py`)**:
+  - 承接 TS 退役 `updateRag.ts` 的角色,规格对齐 `docs/rag-chunking-and-search.md` §2:frontmatter(title/businessId/category)声明归属租户(缺 businessId 整份跳过,多租户安全——绝不猜测归属);`#`/`##`/`###` 维护章节路径 headerPath;SOP 有序列表原子不拆;超长章节按空行段落贪心打包(≤500 字符);确定性上下文摘要(Anthropic Contextual Retrieval 形态,零 LLM 调用)。
+  - `docs/knowledge/aurora_store_and_products.md`:极光潮品门店与商品知识指南(售后退换货 7 天无理由/尺码版型/户外面料压胶护理/顺丰物流/门店会员),内容对齐 `merchant_seed` SPU 域数据与售后时效基准(`get_return_window_days` 无租户覆写默认 7 天),知识与技能行为不打架。
+- **种子改为读文件 (`db/seed.py`)**:`_seed_rag_documents` 内联硬编码三元组(2026-09-09 前)退役,改为摄取 `docs/knowledge/` 全部文档(现有 nike/adidas/ecommerce 文档一并纳入,nike=2/adidas=2/ecommerce=2/aurora=5 切片);幂等语义从裸 INSERT(重复 reseed 无限堆行、挤占检索 Top-N)改为按 (business_id, source_url=文件名) 整组替换(TS `replaceKnowledgeFile` 同义),管理端人工新增行不受影响;另一次性清理三条伪 URL 旧行。
+- **冷启动自愈同源 (`rag/contextual_rag.py`)**:`_ensure_seed_data` 空表时优先摄取知识文件(与种子同一数据源),文件缺失/不可读回退 TS 基线内联 SEED_DOCS(原行为不动);切片 metadata 带 docTitle/headerPath,检索与 admin RAG 列表可直接展示。
+
+### ✅ 验证 (Verification,如实)
+
+- 新增 `tests/test_merchant_rag_knowledge.py` 6 用例全绿:解析器(frontmatter/SOP 原子/无归属跳过)+ 播种幂等(双跑行数稳定、伪 URL 旧行清理、人工行保留)+ 检索租户隔离(aurora 只召回 aurora,Nike/Adidas/三里屯/淮海路零泄漏)+ 空表冷启动文件摄取;engine 全量 190 passed;ruff 双服务干净。
+- 真实 embedding 实弹冒烟(dev 库 `db:seed` 后):「冲锋衣怎么洗」→ 户外面料护理(0.669)、「退换货政策」→ 售后退换货(0.667)、「鞋码怎么选」→ 尺码版型(0.713)、「顺丰多久到」→ 物流配送(0.664),语义路由全部命中正确章节且过 0.4 断路阀;双跑 `db:seed` 后按租户行数稳定(nike=2/adidas=2/ecommerce=2/aurora=5),dev 库幂等实证。已供环境重跑 `bun run db:seed` 即生效;知识目录可经 `RAG_KNOWLEDGE_DIR` 覆写。
+- 双轴 code-review(Standards/Spec)收敛修复:种子 DELETE 补租户限定(同名异租户行不得误伤,测试钉死)、chunk→row 组装收敛 `KnowledgeChunk.metadata_dict()`(seed/自愈共用)、知识目录缺失时回退显式播报、`docs/rag-chunking-and-search.md` §5/§6 由退役 TS 脚本 SOP 换为 Python 摄取现实。
+
+---
+
 ## [2.6.0] - 2026-09-09 (商户端多模态 + 破损图商品归属消歧:发破损图自动关联订单)
 
 2.5.0 收官后的两个追加交付(grilling 共识→直接实现):商户悬浮客服接入图片链路;破损图不再机械追问订单号——vision 摘要 × 近单商品行 LLM 消歧,高置信自动关联。期间连带挖出并修复 **bigmodel glm-4.7 结构化调用全量 400** 的管线级缺陷。

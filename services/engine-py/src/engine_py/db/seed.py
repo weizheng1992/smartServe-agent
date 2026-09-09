@@ -15,6 +15,7 @@ import bcrypt
 from sqlalchemy import text
 
 from ..llm import get_embedding_model
+from ..rag.knowledge_files import default_knowledge_dir, load_knowledge_chunks
 from .session import _engine
 
 
@@ -32,6 +33,63 @@ def _seed_password_hash() -> str:
     return bcrypt.hashpw(
         os.environ.get("E2E_ACCOUNT_PASSWORD", "agent-all-dev").encode(), bcrypt.gensalt()
     ).decode()
+
+
+# 2026-09-09 前种子内联硬编码的三条伪 URL 行(租户成对),知识源迁往 docs/knowledge/*.md 后
+# 一次性清理,避免 dev 库残留旧行与新文件切片混入同一检索池。
+_LEGACY_RAG_ROWS = (
+    ("nike", "https://nike.com/policies/refund"),
+    ("adidas", "https://adidas.com/help/shipping"),
+    ("ecommerce", "https://shop.common/terms"),
+)
+
+
+async def _seed_rag_documents(conn) -> None:
+    """RAG 知识库注入:读取 docs/knowledge/*.md 切片入库(入库即向量化)。
+
+    知识内容不写死在种子里 —— 文档即数据源(frontmatter 声明归属租户,见
+    rag/knowledge_files.py);rag_documents 无业务唯一键,重复 reseed 会无限堆行
+    并挤占检索 Top-N,故按 (business_id, source_url=文件名) 整组替换(TS
+    replaceKnowledgeFile 同语义),删除一律带租户限定(多租户不变量 #1),
+    管理端人工新增的文档不受影响。
+    """
+    chunks = load_knowledge_chunks(default_knowledge_dir())
+    if not chunks:
+        print("[PG Seed] 警告:docs/knowledge 无可摄取知识文件,rag_documents 保持原状")
+        return
+
+    for business_id, source_url in _LEGACY_RAG_ROWS:
+        await conn.execute(
+            text("DELETE FROM rag_documents WHERE business_id = :b AND source_url = :u"),
+            {"b": business_id, "u": source_url},
+        )
+
+    for chunk_key in dict.fromkeys((c.business_id, c.source_url) for c in chunks):
+        await conn.execute(
+            text("DELETE FROM rag_documents WHERE business_id = :b AND source_url = :s"),
+            {"b": chunk_key[0], "s": chunk_key[1]},
+        )
+    for chunk in chunks:
+        await conn.execute(
+            text(
+                "INSERT INTO rag_documents "
+                "(business_id, source_url, chunk_text, contextual_summary, metadata, embedding) "
+                "VALUES (:b, :u, :c, :s, CAST(:m AS jsonb), :e)"
+            ),
+            {
+                "b": chunk.business_id,
+                "u": chunk.source_url,
+                "c": chunk.chunk_text,
+                "s": chunk.contextual_summary(),
+                "m": json.dumps(chunk.metadata_dict(), ensure_ascii=False),
+                "e": await _embed(chunk.embedding_input()),
+            },
+        )
+    per_business: dict[str, int] = {}
+    for chunk in chunks:
+        per_business[chunk.business_id] = per_business.get(chunk.business_id, 0) + 1
+    summary = ", ".join(f"{bid}={count}" for bid, count in sorted(per_business.items()))
+    print(f"[PG Seed] rag_documents 注入成功(含向量,按租户: {summary})")
 
 
 async def main() -> None:
@@ -167,45 +225,7 @@ async def main() -> None:
         print("[PG Seed] guardrail_rules / tenant_billing_quotas 注入成功")
 
         # 7. RAG 知识库与长期画像事实(入库即向量化,组装口径与 contextual_rag / long_memory 一致)
-        rag_docs = [
-            (
-                "nike",
-                "https://nike.com/policies/refund",
-                "耐克官方商城支持签收之日起 7 天内无理由退换货。退款将在商品入库质检合格后 48 小时内原路返回。",
-                "耐克退换货时效与退款处理流程",
-                '{"category": "refund_policy", "version": "v2.1"}',
-            ),
-            (
-                "adidas",
-                "https://adidas.com/help/shipping",
-                "阿迪达斯全场订单满 199 元包邮，普通快递 3-5 个工作日送达，顺丰特快支持次日达。",
-                "阿迪达斯物流配送规则与运费说明",
-                '{"category": "shipping_policy", "version": "v1.4"}',
-            ),
-            (
-                "ecommerce",
-                "https://shop.common/terms",
-                "通用电商支持全品类正品保障，非人为损坏提供 15 天免费换货及 1 年质保服务。",
-                "通用电商正品保障与售后服务条款",
-                '{"category": "warranty_policy", "version": "v1.0"}',
-            ),
-        ]
-        for business_id, source_url, chunk_text, summary, metadata_json in rag_docs:
-            await conn.execute(
-                text(
-                    "INSERT INTO rag_documents "
-                    "(business_id, source_url, chunk_text, contextual_summary, metadata, embedding) "
-                    "VALUES (:b, :u, :c, :s, CAST(:m AS jsonb), :e)"
-                ),
-                {
-                    "b": business_id,
-                    "u": source_url,
-                    "c": chunk_text,
-                    "s": summary,
-                    "m": metadata_json,
-                    "e": await _embed(f"[Context] {summary}\n\n[Content] {chunk_text}"),
-                },
-            )
+        await _seed_rag_documents(conn)
         memory_facts = [
             ("u_vip_881", "nike", "tenant", "跑鞋鞋码偏好 42.5 码，通常在周末上午进行半马训练", 0.96, "chat_dialogue_inference", "approved"),
             ("u_user_332", "adidas", "tenant", "偏好三叶草复古休闲系列，对环保再生材质有强烈认同感", 0.88, "explicit_user_statement", "approved"),
@@ -229,7 +249,7 @@ async def main() -> None:
                     "e": await _embed(fact_text),
                 },
             )
-        print("[PG Seed] rag_documents + long_memory_facts 注入成功(含向量)")
+        print("[PG Seed] long_memory_facts 注入成功(含向量)")
 
     await _engine.dispose()
     print("[PG Seed] 种子数据注入完成")
