@@ -223,11 +223,38 @@ class IntentTriageEngine:
         }
 
     @staticmethod
+    def _vision_disambig_due(
+        state: dict,
+        vision_analysis: dict | None,
+        *,
+        after_sale: bool,
+        order_id_resolved: str | None,
+    ) -> bool:
+        """视觉消歧闸门谓词(三浮现点共用收口,工单04 2026-09-10)。
+
+        带图 × 售后意图已浮现 × 全链无单号(文本通道 / 图内 OCR / 已确认
+        targetOrderId 三通道皆无)→ 须过商品归属消歧。此前三站各写一套
+        `and not ...` 链,漏一条即静默漏闸;单号通道判定在此唯一实现。
+        售后意图如何浮现(intentType / 关键词分支 / 结构化 entities)是各站
+        差异所在,由调用方算好经 after_sale 传入;order_id_resolved 传该站
+        已解析到的文本通道单号(与 OCR/上下文通道在此融合判定)。
+        """
+        vision_order_id = str((vision_analysis or {}).get("extractedOrderId") or "").strip()
+        return bool(
+            after_sale
+            and state.get("image_urls")
+            and vision_analysis
+            and not (order_id_resolved or "").strip()
+            and not vision_order_id
+            and not (state.get("order_context") or {}).get("targetOrderId")
+        )
+
+    @staticmethod
     async def _run_vision_disambig(state: dict, vision_analysis: dict, tenant_id: str) -> dict:
         """带图售后缺单号时的商品归属消歧核心(Step 1.6 / Step 2 判定 3 / Step 3
         三个意图浮现点共用,2026-09-09 收口):matched 时注入 targetOrderId 并播报
         订单关联;其余状态原样返回,由调用方经 _vision_disambig_bypass 收口。
-        闸门条件(带图 × 售后意图 × 全链无单号)随各浮现点的单号来源不同留在调用方。"""
+        闸门条件(带图 × 售后意图 × 全链无单号)经 _vision_disambig_due 唯一实现。"""
         disambig = await disambiguate_product(vision_analysis, state.get("user_id"), tenant_id)
         if disambig["status"] == "matched":
             _set_target_order_id(state, disambig["orderId"])
@@ -580,13 +607,11 @@ class IntentTriageEngine:
             #     抽取器只认输入正则与该键,slot_extractor.py:72-82);
             #   多候选/低置信/模型失败 → 商品选择 quick_replies 卡片问用户;
             #   无候选订单 → 明示指引。消歧失败绝不炸会话,最坏多问一次。
-            if (
-                state.get("image_urls")
-                and vision_analysis
-                and task_spec["intentType"] in AFTER_SALE_INTENTS
-                and not task_spec["slots"].get("orderId")
-                and not vision_order_id
-                and not (existing_order_context or {}).get("targetOrderId")
+            if IntentTriageEngine._vision_disambig_due(
+                state,
+                vision_analysis,
+                after_sale=task_spec["intentType"] in AFTER_SALE_INTENTS,
+                order_id_resolved=task_spec["slots"].get("orderId"),
             ):
                 disambig = await IntentTriageEngine._run_vision_disambig(state, vision_analysis, tenant_id)
                 if disambig["status"] == "matched":
@@ -843,11 +868,11 @@ class IntentTriageEngine:
                 # 由 damage_assessment 在此浮现,SlotExtractor 阶段还是 chat —— Step 1.6
                 # 闸门因此永不触发。此处带图缺单号必须同样过消歧,否则为本场景
                 # 造的商品选择卡对典型措辞失效,退回 planner 深规划自由发挥。
-                if (
-                    state.get("image_urls")
-                    and vision_analysis
-                    and not refund_order_id
-                    and not (state.get("order_context") or {}).get("targetOrderId")
+                if IntentTriageEngine._vision_disambig_due(
+                    state,
+                    vision_analysis,
+                    after_sale=True,  # 判定3 分支本身即售后关键词成立
+                    order_id_resolved=refund_order_id,  # 融合单号(文本/上下文/OCR)非空即有主
                 ):
                     disambig = await IntentTriageEngine._run_vision_disambig(state, vision_analysis, tenant_id)
                     if disambig["status"] == "matched":
@@ -1010,13 +1035,11 @@ class IntentTriageEngine:
                 p["intent"] in AFTER_SALE_INTENTS and not p["entities"].get("orderId")
                 for p in parsed
             )
-            if (
-                has_after_sale
-                and after_sale_missing_order
-                and state.get("image_urls")
-                and vision_analysis
-                and not vision_order_id
-                and not (state.get("order_context") or {}).get("targetOrderId")
+            if IntentTriageEngine._vision_disambig_due(
+                state,
+                vision_analysis,
+                after_sale=has_after_sale and after_sale_missing_order,
+                order_id_resolved=None,  # 缺单号已由 after_sale_missing_order 表达(per-intent entities)
             ):
                 disambig = await IntentTriageEngine._run_vision_disambig(
                     state, vision_analysis, active_tenant_id

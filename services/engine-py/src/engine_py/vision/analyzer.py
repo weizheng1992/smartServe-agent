@@ -27,9 +27,10 @@ from pydantic import BaseModel, Field
 
 from ..llm import get_vision_model
 from ..tools_registry.scrubber import scrub_pii_string
+from ..triage.intent_registry import VISION_ORDER_ID_RE  # 图内 OCR 单号正则收口 intent_registry(工单04)
 
 # ---- TS 原版正则,1:1 继承(破损词表按真实措辞扩充,见 docstring) ----
-_ORDER_RE = re.compile(r"\bORD-[A-Za-z0-9_-]+\b", re.IGNORECASE)
+_ORDER_RE = VISION_ORDER_ID_RE
 _TRACKING_RE = re.compile(r"\b(SF|YTO|ZTO|EMS|TRACK)[\w\d]{8,14}\b", re.IGNORECASE)
 # 破损词表:TS 原版 + 开胶/断裂/脱胶(E2E 实测「鞋底开胶断裂」全不命中,
 # LLM 超时降级后连兜底定责都丢——类目真实措辞,补词非契约变更)

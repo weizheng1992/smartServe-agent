@@ -15,10 +15,12 @@ from ...event_bus import emit_status
 from ...llm import CircuitBreakerOpenError, bind_llm_call_node, get_chat_model
 from ...memory import ShortMemory
 from ...tenant import get_merchant_display_name
+from ...triage.intent_registry import (
+    EXPLICIT_ORDER_ID_RE as _EXPLICIT_ORDER_ID_RE,  # 单号正则收口 intent_registry(工单04)
+)
 from ..state import AgentState, build_history_context
 from .utils import extract_order_id
 
-_EXPLICIT_ORDER_ID_RE = re.compile(r"(?:[A-Za-z0-9]+-)*ORD-[A-Za-z0-9_-]+", re.IGNORECASE)
 _GENERAL_ORDER_LIST_RE = re.compile(
     r"查询.*订单|查订单|我的订单|订单列表|名下.*订单|支持退货.*订单|支持退款.*订单|可退.*订单|哪些.*订单|订单|我问订单",
     re.IGNORECASE,

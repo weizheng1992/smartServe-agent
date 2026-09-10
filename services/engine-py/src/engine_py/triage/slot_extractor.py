@@ -11,24 +11,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-
-class AgentIntentType:
-    CHAT = "chat"
-    CART_MANAGE = "cart_manage"
-    SHOPPING_GUIDE = "shopping_guide"
-    ORDER_MODIFY_ADDRESS = "order_modify_address"
-    ORDER_CANCEL = "order_cancel"
-    ORDER_RETURN = "order_return"
-    ORDER_QUERY = "order_query"
-    ORDER_STATUS = "order_status"
-    REFUND = "refund"
-    METRIC_QUERY = "metric_query"
-    HUMAN_ESCALATION = "human_escalation"
-    GENERAL_QUERY = "general_query"
-    # 咨询类(2026-09-09):问店铺知识(政策/尺码/时效等)非动作,走 RAG 直答快轨
-    CONSULT = "consult"
-    OUT_OF_SCOPE = "out_of_scope"
-
+from .intent_registry import (
+    AgentIntentType,
+)
 
 # ---------------------------------------------------------------------------
 # 1. 原子实体提取器

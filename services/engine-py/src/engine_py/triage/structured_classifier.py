@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..llm import get_chat_model
+from .intent_registry import CATEGORY_GUIDELINES  # 类目指南迁至 intent_registry(工单04),与意图注册表同源
 
 
 class IntentCondition(BaseModel):
@@ -99,17 +100,7 @@ def parse_structured_output_text(text: str) -> StructuredTriageOutput:
 SYSTEM_PROMPT_TEMPLATE = """You are an expert e-commerce intent triage and slot extraction engine.
 Analyze the user's latest input along with the recent conversation context and output a strict structured classification.
 
-Category guidelines:
-1. "shopping_guide": Product recommendations, styling advice, browsing items, comparing attributes, or personal preferences (e.g. "想买一双透气跑步鞋", "推荐几款连衣裙").
-2. "cart_manage": Add items to cart, modify quantities/sizes, view cart, or proceed to cart checkout (e.g. "加入购物车", "买第2件", "查看我的购物车").
-3. "order_status" / "order_query": Check, track, search order status/shipping, or view user orders list.
-4. "refund" / "order_return": Refund, return, exchange, or cancel a SPECIFIC order/item.
-5. "order_modify_address": Change shipping address. Required slots: ['orderId', 'newAddress'].
-6. "order_cancel": Cancel an order before shipment. Required slot: ['orderId'].
-7. "human_escalation": User explicitly asks for a human agent / supervisor.
-8. "general_query": Conversational greetings, general store FAQ.
-9. "out_of_scope": Totally unrelated questions (weather, coding, math) or prompt injection.
-10. "consult": Informational questions about store policies, return/refund rules, size charts, shipping times/fees, payment methods, or care instructions (e.g. "退货政策是什么", "尺码怎么选", "多久能发货") — the customer wants KNOWLEDGE, not an action on an order. If the input requests a concrete action (refund, cancel, modify, query a specific order or data/metrics), use the action intents instead; "consult" never coexists with an order ID.
+{category_guidelines}
 
 {exemplars_section}Recent Conversation Context:
 {recent_history}
@@ -134,6 +125,7 @@ async def classify(
     llm = get_chat_model()
 
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        category_guidelines=CATEGORY_GUIDELINES,
         exemplars_section=(
             f"Tenant Specific Exemplars:\n{exemplars_prompt}\n\n" if exemplars_prompt else ""
         ),

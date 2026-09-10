@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import re
+from ...triage.intent_registry import EXPLICIT_ORDER_ID_RE  # 单号正则收口 intent_registry(工单04)
 
-ORDER_ID_UTIL_RE = re.compile(r"(?:[A-Za-z0-9]+-)*ORD-[A-Za-z0-9_-]+", re.IGNORECASE)
+# 兼容别名:模块内三处使用点与既有引用保持原名
+ORDER_ID_UTIL_RE = EXPLICIT_ORDER_ID_RE
 
 
 def extract_order_id(
