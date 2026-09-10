@@ -15,6 +15,7 @@ from pathlib import Path
 
 from engine_py.db import get_session
 from engine_py.event_bus import get_client, read_agent_events
+from engine_py.onboarding import build_entry_cards, resolve_onboarding_config
 from engine_py.run_agent import AgentJobInput, run_agent
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -152,17 +153,64 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
     }
 
 
+def _greeting_row(
+    thread_id: str,
+    business_id: str,
+    user_id: str,
+    message_id: str,
+    content: str,
+    cards: list | None = None,
+) -> dict:
+    """首访 welcome 行与回访 greet 行的共形载荷(仅 cards 有无之差)。"""
+    row = {
+        "threadId": thread_id,
+        "businessId": business_id,
+        "userId": user_id,
+        "id": message_id,
+        "role": "assistant",
+        "content": content,
+    }
+    if cards:
+        row["cards"] = cards
+    return row
+
+
 class CreateThreadIn(BaseModel):
     threadId: str | None = None
     userId: str | None = None
     businessId: str | None = None
 
 
+@router.get("/threads")
+async def list_chat_threads(
+    userId: str = Query(...),
+    businessId: str | None = Query(None),
+):
+    """终端顾客会话列表(new-user-onboarding B,路由计数 42→43)。
+
+    TS 基线无此路由,web 侧栏 fetchThreads 长期吞 404 恒空 —— 同一个缺口
+    也挡住了服务端权威首访判定。契约:必填 ``userId``(严格属主等值过滤,
+    防跨用户泄漏),可选 ``businessId`` 收窄,``updated_at DESC``;服务端
+    固定封顶 50,不对客户端开放翻页参数。
+    """
+    threads = await conversation_repo.list_user_threads(
+        user_id=userId,
+        business_id=businessId,
+        limit=50,
+    )
+    return {"success": True, "threads": threads}
+
+
 @router.post("/threads")
 async def create_chat_thread(body: CreateThreadIn, request: Request):
     """建线程(web「开启新一轮对话」前置)。TS 基线服务端缺失此路由,前端
     静默吞 404 导致按钮长期失效 —— wayfinder 004 E2E 钉出后补齐。幂等可重放;
-    同 id 异主(他租户/他用户)冲突返回 409,绝不回显他人线程元数据。"""
+    同 id 异主(他租户/他用户)冲突返回 409,绝不回显他人线程元数据。
+
+    new-user-onboarding C:新建线程即落引导 assistant 行 —— 该用户在该租户的
+    首线程给全量引导(welcomeText + 能力入口 quick_replies 卡),回访新线程给
+    一行轻问候;消息 id 确定性(``welcome_/greet_ + threadId``)+ 仅真新建时写,
+    幂等重放零重复。"""
     thread_id = body.threadId or _generate_thread_id()
     tenant_header = request.headers.get("x-tenant-id") or request.headers.get("x-business-id")
     business_id = (body.businessId or tenant_header or "ecommerce").lower().strip()
@@ -173,6 +221,43 @@ async def create_chat_thread(body: CreateThreadIn, request: Request):
     )
     if thread is None:
         raise HTTPException(409, "Thread ID conflicts with an existing thread under another owner")
+
+    if thread.get("created"):
+        # 引导行必须归属真实用户:首访判定按 user×tenant,匿名线程(body
+        # 与既有行皆无 userId)无从判定,不落引导行、不冒认演示账号身份。
+        effective_user_id = body.userId or thread.get("userId")
+        if effective_user_id:
+            prior_threads = await conversation_repo.list_user_threads(
+                user_id=effective_user_id, business_id=business_id, limit=2
+            )
+            is_first_thread = len(prior_threads) <= 1  # 仅本次新建的这一条
+            try:
+                onboarding = await resolve_onboarding_config(business_id)
+                if is_first_thread:
+                    await conversation_repo.append_message(
+                        _greeting_row(
+                            thread_id,
+                            business_id,
+                            effective_user_id,
+                            f"welcome_{thread_id}",  # 确定性 id:重放天然幂等
+                            onboarding["welcomeText"],
+                            cards=build_entry_cards(onboarding),
+                        )
+                    )
+                else:
+                    await conversation_repo.append_message(
+                        _greeting_row(
+                            thread_id,
+                            business_id,
+                            effective_user_id,
+                            f"greet_{thread_id}",
+                            onboarding["returningGreeting"],
+                        )
+                    )
+            except Exception as greet_err:
+                # 引导行失败不阻断建线程主契约(线程已建好,聊天照常可用)
+                print(f"[ChatThreads] Failed to persist onboarding greeting for {thread_id}: {greet_err}")
+
     return {"success": True, "thread": thread}
 
 

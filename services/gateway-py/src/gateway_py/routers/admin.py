@@ -8,6 +8,7 @@ import math
 
 from engine_py.approvals import ApprovalGatekeeper
 from engine_py.db import RagDocumentRow, get_session
+from engine_py.onboarding import validate_onboarding_config
 from engine_py.rag import ContextualRAG
 from engine_py.skills import SkillRegistry
 from engine_py.tenant_config import get_tenant_config, invalidate_cache, update_tenant_skill_config
@@ -52,7 +53,7 @@ async def tenant_list():
                 (
                     await session.execute(
                         text(
-                            "SELECT t.business_id, t.name, t.status, t.industry, t.created_at, tc.spi_config, tc.skills_config "
+                            "SELECT t.business_id, t.name, t.status, t.industry, t.created_at, tc.spi_config, tc.skills_config, tc.onboarding_config "
                             "FROM tenants t LEFT JOIN tenant_configs tc ON LOWER(t.business_id) = LOWER(tc.business_id) "
                             "ORDER BY t.created_at DESC"
                         )
@@ -84,6 +85,11 @@ async def tenant_list():
                         "webhookUrl": spi.get("spiBaseUrl") or "http://localhost:3005",
                         "status": row["status"] or "active",
                         "createdAt": row["created_at"].isoformat().split("T")[0] if row["created_at"] else "2026-01-01",
+                        # 编辑面回读(new-user-onboarding E):无配置租户回 None,
+                        # 前端 JSON 文本域以「未配置」态呈现而非伪造默认值
+                        "onboardingConfig": (
+                            row["onboarding_config"] if isinstance(row["onboarding_config"], dict) else None
+                        ),
                     }
                 )
             return {"success": True, "tenants": tenants}
@@ -112,6 +118,9 @@ class TenantUpdateIn(BaseModel):
     apiKey: str | None = None
     refundLimit: int | None = None
     industry: str | None = None
+    # 新用户引导配置(new-user-onboarding E):完整 JSON 文档,提供即整体覆写
+    # (部分字段回落是 resolve_onboarding_config 读取侧的职责),服务端 schema 校验
+    onboardingConfig: dict | None = None
 
 
 @router.post("/api/tenant")
@@ -181,6 +190,13 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
     if not body.name:
         raise HTTPException(400, "Tenant Name is required")
 
+    # 服务端 schema 校验(new-user-onboarding E):JSON 手编错形必须诚实失败,
+    # 而非落库后在首访欢迎/引擎旁路两处静默回落平台默认
+    if body.onboardingConfig is not None:
+        onboarding_errors = validate_onboarding_config(body.onboardingConfig)
+        if onboarding_errors:
+            raise HTTPException(400, f"onboardingConfig 校验失败: {'; '.join(onboarding_errors)}")
+
     async with get_session() as session:
         existing = (
             await session.execute(
@@ -201,7 +217,8 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
         cfg_row = (
             await session.execute(
                 text(
-                    "SELECT id, spi_config, skills_config FROM tenant_configs WHERE LOWER(business_id) = :bid LIMIT 1"
+                    "SELECT id, spi_config, skills_config, onboarding_config FROM tenant_configs "
+                    "WHERE LOWER(business_id) = :bid LIMIT 1"
                 ).bindparams(bid=clean_id)
             )
         ).mappings().first()
@@ -219,20 +236,32 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
             refund_cfg["enabled"] = refund_cfg.get("enabled", True)
             refund_cfg["approvalThresholdAmount"] = body.refundLimit
             skills["skill_order_refund"] = refund_cfg
+        # onboarding_config:请求携带即整体覆写(完整 schema 文档),未携带保留既有
+        onboarding = (
+            dict(body.onboardingConfig)
+            if body.onboardingConfig is not None
+            else (dict(cfg_row["onboarding_config"]) if isinstance(cfg_row and cfg_row["onboarding_config"], dict) else None)
+        )
 
         if cfg_row:
             await session.execute(
                 text(
                     "UPDATE tenant_configs SET spi_config = CAST(:spi AS jsonb), skills_config = CAST(:skills AS jsonb), "
-                    "updated_at = NOW() WHERE id = :cid"
-                ).bindparams(spi=json.dumps(spi), skills=json.dumps(skills), cid=cfg_row["id"])
+                    "onboarding_config = CAST(:onboarding AS jsonb), updated_at = NOW() WHERE id = :cid"
+                ).bindparams(
+                    spi=json.dumps(spi),
+                    skills=json.dumps(skills),
+                    onboarding=json.dumps(onboarding) if onboarding is not None else None,
+                    cid=cfg_row["id"],
+                )
             )
         else:
             await session.execute(
                 text(
                     "INSERT INTO tenant_configs (business_id, system_prompt, welcome_message, status, version, "
-                    "spi_config, enabled_skills, skills_config) "
-                    "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), CAST(:skills AS jsonb))"
+                    "spi_config, enabled_skills, skills_config, onboarding_config) "
+                    "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), "
+                    "CAST(:skills AS jsonb), CAST(:onboarding AS jsonb))"
                 ).bindparams(
                     bid=clean_id,
                     prompt=f"You are the official AI Customer Support Agent for {body.name}.",
@@ -242,6 +271,7 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
                         ["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]
                     ),
                     skills=json.dumps(skills),
+                    onboarding=json.dumps(onboarding) if onboarding is not None else None,
                 )
             )
         await session.commit()

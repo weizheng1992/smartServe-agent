@@ -104,12 +104,12 @@ def test_主链不写用户行_仅落assistant(monkeypatch):
 
 
 def test_问候旁路同样不写用户行(monkeypatch):
-    """极速问候旁路(_is_quick_greeting)与主链同规:不插用户行,问候
+    """极速问候旁路(is_quick_greeting)与主链同规:不插用户行,问候
     assistant 行照常落库。"""
     thread_id = "dbg_thread_user_single_greet"
     result = _run(monkeypatch, thread_id, "你好")
 
-    assert "智能客服助理" in result["output"]
+    assert "智能客服小助手" in result["output"]
     roles = asyncio.run(_fetch_roles(thread_id))
     assert roles.count("user") == 0
     assert roles.count("assistant") == 1

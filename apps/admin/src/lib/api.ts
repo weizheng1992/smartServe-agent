@@ -217,6 +217,7 @@ export const tenantsApi = {
       apiKey?: string;
       refundLimit?: number;
       industry?: string;
+      onboardingConfig?: Record<string, any> | null;
     },
   ) => {
     return adminApi.put(`/api/tenant/${id}`, body);

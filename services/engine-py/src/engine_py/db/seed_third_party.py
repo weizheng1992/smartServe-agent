@@ -87,7 +87,7 @@ ON CONFLICT (business_id) DO UPDATE SET
   name = EXCLUDED.name,
   status = EXCLUDED.status;
 
-INSERT INTO tenant_configs (id, business_id, system_prompt, welcome_message, status, version, spi_config, enabled_skills)
+INSERT INTO tenant_configs (id, business_id, system_prompt, welcome_message, status, version, spi_config, enabled_skills, onboarding_config)
 VALUES (
   'b0000000-0000-0000-0000-000000000001',
   'aurora',
@@ -96,11 +96,23 @@ VALUES (
   'published',
   1,
   '{"mode": "remote_spi", "spiBaseUrl": "http://localhost:3005", "apiSecret": "aurora_secret_key_8899", "timeoutMs": 5000}'::jsonb,
-  '["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]'::jsonb
+  '["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]'::jsonb,
+  '{
+    "welcomeText": "您好！欢迎来到 {brand} 👋 我是极光小助手，可以帮您：\\n1. 查订单、改收货地址\\n2. 办退款与售后\\n3. 推荐与查询商品\\n\\n点击下方快捷入口，或直接说出您的需求～",
+    "returningGreeting": "欢迎回来 {brand}！查订单还是办售后，直接告诉小助手～",
+    "quickRepliesTitle": "您可以直接选择：",
+    "quickReplies": [
+      {"label": "📦 查询订单物流", "action": "send_message", "payload": {"text": "帮我查一下最新的订单物流进度"}},
+      {"label": "📍 修改收货地址", "action": "send_message", "payload": {"text": "我想修改收货地址"}},
+      {"label": "💰 申请退款售后", "action": "send_message", "payload": {"text": "我想申请退款"}},
+      {"label": "🎧 转人工客服", "action": "send_message", "payload": {"text": "转人工"}}
+    ]
+  }'::jsonb
 )
 ON CONFLICT (id) DO UPDATE SET
   spi_config = EXCLUDED.spi_config,
-  system_prompt = EXCLUDED.system_prompt;
+  system_prompt = EXCLUDED.system_prompt,
+  onboarding_config = EXCLUDED.onboarding_config;
 """
 
 _PRODUCTS = [

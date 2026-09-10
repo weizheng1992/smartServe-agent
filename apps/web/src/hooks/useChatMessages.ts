@@ -4,13 +4,6 @@ import { AgentStreamClient } from '../lib/agentStreamClient';
 import { translateTaskPlan } from '../lib/translateTaskPlan';
 import type { Message, UserSession } from './types';
 
-export const DEFAULT_ASSISTANT_MESSAGE: Message = {
-  id: 'default_welcome',
-  role: 'assistant',
-  content:
-    '您好！我是您的高级智能电商客服助理。基于 LangGraph 决策图、智能执行流以及多维度记忆系统，我能帮您自动化处理订单查询、快捷退款、库存核验或网页截图看板分析。今天有什么我可以帮您的？',
-};
-
 interface UseChatMessagesProps {
   currentUser: UserSession | null;
   activeThreadId: string;
@@ -19,7 +12,9 @@ interface UseChatMessagesProps {
 }
 
 export function useChatMessages({ currentUser, activeThreadId, activeBusinessId, fetchThreads }: UseChatMessagesProps) {
-  const [messages, setMessages] = useState<Message[]>([DEFAULT_ASSISTANT_MESSAGE]);
+  // 欢迎语服务端权威(new-user-onboarding F):建线程时网关已按租户 onboarding_config
+  // 落 welcome assistant 行(带入口卡),前端不再本地伪造默认欢迎语
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activePlan, setActivePlan] = useState<TaskPlan | null>(null);
@@ -46,7 +41,8 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
         return;
       }
       if (data.success && Array.isArray(data.messages)) {
-        const fullMessages: Message[] = data.messages.length > 0 ? data.messages : [DEFAULT_ASSISTANT_MESSAGE];
+        // 空历史即空时间线:welcome 行由建线程服务端写入,此处不再伪造兜底欢迎语
+        const fullMessages: Message[] = data.messages;
 
         setMessages((prev) => {
           // 如果用户已经切换了会话，立即忽略
@@ -76,8 +72,9 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
     setCurrentStepText('');
     setIsSubmitting(false);
 
-    // 🚀 切换或新建会话时，立即先重置界面消息为初始欢迎语，彻底消除旧会话视觉残留与历史穿透
-    setMessages([DEFAULT_ASSISTANT_MESSAGE]);
+    // 🚀 切换或新建会话时，立即先清空界面消息,彻底消除旧会话视觉残留与历史穿透;
+    // 欢迎行随 loadHistory 从服务端恢复(建线程时已落库)
+    setMessages([]);
 
     if (activeThreadId) {
       loadHistory(activeThreadId);

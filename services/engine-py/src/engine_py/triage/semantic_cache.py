@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
-import re
 
 from ..llm import get_embedding_model
+from .rule_matchers import normalize_greeting_input
 
 DEFAULT_ANCHOR_PHRASES: dict[str, list[str]] = {
     "order_status": [
@@ -133,5 +133,9 @@ def add_query_to_semantic_cache(business_id: str, query: str, reply: str, vector
 
 
 def strip_punctuation_for_greeting(user_input: str) -> str:
-    """镜像 triage 主流程的 cleanInput 规整:去标点与空白后小写。"""
-    return re.sub(r"[，。！？,.!?\s]", "", user_input.lower())
+    """镜像 triage 主流程的 cleanInput 规整:去标点与空白后小写。
+
+    实现统一委托 ``rule_matchers.normalize_greeting_input``(与
+    ``is_quick_greeting`` 同一规整口径,单一来源)。
+    """
+    return normalize_greeting_input(user_input)

@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Input, Label } from 'ui';
+import { Input, Label, Textarea } from 'ui';
 import { FormModal } from '../../../components/crud';
 import type { TenantRecord } from '../types';
 
@@ -89,6 +89,24 @@ export function TenantFormModal({ isOpen, onClose, onSubmit, isCreate, formData,
             className="w-full h-8 text-xs bg-slate-50 border-slate-200 font-mono"
           />
         </div>
+        {!isCreate && (
+          <div>
+            <Label className="block text-xs font-semibold text-slate-700 mb-1">
+              新用户引导配置 (onboardingConfig,JSON)
+            </Label>
+            <p className="text-[11px] text-slate-400 mb-1.5">
+              首访欢迎语 / 回访轻问候 / 快捷入口按钮。留空 = 不修改既有配置;填 {'{}'}
+              可重置为平台默认(品牌名自动渲染 {'{brand}'} 占位符)。保存时服务端校验 schema,错形将整体拒绝。
+            </p>
+            <Textarea
+              value={formData.onboardingConfigJson || ''}
+              onChange={(e) => setFormData({ ...formData, onboardingConfigJson: e.target.value })}
+              placeholder='{"welcomeText": "您好！我是 {brand} 的智能客服小助手...", "quickReplies": [...]}'
+              className="w-full min-h-40 text-xs bg-slate-50 border-slate-200 font-mono leading-relaxed"
+              spellCheck={false}
+            />
+          </div>
+        )}
       </div>
     </FormModal>
   );

@@ -16,8 +16,9 @@ from ..db import IntentLog, LowConfidenceLog, get_session
 from ..event_bus import emit_job_result, emit_status
 from ..llm import CircuitBreakerOpenError
 from ..memory import ShortMemory, TaskMemory
+from ..onboarding import build_entry_cards, resolve_onboarding_config
 from ..skills import is_action_query
-from ..tenant import get_merchant_display_name, sanitize_tenant_response, tenant_of_state
+from ..tenant import sanitize_tenant_response, tenant_of_state
 from ..vision import analyze_images
 from . import rule_matchers
 from .consult_fast_path import (
@@ -451,19 +452,20 @@ class IntentTriageEngine:
         # 🛡️ Step 1: 规则白名单
         clean_input = strip_punctuation_for_greeting(input_text)
         tenant_id = tenant_of_state(state)
-        brand_name = get_merchant_display_name(tenant_id)
 
         if rule_matchers.is_greeting(clean_input):
-            reply = (
-                f"您好！我是 {brand_name} 的智能客服助理。✨\n\n"
-                "我能为您提供以下高效率的自动化业务操作：\n"
-                '1. **订单物流查询**：例如 *"帮我查一下 ORD-98712 的发货状态"*\n'
-                '2. **快捷退款办理**：例如 *"帮我申请退款"*\n'
-                '3. **网页看板快照**：例如 *"帮我截取系统首页进行界面圆角核验"*\n\n'
-                "请告诉我您需要处理的业务，我将直接为您调起系统底层工具为您搞定！"
-            )
+            # 同源改造(new-user-onboarding D):罐头回复消费租户 onboarding_config
+            # (与建线程欢迎行/引擎极速旁路同一份),入口卡一并下发;零 LLM 与
+            # 仲裁留痕口径不变(rule_greeting 路由键、candidates 记录)。
+            onboarding = await resolve_onboarding_config(tenant_id)
             return await IntentTriageEngine.handle_immediate_bypass(
-                state, "rule_greeting", reply, [{"intent": "general_query", "confidence": 1.0}], "rule", 1.0
+                state,
+                "rule_greeting",
+                onboarding["welcomeText"],
+                [{"intent": "general_query", "confidence": 1.0}],
+                "rule",
+                1.0,
+                cards=build_entry_cards(onboarding),
             )
 
         if rule_matchers.is_exit_command(clean_input):

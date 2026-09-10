@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import importlib
 import random
+from typing import ClassVar
 
 import pytest
 
@@ -101,6 +102,87 @@ class TestTenant:
         assert ghost_res.status_code == 404
 
         await client.delete(f"/api/tenant/{ut_id}")
+
+
+class TestTenantOnboardingConfig:
+    """租户引导配置编辑面契约(new-user-onboarding E)。
+
+    PUT /api/tenant/{id} 收 onboardingConfig 完整 JSON 文档:服务端 schema 校验
+    (engine_py.onboarding.validate_onboarding_config 单一来源)—— JSON 手编错形
+    400 诚实失败;合法即整体覆写落 tenant_configs.onboarding_config,未携带
+    保留既有(合并式);GET /api/tenant/list 回读供编辑面预填。"""
+
+    VALID_ONBOARDING: ClassVar[dict] = {
+        "welcomeText": "您好！我是契约测试租户的智能客服 🎉",
+        "returningGreeting": "欢迎回来！请问这次需要帮您什么？",
+        "quickRepliesTitle": "您可以直接选择：",
+        "quickReplies": [
+            {"label": "查订单", "action": "send_message", "payload": {"text": "帮我查订单物流"}},
+            {"label": "🎧 转人工", "action": "send_message", "payload": {"text": "转人工"}},
+        ],
+    }
+
+    async def test_valid_onboarding_config_write_and_readback(self, client, contract_fixtures):
+        ot_id = f"ot_{_TS}"
+        create_res = await client.post("/api/tenant", json={"id": ot_id, "name": "引导配置测试租户"})
+        assert create_res.status_code in (200, 201)
+
+        upd_res = await client.put(
+            f"/api/tenant/{ot_id}",
+            json={"name": "引导配置测试租户", "onboardingConfig": self.VALID_ONBOARDING},
+        )
+        assert upd_res.status_code == 200
+        assert upd_res.json()["success"] is True
+
+        # 列表回读:编辑面预填取到的是刚写入的真实配置,非伪造默认
+        list_res = await client.get("/api/tenant/list")
+        row = next((t for t in list_res.json()["tenants"] if t["id"] == ot_id), None)
+        assert row is not None
+        assert row["onboardingConfig"] == self.VALID_ONBOARDING
+
+        await client.delete(f"/api/tenant/{ot_id}")
+
+    async def test_unknown_top_level_key_rejected_400(self, client, contract_fixtures):
+        ot_id = f"ot2_{_TS}"
+        await client.post("/api/tenant", json={"id": ot_id, "name": "引导校验测试租户"})
+
+        bad = {**self.VALID_ONBOARDING, "welcomText": "未知键错形"}
+        res = await client.put(f"/api/tenant/{ot_id}", json={"name": "引导校验测试租户", "onboardingConfig": bad})
+        assert res.status_code == 400
+        # FastAPI HTTPException 序列化为 detail;错误信息须点名具体错形供编辑面展示
+        assert "onboardingConfig" in res.json()["detail"]
+
+        await client.delete(f"/api/tenant/{ot_id}")
+
+    async def test_button_shape_error_rejected_400(self, client, contract_fixtures):
+        ot_id = f"ot3_{_TS}"
+        await client.post("/api/tenant", json={"id": ot_id, "name": "引导按钮校验租户"})
+
+        bad = {**self.VALID_ONBOARDING, "quickReplies": [{"label": "缺 action 与 payload"}]}
+        res = await client.put(f"/api/tenant/{ot_id}", json={"name": "引导按钮校验租户", "onboardingConfig": bad})
+        assert res.status_code == 400
+        assert "quickReplies" in res.json()["detail"]
+
+        await client.delete(f"/api/tenant/{ot_id}")
+
+    async def test_update_without_onboarding_preserves_existing(self, client, contract_fixtures):
+        """合并式语义:不带 onboardingConfig 的常规更新(改名/阈值)不得清空既有引导配置。"""
+        ot_id = f"ot4_{_TS}"
+        await client.post("/api/tenant", json={"id": ot_id, "name": "引导保留测试租户"})
+        await client.put(
+            f"/api/tenant/{ot_id}", json={"name": "引导保留测试租户", "onboardingConfig": self.VALID_ONBOARDING}
+        )
+
+        plain_res = await client.put(f"/api/tenant/{ot_id}", json={"name": "引导保留测试租户V2", "refundLimit": 888})
+        assert plain_res.status_code == 200
+
+        list_res = await client.get("/api/tenant/list")
+        row = next((t for t in list_res.json()["tenants"] if t["id"] == ot_id), None)
+        assert row["name"] == "引导保留测试租户V2"
+        assert row["refundLimit"] == 888
+        assert row["onboardingConfig"] == self.VALID_ONBOARDING  # 未携带 → 保留
+
+        await client.delete(f"/api/tenant/{ot_id}")
 
 
 class TestMerchantTenantGate:
@@ -406,6 +488,143 @@ class TestChatThreads:
         )
         assert cross_user.status_code == 409
         assert "CUST-E2E-OWNER" not in cross_user.text
+
+
+class TestChatThreadsList:
+    """GET /api/chat/threads(new-user-onboarding B,路由计数 42→43)。
+
+    TS 基线无此路由,web 侧栏 fetchThreads 长期吞 404 恒空;同一缺口也
+    挡住服务端权威首访判定。契约:必填 userId(严格属主等值过滤)、可选
+    businessId 收窄、updated_at DESC、上限 50、形状对齐 web ChatThread。
+    """
+
+    async def test_list_returns_user_threads_recent_first(self, client, contract_fixtures):
+        uid = "CUST-E2E-LIST-1"
+        await client.post("/api/chat/threads", json={"userId": uid, "threadId": "thread_list_a", "businessId": "nike"})
+        await client.post("/api/chat/threads", json={"userId": uid, "threadId": "thread_list_b", "businessId": "nike"})
+        res = await client.get("/api/chat/threads", params={"userId": uid})
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        ids = [t["id"] for t in body["threads"]]
+        assert "thread_list_a" in ids and "thread_list_b" in ids
+        assert ids.index("thread_list_b") < ids.index("thread_list_a")  # 最近活跃在前
+        item = body["threads"][0]
+        assert set(item) >= {"id", "userId", "businessId", "status", "createdAt", "updatedAt"}
+        assert item["businessId"] == "nike"
+        # 最后一条消息摘要:建线程即落引导 assistant 行,列表可见轻摘要
+        assert item["lastMessageRole"] == "assistant"
+        assert item["lastMessageSnippet"]
+        assert item["lastMessageTime"]
+
+    async def test_list_requires_user_id(self, client, contract_fixtures):
+        res = await client.get("/api/chat/threads")
+        assert res.status_code == 422  # FastAPI 必填查询参缺省
+
+    async def test_list_owner_scoped_no_cross_user_leak(self, client, contract_fixtures):
+        """他人线程绝不出现:严格 user_id 等值,不做 thread-id 模糊兜底。"""
+        await client.post(
+            "/api/chat/threads",
+            json={"userId": "CUST-E2E-LIST-OTHER", "threadId": "thread_list_other", "businessId": "nike"},
+        )
+        res = await client.get("/api/chat/threads", params={"userId": "CUST-E2E-LIST-2"})
+        body = res.json()
+        assert body["success"] is True
+        assert body["threads"] == []
+        assert "thread_list_other" not in res.text
+
+    async def test_list_business_filter_narrows(self, client, contract_fixtures):
+        uid = "CUST-E2E-LIST-3"
+        await client.post("/api/chat/threads", json={"userId": uid, "threadId": "thread_list_nike", "businessId": "nike"})
+        await client.post(
+            "/api/chat/threads", json={"userId": uid, "threadId": "thread_list_adidas", "businessId": "adidas"}
+        )
+        res = await client.get("/api/chat/threads", params={"userId": uid, "businessId": "adidas"})
+        ids = [t["id"] for t in res.json()["threads"]]
+        assert "thread_list_adidas" in ids
+        assert "thread_list_nike" not in ids
+
+
+class TestThreadOnboardingLifecycle:
+    """POST /threads 引导行生命周期(new-user-onboarding C)。
+
+    首线程全量引导(welcomeText + quick_replies 入口卡)、回访新线程一行
+    轻问候、幂等重放零重复;welcome 行是网关写入 assistant 行的**特批例外**
+    (既有所有权:assistant 行归引擎)—— 特例仅限建线程时引导行,聊天回复
+    仍归引擎。
+    """
+
+    async def _messages_of(self, client, thread_id: str) -> list[dict]:
+        res = await client.get("/api/chat/messages", params={"threadId": thread_id})
+        return res.json()["messages"]
+
+    async def test_first_thread_full_onboarding_with_entry_card(self, client, contract_fixtures):
+        uid = "CUST-E2E-ONB-1"
+        res = await client.post(
+            "/api/chat/threads", json={"userId": uid, "threadId": "thread_onb_first", "businessId": "nike"}
+        )
+        assert res.status_code == 200
+        messages = await self._messages_of(client, "thread_onb_first")
+        assert len(messages) == 1
+        welcome = messages[0]
+        assert welcome["role"] == "assistant"
+        # 契约夹具无 onboarding_config 行 → 平台默认文案,品牌按 tenants.name 渲染
+        assert "Nike 官方旗舰店" in welcome["content"]
+        assert "智能客服" in welcome["content"]
+        cards = welcome["cards"] or []
+        assert cards and cards[0]["type"] == "quick_replies"
+        options = cards[0]["data"]["options"]
+        assert 3 <= len(options) <= 5  # 调研甜点区
+        assert "转人工" in options[-1]["label"]  # 转人工固定末位
+        for opt in options:
+            assert opt["action"] in {"send_message", "trigger_upload"}
+
+    async def test_idempotent_replay_no_duplicate_welcome(self, client, contract_fixtures):
+        payload = {"userId": "CUST-E2E-ONB-2", "threadId": "thread_onb_replay", "businessId": "nike"}
+        await client.post("/api/chat/threads", json=payload)
+        await client.post("/api/chat/threads", json=payload)
+        messages = await self._messages_of(client, "thread_onb_replay")
+        assert len(messages) == 1  # 确定性消息 id + created 旗标双保险
+
+    async def test_returning_new_thread_gets_light_greeting_only(self, client, contract_fixtures):
+        uid = "CUST-E2E-ONB-3"
+        await client.post("/api/chat/threads", json={"userId": uid, "threadId": "thread_onb_r1", "businessId": "nike"})
+        await client.post("/api/chat/threads", json={"userId": uid, "threadId": "thread_onb_r2", "businessId": "nike"})
+        messages = await self._messages_of(client, "thread_onb_r2")
+        assert len(messages) == 1
+        greeting = messages[0]
+        assert greeting["role"] == "assistant"
+        assert "欢迎回来" in greeting["content"]
+        assert len(greeting["content"]) < 80  # 一行轻问候,非全量引导
+        assert not greeting.get("cards")
+
+    async def test_first_visit_per_tenant_independent(self, client, contract_fixtures):
+        """首访判定按 (user, tenant) 组合:用户在 nike 已有线程,换 adidas 开
+        新线程仍是该租户首访 → 全量引导。"""
+        uid = "CUST-E2E-ONB-4"
+        await client.post("/api/chat/threads", json={"userId": uid, "threadId": "thread_onb_t_nike", "businessId": "nike"})
+        await client.post(
+            "/api/chat/threads", json={"userId": uid, "threadId": "thread_onb_t_adidas", "businessId": "adidas"}
+        )
+        messages = await self._messages_of(client, "thread_onb_t_adidas")
+        assert len(messages) == 1
+        cards = messages[0]["cards"] or []
+        assert cards and cards[0]["type"] == "quick_replies"  # 全量引导,非轻问候
+
+    async def test_greeting_failure_does_not_block_thread_creation(self, client, contract_fixtures, monkeypatch):
+        """引导配置解析炸了也不阻断建线程主契约:线程照建(200),零消息行,
+        聊天照常可用(建线程永远成功优先)。"""
+
+        async def _boom(business_id: str = "ecommerce"):
+            raise RuntimeError("onboarding config db down")
+
+        monkeypatch.setattr("gateway_py.routers.chat.resolve_onboarding_config", _boom)
+        res = await client.post(
+            "/api/chat/threads", json={"userId": "CUST-E2E-ONB-5", "threadId": "thread_onb_fail", "businessId": "nike"}
+        )
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+        assert await self._messages_of(client, "thread_onb_fail") == []
 
 
 class TestChatUpload:

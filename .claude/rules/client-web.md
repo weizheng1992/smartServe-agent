@@ -14,6 +14,7 @@ paths: ["apps/web/**/*"]
 - **流式事件总线**：通过 Server-Sent Events (SSE) 接收服务端事件（`token`, `card`, `step_progress`, `takeover_status`, `error`, `done`）。
 - **打字机平滑渲染**：文本 Token 实时追加并平滑滚动，避免大段闪烁。
 - **自愈式会话恢复**：页面刷新或网络重连时，通过 `threadId` 自动同步加载历史消息与当前执行状态。
+- **欢迎语服务端权威（new-user-onboarding F，2026-09-10）**：`DEFAULT_ASSISTANT_MESSAGE` 前端本地伪造欢迎语已退役——`useChatMessages` 初始/切换/空历史一律空时间线,welcome 行（含 quick_replies 入口卡）由网关建线程时按租户 `onboarding_config` 落库,前端经 `loadHistory` 恢复真实欢迎语与入口卡（RichCardRenderer 渲染,`CARD_ACTION_HANDLERS.send_message` 发送 `payload.text`）。侧栏会话列表走 `GET /api/chat/threads?userId=`（严格按 userId 归属,含最后消息摘要）,前端不得再对空历史伪造兜底文案。
 
 ### 1.2 多模态交互卡片族谱 (Rich Interactive Cards)
 

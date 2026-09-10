@@ -217,14 +217,20 @@ async def create_thread(thread_id: str, business_id: str, user_id: str | None = 
     归属守卫:同 id 线程若属他租户(business_id 不符)或已有属主且与调用者
     user_id 不符,返回 None(路由层转 409)——绝不回显他人线程元数据;
     旧线程无属主时自愈认领给调用者。
+
+    返回值新增 ``created``(new-user-onboarding C):INSERT ... RETURNING 探明
+    本次调用是否真插了行 —— 幂等重放(created=False)时路由层据此跳过引导行,
+    消息 id 确定性兜底之上双保险。
     """
     async with get_session() as session:
-        await session.execute(
+        inserted = await session.execute(
             text(
                 'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") '
-                "VALUES (:tid, :uid, :bid, 'active', NOW(), NOW()) ON CONFLICT (id) DO NOTHING"
+                "VALUES (:tid, :uid, :bid, 'active', NOW(), NOW()) "
+                "ON CONFLICT (id) DO NOTHING RETURNING id"
             ).bindparams(tid=thread_id, uid=user_id, bid=business_id)
         )
+        created = inserted.scalar_one_or_none() is not None
         row = (
             await session.execute(
                 text(
@@ -251,9 +257,72 @@ async def create_thread(thread_id: str, business_id: str, user_id: str | None = 
         "userId": row["user_id"],
         "businessId": row["business_id"],
         "status": row["status"] or "active",
+        "created": created,
         "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
         "updatedAt": row["updated_at"].isoformat() if row["updated_at"] else None,
     }
+
+
+async def list_user_threads(user_id: str, business_id: str | None = None, limit: int = 20) -> list[dict]:
+    """终端顾客会话列表(GET /api/chat/threads,new-user-onboarding B)。
+
+    与 admin 侧 ``list_conversations`` 的差异:属主过滤为严格等值
+    ``t.user_id = :uid``,不做 thread-id ILIKE 模糊兜底 —— 顾客端防跨用户
+    泄漏;``businessId`` 参数可选收窄(商户切换视图),缺省跨商户全量。
+    排序 ``updated_at DESC``(最近活跃在前),上限 50。
+    """
+    clean_uid = (user_id or "").strip()
+    if not clean_uid:
+        return []
+    lim = max(1, min(50, limit))
+
+    conditions = ['t."user_id" = :uid']
+    params: dict = {"uid": clean_uid}
+    clean_bid = (business_id or "").lower().strip()
+    if clean_bid:
+        conditions.append("t.business_id = :bid")
+        params["bid"] = clean_bid
+
+    async with get_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT t.id AS thread_id, t.business_id, t.user_id, t.status, t.created_at, t.updated_at, "
+                        "m.content AS last_msg_content, m.role AS last_msg_role, m.timestamp AS last_msg_time "
+                        "FROM threads t LEFT JOIN LATERAL ("
+                        "  SELECT content, role, timestamp FROM messages WHERE thread_id = t.id "
+                        "  ORDER BY created_at DESC, timestamp DESC LIMIT 1"
+                        ") m ON true "
+                        f"WHERE {' AND '.join(conditions)} ORDER BY t.updated_at DESC LIMIT :lim"
+                    ).bindparams(**params, lim=lim)
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+    items = []
+    for r in rows:
+        snippet = r["last_msg_content"]
+        if snippet and len(snippet) > 80:
+            snippet = snippet[:80] + "..."
+        # messages.timestamp 是 Text 列(append_message 写 ISO 字符串),旧引擎行亦为 str
+        last_time = r["last_msg_time"]
+        items.append(
+            {
+                "id": r["thread_id"],
+                "userId": r["user_id"],
+                "businessId": r["business_id"],
+                "status": r["status"] or "active",
+                "createdAt": r["created_at"].isoformat() if r["created_at"] else None,
+                "updatedAt": r["updated_at"].isoformat() if r["updated_at"] else None,
+                "lastMessageSnippet": snippet,
+                "lastMessageRole": r["last_msg_role"],
+                "lastMessageTime": last_time if isinstance(last_time, str) else (last_time.isoformat() if last_time else None),
+            }
+        )
+    return items
 
 
 async def append_message(payload: dict) -> dict:

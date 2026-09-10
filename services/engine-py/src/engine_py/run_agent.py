@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import time
 
 from pydantic import BaseModel, Field
@@ -41,31 +40,11 @@ from .llm import (
     take_thread_token_total,
 )
 from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
+from .onboarding import build_entry_cards, resolve_onboarding_config
 from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
+from .triage.rule_matchers import is_quick_greeting
 from .vision import normalize_image_urls
-
-_QUICK_GREETINGS = [
-    "你好",
-    "您好",
-    "哈喽",
-    "哈罗",
-    "hello",
-    "hi",
-    "hey",
-    "你是谁",
-    "你是哪个",
-    "你是AI吗",
-    "你是机器人吗",
-    "who are you",
-    "how are you",
-]
-_GREETING_CLEAN_RE = re.compile(r"[，。！？,.!?\s]")
-
-
-def _is_quick_greeting(message: str) -> bool:
-    clean = _GREETING_CLEAN_RE.sub("", message.strip().lower())
-    return clean in _QUICK_GREETINGS
 
 
 class AgentJobInput(BaseModel):
@@ -206,8 +185,8 @@ async def run_agent(job: AgentJobInput) -> dict:
     short_memory = ShortMemory(thread_id, 10, job.business_id)
     task_memory = TaskMemory(thread_id)
 
-    # 1. 🚀 毫秒级极速直达旁路:纯问候语零模型开销
-    if _is_quick_greeting(input_message):
+    # 1. 🚀 毫秒级极速直达旁路:纯问候/身份问句零模型开销
+    if is_quick_greeting(input_message):
         resolved_biz_id = job.business_id or "ecommerce"
         try:
             async with get_session() as session:
@@ -219,26 +198,23 @@ async def run_agent(job: AgentJobInput) -> dict:
         except Exception as g_err:
             print(f"[Quick Greeting] Failed to resolve thread businessId: {g_err}")
 
-        brand_name = get_merchant_display_name(resolved_biz_id)
-        greeting_text = (
-            f"您好！我是 {brand_name} 的智能客服助理。✨\n\n"
-            "我能为您提供以下高效率的自动化业务操作：\n"
-            '1. **订单物流查询**：例如 *"帮我查一下 ORD-98712 的发货状态"*\n'
-            '2. **快捷退款办理**：例如 *"帮我申请退款"*\n'
-            '3. **网页看板快照**：例如 *"帮我截取系统首页进行界面圆角核验"*\n\n'
-            "请告诉我您需要处理的业务，我将真刀真枪为您调起系统底层工具为您搞定！"
-        )
+        # 同源改造(new-user-onboarding D):罐头回复消费租户 onboarding_config,
+        # 与建线程欢迎行/回访轻问候同一份配置 —— 杜绝两套自我介绍。
+        onboarding = await resolve_onboarding_config(resolved_biz_id)
+        greeting_text = onboarding["welcomeText"]
+        greeting_cards = build_entry_cards(onboarding)
 
         try:
             await _ensure_thread(thread_id, user_id, job.business_id)
         except Exception as thread_err:
             print(f"[DB] Failed to ensure thread exists for quick greeting: {thread_err}")
 
-        # 用户行归网关持久化(005 治理):旁路只落问候 assistant 行
-        await short_memory.add_message("assistant", greeting_text)
+        # 用户行归网关持久化(005 治理):旁路只落问候 assistant 行(带入口卡)
+        await short_memory.add_message("assistant", greeting_text, cards=greeting_cards)
 
         mock_result = {
             "output": greeting_text,
+            "cards": greeting_cards,
             "taskPlan": {
                 "goal": "Bypass planner loop and respond to quick greeting directly",
                 "subtasks": [
@@ -261,7 +237,7 @@ async def run_agent(job: AgentJobInput) -> dict:
                 plan=mock_result["taskPlan"],
             )
             await asyncio.sleep(0.1)
-            await emit_job_result(job_id, greeting_text, mock_result["taskPlan"], [])
+            await emit_job_result(job_id, greeting_text, mock_result["taskPlan"], greeting_cards)
 
         return mock_result
 

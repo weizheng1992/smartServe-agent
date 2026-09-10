@@ -27,6 +27,7 @@ export function TenantsPage() {
           webhookUrl: t.webhookUrl || `https://api.${t.id}.com/webhook`,
           status: (t.status as any) || 'active',
           createdAt: t.createdAt ? new Date(t.createdAt).toISOString().split('T')[0] : '2026-01-01',
+          onboardingConfig: t.onboardingConfig ?? null,
         }));
         return mergedTenants;
       }
@@ -62,14 +63,20 @@ export function TenantsPage() {
   );
 
   const updateTenantApi = useCallback(async (item: TenantRecord) => {
-    await tenantsApi.update(item.id, {
+    const res = await tenantsApi.update(item.id, {
       name: item.name,
       status: item.status,
       webhookUrl: item.webhookUrl,
       apiKey: item.apiKey,
       refundLimit: item.refundLimit,
       industry: item.industry,
+      // 未携带 = 保留既有配置(服务端合并式语义);携带即整体覆写
+      ...(item.onboardingConfig !== undefined ? { onboardingConfig: item.onboardingConfig } : {}),
     });
+    if (!res.success) {
+      // 诚实失败:schema 校验 400 必须可见,而非静默假装保存成功
+      throw new Error(res.error || '保存失败');
+    }
     return item;
   }, []);
 
@@ -144,7 +151,11 @@ export function TenantsPage() {
 
   const handleOpenEdit = (tenant: TenantRecord) => {
     setSelectedItem(tenant);
-    setFormData({ ...tenant });
+    setFormData({
+      ...tenant,
+      // JSON 文本域编辑态:已配置序列化预填,未配置留空(空 = 不携带,保留/继续未配置)
+      onboardingConfigJson: tenant.onboardingConfig ? JSON.stringify(tenant.onboardingConfig, null, 2) : '',
+    });
     setIsEditOpen(true);
   };
 
@@ -155,12 +166,33 @@ export function TenantsPage() {
       createItem({
         ...(formData as TenantRecord),
         createdAt: new Date().toISOString().split('T')[0],
-      });
+      }).catch((err: Error) => alert(`租户创建失败:${err.message}`));
     } else if (isEditOpen && selectedItem) {
-      updateItem('id', {
+      // 引导配置 JSON 解析在提交前完成:手编错形即时可见,不发坏请求
+      let parsedOnboarding: Record<string, any> | undefined;
+      const jsonText = (formData.onboardingConfigJson || '').trim();
+      if (jsonText) {
+        try {
+          parsedOnboarding = JSON.parse(jsonText);
+        } catch (err) {
+          alert(`引导配置不是合法 JSON:${err instanceof Error ? err.message : String(err)}`);
+          return;
+        }
+      }
+      // 剥离编辑态专用字段与回读副本:onboardingConfig 仅由本次解析结果决定
+      // (非空 = 携带整体覆写;空 = 不携带,服务端保留既有)
+      const {
+        onboardingConfig: _omitCfg,
+        onboardingConfigJson: _omitJson,
+        ...rest
+      } = {
         ...selectedItem,
         ...(formData as TenantRecord),
-      });
+      } as TenantRecord;
+      updateItem('id', {
+        ...rest,
+        ...(parsedOnboarding !== undefined ? { onboardingConfig: parsedOnboarding } : {}),
+      } as TenantRecord).catch((err: Error) => alert(`保存失败:${err.message}`));
     }
   };
 

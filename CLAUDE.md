@@ -53,7 +53,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
                             ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │              API 网关 (services/gateway-py,Python/FastAPI)             │
-│  - 42 条契约路由(39 冻结 + auth/me、chat/threads、chat/upload):     │
+│  - 43 条契约路由(39 冻结 + auth/me、chat/threads(GET/POST)、chat/upload):│
 │    tenants、skills、approvals、聊天 SSE、conversations、RAG 文档、    │
 │    personas、guardrails、billing、logs、商户 store/admin、            │
 │    SPI v1(HMAC 签名)                                                 │
@@ -109,7 +109,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 5. **零依赖共享 UI**:
    - `apps/web` 与 `apps/admin` 使用 `@agent-all/ui` + Tailwind CSS,不得引入重型外部组件框架。
 6. **契约冻结**:
-   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(现有 `/api/auth/me`、`POST /api/chat/threads`、`POST /api/chat/upload`,合计 42 条)。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
+   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(现有 `/api/auth/me`、`POST /api/chat/threads`、`GET /api/chat/threads`、`POST /api/chat/upload`,合计 43 条)。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
 
 ---
 

@@ -5,7 +5,7 @@ paths: ["services/gateway-py/**/*"]
 
 # 服务端多租户网关与实时协同规范 (Server Gateway)
 
-本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（现有 `/api/auth/me`、`POST /api/chat/threads`、`POST /api/chat/upload`，合计 42 条；pytest 契约测试为唯一真实来源）。
+本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（现有 `/api/auth/me`、`POST /api/chat/threads`、`GET /api/chat/threads`、`POST /api/chat/upload`，合计 43 条；pytest 契约测试为唯一真实来源）。
 
 ## 1. 核心模块与架构规范
 
@@ -15,10 +15,12 @@ paths: ["services/gateway-py/**/*"]
 2. **`routers/chat.py`**：
    - 智能体作业受理（入队 Redis Stream / 直跑）与 SSE 事件流端点（`Last-Event-ID` 断线重连回放，事件源为 Redis Streams 本身）。
    - 会话消息持久化与历史拉取（多租户过滤）。
-   - 显式建线程 `POST /api/chat/threads`（幂等 upsert;同 id 异租户/异用户冲突 409 不回显他人元数据,无主线程自愈认领——web「开启新一轮对话」前置,wayfinder 004 补齐）。
+   - 显式建线程 `POST /api/chat/threads`（幂等 upsert;同 id 异租户/异用户冲突 409 不回显他人元数据,无主线程自愈认领——web「开启新一轮对话」前置,wayfinder 004 补齐）。**建线程引导行（new-user-onboarding C,2026-09-10）**：新建成功（`created` 标记,INSERT ON CONFLICT DO NOTHING 判真）后服务端按租户 `onboarding_config`（`engine_py.onboarding.resolve_onboarding_config`,逐字段三态回落+平台默认渲染 {brand}）落一条 assistant 行——首线程（该 user×tenant 仅此一条,`list_user_threads(limit=2)` 判定）写完整 welcomeText + quick_replies 入口卡（cards JSONB）,回访新线程写一行 returningGreeting 轻问候;确定性消息 id `welcome_{threadId}`/`greet_{threadId}` + created 标记双护栏防重放双写;引导行失败只 print 不阻断建线程主契约。**写所有权特例**：assistant 行归引擎,但 welcome/greet 引导行是网关写入的刻意例外（仅建线程时点,与「用户行归网关」互补,契约测试钉死）。
+   - 会话列表 `GET /api/chat/threads?userId=`（new-user-onboarding B,42→43 条契约）：`conversation_repo.list_user_threads` 严格 `user_id` 等值匹配（**严禁 ILIKE 模糊**,admin 侧模糊检索是另一码事——跨用户泄漏防线）,LEFT JOIN LATERAL 取最后一条消息摘要（≤80 字）,`updated_at DESC`,limit 封顶 50;web 侧栏「历史会话恢复」的真实数据源,首访/回访判定同源复用。
    - 图片上传 `POST /api/chat/upload`（wayfinder multimodal-image-chat 002）：MIME 白名单 jpeg/png/webp/gif、10MB 读流限长（不信任声明）、UUID 文件名落盘 `public/uploads`（`UPLOADS_DIR` env 可覆写,测试隔离用），`/api/uploads` StaticFiles 回读；响应顶层 `{success, url}`、失败顶层 `error` 供前端 alert 精确展示。
 3. **`routers/admin.py` / `crud.py`**：
    - 会话历史、审批单（Approve / Reject，触发事务发件箱与幂等恢复）、Skills 配置（`GET/PUT /api/skills/config`）、RAG 文档、画像、护栏、计费配额、日志等管理端 CRUD。
+   - 租户引导配置编辑（new-user-onboarding E,2026-09-10）：`PUT /api/tenant/{id}` 收 `onboardingConfig` 完整 JSON 文档——服务端 `validate_onboarding_config` 校验（未知顶层键/按钮错形 400 诚实失败,错误信息点名具体字段）,携带即整体覆写 `tenant_configs.onboarding_config`、未携带保留既有（合并式,与 spi/skills 同语义）;`GET /api/tenant/list` 回读 `onboardingConfig`（null = 未配置）供编辑面预填。admin 前端 JSON 文本域:非法 JSON 提交前拦截,服务端 400 经 throw→alert 可见,不静默假装保存成功。
    - 数据真实性约定（2026-09-07 起，wayfinder 005）：`/api/evals/results` 读取 `engine_py.evals.promptfoo_import` 从真实 promptfoo 运行写入的汇总行（`bun run test:prompt:record` 三套件自动入库 `eval_runs`/`eval_results` + 展示表；随机生成器已下线，`POST /api/evals/run` 返回 410 指引真实通道，响应不再携带 `isMock`）；`/api/logs` 消费 `session_metrics`/`intent_logs` 真实值，无遥测数据处返回真实 0，**严禁编造 token/延迟数字**。
    - 画像事实删除（`DELETE /api/personas/{id}`）在删除成功后调用 `engine_py.badcase.pool.record_badcase_signal` 入坏例候选池（失败静默降级，不影响删除响应）。
 4. **`routers/merchant.py` + `merchant_domain.py` / `merchant_db.py`**：商户门户店铺端与管理端路由及领域逻辑（原 Next.js Route Handlers 移植）。

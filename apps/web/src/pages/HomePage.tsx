@@ -17,7 +17,7 @@ import { APMPanel } from '../components/APMPanel';
 import { AuditDesk } from '../components/AuditDesk';
 import { ChatArea } from '../components/ChatArea';
 import { LeftSidebar } from '../components/LeftSidebar';
-import { DEFAULT_ASSISTANT_MESSAGE, useApprovals, useAuth, useChatMessages, useChatThreads } from '../hooks';
+import { useApprovals, useAuth, useChatMessages, useChatThreads } from '../hooks';
 
 const formatFriendlyDate = (dateStr: string | Date | undefined | null) => {
   if (!dateStr) return '未知时间';
@@ -56,7 +56,8 @@ export function HomePage() {
       setCurrentStepText('');
       setTokensConsumed(0);
       setActiveTab('CHAT_DESK');
-      setMessages([DEFAULT_ASSISTANT_MESSAGE]);
+      // welcome 行已由建线程请求服务端落库,清空后由 loadHistory 恢复真实欢迎语+入口卡
+      setMessages([]);
     },
   });
 

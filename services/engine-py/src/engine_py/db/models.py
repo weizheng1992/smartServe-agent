@@ -399,6 +399,7 @@ class TenantConfig(Base):
     spi_config: Mapped[dict | None] = mapped_column(JSONB)
     enabled_skills: Mapped[list | None] = mapped_column(JSONB)
     skills_config: Mapped[dict | None] = mapped_column(JSONB)
+    onboarding_config: Mapped[dict | None] = mapped_column(JSONB)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 

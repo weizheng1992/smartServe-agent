@@ -4,6 +4,27 @@
 
 ---
 
+## [2.6.5] - 2026-09-10 (新用户引导话术:onboarding_config 单一配置源 + 服务端权威首访判定 + 问候旁路同源)
+
+wayfinder 地图(`.scratch/new-user-onboarding/`)六张工单一次落地。此前新顾客看到的欢迎语是 web 前端写死的 `DEFAULT_ASSISTANT_MESSAGE`(提 LangGraph/记忆系统等内部术语、零租户品牌、零能力入口),刷新即丢、不落库;引擎问候旁路又持另一套自我介绍——两套话术并存。
+
+### ✨ Features
+
+- **onboarding_config 配置底座(A)**:`engine_py.onboarding` 单一来源——schema(welcomeText≤500/returningGreeting≤200/quickRepliesTitle≤50/quickReplies 1-8 按钮带 action+payload)与平台默认三段式文案(身份→3 能力主题→单一召唤,按钮 3-5 个动词开头、转人工固定末位);回落语义(评审修订):**配置存在(含 `{}` 显式重置)即权威**,缺失字段直接回落平台默认渲染 {brand},`welcome_message` 列仅中继 onboarding_config 为 NULL 的存量租户(该列首个消费方)——与 PUT「携带即整体覆写」及 admin「`{}` = 重置平台默认」承诺自洽;DB 异常回落平台默认冷启动不炸;`tenant_configs.onboarding_config` JSONB 列(Alembic 0008,幂等护栏)+ aurora 种子带品牌化配置。
+- **GET /api/chat/threads 会话列表(B,契约 42→43)**:web 侧栏历史恢复的真实数据源;`list_user_threads` 严格 `user_id` 等值(严禁 ILIKE 模糊——跨用户泄漏防线),LEFT JOIN LATERAL 最后消息摘要,updated_at DESC 服务端固定封顶 50(不对客户端开放翻页参数);同批钉 4 条契约测试。
+- **建线程引导行落库(C)**:POST /threads 新建成功(`created` 标记)后服务端判定首访(`list_user_threads(limit=2)`,per user×tenant)——首线程写完整 welcomeText + quick_replies 入口卡(cards JSONB),回访写一行轻问候;确定性消息 id `welcome_{threadId}`/`greet_{threadId}` 双护栏防重放双写;引导行只归属真实 userId(匿名线程不落,不冒认演示账号);引导行失败不阻断建线程(契约测试钉死)。**写所有权特例**:assistant 行归引擎,但引导行是网关写入的刻意例外(仅建线程时点,docstring+契约测试钉死)。
+- **问候旁路同源化(D)**:run_agent 身份问句表 × triage 时段问候表并集收口为 `QUICK_GREETING_WORDS` 单一来源(GREETING_RE 程序化派生,两层永不漂移;原表带空格词条在剥空白规整下本是死词条,统一规整后形态);极速旁路与 triage 规则层罐头回复统一消费 onboarding_config(与建线程欢迎行同一份,杜绝两套自我介绍),welcomeText+入口卡带卡落库;零 LLM、rule_greeting 路由键与仲裁留痕口径不变。
+- **admin 引导配置编辑面(E)**:PUT /api/tenant/{id} 收 onboardingConfig 完整 JSON——服务端 `validate_onboarding_config` 校验(未知顶层键/按钮错形 400 诚实失败),携带即整体覆写、未携带保留(合并式);GET /api/tenant/list 回读供预填;admin JSON 文本域(非法 JSON 提交前拦截、服务端 400 经 alert 可见)。
+- **web 欢迎语服务端权威(F)**:`DEFAULT_ASSISTANT_MESSAGE` 退役——初始/切换/空历史一律空时间线,welcome 行经 loadHistory 从服务端恢复(含入口卡渲染与 send_message 动作分发),前端不再本地伪造。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **329 passed**(新增 38:onboarding 配置 12 + 问候旁路 26),ruff 干净;网关契约套件 **113 passed**(本特性 13 条:threads 列表 4 + 引导生命周期 5 + 租户引导校验 4;评审删 1 条超规格客户端 limit 测试、补 1 条引导失败不阻断测试,总数与 2.6.4 基线 113 持平),web/admin tsc + biome 干净。
+- promptfoo 无漂移:统一伞 56 + planner 8 基线不动(全用例无纯问候输入,旁路仅精确命中,无重钉需要)。
+- 已知边界(如实记录):web `handleDeleteThread` 调用的 `DELETE /api/chat/threads` 服务端仍不存在(本次地图仅指定 GET,删线程为存量缺口,列入下张地图);存量旧线程(迁移前创建)无 welcome 行,空历史如实呈现空时间线。
+
+---
+
 ## [2.6.4] - 2026-09-10 (意图仲裁化:正则建议、LLM 仲裁 —— 留痕/信号源/快轨仲裁员/锚点降级/评测伞)
 
 起点(`/grill-me` 评审):`graph/nodes` 的意图解析是否需要优化。结论:分流瀑布本身高效,病灶在**终局权分配**——非 LLM 层(正则/槽位/锚点)独自把对话判死后无迹可查、无信号可救。四轮评审定下「正则建议、LLM 仲裁」模型,8 张工单(spec:`.scratch/intent-arbitration/`)分两阶段落地:
