@@ -119,8 +119,11 @@ export function writeJson(filePath: string, data: unknown): void {
 }
 
 export function runPromptfooSuite(suite: SuiteDef, outputFilePath: string): PromptfooSummary {
+  // --delay 3000:真跑 triage/RAG/judge 的行即便串行(maxConcurrency 默认 1)也
+  // 会背靠背触发 bigmodel RPM 限制 —— 429 把咨询直答打成 consult_no_rag 回退、
+  // judge 打成 scorer 报错,基线被限流噪声污染。行间 3s 间隔摊薄请求密度。
   const res = Bun.spawnSync(
-    ['bunx', 'promptfoo', 'eval', '-c', suite.config, '-o', outputFilePath, '--no-write', '--no-cache', '--no-table'],
+    ['bunx', 'promptfoo', 'eval', '-c', suite.config, '-o', outputFilePath, '--no-write', '--no-cache', '--no-table', '--delay', '3000'],
     { cwd: REPO_ROOT, stdout: 'inherit', stderr: 'inherit' },
   );
   if (res.exitCode !== 0) {

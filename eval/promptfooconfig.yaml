@@ -10,6 +10,13 @@ defaultTest:
   options:
     provider: "file://providers/agent_provider.py:call_api"
 
+# 串行 + 行间隔:真跑 triage/RAG/judge 的行背靠背调用会撞 bigmodel RPM 限制,
+# 429 把咨询直答打成 consult_no_rag 回退、judge 打成 scorer 报错(限流噪声
+# 污染基线);maxConcurrency=1 显式钉串行(0.111 默认即 1),行间延迟见
+# baselineLib.ts 的 --delay 3000
+evaluateOptions:
+  maxConcurrency: 1
+
 tests:
   - testCases/ecommerce/single-intent.json
   - testCases/ecommerce/multi-intent.json

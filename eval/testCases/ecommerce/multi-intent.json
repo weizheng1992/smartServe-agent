@@ -6,10 +6,7 @@
     ],
     "vars": {
       "input": "我想看看我买的跑鞋 ORD-98712 到了没，顺便我想把上一笔订单申请退款了",
-      "expectedIntents": [
-        "order_return",
-        "order_query"
-      ]
+      "expectedIntents": "[\"order_return\", \"order_query\"]"
     },
     "assert": [
       {
@@ -25,10 +22,6 @@
     ],
     "vars": {
       "input": "我想看看我买的跑鞋 ORD-98712 到了没，顺便我想把上一笔订单申请退款了",
-      "expectedIntents": [
-        "order_status",
-        "refund"
-      ],
       "expectedTools": [
         "getOrderStatus",
         "processRefund"
@@ -84,9 +77,6 @@
     ],
     "vars": {
       "input": "我刚才对订单 ORD-98712 申请退款被拒绝了，我想申请另外一笔订单 ORD-55555 的退款",
-      "expectedIntents": [
-        "refund"
-      ],
       "expectedTools": [
         "processRefund"
       ]

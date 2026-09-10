@@ -1,31 +1,45 @@
 [
   {
     "description": "仲裁留痕一致性(实锤案例二)- 极简输入下槽位层(chat)与嵌入层(order_status)双分类跨族冲突,留痕 winner 必须与终局 intents[0] 同源(2026-09-10 工单01 仲裁留痕列)",
-    "prompts": ["classifier"],
+    "prompts": [
+      "classifier"
+    ],
     "vars": {
       "input": "我的订单",
-      "expectedIntents": ["order_status"]
+      "expectedIntents": [
+        "order_status"
+      ]
     },
     "assert": [
-      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" },
       {
         "type": "javascript",
-        "value": "output => { const p = JSON.parse(output); const a = p.arbitration || {}; const winner = a.winner; const first = (p.intents || [])[0]?.intent; if (!a.method || !Array.isArray(a.candidates) || a.candidates.length === 0) { return { pass: false, score: 0, reason: `arbitration trace incomplete: method=${a.method}, candidates=${JSON.stringify(a.candidates)}` }; } if (winner !== first) { return { pass: false, score: 0, reason: `trace winner ${winner} !== terminal intents[0] ${first}` }; } return true; }"
+        "value": "file://scorers/intentF1.scorer.ts"
+      },
+      {
+        "type": "javascript",
+        "value": "file://scorers/arbitrationTrace.scorer.ts"
       }
     ]
   },
   {
     "description": "仲裁留痕一致性 - 语料泛查单口语走 Step 3 结构化 LLM 终局,留痕须记录全部层候选提议且 winner 与终局同源",
-    "prompts": ["classifier"],
+    "prompts": [
+      "classifier"
+    ],
     "vars": {
       "input": "看看我买了啥，列一下我的购买记录",
-      "expectedIntents": ["order_query"]
+      "expectedIntents": [
+        "order_query"
+      ]
     },
     "assert": [
-      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" },
       {
         "type": "javascript",
-        "value": "output => { const p = JSON.parse(output); const a = p.arbitration || {}; const winner = a.winner; const first = (p.intents || [])[0]?.intent; if (!a.method || !Array.isArray(a.candidates) || a.candidates.length === 0) { return { pass: false, score: 0, reason: `arbitration trace incomplete: method=${a.method}, candidates=${JSON.stringify(a.candidates)}` }; } if (winner !== first) { return { pass: false, score: 0, reason: `trace winner ${winner} !== terminal intents[0] ${first}` }; } return true; }"
+        "value": "file://scorers/intentF1.scorer.ts"
+      },
+      {
+        "type": "javascript",
+        "value": "file://scorers/arbitrationTrace.scorer.ts"
       }
     ]
   }

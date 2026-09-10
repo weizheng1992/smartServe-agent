@@ -1,7 +1,7 @@
 {
   "suite": "planner",
-  "pinnedAt": "2026-09-05T09:31:40.837Z",
-  "gitSha": "d0c2d14db160a1ed1e6dd74e1f3828eaab20a0f5",
+  "pinnedAt": "2026-09-10T01:19:41.929Z",
+  "gitSha": "415d9fde82ae6bc8f1bb5bb6ce2f4eb5c868fb83",
   "config": {
     "path": "eval/promptfoo.planner.yaml",
     "sha256": "ccb0e91fd7b84e93c353e825c297e4de8a08a75dd70ca8ebb39c9ccb37622170"
@@ -54,12 +54,12 @@
       "score": 1
     },
     {
-      "description": "指标规划 - 爆款与出货量查询",
+      "description": "多任务规划 - 查物流与退款双重意图",
       "success": true,
       "score": 1
     },
     {
-      "description": "多任务规划 - 查物流与退款双重意图",
+      "description": "指标规划 - 爆款与出货量查询",
       "success": true,
       "score": 1
     }

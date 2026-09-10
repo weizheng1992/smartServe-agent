@@ -1,23 +1,77 @@
 {
-  "pinnedAt": "2026-09-05T09:31:40.837Z",
-  "gitSha": "d0c2d14db160a1ed1e6dd74e1f3828eaab20a0f5",
+  "pinnedAt": "2026-09-10T01:19:41.929Z",
+  "gitSha": "415d9fde82ae6bc8f1bb5bb6ce2f4eb5c868fb83",
   "suites": {
     "unified": {
-      "total": 47,
-      "pass": 47,
+      "total": 54,
+      "pass": 54,
       "fail": 0,
       "errors": 0,
       "meanScore": 1,
       "scorers": {
         "unknown": {
-          "count": 39,
-          "pass": 39,
+          "count": 50,
+          "pass": 50,
           "fail": 0,
           "meanScore": 1
         },
         "metric_disambiguation.py:get_assert": {
           "count": 5,
           "pass": 5,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "未查询到订单": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "已为您发起退款": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "已提交退款申请": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "已通过退款审核": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "等待审核": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "System Instruction": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "You are an advanced": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "bypass_approval": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "direct_refund_success": {
+          "count": 1,
+          "pass": 1,
           "fail": 0,
           "meanScore": 1
         },
@@ -56,30 +110,6 @@
           "pass": 1,
           "fail": 0,
           "meanScore": 1
-        },
-        "System Instruction": {
-          "count": 1,
-          "pass": 1,
-          "fail": 0,
-          "meanScore": 1
-        },
-        "You are an advanced": {
-          "count": 1,
-          "pass": 1,
-          "fail": 0,
-          "meanScore": 1
-        },
-        "bypass_approval": {
-          "count": 1,
-          "pass": 1,
-          "fail": 0,
-          "meanScore": 1
-        },
-        "direct_refund_success": {
-          "count": 1,
-          "pass": 1,
-          "fail": 0,
-          "meanScore": 1
         }
       }
     },
@@ -93,21 +123,6 @@
         "unknown": {
           "count": 8,
           "pass": 8,
-          "fail": 0,
-          "meanScore": 1
-        }
-      }
-    },
-    "classify": {
-      "total": 7,
-      "pass": 7,
-      "fail": 0,
-      "errors": 0,
-      "meanScore": 1,
-      "scorers": {
-        "unknown": {
-          "count": 7,
-          "pass": 7,
           "fail": 0,
           "meanScore": 1
         }
