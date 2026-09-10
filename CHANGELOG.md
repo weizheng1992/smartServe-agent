@@ -4,6 +4,32 @@
 
 ---
 
+## [2.6.4] - 2026-09-10 (意图仲裁化:正则建议、LLM 仲裁 —— 留痕/信号源/快轨仲裁员/锚点降级/评测伞)
+
+起点(`/grill-me` 评审):`graph/nodes` 的意图解析是否需要优化。结论:分流瀑布本身高效,病灶在**终局权分配**——非 LLM 层(正则/槽位/锚点)独自把对话判死后无迹可查、无信号可救。四轮评审定下「正则建议、LLM 仲裁」模型,8 张工单(spec:`.scratch/intent-arbitration/`)分两阶段落地:
+
+### ✨ Features (阶段 1:留痕与信号底座)
+
+- **仲裁留痕(01)**:各判定层以 `{layer, intent, confidence}` 快照累积 `proposals`,终局经 `log_intent_to_db` **单点落库** `intent_logs`(`candidates` 列 + `winner` + `arbitration_reason`)——修复槽位层与 skill_fast_track 同输入双写;`llm_call_logs` 补 `node` 归因,每笔 LLM 调用可溯源到图节点(延迟统计/成本归因的地基)。
+- **坏例池两个新信号源(02)**:`intent_conflict`(candidates 跨意图族:动作形 × 咨询侧,须来自不同层)与 `intent_mismatch`(LLM 宣称 out_of_scope × 落库 general_query 不符),挂单点落库后入池;信号只入池不直接成为断言,经人工 triage 并入评测语料。
+- **评测伞扩展(03)**:统一套件意图分类用例改测**真引擎**(`agent_provider._triage_full`,经 intent_logs 带出仲裁留痕),classify 回声 provider 退役;新增 `intentF1`/`notOosCanned`/`arbitrationTrace`/`ragDirect`/`sameAskConsistency`/`slotClarification` 文件化 scorer(promptfoo 0.111 内联箭头函数断言不执行,必须 file://);伞面 54+8,基线全钉绿。
+- **意图注册表合一(04)**:消费方驱动收敛——`AgentIntentType` 枚举为唯一事实源,F1/评测断言/分流路由同源消费。
+
+### ✨ Features (阶段 2:终局权重分配)
+
+- **咨询快轨终局权收编(05)**:直答 prompt 带 ROUTING VETO——用户实为请求执行动作时返回 `__ROUTE_TO_ACTION__` 哨兵,快轨放行 fallthrough 完整管线(正则误命中的代价从「答非所问且关会话」降为多走一次既有管道);Step 3 侧否决降级 general_query 零规划。零新增调用/延迟:p50 咨询路径仍是单次直答,答案生成器升级为生成器+复核员;标记回复严禁写语义缓存。
+- **锚点 oos 终局权收编(06)**:Step 2 判定 4(29 锚句余弦 ×0.86 硬阈值)不再独自关会话——记 `embedding(out_of_scope)` 提议后 fallthrough Step 3 精判:确认出范畴照旧收尾(`llm_out_of_scope`,candidates 呈现 embedding→structured_llm 确认链),改判走咨询直答/动作管线。实测靶案例「买个东西怎么买」(oos 锚句相似 1.000 的购买流程咨询)从罐头「超出服务范围」转判 shopping_guide;route key `embedding_out_of_scope` 退役。真 oos +1 确认调用,node 归因单列可见,p50 咨询路径不含此路径。
+- **冲突触发仲裁·数据定夺(07)**:01 留痕 393 行直接审计「槽位/锚点判动作 × 咨询形措辞」靶形状 **0 例**(冲突 33 例全为 slot(chat)×动作胜出的良性形状)——显式记录「接受残余,不加 LLM 仲裁调用」决策(硬上会令礼貌措辞的真动作平白 +1 调用);补零调用观测标记 `is_consult_shaped_marker` 挂槽位层动作终局,命中记 `consult_shaped_gate` 提议,残余复现对坏例池信号源可见(此前单层动作终局无 consult 侧候选,残余不可见无从积累数据)。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **291 passed**(阶段 1 基线 276 + 阶段 2 新增 15:锚点仲裁 3 + 冲突标记 12),ruff 干净;网关契约 100 passed。
+- 延迟/调用数实测(`llm_call_logs` node 归因):咨询直答缓存未命中 **1 次调用**(直答兼任仲裁员,与 2.6.2 快轨持平)/ 复问 **0 次调用 0.1s**(语义缓存)/ 真 oos **1 次确认调用 5-6.5s**(06 引入,p50 咨询路径不含)/ 动作查询带单号 triage 阶段 **0 次 LLM 调用**(技能快轨)。05 仲裁员否决路径实弹验证(5-token 哨兵 → fallthrough → 动作管道),02 冲突信号同步入池。
+- promptfoo 统一伞 54 用例 + planner 伞 8 用例终钉全绿(基线 README 数字同步)。
+- 已知残余(如实记录):无标点「谁」系疑问句(「改地址的话转寄运费谁承担的呀」)对快轨闸门与 07 标记同时隐形,槽位层判动作反问单号而知识库有答案——留痕可见、待放量后凭 02 信号复盘,不在本批硬修。
+
+---
+
 ## [2.6.3] - 2026-09-09 (破损图 OCR 单号消费 + 消歧闸门意图浮现点补全 + 幽灵单前置拦截)
 
 诊断起点（/diagnosing-bugs）:用户上传破损鞋图（图内印有「破损投诉 ORD-77777」字样）+「坏了」，机器人却回问"是 9081 还是 9082 哪笔订单出了问题"。vision 实弹输出完全正确（`extractedOrderId=ORD-77777` / ocrText / severe 0.95）——错在引擎把识别结果丢掉了，三层缺陷连环：

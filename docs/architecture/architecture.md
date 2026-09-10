@@ -65,24 +65,45 @@
 
 ---
 
-## 3.4 意图识别（Triage 三层过滤架构）
+## 3.4 意图识别（Triage 仲裁化架构：正则建议、LLM 仲裁）
 
 ### 📂 核心文件：
 
-- `packages/engine/src/graph/nodes/triage.node.ts` (核心行数 83 - 295)
+- `services/engine-py/src/engine_py/triage/intent_triage_engine.py`（分流瀑布与终局收口）
+- `services/engine-py/src/engine_py/triage/consult_fast_path.py`（咨询直答快轨 + 仲裁员否决标记）
+- `services/engine-py/src/engine_py/triage/structured_classifier.py`（LLM 结构化精判）
 
 ### 💡 架构解析：
 
-项目独创了 **“规则前置 -> 规则白名单 -> 语义置信度评估 -> 大模型多意图检测”** 三层意图防御金字塔，确保在超高并发下，既有极高精确度，又有极低算力成本：
+2026-09-10（intent-arbitration 阶段 1/2）起，意图识别从「多层漏斗、逐层截胡」改为
+**「正则建议、LLM 仲裁」**模型：非 LLM 层（规则/槽位/锚点）是**提议者**而非终局裁判，
+LLM 是仲裁员与终局。每一层的判定以 `{layer, intent, confidence}` 快照累积进
+`candidates`，终局决策经 `log_intent_to_db` **单点落库** `intent_logs`
+（`winner` = 首个 primary 意图，`arbitration_reason` = 谁关闭了会话）——谁压过了谁，自此可查：
 
-1. **第一层：纯规则预过滤 (Rule-based Precheck)**
-   - 纯符号拦截、超长文本拦截、空内容过滤。
-   - 白名单指令，如“你好”（问候语）、“转人工”、“退出”。**10ms 瞬间由硬编码做出专业答复，大模型开销为 0**。
-2. **第二层：物理向量余弦相似度匹配 (Semantic Embedding)**
-   - 离线预缓存 `order_status`、`refund` 和 `out_of_scope`（超出业务范围，如天气、写代码、政治）的锚点句向量。
-   - 计算用户提问与锚点的最大 Cosine Similarity：若相似度 $\ge 0.88$ 且与无关领域的差值 $\ge 0.08$，直接判定为对应意图，**完美避开大模型分类，提速 10 倍**！
-3. **第三层：大模型深度精细分类 (LLM Deep Triage)**
-   - 当两两模糊（如既像查单又像退款）且向量得分都不高时，降级激活 Gemini 3.5 Flash 进行多轮深度解析，保障 100% 的意图捕获底线。
+1. **规则前置层（Step 0-1，零 LLM，保留终局权）**：空内容/纯符号/超长拦截、问候/退出白名单、
+   语义重复拦截。这些终局的错判代价为零（罐头回复可恢复），照旧 10ms 硬编码闭环。
+2. **咨询直答快轨（Step 1.4，单次 LLM 调用兼任仲裁员）**：政策/尺码/时效类「问知识」输入
+   （`is_consult_query`：咨询话题 × 疑问语气，否定动作形/复合意图/显式订单号/带图）单次调用
+   RAG 直答；同一调用的 prompt 带 **ROUTING VETO** 规则——发现用户实为请求执行动作时返回
+   `__ROUTE_TO_ACTION__` 哨兵，快轨放行 fallthrough 完整管线（否决进 `candidates` 留痕，
+   `consult_arbiter` 层 intent 记 None）。语义缓存（≥0.96）令复问 0 调用秒回。
+3. **槽位层（Step 1.5-1.6，提议者 + 受控终局）**：槽位抽取 + 技能快轨。单意图完整、置信 ≥0.8
+   时照旧技能直通（`skill_fast_track`）；缺槽反问。措辞带咨询形标记
+   （`is_consult_shaped_marker`，零调用）时额外记 `consult_shaped_gate` 提议——
+   「判动作 × 咨询形措辞」残余对坏例池冲突信号源可见，路由不变。
+4. **锚点向量层（Step 2，降为提议者）**：`order_status`/`refund` 锚点高相似仍可快车道直达
+   （动作形输入误答代价高但锚点经实测校准）；**oos 锚点不再独自关会话**——仅记
+   `embedding(out_of_scope)` 提议后 fallthrough 精判层，由 LLM 确认（`llm_out_of_scope`）
+   或改判（咨询直答/动作管线）。此路径 +1 确认调用，经 `llm_call_logs` 的 node 归因单列可见，
+   p50 咨询路径不含此路径。
+5. **LLM 结构化精判（Step 3，仲裁终局）**：多意图联合分类 + 坏例召回（`format_exemplars_for_prompt`）。
+   判 `consult` 走同一快轨（同样受仲裁员否决约束）；判 oos 收尾；其余按动作管线裁决。
+
+**冲突信号闭环**：`badcase/intent_signals.py` 的 `detect_intent_conflict` 消费终局
+`candidates`——跨意图族（动作形 × 咨询形）且来自**不同层**的提议对入坏例候选池
+（`intent_conflict` 信号源）；LLM 精判与落库意图不符另有「宣称与落库不符」信号源。信号只入池
+不直接成为断言，经人工 triage 并入评测语料（详见 `.claude/rules/agent-engine.md` §1.8）。
 
 ---
 
@@ -90,8 +111,8 @@
 
 ### 📂 核心文件：
 
-1. **意图承接**：`packages/engine/src/graph/nodes/triage.node.ts`
-2. **动态规划**：`packages/engine/src/graph/nodes/planner.node.ts`
+1. **意图承接**：`services/engine-py/src/engine_py/graph/nodes/triage.py`
+2. **动态规划**：`services/engine-py/src/engine_py/graph/nodes/planner.py`
 
 ### 💡 架构解析：
 

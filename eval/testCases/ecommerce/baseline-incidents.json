@@ -25,8 +25,9 @@
     },
     "assert": [
       {
-        "type": "contains",
-        "value": "未查询到订单"
+        "type": "javascript",
+        "value": "/(未|没有|无法|未能).{0,4}(查询到|查到|找到|检索到).{0,4}订单|查无此单|不属于.{0,8}(账户|账号|当前)/.test(output)",
+        "metric": "ghostOrderHonestFail"
       },
       {
         "type": "not-contains",

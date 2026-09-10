@@ -1,17 +1,17 @@
 {
-  "pinnedAt": "2026-09-10T01:19:41.929Z",
-  "gitSha": "415d9fde82ae6bc8f1bb5bb6ce2f4eb5c868fb83",
+  "pinnedAt": "2026-09-10T02:31:27.555Z",
+  "gitSha": "06273ac684b3f410477c080b3232f7c57293dc60",
   "suites": {
     "unified": {
-      "total": 54,
-      "pass": 54,
+      "total": 56,
+      "pass": 56,
       "fail": 0,
       "errors": 0,
       "meanScore": 1,
       "scorers": {
         "unknown": {
-          "count": 50,
-          "pass": 50,
+          "count": 53,
+          "pass": 53,
           "fail": 0,
           "meanScore": 1
         },
@@ -21,7 +21,7 @@
           "fail": 0,
           "meanScore": 1
         },
-        "未查询到订单": {
+        ".test(output)": {
           "count": 1,
           "pass": 1,
           "fail": 0,

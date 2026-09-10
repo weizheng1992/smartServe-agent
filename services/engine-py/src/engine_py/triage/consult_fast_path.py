@@ -183,8 +183,13 @@ async def answer_consult_from_rag(
         "6. ROUTING VETO (intent arbitration duty): first check what the customer actually wants. "
         "If they are requesting that you EXECUTE a concrete action — placing/adding an order, "
         "cancelling, modifying an address, refunding/returning a specific order, or checking their "
-        "own order/shipping/data — do NOT answer at all. Reply with EXACTLY this ASCII marker and "
-        "nothing else: __ROUTE_TO_ACTION__"
+        "own order/shipping/data — do NOT answer at all. This includes MIXED messages where the "
+        "customer states a first-person intent to return/cancel/modify an item (e.g. 「我不想要了」"
+        "「这单不要了」「想把它退了」) and then asks about timing or process — the underlying "
+        "request is to execute the action, so veto. Pure general policy questions WITHOUT any "
+        "first-person action intent (e.g. 「退货政策是什么」「退货的话运费谁出」) must still be "
+        "answered normally. When vetoing, reply with EXACTLY this ASCII marker and nothing else: "
+        "__ROUTE_TO_ACTION__"
     )
     response = await get_chat_model().ainvoke(prompt)
     content = response.content if hasattr(response, "content") else str(response)

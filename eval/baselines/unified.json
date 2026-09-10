@@ -1,22 +1,22 @@
 {
   "suite": "unified",
-  "pinnedAt": "2026-09-10T01:19:41.929Z",
-  "gitSha": "415d9fde82ae6bc8f1bb5bb6ce2f4eb5c868fb83",
+  "pinnedAt": "2026-09-10T02:31:27.555Z",
+  "gitSha": "06273ac684b3f410477c080b3232f7c57293dc60",
   "config": {
     "path": "eval/promptfooconfig.yaml",
     "sha256": "fbc30876fcf817d8e65f6bbc1376424463e33560e8931419448c705cb56d5066"
   },
   "promptfooVersion": "0.111.1",
   "summary": {
-    "total": 54,
-    "pass": 54,
+    "total": 56,
+    "pass": 56,
     "fail": 0,
     "errors": 0,
     "meanScore": 1,
     "scorers": {
       "unknown": {
-        "count": 50,
-        "pass": 50,
+        "count": 53,
+        "pass": 53,
         "fail": 0,
         "meanScore": 1
       },
@@ -26,7 +26,7 @@
         "fail": 0,
         "meanScore": 1
       },
-      "未查询到订单": {
+      ".test(output)": {
         "count": 1,
         "pass": 1,
         "fail": 0,
@@ -320,6 +320,11 @@
       "score": 1
     },
     {
+      "description": "快轨终局权收编(工单05)- 动作形但命中咨询主题词:「不想要了」逃逸动作否定正则,直答调用兼任仲裁员返回路由标记,会话 fallthrough 完整动作管线(order_return 反问订单号),不得以资讯回复关闭会话",
+      "success": true,
+      "score": 1
+    },
+    {
       "description": "购物车技能快轨 - 口语化加购表达命中 skill_fast_track(购物车写操作必须走技能 SOP 管道,不走 LLM 工具兜底)",
       "success": true,
       "score": 1
@@ -336,6 +341,11 @@
     },
     {
       "description": "仲裁留痕一致性 - 语料泛查单口语走 Step 3 结构化 LLM 终局,留痕须记录全部层候选提议且 winner 与终局同源",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "锚点误吞获救(工单06)- 「买个东西怎么买」oos 锚句相似 1.000(判定4 必命中)但实为购买流程咨询:不得被 oos 罐头回复关会话,须 fallthrough 结构化精判改判(分类器实测判 shopping_guide/general_query,均非 oos;expectedIntents 列允许集,不断言单一标签)",
       "success": true,
       "score": 1
     },
