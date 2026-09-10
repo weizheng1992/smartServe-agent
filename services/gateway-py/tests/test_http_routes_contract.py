@@ -338,6 +338,59 @@ class TestStoreChatMultimodal:
         assert res.json()["success"] is False
 
 
+class TestConversationTimelineChronologicalOrder:
+    """时间线排序锚(2026-09-10):messages.timestamp 是 TEXT 列,网关写 naive 本地
+    墙钟(append_message datetime.now()),引擎写 UTC 带偏移(short_memory 模拟时钟,
+    与真实落库时刻可有分钟级偏差)—— 两格式字符串比较无意义,曾致最近一轮
+    「用户问 → 客服答」在时间线里倒置显示(答在问上)。排序锚改 created_at
+    (DB 单一时钟、DEFAULT now()),与 list_conversations / list_user_threads 的
+    LATERAL 末消息选取(ORDER BY created_at DESC)同锚。"""
+
+    async def test_store_chat_messages_orders_by_created_at_not_text_timestamp(self, client, contract_fixtures):
+        import datetime as dt
+
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        base = dt.datetime.now(dt.UTC)
+        t_user_real = base - dt.timedelta(minutes=4)
+        t_asst_real = base - dt.timedelta(minutes=2)
+        # 镜像生产数据形状:用户行=网关 naive 北京墙钟;客服行=引擎 UTC(+00:00)
+        naive_user_text = (t_user_real + dt.timedelta(hours=8)).replace(tzinfo=None).isoformat()
+        utc_asst_text = t_asst_real.isoformat()
+
+        thread_id = "thread_timeline_order_tz"
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") '
+                    "VALUES (:tid, 'CUST-TZ-ORDER', 'nike', 'active', NOW(), NOW()) ON CONFLICT (id) DO NOTHING"
+                ).bindparams(tid=thread_id)
+            )
+            for mid, role, content, ts_text, created_at in [
+                ("tzorder_user", "user", "坏了", naive_user_text, t_user_real),
+                ("tzorder_asst", "assistant", "收到您的照片,请选择破损商品", utc_asst_text, t_asst_real),
+            ]:
+                await session.execute(
+                    text(
+                        "INSERT INTO messages (id, thread_id, business_id, role, content, timestamp, created_at) "
+                        "VALUES (:mid, :tid, 'nike', :role, :content, :ts, :ca) ON CONFLICT (id) DO NOTHING"
+                    ).bindparams(
+                        mid=mid, tid=thread_id, role=role, content=content, ts=ts_text, ca=created_at.replace(tzinfo=None)
+                    )
+                )
+            await session.commit()
+
+        res = await client.get(
+            "/api/store/chat/messages",
+            params={"businessId": "nike", "threadId": thread_id, "userId": "CUST-TZ-ORDER"},
+        )
+        assert res.status_code == 200
+        roles = [m["role"] for m in res.json()["messages"]]
+        # 真实时序:用户问(早 2 分钟)在前、客服答在后;文本字符串序会倒置这对
+        assert roles == ["user", "assistant"]
+
+
 class TestStoreOrdersStrictScoping:
     """商户订单列表严格归属(2026-09-05):/api/store/orders 不得再 OR CUST-8801
     混入演示用户订单。背景 bug:任何 customerId 查询都会带出张伟(CUST-8801)

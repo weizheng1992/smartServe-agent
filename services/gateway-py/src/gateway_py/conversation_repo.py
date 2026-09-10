@@ -127,8 +127,14 @@ async def get_conversation_timeline(thread_id: str, business_id: str | None = No
             (
                 await session.execute(
                     text(
+                        # 排序锚用 created_at 而非 TEXT 列 timestamp:网关写 naive 本地墙钟、
+                        # 引擎写 UTC(带偏移的模拟时钟),两格式字符串比较无意义 —— 曾致
+                        # 「用户问→客服答」跨格式倒置(答在问上)。created_at 为 DB 单一
+                        # 时钟(DEFAULT now()),与 list_conversations / list_user_threads
+                        # LATERAL 末消息选取(ORDER BY created_at DESC)同锚;role 位次
+                        # 保留同刻并列时的逻辑序(同事务 now() 相同:先问后答)。
                         "SELECT id, role, content, cards, image_urls, timestamp FROM messages WHERE thread_id = :tid "
-                        "ORDER BY timestamp ASC, CASE role WHEN 'system' THEN 1 WHEN 'user' THEN 2 "
+                        "ORDER BY created_at ASC, CASE role WHEN 'system' THEN 1 WHEN 'user' THEN 2 "
                         "WHEN 'assistant' THEN 3 ELSE 4 END ASC, id ASC"
                     ).bindparams(tid=clean_thread_id)
                 )
