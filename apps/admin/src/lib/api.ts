@@ -200,6 +200,9 @@ export const tenantsApi = {
     apiKey?: string;
     industry?: string;
     config?: Record<string, any>;
+    // 新用户引导配置(2026-09-10):创建即携带,服务端 schema 校验后写入,
+    // 消除「先建后编辑」两步走;未携带 = 保持未配置(首访走平台默认)
+    onboardingConfig?: Record<string, any> | null;
   }) => {
     return adminApi.post('/api/tenant', body);
   },

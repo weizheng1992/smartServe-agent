@@ -152,14 +152,15 @@ export function useChatThreads({ currentUser, isSubmitting = false, onThreadCrea
   const handleDeleteThread = async (e: React.MouseEvent, threadIdToDelete: string) => {
     e.stopPropagation(); // Prevent choosing this thread upon deleting
     if (isSubmitting) return;
+    if (!currentUser) return;
 
     const confirmDelete = window.confirm(
-      '⚠️ 您确定要彻底删除该会话吗？\n该操作将物理抹除该会话下的所有聊天消息、审核单据、日志度量等关联记录，不可撤销！',
+      '⚠️ 您确定要删除该会话吗？\n该会话及其全部聊天消息将被删除，不可撤销！（审批与运营审计记录不受影响）',
     );
     if (!confirmDelete) return;
 
     try {
-      const res = await fetch(`/api/chat/threads?threadId=${threadIdToDelete}`, {
+      const res = await fetch(`/api/chat/threads?threadId=${threadIdToDelete}&userId=${currentUser.id}`, {
         method: 'DELETE',
       });
       const data = await res.json();

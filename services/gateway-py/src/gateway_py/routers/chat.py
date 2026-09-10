@@ -261,6 +261,24 @@ async def create_chat_thread(body: CreateThreadIn, request: Request):
     return {"success": True, "thread": thread}
 
 
+@router.delete("/threads")
+async def delete_chat_thread(threadId: str = Query(...), userId: str = Query(...)):
+    """删除会话线程(web 侧栏删线程按钮,TS 时代调用至今服务端恒 405 ——
+    2026-09-10 补齐存量缺口,路由计数 43→44)。
+
+    契约:``threadId``/``userId`` 必填(缺参 422);属主不符或线程无属主
+    返回 403(顾客列表严格等值本就看不到无主线程);查无此线程 404;成功
+    同事务删除消息、task_memory 挂起任务态与线程行。审计类记录(审批/
+    意图留痕/遥测)刻意保留 —— 审批与遥测是平台审计资产,不随顾客删线程蒸发。
+    """
+    outcome = await conversation_repo.delete_thread(threadId, userId)
+    if outcome == "not_found":
+        raise HTTPException(404, "Thread not found")
+    if outcome == "forbidden":
+        raise HTTPException(403, "Thread does not belong to the requesting user")
+    return {"success": True, "threadId": threadId}
+
+
 async def _sse_frame(seq: int, event: str, data) -> str:
     return f"id: {seq}\nevent: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 

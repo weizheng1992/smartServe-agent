@@ -325,6 +325,35 @@ async def list_user_threads(user_id: str, business_id: str | None = None, limit:
     return items
 
 
+async def delete_thread(thread_id: str, user_id: str) -> str:
+    """删除会话线程(DELETE /api/chat/threads,2026-09-10 补齐 web 侧栏存量缺口)。
+
+    返回 ``deleted`` / ``not_found`` / ``forbidden``(路由层映射 200/404/403)。
+    属主守卫:线程已有属主且非调用者,或线程无属主(顾客列表严格等值本就
+    看不到无主线程,不开放顾客删除)→ ``forbidden``。
+
+    同一事务删除三表:messages、task_memory(挂起任务态——POST 接受客户端
+    自报 threadId,同 id 重建不得复活旧任务态)、threads。审计类记录
+    (pending_approvals/intent_logs/session_metrics 等)刻意保留:审批与
+    遥测是平台审计资产,不随顾客删线程蒸发。
+    """
+    clean_tid = (thread_id or "").strip()
+    clean_uid = (user_id or "").strip()
+    async with get_session() as session:
+        row = (
+            await session.execute(text("SELECT user_id FROM threads WHERE id = :tid").bindparams(tid=clean_tid))
+        ).mappings().first()
+        if row is None:
+            return "not_found"
+        if not clean_uid or not row["user_id"] or row["user_id"] != clean_uid:
+            return "forbidden"
+        await session.execute(text("DELETE FROM messages WHERE thread_id = :tid").bindparams(tid=clean_tid))
+        await session.execute(text("DELETE FROM task_memory WHERE thread_id = :tid").bindparams(tid=clean_tid))
+        await session.execute(text("DELETE FROM threads WHERE id = :tid").bindparams(tid=clean_tid))
+        await session.commit()
+    return "deleted"
+
+
 async def append_message(payload: dict) -> dict:
     """镜像 ConversationRepository.appendMessage(含线程自愈与 operator 角色落库)。"""
     thread_id = payload["threadId"]

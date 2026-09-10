@@ -39,7 +39,7 @@ export function TenantsPage() {
 
   const createTenantApi = useCallback(
     async (item: Partial<TenantRecord>) => {
-      await tenantsApi.create({
+      const res = await tenantsApi.create({
         id: item.id || '',
         name: item.name || '',
         apiKey: item.apiKey,
@@ -51,7 +51,13 @@ export function TenantsPage() {
           autoEscalation: item.autoEscalation,
           webhookUrl: item.webhookUrl,
         },
+        // 创建即携带引导配置(未携带 = 保持未配置,首访走平台默认)
+        ...(item.onboardingConfig !== undefined ? { onboardingConfig: item.onboardingConfig } : {}),
       });
+      if (!res.success) {
+        // 诚实失败:onboardingConfig schema 校验 400 必须可见(detail 为 FastAPI HTTPException 字段)
+        throw new Error(res.error || res.detail || '租户创建失败');
+      }
       addOrUpdateTenant({
         id: item.id || '',
         name: item.name || '',
@@ -145,6 +151,7 @@ export function TenantsPage() {
       autoEscalation: true,
       webhookUrl: 'https://api.example.com/spi/webhook',
       status: 'active',
+      onboardingConfigJson: '',
     });
     setIsCreateOpen(true);
   };
@@ -161,24 +168,26 @@ export function TenantsPage() {
 
   const handleSaveSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // 引导配置 JSON 解析在提交前完成:手编错形即时可见,不发坏请求(创建/编辑同规则)
+    let parsedOnboarding: Record<string, any> | undefined;
+    const jsonText = (formData.onboardingConfigJson || '').trim();
+    if (jsonText) {
+      try {
+        parsedOnboarding = JSON.parse(jsonText);
+      } catch (err) {
+        alert(`引导配置不是合法 JSON:${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+    }
     if (isCreateOpen) {
       if (!formData.id || !formData.name) return;
       createItem({
         ...(formData as TenantRecord),
         createdAt: new Date().toISOString().split('T')[0],
+        // 非空 = 创建即写入(服务端校验 schema);空 = 不携带,保持未配置
+        ...(parsedOnboarding !== undefined ? { onboardingConfig: parsedOnboarding } : {}),
       }).catch((err: Error) => alert(`租户创建失败:${err.message}`));
     } else if (isEditOpen && selectedItem) {
-      // 引导配置 JSON 解析在提交前完成:手编错形即时可见,不发坏请求
-      let parsedOnboarding: Record<string, any> | undefined;
-      const jsonText = (formData.onboardingConfigJson || '').trim();
-      if (jsonText) {
-        try {
-          parsedOnboarding = JSON.parse(jsonText);
-        } catch (err) {
-          alert(`引导配置不是合法 JSON:${err instanceof Error ? err.message : String(err)}`);
-          return;
-        }
-      }
       // 剥离编辑态专用字段与回读副本:onboardingConfig 仅由本次解析结果决定
       // (非空 = 携带整体覆写;空 = 不携带,服务端保留既有)
       const {

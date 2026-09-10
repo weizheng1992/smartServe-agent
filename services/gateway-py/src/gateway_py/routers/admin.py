@@ -109,6 +109,9 @@ class TenantCreateIn(BaseModel):
     industry: str | None = None
     # 前端 create 以嵌套 config 携带行业/阈值/回调,与平铺字段取并集(平铺优先)
     config: dict | None = None
+    # 新用户引导配置(2026-09-10 补齐「仅编辑态」边界):与 PUT 同语义 ——
+    # 服务端 schema 校验,携带即写入(新建即生效,不必先建再编辑)
+    onboardingConfig: dict | None = None
 
 
 class TenantUpdateIn(BaseModel):
@@ -134,6 +137,13 @@ async def create_tenant(body: TenantCreateIn):
     webhook_url = body.webhookUrl or cfg.get("webhookUrl")
     refund_limit = body.refundLimit if body.refundLimit is not None else cfg.get("refundLimit")
 
+    # 与 PUT 同语义的服务端 schema 校验:JSON 手编错形诚实失败(400),
+    # 而非落库后在首访欢迎/引擎旁路两处静默回落平台默认
+    if body.onboardingConfig is not None:
+        onboarding_errors = validate_onboarding_config(body.onboardingConfig)
+        if onboarding_errors:
+            raise HTTPException(400, f"onboardingConfig 校验失败: {'; '.join(onboarding_errors)}")
+
     spi_config = {
         "mode": "remote_spi",
         "spiBaseUrl": webhook_url or "http://localhost:3005",
@@ -157,17 +167,32 @@ async def create_tenant(body: TenantCreateIn):
             )
         ).scalar_one_or_none()
         if existing:
-            await session.execute(
-                text("UPDATE tenant_configs SET spi_config = :spi, skills_config = :skills, updated_at = NOW() WHERE id = :cid").bindparams(
-                    spi=json.dumps(spi_config), skills=json.dumps(skills_config), cid=existing
+            # 合并式:仅当请求携带 onboardingConfig 时写入(重建既有租户未携带 → 不动既有引导配置)
+            if body.onboardingConfig is not None:
+                await session.execute(
+                    text(
+                        "UPDATE tenant_configs SET spi_config = :spi, skills_config = :skills, "
+                        "onboarding_config = CAST(:onboarding AS jsonb), updated_at = NOW() WHERE id = :cid"
+                    ).bindparams(
+                        spi=json.dumps(spi_config),
+                        skills=json.dumps(skills_config),
+                        onboarding=json.dumps(body.onboardingConfig),
+                        cid=existing,
+                    )
                 )
-            )
+            else:
+                await session.execute(
+                    text("UPDATE tenant_configs SET spi_config = :spi, skills_config = :skills, updated_at = NOW() WHERE id = :cid").bindparams(
+                        spi=json.dumps(spi_config), skills=json.dumps(skills_config), cid=existing
+                    )
+                )
         else:
             await session.execute(
                 text(
                     "INSERT INTO tenant_configs (business_id, system_prompt, welcome_message, status, version, "
-                    "spi_config, enabled_skills, skills_config) "
-                    "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), CAST(:skills AS jsonb))"
+                    "spi_config, enabled_skills, skills_config, onboarding_config) "
+                    "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), "
+                    "CAST(:skills AS jsonb), CAST(:onboarding AS jsonb))"
                 ).bindparams(
                     bid=clean_id,
                     prompt=f"You are the official AI Customer Support Agent for {body.name}.",
@@ -177,6 +202,7 @@ async def create_tenant(body: TenantCreateIn):
                         ["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]
                     ),
                     skills=json.dumps(skills_config),
+                    onboarding=json.dumps(body.onboardingConfig) if body.onboardingConfig is not None else None,
                 )
             )
         await session.commit()

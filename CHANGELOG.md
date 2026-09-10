@@ -4,7 +4,22 @@
 
 ---
 
-## [2.6.5] - 2026-09-10 (新用户引导话术:onboarding_config 单一配置源 + 服务端权威首访判定 + 问候旁路同源)
+## [2.6.6] - 2026-09-10 (2.6.5 收官遗留三清:DELETE /threads 补齐 + admin 创建流收 onboardingConfig + 回落语义措辞同步)
+
+用户指令「遗留 处理了」—— 收口 2.6.5 交付报告中的遗留项:web 侧栏删线程按钮自 TS 时代调用至今服务端恒 405、admin 引导配置仅编辑态可设(新建租户须先建后编辑两步走)、server-gateway.md §1.1 回落语义措辞与评审修订后的实际行为脱节。
+
+### ✨ Features
+
+- **DELETE /api/chat/threads(契约 43→44)**:`conversation_repo.delete_thread` 属主严格等值守卫(无主线程 403——顾客列表本就看不到,不开放顾客删除;跨用户 403;查无 404,threadId/userId 必填缺省 422);同一事务删除 threads + messages + task_memory(POST 接受客户端自报 threadId,同 id 重建不得复活旧任务态);**审计类记录(pending_approvals/intent_logs/session_metrics 等)刻意保留**——审批与遥测是平台审计资产,不随顾客删线程蒸发;web 确认弹窗文案与现实对齐(不再谎称抹除审核单据/日志度量),删除后活动线程回退逻辑保留。4 条契约测试(级联删除/必填/非属主 404)。
+- **admin 租户创建流收 onboardingConfig(消除「仅编辑态」边界)**:`POST /api/tenant` 的 `TenantCreateIn` 新增 `onboardingConfig`——与 PUT 同语义的服务端 `validate_onboarding_config` 校验(错形 400 诚实失败且租户不落库),tenant_configs 两分支落库(既有行合并式仅携带时写、新行 INSERT 带列),未携带保持未配置(首访走平台默认);admin 表单 JSON 文本域创建/编辑两态同渲染(文案区分:新建留空 = 不写入、编辑留空 = 不修改、`{}` = 显式重置),JSON 解析提升至提交前(两分支共用),createTenantApi 补 `res.success` 检查(400 经 throw→alert 可见,不再静默假装创建成功)。3 条契约测试(创建回读等值/错形 400 不落库/未携带回 null)。
+- **rules 措辞同步**:`server-gateway.md` §1.1 引导行回落语义改为评审修订后的行为(配置存在含 `{}` 即权威;welcome_message 列仅中继 NULL 存量租户),路由计数 43→44,补删线程条目与创建流语义;CLAUDE.md §2 契约计数同步。
+
+### ✅ 验证 (Verification,如实)
+
+- 网关契约套件 **120 passed**(2.6.5 基线 113 + 删线程 4 + 创建流 3),ruff 两服务干净,web/admin tsc + biome 干净。
+- 存量旧线程无 welcome 行维持设计决策不动(空时间线如实呈现,非缺陷)。
+
+---
 
 wayfinder 地图(`.scratch/new-user-onboarding/`)六张工单一次落地。此前新顾客看到的欢迎语是 web 前端写死的 `DEFAULT_ASSISTANT_MESSAGE`(提 LangGraph/记忆系统等内部术语、零租户品牌、零能力入口),刷新即丢、不落库;引擎问候旁路又持另一套自我介绍——两套话术并存。
 

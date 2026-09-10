@@ -53,7 +53,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
                             ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │              API 网关 (services/gateway-py,Python/FastAPI)             │
-│  - 43 条契约路由(39 冻结 + auth/me、chat/threads(GET/POST)、chat/upload):│
+│  - 44 条契约路由(39 冻结 + auth/me、chat/threads(GET/POST/DELETE)、chat/upload):│
 │    tenants、skills、approvals、聊天 SSE、conversations、RAG 文档、    │
 │    personas、guardrails、billing、logs、商户 store/admin、            │
 │    SPI v1(HMAC 签名)                                                 │

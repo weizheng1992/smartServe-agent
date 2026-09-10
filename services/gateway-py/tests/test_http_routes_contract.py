@@ -110,7 +110,10 @@ class TestTenantOnboardingConfig:
     PUT /api/tenant/{id} 收 onboardingConfig 完整 JSON 文档:服务端 schema 校验
     (engine_py.onboarding.validate_onboarding_config 单一来源)—— JSON 手编错形
     400 诚实失败;合法即整体覆写落 tenant_configs.onboarding_config,未携带
-    保留既有(合并式);GET /api/tenant/list 回读供编辑面预填。"""
+    保留既有(合并式);GET /api/tenant/list 回读供编辑面预填。
+
+    POST /api/tenant 创建流同语义(2026-09-10 补齐「仅编辑态」边界):创建即
+    携带即写入,不必先建再编辑;错形 400 且不落租户。"""
 
     VALID_ONBOARDING: ClassVar[dict] = {
         "welcomeText": "您好！我是契约测试租户的智能客服 🎉",
@@ -121,6 +124,51 @@ class TestTenantOnboardingConfig:
             {"label": "🎧 转人工", "action": "send_message", "payload": {"text": "转人工"}},
         ],
     }
+
+    async def test_create_with_onboarding_config_write_and_readback(self, client, contract_fixtures):
+        """创建即携带(2026-09-10):POST /api/tenant 带 onboardingConfig → 校验通过
+        即随建租户一并落库,列表回读等值;消除「先建后编辑」两步走。"""
+        ct_id = f"otc_{_TS}"
+        res = await client.post(
+            "/api/tenant",
+            json={"id": ct_id, "name": "创建带引导配置租户", "onboardingConfig": self.VALID_ONBOARDING},
+        )
+        assert res.status_code in (200, 201)
+        assert res.json()["success"] is True
+
+        list_res = await client.get("/api/tenant/list")
+        row = next((t for t in list_res.json()["tenants"] if t["id"] == ct_id), None)
+        assert row is not None
+        assert row["onboardingConfig"] == self.VALID_ONBOARDING
+
+        await client.delete(f"/api/tenant/{ct_id}")
+
+    async def test_create_with_invalid_onboarding_rejected_400(self, client, contract_fixtures):
+        """创建流错形与 PUT 同姿态:400 诚实失败,且租户不落库(不留半成品行)。"""
+        ct_id = f"otc2_{_TS}"
+        bad = {**self.VALID_ONBOARDING, "welcomText": "未知键错形"}
+        res = await client.post(
+            "/api/tenant",
+            json={"id": ct_id, "name": "创建错形校验租户", "onboardingConfig": bad},
+        )
+        assert res.status_code == 400
+        assert "onboardingConfig" in res.json()["detail"]
+
+        list_res = await client.get("/api/tenant/list")
+        assert next((t for t in list_res.json()["tenants"] if t["id"] == ct_id), None) is None
+
+    async def test_create_without_onboarding_leaves_unconfigured(self, client, contract_fixtures):
+        """未携带 = 保持未配置(回读 null,首访走平台默认),与编辑态「未携带保留」同语义。"""
+        ct_id = f"otc3_{_TS}"
+        res = await client.post("/api/tenant", json={"id": ct_id, "name": "创建不带引导租户"})
+        assert res.status_code in (200, 201)
+
+        list_res = await client.get("/api/tenant/list")
+        row = next((t for t in list_res.json()["tenants"] if t["id"] == ct_id), None)
+        assert row is not None
+        assert row["onboardingConfig"] is None
+
+        await client.delete(f"/api/tenant/{ct_id}")
 
     async def test_valid_onboarding_config_write_and_readback(self, client, contract_fixtures):
         ot_id = f"ot_{_TS}"
@@ -625,6 +673,86 @@ class TestThreadOnboardingLifecycle:
         assert res.status_code == 200
         assert res.json()["success"] is True
         assert await self._messages_of(client, "thread_onb_fail") == []
+
+
+class TestChatThreadDelete:
+    """DELETE /api/chat/threads(2026-09-10 补齐,路由计数 43→44)。
+
+    web 侧栏删线程按钮自 TS 时代就调用此端点,服务端一直 405 —— 存量缺口
+    收口。契约:threadId/userId 必填;属主严格等值(无主线程不开放顾客删除,
+    顾客列表本就看不到);删除范围 = 线程行 + 全部消息 + task_memory 挂起
+    任务态(同 id 重建不得复活旧任务态);审计类记录(审批/意图留痕/遥测)
+    刻意保留 —— 平台审计资产不随顾客删线程蒸发。
+    """
+
+    async def test_delete_removes_thread_messages_and_task_state(self, client, contract_fixtures):
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        uid = "CUST-E2E-DEL-1"
+        await client.post(
+            "/api/chat/threads", json={"userId": uid, "threadId": "thread_del_cascade", "businessId": "nike"}
+        )
+        # 挂起任务态:模拟一轮被 HITL 挂起的任务留下的 task_memory 行
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO task_memory (id, thread_id, pending_intents) "
+                    "VALUES (gen_random_uuid(), :tid, CAST('{}' AS jsonb))"
+                ).bindparams(tid="thread_del_cascade")
+            )
+            await session.commit()
+
+        res = await client.delete("/api/chat/threads", params={"threadId": "thread_del_cascade", "userId": uid})
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+
+        async with get_session() as session:
+            thread = (
+                await session.execute(
+                    text("SELECT id FROM threads WHERE id = :tid").bindparams(tid="thread_del_cascade")
+                )
+            ).first()
+            msg_count = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM messages WHERE thread_id = :tid").bindparams(tid="thread_del_cascade")
+                )
+            ).scalar()
+            task_count = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM task_memory WHERE thread_id = :tid").bindparams(tid="thread_del_cascade")
+                )
+            ).scalar()
+        assert thread is None
+        assert msg_count == 0  # 建线程引导行随会话一并删除
+        assert task_count == 0
+        listed = await client.get("/api/chat/threads", params={"userId": uid})
+        assert "thread_del_cascade" not in [t["id"] for t in listed.json()["threads"]]
+
+    async def test_delete_requires_both_params(self, client, contract_fixtures):
+        no_thread = await client.delete("/api/chat/threads", params={"userId": "CUST-E2E-DEL-2"})
+        assert no_thread.status_code == 422
+        no_user = await client.delete("/api/chat/threads", params={"threadId": "thread_del_x"})
+        assert no_user.status_code == 422
+
+    async def test_delete_rejects_non_owner(self, client, contract_fixtures):
+        """跨用户删除 403:与 POST 同 id 异主守卫同姿态,他人线程删不掉。"""
+        await client.post(
+            "/api/chat/threads",
+            json={"userId": "CUST-E2E-DEL-OWNER", "threadId": "thread_del_guard", "businessId": "nike"},
+        )
+        res = await client.delete(
+            "/api/chat/threads", params={"threadId": "thread_del_guard", "userId": "CUST-E2E-DEL-INTRUDER"}
+        )
+        assert res.status_code == 403
+        listed = await client.get("/api/chat/threads", params={"userId": "CUST-E2E-DEL-OWNER"})
+        assert "thread_del_guard" in [t["id"] for t in listed.json()["threads"]]
+
+    async def test_delete_unknown_thread_404(self, client, contract_fixtures):
+        res = await client.delete(
+            "/api/chat/threads", params={"threadId": "thread_del_ghost", "userId": "CUST-E2E-DEL-3"}
+        )
+        assert res.status_code == 404
 
 
 class TestChatUpload:
