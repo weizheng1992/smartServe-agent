@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { ThirdPartyOrder, ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from 'ui';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { useCurrentUser } from '../context/UserContext';
+
+/** 品类切换的「全部」哨兵:tab 清单首项与过滤判断共用同一常量 */
+const ALL_CATEGORY = '全部';
 
 export default function StorefrontPage() {
   const { user } = useCurrentUser();
@@ -12,6 +15,7 @@ export default function StorefrontPage() {
   const [addressCount, setAddressCount] = useState(0);
   const [cartCount, setCartCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState<string>(ALL_CATEGORY);
 
   // 选规格购买/加购弹窗
   const [buyingProduct, setBuyingProduct] = useState<ThirdPartyProduct | null>(null);
@@ -63,6 +67,21 @@ export default function StorefrontPage() {
     fetchProducts();
     fetchCounts(user.id);
   }, [user.id]);
+
+  // 品类切换:从商品数据派生品类清单,「全部」为首项
+  const categories = useMemo(() => {
+    const seen = new Set<string>();
+    for (const p of products) {
+      if (p.category) seen.add(p.category);
+    }
+    return [ALL_CATEGORY, ...Array.from(seen)];
+  }, [products]);
+
+  const categoryCount = (cat: string) =>
+    cat === ALL_CATEGORY ? products.length : products.filter((p) => p.category === cat).length;
+
+  const visibleProducts =
+    activeCategory === ALL_CATEGORY ? products : products.filter((p) => p.category === activeCategory);
 
   const handleOpenBuyModal = (product: ThirdPartyProduct) => {
     setBuyingProduct(product);
@@ -154,14 +173,44 @@ export default function StorefrontPage() {
 
       {/* SPU 商品网格大厅 */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-slate-900 flex items-center space-x-2">
             <span>🔥 旗舰精选 SPU 系列</span>
             <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full font-normal">
-              {products.length} 个 SPU 单元
+              {activeCategory === ALL_CATEGORY
+                ? `${products.length} 个 SPU 单元`
+                : `${visibleProducts.length}/${products.length} 个 SPU 单元`}
             </span>
           </h2>
           <span className="text-xs text-slate-500">读写商户独立数据库 merchant_spus & merchant_skus</span>
+        </div>
+
+        {/* 品类切换 */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          {categories.map((cat) => {
+            const isActive = activeCategory === cat;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setActiveCategory(cat)}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold border transition cursor-pointer flex items-center gap-1.5 ${
+                  isActive
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <span>{cat}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-normal ${
+                    isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {categoryCount(cat)}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {loading ? (
@@ -170,9 +219,13 @@ export default function StorefrontPage() {
               <div key={n} className="bg-white rounded-xl border border-slate-200 p-4 h-80 animate-pulse" />
             ))}
           </div>
+        ) : visibleProducts.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-xl py-16 text-center text-sm text-slate-500">
+            该分类下暂无在售商品
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {products.map((product) => (
+            {visibleProducts.map((product) => (
               <div
                 key={product.productId}
                 className="bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-md transition flex flex-col justify-between group"
