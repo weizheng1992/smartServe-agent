@@ -4,6 +4,27 @@
 
 ---
 
+## [2.6.7] - 2026-09-10 (误退事故两层收口:带图轮次豁免文本去重 + 单号信任边界;会话时间线排序锚修正)
+
+诊断起点(/diagnosing-bugs):用户重发「坏了」+ 破损投诉图(图内明示外店单号 ORD-77777),机器人对**本店真单** AURORA-ORD-2026-9081 误起退款审批。vision 实弹输出依旧完全正确(`extractedOrderId=ORD-77777` / severe 0.95)——2.6.3 的 OCR 消费修复本身无恙,错在成果被两道旧闸联合短路:
+
+1. **重复提问拦截器吞新证据**:Step 0 文本去重只比 `input == 上一轮用户文本`,当前轮图证与 Step 0.5 刚算出的 `vision_order_id` 被完全无视 → `duplicate_bypass` 逐字重放修复前(pre-OCR 消费)的旧消歧卡,引导用户挑本店真单;intent_logs 佐证 `duplicate_bypass(rule)` 后一轮即 refund 审批落库。
+2. **历史回填单号冒充已确认**:通用 `extract_order_id` 反扫历史把旧消歧卡里的本店真单回填进 slots,旧代码直接 `_set_target_order_id` → refund 判定 fused 的 confirmed 通道与视觉消歧闸双双短路 → vision OCR 失效的轮次(GLM 结构化输出非确定性失败降级启发式、extractedOrderId 为空)直接对历史单自动退款。
+
+### 🐛 Fixes
+
+- **带图轮次豁免文本去重(`triage/intent_triage_engine.py`)**:图证即新证据,与 `is_operational_action` 同为去重豁免闸——否则带图重发会在图证被消费之前就把会话关成过期答复的重放。纯文本真重复照旧重放(对照组钉死,不过度修复)。
+- **单号信任边界(同文件)**:slots.orderId 区分来源,优先级定谳 **文本显式 > TaskMemory 已确认 > 图内 OCR > 历史回填**;历史回填值留在 slots 供查询类续聊(ORDER_QUERY 快轨),不写入 order_context 冒充已确认、不充当消歧闸的已解析通道。Step 1.6 消歧闸的 `order_id_resolved` 同步改喂文本通道单号(谓词自述即「text channel」,旧代码传 slots 违反自述,历史回填值借道闸门短路消歧)。
+- **会话时间线排序锚(`gateway_py/conversation_repo.py`)**:merchant 聊天记录顺序错乱——messages.timestamp TEXT 混格式(网关 naive 墙钟 / 引擎 UTC 带偏移)字符串序跨格式必乱;列表排序与 LATERAL 末消息同锚改 `created_at`,契约测试钉死混格式线程「问→答」对序。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **332 passed**(基线 329 + 事故钉 3:带图重发不重放且 OCR 消费 / OCR 失效 × 历史回填必须消歧不退款 / 纯文本真重复照旧重放),ruff 干净;网关契约套件 **121 passed**(2.6.6 基线 120 + 时间线对序 1)。
+- 网关实弹回路(播种带 `-i` + 行数断言):事故线程形状逐字回放「坏了 + 破损图」→ 不重放、不自动退款,图内 ORD-77777 照常消费、幽灵单前置拦截诚实报错;全新线程同输入同样 GREEN。
+- 已知残余(如实记录):多意图分支 `_set_target_order_id(state, primary_order_id)` 仍可把回填单号种进 order_context 影响下一轮(需复合多意图输入才触发,不在事故链上,留观)。
+
+---
+
 ## [2.6.6] - 2026-09-10 (2.6.5 收官遗留三清:DELETE /threads 补齐 + admin 创建流收 onboardingConfig + 回落语义措辞同步)
 
 用户指令「遗留 处理了」—— 收口 2.6.5 交付报告中的遗留项:web 侧栏删线程按钮自 TS 时代调用至今服务端恒 405、admin 引导配置仅编辑态可设(新建租户须先建后编辑两步走)、server-gateway.md §1.1 回落语义措辞与评审修订后的实际行为脱节。

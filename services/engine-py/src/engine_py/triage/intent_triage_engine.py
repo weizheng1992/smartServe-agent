@@ -404,8 +404,19 @@ class IntentTriageEngine:
             user_msgs = [m for m in history_msgs if m.get("role") == "user"]
             assistant_msgs = [m for m in history_msgs if m.get("role") == "assistant"]
             is_operational_action = bool(OPERATIONAL_ACTION_RE.search(input_text))
+            # 带图轮次不做文本去重(2026-09-10 误退事故):拦截器只比文本,
+            # 「坏了」+破损图重发会先于 Step 0.5 图证(OCR 单号/破损定责)被消费
+            # 就把会话关成上一轮答复的重放 —— 事故线程重放了修复前(pre-OCR消费)
+            # 的旧消歧卡,引导用户挑本店真单对外店单 ORD-77777 误起退款审批。
+            # 图证即新证据,与 is_operational_action 同为去重豁免闸。
+            carries_image_evidence = bool(state.get("image_urls"))
 
-            if not is_operational_action and len(user_msgs) >= 2 and assistant_msgs:
+            if (
+                not is_operational_action
+                and not carries_image_evidence
+                and len(user_msgs) >= 2
+                and assistant_msgs
+            ):
                 last_user_msg = user_msgs[-2]
                 last_assistant_msg = assistant_msgs[-1]
 
@@ -601,17 +612,24 @@ class IntentTriageEngine:
                 input_text, active_intent, existing_slots, context
             )
 
-            if task_spec["slots"].get("orderId"):
-                _set_target_order_id(state, task_spec["slots"]["orderId"])
+            # 单号信任边界(2026-09-10 误退事故第二层):slots.orderId 可能来自通用
+            # extract_order_id 的历史反向回填 —— 历史最后提及的单号(旧消歧卡里的
+            # 本店真单)只是续聊启发,不是用户本轮确认。它一旦进入 order_context,
+            # refund 类判定(Step 2 判定 3 fused 的 confirmed 通道)与视觉消歧闸
+            # (order_id_resolved)都会被短路:图内外店单 OCR 失效的轮次直接对历史
+            # 单自动退款。文本显式与 TaskMemory 已确认才是可信通道;历史回填值
+            # 留在 slots 供查询类续聊(ORDER_QUERY 快轨),不冒充已确认。
+            text_order_match = ORDER_ID_RE.search(input_text)
+            text_channel_order_id = text_order_match.group(0) if text_order_match else None
+            confirmed_channel_order_id = (existing_order_context or {}).get("targetOrderId")
+            trusted_order_id = text_channel_order_id or confirmed_channel_order_id
+            if trusted_order_id:
+                _set_target_order_id(state, trusted_order_id)
 
-            # 图内 OCR 单号注入(2026-09-09 事故:ORD-77777 算完即丢)——文本单号
-            # 与已确认订单上下文优先,OCR 不得覆盖;注入后重跑槽位抽取,退款严格
-            # 抽取器经 orderContext.targetOrderId 取到(与消歧 matched 注入同型)
-            if (
-                vision_order_id
-                and not task_spec["slots"].get("orderId")
-                and not (existing_order_context or {}).get("targetOrderId")
-            ):
+            # 图内 OCR 单号注入(2026-09-09 事故:ORD-77777 算完即丢)——单号优先级
+            # 文本 > 已确认上下文 > 图内 OCR > 历史回填;注入后重跑槽位抽取,退款
+            # 严格抽取器经 orderContext.targetOrderId 取到(与消歧 matched 注入同型)
+            if vision_order_id and not trusted_order_id:
                 _set_target_order_id(state, vision_order_id)
                 context["orderContext"] = state["order_context"]
                 task_spec = SlotExtractor.extract(input_text, active_intent, existing_slots, context)
@@ -631,7 +649,9 @@ class IntentTriageEngine:
                 state,
                 vision_analysis,
                 after_sale=task_spec["intentType"] in AFTER_SALE_INTENTS,
-                order_id_resolved=task_spec["slots"].get("orderId"),
+                # 文本通道单号(slots 可能携带历史回填值,不算已解析 —— 信任边界
+                # 同上,2026-09-10 误退事故第二层;谓词本体另有 OCR/上下文通道)
+                order_id_resolved=text_channel_order_id,
             ):
                 disambig = await IntentTriageEngine._run_vision_disambig(state, vision_analysis, tenant_id)
                 if disambig["status"] == "matched":
