@@ -21,6 +21,10 @@ tests:
   - testCases/ecommerce/slot-clarification.json
   - testCases/ecommerce/multimodal-damage.json
   - testCases/ecommerce/metric-disambiguation.json
+  - testCases/ecommerce/consult-fastpath.json
+  - testCases/ecommerce/cart-guide.json
+  - testCases/ecommerce/arbitration-consistency.json
+  - testCases/ecommerce/baseline-incidents.json
   - testCases/legal/single-intent.json
   - testCases/security/injection.json
   - testCases/ecommerce/rag-evaluation.json

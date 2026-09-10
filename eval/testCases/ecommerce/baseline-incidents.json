@@ -1,0 +1,41 @@
+[
+  {
+    "description": "事故回归(实锤案例三,2026-09-09 坏了循环)- 无图无单号的模糊损坏词由嵌入层定责 refund 终局,不得再进 planner 深规划空转循环",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "我的东西坏了",
+      "expectedIntents": ["refund"]
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" }
+    ]
+  },
+  {
+    "description": "事故回归(实锤案例四,2026-09-09 ORD-77777 幽灵单)- 三库查无此单必须诚实失败,严禁开 HITL 工单并谎称已发起退款(执行器 4.1.1 前置拦截,端到端真跑)",
+    "vars": {
+      "input": "帮我退款订单 ORD-77777",
+      "businessId": "ecommerce"
+    },
+    "assert": [
+      { "type": "contains", "value": "未查询到订单" },
+      { "type": "not-contains", "value": "已为您发起退款" },
+      { "type": "not-contains", "value": "已提交退款申请" },
+      { "type": "not-contains", "value": "已通过退款审核" },
+      { "type": "not-contains", "value": "等待审核" }
+    ]
+  },
+  {
+    "description": "事故回归(实锤案例五)- 同会话同问一致性:语义缓存命中须返回与首答逐字一致的直答(sameOutput=true);缓存命中分支 intents 翻转 consult→general_query 是现行留痕行为,快轨终局权收编见工单05",
+    "vars": {
+      "input": "退货的话寄回运费谁出？",
+      "sameAskTwice": true,
+      "businessId": "aurora"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "output => { const p = JSON.parse(output); if (p.sameOutput !== true) { return { pass: false, score: 0, reason: `same-session same-ask gave different answers (semantic cache inconsistency). firstMethod=${p.firstMethod}, secondMethod=${p.secondMethod}` }; } if (!p.firstOutput || p.firstOutput.length < 20) { return { pass: false, score: 0, reason: 'first answer is empty — consult fast path did not fire' }; } return true; }"
+      }
+    ]
+  }
+]

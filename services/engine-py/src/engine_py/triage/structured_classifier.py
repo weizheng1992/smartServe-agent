@@ -142,7 +142,14 @@ async def classify(
     )
 
     try:
-        structured_llm = llm.with_structured_output(StructuredTriageOutput, include_raw=True)
+        # method="function_calling"(2026-09-10):glm-4.7 对默认 json_schema 路径
+        # 回围栏 JSON(```json ... ```)致 SDK 解析三连败,白白退避重试后才落
+        # prompt 兜底;function_calling 路径经 tool_calls.arguments 传 JSON 无围栏,
+        # 且兼容收口(llm/chat.py:tool_choice 改写 required)已由
+        # test_llm_chat_model.py 钉死 —— 与 vision/商品消歧同管道。
+        structured_llm = llm.with_structured_output(
+            StructuredTriageOutput, method="function_calling", include_raw=True
+        )
         result = await structured_llm.ainvoke(system_prompt)
         parsed = result.get("parsed") if isinstance(result, dict) else result
         if parsed is not None:

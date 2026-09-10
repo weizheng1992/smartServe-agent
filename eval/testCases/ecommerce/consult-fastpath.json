@@ -1,0 +1,46 @@
+[
+  {
+    "description": "咨询直答快轨 - 退货政策纯咨询秒级直答不进 planner(实锤案例一:arbitration.method=rag_direct 证明在 triage 内闭环,planner 从未运行)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "退货政策是什么？",
+      "expectedIntents": ["consult"],
+      "businessId": "aurora"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" },
+      {
+        "type": "javascript",
+        "value": "output => { const p = JSON.parse(output); const m = (p.arbitration||{}).method; if (m !== 'rag_direct') { return { pass: false, score: 0, reason: `expected arbitration.method=rag_direct (consult fast path bypass), got ${m}` }; } return true; }"
+      }
+    ]
+  },
+  {
+    "description": "咨询直答快轨 - 尺码选择知识咨询(aurora 租户 RAG 知识库)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "你们家的鞋子尺码怎么选？",
+      "expectedIntents": ["consult"],
+      "businessId": "aurora"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" }
+    ]
+  },
+  {
+    "description": "咨询直答快轨 - 口语化时效表达逃逸规则闸,由 Step 3 结构化 LLM 捕获 consult 后走同一快轨(rag_consult_direct_llm)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "买完之后一般几天能到手上？",
+      "expectedIntents": ["consult"],
+      "businessId": "aurora"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" },
+      {
+        "type": "javascript",
+        "value": "output => { const p = JSON.parse(output); const m = (p.arbitration||{}).method; if (m !== 'rag_direct') { return { pass: false, score: 0, reason: `expected arbitration.method=rag_direct (Step3 LLM consult → same fast path), got ${m}` }; } return true; }"
+      }
+    ]
+  }
+]

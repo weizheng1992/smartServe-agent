@@ -5,14 +5,16 @@ export const REPO_ROOT = resolve(__dirname, '..');
 export const BASELINE_DIR = resolve(__dirname, 'baselines');
 
 export interface SuiteDef {
-  name: 'unified' | 'planner' | 'classify';
+  name: 'unified' | 'planner';
   config: string;
 }
 
+// classify 分册已退役(2026-09-10 工单03):其 7 个意图用例早已 1:1 收编进
+// 统一套件,且统一套件的意图用例自此走生产瀑布真跑(非回声),分类回归
+// 由 unified 基线一力承担;独立 classify 分册成为纯冗余。
 export const SUITES: SuiteDef[] = [
   { name: 'unified', config: 'eval/promptfooconfig.yaml' },
   { name: 'planner', config: 'eval/promptfoo.planner.yaml' },
-  { name: 'classify', config: 'eval/promptfoo.classify.yaml' },
 ];
 
 export interface ScorerAggregate {

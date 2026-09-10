@@ -35,7 +35,10 @@ class TestBigmodelParamStripped:
             tool_choice={"type": "function", "function": {"name": "T"}},
         )
         assert "parallel_tool_calls" not in payload
-        assert "stream" not in payload  # False 剥除;显式 True 流式语义须保留
+        # stream:false 仅与 tools 同现才剥(2026-09-10 修正):本直传无 tools,
+        # 键保留 —— SDK response_format 路径的 ``payload.pop("stream")`` 依赖键存在,
+        # 无条件剥除曾令默认 method 结构化调用全量 KeyError('stream')
+        assert payload.get("stream") is False
         assert payload["tool_choice"] == "required"  # 对象形式改写,非剥除(闲聊 prompt 下仍强制调工具)
 
     def test_structured_output_request_omits_param_end_to_end(self):
@@ -113,6 +116,73 @@ class TestBigmodelParamStripped:
                 # 思维链关闭同点注入:thinking 与 tools 同现 bigmodel 收(实测),且必须
                 # 穿透 with_structured_output —— 否则 triage 分类器仍带 reasoning 拖延迟
                 assert captured["body"]["thinking"] == {"type": "disabled"}
+            finally:
+                chatmod.settings = original_settings  # type: ignore[assignment]
+                chatmod.get_chat_model.cache_clear()
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_structured_output_default_method_not_broken_by_stream_strip(self):
+        """默认 method(response_format/json_schema 路径)回归钉死(2026-09-10):
+
+        SDK ``_agenerate`` 对 response_format 载荷执行无守卫 ``payload.pop("stream")``,
+        依赖 stream 键存在;1b15979 的无条件剥除令该路径全量 KeyError('stream'),
+        结构化调用被静默打落到 prompt 兜底(3 次退避重试 + 一次兜底调用,延迟与
+        成本双涨)。本用例证明默认 method 的结构化调用在剥除逻辑下仍然存活。
+        """
+        captured: dict = {}
+
+        class _EchoJson(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                captured["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                resp = json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "finish_reason": "stop",
+                                "index": 0,
+                                "message": {"content": '{"ok": true}', "role": "assistant"},
+                            }
+                        ],
+                        "created": 1,
+                        "id": "x",
+                        "model": "echo",
+                        "object": "chat.completion",
+                    }
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+
+            def log_message(self, *args) -> None:  # 静默访问日志
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _EchoJson)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            fake = SimpleNamespace(
+                llm_base_url=f"http://127.0.0.1:{server.server_port}/v1",
+                llm_api_key="sk-test",
+                llm_model="glm-4.7",
+                llm_thinking="disabled",
+            )
+            original_settings = chatmod.settings
+            chatmod.settings = fake  # type: ignore[assignment]
+            chatmod.get_chat_model.cache_clear()
+            model = chatmod.get_chat_model()
+            try:
+                from pydantic import BaseModel
+
+                class _T(BaseModel):
+                    ok: bool
+
+                structured = model.with_structured_output(_T)  # 默认 method
+                result = structured.invoke("返回 ok=true")
+                assert result.ok is True  # 此前该调用 KeyError('stream') 三连后落兜底
+                assert "response_format" in captured["body"]  # 确认走的是 response_format 路径
             finally:
                 chatmod.settings = original_settings  # type: ignore[assignment]
                 chatmod.get_chat_model.cache_clear()

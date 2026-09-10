@@ -1,0 +1,24 @@
+[
+  {
+    "description": "购物车技能快轨 - 口语化加购表达命中 skill_fast_track(购物车写操作必须走技能 SOP 管道,不走 LLM 工具兜底)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "帮我把这双透气跑鞋加入购物车",
+      "expectedIntents": ["cart_manage"]
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" }
+    ]
+  },
+  {
+    "description": "导购技能快轨 - 商品推荐请求命中 skill_fast_track",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "推荐几款适合夏天穿的透气跑鞋",
+      "expectedIntents": ["shopping_guide"]
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" }
+    ]
+  }
+]

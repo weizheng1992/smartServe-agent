@@ -120,7 +120,12 @@ class _ResilientChatOpenAI(ChatOpenAI):
         # with_structured_output(function_calling) 三者皆发,此前 triage
         # 分类器/商品消歧等全部结构化调用 400,被关键词兜底静默掩盖。
         payload.pop("parallel_tool_calls", None)
-        if payload.get("stream") is False:
+        # stream:false 仅与 tools 同现才 400(1210);单独出现无害,且 SDK 的
+        # response_format 路径(base.py ``if "response_format" in payload:
+        # payload.pop("stream")``)依赖该键存在 —— 无条件剥除令默认 method 的
+        # with_structured_output 全量 KeyError('stream'),结构化调用被静默
+        # 打落到 prompt 兜底(2026-09-10 修复,1b15979 的过剥回归)。
+        if payload.get("stream") is False and payload.get("tools"):
             payload.pop("stream")
         if isinstance(payload.get("tool_choice"), dict):
             payload["tool_choice"] = "required"
