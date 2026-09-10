@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import select

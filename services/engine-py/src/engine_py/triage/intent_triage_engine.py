@@ -929,27 +929,22 @@ class IntentTriageEngine:
                     "tool_errors_count": -1,
                 }
 
-            # 判定 4: 超出业务范畴拦截
+            # 判定 4: 超出业务范畴拦截 —— 锚点层降为提议者(intent-arbitration 06,
+            # 2026-09-10)。旧路径 29 条锚句余弦 × 硬阈值判 oos 即直接关会话,零
+            # LLM 确认:「买个东西怎么买」(购买流程咨询,oos 锚句相似 1.000)被
+            # 误吞成零计划兜底,而结构化精判判 shopping_guide。现仅记提议后
+            # fallthrough Step 3:LLM 确认出范畴 → llm_out_of_scope 收尾(行为
+            # 不变,该路径 +1 调用可接受);改判 → 咨询直答/动作管线照常裁决。
+            # 真 oos(天气/写代码)的确认调用经 01 的 node 归因计入延迟统计,
+            # p50 咨询路径不含本路径,红线不破。
             if score_oos >= 0.86 and score_oos - max(score_order, score_refund) >= 0.06:
-                reply = (
-                    "您好！我是您的高级智能电商客服助理，主要负责协助处理订单、物流及退款相关业务。"
-                    "您刚才提到的问题超出了我的服务范围（属于日常咨询/外部问题）。"
-                    "请问有什么具体的电商订单问题需要我协助吗？"
-                )
-                return await IntentTriageEngine.handle_immediate_bypass(
-                    state,
-                    "embedding_out_of_scope",
-                    reply,
-                    [{"intent": "general_query", "confidence": score_oos}],
-                    "embedding",
-                    score_oos,
-                    candidates=[
-                        *proposals,
-                        # 宣称 out_of_scope × 落库 general_query:锚点层的宣称与
-                        # 终局落库不符,坏例池「宣称与落库不符」信号源的靶样本
-                        _proposal("embedding", "out_of_scope", score_oos),
-                    ],
-                )
+                proposals.append(_proposal("embedding", "out_of_scope", score_oos))
+                if state.get("job_id"):
+                    await emit_status(
+                        state["job_id"],
+                        "🔎 锚点初判为业务范畴外,正在交由大模型复核确认...",
+                        node="triage",
+                    )
         except Exception as embed_err:
             print(f"[Triage Embedding Step 2 Exception] Bypassing Embedding Classifier: {embed_err}")
 
@@ -996,6 +991,10 @@ class IntentTriageEngine:
                 item.intent == "out_of_scope" for item in structured_res.intents
             )
             if is_oos:
+                # 锚点 oos 提议的 LLM 确认终点(06):真 oos 在此收尾,candidates
+                # 呈现 embedding→structured_llm 的确认链;改判则不进本分支,
+                # 走下方 consult 直答 / 动作管线。宣称 out_of_scope × 落库
+                # general_query:坏例池「宣称与落库不符」信号源同口径。
                 reply = (
                     "您好！我是您的高级智能电商客服助理，主要负责协助处理导购、购物车、订单物流及退款相关业务。"
                     "您刚才提到的问题超出了我的服务范围（属于外部或高风险意图）。"
@@ -1010,7 +1009,6 @@ class IntentTriageEngine:
                     0.9,
                     candidates=[
                         *proposals,
-                        # 宣称 out_of_scope × 落库 general_query:与判定 4 同口径
                         _proposal("structured_llm", "out_of_scope", 0.9),
                     ],
                 )

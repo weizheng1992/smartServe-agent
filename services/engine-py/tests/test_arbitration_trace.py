@@ -31,7 +31,6 @@ from engine_py.skills import SkillRegistry
 from engine_py.triage import intent_triage_engine as triage_mod
 from engine_py.triage.intent_triage_engine import IntentTriageEngine
 
-
 # ---- 共享假件(与 test_consult_fast_path 同构) ----
 
 
