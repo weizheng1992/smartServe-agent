@@ -235,6 +235,12 @@ class IntentLog(Base):
     predicted_intents: Mapped[list] = mapped_column(JSONB, nullable=False)
     method: Mapped[str | None] = mapped_column(Text)
     confidence: Mapped[float | None] = mapped_column(Float)
+    # 仲裁留痕(2026-09-10 intent-arbitration 01):各判定层提议快照、终局胜者
+    # 与裁决理由 —— 槽位层与 skill_fast_track 曾对同一输入双写且无仲裁记录,
+    # 挖掘口径(宣称层 vs 落库胜者)自此可查。
+    candidates: Mapped[list | None] = mapped_column(JSONB)
+    winner: Mapped[str | None] = mapped_column(Text)
+    arbitration_reason: Mapped[str | None] = mapped_column(Text)
     actual_outcome: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 

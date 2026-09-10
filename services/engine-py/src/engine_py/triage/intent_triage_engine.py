@@ -11,6 +11,7 @@ import asyncio
 import re
 from typing import Any
 
+from ..badcase.intent_signals import record_intent_conflict_if_any
 from ..db import IntentLog, LowConfidenceLog, get_session
 from ..event_bus import emit_job_result, emit_status
 from ..llm import CircuitBreakerOpenError
@@ -86,11 +87,36 @@ async def _emit_vision_order_linked(job_id: str | None, order_id: str, product_n
         )
 
 
+def _proposal(layer: str, intent: Any, confidence: Any = None) -> dict:
+    """仲裁留痕:单层判定提议快照(intent-arbitration 01,2026-09-10)。
+
+    candidates 列表的元素形状:``{"layer", "intent", "confidence"}``。规则闸门
+    (consult_gate/rule_prefilter)无数值置信度,confidence 记 None;
+    消费方(坏例池冲突信号源、冲突触发仲裁)以 layer+intent 对判定冲突。
+    """
+    return {
+        "layer": layer,
+        "intent": str(intent) if intent is not None else None,
+        "confidence": round(float(confidence), 3) if confidence is not None else None,
+    }
+
+
 class IntentTriageEngine:
     @staticmethod
     async def log_intent_to_db(
-        thread_id: str, input_text: str, intents: list[dict], method: str, confidence: float
+        thread_id: str,
+        input_text: str,
+        intents: list[dict],
+        method: str,
+        confidence: float,
+        candidates: list[dict] | None = None,
+        arbitration_reason: str | None = None,
     ) -> None:
+        """终局决策单点落库(intent-arbitration 01):candidates 承载各判定层
+        提议快照,winner 取首个 primary 意图,arbitration_reason 记裁决理由
+        (旁路路径默认 route_key)。对同一输入只允许一次本调用 —— 槽位层与
+        skill_fast_track 曾双写两行且无仲裁记录,现 fast-track 命中时以
+        bypass 内的本次写为准,槽位层不再预写。"""
         try:
             async with get_session() as session:
                 session.add(
@@ -100,11 +126,18 @@ class IntentTriageEngine:
                         predicted_intents=intents,
                         method=method,
                         confidence=confidence,
+                        candidates=candidates,
+                        winner=(intents[0].get("intent") if intents else None),
+                        arbitration_reason=arbitration_reason,
                     )
                 )
                 await session.commit()
             if confidence < 0.65:
                 await IntentTriageEngine.log_low_confidence_to_db(thread_id, input_text, intents)
+            # 📥 分类器冲突信号入坏例池(02):候选跨意图族(动作形 × 咨询形)
+            # → 候选行;入池静默降级,失败不影响意图日志已落的事实
+            if candidates and len(candidates) >= 2:
+                await record_intent_conflict_if_any(thread_id, candidates)
         except Exception as err:
             print(f"[Triage Logging Exception] Bypassed log persistence: {err}")
 
@@ -134,6 +167,8 @@ class IntentTriageEngine:
         confidence: float,
         damage_assessment: dict | None = None,
         cards: list | None = None,
+        candidates: list[dict] | None = None,
+        arbitration_reason: str | None = None,
     ) -> dict:
         tenant_id = tenant_of_state(state)
         sanitized_reply = sanitize_tenant_response(reply_text, tenant_id)
@@ -145,6 +180,9 @@ class IntentTriageEngine:
             intents if intents else [{"intent": "general_query", "confidence": confidence}],
             method,
             confidence,
+            candidates=candidates,
+            # 旁路的裁决理由默认即路由键(哪条快道关闭了会话)
+            arbitration_reason=arbitration_reason or route_key,
         )
 
         bypass_plan = {
@@ -205,6 +243,7 @@ class IntentTriageEngine:
         confidence: float,
         damage_assessment: dict | None,
         disambig: dict,
+        candidates: list[dict] | None = None,
     ) -> dict:
         """消歧无候选/多候选两态的 bypass 收口(Step 1.6 与意图浮现点共用,2026-09-09)。"""
         if not disambig["candidates"]:
@@ -216,6 +255,7 @@ class IntentTriageEngine:
                 "vision_disambig",
                 0.9,
                 damage_assessment,
+                candidates=candidates,
             )
         return await IntentTriageEngine.handle_immediate_bypass(
             state,
@@ -226,12 +266,18 @@ class IntentTriageEngine:
             0.9,
             damage_assessment,
             [build_select_card(disambig["candidates"])],
+            candidates=candidates,
         )
 
     @staticmethod
     async def process(state: dict) -> dict:
         thread_id = state.get("thread_id", "")
         input_text = (state.get("input") or "").strip()
+
+        # 仲裁留痕(intent-arbitration 01,2026-09-10):逐层累积判定提议,终局
+        # 决策单点落库时作为 candidates 快照 —— 正则/槽位/锚点层降为「提议者」,
+        # 谁关闭了会话、谁压过了谁,自此可查(坏例池冲突信号源共同消费)。
+        proposals: list[dict] = []
 
         input_embedding = state.get("input_embedding") or []
         if input_text and input_embedding:
@@ -419,10 +465,17 @@ class IntentTriageEngine:
                     "rag_direct",
                     consult_confidence,
                     damage_assessment,
+                    candidates=[_proposal("consult_gate", "consult")],
                 )
             consult_intents = [{"intent": AgentIntentType.GENERAL_QUERY, "confidence": 0.9, "type": "primary"}]
             await IntentTriageEngine.log_intent_to_db(
-                thread_id, input_text, consult_intents, "consult_no_rag", 0.9
+                thread_id,
+                input_text,
+                consult_intents,
+                "consult_no_rag",
+                0.9,
+                candidates=[_proposal("consult_gate", "consult")],
+                arbitration_reason="consult_no_rag",
             )
             return {
                 "intents": consult_intents,
@@ -477,7 +530,15 @@ class IntentTriageEngine:
                     _set_target_order_id(state, primary_order_id)
 
                 await IntentTriageEngine.log_intent_to_db(
-                    thread_id, input_text, multi_intents, "slot_extractor_multi", 0.95
+                    thread_id,
+                    input_text,
+                    multi_intents,
+                    "slot_extractor_multi",
+                    0.95,
+                    candidates=[
+                        _proposal("slot_extractor", s["intentType"], s["confidence"]) for s in all_specs
+                    ],
+                    arbitration_reason="slot_extractor_multi",
                 )
                 return {
                     "intents": multi_intents,
@@ -508,6 +569,10 @@ class IntentTriageEngine:
                 context["orderContext"] = state["order_context"]
                 task_spec = SlotExtractor.extract(input_text, active_intent, existing_slots, context)
 
+            # 槽位层提议入留痕(实体注入/消歧重抽取后取最终形态;后续各决策点
+            # 的 candidates 以此为前缀,呈现「槽位判 X vs 锚点判 Y」的竞争原貌)
+            proposals.append(_proposal("slot_extractor", task_spec["intentType"], task_spec["confidence"]))
+
             # 📷 Step 1.6: 破损图商品归属消歧(grilling 2026-09-09)——售后意图
             # 带图但缺 orderId(图内也无单号,OCR 通道失效)时,用 vision 摘要 ×
             # 近单商品行做 LLM 消歧,替代机械"请提供订单号"澄清:
@@ -529,10 +594,18 @@ class IntentTriageEngine:
                     # 重跑槽位抽取:targetOrderId 已就位,本轮 slots 直接带上
                     # orderId,免二次"请提供订单号"澄清;仍取不到则走下方正常澄清兜底
                     task_spec = SlotExtractor.extract(input_text, active_intent, existing_slots, context)
+                    proposals[-1] = _proposal(
+                        "slot_extractor", task_spec["intentType"], task_spec["confidence"]
+                    )
                 else:
                     # 无候选/多候选两态收口(无候选明示指引,多候选出商品选择卡)
                     return await IntentTriageEngine._vision_disambig_bypass(
-                        state, task_spec["intentType"], task_spec["confidence"], damage_assessment, disambig
+                        state,
+                        task_spec["intentType"],
+                        task_spec["confidence"],
+                        damage_assessment,
+                        disambig,
+                        candidates=list(proposals),
                     )
 
             # 高风险/多参数意图缺失必填槽位 → 即时追问,阻断死循环自旋
@@ -563,6 +636,7 @@ class IntentTriageEngine:
                     "slot_extractor",
                     task_spec["confidence"],
                     damage_assessment,
+                    candidates=list(proposals),
                 )
 
             is_multi_intent_candidate = bool(MULTI_INTENT_CANDIDATE_RE.search(input_text)) or (
@@ -584,9 +658,6 @@ class IntentTriageEngine:
                         "taskSpec": task_spec,
                     }
                 ]
-                await IntentTriageEngine.log_intent_to_db(
-                    thread_id, input_text, intents, "slot_extractor", task_spec["confidence"]
-                )
                 await task_memory.save_task_state(
                     {
                         "goal": f"Completed {task_spec['intentType']}",
@@ -600,12 +671,32 @@ class IntentTriageEngine:
                     }
                 )
 
-                # 🎯 Skill Fast-Track 直达极速执行(skills 包落地后自动激活)
+                # 🎯 Skill Fast-Track 直达极速执行(skills 包落地后自动激活)。
+                # 终局决策单点落库(01):fast-track 命中时以 bypass 内的写为准
+                # (method=skill_fast_track,candidates 含槽位+技能两提议);
+                # 未命中才在下方落 slot_extractor 行 —— 修复同一输入双写。
                 fast_track = await IntentTriageEngine._try_skill_fast_track(
-                    state, thread_id, tenant_id, task_spec, history_msgs, damage_assessment, intents
+                    state,
+                    thread_id,
+                    tenant_id,
+                    task_spec,
+                    history_msgs,
+                    damage_assessment,
+                    intents,
+                    proposals,
                 )
                 if fast_track is not None:
                     return fast_track
+
+                await IntentTriageEngine.log_intent_to_db(
+                    thread_id,
+                    input_text,
+                    intents,
+                    "slot_extractor",
+                    task_spec["confidence"],
+                    candidates=list(proposals),
+                    arbitration_reason="slot_extractor_single_complete",
+                )
 
                 return {
                     "intents": intents,
@@ -645,6 +736,10 @@ class IntentTriageEngine:
                         [{"intent": "general_query", "confidence": cache_hit["similarity"]}],
                         "semantic_cache",
                         cache_hit["similarity"],
+                        candidates=[
+                            *proposals,
+                            _proposal("semantic_cache", "general_query", cache_hit["similarity"]),
+                        ],
                     )
 
             for v in anchors["order_status"]:
@@ -686,7 +781,17 @@ class IntentTriageEngine:
                     },
                 ]
                 await IntentTriageEngine.log_intent_to_db(
-                    thread_id, input_text, intents, "embedding", intents[0]["confidence"]
+                    thread_id,
+                    input_text,
+                    intents,
+                    "embedding",
+                    intents[0]["confidence"],
+                    candidates=[
+                        *proposals,
+                        _proposal("embedding", "order_status", score_order),
+                        _proposal("embedding", "refund", score_refund),
+                    ],
+                    arbitration_reason="embedding_composite",
                 )
                 return {
                     "intents": intents,
@@ -711,7 +816,13 @@ class IntentTriageEngine:
                     }
                 ]
                 await IntentTriageEngine.log_intent_to_db(
-                    thread_id, input_text, intents, "embedding", intents[0]["confidence"]
+                    thread_id,
+                    input_text,
+                    intents,
+                    "embedding",
+                    intents[0]["confidence"],
+                    candidates=[*proposals, _proposal("embedding", "order_status", score_order)],
+                    arbitration_reason="embedding_order_status",
                 )
                 return {
                     "intents": intents,
@@ -743,7 +854,15 @@ class IntentTriageEngine:
                         refund_order_id = disambig["orderId"]
                     else:
                         return await IntentTriageEngine._vision_disambig_bypass(
-                            state, "refund", max(score_refund, 0.95), damage_assessment, disambig
+                            state,
+                            "refund",
+                            max(score_refund, 0.95),
+                            damage_assessment,
+                            disambig,
+                            candidates=[
+                                *proposals,
+                                _proposal("embedding", "refund", score_refund),
+                            ],
                         )
                 intents = [
                     {
@@ -754,7 +873,13 @@ class IntentTriageEngine:
                     }
                 ]
                 await IntentTriageEngine.log_intent_to_db(
-                    thread_id, input_text, intents, "embedding", intents[0]["confidence"]
+                    thread_id,
+                    input_text,
+                    intents,
+                    "embedding",
+                    intents[0]["confidence"],
+                    candidates=[*proposals, _proposal("embedding", "refund", score_refund)],
+                    arbitration_reason="embedding_refund",
                 )
                 return {
                     "intents": intents,
@@ -780,6 +905,12 @@ class IntentTriageEngine:
                     [{"intent": "general_query", "confidence": score_oos}],
                     "embedding",
                     score_oos,
+                    candidates=[
+                        *proposals,
+                        # 宣称 out_of_scope × 落库 general_query:锚点层的宣称与
+                        # 终局落库不符,坏例池「宣称与落库不符」信号源的靶样本
+                        _proposal("embedding", "out_of_scope", score_oos),
+                    ],
                 )
         except Exception as embed_err:
             print(f"[Triage Embedding Step 2 Exception] Bypassing Embedding Classifier: {embed_err}")
@@ -815,6 +946,14 @@ class IntentTriageEngine:
             fallback_match = ORDER_ID_RE.search(input_text)
             fallback_order_id = fallback_match.group(0) if fallback_match else None
 
+            # 分类器提议(Step 3 各决策点共用的 candidates 尾元素)
+            llm_first = structured_res.intents[0] if structured_res.intents else None
+            llm_proposal = _proposal(
+                "structured_llm",
+                llm_first.intent if llm_first else None,
+                (llm_first.confidence if llm_first else None) or 0.9,
+            )
+
             is_oos = structured_res.isOutOfScope or any(
                 item.intent == "out_of_scope" for item in structured_res.intents
             )
@@ -831,6 +970,11 @@ class IntentTriageEngine:
                     [{"intent": "general_query", "confidence": 0.9}],
                     "structured_llm",
                     0.9,
+                    candidates=[
+                        *proposals,
+                        # 宣称 out_of_scope × 落库 general_query:与判定 4 同口径
+                        _proposal("structured_llm", "out_of_scope", 0.9),
+                    ],
                 )
 
             parsed: list[dict] = []
@@ -889,6 +1033,7 @@ class IntentTriageEngine:
                         parsed[0]["confidence"] if parsed else 0.9,
                         damage_assessment,
                         disambig,
+                        candidates=[*proposals, llm_proposal],
                     )
 
             first_missing = next(
@@ -907,6 +1052,7 @@ class IntentTriageEngine:
                     "structured_llm",
                     parsed[0]["confidence"] if parsed else 0.9,
                     damage_assessment,
+                    candidates=[*proposals, llm_proposal],
                 )
 
             # 🛣️ 分类器判 consult(规则层漏网的咨询措辞)× RAG 非空 → 直答快轨;
@@ -923,11 +1069,20 @@ class IntentTriageEngine:
                         "rag_direct",
                         consult_confidence,
                         damage_assessment,
+                        candidates=[*proposals, llm_proposal],
                     )
                 parsed = [{**p, "intent": AgentIntentType.GENERAL_QUERY} for p in parsed]
 
             confidence = parsed[0]["confidence"] if parsed else 0.85
-            await IntentTriageEngine.log_intent_to_db(thread_id, input_text, parsed, "structured_llm", confidence)
+            await IntentTriageEngine.log_intent_to_db(
+                thread_id,
+                input_text,
+                parsed,
+                "structured_llm",
+                confidence,
+                candidates=[*proposals, llm_proposal],
+                arbitration_reason="structured_llm_terminal",
+            )
 
             if state.get("job_id"):
                 await emit_status(
@@ -956,7 +1111,13 @@ class IntentTriageEngine:
             print(f"IntentTriageEngine Step 3 structured classifier failed: {err}")
             fallback_intents = [{"intent": "general_query", "confidence": 0.5}]
             await IntentTriageEngine.log_intent_to_db(
-                thread_id, input_text, fallback_intents, "structured_llm_fallback", 0.5
+                thread_id,
+                input_text,
+                fallback_intents,
+                "structured_llm_fallback",
+                0.5,
+                candidates=list(proposals),
+                arbitration_reason="structured_llm_exception_fallback",
             )
             return {
                 "intents": fallback_intents,
@@ -976,6 +1137,7 @@ class IntentTriageEngine:
         history_msgs: list[dict],
         damage_assessment: dict | None,
         intents: list[dict],
+        proposals: list[dict] | None = None,
     ) -> dict | None:
         """🎯 Skill Fast-Track:命中专属技能则 Triage 阶段直达闭环履约。
 
@@ -1025,6 +1187,10 @@ class IntentTriageEngine:
                 "skill_fast_track",
                 task_spec["confidence"],
                 damage_assessment,
+                candidates=[
+                    *(proposals or []),
+                    _proposal("skill_fast_track", matching_skill.metadata["id"], task_spec["confidence"]),
+                ],
             )
             return {
                 **bypass,

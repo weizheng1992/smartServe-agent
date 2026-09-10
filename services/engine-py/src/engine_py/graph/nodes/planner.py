@@ -12,7 +12,7 @@ import re
 from ...approvals import find_approval_by_id, find_latest_approval_by_thread_id
 from ...config import settings
 from ...event_bus import emit_status
-from ...llm import CircuitBreakerOpenError, get_chat_model
+from ...llm import CircuitBreakerOpenError, bind_llm_call_node, get_chat_model
 from ...memory import ShortMemory
 from ...tenant import get_merchant_display_name
 from ..state import AgentState, build_history_context
@@ -37,6 +37,7 @@ def planner_llm():
 
 
 async def planner_node(state: AgentState) -> dict:
+    bind_llm_call_node("planner")
     intents = state.get("intents") or []
     input_text = state.get("input", "")
     job_id = state.get("job_id")

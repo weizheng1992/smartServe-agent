@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from ...llm import bind_llm_call_node
 from ..state import AgentState
 from .step_execution_engine import execute_step
 
 
 async def executor_node(state: AgentState) -> dict:
+    bind_llm_call_node("executor")
     result = await execute_step(dict(state))
     update: dict = {
         "task_plan": result["taskPlan"],

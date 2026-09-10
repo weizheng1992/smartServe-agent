@@ -41,6 +41,7 @@ class CallContext:
     thread_id: str | None
     business_id: str | None
     job_id: str | None = None  # 韧性层状态事件(${jobId}:status)的发布目标
+    node: str | None = None  # 图节点名兜底(langgraph_node 元数据缺失时,intent-arbitration 01)
 
 
 _call_context: ContextVar[CallContext | None] = ContextVar("llm_call_context", default=None)
@@ -55,6 +56,26 @@ def bind_llm_call_context(
     不可能发生;create_task 派生的后台任务(画像审计)在创建时刻快照继承。
     """
     _call_context.set(CallContext(thread_id=thread_id, business_id=business_id, job_id=job_id))
+
+
+def bind_llm_call_node(node: str) -> None:
+    """为当前任务标注 LLM 调用归因的图节点名(各节点包装层顶部调用)。
+
+    节点内部不带 config 的直调(triage 的分类器/咨询直答、planner 深度规划
+    等)拿不到 ``langgraph_node`` 回调元数据 —— 实测 llm_call_logs 过半行
+    node 为空(2026-09-10 intent-arbitration 01)。本 ContextVar 兜底补齐;
+    元数据存在时仍以元数据优先(嵌套 Runnable 传播的是更精确真值)。
+    保留既有 thread/business/job 字段,仅补 node。
+    """
+    ctx = _call_context.get()
+    _call_context.set(
+        CallContext(
+            thread_id=ctx.thread_id if ctx else None,
+            business_id=ctx.business_id if ctx else None,
+            job_id=ctx.job_id if ctx else None,
+            node=node,
+        )
+    )
 
 
 def current_llm_call_context() -> CallContext | None:
@@ -141,6 +162,9 @@ class LlmCallTelemetryHandler(BaseCallbackHandler):
         cost_usd = (total_tokens / 1_000_000) * COST_PER_MTOK_USD if total_tokens is not None else None
 
         ctx = _call_context.get()
+        # langgraph_node 元数据优先(嵌套 Runnable 真值);节点内直调无元数据时
+        # 以 bind_llm_call_node 的 ContextVar 兜底,消除 node 空白行
+        node = node or (ctx.node if ctx else None)
         row = {
             "thread_id": ctx.thread_id if ctx else None,
             "business_id": ctx.business_id if ctx else None,

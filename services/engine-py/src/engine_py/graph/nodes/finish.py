@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from ...llm import CircuitBreakerOpenError, get_chat_model
+from ...llm import CircuitBreakerOpenError, bind_llm_call_node, get_chat_model
 from ...memory import ShortMemory
 from ...skills import is_action_query
 from ...tenant import get_merchant_display_name, sanitize_tenant_response
@@ -39,6 +39,7 @@ async def _resolve_tenant_id(state: dict) -> str:
 
 
 async def finish_node(state: AgentState) -> dict:
+    bind_llm_call_node("finish")
     short_memory = state.get("short_memory") or []
     tenant_id = await _resolve_tenant_id(dict(state))
     brand_name = get_merchant_display_name(tenant_id)

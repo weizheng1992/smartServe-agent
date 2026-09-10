@@ -15,6 +15,8 @@ SOURCE_PERSONA_FACT_DELETED = "persona_fact_deleted"
 SOURCE_APPROVAL_REJECTED = "approval_rejected"
 SOURCE_THUMBS_DOWN = "thumbs_down"  # v3.1 契约修订后接入
 SOURCE_CIRCUIT_BREAKER = "circuit_breaker"  # 单独立案聚合,不直接转 case
+SOURCE_INTENT_CONFLICT = "intent_conflict"  # intent-arbitration 02:跨意图族判定冲突
+SOURCE_CLAIM_MISMATCH = "claim_mismatch"  # intent-arbitration 02:终稿宣称与审批落库不符
 
 # 信号源默认先验:不同来源的可信度不同
 SOURCE_PRIORS: dict[str, str] = {
@@ -23,6 +25,9 @@ SOURCE_PRIORS: dict[str, str] = {
     SOURCE_APPROVAL_REJECTED: "expected_behavior",  # HITL 设计行为,除非 triage 勾选"审批判错"
     SOURCE_THUMBS_DOWN: "neutral",
     SOURCE_CIRCUIT_BREAKER: "suspected_defect",
+    # 冲突可能是快轨合法压制非 LLM 层(设计行为),人审定性;宣称无据则几乎必是缺陷
+    SOURCE_INTENT_CONFLICT: "neutral",
+    SOURCE_CLAIM_MISMATCH: "suspected_defect",
 }
 
 

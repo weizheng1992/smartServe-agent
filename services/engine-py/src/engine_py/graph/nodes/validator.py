@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 
 from ...event_bus import emit_status
-from ...llm import CircuitBreakerOpenError, get_chat_model
+from ...llm import CircuitBreakerOpenError, bind_llm_call_node, get_chat_model
 from ..state import AgentState
 
 
 async def validator_node(state: AgentState) -> dict:
+    bind_llm_call_node("validator")
     current_plan = dict(state.get("task_plan") or {})
     current_index = current_plan.get("currentStepIndex", 0)
     subtasks = [dict(st) for st in current_plan.get("subtasks") or []]

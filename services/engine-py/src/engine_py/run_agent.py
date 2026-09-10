@@ -25,6 +25,7 @@ import time
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
+from .badcase.intent_signals import record_claim_mismatch_if_any
 from .badcase.pool import SOURCE_CIRCUIT_BREAKER, record_badcase_signal
 from .cards import CardSynthesizer
 from .db import BusinessConfigRow, SessionMetric, Thread, get_session
@@ -450,6 +451,16 @@ async def run_agent(job: AgentJobInput) -> dict:
                     else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
                 ),
             )
+
+        # 🔍 宣称与落库不符信号入池(intent-arbitration 02):终稿宣称已退款/
+        # 已提交审批 × 审批表整会话零记录 → 候选行(先验 suspected_defect)。
+        # ORD-77777 编造审批一类:幽灵单拦截挡住了开单,终稿幻觉的宣称仍要
+        # 能被捕到;入池静默降级不阻断收口。
+        await record_claim_mismatch_if_any(
+            thread_id,
+            dynamic_config["businessId"],
+            str(result.get("output") or ""),
+        )
     except Exception as metrics_err:
         print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
 
