@@ -171,6 +171,25 @@ class TestRunConsultDirectAnswer:
         assert hit[1][0]["intent"] == "general_query", "缓存复放口径与 Step 2 super_semantic_cache 一致"
         assert "answer_args" not in calls, "缓存命中不得再发起 LLM 调用"
 
+    def test_route_marker_not_cached_and_returns_marker_tuple(self, monkeypatch):
+        """仲裁员否决(05):直答回路由标记 → 返回 (marker, [], 0.0) 且严禁写
+        语义缓存(动作形输入的答案没有知识依据,缓存会令后续同形输入被
+        资讯回复截胡)。"""
+        calls = self._patch(monkeypatch, answer=cfp.ROUTE_TO_ACTION_MARKER)
+        hit = asyncio.run(run_consult_direct_answer(_consult_state(), []))
+        assert hit is not None
+        assert hit[0] == cfp.ROUTE_TO_ACTION_MARKER
+        assert hit[1] == []
+        assert "cache_add" not in calls, "路由标记回复不得写语义缓存"
+
+    def test_marker_with_surrounding_whitespace_still_detected(self, monkeypatch):
+        """LLM 可能在标记前后带空白/换行,strip 后必须仍识别为路由标记;
+        此类回复同样不落缓存。"""
+        calls = self._patch(monkeypatch, answer=f"  \n{cfp.ROUTE_TO_ACTION_MARKER}\n ")
+        hit = asyncio.run(run_consult_direct_answer(_consult_state(), []))
+        assert hit is not None and hit[0] == cfp.ROUTE_TO_ACTION_MARKER
+        assert "cache_add" not in calls
+
 
 async def _fake_exemplars(*args, **kwargs) -> list:
     return []
@@ -195,11 +214,14 @@ class _FakeTaskMemory:
     async def get_task_state(self) -> dict | None:
         return None
 
+    async def save_task_state(self, state: dict) -> None:
+        return None
+
 
 class TestTriageWiring:
     """Step 1.4 接线:process() 层验证直答旁路与空弱回落(误路由修复)。"""
 
-    def _run_process(self, monkeypatch: pytest.MonkeyPatch, direct_hit) -> dict:
+    def _run_process(self, monkeypatch: pytest.MonkeyPatch, direct_hit, state: dict | None = None) -> dict:
         async def _fake_direct(state, history_msgs):
             return direct_hit
 
@@ -219,7 +241,7 @@ class TestTriageWiring:
         monkeypatch.setattr(SemanticVectorCache, "get_embedding_with_cache", _fake_embed)
         monkeypatch.setattr(SemanticVectorCache, "get_anchor_vectors", _fake_anchors)
 
-        state = _consult_state()
+        state = state or _consult_state()
         return asyncio.run(triage_mod.IntentTriageEngine.process(state))
 
     def test_consult_direct_hit_bypasses_to_output(self, monkeypatch):
@@ -239,6 +261,24 @@ class TestTriageWiring:
         assert result["intents"][0]["intent"] == "general_query"
         assert "output" not in result, "空弱回落不应产出旁路回复(交 finish 终稿)"
         assert "订单编号" not in str(result), "不得误判动作形反问订单号"
+
+    def test_route_marker_falls_through_full_pipeline_not_consult_close(self, monkeypatch):
+        """终局权收编(05):快轨命中但仲裁员否决(动作形)→ 不得以 consult
+        直答关会话,fallthrough 完整管线 —— 本输入含「退货」字样,Step 1.5
+        槽位层应判 order_return 并反问订单号(动作管道结果)。"""
+        state = _consult_state()
+        state["input"] = "这单我不想要了,退货的话是马上就能安排吗"
+        result = self._run_process(
+            monkeypatch,
+            (cfp.ROUTE_TO_ACTION_MARKER, [], 0.0),
+            state=state,
+        )
+        assert result["intents"][0]["intent"] == "order_return", (
+            "仲裁员否决后应走动作管道,而非 consult 直答关会话"
+        )
+        assert "output" not in result or "政策" not in str(result.get("output", "")), (
+            "不得以资讯回复关闭动作请求会话"
+        )
 
 
 if __name__ == "__main__":

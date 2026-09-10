@@ -20,7 +20,7 @@ from ..skills import is_action_query
 from ..tenant import get_merchant_display_name, sanitize_tenant_response, tenant_of_state
 from ..vision import analyze_images
 from . import rule_matchers
-from .consult_fast_path import is_consult_query, run_consult_direct_answer
+from .consult_fast_path import ROUTE_TO_ACTION_MARKER, is_consult_query, run_consult_direct_answer
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
 from .product_disambiguator import AFTER_SALE_INTENTS, build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
@@ -484,34 +484,47 @@ class IntentTriageEngine:
             consult_hit = await run_consult_direct_answer(state, history_msgs)
             if consult_hit is not None:
                 consult_answer, consult_intents, consult_confidence = consult_hit
-                return await IntentTriageEngine.handle_immediate_bypass(
-                    state,
-                    "rag_consult_direct",
-                    consult_answer,
+                if consult_answer == ROUTE_TO_ACTION_MARKER:
+                    # 🧭 仲裁员否决(intent-arbitration 05,2026-09-10):正则快轨
+                    # 不再独自关会话 —— 直答调用复核为动作形请求,fallthrough 完整
+                    # 管线(Step 1.5 起照常裁决,用户拿到动作管道结果而非资讯回复)。
+                    # 改判进终局行 candidates:consult_gate 提议 consult,
+                    # consult_arbiter 否决(intent 记 None —— 该层只判定「非咨询」,
+                    # 不认领具体动作意图,终局由后续层裁决);不另写日志行,
+                    # 终局单点落库(01)不变。
+                    proposals.append(_proposal("consult_gate", "consult"))
+                    proposals.append(_proposal("consult_arbiter", None))
+                else:
+                    return await IntentTriageEngine.handle_immediate_bypass(
+                        state,
+                        "rag_consult_direct",
+                        consult_answer,
+                        consult_intents,
+                        "rag_direct",
+                        consult_confidence,
+                        damage_assessment,
+                        candidates=[_proposal("consult_gate", "consult")],
+                    )
+            else:
+                # RAG 空弱/直答失败:回落 general_query 零规划旁路(finish 终稿)
+                consult_intents = [{"intent": AgentIntentType.GENERAL_QUERY, "confidence": 0.9, "type": "primary"}]
+                await IntentTriageEngine.log_intent_to_db(
+                    thread_id,
+                    input_text,
                     consult_intents,
-                    "rag_direct",
-                    consult_confidence,
-                    damage_assessment,
+                    "consult_no_rag",
+                    0.9,
                     candidates=[_proposal("consult_gate", "consult")],
+                    arbitration_reason="consult_no_rag",
                 )
-            consult_intents = [{"intent": AgentIntentType.GENERAL_QUERY, "confidence": 0.9, "type": "primary"}]
-            await IntentTriageEngine.log_intent_to_db(
-                thread_id,
-                input_text,
-                consult_intents,
-                "consult_no_rag",
-                0.9,
-                candidates=[_proposal("consult_gate", "consult")],
-                arbitration_reason="consult_no_rag",
-            )
-            return {
-                "intents": consult_intents,
-                "active_domain_role": "chitchat",
-                "short_memory": history_msgs,
-                "damage_assessment": damage_assessment,
-                "global_transitions_count": -1,
-                "tool_errors_count": -1,
-            }
+                return {
+                    "intents": consult_intents,
+                    "active_domain_role": "chitchat",
+                    "short_memory": history_msgs,
+                    "damage_assessment": damage_assessment,
+                    "global_transitions_count": -1,
+                    "tool_errors_count": -1,
+                }
 
         # 🛡️ Step 1.5: 意图与槽位完整性拦截
         try:
@@ -1084,17 +1097,26 @@ class IntentTriageEngine:
                 consult_hit = await run_consult_direct_answer(state, history_msgs)
                 if consult_hit is not None:
                     consult_answer, _, consult_confidence = consult_hit
-                    return await IntentTriageEngine.handle_immediate_bypass(
-                        state,
-                        "rag_consult_direct_llm",
-                        consult_answer,
-                        parsed,
-                        "rag_direct",
-                        consult_confidence,
-                        damage_assessment,
-                        candidates=[*proposals, llm_proposal],
-                    )
-                parsed = [{**p, "intent": AgentIntentType.GENERAL_QUERY} for p in parsed]
+                    if consult_answer == ROUTE_TO_ACTION_MARKER:
+                        # 🧭 仲裁员否决(05):分类器判 consult × 仲裁员判动作形。
+                        # 此处不再 fallthrough 深规划(consult 落 planner 会失控
+                        # 深规划),与 RAG 空弱同款降级 general_query 零规划;
+                        # 否决进 candidates 留痕,终局行可溯改判来源。
+                        proposals.append(_proposal("consult_arbiter", None))
+                        parsed = [{**p, "intent": AgentIntentType.GENERAL_QUERY} for p in parsed]
+                    else:
+                        return await IntentTriageEngine.handle_immediate_bypass(
+                            state,
+                            "rag_consult_direct_llm",
+                            consult_answer,
+                            parsed,
+                            "rag_direct",
+                            consult_confidence,
+                            damage_assessment,
+                            candidates=[*proposals, llm_proposal],
+                        )
+                else:
+                    parsed = [{**p, "intent": AgentIntentType.GENERAL_QUERY} for p in parsed]
 
             confidence = parsed[0]["confidence"] if parsed else 0.85
             await IntentTriageEngine.log_intent_to_db(

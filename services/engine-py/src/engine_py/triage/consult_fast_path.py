@@ -16,6 +16,13 @@
 - 单次调用(品牌人设 + RAG 切片 + 近期历史)生成答案,strictly grounded;
 - 答案回填语义缓存(咨询形非动作、有 RAG 依据,可安全缓存)。
 RAG 空弱/直答失败返回 None,调用方回落原管道兜底。
+
+答案调用兼任仲裁员(intent-arbitration 05,2026-09-10):直答 prompt 带
+ROUTING VETO 规则 —— 用户实为请求执行动作(下单/退/改/查单)而非问知识时,
+返回 ROUTE_TO_ACTION_MARKER 而非作答;快轨放行 fallthrough 完整管线,
+用户拿到动作管道结果。标记回复不写语义缓存。零新增调用/延迟:p50 咨询
+路径仍是那一次直答调用,只是从「答案生成器」升级为「答案生成器+意图
+复核员」;正则误命中的代价从「答非所问且关会话」降为多走一次既有管道。
 """
 
 from __future__ import annotations
@@ -33,6 +40,11 @@ from .slot_extractor import ORDER_ID_RE, AgentIntentType
 # 「知识库未覆盖」兜底,白花一次调用)。bge-small-zh 同域中文通常 0.6+,
 # 无关提问 0.3-0.45,0.55 取在分界上。
 RAG_DIRECT_MIN_SIMILARITY = 0.55
+
+# 直答兼任仲裁员的路由标记(intent-arbitration 05,2026-09-10):直答调用
+# 发现用户实为请求执行动作(而非问知识)时,返回此标记令快轨放行、fallthrough
+# 完整管线。刻意用长而唯一的 ASCII 哨兵 —— 正常中文直答不可能与之碰撞。
+ROUTE_TO_ACTION_MARKER = "__ROUTE_TO_ACTION__"
 
 # 咨询话题词:「问知识」域 —— 政策/流程/时效/尺码/洗护/费用/票据/会员
 _CONSULT_TOPIC_RE = re.compile(
@@ -130,7 +142,12 @@ async def answer_consult_from_rag(
         "when present (e.g. return window in days, tag/packaging requirements, who pays shipping).\n"
         f'4. Refer to the store strictly as "{brand_name}". Reply fully in Chinese.\n'
         "5. You may close with a light offer to help further (e.g. providing an order ID to process "
-        "a return), but do NOT claim any action has already been executed."
+        "a return), but do NOT claim any action has already been executed.\n"
+        "6. ROUTING VETO (intent arbitration duty): first check what the customer actually wants. "
+        "If they are requesting that you EXECUTE a concrete action — placing/adding an order, "
+        "cancelling, modifying an address, refunding/returning a specific order, or checking their "
+        "own order/shipping/data — do NOT answer at all. Reply with EXACTLY this ASCII marker and "
+        "nothing else: __ROUTE_TO_ACTION__"
     )
     response = await get_chat_model().ainvoke(prompt)
     content = response.content if hasattr(response, "content") else str(response)
@@ -194,6 +211,18 @@ async def run_consult_direct_answer(state: dict, history_msgs: list[dict]) -> tu
     except Exception as answer_err:
         print(f"[Consult Fast-Path] RAG 直答失败,回落常规管道: {answer_err}")
         return None
+
+    # 🧭 仲裁员否决(intent-arbitration 05):直答调用发现动作形请求,改判路由
+    # —— 快轨放行,调用方 fallthrough 完整管线;标记回复严禁写语义缓存
+    #(动作形输入的答案没有知识依据,缓存会令后续同形输入被资讯回复截胡)。
+    if answer.strip() == ROUTE_TO_ACTION_MARKER:
+        if job_id:
+            await emit_status(
+                job_id,
+                "🔎 复核为操作请求,转入任务处理管道(意图仲裁员改判)...",
+                node="triage",
+            )
+        return ROUTE_TO_ACTION_MARKER, [], 0.0
 
     # 回填语义缓存:咨询形输入非动作、回答有 RAG 切片依据,后续相似提问秒回
     if vector:
