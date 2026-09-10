@@ -20,7 +20,12 @@ from ..skills import is_action_query
 from ..tenant import get_merchant_display_name, sanitize_tenant_response, tenant_of_state
 from ..vision import analyze_images
 from . import rule_matchers
-from .consult_fast_path import ROUTE_TO_ACTION_MARKER, is_consult_query, run_consult_direct_answer
+from .consult_fast_path import (
+    ROUTE_TO_ACTION_MARKER,
+    is_consult_query,
+    is_consult_shaped_marker,
+    run_consult_direct_answer,
+)
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
 from .product_disambiguator import AFTER_SALE_INTENTS, build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
@@ -696,6 +701,16 @@ class IntentTriageEngine:
                         "taskSpec": task_spec,
                     }
                 ]
+
+                # 🧭 冲突标记留痕(intent-arbitration 07,2026-09-10):槽位层判
+                # 动作 × 措辞带咨询形标记(疑问词×话题词×无动作动词)→ 记
+                # consult_shaped_gate 提议进 candidates —— 单层动作终局此前无
+                # consult 侧候选,该残余对坏例池冲突信号源不可见,无从累积数据。
+                # 路由不变(照旧技能直通/规划);01 留痕 393 行直接审计此形状
+                # 0 例,不硬上 LLM 仲裁,观测放量后凭数据复盘。
+                if is_consult_shaped_marker(input_text):
+                    proposals.append(_proposal("consult_shaped_gate", AgentIntentType.CONSULT))
+
                 await task_memory.save_task_state(
                     {
                         "goal": f"Completed {task_spec['intentType']}",

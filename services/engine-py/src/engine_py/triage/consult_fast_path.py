@@ -23,6 +23,11 @@ ROUTING VETO 规则 —— 用户实为请求执行动作(下单/退/改/查单)
 用户拿到动作管道结果。标记回复不写语义缓存。零新增调用/延迟:p50 咨询
 路径仍是那一次直答调用,只是从「答案生成器」升级为「答案生成器+意图
 复核员」;正则误命中的代价从「答非所问且关会话」降为多走一次既有管道。
+
+is_consult_shaped_marker(07,2026-09-10)是纯措辞侧的冲突标记(与
+is_consult_query 分工:本模块快轨闸门 vs 槽位层动作终局的留痕观测),零
+调用零路由影响 —— 「判动作 × 咨询形措辞」残余经仲裁留痕进坏例池信号源
+观测,01 数据 393 行直接审计 0 例,不为其硬上 LLM 仲裁。
 """
 
 from __future__ import annotations
@@ -76,6 +81,38 @@ _CONSULT_ACTION_RE = re.compile(
 )
 # 短语裸话题(≤12 字且无疑问词也算):「退货政策」「尺码表」类省略式提问
 _CONSULT_BARE_TOPIC_RE = re.compile(r"(?:政策|规定|流程|尺码|运费|发票|保修|保养|退换)")
+
+# 冲突标记(intent-arbitration 07,2026-09-10):纯措辞侧的咨询形判定,零调用。
+# 与 is_consult_query 的分工:后者是快轨闸门(命中即直答);本标记只用于
+# 「槽位层判动作终局 × 措辞带咨询形」的冲突留痕 —— 话题词更宽(退货/退款
+# 这类槽位规则关键词作名词出现也算),动作动词否定更严(我要/我想/查 全排除),
+# 保证只有「措辞像问知识、判定却进了动作管道」的输入被标记。
+_CONSULT_MARKER_QUESTION_RE = re.compile(r"(?:什么是|是什么|什么叫|怎么|如何|怎样|怎么样|哪些|哪个|什么|多少|多久|何时|吗|呢|？|\?|请问|想了解|想咨询|了解一下)")
+_CONSULT_MARKER_TOPIC_RE = re.compile(
+    r"(?:政策|规定|制度|流程|手续|条件|要求|时效|多久|几天|尺码|运费|发票|保修|三包|质保"
+    r"|退换|退货|退款|退钱|售后|无理由|换货|会员|积分|优惠)"
+)
+_CONSULT_MARKER_ACTION_RE = re.compile(
+    r"(?:帮我|给我|麻烦|我要|我想|申请|办理|退掉|退了|取消"
+    r"|改地址|修改|改成|换货吧|加购|加入购物车|购物车|结算|下单|买单|买第"
+    r"|转人工|找客服|查|查询|搜索|搜一下|订单|物流|快递|单号|ord-)",
+    re.IGNORECASE,
+)
+
+
+def is_consult_shaped_marker(text: str) -> bool:
+    """咨询形标记(07):疑问词 × 售后/政策话题词 × 无动作动词。
+
+    只进仲裁留痕不改变路由 —— 槽位层判动作终局时若本标记成立,即
+    「判动作 × 咨询形措辞」冲突候选,坏例池冲突信号源据此观测残余;
+    01 留痕 393 行直接审计该形状 0 例,数据不支撑为其加 LLM 仲裁调用。
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if _CONSULT_MARKER_ACTION_RE.search(stripped):
+        return False
+    return bool(_CONSULT_MARKER_QUESTION_RE.search(stripped) and _CONSULT_MARKER_TOPIC_RE.search(stripped))
 
 
 def is_consult_query(text: str, has_image: bool = False) -> bool:
