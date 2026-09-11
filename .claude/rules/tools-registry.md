@@ -14,6 +14,7 @@ paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/gatewa
 - **标准工具契约**：所有工具必须实现统一契约，包含 `name`、`description`、`parameters` (JSON Schema) 和 `execute(params, context)` 协程方法。
 - **租户上下文传递**：执行环境通过 `ToolExecutionContext` 强制注入 `business_id`、`user_id`、`thread_id`，确保工具执行天然具备多租户约束。
 - **域服务分层**：`order_domain.py` / `mall_domain.py` 承载订单与商城领域查询；`ecommerce_tools.py` 组装为可执行工具；`cache.py` 提供工具级缓存。
+- **商品检索降级链（2026-09-11 L3，症状「推荐背包热销」给了 Nike 跑鞋）**：`search_products` / `compare_products` / SPI `search_products` 统一走 **商户真货架（`agent_merchant.merchant_spus/skus`，经 `order_domain._merchant_reader_engine` 跨库只读）→ engine 本地 `products` 表 → 诚实空** 三级链；单商户现实下全租户统一路由（含 ecommerce，商户表无租户列）。**search 路径严禁 mock 目录兜底**（`MOCK_PRODUCTS` 假目录与 `compare_products` 硬编码拼接已拆除——假货不得冒充推荐，库可达但查无必须诚实空，不得跨目录补货）。词元提取经 `_extract_query_terms` 剥导购 wrapper 词（修饰词族一律短语形，「比较」裸词会残留「好」拉入无关商品）；SPU 展示价 = MIN(sku.price)、库存 = SUM(sku.stock)，无 SKU 的 SPU 经 `HAVING MIN IS NOT NULL` 排除。热销排序**不做**（merchant 库无销量列，全仓亦无 sales_volume），排序 min_price ASC 系已文档化限制，严禁合成假热度。行为由 `tests/test_merchant_catalog_reach.py`（密封商户库）与 `tests/test_mall_search_terms.py`（词元单测 + engine 降级分支）钉死。
 
 ### 1.2 开放集成与标准 SPI/MCP 连接器
 

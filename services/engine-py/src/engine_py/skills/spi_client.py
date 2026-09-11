@@ -192,41 +192,28 @@ class LocalDbSpiAdapter:
         }
 
     async def search_products(self, params: dict) -> list[dict]:
-        try:
-            async with get_session() as session:
-                rows = (
-                    (
-                        await session.execute(
-                            text(
-                                'SELECT id, name AS "title", category, price, stock FROM products '
-                                "WHERE (business_id = :bid OR :bid = 'ecommerce') "
-                                "AND (:q::text IS NULL OR name ILIKE '%' || :q || '%' OR category ILIKE '%' || :q || '%') "
-                                "LIMIT :lim"
-                            ).bindparams(
-                                bid=params.get("tenantId", "ecommerce"),
-                                q=params.get("query") or None,
-                                lim=params.get("limit") or 5,
-                            )
-                        )
-                    )
-                    .mappings()
-                    .all()
-                )
-                return [
-                    {
-                        "productId": str(r["id"]),
-                        "title": r["title"],
-                        "description": "",
-                        "price": float(r["price"] or 0),
-                        "stock": int(r["stock"] or 0),
-                        "category": r.get("category"),
-                        "isAvailable": int(r["stock"] or 0) > 0,
-                    }
-                    for r in rows
-                ]
-        except Exception:
-            return []
-
-
-# shoppingGuideSkill 依赖 MallDomainService 已由 tools_registry 提供
-_ = MallDomainService
+        """经 MallDomainService 统一检索链(商户真货架优先 → engine 表 → 诚实空,
+        2026-09-11 L3),映射回 SPI 契约。MallDomainService 全链容错不抛错,
+        维持本方法历史不抛错契约(ProductInquirySkill 零改动)。"""
+        res = await MallDomainService.search_products(
+            {
+                "query": params.get("query"),
+                "category": params.get("category"),
+                "maxPrice": params.get("maxPrice"),
+                "limit": params.get("limit") or 5,
+                "businessId": params.get("tenantId", "ecommerce"),
+                "threadId": params.get("threadId"),
+            }
+        )
+        return [
+            {
+                "productId": p["id"],
+                "title": p["name"],
+                "description": p.get("description") or "",
+                "price": float(p.get("price") or 0),
+                "stock": int(p.get("stock") or 0),
+                "category": p.get("category"),
+                "isAvailable": int(p.get("stock") or 0) > 0,
+            }
+            for p in res.get("products") or []
+        ]

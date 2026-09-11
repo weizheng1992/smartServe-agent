@@ -1,19 +1,85 @@
-"""商城领域服务 — 镜像 tools/src/mallDomainService.ts(984 LOC,全量移植,含种子兜底)。"""
+"""商城领域服务 — 镜像 tools/src/mallDomainService.ts(984 LOC,全量移植,含种子兜底)。
+
+商品检索例外(2026-09-11 L3):search_products 不再吃 TS 基线的 MOCK 种子兜底
+—— 主目录换 agent_merchant 商户真货架,降级链 = 商户货架 → engine 本地 products
+表 → 诚实空;compare_products 同步只吃真实检索结果,假货不混入、话术不点名。"""
 
 from __future__ import annotations
 
 import json
 import random
+import re
 import time
 
 from sqlalchemy import text
 
 from ..db import get_session
+from . import order_domain
 from .cache import tool_cache
 from .order_domain import OrderDomainService
 
 
 class MallDomainService:
+    # 导购 wrapper 词表:剥掉无商品语义的导购措辞,剩余才是检索词元。与
+    # slot_extractor SHOPPING_GUIDE 规则、ShoppingGuideSkill._FALLBACK_RE
+    # 两处意图词表同族维护(2026-09-07 同源补词);含商品语义的词条
+    # (选鞋/选衣服/跑步鞋/卫衣/夹克)严禁入列 —— 剥掉即毁掉检索词。
+    _GUIDE_WRAPPER_TERMS = (
+        "有什么好看",
+        "推荐几款",
+        "推荐几件",
+        "推荐一款",
+        "介绍一下",
+        "什么牌子",
+        "买什么",
+        "有没有",
+        "挑一款",
+        "选一款",
+        "找一找",
+        "哪款好",
+        "看商品",
+        "好看",
+        "款式",
+        "热门",
+        "爆款",
+        "热销",
+        "热卖",
+        "畅销",
+        "上新",
+        "新品",
+        "推荐",
+        "导购",
+        "最近",
+        "商品",
+        "东西",
+        "我想",
+        "帮我",
+        "买",
+        "请",
+        # 2026-09-11 L1 补:评价/热度修饰词族。注意「的」是分隔符但「好/高」不是——
+        # 「比较好的帐篷」剥「比较」会残留『好』词元(OR 匹配拉入无关商品),故修饰
+        # 词族一律收短语形(比较好/人气高/性价比高/最好卖…);长序替换内建,
+        # 「性价比高」先于「性价比」消费。
+        "有什么",
+        "卖得好",
+        "卖的好",
+        "比较好",
+        "比较",
+        "不错",
+        "性价比高",
+        "性价比",
+        "值得",
+        "人气高",
+        "人气",
+        "受欢迎",
+        "最受欢迎",
+        "口碑",
+        "评价好",
+        "评价",
+        "最好",
+        "最好卖",
+    )
+
     # 购物车存储(2026-09-08 重构):_cart_storage 降级为进程一级读缓存,真实
     # 状态写穿透 Redis(agent:cart:{userId})。此前纯进程内存,网关重启即失忆,
     # 与浏览器 localStorage 购物车分裂 —— 引擎对已遗忘的车重新播报「已成功
@@ -54,7 +120,9 @@ class MallDomainService:
             print(f"[MallDomain] Cart Redis persist degraded to memory only: {err}")
 
     @staticmethod
-    async def get_user_addresses(user_id: str | None = None, business_id: str | None = None, thread_id: str | None = None) -> dict:
+    async def get_user_addresses(
+        user_id: str | None = None, business_id: str | None = None, thread_id: str | None = None
+    ) -> dict:
         """1. 查询用户收货地址簿。"""
         effective_user_id = user_id
         effective_biz_id = business_id or "ecommerce"
@@ -102,7 +170,7 @@ class MallDomainService:
                                 "receiverName": r["receiverName"],
                                 "receiverPhone": r["receiverPhone"],
                                 "fullAddress": r["fullAddress"]
-                                or f'{r["province"]}{r["city"]}{r["district"]}{r["detailAddress"]}',
+                                or f"{r['province']}{r['city']}{r['district']}{r['detailAddress']}",
                                 "tag": r["tag"] or "home",
                                 "isDefault": bool(r["isDefault"]),
                             }
@@ -148,7 +216,7 @@ class MallDomainService:
 
         effective_user_id = user_id or "anonymous_user"
         effective_biz_id = business_id or "ecommerce"
-        full_address = f'{params["province"]}{params["city"]}{params["district"]}{params["detailAddress"]}'
+        full_address = f"{params['province']}{params['city']}{params['district']}{params['detailAddress']}"
 
         try:
             async with get_session() as session:
@@ -159,28 +227,32 @@ class MallDomainService:
                         ).bindparams(uid=effective_user_id, bid=effective_biz_id)
                     )
                 inserted = (
-                    await session.execute(
-                        text(
-                            "INSERT INTO user_addresses ("
-                            "business_id, user_id, receiver_name, receiver_phone, "
-                            "province, city, district, detail_address, full_address, tag, is_default, created_at, updated_at"
-                            ") VALUES (:bid, :uid, :rn, :rp, :prov, :city, :dist, :detail, :full, :tag, :is_def, NOW(), NOW()) "
-                            'RETURNING id, full_address AS "fullAddress", is_default AS "isDefault"'
-                        ).bindparams(
-                            bid=effective_biz_id,
-                            uid=effective_user_id,
-                            rn=params["receiverName"],
-                            rp=params["receiverPhone"],
-                            prov=params["province"],
-                            city=params["city"],
-                            dist=params["district"],
-                            detail=params["detailAddress"],
-                            full=full_address,
-                            tag=params.get("tag") or "home",
-                            is_def=bool(params.get("isDefault")),
+                    (
+                        await session.execute(
+                            text(
+                                "INSERT INTO user_addresses ("
+                                "business_id, user_id, receiver_name, receiver_phone, "
+                                "province, city, district, detail_address, full_address, tag, is_default, created_at, updated_at"
+                                ") VALUES (:bid, :uid, :rn, :rp, :prov, :city, :dist, :detail, :full, :tag, :is_def, NOW(), NOW()) "
+                                'RETURNING id, full_address AS "fullAddress", is_default AS "isDefault"'
+                            ).bindparams(
+                                bid=effective_biz_id,
+                                uid=effective_user_id,
+                                rn=params["receiverName"],
+                                rp=params["receiverPhone"],
+                                prov=params["province"],
+                                city=params["city"],
+                                dist=params["district"],
+                                detail=params["detailAddress"],
+                                full=full_address,
+                                tag=params.get("tag") or "home",
+                                is_def=bool(params.get("isDefault")),
+                            )
                         )
                     )
-                ).mappings().first()
+                    .mappings()
+                    .first()
+                )
                 await session.commit()
 
                 return {
@@ -246,6 +318,7 @@ class MallDomainService:
 
                 rows = [dict(r) for r in rows]
                 if params.get("color") or params.get("size"):
+
                     def _matches(r: dict) -> bool:
                         spec = r.get("specAttributes") or {}
                         match = True
@@ -318,7 +391,11 @@ class MallDomainService:
                 "imageUrl": "/products/aj1_red.png",
             },
         ]
-        return {"total": len(mock_skus), "productId": params.get("productId") or "prod_nike_air_jordan_1", "skus": mock_skus}
+        return {
+            "total": len(mock_skus),
+            "productId": params.get("productId") or "prod_nike_air_jordan_1",
+            "skus": mock_skus,
+        }
 
     @staticmethod
     async def query_package_tracking(params: dict) -> dict:
@@ -330,28 +407,36 @@ class MallDomainService:
                 pkg_row = None
                 if tracking_number:
                     pkg_row = (
-                        await session.execute(
-                            text(
-                                'SELECT id, business_id AS "businessId", order_id AS "orderId", carrier, '
-                                'carrier_code AS "carrierCode", tracking_number AS "trackingNumber", status, '
-                                'current_location AS "currentLocation", courier_name AS "courierName", '
-                                'courier_phone AS "courierPhone", estimated_delivery AS "estimatedDelivery" '
-                                "FROM logistics_packages WHERE tracking_number = :tn LIMIT 1"
-                            ).bindparams(tn=tracking_number)
+                        (
+                            await session.execute(
+                                text(
+                                    'SELECT id, business_id AS "businessId", order_id AS "orderId", carrier, '
+                                    'carrier_code AS "carrierCode", tracking_number AS "trackingNumber", status, '
+                                    'current_location AS "currentLocation", courier_name AS "courierName", '
+                                    'courier_phone AS "courierPhone", estimated_delivery AS "estimatedDelivery" '
+                                    "FROM logistics_packages WHERE tracking_number = :tn LIMIT 1"
+                                ).bindparams(tn=tracking_number)
+                            )
                         )
-                    ).mappings().first()
+                        .mappings()
+                        .first()
+                    )
                 elif order_id:
                     pkg_row = (
-                        await session.execute(
-                            text(
-                                'SELECT id, business_id AS "businessId", order_id AS "orderId", carrier, '
-                                'carrier_code AS "carrierCode", tracking_number AS "trackingNumber", status, '
-                                'current_location AS "currentLocation", courier_name AS "courierName", '
-                                'courier_phone AS "courierPhone", estimated_delivery AS "estimatedDelivery" '
-                                "FROM logistics_packages WHERE order_id = :oid ORDER BY created_at DESC LIMIT 1"
-                            ).bindparams(oid=order_id)
+                        (
+                            await session.execute(
+                                text(
+                                    'SELECT id, business_id AS "businessId", order_id AS "orderId", carrier, '
+                                    'carrier_code AS "carrierCode", tracking_number AS "trackingNumber", status, '
+                                    'current_location AS "currentLocation", courier_name AS "courierName", '
+                                    'courier_phone AS "courierPhone", estimated_delivery AS "estimatedDelivery" '
+                                    "FROM logistics_packages WHERE order_id = :oid ORDER BY created_at DESC LIMIT 1"
+                                ).bindparams(oid=order_id)
+                            )
                         )
-                    ).mappings().first()
+                        .mappings()
+                        .first()
+                    )
 
                 if pkg_row:
                     tracks = (
@@ -542,7 +627,9 @@ class MallDomainService:
             effective_user_id = ctx["userId"]
             effective_biz_id = ctx["businessId"]
 
-        order = await OrderDomainService.find_order_by_id(params["orderId"], effective_user_id, effective_biz_id)
+        order = await OrderDomainService.find_order_by_id(
+            params["orderId"], effective_user_id, effective_biz_id
+        )
         if not order:
             return {"error": f"⚠️ 售后申请失败：订单 {params['orderId']} 不属于您名下或不存在。"}
 
@@ -574,11 +661,15 @@ class MallDomainService:
                     text(
                         "INSERT INTO after_sale_logs (ticket_id, action, operator, note, created_at) "
                         "VALUES (:tid, 'created', 'agent_autopilot', :note, NOW())"
-                    ).bindparams(tid=ticket_id, note=f"用户申请【{params['type']}】，原因: {params['reason']}")
+                    ).bindparams(
+                        tid=ticket_id, note=f"用户申请【{params['type']}】，原因: {params['reason']}"
+                    )
                 )
                 await session.commit()
         except Exception as err:
-            print(f"[MallDomainService.applyAfterSale] Database insert failed, returning fallback ticket: {err}")
+            print(
+                f"[MallDomainService.applyAfterSale] Database insert failed, returning fallback ticket: {err}"
+            )
 
         await tool_cache.delete(f"cache:order_status:{params['orderId']}")
 
@@ -597,38 +688,103 @@ class MallDomainService:
             ),
         }
 
-    MOCK_PRODUCTS = [
-        {
-            "id": "prod_nike_air_pegasus_41",
-            "name": "Nike Air Zoom Pegasus 41 极速轻量透气跑鞋",
-            "price": 899.0,
-            "stock": 58,
-            "description": "双重 Zoom Air 缓震气垫，工程网眼鞋面透气亲肤，全天候舒适缓震。",
-            "category": "running_shoes",
-            "specs": {"适用人群": "男女同款", "场景": "日常慢跑/马拉松训练", "材质": "透气织物+气垫"},
-            "imageUrl": "/products/pegasus_41.png",
-        },
-        {
-            "id": "prod_nike_invincible_3",
-            "name": "Nike ZoomX Invincible Run 3 旗舰缓震跑鞋",
-            "price": 1299.0,
-            "stock": 22,
-            "description": "厚底 ZoomX 超强回弹泡棉，高阶护膝缓震，长距离奔跑首选。",
-            "category": "running_shoes",
-            "specs": {"适用人群": "男女同款", "场景": "长距离慢跑/大体重护膝", "材质": "Flyknit 编织+ZoomX"},
-            "imageUrl": "/products/invincible_3.png",
-        },
-        {
-            "id": "prod_nike_windrunner_jacket",
-            "name": "Nike Windrunner 连帽运动风行者夹克外套",
-            "price": 599.0,
-            "stock": 45,
-            "description": "经典 V 字拼接设计，防风轻防泼水面料，内里网眼透气舒适。",
-            "category": "apparel",
-            "specs": {"适用人群": "男女同款", "版型": "标准休闲宽松", "面料": "聚酯纤维防风层"},
-            "imageUrl": "/products/windrunner.png",
-        },
-    ]
+    # MOCK_PRODUCTS(3 件 Nike 假目录)已于 2026-09-11 L3 整体拆除:它是
+    # 「要背包给跑鞋」症状的假货源头,降级链终点改诚实空;test_guide_skills
+    # 用各自的局部桩数据,不依赖此属性。
+
+    @staticmethod
+    def _extract_query_terms(query: str | None) -> list[str]:
+        """原始 NL 输入 → 检索词元:剥导购 wrapper 词,按分隔符切分。
+
+        整句子串匹配对 NL 措辞永远空手而归(2026-09-11「推荐背包热销」给了
+        跑鞋);剥词后按词元 OR 匹配。剩余为空 = 纯浏览形输入,无关键词,
+        由调用方走浏览语义(不加 query 过滤)。替换按词长降序,防「推荐」
+        先吃掉「推荐几款」留下裸「几款」。
+        """
+        if not query:
+            return []
+        rest = query
+        for term in sorted(MallDomainService._GUIDE_WRAPPER_TERMS, key=len, reverse=True):
+            rest = rest.replace(term, " ")
+        chunks = re.split(r"[\s,，、。.!！?？:；;的]+", rest)
+        return [c for c in (chunk.strip() for chunk in chunks) if c]
+
+    @staticmethod
+    async def _search_merchant_catalog(
+        terms: list[str], category: str | None, max_price, limit: int
+    ) -> list[dict] | None:
+        """商户真货架检索(agent_merchant.merchant_spus/skus)。
+
+        None=库不可达(调用方降级 engine 本地表);[]=可达查无(诚实空,
+        严禁跨目录补货)。词元 OR ILIKE 四列(title/subtitle/category/description)
+        对齐网关搜索先例 —— category 列必须参与:SPU title 是「双肩包」不含
+        「背包」,品类列「背包收纳」才是命中面。展示价=MIN(sku.price)、库存=
+        SUM(sku.stock),与网关 _spu_to_product 同语义;排序 min_price ASC 与
+        engine 分支 price ASC 契约一致。热销排序不做:merchant 库无销量列
+        (全仓亦无 sales_volume),无数据源 —— 已文档化限制,不合成假热度。
+        无 SKU 的 SPU 展示价 NULL,经 HAVING 排除(不可售,且 float(None) 会炸)。
+        """
+        conditions = ["s.status = 'ON_SALE'"]
+        params: dict = {}
+        if terms:
+            like_clauses = []
+            for idx, term in enumerate(terms):
+                key = f"q{idx}"
+                params[key] = f"%{term}%"
+                like_clauses.append(
+                    f"(s.title ILIKE :{key} OR s.subtitle ILIKE :{key} "
+                    f"OR s.category ILIKE :{key} OR s.description ILIKE :{key})"
+                )
+            conditions.append("(" + " OR ".join(like_clauses) + ")")
+        if category:
+            conditions.append("s.category = :cat")
+            params["cat"] = category
+        having_clauses = ["MIN(k.price) IS NOT NULL"]
+        if max_price:
+            having_clauses.append("MIN(k.price) <= :pmax")
+            params["pmax"] = max_price
+        params["lim"] = limit
+        try:
+            # 运行时经 order_domain 模块属性取 reader,严禁 from-import 导入期
+            # 绑定:测试以整体替换 order_domain._merchant_reader_engine 的方式
+            # 注入密封容器引擎,绑定会让 patch 失明。
+            async with order_domain._merchant_reader_engine().connect() as conn:
+                rows = (
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT s.spu_code, s.title, s.subtitle, s.description, s.category, "
+                                "s.main_image, s.specs, "
+                                "MIN(k.price) AS min_price, COALESCE(SUM(k.stock), 0) AS total_stock "
+                                "FROM merchant_spus s LEFT JOIN merchant_skus k ON k.spu_id = s.id "
+                                f"WHERE {' AND '.join(conditions)} "
+                                "GROUP BY s.id "
+                                f"HAVING {' AND '.join(having_clauses)} "
+                                "ORDER BY min_price ASC LIMIT :lim"
+                            ).bindparams(**params)
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+        except Exception as err:
+            print(f"[MallDomain] 商户真货架库不可达,商品检索降级 engine 本地表: {err}")
+            return None
+        return [
+            {
+                "id": r["spu_code"],
+                "name": r["title"],
+                "price": float(r["min_price"]),
+                "stock": int(r["total_stock"] or 0),
+                # 卡片 💡 行吃卖点短句,长文案只作回落(唯一消费方是
+                # ShoppingGuideSkill._format_candidate 的单行渲染)
+                "description": r["subtitle"] or r["description"],
+                "category": r["category"],
+                "specs": r["specs"] if isinstance(r["specs"], dict) else {},
+                "imageUrl": r["main_image"],
+            }
+            for r in rows
+        ]
 
     @staticmethod
     async def search_products(params: dict) -> dict:
@@ -638,11 +794,22 @@ class MallDomainService:
         max_price = params.get("maxPrice")
         limit = params.get("limit") or 4
         effective_biz_id = params.get("businessId") or "ecommerce"
+        terms = MallDomainService._extract_query_terms(query)
 
         if params.get("threadId") and effective_biz_id == "ecommerce":
             ctx = await OrderDomainService.get_thread_session_context(params["threadId"])
             if ctx["businessId"]:
                 effective_biz_id = ctx["businessId"]
+
+        # L3(2026-09-11):聊天检索主目录换商户真货架(单商户现实,全租户含
+        # ecommerce 统一路由;merchant 分支不吃 businessId —— 商户表无租户列)。
+        # None=不可达降级 engine 本地 products 表;[]=可达查无 → 诚实空,
+        # 严禁跨目录补货。
+        merchant_products = await MallDomainService._search_merchant_catalog(
+            terms, category, max_price, limit
+        )
+        if merchant_products is not None:
+            return {"total": len(merchant_products), "products": merchant_products}
 
         try:
             conditions: list[str] = []
@@ -650,9 +817,13 @@ class MallDomainService:
             if effective_biz_id and effective_biz_id != "ecommerce":
                 conditions.append("business_id = :bid")
                 query_params["bid"] = effective_biz_id
-            if query:
-                conditions.append("(name ILIKE :q OR description ILIKE :q)")
-                query_params["q"] = f"%{query}%"
+            if terms:
+                like_clauses = []
+                for idx, term in enumerate(terms):
+                    key = f"q{idx}"
+                    query_params[key] = f"%{term}%"
+                    like_clauses.append(f"(name ILIKE :{key} OR description ILIKE :{key})")
+                conditions.append("(" + " OR ".join(like_clauses) + ")")
             if category:
                 conditions.append("category = :cat")
                 query_params["cat"] = category
@@ -692,50 +863,37 @@ class MallDomainService:
                         ],
                     }
         except Exception as err:
-            print(f"[MallDomainService.searchProducts] Database query fallback: {err}")
+            print(f"[MallDomainService.searchProducts] Database query error, degrade to honest empty: {err}")
 
-        def _matches(p: dict) -> bool:
-            if query and query not in p["name"] and query not in p["description"] and query not in p["category"]:
-                return False
-            if max_price and p["price"] > max_price:
-                return False
-            return True
-
-        filtered = [p for p in MallDomainService.MOCK_PRODUCTS if _matches(p)]
-        result_list = filtered or MallDomainService.MOCK_PRODUCTS
-        return {"total": len(result_list), "products": result_list[:limit]}
+        # 查无结果诚实返回空(2026-09-11):旧 `filtered or MOCK_PRODUCTS` 把整个
+        # 目录冒充「推荐」全量返回(要背包给跑鞋)的欺骗性兜底已拆除,B 档先改
+        # 诚实过滤、L3 起 MOCK_PRODUCTS 本体也删 —— 降级链终点只剩诚实空。纯
+        # 浏览形输入由 terms 为空走无关键词全量路径,浏览语义不受影响。
+        return {"total": 0, "products": []}
 
     @staticmethod
     async def compare_products(params: dict) -> dict:
         """7. 商品多维参数对比。"""
         product_ids = params["productIds"]
+        # 对比池仅来自 search_products 真实结果(商户真货架优先链,2026-09-11):
+        # 硬编码 Nike 拼接与点名 Pegasus/Invincible 的文案已拆除 —— 假货不得
+        # 混入对比,话术不得点名检索结果里不存在的商品。
         search_res = await MallDomainService.search_products({**params, "limit": 10})
-        all_products = list(search_res.get("products") or []) + [
-            {
-                "id": "prod_nike_air_pegasus_41",
-                "name": "Nike Pegasus 41",
-                "price": 899.0,
-                "specs": {"缓震度": "中等均衡", "重量": "260g (42码)", "推荐场景": "5-10km 日常慢跑", "性价比": "高"},
-            },
-            {
-                "id": "prod_nike_invincible_3",
-                "name": "Nike Invincible 3",
-                "price": 1299.0,
-                "specs": {"缓震度": "超强顶级", "重量": "298g (42码)", "推荐场景": "半马/大体重缓震护膝", "性价比": "旗舰体验"},
-            },
-        ]
-
         matched = [
-            p for p in all_products if p.get("id") in product_ids or any(pid in (p.get("name") or "") for pid in product_ids)
+            p
+            for p in (search_res.get("products") or [])
+            if p.get("id") in product_ids or any(pid in (p.get("name") or "") for pid in product_ids)
         ]
+        summary = (
+            f"已为您对比 {len(matched)} 款商品的核心参数，如需逐项深挖某一维度请告诉我。"
+            if matched
+            else "未找到可对比的商品，请确认商品名称或编号后重试。"
+        )
         return {
             "success": True,
             "comparedCount": len(matched),
             "products": matched,
-            "summary": (
-                f"已为您对比 {len(matched)} 款商品的核心参数：Pegasus 41 性价比高、更轻巧；"
-                "Invincible 3 缓震回弹更澎湃、适合长时间运动。"
-            ),
+            "summary": summary,
         }
 
     @staticmethod
@@ -752,7 +910,15 @@ class MallDomainService:
         if existing:
             existing["quantity"] += quantity
         else:
-            items.append({"skuId": sku_id, "quantity": quantity, "title": title, "price": price, "spec": params.get("spec")})
+            items.append(
+                {
+                    "skuId": sku_id,
+                    "quantity": quantity,
+                    "title": title,
+                    "price": price,
+                    "spec": params.get("spec"),
+                }
+            )
         await MallDomainService._save_cart(cart_key, items)
 
         total_amount = sum(i["price"] * i["quantity"] for i in items)
