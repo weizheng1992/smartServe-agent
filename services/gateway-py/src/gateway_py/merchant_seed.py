@@ -627,13 +627,13 @@ async def seed_merchant_data() -> None:
                     text(
                         "INSERT INTO merchant_spus (spu_code, title, subtitle, description, category, brand, "
                         "main_image, banner_images, spec_dimensions, specs, status) "
-                        "VALUES (:c, :t, :st, :d, :cat, 'AURORA 极光', :img, :banners, :dims, :specs, 'ON_SALE') "
+                        "VALUES (:c, :t, :subtitle, :d, :cat, 'AURORA 极光', :img, :banners, :dims, :specs, 'ON_SALE') "
                         "RETURNING id"
                     ),
                     {
                         "c": spu["code"],
                         "t": spu["title"],
-                        "st": spu["subtitle"],
+                        "subtitle": spu["subtitle"],
                         "d": spu["description"],
                         "cat": spu["category"],
                         "img": spu["main_image"],
@@ -670,22 +670,11 @@ async def seed_merchant_data() -> None:
                 "VALUES ('CUST-8801', '张伟', '13800138000', 'zhangwei@example.com', '黑金SVIP', :addrs, :tags)"
             ),
             {
+                # 地址与订单侧 shipping_address 同源:复用 _ADDR_* 常量,不再三字段逐字双写
                 "addrs": json.dumps(
                     [
-                        {
-                            "id": "addr_01",
-                            "recipientName": "张伟",
-                            "phone": "13800138000",
-                            "fullAddress": "北京市朝阳区建国门外大街1号国贸大厦A座 3801室",
-                            "isDefault": True,
-                        },
-                        {
-                            "id": "addr_02",
-                            "recipientName": "张伟",
-                            "phone": "13800138000",
-                            "fullAddress": "北京市海淀区中关村南大街1号院8号楼1201室",
-                            "isDefault": False,
-                        },
+                        {"id": "addr_01", **_ADDR_GUOMAO, "isDefault": True},
+                        {"id": "addr_02", **_ADDR_ZHONGGUANCUN, "isDefault": False},
                     ],
                     ensure_ascii=False,
                 ),
@@ -698,11 +687,11 @@ async def seed_merchant_data() -> None:
                 text(
                     "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, currency, "
                     "shipping_address, tracking_info, is_returnable, is_address_modifiable) "
-                    "VALUES (:oid, 'CUST-8801', :st, :total, 'CNY', :addr, :tracking, :ret, :modif)"
+                    "VALUES (:oid, 'CUST-8801', :status, :total, 'CNY', :addr, :tracking, :ret, :modif)"
                 ),
                 {
                     "oid": order["order_id"],
-                    "st": order["status"],
+                    "status": order["status"],
                     "total": order["total"],
                     "addr": json.dumps(order["address"], ensure_ascii=False),
                     "tracking": json.dumps(order["tracking"], ensure_ascii=False) if order["tracking"] else None,
@@ -715,14 +704,14 @@ async def seed_merchant_data() -> None:
                     text(
                         "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, "
                         "price, image_url, spec_summary) "
-                        "VALUES (:oid, :spu, :sku, :t, :st, :q, :p, :img, :spec)"
+                        "VALUES (:oid, :spu, :sku, :t, :sku_title, :q, :p, :img, :spec)"
                     ),
                     {
                         "oid": order["order_id"],
                         "spu": it["spu"],
                         "sku": it["sku"],
                         "t": it["title"],
-                        "st": it["sku_title"],
+                        "sku_title": it["sku_title"],
                         "q": it["quantity"],
                         "p": it["price"],
                         "img": it["image"],
