@@ -251,7 +251,7 @@ async def admin_approvals_action(body: dict):
 @router.get("/api/store/products")
 async def store_products():
     try:
-        products = await mds.search_products(limit=20)
+        products = await mds.search_products(limit=100)
         return {"success": True, "products": products}
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
