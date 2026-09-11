@@ -4,6 +4,27 @@
 
 ---
 
+## [2.6.9] - 2026-09-12 (加购幻影 Nike 收口 + 检索召回三连升:词干别名 / L4 词表锚定改写 / 诚实空品类盘点)
+
+诊断起点(/diagnosing-bugs,红灯脚本 /tmp/repro_cart_bug.py):「卖的好的短袖」推荐后追一句「把第一件加入购物车」,入车的是**不存在的 Nike Pegasus**。事故链三层——①「卖得好」措辞不在快轨触发词表,落入 structured_llm 图路径;② planner 给 executor 的是 searchProducts **工具**而非 ShoppingGuideSkill,工具路径不写 guide_context,且 `_execute_single_step_core` 对 state 的直接赋值是死写(executor_node 只回传四键),上一轮导购的 stale 候选经 run_agent 收口原样存回 TaskMemory;③ CartManageSkill 序数解析失败时硬编码 Pegasus/AJ1 假商品兜底,幻影商品入车。
+
+### 🐛 Fixes
+
+- **幻影 Nike 加购回归三层收口**:A. 触发词补「卖得好/卖的好」(slot_extractor SHOPPING_GUIDE 与 guide_skills `_FALLBACK_RE` 同源补词)——该措辞族回 Triage 快轨,ShoppingGuideSkill 刷新候选;B. 图路径确定性守卫:searchProducts 工具结果非空即登记 `guide_context`(与技能路径 `extra.guideContext` 同形,不依赖 planner 选工具还是选技能),且 guideContext **经返回值上行**(单步/并行两路收口,executor_node 写入图状态)——stale 候选不再跨轮存活;C. CartManageSkill 候选全解析失败时诚实反问,拆除改量(`sku_nike_aj1_blk_425`)与加购(Pegasus 假商品)两处硬编码兜底——无上下文的加购指令宁可追问,不可编造目标商品。
+- **词干别名展开**:`_expand_stem_aliases` 口语统称「裤子/鞋子」→ 追加货架词素「裤/鞋」OR 词元(症状「卖的好的裤子」:货架命名「工装裤/慢跑裤/老爹鞋」四列不含「裤子/鞋子」子串,ILIKE 永远擦肩;语义档余弦 0.51-0.53 又卡 0.55 阈值下,词干路径才是确定性修法)。刻意显式小词表而非通用剥「子」——电子/种子类词剥后语义漂移;空表进空表出,浏览形判定不受影响;语义档仍嵌原始 query(阈值按原始查询定标,换表示会毁定标)。
+
+### ✨ Features
+
+- **L4 词表锚定改写重试**:词元+语义双空后(症状「卖的好的背心」双空即终局),`_rewrite_query_terms` 以 `get_shelf_overview()` 品类词表为锚调一次 LLM,把口语措辞映射成货架检索词元(只允许产出词表品类词或常见叫法,防跨目录自由发挥)再重试一次;`AI_MALL_QUERY_REWRITE_ENABLED` 默认开、`AI_MALL_QUERY_REWRITE_TIMEOUT_SECONDS` 默认 2.0;超时/异常/脏输出/非 dict 体一律降级空表,检索链终点始终是诚实空;产出钳制(2-6 字、≤3 个、去重、剥 ``` 围栏);纯浏览形输入不进 L4。
+- **诚实空品类盘点**:`get_shelf_overview()` 在售 SPU 按品类聚合计数(OFF_SALE 不计数,spu_count DESC + category ASC 确定序),ShoppingGuideSkill / ProductInquirySkill 空分支把「调整关键词」升级为「目前店内热卖品类:背包收纳(2款)…」——剩余诚实空从冷场变成可点选的真实方向;盘点不可达优雅省略盘点段(不降级 engine 本地表,盘点描述商户店内、严禁跨目录拼数)。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **423 passed**(2.6.8 基线 397 → 本轮 423,+26 零回归):新增幻影 Nike 回归套件 `test_cart_phantom_nike_regression.py`(事故链钉死)、词干别名 3 用例(裤子召回/鞋子对称/「杯子」不通用剥子)、L4 改写 8+6 用例(接线召回/空表诚实空/开关关闭零触达/密封降级 + 纯解析围栏剥除/脏 JSON/非 dict/长度去重截断/词表空零调用/超时)、品类盘点技能面 4 用例(盘点空不编造/有盘点带真实品类/两技能同源);ruff 干净;promptfoo 不跑(eval/ 零相关引用,不动意图路由契约)。
+- 既有诚实空语义用例回归确认:改写档套件级默认密封(沿 `_sealed_embed` 先例),意外进入 L4 分支的用例得到降级空表,行为与封桩前一致。
+
+---
+
 ## [2.6.8] - 2026-09-11 (商品检索假货收口:接通商户真货架 + 拆 mock 兜底 + 语义召回补位)
 
 诊断起点(/diagnosing-bugs):门店聊天输入「推荐背包热销」,回复却是 3 件 Nike 跑鞋。根因两层——① `search_products` 以整句做子串匹配(`name ILIKE '%推荐背包热销%'`),NL 措辞永远命中不了任何商品字段;② 查无时 `filtered or MOCK_PRODUCTS` 欺骗性兜底把整个假目录(3 件 Nike)冒充「热销推荐」全量返回。B 档先改诚实过滤暴露真缺口:18 SPU/62 SKU 真货全在 agent_merchant 独立库,engine 侧只看本地 products 表(5 行,无背包)。
