@@ -10,6 +10,12 @@ docs/assets/ 下三张破损测试图覆盖售后视觉链路的三条道:
 - AURORA-ORD-2026-9083 咖啡套装(SHIPPED 已签收) ← damaged-order-9083.png(面单 OCR 单号)+
   damaged-coffee-set.png(商品破损,无单号,走消歧与破损定责)
 
+破损测试图为合成标注图(docs/assets/gen_damage_fixtures.py 确定性生成,random.seed(2026)):
+真实商品底图上绘制红圈/裂纹/破洞与中文标注文本 —— vision 链路依赖标注文本与
+面单印刷单号定责,合成图可控可复现;底图与产物逐字节入仓,重跑脚本时
+damaged-order-9083.png 与 damaged-coffee-set.png 两张必须 MD5 不变。
+damaged-jacket.png 的底图与 _IMG_1 是同一张照片(黑色硬壳冲锋衣,一处换图两处受益)。
+
 用法::
 
     cd services/gateway-py && uv run python -m gateway_py.merchant_seed
@@ -24,7 +30,8 @@ from sqlalchemy import text
 
 from .merchant_db import ensure_merchant_tables, merchant_engine
 
-_IMG_1 = "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=800&auto=format&fit=crop&q=60"
+# 黑色硬壳冲锋衣(面料带水珠,贴「暴雨级防水」卖点);damaged-jacket.png 底图同源
+_IMG_1 = "https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=800&auto=format&fit=crop&q=60"
 _IMG_1B = "https://images.unsplash.com/photo-1544441893-675973e31985?w=800&auto=format&fit=crop&q=60"
 _IMG_2 = "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&auto=format&fit=crop&q=60"
 _IMG_3 = "https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?w=800&auto=format&fit=crop&q=60"

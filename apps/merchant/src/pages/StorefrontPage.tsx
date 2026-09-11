@@ -327,7 +327,7 @@ export default function StorefrontPage() {
                   src={
                     selectedSku?.imageUrl ||
                     buyingProduct.imageUrl ||
-                    'https://images.unsplash.com/photo-1551028719-00167b16eac5?w=200'
+                    'https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=200'
                   }
                   alt="SKU"
                   className="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-white"

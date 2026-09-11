@@ -194,7 +194,7 @@ export default function OrdersPage() {
                   {order.items?.map((item, idx) => (
                     <div key={idx} className="flex items-center space-x-4">
                       <img
-                        src={item.imageUrl || 'https://images.unsplash.com/photo-1551028719-00167b16eac5?w=200'}
+                        src={item.imageUrl || 'https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=200'}
                         alt={item.title}
                         className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0"
                       />
