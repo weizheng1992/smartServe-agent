@@ -4,6 +4,29 @@
 
 ---
 
+## [2.6.8] - 2026-09-11 (商品检索假货收口:接通商户真货架 + 拆 mock 兜底 + 语义召回补位)
+
+诊断起点(/diagnosing-bugs):门店聊天输入「推荐背包热销」,回复却是 3 件 Nike 跑鞋。根因两层——① `search_products` 以整句做子串匹配(`name ILIKE '%推荐背包热销%'`),NL 措辞永远命中不了任何商品字段;② 查无时 `filtered or MOCK_PRODUCTS` 欺骗性兜底把整个假目录(3 件 Nike)冒充「热销推荐」全量返回。B 档先改诚实过滤暴露真缺口:18 SPU/62 SKU 真货全在 agent_merchant 独立库,engine 侧只看本地 products 表(5 行,无背包)。
+
+### 🐛 Fixes
+
+- **检索降级链重构(L3)**:`search_products` / `compare_products` / SPI `search_products` 统一走 **商户真货架(`agent_merchant.merchant_spus/skus`,经 `order_domain._merchant_reader_engine` 跨库只读)→ engine 本地 products 表 → 诚实空**;单商户现实下全租户统一路由(含 ecommerce,商户表无租户列)。词元 OR ILIKE 四列(title/subtitle/**category**/description——SPU title 是「双肩包」不含「背包」,品类列才是命中面)+ `status='ON_SALE'` 过滤 + `HAVING MIN(k.price) IS NOT NULL` 常驻(无 SKU SPU 展示价 NULL:PG ASC 排 NULLS FIRST 且 `float(None)` 炸);展示价=MIN(sku.price)/库存=SUM(sku.stock) 与网关 `_spu_to_product` 同语义。**跨库读严禁 from-import 导入期绑定**(运行时经 order_domain 模块属性查表,测试整体替换模块属性注入密封容器引擎)。
+- **假货整体拆除**:「要背包给跑鞋」的欺骗性兜底源头 `MOCK_PRODUCTS`(3 件 Nike 假目录)整体删除;`compare_products` 硬编码 Nike 拼接与点名 Pegasus/Invincible 文案一并拆除,话术不得点名检索结果里不存在的商品。库可达但查无必须诚实空,严禁跨目录补货。
+- **L1 导购词族补齐**:`_GUIDE_WRAPPER_TERMS` 追加评价/热度修饰词族 18 条,一律**短语形**——「的」是分隔符但「好/高」不是,「比较好的帐篷」剥裸词「比较」会残留『好』词元(OR 匹配拉入无关商品);长序替换内建使「性价比高」先于「性价比」消费;补「有什么」修复词表只有「有没有」的浏览形漏判不对称。
+- **SPI 改道**:`LocalDbSpiAdapter.search_products` 经 `MallDomainService` 统一检索链,出参七键契约零漂移,ProductInquirySkill 零改动。
+
+### ✨ Features
+
+- **L2 语义召回补位**:商户货架词元查空且原始 NL 非空时,对硬过滤候选池(status/category/maxPrice 先行挤出池)做 bge 余弦 top-k,命中按相似度 DESC——口语措辞(「野外露营睡觉用的」)不再空手而归。阈值 **0.55 系真 bge-small-zh 实测定标**(首版 0.6 实测全灭:正例落 0.56-0.58、无关品类 0.36-0.45,bge-small 余弦绝对值整体偏低),与 RAG 直答同档。SPU 向量进程内缓存按文案 sha256 失效(商户改标题/卖点下轮自动重嵌,无需通知 engine);嵌入走 `get_embedding_model()` 既有串行护栏(防 2026-09-05 双线程 SIGSEGV);嵌入异常/不可用降级诚实空绝不阻断;`AI_MALL_SEMANTIC_ENABLED=0` 一键关。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **397 passed**(2.6.7 后基线 332 → B 档 373 → 本轮 397,零回归):新增 `test_merchant_catalog_reach.py` 16 用例(密封商户库:症状钉死/OFF_SALE/maxPrice=min SKU 价/降级链/技能端到端/SPI 契约/诚实空不跨目录/浏览形/多词元 OR + 语义 6:补位命中/阈值下诚实空/缓存文案哈希失效重嵌/嵌入故障降级/开关关闭零触达/硬过滤先于语义),`test_mall_search_terms.py` 重构 16 用例(词元单测 + engine 降级分支,商户 reader 抛异常桩密封消除宿主 env 非决定性);ruff 干净;promptfoo 不跑(eval/ 零 searchProducts 引用,不动意图路由)。
+- 实跑真商户库(18 SPU/62 SKU):「推荐背包热销」→背包收纳 3 SPU(¥259/499/829)零跑鞋;「比较好的帐篷」→露营帐篷;「野外露营睡觉用的」→睡袋 0.58+帐篷 0.56(语义补位);「户外防晒防雨的外套」→硬壳冲锋衣 0.57(次高 0.52 挡掉);「Pegasus 41」「滑雪板」→诚实空(假鞋时代结束)。
+- 已知边界(如实记录):热销排序不做(merchant 库无销量列,全仓亦无 sales_volume),词元/浏览路径排序 min_price ASC 系已文档化限制;其余 TS 基线 mock(query_product_skus/tracking/reviews/演示车)不动。
+
+---
+
 ## [2.6.7] - 2026-09-10 (误退事故两层收口:带图轮次豁免文本去重 + 单号信任边界;会话时间线排序锚修正)
 
 诊断起点(/diagnosing-bugs):用户重发「坏了」+ 破损投诉图(图内明示外店单号 ORD-77777),机器人对**本店真单** AURORA-ORD-2026-9081 误起退款审批。vision 实弹输出依旧完全正确(`extractedOrderId=ORD-77777` / severe 0.95)——2.6.3 的 OCR 消费修复本身无恙,错在成果被两道旧闸联合短路:
