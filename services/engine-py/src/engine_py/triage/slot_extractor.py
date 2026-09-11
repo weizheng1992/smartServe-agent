@@ -233,13 +233,6 @@ INTENT_SCHEMAS: dict[str, IntentSchema] = {
     ),
 }
 
-REQUIRED_SLOTS_MAP: dict[str, list[str]] = {
-    AgentIntentType.ORDER_MODIFY_ADDRESS: ["orderId", "newAddress"],
-    AgentIntentType.ORDER_RETURN: ["orderId"],
-    AgentIntentType.ORDER_CANCEL: ["orderId"],
-    AgentIntentType.ORDER_QUERY: ["orderId"],
-}
-
 
 # ---------------------------------------------------------------------------
 # 4. SlotExtractor

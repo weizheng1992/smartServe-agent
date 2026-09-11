@@ -34,6 +34,21 @@ class AgentIntentType:
     OUT_OF_SCOPE = "out_of_scope"
 
 
+# 咨询/兜底形意图族(动作形 × 咨询形口径的咨询侧,工单04 2026-09-11 上移单一
+# 来源):badcase/intent_signals 冲突检测与 triage Step3 consult 降级两消费方
+# 共用。成员口径与 badcase 侧历史集合逐字一致;"chitchat" 非注册表档位 ——
+# resolve_domain_role 的默认域角色名,历史口径成员,保持兼容不剔除。
+CONSULT_SIDE_INTENTS = frozenset(
+    {
+        AgentIntentType.CONSULT,
+        AgentIntentType.GENERAL_QUERY,
+        AgentIntentType.OUT_OF_SCOPE,
+        AgentIntentType.CHAT,
+        "chitchat",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # 1. 单号正则收口(此前三处各写一份)
 # ---------------------------------------------------------------------------
@@ -86,6 +101,10 @@ class IntentSpec:
     notes: str = ""
     # 结构化分类器 prompt 类目号(None=不在 10 类目里,由规则层产出)
     prompt_category: int | None = None
+    # 执行域角色(resolve_domain_role 的档位映射,工单04 2026-09-11 上表):
+    # cart / shopping_guide / order_service / chitchat 四域;文本侧线索回退
+    # (购物车/导购措辞)是文本维度,留在 resolve_domain_role 本体不进表
+    domain_role: str = "chitchat"
 
 
 INTENT_REGISTRY: dict[str, IntentSpec] = {
@@ -94,7 +113,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         family="conversational",
         consumers=(
             "triage Step1 负向闸(intent != 'chat' 才继续精判)",
-            "badcase/intent_signals._CONSULT_SIDE_INTENTS(咨询侧冲突信号)",
+            "badcase/intent_signals 冲突检测(咨询侧集合 CONSULT_SIDE_INTENTS,本体已上移本表)",
         ),
         lifecycle="intermediate",
         notes="寒暄闸的中间信号,从不作为终局 intents 落 planner;badcase 侧作弱意图参与冲突判定",
@@ -119,6 +138,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         ),
         lifecycle="active",
         prompt_category=1,
+        domain_role="shopping_guide",
     ),
     AgentIntentType.CART_MANAGE: IntentSpec(
         name="cart_manage",
@@ -128,6 +148,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         ),
         lifecycle="active",
         prompt_category=2,
+        domain_role="cart",
     ),
     AgentIntentType.ORDER_QUERY: IntentSpec(
         name="order_query",
@@ -140,6 +161,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         lifecycle="active",
         prompt_category=3,
         notes="与 order_status 同义对;已知分叉:cards/card_synthesizer 骨架卡只认 order_status(order_query 出查单卡落空)——修复另开工单",
+        domain_role="order_service",
     ),
     AgentIntentType.ORDER_STATUS: IntentSpec(
         name="order_status",
@@ -152,6 +174,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         ),
         lifecycle="active",
         prompt_category=3,
+        domain_role="order_service",
     ),
     AgentIntentType.ORDER_MODIFY_ADDRESS: IntentSpec(
         name="order_modify_address",
@@ -162,6 +185,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         ),
         lifecycle="active",
         prompt_category=5,
+        domain_role="order_service",
     ),
     AgentIntentType.ORDER_CANCEL: IntentSpec(
         name="order_cancel",
@@ -174,6 +198,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
             "大写 'ORDER_CANCEL'(技能匹配大小写敏感,小写终局永不命中);无专属取消工具。"
             "潜在价值:与 general_query 零规划旁路区分(收编会丢「取消」语义)。修复另开工单"
         ),
+        domain_role="order_service",
     ),
     AgentIntentType.ORDER_RETURN: IntentSpec(
         name="order_return",
@@ -187,6 +212,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         lifecycle="active",
         prompt_category=4,
         notes="与 refund 同义对;TS 冻结契约 packages/types 的 ORDER_RETURN 枚举值即 'refund'(历史归并痕迹)",
+        domain_role="order_service",
     ),
     AgentIntentType.REFUND: IntentSpec(
         name="refund",
@@ -200,6 +226,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         ),
         lifecycle="active",
         prompt_category=4,
+        domain_role="order_service",
     ),
     AgentIntentType.METRIC_QUERY: IntentSpec(
         name="metric_query",
@@ -210,6 +237,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         ),
         lifecycle="latent",
         notes="无专属快轨分支,靠 LLM 规划兜住;潜在价值:收编进 general_query 会命中零规划旁路直接终稿,指标能力即死,故不可合并",
+        domain_role="order_service",
     ),
     AgentIntentType.HUMAN_ESCALATION: IntentSpec(
         name="human_escalation",
@@ -219,6 +247,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         ),
         lifecycle="active",
         prompt_category=7,
+        domain_role="order_service",
     ),
     AgentIntentType.CONSULT: IntentSpec(
         name="consult",

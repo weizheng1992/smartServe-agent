@@ -118,8 +118,6 @@ Instructions:
 async def classify(
     user_input: str,
     recent_history_text: str | None = None,
-    job_id: str | None = None,
-    thread_id: str | None = None,
     exemplars_prompt: str = "",
 ) -> StructuredTriageOutput:
     llm = get_chat_model()
@@ -155,10 +153,7 @@ async def classify(
             return parse_structured_output_text(str(raw_text))
         raise ValueError("structured output returned neither parsed result nor raw text")
     except Exception as err:
-        print(
-            "[StructuredClassifier] Structured output invocation failed, "
-            f"falling back to prompt-guided JSON parsing: {err}"
-        )
+        print(f"[StructuredClassifier] 结构化输出调用失败,降级 prompt 引导 JSON 解析: {err}")
         # fallback prompt 内嵌真实 JSON Schema 与示例,避免模型凭名字猜测字段
         schema_json = json.dumps(StructuredTriageOutput.model_json_schema(), ensure_ascii=False)
         example_json = json.dumps(

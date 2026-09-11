@@ -21,12 +21,15 @@ import re
 from sqlalchemy import func, select
 
 from ..db import PendingApproval, Thread, get_session
+from ..triage.intent_registry import CONSULT_SIDE_INTENTS
 from .pool import SOURCE_CLAIM_MISMATCH, SOURCE_INTENT_CONFLICT, record_badcase_signal
 
 # 咨询/兜底形意图族:不触发执行管道的类目。槽位层的 chat、快轨的 consult、
 # 兜底 general_query、范畴外 out_of_scope 同族;其余(refund/order_return/
 # cart_*/skill_* 等)一律视为动作形 —— 与 07 冲突检测保持同一口径。
-_CONSULT_SIDE_INTENTS = {"consult", "general_query", "out_of_scope", "chat", "chitchat"}
+# 集合本体上移 intent_registry(工单04 2026-09-11),triage Step3 consult
+# 降级与本检测共用同一口径;此处别名保持本模块既有引用不动。
+_CONSULT_SIDE_INTENTS = CONSULT_SIDE_INTENTS
 
 # 终稿宣称模式:宣称已发起退款/退货/审批动作。均要求「已/已经」先行,
 # 「尚未/未」类否定措辞天然不命中。

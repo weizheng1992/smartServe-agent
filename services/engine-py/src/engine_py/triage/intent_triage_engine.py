@@ -28,6 +28,7 @@ from .consult_fast_path import (
     run_consult_direct_answer,
 )
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
+from .intent_registry import CONSULT_SIDE_INTENTS, INTENT_REGISTRY
 from .product_disambiguator import AFTER_SALE_INTENTS, build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
 from .slot_extractor import ORDER_ID_RE, AgentIntentType, SlotExtractor
@@ -42,6 +43,17 @@ ORDER_KEYWORDS_RE = re.compile(r"订单|发货|物流|查单|买的|快递|到�
 REFUND_KEYWORDS_RE = re.compile(r"退款|退货|退钱|退单|退款申请|退货流程|破损|坏了|碎了|瑕疵", re.IGNORECASE)
 MULTI_INTENT_CANDIDATE_RE = re.compile(r"(?:另外|同时|并且|顺便|还有|然后再|接着|以及)")
 
+# 文本侧域角色线索(工单04 2026-09-11):措辞维度的回退 —— 正则与判定次序
+# 逐字节保持旧实现,仅提为模块常量。文本线索优先于意图档位:措辞含加购动词
+# 时即使档位是 chat/refund 也回 cart 域(用户嘴上在说购物车)
+_CART_TEXT_HINT_RE = re.compile(
+    r"(?:加购|购物车|结算|去结算|买它|加入购物车|移出购物车|清空购物车|删除第|改成\s*\d+|修改为\s*\d+)",
+    re.IGNORECASE,
+)
+_SHOPPING_TEXT_HINT_RE = re.compile(
+    r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好)", re.IGNORECASE
+)
+
 
 def resolve_domain_role(intents: list[dict], input_text: str | None = None) -> str:
     primary_intent = ""
@@ -52,27 +64,17 @@ def resolve_domain_role(intents: list[dict], input_text: str | None = None) -> s
     if not primary_intent and intents:
         primary_intent = intents[0].get("intent", "")
 
-    if primary_intent == "cart_manage" or re.search(
-        r"(?:加购|购物车|结算|去结算|买它|加入购物车|移出购物车|清空购物车|删除第|改成\s*\d+|修改为\s*\d+)",
-        input_text or "",
-        re.IGNORECASE,
-    ):
+    text = input_text or ""
+    # 文本线索优先(购物车措辞最先判、次导购措辞 —— 与旧实现次序一致)
+    if primary_intent == AgentIntentType.CART_MANAGE or _CART_TEXT_HINT_RE.search(text):
         return "cart"
-    if primary_intent == "shopping_guide" or re.search(
-        r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好)", input_text or "", re.IGNORECASE
-    ):
+    if primary_intent == AgentIntentType.SHOPPING_GUIDE or _SHOPPING_TEXT_HINT_RE.search(text):
         return "shopping_guide"
-    if primary_intent in (
-        "order_status",
-        "refund",
-        "order_modify_address",
-        "order_cancel",
-        "order_query",
-        "order_return",
-        "human_escalation",
-        "metric_query",
-    ):
-        return "order_service"
+    # 意图档位 → 注册表 domain_role(工单04:映射上表,此处只查表;cart/
+    # shopping_guide 两档在上面文本分支已返回,注册表值兜底同判)
+    spec = INTENT_REGISTRY.get(primary_intent)
+    if spec is not None:
+        return spec.domain_role
     return "chitchat"
 
 
@@ -105,6 +107,60 @@ def _proposal(layer: str, intent: Any, confidence: Any = None) -> dict:
         "intent": str(intent) if intent is not None else None,
         "confidence": round(float(confidence), 3) if confidence is not None else None,
     }
+
+
+def _triage_terminal_result(
+    intents: list[dict],
+    input_text: str,
+    history_msgs: list[dict],
+    damage_assessment: dict | None,
+    *,
+    role: str | None = None,
+    state: dict | None = None,
+    with_order_context: bool = False,
+) -> dict:
+    """成功路径(非 bypass)终局返回形状收口(工单03 2026-09-11):此前 9 处
+    逐字重复。role 显式覆盖咨询回落路径的 chitchat 字面量;with_order_context
+    逐站点保持键存在性 —— 是否透传单号上下文是各判定的语义差异,不在收口内
+    拉齐。"""
+    result = {
+        "intents": intents,
+        "active_domain_role": role if role is not None else resolve_domain_role(intents, input_text),
+        "short_memory": history_msgs,
+        "damage_assessment": damage_assessment,
+        "global_transitions_count": -1,
+        "tool_errors_count": -1,
+    }
+    if with_order_context and state is not None:
+        result["order_context"] = state.get("order_context")
+    return result
+
+
+def _demote_consult_keep_actions(parsed: list[dict]) -> list[dict]:
+    """consult 主导终局的降级(工单06 2026-09-11,本批唯一行为变更)。
+
+    Step3 分类器判 consult 主导后,否决/RAG 空弱两条路径需要降级离场:
+    - 咨询侧条目(intent ∈ CONSULT_SIDE_INTENTS)降级 general_query;
+    - 动作形条目保留 —— 首个动作形提升为 primary,原 primary 降 secondary
+      (intent-arbitration 故事3:带动作意图的请求绝不因一条资讯回复了事;
+      故事5:混排拆开各走各路,planner 对多意图自然编排);
+    - 纯 consult 输入无动作可保 → 输出与旧整体降级逐字同形(回归安全)。
+    """
+    result = [{**p} for p in parsed]
+    for entry in result:
+        if entry.get("intent") in CONSULT_SIDE_INTENTS:
+            entry["intent"] = AgentIntentType.GENERAL_QUERY
+    first_action = next(
+        (i for i, p in enumerate(result) if p["intent"] not in CONSULT_SIDE_INTENTS), None
+    )
+    if first_action is None:
+        return result
+    if first_action == 0:
+        return result
+    promoted = result.pop(first_action)
+    promoted["type"] = "primary"
+    result[0]["type"] = "secondary"
+    return [promoted, *result]
 
 
 class IntentTriageEngine:
@@ -145,7 +201,7 @@ class IntentTriageEngine:
             if candidates and len(candidates) >= 2:
                 await record_intent_conflict_if_any(thread_id, candidates)
         except Exception as err:
-            print(f"[Triage Logging Exception] Bypassed log persistence: {err}")
+            print(f"[Triage] 意图日志落库失败,已跳过不阻断会话 (threadId={thread_id}): {err}")
 
     @staticmethod
     async def log_low_confidence_to_db(thread_id: str, input_text: str, candidates: Any) -> None:
@@ -161,7 +217,7 @@ class IntentTriageEngine:
                 )
                 await session.commit()
         except Exception as err:
-            print(f"[Low Confidence Logging Exception] Bypassed log persistence: {err}")
+            print(f"[Triage] 低置信日志落库失败,已跳过 (threadId={thread_id}): {err}")
 
     @staticmethod
     async def handle_immediate_bypass(
@@ -336,14 +392,7 @@ class IntentTriageEngine:
                     "🔄 恢复执行流：检测到主管人工决议，正在快速解挂并拉起后续处理步骤...",
                     node="triage",
                 )
-            return {
-                "intents": intents,
-                "active_domain_role": resolve_domain_role(intents, input_text),
-                "short_memory": history_msgs,
-                "damage_assessment": state.get("damage_assessment"),
-                "global_transitions_count": -1,
-                "tool_errors_count": -1,
-            }
+            return _triage_terminal_result(intents, input_text, history_msgs, state.get("damage_assessment"))
 
         if state.get("job_id"):
             await emit_status(
@@ -367,7 +416,7 @@ class IntentTriageEngine:
                 vision_analysis = await analyze_images(state["image_urls"], input_text)
                 damage_assessment = vision_analysis.get("damageAssessment") or damage_assessment
             except Exception as vision_err:
-                print(f"[Triage Multimodal Vision Exception]: {vision_err}")
+                print(f"[Triage] 多模态视觉解析失败,降级启发式兜底 (threadId={thread_id}): {vision_err}")
 
         # 图内 OCR 单号(2026-09-09):消费语义与文本单号一致 —— 进实体/订单上下文,
         # 查无此单由技能归属校验诚实报错;此前算完即丢,图内明示单号对流程零贡献
@@ -390,14 +439,7 @@ class IntentTriageEngine:
 
         if rule_matchers.is_human_escalation_requested(input_text):
             intents = [{"intent": "human_escalation", "confidence": 1.0}]
-            return {
-                "intents": intents,
-                "active_domain_role": resolve_domain_role(intents, input_text),
-                "short_memory": history_msgs,
-                "damage_assessment": damage_assessment,
-                "global_transitions_count": -1,
-                "tool_errors_count": -1,
-            }
+            return _triage_terminal_result(intents, input_text, history_msgs, damage_assessment)
 
         # 🛡️ 重复提问拦截器
         try:
@@ -458,7 +500,7 @@ class IntentTriageEngine:
                         last_assistant_msg.get("cards"),
                     )
         except Exception as sh_err:
-            print(f"[Triage Duplicate Shield Exception] Bypassed duplicate check: {sh_err}")
+            print(f"[Triage] 重复提问拦截器异常,已跳过去重检查 (threadId={thread_id}): {sh_err}")
 
         # 🛡️ Step 1: 规则白名单
         clean_input = strip_punctuation_for_greeting(input_text)
@@ -535,14 +577,9 @@ class IntentTriageEngine:
                     candidates=[_proposal("consult_gate", "consult")],
                     arbitration_reason="consult_no_rag",
                 )
-                return {
-                    "intents": consult_intents,
-                    "active_domain_role": "chitchat",
-                    "short_memory": history_msgs,
-                    "damage_assessment": damage_assessment,
-                    "global_transitions_count": -1,
-                    "tool_errors_count": -1,
-                }
+                return _triage_terminal_result(
+                    consult_intents, input_text, history_msgs, damage_assessment, role="chitchat"
+                )
 
         # 🛡️ Step 1.5: 意图与槽位完整性拦截
         try:
@@ -598,19 +635,14 @@ class IntentTriageEngine:
                     ],
                     arbitration_reason="slot_extractor_multi",
                 )
-                return {
-                    "intents": multi_intents,
-                    "active_domain_role": resolve_domain_role(multi_intents, input_text),
-                    "short_memory": history_msgs,
-                    "damage_assessment": damage_assessment,
-                    "order_context": state.get("order_context"),
-                    "global_transitions_count": -1,
-                    "tool_errors_count": -1,
-                }
+                return _triage_terminal_result(
+                    multi_intents, input_text, history_msgs, damage_assessment,
+                    state=state, with_order_context=True,
+                )
 
-            task_spec = all_specs[0] if all_specs else SlotExtractor.extract(
-                input_text, active_intent, existing_slots, context
-            )
+            # extract_all 恒非空(detected≤1 时返回 [extract(...)]、≥2 时逐规则
+            # 列表,且 ≥2 已在上分支返回),此处直接取首元素(工单02 死分支清理)
+            task_spec = all_specs[0]
 
             # 单号信任边界(2026-09-10 误退事故第二层):slots.orderId 可能来自通用
             # extract_order_id 的历史反向回填 —— 历史最后提及的单号(旧消歧卡里的
@@ -673,6 +705,15 @@ class IntentTriageEngine:
                         candidates=list(proposals),
                     )
 
+            # 🧭 冲突标记留痕(intent-arbitration 07,工单07 2026-09-11 挂点前移):
+            # 槽位层判动作 × 咨询形措辞(疑问词×话题词×无动作动词)→ 记
+            # consult_shaped_gate 提议。挂点自「槽位完整高置信终局」前移至缺槽
+            # 反问检查之前 —— 07 追溯的靶形状正是咨询形输入被缺槽反问打断,
+            # 旧挂点在该路径永不点亮,冲突信号源对此失明。路由不变(只记提议
+            # 不碰 intents);信号只入池不成为断言(07 口径)。
+            if task_spec["intentType"] != AgentIntentType.CHAT and is_consult_shaped_marker(input_text):
+                proposals.append(_proposal("consult_shaped_gate", AgentIntentType.CONSULT))
+
             # 高风险/多参数意图缺失必填槽位 → 即时追问,阻断死循环自旋
             if task_spec["missingSlots"] and task_spec["clarificationMessage"]:
                 await task_memory.save_task_state(
@@ -724,15 +765,6 @@ class IntentTriageEngine:
                     }
                 ]
 
-                # 🧭 冲突标记留痕(intent-arbitration 07,2026-09-10):槽位层判
-                # 动作 × 措辞带咨询形标记(疑问词×话题词×无动作动词)→ 记
-                # consult_shaped_gate 提议进 candidates —— 单层动作终局此前无
-                # consult 侧候选,该残余对坏例池冲突信号源不可见,无从累积数据。
-                # 路由不变(照旧技能直通/规划);01 留痕 393 行直接审计此形状
-                # 0 例,不硬上 LLM 仲裁,观测放量后凭数据复盘。
-                if is_consult_shaped_marker(input_text):
-                    proposals.append(_proposal("consult_shaped_gate", AgentIntentType.CONSULT))
-
                 await task_memory.save_task_state(
                     {
                         "goal": f"Completed {task_spec['intentType']}",
@@ -773,16 +805,9 @@ class IntentTriageEngine:
                     arbitration_reason="slot_extractor_single_complete",
                 )
 
-                return {
-                    "intents": intents,
-                    "active_domain_role": resolve_domain_role(intents, input_text),
-                    "short_memory": history_msgs,
-                    "damage_assessment": damage_assessment,
-                    "global_transitions_count": -1,
-                    "tool_errors_count": -1,
-                }
+                return _triage_terminal_result(intents, input_text, history_msgs, damage_assessment)
         except Exception as slot_err:
-            print(f"[Triage Slot-Clarification Exception]: {slot_err}")
+            print(f"[Triage] 槽位澄清阶段异常,已跳过槽位层裁决 (threadId={thread_id}): {slot_err}")
 
         # 🛡️ Step 2: Embedding 快速语义分类
         score_order = 0.0
@@ -800,7 +825,7 @@ class IntentTriageEngine:
             # 落到下方锚点判定 / Step 3 精判的真实执行管道。
             cache_tenant = tenant_of_state(state)
             if is_action_query(input_text, cache_tenant):
-                print(f"[Triage Semantic Cache] Action-shaped input skips reply cache: {input_text[:50]}")
+                print(f"[Triage] 动作形输入跳过回复缓存读取 (tenantId={cache_tenant}): {input_text[:50]}")
             else:
                 cache_hit = SemanticVectorCache.find_best_semantic_match(cache_tenant, user_vector, 0.96)
                 if cache_hit:
@@ -868,15 +893,10 @@ class IntentTriageEngine:
                     ],
                     arbitration_reason="embedding_composite",
                 )
-                return {
-                    "intents": intents,
-                    "active_domain_role": resolve_domain_role(intents, input_text),
-                    "short_memory": history_msgs,
-                    "damage_assessment": damage_assessment,
-                    "order_context": state.get("order_context"),
-                    "global_transitions_count": -1,
-                    "tool_errors_count": -1,
-                }
+                return _triage_terminal_result(
+                    intents, input_text, history_msgs, damage_assessment,
+                    state=state, with_order_context=True,
+                )
 
             # 判定 2: 物流/订单状态查询直达
             if (score_order >= 0.88 and score_order - score_oos >= 0.08) or (
@@ -899,15 +919,10 @@ class IntentTriageEngine:
                     candidates=[*proposals, _proposal("embedding", "order_status", score_order)],
                     arbitration_reason="embedding_order_status",
                 )
-                return {
-                    "intents": intents,
-                    "active_domain_role": resolve_domain_role(intents, input_text),
-                    "short_memory": history_msgs,
-                    "damage_assessment": damage_assessment,
-                    "order_context": state.get("order_context"),
-                    "global_transitions_count": -1,
-                    "tool_errors_count": -1,
-                }
+                return _triage_terminal_result(
+                    intents, input_text, history_msgs, damage_assessment,
+                    state=state, with_order_context=True,
+                )
 
             # 判定 3: 明确退款执行意图直达
             if (score_refund >= 0.88 and score_refund - score_oos >= 0.08) or (
@@ -956,15 +971,10 @@ class IntentTriageEngine:
                     candidates=[*proposals, _proposal("embedding", "refund", score_refund)],
                     arbitration_reason="embedding_refund",
                 )
-                return {
-                    "intents": intents,
-                    "active_domain_role": resolve_domain_role(intents, input_text),
-                    "short_memory": history_msgs,
-                    "damage_assessment": damage_assessment,
-                    "order_context": state.get("order_context"),
-                    "global_transitions_count": -1,
-                    "tool_errors_count": -1,
-                }
+                return _triage_terminal_result(
+                    intents, input_text, history_msgs, damage_assessment,
+                    state=state, with_order_context=True,
+                )
 
             # 判定 4: 超出业务范畴拦截 —— 锚点层降为提议者(intent-arbitration 06,
             # 2026-09-10)。旧路径 29 条锚句余弦 × 硬阈值判 oos 即直接关会话,零
@@ -983,7 +993,7 @@ class IntentTriageEngine:
                         node="triage",
                     )
         except Exception as embed_err:
-            print(f"[Triage Embedding Step 2 Exception] Bypassing Embedding Classifier: {embed_err}")
+            print(f"[Triage] 嵌入锚点分类异常,已跳过 Step 2 锚点判定 (threadId={thread_id}): {embed_err}")
 
         # 🛡️ Step 3: 大模型结构化联合精判
         context_msgs = history_msgs[:-1]
@@ -1003,13 +1013,14 @@ class IntentTriageEngine:
                 if matched_exemplars:
                     exemplars_prompt = format_exemplars_for_prompt(matched_exemplars)
             except Exception as ex_err:
-                print(f"[Triage Exemplars Retrieval Exception]: {ex_err}")
+                print(
+                    f"[Triage] 租户样本召回失败,降级空样本 "
+                    f"(threadId={thread_id}/tenantId={active_tenant_id}): {ex_err}"
+                )
 
             structured_res = await classify(
                 input_text,
                 recent_history_text=recent_history,
-                job_id=state.get("job_id"),
-                thread_id=state.get("thread_id"),
                 exemplars_prompt=exemplars_prompt,
             )
 
@@ -1134,11 +1145,14 @@ class IntentTriageEngine:
                     consult_answer, _, consult_confidence = consult_hit
                     if consult_answer == ROUTE_TO_ACTION_MARKER:
                         # 🧭 仲裁员否决(05):分类器判 consult × 仲裁员判动作形。
-                        # 此处不再 fallthrough 深规划(consult 落 planner 会失控
-                        # 深规划),与 RAG 空弱同款降级 general_query 零规划;
+                        # 不再 fallthrough 深规划(consult 落 planner 会失控深规划),
+                        # 降级离场;降级保留动作形条目并提升首个动作为 primary
+                        # (工单06 2026-09-11)—— 否决只否「资讯直答」,不否动作,
+                        # 带动作意图的请求绝不因一条资讯回复了事(故事3/5),
+                        # 提升后非单 general_query 自然进 planner 编排。
                         # 否决进 candidates 留痕,终局行可溯改判来源。
                         proposals.append(_proposal("consult_arbiter", None))
-                        parsed = [{**p, "intent": AgentIntentType.GENERAL_QUERY} for p in parsed]
+                        parsed = _demote_consult_keep_actions(parsed)
                     else:
                         return await IntentTriageEngine.handle_immediate_bypass(
                             state,
@@ -1151,7 +1165,9 @@ class IntentTriageEngine:
                             candidates=[*proposals, llm_proposal],
                         )
                 else:
-                    parsed = [{**p, "intent": AgentIntentType.GENERAL_QUERY} for p in parsed]
+                    # RAG 空弱:同款降级离场(工单06:保留动作形并提升 primary;
+                    # 纯 consult 输入输出与旧整体降级同形)
+                    parsed = _demote_consult_keep_actions(parsed)
 
             confidence = parsed[0]["confidence"] if parsed else 0.85
             await IntentTriageEngine.log_intent_to_db(
@@ -1175,20 +1191,15 @@ class IntentTriageEngine:
                     node="triage",
                 )
 
-            return {
-                "intents": parsed,
-                "active_domain_role": resolve_domain_role(parsed, input_text),
-                "short_memory": history_msgs,
-                "damage_assessment": damage_assessment,
-                "order_context": state.get("order_context"),
-                "global_transitions_count": -1,
-                "tool_errors_count": -1,
-            }
+            return _triage_terminal_result(
+                parsed, input_text, history_msgs, damage_assessment,
+                state=state, with_order_context=True,
+            )
         except CircuitBreakerOpenError:
             # 上游 LLM 熔断非节点级可恢复:上抛 run_agent 走 job 级降级(兜底 intent 仅面向分类输出类失败)
             raise
         except Exception as err:
-            print(f"IntentTriageEngine Step 3 structured classifier failed: {err}")
+            print(f"[Triage] Step 3 结构化精判失败,降级兜底意图 (threadId={thread_id}): {err}")
             fallback_intents = [{"intent": "general_query", "confidence": 0.5}]
             await IntentTriageEngine.log_intent_to_db(
                 thread_id,
@@ -1199,14 +1210,7 @@ class IntentTriageEngine:
                 candidates=list(proposals),
                 arbitration_reason="structured_llm_exception_fallback",
             )
-            return {
-                "intents": fallback_intents,
-                "active_domain_role": resolve_domain_role(fallback_intents, input_text),
-                "short_memory": history_msgs,
-                "damage_assessment": damage_assessment,
-                "global_transitions_count": -1,
-                "tool_errors_count": -1,
-            }
+            return _triage_terminal_result(fallback_intents, input_text, history_msgs, damage_assessment)
 
     @staticmethod
     async def _try_skill_fast_track(

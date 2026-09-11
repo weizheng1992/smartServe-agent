@@ -83,10 +83,25 @@ def _action_state() -> dict:
     }
 
 
+def _clarify_state() -> dict:
+    # 缺槽反问终局(工单07 观测洞靶形状):咨询闸因「顺便」闭合、槽位层判
+    # order_return 缺 orderId 触发反问、咨询形标记真命中(均实测钉死)
+    return {
+        "thread_id": "thread_conflict_marker_clarify",
+        "user_id": "u_marker_clarify",
+        "input": "顺便问下退货政策是什么",
+        "image_urls": [],
+        "input_embedding": [1.0, 0.0, 0.0],
+        "business_config": {"businessId": "ecommerce"},
+    }
+
+
 class TestConflictMarkerWiring:
     """接线:标记命中 → consult_shaped_gate 提议进终局留痕,路由不变。"""
 
-    def _run_process(self, monkeypatch: pytest.MonkeyPatch, log_calls: list) -> dict:
+    def _run_process(
+        self, monkeypatch: pytest.MonkeyPatch, log_calls: list, state: dict | None = None
+    ) -> dict:
         async def _fake_embed(text: str) -> list[float]:
             return [1.0, 0.0, 0.0]
 
@@ -108,7 +123,7 @@ class TestConflictMarkerWiring:
         monkeypatch.setattr(SemanticVectorCache, "_tenant_cache", {})
         monkeypatch.setattr(SemanticVectorCache, "get_embedding_with_cache", _fake_embed)
         monkeypatch.setattr(SemanticVectorCache, "get_anchor_vectors", _fake_anchors)
-        return asyncio.run(triage_mod.IntentTriageEngine.process(_action_state()))
+        return asyncio.run(triage_mod.IntentTriageEngine.process(state or _action_state()))
 
     def test_marker_fires_records_gate_proposal_without_route_change(self, monkeypatch):
         """标记命中(模拟措辞逃逸):终局行 candidates 含 consult_shaped_gate
@@ -132,6 +147,23 @@ class TestConflictMarkerWiring:
         assert result["intents"][0]["intent"] == "order_return"
         layers = [c["layer"] for c in log_calls[0]["kwargs"]["candidates"]]
         assert "consult_shaped_gate" not in layers
+
+    def test_marker_fires_on_clarification_terminal(self, monkeypatch):
+        """工单07(挂点前移):缺槽反问终局 —— 07 追溯的历史靶落点(咨询形
+        输入被槽位层反问打断)—— 的留痕也带 consult_shaped_gate 提议;真实
+        标记不模拟;路由不变(照旧反问补单号)。"""
+        log_calls: list = []
+        result = self._run_process(monkeypatch, log_calls, _clarify_state())
+        # 反问终局:bypass 输出为澄清话术,意图仍是槽位层判定的 order_return
+        assert result["intents"][0]["intent"] == "order_return", "标记只留痕,不改路由"
+        assert "订单编号" in str(result.get("output", "")), "缺槽反问终局形态保持"
+        candidates = log_calls[0]["kwargs"]["candidates"]
+        layers = [(c["layer"], c["intent"]) for c in candidates]
+        assert ("consult_shaped_gate", "consult") in layers, "缺槽反问终局的留痕必须带上标记提议"
+        # 02 冲突口径同源:该留痕对坏例池冲突信号源可见
+        from engine_py.badcase.intent_signals import detect_intent_conflict
+
+        assert detect_intent_conflict(candidates) is not None
 
 
 if __name__ == "__main__":
