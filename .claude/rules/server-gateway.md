@@ -51,4 +51,4 @@ paths: ["services/gateway-py/**/*"]
 1. **依赖注入显式化**：FastAPI `Depends` 提供会话/连接池，跨模块调用通过显式参数传递，不引入全局单例服务注册表。
 2. **DTO 严格校验**：所有接收客户端输入的主体必须使用 Pydantic 模型定义清晰的 DTO（字段名保持与 TS 契约一致的 camelCase 输出）。
 3. **契约测试先行**：新增或修改路由时，必须在 `services/gateway-py/tests/test_http_routes_contract.py` / `test_realtime_contract.py` 同步维护用例；契约改动需同步前端 `packages/types`。
-4. **不跑测试**：本仓库当前约定由人工触发 pytest（`bun run test:eval`），Claude 修改后仅做语法检查。
+
