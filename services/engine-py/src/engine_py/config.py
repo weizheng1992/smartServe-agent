@@ -61,5 +61,15 @@ class Settings:
     # 封顶防失控;截断 JSON 会落 planner 兜底单步计划(功能降级不炸会话)
     planner_max_tokens: int = field(default_factory=lambda: int(_env("AI_PLANNER_MAX_TOKENS", "2000")))
 
+    # L2 商品语义召回(2026-09-11):词元 ILIKE 查空时 bge 余弦补位。默认开;
+    # 阈值 0.55 系真 bge-small-zh 实测定标(2026-09-11 实测分布:口语措辞 vs
+    # 商品文案的正例落 0.56-0.58、无关品类 0.36-0.45 —— bge-small 的余弦
+    # 绝对值整体偏低,0.6 会把全部正例挡掉),与 RAG 直答 0.55 同档。嵌入
+    # 不可用/异常时降级诚实空,绝不阻断检索。
+    mall_semantic_enabled: bool = field(default_factory=lambda: _env("AI_MALL_SEMANTIC_ENABLED", "1") == "1")
+    mall_semantic_min_similarity: float = field(
+        default_factory=lambda: float(_env("AI_MALL_SEMANTIC_MIN_SIMILARITY", "0.55"))
+    )
+
 
 settings = Settings()

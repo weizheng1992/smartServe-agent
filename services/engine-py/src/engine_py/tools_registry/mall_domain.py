@@ -1,22 +1,37 @@
 """商城领域服务 — 镜像 tools/src/mallDomainService.ts(984 LOC,全量移植,含种子兜底)。
 
-商品检索例外(2026-09-11 L3):search_products 不再吃 TS 基线的 MOCK 种子兜底
-—— 主目录换 agent_merchant 商户真货架,降级链 = 商户货架 → engine 本地 products
-表 → 诚实空;compare_products 同步只吃真实检索结果,假货不混入、话术不点名。"""
+商品检索例外(2026-09-11 L3/L2):search_products 不再吃 TS 基线的 MOCK 种子兜底
+—— 主目录换 agent_merchant 商户真货架,检索链 = 商户货架(词元 ILIKE → 语义
+余弦补位)→ engine 本地 products 表 → 诚实空;compare_products 同步只吃真实
+检索结果,假货不混入、话术不点名。"""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import random
 import re
 import time
 
 from sqlalchemy import text
 
+from ..config import settings
 from ..db import get_session
+from ..llm.chat import get_embedding_model
 from . import order_domain
 from .cache import tool_cache
 from .order_domain import OrderDomainService
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """余弦相似度(与 rag/contextual_rag.py 同源实现,零范数防御)。"""
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if not norm_a or not norm_b:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 class MallDomainService:
@@ -87,6 +102,11 @@ class MallDomainService:
     # 纹丝不动(用户症状:「说成功了但没加入」)。Redis 不可用时降级纯内存。
     _cart_storage: dict[str, list[dict]] = {}
     _CART_REDIS_PREFIX = "agent:cart:"
+
+    # L2 语义召回缓存:spu_code → (嵌入文本 sha256 前 16 位, 向量)。进程内
+    # 缓存足够 —— 重嵌只是几毫秒级 bge 推理,跨进程共享(pgvector)是目录
+    # 到千级 SPU 后的事,现在引入是过度设计。
+    _spu_embedding_cache: dict[str, tuple[str, list[float]]] = {}
 
     @staticmethod
     async def _load_cart(cart_key: str) -> list[dict] | None:
@@ -710,19 +730,21 @@ class MallDomainService:
         return [c for c in (chunk.strip() for chunk in chunks) if c]
 
     @staticmethod
-    async def _search_merchant_catalog(
-        terms: list[str], category: str | None, max_price, limit: int
+    async def _fetch_merchant_catalog(
+        terms: list[str] | None, category: str | None, max_price, limit: int
     ) -> list[dict] | None:
-        """商户真货架检索(agent_merchant.merchant_spus/skus)。
+        """商户真货架 SQL 检索层(agent_merchant.merchant_spus/skus)。
 
         None=库不可达(调用方降级 engine 本地表);[]=可达查无(诚实空,
-        严禁跨目录补货)。词元 OR ILIKE 四列(title/subtitle/category/description)
-        对齐网关搜索先例 —— category 列必须参与:SPU title 是「双肩包」不含
-        「背包」,品类列「背包收纳」才是命中面。展示价=MIN(sku.price)、库存=
-        SUM(sku.stock),与网关 _spu_to_product 同语义;排序 min_price ASC 与
-        engine 分支 price ASC 契约一致。热销排序不做:merchant 库无销量列
-        (全仓亦无 sales_volume),无数据源 —— 已文档化限制,不合成假热度。
-        无 SKU 的 SPU 展示价 NULL,经 HAVING 排除(不可售,且 float(None) 会炸)。
+        严禁跨目录补货)。terms 非空时词元 OR ILIKE 四列(title/subtitle/
+        category/description,对齐网关搜索先例 —— category 列必须参与:SPU
+        title 是「双肩包」不含「背包」,品类列「背包收纳」才是命中面);terms
+        为 None 是 L2 语义召回的候选池形态(硬过滤全量,无词元条件)。展示价=
+        MIN(sku.price)、库存=SUM(sku.stock),与网关 _spu_to_product 同语义;
+        排序 min_price ASC 与 engine 分支 price ASC 契约一致。热销排序不做:
+        merchant 库无销量列(全仓亦无 sales_volume),无数据源 —— 已文档化
+        限制,不合成假热度。无 SKU 的 SPU 展示价 NULL,经 HAVING 排除
+        (不可售,且 float(None) 会炸)。
         """
         conditions = ["s.status = 'ON_SALE'"]
         params: dict = {}
@@ -787,6 +809,70 @@ class MallDomainService:
         ]
 
     @staticmethod
+    async def _embed_texts(texts: list[str]) -> list[list[float]]:
+        """批量文本嵌入(独立静态方法是为了给测试留桩点)。"""
+        return await get_embedding_model().aembed_documents(texts)
+
+    @staticmethod
+    async def _embed_query(query: str) -> list[float]:
+        """查询嵌入(独立静态方法是为了给测试留桩点)。"""
+        return await get_embedding_model().aembed_query(query)
+
+    @staticmethod
+    async def _ensure_spu_embeddings(products: list[dict]) -> list[list[float]]:
+        """候选 SPU 嵌入向量:进程内缓存按嵌入文本 sha256 失效(商户改标题/
+        卖点,下轮查询自动重嵌,无需通知 engine)。miss 批量一次
+        aembed_documents —— 本地 bge 经 _SerializedEmbeddings 进程级串行
+        护栏(2026-09-05 双线程 SIGSEGV 事故,见 llm/chat.py)。"""
+        texts = [f"{p['name']} {p['description'] or ''} {p['category'] or ''}" for p in products]
+        vectors: list[list[float] | None] = []
+        need_idx: list[int] = []
+        for idx, embed_text in enumerate(texts):
+            digest = hashlib.sha256(embed_text.encode("utf-8")).hexdigest()[:16]
+            cached = MallDomainService._spu_embedding_cache.get(products[idx]["id"])
+            if cached and cached[0] == digest:
+                vectors.append(cached[1])
+            else:
+                vectors.append(None)
+                need_idx.append(idx)
+        if need_idx:
+            embedded = await MallDomainService._embed_texts([texts[i] for i in need_idx])
+            for idx, vector in zip(need_idx, embedded, strict=True):
+                digest = hashlib.sha256(texts[idx].encode("utf-8")).hexdigest()[:16]
+                MallDomainService._spu_embedding_cache[products[idx]["id"]] = (digest, list(vector))
+                vectors[idx] = list(vector)
+        assert all(v is not None for v in vectors), "补齐 miss 后不应残留 None"
+        return vectors  # type: ignore[return-value]
+
+    @staticmethod
+    async def _semantic_recall_merchant_catalog(
+        query: str, category: str | None, max_price, limit: int
+    ) -> list[dict] | None:
+        """L2 语义召回补位(2026-09-11):词元 ILIKE 查空时 bge 余弦 top-k。
+
+        返回契约与 _fetch_merchant_catalog 一致(None=能力不可用,[]=无命中)。
+        候选池吃满硬过滤(status/category/maxPrice)但不吃词元条件;命中按
+        相似度 DESC 输出 —— 语义档的价值就是相关性排序(min_price ASC 只属
+        词元/浏览路径)。嵌入异常降级 None → 调用方落诚实空,绝不阻断检索。
+        """
+        candidates = await MallDomainService._fetch_merchant_catalog(None, category, max_price, 200)
+        if candidates is None or not candidates:
+            return candidates
+        try:
+            query_vector = await MallDomainService._embed_query(query)
+            candidate_vectors = await MallDomainService._ensure_spu_embeddings(candidates)
+            scored: list[tuple[float, dict]] = []
+            for product, vector in zip(candidates, candidate_vectors, strict=True):
+                similarity = _cosine_similarity(query_vector, vector)
+                if similarity >= settings.mall_semantic_min_similarity:
+                    scored.append((similarity, product))
+            scored.sort(key=lambda pair: pair[0], reverse=True)
+            return [product for _, product in scored[:limit]]
+        except Exception as err:
+            print(f"[MallDomain] 语义召回嵌入不可用,降级诚实空: {err}")
+            return None
+
+    @staticmethod
     async def search_products(params: dict) -> dict:
         """6. 商品检索与导购选品。"""
         query = params.get("query")
@@ -801,14 +887,23 @@ class MallDomainService:
             if ctx["businessId"]:
                 effective_biz_id = ctx["businessId"]
 
-        # L3(2026-09-11):聊天检索主目录换商户真货架(单商户现实,全租户含
+        # L3/L2(2026-09-11):聊天检索主目录换商户真货架(单商户现实,全租户含
         # ecommerce 统一路由;merchant 分支不吃 businessId —— 商户表无租户列)。
         # None=不可达降级 engine 本地 products 表;[]=可达查无 → 诚实空,
-        # 严禁跨目录补货。
-        merchant_products = await MallDomainService._search_merchant_catalog(
+        # 严禁跨目录补货。词元查空且原始 NL 非空时,先经语义召回补位(L2,
+        # 「户外过夜的装备」这类词元命中不了的口语措辞);浏览形输入(terms 空
+        # 但 fetch 全量非空)不走语义。语义 None/[] 都落诚实空。
+        merchant_products = await MallDomainService._fetch_merchant_catalog(
             terms, category, max_price, limit
         )
         if merchant_products is not None:
+            if not merchant_products and query and settings.mall_semantic_enabled:
+                merchant_products = (
+                    await MallDomainService._semantic_recall_merchant_catalog(
+                        query, category, max_price, limit
+                    )
+                    or []
+                )
             return {"total": len(merchant_products), "products": merchant_products}
 
         try:

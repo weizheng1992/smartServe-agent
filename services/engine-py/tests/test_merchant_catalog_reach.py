@@ -64,8 +64,9 @@ _ON_SALE_CODES = {row[0] for row in _SPUS if row[4] == "ON_SALE"}
 
 
 async def _setup_shelf(pg_factory):
-    """密封 PG + 同容器商户镜像表铺数 + reader patch。返回 teardown 所需句柄。"""
+    """密封 PG + 同容器商户镜像表铺数 + reader/嵌入 patch。返回 teardown 句柄。"""
     from engine_py.tools_registry import order_domain
+    from engine_py.tools_registry.mall_domain import MallDomainService
 
     engine = pg_factory.kw["bind"]
     url = engine.url.render_as_string(hide_password=False)
@@ -110,13 +111,30 @@ async def _setup_shelf(pg_factory):
 
     original = order_domain._merchant_reader_engine
     order_domain._merchant_reader_engine = lambda: merchant_engine
-    return engine, merchant_engine, original
+
+    # 嵌入默认密封:意外走到语义路径的用例得到「嵌入不可用 → 降级诚实空」,
+    # 不加载真 bge 模型(密封测试零外部依赖、确定性)。语义用例显式覆盖
+    # _embed_query/_embed_texts 为向量桩;嵌入故障降级用例恰好消费本桩。
+    async def _sealed_embed(*_args, **_kwargs):
+        raise RuntimeError("embedding sealed in this suite")
+
+    original_embeds = (
+        MallDomainService.__dict__["_embed_query"],
+        MallDomainService.__dict__["_embed_texts"],
+    )
+    MallDomainService._embed_query = staticmethod(_sealed_embed)
+    MallDomainService._embed_texts = staticmethod(_sealed_embed)
+    return engine, merchant_engine, original, original_embeds
 
 
-async def _teardown_shelf(engine, merchant_engine, original) -> None:
+async def _teardown_shelf(engine, merchant_engine, original, original_embeds) -> None:
     from engine_py.tools_registry import order_domain
+    from engine_py.tools_registry.mall_domain import MallDomainService
 
     order_domain._merchant_reader_engine = original
+    MallDomainService._embed_query = original_embeds[0]
+    MallDomainService._embed_texts = original_embeds[1]
+    MallDomainService._spu_embedding_cache.clear()
     async with merchant_engine.begin() as conn:
         await conn.execute(text("TRUNCATE merchant_skus, merchant_spus"))
     await merchant_engine.dispose()
@@ -135,7 +153,7 @@ def test_symptom_backpack_query_returns_only_backpack(pg_factory):
 
 
 async def _symptom_scenario(pg_factory) -> None:
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         res = await _search("推荐背包热销")
         assert res["total"] == 1, f"应只命中背包 SPU,实际: {[p['id'] for p in res['products']]}"
@@ -152,7 +170,7 @@ async def _symptom_scenario(pg_factory) -> None:
         assert isinstance(product["specs"], dict)
         assert product["imageUrl"] == "https://img.test/SPU-T-BAG.png"
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_l1_modifier_family_routes_to_tent(pg_factory):
@@ -161,7 +179,7 @@ def test_l1_modifier_family_routes_to_tent(pg_factory):
 
 
 async def _l1_scenario(pg_factory) -> None:
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         for query in ("有什么卖的好的帐篷", "比较好的帐篷"):
             res = await _search(query)
@@ -169,7 +187,7 @@ async def _l1_scenario(pg_factory) -> None:
                 f"{query!r} 应剥修饰词后仅命中帐篷,实际: {[p['id'] for p in res['products']]}"
             )
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_off_sale_filtered(pg_factory):
@@ -178,12 +196,12 @@ def test_off_sale_filtered(pg_factory):
 
 
 async def _off_sale_scenario(pg_factory) -> None:
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         res = await _search("联名背包")  # 只命中 OFF_SALE 行
         assert res == {"total": 0, "products": []}
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_max_price_filters_on_min_sku_price(pg_factory):
@@ -192,7 +210,7 @@ def test_max_price_filters_on_min_sku_price(pg_factory):
 
 
 async def _max_price_scenario(pg_factory) -> None:
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         res = await _search("背包", maxPrice=850)
         # 背包双 SKU 829/899:min=829 过阈,高价位 SKU 不得拖杀整个 SPU
@@ -201,7 +219,7 @@ async def _max_price_scenario(pg_factory) -> None:
         assert await _search("冲锋衣", maxPrice=1000) == {"total": 0, "products": []}
         assert [p["id"] for p in (await _search("冲锋衣"))["products"]] == ["SPU-T-RICH"]
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_reader_failure_degrades_to_engine_chain(pg_factory):
@@ -213,7 +231,7 @@ async def _degrade_scenario(pg_factory) -> None:
     from engine_py.db import get_session
     from engine_py.tools_registry import order_domain
 
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         def _boom():
             raise RuntimeError("merchant shelf down")
@@ -237,7 +255,7 @@ async def _degrade_scenario(pg_factory) -> None:
         # engine 也查无 → 诚实空,不再落 Nike 假目录
         assert await _search("独木舟") == {"total": 0, "products": []}
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_shopping_guide_skill_consumes_merchant_shape(pg_factory):
@@ -248,7 +266,7 @@ def test_shopping_guide_skill_consumes_merchant_shape(pg_factory):
 async def _skill_scenario(pg_factory) -> None:
     from engine_py.skills.guide_skills import ShoppingGuideSkill
 
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         result = await ShoppingGuideSkill().execute({"input": "推荐背包热销", "tenantId": "ecommerce"})
         assert result["success"] is True
@@ -264,7 +282,7 @@ async def _skill_scenario(pg_factory) -> None:
         assert isinstance(candidate["specs"], dict)
         assert candidate["imageUrl"].startswith("https://img.test/")
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_spi_adapter_routes_merchant_shelf(pg_factory):
@@ -275,7 +293,7 @@ def test_spi_adapter_routes_merchant_shelf(pg_factory):
 async def _spi_scenario(pg_factory) -> None:
     from engine_py.skills.spi_client import LocalDbSpiAdapter
 
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         rows = await LocalDbSpiAdapter().search_products(
             {"query": "背包", "tenantId": "ecommerce", "limit": 5}
@@ -289,7 +307,7 @@ async def _spi_scenario(pg_factory) -> None:
         assert row["isAvailable"] is True
         assert isinstance(row["price"], float)
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_honest_empty_no_cross_catalog(pg_factory):
@@ -298,11 +316,11 @@ def test_honest_empty_no_cross_catalog(pg_factory):
 
 
 async def _honest_empty_scenario(pg_factory) -> None:
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         assert await _search("滑雪板") == {"total": 0, "products": []}
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_browse_form_lists_all_on_sale(pg_factory):
@@ -311,7 +329,7 @@ def test_browse_form_lists_all_on_sale(pg_factory):
 
 
 async def _browse_scenario(pg_factory) -> None:
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         res = await _search("最近热销的商品")
         ids = {p["id"] for p in res["products"]}
@@ -320,7 +338,7 @@ async def _browse_scenario(pg_factory) -> None:
         prices = [p["price"] for p in res["products"]]
         assert prices == sorted(prices), f"应按展示价 ASC 排序,实际: {prices}"
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
 
 
 def test_multi_term_latin_or(pg_factory):
@@ -329,9 +347,184 @@ def test_multi_term_latin_or(pg_factory):
 
 
 async def _latin_scenario(pg_factory) -> None:
-    _engine, merchant_engine, original = await _setup_shelf(pg_factory)
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
     try:
         res = await _search("Pegasus 41")
         assert [p["id"] for p in res["products"]] == ["SPU-T-P41"]
     finally:
-        await _teardown_shelf(_engine, merchant_engine, original)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
+
+
+# ------------------------------------------------- L2 语义召回(桩嵌入密封)
+
+
+def _vec_for_text(embed_text: str) -> list[float]:
+    """确定性语义桩:按品类词定向,词元查空的口语措辞经余弦补位可测。"""
+    if "帐篷" in embed_text:
+        return [1.0, 0.0, 0.0]
+    if "背包" in embed_text:
+        return [0.0, 1.0, 0.0]
+    if "冲锋衣" in embed_text:
+        return [0.0, 1.0, 1.0]
+    return [0.0, 0.0, 1.0]
+
+
+def test_semantic_recall_fills_token_miss(pg_factory):
+    """L2 补位:词元查空的口语措辞(「野外露营睡觉用的」)经语义召回帐篷。"""
+    asyncio.run(_semantic_fill_scenario(pg_factory))
+
+
+async def _semantic_fill_scenario(pg_factory) -> None:
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
+
+    async def _camping_query(_q: str) -> list[float]:
+        return [1.0, 0.0, 0.0]
+
+    async def _stubby_texts(texts: list[str]) -> list[list[float]]:
+        return [_vec_for_text(t) for t in texts]
+
+    MallDomainService._embed_query = staticmethod(_camping_query)
+    MallDomainService._embed_texts = staticmethod(_stubby_texts)
+    try:
+        res = await _search("野外露营睡觉用的")  # 词元不命中任何种子文案
+        assert [p["id"] for p in res["products"]] == ["SPU-T-TENT"], (
+            f"语义补位应召回帐篷,实际: {[p['id'] for p in res['products']]}"
+        )
+    finally:
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
+
+
+def test_semantic_below_threshold_honest_empty(pg_factory):
+    """全部候选余弦低于阈值(默认 0.55,真 bge 实测定标)→ 语义也无命中 → 诚实空。"""
+    asyncio.run(_semantic_threshold_scenario(pg_factory))
+
+
+async def _semantic_threshold_scenario(pg_factory) -> None:
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
+
+    async def _diagonal_query(_q: str) -> list[float]:
+        return [0.5, 0.5, 0.7071]  # 与任何基向量余弦恒 0.5 < 0.6
+
+    async def _uniform_texts(texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0, 0.0] for _ in texts]
+
+    MallDomainService._embed_query = staticmethod(_diagonal_query)
+    MallDomainService._embed_texts = staticmethod(_uniform_texts)
+    try:
+        assert await _search("野外露营睡觉用的") == {"total": 0, "products": []}
+    finally:
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
+
+
+def test_semantic_cache_invalidation_on_text_change(pg_factory):
+    """SPU 嵌入缓存按文案哈希失效:文案未变零重嵌,变更仅重嵌该 SPU。"""
+    asyncio.run(_semantic_cache_scenario(pg_factory))
+
+
+async def _semantic_cache_scenario(pg_factory) -> None:
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
+    embed_calls: list[list[str]] = []
+
+    async def _counting_texts(texts: list[str]) -> list[list[float]]:
+        embed_calls.append(list(texts))
+        return [_vec_for_text(t) for t in texts]
+
+    async def _camping_query(_q: str) -> list[float]:
+        return [1.0, 0.0, 0.0]
+
+    MallDomainService._embed_texts = staticmethod(_counting_texts)
+    MallDomainService._embed_query = staticmethod(_camping_query)
+    try:
+        await _search("野外露营睡觉用的")
+        assert len(embed_calls) == 1 and len(embed_calls[0]) == 5, "首轮应批量嵌入 5 个在售 SPU"
+
+        await _search("野外露营睡觉用的")
+        assert len(embed_calls) == 1, "文案未变,缓存命中不得重嵌"
+
+        async with merchant_engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE merchant_spus SET subtitle = 'updated camping copy' WHERE spu_code = 'SPU-T-TENT'")
+            )
+        await _search("野外露营睡觉用的")
+        assert len(embed_calls) == 2 and len(embed_calls[1]) == 1, "仅文案变更的 SPU 重嵌"
+    finally:
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
+
+
+def test_semantic_embedding_failure_degrades_to_honest_empty(pg_factory):
+    """嵌入不可用(默认密封桩即 raise)→ 语义降级,检索不炸、落诚实空。"""
+    asyncio.run(_semantic_failure_scenario(pg_factory))
+
+
+async def _semantic_failure_scenario(pg_factory) -> None:
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
+    try:
+        res = await _search("野外露营睡觉用的")  # 词元空 → 语义 → 嵌入 raise → 降级
+        assert res == {"total": 0, "products": []}
+    finally:
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
+
+
+def test_semantic_disabled_by_flag(pg_factory):
+    """AI_MALL_SEMANTIC_ENABLED=0:词元空直接诚实空,零嵌入调用。"""
+    asyncio.run(_semantic_disabled_scenario(pg_factory))
+
+
+async def _semantic_disabled_scenario(pg_factory) -> None:
+    from engine_py.config import settings
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
+    query_calls: list[str] = []
+
+    async def _spy_query(q: str) -> list[float]:
+        query_calls.append(q)
+        return [1.0, 0.0, 0.0]
+
+    MallDomainService._embed_query = staticmethod(_spy_query)
+    # settings 是 frozen dataclass,测试覆写走 object.__setattr__
+    # (先例:test_cart_persistence_regression.py 的 redis_url 覆写)
+    previous = settings.mall_semantic_enabled
+    object.__setattr__(settings, "mall_semantic_enabled", False)
+    try:
+        assert await _search("野外露营睡觉用的") == {"total": 0, "products": []}
+        assert query_calls == [], "开关关闭不得触达嵌入"
+    finally:
+        object.__setattr__(settings, "mall_semantic_enabled", previous)
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
+
+
+def test_semantic_respects_hard_filters(pg_factory):
+    """语义候选池吃满硬过滤:maxPrice 先于语义把高价 SPU 挤出池。"""
+    asyncio.run(_semantic_hard_filter_scenario(pg_factory))
+
+
+async def _semantic_hard_filter_scenario(pg_factory) -> None:
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    _engine, merchant_engine, original, embeds = await _setup_shelf(pg_factory)
+
+    # 偏「冲锋衣/鞋」维度:与冲锋衣 [0,1,1] 余弦≈0.77、跑鞋 [0,0,1]≈0.995
+    # 均过阈,与背包/帐篷正交 —— 断言只钉硬过滤挤出的 RICH 在/不在。
+    async def _outdoor_query(_q: str) -> list[float]:
+        return [0.0, 0.1, 1.0]
+
+    async def _stubby_texts(texts: list[str]) -> list[list[float]]:
+        return [_vec_for_text(t) for t in texts]
+
+    MallDomainService._embed_query = staticmethod(_outdoor_query)
+    MallDomainService._embed_texts = staticmethod(_stubby_texts)
+    try:
+        res = await _search("野外防晒防雨的外套")  # 词元不命中种子文案
+        assert "SPU-T-RICH" in {p["id"] for p in res["products"]}
+
+        filtered = await _search("野外防晒防雨的外套", maxPrice=1000)  # RICH 1299 出池
+        assert "SPU-T-RICH" not in {p["id"] for p in filtered["products"]}
+    finally:
+        await _teardown_shelf(_engine, merchant_engine, original, embeds)
