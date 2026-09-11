@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import math
@@ -18,7 +19,7 @@ from sqlalchemy import text
 
 from ..config import settings
 from ..db import get_session
-from ..llm.chat import get_embedding_model
+from ..llm.chat import get_chat_model, get_embedding_model
 from . import order_domain
 from .cache import tool_cache
 from .order_domain import OrderDomainService
@@ -94,6 +95,17 @@ class MallDomainService:
         "最好",
         "最好卖",
     )
+
+    # 口语词元 → 货架词素别名(2026-09-12,_expand_stem_aliases 消费):口语统称
+    # 「裤子/鞋子」与货架命名「工装裤/慢跑裤/老爹鞋」差一个名词后缀,ILIKE 子串
+    # 永远擦肩(症状:「卖的好的裤子」货架明明有裤子却诚实空——语义档余弦
+    # 0.51-0.53 又卡在 0.55 阈值下,词干路径才是确定性修法)。刻意显式小词表
+    # 而非通用剥「子」规则 —— 电子/种子类词剥后语义漂移,别名只在核实过货架
+    # 词素后收录。
+    _TERM_STEM_ALIASES: dict[str, tuple[str, ...]] = {
+        "裤子": ("裤",),
+        "鞋子": ("鞋",),
+    }
 
     # 购物车存储(2026-09-08 重构):_cart_storage 降级为进程一级读缓存,真实
     # 状态写穿透 Redis(agent:cart:{userId})。此前纯进程内存,网关重启即失忆,
@@ -730,6 +742,21 @@ class MallDomainService:
         return [c for c in (chunk.strip() for chunk in chunks) if c]
 
     @staticmethod
+    def _expand_stem_aliases(terms: list[str]) -> list[str]:
+        """词元 → 词元 + 货架词素别名(扩充 ILIKE OR 匹配面,保持原词元在前)。
+
+        词干是子串超集(「%裤%」⊇「%裤子%」),追加不改原词元语义;别名见
+        _TERM_STEM_ALIASES 注释。空表进空表出 —— 浏览形判定不受影响。"""
+        expanded: list[str] = []
+        for term in terms:
+            if term not in expanded:
+                expanded.append(term)
+            for stem in MallDomainService._TERM_STEM_ALIASES.get(term, ()):
+                if stem not in expanded:
+                    expanded.append(stem)
+        return expanded
+
+    @staticmethod
     async def _fetch_merchant_catalog(
         terms: list[str] | None, category: str | None, max_price, limit: int
     ) -> list[dict] | None:
@@ -873,6 +900,89 @@ class MallDomainService:
             return None
 
     @staticmethod
+    async def get_shelf_overview() -> list[dict]:
+        """店内品类盘点(2026-09-12):在售 SPU 按品类聚合计数,供诚实空回复
+        引导(「暂时没有背心,店里有 背包收纳(2款)、潮流鞋靴(2款)…」)。
+
+        库不可达返回 [](调用方优雅省略盘点段),不降级 engine 本地表 ——
+        盘点描述的是「商户店内」货架,跨目录拼数会误导。"""
+        try:
+            async with order_domain._merchant_reader_engine().connect() as conn:
+                rows = (
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT s.category, COUNT(*) AS spu_count "
+                                "FROM merchant_spus s WHERE s.status = 'ON_SALE' "
+                                "GROUP BY s.category ORDER BY spu_count DESC, s.category ASC"
+                            )
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+        except Exception as err:
+            print(f"[MallDomain] 品类盘点不可达,诚实空回复省略盘点段: {err}")
+            return []
+        return [{"category": r["category"], "spuCount": int(r["spu_count"])} for r in rows]
+
+    @staticmethod
+    async def _invoke_rewrite_llm(prompt: str) -> str:
+        """改写档 LLM 调用(独立静态方法 = 测试桩点);超时由调用方统一收口。"""
+        response = await get_chat_model().ainvoke(prompt)
+        return response.content if hasattr(response, "content") else str(response)
+
+    @staticmethod
+    async def _rewrite_query_terms(query: str, categories: list[str]) -> list[str]:
+        """L4 同义词改写(2026-09-12):词元+语义双空后,以货架品类词表为锚,
+        让 LLM 把口语措辞映射成货架检索词元再试一次。
+
+        设计约束:①词表锚定 —— 改写只允许产出词表内品类词或其近义商品叫法,
+        防 LLM 自由发挥跨目录补货(与「诚实空不跨目录」同一红线);②短超时
+        (默认 2s)+ 任何异常降级空表,检索链终点始终是诚实空;③解析容错
+        围栏/脏 JSON,产出经长度与数量钳制。"""
+        if not categories:
+            return []
+        vocab_line = "、".join(categories)
+        prompt = (
+            f"用户在商店搜索：\"{query}\"\n"
+            f"店内货架在售品类词表：{vocab_line}\n"
+            "任务：判断用户想买的商品是否属于词表中某品类或其常见叫法（同义词/口语别称）。\n"
+            '只输出 JSON 对体：{"terms": ["检索词", ...]}\n'
+            "规则：\n"
+            "1. terms 只放能在词表品类名或常见商品叫法上命中该需求的中文短词（2-6 字）；\n"
+            "2. 最多 3 个，按可能性从高到低；\n"
+            "3. 词表与该需求商品语义无关时输出 {\"terms\": []}，不要勉强关联；\n"
+            "4. 不要输出任何解释文字。"
+        )
+        try:
+            raw = await asyncio.wait_for(
+                MallDomainService._invoke_rewrite_llm(prompt),
+                timeout=settings.mall_query_rewrite_timeout_seconds,
+            )
+        except Exception as err:
+            print(f"[MallDomain] 查询改写档降级空表(query={query!r}): {err}")
+            return []
+        clean = str(raw).strip()
+        if clean.startswith("```"):
+            clean = re.sub(r"^```[a-zA-Z]*\s*", "", clean)
+            clean = re.sub(r"\s*```$", "", clean).strip()
+        try:
+            parsed = json.loads(clean)
+        except Exception:
+            print(f"[MallDomain] 查询改写档输出不可解析,降级空表: {clean[:120]!r}")
+            return []
+        terms = parsed.get("terms") if isinstance(parsed, dict) else None
+        if not isinstance(terms, list):
+            return []
+        cleaned: list[str] = []
+        for term in terms[:3]:
+            text_term = str(term).strip()
+            if 1 < len(text_term) <= 6 and text_term not in cleaned:
+                cleaned.append(text_term)
+        return cleaned
+
+    @staticmethod
     async def search_products(params: dict) -> dict:
         """6. 商品检索与导购选品。"""
         query = params.get("query")
@@ -880,7 +990,10 @@ class MallDomainService:
         max_price = params.get("maxPrice")
         limit = params.get("limit") or 4
         effective_biz_id = params.get("businessId") or "ecommerce"
-        terms = MallDomainService._extract_query_terms(query)
+        # 词干别名展开(2026-09-12):口语统称「裤子/鞋子」→ 追加货架词素「裤/鞋」
+        # 作 OR 词元 —— 商户货架与 engine 兜底两条词元路径共享;语义档仍嵌原始
+        # query(0.55 阈值按原始查询定标,换表示会毁定标)。
+        terms = MallDomainService._expand_stem_aliases(MallDomainService._extract_query_terms(query))
 
         if params.get("threadId") and effective_biz_id == "ecommerce":
             ctx = await OrderDomainService.get_thread_session_context(params["threadId"])
@@ -904,6 +1017,21 @@ class MallDomainService:
                     )
                     or []
                 )
+            # L4(2026-09-12):词元+语义双空后的同义词改写重试 —— 口语统称与
+            # 货架命名既无词元交集、余弦又卡阈值下时(「背心」症状:0.51-0.53
+            # vs 0.55),LLM 以货架品类词表为锚改写一次。词表锚定 + 短超时降级,
+            # 重试空即诚实空,不跨目录补货。
+            if not merchant_products and query and settings.mall_query_rewrite_enabled:
+                rewritten = await MallDomainService._rewrite_query_terms(
+                    query, [o["category"] for o in await MallDomainService.get_shelf_overview()]
+                )
+                if rewritten:
+                    merchant_products = (
+                        await MallDomainService._fetch_merchant_catalog(
+                            MallDomainService._expand_stem_aliases(rewritten), category, max_price, limit
+                        )
+                        or []
+                    )
             return {"total": len(merchant_products), "products": merchant_products}
 
         try:

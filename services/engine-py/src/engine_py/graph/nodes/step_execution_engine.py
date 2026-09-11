@@ -363,6 +363,33 @@ async def _execute_single_step_core(
                 )
                 result_data = {"toolExecuted": tool_name, "output": output}
 
+                # 图路径候选登记(2026-09-12):planner 给 executor 的可能是
+                # searchProducts 工具而非 ShoppingGuideSkill —— 工具路径此前不
+                # 写 guide_context,上一轮导购的 stale 候选经 run_agent 收口原样
+                # 存回 TaskMemory,下一轮加购的"第N件"序数解析到旧候选(幻影
+                # Nike 入车症状)。结果非空即刷新候选,与技能路径的
+                # extra.guideContext 同形,不依赖 planner 选工具还是选技能。
+                if tool_name == "searchProducts" and isinstance(output, dict) and output.get("products"):
+                    found_products = output["products"]
+                    state["guide_context"] = {
+                        "candidateProductIds": [p.get("id") for p in found_products],
+                        "candidateProducts": [
+                            {
+                                "id": p.get("id"),
+                                "name": p.get("name"),
+                                "price": float(p.get("price") or 0),
+                                "stock": int(p.get("stock") or 0),
+                                "description": p.get("description"),
+                                "specs": p.get("specs"),
+                                "imageUrl": p.get("imageUrl"),
+                            }
+                            for p in found_products
+                        ],
+                        "extractedPreferences": {},
+                        "clarificationRound": 1,
+                        "lastSearchQuery": args.get("query") or state.get("input") or "",
+                    }
+
                 # 此处原有「工具执行 → eval_runs/eval_results 评估日志」写入块,已于
                 # 2026-09-05 整体移除:UUID 主键传 VARCHAR 导致从未成功写入过一行
                 # (每次工具执行必报 DatatypeMismatchError),且写入值为硬编码假指标
@@ -381,6 +408,11 @@ async def _execute_single_step_core(
         "updatedStep": updated_step,
         "toolErrorsCount": 1 if result_data.get("error") else 0,
         "toolExecutedName": result_data.get("toolExecuted"),
+        # guide_context 必须经返回值上行(2026-09-12):executor_node 拿到的是
+        # dict(state) 拷贝,直接改 state 键是死写 —— 技能/工具分支刷新的候选
+        # 上下文此前到不了图状态,run_agent 收口把旧值原样存回 TaskMemory
+        # (幻影 Nike 入车症状的图路径根因)。
+        "guideContext": state.get("guide_context"),
     }
 
 
@@ -476,9 +508,12 @@ async def execute_step(state: dict) -> dict:
                 for idx in candidate_indices
             )
         )
+        merged_guide_context = None
         for idx, res in zip(candidate_indices, parallel_results):
             updated_subtasks[idx] = res["updatedStep"]
             total_errors += res["toolErrorsCount"]
+            if res.get("guideContext"):
+                merged_guide_context = res["guideContext"]
 
         next_plan = {**current_plan, "subtasks": updated_subtasks}
         if job_id:
@@ -493,6 +528,7 @@ async def execute_step(state: dict) -> dict:
             "shortMemory": short_memory,
             "globalTransitionsCount": 1,
             "toolErrorsCount": total_errors,
+            "guideContext": merged_guide_context,
         }
 
     # 单步骤标准执行
@@ -559,6 +595,7 @@ async def execute_step(state: dict) -> dict:
         "shortMemory": short_memory,
         "globalTransitionsCount": 1,
         "toolErrorsCount": single_result["toolErrorsCount"],
+        "guideContext": single_result.get("guideContext"),
     }
 
 

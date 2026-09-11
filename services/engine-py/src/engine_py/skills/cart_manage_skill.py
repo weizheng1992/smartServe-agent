@@ -258,7 +258,21 @@ class CartManageSkill(BaseSkill):
             if target_item is None and current_items:
                 target_item = current_items[0]
 
-            target_sku = (target_item or {}).get("skuId") or existing_cart.get("lastModifiedItemId") or "sku_nike_aj1_blk_425"
+            # 目标 SKU 解析失败诚实拦截(2026-09-12):旧兜底硬编码 AJ1 假 SKU,
+            # 改量指令解析不到目标时不许错改幻影商品。上游 :227 空车守卫已拦
+            # 空车,这里只剩"有车但全链解析失败"的罕见残余,宁可追问。
+            target_sku = (target_item or {}).get("skuId") or existing_cart.get("lastModifiedItemId")
+            if not target_sku:
+                return {
+                    "success": True,
+                    "skillId": self.metadata["id"],
+                    "output": (
+                        "未能定位您想调整数量的商品，请直接说\"把【商品名】数量改成N\"，"
+                        "或先\"查看购物车\"确认当前明细。"
+                    ),
+                    "nextAction": "finish",
+                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                }
             update_res = await MallDomainService.update_cart_item(
                 {"skuId": target_sku, "quantity": new_qty, "userId": context.get("userId"), "threadId": context.get("threadId")}
             )
@@ -462,9 +476,19 @@ class CartManageSkill(BaseSkill):
                 target_sku_id = candidate_list[0]
                 target_title = f"推荐商品 #1 ({target_sku_id})"
             else:
-                target_sku_id = "prod_nike_air_pegasus_41"
-                target_title = "Nike Air Zoom Pegasus 41 极速轻量透气跑鞋"
-                target_price = 899.0
+                # 无任何候选可解析时诚实反问(2026-09-12):旧兜底硬编码 Nike
+                # Pegasus 假商品入车 —— 无上下文的加购指令宁可追问,不可编造
+                # 目标商品(幻影入车症状的最后一道假货出口)。
+                return {
+                    "success": True,
+                    "skillId": self.metadata["id"],
+                    "output": (
+                        "请问您想将哪一款商品加入购物车呢？\n"
+                        "您可以先让我为您推荐商品（例如\"推荐热销短袖\"），再说\"把第1件加入购物车\"即可！🛒"
+                    ),
+                    "nextAction": "finish",
+                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                }
 
         qty_match = _QTY_BUY_RE.search(user_input)
         quantity = int(qty_match.group(1)) if qty_match else 1

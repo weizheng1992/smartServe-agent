@@ -30,10 +30,22 @@ class ProductInquirySkill(BaseSkill):
         )
 
         if not products:
+            # 品类盘点引导(2026-09-12):与 ShoppingGuideSkill 空分支同款,诚实空
+            # 带店内真实品类方向。
+            overview = await MallDomainService.get_shelf_overview()
+            inventory_line = (
+                "、".join(f"{o['category']}({o['spuCount']}款)" for o in overview) if overview else ""
+            )
+            output = f'抱歉，未能找到与"{query}"相关的商品。'
+            output += (
+                f"\n目前店内热卖品类：{inventory_line}，欢迎换个叫法或从这些品类挑挑看！"
+                if inventory_line
+                else "您可以尝试更换关键词或咨询在线客服。"
+            )
             return {
                 "success": True,
                 "skillId": self.metadata["id"],
-                "output": f'抱歉，未能找到与"{query}"相关的商品，您可以尝试更换关键词或咨询在线客服。',
+                "output": output,
                 "nextAction": "finish",
             }
 
@@ -73,8 +85,9 @@ class ShoppingGuideSkill(BaseSkill):
 
     # 与 slot_extractor 的 SHOPPING_GUIDE 规则同源补词(2026-09-07):热门/爆款类
     # 措辞也须被 is_action_query 视作动作形输入,拒绝命中语义回复缓存。
+    # 2026-09-12:补入 卖得好/卖的好(与 slot_extractor 同步,见该处注释)。
     _FALLBACK_RE = re.compile(
-        r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好|跑步鞋|卫衣|夹克|热门|爆款|热销|热卖|畅销|上新|新品)",
+        r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好|跑步鞋|卫衣|夹克|热门|爆款|热销|热卖|畅销|上新|新品|卖得好|卖的好)",
         re.IGNORECASE,
     )
 
@@ -148,10 +161,22 @@ class ShoppingGuideSkill(BaseSkill):
         candidate_product_ids = [p["id"] for p in products]
 
         if not products:
+            # 品类盘点引导(2026-09-12):诚实空不冷场 —— 告诉用户店里实际有什么,
+            # 「卖得好」类模糊词落空时给可点选的真实方向,而非一句调整关键词。
+            overview = await MallDomainService.get_shelf_overview()
+            inventory_line = (
+                "、".join(f"{o['category']}({o['spuCount']}款)" for o in overview) if overview else ""
+            )
+            output = f'抱歉，暂时未能找到完全符合"{user_input}"的现货商品。'
+            output += (
+                f"\n目前店内热卖品类：{inventory_line}，欢迎换个叫法或从这些品类挑挑看！"
+                if inventory_line
+                else "建议您可以调整预算或关键词再试一次！"
+            )
             return {
                 "success": True,
                 "skillId": self.metadata["id"],
-                "output": f'抱歉，暂时未能找到完全符合"{user_input}"的现货商品。建议您可以调整预算或关键词再试一次！',
+                "output": output,
                 "nextAction": "finish",
             }
 

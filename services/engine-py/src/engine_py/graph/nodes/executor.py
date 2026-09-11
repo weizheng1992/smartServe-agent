@@ -18,4 +18,9 @@ async def executor_node(state: AgentState) -> dict:
         update["short_memory"] = result["shortMemory"]
     if "toolErrorsCount" in result:
         update["tool_errors_count"] = result["toolErrorsCount"]
+    # 候选上下文上行(2026-09-12):技能 extra 或 searchProducts 工具结果刷新的
+    # guideContext 必须回写图状态,否则 run_agent 收口把上一轮 stale 候选原样
+    # 存回 TaskMemory,下一轮加购序数解析到旧候选(幻影 Nike 入车症状)。
+    if result.get("guideContext") is not None:
+        update["guide_context"] = result["guideContext"]
     return update

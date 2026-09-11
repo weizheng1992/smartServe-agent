@@ -34,6 +34,15 @@ def _stub_search(monkeypatch: pytest.MonkeyPatch, products: list[dict]) -> list[
     return calls
 
 
+def _stub_overview(monkeypatch: pytest.MonkeyPatch, overview: list[dict]) -> None:
+    """桩掉 get_shelf_overview(品类盘点,2026-09-12):空分支会调它,不桩即打真实
+    商户 reader(宿主 dev DB),破坏密封。"""
+    async def fake_overview() -> list[dict]:
+        return overview
+
+    monkeypatch.setattr(MallDomainService, "get_shelf_overview", staticmethod(fake_overview))
+
+
 def _run_guide(text: str, guide_ctx: dict | None = None) -> dict:
     ctx = {
         "threadId": "t_guide",
@@ -82,9 +91,26 @@ def test_budget_is_parsed_and_passed_to_search(monkeypatch: pytest.MonkeyPatch) 
 
 def test_no_products_honest_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_search(monkeypatch, [])
+    _stub_overview(monkeypatch, [])  # 盘点不可达 → 回落旧文案,诚实空不冷场变冷场
     res = _run_guide("推荐滑雪板")
     assert "未能找到" in res["output"]
+    assert "目前店内热卖品类" not in res["output"], "盘点空不得编造品类"
     assert "cards" not in res or not res.get("cards")
+
+
+def test_no_products_empty_lists_real_categories(monkeypatch: pytest.MonkeyPatch) -> None:
+    """诚实空带品类盘点(2026-09-12):不冷场,给可点选的真实店内方向。"""
+    _stub_search(monkeypatch, [])
+    _stub_overview(
+        monkeypatch,
+        [{"category": "背包收纳", "spuCount": 2}, {"category": "露营装备", "spuCount": 1}],
+    )
+    res = _run_guide("推荐几款背心")  # >4 字,避开超模糊追问分支,直达检索空分支
+    assert "未能找到" in res["output"]
+    assert "目前店内热卖品类" in res["output"]
+    assert "背包收纳(2款)" in res["output"]
+    assert "露营装备(1款)" in res["output"]
+    assert "调整预算或关键词" not in res["output"], "有盘点时回落文案不得同时出现"
 
 
 def test_candidates_contract_feeds_cart_skill(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,5 +193,19 @@ def test_inquiry_lists_products_with_stock(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_inquiry_no_result_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_overview(monkeypatch, [])  # 盘点不可达 → 回落旧文案
     res = _run_inquiry(monkeypatch, [])
     assert "未能找到" in res["output"]
+
+
+def test_inquiry_no_result_lists_real_categories(monkeypatch: pytest.MonkeyPatch) -> None:
+    """查询技能空分支同款盘点:诚实空带店内真实品类(与导购空分支同源)。"""
+    _stub_overview(
+        monkeypatch,
+        [{"category": "潮流鞋靴", "spuCount": 2}, {"category": "下装裤类", "spuCount": 1}],
+    )
+    res = _run_inquiry(monkeypatch, [])
+    assert "未能找到" in res["output"]
+    assert "目前店内热卖品类" in res["output"]
+    assert "潮流鞋靴(2款)" in res["output"]
+    assert "下装裤类(1款)" in res["output"]

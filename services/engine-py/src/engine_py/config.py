@@ -71,5 +71,14 @@ class Settings:
         default_factory=lambda: float(_env("AI_MALL_SEMANTIC_MIN_SIMILARITY", "0.55"))
     )
 
+    # L4 查询同义词改写(2026-09-12):词元+语义双空时,LLM 以货架品类词表为
+    # 锚把口语措辞改写成货架检索词元重试一次(用户症状:「卖的好的背心」诚实
+    # 空 —— 词元不命中、余弦 0.51-0.53 卡 0.55 阈值下,双空即终局,无第三档)。
+    # 默认开;超时/异常降级空表,检索链终点仍是诚实空;改写档不叠加嵌入。
+    mall_query_rewrite_enabled: bool = field(default_factory=lambda: _env("AI_MALL_QUERY_REWRITE_ENABLED", "1") == "1")
+    mall_query_rewrite_timeout_seconds: float = field(
+        default_factory=lambda: float(_env("AI_MALL_QUERY_REWRITE_TIMEOUT_SECONDS", "2.0"))
+    )
+
 
 settings = Settings()
