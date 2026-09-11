@@ -109,7 +109,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 5. **零依赖共享 UI**:
    - `apps/web` 与 `apps/admin` 使用 `@agent-all/ui` + Tailwind CSS,不得引入重型外部组件框架。
 6. **契约冻结**:
-   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(现有 `/api/auth/me`、`POST /api/chat/threads`、`GET /api/chat/threads`、`POST /api/chat/upload`,合计 43 条)。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
+   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(现有 `/api/auth/me`、`POST /api/chat/threads`、`GET /api/chat/threads`、`DELETE /api/chat/threads`、`POST /api/chat/upload`,合计 44 条)。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
 
 ---
 
@@ -143,7 +143,6 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 
 ## 6. Git 提交规范
 
-- **提交身份**：提交作者固定使用 GitHub 账号 `weizheng1992`（`740977067@qq.com`，仓库局部 git config 已覆盖，推送走 SSH key），不得临时改动身份。
 - **提交信息**：只写提交说明本身，不添加任何其他内容——不加 `Co-Authored-By`、`Generated with Claude Code` 之类的尾注或署名。
 
 
