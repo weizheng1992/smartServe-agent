@@ -4,6 +4,30 @@
 
 ---
 
+## [2.6.15] - 2026-09-12 (售后凭证落票 + 排行真销量源 + 热销解禁 + 商户目录扩容 —— ADR-0002)
+
+2.6.14 收尾留档三项同根源遗留(数据不在该在的地方),grill-with-docs 两轮八问逐项裁决 + /to-spec 发布(.scratch/aftersale-evidence-real-sales),TDD 落地;实弹三抓三修。
+
+### ✨ Features
+
+- **售后凭证落票(ADR-0002 Q1/Q2)**:`after_sale_tickets` 加 `evidence_urls` JSONB(0009 迁移),`applyAfterSale` schema 加 `evidenceImageUrls`,executor 层程序化注入(严禁指望 LLM 抄 URL):applyAfterSale 落工单凭证列,processRefund 凭证随 HITL 审批载荷让人工审批员看图;上限对齐视觉常量;落库失败诚实报错严禁假「已提交」。
+- **排行换商户真销量源(Q3)**:`queryProductRanking` 改商户真订单聚合(merchant_order_items × merchant_orders,**排除退款/取消单**,明细按 SPU 预聚合子查询);毛利/毛利率随成本数据缺位整体移除(消歧胶囊组 5→3),被移除指标(含中文别名)诚实报错;manager_id/businessId 过滤随本地演示表路径退役。
+- **热销解禁(Q4/Q7,数据条件禁令)**:有真聚合兜底的「🔥 热销商品」入口置顶(点击文本「按销量查一下热销商品排行」——实弹验证裸「热销」会被导购词表截获),品类 chip 自身仍禁热度词;chips 上限 6→8;导购推荐卡「热销推荐」改「为您推荐/店长精选」、编造 metricScore(99-idx*5)拆除。
+- **商户目录扩容(Q5/Q6/Q8)**:9 品类 30 SPU / 92 SKU(新增 衬衫/配饰/运动配件,衬衫即产品最初点名品类);27 笔演示历史订单行项目从目录派生(单一事实源),状态 PAID7/SHIPPED13/DELIVERED8/REFUNDED2、日期散布最近 60 天、17/30 SPU 有销量长尾诚实零——聚合永远运行时真算。
+
+### 🐛 Fixes(实弹三抓 + 双轴评审)
+
+- **排行 JOIN 扇出**(实弹):1 SPU × N SKU × M 明细三路直连笛卡尔放大,冲锋衣 5 件卖成「量30/GMV 38,970」——明细预聚合子查询 + 双 SKU 密封用例钉死。
+- **售后工单从未真正落库**(实弹):`order_id` 外键指向本地 orders,商户真单售后插不进去且异常被吞返回假 `success:True`——0010 迁移去 FK(订单双源现实)+ 诚实报错,真 DB 直调验证 evidence_urls 落库。
+- **导购推荐卡冒充排行卡**(实弹):rankingMetric=recommendation 误触发统计口径消歧组;消歧组只认真源指标。
+- 双轴评审批:seed `days_ago` 死数据(INSERT 补 created_at 散布)/共享密封容器卫生(异形 DDL 对齐、reader patch 泄漏恢复、FK 卡 TRUNCATE)/消歧组「我负责的」文案退役/processRefund schema 补凭证声明/证据上限统一引用视觉常量。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **484 passed**(2.6.14 基线 465 + 新增 19)、gateway 121 passed、ruff 双服务干净;Alembic 0009/0010 已应用;商户库重播种 30 单日期散布 2026-07-17~09-10。实弹:热销排行真数据(T恤 7 件 No.1 / 冲锋衣 GMV 6,495=5×1299,退款排除);带图售后审批载荷实弹携带凭证 URL + 工单 evidence_urls 直调落库验证;「看看衬衫有什么商品」4 款真实命中(库存=SUM(SKU) 正确);热销入口 + 品类 chips 上限 8;推荐卡「为您推荐」零编造。设计过程:ADR-0002 + spec(.scratch/aftersale-evidence-real-sales)落盘,CONTEXT.md 术语与 README 计数同步。
+
+---
+
 ## [2.6.14] - 2026-09-12 (场景化快捷回复:固定四件套退役,按意图出组 + 「查询未发货的订单」能力补齐)
 
 产品在退款反问轮与商品推荐轮提出「快捷按钮按情况提供」;grill-with-docs 两轮六问逐项裁决(ADR-0001),TDD 落地。
