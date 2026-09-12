@@ -4,6 +4,23 @@
 
 ---
 
+## [2.6.19] - 2026-09-12 (merchant 全意图真实操作验收:16 探针全绿 + 改址链路三症修复)
+
+用户指令「在 merchant 真实操作聊天各种意图输入看结果是否对」——16 探针全意图验收,每笔带数据库对账(查单对真单状态/退款走审批门/建地址行级核验/排行对订单聚合/加购对 Redis/审批后闭环核验),脚本与结果:`.scratch/address-order-bug/merchant_intent_acceptance.py`(gitignored)。
+
+### 🐛 Fixes(验收抓出的三个真缺陷)
+
+- **改单地址 SQL 列名断裂(全量订单不可用)**:`change_shipping_address` 的 UPDATE 写不存在的 `address` 列(orders 真实列名 `shipping_address`)——任何单都炸并被 catch 吞成「处理失败」,merchant 真单连改的资格都没有;修复:engine 单改用 `shipping_address` 列,merchant 真单跳过引擎写(表里本就无此行)直接商户镜像写穿。
+- **「退了/退掉/退还」不在退款词表(资金句误路由)**:「退了订单 AURORA-ORD-2026-9094」被判定 2 路由成查单只回状态;补入 REFUND_KEYWORDS_RE,资金句回归结构化精判→退款管线。连带面:词表扩容后判定 3 关键词分支会把「导购+退款」复合句吞成单退款——`money_action_yielded` 标记同闸(规则层已判「资金词在场但意图非资金」时判定 3 让位)。
+- **高价值改址完全绕过 HITL**:技能快轨对 execute_order_action 直接传 is_approved=True,¥100 红线形同虚设;修复:技能内 >¥100 建 changeShippingAddress 审批工单并如实告知等待审核 + **恢复计划随 result.taskPlan 带回**(handle_immediate_bypass 新增透传参数)——run_agent 回合收口以 result.task_plan 覆盖 TaskMemory,不随行则挂起计划被 bypass 空计划冲掉,审批通过 resume 无计划可恢复(实弹抓获:approve 成功而地址未变)。审批通过 → HOT-RESUME 复用 → executor 快路径确定性执行,全闭环实弹验证:批准后 merchant_orders.shipping_address 真实变更为上海新址。
+
+### ✅ 验证 (Verification,如实)
+
+- TDD 红灯先行:engine pytest **561 passed**(+7:改址列名/merchant 跳过引擎写/退款词表/高价值 HITL 工单/低价值直执行/恢复计划随行),gateway 121 passed,ruff 干净。
+- 实弹验收 **16/16 全绿**:导购(货架背包 3/3 命中)、语义检索(口语→睡袋)、单单/列表/未发货查询(与 merchant 状态逐笔对账,列表 10/10 真实单号含卡片)、退款(未越权+审批工单)、改址(审批工单)、建地址(行级核验,手机号脱敏落库)、查地址簿、销量排行(订单聚合 top3 全命中)、咨询直答、转人工(工单)、超范围(不编造天气)、加购(Redis 对账)、数量多品类;审批后真退款闭环(REFUNDED 落库)+ 审批后真改址闭环(新地址落库)。
+
+---
+
 ## [2.6.18] - 2026-09-12 (多意图不打断一期:「建地址+下单」不再被反问劫持 + 资金动作一票优先 + 地址簿能力落地)
 
 用户实报(diagnosing-bugs + 11 探针多意图实弹矩阵 + to-spec → implement 全流程):「创建新地址 张伟 13800138000 北京市…并下单极光防晒短袖寄到新地址」被反手索要订单号——既没建地址也没下单。11 探针矩阵钉死四层根因:①缺槽反问短路(任一意图——哪怕 secondary——缺槽,整轮变反问,planner 复合编排全被跳过);②资金动作被单技能快轨静默吞(「退了订单9081,然后推荐跑步鞋」整句进导购);③意图词表缺口(10 类目无地址簿管理,LLM 落 general_query 后编造「已发货联系快递员改派、转寄费自理」假政策);④`ORDER_ID_RE` 裸数字分支把手机号当单号。spec: `.scratch/multi-intent-no-interrupt/spec.md`(gitignored)。

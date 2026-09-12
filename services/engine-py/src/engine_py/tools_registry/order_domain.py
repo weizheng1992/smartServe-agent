@@ -777,23 +777,28 @@ class OrderDomainService:
                 }
 
             effective_order_id = order.get("orderId") or order_id
-            async with get_session() as session:
-                await session.execute(
-                    text('UPDATE "orders" SET address = :addr WHERE "order_id" = :oid').bindparams(
-                        addr=new_address, oid=effective_order_id
-                    )
-                )
-                try:
-                    # 同退款路径:三方镜像表为旁路,SAVEPOINT 隔离防事务中止连坐主地址更新
-                    async with session.begin_nested():
-                        await session.execute(
-                            text(
-                                'UPDATE "third_party_orders" SET shipping_address = :addr WHERE "ext_order_sn" = :oid'
-                            ).bindparams(addr=new_address, oid=effective_order_id)
+            # merchant 真单(engine orders 表无此行):跳过引擎写,直接商户镜像
+            # 写穿 —— 此前 UPDATE orders SET address 写的是不存在的列(真实列名
+            # shipping_address),任何来源都炸并被吞成通用失败(2026-09-12
+            # merchant 验收 07)。
+            if order.get("source") != "merchant":
+                async with get_session() as session:
+                    await session.execute(
+                        text('UPDATE "orders" SET shipping_address = :addr WHERE "order_id" = :oid').bindparams(
+                            addr=new_address, oid=effective_order_id
                         )
-                except Exception as tp_err:
-                    print(f"[地址更新] 三方镜像表更新失败(SAVEPOINT 已隔离,主更新继续) order={effective_order_id}: {tp_err}")
-                await session.commit()
+                    )
+                    try:
+                        # 同退款路径:三方镜像表为旁路,SAVEPOINT 隔离防事务中止连坐主地址更新
+                        async with session.begin_nested():
+                            await session.execute(
+                                text(
+                                    'UPDATE "third_party_orders" SET shipping_address = :addr WHERE "ext_order_sn" = :oid'
+                                ).bindparams(addr=new_address, oid=effective_order_id)
+                            )
+                    except Exception as tp_err:
+                        print(f"[地址更新] 三方镜像表更新失败(SAVEPOINT 已隔离,主更新继续) order={effective_order_id}: {tp_err}")
+                    await session.commit()
 
             if order.get("source") == "merchant":
                 existing_shipping = (

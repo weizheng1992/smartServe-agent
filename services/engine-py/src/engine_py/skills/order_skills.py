@@ -216,6 +216,153 @@ class OrderAddressModificationSkill(BaseSkill):
                 ),
             }
 
+        # 🛡️ 高价值改址 HITL(2026-09-12 merchant 验收 07):技能快轨此前对
+        # execute_order_action 直接传 is_approved=True,完全绕过步进引擎的审批
+        # 门 —— ¥100 红线形同虚设。waiting 工单幂等认领(重复追问同话术),
+        # 审批通过经 resume 重放落到工具路径确定性执行。
+        try:
+            order_total = float(order.get("totalAmount") or 0)
+        except (TypeError, ValueError):
+            order_total = 0.0
+        if order_total > 100.0 and not (context.get("extra") or {}).get("isApproved"):
+            from ..approvals.gatekeeper import ApprovalPolicyEngine
+
+            ticket = await ApprovalPolicyEngine.create_pending_approval_ticket(
+                {
+                    "threadId": context.get("threadId") or "",
+                    "userId": context.get("userId"),
+                    "actionType": "changeShippingAddress",
+                    "actionPayload": {"args": {"orderId": order_id, "newAddress": new_address}},
+                    "jobId": None,
+                    "stepToRun": {
+                        "id": "skill_address_modification",
+                        "description": f"Change shipping address for order {order_id}",
+                    },
+                    "currentPlan": {"subtasks": [{}]},
+                    "currentIndex": 0,
+                }
+            )
+
+            # 恢复计划随结果带回:run_agent 回合收口会用 result.task_plan 覆盖
+            # TaskMemory —— 不随行则挂起计划被 bypass 空计划冲掉,审批通过后
+            # resume 无计划可恢复(2026-09-12 实弹:approve 成功而地址未变)。
+            awaiting_plan = {
+                "goal": f"Change shipping address for order {order_id} (awaiting approval)",
+                "subtasks": [
+                    {
+                        "id": "step_fast_change_address_skill",
+                        "description": (
+                            f"Call changeShippingAddress for order {order_id} "
+                            f"with new address {new_address}"
+                        ),
+                        "status": "pending",
+                        "result": {
+                            "waitingForApproval": True,
+                            "approvalId": ticket.get("approvalId"),
+                        },
+                    }
+                ],
+                "currentStepIndex": 0,
+            }
+            return {
+                "success": True,
+                "skillId": self.metadata["id"],
+                "output": (
+                    f"订单 [{order_id}] 属于高价值订单（¥{order_total}），收货地址修改已提交人工审核"
+                    f"（工单号 {ticket.get('approvalId')}）。审批通过后将自动执行变更，请稍候。"
+                ),
+                "nextAction": "finish",
+                "taskPlan": awaiting_plan,
+                "extra": {
+                    "orderContext": {
+                        "targetOrderId": order_id,
+                        "orderStatus": order.get("status"),
+                        "actionType": "modify_address",
+                    }
+                },
+            }
+
+
+            async def _persist_awaiting_plan() -> None:
+                """挂起计划落库(与退款 HITL 同机制):审批通过经 resume 重放时
+                HOT-RESUME 100% 复用本计划,executor 快路径确定性执行改址 —— 技能
+                快轨没有 planner 计划,不落库则 resume 无计划可恢复,审批形同虚设
+                (2026-09-12 实弹:approve 成功而地址未变)。"""
+                from ..memory.task_memory import TaskMemory
+
+                await TaskMemory(context.get("threadId") or "").save_task_state(
+                    {
+                        "goal": f"Change shipping address for order {order_id} (awaiting approval)",
+                        "subtasks": [
+                            {
+                                "id": "step_fast_change_address_skill",
+                                "description": (
+                                    f"Call changeShippingAddress for order {order_id} "
+                                    f"with new address {new_address}"
+                                ),
+                                "status": "pending",
+                                "result": {
+                                    "waitingForApproval": True,
+                                    "approvalId": ticket.get("approvalId"),
+                                },
+                            }
+                        ],
+                        "currentStepIndex": 0,
+                        "activeIntent": None,
+                        "slots": {},
+                        "orderContext": {"targetOrderId": order_id},
+                    }
+                )
+
+            await _persist_awaiting_plan()
+            return {
+                "success": True,
+                "skillId": self.metadata["id"],
+                "output": (
+                    f"订单 [{order_id}] 属于高价值订单（¥{order_total}），收货地址修改已提交人工审核"
+                    f"（工单号 {ticket.get('approvalId')}）。审批通过后将自动执行变更，请稍候。"
+                ),
+                "nextAction": "finish",
+                "extra": {
+                    "orderContext": {
+                        "targetOrderId": order_id,
+                        "orderStatus": order.get("status"),
+                        "actionType": "modify_address",
+                    }
+                },
+            }
+
+        async def _persist_awaiting_plan() -> None:
+            """挂起计划落库(与退款 HITL 同机制):审批通过经 resume 重放时
+            HOT-RESUME 100% 复用本计划,executor 快路径确定性执行改址 —— 技能
+            快轨没有 planner 计划,不落库则 resume 无计划可恢复,审批形同虚设
+            (2026-09-12 实弹:approve 成功而地址未变)。"""
+            from ..memory.task_memory import TaskMemory
+
+            await TaskMemory(context.get("threadId") or "").save_task_state(
+                {
+                    "goal": f"Change shipping address for order {order_id} (awaiting approval)",
+                    "subtasks": [
+                        {
+                            "id": "step_fast_change_address_skill",
+                            "description": (
+                                f"Call changeShippingAddress for order {order_id} "
+                                f"with new address {new_address}"
+                            ),
+                            "status": "pending",
+                            "result": {
+                                "waitingForApproval": True,
+                                "approvalId": ticket.get("approvalId"),
+                            },
+                        }
+                    ],
+                    "currentStepIndex": 0,
+                    "activeIntent": None,
+                    "slots": {},
+                    "orderContext": {"targetOrderId": order_id},
+                }
+            )
+
         action_result = await spi_client.execute_order_action(
             {
                 "actionType": "MODIFY_ADDRESS",

@@ -166,8 +166,35 @@ def test_address_not_modifiable_flag_refuses(monkeypatch: pytest.MonkeyPatch) ->
     assert [c[0] for c in spi.calls] == ["get_order_detail"]
 
 
-def test_address_modifiable_order_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_address_high_value_gates_to_hitl(monkeypatch: pytest.MonkeyPatch) -> None:
+    """高价值(¥200>100)改址:技能路径必须过 HITL 门(2026-09-12 merchant 验收
+    07 修复 —— 旧契约直改是审批红线旁路,新契约建审批工单并如实告知)。"""
+    created: list[dict] = []
+
+    class _FakeGate:
+        @staticmethod
+        async def create_pending_approval_ticket(params: dict) -> dict:
+            created.append(params)
+            return {"approvalId": "fake-approval-1", "nextPlan": {"subtasks": [{}]}}
+
+    import engine_py.approvals.gatekeeper as gatekeeper_mod
+
+    monkeypatch.setattr(gatekeeper_mod.ApprovalPolicyEngine, "create_pending_approval_ticket", _FakeGate.create_pending_approval_ticket)
     spi = _FakeSpi()
+    _wire(monkeypatch, spi, skill_cls=OrderAddressModificationSkill)
+    res = asyncio.run(
+        OrderAddressModificationSkill().execute(_ctx({"orderId": _ORDER["orderId"], "newAddress": "上海市浦东新区张江路 5 号"}))
+    )
+    assert res["success"] is True
+    assert "人工审核" in res["output"]
+    assert [c[0] for c in spi.calls] == ["get_order_detail"], "高价值改址等待审批,严禁直接执行"
+    assert created[0]["actionType"] == "changeShippingAddress"
+    assert created[0]["actionPayload"]["args"]["newAddress"] == "上海市浦东新区张江路 5 号"
+
+
+def test_address_low_value_order_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """低价值(¥30≤100)改址:不受审批门拦截,直接执行(threadId 透传)。"""
+    spi = _FakeSpi(order={**_ORDER, "totalAmount": 30.0})
     _wire(monkeypatch, spi, skill_cls=OrderAddressModificationSkill)
     res = asyncio.run(
         OrderAddressModificationSkill().execute(_ctx({"orderId": _ORDER["orderId"], "newAddress": "上海市浦东新区张江路 5 号"}))

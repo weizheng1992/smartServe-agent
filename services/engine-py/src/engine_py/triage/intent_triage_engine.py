@@ -46,7 +46,7 @@ OPERATIONAL_ACTION_RE = re.compile(
 )
 UNSANITIZED_TAGS_RE = re.compile(r"\[(?:ECOMMERCE|BRAND|STORE|MERCHANT|SHOP|ADIDAS|NIKE)\]", re.IGNORECASE)
 ORDER_KEYWORDS_RE = re.compile(r"订单|发货|物流|查单|买的|快递|到哪|运单|面单", re.IGNORECASE)
-REFUND_KEYWORDS_RE = re.compile(r"退款|退货|退钱|退单|退款申请|退货流程|破损|坏了|碎了|瑕疵", re.IGNORECASE)
+REFUND_KEYWORDS_RE = re.compile(r"退款|退货|退钱|退单|退款申请|退货流程|破损|坏了|碎了|瑕疵|退了|退掉|退还", re.IGNORECASE)
 MULTI_INTENT_CANDIDATE_RE = re.compile(r"(?:另外|同时|并|顺便|还有|然后|接着|以及)")
 # 多意图不打断一期(2026-09-12):复合候选形的缺槽反问收窄与资金动作否决。
 # 「然后」「并」裸词补入 —— 旧正则只有「然后再」「并且」,「退了订单9081，
@@ -369,6 +369,7 @@ class IntentTriageEngine:
         cards: list | None = None,
         candidates: list[dict] | None = None,
         arbitration_reason: str | None = None,
+        task_plan: dict | None = None,
     ) -> dict:
         tenant_id = tenant_of_state(state)
         sanitized_reply = sanitize_tenant_response(reply_text, tenant_id)
@@ -385,7 +386,7 @@ class IntentTriageEngine:
             arbitration_reason=arbitration_reason or route_key,
         )
 
-        bypass_plan = {
+        bypass_plan = task_plan or {
             "goal": "Address quick bypass query",
             "subtasks": [
                 {
@@ -720,6 +721,10 @@ class IntentTriageEngine:
                 )
 
         # 🛡️ Step 1.5: 意图与槽位完整性拦截
+        # 资金让位标记(多意图一期):规则层见资金词族但判成非资金意图时,判定 3
+        # 关键词分支同样让位 —— 否则「推荐卫衣，帮我把上一单退掉」在 Step2 被
+        # 吞成单退款,导购半静默丢失(与 766 处 money_action_veto_yield 同源)。
+        money_action_yielded = False
         try:
             task_memory = TaskMemory(thread_id)
             existing_task_state = await task_memory.get_task_state() or {}
@@ -925,6 +930,7 @@ class IntentTriageEngine:
                         candidates=list(proposals),
                         arbitration_reason="money_action_veto_yield",
                     )
+                    money_action_yielded = True
                 else:
                     intents = [
                         {
@@ -1145,10 +1151,13 @@ class IntentTriageEngine:
             # 多意图不打断(2026-09-12):关键词分支是单意图时代产物 —— 复合候选
             # 形下「查订单把没发货的退了」的查单词独走终端吞掉退款半(A3 实弹),
             # 让位结构化精判; embedding 高分分支(≥0.88)不受闸,主语义明确时照常直达。
+            # money_action_yielded 同闸:规则层已判「资金词在场但意图是导购/购物车」,
+            # 此处若独走退款终端,复合句的另一半又被吞(词表扩容后的连带面)。
             if (score_refund >= 0.88 and score_refund - score_oos >= 0.08) or (
                 has_refund_keywords
                 and not has_order_keywords
                 and not _is_multi_intent_candidate(input_text)
+                and not money_action_yielded
             ):
                 refund_order_id = fused_order_id
                 # 📷 意图浮现点消歧(2026-09-09):模糊损坏词(「坏了」)的售后意图
@@ -1512,6 +1521,8 @@ class IntentTriageEngine:
                 if extra_ctx:
                     state_key = {"guideContext": "guide_context", "cartContext": "cart_context", "orderContext": "order_context"}[ctx_key]
                     state[state_key] = {**(state.get(state_key) or {}), **extra_ctx}
+            # 技能可携带恢复计划(HITL 挂起形):随 bypass 透传,防止 run_agent
+            # 回合收口以 bypass 空计划覆盖挂起步骤(高价值改址审批恢复依赖它)
             bypass = await IntentTriageEngine.handle_immediate_bypass(
                 state,
                 f"skill_fast_track_{matching_skill.metadata['id']}",
@@ -1520,10 +1531,12 @@ class IntentTriageEngine:
                 "skill_fast_track",
                 task_spec["confidence"],
                 damage_assessment,
+                cards=skill_result.get("cards"),
                 candidates=[
                     *(proposals or []),
                     _proposal("skill_fast_track", matching_skill.metadata["id"], task_spec["confidence"]),
                 ],
+                task_plan=skill_result.get("taskPlan"),
             )
             return {
                 **bypass,
