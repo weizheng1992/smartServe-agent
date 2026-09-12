@@ -144,6 +144,20 @@ def test_shopping_guide_can_handle_fallback() -> None:
     assert skill.can_handle({"input": "查询订单状态"}) is False
 
 
+def test_guide_card_carries_no_fabricated_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """推荐卡诚实性(2026-09-12):商户货架无销量/GMV/毛利数据,严禁合成
+    (对齐 2.6.8 铁律)——旧卡编造 totalGmv=价格×100、grossProfit=价格×40%、
+    marginRate='40%'、totalVolume 兜底 100,前端照实展示欺骗用户。"""
+    _stub_search(monkeypatch, _MOCK_PRODUCTS)
+    res = _run_guide("推荐几双跑鞋")
+    card = next(c for c in res["cards"] if c["type"] == "product_ranking")
+    for p in card["data"]["products"]:
+        for fabricated in ("totalVolume", "totalGmv", "grossProfit", "marginRate"):
+            assert fabricated not in p, f"推荐卡不得编造 {fabricated}"
+        assert p["metricDisplay"], "仅允许真实字段+推荐位次文案"
+        assert p["price"] > 0
+
+
 # ---------------------------------------------------------------- 商品查询
 
 class _FakeSpi:

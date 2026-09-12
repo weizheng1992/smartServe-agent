@@ -98,12 +98,14 @@ export interface RankedProductItem {
   price: number;
   costPrice?: number;
   stock?: number;
-  totalVolume: number;
-  totalGmv: number;
-  grossProfit: number;
-  marginRate: string;
-  metricScore: number;
-  metricDisplay: string;
+  // 销售排行字段仅 queryProductRanking 结果必有;导购推荐卡与检索形条目
+  // 均不带(商户货架无销量/毛利数据,严禁合成),前端按存在性渲染。
+  totalVolume?: number;
+  totalGmv?: number;
+  grossProfit?: number;
+  marginRate?: string;
+  metricScore?: number;
+  metricDisplay?: string;
 }
 
 export interface ProductRankingCardData {

@@ -61,19 +61,29 @@ export const ProductRankingCard: React.FC<ProductRankingCardProps> = ({ data, on
                     <h4 className="font-medium text-slate-200 truncate text-xs">{p.name}</h4>
                     <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
                       <span>单价: ¥{p.price}</span>
-                      <span>•</span>
-                      <span>销量: {p.totalVolume} 件</span>
-                      <span>•</span>
-                      <span>毛利率: {p.marginRate}</span>
+                      {p.totalVolume != null && (
+                        <>
+                          <span>•</span>
+                          <span>销量: {p.totalVolume} 件</span>
+                        </>
+                      )}
+                      {p.marginRate != null && (
+                        <>
+                          <span>•</span>
+                          <span>毛利率: {p.marginRate}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="text-right shrink-0">
                   <div className="text-xs font-semibold text-emerald-400 font-mono">
-                    {p.metricDisplay || `¥${p.totalGmv.toLocaleString()}`}
+                    {p.metricDisplay || (p.totalGmv != null ? `¥${p.totalGmv.toLocaleString()}` : '—')}
                   </div>
-                  <div className="text-[10px] text-slate-400">毛利 ¥{p.grossProfit.toLocaleString()}</div>
+                  {p.grossProfit != null && (
+                    <div className="text-[10px] text-slate-400">毛利 ¥{p.grossProfit.toLocaleString()}</div>
+                  )}
                 </div>
               </div>
             );

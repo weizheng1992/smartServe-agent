@@ -203,11 +203,14 @@ class CardSynthesizer:
                 cards.append({"type": "refund_confirmation", "data": refund_card})
 
             # 4. 商品排行卡(queryProductRanking)
+            # 判定只认排行签名(rankingMetric/步骤语义)——严禁「products 非空
+            # 即排行卡」:searchProducts 工具结果的键同样叫 products,条目是
+            # 检索形(无 totalGmv/grossProfit),误装后前端读缺失字段抛
+            # toLocaleString TypeError 白屏,且给搜索结果盖假「GMV 排行」头衔。
             is_ranking_task = (
                 "ranking" in st_id
                 or "ranking" in (st.get("description") or "").lower()
                 or result.get("rankingMetric") is not None
-                or (isinstance(result.get("products"), list) and result.get("products"))
             )
             if is_ranking_task and isinstance(result.get("products"), list):
                 ranking_card = {
