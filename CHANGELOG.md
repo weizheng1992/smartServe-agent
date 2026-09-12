@@ -4,6 +4,29 @@
 
 ---
 
+## [2.6.11] - 2026-09-12 (实测遗留三项收口:退款金额诚实化 + 降级网双层加固 + 规格问句直答)
+
+2.6.10 全链路实测(/implement 后 E2E 电池)撞出的三项遗留,本轮 TDD 收口;双轴 code-review(Standards + Spec 并行子代理)又从修复本身掀出四处次生问题,一并修复。
+
+### 🐛 Fixes
+
+- **退款金额诚实化(残余①)**:`process_refund` 回执旧硬编码 `$` 前缀(人民币店渲染成美元,实测「退款金额 $1299.0」)且金额未知时兜底编造 **"$99.99"** —— 退款单编造金额比货币符号错严重得多。改为真单总额/申请额随单取值,平台 CNY 默认(显式 USD 才 $),剥不出数值如实「待确认」(`_format_amount_value` 助手,float 异常兜底);审计文案两处编造的 "$100 limit" 限额声明(代码并不知晓该值)改为如实描述(金额 + 时效窗 + "no approved HITL record"),地址变更审计/挂起文案与免签放行状态事件的 `$` 家族同批清零。**实弹复测**:9082 完整审批闭环 → 「退款金额:¥589.00」零美元符。
+- **降级网双层加固(残余②)**:上游 429 重试耗尽曾以 HTTP 500 + ASGI 堆栈裸露。①`run_agent` 图调用 `except` 从仅 `CircuitBreakerOpenError` 拓宽到全异常,与熔断同形道歉降级(回复照常交付、SSE 流照常收口);②网关 sync 派发 `await task` 兜 try/except,残余异常返回诚实道歉文案而非 500;③回复产出后的三路记忆回写/任务态落库/result 事件发布全部包护 —— 答案已算出,持久化失败不得吞掉交付。
+- **规格问句直答(残余③,技能面)**:`ProductInquirySkill` 新增规格问句分支(规格/尺码/尺寸/颜色/码数/参数/型号),检索首位商品命中即直查真货架 SKU 出参渲染(价格/库存/缺货如实),查无回落商品列表;非规格问句零 SKU 查询。**已知残余(如实)**:意图路由仍把「双肩包有什么规格」判 general_query(structured_llm 0.95),技能面已具备直答能力但路由未到位 —— 触达需动意图路由 + promptfoo 基线重钉,单独立项。
+
+### 🔍 双轴审查次生修复(code-review 掀出)
+
+- **遥测失真**:图异常降级原复用熔断旗标,session_metrics 会落 `resolved_auto`/`is_success=True` 把失败记成成功 —— 新增 `graph_error_fired` 旗标,独立落 `resolution_status="graph_error_degraded"`(is_success=False),坏例池同权入池(独立 note);`_degraded_llm_breaker_result` 更名 `_degraded_apology_result`(docstring 覆盖两种降级来源)。
+- **规格错配守卫**:productId 为空串时 `query_product_skus` 条件全空会拉回任意 20 条本地 SKU 冠以首位商品标题 —— 空productId 直接回落列表形态。
+- **金额解析后置风险**:`float()` 在退款 UPDATE 已 commit 之后执行,异形串("1.2.3")抛错会使已落库退款走进道歉降级 —— 统一收口 `_format_amount_value` 内兜底。
+- **审计自相矛盾**:降级文案 `{total_amount or 0}` 渲染 "¥0" 与 `refundAmount="待确认"` 打架,改用已解析诚实值。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **434 passed**(2.6.10 基线 432,+2 零回归:规格直答/非规格不触达 SKU);gateway 契约套件 **121 passed**;ruff 干净。实弹:退款 ¥589.00 全链闭环;429 场景不可稳定复现,以双层代码防线 + 契约套件护航(如实记录,未实弹)。
+
+---
+
 ## [2.6.10] - 2026-09-12 (mock 兜底清零:七处欺骗性兜底拆除,失败/查空一律诚实空或真实失败)
 
 诊断起点(/triage + 全链路实测电池):分诊盘点定位五处残余欺骗性 mock,E2E 实测(40+ 条真实 LLM 消息)又撞出两处——「清空购物车→查看」100% 变出幻影 AJ1(`(await _load_cart(key)) or [演示车]` 的 falsy 陷阱:清空写入的 `[]` 必然落进兜底)、技能层加购 `or 899.0` 假价格(恰为已拆除的 Pegasus 假商品价)。工单 real-data-only/01,维护者裁决:演示身份体系(CUST-8801 等)保留划出范围。
