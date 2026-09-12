@@ -4,6 +4,22 @@
 
 ---
 
+## [2.6.12] - 2026-09-12 (商品排行卡白屏收口:检索结果误装排行卡 + 推荐卡编造 GMV 拆除)
+
+前端实报 `ProductRankingCard.tsx:74` 抛 `Cannot read properties of undefined (reading 'toLocaleString')`(聊天台白屏),诊断闭环收口,顺带在同一张卡上掀出并拆除一处漏网 mock。
+
+### 🐛 Fixes
+
+- **根因(engine 卡合成器误判)**:排行卡判定含「subtask 结果 `products` 非空即排行卡」启发式,与 `searchProducts` 工具出参撞键 —— planner 选工具路径(非导购技能)时,检索结果条目是商户货架检索形(`id/name/price/stock`,无 `totalGmv/grossProfit/metricDisplay`),被误装成排行卡后前端读缺失字段抛 TypeError 白屏,且给搜索结果盖假「总销售额 (GMV)」头衔挂排行快捷消歧组。判定收口为只认排行签名(`rankingMetric`/步骤 id/描述含 ranking);真 `queryProductRanking` 出参恒带 `rankingMetric`,契约测试钉死不受扰。
+- **前端防御性渲染**:`RankedProductItem` 排行字段(totalVolume/totalGmv/grossProfit/marginRate/metricScore/metricDisplay)改可选,`ProductRankingCard` 按存在性渲染、缺省降级「—」—— 线上任何契约违约降级为局部缺项,不再整台白屏。
+- **推荐卡编造指标拆除(诚实性,同卡同源)**:`ShoppingGuideSkill` 推荐卡一直编造 `totalGmv=价格×100`、`grossProfit=价格×40%`、`marginRate='40%'`、`totalVolume` 兜底 100,前端照实渲染成「销量:100 件 • 毛利率:40% • ¥49,900」欺骗用户 —— 2.6.10 mock 清零的漏网之鱼(E2E 电池只审文本输出未审卡片载荷)。整体拆除只留真实字段(价格/现货/品类/推荐位次),对齐 2.6.8「商户货架无销量数据,严禁合成假热度」铁律。
+
+### ✅ 验证 (Verification,如实)
+
+- TDD 三红灯先行:前端 `renderToString` 复现原始 TypeError / engine 合成器对检索出参误装 / guide 卡编造字段断言 → 修复后全绿。engine pytest **437 passed**(434 基线 +3,零回归)、packages/ui bun test **20 passed**、admin/web 套件 **23 passed**、ruff + tsc 干净。实弹三流复测:推荐卡载荷仅真实字段、GMV 排行卡契约正常(诚实空 items=0)、检索流零卡片误装。
+
+---
+
 ## [2.6.11] - 2026-09-12 (实测遗留三项收口:退款金额诚实化 + 降级网双层加固 + 规格问句直答)
 
 2.6.10 全链路实测(/implement 后 E2E 电池)撞出的三项遗留,本轮 TDD 收口;双轴 code-review(Standards + Spec 并行子代理)又从修复本身掀出四处次生问题,一并修复。
