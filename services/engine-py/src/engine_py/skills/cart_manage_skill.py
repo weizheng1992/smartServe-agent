@@ -7,8 +7,18 @@ import re
 from ..tools_registry.mall_domain import MallDomainService
 from .base_skill import BaseSkill
 
-_ORDINAL_RE = re.compile(r"(?:把)?第\s*([一二三四五12345两])\s*[件款个双]?")
-_INDEX_MAP = {"一": 0, "1": 0, "二": 1, "2": 1, "两": 1, "三": 2, "3": 2, "四": 3, "4": 3, "五": 4, "5": 4}
+_ORDINAL_RE = re.compile(r"(?:把)?第\s*(\d+|[一二三四五六七八九十两])\s*[件款个双]?")
+# 数字串经 _ordinal_to_index 换算(支持「第10件」多位),汉字查表
+_INDEX_MAP = {"一": 0, "二": 1, "两": 1, "三": 2, "四": 3, "五": 4, "六": 5, "七": 6, "八": 7, "九": 8, "十": 9}
+# 词表外大序数兜底(第十一/第100…):只在「诚实反问」时作存在性判定用
+_ORD_ANY_RE = re.compile(r"第\s*[0-9一二三四五六七八九十百千]+")
+
+
+def _ordinal_to_index(token: str) -> int:
+    """序数字符 → 0 基下标:数字串按位值换算(第10件=9),汉字查表。"""
+    if token.isdigit():
+        return int(token) - 1
+    return _INDEX_MAP.get(token, 0)
 
 _VIEW_ONLY_RE = re.compile(
     r"(?:查看购物车|看下购物车|购物车总价|看购物车|购物车里|购物车有什么|多少钱|算下总价|结算|去买单|去结算)"
@@ -19,7 +29,11 @@ _ADD_RE = re.compile(r"(?:加购物车|加入购物车|放进购物车|放入购
 _CLEAR_RE = re.compile(r"(?:清空|全部删除|全删)")
 _QTY_UPDATE_RE = re.compile(r"(?:改成|修改为|数量设为|变成|改为|调整为|增加到|减少到)\s*(\d+)\s*件?")
 _VAGUE_RE = re.compile(r"(?:第几|哪件|哪款|哪一个)")
-_ORDINAL_FULL_RE = re.compile(r"(?:把)?第\s*([一二三四五12345两])\s*[件款个双]|买第\s*([一二三四五12345两])|第\s*([一二三四五12345两])\s*款")
+_ORDINAL_FULL_RE = re.compile(
+    r"(?:把)?第\s*(\d+|[一二三四五六七八九十两])\s*[件款个双]"
+    r"|买第\s*(\d+|[一二三四五六七八九十两])"
+    r"|第\s*(\d+|[一二三四五六七八九十两])\s*款"
+)
 _ADD_ALL_RE = re.compile(r"(?:全部|所有|都)")
 _NAME_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z]{2,}")
 # 品牌与通用款型词不计分:点名"A款"不得因共享 Nike/Run 等泛词误中"B款"
@@ -64,7 +78,7 @@ class CartManageSkill(BaseSkill):
 
     _CAN_HANDLE_RE = re.compile(
         r"(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|买第|件加入|款加入|放入购物车|"
-        r"第[一二三四五12345两几][件款个双]|要第|删除|移除|删掉|清空|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+)"
+        r"第[0-9一二三四五六七八九十两几][件款个双]|要第|删除|移除|删掉|清空|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+)"
     )
 
     @staticmethod
@@ -183,7 +197,7 @@ class CartManageSkill(BaseSkill):
             ordinal_match = _ORDINAL_RE.search(user_input)
             target_item = None
             if ordinal_match:
-                target_index = _INDEX_MAP.get(ordinal_match.group(1), 0)
+                target_index = _ordinal_to_index(ordinal_match.group(1))
                 if target_index >= len(current_items):
                     # 越界守卫(2026-09-06):此前越界序数静默落兜底链误删首款
                     return {
@@ -254,7 +268,7 @@ class CartManageSkill(BaseSkill):
             ordinal_match = _ORDINAL_RE.search(user_input)
             target_item = None
             if ordinal_match:
-                target_index = _INDEX_MAP.get(ordinal_match.group(1), 0)
+                target_index = _ordinal_to_index(ordinal_match.group(1))
                 if target_index >= len(current_items):
                     # 越界守卫(2026-09-06):越界序数不得错改首款/lastModified
                     return {
@@ -478,7 +492,7 @@ class CartManageSkill(BaseSkill):
         ordinal_match = _ORDINAL_FULL_RE.search(user_input)
         if ordinal_match:
             ordinal_char = ordinal_match.group(1) or ordinal_match.group(2) or ordinal_match.group(3)
-            target_index = _INDEX_MAP.get(ordinal_char, 0)
+            target_index = _ordinal_to_index(ordinal_char)
             if target_index < len(candidate_products):
                 prod = candidate_products[target_index]
                 target_sku_id = prod["id"]
@@ -487,6 +501,34 @@ class CartManageSkill(BaseSkill):
             elif target_index < len(candidate_list):
                 target_sku_id = candidate_list[target_index]
                 target_title = f"推荐商品 #{target_index + 1} ({target_sku_id})"
+
+        # 序数越界守卫(2026-09-12):序数解析不出有效目标时诚实反问,严禁静默
+        # 落 candidate[0] —— 推荐仅 2 款时「把第四个加入购物车」曾错加第 1 款
+        # 并撞上「已在购物车」提示(用户实报)。与删除/改量分支 2026-09-06 越界
+        # 守卫同类症状,加购分支补齐;词表外大序数(第十一+)同口径,不猜不装。
+        broad_ordinal = _ORD_ANY_RE.search(user_input)
+        if not target_sku_id and broad_ordinal and (candidate_products or candidate_list):
+            pool = candidate_products or [
+                {"id": cid, "name": f"推荐商品 #{i + 1}", "price": None} for i, cid in enumerate(candidate_list)
+            ]
+            list_text = "\n".join(
+                f"{i + 1}. 【{c['name']}】" + (f" ¥{c['price']}" if c.get("price") is not None else "")
+                for i, c in enumerate(pool)
+            )
+            if ordinal_match:
+                head = f"本次推荐只有 {len(pool)} 款商品，没有第{target_index + 1}款，未加入任何商品。"
+            else:
+                head = f"没有定位到您说的「{broad_ordinal.group(0)}」，本次推荐共 {len(pool)} 款，未加入任何商品。"
+            return {
+                "success": True,
+                "skillId": self.metadata["id"],
+                "output": (
+                    f"{head}\n\n{list_text}\n\n"
+                    "可直接说要哪一款，例如“把第1件加入购物车”。🛒"
+                ),
+                "nextAction": "finish",
+                "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+            }
 
         if not target_sku_id:
             if candidate_products:
