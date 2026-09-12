@@ -385,6 +385,18 @@ class OrderDomainService:
         return enriched_order
 
     @staticmethod
+    def _format_amount_value(prefix: str, raw) -> str:
+        """任意形态金额 → 币种前缀 + 两位小数;剥不出数值或解析失败如实
+        「待确认」—— 退款单金额严禁编造(real-data-only/01 残余项①)。"""
+        cleaned = _AMOUNT_STRIP_RE.sub("", str(raw))
+        if not cleaned:
+            return "待确认"
+        try:
+            return f"{prefix}{float(cleaned):.2f}"
+        except (ValueError, TypeError):
+            return "待确认"
+
+    @staticmethod
     async def process_refund(
         order_id: str, reason: str, thread_id: str | None = None, amount: str | None = None
     ) -> dict:
@@ -464,12 +476,17 @@ class OrderDomainService:
 
         await tool_cache.delete(f"cache:order_status:{order_id}")
 
-        refund_amount_val = "$99.99"
+        # 退款金额如实取值(2026-09-12):旧兜底 "$99.99" 是编造的退款回执金额,
+        # "$" 前缀把人民币店渲染成美元 —— 金额取真单总额或申请额,币种随单
+        # (平台全 CNY 体系,显式 USD 才用 $),两者皆无则如实标注待确认。
         total_amount_val = order.get("totalAmount")
-        if total_amount_val:
-            refund_amount_val = f"${total_amount_val}"
+        currency_prefix = "$" if str(order.get("currency") or "CNY").upper() == "USD" else "¥"
+        if total_amount_val is not None:
+            refund_amount_val = OrderDomainService._format_amount_value(currency_prefix, total_amount_val)
         elif amount:
-            refund_amount_val = amount if amount.startswith("$") else f"${amount}"
+            refund_amount_val = OrderDomainService._format_amount_value(currency_prefix, amount)
+        else:
+            refund_amount_val = "待确认"
 
         audit_trail = None
         if thread_id:
@@ -508,8 +525,9 @@ class OrderDomainService:
                 "approvalId": "AUTO_APPROVED",
                 "approvedAt": _dt.datetime.now().isoformat(),
                 "policyMatched": (
-                    f"SOP Auto-Approval Limit Check: Passed (${total_amount_val or 0} <= $100 limit; "
-                    f"{diff_days} days elapsed of allowed {return_window_days} days)"
+                    f"SOP Window Check: Passed (amount {refund_amount_val}; "
+                    f"{diff_days} days elapsed of allowed {return_window_days} days; "
+                    "auto-approved path: no approved HITL record found for this thread)"
                 ),
                 "actionVerifier": "system_auto_approval_engine",
                 "verifiableHash": hashlib.sha256(raw_hash.encode()).hexdigest(),
@@ -678,7 +696,7 @@ class OrderDomainService:
                     "actionPayload": {"args": {"orderId": order_id, "newAddress": new_address}},
                     "message": (
                         f"🛡️ Security Alert: Address change for high-value order {order_id} "
-                        f"(${total_amount}) has been suspended. Awaiting Supervisor verification."
+                        f"(¥{total_amount}) has been suspended. Awaiting Supervisor verification."
                     ),
                 }
 
@@ -744,7 +762,7 @@ class OrderDomainService:
                 audit_trail = {
                     "approvalId": "AUTO_APPROVED",
                     "approvedAt": _dt.datetime.now().isoformat(),
-                    "policyMatched": f"SOP Address Change Check: Standard Auto-Approval (${total_amount} <= $100 limit)",
+                    "policyMatched": f"SOP Address Change Check: Standard Auto-Approval ({total_amount})",
                     "actionVerifier": "system_auto_approval_engine",
                     "verifiableHash": hashlib.sha256(
                         f"auto-approved-address:{order_id}:{total_amount}".encode()

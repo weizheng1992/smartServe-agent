@@ -220,8 +220,8 @@ async def _execute_single_step_core(
             if auto_check["shouldAutoApprove"] and state.get("job_id"):
                 await emit_status(
                     state["job_id"],
-                    f"✅ 政策放行：检测到本次退款金额 (${auto_check['groundedAmount']}) 在商户免签限额 "
-                    f"(${tenant_limit}) 以内，已物理触发【额度免签直接放行】！",
+                    f"✅ 政策放行：检测到本次退款金额 (¥{auto_check['groundedAmount']}) 在商户免签限额 "
+                    f"(¥{tenant_limit}) 以内，已物理触发【额度免签直接放行】！",
                     node="executor",
                 )
 

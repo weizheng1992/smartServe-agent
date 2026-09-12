@@ -374,9 +374,9 @@ class TestNodeFallbackCarveOut:
 
 class TestDegradedBreakerResult:
     def test_degraded_result_shape_is_graph_consumable(self):
-        from engine_py.run_agent import _degraded_llm_breaker_result
+        from engine_py.run_agent import _degraded_apology_result
 
-        result = _degraded_llm_breaker_result()
+        result = _degraded_apology_result()
         assert "稍后再试" in result["output"]
         assert result["task_plan"]["subtasks"] == []
         assert result["loop_count"] == 0

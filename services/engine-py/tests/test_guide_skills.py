@@ -156,7 +156,9 @@ class _FakeSpi:
         return self.products
 
 
-def _run_inquiry(monkeypatch: pytest.MonkeyPatch, products) -> dict:
+def _run_inquiry(
+    monkeypatch: pytest.MonkeyPatch, products, input_text: str = "Pegasus 41 有货吗", query: str = "Pegasus 41"
+) -> dict:
     spi = _FakeSpi(products)
 
     async def fake_client(self, tenant_id: str):
@@ -167,8 +169,8 @@ def _run_inquiry(monkeypatch: pytest.MonkeyPatch, products) -> dict:
         "threadId": "t_inq",
         "tenantId": "ecommerce",
         "userId": "u_inq",
-        "input": "Pegasus 41 有货吗",
-        "slots": {"query": "Pegasus 41"},
+        "input": input_text,
+        "slots": {"query": query},
     }
     return asyncio.run(ProductInquirySkill().execute(ctx))
 
@@ -209,3 +211,71 @@ def test_inquiry_no_result_lists_real_categories(monkeypatch: pytest.MonkeyPatch
     assert "目前店内热卖品类" in res["output"]
     assert "潮流鞋靴(2款)" in res["output"]
     assert "下装裤类(1款)" in res["output"]
+
+def test_inquiry_spec_ask_lists_real_skus(monkeypatch: pytest.MonkeyPatch) -> None:
+    """规格问句(2026-09-12):问「有什么规格」直答真货架 SKU,不再只列商品
+    让用户再问一轮(实测「双肩包有什么规格」曾空转)。"""
+    spi_products = [
+        {
+            "productId": "SPU-P-BAG",
+            "title": "极光 城市通勤双肩包",
+            "description": "通勤双肩包",
+            "price": 499.0,
+            "stock": 42,
+            "isAvailable": 1,
+        }
+    ]
+    sku_payload = {
+        "total": 2,
+        "productId": "SPU-P-BAG",
+        "skus": [
+            {
+                "skuId": "SPU-P-BAG-SKU-M",
+                "skuCode": "SPU-P-BAG-SKU-M",
+                "productName": "极光 城市通勤双肩包",
+                "specs": {"color": "曜石黑", "size": "15寸"},
+                "price": "¥499.00",
+                "stock": 30,
+                "inStock": True,
+                "status": "ON_SALE",
+            },
+            {
+                "skuId": "SPU-P-BAG-SKU-L",
+                "skuCode": "SPU-P-BAG-SKU-L",
+                "productName": "极光 城市通勤双肩包",
+                "specs": {"color": "雾岩灰", "size": "17寸"},
+                "price": "¥549.00",
+                "stock": 0,
+                "inStock": False,
+                "status": "ON_SALE",
+            },
+        ],
+    }
+
+    async def fake_skus(params: dict) -> dict:
+        return sku_payload
+
+    monkeypatch.setattr(MallDomainService, "query_product_skus", staticmethod(fake_skus))
+    res = _run_inquiry(monkeypatch, spi_products, input_text="双肩包有什么规格", query="双肩包 规格")
+    out = res["output"]
+    assert "可选规格" in out, f"规格问句应直答 SKU: {out}"
+    assert "曜石黑" in out and "¥499.00" in out, f"应带真规格与价格: {out}"
+    assert "雾岩灰" in out and "缺货" in out, f"缺货规格也应如实列出: {out}"
+
+
+def test_inquiry_non_spec_ask_keeps_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非规格问句保持原列表形态,不触发 SKU 查询。"""
+    spi_products = [
+        {"productId": "SPU-X", "title": "某商品", "description": "", "price": 99.0, "stock": 3, "isAvailable": 1}
+    ]
+    called: list[dict] = []
+
+    async def fake_skus(params: dict) -> dict:
+        called.append(params)
+        return {"total": 0, "skus": []}
+
+    monkeypatch.setattr(MallDomainService, "query_product_skus", staticmethod(fake_skus))
+    res = _run_inquiry(monkeypatch, spi_products, input_text="有没有便宜的背包", query="便宜的背包")
+    assert called == [], "非规格问句不得触达 SKU 查询"
+    assert "为您找到以下相关商品" in res["output"]
+

@@ -7,6 +7,9 @@ import re
 from ..tools_registry.mall_domain import MallDomainService
 from .base_skill import BaseSkill
 
+# 规格问句识别(2026-09-12):命中即对检索首位商品直查真货架 SKU
+_SPEC_ASK_RE = re.compile(r"(规格|尺码|尺寸|颜色|码数|参数|型号)")
+
 
 class ProductInquirySkill(BaseSkill):
     metadata = {
@@ -49,6 +52,34 @@ class ProductInquirySkill(BaseSkill):
                 "nextAction": "finish",
             }
 
+        # 规格问句直答(2026-09-12):「有什么规格/尺码/颜色」类问句,检索首位
+        # 商品命中即直查真货架 SKU 出参(real-data-only/01 残余项③)—— 不再
+        # 只列商品让用户再问一轮;查无/查询异常回落列表形态,不阻断。
+        top_id = products[0].get("productId") if products else None
+        if _SPEC_ASK_RE.search(query) and top_id:
+            top = products[0]
+            try:
+                sku_res = await MallDomainService.query_product_skus({"productId": top_id})
+            except Exception as sku_err:
+                print(f"[ProductInquirySkill] SKU 查询失败,回落商品列表: {sku_err}")
+                sku_res = None
+            skus = (sku_res or {}).get("skus") or []
+            if skus:
+                spec_lines = "\n".join(
+                    f"• {self._format_spec(s.get('specs'))} — {s['price']}"
+                    f"（{'现货' if s.get('inStock') else '缺货'}）"
+                    for s in skus
+                )
+                return {
+                    "success": True,
+                    "skillId": self.metadata["id"],
+                    "output": (
+                        f"为您找到【{top.get('title')}】，可选规格如下：\n{spec_lines}\n\n"
+                        "如需把某一款加入购物车或了解详情，请随时告诉我！"
+                    ),
+                    "nextAction": "finish",
+                }
+
         product_summary = "\n\n".join(
             self._format_product(p) for p in products
         )
@@ -58,6 +89,12 @@ class ProductInquirySkill(BaseSkill):
             "output": f"为您找到以下相关商品：\n{product_summary}\n\n如需了解具体尺码规格或下单，请随时告诉我！",
             "nextAction": "finish",
         }
+
+    @staticmethod
+    def _format_spec(specs: dict | None) -> str:
+        if not specs:
+            return "标准款"
+        return " / ".join(f"{v}" for v in specs.values()) or "标准款"
 
     @staticmethod
     def _format_product(p: dict) -> str:

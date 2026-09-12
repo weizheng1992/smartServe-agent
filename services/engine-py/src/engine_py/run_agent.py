@@ -133,11 +133,12 @@ async def _resolve_business_context(
     return business_id, dynamic_config
 
 
-def _degraded_llm_breaker_result() -> dict:
-    """上游 LLM 熔断时的降级结果:道歉回复 + 空计划,沿用图终态消费链路。
+def _degraded_apology_result() -> dict:
+    """LLM 熔断或图执行异常时的降级结果:道歉回复 + 空计划,沿用图终态消费链路。
 
-    run_agent 主流程(metrics 落盘 / 任务记忆 / result 事件)继续走通,
-    仅 resolution_status 落 ``llm_circuit_breaker``。
+    run_agent 主流程(metrics 落盘 / 任务记忆 / result 事件)继续走通;
+    resolution_status 由调用方按旗标落 ``llm_circuit_breaker`` /
+    ``graph_error_degraded``(区分降级来源,遥测如实)。
     """
     return {
         "output": (
@@ -325,6 +326,7 @@ async def run_agent(job: AgentJobInput) -> dict:
     start_time = time.time()
     graph_app = build_graph()
     llm_breaker_fired = False
+    graph_error_fired = False
     try:
         result = await graph_app.ainvoke(initial_state)
     except CircuitBreakerOpenError as breaker_err:
@@ -333,7 +335,15 @@ async def run_agent(job: AgentJobInput) -> dict:
         # (ticket 006 熔断信号入池的数据源)。韧性层已发布 circuit_breaker_open 状态事件。
         print(f"[runAgent] ⚠️ 上游 LLM 熔断,降级道歉回复: {breaker_err}")
         llm_breaker_fired = True
-        result = _degraded_llm_breaker_result()
+        result = _degraded_apology_result()
+    except Exception as graph_err:
+        # 拓宽降级网(2026-09-12):图中任一未捕获异常(如上游 429 重试耗尽、
+        # 单节点 bug)不得穿透为网关 500 / SSE 流挂死 —— 与熔断同形道歉降级。
+        # 独立旗标 graph_error_fired:session_metrics 落 graph_error_degraded,
+        # 严禁把降级作业记成 resolved_auto 成功(遥测如实,双轴审查工单)。
+        print(f"[runAgent] ⚠️ 图执行未捕获异常,降级道歉回复: {graph_err!r}")
+        graph_error_fired = True
+        result = _degraded_apology_result()
     elapsed_latency_ms = (time.time() - start_time) * 1000
 
     # 🪙 SaaS 遥测:算力消耗 / 成本换算 / 图决策深度 / 解挂状态
@@ -356,6 +366,10 @@ async def run_agent(job: AgentJobInput) -> dict:
             resolution_status = "llm_circuit_breaker"
             is_success = False
             feedback_comment = "Upstream LLM circuit breaker open; job degraded with apology fallback."
+        elif graph_error_fired:
+            resolution_status = "graph_error_degraded"
+            is_success = False
+            feedback_comment = "Graph execution raised; job degraded with apology fallback."
         else:
             resolution_status = "circuit_breaker" if breaker_fired else "resolved_auto"
             is_success = not breaker_fired
@@ -415,7 +429,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         # 无会话归属的后台调用,而池以会话为评审单位,与 session_metrics
         # 熔断落盘(003 数据源)同位;dedupe=True 使 OPEN 窗口内同一会话多次
         # 回合只入池一次;入池失败静默降级不阻断主流程(内建)。
-        if llm_breaker_fired or breaker_fired:
+        if llm_breaker_fired or graph_error_fired or breaker_fired:
             await record_badcase_signal(
                 SOURCE_CIRCUIT_BREAKER,
                 conversation_ref=f"thread:{thread_id}",
@@ -424,7 +438,11 @@ async def run_agent(job: AgentJobInput) -> dict:
                 note=(
                     "上游 LLM 熔断(OPEN)拦截,会话降级道歉回复"
                     if llm_breaker_fired
-                    else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
+                    else (
+                        "图执行未捕获异常,降级道歉回复"
+                        if graph_error_fired
+                        else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
+                    )
                 ),
             )
 
@@ -451,13 +469,16 @@ async def run_agent(job: AgentJobInput) -> dict:
     existing_cards = result.get("cards") or []
     final_cards = existing_cards if existing_cards else synthesized_cards
 
-    # 助手回复回写三路记忆
+    # 助手回复回写三路记忆(回复已产出,持久化失败不阻断交付)
     if result.get("output"):
-        await short_memory.add_message("assistant", result["output"], final_cards)
-        await episodic_memory.add_event(
-            f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
-        )
-        await long_memory.extract_and_store_fact(result["output"], input_message)
+        try:
+            await short_memory.add_message("assistant", result["output"], final_cards)
+            await episodic_memory.add_event(
+                f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
+            )
+            await long_memory.extract_and_store_fact(result["output"], input_message)
+        except Exception as mem_err:
+            print(f"[runAgent] 回复已交付,记忆回写失败(不阻断): {mem_err!r}")
 
     # 持久化任务记忆与领域上下文
     task_plan_to_save = result.get("task_plan") or {
@@ -465,18 +486,24 @@ async def run_agent(job: AgentJobInput) -> dict:
         "subtasks": [],
         "currentStepIndex": 0,
     }
-    await task_memory.save_task_state(
-        {
-            **task_plan_to_save,
-            "guideContext": result.get("guide_context") or saved_guide_context,
-            "cartContext": result.get("cart_context") or saved_cart_context,
-            "orderContext": result.get("order_context") or saved_order_context,
-        }
-    )
+    try:
+        await task_memory.save_task_state(
+            {
+                **task_plan_to_save,
+                "guideContext": result.get("guide_context") or saved_guide_context,
+                "cartContext": result.get("cart_context") or saved_cart_context,
+                "orderContext": result.get("order_context") or saved_order_context,
+            }
+        )
+    except Exception as tm_err:
+        print(f"[runAgent] 任务状态落库失败(不阻断): {tm_err!r}")
 
     final_result = {**to_ts_dict(result), "cards": final_cards}
 
     if job_id:
-        await publish_agent_event(job_id, "result", final_result)
+        try:
+            await publish_agent_event(job_id, "result", final_result)
+        except Exception as pub_err:
+            print(f"[runAgent] 结果事件发布失败(sync 返回值仍完整): {pub_err!r}")
 
     return final_result

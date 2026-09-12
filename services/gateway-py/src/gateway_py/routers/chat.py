@@ -132,7 +132,17 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
     task = asyncio.create_task(run_agent(job))
 
     if body.sync:
-        final_state = await task
+        # 兜底降级(2026-09-12):run_agent 已做图级降级网,此处再兜一层 ——
+        # 任何残余异常不再以 HTTP 500 + ASGI 堆栈裸露给客户端(上游 429 实测),
+        # 而是与熔断路径同形的诚实道歉文案。
+        try:
+            final_state = await task
+        except Exception as agent_err:
+            print(f"[Chat] agent job raised, graceful degrade: {agent_err!r}")
+            final_state = {
+                "output": "非常抱歉，智能服务当前遇到上游模型波动，暂时无法处理您的请求。请稍后再试，或选择人工客服协助。",
+                "cards": [],
+            }
         output = final_state.get("output") or "智能客服已为您处理完毕。"
         return {
             "success": True,
