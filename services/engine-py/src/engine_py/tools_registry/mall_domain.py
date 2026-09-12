@@ -212,29 +212,9 @@ class MallDomainService:
         except Exception as err:
             print(f"[MallDomainService.getUserAddresses] Database query error: {err}")
 
-        # 默认高保真种子数据兜底
-        return {
-            "total": 2,
-            "userId": effective_user_id or "current_user",
-            "addresses": [
-                {
-                    "id": "addr_default_home_01",
-                    "receiverName": "张先生",
-                    "receiverPhone": "138****8899",
-                    "fullAddress": "北京市海淀区中关村南大街1号院3号楼802室",
-                    "tag": "home",
-                    "isDefault": True,
-                },
-                {
-                    "id": "addr_company_office_02",
-                    "receiverName": "张先生 (公司)",
-                    "receiverPhone": "138****8899",
-                    "fullAddress": "北京市朝阳区酒仙桥路恒通商务园B8栋5层",
-                    "tag": "company",
-                    "isDefault": False,
-                },
-            ],
-        }
+        # 终点诚实空(2026-09-12):旧「张先生/中关村」高保真假地址兜底退役 ——
+        # 查无/库不可达是合法真实态,严禁虚构地址顶替(real-data-only/01)。
+        return {"total": 0, "userId": effective_user_id or "current_user", "addresses": []}
 
     @staticmethod
     async def save_user_address(params: dict) -> dict:
@@ -296,11 +276,13 @@ class MallDomainService:
                     "isDefault": bool(params.get("isDefault")),
                 }
         except Exception as err:
-            print(f"[MallDomainService.saveUserAddress] Database insert fallback: {err}")
+            # 写库失败如实失败(2026-09-12):旧兜底假成功 + addr_mock_ 假 ID ——
+            # 用户以为保存成功实际未落库,比假数据更糟(real-data-only/01)。
+            print(f"[MallDomainService.saveUserAddress] Database insert failed: {err}")
             return {
-                "success": True,
-                "message": "收货地址已登记",
-                "addressId": f"addr_mock_{int(time.time() * 1000)}",
+                "success": False,
+                "message": "收货地址保存失败，请稍后重试或联系人工客服。",
+                "addressId": None,
                 "fullAddress": full_address,
                 "tag": params.get("tag") or "home",
                 "isDefault": bool(params.get("isDefault")),
@@ -308,12 +290,55 @@ class MallDomainService:
 
     @staticmethod
     async def query_product_skus(params: dict) -> dict:
-        """2. 查询商品多规格 SKU 与物理库存。"""
+        """2. 查询商品多规格 SKU 与物理库存。
+
+        降级链(2026-09-12,real-data-only/01):商户真货架(merchant_skus×
+        merchant_spus)优先 → engine 本地 product_skus → 诚实空。商户库可达
+        但查无必须诚实空,严禁假 SKU 目录顶替(旧 AJ1 三件套已拆)。
+        """
         business_id = params.get("businessId")
         if not business_id and params.get("threadId"):
             ctx = await OrderDomainService.get_thread_session_context(params["threadId"])
             if ctx["businessId"]:
                 business_id = ctx["businessId"]
+
+        product_id = params.get("productId")
+        sku_code = params.get("skuCode")
+
+        # 1) 商户真货架:spu_code 精确命中或 title 子串解析(导购候选名直达规格)
+        if product_id or sku_code:
+            try:
+                async with order_domain._merchant_reader_engine().connect() as mconn:
+                    rows = (
+                        (
+                            await mconn.execute(
+                                text(
+                                    'SELECT sk.id, sk.sku_code AS "skuCode", sp.title AS "productName", '
+                                    "sk.spec_attributes AS \"specAttributes\", sk.price, sk.stock, "
+                                    'COALESCE(sk.image_url, sp.main_image) AS "imageUrl", sp.status '
+                                    "FROM merchant_skus sk JOIN merchant_spus sp ON sk.spu_id = sp.id "
+                                    "WHERE sp.status = 'ON_SALE' AND ("
+                                    "(CAST(:pid AS TEXT) IS NOT NULL AND (sp.spu_code = :pid OR sp.title ILIKE CAST(:ptitle AS TEXT))) "
+                                    "OR (CAST(:sku AS TEXT) IS NOT NULL AND sk.sku_code = :sku)) "
+                                    "AND (CAST(:in_stock_only AS INT) = 0 OR sk.stock > 0) "
+                                    "ORDER BY sk.price ASC LIMIT 20"
+                                ).bindparams(
+                                    pid=product_id,
+                                    ptitle=f"%{product_id}%" if product_id else None,
+                                    sku=sku_code,
+                                    in_stock_only=1 if params.get("inStockOnly") else 0,
+                                )
+                            )
+                        )
+                        .mappings()
+                        .all()
+                    )
+                if rows:
+                    return MallDomainService._sku_rows_to_payload([dict(r) for r in rows], product_id, params)
+                # 商户库可达但查无 → 诚实空,不落本地演示目录
+                return {"total": 0, "productId": product_id, "skus": []}
+            except Exception as err:
+                print(f"[MallDomainService.queryProductSkus] Merchant shelf unavailable, degrading: {err}")
 
         try:
             conditions: list[str] = []
@@ -349,84 +374,51 @@ class MallDomainService:
                 )
 
                 rows = [dict(r) for r in rows]
-                if params.get("color") or params.get("size"):
-
-                    def _matches(r: dict) -> bool:
-                        spec = r.get("specAttributes") or {}
-                        match = True
-                        if params.get("color") and spec.get("color"):
-                            match = match and (
-                                params["color"] in spec["color"] or spec["color"] in params["color"]
-                            )
-                        if params.get("size") and spec.get("size"):
-                            match = match and (
-                                params["size"] in str(spec["size"]) or str(spec["size"]) in params["size"]
-                            )
-                        return match
-
-                    rows = [r for r in rows if _matches(r)]
 
                 if rows:
-                    return {
-                        "total": len(rows),
-                        "productId": params.get("productId"),
-                        "skus": [
-                            {
-                                "skuId": str(r["id"]),
-                                "skuCode": r["skuCode"],
-                                "productName": r.get("productName"),
-                                "specs": r.get("specAttributes"),
-                                "price": f"¥{float(r['price']):.2f}",
-                                "stock": r["stock"],
-                                "inStock": (r["stock"] or 0) > 0,
-                                "status": r["status"],
-                                "imageUrl": r.get("imageUrl"),
-                            }
-                            for r in rows
-                        ],
-                    }
+                    return MallDomainService._sku_rows_to_payload(rows, params.get("productId"), params)
         except Exception as err:
             print(f"[MallDomainService.queryProductSkus] Error querying SKUs: {err}")
 
-        mock_skus = [
-            {
-                "skuId": "sku_nike_aj1_blk_42",
-                "skuCode": "NK-AJ1-001-42",
-                "productName": "Air Jordan 1 Retro High OG",
-                "specs": {"color": "黑白芝加哥", "size": "42", "version": "高帮经典款"},
-                "price": "¥1299.00",
-                "stock": 15,
-                "inStock": True,
-                "status": "active",
-                "imageUrl": "/products/aj1_black.png",
-            },
-            {
-                "skuId": "sku_nike_aj1_blk_425",
-                "skuCode": "NK-AJ1-001-425",
-                "productName": "Air Jordan 1 Retro High OG",
-                "specs": {"color": "黑白芝加哥", "size": "42.5", "version": "高帮经典款"},
-                "price": "¥1299.00",
-                "stock": 8,
-                "inStock": True,
-                "status": "active",
-                "imageUrl": "/products/aj1_black.png",
-            },
-            {
-                "skuId": "sku_nike_aj1_red_43",
-                "skuCode": "NK-AJ1-002-43",
-                "productName": "Air Jordan 1 Retro High OG",
-                "specs": {"color": "公牛红", "size": "43", "version": "高帮经典款"},
-                "price": "¥1399.00",
-                "stock": 0,
-                "inStock": False,
-                "status": "out_of_stock",
-                "imageUrl": "/products/aj1_red.png",
-            },
-        ]
+        # 终点诚实空(2026-09-12):旧 AJ1 假 SKU 目录整体退役 —— 查无/库不可达
+        # 是合法真实态,严禁硬编码目录顶替(real-data-only/01)。
+        return {"total": 0, "productId": params.get("productId"), "skus": []}
+
+    @staticmethod
+    def _sku_rows_to_payload(rows: list[dict], product_id: str | None, params: dict) -> dict:
+        """SKU 行 → 出参载荷(商户/本地两路共用,契约键零漂移)。
+
+        skuId 取值:商户路径为 sku_code(与导购候选 id=spu_code、网关加购
+        同一业务标识);本地回退路径为行 UUID(历史形态)。键名两路一致。"""
+        if params.get("color") or params.get("size"):
+
+            def _matches(r: dict) -> bool:
+                spec = r.get("specAttributes") or {}
+                match = True
+                if params.get("color") and spec.get("color"):
+                    match = match and (params["color"] in spec["color"] or spec["color"] in params["color"])
+                if params.get("size") and spec.get("size"):
+                    match = match and (params["size"] in str(spec["size"]) or str(spec["size"]) in params["size"])
+                return match
+
+            rows = [r for r in rows if _matches(r)]
         return {
-            "total": len(mock_skus),
-            "productId": params.get("productId") or "prod_nike_air_jordan_1",
-            "skus": mock_skus,
+            "total": len(rows),
+            "productId": product_id,
+            "skus": [
+                {
+                    "skuId": str(r.get("skuCode") or r["id"]),
+                    "skuCode": r["skuCode"],
+                    "productName": r.get("productName"),
+                    "specs": r.get("specAttributes"),
+                    "price": f"¥{float(r['price']):.2f}",
+                    "stock": r["stock"],
+                    "inStock": (r["stock"] or 0) > 0,
+                    "status": r.get("status"),
+                    "imageUrl": r.get("imageUrl"),
+                }
+                for r in rows
+            ],
         }
 
     @staticmethod
@@ -1125,7 +1117,15 @@ class MallDomainService:
         sku_id = params["skuId"]
         quantity = params.get("quantity") or 1
         title = params.get("title") or "精选商品"
-        price = params.get("price") if params.get("price") is not None else 899.0
+        # 无价不入车(2026-09-12):旧兜底 899.0 恰为已拆除的 Pegasus 假商品价 ——
+        # 编造价格会污染购物车总额,缺参必须如实拒绝(real-data-only/01)。
+        if params.get("price") is None:
+            return {
+                "success": False,
+                "message": "未能确定该商品的价格，无法加入购物车。请重新选择商品后再试。",
+                "lastModifiedItemId": None,
+            }
+        price = params.get("price")
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
 
         items = (await MallDomainService._load_cart(cart_key)) or []
@@ -1170,15 +1170,10 @@ class MallDomainService:
     @staticmethod
     async def get_cart_summary(params: dict) -> dict:
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
-        items = (await MallDomainService._load_cart(cart_key)) or [
-            {
-                "skuId": "sku_nike_aj1_blk_425",
-                "title": "Air Jordan 1 Retro High OG (42.5码 / 黑白芝加哥)",
-                "price": 1299.0,
-                "quantity": 1,
-                "spec": "颜色: 黑白芝加哥 | 尺码: 42.5",
-            }
-        ]
+        # 空车诚实空(2026-09-12):旧 `or [AJ1 演示车]` 兜底有两层欺骗 —— 空车是
+        # 合法真实态被顶替,且 [] 是 falsy,清空购物车后查看必现幻影 AJ1
+        # (real-data-only/01 实测 100% 复现)。
+        items = (await MallDomainService._load_cart(cart_key)) or []
         total_amount = sum(i["price"] * i["quantity"] for i in items)
         estimated_discount = 100 if total_amount >= 1000 else 0
         return {

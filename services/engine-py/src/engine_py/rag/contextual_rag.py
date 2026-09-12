@@ -86,48 +86,6 @@ def _parse_embedding(raw) -> list[float] | None:
         return None
 
 
-# 仅 _search_local_fake_docs 离线兜底(PG 不可用时镜像 TS 基线三条演示切片)使用;
-# 自愈播种(_ensure_seed_data)自 2026-09-09 起同源读 docs/knowledge/*.md,不再回退此处
-SEED_DOCS = [
-    {
-        "businessId": "ecommerce",
-        "chunkText": "对于我们电商主站的订单，普通用户享有自签收之日起 7 天无理由退换货权益。退回的商品必须保持吊牌完整、未拆封且不影响二次销售。非质量问题的退货由买家自行承担寄回运费。",
-        "contextualSummary": "这段切片描述了电商主站（ecommerce）标准 7 天无理由退换货的前提条件与退货运费归属政策。",
-        "category": "refund_policy",
-    },
-    {
-        "businessId": "nike",
-        "chunkText": "Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。",
-        "contextualSummary": "这段切片详细说明了 Nike 会员尊享的 30 天无损无理由退货、已拆吊牌退货政策以及顺丰寄回服务。",
-        "category": "refund_policy",
-    },
-    {
-        "businessId": "adidas",
-        "chunkText": "Adidas 支持签收后 14 天退换货。所有商品必须保留原始包装盒与防伪扣，试穿时请勿弄脏鞋底。退货需要通过官方微信小程序预约快递员上门取件，不支持自行寄送。",
-        "contextualSummary": "这段切片详细规定了 Adidas 的 14 天退换货时效、原始防伪包装要求，以及微信小程序预约取件的硬性物流约束。",
-        "category": "refund_policy",
-    },
-    {
-        "businessId": "nike",
-        "chunkText": "Nike 官方鞋码对照与版型建议：Pegasus 飞马系列跑鞋版型紧凑、足弓包裹感极强。常规脚型建议选择比正装皮鞋大半码；高足弓或宽脚掌用户，强烈建议购买大一码（例如平时穿42码，建议选42.5码或43码），否则易出现脚趾顶红或严重的侧向挤压感。",
-        "contextualSummary": "这段切片详细规定了 Nike 运动鞋（特别是飞马系列跑鞋）的鞋码对照和版型偏小的尺码升级建议。",
-        "category": "size_chart",
-    },
-    {
-        "businessId": "adidas",
-        "chunkText": "Adidas 服饰尺码指南：Adidas 户外运动夹克、卫衣与连帽衫整体采用欧美版型剪裁，版型偏向宽松和落肩、Oversized 风格。如果您平时穿着 L 码（适合175cm-180cm），且偏好贴身或标准挺拔版型，建议选择比常规尺码小一号（即 M 码）。",
-        "category": "size_chart",
-        "contextualSummary": "这段切片详细规定了 Adidas 衣服欧版偏宽松落肩的设计特征及建议买小一码的尺码指南。",
-    },
-    {
-        "businessId": "ecommerce",
-        "chunkText": "电商主站常规服饰尺码：通用针织衫、纯棉打底衫尺码为标准中国国标码。M 码适合身高 170cm 左右，L 码适合身高 175cm 左右，XL 码适合身高 180cm 左右。因纯棉材质存在正常 1.5% 的缩水率，建议身高卡在边缘或体型微胖的用户选择大一码。",
-        "category": "size_chart",
-        "contextualSummary": "这段切片规定了电商主站针织衫等标准国标尺码对照，以及考虑纯棉缩水率后的微胖大一码推荐。",
-    },
-]
-
-
 class ContextualRAG:
     def __init__(self, business_id: str) -> None:
         self.business_id = business_id
@@ -199,8 +157,11 @@ class ContextualRAG:
                     .all()
                 )
         except Exception as db_err:
-            print(f"[RAG] PostgreSQL query failed, falling back to Local Fake RAG: {db_err}")
-            return self._search_local_fake_docs(query)
+            # 库失败诚实空(2026-09-12):旧「Local Fake RAG」演示切片兜底退役,
+            # 假相似度(0.35/0.65/0.55 关键词拍数)一并拆除 —— RAG 检索终点只有
+            # 真实结果或空,与嵌入失败降级同标准(real-data-only/01)。
+            print(f"[RAG] PostgreSQL query failed, returning honest empty: {db_err}")
+            return []
 
         doc_embeddings: dict[str, float] = {}
         docs_with_tokens: list[dict] = []
@@ -270,36 +231,3 @@ class ContextualRAG:
 
         scored_docs.sort(key=lambda doc: rrf_scores.get(doc["id"], 0), reverse=True)
         return scored_docs[:limit]
-
-    def _search_local_fake_docs(self, query: str) -> list[dict]:
-        """离线高保真兜底(与 TS 版三条演示切片一致)。"""
-        fake_data = SEED_DOCS[:3]
-        fake_ids = ["fake_rag_1", "fake_rag_2", "fake_rag_3"]
-        filtered = []
-        for doc, fake_id in zip(fake_data, fake_ids):
-            if doc["businessId"] != self.business_id:
-                continue
-            filtered.append({"id": fake_id, **doc})
-
-        docs_with_tokens = [
-            {"id": d["id"], "tokens": tokenize(f"{d.get('contextualSummary') or ''} {d['chunkText']}")}
-            for d in filtered
-        ]
-        bm25_scores = compute_bm25(query, docs_with_tokens)
-
-        query_lower = query.lower()
-        results = []
-        for d in filtered:
-            bm25_score = bm25_scores.get(d["id"], 0)
-            normalized_bm25 = bm25_score / (bm25_score + 1)
-            simulated_vector_similarity = 0.35
-            if self.business_id.lower() in query_lower:
-                simulated_vector_similarity = 0.65
-            elif any(kw in query_lower for kw in ("退", "refund", "return", "换货")):
-                simulated_vector_similarity = 0.55
-            hybrid_score = simulated_vector_similarity * 0.8 + normalized_bm25 * 0.2
-            results.append({**d, "similarity": hybrid_score})
-
-        results = [r for r in results if r["similarity"] >= 0.4]
-        results.sort(key=lambda r: r["similarity"], reverse=True)
-        return results[:2]

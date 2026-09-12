@@ -67,6 +67,23 @@ class CartManageSkill(BaseSkill):
         r"第[一二三四五12345两几][件款个双]|要第|删除|移除|删掉|清空|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+)"
     )
 
+    @staticmethod
+    def _add_rejected_response(
+        add_res: dict, guide_context: dict | None, existing_cart: dict | None
+    ) -> dict | None:
+        """入车被服务层拒绝(缺价等)时如实回传,不播报成功卡 —— skill 层
+        success 语义是「技能处理完成」:业务失败经 output 文案如实送达用户
+        (2026-09-12 real-data-only/01:宁可追问,不可编造)。非拒绝返回 None。"""
+        if add_res.get("success"):
+            return None
+        return {
+            "success": True,
+            "skillId": CartManageSkill.metadata["id"],
+            "output": add_res.get("message") or "该商品暂时无法加入购物车，请稍后再试。",
+            "nextAction": "finish",
+            "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+        }
+
     def can_handle(self, context: dict) -> bool:
         if super().can_handle(context):
             return True
@@ -323,7 +340,9 @@ class CartManageSkill(BaseSkill):
         slots = context.get("slots") or {}
         target_sku_id = slots.get("skuId") or slots.get("productId") or ""
         target_title = "精选推荐商品"
-        target_price = 899.0
+        # 无价不编价(2026-09-12):旧初始化 899.0 恰为已拆除的 Pegasus 假商品价,
+        # 服务层对缺价拒绝入车 —— 技能层同原则透传真价,价格未知保持 None。
+        target_price: float | None = None
 
         candidate_products = guide_context.get("candidateProducts") or []
         candidate_list = guide_context.get("candidateProductIds") or []
@@ -393,11 +412,14 @@ class CartManageSkill(BaseSkill):
                         "skuId": prod["id"],
                         "quantity": per_qty,
                         "title": prod.get("name") or "精选推荐商品",
-                        "price": prod.get("price") or 0,
+                        "price": prod.get("price"),
                         "userId": context.get("userId"),
                         "threadId": context.get("threadId"),
                     }
                 )
+                rejected = self._add_rejected_response(add_res, guide_context, existing_cart)
+                if rejected:
+                    return rejected
                 updated_cart = add_res.get("cart") or {}
             added_titles = "、".join(str(p.get("name") or p["id"]) for p in new_products)
             card = {
@@ -461,7 +483,7 @@ class CartManageSkill(BaseSkill):
                 prod = candidate_products[target_index]
                 target_sku_id = prod["id"]
                 target_title = prod["name"]
-                target_price = prod.get("price") or 899.0
+                target_price = prod.get("price")
             elif target_index < len(candidate_list):
                 target_sku_id = candidate_list[target_index]
                 target_title = f"推荐商品 #{target_index + 1} ({target_sku_id})"
@@ -471,7 +493,7 @@ class CartManageSkill(BaseSkill):
                 prod = candidate_products[0]
                 target_sku_id = prod["id"]
                 target_title = prod["name"]
-                target_price = prod.get("price") or 899.0
+                target_price = prod.get("price")
             elif candidate_list:
                 target_sku_id = candidate_list[0]
                 target_title = f"推荐商品 #1 ({target_sku_id})"
@@ -535,6 +557,9 @@ class CartManageSkill(BaseSkill):
                 "threadId": context.get("threadId"),
             }
         )
+        rejected = self._add_rejected_response(add_res, guide_context, existing_cart)
+        if rejected:
+            return rejected
         updated_cart = add_res.get("cart") or {}
 
         card = {

@@ -41,130 +41,13 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
           if (res.success && res.data?.messages && res.data.messages.length > 0) {
             setMessages(res.data.messages);
           } else {
-            // 根据当前会话意图构建高质量结构化回放演示数据
-            const defaultMsgs: MessageItem[] = [
-              {
-                id: 'msg_u_01',
-                role: 'user',
-                content: conversation.lastMessage || '请帮我处理一下订单问题',
-                timestamp: conversation.updatedAt,
-              },
-              {
-                id: 'msg_a_01',
-                role: 'assistant',
-                content:
-                  conversation.intent === 'order_refund'
-                    ? '已为您发起售后退款流程，正在核对退款金额与时效合规门禁...'
-                    : conversation.intent === 'order_status'
-                      ? '为您查询到最新物流履约进展，包裹已发出并正在快速配送中。'
-                      : '已为您查询到相关商品现货库存与详细规格参数，请您确认。',
-                thoughtSteps: [
-                  {
-                    step: 'Intent Classification (TriageNode)',
-                    status: 'completed',
-                    detail: `识别意图: [${conversation.intent}], 置信度: 0.985`,
-                  },
-                  {
-                    step: 'Planner & SOP Assembly',
-                    status: 'completed',
-                    detail: `装配商户 [${conversation.businessId.toUpperCase()}] 专属业务 SOP 策略`,
-                  },
-                  {
-                    step: 'Tool Execution & Guardrails',
-                    status: 'completed',
-                    detail:
-                      conversation.status === 'waiting_approval'
-                        ? '触发风控金额审批门禁，执行挂起并通知人工审核'
-                        : '执行沙箱工具调用并校验数据返回完整性',
-                  },
-                ],
-                toolCalls:
-                  conversation.intent === 'order_refund'
-                    ? [
-                        {
-                          name: 'processRefund',
-                          args: {
-                            orderId: 'ORD-2026-9901',
-                            amount: 500,
-                            reason: '尺码不合申请退货退款',
-                          },
-                          result: {
-                            status:
-                              conversation.status === 'waiting_approval' ? 'suspended_pending_approval' : 'success',
-                            approvalId: 'appr_auto_9021',
-                          },
-                        },
-                      ]
-                    : conversation.intent === 'order_status'
-                      ? [
-                          {
-                            name: 'getOrderStatus',
-                            args: { orderId: 'ORD-2026-11094' },
-                            result: {
-                              status: 'in_transit',
-                              carrier: '顺丰速运',
-                              trackingNumber: 'SF10992381029',
-                            },
-                          },
-                        ]
-                      : undefined,
-                cards:
-                  conversation.intent === 'order_status'
-                    ? [
-                        {
-                          type: 'tracking_timeline',
-                          data: {
-                            trackingNumber: 'SF10992381029',
-                            carrier: '顺丰特快',
-                            currentStatus: '运输中 - 派送中',
-                            timeline: [
-                              {
-                                time: '2026-02-23 08:30',
-                                location: '上海转运中心',
-                                description: '快件已到达【上海转运中心】，正在分拣中',
-                                status: 'in_transit',
-                              },
-                              {
-                                time: '2026-02-23 14:15',
-                                location: '徐汇区派送部',
-                                description: '快递员【张师傅】正在为您派送中',
-                                status: 'in_transit',
-                              },
-                            ],
-                          },
-                        },
-                      ]
-                    : conversation.intent === 'order_refund'
-                      ? [
-                          {
-                            type: 'refund_confirmation',
-                            data: {
-                              orderId: 'ORD-2026-9901',
-                              refundAmount: 500,
-                              currency: 'CNY',
-                              refundReason: '超额售后退款申请',
-                              refundMethod: '原路退回至微信支付账户',
-                              status: conversation.status === 'waiting_approval' ? 'submitted' : 'approved',
-                              requiresApproval: conversation.status === 'waiting_approval',
-                            },
-                          },
-                        ]
-                      : undefined,
-                timestamp: conversation.updatedAt,
-              },
-            ];
-            setMessages(defaultMsgs);
+            // 时间线为空是合法真实态:渲染空态,严禁合成演示对话
+            // (2026-09-12 real-data-only/01:假思维链/假置信度/假单号整体退役)
+            setMessages([]);
           }
         })
         .catch(() => {
-          setMessages([
-            {
-              id: 'msg_u_default',
-              role: 'user',
-              content: conversation.lastMessage || '用户咨询内容',
-              timestamp: conversation.updatedAt,
-            },
-          ]);
+          setMessages([]);
         })
         .finally(() => {
           setIsLoadingMessages(false);

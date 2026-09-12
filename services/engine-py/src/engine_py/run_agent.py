@@ -212,7 +212,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         # 用户行归网关持久化(005 治理):旁路只落问候 assistant 行(带入口卡)
         await short_memory.add_message("assistant", greeting_text, cards=greeting_cards)
 
-        mock_result = {
+        greeting_result = {
             "output": greeting_text,
             "cards": greeting_cards,
             "taskPlan": {
@@ -234,12 +234,12 @@ async def run_agent(job: AgentJobInput) -> dict:
                 job_id,
                 "极速通道：已秒级识别您所发送的日常打招呼，为您载入高画质欢迎界面...",
                 node="triage",
-                plan=mock_result["taskPlan"],
+                plan=greeting_result["taskPlan"],
             )
             await asyncio.sleep(0.1)
-            await emit_job_result(job_id, greeting_text, mock_result["taskPlan"], greeting_cards)
+            await emit_job_result(job_id, greeting_text, greeting_result["taskPlan"], greeting_cards)
 
-        return mock_result
+        return greeting_result
 
     # 2. 🔍 三路 RAG 与记忆检索(文本过短时跳过,节省 1.5s+ 首字延迟)
     long_facts: list = []
