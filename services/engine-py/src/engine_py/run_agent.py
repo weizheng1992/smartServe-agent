@@ -458,16 +458,18 @@ async def run_agent(job: AgentJobInput) -> dict:
     except Exception as metrics_err:
         print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
 
-    # 🗂️ 富媒体卡片合成(已有卡片优先)
-    synthesized_cards = CardSynthesizer.synthesize_cards(
+    # 🗂️ 富媒体卡片合成(ADR-0001:场景化快捷回复;域卡片优先作基座,
+    # 场景组统一追加;购物轮实查真货架品类喂 chips,不可达诚实空)
+    shelf_categories = await CardSynthesizer.fetch_shelf_categories(result.get("intents"), thread_id)
+    final_cards = CardSynthesizer.synthesize_cards(
         {
             "taskPlan": result.get("task_plan"),
             "intents": result.get("intents"),
             "damageAssessment": result.get("damage_assessment"),
+            "existingCards": result.get("cards") or [],
+            "shelfCategories": shelf_categories,
         }
     )
-    existing_cards = result.get("cards") or []
-    final_cards = existing_cards if existing_cards else synthesized_cards
 
     # 助手回复回写三路记忆(回复已产出,持久化失败不阻断交付)
     if result.get("output"):

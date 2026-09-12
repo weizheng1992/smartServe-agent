@@ -77,6 +77,30 @@ def _merchant_row_to_order(row) -> dict:
     }
 
 
+# 发货状态过滤(ADR-0001 Q2):「查询未发货的订单」快捷按钮的能力兜底。
+# UNSHIPPED = 仍在等待出货 —— 排除 shipped/delivered/refunded/cancelled:
+# 退款/取消单永不出货,算「未发货」会误导用户以为还有包裹在路上
+# (2026-09-12 实弹修正:CUST-8801 两笔 REFUNDED 单曾被算成未发货)。
+# 两路查单走同一纯函数,严禁语义漂移(2.6.8「两路永不漂移」先例)。
+_SHIPPING_FILTER_KEYS = ("UNSHIPPED", "SHIPPED", "DELIVERED")
+_UNSHIPPED_EXCLUDE = ("shipped", "delivered", "refunded", "cancelled")
+
+
+def _apply_shipping_filter(rows: list[dict], shipping_status: str | None) -> list[dict]:
+    """发货状态纯函数过滤;存储值大小写不敏感。过滤值合法性由调用方前置校验。"""
+    if not shipping_status:
+        return rows
+    key = str(shipping_status).upper()
+
+    def _keep(raw_status: object) -> bool:
+        s = str(raw_status or "").lower()
+        if key == "UNSHIPPED":
+            return s not in _UNSHIPPED_EXCLUDE
+        return s == key.lower()
+
+    return [r for r in rows if _keep(r.get("status"))]
+
+
 async def _list_merchant_orders(user_id: str) -> list[dict] | None:
     """商户库查单;库不可达返回 None 供调用方降级 engine 本地表。"""
     if not user_id:
@@ -613,12 +637,24 @@ class OrderDomainService:
             return {"error": "Failed to create order in database."}
 
     @staticmethod
-    async def list_user_orders(thread_id: str | None = None, user_id: str | None = None, business_id: str | None = None) -> dict:
+    async def list_user_orders(
+        thread_id: str | None = None,
+        user_id: str | None = None,
+        business_id: str | None = None,
+        shipping_status: str | None = None,
+    ) -> dict:
         """历史订单列表:商户门户真单优先(agent_merchant.merchant_orders),engine 本地表兜底。
 
         2026-09-05 起:与商户门户"我的订单"列表页同源,严格按当前用户归属匹配;
         不再回退 CUST-8801 演示单,也不再空结果自愈注入虚构订单。
+        2026-09-12 起:支持发货状态过滤(ADR-0001 Q2)——UNSHIPPED/SHIPPED/
+        DELIVERED,非法值诚实报错,严禁静默全量。
         """
+        if shipping_status and str(shipping_status).upper() not in _SHIPPING_FILTER_KEYS:
+            return {
+                "error": f"未知的发货状态过滤值: {shipping_status}(仅支持 {'/'.join(_SHIPPING_FILTER_KEYS)})"
+            }
+
         target_user_id = user_id
         target_business_id = business_id
         if (not target_user_id or not target_business_id) and thread_id:
@@ -633,7 +669,7 @@ class OrderDomainService:
         # 1) 商户门户真单 —— 与列表页同源,严格归属匹配;库不可达(None)时静默降级
         merchant_orders = await _list_merchant_orders(target_user_id or "")
         if merchant_orders:
-            return {"orders": merchant_orders}
+            return {"orders": _apply_shipping_filter(merchant_orders, shipping_status)}
 
         # 2) engine 本地表兜底(非商户租户演示单,或商户库离线)
         if target_user_id:
@@ -656,7 +692,9 @@ class OrderDomainService:
                         .all()
                     )
                     if rows:
-                        return {"orders": [dict(row) for row in rows]}
+                        return {
+                            "orders": _apply_shipping_filter([dict(row) for row in rows], shipping_status)
+                        }
             except Exception as err:
                 print(f"[OrderDomainService.listUserOrders] Failed: {err}")
                 return {"error": "Failed to retrieve orders from database."}

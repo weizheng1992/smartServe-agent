@@ -2,6 +2,20 @@
 
 This document serves as the single source of truth for domain vocabulary and module shapes across the codebase.
 
+## Chat Cards & Quick Replies Subsystem (engine-py)
+
+### CardSynthesizer (`services/engine-py/src/engine_py/cards/card_synthesizer.py`)
+
+The card assembly layer that turns finished graph state into rich card payloads (ADR-0001):
+
+- **Scene-Conditional Quick Replies (`场景组`)**: Every reply carries ONE `quick_replies` capsule chosen by the turn's classified intents — refund scene (`refund`/`order_return`), category chips from the live merchant shelf (`shopping_guide`), or the default generic set. Every button must be backed by a real capability (**死按钮禁令** — the data-honesty iron rule extended to UI interactions); hot-selling wording (`热销/卖得好/爆款`) is forbidden since the merchant shelf has no sales column.
+- **Base Precedence & First-Wins**: Domain cards emitted by skills win as the base; skill-authored quick_replies (e.g. damage-photo disambiguation) are kept verbatim and suppress the scene capsule (never two capsules per screen); product_ranking cards always get the metric-disambiguation set.
+- **`fetch_shelf_categories`**: Guide-turn-only live shelf overview; zero DB queries on other turns; honest-empty (falls back to the generic set) on failure — never a static fake catalog.
+
+### Shipping-Status Order Filter (`services/engine-py/src/engine_py/tools_registry/order_domain.py`)
+
+`list_user_orders(shipping_status)` — `UNSHIPPED` = still awaiting shipment (excludes shipped/delivered/refunded/cancelled), `SHIPPED`, `DELIVERED`; case-insensitive; invalid values error honestly instead of silently returning everything. Both order sources (merchant real orders / engine local table) share one pure filter (`_apply_shipping_filter`) so the two paths can never drift.
+
 ## Execution & Gatekeeping Subsystem
 
 ### ApprovalGatekeeper (`packages/engine/src/approval/approvalGatekeeper.ts`)

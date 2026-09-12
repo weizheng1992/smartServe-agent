@@ -8,6 +8,60 @@ from typing import Any
 
 _AMOUNT_STRIP_RE = re.compile(r"[^0-9.]")
 
+# ── 场景化快捷回复(ADR-0001,2026-09-12)───────────────────────────────
+# 每个按钮背后必须有真实能力兜底(死按钮禁令 = 2.6.8 数据诚实铁律延伸到
+# UI 交互层);文案严禁「热销/卖得好/爆款」——商户货架无销量列。
+# 场景键为意图 id(呈现层自有,意图注册表零改动,ADR-0001 Q6=A)。
+_SCENE_REFUND_INTENTS = frozenset({"refund", "order_return"})
+_GUIDE_INTENT = "shopping_guide"
+
+
+def _intent_ids(intents: list[dict] | None) -> set[str]:
+    """本轮已分类意图 id 集(state.intents 条目形如 {"intent": ..., "confidence": ...})。"""
+    return {it.get("intent") for it in (intents or []) if isinstance(it, dict)}
+
+_QUICK_REPLY_SETS: dict[str, list[dict]] = {
+    # 退款/售后场景(ADR-0001 Q2):用户已在退款流程,「申请退款」撤下;
+    # 「查询未发货的订单」由 list_user_orders 的 shippingStatus 过滤兜底。
+    "refund": [
+        {"label": "🧾 查询最近的订单", "action": "send_message", "payload": {"text": "查询我最近的订单"}},
+        {"label": "🚚 查询未发货的订单", "action": "send_message", "payload": {"text": "查询我未发货的订单"}},
+        {"label": "📷 上传商品瑕疵照片", "action": "trigger_upload", "payload": {"prompt": "上传商品照片核验"}},
+        {"label": "🎧 呼叫人工客服", "action": "send_message", "payload": {"text": "转人工"}},
+    ],
+    # 兜底通用组(ADR-0001 Q5):旧「查询物流进度」并入订单查询——同一意图
+    # 同一出口,订单回复自带物流/时间线,不留两个按钮挤一个门。
+    "default": [
+        {"label": "📦 查询我的订单", "action": "send_message", "payload": {"text": "查询我最近的订单"}},
+        {"label": "🛍️ 逛逛商城", "action": "send_message", "payload": {"text": "看看商城有什么商品"}},
+        {"label": "💰 申请退款", "action": "send_message", "payload": {"text": "我想申请退款"}},
+        {"label": "🎧 呼叫人工客服", "action": "send_message", "payload": {"text": "转人工"}},
+    ],
+}
+
+
+def _scene_quick_replies(options: dict) -> dict:
+    """按本轮已分类意图挑场景组(ADR-0001 Q1);品类 chips 只认真货架盘点
+    数据,盘点空退通用组,严禁编造品类(ADR-0001 Q3)。"""
+    intent_ids = _intent_ids(options.get("intents"))
+    if intent_ids & _SCENE_REFUND_INTENTS:
+        return {"title": "您可能需要：", "options": list(_QUICK_REPLY_SETS["refund"])}
+    if _GUIDE_INTENT in intent_ids:
+        categories = [c for c in (options.get("shelfCategories") or []) if c.get("category")][:6]
+        if categories:
+            return {
+                "title": "在售品类，点按直达：",
+                "options": [
+                    {
+                        "label": f"🏷️ {c['category']}({c.get('spuCount', 0)}款)",
+                        "action": "send_message",
+                        "payload": {"text": f"看看{c['category']}有什么商品"},
+                    }
+                    for c in categories
+                ],
+            }
+    return {"title": "您可能需要：", "options": list(_QUICK_REPLY_SETS["default"])}
+
 
 def _parse_amount(raw: Any) -> float:
     if isinstance(raw, (int, float)):
@@ -21,6 +75,22 @@ def _parse_amount(raw: Any) -> float:
 
 
 class CardSynthesizer:
+    @staticmethod
+    async def fetch_shelf_categories(intents: list[dict] | None, thread_id: str | None = None) -> list[dict]:
+        """购物意图轮实查真货架品类盘点(ADR-0001 Q3,喂给品类 chips)。
+
+        非购物轮零查库;盘点不可达诚实空(该轮不挂品类 chips),严禁静态
+        假目录兜底。运行时模块属性查表,禁导入期绑定(测试桩点)。"""
+        if _GUIDE_INTENT not in _intent_ids(intents):
+            return []
+        from ..tools_registry.mall_domain import MallDomainService
+
+        try:
+            return await MallDomainService.get_shelf_overview()
+        except Exception as err:
+            print(f"[CardSynthesizer] 品类盘点不可达,该轮不挂品类 chips threadId={thread_id}: {err}")
+            return []
+
     @staticmethod
     def synthesize_skeleton_cards(options: dict) -> list[dict]:
         """流式骨架卡片(Streaming Hydration Skeletons)。"""
@@ -270,9 +340,16 @@ class CardSynthesizer:
                     }
                 )
 
-        # 快捷回复胶囊(排行卡优先挂指标消歧组)
-        has_ranking_card = any(c.get("type") == "product_ranking" for c in cards)
-        if has_ranking_card:
+        # 快捷回复胶囊(ADR-0001 Q4):域卡片优先作基座(原 run_agent
+        # short-circuit 语义收编进合成器),排行卡优先挂指标消歧组(2.6.12
+        # 契约),其余按本轮意图出场景组,统一追加在消息尾部。
+        # 技能自带的 quick_replies(如破损照片消歧组)是更具体的场景行:
+        # first-wins 原样保留,严禁一屏两条胶囊。
+        existing_cards = options.get("existingCards") or []
+        base_cards = list(existing_cards) if existing_cards else cards
+        if any(c.get("type") == "quick_replies" for c in base_cards):
+            return base_cards
+        if any(c.get("type") == "product_ranking" for c in base_cards):
             quick_replies = {
                 "title": "您也可以一键切换其他统计口径：",
                 "options": [
@@ -284,14 +361,6 @@ class CardSynthesizer:
                 ],
             }
         else:
-            quick_replies = {
-                "title": "您可能需要：",
-                "options": [
-                    {"label": "📦 查询物流进度", "action": "send_message", "payload": {"text": "帮我查一下最新物流发货进度"}},
-                    {"label": "💰 申请退款服务", "action": "send_message", "payload": {"text": "我想申请退款"}},
-                    {"label": "📷 上传商品瑕疵照片", "action": "trigger_upload", "payload": {"prompt": "上传商品照片核验"}},
-                    {"label": "🎧 呼叫人工客服", "action": "send_message", "payload": {"text": "转人工"}},
-                ],
-            }
-        cards.append({"type": "quick_replies", "data": quick_replies})
-        return cards
+            quick_replies = _scene_quick_replies(options)
+        base_cards.append({"type": "quick_replies", "data": quick_replies})
+        return base_cards

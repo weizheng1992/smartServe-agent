@@ -81,14 +81,20 @@ async def run_agent_state_node(node_name: str, ts_state: dict) -> dict:
     py_state.update({k: v for k, v in updates.items()})
 
     if node_name == "finish":
-        synthesized_cards = CardSynthesizer.synthesize_cards(
+        # ADR-0001:与 run_agent 同一合成接线 —— 域卡片优先作基座、场景化
+        # 快捷回复统一追加、购物轮实查真货架品类;两路严禁漂移(2.6.8 先例)。
+        shelf_categories = await CardSynthesizer.fetch_shelf_categories(
+            py_state.get("intents"), state.get("threadId")
+        )
+        final_cards = CardSynthesizer.synthesize_cards(
             {
                 "taskPlan": py_state.get("task_plan"),
                 "intents": py_state.get("intents"),
                 "damageAssessment": py_state.get("damage_assessment"),
+                "existingCards": py_state.get("cards") or [],
+                "shelfCategories": shelf_categories,
             }
         )
-        final_cards = py_state.get("cards") or synthesized_cards
         py_state["cards"] = final_cards
 
         if py_state.get("output"):

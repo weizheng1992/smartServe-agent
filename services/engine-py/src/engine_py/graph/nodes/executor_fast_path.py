@@ -12,6 +12,8 @@ _PURE_COMMUNICATION_RE = re.compile(
 _COMMUNICATION_ACTION_RE = re.compile(r"(call|invoke|execute|调用|执行)", re.IGNORECASE)
 _DESC_ADDRESS_RE = re.compile(r"with new address\s*([^\n]+)", re.IGNORECASE)
 _INPUT_ADDRESS_RE = re.compile(r"(?:改成|改到|送至|送去|寄到|地址为|地址是)\s*([^,，!！?？\n]+)", re.IGNORECASE)
+# 未发货语义(ADR-0001 Q2):快路径与 LLM 路径同语义,严禁快路径吞过滤
+_UNSHIPPED_RE = re.compile(r"未发货|还没发货|尚未发货")
 
 
 def try_match_executor_fast_path(
@@ -87,7 +89,8 @@ def try_match_executor_fast_path(
         any(kw in desc_lower for kw in ("listuserorders", "list orders", "fetch recent orders", "全部订单", "历史订单", "名下订单"))
         and "listUserOrders" in allowed_tools
     ):
-        return {"toolName": "listUserOrders", "args": {}}
+        unshipped = bool(_UNSHIPPED_RE.search(description) or _UNSHIPPED_RE.search(user_input or ""))
+        return {"toolName": "listUserOrders", "args": {"shippingStatus": "UNSHIPPED"} if unshipped else {}}
 
     if (
         any(kw in desc_lower for kw in ("screenshot", "takescreenshot", "截图", "快照"))

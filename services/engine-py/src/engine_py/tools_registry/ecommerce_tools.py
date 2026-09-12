@@ -24,7 +24,10 @@ async def _process_refund(args: dict):
 
 async def _list_user_orders(args: dict):
     return await OrderDomainService.list_user_orders(
-        args.get("threadId"), args.get("userId"), args.get("businessId") or args.get("tenantId")
+        args.get("threadId"),
+        args.get("userId"),
+        args.get("businessId") or args.get("tenantId"),
+        args.get("shippingStatus"),
     )
 
 
@@ -137,8 +140,21 @@ register_tool(
 register_tool(
     ToolDefinition(
         name="listUserOrders",
-        description="List all recent orders and tracking status for the current customer.",
-        schema={"type": "object", "properties": {}},
+        description=(
+            "List all recent orders and tracking status for the current customer. Supports an "
+            "optional shippingStatus filter: UNSHIPPED (not shipped yet, incl. paid awaiting "
+            "shipment), SHIPPED, DELIVERED."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "shippingStatus": {
+                    "type": "string",
+                    "enum": ["UNSHIPPED", "SHIPPED", "DELIVERED"],
+                    "description": "Optional filter. UNSHIPPED = still awaiting shipment (excludes shipped/delivered/refunded/cancelled).",
+                }
+            },
+        },
         execute=_list_user_orders,
     )
 )
