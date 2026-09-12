@@ -16,6 +16,8 @@ _INPUT_ADDRESS_RE = re.compile(r"(?:改成|改到|送至|送去|寄到|地址为
 _UNSHIPPED_RE = re.compile(r"未发货|还没发货|尚未发货")
 # saveUserAddress 六必需字段(planner 快轨子任务描述以「字段 值、」形态携带)
 _SAVE_ADDR_FIELDS = ("receiverName", "receiverPhone", "province", "city", "district", "detailAddress")
+# 排行指标提取(planner 快轨子任务描述形态:「rankingMetric gmv」)
+_RANKING_METRIC_RE = re.compile(r"rankingMetric\s+([a-z_]+)", re.IGNORECASE)
 
 
 def _save_address_args(description: str) -> dict | None:
@@ -79,6 +81,25 @@ def try_match_executor_fast_path(
         and "getUserAddresses" in allowed_tools
     ):
         return {"toolName": "getUserAddresses", "args": {}}
+
+    # 📊 真实排行确定性映射(遗留二期,2026-09-13):仅认 planner 快轨固定句式
+    # (描述内嵌 rankingMetric N);深规划产出的自由描述可能带 category/limit
+    # 参数,直配会吞参 —— 返回 None 落 LLM 兜底(rule 9 从历史抽参)。
+    if (
+        "queryproductranking" in desc_lower
+        and "rankingmetric" in desc_lower
+        and "queryProductRanking" in allowed_tools
+    ):
+        metric_match = _RANKING_METRIC_RE.search(description)
+        return {
+            "toolName": "queryProductRanking",
+            "args": {"rankingMetric": metric_match.group(1) if metric_match else "volume"},
+        }
+
+    # 🛒 真·聊天下单确定性映射(遗留二期):checkoutCart 子任务直配工具;描述含
+    # "cart" 会命中下方购物车技能分支,必须先行。
+    if "checkoutcart" in desc_lower and "checkoutCart" in allowed_tools:
+        return {"toolName": "checkoutCart", "args": {}}
 
     if (
         any(

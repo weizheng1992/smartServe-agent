@@ -1228,6 +1228,307 @@ class MallDomainService:
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
         return bool(await MallDomainService._load_cart(cart_key))
 
+    # ── 真·聊天下单与订单→购物车桥接(遗留二期,2026-09-13)────────────────
+    # 结算与商城页 create_order_from_cart 同一真账本语义:FOR UPDATE 锁库存、
+    # 校验并扣减、PAID、cost_at_purchase 快照、all-or-nothing(任一行失败整单
+    # 不落)。购物车行是 SPU 粒度(skuId=spu_code,导购目录 id 契约),结算解析
+    # 为该 SPU 当前 ON_SALE 且有库存的最低价 SKU —— 与展示价=MIN(price) 同
+    # 语义,规格在回复中如实展示;skuId 直配 sku_code 时按商城页同源直取。
+
+    @staticmethod
+    async def _default_address_row(user_id: str) -> dict | None:
+        """地址簿默认行(is_default 优先,无则最新一条);表不可达返回 None。"""
+        try:
+            async with get_session() as session:
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT receiver_name, receiver_phone, full_address FROM user_addresses "
+                            "WHERE user_id = :uid ORDER BY is_default DESC, created_at DESC LIMIT 1"
+                        ).bindparams(uid=user_id)
+                    )
+                ).mappings().first()
+                return dict(row) if row else None
+        except Exception as err:
+            print(f"[MallDomain] 地址簿查询失败,按无地址处理: {err}")
+            return None
+
+    @staticmethod
+    async def _resolve_purchasable_sku(conn, *, spu_id: str | None = None, spu_code: str | None = None, sku_code: str | None = None) -> dict | None:
+        """解析当前可购 SKU:sku_code 直配优先,否则 SPU(按 id 或 code)在售
+        且有库存的最低价 SKU;不可售返回 None。"""
+        if sku_code:
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT k.sku_code, k.price, k.stock, k.sku_title, k.spec_attributes, "
+                        "k.cost_price, k.image_url, s.id AS spu_id, s.spu_code AS spu_code, "
+                        "s.title AS spu_title, s.main_image "
+                        "FROM merchant_skus k JOIN merchant_spus s ON s.id = k.spu_id "
+                        "WHERE k.sku_code = :code AND s.status = 'ON_SALE' LIMIT 1"
+                    ).bindparams(code=sku_code)
+                )
+            ).mappings().first()
+            if row:
+                return dict(row)
+        if spu_id or spu_code:
+            # items.spu_id 的事实契约是 spu_code(排行/桥接 join 口径),但历史
+            # 数据两形态并存(UUID 文本/编码)—— 双匹配统一兼容
+            bind = {"sid": str(spu_id or spu_code)}
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT k.sku_code, k.price, k.stock, k.sku_title, k.spec_attributes, "
+                        "k.cost_price, k.image_url, s.id AS spu_id, s.spu_code AS spu_code, "
+                        "s.title AS spu_title, s.main_image "
+                        "FROM merchant_skus k JOIN merchant_spus s ON s.id = k.spu_id "
+                        "WHERE (s.id::text = :sid OR s.spu_code = :sid) "
+                        "AND s.status = 'ON_SALE' AND k.stock > 0 "
+                        "ORDER BY k.price ASC LIMIT 1"
+                    ).bindparams(**bind)
+                )
+            ).mappings().first()
+            if row:
+                return dict(row)
+        return None
+
+    @staticmethod
+    async def checkout_user_cart(params: dict) -> dict:
+        """真·聊天下单:购物车 → 商户真单(遗留二期,2026-09-13)。
+
+        与商城页同一账本:任一行不可售整单不落(all-or-nothing);地址取显式
+        提供 > 地址簿默认 > 诚实追问(严禁假地址兜底,real-data-only/01)。
+        顾客自有资金的下单与商城页同权,不走 HITL。
+        """
+        from . import order_domain as _order_domain
+
+        user_id = params.get("userId")
+        if not user_id and params.get("threadId"):
+            ctx = await _order_domain.OrderDomainService.get_thread_session_context(params["threadId"])
+            user_id = user_id or ctx["userId"]
+        if not user_id:
+            return {"success": False, "message": "未能识别您的身份，无法结算，请稍后重试。"}
+
+        items = (await MallDomainService._load_cart(user_id)) or []
+        if not items:
+            return {
+                "success": False,
+                "message": "购物车还是空的，先挑点商品加入购物车，再来对我说「结算下单」吧！",
+            }
+
+        # 收货地址:显式 > 地址簿默认 > 诚实追问
+        raw_addr = params.get("shippingAddress")
+        addr_dict: dict | None = None
+        if isinstance(raw_addr, dict) and (raw_addr.get("fullAddress") or raw_addr.get("address")):
+            addr_dict = {
+                "recipientName": raw_addr.get("recipientName") or "顾客",
+                "phone": str(raw_addr.get("phone") or ""),
+                "fullAddress": raw_addr.get("fullAddress") or raw_addr.get("address"),
+            }
+        elif isinstance(raw_addr, str) and raw_addr.strip():
+            # 收件人/电话取地址簿默认行真值;顾客口述地址通常只有地址本身,
+            # 缺人名电话时如实占位(与 needsAddress 追问路径同一诚实口径)
+            fallback_row = await MallDomainService._default_address_row(user_id)
+            addr_dict = {
+                "recipientName": (fallback_row or {}).get("receiver_name") or "顾客",
+                "phone": str((fallback_row or {}).get("receiver_phone") or ""),
+                "fullAddress": raw_addr.strip(),
+            }
+        if addr_dict is None:
+            default_row = await MallDomainService._default_address_row(user_id)
+            if default_row:
+                addr_dict = {
+                    "recipientName": default_row["receiver_name"],
+                    "phone": str(default_row["receiver_phone"] or ""),
+                    "fullAddress": default_row["full_address"],
+                }
+            else:
+                return {
+                    "success": False,
+                    "needsAddress": True,
+                    "message": "结算需要收货地址，您的地址簿还是空的。请告诉我收件人姓名、电话和详细地址，我为您创建后再结算。",
+                }
+
+        try:
+            async with _order_domain._merchant_reader_engine().begin() as conn:
+                resolved: list[dict] = []
+                failures: list[str] = []
+                for item in items:
+                    qty = int(item.get("quantity") or 1)
+                    sid = str(item.get("skuId") or "")
+                    sku = await MallDomainService._resolve_purchasable_sku(conn, sku_code=sid)
+                    if sku is None:
+                        sku = await MallDomainService._resolve_purchasable_sku(conn, spu_code=sid)
+                    if sku is None:
+                        failures.append(f"{item.get('title') or sid}：已下架或暂无库存")
+                        continue
+                    if sku["stock"] < qty:
+                        failures.append(f"{sku['spu_title']}（{sku['sku_title']}）：库存不足，仅剩 {sku['stock']} 件")
+                        continue
+                    resolved.append({**sku, "quantity": qty})
+                if failures:
+                    return {
+                        "success": False,
+                        "message": "以下商品无法结算：" + "；".join(failures),
+                        "failures": failures,
+                    }
+
+                # 订单号查重(AURORA-ORD-2026-XXXX 与种子/商城页同格式)
+                order_id = ""
+                for _ in range(6):
+                    candidate = f"AURORA-ORD-2026-{random.randint(1000, 9999)}"
+                    exists = (
+                        await conn.execute(
+                            text("SELECT 1 FROM merchant_orders WHERE order_id = :o").bindparams(o=candidate)
+                        )
+                    ).scalar()
+                    if not exists:
+                        order_id = candidate
+                        break
+                if not order_id:
+                    return {"success": False, "message": "订单号生成冲突，请稍后重试。"}
+
+                total_amount = 0.0
+                line_summaries: list[str] = []
+                # 条件 UPDATE(stock >= qty)原子防超卖:resolve 与扣减之间读
+                # COMMITTED 快照可被并发单改掉,rowcount=0 即并发失利 → 整单不落
+                for r in resolved:
+                    updated = await conn.execute(
+                        text(
+                            "UPDATE merchant_skus SET stock = stock - :qty "
+                            "WHERE sku_code = :code AND stock >= :qty"
+                        ).bindparams(qty=r["quantity"], code=r["sku_code"])
+                    )
+                    if not updated.rowcount:
+                        return {
+                            "success": False,
+                            "message": f"{r['spu_title']}（{r['sku_title'] or '默认规格'}）刚刚被抢购一空，库存不足，请稍后再试。",
+                        }
+                    total_amount += float(r["price"]) * r["quantity"]
+                    line_summaries.append(
+                        f"{r['spu_title']}（{r['sku_title'] or '默认规格'}）x{r['quantity']} ¥{r['price']}"
+                    )
+
+                # 主单先行:items.order_id 对 merchant_orders 有外键
+                await conn.execute(
+                    text(
+                        "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, currency, "
+                        "shipping_address, is_returnable, is_address_modifiable) "
+                        "VALUES (:oid, :cid, 'PAID', :amt, 'CNY', CAST(:addr AS jsonb), TRUE, TRUE)"
+                    ).bindparams(
+                        oid=order_id, cid=user_id, amt=round(total_amount, 2),
+                        addr=json.dumps(addr_dict, ensure_ascii=False),
+                    )
+                )
+                for r in resolved:
+                    spec_summary = " / ".join(
+                        f"{k}:{v}" for k, v in (r.get("spec_attributes") or {}).items()
+                    )
+                    await conn.execute(
+                        text(
+                            "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, "
+                            "quantity, price, image_url, spec_summary, cost_at_purchase) VALUES "
+                            "(:oid, :spu, :code, :t, :st, :qty, :price, :img, :spec, :cost)"
+                        ).bindparams(
+                            oid=order_id, spu=str(r["spu_code"]), code=r["sku_code"], t=r["spu_title"],
+                            st=r["sku_title"] or "", qty=r["quantity"], price=r["price"],
+                            img=r.get("image_url"), spec=spec_summary, cost=r.get("cost_price") or 0,
+                        )
+                    )
+        except Exception as err:
+            print(f"[MallDomain] checkout failed: {err}")
+            return {"success": False, "message": "结算失败，请稍后重试或转人工客服处理。"}
+
+        await MallDomainService._save_cart(user_id, [])
+        return {
+            "success": True,
+            "orderId": order_id,
+            "totalAmount": round(total_amount, 2),
+            "items": line_summaries,
+            "shippingAddress": addr_dict["fullAddress"],
+        }
+
+    @staticmethod
+    async def add_order_item_to_cart(params: dict) -> dict:
+        """订单→购物车桥接(遗留二期,2026-09-13):按关键词在顾客商户真单
+        明细里找买过的商品,解析当前在售最低价 SKU 真实回车。
+
+        零命中/多命中/已下架一律如实回复:多命中列出候选让顾客挑,严禁静默
+        选一个;历史成交价不等于当前售价,入车价必须取当前货架价。
+        """
+        from . import order_domain as _order_domain
+
+        keyword = (params.get("keyword") or "").strip()
+        # 口语量词剥除:「那件冲锋衣/这款背包」→「冲锋衣/背包」,否则 ILIKE 落空
+        keyword = re.sub(r"^(?:那|这|该|此)(?:件|款|个|只|台|条)", "", keyword).strip()
+        user_id = params.get("userId")
+        if not user_id and params.get("threadId"):
+            ctx = await _order_domain.OrderDomainService.get_thread_session_context(params["threadId"])
+            user_id = user_id or ctx["userId"]
+        if not keyword:
+            return {"success": False, "message": "请告诉我想把订单里的哪件商品加入购物车（说出商品名即可）。"}
+        if not user_id:
+            return {"success": False, "message": "未能识别您的身份，请稍后重试。"}
+
+        try:
+            async with _order_domain._merchant_reader_engine().connect() as conn:
+                rows = (
+                    await conn.execute(
+                        text(
+                            "SELECT oi.spu_id, MIN(oi.title) AS title FROM merchant_order_items oi "
+                            "JOIN merchant_orders o ON o.order_id = oi.order_id "
+                            "WHERE o.customer_id = :uid AND o.status NOT IN ('REFUNDED','CANCELLED') "
+                            "AND (oi.title ILIKE :kw OR oi.sku_title ILIKE :kw) "
+                            "GROUP BY oi.spu_id ORDER BY MIN(oi.title) LIMIT 20"
+                        ).bindparams(uid=user_id, kw=f"%{keyword}%")
+                    )
+                ).mappings().all()
+        except Exception as err:
+            print(f"[MallDomain] 订单明细查询失败: {err}")
+            return {"success": False, "message": "暂时查不到您的订单记录，请稍后再试。"}
+
+        if not rows:
+            return {"success": False, "message": f"您的订单里没有找到「{keyword}」相关的商品。"}
+        if len(rows) > 1:
+            titles = "、".join(f"「{r['title']}」" for r in rows)
+            return {
+                "success": False,
+                "message": f"您的订单里有 {len(rows)} 件商品与「{keyword}」相关：{titles}。请告诉我要把哪一件加入购物车。",
+            }
+
+        row = rows[0]
+        try:
+            async with _order_domain._merchant_reader_engine().begin() as conn:
+                sku = await MallDomainService._resolve_purchasable_sku(conn, spu_id=str(row["spu_id"]))
+        except Exception as err:
+            print(f"[MallDomain] 桥接 SKU 解析失败: {err}")
+            return {"success": False, "message": "暂时无法确认该商品的在售状态，请稍后再试。"}
+        if sku is None:
+            return {"success": False, "message": f"「{row['title']}」目前已下架或无库存，暂时无法再次购买。"}
+
+        add_res = await MallDomainService.add_to_cart(
+            {
+                "skuId": sku["sku_code"],
+                "quantity": 1,
+                "title": row["title"],
+                "price": float(sku["price"]),
+                "spec": sku["sku_title"] or "",
+                "userId": user_id,
+                "threadId": params.get("threadId"),
+            }
+        )
+        if not add_res.get("success"):
+            return add_res
+        return {
+            "success": True,
+            "message": (
+                f"已将您订单里的「{row['title']}」加入购物车"
+                f"（当前在售规格：{sku['sku_title'] or '默认'}，¥{sku['price']}）。"
+            ),
+            "lastModifiedItemId": sku["sku_code"],
+            "cart": add_res.get("cart"),
+        }
+
     @staticmethod
     async def get_cart_summary(params: dict) -> dict:
         cart_key = params.get("userId") or params.get("threadId") or "default_user"

@@ -26,6 +26,40 @@ _GENERAL_ORDER_LIST_RE = re.compile(
     re.IGNORECASE,
 )
 
+# 指标×导购确定性快轨(遗留二期,2026-09-13):指标词族 → rankingMetric 映射
+# (METRIC_REGISTRY 5 键:gmv/volume/gross_profit/margin_rate/stock_risk)
+_METRIC_HINT_RE = re.compile(r"(?:gmv|销售额|销量|毛利|利润|滞销|卖得好|卖的好)", re.IGNORECASE)
+_SHOPPING_HINT_RE = re.compile(r"(?:推荐|买什么|挑一款|选一款|哪款好)", re.IGNORECASE)
+
+
+def _ranking_subtask(metric_or_text: str, suffix: str) -> dict:
+    """排行快轨子任务单点构造(主快轨与订单动作补偿共用)。
+
+    metric_or_text 传已解析 metric 键(gmv/volume/...)或原文(自动解析)。"""
+    metric = (
+        metric_or_text
+        if metric_or_text in ("gmv", "volume", "gross_profit", "margin_rate", "stock_risk")
+        else _ranking_metric_from_text(metric_or_text)
+    )
+    return {
+        "id": f"step_fast_ranking_{suffix}",
+        "description": f"Call queryProductRanking with rankingMetric {metric} to fetch real sales ranking",
+        "status": "pending",
+    }
+
+
+def _ranking_metric_from_text(text: str) -> str:
+    """指标词族 → 排行 metric 键(与 OrderDomainService.METRIC_REGISTRY 同名)。"""
+    if re.search(r"毛利率", text, re.IGNORECASE):
+        return "margin_rate"
+    if re.search(r"毛利|利润", text, re.IGNORECASE):
+        return "gross_profit"
+    if re.search(r"gmv|销售额", text, re.IGNORECASE):
+        return "gmv"
+    if re.search(r"滞销", text, re.IGNORECASE):
+        return "stock_risk"
+    return "volume"
+
 
 def planner_llm():
     """深度规划专用模型调用点(max_tokens 封顶)。
@@ -306,6 +340,42 @@ async def planner_node(state: AgentState) -> dict:
         has_cart_manage = any(i.get("intent") == "cart_manage" for i in intents)
         has_order_list = any(i.get("intent") in ("order_status", "order_query") for i in intents)
 
+        # 📊 指标×导购确定性快轨(遗留二期,2026-09-13):「看看GMV多少,顺便推荐
+        # 卖得好的」复合句曾依赖深规划自觉 —— LLM 偶发把 GMV 当后台数据拒答。
+        # 排行子任务 + 导购子任务确定性组装,零 LLM 拒答面;资金/订单动作在场
+        # 时不劫持(让位深规划按资金纪律编排)。
+        has_order_action = any(
+            i.get("intent")
+            in ("refund", "order_return", "order_modify_address", "order_cancel", "order_status", "order_query")
+            for i in intents
+        )
+        metric_hint = _METRIC_HINT_RE.search(input_text or "")
+        guide_hint = bool(has_shopping_guide) or bool(_SHOPPING_HINT_RE.search(input_text or ""))
+        has_metric = any(i.get("intent") == "metric_query" for i in intents) or bool(metric_hint)
+        if has_metric and guide_hint and not has_order_action:
+            ranking_metric = _ranking_metric_from_text(input_text or "")
+            fast_subtasks = [
+                _ranking_subtask(ranking_metric, "0"),
+                {
+                    "id": "step_fast_guide_1",
+                    "description": f"Execute ShoppingGuideSkill for input: {input_text}",
+                    "status": "pending",
+                },
+            ]
+            fast_plan = {
+                "goal": "Fetch real sales metrics and shopping recommendations",
+                "subtasks": fast_subtasks,
+                "currentStepIndex": 0,
+            }
+            if job_id:
+                await emit_status(
+                    job_id,
+                    "⚡ 极速规划直达：识别到经营数据+导购复合诉求，已组装排行与导购双子任务流！",
+                    node="planner",
+                    plan=fast_plan,
+                )
+            return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
+
         if (has_shopping_guide or has_cart_manage) and has_order_list and len(intents) >= 2:
             fast_subtasks = []
             if has_cart_manage:
@@ -426,6 +496,24 @@ async def planner_node(state: AgentState) -> dict:
                         },
                     )
 
+                # 复合偿付(遗留二期,2026-09-13):订单动作快轨只认订单族意图,
+                # 句中同现的指标/导购诉求此前被静默吞 —— 尾追排行/导购子任务,
+                # 复合请求每个动作都有子任务(rule 7 的确定性兑现)。排行偿付须
+                # 指标×导购双命中(「那鞋销量不行」不得凭空造排行步骤)。
+                wants_metric = bool(_METRIC_HINT_RE.search(input_text or "")) and (
+                    bool(has_shopping_guide) or bool(_SHOPPING_HINT_RE.search(input_text or ""))
+                )
+                if wants_metric:
+                    fast_subtasks.append(_ranking_subtask(input_text, "m"))
+                if has_shopping_guide or _SHOPPING_HINT_RE.search(input_text or ""):
+                    fast_subtasks.append(
+                        {
+                            "id": "step_fast_guide_m",
+                            "description": f"Execute ShoppingGuideSkill for input: {input_text}",
+                            "status": "pending",
+                        }
+                    )
+
                 if fast_subtasks:
                     first_intent = action_intents[0]["intent"]
                     if first_intent in ("order_status", "order_query"):
@@ -496,10 +584,11 @@ async def planner_node(state: AgentState) -> dict:
         "the plan with exactly ONE subtask that asks the customer for the missing information. NEVER drop "
         "or silently ignore part of a compound request — every requested action must either get a subtask "
         "or an explicit ask.\n"
-        "8. NEW ORDER REQUESTS: the chat assistant CANNOT place new orders. NEVER plan a step calling "
-        "createOrder — it does not exist as a customer-facing capability. When the customer asks to place "
-        "an order (下单), plan an addToCart step when the product is clear from context, and the final "
-        "reply must tell the customer to finish checkout via the shopping-cart card or the store page. "
+        "8. ORDER PLACEMENT: the chat assistant CAN place a REAL order from the current shopping cart via "
+        "checkoutCart (real stock, real merchant order). When the customer asks to check out / place the "
+        "order (结算下单/下单) and the product is already clear, plan a checkoutCart step; when the product "
+        "is not yet chosen, plan addToCart (product clear from context) and the final reply guides them to "
+        "say 结算下单. NEVER plan a step calling createOrder — it does not exist. "
         "For address book management (创建/查看收货地址, intent address_manage), plan saveUserAddress or "
         "getUserAddresses steps — these are real capabilities.\n\n"
         "Return a JSON object with:\n"

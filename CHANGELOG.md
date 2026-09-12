@@ -4,6 +4,32 @@
 
 ---
 
+## [2.6.20] - 2026-09-13 (遗留二期:真·聊天下单 + 订单→购物车桥接 + 指标复合确定性编排)
+
+2.6.18/2.6.19 收尾明示的二期三项一个版本收口(用户「遗留二期做」,to-spec → implement)。spec: `.scratch/phase2-bridging-checkout/spec.md`(gitignored)。
+
+### ✨ Features
+
+- **真·聊天下单(checkoutCart)**:MallDomainService.checkout_user_cart —— 购物车逐行解析商户真 SKU(skuId=spu_code 按 SPU 当前 ON_SALE 最低价在售 SKU 结算,与展示价=MIN(price) 同语义,规格如实展示;sku_code 直配),条件 UPDATE(stock>=qty)原子扣减防超卖,**任一行失败整单不落**(all-or-nothing 与商城页同口径),cost_at_purchase 快照落明细,PAID 真单与商城页同一账本(既有发货/退款/改址 HITL 链路直接可消费);地址:显式提供(收件人/电话缺项取地址簿真值)> 地址簿 is_default > 诚实追问(needsAddress,严禁假地址兜底);顾客自有资金下单与商城页同权免审(spec 明示豁免,执行面确定性快路径+库级对账钉死)。items.spu_id 落 spu_code(排行 join 的事实契约)。
+- **订单→购物车桥接(add_order_item_to_cart)**:「把我订单里的那件冲锋衣加入购物车」——商户真单明细按关键词回查(口语量词剥除「那件X」→「X」),解析当前在售最低价 SKU 真实回车;零命中/已下架/多命中(GROUP BY spu_id 防同 SPU 标题漂移假双候选)一律如实回复,已退款/取消单排除(与排行/资金口径一致)。
+- **指标×导购确定性快轨(planner)**:「看看GMV多少,顺便推荐卖得好的」——排行子任务(rankingMetric 词族映射,与 METRIC_REGISTRY 5 键同名)+ 导购子任务确定性组装,零 LLM 拒答面(A7 偶发拒答从根上消失);订单动作快轨尾追复合偿付(指标×导购双命中才追排行,「那鞋销量不行」不凭空造步骤)。
+- **executor 快路径**:queryProductRanking(仅认快轨 pinned 句式提取 rankingMetric,深规划带参描述落 LLM 兜底防吞参)+ checkoutCart 直配;白名单入列(规则文件同步修订特例条款)。
+
+### 🐛 Fixes(评审抓获)
+
+- **超卖竞态**:条件 UPDATE 替代先查后扣(READ COMMITTED 下 resolve 与扣减间库存可被并发单清空),密封测试以 racy resolve 桩复现竞态窗口钉死。
+- **否定词误下单**:「我还没下单」「先不付款」「货到付款」被 _CHECKOUT_RE 命中会开出真单 —— 否定守卫前置。
+- **复合吞(结算分支)**:「删掉背包然后结算下单」曾带着不要的商品直接开单 —— 删除/加购动作在场让位,结算分支不吞半。
+- **快轨劫持**:指标轨排除族补 order_status/order_query(「查下订单顺便推荐卖得好的」不得吞订单半);导购词收紧去「款式/好看的」(「滞销款式」纯指标轮不得被塞导购子任务)。
+
+### ✅ 验证 (Verification,如实)
+
+- TDD 红灯先行:engine pytest **582 passed**(+21,零回归)、gateway 121 passed、ruff 双服务干净、promptfoo 双套件 56/0 + 8/0 与基线全对齐。
+- 实弹:「把我订单里的冲锋衣加入购物车」→ 历史单商品按当前货架价 ¥1299 回车;「把购物车里的东西结算下单」→ 真单 AURORA-ORD-2026-5320(5 行明细 ¥4555,收货地址自动取 2.6.19 建的杭州默认地址,库级对账全对);「看看上个月GMV多少，顺便推荐下卖得好的」→ 真数据 GMV 排行(6495/4495/2697 与订单聚合一致)+ 导购双办妥零拒答。
+- 已知限制如实记录:清车在 DB 事务提交后执行(崩溃窗口极小;条件扣减防超卖,重结算会二次扣减为独立订单)。
+
+---
+
 ## [2.6.19] - 2026-09-12 (merchant 全意图真实操作验收:16 探针全绿 + 改址链路三症修复)
 
 用户指令「在 merchant 真实操作聊天各种意图输入看结果是否对」——16 探针全意图验收,每笔带数据库对账(查单对真单状态/退款走审批门/建地址行级核验/排行对订单聚合/加购对 Redis/审批后闭环核验),脚本与结果:`.scratch/address-order-bug/merchant_intent_acceptance.py`(gitignored)。

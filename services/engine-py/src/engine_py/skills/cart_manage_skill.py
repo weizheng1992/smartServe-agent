@@ -26,6 +26,16 @@ _VIEW_ONLY_RE = re.compile(
 _VIEW_EXCLUDE_RE = re.compile(r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购|买第|要第|改成|修改|删除|移除|删掉)")
 _DELETE_RE = re.compile(r"(?:删除|移除|删掉|去掉|不要了|清空)")
 _ADD_RE = re.compile(r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购)")
+# 真·聊天下单触发(遗留二期,2026-09-13):拦截在查看分支前;裸「结算」保持
+# 查看摘要旧契约,「下单/去结算/提交订单/付款」才开真实订单。
+_CHECKOUT_RE = re.compile(r"(?:结算下单|去结算|提交订单|付款|[^\s]下单|^下单)")
+# 否定/非结算形守卫:「我还没下单」「先不付款」「货到付款」严禁开出真单
+_CHECKOUT_NEG_RE = re.compile(r"(?:还没|没有|不用|不要|先不|暂不|别|[^\s]个下单|货到付款|未付款)")
+_CHECKOUT_ADDR_RE = re.compile(r"(?:寄到|送到|地址为|地址是|邮寄到)\s*([^,，。!！?？\n]+)")
+# 订单→购物车桥接:「订单(里)的 X 加入购物车」—— X 为历史购买商品关键词
+_BRIDGE_KEYWORD_RE = re.compile(
+    r"(?:订单|买过)[^。！？]{0,10}里?[面中]?的([^,，。！？]+?)(?:加入|加购|放进|放入|扔进|来一|买一)"
+)
 _CLEAR_RE = re.compile(r"(?:清空|全部删除|全删)")
 _QTY_UPDATE_RE = re.compile(r"(?:改成|修改为|数量设为|变成|改为|调整为|增加到|减少到)\s*(\d+)\s*件?")
 _VAGUE_RE = re.compile(r"(?:第几|哪件|哪款|哪一个)")
@@ -109,6 +119,70 @@ class CartManageSkill(BaseSkill):
         extra = context.get("extra") or {}
         guide_context = extra.get("guideContext") or {}
         existing_cart = extra.get("cartContext") or {}
+
+        # 0. 结算下单(遗留二期,2026-09-13):真·聊天下单,拦截在查看分支之前
+        # —— 裸「结算」仍是查看摘要(旧契约),「下单/去结算/提交订单/付款」才开单。
+        # 复合守卫:同句含删除/加购动作时让位(「删掉背包然后结算下单」先删后说,
+        # 严禁吞掉删除半带着不要的商品开出真单 —— rule 7 复合偿付纪律)
+        if (
+            _CHECKOUT_RE.search(user_input)
+            and not _ADD_RE.search(user_input)
+            and not _DELETE_RE.search(user_input)
+            and not _CHECKOUT_NEG_RE.search(user_input)
+        ):
+            # 显式地址跟随(「寄到/送到/地址为…」),否则服务层取地址簿默认
+            addr_match = _CHECKOUT_ADDR_RE.search(user_input)
+            checkout_res = await MallDomainService.checkout_user_cart(
+                {
+                    "userId": context.get("userId"),
+                    "threadId": context.get("threadId"),
+                    "shippingAddress": addr_match.group(1).strip() if addr_match else None,
+                }
+            )
+            if checkout_res.get("success"):
+                lines = "\n".join(f"• {line}" for line in checkout_res.get("items") or [])
+                return {
+                    "success": True,
+                    "skillId": self.metadata["id"],
+                    "output": (
+                        f"🎉 下单成功！订单号 [{checkout_res.get('orderId')}]。\n\n"
+                        f"{lines}\n\n"
+                        f"💰 实付金额: ¥{checkout_res.get('totalAmount')}\n"
+                        f"📦 收货地址: {checkout_res.get('shippingAddress')}\n\n"
+                        "可在「我的订单」中随时查看物流状态。"
+                    ),
+                    "nextAction": "finish",
+                    "extra": {"cartContext": {"items": [], "totalAmount": 0}, "guideContext": guide_context},
+                }
+            return {
+                "success": True,
+                "skillId": self.metadata["id"],
+                "output": checkout_res.get("message") or "结算未完成，请稍后再试。",
+                "nextAction": "finish",
+                "extra": {"cartContext": existing_cart, "guideContext": guide_context},
+            }
+
+        # 0.5 订单→购物车桥接(遗留二期):「订单里的 X 加入购物车」—— 商户真单
+        # 明细按关键词回查,当前在售 SKU 真实入车;找不到/多命中/已下架均如实回复。
+        bridge_match = _BRIDGE_KEYWORD_RE.search(user_input)
+        if bridge_match and _ADD_RE.search(user_input):
+            bridge_res = await MallDomainService.add_order_item_to_cart(
+                {
+                    "userId": context.get("userId"),
+                    "threadId": context.get("threadId"),
+                    "keyword": (bridge_match.group(1) or "").strip(),
+                }
+            )
+            return {
+                "success": True,
+                "skillId": self.metadata["id"],
+                "output": bridge_res.get("message") or "该商品暂时无法加入购物车，请稍后再试。",
+                "nextAction": "finish",
+                "extra": {
+                    "cartContext": bridge_res.get("cart") or existing_cart,
+                    "guideContext": guide_context,
+                },
+            }
 
         # 1. 查看购物车与算价结算(_VIEW_ONLY_RE 等均为模块级常量,不可经 self. 访问)
         if _VIEW_ONLY_RE.search(user_input) and not _VIEW_EXCLUDE_RE.search(user_input):

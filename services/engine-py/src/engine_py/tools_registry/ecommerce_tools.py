@@ -65,6 +65,11 @@ async def _save_user_address(args: dict):
     return await MallDomainService.save_user_address(args)
 
 
+async def _checkout_cart(args: dict):
+    """真·聊天下单(遗留二期):购物车 → 商户真单,与商城页同一账本。"""
+    return await MallDomainService.checkout_user_cart(args)
+
+
 async def _query_product_skus(args: dict):
     return await MallDomainService.query_product_skus(args)
 
@@ -255,6 +260,27 @@ register_tool(
             },
         },
         execute=_save_user_address,
+    )
+)
+register_tool(
+    ToolDefinition(
+        name="checkoutCart",
+        description=(
+            "Place a REAL order from the customer's current shopping cart: resolves real merchant SKUs "
+            "(SPU lines settle at the current cheapest in-stock SKU), checks and deducts stock, snapshots "
+            "cost, and binds the shipping address (explicit address, or the customer's default address book "
+            "entry; fails honestly asking for an address when none exists). Auto-resolves user context. "
+            "All-or-nothing: any unavailable cart line cancels the whole order."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "userId": {"type": "string"},
+                "threadId": {"type": "string"},
+                "shippingAddress": {"type": "object", "description": "Optional explicit address {fullAddress, recipientName, phone} or plain string"},
+            },
+        },
+        execute=_checkout_cart,
     )
 )
 register_tool(

@@ -42,5 +42,5 @@ paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/gatewa
 ## 2. 编码与维护准则
 
 1. **结构化返回**：所有工具执行返回必须符合 `{ success: boolean, data?: any, error?: string, rawCard?: any }` 结构。
-2. **零副作用只读默认**：具备写操作属性的工具（如 `processRefund`, `updateShippingAddress`）必须声明 `requiresApproval: true`，由引擎挂起至 HITL 人工审核台。
+2. **零副作用只读默认**：具备写操作属性的工具（如 `processRefund`, `updateShippingAddress`）必须声明 `requiresApproval: true`，由引擎挂起至 HITL 人工审核台。豁免口径（2026-09-13）：资金/订单操作（退款、改单地址）走 HITL；顾客自有资产操作（地址簿管理 `saveUserAddress`、购物车结算 `checkoutCart`）与商城前台同权免审 —— 二者执行面均有确定性快路径与库级对账测试钉死，checkoutCart 为 all-or-nothing 条件扣减（防超卖）。
 3. **安全注入校验**：严禁字符串拼接构造 SQL 或 Shell 命令，所有动态入参必须使用参数化绑定。

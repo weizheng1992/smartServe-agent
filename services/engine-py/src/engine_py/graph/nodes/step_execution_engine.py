@@ -187,7 +187,11 @@ async def _execute_single_step_core(
             '(e.g. "searchProducts", "compareProducts", "queryProductSkus", "queryProductReviews", '
             '"queryProductRanking"). For hot-selling / best-seller asks (热销/热卖/畅销/卖得好), '
             'select "queryProductRanking" with rankingMetric "volume" (real sales data only).\n'
-            "10. Extract arguments from CONVERSATION HISTORY below.\n\n"
+            '10. If the step description mentions placing a real order / checking out the cart '
+            '(结算下单/下单), select "checkoutCart" — it creates a real merchant order from the current '
+            'cart. If it mentions sales ranking or best-seller metrics with a named rankingMetric, '
+            'select "queryProductRanking" with that rankingMetric (real sales data only).\n'
+            "11. Extract arguments from CONVERSATION HISTORY below.\n\n"
             'Output raw JSON object or "NONE":\n{"toolName": "toolName", "args": {"key": "value"}}\n\n'
             f"[CONVERSATION HISTORY]\n{history_context}"
         )
@@ -471,6 +475,7 @@ _base_executor_tools = [
     "getCartSummary",
     "saveUserAddress",
     "getUserAddresses",
+    "checkoutCart",
 ]
 
 
