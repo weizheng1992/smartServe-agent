@@ -4,6 +4,28 @@
 
 ---
 
+## [2.6.14] - 2026-09-12 (场景化快捷回复:固定四件套退役,按意图出组 + 「查询未发货的订单」能力补齐)
+
+产品在退款反问轮与商品推荐轮提出「快捷按钮按情况提供」;grill-with-docs 两轮六问逐项裁决(ADR-0001),TDD 落地。
+
+### ✨ Features
+
+- **场景化快捷回复(ADR-0001)**:card_synthesizer 收编基座裁决(域卡片优先作基座,run_agent short-circuit 拆除),按本轮已分类意图出组——refund/order_return → 退款四键(查询最近的订单/查询未发货的订单/上传商品瑕疵照片/呼叫人工客服;场景内撤「申请退款」,用户已在流程中);shopping_guide → 品类 chips(点击「看看{品类}有什么商品」直达导购);其余 → 通用四键(查询我的订单/逛逛商城/申请退款/人工)。旧「查询物流进度」并入订单查询(同一意图同一出口),固定四件套整体退役,前端零改动。
+- **品类 chips 只认真货架**:`get_shelf_overview` 实查(仅购物轮查库,失败退通用组严禁编造),带真实在售款数,文案严禁「热销/卖得好/爆款」——2.6.8「商户货架无销量列」铁律从文本输出延伸到 UI 交互层(死按钮禁令)。
+- **未发货过滤能力**:`list_user_orders` 加 `shippingStatus`(UNSHIPPED=仍在等待出货,排除 refunded/cancelled——实弹修正 CUST-8801 两笔 REFUNDED 单曾被算成未发货;SHIPPED/DELIVERED 精确匹配;非法值诚实报错严禁静默全量;商户真单/engine 本地表两路同走 `_apply_shipping_filter` 纯函数防漂移),工具 schema enum + executor 提示词 + 快路径三处同语义。
+
+### 🐛 Fixes(双轴 code-review 掀出,一并修复)
+
+- Temporal 双模路径残留旧 short-circuit,域卡片轮仍不挂场景组 → `temporal/activities.py` 与 run_agent 同一合成接线,两路严禁漂移(2.6.8 先例)。
+- 技能自带 quick_replies(破损照片消歧组)与场景组会同屏双胶囊 → first-wins:技能自带行原样保留,场景组让位。
+- executor 快路径硬编码 `args={}` 吞掉 shippingStatus → 快路径与 LLM 路径同语义(描述/输入含未发货语义即传 UNSHIPPED)。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **465 passed**(2.6.13 基线 441 + 新增 24 零回归:场景组 13 / 未发货过滤 8 / 快路径 3),ruff 干净。实弹(网关重启):退款反问轮 → 退款场景组;「查询我未发货的订单」→ 诚实空(3 单全 SHIPPED/REFUNDED,无一错报未发货);「看看商城有什么商品」→ 6 真品类 chips(各 3 款,对账 18 SPU);点击「潮流鞋靴」chip → 品类过滤 3 款鞋靴;咨询轮 → 通用组。设计定案落 docs/adr/0001,术语表补 CONTEXT.md「Chat Cards & Quick Replies Subsystem」。
+
+---
+
 ## [2.6.13] - 2026-09-12 (加购序数越界诚实反问:「把第四个加入购物车」不再错加第 1 款)
 
 ### 🐛 Fixes
