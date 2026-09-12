@@ -77,6 +77,8 @@ class MallDomainService:
         # 词族一律收短语形(比较好/人气高/性价比高/最好卖…);长序替换内建,
         # 「性价比高」先于「性价比」消费。
         "有什么",
+        "一下",
+        "我要",
         "卖得好",
         "卖的好",
         "比较好",
@@ -106,6 +108,11 @@ class MallDomainService:
         "裤子": ("裤",),
         "鞋子": ("鞋",),
     }
+    # 词元清洗(ADR 检索链 L1):数量前缀逐块剥、「衬衫都」尾缀语气字仅剥
+    # 长块(len>2,「成都」两字不动);⚠️ 分隔符连词只收「和/与」,「跟」
+    # 严禁入列(高跟鞋/跟妆会被劈开)。
+    _QUANTITY_PREFIX_RE = re.compile(r"^(?:几[件条双款个]|[两三四五六七八九十]+[件条双款个]|\d+[件条双款个])")
+    _TRAILING_PARTICLE_RE = re.compile(r"(?:都要|都|吧|呢|啊|呀)$")
 
     # 购物车存储(2026-09-08 重构):_cart_storage 降级为进程一级读缓存,真实
     # 状态写穿透 Redis(agent:cart:{userId})。此前纯进程内存,网关重启即失忆,
@@ -740,8 +747,16 @@ class MallDomainService:
         rest = query
         for term in sorted(MallDomainService._GUIDE_WRAPPER_TERMS, key=len, reverse=True):
             rest = rest.replace(term, " ")
-        chunks = re.split(r"[\s,，、。.!！?？:；;的]+", rest)
-        return [c for c in (chunk.strip() for chunk in chunks) if c]
+        chunks = re.split(r"[\s,，、。.!！?？:；;的和与]+", rest)
+        cleaned = []
+        for chunk in chunks:
+            chunk = MallDomainService._QUANTITY_PREFIX_RE.sub("", chunk.strip()).strip()
+            # 尾缀语气字仅剥长块(len>2):「衬衫都」→「衬衫」;「成都」两字不动
+            if len(chunk) > 2:
+                chunk = MallDomainService._TRAILING_PARTICLE_RE.sub("", chunk).strip()
+            if chunk and chunk not in cleaned:
+                cleaned.append(chunk)
+        return cleaned
 
     @staticmethod
     def _expand_stem_aliases(terms: list[str]) -> list[str]:
@@ -995,7 +1010,8 @@ class MallDomainService:
         # 词干别名展开(2026-09-12):口语统称「裤子/鞋子」→ 追加货架词素「裤/鞋」
         # 作 OR 词元 —— 商户货架与 engine 兜底两条词元路径共享;语义档仍嵌原始
         # query(0.55 阈值按原始查询定标,换表示会毁定标)。
-        terms = MallDomainService._expand_stem_aliases(MallDomainService._extract_query_terms(query))
+        base_terms = MallDomainService._extract_query_terms(query)
+        terms = MallDomainService._expand_stem_aliases(base_terms)
 
         if params.get("threadId") and effective_biz_id == "ecommerce":
             ctx = await OrderDomainService.get_thread_session_context(params["threadId"])
@@ -1008,9 +1024,44 @@ class MallDomainService:
         # 严禁跨目录补货。词元查空且原始 NL 非空时,先经语义召回补位(L2,
         # 「户外过夜的装备」这类词元命中不了的口语措辞);浏览形输入(terms 空
         # 但 fetch 全量非空)不走语义。语义 None/[] 都落诚实空。
-        merchant_products = await MallDomainService._fetch_merchant_catalog(
-            terms, category, max_price, limit
-        )
+        # 多品类连词请求(词元 ≥2,如「裤子和衬衫」)按词元轮转配额:
+        # 每个词元各取 top-limit 后交错合并去重——价格单序会让贵品类在
+        # 小 limit 下全灭(实报症状第二层)。单品类/浏览形不进此路。
+        merchant_products = None
+        merchant_unreachable = False
+        if len(base_terms) >= 2 and not category:
+            per_term_lists: list[list[dict]] = []
+            for term in base_terms:
+                rows = await MallDomainService._fetch_merchant_catalog(
+                    MallDomainService._expand_stem_aliases([term]), category, max_price, limit
+                )
+                if rows is None:
+                    # 库不可达:立即中断,跳过词元单查,交给既有降级链
+                    # (语义/L4 本就各自处理不可达),严禁 N 词元 N 次失败连接
+                    per_term_lists = []
+                    merchant_unreachable = True
+                    break
+                if rows:
+                    per_term_lists.append(rows)
+            if per_term_lists:
+                merged: list[dict] = []
+                seen_ids: set[str] = set()
+                exhausted = False
+                for rank in range(max(len(lst) for lst in per_term_lists)):
+                    for lst in per_term_lists:
+                        if rank < len(lst) and lst[rank]["id"] not in seen_ids:
+                            seen_ids.add(lst[rank]["id"])
+                            merged.append(lst[rank])
+                            if len(merged) >= limit:
+                                exhausted = True
+                                break
+                    if exhausted:
+                        break
+                merchant_products = merged
+        if merchant_products is None and not merchant_unreachable:
+            merchant_products = await MallDomainService._fetch_merchant_catalog(
+                terms, category, max_price, limit
+            )
         if merchant_products is not None:
             if not merchant_products and query and settings.mall_semantic_enabled:
                 merchant_products = (

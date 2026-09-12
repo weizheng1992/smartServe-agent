@@ -185,11 +185,21 @@ class ShoppingGuideSkill(BaseSkill):
             }
 
         # 3. 商品检索与推荐
+        # 数量语义(2026-09-12 用户实报「我要2个商品」被无视):「N个/N件」
+        # 显式数量 → 推荐 N 款(上限 8,与品类快捷区一致);「几件/几款」
+        # 或未提 → 维持默认 3。
+        requested_count = re.search(r"([2-9]|1[0]|两|三|四|五|六|七|八|九|十)\s*个", user_input)
+        limit = 3
+        if requested_count:
+            raw = requested_count.group(1)
+            cn = {"两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+            limit = int(raw) if raw.isdigit() else cn.get(raw, 3)
+            limit = max(1, min(limit, 8))
         search_res = await MallDomainService.search_products(
             {
                 "query": user_input,
                 "maxPrice": max_price,
-                "limit": 3,
+                "limit": limit,
                 "businessId": context.get("tenantId"),
                 "threadId": context.get("threadId"),
             }
