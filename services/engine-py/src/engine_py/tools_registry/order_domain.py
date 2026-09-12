@@ -637,6 +637,44 @@ class OrderDomainService:
             return {"error": "Failed to create order in database."}
 
     @staticmethod
+    async def get_thread_evidence_images(thread_id: str | None) -> list[str]:
+        """本会话用户消息的历史图片(ADR-0003 Q3 售后凭证回溯):
+        newest-first、跨消息去重、上限与引擎视觉上限一致;查询失败诚实空。"""
+        if not thread_id:
+            return []
+        from ..vision.analyzer import MAX_IMAGES_PER_MESSAGE
+
+        try:
+            async with get_session() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            text(
+                                "SELECT image_urls FROM messages WHERE thread_id = :tid AND role = 'user' "
+                                "AND image_urls IS NOT NULL AND image_urls != '[]'::jsonb "
+                                # 10 条消息足够覆盖上限 3 张去重余量,防超长会话全表扫
+                                "ORDER BY created_at DESC LIMIT 10"
+                            ).bindparams(tid=thread_id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+        except Exception as err:
+            print(f"[OrderDomainService] 历史凭证图查询失败 threadId={thread_id}: {err}")
+            return []
+        seen: set[str] = set()
+        urls: list[str] = []
+        for row in rows:
+            for url in row or []:
+                if url and url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+                    if len(urls) >= MAX_IMAGES_PER_MESSAGE:
+                        return urls
+        return urls
+
+    @staticmethod
     async def list_user_orders(
         thread_id: str | None = None,
         user_id: str | None = None,
@@ -918,22 +956,15 @@ class OrderDomainService:
     # ------------------------------------------------------------------
     # 📊 商品多维度排行(简化版 metric 注册表;完整 NL 解析随 nlQuery 批次移植)
     # ------------------------------------------------------------------
-    # 排行指标(ADR-0002 Q3):商户真订单聚合源。gross_profit/margin_rate
-    # 随 engine 本地演示表路径整体移除——商户库无成本价列,算不了就不提供;
-    # 被移除指标诚实报错,严禁静默回退假装成功。
+    # 排行指标(ADR-0002 Q3 + ADR-0003 Q2):商户真订单聚合源;成本快照
+    # (merchant_order_items.cost_at_purchase)到位后毛利/毛利率回归,
+    # 口径为精确值(Σ 量×成交价 − Σ 量×快照进价),非估算。
     METRIC_REGISTRY = {
         "gmv": {"key": "gmv", "label": "总销售额 (GMV)", "unit": "元", "direction": "DESC"},
         "volume": {"key": "volume", "label": "出货销量 (件)", "unit": "件", "direction": "DESC"},
+        "gross_profit": {"key": "gross_profit", "label": "净毛利润", "unit": "元", "direction": "DESC"},
+        "margin_rate": {"key": "margin_rate", "label": "毛利率", "unit": "%", "direction": "DESC"},
         "stock_risk": {"key": "stock_risk", "label": "滞销库存风险", "unit": "件", "direction": "ASC"},
-    }
-    _REMOVED_METRICS = {
-        "gross_profit": "净毛利润",
-        "margin_rate": "毛利率",
-        "profit": "净毛利润",
-        "margin": "毛利率",
-        # LLM 常直接回中文指标名,同口径诚实报错
-        "净毛利润": "净毛利润",
-        "毛利率": "毛利率",
     }
 
     @staticmethod
@@ -943,17 +974,11 @@ class OrderDomainService:
         - 数据源 merchant_order_items × merchant_orders(排除 REFUNDED/CANCELLED),
           在售过滤 ON_SALE,展示价 = MIN(sku.price),库存 = SUM(sku.stock),
           与网关/检索链同源;零销量款不进 gmv/volume 榜(诚实空优于误导)。
-        - gross_profit/margin_rate 已移除(商户库无成本价列),传入即诚实报错。
+        - gross_profit/margin_rate 按 merchant_order_items.cost_at_purchase
+          成交快照精确计算(ADR-0003),非估算;写入明细必须带快照。
         - manager_id/businessId 过滤随 engine 本地表路径退役(单商户现实)。"""
         raw_input = options.get("query") or options.get("naturalQuery") or options.get("rankingMetric") or "gmv"
         raw_str = str(raw_input)
-        if raw_str in OrderDomainService._REMOVED_METRICS:
-            return {
-                "error": (
-                    f"指标「{OrderDomainService._REMOVED_METRICS[raw_str]}」已下线:商户货架暂无成本价数据,"
-                    "无法诚实计算毛利。可用口径:总销售额 (GMV) / 出货销量 / 库存风险。"
-                )
-            }
         registry = OrderDomainService.METRIC_REGISTRY
         metric_key = raw_str if raw_str in registry else "gmv"
         target_metric = registry[metric_key]
@@ -974,6 +999,14 @@ class OrderDomainService:
                 metric_expr = 'COALESCE(MAX(agg.gmv), 0)::float'
             elif metric_key == "volume":
                 metric_expr = 'COALESCE(MAX(agg.qty), 0)::int'
+            elif metric_key == "gross_profit":
+                metric_expr = '(COALESCE(MAX(agg.gmv), 0) - COALESCE(MAX(agg.cost), 0))::float'
+            elif metric_key == "margin_rate":
+                metric_expr = (
+                    '(CASE WHEN COALESCE(MAX(agg.gmv), 0) > 0 '
+                    'THEN (COALESCE(MAX(agg.gmv), 0) - COALESCE(MAX(agg.cost), 0)) * 100.0 '
+                    '/ MAX(agg.gmv) ELSE 0 END)::float'
+                )
             else:
                 metric_expr = 'COALESCE(SUM(k.stock), 0)::int'
 
@@ -983,6 +1016,10 @@ class OrderDomainService:
                 'COALESCE(SUM(k.stock), 0)::int AS stock, '
                 'COALESCE(MAX(agg.qty), 0)::int AS "totalVolume", '
                 'COALESCE(MAX(agg.gmv), 0)::float AS "totalGmv", '
+                '(COALESCE(MAX(agg.gmv), 0) - COALESCE(MAX(agg.cost), 0))::float AS "grossProfit", '
+                '(CASE WHEN COALESCE(MAX(agg.gmv), 0) > 0 '
+                'THEN (COALESCE(MAX(agg.gmv), 0) - COALESCE(MAX(agg.cost), 0)) * 100.0 '
+                '/ MAX(agg.gmv) ELSE 0 END)::float AS "marginRate", '
                 f'{metric_expr} AS "metricScore" '
                 "FROM merchant_spus s "
                 "LEFT JOIN merchant_skus k ON k.spu_id = s.id "
@@ -990,7 +1027,10 @@ class OrderDomainService:
                 # N SKU × M 明细三路直连笛卡尔放大,5 件卖成 30 件);退款/
                 # 取消单在子查询内排除,零销量 SPU 靠 LEFT JOIN 保留盘点。
                 "LEFT JOIN ("
-                "SELECT oi.spu_id, SUM(oi.quantity) AS qty, SUM(oi.quantity * oi.price) AS gmv "
+                # cost_at_purchase 列 NOT NULL:COALESCE 0 会把漏写快照的
+                # 明细当零成本、毛利虚高呈精确——直接求和,漏写即报错可见
+                "SELECT oi.spu_id, SUM(oi.quantity) AS qty, SUM(oi.quantity * oi.price) AS gmv, "
+                "SUM(oi.quantity * oi.cost_at_purchase) AS cost "
                 "FROM merchant_order_items oi "
                 "JOIN merchant_orders o ON o.order_id = oi.order_id "
                 "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
@@ -1016,6 +1056,8 @@ class OrderDomainService:
                     "stock": int(r.get("stock") or 0),
                     "totalVolume": int(r.get("totalVolume") or 0),
                     "totalGmv": float(r.get("totalGmv") or 0),
+                    "grossProfit": float(r.get("grossProfit") or 0),
+                    "marginRate": f"{float(r.get('marginRate') or 0):.1f}%",
                     "metricScore": (metric_value := float(r.get("metricScore") or 0)),
                     "metricDisplay": f"{metric_value:,.0f} {target_metric['unit']}",
                 }

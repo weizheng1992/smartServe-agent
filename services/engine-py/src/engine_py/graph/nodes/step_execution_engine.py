@@ -21,15 +21,28 @@ _JSON_FENCE_START_RE = re.compile(r"^```json\s*")
 _AFTERSALE_EVIDENCE_TOOLS = frozenset({"applyAfterSale", "processRefund"})
 
 
-def maybe_inject_aftersale_evidence(tool_name: str, args: dict, image_urls: list | None) -> dict:
-    """售后工具 + 本轮有图 + 参数缺凭证 → 程序化补注(上限与引擎视觉上限一致)。"""
+async def maybe_inject_aftersale_evidence(tool_name: str, args: dict, state: dict) -> dict:
+    """售后工具凭证程序化注入(ADR-0002 Q1 + ADR-0003 Q3):
+    本轮 state.image_urls 优先(有图严禁额外查库);本轮无图回溯本会话
+    历史用户消息图片;两者皆无 → 原样返回。上限与引擎视觉上限一致。"""
     from ...vision.analyzer import MAX_IMAGES_PER_MESSAGE
 
-    if tool_name not in _AFTERSALE_EVIDENCE_TOOLS or not image_urls:
+    if tool_name not in _AFTERSALE_EVIDENCE_TOOLS:
         return args
     if args.get("evidenceImageUrls"):
         return args
-    return {**args, "evidenceImageUrls": list(image_urls)[:MAX_IMAGES_PER_MESSAGE]}
+    current = list(state.get("image_urls") or [])
+    if not current:
+        try:
+            from ...tools_registry.order_domain import OrderDomainService
+
+            current = await OrderDomainService.get_thread_evidence_images(state.get("thread_id"))
+        except Exception as err:
+            print(f"[StepExecutionEngine] 历史凭证图回溯失败 threadId={state.get('thread_id')}: {err}")
+            current = []
+    if not current:
+        return args
+    return {**args, "evidenceImageUrls": current[:MAX_IMAGES_PER_MESSAGE]}
 
 
 def _try_import_skills():
@@ -193,7 +206,7 @@ async def _execute_single_step_core(
 
     if parsed_tool_call and parsed_tool_call.get("toolName") in allowed_tools:
         tool_name = parsed_tool_call["toolName"]
-        args = maybe_inject_aftersale_evidence(tool_name, parsed_tool_call.get("args") or {}, state.get("image_urls"))
+        args = await maybe_inject_aftersale_evidence(tool_name, parsed_tool_call.get("args") or {}, state)
         order_id = args.get("orderId")
 
         # 4.1 重复退款防护拦截(三源判定,商户真单按用户归属匹配)

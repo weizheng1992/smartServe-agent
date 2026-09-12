@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import zlib
 
 from sqlalchemy import text
 
@@ -53,6 +54,16 @@ _IMG_COFFEE = "https://images.unsplash.com/photo-1442512595331-e89e73853f31?w=80
 _IMG_TENT = "https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=800&auto=format&fit=crop&q=60"
 _IMG_CAMP = "https://images.unsplash.com/photo-1517824806704-9040b037703b?w=800&auto=format&fit=crop&q=60"
 _IMG_SLEEP = "https://images.unsplash.com/photo-1510312305653-8ed496efae75?w=800&auto=format&fit=crop&q=60"
+
+
+_COST_RATIOS = (0.42, 0.45, 0.48, 0.52)
+
+
+def _demo_cost(price: float, sku_code: str) -> float:
+    """演示进价(ADR-0003 Q1):按 SKU 编码 crc32 确定性取成本系数(42%~52%),
+    跨进程可复现;排行毛利永远运行时真算,严禁把这里的系数写死成任何「利润」。"""
+    return round(price * _COST_RATIOS[zlib.crc32(sku_code.encode()) % len(_COST_RATIOS)], 2)
+
 
 _SPUS = [
     {
@@ -1160,8 +1171,8 @@ async def seed_merchant_data() -> None:
                 await conn.execute(
                     text(
                         "INSERT INTO merchant_skus (spu_id, sku_code, sku_title, spec_attributes, price, "
-                        "original_price, stock, barcode, image_url) "
-                        "VALUES (:spu, :code, :title, :attrs, :price, :orig, :stock, :barcode, :img)"
+                        "original_price, stock, barcode, image_url, cost_price) "
+                        "VALUES (:spu, :code, :title, :attrs, :price, :orig, :stock, :barcode, :img, :cost)"
                     ),
                     {
                         "spu": str(spu_id),
@@ -1173,6 +1184,7 @@ async def seed_merchant_data() -> None:
                         "stock": stock,
                         "barcode": barcode,
                         "img": spu["image"],
+                        "cost": _demo_cost(price, code),
                     },
                 )
 
@@ -1217,8 +1229,8 @@ async def seed_merchant_data() -> None:
                 await conn.execute(
                     text(
                         "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, "
-                        "price, image_url, spec_summary) "
-                        "VALUES (:oid, :spu, :sku, :t, :sku_title, :q, :p, :img, :spec)"
+                        "price, image_url, spec_summary, cost_at_purchase) "
+                        "VALUES (:oid, :spu, :sku, :t, :sku_title, :q, :p, :img, :spec, :cost)"
                     ),
                     {
                         "oid": order["order_id"],
@@ -1230,6 +1242,7 @@ async def seed_merchant_data() -> None:
                         "p": it["price"],
                         "img": it["image"],
                         "spec": it["spec"],
+                        "cost": _demo_cost(it["price"], it["sku"]),
                     },
                 )
 

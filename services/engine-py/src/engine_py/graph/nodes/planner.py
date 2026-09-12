@@ -199,6 +199,13 @@ async def planner_node(state: AgentState) -> dict:
         f'- In all user-facing subtasks, refer to the store strictly by its real brand name "{brand_name}".\n'
         "- If the customer explicitly asks to query or operate on unrelated external brands/stores, plan to "
         f"politely refuse and clarify that you only support {brand_name}."
+        # ADR-0002/0003:经营口径排行是本店在售商品的合法客服能力(商户真订单
+        # 聚合,非后台报表),严禁把它当敏感数据拒答或改道导购浏览。
+        "\n- Product ranking asks (热销/排行/排名/Top N, by GMV/销量/毛利/毛利率/库存) are a "
+        "legitimate storefront capability backed by real sales data: plan a step that calls "
+        "'queryProductRanking' with the matching rankingMetric (gmv/volume/gross_profit/margin_rate/"
+        "stock_risk). NEVER refuse these as 'backend reports' and NEVER substitute them with "
+        "product recommendations."
     )
 
     # 🚀 会话上下文记忆注入

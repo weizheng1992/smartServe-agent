@@ -91,6 +91,10 @@ CREATE TABLE IF NOT EXISTS merchant_order_items (
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- ADR-0003 Q1:成本价(当前采购进价)+ 明细成交进价快照 —— 毛利精确口径
+ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE merchant_order_items ADD COLUMN IF NOT EXISTS cost_at_purchase NUMERIC(10,2) NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS merchant_audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   action_type TEXT NOT NULL,

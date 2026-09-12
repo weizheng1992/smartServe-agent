@@ -3,16 +3,16 @@
 症状根源:queryProductRanking 查 engine 本地 5 行演示表且按 manager_id 过滤
 (种子无 manager_id)→ 恒诚实空 items=0;「热销/排行」永远空手而归。
 
-契约(ADR-0002):
+契约(ADR-0002 Q3 + ADR-0003 Q1/Q2):
 - 数据源 = 商户真订单明细:merchant_order_items × merchant_orders,
   **排除 REFUNDED/CANCELLED**——退款单不产生真实成交;
 - 在售过滤 status='ON_SALE'(下架款不进榜),展示价 = MIN(sku.price),
   库存 = SUM(sku.stock)(与网关/检索链同源);
 - gmv/volume 只收真实卖出 ≥1 件的 SPU(零销量热销榜 = 误导);
-- **gross_profit / margin_rate 指标整体移除**:商户库无成本价列,算不了就
-  不提供——被移除指标诚实报错,严禁静默回退;
+- **毛利/毛利率按 cost_at_purchase 成交快照精确计算**(ADR-0003 回归),
+  退款件的价与成本同被排除;
 - manager_id / businessId 过滤摘除(单商户现实,全租户统一路由先例);
-- 条目无 costPrice/grossProfit/marginRate(前端 2.6.12 起可选渲染,零改动)。
+- 条目含 grossProfit/marginRate,无 costPrice(SPU 级无单一进价)。
 """
 
 from __future__ import annotations
@@ -52,7 +52,8 @@ _DDL = [
     """
     CREATE TABLE IF NOT EXISTS merchant_order_items (
       id UUID PRIMARY KEY, order_id TEXT NOT NULL,
-      spu_id TEXT, sku_code TEXT, title TEXT, quantity INTEGER NOT NULL DEFAULT 1, price NUMERIC(10,2)
+      spu_id TEXT, sku_code TEXT, title TEXT, quantity INTEGER NOT NULL DEFAULT 1,
+      price NUMERIC(10,2), cost_at_purchase NUMERIC(10,2) NOT NULL DEFAULT 0
     )
     """,
 ]
@@ -112,6 +113,7 @@ def merchant_pg(pg_factory):
                     )
             # ② 订单 + 明细(单遍;价格取各 SPU 真值)
             item_prices = {"SPU-A": 829.0, "SPU-B": 1299.0, "SPU-C": 999.0, "SPU-D": 1999.0}
+            item_costs = {"SPU-A": 400.0, "SPU-B": 600.0, "SPU-C": 500.0, "SPU-D": 900.0}
             seen_orders: set[str] = set()
             for code, *_, sales in _SEED:
                 for oid, ostatus, qty in sales:
@@ -123,10 +125,10 @@ def merchant_pg(pg_factory):
                                 oid=oid, cust="CUST-8801", st=ostatus, amt=0)
                         )
                     await conn.execute(
-                        text("INSERT INTO merchant_order_items (id, order_id, spu_id, sku_code, title, quantity, price) "
-                             "VALUES (:id, :oid, :spu, :sku, :title, :qty, :price)").bindparams(
+                        text("INSERT INTO merchant_order_items (id, order_id, spu_id, sku_code, title, quantity, price, cost_at_purchase) "
+                             "VALUES (:id, :oid, :spu, :sku, :title, :qty, :price, :cost)").bindparams(
                             id=uuid.uuid4(), oid=oid, spu=code, sku=code + "-SKU-1",
-                            title=f"{code} 商品", qty=qty, price=item_prices[code])
+                            title=f"{code} 商品", qty=qty, price=item_prices[code], cost=item_costs[code])
                     )
         await merchant_engine.dispose()
 
@@ -200,22 +202,39 @@ def test_multi_sku_spu_no_join_fanout(merchant_pg) -> None:
     assert a_stock["stock"] == 17, "库存 = SUM(sku.stock)(10+7),不得被明细行放大"
 
 
-def test_items_have_no_cost_fields(merchant_pg) -> None:
-    """商户库无成本价 → 条目严禁出现毛利字段(前端可选渲染,缺省降级)。"""
+def test_items_carry_profit_fields_from_cost_snapshot(merchant_pg) -> None:
+    """ADR-0003:成本快照到位 → 条目恢复毛利字段;costPrice 仍不出
+    (多 SKU SPU 无单一进价,前端也不渲染)。"""
     result = asyncio.run(OrderDomainService.query_product_ranking({"rankingMetric": "gmv", "limit": 10}))
 
     for item in result["products"]:
-        assert "costPrice" not in item
-        assert "grossProfit" not in item
-        assert "marginRate" not in item
+        assert "grossProfit" in item and "marginRate" in item, "成本快照到位,毛利字段必须恢复"
+        assert "costPrice" not in item, "SPU 级无单一进价,不出该字段"
+        assert item["marginRate"].endswith("%")
 
 
-def test_removed_metrics_error_honestly(merchant_pg) -> None:
-    """gross_profit/margin_rate 已移除:诚实报错,严禁静默回退 gmv 假装成功。"""
-    for metric in ("gross_profit", "margin_rate"):
-        result = asyncio.run(OrderDomainService.query_product_ranking({"rankingMetric": metric}))
-        assert "error" in result, f"{metric} 必须诚实报错"
-        assert "products" not in result
+def test_profit_metrics_computed_from_cost_snapshot(merchant_pg) -> None:
+    """毛利按成交进价快照精确计算(ADR-0003 Q1/Q2):
+    SPU-A 净销量 3 件,GMV 2487,快照成本 3×400=1200 → 毛利 1287,毛利率 ≈51.75%。"""
+    profit = asyncio.run(OrderDomainService.query_product_ranking({"rankingMetric": "gross_profit", "limit": 10}))
+    assert profit["metricLabel"] == "净毛利润"
+    a = next(i for i in profit["products"] if i["productId"] == _spu_id("SPU-A"))
+    assert a["totalGmv"] == pytest.approx(2487.0)
+    assert a["grossProfit"] == pytest.approx(2487.0 - 3 * 400.0), "毛利 = Σ(量×价 − 量×成交快照进价)"
+    assert a["grossProfit"] == pytest.approx(a["metricScore"])
+
+    margin = asyncio.run(OrderDomainService.query_product_ranking({"rankingMetric": "margin_rate", "limit": 10}))
+    assert margin["metricUnit"] == "%"
+    a_m = next(i for i in margin["products"] if i["productId"] == _spu_id("SPU-A"))
+    assert a_m["marginRate"] == f"{(2487.0 - 1200.0) / 2487.0 * 100:.1f}%"
+
+
+def test_refunded_items_cost_not_in_profit(merchant_pg) -> None:
+    """退款件的售价与快照成本同被整单排除:SPU-A 若把退款 4 件计入,
+    毛利应为 2487 − 7×400 = −313;断言 +1287 即证明退款件完全未参与。"""
+    profit = asyncio.run(OrderDomainService.query_product_ranking({"rankingMetric": "gross_profit", "limit": 10}))
+    a = next(i for i in profit["products"] if i["productId"] == _spu_id("SPU-A"))
+    assert a["grossProfit"] == pytest.approx(2487.0 - 3 * 400.0)
 
 
 def test_unknown_metric_falls_back_to_gmv(merchant_pg) -> None:

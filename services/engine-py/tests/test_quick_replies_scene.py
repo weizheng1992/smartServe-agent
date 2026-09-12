@@ -206,9 +206,8 @@ def test_ranking_card_disambiguation_beats_scene_map() -> None:
     assert not any("潮流鞋靴" in lb for lb in _labels(data))
 
 
-def test_ranking_disambiguation_shrunk_to_three_metrics() -> None:
-    """ADR-0002:毛利/毛利率指标已移除,消歧组 5→3——挂着算不了的口径
-    就是死按钮。"""
+def test_ranking_disambiguation_back_to_five_metrics() -> None:
+    """ADR-0003 Q2:成本快照到位,毛利/毛利率回归,消歧组回 5 键。"""
     ranking_output = {
         "success": True,
         "rankingMetric": "gmv",
@@ -226,11 +225,12 @@ def test_ranking_disambiguation_shrunk_to_three_metrics() -> None:
         CardSynthesizer.synthesize_cards({"taskPlan": task_plan})
     )
     labels = _labels(data)
-    assert len(labels) == 3
+    assert len(labels) == 5
     assert any("GMV" in lb for lb in labels)
     assert any("销量" in lb for lb in labels)
+    assert any("毛利" in lb for lb in labels), "成本快照到位,净毛利润口径回归"
+    assert any("毛利率" in lb for lb in labels)
     assert any("滞销" in lb for lb in labels)
-    assert not any("毛利" in lb or "毛利率" in lb for lb in labels), "毛利口径已下线,胶囊组不得再挂"
     # ADR-0002 Q3:manager 范围随本地表路径退役,点击文本不得再承诺「我负责的」
     payloads = " ".join(o["payload"]["text"] for o in data["options"])
     assert "我负责的" not in payloads

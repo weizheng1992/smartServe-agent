@@ -42,6 +42,18 @@ UNSANITIZED_TAGS_RE = re.compile(r"\[(?:ECOMMERCE|BRAND|STORE|MERCHANT|SHOP|ADID
 ORDER_KEYWORDS_RE = re.compile(r"订单|发货|物流|查单|买的|快递|到哪|运单|面单", re.IGNORECASE)
 REFUND_KEYWORDS_RE = re.compile(r"退款|退货|退钱|退单|退款申请|退货流程|破损|坏了|碎了|瑕疵", re.IGNORECASE)
 MULTI_INTENT_CANDIDATE_RE = re.compile(r"(?:另外|同时|并且|顺便|还有|然后再|接着|以及)")
+# ADR-0003:经营口径排行(利润词 × 排行词共现)规则前置 —— 实弹三连拒的
+# 根因是 LLM 分类层把「利润」判成后台经营数据拒答;排行是店长在客服台的
+# 合法诉求,确定性直通 metric_query(planner→executor queryProductRanking)。
+PROFIT_RANKING_RE = re.compile(
+    r"^(?=.*(?:毛利|利润|毛利率))(?=.*(?:排行|排名|top|热销|畅销|最高|前\s*\d)).+",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def is_profit_ranking_query(text: str | None) -> bool:
+    """纯谓词(测试缝):利润词与排行词共现判定。"""
+    return bool(text) and bool(PROFIT_RANKING_RE.search(text))
 
 # 文本侧域角色线索(工单04 2026-09-11):措辞维度的回退 —— 正则与判定次序
 # 逐字节保持旧实现,仅提为模块常量。文本线索优先于意图档位:措辞含加购动词
@@ -896,6 +908,24 @@ class IntentTriageEngine:
                 return _triage_terminal_result(
                     intents, input_text, history_msgs, damage_assessment,
                     state=state, with_order_context=True,
+                )
+
+            # 判定 1.5(ADR-0003):经营口径排行规则前置 —— 确定性直通
+            # metric_query,严禁 LLM 分类层把「利润」当后台数据拒答。
+            if is_profit_ranking_query(input_text):
+                intents = [{"intent": "metric_query", "confidence": 0.97, "type": "primary"}]
+                await IntentTriageEngine.log_intent_to_db(
+                    thread_id,
+                    input_text,
+                    intents,
+                    "rule",
+                    intents[0]["confidence"],
+                    candidates=[_proposal("rule", "metric_query", 0.97)],
+                    arbitration_reason="profit_ranking_precheck",
+                )
+                return _triage_terminal_result(
+                    intents, input_text, history_msgs, damage_assessment,
+                    state=state,
                 )
 
             # 判定 2: 物流/订单状态查询直达

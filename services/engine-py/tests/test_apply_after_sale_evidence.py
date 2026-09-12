@@ -126,15 +126,22 @@ def test_tool_schema_has_evidence_param() -> None:
 def test_executor_injects_evidence_for_aftersale_tools() -> None:
     from engine_py.graph.nodes.step_execution_engine import maybe_inject_aftersale_evidence
 
-    args = maybe_inject_aftersale_evidence(
-        "applyAfterSale",
-        {"orderId": "O1", "type": "return_and_refund", "reason": "quality_issue"},
-        ["/api/uploads/a.jpg", "/api/uploads/b.jpg"],
+    args = asyncio.run(
+        maybe_inject_aftersale_evidence(
+            "applyAfterSale",
+            {"orderId": "O1", "type": "return_and_refund", "reason": "quality_issue"},
+            {"image_urls": ["/api/uploads/a.jpg", "/api/uploads/b.jpg"], "thread_id": "t1"},
+        )
     )
     assert args["evidenceImageUrls"] == ["/api/uploads/a.jpg", "/api/uploads/b.jpg"]
 
     # processRefund 不落工单表,但凭证随审批载荷让人工审批员可见
-    refund_args = maybe_inject_aftersale_evidence("processRefund", {"orderId": "O1", "reason": "破损"}, ["/api/uploads/a.jpg"])
+    refund_args = asyncio.run(
+        maybe_inject_aftersale_evidence(
+            "processRefund", {"orderId": "O1", "reason": "破损"},
+            {"image_urls": ["/api/uploads/a.jpg"], "thread_id": "t1"},
+        )
+    )
     assert refund_args["evidenceImageUrls"] == ["/api/uploads/a.jpg"]
 
 
@@ -142,14 +149,11 @@ def test_executor_injection_noop_cases() -> None:
     from engine_py.graph.nodes.step_execution_engine import maybe_inject_aftersale_evidence
 
     # 非售后工具不注入
-    assert maybe_inject_aftersale_evidence("getOrderStatus", {"orderId": "O1"}, ["/a.jpg"]) == {"orderId": "O1"}
-    # 本轮无图不注入
-    args = {"orderId": "O1"}
-    assert maybe_inject_aftersale_evidence("applyAfterSale", args, []) is args
-    assert maybe_inject_aftersale_evidence("applyAfterSale", args, None) is args
+    state = {"image_urls": ["/a.jpg"], "thread_id": "t1"}
+    assert asyncio.run(maybe_inject_aftersale_evidence("getOrderStatus", {"orderId": "O1"}, state)) == {"orderId": "O1"}
     # 已有凭证(LLM 或上游已给)不覆盖
     with_evidence = {"orderId": "O1", "evidenceImageUrls": ["/x.jpg"]}
-    assert maybe_inject_aftersale_evidence("applyAfterSale", with_evidence, ["/a.jpg"]) is with_evidence
+    assert asyncio.run(maybe_inject_aftersale_evidence("applyAfterSale", with_evidence, state)) is with_evidence
 
 
 def test_db_failure_errors_honestly(monkeypatch: pytest.MonkeyPatch, stubbed_order) -> None:

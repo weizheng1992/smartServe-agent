@@ -359,18 +359,25 @@ class CardSynthesizer:
         base_cards = list(existing_cards) if existing_cards else cards
         if any(c.get("type") == "quick_replies" for c in base_cards):
             return base_cards
+        # 真排行卡才挂消歧组:指标键运行时查表(ADR-0003 Q2 毛利回归后 5 键),
+        # 严禁手抄字面量与 METRIC_REGISTRY 漂移;导购推荐卡(recommendation)不触发。
+        from ..tools_registry.order_domain import OrderDomainService
+
+        ranking_metric_keys = set(OrderDomainService.METRIC_REGISTRY)
         if any(
             c.get("type") == "product_ranking"
-            and (c.get("data") or {}).get("rankingMetric") in ("gmv", "volume", "stock_risk")
+            and (c.get("data") or {}).get("rankingMetric") in ranking_metric_keys
             for c in base_cards
         ):
-            # ADR-0002:毛利/毛利率口径已随成本数据缺位移除,消歧组 5→3——
-            # 挂着算不了的口径就是死按钮。
+            # ADR-0003:成本快照到位,毛利/毛利率口径回归,消歧组回 5 键;
+            # 指标键运行时查表,与 METRIC_REGISTRY 永不漂移。
             quick_replies = {
                 "title": "您也可以一键切换其他统计口径：",
                 "options": [
                     {"label": "💰 按总销售额 (GMV)", "action": "send_message", "payload": {"text": "按总销售额最高的热销商品排行 Top 5"}},
                     {"label": "📦 按出货销量件数", "action": "send_message", "payload": {"text": "按出货销量最高的热销商品排行 Top 5"}},
+                    {"label": "📈 按净毛利润金额", "action": "send_message", "payload": {"text": "按净毛利润最高的热销商品排行 Top 5"}},
+                    {"label": "🎯 按单品毛利率 %", "action": "send_message", "payload": {"text": "按毛利率最高的热销商品排行 Top 5"}},
                     {"label": "⚠️ 排查滞销库存", "action": "send_message", "payload": {"text": "排查在售商品的滞销库存风险"}},
                 ],
             }
