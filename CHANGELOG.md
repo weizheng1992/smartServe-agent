@@ -4,6 +4,34 @@
 
 ---
 
+## [2.6.10] - 2026-09-12 (mock 兜底清零:七处欺骗性兜底拆除,失败/查空一律诚实空或真实失败)
+
+诊断起点(/triage + 全链路实测电池):分诊盘点定位五处残余欺骗性 mock,E2E 实测(40+ 条真实 LLM 消息)又撞出两处——「清空购物车→查看」100% 变出幻影 AJ1(`(await _load_cart(key)) or [演示车]` 的 falsy 陷阱:清空写入的 `[]` 必然落进兜底)、技能层加购 `or 899.0` 假价格(恰为已拆除的 Pegasus 假商品价)。工单 real-data-only/01,维护者裁决:演示身份体系(CUST-8801 等)保留划出范围。
+
+### 🐛 Fixes
+
+- **SKU 查询假目录拆除 + 商户货架接线**:`query_product_skus` 降级链重构为 **商户真货架(merchant_skus×merchant_spus,spu_code 精确/标题子串双解析)→ engine 本地 product_skus → 诚实空**;旧「查无/异常兜底 AJ1 三件套」整体退役——真店问「双肩包有什么规格」此前只能答「没有参数」(商户 62 SKU 不在命中面),现在按名直达真规格;两路出参经 `_sku_rows_to_payload` 共用 mapper 契约零漂移(skuId:商户路径取 sku_code 与导购候选/网关加购同标识,本地回退保持行 UUID)。
+- **地址簿假地址拆除**:`get_user_addresses` 旧「张先生/中关村」高保真兜底退役,查无/库不可达 → `total: 0` 空列表。
+- **地址保存假成功拆除**:`save_user_address` 写库失败旧返回 `success: True` + `addr_mock_` 假 ID(用户以为存上实际未落库)→ `success: False` + 可读错误。
+- **购物车演示车拆除**:`get_cart_summary` 空车/缺失键一律诚实空(`itemCount: 0`),`[] or 演示车` falsy 陷阱根除;`has_cart` 过时 docstring 同步更新。
+- **加购假价格双收口**:服务层 `add_to_cart` 缺价拒绝入车(899.0 兜底退役);技能层 `cart_manage_skill` 三处 `or 899.0`/初始化同步拆除透传真价,且入车被拒经 `_add_rejected_response` 如实回传、不再播报成功卡——服务层守卫不再被技能层预编价格架空。
+- **RAG 假切片退役**:ContextualRAG PG 查询失败旧降级「Local Fake RAG」(内联种子切片 + 关键词拍出的假相似度 0.35/0.65/0.55)→ 诚实空,与嵌入失败降级同标准;`SEED_DOCS`/`_search_local_fake_docs`/模拟相似度整体删除(冷启动播种自 9-09 起同源读 docs/knowledge,不受影响)。
+- **Admin 透视假轨迹拆除**:ThreadDeepTraceDrawer 时间线查空/加载失败旧按意图整段合成假对话(假思维链/置信度 0.985/假工单号/假顺丰单号)→ 空态「暂无历史对话消息」。
+
+### 🧹 命名与文案
+
+- `run_agent.py` 问候旁路 `mock_result` → `greeting_result`(内容是真实 onboarding 配置,仅命名失真)。
+- `gatekeeper.py` 审批挂起文案指路「人工授权模拟面板」(admin 无此面板)→ 改指真实入口「审批与风控审计」页(与 Sidebar/Header 导航名一致)。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **432 passed**(2.6.9 基线 423,+9 零回归):新增 `test_mock_purge.py` 9 用例——SKU 商户货架接线/OFF_SALE 与查无诚实空/双库不可达诚实空/地址簿诚实空/地址保存真实失败/空车诚实空/清空→查看空车/缺价拒绝入车/RAG 库失败诚实空;TDD 先红灯(AJ1 假目录在测试中现形)后绿灯。
+- ruff 干净;admin tsc 通过、biome 警告改前改后持平(4 处既有,零新增)。
+- 实弹复测(真网关 4000):清空→查看 → 「0 件商品(暂无商品)」零 AJ1;「推荐背包热销」→ 真货架 3 SPU 零跑鞋(检索链零回归)。
+- 已知边界(如实):「双肩包有什么规格」技能面会先反问具体商品(对话策略,工具面已按名直达);批注示例 long_memory 提示词中的 Nike/Air Jordan 系偏好抽取教学示例,非数据面,保留。
+
+---
+
 ## [2.6.9] - 2026-09-12 (加购幻影 Nike 收口 + 检索召回三连升:词干别名 / L4 词表锚定改写 / 诚实空品类盘点)
 
 诊断起点(/diagnosing-bugs,红灯脚本 /tmp/repro_cart_bug.py):「卖的好的短袖」推荐后追一句「把第一件加入购物车」,入车的是**不存在的 Nike Pegasus**。事故链三层——①「卖得好」措辞不在快轨触发词表,落入 structured_llm 图路径;② planner 给 executor 的是 searchProducts **工具**而非 ShoppingGuideSkill,工具路径不写 guide_context,且 `_execute_single_step_core` 对 state 的直接赋值是死写(executor_node 只回传四键),上一轮导购的 stale 候选经 run_agent 收口原样存回 TaskMemory;③ CartManageSkill 序数解析失败时硬编码 Pegasus/AJ1 假商品兜底,幻影商品入车。
