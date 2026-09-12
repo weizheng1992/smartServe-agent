@@ -4,6 +4,27 @@
 
 ---
 
+## [2.6.16] - 2026-09-12 (成本价数据工程毛利回归 + 售后凭证会话历史回溯 —— ADR-0003)
+
+ADR-0002 两个二期项一个版本收口(grill 一轮四问「按照推荐」)。
+
+### ✨ Features
+
+- **成本价双层落库(Q1)**:merchant_skus.cost_price(当前采购进价)+ merchant_order_items.cost_at_purchase(成交时进价快照),`ADD COLUMN IF NOT EXISTS` 追加进 `_MERCHANT_DDL` 幂等生效;seed 进价按 SKU 编码 crc32 从 42%~52% 系数调色板确定性推导(跨进程可复现,注明演示数据边界)。
+- **毛利/毛利率指标回归(Q2)**:gross_profit + margin_rate 恢复进 METRIC_REGISTRY,口径为成交快照精确值(Σ 量×成交价 − Σ 量×快照进价,非估算);统计口径消歧组回 5 键;`_REMOVED_METRICS` 删除;排行条目恢复 grossProfit/marginRate(前端可选渲染零改动);消歧组指标键运行时查表,严禁手抄字面量漂移。
+- **售后凭证会话历史回溯(Q3)**:`get_thread_evidence_images` 直查本会话 user 消息 image_urls(newest-first、跨消息去重、上限=视觉上限);凭证注入升级 state 驱动异步——本轮有图优先(严禁额外查库),本轮无图回溯历史,两者皆无原样返回。
+
+### 🐛 Fixes(实弹 + 双轴评审)
+
+- **毛利排行被两层 LLM 拒答**(实弹三连拒):triage 分类层与 planner 规划层都把「利润」当后台敏感数据——triage 判定 1.5 规则前置(`PROFIT_RANKING_RE` 利润词×排行词共现直通 metric_query,arbitration_reason 落库可审计,确定性规则不触碰 promptfoo LLM 基线)+ planner 提示词补经营口径合法性条款(严禁拒答为「后台报表」或改道导购)。
+- **成本假精确风险**(评审):cost 求和去 COALESCE 0——列 NOT NULL,漏写快照的明细报错可见而非毛利虚高呈精确;三处陈旧注释/文档串(还写着「毛利已移除」)对齐 ADR-0003;名不符实测试正名(退款件成本排除由断言直接证明)。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **492 passed**(2.6.15 基线 484 + 新增 8)、gateway 121 passed、ruff 双服务干净;重播种后 92/92 SKU、47/47 明细全带成本快照。实弹:净毛利排行冲锋衣 No.1(毛利 3,507.3 / 54.0%)、毛利率排行速干衬衫 No.1(58.0%)——口径不同冠军不同,纯真数据;带图轮后无图退款,审批载荷实弹携带轮 1 凭证(历史回溯命中)。ADR-0003 验证段已回填。
+
+---
+
 ## [2.6.15] - 2026-09-12 (售后凭证落票 + 排行真销量源 + 热销解禁 + 商户目录扩容 —— ADR-0002)
 
 2.6.14 收尾留档三项同根源遗留(数据不在该在的地方),grill-with-docs 两轮八问逐项裁决 + /to-spec 发布(.scratch/aftersale-evidence-real-sales),TDD 落地;实弹三抓三修。
