@@ -538,7 +538,9 @@ class AfterSaleTicket(Base):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     business_id: Mapped[str] = mapped_column(Text, nullable=False)
-    order_id: Mapped[str] = mapped_column(Text, ForeignKey("orders.order_id"), nullable=False)
+    # 订单双源现实(商户真单在 agent_merchant):order_id 只作引用不作 FK,
+    # 指向本地 orders 的外键会让商户单售后永远插不进去(2026-09-12 实弹抓出)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
     order_item_id: Mapped[str | None] = mapped_column(Text)
     user_id: Mapped[str] = mapped_column(Text, nullable=False)
     type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -546,6 +548,8 @@ class AfterSaleTicket(Base):
     reason_description: Mapped[str | None] = mapped_column(Text)
     refund_amount: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending_review'"), nullable=False)
+    # ADR-0002 Q1:本轮上传的瑕疵凭证(/api/uploads/... 相对 URL),审批员看单即看图
+    evidence_urls: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     return_tracking_number: Mapped[str | None] = mapped_column(Text)
     human_approval_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))

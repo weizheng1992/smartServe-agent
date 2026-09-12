@@ -218,16 +218,16 @@ class ShoppingGuideSkill(BaseSkill):
             }
 
         # 4. 组装商品卡片
-        # 诚实性(2026-09-12):商户货架无销量/GMV/毛利数据,严禁合成假热度
-        # (对齐 2.6.8 铁律)——只带真实字段(价格/现货/品类)+ 推荐位次文案,
-        # 前端对缺省排行字段按存在性渲染。
+        # 诚实性(ADR-0002 数据条件禁令):商户货架无销量数据,推荐卡严禁
+        # 「热销」字样与编造分数(metricScore=99-idx*5 已拆)——只带真实
+        # 字段(价格/现货/品类)+ 推荐位次;rankingMetric=recommendation
+        # 让卡合成器识别为推荐卡而非真排行(不触发统计口径消歧组)。
         cards = [
             {
                 "type": "product_ranking",
                 "data": {
                     "rankingMetric": "recommendation",
-                    "metricLabel": "热销推荐",
-                    "metricUnit": "分",
+                    "metricLabel": "为您推荐",
                     "itemCount": len(products),
                     "summary": f"为您精选 {len(products)} 款现货商品",
                     "products": [
@@ -238,8 +238,7 @@ class ShoppingGuideSkill(BaseSkill):
                             "category": p.get("category") or "精选现货",
                             "price": float(p.get("price") or 0),
                             "stock": int(p.get("stock") or 0),
-                            "metricScore": 99 - idx * 5,
-                            "metricDisplay": "热销推荐" if idx == 0 else f"推荐 No.{idx + 1}",
+                            "metricDisplay": "店长精选" if idx == 0 else f"推荐 No.{idx + 1}",
                         }
                         for idx, p in enumerate(products)
                     ],

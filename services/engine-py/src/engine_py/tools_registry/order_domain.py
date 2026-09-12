@@ -918,105 +918,119 @@ class OrderDomainService:
     # ------------------------------------------------------------------
     # 📊 商品多维度排行(简化版 metric 注册表;完整 NL 解析随 nlQuery 批次移植)
     # ------------------------------------------------------------------
+    # 排行指标(ADR-0002 Q3):商户真订单聚合源。gross_profit/margin_rate
+    # 随 engine 本地演示表路径整体移除——商户库无成本价列,算不了就不提供;
+    # 被移除指标诚实报错,严禁静默回退假装成功。
     METRIC_REGISTRY = {
-        "gmv": {"key": "gmv", "label": "总销售额 (GMV)", "unit": "元", "direction": "DESC",
-                "expression": 'COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0)::float'},
-        "volume": {"key": "volume", "label": "出货销量 (件)", "unit": "件", "direction": "DESC",
-                   "expression": "COALESCE(SUM(oi.quantity), 0)::int"},
-        "gross_profit": {"key": "gross_profit", "label": "净毛利润", "unit": "元", "direction": "DESC",
-                         "expression": ('(COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) - '
-                                         'COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase, p.cost_price, 0)), 0))::float')},
-        "margin_rate": {"key": "margin_rate", "label": "毛利率", "unit": "%", "direction": "DESC",
-                        "expression": ('CASE WHEN COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) > 0 THEN '
-                                       "(COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) - "
-                                       "COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase, p.cost_price, 0)), 0)) * 100.0 "
-                                       "/ COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) ELSE 0 END")},
-        "stock_risk": {"key": "stock_risk", "label": "滞销库存风险", "unit": "件", "direction": "ASC",
-                       "expression": "p.stock"},
+        "gmv": {"key": "gmv", "label": "总销售额 (GMV)", "unit": "元", "direction": "DESC"},
+        "volume": {"key": "volume", "label": "出货销量 (件)", "unit": "件", "direction": "DESC"},
+        "stock_risk": {"key": "stock_risk", "label": "滞销库存风险", "unit": "件", "direction": "ASC"},
+    }
+    _REMOVED_METRICS = {
+        "gross_profit": "净毛利润",
+        "margin_rate": "毛利率",
+        "profit": "净毛利润",
+        "margin": "毛利率",
+        # LLM 常直接回中文指标名,同口径诚实报错
+        "净毛利润": "净毛利润",
+        "毛利率": "毛利率",
     }
 
     @staticmethod
     async def query_product_ranking(options: dict) -> dict:
-        """📊 商品多维度排行与销售分析(租户隔离 + 经理负责制过滤)。"""
+        """📊 商品排行(ADR-0002):商户真订单聚合,退款/取消单不计入真实成交。
+
+        - 数据源 merchant_order_items × merchant_orders(排除 REFUNDED/CANCELLED),
+          在售过滤 ON_SALE,展示价 = MIN(sku.price),库存 = SUM(sku.stock),
+          与网关/检索链同源;零销量款不进 gmv/volume 榜(诚实空优于误导)。
+        - gross_profit/margin_rate 已移除(商户库无成本价列),传入即诚实报错。
+        - manager_id/businessId 过滤随 engine 本地表路径退役(单商户现实)。"""
         raw_input = options.get("query") or options.get("naturalQuery") or options.get("rankingMetric") or "gmv"
-        metric_key = raw_input if raw_input in OrderDomainService.METRIC_REGISTRY else "gmv"
-        limit_match = re.search(r"\btop\s*(\d+)", str(raw_input), re.IGNORECASE)
+        raw_str = str(raw_input)
+        if raw_str in OrderDomainService._REMOVED_METRICS:
+            return {
+                "error": (
+                    f"指标「{OrderDomainService._REMOVED_METRICS[raw_str]}」已下线:商户货架暂无成本价数据,"
+                    "无法诚实计算毛利。可用口径:总销售额 (GMV) / 出货销量 / 库存风险。"
+                )
+            }
+        registry = OrderDomainService.METRIC_REGISTRY
+        metric_key = raw_str if raw_str in registry else "gmv"
+        target_metric = registry[metric_key]
+        limit_match = re.search(r"\btop\s*(\d+)", raw_str, re.IGNORECASE)
         parsed_limit = int(limit_match.group(1)) if limit_match else None
-
-        session = await OrderDomainService.get_thread_session_context(options.get("threadId"))
-        business_id = options.get("businessId") or session["businessId"] or "nike"
-        user_id = session["userId"] or "4c9ce5e9-eb44-4988-b9f4-ec75ec9d8444"
-
-        target_metric = OrderDomainService.METRIC_REGISTRY[metric_key]
         final_limit = options.get("limit") or parsed_limit or 5
-        manager_only = options.get("managerOnly") if options.get("managerOnly") is not None else True
 
         try:
-            params: dict = {"bid": business_id}
-            where_clause = "WHERE p.business_id = :bid"
-            if manager_only and user_id:
-                where_clause += " AND p.manager_id = :uid"
-                params["uid"] = user_id
+            params: dict = {"lim": final_limit}
+            category_clause = ""
             if options.get("category"):
-                where_clause += " AND p.category = :cat"
+                category_clause = "AND s.category = :cat"
                 params["cat"] = options["category"]
-            params["lim"] = final_limit
+            having_clause = (
+                "HAVING COALESCE(MAX(agg.qty), 0) > 0" if metric_key in ("gmv", "volume") else ""
+            )
+            if metric_key == "gmv":
+                metric_expr = 'COALESCE(MAX(agg.gmv), 0)::float'
+            elif metric_key == "volume":
+                metric_expr = 'COALESCE(MAX(agg.qty), 0)::int'
+            else:
+                metric_expr = 'COALESCE(SUM(k.stock), 0)::int'
 
             sql = text(
-                'SELECT p.id AS "productId", p.name, p.category, p.price, p.stock, '
-                'COALESCE(p.cost_price, 0) AS "costPrice", '
-                'COALESCE(SUM(oi.quantity), 0)::int AS "totalVolume", '
-                'COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0)::float AS "totalGmv", '
-                'COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase, p.cost_price, 0)), 0)::float AS "totalCost", '
-                '(COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) - '
-                'COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase, p.cost_price, 0)), 0))::float AS "grossProfit", '
-                f'({target_metric["expression"]})::float AS "computedMetricValue" '
-                "FROM products p "
-                "LEFT JOIN order_items oi ON oi.product_id = p.id "
-                f"{where_clause} "
-                'GROUP BY p.id, p.name, p.category, p.price, p.stock, p.cost_price '
-                f'ORDER BY "computedMetricValue" {target_metric["direction"]} '
+                'SELECT s.id::text AS "productId", s.title AS "name", s.category, '
+                "MIN(k.price)::float AS price, "
+                'COALESCE(SUM(k.stock), 0)::int AS stock, '
+                'COALESCE(MAX(agg.qty), 0)::int AS "totalVolume", '
+                'COALESCE(MAX(agg.gmv), 0)::float AS "totalGmv", '
+                f'{metric_expr} AS "metricScore" '
+                "FROM merchant_spus s "
+                "LEFT JOIN merchant_skus k ON k.spu_id = s.id "
+                # 明细先按 spu_id 预聚合再连(2026-09-12 实弹实伤:1 SPU ×
+                # N SKU × M 明细三路直连笛卡尔放大,5 件卖成 30 件);退款/
+                # 取消单在子查询内排除,零销量 SPU 靠 LEFT JOIN 保留盘点。
+                "LEFT JOIN ("
+                "SELECT oi.spu_id, SUM(oi.quantity) AS qty, SUM(oi.quantity * oi.price) AS gmv "
+                "FROM merchant_order_items oi "
+                "JOIN merchant_orders o ON o.order_id = oi.order_id "
+                "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                "GROUP BY oi.spu_id"
+                ") agg ON agg.spu_id = s.spu_code "
+                f"WHERE s.status = 'ON_SALE' {category_clause} "
+                "GROUP BY s.id, s.title, s.category, agg.qty, agg.gmv "
+                f"{having_clause} "
+                f'ORDER BY "metricScore" {target_metric["direction"]} '
                 "LIMIT :lim"
             ).bindparams(**params)
 
-            async with get_session() as db_session:
-                rows = (await db_session.execute(sql)).mappings().all()
+            async with _merchant_reader_engine().connect() as conn:
+                rows = (await conn.execute(sql)).mappings().all()
 
-            ranked_products = []
-            for idx, r in enumerate(rows):
-                total_gmv = float(r.get("totalGmv") or 0)
-                gross_profit = float(r.get("grossProfit") or 0)
-                margin_rate = f"{(gross_profit / total_gmv) * 100:.1f}%" if total_gmv > 0 else "0.0%"
-                metric_value = float(r.get("computedMetricValue") or 0)
-                ranked_products.append(
-                    {
-                        "rank": idx + 1,
-                        "productId": str(r["productId"]),
-                        "name": str(r["name"]),
-                        "category": str(r.get("category") or "general"),
-                        "price": float(r.get("price") or 0),
-                        "costPrice": float(r.get("costPrice") or 0),
-                        "stock": int(r.get("stock") or 0),
-                        "totalVolume": int(r.get("totalVolume") or 0),
-                        "totalGmv": total_gmv,
-                        "grossProfit": gross_profit,
-                        "marginRate": margin_rate,
-                        "metricScore": metric_value,
-                        "metricDisplay": f"{metric_value:,.0f} {target_metric['unit']}",
-                    }
-                )
+            ranked_products = [
+                {
+                    "rank": idx + 1,
+                    "productId": r["productId"],
+                    "name": str(r["name"]),
+                    "category": str(r.get("category") or "general"),
+                    "price": float(r.get("price") or 0),
+                    "stock": int(r.get("stock") or 0),
+                    "totalVolume": int(r.get("totalVolume") or 0),
+                    "totalGmv": float(r.get("totalGmv") or 0),
+                    "metricScore": (metric_value := float(r.get("metricScore") or 0)),
+                    "metricDisplay": f"{metric_value:,.0f} {target_metric['unit']}",
+                }
+                for idx, r in enumerate(rows)
+            ]
 
             return {
                 "success": True,
                 "rankingMetric": target_metric["key"],
                 "metricLabel": target_metric["label"],
                 "metricUnit": target_metric["unit"],
-                "businessId": business_id,
-                "managerId": user_id if manager_only else None,
                 "itemCount": len(ranked_products),
                 "products": ranked_products,
                 "summary": (
-                    f"已为您完成{'名下负责商品' if manager_only else '全商户商品'}的排行检索，"
+                    f"已按真实成交(排除退款/取消单)完成排行检索，"
                     f"排序口径：【{target_metric['label']}】，共返回 {len(ranked_products)} 款商品。"
                 ),
             }

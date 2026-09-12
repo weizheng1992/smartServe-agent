@@ -659,6 +659,11 @@ class MallDomainService:
 
         ticket_id = f"AS-{int(time.time()):X}-{random.randint(100, 999)}"
         refund_amount = params.get("refundAmount") or float(order.get("totalAmount") or 0) or 100.0
+        # ADR-0002 Q1/Q2:本轮上传的瑕疵凭证落票(上限与引擎视觉上限一致);
+        # 不传 = 空数组,旧行为零破坏。executor 层程序化注入,严禁指望 LLM 抄 URL。
+        from ..vision.analyzer import MAX_IMAGES_PER_MESSAGE
+
+        evidence_urls = [str(u) for u in (params.get("evidenceImageUrls") or [])][:MAX_IMAGES_PER_MESSAGE]
 
         try:
             async with get_session() as session:
@@ -666,9 +671,10 @@ class MallDomainService:
                     text(
                         "INSERT INTO after_sale_tickets ("
                         "id, business_id, order_id, order_item_id, user_id, "
-                        "type, reason, reason_description, refund_amount, status, created_at, updated_at"
+                        "type, reason, reason_description, refund_amount, evidence_urls, status, created_at, updated_at"
                         ") VALUES ("
-                        ":tid, :bid, :oid, :oiid, :uid, :type, :reason, :rdesc, :amount, 'pending_review', NOW(), NOW())"
+                        ":tid, :bid, :oid, :oiid, :uid, :type, :reason, :rdesc, :amount, "
+                        "CAST(:evidence AS jsonb), 'pending_review', NOW(), NOW())"
                     ).bindparams(
                         tid=ticket_id,
                         bid=effective_biz_id,
@@ -679,6 +685,7 @@ class MallDomainService:
                         reason=params["reason"],
                         rdesc=params.get("reasonDescription") or "用户通过智能客服提交售后申请",
                         amount=refund_amount,
+                        evidence=json.dumps(evidence_urls, ensure_ascii=False),
                     )
                 )
                 await session.execute(
@@ -691,9 +698,11 @@ class MallDomainService:
                 )
                 await session.commit()
         except Exception as err:
-            print(
-                f"[MallDomainService.applyAfterSale] Database insert failed, returning fallback ticket: {err}"
-            )
+            # 诚实失败(ADR-0002):工单没落库就严禁播报「已提交」——吞异常
+            # 返回假 success 是 2026-09-12 实弹抓出的存量欺骗(商户单售后
+            # 因 order_id 外键错位从未真正落库)。
+            print(f"[MallDomainService.applyAfterSale] 售后工单落库失败 orderId={params.get('orderId')}: {err}")
+            return {"success": False, "error": "售后工单提交失败，请稍后重试或转人工客服处理。"}
 
         await tool_cache.delete(f"cache:order_status:{params['orderId']}")
 
@@ -705,6 +714,7 @@ class MallDomainService:
             "reason": params["reason"],
             "refundAmount": f"¥{refund_amount:.2f}",
             "status": "pending_review",
+            "evidenceCount": len(evidence_urls),
             "instruction": (
                 "仅退款申请已提交，系统预计将在 1-2 小时内原路返还款项。"
                 if params["type"] == "refund_only"

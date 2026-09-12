@@ -15,6 +15,22 @@ from .executor_fast_path import try_match_executor_fast_path
 
 _JSON_FENCE_START_RE = re.compile(r"^```json\s*")
 
+# 售后凭证程序化注入(ADR-0002 Q1):applyAfterSale 落工单 evidence_urls 列,
+# processRefund 经 HITL 审批载荷让人工审批员看到凭证。唯一可信来源是本轮
+# state.image_urls —— 严禁指望 LLM 从会话历史抄 URL(会错链漏链)。
+_AFTERSALE_EVIDENCE_TOOLS = frozenset({"applyAfterSale", "processRefund"})
+
+
+def maybe_inject_aftersale_evidence(tool_name: str, args: dict, image_urls: list | None) -> dict:
+    """售后工具 + 本轮有图 + 参数缺凭证 → 程序化补注(上限与引擎视觉上限一致)。"""
+    from ...vision.analyzer import MAX_IMAGES_PER_MESSAGE
+
+    if tool_name not in _AFTERSALE_EVIDENCE_TOOLS or not image_urls:
+        return args
+    if args.get("evidenceImageUrls"):
+        return args
+    return {**args, "evidenceImageUrls": list(image_urls)[:MAX_IMAGES_PER_MESSAGE]}
+
 
 def _try_import_skills():
     try:
@@ -156,7 +172,8 @@ async def _execute_single_step_core(
             '9. If the step description mentions searching, recommending or ranking products, comparing '
             'products, or checking SKU stock and reviews, select the matching product tool '
             '(e.g. "searchProducts", "compareProducts", "queryProductSkus", "queryProductReviews", '
-            '"queryProductRanking").\n'
+            '"queryProductRanking"). For hot-selling / best-seller asks (热销/热卖/畅销/卖得好), '
+            'select "queryProductRanking" with rankingMetric "volume" (real sales data only).\n'
             "10. Extract arguments from CONVERSATION HISTORY below.\n\n"
             'Output raw JSON object or "NONE":\n{"toolName": "toolName", "args": {"key": "value"}}\n\n'
             f"[CONVERSATION HISTORY]\n{history_context}"
@@ -176,7 +193,7 @@ async def _execute_single_step_core(
 
     if parsed_tool_call and parsed_tool_call.get("toolName") in allowed_tools:
         tool_name = parsed_tool_call["toolName"]
-        args = parsed_tool_call.get("args") or {}
+        args = maybe_inject_aftersale_evidence(tool_name, parsed_tool_call.get("args") or {}, state.get("image_urls"))
         order_id = args.get("orderId")
 
         # 4.1 重复退款防护拦截(三源判定,商户真单按用户归属匹配)

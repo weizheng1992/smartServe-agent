@@ -1,8 +1,10 @@
 """商户独立库种子数据 — 源自退役的 apps/merchant/src/db/seed.ts(SPU/SKU/多规格矩阵),
 并在其基础上扩容为多品类目录。
 
-6 大品类 18 个 SPU(户外机能 / 潮流T恤 / 下装裤类 / 潮流鞋靴 / 背包收纳 / 露营装备),
-每类 3 个 SPU、每个 SPU 带 2-6 个 SKU。测试客户 CUST-8801 名下三单,配合
+9 大品类 30 个 SPU(户外机能 / 潮流T恤 / 下装裤类 / 潮流鞋靴 / 背包收纳 / 露营装备 /
+衬衫 / 配饰 / 运动配件),92 个 SKU。另含 27 笔演示历史交易(ADR-0002 Q5/Q8):
+销量聚合有真实感分布(头部 4~8 件 / 腰部 1~3 件 / 约 1/3 SPU 零销量),含 REFUNDED
+单供「排除退款」聚合验证;聚合永远运行时真算,严禁写死成「热度」。测试客户 CUST-8801 名下三单,配合
 docs/assets/ 下三张破损测试图覆盖售后视觉链路的三条道:
 
 - AURORA-ORD-2026-9081 冲锋衣(PAID)  ← damaged-jacket.png(衣服破损,无单号,走商品归属消歧)
@@ -521,6 +523,420 @@ _SPUS = [
             ("AURORA-SKU-018-BLU-M5C", "木乃伊睡袋 湖蓝 舒适-5℃", {"颜色": "湖蓝", "温标": "舒适-5℃"}, 999.0, 1199.0, 20, None),
         ],
     },
+    {
+        'code': "SPU-AURORA-019",
+        'title': "极光 UPF40+ 速干透气户外机能长袖衬衫",
+        'subtitle': "UPF40+防晒 | 速干排汗 | 拉链透气井",
+        'description': "远足徒步与日常通勤两用的机能长袖衬衫,UPF40+ 抗紫外线面料配合速干排汗纤维,胸前拉链透气井与卷袖袢设计应对多变山野天气。",
+        'category': "衬衫",
+        'main_image': _IMG_SHIRTS,
+        'banners': [_IMG_SHIRTS, _IMG_RACK],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["云白", "沙棕"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M (170/88A)", "L (175/92A)"],
+            },
+        ],
+        'specs': {
+            '面料材质': "92% 锦纶 + 8% 氨纶",
+            '防晒指数': "UPF40+",
+            '功能': "速干排汗 / 抗紫外线",
+            '版型': "常规修身",
+        },
+        'skus': [
+            ("AURORA-SKU-019-WHT-M", "速干机能衬衫 云白 M码", {
+                '颜色': "云白",
+                '尺码': "M (170/88A)",
+            }, 399.0, 499.0, 40, "690123419011"),
+            ("AURORA-SKU-019-WHT-L", "速干机能衬衫 云白 L码", {
+                '颜色': "云白",
+                '尺码': "L (175/92A)",
+            }, 399.0, 499.0, 52, "690123419012"),
+            ("AURORA-SKU-019-SAN-M", "速干机能衬衫 沙棕 M码", {
+                '颜色': "沙棕",
+                '尺码': "M (170/88A)",
+            }, 399.0, 499.0, 28, "690123419013"),
+            ("AURORA-SKU-019-SAN-L", "速干机能衬衫 沙棕 L码", {
+                '颜色': "沙棕",
+                '尺码': "L (175/92A)",
+            }, 399.0, 499.0, 33, "690123419014"),
+        ],
+        'image': _IMG_SHIRTS,
+    },
+    {
+        'code': "SPU-AURORA-020",
+        'title': "极光 磨毛法兰绒保暖格纹长袖衬衫",
+        'subtitle': "磨毛法兰绒 | 复古格纹 | 起绒保暖",
+        'description': "精梳棉磨毛法兰绒,双面起绒亲肤保暖;经典复古格纹,山系穿搭与秋冬通勤都能压得住场。",
+        'category': "衬衫",
+        'main_image': _IMG_RACK,
+        'banners': [_IMG_RACK, _IMG_SHIRTS],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["铁灰格", "驼棕格"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M (170/88A)", "L (175/92A)", "XL (180/96A)"],
+            },
+        ],
+        'specs': {
+            '面料材质': "100% 精梳棉(磨毛法兰绒)",
+            '克重': "260g/㎡",
+            '功能': "起绒保暖",
+            '版型': "宽松落肩",
+        },
+        'skus': [
+            ("AURORA-SKU-020-GRY-M", "法兰绒格纹衬衫 铁灰格 M码", {
+                '颜色': "铁灰格",
+                '尺码': "M (170/88A)",
+            }, 459.0, 559.0, 25, "690123420011"),
+            ("AURORA-SKU-020-GRY-L", "法兰绒格纹衬衫 铁灰格 L码", {
+                '颜色': "铁灰格",
+                '尺码': "L (175/92A)",
+            }, 459.0, 559.0, 30, "690123420012"),
+            ("AURORA-SKU-020-TAN-L", "法兰绒格纹衬衫 驼棕格 L码", {
+                '颜色': "驼棕格",
+                '尺码': "L (175/92A)",
+            }, 459.0, 559.0, 18, "690123420013"),
+        ],
+        'image': _IMG_RACK,
+    },
+    {
+        'code': "SPU-AURORA-021",
+        'title': "极光 120g超轻可收纳防晒皮肤短袖衬衫",
+        'subtitle': "超轻120g | 可收纳自带袋 | DWR防泼水",
+        'description': "仅 120g 的超轻皮肤衬衫,自带收纳袋可压缩至掌心大小;DWR 防泼水处理应对夏日阵雨,UPF30+ 日常通勤防晒足够。",
+        'category': "衬衫",
+        'main_image': _IMG_SHIRTS,
+        'banners': [_IMG_SHIRTS],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["云白", "湖蓝"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M (170/88A)", "L (175/92A)"],
+            },
+        ],
+        'specs': {
+            '面料材质': "100% 锦纶 20D",
+            '重量': "约120g(≈L码)",
+            '功能': "防泼水 / UPF30+",
+            '收纳': "自带掌心收纳袋",
+        },
+        'skus': [
+            ("AURORA-SKU-021-WHT-M", "超轻皮肤衬衫 云白 M码", {
+                '颜色': "云白",
+                '尺码': "M (170/88A)",
+            }, 329.0, 399.0, 36, "690123421011"),
+            ("AURORA-SKU-021-WHT-L", "超轻皮肤衬衫 云白 L码", {
+                '颜色': "云白",
+                '尺码': "L (175/92A)",
+            }, 329.0, 399.0, 42, "690123421012"),
+            ("AURORA-SKU-021-BLU-L", "超轻皮肤衬衫 湖蓝 L码", {
+                '颜色': "湖蓝",
+                '尺码': "L (175/92A)",
+            }, 329.0, 399.0, 20, "690123421013"),
+        ],
+        'image': _IMG_SHIRTS,
+    },
+    {
+        'code': "SPU-AURORA-022",
+        'title': "极光 亚麻混纺透气度假休闲短袖衬衫",
+        'subtitle': "亚麻混纺 | 透气垂坠 | 度假廓形",
+        'description': "55% 亚麻混纺带来天然透气与垂坠廓形,海岛度假与夏日 citywalk 都合适的松弛感短袖衬衫。",
+        'category': "衬衫",
+        'main_image': _IMG_SHIRTS,
+        'banners': [_IMG_SHIRTS, _IMG_DENIM],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["米杏", "靛蓝"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M (170/88A)", "L (175/92A)"],
+            },
+        ],
+        'specs': {
+            '面料材质': "55% 亚麻 + 45% 棉",
+            '功能': "透气吸湿",
+            '版型': "度假宽松廓形",
+        },
+        'skus': [
+            ("AURORA-SKU-022-BEG-M", "亚麻度假衬衫 米杏 M码", {
+                '颜色': "米杏",
+                '尺码': "M (170/88A)",
+            }, 379.0, 459.0, 22, "690123422011"),
+            ("AURORA-SKU-022-BEG-L", "亚麻度假衬衫 米杏 L码", {
+                '颜色': "米杏",
+                '尺码': "L (175/92A)",
+            }, 379.0, 459.0, 26, "690123422012"),
+        ],
+        'image': _IMG_SHIRTS,
+    },
+    {
+        'code': "SPU-AURORA-023",
+        'title': "极光 UPF50+ 可折叠双面戴渔夫帽",
+        'subtitle': "UPF50+ | 可折叠随行 | 双面两戴",
+        'description': "UPF50+ 防晒渔夫帽,帽檐定型可任意折叠不塌;双面两戴一帽两色,收纳进背包侧袋毫无存在感。",
+        'category': "配饰",
+        'main_image': _IMG_CAMP,
+        'banners': [_IMG_CAMP],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["卡其", "藏青"],
+            },
+            {
+                'name': "尺码",
+                'values': ["均码 (56-60cm)"],
+            },
+        ],
+        'specs': {
+            '材质': "锦纶 + UPF50+ 涂层",
+            '帽檐': "7.5cm 定型宽檐",
+            '功能': "可折叠 / 双面两戴",
+        },
+        'skus': [
+            ("AURORA-SKU-023-KH-F", "防晒渔夫帽 卡其 均码", {
+                '颜色': "卡其",
+                '尺码': "均码 (56-60cm)",
+            }, 129.0, 159.0, 60, "690123423011"),
+            ("AURORA-SKU-023-NVY-F", "防晒渔夫帽 藏青 均码", {
+                '颜色': "藏青",
+                '尺码': "均码 (56-60cm)",
+            }, 129.0, 159.0, 55, "690123423012"),
+        ],
+        'image': _IMG_CAMP,
+    },
+    {
+        'code': "SPU-AURORA-024",
+        'title': "极光 防风保暖触屏魔术手套",
+        'subtitle': "触屏指尖 | 防风抓绒 | 弹力贴合",
+        'description': "防风抓绒外层搭配导电触屏指尖,冬天刷手机不用脱手套;四面弹力贴合手型,骑行通勤山野皆宜。",
+        'category': "配饰",
+        'main_image': _IMG_SLEEP,
+        'banners': [_IMG_SLEEP],
+        'dimensions': [
+            {
+                'name': "尺码",
+                'values': ["M", "L"],
+            },
+        ],
+        'specs': {
+            '材质': "抓绒 + 导电纤维指尖",
+            '功能': "触屏 / 防风保暖",
+        },
+        'skus': [
+            ("AURORA-SKU-024-BLK-M", "触屏保暖手套 黑色 M码", {
+                '尺码': "M",
+            }, 99.0, 129.0, 48, "690123424011"),
+            ("AURORA-SKU-024-BLK-L", "触屏保暖手套 黑色 L码", {
+                '尺码': "L",
+            }, 99.0, 129.0, 44, "690123424012"),
+        ],
+        'image': _IMG_SLEEP,
+    },
+    {
+        'code': "SPU-AURORA-025",
+        'title': "极光 速干无缝多功能魔术头巾围脖",
+        'subtitle': "无缝编织 | 速干吸汗 | 12种戴法",
+        'description': "无缝圆筒编织不勒头,速干吸汗面料;面罩、发带、围脖、头巾十二种戴法,是山野多面手。",
+        'category': "配饰",
+        'main_image': _IMG_CAMP,
+        'banners': [_IMG_CAMP],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["曜黑", "雾灰"],
+            },
+            {
+                'name': "尺码",
+                'values': ["均码"],
+            },
+        ],
+        'specs': {
+            '材质': "90% 涤纶 + 10% 氨纶",
+            '功能': "速干 / 无缝 / 多用途",
+        },
+        'skus': [
+            ("AURORA-SKU-025-BLK-F", "魔术头巾围脖 曜黑 均码", {
+                '颜色': "曜黑",
+                '尺码': "均码",
+            }, 59.0, 79.0, 80, "690123425011"),
+            ("AURORA-SKU-025-GRY-F", "魔术头巾围脖 雾灰 均码", {
+                '颜色': "雾灰",
+                '尺码': "均码",
+            }, 59.0, 79.0, 75, "690123425012"),
+        ],
+        'image': _IMG_CAMP,
+    },
+    {
+        'code': "SPU-AURORA-026",
+        'title': "极光 宽檐透气可调节防晒空顶帽",
+        'subtitle': "宽檐大帽檐 | 空顶透气 | 围头可调节",
+        'description': "空顶设计头顶散热,宽檐全向遮阳;围头魔术贴可调节,跑步徒步都不晃。",
+        'category': "配饰",
+        'main_image': _IMG_CAMP,
+        'banners': [_IMG_CAMP],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["米白", "军绿"],
+            },
+            {
+                'name': "尺码",
+                'values': ["均码 (54-60cm)", "加大 (60-63cm)"],
+            },
+        ],
+        'specs': {
+            '材质': "轻量锦纶",
+            '帽檐': "9cm 超宽檐",
+            '功能': "空顶透气 / 可调节",
+        },
+        'skus': [
+            ("AURORA-SKU-026-WHT-F", "防晒空顶帽 米白 均码", {
+                '颜色': "米白",
+                '尺码': "均码 (54-60cm)",
+            }, 139.0, 169.0, 38, "690123426011"),
+            ("AURORA-SKU-026-GRN-F", "防晒空顶帽 军绿 均码", {
+                '颜色': "军绿",
+                '尺码': "均码 (54-60cm)",
+            }, 139.0, 169.0, 35, "690123426012"),
+            ("AURORA-SKU-026-GRN-L", "防晒空顶帽 军绿 加大", {
+                '颜色': "军绿",
+                '尺码': "加大 (60-63cm)",
+            }, 139.0, 169.0, 12, "690123426013"),
+        ],
+        'image': _IMG_CAMP,
+    },
+    {
+        'code': "SPU-AURORA-027",
+        'title': "极光 Tritan大容量便携弹盖运动水壶",
+        'subtitle': "Tritan材质 | 1L大容量 | 弹盖直饮",
+        'description': "食品级 Tritan 材质耐摔无异味,1L 大容量减少接水次数;单手弹盖直饮,登山骑行办公都顺手。",
+        'category': "运动配件",
+        'main_image': _IMG_CAMP,
+        'banners': [_IMG_CAMP],
+        'dimensions': [
+            {
+                'name': "容量",
+                'values': ["750ml", "1L"],
+            },
+        ],
+        'specs': {
+            '材质': "食品级 Tritan",
+            '耐温': "-10℃~96℃",
+            '功能': "弹盖直饮 / 挂环便携",
+        },
+        'skus': [
+            ("AURORA-SKU-027-750", "便携运动水壶 750ml", {
+                '容量': "750ml",
+            }, 79.0, 99.0, 66, "690123427011"),
+            ("AURORA-SKU-027-1L", "便携运动水壶 1L", {
+                '容量': "1L",
+            }, 89.0, 109.0, 58, "690123427012"),
+        ],
+        'image': _IMG_CAMP,
+    },
+    {
+        'code': "SPU-AURORA-028",
+        'title': "极光 硅胶缓震环透气针织运动护膝",
+        'subtitle': "硅胶缓震环 | 透气针织 | 左右通用",
+        'description': "环形硅胶缓震垫稳定髌骨,三维针织逐区透气加压;跑步登山羽毛球,膝盖不舒服时它最懂。",
+        'category': "运动配件",
+        'main_image': _IMG_TRAIL,
+        'banners': [_IMG_TRAIL],
+        'dimensions': [
+            {
+                'name': "尺码",
+                'values': ["M", "L", "XL"],
+            },
+        ],
+        'specs': {
+            '材质': "尼龙针织 + 硅胶缓震环",
+            '功能': "缓震 / 加压 / 透气",
+            '适用': "跑步 / 登山 / 球类",
+        },
+        'skus': [
+            ("AURORA-SKU-028-M", "缓震运动护膝 M码", {
+                '尺码': "M",
+            }, 149.0, 179.0, 30, "690123428011"),
+            ("AURORA-SKU-028-L", "缓震运动护膝 L码", {
+                '尺码': "L",
+            }, 149.0, 179.0, 34, "690123428012"),
+            ("AURORA-SKU-028-XL", "缓震运动护膝 XL码", {
+                '尺码': "XL",
+            }, 149.0, 179.0, 16, "690123428013"),
+        ],
+        'image': _IMG_TRAIL,
+    },
+    {
+        'code': "SPU-AURORA-029",
+        'title': "极光 8mm加厚TPE双面防滑瑜伽垫",
+        'subtitle': "8mm加厚 | TPE双面防滑 | 附绑带",
+        'description': "8mm 加厚缓冲护膝护踝,TPE 双面防滑纹路抓地稳;自带绑带收纳,家练外出都轻便。",
+        'category': "运动配件",
+        'main_image': _IMG_CAMP,
+        'banners': [_IMG_CAMP],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["紫灰", "暮蓝"],
+            },
+        ],
+        'specs': {
+            '材质': "TPE 双层",
+            '厚度': "8mm",
+            '功能': "双面防滑 / 附收纳绑带",
+        },
+        'skus': [
+            ("AURORA-SKU-029-GRY", "TPE瑜伽垫 紫灰", {
+                '颜色': "紫灰",
+            }, 199.0, 239.0, 26, "690123429011"),
+            ("AURORA-SKU-029-BLU", "TPE瑜伽垫 暮蓝", {
+                '颜色': "暮蓝",
+            }, 199.0, 239.0, 24, "690123429012"),
+        ],
+        'image': _IMG_CAMP,
+    },
+    {
+        'code': "SPU-AURORA-030",
+        'title': "极光 三档亮度USB-C磁吸露营营地灯",
+        'subtitle': "三档亮度 | USB-C充电 | 磁吸悬挂",
+        'description': "三档亮度一键切换,最高 300 流明照亮整顶帐篷;底部磁吸 + 提挂两用,USB-C 快充 6 小时续航。",
+        'category': "运动配件",
+        'main_image': _IMG_TENT,
+        'banners': [_IMG_TENT],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["曜黑", "军绿"],
+            },
+        ],
+        'specs': {
+            '亮度': "最高300流明/三档",
+            '充电': "USB-C / 6小时续航",
+            '安装': "磁吸 + 提挂两用",
+        },
+        'skus': [
+            ("AURORA-SKU-030-BLK", "露营营地灯 曜黑", {
+                '颜色': "曜黑",
+            }, 169.0, 199.0, 32, "690123430011"),
+            ("AURORA-SKU-030-GRN", "露营营地灯 军绿", {
+                '颜色': "军绿",
+            }, 169.0, 199.0, 28, "690123430012"),
+        ],
+        'image': _IMG_TENT,
+    },
 ]
 
 _ADDR_GUOMAO = {
@@ -539,6 +955,7 @@ _ORDERS = [
     {
         "order_id": "AURORA-ORD-2026-9081",
         "status": "PAID",
+        "days_ago": 30,
         "total": 1299.0,
         "address": _ADDR_GUOMAO,
         "tracking": None,
@@ -560,6 +977,7 @@ _ORDERS = [
     {
         "order_id": "AURORA-ORD-2026-9082",
         "status": "SHIPPED",
+        "days_ago": 21,
         "total": 589.0,
         "address": _ADDR_ZHONGGUANCUN,
         "tracking": {
@@ -587,6 +1005,7 @@ _ORDERS = [
         # OCR/破损链路测试单:易碎玻璃制品,已签收开箱破损,与 docs/assets/ 两张咖啡套装测试图配套
         "order_id": "AURORA-ORD-2026-9083",
         "status": "SHIPPED",
+        "days_ago": 14,
         "total": 459.0,
         "address": _ADDR_GUOMAO,
         "tracking": {
@@ -611,6 +1030,92 @@ _ORDERS = [
         ],
     },
 ]
+
+
+# ---------------------------------------------------------------------------
+# 演示历史交易(ADR-0002 Q5/Q8):使销量聚合有真实感分布 —— 头部 4~8 件、
+# 腰部 1~3 件、约 1/3 SPU 零销量(诚实长尾),并含 REFUNDED 单供「排除退款」
+# 聚合逻辑真实验证。数据诚实边界:这是演示环境的合法 seed 数据;排行/热销
+# 永远运行时真聚合,严禁任何代码把这里的行数写死成「热度」。
+_HISTORY_ITEMS = [
+    # (order_id, status, days_ago, [(spu_code, sku_code, qty), ...])
+    ("AURORA-ORD-2026-9091", "PAID", 2, [("SPU-AURORA-002", "AURORA-SKU-002-GRY-M", 2), ("SPU-AURORA-027", "AURORA-SKU-027-750", 1)]),
+    ("AURORA-ORD-2026-9092", "SHIPPED", 3, [("SPU-AURORA-001", "AURORA-SKU-002", 1)]),
+    ("AURORA-ORD-2026-9093", "DELIVERED", 6, [("SPU-AURORA-004", "AURORA-SKU-004-GRY-41", 1), ("SPU-AURORA-002", "AURORA-SKU-002-GRY-L", 1)]),
+    ("AURORA-ORD-2026-9094", "PAID", 9, [("SPU-AURORA-012", "AURORA-SKU-012-BRN-42", 1)]),
+    ("AURORA-ORD-2026-9095", "SHIPPED", 12, [("SPU-AURORA-014", "AURORA-SKU-014-RED-45L", 1), ("SPU-AURORA-015", "AURORA-SKU-015-BLK", 1)]),
+    ("AURORA-ORD-2026-9096", "DELIVERED", 14, [("SPU-AURORA-002", "AURORA-SKU-002-GRY-M", 2)]),
+    ("AURORA-ORD-2026-9097", "PAID", 16, [("SPU-AURORA-005", "AURORA-SKU-005-BLK-M", 1)]),
+    ("AURORA-ORD-2026-9098", "SHIPPED", 18, [("SPU-AURORA-017", "AURORA-SKU-017-GRN-2P", 1)]),
+    ("AURORA-ORD-2026-9099", "REFUNDED", 20, [("SPU-AURORA-004", "AURORA-SKU-004-GRY-42", 2)]),
+    ("AURORA-ORD-2026-9100", "SHIPPED", 22, [("SPU-AURORA-019", "AURORA-SKU-019-WHT-L", 1), ("SPU-AURORA-023", "AURORA-SKU-023-KH-F", 1)]),
+    ("AURORA-ORD-2026-9101", "DELIVERED", 24, [("SPU-AURORA-004", "AURORA-SKU-004-GRY-41", 1), ("SPU-AURORA-012", "AURORA-SKU-012-BRN-43", 1)]),
+    ("AURORA-ORD-2026-9102", "PAID", 26, [("SPU-AURORA-014", "AURORA-SKU-014-RED-45L", 2)]),
+    ("AURORA-ORD-2026-9103", "SHIPPED", 28, [("SPU-AURORA-001", "AURORA-SKU-002", 1), ("SPU-AURORA-006", "AURORA-SKU-006-BLK-M", 1)]),
+    ("AURORA-ORD-2026-9104", "DELIVERED", 30, [("SPU-AURORA-002", "AURORA-SKU-002-GRY-L", 1), ("SPU-AURORA-015", "AURORA-SKU-015-TAN", 1), ("SPU-AURORA-027", "AURORA-SKU-027-1L", 1)]),
+    ("AURORA-ORD-2026-9105", "PAID", 32, [("SPU-AURORA-003", "AURORA-SKU-003-BLK-M", 1)]),
+    ("AURORA-ORD-2026-9106", "SHIPPED", 34, [("SPU-AURORA-001", "AURORA-SKU-001-BLK-M", 1), ("SPU-AURORA-013", "AURORA-SKU-013-BLK-18L", 1)]),
+    ("AURORA-ORD-2026-9107", "DELIVERED", 36, [("SPU-AURORA-004", "AURORA-SKU-004-GRY-41", 1), ("SPU-AURORA-011", "AURORA-SKU-011-ORG-41", 1)]),
+    ("AURORA-ORD-2026-9108", "DELIVERED", 38, [("SPU-AURORA-005", "AURORA-SKU-005-BLK-L", 1), ("SPU-AURORA-016", "AURORA-SKU-016-GRN-BASIC", 1)]),
+    ("AURORA-ORD-2026-9109", "SHIPPED", 40, [("SPU-AURORA-012", "AURORA-SKU-012-BRN-42", 1), ("SPU-AURORA-018", "AURORA-SKU-018-GRY-0C", 1)]),
+    ("AURORA-ORD-2026-9110", "DELIVERED", 42, [("SPU-AURORA-002", "AURORA-SKU-002-GRY-M", 1), ("SPU-AURORA-004", "AURORA-SKU-004-GRY-41", 1)]),
+    ("AURORA-ORD-2026-9111", "REFUNDED", 44, [("SPU-AURORA-014", "AURORA-SKU-014-GRN-38L", 1)]),
+    ("AURORA-ORD-2026-9112", "SHIPPED", 46, [("SPU-AURORA-001", "AURORA-SKU-001-BLK-M", 1), ("SPU-AURORA-013", "AURORA-SKU-013-BLK-26L", 1)]),
+    ("AURORA-ORD-2026-9113", "PAID", 48, [("SPU-AURORA-012", "AURORA-SKU-012-BRN-43", 1), ("SPU-AURORA-003", "AURORA-SKU-003-BLK-L", 1)]),
+    ("AURORA-ORD-2026-9114", "SHIPPED", 50, [("SPU-AURORA-005", "AURORA-SKU-005-BLK-M", 1), ("SPU-AURORA-019", "AURORA-SKU-019-SAN-L", 1)]),
+    ("AURORA-ORD-2026-9115", "DELIVERED", 52, [("SPU-AURORA-004", "AURORA-SKU-004-GRY-42", 1)]),
+    ("AURORA-ORD-2026-9116", "SHIPPED", 54, [("SPU-AURORA-015", "AURORA-SKU-015-BLK", 1), ("SPU-AURORA-023", "AURORA-SKU-023-NVY-F", 1)]),
+    ("AURORA-ORD-2026-9117", "SHIPPED", 57, [("SPU-AURORA-017", "AURORA-SKU-017-ORG-2P", 1)]),
+]
+
+
+def _build_history_orders() -> list[dict]:
+    """从 _SPUS 目录派生历史单行项目(title/价格取自 SKU 真值,单一事实源)。"""
+    sku_index = {sku[0]: (spu, sku) for spu in _SPUS for sku in spu["skus"]}
+    orders: list[dict] = []
+    seq = 1
+    for oid, status, days_ago, items in _HISTORY_ITEMS:
+        rows = []
+        for spu_code, sku_code, qty in items:
+            spu, sku = sku_index[sku_code]
+            rows.append(
+                {
+                    "spu": spu_code,
+                    "sku": sku_code,
+                    "title": spu["title"],
+                    "sku_title": sku[1],
+                    "quantity": qty,
+                    "price": float(sku[3]),
+                    "image": spu.get("image") or spu["main_image"],
+                    "spec": " / ".join(str(v) for v in sku[2].values()),
+                }
+            )
+        tracking = None
+        if status in ("SHIPPED", "DELIVERED"):
+            tracking = {
+                "carrier": "SF",
+                "trackingNumber": f"SF10829385{seq:03d}",
+                "status": "DELIVERED" if status == "DELIVERED" else "IN_TRANSIT",
+                "latestLocation": "北京朝阳国贸营业点" if status == "DELIVERED" else "北京顺丰分拨中心",
+            }
+            seq += 1
+        orders.append(
+            {
+                "order_id": oid,
+                "status": status,
+                "days_ago": days_ago,
+                "total": sum(r["price"] * r["quantity"] for r in rows),
+                "address": _ADDR_GUOMAO if int(oid[-1]) % 2 else _ADDR_ZHONGGUANCUN,
+                "tracking": tracking,
+                "returnable": True,
+                "address_modifiable": status == "PAID",
+                "items": rows,
+            }
+        )
+    return orders
+
+
+_ORDERS.extend(_build_history_orders())
 
 
 async def seed_merchant_data() -> None:
@@ -693,8 +1198,9 @@ async def seed_merchant_data() -> None:
             await conn.execute(
                 text(
                     "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, currency, "
-                    "shipping_address, tracking_info, is_returnable, is_address_modifiable) "
-                    "VALUES (:oid, 'CUST-8801', :status, :total, 'CNY', :addr, :tracking, :ret, :modif)"
+                    "shipping_address, tracking_info, is_returnable, is_address_modifiable, created_at) "
+                    "VALUES (:oid, 'CUST-8801', :status, :total, 'CNY', :addr, :tracking, :ret, :modif, "
+                    "NOW() - make_interval(days => :days))"
                 ),
                 {
                     "oid": order["order_id"],
@@ -704,6 +1210,7 @@ async def seed_merchant_data() -> None:
                     "tracking": json.dumps(order["tracking"], ensure_ascii=False) if order["tracking"] else None,
                     "ret": order["returnable"],
                     "modif": order["address_modifiable"],
+                    "days": order.get("days_ago", 0),
                 },
             )
             for it in order["items"]:

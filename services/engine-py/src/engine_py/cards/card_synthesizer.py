@@ -10,10 +10,13 @@ _AMOUNT_STRIP_RE = re.compile(r"[^0-9.]")
 
 # ── 场景化快捷回复(ADR-0001,2026-09-12)───────────────────────────────
 # 每个按钮背后必须有真实能力兜底(死按钮禁令 = 2.6.8 数据诚实铁律延伸到
-# UI 交互层);文案严禁「热销/卖得好/爆款」——商户货架无销量列。
+# UI 交互层);「热销」类文案自 ADR-0002 起改为数据条件禁令——有真销量
+# 聚合兜底的专用入口可挂,品类 chip 自身仍严禁热度词。
 # 场景键为意图 id(呈现层自有,意图注册表零改动,ADR-0001 Q6=A)。
 _SCENE_REFUND_INTENTS = frozenset({"refund", "order_return"})
 _GUIDE_INTENT = "shopping_guide"
+# 品类快捷区总上限 8 = 热销入口 1 + 品类 7(ADR-0002 Q7)
+_GUIDE_CHIP_CATEGORY_LIMIT = 7
 
 
 def _intent_ids(intents: list[dict] | None) -> set[str]:
@@ -47,17 +50,24 @@ def _scene_quick_replies(options: dict) -> dict:
     if intent_ids & _SCENE_REFUND_INTENTS:
         return {"title": "您可能需要：", "options": list(_QUICK_REPLY_SETS["refund"])}
     if _GUIDE_INTENT in intent_ids:
-        categories = [c for c in (options.get("shelfCategories") or []) if c.get("category")][:6]
+        categories = [c for c in (options.get("shelfCategories") or []) if c.get("category")][:_GUIDE_CHIP_CATEGORY_LIMIT]
         if categories:
             return {
                 "title": "在售品类，点按直达：",
                 "options": [
-                    {
-                        "label": f"🏷️ {c['category']}({c.get('spuCount', 0)}款)",
-                        "action": "send_message",
-                        "payload": {"text": f"看看{c['category']}有什么商品"},
-                    }
-                    for c in categories
+                    # ADR-0002 Q4/Q7:热销入口置顶——点击走真销量排行
+                    # (queryProductRanking 商户真订单聚合);品类 chip 自身
+                    # 严禁挂热度词,「热销」二字由真数据兜底(数据条件禁令)。
+                    # 「热销」裸词会被导购词表截获(实弹验证),点击文本必须带排行/销量语义
+                    {"label": "🔥 热销商品", "action": "send_message", "payload": {"text": "按销量查一下热销商品排行"}},
+                    *[
+                        {
+                            "label": f"🏷️ {c['category']}({c.get('spuCount', 0)}款)",
+                            "action": "send_message",
+                            "payload": {"text": f"看看{c['category']}有什么商品"},
+                        }
+                        for c in categories
+                    ],
                 ],
             }
     return {"title": "您可能需要：", "options": list(_QUICK_REPLY_SETS["default"])}
@@ -349,15 +359,19 @@ class CardSynthesizer:
         base_cards = list(existing_cards) if existing_cards else cards
         if any(c.get("type") == "quick_replies" for c in base_cards):
             return base_cards
-        if any(c.get("type") == "product_ranking" for c in base_cards):
+        if any(
+            c.get("type") == "product_ranking"
+            and (c.get("data") or {}).get("rankingMetric") in ("gmv", "volume", "stock_risk")
+            for c in base_cards
+        ):
+            # ADR-0002:毛利/毛利率口径已随成本数据缺位移除,消歧组 5→3——
+            # 挂着算不了的口径就是死按钮。
             quick_replies = {
                 "title": "您也可以一键切换其他统计口径：",
                 "options": [
-                    {"label": "💰 按总销售额 (GMV)", "action": "send_message", "payload": {"text": "按总销售额最高查询我负责的商品 Top 5"}},
-                    {"label": "📦 按出货销量件数", "action": "send_message", "payload": {"text": "按出货销量最高查询我负责的商品 Top 5"}},
-                    {"label": "📈 按净毛利润金额", "action": "send_message", "payload": {"text": "按净毛利润最高查询我负责的商品 Top 5"}},
-                    {"label": "🎯 按单品毛利率 %", "action": "send_message", "payload": {"text": "按毛利率最高查询我负责的商品 Top 5"}},
-                    {"label": "⚠️ 排查滞销库存", "action": "send_message", "payload": {"text": "排查我负责的滞销库存商品"}},
+                    {"label": "💰 按总销售额 (GMV)", "action": "send_message", "payload": {"text": "按总销售额最高的热销商品排行 Top 5"}},
+                    {"label": "📦 按出货销量件数", "action": "send_message", "payload": {"text": "按出货销量最高的热销商品排行 Top 5"}},
+                    {"label": "⚠️ 排查滞销库存", "action": "send_message", "payload": {"text": "排查在售商品的滞销库存风险"}},
                 ],
             }
         else:

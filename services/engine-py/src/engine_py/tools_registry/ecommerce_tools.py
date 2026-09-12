@@ -132,7 +132,18 @@ register_tool(
         ),
         schema={
             "type": "object",
-            "properties": {"orderId": {"type": "string"}, "reason": {"type": "string"}},
+            "properties": {
+                "orderId": {"type": "string"},
+                "reason": {"type": "string"},
+                "evidenceImageUrls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional evidence photo URLs uploaded this turn. Auto-attached by the "
+                        "engine; surfaces to the human approver via the approval payload."
+                    ),
+                },
+            },
         },
         execute=_process_refund,
     )
@@ -325,6 +336,14 @@ register_tool(
                 "reason": {"type": "string", "enum": ["wrong_size", "quality_issue", "not_as_described", "no_reason_7d"]},
                 "reasonDescription": {"type": "string"},
                 "refundAmount": {"type": "number"},
+                "evidenceImageUrls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional evidence photo URLs uploaded this turn. Normally auto-attached "
+                        "by the engine from the conversation's uploaded images — do not invent URLs."
+                    ),
+                },
             },
         },
         execute=_apply_after_sale,
