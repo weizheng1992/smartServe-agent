@@ -27,6 +27,14 @@ bun run test:prompt:compare
 bun run test:prompt:compare -- --results-dir /path/to/results
 ```
 
+⚠️ **解释器要求(2026-09-12)**:promptfoo 的 Python provider 落在系统默认 `python3` 上执行,
+而 engine 依赖(redis/langgraph/sqlalchemy 等)不在系统环境 —— 缺依赖会以数十个
+`Agent Provider execution error: No module named 'redis'` 形态假失败。对照/钉定必须带:
+
+```bash
+PROMPTFOO_PYTHON=$PWD/services/.venv/bin/python bun run test:prompt:compare
+```
+
 ## 回归判定规则
 
 以下任一情况判为回归,对比失败(exit 1):

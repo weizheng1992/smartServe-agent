@@ -47,16 +47,10 @@ async def _record_user_preference(args: dict):
     )
 
 
-async def _create_order(args: dict):
-    effective_user_id = args.get("userId")
-    effective_business_id = args.get("businessId")
-    if (not effective_user_id or not effective_business_id) and args.get("threadId"):
-        ctx = await OrderDomainService.get_thread_session_context(args["threadId"])
-        effective_user_id = effective_user_id or ctx["userId"]
-        effective_business_id = effective_business_id or ctx["businessId"]
-    return await OrderDomainService.create_order(
-        {**args, "userId": effective_user_id or "", "businessId": effective_business_id or "ecommerce"}
-    )
+# createOrder 工具注册面已摘除(多意图一期,2026-09-12):它写 engine 本地
+# demo orders 表、硬编 status='shipped' 并编造顺丰运单号,是假单工具 —— 聊天
+# 下单诉求由 planner 深规划规则 8 引导加购+购物车卡结算,严禁经此造假单。
+# OrderDomainService.create_order 方法保留供测试/演示种子使用。
 
 
 async def _query_product_ranking(args: dict):
@@ -210,24 +204,6 @@ register_tool(
             },
         },
         execute=_record_user_preference,
-    )
-)
-register_tool(
-    ToolDefinition(
-        name="createOrder",
-        description="Create a new customer order. Automatically resolves user context and tenant ID.",
-        schema={
-            "type": "object",
-            "properties": {
-                "userId": {"type": "string"},
-                "orderId": {"type": "string"},
-                "businessId": {"type": "string"},
-                "totalAmount": {"type": "number"},
-                "carrier": {"type": "string"},
-                "items": {"type": "array"},
-            },
-        },
-        execute=_create_order,
     )
 )
 register_tool(

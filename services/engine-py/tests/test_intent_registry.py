@@ -32,7 +32,9 @@ class TestRegistryAlignment:
             v for k, v in vars(reg.AgentIntentType).items() if not k.startswith("_")
         }
         assert set(INTENT_REGISTRY) == type_values
-        assert len(INTENT_REGISTRY) == 14
+        # 15 档:多意图一期(2026-09-12)新增 address_manage(规则层产出,
+        # metric_query 先例 —— 不进分类器 10 类目,prompt_category=None)
+        assert len(INTENT_REGISTRY) == 15
 
     def test_slot_extractor_reexports_same_class(self):
         # 定义已迁 intent_registry,slot_extractor.AgentIntentType 是同一类对象
@@ -87,13 +89,19 @@ class TestCategoryGuidelines:
                 assert f'"{spec.name}"' in CATEGORY_GUIDELINES, spec.name
 
     def test_terminal_intents_have_a_producer_layer(self):
-        # 可终局的档位(active/latent)必有产出层:分类器类目 prompt 或规则层
-        # INTENT_DETECTION_RULES(intermediate/candidate 例外:chat 是闸门中间
-        # 信号,out_of_scope 只作候选)。metric_query 即规则层产出、无类目。
+        # 可终局的档位(active/latent)必有产出层:分类器类目 prompt、规则层
+        # INTENT_DETECTION_RULES,或 triage 专属检测器(intermediate/candidate
+        # 例外:chat 是闸门中间信号,out_of_scope 只作候选)。
+        # metric_query 即规则层产出、无类目;address_manage 产出层是
+        # intent_triage_engine.detect_address_manage(判定 1.6 + Step3 注入器)。
+        from engine_py.triage.intent_triage_engine import detect_address_manage
+
         terminal = set(reg.terminal_intents())
         prompt_covered = set(reg.prompt_category_intents())
         rule_covered = {r.intent for r in slot_extractor.INTENT_DETECTION_RULES}
-        orphans = terminal - (prompt_covered | rule_covered)
+        detector_covered = {reg.AgentIntentType.ADDRESS_MANAGE}
+        assert detect_address_manage("看看我的收货地址") is not None, "检测器生产层失活"
+        orphans = terminal - (prompt_covered | rule_covered | detector_covered)
         assert not orphans, orphans
 
 

@@ -230,6 +230,57 @@ async def planner_node(state: AgentState) -> dict:
     if not rejection_context and intents:
         single_intent = intents[0].get("intent")
 
+        # 🏠 地址簿快轨(多意图一期,2026-09-12):单 address_manage 直达
+        # saveUserAddress/getUserAddresses 子任务,零 LLM —— 写动作必须确定性,
+        # 严禁落深规划自由发挥(A11 实弹曾编造假改派流程)。评审缺陷修复:
+        # 复合形(address_manage+cart_manage 等)不得被本快轨砍掉次要意图,
+        # len==1 闸保复合形落深规划按规则 7 双编排。
+        if len(intents) == 1 and single_intent == "address_manage":
+            addr_entities = intents[0].get("entities") or {}
+            if addr_entities.get("addressAction") == "list":
+                fast_plan = {
+                    "goal": "List saved delivery addresses for customer",
+                    "subtasks": [
+                        {
+                            "id": "step_fast_address_book_list",
+                            "description": "Call getUserAddresses to list the customer's saved delivery addresses",
+                            "status": "pending",
+                        }
+                    ],
+                    "currentStepIndex": 0,
+                }
+            elif addr_entities.get("addressAction") == "save" and not (
+                intents[0].get("missingSlots") or []
+            ):
+                field_line = "、".join(
+                    f"{key} {value}" for key, value in addr_entities.items() if key != "addressAction"
+                )
+                fast_plan = {
+                    "goal": "Save new delivery address to customer address book",
+                    "subtasks": [
+                        {
+                            "id": "step_fast_save_address",
+                            "description": (
+                                "Call saveUserAddress to save a new delivery address with: "
+                                f"{field_line}"
+                            ),
+                            "status": "pending",
+                        }
+                    ],
+                    "currentStepIndex": 0,
+                }
+            else:
+                fast_plan = None
+            if fast_plan is not None:
+                if job_id:
+                    await emit_status(
+                        job_id,
+                        "⚡ 极速直达：识别到地址簿管理诉求，已直达地址簿工具执行链！",
+                        node="planner",
+                        plan=fast_plan,
+                    )
+                return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
+
         if single_intent == "human_escalation":
             fast_plan = {
                 "goal": "Escalate conversation to human support operator",
@@ -439,6 +490,18 @@ async def planner_node(state: AgentState) -> dict:
         "specific order ID, or they explicitly confirm one in this turn. If the current request contains no "
         "order ID, plan a step to ASK the customer which order to refund instead — the last-mentioned order "
         "in history may be a stale one that was already refunded.\n\n"
+        "7. MULTI-INTENT REQUESTS (do-what-you-can): when the intents list contains multiple entries, plan "
+        "subtasks covering EVERY actionable intent. If an intent is missing a required slot (its "
+        "missingSlots field, e.g. a refund without orderId), still plan the doable subtasks first and end "
+        "the plan with exactly ONE subtask that asks the customer for the missing information. NEVER drop "
+        "or silently ignore part of a compound request — every requested action must either get a subtask "
+        "or an explicit ask.\n"
+        "8. NEW ORDER REQUESTS: the chat assistant CANNOT place new orders. NEVER plan a step calling "
+        "createOrder — it does not exist as a customer-facing capability. When the customer asks to place "
+        "an order (下单), plan an addToCart step when the product is clear from context, and the final "
+        "reply must tell the customer to finish checkout via the shopping-cart card or the store page. "
+        "For address book management (创建/查看收货地址, intent address_manage), plan saveUserAddress or "
+        "getUserAddresses steps — these are real capabilities.\n\n"
         "Return a JSON object with:\n"
         '- "goal": overall goal description\n'
         '- "subtasks": array of objects with keys "id" (unique string), "description" (what to do, e.g., '

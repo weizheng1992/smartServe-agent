@@ -21,6 +21,7 @@ class AgentIntentType:
     CART_MANAGE = "cart_manage"
     SHOPPING_GUIDE = "shopping_guide"
     ORDER_MODIFY_ADDRESS = "order_modify_address"
+    ADDRESS_MANAGE = "address_manage"
     ORDER_CANCEL = "order_cancel"
     ORDER_RETURN = "order_return"
     ORDER_QUERY = "order_query"
@@ -186,6 +187,22 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         lifecycle="active",
         prompt_category=5,
         domain_role="order_service",
+    ),
+    AgentIntentType.ADDRESS_MANAGE: IntentSpec(
+        name="address_manage",
+        family="shopping",
+        consumers=(
+            "triage 判定 1.6 地址簿规则前置(arbitration_reason=address_manage_precheck)",
+            "Step3 复合注入(_inject_address_manage,复合形 primary)",
+            "planner 快轨 → saveUserAddress / getUserAddresses",
+        ),
+        lifecycle="active",
+        # 规则层产出意图(metric_query 先例,2026-09-12):地址簿管理不在分类器
+        # 10 类目里 —— 词表缺口曾使「创建地址」被硬塞 order_modify_address 要
+        # 订单号、或落 general_query 让 planner 编造假改派流程(实弹矩阵 A11)。
+        # 进类目 = 改分类器 prompt = promptfoo 类目基线重钉, deliberately 不做。
+        prompt_category=None,
+        domain_role="shopping_guide",
     ),
     AgentIntentType.ORDER_CANCEL: IntentSpec(
         name="order_cancel",

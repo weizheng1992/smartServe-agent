@@ -28,10 +28,16 @@ from .consult_fast_path import (
     run_consult_direct_answer,
 )
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
-from .intent_registry import CONSULT_SIDE_INTENTS, INTENT_REGISTRY
+from .intent_registry import CONSULT_SIDE_INTENTS, EXPLICIT_ORDER_ID_RE, INTENT_REGISTRY
 from .product_disambiguator import AFTER_SALE_INTENTS, build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
-from .slot_extractor import ORDER_ID_RE, AgentIntentType, SlotExtractor
+from .slot_extractor import (
+    ORDER_ID_RE,
+    PHONE_SHAPE,
+    AgentIntentType,
+    SlotExtractor,
+    parse_chinese_address,
+)
 from .structured_classifier import classify
 
 OPERATIONAL_ACTION_RE = re.compile(
@@ -41,7 +47,22 @@ OPERATIONAL_ACTION_RE = re.compile(
 UNSANITIZED_TAGS_RE = re.compile(r"\[(?:ECOMMERCE|BRAND|STORE|MERCHANT|SHOP|ADIDAS|NIKE)\]", re.IGNORECASE)
 ORDER_KEYWORDS_RE = re.compile(r"订单|发货|物流|查单|买的|快递|到哪|运单|面单", re.IGNORECASE)
 REFUND_KEYWORDS_RE = re.compile(r"退款|退货|退钱|退单|退款申请|退货流程|破损|坏了|碎了|瑕疵", re.IGNORECASE)
-MULTI_INTENT_CANDIDATE_RE = re.compile(r"(?:另外|同时|并且|顺便|还有|然后再|接着|以及)")
+MULTI_INTENT_CANDIDATE_RE = re.compile(r"(?:另外|同时|并|顺便|还有|然后|接着|以及)")
+# 多意图不打断一期(2026-09-12):复合候选形的缺槽反问收窄与资金动作否决。
+# 「然后」「并」裸词补入 —— 旧正则只有「然后再」「并且」,「退了订单9081，
+# 然后推荐跑步鞋」「建地址…，并下单…」都漏判成单意图(A1/A6 实弹病灶)。
+MONEY_ACTION_VETO_RE = re.compile(r"(?:退款|退货|退还|退了|退掉|换货|申请售后)")
+# 资金动作意图集(让位判定的参照):规则层单意图终局若非本集而输入命中
+# 资金词族,即视为「资金半被规则层漏检」,连终局一起让位 Step2/3 精判。
+_MONEY_ACTION_INTENTS = frozenset({AgentIntentType.REFUND, AgentIntentType.ORDER_RETURN})
+# 技能元数据 category 常量(售后域):资金否决只针对非售后域技能
+_AFTER_SALE_SKILL_CATEGORY = "after_sale"
+
+
+def _money_action_vetoed(input_text: str | None) -> bool:
+    """纯谓词(测试缝):资金动作词族命中 —— 命中时导购/购物车等非售后快轨
+    必须让位,动作请求绝不静默吞。"""
+    return bool(input_text) and bool(MONEY_ACTION_VETO_RE.search(input_text))
 # ADR-0003:经营口径排行(利润词 × 排行词共现)规则前置 —— 实弹三连拒的
 # 根因是 LLM 分类层把「利润」判成后台经营数据拒答;排行是店长在客服台的
 # 合法诉求,确定性直通 metric_query(planner→executor queryProductRanking)。
@@ -54,6 +75,111 @@ PROFIT_RANKING_RE = re.compile(
 def is_profit_ranking_query(text: str | None) -> bool:
     """纯谓词(测试缝):利润词与排行词共现判定。"""
     return bool(text) and bool(PROFIT_RANKING_RE.search(text))
+
+
+def _is_multi_intent_candidate(input_text: str | None) -> bool:
+    """纯谓词(测试缝):复合候选形 —— 连接词命中或 查/物流/状态 × 退/改/换
+    共现。复合形不做规则层缺槽反问与单意图快轨,交结构化精判与 planner 编排
+    (多意图不打断一期,2026-09-12;自 inline 判定提纯,判定式逐字保持)。"""
+    if not input_text:
+        return False
+    return bool(MULTI_INTENT_CANDIDATE_RE.search(input_text)) or (
+        ("查" in input_text or "物流" in input_text or "状态" in input_text)
+        and ("退" in input_text or "改" in input_text or "换" in input_text)
+    )
+
+
+def _should_clarify_first(parsed: list[dict]) -> bool:
+    """纯谓词(测试缝):结构化层缺槽反问收窄 —— 仅 primary 缺槽且无「非咨询
+    族且槽位齐备」的营救意图时才反问。secondary 缺槽不陪葬(A1:建地址+下单
+    被改单地址的缺单号反问整轮劫持);营救意图存在时放行 planner 先办能办的
+    (尽力而为规则),咨询族(CONSULT_SIDE_INTENTS)与缺槽意图不算营救。"""
+    if not parsed:
+        return False
+    if not parsed[0].get("missingSlots"):
+        return False
+    for secondary in parsed[1:]:
+        if secondary.get("intent") not in CONSULT_SIDE_INTENTS and not secondary.get("missingSlots"):
+            return False
+    return True
+
+
+# 地址簿规则前置(多意图一期,2026-09-12):创建形/查询形两检测器 + 中文
+# 地址解析(解析器在 slot_extractor)。判定 1.6 与 Step3 注入器共用。
+_ADDRESS_CREATE_PAYLOAD_RE = re.compile(
+    r"(?:创建|新建|添加|新增|保存)[^。,，\n]{0,8}地址[是为:：]?\s*(.*)$", re.DOTALL
+)
+_ADDRESS_BOOK_LIST_RE = re.compile(
+    r"(?:查看|看看|查一下|有哪些)(?:我的)?(?:收货地址|地址簿)"
+    r"|我的(?:收货地址|地址簿)(?:有哪些|是什么|列表)?$"
+)
+_PHONE_RE = re.compile(rf"(?<!\d)({PHONE_SHAPE})(?!\d)")
+_CHINESE_NAME_RE = re.compile(r"([\u4e00-\u9fa5]{2,4})\s*$")
+_ADDRESS_SAVE_REQUIRED = ("receiverName", "receiverPhone", "province", "city", "district", "detailAddress")
+
+
+def _address_manage_intent_entry(detected: dict) -> dict:
+    """address_manage 终局条目单点构造(判定 1.6 直通与 Step3 注入器共用)。"""
+    return {
+        "intent": AgentIntentType.ADDRESS_MANAGE,
+        "confidence": 0.9,
+        "type": "primary",
+        "entities": dict(detected["entities"]),
+        "missingSlots": list(detected["missingSlots"]),
+    }
+
+
+def detect_address_manage(text: str | None) -> dict | None:
+    """纯函数(测试缝):地址簿管理意图检出。
+
+    返回 None=非地址簿诉求;{"mode": "save"|"list", "entities": {...},
+    "missingSlots": [...]}。显式 ORD- 单号在场一律让位订单域(改单地址语境,
+    即便句中出现「新创建的地址」字样);创建形 payload(收件人/电话/地址)
+    缺件以 missingSlots 表达,严禁瞎猜落库。
+    """
+    if not text:
+        return None
+    if EXPLICIT_ORDER_ID_RE.search(text):
+        return None
+    if _ADDRESS_BOOK_LIST_RE.search(text):
+        return {"mode": "list", "entities": {"addressAction": "list"}, "missingSlots": []}
+    payload_match = _ADDRESS_CREATE_PAYLOAD_RE.search(text)
+    if not payload_match:
+        return None
+    entities: dict = {"addressAction": "save"}
+    payload = (payload_match.group(1) or "").strip()
+    phone_match = _PHONE_RE.search(payload)
+    if phone_match:
+        entities["receiverPhone"] = phone_match.group(1)
+        before = payload[: phone_match.start()].strip(" ,，:：-—")
+        name_match = _CHINESE_NAME_RE.search(before)
+        if name_match:
+            entities["receiverName"] = name_match.group(1)
+        after = payload[phone_match.end():].strip(" ,，:：-—")
+        if after:
+            entities["fullAddress"] = after
+            parsed_addr = parse_chinese_address(after)
+            if parsed_addr:
+                entities.update(parsed_addr)
+    missing = [key for key in _ADDRESS_SAVE_REQUIRED if not entities.get(key)]
+    return {"mode": "save", "entities": entities, "missingSlots": missing}
+
+
+def _inject_address_manage(parsed: list[dict], input_text: str) -> list[dict]:
+    """Step3 复合注入(纯函数,测试缝):复合候选形(建地址+下单等)不进
+    判定 1.6 直通,由本注入器把 address_manage 提为 primary —— 结构化分类器
+    词表没有地址簿档位,只会产出 general_query(丢弃,兜底族不落 planner)
+    与真实动作意图(保序降为 secondary)。"""
+    detected = detect_address_manage(input_text)
+    if detected is None:
+        return parsed
+    entry = _address_manage_intent_entry(detected)
+    rest = [
+        {**item, "type": "secondary"}
+        for item in parsed
+        if item.get("intent") != AgentIntentType.GENERAL_QUERY
+    ]
+    return [entry, *rest]
 
 # 文本侧域角色线索(工单04 2026-09-11):措辞维度的回退 —— 正则与判定次序
 # 逐字节保持旧实现,仅提为模块常量。文本线索优先于意图档位:措辞含加购动词
@@ -726,8 +852,18 @@ class IntentTriageEngine:
             if task_spec["intentType"] != AgentIntentType.CHAT and is_consult_shaped_marker(input_text):
                 proposals.append(_proposal("consult_shaped_gate", AgentIntentType.CONSULT))
 
-            # 高风险/多参数意图缺失必填槽位 → 即时追问,阻断死循环自旋
-            if task_spec["missingSlots"] and task_spec["clarificationMessage"]:
+            # 多意图不打断(2026-09-12):复合候选形先行判定 —— 缺槽反问与单
+            # 意图快轨都不得劫持复合轮,交结构化精判与 planner 编排。
+            is_multi_intent_candidate = _is_multi_intent_candidate(input_text)
+
+            # 高风险/多参数意图缺失必填槽位 → 即时追问,阻断死循环自旋。
+            # 复合候选形除外(A3:「查订单把没发货的退了」被规则层「请提供
+            # 订单编号」劫持,先查单再挑的合法流永远走不到 planner)。
+            if (
+                task_spec["missingSlots"]
+                and task_spec["clarificationMessage"]
+                and not is_multi_intent_candidate
+            ):
                 await task_memory.save_task_state(
                     {
                         "goal": f"Fulfill {task_spec['intentType']}",
@@ -757,11 +893,6 @@ class IntentTriageEngine:
                     candidates=list(proposals),
                 )
 
-            is_multi_intent_candidate = bool(MULTI_INTENT_CANDIDATE_RE.search(input_text)) or (
-                ("查" in input_text or "物流" in input_text or "状态" in input_text)
-                and ("退" in input_text or "改" in input_text or "换" in input_text)
-            )
-
             # 参数齐备且非复合多意图 → 高置信度放行进入 DAG 调度
             if (
                 not is_multi_intent_candidate
@@ -769,55 +900,81 @@ class IntentTriageEngine:
                 and not task_spec["missingSlots"]
                 and task_spec["confidence"] >= 0.8
             ):
-                intents = [
-                    {
-                        "intent": task_spec["intentType"],
-                        "confidence": task_spec["confidence"],
-                        "taskSpec": task_spec,
-                    }
-                ]
+                # 🚦 资金否决让位(多意图一期,2026-09-12,评审缺陷②):规则层只
+                # 检出导购/购物车单意图(资金词族不在其规则 pattern 里,如「退掉」)
+                # 时,连单意图终局一起让位 Step2/3 精判并留痕 —— 否则「推荐几款
+                # 卫衣，帮我把上一单退掉」照样以 single_complete 吞掉退款半。
+                if (
+                    _money_action_vetoed(input_text)
+                    and task_spec["intentType"] not in _MONEY_ACTION_INTENTS
+                ):
+                    yield_intents = [
+                        {
+                            "intent": task_spec["intentType"],
+                            "confidence": task_spec["confidence"],
+                            "type": "primary",
+                            "taskSpec": task_spec,
+                        }
+                    ]
+                    await IntentTriageEngine.log_intent_to_db(
+                        thread_id,
+                        input_text,
+                        yield_intents,
+                        "rule",
+                        task_spec["confidence"],
+                        candidates=list(proposals),
+                        arbitration_reason="money_action_veto_yield",
+                    )
+                else:
+                    intents = [
+                        {
+                            "intent": task_spec["intentType"],
+                            "confidence": task_spec["confidence"],
+                            "taskSpec": task_spec,
+                        }
+                    ]
 
-                await task_memory.save_task_state(
-                    {
-                        "goal": f"Completed {task_spec['intentType']}",
-                        "subtasks": [],
-                        "currentStepIndex": 0,
-                        "activeIntent": None,
-                        "slots": task_spec["slots"],
-                        "orderContext": state.get("order_context"),
-                        "guideContext": state.get("guide_context"),
-                        "cartContext": state.get("cart_context"),
-                    }
-                )
+                    await task_memory.save_task_state(
+                        {
+                            "goal": f"Completed {task_spec['intentType']}",
+                            "subtasks": [],
+                            "currentStepIndex": 0,
+                            "activeIntent": None,
+                            "slots": task_spec["slots"],
+                            "orderContext": state.get("order_context"),
+                            "guideContext": state.get("guide_context"),
+                            "cartContext": state.get("cart_context"),
+                        }
+                    )
 
-                # 🎯 Skill Fast-Track 直达极速执行(skills 包落地后自动激活)。
-                # 终局决策单点落库(01):fast-track 命中时以 bypass 内的写为准
-                # (method=skill_fast_track,candidates 含槽位+技能两提议);
-                # 未命中才在下方落 slot_extractor 行 —— 修复同一输入双写。
-                fast_track = await IntentTriageEngine._try_skill_fast_track(
-                    state,
-                    thread_id,
-                    tenant_id,
-                    task_spec,
-                    history_msgs,
-                    damage_assessment,
-                    intents,
-                    proposals,
-                )
-                if fast_track is not None:
-                    return fast_track
+                    # 🎯 Skill Fast-Track 直达极速执行(skills 包落地后自动激活)。
+                    # 终局决策单点落库(01):fast-track 命中时以 bypass 内的写为准
+                    # (method=skill_fast_track,candidates 含槽位+技能两提议);
+                    # 未命中才在下方落 slot_extractor 行 —— 修复同一输入双写。
+                    fast_track = await IntentTriageEngine._try_skill_fast_track(
+                        state,
+                        thread_id,
+                        tenant_id,
+                        task_spec,
+                        history_msgs,
+                        damage_assessment,
+                        intents,
+                        proposals,
+                    )
+                    if fast_track is not None:
+                        return fast_track
 
-                await IntentTriageEngine.log_intent_to_db(
-                    thread_id,
-                    input_text,
-                    intents,
-                    "slot_extractor",
-                    task_spec["confidence"],
-                    candidates=list(proposals),
-                    arbitration_reason="slot_extractor_single_complete",
-                )
+                    await IntentTriageEngine.log_intent_to_db(
+                        thread_id,
+                        input_text,
+                        intents,
+                        "slot_extractor",
+                        task_spec["confidence"],
+                        candidates=list(proposals),
+                        arbitration_reason="slot_extractor_single_complete",
+                    )
 
-                return _triage_terminal_result(intents, input_text, history_msgs, damage_assessment)
+                    return _triage_terminal_result(intents, input_text, history_msgs, damage_assessment)
         except Exception as slot_err:
             print(f"[Triage] 槽位澄清阶段异常,已跳过槽位层裁决 (threadId={thread_id}): {slot_err}")
 
@@ -928,9 +1085,39 @@ class IntentTriageEngine:
                     state=state,
                 )
 
+            # 判定 1.6(多意图一期,2026-09-12):地址簿规则前置 —— 词表缺口曾使
+            # 「创建地址」落 general_query 让 planner 编造假改派流程(A11 实弹:
+            # 幻觉「已发货联系快递员改派、转寄费自理」)。纯建/查地址(非复合)
+            # 确定性直通 address_manage,零结构化调用;复合形让位 Step3 注入器。
+            if not _is_multi_intent_candidate(input_text):
+                detected_addr = detect_address_manage(input_text)
+                if detected_addr is not None and (
+                    detected_addr["mode"] == "list" or not detected_addr["missingSlots"]
+                ):
+                    addr_intents = [_address_manage_intent_entry(detected_addr)]
+                    await IntentTriageEngine.log_intent_to_db(
+                        thread_id,
+                        input_text,
+                        addr_intents,
+                        "rule",
+                        0.9,
+                        candidates=[
+                            *proposals,
+                            _proposal("rule", AgentIntentType.ADDRESS_MANAGE, 0.9),
+                        ],
+                        arbitration_reason="address_manage_precheck",
+                    )
+                    return _triage_terminal_result(
+                        addr_intents, input_text, history_msgs, damage_assessment,
+                        state=state,
+                    )
+
             # 判定 2: 物流/订单状态查询直达
+            # 多意图不打断(2026-09-12):关键词分支对复合候选形让位(同判定 3 注)
             if (score_order >= 0.88 and score_order - score_oos >= 0.08) or (
-                has_order_keywords and not has_refund_keywords
+                has_order_keywords
+                and not has_refund_keywords
+                and not _is_multi_intent_candidate(input_text)
             ):
                 intents = [
                     {
@@ -955,8 +1142,13 @@ class IntentTriageEngine:
                 )
 
             # 判定 3: 明确退款执行意图直达
+            # 多意图不打断(2026-09-12):关键词分支是单意图时代产物 —— 复合候选
+            # 形下「查订单把没发货的退了」的查单词独走终端吞掉退款半(A3 实弹),
+            # 让位结构化精判; embedding 高分分支(≥0.88)不受闸,主语义明确时照常直达。
             if (score_refund >= 0.88 and score_refund - score_oos >= 0.08) or (
-                has_refund_keywords and not has_order_keywords
+                has_refund_keywords
+                and not has_order_keywords
+                and not _is_multi_intent_candidate(input_text)
             ):
                 refund_order_id = fused_order_id
                 # 📷 意图浮现点消歧(2026-09-09):模糊损坏词(「坏了」)的售后意图
@@ -1094,6 +1286,16 @@ class IntentTriageEngine:
             parsed: list[dict] = []
             for idx, item in enumerate(structured_res.intents):
                 entities = dict(item.entities or {})
+                # 单号形态校验(多意图一期,2026-09-12):分类器自由抽取的
+                # orderId 连宽松单号正则都不过时(「退了订单9081」的尾缀被抽成
+                # 单号,A6 实弹:执行器未调工具即宣称退款成功)必须剥除并补缺槽
+                # 注记 —— 资金/订单动作严禁以假单号为据执行;规范化单号
+                # (ORD-/AURORA-ORD-)不受影响,正则 fallback 通道本就合法。
+                raw_order_id = entities.get("orderId")
+                if raw_order_id and not ORDER_ID_RE.search(str(raw_order_id)):
+                    entities.pop("orderId", None)
+                    if item.intent in _MONEY_ACTION_INTENTS and "orderId" not in (item.missingSlots or []):
+                        item.missingSlots = list(item.missingSlots or []) + ["orderId"]
                 primary_order_id = entities.get("orderId") or fallback_order_id
                 if primary_order_id:
                     entities["orderId"] = primary_order_id
@@ -1103,6 +1305,9 @@ class IntentTriageEngine:
                         "confidence": item.confidence or 0.9,
                         "type": item.type or ("primary" if idx == 0 else "secondary"),
                         "entities": entities,
+                        # 多意图不打断(2026-09-12):缺槽注记随行 —— 缺槽反问
+                        # 收窄谓词与 planner「尽力而为」规则都以它为输入
+                        "missingSlots": list(item.missingSlots or []),
                         **({"condition": item.condition.model_dump()} if item.condition else {}),
                     }
                 )
@@ -1112,6 +1317,11 @@ class IntentTriageEngine:
             )
             if primary_order_id:
                 _set_target_order_id(state, primary_order_id)
+
+            # 地址簿复合注入(多意图一期,2026-09-12):分类器词表无地址簿档位,
+            # 建地址形(可复合下单/导购)在此提为 primary,A1「建地址+下单寄新
+            # 地址」由此双意图进 planner。
+            parsed = _inject_address_manage(parsed, input_text)
 
             # 📷 意图浮现点消歧 · Step 3(2026-09-09):分类器判出售后意图、带图
             # 且全链无单号(文本/OCR/上下文)时同样过商品消歧 —— 与判定 3 同理,
@@ -1148,11 +1358,11 @@ class IntentTriageEngine:
                         candidates=[*proposals, llm_proposal],
                     )
 
-            first_missing = next(
-                (i for i in structured_res.intents if i.missingSlots), None
-            )
+            # 缺槽反问收窄(多意图不打断一期,2026-09-12):仅 primary 缺槽且
+            # 无营救意图时反问;secondary 缺槽(A1:改单地址缺单号)不劫持
+            # primary 齐备的复合轮,放行 planner 先办能办的、结尾一次性追问。
             if (
-                first_missing is not None
+                _should_clarify_first(parsed)
                 and structured_res.clarificationMessage
                 and not vision_disambig_matched
             ):
@@ -1282,6 +1492,15 @@ class IntentTriageEngine:
         }
         matching_skill = SkillRegistry.find_matching_skill(context)
         if matching_skill is None:
+            return None
+
+        # 🚦 资金动作一票否决(多意图不打断一期,2026-09-12):输入含退款/退货
+        # 词族而命中的技能非售后域时,拒绝快轨 —— 否则「退了订单X，然后推荐Y」
+        # 被导购 fallback 正则整句吞掉,资金动作静默丢失(实弹矩阵 A6)。
+        # 返回 None 落回 embedding 锚点/结构化精判,那里有 refund 锚点与判定 3。
+        if _money_action_vetoed(input_text) and (
+            matching_skill.metadata.get("category") != _AFTER_SALE_SKILL_CATEGORY
+        ):
             return None
 
         skill_result = await matching_skill.execute(context)

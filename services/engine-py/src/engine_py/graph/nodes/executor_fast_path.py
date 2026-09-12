@@ -14,6 +14,21 @@ _DESC_ADDRESS_RE = re.compile(r"with new address\s*([^\n]+)", re.IGNORECASE)
 _INPUT_ADDRESS_RE = re.compile(r"(?:改成|改到|送至|送去|寄到|地址为|地址是)\s*([^,，!！?？\n]+)", re.IGNORECASE)
 # 未发货语义(ADR-0001 Q2):快路径与 LLM 路径同语义,严禁快路径吞过滤
 _UNSHIPPED_RE = re.compile(r"未发货|还没发货|尚未发货")
+# saveUserAddress 六必需字段(planner 快轨子任务描述以「字段 值、」形态携带)
+_SAVE_ADDR_FIELDS = ("receiverName", "receiverPhone", "province", "city", "district", "detailAddress")
+
+
+def _save_address_args(description: str) -> dict | None:
+    """从快轨子任务描述解析 saveUserAddress 六字段;缺任一即返回 None
+    (宁走诚实失败,严禁拿残参落库)。"""
+    args: dict = {}
+    for field in _SAVE_ADDR_FIELDS:
+        m = re.search(rf"{field}\s*([^\s、,，;；]+)", description)
+        if m:
+            args[field] = m.group(1)
+    if all(args.get(field) for field in _SAVE_ADDR_FIELDS):
+        return args
+    return None
 
 
 def try_match_executor_fast_path(
@@ -50,6 +65,20 @@ def try_match_executor_fast_path(
         and extracted_order_id
     ):
         return {"toolName": "getOrderStatus", "args": {"orderId": extracted_order_id}}
+
+    # 🏠 地址簿确定性执行(多意图一期,2026-09-12):saveUserAddress 是写动作,
+    # 严禁空转给通用 LLM 步骤执行 —— 实弹 A11:未调工具即宣称「已成功保存」
+    # (user_addresses 表 0 行)。六字段不全时不命中,宁走诚实失败不瞎猜。
+    if "saveuseraddress" in desc_lower and "saveUserAddress" in allowed_tools:
+        args = _save_address_args(description)
+        if args is not None:
+            return {"toolName": "saveUserAddress", "args": args}
+
+    if (
+        any(kw in desc_lower for kw in ("getuseraddresses", "地址簿列表", "收货地址列表"))
+        and "getUserAddresses" in allowed_tools
+    ):
+        return {"toolName": "getUserAddresses", "args": {}}
 
     if (
         any(

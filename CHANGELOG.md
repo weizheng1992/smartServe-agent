@@ -4,6 +4,36 @@
 
 ---
 
+## [2.6.18] - 2026-09-12 (多意图不打断一期:「建地址+下单」不再被反问劫持 + 资金动作一票优先 + 地址簿能力落地)
+
+用户实报(diagnosing-bugs + 11 探针多意图实弹矩阵 + to-spec → implement 全流程):「创建新地址 张伟 13800138000 北京市…并下单极光防晒短袖寄到新地址」被反手索要订单号——既没建地址也没下单。11 探针矩阵钉死四层根因:①缺槽反问短路(任一意图——哪怕 secondary——缺槽,整轮变反问,planner 复合编排全被跳过);②资金动作被单技能快轨静默吞(「退了订单9081,然后推荐跑步鞋」整句进导购);③意图词表缺口(10 类目无地址簿管理,LLM 落 general_query 后编造「已发货联系快递员改派、转寄费自理」假政策);④`ORDER_ID_RE` 裸数字分支把手机号当单号。spec: `.scratch/multi-intent-no-interrupt/spec.md`(gitignored)。
+
+### ✨ Features
+
+- **address_manage 意图(metric_query 先例)**:规则层产出(prompt_category=None,零分类器 prompt 变更、零 promptfoo 类目基线重钉)。检测器 `detect_address_manage`(创建形/查询形双正则,显式 ORD- 单号在场让位订单域)+ 中文地址解析 `parse_chinese_address`(直辖市 province=city 同名/省→市→区/区解析不出宁可诚实反问严禁瞎猜落库)+ 判定 1.6 纯建/查地址零 LLM 直通(`address_manage_precheck` 留痕)+ Step3 复合注入器(建地址+下单等复合形提为 primary,general_query 兜底族丢弃)+ planner 单意图快轨直达 saveUserAddress/getUserAddresses 子任务。
+- **executor 快路径 + 白名单**:saveUserAddress/getUserAddresses 进 executor 确定性快路径(`_save_address_args` 六字段全有才命中)与白名单基座 `_base_executor_tools`——实弹抓到不入列的代价:子任务空转给通用 LLM 步骤执行,**未调工具即宣称「已成功保存」,表 0 行**(幻觉成功,坏例池 claim_mismatch 类)。
+- **深规划「尽力而为」规则(rule 7/8)**:多意图请求为每个可执行意图规划子任务、缺槽的以恰好一个 ask-user 步骤收口,严禁静默吞;下单诉求严禁规划 createOrder,改规划 addToCart + 购物车卡结算指引。
+
+### 🐛 Fixes
+
+- **缺槽反问收窄(两处同口径)**:规则层 `slot_clarification_fastpath` 复合候选形(MULTI_INTENT_CANDIDATE_RE 补「然后」「并」裸词)不反问;结构化层 `_should_clarify_first` 仅 primary 缺槽且无「非咨询族且槽位齐备」营救意图时反问——secondary 缺槽不再劫持整轮(A1:分类器抽槽全对,却因 secondary 缺单号全场陪葬),parsed 携带 missingSlots 注记进 planner。
+- **资金动作一票否决**:`_try_skill_fast_track` 入口 + 单意图高置信终局双闸——输入命中资金词族(退款|退货|退还|退了|退掉|换货|申请售后)而非售后域技能/意图时让位 Step2/3 精判并 `money_action_veto_yield` 留痕;判定 2/3 关键词分支同闸(「查订单把没发货的退了」的查单词曾独走终端吞掉退款半)。
+- **手机号/假单号防污染**:`ORDER_ID_RE` 裸数字分支负向前瞻排除 `PHONE_SHAPE`(1[3-9]\d{9},共享常量防漂移);结构化层抽取的 orderId 不过宽松正则即剥除并补缺槽注记(「订单9081」尾缀曾被当单号,执行器未调工具即宣称退款成功)。
+- **createOrder 假单工具摘除(executor 面)**:写 demo 表+硬编 shipped+编造运单号,零生产消费方,从工具注册面下线(服务方法留测试/种子)。
+- **A7 GMV 拒答波动**:非本轮引入(路由与本轮改动零交集,deep planner 对指标问句的拒答倾向系 2.6.15 已知残留),如实记录不掩饰。
+
+### 📋 Docs/Ops
+
+- agent-engine.md §1.3 如实扩员:规则直通前置登记 metric_query/address_manage 两成员(检测器双词族锚定,错判代价近零,词表缺口下 LLM 仲裁层反而必然误判)。
+- promptfoo 运维注记:provider 宿主 python3 缺引擎依赖(redis/langgraph),对照/钉定需 `PROMPTFOO_PYTHON=services/.venv/bin/python`;注册表 parity 测试 14→15 档对齐。
+
+### ✅ 验证 (Verification,如实)
+
+- TDD 红灯先行(纯函数缝 + Step3 桩法缝,先例 test_profit_ranking_precheck/test_step3_consult_demote):engine pytest **554 passed**(2.6.17 基线 502 + 52 新增,零回归)、gateway 121 passed、ruff 双服务干净、promptfoo 双套件 56/0 + 8/0 与基线全对齐(unified 意图用例经生产瀑布真跑,triage 规则层变更未漂移基线)。
+- 实弹矩阵复跑(11→8 探针):A1 建地址真落库(user_addresses 行级核验)+加购确认+新地址结算指引三段齐全;A3 列出 7 笔真实未发货单号再问退哪笔;A4 推荐加购+诚实结算指引(不再规划假单);A6 诚实查无 9081+同类推荐;A11 地址真创建。对照组 A8(问单号+主动答政策)、A10(条件式加购)不回归。评审抓获并修复:planner 快轨未限单意图(A1 复合被砍半)、资金否决未落真实让位、快路径无处理器幻觉成功——均以红灯测试钉死。
+
+---
+
 ## [2.6.17] - 2026-09-12 (多品类连词检索修复:「裤子和 衬衫」裤子被吞 + 数量语义)
 
 用户实报(diagnosing-bugs 全流程):「我想买几件裤子和 衬衫推荐一下」只回衬衫 3 款;「我要2个商品」数量被无视。

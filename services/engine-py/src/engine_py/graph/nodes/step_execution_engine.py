@@ -448,6 +448,32 @@ async def _execute_single_step_core(
     }
 
 
+# executor 步骤工具白名单基座(测试缝):租户 business_config.tools 可追加,
+# 不可缩减。地址簿工具(saveUserAddress/getUserAddresses)于多意图一期入列 ——
+# saveUserAddress 是顾客自有低风险写(A11 实弹:不入列则 planner 快轨子任务
+# 被 dispatch 门槛跳过,LLM 步骤执行幻觉宣称「已成功保存」,表 0 行),
+# 执行器有确定性快路径;addToCart 等购物车写仍不入列(必须走技能 SOP)。
+_base_executor_tools = [
+    "getOrderStatus",
+    "processRefund",
+    "takeScreenshot",
+    "listUserOrders",
+    "changeShippingAddress",
+    "generateInvoice",
+    "recordUserPreference",
+    "skill_shopping_guide",
+    "skill_cart_manage",
+    "searchProducts",
+    "compareProducts",
+    "queryProductSkus",
+    "queryProductReviews",
+    "queryProductRanking",
+    "getCartSummary",
+    "saveUserAddress",
+    "getUserAddresses",
+]
+
+
 async def execute_step(state: dict) -> dict:
     current_plan = dict(state.get("task_plan") or {})
     current_index = current_plan.get("currentStepIndex", 0)
@@ -462,26 +488,10 @@ async def execute_step(state: dict) -> dict:
     business_config = state.get("business_config") or {}
     # 2026-09-07:TS 基线白名单仅含订单/退款 7 工具,商品查询/导购类子任务在下方
     # dispatch 门槛被整段跳过 → "Step execution completed without needing tools"
-    # 空转至 finish 道歉降级。现纳入:导购/购物车技能(executor_fast_path 直呼其
+    # 空转至道歉降级。现纳入:导购/购物车技能(executor_fast_path 直呼其
     # 注册表 id)+ 只读商品工具。写操作购物车工具(addToCart/updateCartItem)仍不
     # 入白名单 —— 加购/改量必须走技能 SOP 管道,不允许 LLM 兜底直调。
-    base_tools = [
-        "getOrderStatus",
-        "processRefund",
-        "takeScreenshot",
-        "listUserOrders",
-        "changeShippingAddress",
-        "generateInvoice",
-        "recordUserPreference",
-        "skill_shopping_guide",
-        "skill_cart_manage",
-        "searchProducts",
-        "compareProducts",
-        "queryProductSkus",
-        "queryProductReviews",
-        "queryProductRanking",
-        "getCartSummary",
-    ]
+    base_tools = _base_executor_tools
     allowed_tools = list(dict.fromkeys([*(business_config.get("tools") or []), *base_tools])) if business_config.get(
         "tools"
     ) else list(base_tools)

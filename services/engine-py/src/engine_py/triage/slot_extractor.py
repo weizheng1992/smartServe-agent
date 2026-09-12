@@ -18,10 +18,18 @@ from .intent_registry import (
 # ---------------------------------------------------------------------------
 # 1. 原子实体提取器
 # ---------------------------------------------------------------------------
+# 手机形态(2026-09-12 多意图一期共享常量):ORDER_ID_RE 负向前瞻与
+# intent_triage_engine._PHONE_RE 共用,防多处各写一份漂移
+PHONE_SHAPE = r"1[3-9]\d{9}"
+
 ORDER_ID_RE = re.compile(
-    r"(?:[A-Za-z0-9]+[-_])*ORD(?:[-_][A-Za-z0-9]+)+|\b[A-Za-z]{2,8}[-_]?\d{4,}\b|\b\d{8,}\b",
+    r"(?:[A-Za-z0-9]+[-_])*ORD(?:[-_][A-Za-z0-9]+)+|\b[A-Za-z]{2,8}[-_]?\d{4,}\b"
+    rf"|\b(?!{PHONE_SHAPE}\b)\d{{8,}}\b",
     re.IGNORECASE,
 )
+# 裸数字分支的负向前瞻(2026-09-12 多意图一期):1[3-9] 开头的 11 位是手机
+# 形态 ——「创建地址 张伟 13800138000 北京市…」曾被当成 orderId 去查一笔
+# 不存在的订单;严格 ORD- 通道(EXPLICIT/VISION)不受影响。
 ADDRESS_KEYWORDS_RE = re.compile(
     r"(?:改成|改到|送至|送往|送去|寄到|寄往|改派到|改派|改送|新地址[是为:：]?|地址[是为:：])\s*([^,，!！?？\n]+)",
     re.IGNORECASE,
@@ -37,6 +45,54 @@ RETURN_REASONS_MAP: list[dict] = [
     {"reason": "not_as_described", "keywords": ["不符合", "不一样", "虚假"]},
     {"reason": "no_reason_7d", "keywords": ["七天", "不喜欢", "不想要"]},
 ]
+
+
+# 直辖市(多意图一期地址簿解析,2026-09-12):province=city 同名
+_MUNICIPALITIES = ("北京市", "上海市", "天津市", "重庆市")
+_PROVINCE_RE = re.compile(r"^([^省市\s,，]{1,8}省)")
+_CITY_RE = re.compile(r"^([^省市\s,，]{1,6}市)")
+_DISTRICT_RE = re.compile(r"^([^区县市\s,，]{1,6}[区县])")
+
+
+def parse_chinese_address(full: str | None) -> dict | None:
+    """中文地址解析(纯函数,测试缝;公开 API —— intent_triage_engine 检测器
+    跨模块消费):全地址 → 省/市/区/详细 四段。
+
+    规则:直辖市开头 province=city 同名;否则 XX省 → XX市 → (XX区|XX县);
+    余文为详细地址。区解析不出即返回 None(saveUserAddress 落库需要区级段,
+    解析失败宁可让上层诚实反问,严禁瞎猜落库)。
+    """
+    text = (full or "").strip().strip("，,。;； ")
+    if not text:
+        return None
+    province = city = district = ""
+    for muni in _MUNICIPALITIES:
+        if text.startswith(muni):
+            province = city = muni
+            text = text[len(muni):]
+            break
+    if not province:
+        m = _PROVINCE_RE.match(text)
+        if m:
+            province = m.group(1)
+            text = text[len(province):]
+    if not city:
+        m = _CITY_RE.match(text)
+        if m:
+            city = m.group(1)
+            text = text[len(city):]
+    m = _DISTRICT_RE.match(text)
+    if m:
+        district = m.group(1)
+        text = text[len(district):]
+    if not district:
+        return None
+    return {
+        "province": province,
+        "city": city,
+        "district": district,
+        "detailAddress": text.strip(),
+    }
 
 
 def extract_order_id(text: str, context: dict | None = None) -> str | None:

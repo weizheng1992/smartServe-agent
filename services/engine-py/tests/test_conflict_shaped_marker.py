@@ -84,12 +84,14 @@ def _action_state() -> dict:
 
 
 def _clarify_state() -> dict:
-    # 缺槽反问终局(工单07 观测洞靶形状):咨询闸因「顺便」闭合、槽位层判
-    # order_return 缺 orderId 触发反问、咨询形标记真命中(均实测钉死)
+    # 缺槽反问终局(工单07 观测洞靶形状):咨询闸因「签收」闭合、槽位层判
+    # order_return 缺 orderId 触发反问、咨询形标记真命中。多意图一期
+    # (2026-09-12)后旧输入「顺便问下退货政策是什么」因连接词改道结构化
+    # 精判(咨询直达,不再反问),本钉换用无连接词的同形输入保持靶形状。
     return {
         "thread_id": "thread_conflict_marker_clarify",
         "user_id": "u_marker_clarify",
-        "input": "顺便问下退货政策是什么",
+        "input": "签收后还能退货吗",
         "image_urls": [],
         "input_embedding": [1.0, 0.0, 0.0],
         "business_config": {"businessId": "ecommerce"},
