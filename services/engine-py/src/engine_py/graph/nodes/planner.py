@@ -32,6 +32,8 @@ _GENERAL_ORDER_LIST_RE = re.compile(
 # 指标×导购确定性快轨(遗留二期,2026-09-13):指标词族 → rankingMetric 映射
 # (METRIC_REGISTRY 5 键:gmv/volume/gross_profit/margin_rate/stock_risk)
 _METRIC_HINT_RE = re.compile(r"(?:gmv|销售额|销量|毛利|利润|滞销|卖得好|卖的好)", re.IGNORECASE)
+# 全量加购诉求(2026-09-13 一句话接力:「推荐X，都要了」)
+_ADD_ALL_HINT_RE = re.compile(r"(?:都要|全要|一起买|都要了)")
 _SHOPPING_HINT_RE = re.compile(r"(?:推荐|买什么|挑一款|选一款|哪款好)", re.IGNORECASE)
 
 
@@ -374,6 +376,41 @@ async def planner_node(state: AgentState) -> dict:
                 await emit_status(
                     job_id,
                     "⚡ 极速规划直达：识别到经营数据+导购复合诉求，已组装排行与导购双子任务流！",
+                    node="planner",
+                    plan=fast_plan,
+                )
+            return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
+
+        # 🛒 推荐×全量加购确定性快轨(2026-09-13 一句话接力):「推荐X，都要了」
+        # 先导购(写候选,数量语义生效)后购物车全量入车 —— 零 LLM,严禁 guide
+        # 快轨单技能吞掉加购半。
+        if (
+            has_shopping_guide
+            and has_cart_manage
+            and _ADD_ALL_HINT_RE.search(input_text or "")
+            and not has_order_action
+        ):
+            fast_subtasks = [
+                {
+                    "id": "step_fast_guide_0",
+                    "description": f"Execute ShoppingGuideSkill for input: {input_text}",
+                    "status": "pending",
+                },
+                {
+                    "id": "step_fast_cart_1",
+                    "description": f"Execute CartSkill for input: {input_text}",
+                    "status": "pending",
+                },
+            ]
+            fast_plan = {
+                "goal": "Recommend products then add them all to cart",
+                "subtasks": fast_subtasks,
+                "currentStepIndex": 0,
+            }
+            if job_id:
+                await emit_status(
+                    job_id,
+                    "⚡ 极速规划直达：识别到推荐+全量加购诉求，已组装导购与购物车双子任务流！",
                     node="planner",
                     plan=fast_plan,
                 )

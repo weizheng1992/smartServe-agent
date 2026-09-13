@@ -344,6 +344,7 @@ async def _execute_single_step_core(
                 (state.get("business_config") or {}).get("businessId") or state.get("business_id") or "ecommerce"
             ).lower()
             intents = state.get("intents") or []
+            print(f"[DEBUG-ho1] dispatch {tool_name} state.guide_context候选={len((state.get('guide_context') or {}).get('candidateProducts') or [])}")
             skill_result = await skill_def.execute(
                 {
                     "threadId": state.get("thread_id"),
@@ -511,16 +512,33 @@ async def execute_step(state: dict) -> dict:
         else f'\n\n[CURRENT USER INPUT]:\nCustomer: "{state.get("input")}"'
     )
 
-    # ⚡ 独立子任务并行调度检测
+    # ⚡ 独立子任务并行调度检测。
+    # 技能依赖护栏(2026-09-13 一句话接力实弹):guide 写候选 → cart 读候选
+    # 是有状态依赖的 SOP 链,曾被无脑并行(gather 同一 state 拷贝)——cart 在
+    # guide 写入前读空候选直接反问。技能型步骤之间一律串行。
+    def _skill_tool_of(desc: str) -> str | None:
+        match = try_match_executor_fast_path(desc, state.get("input") or "", allowed_tools, short_memory)
+        tool = (match or {}).get("toolName") or ""
+        return tool if tool.startswith("skill_") else None
+
+    current_skill_tool = _skill_tool_of(subtasks[current_index].get("description") or "")
     candidate_indices = [current_index]
     for idx in range(current_index + 1, len(subtasks)):
         next_st = subtasks[idx]
         if next_st and (next_st.get("status") == "pending" or not next_st.get("status")):
+            next_skill_tool = _skill_tool_of(next_st.get("description") or "")
+            next_desc = (next_st.get("description") or "").lower()
+            is_escalation = any(kw in next_desc for kw in ("escalat", "human", "转人工"))
+            if next_skill_tool and (current_skill_tool or any(
+                (try_match_executor_fast_path(
+                    (subtasks[i].get("description") or ""), state.get("input") or "", allowed_tools, short_memory
+                ) or {}).get("toolName", "").startswith("skill_")
+                for i in candidate_indices
+            )):
+                break  # 技能链串行:前序技能可能写后续技能消费的状态
             match = try_match_executor_fast_path(
                 next_st.get("description") or "", state.get("input") or "", allowed_tools, short_memory
             )
-            next_desc = (next_st.get("description") or "").lower()
-            is_escalation = any(kw in next_desc for kw in ("escalat", "human", "转人工"))
             if match and not is_escalation:
                 candidate_indices.append(idx)
             else:

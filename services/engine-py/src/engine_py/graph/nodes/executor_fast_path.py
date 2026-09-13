@@ -133,13 +133,20 @@ def try_match_executor_fast_path(
     # 2026-09-07:返回 SkillsRegistry 真实技能 id(带 skill_ 前缀)。TS 基线此处
     # 返回伪名 cart_manage/shopping_guide —— 既不在 allowed_tools 白名单、也查不到
     # 注册表技能,分发门槛整段跳过,商品/购物车子任务空转至道歉降级(继承缺陷)。
+    # 显式技能名优先(2026-09-13 一句话接力):复合计划子任务描述嵌入对方
+    # 关键词(「Execute ShoppingGuideSkill … 加入购物车」),关键词匹配曾互相
+    # 劫持 —— 描述点名技能 id 时直配,关键词只兜底无名描述。
+    if "cartskill" in desc_lower:
+        return {"toolName": "skill_cart_manage", "args": {"userInput": user_input}}
+    if "shoppingguideskill" in desc_lower or "shopping_guide" in desc_lower:
+        return {"toolName": "skill_shopping_guide", "args": {"userInput": user_input}}
     if any(kw in desc_lower for kw in ("cart", "加购物车", "加入购物车", "加购", "购物车", "结算", "改数量", "删商品")):
         return {"toolName": "skill_cart_manage", "args": {"userInput": user_input}}
 
     # 子串匹配(非正则):裸 "hot" 会误中 what/shot,故用完整词 popular/trending/best seller。
     if any(
         kw in desc_lower
-        for kw in ("shopping_guide", "recommend", "推荐", "导购", "选品", "popular", "trending", "best seller", "bestseller")
+        for kw in ("recommend", "推荐", "导购", "选品", "popular", "trending", "best seller", "bestseller")
     ):
         return {"toolName": "skill_shopping_guide", "args": {"userInput": user_input}}
 

@@ -205,11 +205,9 @@ class TestSelfHealingSourceTopUp:
     def test_new_knowledge_file_ingested_for_seeded_db(self, pg_factory, monkeypatch):
         """已播种库(有其它 source 行)遇到新知识文件:必须补灌 —— 商品知识
         文档对既有库可见的前提。"""
-        from engine_py.rag import knowledge_files
         from engine_py.rag.contextual_rag import ContextualRAG
 
         engine = pg_factory.kw["bind"]
-        original_load = knowledge_files.load_knowledge_chunks
 
         def _two_files():
             return [

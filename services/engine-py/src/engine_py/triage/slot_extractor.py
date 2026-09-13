@@ -182,7 +182,9 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
             r"(?:推荐|买什么|有什么好看|有没有|挑一款|选一款|适合.*的|找一找|推荐一款|介绍一下|哪款好|选鞋|选衣服|看商品|导购|什么牌子|款式|推荐几件|推荐几款|热门|爆款|热销|热卖|畅销|上新|新品|卖得好|卖的好)",
             re.IGNORECASE,
         ),
-        negative_pattern=re.compile(r"(?:加购物车|加入购物车|放进购物车|加购|移出购物车|清空购物车)", re.IGNORECASE),
+        # 全量加购诉求(都要/全要/一起买)不得否掉导购半 —— 「推荐X，都要了」
+                    # 是先推荐后全量入车的复合流(2026-09-13 一句话接力)
+                    negative_pattern=re.compile(r"^(?!.*(?:都要|全要|一起买)).*(?:加购物车|加入购物车|放进购物车|加购|移出购物车|清空购物车)", re.IGNORECASE),
     ),
     IntentRule(
         intent=AgentIntentType.ORDER_MODIFY_ADDRESS,

@@ -134,6 +134,72 @@ class TestGuideQuantityMeasureWords:
         assert match is not None, "「两款」必须被数量语义命中"
 
 
+class TestRecommendAllHandoff:
+    def test_guide_rule_survives_all_buy_suffix(self):
+        """「推荐两款登山包，都要了，一起加入购物车」:guide 规则不得被
+        negative(加入购物车)误杀 —— 推荐半与全量加购半都要检出。"""
+        specs = SlotExtractor.extract_all("推荐两款登山包，都要了，一起加入购物车")
+        intents = {s["intentType"] for s in specs}
+        assert {"shopping_guide", "cart_manage"} <= intents, intents
+
+    def test_planner_plans_guide_then_cart_for_all_buy(self, monkeypatch):
+        """推荐×全量加购复合:确定性双子任务(先导购写候选,后购物车全量入车),
+        零 LLM —— 一句话流自动接力。"""
+        from engine_py.graph.nodes import planner as planner_mod
+
+        class _FakeSM:
+            def __init__(self, thread_id: str) -> None:
+                pass
+
+            async def get_messages(self) -> list:
+                return []
+
+        monkeypatch.setattr(planner_mod, "ShortMemory", _FakeSM)
+
+        def _no_llm(*args, **kwargs):
+            raise AssertionError("推荐×全量加购必须走确定性快轨")
+
+        monkeypatch.setattr(planner_mod, "planner_llm", _no_llm)
+        state = {
+            "intents": [
+                {"intent": "cart_manage", "confidence": 0.95, "type": "primary"},
+                {"intent": "shopping_guide", "confidence": 0.9, "type": "secondary"},
+            ],
+            "input": "推荐两款登山包，都要了，一起加入购物车",
+            "short_memory": [],
+        }
+        result = asyncio.run(planner_mod.planner_node(state))
+        descs = [st.get("description", "") for st in result["task_plan"]["subtasks"]]
+        assert any("ShoppingGuideSkill" in d for d in descs), descs
+        assert any("CartSkill" in d or "cart_manage" in d for d in descs), descs
+        assert descs.index(next(d for d in descs if "ShoppingGuideSkill" in d)) < descs.index(
+            next(d for d in descs if "CartSkill" in d or "cart_manage" in d)
+        ), "导购必须先于购物车(候选先写,后全量入车)"
+
+
+class TestFastPathSkillNamePriority:
+    def test_compound_descriptions_do_not_hijack_each_other(self):
+        from engine_py.graph.nodes.executor_fast_path import try_match_executor_fast_path
+
+        """复合计划子任务描述嵌入对方关键词(「Execute ShoppingGuideSkill…
+        加入购物车」)—— 显式技能名必须优先,关键词严禁互相劫持
+        (实弹:guide 子任务被 cart 分支劫持,推荐半跑成了加购反问)。"""
+        guide_result = try_match_executor_fast_path(
+            description="Execute ShoppingGuideSkill for input: 推荐两款登山包，都要了，一起加入购物车",
+            user_input="推荐两款登山包，都要了，一起加入购物车",
+            allowed_tools=["skill_shopping_guide", "skill_cart_manage"],
+        )
+        assert guide_result == {"toolName": "skill_shopping_guide",
+                                "args": {"userInput": "推荐两款登山包，都要了，一起加入购物车"}}
+        cart_result = try_match_executor_fast_path(
+            description="Execute CartSkill for input: 推荐两款登山包，都要了，一起加入购物车",
+            user_input="推荐两款登山包，都要了，一起加入购物车",
+            allowed_tools=["skill_shopping_guide", "skill_cart_manage"],
+        )
+        assert cart_result == {"toolName": "skill_cart_manage",
+                               "args": {"userInput": "推荐两款登山包，都要了，一起加入购物车"}}
+
+
 class TestPlannerUrgeRule:
     def test_urge_is_not_escalation(self, monkeypatch):
         """「帮我催催」:催单是查单+话术,严禁规划人工转接(M2 实弹把急用

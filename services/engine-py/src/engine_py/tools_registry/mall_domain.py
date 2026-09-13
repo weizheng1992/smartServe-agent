@@ -109,14 +109,17 @@ class MallDomainService:
         "鞋子": ("鞋",),
         # 包类口语名(2026-09-13):「登山包」子串不在「高山徒步轻量化背包」中,
         # 词素(背包/包)补匹配面
-        "登山包": ("背包", "包"),
-        "腰包": ("包",),
-        "胸包": ("包",),
+        "登山包": ("背包",),
+        "腰包": (),
+        "胸包": (),
     }
     # 词元清洗(ADR 检索链 L1):数量前缀逐块剥、「衬衫都」尾缀语气字仅剥
     # 长块(len>2,「成都」两字不动);⚠️ 分隔符连词只收「和/与」,「跟」
     # 严禁入列(高跟鞋/跟妆会被劈开)。
-    _QUANTITY_PREFIX_RE = re.compile(r"^(?:几[件条双款个]|[两三四五六七八九十]+[件条双款个]|\d+[件条双款个])")
+    # 数量前缀(2026-09-13 块内定位):「推荐两款登山包」块首是「推荐」,
+    # ^ 锚定剥不掉致词元全死落语义召回(渔夫帽顶了登山包)—— 改块内最小
+    # 贪婪定位,剥到量词为止
+    _QUANTITY_PREFIX_RE = re.compile(r"^.*?(?:几[件条双款个]|[两三四五六七八九十]+[件条双款个]|\d+[件条双款个])")
     _TRAILING_PARTICLE_RE = re.compile(r"(?:都要|都|吧|呢|啊|呀)$")
 
     # 购物车存储(2026-09-08 重构):_cart_storage 降级为进程一级读缓存,真实
@@ -805,8 +808,10 @@ class MallDomainService:
         """
         conditions = ["s.status = 'ON_SALE'"]
         params: dict = {}
+        title_hit_clause = ""
         if terms:
             like_clauses = []
+            title_clauses = []
             for idx, term in enumerate(terms):
                 key = f"q{idx}"
                 params[key] = f"%{term}%"
@@ -814,7 +819,11 @@ class MallDomainService:
                     f"(s.title ILIKE :{key} OR s.subtitle ILIKE :{key} "
                     f"OR s.category ILIKE :{key} OR s.description ILIKE :{key})"
                 )
+                title_clauses.append(f"s.title ILIKE :{key}")
             conditions.append("(" + " OR ".join(like_clauses) + ")")
+            # 标题命中优先(2026-09-13):description 弱命中(渔夫帽描述含「包」)
+            # 曾凭价格优势把 title 强命中的真背包挤出 LIMIT
+            title_hit_clause = f"({' OR '.join(title_clauses)})"
         if category:
             conditions.append("s.category = :cat")
             params["cat"] = category
@@ -839,7 +848,12 @@ class MallDomainService:
                                 f"WHERE {' AND '.join(conditions)} "
                                 "GROUP BY s.id "
                                 f"HAVING {' AND '.join(having_clauses)} "
-                                "ORDER BY min_price ASC LIMIT :lim"
+                                + (
+                                    f"ORDER BY (CASE WHEN {title_hit_clause} THEN 0 ELSE 1 END), min_price ASC "
+                                    "LIMIT :lim"
+                                    if title_hit_clause
+                                    else "ORDER BY min_price ASC LIMIT :lim"
+                                )
                             ).bindparams(**params)
                         )
                     )
