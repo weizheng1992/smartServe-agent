@@ -458,6 +458,19 @@ async def run_agent(job: AgentJobInput) -> dict:
     except Exception as metrics_err:
         print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
 
+    # 🛡️ 订单宣称反幻觉硬闸(2026-09-13 用户实报):复合流被判单导购终局后
+    # LLM 叙事宣称「已成功结算下单/订单号 2477」—— 单号实为上轮幻觉残留在
+    # 历史里的假号(幻觉自增殖)。收口确定性校验:宣称单号必须来自本轮
+    # checkoutCart 真实结果,否则剥离宣称+诚实说明,幻觉不进对话历史。
+    try:
+        from .graph.nodes.output_guard import sanitize_order_claims
+
+        result["output"] = await sanitize_order_claims(
+            str(result.get("output") or ""), result.get("task_plan")
+        )
+    except Exception as guard_err:
+        print(f"[runAgent] 订单宣称校验失败(放行原文,不阻断): {guard_err!r}")
+
     # 🗂️ 富媒体卡片合成(ADR-0001:场景化快捷回复;域卡片优先作基座,
     # 场景组统一追加;购物轮实查真货架品类喂 chips,不可达诚实空)
     shelf_categories = await CardSynthesizer.fetch_shelf_categories(result.get("intents"), thread_id)

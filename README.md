@@ -73,7 +73,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 | **BI 与 Text-to-SQL 安全**               | 字符串拼接 SQL 模板，存在注入风险与超时卡顿            | **参数化 AST 编译器与只读事务沙箱**：sqlglot AST 只读审计（强制 `SELECT` only）、参数化绑定、`SET TRANSACTION READ ONLY` + 超时熔断守护与 `LIMIT 50` 约束。                                         |
 | **商户开放集成与技能生态**               | 静态内置工具与预设店铺规则                             | **开放商户 SPI 对接标准 & SOP 技能体系**：HMAC-SHA256 签名 + 时间戳防重放、SSRF 私网阻断、标准 RESTful `/api/skills/config` 动态重载与 MCP 复合生态。                                                |
 | **实时协同与流式推流弹性**               | 简单的 SSE 传输，断线重连丢失事件，缺乏坐席接管机制    | **Redis Streams 事件主干 + Last-Event-ID 弹性回放**：事件以 XADD 持久化（INCR 序号 + maxlen），SSE 断线重连按序号精准回放；python-socketio 实现毫秒级人工客服协同接管。                              |
-| **质量保障与自动化测试**                 | 少量零散单元测试                                       | **全自动化测试流水线**：pytest 契约套件（密封 testcontainers PG+Redis，121 例：HTTP/SSE/socket.io 契约 + AST 沙箱）+ engine 609 例（意图仲裁/视觉消歧/记忆/发件箱对账/多意图不打断）、Playwright 真实浏览器 E2E 与 Promptfoo Python Provider 评估全覆盖。                   |
+| **质量保障与自动化测试**                 | 少量零散单元测试                                       | **全自动化测试流水线**：pytest 契约套件（密封 testcontainers PG+Redis，121 例：HTTP/SSE/socket.io 契约 + AST 沙箱）+ engine 614 例（意图仲裁/视觉消歧/记忆/发件箱对账/多意图不打断）、Playwright 真实浏览器 E2E 与 Promptfoo Python Provider 评估全覆盖。                   |
 
 ---
 
@@ -201,7 +201,7 @@ smartServe-agent 是一款基于 **Turborepo Monorepo**、**Python FastAPI 网�
 │   │   │   ├── event_bus.py            # Redis Streams 事件主干 (INCR seq + XADD maxlen)
 │   │   │   └── run_agent.py            # 智能体作业入口 (AgentJobInput → run_agent)
 │   │   ├── alembic/                    # 数据库迁移唯一所有权 (bun run db:push)
-│   │   └── tests/                      # pytest 套件 609 例 (密封 PG 夹具: 意图仲裁/视觉消歧/记忆/发件箱对账/多意图不打断/scheduler 等)
+│   │   └── tests/                      # pytest 套件 614 例 (密封 PG 夹具: 意图仲裁/视觉消歧/记忆/发件箱对账/多意图不打断/scheduler 等)
 │   │
 │   └── gateway-py/                     # FastAPI API 网关 (Port 4000)
 │       ├── src/gateway_py/
