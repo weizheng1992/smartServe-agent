@@ -11,6 +11,9 @@ export interface ExecuteApprovalActionOptions {
   action: 'approve' | 'reject' | 'cancel';
   rejectionReason?: string;
   apiEndpoint?: string;
+  /** 核准人契约(admin-readiness 01):调用方声明身份;缺省由网关按调用面角色兜底 */
+  actor?: string;
+  actorRole?: 'platform_admin' | 'merchant_operator' | 'system';
 }
 
 export interface ExecuteHumanReplyOptions {
@@ -45,6 +48,8 @@ export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals') {
       action,
       rejectionReason,
       apiEndpoint = defaultEndpoint,
+      actor,
+      actorRole,
     }: ExecuteApprovalActionOptions): Promise<ApprovalActionResult> => {
       setSubmittingActionId(approvalId);
       try {
@@ -57,6 +62,8 @@ export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals') {
             approvalId,
             action,
             rejectionReason: action === 'reject' ? reason || '退款申请不符合政策要求。' : '',
+            ...(actor ? { actor } : {}),
+            ...(actorRole ? { actorRole } : {}),
           }),
         });
 

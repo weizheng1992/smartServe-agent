@@ -536,6 +536,70 @@ class TestApprovals:
         # process_approval_action 透传结果:status 推进为 approved 或显式 success
         assert body.get("status") == "approved" or body.get("success") is True
 
+    async def _insert_waiting_ticket(self, ticket_id: str) -> None:
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO pending_approvals (id, thread_id, business_id, status, action_type, reason, "
+                    "action_payload, deadline) VALUES (CAST(:id AS uuid), :tid, 'nike', 'waiting', 'processRefund', "
+                    "'actor 契约工单', CAST('{}' AS jsonb), NOW() + INTERVAL '24 hours') ON CONFLICT (id) DO NOTHING"
+                ).bindparams(id=ticket_id, tid=CONTRACT_THREAD)
+            )
+            await session.commit()
+
+    async def test_resolve_carries_actor_identity(self, client, contract_fixtures):
+        """核准人契约(admin-readiness 01):actor 显式声明/缺省按调用面兜底,
+        均落 actionPayload.resolvedBy/resolvedByRole 并由列表顶层透出;
+        非法 actorRole 归 system。"""
+        import uuid as _uuid
+
+        # ① 显式 actor(商户面操作员)
+        aid = str(_uuid.uuid4())
+        await self._insert_waiting_ticket(aid)
+        res = await client.post(
+            "/api/approvals",
+            headers={"x-tenant-id": "nike", "x-role": "merchant"},
+            json={"approvalId": aid, "action": "approve", "actor": "op_12(王店长)", "actorRole": "merchant_operator"},
+        )
+        assert res.status_code == 200
+        listing = await client.get("/api/approvals", params={"tenantId": "nike"})
+        row = next(a for a in listing.json()["approvals"] if a["id"] == aid)
+        assert row["actionPayload"]["resolvedBy"] == "op_12(王店长)"
+        assert row["actionPayload"]["resolvedByRole"] == "merchant_operator"
+        assert row["resolvedBy"] == "op_12(王店长)"
+        assert row["resolvedByRole"] == "merchant_operator"
+
+        # ② 缺省 actor + x-role: admin → platform_admin 兜底
+        aid2 = str(_uuid.uuid4())
+        await self._insert_waiting_ticket(aid2)
+        res2 = await client.post(
+            "/api/approvals",
+            headers={"x-tenant-id": "nike", "x-role": "admin"},
+            json={"approvalId": aid2, "action": "reject", "rejectionReason": "契约驳回"},
+        )
+        assert res2.status_code == 200
+        listing2 = await client.get("/api/approvals", params={"tenantId": "nike"})
+        row2 = next(a for a in listing2.json()["approvals"] if a["id"] == aid2)
+        assert row2["status"] == "rejected"
+        assert row2["actionPayload"]["resolvedBy"] == "platform_admin"
+        assert row2["actionPayload"]["resolvedByRole"] == "platform_admin"
+
+        # ③ 非法 actorRole 归 system
+        aid3 = str(_uuid.uuid4())
+        await self._insert_waiting_ticket(aid3)
+        res3 = await client.post(
+            "/api/approvals",
+            headers={"x-tenant-id": "nike"},
+            json={"approvalId": aid3, "action": "approve", "actor": "ghost", "actorRole": "hacker"},
+        )
+        assert res3.status_code == 200
+        listing3 = await client.get("/api/approvals", params={"tenantId": "nike"})
+        row3 = next(a for a in listing3.json()["approvals"] if a["id"] == aid3)
+        assert row3["actionPayload"]["resolvedByRole"] == "system"
+
 
 class TestChatThreads:
     """回归钉(wayfinder 004):POST /api/chat/threads。

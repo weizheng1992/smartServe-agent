@@ -419,12 +419,14 @@ async def list_approvals(
     except Exception as err:
         print(f"[ApprovalsService] Failed to list approvals: {err}")
         approvals = []
-    # 人工决议明细(驳回理由/坐席回复)埋在 actionPayload 深层,提到顶层供
+    # 人工决议明细(驳回理由/坐席回复/核准人)埋在 actionPayload 深层,提到顶层供
     # 管理台「审批人 / 驳回理由」列直接消费 —— 此前该列永远显示「-」
     for item in approvals:
         payload = item.get("actionPayload") if isinstance(item.get("actionPayload"), dict) else {}
         item["rejectionReason"] = payload.get("rejectionReason") or None
         item["humanReply"] = payload.get("humanReply") or None
+        item["resolvedBy"] = payload.get("resolvedBy") or None
+        item["resolvedByRole"] = payload.get("resolvedByRole") or None
     return {"success": True, "approvals": approvals, "total": len(approvals), "tenantId": effective_tenant}
 
 
@@ -434,6 +436,20 @@ async def list_approvals(
 @approvals_router.post("/api/approvals")
 @approvals_router.post("/api/chat/approvals")
 async def resolve_approval(body: dict, request: Request):
+    # 核准人契约(admin-readiness 01):调用方可声明 actor(显示名)+actorRole,
+    # 缺省按调用面角色兜底 —— admin 面注入 platform_admin,其余按 merchant_operator。
+    # 身份落 actionPayload.resolvedBy/resolvedByRole(engine 侧透传),管理台
+    # 「审批人 / 驳回理由」列据此显示真实来源,不再只能显示模糊「人工坐席接管」。
+    actor = (body.get("actor") or "").strip()
+    actor_role = body.get("actorRole")
+    header_role = (request.headers.get("x-role") or "").strip().lower()
+    if not actor:
+        if header_role == "admin":
+            actor, actor_role = "platform_admin", "platform_admin"
+        else:
+            actor, actor_role = "merchant_operator", "merchant_operator"
+    elif not actor_role:
+        actor_role = "platform_admin" if header_role == "admin" else "merchant_operator"
     options = {
         "approvalId": body.get("approvalId"),
         "threadId": body.get("threadId"),
@@ -441,6 +457,8 @@ async def resolve_approval(body: dict, request: Request):
         "rejectionReason": body.get("rejectionReason"),
         "humanReply": body.get("humanReply") or body.get("replyMessage"),
         "isFinish": body.get("isFinish"),
+        "resolvedBy": actor,
+        "resolvedByRole": actor_role,
     }
     return await ApprovalGatekeeper.process_approval_action(options)
 

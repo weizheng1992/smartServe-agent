@@ -163,6 +163,9 @@ export const approvalsApi = {
     rejectionReason?: string;
     humanReply?: string;
     isFinish?: boolean;
+    // 核准人契约(admin-readiness 01):声明身份,缺省由网关按调用面角色兜底
+    actor?: string;
+    actorRole?: 'platform_admin' | 'merchant_operator' | 'system';
     tenantId?: string;
   }) => {
     return adminApi.post('/api/approvals', body, body.tenantId);

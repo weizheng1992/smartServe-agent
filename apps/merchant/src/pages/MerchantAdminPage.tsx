@@ -254,6 +254,10 @@ export default function MerchantAdminPage() {
     const result = await executeApprovalAction({
       approvalId,
       action,
+      // 核准人契约(admin-readiness 01):商户面声明身份;控制台暂无登录账号,
+      // 以调用面角色声明,接入真实账号后替换为操作员显示名即可,契约不变
+      actor: 'merchant_operator',
+      actorRole: 'merchant_operator',
       apiEndpoint: '/api/admin/approvals',
     });
     if (result.success) {

@@ -558,6 +558,12 @@ class ApprovalGatekeeper:
         rejection_reason = options.get("rejectionReason")
         human_reply = options.get("humanReply")
         is_finish = options.get("isFinish")
+        # 核准人契约(2026-09-13 admin-readiness 01):调用方声明身份,缺省由网关
+        # 按 x-role 兜底注入;落 actionPayload,与 humanReply/rejectionReason 同模式。
+        resolved_by = (options.get("resolvedBy") or "").strip() or "unknown"
+        resolved_by_role = options.get("resolvedByRole")
+        if resolved_by_role not in ("platform_admin", "merchant_operator", "system"):
+            resolved_by_role = "system"
 
         if action == "start_human_takeover":
             return await ApprovalGatekeeper.start_human_takeover(thread_id or "default_thread")
@@ -631,6 +637,8 @@ class ApprovalGatekeeper:
                     **(record.action_payload or {}),
                     "rejectionReason": rejection_reason or "",
                     "humanReply": human_reply or "",
+                    "resolvedBy": resolved_by,
+                    "resolvedByRole": resolved_by_role,
                 }
 
                 # 🎯 确定性 Job ID:job_resume_${approvalId},物理防重幂等

@@ -42,7 +42,9 @@ export function AuditsPage() {
         reviewerId:
           item.reviewerId ||
           item.operatorId ||
-          // 引擎不记录核准人身份,人工接管型工单的终态即「已由人工坐席接管处理」
+          // 核准人契约:决议时写入 actionPayload.resolvedBy(平台管理面显示名);
+          // 历史无 actor 的接管型工单回落「人工坐席接管」
+          item.actionPayload?.resolvedBy ||
           (item.status === 'resolved_by_human' ? '人工坐席接管' : undefined),
         rejectionReason: item.rejectionReason || item.actionPayload?.rejectionReason || undefined,
         createdAt: item.createdAt
@@ -105,6 +107,9 @@ export function AuditsPage() {
         threadId: selectedItem.threadId,
         action: apiAction,
         rejectionReason: action === 'rejected' ? '平台管理员依据风控策略驳回' : undefined,
+        // 核准人契约(admin-readiness 01):admin 面声明身份,引擎落 actionPayload
+        actor: 'platform_admin',
+        actorRole: 'platform_admin',
         tenantId: selectedItem.businessId,
       });
 
