@@ -149,5 +149,5 @@ SaaS 管理控制台(admin)作为平台运营者的唯一工作面,存在四类�
 - **提交轨迹**(时间序):`e3c14fa`(9 项修复+去 mock)→ 工单 01 `449b3e3`(actor 契约)→ 工单 02(注册表统一)→ 工单 03(大盘)→ 工单 04/11(商户审计+三缺陷)→ 工单 10/08/09(下钻/错误条/数据治理)。
 - **测试基线**:gateway pytest 130、engine pytest 615、admin bun test 35、admin e2e 14、merchant e2e 8(7 过 1 数据驱动 skip)。
 - **并行会话注意**:仓库常有并行 WIP(如 step_execution_engine 在途改动含一个已知 F821),改 gatekeeper/merchant 路由前先 `git status` 确认;本规格的实现提交均与并行改动零交集。
-- **截图证据**:`.scratch/admin-console-readiness/assets/merchant-console/`(gitignored 目录下的审计截图 8 张)。
+- **截图证据**:审计过程截图(临时目录)已随收口删除;审计结论以工单 04/11 的文字记录为准。
 - 商户台过滤语义:审批/会话按**线程归属租户**过滤(business_id 冗余不可信),造测试数据时必须先建正确归属的线程。
