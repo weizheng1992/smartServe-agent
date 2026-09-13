@@ -622,7 +622,7 @@ class CartManageSkill(BaseSkill):
                     "skillId": self.metadata["id"],
                     "output": (
                         "请问您想将哪一款商品加入购物车呢？\n"
-                        "您可以先让我为您推荐商品（例如\"推荐热销短袖\"），再说\"把第1件加入购物车\"即可！🛒"
+                        "您可以先让我为您推荐商品（例如\"推荐几款短袖\"），再说\"把第1件加入购物车\"即可！🛒"
                     ),
                     "nextAction": "finish",
                     "extra": {"guideContext": guide_context, "cartContext": existing_cart},

@@ -28,7 +28,12 @@ from .consult_fast_path import (
     run_consult_direct_answer,
 )
 from .exemplar_service import format_exemplars_for_prompt, search_relevant_exemplars
-from .intent_registry import CONSULT_SIDE_INTENTS, EXPLICIT_ORDER_ID_RE, INTENT_REGISTRY
+from .intent_registry import (
+    CONSULT_SIDE_INTENTS,
+    EXPLICIT_ORDER_ID_RE,
+    INTENT_REGISTRY,
+    REFUND_VERB_RE,
+)
 from .product_disambiguator import AFTER_SALE_INTENTS, build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, cosine_similarity, strip_punctuation_for_greeting
 from .slot_extractor import (
@@ -46,12 +51,17 @@ OPERATIONAL_ACTION_RE = re.compile(
 )
 UNSANITIZED_TAGS_RE = re.compile(r"\[(?:ECOMMERCE|BRAND|STORE|MERCHANT|SHOP|ADIDAS|NIKE)\]", re.IGNORECASE)
 ORDER_KEYWORDS_RE = re.compile(r"订单|发货|物流|查单|买的|快递|到哪|运单|面单", re.IGNORECASE)
-REFUND_KEYWORDS_RE = re.compile(r"退款|退货|退钱|退单|退款申请|退货流程|破损|坏了|碎了|瑕疵|退了|退掉|退还", re.IGNORECASE)
-MULTI_INTENT_CANDIDATE_RE = re.compile(r"(?:另外|同时|并|顺便|还有|然后|接着|以及)")
+# 退款动词族单一事实源(intent_registry.REFUND_VERB_RE,2026-09-13 收口)+
+# 破损词(damage assessment 专用,不入 slot 规则表 —— 「坏了」不是退款动词)
+REFUND_KEYWORDS_RE = re.compile(REFUND_VERB_RE.pattern + r"|破损|坏了|碎了|瑕疵", re.IGNORECASE)
+MULTI_INTENT_CANDIDATE_RE = re.compile(
+    r"(?:另外|同时|并|顺便|还有|然后|接着|以及|随后|其次|再(?=[查看买退加来试问改推结]))"
+)
 # 多意图不打断一期(2026-09-12):复合候选形的缺槽反问收窄与资金动作否决。
 # 「然后」「并」裸词补入 —— 旧正则只有「然后再」「并且」,「退了订单9081，
 # 然后推荐跑步鞋」「建地址…，并下单…」都漏判成单意图(A1/A6 实弹病灶)。
-MONEY_ACTION_VETO_RE = re.compile(r"(?:退款|退货|退还|退了|退掉|换货|申请售后)")
+# 资金否决 = 退款动词族 + 换货(换货刻意不入族,见 intent_registry 注)
+MONEY_ACTION_VETO_RE = re.compile(REFUND_VERB_RE.pattern + r"|换货", re.IGNORECASE)
 # 资金动作意图集(让位判定的参照):规则层单意图终局若非本集而输入命中
 # 资金词族,即视为「资金半被规则层漏检」,连终局一起让位 Step2/3 精判。
 _MONEY_ACTION_INTENTS = frozenset({AgentIntentType.REFUND, AgentIntentType.ORDER_RETURN})
@@ -67,7 +77,7 @@ def _money_action_vetoed(input_text: str | None) -> bool:
 # 根因是 LLM 分类层把「利润」判成后台经营数据拒答;排行是店长在客服台的
 # 合法诉求,确定性直通 metric_query(planner→executor queryProductRanking)。
 PROFIT_RANKING_RE = re.compile(
-    r"^(?=.*(?:毛利|利润|毛利率))(?=.*(?:排行|排名|top|热销|畅销|最高|前\s*\d)).+",
+    r"^(?=.*(?:毛利|利润|毛利率|赚钱|挣钱|赚多少))(?=.*(?:排行|排名|top|热销|畅销|最高|前\s*\d)).+",
     re.IGNORECASE | re.DOTALL,
 )
 

@@ -258,8 +258,9 @@ def _run_process(monkeypatch: pytest.MonkeyPatch, input_text: str, classify_resu
 
 class TestRuleLevelClarifySkipOnCompound:
     def test_a3_shape_reaches_structured_instead_of_rule_clarification(self, monkeypatch):
-        """「查订单把没发货的退了」:复合候选形不做规则层缺槽反问,落结构化
-        精判 → primary(order_query)齐备 → 放行 planner(整轮无反问)。"""
+        """「查订单把没发货的退了」:退了族入 slot 规则表后(2026-09-13 收口),
+        规则层 extract_all 直接拆出查单+退款双意图终端 —— 无需 LLM 兜底,
+        也绝不被缺槽反问劫持。"""
         log_calls: list = []
         result = _run_process(
             monkeypatch,
@@ -274,7 +275,9 @@ class TestRuleLevelClarifySkipOnCompound:
             log_calls,
         )
         assert "output" not in result, "复合形不得被缺槽反问劫持整轮"
-        assert [p["intent"] for p in result["intents"]] == ["order_query", "refund"]
+        intents = {p["intent"] for p in result["intents"]}
+        assert intents == {"order_query", "order_return"}, "规则层直接拆分,零 LLM"
+        assert log_calls[0]["kwargs"].get("arbitration_reason") == "slot_extractor_multi"
 
     def test_a1_shape_secondary_missing_slot_does_not_hijack(self, monkeypatch):
         """「来点背包,并修改收货地址…」:primary 齐备 × secondary 缺单号 →
@@ -324,11 +327,33 @@ class TestOrderIdShapeSanitize:
             ),
             log_calls,
         )
-        first = result["intents"][0]
-        assert first["entities"].get("orderId") is None, "不合格形态的单号必须剥除"
-        assert "orderId" in (first.get("missingSlots") or []), "剥除后必须补缺槽注记"
-        assert "output" not in result, "剥除后放行 planner(先办导购+追问退哪单)"
-        assert result["intents"][1]["intent"] == "shopping_guide"
+        # ①「退了」族入 slot 规则表后(2026-09-13 收口)规则层直接拆分,
+        # 四位尾缀 9081 本就不匹配单号正则,永不入槽
+        intents = {p["intent"] for p in result["intents"]}
+        assert intents == {"order_return", "shopping_guide"}, "规则层直接拆分,零 LLM"
+        refund_intent = next(p for p in result["intents"] if p["intent"] == "order_return")
+        assert not (refund_intent.get("entities") or {}).get("orderId"), "四位尾缀严禁充当单号"
+        assert "output" not in result
+
+        # ②结构化层防线仍保留:无规则词句子、LLM 抽出手机号形态单号必须剥除
+        # (2.6.18 场景:号码被当单号去查一笔不存在的订单)
+        log_calls2: list = []
+        result2 = _run_process(
+            monkeypatch,
+            "处理一下那笔款项",
+            StructuredTriageOutput(
+                intents=[
+                    IntentNode(
+                        intent="refund", confidence=0.95, type="primary",
+                        entities={"orderId": "13800138000"}, missingSlots=[],
+                    ),
+                ]
+            ),
+            log_calls2,
+        )
+        first2 = result2["intents"][0]
+        assert first2["entities"].get("orderId") is None, "不合格形态的单号必须剥除"
+        assert "orderId" in (first2.get("missingSlots") or []), "剥除后必须补缺槽注记"
 
     def test_valid_shape_order_id_survives(self, monkeypatch):
         """规范形态单号(ORD-/AURORA-ORD-)不受形状校验误伤。"""
@@ -379,10 +404,25 @@ class TestMoneyActionYieldWiring:
             ),
             log_calls,
         )
-        reasons = [lc["kwargs"].get("arbitration_reason") for lc in log_calls]
-        assert "money_action_veto_yield" in reasons, "资金否决让位必须留痕"
-        assert "假导购回复" not in str(result.get("output")), "资金动作在场不得单导购终局"
-        assert [p["intent"] for p in result["intents"]] == ["shopping_guide", "refund"]
+        # ①「退掉」族已入 slot 规则表 → 规则层直接拆分,零 LLM 零吞半
+        assert [p["intent"] for p in result["intents"]] == ["shopping_guide", "order_return"]
+        assert "output" not in result, "规则层拆分放行 planner"
+
+        # ②「换货」刻意不入 slot 族(防击穿咨询闸):单意图高置信终局仍需
+        # 资金让位(money_action_veto_yield)兜底
+        result2 = _run_process(
+            monkeypatch,
+            "推荐几款卫衣，帮我换货",
+            StructuredTriageOutput(
+                intents=[
+                    IntentNode(intent="shopping_guide", confidence=0.9, type="primary", missingSlots=[]),
+                ],
+            ),
+            log_calls,
+        )
+        reasons2 = [lc["kwargs"].get("arbitration_reason") for lc in log_calls]
+        assert "money_action_veto_yield" in reasons2, "换货形必须经资金让位兜底"
+        assert "假导购回复" not in str(result2.get("output")), "资金动作在场不得单导购终局"
 
 
 class TestStructuredClarifyStillAsksWhenPrimaryMissing:

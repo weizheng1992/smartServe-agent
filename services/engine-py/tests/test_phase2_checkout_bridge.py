@@ -570,7 +570,6 @@ def test_checkout_concurrent_stock_loss_no_order(pg_factory):
                 await conn.execute(text("UPDATE merchant_skus SET stock = 0 WHERE sku_code='SPU-P2-BAG-SKU-0'"))
             # 绕过 resolve 预检直接构造竞态:把库存恢复 1 条件 —— 用 monkey 场景:
             # resolve 需要 stock>0 才入选,故并发窗口用 patch 固定 resolve 结果
-            import engine_py.tools_registry.mall_domain as md
 
             real_resolve = MallDomainService._resolve_purchasable_sku
 
@@ -688,8 +687,8 @@ class TestCartSkillBranches:
             return {"success": True, "orderId": "X"}
 
         monkeypatch.setattr(MallDomainService, "checkout_user_cart", staticmethod(_fake_checkout))
-        for text in ("我还没下单呢", "先不付款", "货到付款可以吗", "不要下单"):
-            asyncio.run(CartManageSkill().execute(_skill_ctx(text)))
+        for phrase in ("我还没下单呢", "先不付款", "货到付款可以吗", "不要下单"):
+            asyncio.run(CartManageSkill().execute(_skill_ctx(phrase)))
         assert not calls, f"否定形误触结算: {calls}"
 
     def test_delete_plus_checkout_yields_to_delete(self, monkeypatch):

@@ -63,10 +63,17 @@ class TestParseChineseAddress:
         }
 
     def test_city_without_province(self):
+        """省略省前缀:高频市经 CITY_PROVINCE_MAP 反查推断(2026-09-13 nightly)。"""
         parsed = parse_chinese_address("广州市天河区体育西路5号")
         assert parsed["city"] == "广州市"
         assert parsed["district"] == "天河区"
         assert parsed["detailAddress"] == "体育西路5号"
+        assert parsed["province"] == "广东省"
+
+    def test_city_unknown_province_stays_empty(self):
+        """映射表查不到的市:省保持空,saveUserAddress 缺 province 走诚实反问。"""
+        parsed = parse_chinese_address("保定市竞秀区朝阳南大街1号")
+        assert parsed["city"] == "保定市"
         assert parsed["province"] == ""
 
     def test_unparsable_returns_none(self):

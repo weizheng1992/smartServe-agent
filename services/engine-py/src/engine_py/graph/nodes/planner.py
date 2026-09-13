@@ -21,8 +21,11 @@ from ...triage.intent_registry import (
 from ..state import AgentState, build_history_context
 from .utils import extract_order_id
 
+# ⚠️ 与 slot_extractor._GENERAL_LIST_POSITIVE_RE 是孪生词表(nightly G4 钉死
+# 双轨),新增措辞两处必须同步 ——「看看我买了啥」曾只认 slot 侧漏 planner 快轨
 _GENERAL_ORDER_LIST_RE = re.compile(
-    r"查询.*订单|查订单|我的订单|订单列表|名下.*订单|支持退货.*订单|支持退款.*订单|可退.*订单|哪些.*订单|订单|我问订单",
+    r"查询.*订单|查订单|我的订单|订单列表|名下.*订单|支持退货.*订单|支持退款.*订单|可退.*订单|哪些.*订单|订单|我问订单"
+    r"|看看我买了啥|买了啥|买过啥|我买的东西|历史购买记录",
     re.IGNORECASE,
 )
 
@@ -52,7 +55,7 @@ def _ranking_metric_from_text(text: str) -> str:
     """指标词族 → 排行 metric 键(与 OrderDomainService.METRIC_REGISTRY 同名)。"""
     if re.search(r"毛利率", text, re.IGNORECASE):
         return "margin_rate"
-    if re.search(r"毛利|利润", text, re.IGNORECASE):
+    if re.search(r"毛利|利润|赚钱|挣钱|赚多少", text, re.IGNORECASE):
         return "gross_profit"
     if re.search(r"gmv|销售额", text, re.IGNORECASE):
         return "gmv"

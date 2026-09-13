@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .intent_registry import (
+    CITY_PROVINCE_MAP,
+    REFUND_VERB_RE,
     AgentIntentType,
 )
 
@@ -81,6 +83,10 @@ def parse_chinese_address(full: str | None) -> dict | None:
         if m:
             city = m.group(1)
             text = text[len(city):]
+    # 省级反查(2026-09-13):「成都市高新区…」省略省前缀,高频市查表推断;
+    # 查不到保持空省 —— saveUserAddress 缺 province 走诚实反问
+    if not province and city:
+        province = CITY_PROVINCE_MAP.get(city, "")
     m = _DISTRICT_RE.match(text)
     if m:
         district = m.group(1)
@@ -195,7 +201,8 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
     IntentRule(
         intent=AgentIntentType.ORDER_RETURN,
         confidence=0.95,
-        pattern=re.compile(r"(?:退货|退款|退单|申请售后|退钱|不想要了|申请退款)", re.IGNORECASE),
+        # 退款动词族单一事实源(intent_registry.REFUND_VERB_RE,2026-09-13 收口)
+        pattern=REFUND_VERB_RE,
     ),
     IntentRule(
         intent=AgentIntentType.ORDER_QUERY,
