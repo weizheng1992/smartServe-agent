@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from engine_py.graph.nodes.output_guard import sanitize_order_claims
-
-import asyncio
 
 
 def _plan_with_checkout(order_id: str) -> dict:

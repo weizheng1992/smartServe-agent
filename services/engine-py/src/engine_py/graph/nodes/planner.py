@@ -357,7 +357,8 @@ async def planner_node(state: AgentState) -> dict:
         metric_hint = _METRIC_HINT_RE.search(input_text or "")
         guide_hint = bool(has_shopping_guide) or bool(_SHOPPING_HINT_RE.search(input_text or ""))
         has_metric = any(i.get("intent") == "metric_query" for i in intents) or bool(metric_hint)
-        if has_metric and guide_hint and not has_order_action:
+        if has_metric and guide_hint and not has_order_action and not has_cart_manage:
+            # cart 在场(加购/结算复合)让位三段接力轨 —— 指标轨只管纯查询+推荐
             ranking_metric = _ranking_metric_from_text(input_text or "")
             fast_subtasks = [
                 _ranking_subtask(ranking_metric, "0"),
@@ -384,10 +385,14 @@ async def planner_node(state: AgentState) -> dict:
         # 🛒 推荐×全量加购确定性快轨(2026-09-13 一句话接力):「推荐X，都要了」
         # 先导购(写候选,数量语义生效)后购物车全量入车 —— 零 LLM,严禁 guide
         # 快轨单技能吞掉加购半。
+        # 结算词与句中地址(2026-09-13 三段接力):「查卖得好的短袖,把第一个
+        # 加入购物车,地址是X,然后结算」—— 深规划自由发挥曾产出无执行的幻觉
+        # 叙事(历史幻觉单号自增殖),三段确定性编排根治。
+        _CHECKOUT_HINT_RE = re.compile(r"(?:结算|下单|买单)")
+        _STATED_ADDR_RE = re.compile(r"(?:地址是|寄到|送到|邮寄到)\s*([^,，。]+)")
         if (
             has_shopping_guide
             and has_cart_manage
-            and _ADD_ALL_HINT_RE.search(input_text or "")
             and not has_order_action
         ):
             fast_subtasks = [
@@ -402,8 +407,21 @@ async def planner_node(state: AgentState) -> dict:
                     "status": "pending",
                 },
             ]
+            if _CHECKOUT_HINT_RE.search(input_text or ""):
+                addr = _STATED_ADDR_RE.search(input_text or "")
+                shipping = f"shipping to {addr.group(1).strip()}" if addr else                     "shipping to the customer's default address"
+                fast_subtasks.append(
+                    {
+                        "id": "step_fast_checkout_2",
+                        "description": (
+                            f"Call checkoutCart to place a real order from the current cart items, {shipping}"
+                        ),
+                        "status": "pending",
+                    }
+                )
             fast_plan = {
-                "goal": "Recommend products then add them all to cart",
+                "goal": "Recommend products then add them to cart"
+                + (" and check out" if _CHECKOUT_HINT_RE.search(input_text or "") else ""),
                 "subtasks": fast_subtasks,
                 "currentStepIndex": 0,
             }

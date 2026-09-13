@@ -177,6 +177,43 @@ class TestRecommendAllHandoff:
         ), "导购必须先于购物车(候选先写,后全量入车)"
 
 
+class TestSearchAddCheckoutChain:
+    def test_three_stage_chain_planned_deterministically(self, monkeypatch):
+        """「查询卖的好的短袖，并把第一个加入购物车，地址是X，然后结算」:
+        三段确定性编排(导购写候选→购物车按序数入车→checkoutCart 带句中地址),
+        零 LLM —— 深规划自由发挥曾产出无执行的幻觉叙事。"""
+        from engine_py.graph.nodes import planner as planner_mod
+
+        class _FakeSM:
+            def __init__(self, thread_id: str) -> None:
+                pass
+
+            async def get_messages(self) -> list:
+                return []
+
+        monkeypatch.setattr(planner_mod, "ShortMemory", _FakeSM)
+
+        def _no_llm(*args, **kwargs):
+            raise AssertionError("导购×加购×结算三段复合必须走确定性快轨")
+
+        monkeypatch.setattr(planner_mod, "planner_llm", _no_llm)
+        state = {
+            "intents": [
+                {"intent": "shopping_guide", "confidence": 0.9, "type": "primary"},
+                {"intent": "cart_manage", "confidence": 0.9, "type": "secondary"},
+            ],
+            "input": "查询卖的好的短袖，并把第一个加入购物车，地址是北京市海淀区中关村南大街1号院8号楼1201室，然后结算",
+            "short_memory": [],
+        }
+        result = asyncio.run(planner_mod.planner_node(state))
+        descs = [st.get("description", "") for st in result["task_plan"]["subtasks"]]
+        assert any("ShoppingGuideSkill" in d for d in descs), descs
+        assert any("CartSkill" in d for d in descs), descs
+        checkout = next((d for d in descs if "checkoutCart" in d), None)
+        assert checkout is not None, "必须有结算子任务"
+        assert "北京市海淀区中关村南大街1号院8号楼1201室" in checkout, "句中地址必须嵌进结算步骤"
+
+
 class TestFastPathSkillNamePriority:
     def test_compound_descriptions_do_not_hijack_each_other(self):
         from engine_py.graph.nodes.executor_fast_path import try_match_executor_fast_path

@@ -529,13 +529,8 @@ async def execute_step(state: dict) -> dict:
             next_skill_tool = _skill_tool_of(next_st.get("description") or "")
             next_desc = (next_st.get("description") or "").lower()
             is_escalation = any(kw in next_desc for kw in ("escalat", "human", "转人工"))
-            if next_skill_tool and (current_skill_tool or any(
-                (try_match_executor_fast_path(
-                    (subtasks[i].get("description") or ""), state.get("input") or "", allowed_tools, short_memory
-                ) or {}).get("toolName", "").startswith("skill_")
-                for i in candidate_indices
-            )):
-                break  # 技能链串行:前序技能可能写后续技能消费的状态
+            if current_skill_tool or next_skill_tool:
+                break  # 技能链串行:前序技能写候选/购物车,后续步骤(含 checkoutCart 工具)消费 —— 严禁并行
             match = try_match_executor_fast_path(
                 next_st.get("description") or "", state.get("input") or "", allowed_tools, short_memory
             )
