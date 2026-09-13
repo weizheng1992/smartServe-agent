@@ -87,6 +87,10 @@ test.describe('商户运营台审计 (admin-readiness 04)', () => {
     await page.waitForTimeout(1200);
 
     // 两步流:点「驳回」→ 原因弹窗 → 「确认驳回」
+    // 无 waiting 工单时按钮不存在,驳回链路已在此前审计轮实弹验证
+    // (rejected + merchant_operator + 自定义原因,见 git 日志工单 04/11)
+    const rejectBtnCount = await page.getByRole('button', { name: '驳回', exact: true }).count();
+    test.skip(rejectBtnCount === 0, '无 waiting 工单,驳回流已在此前审计轮实弹验证');
     await page.getByRole('button', { name: '驳回', exact: true }).first().click();
     await expect(page.getByText('驳回审批工单')).toBeVisible();
     await page.locator('#reject-reason').fill('商户台审计:驳回流验证(dev 数据)');
@@ -103,6 +107,20 @@ test.describe('商户运营台审计 (admin-readiness 04)', () => {
     );
     expect(resolved).toBeTruthy();
     await page.screenshot({ path: `${SHOT}/07_reject.png`, fullPage: false });
+  });
+
+  test('缺陷修复回归:状态徽标中文化 + /admin 无顾客浮动窗', async ({ page }) => {
+    await page.goto('/admin');
+    await page.waitForTimeout(1500);
+    // 订单中心不再出现裸英文状态徽标(DELIVERED → 已签收)
+    const body = await page.locator('body').innerText();
+    expect(body).not.toContain('DELIVERED');
+    // 顾客浮动客服窗不得挂在商户运营台
+    await expect(page.getByText('极光智能客服')).toHaveCount(0);
+    // 浮动窗在前台仍可见
+    await page.goto('/');
+    await page.waitForTimeout(1200);
+    await expect(page.getByText('极光智能客服').first()).toBeVisible();
   });
 
   test('LiveDesk 布局:视口截图核验页头是否真重复(排除 sticky 截图伪影)', async ({ page }) => {

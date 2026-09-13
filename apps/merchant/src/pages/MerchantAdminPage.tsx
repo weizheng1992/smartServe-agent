@@ -753,13 +753,16 @@ export default function MerchantAdminPage() {
                                   ? 'bg-blue-100 text-blue-800 border-blue-200 font-bold'
                                   : o.status === 'REFUNDED'
                                     ? 'bg-purple-100 text-purple-800 border-purple-200 font-bold'
-                                    : 'bg-slate-100 text-slate-800 border-slate-200 font-bold'
+                                    : o.status === 'DELIVERED'
+                                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200 font-bold'
+                                      : 'bg-slate-100 text-slate-800 border-slate-200 font-bold'
                             }
                           >
                             {o.status === 'PAID' && '待发货'}
                             {o.status === 'SHIPPED' && '已发货'}
                             {o.status === 'REFUNDED' && '已退款'}
-                            {!['PAID', 'SHIPPED', 'REFUNDED'].includes(o.status) && o.status}
+                            {o.status === 'DELIVERED' && '已签收'}
+                            {!['PAID', 'SHIPPED', 'REFUNDED', 'DELIVERED'].includes(o.status) && o.status}
                           </Badge>
                         </td>
                         <td className="p-3.5 font-bold text-slate-900">¥{Number(o.total_amount).toFixed(2)}</td>

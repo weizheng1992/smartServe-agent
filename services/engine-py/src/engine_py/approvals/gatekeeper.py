@@ -295,6 +295,35 @@ class ApprovalGatekeeper:
                     new_approval_id = str(uuid.uuid4())
                     deadline = _dt.datetime.now() + _dt.timedelta(hours=24)
                     thread_ctx = await _thread_owner_context(session, opts["threadId"])
+                    args = opts.get("args") or {}
+                    # 退款审批卡金额(admin-readiness 11):商户盲批资金单不可接受,
+                    # 建单时按 orderId 回查商户库快照真实 total_amount 落 args;
+                    # 库不可达/查无此单时诚实标注,严禁落 0 或编造金额
+                    if opts.get("toolName") == "processRefund" and args.get("orderId") and not args.get("amount"):
+                        try:
+                            from ..tools_registry.order_domain import _merchant_reader_engine
+
+                            async with _merchant_reader_engine().connect() as mconn:
+                                amount_row = (
+                                    await mconn.execute(
+                                        text(
+                                            "SELECT total_amount, currency FROM merchant_orders "
+                                            "WHERE order_id = :oid LIMIT 1"
+                                        ).bindparams(oid=str(args["orderId"]))
+                                    )
+                                ).mappings().first()
+                            if amount_row is not None:
+                                args = {
+                                    **args,
+                                    "amount": float(amount_row["total_amount"]),
+                                    "currency": amount_row["currency"],
+                                    "amountSource": "merchant_orders_snapshot",
+                                }
+                            else:
+                                args = {**args, "amountSource": "order_not_found_in_merchant_db"}
+                        except Exception as amount_err:
+                            print(f"[Gatekeeper] refund amount lookup unavailable: {amount_err}")
+                            args = {**args, "amountSource": "lookup_unavailable"}
                     session.add(
                         PendingApproval(
                             id=new_approval_id,
@@ -303,7 +332,7 @@ class ApprovalGatekeeper:
                             action_type=opts["toolName"],
                             action_payload={
                                 "description": opts.get("stepDescription"),
-                                "args": opts.get("args") or {},
+                                "args": args,
                                 "stepIndex": opts.get("stepIndex"),
                             },
                             status="waiting",
