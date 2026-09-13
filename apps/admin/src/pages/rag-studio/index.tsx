@@ -34,16 +34,22 @@ export function RagStudioPage() {
   }, []);
 
   const createDocApi = useCallback(async (item: Partial<KnowledgeChunkRecord>, tenantId: string) => {
+    // 契约:POST /api/rag/documents 必填 chunkText;title/category 走顶层字段由服务端落 metadata。
+    // 此前发 title/content/tenantId 全部对不上 → 422 被 api 层吞成 {success:false},
+    // 再被 `res.data || item` 兜底成本地假对象,弹窗照关、列表刷新后蒸发(2026-09-13 修复)
     const res = await ragApi.createDoc(
       {
+        chunkText: item.content || '',
+        businessId: item.businessId || tenantId,
         title: item.docTitle || '新知识切片',
-        category: item.category || '通用政策',
-        content: item.content || '',
-        tenantId: item.businessId || tenantId,
+        category: item.category || 'product_knowledge',
       },
       tenantId,
     );
-    return res.data || item;
+    if (!res.success || !res.data) {
+      throw new Error(res.error || '创建知识切片失败');
+    }
+    return res.data;
   }, []);
 
   const deleteDocApi = useCallback(async (id: string, tenantId: string) => {
@@ -93,6 +99,7 @@ export function RagStudioPage() {
   const [playResults, setPlayResults] = useState<Array<{ id: string; title: string; score: number; content: string }>>(
     [],
   );
+  const [playSearched, setPlaySearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
 
   const [formData, setFormData] = useState<Partial<KnowledgeChunkRecord>>({});
@@ -100,9 +107,9 @@ export function RagStudioPage() {
   const handleOpenCreate = () => {
     setFormData({
       id: `chunk_${Date.now()}`,
-      businessId: selectedTenantId === 'all' ? 'nike' : selectedTenantId,
+      businessId: selectedTenantId === 'all' ? 'ecommerce' : selectedTenantId,
       docTitle: '',
-      category: '售后政策',
+      category: 'product_knowledge',
       content: '',
       tokenCount: 0,
     });
@@ -124,8 +131,10 @@ export function RagStudioPage() {
   const handleRunSearch = async () => {
     if (!playQuery.trim()) return;
     setIsSearching(true);
+    setPlaySearched(true);
     try {
-      const res = await ragApi.search(playQuery, selectedTenantId === 'all' ? 'ecommerce' : selectedTenantId);
+      // all = 上帝视角,由后端跨租户检索(此前前端偷偷降级成 ecommerce,他租知识永不召回)
+      const res = await ragApi.search(playQuery, selectedTenantId);
       // 契约:POST /api/rag/query → {success, data: {matches: [{id, chunkText, contextualSummary, score}]}}
       const matches = res.success ? res.data?.matches : undefined;
       if (Array.isArray(matches)) {
@@ -221,6 +230,7 @@ export function RagStudioPage() {
         onSearch={handleRunSearch}
         isSearching={isSearching}
         results={playResults}
+        hasSearched={playSearched}
       />
 
       {/* 知识切片列表 */}
@@ -232,9 +242,11 @@ export function RagStudioPage() {
           statusFilter={statusFilter}
           onStatusChange={setStatusFilter}
           statusOptions={[
-            { label: '售后政策', value: '售后政策' },
-            { label: '商品知识', value: '商品知识' },
-            { label: '会员权益', value: '会员权益' },
+            // 选项值必须与切片 metadata.category 的真实 key 对齐 ——
+            // 此前写死中文文案(售后政策/商品知识/会员权益)与数据永不匹配,一筛就空
+            { label: '商品知识', value: 'product_knowledge' },
+            { label: '门店信息', value: 'store_info' },
+            { label: '运营指南', value: 'operation_guide' },
           ]}
           showTenantFilter={true}
           onReset={handleResetFilters}

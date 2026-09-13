@@ -1031,6 +1031,90 @@ class TestConversations:
         assert body["success"] is True
         assert body["data"] is not None
 
+    async def test_list_carries_real_per_thread_telemetry(self, client, contract_fixtures):
+        """会话列表的 messageCount/totalTokens/costUsd 必须是库内真算
+        (此前前端对缺失字段兜底 850 tokens / $0.0035 / 1 轮等编造值)。"""
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        from gateway_py import conversation_repo
+
+        from .conftest import create_thread
+
+        tid = f"tel_thread_{_TS}"
+        await create_thread(tid, "u_tel", "nike")
+        await conversation_repo.append_message(
+            {"threadId": tid, "businessId": "nike", "role": "user", "content": "遥测契约消息"}
+        )
+        await conversation_repo.append_message(
+            {"threadId": tid, "businessId": "nike", "role": "assistant", "content": "遥测契约回复"}
+        )
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO llm_call_logs (thread_id, business_id, node, model, tokens_in, tokens_out, cost_usd, latency_ms) "
+                    "VALUES (:tid, 'nike', 'planner', 'glm-4.7', 100, 30, 0.002, 500), "
+                    "(:tid, 'nike', 'executor', 'glm-4.7', 200, 70, 0.004, 1500)"
+                ).bindparams(tid=tid)
+            )
+            await session.commit()
+
+        res = await client.get(
+            "/api/conversations", params={"tenantId": "nike", "status": "all", "limit": 50, "offset": 0}
+        )
+        assert res.status_code == 200
+        items = res.json().get("conversations") or []
+        row = next((c for c in items if c.get("threadId") == tid), None)
+        assert row is not None
+        assert row["messageCount"] == 2
+        assert row["totalTokens"] == 400
+        assert abs(row["costUsd"] - 0.006) < 1e-9
+        assert row["llmCalls"] == 2
+
+    async def test_telemetry_endpoint_aggregates_real_llm_logs(self, client, contract_fixtures):
+        """会话遥测端点:节点级真算聚合;无记录线程诚实空(严禁假节点/假耗时)。"""
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        from .conftest import create_thread
+
+        tid = f"tel_node_{_TS}"
+        await create_thread(tid, "u_tel", "nike")
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO llm_call_logs (thread_id, business_id, node, model, tokens_in, tokens_out, cost_usd, latency_ms) "
+                    "VALUES (:tid, 'nike', 'planner', 'glm-4.7', 100, 30, 0.002, 500), "
+                    "(:tid, 'nike', 'planner', 'glm-4.7', 10, 20, 0.001, 700), "
+                    "(:tid, 'nike', 'executor', 'glm-4.7', 200, 70, 0.004, 1500)"
+                ).bindparams(tid=tid)
+            )
+            await session.commit()
+
+        res = await client.get(f"/api/conversations/{tid}/telemetry", headers={"x-tenant-id": "nike"})
+        assert res.status_code == 200
+        data = res.json()["data"]
+        nodes = {n["node"]: n for n in data["nodes"]}
+        assert set(nodes) == {"planner", "executor"}
+        assert nodes["planner"]["calls"] == 2
+        assert nodes["planner"]["tokens"] == 160
+        assert nodes["planner"]["avgLatencyMs"] == 600
+        assert nodes["executor"]["calls"] == 1
+        totals = data["totals"]
+        assert totals["calls"] == 3
+        assert totals["tokens"] == 430
+        assert abs(totals["costUsd"] - 0.007) < 1e-9
+
+        # 无遥测线程:诚实空(此前该场景由前端假节点链顶替)
+        empty_tid = f"tel_empty_{_TS}"
+        await create_thread(empty_tid, "u_tel", "nike")
+        empty = await client.get(f"/api/conversations/{empty_tid}/telemetry", headers={"x-tenant-id": "nike"})
+        assert empty.status_code == 200
+        empty_data = empty.json()["data"]
+        assert empty_data["nodes"] == []
+        assert empty_data["totals"]["calls"] == 0
+        assert empty_data["totals"]["tokens"] == 0
+
 
 class TestRagDocuments:
     async def test_crud_roundtrip(self, client, contract_fixtures):
@@ -1055,6 +1139,50 @@ class TestRagDocuments:
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
         assert isinstance(del_res.json()["message"], str)
+
+    async def test_create_persists_user_title_and_category(self, client, contract_fixtures):
+        """管理台新建切片:自拟标题/分类必须落库(此前被硬编码「知识文档」覆盖),content 别名可用,空正文 422。"""
+        titled = f"契约自拟标题 {_TS}"
+        create_res = await client.post(
+            "/api/rag/documents",
+            headers={"x-tenant-id": "nike"},
+            json={"chunkText": f"契约测试:自拟标题切片 {_TS}", "title": titled, "category": "product_knowledge"},
+        )
+        assert create_res.status_code == 201
+        data = create_res.json()["data"]
+        assert data["docTitle"] == titled
+        assert data["category"] == "product_knowledge"
+
+        alias_res = await client.post(
+            "/api/rag/documents",
+            headers={"x-tenant-id": "nike"},
+            json={"content": f"契约测试 content 别名切片 {_TS}"},
+        )
+        assert alias_res.status_code == 201
+
+        empty_res = await client.post("/api/rag/documents", headers={"x-tenant-id": "nike"}, json={})
+        assert empty_res.status_code == 422
+
+        await client.delete(f"/api/rag/documents/{data['id']}")
+        await client.delete(f"/api/rag/documents/{alias_res.json()['data']['id']}")
+
+    async def test_query_returns_honest_empty_without_fake_scores(self, client, contract_fixtures):
+        """拆除「前 N 条文档 + 硬编码 0.75」假召回兜底:无命中时必须诚实空。"""
+        res = await client.post("/api/rag/query", json={"query": "zzz_qq_无任何语义关联乱串_xyzzy", "tenantId": "nike"})
+        assert res.status_code == 200
+        body = res.json()["data"]
+        assert isinstance(body["matches"], list)
+        for match in body["matches"]:
+            assert abs(match["score"] - 0.75) > 1e-9
+
+    async def test_query_tenant_all_does_not_crash_and_stays_honest(self, client, contract_fixtures):
+        """上帝视角 tenantId=all:不再被硬编码降级成 ecommerce;响应契约与单租户一致。"""
+        res = await client.post("/api/rag/query", json={"query": "退换货政策", "tenantId": "all"})
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert body["data"]["tenantId"] == "all"
+        assert isinstance(body["data"]["matches"], list)
 
 
 class TestPersonas:

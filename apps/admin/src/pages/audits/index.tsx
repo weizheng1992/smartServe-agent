@@ -7,6 +7,18 @@ import type { AuditRecord } from './types';
 
 export * from './types';
 
+/** 触发动作详情的人读摘要:优先展示业务关键参数,避免裸 JSON 糊在动作名后无法阅读 */
+function summarizePayload(payload: Record<string, any>): string {
+  if (!payload || typeof payload !== 'object') return '';
+  const args = payload.args && typeof payload.args === 'object' ? payload.args : payload;
+  const parts: string[] = [];
+  for (const key of ['orderId', 'newAddress', 'reason', 'description', 'userInput']) {
+    const val = args[key];
+    if (val) parts.push(`${key}: ${String(val).slice(0, 60)}`);
+  }
+  return parts.join(' · ') || JSON.stringify(payload).slice(0, 120);
+}
+
 export function AuditsPage() {
   const fetchApprovals = useCallback(async ({ tenantId, status }: { tenantId: string; status?: string }) => {
     const res = await approvalsApi.list({
@@ -27,8 +39,12 @@ export function AuditsPage() {
               ? item.toolInput
               : { raw: item.toolInput || item.actionPayload },
         status: item.status || 'waiting',
-        reviewerId: item.operatorId || item.reviewerId,
-        rejectionReason: item.rejectionReason,
+        reviewerId:
+          item.reviewerId ||
+          item.operatorId ||
+          // 引擎不记录核准人身份,人工接管型工单的终态即「已由人工坐席接管处理」
+          (item.status === 'resolved_by_human' ? '人工坐席接管' : undefined),
+        rejectionReason: item.rejectionReason || item.actionPayload?.rejectionReason || undefined,
         createdAt: item.createdAt
           ? new Date(item.createdAt).toLocaleString('zh-CN')
           : new Date().toLocaleString('zh-CN'),
@@ -145,7 +161,7 @@ export function AuditsPage() {
             {row.actionType}
           </span>
           <span className="text-xs text-slate-500 truncate inline-block max-w-[200px] align-bottom">
-            {JSON.stringify(row.actionPayload)}
+            {summarizePayload(row.actionPayload)}
           </span>
         </div>
       ),
@@ -154,7 +170,7 @@ export function AuditsPage() {
       key: 'status',
       header: '审批状态',
       render: (row: AuditRecord) => {
-        const map = {
+        const map: Record<string, { label: string; cls: string }> = {
           waiting: {
             label: '待审批 (Waiting)',
             cls: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -171,8 +187,13 @@ export function AuditsPage() {
             label: '已超时 (Timed Out)',
             cls: 'bg-slate-100 text-slate-500 border-slate-200',
           },
+          resolved_by_human: {
+            label: '已接管完结 (Resolved by Human)',
+            cls: 'bg-sky-50 text-sky-700 border-sky-200',
+          },
         };
-        const st = map[row.status] || map.waiting;
+        // 未知状态以中性灰显示原文,严禁回落成「待审批」误导运营重复决议
+        const st = map[row.status] || { label: `${row.status}`, cls: 'bg-slate-100 text-slate-600 border-slate-200' };
         return (
           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${st.cls}`}>
             {st.label}
@@ -212,6 +233,7 @@ export function AuditsPage() {
           { label: '已通过 (Approved)', value: 'approved' },
           { label: '已驳回 (Rejected)', value: 'rejected' },
           { label: '已超时 (Timed Out)', value: 'timed_out' },
+          { label: '已接管完结 (Resolved by Human)', value: 'resolved_by_human' },
         ]}
         showTenantFilter={true}
         onReset={handleResetFilters}

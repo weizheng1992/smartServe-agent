@@ -14,6 +14,7 @@ export interface FilterBarProps {
   statusFilter?: string;
   onStatusChange?: (val: string) => void;
   statusOptions?: FilterOption[];
+  statusLabel?: string;
   showTenantFilter?: boolean;
   tenantFilter?: string;
   onTenantChange?: (val: string) => void;
@@ -29,6 +30,7 @@ export function FilterBar({
   statusFilter,
   onStatusChange,
   statusOptions,
+  statusLabel = '状态:',
   showTenantFilter = false,
   tenantFilter,
   onTenantChange,
@@ -79,7 +81,7 @@ export function FilterBar({
         {/* 状态筛选 */}
         {statusOptions && onStatusChange && (
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <span>状态:</span>
+            <span>{statusLabel}</span>
             <select
               value={statusFilter ?? ''}
               onChange={(e) => onStatusChange(e.target.value)}

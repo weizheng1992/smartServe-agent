@@ -31,20 +31,21 @@ export function ConversationsPage() {
       });
 
       if (res.success && Array.isArray(res.conversations)) {
+        // real-data-only(2026-09-13):messageCount/totalTokens/costUsd 由网关对
+        // messages / llm_call_logs 库内真算返回;缺失即 0,严禁再兜底
+        // 850 tokens / $0.0035 / 1 轮 / 「最新用户消息」之类编造值
         const records: ConversationRecord[] = res.conversations.map((item: any) => ({
           threadId: item.threadId,
-          userId: item.userId || 'anonymous_user',
+          userId: item.userId || '-',
           businessId: item.businessId || tenantId || 'ecommerce',
-          channel: (item.metadata?.channel as string) || 'Web Widget',
+          channel: (item.metadata?.channel as string) || '未知渠道',
           status: item.status as any,
-          intent: (item.tags?.[0] as string) || (item.metadata?.intent as string) || 'general_inquiry',
-          messageCount: item.metadata?.messageCount || 1,
-          totalTokens: item.metadata?.totalTokens || 850,
-          costUsd: item.metadata?.costUsd || 0.0035,
-          lastMessage: item.lastMessageSnippet || '最新用户消息',
-          updatedAt: item.updatedAt
-            ? new Date(item.updatedAt).toLocaleString('zh-CN')
-            : new Date().toLocaleString('zh-CN'),
+          intent: (item.tags?.[0] as string) || (item.metadata?.intent as string) || '未识别',
+          messageCount: typeof item.messageCount === 'number' ? item.messageCount : 0,
+          totalTokens: typeof item.totalTokens === 'number' ? item.totalTokens : 0,
+          costUsd: typeof item.costUsd === 'number' ? item.costUsd : 0,
+          lastMessage: item.lastMessageSnippet || '(暂无消息)',
+          updatedAt: item.updatedAt ? new Date(item.updatedAt).toLocaleString('zh-CN') : '-',
         }));
         return { data: records, total: res.total ?? records.length };
       }

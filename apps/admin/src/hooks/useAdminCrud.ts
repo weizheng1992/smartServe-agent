@@ -178,6 +178,18 @@ export function useAdminCrud<T extends Record<string, any>>({
     setCurrentPage(1);
   }, []);
 
+  // 搜索/筛选变更即重置页码:停留在旧页码会落进超出结果范围的空页,
+  // 造成「共 N 条数据却显示空态」的假象(第 2/1 页 bug,2026-09-13 修复)
+  const changeSearchQuery = useCallback((val: string) => {
+    setSearchQuery(val);
+    setCurrentPage(1);
+  }, []);
+
+  const changeStatusFilter = useCallback((val: string) => {
+    setStatusFilter(val);
+    setCurrentPage(1);
+  }, []);
+
   // CRUD 操作方法
   const createItem = useCallback(
     async (newItem: Partial<T>) => {
@@ -306,9 +318,9 @@ export function useAdminCrud<T extends Record<string, any>>({
     pageSize,
     setPageSize,
     searchQuery,
-    setSearchQuery,
+    setSearchQuery: changeSearchQuery,
     statusFilter,
-    setStatusFilter,
+    setStatusFilter: changeStatusFilter,
     handleResetFilters,
     isLoading,
     isSubmitting,

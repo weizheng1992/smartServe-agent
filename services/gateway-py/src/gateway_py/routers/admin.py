@@ -419,6 +419,12 @@ async def list_approvals(
     except Exception as err:
         print(f"[ApprovalsService] Failed to list approvals: {err}")
         approvals = []
+    # 人工决议明细(驳回理由/坐席回复)埋在 actionPayload 深层,提到顶层供
+    # 管理台「审批人 / 驳回理由」列直接消费 —— 此前该列永远显示「-」
+    for item in approvals:
+        payload = item.get("actionPayload") if isinstance(item.get("actionPayload"), dict) else {}
+        item["rejectionReason"] = payload.get("rejectionReason") or None
+        item["humanReply"] = payload.get("humanReply") or None
     return {"success": True, "approvals": approvals, "total": len(approvals), "tenantId": effective_tenant}
 
 
@@ -456,19 +462,15 @@ async def rag_documents(tenantId: str | None = Query(None), x_tenant_id: str | N
 
 def _rag_item(r: RagDocumentRow) -> dict:
     meta = r.metadata_ if isinstance(r.metadata_, dict) else {}
+    # 无任何标题来源时诚实标注「未命名 + id 片段」——严禁按 business_id 编造
+    # 「Nike 官方售后与质保政策」之类看似真实的文档名(real-data-only,2026-09-13)
     doc_title = (
         meta.get("title")
         or meta.get("docTitle")
         or r.source_url
-        or (
-            "Nike 官方售后与质保政策"
-            if r.business_id == "nike"
-            else "Adidas 品牌服务与退换细则"
-            if r.business_id == "adidas"
-            else "官方通用商城知识文档"
-        )
+        or f"未命名知识切片 ({str(r.id)[:8]})"
     )
-    category = meta.get("category") or ("售后政策" if r.business_id == "nike" else "商品知识")
+    category = meta.get("category") or "未分类"
     created = _dt.date.today().isoformat() if not r.created_at else r.created_at.isoformat().split("T")[0]
     return {
         "id": str(r.id),
@@ -488,24 +490,39 @@ def _rag_item(r: RagDocumentRow) -> dict:
 
 
 class RagDocIn(BaseModel):
-    chunkText: str
+    chunkText: str | None = None
+    content: str | None = None  # 旧管理台字段别名,与 chunkText 二选一
     businessId: str | None = None
     sourceUrl: str | None = None
     contextualSummary: str | None = None
     metadata: dict | None = None
+    title: str | None = None
+    category: str | None = None
 
 
 @router.post("/api/rag/documents", status_code=201)
 async def add_rag_document(body: RagDocIn, x_tenant_id: str | None = Header(None)):
+    chunk_text = (body.chunkText or body.content or "").strip()
+    if not chunk_text:
+        raise HTTPException(422, "chunkText (或 content 别名) 不能为空")
     business_id = body.businessId or x_tenant_id or "ecommerce"
-    meta = {**(body.metadata or {}), "title": "知识文档", "category": "通用政策"}
+    user_meta = body.metadata or {}
+    # 用户自拟标题/分类优先,缺省才落平台默认 —— 此前硬编码 "知识文档"/"通用政策" 覆盖入参,
+    # 管理台新建切片标题永远显示成兜底名(2026-09-13 修复)
+    meta = {
+        **user_meta,
+        "title": user_meta.get("title") or body.title or "知识文档",
+        "category": user_meta.get("category") or body.category or "通用政策",
+    }
     async with get_session() as session:
         row = RagDocumentRow(
             business_id=business_id,
             source_url=body.sourceUrl,
-            chunk_text=body.chunkText,
-            contextual_summary=body.contextualSummary or body.chunkText[:50],
-            metadata=meta,
+            chunk_text=chunk_text,
+            contextual_summary=body.contextualSummary or chunk_text[:50],
+            # 注意列属性是 metadata_(映射 "metadata" 列):传 metadata= 只会挂到
+            # Declarative Base 的保留同名属性上,静默不落库 —— 标题/分类曾因此永远丢失
+            metadata_=meta,
         )
         session.add(row)
         await session.commit()
@@ -531,20 +548,23 @@ async def delete_rag_document(doc_id: str, tenantId: str | None = Query(None), x
 class RagQueryIn(BaseModel):
     query: str
     tenantId: str | None = None
+    category: str | None = None
 
 
 @router.post("/api/rag/query")
 async def rag_query(body: RagQueryIn, x_tenant_id: str | None = Header(None)):
     tenant_id = body.tenantId or x_tenant_id
-    biz_id = tenant_id if tenant_id and tenant_id != "all" else "ecommerce"
+    # 'all' = 管理台上帝视角:跨租户检索。此前硬编码降级成 ecommerce,
+    # 上帝视角永远检不到他租知识(2026-09-13 修复,与 ContextualRAG 全局模式配套)
+    biz_id = tenant_id if tenant_id and tenant_id != "all" else None
     rag = ContextualRAG(biz_id)
-    results = await rag.search_relevant_docs(body.query, 5)
+    results = await rag.search_relevant_docs(body.query, 5, category=body.category)
     if results:
         return {
             "success": True,
             "data": {
                 "query": body.query,
-                "tenantId": biz_id,
+                "tenantId": tenant_id or "all",
                 "matches": [
                     {
                         "id": r["id"],
@@ -557,23 +577,15 @@ async def rag_query(body: RagQueryIn, x_tenant_id: str | None = Header(None)):
                 ],
             },
         }
-    # 无向量命中时回退列出文档;此前误引用未定义的 tenantId,一进本分支即 NameError
-    docs = await rag_documents(tenant_id, x_tenant_id)
+    # 无向量命中时诚实空(real-data-only):检索终点只有真实命中或空,
+    # 不再用「前 N 条文档 + 硬编码 0.75 假分数」冒充召回结果 —— 那会让
+    # 管理员在演练台上看到完全不相关的「Top 命中」(2026-09-13 拆除)
     return {
         "success": True,
         "data": {
             "query": body.query,
             "tenantId": tenant_id or "all",
-            "matches": [
-                {
-                    "id": d["id"],
-                    "businessId": d["businessId"],
-                    "chunkText": d["chunkText"],
-                    "contextualSummary": d["contextualSummary"],
-                    "score": 0.75,
-                }
-                for d in docs["data"][:3]
-            ],
+            "matches": [],
         },
     }
 
@@ -637,3 +649,74 @@ async def update_conversation_status(thread_id: str, body: ConversationStatusIn,
     if not updated:
         raise HTTPException(404, f"Conversation '{thread_id}' not found")
     return {"success": True, "data": updated}
+
+
+@router.get("/api/conversations/{thread_id}/telemetry")
+async def conversation_telemetry(thread_id: str, request: Request):
+    """会话级真实决策遥测(real-data-only,2026-09-13):按 LangGraph 节点聚合
+    llm_call_logs 的调用次数/Token/成本/延迟 —— 此前管理台「LangGraph 决策流」Tab
+    整段是前端编造的假节点耗时/假置信度/假运单号,现全部替换为库内真算;
+    无遥测记录时诚实空,严禁合成演示链路。"""
+    tenant_id = (
+        request.headers.get("x-tenant-id")
+        or request.headers.get("x-business-id")
+        or request.query_params.get("tenantId")
+        or "all"
+    )
+    clean_tenant = (tenant_id or "").lower().strip()
+    params: dict = {"tid": thread_id.strip()}
+    tenant_filter = ""
+    if clean_tenant and clean_tenant != "all":
+        tenant_filter = " AND business_id = :biz"
+        params["biz"] = clean_tenant
+
+    async with get_session() as session:
+        node_rows = (
+            await session.execute(
+                text(
+                    "SELECT COALESCE(node, 'unknown') AS node, COUNT(*) AS calls, "
+                    "COALESCE(SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)), 0) AS tokens, "
+                    "COALESCE(SUM(cost_usd), 0) AS cost_usd, "
+                    "COALESCE(AVG(latency_ms), 0) AS avg_latency_ms, "
+                    "COALESCE(SUM(latency_ms), 0) AS total_latency_ms, "
+                    "MAX(created_at) AS last_at "
+                    "FROM llm_call_logs WHERE thread_id = :tid"
+                    f"{tenant_filter} GROUP BY COALESCE(node, 'unknown') ORDER BY MAX(created_at)"
+                ).bindparams(**params)
+            )
+        ).mappings().all()
+        total_row = (
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) AS calls, "
+                    "COALESCE(SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)), 0) AS tokens, "
+                    "COALESCE(SUM(cost_usd), 0) AS cost_usd, "
+                    "COALESCE(AVG(latency_ms), 0) AS avg_latency_ms, "
+                    "COALESCE(SUM(tokens_in), 0) AS tokens_in, "
+                    "COALESCE(SUM(tokens_out), 0) AS tokens_out "
+                    "FROM llm_call_logs WHERE thread_id = :tid" + tenant_filter
+                ).bindparams(**params)
+            )
+        ).mappings().first()
+
+    nodes = [
+        {
+            "node": r["node"],
+            "calls": int(r["calls"]),
+            "tokens": int(r["tokens"]),
+            "costUsd": float(r["cost_usd"]),
+            "avgLatencyMs": round(float(r["avg_latency_ms"])),
+            "totalLatencyMs": int(r["total_latency_ms"]),
+            "lastAt": r["last_at"].isoformat() if r["last_at"] else None,
+        }
+        for r in node_rows
+    ]
+    totals = {
+        "calls": int(total_row["calls"]),
+        "tokens": int(total_row["tokens"]),
+        "tokensIn": int(total_row["tokens_in"]),
+        "tokensOut": int(total_row["tokens_out"]),
+        "costUsd": float(total_row["cost_usd"]),
+        "avgLatencyMs": round(float(total_row["avg_latency_ms"])),
+    }
+    return {"success": True, "data": {"threadId": thread_id, "nodes": nodes, "totals": totals}}

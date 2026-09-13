@@ -8,6 +8,7 @@ export interface RagPlaygroundProps {
   onSearch: () => void;
   isSearching: boolean;
   results: Array<{ id: string; title: string; score: number; content: string }>;
+  hasSearched?: boolean;
 }
 
 export function RagPlayground({
@@ -17,6 +18,7 @@ export function RagPlayground({
   onSearch,
   isSearching,
   results,
+  hasSearched = false,
 }: RagPlaygroundProps) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
@@ -71,6 +73,14 @@ export function RagPlayground({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* 诚实空态:检索已完成但无相关命中(此前后端会用假分数冒充结果,现已拆除) */}
+      {hasSearched && !isSearching && results.length === 0 && (
+        <div className="mt-3.5 pt-3 border-t border-slate-100 text-[11px] text-slate-500 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+          未召回相关切片 —— 知识库中没有与该 Query 相似度达标的内容,可切换隔离租户或调整问法重试。
         </div>
       )}
     </div>

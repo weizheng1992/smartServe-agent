@@ -1,5 +1,7 @@
 import type React from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router';
+import { adminApi } from '../../lib/api';
 
 interface NavItem {
   name: string;
@@ -169,6 +171,32 @@ const NAV_GROUPS: NavGroup[] = [
 
 export function Sidebar() {
   const location = useLocation();
+  // 底部状态条接真实健康检查(2026-09-13 real-data-only):
+  // 此前硬编码「Engine v2.4 运行中 / 10 Nodes Active」编造值,现以 /api/health
+  // 真实探活渲染在线/离线,并透出服务端返回的真实 service 标识
+  const [gatewayService, setGatewayService] = useState<string | null>(null);
+  const [gatewayOnline, setGatewayOnline] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const probe = async () => {
+      try {
+        const res = await adminApi.get('/api/health');
+        if (!cancelled) {
+          setGatewayOnline(Boolean(res.success));
+          setGatewayService(typeof res.service === 'string' ? res.service : null);
+        }
+      } catch {
+        if (!cancelled) setGatewayOnline(false);
+      }
+    };
+    probe();
+    const timer = setInterval(probe, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   return (
     <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 h-screen sticky top-0">
@@ -222,13 +250,23 @@ export function Sidebar() {
         ))}
       </div>
 
-      {/* 底部系统状态 */}
+      {/* 底部系统状态(真实 /api/health 探活,30s 轮询) */}
       <div className="p-3.5 border-t border-slate-200 bg-slate-50/50 flex items-center justify-between text-xs text-slate-500">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[11px] font-medium text-slate-600">Engine v2.4 运行中</span>
+          <div
+            className={`w-2 h-2 rounded-full ${
+              gatewayOnline === false ? 'bg-rose-500' : gatewayOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'
+            }`}
+          />
+          <span className="text-[11px] font-medium text-slate-600">
+            {gatewayOnline === false
+              ? '网关离线'
+              : gatewayOnline
+                ? `服务在线${gatewayService ? ` · ${gatewayService}` : ''}`
+                : '探活中...'}
+          </span>
         </div>
-        <span className="text-[10px] text-slate-400 font-mono">10 Nodes Active</span>
+        <span className="text-[10px] text-slate-400 font-mono">/api/health</span>
       </div>
     </aside>
   );

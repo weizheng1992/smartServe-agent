@@ -214,6 +214,7 @@ export function SkillsToolsPage() {
         searchPlaceholder="搜索工具名称、标识或描述..."
         statusFilter={statusFilter}
         onStatusChange={setStatusFilter}
+        statusLabel="工具类型:"
         statusOptions={[
           { label: 'SOP Skill 技能', value: 'skill' },
           { label: '原生工具 (Native)', value: 'native' },

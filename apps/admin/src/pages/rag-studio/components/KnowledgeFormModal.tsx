@@ -1,6 +1,8 @@
 import type React from 'react';
 import { Input, Label, Textarea } from 'ui';
 import { FormModal } from '../../../components/crud';
+import { buildBusinessScopeOptions } from '../../../lib/businessScopes';
+import { useAdminTenantStore } from '../../../store/tenantStore';
 import type { KnowledgeChunkRecord } from '../types';
 
 export interface KnowledgeFormModalProps {
@@ -20,6 +22,9 @@ export function KnowledgeFormModal({
   formData,
   setFormData,
 }: KnowledgeFormModalProps) {
+  // 归属商户 = 租户注册表 ∪ 平台内置业务域(此前硬编码三个演示租户,真实入驻租户选不了)
+  const { tenants } = useAdminTenantStore();
+  const businessOptions = buildBusinessScopeOptions(tenants);
   return (
     <FormModal
       isOpen={isOpen}
@@ -44,24 +49,29 @@ export function KnowledgeFormModal({
           <div>
             <Label className="block text-xs font-semibold text-slate-700 mb-1">归属商户</Label>
             <select
-              value={formData.businessId || 'nike'}
+              value={formData.businessId || 'ecommerce'}
               onChange={(e) => setFormData({ ...formData, businessId: e.target.value })}
               className="w-full h-8 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md font-medium text-slate-700 focus:outline-hidden focus:border-slate-400"
             >
-              <option value="nike">Nike 官方旗舰店</option>
-              <option value="adidas">Adidas 运动专营</option>
-              <option value="ecommerce">通用电商主站</option>
+              {businessOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.name}
+                </option>
+              ))}
             </select>
           </div>
         </div>
         <div>
           <Label className="block text-xs font-semibold text-slate-700 mb-1">知识分类</Label>
-          <Input
-            type="text"
-            value={formData.category || '售后政策'}
+          <select
+            value={formData.category || 'product_knowledge'}
             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-            className="w-full h-8 text-xs bg-slate-50 border-slate-200"
-          />
+            className="w-full h-8 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md font-medium text-slate-700 focus:outline-hidden focus:border-slate-400"
+          >
+            <option value="product_knowledge">商品知识 (product_knowledge)</option>
+            <option value="store_info">门店信息 (store_info)</option>
+            <option value="operation_guide">运营指南 (operation_guide)</option>
+          </select>
         </div>
         <div>
           <Label className="block text-xs font-semibold text-slate-700 mb-1">切片正文内容 (Markdown / Plaintext)</Label>

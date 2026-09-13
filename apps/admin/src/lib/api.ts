@@ -99,6 +99,10 @@ export const adminApi = {
 
 /** 1. 会话中心 API */
 export const conversationsApi = {
+  telemetry: (threadId: string, tenantId?: string) => {
+    return adminApi.get(`/api/conversations/${threadId}/telemetry`, tenantId);
+  },
+
   list: (params: {
     tenantId?: string;
     status?: string;
@@ -235,10 +239,11 @@ export const ragApi = {
 
   createDoc: (
     body: {
-      title: string;
-      category: string;
-      content: string;
-      tenantId?: string;
+      chunkText: string;
+      businessId?: string;
+      title?: string;
+      category?: string;
+      sourceUrl?: string;
     },
     tenantId?: string,
   ) => {

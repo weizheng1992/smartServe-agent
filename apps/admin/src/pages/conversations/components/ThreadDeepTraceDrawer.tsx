@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Badge, Button, DetailDrawer, Input, RichCardRenderer, Tabs, TabsContent, TabsList, TabsTrigger } from 'ui';
+import { ConfirmDialog } from '../../../components/crud';
 import { conversationsApi } from '../../../lib/api';
 import type { ConversationRecord } from '../types';
 
@@ -29,6 +30,27 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
   const [replyContent, setReplyContent] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [isArchiveConfirmOpen, setIsArchiveConfirmOpen] = useState(false);
+  const [telemetry, setTelemetry] = useState<{
+    nodes: Array<{
+      node: string;
+      calls: number;
+      tokens: number;
+      costUsd: number;
+      avgLatencyMs: number;
+      totalLatencyMs: number;
+      lastAt: string | null;
+    }>;
+    totals: {
+      calls: number;
+      tokens: number;
+      tokensIn: number;
+      tokensOut: number;
+      costUsd: number;
+      avgLatencyMs: number;
+    };
+  } | null>(null);
+  const [isLoadingTelemetry, setIsLoadingTelemetry] = useState(false);
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
 
   // 抽屉打开时实时从数据库拉取会话消息时间线
@@ -119,54 +141,31 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
     }
   };
 
-  // 动态构建 LangGraph 决策流节点
-  const traceNodes = useMemo(() => {
-    if (!conversation) return [];
-    const isRefund = conversation.intent === 'order_refund';
-    const isStatus = conversation.intent === 'order_status';
-    const isWaiting = conversation.status === 'waiting_approval';
-
-    return [
-      {
-        node: '1. IntentTriageNode (意图分类与多轮槽位提取)',
-        status: 'success',
-        time: '12ms',
-        desc: `分类器识别意图: [${conversation.intent}]，提取槽位信息，置信度得分: 0.985`,
-      },
-      {
-        node: '2. PlannerNode (DAG 任务分解与 SOP 装配)',
-        status: 'success',
-        time: '48ms',
-        desc: isRefund
-          ? '装配退款 SOP：[1. queryOrderDetails ➔ 2. verifyRefundPolicy ➔ 3. approvalGatekeeper]'
-          : isStatus
-            ? '装配履约 SOP：[1. queryOrderStatus ➔ 2. fetchTrackingTimeline ➔ 3. formatCard]'
-            : '装配导购 SOP：[1. searchProductCatalog ➔ 2. checkInventory ➔ 3. rankingRecommend]',
-      },
-      {
-        node: '3. ToolExecutionNode (沙箱工具执行与安全合规)',
-        status: isWaiting ? 'warning' : 'success',
-        time: '95ms',
-        desc: isRefund
-          ? `调用 [processRefund] 工具：检验退款金额 ¥500，商户免签阈值: ¥${
-              conversation.businessId === 'nike' ? '500' : '300'
-            }`
-          : isStatus
-            ? '调用 [getOrderStatus] 工具：实时查询物流单号 SF10992381029 履约轨迹'
-            : '调用 [searchProductCatalog] 工具：查询现货 SKU 列表及实时库存',
-      },
-      {
-        node: isWaiting
-          ? '4. ApprovalGatekeeper (HITL 人工风控审核挂起)'
-          : '4. Guardrails & Response (安全合规与多模态合成)',
-        status: isWaiting ? 'warning' : 'success',
-        time: '15ms',
-        desc: isWaiting
-          ? '触发金额安全策略阻断，已创建 pending_approvals 工单并挂起状态机等待人工审核'
-          : '通过输入输出敏感词安全围栏校验，合成多模态富交互响应卡片',
-      },
-    ];
-  }, [conversation]);
+  // 会话级真实决策遥测(llm_call_logs 按节点真算):抽屉打开时拉取,
+  // 无记录即诚实空 —— 此前「LangGraph 决策流」Tab 整段为前端编造的
+  // 假节点耗时/假置信度 0.985/假运单号/假免签阈值,已整体退役
+  useEffect(() => {
+    if (!isOpen || !conversation?.threadId) {
+      setTelemetry(null);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingTelemetry(true);
+    conversationsApi
+      .telemetry(conversation.threadId, conversation.businessId)
+      .then((res) => {
+        if (!cancelled) setTelemetry(res.success ? (res.data ?? null) : null);
+      })
+      .catch(() => {
+        if (!cancelled) setTelemetry(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingTelemetry(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, conversation]);
 
   if (!conversation) return null;
 
@@ -386,7 +385,7 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => handleUpdateStatus('resolved')}
+                    onClick={() => setIsArchiveConfirmOpen(true)}
                     disabled={isUpdatingStatus}
                     className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200 h-7"
                   >
@@ -409,50 +408,73 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
           </div>
         </TabsContent>
 
-        {/* Tab 2: LangGraph 决策流 */}
+        {/* Tab 2: LangGraph 决策流(real-data-only:llm_call_logs 按节点真算,
+            此前整段为前端编造的假节点/假耗时/假置信度/假单号,已退役) */}
         <TabsContent value="trace" className="space-y-4 mt-4">
           <div className="bg-slate-950 text-slate-200 rounded-2xl p-5 font-mono text-xs space-y-4 border border-slate-800 shadow-lg">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <span className="text-emerald-400 font-bold flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                LangGraph StateGraph Execution Trace
+                LangGraph 节点执行遥测 (llm_call_logs)
               </span>
               <span className="text-[11px] text-slate-400">Thread: {conversation.threadId}</span>
             </div>
 
-            <div className="space-y-3">
-              {traceNodes.map((t, idx) => (
-                <div key={idx} className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className={`font-bold ${t.status === 'warning' ? 'text-amber-400' : 'text-emerald-400'}`}>
-                      {t.node}
-                    </span>
-                    <span className="text-[10px] text-slate-500 bg-slate-800 px-2 py-0.5 rounded">{t.time}</span>
+            {isLoadingTelemetry ? (
+              <div className="text-center py-8 text-[11px] text-slate-400">正在加载真实节点遥测...</div>
+            ) : !telemetry || telemetry.nodes.length === 0 ? (
+              <div className="text-center py-8 text-[11px] text-slate-400">
+                该会话暂无已持久化的 LLM 节点遥测 —— 快轨/规则路径不经过 LLM 时此为正常空态
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {telemetry.nodes.map((n) => (
+                  <div key={n.node} className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-emerald-400">{n.node}</span>
+                      <span className="text-[10px] text-slate-500 bg-slate-800 px-2 py-0.5 rounded">
+                        {n.calls} 次 · avg {n.avgLatencyMs}ms
+                      </span>
+                    </div>
+                    <div className="text-slate-300 text-[11px] leading-relaxed">
+                      tokens {n.tokens.toLocaleString()} · 成本 ${n.costUsd.toFixed(4)} · 累计延迟 {n.totalLatencyMs}ms
+                      {n.lastAt ? ` · 最近调用 ${new Date(n.lastAt).toLocaleString('zh-CN')}` : ''}
+                    </div>
                   </div>
-                  <div className="text-slate-300 text-[11px] leading-relaxed">{t.desc}</div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </TabsContent>
 
-        {/* Tab 3: 遥测与 Token 计量 */}
+        {/* Tab 3: 遥测与 Token 计量(real-data-only:全部来自 llm_call_logs 库内真算) */}
         <TabsContent value="metrics" className="space-y-4 mt-4">
           <div className="grid grid-cols-3 gap-3">
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
               <div className="text-[11px] text-slate-500">累计 Token 消耗</div>
-              <div className="text-xl font-bold text-slate-900 mt-1">{conversation.totalTokens.toLocaleString()}</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">包含 Prompt 与 Completion</div>
+              <div className="text-xl font-bold text-slate-900 mt-1">
+                {(telemetry?.totals.tokens ?? 0).toLocaleString()}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                Prompt {(telemetry?.totals.tokensIn ?? 0).toLocaleString()} + Completion{' '}
+                {(telemetry?.totals.tokensOut ?? 0).toLocaleString()}
+              </div>
             </div>
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
               <div className="text-[11px] text-slate-500">预估调用成本</div>
-              <div className="text-xl font-bold text-emerald-600 mt-1">${conversation.costUsd.toFixed(4)}</div>
+              <div className="text-xl font-bold text-emerald-600 mt-1">
+                ${(telemetry?.totals.costUsd ?? 0).toFixed(4)}
+              </div>
               <div className="text-[10px] text-slate-400 mt-0.5">按动态模型定价换算</div>
             </div>
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
-              <div className="text-[11px] text-slate-500">会话轮次与频次</div>
-              <div className="text-xl font-bold text-slate-900 mt-1">{conversation.messageCount} 轮</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">平均响应耗时 120ms</div>
+              <div className="text-[11px] text-slate-500">LLM 调用次数</div>
+              <div className="text-xl font-bold text-slate-900 mt-1">{telemetry?.totals.calls ?? 0} 次</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {(telemetry?.totals.calls ?? 0) > 0
+                  ? `平均响应耗时 ${telemetry?.totals.avgLatencyMs}ms`
+                  : '暂无调用记录'}
+              </div>
             </div>
           </div>
 
@@ -491,6 +513,16 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* 结单归档为不可逆管理动作,与其他模块的删除同级要求二次确认 */}
+      <ConfirmDialog
+        isOpen={isArchiveConfirmOpen}
+        onClose={() => setIsArchiveConfirmOpen(false)}
+        onConfirm={() => handleUpdateStatus('resolved')}
+        title="确认结单并归档该会话？"
+        description={`归档会话 [${conversation?.threadId}] 后,AI 自动回复将停止,会话状态置为已完结。`}
+        confirmText="确认归档"
+      />
     </DetailDrawer>
   );
 }

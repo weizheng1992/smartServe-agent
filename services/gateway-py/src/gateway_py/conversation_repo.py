@@ -59,11 +59,26 @@ async def list_conversations(
                         "SELECT t.id AS thread_id, t.business_id, t.user_id, t.status, t.assigned_operator_id, "
                         "COALESCE(t.unread_count, 0) AS unread_count, COALESCE(t.tags, '[]'::jsonb) AS tags, "
                         "COALESCE(t.metadata, '{}'::jsonb) AS metadata, t.created_at, t.updated_at, "
-                        "m.content AS last_msg_content, m.role AS last_msg_role, m.timestamp AS last_msg_time "
+                        "m.content AS last_msg_content, m.role AS last_msg_role, m.timestamp AS last_msg_time, "
+                        "COALESCE(mc.msg_count, 0) AS msg_count, "
+                        "COALESCE(lm.total_tokens, 0) AS total_tokens, "
+                        "COALESCE(lm.cost_usd, 0) AS cost_usd, "
+                        "COALESCE(lm.llm_calls, 0) AS llm_calls "
                         "FROM threads t LEFT JOIN LATERAL ("
                         "  SELECT content, role, timestamp FROM messages WHERE thread_id = t.id "
                         "  ORDER BY created_at DESC, timestamp DESC LIMIT 1"
                         ") m ON true "
+                        # 会话级真实遥测(2026-09-13 real-data-only):此前前端对缺失字段
+                        # 兜底 850 tokens / $0.0035 / 1 条消息等编造值,全部改为库内真算
+                        "LEFT JOIN LATERAL ("
+                        "  SELECT COUNT(*) AS msg_count FROM messages m2 WHERE m2.thread_id = t.id"
+                        ") mc ON true "
+                        "LEFT JOIN LATERAL ("
+                        "  SELECT COALESCE(SUM(COALESCE(l.tokens_in, 0) + COALESCE(l.tokens_out, 0)), 0) AS total_tokens, "
+                        "  COALESCE(SUM(l.cost_usd), 0) AS cost_usd, "
+                        "  COUNT(*) AS llm_calls "
+                        "  FROM llm_call_logs l WHERE l.thread_id = t.id"
+                        ") lm ON true "
                         f"{where_clause} ORDER BY t.updated_at DESC LIMIT :lim OFFSET :off"
                     ).bindparams(**params, lim=limit, off=offset)
                 )
@@ -92,6 +107,11 @@ async def list_conversations(
                 "lastMessageSnippet": snippet,
                 "lastMessageRole": r["last_msg_role"],
                 "lastMessageTime": r["last_msg_time"],
+                # 会话级真实遥测(llm_call_logs / messages 库内真算,无命中即 0)
+                "messageCount": int(r["msg_count"]),
+                "totalTokens": int(r["total_tokens"]),
+                "costUsd": float(r["cost_usd"]),
+                "llmCalls": int(r["llm_calls"]),
             }
         )
     return {"items": items, "total": int(total)}

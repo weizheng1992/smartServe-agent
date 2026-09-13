@@ -83,7 +83,7 @@ export function PersonasPage() {
     setFormData({
       id: `fact_${Date.now()}`,
       userId: '',
-      businessId: 'nike',
+      businessId: 'ecommerce',
       fact: '',
       confidence: 0.9,
       source: 'admin_manual_input',
