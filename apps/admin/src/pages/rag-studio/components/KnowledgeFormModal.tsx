@@ -9,6 +9,7 @@ export interface KnowledgeFormModalProps {
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
   isCreate: boolean;
+  errorMessage?: string | null;
   formData: Partial<KnowledgeChunkRecord>;
   setFormData: (data: Partial<KnowledgeChunkRecord>) => void;
 }
@@ -18,6 +19,7 @@ export function KnowledgeFormModal({
   onClose,
   onSubmit,
   isCreate,
+  errorMessage,
   formData,
   setFormData,
 }: KnowledgeFormModalProps) {
@@ -27,6 +29,7 @@ export function KnowledgeFormModal({
   const businessOptions = tenants.filter((t) => t.id !== 'all');
   return (
     <FormModal
+      errorMessage={errorMessage}
       isOpen={isOpen}
       onClose={onClose}
       onSubmit={onSubmit}

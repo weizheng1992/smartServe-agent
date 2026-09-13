@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import time
+import uuid
 
 from engine_py.badcase.pool import SOURCE_PERSONA_FACT_DELETED, record_badcase_signal
 from engine_py.db import (
@@ -353,6 +354,48 @@ async def eval_results():
         rows = (await session.execute(select(EvalRunRecordRow).order_by(desc(EvalRunRecordRow.created_at)))).scalars().all()
     data = [_eval_item(r) for r in rows]
     return {"success": True, "total": len(data), "data": data}
+
+
+@router.get("/api/evals/results/{run_record_id}/cases")
+async def eval_run_cases(run_record_id: str):
+    """评测批次样本下钻(admin-readiness 10):逐用例 case_name/passed/score/
+    latencyMs/error。关联键:eval_run_records.id 即 "eval_run_" + eval_runs.id
+    (导入器同事务写入,wayfinder 005);解析失败/无样本诚实空列表。"""
+    from sqlalchemy import text as _text
+
+    run_id = run_record_id.removeprefix("eval_run_")
+    try:
+        _uuid_check = uuid.UUID(run_id)
+    except ValueError:
+        return {"success": True, "total": 0, "data": []}
+
+    async with get_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    _text(
+                        "SELECT case_name, passed, metrics FROM eval_results "
+                        "WHERE run_id = :rid ORDER BY case_name"
+                    ).bindparams(rid=_uuid_check)
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+    cases = []
+    for r in rows:
+        metrics = r["metrics"] if isinstance(r["metrics"], dict) else {}
+        cases.append(
+            {
+                "caseName": r["case_name"],
+                "passed": r["passed"],
+                "score": float(metrics.get("score") or 0),
+                "latencyMs": metrics.get("latencyMs"),
+                "error": metrics.get("error"),
+            }
+        )
+    return {"success": True, "total": len(cases), "data": cases}
 
 
 class TriggerEvalIn(BaseModel):

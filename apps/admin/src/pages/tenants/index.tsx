@@ -119,6 +119,7 @@ export function TenantsPage() {
     createItem,
     updateItem,
     deleteItem,
+    error,
   } = useAdminCrud<TenantRecord>({
     fetchList: fetchTenantsList,
     createApi: createTenantApi,
@@ -338,6 +339,7 @@ export function TenantsPage() {
       />
 
       <TenantFormModal
+        errorMessage={error}
         isOpen={isCreateOpen || isEditOpen}
         onClose={() => {
           setIsCreateOpen(false);

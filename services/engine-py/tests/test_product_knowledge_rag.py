@@ -59,7 +59,9 @@ class TestBuildProductChunks:
         bare = [{"id": "u", "spu_code": "S", "title": "某商品", "subtitle": None,
                  "description": None, "category": None, "specs": None, "status": "ON_SALE", "skus": []}]
         chunks = build_product_chunks(bare, "ecommerce")
-        assert chunks[0].chunk_text == "某商品", "无真实字段时正文只有标题"
+        # 首行固定「商品名：」前缀(admin-readiness 11):chunk_text 是检索主字段,
+        # 名称缺席会让品名词元落空;无真实字段时正文仅此一行,依旧零编造
+        assert chunks[0].chunk_text == "商品名：某商品", "无真实字段时正文只有商品名一行"
 
     def test_embedding_input_contains_context_prefix(self):
         c = build_product_chunks(_fake_rows(), "ecommerce")[0]

@@ -53,6 +53,7 @@ export function SkillsToolsPage() {
     statusFilter,
     setStatusFilter,
     handleResetFilters,
+    error,
     isEditOpen,
     setIsEditOpen,
     selectedItem,
@@ -237,6 +238,7 @@ export function SkillsToolsPage() {
       />
 
       <ToolFormModal
+        errorMessage={error}
         isOpen={isEditOpen}
         onClose={() => {
           setIsEditOpen(false);

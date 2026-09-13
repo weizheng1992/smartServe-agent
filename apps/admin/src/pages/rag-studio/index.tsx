@@ -75,6 +75,7 @@ export function RagStudioPage() {
     setItemToDelete,
     createItem,
     deleteItem,
+    error,
   } = useAdminCrud<KnowledgeChunkRecord>({
     fetchList: fetchChunks,
     createApi: createDocApi,
@@ -278,6 +279,7 @@ export function RagStudioPage() {
       </div>
 
       <KnowledgeFormModal
+        errorMessage={error}
         isOpen={isCreateOpen}
         onClose={() => {
           setIsCreateOpen(false);

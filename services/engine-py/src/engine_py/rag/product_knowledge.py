@@ -70,7 +70,9 @@ def build_product_chunks(rows: list[dict], business_id: str) -> list[KnowledgeCh
             source_url=SYNC_SOURCE_URL,
             doc_title=f"商品知识：{title}",
             header_path=f"商品目录 > {category} > {title}",
-            chunk_text="\n".join(lines) or title,
+            # 首行带商品名:chunk_text 是检索主字段,商品名缺席会让「XX 水壶怎么样」
+            # 的名称语义落空,也使存量行无法按内容回填标题(admin-readiness 11)
+            chunk_text="\n".join([f"商品名：{title}", *lines]) or title,
             category="product_knowledge",
         )
         chunks.append(chunk)

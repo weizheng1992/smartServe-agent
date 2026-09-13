@@ -9,6 +9,7 @@ export interface PersonaFormModalProps {
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
   isCreate: boolean;
+  errorMessage?: string | null;
   formData: Partial<PersonaRecord>;
   setFormData: (data: Partial<PersonaRecord>) => void;
 }
@@ -18,6 +19,7 @@ export function PersonaFormModal({
   onClose,
   onSubmit,
   isCreate,
+  errorMessage,
   formData,
   setFormData,
 }: PersonaFormModalProps) {
@@ -27,6 +29,7 @@ export function PersonaFormModal({
   const businessOptions = tenants.filter((t) => t.id !== 'all');
   return (
     <FormModal
+      errorMessage={errorMessage}
       isOpen={isOpen}
       onClose={onClose}
       onSubmit={onSubmit}

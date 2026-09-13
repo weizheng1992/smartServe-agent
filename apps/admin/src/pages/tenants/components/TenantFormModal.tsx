@@ -8,13 +8,23 @@ export interface TenantFormModalProps {
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
   isCreate: boolean;
+  errorMessage?: string | null;
   formData: Partial<TenantRecord>;
   setFormData: (data: Partial<TenantRecord>) => void;
 }
 
-export function TenantFormModal({ isOpen, onClose, onSubmit, isCreate, formData, setFormData }: TenantFormModalProps) {
+export function TenantFormModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  isCreate,
+  formData,
+  setFormData,
+  errorMessage,
+}: TenantFormModalProps) {
   return (
     <FormModal
+      errorMessage={errorMessage}
       isOpen={isOpen}
       onClose={onClose}
       onSubmit={onSubmit}

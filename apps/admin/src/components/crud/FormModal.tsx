@@ -11,6 +11,9 @@ export interface FormModalProps {
   submitText?: string;
   isSubmitting?: boolean;
   width?: string;
+  /** 表单级错误(字段校验失败说明 / API 4xx 摘要):红色错误条展示,
+   *  取代此前「空提交只剩原生气泡、API 失败静默关窗」的不可见失败(admin-readiness 08) */
+  errorMessage?: string | null;
 }
 
 export function FormModal({
@@ -23,6 +26,7 @@ export function FormModal({
   submitText = '保存提交',
   isSubmitting = false,
   width = 'max-w-lg',
+  errorMessage,
 }: FormModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isSubmitting && onClose()}>
@@ -37,6 +41,12 @@ export function FormModal({
         </DialogHeader>
 
         <form onSubmit={onSubmit}>
+          {errorMessage && (
+            <div className="mx-6 mt-4 p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-start gap-1.5">
+              <span aria-hidden="true">⚠</span>
+              <span>{errorMessage}</span>
+            </div>
+          )}
           <div className="px-6 py-5 max-h-[70vh] overflow-y-auto space-y-4 text-sm text-slate-700">{children}</div>
 
           <DialogFooter className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-end gap-2.5 sm:space-x-0">

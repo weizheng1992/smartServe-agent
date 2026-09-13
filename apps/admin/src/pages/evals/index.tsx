@@ -1,6 +1,6 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Badge, Progress } from 'ui';
-import { DataTable, FilterBar } from '../../components/crud';
+import { DataTable, DetailDrawer, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
 import { evalsApi } from '../../lib/api';
 import { EvalMetricsSummary } from './components/EvalMetricsSummary';
@@ -47,6 +47,32 @@ export function EvalsPage() {
       return true;
     },
   });
+
+  // 样本下钻(admin-readiness 10):行点击 → 抽屉列出该批次逐用例结果
+  const [casesOpen, setCasesOpen] = useState(false);
+  const [casesRun, setCasesRun] = useState<EvalRunRecord | null>(null);
+  const [cases, setCases] = useState<
+    Array<{ caseName: string; passed: boolean | null; score: number; latencyMs?: number; error?: string }>
+  >([]);
+  const [isLoadingCases, setIsLoadingCases] = useState(false);
+
+  const openCases = useCallback(async (row: EvalRunRecord) => {
+    setCasesRun(row);
+    setCasesOpen(true);
+    setIsLoadingCases(true);
+    setCases([]);
+    try {
+      const res = await fetch(`/api/evals/results/${row.id}/cases`, {
+        headers: { 'x-tenant-id': 'all', 'x-role': 'admin' },
+      });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) setCases(json.data);
+    } catch (err) {
+      console.warn('Failed to fetch eval cases:', err);
+    } finally {
+      setIsLoadingCases(false);
+    }
+  }, []);
 
   const columns = [
     {
@@ -126,6 +152,7 @@ export function EvalsPage() {
         <DataTable<EvalRunRecord>
           columns={columns}
           data={paginatedData}
+          onRowClick={openCases}
           emptyText="暂无评测运行记录"
           pagination={{
             currentPage,
@@ -135,6 +162,46 @@ export function EvalsPage() {
           }}
         />
       </div>
+
+      <DetailDrawer
+        isOpen={casesOpen}
+        onClose={() => setCasesOpen(false)}
+        width="sm:max-w-2xl"
+        title={`评测样本下钻: ${casesRun?.runName ?? ''}`}
+        subtitle={`Dataset: ${casesRun?.datasetName} · ${cases?.length ?? 0} 条样本(逐用例真算,失败样例附错误)`}
+      >
+        {isLoadingCases ? (
+          <div className="text-center py-10 text-xs text-slate-400">正在加载样本数据...</div>
+        ) : cases.length === 0 ? (
+          <div className="text-center py-10 text-xs text-slate-400">该批次无逐用例样本数据(诚实空,不伪造)</div>
+        ) : (
+          <div className="space-y-2">
+            {cases.map((c) => (
+              <div
+                key={c.caseName}
+                className={`p-3 rounded-xl border text-xs space-y-1 ${
+                  c.passed === false ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-800">{c.caseName}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full font-medium ${
+                      c.passed === false ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                    }`}
+                  >
+                    {c.passed === false ? '失败' : '通过'}
+                  </span>
+                </div>
+                <div className="text-slate-500 font-mono text-[11px]">
+                  score {(c.score * 100).toFixed(1)}%{c.latencyMs ? ` · ${Math.round(c.latencyMs)}ms` : ''}
+                </div>
+                {c.error && <div className="text-rose-600 text-[11px] whitespace-pre-wrap">{c.error}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </DetailDrawer>
     </div>
   );
 }

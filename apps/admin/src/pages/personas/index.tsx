@@ -56,6 +56,7 @@ export function PersonasPage() {
     createItem,
     updateItem,
     deleteItem,
+    error,
   } = useAdminCrud<PersonaRecord>({
     fetchList: fetchPersonasList,
     createApi: createPersonaApi,
@@ -246,6 +247,7 @@ export function PersonasPage() {
       />
 
       <PersonaFormModal
+        errorMessage={error}
         isOpen={isCreateOpen || isEditOpen}
         onClose={() => {
           setIsCreateOpen(false);

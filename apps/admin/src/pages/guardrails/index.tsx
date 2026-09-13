@@ -66,6 +66,7 @@ export function GuardrailsPage() {
     createItem,
     updateItem,
     deleteItem,
+    error,
   } = useAdminCrud<GuardrailRuleRecord>({
     fetchList: fetchGuardrailsList,
     createApi: createGuardrailApi,
@@ -259,6 +260,7 @@ export function GuardrailsPage() {
       />
 
       <GuardrailFormModal
+        errorMessage={error}
         isOpen={isCreateOpen || isEditOpen}
         onClose={() => {
           setIsCreateOpen(false);

@@ -8,6 +8,7 @@ export interface GuardrailFormModalProps {
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
   isCreate: boolean;
+  errorMessage?: string | null;
   selectedItem: GuardrailRuleRecord | null;
   formData: Partial<GuardrailRuleRecord>;
   setFormData: (data: Partial<GuardrailRuleRecord>) => void;
@@ -18,12 +19,14 @@ export function GuardrailFormModal({
   onClose,
   onSubmit,
   isCreate,
+  errorMessage,
   selectedItem,
   formData,
   setFormData,
 }: GuardrailFormModalProps) {
   return (
     <FormModal
+      errorMessage={errorMessage}
       isOpen={isOpen}
       onClose={onClose}
       onSubmit={onSubmit}

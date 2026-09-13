@@ -8,13 +8,23 @@ export interface ToolFormModalProps {
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
   isCreate: boolean;
+  errorMessage?: string | null;
   formData: Partial<SkillToolRecord>;
   setFormData: (data: Partial<SkillToolRecord>) => void;
 }
 
-export function ToolFormModal({ isOpen, onClose, onSubmit, isCreate, formData, setFormData }: ToolFormModalProps) {
+export function ToolFormModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  isCreate,
+  formData,
+  setFormData,
+  errorMessage,
+}: ToolFormModalProps) {
   return (
     <FormModal
+      errorMessage={errorMessage}
       isOpen={isOpen}
       onClose={onClose}
       onSubmit={onSubmit}
