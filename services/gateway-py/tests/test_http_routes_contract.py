@@ -1568,6 +1568,37 @@ class TestLogs:
             assert not row["id"].startswith("log_metric_")
 
 
+class TestMerchantAdminApprovalsActor:
+    """商户控制台 resolve 通道的核准人契约(admin-readiness 04 审计抓获):
+    此前直调引擎漏注入 actor,商户面决议落库恒 unknown。"""
+
+    async def test_merchant_resolve_defaults_to_merchant_operator(self, client, contract_fixtures):
+        import uuid as _uuid
+
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        aid = str(_uuid.uuid4())
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO pending_approvals (id, thread_id, business_id, status, action_type, reason, "
+                    "action_payload, deadline) VALUES (CAST(:id AS uuid), :tid, 'nike', 'waiting', 'processRefund', "
+                    "'商户通道 actor 契约', CAST('{}' AS jsonb), NOW() + INTERVAL '24 hours') "
+                    "ON CONFLICT (id) DO NOTHING"
+                ).bindparams(id=aid, tid=CONTRACT_THREAD)
+            )
+            await session.commit()
+
+        res = await client.post("/api/admin/approvals", json={"approvalId": aid, "action": "approve"})
+        assert res.status_code == 200
+
+        listing = await client.get("/api/admin/approvals", params={"tenantId": "nike"})
+        row = next(a for a in listing.json()["approvals"] if a["id"] == aid)
+        assert row["actionPayload"]["resolvedBy"] == "merchant_operator"
+        assert row["actionPayload"]["resolvedByRole"] == "merchant_operator"
+
+
 class TestMerchantStoreChatStream:
     """SSE 通道 thread:{threadId}:message — 回归钉:stream 路由必须真正以 SSE 流式返回。
 

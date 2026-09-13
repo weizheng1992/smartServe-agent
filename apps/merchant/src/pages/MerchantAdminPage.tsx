@@ -250,10 +250,18 @@ export default function MerchantAdminPage() {
     }
   }, [activeThreadMessages, activeTab]);
 
-  const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {
+  const handleApprovalAction = async (
+    approvalId: string,
+    action: 'approve' | 'reject',
+    /** 弹窗直传驳回原因 —— 不传则由 hook 回退 rejectionReasons/默认文案。
+     * 修复(工单 04 审计):弹窗旧实现只写 setRejectionReasons 后立即调用,
+     * state 异步更新使 hook 闭包读到旧值,用户填写的原因被吞成兜底文案。 */
+    explicitReason?: string,
+  ) => {
     const result = await executeApprovalAction({
       approvalId,
       action,
+      rejectionReason: action === 'reject' ? (explicitReason ?? undefined) : undefined,
       // 核准人契约(admin-readiness 01):商户面声明身份;控制台暂无登录账号,
       // 以调用面角色声明,接入真实账号后替换为操作员显示名即可,契约不变
       actor: 'merchant_operator',
@@ -1910,7 +1918,7 @@ export default function MerchantAdminPage() {
                     [rejectingApprovalId]: rejectReasonInput,
                   }));
                 }
-                await handleApprovalAction(rejectingApprovalId, 'reject');
+                await handleApprovalAction(rejectingApprovalId, 'reject', rejectReasonInput);
                 setRejectingApprovalId(null);
                 setRejectReasonInput('');
               }}

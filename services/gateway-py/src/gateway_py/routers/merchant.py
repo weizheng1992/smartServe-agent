@@ -223,6 +223,10 @@ async def admin_approvals(
 @router.post("/api/admin/approvals")
 async def admin_approvals_action(body: dict):
     try:
+        # 核准人契约(admin-readiness 01):商户控制台通道 —— 此前直调引擎漏注入
+        # actor,落库恒 unknown(工单 04 审计实弹抓获);此路由即商户面,缺省 merchant_operator
+        actor = (body.get("actor") or "").strip() or "merchant_operator"
+        actor_role = body.get("actorRole") or "merchant_operator"
         result = await ApprovalGatekeeper.process_approval_action(
             {
                 "approvalId": body.get("approvalId"),
@@ -231,6 +235,8 @@ async def admin_approvals_action(body: dict):
                 "rejectionReason": body.get("rejectionReason"),
                 "humanReply": body.get("humanReply") or body.get("replyMessage"),
                 "isFinish": body.get("isFinish"),
+                "resolvedBy": actor,
+                "resolvedByRole": actor_role,
             }
         )
         if result.get("error"):
