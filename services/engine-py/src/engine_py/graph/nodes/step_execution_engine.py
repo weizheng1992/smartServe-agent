@@ -344,7 +344,6 @@ async def _execute_single_step_core(
                 (state.get("business_config") or {}).get("businessId") or state.get("business_id") or "ecommerce"
             ).lower()
             intents = state.get("intents") or []
-            print(f"[DEBUG-ho1] dispatch {tool_name} state.guide_context候选={len((state.get('guide_context') or {}).get('candidateProducts') or [])}")
             skill_result = await skill_def.execute(
                 {
                     "threadId": state.get("thread_id"),

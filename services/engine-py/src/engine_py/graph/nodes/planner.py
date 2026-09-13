@@ -32,8 +32,6 @@ _GENERAL_ORDER_LIST_RE = re.compile(
 # 指标×导购确定性快轨(遗留二期,2026-09-13):指标词族 → rankingMetric 映射
 # (METRIC_REGISTRY 5 键:gmv/volume/gross_profit/margin_rate/stock_risk)
 _METRIC_HINT_RE = re.compile(r"(?:gmv|销售额|销量|毛利|利润|滞销|卖得好|卖的好)", re.IGNORECASE)
-# 全量加购诉求(2026-09-13 一句话接力:「推荐X，都要了」)
-_ADD_ALL_HINT_RE = re.compile(r"(?:都要|全要|一起买|都要了)")
 _SHOPPING_HINT_RE = re.compile(r"(?:推荐|买什么|挑一款|选一款|哪款好)", re.IGNORECASE)
 
 

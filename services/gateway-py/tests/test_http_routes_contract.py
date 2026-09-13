@@ -1503,6 +1503,65 @@ class TestEvals:
         assert res.status_code == 410
         assert "test:prompt:record" in res.json()["detail"]
 
+    async def test_result_cases_drilldown_lists_real_rows(self, client, contract_fixtures):
+        """评测批次样本下钻(admin-readiness 10):run_record_id 即
+        "eval_run_" + eval_runs.id,逐用例 caseName/passed/score/latencyMs/error
+        按升序透传,失败样本错误保真。"""
+        import uuid as _uuid
+
+        from engine_py.db import EvalResult, EvalRun, get_session
+
+        run_uuid = _uuid.uuid4()
+        async with get_session() as session:
+            # 两段式提交:FK 依赖(eval_results.run_id → eval_runs.id)先落父行
+            session.add(EvalRun(id=run_uuid, business_id="ecommerce", pass_rate=0.5))
+            await session.commit()
+            session.add(
+                EvalResult(
+                    run_id=run_uuid,
+                    case_name="a_order_query",
+                    passed=True,
+                    metrics={"score": 0.87, "latencyMs": 1200},
+                )
+            )
+            session.add(
+                EvalResult(
+                    run_id=run_uuid,
+                    case_name="b_refund_flow",
+                    passed=False,
+                    metrics={"score": 0.2, "latencyMs": 3400, "error": "assert unbacked claim"},
+                )
+            )
+            await session.commit()
+
+        res = await client.get(f"/api/evals/results/eval_run_{run_uuid}/cases")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert body["total"] == 2
+        first, second = body["data"]  # case_name 升序
+        assert first["caseName"] == "a_order_query"
+        assert first["passed"] is True
+        assert first["score"] == 0.87
+        assert first["latencyMs"] == 1200
+        assert first["error"] is None
+        assert second["caseName"] == "b_refund_flow"
+        assert second["passed"] is False
+        assert second["error"] == "assert unbacked claim"
+
+    async def test_result_cases_honest_empty_for_garbage_and_unknown(self, client, contract_fixtures):
+        """非法 id / 无样本 → 诚实空列表,严禁编造。"""
+        import uuid as _uuid
+
+        res = await client.get("/api/evals/results/eval_run_not-a-uuid/cases")
+        assert res.status_code == 200
+        assert res.json() == {"success": True, "total": 0, "data": []}
+
+        unknown = _uuid.uuid4()
+        res2 = await client.get(f"/api/evals/results/eval_run_{unknown}/cases")
+        assert res2.status_code == 200
+        assert res2.json() == {"success": True, "total": 0, "data": []}
+
 
 class TestLogs:
     async def test_success_envelope(self, client, contract_fixtures):

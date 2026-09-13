@@ -14,11 +14,20 @@ import re
 
 from sqlalchemy import text
 
-_CLAIMED_ORDER_ID_RE = re.compile(r"AURORA-ORD-\d+(?:-\d+)?", re.IGNORECASE)
+from ...triage.intent_registry import EXPLICIT_ORDER_ID_RE
+
+# 单号形态单一来源:复用 triage 的显式单号正则(ORD- 任意前缀通用,多租户
+# 各品牌单号格式同闸),严禁再硬编码 AURORA 品牌前缀
+_CLAIMED_ORDER_ID_RE = EXPLICIT_ORDER_ID_RE
 _CHECKOUT_SUCCESS_MARKER = "checkoutcart"
+# 叙事宣称词族单一来源:触发(sanitize 的 elif)与剥离(_CLAIM_SENTENCE_RE)
+# 共用同一份变体表,严禁触发面窄于剥离面(评审 2026-09-14:「已完成下单结算」
+# 在剥离表却不在触发表,宣称漏网)
+_NARRATIVE_CLAIM_RE = re.compile(
+    r"(?:成功完成结算下单|已完成下单结算|成功下单|完成下单结算|下单结算成功|订单结算成功|结算成功|下单成功)"
+)
 _CLAIM_SENTENCE_RE = re.compile(
-    r"[^。\n]*(?:成功完成结算下单|已完成下单结算|成功下单|完成下单结算|下单结算成功|订单结算成功|结算成功|下单成功|"
-    r"订单号[是为:：]?\s*AURORA-ORD-\d+)[^。\n]*[。\n]?"
+    r"[^。\n]*(?:" + _NARRATIVE_CLAIM_RE.pattern + rf"|订单号[是为:：]?\s*{EXPLICIT_ORDER_ID_RE.pattern})[^。\n]*[。\n]?"
 )
 # 购物车宣称(2026-09-13 扩展):「已自动将 X 加入购物车」需本轮 cart 技能/
 # addToCart 真实成功结果背书 —— 复合流单导购终局下这也是幻觉叙事
@@ -65,7 +74,6 @@ async def sanitize_order_claims(output: str, task_plan: dict | None) -> str:
     - 宣称 id 全部能在本轮真实结果中找到 → 原样返回;
     - 存在无凭据宣称 → 剥离宣称句并追加诚实说明(幻觉不进历史)。
     """
-    changed = False
     if output and _CLAIMED_ORDER_ID_RE.search(output):
         claimed = set(_CLAIMED_ORDER_ID_RE.findall(output))
         real = _real_order_ids(task_plan)
@@ -74,17 +82,14 @@ async def sanitize_order_claims(output: str, task_plan: dict | None) -> str:
             output = _strip_claim_sentences(output)
             for order_id in unbacked:
                 output = output.replace(order_id, "（无效订单号，已由系统核对移除）")
-            changed = True
-    elif output and re.search(r"(?:成功完成结算下单|已完成下单结算|下单结算成功|成功下单)", output):
+    elif output and _NARRATIVE_CLAIM_RE.search(output):
         if not _real_order_ids(task_plan):
             output = _strip_claim_sentences(output)
-            changed = True
     # 购物车宣称:无本轮真实加购凭据 → 剥离宣称句
     if output and _CART_CLAIM_SENTENCE_RE.search(output) and not _cart_add_backed(task_plan):
         output = _CART_CLAIM_SENTENCE_RE.sub("", output).rstrip()
         if _HONEST_CART_NOTICE not in output:
             output += ("\n\n" if output else "") + _HONEST_CART_NOTICE
-        changed = True
     return output
 
 
@@ -101,8 +106,9 @@ async def _order_exists(order_id: str) -> bool:
                 )
             ).scalar()
             return bool(row)
-    except Exception:
-        return True  # 库不可达时放行(宁可漏拦,不误杀真实订单)
+    except Exception as err:
+        print(f"[OutputGuard] 订单存在性核验不可达,放行宣称 (orderId={order_id}): {err}")
+        return True  # 库不可达时放行(宁可漏拦,不误杀真实订单),但错误必须留痕
 
 
 def _cart_add_backed(task_plan: dict | None) -> bool:
