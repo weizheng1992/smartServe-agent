@@ -65,6 +65,62 @@ def _demo_cost(price: float, sku_code: str) -> float:
     return round(price * _COST_RATIOS[zlib.crc32(sku_code.encode()) % len(_COST_RATIOS)], 2)
 
 
+# 品类评价模板(2026-09-13):{模板池} × crc32 取模确定性生成 —— 评价是演示
+# 数据(商品即演示商品),内容写真实感口碑,严禁编造具体性能参数。
+_REVIEW_TEMPLATES: dict[str, list[tuple[int, str]]] = {
+    "服装": [
+        (5, "面料厚实有垂感，做工走线工整，洗了两水没有起球变形，好评。"),
+        (5, "版型正，上身效果和详情页一致，颜色耐看，值得回购。"),
+        (4, "整体满意，尺码按建议买的正合适，快递也快。"),
+        (4, "质感对得起价格，缝线细节到位，家人也说好看。"),
+        (3, "款式不错，不过面料手感比想象中略硬一点，穿穿应该会软。"),
+    ],
+    "鞋靴": [
+        (5, "上脚舒服，缓震回弹明显，走一天不累脚，五星。"),
+        (5, "鞋楦宽松适合我的脚型，做工没得挑，第二次买这个牌子了。"),
+        (4, "颜值和舒适度都在线，码数按脚长买的正好，防滑也不错。"),
+        (4, "透气性可以，走路轻，就是新鞋略有磨合期。"),
+        (3, "外观好看，偏码半码，建议按脚长选。"),
+    ],
+    "背包": [
+        (5, "背负系统给力，装满走一天肩膀不勒，分区设计合理。"),
+        (5, "做工扎实，拉链顺滑，容量比看着能装，通勤徒步都能用。"),
+        (4, "自重轻，收纳位多，防泼水效果下小雨够用。"),
+        (4, "扣具结实，背板透气，性价比可以。"),
+        (3, "功能没问题，颜色比图片深一点。"),
+    ],
+    "露营": [
+        (5, "搭起来快，防水经受住一夜大雨，内帐不返潮。"),
+        (5, "做工和细节都在线，收纳体积友好，露营体验加分包。"),
+        (4, "稳定性不错，风夜里撑得住，配件齐全。"),
+        (4, "防水面料质感好，搭建说明清楚，新手也能搞定。"),
+        (3, "整体可以，重量对徒步党略友好度一般，自驾无所谓。"),
+    ],
+    "配饰": [
+        (5, "细节精致，材质摸着舒服，送人也拿得出手。"),
+        (5, "实用又好看，日常百搭，物超所值。"),
+        (4, "做工可以，功能实用，满意度高。"),
+        (4, "质感不错，包装也体面。"),
+        (3, "中规中矩，符合预期。"),
+    ],
+}
+
+_CATEGORY_TEMPLATE_KEY = {
+    "潮流T恤": "服装", "衬衫": "服装", "下装裤类": "服装", "户外机能": "服装",
+    "潮流鞋靴": "鞋靴", "背包收纳": "背包", "露营装备": "露营", "配饰": "配饰", "运动配件": "配饰",
+}
+
+
+def _demo_reviews(spu_code: str, category: str, title: str) -> list[tuple[int, str]]:
+    """确定性评价生成:品类模板池,crc32 选起点与条数(4~5 条),星级 3-5
+    分布模拟真实口碑分层。"""
+    pool = _REVIEW_TEMPLATES[_CATEGORY_TEMPLATE_KEY.get(category, "配饰")]
+    seed_val = zlib.crc32(spu_code.encode())
+    count = 4 + (seed_val % 2)
+    picked = [pool[(seed_val + offset) % len(pool)] for offset in range(count)]
+    return picked
+
+
 _SPUS = [
     {
         "code": "SPU-AURORA-001",
@@ -1135,6 +1191,7 @@ async def seed_merchant_data() -> None:
 
     async with merchant_engine().begin() as conn:
         for table in (
+            "merchant_product_reviews",
             "merchant_order_items",
             "merchant_audit_logs",
             "merchant_orders",
@@ -1186,6 +1243,18 @@ async def seed_merchant_data() -> None:
                         "img": spu["image"],
                         "cost": _demo_cost(price, code),
                     },
+                )
+
+            # 商品评价(2026-09-13):确定性生成,品类模板 + spu_code 哈希取模选词
+            # —— 「评价好的X」的真实数据面。评价为演示数据(商品即演示商品),
+            # 内容按品类写真实感口碑,不入具体假参数。
+            for rating, content in _demo_reviews(spu["code"], spu["category"], spu["title"]):
+                await conn.execute(
+                    text(
+                        "INSERT INTO merchant_product_reviews (spu_id, customer_id, rating, content) "
+                        "VALUES (:spu, :cust, :rating, :content)"
+                    ),
+                    {"spu": str(spu_id), "cust": None, "rating": rating, "content": content},
                 )
 
         await conn.execute(

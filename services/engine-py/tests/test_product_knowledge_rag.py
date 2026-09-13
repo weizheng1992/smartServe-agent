@@ -127,9 +127,10 @@ async def _seed_merchant(engine, title: str = "极光 420g重磅毛圈棉抽绳�
 
 class TestSyncProductKnowledge:
     def test_sync_writes_and_replaces_idempotently(self, pg_factory, monkeypatch):
-        from engine_py.tools_registry import order_domain
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy.pool import NullPool
+
+        from engine_py.tools_registry import order_domain
 
         engine = pg_factory.kw["bind"]
         url = engine.url.render_as_string(hide_password=False)
@@ -204,8 +205,8 @@ class TestSelfHealingSourceTopUp:
     def test_new_knowledge_file_ingested_for_seeded_db(self, pg_factory, monkeypatch):
         """已播种库(有其它 source 行)遇到新知识文件:必须补灌 —— 商品知识
         文档对既有库可见的前提。"""
-        from engine_py.rag.contextual_rag import ContextualRAG
         from engine_py.rag import knowledge_files
+        from engine_py.rag.contextual_rag import ContextualRAG
 
         engine = pg_factory.kw["bind"]
         original_load = knowledge_files.load_knowledge_chunks
@@ -297,7 +298,6 @@ class TestSelfHealingSourceTopUp:
 
     def test_idempotent_no_duplication(self, pg_factory, monkeypatch):
         from engine_py.rag.contextual_rag import ContextualRAG
-        from engine_py.rag import knowledge_files
 
         engine = pg_factory.kw["bind"]
 

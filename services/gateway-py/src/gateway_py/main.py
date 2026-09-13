@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from engine_py.llm import warm_embedding_model_in_background
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +21,22 @@ from .realtime import sio
 from .routers import admin, auth, chat, crud, merchant, spi
 from .tenant_context import TenantContextMiddleware, _PermissionError
 
-fastapi_app = FastAPI(title="agent-all gateway-py", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # 商品知识 RAG 同步(2026-09-13):商户真货架 → rag_documents,启动时
+    # 幂等重建 —— 商户改标题/价格后重启生效;商户库未 seed 时诚实跳过。
+    try:
+        from engine_py.rag.product_knowledge import sync_product_knowledge
+
+        result = await sync_product_knowledge("ecommerce")
+        print(f"[Startup] Product knowledge RAG synced: {result}")
+    except Exception as startup_err:
+        print(f"[Startup] Product knowledge sync skipped: {startup_err}")
+    yield
+
+
+fastapi_app = FastAPI(title="agent-all gateway-py", version="0.1.0", lifespan=_lifespan)
 
 # 限流最先注册 → 位于最内层:须在 TenantContextMiddleware 解析完 request.state.tenant
 # 之后运行,与 guard 同一租户口径;只挂 /api/chat 与 /api/v1/spi 高频入口。

@@ -107,6 +107,11 @@ class MallDomainService:
     _TERM_STEM_ALIASES: dict[str, tuple[str, ...]] = {
         "裤子": ("裤",),
         "鞋子": ("鞋",),
+        # 包类口语名(2026-09-13):「登山包」子串不在「高山徒步轻量化背包」中,
+        # 词素(背包/包)补匹配面
+        "登山包": ("背包", "包"),
+        "腰包": ("包",),
+        "胸包": ("包",),
     }
     # 词元清洗(ADR 检索链 L1):数量前缀逐块剥、「衬衫都」尾缀语气字仅剥
     # 长块(len>2,「成都」两字不动);⚠️ 分隔符连词只收「和/与」,「跟」
@@ -233,6 +238,17 @@ class MallDomainService:
             user_id = user_id or ctx["userId"]
             business_id = business_id or ctx["businessId"]
 
+        # 必填字段防线(2026-09-13 M7 实弹):缺参曾直接 KeyError 炸图熔断
+        missing_fields = [
+            key for key in ("province", "city", "district", "detailAddress", "receiverName", "receiverPhone")
+            if not params.get(key)
+        ]
+        if missing_fields:
+            return {
+                "success": False,
+                "missingFields": missing_fields,
+                "message": "收货地址信息不完整（缺：" + "、".join(missing_fields) + "），请补充后再保存。",
+            }
         effective_user_id = user_id or "anonymous_user"
         effective_biz_id = business_id or "ecommerce"
         full_address = f"{params['province']}{params['city']}{params['district']}{params['detailAddress']}"
@@ -551,100 +567,97 @@ class MallDomainService:
 
     @staticmethod
     async def query_product_reviews(params: dict) -> dict:
-        """4. 查询商品评价与口碑画像。"""
-        limit = params.get("limit") or 5
+        """4. 查询商品评价与口碑画像(2026-09-13 重写:商户真评价表)。
+
+        此前查 engine 本地 product_reviews(products 域,0 行)—— 评价诉求
+        全链无数据。现读 merchant_product_reviews,productName 按商品名模糊
+        匹配 SPU,返回真实评分/内容;无评价诚实说明,严禁编造。
+        """
+        from . import order_domain as _order_domain
+
+        product_name = (params.get("productName") or params.get("productId") or "").strip()
+        limit = int(params.get("limit") or 5)
         try:
-            conditions: list[str] = []
-            query_params: dict = {}
-            if params.get("productId"):
-                conditions.append("r.product_id = :pid")
-                query_params["pid"] = params["productId"]
-            if params.get("fitFeedback"):
-                conditions.append("r.fit_feedback = :fit")
-                query_params["fit"] = params["fitFeedback"]
-            if params.get("sentiment"):
-                conditions.append("r.sentiment = :sent")
-                query_params["sent"] = params["sentiment"]
-            if params.get("ratingMin"):
-                conditions.append("r.rating >= :rmin")
-                query_params["rmin"] = params["ratingMin"]
-            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-            async with get_session() as session:
-                rows = (
-                    (
-                        await session.execute(
+            async with _order_domain._merchant_reader_engine().connect() as conn:
+                if product_name:
+                    # 词元化匹配(2026-09-13):「三合一冲锋衣」子串不在
+                    # 「极光三合一全天候户外硬壳冲锋衣」中,整词死匹配曾查空
+                    tokens = [t for t in MallDomainService._extract_query_terms(product_name) if len(t) >= 2][:4]
+                    # 整词空则 3/2 字滑窗子词(无分词器;「三合一冲锋衣」→「三合一/冲锋衣」)
+                    if tokens:
+                        probe = await conn.execute(
                             text(
-                                'SELECT r.id, r.product_id AS "productId", r.user_name AS "userName", r.rating, '
-                                'r.content, r.fit_feedback AS "fitFeedback", r.sentiment, '
-                                'r.merchant_reply AS "merchantReply", r.created_at AS "createdAt" '
-                                f"FROM product_reviews r {where_clause} "
-                                "ORDER BY r.rating DESC, r.created_at DESC "
-                                f"LIMIT {int(limit)}"
-                            ).bindparams(**query_params)
+                                "SELECT 1 FROM merchant_spus s WHERE "
+                                + " OR ".join(
+                                    f"(s.title ILIKE :kw{i} OR s.subtitle ILIKE :kw{i})"
+                                    for i in range(len(tokens))
+                                )
+                                + " LIMIT 1"
+                            ).bindparams(**{f"kw{i}": f"%{t}%" for i, t in enumerate(tokens)})
                         )
-                    )
-                    .mappings()
-                    .all()
-                )
-
-                if rows:
-                    avg_rating = sum(int(r["rating"] or 0) for r in rows) / len(rows)
-                    fit_labels = {
-                        "true_to_size": "尺码偏好: 正码合脚",
-                        "runs_small": "尺码偏好: 偏小半码，建议拍大",
-                    }
+                        if probe.scalar() is None:
+                            sliding = list({product_name[i:i + n] for n in (3, 2) for i in range(len(product_name) - n + 1)})
+                            tokens = [w for w in sliding if len(w) >= 2][:6]
+                    or_clauses = " OR ".join(
+                        f"(s.title ILIKE :kw{i} OR s.subtitle ILIKE :kw{i})"
+                        for i in range(len(tokens))
+                    ) or "TRUE"
+                    spu_rows = (
+                        await conn.execute(
+                            text(
+                                f"SELECT s.id, s.title FROM merchant_spus s WHERE {or_clauses} LIMIT 5"
+                            ).bindparams(**{f"kw{i}": f"%{t}%" for i, t in enumerate(tokens)})
+                        )
+                    ).mappings().all()
+                else:
+                    spu_rows = (
+                        await conn.execute(text("SELECT s.id, s.title FROM merchant_spus s LIMIT 5"))
+                    ).mappings().all()
+                if not spu_rows:
                     return {
-                        "totalReviews": len(rows),
-                        "avgRating": f"{avg_rating:.1f} / 5.0",
-                        "sentimentSummary": {
-                            "positiveRate": "92%",
-                            "fitConsensus": "86% 用户反馈尺码标准（正码），鞋楦包裹性适中",
-                        },
-                        "reviews": [
-                            {
-                                "userName": r.get("userName") or "匿名用户",
-                                "rating": f"{r['rating']} ⭐",
-                                "content": r["content"],
-                                "fitFeedback": fit_labels.get(r.get("fitFeedback"), "尺码偏好: 偏大"),
-                                "merchantReply": r.get("merchantReply"),
-                            }
-                            for r in rows
-                        ],
+                        "success": True,
+                        "reviews": [],
+                        "averageRating": None,
+                        "total": 0,
+                        "message": f"暂未找到与「{product_name}」相关的在售商品，无法查询评价。",
                     }
+                spu_ids = [str(r["id"]) for r in spu_rows]
+                rows = (
+                    await conn.execute(
+                        text(
+                            "SELECT r.rating, r.content, r.created_at, s.title AS spu_title "
+                            "FROM merchant_product_reviews r JOIN merchant_spus s ON s.id = r.spu_id "
+                            "WHERE r.spu_id = ANY(CAST(:ids AS uuid[])) "
+                            "ORDER BY r.created_at DESC, r.rating DESC LIMIT :lim"
+                        ).bindparams(ids=spu_ids, lim=limit)
+                    )
+                ).mappings().all()
         except Exception as err:
-            print(f"[MallDomainService.queryProductReviews] Database error: {err}")
+            print(f"[MallDomain] 商品评价查询失败(诚实空): {err}")
+            return {"success": True, "reviews": [], "averageRating": None, "total": 0,
+                    "message": "评价数据暂时查询不到，请稍后再试。"}
 
+        reviews = [
+            {
+                "rating": int(r["rating"]),
+                "content": r["content"],
+                "product": r["spu_title"],
+                "date": r["created_at"].strftime("%Y-%m-%d") if r.get("created_at") else None,
+            }
+            for r in rows
+        ]
+        average = round(sum(r["rating"] for r in reviews) / len(reviews), 1) if reviews else None
+        message = (
+            f"共找到 {len(reviews)} 条真实评价" + (f"，平均 {average} 分。" if average is not None else "")
+            if reviews
+            else "该商品暂无用户评价。"
+        )
         return {
-            "totalReviews": 128,
-            "avgRating": "4.8 / 5.0",
-            "sentimentSummary": {
-                "positiveRate": "94.5%",
-                "fitConsensus": "88% 用户反馈按日常运动鞋正码选购即可，前掌包裹感舒适",
-            },
-            "reviews": [
-                {
-                    "userName": "晨***跑",
-                    "rating": "5 ⭐",
-                    "content": "脚感很棒，包裹性强，日常穿42码这款拍42码刚刚好，非常透气！",
-                    "fitFeedback": "尺码偏好: 正码合脚",
-                    "merchantReply": "感谢您的认可！祝您跑出好成绩！",
-                },
-                {
-                    "userName": "k***8",
-                    "rating": "5 ⭐",
-                    "content": "颜值在线，做工走线工整，顺丰第二天就到了，五星好评。",
-                    "fitFeedback": "尺码偏好: 正码合脚",
-                    "merchantReply": None,
-                },
-                {
-                    "userName": "路***人",
-                    "rating": "4 ⭐",
-                    "content": "鞋底略硬需要踩开两三天，脚背偏高的朋友建议选大半码。",
-                    "fitFeedback": "尺码偏好: 脚背高建议大半码",
-                    "merchantReply": "收到反馈，高脚背鞋友可适当松开鞋带前两组穿孔哦~",
-                },
-            ],
+            "success": True,
+            "reviews": reviews,
+            "averageRating": average,
+            "total": len(reviews),
+            "message": message,
         }
 
     @staticmethod

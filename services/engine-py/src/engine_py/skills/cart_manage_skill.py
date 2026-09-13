@@ -28,9 +28,11 @@ _DELETE_RE = re.compile(r"(?:删除|移除|删掉|去掉|不要了|清空)")
 _ADD_RE = re.compile(r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购)")
 # 真·聊天下单触发(遗留二期,2026-09-13):拦截在查看分支前;裸「结算」保持
 # 查看摘要旧契约,「下单/去结算/提交订单/付款」才开真实订单。
-_CHECKOUT_RE = re.compile(r"(?:结算下单|去结算|提交订单|付款|[^\s]下单|^下单)")
+_CHECKOUT_RE = re.compile(r"(?:结算下单|去结算|提交订单|付款|[^\s]下单|^下单|(?:然后|再|接着|帮忙|帮我|给我)结算)")
 # 否定/非结算形守卫:「我还没下单」「先不付款」「货到付款」严禁开出真单
 _CHECKOUT_NEG_RE = re.compile(r"(?:还没|没有|不用|不要|先不|暂不|别|[^\s]个下单|货到付款|未付款)")
+# 检索/推荐诉求(2026-09-13):在场时禁用加购的历史回溯候选(幻影守卫)
+_SEARCH_INTENT_RE = re.compile(r"(?:推荐|询|问|看看|看看有|找|挑|评价|口碑|热销|爆款|有什么)")
 _CHECKOUT_ADDR_RE = re.compile(r"(?:寄到|送到|地址为|地址是|邮寄到)\s*([^,，。!！?？\n]+)")
 # 订单→购物车桥接:「订单(里)的 X 加入购物车」—— X 为历史购买商品关键词
 _BRIDGE_KEYWORD_RE = re.compile(
@@ -435,9 +437,12 @@ class CartManageSkill(BaseSkill):
         candidate_products = guide_context.get("candidateProducts") or []
         candidate_list = guide_context.get("candidateProductIds") or []
 
-        # guideContext 为空时从近期对话历史智能回溯推荐候选
+        # guideContext 为空时从近期对话历史智能回溯推荐候选。
+        # 幻影守卫(2026-09-13 用户实报):句中带检索/推荐诉求(「询评价好的
+        # 短袖」)而本轮无候选时,历史回溯会把上一轮的别的商品当成「第一个」
+        # 入车 —— 检索诉求在场一律禁用回溯,诚实反问。
         short_mem = extra.get("shortMemory") or []
-        if not candidate_list and short_mem:
+        if not candidate_list and short_mem and not _SEARCH_INTENT_RE.search(user_input):
             for msg in reversed(short_mem):
                 if msg.get("role") == "assistant" and isinstance(msg.get("content"), str) and "推荐商品" in msg["content"]:
                     parsed_products = [

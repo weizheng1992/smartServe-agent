@@ -188,7 +188,7 @@ class ShoppingGuideSkill(BaseSkill):
         # 数量语义(2026-09-12 用户实报「我要2个商品」被无视):「N个/N件」
         # 显式数量 → 推荐 N 款(上限 8,与品类快捷区一致);「几件/几款」
         # 或未提 → 维持默认 3。
-        requested_count = re.search(r"([2-9]|1[0]|两|三|四|五|六|七|八|九|十)\s*个", user_input)
+        requested_count = re.search(r"([2-9]|1[0]|两|三|四|五|六|七|八|九|十)\s*[个件款条双只]", user_input)
         limit = 3
         if requested_count:
             raw = requested_count.group(1)

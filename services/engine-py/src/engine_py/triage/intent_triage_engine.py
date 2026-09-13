@@ -117,7 +117,7 @@ def _should_clarify_first(parsed: list[dict]) -> bool:
 # 地址簿规则前置(多意图一期,2026-09-12):创建形/查询形两检测器 + 中文
 # 地址解析(解析器在 slot_extractor)。判定 1.6 与 Step3 注入器共用。
 _ADDRESS_CREATE_PAYLOAD_RE = re.compile(
-    r"(?:创建|新建|添加|新增|保存)[^。,，\n]{0,8}地址[是为:：]?\s*(.*)$", re.DOTALL
+    r"(?:创建|新建|添加|新增|保存|增加|加)[^。,，\n]{0,8}地址[是为:：]?\s*(.*)$", re.DOTALL
 )
 _ADDRESS_BOOK_LIST_RE = re.compile(
     r"(?:查看|看看|查一下|有哪些)(?:我的)?(?:收货地址|地址簿)"

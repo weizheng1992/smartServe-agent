@@ -95,6 +95,20 @@ CREATE TABLE IF NOT EXISTS merchant_order_items (
 ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2) NOT NULL DEFAULT 0;
 ALTER TABLE merchant_order_items ADD COLUMN IF NOT EXISTS cost_at_purchase NUMERIC(10,2) NOT NULL DEFAULT 0;
 
+-- 商品评价(2026-09-13):「评价好的X」检索/查询的真实数据面 —— 此前
+-- product_reviews 挂 engine 本地 products 域且 0 行,评价诉求全链无数据。
+-- 评价挂在商户 SPU 上,与聊天/商城同一商品身份(spu_id)。
+CREATE TABLE IF NOT EXISTS merchant_product_reviews (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  spu_id UUID NOT NULL,
+  sku_code TEXT,
+  customer_id TEXT,
+  rating INT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_reviews_spu ON merchant_product_reviews(spu_id);
+
 CREATE TABLE IF NOT EXISTS merchant_audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   action_type TEXT NOT NULL,

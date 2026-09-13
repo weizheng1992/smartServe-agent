@@ -18,6 +18,8 @@ _UNSHIPPED_RE = re.compile(r"未发货|还没发货|尚未发货")
 _SAVE_ADDR_FIELDS = ("receiverName", "receiverPhone", "province", "city", "district", "detailAddress")
 # 排行指标提取(planner 快轨子任务描述形态:「rankingMetric gmv」)
 _RANKING_METRIC_RE = re.compile(r"rankingMetric\s+([a-z_]+)", re.IGNORECASE)
+# 顾客口述地址提取(checkoutCart 步骤描述/用户输入形态)
+_STATED_ADDRESS_RE = re.compile(r"(?:shipping to|地址是|寄到|送到|邮寄到)\s*([^,，。\n]+)", re.IGNORECASE)
 
 
 def _save_address_args(description: str) -> dict | None:
@@ -97,9 +99,15 @@ def try_match_executor_fast_path(
         }
 
     # 🛒 真·聊天下单确定性映射(遗留二期):checkoutCart 子任务直配工具;描述含
-    # "cart" 会命中下方购物车技能分支,必须先行。
+    # "cart" 会命中下方购物车技能分支,必须先行。地址保真(2026-09-13 用户
+    # 实报):深规划把顾客给的地址写进步骤描述,快路径提取为显式地址 ——
+    # 严禁静默回落地址簿默认地址。
     if "checkoutcart" in desc_lower and "checkoutCart" in allowed_tools:
-        return {"toolName": "checkoutCart", "args": {}}
+        stated = _STATED_ADDRESS_RE.search(description) or _STATED_ADDRESS_RE.search(user_input or "")
+        return {
+            "toolName": "checkoutCart",
+            "args": {"shippingAddress": stated.group(1).strip()} if stated else {},
+        }
 
     if (
         any(
