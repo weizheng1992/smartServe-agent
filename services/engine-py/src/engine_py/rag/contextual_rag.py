@@ -6,7 +6,7 @@ import json
 import math
 import re
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from ..db import RagDocumentRow, get_session
 from ..llm import get_embedding_model
@@ -87,20 +87,23 @@ def _parse_embedding(raw) -> list[float] | None:
 
 
 class ContextualRAG:
-    def __init__(self, business_id: str) -> None:
-        self.business_id = business_id
+    def __init__(self, business_id: str | None) -> None:
+        # None/''/'all' = 跨租户全局检索(SaaS 管理台上帝视角);其余值强制单租户隔离。
+        # 此前网关把 all 硬编码成 ecommerce,上帝视角永远检不到他租知识(2026-09-13 修复)。
+        normalized = (business_id or "").strip().lower()
+        self.business_id = normalized if normalized and normalized != "all" else None
 
     async def _ensure_seed_data(self) -> None:
-        """知识库为空时自愈播种:与 db.seed 同源读 docs/knowledge/*.md(知识不写死,
+        """知识自愈播种:与 db.seed 同源读 docs/knowledge/*.md(知识不写死,
         单一来源);文件不可用/目录空则跳过播种 —— 不回退内联写死内容,否则冷启动
-        降级路径会与种子漂移成两套知识(2026-09-09 评审修复)。"""
+        降级路径会与种子漂移成两套知识(2026-09-09 评审修复)。
+
+        2026-09-13 升级为 source 级补齐:原先只在「表全空」时播种,新增知识
+        文件对已播种库永远不生效(商品知识文档因此不可见)。现按
+        (business_id, source_url) 键比对,缺失的文件单独补灌 —— 幂等,已有
+        文件零嵌入开销。"""
         try:
             async with get_session() as session:
-                existing = (
-                    await session.execute(select(RagDocumentRow.id).limit(1))
-                ).scalar_one_or_none()
-                if existing is not None:
-                    return
                 try:
                     chunks = load_knowledge_chunks()
                 except Exception as files_err:
@@ -109,8 +112,48 @@ class ContextualRAG:
                 if not chunks:
                     print("[RAG] docs/knowledge 无可摄取切片,跳过自愈播种(不回退内联写死内容)")
                     return
+                # 文件级内容哈希比对(2026-09-13):新文件补灌,内容变更的
+                # 文件整组重灌 —— 知识文档修订后无需手动清库
+                existing_rows = (
+                    await session.execute(
+                        text(
+                            "SELECT business_id, source_url, COUNT(*) AS n, "
+                            "MD5(string_agg(chunk_text, '|' ORDER BY chunk_text)) AS sha "
+                            "FROM rag_documents GROUP BY business_id, source_url"
+                        )
+                    )
+                ).mappings().all()
+                existing = {
+                    (r["business_id"], r["source_url"]): (int(r["n"]), r["sha"])
+                    for r in existing_rows
+                }
+
+                def _file_sha(file_chunks: list) -> tuple[int, str]:
+                    import hashlib
+
+                    joined = "|".join(sorted(c.chunk_text for c in file_chunks))
+                    return len(file_chunks), hashlib.md5(joined.encode()).hexdigest()
+
+                stale_keys: set[tuple[str, str]] = set()
+                by_file: dict[tuple[str, str], list] = {}
+                for c in chunks:
+                    by_file.setdefault((c.business_id, c.source_url), []).append(c)
+                for key, file_chunks in by_file.items():
+                    want_n, want_sha = _file_sha(file_chunks)
+                    have = existing.get(key)
+                    if have is None or have[0] != want_n or have[1] != want_sha:
+                        stale_keys.add(key)
+                if not stale_keys:
+                    return
+                pending = [c for c in chunks if (c.business_id, c.source_url) in stale_keys]
+                for key in stale_keys:
+                    await session.execute(
+                        text(
+                            "DELETE FROM rag_documents WHERE business_id = :bid AND source_url = :src"
+                        ).bindparams(bid=key[0], src=key[1])
+                    )
                 rows: list[RagDocumentRow] = []
-                for chunk in chunks:
+                for chunk in pending:
                     embedding = await get_embedding_model().aembed_query(chunk.embedding_input())
                     rows.append(
                         RagDocumentRow(
@@ -119,11 +162,13 @@ class ContextualRAG:
                             chunk_text=chunk.chunk_text,
                             contextual_summary=chunk.contextual_summary(),
                             embedding=json.dumps(embedding),
-                            metadata=chunk.metadata_dict(),
+                            metadata_=chunk.metadata_dict(),
                         )
                     )
-                session.add_all(rows)
-                await session.commit()
+                if rows:
+                    session.add_all(rows)
+                    await session.commit()
+                    print(f"[RAG] Self-healing seed appended {len(rows)} chunks from {len({(c.business_id, c.source_url) for c in pending})} new knowledge source(s)")
         except Exception as err:
             print(f"[RAG] Self-healing seed failed (possibly due to offline/mocked DB): {err}")
 
@@ -147,15 +192,10 @@ class ContextualRAG:
 
         try:
             async with get_session() as session:
-                rows = (
-                    (
-                        await session.execute(
-                            select(RagDocumentRow).where(RagDocumentRow.business_id == self.business_id)
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
+                stmt = select(RagDocumentRow)
+                if self.business_id:
+                    stmt = stmt.where(RagDocumentRow.business_id == self.business_id)
+                rows = (await session.execute(stmt)).scalars().all()
         except Exception as db_err:
             # 库失败诚实空(2026-09-12):旧「Local Fake RAG」演示切片兜底退役,
             # 假相似度(0.35/0.65/0.55 关键词拍数)一并拆除 —— RAG 检索终点只有
@@ -168,8 +208,8 @@ class ContextualRAG:
         row_meta_map: dict[str, dict] = {}
 
         for row in rows:
-            # 🔒 多租户双锁校验:应用层二次强制租户边界
-            if row.business_id != self.business_id:
+            # 🔒 多租户双锁校验:应用层二次强制租户边界(全局视角 business_id=None 时放行)
+            if self.business_id and row.business_id != self.business_id:
                 continue
             row_meta = row.metadata_ if isinstance(row.metadata_, dict) else {}
             row_meta_map[str(row.id)] = row_meta

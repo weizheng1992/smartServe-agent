@@ -4,6 +4,28 @@
 
 ---
 
+## [2.6.21] - 2026-09-13 (商品知识 RAG 入库:「XX 特点」从「没找到」到真规格直答)
+
+用户实报:「极光 420g重磅毛圈棉抽绳束脚慢 特点」得到「政策资料中没找到相关信息」——RAG 知识库只有店铺政策没有商品信息,商品知识问句全落空。
+
+### ✨ Features
+
+- **静态品类养护知识**(`docs/knowledge/ecommerce_product_knowledge.md`,businessId: ecommerce):六大段——棉质/针织面料特性与洗护、功能性外套(三合一/羽绒/软壳)洗护收纳、鞋靴养护、背包配件养护、露营装备使用存放、选购尺码建议 + 在售主力款尺码速查表——走既有 Markdown 摄取链,零代码。
+- **动态商品知识同步器**(`rag/product_knowledge.py`):商户真货架派生每 SPU 一块切片(卖点/核心规格/在售规格与价格/价格区间/库存状态),**内容全部来自 merchant_spus/skus 真实字段,严禁为虚构商品编造参数**(real-data-only/01);source_url=product_catalog_sync.md 整组替换幂等,gateway 启动 lifespan 自动同步(商户改标题/价格重启生效,30 SPU 秒级),商户库不可达诚实跳过。items.spu_id 落 spu_code 契约兼容(历史 UUID/编码两形态 id::text OR spu_code 双匹配)。
+- **咨询闸商品知识信号**:「特点/参数/规格/材质/面料/卖点/功能/用途/配置」进 _CONSULT_TOPIC_RE + 知识强信号独立通道(不受 12 字裸话题长度限制)——「极光 420g…慢跑裤 特点」14 字无问号此前进不了咨询直答。
+
+### 🐛 Fixes(顺带挖出的存量 bug)
+
+- **RagDocumentRow(metadata=…) 列从未写入**:关键字传的是 SQLAlchemy Base 类属性名(metadata),真实映射属性是 metadata_ —— 实例 dict 遮蔽类属性不报错,列恒 NULL,search 的 category 过滤/docTitle/headerPath 进 BM25 全部失效;两处播种点(product_knowledge/contextual_rag)修为 metadata_。
+- **知识自愈播种升级**:①source 级补齐——原先只在「表全空」时播种,新增知识文件对已播种库永远不可见;②文件内容哈希比对(string_agg MD5,排序无关聚合)——文件修订整组自动重灌,免手动清库。
+
+### ✅ 验证 (Verification,如实)
+
+- TDD:engine pytest **593 passed**(+10:切片真规格/裸 SPU 不编造/幂等/标题变更反映 headerPath/商户不可达诚实跳过/source 补齐/内容修订重灌/咨询闸信号与负例),gateway 121 过、ruff 干净、promptfoo 双套件 56/0 + 8/0 与基线全对齐。
+- 实弹:原句 → 逐条真规格直答(420g 重磅毛圈棉混纺/宽松锥形 Easy Fit/高弹罗纹收口抽绳/侧插袋后防盗拉链袋);「三合一冲锋衣怎么洗」→ 完整洗护指南(严禁机洗/30℃ 手洗/压胶条忌熨烫/内外胆分洗);「Vibram老爹鞋尺码怎么选」→ 40-43 码对应脚长速查(文件变更自动重灌验证:appended 7 chunks)。
+
+---
+
 ## [2.6.20] - 2026-09-13 (遗留二期:真·聊天下单 + 订单→购物车桥接 + 指标复合确定性编排)
 
 2.6.18/2.6.19 收尾明示的二期三项一个版本收口(用户「遗留二期做」,to-spec → implement)。spec: `.scratch/phase2-bridging-checkout/spec.md`(gitignored)。

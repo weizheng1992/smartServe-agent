@@ -60,7 +60,8 @@ _CONSULT_TOPIC_RE = re.compile(
     r"|退换|退货|退款|退钱|售后|无理由|吊牌|包装|原路"
     r"|包邮|运费|邮费|配送范围|配送吗|发货时间|发货速度|几天到|多久到"
     r"|发票|保修|三包|质保"
-    r"|支付方式|货到付款|会员|积分|优惠券|折扣)",
+    r"|支付方式|货到付款|会员|积分|优惠券|折扣"
+    r"|特点|参数|规格|材质|面料|卖点|功能|用途|配置)",
     re.IGNORECASE,
 )
 # 疑问形标记:咨询天然带提问语气/疑问词
@@ -118,6 +119,13 @@ def is_consult_shaped_marker(text: str) -> bool:
     return bool(_CONSULT_MARKER_QUESTION_RE.search(stripped) and _CONSULT_MARKER_TOPIC_RE.search(stripped))
 
 
+# 商品知识强信号(2026-09-13):「XX 特点/规格/材质」类问句是知识诉求,
+# 不受 12 字裸话题长度限制 —— 商品知识入库 RAG 后在此接住直答
+_CONSULT_KNOWLEDGE_SIGNAL_RE = re.compile(
+    r"(?:特点|参数|规格|材质|面料|卖点|功能|用途|配置)"
+)
+
+
 def is_consult_query(text: str, has_image: bool = False) -> bool:
     """咨询形判定:问店铺知识,非要求执行动作。
 
@@ -142,6 +150,8 @@ def is_consult_query(text: str, has_image: bool = False) -> bool:
     if not _CONSULT_TOPIC_RE.search(stripped):
         return False
     if _CONSULT_QUESTION_RE.search(stripped):
+        return True
+    if _CONSULT_KNOWLEDGE_SIGNAL_RE.search(stripped):
         return True
     return len(stripped) <= 12 and bool(_CONSULT_BARE_TOPIC_RE.search(stripped))
 
