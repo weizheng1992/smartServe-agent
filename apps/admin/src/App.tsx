@@ -5,6 +5,7 @@ import {
   AuditsPage,
   BillingPage,
   ConversationsPage,
+  DashboardPage,
   EvalsPage,
   GuardrailsPage,
   PersonasPage,
@@ -19,7 +20,8 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<AdminLayout />}>
-          <Route path="/" element={<Navigate to="/tenants" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/tenants" element={<TenantsPage />} />
           <Route path="/conversations" element={<ConversationsPage />} />
           <Route path="/audits" element={<AuditsPage />} />

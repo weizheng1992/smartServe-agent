@@ -138,6 +138,41 @@ test.describe('Admin 修复回归 (2026-09-13)', () => {
     await expect(dialog).toBeHidden();
   });
 
+  test('全局指标大盘:六卡真算渲染,README 宣传假数字绝迹', async ({ page }) => {
+    await page.goto('/dashboard');
+    await expect(page.getByText('活跃租户数(近 7 天)')).toBeVisible();
+    await expect(page.getByText(/Autopilot 率/)).toBeVisible();
+    await expect(page.getByText('待审批 HITL 工单')).toBeVisible();
+    await expect(page.getByText(/LLM 调用/)).toBeVisible();
+    // 侧栏第一项即全局大盘
+    await expect(page.getByRole('link', { name: '全局大盘' })).toBeVisible();
+    // 编造宣传数字(README 原 94.2%+)不得出现在页面
+    const body = await page.locator('main').innerText();
+    expect(body).not.toContain('94.2');
+    // 数值区真实渲染(非全空态)
+    expect(body).toMatch(/\d/);
+  });
+
+  test('租户注册表统一:内置业务域入表带保护,前后端同源', async ({ page }) => {
+    // 注册表(live seed 后)应含 aurora + 四个内置域;内置行带徽标且无删除按钮
+    await page.goto('/tenants');
+    await expect(page.getByText('极光潮品官方旗舰店')).toBeVisible();
+    for (const builtin of ['通用电商主站', 'Nike 官方旗舰店', 'Adidas 运动专营', '全局画像记忆层']) {
+      const row = page.getByRole('row', { name: new RegExp(builtin) });
+      await expect(row).toBeVisible();
+      await expect(row).toContainText('内置');
+      await expect(row.getByRole('button', { name: '删除' })).toHaveCount(0);
+    }
+    // 真实入驻租户仍可删(按钮存在)
+    await expect(
+      page.getByRole('row', { name: /极光潮品官方旗舰店/ }).getByRole('button', { name: '删除' }),
+    ).toBeVisible();
+
+    // 后端删除保护(403)
+    const del = await page.request.delete('/api/tenant/nike', { headers: { 'x-role': 'admin' } });
+    expect(del.status()).toBe(403);
+  });
+
   test('P3 会话结单并归档必须二次确认(取消不生效)', async ({ page }) => {
     await page.goto('/conversations');
     await expect(page.getByText(/共 \d+ 条数据/)).toBeVisible();

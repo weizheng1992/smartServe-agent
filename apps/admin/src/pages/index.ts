@@ -1,3 +1,4 @@
+export * from './dashboard';
 export * from './tenants';
 export * from './conversations';
 export * from './audits';

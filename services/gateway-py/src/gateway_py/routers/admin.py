@@ -45,6 +45,108 @@ async def tenant_ping(x_tenant_id: str | None = Header(None)):
     }
 
 
+@router.get("/api/overview")
+async def platform_overview():
+    """全局指标大盘聚合端点(admin-readiness 03,real-data-only):一次请求出全部
+    卡片,全部库内真算 —— 活跃租户(近7天 session_metrics 有落账)、会话状态分布、
+    待审批 HITL 工单(含最老积压)、Token/成本(session_metrics SUM,与计费页同源)、
+    Autopilot 率(resolved_auto 占比,替换 README 编造的 94.2%)、人工接管会话数、
+    LLM 调用近 24h(llm_call_logs)。README 的「在线客服坐席」无在线状态数据源,
+    诚实不做假指标,以「人工接管会话数」替代。"""
+    async with get_session() as session:
+        active_tenants = (
+            await session.execute(
+                text(
+                    "SELECT COUNT(DISTINCT business_id) FROM session_metrics "
+                    "WHERE created_at >= NOW() - INTERVAL '7 days'"
+                )
+            )
+        ).scalar_one()
+
+        status_rows = (
+            (
+                await session.execute(
+                    text("SELECT resolution_status, COUNT(*) AS n FROM session_metrics GROUP BY resolution_status")
+                )
+            )
+            .mappings()
+            .all()
+        )
+        session_distribution = {r["resolution_status"]: int(r["n"]) for r in status_rows}
+        total_sessions = sum(session_distribution.values())
+        resolved_auto = session_distribution.get("resolved_auto", 0)
+
+        thread_rows = (
+            (await session.execute(text("SELECT status, COUNT(*) AS n FROM threads GROUP BY status"))).mappings().all()
+        )
+        thread_distribution = {r["status"]: int(r["n"]) for r in thread_rows}
+
+        human_takeover = (
+            await session.execute(text("SELECT COUNT(*) FROM threads WHERE assigned_operator_id IS NOT NULL"))
+        ).scalar_one()
+
+        waiting_row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT COUNT(*) AS n, "
+                        "COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 60, 0) AS oldest_minutes "
+                        "FROM pending_approvals WHERE status = 'waiting'"
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+
+        usage_row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT COALESCE(SUM(total_tokens), 0) AS tokens, "
+                        "COALESCE(SUM(calculated_cost_usd), 0) AS cost FROM session_metrics"
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+
+        llm_row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost, "
+                        "COALESCE(AVG(latency_ms), 0) AS avg_latency "
+                        "FROM llm_call_logs WHERE created_at >= NOW() - INTERVAL '24 hours'"
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+
+    return {
+        "success": True,
+        "data": {
+            "activeTenants": int(active_tenants),
+            "sessions": {"total": total_sessions, "distribution": session_distribution},
+            "threads": {"distribution": thread_distribution, "humanTakeover": int(human_takeover)},
+            "approvals": {
+                "waiting": int(waiting_row["n"]),
+                "oldestWaitingMinutes": round(float(waiting_row["oldest_minutes"])),
+            },
+            "usage": {"tokens": int(usage_row["tokens"]), "costUsd": float(usage_row["cost"])},
+            "autopilotRate": round(resolved_auto / total_sessions, 4) if total_sessions else 0,
+            "llm24h": {
+                "calls": int(llm_row["calls"]),
+                "costUsd": float(llm_row["cost"]),
+                "avgLatencyMs": round(float(llm_row["avg_latency"])),
+            },
+        },
+    }
+
+
 @router.get("/api/tenant/list")
 async def tenant_list():
     try:

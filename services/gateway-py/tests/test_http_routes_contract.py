@@ -651,6 +651,50 @@ class TestApprovals:
         assert row3["actionPayload"]["resolvedByRole"] == "system"
 
 
+class TestOverview:
+    """全局指标大盘(admin-readiness 03):六卡全部库内真算,与直连 SQL 对账;
+    README 编造的 94.2% Autopilot 率在此被真实值取代。"""
+
+    async def test_overview_cards_match_sql_ground_truth(self, client, contract_fixtures):
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        res = await client.get("/api/overview")
+        assert res.status_code == 200
+        data = res.json()["data"]
+
+        # 直连 SQL 算地面真值
+        async with get_session() as session:
+            auto, total = (
+                await session.execute(
+                    text(
+                        "SELECT COUNT(*) FILTER (WHERE resolution_status = 'resolved_auto'), COUNT(*) "
+                        "FROM session_metrics"
+                    )
+                )
+            ).one()
+            expected_rate = round(auto / total, 4) if total else 0
+            waiting = (
+                await session.execute(text("SELECT COUNT(*) FROM pending_approvals WHERE status = 'waiting'"))
+            ).scalar_one()
+            expected_tokens = (
+                await session.execute(text("SELECT COALESCE(SUM(total_tokens), 0) FROM session_metrics"))
+            ).scalar_one()
+
+        assert data["autopilotRate"] == expected_rate
+        assert data["approvals"]["waiting"] == waiting
+        assert data["usage"]["tokens"] == expected_tokens
+        assert data["sessions"]["total"] == total
+        # 密封环境 session_metrics 为空表:分布为空 dict,get 需缺省
+        assert data["sessions"]["distribution"].get("resolved_auto", 0) == auto
+
+        # 形状:六卡齐活且数值型
+        assert isinstance(data["activeTenants"], int)
+        assert isinstance(data["threads"]["humanTakeover"], int)
+        assert set(data["llm24h"]) == {"calls", "costUsd", "avgLatencyMs"}
+        assert 0 <= data["autopilotRate"] <= 1
+
+
 class TestChatThreads:
     """回归钉(wayfinder 004):POST /api/chat/threads。
 
