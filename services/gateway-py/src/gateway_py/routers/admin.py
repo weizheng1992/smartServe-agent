@@ -53,7 +53,8 @@ async def tenant_list():
                 (
                     await session.execute(
                         text(
-                            "SELECT t.business_id, t.name, t.status, t.industry, t.created_at, tc.spi_config, tc.skills_config, tc.onboarding_config "
+                            "SELECT t.business_id, t.name, t.status, t.industry, t.created_at, t.plan_tier, "
+                            "tc.spi_config, tc.skills_config, tc.onboarding_config "
                             "FROM tenants t LEFT JOIN tenant_configs tc ON LOWER(t.business_id) = LOWER(tc.business_id) "
                             "ORDER BY t.created_at DESC"
                         )
@@ -84,6 +85,7 @@ async def tenant_list():
                         "autoEscalation": True,
                         "webhookUrl": spi.get("spiBaseUrl") or "http://localhost:3005",
                         "status": row["status"] or "active",
+                        "planTier": row["plan_tier"] or "free",
                         "createdAt": row["created_at"].isoformat().split("T")[0] if row["created_at"] else "2026-01-01",
                         # 编辑面回读(new-user-onboarding E):无配置租户回 None,
                         # 前端 JSON 文本域以「未配置」态呈现而非伪造默认值
@@ -226,11 +228,15 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
     async with get_session() as session:
         existing = (
             await session.execute(
-                text("SELECT id FROM tenants WHERE LOWER(business_id) = :bid LIMIT 1").bindparams(bid=clean_id)
+                text("SELECT id, plan_tier FROM tenants WHERE LOWER(business_id) = :bid LIMIT 1").bindparams(bid=clean_id)
             )
-        ).scalar_one_or_none()
+        ).mappings().first()
         if not existing:
             raise HTTPException(404, f"Tenant '{business_id}' not found")
+        # 内置业务域保护(admin-readiness 02):builtin 是 nightly 评测/密封契约的
+        # 依赖基线,禁停用(名称/行业仍可改);一行误删全线爆炸
+        if existing["plan_tier"] == "builtin" and (body.status or "active") != "active":
+            raise HTTPException(403, f"内置业务域 '{business_id}' 不可停用")
 
         await session.execute(
             text(
@@ -309,6 +315,14 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
 async def delete_tenant(business_id: str):
     clean_id = business_id.lower().strip()
     async with get_session() as session:
+        plan_tier = (
+            await session.execute(
+                text("SELECT plan_tier FROM tenants WHERE LOWER(business_id) = :bid LIMIT 1").bindparams(bid=clean_id)
+            )
+        ).scalar_one_or_none()
+        # 内置业务域保护(admin-readiness 02):builtin 是评测/契约依赖基线,禁删
+        if plan_tier == "builtin":
+            raise HTTPException(403, f"内置业务域 '{business_id}' 不可删除(生产可用 SEED_BUILTIN_TENANTS 控制播种)")
         await session.execute(
             text("DELETE FROM tenant_configs WHERE LOWER(business_id) = :bid").bindparams(bid=clean_id)
         )

@@ -47,6 +47,56 @@ class TestTenant:
         ids = [t["id"] for t in body["tenants"]]
         assert "nike" in ids
         assert "adidas" in ids
+        # 注册表行携带 planTier(admin-readiness 02:内置域标记随行下发)
+        sample = body["tenants"][0]
+        assert isinstance(sample.get("planTier"), str)
+
+    async def test_builtin_tenant_delete_and_disable_protected(self, client, contract_fixtures):
+        """内置业务域保护(admin-readiness 02):builtin 行禁删、禁停用,
+        名称/行业仍可改 —— nike/adidas/ecommerce 是 nightly 评测与密封契约的依赖基线。"""
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        builtin_id = f"bt_{_TS}"
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO tenants (business_id, name, plan_tier, status) "
+                    "VALUES (:bid, '内置保护契约域', 'builtin', 'active') ON CONFLICT (business_id) DO NOTHING"
+                ).bindparams(bid=builtin_id)
+            )
+            await session.commit()
+
+        # 禁删
+        del_res = await client.delete(f"/api/tenant/{builtin_id}")
+        assert del_res.status_code == 403
+        assert "不可删除" in str(del_res.json())
+
+        # 禁停用
+        disable_res = await client.put(
+            f"/api/tenant/{builtin_id}",
+            json={"name": "内置保护契约域", "status": "disabled"},
+        )
+        assert disable_res.status_code == 403
+        assert "不可停用" in str(disable_res.json())
+
+        # 名称/行业仍可改(status 保持 active)
+        rename_res = await client.put(
+            f"/api/tenant/{builtin_id}",
+            json={"name": "内置保护契约域-改名", "status": "active", "industry": "契约测试"},
+        )
+        assert rename_res.status_code == 200
+
+        listing = await client.get("/api/tenant/list")
+        row = next(t for t in listing.json()["tenants"] if t["id"] == builtin_id)
+        assert row["name"] == "内置保护契约域-改名"
+        assert row["status"] == "active"
+        assert row["planTier"] == "builtin"
+
+        # 清理:直连 DB(路由层拒删,测试自清理走 SQL)
+        async with get_session() as session:
+            await session.execute(text("DELETE FROM tenants WHERE business_id = :bid").bindparams(bid=builtin_id))
+            await session.commit()
 
     async def test_create_list_delete_roundtrip(self, client, contract_fixtures):
         ct_id = f"ct_{_TS}"

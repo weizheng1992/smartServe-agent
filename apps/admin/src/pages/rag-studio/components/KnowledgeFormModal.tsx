@@ -1,7 +1,6 @@
 import type React from 'react';
 import { Input, Label, Textarea } from 'ui';
 import { FormModal } from '../../../components/crud';
-import { buildBusinessScopeOptions } from '../../../lib/businessScopes';
 import { useAdminTenantStore } from '../../../store/tenantStore';
 import type { KnowledgeChunkRecord } from '../types';
 
@@ -22,9 +21,10 @@ export function KnowledgeFormModal({
   formData,
   setFormData,
 }: KnowledgeFormModalProps) {
-  // 归属商户 = 租户注册表 ∪ 平台内置业务域(此前硬编码三个演示租户,真实入驻租户选不了)
+  // 归属商户 = 租户注册表单一事实源(内置业务域已由 seed 入注册表,
+  // businessScopes 前端兜底随 admin-readiness 02 退役)
   const { tenants } = useAdminTenantStore();
-  const businessOptions = buildBusinessScopeOptions(tenants);
+  const businessOptions = tenants.filter((t) => t.id !== 'all');
   return (
     <FormModal
       isOpen={isOpen}

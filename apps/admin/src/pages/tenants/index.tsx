@@ -26,6 +26,8 @@ export function TenantsPage() {
           autoEscalation: t.autoEscalation ?? true,
           webhookUrl: t.webhookUrl || `https://api.${t.id}.com/webhook`,
           status: (t.status as any) || 'active',
+          // 内置业务域标记(admin-readiness 02):builtin 行禁删禁停用
+          planTier: t.planTier || 'free',
           createdAt: t.createdAt ? new Date(t.createdAt).toISOString().split('T')[0] : '2026-01-01',
           onboardingConfig: t.onboardingConfig ?? null,
         }));
@@ -211,7 +213,14 @@ export function TenantsPage() {
       header: '商户名称 / ID',
       render: (row: TenantRecord) => (
         <div>
-          <div className="font-semibold text-slate-900">{row.name}</div>
+          <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+            {row.name}
+            {row.planTier === 'builtin' && (
+              <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-medium">
+                内置
+              </span>
+            )}
+          </div>
           <div className="text-xs font-mono text-slate-400">ID: {row.id}</div>
         </div>
       ),
@@ -274,13 +283,15 @@ export function TenantsPage() {
           >
             编辑配置
           </button>
-          <button
-            type="button"
-            onClick={() => setItemToDelete(row)}
-            className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-          >
-            删除
-          </button>
+          {row.planTier !== 'builtin' && (
+            <button
+              type="button"
+              onClick={() => setItemToDelete(row)}
+              className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
+            >
+              删除
+            </button>
+          )}
         </div>
       ),
     },

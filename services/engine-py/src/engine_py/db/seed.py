@@ -108,6 +108,25 @@ async def main() -> None:
         ).scalar_one()
         print(f"[PG Seed] 用户注册成功: test@example.com ({user_id},密码登录已启用)")
 
+        # 内置业务域入注册表(2026-09-13 admin-readiness 02):ecommerce/nike/adidas/global
+        # 在 usage/knowledge/memory 里本就是真实业务域,但 tenants 注册表缺行导致
+        # /api/tenant/list、租户穿透、画像归属四处与其余消费面分裂(密封契约环境
+        # SEED_TENANTS 早已按「注册表应含它们」断言,漂移方是 live 种子)。
+        # plan_tier='builtin' 标记 + 租户删除/停用路由拒 builtin 防误删;
+        # 生产部署可置 SEED_BUILTIN_TENANTS=false 跳过。
+        if os.environ.get("SEED_BUILTIN_TENANTS", "true").strip().lower() in ("1", "true", "yes"):
+            await conn.execute(
+                text(
+                    "INSERT INTO tenants (business_id, name, plan_tier, status) VALUES "
+                    "('ecommerce', '通用电商主站', 'builtin', 'active'), "
+                    "('nike', 'Nike 官方旗舰店', 'builtin', 'active'), "
+                    "('adidas', 'Adidas 运动专营', 'builtin', 'active'), "
+                    "('global', '全局画像记忆层', 'builtin', 'active') "
+                    "ON CONFLICT (business_id) DO NOTHING"
+                )
+            )
+            print("[PG Seed] 内置业务域注册:ecommerce / nike / adidas / global(plan_tier=builtin)")
+
         await conn.execute(
             text(
                 "INSERT INTO threads (id, user_id, business_id, status) VALUES "
