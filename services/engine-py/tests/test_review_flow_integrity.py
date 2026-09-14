@@ -192,6 +192,24 @@ class TestAddressBookCustomerOwned:
         assert detected is not None and detected["mode"] == "list"
 
 
+# ── ③重复拦截数字指纹:槽位数字不同=不同请求 ─────────────────────────────
+
+
+class TestDuplicateDigitFingerprint:
+    def test_digit_runs_differ_means_not_duplicate(self):
+        """「…1211室」vs「…1402室」:门牌数字不同,严禁语义重复重放
+        (实弹:新地址保存被旧确认重放顶掉)。"""
+        from engine_py.triage.intent_triage_engine import _digit_fingerprint
+
+        assert _digit_fingerprint("新增地址 张伟 13800138000 北京市海淀区中关村南大街1号院8号楼1211室") != (
+            _digit_fingerprint("新增地址 张伟 13800138000 北京市海淀区中关村南大街1号院8号楼1402室")
+        )
+
+    def test_same_digits_same_fingerprint(self):
+        from engine_py.triage.intent_triage_engine import _digit_fingerprint as _df
+        assert _df("退货政策是什么") == _df("退货策略是什么") == []
+
+
 # ── ③改单意图对下单/结算复合语境让位 ─────────────────────────────────────
 
 

@@ -50,6 +50,16 @@ OPERATIONAL_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 UNSANITIZED_TAGS_RE = re.compile(r"\[(?:ECOMMERCE|BRAND|STORE|MERCHANT|SHOP|ADIDAS|NIKE)\]", re.IGNORECASE)
+# 数字指纹(2026-09-14 语义重复拦截收紧):门牌/单号/数量等槽位数字是动作
+# 的身份的一部分 —— 两句语义相似但数字串不同,是「换了个请求」不是「重复
+# 提问」(实弹:「新增地址…1211室」vs「…1402室」仅差门牌,旧确认重放顶掉
+# 了新保存)。
+_DIGIT_RUN_RE = re.compile(r"\d+")
+
+
+def _digit_fingerprint(text: str | None) -> list[str]:
+    """纯函数(测试缝):输入的数字串序列,作语义去重的槽位指纹。"""
+    return _DIGIT_RUN_RE.findall(text or "")
 ORDER_KEYWORDS_RE = re.compile(r"订单|发货|物流|查单|买的|快递|到哪|运单|面单", re.IGNORECASE)
 # 退款动词族单一事实源(intent_registry.REFUND_VERB_RE,2026-09-13 收口)+
 # 破损词(damage assessment 专用,不入 slot 规则表 —— 「坏了」不是退款动词)
@@ -639,7 +649,11 @@ class IntentTriageEngine:
                         SemanticVectorCache.get_embedding_with_cache(last_user_msg["content"]),
                     )
                     sim = cosine_similarity(current_vec, last_vec)
-                    if sim >= 0.98:
+                    # 数字指纹必须一致(2026-09-14):门牌/单号/数量不同的
+                    # 「相似句」是新请求,严禁重放旧答复
+                    if sim >= 0.98 and _digit_fingerprint(input_text) == _digit_fingerprint(
+                        last_user_msg["content"]
+                    ):
                         is_semantically_same = True
 
                 is_last_response_failed = rule_matchers.is_failed_response(last_assistant_msg["content"])
