@@ -111,6 +111,8 @@ class MallDomainService:
         # 包类口语名(2026-09-13):「登山包」子串不在「高山徒步轻量化背包」中,
         # 词素(背包/包)补匹配面
         "登山包": ("背包",),
+        "爬山": ("高山", "徒步"),
+        "登山": ("高山",),
         "腰包": (),
         "胸包": (),
     }
@@ -123,6 +125,14 @@ class MallDomainService:
     # 改块内最小贪婪定位,剥到量词为止
     _QUANTITY_LOCATOR_RE = re.compile(r"^.*?(?:几[件条双款个]|[两三四五六七八九十]+[件条双款个]|\d+[件条双款个])")
     _TRAILING_PARTICLE_RE = re.compile(r"(?:都要|都|吧|呢|啊|呀)$")
+    # 价格极值修饰词(2026-09-14 T3 矩阵):「最便宜的背包」曾把「便宜」混入
+    # 词元稀释检索(头巾/水壶顶了真背包)—— 极值词是排序语义,剥除后由
+    # search sort(price_desc)承接
+    _PRICE_SUPERLATIVE_RE = re.compile(r"(?:最便宜|最贵|性价比高|性价比|便宜点|便宜)")
+    # 疑问词与口语前缀清洗(2026-09-14 T3 矩阵):「最贵的冲锋衣是哪款」曾整块
+    # 成词元「冲锋衣是哪款」ILIKE 必空
+    _INTERROGATIVE_TOKEN_RE = re.compile(r"(?:是哪款|哪种|哪个|哪些|什么|怎么样|好吗)")
+    _LEADING_FILLER_RE = re.compile(r"^(?:我们|我|你|您|经常|平时|一般|常常|总是|最近|帮忙|帮我|请|打算|想要|想|要|买|找|问|看|挑|选|的)+")
 
     # 购物车存储(2026-09-08 重构):_cart_storage 降级为进程一级读缓存,真实
     # 状态写穿透 Redis(agent:cart:{userId})。此前纯进程内存,网关重启即失忆,
@@ -763,7 +773,15 @@ class MallDomainService:
         chunks = re.split(r"[\s,，、。.!！?？:；;的和与]+", rest)
         cleaned = []
         for chunk in chunks:
+            chunk = MallDomainService._PRICE_SUPERLATIVE_RE.sub("", chunk.strip()).strip()
+            chunk = MallDomainService._INTERROGATIVE_TOKEN_RE.sub("", chunk).strip()
             chunk = MallDomainService._QUANTITY_LOCATOR_RE.sub("", chunk.strip()).strip()
+            # 口语前缀循环剥(「我经常爬山」→「爬山」)
+            while True:
+                stripped = MallDomainService._LEADING_FILLER_RE.sub("", chunk).strip()
+                if stripped == chunk:
+                    break
+                chunk = stripped
             # 尾缀语气字仅剥长块(len>2):「衬衫都」→「衬衫」;「成都」两字不动
             if len(chunk) > 2:
                 chunk = MallDomainService._TRAILING_PARTICLE_RE.sub("", chunk).strip()
@@ -788,7 +806,7 @@ class MallDomainService:
 
     @staticmethod
     async def _fetch_merchant_catalog(
-        terms: list[str] | None, category: str | None, max_price, limit: int
+        terms: list[str] | None, category: str | None, max_price, limit: int, sort: str | None = None
     ) -> list[dict] | None:
         """商户真货架 SQL 检索层(agent_merchant.merchant_spus/skus)。
 
@@ -846,10 +864,15 @@ class MallDomainService:
                                 "GROUP BY s.id "
                                 f"HAVING {' AND '.join(having_clauses)} "
                                 + (
-                                    f"ORDER BY (CASE WHEN {title_hit_clause} THEN 0 ELSE 1 END), min_price ASC "
-                                    "LIMIT :lim"
+                                    f"ORDER BY (CASE WHEN {title_hit_clause} THEN 0 ELSE 1 END), "
+                                    + ("min_price DESC " if sort == "price_desc" else "min_price ASC ")
+                                    + "LIMIT :lim"
                                     if title_hit_clause
-                                    else "ORDER BY min_price ASC LIMIT :lim"
+                                    else (
+                                        "ORDER BY min_price DESC LIMIT :lim"
+                                        if sort == "price_desc"
+                                        else "ORDER BY min_price ASC LIMIT :lim"
+                                    )
                                 )
                             ).bindparams(**params)
                         )
@@ -1025,8 +1048,9 @@ class MallDomainService:
 
     @staticmethod
     async def search_products(params: dict) -> dict:
-        """6. 商品检索与导购选品。"""
+        """6. 商品检索与导购选品。sort: "price_desc" 按价格降序(「最贵的X」)。"""
         query = params.get("query")
+        sort_mode = params.get("sort")
         category = params.get("category")
         max_price = params.get("maxPrice")
         limit = params.get("limit") or 4
@@ -1084,7 +1108,7 @@ class MallDomainService:
                 merchant_products = merged
         if merchant_products is None and not merchant_unreachable:
             merchant_products = await MallDomainService._fetch_merchant_catalog(
-                terms, category, max_price, limit
+                terms, category, max_price, limit, sort=sort_mode
             )
         if merchant_products is not None:
             if not merchant_products and query and settings.mall_semantic_enabled:

@@ -42,7 +42,7 @@ class TestReviewDataSource:
                 await conn.execute(text(
                     "CREATE TABLE IF NOT EXISTS merchant_spus ("
                     " id UUID PRIMARY KEY, spu_code TEXT UNIQUE, title TEXT NOT NULL,"
-                    " subtitle TEXT, description TEXT, category TEXT, status TEXT DEFAULT 'ON_SALE')"
+                    " subtitle TEXT, description TEXT, category TEXT, main_image TEXT, specs JSONB DEFAULT '{}'::jsonb, status TEXT DEFAULT 'ON_SALE')"
                 ))
                 await conn.execute(text(
                     "INSERT INTO merchant_spus (id, spu_code, title) VALUES "
@@ -93,7 +93,7 @@ class TestReviewDataSource:
                 await conn.execute(text(
                     "CREATE TABLE IF NOT EXISTS merchant_spus ("
                     " id UUID PRIMARY KEY, spu_code TEXT UNIQUE, title TEXT NOT NULL,"
-                    " subtitle TEXT, description TEXT, category TEXT, status TEXT DEFAULT 'ON_SALE')"
+                    " subtitle TEXT, description TEXT, category TEXT, main_image TEXT, specs JSONB DEFAULT '{}'::jsonb, status TEXT DEFAULT 'ON_SALE')"
                 ))
                 await conn.execute(text(
                     "INSERT INTO merchant_spus (id, spu_code, title) VALUES "
@@ -207,6 +207,93 @@ class TestAddressBookCustomerOwned:
 
         detected = detect_address_manage("地址列表")
         assert detected is not None and detected["mode"] == "list"
+
+
+
+
+# ── 价格极值/对比/场景化推荐:快轨词表与价格排序(2026-09-14 T3 矩阵)──────
+
+
+class TestPriceSuperlativeAndScenario:
+    def test_guide_vocab_covers_superlative_and_scenario(self):
+        """T3 矩阵:价格极值/对比/场景化问法必须进导购快轨词表 —— 落深规划
+        曾 25~236s(转圈根因)。"""
+        from engine_py.skills.guide_skills import ShoppingGuideSkill
+
+        for text in (
+            "最便宜的背包", "最贵的冲锋衣是哪款", "性价比最高的跑鞋", "问最便宜的背包",
+            "有没有便宜点的短袖", "三合一冲锋衣和软壳冲锋衣哪个好", "背包和胸包怎么选",
+            "极光的跑鞋和徒步鞋有什么区别", "我经常爬山，买哪种背包", "冬天露营该用什么睡袋",
+            "日常通勤背什么包好", "周末去爬山需要准备什么装备", "跑鞋哪款性价比最高",
+        ):
+            assert ShoppingGuideSkill().can_handle({"input": text}), text
+
+    def test_price_modifier_stripped_from_terms(self):
+        """「最便宜的背包」词元=「背包」:价格极值词是排序修饰,严禁混入词元
+        (曾把头巾/水壶按价格升序顶了真背包)。"""
+        from engine_py.tools_registry.mall_domain import MallDomainService
+
+        terms = MallDomainService._extract_query_terms("最便宜的背包")
+        assert "背包" in terms
+        assert all("便宜" not in t for t in terms)
+
+    def test_search_supports_price_desc(self, pg_factory, monkeypatch):
+        """「最贵的X」:检索支持 price_desc 排序(首条即最贵)。"""
+        from engine_py.tools_registry import order_domain
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy.pool import NullPool
+
+        engine = pg_factory.kw["bind"]
+        merchant_engine = create_async_engine(url=engine.url.render_as_string(hide_password=False), poolclass=NullPool)
+        original = order_domain._merchant_reader_engine
+
+        async def setup():
+            async with merchant_engine.begin() as conn:
+                await conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS merchant_spus ("
+                    " id UUID PRIMARY KEY, spu_code TEXT UNIQUE, title TEXT NOT NULL,"
+                    " subtitle TEXT, description TEXT, category TEXT, main_image TEXT,"
+                    " specs JSONB DEFAULT '{}'::jsonb, status TEXT DEFAULT 'ON_SALE',"
+                    " created_at TIMESTAMP NOT NULL DEFAULT NOW())"
+                ))
+                await conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS merchant_skus ("
+                    " id UUID PRIMARY KEY, spu_id UUID NOT NULL, sku_code TEXT UNIQUE,"
+                    " sku_title TEXT, price NUMERIC(10,2) NOT NULL, stock INTEGER DEFAULT 0,"
+                    " spec_attributes JSONB DEFAULT '{}'::jsonb, image_url TEXT,"
+                    " cost_price NUMERIC(10,2) NOT NULL DEFAULT 0,"
+                    " created_at TIMESTAMP NOT NULL DEFAULT NOW())"
+                ))
+                await conn.execute(text("TRUNCATE merchant_skus, merchant_spus"))
+                for code, title in (("SPU-CHEAP", "极光 便宜背包"), ("SPU-PRICY", "极光 昂贵背包")):
+                    await conn.execute(text(
+                        "INSERT INTO merchant_spus (id, spu_code, title) VALUES "
+                        "(CAST(:sid AS uuid), :c, :t)"
+                    ).bindparams(sid=str(__import__("uuid").uuid5(__import__("uuid").NAMESPACE_URL, code)), c=code, t=title))
+                await conn.execute(text(
+                    "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, price, stock) VALUES "
+                    "(CAST(:i1 AS uuid), CAST(:s1 AS uuid), 'SPU-CHEAP-SKU-0', '基础款', 199.0, 10), "
+                    "(CAST(:i2 AS uuid), CAST(:s2 AS uuid), 'SPU-PRICY-SKU-0', '旗舰款', 1899.0, 3)"
+                ).bindparams(
+                    i1=str(__import__("uuid").uuid5(__import__("uuid").NAMESPACE_URL, "cheap-sku")),
+                    s1=str(__import__("uuid").uuid5(__import__("uuid").NAMESPACE_URL, "SPU-CHEAP")),
+                    i2=str(__import__("uuid").uuid5(__import__("uuid").NAMESPACE_URL, "pricy-sku")),
+                    s2=str(__import__("uuid").uuid5(__import__("uuid").NAMESPACE_URL, "SPU-PRICY")),
+                ))
+
+        asyncio.run(setup())
+        order_domain._merchant_reader_engine = lambda: merchant_engine
+        try:
+            asc = asyncio.run(MallDomainService.search_products({"query": "背包", "limit": 2}))
+            desc = asyncio.run(MallDomainService.search_products({"query": "背包", "sort": "price_desc", "limit": 2}))
+        finally:
+            order_domain._merchant_reader_engine = original
+            asyncio.run(merchant_engine.dispose())
+        asc_first = (asc.get("products") or [{}])[0].get("price")
+        desc_first = (desc.get("products") or [{}])[0].get("price")
+        assert asc_first == 199.0 and desc_first == 1899.0, (asc_first, desc_first)
+
+
 
 
 # ── ③重复拦截数字指纹:槽位数字不同=不同请求 ─────────────────────────────
