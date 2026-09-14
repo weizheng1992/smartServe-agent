@@ -13,6 +13,7 @@ import json
 import math
 import random
 import re
+import secrets
 import time
 
 from sqlalchemy import text
@@ -171,77 +172,63 @@ class MallDomainService:
     async def get_user_addresses(
         user_id: str | None = None, business_id: str | None = None, thread_id: str | None = None
     ) -> dict:
-        """1. 查询用户收货地址簿。"""
+        """1. 查询用户收货地址簿(单账本:商户侧 merchant_customers.addresses,
+        与商城前端「我的地址」同一存储 —— 双库分裂曾致聊天新增在前端永不可见,
+        2026-09-14 用户实报)。"""
+        from . import order_domain as _order_domain
+
         effective_user_id = user_id
         if not effective_user_id and thread_id:
             ctx = await OrderDomainService.get_thread_session_context(thread_id)
             effective_user_id = effective_user_id or ctx["userId"]
+        if not effective_user_id:
+            return {"total": 0, "userId": "current_user", "addresses": []}
 
         try:
-            # 地址簿是顾客自有数据(2026-09-13 M 实弹):按 user_id 查询,严禁
-            # business_id 过滤 —— 同一顾客在极光租户线程查不到 ecommerce 写入
-            # 的地址(6 条真实地址曾因租户过滤查无)。
-            conditions: list[str] = []
-            params: dict = {}
-            if effective_user_id:
-                conditions.append("user_id = :uid")
-                params["uid"] = effective_user_id
-            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-            async with get_session() as session:
-                rows = (
-                    (
-                        await session.execute(
-                            text(
-                                'SELECT id, business_id AS "businessId", user_id AS "userId", '
-                                'receiver_name AS "receiverName", receiver_phone AS "receiverPhone", '
-                                'province, city, district, detail_address AS "detailAddress", '
-                                'full_address AS "fullAddress", tag, is_default AS "isDefault", '
-                                'created_at AS "createdAt" FROM user_addresses '
-                                f"{where_clause} ORDER BY is_default DESC, created_at DESC LIMIT 10"
-                            ).bindparams(**params)
+            async with _order_domain._merchant_reader_engine().connect() as conn:
+                raw = (
+                    await conn.execute(
+                        text("SELECT addresses FROM merchant_customers WHERE customer_id = :uid").bindparams(
+                            uid=effective_user_id
                         )
                     )
-                    .mappings()
-                    .all()
-                )
-                if rows:
-                    return {
-                        "total": len(rows),
-                        "userId": effective_user_id or "current_user",
-                        "addresses": [
-                            {
-                                "id": str(r["id"]),
-                                "receiverName": r["receiverName"],
-                                "receiverPhone": r["receiverPhone"],
-                                "fullAddress": r["fullAddress"]
-                                or f"{r['province']}{r['city']}{r['district']}{r['detailAddress']}",
-                                "tag": r["tag"] or "home",
-                                "isDefault": bool(r["isDefault"]),
-                            }
-                            for r in rows
-                        ],
-                    }
+                ).scalar()
         except Exception as err:
-            print(f"[MallDomainService.getUserAddresses] Database query error: {err}")
-
-        # 终点诚实空(2026-09-12):旧「张先生/中关村」高保真假地址兜底退役 ——
-        # 查无/库不可达是合法真实态,严禁虚构地址顶替(real-data-only/01)。
-        return {"total": 0, "userId": effective_user_id or "current_user", "addresses": []}
+            print(f"[MallDomain] 地址簿查询失败(诚实空): {err}")
+            raw = None
+        entries = raw if isinstance(raw, list) else []
+        addresses = [
+            {
+                "addressId": e.get("id"),
+                "receiverName": e.get("recipientName"),
+                "receiverPhone": e.get("phone"),
+                "fullAddress": e.get("fullAddress"),
+                "isDefault": bool(e.get("isDefault")),
+            }
+            for e in entries
+            if isinstance(e, dict)
+        ]
+        return {
+            "total": len(addresses),
+            "userId": effective_user_id,
+            "addresses": addresses,
+            "message": f"共 {len(addresses)} 个收货地址。" if addresses else "地址列表为空。",
+        }
 
     @staticmethod
+    @staticmethod
     async def save_user_address(params: dict) -> dict:
-        """保存或新增用户收货地址。"""
-        user_id = params.get("userId")
-        business_id = params.get("businessId")
-        if (not user_id or not business_id) and params.get("threadId"):
-            ctx = await OrderDomainService.get_thread_session_context(params["threadId"])
-            user_id = user_id or ctx["userId"]
-            business_id = business_id or ctx["businessId"]
+        """保存或新增用户收货地址(单账本:商户侧 merchant_customers.addresses,
+        与商城前端同一存储 —— 双库分裂曾致聊天新增在前端永不可见)。"""
+
+        def _mask(phone: str | None) -> str:
+            phone = str(phone or "")
+            return phone[:3] + "****" + phone[-4:] if len(phone) == 11 else phone
 
         # 必填字段防线(2026-09-13 M7 实弹):缺参曾直接 KeyError 炸图熔断
         missing_fields = [
-            key for key in ("province", "city", "district", "detailAddress", "receiverName", "receiverPhone")
+            key
+            for key in ("province", "city", "district", "detailAddress", "receiverName", "receiverPhone")
             if not params.get(key)
         ]
         if missing_fields:
@@ -250,68 +237,80 @@ class MallDomainService:
                 "missingFields": missing_fields,
                 "message": "收货地址信息不完整（缺：" + "、".join(missing_fields) + "），请补充后再保存。",
             }
-        effective_user_id = user_id or "anonymous_user"
-        effective_biz_id = business_id or "ecommerce"
-        full_address = f"{params['province']}{params['city']}{params['district']}{params['detailAddress']}"
+
+        from . import order_domain as _order_domain
+
+        user_id = params.get("userId")
+        if not user_id and params.get("threadId"):
+            ctx = await _order_domain.OrderDomainService.get_thread_session_context(params["threadId"])
+            user_id = user_id or ctx["userId"]
+        if not user_id:
+            return {"success": False, "message": "未能识别您的身份，无法保存地址，请稍后重试。"}
+
+        full_address = (
+            f"{params['province']}{params['city']}{params['district']}{params['detailAddress']}"
+        )
+        entry = {
+            "id": params.get("id") or f"ADDR_{int(time.time() * 1000)}_{secrets.token_hex(2)}",
+            "recipientName": params["receiverName"],
+            "phone": _mask(params["receiverPhone"]),
+            "province": params["province"],
+            "city": params["city"],
+            "district": params["district"],
+            "detailAddress": params["detailAddress"],
+            "fullAddress": full_address,
+            "isDefault": bool(params.get("isDefault")),
+        }
 
         try:
-            async with get_session() as session:
-                if params.get("isDefault"):
-                    await session.execute(
-                        text(
-                            "UPDATE user_addresses SET is_default = false WHERE user_id = :uid AND business_id = :bid"
-                        ).bindparams(uid=effective_user_id, bid=effective_biz_id)
-                    )
-                inserted = (
-                    (
-                        await session.execute(
-                            text(
-                                "INSERT INTO user_addresses ("
-                                "business_id, user_id, receiver_name, receiver_phone, "
-                                "province, city, district, detail_address, full_address, tag, is_default, created_at, updated_at"
-                                ") VALUES (:bid, :uid, :rn, :rp, :prov, :city, :dist, :detail, :full, :tag, :is_def, NOW(), NOW()) "
-                                'RETURNING id, full_address AS "fullAddress", is_default AS "isDefault"'
-                            ).bindparams(
-                                bid=effective_biz_id,
-                                uid=effective_user_id,
-                                rn=params["receiverName"],
-                                rp=params["receiverPhone"],
-                                prov=params["province"],
-                                city=params["city"],
-                                dist=params["district"],
-                                detail=params["detailAddress"],
-                                full=full_address,
-                                tag=params.get("tag") or "home",
-                                is_def=bool(params.get("isDefault")),
-                            )
+            async with _order_domain._merchant_reader_engine().begin() as conn:
+                row = (
+                    await conn.execute(
+                        text("SELECT addresses FROM merchant_customers WHERE customer_id = :uid").bindparams(
+                            uid=user_id
                         )
                     )
-                    .mappings()
-                    .first()
+                ).mappings().first()
+                current = (row.get("addresses") if row else None) or []
+                updated = [dict(a) for a in current if isinstance(a, dict)]
+                # 首条自动设默认;显式默认时清除其它默认(与商城前端同语义)
+                should_default = entry["isDefault"] or not updated
+                if should_default:
+                    updated = [{**a, "isDefault": False} for a in updated]
+                entry["isDefault"] = should_default
+                existing = next((i for i, a in enumerate(updated) if a.get("id") == entry["id"]), -1)
+                if existing >= 0:
+                    updated[existing] = entry
+                else:
+                    updated.append(entry)
+                await conn.execute(
+                    text(
+                        "INSERT INTO merchant_customers (customer_id, name, phone, addresses) VALUES "
+                        "(:uid, :name, :phone, CAST(:a AS jsonb)) ON CONFLICT (customer_id) DO UPDATE "
+                        "SET addresses = EXCLUDED.addresses"
+                    ).bindparams(
+                        uid=user_id, name=entry["recipientName"], phone=entry["phone"],
+                        a=json.dumps(updated, ensure_ascii=False),
+                    )
                 )
-                await session.commit()
-
-                return {
-                    "success": True,
-                    "message": "收货地址保存成功",
-                    "addressId": str(inserted["id"]) if inserted else f"addr_{int(time.time() * 1000)}",
-                    "fullAddress": full_address,
-                    "tag": params.get("tag") or "home",
-                    "isDefault": bool(params.get("isDefault")),
-                }
         except Exception as err:
-            # 写库失败如实失败(2026-09-12):旧兜底假成功 + addr_mock_ 假 ID ——
-            # 用户以为保存成功实际未落库,比假数据更糟(real-data-only/01)。
-            print(f"[MallDomainService.saveUserAddress] Database insert failed: {err}")
+            print(f"[MallDomain] saveUserAddress(merchant ledger) failed: {err}")
             return {
                 "success": False,
                 "message": "收货地址保存失败，请稍后重试或联系人工客服。",
                 "addressId": None,
                 "fullAddress": full_address,
-                "tag": params.get("tag") or "home",
-                "isDefault": bool(params.get("isDefault")),
             }
 
+        return {
+            "success": True,
+            "message": "收货地址保存成功",
+            "addressId": entry["id"],
+            "fullAddress": full_address,
+            "isDefault": entry["isDefault"],
+        }
+
+    @staticmethod
     @staticmethod
     async def query_product_skus(params: dict) -> dict:
         """2. 查询商品多规格 SKU 与物理库存。
@@ -1318,21 +1317,31 @@ class MallDomainService:
 
     @staticmethod
     async def _default_address_row(user_id: str) -> dict | None:
-        """地址簿默认行(is_default 优先,无则最新一条);表不可达返回 None。"""
+        """地址簿默认条目(商户账本 merchant_customers.addresses,is_default
+        优先无则最新一条);账本不可达/无地址返回 None —— checkout 诚实追问。"""
+        from . import order_domain as _order_domain
+
         try:
-            async with get_session() as session:
-                row = (
-                    await session.execute(
-                        text(
-                            "SELECT receiver_name, receiver_phone, full_address FROM user_addresses "
-                            "WHERE user_id = :uid ORDER BY is_default DESC, created_at DESC LIMIT 1"
-                        ).bindparams(uid=user_id)
+            async with _order_domain._merchant_reader_engine().connect() as conn:
+                raw = (
+                    await conn.execute(
+                        text("SELECT addresses FROM merchant_customers WHERE customer_id = :uid").bindparams(
+                            uid=user_id
+                        )
                     )
-                ).mappings().first()
-                return dict(row) if row else None
+                ).scalar()
         except Exception as err:
-            print(f"[MallDomain] 地址簿查询失败,按无地址处理: {err}")
+            print(f"[MallDomain] 地址簿查询失败(按无地址处理): {err}")
             return None
+        entries = raw if isinstance(raw, list) else []
+        if not entries:
+            return None
+        chosen = next((e for e in entries if e.get("isDefault")), entries[0])
+        return {
+            "receiver_name": chosen.get("recipientName"),
+            "receiver_phone": chosen.get("phone"),
+            "full_address": chosen.get("fullAddress"),
+        }
 
     @staticmethod
     async def _resolve_purchasable_sku(conn, *, spu_id: str | None = None, spu_code: str | None = None, sku_code: str | None = None) -> dict | None:

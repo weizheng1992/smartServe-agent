@@ -163,26 +163,43 @@ class TestPhantomAddGuard:
 
 
 class TestAddressBookCustomerOwned:
-    def test_get_addresses_not_filtered_by_business_id(self, pg_factory):
-        """顾客在不同租户会话里管理同一份地址簿:查询按 user_id,不再按
-        business_id 过滤(M 实弹:aurora 线程查 ecommerce 写入的 6 条 → 暂无)。"""
+    def test_address_book_reads_merchant_ledger(self, pg_factory, monkeypatch):
+        """地址簿单账本:聊天读写商户侧 merchant_customers.addresses(与商城
+        前端同一存储)—— 双库分裂曾致聊天新增在前端「我的地址」永不可见。"""
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy.pool import NullPool
+
+        from engine_py.tools_registry import order_domain
         from engine_py.tools_registry.mall_domain import MallDomainService
 
-        async def scenario():
-            engine = pg_factory.kw["bind"]
-            async with engine.begin() as conn:
-                await conn.execute(text("DELETE FROM user_addresses WHERE user_id=:u"), {"u": "CUST-AB"})
-                await conn.execute(text(
-                    "INSERT INTO user_addresses (business_id, user_id, receiver_name, receiver_phone, "
-                    "province, city, district, detail_address, full_address, tag, is_default) VALUES "
-                    "('ecommerce', 'CUST-AB', '张伟', '13800138000', '北京市', '北京市', '海淀区', "
-                    "'中关村南大街1号', '北京市海淀区中关村南大街1号', 'home', true)"
-                ))
-            # 以另一租户(aurora)身份查询同一顾客
-            return await MallDomainService.get_user_addresses("CUST-AB", "aurora", None)
+        engine = pg_factory.kw["bind"]
+        merchant_engine = create_async_engine(url=engine.url.render_as_string(hide_password=False), poolclass=NullPool)
+        original = order_domain._merchant_reader_engine
 
-        result = asyncio.run(scenario())
-        assert result.get("total", 0) >= 1, f"顾客自有地址簿不得按租户过滤: {result}"
+        async def setup():
+            async with merchant_engine.begin() as conn:
+                await conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS merchant_customers ("
+                    " customer_id TEXT PRIMARY KEY, name TEXT, addresses JSONB DEFAULT '[]'::jsonb)"
+                ))
+                await conn.execute(text(
+                    "INSERT INTO merchant_customers (customer_id, addresses) VALUES "
+                    "('CUST-AB', CAST(:a AS jsonb)) "
+                    "ON CONFLICT (customer_id) DO UPDATE SET addresses = EXCLUDED.addresses"
+                ).bindparams(a='[{"id":"addr_x","recipientName":"张伟","phone":"13800138000",'
+                                '"fullAddress":"北京市海淀区中关村南大街1号","isDefault":true}]'))
+
+        asyncio.run(setup())
+        order_domain._merchant_reader_engine = lambda: merchant_engine
+        try:
+            result = asyncio.run(MallDomainService.get_user_addresses("CUST-AB", "aurora", None))
+        finally:
+            order_domain._merchant_reader_engine = original
+            asyncio.run(merchant_engine.dispose())
+
+        addrs = result.get("addresses") or []
+        assert result.get("total", 0) >= 1, f"必须读到商户账本地址: {result}"
+        assert addrs[0].get("fullAddress") == "北京市海淀区中关村南大街1号"
 
     def test_bare_address_list_detected(self):
         """裸「地址列表」必须检出地址簿查询意图(曾落咨询 RAG 答改派政策)。"""

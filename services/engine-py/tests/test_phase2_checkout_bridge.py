@@ -70,6 +70,13 @@ _MERCHANT_DDL = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS merchant_customers (
+      customer_id TEXT PRIMARY KEY,
+      name TEXT,
+      addresses JSONB DEFAULT '[]'::jsonb
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS merchant_order_items (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       order_id TEXT NOT NULL,
@@ -327,16 +334,15 @@ def test_checkout_uses_default_address(pg_factory):
     async def scenario():
         engine, me, orig, embeds = await _setup(pg_factory)
         try:
-            async with engine.begin() as conn:
-                await conn.execute(text("DELETE FROM user_addresses WHERE user_id=:u"), {"u": UID})
-                await conn.execute(
-                    text(
-                        "INSERT INTO user_addresses (business_id, user_id, receiver_name, receiver_phone, "
-                        "province, city, district, detail_address, full_address, tag, is_default) VALUES "
-                        "('ecommerce', :u, '张伟', '13800138000', '北京市', '北京市', '海淀区', "
-                        "'中关村南大街1号', '北京市海淀区中关村南大街1号', 'home', true)"
-                    ).bindparams(u=UID)
-                )
+            async with me.begin() as conn:
+                await conn.execute(text(
+                    "INSERT INTO merchant_customers (customer_id, addresses) VALUES "
+                    "(:u, CAST(:a AS jsonb)) ON CONFLICT (customer_id) DO UPDATE SET addresses = EXCLUDED.addresses"
+                ).bindparams(
+                    u=UID,
+                    a='[{"id":"addr_d","recipientName":"张伟","phone":"13800138000",'
+                      '"fullAddress":"北京市海淀区中关村南大街1号","isDefault":true}]',
+                ))
             _seed_cart([{"skuId": "SPU-P2-BAG-SKU-0", "title": "背包", "price": 829.0, "quantity": 1}])
             result = await MallDomainService.checkout_user_cart({"userId": UID})
             async with me.connect() as conn:
