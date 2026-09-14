@@ -122,6 +122,7 @@ _ADDRESS_CREATE_PAYLOAD_RE = re.compile(
 _ADDRESS_BOOK_LIST_RE = re.compile(
     r"(?:查看|看看|查一下|有哪些)(?:我的)?(?:收货地址|地址簿)"
     r"|我的(?:收货地址|地址簿)(?:有哪些|是什么|列表)?$"
+    r"|^(?:地址列表|收货地址列表|地址簿列表)$"
 )
 _PHONE_RE = re.compile(rf"(?<!\d)({PHONE_SHAPE})(?!\d)")
 _CHINESE_NAME_RE = re.compile(r"([\u4e00-\u9fa5]{2,4})\s*$")

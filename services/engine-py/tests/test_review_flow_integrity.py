@@ -159,6 +159,39 @@ class TestPhantomAddGuard:
         assert "哪一款" in (result.get("output") or ""), "必须诚实反问"
 
 
+# ── ③地址簿是顾客自有数据:跨租户可见 + 裸「地址列表」检出 ─────────────────
+
+
+class TestAddressBookCustomerOwned:
+    def test_get_addresses_not_filtered_by_business_id(self, pg_factory):
+        """顾客在不同租户会话里管理同一份地址簿:查询按 user_id,不再按
+        business_id 过滤(M 实弹:aurora 线程查 ecommerce 写入的 6 条 → 暂无)。"""
+        from engine_py.tools_registry.mall_domain import MallDomainService
+
+        async def scenario():
+            engine = pg_factory.kw["bind"]
+            async with engine.begin() as conn:
+                await conn.execute(text("DELETE FROM user_addresses WHERE user_id=:u"), {"u": "CUST-AB"})
+                await conn.execute(text(
+                    "INSERT INTO user_addresses (business_id, user_id, receiver_name, receiver_phone, "
+                    "province, city, district, detail_address, full_address, tag, is_default) VALUES "
+                    "('ecommerce', 'CUST-AB', '张伟', '13800138000', '北京市', '北京市', '海淀区', "
+                    "'中关村南大街1号', '北京市海淀区中关村南大街1号', 'home', true)"
+                ))
+            # 以另一租户(aurora)身份查询同一顾客
+            return await MallDomainService.get_user_addresses("CUST-AB", "aurora", None)
+
+        result = asyncio.run(scenario())
+        assert result.get("total", 0) >= 1, f"顾客自有地址簿不得按租户过滤: {result}"
+
+    def test_bare_address_list_detected(self):
+        """裸「地址列表」必须检出地址簿查询意图(曾落咨询 RAG 答改派政策)。"""
+        from engine_py.triage.intent_triage_engine import detect_address_manage
+
+        detected = detect_address_manage("地址列表")
+        assert detected is not None and detected["mode"] == "list"
+
+
 # ── ③改单意图对下单/结算复合语境让位 ─────────────────────────────────────
 
 
