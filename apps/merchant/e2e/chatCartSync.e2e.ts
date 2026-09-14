@@ -1,12 +1,17 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * 回归测试:聊天挂件内"把第1件加入购物车"后,商城购物车必须真实收到商品。
+ * 回归测试:聊天挂件内"推荐→把第1件加入购物车"后,商城购物车必须真实收到商品。
  * 背景 bug(2026-09-04):引擎侧 CartManageSkill 旧代码经 self. 访问模块级正则抛
  * AttributeError,fast-track 失败兜底 general_query,finish 节点 LLM 幻觉"已成功
  * 加购"并回填语义缓存;此后相似请求全部命中缓存,回复无 cart_card,商城购物车
  * 始终为空。修复后 fast-track 返回 cart_card,前端 syncCartToLocalStorage 同步落库。
  * 同时钉死次生 bug:SSE 推送与 POST 响应两路同步不得重复累加(quantity 必须为 1)。
+ *
+ * 2026-09-14 诊断更新:欢迎语已改为前端本地渲染(routeGreetingConfig,msg_init_*
+ * 不进引擎),旧版直接发裸序数「把第1件加入购物车」依赖的"欢迎轮候选"不存在,
+ * 引擎诚实反问是正确行为(2.6.13 序数诚实反问同哲学)——测试改为真实用户流
+ * 「先推荐产生候选,再序数加购」,商品名动态断言(不再写死 Nike Pegasus)。
  */
 test.use({ baseURL: 'http://localhost:3005' });
 
@@ -35,7 +40,20 @@ test('聊天加购后商城购物车应收到 1 件商品(非空、不翻倍)', 
   const chatModal = page.locator("div.fixed:has-text('极光潮品 AI 智能助理')");
   await expect(chatModal).toBeVisible();
 
-  // 发送加购指令并等待 POST 响应
+  // 第一轮:真推荐(引擎 ShoppingGuideSkill 写入候选 —— 序数加购的前提)。
+  // 措辞必须选货架确定命中的词元(短袖/冲锋衣等):「跑鞋」类货架无同名商品,
+  // 检索全靠 L4 LLM 同义词改写,概率性诚实空会让本测试抖动(2026-09-14 实弹)
+  const recommendDone = page.waitForResponse(
+    (r) => r.url().includes('/api/store/chat') && r.request().method() === 'POST',
+    { timeout: 90_000 },
+  );
+  await chatModal.locator("input[type='text']").fill('推荐几款短袖');
+  await chatModal.locator("input[type='text']").press('Enter');
+  const recResp = await recommendDone;
+  const recBody = await recResp.json();
+  expect(recBody.success).toBe(true);
+
+  // 第二轮:序数加购并等待 POST 响应
   const postDone = page.waitForResponse((r) => r.url().includes('/api/store/chat') && r.request().method() === 'POST', {
     timeout: 90_000,
   });
@@ -48,20 +66,23 @@ test('聊天加购后商城购物车应收到 1 件商品(非空、不翻倍)', 
   // 🔴 核心断言 1:响应必须携带带 items 的 cart_card(缺卡片 = 商城购物车收不到商品)
   const cartCards = (body.cards || []).filter((c: any) => c.type === 'cart_card');
   expect(cartCards.length, '响应应包含 cart_card').toBeGreaterThan(0);
-  expect((cartCards[0].data?.items || []).length, 'cart_card 应携带 items').toBeGreaterThan(0);
+  const addedItems = cartCards[0].data?.items || [];
+  expect(addedItems.length, 'cart_card 应携带 items').toBeGreaterThan(0);
+  const addedTitle = String(addedItems[0].title || '');
+  expect(addedTitle.length, '加购商品应有标题').toBeGreaterThan(0);
 
   // 给 SSE 一路 + POST 一路的双同步留出完成窗口,再断言本地购物车
   await page.waitForTimeout(3_000);
 
-  // 🔴 核心断言 2:aurora_store_cart 收到商品,且 quantity 恰为 1(两路同步不得累加)
+  // 🔴 核心断言 2:aurora_store_cart 收到的正是聊天轮加购的商品,quantity 恰为 1
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('aurora_store_cart') || '[]'));
   expect(stored.length, '商城购物车应有 1 款商品').toBe(1);
   expect(stored[0].quantity, '加购 1 件不得翻倍').toBe(1);
-  expect(String(stored[0].title)).toContain('Nike Air Zoom Pegasus 41');
+  expect(String(stored[0].title)).toBe(addedTitle);
 
-  // 🔴 核心断言 3:购物车页真实渲染该商品
+  // 🔴 核心断言 3:购物车页真实渲染该商品(标题动态,推荐第一名随货架变化)
   await page.goto('/cart');
   await expect(page.getByRole('heading', { name: /🛒 购物车/ })).toBeVisible();
   await expect(page.getByText('已选 1 件商品')).toBeVisible();
-  await expect(page.getByRole('link', { name: /Nike Air Zoom Pegasus 41/ }).first()).toBeVisible();
+  await expect(page.getByText(addedTitle).first()).toBeVisible();
 });

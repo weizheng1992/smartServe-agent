@@ -472,6 +472,43 @@ class TestPlannerMetricGuideFastTrack:
         assert any("queryProductRanking" in d and "gmv" in d for d in descs)
         assert any("ShoppingGuideSkill" in d for d in descs)
 
+    def test_ordinal_guide_cart_composite_two_stage(self, monkeypatch):
+        """序数形 guide×cart 复合句(无全量词)确定性两段(code-review 2026-09-14
+        补钉 dbde52f 口径:cd32139 全量词门槛已被泛化,序数形是三段编排的原始
+        靶形)—— 导购写候选在前、CartSkill 序数入车在后,零 LLM。"""
+        plan = self._plan(
+            monkeypatch,
+            [
+                {"intent": "shopping_guide", "confidence": 0.9, "type": "primary"},
+                {"intent": "cart_manage", "confidence": 0.85, "type": "secondary"},
+            ],
+            "推荐几款短袖，把第一个加入购物车",
+        )
+        descs = [st["description"] for st in plan["task_plan"]["subtasks"]]
+        assert any("ShoppingGuideSkill" in d for d in descs), "导购半必须偿付(写候选)"
+        assert any("CartSkill" in d for d in descs), "序数加购半必须偿付"
+        guide_idx = next(i for i, d in enumerate(descs) if "ShoppingGuideSkill" in d)
+        cart_idx = next(i for i, d in enumerate(descs) if "CartSkill" in d)
+        assert guide_idx < cart_idx, "有状态 SOP 链:必须先写候选后序数入车"
+        assert not any("queryProductRanking" in d for d in descs), "无指标词不得混入排行"
+
+    def test_ordinal_three_stage_with_checkout_and_metric_not_hijacked(self, monkeypatch):
+        """dbde52f 原始靶形:「查询卖的好的短袖,把第一个加入购物车,然后结算」——
+        句含「卖的好」指标词,指标轨必须让位三段轨(cart 在场);三段齐全且零 LLM。"""
+        plan = self._plan(
+            monkeypatch,
+            [
+                {"intent": "shopping_guide", "confidence": 0.9, "type": "primary"},
+                {"intent": "cart_manage", "confidence": 0.85, "type": "secondary"},
+            ],
+            "查询卖的好的短袖，把第一个加入购物车，然后结算",
+        )
+        descs = [st["description"] for st in plan["task_plan"]["subtasks"]]
+        assert any("ShoppingGuideSkill" in d for d in descs)
+        assert any("CartSkill" in d for d in descs)
+        assert any("checkoutCart" in d for d in descs), "结算段必须确定性追加"
+        assert not any("queryProductRanking" in d for d in descs), "指标轨不得劫持三段轨"
+
     def test_volume_wording_maps_to_volume_metric(self, monkeypatch):
         plan = self._plan(
             monkeypatch,
