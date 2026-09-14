@@ -30,8 +30,11 @@ _GENERAL_ORDER_LIST_RE = re.compile(
 )
 
 # 指标×导购确定性快轨(遗留二期,2026-09-13):指标词族 → rankingMetric 映射
-# (METRIC_REGISTRY 5 键:gmv/volume/gross_profit/margin_rate/stock_risk)
-_METRIC_HINT_RE = re.compile(r"(?:gmv|销售额|销量|毛利|利润|滞销|卖得好|卖的好)", re.IGNORECASE)
+# (METRIC_REGISTRY 5 键:gmv/volume/gross_profit/margin_rate/stock_risk)。
+# ⚠️ 与 triage.PROFIT_RANKING_RE 利润词族是孪生词表(nightly 2026-09-14 钉死):
+# triage 侧补「赚钱/挣钱/赚多少」时本表未同步 ——「最赚钱的商品排行」直通
+# metric_query 后 _ranking_metric_from_text 解析成默认 volume,利润榜变销量榜。
+_METRIC_HINT_RE = re.compile(r"(?:gmv|销售额|销量|毛利|利润|赚钱|挣钱|赚多少|滞销|卖得好|卖的好)", re.IGNORECASE)
 _SHOPPING_HINT_RE = re.compile(r"(?:推荐|买什么|挑一款|选一款|哪款好)", re.IGNORECASE)
 
 
@@ -334,6 +337,28 @@ async def planner_node(state: AgentState) -> dict:
                 await emit_status(
                     job_id,
                     "⚡ 极速介入直达：检测到人工客服与熔断诉求，已物理生成人工转接步骤并推入执行链！",
+                    node="planner",
+                    plan=fast_plan,
+                )
+            return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
+
+        # 📊 单意图 metric_query 确定性快轨(2026-09-14 nightly 巡检):ADR-0003
+        # 规则前置只保证了 triage→planner 段直通,planner→executor 段仍落 LLM
+        # 深规划自由发挥 ——「最赚钱的商品排行」_ranking_metric_from_text 明明
+        # 能解析出 gross_profit,LLM 深规划却自选 volume(利润榜变销量榜,回复
+        # 自称「利润表现优异」实为销量排序)。排行 metric 是纯词表映射,与
+        # address_manage 同理必须零 LLM 确定性执行。
+        if len(intents) == 1 and single_intent == "metric_query":
+            metric = _ranking_metric_from_text(input_text or "")
+            fast_plan = {
+                "goal": "Fetch real product ranking by metric",
+                "subtasks": [_ranking_subtask(metric, "0")],
+                "currentStepIndex": 0,
+            }
+            if job_id:
+                await emit_status(
+                    job_id,
+                    f"⚡ 极速直达：识别到经营排行诉求，确定性执行 {metric} 排行检索！",
                     node="planner",
                     plan=fast_plan,
                 )

@@ -782,3 +782,39 @@ class TestCartSkillBranches:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class TestPlannerMetricSoloFastTrack:
+    """单意图 metric_query 确定性快轨(2026-09-14 nightly 巡检钉)。
+
+    「最赚钱的商品排行」曾落 LLM 深规划自选 volume(利润榜变销量榜,回复自称
+    「利润表现优异」实为销量排序)——排行 metric 是纯词表映射,与 address_manage
+    同理必须零 LLM 确定性执行。"""
+
+    def _plan(self, monkeypatch: pytest.MonkeyPatch, input_text: str) -> dict:
+        from engine_py.graph.nodes import planner as planner_mod
+
+        monkeypatch.setattr(planner_mod, "ShortMemory", _FakeShortMemory)
+
+        def _no_llm(*args, **kwargs):
+            raise AssertionError("单意图排行句必须走确定性快轨,不得消耗 LLM")
+
+        monkeypatch.setattr(planner_mod, "planner_llm", _no_llm)
+        state = {
+            "intents": [{"intent": "metric_query", "confidence": 0.97, "type": "primary"}],
+            "input": input_text,
+            "short_memory": [],
+        }
+        return asyncio.run(planner_mod.planner_node(state))
+
+    def test_zhuanqian_maps_to_gross_profit(self, monkeypatch):
+        plan = self._plan(monkeypatch, "最赚钱的商品排行")
+        descs = [st["description"] for st in plan["task_plan"]["subtasks"]]
+        assert len(descs) == 1
+        assert "queryProductRanking" in descs[0] and "gross_profit" in descs[0]
+
+    def test_margin_rate_and_volume_wording(self, monkeypatch):
+        descs_margin = [st["description"] for st in self._plan(monkeypatch, "毛利率排行")["task_plan"]["subtasks"]]
+        assert "margin_rate" in descs_margin[0]
+        descs_volume = [st["description"] for st in self._plan(monkeypatch, "销量排行")["task_plan"]["subtasks"]]
+        assert "volume" in descs_volume[0]
