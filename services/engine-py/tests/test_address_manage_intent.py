@@ -117,8 +117,17 @@ class TestDetectAddressManage:
         assert detect_address_manage("修改收货地址为上海市浦东新区") is None
 
     def test_list_forms(self):
-        for text in ("看看我的收货地址", "我的地址簿有哪些", "查一下我的地址簿"):
+        for text in ("看看我的收货地址", "我的地址簿有哪些", "查一下我的地址簿", "地址列表"):
             detected = detect_address_manage(text)
+            assert detected is not None and detected["mode"] == "list", text
+
+    def test_bare_list_forms_after_prefix(self, monkeypatch):
+        """「我的地址列表/看看我的地址列表」(2026-09-14 用户实报):省略「收货」
+        的形必须命中,曾落 general_query 直答「地址列表为空」。"""
+        from engine_py.triage.intent_triage_engine import detect_address_manage as det
+
+        for text in ("我的地址列表", "看看我的地址列表", "我的地址列表有哪些"):
+            detected = det(text)
             assert detected is not None and detected["mode"] == "list", text
 
     def test_order_address_lookup_is_not_address_book(self):
