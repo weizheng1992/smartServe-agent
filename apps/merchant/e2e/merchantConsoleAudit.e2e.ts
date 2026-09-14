@@ -77,6 +77,32 @@ test.describe('商户运营台审计 (admin-readiness 04)', () => {
     await page.screenshot({ path: `${SHOT}/06_spi.png`, fullPage: true });
   });
 
+  test('P1 金额回照回归:waiting 退款审批卡金额=商户库真实快照', async ({ page }) => {
+    // 工单 11 验收原句「审批卡金额>0」——P1 修复(gatekeeper 建票回查
+    // merchant_orders.total_amount 落 args.amount,商户不再盲批资金单)
+    // 此前零自动化验证(code-review 2026-09-14 补钉):卡面金额必须等于
+    // 快照值,严禁 ¥0.00。数据驱动:无带快照的 waiting 退款票时诚实 skip。
+    const res = await page.request.get(
+      '/api/admin/approvals?tenantId=aurora&status=waiting&actionType=processRefund',
+    );
+    const body = await res.json();
+    const refundTicket = (body.approvals || []).find(
+      (a: any) => typeof (a.actionPayload || {}).args?.amount === 'number',
+    );
+    test.skip(!refundTicket, '无带金额快照的 waiting 退款工单(先经 /api/chat 实弹造票)');
+    const expectedAmount = `¥${Number(refundTicket.actionPayload.args.amount).toFixed(2)}`;
+
+    await page.goto('/admin');
+    await page.waitForTimeout(1200);
+    await page.getByText('待办审核 (HITL)').first().click();
+    await page.waitForTimeout(1200);
+
+    const pageBody = await page.locator('body').innerText();
+    expect(pageBody).toContain(expectedAmount);
+    expect(pageBody).not.toContain('¥0.00');
+    await page.screenshot({ path: `${SHOT}/09_refund_amount.png`, fullPage: false });
+  });
+
   test('驳回流(UI 点击):waiting 工单驳回后状态翻转 + actor 落库', async ({ page }) => {
     // 驳回当前唯一的 waiting 工单(processRefund,dev 数据,拒绝不动资金)验证
     // 商户面两步驳回流 + 核准人契约落库;human_escalation 型终态是 resolved_by_human,
@@ -99,13 +125,18 @@ test.describe('商户运营台审计 (admin-readiness 04)', () => {
 
     const res = await page.request.get('/api/admin/approvals?tenantId=aurora');
     const body = await res.json();
-    const resolved = (body.approvals || []).some(
-      (a: any) =>
-        ['rejected', 'resolved_by_human'].includes(a.status) &&
-        (a.actionPayload || {}).resolvedBy === 'merchant_operator' &&
-        ((a.actionPayload || {}).rejectionReason || '').includes('商户台审计'),
+    // 按 actionType 分别钉真实语义(code-review 2026-09-14 收紧:旧 OR 断言
+    // ['rejected','resolved_by_human'].includes 会让接管型落 rejected 漏网):
+    // 资金型 processRefund 终态 rejected;人工接管型 human_escalation 终态
+    // resolved_by_human。以「商户台审计」自定义原因定位本次驳回的票。
+    const resolved = (body.approvals || []).find((a: any) =>
+      ((a.actionPayload || {}).rejectionReason || '').includes('商户台审计'),
     );
-    expect(resolved).toBeTruthy();
+    expect(resolved, '按驳回原因定位到本次驳回的工单').toBeTruthy();
+    const expectedStatus =
+      resolved.actionType === 'human_escalation' ? 'resolved_by_human' : 'rejected';
+    expect(resolved.status).toBe(expectedStatus);
+    expect((resolved.actionPayload || {}).resolvedBy).toBe('merchant_operator');
     await page.screenshot({ path: `${SHOT}/07_reject.png`, fullPage: false });
   });
 

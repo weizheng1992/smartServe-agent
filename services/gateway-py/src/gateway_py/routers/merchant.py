@@ -21,6 +21,7 @@ from engine_py.event_bus import get_client as get_redis
 from engine_py.run_agent import AgentJobInput, run_agent
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
@@ -31,6 +32,21 @@ from ..hmac_signer import verify as hmac_verify
 router = APIRouter()
 
 THREAD_CHANNEL = "thread:{thread_id}:message"
+
+
+class MerchantApprovalActionIn(BaseModel):
+    """POST /api/admin/approvals 请求体(server-gateway §2.2:接收客户端输入的
+    主体必须 DTO,此前裸 dict 延续违例,code-review 2026-09-14 收口)。"""
+
+    approvalId: str | None = None
+    threadId: str | None = None
+    action: str | None = None
+    rejectionReason: str | None = None
+    humanReply: str | None = None
+    replyMessage: str | None = None
+    isFinish: bool | None = None
+    actor: str | None = None
+    actorRole: str | None = None
 
 
 def _err_msg(err: BaseException) -> str:
@@ -221,20 +237,20 @@ async def admin_approvals(
 
 
 @router.post("/api/admin/approvals")
-async def admin_approvals_action(body: dict):
+async def admin_approvals_action(body: MerchantApprovalActionIn):
     try:
         # 核准人契约(admin-readiness 01):商户控制台通道 —— 此前直调引擎漏注入
         # actor,落库恒 unknown(工单 04 审计实弹抓获);此路由即商户面,缺省 merchant_operator
-        actor = (body.get("actor") or "").strip() or "merchant_operator"
-        actor_role = body.get("actorRole") or "merchant_operator"
+        actor = (body.actor or "").strip() or "merchant_operator"
+        actor_role = body.actorRole or "merchant_operator"
         result = await ApprovalGatekeeper.process_approval_action(
             {
-                "approvalId": body.get("approvalId"),
-                "threadId": body.get("threadId"),
-                "action": body.get("action"),
-                "rejectionReason": body.get("rejectionReason"),
-                "humanReply": body.get("humanReply") or body.get("replyMessage"),
-                "isFinish": body.get("isFinish"),
+                "approvalId": body.approvalId,
+                "threadId": body.threadId,
+                "action": body.action,
+                "rejectionReason": body.rejectionReason,
+                "humanReply": body.humanReply or body.replyMessage,
+                "isFinish": body.isFinish,
                 "resolvedBy": actor,
                 "resolvedByRole": actor_role,
             }

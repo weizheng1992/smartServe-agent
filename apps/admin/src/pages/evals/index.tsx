@@ -62,10 +62,7 @@ export function EvalsPage() {
     setIsLoadingCases(true);
     setCases([]);
     try {
-      const res = await fetch(`/api/evals/results/${row.id}/cases`, {
-        headers: { 'x-tenant-id': 'all', 'x-role': 'admin' },
-      });
-      const json = await res.json();
+      const json = await evalsApi.getResultCases(row.id);
       if (json.success && Array.isArray(json.data)) setCases(json.data);
     } catch (err) {
       console.warn('Failed to fetch eval cases:', err);

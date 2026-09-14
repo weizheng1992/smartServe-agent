@@ -54,6 +54,24 @@ def _merchant_reader_engine():
     return create_async_engine(url, pool_size=5, max_overflow=0, pool_pre_ping=True)
 
 
+async def merchant_order_snapshot(order_id: str) -> dict | None:
+    """商户镜像库单行快照(共享查询门面,2026-09-14 code-review 消重):
+    output_guard 宣称核验与 gatekeeper 退款金额回照此前各写一份裸 SQL 且
+    跨模块直触 _merchant_reader_engine 私有面 —— 收口到本门面。
+    返回 None=查无此单;命中含 order_id/total_amount/currency。"""
+    engine = _merchant_reader_engine()
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT order_id, total_amount, currency FROM merchant_orders "
+                    "WHERE order_id = :o LIMIT 1"
+                ).bindparams(o=str(order_id))
+            )
+        ).mappings().first()
+    return dict(row) if row else None
+
+
 def _merchant_row_to_order(row) -> dict:
     tracking = row.get("tracking_info") if isinstance(row.get("tracking_info"), dict) else {}
     shipping = row.get("shipping_address") if isinstance(row.get("shipping_address"), dict) else {}

@@ -331,4 +331,7 @@ export const evalsApi = {
   getResults: () => {
     return adminApi.get('/api/evals/results');
   },
+  getResultCases: (runRecordId: string) => {
+    return adminApi.get(`/api/evals/results/${runRecordId}/cases`);
+  },
 };

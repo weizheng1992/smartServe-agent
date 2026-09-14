@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import text
-
 from ...triage.intent_registry import EXPLICIT_ORDER_ID_RE
 
 # 单号形态单一来源:复用 triage 的显式单号正则(ORD- 任意前缀通用,多租户
@@ -98,14 +96,7 @@ async def _order_exists(order_id: str) -> bool:
     from ...tools_registry import order_domain
 
     try:
-        engine = order_domain._merchant_reader_engine()
-        async with engine.connect() as conn:
-            row = (
-                await conn.execute(
-                    text("SELECT 1 FROM merchant_orders WHERE order_id = :o LIMIT 1").bindparams(o=order_id)
-                )
-            ).scalar()
-            return bool(row)
+        return (await order_domain.merchant_order_snapshot(order_id)) is not None
     except Exception as err:
         print(f"[OutputGuard] 订单存在性核验不可达,放行宣称 (orderId={order_id}): {err}")
         return True  # 库不可达时放行(宁可漏拦,不误杀真实订单),但错误必须留痕

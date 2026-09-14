@@ -116,10 +116,11 @@ class MallDomainService:
     # 词元清洗(ADR 检索链 L1):数量前缀逐块剥、「衬衫都」尾缀语气字仅剥
     # 长块(len>2,「成都」两字不动);⚠️ 分隔符连词只收「和/与」,「跟」
     # 严禁入列(高跟鞋/跟妆会被劈开)。
-    # 数量前缀(2026-09-13 块内定位):「推荐两款登山包」块首是「推荐」,
-    # ^ 锚定剥不掉致词元全死落语义召回(渔夫帽顶了登山包)—— 改块内最小
-    # 贪婪定位,剥到量词为止
-    _QUANTITY_PREFIX_RE = re.compile(r"^.*?(?:几[件条双款个]|[两三四五六七八九十]+[件条双款个]|\d+[件条双款个])")
+    # 数量词块内定位(2026-09-13;原名 _QUANTITY_PREFIX_RE 名不副实 —— 已非
+    # ^ 前缀锚定,code-review 2026-09-14 正名):「推荐两款登山包」块首是
+    # 「推荐」,前缀锚定剥不掉致词元全死落语义召回(渔夫帽顶了登山包)——
+    # 改块内最小贪婪定位,剥到量词为止
+    _QUANTITY_LOCATOR_RE = re.compile(r"^.*?(?:几[件条双款个]|[两三四五六七八九十]+[件条双款个]|\d+[件条双款个])")
     _TRAILING_PARTICLE_RE = re.compile(r"(?:都要|都|吧|呢|啊|呀)$")
 
     # 购物车存储(2026-09-08 重构):_cart_storage 降级为进程一级读缓存,真实
@@ -172,19 +173,16 @@ class MallDomainService:
     ) -> dict:
         """1. 查询用户收货地址簿。"""
         effective_user_id = user_id
-        effective_biz_id = business_id or "ecommerce"
-        if (not effective_user_id or effective_biz_id == "ecommerce") and thread_id:
+        if not effective_user_id and thread_id:
             ctx = await OrderDomainService.get_thread_session_context(thread_id)
             effective_user_id = effective_user_id or ctx["userId"]
-            if ctx["businessId"]:
-                effective_biz_id = ctx["businessId"]
 
         try:
+            # 地址簿是顾客自有数据(2026-09-13 M 实弹):按 user_id 查询,严禁
+            # business_id 过滤 —— 同一顾客在极光租户线程查不到 ecommerce 写入
+            # 的地址(6 条真实地址曾因租户过滤查无)。
             conditions: list[str] = []
             params: dict = {}
-            if effective_biz_id and effective_biz_id != "ecommerce":
-                conditions.append("business_id = :bid")
-                params["bid"] = effective_biz_id
             if effective_user_id:
                 conditions.append("user_id = :uid")
                 params["uid"] = effective_user_id
@@ -766,7 +764,7 @@ class MallDomainService:
         chunks = re.split(r"[\s,，、。.!！?？:；;的和与]+", rest)
         cleaned = []
         for chunk in chunks:
-            chunk = MallDomainService._QUANTITY_PREFIX_RE.sub("", chunk.strip()).strip()
+            chunk = MallDomainService._QUANTITY_LOCATOR_RE.sub("", chunk.strip()).strip()
             # 尾缀语气字仅剥长块(len>2):「衬衫都」→「衬衫」;「成都」两字不动
             if len(chunk) > 2:
                 chunk = MallDomainService._TRAILING_PARTICLE_RE.sub("", chunk).strip()

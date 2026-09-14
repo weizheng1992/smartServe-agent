@@ -301,17 +301,9 @@ class ApprovalGatekeeper:
                     # 库不可达/查无此单时诚实标注,严禁落 0 或编造金额
                     if opts.get("toolName") == "processRefund" and args.get("orderId") and not args.get("amount"):
                         try:
-                            from ..tools_registry.order_domain import _merchant_reader_engine
+                            from ..tools_registry.order_domain import merchant_order_snapshot
 
-                            async with _merchant_reader_engine().connect() as mconn:
-                                amount_row = (
-                                    await mconn.execute(
-                                        text(
-                                            "SELECT total_amount, currency FROM merchant_orders "
-                                            "WHERE order_id = :oid LIMIT 1"
-                                        ).bindparams(oid=str(args["orderId"]))
-                                    )
-                                ).mappings().first()
+                            amount_row = await merchant_order_snapshot(str(args["orderId"]))
                             if amount_row is not None:
                                 args = {
                                     **args,
