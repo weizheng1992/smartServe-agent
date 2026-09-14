@@ -123,6 +123,10 @@ class ShoppingGuideSkill(BaseSkill):
     # 与 slot_extractor 的 SHOPPING_GUIDE 规则同源补词(2026-09-07):热门/爆款类
     # 措辞也须被 is_action_query 视作动作形输入,拒绝命中语义回复缓存。
     # 2026-09-12:补入 卖得好/卖的好(与 slot_extractor 同步,见该处注释)。
+    # 上下文指代式对比(2026-09-14):「最贵的和最便宜的对比」—— 无品类词,
+    # 指代上一轮检索
+    _COMPARE_RE = re.compile(r"(?:对比|不同|差别|区别|比一比)")
+
     _FALLBACK_RE = re.compile(
         r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好|跑步鞋|卫衣|夹克|热门|爆款|热销|热卖|畅销|上新|新品|卖得好|卖的好"
         r"|最便宜|便宜点|最贵|性价比|哪个好|怎么选|有什么区别|买哪种|该用什么|需要准备什么"
@@ -213,6 +217,59 @@ class ShoppingGuideSkill(BaseSkill):
         )
         products = search_res.get("products") or []
         candidate_product_ids = [p["id"] for p in products]
+
+        # 上下文指代式对比(2026-09-14 用户实报):「最贵的 背包」→「最贵的和
+        # 最便宜的对比」—— 对比句无品类词(极值词剥除+指代上一轮),检索必空。
+        # 此处用上一轮检索词(lastSearchQuery)重提品类词,全量检索后取最贵 +
+        # 最便宜两档对比展示;无上下文时保持诚实空。
+        if not products and self._COMPARE_RE.search(user_input):
+            last_query = (existing_guide.get("lastSearchQuery") or "").strip()
+            ctx_terms = [
+                t for t in MallDomainService._extract_query_terms(last_query)
+                if t not in ("对比", "不同", "差别", "区别")
+            ][:3]
+            if ctx_terms:
+                # 走 search_products 完整链(词元展开/商户账本/降级链同源)
+                ctx_query = " ".join(ctx_terms)
+                full_res = await MallDomainService.search_products(
+                    {"query": ctx_query, "limit": 50, "threadId": context.get("threadId"),
+                     "businessId": context.get("tenantId")}
+                )
+                priced = sorted(
+                    (p for p in (full_res.get("products") or []) if p.get("price") is not None),
+                    key=lambda p: float(p["price"]),
+                )
+                if len(priced) >= 2:
+                    lo, hi = priced[0], priced[-1]
+                    diff = float(hi["price"]) - float(lo["price"])
+
+                    def _line(tag: str, item: dict) -> str:
+                        return (
+                            f"{tag}：【{item['name']}】 ¥{item['price']} (现货 {item.get('stock')} 件)\n"
+                            f"   💡 {item.get('description') or ''}"
+                        )
+
+                    output = (
+                        f"为您对比{('「' + ctx_terms[0] + '」') if ctx_terms else ''}最便宜与最贵的两款：\n\n"
+                        f"{_line('💰 最便宜', lo)}\n\n"
+                        f"{_line('💎 最贵', hi)}\n\n"
+                        f"💰 价差：¥{diff:.0f}。{'价差主要来自容量/材质/配置档位，按用途选择即可' if diff > 0 else ''}"
+                    )
+                    return {
+                        "success": True,
+                        "skillId": self.metadata["id"],
+                        "output": output,
+                        "nextAction": "finish",
+                        "extra": {
+                            "guideContext": {
+                                "candidateProductIds": [lo["id"], hi["id"]],
+                                "candidateProducts": [lo, hi],
+                                "lastSearchQuery": last_query,
+                                "extractedPreferences": extracted_prefs,
+                                "clarificationRound": clarification_round,
+                            }
+                        },
+                    }
 
         if not products:
             # 品类盘点引导(2026-09-12):诚实空不冷场 —— 告诉用户店里实际有什么,

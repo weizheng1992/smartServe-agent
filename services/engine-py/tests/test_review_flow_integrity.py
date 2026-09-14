@@ -320,6 +320,56 @@ class TestDuplicateDigitFingerprint:
 # ── 第四轮:守卫语境/否定推荐/JSON 泄漏 ──────────────────────────────────
 
 
+
+
+# ── 第五轮:上下文指代式对比 ─────────────────────────────────────────────
+
+
+class TestContextualComparison:
+    def test_pronoun_comparison_uses_context_category(self, monkeypatch):
+        """「最贵的 背包」→「最贵的和最便宜的对比」:对比句无品类词,指代
+        上一轮检索(背包)—— 导购必须用上下文品类词重新检索,取最贵+最便宜
+        对比展示,严禁诚实空。"""
+        from engine_py.skills.guide_skills import ShoppingGuideSkill
+        from engine_py.tools_registry.mall_domain import MallDomainService
+
+        calls: list[dict] = []
+
+        async def _fake_search(params: dict) -> dict:
+            calls.append(params)
+            if params.get("query") in ("最贵的 背包", "最贵的和最便宜的对比，有什么不同"):
+                return {"total": 0, "products": []}
+            # 品类全量检索:两档背包
+            return {
+                "total": 2,
+                "products": [
+                    {"id": "SPU-B-1", "name": "极光 高山徒步轻量化背包 38L", "price": 829.0, "stock": 72},
+                    {"id": "SPU-B-2", "name": "极光 城市通勤双肩包 26L", "price": 499.0, "stock": 190},
+                ],
+            }
+
+        monkeypatch.setattr(MallDomainService, "search_products", staticmethod(_fake_search))
+        ctx = {
+            "threadId": "cmp_t", "tenantId": "ecommerce", "userId": "CUST-8801",
+            "input": "最贵的和最便宜的对比，有什么不同",
+            "extra": {
+                "guideContext": {
+                    "candidateProductIds": ["SPU-B-1"],
+                    "candidateProducts": [{"id": "SPU-B-1", "name": "极光 高山徒步轻量化背包 38L", "price": 829.0}],
+                    "lastSearchQuery": "最贵的 背包",
+                }
+            },
+        }
+        result = asyncio.run(ShoppingGuideSkill().execute(ctx))
+        out = result.get("output") or ""
+        assert calls, "上下文对比必须重新检索品类"
+        assert any(c.get("query") == "背包" for c in calls), f"必须用上下文品类词检索: {[c.get('query') for c in calls]}"
+        assert "829" in out and "499" in out, "对比必须含最贵与最便宜两档"
+        assert "暂未找到" not in out, "有上下文品类时严禁诚实空"
+
+
+
+
 class TestGuardContextAndLeaks:
     def test_order_query_mentioning_id_not_sanitized(self):
         """N3 实报:查不存在订单的诚实回复被守卫误伤(替换标记泄漏给用户)
