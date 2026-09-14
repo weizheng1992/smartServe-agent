@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router';
 import type { ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button } from 'ui';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
+import { addStoreCartItem } from '../lib/storeCart';
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -70,19 +71,9 @@ export default function ProductDetailPage() {
     setIsAddingToCart(true);
 
     try {
-      const existingCart = JSON.parse(localStorage.getItem('aurora_store_cart') || '[]');
-      const idx = existingCart.findIndex((it: any) => it.sku.skuCode === selectedSku.skuCode);
-      if (idx >= 0) {
-        existingCart[idx].quantity += buyQuantity;
-      } else {
-        existingCart.push({
-          product,
-          sku: selectedSku,
-          quantity: buyQuantity,
-          selected: true,
-        });
-      }
-      localStorage.setItem('aurora_store_cart', JSON.stringify(existingCart));
+      // 形状单一所有者(2026-09-14 NaN 事故):曾在此写嵌套 {product, sku},
+      // CartPage 按扁平契约直读 → ¥NaN 且 skuCode/title 全丢
+      addStoreCartItem(product, selectedSku, buyQuantity);
 
       setCartSuccessMessage(`已成功加入购物车！规格：${selectedSku.skuTitle}`);
       setTimeout(() => setCartSuccessMessage(null), 3000);

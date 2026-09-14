@@ -3,6 +3,7 @@ import { useLocation } from 'react-router';
 import type { OrderCardData, RichCardBlock } from 'types';
 import { Button, Input, Loader2, Paperclip, RichCardRenderer, X } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
+import { readStoreCart, writeStoreCart } from '../../lib/storeCart';
 import { type RouteGreetingContext, getGreetingForRoute } from './routeGreetingConfig';
 
 interface ChatMessage {
@@ -31,14 +32,12 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
   if (!cartCard || !('items' in cartCard.data)) return;
 
   try {
-    const rawStored = localStorage.getItem('aurora_store_cart');
-    const existingCart: any[] = rawStored ? JSON.parse(rawStored) : [];
+    // 经单一所有者读写(2026-09-14 NaN 事故):读取侧归一历史嵌套条目
+    const existingCart: any[] = readStoreCart();
     const actionType = cartCard.data.actionType;
 
     if (actionType === 'cleared') {
-      localStorage.setItem('aurora_store_cart', JSON.stringify([]));
-      window.dispatchEvent(new Event('cart_updated'));
-      window.dispatchEvent(new Event('storage'));
+      writeStoreCart([]);
       return;
     }
 
@@ -81,22 +80,26 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
           stock: 99,
           specAttributes: {},
           selected: true,
-          sku: {
-            skuCode: skuCode,
-            skuTitle: item.specSummary || item.skuTitle || '官方精选规格',
-            price: Number(item.price || 899.0),
-          },
-          product: {
-            id: item.spuId || 'SPU-AURORA-001',
-            title: item.title,
-          },
         });
       }
     }
 
-    localStorage.setItem('aurora_store_cart', JSON.stringify(existingCart));
-    window.dispatchEvent(new Event('cart_updated'));
-    window.dispatchEvent(new Event('storage'));
+    // 快照对账(2026-09-14):cart_card items 是引擎车的全量快照 —— 本地有而
+    // 快照没有的条目即聊天侧已删除,不剔除则商城页删除永不生效
+    if (Array.isArray(cartCard.data.items)) {
+      const snapshotIds = new Set(
+        (cartCard.data.items as any[])
+          .map((it) => it.skuCode || it.skuId || it.id)
+          .filter((id): id is string => Boolean(id)),
+      );
+      const reconciled = existingCart.filter(
+        (it: any) => snapshotIds.has(it.skuCode || it.sku?.skuCode || it.id),
+      );
+      existingCart.length = 0;
+      existingCart.push(...reconciled);
+    }
+
+    writeStoreCart(existingCart as any);
   } catch (err) {
     console.warn('[FloatingChatWidget] Failed to sync cart to localStorage:', err);
   }
@@ -617,6 +620,14 @@ export function FloatingChatWidget({
           userId: user.id,
           businessId: 'aurora',
           imageUrls: imagesToSend.length > 0 ? imagesToSend : undefined,
+          // 商城车随消息上行(2026-09-14 空车谎报收口):引擎车空时水合,
+          // 否则客服对商城页加购的商品永远「看不到车」
+          storeCart: readStoreCart().map((it) => ({
+            skuCode: it.skuCode,
+            title: it.title,
+            price: it.price,
+            quantity: it.quantity,
+          })),
           routeContext: {
             pathname,
             ...contextOverride,

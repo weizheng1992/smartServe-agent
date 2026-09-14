@@ -91,6 +91,8 @@ class DispatchChatIn(BaseModel):
     businessId: str | None = None
     imageUrls: list[str] | None = None
     sync: bool | None = None
+    # 商户门户商城车条目(2026-09-14 空车谎报收口):可选透传,引擎空车时水合
+    storeCart: list[dict] | None = None
 
 
 def _generate_thread_id() -> str:
@@ -128,6 +130,7 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
         businessId=effective_business_id,
         message=effective_message,
         imageUrls=body.imageUrls or [],
+        storeCart=body.storeCart or [],
     )
     task = asyncio.create_task(run_agent(job))
 

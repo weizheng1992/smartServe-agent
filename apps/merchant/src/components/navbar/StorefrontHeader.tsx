@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router';
 import { useLocation } from 'react-router';
 import { useCurrentUser } from '../../context/UserContext';
+import { readStoreCart } from '../../lib/storeCart';
 
 export function StorefrontHeader({
   cartCount = 0,
@@ -25,13 +26,8 @@ export function StorefrontHeader({
 
   React.useEffect(() => {
     const updateCount = () => {
-      try {
-        const stored = JSON.parse(localStorage.getItem('aurora_store_cart') || '[]');
-        const total = stored.reduce((sum: number, it: any) => sum + (it.quantity || 1), 0);
-        setSyncedCartCount(total);
-      } catch {
-        // ignore
-      }
+      // 经单一所有者归一读取(2026-09-14 NaN 事故),兼容历史嵌套形状条目
+      setSyncedCartCount(readStoreCart().reduce((sum, it) => sum + it.quantity, 0));
     };
     updateCount();
     window.addEventListener('cart_updated', updateCount);

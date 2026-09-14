@@ -5,6 +5,7 @@ import { AddressModal, type CustomerAddress } from '../components/address/Addres
 import type { CartItem } from '../components/cart/CartDrawer';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { useCurrentUser } from '../context/UserContext';
+import { readStoreCart, writeStoreCart } from '../lib/storeCart';
 
 export default function CartPage() {
   const navigate = useNavigate();
@@ -21,14 +22,9 @@ export default function CartPage() {
 
   // 加载购物车和地址数据
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('aurora_store_cart');
-      if (stored) {
-        setCart(JSON.parse(stored));
-      }
-    } catch {
-      // ignore
-    }
+    // 经单一所有者归一读取(2026-09-14 NaN 事故):历史嵌套 {product, sku} 条目
+    // 在读取侧提平自愈,已中毒的本地存档无需清缓存
+    setCart(readStoreCart());
 
     const fetchAddresses = async () => {
       try {
@@ -48,7 +44,7 @@ export default function CartPage() {
 
   const saveCart = (newCart: CartItem[]) => {
     setCart(newCart);
-    localStorage.setItem('aurora_store_cart', JSON.stringify(newCart));
+    writeStoreCart(newCart);
   };
 
   const handleUpdateQuantity = (skuCode: string, delta: number) => {

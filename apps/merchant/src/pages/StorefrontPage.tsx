@@ -4,6 +4,7 @@ import type { ThirdPartyOrder, ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from 'ui';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { useCurrentUser } from '../context/UserContext';
+import { addStoreCartItem, readStoreCart } from '../lib/storeCart';
 
 /** 品类切换的「全部」哨兵:tab 清单首项与过滤判断共用同一常量 */
 const ALL_CATEGORY = '全部';
@@ -43,9 +44,8 @@ export default function StorefrontPage() {
   // 统计角标数据
   const fetchCounts = async (targetUserId = user.id) => {
     try {
-      // 购物车数量
-      const storedCart = JSON.parse(localStorage.getItem('aurora_store_cart') || '[]');
-      const totalCart = storedCart.reduce((sum: number, it: any) => sum + (it.quantity || 1), 0);
+      // 购物车数量(经单一所有者归一读取,兼容历史嵌套形状)
+      const totalCart = readStoreCart().reduce((sum, it) => sum + it.quantity, 0);
       setCartCount(totalCart);
 
       // 订单与地址数量
@@ -109,19 +109,9 @@ export default function StorefrontPage() {
 
   const handleAddToCart = () => {
     if (!buyingProduct || !selectedSku) return;
-    const existingCart = JSON.parse(localStorage.getItem('aurora_store_cart') || '[]');
-    const idx = existingCart.findIndex((it: any) => it.sku.skuCode === selectedSku.skuCode);
-    if (idx >= 0) {
-      existingCart[idx].quantity += buyQuantity;
-    } else {
-      existingCart.push({
-        product: buyingProduct,
-        sku: selectedSku,
-        quantity: buyQuantity,
-        selected: true,
-      });
-    }
-    localStorage.setItem('aurora_store_cart', JSON.stringify(existingCart));
+    // 形状单一所有者(2026-09-14 NaN 事故):曾在此写嵌套 {product, sku},
+    // CartPage 按扁平契约直读 → ¥NaN 且 skuCode/title 全丢
+    addStoreCartItem(buyingProduct, selectedSku, buyQuantity);
     fetchCounts();
     setCartSuccessNotice(`已将「${selectedSku.skuTitle}」加入购物车！`);
     setTimeout(() => setCartSuccessNotice(null), 3000);

@@ -436,6 +436,9 @@ async def store_chat(body: dict):
                 businessId=business_id,
                 message=effective_message,
                 imageUrls=image_urls,
+                # 商户门户商城车(2026-09-14 空车谎报收口):引擎空车时水合,
+                # 见 MallDomainService.hydrate_cart_from_storefront
+                storeCart=[it for it in (body.get("storeCart") or []) if isinstance(it, dict)],
             )
         )
         output = final_state.get("output") or final_state.get("result") or "极光潮品智能客服已为您处理完毕。"
