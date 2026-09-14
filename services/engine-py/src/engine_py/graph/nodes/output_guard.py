@@ -72,7 +72,12 @@ async def sanitize_order_claims(output: str, task_plan: dict | None) -> str:
     - 宣称 id 全部能在本轮真实结果中找到 → 原样返回;
     - 存在无凭据宣称 → 剥离宣称句并追加诚实说明(幻觉不进历史)。
     """
-    if output and _CLAIMED_ORDER_ID_RE.search(output):
+    # 语境门槛(N3 实报):查单语境(「查无此单」类回复)提及单号是正常叙事,
+    # 严禁守卫改写 —— 只拦「下单/结算成功」宣称
+    success_claim_present = bool(
+        re.search(r"(?:下单成功|结算成功|成功下单|成功完成结算|已完成下单|下单结算成功|已成功结算)", output or "")
+    )
+    if output and success_claim_present and _CLAIMED_ORDER_ID_RE.search(output):
         claimed = set(_CLAIMED_ORDER_ID_RE.findall(output))
         real = _real_order_ids(task_plan)
         unbacked = {order_id for order_id in claimed - real if not await _order_exists(order_id)}
@@ -88,6 +93,10 @@ async def sanitize_order_claims(output: str, task_plan: dict | None) -> str:
         output = _CART_CLAIM_SENTENCE_RE.sub("", output).rstrip()
         if _HONEST_CART_NOTICE not in output:
             output += ("\n\n" if output else "") + _HONEST_CART_NOTICE
+        changed = True
+    # 工具 JSON 泄漏剥离(N12 实报):finish 曾把工具回执 JSON 原样吐给用户
+    if output and re.search(r"执行详情：?\s*\[", output):
+        output = re.sub(r"执行详情：?\s*\[.*", "", output, flags=re.DOTALL).rstrip()
     return output
 
 

@@ -130,10 +130,15 @@ class ShoppingGuideSkill(BaseSkill):
         re.IGNORECASE,
     )
 
+    # 否定购买意向(2026-09-14 N2 实报):「我不想买了/别推荐」严禁再搜索推荐
+    _NEGATIVE_INTENT_RE = re.compile(r"(?:不想买|别.{0,2}推荐|不要推荐|不再推荐|停止推荐)")
+
     def can_handle(self, context: dict) -> bool:
         if super().can_handle(context):
             return True
         user_input = (context.get("input") or "").lower()
+        if self._NEGATIVE_INTENT_RE.search(user_input):
+            return False
         return bool(self._FALLBACK_RE.search(user_input))
 
     async def execute(self, context: dict) -> dict:

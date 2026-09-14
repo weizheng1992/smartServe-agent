@@ -239,9 +239,10 @@ class TestPriceSuperlativeAndScenario:
 
     def test_search_supports_price_desc(self, pg_factory, monkeypatch):
         """「最贵的X」:检索支持 price_desc 排序(首条即最贵)。"""
-        from engine_py.tools_registry import order_domain
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy.pool import NullPool
+
+        from engine_py.tools_registry import order_domain
 
         engine = pg_factory.kw["bind"]
         merchant_engine = create_async_engine(url=engine.url.render_as_string(hide_password=False), poolclass=NullPool)
@@ -312,6 +313,44 @@ class TestDuplicateDigitFingerprint:
     def test_same_digits_same_fingerprint(self):
         from engine_py.triage.intent_triage_engine import _digit_fingerprint as _df
         assert _df("退货政策是什么") == _df("退货策略是什么") == []
+
+
+
+
+# ── 第四轮:守卫语境/否定推荐/JSON 泄漏 ──────────────────────────────────
+
+
+class TestGuardContextAndLeaks:
+    def test_order_query_mentioning_id_not_sanitized(self):
+        """N3 实报:查不存在订单的诚实回复被守卫误伤(替换标记泄漏给用户)
+        —— 守卫只应拦「下单/结算成功」类宣称,不得碰查单语境。"""
+        from engine_py.graph.nodes.output_guard import sanitize_order_claims
+
+        out = (
+            "关于您查询的订单 AURORA-ORD-2026-9999，系统查询结果显示该订单不属于您名下，"
+            "或不存在于系统中。建议您核对一下订单号是否输入正确。"
+        )
+        assert asyncio.run(sanitize_order_claims(out, None)) == out, "查单语境严禁被守卫改写"
+
+    def test_raw_tool_json_dump_stripped(self):
+        """N12 实报:finish 把工具 JSON 原样吐给用户 —— 必须剥离。"""
+        from engine_py.graph.nodes.output_guard import sanitize_order_claims
+
+        out = (
+            "您好！您的请求已由 官方综合商城 客服系统处理。执行详情："
+            '[{"toolExecuted": "listUserOrders", "output": {"orders": [1,2]}}]'
+        )
+        cleaned = asyncio.run(sanitize_order_claims(out, None))
+        assert "toolExecuted" not in cleaned and "执行详情：[" not in cleaned
+
+    def test_negative_purchase_intent_not_guided(self, monkeypatch):
+        """N2 实报:「我不想买了，别给我推荐任何东西」仍被导购快轨搜索推荐
+        —— 否定意向必须让位,不得强行推荐。"""
+        from engine_py.skills.guide_skills import ShoppingGuideSkill
+
+        skill = ShoppingGuideSkill()
+        ctx = {"input": "我不想买了，别给我推荐任何东西"}
+        assert skill.can_handle(ctx) is False, "否定意向不得进导购推荐"
 
 
 # ── ③改单意图对下单/结算复合语境让位 ─────────────────────────────────────
