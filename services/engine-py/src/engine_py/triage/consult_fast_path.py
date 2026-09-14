@@ -84,7 +84,7 @@ _CONSULT_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 # 短语裸话题(≤12 字且无疑问词也算):「退货政策」「尺码表」类省略式提问
-_CONSULT_BARE_TOPIC_RE = re.compile(r"(?:政策|规定|流程|尺码|运费|发票|保修|保养|退换)")
+_CONSULT_BARE_TOPIC_RE = re.compile(r"(?:政策|策略|规定|规则|流程|手续|尺码|运费|发票|保修|保养|退换)")
 
 # 冲突标记(intent-arbitration 07,2026-09-10):纯措辞侧的咨询形判定,零调用。
 # 与 is_consult_query 的分工:后者是快轨闸门(命中即直答);本标记只用于

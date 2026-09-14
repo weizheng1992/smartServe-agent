@@ -283,3 +283,12 @@ class TestTriageWiring:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_bare_topic_strategy_forms_are_consult():
+    """「退货策略/退款策略」与「退货政策」同义 —— 裸话题表必须含「策略」
+    (2026-09-13 用户实报:「退货策略」被退款缺槽反问劫持,一字之差)。"""
+    from engine_py.triage.consult_fast_path import is_consult_query
+
+    for text in ("退货策略", "退款策略", "退换策略", "保修策略", "退货政策"):
+        assert is_consult_query(text), text

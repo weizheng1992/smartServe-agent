@@ -1253,6 +1253,62 @@ class MallDomainService:
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
         return bool(await MallDomainService._load_cart(cart_key))
 
+    @staticmethod
+    async def hydrate_cart_from_storefront(params: dict) -> bool:
+        """商城门户车 → 引擎车幂等合并(2026-09-14 空车谎报收口)。
+
+        症状:商城 UI 加购只写浏览器 localStorage,引擎车在 Redis,两存储互不
+        相通 —— 用户说「删除/结算/查看购物车」时引擎只见空车,谎报「购物车
+        还是空的」。每封聊天请求携带商城车条目(storeCart),本方法把引擎车
+        没有的条目并进去:引擎车是会话内权威车,聊天侧删除经 cart_card 快照
+        回同步商城车,商城侧重加经下一封消息水合回来 —— 双向最终一致。
+
+        契约:skuCode 已在引擎车(聊天侧同款)→ 跳过,严禁覆盖聊天侧数量;
+        载荷空/全部无效 → False;垃圾条目逐条容错,绝不抛出 —— 水合失败只
+        降级为「引擎车维持原状」,聊天主链路照常。无价条目不入车(镜像
+        add_to_cart 的无价拒绝红线,严禁以 0/兜底价污染车总额)。
+        """
+        try:
+            items = params.get("items") or []
+            valid = [
+                it
+                for it in items
+                if isinstance(it, dict)
+                and isinstance(it.get("skuCode"), str)
+                and it["skuCode"]
+                and isinstance(it.get("price"), (int, float))
+            ]
+            if not valid:
+                return False
+            cart_params = {"userId": params.get("userId"), "threadId": params.get("threadId")}
+            cart_key = cart_params.get("userId") or cart_params.get("threadId") or "default_user"
+            existing_skus = {i.get("skuId") for i in ((await MallDomainService._load_cart(cart_key)) or [])}
+            added = False
+            for it in valid:
+                if it["skuCode"] in existing_skus:
+                    continue
+                try:
+                    quantity = max(1, int(it.get("quantity") or 1))
+                except (TypeError, ValueError):
+                    quantity = 1
+                price = it.get("price")
+                await MallDomainService.add_to_cart(
+                    {
+                        "skuId": it["skuCode"],
+                        "quantity": quantity,
+                        "title": it.get("title") or "精选商品",
+                        "price": float(price) if isinstance(price, (int, float)) else None,
+                        "spec": it.get("specAttributes"),
+                        "userId": cart_params.get("userId"),
+                        "threadId": cart_params.get("threadId"),
+                    }
+                )
+                added = True
+            return added
+        except Exception as err:
+            print(f"[MallDomain] 商城车水合失败,引擎车维持原状: {err}")
+            return False
+
     # ── 真·聊天下单与订单→购物车桥接(遗留二期,2026-09-13)────────────────
     # 结算与商城页 create_order_from_cart 同一真账本语义:FOR UPDATE 锁库存、
     # 校验并扣减、PAID、cost_at_purchase 快照、all-or-nothing(任一行失败整单

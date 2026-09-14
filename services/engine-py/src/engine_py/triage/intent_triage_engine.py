@@ -484,12 +484,26 @@ class IntentTriageEngine:
         disambig: dict,
         candidates: list[dict] | None = None,
     ) -> dict:
-        """消歧无候选/多候选两态的 bypass 收口(Step 1.6 与意图浮现点共用,2026-09-09)。"""
+        """消歧无候选/都不像/多候选三态的 bypass 收口(Step 1.6 与意图浮现点共用,
+        2026-09-09;no_match 出口 2026-09-14 坏例探测补 —— 无关图逼选是体验伤,
+        见 product_disambiguator.CONFIDENCE_NO_MATCH 注释)。"""
         if not disambig["candidates"]:
             return await IntentTriageEngine.handle_immediate_bypass(
                 state,
                 "image_product_no_orders",
                 "未能找到您可用的订单信息。请提供订单编号,或输入「转人工」联系人工客服为您处理。",
+                [{"intent": intent_type, "confidence": confidence}],
+                "vision_disambig",
+                0.9,
+                damage_assessment,
+                candidates=candidates,
+            )
+        if disambig.get("status") == "no_match":
+            return await IntentTriageEngine.handle_immediate_bypass(
+                state,
+                "image_product_no_match",
+                "未在您近期的订单中找到与图片相符的商品。麻烦告诉我具体是哪件商品、出了什么问题,"
+                "或直接提供订单编号,我来为您处理。",
                 [{"intent": intent_type, "confidence": confidence}],
                 "vision_disambig",
                 0.9,

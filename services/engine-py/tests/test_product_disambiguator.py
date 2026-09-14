@@ -103,6 +103,22 @@ class TestDisambiguateProduct:
         assert result["status"] == "ambiguous"
         assert len(result["candidates"]) == 3
 
+    def test_no_match_when_confidence_below_floor(self, monkeypatch):
+        """「都不像」出口(2026-09-14 坏例探测 S01/S10 实证钉死):模型判定图片与
+        所有候选无关(置信落底线以下)→ no_match,不得 ambiguous 逼选。"""
+        _wire_candidates(monkeypatch, _candidates_fixture())
+        model = _FakeModel(_match("ORD-1001", "Nike Air 红色运动鞋", 0.1))
+        result = asyncio.run(disambiguate_product(_VISION, "CUST-1", "aurora", model=model))
+        assert result["status"] == "no_match"
+        assert len(result["candidates"]) == 3
+
+    def test_floor_boundary_confidence_still_ambiguous(self, monkeypatch):
+        """边界钉死:恰在底线(0.2)不算「都不像」—— 有一点像就交卡片让人裁。"""
+        _wire_candidates(monkeypatch, _candidates_fixture())
+        model = _FakeModel(_match("ORD-1002", "玻璃茶具套装", 0.2))
+        result = asyncio.run(disambiguate_product(_VISION, "CUST-1", "aurora", model=model))
+        assert result["status"] == "ambiguous"
+
     def test_hallucinated_order_id_rejected(self, monkeypatch):
         # 防幻觉:模型编造候选之外的订单号,即便高置信也必须降级 ambiguous
         _wire_candidates(monkeypatch, _candidates_fixture())

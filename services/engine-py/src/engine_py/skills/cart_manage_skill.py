@@ -264,6 +264,12 @@ class CartManageSkill(BaseSkill):
                     "success": True,
                     "skillId": self.metadata["id"],
                     "output": "已成功清空购物车中的所有商品。如需重新选购，请随时告诉我！🛒",
+                    "cards": [
+                        {
+                            "type": "cart_card",
+                            "data": {"actionType": "cleared", "title": "购物车已清空", "items": [], "currency": "CNY"},
+                        }
+                    ],
                     "nextAction": "finish",
                     "extra": {"cartContext": {"items": [], "totalAmount": 0}, "guideContext": guide_context},
                 }
@@ -299,6 +305,29 @@ class CartManageSkill(BaseSkill):
                     {"skuId": target_item["skuId"], "quantity": 0, "userId": context.get("userId"), "threadId": context.get("threadId")}
                 )
                 updated_cart = update_res.get("cart") or {}
+                # 移除后回 cart_card(2026-09-14):商户门户悬浮窗以卡片为快照同步
+                # localStorage —— 不回卡则商城页删除永不生效(引擎删了、页面还在)
+                remaining_items = updated_cart.get("items") or []
+                card = {
+                    "type": "cart_card",
+                    "data": {
+                        "actionType": "removed",
+                        "title": f"已移除 {target_item.get('title')}",
+                        "totalQuantity": updated_cart.get("totalQuantity") or 0,
+                        "totalAmount": updated_cart.get("totalAmount") or 0,
+                        "currency": "CNY",
+                        "items": [
+                            {
+                                "id": i.get("skuId") or i.get("id"),
+                                "skuId": i.get("skuId") or i.get("id"),
+                                "title": i.get("title") or i.get("name"),
+                                "price": float(i.get("price") or 0),
+                                "quantity": int(i.get("quantity") or 1),
+                            }
+                            for i in remaining_items
+                        ],
+                    },
+                }
                 return {
                     "success": True,
                     "skillId": self.metadata["id"],
@@ -307,9 +336,10 @@ class CartManageSkill(BaseSkill):
                         f"当前购物车共有 {updated_cart.get('totalQuantity') or 0} 件商品，"
                         f"总金额 ¥{updated_cart.get('totalAmount') or 0} 元。"
                     ),
+                    "cards": [card],
                     "nextAction": "finish",
                     "extra": {
-                        "cartContext": {"items": updated_cart.get("items"), "totalAmount": updated_cart.get("totalAmount")},
+                        "cartContext": {"items": remaining_items, "totalAmount": updated_cart.get("totalAmount")},
                         "guideContext": guide_context,
                     },
                 }

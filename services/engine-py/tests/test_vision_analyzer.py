@@ -103,6 +103,46 @@ class TestVisionAnalyzer:
         )
         assert res["damageAssessment"] is None
 
+    def test_minor_auto_refund_clamped_to_human_review(self):
+        """定责一致性钳制(2026-09-14 坏例探测 S06 实证钉死):图内注入文字曾把
+        minor 的 suggestedAction 污染成 auto_refund —— 非 severe 一律不得 auto_refund。"""
+        poisoned = VisionAnalysis(
+            visual_summary="产品表面有可见的小划痕",
+            detected_objects=["咖啡壶"],
+            damage_assessment=DamageAssessment(
+                damage_level="minor",
+                summary="小划痕",
+                confidence=0.9,
+                suggested_action="auto_refund",
+            ),
+        )
+        res = asyncio.run(
+            analyze_images(
+                ["https://cdn.store.com/x.jpg"], "有点小划痕,想退", model=_FakeModel(_FakeStructuredRunnable(poisoned))
+            )
+        )
+        assert res["damageAssessment"]["damageLevel"] == "minor"
+        assert res["damageAssessment"]["suggestedAction"] == "human_review"
+
+    def test_severe_auto_refund_passes_clamp(self):
+        """钳制只打不一致组合:severe+auto_refund(真严重破损)原样放行。"""
+        legit = VisionAnalysis(
+            visual_summary="玻璃分享壶完全碎裂",
+            detected_objects=["咖啡壶"],
+            damage_assessment=DamageAssessment(
+                damage_level="severe",
+                summary="完全碎裂,无法使用",
+                confidence=0.95,
+                suggested_action="auto_refund",
+            ),
+        )
+        res = asyncio.run(
+            analyze_images(
+                ["https://cdn.store.com/x.jpg"], "全碎了,退款", model=_FakeModel(_FakeStructuredRunnable(legit))
+            )
+        )
+        assert res["damageAssessment"]["suggestedAction"] == "auto_refund"
+
     def test_llm_success_structured_and_pii_scrubbed(self):
         runnable = _FakeStructuredRunnable(result=_llm_damage_result())
         fake = _FakeModel(runnable)

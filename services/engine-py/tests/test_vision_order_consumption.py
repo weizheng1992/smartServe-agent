@@ -184,6 +184,31 @@ class TestDisambiguationGateAtIntentEmergence:
         assert any(c.get("type") == "quick_replies" for c in cards), f"选择卡缺失:{cards!r}"
         assert calls["args"] == ("CUST-8801", "aurora"), "消歧必须拿到真实用户与租户"
 
+    def test_no_match_status_routes_to_guidance_not_select_card(self, monkeypatch):
+        """「都不像」出口(2026-09-14 坏例探测 S01/S10 实证钉死):消歧返回
+        no_match(无关图/候选全不像)必须出引导文案,不得逼用户从无关选项点选。"""
+        _patch_common(monkeypatch, _VISION_NO_OCR)
+
+        async def _fake_disambig(vision, user_id, business_id, **kwargs):
+            return {
+                "status": "no_match",
+                "candidates": [
+                    {"orderId": "AURORA-ORD-2026-9081", "productName": "极光风暴冲锋衣", "quantity": 1},
+                ],
+            }
+
+        monkeypatch.setattr(triage_mod, "disambiguate_product", _fake_disambig)
+        result = asyncio.run(triage_mod.IntentTriageEngine.process(_incident_state()))
+
+        output = result.get("output") or ""
+        assert "未在您近期的订单中找到与图片相符" in output, (
+            f"no_match 必须出引导文案而非逼选,实际 output={output[:80]!r}"
+        )
+        cards = result.get("cards") or []
+        assert not any(c.get("type") == "quick_replies" for c in cards), (
+            f"no_match 不得出商品选择卡:{cards!r}"
+        )
+
     def test_image_with_ocr_order_id_skips_disambiguation(self, monkeypatch):
         """图内已有单号 → 走单号消费(后续查无此单由技能诚实报错),不得进消歧。"""
         _patch_common(monkeypatch, _VISION_WITH_OCR)

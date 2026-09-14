@@ -43,6 +43,7 @@ from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from .onboarding import build_entry_cards, resolve_onboarding_config
 from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
+from .tools_registry.mall_domain import MallDomainService
 from .triage.rule_matchers import is_quick_greeting
 from .vision import normalize_image_urls
 
@@ -56,6 +57,10 @@ class AgentJobInput(BaseModel):
     business_id: str = Field(default="ecommerce", alias="businessId")
     message: str
     image_urls: list[str] = Field(default_factory=list, alias="imageUrls")
+    # 商户门户商城车条目(2026-09-14 空车谎报收口):门户加购只写浏览器
+    # localStorage,引擎车在 Redis 两存储互不相通 —— 携带即水合,见
+    # MallDomainService.hydrate_cart_from_storefront
+    store_cart: list[dict] = Field(default_factory=list, alias="storeCart")
 
     model_config = {"populate_by_name": True}
 
@@ -317,6 +322,17 @@ async def run_agent(job: AgentJobInput) -> dict:
         initial_state["cart_context"] = saved_cart_context
     if saved_order_context is not None:
         initial_state["order_context"] = saved_order_context
+
+    # 商城车水合(2026-09-14 空车谎报收口):商城页加购只写浏览器 localStorage,
+    # 引擎车在 Redis —— 不水合则聊天侧删除/结算/查看只见空车。幂等合并:引擎车
+    # 已有的 skuCode 跳过(聊天侧数量权威),失败降级空车照常,绝不阻断主链路。
+    if job.store_cart:
+        try:
+            await MallDomainService.hydrate_cart_from_storefront(
+                {"userId": user_id, "threadId": thread_id, "items": job.store_cart}
+            )
+        except Exception as hydrate_err:
+            print(f"[runAgent] 商城车水合异常,忽略: {hydrate_err!r}")
 
     if job_id:
         await publish_agent_event(
