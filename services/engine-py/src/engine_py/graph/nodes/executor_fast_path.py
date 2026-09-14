@@ -20,6 +20,11 @@ _SAVE_ADDR_FIELDS = ("receiverName", "receiverPhone", "province", "city", "distr
 _RANKING_METRIC_RE = re.compile(r"rankingMetric\s+([a-z_]+)", re.IGNORECASE)
 # 顾客口述地址提取(checkoutCart 步骤描述/用户输入形态)
 _STATED_ADDRESS_RE = re.compile(r"(?:shipping to|地址是|寄到|送到|邮寄到)\s*([^,，。\n]+)", re.IGNORECASE)
+# 意图指向本轮推荐候选的词形(2026-09-15 S6 跨品类错单):「就要第一个/买第一件」
+# 指代本轮推荐;无本轮候选时严禁拿购物车遗留品结算
+_INTENT_TARGET_RE = re.compile(r"(?:就要|就买|买|要|拿下|选)[^,，。\n]{0,4}第[一二三四五六1-6]|第[一二三四五六1-6][款个件][^,，。\n]{0,6}(?:直接|马上)?下单")
+# 明确指向购物车本身的措辞(放行)
+_CART_ITSELF_RE = re.compile(r"(?:购物车里的?|车里的?|购物车的?)")
 
 
 def _save_address_args(description: str) -> dict | None:
@@ -33,6 +38,21 @@ def _save_address_args(description: str) -> dict | None:
     if all(args.get(field) for field in _SAVE_ADDR_FIELDS):
         return args
     return None
+
+
+def _has_current_candidates(desc_lower: str) -> bool:
+    """步骤描述是否携带本轮推荐候选形(guide 步骤在前/描述含候选语义)。"""
+    return "shoppingskill" in desc_lower or "shoppingskillskill" in desc_lower or "recommend" in desc_lower
+
+
+def _intent_target_missing(user_input: str, has_candidates: bool) -> bool:
+    """纯谓词(测试缝):意图指向本轮推荐候选 × 本轮无候选 → 指代悬空。
+    明确指向购物车本身的措辞(「购物车里的东西结算」)不拦。"""
+    if not user_input:
+        return False
+    if _CART_ITSELF_RE.search(user_input):
+        return False
+    return bool(_INTENT_TARGET_RE.search(user_input)) and not has_candidates
 
 
 def try_match_executor_fast_path(
@@ -103,6 +123,12 @@ def try_match_executor_fast_path(
     # 实报):深规划把顾客给的地址写进步骤描述,快路径提取为显式地址 ——
     # 严禁静默回落地址簿默认地址。
     if "checkoutcart" in desc_lower and "checkoutCart" in allowed_tools:
+        # S6 守卫(2026-09-15):意图指向本轮推荐候选(第N个下单)但本轮无候选
+        # —— 检索轮追问形输入未产出推荐,序数悬空,拿购物车遗留品结算是
+        # 跨品类错单(实弹:推荐帐篷→就要第一个,结了老爹鞋+渔夫帽)。拒配
+        # 工具,让步骤落入 LLM 兜底向用户确认目标商品。
+        if _intent_target_missing(user_input or "", has_candidates=_has_current_candidates(desc_lower)):
+            return None
         stated = _STATED_ADDRESS_RE.search(description) or _STATED_ADDRESS_RE.search(user_input or "")
         return {
             "toolName": "checkoutCart",

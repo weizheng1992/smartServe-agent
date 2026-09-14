@@ -75,6 +75,22 @@ def _match_cart_item_by_name(user_input: str, items: list[dict]) -> dict | None:
     return best_item if best_score >= 1 else None
 _QTY_BUY_RE = re.compile(r"(?:数量|买|要|加|购)\s*(\d+)\s*件?")
 _HISTORY_ITEM_RE = re.compile(r"(\d+)\.\s*【([^】]+)】\s*¥?(\d+(?:\.\d+)?)")
+# 点名直配的剥词表(2026-09-14):加购动作词剥净后仍有实质内容 = 用户点了名。
+# 刻意不含单字「的/吧」以外的规格字 —— 「曜石黑 M码」「POLO衫」必须原样留存
+# 供货架直配评分;注意「码」不可剥(M码/L码 是规格判别词)。
+_ADD_ACTION_STRIP_RE = re.compile(
+    r"加入购物车|放进购物车|放入购物车|加购物车|加购|购物车|帮我|给我|麻烦|我想|想要|"
+    r"下单|结账|来一[件个个只]|一[件个个只]|\d+\s*[件个个只]|加入|谢谢|最后|这个|那个|一下|买|要|加|吧|呗|哦|哈|把|"
+    r"第\s*[0-9一二三四五六七八九十百千]*"
+)
+
+
+def _named_query_remainder(user_input: str) -> str:
+    """剥加购动作词/序数残词后剩余的实质内容:非空(≥2 字) = 用户点名了具体
+    商品/规格。序数残词(「把第一件」剥完剩「把第」)严禁当商品名去货架查询。"""
+    rest = _ADD_ACTION_STRIP_RE.sub(" ", user_input)
+    rest = rest.strip(" \t,，。.!！?？:；;的了")
+    return rest if len(rest) >= 2 else ""
 
 
 class CartManageSkill(BaseSkill):
@@ -126,12 +142,29 @@ class CartManageSkill(BaseSkill):
         # —— 裸「结算」仍是查看摘要(旧契约),「下单/去结算/提交订单/付款」才开单。
         # 复合守卫:同句含删除/加购动作时让位(「删掉背包然后结算下单」先删后说,
         # 严禁吞掉删除半带着不要的商品开出真单 —— rule 7 复合偿付纪律)
+        # S6 跨品类错单守卫(2026-09-15):「就要第一个,直接下单」的「第一个」
+        # 指向本轮推荐候选;候选为空(检索轮走了追问)时指代悬空,拿购物车
+        # 遗留品结算是错单(实弹:推荐帐篷→结了老爹鞋)。诚实反问目标商品。
+        _guide_ctx = (context.get("extra") or {}).get("guideContext") or {}
+        _has_candidates = bool(_guide_ctx.get("candidateProducts") or _guide_ctx.get("candidateProductIds"))
+        _ordinal_checkout = re.search(r"第[一二三四五六1-6][款个件]", user_input)
         if (
             _CHECKOUT_RE.search(user_input)
             and not _ADD_RE.search(user_input)
             and not _DELETE_RE.search(user_input)
             and not _CHECKOUT_NEG_RE.search(user_input)
         ):
+            if _ordinal_checkout and not _has_candidates:
+                return {
+                    "success": True,
+                    "skillId": self.metadata["id"],
+                    "output": (
+                        "您说的「第一个」我这边还没有对应的推荐列表——刚才没能为您展示商品。"
+                        "请告诉我您想买的商品(例如「推荐帐篷」),确认推荐结果后再说「下单」,我马上为您办理。"
+                    ),
+                    "nextAction": "finish",
+                    "extra": {"cartContext": existing_cart, "guideContext": guide_context},
+                }
             # 显式地址跟随(「寄到/送到/地址为…」),否则服务层取地址簿默认
             addr_match = _CHECKOUT_ADDR_RE.search(user_input)
             checkout_res = await MallDomainService.checkout_user_cart(
@@ -463,6 +496,7 @@ class CartManageSkill(BaseSkill):
         # 无价不编价(2026-09-12):旧初始化 899.0 恰为已拆除的 Pegasus 假商品价,
         # 服务层对缺价拒绝入车 —— 技能层同原则透传真价,价格未知保持 None。
         target_price: float | None = None
+        target_spec: dict | None = None
 
         candidate_products = guide_context.get("candidateProducts") or []
         candidate_list = guide_context.get("candidateProductIds") or []
@@ -639,6 +673,53 @@ class CartManageSkill(BaseSkill):
                 "extra": {"guideContext": guide_context, "cartContext": existing_cart},
             }
 
+        # 5. 按名直配(2026-09-14 用户实报:点名「极光三合一冲锋衣 曜石黑 M码」
+        # 却入了候选第一款 —— 加购链从未实现按名解析,名字被静默忽略后落
+        # candidate[0],真商品错替与幻影同族)。剥动作词后仍有实质内容 = 用户
+        # 点了名:先查商户真货架按描述直配(真 sku_code/真价);配不中或歧义
+        # 诚实反问列候选,严禁静默替他款。裸动词加购(剥完为空)不进此路径,
+        # candidate[0] 既有契约不变。
+        if not target_sku_id:
+            named_query = _named_query_remainder(user_input)
+            # 检索诉求句严禁进按名直配(2026-09-15 幻影守卫回归):「询评价好的
+            # 短袖，并把第一个加入购物车」的残词是检索半(询…短袖),不是点名
+            # —— 进直配会整句查货架配不中,吃掉诚实反问还劫持序数守卫。
+            if _SEARCH_INTENT_RE.search(named_query or ""):
+                named_query = ""
+            if named_query:
+                shelf_hit = await MallDomainService.find_shelf_sku_by_description(named_query)
+                if shelf_hit:
+                    target_sku_id = shelf_hit["skuCode"]
+                    target_title = shelf_hit["title"]
+                    target_price = shelf_hit["price"]
+                    target_spec = shelf_hit.get("spec")
+                else:
+                    if candidate_products:
+                        list_text = "\n".join(
+                            f"{i + 1}. 【{c['name']}】 ¥{c['price']}" for i, c in enumerate(candidate_products)
+                        )
+                        return {
+                            "success": True,
+                            "skillId": self.metadata["id"],
+                            "output": (
+                                f"没有在店内找到「{named_query}」对应的在售规格，未加入任何商品。\n"
+                                f"请问您想要哪一款？店内现货:{list_text}\n\n"
+                                "可直接说「把第1件加入购物车」，或告诉我完整的商品名与规格。🛒"
+                            ),
+                            "nextAction": "finish",
+                            "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                        }
+                    return {
+                        "success": True,
+                        "skillId": self.metadata["id"],
+                        "output": (
+                            f"没有在店内找到「{named_query}」对应的在售规格，未加入任何商品。\n"
+                            "您可以先让我为您推荐商品（例如\"推荐几款短袖\"），再说\"把第1件加入购物车\"即可！🛒"
+                        ),
+                        "nextAction": "finish",
+                        "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                    }
+
         if not target_sku_id:
             if candidate_products:
                 prod = candidate_products[0]
@@ -704,6 +785,7 @@ class CartManageSkill(BaseSkill):
                 "quantity": quantity,
                 "title": target_title,
                 "price": target_price,
+                "spec": target_spec,
                 "userId": context.get("userId"),
                 "threadId": context.get("threadId"),
             }

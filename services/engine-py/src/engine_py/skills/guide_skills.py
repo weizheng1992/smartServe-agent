@@ -127,6 +127,9 @@ class ShoppingGuideSkill(BaseSkill):
     # 指代上一轮检索
     _COMPARE_RE = re.compile(r"(?:对比|不同|差别|区别|比一比)")
 
+    # 价位带指代(S5,2026-09-15):「有没有中间价位的」—— 无品类词指代上轮
+    _PRICE_BAND_RE = re.compile(r"(?:中间价位|中间价|价位段|中等价位)")
+
     _FALLBACK_RE = re.compile(
         r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好|跑步鞋|卫衣|夹克|热门|爆款|热销|热卖|畅销|上新|新品|卖得好|卖的好"
         r"|最便宜|便宜点|最贵|性价比|哪个好|怎么选|有什么区别|买哪种|该用什么|需要准备什么"
@@ -222,7 +225,9 @@ class ShoppingGuideSkill(BaseSkill):
         # 最便宜的对比」—— 对比句无品类词(极值词剥除+指代上一轮),检索必空。
         # 此处用上一轮检索词(lastSearchQuery)重提品类词,全量检索后取最贵 +
         # 最便宜两档对比展示;无上下文时保持诚实空。
-        if not products and self._COMPARE_RE.search(user_input):
+        # S5 泛化(2026-09-15):「有没有中间价位的」同类 —— 无品类词指代上轮,
+        # 词元(中间价位)检索必空;命中对比/价位指代 × 有上下文检索词即重检
+        if not products and (self._COMPARE_RE.search(user_input) or self._PRICE_BAND_RE.search(user_input)):
             last_query = (existing_guide.get("lastSearchQuery") or "").strip()
             ctx_terms = [
                 t for t in MallDomainService._extract_query_terms(last_query)
@@ -239,6 +244,22 @@ class ShoppingGuideSkill(BaseSkill):
                     (p for p in (full_res.get("products") or []) if p.get("price") is not None),
                     key=lambda p: float(p["price"]),
                 )
+                # 中间价位(S5):≥3 档时去掉首尾极值,只留中位段
+                if self._PRICE_BAND_RE.search(user_input) and len(priced) >= 3:
+                    priced = priced[1:-1]
+                if self._PRICE_BAND_RE.search(user_input) and priced:
+                    items = priced[:3]
+                    lines = "\n".join(
+                        f"{i + 1}. 【{p['name']}】 ¥{p['price']} (现货 {p.get('stock')} 件)"
+                        for i, p in enumerate(items)
+                    )
+                    return {
+                        "success": True,
+                        "skillId": self.metadata["id"],
+                        "output": f"为您找到{('「' + ctx_terms[0] + '」') if ctx_terms else ''}中间价位的商品：\n\n{lines}",
+                        "nextAction": "finish",
+                        "extra": {"guideContext": {"lastSearchQuery": last_query}},
+                    }
                 if len(priced) >= 2:
                     lo, hi = priced[0], priced[-1]
                     diff = float(hi["price"]) - float(lo["price"])

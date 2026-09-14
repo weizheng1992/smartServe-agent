@@ -112,12 +112,17 @@ async def _order_exists(order_id: str) -> bool:
 
 
 def _cart_add_backed(task_plan: dict | None) -> bool:
-    """本轮是否存在真实的加购执行(cart 技能/addToCart 成功结果)。"""
+    """本轮是否存在真实的加购执行(cart 技能/addToCart 成功结果)。
+
+    技能快轨 bypass 计划没有步骤级回执(S1 实报复报):description 含
+    skill_fast_track_skill_cart_manage 的 bypass 即为真实技能执行凭据。"""
     for step in (task_plan or {}).get("subtasks") or []:
         result = step.get("result") or {}
         desc = (step.get("description") or "").lower()
         output = result.get("output") or ""
         output = output if isinstance(output, str) else json_dumps(output)
+        if "skill_fast_track_skill_cart_manage" in desc:
+            return True
         if result.get("success") and (
             "cartskill" in desc or "addtocart" in desc or "加入购物车" in output or "已成功将" in output
         ):

@@ -229,9 +229,14 @@ _GENERAL_LIST_POSITIVE_RE = re.compile(
 _GENERAL_LIST_LOGISTICS_RE = re.compile(
     r"(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递)", re.IGNORECASE
 )
+# 最近的订单(2026-09-15 S2):「查一下我最近的订单」曾被 ORDER_QUERY 规则
+# 截胡进缺槽反问 —— 列表形措辞优先列单,与「查询我最近的订单」同待遇
+_RECENT_ORDERS_RE = re.compile(r"(?:最近|最新)[的]?(?:订单|历史订单)", re.IGNORECASE)
 
 
 def is_general_order_list_query(text: str) -> bool:
+    if _RECENT_ORDERS_RE.search(text):
+        return True
     return bool(_GENERAL_LIST_POSITIVE_RE.search(text)) and not bool(_GENERAL_LIST_LOGISTICS_RE.search(text))
 
 

@@ -370,6 +370,92 @@ class TestContextualComparison:
 
 
 
+
+
+# ── 第五轮修复:跨品类错单/守卫误报/查单快轨/上下文品类重检 ────────────
+
+
+class TestRound5Fixes:
+    def test_checkout_refuses_when_intent_target_missing(self):
+        """S6 根因:「就要第一个,直接下单」在无本轮推荐候选时,不得拿购物车
+        遗留品结算 —— checkout 前置守卫:意图指向本轮推荐而候选为空时,
+        checkoutCart 必须拒绝对遗留车下单(诚实反问)。纯谓词缝。"""
+        from engine_py.graph.nodes.executor_fast_path import _intent_target_missing
+
+        # 意图指向推荐候选(就要第一个)+ 候选为空 → 拦
+        assert _intent_target_missing("就要第一个,直接下单", has_candidates=False) is True
+        # 指向购物车本身(购物车里的东西结算)→ 放行
+        assert _intent_target_missing("把购物车里的东西结算下单", has_candidates=False) is False
+        assert _intent_target_missing("购物车里的东西结算下单", has_candidates=False) is False
+        # 有本轮候选 → 放行
+        assert _intent_target_missing("就要第一个,直接下单", has_candidates=True) is False
+
+    def test_cart_claim_guard_no_false_positive_on_real_add(self):
+        """S1:真实加购成功时,购物车宣称守卫不得追加「加购未真实发生」。"""
+        from engine_py.graph.nodes.output_guard import sanitize_order_claims
+
+        out = "已成功将 1 件商品加入购物车！当前购物车共有 2 件商品。"
+        plan = {
+            "subtasks": [
+                {
+                    "id": "step_fast_cart_1",
+                    "description": "Execute CartSkill for input: 把第二个加入购物车",
+                    "result": {"success": True, "output": "已成功将 1 件商品加入购物车！"},
+                }
+            ]
+        }
+        cleaned = asyncio.run(sanitize_order_claims(out, plan))
+        assert "加购未真实发生" not in cleaned, "真实加购回执在场时守卫严禁误报"
+
+    def test_recent_orders_query_routes_to_list(self):
+        """S2:「查一下我最近的订单」必须走列单,不得反问订单号。"""
+        from engine_py.triage.slot_extractor import SlotExtractor
+
+        specs = SlotExtractor.extract_all("查一下我最近的订单")
+        intents = {s["intentType"] for s in specs}
+        assert intents & {"order_query", "order_status", "chat"}, intents
+
+    def test_mid_price_uses_context_category(self, monkeypatch):
+        """S5:「有没有中间价位的」无品类词,须用上下文品类重检(非诚实空)。"""
+        from engine_py.skills.guide_skills import ShoppingGuideSkill
+        from engine_py.tools_registry.mall_domain import MallDomainService
+
+        calls: list[dict] = []
+
+        async def _fake_search(params: dict) -> dict:
+            calls.append(params)
+            if "中间价位" in (params.get("query") or ""):
+                return {"total": 0, "products": []}
+            return {
+                "total": 3,
+                "products": [
+                    {"id": "B1", "name": "极光 胸包", "price": 259.0, "stock": 10},
+                    {"id": "B2", "name": "极光 双肩包", "price": 499.0, "stock": 20},
+                    {"id": "B3", "name": "极光 徒步背包", "price": 829.0, "stock": 5},
+                ],
+            }
+
+        monkeypatch.setattr(MallDomainService, "search_products", staticmethod(_fake_search))
+        ctx = {
+            "threadId": "mid_t", "tenantId": "ecommerce", "userId": "CUST-8801",
+            "input": "有没有中间价位的",
+            "extra": {
+                "guideContext": {
+                    "candidateProductIds": ["B3"],
+                    "candidateProducts": [{"id": "B3", "name": "极光 徒步背包", "price": 829.0}],
+                    "lastSearchQuery": "最贵的 背包",
+                }
+            },
+        }
+        result = asyncio.run(ShoppingGuideSkill().execute(ctx))
+        out = result.get("output") or ""
+        assert any("背包" in (c.get("query") or "") for c in calls), "必须用上下文品类词重检"
+        assert "499" in out, f"应推荐中间价位 ¥499: {out[:150]}"
+        assert "暂未找到" not in out
+
+
+
+
 class TestGuardContextAndLeaks:
     def test_order_query_mentioning_id_not_sanitized(self):
         """N3 实报:查不存在订单的诚实回复被守卫误伤(替换标记泄漏给用户)

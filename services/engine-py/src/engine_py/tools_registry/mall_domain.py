@@ -1242,15 +1242,21 @@ class MallDomainService:
         if existing:
             existing["quantity"] += quantity
         else:
-            items.append(
-                {
-                    "skuId": sku_id,
-                    "quantity": quantity,
-                    "title": title,
-                    "price": price,
-                    "spec": params.get("spec"),
-                }
-            )
+            row = {
+                "skuId": sku_id,
+                "quantity": quantity,
+                "title": title,
+                "price": price,
+                "spec": params.get("spec"),
+            }
+            # 可选引用键(2026-09-14 点名直配):skuCode 钉住用户点名的确切规格
+            # (结算 sku_code 直配优先,不再被「SPU 最低价」静默换规格);spuId
+            # 供前端卡片/商城链接回指 SPU。缺省不落键,旧行形状不变。
+            if params.get("skuCode"):
+                row["skuCode"] = str(params["skuCode"])
+            if params.get("spuId"):
+                row["spuId"] = str(params["spuId"])
+            items.append(row)
         await MallDomainService._save_cart(cart_key, items)
 
         total_amount = sum(i["price"] * i["quantity"] for i in items)
@@ -1275,6 +1281,104 @@ class MallDomainService:
         """
         cart_key = params.get("userId") or params.get("threadId") or "default_user"
         return bool(await MallDomainService._load_cart(cart_key))
+
+    @staticmethod
+    def _shelf_text_tokens(text: str) -> set[str]:
+        """货架文本词袋(按名直配评分用):CJK 二元组 + 拉丁/数字词元。"""
+        tokens: set[str] = set()
+        for run in re.findall(r"[\u4e00-\u9fff]+", text):
+            if len(run) == 1:
+                tokens.add(run)
+            else:
+                tokens.update(run[i : i + 2] for i in range(len(run) - 1))
+        for run in re.findall(r"[A-Za-z0-9]+", text):
+            tokens.add(run.lower())
+        return tokens
+
+    @staticmethod
+    async def find_shelf_sku_by_description(query: str) -> dict | None:
+        """按自然语言描述直配商户货架 SKU(2026-09-14 点名错替收口)。
+
+        症状:用户点名「极光三合一冲锋衣 曜石黑 M码 加入购物车」,加购链从未
+        实现按名解析 —— 名字被静默忽略后落 candidate[0],真商品错替与幻影
+        同族(此前拆除的是假商品兜底,真商品错替这半一直都在)。
+
+        评分:查询对 (SPU 标题 + SKU 标题 + 规格值) 的字符二元组 F1。判据:
+        冠军分 ≥0.35 且领先次名 ≥0.03 才直配;并列/接近并列 = 无法唯一确定,
+        返回 None 由调用方诚实反问(同名不同规格、货架无此物都走这条路)。
+        货架不可达/空架返回 None,绝不阻断。
+        """
+        query_tokens = MallDomainService._shelf_text_tokens(query)
+        if not query_tokens:
+            return None
+        try:
+            async with order_domain._merchant_reader_engine().connect() as conn:
+                rows = (
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT k.sku_code, k.sku_title, k.spec_attributes, k.price, k.stock, "
+                                "s.spu_code, s.title AS spu_title, s.main_image "
+                                "FROM merchant_skus k JOIN merchant_spus s ON s.id = k.spu_id "
+                                "WHERE s.status = 'ON_SALE' AND k.stock > 0 LIMIT 300"
+                            )
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+        except Exception as err:
+            print(f"[MallDomain] 按名直配货架不可达,交回调用方处理: {err}")
+            return None
+        scored: list[tuple[float, str, dict]] = []
+        for r in rows:
+            spec = r["spec_attributes"]
+            spec_text = " ".join(str(v) for v in spec.values()) if isinstance(spec, dict) else str(spec or "")
+            row_tokens = MallDomainService._shelf_text_tokens(f"{r['spu_title']} {r['sku_title'] or ''} {spec_text}")
+            if not row_tokens:
+                continue
+            f1 = 2 * len(query_tokens & row_tokens) / (len(query_tokens) + len(row_tokens))
+            scored.append((f1, r["sku_code"], dict(r)))
+        if not scored:
+            return None
+        scored.sort(key=lambda t: (-t[0], t[1]))
+        best_f1, best_code, best_row = scored[0]
+        if best_f1 < 0.35:
+            return None
+
+        def _spec_hits(row: dict) -> int:
+            """查询对 SKU 级文本(sku_title+规格值)的命中数 —— 同 SPU 兄弟规格的
+            判别器:SPU 标题人人相同,规格词(颜色/尺码)说了才算。"""
+            spec = row["spec_attributes"]
+            spec_text = " ".join(str(v) for v in spec.values()) if isinstance(spec, dict) else ""
+            return len(query_tokens & MallDomainService._shelf_text_tokens(f"{row['sku_title'] or ''} {spec_text}"))
+
+        near = [s for s in scored if s[0] >= best_f1 - 0.03]
+        if len(near) > 1:
+            # 近并列二分:跨 SPU(两款不同商品都像)→ 诚实反问;同 SPU 兄弟规格
+            # → 规格词命中多者胜(「冰川白 M码」vs「曜石黑 L」),命中同数 =
+            # 用户没消解规格,反问尺码颜色。
+            if any(s[2]["spu_code"] != near[0][2]["spu_code"] for s in near[1:]):
+                return None
+            hits = [(_spec_hits(s[2]), s) for s in near]
+            max_h = max(h for h, _ in hits)
+            winners = [s for h, s in hits if h == max_h]
+            if len(winners) != 1:
+                return None
+            best_code, best_row = winners[0][1], winners[0][2]
+
+        best_spec = best_row["spec_attributes"] if isinstance(best_row["spec_attributes"], dict) else {}
+        return {
+            "skuCode": best_code,
+            "spuCode": best_row["spu_code"],
+            "spuTitle": best_row["spu_title"],
+            "skuTitle": best_row["sku_title"] or "",
+            "title": f"{best_row['spu_title']} {best_row['sku_title'] or ''}".strip(),
+            "price": float(best_row["price"]),
+            "stock": int(best_row["stock"] or 0),
+            "imageUrl": best_row["main_image"],
+            "spec": best_spec,
+        }
 
     @staticmethod
     async def hydrate_cart_from_storefront(params: dict) -> bool:
@@ -1469,7 +1573,10 @@ class MallDomainService:
                 failures: list[str] = []
                 for item in items:
                     qty = int(item.get("quantity") or 1)
-                    sid = str(item.get("skuId") or "")
+                    # 行上钉了 skuCode(点名直配)优先按确切规格直取,严禁被
+                    # 「SPU 最低价」静默换掉用户点名的规格;未钉 skuCode 的行
+                    # (导购候选/SKU 直配)维持原解析次序
+                    sid = str(item.get("skuCode") or item.get("skuId") or "")
                     sku = await MallDomainService._resolve_purchasable_sku(conn, sku_code=sid)
                     if sku is None:
                         sku = await MallDomainService._resolve_purchasable_sku(conn, spu_code=sid)
