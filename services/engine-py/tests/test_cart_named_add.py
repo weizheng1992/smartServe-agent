@@ -167,9 +167,14 @@ async def _named_spec_scenario(pg_factory) -> None:
         )
         assert result["success"] is True
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
-        assert [i["skuId"] for i in items] == ["SKU-N-COAT-BLACK-M"], (
-            f"点名冲锋衣曜石黑M码必须直配该 SKU,实际入车: {[(i['skuId'], i.get('title')) for i in items]}"
+        assert [i["skuId"] for i in items] == ["SPU-N-COAT"], (
+            f"车行主键必须维持 SPU 粒度契约(skuId=spu_code),实际: {[i['skuId'] for i in items]}"
         )
+        # 用户点名的确切规格钉在 skuCode 上(结算 sku_code 直配优先不换规格)
+        assert items[0]["skuCode"] == "SKU-N-COAT-BLACK-M"
+        assert items[0]["spuId"] == "SPU-N-COAT"
+        # 标题是干净 SPU 标题,不得拼接 SKU 标题致信息重复错乱
+        assert items[0]["title"] == "极光三合一全天候户外硬壳冲锋衣 (2026款旗舰版)"
         assert items[0]["price"] == 1299.0
         assert "冲锋衣" in result["output"]
     finally:

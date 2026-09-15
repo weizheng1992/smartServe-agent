@@ -238,6 +238,8 @@ class CartManageSkill(BaseSkill):
                         {
                             "id": i.get("skuId") or i.get("id"),
                             "skuId": i.get("skuId") or i.get("id"),
+                            "skuCode": i.get("skuCode") or i.get("skuId") or i.get("id"),
+                            "spuId": i.get("spuId") or i.get("skuId") or i.get("id"),
                             "title": i.get("title") or i.get("name"),
                             "price": float(i.get("price") or 0),
                             "quantity": int(i.get("quantity") or 1),
@@ -353,6 +355,8 @@ class CartManageSkill(BaseSkill):
                             {
                                 "id": i.get("skuId") or i.get("id"),
                                 "skuId": i.get("skuId") or i.get("id"),
+                            "skuCode": i.get("skuCode") or i.get("skuId") or i.get("id"),
+                            "spuId": i.get("spuId") or i.get("skuId") or i.get("id"),
                                 "title": i.get("title") or i.get("name"),
                                 "price": float(i.get("price") or 0),
                                 "quantity": int(i.get("quantity") or 1),
@@ -497,6 +501,9 @@ class CartManageSkill(BaseSkill):
         # 服务层对缺价拒绝入车 —— 技能层同原则透传真价,价格未知保持 None。
         target_price: float | None = None
         target_spec: dict | None = None
+        # 点名直配的引用键(2026-09-14):skuCode 钉确切规格、spuId 回指 SPU,
+        # 经 add_to_cart 落在车行上;非点名路径为空 dict,行形状不变。
+        target_refs: dict = {}
 
         candidate_products = guide_context.get("candidateProducts") or []
         candidate_list = guide_context.get("candidateProductIds") or []
@@ -593,6 +600,8 @@ class CartManageSkill(BaseSkill):
                         {
                             "id": it.get("skuId") or it.get("id"),
                             "skuId": it.get("skuId") or it.get("id"),
+                            "skuCode": it.get("skuCode") or it.get("skuId") or it.get("id"),
+                            "spuId": it.get("spuId") or it.get("skuId") or it.get("id"),
                             "title": it.get("title") or it.get("name"),
                             "price": float(it.get("price") or 0),
                             "quantity": int(it.get("quantity") or per_qty),
@@ -689,10 +698,15 @@ class CartManageSkill(BaseSkill):
             if named_query:
                 shelf_hit = await MallDomainService.find_shelf_sku_by_description(named_query)
                 if shelf_hit:
-                    target_sku_id = shelf_hit["skuCode"]
-                    target_title = shelf_hit["title"]
+                    # 车行主键维持 SPU 粒度契约(skuId=spu_code,结算/去重/卡片
+                    # 回指全按 SPU);用户点名的确切规格经 skuCode 钉在行上,
+                    # 结算 sku_code 直配优先不被「SPU 最低价」换规格;标题用干净
+                    # SPU 标题(曾把 sku_title 拼进 title 致信息重复错乱)。
+                    target_sku_id = shelf_hit["spuCode"]
+                    target_title = shelf_hit["spuTitle"]
                     target_price = shelf_hit["price"]
                     target_spec = shelf_hit.get("spec")
+                    target_refs = {"skuCode": shelf_hit["skuCode"], "spuId": shelf_hit["spuCode"]}
                 else:
                     if candidate_products:
                         list_text = "\n".join(
@@ -786,6 +800,8 @@ class CartManageSkill(BaseSkill):
                 "title": target_title,
                 "price": target_price,
                 "spec": target_spec,
+                "skuCode": target_refs.get("skuCode"),
+                "spuId": target_refs.get("spuId"),
                 "userId": context.get("userId"),
                 "threadId": context.get("threadId"),
             }
@@ -808,6 +824,8 @@ class CartManageSkill(BaseSkill):
                         {
                             "id": it.get("skuId") or it.get("id"),
                             "skuId": it.get("skuId") or it.get("id"),
+                            "skuCode": it.get("skuCode") or it.get("skuId") or it.get("id"),
+                            "spuId": it.get("spuId") or it.get("skuId") or it.get("id"),
                             "title": it.get("title") or it.get("name") or target_title,
                             "price": float(it.get("price") or target_price),
                             "quantity": int(it.get("quantity") or quantity),

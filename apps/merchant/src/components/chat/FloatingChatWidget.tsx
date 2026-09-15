@@ -85,16 +85,20 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
     }
 
     // 快照对账(2026-09-14):cart_card items 是引擎车的全量快照 —— 本地有而
-    // 快照没有的条目即聊天侧已删除,不剔除则商城页删除永不生效
+    // 快照没有的条目即聊天侧已删除,不剔除则商城页删除永不生效。引擎车行是
+    // SPU 粒度(skuId=spu 码),快照同时携带 skuCode(确切规格)与 spuId,
+    // 本地条目任一键命中即视为仍在车。
     if (Array.isArray(cartCard.data.items)) {
-      const snapshotIds = new Set(
-        (cartCard.data.items as any[])
-          .map((it) => it.skuCode || it.skuId || it.id)
-          .filter((id): id is string => Boolean(id)),
-      );
-      const reconciled = existingCart.filter(
-        (it: any) => snapshotIds.has(it.skuCode || it.sku?.skuCode || it.id),
-      );
+      const snapshotIds = new Set<string>();
+      for (const it of cartCard.data.items as any[]) {
+        for (const key of [it.skuCode, it.skuId, it.id, it.spuId]) {
+          if (key) snapshotIds.add(String(key));
+        }
+      }
+      const reconciled = existingCart.filter((it: any) => {
+        const own = [it.skuCode, it.sku?.skuCode, it.id, it.spuId].filter(Boolean).map(String);
+        return own.length === 0 || own.some((k) => snapshotIds.has(k));
+      });
       existingCart.length = 0;
       existingCart.push(...reconciled);
     }
@@ -621,9 +625,11 @@ export function FloatingChatWidget({
           businessId: 'aurora',
           imageUrls: imagesToSend.length > 0 ? imagesToSend : undefined,
           // 商城车随消息上行(2026-09-14 空车谎报收口):引擎车空时水合,
-          // 否则客服对商城页加购的商品永远「看不到车」
+          // 否则客服对商城页加购的商品永远「看不到车」;spuId 供引擎车行
+          // 维持 SPU 粒度主键(skuId=spu 码契约)
           storeCart: readStoreCart().map((it) => ({
             skuCode: it.skuCode,
+            spuId: it.spuId,
             title: it.title,
             price: it.price,
             quantity: it.quantity,

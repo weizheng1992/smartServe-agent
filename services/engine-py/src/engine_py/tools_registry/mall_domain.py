@@ -1412,7 +1412,10 @@ class MallDomainService:
             existing_skus = {i.get("skuId") for i in ((await MallDomainService._load_cart(cart_key)) or [])}
             added = False
             for it in valid:
-                if it["skuCode"] in existing_skus:
+                # 行主键维持 SPU 粒度契约(skuId=spuId 优先,退回 skuCode);确切
+                # 规格经 skuCode 钉住,结算直配不换规格
+                row_key = str(it.get("spuId") or it["skuCode"])
+                if row_key in existing_skus:
                     continue
                 try:
                     quantity = max(1, int(it.get("quantity") or 1))
@@ -1421,11 +1424,13 @@ class MallDomainService:
                 price = it.get("price")
                 await MallDomainService.add_to_cart(
                     {
-                        "skuId": it["skuCode"],
+                        "skuId": row_key,
                         "quantity": quantity,
                         "title": it.get("title") or "精选商品",
                         "price": float(price) if isinstance(price, (int, float)) else None,
                         "spec": it.get("specAttributes"),
+                        "skuCode": str(it["skuCode"]),
+                        "spuId": row_key,
                         "userId": cart_params.get("userId"),
                         "threadId": cart_params.get("threadId"),
                     }
