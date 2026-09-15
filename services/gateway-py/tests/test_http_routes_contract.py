@@ -441,6 +441,51 @@ class TestConversationTimelineChronologicalOrder:
         assert roles == ["user", "assistant"]
 
 
+class TestStoreCartRead:
+    """商城购物车只读端点(2026-09-15 单账本收口):聊天侧入车在引擎账本,
+    商城购物车页挂载时经此端点合流展示 —— 此前聊天加购后商城页永远少一件。
+    契约:有车返回引擎车行(含点名直配 skuCode/spuId);无车诚实空,严禁
+    get_cart_summary 的演示默认车(AJ1)漏出。"""
+
+    async def test_store_cart_returns_engine_rows(self, client, contract_fixtures):
+        from engine_py.tools_registry.mall_domain import MallDomainService
+
+        # 内存车直种(_load_cart 内存优先,零 Redis 依赖,确定性)
+        MallDomainService._cart_storage["CUST-CT-CART"] = [
+            {
+                "skuId": "SPU-CT-CART",
+                "quantity": 2,
+                "title": "契约测试冲锋衣",
+                "price": 1299.0,
+                "skuCode": "SKU-CT-CART-BLK-M",
+                "spuId": "SPU-CT-CART",
+                "spec": {"颜色": "曜石黑", "尺码": "M"},
+            }
+        ]
+        try:
+            res = await client.get("/api/store/cart", params={"customerId": "CUST-CT-CART"})
+            assert res.status_code == 200
+            body = res.json()
+            assert body["success"] is True
+            assert body["totalQuantity"] == 2
+            assert body["totalAmount"] == 2598.0
+            row = body["items"][0]
+            assert row["skuCode"] == "SKU-CT-CART-BLK-M", "点名直配的 skuCode 必须随行透出(商城页结算直取)"
+            assert row["spuId"] == "SPU-CT-CART"
+            assert row["title"] == "契约测试冲锋衣"
+        finally:
+            MallDomainService._cart_storage.pop("CUST-CT-CART", None)
+
+    async def test_store_cart_honest_empty_for_unknown_customer(self, client, contract_fixtures):
+        """无车顾客必须空车,严禁演示默认车(AJ1)顶替真实态。"""
+        res = await client.get("/api/store/cart", params={"customerId": "CUST-CT-NOCART"})
+        assert res.status_code == 200
+        body = res.json()
+        assert body["success"] is True
+        assert body["items"] == []
+        assert body["totalQuantity"] == 0
+
+
 class TestStoreOrdersStrictScoping:
     """商户订单列表严格归属(2026-09-05):/api/store/orders 不得再 OR CUST-8801
     混入演示用户订单。背景 bug:任何 customerId 查询都会带出张伟(CUST-8801)

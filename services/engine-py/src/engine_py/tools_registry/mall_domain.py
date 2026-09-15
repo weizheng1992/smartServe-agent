@@ -1251,6 +1251,11 @@ class MallDomainService:
                 # 图片透传(2026-09-15 用户实报):车行缺图曾致前端卡片图不对
                 "imageUrl": params.get("imageUrl"),
             }
+            # 规格摘要(2026-09-15 用户实报:商城页「规格:」空白):入车即落
+            # 可读摘要,卡片 specSummary 与商城页 skuTitle 直接消费
+            spec = params.get("spec")
+            if isinstance(spec, dict) and spec:
+                row["specSummary"] = " / ".join(str(v) for v in spec.values())
             # 可选引用键(2026-09-14 点名直配):skuCode 钉住用户点名的确切规格
             # (结算 sku_code 直配优先,不再被「SPU 最低价」静默换规格);spuId
             # 供前端卡片/商城链接回指 SPU。缺省不落键,旧行形状不变。
@@ -1431,6 +1436,7 @@ class MallDomainService:
                         "title": it.get("title") or "精选商品",
                         "price": float(price) if isinstance(price, (int, float)) else None,
                         "spec": it.get("specAttributes"),
+                        "imageUrl": it.get("imageUrl"),
                         "skuCode": str(it["skuCode"]),
                         "spuId": row_key,
                         "userId": cart_params.get("userId"),

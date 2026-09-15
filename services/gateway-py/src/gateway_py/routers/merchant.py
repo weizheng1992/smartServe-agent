@@ -397,6 +397,33 @@ async def publish_thread_message(thread_id: str, payload: dict) -> None:
         print(f"[MerchantChat] Redis publish thread message failed: {err}")
 
 
+@router.get("/api/store/cart")
+async def store_cart(customerId: str | None = None):
+    """商城购物车读取(2026-09-15 单账本收口):聊天侧入车在引擎账本(Redis),
+    商城购物车页此前只读浏览器 localStorage —— 聊天加购后商城页永远少一件,
+    且回复瞬间的前端卡片同步一错过(导航/刷新打断)就永久不同步。只读端点:
+    返回该顾客的引擎车行(含点名直配的 skuCode/spuId 回指),商城页挂载时
+    合流展示;写入仍走聊天与商城页各自入口。无车诚实空 —— 严禁
+    get_cart_summary 的演示默认车(AJ1)漏进真实用户页面。"""
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    effective_customer = customerId or "CUST-8801"
+    try:
+        if not await MallDomainService.has_cart({"userId": effective_customer}):
+            return {"success": True, "items": [], "totalQuantity": 0, "totalAmount": 0}
+        summary = await MallDomainService.get_cart_summary({"userId": effective_customer})
+        cart = summary.get("cart") or {}
+        return {
+            "success": True,
+            "items": cart.get("items") or [],
+            "totalQuantity": cart.get("totalQuantity") or 0,
+            "totalAmount": float(cart.get("totalAmount") or 0),
+        }
+    except Exception as err:
+        print(f"[MerchantStore] cart read failed, honest empty: {err}")
+        return {"success": True, "items": [], "totalQuantity": 0, "totalAmount": 0}
+
+
 @router.post("/api/store/chat")
 async def store_chat(body: dict):
     try:

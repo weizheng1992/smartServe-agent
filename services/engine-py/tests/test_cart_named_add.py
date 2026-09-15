@@ -167,16 +167,52 @@ async def _named_spec_scenario(pg_factory) -> None:
         )
         assert result["success"] is True
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
-        assert [i["skuId"] for i in items] == ["SPU-N-COAT"], (
-            f"车行主键必须维持 SPU 粒度契约(skuId=spu_code),实际: {[i['skuId'] for i in items]}"
+        # 点名直配行以 SKU 码为主键(与商城页加购同构):同款不同规格必须
+        # 两行共存(2026-09-15 用户实报「曜石黑 L码」被 SPU 粒度去重拦掉)
+        assert [i["skuId"] for i in items] == ["SKU-N-COAT-BLACK-M"], (
+            f"点名直配行主键应为确切 SKU 码,实际: {[i['skuId'] for i in items]}"
         )
-        # 用户点名的确切规格钉在 skuCode 上(结算 sku_code 直配优先不换规格)
         assert items[0]["skuCode"] == "SKU-N-COAT-BLACK-M"
         assert items[0]["spuId"] == "SPU-N-COAT"
         # 标题是干净 SPU 标题,不得拼接 SKU 标题致信息重复错乱
         assert items[0]["title"] == "极光三合一全天候户外硬壳冲锋衣 (2026款旗舰版)"
         assert items[0]["price"] == 1299.0
+        # 图与规格摘要随行(商城页渲染依赖,2026-09-15 实报「没图片/规格空白」)
+        assert items[0]["imageUrl"] == "https://img.test/SPU-N-COAT.png"
+        # JSONB 回读会重排键序,断言做无序比较
+        assert set(items[0]["specSummary"].split(" / ")) == {"曜石黑", "M"}
         assert "冲锋衣" in result["output"]
+    finally:
+        await _teardown_shelf(merchant_engine, original_reader)
+
+
+def test_same_spu_two_specs_coexist(pg_factory):
+    """同款不同规格两行共存(2026-09-15 用户实报场景):曜石黑 M 在车,再点
+    名曜石黑 L → 必须新增一行,严禁被 SPU 粒度去重拦成「已在购物车」。"""
+    asyncio.run(_two_specs_scenario(pg_factory))
+
+
+async def _two_specs_scenario(pg_factory) -> None:
+    from engine_py.skills.cart_manage_skill import CartManageSkill
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    merchant_engine, original_reader = await _setup_shelf(pg_factory)
+    try:
+        r1 = await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车"))
+        assert r1["success"] is True
+        r2 = await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 L码 加入购物车"))
+        assert r2["success"] is True
+        items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
+        assert [i["skuId"] for i in items] == ["SKU-N-COAT-BLACK-M", "SKU-N-COAT-BLACK-L"], (
+            f"同款两规格必须两行共存,实际: {[i['skuId'] for i in items]}"
+        )
+        assert "已在购物车" not in r2["output"], "不同规格不得被误判为重复"
+
+        # 三次:重复加购已存在的 M 规格 → 诚实提示已在车(同规格去重)
+        r3 = await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车"))
+        assert "已在购物车" in r3["output"]
+        items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
+        assert len(items) == 2, f"同规格重复不得新增行,实际: {[i['skuId'] for i in items]}"
     finally:
         await _teardown_shelf(merchant_engine, original_reader)
 
@@ -245,7 +281,7 @@ async def _stale_slot_scenario(pg_factory) -> None:
         assert result["success"] is True
         assert "背包" not in result["output"], f"遗留槽位目标不得顶替点名商品: {result['output'][:80]}"
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
-        coat_row = next((i for i in items if i["skuId"] == "SPU-N-COAT"), None)
+        coat_row = next((i for i in items if i["skuId"] == "SKU-N-COAT-BLACK-M"), None)
         assert coat_row is not None, f"点名冲锋衣必须入车,实际: {[(i['skuId'], i['quantity']) for i in items]}"
         assert coat_row["quantity"] == 1 and coat_row["skuCode"] == "SKU-N-COAT-BLACK-M"
         # 遗留背包行原样保留(不误删)

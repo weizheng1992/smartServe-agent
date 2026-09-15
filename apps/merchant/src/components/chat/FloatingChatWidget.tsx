@@ -633,6 +633,8 @@ export function FloatingChatWidget({
             title: it.title,
             price: it.price,
             quantity: it.quantity,
+            imageUrl: it.imageUrl,
+            specAttributes: it.specAttributes,
           })),
           routeContext: {
             pathname,

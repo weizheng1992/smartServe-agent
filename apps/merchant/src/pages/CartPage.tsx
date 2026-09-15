@@ -42,6 +42,49 @@ export default function CartPage() {
     fetchAddresses();
   }, []);
 
+  // 引擎车合流(2026-09-15 单账本收口):聊天侧入车在引擎账本(Redis),本地
+  // 存档只是缓存 —— 聊天加购后商城页永远少一件,且回复瞬间的前端卡片同步一
+  // 错过(导航/刷新打断)就永久不同步。挂载时拉引擎车行合流:引擎行权威
+  // (含点名直配的 skuCode/规格),本地独有行(商城页加购,尚未随消息水合)
+  // 保留,合流结果回写存档。
+  useEffect(() => {
+    if (!user.id) return;
+    const fetchEngineCart = async () => {
+      try {
+        const res = await fetch(`/api/store/cart?customerId=${encodeURIComponent(user.id)}`);
+        const data = await res.json();
+        if (!data.success || !Array.isArray(data.items) || data.items.length === 0) return;
+        const engineRows: CartItem[] = data.items.map((r: any) => ({
+          id: r.skuCode || r.skuId,
+          spuId: r.spuId || r.skuId,
+          skuCode: r.skuCode || r.skuId,
+          title: r.title,
+          skuTitle: r.specSummary || (r.spec ? Object.values(r.spec).join(' / ') : ''),
+          imageUrl: r.imageUrl || '',
+          price: Number(r.price) || 0,
+          quantity: Math.max(1, Number(r.quantity) || 1),
+          stock: 99,
+          specAttributes: r.spec || {},
+          selected: true,
+        }));
+        setCart((prev) => {
+          // 合流去重键:引擎行的 skuCode(确切规格)与 spuId(SPU 回指);
+          // 本地行任一键命中即视为同一商品(引擎行权威,数量以引擎为准)
+          const engineKeys = new Set(engineRows.flatMap((r) => [r.skuCode, r.spuId, r.id]));
+          const localOnly = prev.filter(
+            (it) => !engineKeys.has(it.skuCode) && !engineKeys.has(it.spuId) && !engineKeys.has(it.id),
+          );
+          const merged = [...engineRows, ...localOnly];
+          writeStoreCart(merged as any);
+          return merged;
+        });
+      } catch {
+        // 引擎车不可达:本地存档照常展示(降级不炸页面)
+      }
+    };
+    fetchEngineCart();
+  }, [user.id]);
+
   const saveCart = (newCart: CartItem[]) => {
     setCart(newCart);
     writeStoreCart(newCart);
@@ -204,11 +247,17 @@ export default function CartPage() {
                       onChange={() => handleToggleSelect(item.skuCode)}
                       className="w-4 h-4 text-emerald-600 rounded shrink-0 cursor-pointer"
                     />
-                    <img
-                      src={item.imageUrl}
-                      alt={item.title}
-                      className="w-20 h-20 rounded-xl object-cover border border-slate-200 shrink-0"
-                    />
+                    {item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.title}
+                        className="w-20 h-20 rounded-xl object-cover border border-slate-200 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-20 h-20 rounded-xl bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-xl">
+                        🛍️
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <Link
                         to={`/products/${item.spuId}`}

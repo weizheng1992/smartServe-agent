@@ -716,14 +716,16 @@ class CartManageSkill(BaseSkill):
         if named_query:
             shelf_hit = await MallDomainService.find_shelf_sku_by_description(named_query)
             if shelf_hit:
-                # 车行主键维持 SPU 粒度契约(skuId=spu_code,结算/去重/卡片
-                # 回指全按 SPU);用户点名的确切规格经 skuCode 钉在行上,
-                # 结算 sku_code 直配优先不被「SPU 最低价」换规格;标题用干净
-                # SPU 标题(曾把 sku_title 拼进 title 致信息重复错乱)。
-                target_sku_id = shelf_hit["spuCode"]
+                # 点名直配行以 SKU 码为主键(与商城页加购同构,2026-09-15 用户
+                # 实报:点名「曜石黑 L码」被 SPU 粒度去重拦成「已在购物车」——
+                # 同款不同规格是两件商品,必须两行共存)。行上同时携带 spuId
+                # (SPU 回指,卡片/商城链接)与干净 SPU 标题;结算 sku_code 直配
+                # 优先不被「SPU 最低价」换规格。
+                target_sku_id = shelf_hit["skuCode"]
                 target_title = shelf_hit["spuTitle"]
                 target_price = shelf_hit["price"]
                 target_spec = shelf_hit.get("spec")
+                target_image_url = shelf_hit.get("imageUrl")
                 target_refs = {"skuCode": shelf_hit["skuCode"], "spuId": shelf_hit["spuCode"]}
             else:
                 # 配不中二分:纯指代(「刚才那个」剥提示词后为空)→ 保留既有
@@ -784,12 +786,22 @@ class CartManageSkill(BaseSkill):
         qty_match = _QTY_BUY_RE.search(user_input)
         quantity = int(qty_match.group(1)) if qty_match else 1
 
-        # 已在车拦截(2026-09-06 产品语义):重复加购不自动累量,提示当前数量与改量入口
+        # 已在车拦截(2026-09-06 产品语义):重复加购不自动累量,提示当前数量与改量入口。
+        # 判据含 skuCode(2026-09-15 用户实报:点名「曜石黑 L码」被 SPU 粒度去重
+        # 拦成「已在购物车(x1)」——同款不同规格是两件商品):行按 skuId 或钉住的
+        # skuCode 任一命中即视为同规格重复。
         pre_summary = await MallDomainService.get_cart_summary(
             {"userId": context.get("userId"), "threadId": context.get("threadId")}
         )
         pre_cart = pre_summary.get("cart") or {}
-        dup_item = next((i for i in (pre_cart.get("items") or []) if i.get("skuId") == target_sku_id), None)
+        dup_item = next(
+            (
+                i
+                for i in (pre_cart.get("items") or [])
+                if i.get("skuId") == target_sku_id or i.get("skuCode") == target_sku_id
+            ),
+            None,
+        )
         if dup_item:
             dup_title = str(dup_item.get("title") or target_title)
             cur_qty = int(dup_item.get("quantity") or 1)
