@@ -1663,6 +1663,27 @@ class MallDomainService:
                 "message": "购物车还是空的，先挑点商品加入购物车，再来对我说「结算下单」吧！",
             }
 
+        # 复合「加购+下单」范围结算(2026-09-15 用户实报「说的第一个商品,为什么
+        # 这么多」):同句既加购又下单时,executor 快路径经 cartContext.addedThisTurn
+        # 注入 onlySkuIds —— 只结本轮加购的行,历史在车遗留品不得静默陪结,也不得
+        # 被清车。范围显式为空(加购半未完成)→ 诚实拒结,绝不拿遗留品开单(S6
+        # 跨品类错单守卫同哲学)。参数缺省(None)保持整车结算旧契约。
+        only_sku_ids = params.get("onlySkuIds")
+        scoped_checkout = only_sku_ids is not None
+        all_items = list(items)
+        if scoped_checkout:
+            wanted = {str(i) for i in (only_sku_ids or []) if str(i)}
+            items = [
+                i
+                for i in items
+                if str(i.get("skuId") or "") in wanted or str(i.get("skuCode") or "") in wanted
+            ]
+            if not items:
+                return {
+                    "success": False,
+                    "message": "本轮要结算的商品还没有加入购物车（加购可能未完成），已为您取消本次结算；购物车商品保持不变。",
+                }
+
         # 收货地址:显式 > 地址簿默认 > 诚实追问
         raw_addr = params.get("shippingAddress")
         addr_dict: dict | None = None
@@ -1789,7 +1810,15 @@ class MallDomainService:
             print(f"[MallDomain] checkout failed: {err}")
             return {"success": False, "message": "结算失败，请稍后重试或转人工客服处理。"}
 
-        await MallDomainService._save_cart(user_id, [])
+        # 清车:整车结算清空;范围结算只移除已结的行,遗留品原样保留。
+        # 按对象身份剔除(过滤保留了原行引用):旧车行形状 skuId=spu_code 时
+        # 同款双规格两行 skuId 相同,按 skuId 键剔除会误删未结算规格。
+        if scoped_checkout:
+            settled_ids = {id(i) for i in items}
+            remaining = [i for i in all_items if id(i) not in settled_ids]
+            await MallDomainService._save_cart(user_id, remaining)
+        else:
+            await MallDomainService._save_cart(user_id, [])
         return {
             "success": True,
             "orderId": order_id,

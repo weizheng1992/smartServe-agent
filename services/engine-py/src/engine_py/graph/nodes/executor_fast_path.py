@@ -25,6 +25,18 @@ _STATED_ADDRESS_RE = re.compile(r"(?:shipping to|地址是|寄到|送到|邮寄�
 _INTENT_TARGET_RE = re.compile(r"(?:就要|就买|买|要|拿下|选)[^,，。\n]{0,4}第[一二三四五六1-6]|第[一二三四五六1-6][款个件][^,，。\n]{0,6}(?:直接|马上)?下单")
 # 明确指向购物车本身的措辞(放行)
 _CART_ITSELF_RE = re.compile(r"(?:购物车里的?|车里的?|购物车的?)")
+# 复合「加购+下单」句形(2026-09-15 用户实报「说的第一个商品,为什么这么多」):
+# 同句既加购又下单 = 只买刚加的那件,结算必须范围化到本轮加购行,严禁整车
+# 把历史在车遗留品静默陪结(实弹:¥4455 订单结了 4 件没点名的旧货)
+_ADD_ACTION_RE = re.compile(r"加入购物车|放进购物车|放入购物车|加购物车|加购")
+_CHECKOUT_ACTION_RE = re.compile(r"下单|去结算|提交订单|付款|去买单")
+
+
+def _is_add_then_checkout(user_input: str | None) -> bool:
+    """纯谓词(测试缝):同句复合「加购 × 下单」形。"""
+    if not user_input:
+        return False
+    return bool(_ADD_ACTION_RE.search(user_input)) and bool(_CHECKOUT_ACTION_RE.search(user_input))
 
 
 def _save_address_args(description: str) -> dict | None:
@@ -56,7 +68,11 @@ def _intent_target_missing(user_input: str, has_candidates: bool) -> bool:
 
 
 def try_match_executor_fast_path(
-    description: str, user_input: str, allowed_tools: list[str], short_memory: list[dict] | None = None
+    description: str,
+    user_input: str,
+    allowed_tools: list[str],
+    short_memory: list[dict] | None = None,
+    cart_last_added: list[str] | None = None,
 ) -> dict | None:
     desc_lower = description.lower()
     input_lower = (user_input or "").lower()
@@ -134,9 +150,16 @@ def try_match_executor_fast_path(
         if _intent_target_missing(user_input or "", has_candidates=_has_current_candidates(desc_lower)):
             return None
         stated = _STATED_ADDRESS_RE.search(description) or _STATED_ADDRESS_RE.search(user_input or "")
+        args = {"shippingAddress": stated.group(1).strip()} if stated else {}
+        # 复合「加购+下单」范围化(2026-09-15 用户实报):cart_last_added 来自
+        # 本轮技能写入的 cartContext.addedThisTurn —— 非空只结本轮加购行,显式
+        # 空列表(加购半未完成/被拦)交服务层诚实拒结;裸下单(无加购动作)
+        # 不注入,整车结算旧契约不变。None = 本轮无技能加购信息,不范围化。
+        if _is_add_then_checkout(user_input or "") and cart_last_added is not None:
+            args["onlySkuIds"] = list(cart_last_added)
         return {
             "toolName": "checkoutCart",
-            "args": {"shippingAddress": stated.group(1).strip()} if stated else {},
+            "args": args,
         }
 
     if (

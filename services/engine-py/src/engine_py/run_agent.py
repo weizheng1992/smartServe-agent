@@ -319,7 +319,13 @@ async def run_agent(job: AgentJobInput) -> dict:
     if saved_guide_context is not None:
         initial_state["guide_context"] = saved_guide_context
     if saved_cart_context is not None:
-        initial_state["cart_context"] = saved_cart_context
+        # addedThisTurn 回合初剥离(2026-09-15 复合「加购+下单」范围结算):
+        # 该标记只描述「本轮技能加购的行」,上一轮的残留若带入,本轮裸「下单」
+        # 会被错误范围化成只结上一轮的加购(整车契约破坏)。本轮技能一旦执行
+        # 加购即重写此键,跨轮语义由 run_agent 收口的 cartContext 整体落库承担。
+        initial_state["cart_context"] = {
+            k: v for k, v in saved_cart_context.items() if k != "addedThisTurn"
+        }
     if saved_order_context is not None:
         initial_state["order_context"] = saved_order_context
 

@@ -160,7 +160,11 @@ async def _execute_single_step_core(
 
     # 2. Fast-Path 正则匹配
     parsed_tool_call = try_match_executor_fast_path(
-        step_to_run.get("description") or "", state.get("input") or "", allowed_tools, short_memory
+        step_to_run.get("description") or "",
+        state.get("input") or "",
+        allowed_tools,
+        short_memory,
+        cart_last_added=(state.get("cart_context") or {}).get("addedThisTurn"),
     )
 
     if parsed_tool_call is None:
@@ -459,6 +463,10 @@ async def _execute_single_step_core(
         # 上下文此前到不了图状态,run_agent 收口把旧值原样存回 TaskMemory
         # (幻影 Nike 入车症状的图路径根因)。
         "guideContext": state.get("guide_context"),
+        # cart_context 同型上行(2026-09-15 复合加购+下单范围结算):技能写入的
+        # addedThisTurn(本轮加购行)必须跨图节点存活,后续 checkoutCart 步骤的
+        # 快路径才读得到结算范围 —— 原地变更同是死写。
+        "cartContext": state.get("cart_context"),
     }
 
 
@@ -528,7 +536,13 @@ async def execute_step(state: dict) -> dict:
     # 是有状态依赖的 SOP 链,曾被无脑并行(gather 同一 state 拷贝)——cart 在
     # guide 写入前读空候选直接反问。技能型步骤之间一律串行。
     def _skill_tool_of(desc: str) -> str | None:
-        match = try_match_executor_fast_path(desc, state.get("input") or "", allowed_tools, short_memory)
+        match = try_match_executor_fast_path(
+            desc,
+            state.get("input") or "",
+            allowed_tools,
+            short_memory,
+            cart_last_added=(state.get("cart_context") or {}).get("addedThisTurn"),
+        )
         tool = (match or {}).get("toolName") or ""
         return tool if tool.startswith("skill_") else None
 
@@ -543,7 +557,11 @@ async def execute_step(state: dict) -> dict:
             if current_skill_tool or next_skill_tool:
                 break  # 技能链串行:前序技能写候选/购物车,后续步骤(含 checkoutCart 工具)消费 —— 严禁并行
             match = try_match_executor_fast_path(
-                next_st.get("description") or "", state.get("input") or "", allowed_tools, short_memory
+                next_st.get("description") or "",
+                state.get("input") or "",
+                allowed_tools,
+                short_memory,
+                cart_last_added=(state.get("cart_context") or {}).get("addedThisTurn"),
             )
             if match and not is_escalation:
                 candidate_indices.append(idx)
@@ -580,11 +598,14 @@ async def execute_step(state: dict) -> dict:
             )
         )
         merged_guide_context = None
+        merged_cart_context = None
         for idx, res in zip(candidate_indices, parallel_results):
             updated_subtasks[idx] = res["updatedStep"]
             total_errors += res["toolErrorsCount"]
             if res.get("guideContext"):
                 merged_guide_context = res["guideContext"]
+            if res.get("cartContext"):
+                merged_cart_context = res["cartContext"]
 
         next_plan = {**current_plan, "subtasks": updated_subtasks}
         if job_id:
@@ -600,6 +621,7 @@ async def execute_step(state: dict) -> dict:
             "globalTransitionsCount": 1,
             "toolErrorsCount": total_errors,
             "guideContext": merged_guide_context,
+            "cartContext": merged_cart_context,
         }
 
     # 单步骤标准执行
@@ -667,6 +689,7 @@ async def execute_step(state: dict) -> dict:
         "globalTransitionsCount": 1,
         "toolErrorsCount": single_result["toolErrorsCount"],
         "guideContext": single_result.get("guideContext"),
+        "cartContext": single_result.get("cartContext"),
     }
 
 

@@ -65,8 +65,8 @@ _MERCHANT_DDL = [
       shipping_address JSONB DEFAULT '{}'::jsonb,
       is_returnable BOOLEAN DEFAULT TRUE,
       is_address_modifiable BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
     """

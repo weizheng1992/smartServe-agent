@@ -123,7 +123,9 @@ class CartManageSkill(BaseSkill):
     ) -> dict | None:
         """入车被服务层拒绝(缺价等)时如实回传,不播报成功卡 —— skill 层
         success 语义是「技能处理完成」:业务失败经 output 文案如实送达用户
-        (2026-09-12 real-data-only/01:宁可追问,不可编造)。非拒绝返回 None。"""
+        (2026-09-12 real-data-only/01:宁可追问,不可编造)。非拒绝返回 None。
+        addedThisTurn=[]:本轮加购未完成,复合「加购+下单」句的结算半据此拒结
+        (cartContext 死写上行链见 executor_node,2026-09-15 范围结算)。"""
         if add_res.get("success"):
             return None
         return {
@@ -131,7 +133,10 @@ class CartManageSkill(BaseSkill):
             "skillId": CartManageSkill.metadata["id"],
             "output": add_res.get("message") or "该商品暂时无法加入购物车，请稍后再试。",
             "nextAction": "finish",
-            "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+            "extra": {
+                "guideContext": guide_context,
+                "cartContext": {**(existing_cart or {}), "addedThisTurn": []},
+            },
         }
 
     def can_handle(self, context: dict) -> bool:
@@ -171,7 +176,7 @@ class CartManageSkill(BaseSkill):
                         "请告诉我您想买的商品(例如「推荐帐篷」),确认推荐结果后再说「下单」,我马上为您办理。"
                     ),
                     "nextAction": "finish",
-                    "extra": {"cartContext": existing_cart, "guideContext": guide_context},
+                    "extra": {"cartContext": {**(existing_cart or {}), "addedThisTurn": []}, "guideContext": guide_context},
                 }
             # 显式地址跟随(「寄到/送到/地址为…」),否则服务层取地址簿默认
             addr_match = _CHECKOUT_ADDR_RE.search(user_input)
@@ -202,7 +207,7 @@ class CartManageSkill(BaseSkill):
                 "skillId": self.metadata["id"],
                 "output": checkout_res.get("message") or "结算未完成，请稍后再试。",
                 "nextAction": "finish",
-                "extra": {"cartContext": existing_cart, "guideContext": guide_context},
+                "extra": {"cartContext": {**(existing_cart or {}), "addedThisTurn": []}, "guideContext": guide_context},
             }
 
         # 0.5 订单→购物车桥接(遗留二期):「订单里的 X 加入购物车」—— 商户真单
@@ -222,7 +227,14 @@ class CartManageSkill(BaseSkill):
                 "output": bridge_res.get("message") or "该商品暂时无法加入购物车，请稍后再试。",
                 "nextAction": "finish",
                 "extra": {
-                    "cartContext": bridge_res.get("cart") or existing_cart,
+                    "cartContext": {
+                        **(bridge_res.get("cart") or existing_cart),
+                        "addedThisTurn": (
+                            [bridge_res["lastModifiedItemId"]]
+                            if bridge_res.get("lastModifiedItemId")
+                            else []
+                        ),
+                    },
                     "guideContext": guide_context,
                 },
             }
@@ -295,7 +307,7 @@ class CartManageSkill(BaseSkill):
                     "skillId": self.metadata["id"],
                     "output": "购物车还是空的，没有可移除的商品。如需选购，可对我说“推荐跑鞋”或“查看购物车”。",
                     "nextAction": "finish",
-                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                    "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                 }
 
             if _CLEAR_RE.search(user_input):
@@ -333,7 +345,7 @@ class CartManageSkill(BaseSkill):
                             "如需查看明细，可说“查看购物车”。"
                         ),
                         "nextAction": "finish",
-                        "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                        "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                     }
                 target_item = current_items[target_index]
             else:
@@ -393,7 +405,7 @@ class CartManageSkill(BaseSkill):
                 "skillId": self.metadata["id"],
                 "output": "购物车中暂无该商品或已为空，无需重复移除。",
                 "nextAction": "finish",
-                "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
             }
 
         # 3. 数量修改
@@ -412,7 +424,7 @@ class CartManageSkill(BaseSkill):
                     "skillId": self.metadata["id"],
                     "output": "购物车还是空的，先加入商品后再调整数量。如需选购，可对我说“推荐跑鞋”。",
                     "nextAction": "finish",
-                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                    "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                 }
 
             # 目标解析链与删除分支对齐:序数词 → 商品名匹配 → lastModifiedItemId → 首款
@@ -430,7 +442,7 @@ class CartManageSkill(BaseSkill):
                             "如需查看明细，可说“查看购物车”。"
                         ),
                         "nextAction": "finish",
-                        "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                        "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                     }
                 target_item = current_items[target_index]
             else:
@@ -453,7 +465,7 @@ class CartManageSkill(BaseSkill):
                         "或先\"查看购物车\"确认当前明细。"
                     ),
                     "nextAction": "finish",
-                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                    "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                 }
             update_res = await MallDomainService.update_cart_item(
                 {"skuId": target_sku, "quantity": new_qty, "userId": context.get("userId"), "threadId": context.get("threadId")}
@@ -491,14 +503,14 @@ class CartManageSkill(BaseSkill):
                         "您可以直接对我说“把第1件加入购物车”或“把第2件加入购物车”，我立即为您办理！🛒"
                     ),
                     "nextAction": "finish",
-                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                    "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                 }
             return {
                 "success": True,
                 "skillId": self.metadata["id"],
                 "output": "请问您想将哪一款商品加入购物车呢？您可以直接对我说“把第1件加入购物车”或“把第2件加入购物车”，我立即为您办理！🛒",
                 "nextAction": "finish",
-                "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
             }
 
         # 4. 加购执行(含跨 Agent 指代消解)
@@ -645,6 +657,9 @@ class CartManageSkill(BaseSkill):
                         "lastModifiedItemId": candidate_products[-1]["id"],
                         "items": updated_cart.get("items"),
                         "totalAmount": updated_cart.get("totalAmount"),
+                        # 本轮全量加购的行(复合「加购+下单」句的结算范围,
+                        # 2026-09-15;已在车的未重复加入,不入范围)
+                        "addedThisTurn": [p["id"] for p in new_products],
                     },
                     "guideContext": {
                         **guide_context,
@@ -692,7 +707,7 @@ class CartManageSkill(BaseSkill):
                     "可直接说要哪一款，例如“把第1件加入购物车”。🛒"
                 ),
                 "nextAction": "finish",
-                "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
             }
 
         # 5. 按名直配(2026-09-14 用户实报:点名「极光三合一冲锋衣 曜石黑 M码」
@@ -746,7 +761,7 @@ class CartManageSkill(BaseSkill):
                                 "可直接说「把第1件加入购物车」，或告诉我完整的商品名与规格。🛒"
                             ),
                             "nextAction": "finish",
-                            "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                            "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                         }
                     return {
                         "success": True,
@@ -756,7 +771,7 @@ class CartManageSkill(BaseSkill):
                             "您可以先让我为您推荐商品（例如\"推荐几款短袖\"），再说\"把第1件加入购物车\"即可！🛒"
                         ),
                         "nextAction": "finish",
-                        "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                        "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                     }
 
         if not target_sku_id:
@@ -780,7 +795,7 @@ class CartManageSkill(BaseSkill):
                         "您可以先让我为您推荐商品（例如\"推荐几款短袖\"），再说\"把第1件加入购物车\"即可！🛒"
                     ),
                     "nextAction": "finish",
-                    "extra": {"guideContext": guide_context, "cartContext": existing_cart},
+                    "extra": {"guideContext": guide_context, "cartContext": {**(existing_cart or {}), "addedThisTurn": []}},
                 }
 
         qty_match = _QTY_BUY_RE.search(user_input)
@@ -819,6 +834,9 @@ class CartManageSkill(BaseSkill):
                         "lastModifiedItemId": target_sku_id,
                         "items": pre_cart.get("items") or [],
                         "totalAmount": pre_cart.get("totalAmount"),
+                        # 已在车拦截:未新加,但用户指名的就是这件 —— 复合
+                        # 「加购+下单」句的结算范围按指名行走(2026-09-15)
+                        "addedThisTurn": [target_sku_id],
                     },
                     "guideContext": {
                         **guide_context,
@@ -893,6 +911,9 @@ class CartManageSkill(BaseSkill):
                     "lastModifiedItemId": target_sku_id,
                     "items": updated_cart.get("items"),
                     "totalAmount": updated_cart.get("totalAmount"),
+                    # 本轮加购行(复合「加购+下单」句的结算范围,2026-09-15
+                    # 用户实报:结算只买刚加的那件,历史在车遗留品不陪结)
+                    "addedThisTurn": [target_sku_id],
                 },
                 "guideContext": {**guide_context, "candidateProductIds": candidate_list, "candidateProducts": candidate_products},
             },

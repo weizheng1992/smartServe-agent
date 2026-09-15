@@ -280,7 +280,10 @@ register_tool(
             "(SPU lines settle at the current cheapest in-stock SKU), checks and deducts stock, snapshots "
             "cost, and binds the shipping address (explicit address, or the customer's default address book "
             "entry; fails honestly asking for an address when none exists). Auto-resolves user context. "
-            "All-or-nothing: any unavailable cart line cancels the whole order."
+            "All-or-nothing: any unavailable cart line cancels the whole order. "
+            "onlySkuIds (injected by the executor fast-path for composite add-then-checkout requests) "
+            "scopes the order to the cart lines added in this turn — stale cart lines are neither "
+            "ordered nor cleared; an empty list refuses the checkout honestly."
         ),
         schema={
             "type": "object",
@@ -288,6 +291,11 @@ register_tool(
                 "userId": {"type": "string"},
                 "threadId": {"type": "string"},
                 "shippingAddress": {"type": "object", "description": "Optional explicit address {fullAddress, recipientName, phone} or plain string"},
+                "onlySkuIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional scope: checkout only these cart lines (skuId or skuCode). Omit for whole-cart checkout.",
+                },
             },
         },
         execute=_checkout_cart,

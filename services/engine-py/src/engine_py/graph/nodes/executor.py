@@ -23,4 +23,9 @@ async def executor_node(state: AgentState) -> dict:
     # 存回 TaskMemory,下一轮加购序数解析到旧候选(幻影 Nike 入车症状)。
     if result.get("guideContext") is not None:
         update["guide_context"] = result["guideContext"]
+    # 车上下文上行(2026-09-15 复合加购+下单范围结算):技能写入的
+    # cartContext(含 addedThisTurn 本轮加购行)必须回写图状态,后续
+    # checkoutCart 步骤的快路径才读得到结算范围(同 guideContext 死写根因)。
+    if result.get("cartContext") is not None:
+        update["cart_context"] = result["cartContext"]
     return update
