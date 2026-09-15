@@ -1449,6 +1449,57 @@ class MallDomainService:
     # 语义,规格在回复中如实展示;skuId 直配 sku_code 时按商城页同源直取。
 
     @staticmethod
+    async def delete_user_address(params: dict) -> dict:
+        """删除收货地址(2026-09-15 能力补齐):按收件人/full_address 子串定位
+        顾客账本条目并移除;找不到/歧义如实说明。"""
+        from . import order_domain as _order_domain
+
+        user_id = params.get("userId")
+        if not user_id and params.get("threadId"):
+            ctx = await _order_domain.OrderDomainService.get_thread_session_context(params["threadId"])
+            user_id = user_id or ctx["userId"]
+        target = (params.get("addressId") or params.get("receiverName") or params.get("fullAddress") or "").strip()
+        if not user_id or not target:
+            return {"success": False, "message": "请告诉我要删除哪个收货地址（收件人或地址）。"}
+
+        try:
+            async with _order_domain._merchant_reader_engine().begin() as conn:
+                raw = (
+                    await conn.execute(
+                        text("SELECT addresses FROM merchant_customers WHERE customer_id = :uid").bindparams(
+                            uid=user_id
+                        )
+                    )
+                ).scalar()
+            entries = raw if isinstance(raw, list) else []
+            hits = [
+                e for e in entries
+                if isinstance(e, dict) and (
+                    target in (e.get("fullAddress") or "")
+                    or target in (e.get("recipientName") or "")
+                    or e.get("id") == target
+                )
+            ]
+            if not hits:
+                return {"success": False, "message": f"地址簿里没有找到与「{target}」匹配的收货地址。"}
+            if len(hits) > 1:
+                names = "、".join(f"「{h.get('fullAddress')}」" for h in hits)
+                return {"success": False, "message": f"找到 {len(hits)} 条匹配地址：{names}，请指明要删除哪一条。"}
+            remaining = [e for e in entries if e is not hits[0]]
+            await conn.execute(
+                text(
+                    "UPDATE merchant_customers SET addresses = CAST(:a AS jsonb) WHERE customer_id = :uid"
+                ).bindparams(uid=user_id, a=json.dumps(remaining, ensure_ascii=False))
+            )
+            return {
+                "success": True,
+                "message": f"已删除收货地址：{hits[0].get('fullAddress')}",
+            }
+        except Exception as err:
+            print(f"[MallDomain] deleteUserAddress failed: {err}")
+            return {"success": False, "message": "地址删除失败，请稍后重试。"}
+
+    @staticmethod
     async def set_default_address(params: dict) -> dict:
         """设默认收货地址(2026-09-15 S8 能力补齐):按 receiver_name 或地址 id
         定位顾客账本条目,置 is_default 并清除其它默认;找不到如实说明。"""

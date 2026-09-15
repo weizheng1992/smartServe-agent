@@ -75,6 +75,11 @@ async def _set_default_address(args: dict):
     return await MallDomainService.set_default_address(args)
 
 
+async def _delete_user_address(args: dict):
+    """删除收货地址(2026-09-15 能力补齐)。"""
+    return await MallDomainService.delete_user_address(args)
+
+
 async def _query_product_skus(args: dict):
     return await MallDomainService.query_product_skus(args)
 
@@ -286,6 +291,22 @@ register_tool(
             },
         },
         execute=_checkout_cart,
+    )
+)
+register_tool(
+    ToolDefinition(
+        name="deleteUserAddress",
+        description="Delete one of the customer's saved delivery addresses (matches by recipient name or address substring).",
+        schema={
+            "type": "object",
+            "properties": {
+                "userId": {"type": "string"},
+                "threadId": {"type": "string"},
+                "receiverName": {"type": "string"},
+                "fullAddress": {"type": "string"},
+            },
+        },
+        execute=_delete_user_address,
     )
 )
 register_tool(

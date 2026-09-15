@@ -122,6 +122,8 @@ def try_match_executor_fast_path(
     # "cart" 会命中下方购物车技能分支,必须先行。地址保真(2026-09-13 用户
     # 实报):深规划把顾客给的地址写进步骤描述,快路径提取为显式地址 ——
     # 严禁静默回落地址簿默认地址。
+    if "deleteuseraddress" in desc_lower and "deleteUserAddress" in allowed_tools:
+        return {"toolName": "deleteUserAddress", "args": {}}
     if "setdefaultaddress" in desc_lower and "setDefaultAddress" in allowed_tools:
         return {"toolName": "setDefaultAddress", "args": {}}
     if "checkoutcart" in desc_lower and "checkoutCart" in allowed_tools:

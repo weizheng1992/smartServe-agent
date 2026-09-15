@@ -398,6 +398,16 @@ async def _execute_single_step_core(
                     }
                 )
                 result_data = {"toolExecuted": tool_name, "output": output}
+                # 待确认动作登记(S8/S3/S7 同族,2026-09-15):地址保存成功后,
+                # 「改成默认」确认轮可由 triage pending_action 恢复执行,LLM 不再丢参
+                if tool_name == "saveUserAddress" and isinstance(output, dict) and output.get("success"):
+                    state["task_plan"] = {
+                        **(state.get("task_plan") or {}),
+                        "pendingAction": {
+                            "tool": "set_default_address",
+                            "args": {"receiverName": output.get("fullAddress") and ""},
+                        },
+                    }
 
                 # 图路径候选登记(2026-09-12):planner 给 executor 的可能是
                 # searchProducts 工具而非 ShoppingGuideSkill —— 工具路径此前不
@@ -476,6 +486,7 @@ _base_executor_tools = [
     "saveUserAddress",
     "getUserAddresses",
     "setDefaultAddress",
+    "deleteUserAddress",
     "checkoutCart",
 ]
 

@@ -289,7 +289,22 @@ async def planner_node(state: AgentState) -> dict:
                     ],
                     "currentStepIndex": 0,
                 }
-            elif addr_entities.get("addressAction") == "set_default":
+            elif addr_entities.get("addressAction") == "delete":
+                fast_plan = {
+                    "goal": "Delete saved delivery addresses for customer",
+                    "subtasks": [
+                        {
+                            "id": "step_fast_address_delete",
+                            "description": (
+                                f"Call deleteUserAddress to delete the customer's saved delivery address. "
+                                f"Customer said: {input_text}. If ambiguous, call getUserAddresses first "
+                                f"and confirm with the customer which address to delete."
+                            ),
+                            "status": "pending",
+                        }
+                    ],
+                    "currentStepIndex": 0,
+                }
                 target = (input_text or "").strip()
                 fast_plan = {
                     "goal": "Set default delivery address for customer",

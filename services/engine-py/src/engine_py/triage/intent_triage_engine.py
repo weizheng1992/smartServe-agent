@@ -174,6 +174,16 @@ def detect_address_manage(text: str | None) -> dict | None:
             "entities": {"addressAction": "set_default"},
             "missingSlots": [],
         }
+    # 删除形(2026-09-15 N4 能力补齐):「把我的地址全部删掉」
+    if (
+        re.search(r"(?:删除|删掉|移除|清空)[^。,，\n]{0,8}(?:我的)?(?:全部)?(?:收货地址|地址簿|地址)", text)
+        or re.search(r"(?:收货地址|地址簿|地址)[^。,，\n]{0,8}(?:删除|删掉|移除|清空)", text)
+    ):
+        return {
+            "mode": "delete",
+            "entities": {"addressAction": "delete"},
+            "missingSlots": [],
+        }
     payload_match = _ADDRESS_CREATE_PAYLOAD_RE.search(text)
     if not payload_match:
         return None
@@ -558,6 +568,25 @@ class IntentTriageEngine:
 
         short_memory = ShortMemory(thread_id)
         history_msgs = await short_memory.get_messages()
+
+        # ✅ 澄清确认轮动作恢复(2026-09-15 S8/S3/S7 同族):上一轮技能留下
+        # pending_action(如 set_default_address 待确认)且本轮是肯定确认时,
+        # 直接恢复执行该动作 —— LLM 确认轮会丢上下文参数,硬编码恢复才稳。
+        if re.match(r"^(?:是的?|对|确认|没错|好的?|ok|OK)[,，。!！?？～～]?\s*$", input_text.strip()):
+            task_state = state.get("task_plan") or {}
+            pending_action = task_state.get("pendingAction") if isinstance(task_state, dict) else None
+            if isinstance(pending_action, dict) and pending_action.get("tool"):
+                action_tool = str(pending_action["tool"])
+                action_args = pending_action.get("args") or {}
+                intents = [{"intent": "address_manage", "confidence": 1.0, "type": "primary",
+                            "entities": {"addressAction": action_tool, **(action_args or {})}}]
+                if state.get("job_id"):
+                    await emit_status(
+                        state["job_id"],
+                        "✅ 检测到确认回复，正在恢复上一轮待执行的操作...",
+                        node="triage",
+                    )
+                return _triage_terminal_result(intents, input_text, history_msgs, state.get("damage_assessment"), state=state)
 
         # 🛡️ 人工恢复/系统提问解挂判定
         if input_text.startswith("System:"):
