@@ -1,18 +1,19 @@
-"""技能基类 — 镜像 skills/baseSkill.ts(租户配置覆盖 + 风控阈值 + SPI 客户端)。"""
+"""技能基类 — 租户配置覆盖 + 风控阈值 + SPI 客户端;进出为类型化契约。"""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
 from ..tenant_config import get_tenant_config
+from .contract import SkillContext, SkillResult
 from .spi_client import LocalDbSpiAdapter
 
 
 class BaseSkill(ABC):
     metadata: dict
 
-    def can_handle(self, context: dict) -> bool:
-        active_intent = (context.get("slots") or {}).get("activeIntent") or (context.get("extra") or {}).get("intent") or ""
+    def can_handle(self, context: SkillContext) -> bool:
+        active_intent = context.slots.get("activeIntent") or context.extra.get("intent") or ""
         return active_intent in self.metadata.get("triggerIntents", [])
 
     async def get_effective_config(self, tenant_id: str) -> dict | None:
@@ -35,7 +36,7 @@ class BaseSkill(ABC):
         return float(self.metadata.get("approvalThresholdAmount") or 50)
 
     @abstractmethod
-    async def execute(self, context: dict) -> dict: ...
+    async def execute(self, context: SkillContext) -> SkillResult: ...
 
     async def get_spi_client(self, tenant_id: str) -> LocalDbSpiAdapter:
         """获取租户 SPI 客户端。TODO(Phase 1b):remote/mcp 模式适配器,当前统一本地适配器。"""

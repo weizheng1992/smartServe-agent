@@ -22,6 +22,7 @@ import asyncio
 from sqlalchemy import text
 
 from engine_py.graph.nodes.executor_fast_path import try_match_executor_fast_path
+from engine_py.skills.contract import SkillContext
 
 USER_INPUT = "帮我把热销第一个的商品加入购物车，并下单使用地址列表第一个地址"
 _ADDR = {"recipientName": "张伟", "phone": "13800138000", "fullAddress": "北京市朝阳区建国门外大街1号国贸大厦A座 3801室"}
@@ -155,30 +156,26 @@ def test_fast_path_scopes_composite_and_preserves_bare_checkout():
 def test_cart_skill_marks_added_this_turn():
     """契约 4(链路中段):技能加购成功/已在车拦截都要写 cartContext.addedThisTurn,
     executor 上行后快路径才有范围可注入。"""
-    from engine_py.skills.cart_manage_skill import CartManageSkill
+    from engine_py.skills.cart import CartManageSkill
     from engine_py.tools_registry.mall_domain import MallDomainService
 
     async def scenario():
         MallDomainService._cart_storage.clear()
         try:
             skill = CartManageSkill()
-            base_ctx = {
-                "userId": "CUST-MARK-1",
-                "threadId": "thread_mark_1",
-                "input": "把第2件加入购物车",
-                "slots": {},
-                "extra": {
-                    "guideContext": {
-                        "candidateProducts": [
-                            {"id": "SPU-A", "name": "冲锋衣 M", "price": 1299.0},
-                            {"id": "SPU-B", "name": "背包 38L", "price": 829.0},
-                        ]
-                    },
-                    "cartContext": {},
+            base_ctx = SkillContext(
+                user_id="CUST-MARK-1",
+                thread_id="thread_mark_1",
+                input="把第2件加入购物车",
+                guide_context={
+                    "candidateProducts": [
+                        {"id": "SPU-A", "name": "冲锋衣 M", "price": 1299.0},
+                        {"id": "SPU-B", "name": "背包 38L", "price": 829.0},
+                    ]
                 },
-            }
-            added = await skill.execute({**base_ctx, "input": "把第2件加入购物车"})
-            dup = await skill.execute({**base_ctx, "input": "把第2件加入购物车"})
+            )
+            added = (await skill.execute(SkillContext(**{**base_ctx.__dict__, "input": "把第2件加入购物车"}))).to_dict()
+            dup = (await skill.execute(SkillContext(**{**base_ctx.__dict__, "input": "把第2件加入购物车"}))).to_dict()
             return added, dup
         finally:
             MallDomainService._cart_storage.clear()

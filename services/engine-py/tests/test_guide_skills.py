@@ -11,7 +11,8 @@ import asyncio
 
 import pytest
 
-from engine_py.skills.cart_manage_skill import CartManageSkill
+from engine_py.skills.cart import CartManageSkill
+from engine_py.skills.contract import SkillContext
 from engine_py.skills.guide_skills import ProductInquirySkill, ShoppingGuideSkill
 from engine_py.tools_registry.mall_domain import MallDomainService
 
@@ -44,15 +45,14 @@ def _stub_overview(monkeypatch: pytest.MonkeyPatch, overview: list[dict]) -> Non
 
 
 def _run_guide(text: str, guide_ctx: dict | None = None) -> dict:
-    ctx = {
-        "threadId": "t_guide",
-        "tenantId": "ecommerce",
-        "userId": "u_guide",
-        "input": text,
-        "slots": {},
-        "extra": {"guideContext": guide_ctx} if guide_ctx else {},
-    }
-    return asyncio.run(ShoppingGuideSkill().execute(ctx))
+    ctx = SkillContext(
+        thread_id="t_guide",
+        tenant_id="ecommerce",
+        user_id="u_guide",
+        input=text,
+        guide_context=guide_ctx or {},
+    )
+    return asyncio.run(ShoppingGuideSkill().execute(ctx)).to_dict()
 
 
 def test_very_vague_input_triggers_clarification(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,16 +123,16 @@ def test_candidates_contract_feeds_cart_skill(monkeypatch: pytest.MonkeyPatch) -
     MallDomainService._cart_storage.pop("u_guide", None)
     cart_res = asyncio.run(
         CartManageSkill().execute(
-            {
-                "threadId": "t_guide",
-                "tenantId": "ecommerce",
-                "userId": "u_guide",
-                "input": "把第2件加入购物车",
-                "slots": {"activeIntent": "cart_manage"},
-                "extra": {"guideContext": guide_ctx},
-            }
+            SkillContext(
+                thread_id="t_guide",
+                tenant_id="ecommerce",
+                user_id="u_guide",
+                input="把第2件加入购物车",
+                slots={"activeIntent": "cart_manage"},
+                guide_context=guide_ctx,
+            )
         )
-    )
+    ).to_dict()
     cart_map = {i["skuId"]: i["quantity"] for i in MallDomainService._cart_storage["u_guide"]}
     assert cart_map == {"prod_nike_invincible_3": 1}, "第2件 = 导购候选#2 Invincible"
     assert "Invincible" in cart_res["output"]
@@ -140,8 +140,8 @@ def test_candidates_contract_feeds_cart_skill(monkeypatch: pytest.MonkeyPatch) -
 
 def test_shopping_guide_can_handle_fallback() -> None:
     skill = ShoppingGuideSkill()
-    assert skill.can_handle({"input": "帮我挑一款跑鞋"}) is True
-    assert skill.can_handle({"input": "查询订单状态"}) is False
+    assert skill.can_handle(SkillContext(input="帮我挑一款跑鞋")) is True
+    assert skill.can_handle(SkillContext(input="查询订单状态")) is False
 
 
 def test_guide_card_carries_no_fabricated_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,14 +179,14 @@ def _run_inquiry(
         return spi
 
     monkeypatch.setattr(ProductInquirySkill, "get_spi_client", fake_client)
-    ctx = {
-        "threadId": "t_inq",
-        "tenantId": "ecommerce",
-        "userId": "u_inq",
-        "input": input_text,
-        "slots": {"query": query},
-    }
-    return asyncio.run(ProductInquirySkill().execute(ctx))
+    ctx = SkillContext(
+        thread_id="t_inq",
+        tenant_id="ecommerce",
+        user_id="u_inq",
+        input=input_text,
+        slots={"query": query},
+    )
+    return asyncio.run(ProductInquirySkill().execute(ctx)).to_dict()
 
 
 def test_inquiry_lists_products_with_stock(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import asyncio
 
-from engine_py.skills.cart_manage_skill import CartManageSkill
+from engine_py.skills.cart import CartManageSkill
 from engine_py.tools_registry.mall_domain import MallDomainService
+from engine_py.skills.contract import SkillContext
 
 _USER = "u_delname"
 
@@ -27,22 +28,20 @@ _INITIAL_ITEMS = [
 def _run_skill(user_input: str) -> dict:
     # 复刻全量加购后的状态:三款在车,lastModifiedItemId 指向最后一款(Windrunner)
     MallDomainService._cart_storage[_USER] = [dict(i) for i in _INITIAL_ITEMS]
-    context = {
-        "threadId": "t_delname",
-        "tenantId": "ecommerce",
-        "userId": _USER,
-        "input": user_input,
-        "slots": {"activeIntent": "cart_manage"},
-        "extra": {
-            "guideContext": {},
-            "cartContext": {
+    context = SkillContext(
+        thread_id="t_delname",
+        tenant_id="ecommerce",
+        user_id=_USER,
+        input=user_input,
+        slots={"activeIntent": "cart_manage"},
+        guide_context={},
+        cart_context={
                 "lastModifiedItemId": "prod_nike_windrunner_jacket",
                 "items": _INITIAL_ITEMS,
                 "totalAmount": 2797.0,
             },
-        },
-    }
-    return asyncio.run(CartManageSkill().execute(context))
+    )
+    return asyncio.run(CartManageSkill().execute(context)).to_dict()
 
 
 def _remaining() -> list[str]:

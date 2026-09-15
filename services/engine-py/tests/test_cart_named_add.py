@@ -22,6 +22,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from engine_py.skills.cart import CartManageSkill
+from engine_py.skills.contract import SkillContext
+
 _MERCHANT_SPUS_DDL = """
 CREATE TABLE IF NOT EXISTS merchant_spus (
   id UUID PRIMARY KEY,
@@ -141,14 +144,13 @@ _GUIDE_CONTEXT = {
 }
 
 
-def _named_add_context(user_input: str) -> dict:
-    return {
-        "input": user_input,
-        "userId": "CUST-NAMED-01",
-        "tenantId": "aurora",
-        "slots": {},
-        "extra": {"guideContext": _GUIDE_CONTEXT},
-    }
+def _named_add_context(user_input: str) -> SkillContext:
+    return SkillContext(
+        input=user_input,
+        user_id="CUST-NAMED-01",
+        tenant_id="aurora",
+        guide_context=_GUIDE_CONTEXT,
+    )
 
 
 def test_named_product_with_spec_lands_exact_sku(pg_factory):
@@ -157,14 +159,13 @@ def test_named_product_with_spec_lands_exact_sku(pg_factory):
 
 
 async def _named_spec_scenario(pg_factory) -> None:
-    from engine_py.skills.cart_manage_skill import CartManageSkill
     from engine_py.tools_registry.mall_domain import MallDomainService
 
     merchant_engine, original_reader = await _setup_shelf(pg_factory)
     try:
-        result = await CartManageSkill().execute(
+        result = (await CartManageSkill().execute(
             _named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车")
-        )
+        )).to_dict()
         assert result["success"] is True
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
         # 点名直配行以 SKU 码为主键(与商城页加购同构):同款不同规格必须
@@ -193,14 +194,13 @@ def test_same_spu_two_specs_coexist(pg_factory):
 
 
 async def _two_specs_scenario(pg_factory) -> None:
-    from engine_py.skills.cart_manage_skill import CartManageSkill
     from engine_py.tools_registry.mall_domain import MallDomainService
 
     merchant_engine, original_reader = await _setup_shelf(pg_factory)
     try:
-        r1 = await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车"))
+        r1 = (await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车"))).to_dict()
         assert r1["success"] is True
-        r2 = await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 L码 加入购物车"))
+        r2 = (await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 L码 加入购物车"))).to_dict()
         assert r2["success"] is True
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
         assert [i["skuId"] for i in items] == ["SKU-N-COAT-BLACK-M", "SKU-N-COAT-BLACK-L"], (
@@ -209,7 +209,7 @@ async def _two_specs_scenario(pg_factory) -> None:
         assert "已在购物车" not in r2["output"], "不同规格不得被误判为重复"
 
         # 三次:重复加购已存在的 M 规格 → 诚实提示已在车(同规格去重)
-        r3 = await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车"))
+        r3 = (await CartManageSkill().execute(_named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车"))).to_dict()
         assert "已在购物车" in r3["output"]
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
         assert len(items) == 2, f"同规格重复不得新增行,实际: {[i['skuId'] for i in items]}"
@@ -223,12 +223,11 @@ def test_named_off_shelf_product_asks_not_substitutes(pg_factory):
 
 
 async def _named_off_shelf_scenario(pg_factory) -> None:
-    from engine_py.skills.cart_manage_skill import CartManageSkill
     from engine_py.tools_registry.mall_domain import MallDomainService
 
     merchant_engine, original_reader = await _setup_shelf(pg_factory)
     try:
-        result = await CartManageSkill().execute(_named_add_context("滑雪板 加入购物车"))
+        result = (await CartManageSkill().execute(_named_add_context("滑雪板 加入购物车"))).to_dict()
         assert result["success"] is True
         assert "哪一款" in result["output"], f"配不中必须反问而非错替,实际: {result['output'][:80]}"
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
@@ -243,12 +242,11 @@ def test_bare_add_still_takes_first_candidate(pg_factory):
 
 
 async def _bare_add_scenario(pg_factory) -> None:
-    from engine_py.skills.cart_manage_skill import CartManageSkill
     from engine_py.tools_registry.mall_domain import MallDomainService
 
     merchant_engine, original_reader = await _setup_shelf(pg_factory)
     try:
-        result = await CartManageSkill().execute(_named_add_context("加入购物车"))
+        result = (await CartManageSkill().execute(_named_add_context("加入购物车"))).to_dict()
         assert result["success"] is True
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
         assert [i["skuId"] for i in items] == ["SPU-N-POLO"], (
@@ -266,7 +264,6 @@ def test_stale_slot_target_overridden_by_named_product(pg_factory):
 
 
 async def _stale_slot_scenario(pg_factory) -> None:
-    from engine_py.skills.cart_manage_skill import CartManageSkill
     from engine_py.tools_registry.mall_domain import MallDomainService
 
     merchant_engine, original_reader = await _setup_shelf(pg_factory)
@@ -275,9 +272,13 @@ async def _stale_slot_scenario(pg_factory) -> None:
         MallDomainService._cart_storage["CUST-NAMED-01"] = [
             {"skuId": "SPU-N-LEGACY-BAG", "quantity": 2, "title": "极光 高山徒步轻量化背包 38L/45L", "price": 829.0}
         ]
-        ctx = _named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车")
-        ctx["slots"] = {"productId": "SPU-N-LEGACY-BAG"}
-        result = await CartManageSkill().execute(ctx)
+        from dataclasses import replace as _dc_replace
+
+        ctx = _dc_replace(
+            _named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车"),
+            slots={"productId": "SPU-N-LEGACY-BAG"},
+        )
+        result = (await CartManageSkill().execute(ctx)).to_dict()
         assert result["success"] is True
         assert "背包" not in result["output"], f"遗留槽位目标不得顶替点名商品: {result['output'][:80]}"
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
@@ -296,13 +297,12 @@ def test_pure_deixis_reference_keeps_slot_target(pg_factory):
 
 
 async def _pure_deixis_scenario(pg_factory) -> None:
-    from engine_py.skills.cart_manage_skill import CartManageSkill
     from engine_py.tools_registry.mall_domain import MallDomainService
 
     merchant_engine, original_reader = await _setup_shelf(pg_factory)
     try:
         # 纯指代无 slots:落到既有 candidate[0] 链(候选自带真价,无价不入车不拦)
-        result = await CartManageSkill().execute(_named_add_context("把刚才那个加入购物车"))
+        result = (await CartManageSkill().execute(_named_add_context("把刚才那个加入购物车"))).to_dict()
         assert result["success"] is True
         items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
         assert [i["skuId"] for i in items] == ["SPU-N-POLO"], (

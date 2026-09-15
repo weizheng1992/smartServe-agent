@@ -75,6 +75,7 @@ async def _teardown(engine, merchant_engine, original, thread_id: str):
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM pending_approvals WHERE thread_id = :t").bindparams(t=thread_id))
         await conn.execute(text("DELETE FROM task_memory WHERE thread_id = :t").bindparams(t=thread_id))
+        await conn.execute(text("DELETE FROM messages WHERE thread_id = :t").bindparams(t=thread_id))
         await conn.execute(text("DELETE FROM threads WHERE id = :t").bindparams(t=thread_id))
     await merchant_engine.dispose()
 

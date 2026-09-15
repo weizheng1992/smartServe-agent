@@ -24,7 +24,8 @@ import pytest
 
 from engine_py.graph.nodes import executor as executor_module
 from engine_py.graph.nodes import step_execution_engine
-from engine_py.skills.cart_manage_skill import CartManageSkill
+from engine_py.skills.cart import CartManageSkill
+from engine_py.skills.contract import SkillContext, SkillResult
 from engine_py.skills.guide_skills import ShoppingGuideSkill
 from engine_py.tools_registry.mall_domain import MallDomainService
 from engine_py.triage.slot_extractor import SlotExtractor
@@ -72,7 +73,7 @@ def test_colloquial_hot_phrase_routes_to_guide(phrase: str):
     曾不命中 → structured_llm 图路径 → 候选不刷新(幻影根源之一)。"""
     result = SlotExtractor.extract(phrase)
     assert result["intentType"] == "shopping_guide", f"{phrase!r} 应命中导购快轨规则"
-    assert ShoppingGuideSkill().can_handle({"input": phrase}) is True
+    assert ShoppingGuideSkill().can_handle(SkillContext(input=phrase)) is True
 
 
 def test_cart_phrase_not_hijacked_by_guide_rule():
@@ -192,19 +193,16 @@ def test_skill_extra_guide_context_threads(monkeypatch: pytest.MonkeyPatch):
     class _FakeSkill:
         metadata = {"name": "商品智能导购"}
 
-        async def execute(self, _context: dict) -> dict:
-            return {
-                "success": True,
-                "output": "为您精选了以下推荐商品…",
-                "extra": {
-                    "guideContext": {
-                        "candidateProductIds": ["SPU-T-SHIRT-1"],
-                        "candidateProducts": [dict(FRESH_TOOL_PRODUCTS[0])],
-                        "clarificationRound": 1,
-                        "lastSearchQuery": "卖的好的短袖",
-                    }
+        async def execute(self, _context) -> SkillResult:
+            return SkillResult(
+                output="为您精选了以下推荐商品…",
+                guide_context={
+                    "candidateProductIds": ["SPU-T-SHIRT-1"],
+                    "candidateProducts": [dict(FRESH_TOOL_PRODUCTS[0])],
+                    "clarificationRound": 1,
+                    "lastSearchQuery": "卖的好的短袖",
                 },
-            }
+            )
 
     class _FakeRegistry:
         @staticmethod
@@ -245,9 +243,9 @@ def test_add_to_cart_without_candidates_asks_honestly(monkeypatch: pytest.Monkey
     monkeypatch.setattr(MallDomainService, "add_to_cart", staticmethod(fake_add))
 
     async def scenario() -> dict:
-        return await CartManageSkill().execute(
-            {"input": "把第一件加入购物车", "userId": "u1", "threadId": "t1", "extra": {}}
-        )
+        return (await CartManageSkill().execute(
+            SkillContext(input="把第一件加入购物车", user_id="u1", thread_id="t1")
+        )).to_dict()
 
     res = asyncio.run(scenario())
     assert res["success"] is True
@@ -276,9 +274,9 @@ def test_qty_change_unresolvable_target_asks_honestly(monkeypatch: pytest.Monkey
     monkeypatch.setattr(MallDomainService, "update_cart_item", staticmethod(fake_update))
 
     async def scenario() -> dict:
-        return await CartManageSkill().execute(
-            {"input": "把那件数量改成2", "userId": "u1", "threadId": "t1", "extra": {}}
-        )
+        return (await CartManageSkill().execute(
+            SkillContext(input="把那件数量改成2", user_id="u1", thread_id="t1")
+        )).to_dict()
 
     res = asyncio.run(scenario())
     assert res["success"] is True

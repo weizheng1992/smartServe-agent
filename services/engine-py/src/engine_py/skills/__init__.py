@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from .base_skill import BaseSkill
-from .cart_manage_skill import CartManageSkill
+from .cart import CartManageSkill
+from .contract import SkillContext
 from .guide_skills import ProductInquirySkill, ShoppingGuideSkill
 from .order_skills import OrderAddressModificationSkill, OrderRefundSkill
 
@@ -38,7 +39,7 @@ class SkillRegistry:
         return list(cls._skills.values())
 
     @classmethod
-    def find_matching_skill(cls, context: dict) -> BaseSkill | None:
+    def find_matching_skill(cls, context: SkillContext) -> BaseSkill | None:
         cls._ensure_initialized()
         for skill in cls._skills.values():
             if skill.can_handle(context):
@@ -58,7 +59,7 @@ def is_action_query(input_text: str, tenant_id: str = "") -> bool:
     try:
         return (
             SkillRegistry.find_matching_skill(
-                {"input": input_text or "", "tenantId": tenant_id, "slots": {}}
+                SkillContext(input=input_text or "", tenant_id=tenant_id or "ecommerce")
             )
             is not None
         )

@@ -59,9 +59,22 @@ class _FakeSkill:
         self._result = result
         self.executed_with: dict | None = None
 
-    async def execute(self, context: dict) -> dict:
+    async def execute(self, context) -> SkillResult:
         self.executed_with = context
-        return self._result
+        from engine_py.skills.contract import SkillResult
+
+        d = dict(self._result)
+        extra = d.pop("extra", None)
+        return SkillResult(
+            success=d.get("success", True),
+            output=d.get("output", ""),
+            next_action=d.get("nextAction", "finish"),
+            cards=d.get("cards"),
+            task_plan=d.get("taskPlan"),
+            guide_context=(extra or {}).get("guideContext"),
+            cart_context=(extra or {}).get("cartContext"),
+            order_context=(extra or {}).get("orderContext"),
+        )
 
 
 def _order_query_state() -> dict:

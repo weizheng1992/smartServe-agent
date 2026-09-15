@@ -22,6 +22,7 @@ from sqlalchemy.pool import NullPool
 from engine_py.skills.guide_skills import ShoppingGuideSkill
 from engine_py.tools_registry import order_domain
 from engine_py.tools_registry.mall_domain import MallDomainService
+from engine_py.skills.contract import SkillContext
 
 # ── 纯函数缝:词元切分 ────────────────────────────────────────────────────
 
@@ -137,15 +138,16 @@ def test_user_exact_sentence_returns_both_categories(merchant_pg) -> None:
 
 def test_guide_skill_honors_requested_count(merchant_pg) -> None:
     """「我要2个商品」→ 推荐 2 款,不是硬编码 3。"""
-    context = {
-        "threadId": "t_qty",
-        "tenantId": "ecommerce",
-        "userId": "CUST-8801",
-        "input": "我要2个商品,裤子和衬衫都推荐一下",
-        "slots": {"activeIntent": "shopping_guide"},
-        "extra": {"guideContext": {}, "cartContext": {}},
-    }
-    result = asyncio.run(ShoppingGuideSkill().execute(context))
+    context = SkillContext(
+        thread_id="t_qty",
+        tenant_id="ecommerce",
+        user_id="CUST-8801",
+        input="我要2个商品,裤子和衬衫都推荐一下",
+        slots={"activeIntent": "shopping_guide"},
+        guide_context={},
+        cart_context={},
+    )
+    result = asyncio.run(ShoppingGuideSkill().execute(context)).to_dict()
     count = result["output"].count("【")
     assert count == 2, f"用户要 2 个商品,实际推荐 {count} 个"
     names = result["output"]
@@ -163,15 +165,16 @@ def test_multi_term_interleave_gives_each_category_a_seat(merchant_pg) -> None:
 
 def test_chinese_numeral_count_honored(merchant_pg) -> None:
     """「我要三个商品」→ 3 款(中文数字不得静默丢弃)。"""
-    context = {
-        "threadId": "t_qty3",
-        "tenantId": "ecommerce",
-        "userId": "CUST-8801",
-        "input": "我要四个商品,推荐一下",
-        "slots": {"activeIntent": "shopping_guide"},
-        "extra": {"guideContext": {}, "cartContext": {}},
-    }
-    result = asyncio.run(ShoppingGuideSkill().execute(context))
+    context = SkillContext(
+        thread_id="t_qty3",
+        tenant_id="ecommerce",
+        user_id="CUST-8801",
+        input="我要四个商品,推荐一下",
+        slots={"activeIntent": "shopping_guide"},
+        guide_context={},
+        cart_context={},
+    )
+    result = asyncio.run(ShoppingGuideSkill().execute(context)).to_dict()
     assert result["output"].count("【") == 4
 
 

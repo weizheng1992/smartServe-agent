@@ -6,6 +6,7 @@ import re
 
 from ..tools_registry.mall_domain import MallDomainService
 from .base_skill import BaseSkill
+from .contract import SkillContext, SkillResult
 
 # 规格问句识别(2026-09-12):命中即对检索首位商品直查真货架 SKU
 _SPEC_ASK_RE = re.compile(r"(规格|尺码|尺寸|颜色|码数|参数|型号)")
@@ -22,14 +23,13 @@ class ProductInquirySkill(BaseSkill):
         "version": "1.0.0",
     }
 
-    async def execute(self, context: dict) -> dict:
-        slots = context.get("slots") or {}
-        query = slots.get("query") or context.get("input") or ""
-        category = slots.get("category")
+    async def execute(self, context: SkillContext) -> SkillResult:
+        query = context.slots.get("query") or context.input or ""
+        category = context.slots.get("category")
 
-        spi_client = await self.get_spi_client(context.get("tenantId", "ecommerce"))
+        spi_client = await self.get_spi_client(context.tenant_id)
         products = await spi_client.search_products(
-            {"query": query, "category": category, "tenantId": context.get("tenantId", "ecommerce"), "limit": 3}
+            {"query": query, "category": category, "tenantId": context.tenant_id, "limit": 3}
         )
 
         if not products:
@@ -45,12 +45,7 @@ class ProductInquirySkill(BaseSkill):
                 if inventory_line
                 else "您可以尝试更换关键词或咨询在线客服。"
             )
-            return {
-                "success": True,
-                "skillId": self.metadata["id"],
-                "output": output,
-                "nextAction": "finish",
-            }
+            return SkillResult(skill_id=self.metadata["id"], output=output)
 
         # 规格问句直答(2026-09-12):「有什么规格/尺码/颜色」类问句,检索首位
         # 商品命中即直查真货架 SKU 出参(real-data-only/01 残余项③)—— 不再
@@ -70,25 +65,21 @@ class ProductInquirySkill(BaseSkill):
                     f"（{'现货' if s.get('inStock') else '缺货'}）"
                     for s in skus
                 )
-                return {
-                    "success": True,
-                    "skillId": self.metadata["id"],
-                    "output": (
+                return SkillResult(
+                    skill_id=self.metadata["id"],
+                    output=(
                         f"为您找到【{top.get('title')}】，可选规格如下：\n{spec_lines}\n\n"
                         "如需把某一款加入购物车或了解详情，请随时告诉我！"
                     ),
-                    "nextAction": "finish",
-                }
+                )
 
         product_summary = "\n\n".join(
             self._format_product(p) for p in products
         )
-        return {
-            "success": True,
-            "skillId": self.metadata["id"],
-            "output": f"为您找到以下相关商品：\n{product_summary}\n\n如需了解具体尺码规格或下单，请随时告诉我！",
-            "nextAction": "finish",
-        }
+        return SkillResult(
+            skill_id=self.metadata["id"],
+            output=f"为您找到以下相关商品：\n{product_summary}\n\n如需了解具体尺码规格或下单，请随时告诉我！",
+        )
 
     @staticmethod
     def _format_spec(specs: dict | None) -> str:
@@ -140,17 +131,17 @@ class ShoppingGuideSkill(BaseSkill):
     # 否定购买意向(2026-09-14 N2 实报):「我不想买了/别推荐」严禁再搜索推荐
     _NEGATIVE_INTENT_RE = re.compile(r"(?:不想买|别.{0,2}推荐|不要推荐|不再推荐|停止推荐)")
 
-    def can_handle(self, context: dict) -> bool:
+    def can_handle(self, context: SkillContext) -> bool:
         if super().can_handle(context):
             return True
-        user_input = (context.get("input") or "").lower()
+        user_input = context.input.lower()
         if self._NEGATIVE_INTENT_RE.search(user_input):
             return False
         return bool(self._FALLBACK_RE.search(user_input))
 
-    async def execute(self, context: dict) -> dict:
-        user_input = (context.get("input") or "").strip()
-        existing_guide = (context.get("extra") or {}).get("guideContext") or {}
+    async def execute(self, context: SkillContext) -> SkillResult:
+        user_input = context.input.strip()
+        existing_guide = context.guide_context or {}
         extracted_prefs: dict = {**(existing_guide.get("extractedPreferences") or {})}
         clarification_round = existing_guide.get("clarificationRound") or 0
 
@@ -185,18 +176,14 @@ class ShoppingGuideSkill(BaseSkill):
         )
         if is_very_vague:
             clarification_round += 1
-            return {
-                "success": True,
-                "skillId": self.metadata["id"],
-                "output": (
+            return SkillResult(
+                skill_id=self.metadata["id"],
+                output=(
                     "您好！我是您的专属选品顾问。请问您这次选购是男款还是女款？"
                     "主要用于日常通勤还是专业运动跑步呢？告诉我您的偏好或预算，我将为您精准挑选！✨"
                 ),
-                "nextAction": "finish",
-                "extra": {
-                    "guideContext": {"extractedPreferences": extracted_prefs, "clarificationRound": clarification_round}
-                },
-            }
+                guide_context={"extractedPreferences": extracted_prefs, "clarificationRound": clarification_round},
+            )
 
         # 3. 商品检索与推荐
         # 数量语义(2026-09-12 用户实报「我要2个商品」被无视):「N个/N件」
@@ -214,8 +201,8 @@ class ShoppingGuideSkill(BaseSkill):
                 "query": user_input,
                 "maxPrice": max_price,
                 "limit": limit,
-                "businessId": context.get("tenantId"),
-                "threadId": context.get("threadId"),
+                "businessId": context.tenant_id,
+                "threadId": context.thread_id,
             }
         )
         products = search_res.get("products") or []
@@ -237,8 +224,8 @@ class ShoppingGuideSkill(BaseSkill):
                 # 走 search_products 完整链(词元展开/商户账本/降级链同源)
                 ctx_query = " ".join(ctx_terms)
                 full_res = await MallDomainService.search_products(
-                    {"query": ctx_query, "limit": 50, "threadId": context.get("threadId"),
-                     "businessId": context.get("tenantId")}
+                    {"query": ctx_query, "limit": 50, "threadId": context.thread_id,
+                     "businessId": context.tenant_id}
                 )
                 priced = sorted(
                     (p for p in (full_res.get("products") or []) if p.get("price") is not None),
@@ -253,13 +240,11 @@ class ShoppingGuideSkill(BaseSkill):
                         f"{i + 1}. 【{p['name']}】 ¥{p['price']} (现货 {p.get('stock')} 件)"
                         for i, p in enumerate(items)
                     )
-                    return {
-                        "success": True,
-                        "skillId": self.metadata["id"],
-                        "output": f"为您找到{('「' + ctx_terms[0] + '」') if ctx_terms else ''}中间价位的商品：\n\n{lines}",
-                        "nextAction": "finish",
-                        "extra": {"guideContext": {"lastSearchQuery": last_query}},
-                    }
+                    return SkillResult(
+                        skill_id=self.metadata["id"],
+                        output=f"为您找到{('「' + ctx_terms[0] + '」') if ctx_terms else ''}中间价位的商品：\n\n{lines}",
+                        guide_context={"lastSearchQuery": last_query},
+                    )
                 if len(priced) >= 2:
                     lo, hi = priced[0], priced[-1]
                     diff = float(hi["price"]) - float(lo["price"])
@@ -276,21 +261,17 @@ class ShoppingGuideSkill(BaseSkill):
                         f"{_line('💎 最贵', hi)}\n\n"
                         f"💰 价差：¥{diff:.0f}。{'价差主要来自容量/材质/配置档位，按用途选择即可' if diff > 0 else ''}"
                     )
-                    return {
-                        "success": True,
-                        "skillId": self.metadata["id"],
-                        "output": output,
-                        "nextAction": "finish",
-                        "extra": {
-                            "guideContext": {
-                                "candidateProductIds": [lo["id"], hi["id"]],
-                                "candidateProducts": [lo, hi],
-                                "lastSearchQuery": last_query,
-                                "extractedPreferences": extracted_prefs,
-                                "clarificationRound": clarification_round,
-                            }
+                    return SkillResult(
+                        skill_id=self.metadata["id"],
+                        output=output,
+                        guide_context={
+                            "candidateProductIds": [lo["id"], hi["id"]],
+                            "candidateProducts": [lo, hi],
+                            "lastSearchQuery": last_query,
+                            "extractedPreferences": extracted_prefs,
+                            "clarificationRound": clarification_round,
                         },
-                    }
+                    )
 
         if not products:
             # 品类盘点引导(2026-09-12):诚实空不冷场 —— 告诉用户店里实际有什么,
@@ -305,12 +286,7 @@ class ShoppingGuideSkill(BaseSkill):
                 if inventory_line
                 else "建议您可以调整预算或关键词再试一次！"
             )
-            return {
-                "success": True,
-                "skillId": self.metadata["id"],
-                "output": output,
-                "nextAction": "finish",
-            }
+            return SkillResult(skill_id=self.metadata["id"], output=output)
 
         # 4. 组装商品卡片
         # 诚实性(ADR-0002 数据条件禁令):商户货架无销量数据,推荐卡严禁
@@ -368,14 +344,12 @@ class ShoppingGuideSkill(BaseSkill):
             "clarificationRound": clarification_round + 1,
             "lastSearchQuery": user_input,
         }
-        return {
-            "success": True,
-            "skillId": self.metadata["id"],
-            "output": output,
-            "cards": cards,
-            "nextAction": "finish",
-            "extra": {"guideContext": guide_context},
-        }
+        return SkillResult(
+            skill_id=self.metadata["id"],
+            output=output,
+            cards=cards,
+            guide_context=guide_context,
+        )
 
     @staticmethod
     def _format_candidate(p: dict, idx: int) -> str:

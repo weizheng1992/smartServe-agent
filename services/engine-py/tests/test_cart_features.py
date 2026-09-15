@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 
-from engine_py.skills.cart_manage_skill import CartManageSkill
+from engine_py.skills.cart import CartManageSkill
+from engine_py.skills.contract import SkillContext
 from engine_py.tools_registry.mall_domain import MallDomainService
 
 _PEG = {"skuId": "prod_nike_air_pegasus_41", "title": "Nike Air Zoom Pegasus 41 极速轻量透气跑鞋", "price": 899.0, "quantity": 1}
@@ -34,18 +35,16 @@ def _cart(user: str) -> dict[str, int]:
 
 def _run(user: str, text: str, *, last_modified: str | None = None) -> dict:
     # 注意:不清 storage —— 各测试用 _seed 显式铺场,多轮场景依赖累积态
-    ctx = {
-        "threadId": f"t_{user}",
-        "tenantId": "ecommerce",
-        "userId": user,
-        "input": text,
-        "slots": {"activeIntent": "cart_manage"},
-        "extra": {
-            "guideContext": {"candidateProducts": _CANDIDATES, "candidateProductIds": [c["id"] for c in _CANDIDATES]},
-            "cartContext": {"lastModifiedItemId": last_modified} if last_modified else {},
-        },
-    }
-    return asyncio.run(CartManageSkill().execute(ctx))
+    ctx = SkillContext(
+        thread_id=f"t_{user}",
+        tenant_id="ecommerce",
+        user_id=user,
+        input=text,
+        slots={"activeIntent": "cart_manage"},
+        guide_context={"candidateProducts": _CANDIDATES, "candidateProductIds": [c["id"] for c in _CANDIDATES]},
+        cart_context={"lastModifiedItemId": last_modified} if last_modified else {},
+    )
+    return asyncio.run(CartManageSkill().execute(ctx)).to_dict()
 
 
 # ---------------------------------------------------------------- 查看 / 清空
@@ -171,28 +170,25 @@ def test_history_backtrack_fills_candidates_from_short_memory() -> None:
     """guideContext 为空时,从短期记忆的推荐列表回溯候选。"""
     _seed("u_hist", [])
     MallDomainService._cart_storage.pop("u_hist", None)
-    ctx = {
-        "threadId": "t_hist",
-        "tenantId": "ecommerce",
-        "userId": "u_hist",
-        "input": "把第2件加入购物车",
-        "slots": {"activeIntent": "cart_manage"},
-        "extra": {
-            "guideContext": {},
-            "shortMemory": [
-                {"role": "user", "content": "推荐跑鞋"},
-                {
-                    "role": "assistant",
-                    "content": (
-                        "为您精选推荐商品：\n"
-                        "1. 【Nike Air Zoom Pegasus 41 极速轻量透气跑鞋】 ¥899.0 (现货)\n"
-                        "2. 【Nike ZoomX Invincible Run 3 旗舰缓震跑鞋】 ¥1299.0 (现货)\n"
-                    ),
-                },
-            ],
-        },
-    }
-    res = asyncio.run(CartManageSkill().execute(ctx))
+    ctx = SkillContext(
+        thread_id="t_hist",
+        tenant_id="ecommerce",
+        user_id="u_hist",
+        input="把第2件加入购物车",
+        slots={"activeIntent": "cart_manage"},
+        short_memory=[
+            {"role": "user", "content": "推荐跑鞋"},
+            {
+                "role": "assistant",
+                "content": (
+                    "为您精选推荐商品：\n"
+                    "1. 【Nike Air Zoom Pegasus 41 极速轻量透气跑鞋】 ¥899.0 (现货)\n"
+                    "2. 【Nike ZoomX Invincible Run 3 旗舰缓震跑鞋】 ¥1299.0 (现货)\n"
+                ),
+            },
+        ],
+    )
+    res = asyncio.run(CartManageSkill().execute(ctx)).to_dict()
     cart = _cart("u_hist")
     assert list(cart) == ["prod_recommend_2"], "第2件应取自历史回溯候选"
     assert "Invincible" in res["output"]
@@ -240,5 +236,5 @@ def test_qty_on_empty_cart_does_not_claim_phantom_update() -> None:
 
 def test_can_handle_positive_and_negative() -> None:
     skill = CartManageSkill()
-    assert skill.can_handle({"input": "把第2件加入购物车", "slots": {"activeIntent": "cart_manage"}}) is True
-    assert skill.can_handle({"input": "今天天气怎么样"}) is False
+    assert skill.can_handle(SkillContext(input="把第2件加入购物车", slots={"activeIntent": "cart_manage"})) is True
+    assert skill.can_handle(SkillContext(input="今天天气怎么样")) is False

@@ -16,7 +16,8 @@ from ..db import IntentLog, LowConfidenceLog, get_session
 from ..event_bus import emit_job_result, emit_status
 from ..memory import ShortMemory, TaskMemory  # noqa: F401 (测试 patch 面)
 from ..onboarding import build_entry_cards, resolve_onboarding_config  # noqa: F401 (测试 patch 面)
-from ..skills import is_action_query  # noqa: F401 (测试 patch 面)
+from ..skills import is_action_query
+from ..skills.contract import SkillContext  # noqa: F401 (测试 patch 面)
 from ..tenant import sanitize_tenant_response, tenant_of_state
 from ..vision import analyze_images  # noqa: F401 (测试 patch 面)
 from .consult_fast_path import (  # noqa: F401 (测试 patch 面)
@@ -656,21 +657,21 @@ class IntentTriageEngine:
 
         input_text = state.get("input", "")
         slots = {**task_spec["slots"], "activeIntent": task_spec["intentType"]}
-        context = {
-            "threadId": thread_id,
-            "tenantId": tenant_id,
-            "userId": state.get("user_id"),
-            "input": input_text,
-            "slots": slots,
-            "imageUrls": state.get("image_urls"),
-            "extra": {
-                "damageAssessment": damage_assessment,
-                "guideContext": state.get("guide_context"),
-                "cartContext": state.get("cart_context"),
-                "orderContext": state.get("order_context"),
-                "shortMemory": history_msgs,
-            },
-        }
+        # 类型化契约适配器 A(triage 快轨,2026-09-15 架构深化②):线上
+        # state → SkillContext 只在此处翻译一次。
+        context = SkillContext(
+            thread_id=thread_id,
+            tenant_id=tenant_id,
+            user_id=state.get("user_id"),
+            input=input_text,
+            slots=slots,
+            image_urls=state.get("image_urls"),
+            guide_context=state.get("guide_context") or {},
+            cart_context=state.get("cart_context") or {},
+            order_context=state.get("order_context"),
+            damage_assessment=damage_assessment,
+            short_memory=history_msgs,
+        )
         try:
             matching_skill = SkillRegistry.find_matching_skill(context)
         except Exception as match_err:
@@ -690,30 +691,32 @@ class IntentTriageEngine:
             return None
 
         skill_result = await matching_skill.execute(context)
-        if skill_result.get("success") and skill_result.get("nextAction") == "finish":
-            if skill_result.get("cards"):
-                state["cards"] = (state.get("cards") or []) + skill_result["cards"]
-            for ctx_key in ("guideContext", "cartContext", "orderContext"):
-                extra_ctx = (skill_result.get("extra") or {}).get(ctx_key)
+        if skill_result.success and skill_result.next_action == "finish":
+            if skill_result.cards:
+                state["cards"] = (state.get("cards") or []) + skill_result.cards
+            for extra_ctx, state_key in (
+                (skill_result.guide_context, "guide_context"),
+                (skill_result.cart_context, "cart_context"),
+                (skill_result.order_context, "order_context"),
+            ):
                 if extra_ctx:
-                    state_key = {"guideContext": "guide_context", "cartContext": "cart_context", "orderContext": "order_context"}[ctx_key]
                     state[state_key] = {**(state.get(state_key) or {}), **extra_ctx}
             # 技能可携带恢复计划(HITL 挂起形):随 bypass 透传,防止 run_agent
             # 回合收口以 bypass 空计划覆盖挂起步骤(高价值改址审批恢复依赖它)
             bypass = await IntentTriageEngine.handle_immediate_bypass(
                 state,
                 f"skill_fast_track_{matching_skill.metadata['id']}",
-                skill_result["output"],
+                skill_result.output,
                 intents,
                 "skill_fast_track",
                 task_spec["confidence"],
                 damage_assessment,
-                cards=skill_result.get("cards"),
+                cards=skill_result.cards,
                 candidates=[
                     *(proposals or []),
                     _proposal("skill_fast_track", matching_skill.metadata["id"], task_spec["confidence"]),
                 ],
-                task_plan=skill_result.get("taskPlan"),
+                task_plan=skill_result.task_plan,
             )
             return {
                 **bypass,

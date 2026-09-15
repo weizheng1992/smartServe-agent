@@ -24,6 +24,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from engine_py.skills.contract import SkillContext
+
 REPRO_THREAD = "dbg_repro_thread_spi_ctx"
 REPRO_USER = "CUST-SPI-REPRO-1"
 ORDER_REFUNDED = "AURORA-ORD-2026-9082"
@@ -145,16 +147,16 @@ async def _third_party_status(merchant_engine, order_id: str) -> str | None:
         ).scalar()
 
 
-def _skill_context(order_id: str) -> dict:
+def _skill_context(order_id: str) -> SkillContext:
     """triage fast-track / 执行器技能派发的真实 context 形态(线程上下文齐全)。"""
-    return {
-        "threadId": REPRO_THREAD,
-        "tenantId": "aurora",
-        "userId": REPRO_USER,
-        "input": f"帮我申请订单 {order_id} 的退款",
-        "slots": {"orderId": order_id, "reason": "全额退款", "refundAmount": 49.00, "activeIntent": "order_return"},
-        "extra": {"isApproved": True},
-    }
+    return SkillContext(
+        thread_id=REPRO_THREAD,
+        tenant_id="aurora",
+        user_id=REPRO_USER,
+        input=f"帮我申请订单 {order_id} 的退款",
+        slots={"orderId": order_id, "reason": "全额退款", "refundAmount": 49.00, "activeIntent": "order_return"},
+        is_approved=True,
+    )
 
 
 async def _merchant_status(merchant_engine, order_id: str):
@@ -218,7 +220,7 @@ async def _blind_refund_scenario(pg_factory):
         assert await _third_party_status(merchant_engine, ORDER_REFUNDED) == "PAID", (
             "已 REFUNDED 订单经技能链路又发生了一次物理退款写(third_party 被改写)"
         )
-        assert result.get("success") is not True, (
+        assert result.success is not True, (
             f"已 REFUNDED 订单经技能链路被再次宣称退款成功: {result.get('output')}"
         )
     finally:
@@ -236,7 +238,7 @@ async def _write_through_scenario(pg_factory):
         from engine_py.skills.order_skills import OrderRefundSkill
 
         result = await OrderRefundSkill().execute(_skill_context(ORDER_PAID))
-        assert result.get("success") is True, f"合法退款应成功,实际: {result.get('error') or result.get('output')}"
+        assert result.success is True, f"合法退款应成功,实际: {result.error or result.output}"
 
         row = await _merchant_status(merchant_engine, ORDER_PAID)
         assert row["status"] == "REFUNDED", (

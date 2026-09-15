@@ -22,8 +22,9 @@ import asyncio
 
 import pytest
 
-from engine_py.skills.cart_manage_skill import CartManageSkill
+from engine_py.skills.cart import CartManageSkill
 from engine_py.tools_registry.mall_domain import MallDomainService
+from engine_py.skills.contract import SkillContext
 
 _CANDIDATES = [
     {"id": "prod_a", "name": "测试商品A", "price": 100.0},
@@ -118,21 +119,19 @@ def test_add_all_after_restart_reports_dup_not_false_success(sealed_redis_client
 
     async def flow() -> tuple[str, str]:
         async def _run_add_all(user_id: str) -> str:
-            context = {
-                "threadId": f"t_{user_id}",
-                "tenantId": "ecommerce",
-                "userId": user_id,
-                "input": "3个全部加入购物车",
-                "slots": {"activeIntent": "cart_manage"},
-                "extra": {
-                    "guideContext": {
+            context = SkillContext(
+                thread_id=f"t_{user_id}",
+                tenant_id="ecommerce",
+                user_id=user_id,
+                input="3个全部加入购物车",
+                slots={"activeIntent": "cart_manage"},
+                guide_context={
                         "candidateProducts": _CANDIDATES,
                         "candidateProductIds": [c["id"] for c in _CANDIDATES],
                     },
-                    "cartContext": {},
-                },
-            }
-            return (await CartManageSkill().execute(context))["output"]
+                cart_context={},
+            )
+            return ((await CartManageSkill().execute(context)).to_dict())["output"]
 
         first = await _run_add_all("u_readd")
         _simulate_process_restart()

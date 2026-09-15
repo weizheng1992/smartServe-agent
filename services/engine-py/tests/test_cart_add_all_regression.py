@@ -12,8 +12,9 @@ import asyncio
 
 import pytest
 
-from engine_py.skills.cart_manage_skill import CartManageSkill
+from engine_py.skills.cart import CartManageSkill
 from engine_py.tools_registry.mall_domain import MallDomainService
+from engine_py.skills.contract import SkillContext
 
 _CANDIDATES = [
     {"id": "prod_a", "name": "测试商品A", "price": 100.0},
@@ -25,22 +26,20 @@ _CANDIDATE_IDS = {c["id"] for c in _CANDIDATES}
 
 def _run_skill(user_input: str, user_id: str = "u_addall") -> None:
     # 镜像 _try_skill_fast_track 的真实调用形状
-    context = {
-        "threadId": "t_addall",
-        "tenantId": "ecommerce",
-        "userId": user_id,
-        "input": user_input,
-        "slots": {"activeIntent": "cart_manage"},
-        "extra": {
-            "guideContext": {
+    context = SkillContext(
+        thread_id="t_addall",
+        tenant_id="ecommerce",
+        user_id=user_id,
+        input=user_input,
+        slots={"activeIntent": "cart_manage"},
+        guide_context={
                 "candidateProducts": _CANDIDATES,
                 "candidateProductIds": sorted(_CANDIDATE_IDS),
             },
-            "cartContext": {},
-        },
-    }
+        cart_context={},
+    )
     MallDomainService._cart_storage.pop(user_id, None)
-    asyncio.run(CartManageSkill().execute(context))
+    asyncio.run(CartManageSkill().execute(context)).to_dict()
 
 
 @pytest.mark.parametrize(

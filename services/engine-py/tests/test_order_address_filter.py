@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS merchant_orders (
   order_id TEXT PRIMARY KEY,
   customer_id TEXT,
   status TEXT NOT NULL DEFAULT 'PAID',
-  total_amount NUMERIC(10,2)
+  total_amount NUMERIC(10,2),
+  currency TEXT NOT NULL DEFAULT 'CNY'
 )
 """
 
@@ -32,7 +33,11 @@ CREATE TABLE IF NOT EXISTS merchant_orders (
 # (沿 test_mock_purge 的列补齐先例,本套件不依赖文件名字典序)
 _MERCHANT_ORDERS_COLUMN_PATCHES = [
     "ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'::jsonb",
-    "ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT NOW()",
+    "ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'CNY'",
+    "ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS is_returnable BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS is_address_modifiable BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
 ]
 
 _UID = "CUST-ADDR-FILTER"

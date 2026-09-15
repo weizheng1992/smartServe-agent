@@ -14,6 +14,7 @@ import asyncio
 
 import pytest
 
+from engine_py.skills.contract import SkillResult
 from engine_py.triage import intent_triage_engine as triage_mod
 from engine_py.triage.intent_triage_engine import (
     MULTI_INTENT_CANDIDATE_RE,
@@ -80,8 +81,8 @@ class TestMoneyActionVeto:
         class _FakeSkill:
             metadata = {"id": "skill_fake", "category": skill_category}
 
-            async def execute(self, context: dict) -> dict:
-                return {"success": True, "nextAction": "finish", "output": "假技能回复"}
+            async def execute(self, context) -> SkillResult:
+                return SkillResult(output="假技能回复")
 
         from engine_py.skills import SkillRegistry
 
@@ -384,8 +385,8 @@ class TestMoneyActionYieldWiring:
         class _FakeSkill:
             metadata = {"id": "skill_shopping_guide", "category": "pre_sale"}
 
-            async def execute(self, context: dict) -> dict:
-                return {"success": True, "nextAction": "finish", "output": "假导购回复"}
+            async def execute(self, context) -> SkillResult:
+                return SkillResult(output="假导购回复")
 
         from engine_py.skills import SkillRegistry
 

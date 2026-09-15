@@ -21,6 +21,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from engine_py.skills.contract import SkillContext
+
 UID = "CUST-8801"
 TID = "phase2_thread"
 
@@ -670,20 +672,18 @@ def test_bridge_excludes_refunded_orders(pg_factory):
 # ── 购物车 SOP 分支路由 ───────────────────────────────────────────────────
 
 
-def _skill_ctx(input_text: str) -> dict:
-    return {
-        "threadId": TID,
-        "tenantId": "ecommerce",
-        "userId": UID,
-        "input": input_text,
-        "slots": {},
-        "extra": {},
-    }
+def _skill_ctx(input_text: str) -> SkillContext:
+    return SkillContext(
+        thread_id=TID,
+        tenant_id="ecommerce",
+        user_id=UID,
+        input=input_text,
+    )
 
 
 class TestCartSkillBranches:
     def test_checkout_branch_calls_real_checkout(self, monkeypatch):
-        from engine_py.skills.cart_manage_skill import CartManageSkill
+        from engine_py.skills.cart import CartManageSkill
         from engine_py.tools_registry.mall_domain import MallDomainService
 
         calls: list[dict] = []
@@ -694,13 +694,13 @@ class TestCartSkillBranches:
                     "items": [], "shippingAddress": "默认地址"}
 
         monkeypatch.setattr(MallDomainService, "checkout_user_cart", staticmethod(_fake_checkout))
-        result = asyncio.run(CartManageSkill().execute(_skill_ctx("把购物车里的东西结算下单")))
+        result = asyncio.run(CartManageSkill().execute(_skill_ctx("把购物车里的东西结算下单"))).to_dict()
         assert len(calls) == 1 and calls[0].get("userId") == UID
         assert "AURORA-ORD-2026-7777" in (result.get("output") or "")
 
     def test_bare_jiesuan_stays_view(self, monkeypatch):
         """裸「结算」保持查看摘要语义(旧契约),不得误开真实订单。"""
-        from engine_py.skills.cart_manage_skill import CartManageSkill
+        from engine_py.skills.cart import CartManageSkill
         from engine_py.tools_registry.mall_domain import MallDomainService
 
         calls: list[dict] = []
@@ -714,13 +714,13 @@ class TestCartSkillBranches:
 
         monkeypatch.setattr(MallDomainService, "checkout_user_cart", staticmethod(_fake_checkout))
         monkeypatch.setattr(MallDomainService, "get_cart_summary", staticmethod(_fake_summary))
-        result = asyncio.run(CartManageSkill().execute(_skill_ctx("结算")))
+        result = asyncio.run(CartManageSkill().execute(_skill_ctx("结算"))).to_dict()
         assert not calls, "裸结算严禁触发真实下单"
         assert result.get("success") is True
 
     def test_negation_never_checks_out(self, monkeypatch):
         """「我还没下单/先不付款」等否定形严禁开出真单。"""
-        from engine_py.skills.cart_manage_skill import CartManageSkill
+        from engine_py.skills.cart import CartManageSkill
         from engine_py.tools_registry.mall_domain import MallDomainService
 
         calls: list = []
@@ -731,13 +731,13 @@ class TestCartSkillBranches:
 
         monkeypatch.setattr(MallDomainService, "checkout_user_cart", staticmethod(_fake_checkout))
         for phrase in ("我还没下单呢", "先不付款", "货到付款可以吗", "不要下单"):
-            asyncio.run(CartManageSkill().execute(_skill_ctx(phrase)))
+            asyncio.run(CartManageSkill().execute(_skill_ctx(phrase))).to_dict()
         assert not calls, f"否定形误触结算: {calls}"
 
     def test_delete_plus_checkout_yields_to_delete(self, monkeypatch):
         """「删掉背包然后结算下单」:删除半必须先被执行,严禁吞掉删半带
         着不要的商品开出真单。"""
-        from engine_py.skills.cart_manage_skill import CartManageSkill
+        from engine_py.skills.cart import CartManageSkill
         from engine_py.tools_registry.mall_domain import MallDomainService
 
         checkout_calls: list = []
@@ -760,12 +760,12 @@ class TestCartSkillBranches:
         monkeypatch.setattr(MallDomainService, "get_cart_summary", staticmethod(_fake_summary))
         monkeypatch.setattr(MallDomainService, "has_cart", staticmethod(_fake_has_cart))
         monkeypatch.setattr(MallDomainService, "update_cart_item", staticmethod(_fake_update))
-        result = asyncio.run(CartManageSkill().execute(_skill_ctx("删掉背包然后结算下单")))
+        result = asyncio.run(CartManageSkill().execute(_skill_ctx("删掉背包然后结算下单"))).to_dict()
         assert not checkout_calls, "复合删除+结算不得直接开单"
         assert result.get("success") is True
 
     def test_bridge_branch_calls_order_item_bridge(self, monkeypatch):
-        from engine_py.skills.cart_manage_skill import CartManageSkill
+        from engine_py.skills.cart import CartManageSkill
         from engine_py.tools_registry.mall_domain import MallDomainService
 
         calls: list[dict] = []
@@ -775,7 +775,7 @@ class TestCartSkillBranches:
             return {"success": True, "message": "已将您订单里的冲锋衣加入购物车"}
 
         monkeypatch.setattr(MallDomainService, "add_order_item_to_cart", staticmethod(_fake_bridge))
-        result = asyncio.run(CartManageSkill().execute(_skill_ctx("把我最近的订单里的那件冲锋衣加入购物车")))
+        result = asyncio.run(CartManageSkill().execute(_skill_ctx("把我最近的订单里的那件冲锋衣加入购物车"))).to_dict()
         assert len(calls) == 1 and calls[0].get("keyword"), "必须带商品关键词"
         assert "冲锋衣" in (result.get("output") or "")
 

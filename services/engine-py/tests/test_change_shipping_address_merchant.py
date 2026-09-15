@@ -16,6 +16,7 @@ import asyncio
 import pytest
 from sqlalchemy import text
 
+from engine_py.skills.contract import SkillContext
 from engine_py.skills.order_skills import OrderAddressModificationSkill
 from engine_py.skills.spi_client import LocalDbSpiAdapter
 from engine_py.tools_registry.order_domain import OrderDomainService
@@ -124,14 +125,14 @@ class _FakeSpi:
         return {"success": True, "actionType": req.get("actionType"), "message": "ok"}
 
 
-def _skill_ctx(order: dict) -> dict:
-    return {
-        "threadId": TID,
-        "tenantId": "ecommerce",
-        "userId": UID,
-        "input": "把订单的收货地址改成上海市浦东新区世纪大道100号",
-        "slots": {"orderId": order["orderId"], "newAddress": NEW_ADDR, "activeIntent": "order_modify_address"},
-    }
+def _skill_ctx(order: dict) -> SkillContext:
+    return SkillContext(
+        thread_id=TID,
+        tenant_id="ecommerce",
+        user_id=UID,
+        input="把订单的收货地址改成上海市浦东新区世纪大道100号",
+        slots={"orderId": order["orderId"], "newAddress": NEW_ADDR, "activeIntent": "order_modify_address"},
+    )
 
 
 def test_skill_high_value_creates_hitl_ticket(pg_factory, monkeypatch):
@@ -160,7 +161,7 @@ def test_skill_high_value_creates_hitl_ticket(pg_factory, monkeypatch):
             return _FakeSpi(order, calls)
 
         monkeypatch.setattr(OrderAddressModificationSkill, "get_spi_client", _fake_spi)
-        result = await OrderAddressModificationSkill().execute(_skill_ctx(order))
+        result = (await OrderAddressModificationSkill().execute(_skill_ctx(order))).to_dict()
         async with engine.connect() as conn:
             tickets = (
                 await conn.execute(
@@ -205,7 +206,7 @@ def test_skill_low_value_executes_directly(pg_factory, monkeypatch):
             return _FakeSpi(order, calls)
 
         monkeypatch.setattr(OrderAddressModificationSkill, "get_spi_client", _fake_spi)
-        result = await OrderAddressModificationSkill().execute(_skill_ctx(order))
+        result = (await OrderAddressModificationSkill().execute(_skill_ctx(order))).to_dict()
         return result, calls
 
     result, calls = asyncio.run(scenario())

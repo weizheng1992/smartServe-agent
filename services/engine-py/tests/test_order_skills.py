@@ -11,6 +11,7 @@ import asyncio
 
 import pytest
 
+from engine_py.skills.contract import SkillContext
 from engine_py.skills.order_skills import OrderAddressModificationSkill, OrderRefundSkill
 
 _ORDER = {
@@ -48,15 +49,16 @@ def _wire(monkeypatch: pytest.MonkeyPatch, spi: _FakeSpi, threshold: float = 50.
     monkeypatch.setattr(skill_cls, "get_effective_approval_threshold", fake_threshold)
 
 
-def _ctx(slots: dict, extra: dict | None = None) -> dict:
-    return {
-        "threadId": "t_order_skill",
-        "tenantId": "aurora",
-        "userId": "CUST-8802",
-        "input": "我要退款",
-        "slots": slots,
-        "extra": extra or {},
-    }
+def _ctx(slots: dict, extra: dict | None = None) -> SkillContext:
+    extra = extra or {}
+    return SkillContext(
+        thread_id="t_order_skill",
+        tenant_id="aurora",
+        user_id="CUST-8802",
+        input="我要退款",
+        slots=slots,
+        is_approved=bool(extra.get("isApproved")),
+    )
 
 
 # ---------------------------------------------------------------- 退款 SOP
@@ -65,8 +67,8 @@ def test_refund_missing_order_id_asks_for_slot(monkeypatch: pytest.MonkeyPatch) 
     spi = _FakeSpi()
     _wire(monkeypatch, spi)
     res = asyncio.run(OrderRefundSkill().execute(_ctx({})))
-    assert res["success"] is False
-    assert "订单号" in res["output"]
+    assert res.success is False
+    assert "订单号" in res.output
     assert spi.calls == [], "缺槽位时不得发起任何 SPI 调用"
 
 
@@ -74,8 +76,8 @@ def test_refund_order_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     spi = _FakeSpi(order=None)
     _wire(monkeypatch, spi)
     res = asyncio.run(OrderRefundSkill().execute(_ctx({"orderId": "NOPE-1"})))
-    assert res["success"] is False
-    assert "未查询到" in res["output"]
+    assert res.success is False
+    assert "未查询到" in res.output
 
 
 def test_refund_over_threshold_routes_to_hitl(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,11 +85,11 @@ def test_refund_over_threshold_routes_to_hitl(monkeypatch: pytest.MonkeyPatch) -
     spi = _FakeSpi()
     _wire(monkeypatch, spi, threshold=50.0)
     res = asyncio.run(OrderRefundSkill().execute(_ctx({"orderId": _ORDER["orderId"]})))
-    assert res["nextAction"] == "require_approval"
-    assert res["approvalPayload"]["actionType"] == "processRefund"
-    assert res["approvalPayload"]["amount"] == 200.0
+    assert res.next_action == "require_approval"
+    assert res.approval_payload["actionType"] == "processRefund"
+    assert res.approval_payload["amount"] == 200.0
     assert [c[0] for c in spi.calls] == ["get_order_detail"], "门禁拦截时严禁 execute_order_action"
-    assert "人工" in res["output"]
+    assert "人工" in res.output
 
 
 def test_refund_over_threshold_with_approval_executes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,8 +97,8 @@ def test_refund_over_threshold_with_approval_executes(monkeypatch: pytest.Monkey
     spi = _FakeSpi()
     _wire(monkeypatch, spi, threshold=50.0)
     res = asyncio.run(OrderRefundSkill().execute(_ctx({"orderId": _ORDER["orderId"]}, extra={"isApproved": True})))
-    assert res["success"] is True
-    assert res["cards"][0]["type"] == "refund_confirmation"
+    assert res.success is True
+    assert res.cards[0]["type"] == "refund_confirmation"
     assert [c[0] for c in spi.calls] == ["get_order_detail", "execute_order_action"]
     # threadId 必须透传:process_refund 靠它解析归属用户(SPI 上下文修复回归)
     exec_params = spi.calls[1][1]
@@ -109,23 +111,23 @@ def test_refund_below_threshold_auto_executes(monkeypatch: pytest.MonkeyPatch) -
     spi = _FakeSpi(order={**_ORDER, "totalAmount": 30.0})
     _wire(monkeypatch, spi, threshold=50.0)
     res = asyncio.run(OrderRefundSkill().execute(_ctx({"orderId": _ORDER["orderId"]})))
-    assert res["success"] is True
-    assert res["nextAction"] == "finish"
-    assert "原路退回" in res["output"]
+    assert res.success is True
+    assert res.next_action == "finish"
+    assert "原路退回" in res.output
 
 
 def test_refund_action_failure_surfaces_message(monkeypatch: pytest.MonkeyPatch) -> None:
     spi = _FakeSpi(order={**_ORDER, "totalAmount": 30.0}, action_result={"success": False, "message": "库存锁定中"})
     _wire(monkeypatch, spi, threshold=50.0)
     res = asyncio.run(OrderRefundSkill().execute(_ctx({"orderId": _ORDER["orderId"]})))
-    assert res["success"] is False
-    assert "退款申请失败" in res["output"] and "库存锁定中" in res["output"]
+    assert res.success is False
+    assert "退款申请失败" in res.output and "库存锁定中" in res.output
 
 
 def test_refund_fallback_regex_can_handle() -> None:
     skill = OrderRefundSkill()
-    assert skill.can_handle({"input": "这个鞋子有瑕疵"}) is True
-    assert skill.can_handle({"input": "今天天气不错"}) is False
+    assert skill.can_handle(SkillContext(input="这个鞋子有瑕疵")) is True
+    assert skill.can_handle(SkillContext(input="今天天气不错")) is False
 
 
 # ---------------------------------------------------------------- 改地址 SOP
@@ -134,8 +136,8 @@ def test_address_missing_slots_asks(monkeypatch: pytest.MonkeyPatch) -> None:
     spi = _FakeSpi()
     _wire(monkeypatch, spi, skill_cls=OrderAddressModificationSkill)
     res = asyncio.run(OrderAddressModificationSkill().execute(_ctx({"orderId": "X"})))
-    assert res["success"] is False
-    assert "订单编号和新的收货地址" in res["output"]
+    assert res.success is False
+    assert "订单编号和新的收货地址" in res.output
     assert spi.calls == []
 
 
@@ -143,8 +145,8 @@ def test_address_order_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     spi = _FakeSpi(order=None)
     _wire(monkeypatch, spi, skill_cls=OrderAddressModificationSkill)
     res = asyncio.run(OrderAddressModificationSkill().execute(_ctx({"orderId": "NOPE-1", "newAddress": "北京市朝阳区"})))
-    assert res["success"] is False
-    assert "未查询到" in res["output"]
+    assert res.success is False
+    assert "未查询到" in res.output
 
 
 @pytest.mark.parametrize("status", ["SHIPPED", "DELIVERED", "CANCELLED"])
@@ -153,8 +155,8 @@ def test_address_fulfilled_order_is_refused(monkeypatch: pytest.MonkeyPatch, sta
     spi = _FakeSpi(order={**_ORDER, "status": status})
     _wire(monkeypatch, spi, skill_cls=OrderAddressModificationSkill)
     res = asyncio.run(OrderAddressModificationSkill().execute(_ctx({"orderId": _ORDER["orderId"], "newAddress": "上海市浦东新区"})))
-    assert res["success"] is False
-    assert "无法直接拦截修改" in res["output"]
+    assert res.success is False
+    assert "无法直接拦截修改" in res.output
     assert [c[0] for c in spi.calls] == ["get_order_detail"], "拦截时严禁 execute_order_action"
 
 
@@ -162,7 +164,7 @@ def test_address_not_modifiable_flag_refuses(monkeypatch: pytest.MonkeyPatch) ->
     spi = _FakeSpi(order={**_ORDER, "isAddressModifiable": False})
     _wire(monkeypatch, spi, skill_cls=OrderAddressModificationSkill)
     res = asyncio.run(OrderAddressModificationSkill().execute(_ctx({"orderId": _ORDER["orderId"], "newAddress": "上海市浦东新区"})))
-    assert res["success"] is False
+    assert res.success is False
     assert [c[0] for c in spi.calls] == ["get_order_detail"]
 
 
@@ -185,8 +187,8 @@ def test_address_high_value_gates_to_hitl(monkeypatch: pytest.MonkeyPatch) -> No
     res = asyncio.run(
         OrderAddressModificationSkill().execute(_ctx({"orderId": _ORDER["orderId"], "newAddress": "上海市浦东新区张江路 5 号"}))
     )
-    assert res["success"] is True
-    assert "人工审核" in res["output"]
+    assert res.success is True
+    assert "人工审核" in res.output
     assert [c[0] for c in spi.calls] == ["get_order_detail"], "高价值改址等待审批,严禁直接执行"
     assert created[0]["actionType"] == "changeShippingAddress"
     assert created[0]["actionPayload"]["args"]["newAddress"] == "上海市浦东新区张江路 5 号"
@@ -199,9 +201,9 @@ def test_address_low_value_order_executes(monkeypatch: pytest.MonkeyPatch) -> No
     res = asyncio.run(
         OrderAddressModificationSkill().execute(_ctx({"orderId": _ORDER["orderId"], "newAddress": "上海市浦东新区张江路 5 号"}))
     )
-    assert res["success"] is True
-    assert "上海市浦东新区张江路 5 号" in res["output"]
-    assert res["cards"][0]["type"] == "order_card"
+    assert res.success is True
+    assert "上海市浦东新区张江路 5 号" in res.output
+    assert res.cards[0]["type"] == "order_card"
     exec_params = spi.calls[1][1]
     assert exec_params["actionType"] == "MODIFY_ADDRESS"
     assert exec_params["newAddress"] == "上海市浦东新区张江路 5 号"
@@ -210,5 +212,5 @@ def test_address_low_value_order_executes(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_address_fallback_regex_can_handle() -> None:
     skill = OrderAddressModificationSkill()
-    assert skill.can_handle({"input": "帮我改地址"}) is True
-    assert skill.can_handle({"input": "推荐几双跑鞋"}) is False
+    assert skill.can_handle(SkillContext(input="帮我改地址")) is True
+    assert skill.can_handle(SkillContext(input="推荐几双跑鞋")) is False

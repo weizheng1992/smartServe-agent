@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import asyncio
 
-from engine_py.skills.cart_manage_skill import CartManageSkill
+from engine_py.skills.cart import CartManageSkill
 from engine_py.tools_registry.mall_domain import MallDomainService
+from engine_py.skills.contract import SkillContext
 
 _USER = "u_ord_oob"
 
@@ -32,21 +33,19 @@ _PRESEED_CART = [
 def _run_skill(user_input: str, candidates: list[dict] | None = None, preseed: list[dict] | None = None) -> dict:
     candidates = candidates if candidates is not None else _CANDIDATES
     MallDomainService._cart_storage[_USER] = [dict(i) for i in (preseed if preseed is not None else _PRESEED_CART)]
-    context = {
-        "threadId": "t_ord_oob",
-        "tenantId": "ecommerce",
-        "userId": _USER,
-        "input": user_input,
-        "slots": {"activeIntent": "cart_manage"},
-        "extra": {
-            "guideContext": {
+    context = SkillContext(
+        thread_id="t_ord_oob",
+        tenant_id="ecommerce",
+        user_id=_USER,
+        input=user_input,
+        slots={"activeIntent": "cart_manage"},
+        guide_context={
                 "candidateProducts": candidates,
                 "candidateProductIds": [c["id"] for c in candidates],
             },
-            "cartContext": {},
-        },
-    }
-    return asyncio.run(CartManageSkill().execute(context))
+        cart_context={},
+    )
+    return asyncio.run(CartManageSkill().execute(context)).to_dict()
 
 
 def _landed_ids() -> set[str]:

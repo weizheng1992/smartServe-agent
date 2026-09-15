@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import text
 
 from engine_py.graph.nodes.executor_fast_path import try_match_executor_fast_path
+from engine_py.skills.contract import SkillContext
 from engine_py.tools_registry.mall_domain import MallDomainService
 from engine_py.triage.slot_extractor import SlotExtractor
 
@@ -128,7 +129,7 @@ class TestPhantomAddGuard:
     def test_ordinal_with_search_intent_ignores_history_candidates(self, monkeypatch):
         """「询评价好的短袖，并把第一个加入购物车」:本轮检索无果时,历史回溯
         候选(上一轮的慢跑裤)严禁充当「第一个」—— 必须诚实反问。"""
-        from engine_py.skills.cart_manage_skill import CartManageSkill
+        from engine_py.skills.cart import CartManageSkill
         from engine_py.tools_registry.mall_domain import MallDomainService
 
         add_calls: list = []
@@ -143,18 +144,14 @@ class TestPhantomAddGuard:
         monkeypatch.setattr(MallDomainService, "add_to_cart", staticmethod(_fake_add))
         monkeypatch.setattr(MallDomainService, "get_cart_summary", staticmethod(_fake_summary))
 
-        ctx = {
-            "threadId": "phantom_t", "tenantId": "ecommerce", "userId": "CUST-8801",
-            "input": "询评价好的短袖，并把第一个加入购物车",
-            "slots": {},
-            "extra": {
-                "shortMemory": [
-                    {"role": "assistant", "content": "为您精选了以下推荐商品：\n1. 【极光 420g重磅毛圈棉抽绳束脚慢跑裤】 ¥349"}
-                ],
-                "guideContext": {},  # 本轮导购检索为空,候选全靠历史回溯
-            },
-        }
-        result = asyncio.run(CartManageSkill().execute(ctx))
+        ctx = SkillContext(
+            thread_id="phantom_t", tenant_id="ecommerce", user_id="CUST-8801",
+            input="询评价好的短袖，并把第一个加入购物车",
+            short_memory=[
+                {"role": "assistant", "content": "为您精选了以下推荐商品：\n1. 【极光 420g重磅毛圈棉抽绳束脚慢跑裤】 ¥349"}
+            ],
+        )
+        result = asyncio.run(CartManageSkill().execute(ctx)).to_dict()
         assert not add_calls, "检索诉求句中历史候选严禁充当加购目标(幻影入车)"
         assert "哪一款" in (result.get("output") or ""), "必须诚实反问"
 
@@ -220,13 +217,13 @@ class TestPriceSuperlativeAndScenario:
         曾 25~236s(转圈根因)。"""
         from engine_py.skills.guide_skills import ShoppingGuideSkill
 
-        for text in (
+        for phrase in (
             "最便宜的背包", "最贵的冲锋衣是哪款", "性价比最高的跑鞋", "问最便宜的背包",
             "有没有便宜点的短袖", "三合一冲锋衣和软壳冲锋衣哪个好", "背包和胸包怎么选",
             "极光的跑鞋和徒步鞋有什么区别", "我经常爬山，买哪种背包", "冬天露营该用什么睡袋",
             "日常通勤背什么包好", "周末去爬山需要准备什么装备", "跑鞋哪款性价比最高",
         ):
-            assert ShoppingGuideSkill().can_handle({"input": text}), text
+            assert ShoppingGuideSkill().can_handle(SkillContext(input=phrase)), phrase
 
     def test_price_modifier_stripped_from_terms(self):
         """「最便宜的背包」词元=「背包」:价格极值词是排序修饰,严禁混入词元
@@ -349,18 +346,16 @@ class TestContextualComparison:
             }
 
         monkeypatch.setattr(MallDomainService, "search_products", staticmethod(_fake_search))
-        ctx = {
-            "threadId": "cmp_t", "tenantId": "ecommerce", "userId": "CUST-8801",
-            "input": "最贵的和最便宜的对比，有什么不同",
-            "extra": {
-                "guideContext": {
-                    "candidateProductIds": ["SPU-B-1"],
-                    "candidateProducts": [{"id": "SPU-B-1", "name": "极光 高山徒步轻量化背包 38L", "price": 829.0}],
-                    "lastSearchQuery": "最贵的 背包",
-                }
+        ctx = SkillContext(
+            thread_id="cmp_t", tenant_id="ecommerce", user_id="CUST-8801",
+            input="最贵的和最便宜的对比，有什么不同",
+            guide_context={
+                "candidateProductIds": ["SPU-B-1"],
+                "candidateProducts": [{"id": "SPU-B-1", "name": "极光 高山徒步轻量化背包 38L", "price": 829.0}],
+                "lastSearchQuery": "最贵的 背包",
             },
-        }
-        result = asyncio.run(ShoppingGuideSkill().execute(ctx))
+        )
+        result = asyncio.run(ShoppingGuideSkill().execute(ctx)).to_dict()
         out = result.get("output") or ""
         assert calls, "上下文对比必须重新检索品类"
         assert any(c.get("query") == "背包" for c in calls), f"必须用上下文品类词检索: {[c.get('query') for c in calls]}"
@@ -436,18 +431,16 @@ class TestRound5Fixes:
             }
 
         monkeypatch.setattr(MallDomainService, "search_products", staticmethod(_fake_search))
-        ctx = {
-            "threadId": "mid_t", "tenantId": "ecommerce", "userId": "CUST-8801",
-            "input": "有没有中间价位的",
-            "extra": {
-                "guideContext": {
-                    "candidateProductIds": ["B3"],
-                    "candidateProducts": [{"id": "B3", "name": "极光 徒步背包", "price": 829.0}],
-                    "lastSearchQuery": "最贵的 背包",
-                }
+        ctx = SkillContext(
+            thread_id="mid_t", tenant_id="ecommerce", user_id="CUST-8801",
+            input="有没有中间价位的",
+            guide_context={
+                "candidateProductIds": ["B3"],
+                "candidateProducts": [{"id": "B3", "name": "极光 徒步背包", "price": 829.0}],
+                "lastSearchQuery": "最贵的 背包",
             },
-        }
-        result = asyncio.run(ShoppingGuideSkill().execute(ctx))
+        )
+        result = asyncio.run(ShoppingGuideSkill().execute(ctx)).to_dict()
         out = result.get("output") or ""
         assert any("背包" in (c.get("query") or "") for c in calls), "必须用上下文品类词重检"
         assert "499" in out, f"应推荐中间价位 ¥499: {out[:150]}"
@@ -485,7 +478,7 @@ class TestGuardContextAndLeaks:
         from engine_py.skills.guide_skills import ShoppingGuideSkill
 
         skill = ShoppingGuideSkill()
-        ctx = {"input": "我不想买了，别给我推荐任何东西"}
+        ctx = SkillContext(input="我不想买了，别给我推荐任何东西")
         assert skill.can_handle(ctx) is False, "否定意向不得进导购推荐"
 
 
@@ -523,7 +516,7 @@ class TestCheckoutAddressFidelity:
 
     def test_cart_skill_checkout_branch_uses_stated_address(self, monkeypatch):
         """单意图结算路径:「地址是X,然后结算」显式地址必须传给结算服务。"""
-        from engine_py.skills.cart_manage_skill import CartManageSkill
+        from engine_py.skills.cart import CartManageSkill
         from engine_py.tools_registry.mall_domain import MallDomainService
 
         calls: list = []
@@ -533,11 +526,10 @@ class TestCheckoutAddressFidelity:
             return {"success": True, "orderId": "T-1", "totalAmount": 1, "items": [], "shippingAddress": "X"}
 
         monkeypatch.setattr(MallDomainService, "checkout_user_cart", staticmethod(_fake_checkout))
-        asyncio.run(CartManageSkill().execute({
-            "threadId": "addr_t", "tenantId": "ecommerce", "userId": "CUST-8801",
-            "input": "地址是北京市海淀区中关村南大街1号院8号楼1201室，然后结算",
-            "slots": {}, "extra": {},
-        }))
+        asyncio.run(CartManageSkill().execute(SkillContext(
+            thread_id="addr_t", tenant_id="ecommerce", user_id="CUST-8801",
+            input="地址是北京市海淀区中关村南大街1号院8号楼1201室，然后结算",
+        )))
         assert calls and calls[0].get("shippingAddress") == "北京市海淀区中关村南大街1号院8号楼1201室"
 
 

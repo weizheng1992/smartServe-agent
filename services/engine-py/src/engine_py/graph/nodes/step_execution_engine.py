@@ -9,7 +9,7 @@ import re
 from ...approvals.gatekeeper import ApprovalPolicyEngine
 from ...event_bus import emit_status
 from ...llm import get_chat_model
-from ...memory import ShortMemory, TaskMemory
+from ...memory import ShortMemory
 from ..state import build_history_context
 from .executor_fast_path import try_match_executor_fast_path
 
@@ -297,6 +297,23 @@ async def _execute_single_step_core(
                             "approvalId": approval_result.get("approvalId"),
                         },
                     }
+                    # 审核告知(2026-09-15 用户实报「超限了为什么没有审核」):挂起
+                    # 即由引擎直写确定性审核通知进会话(messages 表,刷新即可见),
+                    # 严禁只靠 LLM 自由措辞转述——曾致回复通篇「已为您处理退款申请」
+                    # 不提人工审核,用户以为直接退款了。仅退款挂起发(改址另有同义文案)。
+                    thread_id_for_notice = state.get("thread_id") or ""
+                    if thread_id_for_notice and tool_name == "processRefund":
+                        try:
+                            await ShortMemory(
+                                str(thread_id_for_notice), str(state.get("business_id") or "ecommerce")
+                            ).add_message(
+                                "assistant",
+                                f"🛠️ 该订单退款金额(¥{auto_check['groundedAmount']})超过商户免签限额"
+                                f"(¥{tenant_limit})，退款申请已提交人工审核，审批通过后将自动执行，"
+                                "请耐心等待审核结果。",
+                            )
+                        except Exception as notice_err:
+                            print(f"[执行引擎] 审核告知消息写入失败: {notice_err}")
                     # 🛡️ 挂起即落库(wayfinder 004):审批工单创建后对前端 2s 轮询
                     # 立即可见,而挂起计划此前要等运行收口才 save_task_state —— 窗口期
                     # 内核签派发的 job_resume_* 读到空计划,triage 的 System: 分支
@@ -311,14 +328,9 @@ async def _execute_single_step_core(
                         ],
                         "currentStepIndex": index_to_run,
                     }
-                    thread_id = state.get("thread_id") or ""
-                    if thread_id:
-                        try:
-                            await TaskMemory(thread_id).save_task_state(suspended_plan)
-                        except Exception as tm_err:
-                            print(f"[执行引擎] 挂起计划落库任务记忆失败 thread={thread_id}: {tm_err}")
-                    else:
-                        # 空 thread_id 会命中 TaskMemory("") 的共享键,污染其他会话的任务记忆
+                    from ...skills.suspension import persist_suspended_plan
+
+                    if not await persist_suspended_plan(state.get("thread_id"), suspended_plan):
                         print("[执行引擎] 挂起计划落库跳过:thread_id 为空,拒绝写入共享键")
                     return {"updatedStep": pending_step, "toolErrorsCount": 0, "waitingForApproval": True}
 
@@ -348,36 +360,37 @@ async def _execute_single_step_core(
                 (state.get("business_config") or {}).get("businessId") or state.get("business_id") or "ecommerce"
             ).lower()
             intents = state.get("intents") or []
-            skill_result = await skill_def.execute(
-                {
-                    "threadId": state.get("thread_id"),
-                    "tenantId": tenant_id,
-                    "userId": state.get("user_id"),
-                    "input": state.get("input"),
-                    "slots": {**args, "activeIntent": (intents[0].get("intent") if intents else "")},
-                    "imageUrls": state.get("image_urls"),
-                    "extra": {
-                        "isApproved": True,
-                        "damageAssessment": state.get("damage_assessment"),
-                        "guideContext": state.get("guide_context"),
-                        "cartContext": state.get("cart_context"),
-                    },
-                }
+            # 类型化契约适配器 B(step 执行引擎,2026-09-15 架构深化②):
+            # 线上 state → SkillContext 只在此处翻译一次。
+            from ...skills.contract import SkillContext
+
+            skill_context = SkillContext(
+                thread_id=state.get("thread_id"),
+                tenant_id=tenant_id,
+                user_id=state.get("user_id"),
+                input=state.get("input") or "",
+                slots={**args, "activeIntent": (intents[0].get("intent") if intents else "")},
+                image_urls=state.get("image_urls"),
+                guide_context=state.get("guide_context") or {},
+                cart_context=state.get("cart_context") or {},
+                order_context=state.get("order_context"),
+                damage_assessment=state.get("damage_assessment"),
+                is_approved=True,
             )
+            skill_result = await skill_def.execute(skill_context)
             result_data = {
                 "toolExecuted": tool_name,
-                "output": skill_result.get("output"),
-                "cards": skill_result.get("cards"),
-                "success": skill_result.get("success"),
-                "error": skill_result.get("error"),
+                "output": skill_result.output,
+                "cards": skill_result.cards,
+                "success": skill_result.success,
+                "error": skill_result.error,
             }
-            extra = skill_result.get("extra") or {}
-            if extra.get("guideContext"):
-                state["guide_context"] = extra["guideContext"]
-            if extra.get("cartContext"):
-                state["cart_context"] = extra["cartContext"]
-            if skill_result.get("cards"):
-                state["cards"] = (state.get("cards") or []) + skill_result["cards"]
+            if skill_result.guide_context:
+                state["guide_context"] = skill_result.guide_context
+            if skill_result.cart_context:
+                state["cart_context"] = skill_result.cart_context
+            if skill_result.cards:
+                state["cards"] = (state.get("cards") or []) + skill_result.cards
         else:
             get_tool = _try_import_tools()
             tool_def = get_tool(tool_name) if get_tool else None

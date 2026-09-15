@@ -279,11 +279,12 @@ def test_shopping_guide_skill_consumes_merchant_shape(pg_factory):
 
 
 async def _skill_scenario(pg_factory) -> None:
+    from engine_py.skills.contract import SkillContext
     from engine_py.skills.guide_skills import ShoppingGuideSkill
 
     _engine, merchant_engine, original, embeds, rewrite = await _setup_shelf(pg_factory)
     try:
-        result = await ShoppingGuideSkill().execute({"input": "推荐背包热销", "tenantId": "ecommerce"})
+        result = (await ShoppingGuideSkill().execute(SkillContext(input="推荐背包热销", tenant_id="ecommerce"))).to_dict()
         assert result["success"] is True
         card = result["cards"][0]
         assert card["type"] == "product_ranking"

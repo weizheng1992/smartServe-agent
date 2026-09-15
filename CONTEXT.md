@@ -134,3 +134,14 @@ A unified execution orchestrator and fallback defense layer encapsulating Tempor
 
 - **Adaptive Execution Routing (`dispatchJob`)**: Probes Temporal Server connectivity and dynamically routes tasks to Temporal durable workflows or falls back to local high-fidelity LangGraph simulators.
 - **Serverless Anti-Freeze & Promise Tracking**: Automatically binds execution promises to Serverless request context (`waitUntil`) and global execution tracking maps (`getJobExecution`).
+
+## Skills Subsystem (engine-py)
+
+### Typed Skill Contract (`services/engine-py/src/engine_py/skills/contract.py`)
+`SkillContext` / `SkillResult` are the sole interface between skills and their two production callers — the triage skill fast-track and the step executor dispatch are the two adapters that translate to/from the online camelCase dict once each (`to_dict()` shape frozen by `tests/test_skill_contract_golden.py`). Domain contexts (`guide_context` / `cart_context` / `order_context`) are fields, not key conventions: a concept like the per-turn cart additions (`cart_context.addedThisTurn`, consumed by the composite add-then-checkout scoped checkout) lives in one place instead of threading through five layers. `executor_node` returns `cart_context` upward (same dead-write fix as guideContext, 2026-09-12).
+
+### Cart Action Table (`services/engine-py/src/engine_py/skills/cart/`)
+CartManageSkill is a thin shell over `ACTION_TABLE` — verbs (checkout / order-bridge / view / delete / qty / vague-ask / add-all / add) are declarative rows (detector + handler); branch precedence is table order, not if-ladder. `resolver.py` is the single source for cart utterance regexes and `resolve_cart_item` (ordinal → name-match → lastModified → first) shared by delete/qty; `cards.py` owns cart_card assembly. The 920-line branch swamp this replaced produced the S6 wrong-order, phantom-Nike and dual-SKU dedup incidents.
+
+### HITL Suspension Seam (`services/engine-py/src/engine_py/skills/suspension.py`)
+`persist_suspended_plan` / `suspend_for_approval` are the only implementations of ticket creation + immediate plan persistence + response assembly (wayfinder 004: the recovery plan must hit TaskMemory the moment the approval ticket becomes visible to the 2s poller — the address-skill copy of this invariant used to sit after an unconditional `return` and never ran).

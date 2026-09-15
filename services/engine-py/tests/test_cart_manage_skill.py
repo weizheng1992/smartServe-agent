@@ -12,7 +12,8 @@ import asyncio
 
 import pytest
 
-from engine_py.skills.cart_manage_skill import CartManageSkill
+from engine_py.skills.cart import CartManageSkill
+from engine_py.skills.contract import SkillContext
 from engine_py.tools_registry.mall_domain import MallDomainService
 
 _FAKE_CART = {
@@ -51,7 +52,7 @@ def test_execute_branches_succeed(user_input: str, branch: str, monkeypatch: pyt
 
     async def run() -> dict:
         # bug 时此处抛 AttributeError: 'CartManageSkill' object has no attribute '_VIEW_ONLY_RE'
-        return await skill.execute({"input": user_input, "userId": "u1", "threadId": "t1"})
+        return (await skill.execute(SkillContext(input=user_input, user_id="u1", thread_id="t1"))).to_dict()
 
     res = asyncio.run(run())
     assert res["success"] is True, f"branch={branch}"

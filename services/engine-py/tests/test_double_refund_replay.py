@@ -108,6 +108,7 @@ async def _teardown(engine, merchant_engine, original):
         # 挂起即落库(wayfinder 004)后 execute_step 也会写 task_memory,
         # 须先清子行否则 threads 删除触发外键
         await conn.execute(text("DELETE FROM task_memory WHERE thread_id = :t").bindparams(t=REPRO_THREAD))
+        await conn.execute(text("DELETE FROM messages WHERE thread_id = :t").bindparams(t=REPRO_THREAD))
         await conn.execute(text("DELETE FROM threads WHERE id = :t").bindparams(t=REPRO_THREAD))
     await merchant_engine.dispose()
 
@@ -368,6 +369,7 @@ async def _tz_aware_delivery_scenario(pg_factory):
         # 断言失败也要清理本用例私有线程/订单,避免残留行污染同库后续回放
         async with engine.begin() as conn:
             await conn.execute(text("DELETE FROM orders WHERE order_id = :oid").bindparams(oid=tz_order))
+            await conn.execute(text("DELETE FROM messages WHERE thread_id = :tid").bindparams(tid=tz_thread))
             await conn.execute(text("DELETE FROM threads WHERE id = :tid").bindparams(tid=tz_thread))
 
 
@@ -423,6 +425,7 @@ async def _suspension_persist_plan_scenario(pg_factory):
         async with engine.begin() as conn:
             await conn.execute(text("DELETE FROM pending_approvals WHERE thread_id = :t").bindparams(t=thread))
             await conn.execute(text("DELETE FROM task_memory WHERE thread_id = :t").bindparams(t=thread))
+            await conn.execute(text("DELETE FROM messages WHERE thread_id = :t").bindparams(t=thread))
             await conn.execute(
                 text(
                     "INSERT INTO threads (id, user_id, business_id, status, created_at, updated_at) "
@@ -471,5 +474,6 @@ async def _suspension_persist_plan_scenario(pg_factory):
         async with engine.begin() as conn:
             await conn.execute(text("DELETE FROM pending_approvals WHERE thread_id = :t").bindparams(t=thread))
             await conn.execute(text("DELETE FROM task_memory WHERE thread_id = :t").bindparams(t=thread))
+            await conn.execute(text("DELETE FROM messages WHERE thread_id = :t").bindparams(t=thread))
             await conn.execute(text("DELETE FROM threads WHERE id = :t").bindparams(t=thread))
         await _teardown(engine, merchant_engine, original)
