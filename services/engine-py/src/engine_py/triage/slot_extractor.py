@@ -193,7 +193,13 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
             r"(?:(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)|(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)|(?:改到|改成|送至|送往|改派到|改派|改送)\s*[^?？哪里哪儿\n]+)",
             re.IGNORECASE,
         ),
-        negative_pattern=re.compile(r"(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)", re.IGNORECASE),
+        # 设默认地址(2026-09-15 S8)是地址簿操作不是改单 —— 负向豁免,严禁
+        # 反问订单号(实弹:「刚才那个地址改成默认」被截胡索要订单编号)
+        negative_pattern=re.compile(
+            r"(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)"
+            r"|改成默认|设为默认|设置为默认|变成默认|设默认",
+            re.IGNORECASE,
+        ),
     ),
     IntentRule(
         intent=AgentIntentType.ORDER_CANCEL,

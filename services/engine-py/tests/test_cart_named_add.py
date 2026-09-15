@@ -220,3 +220,57 @@ async def _bare_add_scenario(pg_factory) -> None:
         )
     finally:
         await _teardown_shelf(merchant_engine, original_reader)
+
+
+def test_stale_slot_target_overridden_by_named_product(pg_factory):
+    """slots.productId 遗留目标(上一轮推荐的背包)严禁劫持显式点名 —— 用户实报
+    「点名冲锋衣却回复背包已在购物车」:planner 把上轮推荐填进 step args,
+    目标被预设后按名直配整个被跳过。显式点名必须压过遗留槽位。"""
+    asyncio.run(_stale_slot_scenario(pg_factory))
+
+
+async def _stale_slot_scenario(pg_factory) -> None:
+    from engine_py.skills.cart_manage_skill import CartManageSkill
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    merchant_engine, original_reader = await _setup_shelf(pg_factory)
+    try:
+        # 生产现场复刻:购物车遗留背包 x2,槽位带背包 productId,点名冲锋衣
+        MallDomainService._cart_storage["CUST-NAMED-01"] = [
+            {"skuId": "SPU-N-LEGACY-BAG", "quantity": 2, "title": "极光 高山徒步轻量化背包 38L/45L", "price": 829.0}
+        ]
+        ctx = _named_add_context("极光三合一冲锋衣 曜石黑 M码 加入购物车")
+        ctx["slots"] = {"productId": "SPU-N-LEGACY-BAG"}
+        result = await CartManageSkill().execute(ctx)
+        assert result["success"] is True
+        assert "背包" not in result["output"], f"遗留槽位目标不得顶替点名商品: {result['output'][:80]}"
+        items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
+        coat_row = next((i for i in items if i["skuId"] == "SPU-N-COAT"), None)
+        assert coat_row is not None, f"点名冲锋衣必须入车,实际: {[(i['skuId'], i['quantity']) for i in items]}"
+        assert coat_row["quantity"] == 1 and coat_row["skuCode"] == "SKU-N-COAT-BLACK-M"
+        # 遗留背包行原样保留(不误删)
+        assert any(i["skuId"] == "SPU-N-LEGACY-BAG" and i["quantity"] == 2 for i in items)
+    finally:
+        await _teardown_shelf(merchant_engine, original_reader)
+
+
+def test_pure_deixis_reference_keeps_slot_target(pg_factory):
+    """纯指代(「刚才那个」无实质品名)→ 交回既有槽位/候选链,planner 消解仍有效。"""
+    asyncio.run(_pure_deixis_scenario(pg_factory))
+
+
+async def _pure_deixis_scenario(pg_factory) -> None:
+    from engine_py.skills.cart_manage_skill import CartManageSkill
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    merchant_engine, original_reader = await _setup_shelf(pg_factory)
+    try:
+        # 纯指代无 slots:落到既有 candidate[0] 链(候选自带真价,无价不入车不拦)
+        result = await CartManageSkill().execute(_named_add_context("把刚才那个加入购物车"))
+        assert result["success"] is True
+        items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
+        assert [i["skuId"] for i in items] == ["SPU-N-POLO"], (
+            f"纯指代交回既有候选链(candidate[0]=POLO),实际: {[i['skuId'] for i in items]}"
+        )
+    finally:
+        await _teardown_shelf(merchant_engine, original_reader)

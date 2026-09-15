@@ -1449,6 +1449,71 @@ class MallDomainService:
     # 语义,规格在回复中如实展示;skuId 直配 sku_code 时按商城页同源直取。
 
     @staticmethod
+    async def set_default_address(params: dict) -> dict:
+        """设默认收货地址(2026-09-15 S8 能力补齐):按 receiver_name 或地址 id
+        定位顾客账本条目,置 is_default 并清除其它默认;找不到如实说明。"""
+        from . import order_domain as _order_domain
+
+        user_id = params.get("userId")
+        if not user_id and params.get("threadId"):
+            ctx = await _order_domain.OrderDomainService.get_thread_session_context(params["threadId"])
+            user_id = user_id or ctx["userId"]
+        if not user_id:
+            return {"success": False, "message": "未能识别您的身份，请稍后重试。"}
+        target = (params.get("addressId") or params.get("receiverName") or "").strip()
+
+        try:
+            async with _order_domain._merchant_reader_engine().begin() as conn:
+                raw = (
+                    await conn.execute(
+                        text("SELECT addresses FROM merchant_customers WHERE customer_id = :uid").bindparams(
+                            uid=user_id
+                        )
+                    )
+                ).scalar()
+            entries = raw if isinstance(raw, list) else []
+            if not entries:
+                return {"success": False, "message": "您的地址簿还是空的，暂无可设为默认的地址。"}
+            hit = None
+            for e in entries:
+                if not isinstance(e, dict):
+                    continue
+                name = (e.get("recipientName") or "")
+                addr = (e.get("fullAddress") or "")
+                # 子串双向匹配(「王五」含于「王五 的地址」等 LLM 转述形态)
+                if target and (
+                    e.get("id") == target
+                    or target in name
+                    or name in target
+                    or target in addr
+                ):
+                    hit = e
+                    break
+            if hit is None:
+                names = "、".join(str(e.get("recipientName") or "未命名") for e in entries if isinstance(e, dict))
+                return {"success": False, "message": f"地址簿里没找到「{target or '该地址'}」。现有：{names}"}
+            for e in entries:
+                if isinstance(e, dict):
+                    e["isDefault"] = e is hit
+            async with _order_domain._merchant_reader_engine().begin() as conn:
+                await conn.execute(
+                    text(
+                        "UPDATE merchant_customers SET addresses = CAST(:a AS jsonb) "
+                        "WHERE customer_id = :uid"
+                    ).bindparams(uid=user_id, a=json.dumps(entries, ensure_ascii=False))
+                )
+            return {
+                "success": True,
+                "message": (
+                    f"已将【{hit.get('recipientName')}】的地址（{hit.get('fullAddress')}）设为默认收货地址。"
+                ),
+                "addressId": hit.get("id"),
+            }
+        except Exception as err:
+            print(f"[MallDomain] setDefaultAddress failed: {err}")
+            return {"success": False, "message": "默认地址设置失败，请稍后重试。"}
+
+    @staticmethod
     async def _default_address_row(user_id: str) -> dict | None:
         """地址簿默认条目(商户账本 merchant_customers.addresses,is_default
         优先无则最新一条);账本不可达/无地址返回 None —— checkout 诚实追问。"""

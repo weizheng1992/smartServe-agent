@@ -134,6 +134,10 @@ _ADDRESS_BOOK_LIST_RE = re.compile(
     r"|我的(?:收货)?地址(?:簿|列表)?(?:有哪些|是什么)?$"
     r"|^(?:地址列表|收货地址列表|地址簿列表)$"
 )
+# 设默认形(2026-09-15 S8):「刚才那个地址改成默认/设为默认地址」
+_ADDRESS_SET_DEFAULT_RE = re.compile(
+    r"(?:改成|设为|设置为|变成|设)[^。,，\n]{0,4}默认(?:地址)?|(?:默认地址)[^。,，\n]{0,4}(?:改成|设为|设置为)"
+)
 _PHONE_RE = re.compile(rf"(?<!\d)({PHONE_SHAPE})(?!\d)")
 _CHINESE_NAME_RE = re.compile(r"([\u4e00-\u9fa5]{2,4})\s*$")
 _ADDRESS_SAVE_REQUIRED = ("receiverName", "receiverPhone", "province", "city", "district", "detailAddress")
@@ -164,6 +168,12 @@ def detect_address_manage(text: str | None) -> dict | None:
         return None
     if _ADDRESS_BOOK_LIST_RE.search(text):
         return {"mode": "list", "entities": {"addressAction": "list"}, "missingSlots": []}
+    if _ADDRESS_SET_DEFAULT_RE.search(text):
+        return {
+            "mode": "set_default",
+            "entities": {"addressAction": "set_default"},
+            "missingSlots": [],
+        }
     payload_match = _ADDRESS_CREATE_PAYLOAD_RE.search(text)
     if not payload_match:
         return None

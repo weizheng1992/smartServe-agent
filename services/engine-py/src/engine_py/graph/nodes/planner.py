@@ -289,6 +289,24 @@ async def planner_node(state: AgentState) -> dict:
                     ],
                     "currentStepIndex": 0,
                 }
+            elif addr_entities.get("addressAction") == "set_default":
+                target = (input_text or "").strip()
+                fast_plan = {
+                    "goal": "Set default delivery address for customer",
+                    "subtasks": [
+                        {
+                            "id": "step_fast_address_default",
+                            "description": (
+                                f"Call setDefaultAddress to set the customer's default delivery address. "
+                                f"Extract the receiverName (收件人姓名, e.g. 王五/张伟) from the customer's "
+                                f"words: {target} — pass it as the receiverName argument. If ambiguous, first "
+                                f"call getUserAddresses and mention the candidates by recipientName in your reply."
+                            ),
+                            "status": "pending",
+                        }
+                    ],
+                    "currentStepIndex": 0,
+                }
             elif addr_entities.get("addressAction") == "save" and not (
                 intents[0].get("missingSlots") or []
             ):

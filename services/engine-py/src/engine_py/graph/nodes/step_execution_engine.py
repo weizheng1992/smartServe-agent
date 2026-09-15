@@ -475,6 +475,7 @@ _base_executor_tools = [
     "getCartSummary",
     "saveUserAddress",
     "getUserAddresses",
+    "setDefaultAddress",
     "checkoutCart",
 ]
 

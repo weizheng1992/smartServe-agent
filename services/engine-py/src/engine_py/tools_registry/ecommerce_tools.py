@@ -70,6 +70,11 @@ async def _checkout_cart(args: dict):
     return await MallDomainService.checkout_user_cart(args)
 
 
+async def _set_default_address(args: dict):
+    """设默认收货地址(2026-09-15 S8 能力补齐)。"""
+    return await MallDomainService.set_default_address(args)
+
+
 async def _query_product_skus(args: dict):
     return await MallDomainService.query_product_skus(args)
 
@@ -281,6 +286,22 @@ register_tool(
             },
         },
         execute=_checkout_cart,
+    )
+)
+register_tool(
+    ToolDefinition(
+        name="setDefaultAddress",
+        description="Set one of the customer's saved delivery addresses as the default (matches by address id or recipient name from conversation context).",
+        schema={
+            "type": "object",
+            "properties": {
+                "userId": {"type": "string"},
+                "threadId": {"type": "string"},
+                "addressId": {"type": "string"},
+                "receiverName": {"type": "string"},
+            },
+        },
+        execute=_set_default_address,
     )
 )
 register_tool(

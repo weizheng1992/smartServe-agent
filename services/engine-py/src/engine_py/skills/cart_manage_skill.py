@@ -93,6 +93,14 @@ def _named_query_remainder(user_input: str) -> str:
     return rest if len(rest) >= 2 else ""
 
 
+# 纯指代判别(2026-09-15):配不中后剥指代词,剥完为空 = 用户在指代上下文
+# 商品(「刚才那个」),交回槽位/候选链由 planner 消解;仍有实质 = 点名了
+# 货架确认不了的东西,诚实反问。
+_NAMED_DEIXIS_STRIP_RE = re.compile(
+    r"那个|这个|它|刚才|刚刚|同款|上一?轮|上一?个|之前|一样|那件|这件"
+)
+
+
 class CartManageSkill(BaseSkill):
     metadata = {
         "id": "skill_cart_manage",
@@ -688,26 +696,36 @@ class CartManageSkill(BaseSkill):
         # 点了名:先查商户真货架按描述直配(真 sku_code/真价);配不中或歧义
         # 诚实反问列候选,严禁静默替他款。裸动词加购(剥完为空)不进此路径,
         # candidate[0] 既有契约不变。
-        if not target_sku_id:
-            named_query = _named_query_remainder(user_input)
-            # 检索诉求句严禁进按名直配(2026-09-15 幻影守卫回归):「询评价好的
-            # 短袖，并把第一个加入购物车」的残词是检索半(询…短袖),不是点名
-            # —— 进直配会整句查货架配不中,吃掉诚实反问还劫持序数守卫。
-            if _SEARCH_INTENT_RE.search(named_query or ""):
-                named_query = ""
-            if named_query:
-                shelf_hit = await MallDomainService.find_shelf_sku_by_description(named_query)
-                if shelf_hit:
-                    # 车行主键维持 SPU 粒度契约(skuId=spu_code,结算/去重/卡片
-                    # 回指全按 SPU);用户点名的确切规格经 skuCode 钉在行上,
-                    # 结算 sku_code 直配优先不被「SPU 最低价」换规格;标题用干净
-                    # SPU 标题(曾把 sku_title 拼进 title 致信息重复错乱)。
-                    target_sku_id = shelf_hit["spuCode"]
-                    target_title = shelf_hit["spuTitle"]
-                    target_price = shelf_hit["price"]
-                    target_spec = shelf_hit.get("spec")
-                    target_refs = {"skuCode": shelf_hit["skuCode"], "spuId": shelf_hit["spuCode"]}
-                else:
+        # 优先级(2026-09-15 用户实报「背包已在购物车」):named_query 非空时
+        # 直配 **压过 slots.productId 遗留目标** —— planner 会把上一轮推荐填进
+        # step args(背包),显式点名必须压过上下文遗留目标,否则目标被预设、
+        # 按名直配整个被跳过。配不中二分:纯指代(「刚才那个」剥完为空)交回
+        # 既有链由槽位解析(planner 对指代的消息级消解仍有效);仍有实质内容 =
+        # 点名的商品货架确认不了,反问,不替。
+        named_query = _named_query_remainder(user_input)
+        # 检索诉求句严禁进按名直配(2026-09-15 幻影守卫回归):「询评价好的
+        # 短袖，并把第一个加入购物车」的残词是检索半(询…短袖),不是点名
+        # —— 进直配会整句查货架配不中,吃掉诚实反问还劫持序数守卫。
+        if _SEARCH_INTENT_RE.search(named_query or ""):
+            named_query = ""
+        if named_query:
+            shelf_hit = await MallDomainService.find_shelf_sku_by_description(named_query)
+            if shelf_hit:
+                # 车行主键维持 SPU 粒度契约(skuId=spu_code,结算/去重/卡片
+                # 回指全按 SPU);用户点名的确切规格经 skuCode 钉在行上,
+                # 结算 sku_code 直配优先不被「SPU 最低价」换规格;标题用干净
+                # SPU 标题(曾把 sku_title 拼进 title 致信息重复错乱)。
+                target_sku_id = shelf_hit["spuCode"]
+                target_title = shelf_hit["spuTitle"]
+                target_price = shelf_hit["price"]
+                target_spec = shelf_hit.get("spec")
+                target_refs = {"skuCode": shelf_hit["skuCode"], "spuId": shelf_hit["spuCode"]}
+            else:
+                # 配不中二分:纯指代(「刚才那个」剥提示词后为空)→ 保留既有
+                # 槽位/候选链(planner 对指代的消息级消解仍有效);仍有实质内容
+                # → 点名的商品货架确认不了,诚实反问,严禁静默替他款。
+                residue = _NAMED_DEIXIS_STRIP_RE.sub(" ", named_query).strip(" \t,，。.!！?？:；;的了")
+                if residue:
                     if candidate_products:
                         list_text = "\n".join(
                             f"{i + 1}. 【{c['name']}】 ¥{c['price']}" for i, c in enumerate(candidate_products)
@@ -716,7 +734,7 @@ class CartManageSkill(BaseSkill):
                             "success": True,
                             "skillId": self.metadata["id"],
                             "output": (
-                                f"没有在店内找到「{named_query}」对应的在售规格，未加入任何商品。\n"
+                                f"没有在店内找到「{residue}」对应的在售规格，未加入任何商品。\n"
                                 f"请问您想要哪一款？店内现货:{list_text}\n\n"
                                 "可直接说「把第1件加入购物车」，或告诉我完整的商品名与规格。🛒"
                             ),
@@ -727,7 +745,7 @@ class CartManageSkill(BaseSkill):
                         "success": True,
                         "skillId": self.metadata["id"],
                         "output": (
-                            f"没有在店内找到「{named_query}」对应的在售规格，未加入任何商品。\n"
+                            f"没有在店内找到「{residue}」对应的在售规格，未加入任何商品。\n"
                             "您可以先让我为您推荐商品（例如\"推荐几款短袖\"），再说\"把第1件加入购物车\"即可！🛒"
                         ),
                         "nextAction": "finish",
