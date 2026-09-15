@@ -4,6 +4,21 @@
 
 ---
 
+## [2.6.38] - 2026-09-15 (购物车图片对齐:车行 imageUrl 全链透传)
+
+用户实报:购物车商品图片不对/没对应上——根因是**车行从不存图片**:`add_to_cart` 落库行只有 skuId/quantity/title/price/spec,没有 imageUrl;前端购物车卡渲染 `i.get("imageUrl")` 恒空,只能落占位/错图。
+
+### 🐛 Fixes
+
+- **imageUrl 全链透传**:①guide 候选(candidateProducts)本就带 catalog 的 imageUrl ✓;②购物车技能两个加购调用点(单加/全量)透传 `imageUrl`;③`add_to_cart` 车行存储补 `imageUrl` 键;④按名直配 `find_shelf_sku_by_description` 返回补 `main_image`。
+- 实弹:入车后 Redis 车行每条带各自正确的图(背包=登山包图、渔夫帽=帽图),前端购物车卡渲染 `i.get("imageUrl")` 不再落空。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **656 passed**、gateway 134 过、ruff 干净、promptfoo 双套件 56/0 + 8/0 与基线全对齐;实弹 Redis 车行对账:每条 imageUrl 与商品一一对应。
+
+---
+
 ## [2.6.37] - 2026-09-15 (确认链恢复 + 删除地址能力 + 场景别名补齐)
 
 按顺序补齐挂账四项中的三项(②对比 SOP 已于 2.6.31/2.6.33 落地上下文对比分支,本轮不重复)。

@@ -1248,6 +1248,8 @@ class MallDomainService:
                 "title": title,
                 "price": price,
                 "spec": params.get("spec"),
+                # 图片透传(2026-09-15 用户实报):车行缺图曾致前端卡片图不对
+                "imageUrl": params.get("imageUrl"),
             }
             # 可选引用键(2026-09-14 点名直配):skuCode 钉住用户点名的确切规格
             # (结算 sku_code 直配优先,不再被「SPU 最低价」静默换规格);spuId

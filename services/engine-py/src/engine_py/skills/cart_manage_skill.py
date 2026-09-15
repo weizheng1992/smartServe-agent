@@ -515,6 +515,10 @@ class CartManageSkill(BaseSkill):
 
         candidate_products = guide_context.get("candidateProducts") or []
         candidate_list = guide_context.get("candidateProductIds") or []
+        # 图片透传(2026-09-15 用户实报):车行缺图曾致前端卡片图不对
+        target_image_url = next(
+            (p.get("imageUrl") for p in candidate_products if p.get("id") == target_sku_id), None
+        )
 
         # guideContext 为空时从近期对话历史智能回溯推荐候选。
         # 幻影守卫(2026-09-13 用户实报):句中带检索/推荐诉求(「询评价好的
@@ -585,6 +589,7 @@ class CartManageSkill(BaseSkill):
                         "quantity": per_qty,
                         "title": prod.get("name") or "精选推荐商品",
                         "price": prod.get("price"),
+                        "imageUrl": prod.get("imageUrl"),
                         "userId": context.get("userId"),
                         "threadId": context.get("threadId"),
                     }
@@ -820,6 +825,7 @@ class CartManageSkill(BaseSkill):
                 "spec": target_spec,
                 "skuCode": target_refs.get("skuCode"),
                 "spuId": target_refs.get("spuId"),
+                "imageUrl": target_image_url,
                 "userId": context.get("userId"),
                 "threadId": context.get("threadId"),
             }
