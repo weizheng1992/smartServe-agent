@@ -1058,7 +1058,18 @@ class IntentTriageEngine:
                         arbitration_reason="slot_extractor_single_complete",
                     )
 
-                    return _triage_terminal_result(intents, input_text, history_msgs, damage_assessment)
+                    # 单号上下文透传(2026-09-15 查单关联断链收口):本终局是全
+                    # 引擎唯一漏带 with_order_context 的出口 —— 查单轮解析出的
+                    # targetOrderId 只落在原地 state,不进 LangGraph 通道,run_agent
+                    # 收口「result or 回合初快照」双空把 TaskMemory.orderContext
+                    # 覆空,下一轮资金动作严格抽取器读不到已确认单号,冷启动追问
+                    # (实弹:刚查完 9094 说「我想申请退款」被反问订单编号)。
+                    # 此处 state.order_context 只含可信通道值(文本显式/已确认
+                    # 上下文/图内 OCR,见 869-880 信任边界),透传不泄漏历史盲回填。
+                    return _triage_terminal_result(
+                        intents, input_text, history_msgs, damage_assessment,
+                        state=state, with_order_context=True,
+                    )
         except Exception as slot_err:
             print(f"[Triage] 槽位澄清阶段异常,已跳过槽位层裁决 (threadId={thread_id}): {slot_err}")
 
