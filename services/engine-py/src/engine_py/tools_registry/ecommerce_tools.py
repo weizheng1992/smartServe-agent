@@ -28,6 +28,7 @@ async def _list_user_orders(args: dict):
         args.get("userId"),
         args.get("businessId") or args.get("tenantId"),
         args.get("shippingStatus"),
+        args.get("shippingAddress"),
     )
 
 
@@ -163,7 +164,9 @@ register_tool(
         description=(
             "List all recent orders and tracking status for the current customer. Supports an "
             "optional shippingStatus filter: UNSHIPPED (not shipped yet, incl. paid awaiting "
-            "shipment), SHIPPED, DELIVERED."
+            "shipment), SHIPPED, DELIVERED. Also supports an optional shippingAddress substring "
+            "filter (e.g. the user asks for orders shipped to a specific address) — pass the "
+            "address text the user provided."
         ),
         schema={
             "type": "object",
@@ -172,7 +175,11 @@ register_tool(
                     "type": "string",
                     "enum": ["UNSHIPPED", "SHIPPED", "DELIVERED"],
                     "description": "Optional filter. UNSHIPPED = still awaiting shipment (excludes shipped/delivered/refunded/cancelled).",
-                }
+                },
+                "shippingAddress": {
+                    "type": "string",
+                    "description": "Optional substring filter on the shipping address (e.g. 'A座 3801室'). Fill this when the user asks for orders by shipping address.",
+                },
             },
         },
         execute=_list_user_orders,

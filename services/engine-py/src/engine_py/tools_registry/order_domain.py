@@ -104,6 +104,25 @@ _SHIPPING_FILTER_KEYS = ("UNSHIPPED", "SHIPPED", "DELIVERED")
 _UNSHIPPED_EXCLUDE = ("shipped", "delivered", "refunded", "cancelled")
 
 
+def _apply_address_filter(rows: list[dict], shipping_address: str | None) -> list[dict]:
+    """收货地址子串过滤(2026-09-15 用户实报):问「地址是 X 的订单」必须真过滤,
+    严禁工具返回全量而 LLM 文本虚报已筛选。行地址形态两类:商户行 shippingAddress
+    为 dict(取 fullAddress 等序列化匹配),engine 行 shipping_address 为文本。"""
+    if not shipping_address:
+        return rows
+    key = str(shipping_address).strip()
+    if not key:
+        return rows
+
+    def _addr_text(r: dict) -> str:
+        addr = r.get("shippingAddress") or r.get("shipping_address")
+        if isinstance(addr, dict):
+            return json.dumps(addr, ensure_ascii=False)
+        return str(addr or "")
+
+    return [r for r in rows if key in _addr_text(r)]
+
+
 def _apply_shipping_filter(rows: list[dict], shipping_status: str | None) -> list[dict]:
     """发货状态纯函数过滤;存储值大小写不敏感。过滤值合法性由调用方前置校验。"""
     if not shipping_status:
@@ -698,6 +717,7 @@ class OrderDomainService:
         user_id: str | None = None,
         business_id: str | None = None,
         shipping_status: str | None = None,
+        shipping_address: str | None = None,
     ) -> dict:
         """历史订单列表:商户门户真单优先(agent_merchant.merchant_orders),engine 本地表兜底。
 
@@ -725,14 +745,18 @@ class OrderDomainService:
         # 1) 商户门户真单 —— 与列表页同源,严格归属匹配;库不可达(None)时静默降级
         merchant_orders = await _list_merchant_orders(target_user_id or "")
         if merchant_orders:
-            return {"orders": _apply_shipping_filter(merchant_orders, shipping_status)}
+            return {
+                "orders": _apply_address_filter(
+                    _apply_shipping_filter(merchant_orders, shipping_status), shipping_address
+                )
+            }
 
         # 2) engine 本地表兜底(非商户租户演示单,或商户库离线)
         if target_user_id:
             orders_sql = (
                 'SELECT "order_id" AS "orderId", status, carrier, "tracking_number" AS "trackingNumber", '
                 '"estimated_delivery" AS "estimatedDelivery", "total_amount" AS "totalAmount", '
-                '"business_id" AS "businessId" FROM orders '
+                '"business_id" AS "businessId", shipping_address FROM orders '
                 'WHERE "user_id" = :uid AND "business_id" = :bid '
                 'ORDER BY "estimated_delivery" DESC'
             )
@@ -749,7 +773,10 @@ class OrderDomainService:
                     )
                     if rows:
                         return {
-                            "orders": _apply_shipping_filter([dict(row) for row in rows], shipping_status)
+                            "orders": _apply_address_filter(
+                                _apply_shipping_filter([dict(row) for row in rows], shipping_status),
+                                shipping_address,
+                            )
                         }
             except Exception as err:
                 print(f"[OrderDomainService.listUserOrders] Failed: {err}")
