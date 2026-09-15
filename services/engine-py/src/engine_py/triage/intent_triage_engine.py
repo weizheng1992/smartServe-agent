@@ -126,9 +126,20 @@ def _should_clarify_first(parsed: list[dict]) -> bool:
 
 # 地址簿规则前置(多意图一期,2026-09-12):创建形/查询形两检测器 + 中文
 # 地址解析(解析器在 slot_extractor)。判定 1.6 与 Step3 注入器共用。
+# 「建」单字入列(nightly 2026-09-14 实报回归:「建地址 张三…」曾整句漏检出,
+# 词表只有「创建/新建」双字形)。
 _ADDRESS_CREATE_PAYLOAD_RE = re.compile(
-    r"(?:创建|新建|添加|新增|保存|增加|加)[^。,，\n]{0,8}地址[是为:：]?\s*(.*)$", re.DOTALL
+    r"(?:创建|新建|添加|新增|保存|增加|加|建)[^。,，\n]{0,8}地址[是为:：]?\s*(.*)$", re.DOTALL
 )
+# 复合句 payload 截断(nightly 2026-09-14):「创建地址…望京路1号，然后下单」
+# 曾把「然后下单」整段吞进 fullAddress 落库 —— payload 在连接词处截断,
+# 下半句属于下一个意图。
+_ADDRESS_PAYLOAD_TRUNCATE_RE = re.compile(
+    r"[，,。;；]?\s*(?:然后|接着|并|并且|顺便|另外|还有|以及|再(?=[查看看买退加来试问改推结]))"
+)
+# 姓名前缀剥除(nightly 2026-09-14):「收件人李四」曾整段 4 字尾匹配成
+# 「件人李四」落库 —— 称谓前缀在姓名头部,先剥再抽(锚 ^,可迭代吃连用前缀)。
+_NAME_PREFIX_RE = re.compile(r"^(?:收件人|收货人|联系人|收件|姓名|叫|我是)[:：]?\s*")
 _ADDRESS_BOOK_LIST_RE = re.compile(
     r"(?:查看|看看|查一下|有哪些|列一下)(?:我的)?(?:收货地址|地址簿|地址列表)"
     r"|我的(?:收货)?地址(?:簿|列表)?(?:有哪些|是什么)?$"
@@ -189,10 +200,16 @@ def detect_address_manage(text: str | None) -> dict | None:
         return None
     entities: dict = {"addressAction": "save"}
     payload = (payload_match.group(1) or "").strip()
+    payload = _ADDRESS_PAYLOAD_TRUNCATE_RE.split(payload)[0].strip()
     phone_match = _PHONE_RE.search(payload)
     if phone_match:
         entities["receiverPhone"] = phone_match.group(1)
         before = payload[: phone_match.start()].strip(" ,，:：-—")
+        while True:
+            stripped = _NAME_PREFIX_RE.sub("", before).strip()
+            if stripped == before:
+                break
+            before = stripped
         name_match = _CHINESE_NAME_RE.search(before)
         if name_match:
             entities["receiverName"] = name_match.group(1)
@@ -569,43 +586,31 @@ class IntentTriageEngine:
         short_memory = ShortMemory(thread_id)
         history_msgs = await short_memory.get_messages()
 
-        # ✅ 澄清确认轮动作恢复(2026-09-15 S8/S3/S7 同族):上一轮技能留下
-        # pending_action(如 set_default_address 待确认)且本轮是肯定确认时,
-        # 直接恢复执行该动作 —— LLM 确认轮会丢上下文参数,硬编码恢复才稳。
-        if re.match(r"^(?:是的?|对|确认|没错|好的?|ok|OK)[,，。!！?？～～]?\s*$", input_text.strip()):
-            task_state = state.get("task_plan") or {}
-            pending_action = task_state.get("pendingAction") if isinstance(task_state, dict) else None
-            if isinstance(pending_action, dict) and pending_action.get("tool"):
-                action_tool = str(pending_action["tool"])
-                action_args = pending_action.get("args") or {}
-                intents = [{"intent": "address_manage", "confidence": 1.0, "type": "primary",
-                            "entities": {"addressAction": action_tool, **(action_args or {})}}]
-                if state.get("job_id"):
-                    await emit_status(
-                        state["job_id"],
-                        "✅ 检测到确认回复，正在恢复上一轮待执行的操作...",
-                        node="triage",
-                    )
-                return _triage_terminal_result(intents, input_text, history_msgs, state.get("damage_assessment"), state=state)
+        # 判定管线 Stage 化(架构审视候选①,2026-09-13):语义阶段逐一提升为
+        # stages/ 包的独立模块,本函数逐步缩为按序驱动循环;判定逻辑逐字搬移。
+        from .stages import ConfirmationResumeStage, DuplicateInterceptStage, SystemResumeStage
+        from .stages.context import StageContext
 
-        # 🛡️ 人工恢复/系统提问解挂判定
-        if input_text.startswith("System:"):
-            task_plan = state.get("task_plan") or {}
-            subtasks = task_plan.get("subtasks") or []
-            has_refund_task = any(
-                "refund" in (st.get("description") or "").lower()
-                or (st.get("result") or {}).get("approvalId")
-                for st in subtasks
-            )
-            intent = "refund" if has_refund_task else "order_status"
-            intents = [{"intent": intent, "confidence": 1.0}]
-            if state.get("job_id"):
-                await emit_status(
-                    state["job_id"],
-                    "🔄 恢复执行流：检测到主管人工决议，正在快速解挂并拉起后续处理步骤...",
-                    node="triage",
-                )
-            return _triage_terminal_result(intents, input_text, history_msgs, state.get("damage_assessment"))
+        ctx = StageContext(
+            state=state,
+            thread_id=thread_id,
+            input_text=input_text,
+            clean_input="",
+            tenant_id="",
+            history_msgs=history_msgs,
+            engine=IntentTriageEngine,
+            damage_assessment=state.get("damage_assessment"),
+            input_embedding=input_embedding,
+            proposals=proposals,
+        )
+
+        verdict = await ConfirmationResumeStage.judge(ctx)
+        if verdict.terminal:
+            return verdict.result
+
+        verdict = await SystemResumeStage.judge(ctx)
+        if verdict.terminal:
+            return verdict.result
 
         if state.get("job_id"):
             await emit_status(
@@ -654,70 +659,10 @@ class IntentTriageEngine:
             intents = [{"intent": "human_escalation", "confidence": 1.0}]
             return _triage_terminal_result(intents, input_text, history_msgs, damage_assessment)
 
-        # 🛡️ 重复提问拦截器
-        try:
-            user_msgs = [m for m in history_msgs if m.get("role") == "user"]
-            assistant_msgs = [m for m in history_msgs if m.get("role") == "assistant"]
-            is_operational_action = bool(OPERATIONAL_ACTION_RE.search(input_text))
-            # 带图轮次不做文本去重(2026-09-10 误退事故):拦截器只比文本,
-            # 「坏了」+破损图重发会先于 Step 0.5 图证(OCR 单号/破损定责)被消费
-            # 就把会话关成上一轮答复的重放 —— 事故线程重放了修复前(pre-OCR消费)
-            # 的旧消歧卡,引导用户挑本店真单对外店单 ORD-77777 误起退款审批。
-            # 图证即新证据,与 is_operational_action 同为去重豁免闸。
-            carries_image_evidence = bool(state.get("image_urls"))
+        verdict = await DuplicateInterceptStage.judge(ctx)
+        if verdict.terminal:
+            return verdict.result
 
-            if (
-                not is_operational_action
-                and not carries_image_evidence
-                and len(user_msgs) >= 2
-                and assistant_msgs
-            ):
-                last_user_msg = user_msgs[-2]
-                last_assistant_msg = assistant_msgs[-1]
-
-                is_exactly_same = input_text.strip() == last_user_msg["content"].strip()
-
-                is_semantically_same = False
-                if (
-                    not is_exactly_same
-                    and len(input_text.strip()) > 3
-                    and len(last_user_msg["content"].strip()) > 3
-                ):
-                    current_vec, last_vec = await asyncio.gather(
-                        SemanticVectorCache.get_embedding_with_cache(input_text),
-                        SemanticVectorCache.get_embedding_with_cache(last_user_msg["content"]),
-                    )
-                    sim = cosine_similarity(current_vec, last_vec)
-                    # 数字指纹必须一致(2026-09-14):门牌/单号/数量不同的
-                    # 「相似句」是新请求,严禁重放旧答复
-                    if sim >= 0.98 and _digit_fingerprint(input_text) == _digit_fingerprint(
-                        last_user_msg["content"]
-                    ):
-                        is_semantically_same = True
-
-                is_last_response_failed = rule_matchers.is_failed_response(last_assistant_msg["content"])
-                has_unsanitized_tags = bool(UNSANITIZED_TAGS_RE.search(last_assistant_msg["content"]))
-
-                if (is_exactly_same or is_semantically_same) and not is_last_response_failed and not has_unsanitized_tags:
-                    prefix_msg = (
-                        "您好！检测到您发送了与刚才相同的咨询。这是刚才为您查询的最新进度：\n\n"
-                        if is_exactly_same
-                        else "您好！检测到您提问了相似的问题。这是刚才为您查询的最新进度：\n\n"
-                    )
-                    reply = f"{prefix_msg}{last_assistant_msg['content']}"
-                    final_intents = [{"intent": "general_query", "confidence": 1.0}]
-                    return await IntentTriageEngine.handle_immediate_bypass(
-                        state,
-                        "duplicate_bypass",
-                        reply,
-                        final_intents,
-                        "rule",
-                        1.0,
-                        None,
-                        last_assistant_msg.get("cards"),
-                    )
-        except Exception as sh_err:
-            print(f"[Triage] 重复提问拦截器异常,已跳过去重检查 (threadId={thread_id}): {sh_err}")
 
         # 🛡️ Step 1: 规则白名单
         clean_input = strip_punctuation_for_greeting(input_text)
