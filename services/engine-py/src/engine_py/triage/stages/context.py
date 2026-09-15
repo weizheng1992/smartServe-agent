@@ -37,6 +37,21 @@ class StageContext:
 
     # ── 累积组 ──
     proposals: list[dict] = field(default_factory=list)
+    # 跨阶段语义标记(如资金否决让位 money_action_yielded,由 Stage 写入、
+    # 后续判定读取;不入 proposals —— 它是路由闸不是提议)
+    flags: dict = field(default_factory=dict)
+
+    @property
+    def ns(self):
+        """引擎模块命名空间 —— Stage 内所有可被测试替换的协作符号
+        (analyze_images / is_consult_query / run_consult_direct_answer /
+        classify / search_relevant_exemplars / is_action_query / ShortMemory /
+        TaskMemory / SemanticVectorCache 等)一律经 `ctx.ns.<符号>` 运行时
+        读取:存量 67 处测试 patch 打在引擎模块上,经此代理全管线生效,
+        而非在各 Stage 模块顶层绑定(绑定即快照,patch 失效)。"""
+        import sys
+
+        return sys.modules[self.engine.__module__]
 
 
 @dataclass
@@ -56,11 +71,11 @@ class StageVerdict:
     note: dict = field(default_factory=dict)
 
     @classmethod
-    def passthrough(cls, **note: Any) -> "StageVerdict":
+    def passthrough(cls, **note: Any) -> StageVerdict:
         return cls(terminal=False, note=note)
 
     @classmethod
-    def terminal(cls, ctx: StageContext, intents: list[dict], **kwargs: Any) -> "StageVerdict":
+    def terminal(cls, ctx: StageContext, intents: list[dict], **kwargs: Any) -> StageVerdict:
         from ..intent_triage_engine import _triage_terminal_result
 
         result = _triage_terminal_result(

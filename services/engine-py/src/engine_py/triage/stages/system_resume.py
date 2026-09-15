@@ -23,7 +23,7 @@ async def judge(ctx: StageContext) -> StageVerdict:
     intent = "refund" if has_refund_task else "order_status"
     intents = [{"intent": intent, "confidence": 1.0}]
     if ctx.state.get("job_id"):
-        from ..event_bus import emit_status
+        from ...event_bus import emit_status
 
         await emit_status(
             ctx.state["job_id"],

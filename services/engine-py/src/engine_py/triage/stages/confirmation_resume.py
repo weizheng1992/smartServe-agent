@@ -34,7 +34,7 @@ async def judge(ctx: StageContext) -> StageVerdict:
         }
     ]
     if ctx.state.get("job_id"):
-        from ..event_bus import emit_status
+        from ...event_bus import emit_status
 
         await emit_status(
             ctx.state["job_id"],

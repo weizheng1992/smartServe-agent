@@ -45,11 +45,11 @@ async def judge(ctx: StageContext) -> StageVerdict:
                 and len(ctx.input_text.strip()) > 3
                 and len(last_user_msg["content"].strip()) > 3
             ):
-                from ..semantic_cache import SemanticVectorCache, cosine_similarity
+                from ..semantic_cache import cosine_similarity
 
                 current_vec, last_vec = await asyncio.gather(
-                    SemanticVectorCache.get_embedding_with_cache(ctx.input_text),
-                    SemanticVectorCache.get_embedding_with_cache(last_user_msg["content"]),
+                    ctx.ns.SemanticVectorCache.get_embedding_with_cache(ctx.input_text),
+                    ctx.ns.SemanticVectorCache.get_embedding_with_cache(last_user_msg["content"]),
                 )
                 sim = cosine_similarity(current_vec, last_vec)
                 # 数字指纹必须一致(2026-09-14):门牌/单号/数量不同的
