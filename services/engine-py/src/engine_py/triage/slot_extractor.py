@@ -216,7 +216,7 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
         intent=AgentIntentType.ORDER_QUERY,
         confidence=0.92,
         pattern=re.compile(
-            r"(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递|寄到哪|送至哪|到了没|查一下.*订单|查订单状态|查询.*订单|物流查询|查下订单|查订单|我的订单|名下.*订单|全部订单)",
+            r"(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递|寄到哪|送至哪|到了没|查一下.*订单|查订单状态|查询.*订单|物流查询|查下订单|查订单|我的订单|名下.*订单|全部订单|查单|运单|面单)",
             re.IGNORECASE,
         ),
         negative_pattern=re.compile(r"(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)", re.IGNORECASE),

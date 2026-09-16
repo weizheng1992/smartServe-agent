@@ -302,6 +302,37 @@ REFUND_VERB_FAMILY = (
 )
 REFUND_VERB_RE = re.compile("|".join(REFUND_VERB_FAMILY), re.IGNORECASE)
 
+
+# ---------------------------------------------------------------------------
+# 1.6 判定词表单一事实源(admin-readiness 架构审视候选②,2026-09-13):
+# 以下正则此前散落 intent_triage_engine 顶层,消费方(engine 判定层 /
+# embedding_anchor Stage / 测试)一律引用本表 —— 词表改动只许改这里。
+# ---------------------------------------------------------------------------
+
+# 订单关键词族(triage 判定 2 关键词分支 / slot ORDER_QUERY 规则共享):
+# 「查单/运单/面单」曾只在 engine 侧有、slot 规则漏(2026-09-13 漂移审计)。
+ORDER_KEYWORD_FAMILY = (
+    "订单", "发货", "物流", "查单", "买的", "快递", "到哪", "运单", "面单",
+)
+ORDER_KEYWORDS_RE = re.compile("|".join(ORDER_KEYWORD_FAMILY), re.IGNORECASE)
+
+# 退款关键词 = 退款动词族 + 破损词(破损/坏了/碎了/瑕疵是 damage assessment
+# 专用信号,不入 slot ORDER_RETURN 规则 —— 「坏了」不是退款动词)
+REFUND_KEYWORDS_RE = re.compile(REFUND_VERB_RE.pattern + r"|破损|坏了|碎了|瑕疵", re.IGNORECASE)
+
+# 资金否决 = 退款动词族 + 换货(换货刻意不入族,见上方 ⚠️ 注)
+MONEY_ACTION_VETO_RE = re.compile(REFUND_VERB_RE.pattern + r"|换货", re.IGNORECASE)
+
+# 重复提问拦截豁免:命中即视为「操作形请求」,不重放上一条 AI 答复
+OPERATIONAL_ACTION_FAMILY = (
+    "订单", "物流", "快递", "发货", "退款", "退货", "买", "购物车", "加购", "商品",
+    "推荐", "款", "件", "排查", "查", "ord", "track", "refund", "cart", "order",
+)
+OPERATIONAL_ACTION_RE = re.compile("|".join(OPERATIONAL_ACTION_FAMILY), re.IGNORECASE)
+
+# 未消毒标签:上一条 AI 答复含租户/品牌占位标签时不得重放(消毒失败护栏)
+UNSANITIZED_TAGS_RE = re.compile(r"\[(?:ECOMMERCE|BRAND|STORE|MERCHANT|SHOP|ADIDAS|NIKE)\]", re.IGNORECASE)
+
 # 常见市→省反查(地址簿省级推断,2026-09-13):「成都市高新区…」省略省前缀
 # 时 saveUserAddress 必填 province 缺失触发反问 —— 高频市直接推断,查不到
 # 保持诚实反问。

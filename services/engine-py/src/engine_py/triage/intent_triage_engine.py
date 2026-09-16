@@ -16,8 +16,8 @@ from ..db import IntentLog, LowConfidenceLog, get_session
 from ..event_bus import emit_job_result, emit_status
 from ..memory import ShortMemory, TaskMemory  # noqa: F401 (测试 patch 面)
 from ..onboarding import build_entry_cards, resolve_onboarding_config  # noqa: F401 (测试 patch 面)
-from ..skills import is_action_query
-from ..skills.contract import SkillContext  # noqa: F401 (测试 patch 面)
+from ..skills import is_action_query  # noqa: F401 (测试 patch 面)
+from ..skills.contract import SkillContext
 from ..tenant import sanitize_tenant_response, tenant_of_state
 from ..vision import analyze_images  # noqa: F401 (测试 patch 面)
 from .consult_fast_path import (  # noqa: F401 (测试 patch 面)
@@ -30,7 +30,11 @@ from .intent_registry import (
     CONSULT_SIDE_INTENTS,
     EXPLICIT_ORDER_ID_RE,
     INTENT_REGISTRY,
-    REFUND_VERB_RE,
+    MONEY_ACTION_VETO_RE,
+    OPERATIONAL_ACTION_RE,  # noqa: F401 (测试 patch 面)
+    ORDER_KEYWORDS_RE,  # noqa: F401 (测试 patch 面 / embedding_anchor 经 ctx.ns 读取)
+    REFUND_KEYWORDS_RE,  # noqa: F401 (测试 patch 面)
+    UNSANITIZED_TAGS_RE,  # noqa: F401 (测试 patch 面)
 )
 from .product_disambiguator import build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, strip_punctuation_for_greeting
@@ -42,11 +46,6 @@ from .slot_extractor import (
 )
 from .structured_classifier import classify  # noqa: F401 (测试 patch 面)
 
-OPERATIONAL_ACTION_RE = re.compile(
-    r"(?:订单|物流|快递|发货|退款|退货|买|购物车|加购|商品|推荐|款|件|排查|查|ord|track|refund|cart|order)",
-    re.IGNORECASE,
-)
-UNSANITIZED_TAGS_RE = re.compile(r"\[(?:ECOMMERCE|BRAND|STORE|MERCHANT|SHOP|ADIDAS|NIKE)\]", re.IGNORECASE)
 # 数字指纹(2026-09-14 语义重复拦截收紧):门牌/单号/数量等槽位数字是动作
 # 的身份的一部分 —— 两句语义相似但数字串不同,是「换了个请求」不是「重复
 # 提问」(实弹:「新增地址…1211室」vs「…1402室」仅差门牌,旧确认重放顶掉
@@ -57,10 +56,8 @@ _DIGIT_RUN_RE = re.compile(r"\d+")
 def _digit_fingerprint(text: str | None) -> list[str]:
     """纯函数(测试缝):输入的数字串序列,作语义去重的槽位指纹。"""
     return _DIGIT_RUN_RE.findall(text or "")
-ORDER_KEYWORDS_RE = re.compile(r"订单|发货|物流|查单|买的|快递|到哪|运单|面单", re.IGNORECASE)
 # 退款动词族单一事实源(intent_registry.REFUND_VERB_RE,2026-09-13 收口)+
 # 破损词(damage assessment 专用,不入 slot 规则表 —— 「坏了」不是退款动词)
-REFUND_KEYWORDS_RE = re.compile(REFUND_VERB_RE.pattern + r"|破损|坏了|碎了|瑕疵", re.IGNORECASE)
 MULTI_INTENT_CANDIDATE_RE = re.compile(
     r"(?:另外|同时|并|顺便|还有|然后|接着|以及|随后|其次|再(?=[查看买退加来试问改推结]))"
 )
@@ -68,7 +65,6 @@ MULTI_INTENT_CANDIDATE_RE = re.compile(
 # 「然后」「并」裸词补入 —— 旧正则只有「然后再」「并且」,「退了订单9081，
 # 然后推荐跑步鞋」「建地址…，并下单…」都漏判成单意图(A1/A6 实弹病灶)。
 # 资金否决 = 退款动词族 + 换货(换货刻意不入族,见 intent_registry 注)
-MONEY_ACTION_VETO_RE = re.compile(REFUND_VERB_RE.pattern + r"|换货", re.IGNORECASE)
 # 资金动作意图集(让位判定的参照):规则层单意图终局若非本集而输入命中
 # 资金词族,即视为「资金半被规则层漏检」,连终局一起让位 Step2/3 精判。
 _MONEY_ACTION_INTENTS = frozenset({AgentIntentType.REFUND, AgentIntentType.ORDER_RETURN})

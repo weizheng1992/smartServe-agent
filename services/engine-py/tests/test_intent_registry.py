@@ -161,3 +161,56 @@ class TestKnownGaps:
         spec = INTENT_REGISTRY["consult"]
         assert spec.lifecycle == "active"
         assert all("triage" in c for c in spec.consumers)
+
+
+class TestWordlistSingleSource:
+    """词表单一事实源契约(admin-readiness 候选②):判定词表只许住
+    intent_registry,消费方(engine/Stage)引用而非各自 re.compile。
+    历史漏洞:订单词「查单/运单/面单」曾三处各写一半。"""
+
+    def test_order_keyword_family_covered_by_slot_query_rule(self):
+        """订单词族每一词的字面量都必须出现在 slot_extractor 模块源码的规则
+        pattern 里 —— 「查单/运单/面单」曾只在 engine 侧有,embedding 分支与
+        槽位层判定分叉。扫源码而非 import(规则在类内声明,无模块级导出)。"""
+        import inspect
+
+        from engine_py.triage import slot_extractor
+        from engine_py.triage.intent_registry import ORDER_KEYWORD_FAMILY
+
+        slot_source = inspect.getsource(slot_extractor)
+        uncovered = [w for w in ORDER_KEYWORD_FAMILY if w not in slot_source]
+        assert not uncovered, f"订单词族未进 slot 规则源码: {uncovered}"
+
+    def test_refund_keywords_superset_of_verb_family(self):
+        """REFUND_KEYWORDS = VERB 族 + 破损词:超集关系钉死,破损词不得混入
+        slot 退款规则(「坏了」不是退款动词)。"""
+        from engine_py.triage.intent_registry import REFUND_KEYWORDS_RE, REFUND_VERB_RE
+
+        for verb in ("退款", "退了", "给我退", "申请退款"):
+            assert REFUND_KEYWORDS_RE.search(verb)
+        for damage in ("破损", "坏了", "碎了", "瑕疵"):
+            assert REFUND_KEYWORDS_RE.search(damage)
+        # 动词族本体必然是子集
+        assert REFUND_VERB_RE.pattern in REFUND_KEYWORDS_RE.pattern
+
+    def test_veto_re_equals_verb_family_plus_exchange(self):
+        """资金否决 = VERB 族 + 换货(换货刻意不入族,防击穿咨询闸)。"""
+        from engine_py.triage.intent_registry import MONEY_ACTION_VETO_RE, REFUND_VERB_RE
+
+        assert "换货" in MONEY_ACTION_VETO_RE.pattern
+        assert REFUND_VERB_RE.pattern in MONEY_ACTION_VETO_RE.pattern
+        assert not REFUND_VERB_RE.search("换货")
+
+    def test_operational_action_family_covers_core_ops(self):
+        """重复拦截豁免词族必须覆盖核心操作词 —— 漏词会重放上一条 AI 答复。"""
+        from engine_py.triage.intent_registry import OPERATIONAL_ACTION_RE
+
+        for word in ("退款", "订单", "购物车", "推荐", "查询"):
+            assert OPERATIONAL_ACTION_RE.search(word), word
+
+    def test_unsanitized_tags_cover_all_tenant_markers(self):
+        """未消毒标签正则覆盖全部已知租户标记前缀。"""
+        from engine_py.triage.intent_registry import UNSANITIZED_TAGS_RE
+
+        for tag in ("[ECOMMERCE]", "[NIKE]", "[ADIDAS]"):
+            assert UNSANITIZED_TAGS_RE.search(tag)
