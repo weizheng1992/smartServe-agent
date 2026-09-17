@@ -209,3 +209,21 @@ def warm_embedding_model_in_background() -> None:
             print(f"[LLM] embedding 预热失败,降级为请求时懒加载: {warm_err}")
 
     threading.Thread(target=_warm, name="embedding-warm", daemon=True).start()
+
+
+@lru_cache(maxsize=1)
+def get_intent_classifier():
+    """意图分类头缝(wayfinder 11-D1 三缝之①):返回 triage 锚点打分的可替换实现。
+
+    默认 = AnchorIntentClassifier(现状锚点余弦打分,行为零变化);训练完成后
+    (scripts/training/ 的意图头 run)在此按 AI_INTENT_CLASSIFIER 分派新 adapter,
+    回滚 = 去掉环境变量。custom 档显式报 NotImplementedError —— 未注册的切换
+    必须响亮失败,禁止静默落回默认(掩盖影子跑对比结果)。"""
+    import os
+
+    from ..triage.intent_classifier import AnchorIntentClassifier
+
+    impl = os.environ.get("AI_INTENT_CLASSIFIER", "anchor").strip().lower()
+    if impl in ("", "anchor", "default"):
+        return AnchorIntentClassifier()
+    raise NotImplementedError(f"AI_INTENT_CLASSIFIER={impl} 尚未注册(意图头 adapter 未接入;回滚请移除该环境变量)")

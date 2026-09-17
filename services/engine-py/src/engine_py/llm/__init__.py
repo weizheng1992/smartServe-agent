@@ -1,6 +1,12 @@
 """LLM 统一入口子包。"""
 
-from .chat import get_chat_model, get_embedding_model, get_vision_model, warm_embedding_model_in_background
+from .chat import (
+    get_chat_model,
+    get_embedding_model,
+    get_intent_classifier,
+    get_vision_model,
+    warm_embedding_model_in_background,
+)
 from .resilience import CircuitBreaker, CircuitBreakerOpenError, global_circuit_breaker
 from .telemetry import (
     bind_llm_call_context,
@@ -17,6 +23,7 @@ __all__ = [
     "drain_llm_call_writes",
     "get_chat_model",
     "get_embedding_model",
+    "get_intent_classifier",
     "get_vision_model",
     "global_circuit_breaker",
     "take_thread_token_total",

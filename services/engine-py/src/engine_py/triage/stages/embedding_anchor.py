@@ -17,7 +17,6 @@ from ..intent_triage_engine import (
     _is_multi_intent_candidate,
     _proposal,
 )
-from ..semantic_cache import cosine_similarity
 from ..slot_extractor import ORDER_ID_RE, AgentIntentType
 from .context import StageContext, StageVerdict
 
@@ -59,12 +58,15 @@ async def judge(ctx: StageContext) -> StageVerdict:
                     ),
                 )
 
-        for v in anchors["order_status"]:
-            score_order = max(score_order, cosine_similarity(user_vector, v))
-        for v in anchors["refund"]:
-            score_refund = max(score_refund, cosine_similarity(user_vector, v))
-        for v in anchors["out_of_scope"]:
-            score_oos = max(score_oos, cosine_similarity(user_vector, v))
+        # 锚点打分走分类头缝(wayfinder 11-D1):默认 = AnchorIntentClassifier
+        # (与原内联循环逐位同语义);训练产物 adapter 接入后经工厂切换,
+        # 判定阈值与融合逻辑不动。
+        from ...llm import get_intent_classifier
+
+        scores = get_intent_classifier().score(user_vector=user_vector, anchor_vectors=anchors)
+        score_order = scores.order_status
+        score_refund = scores.refund
+        score_oos = scores.out_of_scope
 
         matched_order_id_match = ORDER_ID_RE.search(input_text)
         matched_order_id = matched_order_id_match.group(0) if matched_order_id_match else None

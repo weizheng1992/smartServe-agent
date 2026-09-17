@@ -26,6 +26,7 @@ from ..db import get_session
 from ..llm import get_embedding_model
 from ..tenant_config import get_tenant_config
 from .cache import tool_cache
+from .metric_registry import METRIC_SEMANTIC_REGISTRY
 
 _AMOUNT_STRIP_RE = re.compile(r"[^0-9.]")
 
@@ -41,8 +42,8 @@ def _sf_tracking() -> str:
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
-def _merchant_reader_engine():
+def _merchant_engine_url() -> str:
+    """商户库连接串(读写共用解析;MERCHANT_DATABASE_URL 优先,回落主库同名库)。"""
     url = os.environ.get("MERCHANT_DATABASE_URL")
     if not url:
         base = settings.database_url or "postgres://agent_user:agent_password@localhost:5432/agent_platform"
@@ -51,7 +52,33 @@ def _merchant_reader_engine():
         url = url.replace("postgres://", "postgresql+asyncpg://", 1)
     elif url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return create_async_engine(url, pool_size=5, max_overflow=0, pool_pre_ping=True)
+    return url
+
+
+@lru_cache(maxsize=1)
+def _merchant_reader_engine():
+    """只读引擎(阶段①收口,wayfinder 09-D4):会话级 READ ONLY + 3s 语句超时,
+    为阶段②数据分析只读沙箱提供已物理分离的执行位;写穿透一律走
+    _merchant_writer_engine,严禁复用本引擎。"""
+    return create_async_engine(
+        _merchant_engine_url(),
+        pool_size=5,
+        max_overflow=0,
+        pool_pre_ping=True,
+        connect_args={
+            "server_settings": {
+                "default_transaction_read_only": "on",
+                "statement_timeout": "3000",
+            }
+        },
+    )
+
+
+@lru_cache(maxsize=1)
+def _merchant_writer_engine():
+    """写穿透引擎(与 reader 同 URL 不同池):退款/地址写穿透的独占执行位,
+    不带任何只读标记 —— 读写物理分离后 reader 才能安全收紧为只读角色。"""
+    return create_async_engine(_merchant_engine_url(), pool_size=2, max_overflow=0, pool_pre_ping=True)
 
 
 async def merchant_order_snapshot(order_id: str) -> dict | None:
@@ -211,9 +238,12 @@ async def _fetch_merchant_order_items(order_id: str) -> list[dict]:
 
 
 async def _update_merchant_order(order_id: str, *, status: str | None = None, shipping_address: dict | None = None) -> None:
-    """聊天侧对商户真单的写穿透(退款状态 / 收货地址),与商户门户视图保持一致。"""
+    """聊天侧对商户真单的写穿透(退款状态 / 收货地址),与商户门户视图保持一致。
+
+    必须走 _merchant_writer_engine(阶段①收口):reader 已带会话级 READ ONLY,
+    写操作复用读池会静默失败。"""
     try:
-        async with _merchant_reader_engine().begin() as conn:
+        async with _merchant_writer_engine().begin() as conn:
             if status is not None:
                 await conn.execute(
                     text("UPDATE merchant_orders SET status = :st, updated_at = NOW() WHERE order_id = :oid")
@@ -1004,17 +1034,26 @@ class OrderDomainService:
             return {"error": f"Failed to register consumer preference: {err}"}
 
     # ------------------------------------------------------------------
-    # 📊 商品多维度排行(简化版 metric 注册表;完整 NL 解析随 nlQuery 批次移植)
+    # 📊 商品多维度排行(显示层注册表从 metric_registry 单一事实源派生;
+    # 完整 NL 解析随 nlQuery 批次移植)
     # ------------------------------------------------------------------
     # 排行指标(ADR-0002 Q3 + ADR-0003 Q2):商户真订单聚合源;成本快照
     # (merchant_order_items.cost_at_purchase)到位后毛利/毛利率回归,
     # 口径为精确值(Σ 量×成交价 − Σ 量×快照进价),非估算。
-    METRIC_REGISTRY = {
-        "gmv": {"key": "gmv", "label": "总销售额 (GMV)", "unit": "元", "direction": "DESC"},
-        "volume": {"key": "volume", "label": "出货销量 (件)", "unit": "件", "direction": "DESC"},
-        "gross_profit": {"key": "gross_profit", "label": "净毛利润", "unit": "元", "direction": "DESC"},
-        "margin_rate": {"key": "margin_rate", "label": "毛利率", "unit": "%", "direction": "DESC"},
-        "stock_risk": {"key": "stock_risk", "label": "滞销库存风险", "unit": "件", "direction": "ASC"},
+    # 阶段①收口(wayfinder 08-P2):label/unit/key 语义以 metric_registry 为
+    # 唯一真源(改名/改单位改一处全局生效);排序方向取自注册表而非用户输入
+    # 是 04 号票安全原则 —— direction 单独保留本地闭集(metric_registry 的
+    # direction 语义 = 分析面「越大越好 DESC」,stock_risk 排行榜为「风险最高
+    # 在前」方向相反,这是视图层语义,派生时显式覆盖,禁止静默继承)。
+    RANKING_VIEW_REGISTRY: dict[str, dict] = {
+        key: {
+            "key": key,
+            "label": metric["label"],
+            "unit": metric["unit"],
+            "direction": "ASC" if key == "stock_risk" else metric["direction"],
+        }
+        for key, metric in METRIC_SEMANTIC_REGISTRY.items()
+        if key in ("gmv", "volume", "gross_profit", "margin_rate", "stock_risk")
     }
 
     @staticmethod
@@ -1029,7 +1068,7 @@ class OrderDomainService:
         - manager_id/businessId 过滤随 engine 本地表路径退役(单商户现实)。"""
         raw_input = options.get("query") or options.get("naturalQuery") or options.get("rankingMetric") or "gmv"
         raw_str = str(raw_input)
-        registry = OrderDomainService.METRIC_REGISTRY
+        registry = OrderDomainService.RANKING_VIEW_REGISTRY
         metric_key = raw_str if raw_str in registry else "gmv"
         target_metric = registry[metric_key]
         limit_match = re.search(r"\btop\s*(\d+)", raw_str, re.IGNORECASE)

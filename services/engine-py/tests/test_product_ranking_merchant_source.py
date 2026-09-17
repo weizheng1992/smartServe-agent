@@ -215,9 +215,11 @@ def test_items_carry_profit_fields_from_cost_snapshot(merchant_pg) -> None:
 
 def test_profit_metrics_computed_from_cost_snapshot(merchant_pg) -> None:
     """毛利按成交进价快照精确计算(ADR-0003 Q1/Q2):
-    SPU-A 净销量 3 件,GMV 2487,快照成本 3×400=1200 → 毛利 1287,毛利率 ≈51.75%。"""
+    SPU-A 净销量 3 件,GMV 2487,快照成本 3×400=1200 → 毛利 1287,毛利率 ≈51.75%。
+    label 断言取自 metric_registry 真源(阶段①收口 08-P2:私有副本退役后
+    label 随真源「净毛利润 (收益)」)。"""
     profit = asyncio.run(OrderDomainService.query_product_ranking({"rankingMetric": "gross_profit", "limit": 10}))
-    assert profit["metricLabel"] == "净毛利润"
+    assert profit["metricLabel"] == "净毛利润 (收益)"
     a = next(i for i in profit["products"] if i["productId"] == _spu_id("SPU-A"))
     assert a["totalGmv"] == pytest.approx(2487.0)
     assert a["grossProfit"] == pytest.approx(2487.0 - 3 * 400.0), "毛利 = Σ(量×价 − 量×成交快照进价)"

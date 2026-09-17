@@ -1,0 +1,35 @@
+# 意图分类头(缝①IntentScorer;触发门槛:唯一标注句>=500 且每意图>=32,11-D2)
+# labels 必须与 triage intent_registry 的意图闭集同源(以注册表导出为准替换下方占位)
+
+[task]
+name = "intent_head"
+input_field = "query"
+label_field = "label"
+labels = [
+  "order_status", "refund", "logistics", "shopping_guide", "cart",
+  "greeting", "human_escalation", "out_of_scope",
+  # ...以 engine_py.triage.intent_registry 的 15 意图闭集为准补全...
+]
+
+[data]
+train_jsonl = "training_data/intent_head/labeled.jsonl"
+out_dir = "training_data/intent_head/processed"
+heldout_ratio = 0.15
+# 55 条意图评测集的问句(近邻过滤防泄漏;实测 28 条带 expectedIntents)
+eval_blocklist_jsonl = "eval/testCases/ecommerce/single-intent.jsonl"
+blocklist_field = "vars.question"
+near_dup_threshold = 0.90
+
+[model]
+encoder = "BAAI/bge-small-zh-v1.5"
+device = "cpu"
+
+[train]
+epochs = 20
+batch_size = 32
+lr = 0.01
+seed = 42
+
+[output]
+# 接入 = IntentScorer 新 adapter + get_intent_classifier() 配置切换;影子跑达标后才切
+run_dir = "training_runs/intent_head"

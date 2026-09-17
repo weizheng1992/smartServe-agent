@@ -123,14 +123,17 @@ async def _setup(pg_factory):
         )
 
     original = order_domain._merchant_reader_engine
+    original_writer = order_domain._merchant_writer_engine
     order_domain._merchant_reader_engine = lambda: merchant_engine
-    return engine, merchant_engine, original
+    # 阶段①读写分离(wayfinder 09-D4):写穿透走独立写引擎,测试必须同指容器
+    order_domain._merchant_writer_engine = lambda: merchant_engine
+    return engine, merchant_engine, (original, original_writer)
 
 
 async def _teardown(engine, merchant_engine, original):
     from engine_py.tools_registry import order_domain
 
-    order_domain._merchant_reader_engine = original
+    order_domain._merchant_reader_engine, order_domain._merchant_writer_engine = original
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM threads WHERE id = :t").bindparams(t=REPRO_THREAD))
     async with merchant_engine.begin() as conn:

@@ -52,3 +52,7 @@ Blocked by: 05, 06
 - 同一 promptfoo intentF1 评测集达标且**高于现有基线** → 配置切换生效。
 - **回滚 = adapter 配置回退**（一行配置，不改代码）。
 - LLM 精判保留为最终仲裁（三段路由）。
+
+## Comments
+
+- 2026-09-18 **训练脚手架已落码**（用户决议：不启动训练，但项目/框架搭到位，届时改配置即训）：`services/engine-py/scripts/training/`——common（配置/JSONL/编码器工厂：hash 冒烟 + sentence-transformers 真跑）/ prelabel（LLM 第二意见，httpx 直连不耦合运行时）/ prepare_data（去重→评测句近邻过滤 cos≥0.90→分层切分→闭集校验，出 stats.json）/ train（embedding+torch 线性头，config 驱动 TOML，产出 head.pt+labels.json+config.snapshot.toml+metrics.json 即 adapter 载荷）/ evaluate（复检出 markdown 报告）+ 两份 example 配置 + README（六步流水线/触发门槛表/三缝接入说明）。零新增依赖（torch/ST 既有，tomllib 标准库）；端到端测试 6 个（hash 编码器不下载模型不依赖 DB）+ 水龙头 15 测试 = 21 全绿，ruff 干净。

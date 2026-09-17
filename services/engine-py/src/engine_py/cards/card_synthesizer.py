@@ -360,10 +360,11 @@ class CardSynthesizer:
         if any(c.get("type") == "quick_replies" for c in base_cards):
             return base_cards
         # 真排行卡才挂消歧组:指标键运行时查表(ADR-0003 Q2 毛利回归后 5 键),
-        # 严禁手抄字面量与 METRIC_REGISTRY 漂移;导购推荐卡(recommendation)不触发。
+        # 严禁手抄字面量与注册表漂移;导购推荐卡(recommendation)不触发。
+        # 阶段①收口:私有 METRIC_REGISTRY 已退役,排行视图键集 = metric_registry 派生表。
         from ..tools_registry.order_domain import OrderDomainService
 
-        ranking_metric_keys = set(OrderDomainService.METRIC_REGISTRY)
+        ranking_metric_keys = set(OrderDomainService.RANKING_VIEW_REGISTRY)
         if any(
             c.get("type") == "product_ranking"
             and (c.get("data") or {}).get("rankingMetric") in ranking_metric_keys
