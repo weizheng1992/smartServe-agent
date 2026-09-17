@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>merchant-admin 可对话演示原型 rev2 · 全局悬浮 agent</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .msg-user { align-self: flex-end; background: #18181b; color: #fafafa; border-radius: 14px 14px 4px 14px; padding: 8px 14px; max-width: 70%; }
+  .msg-ai { align-self: flex-start; max-width: 88%; }
+  .anno { font-size: 11px; color: #a1a1aa; border-left: 2px solid #d4d4d8; padding-left: 6px; margin-top: 6px; }
+  .capsule { border: 1px solid #e4e4e7; border-radius: 999px; padding: 5px 12px; font-size: 12px; background: #fff; cursor: pointer; }
+  .capsule:hover { border-color: #18181b; }
+  .nav-item { display: block; padding: 6px 10px; border-radius: 8px; font-size: 13px; color: #52525b; cursor: pointer; }
+  .nav-item:hover { background: #f4f4f5; }
+  .nav-item.active { background: #18181b; color: #fff; }
+  .nav-group { font-size: 11px; color: #a1a1aa; margin: 14px 0 4px 10px; letter-spacing: 1px; }
+  table.data th { font-size: 11px; color: #71717a; text-align: left; padding: 6px 10px; border-bottom: 1px solid #e4e4e7; font-weight: 500; }
+  table.data td { font-size: 12.5px; padding: 7px 10px; border-bottom: 1px solid #f4f4f5; }
+  .typing i { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #a1a1aa; margin: 0 1.5px; animation: blink 1s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%,100% { opacity: .25 } 50% { opacity: 1 } }
+  #fab { box-shadow: 0 8px 24px rgba(0,0,0,.25); animation: pulse 2.5s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 8px 24px rgba(0,0,0,.25) } 50% { box-shadow: 0 8px 24px rgba(0,0,0,.25), 0 0 0 10px rgba(24,24,27,0.04) } }
+</style>
+</head>
+<body class="bg-zinc-100 text-zinc-900 h-screen overflow-hidden">
+
+<div class="flex h-full">
+
+  <!-- ========== 侧边导航（用户重画：按模块分菜单，每模块可有自己的子路由） ========== -->
+  <aside class="w-52 bg-white border-r border-zinc-200 flex flex-col shrink-0">
+    <div class="px-4 py-4 border-b border-zinc-100">
+      <div class="font-semibold text-sm">极光潮品 · 商户后台</div>
+      <div class="text-[11px] text-zinc-400 mt-0.5">apps/merchant-admin</div>
+    </div>
+    <nav class="flex-1 overflow-y-auto px-2 pb-4">
+      <div class="nav-group">数据</div>
+      <span class="nav-item active" data-screen="analytics">📊 数据分析</span>
+      <span class="nav-item" data-screen="reports">📄 我的报告</span>
+      <div class="nav-group">商品</div>
+      <span class="nav-item" data-screen="products">🛍 商品列表</span>
+      <span class="nav-item" data-screen="products">🏷 分类管理</span>
+      <div class="nav-group">订单</div>
+      <span class="nav-item" data-screen="orders">📦 订单履约</span>
+      <div class="nav-group">用户</div>
+      <span class="nav-item" data-screen="customers">👥 客户管理</span>
+      <div class="nav-group">运营</div>
+      <span class="nav-item" data-screen="promotions">🎫 优惠活动</span>
+      <div class="nav-group">系统</div>
+      <span class="nav-item" data-screen="menus">📋 菜单管理</span>
+      <span class="nav-item" data-screen="roles">🛡 角色管理</span>
+      <span class="nav-item" data-screen="staff">👤 员工管理</span>
+    </nav>
+    <div class="px-4 py-3 border-t border-zinc-100 text-[11px] text-zinc-400 leading-4">
+      演示版：回复为预置数据<br>真实实现后接 MetricQueryEngine
+    </div>
+  </aside>
+
+  <main class="flex-1 flex flex-col overflow-hidden relative">
+
+    <header class="h-14 bg-white border-b border-zinc-200 flex items-center justify-between px-6 shrink-0">
+      <div id="crumb" class="text-sm font-medium text-zinc-600">数据 / 数据分析</div>
+      <div class="flex items-center gap-3 text-xs">
+        <div class="relative">
+          <button onclick="toggleRoleMenu()" id="role-badge" class="px-2.5 py-1 rounded-full bg-zinc-900 text-white">老板 · 全部指标可见 ▾</button>
+          <div id="role-menu" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-xl border border-zinc-200 shadow-lg py-1 text-xs z-50">
+            <div class="px-3 py-1.5 text-zinc-400 border-b border-zinc-50">快捷切换账号（重新鉴权）</div>
+            <button onclick="switchRole('finance_owner')" class="block w-full text-left px-3 py-2 hover:bg-zinc-50">老板 · finance_owner</button>
+            <button onclick="switchRole('sales_viewer')" class="block w-full text-left px-3 py-2 hover:bg-zinc-50">运营 · sales_viewer</button>
+            <button onclick="switchRole('warehouse_operator')" class="block w-full text-left px-3 py-2 hover:bg-zinc-50">仓储 · warehouse_operator</button>
+          </div>
+        </div>
+        <span class="text-zinc-400">operator@aurora</span>
+      </div>
+    </header>
+
+    <!-- ========== 屏：数据分析（全屏对话形态） ========== -->
+    <section id="screen-analytics" class="screen flex-1 flex flex-col overflow-hidden">
+      <div id="chat-scroll" class="flex-1 overflow-y-auto p-6">
+        <div id="chat-flow" class="max-w-3xl mx-auto flex flex-col gap-5">
+          <div class="flex flex-wrap gap-2" id="capsule-row">
+            <span class="capsule" data-q="本月销量 Top10">本月销量 Top10</span>
+            <span class="capsule" data-q="卖得最差的商品">卖得最差的商品</span>
+            <span class="capsule" data-q="差评最多的 SKU">差评最多的 SKU</span>
+            <span class="capsule" data-q="近 30 天退款率">近 30 天退款率</span>
+            <span class="capsule" data-q="售后工单概况">售后工单概况</span>
+            <span class="capsule" data-q="客服负载概况">客服负载概况</span>
+          </div>
+          <div class="anno">快捷胶囊（10-D3）· 悬浮 agent 可从任意页面唤起，这里是全屏对话形态</div>
+          <div class="msg-user">本月销量 Top10</div>
+          <div class="msg-ai" id="card-table-demo"></div>
+        </div>
+      </div>
+      <div class="border-t border-zinc-200 bg-white px-6 py-4 shrink-0">
+        <div class="max-w-3xl mx-auto flex gap-3">
+          <input id="chat-input" type="text" placeholder="问点什么：上个月 GMV 趋势 / 卖得最差的商品 / 为什么退货变多了"
+            class="flex-1 border border-zinc-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-zinc-900">
+          <button id="chat-send" class="bg-zinc-900 text-white text-sm px-5 rounded-xl">发送</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 屏：商品列表（选中对比演示） ========== -->
+    <section id="screen-products" class="screen hidden flex-1 overflow-y-auto p-6">
+      <div class="max-w-4xl mx-auto">
+        <div class="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
+            <div class="text-sm font-medium">商品列表</div>
+            <div class="text-xs text-zinc-400">30 SPU · 92 SKU</div>
+          </div>
+          <table class="data w-full">
+            <thead><tr><th><input type="checkbox" onclick="toggleProd(event)"></th><th>商品</th><th>品类</th><th>售价</th><th>月销量</th><th>状态</th></tr></thead>
+            <tbody id="prod-body">
+              <tr class="bg-zinc-50"><td><input type="checkbox" checked onclick="toggleProd(event)"></td><td>机能冲锋衣 Pro</td><td>户外机能</td><td>¥1,299</td><td>182</td><td>在售</td></tr>
+              <tr class="bg-zinc-50"><td><input type="checkbox" checked onclick="toggleProd(event)"></td><td>轻量徒步鞋 GTX</td><td>潮流鞋靴</td><td>¥899</td><td>154</td><td>在售</td></tr>
+              <tr><td><input type="checkbox" onclick="toggleProd(event)"></td><td>战术机能背包 28L</td><td>背包收纳</td><td>¥649</td><td>131</td><td>在售</td></tr>
+              <tr><td><input type="checkbox" onclick="toggleProd(event)"></td><td>速干T恤·鸦青</td><td>潮流T恤</td><td>¥159</td><td>118</td><td>在售</td></tr>
+              <tr><td><input type="checkbox" onclick="toggleProd(event)"></td><td>露营灯 Cube</td><td>露营装备</td><td>¥118</td><td>96</td><td>在售</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="sticky bottom-4 mt-4 mx-auto w-fit bg-zinc-900 text-white rounded-full shadow-lg px-4 py-2 flex items-center gap-3 text-xs">
+          <span id="prod-count">已选 2 个商品</span>
+          <button data-perm="compare" class="bg-white text-zinc-900 rounded-full px-3 py-1" onclick="compareProducts()">对比 / 向 AI 提问 →</button>
+        </div>
+        <div id="prod-ctx" class="mt-6 bg-white rounded-xl border border-zinc-200 p-4 flex-col gap-4 hidden">
+          <div class="flex items-center gap-2 text-[11px]">
+            <span id="prod-chip" class="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200"></span>
+          </div>
+          <div class="msg-user" style="align-self:flex-end">对比这两个商品的销售表现</div>
+          <div class="msg-ai">
+            <div class="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+              <div class="px-4 py-2.5 border-b border-zinc-100 text-xs font-medium text-zinc-500">商品对比 · 2026-09-01 ~ 09-18</div>
+              <table class="data w-full">
+                <thead><tr><th>指标</th><th>机能冲锋衣 Pro</th><th>轻量徒步鞋 GTX</th></tr></thead>
+                <tbody>
+                  <tr><td>销量</td><td class="font-medium">182</td><td>154</td></tr>
+                  <tr><td>GMV</td><td class="font-medium">¥54,600</td><td>¥46,200</td></tr>
+                  <tr><td>毛利率 🔒</td><td>41.2%</td><td class="font-medium">38.7%</td></tr>
+                  <tr><td>差评率（90天）</td><td>2.1%</td><td class="text-rose-600 font-medium">5.8% ⚠</td></tr>
+                  <tr><td>退款率</td><td>1.4%</td><td>3.9%</td></tr>
+                </tbody>
+              </table>
+              <div class="px-4 py-2 text-[11px] text-zinc-400 border-t border-zinc-100">实体过滤：spu IN (所选) · GROUP BY 实体的单次模板查询 · 数字来自真实查询</div>
+            </div>
+          </div>
+          <div class="anno">实体对比（10 号修订：v1 能力）——对比卡片 = 并排指标表；差评率异常自动高亮</div>
+          <div class="msg-ai">
+            <div class="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+              <div class="px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between">
+                <div class="text-xs font-medium text-zinc-500">对比雷达图 · 多指标全景</div>
+                <span class="text-[11px] text-zinc-400">同一回答的第二张卡</span>
+              </div>
+              <div id="radar-compare" style="height:230px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 屏：订单履约 ========== -->
+    <section id="screen-orders" class="screen hidden flex-1 overflow-y-auto p-6">
+      <div class="max-w-4xl mx-auto">
+        <div class="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
+            <div class="text-sm font-medium">订单履约</div>
+            <div class="text-xs text-zinc-400">筛选：全部状态</div>
+          </div>
+          <table class="data w-full">
+            <thead><tr><th><input type="checkbox" checked onclick="toggleSel(event)"></th><th>订单号</th><th>商品</th><th>金额</th><th>状态</th><th>下单时间</th></tr></thead>
+            <tbody id="orders-body">
+              <tr class="bg-zinc-50"><td><input type="checkbox" checked onclick="toggleSel(event)"></td><td>#9081</td><td>机能冲锋衣 Pro ×2</td><td>¥1,196</td><td><span class="text-amber-600">已发货</span></td><td>09-12</td></tr>
+              <tr class="bg-zinc-50"><td><input type="checkbox" checked onclick="toggleSel(event)"></td><td>#9083</td><td>轻量徒步鞋 GTX ×1</td><td>¥699</td><td><span class="text-amber-600">已发货</span></td><td>09-13</td></tr>
+              <tr class="bg-zinc-50"><td><input type="checkbox" checked onclick="toggleSel(event)"></td><td>#9092</td><td>速干T恤·鸦青 ×3</td><td>¥357</td><td><span class="text-zinc-500">待发货</span></td><td>09-15</td></tr>
+              <tr><td><input type="checkbox" onclick="toggleSel(event)"></td><td>#9095</td><td>战术机能背包 28L ×1</td><td>¥449</td><td><span class="text-emerald-600">已签收</span></td><td>09-08</td></tr>
+              <tr><td><input type="checkbox" onclick="toggleSel(event)"></td><td>#9101</td><td>露营灯 Cube ×2</td><td>¥236</td><td><span class="text-rose-600">已退款</span></td><td>09-05</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="sticky bottom-4 mt-4 mx-auto w-fit bg-zinc-900 text-white rounded-full shadow-lg px-4 py-2 flex items-center gap-3 text-xs">
+          <span id="sel-count">已选 3 笔订单</span>
+          <button data-perm="compare" class="bg-white text-zinc-900 rounded-full px-3 py-1" onclick="compareOrders()">对比选中</button>
+          <button data-perm="compare" class="bg-white text-zinc-900 rounded-full px-3 py-1" onclick="askWithContext()">向 AI 提问 →</button>
+        </div>
+        <div id="ctx-chat" class="mt-6 bg-white rounded-xl border border-zinc-200 p-4 flex-col gap-4 hidden">
+          <div class="flex items-center gap-2 text-[11px]">
+            <span id="ctx-chip" class="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200"></span>
+          </div>
+          <div class="msg-user" style="align-self:flex-end">这 3 笔的平均金额和状态分布？</div>
+          <div class="msg-ai">
+            <div class="bg-zinc-50 rounded-xl border border-zinc-200 p-4 text-sm">
+              <div class="grid grid-cols-3 gap-4 text-center">
+                <div><div class="text-xl font-semibold">¥750.7</div><div class="text-[11px] text-zinc-400 mt-1">平均订单金额</div></div>
+                <div><div class="text-xl font-semibold">2 / 1</div><div class="text-[11px] text-zinc-400 mt-1">已发货 / 待发货</div></div>
+                <div><div class="text-xl font-semibold">¥2,252</div><div class="text-[11px] text-zinc-400 mt-1">合计金额</div></div>
+              </div>
+              <div class="mt-3 pt-3 border-t border-zinc-200 text-[11px] text-zinc-400">实体过滤：id IN (所选订单) · business_id 服务端校验 · 数字来自真实查询</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 屏：客户管理 ========== -->
+    <section id="screen-customers" class="screen hidden flex-1 overflow-y-auto p-6">
+      <div class="max-w-4xl mx-auto bg-white rounded-xl border border-zinc-200 overflow-hidden">
+        <div class="px-4 py-3 border-b border-zinc-100 text-sm font-medium">客户管理 <span class="text-[11px] text-zinc-400">merchant_customers</span></div>
+        <table class="data w-full">
+          <thead><tr><th>客户</th><th>累计消费</th><th>订单数</th><th>最近下单</th><th>会员级</th></tr></thead>
+          <tbody>
+            <tr><td>wang***@mail.com</td><td>¥8,942</td><td>17</td><td>09-15</td><td>金</td></tr>
+            <tr><td>li***@qq.com</td><td>¥5,301</td><td>11</td><td>09-13</td><td>银</td></tr>
+            <tr><td>chen***@mail.com</td><td>¥3,978</td><td>8</td><td>09-08</td><td>银</td></tr>
+          </tbody>
+        </table>
+        <div class="anno m-4">选中客户 → 悬浮 agent 问「这个客户的复购情况」= PageContext 同款交互（19-D3）</div>
+      </div>
+    </section>
+
+    <!-- ========== 屏：优惠活动（20 号票规划位） ========== -->
+    <section id="screen-promotions" class="screen hidden flex-1 overflow-y-auto p-6">
+      <div class="max-w-3xl mx-auto">
+        <div class="bg-white rounded-xl border border-dashed border-zinc-300 p-8 text-center">
+          <div class="text-2xl">🎫</div>
+          <div class="text-sm font-medium mt-2">运营管理 · 优惠活动</div>
+          <div class="text-xs text-zinc-400 mt-2 leading-5">模块规划中（20 号票）：满减 / 折扣 / 券的数据模型、<br>与订单结算链的资金口径、活动效果分析指标族。</div>
+          <div class="anno mt-4" style="margin-left:0; border-left:0;">死按钮禁令：能力未上线前不放可点按钮</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 屏：我的报告 ========== -->
+    <section id="screen-reports" class="screen hidden flex-1 overflow-y-auto p-6">
+      <div class="max-w-5xl mx-auto grid grid-cols-12 gap-6">
+        <div class="col-span-5 bg-white rounded-xl border border-zinc-200 overflow-hidden h-fit">
+          <div class="px-4 py-3 border-b border-zinc-100 text-sm font-medium">我的报告</div>
+          <div class="divide-y divide-zinc-50">
+            <div class="px-4 py-3 flex items-center justify-between hover:bg-zinc-50 cursor-pointer">
+              <div><div class="text-sm">2026-08 月度经营报告</div><div class="text-[11px] text-zinc-400 mt-0.5">时间窗 08-01~08-31 · 生成于 09-01 09:12</div></div>
+              <div class="flex gap-2 text-[11px]"><span class="text-blue-600">查看</span><span class="text-zinc-400">下载 CSV</span></div>
+            </div>
+            <div class="px-4 py-3 flex items-center justify-between hover:bg-zinc-50 cursor-pointer">
+              <div><div class="text-sm">2026-09 周报（第 2 周）</div><div class="text-[11px] text-zinc-400 mt-0.5">时间窗 09-07~09-13 · 生成于 09-14 08:30</div></div>
+              <div class="flex gap-2 text-[11px]"><span class="text-blue-600">查看</span><span class="text-zinc-400">下载 CSV</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-span-7 bg-white rounded-xl border border-zinc-200 p-5">
+          <div class="text-base font-semibold">2026-08 月度经营报告</div>
+          <div class="text-[11px] text-zinc-400 mt-1">数字全部来自真实查询 · 结论由 AI 基于下述数字撰写（14-D3 不变量）</div>
+          <div class="grid grid-cols-4 gap-3 mt-4 text-center">
+            <div class="bg-zinc-50 rounded-lg py-3"><div class="text-sm font-semibold">¥412.8k</div><div class="text-[10px] text-zinc-400">GMV</div></div>
+            <div class="bg-zinc-50 rounded-lg py-3"><div class="text-sm font-semibold">1,204</div><div class="text-[10px] text-zinc-400">有效订单</div></div>
+            <div class="bg-zinc-50 rounded-lg py-3"><div class="text-sm font-semibold">3.2%</div><div class="text-[10px] text-zinc-400">退款率</div></div>
+            <div class="bg-zinc-50 rounded-lg py-3"><div class="text-sm font-semibold">87.4%</div><div class="text-[10px] text-zinc-400">AI 解决率</div></div>
+          </div>
+          <div id="chart-report" style="height:160px;" class="mt-4"></div>
+          <div class="mt-3 text-xs leading-5 text-zinc-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <span class="text-amber-700 font-medium">AI 结论（口径注记）：</span>8 月 GMV ¥412.8k，环比 7 月增长 6.3%；退款率 3.2% 低于健康线；差评集中于「轻量徒步鞋 GTX」尺码问题。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 屏：菜单管理 ========== -->
+    <section id="screen-menus" class="screen hidden flex-1 overflow-y-auto p-6">
+      <div class="max-w-4xl mx-auto bg-white rounded-xl border border-zinc-200 overflow-hidden">
+        <div class="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
+          <div class="text-sm font-medium">菜单管理 <span class="text-[11px] text-zinc-400">菜单树 CRUD · 前端路由按配置动态注册</span></div>
+          <button onclick="toast('新增：类型可选 目录 / 菜单 / 按钮——按钮挂在菜单下作为权限点（perms:xxx:yyy），新建后立即出现在角色管理的分配树中')" class="text-xs px-3 py-1.5 rounded-lg bg-zinc-900 text-white">＋ 新增（目录/菜单/按钮）</button>
+        </div>
+        <table class="data w-full">
+          <thead><tr><th>菜单名称</th><th>类型</th><th>路由</th><th>排序</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr class="bg-zinc-50"><td>📁 数据</td><td>目录</td><td>—</td><td>1</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑目录：名称/排序/状态')">编辑</td></tr>
+            <tr><td class="pl-8">├ 📊 数据分析</td><td>菜单</td><td>/analytics</td><td>1</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr><td class="pl-12 text-zinc-500">│&nbsp;&nbsp;├ 「生成报告」按钮</td><td class="text-zinc-400">按钮</td><td>perms:report:gen</td><td>—</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('按钮权限点挂在所属菜单下')">编辑</td></tr>
+            <tr><td class="pl-12 text-zinc-500">│&nbsp;&nbsp;└ 「导出 CSV」按钮</td><td class="text-zinc-400">按钮</td><td>perms:report:csv</td><td>—</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('按钮权限点挂在所属菜单下')">编辑</td></tr>
+            <tr><td class="pl-8">└ 📄 我的报告</td><td>菜单</td><td>/reports</td><td>2</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr class="bg-zinc-50"><td>📁 商品</td><td>目录</td><td>—</td><td>2</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑目录')">编辑</td></tr>
+            <tr><td class="pl-8">├ 🛍 商品列表</td><td>菜单</td><td>/products</td><td>1</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr><td class="pl-8">└ 🏷 分类管理</td><td>菜单</td><td>/categories</td><td>2</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr><td>📦 订单履约</td><td>菜单</td><td>/orders</td><td>3</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr><td class="pl-8 text-zinc-500">└ 「发货操作」按钮</td><td class="text-zinc-400">按钮</td><td>perms:order:ship</td><td>—</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('按钮权限点挂在所属菜单下')">编辑</td></tr>
+            <tr><td>👥 客户管理</td><td>菜单</td><td>/customers</td><td>4</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr class="bg-zinc-50"><td>📁 运营</td><td>目录</td><td>—</td><td>5</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑目录')">编辑</td></tr>
+            <tr><td class="pl-8">└ 🎫 优惠活动</td><td>菜单</td><td>/promotions</td><td>1</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr><td class="pl-12 text-zinc-500">├ 「新建活动」按钮</td><td class="text-zinc-400">按钮</td><td>perms:promo:create</td><td>—</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('按钮权限点挂在所属菜单下')">编辑</td></tr>
+            <tr><td class="pl-12 text-zinc-500">└ 「停用活动」按钮</td><td class="text-zinc-400">按钮</td><td>perms:promo:disable</td><td>—</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('按钮权限点挂在所属菜单下')">编辑</td></tr>
+            <tr class="bg-zinc-50"><td>📁 系统</td><td>目录</td><td>—</td><td>9</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑目录')">编辑</td></tr>
+            <tr><td class="pl-8">├ 📋 菜单管理</td><td>菜单</td><td>/menus</td><td>1</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr><td class="pl-8">│&nbsp;&nbsp;└ 「新增菜单」按钮</td><td class="text-zinc-400">按钮</td><td>perms:menu:create</td><td>—</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('按钮权限点挂在所属菜单下')">编辑</td></tr>
+            <tr><td class="pl-8">├ 🛡 角色管理</td><td>菜单</td><td>/roles</td><td>2</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+            <tr><td class="pl-8">└ 👤 员工管理</td><td>菜单</td><td>/staff</td><td>3</td><td>启用</td><td class="text-blue-600 cursor-pointer" onclick="toast('编辑菜单')">编辑</td></tr>
+          </tbody>
+        </table>
+        <div class="anno m-4">菜单存 menus 表（目录/菜单/按钮三级，business_id 隔离）· 新增页面 = 注册组件 + 建菜单，前端路由/侧栏按配置渲染 · 变更记 merchant_audit_logs</div>
+      </div>
+    </section>
+
+    <!-- ========== 屏：角色管理（菜单分配权限） ========== -->
+    <section id="screen-roles" class="screen hidden flex-1 overflow-y-auto p-6">
+      <div class="max-w-5xl mx-auto grid grid-cols-12 gap-6">
+        <div class="col-span-3 bg-white rounded-xl border border-zinc-200 overflow-hidden h-fit">
+          <div class="px-4 py-3 border-b border-zinc-100 text-sm font-medium">角色</div>
+          <div class="divide-y divide-zinc-50">
+            <div class="px-4 py-2.5 text-sm cursor-pointer hover:bg-zinc-50" onclick="pickRole('finance_owner')" id="rl-finance_owner">老板 <span class="text-[10px] text-zinc-400">finance_owner</span></div>
+            <div class="px-4 py-2.5 text-sm cursor-pointer hover:bg-zinc-50" onclick="pickRole('sales_viewer')" id="rl-sales_viewer">运营 <span class="text-[10px] text-zinc-400">sales_viewer</span></div>
+            <div class="px-4 py-2.5 text-sm cursor-pointer hover:bg-zinc-50" onclick="pickRole('warehouse_operator')" id="rl-warehouse_operator">仓储 <span class="text-[10px] text-zinc-400">warehouse_operator</span></div>
+            <div class="px-4 py-2.5 text-xs text-zinc-400 cursor-pointer hover:bg-zinc-50" onclick="toast('新建角色：创建后在此矩阵分配菜单权限')">＋ 新建角色</div>
+          </div>
+        </div>
+        <div class="col-span-9 space-y-6">
+          <div class="bg-white rounded-xl border border-zinc-200 p-5">
+            <div class="flex items-center justify-between">
+              <div class="text-sm font-medium">菜单分配权限 · <span id="cfg-role-name">老板</span> <span class="text-[11px] text-zinc-400">树形勾选，父子联动，保存即生效</span></div>
+              <div class="flex gap-2">
+                <button onclick="resetPerms()" class="text-xs px-3 py-1.5 rounded-lg border border-zinc-300">恢复默认</button>
+                <button onclick="savePerms()" class="text-xs px-3 py-1.5 rounded-lg bg-zinc-900 text-white">保存配置</button>
+              </div>
+            </div>
+            <div id="cfg-menus" class="mt-4 space-y-1.5"></div>
+            <div class="anno mt-3">角色↔菜单（含按钮权限点）多对多存 role_menus · 服务端按角色菜单集渲染路由与鉴权 · 老板的系统菜单不可移除（防锁死）</div>
+          </div>
+          <div class="bg-white rounded-xl border border-zinc-200 p-5">
+            <div class="text-sm font-medium mb-3">指标权限（闭集） <span class="text-[11px] text-zinc-400">编译层过滤 + 反问选项集同步</span></div>
+            <div id="cfg-metrics" class="flex flex-wrap gap-2"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 屏：员工管理 ========== -->
+    <section id="screen-staff" class="screen hidden flex-1 overflow-y-auto p-6">
+      <div class="max-w-4xl mx-auto bg-white rounded-xl border border-zinc-200 overflow-hidden">
+        <div class="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
+          <div class="text-sm font-medium">员工管理 <span class="text-[11px] text-zinc-400">员工↔角色分配 · 联动顶栏快捷切换账号</span></div>
+          <button onclick="toast('邀请员工：邮箱 + 角色分派（staff 表）')" class="text-xs px-3 py-1.5 rounded-lg bg-zinc-900 text-white">＋ 邀请员工</button>
+        </div>
+        <table class="data w-full">
+          <thead><tr><th>员工</th><th>角色</th><th>状态</th><th>最近登录</th></tr></thead>
+          <tbody>
+            <tr><td>boss@aurora</td><td><span class="px-2 py-0.5 rounded bg-zinc-900 text-white text-[11px]">老板</span></td><td>启用</td><td>刚刚</td></tr>
+            <tr><td>ops@aurora</td><td><span class="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[11px]">运营</span></td><td>启用</td><td>09-17</td></tr>
+            <tr><td>wh@aurora</td><td><span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[11px]">仓储</span></td><td>启用</td><td>09-15</td></tr>
+          </tbody>
+        </table>
+        <div class="anno m-4">切换账号 = 重新鉴权（非身份伪造）· 审计记录 · 老板可借此预览员工视角</div>
+      </div>
+    </section>
+
+    <!-- ========== 全局悬浮 agent（所有路由可用） ========== -->
+    <div id="fab" onclick="toggleFab()" class="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-zinc-900 text-white flex items-center justify-center text-xl cursor-pointer select-none z-40">🤖</div>
+
+    <div id="fab-panel" class="fixed bottom-24 right-6 w-[380px] h-[520px] bg-white rounded-2xl border border-zinc-200 shadow-2xl z-40 hidden flex-col overflow-hidden">
+      <div class="px-4 py-3 border-b border-zinc-100 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span class="text-sm font-medium">数据分析助手</span>
+        </div>
+        <button onclick="goto('analytics')" class="text-[11px] text-zinc-400 hover:text-zinc-900">全屏对话 ↗</button>
+      </div>
+      <div class="px-4 py-2 border-b border-zinc-50 shrink-0">
+        <span id="fab-ctx" class="inline-block px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-[11px]">上下文：数据分析</span>
+      </div>
+      <div id="fab-scroll" class="flex-1 overflow-y-auto p-4">
+        <div id="fab-flow" class="flex flex-col gap-4">
+          <div class="anno" style="margin:0">悬浮 agent：任意路由可唤起，上下文=当前路由+选中数据（19 号修订）</div>
+        </div>
+      </div>
+      <div class="px-3 py-2 border-t border-zinc-100 flex gap-2 overflow-x-auto shrink-0">
+        <span class="capsule shrink-0" onclick="fabSend('本月销量 Top10')">销量 Top10</span>
+        <span class="capsule shrink-0" onclick="fabSend('近 30 天退款率')">退款率</span>
+        <span class="capsule shrink-0" onclick="fabSend('差评最多的 SKU')">差评榜</span>
+      </div>
+      <div class="p-3 border-t border-zinc-100 flex gap-2 shrink-0">
+        <input id="fab-input" type="text" placeholder="提问…" class="flex-1 border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-zinc-900">
+        <button onclick="fabSend(document.getElementById('fab-input').value); document.getElementById('fab-input').value=''" class="bg-zinc-900 text-white text-xs px-3 rounded-lg">发送</button>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+/* ---------------- 导航 ---------------- */
+const crumbs = { analytics: "数据 / 数据分析", products: "商品 / 商品列表", orders: "订单 / 订单履约", customers: "用户 / 客户管理", promotions: "运营 / 优惠活动", reports: "数据 / 我的报告", menus: "系统 / 菜单管理", roles: "系统 / 角色管理", staff: "系统 / 员工管理" };
+let curScreen = "analytics";
+function goto(screen) {
+  curScreen = screen;
+  document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
+  const nav = [...document.querySelectorAll(".nav-item")].find(n => n.dataset.screen === screen);
+  if (nav) nav.classList.add("active");
+  document.querySelectorAll(".screen").forEach(x => x.classList.add("hidden"));
+  document.getElementById("screen-" + screen).classList.remove("hidden");
+  document.getElementById("crumb").textContent = crumbs[screen] || "";
+  document.getElementById("fab-ctx").textContent = "上下文：" + (crumbs[screen] || screen).replace(/ .*\//, "") + (selHint[screen] || "");
+}
+document.querySelectorAll(".nav-item").forEach(el => el.addEventListener("click", () => goto(el.dataset.screen)));
+
+/* ---------------- 图表 ---------------- */
+let chartSeq = 0;
+const baseOpt = { grid: { left: 40, right: 16, top: 20, bottom: 24 }, tooltip: { trigger: "axis" },
+  xAxis: { axisLabel: { fontSize: 10, color: "#a1a1aa" }, axisLine: { lineStyle: { color: "#e4e4e7" } } },
+  yAxis: { axisLabel: { fontSize: 10, color: "#a1a1aa" }, splitLine: { lineStyle: { color: "#f4f4f5" } } } };
+function renderChart(id) {
+  const el = document.getElementById(id);
+  if (!el || !window.echarts) return;
+  if (id.startsWith("gmv")) {
+    const days = Array.from({ length: 30 }, (_, i) => `${20 + i > 31 ? 20 + i - 31 : 20 + i}日`);
+    echarts.init(el).setOption({ ...baseOpt, xAxis: { ...baseOpt.xAxis, type: "category", data: days }, yAxis: { ...baseOpt.yAxis, type: "value" },
+      series: [{ type: "line", smooth: true, symbol: "none", lineStyle: { color: "#18181b", width: 2 }, areaStyle: { color: "rgba(24,24,27,0.06)" },
+        data: days.map((_, i) => Math.round(9500 + 4200 * Math.sin(i / 4) + i * 90 + Math.random() * 1800)) }] });
+  } else if (id.startsWith("bad")) {
+    echarts.init(el).setOption({ ...baseOpt, xAxis: { ...baseOpt.xAxis, type: "value" }, yAxis: { ...baseOpt.yAxis, type: "category", data: ["速干T恤·鸦青", "露营灯 Cube", "战术背包 28L", "徒步鞋 GTX", "冲锋衣 Pro"] },
+      series: [{ type: "bar", barWidth: 12, itemStyle: { color: "#f43f5e", borderRadius: 3 }, data: [4, 6, 7, 11, 13] }] });
+  } else if (id.startsWith("radar")) {
+    echarts.init(el).setOption({ tooltip: {}, legend: { bottom: 0, textStyle: { fontSize: 10, color: "#71717a" } },
+      radar: { indicator: [{ name: "销量", max: 200 }, { name: "GMV(千)", max: 60 }, { name: "毛利率%", max: 60 }, { name: "好评率%", max: 100 }, { name: "复购率%", max: 60 }],
+        radius: "62%", axisName: { fontSize: 10, color: "#71717a" }, splitLine: { lineStyle: { color: "#f4f4f5" } }, splitArea: { show: false } },
+      series: [{ type: "radar", data: [
+        { value: [182, 54.6, 41.2, 97.9, 38], name: "机能冲锋衣 Pro", itemStyle: { color: "#18181b" }, areaStyle: { opacity: 0.08 } },
+        { value: [154, 46.2, 38.7, 94.2, 31], name: "轻量徒步鞋 GTX", itemStyle: { color: "#f43f5e" }, areaStyle: { opacity: 0.08 } }
+      ] }] });
+  } else if (id === "chart-report") {
+    echarts.init(el).setOption({ ...baseOpt, xAxis: { ...baseOpt.xAxis, type: "category", data: ["5月", "6月", "7月", "8月"] }, yAxis: { ...baseOpt.yAxis, type: "value" },
+      series: [{ type: "bar", barWidth: 28, itemStyle: { color: "#18181b", borderRadius: 4 }, data: [355.1, 371.4, 388.2, 412.8] }] });
+  }
+}
+
+/* ---------------- 卡片模板 ---------------- */
+const T = {
+  table: () => `<div class="bg-white rounded-xl border border-zinc-200 shadow-sm overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-zinc-100 flex items-center justify-between">
+      <div class="text-xs font-medium text-zinc-500">销量排行 · 2026-09-01 ~ 09-18</div>
+      <button data-perm="report_gen" class="text-[11px] px-2.5 py-1 rounded-md bg-zinc-900 text-white" onclick="send('给我生成一份月度报告')">生成报告</button>
+    </div>
+    <table class="data w-full"><thead><tr><th>#</th><th>商品</th><th>品类</th><th>销量</th><th>GMV</th><th>毛利率 🔒</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>机能冲锋衣 Pro</td><td>户外机能</td><td>182</td><td>¥54,600</td><td>41.2%</td></tr>
+      <tr><td>2</td><td>轻量徒步鞋 GTX</td><td>潮流鞋靴</td><td>154</td><td>¥46,200</td><td>38.7%</td></tr>
+      <tr><td>3</td><td>战术机能背包 28L</td><td>背包收纳</td><td>131</td><td>¥32,095</td><td>44.1%</td></tr>
+    </tbody></table>
+    <div class="px-4 py-2 text-[11px] text-zinc-400 border-t border-zinc-100">口径：有效订单聚合（排除退款/取消）</div>
+  </div>`,
+  clarify: () => `<div class="bg-white rounded-xl border border-amber-200 p-4">
+    <div class="text-sm">「卖得最差」是指——</div>
+    <div class="flex gap-2 mt-3">
+      <button class="text-xs px-3 py-1.5 rounded-lg border border-zinc-300 bg-white" onclick="send('销售额最低的商品排行')">销售额最低</button>
+      <button class="text-xs px-3 py-1.5 rounded-lg border border-zinc-300 bg-white" onclick="send('销量最低的商品排行')">销量最低</button>
+    </div>
+  </div>`,
+  refuse: () => `<div class="bg-white rounded-xl border border-zinc-200 p-4 text-sm">
+    <div class="font-medium">⚠ 这类归因分析暂不支持</div>
+    <div class="text-zinc-500 text-xs mt-1.5 leading-5">我可以查已注册的指标口径，但不能推测原因。可试试：</div>
+    <div class="flex gap-2 mt-3 flex-wrap">
+      <span class="capsule" onclick="send('近 30 天退款率')">近 30 天退款率</span>
+      <span class="capsule" onclick="send('售后工单概况')">售后工单概况</span>
+    </div>
+  </div>`,
+  line: (id) => `<div class="bg-white rounded-xl border border-zinc-200 shadow-sm overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-zinc-100 text-xs font-medium text-zinc-500">GMV 趋势 · 近 30 天</div>
+    <div id="${id}" style="height:200px;"></div>
+  </div>`,
+  bar: (id) => `<div class="bg-white rounded-xl border border-zinc-200 shadow-sm overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-zinc-100 text-xs font-medium text-zinc-500">差评榜（rating ≤ 2）· 近 90 天</div>
+    <div id="${id}" style="height:190px;"></div>
+  </div>`,
+  refund: () => `<div class="bg-white rounded-xl border border-zinc-200 p-4">
+    <div class="grid grid-cols-3 gap-3 text-center">
+      <div><div class="text-lg font-semibold">2.8%</div><div class="text-[11px] text-zinc-400 mt-1">退款率（30天）</div></div>
+      <div><div class="text-lg font-semibold">34 笔</div><div class="text-[11px] text-zinc-400 mt-1">退款单</div></div>
+      <div><div class="text-lg font-semibold">¥18.2k</div><div class="text-[11px] text-zinc-400 mt-1">退款金额</div></div>
+    </div></div>`,
+  session: () => `<div class="bg-white rounded-xl border border-zinc-200 p-4">
+    <div class="grid grid-cols-3 gap-3 text-center">
+      <div><div class="text-lg font-semibold">1,204</div><div class="text-[11px] text-zinc-400 mt-1">会话量（30天）</div></div>
+      <div><div class="text-lg font-semibold">87.4%</div><div class="text-[11px] text-zinc-400 mt-1">AI 解决率</div></div>
+      <div><div class="text-lg font-semibold">12</div><div class="text-[11px] text-zinc-400 mt-1">人工接管</div></div>
+    </div></div>`,
+  report: () => `<div class="bg-white rounded-xl border border-emerald-200 p-4 text-sm">
+    <div class="font-medium text-emerald-700">✓ 报告已生成</div>
+    <button class="mt-3 text-xs px-3 py-1.5 rounded-lg bg-zinc-900 text-white" onclick="goto('reports')">前往我的报告 →</button>
+  </div>`
+};
+
+/* ---------------- 演示 agent 核心（关键词路由，主屏与悬浮面板共用） ---------------- */
+const ROUTES = [
+  { re: /(为什么|原因|怎么就|归因)/, type: "refuse" },
+  { re: /(报告|月报|周报)/, type: "report" },
+  { re: /(最差|垫底|最烂)/, type: "clarify" },
+  { re: /(趋势|走势|gmv)/i, type: "line" },
+  { re: /(差评|评分|评价)/, type: "bar" },
+  { re: /(退款|退货|售后|工单)/, type: "refund" },
+  { re: /(负载|客服|会话|解决率)/, type: "session" },
+  { re: /(top|排行|销量|卖得|爆款)/i, type: "table" },
+];
+function send(q) { agentReply(q, "chat-flow", "chat-scroll"); goto("analytics"); }
+function fabSend(q) { if (!q || !q.trim()) return; toggleFab(true); agentReply(q.trim(), "fab-flow", "fab-scroll"); }
+function agentReply(q, flowId, scrollId) {
+  const flow = document.getElementById(flowId), scroll = document.getElementById(scrollId);
+  const bubble = document.createElement("div");
+  bubble.className = "msg-user"; bubble.textContent = q;
+  flow.appendChild(bubble);
+  const typing = document.createElement("div");
+  typing.className = "msg-ai";
+  typing.innerHTML = `<div class="bg-white rounded-xl border border-zinc-200 px-4 py-3 typing"><i></i><i></i><i></i>&nbsp;<span class="text-xs text-zinc-400">正在解析问题并查询…</span></div>`;
+  flow.appendChild(typing);
+  scroll.scrollTop = scroll.scrollHeight;
+  setTimeout(() => {
+    typing.remove();
+    const hit = ROUTES.find(r => r.re.test(q));
+    const wrap = document.createElement("div");
+    wrap.className = "msg-ai";
+    const type = hit ? hit.type : "refuse";
+    if (type === "line" || type === "bar") {
+      const id = `${type === "line" ? "gmv" : "bad"}-${++chartSeq}-${flowId}`;
+      wrap.innerHTML = T[type](id);
+      flow.appendChild(wrap); renderChart(id); applyPermButtons();
+    } else {
+      wrap.innerHTML = T[type]();
+      flow.appendChild(wrap); applyPermButtons();
+    }
+    scroll.scrollTop = scroll.scrollHeight;
+  }, 650);
+}
+document.getElementById("chat-send").addEventListener("click", () => {
+  const inp = document.getElementById("chat-input");
+  if (inp.value.trim()) { send(inp.value.trim()); inp.value = ""; }
+});
+document.getElementById("chat-input").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("chat-send").click(); });
+document.getElementById("fab-input").addEventListener("keydown", e => { if (e.key === "Enter") fabSend(e.target.value), e.target.value = ""; });
+document.querySelectorAll("#capsule-row .capsule").forEach(c => c.addEventListener("click", () => send(c.dataset.q)));
+
+/* ---------------- 悬浮面板 ---------------- */
+function toggleFab(forceOpen) {
+  const p = document.getElementById("fab-panel");
+  const show = forceOpen === true ? true : p.classList.contains("hidden");
+  p.classList.toggle("hidden", !show);
+  p.classList.toggle("flex", show);
+}
+
+/* ---------------- 选中态与上下文提示 ---------------- */
+const selHint = { products: " · 选中 2 商品", orders: " · 选中 3 订单", customers: "", promotions: "" };
+function selTexts(bodyId, col) {
+  return [...document.querySelectorAll(`#${bodyId} input:checked`)].map(cb => cb.closest("tr").querySelector(`td:nth-child(${col})`).textContent);
+}
+function toggleSel() {
+  const n = selTexts("orders-body", 2).length;
+  document.getElementById("sel-count").textContent = `已选 ${n} 笔订单`;
+  selHint.orders = ` · 选中 ${n} 订单`;
+  document.getElementById("fab-ctx").textContent = "上下文：订单履约" + selHint.orders;
+}
+function toggleProd() {
+  const n = selTexts("prod-body", 2).length;
+  document.getElementById("prod-count").textContent = `已选 ${n} 个商品`;
+  selHint.products = ` · 选中 ${n} 商品`;
+  document.getElementById("fab-ctx").textContent = "上下文：商品列表" + selHint.products;
+}
+function askWithContext() {
+  const ids = selTexts("orders-body", 2);
+  const chat = document.getElementById("ctx-chat");
+  chat.classList.remove("hidden"); chat.classList.add("flex");
+  document.getElementById("ctx-chip").textContent = `上下文：订单履约 · 已选 ${ids.length} 笔（${ids.join(" ")}）`;
+}
+function compareOrders() {
+  const rows = [...document.querySelectorAll("#orders-body input:checked")].map(cb => [...cb.closest("tr").querySelectorAll("td")].slice(1).map(td => td.innerHTML.trim()));
+  if (rows.length < 2) { alert("至少勾选 2 笔订单才能对比"); return; }
+  const chat = document.getElementById("ctx-chat");
+  chat.classList.remove("hidden"); chat.classList.add("flex");
+  document.getElementById("ctx-chip").textContent = `上下文：订单履约 · 已选 ${rows.length} 笔对比`;
+  const u = document.createElement("div");
+  u.className = "msg-user"; u.style.alignSelf = "flex-end"; u.textContent = `对比这 ${rows.length} 笔订单`;
+  chat.appendChild(u);
+  const labels = ["订单号", "商品", "金额", "状态", "下单时间"];
+  const derived = [["商品件数", rows.map(r => r[1].split("×")[1]?.trim() || "1")], ["物流时效", ["3.2 天", "2.8 天", "—", "5.1 天", "—"].slice(0, rows.length)]];
+  let thead = "<tr><th>属性</th>" + rows.map(r => `<th>${r[0]}</th>`).join("") + "</tr>";
+  let body = labels.slice(1).map((l, i) => `<tr><td>${l}</td>` + rows.map(r => `<td>${r[i + 1]}</td>`).join("") + "</tr>").join("")
+    + derived.map(d => `<tr><td>${d[0]}</td>` + d[1].slice(0, rows.length).map(v => `<td>${v}</td>`).join("") + "</tr>").join("");
+  const wrap = document.createElement("div");
+  wrap.className = "msg-ai";
+  wrap.innerHTML = `<div class="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-zinc-100 text-xs font-medium text-zinc-500">订单对比 · ${rows.length} 笔</div>
+    <table class="data w-full"><thead>${thead}</thead><tbody>${body}</tbody></table>
+    <div class="px-4 py-2 text-[11px] text-zinc-400 border-t border-zinc-100">对比维度 = 订单属性 + 已注册指标闭集（金额/状态/物流时效/商品构成…）· 列随权限过滤（13-D4）</div>
+  </div>`;
+  chat.appendChild(wrap);
+}
+function compareProducts() {
+  const names = selTexts("prod-body", 2);
+  const chat = document.getElementById("prod-ctx");
+  chat.classList.remove("hidden"); chat.classList.add("flex");
+  document.getElementById("prod-chip").textContent = `上下文：商品列表 · 已选 ${names.length} 个（${names.join(" / ")}）`;
+  renderChart("radar-compare");
+}
+
+/* 初始渲染 */
+document.getElementById("card-table-demo").innerHTML = T.table();
+renderChart("chart-report");
+applyPermButtons();
+
+/* ---------------- 菜单/角色/员工 三件套（RBAC：菜单分配权限） ---------------- */
+const ROLE_LABEL = { finance_owner: "老板 · 全部指标可见", sales_viewer: "运营 · 不见成本指标", warehouse_operator: "仓储 · 库存物流面" };
+const ROLE_NAME = { finance_owner: "老板", sales_viewer: "运营", warehouse_operator: "仓储" };
+const SYSTEM_KEYS = ["menus", "roles", "staff"];
+const SYS_BTN_GUARD = ["menu_create", "menu_edit", "role_assign", "staff_invite"];
+const MENU_TREE = [
+  { dir: "数据", items: [
+    { key: "analytics", label: "📊 数据分析", btns: [["report_gen", "生成报告", "report:gen"], ["csv", "导出 CSV", "report:csv"]] },
+    { key: "reports", label: "📄 我的报告", btns: [["csv", "下载 CSV", "report:csv"]] },
+  ]},
+  { dir: "商品", items: [
+    { key: "products", label: "🛍 商品列表 / 🏷 分类管理", btns: [["prod_edit", "商品 编辑/上下架", "prod:edit"], ["compare", "对比 / 向 AI 提问", "ctx:compare"]] },
+  ]},
+  { dir: "订单", items: [
+    { key: "orders", label: "📦 订单履约", btns: [["order_ship", "发货操作", "order:ship"], ["compare", "对比 / 向 AI 提问", "ctx:compare"]] },
+  ]},
+  { dir: "用户", items: [{ key: "customers", label: "👥 客户管理", btns: [] }] },
+  { dir: "运营", items: [
+    { key: "promotions", label: "🎫 优惠活动", btns: [["promo_create", "新建活动", "promo:create"], ["promo_edit", "编辑/停用活动", "promo:disable"]] },
+  ]},
+  { dir: "系统", items: [
+    { key: "menus", label: "📋 菜单管理", btns: [["menu_create", "新增", "menu:create"], ["menu_edit", "编辑", "menu:edit"]] },
+    { key: "roles", label: "🛡 角色管理", btns: [["role_assign", "分配权限/保存", "role:assign"]] },
+    { key: "staff", label: "👤 员工管理", btns: [["staff_invite", "邀请员工", "staff:invite"]] },
+  ]},
+];
+const ALL_MENUS_KEYS = MENU_TREE.flatMap(g => g.items.map(i => i.key));
+const ALL_METRICS = [["gmv", "GMV"], ["volume", "销量"], ["gross_profit", "毛利 🔒"], ["margin_rate", "毛利率 🔒"], ["stock_risk", "库存风险 🔒"], ["review", "差评/评分"], ["refund", "退款/售后"], ["session", "会话指标"]];
+const DEFAULT_PERMS = {
+  finance_owner: { menus: ALL_MENUS_KEYS, buttons: MENU_TREE.flatMap(g => g.items.flatMap(i => i.btns.map(b => b[0]))), metrics: ALL_METRICS.map(m => m[0]) },
+  sales_viewer: { menus: ALL_MENUS_KEYS, buttons: ["report_gen", "csv", "prod_edit", "compare", "order_ship", "promo_create", "promo_edit"], metrics: ["gmv", "volume", "review", "refund", "session"] },
+  warehouse_operator: { menus: ["analytics", "reports", "orders", "menus", "roles", "staff"], buttons: ["report_gen", "csv", "compare", "order_ship"], metrics: ["volume", "stock_risk", "refund", "session"] }
+};
+let PERMS = JSON.parse(JSON.stringify(DEFAULT_PERMS));
+let curRole = "finance_owner", cfgRole = "finance_owner";
+function toggleRoleMenu() { document.getElementById("role-menu").classList.toggle("hidden"); }
+function switchRole(r) {
+  curRole = r;
+  document.getElementById("role-badge").textContent = ROLE_LABEL[r] + " ▾";
+  document.getElementById("role-menu").classList.add("hidden");
+  applyMenuVisibility();
+  if (!PERMS[r].menus.includes(curScreen)) goto("analytics");
+}
+function applyMenuVisibility() {
+  document.querySelectorAll(".nav-item").forEach(n => { n.style.display = PERMS[curRole].menus.includes(n.dataset.screen) ? "" : "none"; });
+  applyPermButtons();
+}
+function applyPermButtons() {
+  document.querySelectorAll("[data-perm]").forEach(b => { b.style.display = PERMS[curRole].buttons.includes(b.dataset.perm) ? "" : "none"; });
+}
+function chip(t) { return `<label class="flex items-center gap-1.5 border border-zinc-200 rounded-lg px-2.5 py-1.5 text-xs cursor-pointer bg-white"><input type="checkbox" ${t[2] ? "checked" : ""} onchange="permToggle('metrics','${t[0]}',this.checked)">${t[1]}</label>`; }
+function pickRole(r) {
+  cfgRole = r;
+  document.getElementById("cfg-role-name").textContent = ROLE_NAME[r];
+  ["finance_owner", "sales_viewer", "warehouse_operator"].forEach(k => { const el = document.getElementById("rl-" + k); if (el) el.classList.toggle("bg-zinc-100", k === r); });
+  document.getElementById("cfg-menus").innerHTML = MENU_TREE.map((g, gi) => {
+    const mOn = g.items.filter(i => PERMS[r].menus.includes(i.key)).length;
+    const bAll = g.items.flatMap(i => i.btns.map(b => b[0]));
+    const bOn = bAll.filter(k => PERMS[r].buttons.includes(k)).length;
+    const dirState = (mOn === g.items.length && bOn === bAll.length) ? "checked" : ((mOn + bOn) > 0 ? "checked style='opacity:.45'" : "");
+    return `<div class="flex items-center gap-2 text-sm"><input type="checkbox" ${dirState} onchange="dirToggle('${r}',${gi},this.checked)"><span class="font-medium">📁 ${g.dir}</span><span class="text-[10px] text-zinc-400">菜单 ${mOn}/${g.items.length} · 按钮 ${bOn}/${bAll.length}</span></div>`
+      + g.items.map(i => {
+        const btnsOn = i.btns.filter(b => PERMS[r].buttons.includes(b[0])).length;
+        const mState = btnsOn === i.btns.length ? "checked" : (btnsOn > 0 ? "checked style='opacity:.45'" : "");
+        return `<label class="flex items-center gap-1.5 text-xs text-zinc-700 ml-7 py-0.5"><input type="checkbox" ${PERMS[r].menus.includes(i.key) ? "checked" : ""} onchange="permToggle('menus','${i.key}',this.checked)">${i.label}</label>`
+          + i.btns.map(b => `<label class="flex items-center gap-1.5 text-[11px] text-zinc-500 ml-12 py-0.5"><input type="checkbox" ${PERMS[r].buttons.includes(b[0]) ? "checked" : ""} onchange="permToggle('buttons','${b[0]}',this.checked)">▪ ${b[1]} <span class="text-zinc-300">${b[2]}</span></label>`).join("");
+      }).join("");
+  }).join("");
+  document.getElementById("cfg-metrics").innerHTML = ALL_METRICS.map(m => chip([m[0], m[1], PERMS[r].metrics.includes(m[0])])).join("");
+}
+function dirToggle(role, gi, on) {
+  MENU_TREE[gi].items.forEach(i => {
+    const s = PERMS[role].menus, idx = s.indexOf(i.key);
+    if (on && idx < 0) s.push(i.key);
+    if (!on && idx >= 0 && !(role === "finance_owner" && SYSTEM_KEYS.includes(i.key))) s.splice(idx, 1);
+    i.btns.forEach(b => {
+      const bs = PERMS[role].buttons, bi = bs.indexOf(b[0]);
+      if (on && bi < 0) bs.push(b[0]);
+      if (!on && bi >= 0 && !(role === "finance_owner" && SYS_BTN_GUARD.includes(b[0]))) bs.splice(bi, 1);
+    });
+  });
+  if (role === "finance_owner" && !on) {
+    SYSTEM_KEYS.forEach(k => { if (!PERMS[role].menus.includes(k)) PERMS[role].menus.push(k); });
+    SYS_BTN_GUARD.forEach(k => { if (!PERMS[role].buttons.includes(k)) PERMS[role].buttons.push(k); });
+    toast("护栏：老板的系统菜单与保存权限不可移除（防锁死）");
+  }
+  pickRole(role);
+  if (curRole === role) applyMenuVisibility();
+}
+function permToggle(group, key, on) {
+  const set = PERMS[cfgRole][group];
+  const i = set.indexOf(key);
+  if (on && i < 0) set.push(key);
+  if (!on && i >= 0) {
+    if (group === "menus" && cfgRole === "finance_owner" && SYSTEM_KEYS.includes(key)) { toast("护栏：老板的系统菜单不可移除（防锁死）"); pickRole(cfgRole); return; }
+    if (group === "buttons" && cfgRole === "finance_owner" && SYS_BTN_GUARD.includes(key)) { toast("护栏：该按钮权限不可从老板移除（防锁死）"); pickRole(cfgRole); return; }
+    set.splice(i, 1);
+  }
+  if (curRole === cfgRole) applyMenuVisibility();
+}
+function savePerms() { toast("配置已保存 · 即时生效（服务端强制 + 缓存失效）· 已记 merchant_audit_logs"); }
+function resetPerms() { PERMS = JSON.parse(JSON.stringify(DEFAULT_PERMS)); pickRole(cfgRole); applyMenuVisibility(); toast("已恢复默认配置"); }
+function toast(msg) {
+  let t = document.getElementById("toast");
+  if (!t) { t = document.createElement("div"); t.id = "toast"; t.className = "fixed bottom-24 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-xs px-4 py-2.5 rounded-full shadow-lg z-50 transition-opacity"; document.body.appendChild(t); }
+  t.textContent = msg; t.style.opacity = "1";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.opacity = "0", 2200);
+}
+pickRole("finance_owner");
+</script>
+</body>
+</html>
