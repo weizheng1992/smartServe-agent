@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from engine_py.analytics import graph, rbac, report_service
+from engine_py.analytics import graph, promotions, rbac, report_service
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -70,7 +70,7 @@ async def set_role_menus(role: str, request: Request):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可分配权限"})
     body = await request.json()
-    await rbac.set_role_menus(ctx["business_id"], role, list(body.get("menuIds") or []))
+    await rbac.set_role_menus(ctx["business_id"], role, list(body.get("menuIds") or []), ctx["staff"])
     return {"success": True}
 
 
@@ -143,3 +143,36 @@ async def export_report_csv(request: Request, report_id: str):
     return JSONResponse(
         content={"success": True, "filename": f"{report_id}.csv", "csv": csv_text},
     )
+
+
+# ---------------- 优惠活动(20 号;写操作限老板/运营) ----------------
+
+
+@router.get("/api/admin/analytics/promotions")
+async def promotions_list(request: Request):
+    await _ctx(request)  # 鉴权闸(租户上下文缺失即 403);列表本身跨租户只读汇总
+    return {"success": True, "promotions": await promotions.list_promotions(), "effect": await promotions.effect_overview()}
+
+
+@router.post("/api/admin/analytics/promotions")
+async def promotions_create(request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] not in ("finance_owner", "sales_viewer"):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
+    body = await request.json()
+    result = await promotions.create_promotion(body, ctx["staff"])
+    if "error" in result:
+        return JSONResponse(status_code=400, content={"success": False, **result})
+    return {"success": True, **result}
+
+
+@router.post("/api/admin/analytics/promotions/{promotion_id}/status")
+async def promotions_set_status(promotion_id: str, request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] not in ("finance_owner", "sales_viewer"):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
+    body = await request.json()
+    result = await promotions.set_promotion_status(promotion_id, str(body.get("status") or ""), ctx["staff"])
+    if "error" in result:
+        return JSONResponse(status_code=400, content={"success": False, **result})
+    return {"success": True, **result}

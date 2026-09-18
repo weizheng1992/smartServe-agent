@@ -28,6 +28,7 @@ from engine_py.llm.telemetry import (
     bind_llm_call_node,
 )
 from engine_py.skills import SkillRegistry
+from engine_py.skills.contract import SkillResult
 from engine_py.triage import intent_triage_engine as triage_mod
 from engine_py.triage.intent_triage_engine import IntentTriageEngine
 
@@ -61,8 +62,6 @@ class _FakeSkill:
 
     async def execute(self, context) -> SkillResult:
         self.executed_with = context
-        from engine_py.skills.contract import SkillResult
-
         d = dict(self._result)
         extra = d.pop("extra", None)
         return SkillResult(

@@ -93,7 +93,6 @@ async def sanitize_order_claims(output: str, task_plan: dict | None) -> str:
         output = _CART_CLAIM_SENTENCE_RE.sub("", output).rstrip()
         if _HONEST_CART_NOTICE not in output:
             output += ("\n\n" if output else "") + _HONEST_CART_NOTICE
-        changed = True
     # 工具 JSON 泄漏剥离(N12 实报):finish 曾把工具回执 JSON 原样吐给用户
     if output and re.search(r"执行详情：?\s*\[", output):
         output = re.sub(r"执行详情：?\s*\[.*", "", output, flags=re.DOTALL).rstrip()

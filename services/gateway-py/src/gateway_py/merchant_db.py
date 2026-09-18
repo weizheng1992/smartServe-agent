@@ -119,6 +119,28 @@ CREATE TABLE IF NOT EXISTS merchant_audit_logs (
   result JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS promotions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  promo_type TEXT NOT NULL,             -- full_reduction | discount | coupon
+  threshold_amount NUMERIC(10,2),       -- 满减门槛(full_reduction)
+  discount_value NUMERIC(10,2) NOT NULL,-- 满减额 / 折扣%(85=8.5折) / 券面额
+  scope_type TEXT NOT NULL DEFAULT 'all',-- all | spu | category
+  scope_value TEXT,                     -- spu_code 或品类名
+  status TEXT NOT NULL DEFAULT 'active',-- active | disabled
+  start_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  end_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS promotion_redemptions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  promotion_id UUID NOT NULL,
+  order_id TEXT NOT NULL,
+  discount_amount NUMERIC(10,2) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
 """
 
 

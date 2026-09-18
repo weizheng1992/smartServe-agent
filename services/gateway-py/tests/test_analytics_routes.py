@@ -115,3 +115,45 @@ class TestStaffAndReports:
     async def test_unknown_report_404(self, client):
         r = await client.get("/api/admin/analytics/reports/rpt_none", headers=AURORA)
         assert r.status_code == 404
+
+
+class TestPromotions:
+    """阶段⑥:优惠活动 CRUD(20 号;写操作,结算资金口径不在本模块)。"""
+
+    async def test_list_empty_honest(self, client):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()  # 商户库自愈建库建表(幂等;含 promotions 两表)
+        r = await client.get("/api/admin/analytics/promotions", headers=AURORA)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["success"] is True and isinstance(body["promotions"], list)
+        assert "effect" in body and body["effect"]["redemptions"] >= 0
+
+    async def test_create_requires_valid_payload(self, client):
+        bad = await client.post("/api/admin/analytics/promotions", headers=AURORA, json={"name": "x"})
+        assert bad.status_code == 400
+
+    async def test_create_and_disable_roundtrip(self, client):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        created = await client.post("/api/admin/analytics/promotions", headers=AURORA, json={
+            "name": "开学季满减", "promoType": "full_reduction", "threshold": 500, "value": 50,
+        })
+        assert created.status_code == 200
+        pid = created.json()["id"]
+
+        listed = await client.get("/api/admin/analytics/promotions", headers=AURORA)
+        assert any(p["id"] == pid and p["status"] == "active" for p in listed.json()["promotions"])
+
+        disabled = await client.post(f"/api/admin/analytics/promotions/{pid}/status",
+                                     headers=AURORA, json={"status": "disabled"})
+        assert disabled.status_code == 200 and disabled.json()["status"] == "disabled"
+
+    async def test_warehouse_cannot_create_403(self, client):
+        await client.post("/api/admin/analytics/staff/switch", headers=AURORA, json={"staffId": "wh@aurora"})
+        r = await client.post("/api/admin/analytics/promotions",
+                              headers={**AURORA, "x-user-id": "wh@aurora"},
+                              json={"name": "x", "promoType": "coupon", "value": 10})
+        assert r.status_code == 403

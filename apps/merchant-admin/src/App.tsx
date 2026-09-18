@@ -3,7 +3,9 @@ import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-ro
 import { Button } from 'ui';
 import { api, currentStaff, switchStaff, type MenuNode } from '@/lib/api';
 import AnalyticsPage from '@/pages/AnalyticsPage';
+import MigratedAdminPage from '@/pages/MigratedAdminPage';
 import PlaceholderPage from '@/pages/PlaceholderPage';
+import PromotionsPage from '@/pages/PromotionsPage';
 import ReportsPage from '@/pages/ReportsPage';
 import { FloatingAgent } from '@/components/FloatingAgent';
 
@@ -98,6 +100,13 @@ export default function App() {
           <Routes>
             <Route path="/analytics" element={<AnalyticsPage role={role} />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/orders" element={<MigratedAdminPage initialTab="orders" />} />
+            <Route path="/approvals" element={<MigratedAdminPage initialTab="approvals" />} />
+            <Route path="/live-desk" element={<MigratedAdminPage initialTab="live_desk" />} />
+            <Route path="/promotions" element={<PromotionsPage />} />
+            <Route path="/products" element={<MigratedAdminPage initialTab="spus" />} />
+            <Route path="/skus" element={<MigratedAdminPage initialTab="skus" />} />
+            <Route path="/spi-logs" element={<MigratedAdminPage initialTab="spi_logs" />} />
             <Route path="*" element={<PlaceholderPage title={currentTop || '商户后台'} />} />
           </Routes>
         </div>

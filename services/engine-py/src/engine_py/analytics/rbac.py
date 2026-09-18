@@ -26,11 +26,15 @@ DEFAULT_MENUS: list[dict] = [
     {"id": "d-goods", "parent": None, "name": "商品", "type": "directory", "route": None, "sort": 2},
     {"id": "m-products", "parent": "d-goods", "name": "商品列表", "type": "menu", "route": "/products", "sort": 1},
     {"id": "btn-prod-edit", "parent": "m-products", "name": "商品编辑/上下架", "type": "button", "perm": "prod:edit", "sort": 1},
+    {"id": "m-skus", "parent": "d-goods", "name": "SKU 库存", "type": "menu", "route": "/skus", "sort": 2},
     {"id": "d-orders", "parent": None, "name": "订单", "type": "directory", "route": None, "sort": 3},
     {"id": "m-orders", "parent": "d-orders", "name": "订单履约", "type": "menu", "route": "/orders", "sort": 1},
     {"id": "btn-order-ship", "parent": "m-orders", "name": "发货操作", "type": "button", "perm": "order:ship", "sort": 1},
+    {"id": "m-approvals", "parent": "d-orders", "name": "售后审批", "type": "menu", "route": "/approvals", "sort": 2},
+    {"id": "m-spi-logs", "parent": "d-orders", "name": "接口日志", "type": "menu", "route": "/spi-logs", "sort": 3},
     {"id": "d-users", "parent": None, "name": "用户", "type": "directory", "route": None, "sort": 4},
     {"id": "m-customers", "parent": "d-users", "name": "客户管理", "type": "menu", "route": "/customers", "sort": 1},
+    {"id": "m-live-desk", "parent": "d-users", "name": "客服工作台", "type": "menu", "route": "/live-desk", "sort": 2},
     {"id": "d-ops", "parent": None, "name": "运营", "type": "directory", "route": None, "sort": 5},
     {"id": "m-promotions", "parent": "d-ops", "name": "优惠活动", "type": "menu", "route": "/promotions", "sort": 1},
     {"id": "btn-promo-create", "parent": "m-promotions", "name": "新建活动", "type": "button", "perm": "promo:create", "sort": 1},
@@ -51,7 +55,7 @@ DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
     "sales_viewer": [m["id"] for m in DEFAULT_MENUS],
     "warehouse_operator": [
         "d-data", "m-analytics", "btn-report-gen", "btn-report-csv", "m-reports",
-        "d-orders", "m-orders", "btn-order-ship",
+        "d-orders", "m-orders", "btn-order-ship", "m-spi-logs",
         "d-system", "m-menus", "btn-menu-create", "m-roles", "btn-role-assign", "m-staff", "btn-staff-invite",
     ],
 }
@@ -142,8 +146,8 @@ async def resolve_staff_role(business_id: str, staff_id_or_email: str | None) ->
     return "finance_owner", staff_id_or_email
 
 
-async def set_role_menus(business_id: str, role: str, menu_ids: list[str]) -> None:
-    """保存角色分配(保存即生效);护栏:老板系统菜单强制回补。"""
+async def set_role_menus(business_id: str, role: str, menu_ids: list[str], operator: str = "system") -> None:
+    """保存角色分配(保存即生效);护栏:老板系统菜单强制回补;变更落商户审计。"""
     if role == "finance_owner":
         menu_ids = list({*menu_ids, *SYSTEM_MENU_IDS})
     async with get_session() as session:
@@ -151,6 +155,13 @@ async def set_role_menus(business_id: str, role: str, menu_ids: list[str]) -> No
         for mid in menu_ids:
             session.add(RoleMenu(role=role, menu_id=mid, business_id=business_id))
         await session.commit()
+    try:  # 审计(20-D5):失败打印不阻断(与写穿透同策略)
+
+        from .promotions import _audit
+
+        await _audit("rbac_role_menus", operator, {"role": role, "menuIds": menu_ids, "businessId": business_id})
+    except Exception as err:
+        print(f"[RBAC] audit failed: {err}")
 
 
 def allowed_metrics_for_role(role: str) -> list[str] | None:
