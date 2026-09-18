@@ -11,6 +11,7 @@ LLM 的位置在 L3(未来 adapter,接口同 resolve);本模块词面层零 LLM 
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -75,7 +76,13 @@ class MetricQueryEngine:
 
     def __init__(self, session_ctx: dict | None = None, resolver: Any | None = None) -> None:
         self.session_ctx = session_ctx or {}
-        self._resolver = resolver  # 未来:11-D1 缝②指标映射 adapter(closed-set 分类头)
+        self._resolver = resolver  # 注入式 resolver(测试/显式 adapter)
+        # 11-D1 缝②:分类头三态(shadow=并行打分只记日志 / on=L0 未命中处接管;
+        # 默认不启用)。懒加载由工厂保证,进程内单例。
+        from .metric_head import get_metric_head
+
+        self._head = get_metric_head()
+        self._head_threshold = float(os.environ.get("AI_METRIC_HEAD_THRESHOLD", "0.5"))
 
     # ---------------- resolve(L0 词面归一) ----------------
     def resolve(self, question: str, session_ctx: dict | None = None) -> StructuredQueryIntent | dict:
@@ -110,7 +117,29 @@ class MetricQueryEngine:
             matched_words.sort(key=lambda p: len(p[1]), reverse=True)
             hit = (matched_words[0][0], matched_words[0][1])
 
+        if self._head is not None:
+            try:
+                head_label, head_conf = self._head.predict(question)
+                if hit is not None and head_label != hit[0]:
+                    print(
+                        f"[MetricHead][shadow] 不一致: L0={hit[0]} head={head_label}({head_conf:.2f})"
+                        f" question={question[:40]!r}"
+                    )
+            except Exception as head_err:
+                print(f"[MetricHead] 打分失败(放行 L0/L3): {head_err}")
+
         if hit is None:
+            # 缝② on 模式:L0 未命中 → 分类头接管(低置信仍放行 L3,不许静默错分)
+            if self._head is not None:
+                try:
+                    head_label, head_conf = self._head.predict(question)
+                    if head_label in registry and head_conf >= self._head_threshold:
+                        print(f"[MetricHead][on] 接管: {head_label}({head_conf:.2f}) question={question[:40]!r}")
+                        return StructuredQueryIntent(metric=head_label, direction=registry[head_label]["direction"])
+                except UnsupportedQuery:
+                    pass
+                except Exception as head_err:
+                    print(f"[MetricHead] on 模式打分失败: {head_err}")
             raise UnsupportedQuery(f"未命中已注册指标(闭集={list(registry)})")
 
         metric_key = hit[0]

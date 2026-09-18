@@ -38,11 +38,11 @@ def main(argv: list[str] | None = None) -> int:
             continue  # 实体概览不进分类分布(依赖 PageContext 选择)
         seen: set[str] = set()
 
-        def add(text: str) -> None:
+        def add(text: str, label_key: str = key, seen_set: set[str] = seen) -> None:
             t = text.strip()
-            if t and t not in seen:
-                seen.add(t)
-                rows.append({"query": t, "label": key, "source": "registry_seed"})
+            if t and t not in seen_set:
+                seen_set.add(t)
+                rows.append({"query": t, "label": label_key, "source": "registry_seed"})
 
         add(metric["label"])
         for syn in metric.get("synonyms") or []:
