@@ -301,6 +301,20 @@ class MetricQueryEngine:
                 "SELECT '__total__' AS \"productId\", COUNT(*)::int AS \"metricScore\" "
                 f"FROM session_metrics WHERE business_id = :business_id {time_clause} LIMIT :lim"
             )
+        elif intent.metric in ("promo_orders", "promo_discount_total"):
+            if intent.time_window:
+                time_clause = "AND r.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            value_expr = (
+                "COUNT(DISTINCT r.order_id)" if intent.metric == "promo_orders" else "COALESCE(SUM(r.discount_amount), 0)::float"
+            )
+            sql = (
+                "SELECT p.name AS \"productId\", "
+                f"{value_expr} AS \"metricScore\" "
+                "FROM promotion_redemptions r JOIN promotions p ON p.id = r.promotion_id "
+                f"WHERE 1=1 {time_clause} "
+                f'GROUP BY p.name ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
         elif intent.metric == "after_sale_overview":
             if intent.time_window:
                 time_clause = "AND created_at >= :window_start"
