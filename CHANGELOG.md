@@ -4,6 +4,28 @@
 
 ---
 
+## [2.6.39] - 2026-09-19 (商户后台 RBAC 收口:按钮权限动态化 + 员工 JWT 登录)
+
+商户后台权限从"半套"补成完整模型:按钮权限点(perm_code)不再硬编码于网关,统一由 `role_menus ⨝ menus.perm_code` 动态派生;身份从"信任 x-user-id 头"收口为"解析 Bearer JWT → staff_members",员工各自真实登录,老板可在角色管理页勾选菜单+按钮分配权限,保存即生效。
+
+### ✨ Features
+
+- **员工密码登录(0013 迁移)**:`staff_members` 加 `password_hash`;`/api/auth/login` 员工凭证优先、平台账号(`users`)回落;种子三账号(`test@example.com`/`ops@aurora`/`wh@aurora`)与邀请员工均以种子密码(`E2E_ACCOUNT_PASSWORD` 可覆写,默认 agent-all-dev)可登录。
+- **按钮权限动态化**:`rbac.perms_for_role()` 从 role_menus 派生权限点闭集(finance_owner 兜底全量);SPU/SKU 写操作(prod:edit)、报告生成/导出(report:gen/report:csv)、优惠创建/停用/编辑/核销(promo:create/promo:disable/promo:redeem,新增核销按钮节点)全部改为权限点驱动;内置角色种子面修剪为与原硬编码 `_perms()` 等效(迁移清理存量 role_menus 行,升级前后权限不变)。
+- **指标权限可自定义**:角色持 `metric:<registry key>` 权限点(菜单管理自行登记,如 metric:gmv_trend)即按点过滤指标;未配置回落内置三档闭集。
+- **身份切换换签 token**:`POST /staff/switch` 仅老板可调,服务端为目标员工签发 JWT(旧实现任意 staffId 自报身份,已拆除);前端保存原始老板凭证,切换/切回均以老板 token 发起。
+- **角色管理页完整化**:菜单+按钮三级勾选树(勾父带子、按钮带 permCode 徽标),新建角色与再分配共用;新增 `GET /roles/{role}/menus` 回填勾选态;新建角色拒绝覆盖内置角色名;`/menus` 响应附带 `perms` 闭集。
+
+### 🔒 Security
+
+- `/api/admin/analytics/*` 不再信任 `x-user-id` 头:无/坏 token 401,非商户员工或已停用 403(旧版未识别员工默认回落 finance_owner 的 fail-open 已删除);`report:csv` 导出端点此前无校验,现由权限点驱动;停用员工禁止登录。
+
+### ✅ 验证 (Verification,如实)
+
+- gateway pytest **165 passed, 2 skipped**(新增 JWT 身份/权限点授予回收/metric 点/停用员工禁登等 9 个用例);engine graph 套件 32 passed(越权用例改为桩掉动态派生层保持无 DB);ruff 干净;merchant-admin `tsc && vite build` 通过。
+
+---
+
 ## [2.6.38] - 2026-09-15 (购物车图片对齐:车行 imageUrl 全链透传)
 
 用户实报:购物车商品图片不对/没对应上——根因是**车行从不存图片**:`add_to_cart` 落库行只有 skuId/quantity/title/price/spec,没有 imageUrl;前端购物车卡渲染 `i.get("imageUrl")` 恒空,只能落占位/错图。

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { currentStaff } from '@/lib/api';
+import { authHeaders } from '@/lib/api';
 
 interface Customer {
   customer_id: string;
@@ -21,7 +21,7 @@ export default function CustomersPage() {
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/analytics/customers', {
-        headers: { 'x-tenant-id': 'aurora', 'x-user-id': currentStaff() },
+        headers: authHeaders(),
       });
       setCustomers((await res.json()).customers || []);
     } catch (err) {
@@ -33,7 +33,7 @@ export default function CustomersPage() {
   async function setLevel(customerId: string, memberLevel: string) {
     const res = await fetch(`/api/admin/analytics/customers/${customerId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', 'x-user-id': currentStaff() },
+      headers: authHeaders(),
       body: JSON.stringify({ memberLevel }),
     });
     const body = await res.json();
@@ -46,7 +46,7 @@ export default function CustomersPage() {
     if (!name || !phone) return;
     const res = await fetch('/api/admin/analytics/customers', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', 'x-user-id': currentStaff() },
+      headers: authHeaders(),
       body: JSON.stringify({ name, phone }),
     });
     const body = await res.json();
@@ -57,7 +57,7 @@ export default function CustomersPage() {
   async function deleteCustomer(cid: string) {
     const res = await fetch(`/api/admin/analytics/customers/${cid}`, {
       method: 'DELETE',
-      headers: { 'x-tenant-id': 'aurora', 'x-user-id': currentStaff() },
+      headers: authHeaders(),
     });
     const body = await res.json();
     setMsg(body.success ? '✓ 已删除' : `失败:${body.message}`);

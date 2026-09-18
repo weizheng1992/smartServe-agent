@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
+import { authHeaders } from '@/lib/api';
 
 interface Sku {
   id: string;
@@ -21,12 +22,7 @@ interface Spu {
 }
 
 const CATEGORIES = ['户外机能', '潮流T恤', '下装裤类', '潮流鞋靴', '背包收纳', '露营装备', '衬衫', '配饰', '运动配件'];
-const H = () => ({
-  'Content-Type': 'application/json',
-  'x-tenant-id': 'aurora',
-  'x-user-id': localStorage.getItem('merchant-admin.staff') || 'boss@aurora',
-  Authorization: `Bearer ${localStorage.getItem('merchant-admin.token') || ''}`,
-});
+const H = authHeaders;
 
 // 商品目录管理(增删改查;删除受订单引用护栏,有成交只可下架)
 export default function ProductsPage() {

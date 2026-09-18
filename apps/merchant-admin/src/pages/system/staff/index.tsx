@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { currentStaff } from '@/lib/api';
+import { authHeaders } from '@/lib/api';
 
 interface Staff {
   id: string;
@@ -22,7 +22,7 @@ export default function StaffPage() {
   const [msg, setMsg] = useState('');
   const [invite, setInvite] = useState({ email: '', displayName: '', role: 'sales_viewer' });
 
-  const H = () => ({ 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', 'x-user-id': currentStaff() });
+  const H = authHeaders;
   const load = useCallback(async () => {
     const res = await fetch('/api/admin/analytics/staff', { headers: H() });
     setStaff((await res.json()).staff || []);

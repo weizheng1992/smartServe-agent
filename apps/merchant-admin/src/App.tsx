@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { Button } from 'ui';
-import { api, currentStaff, switchStaff, type MenuNode } from '@/lib/api';
+import { api, clearSession, currentStaffEmail, hasBossSession, type MenuNode } from '@/lib/api';
 import AnalyticsPage from '@/pages/analytics';
 import OrderWorkbench from '@/pages/order-manager';
 import ProductsPage from '@/pages/goods/products';
@@ -25,7 +24,7 @@ export default function App() {
   const [authed, setAuthed] = useState(() => !!localStorage.getItem('merchant-admin.token'));
   return (
     <BrowserRouter>
-      {authed ? <AdminShell onLogout={() => { localStorage.removeItem('merchant-admin.token'); setAuthed(false); }} /> : <LoginPage onLogin={() => setAuthed(true)} />}
+      {authed ? <AdminShell onLogout={() => { clearSession(); setAuthed(false); }} /> : <LoginPage onLogin={() => setAuthed(true)} />}
     </BrowserRouter>
   );
 }
@@ -92,21 +91,25 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6">
           <div className="text-sm font-medium text-zinc-600">{currentTop}</div>
           <div className="flex items-center gap-3 text-xs">
-            <select
-              className="rounded-full bg-zinc-900 px-3 py-1.5 text-white"
-              value={currentStaff()}
-              onChange={(e) => {
-                switchStaff(e.target.value);
-                void refresh();
-              }}
-            >
-              {staff.map((s) => (
-                <option key={s.id} value={s.email}>
-                  {s.displayName} · {s.role}
-                </option>
-              ))}
-            </select>
-            <span className="text-zinc-400">{currentStaff()}</span>
+            {hasBossSession() && (
+              <select
+                className="rounded-full bg-zinc-900 px-3 py-1.5 text-white"
+                value={currentStaffEmail()}
+                onChange={(e) => {
+                  // 切换 = 服务端换签目标员工 JWT;始终以保存的老板凭证发起
+                  api.staffSwitch(e.target.value)
+                    .then(() => refresh())
+                    .catch((err) => alert(String(err).replace('Error: ', '')));
+                }}
+              >
+                {staff.map((s) => (
+                  <option key={s.id} value={s.email}>
+                    {s.displayName} · {s.role}
+                  </option>
+                ))}
+              </select>
+            )}
+            <span className="text-zinc-400">{currentStaffEmail()} · {role}</span>
             <button className="text-[11px] text-zinc-400 hover:text-zinc-900" onClick={onLogout}>退出</button>
           </div>
         </header>

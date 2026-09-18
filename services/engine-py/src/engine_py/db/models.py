@@ -644,6 +644,8 @@ class StaffMember(Base):
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'finance_owner'"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'enabled'"))
+    # 0013:员工自有登录凭证(bcrypt;NULL=该邮箱仅平台账号可登录)
+    password_hash: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 

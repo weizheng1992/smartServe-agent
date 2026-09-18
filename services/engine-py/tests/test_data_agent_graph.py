@@ -56,8 +56,16 @@ class TestGraphAsk:
         out = asyncio.run(graph.ask("销售额最高的商品", {"business_id": "aurora", "role": "finance_owner"}))
         assert out["cards"][0]["type"] == "text" and "诚实空" in out["cards"][0]["text"]
 
-    def test_role_blocked_metric(self, stub_execute):
-        """sales_viewer 问毛利 → 越权兜底拒绝(13-D4;反问选项集过滤之外的第二道)。"""
+    def test_role_blocked_metric(self, stub_execute, monkeypatch):
+        """sales_viewer 问毛利 → 越权兜底拒绝(13-D4;反问选项集过滤之外的第二道)。
+
+        0013 起指标闭集经 rbac 动态派生(DB);本套件保持无 DB,桩掉派生层
+        返回空集(未持任何 metric: 权限点 → 回落内置闭集路径不在此覆盖,
+        gateway 契约测试有真实 DB 的对应用例)。"""
+        async def _no_metric_perms(role):
+            return []
+
+        monkeypatch.setattr("engine_py.analytics.rbac.allowed_metrics_for_role", _no_metric_perms)
         out = asyncio.run(graph.ask("毛利最高的商品", {"business_id": "aurora", "role": "sales_viewer"}))
         assert out["type"] == "unsupported" and "无权" in out["message"]
 

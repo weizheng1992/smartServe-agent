@@ -23,7 +23,12 @@ test.describe('data agent 全链路', () => {
   let token: string;
   test.beforeAll(async ({ request }) => { token = await loginViaApi(request); });
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript((t: string) => localStorage.setItem('merchant-admin.token', t), token);
+    // 0013:身份 = JWT;预置老板会话(含 boss 凭证,顶栏身份切换器才可见)
+    await page.addInitScript((t: string) => {
+      localStorage.setItem('merchant-admin.token', t);
+      localStorage.setItem('merchant-admin.staff', 'test@example.com');
+      localStorage.setItem('merchant-admin.boss', JSON.stringify({ token: t, email: 'test@example.com' }));
+    }, token);
   });
 
   test('菜单渲染与员工切换(RBAC)', async ({ page }) => {

@@ -19,8 +19,10 @@ import { useWorkbench } from "../workbench";
 
 export function SkusTab() {
   const {
+    activeTab,
     filteredSkus, lowStockCount, setSkuSearchQuery, setSkuStockFilter, skuSearchQuery, skuStockFilter, skus,
   } = useWorkbench();
+  if (activeTab !== 'skus') return null;
   return (
     <>
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden space-y-0">

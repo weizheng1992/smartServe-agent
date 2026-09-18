@@ -40,7 +40,7 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     engine = MetricQueryEngine(session_ctx=session_ctx)
     from .rbac import allowed_metrics_for_role
 
-    allowed = allowed_metrics_for_role(session_ctx.get("role", "finance_owner"))
+    allowed = await allowed_metrics_for_role(session_ctx.get("role", "finance_owner"))
     try:
         intent = engine.resolve(question)
     except UnsupportedQuery as err:

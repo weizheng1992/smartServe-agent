@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
+import { authHeaders } from '@/lib/api';
 
 interface Promotion {
   id: string;
@@ -31,11 +32,7 @@ export default function PromotionsPage() {
   const [redeem, setRedeem] = useState<{ promoId: string; promoName: string; orderId: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const headers = () => ({
-    'Content-Type': 'application/json',
-    'x-tenant-id': 'aurora',
-    'x-user-id': localStorage.getItem('merchant-admin.staff') || 'boss@aurora',
-  });
+  const headers = authHeaders;
 
   const load = useCallback(async () => {
     try {
@@ -70,7 +67,7 @@ export default function PromotionsPage() {
     if (!redeem) return;
     const res = await fetch(`/api/admin/analytics/promotions/${redeem.promoId}/redeem`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', 'x-user-id': localStorage.getItem('merchant-admin.staff') || 'boss@aurora' },
+      headers: authHeaders(),
       body: JSON.stringify({ orderId: redeem.orderId }),
     });
     const body = await res.json();
@@ -82,7 +79,7 @@ export default function PromotionsPage() {
   async function saveEdit(p: Promotion) {
     const res = await fetch(`/api/admin/analytics/promotions/${p.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', 'x-user-id': localStorage.getItem('merchant-admin.staff') || 'boss@aurora' },
+      headers: authHeaders(),
       body: JSON.stringify({ name: p.name, value: p.value }),
     });
     const b = await res.json();
@@ -91,7 +88,7 @@ export default function PromotionsPage() {
   }
 
   async function removePromo(p: Promotion) {
-    const res = await fetch(`/api/admin/analytics/promotions/${p.id}`, { method: 'DELETE', headers: { 'x-tenant-id': 'aurora', 'x-user-id': localStorage.getItem('merchant-admin.staff') || 'boss@aurora' } });
+    const res = await fetch(`/api/admin/analytics/promotions/${p.id}`, { method: 'DELETE', headers: authHeaders() });
     const b = await res.json();
     setMsg(b.success ? '✓ 已删除' : `失败:${b.message}`);
     void load();

@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { currentStaff, type MenuNode } from '@/lib/api';
+import { authHeaders, type MenuNode } from '@/lib/api';
 
 // 菜单管理(13 号 RBAC):树列表 + 新增 + 启停 + 删叶子;系统菜单服务端护栏。
+// 这里登记的按钮权限点(perm_code)即角色管理页可勾选的接口权限。
 export default function MenusPage() {
   const [menus, setMenus] = useState<MenuNode[]>([]);
   const [msg, setMsg] = useState('');
   const [form, setForm] = useState({ name: '', menuType: 'menu', route: '', parentId: '', permCode: '' });
 
-  const H = () => ({ 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', 'x-user-id': currentStaff() });
+  const H = authHeaders;
 
   const load = useCallback(async () => {
     const res = await fetch('/api/admin/analytics/menus', { headers: H() });

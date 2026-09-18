@@ -19,8 +19,10 @@ import { useWorkbench } from "../workbench";
 
 export function SpusTab() {
   const {
+    activeTab,
     filteredSpus, setSpuCategoryFilter, setSpuSearchQuery, spuCategories, spuCategoryFilter, spuSearchQuery, spus,
   } = useWorkbench();
+  if (activeTab !== 'spus') return null;
   return (
     <>
           <div className="space-y-4">

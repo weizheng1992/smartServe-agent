@@ -20,6 +20,10 @@ export function StorefrontHeader({
   const [customPassword, setCustomPassword] = useState('');
   const [loginErr, setLoginErr] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [regName, setRegName] = useState('');
+  const [regErr, setRegErr] = useState('');
+  const [regBusy, setRegBusy] = useState(false);
   const [isCustomLoginOpen, setIsCustomLoginOpen] = useState(false);
   const [syncedCartCount, setSyncedCartCount] = useState(cartCount);
 
@@ -47,6 +51,38 @@ export function StorefrontHeader({
     { label: '📋 我的订单', href: '/orders', count: ordersCount },
     { label: '📍 地址簿', href: '/addresses', count: addressCount },
   ];
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customEmail.trim() || customPassword.length < 8) return;
+    setRegBusy(true);
+    setRegErr('');
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: customEmail.trim(),
+          password: customPassword,
+          displayName: regName || customEmail.split('@')[0],
+        }),
+      });
+      const body = await res.json();
+      if (!body.success) throw new Error(body.message || '注册失败');
+      localStorage.setItem('merchant.token', body.data.token);
+      loginUser({
+        id: body.data.user.customerId || body.data.user.id,
+        name: body.data.user.email,
+        tier: '注册会员',
+      });
+      setCustomPassword('');
+      setIsCustomLoginOpen(false);
+      setIsUserMenuOpen(false);
+    } catch (err) {
+      setRegErr(String(err).replace('Error: ', ''));
+    }
+    setRegBusy(false);
+  };
 
   const handleCustomLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,7 +206,22 @@ export function StorefrontHeader({
                 {/* 自定义登录 */}
                 <div className="pt-2 border-t border-slate-100">
                   {isCustomLoginOpen ? (
-                    <form onSubmit={handleCustomLogin} className="space-y-2">
+                    <form onSubmit={authMode === 'login' ? handleCustomLogin : handleRegister} className="space-y-2">
+                      <div className="flex gap-1 text-[11px]">
+                        <button type="button" onClick={() => setAuthMode('login')}
+                          className={`flex-1 rounded px-2 py-1 ${authMode === 'login' ? 'bg-emerald-600 text-white font-bold' : 'bg-slate-100 text-slate-600'}`}>登录</button>
+                        <button type="button" onClick={() => setAuthMode('register')}
+                          className={`flex-1 rounded px-2 py-1 ${authMode === 'register' ? 'bg-emerald-600 text-white font-bold' : 'bg-slate-100 text-slate-600'}`}>注册</button>
+                      </div>
+                      {authMode === 'register' && (
+                        <input
+                          type="text"
+                          value={regName}
+                          onChange={(e) => setRegName(e.target.value)}
+                          placeholder="昵称(可选)"
+                          className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-emerald-500"
+                        />
+                      )}
                       <input
                         type="email"
                         value={customEmail}
@@ -186,7 +237,9 @@ export function StorefrontHeader({
                         onChange={(e) => setCustomPassword(e.target.value)}
                         placeholder="密码(dev: agent-all-dev)"
                       />
-                      {loginErr && <div className="text-[11px] text-rose-600">{loginErr}</div>}
+                      {(authMode === 'login' ? loginErr : regErr) && (
+                        <div className="text-[11px] text-rose-600">{authMode === 'login' ? loginErr : regErr}</div>
+                      )}
                       <div className="flex justify-end gap-1.5">
                         <button
                           type="button"
@@ -197,7 +250,8 @@ export function StorefrontHeader({
                         </button>
                         <button
                           type="submit"
-                          className="px-2.5 py-1 rounded text-[11px] bg-emerald-600 text-white font-bold hover:bg-emerald-500 cursor-pointer"
+                          disabled={loginBusy || regBusy}
+                          className="px-2.5 py-1 rounded text-[11px] bg-emerald-600 text-white font-bold hover:bg-emerald-500 cursor-pointer disabled:opacity-50"
                         >
                           登录
                         </button>

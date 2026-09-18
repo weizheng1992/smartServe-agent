@@ -1,8 +1,10 @@
 """商户 data agent 路由组(09-D2;/api/admin/analytics/*)。
 
-员工鉴权面(与 /api/admin/* 同域:身份经 x-user-id/x-tenant-id 头,复用
-require_tenant_context 语义);轻管线直调 engine(analytics 包),不走
-Temporal(15 号决议)。SSE 帧:event: clarify|result|unsupported|error。
+员工鉴权面(0013 收口):身份 = Bearer JWT 的 email claim → staff_members
+(员工密码真实登录;不再信任 x-user-id 头,未识别员工 403 而非回落老板)。
+按钮/指标权限按 role_menus 动态派生(rbac.perms_for_role,勾选即生效)。
+轻管线直调 engine(analytics 包),不走 Temporal(15 号决议)。
+SSE 帧:event: clarify|result|unsupported|error。
 """
 
 from __future__ import annotations
@@ -11,11 +13,13 @@ import asyncio
 import json
 
 from engine_py.analytics import graph, promotions, rbac, report_service
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import delete, select
 
 from gateway_py.tenant_context import require_tenant_context
+
+from .auth import issue_token, require_claims
 
 router = APIRouter(tags=["merchant-analytics"])
 
@@ -24,20 +28,22 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
-async def _perms(ctx: dict) -> list[str]:
-    """角色 → 指标/按钮权限并集(菜单树按钮权限点;13-D4)。"""
-    if ctx.get("role") == "finance_owner":
-        return ["prod:edit", "order:ship", "report:gen", "report:csv", "promo:create", "promo:disable", "menu:create", "role:assign", "staff:invite"]
-    if ctx.get("role") == "warehouse_operator":
-        return ["order:ship", "report:gen", "report:csv"]
-    return ["promo:create", "promo:disable", "report:gen", "report:csv"]
-
-
 async def _ctx(request: Request) -> dict:
+    """统一请求上下文:租户 + 员工身份(JWT)+ 角色 + 按钮权限点闭集。"""
     tc = require_tenant_context()
-    staff = request.headers.get("x-user-id") or "staff_owner"
-    role, display = await rbac.resolve_staff_role(tc.get("tenantId") or "aurora", staff)
-    return {"business_id": tc.get("tenantId") or "aurora", "role": role, "staff": staff, "display": display}
+    claims = await require_claims(request.headers.get("authorization"))
+    business_id = tc.get("tenantId") or "aurora"
+    await rbac.ensure_defaults(business_id)
+    staff = await rbac.find_staff(business_id, str(claims.get("email") or ""))
+    if staff is None or staff.status != "enabled":
+        raise HTTPException(status_code=403, detail="非商户员工或已停用,拒绝访问")
+    return {
+        "business_id": business_id,
+        "role": staff.role,
+        "staff": staff.email,
+        "display": staff.display_name,
+        "perms": await rbac.perms_for_role(staff.role),
+    }
 
 
 @router.post("/api/admin/analytics/ask")
@@ -66,16 +72,15 @@ async def analytics_ask(request: Request):
 @router.get("/api/admin/analytics/menus")
 async def analytics_menus(request: Request):
     ctx = await _ctx(request)
-    await rbac.ensure_defaults(ctx["business_id"])
     tree = await rbac.menu_tree_for_role(ctx["business_id"], ctx["role"])
-    return {"success": True, "role": ctx["role"], "menus": tree}
+    return {"success": True, "role": ctx["role"], "perms": ctx["perms"], "menus": tree}
 
 
 @router.post("/api/admin/analytics/roles/{role}/menus")
 async def set_role_menus(role: str, request: Request):
-    """保存角色菜单分配(保存即生效 + 审计口子留给 merchant_audit_logs 接线)。"""
+    """保存角色菜单+按钮权限分配(0013:按钮权限点随 role_menus 动态生效)。"""
     ctx = await _ctx(request)
-    if role not in rbac.ROLES:
+    if role not in rbac.ROLES and not role.startswith("custom_"):
         return JSONResponse(status_code=400, content={"success": False, "message": f"未知角色 {role}"})
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可分配权限"})
@@ -84,13 +89,25 @@ async def set_role_menus(role: str, request: Request):
     return {"success": True}
 
 
+@router.get("/api/admin/analytics/roles/{role}/menus")
+async def get_role_menus(role: str, request: Request):
+    """角色当前权限分配明细(角色管理页勾选树回填)。"""
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可查看权限分配"})
+    from engine_py.db import RoleMenu, get_session
+
+    async with get_session() as session:
+        rows = (await session.execute(select(RoleMenu).where(RoleMenu.role == role))).scalars().all()
+    return {"success": True, "role": role, "menuIds": sorted(r.menu_id for r in rows)}
+
+
 @router.get("/api/admin/analytics/staff")
 async def analytics_staff(request: Request):
     from engine_py.db import StaffMember, get_session
     from sqlalchemy import select
 
     ctx = await _ctx(request)
-    await rbac.ensure_defaults(ctx["business_id"])
     async with get_session() as session:
         rows = (await session.execute(
             select(StaffMember).where(StaffMember.business_id == ctx["business_id"])
@@ -103,17 +120,28 @@ async def analytics_staff(request: Request):
 
 @router.post("/api/admin/analytics/staff/switch")
 async def switch_account(request: Request):
-    """快捷切换账号(13 号):切换 = 重新解析身份(头更新由前端承担),此处
-    返回目标员工画像 + 角色可见菜单,审计口子留给接线。"""
+    """老板快捷切换身份(0013 收口):切换 = 服务端为目标员工签发 JWT,
+    前端换 token 后即以该员工身份行事;非老板 403(旧实现任意 staffId 可
+    自报身份,已随 x-user-id 信任一并拆除)。"""
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可切换查看身份"})
     body = await request.json()
     target = str(body.get("staffId") or "").strip()
     if not target:
         return JSONResponse(status_code=400, content={"success": False, "message": "staffId 必传"})
-    tc = require_tenant_context()
-    business_id = tc.get("tenantId") or "aurora"
-    role, display = await rbac.resolve_staff_role(business_id, target)
-    tree = await rbac.menu_tree_for_role(business_id, role)
-    return {"success": True, "staffId": target, "displayName": display, "role": role, "menus": tree}
+    staff = await rbac.find_staff(ctx["business_id"], target)
+    if staff is None or staff.status != "enabled":
+        return JSONResponse(status_code=404, content={"success": False, "message": "员工不存在或已停用"})
+    tree = await rbac.menu_tree_for_role(ctx["business_id"], staff.role)
+    return {
+        "success": True,
+        "staffId": staff.email,
+        "displayName": staff.display_name,
+        "role": staff.role,
+        "menus": tree,
+        "token": issue_token(staff.id, staff.email),
+    }
 
 
 @router.get("/api/admin/analytics/reports")
@@ -126,7 +154,7 @@ async def analytics_reports(request: Request, limit: int = Query(20, ge=1, le=50
 @router.post("/api/admin/analytics/reports")
 async def create_report(request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] not in ("finance_owner", "sales_viewer"):
+    if "report:gen" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无报告权限"})
     body = await request.json()
     created = await report_service.generate_report(
@@ -147,6 +175,8 @@ async def get_report(request: Request, report_id: str):
 @router.get("/api/admin/analytics/reports/{report_id}/csv")
 async def export_report_csv(request: Request, report_id: str):
     ctx = await _ctx(request)
+    if "report:csv" not in ctx["perms"]:
+        return JSONResponse(status_code=403, content={"success": False, "message": "无报告导出权限"})
     csv_text = await report_service.export_csv(ctx["business_id"], report_id)
     if csv_text is None:
         return JSONResponse(status_code=404, content={"success": False, "message": "报告不存在"})
@@ -167,7 +197,7 @@ async def promotions_list(request: Request):
 @router.post("/api/admin/analytics/promotions")
 async def promotions_create(request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] not in ("finance_owner", "sales_viewer"):
+    if "promo:create" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     body = await request.json()
     result = await promotions.create_promotion(body, ctx["staff"])
@@ -179,7 +209,7 @@ async def promotions_create(request: Request):
 @router.post("/api/admin/analytics/promotions/{promotion_id}/status")
 async def promotions_set_status(promotion_id: str, request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] not in ("finance_owner", "sales_viewer"):
+    if "promo:disable" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     body = await request.json()
     result = await promotions.set_promotion_status(promotion_id, str(body.get("status") or ""), ctx["staff"])
@@ -296,6 +326,8 @@ async def roles_create(request: Request):
     menu_ids = list(body.get("menuIds") or [])
     if not role or " " in role:
         return JSONResponse(status_code=400, content={"success": False, "message": "role 必传且不含空格"})
+    if role in rbac.ROLES:
+        return JSONResponse(status_code=400, content={"success": False, "message": "内置角色不可覆盖,请用 custom_ 前缀新建"})
     if not menu_ids:
         return JSONResponse(status_code=400, content={"success": False, "message": "至少分配一个菜单"})
     await rbac.set_role_menus(ctx["business_id"], role, menu_ids, ctx["staff"])
@@ -333,6 +365,7 @@ async def staff_invite(request: Request):
         row = StaffMember(
             id=f"staff_{_uuid.uuid4().hex[:10]}", business_id=ctx["business_id"],
             email=email, display_name=display, role=role, status="enabled",
+            password_hash=rbac.seed_password_hash(),  # 0013:新员工以种子密码可真实登录
         )
         session.add(row)
         await session.commit()
@@ -416,7 +449,7 @@ async def customer_update(customer_id: str, request: Request):
 @router.post("/api/admin/analytics/promotions/{promotion_id}/redeem")
 async def promotions_redeem(promotion_id: str, request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] not in ("finance_owner", "sales_viewer"):
+    if "promo:redeem" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无核销权限"})
     body = await request.json()
     order_id = str(body.get("orderId") or "").strip()
@@ -453,7 +486,7 @@ async def spus_list(request: Request):
 @router.post("/api/admin/analytics/spus")
 async def spus_create(request: Request):
     ctx = await _ctx(request)
-    if "prod:edit" not in (await _perms(ctx)):
+    if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     body = await request.json()
     title = str(body.get("title") or "").strip()
@@ -484,7 +517,7 @@ async def spus_create(request: Request):
 @router.patch("/api/admin/analytics/spus/{spu_id}")
 async def spus_update(spu_id: str, request: Request):
     ctx = await _ctx(request)
-    if "prod:edit" not in (await _perms(ctx)):
+    if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     body = await request.json()
     from engine_py.tools_registry.order_domain import _merchant_writer_engine
@@ -513,7 +546,7 @@ async def spus_update(spu_id: str, request: Request):
 @router.delete("/api/admin/analytics/spus/{spu_id}")
 async def spus_delete(spu_id: str, request: Request):
     ctx = await _ctx(request)
-    if "prod:edit" not in (await _perms(ctx)):
+    if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     from engine_py.tools_registry.order_domain import _merchant_writer_engine
     from sqlalchemy import text as _t
@@ -541,7 +574,7 @@ async def spus_delete(spu_id: str, request: Request):
 @router.patch("/api/admin/analytics/promotions/{promotion_id}")
 async def promotions_update(promotion_id: str, request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] not in ("finance_owner", "sales_viewer"):
+    if "promo:create" not in ctx["perms"]:  # 编辑随建/改活动权限点(0013 动态化)
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     body = await request.json()
     from engine_py.analytics import promotions as P
@@ -648,7 +681,7 @@ async def skus_list(spu_id: str, request: Request):
 @router.post("/api/admin/analytics/spus/{spu_id}/skus")
 async def skus_create(spu_id: str, request: Request):
     ctx = await _ctx(request)
-    if "prod:edit" not in (await _perms(ctx)):
+    if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     body = await request.json()
     price = body.get("price")
@@ -678,7 +711,7 @@ async def skus_create(spu_id: str, request: Request):
 @router.patch("/api/admin/analytics/skus/{sku_id}")
 async def skus_update(sku_id: str, request: Request):
     ctx = await _ctx(request)
-    if "prod:edit" not in (await _perms(ctx)):
+    if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     body = await request.json()
     from engine_py.tools_registry.order_domain import _merchant_writer_engine
@@ -702,7 +735,7 @@ async def skus_update(sku_id: str, request: Request):
 @router.delete("/api/admin/analytics/skus/{sku_id}")
 async def skus_delete(sku_id: str, request: Request):
     ctx = await _ctx(request)
-    if "prod:edit" not in (await _perms(ctx)):
+    if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     from engine_py.tools_registry.order_domain import _merchant_writer_engine
     from sqlalchemy import text as _t

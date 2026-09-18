@@ -1,111 +1,20 @@
-import React, { createContext, useContext, useCallback, useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApprovalMachine } from "ui";
+import type {
+  ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow, SkuRow, SpuRow, WorkbenchTab,
+} from "./workbench.types";
 
-interface OrderRow {
-  order_id: string;
-  customer_id: string;
-  status: string;
-  total_amount: number;
-  shipping_address: {
-    recipientName: string;
-    phone: string;
-    fullAddress: string;
-  };
-  tracking_info?: {
-    carrier: string;
-    trackingNumber: string;
-    status: string;
-  };
-  is_address_modifiable: boolean;
-  is_returnable: boolean;
-  created_at: string;
-}
+export type { Workbench };
+export type {
+  ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow, SkuRow, SpuRow, WorkbenchTab,
+};
 
-interface AuditLogRow {
-  id: string;
-  action_type: string;
-  order_id: string;
-  idempotency_key: string;
-  operator: string;
-  payload: Record<string, unknown>;
-  result: Record<string, unknown>;
-  created_at: string;
-}
+const contains = (hay: string, q: string) => hay.toLowerCase().includes(q);
 
-interface SkuRow {
-  id: string;
-  sku_code: string;
-  sku_title: string;
-  spu_title: string;
-  brand: string;
-  category: string;
-  spec_attributes: Record<string, string>;
-  price: number;
-  original_price?: number;
-  stock: number;
-}
-
-interface SpuRow {
-  id: string;
-  spu_code: string;
-  title: string;
-  subtitle: string;
-  category: string;
-  brand: string;
-  main_image: string;
-  spec_dimensions: Array<{ name: string; values: string[] }>;
-  specs: Record<string, string>;
-}
-
-interface ApprovalItem {
-  id: string;
-  threadId: string;
-  businessId?: string;
-  userId?: string;
-  userEmail?: string;
-  actionType: string;
-  actionPayload: any;
-  status: string;
-  reason?: string;
-  deadline?: string;
-  createdAt: string;
-}
-
-interface ConversationItem {
-  id: string;
-  threadId?: string;
-  businessId: string;
-  userId?: string;
-  status: string;
-  assignedOperatorId?: string;
-  lastMessage?: string;
-  lastMessageSnippet?: string;
-  updatedAt: string;
-  createdAt: string;
-}
-
-interface MessageItem {
-  id: string;
-  role: 'user' | 'assistant' | 'system' | 'operator';
-  content: string;
-  cards?: any[];
-  operatorInfo?: { operatorId: string; operatorName: string };
-  timestamp: string;
-}
-
-
-export type WorkbenchTab =
-  | "orders"
-  | "approvals"
-  | "live_desk"
-  | "spus"
-  | "skus"
-  | "spi_logs";
-
+/** 集中式状态 hook(每 tab 一个功能域:订单/审批/客服/商品/审计)。
+ *  派生集合(计数/过滤)useMemo 化:任一 state 变化不再整树逐项重算。 */
 export function useWorkbenchState(initialTab: string) {
-  const [activeTab, setActiveTab] = useState<'orders' | 'approvals' | 'live_desk' | 'spus' | 'skus' | 'spi_logs'>(
-    initialTab as 'orders',
-  );
+  const [activeTab, setActiveTab] = useState<WorkbenchTab>(initialTab as WorkbenchTab);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   // PageContext(19-D3):勾选订单 → 写约定键,悬浮 agent 随问题上行实体过滤
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
@@ -395,72 +304,68 @@ export function useWorkbenchState(initialTab: string) {
     }
   };
 
-  // Status counts
-  const pendingApprovalsCount = approvals.filter((a) => a.status === 'waiting').length;
-  const paidOrdersCount = orders.filter((o) => o.status === 'PAID').length;
-  const shippedOrdersCount = orders.filter((o) => o.status === 'SHIPPED').length;
-  const refundedOrdersCount = orders.filter((o) => o.status === 'REFUNDED').length;
-  const lowStockCount = skus.filter((s) => s.stock < 50).length;
+  // ---- 派生:计数与各 tab 过滤集(useMemo;过滤谓词纯函数内聚在本 hook) ----
+  const pendingApprovalsCount = useMemo(() => approvals.filter((a) => a.status === 'waiting').length, [approvals]);
+  const paidOrdersCount = useMemo(() => orders.filter((o) => o.status === 'PAID').length, [orders]);
+  const shippedOrdersCount = useMemo(() => orders.filter((o) => o.status === 'SHIPPED').length, [orders]);
+  const refundedOrdersCount = useMemo(() => orders.filter((o) => o.status === 'REFUNDED').length, [orders]);
+  const lowStockCount = useMemo(() => skus.filter((s) => s.stock < 50).length, [skus]);
 
-  // Filtered Orders
-  const filteredOrders = orders.filter((o) => {
+  const filteredOrders = useMemo(() => orders.filter((o) => {
     if (orderStatusFilter !== 'ALL' && o.status !== orderStatusFilter) return false;
     if (orderSearchQuery.trim()) {
       const q = orderSearchQuery.toLowerCase().trim();
-      const str =
-        `${o.order_id} ${o.customer_id} ${o.shipping_address?.recipientName || ''} ${o.shipping_address?.phone || ''} ${o.shipping_address?.fullAddress || ''} ${o.tracking_info?.trackingNumber || ''}`.toLowerCase();
-      if (!str.includes(q)) return false;
+      const hit = contains(
+        `${o.order_id} ${o.customer_id} ${o.shipping_address?.recipientName || ''} ${o.shipping_address?.phone || ''} ${o.shipping_address?.fullAddress || ''} ${o.tracking_info?.trackingNumber || ''}`,
+        q,
+      );
+      if (!hit) return false;
     }
     return true;
-  });
+  }), [orders, orderStatusFilter, orderSearchQuery]);
 
-  // Filtered Conversations
-  const filteredConversations = conversations.filter((c) => {
+  const filteredConversations = useMemo(() => conversations.filter((c) => {
     const isTakeover = c.status === 'human_takeover';
     if (liveDeskStatusFilter === 'takeover' && !isTakeover) return false;
     if (liveDeskStatusFilter === 'ai' && isTakeover) return false;
     if (liveDeskSearchQuery.trim()) {
       const q = liveDeskSearchQuery.toLowerCase().trim();
-      const str = `${c.threadId || c.id} ${c.userId || ''} ${c.lastMessage || ''}`.toLowerCase();
-      if (!str.includes(q)) return false;
+      if (!contains(`${c.threadId || c.id} ${c.userId || ''} ${c.lastMessage || ''}`, q)) return false;
     }
     return true;
-  });
+  }), [conversations, liveDeskStatusFilter, liveDeskSearchQuery]);
 
-  // Categories list for SPU
-  const spuCategories = Array.from(new Set(spus.map((s) => s.category))).filter(Boolean);
-  const filteredSpus = spus.filter((s) => {
+  const spuCategories = useMemo(
+    () => Array.from(new Set(spus.map((s) => s.category))).filter(Boolean),
+    [spus],
+  );
+  const filteredSpus = useMemo(() => spus.filter((s) => {
     if (spuCategoryFilter !== 'ALL' && s.category !== spuCategoryFilter) return false;
     if (spuSearchQuery.trim()) {
       const q = spuSearchQuery.toLowerCase().trim();
-      const str = `${s.spu_code} ${s.title} ${s.subtitle} ${s.brand} ${s.category}`.toLowerCase();
-      if (!str.includes(q)) return false;
+      if (!contains(`${s.spu_code} ${s.title} ${s.subtitle} ${s.brand} ${s.category}`, q)) return false;
     }
     return true;
-  });
+  }), [spus, spuCategoryFilter, spuSearchQuery]);
 
-  // Filtered SKUs
-  const filteredSkus = skus.filter((s) => {
+  const filteredSkus = useMemo(() => skus.filter((s) => {
     if (skuStockFilter === 'low' && s.stock >= 50) return false;
     if (skuStockFilter === 'normal' && s.stock < 50) return false;
     if (skuSearchQuery.trim()) {
       const q = skuSearchQuery.toLowerCase().trim();
-      const str = `${s.sku_code} ${s.sku_title} ${s.spu_title} ${s.brand} ${s.category}`.toLowerCase();
-      if (!str.includes(q)) return false;
+      if (!contains(`${s.sku_code} ${s.sku_title} ${s.spu_title} ${s.brand} ${s.category}`, q)) return false;
     }
     return true;
-  });
+  }), [skus, skuStockFilter, skuSearchQuery]);
 
-  // Filtered SPI logs
-  const filteredAuditLogs = auditLogs.filter((log) => {
+  const filteredAuditLogs = useMemo(() => auditLogs.filter((log) => {
     if (spiActionFilter !== 'ALL' && log.action_type !== spiActionFilter) return false;
     if (spiSearchQuery.trim()) {
       const q = spiSearchQuery.toLowerCase().trim();
-      const str = `${log.id} ${log.order_id} ${log.action_type} ${log.idempotency_key}`.toLowerCase();
-      if (!str.includes(q)) return false;
+      if (!contains(`${log.id} ${log.order_id} ${log.action_type} ${log.idempotency_key}`, q)) return false;
     }
     return true;
-  });
+  }), [auditLogs, spiActionFilter, spiSearchQuery]);
 
   return {
     activeTab, setActiveTab,

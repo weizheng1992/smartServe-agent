@@ -21,6 +21,7 @@ export function OrdersTab() {
   const {
     activeTab, filteredOrders, orderSearchQuery, orderStatusFilter, orders, paidOrdersCount, refundedOrdersCount, selectedOrderIds, setOrderSearchQuery, setOrderStatusFilter, setSelectedOrderIds, setShippingOrderId, setTrackingNumberInput, shippedOrdersCount, toggleOrderSelection,
   } = useWorkbench();
+  if (activeTab !== 'orders') return null;
   return (
     <>
           <div className="bg-white rounded-b-xl border border-slate-200 shadow-2xs overflow-hidden space-y-0">
