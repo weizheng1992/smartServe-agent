@@ -804,3 +804,41 @@ async def store_promo_price(productId: str = Query(...), price: float = Query(..
     if not promo:
         return {"success": True, "originalPrice": price, "promoPrice": price, "promoName": None}
     return {"success": True, "originalPrice": price, "promoPrice": promo["promoPrice"], "promoName": promo["name"]}
+
+@merchant_promotions_router.post("/api/store/promotions/prices")
+async def store_promo_prices_batch(items: list[dict]):
+    """批量促销价(商城商品列表;服务端唯一算价,避免前端规则漂移)。"""
+    from engine_py.analytics.promotion_engine import promo_for_spu
+    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+
+    async with _merchant_reader_engine().connect() as conn:
+        out = []
+        for item in items[:200]:
+            promo = await promo_for_spu(conn, str(item.get("productId")), float(item.get("price") or 0))
+            out.append({
+                "productId": item.get("productId"),
+                "originalPrice": float(item.get("price") or 0),
+                "promoPrice": promo["promoPrice"] if promo else float(item.get("price") or 0),
+                "promoName": promo["name"] if promo else None,
+            })
+    return {"success": True, "prices": out}
+
+
+@merchant_promotions_router.get("/api/store/promotions/by-order")
+async def store_promo_by_order(orderId: str = Query(...)):
+    """订单优惠关联(商城订单展示原价/优惠/实付)。"""
+    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from sqlalchemy import text as _t
+
+    async with _merchant_reader_engine().connect() as conn:
+        row = (
+            await conn.execute(_t(
+                "SELECT p.name AS promo_name, r.discount_amount AS discount, p.promo_type "
+                "FROM promotion_redemptions r JOIN promotions p ON p.id = r.promotion_id "
+                "WHERE r.order_id = :oid LIMIT 1"
+            ).bindparams(oid=orderId))
+        ).mappings().first()
+    if not row:
+        return {"success": True, "applied": False}
+    return {"success": True, "applied": True, "promoName": row["promo_name"],
+            "discount": float(row["discount"]), "promoType": row["promo_type"]}

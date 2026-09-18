@@ -12,6 +12,8 @@ const ALL_CATEGORY = '全部';
 export default function StorefrontPage() {
   const { user } = useCurrentUser();
   const [products, setProducts] = useState<ThirdPartyProduct[]>([]);
+  const [activePromos, setActivePromos] = useState<Array<{ id: string; name: string; promoType: string; threshold: number | null; value: number }>>([]);
+  const [promoPrices, setPromoPrices] = useState<Record<string, { promoPrice: number; promoName: string | null }>>({});
   const [ordersCount, setOrdersCount] = useState(0);
   const [addressCount, setAddressCount] = useState(0);
   const [cartCount, setCartCount] = useState(0);
@@ -33,12 +35,35 @@ export default function StorefrontPage() {
       setLoading(true);
       const prodRes = await fetch('/api/store/products');
       const prodJson = await prodRes.json();
-      if (prodJson.success) setProducts(prodJson.products || []);
+      if (prodJson.success) {
+        const list = prodJson.products || [];
+        setProducts(list);
+        // 促销价(服务端唯一算价;20 号):批量取后回填
+        try {
+          const promoRes = await fetch('/api/store/promotions/prices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(list.slice(0, 60).map((p: any) => ({ productId: p.product_id || p.id, price: Number(p.price) || 0 }))),
+          });
+          const promoJson = await promoRes.json();
+          const map: Record<string, { promoPrice: number; promoName: string | null }> = {};
+          for (const it of promoJson.prices || []) map[it.productId] = { promoPrice: it.promoPrice, promoName: it.promoName };
+          setPromoPrices(map);
+        } catch { /* 促销价失败按原价展示 */ }
+      }
     } catch (err) {
       console.error('Failed to load products:', err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchPromos = async () => {
+    try {
+      const res = await fetch('/api/store/promotions');
+      const body = await res.json();
+      setActivePromos(body.promotions || []);
+    } catch { /* 活动横幅失败按无活动展示 */ }
   };
 
   // 统计角标数据
@@ -65,6 +90,7 @@ export default function StorefrontPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: 组件内取数函数,挂载拉取商品与角标计数
   useEffect(() => {
     fetchProducts();
+    void fetchPromos();
     fetchCounts(user.id);
   }, [user.id]);
 
@@ -120,6 +146,18 @@ export default function StorefrontPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+
+      {activePromos.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-2 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-700">
+          <span className="font-semibold">🎁 进行中活动:</span>
+          {activePromos.map((p) => (
+            <span key={p.id} className="rounded-full bg-white px-2.5 py-1">
+              {p.name}
+              {p.promoType === 'full_reduction' && p.threshold != null ? `(满 ¥${p.threshold} 减 ¥${p.value})` : p.promoType === 'discount' ? `(${p.value / 10} 折)` : `(¥${p.value} 券)`}
+            </span>
+          ))}
+        </div>
+      )}
       <StorefrontHeader cartCount={cartCount} ordersCount={ordersCount} addressCount={addressCount} />
 
       {/* 商城 Banner */}
@@ -271,7 +309,16 @@ export default function StorefrontPage() {
                   <div className="mt-auto pt-3 flex items-center justify-between">
                     <div>
                       <span className="text-[10px] text-slate-400">起售价</span>
-                      <div className="text-lg font-extrabold text-emerald-600">¥{Number(product.price).toFixed(2)}</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-lg font-extrabold text-emerald-600">
+                          ¥{(promoPrices[String((product as any).productId)]?.promoPrice ?? Number(product.price)).toFixed(2)}
+                        </span>
+                        {promoPrices[String((product as any).productId)]?.promoName && (
+                          <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-600">
+                            {promoPrices[String((product as any).productId)].promoName}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="text-right">
                       <span className="text-[10px] text-slate-400 block">总库存</span>

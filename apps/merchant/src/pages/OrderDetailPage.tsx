@@ -156,6 +156,7 @@ export default function SingleOrderDetailPage() {
           </div>
 
           <div className="pt-3 border-t border-slate-100 flex justify-between items-baseline text-xs">
+            <PromoLine orderId={String((order as any).order_id || (order as any).orderId)} totalAmount={Number(order.totalAmount)} />
             <span className="text-slate-500">实付总金额</span>
             <span className="text-lg font-extrabold text-emerald-700">¥{Number(order.totalAmount).toFixed(2)}</span>
           </div>
@@ -185,6 +186,24 @@ export default function SingleOrderDetailPage() {
         order={order}
         onOpenChatWithOrder={() => {}}
       />
+    </div>
+  );
+}
+
+
+function PromoLine({ orderId, totalAmount }: { orderId: string; totalAmount: number }) {
+  const [promo, setPromo] = useState<{ promoName: string; discount: number } | null>(null);
+  useEffect(() => {
+    fetch(`/api/store/promotions/by-order?orderId=${encodeURIComponent(orderId)}`)
+      .then((r) => r.json())
+      .then((b) => { if (b.applied) setPromo({ promoName: b.promoName, discount: b.discount }); })
+      .catch(() => {});
+  }, [orderId]);
+  if (!promo) return null;
+  return (
+    <div className="flex items-center justify-between w-full">
+      <span className="text-slate-500">优惠({promo.promoName})</span>
+      <span className="text-sm font-semibold text-rose-600">-¥{promo.discount.toFixed(2)}(实付 ¥{(totalAmount - promo.discount).toFixed(2)})</span>
     </div>
   );
 }

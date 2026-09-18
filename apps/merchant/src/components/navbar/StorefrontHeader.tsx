@@ -16,7 +16,10 @@ export function StorefrontHeader({
   const { pathname } = useLocation();
   const { user, switchUser, presetUsers, loginUser } = useCurrentUser();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [customName, setCustomName] = useState('');
+  const [customEmail, setCustomEmail] = useState('test@example.com');
+  const [customPassword, setCustomPassword] = useState('');
+  const [loginErr, setLoginErr] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
   const [isCustomLoginOpen, setIsCustomLoginOpen] = useState(false);
   const [syncedCartCount, setSyncedCartCount] = useState(cartCount);
 
@@ -45,16 +48,31 @@ export function StorefrontHeader({
     { label: '📍 地址簿', href: '/addresses', count: addressCount },
   ];
 
-  const handleCustomLogin = (e: React.FormEvent) => {
+  const handleCustomLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customName.trim()) return;
-    loginUser({
-      name: customName.trim(),
-      tier: '注册会员',
-    });
-    setCustomName('');
-    setIsCustomLoginOpen(false);
-    setIsUserMenuOpen(false);
+    if (!customEmail.trim() || !customPassword) return;
+    setLoginBusy(true);
+    setLoginErr('');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: customEmail.trim(), password: customPassword }),
+      });
+      const body = await res.json();
+      if (!body.success) throw new Error(body.message || '登录失败');
+      localStorage.setItem('merchant.token', body.data.token);
+      loginUser({
+        name: body.data.user.email,
+        tier: '注册会员',
+      });
+      setCustomPassword('');
+      setIsCustomLoginOpen(false);
+      setIsUserMenuOpen(false);
+    } catch (err) {
+      setLoginErr(String(err).replace('Error: ', ''));
+    }
+    setLoginBusy(false);
   };
 
   return (
@@ -154,14 +172,21 @@ export function StorefrontHeader({
                   {isCustomLoginOpen ? (
                     <form onSubmit={handleCustomLogin} className="space-y-2">
                       <input
-                        type="text"
-                        value={customName}
-                        onChange={(e) => setCustomName(e.target.value)}
-                        placeholder="输入自定义用户名"
+                        type="email"
+                        value={customEmail}
+                        onChange={(e) => setCustomEmail(e.target.value)}
+                        placeholder="邮箱"
                         className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-emerald-500"
                         // biome-ignore lint/a11y/noAutofocus: 搜索弹层打开即聚焦,刻意 UX
                         autoFocus
                       />
+                      <input
+                        type="password"
+                        value={customPassword}
+                        onChange={(e) => setCustomPassword(e.target.value)}
+                        placeholder="密码(dev: agent-all-dev)"
+                      />
+                      {loginErr && <div className="text-[11px] text-rose-600">{loginErr}</div>}
                       <div className="flex justify-end gap-1.5">
                         <button
                           type="button"
