@@ -112,7 +112,7 @@ interface MessageItem {
   timestamp: string;
 }
 
-export default function MigratedAdminPage({ initialTab = 'orders' }: { initialTab?: string }) {
+export default function OrderWorkbench({ initialTab = 'orders' }: { initialTab?: string }) {
   const [activeTab, setActiveTab] = useState<'orders' | 'approvals' | 'live_desk' | 'spus' | 'skus' | 'spi_logs'>(
     initialTab as 'orders',
   );

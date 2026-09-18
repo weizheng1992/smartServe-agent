@@ -2,17 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { Button } from 'ui';
 import { api, currentStaff, switchStaff, type MenuNode } from '@/lib/api';
-import AnalyticsPage from '@/pages/AnalyticsPage';
-import MigratedAdminPage from '@/pages/MigratedAdminPage';
-import ProductsPage from '@/pages/ProductsPage';
-import LoginPage from '@/pages/LoginPage';
-import PlaceholderPage from '@/pages/PlaceholderPage';
-import PromotionsPage from '@/pages/PromotionsPage';
-import CustomersPage from '@/pages/CustomersPage';
-import MenusPage from '@/pages/MenusPage';
-import RolesPage from '@/pages/RolesPage';
-import StaffPage from '@/pages/StaffPage';
-import ReportsPage from '@/pages/ReportsPage';
+import AnalyticsPage from '@/pages/analytics';
+import OrderWorkbench from '@/pages/order-manager';
+import ProductsPage from '@/pages/goods/products';
+import LoginPage from '@/pages/login';
+import PromotionsPage from '@/pages/promotions';
+import CustomersPage from '@/pages/customers';
+import MenusPage from '@/pages/system/menus';
+import RolesPage from '@/pages/system/roles';
+import StaffPage from '@/pages/system/staff';
+import ReportsPage from '@/pages/reports';
 import { FloatingAgent } from '@/components/FloatingAgent';
 
 function flattenMenus(nodes: MenuNode[]): Array<MenuNode & { top: string }> {
@@ -116,9 +115,9 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
           <Routes>
             <Route path="/analytics" element={<AnalyticsPage role={role} />} />
             <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/orders" element={<MigratedAdminPage initialTab="orders" />} />
-            <Route path="/approvals" element={<MigratedAdminPage initialTab="approvals" />} />
-            <Route path="/live-desk" element={<MigratedAdminPage initialTab="live_desk" />} />
+            <Route path="/orders" element={<OrderWorkbench initialTab="orders" />} />
+            <Route path="/approvals" element={<OrderWorkbench initialTab="approvals" />} />
+            <Route path="/live-desk" element={<OrderWorkbench initialTab="live_desk" />} />
             <Route path="/promotions" element={<PromotionsPage />} />
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/menus" element={<MenusPage />} />
@@ -126,8 +125,7 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
             <Route path="/staff" element={<StaffPage />} />
             <Route path="/products" element={<ProductsPage />} />
             <Route path="/skus" element={<ProductsPage />} />
-            <Route path="/spi-logs" element={<MigratedAdminPage initialTab="spi_logs" />} />
-            <Route path="*" element={<PlaceholderPage title={currentTop || '商户后台'} />} />
+            <Route path="/spi-logs" element={<OrderWorkbench initialTab="spi_logs" />} />
           </Routes>
         </div>
 

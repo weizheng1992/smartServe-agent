@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'ui';
 import { LineChart } from '@/components/LineChart';
 import { api } from '@/lib/api';
-import { FloatingAgent } from '@/components/FloatingAgent';
 
 const CAPSULES = ['本月销量 Top10', '卖得最差的商品', '差评最多的 SKU', '近 30 天退款率', '售后工单概况', '客服负载概况'];
 
