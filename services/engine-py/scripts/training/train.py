@@ -30,23 +30,48 @@ from torch import nn
 
 
 def train_linear_head(
-    embeddings: torch.Tensor, label_idx: list[int], num_classes: int, *, epochs: int, batch_size: int, lr: float, seed: int
-) -> nn.Linear:
-    """小批量 CE 训练单层线性头;全量放内存(闭集分类头数据量级 = 千句级,CPU 足够)。"""
+    embeddings: torch.Tensor,
+    label_idx: list[int],
+    num_classes: int,
+    *,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    seed: int,
+    eval_each_epoch: tuple[torch.Tensor, list[int]] | None = None,
+) -> tuple[nn.Linear, list[dict]]:
+    """小批量 CE 训练单层线性头;全量放内存(闭集分类头数据量级 = 千句级,CPU 足够)。
+
+    返回 (head, curve):curve = 每 epoch 的 train_loss / heldout_accuracy(如有评估集)
+    —— 损失曲线落 metrics.json,前端可渲染训练图(18/10 号图表语义的复用)。
+    """
     torch.manual_seed(seed)
     dim = embeddings.shape[1]
     head = nn.Linear(dim, num_classes)
     opt = torch.optim.Adam(head.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
-    indices = torch.randperm(len(embeddings))
-    for _ in range(epochs):
-        for start in range(0, len(indices), batch_size):
-            batch = indices[start : start + batch_size]
+    curve: list[dict] = []
+    eval_emb, eval_idx = eval_each_epoch if eval_each_epoch else (None, None)
+    for epoch in range(epochs):
+        epoch_losses = []
+        perm = torch.randperm(len(embeddings))
+        for start in range(0, len(perm), batch_size):
+            batch = perm[start : start + batch_size]
             opt.zero_grad()
-            loss = loss_fn(head(embeddings[batch]), torch.tensor([label_idx[i] for i in batch.tolist()]))
+            logits = head(embeddings[batch])
+            target = torch.tensor([label_idx[i] for i in batch.tolist()])
+            loss = loss_fn(logits, target)
             loss.backward()
             opt.step()
-    return head
+            epoch_losses.append(float(loss.detach()))
+        entry = {"epoch": epoch + 1, "train_loss": round(sum(epoch_losses) / len(epoch_losses), 4)}
+        if eval_emb is not None:
+            with torch.no_grad():
+                pred = head(eval_emb).argmax(dim=1)
+                correct = int((pred == torch.tensor(eval_idx)).sum())
+            entry["heldout_acc"] = round(correct / max(len(eval_idx), 1), 4)
+        curve.append(entry)
+    return head, curve
 
 
 @torch.no_grad()
@@ -85,10 +110,12 @@ def main(argv: list[str] | None = None) -> int:
     train_emb = encode_texts(encoder, train_texts, batch_size=tcfg.get("batch_size", 32))
     heldout_emb = encode_texts(encoder, heldout_texts, batch_size=tcfg.get("batch_size", 32)) if heldout_texts else None
 
-    head = train_linear_head(
+    eval_pair = (heldout_emb, heldout_idx) if heldout_emb is not None and heldout_idx else None
+    head, curve = train_linear_head(
         train_emb, train_idx, len(labels),
         epochs=tcfg.get("epochs", 20), batch_size=tcfg.get("batch_size", 32),
         lr=tcfg.get("lr", 0.01), seed=tcfg.get("seed", 42),
+        eval_each_epoch=eval_pair,
     )
 
     run_dir = Path(cfg["output"]["run_dir"])
@@ -102,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     if heldout_emb is not None:
         pred_idx, _ = predict(head, heldout_emb)
         metrics["heldout"] = classification_report(heldout_idx, pred_idx, labels)
+    metrics["loss_curve"] = curve
     (run_dir / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
 
     held = metrics.get("heldout", {}).get("accuracy")
