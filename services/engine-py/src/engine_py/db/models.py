@@ -605,6 +605,26 @@ class TenantBillingQuota(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
+class QueryExemplar(Base):
+    """data agent 查询示例(L2 few-shot,08-D3):question → 结构化查询意图 JSON。
+
+    双池:business_id='__global__' 为全局共享池,其余为租户池;与
+    intent_exemplars 分表 —— 标注结构不同,严禁混表(污染意图分类语义)。
+    """
+
+    __tablename__ = "query_exemplars"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    intent_json: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list | None] = mapped_column(JSONB)
+    source: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'manual'"))
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
 class IntentExemplar(Base):
     __tablename__ = "intent_exemplars"
 

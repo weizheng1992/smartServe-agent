@@ -20,6 +20,13 @@ from .schema_cards import merchant_schema_card
 from .sql_guard import UnsafeSqlError, assert_safe_select
 from .tools_registry_bridge import metric_semantic_registry
 
+_CALIBERS = {
+    "review_bad": "差评口径 = rating ≤ 2(商户真实评价)",
+    "refund_rate": "退款率 = 退款件 ÷ (有效+退款)件 × 100;CANCELLED 不计分母",
+    "session_volume": "会话量 = session_metrics 计数(与平台大盘同源)",
+    "ai_resolution_rate": "AI 解决率 = resolved_auto ÷ 总会话 × 100(session_metrics 同源)",
+}
+
 
 class UnsupportedQuery(Exception):
     """问句落在已注册指标空间之外(响亮失败,呈现层给可选问法)。"""
@@ -59,8 +66,8 @@ class MetricQueryEngine:
     _GENERIC_HINTS = (("卖得最好", ("gmv", "volume")), ("卖得好", ("gmv", "volume")), ("最好", ("gmv", "volume")))
     _TIME_PATTERNS = (
         ("last_month", re.compile(r"上个月|上月")),
-        ("last_7d", re.compile(r"最近(一|7)天|近7天")),
-        ("last_30d", re.compile(r"最近(三十|30)天|近30天")),
+        ("last_7d", re.compile(r"最近\s*(一|7)\s*天|近\s*7\s*天")),
+        ("last_30d", re.compile(r"最近\s*(三十|30)\s*天|近\s*(三十|30)\s*天")),
     )
 
     def __init__(self, session_ctx: dict | None = None, resolver: Any | None = None) -> None:
@@ -157,8 +164,8 @@ class MetricQueryEngine:
         }.get(intent.metric)
 
         if metric_expr is None:
-            # 阶段③新指标族(评价/退货/会话)登记处;未登记 = 不支持
-            raise UnsupportedQuery(f"指标 {intent.metric} 尚未登记执行模板")
+            # 阶段③新指标族(评价/退货/会话):独立模板族,非销售族形状
+            return self._compile_special_family(intent, business_id)
 
         sql = (
             'SELECT s.id::text AS "productId", s.title AS "name", s.category, '
@@ -215,20 +222,94 @@ class MetricQueryEngine:
             raise ValueError(f"编译模板未过安全闸(模板缺陷,非用户问题): {err}") from err
         return CompiledSQL(sql=sql, params=params, metric=intent.metric, unit=metric["unit"], ast=ast)
 
+    def _compile_special_family(self, intent: StructuredQueryIntent, business_id: str) -> CompiledSQL:
+        """阶段③新族模板:评价/退货(商户库)、会话(engine 本地库)。
+
+        闭集 fragment + bindparams 同销售族;差评/退款族输出商品排行形状,
+        会话族输出总量单行(productId=__total__)。未登记指标仍响亮 Unsupported。
+        """
+        direction = intent.direction
+        # merchant 路无租户列(02 号实证):business_id 只进 engine_db 路参数
+        params: dict[str, Any] = {"lim": intent.limit}
+        if intent.metric in ("session_volume", "ai_resolution_rate"):
+            params["business_id"] = business_id
+        time_clause = ""
+
+        if intent.metric == "review_bad":
+            if intent.time_window:
+                time_clause = "AND r.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                'SELECT r.spu_id AS "productId", COUNT(*) AS "metricScore" '
+                "FROM merchant_product_reviews r "
+                f"WHERE r.rating <= 2 {time_clause} "
+                f'GROUP BY r.spu_id ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "refund_rate":
+            if intent.time_window:
+                time_clause = "AND o.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                'SELECT oi.spu_id AS "productId", '
+                "ROUND(COALESCE(SUM(CASE WHEN o.status = 'REFUNDED' THEN oi.quantity ELSE 0 END), 0)::numeric "
+                "* 100 / GREATEST(SUM(CASE WHEN o.status <> 'CANCELLED' THEN oi.quantity ELSE 0 END), 1), 2)::float AS \"metricScore\" "
+                "FROM merchant_order_items oi JOIN merchant_orders o ON o.order_id = oi.order_id "
+                f"WHERE o.status <> 'CANCELLED' {time_clause} "
+                f'GROUP BY oi.spu_id ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "session_volume":
+            if intent.time_window:
+                time_clause = "AND created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                "SELECT '__total__' AS \"productId\", COUNT(*)::int AS \"metricScore\" "
+                f"FROM session_metrics WHERE business_id = :business_id {time_clause} LIMIT :lim"
+            )
+        elif intent.metric == "ai_resolution_rate":
+            if intent.time_window:
+                time_clause = "AND created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                "SELECT '__total__' AS \"productId\", ROUND(COALESCE(SUM(CASE WHEN resolution_status = 'resolved_auto' "
+                "THEN 1 ELSE 0 END), 0)::numeric * 100 / GREATEST(COUNT(*), 1), 2)::float AS \"metricScore\" "
+                f"FROM session_metrics WHERE business_id = :business_id {time_clause} LIMIT :lim"
+            )
+        else:
+            raise UnsupportedQuery(f"指标 {intent.metric} 尚未登记执行模板")
+
+        return CompiledSQL(
+            sql=sql,
+            params=params,
+            metric=intent.metric,
+            unit=metric_semantic_registry()[intent.metric]["unit"],
+            target_db=("engine_db" if intent.metric in ("session_volume", "ai_resolution_rate") else "merchant_db"),
+        )
+
     async def execute_async(self, compiled: Any, session_ctx: dict | None = None) -> QueryResult:
-        """异步执行(LangGraph 节点主路径);reader 已带 READ ONLY + 超时(阶段①)。"""
+        """异步执行(LangGraph 节点主路径);按 target_db 路由执行位。
+
+        merchant_db → 只读 reader(READ ONLY + 超时,阶段①);engine_db → 引擎
+        本地会话(get_session,同样只读查询)。两路均诚实空、均带口径注记。
+        """
         from sqlalchemy import text
 
-        from ..tools_registry import order_domain
+        if getattr(compiled, "target_db", "merchant_db") == "engine_db":
+            from ..db import get_session
 
-        # 运行时读取模块属性(测试/漂移断言会替换 reader 工厂,静态引用会绕过 patch)
-        async with order_domain._merchant_reader_engine().connect() as conn:
-            rows = (await conn.execute(text(compiled.sql).bindparams(**compiled.params))).mappings().all()
+            async with get_session() as session:
+                rows = (await session.execute(text(compiled.sql).bindparams(**compiled.params))).mappings().all()
+        else:
+            from ..tools_registry import order_domain
+
+            # 运行时读取模块属性(测试替换 reader 工厂,静态引用会绕过 patch)
+            async with order_domain._merchant_reader_engine().connect() as conn:
+                rows = (await conn.execute(text(compiled.sql).bindparams(**compiled.params))).mappings().all()
+        caliber = _CALIBERS.get(compiled.metric, "有效订单聚合(排除退款/取消单)")
         return QueryResult(
             rows=[dict(r) for r in rows],
             metric=compiled.metric,
             unit=compiled.unit,
-            caliber="有效订单聚合(排除退款/取消单)",
+            caliber=caliber,
         )
 
     def execute(self, compiled: Any, session_ctx: dict | None = None) -> QueryResult:
@@ -260,4 +341,6 @@ class CompiledSQL:
     params: dict
     metric: str
     unit: str
+    target_db: str = "merchant_db"  # merchant_db | engine_db(阶段③数据源路由)
     ast: Any = field(default=None, repr=False, compare=False)
+    _schema_card: Any = field(default=None, repr=False, compare=False)
