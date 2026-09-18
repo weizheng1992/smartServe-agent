@@ -1,0 +1,114 @@
+{
+  "source": "training_data/metric_head/seed.jsonl",
+  "loaded": 590,
+  "deduped_removed": 0,
+  "near_dup_removed": 4,
+  "train": 497,
+  "heldout": 89,
+  "per_class": {
+    "gmv": 70,
+    "volume": 79,
+    "gross_profit": 71,
+    "margin_rate": 54,
+    "stock_risk": 71,
+    "review_bad": 45,
+    "refund_rate": 28,
+    "after_sale_overview": 37,
+    "session_volume": 52,
+    "ai_resolution_rate": 29,
+    "gmv_trend": 50,
+    "unsupported": 0
+  },
+  "heldout_report": {
+    "accuracy": 1.0,
+    "macro_f1": 0.9167,
+    "per_class": {
+      "gmv": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 10
+      },
+      "volume": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 12
+      },
+      "gross_profit": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 11
+      },
+      "margin_rate": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      "stock_risk": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 11
+      },
+      "review_bad": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 7
+      },
+      "refund_rate": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 4
+      },
+      "after_sale_overview": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 6
+      },
+      "session_volume": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      "ai_resolution_rate": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 4
+      },
+      "gmv_trend": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      "unsupported": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    }
+  },
+  "labels": [
+    "gmv",
+    "volume",
+    "gross_profit",
+    "margin_rate",
+    "stock_risk",
+    "review_bad",
+    "refund_rate",
+    "after_sale_overview",
+    "session_volume",
+    "ai_resolution_rate",
+    "gmv_trend",
+    "unsupported"
+  ]
+}

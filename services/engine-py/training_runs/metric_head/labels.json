@@ -1,0 +1,17 @@
+{
+  "labels": [
+    "gmv",
+    "volume",
+    "gross_profit",
+    "margin_rate",
+    "stock_risk",
+    "review_bad",
+    "refund_rate",
+    "after_sale_overview",
+    "session_volume",
+    "ai_resolution_rate",
+    "gmv_trend",
+    "unsupported"
+  ],
+  "encoder": "BAAI/bge-small-zh-v1.5"
+}

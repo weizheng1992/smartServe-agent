@@ -1,0 +1,40 @@
+# 指标映射分类头(推荐首训;labels = metric_registry 闭集 + unsupported 兜底)
+# 训练时复制为 metric_head.toml 修改;所有路径相对 services/engine-py。
+
+[task]
+name = "metric_head"
+input_field = "query"
+label_field = "label"
+# 与 metric_registry 登记指标保持同源(新指标登记时同步改这里)
+# 与 METRIC_SEMANTIC_REGISTRY 同源(2026-09-18:含阶段③新族;order_overview 实体概览除外)
+labels = [
+  "gmv", "volume", "gross_profit", "margin_rate", "stock_risk",
+  "review_bad", "refund_rate", "after_sale_overview", "session_volume", "ai_resolution_rate",
+  "gmv_trend",
+  "unsupported",   # 闭集外 → 放行 L3 LLM 兜底,不许静默错分
+]
+
+[data]
+# 原料:prelabel 产物或人工标注 JSONL(query + label)
+train_jsonl = "training_data/metric_head/seed.jsonl"
+out_dir = "training_data/metric_head/processed"
+heldout_ratio = 0.15
+# 评测句泄漏防护:blocklist = promptfoo 评测用例的问句(11-D3 cos>=0.90 挡)
+eval_blocklist_jsonl = "../../eval/testCases/data_analytics/mapping.json"
+blocklist_field = "vars.input"
+near_dup_threshold = 0.90
+
+[model]
+# 真跑用 bge(与线上判重缓存同底座);"hash" = 冒烟/CI(不下载模型,仅验流水线)
+encoder = "BAAI/bge-small-zh-v1.5"
+device = "cpu"
+
+[train]
+epochs = 20
+batch_size = 32
+lr = 0.01
+seed = 42
+
+[output]
+# 产物 = 未来指标映射 adapter 的载荷(head.pt / labels.json / config.snapshot.toml / metrics.json)
+run_dir = "training_runs/metric_head"

@@ -81,9 +81,35 @@ def validate_labels(records: list[dict], labels: list[str]) -> None:
 
 
 def _blocklist_texts(path: str | None, field: str) -> list[str]:
+    """评测 blocklist 加载:支持 JSONL 与 promptfoo JSON 数组(点路径 field,如 vars.input)。"""
     if not path:
         return []
-    return [str(r.get(field) or r.get("query") or "").strip() for r in load_jsonl(path) if r.get(field) or r.get("query")]
+    import json as _json
+    p = Path(path)
+    if not p.exists():
+        print(f"[Prepare] blocklist 文件不存在,跳过泄漏过滤: {path}")
+        return []
+    if p.suffix == ".json":
+        raw = _json.loads(p.read_text(encoding="utf-8"))
+    else:
+        raw = [ _json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip() ]
+
+    def _dig(r: dict, dotted: str):
+        cur = r
+        for part in dotted.split("."):
+            if not isinstance(cur, dict) or part not in cur:
+                return None
+            cur = cur[part]
+        return cur
+
+    out = []
+    for r in raw:
+        v = _dig(r, field) if "." in field else r.get(field)
+        if v is None:
+            v = r.get("query") or r.get("input")
+        if v:
+            out.append(str(v).strip())
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
