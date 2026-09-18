@@ -29,6 +29,7 @@ export default function PromotionsPage() {
   const [msg, setMsg] = useState('');
   const [form, setForm] = useState({ name: '', promoType: 'full_reduction', threshold: '', value: '' });
   const [redeem, setRedeem] = useState<{ promoId: string; promoName: string; orderId: string } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const headers = () => ({
     'Content-Type': 'application/json',
@@ -75,6 +76,24 @@ export default function PromotionsPage() {
     const body = await res.json();
     setMsg(body.success ? `✓ 已核销:订单 ${body.orderId} 优惠 ¥${body.discount}` : `失败:${body.message}`);
     setRedeem(null);
+    void load();
+  }
+
+  async function saveEdit(p: Promotion) {
+    const res = await fetch(`/api/admin/analytics/promotions/${p.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', 'x-user-id': localStorage.getItem('merchant-admin.staff') || 'boss@aurora' },
+      body: JSON.stringify({ name: p.name, value: p.value }),
+    });
+    const b = await res.json();
+    setMsg(b.success ? '✓ 已保存' : `失败:${b.message}`);
+    if (b.success) void load();
+  }
+
+  async function removePromo(p: Promotion) {
+    const res = await fetch(`/api/admin/analytics/promotions/${p.id}`, { method: 'DELETE', headers: { 'x-tenant-id': 'aurora', 'x-user-id': localStorage.getItem('merchant-admin.staff') || 'boss@aurora' } });
+    const b = await res.json();
+    setMsg(b.success ? '✓ 已删除' : `失败:${b.message}`);
     void load();
   }
 
@@ -154,7 +173,14 @@ export default function PromotionsPage() {
             )}
             {promotions.map((p) => (
               <tr key={p.id} className="border-b border-zinc-50">
-                <td className="px-4 py-2">{p.name}</td>
+                <td className="px-4 py-2">
+                  {editingId === p.id ? (
+                    <input className="w-32 rounded border border-zinc-300 px-2 py-1" defaultValue={p.name}
+                      onBlur={(e) => { p.name = e.target.value; void saveEdit(p); setEditingId(null); }} />
+                  ) : (
+                    p.name
+                  )}
+                </td>
                 <td className="px-4 py-2">{TYPE_LABEL[p.promoType] || p.promoType}</td>
                 <td className="px-4 py-2">
                   {p.promoType === 'full_reduction' ? `满 ¥${p.threshold} 减 ¥${p.value}` : p.promoType === 'discount' ? `${p.value / 10} 折` : `¥${p.value} 券`}
@@ -163,10 +189,16 @@ export default function PromotionsPage() {
                   <span className={p.status === 'active' ? 'text-emerald-600' : 'text-zinc-400'}>{p.status === 'active' ? '进行中' : '已停用'}</span>
                 </td>
                 <td className="px-4 py-2">
-                  <Button size="sm" variant="ghost" onClick={() => void toggle(p)}>{p.status === 'active' ? '停用' : '启用'}</Button>
-                  {p.status === 'active' && (
-                    <Button size="sm" variant="ghost" onClick={() => setRedeem({ promoId: p.id, promoName: p.name, orderId: '' })}>核销</Button>
-                  )}
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => setEditingId(editingId === p.id ? null : p.id)}>
+                      {editingId === p.id ? '取消' : '编辑'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void toggle(p)}>{p.status === 'active' ? '停用' : '启用'}</Button>
+                    <Button size="sm" variant="ghost" onClick={() => void removePromo(p)}>删除</Button>
+                    {p.status === 'active' && (
+                      <Button size="sm" variant="ghost" onClick={() => setRedeem({ promoId: p.id, promoName: p.name, orderId: '' })}>核销</Button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

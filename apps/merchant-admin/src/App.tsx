@@ -4,6 +4,7 @@ import { Button } from 'ui';
 import { api, currentStaff, switchStaff, type MenuNode } from '@/lib/api';
 import AnalyticsPage from '@/pages/AnalyticsPage';
 import MigratedAdminPage from '@/pages/MigratedAdminPage';
+import ProductsPage from '@/pages/ProductsPage';
 import LoginPage from '@/pages/LoginPage';
 import PlaceholderPage from '@/pages/PlaceholderPage';
 import PromotionsPage from '@/pages/PromotionsPage';
@@ -123,8 +124,8 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
             <Route path="/menus" element={<MenusPage />} />
             <Route path="/roles" element={<RolesPage />} />
             <Route path="/staff" element={<StaffPage />} />
-            <Route path="/products" element={<MigratedAdminPage initialTab="spus" />} />
-            <Route path="/skus" element={<MigratedAdminPage initialTab="skus" />} />
+            <Route path="/products" element={<ProductsPage />} />
+            <Route path="/skus" element={<ProductsPage />} />
             <Route path="/spi-logs" element={<MigratedAdminPage initialTab="spi_logs" />} />
             <Route path="*" element={<PlaceholderPage title={currentTop || '商户后台'} />} />
           </Routes>
