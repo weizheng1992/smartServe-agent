@@ -43,7 +43,7 @@ def reject_unsafe(sql: str, schema: dict, require_business_id: bool = False) -> 
     if not isinstance(stmt, (exp.Select, exp.Union)):
         raise UnsafeSqlError(f"仅允许 SELECT/UNION,实际 {type(stmt).__name__}")
 
-    allowed_tables = set(schema.get("tables", {}).keys()) if schema else None
+    allowed_tables = set(schema.get("tables", {})) if schema else None
     _validate_expression(stmt, allowed_tables)
 
     if require_business_id and "business_id" not in sql:

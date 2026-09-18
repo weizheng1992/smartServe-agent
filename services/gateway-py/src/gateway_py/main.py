@@ -18,7 +18,7 @@ from socketio import ASGIApp
 
 from .rate_limit import RateLimitMiddleware
 from .realtime import sio
-from .routers import admin, auth, chat, crud, merchant, spi
+from .routers import admin, analytics, auth, chat, crud, merchant, spi
 from .tenant_context import TenantContextMiddleware, _PermissionError
 
 
@@ -83,6 +83,7 @@ fastapi_app.include_router(auth.router)
 fastapi_app.include_router(chat.router)
 fastapi_app.include_router(spi.router)
 fastapi_app.include_router(merchant.router)
+fastapi_app.include_router(analytics.router)
 
 # 聊天图片静态服务(wayfinder multimodal-image-chat 002):上传端点回 /api/uploads/ URL,
 # 前端经既有 /api 代理直达;目录由 chat 模块导入时确保存在

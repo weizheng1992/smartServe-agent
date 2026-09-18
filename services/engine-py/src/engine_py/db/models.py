@@ -605,6 +605,63 @@ class TenantBillingQuota(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
+class Menu(Base):
+    """菜单树(13 号 RBAC 三件套):目录/菜单/按钮三级;前端路由按此动态渲染。"""
+
+    __tablename__ = "menus"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    parent_id: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    menu_type: Mapped[str] = mapped_column(Text, nullable=False)  # directory|menu|button
+    route: Mapped[str | None] = mapped_column(Text)
+    perm_code: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'enabled'"))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+class RoleMenu(Base):
+    """角色↔菜单(含按钮权限点)多对多;保存即生效(服务端强制+缓存失效)。"""
+
+    __tablename__ = "role_menus"
+
+    role: Mapped[str] = mapped_column(Text, primary_key=True)
+    menu_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+class StaffMember(Base):
+    """员工↔角色(13-D1 三档种子,默认全员老板起步;快捷切换账号读取)。"""
+
+    __tablename__ = "staff_members"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'finance_owner'"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'enabled'"))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+class AnalyticsReport(Base):
+    """报告产物(14-D4):HTML 内容直存(rows_json 供 CSV 导出)。"""
+
+    __tablename__ = "analytics_reports"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    generated_by: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    time_window: Mapped[str] = mapped_column(Text, nullable=False)
+    html: Mapped[str] = mapped_column(Text, nullable=False)
+    rows_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
 class QueryExemplar(Base):
     """data agent 查询示例(L2 few-shot,08-D3):question → 结构化查询意图 JSON。
 
