@@ -28,6 +28,7 @@ export default function PromotionsPage() {
   const [effect, setEffect] = useState<Effect | null>(null);
   const [msg, setMsg] = useState('');
   const [form, setForm] = useState({ name: '', promoType: 'full_reduction', threshold: '', value: '' });
+  const [redeem, setRedeem] = useState<{ promoId: string; promoName: string; orderId: string } | null>(null);
 
   const headers = () => ({
     'Content-Type': 'application/json',
@@ -62,6 +63,19 @@ export default function PromotionsPage() {
     const body = await res.json();
     setMsg(body.success ? `✓ 已创建「${body.name}」` : `失败:${body.message}`);
     if (body.success) { setForm({ name: '', promoType: 'full_reduction', threshold: '', value: '' }); void load(); }
+  }
+
+  async function submitRedeem() {
+    if (!redeem) return;
+    const res = await fetch(`/api/admin/analytics/promotions/${redeem.promoId}/redeem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', 'x-user-id': localStorage.getItem('merchant-admin.staff') || 'boss@aurora' },
+      body: JSON.stringify({ orderId: redeem.orderId }),
+    });
+    const body = await res.json();
+    setMsg(body.success ? `✓ 已核销:订单 ${body.orderId} 优惠 ¥${body.discount}` : `失败:${body.message}`);
+    setRedeem(null);
+    void load();
   }
 
   async function toggle(p: Promotion) {
@@ -111,6 +125,18 @@ export default function PromotionsPage() {
         </div>
       </div>
 
+      {redeem && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+          <div className="text-sm font-medium">核销「{redeem.promoName}」</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <input className="w-64 rounded-lg border border-zinc-300 px-3 py-2" placeholder="订单号,如 AURORA-ORD-2026-9091" value={redeem.orderId} onChange={(e) => setRedeem({ ...redeem, orderId: e.target.value })} />
+            <Button size="sm" disabled={!redeem.orderId} onClick={() => void submitRedeem()}>确认核销</Button>
+            <Button size="sm" variant="ghost" onClick={() => setRedeem(null)}>取消</Button>
+            <span className="text-[11px] text-zinc-400">优惠额由服务端按活动规则×订单实付计算;同订单×同活动幂等</span>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <table className="w-full text-[13px]">
           <thead>
@@ -138,6 +164,9 @@ export default function PromotionsPage() {
                 </td>
                 <td className="px-4 py-2">
                   <Button size="sm" variant="ghost" onClick={() => void toggle(p)}>{p.status === 'active' ? '停用' : '启用'}</Button>
+                  {p.status === 'active' && (
+                    <Button size="sm" variant="ghost" onClick={() => setRedeem({ promoId: p.id, promoName: p.name, orderId: '' })}>核销</Button>
+                  )}
                 </td>
               </tr>
             ))}

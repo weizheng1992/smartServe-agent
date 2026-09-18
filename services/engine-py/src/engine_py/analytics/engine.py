@@ -51,6 +51,7 @@ class QueryResult:
     unit: str
     caliber: str  # 口径注记(呈现层展示;数据诚实铁律)
     source: str = "metric_template"
+    chart: str | None = None  # line=折线(时间序列);None=默认表格
 
 
 class MetricQueryEngine:
@@ -96,7 +97,11 @@ class MetricQueryEngine:
                 if phrase in clean:
                     matched_words.extend((k, phrase) for k in hinted_keys)
         for key, metric in registry.items():
-            if key in clean or metric["label"].lower() in clean:
+            # 匹配词记录实际命中的词面(key/label 各自),不记整段 label —— 否则
+            # key 命中会以 label 长度参与最长优先,压过更具体的趋势类条目(实弹修)
+            if key in clean:
+                matched_words.append((key, key))
+            elif metric["label"].lower() in clean:
                 matched_words.append((key, metric["label"]))
             for syn in metric.get("synonyms") or []:
                 if syn.lower() in clean:
@@ -276,6 +281,17 @@ class MetricQueryEngine:
                 f"FROM after_sale_tickets WHERE business_id = :business_id {time_clause} "
                 f'GROUP BY status ORDER BY "metricScore" {direction} LIMIT :lim'
             )
+        elif intent.metric == "gmv_trend":
+            params.pop("lim", None)  # 时间序列无 LIMIT 槽位
+            sql = (
+                "SELECT to_char(d.day, 'MM-DD') AS \"日期\", "
+                "COALESCE(SUM(oi.quantity * oi.price), 0)::float AS \"GMV\" "
+                "FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, INTERVAL '1 day') d(day) "
+                "LEFT JOIN merchant_orders o ON o.created_at::date = d.day "
+                "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                "GROUP BY d.day ORDER BY d.day"
+            )
         elif intent.metric == "order_overview":
             params.pop("lim", None)  # 单行概览无 LIMIT 槽位
             if not intent.entity_ids:
@@ -331,11 +347,13 @@ class MetricQueryEngine:
             async with order_domain._merchant_reader_engine().connect() as conn:
                 rows = (await conn.execute(text(compiled.sql).bindparams(**compiled.params))).mappings().all()
         caliber = _CALIBERS.get(compiled.metric, "有效订单聚合(排除退款/取消单)")
+        chart = "line" if compiled.metric.endswith("_trend") else None
         return QueryResult(
             rows=[dict(r) for r in rows],
             metric=compiled.metric,
             unit=compiled.unit,
             caliber=caliber,
+            chart=chart,
         )
 
     def execute(self, compiled: Any, session_ctx: dict | None = None) -> QueryResult:

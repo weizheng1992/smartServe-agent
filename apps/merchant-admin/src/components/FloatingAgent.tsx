@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button } from 'ui';
+import { LineChart } from '@/components/LineChart';
 import { api } from '@/lib/api';
 
 // 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由(选中数据
@@ -104,6 +105,16 @@ export function FloatingAgent({ route }: { route: string }) {
 }
 
 function ResultCard({ data }: { data: any }) {
+  if (data.chart === 'line' && Array.isArray(data.rows) && data.rows.length >= 2) {
+    const points = data.rows.map((r: any) => ({ label: String(Object.values(r)[0]), value: Number(Object.values(r)[1]) }));
+    return (
+      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{data.metric} · {data.unit}</div>
+        <LineChart points={points} unit={data.unit} />
+        {data.caliber ? <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{data.caliber}</div> : null}
+      </div>
+    );
+  }
   const card = (data.cards || [])[0];
   if (!card) return <div className="text-sm">{data.message || '空结果'}</div>;
   if (card.type !== 'table') return <div className="text-sm">{card.text}</div>;

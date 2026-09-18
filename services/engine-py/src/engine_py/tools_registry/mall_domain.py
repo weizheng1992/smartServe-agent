@@ -273,7 +273,7 @@ class MallDomainService:
         }
 
         try:
-            async with _order_domain._merchant_reader_engine().begin() as conn:
+            async with _order_domain._merchant_writer_engine().begin() as conn:  # 阶段①只读收紧:写事务必须走 writer
                 row = (
                     await conn.execute(
                         text("SELECT addresses FROM merchant_customers WHERE customer_id = :uid").bindparams(
@@ -1471,7 +1471,7 @@ class MallDomainService:
             return {"success": False, "message": "请告诉我要删除哪个收货地址（收件人或地址）。"}
 
         try:
-            async with _order_domain._merchant_reader_engine().begin() as conn:
+            async with _order_domain._merchant_writer_engine().begin() as conn:  # 阶段①只读收紧:写事务必须走 writer
                 raw = (
                     await conn.execute(
                         text("SELECT addresses FROM merchant_customers WHERE customer_id = :uid").bindparams(
@@ -1522,7 +1522,7 @@ class MallDomainService:
         target = (params.get("addressId") or params.get("receiverName") or "").strip()
 
         try:
-            async with _order_domain._merchant_reader_engine().begin() as conn:
+            async with _order_domain._merchant_writer_engine().begin() as conn:  # 阶段①只读收紧:写事务必须走 writer
                 raw = (
                     await conn.execute(
                         text("SELECT addresses FROM merchant_customers WHERE customer_id = :uid").bindparams(
@@ -1554,7 +1554,7 @@ class MallDomainService:
             for e in entries:
                 if isinstance(e, dict):
                     e["isDefault"] = e is hit
-            async with _order_domain._merchant_reader_engine().begin() as conn:
+            async with _order_domain._merchant_writer_engine().begin() as conn:  # 阶段①只读收紧:写事务必须走 writer
                 await conn.execute(
                     text(
                         "UPDATE merchant_customers SET addresses = CAST(:a AS jsonb) "
@@ -1718,7 +1718,7 @@ class MallDomainService:
                 }
 
         try:
-            async with _order_domain._merchant_reader_engine().begin() as conn:
+            async with _order_domain._merchant_writer_engine().begin() as conn:  # 阶段①只读收紧:写事务必须走 writer
                 resolved: list[dict] = []
                 failures: list[str] = []
                 for item in items:
@@ -1781,6 +1781,26 @@ class MallDomainService:
                     )
 
                 # 主单先行:items.order_id 对 merchant_orders 有外键
+                # 优惠结算(20-D3 用户决议启用):服务端唯一算价点,原价口径
+                # 不变(total_amount 仍记原价),实付 = 原价 − 优惠,核销落库。
+                promo_applied = None
+                try:
+                    from engine_py.analytics.promotion_engine import best_for_amount
+
+                    promo_applied = await best_for_amount(
+                        conn, round(total_amount, 2), {str(r["spu_code"]) for r in resolved}
+                    )
+                except Exception as promo_err:
+                    print(f"[MallDomain] 优惠计算失败,按原价结算: {promo_err}")
+
+                if promo_applied:
+                    await conn.execute(
+                        text(
+                            "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+                            "VALUES (CAST(:pid AS uuid), :oid, :amt)"
+                        ).bindparams(pid=promo_applied["promo_id"], oid=order_id, amt=promo_applied["discount"])
+                    )
+
                 await conn.execute(
                     text(
                         "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, currency, "
@@ -1823,6 +1843,8 @@ class MallDomainService:
             "success": True,
             "orderId": order_id,
             "totalAmount": round(total_amount, 2),
+            "promo": promo_applied,
+            "payableAmount": round(total_amount - (promo_applied["discount"] if promo_applied else 0), 2),
             "items": line_summaries,
             "shippingAddress": addr_dict["fullAddress"],
         }
@@ -1877,7 +1899,7 @@ class MallDomainService:
 
         row = rows[0]
         try:
-            async with _order_domain._merchant_reader_engine().begin() as conn:
+            async with _order_domain._merchant_writer_engine().begin() as conn:  # 阶段①只读收紧:写事务必须走 writer
                 sku = await MallDomainService._resolve_purchasable_sku(conn, spu_id=str(row["spu_id"]))
         except Exception as err:
             print(f"[MallDomain] 桥接 SKU 解析失败: {err}")

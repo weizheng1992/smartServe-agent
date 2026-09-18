@@ -4,8 +4,13 @@ import { Button } from 'ui';
 import { api, currentStaff, switchStaff, type MenuNode } from '@/lib/api';
 import AnalyticsPage from '@/pages/AnalyticsPage';
 import MigratedAdminPage from '@/pages/MigratedAdminPage';
+import LoginPage from '@/pages/LoginPage';
 import PlaceholderPage from '@/pages/PlaceholderPage';
 import PromotionsPage from '@/pages/PromotionsPage';
+import CustomersPage from '@/pages/CustomersPage';
+import MenusPage from '@/pages/MenusPage';
+import RolesPage from '@/pages/RolesPage';
+import StaffPage from '@/pages/StaffPage';
 import ReportsPage from '@/pages/ReportsPage';
 import { FloatingAgent } from '@/components/FloatingAgent';
 
@@ -17,14 +22,15 @@ function flattenMenus(nodes: MenuNode[]): Array<MenuNode & { top: string }> {
 }
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => !!localStorage.getItem('merchant-admin.token'));
   return (
     <BrowserRouter>
-      <AdminShell />
+      {authed ? <AdminShell onLogout={() => { localStorage.removeItem('merchant-admin.token'); setAuthed(false); }} /> : <LoginPage onLogin={() => setAuthed(true)} />}
     </BrowserRouter>
   );
 }
 
-function AdminShell() {
+function AdminShell({ onLogout }: { onLogout: () => void }) {
   const [menus, setMenus] = useState<MenuNode[]>([]);
   const [role, setRole] = useState('');
   const [staff, setStaff] = useState<Array<{ id: string; email: string; displayName: string; role: string }>>([]);
@@ -101,6 +107,7 @@ function AdminShell() {
               ))}
             </select>
             <span className="text-zinc-400">{currentStaff()}</span>
+            <button className="text-[11px] text-zinc-400 hover:text-zinc-900" onClick={onLogout}>退出</button>
           </div>
         </header>
 
@@ -112,6 +119,10 @@ function AdminShell() {
             <Route path="/approvals" element={<MigratedAdminPage initialTab="approvals" />} />
             <Route path="/live-desk" element={<MigratedAdminPage initialTab="live_desk" />} />
             <Route path="/promotions" element={<PromotionsPage />} />
+            <Route path="/customers" element={<CustomersPage />} />
+            <Route path="/menus" element={<MenusPage />} />
+            <Route path="/roles" element={<RolesPage />} />
+            <Route path="/staff" element={<StaffPage />} />
             <Route path="/products" element={<MigratedAdminPage initialTab="spus" />} />
             <Route path="/skus" element={<MigratedAdminPage initialTab="skus" />} />
             <Route path="/spi-logs" element={<MigratedAdminPage initialTab="spi_logs" />} />

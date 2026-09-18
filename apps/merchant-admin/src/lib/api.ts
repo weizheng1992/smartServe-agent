@@ -10,12 +10,14 @@ export function switchStaff(staff: string) {
 }
 
 async function req(path: string, init?: RequestInit) {
+  const token = localStorage.getItem('merchant-admin.token');
   const res = await fetch(path, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       'x-tenant-id': 'aurora',
       'x-user-id': currentStaff(),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
   });

@@ -13,6 +13,7 @@ import json
 from engine_py.analytics import graph, promotions, rbac, report_service
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy import delete, select
 
 from gateway_py.tenant_context import require_tenant_context
 
@@ -173,6 +174,246 @@ async def promotions_set_status(promotion_id: str, request: Request):
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     body = await request.json()
     result = await promotions.set_promotion_status(promotion_id, str(body.get("status") or ""), ctx["staff"])
+    if "error" in result:
+        return JSONResponse(status_code=400, content={"success": False, **result})
+    return {"success": True, **result}
+
+
+# ---------------- 菜单管理 CRUD(13 号;系统菜单护栏在服务层) ----------------
+
+
+@router.post("/api/admin/analytics/menus")
+async def create_menu(request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可管理菜单"})
+    body = await request.json()
+    name = str(body.get("name") or "").strip()
+    menu_type = body.get("menuType") or "menu"
+    if not name or menu_type not in ("directory", "menu", "button"):
+        return JSONResponse(status_code=400, content={"success": False, "message": "name/menuType 必传;类型 ∈ directory|menu|button"})
+    import uuid as _uuid
+
+    from engine_py.db import Menu, get_session
+
+    menu_id = "m_" + _uuid.uuid4().hex[:10]
+    async with get_session() as session:
+        session.add(Menu(
+            id=menu_id, business_id=ctx["business_id"], parent_id=body.get("parentId"),
+            name=name, menu_type=menu_type, route=body.get("route") or None,
+            perm_code=body.get("permCode") or None, sort_order=int(body.get("sort") or 0),
+            status="enabled",
+        ))
+        await session.commit()
+    return {"success": True, "id": menu_id}
+
+
+@router.patch("/api/admin/analytics/menus/{menu_id}")
+async def update_menu(menu_id: str, request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可管理菜单"})
+    body = await request.json()
+    from engine_py.db import Menu, get_session
+    from sqlalchemy import select
+
+    async with get_session() as session:
+        row = (await session.execute(select(Menu).where(Menu.id == menu_id))).scalars().first()
+        if not row:
+            return JSONResponse(status_code=404, content={"success": False, "message": "菜单不存在"})
+        if menu_id in rbac.SYSTEM_MENU_IDS and body.get("status") == "disabled":
+            return JSONResponse(status_code=400, content={"success": False, "message": "护栏:系统菜单不可停用"})
+        for field in ("name", "route", "permCode", "sort", "status"):
+            if field in body:
+                setattr(row, {"permCode": "perm_code", "sort": "sort_order"}.get(field, field), body[field])
+        await session.commit()
+    return {"success": True, "id": menu_id}
+
+
+@router.delete("/api/admin/analytics/menus/{menu_id}")
+async def delete_menu(menu_id: str, request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可管理菜单"})
+    if menu_id in rbac.SYSTEM_MENU_IDS:
+        return JSONResponse(status_code=400, content={"success": False, "message": "护栏:系统菜单不可删除"})
+    from engine_py.db import Menu, RoleMenu, get_session
+    from sqlalchemy import select
+
+    async with get_session() as session:
+        children = (await session.execute(select(Menu).where(Menu.parent_id == menu_id))).scalars().first()
+        if children:
+            return JSONResponse(status_code=400, content={"success": False, "message": "存在子菜单,先删子项"})
+        await session.execute(delete(RoleMenu).where(RoleMenu.menu_id == menu_id))
+        row = (await session.execute(select(Menu).where(Menu.id == menu_id))).scalars().first()
+        if row:
+            await session.delete(row)
+        await session.commit()
+    return {"success": True}
+
+
+# ---------------- 角色管理(列表/新建) ----------------
+
+
+@router.get("/api/admin/analytics/roles")
+async def roles_list(request: Request):
+    from engine_py.db import RoleMenu, StaffMember, get_session
+    from sqlalchemy import func, select
+
+    await _ctx(request)
+    async with get_session() as session:
+        menu_counts = dict(
+            (await session.execute(select(RoleMenu.role, func.count()).group_by(RoleMenu.role))).all()
+        )
+        staff_counts = dict(
+            (await session.execute(select(StaffMember.role, func.count()).group_by(StaffMember.role))).all()
+        )
+    roles = []
+    for role in rbac.ROLES:
+        roles.append({"role": role, "menuCount": menu_counts.get(role, 0), "staffCount": staff_counts.get(role, 0), "builtin": True})
+    for role in sorted(menu_counts):
+        if role not in rbac.ROLES:
+            roles.append({"role": role, "menuCount": menu_counts.get(role, 0), "staffCount": staff_counts.get(role, 0), "builtin": False})
+    return {"success": True, "roles": roles}
+
+
+@router.post("/api/admin/analytics/roles")
+async def roles_create(request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可新建角色"})
+    body = await request.json()
+    role = str(body.get("role") or "").strip()
+    menu_ids = list(body.get("menuIds") or [])
+    if not role or " " in role:
+        return JSONResponse(status_code=400, content={"success": False, "message": "role 必传且不含空格"})
+    if not menu_ids:
+        return JSONResponse(status_code=400, content={"success": False, "message": "至少分配一个菜单"})
+    await rbac.set_role_menus(ctx["business_id"], role, menu_ids, ctx["staff"])
+    return {"success": True, "role": role, "menuCount": len(menu_ids)}
+
+
+# ---------------- 员工管理(邀请/改角色/停用) ----------------
+
+
+@router.post("/api/admin/analytics/staff")
+async def staff_invite(request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可邀请员工"})
+    body = await request.json()
+    email = str(body.get("email") or "").strip().lower()
+    display = str(body.get("displayName") or email).strip()
+    role = body.get("role") or "sales_viewer"
+    if not email or "@" not in email:
+        return JSONResponse(status_code=400, content={"success": False, "message": "email 必传"})
+    if role not in (*rbac.ROLES,) and not role.startswith("custom_"):
+        role = f"custom_{role}"
+    import uuid as _uuid
+
+    from engine_py.db import StaffMember, get_session
+
+    async with get_session() as session:
+        exists = (
+            await session.execute(
+                select(StaffMember).where(StaffMember.business_id == ctx["business_id"], StaffMember.email == email)
+            )
+        ).scalars().first()
+        if exists:
+            return JSONResponse(status_code=400, content={"success": False, "message": "该邮箱已存在"})
+        row = StaffMember(
+            id=f"staff_{_uuid.uuid4().hex[:10]}", business_id=ctx["business_id"],
+            email=email, display_name=display, role=role, status="enabled",
+        )
+        session.add(row)
+        await session.commit()
+        return {"success": True, "id": row.id, "email": email, "role": role}
+
+
+@router.patch("/api/admin/analytics/staff/{staff_id}")
+async def staff_update(staff_id: str, request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可管理员工"})
+    body = await request.json()
+    from engine_py.db import StaffMember, get_session
+    from sqlalchemy import select
+
+    async with get_session() as session:
+        row = (
+            await session.execute(
+                select(StaffMember).where(StaffMember.business_id == ctx["business_id"], StaffMember.id == staff_id)
+            )
+        ).scalars().first()
+        if not row:
+            return JSONResponse(status_code=404, content={"success": False, "message": "员工不存在"})
+        if row.role == "finance_owner" and body.get("status") == "disabled":
+            return JSONResponse(status_code=400, content={"success": False, "message": "护栏:老板账号不可停用"})
+        if "role" in body:
+            row.role = body["role"]
+        if "status" in body:
+            row.status = body["status"]
+        if "displayName" in body:
+            row.display_name = body["displayName"]
+        await session.commit()
+        return {"success": True, "id": row.id, "role": row.role, "status": row.status}
+
+
+# ---------------- 客户管理(列表 + 会员级编辑;数据来自商户库) ----------------
+
+
+@router.get("/api/admin/analytics/customers")
+async def customers_list(request: Request):
+    await _ctx(request)
+    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from sqlalchemy import text as _text
+
+    async with _merchant_reader_engine().connect() as conn:
+        rows = (
+            await conn.execute(_text(
+                "SELECT c.customer_id, c.name, c.phone, COALESCE(c.member_level, 'VIP') AS member_level, "
+                "COALESCE(SUM(o.total_amount), 0)::float AS total_spent, COUNT(o.order_id) AS order_count "
+                "FROM merchant_customers c "
+                "LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
+                "GROUP BY c.customer_id, c.name, c.phone, c.member_level "
+                "ORDER BY total_spent DESC LIMIT 100"
+            ))
+        ).mappings().all()
+    return {"success": True, "customers": [dict(r) for r in rows]}
+
+
+@router.patch("/api/admin/analytics/customers/{customer_id}")
+async def customer_update(customer_id: str, request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] != "finance_owner":
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可编辑客户"})
+    body = await request.json()
+    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from sqlalchemy import text as _text
+
+    async with _merchant_writer_engine().begin() as conn:
+        result = await conn.execute(
+            _text("UPDATE merchant_customers SET member_level = :lv, updated_at = NOW() WHERE customer_id = :cid")
+            .bindparams(lv=str(body.get("memberLevel") or "VIP"), cid=customer_id)
+        )
+        if result.rowcount == 0:
+            return JSONResponse(status_code=404, content={"success": False, "message": "客户不存在"})
+    return {"success": True, "customerId": customer_id, "memberLevel": body.get("memberLevel")}
+
+
+# ---------------- 优惠核销(订单↔优惠关联;20-D4) ----------------
+
+
+@router.post("/api/admin/analytics/promotions/{promotion_id}/redeem")
+async def promotions_redeem(promotion_id: str, request: Request):
+    ctx = await _ctx(request)
+    if ctx["role"] not in ("finance_owner", "sales_viewer"):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无核销权限"})
+    body = await request.json()
+    order_id = str(body.get("orderId") or "").strip()
+    if not order_id:
+        return JSONResponse(status_code=400, content={"success": False, "message": "orderId 必传"})
+    result = await promotions.redeem(promotion_id, order_id, ctx["staff"])
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, **result})
     return {"success": True, **result}

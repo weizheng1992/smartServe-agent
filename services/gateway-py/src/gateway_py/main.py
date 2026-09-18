@@ -84,6 +84,7 @@ fastapi_app.include_router(chat.router)
 fastapi_app.include_router(spi.router)
 fastapi_app.include_router(merchant.router)
 fastapi_app.include_router(analytics.router)
+fastapi_app.include_router(merchant.merchant_promotions_router)
 
 # 聊天图片静态服务(wayfinder multimodal-image-chat 002):上传端点回 /api/uploads/ URL,
 # 前端经既有 /api 代理直达;目录由 chat 模块导入时确保存在

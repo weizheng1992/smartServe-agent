@@ -30,6 +30,7 @@ from ..conversation_repo import append_message, get_conversation_timeline, list_
 from ..hmac_signer import verify as hmac_verify
 
 router = APIRouter()
+merchant_promotions_router = APIRouter()
 
 THREAD_CHANNEL = "thread:{thread_id}:message"
 
@@ -769,3 +770,37 @@ async def spi_orders_action(request: Request):
     except Exception as err:
         print(f"[SPI] POST /spi/v1/orders/action failed: {err}")
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
+
+# ---------------- 商城促销(20 号:参加活动/促销价展示) ----------------
+
+
+@merchant_promotions_router.get("/api/store/promotions")
+async def store_promotions():
+    """在售活动列表(商城首页/商品页展示;仅 active 且未过期)。"""
+    from engine_py.analytics.promotion_engine import fetch_active_promos
+    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+
+    async with _merchant_reader_engine().connect() as conn:
+        promos = await fetch_active_promos(conn)
+    return {
+        "success": True,
+        "promotions": [
+            {"id": p["id"], "name": p["name"], "promoType": p["promo_type"],
+             "threshold": float(p["threshold_amount"]) if p["threshold_amount"] is not None else None,
+             "value": float(p["discount_value"]), "scopeType": p["scope_type"], "scopeValue": p["scope_value"]}
+            for p in promos
+        ],
+    }
+
+
+@merchant_promotions_router.get("/api/store/promotions/price")
+async def store_promo_price(productId: str = Query(...), price: float = Query(...)):
+    """单商品促销价(划线价展示;无可用活动返回原价)。"""
+    from engine_py.analytics.promotion_engine import promo_for_spu
+    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+
+    async with _merchant_reader_engine().connect() as conn:
+        promo = await promo_for_spu(conn, productId, price)
+    if not promo:
+        return {"success": True, "originalPrice": price, "promoPrice": price, "promoName": None}
+    return {"success": True, "originalPrice": price, "promoPrice": promo["promoPrice"], "promoName": promo["name"]}

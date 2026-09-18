@@ -84,14 +84,20 @@ async def ensure_defaults(business_id: str) -> None:
             for mid in menu_ids:
                 if (role, mid) not in existing_rm:
                     session.add(RoleMenu(role=role, menu_id=mid, business_id=business_id))
-        existing_staff = {s.email for s in (await session.execute(select(StaffMember))).scalars()}
-        # 三档种子员工(13-D1 默认起步 + 切换账号演示位;真实员工后续经邀请接线)
+        rows = (await session.execute(select(StaffMember))).scalars().all()
+        existing_ids = {s.id for s in rows}
+        existing_emails = {s.email for s in rows}
+        # 三档种子员工(13-D1 默认起步;email 变更后旧行按 id 幂等迁移)
         for sid, email, name, role in (
-            ("staff_owner", "boss@aurora", "老板", "finance_owner"),
+            ("staff_owner", "test@example.com", "老板", "finance_owner"),
             ("staff_ops", "ops@aurora", "运营", "sales_viewer"),
             ("staff_wh", "wh@aurora", "仓储", "warehouse_operator"),
         ):
-            if email not in existing_staff:
+            if sid in existing_ids:
+                row = next(s for s in rows if s.id == sid)
+                if row.email != email:
+                    row.email, row.display_name, row.role = email, name, role
+            elif email not in existing_emails:
                 session.add(StaffMember(
                     id=sid, business_id=business_id, email=email,
                     display_name=name, role=role, status="enabled",

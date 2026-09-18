@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'ui';
+import { LineChart } from '@/components/LineChart';
 import { api } from '@/lib/api';
 import { FloatingAgent } from '@/components/FloatingAgent';
 
@@ -48,10 +49,16 @@ export default function AnalyticsPage({ role }: { role: string }) {
         ))}
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto">
-        {frames.map((f, i) => (
+        {frames.filter((f) => f.event !== 'start').map((f, i) => (
           <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
             {f.event === 'user' ? (
               <div className="rounded-xl bg-zinc-900 px-4 py-2 text-sm text-white">{f.data.message}</div>
+            ) : f.event === 'result' && f.data.chart === 'line' && Array.isArray(f.data.rows) && f.data.rows.length >= 2 ? (
+              <div key="line" className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+                <div className="border-b border-zinc-100 px-4 py-2 text-xs font-medium text-zinc-500">{f.data.metric} · {f.data.unit}</div>
+                <LineChart points={f.data.rows.map((r: any) => ({ label: String(Object.values(r)[0]), value: Number(Object.values(r)[1]) }))} unit={f.data.unit} />
+                <div className="border-t border-zinc-100 px-4 py-1.5 text-[11px] text-zinc-400">口径:{f.data.caliber}</div>
+              </div>
             ) : f.event === 'result' ? (
               <div className="space-y-2">
                 {(f.data.cards || []).map((card: any, j: number) =>

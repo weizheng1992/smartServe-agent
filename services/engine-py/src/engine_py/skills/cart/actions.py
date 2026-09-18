@@ -121,8 +121,14 @@ async def _checkout(env: CartEnv) -> dict:
             "output": (
                 f"🎉 下单成功！订单号 [{checkout_res.get('orderId')}]。\n\n"
                 f"{lines}\n\n"
-                f"💰 实付金额: ¥{checkout_res.get('totalAmount')}\n"
-                f"📦 收货地址: {checkout_res.get('shippingAddress')}\n\n"
+                + (
+                    f"💰 商品金额: ¥{checkout_res.get('totalAmount')}\n"
+                    f"🎁 优惠活动「{checkout_res['promo']['name']}」已抵扣 ¥{checkout_res['promo']['discount']}\n"
+                    f"✅ 实付金额: ¥{checkout_res.get('payableAmount')}\n"
+                    if checkout_res.get("promo")
+                    else f"💰 实付金额: ¥{checkout_res.get('totalAmount')}\n"
+                )
+                + f"📦 收货地址: {checkout_res.get('shippingAddress')}\n\n"
                 "可在「我的订单」中随时查看物流状态。"
             ),
             "nextAction": "finish",

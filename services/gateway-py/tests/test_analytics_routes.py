@@ -157,3 +157,91 @@ class TestPromotions:
                               headers={**AURORA, "x-user-id": "wh@aurora"},
                               json={"name": "x", "promoType": "coupon", "value": 10})
         assert r.status_code == 403
+
+
+class TestTrendAndCrud:
+    """折线趋势(18/10-D2 趋势→折线)+ 菜单 CRUD + 角色 + 员工 + 客户 + 核销。"""
+
+    async def test_gmv_trend_line_chart(self, client):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()  # 商户库自愈(趋势/核销查商户库)
+        r = await client.post("/api/admin/analytics/ask", headers=AURORA, json={"question": "近 30 天 GMV 趋势"})
+        events = dict(_sse_events(r))
+        result = events["result"]
+        assert result.get("chart") == "line"
+        rows = result.get("rows") or []
+        assert len(rows) == 30  # 固定 30 天窗口
+        assert "日期" in rows[0] and "GMV" in rows[0]
+
+    async def test_menu_create_update_delete(self, client):
+        created = await client.post("/api/admin/analytics/menus", headers=AURORA, json={
+            "name": "E2E 临时菜单", "menuType": "menu", "route": "/e2e-tmp", "parentId": None,
+        })
+        assert created.status_code == 200
+        mid = created.json()["id"]
+        patched = await client.patch(f"/api/admin/analytics/menus/{mid}", headers=AURORA, json={"status": "disabled"})
+        assert patched.status_code == 200
+        deleted = await client.delete(f"/api/admin/analytics/menus/{mid}", headers=AURORA)
+        assert deleted.status_code == 200
+
+    async def test_system_menu_protected(self, client):
+        r = await client.delete("/api/admin/analytics/menus/m-menus", headers=AURORA)
+        assert r.status_code == 400
+        assert "护栏" in r.json()["message"]
+
+    async def test_role_create_requires_menus(self, client):
+        r = await client.post("/api/admin/analytics/roles", headers=AURORA, json={"role": "custom_x"})
+        assert r.status_code == 400
+        ok = await client.post("/api/admin/analytics/roles", headers=AURORA, json={
+            "role": "custom_x", "menuIds": ["m-analytics", "m-orders"],
+        })
+        assert ok.status_code == 200
+        listed = await client.get("/api/admin/analytics/roles", headers=AURORA)
+        assert any(x["role"] == "custom_x" for x in listed.json()["roles"])
+
+    async def test_staff_invite_and_guard(self, client):
+        r = await client.post("/api/admin/analytics/staff", headers=AURORA, json={
+            "email": "e2e-new@aurora", "displayName": "E2E", "role": "sales_viewer",
+        })
+        assert r.status_code == 200
+        dup = await client.post("/api/admin/analytics/staff", headers=AURORA, json={"email": "e2e-new@aurora"})
+        assert dup.status_code == 400
+        owner = (await client.get("/api/admin/analytics/staff", headers=AURORA)).json()["staff"]
+        boss = next(s for s in owner if s["role"] == "finance_owner")
+        guard = await client.patch(f"/api/admin/analytics/staff/{boss['id']}", headers=AURORA, json={"status": "disabled"})
+        assert guard.status_code == 400 and "护栏" in guard.json()["message"]
+
+    async def test_customers_list(self, client):
+        r = await client.get("/api/admin/analytics/customers", headers=AURORA)
+        assert r.status_code == 200
+        assert isinstance(r.json()["customers"], list)
+
+    async def test_promotion_redeem_and_idempotency(self, client):
+        await client.post("/api/admin/analytics/staff/switch", headers=AURORA, json={"staffId": "boss@aurora"})
+        created = await client.post("/api/admin/analytics/promotions", headers=AURORA, json={
+            "name": "E2E 核销券", "promoType": "coupon", "value": 100,
+        })
+        pid = created.json()["id"]
+        # 种一笔真实订单(容器商户库为空;经写引擎直写,与生产同链路)
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        async with _merchant_writer_engine().begin() as conn:
+            await conn.execute(_t(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                "VALUES ('AURORA-ORD-2026-9081', 'CUST-8801', 'PAID', 1299.00, "
+                "'{\"fullAddress\": \"E2E 测试地址\"}'::jsonb) "
+                "ON CONFLICT (order_id) DO UPDATE SET total_amount = 1299.00"
+            ))
+        # 不存在的订单 → 400 诚实
+        bad = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
+                                headers=AURORA, json={"orderId": "NOT-EXIST"})
+        assert bad.status_code == 400 and "不存在" in bad.json()["error"]
+        # 种子订单 → 核销成功;重复 → 幂等拦截
+        ok = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
+                               headers=AURORA, json={"orderId": "AURORA-ORD-2026-9081"})
+        assert ok.status_code == 200 and ok.json()["discount"] > 0
+        dup = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
+                                headers=AURORA, json={"orderId": "AURORA-ORD-2026-9081"})
+        assert dup.status_code == 400 and "幂等" in dup.json()["error"]

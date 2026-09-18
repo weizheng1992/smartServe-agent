@@ -73,4 +73,12 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         return {"type": "error", "message": "查询执行失败(已如实报告,未生成估算数据)", "detail": str(err)}
 
     cards = build_cards(question, result, intent)
-    return {"type": "result", "metric": result.metric, "unit": result.unit, "caliber": result.caliber, "cards": cards}
+    return {
+        "type": "result",
+        "metric": result.metric,
+        "unit": result.unit,
+        "caliber": result.caliber,
+        "chart": result.chart,
+        "rows": result.rows,
+        "cards": cards,
+    }

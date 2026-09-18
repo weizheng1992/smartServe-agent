@@ -90,6 +90,60 @@ async def set_promotion_status(promotion_id: str, status: str, operator: str) ->
     return {"id": promotion_id, "status": status}
 
 
+async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
+    """补录核销(20-D4 订单↔优惠关联):对已存在的订单登记某活动的优惠金额。
+
+    优惠额由服务端按活动规则 × 订单实付计算(不在本模块动结算链,20-D3);
+    幂等:同活动×同订单只记一次。订单不存在/未启用活动 → error。
+    """
+    async with _merchant_writer_engine().connect() as conn:
+        promo = (
+            await conn.execute(
+                text("SELECT promo_type, threshold_amount, discount_value, status FROM promotions WHERE id = CAST(:id AS uuid)")
+                .bindparams(id=promotion_id)
+            )
+        ).mappings().first()
+        if not promo:
+            return {"error": "活动不存在"}
+        if promo["status"] != "active":
+            return {"error": "活动已停用,不可核销"}
+        order = (
+            await conn.execute(
+                text("SELECT total_amount FROM merchant_orders WHERE order_id = :oid").bindparams(oid=order_id)
+            )
+        ).mappings().first()
+        if not order:
+            return {"error": f"订单不存在:{order_id}"}
+        dup = (
+            await conn.execute(
+                text("SELECT 1 FROM promotion_redemptions WHERE promotion_id = CAST(:id AS uuid) AND order_id = :oid LIMIT 1")
+                .bindparams(id=promotion_id, oid=order_id)
+            )
+        ).first()
+        if dup:
+            return {"error": "该订单已核销过此活动(幂等拦截)"}
+
+    total = float(order["total_amount"])
+    if promo["promo_type"] == "full_reduction":
+        threshold = float(promo["threshold_amount"] or 0)
+        if total < threshold:
+            return {"error": f"订单实付 ¥{total:.2f} 未达满减门槛 ¥{threshold:.2f}"}
+        discount = float(promo["discount_value"])
+    elif promo["promo_type"] == "discount":
+        discount = round(total * (100 - float(promo["discount_value"])) / 100, 2)
+    else:
+        discount = float(promo["discount_value"])
+    discount = min(discount, total)
+
+    async with _merchant_writer_engine().begin() as conn:
+        await conn.execute(
+            text("INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+                 "VALUES (CAST(:pid AS uuid), :oid, :amt)").bindparams(pid=promotion_id, oid=order_id, amt=discount)
+        )
+    await _audit("promo_redeem", operator, {"promotionId": promotion_id, "orderId": order_id, "discount": discount})
+    return {"promotionId": promotion_id, "orderId": order_id, "discount": discount}
+
+
 async def effect_overview() -> dict:
     """效果速览(20-D4):核销单数/优惠总额/最近核销;真实聚合,零活动诚实空。"""
     async with _merchant_writer_engine().connect() as conn:

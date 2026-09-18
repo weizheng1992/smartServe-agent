@@ -9,9 +9,23 @@
  */
 import { expect, test } from '@playwright/test';
 
+const loginViaApi = async (request: any) => {
+  const res = await request.post('http://localhost:4000/api/auth/login', {
+    data: { email: 'test@example.com', password: 'agent-all-dev' },
+  });
+  const body = await res.json();
+  return body.data.token as string;
+};
+
 const CAPSULES = ['本月销量 Top10', '卖得最差的商品', '差评最多的 SKU', '近 30 天退款率', '售后工单概况', '客服负载概况'];
 
 test.describe('data agent 全链路', () => {
+  let token: string;
+  test.beforeAll(async ({ request }) => { token = await loginViaApi(request); });
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript((t: string) => localStorage.setItem('merchant-admin.token', t), token);
+  });
+
   test('菜单渲染与员工切换(RBAC)', async ({ page }) => {
     await page.goto('/analytics');
     await expect(page.getByText('极光潮品 · 商户后台')).toBeVisible();
@@ -68,7 +82,7 @@ test.describe('data agent 全链路', () => {
     await page.getByPlaceholder('门槛 ¥').fill('300');
     await page.getByPlaceholder(/优惠 ¥/).fill('30');
     await page.getByRole('button', { name: '创建' }).click();
-    await expect(page.getByText(name)).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('td', { hasText: name })).toBeVisible({ timeout: 15_000 });
     const row = page.locator('tr', { hasText: name });
     await row.getByRole('button', { name: '停用' }).click();
     await expect(row.getByText('已停用')).toBeVisible();
