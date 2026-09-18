@@ -7,6 +7,7 @@ from .cart import CartManageSkill
 from .contract import SkillContext
 from .guide_skills import ProductInquirySkill, ShoppingGuideSkill
 from .order_skills import OrderAddressModificationSkill, OrderRefundSkill
+from .promotion_skill import PromotionQuerySkill
 
 
 class SkillRegistry:
@@ -20,6 +21,7 @@ class SkillRegistry:
                 OrderRefundSkill(),
                 ProductInquirySkill(),
                 ShoppingGuideSkill(),
+                PromotionQuerySkill(),
                 CartManageSkill(),
             ):
                 cls.register(skill)

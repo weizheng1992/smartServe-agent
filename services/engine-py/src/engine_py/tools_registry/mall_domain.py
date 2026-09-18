@@ -1786,21 +1786,25 @@ class MallDomainService:
                 promo_applied = None
                 coupon_row_id = None
                 try:
-                    from engine_py.analytics.promotion_engine import best_for_amount, best_user_coupon
+                    # SAVEPOINT:优惠计算失败只回滚保存点,不毒化结算主事务
+                    # (实弹:promotions 表缺失期间,裸 try 会把事务打进 aborted,
+                    #  后续订单 INSERT 全部失败 —— InFailedSQLTransactionError)
+                    async with conn.begin_nested():
+                        from engine_py.analytics.promotion_engine import best_for_amount, best_user_coupon
 
-                    amount = round(total_amount, 2)
-                    scope = {str(r["spu_code"]) for r in resolved}
-                    auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
-                    user_coupon = await best_user_coupon(conn, user_id, amount)
-                    # 券 vs 自动活动:取优惠额大者(单活动/单,防叠加以防资损)
-                    if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
-                        promo_applied = {
-                            "promo_id": None, "name": user_coupon["name"],
-                            "discount": user_coupon["discount"], "kind": "coupon",
-                        }
-                        coupon_row_id = user_coupon["coupon_row_id"]
-                    elif auto:
-                        promo_applied = {**auto, "kind": "auto"}
+                        amount = round(total_amount, 2)
+                        scope = {str(r["spu_code"]) for r in resolved}
+                        auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
+                        user_coupon = await best_user_coupon(conn, user_id, amount)
+                        # 券 vs 自动活动:取优惠额大者(单活动/单,防叠加以防资损)
+                        if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
+                            promo_applied = {
+                                "promo_id": None, "name": user_coupon["name"],
+                                "discount": user_coupon["discount"], "kind": "coupon",
+                            }
+                            coupon_row_id = user_coupon["coupon_row_id"]
+                        elif auto:
+                            promo_applied = {**auto, "kind": "auto"}
                 except Exception as promo_err:
                     print(f"[MallDomain] 优惠计算失败,按原价结算: {promo_err}")
 

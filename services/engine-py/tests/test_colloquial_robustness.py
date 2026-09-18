@@ -31,6 +31,7 @@ class TestSaveUserAddressHonestFailure:
         merchant_engine = create_async_engine(url=engine.url.render_as_string(hide_password=False), poolclass=NullPool)
         original = order_domain._merchant_reader_engine
         order_domain._merchant_reader_engine = lambda: merchant_engine
+        order_domain._merchant_writer_engine = lambda: merchant_engine
         try:
             result = asyncio.run(
                 MallDomainService.save_user_address(
@@ -96,6 +97,7 @@ class TestReviewTokenMatch:
 
         asyncio.run(setup())
         order_domain._merchant_reader_engine = lambda: merchant_engine
+        order_domain._merchant_writer_engine = lambda: merchant_engine
         try:
             result = asyncio.run(MallDomainService.query_product_reviews({"productName": "三合一冲锋衣"}))
         finally:

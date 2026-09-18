@@ -189,7 +189,10 @@ async def _setup(pg_factory):
             )
 
     original = order_domain._merchant_reader_engine
+    original_writer = getattr(order_domain, "_merchant_writer_engine", None)
     order_domain._merchant_reader_engine = lambda: merchant_engine
+    # 阶段①只读收紧后:结算写事务走 writer(与生产一致,测试同指容器)
+    order_domain._merchant_writer_engine = lambda: merchant_engine
 
     async def _sealed_embed(*_args, **_kwargs):
         raise RuntimeError("embedding sealed in this suite")
@@ -201,14 +204,16 @@ async def _setup(pg_factory):
     MallDomainService._embed_query = staticmethod(_sealed_embed)
     MallDomainService._embed_texts = staticmethod(_sealed_embed)
 
-    return engine, merchant_engine, original, original_embeds
+    return engine, merchant_engine, (original, original_writer), original_embeds
 
 
 async def _teardown(engine, merchant_engine, original, original_embeds):
     from engine_py.tools_registry import order_domain
     from engine_py.tools_registry.mall_domain import MallDomainService
 
-    order_domain._merchant_reader_engine = original
+    reader_original, writer_original = original
+    order_domain._merchant_reader_engine = reader_original
+    order_domain._merchant_writer_engine = writer_original
     MallDomainService._embed_query = original_embeds[0]
     MallDomainService._embed_texts = original_embeds[1]
     MallDomainService._cart_storage.clear()

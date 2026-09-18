@@ -13,6 +13,7 @@ from typing import Any
 
 from .intent_registry import (
     CITY_PROVINCE_MAP,
+    PROMOTION_KEYWORDS_RE,
     REFUND_VERB_RE,
     AgentIntentType,
 )
@@ -160,6 +161,13 @@ class IntentRule:
 
 
 INTENT_DETECTION_RULES: list[IntentRule] = [
+    IntentRule(
+        intent=AgentIntentType.PROMOTION_QUERY,
+        confidence=0.92,
+        # 词表单一事实源:intent_registry.PROMOTION_KEYWORDS_RE(2026-09-18
+        # 优惠闭环;规则层产出先例同 metric_query/address_manage)
+        pattern=PROMOTION_KEYWORDS_RE,
+    ),
     IntentRule(
         intent=AgentIntentType.CART_MANAGE,
         confidence=0.95,

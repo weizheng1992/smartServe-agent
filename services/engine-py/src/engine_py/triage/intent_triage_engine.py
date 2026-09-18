@@ -178,10 +178,11 @@ def detect_address_manage(text: str | None) -> dict | None:
             "entities": {"addressAction": "set_default"},
             "missingSlots": [],
         }
-    # 删除形(2026-09-15 N4 能力补齐):「把我的地址全部删掉」
+    # 删除形(2026-09-15 N4 能力补齐):「把我的地址全部删掉」。
+    # 「删了」口语形(nightly 2026-09-18):「把地址删了」曾漏检出。
     if (
-        re.search(r"(?:删除|删掉|移除|清空)[^。,，\n]{0,8}(?:我的)?(?:全部)?(?:收货地址|地址簿|地址)", text)
-        or re.search(r"(?:收货地址|地址簿|地址)[^。,，\n]{0,8}(?:删除|删掉|移除|清空)", text)
+        re.search(r"(?:删除|删掉|移除|清空|删了)[^。,，\n]{0,8}(?:我的)?(?:全部)?(?:收货地址|地址簿|地址)", text)
+        or re.search(r"(?:收货地址|地址簿|地址)[^。,，\n]{0,8}(?:删除|删掉|移除|清空|删了)", text)
     ):
         return {
             "mode": "delete",

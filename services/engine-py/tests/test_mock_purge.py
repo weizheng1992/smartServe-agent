@@ -119,6 +119,7 @@ async def _setup_shelf(pg_factory):
 
     original_reader = order_domain._merchant_reader_engine
     order_domain._merchant_reader_engine = lambda: merchant_engine
+    order_domain._merchant_writer_engine = lambda: merchant_engine
     return merchant_engine, original_reader
 
 

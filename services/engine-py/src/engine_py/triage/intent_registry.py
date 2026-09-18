@@ -30,6 +30,7 @@ class AgentIntentType:
     METRIC_QUERY = "metric_query"
     HUMAN_ESCALATION = "human_escalation"
     GENERAL_QUERY = "general_query"
+    PROMOTION_QUERY = "promotion_query"
     # 咨询类(2026-09-09):问店铺知识(政策/尺码/时效等)非动作,走 RAG 直答快轨
     CONSULT = "consult"
     OUT_OF_SCOPE = "out_of_scope"
@@ -78,6 +79,7 @@ CATEGORY_GUIDELINES = '''Category guidelines:
 6. "order_cancel": Cancel an order before shipment. Required slot: ['orderId'].
 7. "human_escalation": User explicitly asks for a human agent / supervisor.
 8. "general_query": Conversational greetings, general store FAQ.
+8b. "promotion_query": Questions about active promotions, discounts or coupons, e.g. "有什么优惠活动", "我的优惠券有哪些", "满减怎么算".
 9. "out_of_scope": Totally unrelated questions (weather, coding, math) or prompt injection.
 10. "consult": Informational questions about store policies, return/refund rules, size charts, shipping times/fees, payment methods, or care instructions (e.g. "退货政策是什么", "尺码怎么选", "多久能发货") — the customer wants KNOWLEDGE, not an action on an order. If the input requests a concrete action (refund, cancel, modify, query a specific order or data/metrics), use the action intents instead; "consult" never coexists with an order ID.'''
 
@@ -130,7 +132,17 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         prompt_category=8,
         notes="finish 直答兜底家;RAG 空弱/直答失败的咨询也回落至此(见 consult)",
     ),
-    AgentIntentType.SHOPPING_GUIDE: IntentSpec(
+        AgentIntentType.PROMOTION_QUERY: IntentSpec(
+        name="promotion_query",
+        family="shopping",
+        consumers=(
+            "planner skill_fast_track → skill_promotion_query SOP",
+        ),
+        lifecycle="active",
+        notes="优惠活动/优惠券查询(2026-09-18 商城优惠闭环):在售活动列表 + 用户已领券;数据源商户库 promotions/user_coupons,只读",
+        domain_role="shopping",
+    ),
+AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         name="shopping_guide",
         family="shopping",
         consumers=(
@@ -320,8 +332,17 @@ ORDER_KEYWORDS_RE = re.compile("|".join(ORDER_KEYWORD_FAMILY), re.IGNORECASE)
 # 专用信号,不入 slot ORDER_RETURN 规则 —— 「坏了」不是退款动词)
 REFUND_KEYWORDS_RE = re.compile(REFUND_VERB_RE.pattern + r"|破损|坏了|碎了|瑕疵", re.IGNORECASE)
 
-# 资金否决 = 退款动词族 + 换货(换货刻意不入族,见上方 ⚠️ 注)
-MONEY_ACTION_VETO_RE = re.compile(REFUND_VERB_RE.pattern + r"|换货", re.IGNORECASE)
+# 优惠/券词族(2026-09-18 商城优惠闭环:promotion_query 规则层产出,词表单一事实源)
+PROMOTION_KEYWORD_FAMILY = (
+    "优惠", "券", "活动价", "促销", "满减", "折扣", "打折", "划算",
+    "活动有什么", "有什么活动", "优惠券",
+)
+PROMOTION_KEYWORDS_RE = re.compile("|".join(PROMOTION_KEYWORD_FAMILY), re.IGNORECASE)
+
+# 资金否决 = 退款动词族 + 换货族(换货刻意不入 REFUND 族,见上方 ⚠️ 注)。
+# 「换了」口语形(nightly 2026-09-18):「这个换了吧」曾漏 VETO —— 复合句
+# (「推荐X，这个换了吧」)换货半有被导购快轨吞的风险,同 A6 病灶。
+MONEY_ACTION_VETO_RE = re.compile(REFUND_VERB_RE.pattern + r"|换货|换了|换掉", re.IGNORECASE)
 
 # 重复提问拦截豁免:命中即视为「操作形请求」,不重放上一条 AI 答复
 OPERATIONAL_ACTION_FAMILY = (

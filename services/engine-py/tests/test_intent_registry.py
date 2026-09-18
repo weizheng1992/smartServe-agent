@@ -32,9 +32,9 @@ class TestRegistryAlignment:
             v for k, v in vars(reg.AgentIntentType).items() if not k.startswith("_")
         }
         assert set(INTENT_REGISTRY) == type_values
-        # 15 档:多意图一期(2026-09-12)新增 address_manage(规则层产出,
-        # metric_query 先例 —— 不进分类器 10 类目,prompt_category=None)
-        assert len(INTENT_REGISTRY) == 15
+        # 16 档:2026-09-12 多意图 address_manage(规则层产出)之后,
+        # 2026-09-18 优惠闭环新增 promotion_query(规则层产出,词表单一事实源)
+        assert len(INTENT_REGISTRY) == 16
 
     def test_slot_extractor_reexports_same_class(self):
         # 定义已迁 intent_registry,slot_extractor.AgentIntentType 是同一类对象

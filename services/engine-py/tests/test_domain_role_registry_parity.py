@@ -42,6 +42,7 @@ def test_registry_parity_full_map():
         "refund": "order_service",
         "human_escalation": "order_service",
         "metric_query": "order_service",
+            "promotion_query": "shopping",
         "chat": "chitchat",
         "general_query": "chitchat",
         "consult": "chitchat",
