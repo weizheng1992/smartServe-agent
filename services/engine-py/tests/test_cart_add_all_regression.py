@@ -13,8 +13,8 @@ import asyncio
 import pytest
 
 from engine_py.skills.cart import CartManageSkill
-from engine_py.tools_registry.mall_domain import MallDomainService
 from engine_py.skills.contract import SkillContext
+from engine_py.tools_registry.mall_domain import MallDomainService
 
 _CANDIDATES = [
     {"id": "prod_a", "name": "测试商品A", "price": 100.0},

@@ -19,10 +19,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from engine_py.skills.contract import SkillContext
 from engine_py.skills.guide_skills import ShoppingGuideSkill
 from engine_py.tools_registry import order_domain
 from engine_py.tools_registry.mall_domain import MallDomainService
-from engine_py.skills.contract import SkillContext
 
 # ── 纯函数缝:词元切分 ────────────────────────────────────────────────────
 

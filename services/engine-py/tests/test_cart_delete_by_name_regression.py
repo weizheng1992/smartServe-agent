@@ -13,8 +13,8 @@ from __future__ import annotations
 import asyncio
 
 from engine_py.skills.cart import CartManageSkill
-from engine_py.tools_registry.mall_domain import MallDomainService
 from engine_py.skills.contract import SkillContext
+from engine_py.tools_registry.mall_domain import MallDomainService
 
 _USER = "u_delname"
 
