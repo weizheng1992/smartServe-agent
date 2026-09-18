@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
 
+interface Sku {
+  id: string;
+  sku_code: string;
+  sku_title: string | null;
+  price: number;
+  stock: number;
+  spec_attributes: string | null;
+}
+
 interface Spu {
   id: string;
   spu_code: string;
@@ -26,6 +35,10 @@ export default function ProductsPage() {
   const [form, setForm] = useState<{ open: boolean; id?: string; title: string; category: string; price: string; stock: string }>({ open: false, title: '', category: CATEGORIES[0], price: '', stock: '10' });
   const [editing, setEditing] = useState<string | null>(null);
   const [edit, setEdit] = useState({ title: '', price: '', stock: '' });
+  const [openSkus, setOpenSkus] = useState<string | null>(null);
+  const [skus, setSkus] = useState<Sku[]>([]);
+  const [newSku, setNewSku] = useState<{ skuTitle: string; price: string; stock: string }>({ skuTitle: '', price: '', stock: '' });
+  const [skuEdit, setSkuEdit] = useState<{ id: string; price: string; stock: string } | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch('/api/admin/analytics/spus', { headers: H() });
@@ -51,6 +64,36 @@ export default function ProductsPage() {
     setMsg(res.ok ? `✓ 「${s.title}」已${s.status === 'ON_SALE' ? '下架' : '上架'}` : '操作失败');
     void load();
   }
+  async function loadSkus(spuId: string) {
+    const res = await fetch(`/api/admin/analytics/spus/${spuId}/skus`, { headers: H() });
+    setSkus((await res.json()).skus || []);
+  }
+  function toggleSkus(s: Spu) {
+    if (openSkus === s.id) { setOpenSkus(null); return; }
+    setOpenSkus(s.id);
+    void loadSkus(s.id);
+  }
+  async function createSku(spuId: string) {
+    const res = await fetch(`/api/admin/analytics/spus/${spuId}/skus`, { method: 'POST', headers: H(), body: JSON.stringify(newSku) });
+    const b = await res.json();
+    setMsg(b.success ? `✓ SKU ${b.skuCode} 已新增` : `失败:${b.message}`);
+    if (b.success) { setNewSku({ skuTitle: '', price: '', stock: '' }); void loadSkus(spuId); }
+  }
+  async function saveSku(skuId: string, spuId: string, patch: { price: string; stock: string }) {
+    const res = await fetch(`/api/admin/analytics/skus/${skuId}`, {
+      method: 'PATCH', headers: H(),
+      body: JSON.stringify({ price: Number(patch.price), stock: Number(patch.stock) }),
+    });
+    setMsg(res.ok ? '✓ SKU 已保存' : '保存失败');
+    void loadSkus(spuId);
+  }
+  async function deleteSku(skuId: string, spuId: string) {
+    const res = await fetch(`/api/admin/analytics/skus/${skuId}`, { method: 'DELETE', headers: H() });
+    const b = await res.json();
+    setMsg(b.success ? '✓ 已删除' : `失败:${b.message}`);
+    void loadSkus(spuId);
+  }
+
   async function remove(s: Spu) {
     const res = await fetch(`/api/admin/analytics/spus/${s.id}`, { method: 'DELETE', headers: H() });
     const b = await res.json();
@@ -88,6 +131,7 @@ export default function ProductsPage() {
           </thead>
           <tbody>
             {spus.map((s) => (
+              <>
               <tr key={s.id} className="border-b border-zinc-50">
                 <td className="px-4 py-2">
                   {editing === s.id ? (
@@ -121,11 +165,53 @@ export default function ProductsPage() {
                     <div className="flex gap-1">
                       <Button size="sm" variant="ghost" onClick={() => { setEditing(s.id); setEdit({ title: s.title, price: String(s.price), stock: String(s.stock) }); }}>编辑</Button>
                       <Button size="sm" variant="ghost" onClick={() => void toggleStatus(s)}>{s.status === 'ON_SALE' ? '下架' : '上架'}</Button>
+                      <Button size="sm" variant="ghost" onClick={() => toggleSkus(s)}>SKU</Button>
                       <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void remove(s)}>删除</Button>
                     </div>
                   )}
                 </td>
               </tr>
+              {openSkus === s.id && (
+                <tr className="bg-zinc-50/60">
+                  <td colSpan={6} className="px-6 py-3">
+                    <div className="text-[11px] font-semibold text-zinc-500 mb-2">SKU 明细 · {s.spu_code}</div>
+                    <table className="w-full text-[12px]">
+                      <thead><tr className="text-left text-zinc-400">
+                        <th className="py-1 pr-4 font-medium">SKU 编码</th><th className="py-1 pr-4 font-medium">价格</th>
+                        <th className="py-1 pr-4 font-medium">库存</th><th className="py-1 font-medium">操作</th>
+                      </tr></thead>
+                      <tbody>
+                        {skus.map((k) => (
+                          <tr key={k.id}>
+                            <td className="py-1 pr-4 font-mono">{k.sku_code}</td>
+                            <td className="py-1 pr-4">¥{k.price}</td>
+                            <td className="py-1 pr-4">{k.stock}</td>
+                            <td className="py-1">
+                              <Button size="sm" variant="ghost" onClick={() => setSkuEdit({ id: k.id, price: String(k.price), stock: String(k.stock) })}>改价/库存</Button>
+                              <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void deleteSku(k.id, s.id)}>删除</Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {skuEdit && (
+                      <div className="mt-2 flex items-center gap-2 text-xs">
+                        <span className="text-zinc-500">改价/库存:</span>
+                        <input className="w-24 rounded border border-zinc-300 px-2 py-1" placeholder="价格" value={skuEdit.price} onChange={(e) => setSkuEdit({ ...skuEdit, price: e.target.value })} />
+                        <input className="w-20 rounded border border-zinc-300 px-2 py-1" placeholder="库存" value={skuEdit.stock} onChange={(e) => setSkuEdit({ ...skuEdit, stock: e.target.value })} />
+                        <Button size="sm" onClick={() => skuEdit && void saveSku(skuEdit.id, s.id, skuEdit)}>保存</Button>
+                      </div>
+                    )}
+                    <div className="mt-2 flex items-center gap-2 text-xs">
+                      <input className="w-32 rounded border border-zinc-300 px-2 py-1" placeholder="新 SKU 标题" value={newSku.skuTitle} onChange={(e) => setNewSku({ ...newSku, skuTitle: e.target.value })} />
+                      <input className="w-24 rounded border border-zinc-300 px-2 py-1" placeholder="价格" value={newSku.price} onChange={(e) => setNewSku({ ...newSku, price: e.target.value })} />
+                      <input className="w-20 rounded border border-zinc-300 px-2 py-1" placeholder="库存" value={newSku.stock} onChange={(e) => setNewSku({ ...newSku, stock: e.target.value })} />
+                      <Button size="sm" variant="outline" disabled={!newSku.price} onClick={() => void createSku(s.id)}>新增 SKU</Button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </>
             ))}
           </tbody>
         </table>

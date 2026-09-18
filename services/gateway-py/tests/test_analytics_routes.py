@@ -245,3 +245,32 @@ class TestTrendAndCrud:
         dup = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
                                 headers=AURORA, json={"orderId": "AURORA-ORD-2026-9081"})
         assert dup.status_code == 400 and "幂等" in dup.json()["error"]
+
+
+class TestSkuCrud:
+    """SKU 明细增删改查(承接 SPU 页展开;删除受成交护栏)。"""
+
+    async def test_sku_list_create_update_delete(self, client):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        spus = (await client.get("/api/admin/analytics/spus", headers=AURORA)).json()["spus"]
+        spu_id = spus[0]["id"] if spus else None
+        if not spu_id:
+            pytest.skip("容器无 SPU 种子")
+
+        created = await client.post(f"/api/admin/analytics/spus/{spu_id}/skus",
+                                    headers=AURORA, json={"skuTitle": "E2E 规格", "price": 99.5, "stock": 7})
+        assert created.status_code == 200
+        code = created.json()["skuCode"]
+
+        listed = await client.get(f"/api/admin/analytics/spus/{spu_id}/skus", headers=AURORA)
+        assert any(s["sku_code"] == code for s in listed.json()["skus"])
+
+        sku_id = next(s["id"] for s in listed.json()["skus"] if s["sku_code"] == code)
+        patched = await client.patch(f"/api/admin/analytics/skus/{sku_id}", headers=AURORA,
+                                     json={"price": 89.9, "stock": 5})
+        assert patched.status_code == 200
+
+        deleted = await client.delete(f"/api/admin/analytics/skus/{sku_id}", headers=AURORA)
+        assert deleted.status_code == 200

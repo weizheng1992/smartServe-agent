@@ -625,3 +625,94 @@ async def customers_delete(customer_id: str, request: Request):
             return JSONResponse(status_code=400, content={"success": False, "message": "客户名下有订单,不可删除"})
         await conn.execute(_t("DELETE FROM merchant_customers WHERE customer_id = :c").bindparams(c=customer_id))
     return {"success": True}
+
+
+# ---------------- SKU 明细增删改查(承接 SPU 页展开) ----------------
+
+
+@router.get("/api/admin/analytics/spus/{spu_id}/skus")
+async def skus_list(spu_id: str, request: Request):
+    await _ctx(request)
+    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from sqlalchemy import text as _t
+
+    async with _merchant_reader_engine().connect() as conn:
+        rows = (await conn.execute(_t(
+            "SELECT id::text, sku_code, sku_title, price::float AS price, stock, "
+            "spec_attributes::text AS spec_attributes FROM merchant_skus "
+            "WHERE spu_id = CAST(:id AS uuid) ORDER BY sku_code"
+        ).bindparams(id=spu_id))).mappings().all()
+    return {"success": True, "skus": [dict(r) for r in rows]}
+
+
+@router.post("/api/admin/analytics/spus/{spu_id}/skus")
+async def skus_create(spu_id: str, request: Request):
+    ctx = await _ctx(request)
+    if "prod:edit" not in (await _perms(ctx)):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
+    body = await request.json()
+    price = body.get("price")
+    if price is None:
+        return JSONResponse(status_code=400, content={"success": False, "message": "price 必传"})
+    import uuid as _u
+
+    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from sqlalchemy import text as _t
+
+    sku_code = f"SKU-{_u.uuid4().hex[:10].upper()}"
+    spec = body.get("specAttributes") or {}
+    async with _merchant_writer_engine().begin() as conn:
+        spu = (await conn.execute(_t("SELECT spu_code FROM merchant_spus WHERE id = CAST(:id AS uuid)")
+                                  .bindparams(id=spu_id))).first()
+        if not spu:
+            return JSONResponse(status_code=404, content={"success": False, "message": "SPU 不存在"})
+        await conn.execute(_t(
+            "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, price, stock, spec_attributes) "
+            "VALUES (:id, CAST(:spu AS uuid), :code, :title, :price, :stock, CAST(:spec AS jsonb))"
+        ).bindparams(id=str(_u.uuid4()), spu=spu_id, code=sku_code,
+                     title=body.get("skuTitle") or "", price=float(price),
+                     stock=int(body.get("stock") or 0), spec=_u.json.dumps(spec, ensure_ascii=False)))
+    return {"success": True, "skuCode": sku_code}
+
+
+@router.patch("/api/admin/analytics/skus/{sku_id}")
+async def skus_update(sku_id: str, request: Request):
+    ctx = await _ctx(request)
+    if "prod:edit" not in (await _perms(ctx)):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
+    body = await request.json()
+    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from sqlalchemy import text as _t
+
+    sets, params = [], {"id": sku_id}
+    for field, col in (("price", "price"), ("stock", "stock")):
+        if field in body:
+            sets.append(f"{col} = :{field}")
+            params[field] = float(body[field]) if field == "price" else int(body[field])
+    if "skuTitle" in body:
+        sets.append("sku_title = :skuTitle")
+        params["skuTitle"] = str(body["skuTitle"])
+    if not sets:
+        return JSONResponse(status_code=400, content={"success": False, "message": "无可更新字段"})
+    async with _merchant_writer_engine().begin() as conn:
+        await conn.execute(_t(f"UPDATE merchant_skus SET {', '.join(sets)} WHERE id = CAST(:id AS uuid)").bindparams(**params))
+    return {"success": True, "id": sku_id}
+
+
+@router.delete("/api/admin/analytics/skus/{sku_id}")
+async def skus_delete(sku_id: str, request: Request):
+    ctx = await _ctx(request)
+    if "prod:edit" not in (await _perms(ctx)):
+        return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
+    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from sqlalchemy import text as _t
+
+    async with _merchant_writer_engine().begin() as conn:
+        sold = (await conn.execute(_t(
+            "SELECT 1 FROM merchant_order_items WHERE sku_code = "
+            "(SELECT sku_code FROM merchant_skus WHERE id = CAST(:id AS uuid)) LIMIT 1"
+        ).bindparams(id=sku_id))).first()
+        if sold:
+            return JSONResponse(status_code=400, content={"success": False, "message": "该 SKU 已有成交,不可删除(可改库存为 0)"})
+        await conn.execute(_t("DELETE FROM merchant_skus WHERE id = CAST(:id AS uuid)").bindparams(id=sku_id))
+    return {"success": True}
