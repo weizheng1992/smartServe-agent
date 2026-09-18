@@ -1,0 +1,42 @@
+[
+  {
+    "description": "dataMapping 四要素 - 同义词直命中 gmv(销售族)",
+    "vars": { "input": "销售额最高的商品", "expectedMetric": "gmv", "expectedDirection": "DESC", "expectedTimeWindow": null, "expectedKind": "intent" },
+    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+  },
+  {
+    "description": "dataMapping 四要素 - 反向词翻转方向(卖得最差 → ASC,08-P1 回归门)",
+    "vars": { "input": "卖得最差的商品", "expectedMetric": "gmv", "expectedDirection": "ASC", "expectedTimeWindow": null, "expectedKind": "intent" },
+    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+  },
+  {
+    "description": "dataMapping 四要素 - 时间窗解析(近 30 天退款率)",
+    "vars": { "input": "近 30 天退款率", "expectedMetric": "refund_rate", "expectedDirection": "DESC", "expectedTimeWindow": "last_30d", "expectedKind": "intent" },
+    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+  },
+  {
+    "description": "dataMapping 四要素 - 泛指歧义反问(conflictGroup 为选项集)",
+    "vars": { "input": "卖得最好的商品", "expectedMetric": null, "expectedDirection": null, "expectedTimeWindow": null, "expectedKind": "clarify" },
+    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+  },
+  {
+    "description": "dataMapping 四要素 - 不支持问题响亮失败(严禁静默兜底 gmv,08-P1 铁律门)",
+    "vars": { "input": "为什么这个月退货突然变多", "expectedMetric": null, "expectedDirection": null, "expectedTimeWindow": null, "expectedKind": "unsupported" },
+    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+  },
+  {
+    "description": "dataMapping 四要素 - 差评榜(阶段③新族)",
+    "vars": { "input": "差评最多的 SKU", "expectedMetric": "review_bad", "expectedDirection": "DESC", "expectedTimeWindow": null, "expectedKind": "intent" },
+    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+  },
+  {
+    "description": "dataMapping 四要素 - 会话量(engine 本地族)",
+    "vars": { "input": "最近的会话量有多少", "expectedMetric": "session_volume", "expectedDirection": "DESC", "expectedTimeWindow": null, "expectedKind": "intent" },
+    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+  },
+  {
+    "description": "dataMapping 四要素 - LIMIT 提取与 clamp(Top 20)",
+    "vars": { "input": "销量 Top 20", "expectedMetric": "volume", "expectedDirection": "DESC", "expectedTimeWindow": null, "expectedLimit": 20, "expectedKind": "intent" },
+    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+  }
+]
