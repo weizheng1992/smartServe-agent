@@ -117,6 +117,17 @@ export default function MigratedAdminPage({ initialTab = 'orders' }: { initialTa
     initialTab as 'orders',
   );
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  // PageContext(19-D3):勾选订单 → 写约定键,悬浮 agent 随问题上行实体过滤
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const toggleOrderSelection = (orderId: string) => {
+    setSelectedOrderIds((prev) => {
+      const next = prev.includes(orderId) ? prev.filter((x) => x !== orderId) : [...prev, orderId];
+      try {
+        localStorage.setItem('merchant-admin.selection', JSON.stringify(next));
+      } catch { /* 隐私模式等存储不可用:选择仍在本页生效 */ }
+      return next;
+    });
+  };
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [spus, setSpus] = useState<SpuRow[]>([]);
   const [skus, setSkus] = useState<SkuRow[]>([]);
@@ -717,6 +728,17 @@ export default function MigratedAdminPage({ initialTab = 'orders' }: { initialTa
               </div>
             </div>
 
+            {activeTab === 'orders' && selectedOrderIds.length > 0 && (
+              <div className="sticky bottom-3 z-10 mx-auto w-fit flex items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-xs text-white shadow-lg">
+                <span>已选 {selectedOrderIds.length} 笔订单</span>
+                <a
+                  href="/analytics"
+                  className="rounded-full bg-white px-3 py-1 font-semibold text-slate-900"
+                >
+                  向 AI 提问 →
+                </a>
+              </div>
+            )}
             {filteredOrders.length === 0 ? (
               <div className="p-12 text-center space-y-2">
                 <div className="text-3xl">📦</div>
@@ -728,6 +750,20 @@ export default function MigratedAdminPage({ initialTab = 'orders' }: { initialTa
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
                     <tr>
+                      <th className="p-3.5 w-8">
+                        <input
+                          type="checkbox"
+                          aria-label="全选本页订单"
+                          checked={selectedOrderIds.length > 0 && selectedOrderIds.length === filteredOrders.length}
+                          onChange={(e) => {
+                            const next = e.target.checked ? filteredOrders.map((o) => o.order_id) : [];
+                            setSelectedOrderIds(next);
+                            try {
+                              localStorage.setItem('merchant-admin.selection', JSON.stringify(next));
+                            } catch { /* 存储不可用时仅本页生效 */ }
+                          }}
+                        />
+                      </th>
                       <th className="p-3.5">订单流水号</th>
                       <th className="p-3.5">顾客 ID</th>
                       <th className="p-3.5">订单状态</th>
@@ -740,7 +776,15 @@ export default function MigratedAdminPage({ initialTab = 'orders' }: { initialTa
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {filteredOrders.map((o) => (
-                      <tr key={o.order_id} className="hover:bg-slate-50/80 transition">
+                      <tr key={o.order_id} className={`hover:bg-slate-50/80 transition ${selectedOrderIds.includes(o.order_id) ? 'bg-blue-50/60' : ''}`}>
+                        <td className="p-3.5">
+                          <input
+                            type="checkbox"
+                            aria-label={`选择订单 ${o.order_id}`}
+                            checked={selectedOrderIds.includes(o.order_id)}
+                            onChange={() => toggleOrderSelection(o.order_id)}
+                          />
+                        </td>
                         <td className="p-3.5 font-semibold text-slate-900 font-mono">{o.order_id}</td>
                         <td className="p-3.5 text-slate-500">{o.customer_id}</td>
                         <td className="p-3.5">

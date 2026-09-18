@@ -15,7 +15,7 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-from engine_py.analytics.engine import MetricQueryEngine, UnsupportedQuery
+from engine_py.analytics.engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
 from engine_py.tools_registry.metric_registry import METRIC_SEMANTIC_REGISTRY
 
 try:
@@ -132,6 +132,31 @@ class TestNewFamilyCompileExecute:
     def test_unknown_metric_still_unsupported(self, engine):
         with pytest.raises(UnsupportedQuery):
             engine.resolve("今天天气如何")
+
+
+class TestOrderOverview:
+    """PageContext 订单实体概览(19-D3 兑现):实体集必传,空集响亮拒绝。"""
+
+    def test_resolve_by_synonym(self, engine):
+        intent = engine.resolve("这几笔订单的平均金额")
+        assert intent.metric == "order_overview"
+
+    def test_empty_entities_rejected_loudly(self, engine):
+        """没勾选就问概览 → 响亮拒绝(不悄悄全量统计)。"""
+        intent = engine.resolve("这几笔订单的平均金额")
+        with pytest.raises(UnsupportedQuery, match="勾选"):
+            engine.compile(intent)
+
+    def test_compile_carries_entities_as_params(self, engine):
+        intent = engine.resolve("这几笔订单的平均金额")
+        intent = StructuredQueryIntent(
+            metric=intent.metric, direction=intent.direction, limit=intent.limit,
+            entity_ids=["AURORA-ORD-2026-9081", "AURORA-ORD-2026-9083"],
+        )
+        compiled = engine.compile(intent)
+        assert compiled.target_db == "merchant_db"
+        assert compiled.params["entities"] == ["AURORA-ORD-2026-9081", "AURORA-ORD-2026-9083"]
+        assert "ANY(:entities)" in compiled.sql
 
 
 class TestQueryExemplars:

@@ -26,6 +26,7 @@ _CALIBERS = {
     "session_volume": "会话量 = session_metrics 计数(与平台大盘同源)",
     "ai_resolution_rate": "AI 解决率 = resolved_auto ÷ 总会话 × 100(session_metrics 同源)",
     "after_sale_overview": "售后工单按状态分布计数(after_sale_tickets 真算)",
+    "order_overview": "对页面勾选订单做笔数/合计/均值统计(实体来自 PageContext)",
 }
 
 
@@ -275,6 +276,17 @@ class MetricQueryEngine:
                 f"FROM after_sale_tickets WHERE business_id = :business_id {time_clause} "
                 f'GROUP BY status ORDER BY "metricScore" {direction} LIMIT :lim'
             )
+        elif intent.metric == "order_overview":
+            params.pop("lim", None)  # 单行概览无 LIMIT 槽位
+            if not intent.entity_ids:
+                raise UnsupportedQuery("请先在列表中勾选订单,再问概览(实体集必传)")
+            sql = (
+                "SELECT COUNT(*)::int AS \"订单数\", "
+                "ROUND(COALESCE(SUM(total_amount), 0)::numeric, 2)::float AS \"合计金额\", "
+                "ROUND(COALESCE(AVG(total_amount), 0)::numeric, 2)::float AS \"平均金额\" "
+                "FROM merchant_orders WHERE order_id = ANY(:entities)"
+            )
+            params["entities"] = list(intent.entity_ids)[:100]
         elif intent.metric == "ai_resolution_rate":
             if intent.time_window:
                 time_clause = "AND created_at >= :window_start"
