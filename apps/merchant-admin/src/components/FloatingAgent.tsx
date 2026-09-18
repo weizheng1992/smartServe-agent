@@ -56,7 +56,7 @@ export function FloatingAgent({ route }: { route: string }) {
         {frames.length === 0 && (
           <div className="text-[11px] text-zinc-400">试试:本月销量 Top10 / 差评最多的 SKU / 会话量多少</div>
         )}
-        {frames.map((f, i) => (
+        {frames.filter((f) => f.event !== 'start').map((f, i) => (
           <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
             {f.event === 'user' ? (
               <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
