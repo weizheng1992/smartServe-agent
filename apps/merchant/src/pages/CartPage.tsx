@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Button } from 'ui';
 import { AddressModal, type CustomerAddress } from '../components/address/AddressModal';
@@ -10,6 +10,16 @@ import { readStoreCart, writeStoreCart } from '../lib/storeCart';
 export default function CartPage() {
   const navigate = useNavigate();
   const { user } = useCurrentUser();
+  const [myCoupons, setMyCoupons] = useState<Array<{ id: string; name: string; value: number }>>([]);
+
+  const loadCoupons = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/store/coupons?userId=${encodeURIComponent((user as any).id)}`);
+      const body = await res.json();
+      setMyCoupons(body.coupons || []);
+    } catch { /* 券包失败不阻断购物车 */ }
+  }, [(user as any).id]);
+  useEffect(() => { void loadCoupons(); }, [loadCoupons]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<CustomerAddress | null>(null);
@@ -168,6 +178,15 @@ export default function CartPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
+
+      {(myCoupons.length > 0) && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-700">
+          <span className="font-semibold">🎫 我的优惠券(结算自动抵扣):</span>
+          {myCoupons.map((cpn) => (
+            <span key={cpn.id} className="rounded-full bg-white px-2.5 py-1">¥{cpn.value} · {cpn.name}</span>
+          ))}
+        </div>
+      )}
       <StorefrontHeader cartCount={cart.reduce((s, i) => s + i.quantity, 0)} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">

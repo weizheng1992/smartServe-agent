@@ -1784,16 +1784,38 @@ class MallDomainService:
                 # 优惠结算(20-D3 用户决议启用):服务端唯一算价点,原价口径
                 # 不变(total_amount 仍记原价),实付 = 原价 − 优惠,核销落库。
                 promo_applied = None
+                coupon_row_id = None
                 try:
-                    from engine_py.analytics.promotion_engine import best_for_amount
+                    from engine_py.analytics.promotion_engine import best_for_amount, best_user_coupon
 
-                    promo_applied = await best_for_amount(
-                        conn, round(total_amount, 2), {str(r["spu_code"]) for r in resolved}
-                    )
+                    amount = round(total_amount, 2)
+                    scope = {str(r["spu_code"]) for r in resolved}
+                    auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
+                    user_coupon = await best_user_coupon(conn, user_id, amount)
+                    # 券 vs 自动活动:取优惠额大者(单活动/单,防叠加以防资损)
+                    if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
+                        promo_applied = {
+                            "promo_id": None, "name": user_coupon["name"],
+                            "discount": user_coupon["discount"], "kind": "coupon",
+                        }
+                        coupon_row_id = user_coupon["coupon_row_id"]
+                    elif auto:
+                        promo_applied = {**auto, "kind": "auto"}
                 except Exception as promo_err:
                     print(f"[MallDomain] 优惠计算失败,按原价结算: {promo_err}")
 
-                if promo_applied:
+                if promo_applied and coupon_row_id:
+                    # 用户券:落核销 + 标记已用(同事务,防重复使用)
+                    from engine_py.analytics import promotions as _promo_svc
+
+                    await conn.execute(
+                        text(
+                            "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+                            "VALUES ((SELECT promotion_id FROM user_coupons WHERE id = CAST(:c AS uuid)), :oid, :amt)"
+                        ).bindparams(c=coupon_row_id, oid=order_id, amt=promo_applied["discount"])
+                    )
+                    await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id)
+                elif promo_applied:
                     await conn.execute(
                         text(
                             "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "

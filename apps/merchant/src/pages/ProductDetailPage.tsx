@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useNavigate, useParams } from 'react-router';
+import { useCurrentUser } from '@/context/UserContext';
 import type { ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button } from 'ui';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { addStoreCartItem } from '../lib/storeCart';
 
 export default function ProductDetailPage() {
+  const { user } = useCurrentUser();
   const params = useParams();
   const navigate = useNavigate();
   const productId = params?.id as string;
@@ -124,6 +126,23 @@ export default function ProductDetailPage() {
   }
 
   const currentPrice = selectedSku ? Number(selectedSku.price) : Number(product.price);
+  const [couponPromos, setCouponPromos] = useState<Array<{ id: string; name: string; value: number }>>([]);
+  const [couponMsg, setCouponMsg] = useState('');
+  useEffect(() => {
+    fetch('/api/store/promotions')
+      .then((r) => r.json())
+      .then((b) => setCouponPromos((b.promotions || []).filter((p: any) => p.promoType === 'coupon')))
+      .catch(() => {});
+  }, []);
+  async function claimCoupon(promoId: string) {
+    const res = await fetch('/api/store/coupons/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promoId, userId: (user as any).id }),
+    });
+    const b = await res.json();
+    setCouponMsg(b.success ? '✓ 领取成功,结算自动抵扣' : b.message);
+  }
   const currentStock = selectedSku ? selectedSku.stock : product.stock;
 
   return (
@@ -208,6 +227,17 @@ export default function ProductDetailPage() {
               {/* 价格区块 */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-baseline space-x-3">
                 <span className="text-emerald-700 font-extrabold text-3xl">¥{currentPrice.toFixed(2)}</span>
+                {couponPromos.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    {couponPromos.map((p) => (
+                      <button key={p.id} onClick={() => void claimCoupon(p.id)}
+                        className="rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-rose-600 hover:border-rose-500">
+                        🎫 领 ¥{p.value} 券({p.name})
+                      </button>
+                    ))}
+                    {couponMsg && <span className="text-zinc-500">{couponMsg}</span>}
+                  </div>
+                )}
                 {product.originalPrice && (
                   <span className="text-xs text-slate-400 line-through">
                     ¥{Number(product.originalPrice).toFixed(2)}

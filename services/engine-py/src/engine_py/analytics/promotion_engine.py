@@ -59,7 +59,8 @@ async def fetch_active_promos(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def best_for_amount(conn, amount: float, scope_spus: set[str] | None = None) -> dict | None:
+async def best_for_amount(conn, amount: float, scope_spus: set[str] | None = None,
+                          exclude_coupon: bool = False) -> dict | None:
     """对该金额选最优活动;scope_spus 非空时优先取命中商品范围的活动。
 
     返回 {promo_id, name, promo_type, discount} 或 None(无可用活动 —— 调用方
@@ -67,6 +68,8 @@ async def best_for_amount(conn, amount: float, scope_spus: set[str] | None = Non
     """
     promos = await fetch_active_promos(conn)
     promos = [p for p in promos if _in_window(p)]
+    if exclude_coupon:
+        promos = [p for p in promos if p["promo_type"] != "coupon"]  # 券类须用户领取后使用(20-D4)
     best: dict | None = None
     scoped_best: dict | None = None
     for p in promos:
@@ -103,4 +106,27 @@ async def promo_for_spu(conn, spu_code: str, price: float) -> dict | None:
         if not best or discount > best["discount"]:
             best = {"promo_id": p["id"], "name": p["name"], "discount": discount,
                     "promoPrice": round(max(price - discount, 0), 2)}
+    return best
+
+
+async def best_user_coupon(conn, user_id: str, amount: float) -> dict | None:
+    """用户已领取且未使用的券中,对面额取最优(仅 coupon 型)。"""
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT uc.id AS coupon_id, p.name, p.promo_type, p.discount_value, p.threshold_amount "
+                "FROM user_coupons uc JOIN promotions p ON p.id = uc.promotion_id "
+                "WHERE uc.user_id = :u AND uc.status = 'claimed' AND p.status = 'active' "
+                "AND p.promo_type = 'coupon' AND (p.end_at IS NULL OR p.end_at > NOW())"
+            ).bindparams(u=user_id)
+        )
+    ).mappings().all()
+    best = None
+    for r in rows:
+        discount = _compute_discount(dict(r), amount)
+        if discount is None:
+            continue
+        candidate = {"coupon_row_id": r["coupon_id"], "name": r["name"], "discount": min(discount, amount)}
+        if not best or candidate["discount"] > best["discount"]:
+            best = candidate
     return best

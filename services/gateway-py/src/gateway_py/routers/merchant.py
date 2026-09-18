@@ -842,3 +842,26 @@ async def store_promo_by_order(orderId: str = Query(...)):
         return {"success": True, "applied": False}
     return {"success": True, "applied": True, "promoName": row["promo_name"],
             "discount": float(row["discount"]), "promoType": row["promo_type"]}
+
+
+@merchant_promotions_router.post("/api/store/coupons/claim")
+async def store_claim_coupon(request: Request):
+    body = await request.json()
+    promo_id = str(body.get("promoId") or "")
+    user_id = str(body.get("userId") or "").strip()
+    if not promo_id or not user_id:
+        return JSONResponse(status_code=400, content={"success": False, "message": "promoId/userId 必传"})
+    from engine_py.analytics import promotions as P
+
+    result = await P.claim_coupon(promo_id, user_id)
+    if "error" in result:
+        return JSONResponse(status_code=400, content={"success": False, **result})
+    return {"success": True, **result}
+
+
+@merchant_promotions_router.get("/api/store/coupons")
+async def store_my_coupons(request: Request, userId: str = Query(...)):
+    from engine_py.analytics import promotions as P
+
+    coupons = await P.my_coupons(userId)
+    return {"success": True, "coupons": coupons}

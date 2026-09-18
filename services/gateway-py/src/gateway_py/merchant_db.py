@@ -141,6 +141,16 @@ CREATE TABLE IF NOT EXISTS promotion_redemptions (
   discount_amount NUMERIC(10,2) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS user_coupons (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  promotion_id UUID NOT NULL,
+  user_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'claimed',  -- claimed | used
+  used_order_id TEXT,
+  claimed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  used_at TIMESTAMP
+);
 """
 
 

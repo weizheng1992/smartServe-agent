@@ -144,6 +144,60 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
     return {"promotionId": promotion_id, "orderId": order_id, "discount": discount}
 
 
+async def claim_coupon(promotion_id: str, user_id: str) -> dict:
+    """用户领券(仅 coupon 型活动;同活动同用户一次;须在售)。"""
+    async with _merchant_writer_engine().connect() as conn:
+        promo = (
+            await conn.execute(
+                text("SELECT promo_type, status FROM promotions WHERE id = CAST(:id AS uuid)").bindparams(id=promotion_id)
+            )
+        ).mappings().first()
+        if not promo or promo["status"] != "active":
+            return {"error": "活动不存在或已停用"}
+        if promo["promo_type"] != "coupon":
+            return {"error": "该活动类型无需领券(结算自动应用)"}
+        dup = (
+            await conn.execute(
+                text("SELECT 1 FROM user_coupons WHERE promotion_id = CAST(:id AS uuid) AND user_id = :u LIMIT 1")
+                .bindparams(id=promotion_id, u=user_id)
+            )
+        ).first()
+        if dup:
+            return {"error": "已领取过该券"}
+    async with _merchant_writer_engine().begin() as conn:
+        await conn.execute(
+            text("INSERT INTO user_coupons (promotion_id, user_id) VALUES (CAST(:id AS uuid), :u)")
+            .bindparams(id=promotion_id, u=user_id)
+        )
+    await _audit("coupon_claim", user_id, {"promotionId": promotion_id})
+    return {"promotionId": promotion_id, "userId": user_id}
+
+
+async def my_coupons(user_id: str) -> list[dict]:
+    """我的券(未使用):含面额与活动名。"""
+    async with _merchant_writer_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT uc.id, p.name, p.discount_value, uc.claimed_at FROM user_coupons uc "
+                    "JOIN promotions p ON p.id = uc.promotion_id "
+                    "WHERE uc.user_id = :u AND uc.status = 'claimed' AND p.promo_type = 'coupon' "
+                    "ORDER BY uc.claimed_at DESC"
+                ).bindparams(u=user_id)
+            )
+        ).mappings().all()
+    return [{"id": r["id"], "name": r["name"], "value": float(r["discount_value"]),
+             "claimedAt": r["claimed_at"].isoformat() if r["claimed_at"] else None} for r in rows]
+
+
+async def mark_coupon_used(conn, coupon_row_id: str, order_id: str) -> None:
+    """结算用券后置已用(与订单同事务)。"""
+    await conn.execute(
+        text("UPDATE user_coupons SET status = 'used', used_order_id = :o, used_at = NOW() WHERE id = CAST(:id AS uuid)")
+        .bindparams(o=order_id, id=coupon_row_id)
+    )
+
+
 async def effect_overview() -> dict:
     """效果速览(20-D4):核销单数/优惠总额/最近核销;真实聚合,零活动诚实空。"""
     async with _merchant_writer_engine().connect() as conn:
