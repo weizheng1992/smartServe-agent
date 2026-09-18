@@ -17,6 +17,14 @@ function flattenMenus(nodes: MenuNode[]): Array<MenuNode & { top: string }> {
 }
 
 export default function App() {
+  return (
+    <BrowserRouter>
+      <AdminShell />
+    </BrowserRouter>
+  );
+}
+
+function AdminShell() {
   const [menus, setMenus] = useState<MenuNode[]>([]);
   const [role, setRole] = useState('');
   const [staff, setStaff] = useState<Array<{ id: string; email: string; displayName: string; role: string }>>([]);
