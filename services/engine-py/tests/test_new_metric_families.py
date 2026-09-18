@@ -60,6 +60,25 @@ class TestNewFamilyResolve:
         assert intent.metric == "ai_resolution_rate"
 
 
+class TestCapsuleContract:
+    """六快捷胶囊(10-D3)一一可解析 —— 死按钮禁令的判定面:菜单/胶囊上
+    出现的每个问题必须落在已注册指标空间内(实弹冒烟抓过词表缺口)。"""
+
+    CAPSULES = [
+        ("本月销量 Top10", "volume"),
+        ("卖得最差的商品", "gmv"),
+        ("差评最多的 SKU", "review_bad"),
+        ("近 30 天退款率", "refund_rate"),
+        ("售后工单概况", "after_sale_overview"),
+        ("客服负载概况", "session_volume"),
+    ]
+
+    def test_all_capsules_resolve(self, engine):
+        for q, expect in self.CAPSULES:
+            intent = engine.resolve(q)
+            assert intent.metric == expect, f"胶囊「{q}」解析为 {intent.metric},期望 {expect}"
+
+
 class TestNewFamilyCompileExecute:
     def test_target_db_routing(self, engine):
         assert engine.compile(engine.resolve("差评最多的 SKU")).target_db == "merchant_db"

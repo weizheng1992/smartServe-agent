@@ -25,6 +25,7 @@ _CALIBERS = {
     "refund_rate": "退款率 = 退款件 ÷ (有效+退款)件 × 100;CANCELLED 不计分母",
     "session_volume": "会话量 = session_metrics 计数(与平台大盘同源)",
     "ai_resolution_rate": "AI 解决率 = resolved_auto ÷ 总会话 × 100(session_metrics 同源)",
+    "after_sale_overview": "售后工单按状态分布计数(after_sale_tickets 真算)",
 }
 
 
@@ -265,6 +266,15 @@ class MetricQueryEngine:
                 "SELECT '__total__' AS \"productId\", COUNT(*)::int AS \"metricScore\" "
                 f"FROM session_metrics WHERE business_id = :business_id {time_clause} LIMIT :lim"
             )
+        elif intent.metric == "after_sale_overview":
+            if intent.time_window:
+                time_clause = "AND created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                'SELECT status AS "productId", COUNT(*)::int AS "metricScore" '
+                f"FROM after_sale_tickets WHERE business_id = :business_id {time_clause} "
+                f'GROUP BY status ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
         elif intent.metric == "ai_resolution_rate":
             if intent.time_window:
                 time_clause = "AND created_at >= :window_start"
@@ -282,7 +292,11 @@ class MetricQueryEngine:
             params=params,
             metric=intent.metric,
             unit=metric_semantic_registry()[intent.metric]["unit"],
-            target_db=("engine_db" if intent.metric in ("session_volume", "ai_resolution_rate") else "merchant_db"),
+            target_db=(
+                "engine_db"
+                if intent.metric in ("session_volume", "ai_resolution_rate", "after_sale_overview")
+                else "merchant_db"
+            ),
         )
 
     async def execute_async(self, compiled: Any, session_ctx: dict | None = None) -> QueryResult:
