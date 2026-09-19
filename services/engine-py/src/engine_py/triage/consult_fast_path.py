@@ -143,6 +143,13 @@ def is_consult_query(text: str, has_image: bool = False) -> bool:
         return False
     if has_image:
         return False
+    # 数据型优惠问句否定闸(2026-09-18 优惠闭环):含优惠/券/活动词面的问句
+    # 走 promotion_query 规则层 → 数据技能确定性回答,不走 RAG 文档直答
+    # (词表单一事实源,引用 intent_registry.PROMOTION_KEYWORDS_RE)
+    from .intent_registry import PROMOTION_KEYWORDS_RE
+
+    if PROMOTION_KEYWORDS_RE.search(stripped):
+        return False
     if ORDER_ID_RE.search(stripped):
         return False
     if _CONSULT_ACTION_RE.search(stripped):

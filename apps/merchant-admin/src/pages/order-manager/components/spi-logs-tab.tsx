@@ -19,10 +19,8 @@ import { useWorkbench } from "../workbench";
 
 export function SpiLogsTab() {
   const {
-    activeTab,
     filteredAuditLogs, setSelectedLog, setSpiSearchQuery, spiSearchQuery,
   } = useWorkbench();
-  if (activeTab !== 'spi_logs') return null;
   return (
     <>
           <div className="space-y-6">

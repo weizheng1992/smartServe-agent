@@ -32,10 +32,12 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
   },
-  // 单测(vitest):jsdom 环境 + jest-dom 匹配器;`bun run test`
+  // 单测(vitest):jsdom 环境 + jest-dom 匹配器;`bun run test`。
+  // 集成用例直连本地网关 + 真实库(不 mock 数据),超时放宽到 20s。
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     css: false,
+    testTimeout: 20000,
   },
 });

@@ -19,10 +19,8 @@ import { useWorkbench } from "../workbench";
 
 export function LiveDeskTab() {
   const {
-    activeTab,
     activeThreadId, activeThreadMessages, fetchDashboardData, filteredConversations, handleSendMessage, handleTakeover, inputMessage, isTakingOver, liveDeskSearchQuery, liveDeskStatusFilter, loadConversationMessages, messagesEndRef, setActiveThreadId, setInputMessage, setLiveDeskSearchQuery, setLiveDeskStatusFilter,
   } = useWorkbench();
-  if (activeTab !== 'live_desk') return null;
   return (
     <>
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col md:flex-row h-[700px]">

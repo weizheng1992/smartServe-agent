@@ -19,9 +19,8 @@ import { useWorkbench } from "../workbench";
 
 export function OrdersTab() {
   const {
-    activeTab, filteredOrders, orderSearchQuery, orderStatusFilter, orders, paidOrdersCount, refundedOrdersCount, selectedOrderIds, setOrderSearchQuery, setOrderStatusFilter, setSelectedOrderIds, setShippingOrderId, setTrackingNumberInput, shippedOrdersCount, toggleOrderSelection,
+    filteredOrders, orderSearchQuery, orderStatusFilter, orders, paidOrdersCount, refundedOrdersCount, selectedOrderIds, setOrderSearchQuery, setOrderStatusFilter, setSelectedOrderIds, setShippingOrderId, setTrackingNumberInput, shippedOrdersCount, toggleOrderSelection,
   } = useWorkbench();
-  if (activeTab !== 'orders') return null;
   return (
     <>
           <div className="bg-white rounded-b-xl border border-slate-200 shadow-2xs overflow-hidden space-y-0">
@@ -71,7 +70,7 @@ export function OrdersTab() {
               </div>
             </div>
 
-            {activeTab === 'orders' && selectedOrderIds.length > 0 && (
+            {selectedOrderIds.length > 0 && (
               <div className="sticky bottom-3 z-10 mx-auto w-fit flex items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-xs text-white shadow-lg">
                 <span>已选 {selectedOrderIds.length} 笔订单</span>
                 <a

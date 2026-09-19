@@ -1,19 +1,18 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApprovalMachine } from "ui";
 import type {
-  ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow, SkuRow, SpuRow, WorkbenchTab,
+  ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow,
 } from "./workbench.types";
 
 export type {
-  ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow, SkuRow, SpuRow, WorkbenchTab,
+  ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow,
 };
 
 const contains = (hay: string, q: string) => hay.toLowerCase().includes(q);
 
-/** 集中式状态 hook(每 tab 一个功能域:订单/审批/客服/商品/审计)。
+/** 集中式状态 hook(功能域:订单/审批/客服/审计;商品库有独立页,不再入工作台)。
  *  派生集合(计数/过滤)useMemo 化:任一 state 变化不再整树逐项重算。 */
 export function useWorkbenchState(initialTab: string) {
-  const [activeTab, setActiveTab] = useState<WorkbenchTab>(initialTab as WorkbenchTab);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   // PageContext(19-D3):勾选订单 → 写约定键,悬浮 agent 随问题上行实体过滤
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
@@ -27,8 +26,6 @@ export function useWorkbenchState(initialTab: string) {
     });
   };
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
-  const [spus, setSpus] = useState<SpuRow[]>([]);
-  const [skus, setSkus] = useState<SkuRow[]>([]);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
@@ -46,12 +43,6 @@ export function useWorkbenchState(initialTab: string) {
 
   const [liveDeskStatusFilter, setLiveDeskStatusFilter] = useState<'ALL' | 'takeover' | 'ai'>('ALL');
   const [liveDeskSearchQuery, setLiveDeskSearchQuery] = useState<string>('');
-
-  const [spuCategoryFilter, setSpuCategoryFilter] = useState<string>('ALL');
-  const [spuSearchQuery, setSpuSearchQuery] = useState<string>('');
-
-  const [skuStockFilter, setSkuStockFilter] = useState<'ALL' | 'low' | 'normal'>('ALL');
-  const [skuSearchQuery, setSkuSearchQuery] = useState<string>('');
 
   const [spiActionFilter, setSpiActionFilter] = useState<string>('ALL');
   const [spiSearchQuery, setSpiSearchQuery] = useState<string>('');
@@ -101,8 +92,6 @@ export function useWorkbenchState(initialTab: string) {
         if (data.success) {
           setOrders(data.orders || []);
           setAuditLogs(data.auditLogs || []);
-          setSpus(data.spus || []);
-          setSkus(data.skus || []);
         }
       }
 
@@ -154,10 +143,8 @@ export function useWorkbenchState(initialTab: string) {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: messages.length 为滚动触发器,体内不直接读取
   useEffect(() => {
-    if (activeTab === 'live_desk') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [activeThreadMessages, activeTab]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [activeThreadMessages]);
 
   const handleApprovalAction = async (
     approvalId: string,
@@ -303,12 +290,11 @@ export function useWorkbenchState(initialTab: string) {
     }
   };
 
-  // ---- 派生:计数与各 tab 过滤集(useMemo;过滤谓词纯函数内聚在本 hook) ----
+  // ---- 派生:计数与各域过滤集(useMemo;过滤谓词纯函数内聚在本 hook) ----
   const pendingApprovalsCount = useMemo(() => approvals.filter((a) => a.status === 'waiting').length, [approvals]);
   const paidOrdersCount = useMemo(() => orders.filter((o) => o.status === 'PAID').length, [orders]);
   const shippedOrdersCount = useMemo(() => orders.filter((o) => o.status === 'SHIPPED').length, [orders]);
   const refundedOrdersCount = useMemo(() => orders.filter((o) => o.status === 'REFUNDED').length, [orders]);
-  const lowStockCount = useMemo(() => skus.filter((s) => s.stock < 50).length, [skus]);
 
   const filteredOrders = useMemo(() => orders.filter((o) => {
     if (orderStatusFilter !== 'ALL' && o.status !== orderStatusFilter) return false;
@@ -334,29 +320,6 @@ export function useWorkbenchState(initialTab: string) {
     return true;
   }), [conversations, liveDeskStatusFilter, liveDeskSearchQuery]);
 
-  const spuCategories = useMemo(
-    () => Array.from(new Set(spus.map((s) => s.category))).filter(Boolean),
-    [spus],
-  );
-  const filteredSpus = useMemo(() => spus.filter((s) => {
-    if (spuCategoryFilter !== 'ALL' && s.category !== spuCategoryFilter) return false;
-    if (spuSearchQuery.trim()) {
-      const q = spuSearchQuery.toLowerCase().trim();
-      if (!contains(`${s.spu_code} ${s.title} ${s.subtitle} ${s.brand} ${s.category}`, q)) return false;
-    }
-    return true;
-  }), [spus, spuCategoryFilter, spuSearchQuery]);
-
-  const filteredSkus = useMemo(() => skus.filter((s) => {
-    if (skuStockFilter === 'low' && s.stock >= 50) return false;
-    if (skuStockFilter === 'normal' && s.stock < 50) return false;
-    if (skuSearchQuery.trim()) {
-      const q = skuSearchQuery.toLowerCase().trim();
-      if (!contains(`${s.sku_code} ${s.sku_title} ${s.spu_title} ${s.brand} ${s.category}`, q)) return false;
-    }
-    return true;
-  }), [skus, skuStockFilter, skuSearchQuery]);
-
   const filteredAuditLogs = useMemo(() => auditLogs.filter((log) => {
     if (spiActionFilter !== 'ALL' && log.action_type !== spiActionFilter) return false;
     if (spiSearchQuery.trim()) {
@@ -367,8 +330,7 @@ export function useWorkbenchState(initialTab: string) {
   }), [auditLogs, spiActionFilter, spiSearchQuery]);
 
   return {
-    activeTab, setActiveTab,
-    orders, setOrders, auditLogs, setAuditLogs, spus, setSpus, skus, setSkus,
+    orders, auditLogs,
     approvals, setApprovals, conversations, setConversations,
     activeThreadId, setActiveThreadId, activeThreadMessages, setActiveThreadMessages,
     inputMessage, setInputMessage, loading, setLoading,
@@ -376,8 +338,6 @@ export function useWorkbenchState(initialTab: string) {
     approvalStatusFilter, setApprovalStatusFilter, approvalActionFilter, setApprovalActionFilter,
     approvalSearchQuery, setApprovalSearchQuery,
     liveDeskStatusFilter, setLiveDeskStatusFilter, liveDeskSearchQuery, setLiveDeskSearchQuery,
-    spuCategoryFilter, setSpuCategoryFilter, spuSearchQuery, setSpuSearchQuery,
-    skuStockFilter, setSkuStockFilter, skuSearchQuery, setSkuSearchQuery,
     spiActionFilter, setSpiActionFilter, spiSearchQuery, setSpiSearchQuery,
     shippingOrderId, setShippingOrderId, trackingNumberInput, setTrackingNumberInput,
     carrierInput, setCarrierInput, selectedLog, setSelectedLog, copiedLog, setCopiedLog,
@@ -388,8 +348,8 @@ export function useWorkbenchState(initialTab: string) {
     submittingActionId, setRejectionReasons, executeApprovalAction, executeHumanReplyAction,
     loadConversationMessages, fetchDashboardData,
     handleApprovalAction, handleHumanReply, handleTakeover, handleSendMessage, handleShipOrder,
-    pendingApprovalsCount, paidOrdersCount, shippedOrdersCount, refundedOrdersCount, lowStockCount,
-    filteredOrders, filteredConversations, spuCategories, filteredSpus, filteredSkus, filteredAuditLogs,
+    pendingApprovalsCount, paidOrdersCount, shippedOrdersCount, refundedOrdersCount,
+    filteredOrders, filteredConversations, filteredAuditLogs,
   };
 }
 

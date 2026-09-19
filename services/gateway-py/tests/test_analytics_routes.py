@@ -300,6 +300,58 @@ class TestPromotions:
                               json={"name": "x", "promoType": "coupon", "value": 10})
         assert r.status_code == 403
 
+    async def test_grant_coupon_and_customer_coupons(self, client, auth):
+        """发券给客户(0014;复用领券护栏)+ 客户关联券回读。"""
+        from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        created = await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "E2E 定向券", "promoType": "coupon", "value": 20,
+        })
+        pid = created.json()["id"]
+
+        # customerId 必传
+        bad = await client.post(f"/api/admin/analytics/promotions/{pid}/grant", headers=boss, json={})
+        assert bad.status_code == 400
+
+        # 客户档案(customer_id 即商城用户 uid;user_coupons.user_id 同源)
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+
+        async with _merchant_writer_engine().begin() as conn:
+            await conn.execute(_t(
+                "INSERT INTO merchant_customers (customer_id, name, phone) "
+                "VALUES ('CUST-GRANT-E2E', '发券对象', '13800000000') "
+                "ON CONFLICT (customer_id) DO NOTHING"
+            ))
+
+        ok = await client.post(f"/api/admin/analytics/promotions/{pid}/grant",
+                               headers=boss, json={"customerId": "CUST-GRANT-E2E"})
+        assert ok.status_code == 200
+        # 同人同活动一次 → 护栏拦截
+        dup = await client.post(f"/api/admin/analytics/promotions/{pid}/grant",
+                                headers=boss, json={"customerId": "CUST-GRANT-E2E"})
+        assert dup.status_code == 400
+
+        listed = await client.get("/api/admin/analytics/customers/CUST-GRANT-E2E/coupons", headers=boss)
+        assert listed.status_code == 200
+        coupons = listed.json()["coupons"]
+        assert any(c["name"] == "E2E 定向券" and c["status"] == "claimed" for c in coupons)
+
+    async def test_non_boss_cannot_grant_403(self, client, auth):
+        """发券走 promo:create 权限点(仓储种子未勾选 → 403)。"""
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        sw = await client.post("/api/admin/analytics/staff/switch", headers=boss, json={"staffId": "wh@aurora"})
+        wh = {**TENANT, "Authorization": f"Bearer {sw.json()['token']}"}
+        r = await client.post("/api/admin/analytics/promotions/00000000-0000-0000-0000-000000000000/grant",
+                              headers=wh, json={"customerId": "CUST-X"})
+        assert r.status_code == 403
+
 
 class TestTrendAndCrud:
     """折线趋势(18/10-D2 趋势→折线)+ 菜单 CRUD + 角色 + 员工 + 客户 + 核销。"""
@@ -454,6 +506,20 @@ class TestSkuCrud:
 
         deleted = await client.delete(f"/api/admin/analytics/skus/{sku_id}", headers=boss)
         assert deleted.status_code == 200
+
+    async def test_sku_stock_overview(self, client, auth):
+        """SKU 库存总表(SKU 库存独立页数据源):跨 SPU 汇总并带商品标题。"""
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        r = await client.get("/api/admin/analytics/skus", headers=boss)
+        assert r.status_code == 200
+        skus = r.json()["skus"]
+        assert isinstance(skus, list)
+        if not skus:
+            pytest.skip("容器无 SPU/SKU 种子")
+        assert {"id", "sku_code", "spu_id", "spu_title", "price", "stock"} <= set(skus[0])
 
     async def test_sku_write_requires_prod_edit_perm(self, client, auth):
         """prod:edit 权限点:运营种子未勾选 → SKU 写操作 403(0013 动态派生)。"""

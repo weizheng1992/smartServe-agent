@@ -1,14 +1,7 @@
 import { Button } from 'ui';
-import { api } from '@/lib/api';
+import { api, type Customer } from '@/lib/api';
 
-export interface Customer {
-  customer_id: string;
-  name: string;
-  phone: string;
-  member_level: string;
-  total_spent: number;
-  order_count: number;
-}
+export type { Customer };
 
 const LEVELS = ['VIP', '金卡', '银卡'];
 
@@ -16,10 +9,11 @@ interface Props {
   customers: Customer[];
   onMsg: (m: string) => void;
   onChanged: () => void;
+  onDetail: (c: Customer) => void;
 }
 
-/** 客户列表:会员级下拉改即存;删除受"名下有订单不可删"服务端护栏。 */
-export function CustomerTable({ customers, onMsg, onChanged }: Props) {
+/** 客户列表:会员级下拉改即存;详情抽屉(地址/关联券/关联订单);删除受服务端护栏。 */
+export function CustomerTable({ customers, onMsg, onChanged, onDetail }: Props) {
   async function setLevel(customerId: string, memberLevel: string) {
     const body = await api.customers.update(customerId, { memberLevel });
     onMsg(body.success ? `✓ ${customerId} 会员级 → ${memberLevel}` : `失败:${body.message}`);
@@ -68,6 +62,7 @@ export function CustomerTable({ customers, onMsg, onChanged }: Props) {
                 </select>
               </td>
               <td className="px-4 py-2">
+                <Button size="sm" variant="ghost" onClick={() => onDetail(c)}>详情</Button>
                 <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void remove(c.customer_id)}>删除</Button>
               </td>
             </tr>

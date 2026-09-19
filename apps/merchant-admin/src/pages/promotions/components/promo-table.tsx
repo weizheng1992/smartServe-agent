@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { api, type Promotion } from '@/lib/api';
+import { api, type Promotion, type Spu } from '@/lib/api';
 import { RedeemPanel } from './redeem-panel';
+import { GrantPanel } from './grant-panel';
+import { scopeLabel } from './scope';
 
 const TYPE_LABEL: Record<string, string> = {
   full_reduction: '满减',
@@ -21,11 +23,15 @@ interface Props {
   onChanged: () => void;
 }
 
-/** 活动列表:行内编辑(名称失焦即存)、启停、删除(有核销记录不可删)、
- *  核销面板(挂在表头上方)。 */
+/** 活动列表:适用范围、行内编辑(名称失焦即存)、启停、删除、核销与发券。 */
 export function PromoTable({ promotions, onMsg, onChanged }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [redeem, setRedeem] = useState<{ promoId: string; promoName: string } | null>(null);
+  const [granting, setGranting] = useState<Promotion | null>(null);
+  const [spus, setSpus] = useState<Spu[]>([]);
+
+  useEffect(() => { void api.products.list().then((b) => setSpus(b.spus || [])); }, []);
+  const spuTitles = Object.fromEntries(spus.map((s) => [s.spu_code, s.title]));
 
   async function saveEdit(p: Promotion, name: string) {
     const b = await api.promotions.update(p.id, { name, value: p.value });
@@ -56,6 +62,14 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
           onDone={(m) => { onMsg(m); onChanged(); }}
         />
       )}
+      {granting && (
+        <GrantPanel
+          promoName={granting.name}
+          promoId={granting.id}
+          onCancel={() => { setGranting(null); onChanged(); }}
+          onDone={onMsg}
+        />
+      )}
 
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <table className="w-full text-[13px]">
@@ -64,13 +78,14 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
               <th className="px-4 py-2 font-medium">活动</th>
               <th className="px-4 py-2 font-medium">类型</th>
               <th className="px-4 py-2 font-medium">优惠</th>
+              <th className="px-4 py-2 font-medium">适用范围</th>
               <th className="px-4 py-2 font-medium">状态</th>
               <th className="px-4 py-2 font-medium">操作</th>
             </tr>
           </thead>
           <tbody>
             {promotions.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-xs text-zinc-400">暂无活动(诚实空)</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-xs text-zinc-400">暂无活动(诚实空)</td></tr>
             )}
             {promotions.map((p) => (
               <tr key={p.id} className="border-b border-zinc-50">
@@ -84,6 +99,7 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
                 </td>
                 <td className="px-4 py-2">{TYPE_LABEL[p.promoType] || p.promoType}</td>
                 <td className="px-4 py-2">{promoValueLabel(p)}</td>
+                <td className="px-4 py-2 text-zinc-500">{scopeLabel(p.scopeType, p.scopeValue, spuTitles)}</td>
                 <td className="px-4 py-2">
                   <span className={p.status === 'active' ? 'text-emerald-600' : 'text-zinc-400'}>{p.status === 'active' ? '进行中' : '已停用'}</span>
                 </td>
@@ -96,6 +112,9 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
                     <Button size="sm" variant="ghost" onClick={() => void removePromo(p)}>删除</Button>
                     {p.status === 'active' && (
                       <Button size="sm" variant="ghost" onClick={() => setRedeem({ promoId: p.id, promoName: p.name })}>核销</Button>
+                    )}
+                    {p.status === 'active' && p.promoType === 'coupon' && (
+                      <Button size="sm" variant="ghost" onClick={() => setGranting(p)}>发券</Button>
                     )}
                   </div>
                 </td>

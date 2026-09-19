@@ -296,6 +296,8 @@ async def delete_menu(menu_id: str, request: Request):
 
 @router.get("/api/admin/analytics/roles")
 async def roles_list(request: Request):
+    """角色列表(0013 后无「内置」特权:三档种子只是预置配置,可像自定义角色
+    一样重新分配;仅老板角色保留系统菜单防锁死护栏)。"""
     from engine_py.db import RoleMenu, StaffMember, get_session
     from sqlalchemy import func, select
 
@@ -307,13 +309,11 @@ async def roles_list(request: Request):
         staff_counts = dict(
             (await session.execute(select(StaffMember.role, func.count()).group_by(StaffMember.role))).all()
         )
-    roles = []
-    for role in rbac.ROLES:
-        roles.append({"role": role, "menuCount": menu_counts.get(role, 0), "staffCount": staff_counts.get(role, 0), "builtin": True})
-    for role in sorted(menu_counts):
-        if role not in rbac.ROLES:
-            roles.append({"role": role, "menuCount": menu_counts.get(role, 0), "staffCount": staff_counts.get(role, 0), "builtin": False})
-    return {"success": True, "roles": roles}
+    role_names = {*rbac.ROLES, *menu_counts, *staff_counts}
+    return {"success": True, "roles": [
+        {"role": role, "menuCount": menu_counts.get(role, 0), "staffCount": staff_counts.get(role, 0)}
+        for role in sorted(role_names)
+    ]}
 
 
 @router.post("/api/admin/analytics/roles")
@@ -326,10 +326,14 @@ async def roles_create(request: Request):
     menu_ids = list(body.get("menuIds") or [])
     if not role or " " in role:
         return JSONResponse(status_code=400, content={"success": False, "message": "role 必传且不含空格"})
-    if role in rbac.ROLES:
-        return JSONResponse(status_code=400, content={"success": False, "message": "内置角色不可覆盖,请用 custom_ 前缀新建"})
     if not menu_ids:
         return JSONResponse(status_code=400, content={"success": False, "message": "至少分配一个菜单"})
+    from engine_py.db import RoleMenu, get_session
+
+    async with get_session() as session:
+        exists = (await session.execute(select(RoleMenu).where(RoleMenu.role == role))).scalars().first()
+    if exists:
+        return JSONResponse(status_code=400, content={"success": False, "message": f"角色 {role} 已存在,请在列表中直接调整其权限"})
     await rbac.set_role_menus(ctx["business_id"], role, menu_ids, ctx["staff"])
     return {"success": True, "role": role, "menuCount": len(menu_ids)}
 
@@ -413,15 +417,42 @@ async def customers_list(request: Request):
     async with _merchant_reader_engine().connect() as conn:
         rows = (
             await conn.execute(_text(
-                "SELECT c.customer_id, c.name, c.phone, COALESCE(c.member_level, 'VIP') AS member_level, "
+                "SELECT c.customer_id, c.name, c.phone, COALESCE(c.email, '') AS email, "
+                "COALESCE(c.member_level, 'VIP') AS member_level, "
+                "COALESCE(c.addresses, '[]'::jsonb)::text AS addresses, "
                 "COALESCE(SUM(o.total_amount), 0)::float AS total_spent, COUNT(o.order_id) AS order_count "
                 "FROM merchant_customers c "
                 "LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
-                "GROUP BY c.customer_id, c.name, c.phone, c.member_level "
+                "GROUP BY c.customer_id, c.name, c.phone, c.email, c.member_level, c.addresses "
                 "ORDER BY total_spent DESC LIMIT 100"
             ))
         ).mappings().all()
     return {"success": True, "customers": [dict(r) for r in rows]}
+
+
+@router.get("/api/admin/analytics/customers/{customer_id}/coupons")
+async def customer_coupons(customer_id: str, request: Request):
+    """客户关联优惠券(user_id 与商户客户档案同源;含已使用)。"""
+    await _ctx(request)
+    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from sqlalchemy import text as _text
+
+    async with _merchant_reader_engine().connect() as conn:
+        rows = (
+            await conn.execute(_text(
+                "SELECT uc.id::text AS id, p.name, p.discount_value::float AS value, uc.status, "
+                "uc.claimed_at, uc.used_order_id "
+                "FROM user_coupons uc JOIN promotions p ON p.id = uc.promotion_id "
+                "WHERE uc.user_id = :cid ORDER BY uc.claimed_at DESC LIMIT 50"
+            ).bindparams(cid=customer_id))
+        ).mappings().all()
+    return {"success": True, "coupons": [
+        {
+            "id": r["id"], "name": r["name"], "value": r["value"], "status": r["status"],
+            "claimedAt": r["claimed_at"].isoformat() if r["claimed_at"] else None,
+            "usedOrderId": r["used_order_id"],
+        } for r in rows
+    ]}
 
 
 @router.patch("/api/admin/analytics/customers/{customer_id}")
@@ -456,6 +487,22 @@ async def promotions_redeem(promotion_id: str, request: Request):
     if not order_id:
         return JSONResponse(status_code=400, content={"success": False, "message": "orderId 必传"})
     result = await promotions.redeem(promotion_id, order_id, ctx["staff"])
+    if "error" in result:
+        return JSONResponse(status_code=400, content={"success": False, **result})
+    return {"success": True, **result}
+
+
+@router.post("/api/admin/analytics/promotions/{promotion_id}/grant")
+async def promotions_grant(promotion_id: str, request: Request):
+    """商家向指定客户发券(复用领券护栏:仅券型/在售/同人同活动一次)。"""
+    ctx = await _ctx(request)
+    if "promo:create" not in ctx["perms"]:
+        return JSONResponse(status_code=403, content={"success": False, "message": "无发券权限"})
+    body = await request.json()
+    customer_id = str(body.get("customerId") or "").strip()
+    if not customer_id:
+        return JSONResponse(status_code=400, content={"success": False, "message": "customerId 必传"})
+    result = await promotions.claim_coupon(promotion_id, customer_id)
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, **result})
     return {"success": True, **result}
@@ -661,6 +708,25 @@ async def customers_delete(customer_id: str, request: Request):
 
 
 # ---------------- SKU 明细增删改查(承接 SPU 页展开) ----------------
+
+
+@router.get("/api/admin/analytics/skus")
+async def skus_stock_list(request: Request):
+    """跨 SPU 的 SKU 库存总表(SKU 库存菜单独立视角;行内改价/改库存走
+    既有 PATCH /skus/{id};低库存阈值口径与工作台一致,前端过滤)。"""
+    await _ctx(request)
+    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from sqlalchemy import text as _t
+
+    async with _merchant_reader_engine().connect() as conn:
+        rows = (await conn.execute(_t(
+            "SELECT k.id::text AS id, k.sku_code, k.sku_title, s.id::text AS spu_id, "
+            "s.title AS spu_title, k.price::float AS price, k.stock, "
+            "k.spec_attributes::text AS spec_attributes "
+            "FROM merchant_skus k JOIN merchant_spus s ON s.id = k.spu_id "
+            "ORDER BY k.sku_code LIMIT 500"
+        ))).mappings().all()
+    return {"success": True, "skus": [dict(r) for r in rows]}
 
 
 @router.get("/api/admin/analytics/spus/{spu_id}/skus")

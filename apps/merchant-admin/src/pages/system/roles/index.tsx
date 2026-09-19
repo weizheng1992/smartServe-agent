@@ -4,13 +4,13 @@ import { api, hasBossSession, type MenuNode } from '@/lib/api';
 import { RoleAssignPanel } from './components/role-assign-panel';
 import { RoleCreateForm } from './components/role-create-form';
 
-// 角色管理(13 号;0013 完整版):角色列表 + 菜单/按钮勾选树分配。
+// 角色管理(0014 后无「内置」概念):三档种子只是预置配置,与自定义角色一样
+// 可重新分配菜单+按钮;仅老板角色保留系统菜单防锁死护栏(服务端强制回补)。
 // 页面只做编排:勾选树/分配面板/新建表单拆在同目录 components/ 下。
 interface RoleRow {
   role: string;
   menuCount: number;
   staffCount: number;
-  builtin: boolean;
 }
 
 export default function RolesPage() {
@@ -45,7 +45,6 @@ export default function RolesPage() {
               <th className="px-4 py-2 font-medium">角色</th>
               <th className="px-4 py-2 font-medium">菜单/权限点数</th>
               <th className="px-4 py-2 font-medium">员工数</th>
-              <th className="px-4 py-2 font-medium">类型</th>
               <th className="px-4 py-2 font-medium">操作</th>
             </tr>
           </thead>
@@ -55,7 +54,6 @@ export default function RolesPage() {
                 <td className="px-4 py-2">{r.role}</td>
                 <td className="px-4 py-2">{r.menuCount}</td>
                 <td className="px-4 py-2">{r.staffCount}</td>
-                <td className="px-4 py-2 text-zinc-500">{r.builtin ? '内置' : '自定义'}</td>
                 <td className="px-4 py-2">
                   {boss && (
                     <Button size="sm" variant="ghost" onClick={() => void openAssign(r.role)}>

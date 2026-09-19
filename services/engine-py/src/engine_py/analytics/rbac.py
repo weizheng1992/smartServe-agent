@@ -22,7 +22,8 @@ from ..db import Menu, RoleMenu, StaffMember, get_session
 ROLES = ("finance_owner", "sales_viewer", "warehouse_operator")
 SYSTEM_MENU_IDS = ("m-analytics", "m-reports", "m-products", "m-orders", "m-customers", "m-promotions", "m-menus", "m-roles", "m-staff")
 
-# 默认菜单树(16 号原型同构;menu_type: directory|menu|button)
+# 默认菜单树(16 号原型同构;menu_type: directory|menu|button)。
+# 0014:售后审批不再独立成菜单 —— 待办审核并入「客服工作台」页内呈现。
 DEFAULT_MENUS: list[dict] = [
     {"id": "d-data", "parent": None, "name": "数据", "type": "directory", "route": None, "sort": 1},
     {"id": "m-analytics", "parent": "d-data", "name": "数据分析", "type": "menu", "route": "/analytics", "sort": 1},
@@ -36,7 +37,6 @@ DEFAULT_MENUS: list[dict] = [
     {"id": "d-orders", "parent": None, "name": "订单", "type": "directory", "route": None, "sort": 3},
     {"id": "m-orders", "parent": "d-orders", "name": "订单履约", "type": "menu", "route": "/orders", "sort": 1},
     {"id": "btn-order-ship", "parent": "m-orders", "name": "发货操作", "type": "button", "perm": "order:ship", "sort": 1},
-    {"id": "m-approvals", "parent": "d-orders", "name": "售后审批", "type": "menu", "route": "/approvals", "sort": 2},
     {"id": "m-spi-logs", "parent": "d-orders", "name": "接口日志", "type": "menu", "route": "/spi-logs", "sort": 3},
     {"id": "d-users", "parent": None, "name": "用户", "type": "directory", "route": None, "sort": 4},
     {"id": "m-customers", "parent": "d-users", "name": "客户管理", "type": "menu", "route": "/customers", "sort": 1},

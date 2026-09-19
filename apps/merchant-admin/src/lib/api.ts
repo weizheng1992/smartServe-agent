@@ -90,6 +90,12 @@ export interface Sku {
   spec_attributes: string | null;
 }
 
+/** SKU 库存总表行(跨 SPU;SKU 库存独立页用) */
+export interface SkuStockRow extends Sku {
+  spu_id: string;
+  spu_title: string;
+}
+
 export interface Promotion {
   id: string;
   name: string;
@@ -111,9 +117,21 @@ export interface Customer {
   customer_id: string;
   name: string;
   phone: string;
+  email: string;
   member_level: string;
+  /** JSON 文本(merchant_customers.addresses;商城收货地址簿) */
+  addresses: string;
   total_spent: number;
   order_count: number;
+}
+
+export interface CustomerCoupon {
+  id: string;
+  name: string;
+  value: number;
+  status: string;
+  claimedAt: string | null;
+  usedOrderId: string | null;
 }
 
 export type { SseFrame };
@@ -152,7 +170,7 @@ export const api = {
   },
 
   roles: {
-    list: async (): Promise<{ roles: Array<{ role: string; menuCount: number; staffCount: number; builtin: boolean }> }> =>
+    list: async (): Promise<{ roles: Array<{ role: string; menuCount: number; staffCount: number }> }> =>
       fetchJson('/api/admin/analytics/roles'),
     menusOf: async (role: string): Promise<{ role: string; menuIds: string[] }> =>
       fetchJson(`/api/admin/analytics/roles/${role}/menus`),
@@ -190,9 +208,11 @@ export const api = {
     remove: async (id: string) => fetchJson(`/api/admin/analytics/menus/${id}`, { method: 'DELETE' }),
   },
 
-  /** 客户管理(商户库客户;会员级编辑/新增/删除)。 */
+  /** 客户管理(商户库客户;会员级编辑/新增/删除/详情关联数据)。 */
   customers: {
     list: async (): Promise<{ success: boolean; customers: Customer[] }> => fetchJson('/api/admin/analytics/customers'),
+    coupons: async (customerId: string): Promise<{ success: boolean; coupons: CustomerCoupon[] }> =>
+      fetchJson(`/api/admin/analytics/customers/${customerId}/coupons`),
     create: async (p: { name: string; phone: string; memberLevel?: string }) =>
       fetchJson('/api/admin/analytics/customers', { method: 'POST', body: JSON.stringify(p) }),
     update: async (id: string, patch: { memberLevel: string }) =>
@@ -209,6 +229,7 @@ export const api = {
   /** 商品目录(SPU/SKU;页面只做编排,数据操作收口在此)。 */
   products: {
     list: async (): Promise<{ success: boolean; spus: Spu[] }> => fetchJson('/api/admin/analytics/spus'),
+    listAllSkus: async (): Promise<{ success: boolean; skus: SkuStockRow[] }> => fetchJson('/api/admin/analytics/skus'),
     create: async (p: { title: string; category: string; price: number; stock: number }) =>
       fetchJson('/api/admin/analytics/spus', { method: 'POST', body: JSON.stringify(p) }),
     update: async (id: string, patch: Partial<{ title: string; price: number; stock: number; status: string }>) =>
@@ -227,8 +248,11 @@ export const api = {
   promotions: {
     list: async (): Promise<{ success: boolean; promotions: Promotion[]; effect: PromoEffect }> =>
       fetchJson('/api/admin/analytics/promotions'),
-    create: async (p: { name: string; promoType: string; threshold?: number; value: number }) =>
+    create: async (p: { name: string; promoType: string; threshold?: number; value: number; scopeType?: string; scopeValue?: string }) =>
       fetchJson('/api/admin/analytics/promotions', { method: 'POST', body: JSON.stringify(p) }),
+    /** 商家向指定客户发券(仅券型/在售/同人同活动一次,服务端护栏)。 */
+    grant: async (id: string, customerId: string) =>
+      fetchJson(`/api/admin/analytics/promotions/${id}/grant`, { method: 'POST', body: JSON.stringify({ customerId }) }),
     update: async (id: string, patch: { name: string; value: number }) =>
       fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     setStatus: async (id: string, status: string) =>

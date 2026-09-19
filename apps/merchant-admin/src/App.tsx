@@ -4,6 +4,7 @@ import { api, clearSession, currentStaffEmail, hasBossSession, type MenuNode } f
 import AnalyticsPage from '@/pages/analytics';
 import OrderWorkbench from '@/pages/order-manager';
 import ProductsPage from '@/pages/goods/products';
+import SkusPage from '@/pages/goods/skus';
 import LoginPage from '@/pages/login';
 import PromotionsPage from '@/pages/promotions';
 import CustomersPage from '@/pages/customers';
@@ -119,17 +120,16 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
           <Routes>
             <Route path="/analytics" element={<AnalyticsPage role={role} />} />
             <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/orders" element={<OrderWorkbench initialTab="orders" />} />
-            <Route path="/approvals" element={<OrderWorkbench initialTab="approvals" />} />
-            <Route path="/live-desk" element={<OrderWorkbench initialTab="live_desk" />} />
+            <Route path="/orders" element={<OrderWorkbench scope="orders" />} />
+            <Route path="/live-desk" element={<OrderWorkbench scope="live-desk" />} />
             <Route path="/promotions" element={<PromotionsPage />} />
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/menus" element={<MenusPage />} />
             <Route path="/roles" element={<RolesPage />} />
             <Route path="/staff" element={<StaffPage />} />
             <Route path="/products" element={<ProductsPage />} />
-            <Route path="/skus" element={<ProductsPage />} />
-            <Route path="/spi-logs" element={<OrderWorkbench initialTab="spi_logs" />} />
+            <Route path="/skus" element={<SkusPage />} />
+            <Route path="/spi-logs" element={<OrderWorkbench scope="spi-logs" />} />
           </Routes>
         </div>
 

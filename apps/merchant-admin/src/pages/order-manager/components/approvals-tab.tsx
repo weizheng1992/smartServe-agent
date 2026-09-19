@@ -9,20 +9,18 @@ import {
   getApprovalCategory,
   getApprovalContextData,
 } from "ui";
+import { useNavigate } from "react-router";
 import { useWorkbench } from "../workbench";
 
 /** Tab 2: 待办审核中心 (HITL) —— AI 拦截的高危操作人工核决队列。 */
 export function ApprovalsTab() {
   const {
-    activeTab, setActiveTab,
     approvals, approvalStatusFilter, setApprovalStatusFilter, approvalActionFilter, setApprovalActionFilter, approvalSearchQuery, setApprovalSearchQuery,
     submittingActionId, setRejectionReasons,
     fetchDashboardData, handleApprovalAction,
     setInspectingApproval, setRejectingApprovalId, setRejectReasonInput,
-    setActiveThreadId,
   } = useWorkbench();
 
-  if (activeTab !== 'approvals') return null;
 
   const filteredList = approvals.filter((item) => {
     if (approvalStatusFilter !== 'all' && item.status !== approvalStatusFilter) {
@@ -176,8 +174,9 @@ function ApprovalRow({ approval }: { approval: any }) {
     submittingActionId,
     handleApprovalAction,
     setInspectingApproval, setRejectingApprovalId, setRejectReasonInput,
-    setActiveThreadId, setActiveTab,
+    setActiveThreadId,
   } = useWorkbench();
+  const navigate = useNavigate();
   const diag = diagnoseApprovalTrigger(approval);
   const isWaiting = approval.status === 'waiting';
   const isSubmitting = submittingActionId === approval.id;
@@ -264,7 +263,7 @@ function ApprovalRow({ approval }: { approval: any }) {
             size="sm"
             onClick={() => {
               setActiveThreadId(approval.threadId);
-              setActiveTab('live_desk');
+              navigate('/live-desk');
             }}
             className="text-xs h-7 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200 font-medium cursor-pointer"
           >
