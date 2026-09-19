@@ -358,6 +358,18 @@ async def run_agent(job: AgentJobInput) -> dict:
         print(f"[runAgent] ⚠️ 上游 LLM 熔断,降级道歉回复: {breaker_err}")
         llm_breaker_fired = True
         result = _degraded_apology_result()
+        # 确定性兜底分发器(2026-09-19「兜底什么回答什么」):词面可路由的
+        # 问题(优惠/券/订单状态)仍给出真实答案,只有无能力命中才保留罐头
+        try:
+            from .skills.fallback_dispatcher import deterministic_fallback_answer
+
+            fallback_output = await deterministic_fallback_answer(
+                input_message, thread_id, user_id, job.businessId
+            )
+            if fallback_output:
+                result = {**result, "output": fallback_output}
+        except Exception as fb_err:
+            print(f"[runAgent] 确定性兜底失败,保留道歉罐头: {fb_err}")
     except Exception as graph_err:
         # 拓宽降级网(2026-09-12):图中任一未捕获异常(如上游 429 重试耗尽、
         # 单节点 bug)不得穿透为网关 500 / SSE 流挂死 —— 与熔断同形道歉降级。
@@ -366,6 +378,16 @@ async def run_agent(job: AgentJobInput) -> dict:
         print(f"[runAgent] ⚠️ 图执行未捕获异常,降级道歉回复: {graph_err!r}")
         graph_error_fired = True
         result = _degraded_apology_result()
+        try:
+            from .skills.fallback_dispatcher import deterministic_fallback_answer
+
+            fallback_output = await deterministic_fallback_answer(
+                input_message, thread_id, user_id, job.businessId
+            )
+            if fallback_output:
+                result = {**result, "output": fallback_output}
+        except Exception as fb_err:
+            print(f"[runAgent] 确定性兜底失败,保留道歉罐头: {fb_err}")
     elapsed_latency_ms = (time.time() - start_time) * 1000
 
     # 🪙 SaaS 遥测:算力消耗 / 成本换算 / 图决策深度 / 解挂状态

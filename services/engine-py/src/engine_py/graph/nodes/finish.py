@@ -204,6 +204,23 @@ async def finish_node(state: AgentState) -> dict:
         raise
     except Exception as err:
         print(f"finishNode failed, using fallback summary: {err}")
+        # 确定性兜底分发器(2026-09-19「兜底什么回答什么」):LLM 终稿失败时,
+        # 词面可路由的问题(优惠/券/订单状态)仍由数据技能/真实查询回答;
+        # 无能力命中才保留罐头。数据诚实铁律:只答真实查到的。
+        try:
+            from engine_py.skills.fallback_dispatcher import deterministic_fallback_answer
+
+            fallback_output = await deterministic_fallback_answer(
+                state.get("input") or state.get("input_text") or "",
+                state.get("thread_id"),
+                state.get("userId") or state.get("user_id") or "",
+                state.get("businessId") or "aurora",
+            )
+        except Exception as fb_err:
+            print(f"[Finish] 确定性兜底失败: {fb_err}")
+            fallback_output = None
+        if fallback_output:
+            return {"output": fallback_output, "short_memory": short_memory}
         fallback_details = json.dumps(
             [st.get("result") for st in subtasks], ensure_ascii=False, default=str
         )
