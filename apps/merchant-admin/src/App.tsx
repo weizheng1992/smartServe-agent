@@ -128,8 +128,10 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
             <Route path="/roles" element={<RolesPage />} />
             <Route path="/staff" element={<StaffPage />} />
             <Route path="/products" element={<ProductsPage />} />
+            <Route path="/products/:code" element={<ProductsPage focusCode="*" />} />
             <Route path="/skus" element={<SkusPage />} />
             <Route path="/spi-logs" element={<OrderWorkbench scope="spi-logs" />} />
+            <Route path="*" element={<NotFoundRedirect />} />
           </Routes>
         </div>
 
@@ -137,4 +139,10 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
       </main>
     </div>
   );
+}
+
+function NotFoundRedirect() {
+  const navigate = useNavigate();
+  useEffect(() => { navigate("/products", { replace: true }); }, [navigate]);
+  return null;
 }

@@ -5,7 +5,7 @@ import { SpuTable } from './components/spu-table';
 
 // 商品目录管理页(薄编排):新增表单 / SPU 表(行内编辑+上下架+删除)/
 // SKU 子表,按功能拆在同目录 components/ 下;数据操作收口 lib/api.ts。
-export default function ProductsPage() {
+export default function ProductsPage({ focusCode }: { focusCode?: string } = {}) {
   const [spus, setSpus] = useState<Spu[]>([]);
   const [msg, setMsg] = useState('');
 
