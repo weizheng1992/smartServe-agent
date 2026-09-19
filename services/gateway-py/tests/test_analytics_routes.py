@@ -82,6 +82,32 @@ class TestJwtIdentity:
 
 
 class TestAsk:
+    async def test_ask_selected_orders_compare(self, client, auth):
+        """PageContext 勾选两单 → 「两个订单对比」出逐笔行 + 合计/均值(ADR-0005)。"""
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from gateway_py.merchant_db import ensure_merchant_tables
+        from sqlalchemy import text as _t
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        async with _merchant_writer_engine().begin() as c:
+            for oid, amt in (("E2E-CMP-A", 300.00), ("E2E-CMP-B", 500.00)):
+                await c.execute(_t(
+                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                    "VALUES (:oid, 'CUST-CMP', 'PAID', :amt, '{}'::jsonb) "
+                    "ON CONFLICT (order_id) DO UPDATE SET total_amount = :amt, status = 'PAID'"
+                ), {"oid": oid, "amt": amt})
+
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "两个订单对比",
+            "pageContext": {"selection": ["E2E-CMP-A", "E2E-CMP-B"]},
+        })
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "order_overview"
+        rows = events["result"]["rows"]
+        assert {row["订单号"] for row in rows} == {"E2E-CMP-A", "E2E-CMP-B"}
+        assert all("合计金额" in row and "平均金额" in row for row in rows)
+
     async def test_ask_unsupported_is_honest(self, client, auth):
         boss = await auth()
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": "今天心情如何"})

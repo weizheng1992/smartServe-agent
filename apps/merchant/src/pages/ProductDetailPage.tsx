@@ -22,6 +22,15 @@ export default function ProductDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [isAddingToCart, setIsAddingToCart] = useState(false);
   const [cartSuccessMessage, setCartSuccessMessage] = useState<string | null>(null);
+  const [couponPromos, setCouponPromos] = useState<Array<{ id: string; name: string; value: number }>>([]);
+  const [couponMsg, setCouponMsg] = useState('');
+  useEffect(() => {
+    fetch('/api/store/promotions')
+      .then((r) => r.json())
+      .then((b) => setCouponPromos((b.promotions || []).filter((p: any) => p.promoType === 'coupon')))
+      .catch(() => {});
+  }, []);
+
 
   useEffect(() => {
     if (!productId) return;
@@ -126,14 +135,6 @@ export default function ProductDetailPage() {
   }
 
   const currentPrice = selectedSku ? Number(selectedSku.price) : Number(product.price);
-  const [couponPromos, setCouponPromos] = useState<Array<{ id: string; name: string; value: number }>>([]);
-  const [couponMsg, setCouponMsg] = useState('');
-  useEffect(() => {
-    fetch('/api/store/promotions')
-      .then((r) => r.json())
-      .then((b) => setCouponPromos((b.promotions || []).filter((p: any) => p.promoType === 'coupon')))
-      .catch(() => {});
-  }, []);
   async function claimCoupon(promoId: string) {
     const res = await fetch('/api/store/coupons/claim', {
       method: 'POST',

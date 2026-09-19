@@ -49,7 +49,7 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
             intent, _ = await _fallback_intent(question, allowed, session_ctx)
         except UnsupportedQuery as err:
             await _log_unanswered(session_ctx, question)
-            return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单", "detail": str(err)}
+            return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": str(err)}
         if isinstance(intent, dict) and intent.get("clarify"):
             intent.setdefault("originalQuestion", question)  # 实体反问回问时带上原问题
             return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
@@ -99,7 +99,9 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         compiled = engine.compile(intent)
         result = await engine.execute_async(compiled)
     except UnsupportedQuery as err:
-        return {"type": "unsupported", "message": "该指标暂未开放", "detail": str(err)}
+        # 编译期实体闸(如「未勾选订单」)→ 诚实 unsupported 帧并给出动作提示
+        message = str(err) if "勾选" in str(err) else "该指标暂未开放"
+        return {"type": "unsupported", "message": message, "detail": str(err)}
     except Exception as err:
         return {"type": "error", "message": "查询执行失败(已如实报告,未生成估算数据)", "detail": str(err)}
 

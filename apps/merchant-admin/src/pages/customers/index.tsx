@@ -11,16 +11,18 @@ export default function CustomersPage() {
   const [msg, setMsg] = useState('');
   const [detail, setDetail] = useState<Customer | null>(null);
 
+  // load 稳定引用(依赖空数组):详情数据同步用函数式 setState 读取最新
+  // detail —— 此前依赖 [detail] 且 setDetail(新对象) 会形成「无限重取循环 +
+  // 陈旧闭包重开抽屉」(回归:详情页关不掉)。
   const load = useCallback(async () => {
     try {
       const list = (await api.customers.list()).customers || [];
       setCustomers(list);
-      // 详情开着时同步其最新数据(改会员级/删除后不显示陈旧信息)
-      if (detail) setDetail(list.find((c) => c.customer_id === detail.customer_id) || null);
+      setDetail((cur) => (cur ? list.find((c) => c.customer_id === cur.customer_id) || null : cur));
     } catch (err) {
       setMsg(String(err));
     }
-  }, [detail]);
+  }, []);
   useEffect(() => { void load(); }, [load]);
 
   return (

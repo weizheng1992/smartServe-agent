@@ -195,12 +195,28 @@ async def perms_for_role(role: str) -> list[str]:
 
 
 async def set_role_menus(business_id: str, role: str, menu_ids: list[str], operator: str = "system") -> None:
-    """保存角色分配(保存即生效);护栏:老板系统菜单强制回补;变更落商户审计。"""
+    """保存角色分配(保存即生效);护栏:老板系统菜单强制回补;变更落商户审计。
+
+    父链补齐(实测缺陷修复):勾选深层菜单(如 d-ops/m-promotions)时自动
+    补齐其全部祖先目录 —— 否则菜单树从根遍历断链,勾了也不可见。
+    """
     if role == "finance_owner":
         menu_ids = list({*menu_ids, *SYSTEM_MENU_IDS})
     async with get_session() as session:
+        all_menus = (await session.execute(select(Menu))).scalars().all()
+        by_id = {m.id: m for m in all_menus}
+        expanded: set[str] = set()
+        stack = [mid for mid in menu_ids if mid in by_id]
+        while stack:
+            mid = stack.pop()
+            if mid in expanded:
+                continue
+            expanded.add(mid)
+            parent_id = by_id[mid].parent_id
+            if parent_id and parent_id not in expanded:
+                stack.append(parent_id)
         await session.execute(delete(RoleMenu).where(RoleMenu.role == role))
-        for mid in menu_ids:
+        for mid in sorted(expanded):
             session.add(RoleMenu(role=role, menu_id=mid, business_id=business_id))
         await session.commit()
     try:  # 审计(20-D5):失败打印不阻断(与写穿透同策略)

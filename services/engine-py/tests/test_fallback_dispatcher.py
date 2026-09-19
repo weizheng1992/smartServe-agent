@@ -37,11 +37,13 @@ def container(pg_factory, monkeypatch):
                 (
                     "CREATE TABLE IF NOT EXISTS promotions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
                     "name TEXT, promo_type TEXT, threshold_amount NUMERIC(10,2), discount_value NUMERIC(10,2), "
-                    "status TEXT DEFAULT 'active')"
+                    "scope_type TEXT DEFAULT 'all', scope_value TEXT, status TEXT DEFAULT 'active', "
+                    "start_at TIMESTAMP DEFAULT NOW(), end_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW())"
                 ),
                 (
                     "CREATE TABLE IF NOT EXISTS user_coupons (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
-                    "promotion_id UUID, user_id TEXT, status TEXT DEFAULT 'claimed')"
+                    "promotion_id UUID, user_id TEXT, status TEXT DEFAULT 'claimed', "
+                    "claimed_at TIMESTAMP DEFAULT NOW(), used_order_id TEXT, used_at TIMESTAMP)"
                 ),
                 (
                     "CREATE TABLE IF NOT EXISTS promotion_redemptions (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "

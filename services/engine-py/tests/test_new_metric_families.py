@@ -147,6 +147,18 @@ class TestOrderOverview:
         with pytest.raises(UnsupportedQuery, match="勾选"):
             engine.compile(intent)
 
+    def test_empty_entities_message_is_actionable(self, engine):
+        """拒绝文案必须给出动作提示(勾选),而非含糊的「暂未开放」。"""
+        intent = engine.resolve("这几笔订单的平均金额")
+        with pytest.raises(UnsupportedQuery, match="请先在订单列表中勾选订单"):
+            engine.compile(intent)
+
+    def test_resolve_compare_phrasing(self, engine):
+        """ADR-0005:「两个订单对比」等对比问法 → order_overview(词表直命中)。"""
+        for q in ("两个订单对比", "对比这两笔订单", "订单比较"):
+            intent = engine.resolve(q)
+            assert intent.metric == "order_overview"
+
     def test_compile_carries_entities_as_params(self, engine):
         intent = engine.resolve("这几笔订单的平均金额")
         intent = StructuredQueryIntent(

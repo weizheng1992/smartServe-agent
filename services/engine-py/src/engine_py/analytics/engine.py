@@ -27,7 +27,7 @@ _CALIBERS = {
     "session_volume": "会话量 = session_metrics 计数(与平台大盘同源)",
     "ai_resolution_rate": "AI 解决率 = resolved_auto ÷ 总会话 × 100(session_metrics 同源)",
     "after_sale_overview": "售后工单按状态分布计数(after_sale_tickets 真算)",
-    "order_overview": "对页面勾选订单做笔数/合计/均值统计(实体来自 PageContext)",
+    "order_overview": "对页面勾选订单逐笔展示(订单号/状态/金额/时间),合计与均值随行列出,便于两单对比",
     "promo_effect": "活动口径 = 核销记录关联订单(真实归因;自然流量不计入),GMV 为核销订单实付合计",
     "promo_sku_compare": "活动内对比 = 该活动核销订单的商品明细聚合;目标款在「对比分组」列标记",
     "customer_orders": "客户订单 = 名下全部订单按下单时间倒序",
@@ -348,14 +348,19 @@ class MetricQueryEngine:
                 "GROUP BY d.day ORDER BY d.day"
             )
         elif intent.metric == "order_overview":
-            params.pop("lim", None)  # 单行概览无 LIMIT 槽位
+            # ADR-0005:升级为逐笔行 + 合计/均值窗口列 —— 「两个订单对比」等
+            # 对比类问法可直接看每单差异;实体来自 PageContext 勾选(必传)。
+            params.pop("lim", None)  # 逐笔展示无 LIMIT 槽位
             if not intent.entity_ids:
-                raise UnsupportedQuery("请先在列表中勾选订单,再问概览(实体集必传)")
+                raise UnsupportedQuery("请先在订单列表中勾选订单,再问对比/概览(实体集必传)")
             sql = (
-                "SELECT COUNT(*)::int AS \"订单数\", "
-                "ROUND(COALESCE(SUM(total_amount), 0)::numeric, 2)::float AS \"合计金额\", "
-                "ROUND(COALESCE(AVG(total_amount), 0)::numeric, 2)::float AS \"平均金额\" "
-                "FROM merchant_orders WHERE order_id = ANY(:entities)"
+                'SELECT o.order_id AS "订单号", o.status AS "状态", '
+                'o.total_amount::float AS "金额", '
+                "to_char(o.created_at, 'MM-DD HH24:MI') AS \"created_at\", "
+                'ROUND(SUM(o.total_amount) OVER (), 2)::float AS "合计金额", '
+                'ROUND(AVG(o.total_amount) OVER (), 2)::float AS "平均金额" '
+                'FROM merchant_orders o WHERE o.order_id = ANY(:entities) '
+                'ORDER BY o.created_at DESC'
             )
             params["entities"] = list(intent.entity_ids)[:100]
         elif intent.metric == "ai_resolution_rate":

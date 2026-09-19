@@ -634,5 +634,37 @@
         "value": "file://scorers/data_mapping.py:get_assert"
       }
     ]
+  },
+  {
+    "description": "dataMapping - 两个订单对比(order_overview 对比族,ADR-0005)",
+    "vars": {
+      "input": "两个订单对比",
+      "expectedMetric": "order_overview",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 对比这两笔订单(order_overview 对比族,ADR-0005)",
+    "vars": {
+      "input": "对比这两笔订单",
+      "expectedMetric": "order_overview",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   }
 ]

@@ -63,6 +63,8 @@ def _system_prompt(allowed: list[str] | None) -> str:
         "- 问某客户/某人的订单 → entity_kind='customer',entity_mention=客户名或手机号原文\n"
         "- 问活动里某款对比其他款 → metric=promo_sku_compare,entity_kind='promotion',"
         "entity_mention=活动名,compare_mention=目标款商品名或编码\n"
+        "- 问「选中的/勾选的订单」「两个订单对比/这两单差异」→ metric=order_overview"
+        "(实体由页面勾选集提供,entity_kind/entity_mention 留空)\n"
         "- 实体提及必须摘取用户原话,不要改写"
     )
 

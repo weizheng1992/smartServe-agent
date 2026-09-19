@@ -294,7 +294,7 @@ METRIC_SEMANTIC_REGISTRY: dict[str, dict[str, Any]] = {
         "unit": "元",
         "icon": "🧮",
         "aliases": ["selected_orders"],
-        "synonyms": ["订单概览", "这几笔订单", "选中订单", "平均金额", "合计金额", "这几单", "勾选订单的统计", "选中订单的概览", "所选订单"],
+        "synonyms": ["订单概览", "这几笔订单", "选中订单", "平均金额", "合计金额", "这几单", "勾选订单的统计", "选中订单的概览", "所选订单", "订单对比", "两单对比", "两个订单对比", "这两笔订单对比", "订单比较", "这两笔订单", "勾选的订单"],
         "conflictGroup": [],
         "sampleQueries": ["这几笔订单的平均金额", "选中订单合计多少"],
         "availableDimensions": [],
