@@ -68,17 +68,18 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
                   {(dir.children || [])
                     .filter((c) => c.menuType === 'menu')
                     .map((m) => (
-                      <span
+                      <button
+                        type="button"
                         key={m.id}
                         onClick={() => m.route && navigate(m.route)}
-                        className={`block cursor-pointer rounded-lg px-3 py-1.5 text-[13px] ${
+                        className={`block w-full cursor-pointer rounded-lg px-3 py-1.5 text-left text-[13px] ${
                           location.pathname.startsWith(m.route || '###')
                             ? 'bg-zinc-900 text-white'
                             : 'text-zinc-600 hover:bg-zinc-50'
                         }`}
                       >
                         {m.name}
-                      </span>
+                      </button>
                     ))}
                 </>
               )}
@@ -110,7 +111,7 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
               </select>
             )}
             <span className="text-zinc-400">{currentStaffEmail()} · {role}</span>
-            <button className="text-[11px] text-zinc-400 hover:text-zinc-900" onClick={onLogout}>退出</button>
+            <button type="button" className="text-[11px] text-zinc-400 hover:text-zinc-900" onClick={onLogout}>退出</button>
           </div>
         </header>
 

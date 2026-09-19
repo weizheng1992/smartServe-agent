@@ -6,11 +6,12 @@ interface Props {
   onAsk: (q: string) => void;
   onGenReport: () => void;
   reportMsg: string;
-  role: string;
+  /** 当前登录视角角色(仅展示;不用 `role` 命名以免与 ARIA role 属性混淆) */
+  roleName: string;
 }
 
 /** 底部输入栏(受控输入)+ 发送 + 生成报告。 */
-export function AskInputBar({ busy, onAsk, onGenReport, reportMsg, role }: Props) {
+export function AskInputBar({ busy, onAsk, onGenReport, reportMsg, roleName }: Props) {
   const [text, setText] = useState('');
 
   function send() {
@@ -33,7 +34,7 @@ export function AskInputBar({ busy, onAsk, onGenReport, reportMsg, role }: Props
         <Button onClick={send} disabled={busy}>发送</Button>
         <Button variant="outline" onClick={onGenReport}>生成报告</Button>
       </div>
-      {reportMsg && <div className="mt-2 text-[11px] text-zinc-400">{reportMsg}(角色:{role || '—'})</div>}
+      {reportMsg && <div className="mt-2 text-[11px] text-zinc-400">{reportMsg}(角色:{roleName || '—'})</div>}
     </div>
   );
 }

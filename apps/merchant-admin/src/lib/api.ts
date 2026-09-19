@@ -1,6 +1,8 @@
 // 网关 API 客户端(0013 收口:身份 = Bearer JWT,后端不再信任 x-user-id 头)。
 // 老板可经 /staff/switch 换签任意员工 token 体验各角色视角;原始老板凭证
 // 单独保存在 BOSS_KEY,切换动作始终以老板身份发起(非老板无权签发)。
+import { parseSseFrames, type SseFrame } from '@/lib/sse';
+
 const TOKEN_KEY = 'merchant-admin.token';
 const STAFF_KEY = 'merchant-admin.staff';
 const BOSS_KEY = 'merchant-admin.boss';
@@ -105,6 +107,17 @@ export interface PromoEffect {
   totalDiscount: number;
 }
 
+export interface Customer {
+  customer_id: string;
+  name: string;
+  phone: string;
+  member_level: string;
+  total_spent: number;
+  order_count: number;
+}
+
+export type { SseFrame };
+
 export interface MenuNode {
   id: string;
   name: string;
@@ -140,32 +153,51 @@ export const api = {
 
   roles: {
     list: async (): Promise<{ roles: Array<{ role: string; menuCount: number; staffCount: number; builtin: boolean }> }> =>
-      (await req('/api/admin/analytics/roles')).json(),
+      fetchJson('/api/admin/analytics/roles'),
     menusOf: async (role: string): Promise<{ role: string; menuIds: string[] }> =>
-      (await req(`/api/admin/analytics/roles/${role}/menus`)).json(),
+      fetchJson(`/api/admin/analytics/roles/${role}/menus`),
     saveMenus: async (role: string, menuIds: string[]) =>
-      (await req(`/api/admin/analytics/roles/${role}/menus`, { method: 'POST', body: JSON.stringify({ menuIds }) })).json(),
+      fetchJson(`/api/admin/analytics/roles/${role}/menus`, { method: 'POST', body: JSON.stringify({ menuIds }) }),
     create: async (role: string, menuIds: string[]) =>
-      (await req('/api/admin/analytics/roles', { method: 'POST', body: JSON.stringify({ role, menuIds }) })).json(),
+      fetchJson('/api/admin/analytics/roles', { method: 'POST', body: JSON.stringify({ role, menuIds }) }),
   },
 
-  ask: async (question: string, pageContext?: object): Promise<Array<{ event: string; data: any }>> => {
+  ask: async (question: string, pageContext?: object): Promise<SseFrame[]> => {
     // SSE 经 fetch 流式读取;逐帧解析 event/data
     const res = await req('/api/admin/analytics/ask', {
       method: 'POST',
       body: JSON.stringify({ question, pageContext }),
     });
-    const text = await res.text();
-    const frames: Array<{ event: string; data: any }> = [];
-    let event = '';
-    for (const line of text.split('\n')) {
-      if (line.startsWith('event: ')) event = line.slice(7).trim();
-      else if (line.startsWith('data: ') && event) {
-        try { frames.push({ event, data: JSON.parse(line.slice(6)) }); } catch { /* 跳过坏帧 */ }
-        event = '';
-      }
-    }
-    return frames;
+    return parseSseFrames(await res.text());
+  },
+
+  /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录)。 */
+  staff: {
+    list: async (): Promise<{ success: boolean; staff: Array<{ id: string; email: string; displayName: string; role: string; status: string }> }> =>
+      fetchJson('/api/admin/analytics/staff'),
+    invite: async (p: { email: string; displayName: string; role: string }) =>
+      fetchJson('/api/admin/analytics/staff', { method: 'POST', body: JSON.stringify(p) }),
+    update: async (id: string, patch: Partial<{ role: string; status: string; displayName: string }>) =>
+      fetchJson(`/api/admin/analytics/staff/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  },
+
+  /** 菜单管理 CRUD(目录/菜单/按钮 + 权限点;系统菜单护栏在服务端)。 */
+  menuAdmin: {
+    create: async (p: { name: string; menuType: string; route?: string; permCode?: string; parentId?: string | null; sort?: number }) =>
+      fetchJson('/api/admin/analytics/menus', { method: 'POST', body: JSON.stringify(p) }),
+    update: async (id: string, patch: Partial<{ name: string; route: string; permCode: string; sort: number; status: string }>) =>
+      fetchJson(`/api/admin/analytics/menus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: async (id: string) => fetchJson(`/api/admin/analytics/menus/${id}`, { method: 'DELETE' }),
+  },
+
+  /** 客户管理(商户库客户;会员级编辑/新增/删除)。 */
+  customers: {
+    list: async (): Promise<{ success: boolean; customers: Customer[] }> => fetchJson('/api/admin/analytics/customers'),
+    create: async (p: { name: string; phone: string; memberLevel?: string }) =>
+      fetchJson('/api/admin/analytics/customers', { method: 'POST', body: JSON.stringify(p) }),
+    update: async (id: string, patch: { memberLevel: string }) =>
+      fetchJson(`/api/admin/analytics/customers/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: async (id: string) => fetchJson(`/api/admin/analytics/customers/${id}`, { method: 'DELETE' }),
   },
 
   reports: {

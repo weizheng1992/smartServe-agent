@@ -28,6 +28,7 @@ export function FloatingAgent({ route }: { route: string }) {
   if (!open) {
     return (
       <button
+        type="button"
         onClick={() => setOpen(true)}
         className="fixed bottom-6 right-6 z-40 flex h-14 w-14 select-none items-center justify-center rounded-full bg-zinc-900 text-xl text-white shadow-xl"
         aria-label="打开数据分析助手"
@@ -44,7 +45,7 @@ export function FloatingAgent({ route }: { route: string }) {
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
           数据分析助手
         </div>
-        <button className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => setOpen(false)}>
+        <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => setOpen(false)}>
           收起
         </button>
       </div>
@@ -67,6 +68,7 @@ export function FloatingAgent({ route }: { route: string }) {
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(f.data.options || []).map((o: any, j: number) => (
                     <button
+                      type="button"
                       key={j}
                       className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
                       onClick={() => { setQ(`按${o.label}`); }}

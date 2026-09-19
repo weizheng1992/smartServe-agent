@@ -1,7 +1,7 @@
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react-swc';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 // 服务端 API 已迁移至 gateway-py(FastAPI, 端口 4000)。
 // /api/* 与 /spi/* 由 Vite dev server 代理至网关(替代原 Next.js rewrites)。
@@ -31,5 +31,11 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+  },
+  // 单测(vitest):jsdom 环境 + jest-dom 匹配器;`bun run test`
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.ts',
+    css: false,
   },
 });

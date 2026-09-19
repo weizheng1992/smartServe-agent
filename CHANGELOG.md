@@ -4,6 +4,30 @@
 
 ---
 
+## [2.6.41] - 2026-09-19 (剩余菜单页拆分组件 + 前端单测基建)
+
+### ♻️ Refactoring
+
+- **角色管理**:拆 `PermTree` 勾选树 / `RoleAssignPanel`(挂载即回填勾选态)/ `RoleCreateForm`;勾选树纯逻辑(勾父带子、不可变集合)抽 `lib/perm-tree.ts`。
+- **员工/菜单/客户管理**:各拆"创建表单 + 列表表"两个组件(员工共用 `ROLE_LABEL`)。
+- **API 收口**:新增 `api.staff` / `api.menuAdmin` / `api.customers`;`api.roles` 统一迁 `fetchJson`(业务 4xx 仍返回 body,页面错误文案不受影响)。
+- **lib/sse.ts**:SSE 帧解析独立成模块(坏 JSON 跳过不断流),`api.ask` 复用。
+
+### ✨ 单测(前端从零到一)
+
+- vitest + jsdom + @testing-library 接入,`bun run test`;setup 手动 `afterEach(cleanup)`(globals 关闭时 RTL 不自动清理)。
+- **29 用例**:perm-tree 集合运算、sse 帧解析、api 会话凭证/业务 403 不抛错/staffSwitch 换签与切回链路、PermTree・AskInputBar・AskTranscript・EffectCards 组件渲染与交互。
+
+### 🐛 Fixes
+
+- a11y:侧边栏菜单项 span→真 button、FloatingAgent/退出等按钮补 `type`——biome lint 0 error(仅剩原风格 warn 级 noArrayIndexKey)。
+
+### ✅ 验证 (Verification,如实)
+
+- vitest **29 passed**;`tsc && vite build` 绿;e2e 依赖选择器/文案不变。
+
+---
+
 ## [2.6.40] - 2026-09-19 (商户后台前端按功能拆分组件 + 渲染优化)
 
 apps/merchant-admin 功能最重的几页按功能域拆成组件,行为与文案不变。

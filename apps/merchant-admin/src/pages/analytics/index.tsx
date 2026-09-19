@@ -53,7 +53,7 @@ export default function AnalyticsPage({ role }: { role: string }) {
         <AskTranscript frames={frames} onAsk={(q) => void ask(q)} />
         {busy && <div className="text-xs text-zinc-400">正在解析问题并查询…</div>}
       </div>
-      <AskInputBar busy={busy} onAsk={(q) => void ask(q)} onGenReport={() => void genReport()} reportMsg={reportMsg} role={role} />
+      <AskInputBar busy={busy} onAsk={(q) => void ask(q)} onGenReport={() => void genReport()} reportMsg={reportMsg} roleName={role} />
     </div>
   );
 }
