@@ -233,7 +233,7 @@ async def create_menu(request: Request):
         return JSONResponse(status_code=400, content={"success": False, "message": "name/menuType 必传;类型 ∈ directory|menu|button"})
     import uuid as _uuid
 
-    from engine_py.db import Menu, get_session
+    from engine_py.db import Menu, RoleMenu, get_session
 
     menu_id = "m_" + _uuid.uuid4().hex[:10]
     async with get_session() as session:
@@ -243,6 +243,9 @@ async def create_menu(request: Request):
             perm_code=body.get("permCode") or None, sort_order=int(body.get("sort") or 0),
             status="enabled",
         ))
+        # 建成即对管理角色可见(否则新菜单不在任何 role_menus 里,谁都看不到)
+        for manager_role in ("finance_owner", "admin"):
+            session.add(RoleMenu(role=manager_role, menu_id=menu_id, business_id=ctx["business_id"]))
         await session.commit()
     return {"success": True, "id": menu_id}
 
