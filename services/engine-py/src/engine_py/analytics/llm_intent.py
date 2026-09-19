@@ -86,17 +86,31 @@ async def llm_resolve(
         raise UnsupportedQuery("L3 意图层未启用")
 
     registry = metric_semantic_registry()
-    try:
-        resp = await get_chat_model().ainvoke([
-            SystemMessage(content=_system_prompt(allowed)),
-            HumanMessage(content=question),
-        ])
-        out = LlmIntent.model_validate(_parse_llm_json(_content_text(resp)))
-    except UnsupportedQuery:
-        raise
-    except Exception as err:  # LLM 网络/供应商故障/格式坏 → 响亮失败,不静默兜底
-        print(f"[L3] LLM 调用失败(响亮失败): {err}")
-        raise UnsupportedQuery("意图解析服务暂不可用") from err
+
+    # 自托管 SFT 模型优先(AI_INTENT_L3_MODEL=合并后模型目录;QLoRA SFT 产物,
+    # 见 scripts/training/sft_train.py)—— 摆脱 bigmodel API 限流依赖
+    local_model = os.environ.get("AI_INTENT_L3_MODEL")
+    if local_model:
+        try:
+            raw = await _sft_generate(local_model, _system_prompt(allowed), question)
+            out = LlmIntent.model_validate(_parse_llm_json(raw))
+        except UnsupportedQuery:
+            raise
+        except Exception as err:
+            print(f"[L3] SFT 模型推理失败(响亮失败): {err}")
+            raise UnsupportedQuery("意图解析服务暂不可用") from err
+    else:
+        try:
+            resp = await get_chat_model().ainvoke([
+                SystemMessage(content=_system_prompt(allowed)),
+                HumanMessage(content=question),
+            ])
+            out = LlmIntent.model_validate(_parse_llm_json(_content_text(resp)))
+        except UnsupportedQuery:
+            raise
+        except Exception as err:  # LLM 网络/供应商故障/格式坏 → 响亮失败,不静默兜底
+            print(f"[L3] LLM 调用失败(响亮失败): {err}")
+            raise UnsupportedQuery("意图解析服务暂不可用") from err
 
     if not out.metric or out.metric not in registry:
         raise UnsupportedQuery("问题含义未落在已注册指标闭集内")
@@ -200,3 +214,18 @@ def _parse_llm_json(raw: str) -> dict:
     if start < 0 or end <= start:
         raise ValueError(f"响应中无 JSON: {text[:80]!r}")
     return json.loads(text[start:end + 1])
+
+
+_SFT_PIPELINE = None
+
+
+async def _sft_generate(model_path: str, system_prompt: str, question: str) -> str:
+    """自托管 SFT 模型推理(懒加载单例;chat 模板与训练格式一致)。"""
+    global _SFT_PIPELINE
+    if _SFT_PIPELINE is None:
+        from transformers import pipeline as hf_pipeline
+
+        _SFT_PIPELINE = hf_pipeline("text-generation", model=model_path, device_map="auto")
+    prompt = f"{system_prompt}\n\n问句:{question}\nSemQL:"
+    results = _SFT_PIPELINE(prompt, max_new_tokens=256, do_sample=False, return_full_text=False)
+    return results[0]["generated_text"]

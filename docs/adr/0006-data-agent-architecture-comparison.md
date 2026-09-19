@@ -98,9 +98,14 @@
 
 提案结论:QLoRA 单卡首选、DoRA 精度升级、DPO 适合对话偏好、**GRPO 适合带可验证奖励的 Agent 任务**;框架 Unsloth(单卡快速)/LLaMA-Factory(中文生态)/Axolotl(多卡生产)。
 
-### 本仓现状(已在做的「微调」)
+### 本仓现状与采纳决定(按用户决议:微调路线采文档方案)
 
-metric_head 训练闭环(`scripts/training/` + [训练文档](../training/metric-head-training.md)):词表自动造弱标注 590 句(seed_from_registry)→ prepare_data → train(bge-small-zh 嵌入 + 线性分类头)→ evaluate(heldout 98.9%)→ 部署(AI_METRIC_HEAD 三态 shadow/on,回滚=删环境变量)。这等价于提案表格里「单卡快速实验,小样本分类」的极简形态——模型不是 LLM,是嵌入+线性头,但「弱标注→训练→灰度→回滚」的工程闭环完整。
+已有:metric_head 训练闭环(bge+线性头,词表弱标注 590 句,heldout 98.9%,三态灰度)——保留为 **shadow 基线**,不是终点。
+
+**采纳文档路线并已落地脚本**:
+- `scripts/training/sft_dataset.py`:「用户问题 + 指标闭集目录 → SemQL JSON」数据集构建器(词表×时间窗×品类×limit 组合,评测集纯门永不入训);
+- `scripts/training/sft_train.py`:QLoRA SFT(Unsloth + trl,基座 `unsloth/Qwen2.5-7B-Instruct-bnb-4bit`,r=16);
+- 推理接线:`AI_INTENT_L3_MODEL=<合并模型目录>` 时,L3 优先走自托管 SFT 模型(摆脱 bigmodel 限流),未设置走 API。
 
 ### 何时需要升级到 LLM 微调(触发器)
 
@@ -120,7 +125,7 @@ metric_head 训练闭环(`scripts/training/` + [训练文档](../training/metric
 
 | 提案推荐 | 本仓判定 |
 |---|---|
-| QLoRA(Unsloth 单卡) | ✅ 升级触发时首选(自托管 Qwen 意图模型) |
+| QLoRA(Unsloth 单卡) | ✅ **已采纳**(脚本已落,训练按需在 GPU 环境执行) |
 | DoRA | 🟡 同 QLoRA,精度优先时替换 |
 | DPO | 🟡 客服主链路(finish 话术)可适用,非 data agent |
 | GRPO | ✅ 触发器③的候选:SemQL 可验证奖励(闭集+实体+口径)天然构成 reward |
