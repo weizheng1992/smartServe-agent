@@ -43,11 +43,31 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     allowed = await allowed_metrics_for_role(session_ctx.get("role", "finance_owner"))
     try:
         intent = engine.resolve(question)
-    except UnsupportedQuery as err:
-        return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量", "detail": str(err)}
+    except UnsupportedQuery:
+        # L2 范例回放 → L3 LLM 意图兜底(ADR-0005);全部未命中 → 响亮失败 + 落库
+        try:
+            intent, _ = await _fallback_intent(question, allowed, session_ctx)
+        except UnsupportedQuery as err:
+            await _log_unanswered(session_ctx, question)
+            return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单", "detail": str(err)}
+        if isinstance(intent, dict) and intent.get("clarify"):
+            return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
 
     if isinstance(intent, dict) and intent.get("clarify"):
-        return {"type": "clarify", **intent}
+        return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
+
+    # 必填实体缺失(L0/范例直出)→ 列实体候选反问(entity 类 clarify)
+    missing_kind = _missing_entity_kind(intent)
+    if missing_kind:
+        from . import dimensions
+
+        candidates = await dimensions.list_candidates(missing_kind)
+        return {
+            "type": "clarify",
+            "clarifyKind": "entity",
+            "question": f"请选择{dimensions.kind_label(missing_kind)}——",
+            "options": [{"label": c["label"]} for c in candidates],
+        }
 
     if allowed is not None and intent.metric not in allowed:
         return {
@@ -82,3 +102,75 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         "rows": result.rows,
         "cards": cards,
     }
+
+
+async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict):
+    """L0 未命中后的两级兜底:先 L2 范例回放(近零成本),再 L3 LLM 意图(ADR-0005)。
+
+    返回 (intent | clarify dict, via_llm);全部未命中 → UnsupportedQuery。
+    """
+    from . import exemplar_service
+
+    try:
+        exemplar = await exemplar_service.search_exemplar(question, session_ctx.get("business_id") or "")
+        if exemplar and exemplar["intent"].get("metric"):
+            print(f"[L2] 范例命中({exemplar['similarity']:.2f}): {exemplar['question'][:40]!r}")
+            return StructuredQueryIntent(**exemplar["intent"]), False
+    except Exception as err:
+        print(f"[L2] 范例检索失败(放行 L3): {err}")
+
+    from .llm_intent import llm_resolve
+
+    intent = await llm_resolve(question, allowed, session_ctx.get("business_id") or "")
+    if isinstance(intent, StructuredQueryIntent):
+        try:
+            await exemplar_service.add_exemplar(
+                session_ctx.get("business_id") or "__global__",
+                question,
+                {
+                    "metric": intent.metric, "direction": intent.direction, "limit": intent.limit,
+                    "time_window": intent.time_window, "category": intent.category,
+                    "entity_slot": intent.entity_slot,
+                },
+                source="llm",
+            )
+        except Exception as err:
+            print(f"[L2] 范例沉淀失败(不影响回答): {err}")
+        return intent, True
+    return intent, False
+
+
+def _missing_entity_kind(intent) -> str | None:
+    """新族必填实体缺失(经 L0 词表/范例直出、未经实体解析)→ 反问实体。"""
+    from .llm_intent import ENTITY_REQUIRED
+
+    if isinstance(intent, dict):
+        return None
+    kind = ENTITY_REQUIRED.get(intent.metric)
+    if kind and not (intent.entity_slot or {}).get(kind):
+        return kind
+    return None
+
+
+def _filter_clarify_options(clarify: dict, allowed: list[str] | None) -> dict:
+    """反问选项按角色指标闭集过滤(13 号票;实体类选项无 key,不过滤)。"""
+    options = clarify.get("options") or []
+    if allowed is not None and options and all("key" in o for o in options):
+        clarify["options"] = [o for o in options if o.get("key") in allowed]
+    return clarify
+
+
+async def _log_unanswered(session_ctx: dict, question: str) -> None:
+    """未命中问句落库(ADR-0005 增长飞轮输入口;失败打印不阻断)。"""
+    try:
+        from ..db import AgentUnanswered, get_session
+
+        async with get_session() as session:
+            session.add(AgentUnanswered(
+                business_id=session_ctx.get("business_id") or "aurora",
+                role=session_ctx.get("role") or "finance_owner",
+                question=question,
+            ))
+            await session.commit()
+    except Exception as err:
+        print(f"[Unanswered] 落库失败(放行): {err}")

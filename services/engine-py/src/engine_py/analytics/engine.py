@@ -28,6 +28,9 @@ _CALIBERS = {
     "ai_resolution_rate": "AI 解决率 = resolved_auto ÷ 总会话 × 100(session_metrics 同源)",
     "after_sale_overview": "售后工单按状态分布计数(after_sale_tickets 真算)",
     "order_overview": "对页面勾选订单做笔数/合计/均值统计(实体来自 PageContext)",
+    "promo_effect": "活动口径 = 核销记录关联订单(真实归因;自然流量不计入),GMV 为核销订单实付合计",
+    "promo_sku_compare": "活动内对比 = 该活动核销订单的商品明细聚合;目标款在「对比分组」列标记",
+    "customer_orders": "客户订单 = 名下全部订单按下单时间倒序",
 }
 
 
@@ -43,6 +46,9 @@ class StructuredQueryIntent:
     time_window: dict | None = None
     category: str | None = None
     entity_ids: list[str] = field(default_factory=list)  # PageContext 选中实体(IN 绑定)
+    # 命名实体槽(ADR-0005):LLM/L2 解析后的实体 ID 集合,如
+    # {"promotion": ["<uuid>"], "customer": ["CUST-8801"], "spu": ["AURORA-SPU-1"]}
+    entity_slot: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -60,7 +66,7 @@ class MetricQueryEngine:
     business_id 只进绑定参数,不拼接 SQL 文本。"""
 
     _LIMIT_RE = re.compile(r"top\s*(\d+)", re.IGNORECASE)
-    _REVERSE_WORDS = ("最差", "垫底", "最烂", "卖不动", "不走量", "最低")
+    _REVERSE_WORDS = ("最差", "垫底", "最烂", "卖不动", "不走量", "最低", "最少")
     # 反向词族自带指标指向(词表全正向,反向问句不命中同义词 — 03 号票 L0 缺口)
     _REVERSE_METRIC_HINTS = (
         ("卖得最差", "gmv"), ("卖得差", "gmv"), ("销售额最低", "gmv"), ("流水最低", "gmv"),
@@ -129,13 +135,18 @@ class MetricQueryEngine:
                 print(f"[MetricHead] 打分失败(放行 L0/L3): {head_err}")
 
         if hit is None:
-            # 缝② on 模式:L0 未命中 → 分类头接管(低置信仍放行 L3,不许静默错分)
+            # 缝② on 模式:L0 未命中 → 分类头接管(低置信仍放行 L3,不许静默错分);
+            # 槽位(limit/时间窗/品类)与 L0 命中路同源解析(0014 缺口修复)
             if self._head is not None:
                 try:
                     head_label, head_conf = self._head.predict(question)
                     if head_label in registry and head_conf >= self._head_threshold:
                         print(f"[MetricHead][on] 接管: {head_label}({head_conf:.2f}) question={question[:40]!r}")
-                        return StructuredQueryIntent(metric=head_label, direction=registry[head_label]["direction"])
+                        limit2, time2, cat2 = self._extract_slots(clean)
+                        return StructuredQueryIntent(
+                            metric=head_label, direction=registry[head_label]["direction"],
+                            limit=limit2, time_window=time2, category=cat2,
+                        )
                 except UnsupportedQuery:
                     pass
                 except Exception as head_err:
@@ -161,17 +172,18 @@ class MetricQueryEngine:
                     "options": [{"key": m["key"], "label": m["label"], "intent": {"metric": m["key"], "direction": m["direction"]}} for m in siblings],
                 }
 
-        limit_match = self._LIMIT_RE.search(clean)
-        limit = min(max(int(limit_match.group(1)) if limit_match else 5, 1), 50)
-
-        time_window = next(({"kind": kind} for kind, pat in self._TIME_PATTERNS if pat.search(clean)), None)
-
-        category = None
-        cat_match = re.search(r"(户外机能|潮流T恤|下装裤类|潮流鞋靴|背包收纳|露营装备|衬衫|配饰|运动配件)", clean, re.IGNORECASE)
-        if cat_match:
-            category = cat_match.group(1)
+        limit, time_window, category = self._extract_slots(clean)
 
         return StructuredQueryIntent(metric=metric_key, direction=direction, limit=limit, time_window=time_window, category=category)
+
+    def _extract_slots(self, clean: str) -> tuple[int, dict | None, str | None]:
+        """开放槽位解析(limit/时间窗/品类);L0 命中路与分类头 on 路径共用。"""
+        limit_match = self._LIMIT_RE.search(clean)
+        limit = min(max(int(limit_match.group(1)) if limit_match else 5, 1), 50)
+        time_window = next(({"kind": kind} for kind, pat in self._TIME_PATTERNS if pat.search(clean)), None)
+        cat_match = re.search(r"(户外机能|潮流T恤|下装裤类|潮流鞋靴|背包收纳|露营装备|衬衫|配饰|运动配件)", clean, re.IGNORECASE)
+        category = cat_match.group(1) if cat_match else None
+        return limit, time_window, category
 
     # ---------------- compile(模板拼装;LLM 不参与) ----------------
     def compile(self, intent: StructuredQueryIntent | dict, session_ctx: dict | None = None) -> Any:
@@ -354,6 +366,56 @@ class MetricQueryEngine:
                 "SELECT '__total__' AS \"productId\", ROUND(COALESCE(SUM(CASE WHEN resolution_status = 'resolved_auto' "
                 "THEN 1 ELSE 0 END), 0)::numeric * 100 / GREATEST(COUNT(*), 1), 2)::float AS \"metricScore\" "
                 f"FROM session_metrics WHERE business_id = :business_id {time_clause} LIMIT :lim"
+            )
+        elif intent.metric == "promo_effect":
+            # ADR-0005 活动效果总览(核销关联口径:真实归因,自然流量不计入)
+            params.pop("lim", None)
+            promo_ids = (intent.entity_slot or {}).get("promotion") or []
+            if not promo_ids:
+                raise UnsupportedQuery("请先指明活动(如「开学季活动卖得怎么样」)")
+            if intent.time_window:
+                time_clause = "AND r.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            params["entities"] = promo_ids[:20]
+            sql = (
+                'SELECT COUNT(DISTINCT r.order_id) AS "核销订单数", '
+                'COALESCE(SUM(o.total_amount), 0)::float AS "核销GMV", '
+                'COALESCE(SUM(r.discount_amount), 0)::float AS "优惠总额" '
+                'FROM promotion_redemptions r JOIN merchant_orders o ON o.order_id = r.order_id '
+                'WHERE r.promotion_id = ANY(:entities) {time_clause}'
+            )
+            sql = sql.format(time_clause=time_clause)
+        elif intent.metric == "promo_sku_compare":
+            # ADR-0005 活动内商品对比:核销订单的商品明细按款聚合;可标目标款
+            promo_ids = (intent.entity_slot or {}).get("promotion") or []
+            if not promo_ids:
+                raise UnsupportedQuery("请先指明活动(如「开学季活动里冲锋衣对比其他款」)")
+            params["entities"] = promo_ids[:20]
+            params["targets"] = (intent.entity_slot or {}).get("spu") or []
+            sql = (
+                'SELECT oi.spu_id AS "productId", MAX(oi.title) AS "name", '
+                'SUM(oi.quantity)::int AS "销量", '
+                'COALESCE(SUM(oi.quantity * oi.price), 0)::float AS "GMV", '
+                'COUNT(DISTINCT o.order_id)::int AS "订单数", '
+                "MAX(CASE WHEN oi.spu_id = ANY(:targets) THEN '目标款' ELSE '其他款' END) AS \"对比分组\" "
+                'FROM promotion_redemptions r '
+                'JOIN merchant_orders o ON o.order_id = r.order_id '
+                'JOIN merchant_order_items oi ON oi.order_id = r.order_id '
+                'WHERE r.promotion_id = ANY(:entities) '
+                f'GROUP BY oi.spu_id ORDER BY "销量" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "customer_orders":
+            # ADR-0005 客户订单列表(实体列表卡;前端订单行可跳订单管理)
+            cust_ids = (intent.entity_slot or {}).get("customer") or []
+            if not cust_ids:
+                raise UnsupportedQuery("请先指明客户(如「张三最近的订单」)")
+            params["entities"] = cust_ids[:20]
+            sql = (
+                'SELECT o.order_id AS "order_id", o.status AS "status", '
+                'o.total_amount::float AS "total_amount", '
+                "to_char(o.created_at, 'MM-DD HH24:MI') AS \"created_at\" "
+                'FROM merchant_orders o WHERE o.customer_id = ANY(:entities) '
+                'ORDER BY o.created_at DESC LIMIT :lim'
             )
         else:
             raise UnsupportedQuery(f"指标 {intent.metric} 尚未登记执行模板")

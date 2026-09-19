@@ -12,3 +12,4 @@ providers:
 
 tests:
   - testCases/ecommerce/multi-intent.json
+  - testCases/ecommerce/promotion-intent.json

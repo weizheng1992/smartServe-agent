@@ -1,0 +1,86 @@
+[
+  {
+    "description": "意图分类 - 优惠活动查询单一意图(商城优惠闭环 2026-09-18)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "有什么优惠活动",
+      "expectedIntents": "[\"promotion_query\"]"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "意图分类 - 我的优惠券查询(券词面)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "我的优惠券有哪些",
+      "expectedIntents": "[\"promotion_query\"]"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "意图分类 - 满减规则咨询(规则/政策词面)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "满减怎么算",
+      "expectedIntents": "[\"promotion_query\"]"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "多意图联合 - 订单查询 + 优惠券查询(顺便连接词;promotion_query 新族与 order_query 联合)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "查一下订单9081 顺便看看有什么优惠券",
+      "expectedIntents": "[\"order_query\", \"promotion_query\"]"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "多意图联合 - 退货 + 剩余优惠券(退词面 × 券词面复合)",
+    "prompts": ["classifier"],
+    "vars": {
+      "input": "退了这单 还有优惠券吗",
+      "expectedIntents": "[\"order_return\", \"promotion_query\"]"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "步骤规划 - 优惠活动查询快轨(PromotionQuerySkill)",
+    "prompts": ["planner"],
+    "vars": {
+      "input": "有什么优惠活动",
+      "expectedTools": ["queryActivePromotions"]
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/intentF1.scorer.ts"
+      }
+    ]
+  }
+]

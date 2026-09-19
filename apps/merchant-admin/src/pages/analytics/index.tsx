@@ -18,8 +18,8 @@ export default function AnalyticsPage({ role }: { role: string }) {
     setBusy(true);
     setFrames((p) => [...p, { event: 'user', data: { message: question } }]);
     try {
-      const result = await api.ask(question);
-      setFrames((p) => [...p, ...result]);
+      // 流式:每凑齐一帧即上屏(含 clarify/result/unsupported,不再整段等待)
+      await api.ask(question, undefined, (f) => setFrames((p) => [...p, f]));
     } catch (err) {
       setFrames((p) => [...p, { event: 'error', data: { message: String(err) } }]);
     }
@@ -42,6 +42,7 @@ export default function AnalyticsPage({ role }: { role: string }) {
 
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col">
+      <div className="pb-1 text-[11px] text-zinc-400">建议问法:</div>
       <div className="flex flex-wrap gap-2 pb-4">
         {CAPSULES.map((c) => (
           <button key={c} type="button" className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs hover:border-zinc-900" onClick={() => void ask(c)}>

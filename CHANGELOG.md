@@ -4,6 +4,33 @@
 
 ---
 
+## [2.6.44] - 2026-09-19 (data agent 任意问法:LLM 意图层 + 活动效果/对比/客户订单查询族)
+
+grill-me 规划后落地(ADR-0005)。守 08-D1 铁律(LLM 只做语义解析、永不写 SQL),把设计中"L0-L3 四层映射"的 L2/L3 真正接线,并扩容查询族与增长机制。
+
+### ✨ Features
+
+- **L3 LLM 意图兜底**(`analytics/llm_intent.py`):`get_chat_model().with_structured_output` 把任意自然语言解析为闭集结构化意图(metric/方向/limit/时间窗/品类/实体提及),grounding = 指标闭集目录;metric 越闭集/越权/LLM 故障一律响亮失败,绝不静默兜底。`AI_INTENT_L3=off` 一键回滚。
+- **两级路由接线**(graph):L0 词表先命中(胶囊零 LLM)→ 未命中 L2 范例回放(query_exemplars ≥0.90,建成未接线 → 接线;L3 成功问句自动沉淀)→ L3 LLM。
+- **命名实体解析**(`analytics/dimensions.py`):活动/客户/商品提及 → 确定性 ILIKE 落库命中;唯一命中绑定意图实体槽,多命中 → clarify(entity 类反问,点选原词回问),零命中响亮失败。意图新增 `entity_slot` 命名实体槽。
+- **三个新查询族**(首批矩阵成员,核销关联口径):`promo_effect` 活动效果总览(核销订单数/核销GMV/优惠总额);`promo_sku_compare` 活动内商品对比(销量/GMV/订单数,目标款标记);`customer_orders` 客户订单列表卡 —— 前端行级「在订单中查看」写入 PageContext 选中集合并跳订单管理。
+- **未命中落库**:0015 迁移 `agent_unanswered`;unsupported 一问一行,作为语义层登记的增长飞轮输入。
+- **前端流式**:SSE 增量解析器(`createFrameParser`,撕裂容忍)+ `api.ask` onFrame 逐帧上屏,不再整段等待;胶囊前加「建议问法」。
+
+### 🐛 Fixes
+
+- clarify 反问选项按角色指标闭集过滤(13 号票欠账,文案与实现不一致);metric_head on 路径补 limit/时间窗/品类槽位(与 L0 同源 `_extract_slots`);schema 卡片修正客户表列并补 promotions/核销/会话/售后 4 张分析面表(L3 上下文);L0 反向词补「最少」、order_overview 补勾选/选中同义词。
+
+### 📊 评测
+
+- mapping.json 8 → 38 条(生成器逐条经真实 resolve 校验,按构造即绿);新增 `eval/promptfoo.data.yaml` + echo provider + `test:prompt:data` 脚本(此前 data 用例未挂任何 promptfoo 配置)。
+
+### ✅ 验证 (Verification,如实)
+
+- engine/gateway 契约测试全绿(graph 38、gateway analytics 36 passed);vitest **58 passed**;`tsc && vite build` 绿;biome 0 error。预存失败 2 例(test_colloquial/test_new_metric_families 的 NULL category 插入)经 stash 对照确认为并行会话遗留,与本轮无关。
+
+---
+
 ## [2.6.43] - 2026-09-19 (订单域按菜单拆分 + 优惠发券/范围 + 客户详情关联 + TreeTable + 角色全配置化)
 
 grill-me 规划后落地的七项菜单体验收敛;决策结论:售后审批菜单删除并入客服工作台、工作台外壳(头部/指标看板/TabNav)移除、优惠范围只做"全部/指定商品"(券型不展示)、发券入口在优惠活动页、客户详情用抽屉且地址只读、关联订单跳转带勾选、角色去内置化但保留老板防锁死护栏。

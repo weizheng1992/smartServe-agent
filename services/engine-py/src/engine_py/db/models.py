@@ -649,6 +649,18 @@ class StaffMember(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
+class AgentUnanswered(Base):
+    """未命中问句沉淀(ADR-0005 增长飞轮输入口):unsupported 时一问一行。"""
+
+    __tablename__ = "agent_unanswered"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'finance_owner'"))
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
 class AnalyticsReport(Base):
     """报告产物(14-D4):HTML 内容直存(rows_json 供 CSV 导出)。"""
 

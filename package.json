@@ -2,7 +2,10 @@
   "name": "agent-platform",
   "version": "2.0.0",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "turbo run dev --filter=web --filter=merchant",
     "dev:server": "cd services/gateway-py && uv run --env-file ../../.env uvicorn gateway_py.main:app --port 4000 --reload",
@@ -33,7 +36,8 @@
     "test:prompt:pin": "bun eval/pinBaselines.ts",
     "test:prompt:compare": "bun eval/compareBaselines.ts",
     "test:prompt:record": "bun eval/recordEvals.ts",
-    "evals:import": "cd services/engine-py && uv run python -m engine_py.evals.promptfoo_import ../../eval/.records"
+    "evals:import": "cd services/engine-py && uv run python -m engine_py.evals.promptfoo_import ../../eval/.records",
+    "test:prompt:data": "promptfoo eval -c eval/promptfoo.data.yaml --no-write --no-cache"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

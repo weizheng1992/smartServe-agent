@@ -1,0 +1,15 @@
+description: "data agent 意图映射评测(18-D1;直调 MetricQueryEngine.resolve,纯门不入训)"
+
+prompts:
+  - "{{input}}"
+
+# dataMapping 断言直调 resolve,provider 输出不参与判定(echo 仅为 promptfoo 形态要求)
+providers:
+  - "file://providers/echo_provider.py:call_api"
+
+defaultTest:
+  options:
+    provider: "file://providers/echo_provider.py:call_api"
+
+tests:
+  - testCases/data_analytics/mapping.json

@@ -1,0 +1,177 @@
+"""L3 LLM 意图兜底(08-D1:LLM 只做语义解析、永不写 SQL;ADR-0005)。
+
+问句 → 闭集结构化意图(metric/方向/limit/时间窗/品类)+ 实体提及;
+实体提及经 dimensions 确定性落库解析:唯一命中 → 绑定意图实体槽;
+多命中 → clarify 反问(entity 类,前端点选后原词回问);零命中 → 响亮失败。
+
+治理:
+- metric 只能取注册表闭集;越权/未注册 → UnsupportedQuery(08-P1)。
+- AI_INTENT_L3=off 整体关闭(回滚 = 删环境变量);LLM 异常一律放行到
+  响亮失败,严禁静默兜底。
+"""
+
+from __future__ import annotations
+
+import os
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
+
+from . import dimensions
+from .engine import StructuredQueryIntent, UnsupportedQuery
+from .tools_registry_bridge import metric_semantic_registry
+
+ENTITY_REQUIRED: dict[str, str] = {
+    "promo_effect": "promotion",
+    "promo_sku_compare": "promotion",
+    "customer_orders": "customer",
+}
+_VALID_TIME = ("last_7d", "last_30d", "last_month")
+_VALID_CATEGORY = ("户外机能", "潮流T恤", "下装裤类", "潮流鞋靴", "背包收纳", "露营装备", "衬衫", "配饰", "运动配件")
+
+
+class LlmIntent(BaseModel):
+    """LLM 结构化输出契约(全部可空:null = 未表达,由确定性层校验)。"""
+
+    metric: str | None = Field(None, description="指标 key,必须取自闭集;无法确定则为 null")
+    direction: str | None = Field(None, description="ASC=升序(最差/最低);DESC=降序(最好/最高);默认 null")
+    limit: int | None = Field(None, description="Top N;未表达为 null")
+    time_window: str | None = Field(None, description="last_7d|last_30d|last_month|null")
+    category: str | None = Field(None, description="九品类之一或 null")
+    entity_kind: str | None = Field(None, description="promotion=活动 customer=客户 spu=商品;涉及具体实体时必填")
+    entity_mention: str | None = Field(None, description="实体提及原文(活动名/客户名或手机号/商品名),原样摘取")
+    compare_mention: str | None = Field(None, description="对比目标款(商品名/编码),仅对比类问题")
+
+
+def l3_enabled() -> bool:
+    return os.environ.get("AI_INTENT_L3", "on").strip().lower() not in ("0", "off", "false")
+
+
+def _system_prompt(allowed: list[str] | None) -> str:
+    rows = []
+    for key, m in metric_semantic_registry().items():
+        if allowed and key not in allowed:
+            continue
+        rows.append(f"- {key}({m['label']}): {m['description'][:60]}")
+    return (
+        "你是商户数据问答的意图解析器。把用户问题解析为 JSON,规则:\n"
+        f"- metric 只能从闭集中选,闭集:\n{chr(10).join(rows)}\n"
+        "- 问法/措辞任意,但含义不在闭集内(如问原因、问竞品、闲聊)→ metric=null\n"
+        "- time_window ∈ last_7d|last_30d|last_month|null(「昨天/本周」等闭集外时间也置 null 并在 metric 选择时保守处理)\n"
+        "- direction:问最差/最低/垫底 → ASC;最好/最高/Top → DESC;未表达 null\n"
+        "- 问某活动的销售/效果 → entity_kind='promotion',entity_mention=活动名原文\n"
+        "- 问某客户/某人的订单 → entity_kind='customer',entity_mention=客户名或手机号原文\n"
+        "- 问活动里某款对比其他款 → metric=promo_sku_compare,entity_kind='promotion',"
+        "entity_mention=活动名,compare_mention=目标款商品名或编码\n"
+        "- 实体提及必须摘取用户原话,不要改写"
+    )
+
+
+async def llm_resolve(
+    question: str,
+    allowed: list[str] | None = None,
+    business_id: str = "",
+) -> StructuredQueryIntent:
+    """未命中词表后的一跳:LLM 解析 → 实体落库解析 → 闭集意图。
+
+    返回 StructuredQueryIntent(实体已绑槽);实体多命中/未指明必填实体时
+    **抛出** _EntityClarify(由 graph 翻译成 clarify 帧);一切失败 → UnsupportedQuery。
+    """
+    if not l3_enabled():
+        raise UnsupportedQuery("L3 意图层未启用")
+
+    registry = metric_semantic_registry()
+    try:
+        resp = await get_chat_model().ainvoke([
+            SystemMessage(content=_system_prompt(allowed)),
+            HumanMessage(content=question),
+        ])
+        out = LlmIntent.model_validate(_parse_llm_json(_content_text(resp)))
+    except UnsupportedQuery:
+        raise
+    except Exception as err:  # LLM 网络/供应商故障/格式坏 → 响亮失败,不静默兜底
+        print(f"[L3] LLM 调用失败(响亮失败): {err}")
+        raise UnsupportedQuery("意图解析服务暂不可用") from err
+
+    if not out.metric or out.metric not in registry:
+        raise UnsupportedQuery("问题含义未落在已注册指标闭集内")
+    if allowed and out.metric not in allowed:
+        raise UnsupportedQuery("当前角色无权查看该指标")
+
+    metric_meta = registry[out.metric]
+    direction = out.direction if out.direction in ("ASC", "DESC") else metric_meta["direction"]
+    limit = min(max(int(out.limit or 5), 1), 50)
+    time_window = {"kind": out.time_window} if out.time_window in _VALID_TIME else None
+    category = out.category if out.category in _VALID_CATEGORY else None
+
+    intent = StructuredQueryIntent(
+        metric=out.metric, direction=direction, limit=limit,
+        time_window=time_window, category=category,
+    )
+
+    # 实体槽解析(确定性落库;提及 → 候选 → 绑定/反问/响亮失败)
+    slots: dict[str, list[str]] = {}
+    if out.entity_kind and out.entity_mention:
+        candidates = await dimensions.resolve_entity(out.entity_kind, out.entity_mention)
+        if not candidates:
+            raise UnsupportedQuery(f"没有找到「{out.entity_mention}」对应的{dimensions.kind_label(out.entity_kind)}")
+        if len(candidates) > 1:
+            raise _EntityClarify(out.entity_kind, candidates, question)
+        slots[out.entity_kind] = [candidates[0]["id"]]
+
+    required_kind = ENTITY_REQUIRED.get(out.metric)
+    if required_kind and required_kind not in slots:
+        raise _EntityClarify(required_kind, await dimensions.list_candidates(required_kind), question)
+
+    if out.metric == "promo_sku_compare" and out.compare_mention:
+        targets = await dimensions.resolve_entity("spu", out.compare_mention)
+        if not targets:
+            raise UnsupportedQuery(f"没有找到「{out.compare_mention}」对应的商品")
+        slots["spu"] = [t["id"] for t in targets]
+
+    if slots:
+        intent.entity_slot.update(slots)
+    return intent
+
+
+class _EntityClarify(Exception):
+    """实体多命中/未指明必填实体 → 由 graph 翻译成 clarify 帧(选项即候选)。"""
+
+    def __init__(self, kind: str, candidates: list[dict], question: str) -> None:
+        self.kind = kind
+        self.candidates = candidates
+        self.question = question
+        super().__init__(f"实体多命中: {kind}")
+
+
+from ..llm import get_chat_model
+
+
+def build_llm_resolver():
+    """测试/注入缝:返回 llm_resolve 同签名协程(模型可替换)。"""
+
+    async def _resolve(question: str, allowed: list[str] | None = None, business_id: str = ""):
+        return await llm_resolve(question, allowed, business_id)
+
+    return _resolve
+
+def _content_text(resp) -> str:
+    """LangChain 响应 → 文本(str 或 多模态分段)。"""
+    content = resp.content
+    if isinstance(content, str):
+        return content
+    return "".join(part.get("text", "") for part in content if isinstance(part, dict))
+
+
+def _parse_llm_json(raw: str) -> dict:
+    """剥 ```json 围栏 + 截取首尾大括号(glm 系模型常见输出形态)。"""
+    import json
+    import re as _re
+
+    text = (raw or "").strip()
+    text = _re.sub(r"^```[a-zA-Z]*\s*", "", text)
+    text = _re.sub(r"\s*```\s*$", "", text)
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError(f"响应中无 JSON: {text[:80]!r}")
+    return json.loads(text[start:end + 1])

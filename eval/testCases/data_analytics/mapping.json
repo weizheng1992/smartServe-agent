@@ -1,42 +1,638 @@
 [
   {
     "description": "dataMapping 四要素 - 同义词直命中 gmv(销售族)",
-    "vars": { "input": "销售额最高的商品", "expectedMetric": "gmv", "expectedDirection": "DESC", "expectedTimeWindow": null, "expectedKind": "intent" },
-    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+    "vars": {
+      "input": "销售额最高的商品",
+      "expectedMetric": "gmv",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   },
   {
     "description": "dataMapping 四要素 - 反向词翻转方向(卖得最差 → ASC,08-P1 回归门)",
-    "vars": { "input": "卖得最差的商品", "expectedMetric": "gmv", "expectedDirection": "ASC", "expectedTimeWindow": null, "expectedKind": "intent" },
-    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+    "vars": {
+      "input": "卖得最差的商品",
+      "expectedMetric": "gmv",
+      "expectedDirection": "ASC",
+      "expectedTimeWindow": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   },
   {
     "description": "dataMapping 四要素 - 时间窗解析(近 30 天退款率)",
-    "vars": { "input": "近 30 天退款率", "expectedMetric": "refund_rate", "expectedDirection": "DESC", "expectedTimeWindow": "last_30d", "expectedKind": "intent" },
-    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+    "vars": {
+      "input": "近 30 天退款率",
+      "expectedMetric": "refund_rate",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": "last_30d",
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   },
   {
     "description": "dataMapping 四要素 - 泛指歧义反问(conflictGroup 为选项集)",
-    "vars": { "input": "卖得最好的商品", "expectedMetric": null, "expectedDirection": null, "expectedTimeWindow": null, "expectedKind": "clarify" },
-    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+    "vars": {
+      "input": "卖得最好的商品",
+      "expectedMetric": null,
+      "expectedDirection": null,
+      "expectedTimeWindow": null,
+      "expectedKind": "clarify"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   },
   {
     "description": "dataMapping 四要素 - 不支持问题响亮失败(严禁静默兜底 gmv,08-P1 铁律门)",
-    "vars": { "input": "为什么这个月退货突然变多", "expectedMetric": null, "expectedDirection": null, "expectedTimeWindow": null, "expectedKind": "unsupported" },
-    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+    "vars": {
+      "input": "为什么这个月退货突然变多",
+      "expectedMetric": null,
+      "expectedDirection": null,
+      "expectedTimeWindow": null,
+      "expectedKind": "unsupported"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   },
   {
     "description": "dataMapping 四要素 - 差评榜(阶段③新族)",
-    "vars": { "input": "差评最多的 SKU", "expectedMetric": "review_bad", "expectedDirection": "DESC", "expectedTimeWindow": null, "expectedKind": "intent" },
-    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+    "vars": {
+      "input": "差评最多的 SKU",
+      "expectedMetric": "review_bad",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   },
   {
     "description": "dataMapping 四要素 - 会话量(engine 本地族)",
-    "vars": { "input": "最近的会话量有多少", "expectedMetric": "session_volume", "expectedDirection": "DESC", "expectedTimeWindow": null, "expectedKind": "intent" },
-    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+    "vars": {
+      "input": "最近的会话量有多少",
+      "expectedMetric": "session_volume",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   },
   {
     "description": "dataMapping 四要素 - LIMIT 提取与 clamp(Top 20)",
-    "vars": { "input": "销量 Top 20", "expectedMetric": "volume", "expectedDirection": "DESC", "expectedTimeWindow": null, "expectedLimit": 20, "expectedKind": "intent" },
-    "assert": [{ "type": "python", "value": "file://scorers/data_mapping.py:get_assert" }]
+    "vars": {
+      "input": "销量 Top 20",
+      "expectedMetric": "volume",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": 20,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 营业额 Top10",
+    "vars": {
+      "input": "营业额 Top10",
+      "expectedMetric": "gmv",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": 10,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 成交额最低的商品",
+    "vars": {
+      "input": "成交额最低的商品",
+      "expectedMetric": "gmv",
+      "expectedDirection": "ASC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 流水 top 3",
+    "vars": {
+      "input": "流水 top 3",
+      "expectedMetric": "gmv",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": 3,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 销量 Top5",
+    "vars": {
+      "input": "销量 Top5",
+      "expectedMetric": "volume",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": 5,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 毛利最高的商品",
+    "vars": {
+      "input": "毛利最高的商品",
+      "expectedMetric": "gross_profit",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 毛利最低的商品",
+    "vars": {
+      "input": "毛利最低的商品",
+      "expectedMetric": "gross_profit",
+      "expectedDirection": "ASC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 毛利率排行榜",
+    "vars": {
+      "input": "毛利率排行榜",
+      "expectedMetric": "margin_rate",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 毛利率最低的商品",
+    "vars": {
+      "input": "毛利率最低的商品",
+      "expectedMetric": "margin_rate",
+      "expectedDirection": "ASC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 库存风险最高的商品",
+    "vars": {
+      "input": "库存风险最高的商品",
+      "expectedMetric": "stock_risk",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 差评 Top10",
+    "vars": {
+      "input": "差评 Top10",
+      "expectedMetric": "review_bad",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": 10,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 近 7 天退款率",
+    "vars": {
+      "input": "近 7 天退款率",
+      "expectedMetric": "refund_rate",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": "last_7d",
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 上个月退款率",
+    "vars": {
+      "input": "上个月退款率",
+      "expectedMetric": "refund_rate",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": "last_month",
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 近 7 天会话量",
+    "vars": {
+      "input": "近 7 天会话量",
+      "expectedMetric": "session_volume",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": "last_7d",
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - AI 解决率多少",
+    "vars": {
+      "input": "AI 解决率多少",
+      "expectedMetric": "ai_resolution_rate",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 各活动核销订单数",
+    "vars": {
+      "input": "各活动核销订单数",
+      "expectedMetric": "promo_orders",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 活动核销 Top10",
+    "vars": {
+      "input": "活动核销 Top10",
+      "expectedMetric": "promo_orders",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": 10,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 各活动优惠总额",
+    "vars": {
+      "input": "各活动优惠总额",
+      "expectedMetric": "promo_discount_total",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 优惠总额最低的活动",
+    "vars": {
+      "input": "优惠总额最低的活动",
+      "expectedMetric": "promo_discount_total",
+      "expectedDirection": "ASC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 售后工单分布",
+    "vars": {
+      "input": "售后工单分布",
+      "expectedMetric": "after_sale_overview",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 户外机能品类销量 Top10",
+    "vars": {
+      "input": "户外机能品类销量 Top10",
+      "expectedMetric": "volume",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": 10,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 潮流鞋靴品类销售额 top3",
+    "vars": {
+      "input": "潮流鞋靴品类销售额 top3",
+      "expectedMetric": "gmv",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": 3,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 上个月销售额最高的商品",
+    "vars": {
+      "input": "上个月销售额最高的商品",
+      "expectedMetric": "gmv",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": "last_month",
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 近 7 天销量 Top5",
+    "vars": {
+      "input": "近 7 天销量 Top5",
+      "expectedMetric": "volume",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": "last_7d",
+      "expectedLimit": 5,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 公司营收目标完成率",
+    "vars": {
+      "input": "公司营收目标完成率",
+      "expectedMetric": null,
+      "expectedDirection": null,
+      "expectedTimeWindow": null,
+      "expectedKind": "unsupported"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 竞品卖得怎么样",
+    "vars": {
+      "input": "竞品卖得怎么样",
+      "expectedMetric": null,
+      "expectedDirection": null,
+      "expectedTimeWindow": null,
+      "expectedKind": "unsupported"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 帮我写一段营销文案",
+    "vars": {
+      "input": "帮我写一段营销文案",
+      "expectedMetric": null,
+      "expectedDirection": null,
+      "expectedTimeWindow": null,
+      "expectedKind": "unsupported"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 件数最少的商品",
+    "vars": {
+      "input": "件数最少的商品",
+      "expectedMetric": "volume",
+      "expectedDirection": "ASC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - GMV 趋势",
+    "vars": {
+      "input": "GMV 趋势",
+      "expectedMetric": "gmv_trend",
+      "expectedDirection": "ASC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 勾选订单的统计",
+    "vars": {
+      "input": "勾选订单的统计",
+      "expectedMetric": "order_overview",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 哪个商品卖得好",
+    "vars": {
+      "input": "哪个商品卖得好",
+      "expectedMetric": null,
+      "expectedDirection": null,
+      "expectedTimeWindow": null,
+      "expectedLimit": null,
+      "expectedKind": "clarify"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   }
 ]

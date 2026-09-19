@@ -1,7 +1,7 @@
 // 网关 API 客户端(0013 收口:身份 = Bearer JWT,后端不再信任 x-user-id 头)。
 // 老板可经 /staff/switch 换签任意员工 token 体验各角色视角;原始老板凭证
 // 单独保存在 BOSS_KEY,切换动作始终以老板身份发起(非老板无权签发)。
-import { parseSseFrames, type SseFrame } from '@/lib/sse';
+import { createFrameParser, parseSseFrames, type SseFrame } from '@/lib/sse';
 
 const TOKEN_KEY = 'merchant-admin.token';
 const STAFF_KEY = 'merchant-admin.staff';
@@ -180,13 +180,35 @@ export const api = {
       fetchJson('/api/admin/analytics/roles', { method: 'POST', body: JSON.stringify({ role, menuIds }) }),
   },
 
-  ask: async (question: string, pageContext?: object): Promise<SseFrame[]> => {
-    // SSE 经 fetch 流式读取;逐帧解析 event/data
+  ask: async (
+    question: string,
+    pageContext?: object,
+    /** 流式渲染回调:每凑齐一帧即触发(帧同时聚全量返回,兼容旧用法)。 */
+    onFrame?: (f: SseFrame) => void,
+  ): Promise<SseFrame[]> => {
+    // SSE 经 fetch 流式读取;增量解析逐帧回调(ADR-0005 流式渲染)
     const res = await req('/api/admin/analytics/ask', {
       method: 'POST',
       body: JSON.stringify({ question, pageContext }),
     });
-    return parseSseFrames(await res.text());
+    const frames: SseFrame[] = [];
+    const parser = createFrameParser((f) => {
+      frames.push(f);
+      onFrame?.(f);
+    });
+    const reader = res.body?.getReader();
+    if (reader) {
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parser(decoder.decode(value, { stream: true }));
+      }
+      parser(decoder.decode());
+    } else {
+      parser(await res.text());
+    }
+    return frames;
   },
 
   /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录)。 */
