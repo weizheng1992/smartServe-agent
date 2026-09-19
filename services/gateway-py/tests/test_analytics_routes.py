@@ -712,6 +712,29 @@ class TestL3AndGrowth:
         assert "admin" in MANAGER_ROLES and is_manager("admin")
         assert not is_manager("sales_viewer")
 
+    async def test_ship_rbac(self, client, auth):
+        """发货(order:ship)RBAC:无 token 401 / 运营 403 / 仓储过闸到业务校验。"""
+        boss = await auth()
+        body = {"orderId": "E2E 不存在的单", "trackingNo": "SF123"}
+
+        r_none = await client.post("/api/admin/orders/ship", json=body)
+        assert r_none.status_code == 401
+
+        # 运营(无 order:ship 权限点)→ 403
+        ops = await auth("ops@aurora")
+        r_ops = await client.post("/api/admin/orders/ship", headers=ops, json=body)
+        assert r_ops.status_code == 403
+
+        # 仓储(有 order:ship)过权限闸,未命中业务校验前不落库:订单不存在 → 诚实报错
+        sw = await client.post("/api/admin/analytics/staff/switch", headers=boss, json={"staffId": "wh@aurora"})
+        wh = {"x-tenant-id": "aurora", "Authorization": f"Bearer {sw.json()['token']}"}
+        r_wh = await client.post("/api/admin/orders/ship", headers=wh, json=body)
+        assert r_wh.json().get("success") is False
+
+        # 老板缺字段 → 400 参数校验
+        r_boss = await client.post("/api/admin/orders/ship", headers=boss, json={"orderId": "x"})
+        assert r_boss.status_code == 400
+
     async def test_fallback_rechecks_role_403(self, client, auth, patch_llm):
         """防御纵深:resolver 被替换时,兜底结果仍过角色闭集,越权 → unsupported。"""
         from engine_py.analytics.engine import StructuredQueryIntent

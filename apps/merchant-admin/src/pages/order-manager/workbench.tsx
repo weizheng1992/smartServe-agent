@@ -269,7 +269,7 @@ export function useWorkbenchState(initialTab: string) {
     try {
       const resp = await fetch('/api/admin/orders/ship', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('merchant-admin.token') || ''}` },
         body: JSON.stringify({
           orderId,
           carrierCode: carrierInput,

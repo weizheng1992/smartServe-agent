@@ -19,7 +19,7 @@ from engine_py.approvals.gatekeeper import ApprovalGatekeeper
 from engine_py.db import get_session
 from engine_py.event_bus import get_client as get_redis
 from engine_py.run_agent import AgentJobInput, run_agent
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -200,8 +200,31 @@ async def admin_orders():
 
 
 @router.post("/api/admin/orders/ship")
-async def admin_orders_ship(body: dict):
+async def admin_orders_ship(
+    body: dict,
+    authorization: str | None = Header(None),
+):
+    """发货 = 真实世界副作用(锁定地址/扣库存),按 RBAC order:ship 权限点闸。"""
+    from engine_py.analytics import rbac as analytics_rbac
+
+    from .auth import require_claims
+
     try:
+        claims = await require_claims(authorization)
+        email = str(claims.get("email") or "")
+
+        from engine_py.db import StaffMember
+        from sqlalchemy import select
+
+        async with get_session() as session:
+            staff = (
+                await session.execute(select(StaffMember).where(StaffMember.email == email))
+            ).scalars().first()
+        if staff is None or staff.status != "enabled":
+            return JSONResponse(status_code=403, content={"success": False, "message": "非商户员工或已停用"})
+        if "order:ship" not in await analytics_rbac.perms_for_role(staff.role):
+            return JSONResponse(status_code=403, content={"success": False, "message": "无发货权限(order:ship)"})
+
         if not body.get("orderId") or not body.get("trackingNo"):
             return JSONResponse(
                 status_code=400, content={"success": False, "message": "orderId and trackingNo are required"}
@@ -210,6 +233,8 @@ async def admin_orders_ship(body: dict):
             body["orderId"], body.get("carrierCode") or "SF", body["trackingNo"]
         )
         return result
+    except HTTPException:
+        raise
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
 
