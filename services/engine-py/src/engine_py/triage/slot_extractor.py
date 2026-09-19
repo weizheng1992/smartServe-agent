@@ -165,14 +165,20 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
         intent=AgentIntentType.PROMOTION_QUERY,
         confidence=0.92,
         # 词表单一事实源:intent_registry.PROMOTION_KEYWORDS_RE(2026-09-18
-        # 优惠闭环;规则层产出先例同 metric_query/address_manage)
+        # 优惠闭环;规则层产出先例同 metric_query/address_manage)。
+        # 负向豁免(nightly 2026-09-19):「用优惠券下单」曾整句判优惠查询——
+        # 结算/加购动作词在场时是「带优惠参数的结算诉求」,promotion_skill
+        # 只读查询接不住,严禁吞掉 checkout 半。
         pattern=PROMOTION_KEYWORDS_RE,
+        negative_pattern=re.compile(
+            r"(?:下单|去结算|结算|付款|提交订单|加入购物车|放进购物车|加购)", re.IGNORECASE
+        ),
     ),
     IntentRule(
         intent=AgentIntentType.CART_MANAGE,
         confidence=0.95,
         pattern=re.compile(
-            r"(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|去结算|去买单|查看购物车|清空购物车|购物车里|移出购物车|删除.*?购物车|从购物车.*?删除|买第|件加入|款加入|放入购物车|加第|买第|要第|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+|第[一二三四五12345两几][件款个双].*?(?:购物车|买|要|加|删|改|去)|(?:删除|移除|删掉).*?第[一二三四五12345两几][件款个双])|^(?:把)?第\s*[一二三四五12345两几]\s*[件款个双]|都要|全要|一起买",
+            r"(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|去结算|去买单|下单|查看购物车|清空购物车|购物车里|移出购物车|删除.*?购物车|从购物车.*?删除|买第|件加入|款加入|放入购物车|加第|买第|要第|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+|第[一二三四五12345两几][件款个双].*?(?:购物车|买|要|加|删|改|去)|(?:删除|移除|删掉).*?第[一二三四五12345两几][件款个双])|^(?:把)?第\s*[一二三四五12345两几]\s*[件款个双]|都要|全要|一起买",
             re.IGNORECASE,
         ),
     ),
