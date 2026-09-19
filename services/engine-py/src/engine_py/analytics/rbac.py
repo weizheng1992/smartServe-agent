@@ -97,7 +97,10 @@ def seed_password_hash() -> str:
 async def ensure_defaults(business_id: str) -> None:
     """种子幂等:菜单树/角色分配/三档员工账号(员工补密码,可真实登录)。"""
     async with get_session() as session:
-        existing = {m.id for m in (await session.execute(select(Menu))).scalars()}
+        existing = {
+            m.id for m in
+            (await session.execute(select(Menu).where(Menu.business_id == business_id))).scalars()
+        }
         for m in DEFAULT_MENUS:
             if m["id"] not in existing:
                 session.add(Menu(
@@ -105,12 +108,17 @@ async def ensure_defaults(business_id: str) -> None:
                     menu_type=m["type"], route=m.get("route"), perm_code=m.get("perm"),
                     sort_order=m.get("sort", 0), status="enabled",
                 ))
-        existing_rm = {(rm.role, rm.menu_id) for rm in (await session.execute(select(RoleMenu))).scalars()}
+        existing_rm = {
+            (rm.role, rm.menu_id) for rm in
+            (await session.execute(select(RoleMenu).where(RoleMenu.business_id == business_id))).scalars()
+        }
         for role, menu_ids in DEFAULT_ROLE_MENUS.items():
             for mid in menu_ids:
                 if (role, mid) not in existing_rm:
                     session.add(RoleMenu(role=role, menu_id=mid, business_id=business_id))
-        rows = (await session.execute(select(StaffMember))).scalars().all()
+        rows = (
+            await session.execute(select(StaffMember).where(StaffMember.business_id == business_id))
+        ).scalars().all()
         existing_ids = {s.id for s in rows}
         existing_emails = {s.email for s in rows}
         # 三档种子员工(13-D1 默认起步;email 变更后旧行按 id 幂等迁移;
@@ -142,10 +150,16 @@ async def menu_tree_for_role(business_id: str, role: str) -> list[dict]:
     """角色可见菜单树(服务端强制;前端仅为呈现)。目录折叠:父目录保留当且仅当
     有可见子项。"""
     async with get_session() as session:
-        menus = (await session.execute(select(Menu).where(Menu.status == "enabled"))).scalars().all()
+        menus = (
+            await session.execute(
+                select(Menu).where(Menu.status == "enabled", Menu.business_id == business_id)
+            )
+        ).scalars().all()
         allowed = {
             rm.menu_id for rm in
-            (await session.execute(select(RoleMenu).where(RoleMenu.role == role))).scalars()
+            (await session.execute(
+                select(RoleMenu).where(RoleMenu.role == role, RoleMenu.business_id == business_id)
+            )).scalars()
         }
     visible = [m for m in menus if m.id in allowed or role == "finance_owner"]
     # 护栏(13 号):老板系统菜单不可移除 —— 即便 role_menus 被清也强制可见
@@ -183,14 +197,17 @@ async def find_staff(business_id: str, staff_id_or_email: str | None) -> StaffMe
         ).scalars().first()
 
 
-async def perms_for_role(role: str) -> list[str]:
+async def perms_for_role(business_id: str, role: str) -> list[str]:
     """角色 → 按钮权限点闭集(role_menus ⨝ menus.perm_code;0013 动态化,
     角色管理页勾选即生效)。finance_owner 兜底全量已登记权限点。"""
     async with get_session() as session:
         if role == "finance_owner":
             rows = (
                 await session.execute(
-                    select(Menu.perm_code).where(Menu.menu_type == "button", Menu.perm_code.is_not(None))
+                    select(Menu.perm_code).where(
+                        Menu.menu_type == "button", Menu.perm_code.is_not(None),
+                        Menu.business_id == business_id,
+                    )
                 )
             ).scalars().all()
         else:
@@ -198,7 +215,10 @@ async def perms_for_role(role: str) -> list[str]:
                 await session.execute(
                     select(Menu.perm_code)
                     .join(RoleMenu, RoleMenu.menu_id == Menu.id)
-                    .where(RoleMenu.role == role, Menu.menu_type == "button", Menu.perm_code.is_not(None))
+                    .where(
+                        RoleMenu.role == role, Menu.menu_type == "button",
+                        Menu.perm_code.is_not(None), Menu.business_id == business_id,
+                    )
                 )
             ).scalars().all()
     return sorted(set(rows))
@@ -213,7 +233,9 @@ async def set_role_menus(business_id: str, role: str, menu_ids: list[str], opera
     if role == "finance_owner":
         menu_ids = list({*menu_ids, *SYSTEM_MENU_IDS})
     async with get_session() as session:
-        all_menus = (await session.execute(select(Menu))).scalars().all()
+        all_menus = (
+            await session.execute(select(Menu).where(Menu.business_id == business_id))
+        ).scalars().all()
         by_id = {m.id: m for m in all_menus}
         # 传入 id 全部保留(静默丢弃会让「勾了却不生效」);父链只为存在者补祖先
         expanded: set[str] = set(menu_ids)
@@ -227,7 +249,11 @@ async def set_role_menus(business_id: str, role: str, menu_ids: list[str], opera
             if parent_id and parent_id not in expanded:
                 expanded.add(parent_id)
                 stack.append(parent_id)
-        await session.execute(delete(RoleMenu).where(RoleMenu.role == role))
+        await session.execute(
+            delete(RoleMenu).where(
+                RoleMenu.role == role, RoleMenu.business_id == business_id
+            )
+        )
         for mid in sorted(expanded):
             session.add(RoleMenu(role=role, menu_id=mid, business_id=business_id))
         await session.commit()
@@ -240,7 +266,7 @@ async def set_role_menus(business_id: str, role: str, menu_ids: list[str], opera
         print(f"[RBAC] audit failed: {err}")
 
 
-async def allowed_metrics_for_role(role: str) -> list[str] | None:
+async def allowed_metrics_for_role(business_id: str, role: str) -> list[str] | None:
     """指标闭集过滤(13-D2;None=全量)。
 
     0013 起两级解析:角色若持有 `metric:` 前缀按钮权限点(菜单管理可自行
@@ -249,7 +275,10 @@ async def allowed_metrics_for_role(role: str) -> list[str] | None:
     """
     if role == "finance_owner":
         return None
-    metric_perms = {p.removeprefix("metric:") for p in await perms_for_role(role) if p.startswith("metric:")}
+    metric_perms = {
+        p.removeprefix("metric:")
+        for p in await perms_for_role(business_id, role) if p.startswith("metric:")
+    }
     if metric_perms:
         return sorted(metric_perms)
     return ROLE_METRIC_PERMISSIONS.get(role, ROLE_METRIC_PERMISSIONS["sales_viewer"])

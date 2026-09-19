@@ -222,7 +222,7 @@ async def admin_orders_ship(
             ).scalars().first()
         if staff is None or staff.status != "enabled":
             return JSONResponse(status_code=403, content={"success": False, "message": "非商户员工或已停用"})
-        if "order:ship" not in await analytics_rbac.perms_for_role(staff.role):
+        if "order:ship" not in await analytics_rbac.perms_for_role("aurora", staff.role):
             return JSONResponse(status_code=403, content={"success": False, "message": "无发货权限(order:ship)"})
 
         if not body.get("orderId") or not body.get("trackingNo"):

@@ -42,7 +42,7 @@ async def _ctx(request: Request) -> dict:
         "role": staff.role,
         "staff": staff.email,
         "display": staff.display_name,
-        "perms": await rbac.perms_for_role(staff.role),
+        "perms": await rbac.perms_for_role(business_id, staff.role),
     }
 
 
