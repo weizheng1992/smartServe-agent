@@ -51,23 +51,34 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
             await _log_unanswered(session_ctx, question)
             return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单", "detail": str(err)}
         if isinstance(intent, dict) and intent.get("clarify"):
+            intent.setdefault("originalQuestion", question)  # 实体反问回问时带上原问题
             return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
+        # 兜底结果同样过角色闭集(防御纵深:resolver 替换/演化时不放行越权)
+        if not isinstance(intent, dict) and allowed and intent.metric not in allowed:
+            await _log_unanswered(session_ctx, question)
+            return {"type": "unsupported", "message": "当前角色无权查看该指标", "detail": intent.metric}
 
     if isinstance(intent, dict) and intent.get("clarify"):
         return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
 
-    # 必填实体缺失(L0/范例直出)→ 列实体候选反问(entity 类 clarify)
+    # 必填实体缺失(L0/范例直出):问句里已逐字写明候选名 → 自动绑定;
+    # 否则列实体候选反问(entity 类 clarify,帧携带原问题供点选回问)
     missing_kind = _missing_entity_kind(intent)
     if missing_kind:
         from . import dimensions
 
         candidates = await dimensions.list_candidates(missing_kind)
-        return {
-            "type": "clarify",
-            "clarifyKind": "entity",
-            "question": f"请选择{dimensions.kind_label(missing_kind)}——",
-            "options": [{"label": c["label"]} for c in candidates],
-        }
+        mentioned = [c for c in candidates if c["label"] in question or c["id"] in question]
+        if len(mentioned) == 1:
+            intent.entity_slot[missing_kind] = [mentioned[0]["id"]]
+        else:
+            return {
+                "type": "clarify",
+                "clarifyKind": "entity",
+                "question": f"请选择{dimensions.kind_label(missing_kind)}——",
+                "originalQuestion": question,
+                "options": [{"label": c["label"]} for c in candidates],
+            }
 
     if allowed is not None and intent.metric not in allowed:
         return {
@@ -109,19 +120,40 @@ async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx
 
     返回 (intent | clarify dict, via_llm);全部未命中 → UnsupportedQuery。
     """
-    from . import exemplar_service
+    from . import dimensions, exemplar_service
 
     try:
         exemplar = await exemplar_service.search_exemplar(question, session_ctx.get("business_id") or "")
         if exemplar and exemplar["intent"].get("metric"):
+            # 陈旧校验(ADR-0005 后续①):实体槽引用已删除实体 → 停用范例,落 L3
+            stale = False
+            for kind, ids in (exemplar["intent"].get("entity_slot") or {}).items():
+                if ids and not await dimensions.entity_ids_exist(kind, ids):
+                    print(f"[L2] 范例陈旧(实体已删,{kind}): 停用并落 L3")
+                    await exemplar_service.deactivate_exemplar(exemplar["id"])
+                    stale = True
+                    break
+            if stale:
+                from .llm_intent import llm_resolve
+
+                return await llm_resolve(question, allowed, session_ctx.get("business_id") or ""), True
             print(f"[L2] 范例命中({exemplar['similarity']:.2f}): {exemplar['question'][:40]!r}")
             return StructuredQueryIntent(**exemplar["intent"]), False
     except Exception as err:
         print(f"[L2] 范例检索失败(放行 L3): {err}")
 
-    from .llm_intent import llm_resolve
+    from .llm_intent import _EntityClarify, dimensions, llm_resolve
 
-    intent = await llm_resolve(question, allowed, session_ctx.get("business_id") or "")
+    try:
+        intent = await llm_resolve(question, allowed, session_ctx.get("business_id") or "")
+    except _EntityClarify as entity_clarify:
+        print(f"[L3] 实体反问({entity_clarify.kind}): {len(entity_clarify.candidates)} 候选")
+        return {
+            "clarify": True,
+            "clarifyKind": "entity",
+            "question": f"请选择{dimensions.kind_label(entity_clarify.kind)}——",
+            "options": [{"label": c["label"]} for c in entity_clarify.candidates],
+        }, False
     if isinstance(intent, StructuredQueryIntent):
         try:
             await exemplar_service.add_exemplar(

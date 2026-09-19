@@ -82,3 +82,21 @@ async def list_candidates(kind: str, limit: int = 8) -> list[dict]:
 
 class UnsupportedEntityKind(Exception):
     """未知实体种类(编程错误,非用户问题)。"""
+
+
+async def entity_ids_exist(kind: str, ids: list[str]) -> bool:
+    """意图实体槽引用的实体是否仍存在(L2 范例回放前校验;陈旧 → 停用范例)。"""
+    if not ids:
+        return True
+    table, col = {
+        "promotion": ("promotions", "id::text"),
+        "customer": ("merchant_customers", "customer_id"),
+        "spu": ("merchant_spus", "spu_code"),
+    }[kind]
+    async with order_domain._merchant_reader_engine().connect() as conn:
+        row = (
+            await conn.execute(text(
+                f"SELECT COUNT(*) AS n FROM {table} WHERE {col} = ANY(:ids)"
+            ).bindparams(ids=list(ids)[:20]))
+        ).scalar()
+    return bool(row)

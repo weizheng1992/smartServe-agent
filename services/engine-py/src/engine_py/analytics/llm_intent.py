@@ -115,6 +115,10 @@ async def llm_resolve(
         candidates = await dimensions.resolve_entity(out.entity_kind, out.entity_mention)
         if not candidates:
             raise UnsupportedQuery(f"没有找到「{out.entity_mention}」对应的{dimensions.kind_label(out.entity_kind)}")
+        # 逐字消歧:问句里已写明唯一候选名 → 直接绑定,不打断用户反问
+        mentioned = [c for c in candidates if c["label"] in question]
+        if len(mentioned) == 1:
+            candidates = mentioned
         if len(candidates) > 1:
             raise _EntityClarify(out.entity_kind, candidates, question)
         slots[out.entity_kind] = [candidates[0]["id"]]

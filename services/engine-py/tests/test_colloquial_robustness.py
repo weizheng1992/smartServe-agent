@@ -74,13 +74,21 @@ class TestReviewTokenMatch:
                 await conn.execute(text(
                     "CREATE TABLE IF NOT EXISTS merchant_spus ("
                     " id UUID PRIMARY KEY, spu_code TEXT UNIQUE, title TEXT NOT NULL,"
-                    " subtitle TEXT, description TEXT, category TEXT, main_image TEXT,"
+                    " subtitle TEXT, description TEXT, category TEXT NOT NULL DEFAULT '户外机能', main_image TEXT,"
                     " specs JSONB DEFAULT '{}'::jsonb, status TEXT DEFAULT 'ON_SALE',"
                     " created_at TIMESTAMP NOT NULL DEFAULT NOW())"
                 ))
+                # 共享容器形状对齐:窄形状(相邻套件)先建表时补齐本套件查询所需列
                 await conn.execute(text(
-                    "INSERT INTO merchant_spus (id, spu_code, title) VALUES "
-                    "(CAST(:sid AS uuid), 'SPU-RT-1', '极光三合一全天候户外硬壳冲锋衣 (2026款旗舰版)') "
+                    "ALTER TABLE merchant_spus "
+                    "ADD COLUMN IF NOT EXISTS subtitle TEXT, "
+                    "ADD COLUMN IF NOT EXISTS description TEXT, "
+                    "ADD COLUMN IF NOT EXISTS main_image TEXT, "
+                    "ADD COLUMN IF NOT EXISTS specs JSONB DEFAULT '{}'::jsonb"
+                ))
+                await conn.execute(text(
+                    "INSERT INTO merchant_spus (id, spu_code, title, category) VALUES "
+                    "(CAST(:sid AS uuid), 'SPU-RT-1', '极光三合一全天候户外硬壳冲锋衣 (2026款旗舰版)', '户外机能') "
                     "ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title"
                 ).bindparams(sid="22222222-2222-2222-2222-222222222222"))
                 await conn.execute(text(

@@ -76,7 +76,15 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                       key={j}
                       type="button"
                       className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
-                      onClick={() => onAsk(f.data.clarifyKind === 'entity' ? o.label : `按${o.label}的商品排行`)}
+                      onClick={() =>
+                        onAsk(
+                          f.data.clarifyKind === 'entity'
+                            ? f.data.originalQuestion
+                              ? `${f.data.originalQuestion}(${o.label})`
+                              : o.label
+                            : `按${o.label}的商品排行`,
+                        )
+                      }
                     >
                       {o.label}
                     </button>

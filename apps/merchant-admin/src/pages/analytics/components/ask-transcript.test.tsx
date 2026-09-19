@@ -46,13 +46,16 @@ describe('AskTranscript', () => {
     expect(onAsk).toHaveBeenCalledWith('按销量的商品排行');
   });
 
-  it('clarify(实体反问)选项点击 → 原样回发选项文案(不加模板前缀)', () => {
+  it('clarify(实体反问)点击 → 原问题 + 选项名组合回问(保留查询上下文)', () => {
     renderTranscript([{
       event: 'clarify',
-      data: { clarifyKind: 'entity', question: '请选择活动——', options: [{ label: '开学季满减' }, { label: '618 大促' }] },
+      data: {
+        clarifyKind: 'entity', question: '请选择活动——', originalQuestion: '有个活动卖得怎么样',
+        options: [{ label: '开学季满减' }, { label: '618 大促' }],
+      },
     }]);
     fireEvent.click(screen.getByRole('button', { name: '开学季满减' }));
-    expect(onAsk).toHaveBeenCalledWith('开学季满减');
+    expect(onAsk).toHaveBeenCalledWith('有个活动卖得怎么样(开学季满减)');
   });
 
   it('customer_orders 结果卡:渲染订单行 + 「在订单中查看」跳转写选中集合', () => {

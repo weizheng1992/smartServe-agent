@@ -69,5 +69,21 @@ async def search_exemplar(question: str, business_id: str, limit: int = 3) -> di
             continue
         score = cosine_similarity(vector, row.embedding)
         if score >= MATCH_THRESHOLD and (best is None or score > best["similarity"]):
-            best = {"question": row.question, "intent": json.loads(row.intent_json), "similarity": score}
+            best = {
+                "id": row.id,
+                "question": row.question,
+                "intent": json.loads(row.intent_json),
+                "similarity": score,
+            }
     return best
+
+
+async def deactivate_exemplar(exemplar_id: str) -> None:
+    """停用陈旧范例(实体已删除等;回放前校验失败时调用,防持续劫持)。"""
+    async with get_session() as session:
+        row = (await session.execute(
+            select(QueryExemplar).where(QueryExemplar.id == exemplar_id)
+        )).scalars().first()
+        if row:
+            row.is_active = False
+            await session.commit()

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -476,6 +477,188 @@ class TestTrendAndCrud:
         dup = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
                                 headers=boss, json={"orderId": "AURORA-ORD-2026-9081"})
         assert dup.status_code == 400 and "幂等" in dup.json()["error"]
+
+
+class TestL3AndGrowth:
+    """ADR-0005:L3 意图兜底 / 实体反问 / L2 范例回放 / 未命中落库 / 角色防线。
+
+    L3 的 LLM 调用在测试中 monkeypatch(外部服务);数据全部走密封真实库。
+    """
+
+    @pytest.fixture()
+    def patch_llm(self, monkeypatch):
+        """替换 llm_resolve:返回预定意图/clarify,便于隔离测 graph 接线。"""
+        def _patch(outcome):
+            async def _fake(question, allowed=None, business_id=""):
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+            monkeypatch.setattr("engine_py.analytics.llm_intent.llm_resolve", _fake)
+        return _patch
+
+    async def test_l3_activity_effect_sse(self, client, auth, patch_llm):
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        created = await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "E2E L3 活动效果", "promoType": "full_reduction", "threshold": 100, "value": 10,
+        })
+        pid = created.json()["id"]
+
+        # 种核销归因:活动 → 真实订单
+        async with _merchant_writer_engine().begin() as conn:
+            await conn.execute(_t(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                "VALUES ('E2E-L3-ORD', 'CUST-L3', 'PAID', 500.00, '{}'::jsonb) "
+                "ON CONFLICT (order_id) DO UPDATE SET total_amount = 500.00"
+            ))
+            await conn.execute(_t(
+                "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+                "VALUES (CAST(:p AS uuid), 'E2E-L3-ORD', 10.00)"
+            ).bindparams(p=pid))
+
+        patch_llm(StructuredQueryIntent(
+            metric="promo_effect", entity_slot={"promotion": [pid]},
+        ))
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": "E2E L3 那档子促销战报如何"})
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "promo_effect"
+        row = events["result"]["rows"][0]
+        assert row["核销订单数"] >= 1 and row["优惠总额"] >= 10
+
+    async def test_l3_customer_orders_sse(self, client, auth, patch_llm):
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        boss = await auth()
+        patch_llm(StructuredQueryIntent(
+            metric="customer_orders", entity_slot={"customer": ["CUST-L3"]}, limit=10,
+        ))
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": "L3 客户最近的订单"})
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "customer_orders"
+        assert isinstance(events["result"]["rows"], list)
+
+    async def test_entity_clarify_multi_hit_and_reply_loop(self, client, auth, patch_llm):
+        """多命中 → clarify(entity) → 按选项原词回问 → 唯一命中出结果(闭环)。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.llm_intent import _EntityClarify
+
+        boss = await auth()
+        await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "E2E 多命中活动甲", "promoType": "coupon", "value": 5,
+        })
+        await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "E2E 多命中活动乙", "promoType": "coupon", "value": 8,
+        })
+
+        patch_llm(_EntityClarify("promotion", [
+            {"id": "id-甲", "label": "E2E 多命中活动甲"},
+            {"id": "id-乙", "label": "E2E 多命中活动乙"},
+        ], "多命中活动卖得怎么样"))
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": "多命中活动卖得怎么样"})
+        events = dict(_sse_events(r))
+        assert events["clarify"]["clarifyKind"] == "entity"
+        labels = [o["label"] for o in events["clarify"]["options"]]
+        assert "E2E 多命中活动甲" in labels
+
+        # 回问闭环:用户点选后原词回问 → L3 唯一解析 → 出结果
+        target = next(p for p in
+                      (await client.get("/api/admin/analytics/promotions", headers=boss)).json()["promotions"]
+                      if p["name"] == "E2E 多命中活动甲")
+        patch_llm(StructuredQueryIntent(
+            metric="promo_effect", entity_slot={"promotion": [target["id"]]},
+        ))
+        r2 = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": "E2E 多命中活动甲"})
+        events2 = dict(_sse_events(r2))
+        assert events2["result"]["metric"] == "promo_effect"
+
+    async def test_exemplar_replay_l2(self, client, auth):
+        """L2 范例回放:L0 未命中的问句,登记范例后同问直出意图(不触 L3)。"""
+        from engine_py.analytics import exemplar_service
+
+        question = "E2E 范例回放专用神秘问法"
+        await exemplar_service.add_exemplar(
+            "aurora", question,
+            {"metric": "gmv", "direction": "DESC", "limit": 5, "time_window": None, "category": None},
+            source="llm",
+        )
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": question})
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "gmv"
+
+    async def test_unsupported_logged_to_agent_unanswered(self, client, auth):
+        import uuid
+
+        from engine_py.db import AgentUnanswered, get_session
+        from sqlalchemy import select
+
+        question = f"E2E 宇宙语问题 {uuid.uuid4().hex[:8]}"
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": question})
+        assert dict(_sse_events(r)).get("unsupported")
+        async with get_session() as session:
+            rows = (await session.execute(
+                select(AgentUnanswered).where(AgentUnanswered.question == question)
+            )).scalars().all()
+        assert len(rows) == 1 and rows[0].role == "finance_owner"
+
+    async def test_clarify_options_filtered_by_role(self, client, auth):
+        """仓储视角泛指问句 → clarify 选项收敛到其指标闭集(13 号票欠账)。"""
+        boss = await auth()
+        sw = await client.post("/api/admin/analytics/staff/switch", headers=boss, json={"staffId": "wh@aurora"})
+        wh = {**TENANT, "Authorization": f"Bearer {sw.json()['token']}"}
+        r = await client.post("/api/admin/analytics/ask", headers=wh, json={"question": "卖得最好的商品"})
+        events = dict(_sse_events(r))
+        options = events["clarify"]["options"]
+        assert options, "仓储闭集内应有可反问的兄弟指标"
+        assert all(o["key"] in ("volume", "stock_risk") for o in options)
+
+    async def test_stale_exemplar_deactivated_and_falls_to_l3(self, client, auth, patch_llm, monkeypatch):
+        """L2 范例指向已删除实体 → 停用范例并落 L3(ADR-0005 后续①)。"""
+        from engine_py.analytics import exemplar_service
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        question = f"E2E 陈旧范例回放问法 {uuid.uuid4().hex[:8]}"
+        # 范例指向一个不存在的活动
+        await exemplar_service.add_exemplar(
+            "aurora", question,
+            {"metric": "gmv", "direction": "DESC", "limit": 5, "time_window": None,
+             "category": None, "entity_slot": {"promotion": ["00000000-0000-0000-0000-000000000000"]}},
+            source="llm",
+        )
+        called = {"n": 0}
+
+        async def _fake_llm(q, allowed=None, business_id=""):
+            called["n"] += 1
+            return StructuredQueryIntent(metric="gmv", direction="DESC", limit=5)
+
+        monkeypatch.setattr("engine_py.analytics.llm_intent.llm_resolve", _fake_llm)
+
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": question})
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "gmv"
+        assert called["n"] == 1, "陈旧范例应落 L3(被调用)"
+        # 范例已停用,不会再次劫持
+        rows = await exemplar_service.search_exemplar(question, "aurora")
+        assert rows is None
+
+    async def test_fallback_rechecks_role_403(self, client, auth, patch_llm):
+        """防御纵深:resolver 被替换时,兜底结果仍过角色闭集,越权 → unsupported。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        ops = await auth("ops@aurora")  # 运营闭集不含 gross_profit
+        patch_llm(StructuredQueryIntent(metric="gross_profit", direction="DESC"))
+        # 问法避开 L0 词表 → 走兜底 → 纵深校验拦截
+        r = await client.post("/api/admin/analytics/ask", headers=ops, json={"question": "上季度利润贡献王者榜单"})
+        events = dict(_sse_events(r))
+        assert events["unsupported"]["message"] == "当前角色无权查看该指标"
 
 
 class TestSkuCrud:
