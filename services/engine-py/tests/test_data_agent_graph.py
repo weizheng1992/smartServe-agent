@@ -62,7 +62,7 @@ class TestGraphAsk:
         0013 起指标闭集经 rbac 动态派生(DB);本套件保持无 DB,桩掉派生层
         返回空集(未持任何 metric: 权限点 → 回落内置闭集路径不在此覆盖,
         gateway 契约测试有真实 DB 的对应用例)。"""
-        async def _no_metric_perms(role):
+        async def _no_metric_perms(business_id, role):
             return []
 
         monkeypatch.setattr("engine_py.analytics.rbac.allowed_metrics_for_role", _no_metric_perms)
