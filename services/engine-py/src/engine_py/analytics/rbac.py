@@ -205,15 +205,17 @@ async def set_role_menus(business_id: str, role: str, menu_ids: list[str], opera
     async with get_session() as session:
         all_menus = (await session.execute(select(Menu))).scalars().all()
         by_id = {m.id: m for m in all_menus}
-        expanded: set[str] = set()
+        # 传入 id 全部保留(静默丢弃会让「勾了却不生效」);父链只为存在者补祖先
+        expanded: set[str] = set(menu_ids)
+        unknown = [mid for mid in menu_ids if mid not in by_id]
+        if unknown:
+            print(f"[RBAC] 警告: menu_ids 含未登记菜单(已原样保留): {unknown}")
         stack = [mid for mid in menu_ids if mid in by_id]
         while stack:
             mid = stack.pop()
-            if mid in expanded:
-                continue
-            expanded.add(mid)
             parent_id = by_id[mid].parent_id
             if parent_id and parent_id not in expanded:
+                expanded.add(parent_id)
                 stack.append(parent_id)
         await session.execute(delete(RoleMenu).where(RoleMenu.role == role))
         for mid in sorted(expanded):
