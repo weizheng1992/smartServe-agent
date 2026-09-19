@@ -4,7 +4,6 @@ import type {
   ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow, SkuRow, SpuRow, WorkbenchTab,
 } from "./workbench.types";
 
-export type { Workbench };
 export type {
   ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow, SkuRow, SpuRow, WorkbenchTab,
 };

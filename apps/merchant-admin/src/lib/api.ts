@@ -19,7 +19,7 @@ export function setSession(token: string, email: string) {
 }
 
 export function clearSession() {
-  [TOKEN_KEY, STAFF_KEY, BOSS_KEY].forEach((k) => localStorage.removeItem(k));
+  for (const k of [TOKEN_KEY, STAFF_KEY, BOSS_KEY]) localStorage.removeItem(k);
 }
 
 /** 是否持有老板凭证(顶栏身份切换器仅对老板可见)。 */
@@ -53,6 +53,56 @@ async function req(path: string, init?: RequestInit) {
   }
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res;
+}
+
+/** 域数据请求:400 级业务错误也返回 body,由页面按 success/message 呈现文案。 */
+async function fetchJson(path: string, init?: RequestInit) {
+  const res = await fetch(path, {
+    ...init,
+    headers: { ...authHeaders(), ...(init?.headers || {}) },
+  });
+  if (res.status === 401) {
+    clearSession();
+    location.href = '/';
+    throw new Error('401 登录已过期');
+  }
+  return res.json();
+}
+
+export interface Spu {
+  id: string;
+  spu_code: string;
+  title: string;
+  category: string;
+  status: string;
+  price: number;
+  stock: number;
+}
+
+export interface Sku {
+  id: string;
+  sku_code: string;
+  sku_title: string | null;
+  price: number;
+  stock: number;
+  spec_attributes: string | null;
+}
+
+export interface Promotion {
+  id: string;
+  name: string;
+  promoType: string;
+  threshold: number | null;
+  value: number;
+  scopeType: string;
+  scopeValue: string | null;
+  status: string;
+}
+
+export interface PromoEffect {
+  activePromotions: number;
+  redemptions: number;
+  totalDiscount: number;
 }
 
 export interface MenuNode {
@@ -122,5 +172,37 @@ export const api = {
     list: async () => (await req('/api/admin/analytics/reports')).json(),
     create: async () => (await req('/api/admin/analytics/reports', { method: 'POST', body: '{}' })).json(),
     csv: async (id: string) => (await req(`/api/admin/analytics/reports/${id}/csv`)).json(),
+  },
+
+  /** 商品目录(SPU/SKU;页面只做编排,数据操作收口在此)。 */
+  products: {
+    list: async (): Promise<{ success: boolean; spus: Spu[] }> => fetchJson('/api/admin/analytics/spus'),
+    create: async (p: { title: string; category: string; price: number; stock: number }) =>
+      fetchJson('/api/admin/analytics/spus', { method: 'POST', body: JSON.stringify(p) }),
+    update: async (id: string, patch: Partial<{ title: string; price: number; stock: number; status: string }>) =>
+      fetchJson(`/api/admin/analytics/spus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: async (id: string) => fetchJson(`/api/admin/analytics/spus/${id}`, { method: 'DELETE' }),
+    listSkus: async (spuId: string): Promise<{ success: boolean; skus: Sku[] }> =>
+      fetchJson(`/api/admin/analytics/spus/${spuId}/skus`),
+    createSku: async (spuId: string, sku: { skuTitle: string; price: string; stock: string }) =>
+      fetchJson(`/api/admin/analytics/spus/${spuId}/skus`, { method: 'POST', body: JSON.stringify(sku) }),
+    updateSku: async (skuId: string, patch: { price: number; stock: number }) =>
+      fetchJson(`/api/admin/analytics/skus/${skuId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    removeSku: async (skuId: string) => fetchJson(`/api/admin/analytics/skus/${skuId}`, { method: 'DELETE' }),
+  },
+
+  /** 优惠活动(创建/编辑/启停/删除/核销)。 */
+  promotions: {
+    list: async (): Promise<{ success: boolean; promotions: Promotion[]; effect: PromoEffect }> =>
+      fetchJson('/api/admin/analytics/promotions'),
+    create: async (p: { name: string; promoType: string; threshold?: number; value: number }) =>
+      fetchJson('/api/admin/analytics/promotions', { method: 'POST', body: JSON.stringify(p) }),
+    update: async (id: string, patch: { name: string; value: number }) =>
+      fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    setStatus: async (id: string, status: string) =>
+      fetchJson(`/api/admin/analytics/promotions/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+    remove: async (id: string) => fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'DELETE' }),
+    redeem: async (id: string, orderId: string) =>
+      fetchJson(`/api/admin/analytics/promotions/${id}/redeem`, { method: 'POST', body: JSON.stringify({ orderId }) }),
   },
 };

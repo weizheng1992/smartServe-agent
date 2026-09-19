@@ -46,12 +46,12 @@ export function ApprovalsTab() {
 
   const waitingCount = approvals.filter((a) => a.status === 'waiting').length;
 
-  const FILTERS = [
+  const FILTERS: Array<{ key: string; label: string; badge?: number }> = [
     { key: 'waiting', label: '⏳ 待审核', badge: waitingCount },
     { key: 'approved', label: '✅ 已核准' },
     { key: 'rejected', label: '❌ 已驳回' },
     { key: 'all', label: '全部记录' },
-  ] as const;
+  ];
 
   return (
     <div className="space-y-4">
