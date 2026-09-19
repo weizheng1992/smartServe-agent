@@ -360,7 +360,7 @@ async def place_order(params: dict) -> dict:
         sku = (
             await conn.execute(
                 text(
-                    "SELECT s.*, p.title as spu_title, p.main_image as spu_image, p.id as spu_id "
+                    "SELECT s.*, p.title as spu_title, p.main_image as spu_image, p.id as spu_id, p.spu_code "
                     "FROM merchant_skus s JOIN merchant_spus p ON s.spu_id = p.id "
                     "WHERE s.sku_code = :code LIMIT 1"
                 ),
@@ -378,20 +378,40 @@ async def place_order(params: dict) -> dict:
         spec_summary = " / ".join(f"{k}:{v}" for k, v in (sku["spec_attributes"] or {}).items())
 
     async with merchant_engine().begin() as conn:
+        # 优惠引擎(20-D3):SAVEPOINT 隔离,失败按原价结算不毒化事务
+        discount = 0.0
+        promo_name = None
+        coupon_row_id = None
+        try:
+            from engine_py.analytics.promotion_engine import best_for_amount, best_user_coupon
+
+            amount = round(pay_amount, 2)
+            scope = {str(sku["spu_code"])} if "spu_code" in sku else None
+            auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
+            user_coupon = await best_user_coupon(conn, params["customerId"], amount)
+            if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
+                discount = user_coupon["discount"]; promo_name = user_coupon["name"]
+                coupon_row_id = user_coupon["coupon_row_id"]
+            elif auto:
+                discount = auto["discount"]; promo_name = auto["name"]
+        except Exception as promo_err:
+            print(f"[MerchantDomain] 优惠计算失败,按原价结算: {promo_err}")
+
         await conn.execute(
             text("UPDATE merchant_skus SET stock = stock - :qty WHERE sku_code = :code"),
             {"qty": quantity, "code": params["skuCode"]},
         )
         await conn.execute(
             text(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, currency, "
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
                 "shipping_address, is_returnable, is_address_modifiable) "
-                "VALUES (:oid, :cid, 'PAID', :amt, 'CNY', :addr, TRUE, TRUE)"
+                "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', :addr, TRUE, TRUE)"
             ),
             {
                 "oid": order_id,
                 "cid": params["customerId"],
-                "amt": pay_amount,
+                "amt": round(pay_amount - discount, 2),
+                "disc": round(discount, 2),
                 "addr": json.dumps(
                     {
                         "recipientName": params.get("recipientName", "张伟"),
@@ -402,6 +422,10 @@ async def place_order(params: dict) -> dict:
                 ),
             },
         )
+        if coupon_row_id:
+            from engine_py.analytics import promotions as _promo_svc
+
+            await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id)
         await conn.execute(
             text(
                 "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price, "
@@ -419,7 +443,14 @@ async def place_order(params: dict) -> dict:
                 "spec": spec_summary,
             },
         )
-    return {"success": True, "orderId": order_id}
+    return {
+        "success": True,
+        "orderId": order_id,
+        "originalAmount": round(pay_amount, 2),
+        "discount": round(discount, 2),
+        "promoName": promo_name,
+        "payableAmount": round(pay_amount - discount, 2),
+    }
 
 
 async def ship_order(order_id: str, carrier_code: str, tracking_no: str) -> dict:
@@ -593,7 +624,7 @@ async def create_order_from_cart(customer_id: str, items: list[dict], shipping_a
                 sku = (
                     await conn.execute(
                         text(
-                            "SELECT s.*, p.title as spu_title, p.main_image as spu_image, p.id as spu_id "
+                            "SELECT s.*, p.title as spu_title, p.main_image as spu_image, p.id as spu_id, p.spu_code "
                             "FROM merchant_skus s JOIN merchant_spus p ON s.spu_id = p.id "
                             "WHERE s.sku_code = :code FOR UPDATE"
                         ),
@@ -615,6 +646,7 @@ async def create_order_from_cart(customer_id: str, items: list[dict], shipping_a
                 items_to_insert.append(
                     {
                         "spuId": str(sku["spu_id"]),
+                        "spuCode": str(sku["spu_code"]),
                         "skuCode": sku["sku_code"],
                         "spuTitle": sku["spu_title"],
                         "skuTitle": sku["sku_title"],
@@ -625,19 +657,42 @@ async def create_order_from_cart(customer_id: str, items: list[dict], shipping_a
                     }
                 )
 
+            # 优惠引擎(20-D3):SAVEPOINT 隔离,失败按原价不毒化事务
+            discount = 0.0
+            promo_name = None
+            coupon_row_id = None
+            try:
+                from engine_py.analytics.promotion_engine import best_for_amount, best_user_coupon
+
+                scope = {str(oi["spuCode"]) for oi in items_to_insert}
+                auto = await best_for_amount(conn, round(total_amount, 2), scope, exclude_coupon=True)
+                user_coupon = await best_user_coupon(conn, customer_id, round(total_amount, 2))
+                if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
+                    discount = user_coupon["discount"]; promo_name = user_coupon["name"]
+                    coupon_row_id = user_coupon["coupon_row_id"]
+                elif auto:
+                    discount = auto["discount"]; promo_name = auto["name"]
+            except Exception as promo_err:
+                print(f"[MerchantDomain] 购物车结算优惠计算失败,按原价: {promo_err}")
+
             await conn.execute(
                 text(
-                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, currency, "
+                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
                     "shipping_address, is_returnable, is_address_modifiable) "
-                    "VALUES (:oid, :cid, 'PAID', :amt, 'CNY', :addr, TRUE, TRUE)"
+                    "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', :addr, TRUE, TRUE)"
                 ),
                 {
                     "oid": order_id,
                     "cid": customer_id,
-                    "amt": total_amount,
+                    "amt": round(total_amount - discount, 2),
+                    "disc": round(discount, 2),
                     "addr": json.dumps(shipping_address, ensure_ascii=False),
                 },
             )
+            if coupon_row_id:
+                from engine_py.analytics import promotions as _promo_svc
+
+                await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id)
             for oi in items_to_insert:
                 await conn.execute(
                     text(
@@ -658,4 +713,11 @@ async def create_order_from_cart(customer_id: str, items: list[dict], shipping_a
                 )
     except _CartError as err:
         return {"success": False, "message": err.message}
-    return {"success": True, "orderId": order_id, "totalAmount": total_amount}
+    return {
+        "success": True,
+        "orderId": order_id,
+        "totalAmount": round(total_amount, 2),
+        "discount": round(discount, 2),
+        "promoName": promo_name,
+        "payableAmount": round(total_amount - discount, 2),
+    }

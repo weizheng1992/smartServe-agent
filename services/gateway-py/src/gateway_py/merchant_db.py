@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS merchant_order_items (
 
 -- ADR-0003 Q1:成本价(当前采购进价)+ 明细成交进价快照 —— 毛利精确口径
 ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS promo_id UUID;
 ALTER TABLE merchant_order_items ADD COLUMN IF NOT EXISTS cost_at_purchase NUMERIC(10,2) NOT NULL DEFAULT 0;
 
 -- 商品评价(2026-09-13):「评价好的X」检索/查询的真实数据面 —— 此前

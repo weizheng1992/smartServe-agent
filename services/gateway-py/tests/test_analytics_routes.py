@@ -85,8 +85,9 @@ class TestAsk:
     async def test_ask_selected_orders_compare(self, client, auth):
         """PageContext 勾选两单 → 「两个订单对比」出逐笔行 + 合计/均值(ADR-0005)。"""
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
-        from gateway_py.merchant_db import ensure_merchant_tables
         from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
 
         await ensure_merchant_tables()
         boss = await auth()

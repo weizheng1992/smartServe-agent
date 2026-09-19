@@ -28,6 +28,8 @@ export default function CartPage() {
   const [checkoutResult, setCheckoutResult] = useState<{
     orderId?: string;
     message?: string;
+    discount?: number;
+    payableAmount?: number;
   } | null>(null);
 
   // 加载购物车和地址数据
@@ -140,8 +142,9 @@ export default function CartPage() {
     setIsCheckingOut(true);
 
     try {
-      // 循环结算选中的商品项
+      // 循环结算选中的商品项(服务端 place_order 自动应用优惠并返回 discount)
       const orderIds: string[] = [];
+      let totalDiscount = 0;
       for (const item of selectedItems) {
         const res = await fetch('/api/store/orders', {
           method: 'POST',
@@ -158,16 +161,17 @@ export default function CartPage() {
         const data = await res.json();
         if (data.success && data.orderId) {
           orderIds.push(data.orderId);
+          totalDiscount += Number(data.discount || 0);
         }
       }
-
       // 结算完成后从购物车剔除选中的项
       const remainCart = cart.filter((it) => !it.selected);
       saveCart(remainCart);
 
+      const discountNote = totalDiscount > 0 ? `已优惠 ¥${totalDiscount}。` : '';
       setCheckoutResult({
         orderId: orderIds.join(', '),
-        message: `结算成功！已生成订单：${orderIds.join(', ')}`,
+        message: `结算成功！已生成订单：${orderIds.join(', ')}。${discountNote}`,
       });
     } catch {
       alert('下单结算出现异常，请重试');
