@@ -31,6 +31,7 @@ _CALIBERS = {
     "promo_effect": "活动口径 = 核销记录关联订单(真实归因;自然流量不计入),GMV 为核销订单实付合计",
     "promo_sku_compare": "活动内对比 = 该活动核销订单的商品明细聚合;目标款在「对比分组」列标记",
     "customer_orders": "客户订单 = 名下全部订单按下单时间倒序",
+    "promo_compare": "双活动对比 = 各自核销记录关联订单聚合(真实归因;自然流量不计入)",
 }
 
 
@@ -363,6 +364,24 @@ class MetricQueryEngine:
                 'ORDER BY o.created_at DESC'
             )
             params["entities"] = list(intent.entity_ids)[:100]
+        elif intent.metric == "promo_compare":
+            # ADR-0005 登记流水线首批:双活动并排对比(核销关联口径)
+            params.pop("lim", None)  # 并排两行无 LIMIT 槽位
+            promo_ids = (intent.entity_slot or {}).get("promotion") or []
+            if len(promo_ids) < 2:
+                raise UnsupportedQuery("请指明两个活动,如「活动A 对比 活动B」")
+            params["entities"] = promo_ids[:10]
+            sql = (
+                'SELECT p.name AS "活动", '
+                'COUNT(DISTINCT r.order_id) AS "核销订单数", '
+                'COALESCE(SUM(o.total_amount), 0)::float AS "核销GMV", '
+                'COALESCE(SUM(r.discount_amount), 0)::float AS "优惠总额" '
+                'FROM promotion_redemptions r '
+                'JOIN promotions p ON p.id = r.promotion_id '
+                'JOIN merchant_orders o ON o.order_id = r.order_id '
+                'WHERE p.id = ANY(:entities) '
+                'GROUP BY p.name, p.id ORDER BY "核销GMV" DESC'
+            )
         elif intent.metric == "ai_resolution_rate":
             if intent.time_window:
                 time_clause = "AND created_at >= :window_start"

@@ -712,6 +712,56 @@ class TestL3AndGrowth:
         assert "admin" in MANAGER_ROLES and is_manager("admin")
         assert not is_manager("sales_viewer")
 
+    async def test_promo_compare_sse(self, client, auth, patch_llm, monkeypatch):
+        """双活动对比查询族(ADR-0005 登记流水线首批):L3 解析双实体 → 并排两行。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        pa = await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "E2E 对比活动A", "promoType": "full_reduction", "threshold": 100, "value": 20})
+        pb = await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "E2E 对比活动B", "promoType": "full_reduction", "threshold": 200, "value": 40})
+        ida, idb = pa.json()["id"], pb.json()["id"]
+
+        async with _merchant_writer_engine().begin() as conn:
+            for oid, cid, amt in (("E2E-CMP2-A", "C1", 400.00), ("E2E-CMP2-B", "C2", 800.00)):
+                await conn.execute(_t(
+                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                    "VALUES (:oid, :cid, 'PAID', :amt, '{}'::jsonb) "
+                    "ON CONFLICT (order_id) DO UPDATE SET total_amount = :amt"
+                ), {"oid": oid, "cid": cid, "amt": amt})
+            await conn.execute(_t(
+                "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+                "VALUES (CAST(:a AS uuid), 'E2E-CMP2-A', 20.00), (CAST(:b AS uuid), 'E2E-CMP2-B', 40.00)"
+            ), {"a": ida, "b": idb})
+
+        async def _fake_llm(q, allowed=None, business_id=""):
+            return StructuredQueryIntent(
+                metric="promo_compare", entity_slot={"promotion": [ida, idb]},
+            )
+        monkeypatch.setattr("engine_py.analytics.llm_intent.llm_resolve", _fake_llm)
+
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "E2E 对比活动A 和 E2E 对比活动B 哪个好",
+        })
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "promo_compare"
+        rows = events["result"]["rows"]
+        assert len(rows) == 2
+        assert all("核销订单数" in row and "核销GMV" in row for row in rows)
+
+        # 清理
+        async with _merchant_writer_engine().begin() as conn:
+            await conn.execute(_t("DELETE FROM promotion_redemptions WHERE order_id LIKE 'E2E-CMP2-%'"))
+            await conn.execute(_t("DELETE FROM merchant_orders WHERE order_id LIKE 'E2E-CMP2-%'"))
+            await conn.execute(_t("DELETE FROM promotions WHERE id IN (CAST(:a AS uuid), CAST(:b AS uuid))"),
+                               {"a": ida, "b": idb})
+
     async def test_ship_rbac(self, client, auth):
         """发货(order:ship)RBAC:无 token 401 / 运营 403 / 仓储过闸到业务校验。"""
         boss = await auth()

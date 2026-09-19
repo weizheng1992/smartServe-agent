@@ -666,5 +666,37 @@
         "value": "file://scorers/data_mapping.py:get_assert"
       }
     ]
+  },
+  {
+    "description": "dataMapping - 两个活动对比(promo_compare 登记流水线)",
+    "vars": {
+      "input": "两个活动对比",
+      "expectedMetric": "promo_compare",
+      "expectedDirection": "DESC",
+      "expectedTimeWindow": null,
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "dataMapping - 对比一下新客50元券和背包品类85折(promo_compare 登记流水线)",
+    "vars": {
+      "input": "对比一下新客50元券和背包品类85折",
+      "expectedMetric": null,
+      "expectedDirection": null,
+      "expectedTimeWindow": null,
+      "expectedKind": "unsupported"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   }
 ]

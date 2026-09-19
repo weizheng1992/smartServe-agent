@@ -65,6 +65,9 @@ def _system_prompt(allowed: list[str] | None) -> str:
         "entity_mention=活动名,compare_mention=目标款商品名或编码\n"
         "- 问「选中的/勾选的订单」「两个订单对比/这两单差异」→ metric=order_overview"
         "(实体由页面勾选集提供,entity_kind/entity_mention 留空)\n"
+        "- 问两个活动的对比(如「A活动 对比 B活动 哪个好」「两个活动哪个效果好」)→ "
+        "metric=promo_compare,entity_kind='promotion',entity_mention=第一个活动名,"
+        "compare_mention=第二个活动名\n"
         "- 实体提及必须摘取用户原话,不要改写"
     )
 
@@ -134,6 +137,22 @@ async def llm_resolve(
         if not targets:
             raise UnsupportedQuery(f"没有找到「{out.compare_mention}」对应的商品")
         slots["spu"] = [t["id"] for t in targets]
+
+    if out.metric == "promo_compare":
+        # 双活动实体:entity_mention + compare_mention 各解析一个活动
+        for field, mention in (("entity", out.entity_mention), ("compare", out.compare_mention)):
+            if not mention:
+                continue
+            cands = await dimensions.resolve_entity("promotion", mention)
+            if not cands:
+                raise UnsupportedQuery(f"没有找到「{mention}」对应的活动")
+            if len(cands) > 1:
+                raise _EntityClarify("promotion", cands, question)
+            slots.setdefault("promotion", [])
+            slots["promotion"].append(cands[0]["id"])
+        slots["promotion"] = list(dict.fromkeys(slots.get("promotion") or []))
+        if len(slots["promotion"]) < 2:
+            raise UnsupportedQuery("请指明两个不同的活动,如「活动A 对比 活动B」")
 
     if slots:
         intent.entity_slot.update(slots)
