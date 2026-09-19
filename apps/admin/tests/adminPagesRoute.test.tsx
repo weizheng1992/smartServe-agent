@@ -75,6 +75,9 @@ describe('Admin Control Plane Multi-Route Integration Tests', () => {
     const store = useAdminTenantStore.getState();
     expect(store.selectedTenantId).toBe('all');
 
+    // 真实租户列表由 /api/tenant/list 动态加载(dev 网关在线才有;CI 无网关),
+    // 这里直接注入一个真实形态租户,只验证切换/命中/回退的纯逻辑
+    useAdminTenantStore.getState().addOrUpdateTenant({ id: 'nike', name: 'Nike 官方旗舰店' });
     store.setSelectedTenantId('nike');
     expect(useAdminTenantStore.getState().selectedTenantId).toBe('nike');
     expect(useAdminTenantStore.getState().getSelectedTenant().name).toBe('Nike 官方旗舰店');
