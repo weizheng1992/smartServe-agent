@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-from engine_py.analytics import llm_intent
 from engine_py.analytics.llm_intent import (
     ENTITY_REQUIRED,
     LlmIntent,
