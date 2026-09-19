@@ -676,6 +676,42 @@ class TestL3AndGrowth:
         rows = await exemplar_service.search_exemplar(question, "aurora")
         assert rows is None
 
+    async def test_admin_can_manage(self, client, auth):
+        """0014+:admin 管理员角色可分配权限/管理菜单/切换身份(老板之外的第二管理角色)。"""
+        from engine_py.analytics import rbac
+
+        await rbac.ensure_defaults("aurora")
+        admin = await auth("admin@aurora")
+
+        # ① 勾选菜单分配权限保存成功
+        base = (await client.get("/api/admin/analytics/roles/warehouse_operator/menus", headers=admin)).json()["menuIds"]
+        ok = await client.post("/api/admin/analytics/roles/warehouse_operator/menus",
+                               headers=admin, json={"menuIds": base})
+        assert ok.status_code == 200
+
+        # ② 新建菜单成功(管理菜单闸)
+        created = await client.post("/api/admin/analytics/menus", headers=admin, json={
+            "name": "管理员建菜单", "menuType": "menu", "route": "/admin-tmp",
+        })
+        assert created.status_code == 200
+        await client.delete(f"/api/admin/analytics/menus/{created.json()['id']}", headers=admin)
+
+        # ③ 切换身份成功
+        sw = await client.post("/api/admin/analytics/staff/switch", headers=admin, json={"staffId": "wh@aurora"})
+        assert sw.status_code == 200 and sw.json()["role"] == "warehouse_operator"
+
+    async def test_admin_seed_metrics_full(self, client, auth):
+        """管理员指标闭集 = 全量(gmv 越权兜底不触发)。"""
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        admin = await auth("admin@aurora")
+        r = await client.post("/api/admin/analytics/ask", headers=admin, json={"question": "毛利最高的商品"})
+        kinds = [e for e, _ in _sse_events(r)]
+        assert any(k in ("result", "error") for k in kinds)
+        denied = dict(_sse_events(r))
+        assert not denied.get("unsupported", {}).get("message", "").startswith("当前角色无权")
+
     async def test_fallback_rechecks_role_403(self, client, auth, patch_llm):
         """防御纵深:resolver 被替换时,兜底结果仍过角色闭集,越权 → unsupported。"""
         from engine_py.analytics.engine import StructuredQueryIntent

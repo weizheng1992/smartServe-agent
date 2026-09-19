@@ -19,7 +19,9 @@ from sqlalchemy import delete, select
 
 from ..db import Menu, RoleMenu, StaffMember, get_session
 
-ROLES = ("finance_owner", "sales_viewer", "warehouse_operator")
+ROLES = ("finance_owner", "admin", "sales_viewer", "warehouse_operator")
+# 管理角色:可分配权限/管理系统配置(老板+管理员);老板额外保留防锁死护栏
+MANAGER_ROLES = ("finance_owner", "admin")
 SYSTEM_MENU_IDS = ("m-analytics", "m-reports", "m-products", "m-orders", "m-customers", "m-promotions", "m-menus", "m-roles", "m-staff")
 
 # 默认菜单树(16 号原型同构;menu_type: directory|menu|button)。
@@ -62,6 +64,7 @@ DEFAULT_MENUS: list[dict] = [
 _SALES_DENY_BUTTONS = {"btn-prod-edit", "btn-order-ship", "btn-menu-create", "btn-role-assign", "btn-staff-invite"}
 DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
     "finance_owner": [m["id"] for m in DEFAULT_MENUS],
+    "admin": [m["id"] for m in DEFAULT_MENUS],
     "sales_viewer": [m["id"] for m in DEFAULT_MENUS if m["id"] not in _SALES_DENY_BUTTONS],
     "warehouse_operator": [
         "d-data", "m-analytics", "m-reports",
@@ -73,9 +76,15 @@ DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
 # 角色→指标可见闭集(13-D2:成本敏感三指标限 finance_owner;仓储见库存面)
 ROLE_METRIC_PERMISSIONS: dict[str, list[str] | None] = {
     "finance_owner": None,  # None = 全量
+    "admin": None,  # 管理员同老板全量
     "sales_viewer": ["gmv", "volume", "review_bad", "refund_rate", "session_volume", "ai_resolution_rate"],
     "warehouse_operator": ["volume", "stock_risk", "refund_rate", "session_volume"],
 }
+
+
+def is_manager(role: str) -> bool:
+    """管理角色(老板/管理员):可分配权限、管理系统配置。"""
+    return role in MANAGER_ROLES
 
 
 def seed_password_hash() -> str:
@@ -109,6 +118,7 @@ async def ensure_defaults(business_id: str) -> None:
         pwd_hash: str | None = None
         for sid, email, name, role in (
             ("staff_owner", "test@example.com", "老板", "finance_owner"),
+            ("staff_admin", "admin@aurora", "管理员", "admin"),
             ("staff_ops", "ops@aurora", "运营", "sales_viewer"),
             ("staff_wh", "wh@aurora", "仓储", "warehouse_operator"),
         ):

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { api, hasBossSession, type MenuNode } from '@/lib/api';
+import { api, type MenuNode } from '@/lib/api';
 import { RoleAssignPanel } from './components/role-assign-panel';
 import { RoleCreateForm } from './components/role-create-form';
 
@@ -18,14 +18,18 @@ export default function RolesPage() {
   const [tree, setTree] = useState<MenuNode[]>([]);
   const [msg, setMsg] = useState('');
   const [assigning, setAssigning] = useState<string | null>(null);
+  const [canAssign, setCanAssign] = useState(false);
 
   const load = useCallback(async () => {
     setRoles((await api.roles.list()).roles || []);
-    setTree((await api.menus()).menus || []);
+    const m = await api.menus();
+    setTree(m.menus || []);
+    // 分配权限点(老板/管理员角色自带 role:assign;也可经菜单管理勾给其他角色)
+    setCanAssign((m.perms || []).includes('role:assign'));
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const boss = hasBossSession();
+  const boss = canAssign;
 
   async function openAssign(role: string) {
     setMsg('');
@@ -37,7 +41,7 @@ export default function RolesPage() {
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 text-sm font-medium">
           <span>角色列表</span>
-          {!boss && <span className="text-[11px] text-zinc-400">仅老板可分配权限</span>}
+          {!boss && <span className="text-[11px] text-zinc-400">需 role:assign 权限点(老板/管理员)</span>}
         </div>
         <table className="w-full text-[13px]">
           <thead>

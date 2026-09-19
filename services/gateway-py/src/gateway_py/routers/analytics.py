@@ -82,8 +82,8 @@ async def set_role_menus(role: str, request: Request):
     ctx = await _ctx(request)
     if role not in rbac.ROLES and not role.startswith("custom_"):
         return JSONResponse(status_code=400, content={"success": False, "message": f"未知角色 {role}"})
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可分配权限"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可分配权限"})
     body = await request.json()
     await rbac.set_role_menus(ctx["business_id"], role, list(body.get("menuIds") or []), ctx["staff"])
     return {"success": True}
@@ -93,8 +93,8 @@ async def set_role_menus(role: str, request: Request):
 async def get_role_menus(role: str, request: Request):
     """角色当前权限分配明细(角色管理页勾选树回填)。"""
     ctx = await _ctx(request)
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可查看权限分配"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可查看权限分配"})
     from engine_py.db import RoleMenu, get_session
 
     async with get_session() as session:
@@ -124,8 +124,8 @@ async def switch_account(request: Request):
     前端换 token 后即以该员工身份行事;非老板 403(旧实现任意 staffId 可
     自报身份,已随 x-user-id 信任一并拆除)。"""
     ctx = await _ctx(request)
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可切换查看身份"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可切换查看身份"})
     body = await request.json()
     target = str(body.get("staffId") or "").strip()
     if not target:
@@ -224,8 +224,8 @@ async def promotions_set_status(promotion_id: str, request: Request):
 @router.post("/api/admin/analytics/menus")
 async def create_menu(request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可管理菜单"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可管理菜单"})
     body = await request.json()
     name = str(body.get("name") or "").strip()
     menu_type = body.get("menuType") or "menu"
@@ -250,8 +250,8 @@ async def create_menu(request: Request):
 @router.patch("/api/admin/analytics/menus/{menu_id}")
 async def update_menu(menu_id: str, request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可管理菜单"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可管理菜单"})
     body = await request.json()
     from engine_py.db import Menu, get_session
     from sqlalchemy import select
@@ -272,8 +272,8 @@ async def update_menu(menu_id: str, request: Request):
 @router.delete("/api/admin/analytics/menus/{menu_id}")
 async def delete_menu(menu_id: str, request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可管理菜单"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可管理菜单"})
     if menu_id in rbac.SYSTEM_MENU_IDS:
         return JSONResponse(status_code=400, content={"success": False, "message": "护栏:系统菜单不可删除"})
     from engine_py.db import Menu, RoleMenu, get_session
@@ -319,8 +319,8 @@ async def roles_list(request: Request):
 @router.post("/api/admin/analytics/roles")
 async def roles_create(request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可新建角色"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可新建角色"})
     body = await request.json()
     role = str(body.get("role") or "").strip()
     menu_ids = list(body.get("menuIds") or [])
@@ -344,8 +344,8 @@ async def roles_create(request: Request):
 @router.post("/api/admin/analytics/staff")
 async def staff_invite(request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可邀请员工"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可邀请员工"})
     body = await request.json()
     email = str(body.get("email") or "").strip().lower()
     display = str(body.get("displayName") or email).strip()
@@ -379,8 +379,8 @@ async def staff_invite(request: Request):
 @router.patch("/api/admin/analytics/staff/{staff_id}")
 async def staff_update(staff_id: str, request: Request):
     ctx = await _ctx(request)
-    if ctx["role"] != "finance_owner":
-        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可管理员工"})
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可管理员工"})
     body = await request.json()
     from engine_py.db import StaffMember, get_session
     from sqlalchemy import select
