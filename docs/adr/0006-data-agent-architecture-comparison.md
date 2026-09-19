@@ -93,3 +93,35 @@
 4. 指标 >50 引入 MetaRAG 召回;
 5. 多轮/断点需求出现时迁 LangGraph StateGraph;
 6. text-to-SQL「非核验口径」二期缝独立评审。
+
+## 附:微调技术栈对照(2026 主流 QLoRA/DoRA/DPO/GRPO 提案 vs 本仓 metric_head 现状)
+
+提案结论:QLoRA 单卡首选、DoRA 精度升级、DPO 适合对话偏好、**GRPO 适合带可验证奖励的 Agent 任务**;框架 Unsloth(单卡快速)/LLaMA-Factory(中文生态)/Axolotl(多卡生产)。
+
+### 本仓现状(已在做的「微调」)
+
+metric_head 训练闭环(`scripts/training/` + [训练文档](../training/metric-head-training.md)):词表自动造弱标注 590 句(seed_from_registry)→ prepare_data → train(bge-small-zh 嵌入 + 线性分类头)→ evaluate(heldout 98.9%)→ 部署(AI_METRIC_HEAD 三态 shadow/on,回滚=删环境变量)。这等价于提案表格里「单卡快速实验,小样本分类」的极简形态——模型不是 LLM,是嵌入+线性头,但「弱标注→训练→灰度→回滚」的工程闭环完整。
+
+### 何时需要升级到 LLM 微调(触发器)
+
+| 触发器 | 动作 |
+|---|---|
+| ① metric_head heldout 准确率跌破阈值 / 闭集外意图激增 | 自托管 Qwen2.5-7B-Instruct,QLoRA SFT 微调「问句→SemQL」(训练样本=mapping.json 同格式) |
+| ② bigmodel API 限流(实测 429,详见实弹记录)/成本/延迟不可接受 | 同①——自托管同时解决限流依赖 |
+| ③ 意图解析准确率要求超过 prompt+小模型上限 | TRL GRPO:**可验证奖励已现成**——SemQL 过闭集校验+实体命中+口径匹配即 dataMapping scorer 的奖励函数(提案「Agent 工具调用选 GRPO」的典型场景) |
+
+### 约束(不变)
+
+- 08-D1 铁律:微调目标永远是「语义理解 → SemQL」,**任何微调都不能让模型产出 SQL 文本**;
+- 18 号不变量:评测集纯门永不入训,seed_from_registry 弱标注需过滤评测集近邻(cos ≥ 0.90 已实现);
+- bigmodel API 是外部服务不可微调——LLM 微调的前提是自托管模型(前置成本,按触发器①②评估)。
+
+### 技术栈对照(提案推荐 vs 本仓适用性)
+
+| 提案推荐 | 本仓判定 |
+|---|---|
+| QLoRA(Unsloth 单卡) | ✅ 升级触发时首选(自托管 Qwen 意图模型) |
+| DoRA | 🟡 同 QLoRA,精度优先时替换 |
+| DPO | 🟡 客服主链路(finish 话术)可适用,非 data agent |
+| GRPO | ✅ 触发器③的候选:SemQL 可验证奖励(闭集+实体+口径)天然构成 reward |
+| GaLore/PiSSA/VeRA/TorchTune/Axolotl/ms-swift | ❌ 当前规模不需要;多卡生产再评估 Axolotl |
