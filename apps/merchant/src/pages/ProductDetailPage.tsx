@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useNavigate, useParams } from 'react-router';
 import { useCurrentUser } from '@/context/UserContext';
@@ -23,13 +23,19 @@ export default function ProductDetailPage() {
   const [isAddingToCart, setIsAddingToCart] = useState(false);
   const [cartSuccessMessage, setCartSuccessMessage] = useState<string | null>(null);
   const [couponPromos, setCouponPromos] = useState<Array<{ id: string; name: string; value: number }>>([]);
+  const [claimedIds, setClaimedIds] = useState<Set<string>>(new Set());
   const [couponMsg, setCouponMsg] = useState('');
-  useEffect(() => {
+  const refreshCoupons = useCallback(() => {
+    fetch(`/api/store/coupons?userId=${encodeURIComponent((user as any).id)}`)
+      .then((r) => r.json())
+      .then((b) => setClaimedIds(new Set((b.coupons || []).map((x: any) => x.promotionId))))
+      .catch(() => {});
     fetch('/api/store/promotions')
       .then((r) => r.json())
       .then((b) => setCouponPromos((b.promotions || []).filter((p: any) => p.promoType === 'coupon')))
       .catch(() => {});
-  }, []);
+  }, [(user as any).id]);
+  useEffect(() => { refreshCoupons(); }, [refreshCoupons]);
 
 
   useEffect(() => {
@@ -143,6 +149,7 @@ export default function ProductDetailPage() {
     });
     const b = await res.json();
     setCouponMsg(b.success ? '✓ 领取成功,结算自动抵扣' : b.message);
+    refreshCoupons();
   }
   const currentStock = selectedSku ? selectedSku.stock : product.stock;
 
@@ -230,12 +237,19 @@ export default function ProductDetailPage() {
                 <span className="text-emerald-700 font-extrabold text-3xl">¥{currentPrice.toFixed(2)}</span>
                 {couponPromos.length > 0 && (
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                    {couponPromos.map((p) => (
-                      <button key={p.id} onClick={() => void claimCoupon(p.id)}
-                        className="rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-rose-600 hover:border-rose-500">
-                        🎫 领 ¥{p.value} 券({p.name})
-                      </button>
-                    ))}
+                    {couponPromos.map((p) => {
+                      const claimed = claimedIds.has(p.id);
+                      return claimed ? (
+                        <span key={p.id} className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-400">
+                          ✓ 已领取 ¥{p.value} 券({p.name})
+                        </span>
+                      ) : (
+                        <button type="button" key={p.id} onClick={() => void claimCoupon(p.id)}
+                          className="rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-rose-600 hover:border-rose-500">
+                          🎫 领 ¥{p.value} 券({p.name})
+                        </button>
+                      );
+                    })}
                     {couponMsg && <span className="text-zinc-500">{couponMsg}</span>}
                   </div>
                 )}

@@ -179,14 +179,15 @@ async def my_coupons(user_id: str) -> list[dict]:
         rows = (
             await conn.execute(
                 text(
-                    "SELECT uc.id, p.name, p.discount_value, uc.claimed_at FROM user_coupons uc "
+                    "SELECT uc.id, uc.promotion_id, p.name, p.discount_value, uc.claimed_at FROM user_coupons uc "
                     "JOIN promotions p ON p.id = uc.promotion_id "
                     "WHERE uc.user_id = :u AND uc.status = 'claimed' AND p.promo_type = 'coupon' "
                     "ORDER BY uc.claimed_at DESC"
                 ).bindparams(u=user_id)
             )
         ).mappings().all()
-    return [{"id": r["id"], "name": r["name"], "value": float(r["discount_value"]),
+    return [{"id": r["id"], "promotionId": r["promotion_id"], "name": r["name"],
+             "value": float(r["discount_value"]),
              "claimedAt": r["claimed_at"].isoformat() if r["claimed_at"] else None} for r in rows]
 
 
