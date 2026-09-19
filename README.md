@@ -217,6 +217,8 @@ bun run worker                            # Temporal Worker(周期任务)
 |---|---|
 | [双模块重构 spec](docs/specs/mall-data-agent-split.md) | v4 全量规格(ready-for-agent, 含六阶段排期) |
 | [ADR-0004](docs/adr/0004-semantic-layer-route-and-dual-agent-seam.md) | 语义层路线(LLM 永不写 SQL)+双 Agent 模块缝 |
+| [ADR-0005](docs/adr/0005-data-agent-llm-intent-and-growth-loop.md) | L3 LLM 意图兜底 + 覆盖增长机制(未命中落库) |
+| [ADR-0006](docs/adr/0006-data-agent-architecture-comparison.md) | **架构对照:LangGraph+MetaRAG+GRPO 全家桶提案 vs 语义层轻管线**——逐层采用/暂不采用/明确不采用的理由与重新评估触发器 |
 | [训练文档](docs/training/metric-head-training.md) | 小模型数据源/格式/库/参数/部署全链路 |
 | [wayfinder 图谱](docs/wayfinder/mall-data-agent-split/map.md) | 20 张决策票完整推导(实现期歧义以票为源) |
 | [商户接入指南](docs/merchant-onboarding-guide.md) | SPI 对接/RAG 灌入/审批策略 |
