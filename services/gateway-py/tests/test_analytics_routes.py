@@ -700,17 +700,17 @@ class TestL3AndGrowth:
         sw = await client.post("/api/admin/analytics/staff/switch", headers=admin, json={"staffId": "wh@aurora"})
         assert sw.status_code == 200 and sw.json()["role"] == "warehouse_operator"
 
-    async def test_admin_seed_metrics_full(self, client, auth):
-        """管理员指标闭集 = 全量(gmv 越权兜底不触发)。"""
-        from gateway_py.merchant_db import ensure_merchant_tables
+    def test_admin_seed_metrics_full(self):
+        """管理员指标闭集 = 全量(纯配置断言;零 DB/零 loop,防跨 loop 连接池冲突)。"""
+        from engine_py.analytics.rbac import (
+            MANAGER_ROLES,
+            ROLE_METRIC_PERMISSIONS,
+            is_manager,
+        )
 
-        await ensure_merchant_tables()
-        admin = await auth("admin@aurora")
-        r = await client.post("/api/admin/analytics/ask", headers=admin, json={"question": "毛利最高的商品"})
-        kinds = [e for e, _ in _sse_events(r)]
-        assert any(k in ("result", "error") for k in kinds)
-        denied = dict(_sse_events(r))
-        assert not denied.get("unsupported", {}).get("message", "").startswith("当前角色无权")
+        assert ROLE_METRIC_PERMISSIONS["admin"] is None
+        assert "admin" in MANAGER_ROLES and is_manager("admin")
+        assert not is_manager("sales_viewer")
 
     async def test_fallback_rechecks_role_403(self, client, auth, patch_llm):
         """防御纵深:resolver 被替换时,兜底结果仍过角色闭集,越权 → unsupported。"""
