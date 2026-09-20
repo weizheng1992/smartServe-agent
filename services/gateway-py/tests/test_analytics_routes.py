@@ -523,6 +523,24 @@ class TestL3AndGrowth:
             monkeypatch.setattr("engine_py.analytics.llm_intent.llm_resolve", _fake)
         return _patch
 
+    @pytest.fixture()
+    def patch_embedding(self, monkeypatch):
+        """密封 L2 范例向量:CI 无 bge 权重缓存且 hf-mirror 不可达(2026-09-20 实证)。
+
+        按问题文本哈希生成 one-hot 向量 —— 同问相似度 1.0(回放命中),
+        异问不串扰(不会误中其他用例登记的范例)。
+        """
+        import hashlib
+
+        class _FakeEmbed:
+            async def aembed_query(self, text: str) -> list[float]:
+                idx = int(hashlib.md5(text.encode()).hexdigest(), 16) % 64
+                return [1.0 if i == idx else 0.0 for i in range(64)]
+
+        monkeypatch.setattr(
+            "engine_py.llm.get_embedding_model", lambda: _FakeEmbed()
+        )
+
     async def test_l3_activity_effect_sse(self, client, auth, patch_llm):
         from engine_py.analytics.engine import StructuredQueryIntent
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
@@ -604,7 +622,7 @@ class TestL3AndGrowth:
         events2 = dict(_sse_events(r2))
         assert events2["result"]["metric"] == "promo_effect"
 
-    async def test_exemplar_replay_l2(self, client, auth):
+    async def test_exemplar_replay_l2(self, client, auth, patch_embedding):
         """L2 范例回放:L0 未命中的问句,登记范例后同问直出意图(不触 L3)。"""
         from engine_py.analytics import exemplar_service
 
@@ -646,7 +664,7 @@ class TestL3AndGrowth:
         assert options, "仓储闭集内应有可反问的兄弟指标"
         assert all(o["key"] in ("volume", "stock_risk") for o in options)
 
-    async def test_stale_exemplar_deactivated_and_falls_to_l3(self, client, auth, patch_llm, monkeypatch):
+    async def test_stale_exemplar_deactivated_and_falls_to_l3(self, client, auth, patch_llm, patch_embedding, monkeypatch):
         """L2 范例指向已删除实体 → 停用范例并落 L3(ADR-0005 后续①)。"""
         from engine_py.analytics import exemplar_service
         from engine_py.analytics.engine import StructuredQueryIntent
