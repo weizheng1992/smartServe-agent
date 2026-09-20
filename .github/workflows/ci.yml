@@ -33,6 +33,8 @@ jobs:
   python:
     name: Python (ruff / engine 单测 / gateway 契约)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -50,9 +52,20 @@ jobs:
         run: uv run ruff check .
         working-directory: services/gateway-py
       - name: engine-py 单元测试
-        run: uv run pytest
+        run: set -o pipefail && uv run pytest 2>&1 | tee /tmp/engine-pytest.log
         working-directory: services/engine-py
       # gateway 契约测试经 testcontainers 起 PG+Redis,runner 自带 Docker
       - name: gateway-py 契约测试 (testcontainers)
-        run: uv run pytest
+        run: set -o pipefail && uv run pytest 2>&1 | tee /tmp/gateway-pytest.log
         working-directory: services/gateway-py
+      # 临时诊断通道:失败时把 pytest 日志传成 release 资产(匿名可读),
+      # 本机无法直接拉取 Actions 日志;根因定位后删除本步
+      - name: 失败日志回传 (临时诊断)
+        if: failure()
+        working-directory: services
+        run: |
+          gh release create "ci-debug-${GITHUB_RUN_ID}" \
+            --title "CI debug ${GITHUB_RUN_ID}" --notes "auto: failed step logs" \
+            /tmp/engine-pytest.log /tmp/gateway-pytest.log || true
+        env:
+          GH_TOKEN: ${{ github.token }}
