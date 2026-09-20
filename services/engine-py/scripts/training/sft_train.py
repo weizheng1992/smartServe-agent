@@ -34,8 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        from trl import SFTTrainer
         from unsloth import FastLanguageModel
-        from trl import SFTConfig, SFTTrainer
     except ImportError as err:
         sys.exit(f"缺少训练依赖(按文档 pip install unsloth trl peft bitsandbytes): {err}")
 

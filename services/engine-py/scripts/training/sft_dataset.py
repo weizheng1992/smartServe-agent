@@ -25,7 +25,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from engine_py.analytics.rbac import ROLE_METRIC_PERMISSIONS
 from engine_py.tools_registry.metric_registry import METRIC_SEMANTIC_REGISTRY
 
 _TIME_VARIANTS = [
