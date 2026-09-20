@@ -64,6 +64,7 @@ jobs:
         if: failure()
         working-directory: services
         run: |
+          touch /tmp/engine-pytest.log /tmp/gateway-pytest.log
           gh release create "ci-debug-${GITHUB_RUN_ID}" \
             --title "CI debug ${GITHUB_RUN_ID}" --notes "auto: failed step logs" \
             /tmp/engine-pytest.log /tmp/gateway-pytest.log || true
