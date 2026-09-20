@@ -20,6 +20,7 @@ from functools import lru_cache
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from ..config import settings
 from ..db import get_session
@@ -59,12 +60,14 @@ def _merchant_engine_url() -> str:
 def _merchant_reader_engine():
     """只读引擎(阶段①收口,wayfinder 09-D4):会话级 READ ONLY + 3s 语句超时,
     为阶段②数据分析只读沙箱提供已物理分离的执行位;写穿透一律走
-    _merchant_writer_engine,严禁复用本引擎。"""
+    _merchant_writer_engine,严禁复用本引擎。
+
+    NullPool(非 Pool):引擎被 lru_cache 跨事件循环复用 —— QueuePool 的池化
+    asyncpg 连接绑定建连时的循环,测试端每个测试独立 asyncio.run,复用必炸
+    (conftest 同款教训);NullPool 每次取用新建连接、归还即关,循环安全。"""
     return create_async_engine(
         _merchant_engine_url(),
-        pool_size=5,
-        max_overflow=0,
-        pool_pre_ping=True,
+        poolclass=NullPool,
         connect_args={
             "server_settings": {
                 "default_transaction_read_only": "on",
@@ -76,9 +79,10 @@ def _merchant_reader_engine():
 
 @lru_cache(maxsize=1)
 def _merchant_writer_engine():
-    """写穿透引擎(与 reader 同 URL 不同池):退款/地址写穿透的独占执行位,
-    不带任何只读标记 —— 读写物理分离后 reader 才能安全收紧为只读角色。"""
-    return create_async_engine(_merchant_engine_url(), pool_size=2, max_overflow=0, pool_pre_ping=True)
+    """写穿透引擎(与 reader 同 URL 不同位):退款/地址写穿透的独占执行位,
+    不带任何只读标记 —— 读写物理分离后 reader 才能安全收紧为只读角色。
+    NullPool 理由同 reader:缓存引擎 + 池化连接跨循环复用必炸。"""
+    return create_async_engine(_merchant_engine_url(), poolclass=NullPool)
 
 
 async def merchant_order_snapshot(order_id: str) -> dict | None:
