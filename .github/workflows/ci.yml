@@ -54,6 +54,16 @@ jobs:
       - name: engine-py 单元测试
         run: set -o pipefail && uv run pytest 2>&1 | tee /tmp/engine-pytest.log
         working-directory: services/engine-py
+      # 日志对未登录不可见,本机无法直接拉取;失败行回显为 check-run 注记(匿名 API 可读)
+      - name: 失败测试注记回显
+        if: failure()
+        run: |
+          grep -E "^(FAILED|ERROR) " /tmp/engine-pytest.log | head -20 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+          tail -5 /tmp/engine-pytest.log | while IFS= read -r line; do
+            echo "::error::tail: $line"
+          done
       # gateway 契约测试经 testcontainers 起 PG+Redis,runner 自带 Docker
       - name: gateway-py 契约测试 (testcontainers)
         run: set -o pipefail && uv run pytest 2>&1 | tee /tmp/gateway-pytest.log
