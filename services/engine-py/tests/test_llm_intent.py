@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from engine_py.analytics.llm_intent import (
@@ -63,3 +65,29 @@ class TestClosedSetConsistency:
         for key in ("gmv", "promo_effect", "customer_orders"):
             assert key in prompt
         assert "闭集" in prompt
+
+
+class TestSftGenerate:
+    """自托管推理通道(2026-09-20 review 修复:同步 pipeline 不得阻塞事件循环)。"""
+
+    def test_runs_off_event_loop_thread(self, monkeypatch):
+        """to_thread 下放:推理在子线程执行,调用协程不被同步段阻塞。
+
+        直接桩模块级 _SFT_PIPELINE 单例(不进懒加载构造分支)——
+        transformers 的懒加载属性在 worker 线程的 from-import 不吃
+        实例属性遮蔽(3.14 实证),桩构造函数不可靠。
+        """
+        import threading
+
+        import engine_py.analytics.llm_intent as li
+
+        class _FakePipe:
+            def __call__(self, prompt, **kwargs):
+                assert "SemQL:" in prompt and "卖得怎么样" in prompt, f"prompt 形状漂移: {prompt!r}"
+                li._THREAD_WITNESS = threading.current_thread().name
+                return [{"generated_text": '{"metric":"gmv","direction":"DESC","limit":5}'}]
+
+        monkeypatch.setattr(li, "_SFT_PIPELINE", _FakePipe())
+        out = asyncio.run(li._sft_generate("/fake/model", "SYS", "卖得怎么样"))
+        assert '"metric":"gmv"' in out
+        assert li._THREAD_WITNESS != threading.current_thread().name, "推理仍在事件循环线程同步执行"

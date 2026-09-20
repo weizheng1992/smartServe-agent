@@ -805,6 +805,39 @@ class TestL3AndGrowth:
         r_boss = await client.post("/api/admin/orders/ship", headers=boss, json={"orderId": "x"})
         assert r_boss.status_code == 400
 
+    async def test_ship_rbac_cross_tenant(self, client, auth):
+        """他租员工不得按 aurora 菜单放行(2026-09-20 review:perms 硬编码 aurora 假租户)。"""
+        from engine_py.db import StaffMember, get_session
+        from sqlalchemy import delete, select
+
+        await auth()  # ensure_defaults(aurora) 先行,拿到种子 bcrypt 哈希
+        async with get_session() as session:
+            src = (await session.execute(
+                select(StaffMember).where(StaffMember.id == "staff_wh")
+            )).scalars().first()
+            session.add(StaffMember(
+                id="staff_nike_wh", business_id="nike", email="wh@nike",
+                display_name="仓储N", role="warehouse_operator", status="enabled",
+                password_hash=src.password_hash,
+            ))
+            await session.commit()
+        try:
+            r = await client.post("/api/auth/login", json={"email": "wh@nike", "password": DEV_PASSWORD})
+            assert r.status_code == 200
+            token = r.json()["data"]["token"]
+            r_ship = await client.post(
+                "/api/admin/orders/ship",
+                headers={"x-tenant-id": "nike", "Authorization": f"Bearer {token}"},
+                json={"orderId": "x", "trackingNo": "SF1"},
+            )
+            # nike 未配置任何角色菜单 → order:ship 闭集为空 → 403(而非借 aurora 菜单放行)
+            assert r_ship.status_code == 403
+            assert "无发货权限" in r_ship.json()["message"]
+        finally:
+            async with get_session() as session:
+                await session.execute(delete(StaffMember).where(StaffMember.id == "staff_nike_wh"))
+                await session.commit()
+
     async def test_fallback_rechecks_role_403(self, client, auth, patch_llm):
         """防御纵深:resolver 被替换时,兜底结果仍过角色闭集,越权 → unsupported。"""
         from engine_py.analytics.engine import StructuredQueryIntent

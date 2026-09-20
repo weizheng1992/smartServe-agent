@@ -33,6 +33,13 @@ def stub_execute(monkeypatch):
 
 
 class TestGraphAsk:
+    def test_missing_business_id_fails_loud(self):
+        """租户必填(2026-09-20 review):静默缺省 aurora 会让他租查询冒充 aurora 执行。"""
+        import pytest
+
+        with pytest.raises(ValueError, match="business_id"):
+            asyncio.run(graph.ask("销售额最高的商品", {"role": "finance_owner"}))
+
     def test_unsupported_honest(self):
         out = asyncio.run(graph.ask("今天心情如何", {"business_id": "aurora", "role": "finance_owner"}))
         assert out["type"] == "unsupported" and "暂不支持" in out["message"]
