@@ -40,9 +40,12 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     engine = MetricQueryEngine(session_ctx=session_ctx)
     from .rbac import allowed_metrics_for_role
 
-    allowed = await allowed_metrics_for_role(
-        session_ctx.get("business_id", "aurora"), session_ctx.get("role", "finance_owner")
-    )
+    # 租户必填(2026-09-20 review):静默缺省 "aurora" 会让他租查询冒充 aurora
+    # 执行 —— 调用方(gateway SSE/测试)必须显式携带 business_id
+    business_id = session_ctx.get("business_id")
+    if not business_id:
+        raise ValueError("analytics.ask 缺少 business_id:租户隔离不允许静默缺省")
+    allowed = await allowed_metrics_for_role(business_id, session_ctx.get("role", "finance_owner"))
     try:
         intent = engine.resolve(question)
     except UnsupportedQuery:

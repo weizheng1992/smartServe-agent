@@ -23,7 +23,7 @@ def test_rows_are_valid_semql_json():
         assert out["metric"], r
         assert out["direction"] in ("ASC", "DESC")
         assert "time_window" in out and "category" in out
-        assert r["input"] not in json.dumps(r)  # 问句不出现在输出里(自洽)
+        assert r["input"] not in r["output"]  # 问句不出现在输出里(json.dumps 会转义中文,对它断言恒真)
 
 
 def test_all_registered_metrics_covered():

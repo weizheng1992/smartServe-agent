@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -87,30 +88,26 @@ async def llm_resolve(
 
     registry = metric_semantic_registry()
 
-    # 自托管 SFT 模型优先(AI_INTENT_L3_MODEL=合并后模型目录;QLoRA SFT 产物,
-    # 见 scripts/training/sft_train.py)—— 摆脱 bigmodel API 限流依赖
-    local_model = os.environ.get("AI_INTENT_L3_MODEL")
-    if local_model:
-        try:
-            raw = await _sft_generate(local_model, _system_prompt(allowed), question)
-            out = LlmIntent.model_validate(_parse_llm_json(raw))
-        except UnsupportedQuery:
-            raise
-        except Exception as err:
-            print(f"[L3] SFT 模型推理失败(响亮失败): {err}")
-            raise UnsupportedQuery("意图解析服务暂不可用") from err
-    else:
-        try:
-            resp = await get_chat_model().ainvoke([
-                SystemMessage(content=_system_prompt(allowed)),
-                HumanMessage(content=question),
-            ])
-            out = LlmIntent.model_validate(_parse_llm_json(_content_text(resp)))
-        except UnsupportedQuery:
-            raise
-        except Exception as err:  # LLM 网络/供应商故障/格式坏 → 响亮失败,不静默兜底
-            print(f"[L3] LLM 调用失败(响亮失败): {err}")
-            raise UnsupportedQuery("意图解析服务暂不可用") from err
+    async def _invoke_llm() -> str:
+        """取回模型原始输出(SFT 本地优先,bigmodel API 兜底)。"""
+        local_model = os.environ.get("AI_INTENT_L3_MODEL")
+        if local_model:
+            # QLoRA SFT 产物(见 scripts/training/sft_train.py)—— 摆脱 bigmodel API 限流依赖
+            return await _sft_generate(local_model, _system_prompt(allowed), question)
+        resp = await get_chat_model().ainvoke([
+            SystemMessage(content=_system_prompt(allowed)),
+            HumanMessage(content=question),
+        ])
+        return _content_text(resp)
+
+    # 两分支共用同一失败语义:格式坏/网络/供应商故障 → 响亮失败,不静默兜底
+    try:
+        out = LlmIntent.model_validate(_parse_llm_json(await _invoke_llm()))
+    except UnsupportedQuery:
+        raise
+    except Exception as err:
+        print(f"[L3] 意图解析调用失败(响亮失败): {err}")
+        raise UnsupportedQuery("意图解析服务暂不可用") from err
 
     if not out.metric or out.metric not in registry:
         raise UnsupportedQuery("问题含义未落在已注册指标闭集内")
@@ -220,12 +217,20 @@ _SFT_PIPELINE = None
 
 
 async def _sft_generate(model_path: str, system_prompt: str, question: str) -> str:
-    """自托管 SFT 模型推理(懒加载单例;chat 模板与训练格式一致)。"""
-    global _SFT_PIPELINE
-    if _SFT_PIPELINE is None:
-        from transformers import pipeline as hf_pipeline
+    """自托管 SFT 模型推理(懒加载单例;chat 模板与训练格式一致)。
 
-        _SFT_PIPELINE = hf_pipeline("text-generation", model=model_path, device_map="auto")
-    prompt = f"{system_prompt}\n\n问句:{question}\nSemQL:"
-    results = _SFT_PIPELINE(prompt, max_new_tokens=256, do_sample=False, return_full_text=False)
-    return results[0]["generated_text"]
+    自托管豁免口径:本函数是「模型服务本体」而非外部 LLM API 客户端,
+    不经 llm/chat.py 统一入口(无熔断/遥测语义可套);同步 transformers
+    推理经 asyncio.to_thread 下放线程,不阻塞事件循环。
+    """
+    def _run() -> str:
+        global _SFT_PIPELINE
+        if _SFT_PIPELINE is None:
+            from transformers import pipeline as hf_pipeline
+
+            _SFT_PIPELINE = hf_pipeline("text-generation", model=model_path, device_map="auto")
+        prompt = f"{system_prompt}\n\n问句:{question}\nSemQL:"
+        results = _SFT_PIPELINE(prompt, max_new_tokens=256, do_sample=False, return_full_text=False)
+        return results[0]["generated_text"]
+
+    return await asyncio.to_thread(_run)

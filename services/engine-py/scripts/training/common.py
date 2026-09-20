@@ -73,6 +73,10 @@ def get_encoder(name: str, device: str = "cpu"):
     """编码器工厂:name="hash" → 冒烟编码器;否则按 sentence-transformers 模型名加载。"""
     if name == "hash":
         return HashEncoder()
+    # 训练脚本不走 llm/chat.py,这里补镜像(与 .env 保持一致)
+    import os
+
+    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
     from sentence_transformers import SentenceTransformer
 
     return SentenceTransformer(name, device=device)

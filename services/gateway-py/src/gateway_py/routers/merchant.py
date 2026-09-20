@@ -216,13 +216,15 @@ async def admin_orders_ship(
         from engine_py.db import StaffMember
         from sqlalchemy import select
 
+        # JWT 只带 email(sub),租户由 DB 行带出(与 /api/auth/login 同一身份模型)
         async with get_session() as session:
             staff = (
                 await session.execute(select(StaffMember).where(StaffMember.email == email))
             ).scalars().first()
         if staff is None or staff.status != "enabled":
             return JSONResponse(status_code=403, content={"success": False, "message": "非商户员工或已停用"})
-        if "order:ship" not in await analytics_rbac.perms_for_role("aurora", staff.role):
+        # 权限点按员工真租户判定(2026-09-20 review:硬编码 aurora 会让他租员工按 aurora 菜单放行)
+        if "order:ship" not in await analytics_rbac.perms_for_role(staff.business_id, staff.role):
             return JSONResponse(status_code=403, content={"success": False, "message": "无发货权限(order:ship)"})
 
         if not body.get("orderId") or not body.get("trackingNo"):

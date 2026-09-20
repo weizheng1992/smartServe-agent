@@ -34,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        from transformers import TrainingArguments
         from trl import SFTTrainer
         from unsloth import FastLanguageModel
     except ImportError as err:
@@ -60,9 +61,13 @@ def main(argv: list[str] | None = None) -> int:
         train_dataset=dataset,
         dataset_text_field="text",
         max_seq_length=MAX_SEQ_LEN,
-        args={"output_dir": args.out, "num_train_epochs": args.epochs,
-              "per_device_train_batch_size": 2, "gradient_accumulation_steps": 4,
-              "learning_rate": 2e-4, "logging_steps": 10, "save_strategy": "epoch"},
+        # trl 0.13+ 要求 TrainingArguments 实例(裸 dict 已不再被接受)
+        args=TrainingArguments(
+            output_dir=args.out, num_train_epochs=args.epochs,
+            per_device_train_batch_size=2, gradient_accumulation_steps=4,
+            learning_rate=2e-4, logging_steps=10, save_strategy="epoch",
+            report_to=[],
+        ),
     )
     trainer.train()
     trainer.save_model(args.out)

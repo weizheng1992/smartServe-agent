@@ -81,6 +81,25 @@ class TestJwtIdentity:
         assert menus.json()["role"] == "warehouse_operator"
 
 
+@pytest.fixture()
+def patch_embedding(monkeypatch):
+    """密封 L2 范例向量:CI 无 bge 权重缓存且 hf-mirror 不可达(2026-09-20 实证)。
+
+    exemplar_service 走 graph.ask 的 L2 回放(UnsupportedQuery 被 search_exemplar
+    吞掉放行),靠异常兜底不算密封 —— ask 面用例统一桩掉模型加载。
+    按问题文本哈希生成 one-hot 向量:同问相似度 1.0(回放命中),异问不串扰
+    (不会误中其他用例登记的范例)。
+    """
+    import hashlib
+
+    class _FakeEmbed:
+        async def aembed_query(self, text: str) -> list[float]:
+            idx = int(hashlib.md5(text.encode()).hexdigest(), 16) % 64
+            return [1.0 if i == idx else 0.0 for i in range(64)]
+
+    monkeypatch.setattr("engine_py.llm.get_embedding_model", lambda: _FakeEmbed())
+
+
 class TestAsk:
     async def test_ask_selected_orders_compare(self, client, auth):
         """PageContext 勾选两单 → 「两个订单对比」出逐笔行 + 合计/均值(ADR-0005)。"""
@@ -109,7 +128,7 @@ class TestAsk:
         assert {row["订单号"] for row in rows} == {"E2E-CMP-A", "E2E-CMP-B"}
         assert all("合计金额" in row and "平均金额" in row for row in rows)
 
-    async def test_ask_unsupported_is_honest(self, client, auth):
+    async def test_ask_unsupported_is_honest(self, client, auth, patch_embedding):
         boss = await auth()
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": "今天心情如何"})
         assert r.status_code == 200
@@ -523,25 +542,8 @@ class TestL3AndGrowth:
             monkeypatch.setattr("engine_py.analytics.llm_intent.llm_resolve", _fake)
         return _patch
 
-    @pytest.fixture()
-    def patch_embedding(self, monkeypatch):
-        """密封 L2 范例向量:CI 无 bge 权重缓存且 hf-mirror 不可达(2026-09-20 实证)。
 
-        按问题文本哈希生成 one-hot 向量 —— 同问相似度 1.0(回放命中),
-        异问不串扰(不会误中其他用例登记的范例)。
-        """
-        import hashlib
-
-        class _FakeEmbed:
-            async def aembed_query(self, text: str) -> list[float]:
-                idx = int(hashlib.md5(text.encode()).hexdigest(), 16) % 64
-                return [1.0 if i == idx else 0.0 for i in range(64)]
-
-        monkeypatch.setattr(
-            "engine_py.llm.get_embedding_model", lambda: _FakeEmbed()
-        )
-
-    async def test_l3_activity_effect_sse(self, client, auth, patch_llm):
+    async def test_l3_activity_effect_sse(self, client, auth, patch_llm, patch_embedding):
         from engine_py.analytics.engine import StructuredQueryIntent
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
         from sqlalchemy import text as _t
@@ -576,7 +578,7 @@ class TestL3AndGrowth:
         row = events["result"]["rows"][0]
         assert row["核销订单数"] >= 1 and row["优惠总额"] >= 10
 
-    async def test_l3_customer_orders_sse(self, client, auth, patch_llm):
+    async def test_l3_customer_orders_sse(self, client, auth, patch_llm, patch_embedding):
         from engine_py.analytics.engine import StructuredQueryIntent
 
         boss = await auth()
@@ -588,7 +590,7 @@ class TestL3AndGrowth:
         assert events["result"]["metric"] == "customer_orders"
         assert isinstance(events["result"]["rows"], list)
 
-    async def test_entity_clarify_multi_hit_and_reply_loop(self, client, auth, patch_llm):
+    async def test_entity_clarify_multi_hit_and_reply_loop(self, client, auth, patch_llm, patch_embedding):
         """多命中 → clarify(entity) → 按选项原词回问 → 唯一命中出结果(闭环)。"""
         from engine_py.analytics.engine import StructuredQueryIntent
         from engine_py.analytics.llm_intent import _EntityClarify

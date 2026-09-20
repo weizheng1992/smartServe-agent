@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -35,7 +36,7 @@ _TIME_VARIANTS = [
 ]
 _CATEGORIES = ["户外机能", "潮流T恤", "下装裤类", "潮流鞋靴", "背包收纳", "露营装备", "衬衫", "配饰", "运动配件"]
 _LIMITS = [None, 10, 20]
-_REVERSE_MARKERS = ("最差", "最低", "最少", "垫底")
+
 
 def _system_prompt() -> str:
     lines = []
@@ -51,15 +52,6 @@ def _system_prompt() -> str:
     )
 
 
-def _catalog_text() -> str:
-    lines = []
-    for key, m in METRIC_SEMANTIC_REGISTRY.items():
-        if key == "order_overview":
-            continue  # 实体概览依赖 PageContext 勾选,不入静态 SFT
-        lines.append(f"- {key}({m['label']}): {m['description'][:50]}")
-    return "\n".join(lines)
-
-
 def build_sft_rows(
     registry: dict | None = None,
     eval_inputs: set[str] | frozenset[str] = frozenset(),
@@ -71,7 +63,7 @@ def build_sft_rows(
     rows: list[dict[str, str]] = []
     for key, metric in registry.items():
         if key == "order_overview":
-            continue  # 实体概览依赖 PageContext 勾选,不入静态 SFT
+            continue  # order_overview 无词面变体,文末专属问法单独加
         seen: set[str] = set()
 
         def add(question: str, metric_key: str = key, seen_set: set[str] = seen) -> None:
@@ -79,7 +71,7 @@ def build_sft_rows(
             if not q or q in seen_set or q in eval_inputs:
                 return
             seen_set.add(q)
-            semql = _semql_for(metric_key, q)
+            semql = _semql_for(registry, metric_key, q)
             rows.append({
                 "instruction": catalog,
                 "input": q,
@@ -91,7 +83,7 @@ def build_sft_rows(
         for phrase in phrases:
             add(phrase)
             for tw_kind, tw_word in _TIME_VARIANTS[1:]:
-                add(f"{tw_word}{phrase}", )
+                add(f"{tw_word}{phrase}")
             for cat in _CATEGORIES[:3]:
                 add(f"{cat}{phrase}")
             add(f"{phrase} Top 10")
@@ -117,22 +109,19 @@ def add_order_overview(rows: list[dict[str, str]], q: str, system_prompt: str) -
     })
 
 
-def _semql_for(metric_key: str, question: str) -> dict:
+def _semql_for(registry: dict, metric_key: str, question: str) -> dict:
     """问句 → SemQL(与 L0 词面规则一致,用于构造自洽训练样本)。"""
-    registry = METRIC_SEMANTIC_REGISTRY
     metric = registry[metric_key]
     reverse = any(w in question for w in ("最差", "垫底", "最烂", "卖不动", "不走量", "最低", "最少"))
     direction = ("ASC" if metric["direction"] == "DESC" else "DESC") if reverse else metric["direction"]
-    limit = 10 if "top" in question.lower() or "Top" in question else 5
-    import re as _re
-
+    limit = 10 if "top" in question.lower() else 5
     tw = None
     for kind, pat in (("last_7d", r"近\s*7\s*天"), ("last_30d", r"近\s*30\s*天"), ("last_month", r"上个月|上月")):
-        if _re.search(pat, question):
+        if re.search(pat, question):
             tw = {"kind": kind}
             break
     cat = None
-    m = _re.search(r"(户外机能|潮流T恤|下装裤类|潮流鞋靴|背包收纳|露营装备|衬衫|配饰|运动配件)", question)
+    m = re.search(r"(户外机能|潮流T恤|下装裤类|潮流鞋靴|背包收纳|露营装备|衬衫|配饰|运动配件)", question)
     if m:
         cat = m.group(1)
     return {"metric": metric_key, "direction": direction, "limit": limit,
