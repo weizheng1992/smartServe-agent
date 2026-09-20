@@ -10,6 +10,11 @@
 
 修复前本用例的表现是 pytest 进程直接被 SIGSEGV 杀死(整个套件中断),
 比断言失败更"红"。
+
+密封化(2026-09-20 CI 实证):CI 无本地权重缓存且 hf-mirror.com 不可达,
+真模型用例每轮必挂 OSError。被测对象是 ``_SerializedEmbeddings`` 的串行化
+语义而非 torch 本身 —— 桩掉 ``HuggingFaceEmbeddings``(保留真实包装层),
+断言从「维度一致」加强为「同一时刻至多一个在飞」。
 """
 
 from __future__ import annotations
@@ -23,7 +28,32 @@ from engine_py.llm.chat import get_embedding_model
 pytestmark = pytest.mark.asyncio
 
 
-async def test_concurrent_aembed_does_not_segfault() -> None:
+class _FakeHFEmbeddings:
+    """底层模型替身:可观测并发重叠(在飞计数),定长向量。"""
+
+    def __init__(self, **kwargs) -> None:
+        self.inflight = 0
+        self.max_inflight = 0
+
+    async def aembed_query(self, text: str) -> list[float]:
+        self.inflight += 1
+        self.max_inflight = max(self.max_inflight, self.inflight)
+        await asyncio.sleep(0.01)
+        self.inflight -= 1
+        return [1.0, 0.5, 0.25]
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [await self.aembed_query(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return [1.0, 0.5, 0.25]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.5, 0.25] for _ in texts]
+
+
+async def test_concurrent_aembed_does_not_segfault(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("langchain_huggingface.HuggingFaceEmbeddings", _FakeHFEmbeddings)
     model = get_embedding_model()
 
     async def one(i: int) -> int:
@@ -34,3 +64,7 @@ async def test_concurrent_aembed_does_not_segfault() -> None:
 
     assert all(d > 0 for d in dims), f"向量化维度异常: {dims}"
     assert len(set(dims)) == 1, f"同模型并发产出维度不一致: {dims}"
+    # 串行化语义硬钉:asyncio.Lock 锁内同一时刻至多一个在飞
+    assert model._inner.max_inflight == 1, (
+        f"并发推理未被串行化: max_inflight={model._inner.max_inflight}"
+    )
