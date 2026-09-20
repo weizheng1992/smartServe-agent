@@ -940,3 +940,58 @@ class TestRegister:
     async def test_short_password_400(self, client):
         r = await client.post("/api/auth/register", json={"email": "x@y.com", "password": "123"})
         assert r.status_code == 400 and "8 位" in r.json()["message"]
+
+
+class TestTenantIsolation:
+    """code review 硬违规修复回归:RBAC 全查询面必须按 business_id 过滤。
+
+    直插一条 rival 租户的行,再以 aurora 身份走五个查询/变更口 ——
+    读不到、改不动、删不掉、不误判重名。
+    """
+
+    async def test_role_menus_isolated_by_tenant(self, client, auth):
+        boss = await auth()
+        from engine_py.db import RoleMenu, get_session
+
+        async with get_session() as session:
+            session.add(RoleMenu(role="custom_rival", menu_id="m-rival", business_id="rival"))
+            await session.commit()
+
+        # 读:对手角色在此租户不可见(修复前会漏出 rival 的 menuIds)
+        r = await client.get("/api/admin/analytics/roles/custom_rival/menus", headers=boss)
+        assert r.status_code == 200 and r.json()["menuIds"] == []
+
+        # 角色列表计数不跨租户(custom_rival 只有 rival 侧行,不该出现)
+        roles = await client.get("/api/admin/analytics/roles", headers=boss)
+        assert all(row["role"] != "custom_rival" for row in roles.json()["roles"])
+
+        # 同名角色在本租户可创建(修复前误判「已存在」)
+        create = await client.post("/api/admin/analytics/roles", headers=boss,
+                                   json={"role": "custom_rival", "menuIds": ["m-analytics"]})
+        assert create.status_code == 200, create.text
+
+    async def test_menu_mutations_scoped_to_tenant(self, client, auth):
+        boss = await auth()
+        from engine_py.db import Menu, get_session
+        from sqlalchemy import select
+
+        async with get_session() as session:
+            session.add(Menu(id="m-rival-only", business_id="rival",
+                             name="对手菜单", menu_type="menu", route="/rival"))
+            await session.commit()
+
+        # 跨租户改:404(修复前会真实改到对手的菜单)
+        patch = await client.patch("/api/admin/analytics/menus/m-rival-only",
+                                   headers=boss, json={"name": "夺舍"})
+        assert patch.status_code == 404
+
+        # 跨租户删:静默无感,对手行必须幸存
+        delete = await client.delete("/api/admin/analytics/menus/m-rival-only", headers=boss)
+        assert delete.status_code == 200
+        async with get_session() as session:
+            row = (
+                await session.execute(
+                    select(Menu).where(Menu.id == "m-rival-only", Menu.business_id == "rival")
+                )
+            ).scalars().first()
+            assert row is not None and row.name == "对手菜单"

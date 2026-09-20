@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from .schema_cards import merchant_schema_card
+from .schema_cards import compile_safe_schema_card
 from .sql_guard import UnsafeSqlError, assert_safe_select
 from .tools_registry_bridge import metric_semantic_registry
 
@@ -266,7 +266,7 @@ class MetricQueryEngine:
             params["entities"] = list(intent.entity_ids)[:100]
 
         try:
-            ast = assert_safe_select(sql, merchant_schema_card(), require_business_id="business_id" in sql)
+            ast = assert_safe_select(sql, compile_safe_schema_card(), require_business_id="business_id" in sql)
         except UnsafeSqlError as err:
             raise ValueError(f"编译模板未过安全闸(模板缺陷,非用户问题): {err}") from err
         return CompiledSQL(sql=sql, params=params, metric=intent.metric, unit=metric["unit"], ast=ast)
@@ -338,7 +338,7 @@ class MetricQueryEngine:
                 f'GROUP BY status ORDER BY "metricScore" {direction} LIMIT :lim'
             )
         elif intent.metric == "gmv_trend":
-            params.pop("lim", None)  # 时间序列无 LIMIT 槽位
+            params.pop("lim", None)  # 时间序列固定 30 天窗口,仍以显式 LIMIT 兜底行数
             sql = (
                 "SELECT to_char(d.day, 'MM-DD') AS \"日期\", "
                 "COALESCE(SUM(oi.quantity * oi.price), 0)::float AS \"GMV\" "
@@ -346,12 +346,12 @@ class MetricQueryEngine:
                 "LEFT JOIN merchant_orders o ON o.created_at::date = d.day "
                 "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
                 "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
-                "GROUP BY d.day ORDER BY d.day"
+                "GROUP BY d.day ORDER BY d.day LIMIT 50"
             )
         elif intent.metric == "order_overview":
             # ADR-0005:升级为逐笔行 + 合计/均值窗口列 —— 「两个订单对比」等
             # 对比类问法可直接看每单差异;实体来自 PageContext 勾选(必传)。
-            params.pop("lim", None)  # 逐笔展示无 LIMIT 槽位
+            params.pop("lim", None)  # 逐笔展示无 LIMIT 槽位,显式 50 行双保险
             if not intent.entity_ids:
                 raise UnsupportedQuery("请先在订单列表中勾选订单,再问对比/概览(实体集必传)")
             sql = (
@@ -361,7 +361,7 @@ class MetricQueryEngine:
                 'ROUND(SUM(o.total_amount) OVER (), 2)::float AS "合计金额", '
                 'ROUND(AVG(o.total_amount) OVER (), 2)::float AS "平均金额" '
                 'FROM merchant_orders o WHERE o.order_id = ANY(:entities) '
-                'ORDER BY o.created_at DESC'
+                'ORDER BY o.created_at DESC LIMIT 50'
             )
             params["entities"] = list(intent.entity_ids)[:100]
         elif intent.metric == "promo_compare":
@@ -444,11 +444,20 @@ class MetricQueryEngine:
         else:
             raise UnsupportedQuery(f"指标 {intent.metric} 尚未登记执行模板")
 
+        # 安全闸补齐(review 修复):special-family 与销售族同闸 —— AST 白名单
+        # (联合卡表单点)+ 危险函数黑名单;含 business_id 的模板(会话/售后)
+        # 同时断言租户谓词不可剥离。响亮失败,绝不带病执行。
+        try:
+            ast = assert_safe_select(sql, compile_safe_schema_card(), require_business_id="business_id" in sql)
+        except UnsafeSqlError as err:
+            raise ValueError(f"编译模板未过安全闸(模板缺陷,非用户问题): {err}") from err
+
         return CompiledSQL(
             sql=sql,
             params=params,
             metric=intent.metric,
             unit=metric_semantic_registry()[intent.metric]["unit"],
+            ast=ast,
             target_db=(
                 "engine_db"
                 if intent.metric in ("session_volume", "ai_resolution_rate", "after_sale_overview")

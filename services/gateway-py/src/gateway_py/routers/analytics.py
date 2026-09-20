@@ -98,7 +98,11 @@ async def get_role_menus(role: str, request: Request):
     from engine_py.db import RoleMenu, get_session
 
     async with get_session() as session:
-        rows = (await session.execute(select(RoleMenu).where(RoleMenu.role == role))).scalars().all()
+        rows = (
+            await session.execute(
+                select(RoleMenu).where(RoleMenu.role == role, RoleMenu.business_id == ctx["business_id"])
+            )
+        ).scalars().all()
     return {"success": True, "role": role, "menuIds": sorted(r.menu_id for r in rows)}
 
 
@@ -260,7 +264,11 @@ async def update_menu(menu_id: str, request: Request):
     from sqlalchemy import select
 
     async with get_session() as session:
-        row = (await session.execute(select(Menu).where(Menu.id == menu_id))).scalars().first()
+        row = (
+            await session.execute(
+                select(Menu).where(Menu.id == menu_id, Menu.business_id == ctx["business_id"])
+            )
+        ).scalars().first()
         if not row:
             return JSONResponse(status_code=404, content={"success": False, "message": "菜单不存在"})
         if menu_id in rbac.SYSTEM_MENU_IDS and body.get("status") == "disabled":
@@ -283,11 +291,21 @@ async def delete_menu(menu_id: str, request: Request):
     from sqlalchemy import select
 
     async with get_session() as session:
-        children = (await session.execute(select(Menu).where(Menu.parent_id == menu_id))).scalars().first()
+        children = (
+            await session.execute(
+                select(Menu).where(Menu.parent_id == menu_id, Menu.business_id == ctx["business_id"])
+            )
+        ).scalars().first()
         if children:
             return JSONResponse(status_code=400, content={"success": False, "message": "存在子菜单,先删子项"})
-        await session.execute(delete(RoleMenu).where(RoleMenu.menu_id == menu_id))
-        row = (await session.execute(select(Menu).where(Menu.id == menu_id))).scalars().first()
+        await session.execute(
+            delete(RoleMenu).where(RoleMenu.menu_id == menu_id, RoleMenu.business_id == ctx["business_id"])
+        )
+        row = (
+            await session.execute(
+                select(Menu).where(Menu.id == menu_id, Menu.business_id == ctx["business_id"])
+            )
+        ).scalars().first()
         if row:
             await session.delete(row)
         await session.commit()
@@ -304,13 +322,21 @@ async def roles_list(request: Request):
     from engine_py.db import RoleMenu, StaffMember, get_session
     from sqlalchemy import func, select
 
-    await _ctx(request)
+    ctx = await _ctx(request)
     async with get_session() as session:
         menu_counts = dict(
-            (await session.execute(select(RoleMenu.role, func.count()).group_by(RoleMenu.role))).all()
+            (await session.execute(
+                select(RoleMenu.role, func.count())
+                .where(RoleMenu.business_id == ctx["business_id"])
+                .group_by(RoleMenu.role)
+            )).all()
         )
         staff_counts = dict(
-            (await session.execute(select(StaffMember.role, func.count()).group_by(StaffMember.role))).all()
+            (await session.execute(
+                select(StaffMember.role, func.count())
+                .where(StaffMember.business_id == ctx["business_id"])
+                .group_by(StaffMember.role)
+            )).all()
         )
     role_names = {*rbac.ROLES, *menu_counts, *staff_counts}
     return {"success": True, "roles": [
@@ -334,7 +360,11 @@ async def roles_create(request: Request):
     from engine_py.db import RoleMenu, get_session
 
     async with get_session() as session:
-        exists = (await session.execute(select(RoleMenu).where(RoleMenu.role == role))).scalars().first()
+        exists = (
+            await session.execute(
+                select(RoleMenu).where(RoleMenu.role == role, RoleMenu.business_id == ctx["business_id"])
+            )
+        ).scalars().first()
     if exists:
         return JSONResponse(status_code=400, content={"success": False, "message": f"角色 {role} 已存在,请在列表中直接调整其权限"})
     await rbac.set_role_menus(ctx["business_id"], role, menu_ids, ctx["staff"])

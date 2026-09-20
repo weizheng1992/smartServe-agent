@@ -77,7 +77,7 @@ DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
 ROLE_METRIC_PERMISSIONS: dict[str, list[str] | None] = {
     "finance_owner": None,  # None = 全量
     "admin": None,  # 管理员同老板全量
-    "sales_viewer": ["gmv", "volume", "review_bad", "refund_rate", "session_volume", "ai_resolution_rate"],
+    "sales_viewer": ["gmv", "gmv_trend", "order_overview", "volume", "review_bad", "refund_rate", "session_volume", "ai_resolution_rate"],
     "warehouse_operator": ["volume", "stock_risk", "refund_rate", "session_volume"],
 }
 

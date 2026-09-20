@@ -46,6 +46,38 @@ def merchant_schema_card() -> dict[str, Any]:
     return {"database": "agent_merchant", "tables": _MERCHANT_TABLES}
 
 
+# 阶段③ special-family 闭集模板专用的额外表(活动核销 2 表在商户镜像库,
+# 会话/售后 2 表在 engine 本地库)。不进 schema_card_text()(L3 上下文只喂
+# 商户 7 表,token 成本 08-D2 冻结);仅参与编译期 AST 表白名单。
+_SPECIAL_FAMILY_TABLES: dict[str, dict[str, Any]] = {
+    "promotions": {
+        "columns": {"id": "主键", "name": "活动名"},
+        "notes": "",
+    },
+    "promotion_redemptions": {
+        "columns": {"promotion_id": "→ promotions.id", "order_id": "→ merchant_orders.order_id", "discount_amount": "优惠金额", "created_at": "核销时间"},
+        "notes": "核销关联口径:真实归因,自然流量不计入",
+    },
+    "session_metrics": {
+        "columns": {"business_id": "租户", "resolution_status": "resolved_auto/未解决", "created_at": "时间"},
+        "notes": "engine 本地库;查询必带 business_id 谓词",
+    },
+    "after_sale_tickets": {
+        "columns": {"business_id": "租户", "status": "工单状态", "created_at": "时间"},
+        "notes": "engine 本地库;查询必带 business_id 谓词",
+    },
+}
+
+
+def compile_safe_schema_card() -> dict[str, Any]:
+    """编译期安全闸联合卡(商户 7 表 + special-family 4 表)。
+
+    两条编译路径(销售族/特殊族)统一喂这一张表,保证模板新增表必须先在
+    事实源登记,否则安全闸响亮拒绝 —— 表白名单单点收口。
+    """
+    return {"database": "agent_merchant", "tables": {**_MERCHANT_TABLES, **_SPECIAL_FAMILY_TABLES}}
+
+
 def schema_card_text() -> str:
     """紧凑文本形态(喂 L3 兜底层用;每表一行,列名拼接)。"""
     lines = []
