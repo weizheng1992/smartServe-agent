@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApprovalMachine } from "ui";
+import { authHeaders } from "@/lib/api";
 import type {
   ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow,
 } from "./workbench.types";
@@ -269,7 +270,7 @@ export function useWorkbenchState(initialTab: string) {
     try {
       const resp = await fetch('/api/admin/orders/ship', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('merchant-admin.token') || ''}` },
+        headers: { ...authHeaders() },
         body: JSON.stringify({
           orderId,
           carrierCode: carrierInput,

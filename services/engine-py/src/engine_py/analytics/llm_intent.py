@@ -25,6 +25,7 @@ from .tools_registry_bridge import metric_semantic_registry
 ENTITY_REQUIRED: dict[str, str] = {
     "promo_effect": "promotion",
     "promo_sku_compare": "promotion",
+    "promo_compare": "promotion",
     "customer_orders": "customer",
 }
 _VALID_TIME = ("last_7d", "last_30d", "last_month")

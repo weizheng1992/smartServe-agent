@@ -82,11 +82,17 @@ def build_sft_rows(
         phrases = [metric["label"], *(metric.get("synonyms") or [])]
         for phrase in phrases:
             add(phrase)
-            for tw_kind, tw_word in _TIME_VARIANTS[1:]:
+            for _, tw_word in _TIME_VARIANTS[1:]:
                 add(f"{tw_word}{phrase}")
-            for cat in _CATEGORIES[:3]:
+            for cat in _CATEGORIES:
                 add(f"{cat}{phrase}")
-            add(f"{phrase} Top 10")
+            # 同义词条目直接解析为该 limit 值(声明口径:同义词×时间窗×品类×limit 全组合)
+            for lim in _LIMITS[1:]:
+                add(f"{phrase} Top {lim}")
+            # 时间窗 × 品类 交叉组合(60b74cc 声明的覆盖面,此前缺失)
+            for _, tw_word in _TIME_VARIANTS[1:]:
+                for cat in _CATEGORIES:
+                    add(f"{tw_word}{cat}{phrase}")
         # 反向变体(与 L0 反向词族一致)
         for phrase in phrases[:2]:
             add(f"{phrase}最低")
@@ -114,7 +120,8 @@ def _semql_for(registry: dict, metric_key: str, question: str) -> dict:
     metric = registry[metric_key]
     reverse = any(w in question for w in ("最差", "垫底", "最烂", "卖不动", "不走量", "最低", "最少"))
     direction = ("ASC" if metric["direction"] == "DESC" else "DESC") if reverse else metric["direction"]
-    limit = 10 if "top" in question.lower() else 5
+    m_lim = re.search(r"top\s*(\d+)", question, re.IGNORECASE)
+    limit = int(m_lim.group(1)) if m_lim else 5
     tw = None
     for kind, pat in (("last_7d", r"近\s*7\s*天"), ("last_30d", r"近\s*30\s*天"), ("last_month", r"上个月|上月")):
         if re.search(pat, question):

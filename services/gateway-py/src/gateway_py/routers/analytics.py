@@ -244,7 +244,7 @@ async def create_menu(request: Request):
             status="enabled",
         ))
         # 建成即对管理角色可见(否则新菜单不在任何 role_menus 里,谁都看不到)
-        for manager_role in ("finance_owner", "admin"):
+        for manager_role in rbac.MANAGER_ROLES:
             session.add(RoleMenu(role=manager_role, menu_id=menu_id, business_id=ctx["business_id"]))
         await session.commit()
     return {"success": True, "id": menu_id}
@@ -398,6 +398,8 @@ async def staff_update(staff_id: str, request: Request):
             return JSONResponse(status_code=404, content={"success": False, "message": "员工不存在"})
         if row.role == "finance_owner" and body.get("status") == "disabled":
             return JSONResponse(status_code=400, content={"success": False, "message": "护栏:老板账号不可停用"})
+        if row.role == "finance_owner" and "role" in body:
+            return JSONResponse(status_code=400, content={"success": False, "message": "护栏:老板角色不可降级(防锁死)"})
         if "role" in body:
             row.role = body["role"]
         if "status" in body:
