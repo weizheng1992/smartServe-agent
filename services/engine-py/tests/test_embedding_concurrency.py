@@ -53,18 +53,24 @@ class _FakeHFEmbeddings:
 
 
 async def test_concurrent_aembed_does_not_segfault(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("langchain_huggingface.HuggingFaceEmbeddings", _FakeHFEmbeddings)
-    model = get_embedding_model()
+    # get_embedding_model 是 lru_cache 单例:全量跑里可能已被前面的测试用真模型
+    # 填充 —— 清空让本测的桩工厂真正生效;收尾再清,不留假模型给后续测试
+    get_embedding_model.cache_clear()
+    try:
+        monkeypatch.setattr("langchain_huggingface.HuggingFaceEmbeddings", _FakeHFEmbeddings)
+        model = get_embedding_model()
 
-    async def one(i: int) -> int:
-        vec = await model.aembed_query(f"并发向量化任务 {i}")
-        return len(vec)
+        async def one(i: int) -> int:
+            vec = await model.aembed_query(f"并发向量化任务 {i}")
+            return len(vec)
 
-    dims = await asyncio.gather(*(one(i) for i in range(3)))
+        dims = await asyncio.gather(*(one(i) for i in range(3)))
 
-    assert all(d > 0 for d in dims), f"向量化维度异常: {dims}"
-    assert len(set(dims)) == 1, f"同模型并发产出维度不一致: {dims}"
-    # 串行化语义硬钉:asyncio.Lock 锁内同一时刻至多一个在飞
-    assert model._inner.max_inflight == 1, (
-        f"并发推理未被串行化: max_inflight={model._inner.max_inflight}"
-    )
+        assert all(d > 0 for d in dims), f"向量化维度异常: {dims}"
+        assert len(set(dims)) == 1, f"同模型并发产出维度不一致: {dims}"
+        # 串行化语义硬钉:asyncio.Lock 锁内同一时刻至多一个在飞
+        assert model._inner.max_inflight == 1, (
+            f"并发推理未被串行化: max_inflight={model._inner.max_inflight}"
+        )
+    finally:
+        get_embedding_model.cache_clear()
