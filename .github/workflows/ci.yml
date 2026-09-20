@@ -68,3 +68,12 @@ jobs:
       - name: gateway-py 契约测试 (testcontainers)
         run: set -o pipefail && uv run pytest 2>&1 | tee /tmp/gateway-pytest.log
         working-directory: services/gateway-py
+      - name: gateway 失败测试注记回显
+        if: failure()
+        run: |
+          grep -E "^(FAILED|ERROR) " /tmp/gateway-pytest.log | head -20 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+          tail -5 /tmp/gateway-pytest.log | while IFS= read -r line; do
+            echo "::error::gw-tail: $line"
+          done
