@@ -21,15 +21,35 @@ DSW 实例已装 vLLM 0.11。实例 Terminal：
 
 ```bash
 cd /mnt/workspace
-# 基座用 fp16 官方版（LoRA 与量化基座/全精度基座通用;首次下载 ~15GB 走 ModelScope 内网）
-vllm serve Qwen/Qwen2.5-7B-Instruct \
+# 基座建议先手动经 ModelScope 内网拉全精度版(vLLM 无 ModelScope 兜底,直连 hf-mirror 易卡):
+modelscope download --model Qwen/Qwen2.5-7B-Instruct \
+  --local_dir /mnt/workspace/base_models/Qwen2.5-7B-Instruct
+# 用本地目录起服务(LoRA 与量化基座/全精度基座通用):
+vllm serve /mnt/workspace/base_models/Qwen2.5-7B-Instruct \
   --enable-lora --lora-modules semql=./adapter --port 8000 &
-# 另开终端冒烟:
-curl -s http://127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"semql","messages":[{"role":"user","content":"<train.jsonl 的 instruction>\n\n问句:近30天背包收纳销量前10"}]}'
 ```
 
-输出应为规整 SemQL JSON（metric/direction/limit/time_window/category 全在闭集内）。**验证完停机**。
+**冒烟必须用真实 instruction**（训练时的指标闭集指令，存在 `train.jsonl` 首行的 `instruction` 字段；直接 curl 字面量会让模型按字面回答——实测教训，见下）：
+
+```bash
+cat > smoke_semql.py <<'PYEOF'
+import json, urllib.request
+instr = json.loads(open('/mnt/workspace/train.jsonl').readline())['instruction']
+def ask(q):
+    body = json.dumps({"model":"semql","messages":[
+        {"role":"user","content":f"{instr}\n\n问句:{q}"}]}).encode()
+    req = urllib.request.Request("http://127.0.0.1:8000/v1/chat/completions",
+                                 body, {"Content-Type":"application/json"})
+    return json.load(urllib.request.urlopen(req))["choices"][0]["message"]["content"]
+for q in ["近30天背包收纳销量前10", "卖得最差的商品", "上个月gmv最高的品类"]:
+    print("问:", q); print("答:", ask(q)[:400]); print("-"*60)
+PYEOF
+python3 smoke_semql.py
+```
+
+每问应输出一行规整 SemQL JSON（metric/direction/limit/time_window/category 全在闭集内）。**验证完 `pkill -f vllm` 并停机**。
+
+> **2026-09-21 实测记录**：`vllm serve /mnt/workspace/base_models/Qwen2.5-7B-Instruct --enable-lora --lora-modules semql=./adapter` 起服务成功，`model=semql` 正常路由（LoRA 挂载 ✓）。首次冒烟误把字面量 `<train.jsonl 的 instruction>` 当提示词（prompt_tokens 仅 49，正常应 500+），模型按字面回答"如何分析 train.jsonl"——属测试输入错误而非模型问题；换真实 instruction 后的三问结果见本文档末尾"自测结果"。
 
 ### 2.2 本地 Mac 零成本（日常开发用）
 
@@ -111,3 +131,20 @@ print(f"n={t}  metric {stat['metric']/t:.1%}  direction {stat['direction']/t:.1%
 - 42 条小样本，字段准确率差 ±2% 以内算噪声，多跑两次取稳定值
 - 训练集 4478 条里合成组合占大头，mapping.json 是真实问法——**真实问法上的表现权重高于训练指标**（训练 token 准确率 99.6% 只说明格式学会了）
 - 评测集永远不入训（sft_dataset.py 的排除逻辑是护栏），新增评测用例先过一遍排除校验
+
+## 四、自测结果（2026-09-21，DSW vLLM 0.11 + semql LoRA，真实 instruction）
+
+| 问句 | 模型输出 |
+|---|---|
+| 近30天背包收纳销量前10 | `{"metric": "volume", "direction": "DESC", "limit": 10, "time_window": {"kind": "last_30d"}, "category": "背包收纳"}` |
+| 卖得最差的商品 | `{"metric": "volume", "direction": "ASC", "limit": 5, "time_window": null, "category": null}` |
+| 上个月gmv最高的品类 | `{"metric": "gmv", "direction": "DESC", "limit": 5, "time_window": {"kind": "last_month"}, "category": null}` |
+
+**判读**：
+
+- 三问五槽全对：同义词"销量"→volume；**"最差"→ASC 方向翻转命中**（08-P1 回归门用例）；三种时间窗 kind 各就各位；limit 默认 5、显式"前10"→10；品类过滤正确识别"背包收纳"
+- 第 3 问 `category=null` 是**正确行为**："品类"在句中是聚合维度而非过滤条件，SemQL 没有 group-by 槽位，模型没有过度填槽
+- 输出带 `SemQL: ` 前缀（训练文本格式的自然产物），下游解析用 `\{.*\}` 正则提取 JSON 即可（3.2 脚本已容错）
+- 对照首测教训：无 instruction 时通用基座输出整页分析代码；挂 adapter + 真实 instruction 后输出严格受限的 SemQL——**LoRA 生效的直接证据**
+
+**遗留**：42 条 mapping.json 字段准确率脚本尚未实跑（需端点持续在线），下次开实例时补；跑完与现有基线并排对比即为接入决策依据。
