@@ -98,3 +98,6 @@ __pycache__/
 
 # 真实评测运行记录(test:prompt:record 产物,本地入库后即弃)
 eval/.records/
+
+# SFT 权重不入库(GitHub 单文件 100MB 硬限;备份: ~/Downloads/adapter_final.zip + 云端实例)
+services/engine-py/training_data/sft/adapter/
