@@ -39,7 +39,7 @@
 |---|---|
 | 任务 | 问句 + 指标闭集 → SemQL JSON（模型只学语义理解，不写 SQL，铁律 08-D1） |
 | 基座 | `unsloth/Qwen2.5-7B-Instruct-bnb-4bit`（本地 modelscope 缓存目录加载，零下载） |
-| 数据 | `train.jsonl` **4478 样本**（注：本地 sft_dataset.py 生成的是 875 条，云端实跑文件为 4478 条，来源待查但不影响本次训练） |
+| 数据 | `train.jsonl` **4478 样本**（已销案：09-20 16:12 旧版生成 875 条，16:21 用扩展组合后的 sft_dataset.py 重新生成 4478 条并上传训练——与当前脚本重跑输出完全一致；**42 条评测问句零泄漏已验证**） |
 | LoRA | r=16, alpha=32, dropout=0.05, target: q/k/v/o + gate/up/down_proj |
 | 量化 | nf4 4bit（仓库自带 bnb 量化配置），bf16 计算 |
 | 批次 | batch 2 × grad_accum 4（有效 8），max_length 2048 |
@@ -68,5 +68,5 @@
 ## 六、本机同步变更
 
 - `services/engine-py/scripts/training/sft_train.py`：已重写为标准栈（与云端执行版一致，待 commit）
-- `services/engine-py/training_data/sft/train.jsonl`：本地生成版（875 条；云端实跑为 4478 条版，差异待查）
+- `services/engine-py/training_data/sft/train.jsonl`：4478 条（当前 sft_dataset.py 的确定性输出，与云端训练版一致；评测集零泄漏已验证）
 - 定时任务 `automation-9556080f`（本次自动检查/写档）为一次性，已执行完毕，无残留
