@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 DEFAULT_BASE = "Qwen/Qwen2.5-7B-Instruct"
 MAX_SEQ_LEN = 2048
