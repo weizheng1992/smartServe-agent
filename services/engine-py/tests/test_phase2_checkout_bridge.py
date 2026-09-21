@@ -378,7 +378,7 @@ def test_checkout_coupon_discount_reaches_order_row(pg_factory):
             finally:
                 await _teardown(engine, me, orig, embeds)
 
-    result, order, coupon, pid = asyncio.run(scenario())
+    result, order, coupon, _pid = asyncio.run(scenario())
     assert result.get("success") is True, result
     assert float(result["payableAmount"]) == 779.0, f"券后实付应为 779: {result}"
     assert order is not None, "订单必须存在"
