@@ -68,13 +68,17 @@ intent_conflict 唯一句/周连升两周 = 漂移重训信号。**先清 71 条
   注入词表外 eos 占位符（`'<EOS_TOKEN>'`）且显式传参也被覆写，trl 校验必挂；
   三次修补均败后整文件换栈的排障实录见 `docs/sft-deploy-eval.md`。
 - **数据**：`sft_dataset.py` 程序化生成（当前 4478 条；评测集纯门排除已验证零泄漏）。
-- **云训**：PAI-DSW 免费试用包（A10 单卡 6.991 计算时/时，全程含试错 ≈ 45 计算时），
-  2026-09-21 完整跑通，vLLM 自测三问槽位全中（含 ASC 方向翻转 08-P1 门）。
-  训练实录见 `docs/pai-dsw-sft-run-20260920.md`。
+- **训练结果（2026-09-21 完成并验证）**：4478 样本 × 3 epochs = 1680 步，23:49 完整跑完；
+  loss 1.38→0.012 平台、token 准确率 99.6%；vLLM 自测三问槽位全中
+  （含"卖得最差"→ASC 方向翻转的 08-P1 回归门）；42 条字段准确率对比基线待跑。
+  **训练实录与计算时账 → `docs/pai-dsw-sft-run-20260920.md`**
+- **云训平台**：PAI-DSW 免费试用包（A10 单卡 6.991 计算时/小时，全程含试错 ≈ 45 计算时，
+  9 月额度 250 的 ~18%）。
 - **产物纪律**：adapter 权重（154MB）不入库（GitHub 单文件 100MB 硬限），
   已 gitignore；备份在本地 zip 与云端实例（实例停止超 15 天云盘清空，注意窗口）。
 - **部署与测评**：vLLM 自测 / 本地 Ollama / PAI-EAS / engine 接入（影子跑→
-  promptfoo 达标→AI_BASE_URL 切换），全套见 `docs/sft-deploy-eval.md`。
+  promptfoo 达标→AI_BASE_URL 切换）。
+  **部署测评指南（含自测实录与 42 条评分脚本）→ `docs/sft-deploy-eval.md`**
 
 ## 文件清单
 
