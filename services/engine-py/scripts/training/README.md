@@ -59,6 +59,23 @@ intent_conflict 唯一句/周连升两周 = 漂移重训信号。**先清 71 条
 - 接入纪律：先影子跑（并行打分记日志对比）→ promptfoo intentF1 同评测集达标且高于基线
   → 配置切换；**回滚 = 配置回退一行**。评测集永远不入训（prepare 的近邻过滤就是护栏）。
 
+## SFT 轨（SemQL 意图解析，已跑通）
+
+与 metric_head 线性头并行的第二条训练轨：Qwen2.5-7B QLoRA，
+任务 = 问句 + 指标闭集 → SemQL JSON（铁律 08-D1：模型只学语义理解，永不写 SQL）。
+
+- **栈**：标准 transformers + peft + trl。**勿用 unsloth**——其补丁层会向 trainer
+  注入词表外 eos 占位符（`'<EOS_TOKEN>'`）且显式传参也被覆写，trl 校验必挂；
+  三次修补均败后整文件换栈的排障实录见 `docs/sft-deploy-eval.md`。
+- **数据**：`sft_dataset.py` 程序化生成（当前 4478 条；评测集纯门排除已验证零泄漏）。
+- **云训**：PAI-DSW 免费试用包（A10 单卡 6.991 计算时/时，全程含试错 ≈ 45 计算时），
+  2026-09-21 完整跑通，vLLM 自测三问槽位全中（含 ASC 方向翻转 08-P1 门）。
+  训练实录见 `docs/pai-dsw-sft-run-20260920.md`。
+- **产物纪律**：adapter 权重（154MB）不入库（GitHub 单文件 100MB 硬限），
+  已 gitignore；备份在本地 zip 与云端实例（实例停止超 15 天云盘清空，注意窗口）。
+- **部署与测评**：vLLM 自测 / 本地 Ollama / PAI-EAS / engine 接入（影子跑→
+  promptfoo 达标→AI_BASE_URL 切换），全套见 `docs/sft-deploy-eval.md`。
+
 ## 文件清单
 
 | 文件 | 职责 |
@@ -70,11 +87,18 @@ intent_conflict 唯一句/周连升两周 = 漂移重训信号。**先清 71 条
 | `evaluate.py` | 对任意 JSONL 复检 run，出 markdown 报告 |
 | `configs/*.example.toml` | 两份配置样例（指标头 / 意图头），复制后修改即用 |
 | `tests/test_training_pipeline.py` | 端到端测试（hash 编码器，不下载模型不依赖 DB） |
+| `sft_dataset.py` | SemQL SFT 数据构建（词面 × 时间窗 × 品类 × limit 程序化组合；评测集纯门排除，4478 条已验证零泄漏） |
+| `sft_train.py` | QLoRA SFT 训练（**标准 transformers+peft+trl 栈**；勿用 unsloth，原因见排障记录） |
+| `run_all.sh` | metric_head 一键流水线（种子 → 数据 → 训练 → 评估） |
 
 决策溯源：wayfinder 票 05（落点）/ 06（数据可行性）/ 07（水龙头）/ 11（决策文档），
 见 `docs/wayfinder/mall-data-agent-split/issues/`。
 
 ## 部署与接入（训练完 → 上线五步）
+
+> 本节五步针对 **metric_head 线性头**。SFT 轨（SemQL 意图）的部署形态不同
+> （LoRA 端点服务 + AI_BASE_URL 切换），完整部署与测评见
+> `docs/sft-deploy-eval.md`。
 
 **形态：进程内部署，无独立模型服务**（05/11 号决议）。产物 = 不改动的预训练 bge
 编码器（~100MB，与线上判重缓存同一个进程内实例，零额外内存）+ 你训练的一层
