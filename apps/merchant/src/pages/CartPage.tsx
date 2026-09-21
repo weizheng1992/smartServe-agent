@@ -16,7 +16,8 @@ export default function CartPage() {
     try {
       const res = await fetch(`/api/store/coupons?userId=${encodeURIComponent((user as any).id)}`);
       const body = await res.json();
-      setMyCoupons(body.coupons || []);
+      // 接口返回全量含已核销(status=used,供商品页 claimedIds 判重);券包只展示可用
+      setMyCoupons((body.coupons || []).filter((c: any) => c.status === 'claimed'));
     } catch { /* 券包失败不阻断购物车 */ }
   }, [(user as any).id]);
   useEffect(() => { void loadCoupons(); }, [loadCoupons]);

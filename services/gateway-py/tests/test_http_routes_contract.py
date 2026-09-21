@@ -540,6 +540,57 @@ class TestStoreOrdersStrictScoping:
         assert all(o["userId"] == "CUST-8801" for o in body["orders"])
 
 
+class TestStoreCouponLifecycle:
+    """领券→核销全生命周期(2026-09-21 bug 闭环):核销后的券必须仍出现在
+    /api/store/coupons(带 status)——修前只回 claimed 态,商品页 claimedIds
+    丢失记录,领券按钮复现,用户再点即 400「已领取过该券」。"""
+
+    async def test_used_coupon_stays_listed_with_status(self, client, contract_fixtures):
+        import uuid as _uuid
+
+        from sqlalchemy import text
+
+        from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
+
+        await ensure_merchant_tables()
+        uid = "CUST-CT-COUPON-1"
+        async with merchant_engine().begin() as conn:
+            row = (await conn.execute(text(
+                "SELECT id FROM promotions WHERE promo_type='coupon' AND status='active' LIMIT 1"
+            ))).mappings().first()
+            if row is None:
+                pid = str(_uuid.uuid4())
+                await conn.execute(text(
+                    "INSERT INTO promotions (id, name, promo_type, status, "
+                    "discount_value, scope_type) VALUES (CAST(:i AS uuid), '契约测试券', "
+                    "'coupon', 'active', 50, 'all')"
+                ).bindparams(i=pid))
+            else:
+                pid = str(row["id"])
+
+        # ① 首领成功
+        r = await client.post("/api/store/coupons/claim", json={"promoId": pid, "userId": uid})
+        assert r.status_code == 200, r.text
+        # ② 列表含该券,status=claimed
+        listed = (await client.get("/api/store/coupons", params={"userId": uid})).json()["coupons"]
+        assert [(c["promotionId"], c["status"]) for c in listed] == [(pid, "claimed")]
+        # ③ 结算核销(mark_coupon_used 同语义)
+        async with merchant_engine().begin() as conn:
+            await conn.execute(
+                text("UPDATE user_coupons SET status='used' WHERE user_id=:u").bindparams(u=uid)
+            )
+        # ④ 核销后仍在列表,status=used(修前整条消失 → 前端按钮复现)
+        listed2 = (await client.get("/api/store/coupons", params={"userId": uid})).json()["coupons"]
+        assert [(c["promotionId"], c["status"]) for c in listed2] == [(pid, "used")]
+        # ⑤ API 层重复领仍诚实拒绝(业务语义不变)
+        r2 = await client.post("/api/store/coupons/claim", json={"promoId": pid, "userId": uid})
+        assert r2.status_code == 400
+
+        # 清理
+        async with merchant_engine().begin() as conn:
+            await conn.execute(text("DELETE FROM user_coupons WHERE user_id=:u").bindparams(u=uid))
+
+
 class TestSkills:
     async def test_registry(self, client, contract_fixtures):
         res = await client.get("/api/skills/registry")

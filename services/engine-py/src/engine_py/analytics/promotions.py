@@ -174,20 +174,24 @@ async def claim_coupon(promotion_id: str, user_id: str) -> dict:
 
 
 async def my_coupons(user_id: str) -> list[dict]:
-    """我的券(未使用):含面额与活动名。"""
+    """我的券:claimed(可用)+ used(已核销)全量带 status —— 核销态必须仍在
+    列表(2026-09-21 bug:修前只回 claimed,商品页 claimedIds 丢记录,领券按钮
+    复现,重复领取 400「已领取过该券」);可用性由消费方按 status 过滤。"""
     async with _merchant_writer_engine().connect() as conn:
         rows = (
             await conn.execute(
                 text(
-                    "SELECT uc.id, uc.promotion_id, p.name, p.discount_value, uc.claimed_at FROM user_coupons uc "
+                    "SELECT uc.id, uc.promotion_id, p.name, p.discount_value, uc.claimed_at, uc.status "
+                    "FROM user_coupons uc "
                     "JOIN promotions p ON p.id = uc.promotion_id "
-                    "WHERE uc.user_id = :u AND uc.status = 'claimed' AND p.promo_type = 'coupon' "
+                    "WHERE uc.user_id = :u AND p.promo_type = 'coupon' "
                     "ORDER BY uc.claimed_at DESC"
                 ).bindparams(u=user_id)
             )
         ).mappings().all()
     return [{"id": r["id"], "promotionId": r["promotion_id"], "name": r["name"],
              "value": float(r["discount_value"]),
+             "status": r["status"],
              "claimedAt": r["claimed_at"].isoformat() if r["claimed_at"] else None} for r in rows]
 
 
