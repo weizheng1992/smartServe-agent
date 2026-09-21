@@ -1781,8 +1781,8 @@ class MallDomainService:
                     )
 
                 # 主单先行:items.order_id 对 merchant_orders 有外键
-                # 优惠结算(20-D3 用户决议启用):服务端唯一算价点,原价口径
-                # 不变(total_amount 仍记原价),实付 = 原价 − 优惠,核销落库。
+                # 优惠结算(20-D3 用户决议启用):服务端唯一算价点;账本语义与
+                # gateway 结算一致 —— total_amount 记实付,discount_amount 记优惠。
                 promo_applied = None
                 coupon_row_id = None
                 try:
@@ -1827,13 +1827,18 @@ class MallDomainService:
                         ).bindparams(pid=promo_applied["promo_id"], oid=order_id, amt=promo_applied["discount"])
                     )
 
+                # 账本语义与 gateway 结算一致(2026-09-21 bug 修复):total_amount=实付
+                # (原价−优惠),discount_amount=优惠额。此前只写原价且无优惠列 ——
+                # 券被核销而订单页显示全款(订单 1155 实证 ¥50 券白烧)。
+                _discount = promo_applied["discount"] if promo_applied else 0.0
                 await conn.execute(
                     text(
-                        "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, currency, "
+                        "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
                         "shipping_address, is_returnable, is_address_modifiable) "
-                        "VALUES (:oid, :cid, 'PAID', :amt, 'CNY', CAST(:addr AS jsonb), TRUE, TRUE)"
+                        "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', CAST(:addr AS jsonb), TRUE, TRUE)"
                     ).bindparams(
-                        oid=order_id, cid=user_id, amt=round(total_amount, 2),
+                        oid=order_id, cid=user_id,
+                        amt=round(total_amount - _discount, 2), disc=round(_discount, 2),
                         addr=json.dumps(addr_dict, ensure_ascii=False),
                     )
                 )

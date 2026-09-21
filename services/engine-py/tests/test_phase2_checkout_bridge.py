@@ -27,6 +27,43 @@ UID = "CUST-8801"
 TID = "phase2_thread"
 
 _MERCHANT_DDL = [
+    # 促销三表(优惠引擎面:2026-09-21 券账本回归测试所需;形状与 gateway merchant_db 对齐)
+    """
+    CREATE TABLE IF NOT EXISTS promotions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      promo_type TEXT NOT NULL,
+      threshold_amount NUMERIC(10,2),
+      discount_value NUMERIC(10,2) NOT NULL,
+      scope_type TEXT NOT NULL DEFAULT 'all',
+      scope_value TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      start_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      end_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS promotion_redemptions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      promotion_id UUID NOT NULL REFERENCES promotions(id),
+      order_id TEXT NOT NULL,
+      discount_amount NUMERIC(10,2) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_coupons (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      promotion_id UUID NOT NULL REFERENCES promotions(id),
+      user_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'claimed',
+      used_order_id TEXT,
+      used_at TIMESTAMP,
+      claimed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      CONSTRAINT uq_user_promo UNIQUE (promotion_id, user_id)
+    )
+    """,
     # 防御式建表:容器与相邻套件共享,严禁 DROP 改形状 —— CREATE IF NOT EXISTS
     # + ADD COLUMN IF NOT EXISTS 补齐本套所需列,表形状取并集兼容双方。
     """
@@ -70,6 +107,9 @@ _MERCHANT_DDL = [
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+    """,
+    """
+    ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0
     """,
     """
     CREATE TABLE IF NOT EXISTS merchant_customers (
@@ -140,6 +180,9 @@ async def _setup(pg_factory):
             await conn.execute(text(ddl))
         await conn.execute(text("TRUNCATE merchant_order_items, merchant_orders"))
         await conn.execute(text("TRUNCATE merchant_skus, merchant_spus CASCADE"))
+        # 促销三表一并清场:他文件(如 fallback_dispatcher 满400减50)种下的活动/券
+        # 不得污染本套结算账(2026-09-21 实证 real_order 被 −50 打红)
+        await conn.execute(text("TRUNCATE promotions, user_coupons, promotion_redemptions"))
         for spu_code, title, category, status, skus in _SPUS:
             await conn.execute(
                 text(
@@ -281,6 +324,71 @@ def test_checkout_creates_real_order(pg_factory):
     assert float(by_sku["SPU-P2-BAG-SKU-0"]["cost_at_purchase"]) == 400.0
     assert cj_stock == 4 and bag_stock == 18, "库存必须物理扣减"
     assert _read_cart() == [], "下单后购物车必须清空"
+
+
+def test_checkout_coupon_discount_reaches_order_row(pg_factory):
+    """用户券必须在订单账面落地:total_amount=实付(原价−优惠)、discount_amount=优惠额。
+
+    2026-09-21 用户实报 bug(订单 AURORA-ORD-2026-1155 实证):引擎侧结算
+    INSERT 只写原价、无 discount_amount —— promotion_redemptions 记了 ¥50、
+    券被核销,订单账面却全款,商城订单页看不到任何优惠。
+    """
+    import uuid as _uuid
+
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    async def scenario():
+        engine, me, orig, embeds = await _setup(pg_factory)
+        try:
+            async with me.begin() as conn:
+                pid = str(_uuid.uuid4())
+                await conn.execute(text(
+                    "INSERT INTO promotions (id, name, promo_type, status, discount_value, scope_type) "
+                    "VALUES (CAST(:i AS uuid), '契约新客券', 'coupon', 'active', 50, 'all')"
+                ).bindparams(i=pid))
+                await conn.execute(text(
+                    "INSERT INTO user_coupons (promotion_id, user_id) VALUES (CAST(:i AS uuid), :u)"
+                ).bindparams(i=pid, u=UID))
+            _seed_cart([
+                {"skuId": "SPU-P2-BAG-SKU-0", "title": "极光 高山徒步轻量化背包 38L", "price": 829.0, "quantity": 1},
+            ])
+            result = await MallDomainService.checkout_user_cart(
+                {"userId": UID, "threadId": TID,
+                 "shippingAddress": {"recipientName": "张伟", "phone": "13800138000", "fullAddress": "上海市浦东新区世纪大道100号"}}
+            )
+            async with me.connect() as conn:
+                order = (await conn.execute(
+                    text("SELECT total_amount, discount_amount FROM merchant_orders WHERE order_id=:o"),
+                    {"o": result["orderId"]},
+                )).mappings().first()
+                coupon = (await conn.execute(
+                    text("SELECT status, used_order_id FROM user_coupons WHERE user_id=:u"),
+                    {"u": UID},
+                )).mappings().first()
+            return result, order, coupon, pid
+        finally:
+            # 收尾自清:种下的活动/券不向他文件泄漏(共享 pg_factory 库跨文件存活)
+            try:
+                async with me.begin() as conn:
+                    await conn.execute(text("DELETE FROM user_coupons WHERE user_id=:u").bindparams(u=UID))
+                    await conn.execute(text(
+                        "DELETE FROM promotion_redemptions WHERE promotion_id=CAST(:i AS uuid)"
+                    ).bindparams(i=pid))
+                    await conn.execute(text("DELETE FROM promotions WHERE id=CAST(:i AS uuid)").bindparams(i=pid))
+            finally:
+                await _teardown(engine, me, orig, embeds)
+
+    result, order, coupon, pid = asyncio.run(scenario())
+    assert result.get("success") is True, result
+    assert float(result["payableAmount"]) == 779.0, f"券后实付应为 779: {result}"
+    assert order is not None, "订单必须存在"
+    assert float(order["total_amount"]) == 779.0, (
+        f"订单 total_amount 必须是实付 779(原价 829 − 券 50),实为 {order['total_amount']}"
+    )
+    assert float(order["discount_amount"]) == 50.0, (
+        f"订单 discount_amount 必须落 ¥50 优惠,实为 {order['discount_amount']}"
+    )
+    assert coupon["status"] == "used" and coupon["used_order_id"] == result["orderId"]
 
 
 def test_checkout_insufficient_stock_no_order(pg_factory):
