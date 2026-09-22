@@ -1,5 +1,9 @@
-# 生产部署方案（Docker Compose 全栈）
+# 生产部署方案（Docker Compose 全栈 · 场景 A 基础单机版）
 
+> **按规模选方案**：本篇是基础单机版（已实测），适用内部/几十并发。更大规模见
+> [deploy-scaling.md](deploy-scaling.md)——单机压榨（§1）/ 中型生产·监控·蓝绿（§2）/
+> 多机水平扩展（§3）/ K8s（§4），每档含架构与操作步骤（设计稿，采用前需目标环境验证）。
+>
 > 一套 `deploy/` 目录 = 服务器完整上线能力：四个前端（nginx 一体镜像）、
 > gateway（FastAPI）、Temporal Worker（可选）、PostgreSQL/Redis/Temporal。
 > 训练产物（SFT adapter）的部署另见 [sft-deploy-eval.md](sft-deploy-eval.md)。
