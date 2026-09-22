@@ -87,9 +87,9 @@ async def list_candidates(kind: str, limit: int = 8) -> list[dict]:
         elif kind == "customer":
             rows = (
                 await conn.execute(text(
-                    "SELECT c.customer_id AS id, c.name || ' · ' || c.phone AS label "
-                    "FROM merchant_customers c LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
-                    "GROUP BY c.customer_id, c.name, c.phone ORDER BY COUNT(o.order_id) DESC, c.created_at DESC LIMIT :lim"
+                "SELECT c.customer_id AS id, c.name || ' · ' || c.phone AS label, c.name AS name "
+                "FROM merchant_customers c LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
+                "GROUP BY c.customer_id, c.name, c.phone, c.created_at ORDER BY COUNT(o.order_id) DESC, c.created_at DESC LIMIT :lim"
                 ).bindparams(lim=limit))
             ).mappings().all()
         else:  # spu

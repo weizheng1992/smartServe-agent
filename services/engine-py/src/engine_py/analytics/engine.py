@@ -359,15 +359,15 @@ class MetricQueryEngine:
                 f"FROM after_sale_tickets WHERE business_id = :business_id {time_clause} "
                 f'GROUP BY status ORDER BY "metricScore" {direction} LIMIT :lim'
             )
-        elif intent.metric in ("gmv_trend", "volume_trend"):
-            # 趋势族(阶段⑥升级):默认近 30 天按日;「近 N 个月」切自然月粒度
+        elif intent.metric in ("gmv_trend", "volume_trend", "orders_trend"):
+            # 趋势族(阶段⑥⑦):默认近 30 天按日;「近 N 个月」切自然月粒度
             params.pop("lim", None)  # 时间序列窗口固定,仍以显式 LIMIT 兜底行数
-            value_expr = (
-                "COALESCE(SUM(oi.quantity * oi.price), 0)::float"
-                if intent.metric == "gmv_trend"
-                else "COALESCE(SUM(oi.quantity), 0)::float"
-            )
-            label = "GMV" if intent.metric == "gmv_trend" else "销量"
+            _TREND_EXPR = {
+                "gmv_trend": ("COALESCE(SUM(oi.quantity * oi.price), 0)::float", "GMV"),
+                "volume_trend": ("COALESCE(SUM(oi.quantity), 0)::float", "销量"),
+                "orders_trend": ("COUNT(DISTINCT o.order_id)::float", "订单量"),
+            }
+            value_expr, label = _TREND_EXPR[intent.metric]
             window = intent.time_window or {}
             n = int(window.get("n") or 0) if window.get("kind") == "last_months" else 0
             if n >= 2:
@@ -545,6 +545,90 @@ class MetricQueryEngine:
                 "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
                 f"{time_clause} GROUP BY c.customer_id, c.name, c.phone "
                 f'ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "customer_spend_stats":
+            # 客户消费统计(阶段⑦客户族):客户实体必传,宽表单行
+            params.pop("lim", None)
+            params["entities"] = (intent.entity_slot or {}).get("customer") or []
+            sql = (
+                'SELECT c.name AS "客户", c.member_level AS "会员级", '
+                'COUNT(DISTINCT o.order_id)::int AS "订单数", '
+                'COALESCE(SUM(o.total_amount), 0)::float AS "累计消费", '
+                'ROUND(COALESCE(AVG(o.total_amount), 0), 2)::float AS "客单价", '
+                "to_char(MAX(o.created_at), 'MM-DD HH24:MI') AS \"最近下单\" "
+                "FROM merchant_customers c "
+                "LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
+                "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                "WHERE c.customer_id = ANY(:entities) "
+                "GROUP BY c.customer_id, c.name, c.member_level LIMIT 1"
+            )
+        elif intent.metric == "customer_coupons":
+            params["entities"] = (intent.entity_slot or {}).get("customer") or []
+            sql = (
+                'SELECT p.name AS "券名", p.discount_value::float AS "面额折扣", '
+                "CASE uc.status WHEN 'used' THEN '已用' ELSE '未用' END AS \"状态\", "
+                "to_char(uc.claimed_at, 'MM-DD') AS \"领取\", "
+                "to_char(uc.used_at, 'MM-DD') AS \"核销\" "
+                "FROM user_coupons uc JOIN promotions p ON p.id = uc.promotion_id "
+                "WHERE uc.user_id = ANY(:entities) "
+                'ORDER BY uc.claimed_at DESC LIMIT :lim'
+            )
+        elif intent.metric == "customer_profile":
+            # 用户画像:宽表单行;最爱品类/券计数为子查询(确定性,无 LLM 参与)
+            params.pop("lim", None)
+            params["entities"] = (intent.entity_slot or {}).get("customer") or []
+            sql = (
+                'SELECT c.name AS "客户", c.member_level AS "会员级", '
+                "to_char(c.created_at, 'YYYY-MM-DD') AS \"注册时间\", "
+                'COALESCE(SUM(o.total_amount), 0)::float AS "累计消费", '
+                'COUNT(DISTINCT o.order_id)::int AS "订单数", '
+                'ROUND(COALESCE(AVG(o.total_amount), 0), 2)::float AS "客单价", '
+                "to_char(MAX(o.created_at), 'MM-DD HH24:MI') AS \"最近下单\", "
+                '(SELECT s.category FROM merchant_orders o2 '
+                "JOIN merchant_order_items oi ON oi.order_id = o2.order_id "
+                "JOIN merchant_spus s ON s.spu_code = oi.spu_id "
+                "WHERE o2.customer_id = c.customer_id "
+                "AND o2.status NOT IN ('REFUNDED', 'CANCELLED') "
+                'GROUP BY s.category ORDER BY SUM(oi.quantity * oi.price) DESC LIMIT 1) AS "最爱品类", '
+                '(SELECT COUNT(*) FROM user_coupons uc WHERE uc.user_id = c.customer_id)::int AS "领券数", '
+                "(SELECT COUNT(*) FROM user_coupons uc WHERE uc.user_id = c.customer_id "
+                "AND uc.status = 'used')::int AS \"用券数\" "
+                "FROM merchant_customers c "
+                "LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
+                "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                "WHERE c.customer_id = ANY(:entities) "
+                "GROUP BY c.customer_id, c.name, c.member_level, c.created_at LIMIT 1"
+            )
+        elif intent.metric == "stock_value":
+            sql = (
+                'SELECT s.title AS "productId", s.category AS "category", '
+                'COALESCE(SUM(k.stock), 0)::int AS "库存", '
+                'COALESCE(SUM(k.stock * k.price), 0)::float AS "metricScore" '
+                "FROM merchant_spus s JOIN merchant_skus k ON k.spu_id = s.id "
+                "WHERE s.status = 'ON_SALE' "
+                f'GROUP BY s.id, s.title, s.category ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "gmv_mom":
+            # 环比:本月 vs 上月(自然月对齐);两侧 UNION 各算一期,SUM 折叠成单行;
+            # 上月为 0 → 环比置空(不编造)
+            params.pop("lim", None)
+            sql = (
+                'SELECT SUM(t.cur)::float AS "本月GMV", SUM(t.prev)::float AS "上月GMV", '
+                'ROUND(CASE WHEN SUM(t.prev) > 0 THEN ((SUM(t.cur) - SUM(t.prev)) * 100.0 / SUM(t.prev))::numeric END, 1)::float AS "环比%" '
+                "FROM ("
+                "(SELECT COALESCE(SUM(oi.quantity * oi.price), 0)::float AS cur, "
+                "0.0::float AS prev FROM merchant_orders o "
+                "JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                "AND o.created_at >= date_trunc('month', CURRENT_DATE)) "
+                "UNION ALL "
+                "(SELECT 0.0::float AS cur, "
+                "COALESCE(SUM(oi.quantity * oi.price), 0)::float AS prev FROM merchant_orders o "
+                "JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                "AND o.created_at >= date_trunc('month', CURRENT_DATE) - INTERVAL '1 month' "
+                "AND o.created_at < date_trunc('month', CURRENT_DATE))"
+                ") t LIMIT 1"
             )
         else:
             raise UnsupportedQuery(f"指标 {intent.metric} 尚未登记执行模板")

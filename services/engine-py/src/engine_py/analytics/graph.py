@@ -91,7 +91,12 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         from . import dimensions
 
         candidates = await dimensions.list_candidates(missing_kind)
-        mentioned = [c for c in candidates if c["label"] in question or c["id"] in question]
+        # 客户候选 label 是「名 · 手机号」复合串,逐字匹配只看纯名(name 键);
+        # 其余种类 name 键缺省回落 label
+        mentioned = [
+            c for c in candidates
+            if (c.get("name") or c["label"]) in question or c["id"] in question
+        ]
         if len(mentioned) == 1:
             intent.entity_slot[missing_kind] = [mentioned[0]["id"]]
         else:
@@ -108,6 +113,10 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
             "type": "unsupported",
             "message": "当前角色无权查看该指标(反问选项集已过滤,此处为直接问越权指标的兜底拒绝)。",
         }
+
+    # 场景包(L2 复合意图):一个意图 = 一组子查询,展开为多帧结果卡
+    if intent.metric in _SCENARIO_PACKS:
+        return await _run_scenario(intent, session_ctx)
 
     # PageContext(19-D3):选中实体作为实体过滤(IN 绑定;长度上限 100)
     selection = (page_context or {}).get("selection") or []
@@ -128,6 +137,10 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     except Exception as err:
         return {"type": "error", "message": "查询执行失败(已如实报告,未生成估算数据)", "detail": str(err)}
 
+    return _result_frame(question, result, intent)
+
+
+def _result_frame(question: str, result, intent) -> dict:
     cards = build_cards(question, result, intent)
     return {
         "type": "result",
@@ -138,6 +151,59 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         "rows": result.rows,
         "cards": cards,
     }
+
+
+# 场景包展开表(L2 复合意图,grill 设计定稿):键 = 场景意图,值 = 子指标序列;
+# 子指标继承场景意图的实体槽/时间窗/品类。全部走闭集模板,零 LLM。
+_SCENARIO_PACKS: dict[str, list[str]] = {
+    "biz_overview": ["gmv", "order_count", "aov", "session_volume", "refund_rate"],
+    "customer_panorama": ["customer_profile", "customer_coupons", "customer_orders"],
+}
+
+
+async def _run_scenario(intent: StructuredQueryIntent, session_ctx: dict) -> dict:
+    """场景包 → 多帧结果卡;每节独立口径注记、独立可导出/存报告。
+
+    某节失败不影响整包:该节以 error 帧如实呈现(诚实原则,不吞不编)。
+    """
+    engine = MetricQueryEngine(session_ctx=session_ctx)
+    frames: list[dict] = []
+    for sub_metric in _SCENARIO_PACKS[intent.metric]:
+        sub = StructuredQueryIntent(
+            metric=sub_metric, direction=intent.direction, limit=intent.limit,
+            time_window=intent.time_window, category=intent.category,
+            entity_slot=dict(intent.entity_slot),
+        )
+        label = sub_metric
+        try:
+            compiled = engine.compile(sub)
+            result = await engine.execute_async(compiled)
+            frames.append(_result_frame(label, result, sub))
+        except UnsupportedQuery as err:
+            frames.append({"type": "unsupported", "message": str(err), "detail": sub_metric})
+        except Exception as err:
+            frames.append({"type": "error", "message": f"{sub_metric} 执行失败(已如实报告)", "detail": str(err)})
+    return {"type": "multi", "frames": frames}
+
+
+async def ask_all(question: str, session_ctx: dict, page_context: dict | None = None) -> dict:
+    """多轮复合入口:问号显式切分 → 各段独立走完整管线(诚实多卡)。
+
+    单段时行为与 ask() 完全一致;切分只认 ?/?(确定性标点),「和/顺便」等
+    软连接词不切 —— 那是 L3 自由分解的职责,规则抢跑会制造错误回答。
+    """
+    import re as _re
+
+    parts = [p.strip() for p in _re.split(r"[??]", question or "") if p.strip()]
+    if len(parts) <= 1:
+        return await ask(question, session_ctx, page_context)
+    frames: list[dict] = []
+    for part in parts:
+        try:
+            frames.append(await ask(part, session_ctx, page_context))
+        except Exception as err:
+            frames.append({"type": "error", "message": f"「{part}」执行失败(已如实报告)", "detail": str(err)})
+    return {"type": "multi", "frames": frames}
 
 
 async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict):

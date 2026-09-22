@@ -1078,3 +1078,45 @@ class TestSaveResultReport:
         boss = await auth()
         r = await client.post("/api/admin/analytics/reports/from-result", headers=boss, json={"question": "x"})
         assert r.status_code == 400
+
+
+class TestScenarioAndMultiIntent:
+    """场景包多帧 + 问号切分多意图(L2 复合意图):一轮问答多张结果卡。"""
+
+    async def test_biz_overview_emits_five_sections(self, client, auth):
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": "经营概览"})
+        events = _sse_events(r)
+        results = [data for ev, data in events if ev == "result"]
+        assert len(results) == 5
+        assert {sec["metric"] for sec in results} == {"gmv", "order_count", "aov", "session_volume", "refund_rate"}
+        assert all(sec["caliber"] for sec in results)
+
+    async def test_question_mark_split_runs_both(self, client, auth):
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": "销量榜?会话量多少"})
+        events = _sse_events(r)
+        results = [data for ev, data in events if ev == "result"]
+        assert [sec["metric"] for sec in results] == ["volume", "session_volume"]
+
+    async def test_customer_coupons_bound_by_name(self, client, auth):
+        """客户逐字绑定:问句含客户名 → 免反问直接出该客户券列表。"""
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        async with _merchant_writer_engine().begin() as c:
+            await c.execute(_t(
+                "INSERT INTO merchant_customers (customer_id, name, phone) "
+                "VALUES ('CUST-E2E-COUPON', '绑定测试客', '13899990000') ON CONFLICT DO NOTHING"
+            ))
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "绑定测试客名下有哪些优惠券",
+        })
+        events = dict(_sse_events(r))
+        # 客户存在但名下无券 → 诚实空(不反问、不报错)
+        assert events["result"]["metric"] == "customer_coupons"
+        assert events["result"]["rows"] == []

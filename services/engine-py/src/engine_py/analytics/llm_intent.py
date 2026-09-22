@@ -27,6 +27,10 @@ ENTITY_REQUIRED: dict[str, str] = {
     "promo_sku_compare": "promotion",
     "promo_compare": "promotion",
     "customer_orders": "customer",
+    "customer_spend_stats": "customer",
+    "customer_coupons": "customer",
+    "customer_profile": "customer",
+    "customer_panorama": "customer",
 }
 _VALID_TIME = ("last_7d", "last_30d", "last_month")
 _VALID_CATEGORY = ("户外机能", "潮流T恤", "下装裤类", "潮流鞋靴", "背包收纳", "露营装备", "衬衫", "配饰", "运动配件")

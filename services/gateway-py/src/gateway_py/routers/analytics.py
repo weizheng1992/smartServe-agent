@@ -58,10 +58,15 @@ async def analytics_ask(request: Request):
     async def stream():
         yield _sse("start", {"staff": ctx["display"], "role": ctx["role"]})
         try:
-            outcome = await graph.ask(question, ctx, body.get("pageContext"))
+            outcome = await graph.ask_all(question, ctx, body.get("pageContext"))
         except Exception as err:
             outcome = {"type": "error", "message": str(err)}
-        yield _sse(outcome.get("type", "error"), outcome)
+        if outcome.get("type") == "multi":
+            # 场景包/问号切分:一轮回多帧,前端逐帧渲染(每帧独立导出/存报告)
+            for frame in outcome.get("frames") or []:
+                yield _sse(frame.get("type", "error"), frame)
+        else:
+            yield _sse(outcome.get("type", "error"), outcome)
         await asyncio.sleep(0)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={

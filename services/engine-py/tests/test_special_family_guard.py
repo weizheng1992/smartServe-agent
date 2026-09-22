@@ -37,6 +37,13 @@ _SPECIAL_METRICS: list[tuple[str, dict]] = [
     ("zero_sales", {}),
     ("category_gmv_top", {}),
     ("customer_spend_top", {}),
+    # 阶段⑦客户族/环比/走势/货值(场景包 biz_overview/customer_panorama 由编排层展开,不经编译器)
+    ("orders_trend", {}),
+    ("stock_value", {}),
+    ("gmv_mom", {}),
+    ("customer_spend_stats", {"entity_slot": {"customer": ["C1"]}}),
+    ("customer_coupons", {"entity_slot": {"customer": ["C1"]}}),
+    ("customer_profile", {"entity_slot": {"customer": ["C1"]}}),
 ]
 
 
@@ -115,6 +122,13 @@ class TestExitFamilyResolve:
         ("零销量商品有哪些", "zero_sales"),
         ("品类GMV排行", "category_gmv_top"),
         ("消费最高的客户 Top 3", "customer_spend_top"),
+        ("张伟的消费统计", "customer_spend_stats"),
+        ("张伟的优惠券", "customer_coupons"),
+        ("张伟的用户画像", "customer_profile"),
+        ("经营概览", "biz_overview"),
+        ("GMV环比", "gmv_mom"),
+        ("每日订单量走势", "orders_trend"),
+        ("库存价值排行", "stock_value"),
     ])
     def test_exit_family_routes(self, engine, question, metric):
         intent = engine.resolve(question)

@@ -66,6 +66,10 @@ _SPECIAL_FAMILY_TABLES: dict[str, dict[str, Any]] = {
         "columns": {"business_id": "租户", "status": "工单状态", "created_at": "时间"},
         "notes": "engine 本地库;查询必带 business_id 谓词",
     },
+    "user_coupons": {
+        "columns": {"user_id": "客户ID(= merchant_customers.customer_id)", "promotion_id": "→ promotions.id", "status": "claimed/used", "claimed_at": "领取时间", "used_at": "核销时间"},
+        "notes": "商城券包;客户实体过滤",
+    },
 }
 
 
