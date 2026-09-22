@@ -13,6 +13,8 @@
 
 ## Decisions so far
 
+- [T3 多轮会话态](tickets/T3-multi-turn-session.md):session_id+Redis 会话记忆+LLM 追问改写,改写问句贯穿绑定/落存;浏览器多轮实测(见下一条 Decisions 之后的提交)
+
 - [T1 客户消费趋势折线](tickets/T1-customer-spend-trend.md):已上线,折线图浏览器实测(d8dad09)
 - [T2 图表类型指令槽位](tickets/T2-chart-hint.md):chart_hint 全链路,折线/柱状/表格指令生效(d8dad09)
 

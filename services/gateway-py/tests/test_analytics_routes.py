@@ -1154,3 +1154,59 @@ class TestSelectionSlotCoexistence:
         assert events["result"]["metric"] == "customer_spend_stats"
         rows = events["result"]["rows"]
         assert len(rows) == 1 and rows[0]["累计消费"] == 88.0
+
+
+class TestMultiTurnSession:
+    """T3 多轮会话态:session_id 载荷 → 历史/图表切换/追问改写。"""
+
+    async def _ask(self, client, boss, question, session_id):
+        return await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": question, "pageContext": {"sessionId": session_id},
+        })
+
+    async def test_chart_switch_fast_path(self, client, auth):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        sess = f"e2e-t3a-{uuid.uuid4().hex[:8]}"
+        r1 = await self._ask(client, boss, "库存价值排行", sess)
+        assert dict(_sse_events(r1))["result"]["metric"] == "stock_value"
+        r2 = await self._ask(client, boss, "换成表格", sess)
+        sec = dict(_sse_events(r2))["result"]
+        assert sec["metric"] == "stock_value" and sec["chart"] == "table"
+
+    async def test_followup_rewrite_uses_history(self, client, auth, monkeypatch):
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        # 假 L3:改写后的问句统一解析为客户订单意图(免真网依赖)
+        async def fake_llm(question, allowed=None, business_id=""):
+            return StructuredQueryIntent(metric="customer_orders", direction="DESC", limit=10)
+
+        monkeypatch.setattr("engine_py.analytics.llm_intent.llm_resolve", fake_llm)
+        import engine_py.analytics.graph as g
+
+        async def fake_rewrite(question, history):
+            return "张伟最近的订单" if question.startswith("他呢") else None
+
+        monkeypatch.setattr(g, "_rewrite_followup", fake_rewrite)
+
+        # 种客户「张伟」:实体逐字绑定需候选名单里有它
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        await _merchant_writer_engine().begin().__anext__() if False else None
+        async with _merchant_writer_engine().begin() as c:
+            await c.execute(_t(
+                "INSERT INTO merchant_customers (customer_id, name, phone) "
+                "VALUES ('CUST-E2E-MT', '张伟', '13888889999') ON CONFLICT DO NOTHING"
+            ))
+
+        boss = await auth()
+        sess = f"e2e-t3b-{uuid.uuid4().hex[:8]}"
+        r1 = await self._ask(client, boss, "张伟最近的订单", sess)
+        assert dict(_sse_events(r1))["result"]["metric"] == "customer_orders"
+        r2 = await self._ask(client, boss, "他呢?", sess)
+        assert "result" in dict(_sse_events(r2)), f"r2 events={_sse_events(r2)} body={r2.text[:400]}"

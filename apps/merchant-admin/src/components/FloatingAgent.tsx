@@ -64,8 +64,14 @@ export function FloatingAgent({ route }: { route: string }) {
     setBusy(true);
     const question = q.trim();
     const selection = JSON.parse(localStorage.getItem('merchant-admin.selection') || '[]');
+    // T3 多轮:浏览器侧稳定 session_id(服务端 Redis 按此键存会话上下文)
+    let sessionId = localStorage.getItem('merchant-admin.session');
+    if (!sessionId) {
+      sessionId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem('merchant-admin.session', sessionId);
+    }
     try {
-      const result = await api.ask(question, { route, selection });
+      const result = await api.ask(question, { route, selection, sessionId });
       const stamp = ++frameSeq * 100;
       setFrames((prev) => [
         ...prev,
