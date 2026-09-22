@@ -153,6 +153,25 @@ class TestMonthlyTrendRouting:
         intent = engine.resolve("近3个月的销量")
         assert intent.time_window == {"kind": "last_months", "n": 3}
 
+    @pytest.mark.parametrize(("question", "metric"), [
+        ("销量 折线图", "volume_trend"),
+        ("GMV 折线图", "gmv_trend"),
+        ("销量榜 折线图", "volume"),
+    ])
+    def test_line_hint_upgrades_to_trend(self, engine, question, metric):
+        """「XX 折线图」= 随时间的线 → 升级趋势族;榜单语义优先不升级。"""
+        intent = engine.resolve(question)
+        assert intent.metric == metric
+
+    def test_trend_template_filters_by_selected_spu(self, engine):
+        """勾选商品的趋势:模板按勾选的 spu 过滤(勾哪款出哪款的线)。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        compiled = engine.compile(StructuredQueryIntent(
+            metric="volume_trend", entity_slot={"spu": ["SPU-AURORA-001"]},
+        ))
+        assert "oi.spu_id = ANY(:spu_ids)" in compiled.sql
+
     def test_ranking_semantics_outrank_trend(self, engine):
         """「上个月的销量排行」问的是榜单不是折线:降回 volume,时间窗保留。"""
         intent = engine.resolve("上个月的销量排行")

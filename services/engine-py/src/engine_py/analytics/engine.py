@@ -167,6 +167,13 @@ class MetricQueryEngine:
             raise UnsupportedQuery(f"未命中已注册指标(闭集={list(registry)})")
 
         metric_key = hit[0]
+
+        # 折线图指令 × 基础销量/金额指标 → 升级为趋势族(「销量 折线图」问的是
+        # 随时间的线,不是榜单);榜单语义(榜/排行/Top)优先,不升级。
+        # chart_hint 在此提前解析,兼作升级触发器。
+        chart_hint = self._parse_chart_hint(clean)
+        if chart_hint == "line" and metric_key in ("gmv", "volume", "order_count") and not re.search(r"排行|排名|榜|top\s*\d*", clean):
+            metric_key = {"gmv": "gmv_trend", "volume": "volume_trend", "order_count": "orders_trend"}[metric_key]
         metric = registry[metric_key]
 
         # 反向词 → 方向翻转(03-L0 决议);正向泛指词 × 多销售指标 → 反问
@@ -186,7 +193,6 @@ class MetricQueryEngine:
                 }
 
         limit, time_window, category = self._extract_slots(clean)
-        chart_hint = self._parse_chart_hint(clean)
 
         return StructuredQueryIntent(metric=metric_key, direction=direction, limit=limit, time_window=time_window, category=category, chart_hint=chart_hint)
 
@@ -384,7 +390,12 @@ class MetricQueryEngine:
                 "customer_spend_trend": ("COALESCE(SUM(o.total_amount), 0)::float", "消费", False),
             }
             value_expr, label, needs_items = _TREND_EXPR[intent.metric]
-            items_join = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id " if needs_items else ""
+            items_join = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+            spu_ids = (intent.entity_slot or {}).get("spu") or []
+            if spu_ids and intent.metric in ("volume_trend", "gmv_trend"):
+                # 勾选商品的趋势:过滤入 JOIN ON,无销售日照常出零点(线不断)
+                items_join += "AND oi.spu_id = ANY(:spu_ids) "
+                params["spu_ids"] = spu_ids[:50]
             cust_ids = (intent.entity_slot or {}).get("customer") or []
             customer_clause = ""
             if cust_ids:
