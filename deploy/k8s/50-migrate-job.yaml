@@ -1,0 +1,28 @@
+# 一次性迁移 Job:滚动更新前跑(或接入 Helm pre-upgrade hook / Argosync 钩子)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: smartserve
+  annotations:
+    # 手动重跑: kubectl -n smartserve delete job db-migrate && kubectl apply -f 50-migrate-job.yaml
+    note: "rerun by deleting the job"
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: db-migrate }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: registry.example.com/smartserve/gateway:1.0
+          workingDir: /app/services/engine-py
+          command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: { name: app-config }
+            - secretRef: { name: app-secret }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 2Gi }

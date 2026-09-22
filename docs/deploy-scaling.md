@@ -57,9 +57,7 @@ compose 每个长驻服务加：
 **④ 资源上限**（防单服务拖垮整机）：gateway/worker 加
 `deploy.resources.limits.memory: 8g`，postgres 加 `4g`。
 
-### 1.2 用法（compose 多文件合并，不改原文件）
-
-新建 `deploy/docker-compose.scale.yml` 只写上述覆盖项，然后：
+### 1.2 用法（覆盖文件已提供：`deploy/docker-compose.scale.yml`）
 
 ```bash
 docker compose -f deploy/docker-compose.prod.yml \
@@ -76,21 +74,13 @@ docker compose -f deploy/docker-compose.prod.yml \
 
 ## §2 场景 C：中型生产（监控 + 零停机 + 备份强化）
 
-### 2.1 监控栈（追加到 compose）
+### 2.1 监控栈（配置已提供：`deploy/docker-compose.monitoring.yml` + `deploy/monitoring/prometheus.yml`）
 
-```yaml
-  prometheus:
-    image: prom/prometheus
-    volumes: ["./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml"]
-    ports: ["9090:9090"]
-  grafana:
-    image: grafana/grafana
-    ports: ["3300:3000"]
-    volumes: ["grafana_data:/var/lib/grafana"]
-  cadvisor:                        # 容器 CPU/内存/网络指标
-    image: gcr.io/cadvisor/cadvisor
-    volumes: ["/:/rootfs:ro", "/var/run:/var/run:ro", "/sys:/sys:ro",
-              "/var/lib/docker/:/var/lib/docker:ro"]
+```bash
+docker compose -f deploy/docker-compose.prod.yml \
+               -f deploy/docker-compose.monitoring.yml \
+               --env-file deploy/.env.prod up -d prometheus grafana cadvisor
+# Grafana: http://服务器:3300(首登改密);Prometheus 控制台: :9090
 ```
 
 关键指标：`/api/health` 拨测（黑盒）、容器内存/CPU（cadvisor）、PG 活跃连接、
@@ -133,7 +123,14 @@ docker compose -p smartserve-green -f deploy/docker-compose.prod.yml up -d --bui
           └── LLM → 多渠道池化(单端点限流会成为新瓶颈)
 ```
 
-### 3.2 迁移要点（按依赖顺序）
+### 3.2 迁移要点（按依赖顺序；配置已提供）
+
+| 组件 | 配置文件 |
+|---|---|
+| 入口 LB（自托管 nginx 版，TLS+轮询+被动探活） | `deploy/lb/nginx-lb.conf`（云 SLB 参数照抄） |
+| 应用节点（只跑 gateway 的单机 compose） | `deploy/docker-compose.gateway-node.yml` |
+| 独立 embedding（TEI + bge，OpenAI 兼容） | `deploy/embedding/docker-compose.tei.yml` |
+
 
 1. **PG 先行**：pg_dump 迁云 RDS，`DATABASE_URL` 换 RDS 连接串（带
    `?sslmode=require`）；低峰窗口切，应用无感知
@@ -159,6 +156,10 @@ docker compose -p smartserve-green -f deploy/docker-compose.prod.yml up -d --bui
 
 **触发条件**（满足任一再上，否则是过度设计）：多机运维成本失控、需要弹性伸缩
 （促销波峰）、团队已有 K8s 平台。
+
+**全套 manifest 已提供：`deploy/k8s/`**（namespace/secret/configmap/gateway
+Deployment+Service+HPA/web/worker/TEI/migrate Job/Ingress + README 含 apply
+顺序与镜像推送步骤；镜像占位 `registry.example.com/smartserve/*` 需替换）。
 
 **compose → K8s 映射表**：
 

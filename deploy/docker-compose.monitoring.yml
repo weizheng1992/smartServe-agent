@@ -1,0 +1,42 @@
+# 场景 C:监控栈 override —— prometheus + grafana + cadvisor
+#   docker compose -f deploy/docker-compose.prod.yml \
+#                  -f deploy/docker-compose.monitoring.yml \
+#                  --env-file deploy/.env.prod up -d prometheus grafana cadvisor
+# Grafana: http://服务器:3300 (默认账号 admin/admin,首登改密);数据源选 prometheus
+# 未实测(设计稿)
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-grafana}
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3300:3000"
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:

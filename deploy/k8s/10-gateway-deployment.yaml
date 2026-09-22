@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: smartserve
+  labels: { app: gateway }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: gateway }
+  template:
+    metadata:
+      labels: { app: gateway }
+    spec:
+      containers:
+        - name: gateway
+          image: registry.example.com/smartserve/gateway:1.0   # 替换为你的仓库
+          command: ["uv", "run", "--no-sync", "uvicorn", "gateway_py.main:app",
+                    "--host", "0.0.0.0", "--port", "4000", "--workers", "4"]
+          ports: [{ containerPort: 4000 }]
+          envFrom:
+            - configMapRef: { name: app-config }
+            - secretRef: { name: app-secret }
+          env:
+            - name: UPLOADS_DIR
+              value: /data/uploads
+          readinessProbe:
+            httpGet: { path: /api/health, port: 4000 }
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            failureThreshold: 8
+          livenessProbe:
+            httpGet: { path: /api/health, port: 4000 }
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests: { cpu: 500m, memory: 1.5Gi }
+            limits: { cpu: "2", memory: 4Gi }
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: uploads        # 多副本需 RWX 存储类;或改对象存储,见 k8s/README
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads
+  namespace: smartserve
+spec:
+  accessModes: ["ReadWriteOnce"]       # 多副本改 ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi

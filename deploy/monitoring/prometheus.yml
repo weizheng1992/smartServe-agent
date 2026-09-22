@@ -1,0 +1,19 @@
+# Prometheus 抓取配置(cadvisor 容器指标 + 自身)
+# 应用自身暂未暴露 /metrics(python client 未接入);黑盒拨测建议 Grafana Alerting
+# 对 http://gateway:4000/api/health 做探活告警
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # 预留:应用接入 prometheus-fastapi-instrumentator 后启用
+  # - job_name: gateway
+  #   static_configs:
+  #     - targets: ["gateway:4000"]

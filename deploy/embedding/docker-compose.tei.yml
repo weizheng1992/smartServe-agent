@@ -1,0 +1,28 @@
+# 场景 D:独立 embedding 服务(TEI) —— gateway 不再进程内载 bge
+#   docker compose -f deploy/embedding/docker-compose.tei.yml up -d
+# 端口 8081;TEI 提供 OpenAI 兼容 /v1/embeddings
+#
+# 引擎侧接入(二选一):
+#   A. LLM 网关聚合(推荐):在 AI_BASE_URL 指向的网关上,把 /embeddings 路由
+#      反代到 http://本机:8081/v1/embeddings —— 应用配置零改动
+#   B. 引擎配置直连:AI_EMBEDDING_PROVIDER=openai 且 AI_BASE_URL 指向 TEI
+#      (此时 chat 调用也走 TEI,不可行——所以生产走 A)
+# 未实测(设计稿)
+services:
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    command: ["--model-id", "BAAI/bge-small-zh-v1.5", "--port", "80"]
+    ports:
+      - "8081:80"
+    volumes:
+      - tei_data:/data          # 模型权重缓存
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:80/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 120s        # 首启下载 ~100MB 模型
+    restart: unless-stopped
+
+volumes:
+  tei_data:

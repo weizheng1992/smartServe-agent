@@ -1,0 +1,39 @@
+# 独立 embedding 服务:TEI + BAAI/bge-small-zh-v1.5(OpenAI 兼容 /v1/embeddings)
+# LLM 网关把 /embeddings 聚合到 http://tei.smartserve.svc:80 后,应用配置零改动
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tei
+  namespace: smartserve
+  labels: { app: tei }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tei }
+  template:
+    metadata:
+      labels: { app: tei }
+    spec:
+      containers:
+        - name: tei
+          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+          args: ["--model-id", "BAAI/bge-small-zh-v1.5", "--port", "80"]
+          ports: [{ containerPort: 80 }]
+          readinessProbe:
+            httpGet: { path: /health, port: 80 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "1", memory: 2Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tei
+  namespace: smartserve
+spec:
+  selector: { app: tei }
+  ports:
+    - port: 80
+      targetPort: 80

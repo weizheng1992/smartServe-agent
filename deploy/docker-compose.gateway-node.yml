@@ -1,0 +1,36 @@
+# 场景 D:水平扩展单节点 —— 只跑 gateway(无状态),数据库/Redis 用云 RDS/云 Redis
+# 每台应用节点同一份文件+env,SLB 后端组加机器即可扩容
+#
+#   docker compose -f deploy/docker-compose.gateway-node.yml \
+#                  --env-file deploy/.env.prod up -d
+#
+# .env.prod 中 DATABASE_URL/REDIS_URL 换成云 RDS/云 Redis 连接串;
+# RATE_LIMIT_TRUSTED_PROXIES 加入 LB 的网段(否则限流按 LB IP 计)
+# 未实测(设计稿)
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    env_file: .env.prod
+    command: ["uv", "run", "--no-sync", "uvicorn", "gateway_py.main:app",
+              "--host", "0.0.0.0", "--port", "4000", "--workers", "4"]
+    ports:
+      - "4000:4000"
+    volumes:
+      - uploads:/data/uploads          # 多副本时聊天附件需共享:换云盘/NFS 挂载到同一路径
+      - hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:4000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 6
+      start_period: 120s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
+
+volumes:
+  uploads:
+  hf_cache:

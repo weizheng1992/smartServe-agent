@@ -1,0 +1,50 @@
+# 场景 B:单机压榨 override —— 与 prod 合并使用,不改原文件:
+#   docker compose -f deploy/docker-compose.prod.yml \
+#                  -f deploy/docker-compose.scale.yml \
+#                  --env-file deploy/.env.prod up -d
+# 未实测(设计稿);合并后先 `config` 校验再 up
+services:
+  gateway:
+    # 多 worker:每个 worker 各载一份 bge(~300MB 内存);内存紧可切 AI_EMBEDDING_PROVIDER=openai
+    command: ["uv", "run", "--no-sync", "uvicorn", "gateway_py.main:app",
+              "--host", "0.0.0.0", "--port", "4000", "--workers", "4"]
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { memory: 8g }
+        reservations: { memory: 2g }
+
+  worker:
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { memory: 2g }
+
+  web:
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+
+  postgres:
+    # 持久化强化 + 资源上限
+    command: >
+      postgres -c shared_buffers=1GB -c max_connections=200
+               -c work_mem=16MB -c effective_cache_size=3GB
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { memory: 4g }
+
+  redis:
+    # AOF 持久化:重启不丢限流窗口与缓存
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis_password}",
+              "--appendonly", "yes", "--appendfsync", "everysec"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

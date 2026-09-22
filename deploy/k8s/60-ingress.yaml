@@ -1,0 +1,48 @@
+# 域名占位 *.mall.example.com,按实际替换;TLS 建议 cert-manager 自动签
+# 前端四站点走 host 路由;/api 进 Ingress 后由前端同源规则无需单独 api 域——
+# 注意:本集群把 api 独立成域(经 LB 直达 gateway Service),前端构建保持相对 /api
+# 需要浏览器侧同源时,改为在同一个 host 下加 /api 路径路由(见注释示例)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smartserve
+  namespace: smartserve
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"        # SSE
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 25m
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: web.mall.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { name: web } } }
+    - host: admin.mall.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { name: admin } } }
+    - host: merchant.mall.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { name: merchant } } }
+    - host: merchant-admin.mall.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { name: merchant-admin } } }
+    # 同源 /api 方案:四站点 host 各自追加此 path(示例仅列 web 一个)
+    # - host: web.mall.example.com
+    #   http:
+    #     paths:
+    #       - path: /api
+    #         pathType: Prefix
+    #         backend: { service: { name: gateway, port: { number: 4000 } } }

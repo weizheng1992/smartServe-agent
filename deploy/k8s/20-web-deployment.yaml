@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: smartserve
+  labels: { app: web }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: web
+          image: registry.example.com/smartserve/web:1.0   # 替换为你的仓库
+          ports:
+            - { containerPort: 3000, name: web }
+            - { containerPort: 3001, name: admin }
+            - { containerPort: 3005, name: merchant }
+            - { containerPort: 3006, name: merchant-admin }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: smartserve
+spec:
+  selector: { app: web }
+  ports:
+    - { name: web, port: 3000, targetPort: 3000 }
+    - { name: admin, port: 3001, targetPort: 3001 }
+    - { name: merchant, port: 3005, targetPort: 3005 }
+    - { name: merchant-admin, port: 3006, targetPort: 3006 }

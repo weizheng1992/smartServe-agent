@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: smartserve
+  labels: { app: worker }
+spec:
+  replicas: 1                    # Temporal worker 可多副本,周期任务场景 1-2 即可
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      containers:
+        - name: worker
+          image: registry.example.com/smartserve/gateway:1.0
+          workingDir: /app/services/engine-py
+          command: ["uv", "run", "--no-sync", "python", "-m", "engine_py.temporal.worker"]
+          envFrom:
+            - configMapRef: { name: app-config }
+            - secretRef: { name: app-secret }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 2Gi }
