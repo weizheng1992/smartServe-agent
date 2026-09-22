@@ -585,14 +585,17 @@ async def spus_create(request: Request):
     spu_id = str(_u.uuid4())
     code = f"SPU-{_u.uuid4().hex[:8].upper()}"
     async with _merchant_writer_engine().begin() as conn:
+        # asyncpg 严格类型:varchar 入 uuid 列必须显式 CAST(update/delete 同款写法);
+        # main_image/sku_title/spec_attributes 为 NOT NULL,新建时落诚实默认值
         await conn.execute(_t(
-            "INSERT INTO merchant_spus (id, spu_code, title, category, status) "
-            "VALUES (:id, :code, :t, :cat, 'ON_SALE')"
+            "INSERT INTO merchant_spus (id, spu_code, title, category, main_image, status) "
+            "VALUES (CAST(:id AS uuid), :code, :t, :cat, '', 'ON_SALE')"
         ).bindparams(id=spu_id, code=code, t=title, cat=category))
         await conn.execute(_t(
-            "INSERT INTO merchant_skus (id, spu_id, sku_code, price, stock) "
-            "VALUES (:id, :spu, :code, :price, :stock)"
-        ).bindparams(id=str(_u.uuid4()), spu=spu_id, code=code + "-SKU-1", price=float(price), stock=stock))
+            "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, spec_attributes, price, stock) "
+            "VALUES (CAST(:id AS uuid), CAST(:spu AS uuid), :code, :st, CAST(:attrs AS jsonb), :price, :stock)"
+        ).bindparams(id=str(_u.uuid4()), spu=spu_id, code=code + "-SKU-1",
+                     st=f"{title} 默认款", attrs="{}", price=float(price), stock=stock))
     return {"success": True, "id": spu_id, "spuCode": code}
 
 

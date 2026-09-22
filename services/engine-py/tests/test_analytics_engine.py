@@ -93,6 +93,26 @@ class TestSqlGuard:
             reject_unsafe("SELECT 1", schema={}, require_business_id=True)
 
 
+class TestInlineEntityBinding:
+    """「这款商品卖多少」实体槽接线:spu 槽必须进标准族模板过滤
+    (此前只认 PageContext 勾选,L3/行内绑定的实体被静默忽略)。"""
+
+    def test_volume_filters_by_spu_entity_slot(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        compiled = engine.compile(StructuredQueryIntent(metric="volume", entity_slot={"spu": ["SPU-E2E-X"]}))
+        assert "ANY(:entities)" in compiled.sql
+        assert compiled.params["entities"] == ["SPU-E2E-X"]
+
+    def test_page_context_selection_wins_over_slot(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        compiled = engine.compile(
+            StructuredQueryIntent(metric="volume", entity_ids=["SEL-1"], entity_slot={"spu": ["SPU-E2E-X"]})
+        )
+        assert compiled.params["entities"] == ["SEL-1"]
+
+
 class TestCompile:
     def test_compiled_sql_is_parameterized(self, engine):
         intent = engine.resolve("卖得最差的商品 Top 3")

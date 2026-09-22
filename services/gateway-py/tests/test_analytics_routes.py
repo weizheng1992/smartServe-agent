@@ -995,3 +995,63 @@ class TestTenantIsolation:
                 )
             ).scalars().first()
             assert row is not None and row.name == "对手菜单"
+
+
+class TestInlineProductMention:
+    """行内商品提及(零 LLM 路):问句逐字含唯一商品标题 → 绑定该款;
+    有销量出单行,零销量诚实空(而非回退全品类榜 —— 修复前实体被静默忽略)。
+    """
+
+    async def _spu_code_by_title(self, client, boss, title: str) -> str:
+        rows = (await client.get("/api/admin/analytics/spus", headers=boss)).json()["spus"]
+        return next(row["spu_code"] for row in rows if row["title"] == title)
+
+    async def test_mentioned_product_with_sales_answers_single_row(self, client, auth):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()  # 测试容器先建商户库,再走 API
+        boss = await auth()
+        title = "E2E行内绑定测试冲锋衣Pro限定版"
+        r = await client.post("/api/admin/analytics/spus", headers=boss, json={
+            "title": title, "category": "户外机能", "price": 199, "stock": 50,
+        })
+        assert r.status_code == 200, r.text
+        code = await self._spu_code_by_title(client, boss, title)
+
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+        async with _merchant_writer_engine().begin() as c:
+            await c.execute(_t(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                "VALUES ('E2E-INLINE-ORD', 'CUST-INLINE', 'PAID', 597.00, '{}'::jsonb) "
+                "ON CONFLICT (order_id) DO NOTHING"
+            ))
+            await c.execute(_t(
+                "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price) "
+                "VALUES ('E2E-INLINE-ORD', :spu, 'SKU-INLINE-1', :title, 'Pro限定版 L', 3, 199.00)"
+            ), {"spu": code, "title": title})
+
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": f"{title} 最近销量"})
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "volume"
+        rows = events["result"]["rows"]
+        # 模板 productId 出内部 uuid,绑定值是 spu_code —— 按商品名断绑定正确性
+        assert len(rows) == 1 and rows[0]["name"] == title
+        assert rows[0]["metricScore"] == 3
+
+    async def test_mentioned_zero_sales_product_is_honest_empty(self, client, auth):
+        """零销量款:绑定后诚实空 —— 修复前实体被忽略,会回退全品类榜(非空)。"""
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        title = "E2E行内绑定测试零销量帐篷Pro版"
+        r = await client.post("/api/admin/analytics/spus", headers=boss, json={
+            "title": title, "category": "露营装备", "price": 399, "stock": 10,
+        })
+        assert r.status_code == 200, r.text
+
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": f"{title} 最近销量"})
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "volume"
+        assert events["result"]["rows"] == []

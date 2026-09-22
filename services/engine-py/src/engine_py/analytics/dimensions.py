@@ -50,6 +50,28 @@ async def resolve_entity(kind: str, mention: str, limit: int = 8) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def find_inline_spu_mentions(question: str) -> list[dict]:
+    """行内商品提及(L0 无 LLM 路):问句逐字包含完整商品标题/编码即命中。
+
+    方向与 resolve_entity 相反 —— 不是「提及原文 → ILIKE 找实体」,而是
+    「库内标题 → 判断是否为问句子串」,确定性零 LLM;标题过短(<6 字)不参与
+    (「衬衫」这类品类词会命中多款);调用方只在唯一命中时绑定。
+    """
+    q = (question or "").strip()
+    if len(q) < 6:
+        return []
+    async with order_domain._merchant_reader_engine().connect() as conn:
+        rows = (
+            await conn.execute(text(
+                "SELECT spu_code AS id, title AS label FROM merchant_spus "
+                "WHERE (LENGTH(title) >= 6 AND POSITION(title IN :q) > 0) "
+                "OR POSITION(spu_code IN :q) > 0 "
+                "ORDER BY LENGTH(title) DESC"
+            ).bindparams(q=q))
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
 async def list_candidates(kind: str, limit: int = 8) -> list[dict]:
     """未指明实体时的候选清单(clarify 反问选项;按最近/最大取前 N)。"""
     if kind not in _ENTITY_KINDS:

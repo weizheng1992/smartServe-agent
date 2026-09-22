@@ -12,6 +12,10 @@ from typing import Any
 
 from .engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
 
+# 行内商品提及适用闭集(标准商品族:输出商品级榜/单行,模板支持 spu 过滤);
+# 时间序列/会话/活动族不在其列 —— 闭集外指标绝不静默扩展绑定语义。
+_INLINE_SPU_METRICS = frozenset({"gmv", "volume", "gross_profit", "margin_rate", "stock_risk"})
+
 
 def build_cards(question: str, result: Any, intent: StructuredQueryIntent | None = None) -> list[dict]:
     """QueryResult → 卡片(表格为主基座;指标元数据+口径注记必带 —— 诚实呈现)。"""
@@ -65,6 +69,20 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
 
     if isinstance(intent, dict) and intent.get("clarify"):
         return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
+
+    # 行内商品提及(L0 直出、零 LLM):标准商品族指标的问句逐字包含唯一商品
+    # 标题/编码 → 直接绑定 spu 实体槽;零/多命中不改语义(保守放行原问句)。
+    # 扫描属可选增强,连接失败降级放行(同 [L2] 范例检索失败先例,主查询仍响亮)。
+    if intent.metric in _INLINE_SPU_METRICS and not (intent.entity_slot or {}).get("spu"):
+        from . import dimensions
+
+        try:
+            mentions = await dimensions.find_inline_spu_mentions(question)
+        except Exception as scan_err:
+            print(f"[InlineSPU] 行内提及扫描失败(放行原语义): {scan_err}")
+            mentions = []
+        if len(mentions) == 1:
+            intent.entity_slot["spu"] = [mentions[0]["id"]]
 
     # 必填实体缺失(L0/范例直出):问句里已逐字写明候选名 → 自动绑定;
     # 否则列实体候选反问(entity 类 clarify,帧携带原问题供点选回问)

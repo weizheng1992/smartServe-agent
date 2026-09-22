@@ -261,9 +261,12 @@ class MetricQueryEngine:
         if not business_id:
             raise ValueError("session_ctx.business_id 必传(租户谓词服务端注入,不可缺席)")
 
-        if intent.entity_ids:
+        # 实体过滤:PageContext 勾选优先;其次 L3/行内绑定解析出的 spu 实体槽
+        # (「这款商品卖多少」问法)—— 两者同走 IN 绑定,长度上限 100。
+        entities = list(intent.entity_ids) or list((intent.entity_slot or {}).get("spu") or [])
+        if entities:
             sql = sql.replace("WHERE s.status = 'ON_SALE'", "WHERE s.status = 'ON_SALE' AND s.spu_code = ANY(:entities)")
-            params["entities"] = list(intent.entity_ids)[:100]
+            params["entities"] = entities[:100]
 
         try:
             ast = assert_safe_select(sql, compile_safe_schema_card(), require_business_id="business_id" in sql)
