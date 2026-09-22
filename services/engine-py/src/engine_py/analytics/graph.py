@@ -128,6 +128,7 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
             time_window=intent.time_window, category=intent.category,
             entity_ids=[str(s) for s in selection][:100],
             entity_slot=dict(intent.entity_slot),
+            chart_hint=intent.chart_hint,
         )
 
     try:
@@ -150,7 +151,8 @@ def _result_frame(question: str, result, intent) -> dict:
         "metric": result.metric,
         "unit": result.unit,
         "caliber": result.caliber,
-        "chart": result.chart,
+        # 用户图表指令(chart_hint)优先,缺省由指标语义自动推断(趋势→折线)
+        "chart": intent.chart_hint or result.chart,
         "rows": result.rows,
         "cards": cards,
     }
@@ -176,6 +178,7 @@ async def _run_scenario(intent: StructuredQueryIntent, session_ctx: dict) -> dic
             metric=sub_metric, direction=intent.direction, limit=intent.limit,
             time_window=intent.time_window, category=intent.category,
             entity_slot=dict(intent.entity_slot),
+            chart_hint=intent.chart_hint,
         )
         label = sub_metric
         try:

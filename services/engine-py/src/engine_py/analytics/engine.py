@@ -47,6 +47,7 @@ class StructuredQueryIntent:
     time_window: dict | None = None
     category: str | None = None
     entity_ids: list[str] = field(default_factory=list)  # PageContext 选中实体(IN 绑定)
+    chart_hint: str | None = None  # 用户指定图型(line/bar/table);缺省由卡片层自动推断
     # 命名实体槽(ADR-0005):LLM/L2 解析后的实体 ID 集合,如
     # {"promotion": ["<uuid>"], "customer": ["CUST-8801"], "spu": ["AURORA-SPU-1"]}
     entity_slot: dict[str, list[str]] = field(default_factory=dict)
@@ -157,6 +158,7 @@ class MetricQueryEngine:
                         return StructuredQueryIntent(
                             metric=head_label, direction=registry[head_label]["direction"],
                             limit=limit2, time_window=time2, category=cat2,
+                            chart_hint=self._parse_chart_hint(clean),
                         )
                 except UnsupportedQuery:
                     pass
@@ -184,8 +186,19 @@ class MetricQueryEngine:
                 }
 
         limit, time_window, category = self._extract_slots(clean)
+        chart_hint = self._parse_chart_hint(clean)
 
-        return StructuredQueryIntent(metric=metric_key, direction=direction, limit=limit, time_window=time_window, category=category)
+        return StructuredQueryIntent(metric=metric_key, direction=direction, limit=limit, time_window=time_window, category=category, chart_hint=chart_hint)
+
+    _CHART_HINTS = (
+        ("line", re.compile(r"折线|曲线|趋势图")),
+        ("bar", re.compile(r"柱状|条形|柱形")),
+        ("table", re.compile(r"表格")),
+    )
+
+    def _parse_chart_hint(self, clean: str) -> str | None:
+        """图表类型指令槽(Q3):用户点名图型时覆盖卡片自动推断。"""
+        return next((v for v, pat in self._CHART_HINTS if pat.search(clean)), None)
 
     def _extract_slots(self, clean: str) -> tuple[int, dict | None, str | None]:
         """开放槽位解析(limit/时间窗/品类);L0 命中路与分类头 on 路径共用。"""
@@ -359,15 +372,25 @@ class MetricQueryEngine:
                 f"FROM after_sale_tickets WHERE business_id = :business_id {time_clause} "
                 f'GROUP BY status ORDER BY "metricScore" {direction} LIMIT :lim'
             )
-        elif intent.metric in ("gmv_trend", "volume_trend", "orders_trend"):
-            # 趋势族(阶段⑥⑦):默认近 30 天按日;「近 N 个月」切自然月粒度
+        elif intent.metric in ("gmv_trend", "volume_trend", "orders_trend", "customer_spend_trend"):
+            # 趋势族(阶段⑥⑦⑧):默认近 30 天按日;「近 N 个月」切自然月粒度
             params.pop("lim", None)  # 时间序列窗口固定,仍以显式 LIMIT 兜底行数
+            # (expr, label, 是否需要明细表 JOIN)—— 客户消费只走订单表,
+            # JOIN 明细会把 total_amount 按明细行数放大,绝不容忍
             _TREND_EXPR = {
-                "gmv_trend": ("COALESCE(SUM(oi.quantity * oi.price), 0)::float", "GMV"),
-                "volume_trend": ("COALESCE(SUM(oi.quantity), 0)::float", "销量"),
-                "orders_trend": ("COUNT(DISTINCT o.order_id)::float", "订单量"),
+                "gmv_trend": ("COALESCE(SUM(oi.quantity * oi.price), 0)::float", "GMV", True),
+                "volume_trend": ("COALESCE(SUM(oi.quantity), 0)::float", "销量", True),
+                "orders_trend": ("COUNT(DISTINCT o.order_id)::float", "订单量", True),
+                "customer_spend_trend": ("COALESCE(SUM(o.total_amount), 0)::float", "消费", False),
             }
-            value_expr, label = _TREND_EXPR[intent.metric]
+            value_expr, label, needs_items = _TREND_EXPR[intent.metric]
+            items_join = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id " if needs_items else ""
+            cust_ids = (intent.entity_slot or {}).get("customer") or []
+            customer_clause = ""
+            if cust_ids:
+                # 客户过滤入 JOIN ON(非 WHERE):保留无订单日的零值点,折线不断线
+                customer_clause = "AND o.customer_id = ANY(:entities) "
+                params["entities"] = cust_ids[:20]
             window = intent.time_window or {}
             n = int(window.get("n") or 0) if window.get("kind") == "last_months" else 0
             if n >= 2:
@@ -379,8 +402,8 @@ class MetricQueryEngine:
                     f"INTERVAL '{months} months', date_trunc('month', CURRENT_DATE), "
                     "INTERVAL '1 month') d(month) "
                     "LEFT JOIN merchant_orders o ON date_trunc('month', o.created_at) = d.month "
-                    "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
-                    "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                    f"AND o.status NOT IN ('REFUNDED', 'CANCELLED') {customer_clause}"
+                    f"{items_join}"
                     f"GROUP BY d.month ORDER BY d.month LIMIT 50"
                 )
             else:
@@ -389,8 +412,8 @@ class MetricQueryEngine:
                     f"{value_expr} AS \"{label}\" "
                     "FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, INTERVAL '1 day') d(day) "
                     "LEFT JOIN merchant_orders o ON o.created_at::date = d.day "
-                    "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
-                    "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                    f"AND o.status NOT IN ('REFUNDED', 'CANCELLED') {customer_clause}"
+                    f"{items_join}"
                     f"GROUP BY d.day ORDER BY d.day LIMIT 50"
                 )
         elif intent.metric == "order_overview":

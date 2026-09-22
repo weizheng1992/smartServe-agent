@@ -31,6 +31,7 @@ ENTITY_REQUIRED: dict[str, str] = {
     "customer_coupons": "customer",
     "customer_profile": "customer",
     "customer_panorama": "customer",
+    "customer_spend_trend": "customer",
 }
 _VALID_TIME = ("last_7d", "last_30d", "last_month")
 _VALID_CATEGORY = ("户外机能", "潮流T恤", "下装裤类", "潮流鞋靴", "背包收纳", "露营装备", "衬衫", "配饰", "运动配件")
@@ -47,6 +48,7 @@ class LlmIntent(BaseModel):
     entity_kind: str | None = Field(None, description="只能是 promotion|customer|spu 三值之一(promotion=活动 customer=客户 spu=商品);涉及具体实体时必填")
     entity_mention: str | None = Field(None, description="实体提及原文(活动名/客户名或手机号/商品名),原样摘取")
     compare_mention: str | None = Field(None, description="对比目标款(商品名/编码),仅对比类问题")
+    chart_hint: str | None = Field(None, description="用户指定图表形态:line=折线 bar=柱状/条形 table=表格;未表达为 null")
 
 
 def l3_enabled() -> bool:
@@ -76,6 +78,7 @@ def _system_prompt(allowed: list[str] | None) -> str:
         "- 问某活动的销售/效果 → entity_kind='promotion',entity_mention=活动名原文\n"
         "- 问某客户/某人的订单 → entity_kind='customer',entity_mention=客户名或手机号原文\n"
         "- entity_kind 只允许 promotion/customer/spu 三个英文值,禁止 product/商品 等其他写法\n"
+        "- 问句要求折线/曲线 → chart_hint='line';柱状/条形 → 'bar';表格 → 'table';未要求 null\n"
         "- 问活动里某款对比其他款 → metric=promo_sku_compare,entity_kind='promotion',"
         "entity_mention=活动名,compare_mention=目标款商品名或编码\n"
         "- 问「选中的/勾选的订单」「两个订单对比/这两单差异」→ metric=order_overview"
@@ -143,6 +146,7 @@ async def llm_resolve(
     intent = StructuredQueryIntent(
         metric=out.metric, direction=direction, limit=limit,
         time_window=time_window, category=category,
+        chart_hint=out.chart_hint if out.chart_hint in ("line", "bar", "table") else None,
     )
 
     # 实体槽解析(确定性落库;提及 → 候选 → 绑定/反问/响亮失败)

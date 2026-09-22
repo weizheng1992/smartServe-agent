@@ -692,9 +692,11 @@ class TestL3AndGrowth:
         events = dict(_sse_events(r))
         assert events["result"]["metric"] == "gmv"
         assert called["n"] == 1, "陈旧范例应落 L3(被调用)"
-        # 范例已停用,不会再次劫持
+        # 范例已停用:同问句再检索,命中的绝不再是这条陈旧范例
+        # (假 embedding 下池内其他范例同分可见 —— 契约是「陈旧条目失效」,
+        #  不是「池子为空」,后者随池组成漂移成 flake)
         rows = await exemplar_service.search_exemplar(question, "aurora")
-        assert rows is None
+        assert rows is None or rows["question"] != question
 
     async def test_admin_can_manage(self, client, auth):
         """0014+:admin 管理员角色可分配权限/管理菜单/切换身份(老板之外的第二管理角色)。"""
