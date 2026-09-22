@@ -123,7 +123,7 @@ async def _checkout(env: CartEnv) -> dict:
                 f"{lines}\n\n"
                 + (
                     f"💰 商品金额: ¥{checkout_res.get('totalAmount')}\n"
-                    f"🎁 优惠活动「{checkout_res['promo']['name']}」已抵扣 ¥{checkout_res['promo']['discount']}\n"
+                    f"🎁 优惠「{checkout_res['promo']['name']}」已抵扣 ¥{checkout_res['promo']['discount']}\n"
                     f"✅ 实付金额: ¥{checkout_res.get('payableAmount')}\n"
                     if checkout_res.get("promo")
                     else f"💰 实付金额: ¥{checkout_res.get('totalAmount')}\n"

@@ -30,15 +30,27 @@ def _now_ms() -> int:
 
 def _iso(row: Any, key: str) -> str:
     val = row.get(key)
-    return val.isoformat() if val else _dt.datetime.now().isoformat()
+    if not val:
+        return _dt.datetime.now().isoformat()
+    if val.tzinfo is None:
+        # 库为 TIMESTAMP WITHOUT TIME ZONE 且 TimeZone=UTC(实弹:naive 值被
+        # 前端 new Date 按本地解析,下单时间显示早 8 小时)—— 补 UTC 时区后
+        # 转本地,产出带偏移的 ISO,JS 端渲染即正确
+        val = val.replace(tzinfo=_dt.UTC)
+    return val.astimezone().isoformat()
 
 
 def _order_from_row(row: Any, items: list[dict]) -> dict:
+    _discount = float(row.get("discount_amount") or 0)
     return {
         "orderId": row["order_id"],
         "userId": row["customer_id"],
         "status": row["status"],
+        # 账本语义(3c4c843 起):total_amount=实付,discount_amount=优惠;
+        # originalAmount=原价合计,供订单页原价/优惠/实付三行展示
         "totalAmount": float(row["total_amount"]),
+        "discountAmount": _discount,
+        "originalAmount": round(float(row["total_amount"]) + _discount, 2),
         "currency": row["currency"] or "CNY",
         "createdAt": _iso(row, "created_at"),
         "shippingAddress": row["shipping_address"] or {},
@@ -377,72 +389,80 @@ async def place_order(params: dict) -> dict:
         pay_amount = float(sku["price"]) * quantity
         spec_summary = " / ".join(f"{k}:{v}" for k, v in (sku["spec_attributes"] or {}).items())
 
-    async with merchant_engine().begin() as conn:
-        # 优惠引擎(20-D3):SAVEPOINT 隔离,失败按原价结算不毒化事务
-        discount = 0.0
-        promo_name = None
-        coupon_row_id = None
-        try:
-            from engine_py.analytics.promotion_engine import best_for_amount, best_user_coupon
+    # 券校验/核销冲突要回滚整个写入事务(库存+订单),_CartError 在块外翻译成
+    # success False —— 严禁在事务块内 return 造成半截写入被隐式提交
+    try:
+        async with merchant_engine().begin() as conn:
+            # 优惠引擎(20-D3):SAVEPOINT 隔离,失败按原价结算不毒化事务
+            try:
+                promo = await _resolve_promotion(
+                    conn,
+                    params["customerId"],
+                    round(pay_amount, 2),
+                    {str(sku["spu_code"])} if "spu_code" in sku else None,
+                    coupon_id=params.get("couponId"),
+                    skip_coupon=bool(params.get("skipCoupon")),
+                )
+            except _CartError:
+                raise
+            except Exception as promo_err:
+                print(f"[MerchantDomain] 优惠计算失败,按原价结算: {promo_err}")
+                promo = {"discount": 0.0, "promo_name": None, "coupon_row_id": None, "promo_id": None}
+            discount = promo["discount"]
+            promo_name = promo["promo_name"]
 
-            amount = round(pay_amount, 2)
-            scope = {str(sku["spu_code"])} if "spu_code" in sku else None
-            auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
-            user_coupon = await best_user_coupon(conn, params["customerId"], amount)
-            if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
-                discount = user_coupon["discount"]; promo_name = user_coupon["name"]
-                coupon_row_id = user_coupon["coupon_row_id"]
-            elif auto:
-                discount = auto["discount"]; promo_name = auto["name"]
-        except Exception as promo_err:
-            print(f"[MerchantDomain] 优惠计算失败,按原价结算: {promo_err}")
-
-        await conn.execute(
-            text("UPDATE merchant_skus SET stock = stock - :qty WHERE sku_code = :code"),
-            {"qty": quantity, "code": params["skuCode"]},
-        )
-        await conn.execute(
-            text(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
-                "shipping_address, is_returnable, is_address_modifiable) "
-                "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', :addr, TRUE, TRUE)"
-            ),
-            {
-                "oid": order_id,
-                "cid": params["customerId"],
-                "amt": round(pay_amount - discount, 2),
-                "disc": round(discount, 2),
-                "addr": json.dumps(
-                    {
-                        "recipientName": params.get("recipientName", "张伟"),
-                        "phone": params.get("recipientPhone", "13800138000"),
-                        "fullAddress": params.get("shippingAddress") or "北京市海淀区中关村南大街1号院8号楼1201室",
-                    },
-                    ensure_ascii=False,
+            await conn.execute(
+                text("UPDATE merchant_skus SET stock = stock - :qty WHERE sku_code = :code"),
+                {"qty": quantity, "code": params["skuCode"]},
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
+                    "shipping_address, is_returnable, is_address_modifiable) "
+                    "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', :addr, TRUE, TRUE)"
                 ),
-            },
-        )
-        if coupon_row_id:
-            from engine_py.analytics import promotions as _promo_svc
+                {
+                    "oid": order_id,
+                    "cid": params["customerId"],
+                    "amt": round(pay_amount - discount, 2),
+                    "disc": round(discount, 2),
+                    "addr": json.dumps(
+                        {
+                            "recipientName": params.get("recipientName", "张伟"),
+                            "phone": params.get("recipientPhone", "13800138000"),
+                            "fullAddress": params.get("shippingAddress") or "北京市海淀区中关村南大街1号院8号楼1201室",
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
+            if promo["coupon_row_id"]:
+                from engine_py.analytics import promotions as _promo_svc
 
-            await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id)
-        await conn.execute(
-            text(
-                "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price, "
-                "image_url, spec_summary) VALUES (:oid, :spu, :code, :t, :st, :qty, :price, :img, :spec)"
-            ),
-            {
-                "oid": order_id,
-                "spu": str(sku["spu_id"]),
-                "code": sku["sku_code"],
-                "t": sku["spu_title"],
-                "st": sku["sku_title"],
-                "qty": quantity,
-                "price": sku["price"],
-                "img": sku["image_url"] or sku["spu_image"],
-                "spec": spec_summary,
-            },
-        )
+                # 条件核销防双花:False=该券已被并发订单用掉,整体回滚拒单
+                if not await _promo_svc.mark_coupon_used(conn, promo["coupon_row_id"], order_id):
+                    raise _CartError("优惠券已被使用，请刷新券包后重试")
+            await _record_promo_redemption(conn, (promo["activity"] or {}).get("promo_id"), order_id, (promo["activity"] or {}).get("discount", 0.0))
+            await _record_promo_redemption(conn, (promo["coupon"] or {}).get("promo_id"), order_id, (promo["coupon"] or {}).get("discount", 0.0))
+            await conn.execute(
+                text(
+                    "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price, "
+                    "image_url, spec_summary) VALUES (:oid, :spu, :code, :t, :st, :qty, :price, :img, :spec)"
+                ),
+                {
+                    "oid": order_id,
+                    "spu": str(sku["spu_id"]),
+                    "code": sku["sku_code"],
+                    "t": sku["spu_title"],
+                    "st": sku["sku_title"],
+                    "qty": quantity,
+                    "price": sku["price"],
+                    "img": sku["image_url"] or sku["spu_image"],
+                    "spec": spec_summary,
+                },
+            )
+    except _CartError as err:
+        return {"success": False, "message": err.message}
     return {
         "success": True,
         "orderId": order_id,
@@ -609,7 +629,104 @@ class _CartError(Exception):
         self.message = message
 
 
-async def create_order_from_cart(customer_id: str, items: list[dict], shipping_address: dict) -> dict:
+async def _resolve_promotion(
+    conn: Any,
+    customer_id: str,
+    amount: float,
+    scope: set[str] | None,
+    coupon_id: str | None = None,
+    skip_coupon: bool = False,
+) -> dict:
+    """结算优惠决议(服务端唯一算价点,20-D3;选券重构 2026-09-22)。
+
+    叠加语义(2026-09-22 用户决议,替代先前的互斥版):满减/折扣活动自动必享,
+    券由用户自选且可叠加 —— 活动先减,券按余额抵扣封顶,金额永不为负;满减
+    门槛始终按原价合计判定(行业惯例,非活动后余额)。
+
+    - coupon_id 指定 → 自选券与活动叠加:券按(原价-活动优惠)余额计算,不可用
+      抛 _CartError 如实拒单(严禁静默按全款落账 —— 3c4c843 同族教训);活动已
+      覆盖全部金额时券零抵扣,同样拒单让用户保留券面。
+    - skip_coupon → 用户明确不用券(商城页「不使用优惠券」),仅活动。
+    - 两者皆缺省 → 历史自动择优(活动 vs 券取优惠大者,单选不叠加;仅旧调用
+      兼容 —— 商城结算页总是显式传券语义,聊天通道已改走共享的
+      resolve_stacked_promotions 叠加)。
+    返回结构化 activity/coupon 两笔(核销流水分落 promotion_redemptions)+
+    兼容字段 discount(合计)/promo_name(组合)/coupon_row_id(核销券)。
+    """
+    from engine_py.analytics.promotion_engine import (
+        best_for_amount,
+        best_user_coupon,
+        resolve_stacked_promotions,
+    )
+
+    result: dict = {
+        "activity": None,
+        "coupon": None,
+        "discount": 0.0,
+        "promo_name": None,
+        "coupon_row_id": None,
+    }
+    if coupon_id:
+        # 自选券与活动叠加;券不可用/零抵扣由共享决议抛 ValueError,如实拒单
+        try:
+            stacked = await resolve_stacked_promotions(conn, customer_id, amount, scope, coupon_row_id=coupon_id)
+        except ValueError as err:
+            raise _CartError(str(err)) from err
+        act, cpn = stacked["activity"], stacked["coupon"]
+        result["activity"] = (
+            {"discount": act["discount"], "name": act["name"], "promo_id": act["promo_id"]} if act else None
+        )
+        result["coupon"] = (
+            {
+                "discount": cpn["discount"], "name": cpn["name"],
+                "row_id": cpn["coupon_row_id"], "promo_id": cpn["promotion_id"],
+            }
+            if cpn
+            else None
+        )
+    elif skip_coupon:
+        stacked = await resolve_stacked_promotions(conn, customer_id, amount, scope, auto_pick_coupon=False)
+        act = stacked["activity"]
+        result["activity"] = (
+            {"discount": act["discount"], "name": act["name"], "promo_id": act["promo_id"]} if act else None
+        )
+    else:
+        # 历史自动择优:活动 vs 券取优惠大者,单选不叠加(旧调用/契约兼容)
+        auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
+        user_coupon = await best_user_coupon(conn, customer_id, amount)
+        if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
+            result["coupon"] = {
+                "discount": user_coupon["discount"], "name": user_coupon["name"],
+                "row_id": user_coupon["coupon_row_id"], "promo_id": user_coupon["promotion_id"],
+            }
+        elif auto:
+            result["activity"] = {"discount": auto["discount"], "name": auto["name"], "promo_id": auto["promo_id"]}
+    result["discount"] = round(
+        (result["activity"] or {}).get("discount", 0.0) + (result["coupon"] or {}).get("discount", 0.0), 2
+    )
+    names = [p["name"] for p in (result["activity"], result["coupon"]) if p]
+    result["promo_name"] = " + ".join(names) if names else None
+    result["coupon_row_id"] = (result["coupon"] or {}).get("row_id")
+    return result
+
+
+async def _record_promo_redemption(conn: Any, promo_id: str | None, order_id: str, discount: float) -> None:
+    """核销流水与引擎侧账本对齐(mall_domain 同表);无优惠不落。"""
+    if not promo_id or discount <= 0:
+        return
+    await conn.execute(
+        text("INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+             "VALUES (CAST(:pid AS uuid), :oid, :amt)").bindparams(pid=promo_id, oid=order_id, amt=round(discount, 2))
+    )
+
+
+async def create_order_from_cart(
+    customer_id: str,
+    items: list[dict],
+    shipping_address: dict,
+    coupon_id: str | None = None,
+    skip_coupon: bool = False,
+) -> dict:
     if not items:
         return {"success": False, "message": "结算购物车条目不能为空"}
     await ensure_merchant_tables()
@@ -657,23 +774,24 @@ async def create_order_from_cart(customer_id: str, items: list[dict], shipping_a
                     }
                 )
 
-            # 优惠引擎(20-D3):SAVEPOINT 隔离,失败按原价不毒化事务
-            discount = 0.0
-            promo_name = None
-            coupon_row_id = None
+            # 优惠引擎(20-D3):SAVEPOINT 隔离,失败按原价不毒化事务;
+            # 选券/不用券语义见 _resolve_promotion(2026-09-22 结算页重构)
             try:
-                from engine_py.analytics.promotion_engine import best_for_amount, best_user_coupon
-
-                scope = {str(oi["spuCode"]) for oi in items_to_insert}
-                auto = await best_for_amount(conn, round(total_amount, 2), scope, exclude_coupon=True)
-                user_coupon = await best_user_coupon(conn, customer_id, round(total_amount, 2))
-                if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
-                    discount = user_coupon["discount"]; promo_name = user_coupon["name"]
-                    coupon_row_id = user_coupon["coupon_row_id"]
-                elif auto:
-                    discount = auto["discount"]; promo_name = auto["name"]
+                promo = await _resolve_promotion(
+                    conn,
+                    customer_id,
+                    round(total_amount, 2),
+                    {str(oi["spuCode"]) for oi in items_to_insert},
+                    coupon_id=coupon_id,
+                    skip_coupon=skip_coupon,
+                )
+            except _CartError:
+                raise
             except Exception as promo_err:
                 print(f"[MerchantDomain] 购物车结算优惠计算失败,按原价: {promo_err}")
+                promo = {"discount": 0.0, "promo_name": None, "coupon_row_id": None, "promo_id": None}
+            discount = promo["discount"]
+            promo_name = promo["promo_name"]
 
             await conn.execute(
                 text(
@@ -689,10 +807,14 @@ async def create_order_from_cart(customer_id: str, items: list[dict], shipping_a
                     "addr": json.dumps(shipping_address, ensure_ascii=False),
                 },
             )
-            if coupon_row_id:
+            if promo["coupon_row_id"]:
                 from engine_py.analytics import promotions as _promo_svc
 
-                await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id)
+                # 条件核销防双花:False=券已被并发订单用掉,整体回滚拒单
+                if not await _promo_svc.mark_coupon_used(conn, promo["coupon_row_id"], order_id):
+                    raise _CartError("优惠券已被使用，请刷新券包后重试")
+            await _record_promo_redemption(conn, (promo["activity"] or {}).get("promo_id"), order_id, (promo["activity"] or {}).get("discount", 0.0))
+            await _record_promo_redemption(conn, (promo["coupon"] or {}).get("promo_id"), order_id, (promo["coupon"] or {}).get("discount", 0.0))
             for oi in items_to_insert:
                 await conn.execute(
                     text(
@@ -720,4 +842,66 @@ async def create_order_from_cart(customer_id: str, items: list[dict], shipping_a
         "discount": round(discount, 2),
         "promoName": promo_name,
         "payableAmount": round(total_amount - discount, 2),
+    }
+
+
+async def preview_cart_pricing(customer_id: str, items: list[dict]) -> dict:
+    """结算页只读试算(2026-09-22 选券重构):原价、活动优惠、券包逐张可用性。
+
+    只读:不加锁、不减库存、不落任何表。金额口径与 create_order_from_cart
+    完全一致(同价同 scope),但试算≠下单承诺 —— 并发库存以下单事务为准。
+    券包仅回可用张(coupon 型无门槛,claimed+在售+在有效期即可用),前端
+    选择器以此为准;/api/store/coupons 的全量含已核销态仅供 claimedIds 判重。
+    """
+    if not items:
+        return {"success": False, "message": "试算商品不能为空"}
+    await ensure_merchant_tables()
+    total_amount = 0.0
+    total_quantity = 0
+    scope: set[str] = set()
+    try:
+        async with merchant_engine().connect() as conn:
+            for item in items:
+                sku = (
+                    await conn.execute(
+                        text(
+                            "SELECT s.price, p.spu_code FROM merchant_skus s "
+                            "JOIN merchant_spus p ON s.spu_id = p.id WHERE s.sku_code = :code LIMIT 1"
+                        ),
+                        {"code": item["skuCode"]},
+                    )
+                ).mappings().first()
+                if sku is None:
+                    return {"success": False, "message": f"商品规格 [{item['skuCode']}] 不存在"}
+                quantity = item.get("quantity") or 1
+                total_amount += float(sku["price"]) * quantity
+                total_quantity += quantity
+                scope.add(str(sku["spu_code"]))
+
+            from engine_py.analytics.promotion_engine import best_for_amount, list_usable_user_coupons
+
+            amount = round(total_amount, 2)
+            auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
+            # 叠加口径(与 _resolve_promotion 一致):活动先减,券按余额抵扣封顶
+            activity_discount = auto["discount"] if auto else 0.0
+            coupons = await list_usable_user_coupons(conn, customer_id, round(amount - activity_discount, 2))
+    except Exception as err:
+        return {"success": False, "message": f"试算失败: {err}"}
+    return {
+        "success": True,
+        "totalQuantity": total_quantity,
+        "originalAmount": amount,
+        "activity": {"name": auto["name"], "discount": auto["discount"]} if auto else None,
+        "coupons": [
+            {
+                "couponId": c["coupon_row_id"],
+                "promotionId": c["promotion_id"],
+                "name": c["name"],
+                "value": c["value"],
+                "usable": True,
+                "discount": c["discount"],
+            }
+            for c in coupons
+        ],
+        "bestCouponId": (max(coupons, key=lambda c: c["discount"])["coupon_row_id"]) if coupons else None,
     }

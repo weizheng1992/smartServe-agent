@@ -391,6 +391,76 @@ def test_checkout_coupon_discount_reaches_order_row(pg_factory):
     assert coupon["status"] == "used" and coupon["used_order_id"] == result["orderId"]
 
 
+def test_checkout_activity_and_coupon_stack(pg_factory):
+    """叠加语义(2026-09-22 与商城页统一):聊天结算活动先减、券按余额叠加,
+    核销流水分两笔各归各,实付=原价−活动−券。
+
+    背景:聊天侧旧逻辑是「活动 vs 券取大者」单选,商城页改叠加后两通道
+    口径漂移 —— 本钉防回退。
+    """
+    import uuid as _uuid
+
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    async def scenario():
+        engine, me, orig, embeds = await _setup(pg_factory)
+        try:
+            async with me.begin() as conn:
+                pid = str(_uuid.uuid4())
+                cpid = str(_uuid.uuid4())
+                await conn.execute(text(
+                    "INSERT INTO promotions (id, name, promo_type, status, discount_value, threshold_amount, scope_type) "
+                    "VALUES (CAST(:i AS uuid), '叠加回归满减', 'full_reduction', 'active', 30, 200, 'all')"
+                ).bindparams(i=pid))
+                await conn.execute(text(
+                    "INSERT INTO promotions (id, name, promo_type, status, discount_value, scope_type) "
+                    "VALUES (CAST(:i AS uuid), '契约新客券', 'coupon', 'active', 50, 'all')"
+                ).bindparams(i=cpid))
+                await conn.execute(text(
+                    "INSERT INTO user_coupons (promotion_id, user_id) VALUES (CAST(:i AS uuid), :u)"
+                ).bindparams(i=cpid, u=UID))
+            _seed_cart([
+                {"skuId": "SPU-P2-BAG-SKU-0", "title": "极光 高山徒步轻量化背包 38L", "price": 829.0, "quantity": 1},
+            ])
+            result = await MallDomainService.checkout_user_cart(
+                {"userId": UID, "threadId": TID,
+                 "shippingAddress": {"recipientName": "张伟", "phone": "13800138000", "fullAddress": "上海市浦东新区世纪大道100号"}}
+            )
+            async with me.connect() as conn:
+                order = (await conn.execute(
+                    text("SELECT total_amount, discount_amount FROM merchant_orders WHERE order_id=:o"),
+                    {"o": result["orderId"]},
+                )).mappings().first()
+                redemptions = (await conn.execute(
+                    text(
+                        "SELECT r.discount_amount FROM promotion_redemptions r "
+                        "JOIN promotions p ON p.id = r.promotion_id WHERE r.order_id=:o"
+                    ),
+                    {"o": result["orderId"]},
+                )).scalars().all()
+            return result, order, sorted(float(r) for r in redemptions), pid, cpid
+        finally:
+            try:
+                async with me.begin() as conn:
+                    await conn.execute(text("DELETE FROM user_coupons WHERE user_id=:u").bindparams(u=UID))
+                    for promo_id in (pid, cpid):
+                        await conn.execute(text(
+                            "DELETE FROM promotion_redemptions WHERE promotion_id=CAST(:i AS uuid)"
+                        ).bindparams(i=promo_id))
+                        await conn.execute(text("DELETE FROM promotions WHERE id=CAST(:i AS uuid)").bindparams(i=promo_id))
+            finally:
+                await _teardown(engine, me, orig, embeds)
+
+    result, order, redemptions, _pid, _cpid = asyncio.run(scenario())
+    assert result.get("success") is True, result
+    # 829 ≥ 200 → 满200减30 先减;券 50 按余额(799)全额叠加 → 合计 80
+    assert float(result["payableAmount"]) == 749.0, f"叠加后实付应为 749: {result}"
+    assert order is not None
+    assert float(order["total_amount"]) == 749.0 and float(order["discount_amount"]) == 80.0
+    assert redemptions == [30.0, 50.0], f"活动/券必须各落一笔核销流水: {redemptions}"
+    assert "叠加回归满减" in result["promo"]["name"] and "契约新客券" in result["promo"]["name"]
+
+
 def test_checkout_insufficient_stock_no_order(pg_factory):
     """任一行库存不足:整单不落(与商城页 all-or-nothing 一致),回复如实点名。"""
     from engine_py.tools_registry.mall_domain import MallDomainService

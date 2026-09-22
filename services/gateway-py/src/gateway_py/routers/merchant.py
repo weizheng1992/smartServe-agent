@@ -363,6 +363,13 @@ async def store_orders(
 async def store_place_order(body: dict):
     try:
         customer_id = body.get("customerId") or "CUST-8801"
+        # 选券语义(2026-09-22 结算页重构):couponId 缺省=自动择优(旧调用兼容);
+        # "none"=用户明确不用券(活动照常);具体 id=用户自选券(与活动互斥)
+        coupon_id = body.get("couponId") or None
+        skip_coupon = False
+        if coupon_id == "none":
+            coupon_id = None
+            skip_coupon = True
 
         if isinstance(body.get("items"), list) and body["items"]:
             shipping = body.get("shippingAddress")
@@ -382,6 +389,8 @@ async def store_place_order(body: dict):
                     or "13800138000",
                     "fullAddress": full_address,
                 },
+                coupon_id=coupon_id,
+                skip_coupon=skip_coupon,
             )
             return result
 
@@ -393,9 +402,31 @@ async def store_place_order(body: dict):
                 "shippingAddress": body.get("shippingAddress") or "北京市海淀区中关村南大街1号院8号楼1201室",
                 "recipientName": body.get("recipientName") or "张伟",
                 "recipientPhone": body.get("recipientPhone") or "13800138000",
+                "couponId": coupon_id,
+                "skipCoupon": skip_coupon,
             }
         )
         return result
+    except Exception as err:
+        return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
+
+
+@router.post("/api/store/checkout/preview")
+async def store_checkout_preview(body: dict):
+    """结算页只读试算:原价/活动/券包逐张可用性(不加锁不落表)。"""
+    try:
+        customer_id = body.get("customerId") or "CUST-8801"
+        items = body.get("items")
+        if not isinstance(items, list) or not items:
+            return JSONResponse(status_code=400, content={"success": False, "message": "items 必传且不能为空"})
+        normalized = [
+            {"skuCode": str(i.get("skuCode")), "quantity": max(1, int(i.get("quantity") or 1))}
+            for i in items
+            if isinstance(i, dict) and i.get("skuCode")
+        ]
+        if not normalized:
+            return JSONResponse(status_code=400, content={"success": False, "message": "items 缺少有效 skuCode"})
+        return await mds.preview_cart_pricing(customer_id, normalized)
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 

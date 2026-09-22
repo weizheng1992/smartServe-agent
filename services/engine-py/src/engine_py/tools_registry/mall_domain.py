@@ -1783,49 +1783,57 @@ class MallDomainService:
                 # 主单先行:items.order_id 对 merchant_orders 有外键
                 # 优惠结算(20-D3 用户决议启用):服务端唯一算价点;账本语义与
                 # gateway 结算一致 —— total_amount 记实付,discount_amount 记优惠。
+                # 叠加语义(2026-09-22 与商城页统一,共用 resolve_stacked_promotions
+                # 算价口径):活动先减,最优券按余额叠加;核销流水分两笔落。
                 promo_applied = None
                 coupon_row_id = None
+                stacked = None
                 try:
                     # SAVEPOINT:优惠计算失败只回滚保存点,不毒化结算主事务
                     # (实弹:promotions 表缺失期间,裸 try 会把事务打进 aborted,
                     #  后续订单 INSERT 全部失败 —— InFailedSQLTransactionError)
                     async with conn.begin_nested():
-                        from engine_py.analytics.promotion_engine import best_for_amount, best_user_coupon
+                        from engine_py.analytics.promotion_engine import resolve_stacked_promotions
 
                         amount = round(total_amount, 2)
                         scope = {str(r["spu_code"]) for r in resolved}
-                        auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
-                        user_coupon = await best_user_coupon(conn, user_id, amount)
-                        # 券 vs 自动活动:取优惠额大者(单活动/单,防叠加以防资损)
-                        if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
-                            promo_applied = {
-                                "promo_id": None, "name": user_coupon["name"],
-                                "discount": user_coupon["discount"], "kind": "coupon",
-                            }
-                            coupon_row_id = user_coupon["coupon_row_id"]
-                        elif auto:
-                            promo_applied = {**auto, "kind": "auto"}
+                        stacked = await resolve_stacked_promotions(conn, user_id, amount, scope)
                 except Exception as promo_err:
                     print(f"[MallDomain] 优惠计算失败,按原价结算: {promo_err}")
 
-                if promo_applied and coupon_row_id:
-                    # 用户券:落核销 + 标记已用(同事务,防重复使用)
+                activity_part = (stacked or {}).get("activity")
+                coupon_part = (stacked or {}).get("coupon")
+                if coupon_part:
+                    coupon_row_id = coupon_part["coupon_row_id"]
+                if activity_part or coupon_part:
+                    # 用户券:落核销 + 标记已用(同事务,防重复使用);活动/券各
+                    # 落一笔 promotion_redemptions(叠加时两笔,金额各归各)
                     from engine_py.analytics import promotions as _promo_svc
 
-                    await conn.execute(
-                        text(
-                            "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
-                            "VALUES ((SELECT promotion_id FROM user_coupons WHERE id = CAST(:c AS uuid)), :oid, :amt)"
-                        ).bindparams(c=coupon_row_id, oid=order_id, amt=promo_applied["discount"])
-                    )
-                    await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id)
-                elif promo_applied:
-                    await conn.execute(
-                        text(
-                            "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
-                            "VALUES (CAST(:pid AS uuid), :oid, :amt)"
-                        ).bindparams(pid=promo_applied["promo_id"], oid=order_id, amt=promo_applied["discount"])
-                    )
+                    if coupon_part:
+                        await conn.execute(
+                            text(
+                                "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+                                "VALUES ((SELECT promotion_id FROM user_coupons WHERE id = CAST(:c AS uuid)), :oid, :amt)"
+                            ).bindparams(c=coupon_row_id, oid=order_id, amt=coupon_part["discount"])
+                        )
+                        # 条件核销防双花:False=券已被并发订单用掉,抛错回滚整单
+                        if not await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id):
+                            raise RuntimeError("优惠券已被使用，结算整体回滚")
+                    if activity_part:
+                        await conn.execute(
+                            text(
+                                "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+                                "VALUES (CAST(:pid AS uuid), :oid, :amt)"
+                            ).bindparams(pid=activity_part["promo_id"], oid=order_id, amt=activity_part["discount"])
+                        )
+                    parts = [p["name"] for p in (activity_part, coupon_part) if p]
+                    promo_applied = {
+                        "promo_id": (activity_part or {}).get("promo_id"),
+                        "name": " + ".join(parts),
+                        "discount": (activity_part or {}).get("discount", 0.0) + (coupon_part or {}).get("discount", 0.0),
+                        "kind": "stacked" if (activity_part and coupon_part) else ("coupon" if coupon_part else "auto"),
+                    }
 
                 # 账本语义与 gateway 结算一致(2026-09-21 bug 修复):total_amount=实付
                 # (原价−优惠),discount_amount=优惠额。此前只写原价且无优惠列 ——

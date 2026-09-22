@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Button } from 'ui';
 import { AddressModal, type CustomerAddress } from '../components/address/AddressModal';
@@ -10,17 +10,17 @@ import { readStoreCart, writeStoreCart } from '../lib/storeCart';
 export default function CartPage() {
   const navigate = useNavigate();
   const { user } = useCurrentUser();
-  const [myCoupons, setMyCoupons] = useState<Array<{ id: string; name: string; value: number }>>([]);
-
-  const loadCoupons = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/store/coupons?userId=${encodeURIComponent((user as any).id)}`);
-      const body = await res.json();
-      // 接口返回全量含已核销(status=used,供商品页 claimedIds 判重);券包只展示可用
-      setMyCoupons((body.coupons || []).filter((c: any) => c.status === 'claimed'));
-    } catch { /* 券包失败不阻断购物车 */ }
-  }, [(user as any).id]);
-  useEffect(() => { void loadCoupons(); }, [loadCoupons]);
+  // 选券重构(2026-09-22):券由用户自选,不再「结算自动抵扣」。
+  // preview 为服务端只读试算(原价/活动/券包逐张可用性),金额口径与下单一致
+  const [preview, setPreview] = useState<{
+    originalAmount: number;
+    totalQuantity: number;
+    activity: { name: string; discount: number } | null;
+    coupons: Array<{ couponId: string; name: string; value: number; usable: boolean; discount: number }>;
+    bestCouponId: string | null;
+  } | null>(null);
+  // 'none'=明确不用券;具体 id=自选券(与活动互斥,服务端按所选券抵扣)
+  const [selectedCouponId, setSelectedCouponId] = useState<string>('none');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<CustomerAddress | null>(null);
@@ -29,8 +29,6 @@ export default function CartPage() {
   const [checkoutResult, setCheckoutResult] = useState<{
     orderId?: string;
     message?: string;
-    discount?: number;
-    payableAmount?: number;
   } | null>(null);
 
   // 加载购物车和地址数据
@@ -138,42 +136,92 @@ export default function CartPage() {
   const totalPrice = selectedItems.reduce((sum, it) => sum + Number(it.price) * it.quantity, 0);
   const totalCount = selectedItems.reduce((sum, it) => sum + it.quantity, 0);
 
+  // 试算随选中项变化重拉(cartKey 收敛依赖:同商品同数量不重复请求);
+  // 券包/活动随金额口径联动,试算失败静默降级为原价展示,不阻断购物车
+  const selectedKey = selectedItems.map((it) => `${it.skuCode}:${it.quantity}`).join('|');
+  useEffect(() => {
+    const items = selectedItems;
+    if (!user.id || items.length === 0) {
+      setPreview(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/store/checkout/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId: user.id,
+            items: items.map((it) => ({ skuCode: it.skuCode, quantity: it.quantity })),
+          }),
+        });
+        const data = await res.json();
+        if (!cancelled && data.success) setPreview(data);
+      } catch {
+        // 试算不可达:保持原价明细,选券面板为空
+        if (!cancelled) setPreview(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // biome-ignore lint/correctness/useExhaustiveDependencies: selectedItems 由 cartKey 派生,拆行重算无意义
+  }, [user.id, selectedKey]);
+
+  // 购物车变化后所选券失效(已核销/不再可用)→ 诚实回落「不使用」
+  useEffect(() => {
+    if (selectedCouponId !== 'none' && preview && !preview.coupons.some((c) => c.couponId === selectedCouponId)) {
+      setSelectedCouponId('none');
+    }
+  }, [preview, selectedCouponId]);
+
+  // 明细口径与后端 _resolve_promotion 一致(2026-09-22 叠加决议):
+  // 活动自动必享,券自选叠加 —— 活动先减,券按余额抵扣(试算已按余额算好)
+  const activity = preview?.activity ?? null;
+  const selectedCoupon = preview?.coupons.find((c) => c.couponId === selectedCouponId) ?? null;
+  const couponDiscount = selectedCoupon ? Number(selectedCoupon.discount) : 0;
+  const activityDiscount = activity ? Number(activity.discount) : 0;
+  const originalAmount = preview ? Number(preview.originalAmount) : totalPrice;
+  const payableAmount = Math.max(0, originalAmount - couponDiscount - activityDiscount);
+  const totalSaved = couponDiscount + activityDiscount;
+
   const handleCheckout = async () => {
     if (selectedItems.length === 0 || !selectedAddress) return;
     setIsCheckingOut(true);
 
     try {
-      // 循环结算选中的商品项(服务端 place_order 自动应用优惠并返回 discount)
-      const orderIds: string[] = [];
-      let totalDiscount = 0;
-      for (const item of selectedItems) {
-        const res = await fetch('/api/store/orders', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            customerId: user.id,
-            skuCode: item.skuCode,
-            quantity: item.quantity,
-            shippingAddress: selectedAddress.fullAddress,
+      // 整单一次结算(2026-09-22 重构):单订单 + 服务端按整单金额判优惠,
+      // 替代旧的逐商品下单 —— 旧口径下多件商品会静默烧掉多张券,且满减
+      // 阈值按单件金额判,整单够门槛却不生效
+      const res = await fetch('/api/store/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: user.id,
+          items: selectedItems.map((it) => ({ skuCode: it.skuCode, quantity: it.quantity })),
+          shippingAddress: {
             recipientName: selectedAddress.recipientName || user.name,
-            recipientPhone: selectedAddress.phone || user.phone,
-          }),
-        });
-        const data = await res.json();
-        if (data.success && data.orderId) {
-          orderIds.push(data.orderId);
-          totalDiscount += Number(data.discount || 0);
-        }
-      }
-      // 结算完成后从购物车剔除选中的项
-      const remainCart = cart.filter((it) => !it.selected);
-      saveCart(remainCart);
-
-      const discountNote = totalDiscount > 0 ? `已优惠 ¥${totalDiscount}。` : '';
-      setCheckoutResult({
-        orderId: orderIds.join(', '),
-        message: `结算成功！已生成订单：${orderIds.join(', ')}。${discountNote}`,
+            phone: selectedAddress.phone || user.phone,
+            fullAddress: selectedAddress.fullAddress,
+          },
+          couponId: selectedCouponId === 'none' ? 'none' : selectedCouponId,
+        }),
       });
+      const data = await res.json();
+      if (data.success && data.orderId) {
+        // 结算完成后从购物车剔除选中的项;所选券已核销,回落「不使用」
+        saveCart(cart.filter((it) => !it.selected));
+        setSelectedCouponId('none');
+        const savedNote =
+          Number(data.discount) > 0 ? `共优惠 ¥${Number(data.discount).toFixed(2)}（${data.promoName}）。` : '';
+        setCheckoutResult({
+          orderId: data.orderId,
+          message: `结算成功！订单 ${data.orderId} 实付 ¥${Number(data.payableAmount).toFixed(2)}。${savedNote}`,
+        });
+      } else {
+        alert(data.message || '下单失败，请重试');
+      }
     } catch {
       alert('下单结算出现异常，请重试');
     } finally {
@@ -183,15 +231,6 @@ export default function CartPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-
-      {(myCoupons.length > 0) && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-700">
-          <span className="font-semibold">🎫 我的优惠券(结算自动抵扣):</span>
-          {myCoupons.map((cpn) => (
-            <span key={cpn.id} className="rounded-full bg-white px-2.5 py-1">¥{cpn.value} · {cpn.name}</span>
-          ))}
-        </div>
-      )}
       <StorefrontHeader cartCount={cart.reduce((s, i) => s + i.quantity, 0)} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
@@ -357,20 +396,101 @@ export default function CartPage() {
                 )}
               </div>
 
+              {/* 优惠券选择卡片(选券重构 2026-09-22):数据来自服务端试算, */}
+              {/* 只列可用张;满减/折扣活动与优惠券叠加,活动先减、券按余额 */}
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">🎫 优惠券</span>
+                  {preview && preview.coupons.length > 0 && (
+                    <span className="text-[11px] font-medium text-rose-600">{preview.coupons.length} 张可用</span>
+                  )}
+                </div>
+                {!preview || preview.coupons.length === 0 ? (
+                  <div className="text-xs text-slate-400">暂无可用优惠券，去商品页领券吧～</div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="coupon"
+                        checked={selectedCouponId === 'none'}
+                        onChange={() => setSelectedCouponId('none')}
+                        className="w-3.5 h-3.5 accent-slate-600 cursor-pointer"
+                      />
+                      <span className="text-xs text-slate-700">不使用优惠券</span>
+                    </label>
+                    {preview.coupons.map((c) => (
+                      <label
+                        key={c.couponId}
+                        className={`flex items-center justify-between rounded-xl border px-3 py-2 cursor-pointer transition ${
+                          selectedCouponId === c.couponId
+                            ? 'border-rose-300 bg-rose-50/70'
+                            : 'border-dashed border-rose-200 bg-white hover:bg-rose-50/40'
+                        }`}
+                      >
+                        <span className="flex items-center space-x-2 min-w-0">
+                          <input
+                            type="radio"
+                            name="coupon"
+                            checked={selectedCouponId === c.couponId}
+                            onChange={() => setSelectedCouponId(c.couponId)}
+                            className="w-3.5 h-3.5 accent-rose-600 shrink-0 cursor-pointer"
+                          />
+                          <span className="text-xs font-semibold text-slate-800 truncate">
+                            ¥{Number(c.value).toFixed(2)} · {c.name}
+                          </span>
+                          {c.couponId === preview.bestCouponId && (
+                            <span className="shrink-0 rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              最优惠
+                            </span>
+                          )}
+                        </span>
+                        <span className="shrink-0 text-xs font-bold text-rose-600">
+                          抵 ¥{Number(c.discount).toFixed(2)}
+                        </span>
+                      </label>
+                    ))}
+                    {activity && (
+                      <div className="text-[11px] leading-relaxed text-slate-400">
+                        「{activity.name}」活动优惠可与优惠券叠加：活动先减，优惠券按活动后余额抵扣。
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* 费用与结算按钮 */}
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between text-slate-600">
-                    <span>商品总计 ({totalCount} 件)</span>
-                    <span>¥{totalPrice.toFixed(2)}</span>
+                    <span>商品原价 ({totalCount} 件)</span>
+                    <span>¥{originalAmount.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-slate-600">
                     <span>顺丰特快运费</span>
                     <span className="text-emerald-700 font-medium">免运费</span>
                   </div>
+                  {activityDiscount > 0 && (
+                    <div className="flex justify-between font-medium text-rose-600">
+                      <span>活动优惠（{activity?.name}）</span>
+                      <span>-¥{activityDiscount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {couponDiscount > 0 && (
+                    <div className="flex justify-between font-medium text-rose-600">
+                      <span>优惠券抵扣（{selectedCoupon?.name}）</span>
+                      <span>-¥{couponDiscount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {totalSaved > 0 && (
+                    <div className="flex justify-between font-semibold text-rose-600">
+                      <span>合计已优惠</span>
+                      <span>-¥{totalSaved.toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="border-t border-slate-100 pt-2 flex justify-between items-baseline">
                     <span className="font-bold text-slate-900">实付总金额</span>
-                    <span className="text-xl font-extrabold text-emerald-700">¥{totalPrice.toFixed(2)}</span>
+                    <span className="text-xl font-extrabold text-emerald-700">¥{payableAmount.toFixed(2)}</span>
                   </div>
                 </div>
 

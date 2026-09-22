@@ -109,24 +109,78 @@ async def promo_for_spu(conn, spu_code: str, price: float) -> dict | None:
     return best
 
 
-async def best_user_coupon(conn, user_id: str, amount: float) -> dict | None:
-    """用户已领取且未使用的券中,对面额取最优(仅 coupon 型)。"""
+async def list_usable_user_coupons(conn, user_id: str, amount: float) -> list[dict]:
+    """用户已领取且未使用的券,逐张对面额求可用性与优惠额(结算页选券面)。
+
+    返回 [{coupon_row_id, promotion_id, name, value, discount}](仅 coupon 型、
+    claimed、活动在售且在有效期;金额口径与结算一致:min(面额, 金额) 永不为负)。
+    """
     rows = (
         await conn.execute(
             text(
-                "SELECT uc.id AS coupon_id, p.name, p.promo_type, p.discount_value, p.threshold_amount "
+                "SELECT uc.id AS coupon_id, uc.promotion_id, p.name, p.promo_type, p.discount_value, p.threshold_amount "
                 "FROM user_coupons uc JOIN promotions p ON p.id = uc.promotion_id "
                 "WHERE uc.user_id = :u AND uc.status = 'claimed' AND p.status = 'active' "
                 "AND p.promo_type = 'coupon' AND (p.end_at IS NULL OR p.end_at > NOW())"
             ).bindparams(u=user_id)
         )
     ).mappings().all()
-    best = None
+    coupons: list[dict] = []
     for r in rows:
         discount = _compute_discount(dict(r), amount)
         if discount is None:
             continue
-        candidate = {"coupon_row_id": r["coupon_id"], "name": r["name"], "discount": min(discount, amount)}
-        if not best or candidate["discount"] > best["discount"]:
-            best = candidate
-    return best
+        coupons.append(
+            {
+                "coupon_row_id": str(r["coupon_id"]),
+                "promotion_id": str(r["promotion_id"]),
+                "name": r["name"],
+                "value": float(r["discount_value"]),
+                "discount": min(discount, amount),
+            }
+        )
+    return coupons
+
+
+async def best_user_coupon(conn, user_id: str, amount: float) -> dict | None:
+    """用户已领取且未使用的券中,对面额取最优(仅 coupon 型)。"""
+    coupons = await list_usable_user_coupons(conn, user_id, amount)
+    if not coupons:
+        return None
+    return max(coupons, key=lambda c: c["discount"])
+
+
+async def resolve_stacked_promotions(
+    conn, user_id: str, amount: float, scope_spus: set[str] | None,
+    coupon_row_id: str | None = None, auto_pick_coupon: bool = True,
+) -> dict:
+    """叠加结算决议(2026-09-22 叠加语义,商城页/聊天通道共用唯一算价口径):
+    活动(满减/折扣)先减,券按活动后余额抵扣封顶,金额永不为负;满减门槛
+    按原价合计判定。
+
+    - coupon_row_id 指定 → 校验该券可用(归属/claimed/在售/有效期由查询保证),
+      无效或零抵扣抛 ValueError —— 调用方必须如实拒单,严禁静默全款或白烧券。
+    - coupon_row_id 缺省且 auto_pick_coupon → 自动取余额下最优券(聊天通道:
+      无「不用券」入口,券自动使用,与历史「券自动应用」行为一脉相承)。
+    - coupon_row_id 缺省且 auto_pick_coupon=False → 仅活动(商城页「不使用优惠券」)。
+
+    返回 {"activity": best_for_amount 结果|None, "coupon": 券 dict|None,
+    "discount": 合计优惠}。
+    """
+    activity = await best_for_amount(conn, amount, scope_spus, exclude_coupon=True)
+    act_disc = activity["discount"] if activity else 0.0
+    remaining = round(max(amount - act_disc, 0.0), 2)
+    coupon = None
+    if coupon_row_id or auto_pick_coupon:
+        coupons = await list_usable_user_coupons(conn, user_id, remaining)
+        if coupon_row_id:
+            coupon = next((c for c in coupons if c["coupon_row_id"] == coupon_row_id), None)
+            if coupon is None or coupon["discount"] <= 0:
+                raise ValueError("优惠券不可叠加（不存在、已使用，或活动优惠后已无应付金额）")
+        elif coupons:
+            coupon = max(coupons, key=lambda c: c["discount"])
+    return {
+        "activity": activity,
+        "coupon": coupon,
+        "discount": round(act_disc + (coupon["discount"] if coupon else 0.0), 2),
+    }
