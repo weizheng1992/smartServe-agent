@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid as _uuid
 
 import pytest
 from sqlalchemy import text
@@ -142,3 +143,78 @@ class TestPromotionQuerySkill:
         asyncio.run(_claim())
         result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-9999")))
         assert "我的优惠券" not in result.output
+
+
+def _seed_claimed_and_used(container, user_id: str = "CUST-8801") -> None:
+    """种 1 张可用券 + 1 张已核销券。必须挂**两张不同** coupon 型活动:
+    uq_user_promo 限同活动同用户一行(共享容器里该约束由相邻套件 DDL 建立)。"""
+    async def _seed():
+        e = create_async_engine(container.url.render_as_string(hide_password=False), poolclass=NullPool)
+        async with e.begin() as conn:
+            claimed_pid = str(_uuid.uuid4())
+            used_pid = str(_uuid.uuid4())
+            await conn.execute(text(
+                "INSERT INTO promotions (id, name, promo_type, status, discount_value) "
+                "VALUES (CAST(:i AS uuid), '券包回归可用券', 'coupon', 'active', 30)"
+            ).bindparams(i=claimed_pid))
+            await conn.execute(text(
+                "INSERT INTO promotions (id, name, promo_type, status, discount_value) "
+                "VALUES (CAST(:i AS uuid), '券包回归已用券', 'coupon', 'active', 20)"
+            ).bindparams(i=used_pid))
+            await conn.execute(text(
+                "INSERT INTO user_coupons (promotion_id, user_id, status) VALUES (CAST(:p AS uuid), :u, 'claimed')"
+            ).bindparams(p=claimed_pid, u=user_id))
+            await conn.execute(text(
+                "INSERT INTO user_coupons (promotion_id, user_id, status, used_order_id, used_at) "
+                "VALUES (CAST(:p AS uuid), :u, 'used', 'AURORA-ORD-2026-9856', NOW())"
+            ).bindparams(p=used_pid, u=user_id))
+        await e.dispose()
+
+    asyncio.run(_seed())
+
+
+class TestCouponWalletQueries:
+    """券向问法(2026-09-22 实弹):「我的优惠券」「我使用过的优惠券」此前与
+    活动查询同一模板 —— 券包被活动列表淹没,已核销券完全不出现。"""
+
+    def test_my_coupons_query_shows_claimed_and_used(self, container):
+        _seed_claimed_and_used(container)
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "我的优惠券")))
+        assert result.success is True
+        assert "¥30 券" in result.output, f"可用券必须出现: {result.output}"
+        assert "已使用" in result.output, f"已核销券必须出现: {result.output}"
+        assert "9856" in result.output, f"已核销券须带核销单号: {result.output}"
+
+    def test_used_coupons_query_shows_used_only(self, container):
+        _seed_claimed_and_used(container)
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "我使用过的优惠券")))
+        assert result.success is True
+        assert "¥20 券" in result.output
+        assert "已使用" in result.output
+        assert "9856" in result.output
+        # 券向核销查询聚焦已用券,不回活动列表
+        assert "在售优惠活动" not in result.output
+
+    def test_used_coupons_via_hexiao_phrasing(self, container):
+        """「已经核销的优惠券」同属核销查询;「核销规则」等规则咨询须不入。"""
+        from engine_py.skills.promotion_skill import _USED_COUPON_RE
+
+        assert _USED_COUPON_RE.search("已经核销的优惠券有哪些")
+        assert _USED_COUPON_RE.search("核销记录")
+        assert not _USED_COUPON_RE.search("优惠券核销规则是什么")
+        assert not _USED_COUPON_RE.search("怎么使用优惠券")
+
+        _seed_claimed_and_used(container)
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "已经核销的优惠券有哪些")))
+        assert "在售优惠活动" not in result.output
+        assert "9856" in result.output
+
+    def test_my_coupons_honest_empty(self, container):
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "我的优惠券")))
+        assert "还没有领取" in result.output or "暂无" in result.output, result.output
+
+    def test_general_promo_query_template_unchanged(self, container):
+        """非券向问法保持原模板:活动列表 + claimed 券(既有口径不漂移)。"""
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801")))
+        assert "在售优惠活动" in result.output
+        assert "自动应用最优优惠" in result.output
