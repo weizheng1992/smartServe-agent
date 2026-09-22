@@ -153,6 +153,28 @@ CREATE TABLE IF NOT EXISTS user_coupons (
   claimed_at TIMESTAMP NOT NULL DEFAULT NOW(),
   used_at TIMESTAMP
 );
+
+-- 券约束补齐(2026-09-22):此前唯一约束只存在于测试 DDL,正式库裸表 ——
+-- 防重复领取仅有应用层查重(存在并发窗口),孤儿行无人拦。幂等迁移:
+-- pg_constraint 探测后补建;老库存量若已有重复/孤儿行,约束会建失败,
+-- 需先清数(结算/领券的最终防线是 mark_coupon_used 条件更新,非本约束)。
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_user_promo'
+                 AND conrelid = 'user_coupons'::regclass) THEN
+    ALTER TABLE user_coupons ADD CONSTRAINT uq_user_promo UNIQUE (promotion_id, user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_user_coupons_promotion'
+                 AND conrelid = 'user_coupons'::regclass) THEN
+    ALTER TABLE user_coupons ADD CONSTRAINT fk_user_coupons_promotion
+      FOREIGN KEY (promotion_id) REFERENCES promotions(id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_redemptions_promotion'
+                 AND conrelid = 'promotion_redemptions'::regclass) THEN
+    ALTER TABLE promotion_redemptions ADD CONSTRAINT fk_redemptions_promotion
+      FOREIGN KEY (promotion_id) REFERENCES promotions(id);
+  END IF;
+END $$;
 """
 
 

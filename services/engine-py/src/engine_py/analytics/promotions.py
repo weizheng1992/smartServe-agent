@@ -12,6 +12,7 @@ import json
 import uuid
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from ..tools_registry.order_domain import _merchant_writer_engine
 
@@ -164,11 +165,16 @@ async def claim_coupon(promotion_id: str, user_id: str) -> dict:
         ).first()
         if dup:
             return {"error": "已领取过该券"}
-    async with _merchant_writer_engine().begin() as conn:
-        await conn.execute(
-            text("INSERT INTO user_coupons (promotion_id, user_id) VALUES (CAST(:id AS uuid), :u)")
-            .bindparams(id=promotion_id, u=user_id)
-        )
+    try:
+        async with _merchant_writer_engine().begin() as conn:
+            await conn.execute(
+                text("INSERT INTO user_coupons (promotion_id, user_id) VALUES (CAST(:id AS uuid), :u)")
+                .bindparams(id=promotion_id, u=user_id)
+            )
+    except IntegrityError:
+        # 并发双领兜底:应用层查重与应用层插入之间存在窗口,唯一约束(uq_user_promo)
+        # 是最终防线 —— 冲突即视为已领取,与串行语义一致
+        return {"error": "已领取过该券"}
     await _audit("coupon_claim", user_id, {"promotionId": promotion_id})
     return {"promotionId": promotion_id, "userId": user_id}
 
@@ -195,12 +201,20 @@ async def my_coupons(user_id: str) -> list[dict]:
              "claimedAt": r["claimed_at"].isoformat() if r["claimed_at"] else None} for r in rows]
 
 
-async def mark_coupon_used(conn, coupon_row_id: str, order_id: str) -> None:
-    """结算用券后置已用(与订单同事务)。"""
-    await conn.execute(
-        text("UPDATE user_coupons SET status = 'used', used_order_id = :o, used_at = NOW() WHERE id = CAST(:id AS uuid)")
-        .bindparams(o=order_id, id=coupon_row_id)
+async def mark_coupon_used(conn, coupon_row_id: str, order_id: str) -> bool:
+    """结算用券后置已用(与订单同事务)。
+
+    条件核销防双花(2026-09-22):WHERE 带 status='claimed' 并校验影响行数 ——
+    同用户并发两笔结算都能通过可用性读(普通 SELECT),只有这里的条件更新是
+    最终防线;返回 False 时调用方必须整体回滚拒单,严禁继续落单。
+    """
+    result = await conn.execute(
+        text(
+            "UPDATE user_coupons SET status = 'used', used_order_id = :o, used_at = NOW() "
+            "WHERE id = CAST(:id AS uuid) AND status = 'claimed'"
+        ).bindparams(o=order_id, id=coupon_row_id)
     )
+    return result.rowcount > 0
 
 
 async def effect_overview() -> dict:
