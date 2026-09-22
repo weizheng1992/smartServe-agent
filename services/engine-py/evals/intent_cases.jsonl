@@ -1,0 +1,96 @@
+{"question": "帮我查一下我负责商品里面卖得最好的几个", "expect_metric": null, "source": "registry", "expect_clarify": true}
+{"question": "查看本月销售额最高的商品榜单", "expect_metric": "gmv", "source": "registry"}
+{"question": "哪个商品流水贡献最大", "expect_metric": "gmv", "source": "registry"}
+{"question": "哪几款商品出货量最大", "expect_metric": "volume", "source": "registry"}
+{"question": "查看走量最多的爆款商品", "expect_metric": null, "source": "registry", "expect_clarify": true}
+{"question": "销量排名前三的商品", "expect_metric": "volume", "source": "registry"}
+{"question": "哪几款商品真正最赚钱", "expect_metric": "gross_profit", "source": "registry"}
+{"question": "净毛利最高的商品排行", "expect_metric": "gross_profit", "source": "registry"}
+{"question": "刨去进货成本哪款利润最大", "expect_metric": "gross_profit", "source": "registry"}
+{"question": "哪些商品毛利率最高", "expect_metric": "margin_rate", "source": "registry"}
+{"question": "溢价空间最大的商品有哪些", "expect_metric": "margin_rate", "source": "registry"}
+{"question": "仓库里哪些商品积压最多", "expect_metric": "stock_risk", "source": "registry"}
+{"question": "滞销库存排查", "expect_metric": "stock_risk", "source": "registry"}
+{"question": "哪些款压货最严重", "expect_metric": "stock_risk", "source": "registry"}
+{"question": "差评最多的 SKU", "expect_metric": "review_bad", "source": "registry"}
+{"question": "最近差评最多的商品", "expect_metric": "review_bad", "source": "registry"}
+{"question": "近 30 天退款率", "expect_metric": "refund_rate", "source": "registry"}
+{"question": "退款率最高的商品", "expect_metric": "refund_rate", "source": "edge"}
+{"question": "客服负载概况", "expect_metric": "session_volume", "source": "registry"}
+{"question": "最近会话量", "expect_metric": "session_volume", "source": "registry"}
+{"question": "各活动的核销情况", "expect_metric": "promo_orders", "source": "registry"}
+{"question": "优惠活动的核销订单数", "expect_metric": "promo_orders", "source": "registry"}
+{"question": "各活动优惠总额", "expect_metric": "promo_discount_total", "source": "registry"}
+{"question": "活动补贴花了多少钱", "expect_metric": "promo_discount_total", "source": "registry"}
+{"question": "近 30 天 GMV 趋势", "expect_metric": "gmv_trend", "source": "registry"}
+{"question": "每天的销售额走势", "expect_metric": "gmv_trend", "source": "edge"}
+{"question": "近30天GMV趋势", "expect_metric": "gmv_trend", "source": "edge"}
+{"question": "近3个月的销量", "expect_metric": "volume_trend", "source": "registry"}
+{"question": "每月销量趋势", "expect_metric": "volume_trend", "source": "edge"}
+{"question": "几个月的销量怎么样", "expect_metric": "volume_trend", "source": "registry"}
+{"question": "这几笔订单的平均金额", "expect_metric": "order_overview", "source": "registry"}
+{"question": "选中订单合计多少", "expect_metric": "order_overview", "source": "registry"}
+{"question": "售后工单概况", "expect_metric": "after_sale_overview", "source": "registry"}
+{"question": "有多少售后工单", "expect_metric": "after_sale_overview", "source": "registry"}
+{"question": "AI 自动解决率多少", "expect_metric": "ai_resolution_rate", "source": "registry"}
+{"question": "开学季活动卖得怎么样", "expect_metric": "promo_effect", "source": "registry"}
+{"question": "这个活动的核销情况如何", "expect_metric": "promo_effect", "source": "registry"}
+{"question": "开学季活动里冲锋衣对比其他款", "expect_metric": "promo_sku_compare", "source": "registry", "layer": "L3"}
+{"question": "这个活动里哪款卖得最好", "expect_metric": "promo_sku_compare", "layer": "L3", "source": "entity"}
+{"question": "新客50元券对比背包品类85折", "expect_metric": "promo_compare", "source": "registry", "layer": "L3"}
+{"question": "两个活动哪个效果好", "expect_metric": "promo_compare", "layer": "L3", "source": "entity"}
+{"question": "张三最近的订单", "expect_metric": "customer_orders", "layer": "L3", "source": "entity"}
+{"question": "查一下 13800000001 的订单", "expect_metric": "customer_orders", "layer": "L3", "source": "entity"}
+{"question": "本月客单价多少", "expect_metric": "aov", "source": "edge"}
+{"question": "平均每单多少钱", "expect_metric": "aov", "source": "registry"}
+{"question": "本月订单量多少", "expect_metric": "order_count", "source": "edge"}
+{"question": "上周成交笔数", "expect_metric": "order_count", "source": "registry"}
+{"question": "好评最多的商品 Top5", "expect_metric": "review_good", "source": "registry"}
+{"question": "看看好评榜", "expect_metric": "review_good", "source": "registry"}
+{"question": "哪些商品零销量", "expect_metric": "zero_sales", "source": "registry"}
+{"question": "滞销零销量商品有哪些", "expect_metric": "zero_sales", "source": "registry"}
+{"question": "品类GMV排行", "expect_metric": "category_gmv_top", "source": "edge"}
+{"question": "各品类销售额对比", "expect_metric": "category_gmv_top", "source": "registry"}
+{"question": "消费最高的客户 Top5", "expect_metric": "customer_spend_top", "source": "registry"}
+{"question": "客户消费排行", "expect_metric": "customer_spend_top", "source": "registry"}
+{"question": "张伟的消费统计", "expect_metric": "customer_spend_stats", "source": "registry"}
+{"question": "张伟花了多少", "expect_metric": "customer_spend_stats", "source": "registry"}
+{"question": "张伟的优惠券", "expect_metric": "customer_coupons", "source": "registry"}
+{"question": "张伟领了哪些券", "expect_metric": "customer_coupons", "source": "registry"}
+{"question": "张伟的用户画像", "expect_metric": "customer_profile", "source": "registry"}
+{"question": "看看张伟的客户画像", "expect_metric": "customer_profile", "source": "registry"}
+{"question": "张伟的客户全景", "expect_metric": "customer_panorama", "source": "registry"}
+{"question": "看看张伟的全貌", "expect_metric": "customer_panorama", "source": "registry"}
+{"question": "经营概览", "expect_metric": "biz_overview", "source": "registry"}
+{"question": "最近生意怎么样", "expect_metric": "biz_overview", "source": "registry"}
+{"question": "本月比上个月卖得怎么样", "expect_metric": "gmv_mom", "source": "registry"}
+{"question": "GMV环比", "expect_metric": "gmv_mom", "source": "edge"}
+{"question": "每日订单量走势", "expect_metric": "orders_trend", "source": "registry"}
+{"question": "近3个月订单量趋势", "expect_metric": "orders_trend", "source": "registry"}
+{"question": "库存价值排行", "expect_metric": "stock_value", "source": "registry"}
+{"question": "哪个商品压的货值最大", "expect_metric": "stock_value", "source": "registry"}
+{"question": "张伟的消费记录折线图", "expect_metric": "customer_spend_trend", "source": "registry"}
+{"question": "张伟近3个月的消费趋势", "expect_metric": "customer_spend_trend", "source": "registry"}
+{"question": "销量 折线图", "expect_metric": "volume_trend", "source": "edge"}
+{"question": "GMV 折线图", "expect_metric": "gmv_trend", "source": "edge"}
+{"question": "销量榜 折线图", "expect_metric": "volume", "source": "edge"}
+{"question": "上个月的销量排行", "expect_metric": "volume", "source": "edge"}
+{"question": "订单量趋势", "expect_metric": "orders_trend", "source": "edge"}
+{"question": "销量排行", "expect_metric": "volume", "source": "edge"}
+{"question": "GMV 趋势", "expect_metric": "gmv_trend", "source": "edge"}
+{"question": "卖得最差的商品", "expect_metric": "gmv", "expect_direction": "ASC", "source": "edge"}
+{"question": "销量最低的商品", "expect_metric": "volume", "expect_direction": "ASC", "source": "edge"}
+{"question": "销量最高的商品 Top 3", "expect_metric": "volume", "expect_direction": "DESC", "source": "edge"}
+{"question": "上个月销售额排行", "expect_metric": "gmv", "expect_time": "last_month", "source": "edge"}
+{"question": "最近7天销量排行", "expect_metric": "volume", "expect_time": "last_7d", "source": "edge"}
+{"question": "库存价值排行 用表格", "expect_metric": "stock_value", "expect_chart": "table", "source": "edge"}
+{"question": "好评最多的商品 Top 3", "expect_metric": "review_good", "source": "edge"}
+{"question": "零销量商品有哪些", "expect_metric": "zero_sales", "source": "edge"}
+{"question": "会话量多少", "expect_metric": "session_volume", "source": "edge"}
+{"question": "压货最严重的商品", "expect_metric": "stock_risk", "source": "edge"}
+{"question": "张伟最近的订单", "expect_metric": "customer_orders", "source": "edge", "layer": "L3"}
+{"question": "冲锋衣88折对比背包品类85折", "expect_metric": "promo_compare", "layer": "L3", "source": "entity"}
+{"question": "今天心情如何", "expect_unsupported": true, "source": "longtail"}
+{"question": "帮我算算公司估值", "expect_unsupported": true, "source": "longtail"}
+{"question": "为什么这个月退货突然变多", "expect_unsupported": true, "source": "longtail"}
+{"question": "今天天气怎么样", "expect_unsupported": true, "source": "longtail"}

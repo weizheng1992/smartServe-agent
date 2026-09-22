@@ -693,8 +693,29 @@ class MetricQueryEngine:
 
         merchant_db → 只读 reader(READ ONLY + 超时,阶段①);engine_db → 引擎
         本地会话(get_session,同样只读查询)。两路均诚实空、均带口径注记。
+        结果语义缓存(AI_RESULT_CACHE_TTL 秒,默认关):键 = SQL+参数哈希,
+        命中秒回且口径注明缓存 —— 数据仍属同一只读快照语义,非编造。
         """
+        import time
+
         from sqlalchemy import text
+
+        ttl = float(os.environ.get("AI_RESULT_CACHE_TTL", "0") or 0)
+        cache_key = None
+        if ttl > 0:
+            from . import result_cache
+
+            cache_key = result_cache.build_key(compiled.sql, compiled.params)
+            cached = await result_cache.get(cache_key)
+            if cached is not None:
+                age = max(int(time.time() - cached["ts"]), 0)
+                caliber = _CALIBERS.get(compiled.metric, "有效订单聚合(排除退款/取消单)")
+                return QueryResult(
+                    rows=cached["rows"], metric=compiled.metric,
+                    unit=metric_semantic_registry()[compiled.metric]["unit"],
+                    caliber=f"{caliber}(缓存读,数据时刻 ≈{age}s 前)",
+                    chart="line" if compiled.metric.endswith("_trend") else None,
+                )
 
         if getattr(compiled, "target_db", "merchant_db") == "engine_db":
             from ..db import get_session
@@ -707,6 +728,14 @@ class MetricQueryEngine:
             # 运行时读取模块属性(测试替换 reader 工厂,静态引用会绕过 patch)
             async with order_domain._merchant_reader_engine().connect() as conn:
                 rows = (await conn.execute(text(compiled.sql).bindparams(**compiled.params))).mappings().all()
+        if cache_key and ttl > 0:
+            from . import result_cache
+
+            await result_cache.set(
+                cache_key,
+                {"rows": [dict(r) for r in rows], "ts": time.time()},
+                int(ttl),
+            )
         caliber = _CALIBERS.get(compiled.metric, "有效订单聚合(排除退款/取消单)")
         chart = "line" if compiled.metric.endswith("_trend") else None
         return QueryResult(

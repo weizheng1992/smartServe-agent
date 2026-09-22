@@ -106,15 +106,35 @@ async def llm_resolve(
     registry = metric_semantic_registry()
 
     async def _invoke_llm() -> str:
-        """取回模型原始输出(SFT 本地优先,bigmodel API 兜底)。"""
+        """取回模型原始输出(SFT 本地优先 → 原生 function calling → prompt+JSON 兜底)。
+
+        function calling 是 2026 业界共识的意图解析形态:工具 schema 即 LlmIntent,
+        模型填参、无自由文本解析失败面;chat.py 兼容层已驯 bigmodel 1210 怪癖
+        (parallel_tool_calls 剥除、tool_choice 对象改写 required)。任何异常回落
+        旧 prompt 路径,两路同过 LlmIntent 校验 —— 响亮语义不变。
+        """
+        import json as _json
+
         local_model = os.environ.get("AI_INTENT_L3_MODEL")
         if local_model:
             # QLoRA SFT 产物(见 scripts/training/sft_train.py)—— 摆脱 bigmodel API 限流依赖
             return await _sft_generate(local_model, _system_prompt(allowed), question)
-        resp = await get_chat_model().ainvoke([
+        messages = [
             SystemMessage(content=_system_prompt(allowed)),
             HumanMessage(content=question),
-        ])
+        ]
+        model = get_chat_model()
+        try:
+            tool_model = model.bind_tools([LlmIntent], tool_choice="required")
+            resp = await tool_model.ainvoke(messages)
+            for tc in getattr(resp, "tool_calls", None) or []:
+                args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)
+                if args:
+                    return _json.dumps(args, ensure_ascii=False)
+            print("[L3] function calling 未产出工具调用,回落 prompt 解析")
+        except Exception as tool_err:
+            print(f"[L3] function calling 不可用,回落 prompt 解析: {tool_err}")
+        resp = await model.ainvoke(messages)
         return _content_text(resp)
 
     # 两分支共用同一失败语义:格式坏/网络/供应商故障 → 响亮失败,不静默兜底

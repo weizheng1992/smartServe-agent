@@ -1048,7 +1048,7 @@ class TestInlineProductMention:
 
         await ensure_merchant_tables()
         boss = await auth()
-        title = "E2E行内绑定测试零销量帐篷Pro版"
+        title = "E2E行内绑定测试帐篷Pro限定版"
         r = await client.post("/api/admin/analytics/spus", headers=boss, json={
             "title": title, "category": "露营装备", "price": 399, "stock": 10,
         })
