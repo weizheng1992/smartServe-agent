@@ -40,13 +40,21 @@ class LlmIntent(BaseModel):
     limit: int | None = Field(None, description="Top N;未表达为 null")
     time_window: str | None = Field(None, description="last_7d|last_30d|last_month|null")
     category: str | None = Field(None, description="九品类之一或 null")
-    entity_kind: str | None = Field(None, description="promotion=活动 customer=客户 spu=商品;涉及具体实体时必填")
+    entity_kind: str | None = Field(None, description="只能是 promotion|customer|spu 三值之一(promotion=活动 customer=客户 spu=商品);涉及具体实体时必填")
     entity_mention: str | None = Field(None, description="实体提及原文(活动名/客户名或手机号/商品名),原样摘取")
     compare_mention: str | None = Field(None, description="对比目标款(商品名/编码),仅对比类问题")
 
 
 def l3_enabled() -> bool:
     return os.environ.get("AI_INTENT_L3", "on").strip().lower() not in ("0", "off", "false")
+
+
+# 实体种类闭集别名(弱模型实测会输出 product/中文;归一到 dimensions 三值,
+# 未知值在解析侧响亮拒绝 —— 与 08-P1 同一纪律)
+_ENTITY_KIND_ALIASES = {
+    "promotion": "promotion", "customer": "customer", "spu": "spu",
+    "product": "spu", "商品": "spu", "活动": "promotion", "客户": "customer",
+}
 
 
 def _system_prompt(allowed: list[str] | None) -> str:
@@ -63,6 +71,7 @@ def _system_prompt(allowed: list[str] | None) -> str:
         "- direction:问最差/最低/垫底 → ASC;最好/最高/Top → DESC;未表达 null\n"
         "- 问某活动的销售/效果 → entity_kind='promotion',entity_mention=活动名原文\n"
         "- 问某客户/某人的订单 → entity_kind='customer',entity_mention=客户名或手机号原文\n"
+        "- entity_kind 只允许 promotion/customer/spu 三个英文值,禁止 product/商品 等其他写法\n"
         "- 问活动里某款对比其他款 → metric=promo_sku_compare,entity_kind='promotion',"
         "entity_mention=活动名,compare_mention=目标款商品名或编码\n"
         "- 问「选中的/勾选的订单」「两个订单对比/这两单差异」→ metric=order_overview"
@@ -114,6 +123,12 @@ async def llm_resolve(
         raise UnsupportedQuery("问题含义未落在已注册指标闭集内")
     if allowed and out.metric not in allowed:
         raise UnsupportedQuery("当前角色无权查看该指标")
+
+    if out.entity_kind:
+        normalized = _ENTITY_KIND_ALIASES.get(out.entity_kind.strip().lower())
+        if normalized is None:
+            raise UnsupportedQuery(f"实体种类 {out.entity_kind!r} 不在闭集内(promotion/customer/spu)")
+        out.entity_kind = normalized
 
     metric_meta = registry[out.metric]
     direction = out.direction if out.direction in ("ASC", "DESC") else metric_meta["direction"]
@@ -201,7 +216,7 @@ def _content_text(resp) -> str:
 
 
 def _parse_llm_json(raw: str) -> dict:
-    """剥 ```json 围栏 + 截取首尾大括号(glm 系模型常见输出形态)。"""
+    """剥 ```json 围栏 + 截取首尾大括号 + 尾逗号容错(glm 系模型常见输出形态)。"""
     import json
     import re as _re
 
@@ -211,7 +226,15 @@ def _parse_llm_json(raw: str) -> dict:
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         raise ValueError(f"响应中无 JSON: {text[:80]!r}")
-    return json.loads(text[start:end + 1])
+    body = text[start:end + 1]
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        # 弱模型常见坏形:尾逗号("..., }")、全角引号混入 —— 先做无损修补再交-
+        # 仍失败则原样上抛(响亮失败,不猜测语义)
+        repaired = _re.sub(r",\s*([}\]])", r"\1", body)
+        repaired = repaired.replace("\u201c", '"').replace("\u201d", '"')
+        return json.loads(repaired)
 
 
 _SFT_PIPELINE = None

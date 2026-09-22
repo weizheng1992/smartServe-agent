@@ -89,6 +89,18 @@ def _inject_telemetry(config: Any) -> dict:
     return merged
 
 
+# 「始终思考」模型的自适应开关(glm-5.3-flash 实弹,2026-09-22):AI_THINKING
+# 默认 disabled 是 glm-4.7 时代的时延调优;换用拒收 disabled 的模型时,首个
+# 400/1210 触发一次剥除重试并进程内记住 —— 统一 env 仍是唯一配置面,这里只
+# 兜「模型与 env 组合不兼容」的迁移期,不引入第二配置源。
+_THINKING_REJECTED = False
+
+
+def _is_thinking_rejection(err: Exception) -> bool:
+    text = str(err)
+    return "1210" in text and ("思考" in text or "thinking" in text.lower())
+
+
 class _ResilientChatOpenAI(ChatOpenAI):
     """usage 遥测注入 + 熔断/退避/超时韧性层 —— 覆写公共 invoke 入口,直调与组合调用全覆盖。
 
@@ -102,11 +114,27 @@ class _ResilientChatOpenAI(ChatOpenAI):
     def invoke(self, input, config=None, **kwargs):
         # 零参 super() 不进 lambda 帧(无 __class__ cell)——须先在方法体内绑定代理
         sup = super()
-        return resilient_invoke(lambda: sup.invoke(input, _inject_telemetry(config), **kwargs))
+        try:
+            return resilient_invoke(lambda: sup.invoke(input, _inject_telemetry(config), **kwargs))
+        except Exception as err:
+            if _is_thinking_rejection(err) and settings.llm_thinking == "disabled":
+                global _THINKING_REJECTED
+                _THINKING_REJECTED = True
+                print("[LLM] 模型拒收 thinking:disabled → 本次起剥除该参数(AI_THINKING 仍为 disabled)")
+                return resilient_invoke(lambda: sup.invoke(input, _inject_telemetry(config), **kwargs))
+            raise
 
     async def ainvoke(self, input, config=None, **kwargs):
         sup = super()
-        return await resilient_ainvoke(lambda: sup.ainvoke(input, _inject_telemetry(config), **kwargs))
+        try:
+            return await resilient_ainvoke(lambda: sup.ainvoke(input, _inject_telemetry(config), **kwargs))
+        except Exception as err:
+            if _is_thinking_rejection(err) and settings.llm_thinking == "disabled":
+                global _THINKING_REJECTED
+                _THINKING_REJECTED = True
+                print("[LLM] 模型拒收 thinking:disabled → 本次起剥除该参数(AI_THINKING 仍为 disabled)")
+                return await resilient_ainvoke(lambda: sup.ainvoke(input, _inject_telemetry(config), **kwargs))
+            raise
 
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
@@ -134,7 +162,9 @@ class _ResilientChatOpenAI(ChatOpenAI):
         # 客服管线 3 次串行调用即 1-2 分钟回复。thinking 非 openai SDK 标准参数,
         # 顶层直塞 create(**payload) 即炸"unexpected keyword argument",必须经
         # extra_body 通道由 SDK 合并进请求体;setdefault 尊重调用方显式覆写。
-        if settings.llm_thinking == "disabled":
+        # AI_THINKING 是唯一配置面;「始终思考」模型拒收 disabled 时由
+        # _THINKING_REJECTED 自适应剥除(见类上方注释),不新增第二配置源。
+        if settings.llm_thinking == "disabled" and not _THINKING_REJECTED:
             extra_body = payload.get("extra_body") or {}
             extra_body.setdefault("thinking", {"type": "disabled"})
             payload["extra_body"] = extra_body
