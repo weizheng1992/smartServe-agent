@@ -79,7 +79,13 @@ class MetricQueryEngine:
         ("last_month", re.compile(r"上个月|上月")),
         ("last_7d", re.compile(r"最近\s*(一|7)\s*天|近\s*7\s*天")),
         ("last_30d", re.compile(r"最近\s*(三十|30)\s*天|近\s*(三十|30)\s*天")),
+        # 跨月统计(用户实弹诉求):近/最近/过去 N 个月、「几个月的销量」(N 缺省 6);
+        # 纯「每月/按月/月度」无 N 同样切月粒度(N 缺省 6)
+        ("last_months", re.compile(r"(?:(?:近|最近|过去)\s*)?(\d{1,2}|[一两二三四五六七八九十几]+)\s*个月的?")),
+        ("last_months", re.compile(r"每月|按月|月度")),
     )
+    _CN_MONTH_NUMS = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
+                      "七": 7, "八": 8, "九": 9, "十": 10, "几": 6}
 
     def __init__(self, session_ctx: dict | None = None, resolver: Any | None = None) -> None:
         self.session_ctx = session_ctx or {}
@@ -123,6 +129,10 @@ class MetricQueryEngine:
         if matched_words:
             matched_words.sort(key=lambda p: len(p[1]), reverse=True)
             hit = (matched_words[0][0], matched_words[0][1])
+            # 榜/排行语义优先于趋势:「上个月的销量排行」问的是榜单不是折线;
+            # 时间窗照常生效(_trend → 对应榜单指标),趋势问法不受影响。
+            if hit[0].endswith("_trend") and re.search(r"排行|排名|榜单|榜|top\s*\d*", clean):
+                hit = ({"gmv_trend": "gmv", "volume_trend": "volume"}.get(hit[0], hit[0]), hit[1])
 
         if self._head is not None:
             try:
@@ -181,7 +191,16 @@ class MetricQueryEngine:
         """开放槽位解析(limit/时间窗/品类);L0 命中路与分类头 on 路径共用。"""
         limit_match = self._LIMIT_RE.search(clean)
         limit = min(max(int(limit_match.group(1)) if limit_match else 5, 1), 50)
-        time_window = next(({"kind": kind} for kind, pat in self._TIME_PATTERNS if pat.search(clean)), None)
+        time_window: dict | None = None
+        for kind, pat in self._TIME_PATTERNS:
+            m = pat.search(clean)
+            if m:
+                time_window = {"kind": kind}
+                if kind == "last_months":
+                    raw = m.group(1) if m.groups() else None
+                    n = int(raw) if raw and raw.isdigit() else self._CN_MONTH_NUMS.get(raw or "", 6)
+                    time_window["n"] = min(max(n, 1), 24)
+                break
         cat_match = re.search(r"(户外机能|潮流T恤|下装裤类|潮流鞋靴|背包收纳|露营装备|衬衫|配饰|运动配件)", clean, re.IGNORECASE)
         category = cat_match.group(1) if cat_match else None
         return limit, time_window, category
@@ -340,17 +359,40 @@ class MetricQueryEngine:
                 f"FROM after_sale_tickets WHERE business_id = :business_id {time_clause} "
                 f'GROUP BY status ORDER BY "metricScore" {direction} LIMIT :lim'
             )
-        elif intent.metric == "gmv_trend":
-            params.pop("lim", None)  # 时间序列固定 30 天窗口,仍以显式 LIMIT 兜底行数
-            sql = (
-                "SELECT to_char(d.day, 'MM-DD') AS \"日期\", "
-                "COALESCE(SUM(oi.quantity * oi.price), 0)::float AS \"GMV\" "
-                "FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, INTERVAL '1 day') d(day) "
-                "LEFT JOIN merchant_orders o ON o.created_at::date = d.day "
-                "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
-                "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
-                "GROUP BY d.day ORDER BY d.day LIMIT 50"
+        elif intent.metric in ("gmv_trend", "volume_trend"):
+            # 趋势族(阶段⑥升级):默认近 30 天按日;「近 N 个月」切自然月粒度
+            params.pop("lim", None)  # 时间序列窗口固定,仍以显式 LIMIT 兜底行数
+            value_expr = (
+                "COALESCE(SUM(oi.quantity * oi.price), 0)::float"
+                if intent.metric == "gmv_trend"
+                else "COALESCE(SUM(oi.quantity), 0)::float"
             )
+            label = "GMV" if intent.metric == "gmv_trend" else "销量"
+            window = intent.time_window or {}
+            n = int(window.get("n") or 0) if window.get("kind") == "last_months" else 0
+            if n >= 2:
+                months = min(n, 24) - 1  # 含当月共 n 个月;倍数已钳 1-24,字面插值安全
+                sql = (
+                    "SELECT to_char(d.month, 'YYYY-MM') AS \"月份\", "
+                    f"{value_expr} AS \"{label}\" "
+                    "FROM generate_series(date_trunc('month', CURRENT_DATE) - "
+                    f"INTERVAL '{months} months', date_trunc('month', CURRENT_DATE), "
+                    "INTERVAL '1 month') d(month) "
+                    "LEFT JOIN merchant_orders o ON date_trunc('month', o.created_at) = d.month "
+                    "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                    "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                    f"GROUP BY d.month ORDER BY d.month LIMIT 50"
+                )
+            else:
+                sql = (
+                    "SELECT to_char(d.day, 'MM-DD') AS \"日期\", "
+                    f"{value_expr} AS \"{label}\" "
+                    "FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, INTERVAL '1 day') d(day) "
+                    "LEFT JOIN merchant_orders o ON o.created_at::date = d.day "
+                    "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                    "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                    f"GROUP BY d.day ORDER BY d.day LIMIT 50"
+                )
         elif intent.metric == "order_overview":
             # ADR-0005:升级为逐笔行 + 合计/均值窗口列 —— 「两个订单对比」等
             # 对比类问法可直接看每单差异;实体来自 PageContext 勾选(必传)。
@@ -577,6 +619,13 @@ class MetricQueryEngine:
             return now - timedelta(days=7)
         if kind == "last_30d":
             return now - timedelta(days=30)
+        if kind == "last_months":
+            # 含当月共 n 个月 → 起点 = n-1 个月前的月初(月对齐)
+            first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            month = first
+            for _ in range(max(int(window.get("n") or 6), 1) - 1):
+                month = (month - timedelta(days=1)).replace(day=1)
+            return month
         raise UnsupportedQuery(f"未知时间窗 {kind}")
 
 

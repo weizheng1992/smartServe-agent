@@ -119,3 +119,44 @@ class TestExitFamilyResolve:
     def test_exit_family_routes(self, engine, question, metric):
         intent = engine.resolve(question)
         assert intent.metric == metric
+
+
+class TestMonthlyTrendRouting:
+    """跨月销量折线(用户实弹诉求):「近 N 个月/几个月的销量」月粒度趋势。"""
+
+    @pytest.mark.parametrize(("question", "metric"), [
+        ("近3个月的销量", "volume_trend"),
+        ("几个月的销量怎么样", "volume_trend"),
+        ("每月销量趋势", "volume_trend"),
+        ("按月统计销量", "volume_trend"),
+        ("近30天GMV趋势", "gmv_trend"),
+    ])
+    def test_trend_routes(self, engine, question, metric):
+        intent = engine.resolve(question)
+        assert intent.metric == metric
+
+    def test_last_month_window_n_parsed(self, engine):
+        intent = engine.resolve("近3个月的销量")
+        assert intent.time_window == {"kind": "last_months", "n": 3}
+
+    def test_ranking_semantics_outrank_trend(self, engine):
+        """「上个月的销量排行」问的是榜单不是折线:降回 volume,时间窗保留。"""
+        intent = engine.resolve("上个月的销量排行")
+        assert intent.metric == "volume"
+        assert intent.time_window == {"kind": "last_month"}
+
+    def test_monthly_template_compiles_with_month_granularity(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        compiled = engine.compile(StructuredQueryIntent(
+            metric="volume_trend", time_window={"kind": "last_months", "n": 6},
+        ))
+        assert "date_trunc('month'" in compiled.sql
+        assert "销量" in compiled.sql
+
+    def test_daily_trend_template_unchanged(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        compiled = engine.compile(StructuredQueryIntent(metric="volume_trend"))
+        assert compiled.sql.rstrip().endswith("LIMIT 50")
+        assert "date_trunc" not in compiled.sql
