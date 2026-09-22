@@ -1,7 +1,7 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { Button } from 'ui';
-import { BarChart } from '@/components/BarChart';
-import { LineChart } from '@/components/LineChart';
+import { ResultCard } from '@/components/ResultCard';
 import { api } from '@/lib/api';
 
 // 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由(选中数据
@@ -10,23 +10,6 @@ import { api } from '@/lib/api';
 // 帧带自增 id:渲染层会过滤 start 帧,按下标回写状态会错位 —— 一律按 id 回写
 let frameSeq = 0;
 type AgentFrame = { id: number; event: string; data: any; saved?: boolean };
-
-// 明确不做条形图的指标:逐笔列表/窗口列不是排行语义,画条会误导
-const NO_BAR_METRICS = new Set(['order_overview', 'customer_orders']);
-
-function rankingPoints(data: any): Array<{ label: string; value: number }> | null {
-  const rows: any[] = Array.isArray(data.rows) ? data.rows : [];
-  if (rows.length < 2 || NO_BAR_METRICS.has(data.metric)) return null;
-  const cols = Object.keys(rows[0] || {});
-  if (!cols.length) return null;
-  const labelCol = cols[0];
-  const valueCol = cols[cols.length - 1];
-  const points = rows
-    .map((r: any) => ({ label: String(r[labelCol] ?? ''), value: Number(r[valueCol]) }))
-    .filter((p: { label: string; value: number }) => Number.isFinite(p.value));
-  if (points.length < 2) return null;
-  return points.slice(0, 10);
-}
 
 function exportResultCsv(data: any) {
   const rows: any[] = data.rows || [];
@@ -44,6 +27,7 @@ function exportResultCsv(data: any) {
 }
 
 export function FloatingAgent({ route }: { route: string }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [frames, setFrames] = useState<AgentFrame[]>([]);
@@ -89,6 +73,17 @@ export function FloatingAgent({ route }: { route: string }) {
     setBusy(false);
   }
 
+  function pinToBoard(data: any) {
+    const pins = JSON.parse(localStorage.getItem('merchant-admin.board') || '[]');
+    pins.push({
+      id: `pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      question: String(data.__question || ''),
+      route,
+      pinnedAt: new Date().toISOString(),
+    });
+    localStorage.setItem('merchant-admin.board', JSON.stringify(pins.slice(-20)));
+  }
+
   async function saveToReport(frame: AgentFrame) {
     try {
       await api.reports.saveFromResult({
@@ -124,9 +119,14 @@ export function FloatingAgent({ route }: { route: string }) {
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
           数据分析助手
         </div>
-        <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => setOpen(false)}>
-          收起
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => navigate('/board')}>
+            📌 看板
+          </button>
+          <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => setOpen(false)}>
+            收起
+          </button>
+        </div>
       </div>
       <div className="border-b border-zinc-50 px-4 py-2 flex items-center gap-2">
         <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
@@ -178,6 +178,14 @@ export function FloatingAgent({ route }: { route: string }) {
                       onClick={() => exportResultCsv(f.data)}
                     >
                       导出 CSV
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
+                      title="钉到看板页定时重放刷新"
+                      onClick={() => pinToBoard(f.data)}
+                    >
+                      📌 钉看板
                     </button>
                     <button
                       type="button"

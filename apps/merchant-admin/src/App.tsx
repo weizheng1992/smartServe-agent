@@ -12,6 +12,7 @@ import MenusPage from '@/pages/system/menus';
 import RolesPage from '@/pages/system/roles';
 import StaffPage from '@/pages/system/staff';
 import ReportsPage from '@/pages/reports';
+import BoardPage from '@/pages/board';
 import { FloatingAgent } from '@/components/FloatingAgent';
 
 function flattenMenus(nodes: MenuNode[]): Array<MenuNode & { top: string }> {
@@ -119,6 +120,7 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           <Routes>
             <Route path="/analytics" element={<AnalyticsPage role={role} />} />
+            <Route path="/board" element={<BoardPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/orders" element={<OrderWorkbench scope="orders" />} />
             <Route path="/live-desk" element={<OrderWorkbench scope="live-desk" />} />
