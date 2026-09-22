@@ -48,6 +48,16 @@ export function FloatingAgent({ route }: { route: string }) {
   const [busy, setBusy] = useState(false);
   const [frames, setFrames] = useState<AgentFrame[]>([]);
   const [q, setQ] = useState('');
+  // 勾选可见化:残留勾选会静默过滤榜单/实体问法(两次实弹踩坑),必须让用户看得见、可清
+  const [selCount, setSelCount] = useState(0);
+
+  function refreshSelection() {
+    try { setSelCount(JSON.parse(localStorage.getItem('merchant-admin.selection') || '[]').length); } catch { setSelCount(0); }
+  }
+  function clearSelection() {
+    localStorage.removeItem('merchant-admin.selection');
+    setSelCount(0);
+  }
 
   async function ask() {
     if (!q.trim() || busy) return;
@@ -92,7 +102,7 @@ export function FloatingAgent({ route }: { route: string }) {
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => { setOpen(true); refreshSelection(); }}
         className="fixed bottom-6 right-6 z-40 flex h-14 w-14 select-none items-center justify-center rounded-full bg-zinc-900 text-xl text-white shadow-xl"
         aria-label="打开数据分析助手"
       >
@@ -112,10 +122,20 @@ export function FloatingAgent({ route }: { route: string }) {
           收起
         </button>
       </div>
-      <div className="border-b border-zinc-50 px-4 py-2">
+      <div className="border-b border-zinc-50 px-4 py-2 flex items-center gap-2">
         <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
           上下文:{route}
         </span>
+        {selCount > 0 && (
+          <button
+            type="button"
+            onClick={clearSelection}
+            title="勾选会过滤榜单/实体查询,点击清除"
+            className="rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700"
+          >
+            已勾选 {selCount} 项 ✕
+          </button>
+        )}
       </div>
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {frames.length === 0 && (

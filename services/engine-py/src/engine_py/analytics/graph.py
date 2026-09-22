@@ -118,13 +118,16 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     if intent.metric in _SCENARIO_PACKS:
         return await _run_scenario(intent, session_ctx)
 
-    # PageContext(19-D3):选中实体作为实体过滤(IN 绑定;长度上限 100)
+    # PageContext(19-D3):选中实体作为实体过滤(IN 绑定;长度上限 100)。
+    # entity_slot 必须随行保留 —— 勾选重建曾把已绑定的客户/活动/商品槽清空,
+    # 实体必传指标(消费统计/优惠券等)被静默绑成空列表 → 假「诚实空」(实弹踩过)。
     selection = (page_context or {}).get("selection") or []
     if selection:
         intent = StructuredQueryIntent(
             metric=intent.metric, direction=intent.direction, limit=intent.limit,
             time_window=intent.time_window, category=intent.category,
             entity_ids=[str(s) for s in selection][:100],
+            entity_slot=dict(intent.entity_slot),
         )
 
     try:

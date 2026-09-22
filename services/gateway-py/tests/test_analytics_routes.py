@@ -1120,3 +1120,35 @@ class TestScenarioAndMultiIntent:
         # 客户存在但名下无券 → 诚实空(不反问、不报错)
         assert events["result"]["metric"] == "customer_coupons"
         assert events["result"]["rows"] == []
+
+
+class TestSelectionSlotCoexistence:
+    """勾选重建不得清空实体槽(实弹踩坑):残留勾选曾把客户指标绑成空列表假诚实空。"""
+
+    async def test_selection_does_not_void_customer_slot(self, client, auth):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        async with _merchant_writer_engine().begin() as c:
+            await c.execute(_t(
+                "INSERT INTO merchant_customers (customer_id, name, phone) "
+                "VALUES ('CUST-E2E-SEL', '勾选共存客', '13899991111') ON CONFLICT DO NOTHING"
+            ))
+            await c.execute(_t(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                "VALUES ('E2E-SEL-ORD', 'CUST-E2E-SEL', 'PAID', 88.00, '{}'::jsonb) "
+                "ON CONFLICT (order_id) DO NOTHING"
+            ))
+        # 故意带无关勾选 —— 客户实体槽必须仍然生效
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "勾选共存客的消费统计",
+            "pageContext": {"selection": ["AURORA-ORD-9999"]},
+        })
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "customer_spend_stats"
+        rows = events["result"]["rows"]
+        assert len(rows) == 1 and rows[0]["累计消费"] == 88.0
