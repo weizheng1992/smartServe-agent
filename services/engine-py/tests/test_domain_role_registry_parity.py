@@ -88,3 +88,14 @@ def test_consult_side_intents_single_source():
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+def test_promo_deal_recommendation_not_hijacked_by_guide_hint():
+    """优惠荐品词面(2026-09-22 实弹):「推荐优惠最大的商品」曾被导购文本
+    线索(「推荐」)整句截胡成 shopping_guide 域,按销量推荐答非所问 ——
+    优惠+荐品措辞必须归 promotion 域,且不得松动购物车线索的最高优先级。"""
+    intents = [{"intent": "promotion_query", "type": "primary"}]
+    assert resolve_domain_role(intents, "推荐优惠最大的商品") == "shopping"
+    assert resolve_domain_role(intents, "哪款优惠力度最大") == "shopping"
+    # 既有优先级不漂移:加购动词仍最高,纯导购措辞仍归导购
+    assert resolve_domain_role([{"intent": "cart_manage", "type": "primary"}], "用优惠券下单") == "cart"
+    assert resolve_domain_role([{"intent": "shopping_guide", "type": "primary"}], "推荐连衣裙") == "shopping_guide"

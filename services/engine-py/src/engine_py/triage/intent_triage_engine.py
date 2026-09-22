@@ -243,6 +243,15 @@ _CART_TEXT_HINT_RE = re.compile(
 _SHOPPING_TEXT_HINT_RE = re.compile(
     r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好)", re.IGNORECASE
 )
+# 优惠荐品线索(2026-09-22 实弹):「推荐优惠最大的商品」曾被上面的导购
+# 「推荐」线索整句截胡成 shopping_guide 域、按销量推荐答非所问 —— 优惠
+# 词面 + 荐品措辞归 promotion 域,优先级在导购线索之前、购物车线索之后
+# (「用优惠券下单」的加购语义仍最高优先)。
+_PROMO_DEAL_HINT_RE = re.compile(
+    r"(?:优惠|折扣|划算|满减|券)[^。]{0,8}(?:推荐|哪款|哪个|力度)"
+    r"|(?:推荐|哪款|哪个)[^。]{0,8}(?:优惠|折扣|划算|满减)",
+    re.IGNORECASE,
+)
 
 
 def resolve_domain_role(intents: list[dict], input_text: str | None = None) -> str:
@@ -255,9 +264,13 @@ def resolve_domain_role(intents: list[dict], input_text: str | None = None) -> s
         primary_intent = intents[0].get("intent", "")
 
     text = input_text or ""
-    # 文本线索优先(购物车措辞最先判、次导购措辞 —— 与旧实现次序一致)
+    # 文本线索优先(购物车措辞最先判、次优惠荐品、再次导购措辞 —— 加购语义
+    # 优先级不因优惠荐品松动)
     if primary_intent == AgentIntentType.CART_MANAGE or _CART_TEXT_HINT_RE.search(text):
         return "cart"
+    if primary_intent == AgentIntentType.PROMOTION_QUERY or _PROMO_DEAL_HINT_RE.search(text):
+        spec = INTENT_REGISTRY.get(AgentIntentType.PROMOTION_QUERY)
+        return spec.domain_role if spec is not None else "shopping"
     if primary_intent == AgentIntentType.SHOPPING_GUIDE or _SHOPPING_TEXT_HINT_RE.search(text):
         return "shopping_guide"
     # 意图档位 → 注册表 domain_role(工单04:映射上表,此处只查表;cart/

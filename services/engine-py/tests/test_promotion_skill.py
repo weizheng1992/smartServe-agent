@@ -218,3 +218,120 @@ class TestCouponWalletQueries:
         result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801")))
         assert "在售优惠活动" in result.output
         assert "自动应用最优优惠" in result.output
+
+
+def _seed_deal_catalog(container) -> None:
+    """种两款在售商品(A ¥899 / B ¥169):88 折全场活动下 A 立减更大。
+
+    形状并集纪律(3c4c843 同款):共享容器里 merchant_spus/skus 的建表形状
+    由先到文件决定,本用例 ADD COLUMN IF NOT EXISTS 补齐所需列;严禁全表
+    DELETE 他套件的目录行,断言只盯本用例种的两款商品的相对排序。
+    """
+    async def _seed():
+        e = create_async_engine(container.url.render_as_string(hide_password=False), poolclass=NullPool)
+        async with e.begin() as conn:
+            for ddl in (
+                "CREATE TABLE IF NOT EXISTS merchant_spus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "spu_code TEXT UNIQUE, title TEXT, main_image TEXT, status TEXT DEFAULT 'ON_SALE')",
+                "CREATE TABLE IF NOT EXISTS merchant_skus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "spu_id UUID REFERENCES merchant_spus(id), sku_code TEXT UNIQUE, sku_title TEXT, price NUMERIC(10,2), stock INT)",
+                "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS status TEXT",
+                "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS main_image TEXT",
+                "ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS price NUMERIC(10,2)",
+                "ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS stock INT",
+            ):
+                await conn.execute(text(ddl))
+            for code, title, sku, price in (
+                ("CT-DEAL-A", "冠军款老爹鞋", "CT-DEAL-A-SKU", 899),
+                ("CT-DEAL-B", "基础款袜子", "CT-DEAL-B-SKU", 169),
+            ):
+                # 查后插(禁 ON CONFLICT):共享容器里表形状由先到文件决定,
+                # spu_code 未必带唯一约束,ON CONFLICT 会直接报错
+                spu_exists = (
+                    await conn.execute(text("SELECT 1 FROM merchant_spus WHERE spu_code = :c").bindparams(c=code))
+                ).first()
+                if spu_exists is None:
+                    # id 显式生成:共享容器的建表形状未必带 DEFAULT gen_random_uuid()
+                    await conn.execute(text(
+                        "INSERT INTO merchant_spus (id, spu_code, title, status) "
+                        "VALUES (gen_random_uuid(), :c, :t, 'ON_SALE')"
+                    ).bindparams(c=code, t=title))
+                sku_exists = (
+                    await conn.execute(text("SELECT 1 FROM merchant_skus WHERE sku_code = :k").bindparams(k=sku))
+                ).first()
+                if sku_exists is None:
+                    await conn.execute(text(
+                        "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, price, stock) "
+                        "SELECT gen_random_uuid(), p.id, :k, '默认', :p, 10 FROM merchant_spus p WHERE p.spu_code = :c"
+                    ).bindparams(k=sku, p=price, c=code))
+            await conn.execute(text(
+                "UPDATE merchant_spus SET status='ON_SALE' WHERE spu_code IN ('CT-DEAL-A','CT-DEAL-B')"
+            ))
+        await e.dispose()
+
+    asyncio.run(_seed())
+
+
+class TestPromoDealRecommendation:
+    """优惠荐品(2026-09-22 实弹):「推荐优惠最大的商品」曾被导购域按销量
+    推荐答非所问 —— 优惠词面 + 荐品问法须由本技能按立减额荐品。"""
+
+    def test_recommend_products_sorted_by_discount(self, container):
+        _seed_deal_catalog(container)
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "推荐优惠最大的商品")))
+        assert result.success is True
+        assert "优惠力度最大" in result.output
+        # 899×88折 立减 107.88 > 169×88折 立减 20.28:A 必须排前
+        assert result.output.index("冠军款老爹鞋") < result.output.index("基础款袜子")
+        assert "冲锋衣88折" in result.output and "立减" in result.output
+
+    def test_recommend_honest_empty_without_promos(self, container):
+        _seed_deal_catalog(container)
+        async def _clear():
+            e = create_async_engine(container.url.render_as_string(hide_password=False), poolclass=NullPool)
+            async with e.begin() as conn:
+                await conn.execute(text("DELETE FROM promotions"))
+            await e.dispose()
+
+        asyncio.run(_clear())
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "推荐优惠最大的商品")))
+        assert "没有" in result.output and "优惠推荐" in result.output
+
+    def test_category_guidelines_own_deal_recommendation(self):
+        """LLM 分类器类目指南必须把「优惠+荐品」句式划归 8b(21:22 误路由根因)。"""
+        from engine_py.triage.intent_registry import CATEGORY_GUIDELINES
+
+        assert "推荐优惠最大的商品" in CATEGORY_GUIDELINES
+        assert "优惠力度" in CATEGORY_GUIDELINES
+
+    def test_single_clause_deal_ask_absorbs_guide_intent(self):
+        """同句双中(优惠+推荐)由 promotion 吸收 guide,不得拆双意图编排
+        (实弹:双意图下导购按销量推荐的输出盖掉优惠荐品);复合句保留双意图。"""
+        from engine_py.triage.slot_extractor import SlotExtractor
+
+        entries = SlotExtractor.extract_all("推荐优惠最大的商品", None, None, None)
+        assert len(entries) == 1 and entries[0]["intentType"] == "promotion_query"
+
+        both = SlotExtractor.extract_all("有什么优惠活动，顺便推荐连衣裙", None, None, None)
+        intents = [e["intentType"] for e in both]
+        assert "promotion_query" in intents and "shopping_guide" in intents
+
+    def test_fast_track_matches_decided_intent_over_guide_keywords(self):
+        """快轨技能匹配必须认已决意图:promotion_query 不得被导购技能的
+        「推荐」关键词兜底按注册顺序截胡(21:22 实弹根因的最后一环)。"""
+        from engine_py.skills import SkillRegistry
+        from engine_py.skills.contract import SkillContext
+
+        SkillRegistry._ensure_initialized()
+        ctx = SkillContext(
+            thread_id=None,
+            user_id="CUST-8801",
+            tenant_id="aurora",
+            input="推荐优惠最大的商品",
+            slots={"activeIntent": "promotion_query"},
+        )
+        skill = SkillRegistry.find_matching_skill(ctx)
+        assert skill is not None
+        assert skill.metadata["id"] == "skill_promotion_query", (
+            f"promotion_query 意图必须匹配优惠技能,实为 {skill.metadata['id']}"
+        )

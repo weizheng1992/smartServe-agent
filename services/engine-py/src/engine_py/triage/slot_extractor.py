@@ -25,6 +25,9 @@ from .intent_registry import (
 # intent_triage_engine._PHONE_RE 共用,防多处各写一份漂移
 PHONE_SHAPE = r"1[3-9]\d{9}"
 
+# 分句符(优惠荐品吸收判定用,2026-09-22):出现即视为真正的多诉求复合句
+CLAUSE_SPLIT_RE = re.compile(r"[,，;；?？!！\n]|然后|顺便|另外|再看|还有", re.IGNORECASE)
+
 ORDER_ID_RE = re.compile(
     r"(?:[A-Za-z0-9]+[-_])*ORD(?:[-_][A-Za-z0-9]+)+|\b[A-Za-z]{2,8}[-_]?\d{4,}\b"
     rf"|\b(?!{PHONE_SHAPE}\b)\d{{8,}}\b",
@@ -423,6 +426,19 @@ class SlotExtractor:
     ) -> list[dict]:
         text = user_input.strip()
         detected = SlotExtractor.detect_intents(text)
+        if len(detected) > 1:
+            intents_in_list = {rule.intent for rule in detected}
+            # 优惠荐品吸收(2026-09-22 实弹):「推荐优惠最大的商品」同句同时
+            # 命中 promotion_query 与 shopping_guide,是同一个荐品诉求 ——
+            # promotion(带商品优惠排序能力)吸收 guide;严禁拆成双意图编排,
+            # 否则导购按销量推荐的输出盖掉优惠荐品、答非所问。仅当出现分句符
+            # (逗号/问号/然后/顺便)提示确实两件事时才保留双意图。
+            if (
+                AgentIntentType.PROMOTION_QUERY in intents_in_list
+                and AgentIntentType.SHOPPING_GUIDE in intents_in_list
+                and not CLAUSE_SPLIT_RE.search(text)
+            ):
+                detected = [rule for rule in detected if rule.intent != AgentIntentType.SHOPPING_GUIDE]
         if len(detected) <= 1:
             return [SlotExtractor.extract(user_input, active_intent_context, existing_slots, context)]
         return [

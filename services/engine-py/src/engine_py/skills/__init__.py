@@ -43,6 +43,16 @@ class SkillRegistry:
     @classmethod
     def find_matching_skill(cls, context: SkillContext) -> BaseSkill | None:
         cls._ensure_initialized()
+        # 已决意图优先(2026-09-22 实弹):上游 triage 判出的意图必须精确命中
+        # triggerIntents,严禁被关键词兜底型 can_handle(如导购的「推荐」词面)
+        # 按注册顺序截胡 —— 实弹:「推荐优惠最大的商品」意图层判 promotion_query,
+        # 导购技能关键词兜底抢先 claim,按销量推荐答非所问。关键词兜底只服务
+        # 未决意图的输入(is_action_query 嗅探等)。
+        active_intent = context.slots.get("activeIntent") or ""
+        if active_intent:
+            for skill in cls._skills.values():
+                if active_intent in skill.metadata.get("triggerIntents", []):
+                    return skill
         for skill in cls._skills.values():
             if skill.can_handle(context):
                 return skill

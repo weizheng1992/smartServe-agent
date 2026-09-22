@@ -36,6 +36,9 @@ _USED_COUPON_RE = re.compile(
     r"|((已|经|被)核销|核销(过|的|记录|了))"
 )
 _MY_COUPON_RE = re.compile(r"(我的|我领|已领|领到|名下)[^。]{0,6}券|券包")
+# 优惠荐品问法(2026-09-22 实弹):「推荐优惠最大的商品」曾被导购域按销量
+# 推荐答非所问 —— 命中荐品问法时按在售商品的立减额排序荐品
+_RECOMMEND_RE = re.compile(r"(推荐|哪款|哪个|什么商品|值得买|力度最大|优惠最大|最划算|便宜)")
 
 
 def _promo_rule_line(p: dict) -> str:
@@ -63,6 +66,7 @@ class PromotionQuerySkill(BaseSkill):
         ctx = await order_domain.OrderDomainService.get_thread_session_context(context.thread_id)
         user_id = context.user_id or ctx.get("userId") or ""
 
+        question = context.input or ""
         try:
             # 运行时读模块属性(测试替换 reader 工厂才能生效)
             async with order_domain._merchant_reader_engine().connect() as conn:
@@ -87,10 +91,16 @@ class PromotionQuerySkill(BaseSkill):
                         ).bindparams(u=user_id)
                     )
                 ).mappings().all()
+                # 优惠荐品(2026-09-22):荐品问法按在售商品立减额排序
+                recommendation = None
+                if _RECOMMEND_RE.search(question):
+                    recommendation = await self._render_deal_recommendation(conn)
         except Exception as err:
             return SkillResult(success=True, output=f"优惠数据暂时查询不到({err})", next_action="finish")
 
-        question = context.input or ""
+        if recommendation is not None:
+            return SkillResult(success=True, output=recommendation, next_action="finish")
+
         used_only = bool(_USED_COUPON_RE.search(question))
         coupon_centric = used_only or bool(_MY_COUPON_RE.search(question))
         claimed = [c for c in my_coupons if c["status"] == "claimed"]
@@ -151,4 +161,46 @@ class PromotionQuerySkill(BaseSkill):
             lines.append("您还没有领取过优惠券，可在商品页领券后到购物车结算时使用。")
         lines.append("")
         lines.append("活动优惠与优惠券可叠加：活动先减，优惠券按活动后余额抵扣。")
+        return "\n".join(lines)
+
+    async def _render_deal_recommendation(self, conn) -> str:
+        """优惠荐品(2026-09-22):在售商品逐一取最优商品活动(排除券型,
+        券是用户资产不属商品让利),按立减额降序 Top 3;无优惠诚实空。"""
+        from ..analytics.promotion_engine import best_for_amount
+
+        products = (
+            await conn.execute(
+                text(
+                    "SELECT p.spu_code, p.title, MIN(s.price) AS price "
+                    "FROM merchant_spus p JOIN merchant_skus s ON s.spu_id = p.id "
+                    "WHERE p.status = 'ON_SALE' AND s.price IS NOT NULL "
+                    "GROUP BY p.spu_code, p.title"
+                )
+            )
+        ).mappings().all()
+        deals = []
+        for row in products:
+            price = float(row["price"])
+            best = await best_for_amount(conn, price, {str(row["spu_code"])}, exclude_coupon=True)
+            if best and best["discount"] > 0:
+                deals.append(
+                    {
+                        "title": row["title"],
+                        "price": price,
+                        "discount": best["discount"],
+                        "name": best["name"],
+                        "promo_price": round(price - best["discount"], 2),
+                    }
+                )
+        if not deals:
+            return "当前没有进行中的商品优惠，暂时没有优惠推荐。"
+        deals.sort(key=lambda d: d["discount"], reverse=True)
+        lines = ["🎁 优惠力度最大的商品："]
+        for d in deals[:3]:
+            lines.append(
+                f"• {d['title']} ¥{d['price']:.0f} → ¥{d['promo_price']:.0f}"
+                f"（{d['name']}，立减 ¥{d['discount']:.0f}）"
+            )
+        lines.append("")
+        lines.append("领券后可与活动叠加：活动先减，优惠券按余额抵扣。")
         return "\n".join(lines)
