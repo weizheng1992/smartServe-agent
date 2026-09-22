@@ -13,6 +13,9 @@
 
 ## Decisions so far
 
+- [T1 客户消费趋势折线](tickets/T1-customer-spend-trend.md):已上线,折线图浏览器实测(d8dad09)
+- [T2 图表类型指令槽位](tickets/T2-chart-hint.md):chart_hint 全链路,折线/柱状/表格指令生效(d8dad09)
+
 - Q1 终态 = b(对话 + 常驻看板);订阅/告警/大屏进雾区
 - Q2 客户消费趋势 = 趋势族第四元 customer_spend_trend(客户实体 × 日/月)
 - Q3 图表指令 = intent.chart_hint 槽位(L0 词面 + L3 字段 + 前端尊重,缺省自动)

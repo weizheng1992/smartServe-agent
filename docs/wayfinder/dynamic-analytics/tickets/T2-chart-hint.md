@@ -6,4 +6,4 @@ StructuredQueryIntent.chart_hint(line/bar/table)+ L0 词面(折线/柱状/表格
 
 ## Resolution
 
-(待施工)
+已解决(d8dad09):已施工:chart_hint 全链路(L0 词面/L3 字段/graph 透传/前端尊重),柱状与表格指令实测生效,非排行形强制 bar 诚实降级

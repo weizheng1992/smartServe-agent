@@ -6,4 +6,4 @@ registry customer_spend_trend + ENTITY_REQUIRED=customer + 趋势模板四元(�
 
 ## Resolution
 
-(待施工)
+已解决(d8dad09):已施工:customer_spend_trend 上线(趋势四元/客户过滤入 JOIN ON/词面登记),「张伟的消费记录折线图」30 天折线浏览器实测出图
