@@ -226,10 +226,20 @@ export default function OrdersPage() {
 
                       <div className="flex items-center space-x-2 shrink-0">
                         <div className="mr-3 text-right">
-                          <span className="text-slate-500 text-[11px]">实付金额:</span>
-                          <strong className="text-emerald-700 text-sm ml-1">
-                            ¥{Number(order.totalAmount).toFixed(2)}
-                          </strong>
+                          {Number(order.discountAmount || 0) > 0 && (
+                            <div className="text-[11px] text-slate-400 leading-relaxed">
+                              原价 <span className="line-through">¥{Number(order.originalAmount ?? order.totalAmount).toFixed(2)}</span>
+                              <span className="ml-1.5 font-medium text-rose-500">
+                                优惠 -¥{Number(order.discountAmount).toFixed(2)}
+                              </span>
+                            </div>
+                          )}
+                          <div>
+                            <span className="text-slate-500 text-[11px]">实付金额:</span>
+                            <strong className="text-emerald-700 text-sm ml-1">
+                              ¥{Number(order.totalAmount).toFixed(2)}
+                            </strong>
+                          </div>
                         </div>
 
                         <button

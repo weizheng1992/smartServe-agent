@@ -57,7 +57,12 @@ export interface ThirdPartyOrder {
   orderId: string;
   userId: string;
   status: 'PENDING' | 'PAID' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'REFUNDED';
+  /** 实付金额(账本语义:原价 − discountAmount) */
   totalAmount: string | number;
+  /** 优惠金额(活动+券合计;2026-09-22 订单页优惠展示) */
+  discountAmount?: string | number;
+  /** 商品原价合计(= totalAmount + discountAmount;缺省旧数据回退 totalAmount) */
+  originalAmount?: string | number;
   currency?: string;
   createdAt: string;
   items: ThirdPartyOrderItem[];

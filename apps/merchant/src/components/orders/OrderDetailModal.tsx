@@ -95,7 +95,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
   const statusBadge = getStatusBadge(order.status);
   const items = order.items || [];
+  // 账本语义:totalAmount=实付,discountAmount=优惠,originalAmount=原价
   const totalAmount = Number(order.totalAmount || 0);
+  const discountAmount = Number(order.discountAmount || 0);
+  const originalAmount = Number(order.originalAmount ?? totalAmount + discountAmount);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -212,16 +215,23 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2 text-xs">
             <div className="flex justify-between text-slate-600">
               <span>商品总金额</span>
-              <span>¥{totalAmount.toFixed(2)}</span>
+              <span>¥{originalAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-slate-600">
               <span>运费 (极光顺丰包邮)</span>
               <span className="text-emerald-600 font-semibold">¥0.00 (包邮)</span>
             </div>
-            <div className="flex justify-between text-slate-600">
-              <span>SVIP 会员立减</span>
-              <span className="text-emerald-600">-¥0.00</span>
-            </div>
+            {discountAmount > 0 ? (
+              <div className="flex justify-between font-medium text-rose-600">
+                <span>优惠抵扣（活动/优惠券）</span>
+                <span>-¥{discountAmount.toFixed(2)}</span>
+              </div>
+            ) : (
+              <div className="flex justify-between text-slate-600">
+                <span>SVIP 会员立减</span>
+                <span className="text-emerald-600">-¥0.00</span>
+              </div>
+            )}
             <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold">
               <span className="text-slate-900">实付款</span>
               <span className="text-emerald-700 text-base font-extrabold">¥{totalAmount.toFixed(2)}</span>

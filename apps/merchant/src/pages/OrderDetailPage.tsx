@@ -203,7 +203,8 @@ function PromoLine({ orderId, totalAmount }: { orderId: string; totalAmount: num
   return (
     <div className="flex items-center justify-between w-full">
       <span className="text-slate-500">优惠({promo.promoName})</span>
-      <span className="text-sm font-semibold text-rose-600">-¥{promo.discount.toFixed(2)}(实付 ¥{(totalAmount - promo.discount).toFixed(2)})</span>
+      {/* 账本语义(3c4c843 起):totalAmount 已是实付,不再二次减优惠 */}
+      <span className="text-sm font-semibold text-rose-600">-¥{promo.discount.toFixed(2)}(实付 ¥{totalAmount.toFixed(2)})</span>
     </div>
   );
 }
