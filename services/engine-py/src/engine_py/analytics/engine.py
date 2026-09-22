@@ -292,10 +292,10 @@ class MetricQueryEngine:
                 time_clause = "AND r.created_at >= :window_start"
                 params["window_start"] = self._window_start(intent.time_window)
             sql = (
-                'SELECT r.spu_id AS "productId", COUNT(*) AS "metricScore" '
-                "FROM merchant_product_reviews r "
+                'SELECT s.title AS "productId", COUNT(*) AS "metricScore" '
+                "FROM merchant_product_reviews r JOIN merchant_spus s ON s.id = r.spu_id "
                 f"WHERE r.rating <= 2 {time_clause} "
-                f'GROUP BY r.spu_id ORDER BY "metricScore" {direction} LIMIT :lim'
+                f'GROUP BY s.id, s.title ORDER BY "metricScore" {direction} LIMIT :lim'
             )
         elif intent.metric == "refund_rate":
             if intent.time_window:
@@ -443,6 +443,66 @@ class MetricQueryEngine:
                 "to_char(o.created_at, 'MM-DD HH24:MI') AS \"created_at\" "
                 'FROM merchant_orders o WHERE o.customer_id = ANY(:entities) '
                 'ORDER BY o.created_at DESC LIMIT :lim'
+            )
+        elif intent.metric in ("aov", "order_count"):
+            # 阶段⑥对话出口族:总量单行(客单价/订单量;有效成交口径,单行天然有界)
+            params.pop("lim", None)  # 单行聚合,LIMIT 1 字面兜底
+            if intent.time_window:
+                time_clause = "AND o.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            value_expr = (
+                "ROUND(AVG(o.total_amount), 2)::float" if intent.metric == "aov" else "COUNT(*)::int"
+            )
+            sql = (
+                f'SELECT \'__total__\' AS "productId", {value_expr} AS "metricScore" '
+                "FROM merchant_orders o WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"{time_clause} LIMIT 1"
+            )
+        elif intent.metric == "review_good":
+            # 好评榜(与差评榜对偶:rating ≥ 4;评价表 spu_id 为 uuid,join 取商品标题)
+            if intent.time_window:
+                time_clause = "AND r.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                'SELECT s.title AS "productId", COUNT(*) AS "metricScore" '
+                "FROM merchant_product_reviews r JOIN merchant_spus s ON s.id = r.spu_id "
+                f"WHERE r.rating >= 4 {time_clause} "
+                f'GROUP BY s.id, s.title ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "zero_sales":
+            # 零销量在售款(NOT EXISTS 确定性判零),库存降序暴露压货交叉风险
+            sql = (
+                'SELECT s.title AS "productId", s.category AS "category", '
+                'COALESCE(SUM(k.stock), 0)::int AS "metricScore" '
+                "FROM merchant_spus s LEFT JOIN merchant_skus k ON k.spu_id = s.id "
+                "WHERE s.status = 'ON_SALE' AND NOT EXISTS ("
+                "SELECT 1 FROM merchant_order_items oi WHERE oi.spu_id = s.spu_code) "
+                f'GROUP BY s.id, s.title, s.category ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "category_gmv_top":
+            if intent.time_window:
+                time_clause = "AND o.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                'SELECT s.category AS "productId", '
+                'COALESCE(SUM(oi.quantity * oi.price), 0)::float AS "metricScore" '
+                "FROM merchant_spus s JOIN merchant_order_items oi ON oi.spu_id = s.spu_code "
+                "JOIN merchant_orders o ON o.order_id = oi.order_id "
+                "WHERE s.status = 'ON_SALE' AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"{time_clause} GROUP BY s.category "
+                f'ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "customer_spend_top":
+            if intent.time_window:
+                time_clause = "AND o.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                'SELECT c.name AS "productId", c.phone AS "phone", '
+                'COALESCE(SUM(o.total_amount), 0)::float AS "metricScore" '
+                "FROM merchant_orders o JOIN merchant_customers c ON c.customer_id = o.customer_id "
+                "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"{time_clause} GROUP BY c.customer_id, c.name, c.phone "
+                f'ORDER BY "metricScore" {direction} LIMIT :lim'
             )
         else:
             raise UnsupportedQuery(f"指标 {intent.metric} 尚未登记执行模板")

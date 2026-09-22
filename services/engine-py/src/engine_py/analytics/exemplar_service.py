@@ -59,7 +59,7 @@ async def search_exemplar(question: str, business_id: str, limit: int = 3) -> di
                 select(QueryExemplar).where(
                     QueryExemplar.is_active.is_(True),
                     QueryExemplar.business_id.in_([GLOBAL_POOL, business_id or GLOBAL_POOL]),
-                )
+                ).order_by(QueryExemplar.created_at.desc())
             )
         ).scalars().all()
 
@@ -68,6 +68,8 @@ async def search_exemplar(question: str, business_id: str, limit: int = 3) -> di
         if not row.embedding:
             continue
         score = cosine_similarity(vector, row.embedding)
+        # 严格 > + 最新优先排序:相似度平局稳定取最新登记的范例
+        # (fake/量化 embedding 下不同问法易同分,堆序平局会随布局漂移)
         if score >= MATCH_THRESHOLD and (best is None or score > best["similarity"]):
             best = {
                 "id": row.id,

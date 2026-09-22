@@ -167,6 +167,27 @@ async def create_report(request: Request):
     return {"success": True, **created}
 
 
+@router.post("/api/admin/analytics/reports/from-result")
+async def save_result_report(request: Request):
+    """对话结果卡 → 存为报告(我的报告页可见、可导 CSV;权限同报告生成)。
+
+    只搬运对话里真实执行过的查询结果(14-D3:不重算、不编造),行数上限 200。
+    """
+    ctx = await _ctx(request)
+    if "report:gen" not in ctx["perms"]:
+        return JSONResponse(status_code=403, content={"success": False, "message": "无报告权限"})
+    body = await request.json()
+    rows = body.get("rows")
+    if not isinstance(rows, list):
+        return JSONResponse(status_code=400, content={"success": False, "message": "rows 必传(list)"})
+    created = await report_service.save_result_report(
+        ctx["business_id"], ctx["staff"], str(body.get("question") or ""),
+        str(body.get("metric") or "result"), str(body.get("unit") or ""),
+        str(body.get("caliber") or ""), rows[:200],
+    )
+    return {"success": True, **created}
+
+
 @router.get("/api/admin/analytics/reports/{report_id}")
 async def get_report(request: Request, report_id: str):
     ctx = await _ctx(request)

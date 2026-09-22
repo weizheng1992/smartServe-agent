@@ -1055,3 +1055,26 @@ class TestInlineProductMention:
         events = dict(_sse_events(r))
         assert events["result"]["metric"] == "volume"
         assert events["result"]["rows"] == []
+
+
+class TestSaveResultReport:
+    """对话结果卡 → 存为报告:我的报告页可见、CSV 导出复用零改动。"""
+
+    async def test_save_from_result_roundtrip(self, client, auth):
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/reports/from-result", headers=boss, json={
+            "question": "销量最高的商品 Top 3", "metric": "volume", "unit": "件",
+            "caliber": "有效订单聚合(排除退款/取消单)",
+            "rows": [{"productId": "SPU-X", "name": "E2E存报告测试款", "metricScore": 3}],
+        })
+        assert r.status_code == 200, r.text
+        rid = r.json()["id"]
+        reports = (await client.get("/api/admin/analytics/reports", headers=boss)).json()["reports"]
+        assert any(x["id"] == rid and "销量最高" in x["title"] for x in reports)
+        csv = await client.get(f"/api/admin/analytics/reports/{rid}/csv", headers=boss)
+        assert csv.status_code == 200 and "E2E存报告测试款" in csv.json()["csv"]
+
+    async def test_rows_required_400(self, client, auth):
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/reports/from-result", headers=boss, json={"question": "x"})
+        assert r.status_code == 400

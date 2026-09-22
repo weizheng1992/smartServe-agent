@@ -246,6 +246,13 @@ export const api = {
     list: async () => (await req('/api/admin/analytics/reports')).json(),
     create: async () => (await req('/api/admin/analytics/reports', { method: 'POST', body: '{}' })).json(),
     csv: async (id: string) => (await req(`/api/admin/analytics/reports/${id}/csv`)).json(),
+    saveFromResult: async (p: { question: string; metric: string; unit: string; caliber: string; rows: Record<string, unknown>[] }) =>
+      (
+        await req('/api/admin/analytics/reports/from-result', {
+          method: 'POST',
+          body: JSON.stringify(p),
+        })
+      ).json(),
   },
 
   /** 商品目录(SPU/SKU;页面只做编排,数据操作收口在此)。 */

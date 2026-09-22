@@ -30,6 +30,13 @@ _SPECIAL_METRICS: list[tuple[str, dict]] = [
     ("promo_sku_compare", {"entity_slot": {"promotion": ["P1"], "spu": ["S1"]}}),
     ("promo_compare", {"entity_slot": {"promotion": ["P1", "P2"]}}),
     ("customer_orders", {"entity_slot": {"customer": ["C1"]}}),
+    # 阶段⑥对话出口族
+    ("aov", {}),
+    ("order_count", {}),
+    ("review_good", {}),
+    ("zero_sales", {}),
+    ("category_gmv_top", {}),
+    ("customer_spend_top", {}),
 ]
 
 
@@ -91,3 +98,24 @@ class TestSalesViewerClosedSet:
         allowed = ROLE_METRIC_PERMISSIONS["sales_viewer"]
         assert "order_overview" in allowed
         assert "gmv_trend" in allowed
+
+    def test_exit_family_open_to_sales_viewer(self):
+        """阶段⑥出口族对运营开放(客单价/订单量/好评/滞销/品类/客户消费)。"""
+        allowed = ROLE_METRIC_PERMISSIONS["sales_viewer"]
+        assert {"aov", "order_count", "review_good", "zero_sales", "category_gmv_top", "customer_spend_top"} <= set(allowed)
+
+
+class TestExitFamilyResolve:
+    """阶段⑥对话出口族:L0 词面 → 闭集意图(解析即契约)。"""
+
+    @pytest.mark.parametrize(("question", "metric"), [
+        ("本月客单价多少", "aov"),
+        ("本月订单量多少", "order_count"),
+        ("好评最多的商品 Top 3", "review_good"),
+        ("零销量商品有哪些", "zero_sales"),
+        ("品类GMV排行", "category_gmv_top"),
+        ("消费最高的客户 Top 3", "customer_spend_top"),
+    ])
+    def test_exit_family_routes(self, engine, question, metric):
+        intent = engine.resolve(question)
+        assert intent.metric == metric

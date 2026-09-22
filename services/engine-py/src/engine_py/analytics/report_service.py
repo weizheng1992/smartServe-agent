@@ -116,3 +116,24 @@ async def export_csv(business_id: str, report_id: str) -> str | None:
                 writer.writerow(r.values())
         writer.writerow([])
     return buf.getvalue()
+
+
+async def save_result_report(business_id: str, generated_by: str, question: str,
+                             metric: str, unit: str, caliber: str, rows: list[dict]) -> dict:
+    """对话结果卡 → 单节报告(ADR-0005 出口:问过的就能存;我的报告页可见/可导 CSV)。
+
+    rows_json 沿用 generate_report 的 {metric: rows} 字典形,export_csv 零改动复用;
+    数字全部来自对话里真实执行的查询(14-D3 不变量),本函数只做搬运不重算。
+    """
+    section = {"metric": metric, "unit": unit, "caliber": caliber, "rows": rows}
+    title = (question or f"{metric} 查询结果").strip()[:60] or f"{metric} 查询结果"
+    report_id = f"rpt_{uuid.uuid4().hex[:12]}"
+    async with get_session() as session:
+        session.add(AnalyticsReport(
+            id=report_id, business_id=business_id, generated_by=generated_by,
+            title=title, time_window=json.dumps({"source": "agent_result"}, ensure_ascii=False),
+            html=_html_report(title, [section]),
+            rows_json=json.dumps({metric: rows}, ensure_ascii=False, default=str),
+        ))
+        await session.commit()
+    return {"id": report_id, "title": title}

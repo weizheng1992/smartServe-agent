@@ -23,7 +23,9 @@ export default function ReportsPage() {
           <div key={r.id} className="flex items-center justify-between px-4 py-3">
             <div>
               <div className="text-sm">{r.title}</div>
-              <div className="mt-0.5 text-[11px] text-zinc-400">{r.createdAt || ''} · {r.timeWindow}</div>
+              <div className="mt-0.5 text-[11px] text-zinc-400">
+                {r.createdAt || ''} · {r.timeWindow?.includes('agent_result') ? '来自对话结果' : r.timeWindow}
+              </div>
             </div>
             <Button size="sm" variant="ghost" onClick={() => {
               void api.reports.csv(r.id).then((j) => {

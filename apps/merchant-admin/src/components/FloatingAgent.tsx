@@ -1,28 +1,91 @@
 import { useState } from 'react';
 import { Button } from 'ui';
+import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
 import { api } from '@/lib/api';
 
 // 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由(选中数据
 // 由列表页经 localStorage 约定键上行 —— PageContext 19-D3)。
+// 阶段⑥:排行卡条形图化 + 结果卡底部「导出 CSV / 存为报告」(存入我的报告)。
+// 帧带自增 id:渲染层会过滤 start 帧,按下标回写状态会错位 —— 一律按 id 回写
+let frameSeq = 0;
+type AgentFrame = { id: number; event: string; data: any; saved?: boolean };
+
+// 明确不做条形图的指标:逐笔列表/窗口列不是排行语义,画条会误导
+const NO_BAR_METRICS = new Set(['order_overview', 'customer_orders']);
+
+function rankingPoints(data: any): Array<{ label: string; value: number }> | null {
+  const rows: any[] = Array.isArray(data.rows) ? data.rows : [];
+  if (rows.length < 2 || NO_BAR_METRICS.has(data.metric)) return null;
+  const cols = Object.keys(rows[0] || {});
+  if (!cols.length) return null;
+  const labelCol = cols[0];
+  const valueCol = cols[cols.length - 1];
+  const points = rows
+    .map((r: any) => ({ label: String(r[labelCol] ?? ''), value: Number(r[valueCol]) }))
+    .filter((p: { label: string; value: number }) => Number.isFinite(p.value));
+  if (points.length < 2) return null;
+  return points.slice(0, 10);
+}
+
+function exportResultCsv(data: any) {
+  const rows: any[] = data.rows || [];
+  if (!rows.length) return;
+  const cols = Object.keys(rows[0]);
+  const esc = (v: unknown) => `"${String(v ?? '').replaceAll('"', '""')}"`;
+  const lines = [cols.map(esc).join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))];
+  // BOM 头:Excel 打开中文不乱码
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${data.metric || 'result'}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export function FloatingAgent({ route }: { route: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [frames, setFrames] = useState<Array<{ event: string; data: any }>>([]);
+  const [frames, setFrames] = useState<AgentFrame[]>([]);
   const [q, setQ] = useState('');
 
   async function ask() {
     if (!q.trim() || busy) return;
     setBusy(true);
+    const question = q.trim();
     const selection = JSON.parse(localStorage.getItem('merchant-admin.selection') || '[]');
     try {
-      const result = await api.ask(q.trim(), { route, selection });
-      setFrames((prev) => [...prev, { event: 'user', data: { message: q.trim() } }, ...result]);
+      const result = await api.ask(question, { route, selection });
+      const stamp = ++frameSeq * 100;
+      setFrames((prev) => [
+        ...prev,
+        { id: stamp, event: 'user', data: { message: question } },
+        ...result.map((f: any, k: number) => ({
+          id: stamp + k + 1,
+          event: f.event,
+          data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
+        })),
+      ]);
     } catch (err) {
-      setFrames((prev) => [...prev, { event: 'error', data: { message: String(err) } }]);
+      setFrames((prev) => [...prev, { id: ++frameSeq, event: 'error', data: { message: String(err) } }]);
     }
     setQ('');
     setBusy(false);
+  }
+
+  async function saveToReport(frame: AgentFrame) {
+    try {
+      await api.reports.saveFromResult({
+        question: frame.data.__question || '',
+        metric: String(frame.data.metric || 'result'),
+        unit: String(frame.data.unit || ''),
+        caliber: String(frame.data.caliber || ''),
+        rows: frame.data.rows || [],
+      });
+      setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, saved: true } : f)));
+    } catch (err) {
+      setFrames((prev) => [...prev, { id: ++frameSeq, event: 'error', data: { message: `存报告失败:${String(err)}` } }]);
+    }
   }
 
   if (!open) {
@@ -79,7 +142,28 @@ export function FloatingAgent({ route }: { route: string }) {
                 </div>
               </div>
             ) : f.event === 'result' ? (
-              <ResultCard data={f.data} />
+              <>
+                <ResultCard data={f.data} />
+                {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
+                  <div className="mt-1.5 flex gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
+                      onClick={() => exportResultCsv(f.data)}
+                    >
+                      导出 CSV
+                    </button>
+                    <button
+                      type="button"
+                      disabled={f.saved}
+                      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
+                      onClick={() => void saveToReport(f)}
+                    >
+                      {f.saved ? '已存入我的报告 ✓' : '存为报告'}
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="rounded-xl border border-zinc-200 bg-white p-3 text-sm">
                 {f.data.message || f.event}
@@ -120,9 +204,11 @@ function ResultCard({ data }: { data: any }) {
   const card = (data.cards || [])[0];
   if (!card) return <div className="text-sm">{data.message || '空结果'}</div>;
   if (card.type !== 'table') return <div className="text-sm">{card.text}</div>;
+  const bars = rankingPoints(data);
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
       <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{card.title}</div>
+      {bars ? <BarChart points={bars} unit={data.unit} /> : null}
       <table className="w-full text-[12px]">
         <thead>
           <tr className="border-b border-zinc-100 text-left text-zinc-400">
