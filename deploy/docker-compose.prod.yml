@@ -1,0 +1,116 @@
+# 生产编排:四前端(nginx 一体) + gateway + migrate + PG/Redis + Temporal/Worker(可选)
+# 用法见 docs/deploy.md;基础设施与本地开发共用仓库根 docker-compose.yml,两者不冲突
+
+name: smartserve-prod
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_password}
+      POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_user} -d ${POSTGRES_DB:-agent_platform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # 生产默认不向宿主机暴露 5432;需要外部 BI/psql 再放开注释
+    # ports: ["5432:5432"]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis_password}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping", "-a", "${REDIS_PASSWORD:-redis_password}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # ports: ["6379:6379"]
+
+  # 可选:周期任务(HITL 对账/超时扫描)。启用: --profile temporal
+  temporal:
+    image: temporalio/dev-server:latest
+    profiles: ["temporal"]
+    command: ["--ip", "0.0.0.0", "--port", "7233"]
+    restart: unless-stopped
+
+  # 一次性:alembic 迁移,gateway 等它成功后才启动
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    env_file: .env.prod
+    working_dir: /app/services/engine-py
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    env_file: .env.prod
+    ports:
+      - "4000:4000"
+    volumes:
+      - uploads:/data/uploads          # UPLOADS_DIR 指到这里,聊天附件持久化
+      - hf_cache:/root/.cache/huggingface  # bge 本地 embedding 模型缓存,重启免下载
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:4000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s   # 首启需下载 bge 本地 embedding 模型(卷缓存后重启秒过)
+    restart: unless-stopped
+
+  # 可选:Temporal Worker,随 --profile temporal 启用
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    profiles: ["temporal"]
+    env_file: .env.prod
+    working_dir: /app/services/engine-py
+    command: ["uv", "run", "--no-sync", "python", "-m", "engine_py.temporal.worker"]
+    depends_on:
+      temporal:
+        condition: service_started
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "3005:3005"
+      - "3006:3006"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  uploads:
+  hf_cache:

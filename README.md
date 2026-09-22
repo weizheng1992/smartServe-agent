@@ -238,6 +238,7 @@ bun run worker                            # Temporal Worker(周期任务)
 | [wayfinder 图谱](docs/wayfinder/mall-data-agent-split/map.md) | 20 张决策票完整推导(实现期歧义以票为源) |
 | [商户接入指南](docs/merchant-onboarding-guide.md) | SPI 对接/RAG 灌入/审批策略 |
 | [架构深度指南](docs/architecture/) | RAG/HITL 重规划/弹性部署 |
+| **[生产部署方案](docs/deploy.md)** | **Docker Compose 全栈上线:四前端 nginx 一体/gateway/PG/Redis/Temporal,五步上线+运维+安全清单** |
 
 ---
 

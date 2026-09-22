@@ -1,0 +1,29 @@
+# 四前端一体镜像:bun 构建(turbo 跑通 apps/*) + nginx 按端口分发静态产物
+# 3000=web 3001=admin 3005=merchant 3006=merchant-admin,/api 反代 gateway
+FROM oven/bun:1.4.0 AS build
+
+ENV DO_NOT_TRACK=1
+WORKDIR /app
+
+# 先装依赖(workspace 清单+锁文件独立成层)
+COPY package.json bun.lock turbo.json ./
+COPY apps ./apps
+COPY packages ./packages
+RUN bun install --frozen
+
+# 全量构建(各 app: tsc && vite build → dist)
+COPY . .
+RUN bun run build
+
+FROM nginx:1.27-alpine
+
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/apps/web/dist            /var/www/web
+COPY --from=build /app/apps/admin/dist          /var/www/admin
+COPY --from=build /app/apps/merchant/dist       /var/www/merchant
+COPY --from=build /app/apps/merchant-admin/dist /var/www/merchant-admin
+
+EXPOSE 3000 3001 3005 3006
+
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1

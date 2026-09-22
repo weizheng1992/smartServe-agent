@@ -101,3 +101,6 @@ eval/.records/
 
 # SFT 权重不入库(GitHub 单文件 100MB 硬限;备份: ~/Downloads/adapter_final.zip + 云端实例)
 services/engine-py/training_data/sft/adapter/
+
+# 生产密钥文件(仅模板 .env.prod.example 入库)
+deploy/.env.prod

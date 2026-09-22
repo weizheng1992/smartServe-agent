@@ -1,0 +1,22 @@
+# gateway-py + engine-py(uv workspace)——FastAPI 网关与 Temporal Worker 共用此镜像
+# 含 engine 的 torch/sentence-transformers(本地 embedding),镜像体积以 GB 计属预期
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ENV UV_FROZEN=1 \
+    UV_LINK_MODE=copy \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/root/.cache/huggingface
+
+WORKDIR /app/services
+
+# 先拷清单与锁文件,依赖层独立缓存(源码改动不重装依赖)
+COPY services/pyproject.toml services/uv.lock ./
+COPY services/engine-py/ ./engine-py/
+COPY services/gateway-py/ ./gateway-py/
+RUN uv sync --frozen --no-dev
+
+EXPOSE 4000
+
+# 默认网关;worker 复用本镜像,在 compose 里覆盖 command
+CMD ["uv", "run", "--no-sync", "uvicorn", "gateway_py.main:app", "--host", "0.0.0.0", "--port", "4000"]
