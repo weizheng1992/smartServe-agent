@@ -22,7 +22,7 @@ from ..db import Menu, RoleMenu, StaffMember, get_session
 ROLES = ("finance_owner", "admin", "sales_viewer", "warehouse_operator")
 # 管理角色:可分配权限/管理系统配置(老板+管理员);老板额外保留防锁死护栏
 MANAGER_ROLES = ("finance_owner", "admin")
-SYSTEM_MENU_IDS = ("m-analytics", "m-reports", "m-products", "m-orders", "m-customers", "m-promotions", "m-menus", "m-roles", "m-staff")
+SYSTEM_MENU_IDS = ("m-analytics", "m-reports", "m-board", "m-products", "m-orders", "m-customers", "m-promotions", "m-menus", "m-roles", "m-staff")
 
 # 默认菜单树(16 号原型同构;menu_type: directory|menu|button)。
 # 0014:售后审批不再独立成菜单 —— 待办审核并入「客服工作台」页内呈现。
@@ -32,6 +32,7 @@ DEFAULT_MENUS: list[dict] = [
     {"id": "btn-report-gen", "parent": "m-analytics", "name": "生成报告", "type": "button", "perm": "report:gen", "sort": 1},
     {"id": "btn-report-csv", "parent": "m-analytics", "name": "导出 CSV", "type": "button", "perm": "report:csv", "sort": 2},
     {"id": "m-reports", "parent": "d-data", "name": "我的报告", "type": "menu", "route": "/reports", "sort": 2},
+    {"id": "m-board", "parent": "d-data", "name": "数据看板", "type": "menu", "route": "/board", "sort": 3},
     {"id": "d-goods", "parent": None, "name": "商品", "type": "directory", "route": None, "sort": 2},
     {"id": "m-products", "parent": "d-goods", "name": "商品列表", "type": "menu", "route": "/products", "sort": 1},
     {"id": "btn-prod-edit", "parent": "m-products", "name": "商品编辑/上下架", "type": "button", "perm": "prod:edit", "sort": 1},
@@ -67,7 +68,7 @@ DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
     "admin": [m["id"] for m in DEFAULT_MENUS],
     "sales_viewer": [m["id"] for m in DEFAULT_MENUS if m["id"] not in _SALES_DENY_BUTTONS],
     "warehouse_operator": [
-        "d-data", "m-analytics", "m-reports",
+        "d-data", "m-analytics", "m-reports", "m-board",
         "d-orders", "m-orders", "btn-order-ship", "m-spi-logs",
         "d-system", "m-menus", "btn-menu-create", "m-roles", "btn-role-assign", "m-staff", "btn-staff-invite",
     ],
