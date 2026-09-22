@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApprovalMachine } from "ui";
 import { authHeaders } from "@/lib/api";
+import * as pageContext from "@/lib/page-context";
 import type {
   ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow,
 } from "./workbench.types";
@@ -15,14 +16,13 @@ const contains = (hay: string, q: string) => hay.toLowerCase().includes(q);
  *  派生集合(计数/过滤)useMemo 化:任一 state 变化不再整树逐项重算。 */
 export function useWorkbenchState(initialTab: string) {
   const [orders, setOrders] = useState<OrderRow[]>([]);
-  // PageContext(19-D3):勾选订单 → 写约定键,悬浮 agent 随问题上行实体过滤
+  // PageContext(19-D3,T5 翻新):勾选订单 → 内存广播库(类型标记 order),
+  // 悬浮 agent 实时订阅;不再写 localStorage(残留会静默污染查询)
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const toggleOrderSelection = (orderId: string) => {
     setSelectedOrderIds((prev) => {
       const next = prev.includes(orderId) ? prev.filter((x) => x !== orderId) : [...prev, orderId];
-      try {
-        localStorage.setItem('merchant-admin.selection', JSON.stringify(next));
-      } catch { /* 隐私模式等存储不可用:选择仍在本页生效 */ }
+      pageContext.setSelectionKind('order', next);
       return next;
     });
   };

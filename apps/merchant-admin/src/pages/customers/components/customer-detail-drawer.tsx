@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
 import { api, type Customer, type CustomerCoupon } from '@/lib/api';
+import { getSelection, setSelectionKind } from '@/lib/page-context';
 
 interface AddressEntry {
   id?: string;
@@ -56,11 +57,9 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
   })();
 
   function openOrder(orderId: string) {
-    // PageContext 契约(19-D3):写入选定集合,订单页顶部出现"已选"横幅,悬浮 agent 可追问
-    try {
-      const prev = JSON.parse(localStorage.getItem('merchant-admin.selection') || '[]') as string[];
-      localStorage.setItem('merchant-admin.selection', JSON.stringify([...new Set([orderId, ...prev])].slice(0, 100)));
-    } catch { /* 存储不可用时仅跳转 */ }
+    // PageContext 契约(19-D3,T5 翻新):订单写入类型化选择库(order 类),
+    // 订单页"已选"横幅与悬浮 agent 实时联动;不再写 localStorage
+    setSelectionKind('order', [orderId, ...(getSelection().order || [])]);
     onClose();
     navigate('/orders');
   }

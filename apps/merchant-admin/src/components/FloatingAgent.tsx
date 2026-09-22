@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
 import { ResultCard } from '@/components/ResultCard';
 import { api } from '@/lib/api';
+import { clearSelection, getSelection, subscribe, type SelectionMap } from '@/lib/page-context';
 
 // 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由(选中数据
 // 由列表页经 localStorage 约定键上行 —— PageContext 19-D3)。
@@ -26,28 +27,35 @@ function exportResultCsv(data: any) {
   URL.revokeObjectURL(a.href);
 }
 
+const SEL_KIND_LABEL: Record<string, string> = { order: '订单', spu: '商品', customer: '客户' };
+
 export function FloatingAgent({ route }: { route: string }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [frames, setFrames] = useState<AgentFrame[]>([]);
   const [q, setQ] = useState('');
-  // 勾选可见化:残留勾选会静默过滤榜单/实体问法(两次实弹踩坑),必须让用户看得见、可清
-  const [selCount, setSelCount] = useState(0);
+  // 勾选实时联动(T5):内存广播库订阅,勾/清即刻反映到面板横幅
+  const [selMap, setSelMap] = useState<SelectionMap>({});
+  useEffect(() => subscribe((s) => setSelMap({ ...s })), []);
+  const askRef = useRef<(q?: string) => void>(() => {});
 
-  function refreshSelection() {
-    try { setSelCount(JSON.parse(localStorage.getItem('merchant-admin.selection') || '[]').length); } catch { setSelCount(0); }
-  }
-  function clearSelection() {
-    localStorage.removeItem('merchant-admin.selection');
-    setSelCount(0);
-  }
+  // 就地唤起(如订单页「向 AI 提问」):开面板 + 自动提问,不跳页
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      setOpen(true);
+      if (detail.question) askRef.current?.(String(detail.question));
+    };
+    window.addEventListener('merchant-admin:open-agent', handler);
+    return () => window.removeEventListener('merchant-admin:open-agent', handler);
+  }, []);
 
-  async function ask() {
-    if (!q.trim() || busy) return;
+  async function ask(questionOverride?: string) {
+    const question = (questionOverride ?? q).trim();
+    if (!question || busy) return;
     setBusy(true);
-    const question = q.trim();
-    const selection = JSON.parse(localStorage.getItem('merchant-admin.selection') || '[]');
+    const selection = getSelection();
     // T3 多轮:浏览器侧稳定 session_id(服务端 Redis 按此键存会话上下文)
     let sessionId = localStorage.getItem('merchant-admin.session');
     if (!sessionId) {
@@ -72,6 +80,7 @@ export function FloatingAgent({ route }: { route: string }) {
     setQ('');
     setBusy(false);
   }
+  askRef.current = (qOverride?: string) => void ask(qOverride);
 
   function pinToBoard(data: any) {
     const pins = JSON.parse(localStorage.getItem('merchant-admin.board') || '[]');
@@ -103,7 +112,7 @@ export function FloatingAgent({ route }: { route: string }) {
     return (
       <button
         type="button"
-        onClick={() => { setOpen(true); refreshSelection(); }}
+        onClick={() => setOpen(true)}
         className="fixed bottom-6 right-6 z-40 flex h-14 w-14 select-none items-center justify-center rounded-full bg-zinc-900 text-xl text-white shadow-xl"
         aria-label="打开数据分析助手"
       >
@@ -132,16 +141,19 @@ export function FloatingAgent({ route }: { route: string }) {
         <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
           上下文:{route}
         </span>
-        {selCount > 0 && (
+        {(selMap.order?.length || selMap.spu?.length || selMap.customer?.length) ? (
           <button
             type="button"
-            onClick={clearSelection}
-            title="勾选会过滤榜单/实体查询,点击清除"
+            onClick={() => clearSelection()}
+            title="勾选会作为查询上下文,点击清除"
             className="rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700"
           >
-            已勾选 {selCount} 项 ✕
+            已勾选 {(['order', 'spu', 'customer'] as const)
+              .filter((k) => (selMap[k]?.length || 0) > 0)
+              .map((k) => `${SEL_KIND_LABEL[k]} ${selMap[k]!.length}`)
+              .join(' · ')} ✕
           </button>
-        )}
+        ) : null}
       </div>
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {frames.length === 0 && (

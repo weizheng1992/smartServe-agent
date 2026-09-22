@@ -73,12 +73,16 @@ export function OrdersTab() {
             {selectedOrderIds.length > 0 && (
               <div className="sticky bottom-3 z-10 mx-auto w-fit flex items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-xs text-white shadow-lg">
                 <span>已选 {selectedOrderIds.length} 笔订单</span>
-                <a
-                  href="/analytics"
+                <button
+                  type="button"
                   className="rounded-full bg-white px-3 py-1 font-semibold text-slate-900"
+                  // 就地唤起悬浮助手并自动提问(勾选经 PageContext 上行,不跳页)
+                  onClick={() => window.dispatchEvent(new CustomEvent('merchant-admin:open-agent', {
+                    detail: { question: '两个订单对比' },
+                  }))}
                 >
                   向 AI 提问 →
-                </a>
+                </button>
               </div>
             )}
             {filteredOrders.length === 0 ? (

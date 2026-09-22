@@ -122,6 +122,7 @@ class TestAsk:
             "question": "两个订单对比",
             "pageContext": {"selection": ["E2E-CMP-A", "E2E-CMP-B"]},
         })
+        assert "result" in dict(_sse_events(r)), f"DBG {_sse_events(r)} body={r.text[:300]}"
         events = dict(_sse_events(r))
         assert events["result"]["metric"] == "order_overview"
         rows = events["result"]["rows"]
@@ -1210,3 +1211,47 @@ class TestMultiTurnSession:
         assert dict(_sse_events(r1))["result"]["metric"] == "customer_orders"
         r2 = await self._ask(client, boss, "他呢?", sess)
         assert "result" in dict(_sse_events(r2)), f"r2 events={_sse_events(r2)} body={r2.text[:400]}"
+
+
+class TestSelectionKindMap:
+    """T5 类型化勾选:selection 按实体类型分发(order/spu/customer 各归各),
+    不再出现「订单 id 被当商品过滤」的残留污染。"""
+
+    async def test_customer_selection_drives_customer_metric(self, client, auth):
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        async with _merchant_writer_engine().begin() as c:
+            await c.execute(_t(
+                "INSERT INTO merchant_customers (customer_id, name, phone) "
+                "VALUES ('CUST-E2E-KIND', '类型勾选客', '13899992222') ON CONFLICT DO NOTHING"
+            ))
+            await c.execute(_t(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                "VALUES ('E2E-KIND-ORD', 'CUST-E2E-KIND', 'PAID', 66.00, '{}'::jsonb) "
+                "ON CONFLICT (order_id) DO NOTHING"
+            ))
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "消费统计",
+            "pageContext": {"selection": {"customer": ["CUST-E2E-KIND"]}},
+        })
+        assert "result" in dict(_sse_events(r)), f"DBG {_sse_events(r)} body={r.text[:300]}"
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "customer_spend_stats"
+        rows = events["result"]["rows"]
+        assert len(rows) == 1 and rows[0]["累计消费"] == 66.0
+
+    async def test_order_selection_does_not_pollute_ranking(self, client, auth):
+        """勾订单 + 问销量榜:订单 id 不再被当商品过滤(修复前→诚实空假象)。"""
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "销量最高的商品 Top 3",
+            "pageContext": {"selection": {"order": ["AURORA-ORD-DOES-NOT-EXIST"]}},
+        })
+        events = dict(_sse_events(r))
+        # 榜单不再被订单勾选污染(有真实销量数据时应有行;容器内空数据则诚实空但 metric 正确)
+        assert events["result"]["metric"] == "volume"

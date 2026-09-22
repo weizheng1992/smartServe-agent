@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
 import { Button } from 'ui';
 import { api, type Spu } from '@/lib/api';
+import { setSelectionKind } from '@/lib/page-context';
 import { SkuSubTable } from './sku-subtable';
 
 interface Props {
@@ -9,12 +10,19 @@ interface Props {
   onChanged: () => void;
 }
 
-/** SPU 列表:行内编辑(标题/售价/库存)、上/下架、删除(订单引用护栏在服务端)、
- *  展开 SKU 子表。展开态/行编辑态为本组件局部状态。 */
+/** SPU 列表:勾选→PageContext(spu 类,对话实时联动);行内编辑(标题/售价/库存)、
+ *  上/下架、删除(订单引用护栏在服务端)、展开 SKU 子表。展开态/行编辑态为本组件局部状态。 */
 export function SpuTable({ spus, onMsg, onChanged }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [edit, setEdit] = useState({ title: '', price: '', stock: '' });
   const [openSkus, setOpenSkus] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+
+  function toggleSelect(code: string) {
+    const next = selected.includes(code) ? selected.filter((x) => x !== code) : [...selected, code];
+    setSelected(next);
+    setSelectionKind('spu', next);
+  }
 
   async function saveEdit(id: string) {
     const b = await api.products.update(id, { title: edit.title, price: Number(edit.price), stock: Number(edit.stock) });
@@ -44,6 +52,7 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
       <table className="w-full text-[13px]">
         <thead>
           <tr className="border-b border-zinc-100 text-left text-zinc-400">
+            <th className="w-10 px-3 py-2" />
             <th className="px-4 py-2 font-medium">商品</th>
             <th className="px-4 py-2 font-medium">品类</th>
             <th className="px-4 py-2 font-medium">售价</th>
@@ -56,6 +65,14 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
           {spus.map((s) => (
             <Fragment key={s.id}>
               <tr className="border-b border-zinc-50">
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`选择商品 ${s.title}`}
+                    checked={selected.includes(s.spu_code)}
+                    onChange={() => toggleSelect(s.spu_code)}
+                  />
+                </td>
                 <td className="px-4 py-2">
                   {editing === s.id ? (
                     <input className="w-64 rounded border border-zinc-300 px-2 py-1" value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />

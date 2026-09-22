@@ -22,6 +22,12 @@ from .engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
 # 时间序列/会话/活动族不在其列 —— 闭集外指标绝不静默扩展绑定语义。
 _INLINE_SPU_METRICS = frozenset({"gmv", "volume", "gross_profit", "margin_rate", "stock_risk"})
 
+# 客户族闭集(PageContext customer 勾选的作用面)
+_CUSTOMER_SLOT_METRICS = frozenset({
+    "customer_orders", "customer_spend_stats", "customer_coupons",
+    "customer_profile", "customer_panorama", "customer_spend_trend",
+})
+
 # 纯图表切换追问(确定性快捷路):问句只含图型词 → 上一轮问句 + 图型要求重解析
 _CHART_ONLY_RE = re.compile(r"^(?:换成?|改[成为]?|用|来)?\s*(?:一?个?)?\s*(折线图?|柱状图?|条形图?|柱形图?|表格)\s*[?？]?$")
 
@@ -95,6 +101,33 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     if isinstance(intent, dict) and intent.get("clarify"):
         return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
 
+    # PageContext(T5 类型化勾选):order→订单对比;spu→标准族过滤;
+    # customer→客户族过滤。旧数组形态向后兼容(仅订单对比与标准族)。
+    # 各归各是从结构上消灭「订单 id 被当商品过滤」的残留污染(两次实弹踩坑)。
+    raw_sel = (page_context or {}).get("selection") or []
+    if isinstance(raw_sel, dict):
+        sel_orders = [str(x) for x in (raw_sel.get("order") or [])][:100]
+        sel_spu = [str(x) for x in (raw_sel.get("spu") or [])][:100]
+        sel_cust = [str(x) for x in (raw_sel.get("customer") or [])][:100]
+    else:
+        # 旧数组形态向后兼容:同时当订单勾选(订单对比)与商品勾选(标准族过滤)
+        sel_orders, sel_spu, sel_cust = [str(x) for x in raw_sel][:100], [str(x) for x in raw_sel][:100], []
+    def _with_sel(slot: dict) -> StructuredQueryIntent:
+        # intent 是 frozen dataclass —— 合并勾选必须整体重建(旧 PageContext 同款)
+        return StructuredQueryIntent(
+            metric=intent.metric, direction=intent.direction, limit=intent.limit,
+            time_window=intent.time_window, category=intent.category,
+            entity_ids=(sel_orders if intent.metric == "order_overview" else intent.entity_ids),
+            entity_slot=slot, chart_hint=intent.chart_hint,
+        )
+
+    if intent.metric == "order_overview" and sel_orders and sel_orders != intent.entity_ids:
+        intent = _with_sel(dict(intent.entity_slot))
+    elif sel_spu and intent.metric in _INLINE_SPU_METRICS and not (intent.entity_slot or {}).get("spu"):
+        intent = _with_sel({**intent.entity_slot, "spu": sel_spu})
+    elif sel_cust and intent.metric in _CUSTOMER_SLOT_METRICS and not (intent.entity_slot or {}).get("customer"):
+        intent = _with_sel({**intent.entity_slot, "customer": sel_cust})
+
     # 行内商品提及(L0 直出、零 LLM):标准商品族指标的问句逐字包含唯一商品
     # 标题/编码 → 直接绑定 spu 实体槽;零/多命中不改语义(保守放行原问句)。
     # 扫描属可选增强,连接失败降级放行(同 [L2] 范例检索失败先例,主查询仍响亮)。
@@ -147,19 +180,6 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
                 "last_question": effective_question, "intent": intent.__dict__,
             })
         return outcome
-
-    # PageContext(19-D3):选中实体作为实体过滤(IN 绑定;长度上限 100)。
-    # entity_slot 必须随行保留 —— 勾选重建曾把已绑定的客户/活动/商品槽清空,
-    # 实体必传指标(消费统计/优惠券等)被静默绑成空列表 → 假「诚实空」(实弹踩过)。
-    selection = (page_context or {}).get("selection") or []
-    if selection:
-        intent = StructuredQueryIntent(
-            metric=intent.metric, direction=intent.direction, limit=intent.limit,
-            time_window=intent.time_window, category=intent.category,
-            entity_ids=[str(s) for s in selection][:100],
-            entity_slot=dict(intent.entity_slot),
-            chart_hint=intent.chart_hint,
-        )
 
     try:
         compiled = engine.compile(intent)

@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Button } from 'ui';
 import { api, type Customer } from '@/lib/api';
+import { setSelectionKind } from '@/lib/page-context';
 
 export type { Customer };
 
@@ -12,8 +14,17 @@ interface Props {
   onDetail: (c: Customer) => void;
 }
 
-/** 客户列表:会员级下拉改即存;详情抽屉(地址/关联券/关联订单);删除受服务端护栏。 */
+/** 客户列表:勾选→PageContext(customer 类,对话实时联动);会员级改即存;
+ *  详情抽屉(地址/关联券/关联订单);删除受服务端护栏。 */
 export function CustomerTable({ customers, onMsg, onChanged, onDetail }: Props) {
+  const [selected, setSelected] = useState<string[]>([]);
+
+  function toggle(cid: string) {
+    const next = selected.includes(cid) ? selected.filter((x) => x !== cid) : [...selected, cid];
+    setSelected(next);
+    setSelectionKind('customer', next);
+  }
+
   async function setLevel(customerId: string, memberLevel: string) {
     const body = await api.customers.update(customerId, { memberLevel });
     onMsg(body.success ? `✓ ${customerId} 会员级 → ${memberLevel}` : `失败:${body.message}`);
@@ -31,9 +42,15 @@ export function CustomerTable({ customers, onMsg, onChanged, onDetail }: Props) 
       <div className="border-b border-zinc-100 px-4 py-3 text-sm font-medium">
         客户列表 <span className="text-[11px] text-zinc-400">商户库真实客户 · 按累计消费排序 · 会员级改即存 · 有订单客户不可删</span>
       </div>
+      {selected.length > 0 && (
+        <div className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+          已勾选 {selected.length} 位客户 —— 打开右下角助手即可带着勾选提问(如「他们最近下单是什么时候」)
+        </div>
+      )}
       <table className="w-full text-[13px]">
         <thead>
           <tr className="border-b border-zinc-100 text-left text-zinc-400">
+            <th className="w-10 px-3 py-2" />
             <th className="px-4 py-2 font-medium">客户</th>
             <th className="px-4 py-2 font-medium">电话</th>
             <th className="px-4 py-2 font-medium">累计消费</th>
@@ -44,10 +61,18 @@ export function CustomerTable({ customers, onMsg, onChanged, onDetail }: Props) 
         </thead>
         <tbody>
           {customers.length === 0 && (
-            <tr><td colSpan={6} className="px-4 py-6 text-center text-xs text-zinc-400">暂无客户(诚实空)</td></tr>
+            <tr><td colSpan={7} className="px-4 py-6 text-center text-xs text-zinc-400">暂无客户(诚实空)</td></tr>
           )}
           {customers.map((c) => (
             <tr key={c.customer_id} className="border-b border-zinc-50">
+              <td className="px-3 py-2">
+                <input
+                  type="checkbox"
+                  aria-label={`选择客户 ${c.name}`}
+                  checked={selected.includes(c.customer_id)}
+                  onChange={() => toggle(c.customer_id)}
+                />
+              </td>
               <td className="px-4 py-2">{c.name}<span className="ml-2 text-[11px] text-zinc-400">{c.customer_id}</span></td>
               <td className="px-4 py-2">{c.phone}</td>
               <td className="px-4 py-2">¥{c.total_spent.toLocaleString()}</td>

@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { setSession } from '@/lib/api';
 import { GATEWAY, gatewayUp, installLiveFetch, login } from '@/test/live-api';
 import { CustomerDetailDrawer } from './customer-detail-drawer';
+import { getSelection } from '@/lib/page-context';
 
 // 集成测试(真实网关 + 真实库;不 mock 数据):全只读 —— 抽屉仅拉取展示。
 const d = gatewayUp ? describe : describe.skip;
@@ -68,7 +69,8 @@ d('CustomerDetailDrawer(真实库)', () => {
     const buttons = await screen.findAllByRole('button', { name: '在订单中查看' }, { timeout: 8000 });
     fireEvent.click(buttons[0]);
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    const selection = JSON.parse(localStorage.getItem('merchant-admin.selection') || '[]');
-    expect(selection).toContain(his[0].order_id);
+    // T5 契约:选择入内存广播库(类型标记 order),不再写 localStorage
+    const selection = getSelection();
+    expect(selection.order).toContain(his[0].order_id);
   });
 });

@@ -13,6 +13,8 @@
 
 ## Decisions so far
 
+- [T5 选择上下文翻新](tickets/T5-selection-context.md):类型化勾选(order/spu/customer 各归各)+ 内存广播 + 面板实时联动 + 就地唤起;商品/客户列表页接入
+
 - [T4 常驻看板](tickets/T4-pinned-board.md):钉卡重放式看板上线,对话/看板同形结果卡;60s 轮询+不可见暂停+手动刷新
 
 - [T3 多轮会话态](tickets/T3-multi-turn-session.md):session_id+Redis 会话记忆+LLM 追问改写,改写问句贯穿绑定/落存;浏览器多轮实测(见下一条 Decisions 之后的提交)
