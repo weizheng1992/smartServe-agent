@@ -33,7 +33,11 @@ winner 当标签训模型 = 把 LLM 的偏见蒸馏进去。
    ✅ 通道②已上线(2026-09-23):scripts/review_badcase.py 人审 CLI ——
    list(待审候选附线程最近终局)/label(定性→回写 actual_outcome,坏例置
    labeled)/dismiss(非缺陷不动标签);520 条 intent_conflict 积压由此
-   消化,回归 4 钉;通道③待建;
+   消化,回归 4 钉);
+   ✅ 通道③已上线(2026-09-23):scripts/backfill_outcome_from_rules.py
+   —— SlotExtractor 单规则高置信复判历史问句批量回填(歧义/零命中/
+   低置信跳过;澄清行排除走通道①)。首跑 dev 500 行:可贴 373(74.6%),
+   歧义 38/零命中 89 跳过;回归 6 钉(单规则贴/多规则 None/确定性)。
 2. silver label ≥3000 条且每档位 ≥150(当前 12 个活跃档位,需 ~1800 有效);
 3. 训练走既有 SFT 轨基建(QLoRA/PAI,换分类头或小模型),评测以 nightly
    矩阵 + 坏例池复判为门。
