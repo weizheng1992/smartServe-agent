@@ -10,10 +10,41 @@ import { clearSelection, getSelection, getSelectionLabels, subscribe, type Selec
 // 阶段⑥:排行卡条形图化 + 结果卡底部「导出 CSV / 存为报告」(存入我的报告)。
 // 帧带自增 id:渲染层会过滤 start 帧,按下标回写状态会错位 —— 一律按 id 回写
 let frameSeq = 0;
-type AgentFrame = { id: number; event: string; data: any; saved?: boolean };
+type ResultData = {
+  metric: string;
+  unit?: string;
+  caliber?: string;
+  chart?: 'line' | 'bar' | 'table' | null;
+  summary?: string | null;
+  title?: string;
+  __question?: string;
+  rows: Record<string, unknown>[];
+  cards?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
 
-function exportResultCsv(data: any) {
-  const rows: any[] = data.rows || [];
+type AgentEvent =
+  | 'start'
+  | 'user'
+  | 'pending'
+  | 'result'
+  | 'clarify'
+  | 'unsupported'
+  | 'error';
+
+type AgentFrame = {
+  id: number;
+  event: AgentEvent | string;
+  data: AgentFrameData;
+  saved?: boolean;
+};
+
+type AskResultFrame = { event: AgentEvent | string; data: Record<string, unknown> };
+
+type AgentFrameData = { message?: string; options?: Array<{ label: string }> } & Record<string, unknown>;
+
+function exportResultCsv(data: ResultData) {
+  const rows = data.rows || [];
   if (!rows.length) return;
   const cols = Object.keys(rows[0]);
   const esc = (v: unknown) => `"${String(v ?? '').replaceAll('"', '""')}"`;
@@ -87,7 +118,7 @@ export function FloatingAgent({ route }: { route: string }) {
         const withoutPending = prev.filter((f) => f.id !== pendingId);
         return [
           ...withoutPending,
-          ...result.map((f: any, k: number) => ({
+          ...(result as AskResultFrame[]).map((f: AskResultFrame, k: number) => ({
             id: pendingId + 10 + k,
             event: f.event,
             data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
@@ -109,7 +140,7 @@ export function FloatingAgent({ route }: { route: string }) {
     localStorage.setItem('merchant-admin.session', `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   }
 
-  function pinToBoard(data: any) {
+  function pinToBoard(data: ResultData) {
     const pins = JSON.parse(localStorage.getItem('merchant-admin.board') || '[]');
     pins.push({
       id: `pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -121,14 +152,15 @@ export function FloatingAgent({ route }: { route: string }) {
   }
 
   async function saveToReport(frame: AgentFrame) {
+    const data = frame.data as ResultData;
     try {
       await api.reports.saveFromResult({
-        question: frame.data.__question || '',
-        metric: String(frame.data.metric || 'result'),
-        unit: String(frame.data.unit || ''),
-        caliber: String(frame.data.caliber || ''),
-        rows: frame.data.rows || [],
-        chart: frame.data.chart || undefined,
+        question: String(data.__question || ''),
+        metric: String(data.metric || 'result'),
+        unit: String(data.unit || ''),
+        caliber: String(data.caliber || ''),
+        rows: data.rows || [],
+        chart: typeof data.chart === 'string' ? data.chart : undefined,
       });
       setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, saved: true } : f)));
     } catch (err) {
@@ -200,9 +232,9 @@ export function FloatingAgent({ route }: { route: string }) {
               </div>
             ) : f.event === 'clarify' ? (
               <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm">
-                {f.data.question}
+                {String(f.data.question ?? '')}
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {(f.data.options || []).map((o: any, j: number) => (
+                  {((f.data.options || []) as Array<{ label: string }>).map((o, j: number) => (
                     <button
                       type="button"
                       key={j}
@@ -216,11 +248,11 @@ export function FloatingAgent({ route }: { route: string }) {
               </div>
             ) : f.event === 'result' ? (
               <>
-                <ResultCard data={f.data} />
-                {f.data.summary ? (
+                <ResultCard data={f.data as ResultData} />
+                {(f.data as ResultData).summary ? (
                   <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
                     <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
-                    {f.data.summary}
+                    {String((f.data as ResultData).summary ?? '')}
                   </div>
                 ) : null}
                 {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
@@ -228,7 +260,7 @@ export function FloatingAgent({ route }: { route: string }) {
                     <button
                       type="button"
                       className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
-                      onClick={() => exportResultCsv(f.data)}
+                      onClick={() => exportResultCsv(f.data as ResultData)}
                     >
                       导出 CSV
                     </button>
@@ -236,7 +268,7 @@ export function FloatingAgent({ route }: { route: string }) {
                       type="button"
                       className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
                       title="钉到看板页定时重放刷新"
-                      onClick={() => pinToBoard(f.data)}
+                      onClick={() => pinToBoard(f.data as ResultData)}
                     >
                       📌 钉看板
                     </button>
@@ -253,8 +285,8 @@ export function FloatingAgent({ route }: { route: string }) {
               </>
             ) : (
               <div className="rounded-xl border border-zinc-200 bg-white p-3 text-sm">
-                {f.data.message || f.event}
-                {f.data.caliber ? <div className="mt-1 text-[11px] text-zinc-400">口径:{f.data.caliber}</div> : null}
+                {String(f.data.message ?? f.event)}
+                {f.data.caliber ? <div className="mt-1 text-[11px] text-zinc-400">口径:{String(f.data.caliber)}</div> : null}
               </div>
             )}
           </div>
