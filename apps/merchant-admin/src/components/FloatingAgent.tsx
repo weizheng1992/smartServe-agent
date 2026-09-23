@@ -101,6 +101,7 @@ export function FloatingAgent({ route }: { route: string }) {
         unit: String(frame.data.unit || ''),
         caliber: String(frame.data.caliber || ''),
         rows: frame.data.rows || [],
+        chart: frame.data.chart || undefined,
       });
       setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, saved: true } : f)));
     } catch (err) {

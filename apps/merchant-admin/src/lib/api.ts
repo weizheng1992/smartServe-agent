@@ -246,7 +246,9 @@ export const api = {
     list: async () => (await req('/api/admin/analytics/reports')).json(),
     create: async () => (await req('/api/admin/analytics/reports', { method: 'POST', body: '{}' })).json(),
     csv: async (id: string) => (await req(`/api/admin/analytics/reports/${id}/csv`)).json(),
-    saveFromResult: async (p: { question: string; metric: string; unit: string; caliber: string; rows: Record<string, unknown>[] }) =>
+    detail: async (id: string): Promise<{ success: boolean; id: string; title: string; chart: string | null; rows: Record<string, Record<string, unknown>[]> }> =>
+      (await req(`/api/admin/analytics/reports/${id}`)).json(),
+    saveFromResult: async (p: { question: string; metric: string; unit: string; caliber: string; rows: Record<string, unknown>[]; chart?: string }) =>
       (
         await req('/api/admin/analytics/reports/from-result', {
           method: 'POST',

@@ -189,6 +189,7 @@ async def save_result_report(request: Request):
         ctx["business_id"], ctx["staff"], str(body.get("question") or ""),
         str(body.get("metric") or "result"), str(body.get("unit") or ""),
         str(body.get("caliber") or ""), rows[:200],
+        chart=(str(body.get("chart")) if body.get("chart") else None),
     )
     return {"success": True, **created}
 
@@ -200,6 +201,16 @@ async def get_report(request: Request, report_id: str):
     if not report:
         return JSONResponse(status_code=404, content={"success": False, "message": "报告不存在"})
     return {"success": True, **report}
+
+
+@router.get("/api/admin/analytics/reports/{report_id}")
+async def report_detail(request: Request, report_id: str):
+    """报告详情(含 rows):报告页图表重放的数据源。"""
+    ctx = await _ctx(request)
+    detail = await report_service.get_report(ctx["business_id"], report_id)
+    if detail is None:
+        return JSONResponse(status_code=404, content={"success": False, "message": "报告不存在"})
+    return {"success": True, **detail}
 
 
 @router.get("/api/admin/analytics/reports/{report_id}/csv")

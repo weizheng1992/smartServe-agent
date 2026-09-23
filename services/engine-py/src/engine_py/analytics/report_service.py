@@ -98,7 +98,13 @@ async def get_report(business_id: str, report_id: str) -> dict | None:
         ).scalars().first()
     if not row:
         return None
-    return {"id": row.id, "title": row.title, "html": row.html, "rows": json.loads(row.rows_json)}
+    chart = None
+    try:
+        chart = (json.loads(row.time_window) or {}).get("chart")
+    except Exception:
+        pass
+    return {"id": row.id, "title": row.title, "html": row.html,
+            "rows": json.loads(row.rows_json), "chart": chart}
 
 
 async def export_csv(business_id: str, report_id: str) -> str | None:
@@ -119,11 +125,13 @@ async def export_csv(business_id: str, report_id: str) -> str | None:
 
 
 async def save_result_report(business_id: str, generated_by: str, question: str,
-                             metric: str, unit: str, caliber: str, rows: list[dict]) -> dict:
-    """对话结果卡 → 单节报告(ADR-0005 出口:问过的就能存;我的报告页可见/可导 CSV)。
+                             metric: str, unit: str, caliber: str, rows: list[dict],
+                             chart: str | None = None) -> dict:
+    """对话结果卡 → 单节报告(ADR-0005 出口:问过的就能存;我的报告页可见/可导 CSV/可重放图表)。
 
     rows_json 沿用 generate_report 的 {metric: rows} 字典形,export_csv 零改动复用;
-    数字全部来自对话里真实执行的查询(14-D3 不变量),本函数只做搬运不重算。
+    图型存 time_window JSON(_chart 键),数字全部来自对话里真实执行的查询
+    (14-D3 不变量),本函数只做搬运不重算。
     """
     section = {"metric": metric, "unit": unit, "caliber": caliber, "rows": rows}
     title = (question or f"{metric} 查询结果").strip()[:60] or f"{metric} 查询结果"
@@ -131,7 +139,8 @@ async def save_result_report(business_id: str, generated_by: str, question: str,
     async with get_session() as session:
         session.add(AnalyticsReport(
             id=report_id, business_id=business_id, generated_by=generated_by,
-            title=title, time_window=json.dumps({"source": "agent_result"}, ensure_ascii=False),
+            title=title,
+            time_window=json.dumps({"source": "agent_result", "chart": chart}, ensure_ascii=False),
             html=_html_report(title, [section]),
             rows_json=json.dumps({metric: rows}, ensure_ascii=False, default=str),
         ))
