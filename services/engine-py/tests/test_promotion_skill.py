@@ -303,6 +303,7 @@ class TestPromoDealRecommendation:
 
         assert "推荐优惠最大的商品" in CATEGORY_GUIDELINES
         assert "优惠力度" in CATEGORY_GUIDELINES
+        assert "叠加减" in CATEGORY_GUIDELINES
 
     def test_single_clause_deal_ask_absorbs_guide_intent(self):
         """同句双中(优惠+推荐)由 promotion 吸收 guide,不得拆双意图编排
@@ -315,6 +316,26 @@ class TestPromoDealRecommendation:
         both = SlotExtractor.extract_all("有什么优惠活动，顺便推荐连衣裙", None, None, None)
         intents = [e["intentType"] for e in both]
         assert "promotion_query" in intents and "shopping_guide" in intents
+
+    def test_colloquial_deal_phrasing_routes_to_promotion(self):
+        """口语变体(2026-09-23 实弹):「叠加减的最多的商品」不含标准优惠词,
+        曾零命中漏进数据问答回 GMV/销量排行 —— 词表必须接住叠加减/减最多。"""
+        from engine_py.triage.slot_extractor import SlotExtractor
+
+        rules = SlotExtractor.detect_intents("叠加减的最多的商品")
+        assert rules and rules[0].intent == "promotion_query", (
+            f"叠加减句式必须路由优惠查询: {[(r.intent, r.confidence) for r in rules]}"
+        )
+
+        entries = SlotExtractor.extract_all("叠加减的最多的商品", None, None, None)
+        assert len(entries) == 1 and entries[0]["intentType"] == "promotion_query"
+
+    def test_recommend_via_colloquial_phrasing(self, container):
+        _seed_deal_catalog(container)
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "叠加减的最多的商品")))
+        assert result.success is True
+        assert "优惠力度最大" in result.output
+        assert result.output.index("冠军款老爹鞋") < result.output.index("基础款袜子")
 
     def test_fast_track_matches_decided_intent_over_guide_keywords(self):
         """快轨技能匹配必须认已决意图:promotion_query 不得被导购技能的

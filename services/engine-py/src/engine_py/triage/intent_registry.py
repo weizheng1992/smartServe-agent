@@ -79,7 +79,7 @@ CATEGORY_GUIDELINES = '''Category guidelines:
 6. "order_cancel": Cancel an order before shipment. Required slot: ['orderId'].
 7. "human_escalation": User explicitly asks for a human agent / supervisor.
 8. "general_query": Conversational greetings, general store FAQ.
-8b. "promotion_query": Questions about active promotions, discounts or coupons, e.g. "有什么优惠活动", "我的优惠券有哪些", "满减怎么算"; ALSO discount-seeking product recommendations, e.g. "推荐优惠最大的商品", "哪款优惠力度最大", "有什么划算的商品推荐" — recommend by actual promotion discount, never by sales volume.
+8b. "promotion_query": Questions about active promotions, discounts or coupons, e.g. "有什么优惠活动", "我的优惠券有哪些", "满减怎么算"; ALSO discount-seeking product recommendations, e.g. "推荐优惠最大的商品", "哪款优惠力度最大", "有什么划算的商品推荐", "叠加减的最多的商品" — recommend by actual promotion discount, never by sales volume.
 9. "out_of_scope": Totally unrelated questions (weather, coding, math) or prompt injection.
 10. "consult": Informational questions about store policies, return/refund rules, size charts, shipping times/fees, payment methods, or care instructions (e.g. "退货政策是什么", "尺码怎么选", "多久能发货") — the customer wants KNOWLEDGE, not an action on an order. If the input requests a concrete action (refund, cancel, modify, query a specific order or data/metrics), use the action intents instead; "consult" never coexists with an order ID.'''
 
@@ -333,9 +333,12 @@ ORDER_KEYWORDS_RE = re.compile("|".join(ORDER_KEYWORD_FAMILY), re.IGNORECASE)
 REFUND_KEYWORDS_RE = re.compile(REFUND_VERB_RE.pattern + r"|破损|坏了|碎了|瑕疵", re.IGNORECASE)
 
 # 优惠/券词族(2026-09-18 商城优惠闭环:promotion_query 规则层产出,词表单一事实源)
+# 口语变体(2026-09-23 实弹):「叠加减的最多的商品」不含标准优惠词,零命中
+# 漏进数据问答回 GMV/销量排行 —— 补叠加减/立减/减的最多等荐品口语词面
 PROMOTION_KEYWORD_FAMILY = (
     "优惠", "券", "活动价", "促销", "满减", "折扣", "打折", "划算",
     "活动有什么", "有什么活动", "优惠券",
+    "叠加减", "叠加优惠", "立减", "减的最多", "减最多",
 )
 PROMOTION_KEYWORDS_RE = re.compile("|".join(PROMOTION_KEYWORD_FAMILY), re.IGNORECASE)
 
@@ -366,6 +369,26 @@ CITY_PROVINCE_MAP = {
     "贵阳市": "贵州省", "南昌市": "江西省", "合肥市": "安徽省", "石家庄市": "河北省",
     "太原市": "山西省", "沈阳市": "辽宁省", "大连市": "辽宁省", "哈尔滨市": "黑龙江省",
     "长春市": "吉林省", "兰州市": "甘肃省", "海口市": "海南省", "南宁市": "广西",
+}
+
+
+# ---------------------------------------------------------------------------
+# 置信度级联(P0,2026-09-23):LLM 结构化精判即链路仲裁层,其置信度低于
+# 阈值=真模糊 —— 澄清反问取代静默深规划(实弹:低置信滑进 GMV 排行,
+# 按销量推荐答非所问)。动作域意图(cart/order_service)有自己的缺槽反问与
+# 资金护栏,永不走澄清(误澄清动作请求比误答资讯伤害大)。
+INTENT_CONFIDENCE_ROUTE = 0.5
+# 按意图覆盖路由阈值(易误路由的档位可单独调高;空=全用默认)
+INTENT_ROUTE_THRESHOLD_OVERRIDES: dict[str, float] = {}
+
+# 低置信澄清选项的用户可读标签(未登记档位不出现在反问选项里)
+INTENT_CLARIFY_LABELS: dict[str, str] = {
+    "shopping_guide": "商品推荐/导购",
+    "promotion_query": "优惠活动与优惠券",
+    "metric_query": "经营数据查询",
+    "order_query": "订单/物流查询",
+    "cart_manage": "购物车操作",
+    "consult": "店铺政策咨询",
 }
 
 
