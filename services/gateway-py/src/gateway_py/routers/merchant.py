@@ -21,7 +21,7 @@ from engine_py.event_bus import get_client as get_redis
 from engine_py.run_agent import AgentJobInput, run_agent
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
@@ -411,21 +411,26 @@ async def store_place_order(body: dict):
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
+class CheckoutPreviewItem(BaseModel):
+    """试算行(server-gateway §2.2:客户端输入 DTO 化)。"""
+
+    skuCode: str
+    quantity: int = Field(default=1, ge=1)
+
+
+class CheckoutPreviewRequest(BaseModel):
+    customerId: str | None = None
+    items: list[CheckoutPreviewItem] = Field(min_length=1)
+
+
 @router.post("/api/store/checkout/preview")
-async def store_checkout_preview(body: dict):
+async def store_checkout_preview(body: CheckoutPreviewRequest):
     """结算页只读试算:原价/活动/券包逐张可用性(不加锁不落表)。"""
     try:
-        customer_id = body.get("customerId") or "CUST-8801"
-        items = body.get("items")
-        if not isinstance(items, list) or not items:
-            return JSONResponse(status_code=400, content={"success": False, "message": "items 必传且不能为空"})
         normalized = [
-            {"skuCode": str(i.get("skuCode")), "quantity": max(1, int(i.get("quantity") or 1))}
-            for i in items
-            if isinstance(i, dict) and i.get("skuCode")
+            {"skuCode": item.skuCode, "quantity": item.quantity} for item in body.items
         ]
-        if not normalized:
-            return JSONResponse(status_code=400, content={"success": False, "message": "items 缺少有效 skuCode"})
+        customer_id = body.customerId or "CUST-8801"
         return await mds.preview_cart_pricing(customer_id, normalized)
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})

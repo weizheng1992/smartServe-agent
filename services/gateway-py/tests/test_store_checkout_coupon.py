@@ -143,6 +143,12 @@ async def _coupon_status(coupon_row_id: str) -> str | None:
 async def test_default_auto_applies_best_coupon(client, contract_fixtures):
     """缺省 couponId=历史自动择优语义不变(立即购买/旧调用兼容)。"""
     await _seed_catalog()
+    # 隔离他套件遗留数据(全量跑时共享容器):按引用顺序清空促销三表
+    # (本文件是网关套件最后一个,清场无后续影响)
+    async with merchant_engine().begin() as conn:
+        await conn.execute(text("DELETE FROM promotion_redemptions"))
+        await conn.execute(text("DELETE FROM user_coupons"))
+        await conn.execute(text("DELETE FROM promotions"))
     coupon_id = await _seed_coupon(_UID, 50)
     try:
         res = await client.post(

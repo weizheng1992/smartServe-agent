@@ -7,6 +7,7 @@ import json
 import os
 import random
 import secrets
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import text
@@ -407,9 +408,9 @@ async def place_order(params: dict) -> dict:
                 raise
             except Exception as promo_err:
                 print(f"[MerchantDomain] 优惠计算失败,按原价结算: {promo_err}")
-                promo = _empty_promo()
-            discount = promo["discount"]
-            promo_name = promo["promo_name"]
+                promo = PromotionResolution.empty()
+            discount = promo.discount
+            promo_name = promo.promo_name
 
             await conn.execute(
                 text("UPDATE merchant_skus SET stock = stock - :qty WHERE sku_code = :code"),
@@ -436,14 +437,16 @@ async def place_order(params: dict) -> dict:
                     ),
                 },
             )
-            if promo["coupon_row_id"]:
+            if promo.coupon_row_id:
                 from engine_py.analytics import promotions as _promo_svc
 
                 # 条件核销防双花:False=该券已被并发订单用掉,整体回滚拒单
-                if not await _promo_svc.mark_coupon_used(conn, promo["coupon_row_id"], order_id):
+                if not await _promo_svc.mark_coupon_used(conn, promo.coupon_row_id, order_id):
                     raise _CartError("优惠券已被使用，请刷新券包后重试")
-            await _record_promo_redemption(conn, (promo["activity"] or {}).get("promo_id"), order_id, (promo["activity"] or {}).get("discount", 0.0))
-            await _record_promo_redemption(conn, (promo["coupon"] or {}).get("promo_id"), order_id, (promo["coupon"] or {}).get("discount", 0.0))
+            if promo.activity:
+                await _record_promo_redemption(conn, promo.activity.promo_id, order_id, promo.activity.discount)
+            if promo.coupon:
+                await _record_promo_redemption(conn, promo.coupon.promo_id, order_id, promo.coupon.discount)
             await conn.execute(
                 text(
                     "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price, "
@@ -629,6 +632,47 @@ class _CartError(Exception):
         self.message = message
 
 
+@dataclass(frozen=True)
+class PromoPart:
+    """单笔优惠(活动或券)的结算切片。"""
+
+    discount: float
+    name: str
+    promo_id: str | None = None
+    row_id: str | None = None  # 券:user_coupons.id(核销用)
+
+
+@dataclass(frozen=True)
+class PromotionResolution:
+    """结算优惠决议(P1 类型化,2026-09-23 code-review):属性访问根除裸 dict
+    的 KeyError 族(回落字典缺键曾致促销表异常时整单 500)。"""
+
+    activity: PromoPart | None = None
+    coupon: PromoPart | None = None
+
+    @property
+    def discount(self) -> float:
+        return round(
+            (self.activity.discount if self.activity else 0.0)
+            + (self.coupon.discount if self.coupon else 0.0),
+            2,
+        )
+
+    @property
+    def promo_name(self) -> str | None:
+        names = [p.name for p in (self.activity, self.coupon) if p]
+        return " + ".join(names) if names else None
+
+    @property
+    def coupon_row_id(self) -> str | None:
+        return self.coupon.row_id if self.coupon else None
+
+    @classmethod
+    def empty(cls) -> PromotionResolution:
+        """优惠引擎异常回落:按原价结算、零优惠、不核销。"""
+        return cls()
+
+
 async def _resolve_promotion(
     conn: Any,
     customer_id: str,
@@ -636,102 +680,48 @@ async def _resolve_promotion(
     scope: set[str] | None,
     coupon_id: str | None = None,
     skip_coupon: bool = False,
-) -> dict:
-    """结算优惠决议(服务端唯一算价点,20-D3;选券重构 2026-09-22)。
-
-    叠加语义(2026-09-22 用户决议,替代先前的互斥版):满减/折扣活动自动必享,
-    券由用户自选且可叠加 —— 活动先减,券按余额抵扣封顶,金额永不为负;满减
-    门槛始终按原价合计判定(行业惯例,非活动后余额)。
+) -> PromotionResolution:
+    """结算优惠决议(服务端唯一算价点,20-D3):全分支统一委托共享的
+    resolve_stacked_promotions(2026-09-23 缺省语义漂移收口 —— 旧「缺省自动
+    择优单选」与叠加语义并存属漂移,现已同化)。
 
     - coupon_id 指定 → 自选券与活动叠加:券按(原价-活动优惠)余额计算,不可用
       抛 _CartError 如实拒单(严禁静默按全款落账 —— 3c4c843 同族教训);活动已
       覆盖全部金额时券零抵扣,同样拒单让用户保留券面。
     - skip_coupon → 用户明确不用券(商城页「不使用优惠券」),仅活动。
-    - 两者皆缺省 → 历史自动择优(活动 vs 券取优惠大者,单选不叠加;仅旧调用
-      兼容 —— 商城结算页总是显式传券语义,聊天通道已改走共享的
-      resolve_stacked_promotions 叠加)。
-    返回结构化 activity/coupon 两笔(核销流水分落 promotion_redemptions)+
-    兼容字段 discount(合计)/promo_name(组合)/coupon_row_id(核销券)。
-    """
-    from engine_py.analytics.promotion_engine import (
-        best_for_amount,
-        best_user_coupon,
-        resolve_stacked_promotions,
-    )
+    - 两者皆缺省 → 叠加 + 自动取余额下最优券(与聊天通道同语义)。"""
+    from engine_py.analytics.promotion_engine import resolve_stacked_promotions
 
-    result: dict = {
-        "activity": None,
-        "coupon": None,
-        "discount": 0.0,
-        "promo_name": None,
-        "coupon_row_id": None,
-    }
-    if coupon_id:
-        # 自选券与活动叠加;券不可用/零抵扣由共享决议抛 ValueError,如实拒单
-        try:
-            stacked = await resolve_stacked_promotions(conn, customer_id, amount, scope, coupon_row_id=coupon_id)
-        except ValueError as err:
-            raise _CartError(str(err)) from err
-        act, cpn = stacked["activity"], stacked["coupon"]
-        result["activity"] = (
-            {"discount": act["discount"], "name": act["name"], "promo_id": act["promo_id"]} if act else None
+    try:
+        stacked = await resolve_stacked_promotions(
+            conn, customer_id, amount, scope,
+            coupon_row_id=coupon_id or None, auto_pick_coupon=not skip_coupon and not coupon_id,
         )
-        result["coupon"] = (
-            {
-                "discount": cpn["discount"], "name": cpn["name"],
-                "row_id": cpn["coupon_row_id"], "promo_id": cpn["promotion_id"],
-            }
+    except ValueError as err:
+        raise _CartError(str(err)) from err
+    act, cpn = stacked.get("activity"), stacked.get("coupon")
+    return PromotionResolution(
+        activity=(
+            PromoPart(discount=float(act["discount"]), name=act["name"], promo_id=act.get("promo_id"))
+            if act
+            else None
+        ),
+        coupon=(
+            PromoPart(
+                discount=float(cpn["discount"]), name=cpn["name"],
+                promo_id=cpn.get("promotion_id"), row_id=cpn["coupon_row_id"],
+            )
             if cpn
             else None
-        )
-    elif skip_coupon:
-        stacked = await resolve_stacked_promotions(conn, customer_id, amount, scope, auto_pick_coupon=False)
-        act = stacked["activity"]
-        result["activity"] = (
-            {"discount": act["discount"], "name": act["name"], "promo_id": act["promo_id"]} if act else None
-        )
-    else:
-        # 历史自动择优:活动 vs 券取优惠大者,单选不叠加(旧调用/契约兼容)
-        auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
-        user_coupon = await best_user_coupon(conn, customer_id, amount)
-        if user_coupon and (not auto or user_coupon["discount"] > auto["discount"]):
-            result["coupon"] = {
-                "discount": user_coupon["discount"], "name": user_coupon["name"],
-                "row_id": user_coupon["coupon_row_id"], "promo_id": user_coupon["promotion_id"],
-            }
-        elif auto:
-            result["activity"] = {"discount": auto["discount"], "name": auto["name"], "promo_id": auto["promo_id"]}
-    result["discount"] = round(
-        (result["activity"] or {}).get("discount", 0.0) + (result["coupon"] or {}).get("discount", 0.0), 2
+        ),
     )
-    names = [p["name"] for p in (result["activity"], result["coupon"]) if p]
-    result["promo_name"] = " + ".join(names) if names else None
-    result["coupon_row_id"] = (result["coupon"] or {}).get("row_id")
-    return result
-
-
-def _empty_promo() -> dict:
-    """优惠引擎异常回落形状(与 _resolve_promotion 返回同构):按原价结算、
-    零优惠、不核销。2026-09-23 code-review 硬伤:两处内联兜底字典缺
-    activity/coupon 键,后续 (promo["activity"] or {}) 必抛 KeyError ——
-    促销表缺失等异常时「失败按原价结算」失效、整单 500。"""
-    return {
-        "activity": None,
-        "coupon": None,
-        "discount": 0.0,
-        "promo_name": None,
-        "coupon_row_id": None,
-    }
 
 
 async def _record_promo_redemption(conn: Any, promo_id: str | None, order_id: str, discount: float) -> None:
-    """核销流水与引擎侧账本对齐(mall_domain 同表);无优惠不落。"""
-    if not promo_id or discount <= 0:
-        return
-    await conn.execute(
-        text("INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
-             "VALUES (CAST(:pid AS uuid), :oid, :amt)").bindparams(pid=promo_id, oid=order_id, amt=round(discount, 2))
-    )
+    """薄适配:核销流水 SQL 单一事实源在 engine promotions(收口双实现)。"""
+    from engine_py.analytics import promotions as _promo_svc
+
+    await _promo_svc.record_promo_redemption(conn, promo_id, order_id, discount)
 
 
 async def create_order_from_cart(
@@ -803,9 +793,9 @@ async def create_order_from_cart(
                 raise
             except Exception as promo_err:
                 print(f"[MerchantDomain] 购物车结算优惠计算失败,按原价: {promo_err}")
-                promo = _empty_promo()
-            discount = promo["discount"]
-            promo_name = promo["promo_name"]
+                promo = PromotionResolution.empty()
+            discount = promo.discount
+            promo_name = promo.promo_name
 
             await conn.execute(
                 text(
@@ -821,14 +811,16 @@ async def create_order_from_cart(
                     "addr": json.dumps(shipping_address, ensure_ascii=False),
                 },
             )
-            if promo["coupon_row_id"]:
+            if promo.coupon_row_id:
                 from engine_py.analytics import promotions as _promo_svc
 
                 # 条件核销防双花:False=券已被并发订单用掉,整体回滚拒单
-                if not await _promo_svc.mark_coupon_used(conn, promo["coupon_row_id"], order_id):
+                if not await _promo_svc.mark_coupon_used(conn, promo.coupon_row_id, order_id):
                     raise _CartError("优惠券已被使用，请刷新券包后重试")
-            await _record_promo_redemption(conn, (promo["activity"] or {}).get("promo_id"), order_id, (promo["activity"] or {}).get("discount", 0.0))
-            await _record_promo_redemption(conn, (promo["coupon"] or {}).get("promo_id"), order_id, (promo["coupon"] or {}).get("discount", 0.0))
+            if promo.activity:
+                await _record_promo_redemption(conn, promo.activity.promo_id, order_id, promo.activity.discount)
+            if promo.coupon:
+                await _record_promo_redemption(conn, promo.coupon.promo_id, order_id, promo.coupon.discount)
             for oi in items_to_insert:
                 await conn.execute(
                     text(

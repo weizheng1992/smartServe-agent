@@ -1817,11 +1817,8 @@ class MallDomainService:
                     from engine_py.analytics import promotions as _promo_svc
 
                     if coupon_part:
-                        await conn.execute(
-                            text(
-                                "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
-                                "VALUES ((SELECT promotion_id FROM user_coupons WHERE id = CAST(:c AS uuid)), :oid, :amt)"
-                            ).bindparams(c=coupon_row_id, oid=order_id, amt=coupon_part["discount"])
+                        await _promo_svc.record_promo_redemption(
+                            conn, coupon_part["promotion_id"], order_id, coupon_part["discount"]
                         )
                         # 条件核销防双花:False=券已被并发订单用掉,抛错回滚整单
                         if not await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id):
@@ -1830,11 +1827,8 @@ class MallDomainService:
                                 "可换个说法重新结算（不选券或换一张）～"
                             )
                     if activity_part:
-                        await conn.execute(
-                            text(
-                                "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
-                                "VALUES (CAST(:pid AS uuid), :oid, :amt)"
-                            ).bindparams(pid=activity_part["promo_id"], oid=order_id, amt=activity_part["discount"])
+                        await _promo_svc.record_promo_redemption(
+                            conn, activity_part["promo_id"], order_id, activity_part["discount"]
                         )
                     parts = [p["name"] for p in (activity_part, coupon_part) if p]
                     promo_applied = {

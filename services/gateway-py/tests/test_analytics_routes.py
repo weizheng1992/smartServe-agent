@@ -1184,6 +1184,7 @@ class TestMultiTurnSession:
 
     async def test_followup_rewrite_uses_history(self, client, auth, monkeypatch):
         from engine_py.analytics.engine import StructuredQueryIntent
+
         from gateway_py.merchant_db import ensure_merchant_tables
 
         await ensure_merchant_tables()

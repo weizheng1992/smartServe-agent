@@ -46,6 +46,30 @@ def _in_window(promo: dict, now: datetime | None = None) -> bool:
     return True
 
 
+def best_discount_for_amount(
+    promos: list[dict], spu_code: str, price: float
+) -> dict | None:
+    """给定活动集合,取对该商品可用的最大优惠(荐品排序口径:立减额最大,
+    不做 best_for_amount 的「范围优先于全局」取舍)。券型不算商品让利,
+    由调用方预先过滤;低于门槛/超出范畴返回 None。同步纯函数 —— 供荐品
+    一次拉取活动集后内存打分,根除逐 SPU 查询的 N+1(2026-09-23)。"""
+    best: dict | None = None
+    for p in promos:
+        if p.get("promo_type") == "coupon":
+            continue
+        if p.get("scope_type") == "spu" and p.get("scope_value") != spu_code:
+            continue
+        discount = _compute_discount(p, price)
+        if discount is None:
+            continue
+        if not best or discount > best["discount"]:
+            best = {
+                "promo_id": p["id"], "name": p["name"],
+                "discount": min(discount, price),
+            }
+    return best
+
+
 async def fetch_active_promos(conn) -> list[dict]:
     rows = (
         await conn.execute(

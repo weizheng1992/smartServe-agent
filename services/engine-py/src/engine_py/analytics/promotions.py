@@ -201,6 +201,18 @@ async def my_coupons(user_id: str) -> list[dict]:
              "claimedAt": r["claimed_at"].isoformat() if r["claimed_at"] else None} for r in rows]
 
 
+async def record_promo_redemption(conn, promotion_id: str | None, order_id: str, discount: float) -> None:
+    """核销流水统一落库(gateway/engine 结算共用,2026-09-23 收口双实现):
+    promotion_redemptions 一行 = 订单×优惠×立减额;无优惠不落。"""
+    if not promotion_id or discount <= 0:
+        return
+    await conn.execute(
+        text("INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
+             "VALUES (CAST(:pid AS uuid), :oid, :amt)").bindparams(
+                 pid=promotion_id, oid=order_id, amt=round(discount, 2))
+    )
+
+
 async def mark_coupon_used(conn, coupon_row_id: str, order_id: str) -> bool:
     """结算用券后置已用(与订单同事务)。
 
