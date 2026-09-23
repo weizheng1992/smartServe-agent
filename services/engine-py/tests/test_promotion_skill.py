@@ -231,10 +231,10 @@ def _seed_deal_catalog(container) -> None:
         e = create_async_engine(container.url.render_as_string(hide_password=False), poolclass=NullPool)
         async with e.begin() as conn:
             for ddl in (
-                "CREATE TABLE IF NOT EXISTS merchant_spus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
-                "spu_code TEXT UNIQUE, title TEXT, main_image TEXT, status TEXT DEFAULT 'ON_SALE')",
-                "CREATE TABLE IF NOT EXISTS merchant_skus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
-                "spu_id UUID REFERENCES merchant_spus(id), sku_code TEXT UNIQUE, sku_title TEXT, price NUMERIC(10,2), stock INT)",
+                ("CREATE TABLE IF NOT EXISTS merchant_spus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "spu_code TEXT UNIQUE, title TEXT, main_image TEXT, status TEXT DEFAULT 'ON_SALE')"),
+                ("CREATE TABLE IF NOT EXISTS merchant_skus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "spu_id UUID REFERENCES merchant_spus(id), sku_code TEXT UNIQUE, sku_title TEXT, price NUMERIC(10,2), stock INT)"),
                 "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS status TEXT",
                 "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS main_image TEXT",
                 "ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS price NUMERIC(10,2)",
@@ -336,6 +336,107 @@ class TestPromoDealRecommendation:
         assert result.success is True
         assert "优惠力度最大" in result.output
         assert result.output.index("冠军款老爹鞋") < result.output.index("基础款袜子")
+
+
+class TestDealRecommendationRefinement:
+    """多轮 refine(2026-09-23 实弹):「太贵了，来点便宜些优惠大的」曾被无视
+    —— 荐品分支原样复读全局榜,既不排除已荐商品也不响应价格诉求。"""
+
+    @staticmethod
+    def _seed_refinement_catalog(container):
+        """A ¥1099(满1000减150,立减最大) / B ¥399 / C ¥169(满100减30)。"""
+        async def _seed():
+            e = create_async_engine(container.url.render_as_string(hide_password=False), poolclass=NullPool)
+            async with e.begin() as conn:
+                for ddl in (
+                    ("CREATE TABLE IF NOT EXISTS merchant_spus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                    "spu_code TEXT UNIQUE, title TEXT, main_image TEXT, status TEXT DEFAULT 'ON_SALE')"),
+                    ("CREATE TABLE IF NOT EXISTS merchant_skus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                    "spu_id UUID REFERENCES merchant_spus(id), sku_code TEXT UNIQUE, sku_title TEXT, price NUMERIC(10,2), stock INT)"),
+                    "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS status TEXT",
+                ):
+                    await conn.execute(text(ddl))
+                # 清空目录保证排序断言确定(本文件之后无套件依赖目录数据);
+                # promotions 一并重种,免全场 88 折等既有活动干扰力度排序
+                await conn.execute(text("DELETE FROM merchant_skus"))
+                await conn.execute(text("DELETE FROM merchant_spus"))
+                await conn.execute(text("DELETE FROM promotions"))
+                rows = [
+                    ("REF-A", "精化回归贵款", 1099),
+                    ("REF-B", "精化回归中款", 399),
+                    ("REF-C", "精化回归便宜款", 169),
+                ]
+                for code, title, price in rows:
+                    spu_exists = (await conn.execute(text(
+                        "SELECT 1 FROM merchant_spus WHERE spu_code = :c"
+                    ).bindparams(c=code))).first()
+                    if spu_exists is None:
+                        await conn.execute(text(
+                            "INSERT INTO merchant_spus (spu_code, title, status) VALUES (:c, :t, 'ON_SALE')"
+                        ).bindparams(c=code, t=title))
+                    await conn.execute(text(
+                        "INSERT INTO merchant_skus (spu_id, sku_code, sku_title, price, stock) "
+                        "SELECT p.id, :kc, '默认', :p, 10 FROM merchant_spus p WHERE p.spu_code = :c "
+                        "AND NOT EXISTS (SELECT 1 FROM merchant_skus s WHERE s.sku_code = :kc)"
+                    ).bindparams(c=code, kc=f"{code}-SKU", p=price))
+                await conn.execute(text(
+                    "INSERT INTO promotions (name, promo_type, status, discount_value, threshold_amount, scope_type) "
+                    "VALUES ('精化满1000减150', 'full_reduction', 'active', 150, 1000, 'all'), "
+                    "('精化满100减30', 'full_reduction', 'active', 30, 100, 'all')"
+                ))
+            await e.dispose()
+
+        asyncio.run(_seed())
+
+    def test_cheaper_refinement_excludes_shown_and_prefers_cheap(self, container):
+        """多轮 refine:携带已荐清单的追问,排除已荐并按价格升序荐剩余;
+        「这都太贵了」指代上轮全部三款 → 排除后无货须诚实告知。"""
+        self._seed_refinement_catalog(container)
+        from engine_py.skills.contract import SkillContext
+
+        ctx_spy = SkillContext(
+            thread_id=None, user_id="CUST-8801", tenant_id="aurora", input="推荐优惠最大的商品"
+        )
+        first = asyncio.run(PromotionQuerySkill().execute(ctx_spy))
+        assert first.output.index("精化回归贵款") == min(
+            first.output.index(t) for t in ("精化回归贵款", "精化回归中款", "精化回归便宜款")
+        ), f"默认力度榜贵款应第一: {first.output}"
+
+        # 第一轮已荐全部三款,第二轮「太贵了」→ 诚实告知无更便宜,且不再复读
+        refine_ctx = SkillContext(
+            thread_id=None,
+            user_id="CUST-8801",
+            tenant_id="aurora",
+            input="但是这个都太贵了，稍微便宜一些的优惠大的",
+            guide_context=first.guide_context,
+        )
+        second = asyncio.run(PromotionQuerySkill().execute(refine_ctx))
+        assert second.success is True
+        assert "贵款" not in second.output, f"已荐商品不得复读: {second.output}"
+        assert "暂时没有" in second.output, second.output
+
+        # 只荐过贵款一轮:refine 时便宜款/中款按价格升序出现,贵款排除
+        partial_ctx = SkillContext(
+            thread_id=None,
+            user_id="CUST-8801",
+            tenant_id="aurora",
+            input="但是这个都太贵了，稍微便宜一些的优惠大的",
+            guide_context={"promotion_recommendation": {"spuCodes": ["REF-A"]}},
+        )
+        third = asyncio.run(PromotionQuerySkill().execute(partial_ctx))
+        assert third.output.index("精化回归便宜款") < third.output.index("精化回归中款"), (
+            f"价格升序: {third.output}"
+        )
+        assert third.guide_context["promotion_recommendation"]["spuCodes"], "本轮荐品也要回写"
+
+    def test_budget_filters_candidates(self, container):
+        self._seed_refinement_catalog(container)
+        result = asyncio.run(
+            PromotionQuerySkill().execute(_ctx("CUST-8801", "200以内的商品有什么优惠"))
+        )
+        assert result.success is True
+        assert "精化回归便宜款" in result.output
+        assert "精化回归贵款" not in result.output and "精化回归中款" not in result.output
 
     def test_fast_track_matches_decided_intent_over_guide_keywords(self):
         """快轨技能匹配必须认已决意图:promotion_query 不得被导购技能的

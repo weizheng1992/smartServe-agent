@@ -43,6 +43,13 @@ _RECOMMEND_RE = re.compile(
     r"(推荐|哪款|哪个|什么商品|值得买|力度最大|优惠最大|最划算|便宜"
     r"|叠加[^。]{0,4}减|减得?最[多高狠]|立减)"
 )
+# 多轮 refine(2026-09-23 实弹):「太贵了，来点便宜些优惠大的」曾被原样
+# 复读全局榜 —— 价格诉求/预算/换一批措辞触发排除已荐与按价升序
+_BUDGET_RE = re.compile(
+    r"(?:(\d{2,5})\s*(?:元|块)?\s*(?:以内|以下))|(?:预算|不超过|最多)\s*(\d{2,5})\s*(?:元|块)?"
+)
+_CHEAPER_RE = re.compile(r"太贵|贵了|价格高|便宜|低一点|低一些")
+_OTHERS_RE = re.compile(r"其他|别的|换一批|换几款|还有别的")
 
 
 def _promo_rule_line(p: dict) -> str:
@@ -95,15 +102,28 @@ class PromotionQuerySkill(BaseSkill):
                         ).bindparams(u=user_id)
                     )
                 ).mappings().all()
-                # 优惠荐品(2026-09-22):荐品问法按在售商品立减额排序
+                # 优惠荐品(2026-09-22):荐品/价格诉求/预算问法按规则荐品,
+                # guide_context 跨轮携带已荐商品与偏好(多轮 refine)
                 recommendation = None
-                if _RECOMMEND_RE.search(question):
-                    recommendation = await self._render_deal_recommendation(conn)
+                recommendation_spus: list[str] = []
+                if (
+                    _RECOMMEND_RE.search(question)
+                    or _BUDGET_RE.search(question)
+                    or _CHEAPER_RE.search(question)
+                ):
+                    recommendation, recommendation_spus = await self._render_deal_recommendation(
+                        conn, context.guide_context or {}, question
+                    )
         except Exception as err:
             return SkillResult(success=True, output=f"优惠数据暂时查询不到({err})", next_action="finish")
 
         if recommendation is not None:
-            return SkillResult(success=True, output=recommendation, next_action="finish")
+            return SkillResult(
+                success=True,
+                output=recommendation,
+                next_action="finish",
+                guide_context={"promotion_recommendation": {"spuCodes": recommendation_spus}},
+            )
 
         used_only = bool(_USED_COUPON_RE.search(question))
         coupon_centric = used_only or bool(_MY_COUPON_RE.search(question))
@@ -167,10 +187,25 @@ class PromotionQuerySkill(BaseSkill):
         lines.append("活动优惠与优惠券可叠加：活动先减，优惠券按活动后余额抵扣。")
         return "\n".join(lines)
 
-    async def _render_deal_recommendation(self, conn) -> str:
+    async def _render_deal_recommendation(
+        self, conn, guide_context: dict, question: str
+    ) -> tuple[str, list[str]]:
         """优惠荐品(2026-09-22):在售商品逐一取最优商品活动(排除券型,
-        券是用户资产不属商品让利),按立减额降序 Top 3;无优惠诚实空。"""
+        券是用户资产不属商品让利),默认按立减额降序 Top 3;无优惠诚实空。
+
+        多轮 refine(2026-09-23 实弹):「太贵了/便宜些」→ 排除已荐商品并
+        按价格升序荐剩余有活动力度的商品;「X 元以内/预算 X」按预算过滤、
+        力度降序;refine 后无货诚实说明并回退全量力度榜。返回 (文案, 本轮
+        已荐 spu_codes) —— 调用方写回 guide_context 供下一轮 refine。"""
         from ..analytics.promotion_engine import best_for_amount
+
+        budget: float | None = None
+        budget_match = _BUDGET_RE.search(question)
+        if budget_match:
+            budget = float(budget_match.group(1) or budget_match.group(2))
+        cheaper = bool(_CHEAPER_RE.search(question))
+        refining = cheaper or bool(_OTHERS_RE.search(question)) or budget is not None
+        last_shown = set((guide_context or {}).get("promotion_recommendation", {}).get("spuCodes") or [])
 
         products = (
             await conn.execute(
@@ -182,29 +217,55 @@ class PromotionQuerySkill(BaseSkill):
                 )
             )
         ).mappings().all()
-        deals = []
-        for row in products:
-            price = float(row["price"])
-            best = await best_for_amount(conn, price, {str(row["spu_code"])}, exclude_coupon=True)
-            if best and best["discount"] > 0:
-                deals.append(
-                    {
-                        "title": row["title"],
-                        "price": price,
-                        "discount": best["discount"],
-                        "name": best["name"],
-                        "promo_price": round(price - best["discount"], 2),
-                    }
-                )
+
+        async def _collect(exclude: set[str]) -> list[dict]:
+            deals: list[dict] = []
+            for row in products:
+                spu_code = str(row["spu_code"])
+                if spu_code in exclude:
+                    continue
+                price = float(row["price"])
+                if budget is not None and price > budget:
+                    continue
+                best = await best_for_amount(conn, price, {spu_code}, exclude_coupon=True)
+                if best and best["discount"] > 0:
+                    deals.append(
+                        {
+                            "spu_code": spu_code,
+                            "title": row["title"],
+                            "price": price,
+                            "discount": best["discount"],
+                            "name": best["name"],
+                            "promo_price": round(price - best["discount"], 2),
+                        }
+                    )
+            return deals
+
+        exclude = last_shown if refining else set()
+        deals = await _collect(exclude)
+        if refining and not deals:
+            # 排除已荐后无货:诚实告知并引导给预算,严禁把用户嫌贵的产品再列回去
+            return (
+                "更便宜且优惠力度大的商品暂时没有。可以告诉我预算（如「300以内」），"
+                "或看看在售优惠活动～"
+            ), []
         if not deals:
-            return "当前没有进行中的商品优惠，暂时没有优惠推荐。"
-        deals.sort(key=lambda d: d["discount"], reverse=True)
+            return "当前没有进行中的商品优惠，暂时没有优惠推荐。", []
+
+        if cheaper:
+            deals.sort(key=lambda d: d["price"])
+        else:
+            # 立降额优先;平局按价升序(同力度优先便宜,且排序确定可测)
+            deals.sort(key=lambda d: (-d["discount"], d["price"]))
+        top = deals[:3]
+        spu_codes = [d["spu_code"] for d in top]
+
         lines = ["🎁 优惠力度最大的商品："]
-        for d in deals[:3]:
+        for d in top:
             lines.append(
                 f"• {d['title']} ¥{d['price']:.0f} → ¥{d['promo_price']:.0f}"
                 f"（{d['name']}，立减 ¥{d['discount']:.0f}）"
             )
         lines.append("")
         lines.append("领券后可与活动叠加：活动先减，优惠券按余额抵扣。")
-        return "\n".join(lines)
+        return "\n".join(lines), spu_codes
