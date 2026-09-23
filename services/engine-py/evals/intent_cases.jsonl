@@ -71,10 +71,13 @@
 {"question": "哪个商品压的货值最大", "expect_metric": "stock_value", "source": "registry"}
 {"question": "张伟的消费记录折线图", "expect_metric": "customer_spend_trend", "source": "registry"}
 {"question": "张伟近3个月的消费趋势", "expect_metric": "customer_spend_trend", "source": "registry"}
+{"question": "为什么这个月退货突然变多", "expect_metric": "attribution_refund", "source": "edge"}
+{"question": "为什么这个月销售额变多了", "expect_metric": "attribution_sales", "source": "registry"}
 {"question": "销量 折线图", "expect_metric": "volume_trend", "source": "edge"}
 {"question": "GMV 折线图", "expect_metric": "gmv_trend", "source": "edge"}
 {"question": "销量榜 折线图", "expect_metric": "volume", "source": "edge"}
 {"question": "AURORA-ORD-2026-1737 订单详情", "expect_metric": "order_overview", "source": "edge"}
+{"question": "为什么这个月卖得更好", "expect_metric": "attribution_sales", "source": "edge"}
 {"question": "上个月的销量排行", "expect_metric": "volume", "source": "edge"}
 {"question": "订单量趋势", "expect_metric": "orders_trend", "source": "edge"}
 {"question": "销量排行", "expect_metric": "volume", "source": "edge"}
@@ -93,5 +96,4 @@
 {"question": "冲锋衣88折对比背包品类85折", "expect_metric": "promo_compare", "layer": "L3", "source": "entity"}
 {"question": "今天心情如何", "expect_unsupported": true, "source": "longtail"}
 {"question": "帮我算算公司估值", "expect_unsupported": true, "source": "longtail"}
-{"question": "为什么这个月退货突然变多", "expect_unsupported": true, "source": "longtail"}
 {"question": "今天天气怎么样", "expect_unsupported": true, "source": "longtail"}

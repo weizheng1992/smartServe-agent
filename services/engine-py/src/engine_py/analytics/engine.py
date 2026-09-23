@@ -580,6 +580,38 @@ class MetricQueryEngine:
                 f"{time_clause} GROUP BY c.customer_id, c.name, c.phone "
                 f'ORDER BY "metricScore" {direction} LIMIT :lim'
             )
+        elif intent.metric in ("attribution_refund", "attribution_sales"):
+            # 归因族(雾区启动):确定性环比分解 —— 本月 vs 上月按商品列 Top 变动
+            # 贡献者;只呈现算得的差异,不猜测原因(08-D1:LLM/模板都不编叙事)
+            params.pop("lim", None)
+            if intent.metric == "attribution_refund":
+                cur_expr = "COUNT(DISTINCT o.order_id)"
+                status_clause = "AND o.status = 'REFUNDED'"
+                label = "退货变化"
+            else:
+                cur_expr = "COALESCE(SUM(oi.quantity * oi.price), 0)"
+                status_clause = "AND o.status NOT IN ('REFUNDED', 'CANCELLED')"
+                label = "销售变化"
+            sql = (
+                "WITH cur AS ("
+                "SELECT oi.spu_id AS spu, " + cur_expr + "::float AS v "
+                "FROM merchant_orders o JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                "WHERE o.created_at >= date_trunc('month', CURRENT_DATE) " + status_clause + " "
+                "GROUP BY oi.spu_id), "
+                "prev AS ("
+                "SELECT oi.spu_id AS spu, " + cur_expr + "::float AS v "
+                "FROM merchant_orders o JOIN merchant_order_items oi ON oi.order_id = o.order_id "
+                "WHERE o.created_at >= date_trunc('month', CURRENT_DATE) - INTERVAL '1 month' "
+                "AND o.created_at < date_trunc('month', CURRENT_DATE) " + status_clause + " "
+                "GROUP BY oi.spu_id) "
+                "SELECT COALESCE(s.title, c.spu) AS \"" + label + "商品\", "
+                "COALESCE(c.v, 0)::float AS \"本月\", "
+                "COALESCE(p.v, 0)::float AS \"上月\", "
+                "(COALESCE(c.v, 0) - COALESCE(p.v, 0))::float AS \"变化\" "
+                "FROM cur c FULL OUTER JOIN prev p ON p.spu = c.spu "
+                "LEFT JOIN merchant_spus s ON s.spu_code = COALESCE(c.spu, p.spu) "
+                "ORDER BY ABS(COALESCE(c.v, 0) - COALESCE(p.v, 0)) DESC LIMIT 50"
+            )
         elif intent.metric == "customer_spend_stats":
             # 客户消费统计(阶段⑦客户族):客户实体必传,宽表单行
             params.pop("lim", None)

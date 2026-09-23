@@ -1101,3 +1101,49 @@ customer_spend_trend:
   availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
+
+attribution_refund:
+    key: attribution_refund
+    label: 退货变化归因
+    description: 本月 vs 上月退货单数对比,按商品列变化最大的贡献者(确定性环比分解)。
+    domain: review
+    sourceTables: [merchant_orders, merchant_order_items]
+    expression: cur/prev refund count per spu + delta
+    sqlTemplate: merchant_db
+    businessRules:
+      - 归因只做确定性环比分解,不猜测原因(08-D1);变多/变少由行序表达
+    direction: DESC
+    unit: 单
+    icon: "🔍"
+    aliases: [why_refund_change]
+    synonyms: [为什么退货变多, 为什么退货变少, 退货为什么变多, 退款为什么变多,
+      为什么退款变多, 退货变化归因, 为什么退货突然变多, 退货突然变多, 退货突然变少,
+      退货变多, 退货变少, 退款变多, 退款变少]
+    conflictGroup: []
+    sampleQueries: [为什么这个月退货突然变多]
+    availableDimensions: []
+    permissionTag: sales_viewer
+    verifiedConfidence: 0.9
+attribution_sales:
+    key: attribution_sales
+    label: 销售变化归因
+    description: 本月 vs 上月 GMV 对比,按商品列变化最大的贡献者(确定性环比分解)。
+    domain: sales
+    sourceTables: [merchant_orders, merchant_order_items]
+    expression: cur/prev GMV per spu + delta
+    sqlTemplate: merchant_db
+    businessRules:
+      - 归因只做确定性环比分解,不猜测原因(08-D1);变好/变差由行序表达
+    direction: DESC
+    unit: 元
+    icon: "🔍"
+    aliases: [why_sales_change]
+    synonyms: [为什么卖得变好, 为什么卖得变差, 为什么销量变多, 为什么销量变少,
+      为什么销售额变多, 为什么销售额变少, 销售变化归因, 为什么这个月卖得更好,
+      为什么这个月卖得差, 销售额变多, 销售额变少, 销量变多, 销量变少,
+      卖得更好, 卖得更差, 卖得变好, 卖得变差]
+    conflictGroup: []
+    sampleQueries: [为什么这个月销售额变多了]
+    availableDimensions: []
+    permissionTag: sales_viewer
+    verifiedConfidence: 0.9

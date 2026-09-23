@@ -1289,3 +1289,46 @@ class TestInlineOrderId:
         rows = events["result"]["rows"]
         assert len(rows) == 1 and rows[0]["订单号"] == "E2E-DET-ORD"
         assert rows[0]["金额"] == 123.0
+
+
+class TestAttributionFamily:
+    """归因族:为什么退货/销售变化 → 确定性环比分解(Top 变动贡献者)。"""
+
+    async def test_why_refund_increase_attributed(self, client, auth):
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        async with _merchant_writer_engine().begin() as c:
+            await c.execute(_t(
+                "INSERT INTO merchant_spus (id, spu_code, title, category, main_image, status) "
+                "VALUES (CAST(:id AS uuid), :code, :title, '配饰', '', 'ON_SALE') "
+                "ON CONFLICT (spu_code) DO NOTHING"
+            ), {"id": "11111111-1111-1111-1111-111111111111", "code": "SPU-E2E-ATTR", "title": "归因测试款"})
+            await c.execute(_t(
+                "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, spec_attributes, price, stock) "
+                "VALUES (CAST(:sid AS uuid), CAST(:id AS uuid), :code, '默认', CAST('{}' AS jsonb), 100, 5) "
+                "ON CONFLICT DO NOTHING"
+            ), {"sid": "22222222-2222-2222-2222-222222222222", "id": "11111111-1111-1111-1111-111111111111", "code": "SPU-E2E-ATTR-SKU"})
+            # 本月一笔退款单、上月无 → 归因行:变化 +1
+            await c.execute(_t(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address, created_at) "
+                "VALUES ('E2E-ATTR-CUR', 'CUST-E2E-MT', 'REFUNDED', 100.00, '{}'::jsonb, date_trunc('month', CURRENT_DATE) + INTERVAL '1 day') "
+                "ON CONFLICT (order_id) DO NOTHING"
+            ))
+            await c.execute(_t(
+                "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price) "
+                "VALUES ('E2E-ATTR-CUR', 'SPU-E2E-ATTR', 'SPU-E2E-ATTR-SKU', '归因测试款', '默认', 1, 100.00)"
+            ))
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "为什么这个月退货突然变多",
+        })
+        assert "result" in dict(_sse_events(r)), f"DBG {_sse_events(r)} body={r.text[:300]}"
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "attribution_refund"
+        rows = events["result"]["rows"]
+        top = next((x for x in rows if x["退货变化商品"] == "归因测试款"), None)
+        assert top is not None and top["本月"] == 1.0 and top["变化"] == 1.0

@@ -28,6 +28,8 @@ EDGE: list[dict] = [
     {"question": "GMV 折线图", "expect_metric": "gmv_trend", "source": "edge"},
     {"question": "销量榜 折线图", "expect_metric": "volume", "source": "edge"},
     {"question": "AURORA-ORD-2026-1737 订单详情", "expect_metric": "order_overview", "source": "edge"},
+    {"question": "为什么这个月退货突然变多", "expect_metric": "attribution_refund", "source": "edge"},
+    {"question": "为什么这个月卖得更好", "expect_metric": "attribution_sales", "source": "edge"},
     {"question": "上个月的销量排行", "expect_metric": "volume", "source": "edge"},
     {"question": "近30天GMV趋势", "expect_metric": "gmv_trend", "source": "edge"},
     {"question": "每天的销售额走势", "expect_metric": "gmv_trend", "source": "edge"},
@@ -94,7 +96,8 @@ for c in CASES:
 CASES = list(dedup.values())
 
 # ── 3) 长尾拒绝面(08-P1 响亮失败) ─────────────────────────────────
-for q in ["今天心情如何", "帮我算算公司估值", "为什么这个月退货突然变多", "今天天气怎么样"]:
+# 注:「为什么退货变多」已从拒绝面毕业 → attribution_refund(归因族上线)
+for q in ["今天心情如何", "帮我算算公司估值", "今天天气怎么样"]:
     CASES.append({"question": q, "expect_unsupported": True, "source": "longtail"})
 
 OUT = Path(__file__).resolve().parent.parent / "evals" / "intent_cases.jsonl"

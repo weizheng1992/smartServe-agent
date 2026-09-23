@@ -22,7 +22,24 @@ class UnsafeSqlError(Exception):
     """任何校验不通过的统一异常(呈现层据此分类诚实报错)。"""
 
 
+def _cte_aliases(expr: exp.Expression) -> set[str]:
+    """语句内 WITH 定义的 CTE 别名 —— 引用合法,白名单校验须豁免
+    (否则任何 CTE 模板都被误拒,归因族 FULL OUTER JOIN 实弹踩出)。"""
+    names: set[str] = set()
+    for node in expr.walk():
+        if isinstance(node, exp.With):
+            for cte in node.expressions:
+                alias = getattr(cte, "alias", None)
+                if alias is None:
+                    continue
+                name = alias if isinstance(alias, str) else alias.name
+                if name:
+                    names.add(str(name))
+    return names
+
+
 def _validate_expression(expr: exp.Expression, allowed_tables: set[str] | None) -> None:
+    cte_names = _cte_aliases(expr)
     for node in expr.walk():
         if isinstance(node, exp.Func) and node.sql_name().lower() in _FORBIDDEN_FUNCTIONS:
             raise UnsafeSqlError(f"危险函数: {node.sql_name()}")
@@ -30,6 +47,8 @@ def _validate_expression(expr: exp.Expression, allowed_tables: set[str] | None) 
             raise UnsafeSqlError(f"非查询语句: {type(node).__name__}")
         if isinstance(node, exp.Table):
             table_name = node.name
+            if table_name in cte_names:
+                continue
             if allowed_tables is not None and table_name and table_name not in allowed_tables:
                 raise UnsafeSqlError(f"表白名单外: {table_name}")
 

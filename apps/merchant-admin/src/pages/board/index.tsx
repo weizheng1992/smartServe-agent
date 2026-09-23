@@ -57,6 +57,18 @@ export default function BoardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 大屏模式:浏览器全屏 + 网格铺开(看板挂壁/投屏场景)
+  const [bigScreen, setBigScreen] = useState(false);
+  useEffect(() => {
+    const onFs = () => setBigScreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+  function toggleBigScreen() {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen().catch(() => {});
+  }
+
   function removePin(id: string) {
     const next = loadPins().filter((p) => p.id !== id);
     localStorage.setItem('merchant-admin.board', JSON.stringify(next));
@@ -64,7 +76,7 @@ export default function BoardPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className={bigScreen ? 'min-h-screen bg-zinc-50 p-6' : 'mx-auto max-w-4xl'}>
       <div className="mb-3 flex items-center justify-between">
         <div>
           <div className="text-sm font-medium">数据看板</div>
@@ -75,6 +87,7 @@ export default function BoardPage() {
         <div className="flex items-center gap-2">
           {refreshing && <span className="text-[11px] text-zinc-400">刷新中…</span>}
           <Button size="sm" variant="outline" onClick={() => void replay(loadPins())}>立即刷新</Button>
+          <Button size="sm" variant="outline" onClick={toggleBigScreen}>{bigScreen ? '退出大屏' : '⛶ 大屏'}</Button>
         </div>
       </div>
 
@@ -84,7 +97,7 @@ export default function BoardPage() {
         </div>
       )}
 
-      <div className="space-y-4">
+      <div className={bigScreen ? 'grid grid-cols-2 gap-4 xl:grid-cols-3' : 'space-y-4'}>
         {pins.map((pin) => {
           const st = states[pin.id] || { frames: null, error: null, at: null };
           const results = (st.frames || []).filter((f) => f.event === 'result');

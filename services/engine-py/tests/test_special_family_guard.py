@@ -30,6 +30,9 @@ _SPECIAL_METRICS: list[tuple[str, dict]] = [
     ("promo_sku_compare", {"entity_slot": {"promotion": ["P1"], "spu": ["S1"]}}),
     ("promo_compare", {"entity_slot": {"promotion": ["P1", "P2"]}}),
     ("customer_orders", {"entity_slot": {"customer": ["C1"]}}),
+    # 归因族(确定性环比分解)
+    ("attribution_refund", {}),
+    ("attribution_sales", {}),
     # 阶段⑥对话出口族
     ("aov", {}),
     ("order_count", {}),

@@ -78,7 +78,7 @@ DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
 ROLE_METRIC_PERMISSIONS: dict[str, list[str] | None] = {
     "finance_owner": None,  # None = 全量
     "admin": None,  # 管理员同老板全量
-    "sales_viewer": ["gmv", "gmv_trend", "volume_trend", "orders_trend", "order_overview", "volume", "review_bad", "review_good", "refund_rate", "session_volume", "ai_resolution_rate", "aov", "order_count", "zero_sales", "category_gmv_top", "customer_spend_top", "customer_spend_stats", "customer_coupons", "customer_profile", "customer_panorama", "customer_spend_trend", "biz_overview", "gmv_mom"],
+    "sales_viewer": ["gmv", "gmv_trend", "volume_trend", "orders_trend", "order_overview", "volume", "review_bad", "review_good", "refund_rate", "session_volume", "ai_resolution_rate", "aov", "order_count", "zero_sales", "category_gmv_top", "customer_spend_top", "customer_spend_stats", "customer_coupons", "customer_profile", "customer_panorama", "customer_spend_trend", "biz_overview", "gmv_mom", "attribution_refund", "attribution_sales"],
     "warehouse_operator": ["volume", "stock_risk", "refund_rate", "session_volume", "zero_sales", "stock_value", "orders_trend"],
 }
 
