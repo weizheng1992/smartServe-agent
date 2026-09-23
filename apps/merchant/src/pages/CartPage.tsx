@@ -19,7 +19,7 @@ export default function CartPage() {
     coupons: Array<{ couponId: string; name: string; value: number; usable: boolean; discount: number }>;
     bestCouponId: string | null;
   } | null>(null);
-  // 'none'=明确不用券;具体 id=自选券(与活动互斥,服务端按所选券抵扣)
+  // 'none'=明确不用券;具体 id=自选券(与活动叠加:活动先减,券按余额抵扣)
   const [selectedCouponId, setSelectedCouponId] = useState<string>('none');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
@@ -205,7 +205,7 @@ export default function CartPage() {
             phone: selectedAddress.phone || user.phone,
             fullAddress: selectedAddress.fullAddress,
           },
-          couponId: selectedCouponId === 'none' ? 'none' : selectedCouponId,
+          couponId: selectedCouponId,
         }),
       });
       const data = await res.json();
