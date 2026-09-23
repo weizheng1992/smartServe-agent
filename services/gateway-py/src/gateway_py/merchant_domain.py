@@ -407,7 +407,7 @@ async def place_order(params: dict) -> dict:
                 raise
             except Exception as promo_err:
                 print(f"[MerchantDomain] 优惠计算失败,按原价结算: {promo_err}")
-                promo = {"discount": 0.0, "promo_name": None, "coupon_row_id": None, "promo_id": None}
+                promo = _empty_promo()
             discount = promo["discount"]
             promo_name = promo["promo_name"]
 
@@ -710,6 +710,20 @@ async def _resolve_promotion(
     return result
 
 
+def _empty_promo() -> dict:
+    """优惠引擎异常回落形状(与 _resolve_promotion 返回同构):按原价结算、
+    零优惠、不核销。2026-09-23 code-review 硬伤:两处内联兜底字典缺
+    activity/coupon 键,后续 (promo["activity"] or {}) 必抛 KeyError ——
+    促销表缺失等异常时「失败按原价结算」失效、整单 500。"""
+    return {
+        "activity": None,
+        "coupon": None,
+        "discount": 0.0,
+        "promo_name": None,
+        "coupon_row_id": None,
+    }
+
+
 async def _record_promo_redemption(conn: Any, promo_id: str | None, order_id: str, discount: float) -> None:
     """核销流水与引擎侧账本对齐(mall_domain 同表);无优惠不落。"""
     if not promo_id or discount <= 0:
@@ -789,7 +803,7 @@ async def create_order_from_cart(
                 raise
             except Exception as promo_err:
                 print(f"[MerchantDomain] 购物车结算优惠计算失败,按原价: {promo_err}")
-                promo = {"discount": 0.0, "promo_name": None, "coupon_row_id": None, "promo_id": None}
+                promo = _empty_promo()
             discount = promo["discount"]
             promo_name = promo["promo_name"]
 

@@ -369,6 +369,45 @@ async def test_user_coupons_unique_constraint_blocks_double_claim(client, contra
         await _cleanup()
 
 
+async def test_promo_engine_failure_settles_at_original_price(client, contract_fixtures, monkeypatch):
+    """优惠引擎异常回落(2026-09-23 code-review 硬伤):决议函数抛非 _CartError
+    异常时必须按原价结算成单 —— 修前回落字典缺 activity/coupon 键,后续
+    下标访问必抛 KeyError,整单 500 且「失败按原价」承诺失效。"""
+    await _seed_catalog()
+    coupon_id = await _seed_coupon(_UID, 50)
+
+    async def _explode(*args, **kwargs):
+        raise RuntimeError("promotions 表不可达(模拟)")
+
+    monkeypatch.setattr("engine_py.analytics.promotion_engine.resolve_stacked_promotions", _explode)
+    try:
+        # 购物车结算通道
+        res = await client.post(
+            "/api/store/orders",
+            json={"customerId": _UID, "items": [{"skuCode": _SKUCODE, "quantity": 1}], "couponId": coupon_id},
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["success"] is True, f"回落必须成单: {body}"
+        assert body["discount"] == 0.0 and body["payableAmount"] == 300.0
+        # 券不核销(回落零优惠,券保持可用),无核销流水
+        assert await _coupon_status(coupon_id) == "claimed"
+        rows = await _order_rows(body["orderId"])
+        assert rows["total"] == 300.0 and rows["discount"] == 0.0
+        assert rows["redemptions"] == []
+
+        # 立即购买通道(place_order)同病同修
+        res2 = await client.post(
+            "/api/store/orders",
+            json={"customerId": _UID, "skuCode": _SKUCODE, "quantity": 1, "couponId": coupon_id},
+        )
+        assert res2.status_code == 200, res2.text
+        body2 = res2.json()
+        assert body2["success"] is True and body2["payableAmount"] == 300.0
+    finally:
+        await _cleanup()
+
+
 async def test_checkout_preview_readonly(client, contract_fixtures):
     """试算端点:原价/活动/券包逐张可用性,且完全只读(零订单零核销)。"""
     await _seed_catalog()

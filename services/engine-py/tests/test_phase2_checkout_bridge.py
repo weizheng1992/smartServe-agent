@@ -461,6 +461,71 @@ def test_checkout_activity_and_coupon_stack(pg_factory):
     assert "叠加回归满减" in result["promo"]["name"] and "契约新客券" in result["promo"]["name"]
 
 
+def test_checkout_coupon_double_spend_honest_message(pg_factory, monkeypatch):
+    """并发双花的聊天侧回报(2026-09-23 code-review):条件核销返回 False 时
+    整单回滚必须如实告知券因 —— 修前 RuntimeError 被通用 except 吞成
+    「结算失败，请稍后重试或转人工客服处理。」。"""
+    import uuid as _uuid
+
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    async def _fake_mark_used(conn, coupon_row_id, order_id):
+        return False  # 模拟并发订单已核销
+
+    monkeypatch.setattr(
+        "engine_py.analytics.promotions.mark_coupon_used", _fake_mark_used
+    )
+
+    async def scenario():
+        engine, me, orig, embeds = await _setup(pg_factory)
+        try:
+            async with me.begin() as conn:
+                cpid = str(_uuid.uuid4())
+                await conn.execute(text(
+                    "INSERT INTO promotions (id, name, promo_type, status, discount_value, scope_type) "
+                    "VALUES (CAST(:i AS uuid), '双花话术券', 'coupon', 'active', 50, 'all')"
+                ).bindparams(i=cpid))
+                await conn.execute(text(
+                    "INSERT INTO user_coupons (promotion_id, user_id) VALUES (CAST(:i AS uuid), :u)"
+                ).bindparams(i=cpid, u=UID))
+            _seed_cart([
+                {"skuId": "SPU-P2-BAG-SKU-0", "title": "极光 高山徒步轻量化背包 38L", "price": 829.0, "quantity": 1},
+            ])
+            async with me.connect() as conn:
+                before = (await conn.execute(
+                    text("SELECT count(*) FROM merchant_orders WHERE customer_id=:u"), {"u": UID}
+                )).scalar()
+            result = await MallDomainService.checkout_user_cart(
+                {"userId": UID, "threadId": TID,
+                 "shippingAddress": {"recipientName": "张伟", "phone": "13800138000", "fullAddress": "上海市浦东新区世纪大道100号"}}
+            )
+            async with me.connect() as conn:
+                after = (await conn.execute(
+                    text("SELECT count(*) FROM merchant_orders WHERE customer_id=:u"), {"u": UID}
+                )).scalar()
+                coupon = (await conn.execute(
+                    text("SELECT status FROM user_coupons WHERE user_id=:u"), {"u": UID}
+                )).mappings().first()
+            return result, after - before, coupon, cpid
+        finally:
+            try:
+                async with me.begin() as conn:
+                    await conn.execute(text("DELETE FROM user_coupons WHERE user_id=:u").bindparams(u=UID))
+                    await conn.execute(text(
+                        "DELETE FROM promotion_redemptions WHERE promotion_id=CAST(:i AS uuid)"
+                    ).bindparams(i=cpid))
+                    await conn.execute(text("DELETE FROM promotions WHERE id=CAST(:i AS uuid)").bindparams(i=cpid))
+            finally:
+                await _teardown(engine, me, orig, embeds)
+
+    result, new_orders, coupon, _cpid = asyncio.run(scenario())
+    assert result.get("success") is False, result
+    assert "优惠券" in result.get("message", ""), f"必须如实告知券因: {result}"
+    assert "另一笔订单" in result.get("message", ""), result
+    assert new_orders == 0, "整单回滚,零新增订单"
+    assert coupon["status"] == "claimed", "并发对方的核销语义不受本次影响"
+
+
 def test_checkout_insufficient_stock_no_order(pg_factory):
     """任一行库存不足:整单不落(与商城页 all-or-nothing 一致),回复如实点名。"""
     from engine_py.tools_registry.mall_domain import MallDomainService

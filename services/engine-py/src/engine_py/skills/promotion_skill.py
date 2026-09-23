@@ -213,7 +213,8 @@ class PromotionQuerySkill(BaseSkill):
                     "SELECT p.spu_code, p.title, MIN(s.price) AS price "
                     "FROM merchant_spus p JOIN merchant_skus s ON s.spu_id = p.id "
                     "WHERE p.status = 'ON_SALE' AND s.price IS NOT NULL "
-                    "GROUP BY p.spu_code, p.title"
+                    "GROUP BY p.spu_code, p.title "
+                    "HAVING COALESCE(SUM(s.stock), 0) > 0"
                 )
             )
         ).mappings().all()

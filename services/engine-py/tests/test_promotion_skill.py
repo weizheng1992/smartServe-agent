@@ -223,9 +223,11 @@ class TestCouponWalletQueries:
 def _seed_deal_catalog(container) -> None:
     """种两款在售商品(A ¥899 / B ¥169):88 折全场活动下 A 立减更大。
 
-    形状并集纪律(3c4c843 同款):共享容器里 merchant_spus/skus 的建表形状
-    由先到文件决定,本用例 ADD COLUMN IF NOT EXISTS 补齐所需列;严禁全表
-    DELETE 他套件的目录行,断言只盯本用例种的两款商品的相对排序。
+    完全自含(顺序无关,2026-09-23 组合跑教训):清空目录+活动+券表后重种
+    —— 断言依赖「top-3 只含 A/B」的确定宇宙,他套件(bridge 的 ¥829 背包)
+    遗留商品会抢 top-3 名额把 B 挤出榜单。同容器字母序在 bridge 之后跑,
+    清场不伤 bridge(其 _setup 每测试自种);本文件之后再无目录依赖套件。
+    形状并集纪律(3c4c843 同款)照旧:ADD COLUMN IF NOT EXISTS 补列。
     """
     async def _seed():
         e = create_async_engine(container.url.render_as_string(hide_password=False), poolclass=NullPool)
@@ -237,10 +239,28 @@ def _seed_deal_catalog(container) -> None:
                 "spu_id UUID REFERENCES merchant_spus(id), sku_code TEXT UNIQUE, sku_title TEXT, price NUMERIC(10,2), stock INT)"),
                 "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS status TEXT",
                 "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS main_image TEXT",
+                # 形状并集(2026-09-23 组合跑教训):先到建表者定义形状 —— bridge
+                # 的 spu INSERT 需要 subtitle/description/category/specs,我先
+                # 建表时缺列会让其全挂;全量真实 DDL 面照 ADD COLUMN 补齐
+                "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS subtitle TEXT",
+                "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS description TEXT",
+                "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS category TEXT",
+                "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS specs JSONB",
                 "ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS price NUMERIC(10,2)",
                 "ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS stock INT",
             ):
                 await conn.execute(text(ddl))
+            # 自含清场(顺序无关):目录/活动/券表全清后重种确定宇宙
+            await conn.execute(text("DELETE FROM promotion_redemptions"))
+            await conn.execute(text("DELETE FROM user_coupons"))
+            await conn.execute(text("DELETE FROM promotions"))
+            await conn.execute(text("DELETE FROM merchant_skus"))
+            await conn.execute(text("DELETE FROM merchant_spus"))
+            await conn.execute(text(
+                "INSERT INTO promotions (id, name, promo_type, status, discount_value, threshold_amount, scope_type) "
+                "VALUES (gen_random_uuid(), '开学季满400减50', 'full_reduction', 'active', 50, 400, 'all'), "
+                "(gen_random_uuid(), '全场88折', 'discount', 'active', 88, NULL, 'all')"
+            ))
             for code, title, sku, price in (
                 ("CT-DEAL-A", "冠军款老爹鞋", "CT-DEAL-A-SKU", 899),
                 ("CT-DEAL-B", "基础款袜子", "CT-DEAL-B-SKU", 169),
@@ -283,7 +303,7 @@ class TestPromoDealRecommendation:
         assert "优惠力度最大" in result.output
         # 899×88折 立减 107.88 > 169×88折 立减 20.28:A 必须排前
         assert result.output.index("冠军款老爹鞋") < result.output.index("基础款袜子")
-        assert "冲锋衣88折" in result.output and "立减" in result.output
+        assert "全场88折" in result.output and "立减" in result.output
 
     def test_recommend_honest_empty_without_promos(self, container):
         _seed_deal_catalog(container)
@@ -337,6 +357,24 @@ class TestPromoDealRecommendation:
         assert "优惠力度最大" in result.output
         assert result.output.index("冠军款老爹鞋") < result.output.index("基础款袜子")
 
+    def test_out_of_stock_products_not_recommended(self, container):
+        """缺货商品不荐(2026-09-23 code-review):SQL 曾只看 ON_SALE + 价格,
+        零库存商品照荐 —— 荐了买不了,诚实打折。"""
+        _seed_deal_catalog(container)
+
+        async def _zero_stock():
+            e = create_async_engine(container.url.render_as_string(hide_password=False), poolclass=NullPool)
+            async with e.begin() as conn:
+                await conn.execute(text(
+                    "UPDATE merchant_skus SET stock = 0 WHERE sku_code = 'CT-DEAL-A-SKU'"
+                ))
+            await e.dispose()
+
+        asyncio.run(_zero_stock())
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "推荐优惠最大的商品")))
+        assert "冠军款老爹鞋" not in result.output, f"缺货商品不得推荐: {result.output}"
+        assert "基础款袜子" in result.output, "在售有货商品照常推荐"
+
 
 class TestDealRecommendationRefinement:
     """多轮 refine(2026-09-23 实弹):「太贵了，来点便宜些优惠大的」曾被无视
@@ -354,10 +392,19 @@ class TestDealRecommendationRefinement:
                     ("CREATE TABLE IF NOT EXISTS merchant_skus (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
                     "spu_id UUID REFERENCES merchant_spus(id), sku_code TEXT UNIQUE, sku_title TEXT, price NUMERIC(10,2), stock INT)"),
                     "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS status TEXT",
+                    "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS main_image TEXT",
+                    "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS subtitle TEXT",
+                    "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS description TEXT",
+                    "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS category TEXT",
+                    "ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS specs JSONB",
+                    "ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS price NUMERIC(10,2)",
+                    "ALTER TABLE merchant_skus ADD COLUMN IF NOT EXISTS stock INT",
                 ):
                     await conn.execute(text(ddl))
-                # 清空目录保证排序断言确定(本文件之后无套件依赖目录数据);
-                # promotions 一并重种,免全场 88 折等既有活动干扰力度排序
+                # 清空目录/活动/券表保证排序断言确定(自含,顺序无关;
+                # 本文件之后无套件依赖目录数据)
+                await conn.execute(text("DELETE FROM promotion_redemptions"))
+                await conn.execute(text("DELETE FROM user_coupons"))
                 await conn.execute(text("DELETE FROM merchant_skus"))
                 await conn.execute(text("DELETE FROM merchant_spus"))
                 await conn.execute(text("DELETE FROM promotions"))
@@ -371,12 +418,14 @@ class TestDealRecommendationRefinement:
                         "SELECT 1 FROM merchant_spus WHERE spu_code = :c"
                     ).bindparams(c=code))).first()
                     if spu_exists is None:
+                        # id 显式生成:先到建表者(bridge)的形状无 DEFAULT
                         await conn.execute(text(
-                            "INSERT INTO merchant_spus (spu_code, title, status) VALUES (:c, :t, 'ON_SALE')"
+                            "INSERT INTO merchant_spus (id, spu_code, title, status) "
+                            "VALUES (gen_random_uuid(), :c, :t, 'ON_SALE')"
                         ).bindparams(c=code, t=title))
                     await conn.execute(text(
-                        "INSERT INTO merchant_skus (spu_id, sku_code, sku_title, price, stock) "
-                        "SELECT p.id, :kc, '默认', :p, 10 FROM merchant_spus p WHERE p.spu_code = :c "
+                        "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, price, stock) "
+                        "SELECT gen_random_uuid(), p.id, :kc, '默认', :p, 10 FROM merchant_spus p WHERE p.spu_code = :c "
                         "AND NOT EXISTS (SELECT 1 FROM merchant_skus s WHERE s.sku_code = :kc)"
                     ).bindparams(c=code, kc=f"{code}-SKU", p=price))
                 await conn.execute(text(

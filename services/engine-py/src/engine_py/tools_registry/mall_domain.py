@@ -36,6 +36,12 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+class _CouponAlreadyUsedError(RuntimeError):
+    """券已被并发订单核销(条件核销返回 False):整单回滚 + 如实告知券因
+    (2026-09-23 code-review:曾被通用 except 吞成「结算失败请稍后重试」,
+    回滚正确但用户不知道券的事)。"""
+
+
 class MallDomainService:
     # 导购 wrapper 词表:剥掉无商品语义的导购措辞,剩余才是检索词元。与
     # slot_extractor SHOPPING_GUIDE 规则、ShoppingGuideSkill._FALLBACK_RE
@@ -1819,7 +1825,10 @@ class MallDomainService:
                         )
                         # 条件核销防双花:False=券已被并发订单用掉,抛错回滚整单
                         if not await _promo_svc.mark_coupon_used(conn, coupon_row_id, order_id):
-                            raise RuntimeError("优惠券已被使用，结算整体回滚")
+                            raise _CouponAlreadyUsedError(
+                                "这张优惠券刚被另一笔订单使用了。商品未扣款、购物车未清空，"
+                                "可换个说法重新结算（不选券或换一张）～"
+                            )
                     if activity_part:
                         await conn.execute(
                             text(
@@ -1865,6 +1874,9 @@ class MallDomainService:
                             img=r.get("image_url"), spec=spec_summary, cost=r.get("cost_price") or 0,
                         )
                     )
+        except _CouponAlreadyUsedError as coupon_err:
+            print(f"[MallDomain] checkout rolled back, coupon already used: {coupon_err}")
+            return {"success": False, "message": str(coupon_err)}
         except Exception as err:
             print(f"[MallDomain] checkout failed: {err}")
             return {"success": False, "message": "结算失败，请稍后重试或转人工客服处理。"}
