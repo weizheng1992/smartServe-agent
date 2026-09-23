@@ -23,12 +23,14 @@ export default function ProductDetailPage() {
   const [isAddingToCart, setIsAddingToCart] = useState(false);
   const [cartSuccessMessage, setCartSuccessMessage] = useState<string | null>(null);
   const [couponPromos, setCouponPromos] = useState<Array<{ id: string; name: string; value: number }>>([]);
-  const [claimedIds, setClaimedIds] = useState<Set<string>>(new Set());
+  // promotionId → 券状态(claimed/used):used 必须与 claimed 视觉区分(实弹:
+  // 全核销后商品页仍标「✓ 已领取」,购物车却无券可用,用户困惑)
+  const [couponStatus, setCouponStatus] = useState<Map<string, string>>(new Map());
   const [couponMsg, setCouponMsg] = useState('');
   const refreshCoupons = useCallback(() => {
     fetch(`/api/store/coupons?userId=${encodeURIComponent((user as any).id)}`)
       .then((r) => r.json())
-      .then((b) => setClaimedIds(new Set((b.coupons || []).map((x: any) => x.promotionId))))
+      .then((b) => setCouponStatus(new Map((b.coupons || []).map((x: any) => [x.promotionId, x.status as string]))))
       .catch(() => {});
     fetch('/api/store/promotions')
       .then((r) => r.json())
@@ -238,12 +240,22 @@ export default function ProductDetailPage() {
                 {couponPromos.length > 0 && (
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                     {couponPromos.map((p) => {
-                      const claimed = claimedIds.has(p.id);
-                      return claimed ? (
-                        <span key={p.id} className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-400">
-                          ✓ 已领取 ¥{p.value} 券({p.name})
-                        </span>
-                      ) : (
+                      const status = couponStatus.get(p.id);
+                      if (status === 'used') {
+                        return (
+                          <span key={p.id} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-400 line-through">
+                            已使用 ¥{p.value} 券({p.name})
+                          </span>
+                        );
+                      }
+                      if (status === 'claimed') {
+                        return (
+                          <span key={p.id} className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-400">
+                            ✓ 已领取 ¥{p.value} 券({p.name})
+                          </span>
+                        );
+                      }
+                      return (
                         <button type="button" key={p.id} onClick={() => void claimCoupon(p.id)}
                           className="rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-rose-600 hover:border-rose-500">
                           🎫 领 ¥{p.value} 券({p.name})
