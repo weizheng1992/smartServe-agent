@@ -22,6 +22,9 @@ import pytest
 # 环境变量注入必须先于任何 engine_py 导入
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://u:p@localhost:5432/test_unused")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+# 测试密封(P1 影子路由):语义路由会加载真实 BGE —— 测试环境默认关闭,
+# 路由逻辑由 test_semantic_routes.py 用合成向量钉死
+os.environ.setdefault("SEMANTIC_ROUTER_MODE", "off")
 
 ENGINE_DIR = Path(__file__).resolve().parents[1]
 
