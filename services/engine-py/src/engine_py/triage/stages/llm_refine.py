@@ -284,6 +284,28 @@ async def judge(ctx: StageContext) -> StageVerdict:
             arbitration_reason="structured_llm_terminal",
         )
 
+        # 置信度级联(P0,2026-09-23):LLM 精判即链路仲裁层,低于路由阈值=
+        # 真模糊 —— 澄清反问取代静默深规划(实弹:低置信滑进 GMV 排行,
+        # 按销量推荐答非所问)。动作域意图豁免(谓词内判),落库照常留痕。
+        from ..intent_triage_engine import build_confidence_clarify_message, resolve_confidence_action
+
+        primary_intent = parsed[0]["intent"] if parsed else "general_query"
+        if resolve_confidence_action(confidence, primary_intent) == "clarify":
+            ctx.proposals.append(_proposal("confidence_cascade", primary_intent, confidence))
+            return StageVerdict(
+                terminal=True,
+                result=await ctx.engine.handle_immediate_bypass(
+                    state,
+                    "confidence_clarify",
+                    build_confidence_clarify_message(parsed),
+                    parsed,
+                    "confidence_cascade",
+                    confidence,
+                    ctx.damage_assessment,
+                    candidates=[*ctx.proposals, llm_proposal],
+                ),
+            )
+
         if state.get("job_id"):
             from ...event_bus import emit_status
 

@@ -29,7 +29,10 @@ from .exemplar_service import search_relevant_exemplars  # noqa: F401 (测试 pa
 from .intent_registry import (
     CONSULT_SIDE_INTENTS,
     EXPLICIT_ORDER_ID_RE,
+    INTENT_CLARIFY_LABELS,
+    INTENT_CONFIDENCE_ROUTE,
     INTENT_REGISTRY,
+    INTENT_ROUTE_THRESHOLD_OVERRIDES,
     MONEY_ACTION_VETO_RE,
     OPERATIONAL_ACTION_RE,  # noqa: F401 (测试 patch 面)
     ORDER_KEYWORDS_RE,  # noqa: F401 (测试 patch 面 / embedding_anchor 经 ctx.ns 读取)
@@ -99,6 +102,37 @@ def _is_multi_intent_candidate(input_text: str | None) -> bool:
     return bool(MULTI_INTENT_CANDIDATE_RE.search(input_text)) or (
         ("查" in input_text or "物流" in input_text or "状态" in input_text)
         and ("退" in input_text or "改" in input_text or "换" in input_text)
+    )
+
+
+def resolve_confidence_action(confidence: float, intent: str) -> str:
+    """置信度级联纯谓词(P0,测试缝):"route" | "clarify"。
+
+    LLM 结构化精判即链路仲裁层,置信低于路由阈值=真模糊 —— 澄清反问取代
+    静默深规划。动作域意图(cart/order_service)豁免:它们有自己的缺槽反问
+    与资金护栏,误澄清动作请求比误答资讯伤害大。
+    """
+    spec = INTENT_REGISTRY.get(intent)
+    if spec is not None and spec.domain_role in ("cart", "order_service"):
+        return "route"
+    threshold = INTENT_ROUTE_THRESHOLD_OVERRIDES.get(intent, INTENT_CONFIDENCE_ROUTE)
+    return "route" if confidence >= threshold else "clarify"
+
+
+def build_confidence_clarify_message(parsed: list[dict]) -> str:
+    """低置信澄清文案:按候选意图给编号选项 + 转人工指引;无候选诚实致歉。"""
+    labels: list[str] = []
+    for p in parsed:
+        label = INTENT_CLARIFY_LABELS.get(p.get("intent", ""))
+        if label and label not in labels:
+            labels.append(label)
+    if not labels:
+        return "抱歉，我没有理解您的意思。您可以换个说法描述，或回复「转人工」由人工客服为您服务。"
+    marks = "①②③④⑤"
+    opts = "  ".join(f"{marks[i]} {lab}" for i, lab in enumerate(labels[:len(marks)]))
+    return (
+        f"抱歉，我不太确定您的需求。您是想：{opts}？"
+        "可直接回复对应内容或换个说法描述～如需人工帮助，请回复「转人工」。"
     )
 
 
