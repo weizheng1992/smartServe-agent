@@ -1,0 +1,1103 @@
+# 指标语义目录(闭集事实源)—— 由 metric_registry.py 加载器读取。
+# 词面/口径改这里即可,无需改 Python;改后必跑:
+#   AI_INTENT_L3=off uv run python scripts/run_intent_eval.py  (闸门 95%)
+# 必填键: key/label/description/domain/unit/direction/synonyms/permissionTag
+# 实体必传指标同步维护 llm_intent.ENTITY_REQUIRED;权限闭集在 rbac.ROLE_METRIC_PERMISSIONS。
+gmv:
+  key: gmv
+  label: 总销售额 (GMV)
+  description: 统计周期内所有已生效订单的实付销售总流水金额,即 SUM(quantity * price_at_purchase)。不扣除进货成本。
+  domain: sales
+  sourceTables:
+  - products
+  - order_items
+  - orders
+  expression: COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0)::float
+  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      LEFT JOIN order_items\
+    \ oi ON p.id = oi.product_id\n      {filters}\n      GROUP BY {groupBy}\n      ORDER BY \"metricValue\" {direction}\n\
+    \      LIMIT {limit}\n    "
+  businessRules:
+  - 仅统计有效销售订单,排除已取消未付款订单
+  - 单价取下单时快照 price_at_purchase,防止后续商品改价失真
+  direction: DESC
+  unit: 元
+  icon: 💰
+  aliases:
+  - gross_merchandise_volume
+  - total_sales
+  - turnover
+  synonyms:
+  - 卖得好
+  - 销售额
+  - 流水
+  - 业绩
+  - 最卖钱
+  - 成交额
+  - 营业额
+  - 营业收入
+  conflictGroup:
+  - sales_performance_ranking
+  sampleQueries:
+  - 帮我查一下我负责商品里面卖得最好的几个
+  - 查看本月销售额最高的商品榜单
+  - 哪个商品流水贡献最大
+  availableDimensions:
+  - p.id
+  - p.name
+  - p.category
+  - p.manager_id
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.98
+volume:
+  key: volume
+  label: 出货销量 (件数)
+  description: 统计周期内商品实际售出的总件数总量,即 SUM(quantity)。反映商品物理周转频次和爆款热度。
+  domain: sales
+  sourceTables:
+  - products
+  - order_items
+  - orders
+  expression: COALESCE(SUM(oi.quantity), 0)::int
+  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      LEFT JOIN order_items\
+    \ oi ON p.id = oi.product_id\n      {filters}\n      GROUP BY {groupBy}\n      ORDER BY \"metricValue\" {direction}\n\
+    \      LIMIT {limit}\n    "
+  businessRules:
+  - 退货件数是否扣减需视售后策略而定,默认统计总出货件数
+  direction: DESC
+  unit: 件
+  icon: 📦
+  aliases:
+  - sales_volume
+  - total_quantity
+  - order_units
+  synonyms:
+  - 销量
+  - 走量
+  - 爆款
+  - 出货量
+  - 卖得多
+  - 单量最多
+  - 件数最多
+  - 件数
+  - 畅销款
+  - 销量排行
+  - 销量榜
+  - 销量top
+  conflictGroup:
+  - sales_performance_ranking
+  sampleQueries:
+  - 哪几款商品出货量最大
+  - 查看走量最多的爆款商品
+  - 销量排名前三的商品
+  availableDimensions:
+  - p.id
+  - p.name
+  - p.category
+  - p.manager_id
+  permissionTag: warehouse_operator
+  verifiedConfidence: 0.99
+gross_profit:
+  key: gross_profit
+  label: 净毛利润 (收益)
+  description: 销售总流水减去进货/物料成本后的净收益,即 SUM(quantity * (price_at_purchase - cost_at_purchase))。
+  domain: profit
+  sourceTables:
+  - products
+  - order_items
+  - orders
+  expression: (COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) - COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase,
+    p.cost_price, 0)), 0))::float
+  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      LEFT JOIN order_items\
+    \ oi ON p.id = oi.product_id\n      {filters}\n      GROUP BY {groupBy}\n      ORDER BY \"metricValue\" {direction}\n\
+    \      LIMIT {limit}\n    "
+  businessRules:
+  - 如果 order_items 存在下单成本 cost_at_purchase 则优先使用,否则降级回退至 product 当前 cost_price
+  - 毛利可为负数(当贴钱促销时)
+  direction: DESC
+  unit: 元
+  icon: 📈
+  aliases:
+  - profit_amount
+  - gross_margin_dollars
+  synonyms:
+  - 最赚钱
+  - 利润最高
+  - 利润最大
+  - 毛利
+  - 毛利润
+  - 净利润
+  - 赚得多
+  - 净赚
+  - 收益最高
+  conflictGroup:
+  - sales_performance_ranking
+  sampleQueries:
+  - 哪几款商品真正最赚钱
+  - 净毛利最高的商品排行
+  - 刨去进货成本哪款利润最大
+  availableDimensions:
+  - p.id
+  - p.name
+  - p.category
+  - p.manager_id
+  permissionTag: finance_owner
+  verifiedConfidence: 0.95
+margin_rate:
+  key: margin_rate
+  label: 毛利率 (性价比/溢价率)
+  description: 净毛利润与总销售额的比率,公式:(毛利润 / NULLIF(总销售额, 0)) * 100。反映单品盈利质量。
+  domain: profit
+  sourceTables:
+  - products
+  - order_items
+  expression: CASE WHEN SUM(oi.quantity * oi.price_at_purchase) > 0 THEN (((SUM(oi.quantity * oi.price_at_purchase) - SUM(oi.quantity
+    * COALESCE(oi.cost_at_purchase, p.cost_price, 0))) / SUM(oi.quantity * oi.price_at_purchase)) * 100)::float ELSE 0.0 END
+  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      LEFT JOIN order_items\
+    \ oi ON p.id = oi.product_id\n      {filters}\n      GROUP BY {groupBy}\n      ORDER BY \"metricValue\" {direction}\n\
+    \      LIMIT {limit}\n    "
+  businessRules:
+  - 必须使用 NULLIF 或 CASE WHEN 规避分母为 0 抛出除零异常
+  direction: DESC
+  unit: '%'
+  icon: 🎯
+  aliases:
+  - gross_margin_percentage
+  - margin_percentage
+  synonyms:
+  - 毛利率
+  - 利润率
+  - 溢价最高
+  - 溢价空间
+  - 性价比最高
+  - 赚钱效率
+  - 回报率
+  conflictGroup:
+  - sales_performance_ranking
+  sampleQueries:
+  - 哪些商品毛利率最高
+  - 溢价空间最大的商品有哪些
+  availableDimensions:
+  - p.id
+  - p.name
+  - p.category
+  permissionTag: finance_owner
+  verifiedConfidence: 0.94
+stock_risk:
+  key: stock_risk
+  label: 滞销积压库存
+  expression: p.stock::int
+  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      {filters}\n      ORDER\
+    \ BY \"metricValue\" {direction}\n      LIMIT {limit}\n    "
+  description: 当前仓库在库物理剩余库存件数,用于排查滞销压货与动销缓慢风险。
+  domain: inventory
+  sourceTables:
+  - products
+  businessRules:
+  - 库存预警默认按绝对剩余量降序排列
+  direction: DESC
+  unit: 件
+  icon: ⚠️
+  aliases:
+  - inventory_level
+  - slow_moving_stock
+  synonyms:
+  - 滞销
+  - 积压
+  - 卖不出去
+  - 库存最多
+  - 压货
+  - 库存风险
+  - 积压款
+  - 存货最多
+  conflictGroup:
+  - inventory_risk_group
+  sampleQueries:
+  - 仓库里哪些商品积压最多
+  - 滞销库存排查
+  - 哪些款压货最严重
+  availableDimensions:
+  - p.id
+  - p.name
+  - p.category
+  permissionTag: warehouse_operator
+  verifiedConfidence: 0.96
+review_bad:
+  key: review_bad
+  label: 差评榜 (≤2星)
+  description: 统计周期内差评条数排行(rating <= 2);数据源商户镜像库 merchant_product_reviews。
+  domain: review
+  sourceTables:
+  - merchant_product_reviews
+  expression: COUNT(*) FILTER (WHERE rating <= 2)
+  sqlTemplate: merchant_db
+  businessRules:
+  - 差评口径 = rating <= 2;商户真实评价,非合成
+  direction: DESC
+  unit: 条
+  icon: 👎
+  aliases:
+  - bad_reviews
+  synonyms:
+  - 差评
+  - 差评最多
+  - 吐槽最多
+  - 评分最低
+  - 最差评
+  conflictGroup:
+  - review_family
+  sampleQueries:
+  - 差评最多的 SKU
+  - 最近差评最多的商品
+  availableDimensions:
+  - spu_id
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95
+refund_rate:
+  key: refund_rate
+  label: 退款率
+  description: 退款件数 ÷ 有效成交件数 × 100;数据源商户镜像库订单明细。
+  domain: refund
+  sourceTables:
+  - merchant_order_items
+  - merchant_orders
+  expression: refunded_qty / valid_qty * 100
+  sqlTemplate: merchant_db
+  businessRules:
+  - 退款单全额计入退款件;有效口径排除 CANCELLED
+  direction: DESC
+  unit: '%'
+  icon: ↩️
+  aliases:
+  - refund_rate_metric
+  synonyms:
+  - 退款率
+  - 退货率
+  - 退单率
+  conflictGroup:
+  - refund_family
+  sampleQueries:
+  - 近 30 天退款率
+  - 退款率最高的商品
+  availableDimensions:
+  - spu_id
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.93
+session_volume:
+  key: session_volume
+  label: 会话量
+  description: 统计周期内会话条数;engine 本地 session_metrics 同源真算(与平台大盘口径一致)。
+  domain: session
+  sourceTables:
+  - session_metrics
+  expression: COUNT(*)
+  sqlTemplate: engine_db
+  businessRules:
+  - 与平台大盘同表同口径
+  direction: DESC
+  unit: 条
+  icon: 💬
+  aliases:
+  - session_count
+  synonyms:
+  - 会话量
+  - 咨询量
+  - 会话数
+  - 客服负载
+  - 负载概况
+  - 客服情况
+  conflictGroup:
+  - session_family
+  sampleQueries:
+  - 客服负载概况
+  - 最近会话量
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.97
+promo_orders:
+  key: promo_orders
+  label: 活动核销订单数
+  description: 统计周期内使用优惠活动的订单笔数,按活动汇总;数据源 promotion_redemptions。
+  domain: promotion
+  sourceTables:
+  - promotions
+  - promotion_redemptions
+  expression: COUNT(DISTINCT order_id) GROUP BY promo
+  sqlTemplate: merchant_db
+  businessRules:
+  - 同订单同活动只计一次
+  direction: DESC
+  unit: 单
+  icon: 🎯
+  aliases:
+  - promo_redemptions
+  synonyms:
+  - 核销订单
+  - 活动核销
+  - 活动使用情况
+  - 核销了多少
+  - 各活动的核销情况
+  conflictGroup:
+  - promotion_family
+  sampleQueries:
+  - 各活动的核销情况
+  - 优惠活动的核销订单数
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95
+promo_discount_total:
+  key: promo_discount_total
+  label: 活动优惠总额
+  description: 统计周期内优惠活动抵扣的总金额,按活动汇总;数据源 promotion_redemptions。
+  domain: promotion
+  sourceTables:
+  - promotions
+  - promotion_redemptions
+  expression: SUM(discount_amount) GROUP BY promo
+  sqlTemplate: merchant_db
+  businessRules:
+  - 优惠额为结算时服务端计算的实际抵扣
+  direction: DESC
+  unit: 元
+  icon: 💸
+  aliases:
+  - promo_cost
+  synonyms:
+  - 优惠总额
+  - 活动成本
+  - 优惠了多少钱
+  - 补贴了多少
+  - 活动花了多少
+  - 补贴花了多少
+  - 活动补贴
+  conflictGroup:
+  - promotion_family
+  sampleQueries:
+  - 各活动优惠总额
+  - 活动补贴花了多少钱
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95
+gmv_trend:
+  key: gmv_trend
+  label: GMV 趋势
+  description: 近 30 天每日 GMV 折线;有效订单口径(排除退款/取消),按下单日聚合。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  - merchant_order_items
+  expression: SUM(quantity*price) GROUP BY day
+  sqlTemplate: merchant_db
+  businessRules:
+  - 固定近 30 天窗口;日粒度
+  direction: ASC
+  unit: 元
+  icon: 📈
+  aliases:
+  - gmv_trend
+  synonyms:
+  - GMV 趋势
+  - 销售额趋势
+  - 销售额走势
+  - GMV走势
+  - GMV趋势
+  - 每日销售额
+  - GMV 走势
+  - 趋势
+  conflictGroup: []
+  sampleQueries:
+  - 近 30 天 GMV 趋势
+  - 每天的销售额走势
+  - 近30天GMV趋势
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95
+volume_trend:
+  key: volume_trend
+  label: 销量趋势
+  description: 销量(件)折线:默认近 30 天按日;问「近 N 个月/几个月的销量」自动切自然月粒度。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  - merchant_order_items
+  expression: SUM(quantity) GROUP BY day|month
+  sqlTemplate: merchant_db
+  businessRules:
+  - 有效成交口径(排除退款/取消);月粒度含当月,自然月对齐
+  direction: ASC
+  unit: 件
+  icon: 📈
+  aliases:
+  - volume_trend
+  synonyms:
+  - 销量趋势
+  - 销量走势
+  - 月销量
+  - 每月销量
+  - 月度销量
+  - 按月销量
+  - 个月的销量
+  - 月销趋势
+  - 出货趋势
+  - 按月统计
+  conflictGroup: []
+  sampleQueries:
+  - 近3个月的销量
+  - 每月销量趋势
+  - 几个月的销量怎么样
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+order_overview:
+  key: order_overview
+  label: 选中订单概览
+  description: 对页面勾选的订单做笔数/合计金额/平均金额统计;实体集来自 PageContext 选择(必传)。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  expression: COUNT/SUM/AVG(total_amount) FILTER order_id = ANY(entities)
+  sqlTemplate: merchant_db
+  businessRules:
+  - 实体集为空时响亮拒绝(请先勾选订单);金额取订单实付
+  direction: DESC
+  unit: 元
+  icon: 🧮
+  aliases:
+  - selected_orders
+  synonyms:
+  - 订单概览
+  - 这几笔订单
+  - 选中订单
+  - 平均金额
+  - 合计金额
+  - 这几单
+  - 勾选订单的统计
+  - 选中订单的概览
+  - 所选订单
+  - 订单对比
+  - 两单对比
+  - 两个订单对比
+  - 这两笔订单对比
+  - 订单比较
+  - 这两笔订单
+  - 勾选的订单
+  - 订单详情
+  - 这单详情
+  - 单笔订单
+  conflictGroup: []
+  sampleQueries:
+  - 这几笔订单的平均金额
+  - 选中订单合计多少
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.94
+after_sale_overview:
+  key: after_sale_overview
+  label: 售后工单概况
+  description: 售后工单按状态分布计数;engine 本地 after_sale_tickets 真算。
+  domain: refund
+  sourceTables:
+  - after_sale_tickets
+  expression: COUNT(*) GROUP BY status
+  sqlTemplate: engine_db
+  businessRules:
+  - 状态分布:pending_review/approved/rejected/completed 等
+  direction: DESC
+  unit: 单
+  icon: 🧾
+  aliases:
+  - after_sale_status
+  synonyms:
+  - 售后工单
+  - 售后概况
+  - 工单概况
+  - 工单
+  conflictGroup:
+  - refund_family
+  sampleQueries:
+  - 售后工单概况
+  - 有多少售后工单
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95
+ai_resolution_rate:
+  key: ai_resolution_rate
+  label: AI 自动解决率
+  description: resolved_auto 会话 ÷ 总会话 × 100;session_metrics 同源。
+  domain: session
+  sourceTables:
+  - session_metrics
+  expression: resolved_auto / total * 100
+  sqlTemplate: engine_db
+  businessRules:
+  - 分子 = resolution_status='resolved_auto'
+  direction: DESC
+  unit: '%'
+  icon: 🤖
+  aliases:
+  - auto_resolution
+  synonyms:
+  - 自动解决率
+  - AI 解决率
+  - 解决率
+  conflictGroup:
+  - session_family
+  sampleQueries:
+  - AI 自动解决率多少
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.96
+promo_effect:
+  key: promo_effect
+  label: 活动效果总览
+  description: 指定运营活动的核销关联口径汇总:核销订单数、核销GMV、优惠总额。需指明活动(核销归因,自然流量不计入)。
+  domain: promotion
+  sourceTables:
+  - promotions
+  - promotion_redemptions
+  - merchant_orders
+  expression: COUNT(DISTINCT order_id), SUM(total_amount), SUM(discount_amount)
+  sqlTemplate: ''
+  businessRules:
+  - 核销关联口径:仅统计该活动核销记录关联的订单
+  - 优惠总额 = SUM(discount_amount)
+  direction: DESC
+  unit: 单
+  aliases:
+  - campaign_effect
+  synonyms:
+  - 活动效果
+  - 活动销量
+  - 活动卖得怎么样
+  - 活动表现
+  - 核销情况
+  conflictGroup: []
+  sampleQueries:
+  - 开学季活动卖得怎么样
+  - 这个活动的核销情况如何
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+promo_sku_compare:
+  key: promo_sku_compare
+  label: 活动内商品对比
+  description: 指定活动核销订单的商品明细按款聚合:销量/GMV/订单数,可标记目标款对比其他款。需指明活动。
+  domain: promotion
+  sourceTables:
+  - promotions
+  - promotion_redemptions
+  - merchant_orders
+  - merchant_order_items
+  expression: SUM(quantity), SUM(quantity*price), COUNT(DISTINCT order_id)
+  sqlTemplate: ''
+  businessRules:
+  - 按活动核销订单的商品明细聚合
+  - 对比分组列标记目标款/其他款
+  direction: DESC
+  unit: 件
+  aliases:
+  - campaign_sku_compare
+  synonyms:
+  - 活动里哪款卖得好
+  - 活动商品对比
+  - 活动内对比
+  - 活动里的款
+  conflictGroup: []
+  sampleQueries:
+  - 开学季活动里冲锋衣对比其他款
+  - 这个活动里哪款卖得最好
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+promo_compare:
+  key: promo_compare
+  label: 双活动对比
+  description: 两个运营活动并排对比:核销订单数、核销GMV、优惠总额。需指明两个活动(核销归因口径)。
+  domain: promotion
+  sourceTables:
+  - promotions
+  - promotion_redemptions
+  - merchant_orders
+  expression: COUNT(DISTINCT order_id), SUM(total_amount), SUM(discount_amount) GROUP BY promotion
+  sqlTemplate: ''
+  businessRules:
+  - 核销关联口径:各自只统计本活动核销记录关联的订单
+  - 两行并排对比
+  direction: DESC
+  unit: 单
+  aliases:
+  - campaign_compare
+  synonyms:
+  - 两个活动对比
+  - 活动对比
+  - 对比两个活动
+  - 活动A对比活动B
+  - 两个活动哪个好
+  conflictGroup: []
+  sampleQueries:
+  - 新客50元券对比背包品类85折
+  - 两个活动哪个效果好
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+customer_orders:
+  key: customer_orders
+  label: 客户订单查询
+  description: 指定客户名下的订单列表(按下单时间倒序)。需指明客户(姓名/手机号)。
+  domain: customer
+  sourceTables:
+  - merchant_orders
+  - merchant_customers
+  expression: order_id, status, total_amount, created_at
+  sqlTemplate: ''
+  businessRules:
+  - 名下全部订单,不按成交口径过滤(列表展示原状)
+  direction: DESC
+  unit: 单
+  aliases:
+  - customer_recent_orders
+  synonyms:
+  - 客户订单
+  - 名下订单
+  conflictGroup: []
+  sampleQueries:
+  - 张三最近的订单
+  - 查一下 13800000001 的订单
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+aov:
+  key: aov
+  label: 客单价
+  description: 有效订单(排除退款/取消)的平均实付金额;支持时间窗。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  expression: AVG(total_amount) FILTER status NOT IN (REFUNDED, CANCELLED)
+  sqlTemplate: merchant_db
+  businessRules:
+  - 有效成交口径,与 GMV 榜同源
+  direction: DESC
+  unit: 元
+  icon: 🧾
+  aliases:
+  - average_order_value
+  synonyms:
+  - 客单价
+  - 平均每单
+  - 平均订单金额
+  - 每单平均
+  conflictGroup: []
+  sampleQueries:
+  - 本月客单价多少
+  - 平均每单多少钱
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.92
+order_count:
+  key: order_count
+  label: 订单量
+  description: 有效订单笔数(排除退款/取消);支持时间窗。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  expression: COUNT(*) FILTER status NOT IN (REFUNDED, CANCELLED)
+  sqlTemplate: merchant_db
+  businessRules:
+  - 有效成交口径,与 GMV 榜同源
+  direction: DESC
+  unit: 单
+  icon: 📦
+  aliases:
+  - order_volume
+  synonyms:
+  - 订单量
+  - 订单数
+  - 成交笔数
+  - 下了多少单
+  conflictGroup: []
+  sampleQueries:
+  - 本月订单量多少
+  - 上周成交笔数
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.92
+review_good:
+  key: review_good
+  label: 好评榜
+  description: 商品好评(评分 ≥ 4)条数排行;商户真实评价。
+  domain: review
+  sourceTables:
+  - merchant_product_reviews
+  expression: COUNT(*) FILTER rating >= 4 GROUP BY spu_id
+  sqlTemplate: merchant_db
+  businessRules:
+  - 好评口径 = rating ≥ 4(与差评 rating ≤ 2 对偶)
+  direction: DESC
+  unit: 条
+  icon: 🌟
+  aliases:
+  - positive_review_rank
+  synonyms:
+  - 好评榜
+  - 好评最多的商品
+  - 好评数排行
+  conflictGroup: []
+  sampleQueries:
+  - 好评最多的商品 Top5
+  - 看看好评榜
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.92
+zero_sales:
+  key: zero_sales
+  label: 滞销零销量商品
+  description: 在售但一单未成交的商品,按剩余库存降序(压货风险交叉视角)。
+  domain: inventory
+  sourceTables:
+  - merchant_spus
+  - merchant_order_items
+  expression: NOT EXISTS(order_items) ORDER BY stock DESC
+  sqlTemplate: merchant_db
+  businessRules:
+  - 只列在售款;库存降序暴露压货风险
+  direction: DESC
+  unit: 件
+  icon: 🕳️
+  aliases:
+  - unsold_products
+  synonyms:
+  - 滞销零销量
+  - 零销量商品
+  - 零销量
+  - 没销量的商品
+  - 一单没卖的商品
+  conflictGroup: []
+  sampleQueries:
+  - 哪些商品零销量
+  - 滞销零销量商品有哪些
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+category_gmv_top:
+  key: category_gmv_top
+  label: 品类GMV榜
+  description: 按品类聚合的有效成交 GMV 排行;支持时间窗。
+  domain: sales
+  sourceTables:
+  - merchant_spus
+  - merchant_order_items
+  - merchant_orders
+  expression: SUM(quantity*price) GROUP BY category
+  sqlTemplate: merchant_db
+  businessRules:
+  - 有效成交口径;仅统计在售款
+  direction: DESC
+  unit: 元
+  icon: 🏷️
+  aliases:
+  - category_gmv_rank
+  synonyms:
+  - 品类GMV榜
+  - 品类GMV排行
+  - 品类销售额排行
+  - 各品类销售额
+  conflictGroup: []
+  sampleQueries:
+  - 品类GMV排行
+  - 各品类销售额对比
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+customer_spend_top:
+  key: customer_spend_top
+  label: 客户消费榜
+  description: 客户累计消费金额排行(有效成交口径);支持时间窗。
+  domain: customer
+  sourceTables:
+  - merchant_orders
+  - merchant_customers
+  expression: SUM(total_amount) GROUP BY customer ORDER BY DESC
+  sqlTemplate: merchant_db
+  businessRules:
+  - 有效成交口径;展示客户名与手机号
+  direction: DESC
+  unit: 元
+  icon: 👑
+  aliases:
+  - customer_spend_rank
+  synonyms:
+  - 客户消费榜
+  - 客户消费排行
+  - 消费最高的客户
+  - 花钱最多的客户
+  conflictGroup: []
+  sampleQueries:
+  - 消费最高的客户 Top5
+  - 客户消费排行
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+customer_spend_stats:
+  key: customer_spend_stats
+  label: 客户消费统计
+  description: 指定客户的订单数/累计消费/客单价/最近下单;有效成交口径。
+  domain: customer
+  sourceTables:
+  - merchant_customers
+  - merchant_orders
+  expression: COUNT/SUM/AVG(total_amount) FILTER customer = ANY(entities)
+  sqlTemplate: merchant_db
+  businessRules:
+  - 有效成交口径;客户实体必传(逐字绑定或反问)
+  direction: DESC
+  unit: 元
+  icon: 🧾
+  aliases:
+  - customer_spend
+  synonyms:
+  - 消费统计
+  - 消费情况
+  - 消费总额
+  - 花了多少
+  conflictGroup: []
+  sampleQueries:
+  - 张伟的消费统计
+  - 张伟花了多少
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+customer_coupons:
+  key: customer_coupons
+  label: 客户优惠券
+  description: 指定客户名下的优惠券列表(券名/面额/状态/领取与核销时间)。
+  domain: customer
+  sourceTables:
+  - user_coupons
+  - promotions
+  expression: JOIN promotions FILTER user_id = ANY(entities)
+  sqlTemplate: merchant_db
+  businessRules:
+  - 含已用与未用;按领取时间倒序
+  direction: DESC
+  unit: 张
+  icon: 🎟️
+  aliases:
+  - customer_coupon_list
+  synonyms:
+  - 优惠券
+  - 优惠券列表
+  - 持有哪些券
+  - 领了哪些券
+  conflictGroup: []
+  sampleQueries:
+  - 张伟的优惠券
+  - 张伟领了哪些券
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+customer_profile:
+  key: customer_profile
+  label: 用户画像
+  description: 指定客户画像:会员级/注册/累计消费/订单数/客单价/最近下单/最爱品类/领券用券数。
+  domain: customer
+  sourceTables:
+  - merchant_customers
+  - merchant_orders
+  - user_coupons
+  expression: 聚合 + 最爱品类子查询 + 券计数子查询
+  sqlTemplate: merchant_db
+  businessRules:
+  - 宽表单行;消费均为有效成交口径
+  direction: DESC
+  unit: 人
+  icon: 🧑‍💼
+  aliases:
+  - customer_persona
+  synonyms:
+  - 用户画像
+  - 客户画像
+  - 画像
+  conflictGroup: []
+  sampleQueries:
+  - 张伟的用户画像
+  - 看看张伟的客户画像
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+customer_panorama:
+  key: customer_panorama
+  label: 客户全景(场景包)
+  description: 一次问出客户三节:画像 + 优惠券 + 最近订单;编排层展开为多卡。
+  domain: customer
+  sourceTables:
+  - merchant_customers
+  expression: 'scenario: customer_profile + customer_coupons + customer_orders'
+  sqlTemplate: ''
+  businessRules:
+  - 场景包由编排层展开多帧;客户实体必传
+  direction: DESC
+  unit: 人
+  icon: 🗂️
+  aliases:
+  - customer_full_view
+  synonyms:
+  - 客户全景
+  - 客户全景看下
+  - 客户全貌
+  - 全貌
+  conflictGroup: []
+  sampleQueries:
+  - 张伟的客户全景
+  - 看看张伟的全貌
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+biz_overview:
+  key: biz_overview
+  label: 经营概览(场景包)
+  description: 一次问出经营五节:GMV/订单量/客单价/会话量/退款率;编排层展开为多卡。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  - session_metrics
+  - merchant_order_items
+  expression: 'scenario: gmv + order_count + aov + session_volume + refund_rate'
+  sqlTemplate: ''
+  businessRules:
+  - 场景包由编排层展开多帧;每节独立口径注记
+  direction: DESC
+  unit: 元
+  icon: 📊
+  aliases:
+  - business_overview
+  synonyms:
+  - 经营概览
+  - 经营怎么样
+  - 经营情况
+  - 生意怎么样
+  - 大盘
+  conflictGroup: []
+  sampleQueries:
+  - 经营概览
+  - 最近生意怎么样
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+gmv_mom:
+  key: gmv_mom
+  label: GMV 环比
+  description: 本月 vs 上月 GMV 对比与环比百分比;自然月对齐。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  - merchant_order_items
+  expression: 本月子查询 / 上月子查询 + 环比
+  sqlTemplate: merchant_db
+  businessRules:
+  - 有效成交口径;上月为 0 时环比置空(不编造)
+  direction: DESC
+  unit: 元
+  icon: ↔️
+  aliases:
+  - gmv_mom_compare
+  synonyms:
+  - 环比
+  - GMV环比
+  - 比上个月
+  - 销售环比
+  conflictGroup: []
+  sampleQueries:
+  - 本月比上个月卖得怎么样
+  - GMV环比
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+orders_trend:
+  key: orders_trend
+  label: 订单量趋势
+  description: 订单量(单)折线:默认近 30 天按日;「近 N 个月」切自然月粒度。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  expression: COUNT(DISTINCT order_id) GROUP BY day|month
+  sqlTemplate: merchant_db
+  businessRules:
+  - 有效成交口径;粒度规则同销量趋势
+  direction: ASC
+  unit: 单
+  icon: 📉
+  aliases:
+  - order_count_trend
+  synonyms:
+  - 订单量趋势
+  - 订单走势
+  - 每日订单
+  - 每天订单数
+  - 每日订单量
+  conflictGroup: []
+  sampleQueries:
+  - 每日订单量走势
+  - 近3个月订单量趋势
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+stock_value:
+  key: stock_value
+  label: 库存价值排行
+  description: 在售商品库存货值(Σ 库存×售价)排行;压货资金视角。
+  domain: inventory
+  sourceTables:
+  - merchant_spus
+  - merchant_skus
+  expression: SUM(stock*price) GROUP BY spu ORDER BY DESC
+  sqlTemplate: merchant_db
+  businessRules:
+  - 仅统计在售款;展示品类与库存件数
+  direction: DESC
+  unit: 元
+  icon: 💰
+  aliases:
+  - inventory_value
+  synonyms:
+  - 库存价值
+  - 库存金额
+  - 库存货值
+  - 压货资金
+  - 压的货值最大
+  - 货值最大
+  conflictGroup: []
+  sampleQueries:
+  - 库存价值排行
+  - 哪个商品压的货值最大
+  availableDimensions: []
+  permissionTag: warehouse_operator
+  verifiedConfidence: 0.9
+customer_spend_trend:
+  key: customer_spend_trend
+  label: 客户消费趋势
+  description: 指定客户的消费金额折线:默认近 30 天按日,「近 N 个月」切自然月;有效成交口径。
+  domain: customer
+  sourceTables:
+  - merchant_customers
+  - merchant_orders
+  expression: SUM(total_amount) FILTER customer = ANY(entities) GROUP BY day|month
+  sqlTemplate: merchant_db
+  businessRules:
+  - 客户实体必传;只走订单表防明细行放大金额
+  direction: ASC
+  unit: 元
+  icon: 📈
+  aliases:
+  - customer_spend_line
+  synonyms:
+  - 消费记录
+  - 消费趋势
+  - 消费折线
+  - 消费走势
+  conflictGroup: []
+  sampleQueries:
+  - 张伟的消费记录折线图
+  - 张伟近3个月的消费趋势
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9

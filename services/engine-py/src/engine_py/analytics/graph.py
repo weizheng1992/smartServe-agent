@@ -16,11 +16,17 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from . import session_store
+from .context_intake import INLINE_SPU_METRICS as _INLINE_SPU_METRICS
+from .context_intake import (
+    inline_order_ids,
+    merge_into_intent,
+    parse_raw_selection,
+    title_prefix as build_title_prefix,
+)
 from .engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
+from .quick_summary import quick_summary as _quick_summary
 
-# 行内商品提及适用闭集(标准商品族:输出商品级榜/单行,模板支持 spu 过滤);
-# 时间序列/会话/活动族不在其列 —— 闭集外指标绝不静默扩展绑定语义。
-_INLINE_SPU_METRICS = frozenset({"gmv", "volume", "gross_profit", "margin_rate", "stock_risk"})
+
 
 # spu 勾选的作用面 = 标准族榜单 + 趋势族对偶(趋势按勾选商品出线)
 _SPU_FILTERABLE = _INLINE_SPU_METRICS | {"volume_trend", "gmv_trend"}
@@ -104,53 +110,14 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     if isinstance(intent, dict) and intent.get("clarify"):
         return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
 
-    # PageContext(T5 类型化勾选):order→订单对比;spu→标准族过滤;
-    # customer→客户族过滤。旧数组形态向后兼容(仅订单对比与标准族)。
-    # 各归各是从结构上消灭「订单 id 被当商品过滤」的残留污染(两次实弹踩坑)。
-    raw_sel = (page_context or {}).get("selection") or []
-    if isinstance(raw_sel, dict):
-        sel_orders = [str(x) for x in (raw_sel.get("order") or [])][:100]
-        sel_spu = [str(x) for x in (raw_sel.get("spu") or [])][:100]
-        sel_cust = [str(x) for x in (raw_sel.get("customer") or [])][:100]
-    else:
-        # 旧数组形态向后兼容:同时当订单勾选(订单对比)与商品勾选(标准族过滤)
-        sel_orders, sel_spu, sel_cust = [str(x) for x in raw_sel][:100], [str(x) for x in raw_sel][:100], []
-    def _with_sel(slot: dict) -> StructuredQueryIntent:
-        # intent 是 frozen dataclass —— 合并勾选必须整体重建(旧 PageContext 同款)
-        return StructuredQueryIntent(
-            metric=intent.metric, direction=intent.direction, limit=intent.limit,
-            time_window=intent.time_window, category=intent.category,
-            entity_ids=(sel_orders if intent.metric == "order_overview" else intent.entity_ids),
-            entity_slot=slot, chart_hint=intent.chart_hint,
-        )
-
-    if intent.metric == "order_overview" and not intent.entity_ids:
-        # 订单号内联识别:问句里直接写单号(如 AURORA-ORD-2026-1737)→ 免勾选
-        matched = re.findall(r"\b[A-Z0-9]+(?:-[A-Z0-9]+)*-ORD(?:-[A-Z0-9]+)*\b", effective_question.upper())
-        if matched:
-            sel_orders = matched[:20]
-
-    if intent.metric == "order_overview" and sel_orders and sel_orders != intent.entity_ids:
-        intent = _with_sel(dict(intent.entity_slot))
-    elif sel_spu and intent.metric in _SPU_FILTERABLE and not (intent.entity_slot or {}).get("spu"):
-        intent = _with_sel({**intent.entity_slot, "spu": sel_spu})
-    elif sel_cust and intent.metric in _CUSTOMER_SLOT_METRICS and not (intent.entity_slot or {}).get("customer"):
-        intent = _with_sel({**intent.entity_slot, "customer": sel_cust})
-
-    sel_labels = (page_context or {}).get("selectionLabels") or {}
-
-    def _label_desc(kind: str, ids: list[str]) -> str:
-        names = [sel_labels.get(kind, {}).get(i) for i in ids]
-        known = [n for n in names if n]
-        if not known:
-            return f"{len(ids)} 项"
-        return known[0] if len(known) == 1 else f"{known[0]} 等 {len(known)} 项"
-
-    title_prefix = ""
-    if sel_spu and intent.metric in _SPU_FILTERABLE:
-        title_prefix = _label_desc("spu", sel_spu)
-    elif sel_cust and intent.metric in _CUSTOMER_SLOT_METRICS:
-        title_prefix = _label_desc("customer", sel_cust)
+    # 勾选/订单号/标题前缀 intake(context_intake 单一职责模块)
+    sel_orders, sel_spu, sel_cust = parse_raw_selection((page_context or {}).get("selection"))
+    if intent.metric == "order_overview" and not intent.entity_ids and not sel_orders:
+        sel_orders = inline_order_ids(effective_question)
+    intent = merge_into_intent(intent, sel_orders, sel_spu, sel_cust)
+    title_prefix = build_title_prefix(
+        intent, sel_spu, sel_cust, (page_context or {}).get("selectionLabels") or {},
+    )
 
     # 行内商品提及(L0 直出、零 LLM):标准商品族指标的问句逐字包含唯一商品
     # 标题/编码 → 直接绑定 spu 实体槽;零/多命中不改语义(保守放行原问句)。
@@ -221,39 +188,6 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
             "last_question": effective_question, "intent": intent.__dict__,
         })
     return _result_frame(effective_question, result, intent, title_prefix)
-
-
-def _quick_summary(result, intent) -> str | None:
-    """确定性速览(不编造):从真实结果行算最高/最低/榜首/首尾变化。
-
-    单行多列统计卡不生成(表格自明);趋势出峰谷与首尾变化;榜单出项数与
-    榜首。LLM 润色是后续接缝,本函数只做算术 —— 08-D1 精神的呈现侧延伸。
-    """
-    from .tools_registry_bridge import metric_semantic_registry
-
-    rows = result.rows or []
-    if not rows:
-        return None
-    numeric_cols = [k for k, v in rows[0].items() if isinstance(v, (int, float))]
-    if not numeric_cols:
-        return None
-    vcol = numeric_cols[-1]
-    label_col = next((k for k in rows[0] if k != vcol and not isinstance(rows[0][k], (int, float))), vcol)
-    unit = metric_semantic_registry().get(intent.metric, {}).get("unit", "")
-    vals = [float(r[vcol]) for r in rows if isinstance(r.get(vcol), (int, float))]
-    if not vals:
-        return None
-    if (intent.chart_hint or result.chart) == "line" or intent.metric.endswith("_trend"):
-        top_v, low_v = max(vals), min(vals)
-        delta = ((vals[-1] - vals[0]) * 100.0 / vals[0]) if vals[0] else None
-        trend = f"期末较期初{'升' if (delta or 0) > 0 else '降'} {abs(delta):.0f}%" if delta is not None else "首尾持平"
-        return f"峰值 {top_v:,.0f}{unit} · 谷值 {low_v:,.0f}{unit};{trend}"
-    if len(rows) < 2:
-        return None
-    total = sum(vals)
-    top_label = str(rows[0].get(label_col, ""))
-    share = (max(vals) / total * 100) if total else 0
-    return f"共 {len(rows)} 项 · 榜首 {top_label} {max(vals):,.0f}{unit}(占 {share:.0f}%)"
 
 
 def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict:
