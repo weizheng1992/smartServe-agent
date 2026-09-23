@@ -217,6 +217,12 @@ export function FloatingAgent({ route }: { route: string }) {
             ) : f.event === 'result' ? (
               <>
                 <ResultCard data={f.data} />
+                {f.data.summary ? (
+                  <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                    <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
+                    {f.data.summary}
+                  </div>
+                ) : null}
                 {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
                   <div className="mt-1.5 flex gap-2">
                     <button
