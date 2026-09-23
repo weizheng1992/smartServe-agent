@@ -27,6 +27,7 @@ EDGE: list[dict] = [
     {"question": "销量 折线图", "expect_metric": "volume_trend", "source": "edge"},
     {"question": "GMV 折线图", "expect_metric": "gmv_trend", "source": "edge"},
     {"question": "销量榜 折线图", "expect_metric": "volume", "source": "edge"},
+    {"question": "AURORA-ORD-2026-1737 订单详情", "expect_metric": "order_overview", "source": "edge"},
     {"question": "上个月的销量排行", "expect_metric": "volume", "source": "edge"},
     {"question": "近30天GMV趋势", "expect_metric": "gmv_trend", "source": "edge"},
     {"question": "每天的销售额走势", "expect_metric": "gmv_trend", "source": "edge"},

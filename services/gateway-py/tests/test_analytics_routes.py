@@ -1260,3 +1260,31 @@ class TestSelectionKindMap:
         events = dict(_sse_events(r))
         # 榜单不再被订单勾选污染(有真实销量数据时应有行;容器内空数据则诚实空但 metric 正确)
         assert events["result"]["metric"] == "volume"
+
+
+class TestInlineOrderId:
+    """订单号内联识别:问句直接给单号 → 免勾选出单笔订单卡(订单详情)。"""
+
+    async def test_order_id_in_question_answers_single_row(self, client, auth):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        async with _merchant_writer_engine().begin() as c:
+            await c.execute(_t(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                "VALUES ('E2E-DET-ORD', 'CUST-E2E-MT', 'PAID', 123.00, '{}'::jsonb) "
+                "ON CONFLICT (order_id) DO NOTHING"
+            ))
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "E2E-DET-ORD 订单详情",
+        })
+        assert "result" in dict(_sse_events(r)), f"DBG {_sse_events(r)} body={r.text[:300]}"
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "order_overview"
+        rows = events["result"]["rows"]
+        assert len(rows) == 1 and rows[0]["订单号"] == "E2E-DET-ORD"
+        assert rows[0]["金额"] == 123.0

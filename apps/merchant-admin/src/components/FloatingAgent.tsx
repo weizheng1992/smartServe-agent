@@ -38,6 +38,16 @@ export function FloatingAgent({ route }: { route: string }) {
   // 勾选实时联动(T5):内存广播库订阅,勾/清即刻反映到面板横幅
   const [selMap, setSelMap] = useState<SelectionMap>({});
   useEffect(() => subscribe((s) => setSelMap({ ...s })), []);
+  // 会话历史持久化:刷新/重开面板不丢对话(localStorage,上限 60 帧)
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('merchant-admin.agent.history') || '[]');
+      if (Array.isArray(saved) && saved.length) setFrames(saved);
+    } catch { /* 坏档忽略 */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('merchant-admin.agent.history', JSON.stringify(frames.slice(-60))); } catch {}
+  }, [frames]);
   const askRef = useRef<(q?: string) => void>(() => {});
 
   // 就地唤起(如订单页「向 AI 提问」):开面板 + 自动提问,不跳页
@@ -55,6 +65,7 @@ export function FloatingAgent({ route }: { route: string }) {
     const question = (questionOverride ?? q).trim();
     if (!question || busy) return;
     setBusy(true);
+    setQ('');
     const selection = getSelection();
     // T3 多轮:浏览器侧稳定 session_id(服务端 Redis 按此键存会话上下文)
     let sessionId = localStorage.getItem('merchant-admin.session');
@@ -62,25 +73,41 @@ export function FloatingAgent({ route }: { route: string }) {
       sessionId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       localStorage.setItem('merchant-admin.session', sessionId);
     }
+    // 用户问句即时上屏 + 思考中占位(不等 AI 返回才显示)
+    const userStamp = ++frameSeq * 100;
+    const pendingId = userStamp + 1;
+    setFrames((prev) => [
+      ...prev,
+      { id: userStamp, event: 'user', data: { message: question } },
+      { id: pendingId, event: 'pending', data: {} },
+    ]);
     try {
       const result = await api.ask(question, { route, selection, selectionLabels: getSelectionLabels(), sessionId });
-      const stamp = ++frameSeq * 100;
-      setFrames((prev) => [
-        ...prev,
-        { id: stamp, event: 'user', data: { message: question } },
-        ...result.map((f: any, k: number) => ({
-          id: stamp + k + 1,
-          event: f.event,
-          data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
-        })),
-      ]);
+      setFrames((prev) => {
+        const withoutPending = prev.filter((f) => f.id !== pendingId);
+        return [
+          ...withoutPending,
+          ...result.map((f: any, k: number) => ({
+            id: pendingId + 10 + k,
+            event: f.event,
+            data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
+          })),
+        ];
+      });
     } catch (err) {
-      setFrames((prev) => [...prev, { id: ++frameSeq, event: 'error', data: { message: String(err) } }]);
+      setFrames((prev) => prev
+        .filter((f) => f.id !== pendingId)
+        .concat({ id: pendingId + 10, event: 'error', data: { message: String(err) } }));
     }
-    setQ('');
     setBusy(false);
   }
   askRef.current = (qOverride?: string) => void ask(qOverride);
+
+  function newConversation() {
+    setFrames([]);
+    localStorage.removeItem('merchant-admin.agent.history');
+    localStorage.setItem('merchant-admin.session', `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  }
 
   function pinToBoard(data: any) {
     const pins = JSON.parse(localStorage.getItem('merchant-admin.board') || '[]');
@@ -133,6 +160,9 @@ export function FloatingAgent({ route }: { route: string }) {
           <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => navigate('/board')}>
             📌 看板
           </button>
+          <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={newConversation}>
+            ✚ 新对话
+          </button>
           <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => setOpen(false)}>
             收起
           </button>
@@ -164,6 +194,10 @@ export function FloatingAgent({ route }: { route: string }) {
           <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
             {f.event === 'user' ? (
               <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
+            ) : f.event === 'pending' ? (
+              <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-400">
+                正在解析问题并查询…
+              </div>
             ) : f.event === 'clarify' ? (
               <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm">
                 {f.data.question}

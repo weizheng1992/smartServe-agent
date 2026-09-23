@@ -432,7 +432,7 @@ class MetricQueryEngine:
             # 对比类问法可直接看每单差异;实体来自 PageContext 勾选(必传)。
             params.pop("lim", None)  # 逐笔展示无 LIMIT 槽位,显式 50 行双保险
             if not intent.entity_ids:
-                raise UnsupportedQuery("请先在订单列表中勾选订单,再问对比/概览(实体集必传)")
+                raise UnsupportedQuery("请先在订单列表勾选订单,或直接在问句里写订单号(如 AURORA-ORD-2026-1737)")
             sql = (
                 'SELECT o.order_id AS "订单号", o.status AS "状态", '
                 'o.total_amount::float AS "金额", '
