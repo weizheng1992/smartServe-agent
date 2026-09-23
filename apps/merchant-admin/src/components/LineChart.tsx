@@ -32,6 +32,15 @@ export function LineChart({ points, unit }: { points: LinePoint[]; unit?: string
       ))}
       <path d={area} fill="rgba(24,24,27,0.06)" />
       <path d={line} fill="none" stroke="#18181b" strokeWidth="2" />
+      {points.map((p, i) => (
+        <g key={`pt-${i}`}>
+          {/* 透明大热区 + 实心小点:悬停出浏览器原生气泡(数值即看即读) */}
+          <circle cx={x(i)} cy={y(p.value)} r={8} fill="transparent">
+            <title>{`${p.label} · ${p.value.toLocaleString()}${unit || ''}`}</title>
+          </circle>
+          <circle cx={x(i)} cy={y(p.value)} r={2.5} fill="#18181b" />
+        </g>
+      ))}
       {points.map((p, i) =>
         i % labelEvery === 0 ? (
           <text key={i} x={x(i)} y={h - 8} fontSize="9" fill="#a1a1aa" textAnchor="middle">{p.label}</text>

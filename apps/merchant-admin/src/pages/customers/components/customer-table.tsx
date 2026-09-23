@@ -22,7 +22,8 @@ export function CustomerTable({ customers, onMsg, onChanged, onDetail }: Props) 
   function toggle(cid: string) {
     const next = selected.includes(cid) ? selected.filter((x) => x !== cid) : [...selected, cid];
     setSelected(next);
-    setSelectionKind('customer', next);
+    const names = Object.fromEntries(customers.filter((c) => next.includes(c.customer_id)).map((c) => [c.customer_id, c.name]));
+    setSelectionKind('customer', next, names);
   }
 
   async function setLevel(customerId: string, memberLevel: string) {

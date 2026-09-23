@@ -6,6 +6,8 @@ export type SelectionKind = 'order' | 'spu' | 'customer';
 export type SelectionMap = Partial<Record<SelectionKind, string[]>>;
 
 let current: SelectionMap = {};
+// kind → (id → 人话标签):商品标题/客户名,供图表标题等人话呈现
+let labels: Partial<Record<SelectionKind, Record<string, string>>> = {};
 const listeners = new Set<(s: SelectionMap) => void>();
 
 // 旧契约残留一次性清除(迁移 2026-09-22)
@@ -15,11 +17,20 @@ export function getSelection(): SelectionMap {
   return current;
 }
 
-export function setSelectionKind(kind: SelectionKind, ids: string[]): void {
+export function getSelectionLabels(): Partial<Record<SelectionKind, Record<string, string>>> {
+  return labels;
+}
+
+export function setSelectionKind(kind: SelectionKind, ids: string[], labelsById?: Record<string, string>): void {
   const next: SelectionMap = { ...current };
   const uniq = [...new Set(ids)].slice(0, 100);
-  if (uniq.length) next[kind] = uniq;
-  else delete next[kind];
+  if (uniq.length) {
+    next[kind] = uniq;
+    if (labelsById) labels[kind] = { ...(labels[kind] || {}), ...labelsById };
+  } else {
+    delete next[kind];
+    delete labels[kind];
+  }
   current = next;
   emit();
 }

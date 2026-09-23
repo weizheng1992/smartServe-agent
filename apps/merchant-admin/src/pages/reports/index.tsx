@@ -29,9 +29,9 @@ export default function ReportsPage() {
         const cols = list[0] ? Object.keys(list[0]) : [];
         const chart = detail.chart || (metric.endsWith('_trend') ? 'line' : undefined);
         return {
-          metric, unit: '', caliber: '', rows: list, chart,
+          metric, unit: '', caliber: '', rows: list, chart, title: detail.title,
           cards: [{
-            type: 'table', title: `${metric}`, columns: cols.map((k) => ({ key: k, label: k })),
+            type: 'table', title: detail.title, columns: cols.map((k) => ({ key: k, label: k })),
             rows: list, caliber: '',
           }],
         };
@@ -44,7 +44,7 @@ export default function ReportsPage() {
 
   function downloadCsv(id: string) {
     void api.reports.csv(id).then((j) => {
-      const blob = new Blob([j.csv], { type: 'text/csv' });
+      const blob = new Blob([j.csv], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = j.filename;

@@ -21,7 +21,8 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
   function toggleSelect(code: string) {
     const next = selected.includes(code) ? selected.filter((x) => x !== code) : [...selected, code];
     setSelected(next);
-    setSelectionKind('spu', next);
+    const titles = Object.fromEntries(spus.filter((s) => next.includes(s.spu_code)).map((s) => [s.spu_code, s.title]));
+    setSelectionKind('spu', next, titles);
   }
 
   async function saveEdit(id: string) {

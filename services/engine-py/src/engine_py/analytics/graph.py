@@ -22,6 +22,9 @@ from .engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
 # 时间序列/会话/活动族不在其列 —— 闭集外指标绝不静默扩展绑定语义。
 _INLINE_SPU_METRICS = frozenset({"gmv", "volume", "gross_profit", "margin_rate", "stock_risk"})
 
+# spu 勾选的作用面 = 标准族榜单 + 趋势族对偶(趋势按勾选商品出线)
+_SPU_FILTERABLE = _INLINE_SPU_METRICS | {"volume_trend", "gmv_trend"}
+
 # 客户族闭集(PageContext customer 勾选的作用面)
 _CUSTOMER_SLOT_METRICS = frozenset({
     "customer_orders", "customer_spend_stats", "customer_coupons",
@@ -123,10 +126,25 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
 
     if intent.metric == "order_overview" and sel_orders and sel_orders != intent.entity_ids:
         intent = _with_sel(dict(intent.entity_slot))
-    elif sel_spu and intent.metric in _INLINE_SPU_METRICS and not (intent.entity_slot or {}).get("spu"):
+    elif sel_spu and intent.metric in _SPU_FILTERABLE and not (intent.entity_slot or {}).get("spu"):
         intent = _with_sel({**intent.entity_slot, "spu": sel_spu})
     elif sel_cust and intent.metric in _CUSTOMER_SLOT_METRICS and not (intent.entity_slot or {}).get("customer"):
         intent = _with_sel({**intent.entity_slot, "customer": sel_cust})
+
+    sel_labels = (page_context or {}).get("selectionLabels") or {}
+
+    def _label_desc(kind: str, ids: list[str]) -> str:
+        names = [sel_labels.get(kind, {}).get(i) for i in ids]
+        known = [n for n in names if n]
+        if not known:
+            return f"{len(ids)} 项"
+        return known[0] if len(known) == 1 else f"{known[0]} 等 {len(known)} 项"
+
+    title_prefix = ""
+    if sel_spu and intent.metric in _SPU_FILTERABLE:
+        title_prefix = _label_desc("spu", sel_spu)
+    elif sel_cust and intent.metric in _CUSTOMER_SLOT_METRICS:
+        title_prefix = _label_desc("customer", sel_cust)
 
     # 行内商品提及(L0 直出、零 LLM):标准商品族指标的问句逐字包含唯一商品
     # 标题/编码 → 直接绑定 spu 实体槽;零/多命中不改语义(保守放行原问句)。
@@ -196,13 +214,18 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         await session_store.save(business_id, session_id, {
             "last_question": effective_question, "intent": intent.__dict__,
         })
-    return _result_frame(effective_question, result, intent)
+    return _result_frame(effective_question, result, intent, title_prefix)
 
 
-def _result_frame(question: str, result, intent) -> dict:
+def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict:
+    from .tools_registry_bridge import metric_semantic_registry
+
     cards = build_cards(question, result, intent)
+    label = metric_semantic_registry().get(intent.metric, {}).get("label") or intent.metric
+    title = f"{title_prefix} · {label} · {result.unit}" if title_prefix else f"{label} · {result.unit}"
     return {
         "type": "result",
+        "title": title,
         "metric": result.metric,
         "unit": result.unit,
         "caliber": result.caliber,

@@ -121,7 +121,8 @@ async def export_csv(business_id: str, report_id: str) -> str | None:
             for r in rows:
                 writer.writerow(r.values())
         writer.writerow([])
-    return buf.getvalue()
+    # BOM:Excel 直接打开中文不乱码(实弹踩坑:报告页下载曾无 BOM 全乱码)
+    return "\ufeff" + buf.getvalue()
 
 
 async def save_result_report(business_id: str, generated_by: str, question: str,

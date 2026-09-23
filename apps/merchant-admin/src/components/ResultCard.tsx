@@ -24,7 +24,7 @@ export function ResultCard({ data }: { data: any }) {
     const points = data.rows.map((r: any) => ({ label: String(Object.values(r)[0]), value: Number(Object.values(r)[1]) }));
     return (
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-        <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{data.metric} · {data.unit}</div>
+        <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{data.title || `${data.metric} · ${data.unit}`}</div>
         <LineChart points={points} unit={data.unit} />
         {data.caliber ? <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{data.caliber}</div> : null}
       </div>
@@ -62,9 +62,10 @@ export function ResultCard({ data }: { data: any }) {
       </div>
     );
   }
+  const header = data.title || card.title;
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-      <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{card.title}</div>
+      <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{header}</div>
       {bars ? <BarChart points={bars} unit={data.unit} /> : null}
       <table className="w-full text-[12px]">
         <thead>

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { Button } from 'ui';
 import { ResultCard } from '@/components/ResultCard';
 import { api } from '@/lib/api';
-import { clearSelection, getSelection, subscribe, type SelectionMap } from '@/lib/page-context';
+import { clearSelection, getSelection, getSelectionLabels, subscribe, type SelectionMap } from '@/lib/page-context';
 
 // 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由(选中数据
 // 由列表页经 localStorage 约定键上行 —— PageContext 19-D3)。
@@ -63,7 +63,7 @@ export function FloatingAgent({ route }: { route: string }) {
       localStorage.setItem('merchant-admin.session', sessionId);
     }
     try {
-      const result = await api.ask(question, { route, selection, sessionId });
+      const result = await api.ask(question, { route, selection, selectionLabels: getSelectionLabels(), sessionId });
       const stamp = ++frameSeq * 100;
       setFrames((prev) => [
         ...prev,

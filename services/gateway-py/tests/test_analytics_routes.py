@@ -1077,6 +1077,7 @@ class TestSaveResultReport:
         assert any(x["id"] == rid and "销量最高" in x["title"] for x in reports)
         csv = await client.get(f"/api/admin/analytics/reports/{rid}/csv", headers=boss)
         assert csv.status_code == 200 and "E2E存报告测试款" in csv.json()["csv"]
+        assert csv.json()["csv"].startswith("\ufeff"), "报告 CSV 必须带 BOM(Excel 中文)"
         # 图表重放数据源:详情带 rows 与存档图型
         detail = (await client.get(f"/api/admin/analytics/reports/{rid}", headers=boss)).json()
         assert detail["chart"] == "line" and detail["rows"]["volume"][0]["name"] == "E2E存报告测试款"
