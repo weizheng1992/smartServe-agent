@@ -366,8 +366,6 @@ async def _rewrite_followup(question: str, history: dict) -> str | None:
 
 
 async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict, history: dict | None = None):
-    """返回 (intent | clarify dict, via_llm, rewritten):rewritten = 改写后的独立
-    问句,外层实体逐字绑定/会话落存必须使用它(原问句是指代,绑不上实体)。"""
     """L0 未命中后的两级兜底:先 L2 范例回放(近零成本),再 L3 LLM 意图(ADR-0005)。
 
     返回 (intent | clarify dict, via_llm);全部未命中 → UnsupportedQuery。

@@ -716,7 +716,7 @@ METRIC_SEMANTIC_REGISTRY: dict[str, dict[str, Any]] = {
         "conflictGroup": [],
         "sampleQueries": ["库存价值排行", "哪个商品压的货值最大"],
         "availableDimensions": [],
-        "permissionTag": "sales_viewer",
+        "permissionTag": "warehouse_operator",
         "verifiedConfidence": 0.9,
     },
     "customer_spend_trend": {
