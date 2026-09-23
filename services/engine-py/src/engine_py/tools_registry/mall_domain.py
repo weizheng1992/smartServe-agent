@@ -687,11 +687,18 @@ class MallDomainService:
             effective_user_id = ctx["userId"]
             effective_biz_id = ctx["businessId"]
 
+        # 缺单号诚实报错(nightly 2026-09-23):LLM 深规划对缺槽退款复合句
+        # (「看订单顺便把没发货的退了」)可能产出无 orderId 的售后子任务,
+        # params["orderId"] 硬下标曾 KeyError 炸图执行降级道歉文案。
+        order_id = params.get("orderId")
+        if not order_id:
+            return {"error": "⚠️ 售后申请失败：请提供订单编号，或先告诉我您要退哪一笔订单。"}
+
         order = await OrderDomainService.find_order_by_id(
-            params["orderId"], effective_user_id, effective_biz_id
+            order_id, effective_user_id, effective_biz_id
         )
         if not order:
-            return {"error": f"⚠️ 售后申请失败：订单 {params['orderId']} 不属于您名下或不存在。"}
+            return {"error": f"⚠️ 售后申请失败：订单 {order_id} 不属于您名下或不存在。"}
 
         ticket_id = f"AS-{int(time.time()):X}-{random.randint(100, 999)}"
         refund_amount = params.get("refundAmount") or float(order.get("totalAmount") or 0) or 100.0
@@ -714,7 +721,7 @@ class MallDomainService:
                     ).bindparams(
                         tid=ticket_id,
                         bid=effective_biz_id,
-                        oid=params["orderId"],
+                        oid=order_id,
                         oiid=params.get("orderItemId"),
                         uid=effective_user_id or order.get("userId") or "user_001",
                         type=params["type"],
@@ -740,12 +747,12 @@ class MallDomainService:
             print(f"[MallDomainService.applyAfterSale] 售后工单落库失败 orderId={params.get('orderId')}: {err}")
             return {"success": False, "error": "售后工单提交失败，请稍后重试或转人工客服处理。"}
 
-        await tool_cache.delete(f"cache:order_status:{params['orderId']}")
+        await tool_cache.delete(f"cache:order_status:{order_id}")
 
         return {
             "success": True,
             "ticketId": ticket_id,
-            "orderId": params["orderId"],
+            "orderId": order_id,
             "type": params["type"],
             "reason": params["reason"],
             "refundAmount": f"¥{refund_amount:.2f}",
