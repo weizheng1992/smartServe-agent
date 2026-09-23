@@ -43,6 +43,10 @@ def test_time_window_word_matches_slot():
         if "近 7 天" in q:
             assert semql["time_window"] == {"kind": "last_7d"}
         if "上个月" in q:
+            # 环比指标(gmv_mom)自带本月/上月双窗,朴素「上个月→last_month」
+            # 启发式不适用(gmv_mom 词面「比上个月」实弹引入)
+            if semql.get("metric") == "gmv_mom":
+                continue
             assert semql["time_window"] == {"kind": "last_month"}
 
 

@@ -310,7 +310,7 @@ class MetricQueryEngine:
             ast = assert_safe_select(sql, compile_safe_schema_card(), require_business_id="business_id" in sql)
         except UnsafeSqlError as err:
             raise ValueError(f"编译模板未过安全闸(模板缺陷,非用户问题): {err}") from err
-        return CompiledSQL(sql=sql, params=params, metric=intent.metric, unit=metric["unit"], ast=ast)
+        return CompiledSQL(sql=sql, params=params, metric=intent.metric, unit=metric["unit"], ast=ast, chart_hint=intent.chart_hint)
 
     def _compile_special_family(self, intent: StructuredQueryIntent, business_id: str) -> CompiledSQL:
         """阶段③新族模板:评价/退货(商户库)、会话(engine 本地库)。
@@ -713,6 +713,7 @@ class MetricQueryEngine:
             metric=intent.metric,
             unit=metric_semantic_registry()[intent.metric]["unit"],
             ast=ast,
+            chart_hint=intent.chart_hint,
             target_db=(
                 "engine_db"
                 if intent.metric in ("session_volume", "ai_resolution_rate", "after_sale_overview")
@@ -737,16 +738,19 @@ class MetricQueryEngine:
         if ttl > 0:
             from . import result_cache
 
-            cache_key = result_cache.build_key(compiled.sql, compiled.params)
+            cache_key = result_cache.build_key(
+                compiled.sql, compiled.params, chart_hint=compiled.chart_hint,
+            )
             cached = await result_cache.get(cache_key)
             if cached is not None:
                 age = max(int(time.time() - cached["ts"]), 0)
                 caliber = _CALIBERS.get(compiled.metric, "有效订单聚合(排除退款/取消单)")
+                auto_chart = "line" if compiled.metric.endswith("_trend") else None
                 return QueryResult(
                     rows=cached["rows"], metric=compiled.metric,
                     unit=metric_semantic_registry()[compiled.metric]["unit"],
                     caliber=f"{caliber}(缓存读,数据时刻 ≈{age}s 前)",
-                    chart="line" if compiled.metric.endswith("_trend") else None,
+                    chart=compiled.chart_hint or auto_chart,
                 )
 
         if getattr(compiled, "target_db", "merchant_db") == "engine_db":
@@ -814,6 +818,7 @@ class CompiledSQL:
     params: dict
     metric: str
     unit: str
+    chart_hint: str | None = None  # 用户图型指令(缓存键组成部分,命中重建不丢)
     target_db: str = "merchant_db"  # merchant_db | engine_db(阶段③数据源路由)
     ast: Any = field(default=None, repr=False, compare=False)
     _schema_card: Any = field(default=None, repr=False, compare=False)

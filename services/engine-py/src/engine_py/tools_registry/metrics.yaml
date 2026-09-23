@@ -1112,6 +1112,7 @@ attribution_refund:
     sqlTemplate: merchant_db
     businessRules:
       - 归因只做确定性环比分解,不猜测原因(08-D1);变多/变少由行序表达
+      - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
     direction: DESC
     unit: 单
     icon: "🔍"
@@ -1134,6 +1135,7 @@ attribution_sales:
     sqlTemplate: merchant_db
     businessRules:
       - 归因只做确定性环比分解,不猜测原因(08-D1);变好/变差由行序表达
+      - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
     direction: DESC
     unit: 元
     icon: "🔍"

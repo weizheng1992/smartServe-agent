@@ -28,15 +28,6 @@ from .quick_summary import quick_summary as _quick_summary
 
 
 
-# spu 勾选的作用面 = 标准族榜单 + 趋势族对偶(趋势按勾选商品出线)
-_SPU_FILTERABLE = _INLINE_SPU_METRICS | {"volume_trend", "gmv_trend"}
-
-# 客户族闭集(PageContext customer 勾选的作用面)
-_CUSTOMER_SLOT_METRICS = frozenset({
-    "customer_orders", "customer_spend_stats", "customer_coupons",
-    "customer_profile", "customer_panorama", "customer_spend_trend",
-})
-
 # 纯图表切换追问(确定性快捷路):问句只含图型词 → 上一轮问句 + 图型要求重解析
 _CHART_ONLY_RE = re.compile(r"^(?:换成?|改[成为]?|用|来)?\s*(?:一?个?)?\s*(折线图?|柱状图?|条形图?|柱形图?|表格)\s*[?？]?$")
 

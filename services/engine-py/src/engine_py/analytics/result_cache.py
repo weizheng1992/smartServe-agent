@@ -12,9 +12,11 @@ import json
 from .kv import kv_get_json, kv_set_json
 
 
-def build_key(compiled_sql: str, params: dict) -> str:
+def build_key(compiled_sql: str, params: dict, chart_hint: str | None = None) -> str:
+    # 图型指令入键:同一查询「折线」与「柱状」是不同交付,不共享缓存
     digest = hashlib.sha256(
-        (compiled_sql + json.dumps(params, sort_keys=True, default=str)).encode()
+        (compiled_sql + json.dumps(params, sort_keys=True, default=str)
+         + (chart_hint or "")).encode()
     ).hexdigest()[:24]
     return f"da:res:{digest}"
 
