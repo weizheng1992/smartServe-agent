@@ -632,6 +632,27 @@ class IntentTriageEngine:
 
         history_msgs = await ShortMemory(thread_id).get_messages()
 
+        # 🧭 语义意图路由(P1 影子期):管线最前段统一接线 —— 快轨(slot_fusion)
+        # 与精判(llm_refine)两条终局路径都会携带语义提议,影子期只产提议不接
+        # 管路由(SEMANTIC_ROUTER_MODE=off 可关);双指标(免 LLM 占比/坏例池
+        # intent_conflict 增速)入巡检,误路由率达标后切 takeover 直达技能。
+        from .semantic_routes import SemanticIntentRouter, get_semantic_router_mode
+
+        if input_text and get_semantic_router_mode() != "off":
+            try:
+                input_vector = await SemanticVectorCache.get_embedding_with_cache(input_text)
+                route_hit = await SemanticIntentRouter.route_best(input_vector)
+                if route_hit:
+                    proposals.append(_proposal("semantic_router", route_hit[0], route_hit[1]))
+                    if state.get("job_id"):
+                        await emit_status(
+                            state["job_id"],
+                            f"🧭 语义路由影子提议: {route_hit[0]} (相似度 {route_hit[1]:.2f})",
+                            node="triage",
+                        )
+            except Exception as route_err:
+                print(f"[Triage] 语义路由影子失败,跳过: {route_err}")
+
         from .stages import (
             ConfirmationResumeStage,
             ConsultFastTrackStage,
