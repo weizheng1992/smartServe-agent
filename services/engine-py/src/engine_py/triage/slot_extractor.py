@@ -350,6 +350,17 @@ class SlotExtractor:
         return entities
 
     @staticmethod
+    def pick_silver_label(text: str, min_confidence: float = 0.9) -> str | None:
+        """P2 通道③(2026-09-23):历史问句的确定性复判 —— 恰好一条规则
+        高置信命中时返回该意图作 silver label;零命中/多规则歧义/低置信
+        返回 None(歧义句留给澄清①与人审②,严禁硬贴)。"""
+        detected = SlotExtractor.detect_intents(text)
+        if len(detected) != 1:
+            return None
+        rule = detected[0]
+        return rule.intent if rule.confidence >= min_confidence else None
+
+    @staticmethod
     def detect_intents(text: str) -> list[IntentRule]:
         matched: list[IntentRule] = []
         for rule in INTENT_DETECTION_RULES:
