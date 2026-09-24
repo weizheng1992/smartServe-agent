@@ -776,13 +776,18 @@ class OrderDomainService:
 
         # TODO(Phase 1b): 租户配置 spiConnector.remote 时经 SPI 连接器远程查单(connectors/ 批次)
 
-        # 1) 商户门户真单 —— 与列表页同源,严格归属匹配;库不可达(None)时静默降级
+        # 1) 商户门户真单 —— 与列表页同源,严格归属匹配;库不可达(None)时静默降级。
+        # total/summary 显式随行(2026-09-23 实弹):复合层曾把截断可见的 9 笔
+        # 说成「共有 9 笔」—— 真计数必须机器可读,LLM 才有真数可引。
         merchant_orders = await _list_merchant_orders(target_user_id or "")
         if merchant_orders:
+            orders = _apply_address_filter(
+                _apply_shipping_filter(merchant_orders, shipping_status), shipping_address
+            )
             return {
-                "orders": _apply_address_filter(
-                    _apply_shipping_filter(merchant_orders, shipping_status), shipping_address
-                )
+                "orders": orders,
+                "total": len(orders),
+                "summary": f"共 {len(orders)} 笔订单匹配当前筛选(全部返回,无截断)",
             }
 
         # 2) engine 本地表兜底(非商户租户演示单,或商户库离线)

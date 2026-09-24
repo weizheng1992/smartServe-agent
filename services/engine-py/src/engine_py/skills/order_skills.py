@@ -171,6 +171,39 @@ class OrderAddressModificationSkill(BaseSkill):
         order_id = context.slots.get("orderId") or ""
         new_address = context.slots.get("newAddress") or ""
 
+        # 多笔未发货先反问(2026-09-23 实弹):orderId 可能是槽位层从会话历史
+        # 回填的,用户心里的那一笔未必是它 —— 输入未显式带单号且名下未发货
+        # 订单多于一笔时,列出清单让用户挑(带新地址一起说即可),严禁静默定位。
+        from ..triage.slot_extractor import ORDER_ID_RE
+
+        if order_id and not ORDER_ID_RE.search(context.input or ""):
+            try:
+                spi_for_count = await self.get_spi_client(context.tenant_id)
+                all_orders = await spi_for_count.list_orders(
+                    {"userId": context.user_id, "threadId": context.thread_id, "tenantId": context.tenant_id}
+                )
+                unshipped = [
+                    o for o in (all_orders or [])
+                    if str(o.get("status") or "").upper() in ("PAID", "PENDING", "PROCESSING")
+                ]
+            except Exception as count_err:
+                print(f"[OrderAddressSkill] 未发货清点失败,按原流程继续: {count_err}")
+                unshipped = []
+            if len(unshipped) > 1:
+                shown = unshipped[:8]
+                lines = [f"• {o.get('orderId')}（¥{float(o.get('totalAmount') or 0):.0f}）" for o in shown]
+                more = f"\n…等共 {len(unshipped)} 笔" if len(unshipped) > len(shown) else ""
+                return SkillResult(
+                    success=False,
+                    skill_id=self.metadata["id"],
+                    output=(
+                        "您有多笔未发货订单，请告诉我要修改哪一笔的地址"
+                        "（连同新地址一起说即可，如「把 ORD-xxx 改到北京市…」）：\n"
+                        + "\n".join(lines) + more
+                    ),
+                    error="Multiple unshipped orders, need disambiguation",
+                )
+
         if not order_id or not new_address:
             return SkillResult(
                 success=False,

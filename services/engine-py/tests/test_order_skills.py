@@ -214,3 +214,49 @@ def test_address_fallback_regex_can_handle() -> None:
     skill = OrderAddressModificationSkill()
     assert skill.can_handle(SkillContext(input="帮我改地址")) is True
     assert skill.can_handle(SkillContext(input="推荐几双跑鞋")) is False
+
+
+class _FakeSpiWithList(_FakeSpi):
+    """带 list_orders 的桩:改址多单反问场景。"""
+
+    def __init__(self, unshipped: list[dict], **kw):
+        super().__init__(**kw)
+        self.unshipped = unshipped
+
+    async def list_orders(self, params: dict) -> list[dict]:
+        return self.unshipped
+
+
+def test_address_multi_unshipped_asks_disambiguation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """多笔未发货 + 输入未显式带单号:必须列清单反问,严禁静默定位历史单
+    (2026-09-23 实弹:静默定位 7951 与「未发货共 9 笔」答复自相矛盾)。"""
+    unshipped = [
+        {"orderId": "AURORA-ORD-2026-7951", "status": "PAID", "totalAmount": 139.0},
+        {"orderId": "AURORA-ORD-2026-6307", "status": "PAID", "totalAmount": 139.0},
+        {"orderId": "AURORA-ORD-2026-9856", "status": "PAID", "totalAmount": 839.0},
+    ]
+    spi = _FakeSpiWithList(unshipped, order=_ORDER)
+    _wire(monkeypatch, spi, skill_cls=OrderAddressModificationSkill)
+
+    # 输入不含单号形态(7951 由槽位历史回填)
+    ctx = _ctx({"orderId": "AURORA-ORD-2026-7951", "newAddress": "北京市朝阳区"})
+    result = asyncio.run(OrderAddressModificationSkill().execute(ctx))
+    assert result.success is False
+    assert "多笔未发货" in result.output
+    for oid in ("7951", "6307", "9856"):
+        assert oid in result.output, f"清单必须含 {oid}"
+
+
+def test_address_single_unshipped_proceeds_normally(monkeypatch: pytest.MonkeyPatch) -> None:
+    """仅一笔未发货:不打断,照常进入原流程(此处 newAddress 缺槽走通用反问)。"""
+    unshipped = [{"orderId": "AURORA-ORD-2026-7951", "status": "PAID", "totalAmount": 139.0}]
+    spi = _FakeSpiWithList(unshipped, order=_ORDER)
+    _wire(monkeypatch, spi, skill_cls=OrderAddressModificationSkill)
+
+    ctx = _ctx(
+        {"orderId": "AURORA-ORD-2026-7951", "newAddress": "北京市朝阳区"},
+        {"isApproved": True},  # 过 HITL 门,直达执行(本测只证不触发多单反问)
+    )
+    result = asyncio.run(OrderAddressModificationSkill().execute(ctx))
+    # 单笔不触发反问:200 元 > 50 阈值走 HITL 挂起,或直接执行 —— 但绝不是多单反问
+    assert "多笔未发货" not in (result.output or ""), f"单笔未发货不得触发反问: {result.output}"
