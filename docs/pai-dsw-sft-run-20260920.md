@@ -35,6 +35,9 @@
 
 ## 三、训练配置
 
+> 全部参数已提取为 **`services/engine-py/scripts/training/configs/sft_semql.yaml`**，
+> `sft_train.py --config` 直接加载（CLI 显式参数可覆盖）；下表即该文件的注释版。
+
 | 项 | 值 |
 |---|---|
 | 任务 | 问句 + 指标闭集 → SemQL JSON（模型只学语义理解，不写 SQL，铁律 08-D1） |

@@ -1,0 +1,31 @@
+# SemQL SFT 训练配置 —— 2026-09-20 首训实录的提取版(docs/pai-dsw-sft-run-20260920.md)
+# 用法(services/engine-py 下):
+#   uv run python scripts/training/sft_train.py \
+#     --config scripts/training/configs/sft_semql.yaml \
+#     --dataset training_data/sft/train.jsonl --out training_data/sft/adapter
+# 显式 CLI 参数覆盖本文件对应项;重训换数据/基座只改这里
+
+# 基座:云端实跑指向 modelscope 缓存目录(/mnt/workspace/.cache/modelscope/hub/models/unsloth/...),
+# 本地/新环境用仓库名(HF_ENDPOINT 配镜像);LoRA 与量化基座/全精度基座通用
+base: unsloth/Qwen2.5-7B-Instruct-bnb-4bit
+dataset: training_data/sft/train.jsonl
+out: training_data/sft/adapter
+
+lora:
+  r: 16
+  lora_alpha: 32              # 惯例 = 2×r
+  lora_dropout: 0.05
+  task_type: CAUSAL_LM
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  epochs: 3                   # 4478 样本 × 3 epochs ÷ 有效 batch 8 = 1680 步
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 4   # 有效 batch = 8
+  learning_rate: 2.0e-4       # LoRA 惯例区间 1e-4 ~ 3e-4
+  logging_steps: 10
+  save_strategy: epoch
+  report_to: []
+  dataset_text_field: text
+  max_length: 2048
+  eos_token: "<|im_end|>"     # Qwen2.5-Instruct 真实结束符(写字面量,防运行时占位符注入)
