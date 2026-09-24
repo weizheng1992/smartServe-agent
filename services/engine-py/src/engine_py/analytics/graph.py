@@ -25,6 +25,7 @@ from .context_intake import (
 )
 from .engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
 from .quick_summary import quick_summary as _quick_summary
+from .trace import Trace
 
 
 
@@ -75,18 +76,25 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
             print(f"[Session] 图表切换快捷路: {stripped!r} → 重问 {history['last_question'][:24]!r}")
             question = f"{history['last_question']} {stripped}"
 
+    trace = Trace(business_id, session_ctx.get("role", "finance_owner"), question)
+    if history:
+        trace.add_layer("session", followed_up=True)
+
     try:
         intent = engine.resolve(question)
+        trace.add_layer("L0", metric=intent.metric if not isinstance(intent, dict) else "clarify")
     except UnsupportedQuery:
         # L2 范例回放 → L3 LLM 意图兜底(ADR-0005);全部未命中 → 响亮失败 + 落库
         rewritten_q = None
         try:
-            intent, _, rewritten_q = await _fallback_intent(question, allowed, session_ctx, history=history)
+            intent, _, rewritten_q = await _fallback_intent(question, allowed, session_ctx, history=history, trace=trace)
         except UnsupportedQuery as err:
             await _log_unanswered(session_ctx, question)
+            await trace.record("unsupported", final_method="none")
             return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": str(err)}
         if isinstance(intent, dict) and intent.get("clarify"):
             intent.setdefault("originalQuestion", rewritten_q or question)  # 实体反问回问时带上有效问句
+            await trace.record("clarify")
             return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
         # 兜底结果同样过角色闭集(防御纵深:resolver 替换/演化时不放行越权)
         if not isinstance(intent, dict) and allowed and intent.metric not in allowed:
@@ -99,6 +107,7 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     effective_question = rewritten_q or question
 
     if isinstance(intent, dict) and intent.get("clarify"):
+        await trace.record("clarify")
         return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
 
     # 勾选/订单号/标题前缀 intake(context_intake 单一职责模块)
@@ -149,6 +158,7 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
             }
 
     if allowed is not None and intent.metric not in allowed:
+        await trace.record("unsupported", final_metric=intent.metric)
         return {
             "type": "unsupported",
             "message": "当前角色无权查看该指标(反问选项集已过滤,此处为直接问越权指标的兜底拒绝)。",
@@ -157,6 +167,8 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     # 场景包(L2 复合意图):一个意图 = 一组子查询,展开为多帧结果卡
     if intent.metric in _SCENARIO_PACKS:
         outcome = await _run_scenario(intent, session_ctx)
+        await trace.record(outcome.get("type", "error"), final_metric=intent.metric,
+                           final_method="scenario", row_count=len(outcome.get("frames") or []))
         if session_id:
             await session_store.save(business_id, session_id, {
                 "last_question": effective_question, "intent": intent.__dict__,
@@ -169,16 +181,26 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     except UnsupportedQuery as err:
         # 编译期实体闸(如「未勾选订单」)→ 诚实 unsupported 帧并给出动作提示
         message = str(err) if "勾选" in str(err) else "该指标暂未开放"
+        await trace.record("unsupported", final_metric=intent.metric)
         return {"type": "unsupported", "message": message, "detail": str(err)}
     except Exception as err:
+        await trace.record("error", final_metric=intent.metric)
         return {"type": "error", "message": "查询执行失败(已如实报告,未生成估算数据)", "detail": str(err)}
 
+    outcome = _result_frame(effective_question, result, intent, title_prefix)
+    cache_hit = "缓存读" in (result.caliber or "")
+    await trace.record(
+        outcome.get("type", "error"), final_metric=intent.metric,
+        final_method="cache" if cache_hit else "template",
+        sql_template=intent.metric, row_count=len(result.rows or []),
+        cache_hit=cache_hit,
+    )
     if session_id:
         # 只存问句与意图,不存结果(数据现查);unsupported/error 不污染历史
         await session_store.save(business_id, session_id, {
             "last_question": effective_question, "intent": intent.__dict__,
         })
-    return _result_frame(effective_question, result, intent, title_prefix)
+    return outcome
 
 
 def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict:
@@ -290,7 +312,7 @@ async def _rewrite_followup(question: str, history: dict) -> str | None:
         return None
 
 
-async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict, history: dict | None = None):
+async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict, history: dict | None = None, trace: "Trace | None" = None):
     """L0 未命中后的两级兜底:先 L2 范例回放(近零成本),再 L3 LLM 意图(ADR-0005)。
 
     返回 (intent | clarify dict, via_llm);全部未命中 → UnsupportedQuery。
@@ -313,6 +335,8 @@ async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx
 
                 return await llm_resolve(question, allowed, session_ctx.get("business_id") or ""), True, None
             print(f"[L2] 范例命中({exemplar['similarity']:.2f}): {exemplar['question'][:40]!r}")
+            if trace:
+                trace.add_layer("L2", similarity=round(exemplar["similarity"], 3), exemplar=exemplar["question"][:40])
             return StructuredQueryIntent(**exemplar["intent"]), False, None
     except Exception as err:
         print(f"[L2] 范例检索失败(放行 L3): {err}")
@@ -328,6 +352,8 @@ async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx
         rewritten = await _rewrite_followup(question, history)
         if rewritten and rewritten != question:
             print(f"[Session] 追问改写: {question[:20]!r} → {rewritten[:30]!r}")
+            if trace:
+                trace.add_layer("rewrite", rewritten=rewritten[:40])
             try:
                 hit = MetricQueryEngine(session_ctx=session_ctx).resolve(rewritten)
                 if isinstance(hit, StructuredQueryIntent):
@@ -361,6 +387,8 @@ async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx
             )
         except Exception as err:
             print(f"[L2] 范例沉淀失败(不影响回答): {err}")
+        if trace:
+            trace.add_layer("L3", metric=intent.metric)
         return intent, True, (rewritten if rewritten_used else None)
     return intent, False, (rewritten if rewritten_used else None)
 

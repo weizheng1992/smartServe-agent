@@ -270,4 +270,12 @@ class ContextualRAG:
                 )
 
         scored_docs.sort(key=lambda doc: rrf_scores.get(doc["id"], 0), reverse=True)
-        return scored_docs[:limit]
+        result = scored_docs[:limit]
+        # RAG 检索日志(此前零记录):查询/候选总数/召回数/Top 评分 —— 排查
+        # 「知识库明明有却没召回」的唯一线索。stdout 保留,落库走 analytics_trace。
+        top = result[0] if result else None
+        print(
+            f"[RAG] query={query[:40]!r} 候选 {len(doc_embeddings)} → 召回 {len(result)}"
+            + (f" · top_score={top['similarity']:.2f} ({top.get('docTitle') or ''})" if top else "")
+        )
+        return result

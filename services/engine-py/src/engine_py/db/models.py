@@ -661,6 +661,29 @@ class AgentUnanswered(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
+class AnalyticsTrace(Base):
+    """数据 agent 全链路追踪(一次问答一行):L0/L2/L3 各层结果、最终意图、
+    模板、耗时、行数、缓存命中 —— 结构化真相,不依赖 stdout(重启即丢)。"""
+
+    __tablename__ = "analytics_trace"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'finance_owner'"))
+    trace_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    # 分层结果(JSON 数组): [{layer: "L0"|"L2"|"L3"|"session"|"inline", hit: ..., detail: ...}]
+    layers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    final_metric: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_method: Mapped[str | None] = mapped_column(Text, nullable=True)  # L0|L2|L3|scenario|split
+    sql_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    row_count: Mapped[int | None] = mapped_column(nullable=True)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    duration_ms: Mapped[int | None] = mapped_column(nullable=True)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)  # result|clarify|unsupported|error
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
 class AnalyticsReport(Base):
     """报告产物(14-D4):HTML 内容直存(rows_json 供 CSV 导出)。"""
 
