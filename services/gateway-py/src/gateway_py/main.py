@@ -22,17 +22,29 @@ from .routers import admin, analytics, auth, chat, crud, merchant, spi
 from .tenant_context import TenantContextMiddleware, _PermissionError
 
 
-@asynccontextmanager
-async def _lifespan(app: FastAPI):
-    # 商品知识 RAG 同步(2026-09-13):商户真货架 → rag_documents,启动时
-    # 幂等重建 —— 商户改标题/价格后重启生效;商户库未 seed 时诚实跳过。
+async def _sync_product_knowledge_on_startup() -> None:
+    """商品知识 RAG 同步(2026-09-13):商户真货架 → rag_documents,启动时
+    幂等重建 —— 商户改标题/价格后重启生效;商户库未 seed 时诚实跳过。
+
+    挂载身份 = 货架属主 ``_merchant_id()``(2026-09-25 帐篷幻觉收口):此前
+    硬编码演示租户 "ecommerce",aurora 检索被 rag_documents.business_id
+    物理过滤,看不见自己的货架 → finish 零商品事实即编造商品与价格;反向
+    还构成跨租户串味(ecommerce 能引用 aurora 的在售货架)。
+    """
     try:
         from engine_py.rag.product_knowledge import sync_product_knowledge
 
-        result = await sync_product_knowledge("ecommerce")
+        from .merchant_domain import _merchant_id
+
+        result = await sync_product_knowledge(_merchant_id())
         print(f"[Startup] Product knowledge RAG synced: {result}")
     except Exception as startup_err:
         print(f"[Startup] Product knowledge sync skipped: {startup_err}")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    await _sync_product_knowledge_on_startup()
     yield
 
 

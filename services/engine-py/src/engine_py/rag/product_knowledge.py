@@ -79,8 +79,12 @@ def build_product_chunks(rows: list[dict], business_id: str) -> list[KnowledgeCh
     return chunks
 
 
-async def sync_product_knowledge(business_id: str = "ecommerce") -> dict:
+async def sync_product_knowledge(business_id: str) -> dict:
     """商户真货架 → rag_documents 商品知识切片(整组替换,幂等)。
+
+    business_id 必显式传(2026-09-25 帐篷幻觉收口):租户挂载身份是调用方
+    的决策,曾因默认 "ecommerce" + 网关硬编码,把 aurora 货架挂到演示租户
+    名下 —— 属主检索看不见自己的商品,finish 零事实即编帐篷编价格。
 
     商户库不可达/无在售 SPU 时诚实跳过返回 {"synced": 0};嵌入失败同样
     中止(不留半同步状态)。每次调用全量重建该 source_url 键下内容 ——

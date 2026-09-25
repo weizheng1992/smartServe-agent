@@ -2,10 +2,7 @@
   "name": "agent-platform",
   "version": "2.0.0",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "turbo run dev --filter=web --filter=merchant",
     "dev:server": "cd services/gateway-py && uv run --env-file ../../.env uvicorn gateway_py.main:app --port 4000 --reload",
@@ -14,6 +11,7 @@
     "dev:api": "bun --filter web dev",
     "dev:web": "bun --filter web dev",
     "dev:admin": "bun --filter admin dev",
+    "dev:merchant-admin": "bun --filter merchant-admin dev",
     "dev:all": "turbo run dev",
     "worker": "cd services/engine-py && uv run --env-file ../../.env python -m engine_py.temporal.worker",
     "docker:up": "docker compose up -d",

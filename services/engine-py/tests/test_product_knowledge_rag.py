@@ -200,6 +200,105 @@ class TestSyncProductKnowledge:
         assert result.get("skipped") is True and result.get("synced") == 0
 
 
+# ── 租户挂载不变量(2026-09-25 帐篷幻觉实弹)──────────────────────────────
+
+
+class _Sha1Embed:
+    """确定性文本 distinct 单位向量:同文同向量(余弦 1.0),异文近似正交。
+    恒定向量会让任意两文余弦 1.0,检索断言失去区分度,禁用。"""
+
+    async def aembed_query(self, text_val: str) -> list[float]:
+        import hashlib
+        import math
+
+        digest = hashlib.sha256(text_val.encode("utf-8")).digest()
+        vec = [0.0] * 97
+        for i, byte in enumerate(digest):
+            vec[(i * 13 + byte) % 97] += 1.0
+        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+        return [v / norm for v in vec]
+
+
+class TestSyncTenantPlacement:
+    def test_chunks_visible_only_to_filed_tenant(self, pg_factory, monkeypatch):
+        """sync(business_id=X) 的切片必须且只能被 X 检索可见 —— 挂错租户
+        即货架属主看不见自己的商品(finish 零事实编帐篷),他租户反而串味
+        引用别家货架。rag_documents.business_id 是检索的物理租户边界
+        (contextual_rag.search_relevant_docs WHERE business_id = 查询方)。"""
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy.pool import NullPool
+
+        from engine_py.rag.contextual_rag import ContextualRAG
+        from engine_py.tools_registry import order_domain
+
+        engine = pg_factory.kw["bind"]
+        url = engine.url.render_as_string(hide_password=False)
+        merchant_engine = create_async_engine(url, poolclass=NullPool)
+        original = order_domain._merchant_reader_engine
+
+        monkeypatch.setattr(
+            "engine_py.rag.product_knowledge.get_embedding_model", lambda: _Sha1Embed()
+        )
+        monkeypatch.setattr(
+            "engine_py.rag.contextual_rag.get_embedding_model", lambda: _Sha1Embed()
+        )
+        order_domain._merchant_reader_engine = lambda: merchant_engine
+
+        async def scenario():
+            # 同容器兄弟测试(sync 幂等套件)会留 ecommerce 商品行,先清同键
+            # 残留,挂载排他断言才反映本场景
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("DELETE FROM rag_documents WHERE source_url='product_catalog_sync.md'")
+                )
+            await _seed_merchant(engine)
+            result = await sync_product_knowledge("aurora")
+            assert result == {"synced": 1}
+
+            # 挂载面:切片只落在被挂租户名下,演示租户零残留
+            async with engine.connect() as conn:
+                counts = {
+                    bid: n
+                    for bid, n in (
+                        await conn.execute(
+                            text(
+                                "SELECT business_id, COUNT(*) FROM rag_documents "
+                                "WHERE source_url='product_catalog_sync.md' GROUP BY business_id"
+                            )
+                        )
+                    ).all()
+                }
+            assert counts == {"aurora": 1}, f"商品切片必须只挂 aurora 名下,实况 {counts}"
+
+            # 可见性 +:属主租户以其切片原文检索必须命中(同文同向量,余弦 1.0)
+            async with engine.connect() as conn:
+                chunk_body = (await conn.execute(
+                    text(
+                        "SELECT chunk_text FROM rag_documents "
+                        "WHERE business_id='aurora' AND source_url='product_catalog_sync.md'"
+                    )
+                )).scalar()
+            # 探针用 SPU 完整标题:ecommerce 自有知识文件也谈毛圈棉/慢跑裤
+            # (docs/knowledge/ecommerce_product_knowledge.md),布料词会撞车假红
+            needle = "极光 420g重磅毛圈棉抽绳束脚慢跑裤"
+            hits = await ContextualRAG("aurora").search_relevant_docs(chunk_body, limit=2)
+            assert any(needle in str(doc) for doc in hits), (
+                "货架属主检索必须能看见自己的商品切片(帐篷幻觉的第一现场)"
+            )
+
+            # 可见性 −:他租户检索不得串味引用(不存在的血缘)
+            other = await ContextualRAG("ecommerce").search_relevant_docs(chunk_body, limit=2)
+            assert not any(needle in str(doc) for doc in other), (
+                "演示租户不得检索到别家货架切片(跨租户串味面)"
+            )
+
+        try:
+            asyncio.run(scenario())
+        finally:
+            order_domain._merchant_reader_engine = original
+            asyncio.run(merchant_engine.dispose())
+
+
 # ── 自愈播种 source 级补齐 ────────────────────────────────────────────────
 
 
