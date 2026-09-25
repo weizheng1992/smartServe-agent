@@ -21,7 +21,7 @@
     "db:seed": "cd services/engine-py && uv run --env-file ../../.env python -m engine_py.db.seed && uv run --env-file ../../.env python -m engine_py.db.seed_third_party && cd ../gateway-py && uv run --env-file ../../.env python -m gateway_py.merchant_seed",
     "build": "turbo run build",
     "start": "turbo run start",
-    "lint": "turbo run lint",
+    "lint": "biome check .",
     "biome:format": "biome format --write .",
     "biome:lint": "biome lint --write .",
     "biome:check": "biome check --write .",
