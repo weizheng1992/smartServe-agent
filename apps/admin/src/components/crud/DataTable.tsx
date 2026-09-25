@@ -59,6 +59,7 @@ export function DataTable<T extends Record<string, any>>({
           <TableBody className="divide-y divide-slate-100">
             {loading ? (
               Array.from({ length: 4 }).map((_, idx) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: 骨架占位行无业务身份,纯静态 4 行加载占位 */
                 <TableRow key={`skeleton-${idx}`} className="animate-pulse">
                   {columns.map((col) => (
                     <TableCell key={col.key} className="py-4 px-4">

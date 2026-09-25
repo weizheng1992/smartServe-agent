@@ -173,6 +173,7 @@ export function APMPanel({
               </div>
             ) : (
               runningDetails.map((log, lIdx) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: 遥测日志行无业务 id,append-only 追加不重排 */
                 <Card key={lIdx} className="bg-slate-950/60 border-slate-800 shadow-lg border-l-2 border-l-indigo-500">
                   <CardHeader className="p-3 pb-1.5 flex flex-row items-center justify-between space-y-0">
                     <Badge className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-md font-mono text-[10px] px-2 py-0.5">

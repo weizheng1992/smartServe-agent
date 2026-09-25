@@ -43,7 +43,7 @@ function exportResultCsv(data: ResultData) {
   const esc = (v: unknown) => `"${String(v ?? '').replaceAll('"', '""')}"`;
   const lines = [cols.map(esc).join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))];
   // BOM 头:Excel 打开中文不乱码
-  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${data.metric || 'result'}-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -232,8 +232,8 @@ export function FloatingAgent({ route }: { route: string }) {
         )}
         {frames
           .filter((f) => f.event !== 'start')
-          .map((f, i) => (
-            <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
+          .map((f) => (
+            <div key={f.id} className={f.event === 'user' ? 'flex justify-end' : ''}>
               {f.event === 'user' ? (
                 <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
               ) : f.event === 'pending' ? (
@@ -247,6 +247,7 @@ export function FloatingAgent({ route }: { route: string }) {
                     {((f.data.options || []) as Array<{ label: string }>).map((o, j: number) => (
                       <button
                         type="button"
+                        /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
                         key={j}
                         className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
                         onClick={() => {

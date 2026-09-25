@@ -121,6 +121,7 @@ export default function ReportsPage() {
               <div className="space-y-3 border-t border-zinc-100 px-4 py-3">
                 {loading && <div className="text-xs text-zinc-400">载入中…</div>}
                 {sections.map((sec, i) => (
+                  /* biome-ignore lint/suspicious/noArrayIndexKey: 报告节无稳定 id,只读重放不重排 */
                   <ResultCard key={i} data={sec} />
                 ))}
                 {!loading && sections.length === 0 && (

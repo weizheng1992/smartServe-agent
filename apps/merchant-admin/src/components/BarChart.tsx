@@ -13,6 +13,7 @@ export function BarChart({ points, unit }: { points: BarPoint[]; unit?: string }
     <div className="space-y-1.5 px-3 py-2" role="img" aria-label="排行条形图">
       {points.map((p, i) => (
         <div
+          /* biome-ignore lint/suspicious/noArrayIndexKey: 图表数据点无业务 id,按序静态渲染 */
           key={i}
           className="flex items-center gap-2"
           title={`${p.label} · ${p.value.toLocaleString()}${unit || ''}`}

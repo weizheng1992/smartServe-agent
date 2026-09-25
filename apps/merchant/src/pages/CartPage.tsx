@@ -139,6 +139,7 @@ export default function CartPage() {
   // 试算随选中项变化重拉(cartKey 收敛依赖:同商品同数量不重复请求);
   // 券包/活动随金额口径联动,试算失败静默降级为原价展示,不阻断购物车
   const selectedKey = selectedItems.map((it) => `${it.skuCode}:${it.quantity}`).join('|');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedItems 由 cartKey 派生,拆行重算无意义(诊断锚在 hook 行)
   useEffect(() => {
     const items = selectedItems;
     if (!user.id || items.length === 0) {
@@ -166,7 +167,6 @@ export default function CartPage() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: selectedItems 由 cartKey 派生,拆行重算无意义
   }, [user.id, selectedKey]);
 
   // 购物车变化后所选券失效(已核销/不再可用)→ 诚实回落「不使用」

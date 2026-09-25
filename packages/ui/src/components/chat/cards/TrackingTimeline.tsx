@@ -32,6 +32,7 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ data }) => {
         {data.timeline.map((node, idx) => {
           const isLatest = idx === 0;
           return (
+            /* biome-ignore lint/suspicious/noArrayIndexKey: 物流节点无稳定 id,静态时间线不重排 */
             <div key={idx} className="relative flex items-start gap-3">
               <div
                 className={`relative z-10 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full ${

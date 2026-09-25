@@ -116,6 +116,7 @@ export const LogisticsModal: React.FC<LogisticsModalProps> = ({ isOpen, onClose,
               {timeline.map((node, index) => {
                 const isLatest = index === timeline.length - 1 || index === 0;
                 return (
+                  /* biome-ignore lint/suspicious/noArrayIndexKey: 物流节点无稳定 id,同分节点时间可重复,静态时间线不重排 */
                   <div key={node.time + index} className="relative">
                     {/* 节点原点 */}
                     <div

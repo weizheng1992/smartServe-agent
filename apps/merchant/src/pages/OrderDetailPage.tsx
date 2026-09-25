@@ -135,8 +135,8 @@ export default function SingleOrderDetailPage() {
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xs space-y-4">
           <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">商品清单与规格</h2>
           <div className="divide-y divide-slate-100">
-            {order.items?.map((item, idx) => (
-              <div key={idx} className="py-3 flex items-center space-x-4">
+            {order.items?.map((item) => (
+              <div key={item.skuCode || item.title || item.imageUrl} className="py-3 flex items-center space-x-4">
                 <img
                   src={item.imageUrl || 'https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=200'}
                   alt={item.title}

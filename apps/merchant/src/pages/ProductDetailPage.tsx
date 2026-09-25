@@ -27,8 +27,9 @@ export default function ProductDetailPage() {
   // 全核销后商品页仍标「✓ 已领取」,购物车却无券可用,用户困惑)
   const [couponStatus, setCouponStatus] = useState<Map<string, string>>(new Map());
   const [couponMsg, setCouponMsg] = useState('');
+  const userId = (user as any).id;
   const refreshCoupons = useCallback(() => {
-    fetch(`/api/store/coupons?userId=${encodeURIComponent((user as any).id)}`)
+    fetch(`/api/store/coupons?userId=${encodeURIComponent(userId)}`)
       .then((r) => r.json())
       .then((b) => setCouponStatus(new Map((b.coupons || []).map((x: any) => [x.promotionId, x.status as string]))))
       .catch(() => {});
@@ -36,7 +37,7 @@ export default function ProductDetailPage() {
       .then((r) => r.json())
       .then((b) => setCouponPromos((b.promotions || []).filter((p: any) => p.promoType === 'coupon')))
       .catch(() => {});
-  }, [(user as any).id]);
+  }, [userId]);
   useEffect(() => {
     refreshCoupons();
   }, [refreshCoupons]);
@@ -204,6 +205,7 @@ export default function ProductDetailPage() {
                 </button>
                 {product.detailImages.map((imgUrl, idx) => (
                   <button
+                    /* biome-ignore lint/suspicious/noArrayIndexKey: 详情图 URL 可能重复且按钮语义等价,无稳定身份键 */
                     key={idx}
                     type="button"
                     onClick={() => setActiveImage(imgUrl)}

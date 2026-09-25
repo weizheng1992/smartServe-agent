@@ -73,10 +73,11 @@ export const OrderPickerCard: React.FC<OrderPickerCardProps> = ({ data, onAction
         {/* 订单简要列表预览 (展示前 2 笔预览) */}
         <div className="my-3 space-y-1.5">
           {orders.slice(0, 2).map((ord, idx) => (
-            <div
+            <button
+              type="button"
               key={ord.orderId || idx}
               onClick={() => handleSelectOrder(ord)}
-              className="flex items-center justify-between rounded-lg border border-slate-750/70 bg-slate-800/60 p-2.5 text-xs transition-colors hover:border-indigo-500/40 hover:bg-slate-800 cursor-pointer group"
+              className="flex w-full text-left items-center justify-between rounded-lg border border-slate-750/70 bg-slate-800/60 p-2.5 text-xs transition-colors hover:border-indigo-500/40 hover:bg-slate-800 cursor-pointer group"
             >
               <div className="flex items-center gap-2">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-[10px] font-mono text-slate-300">
@@ -91,7 +92,7 @@ export const OrderPickerCard: React.FC<OrderPickerCardProps> = ({ data, onAction
                 </span>
                 <span className="rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] text-slate-300">{ord.status}</span>
               </div>
-            </div>
+            </button>
           ))}
           {orders.length > 2 && (
             <div className="text-center text-[10px] text-slate-400 pt-0.5">... 还有 {orders.length - 2} 笔订单</div>

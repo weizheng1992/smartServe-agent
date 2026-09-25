@@ -9,7 +9,7 @@ export default function (output: string) {
   } catch {
     return { pass: false, score: 0, reason: 'Output is not valid JSON' };
   }
-  const m = (parsed.arbitration || {}).method;
+  const m = parsed.arbitration?.method;
   if (m !== 'rag_direct') {
     return {
       pass: false,

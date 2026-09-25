@@ -625,6 +625,7 @@ export function ApprovalContextDrawer({
                             </span>
                             {ord.items.map((it, i) => (
                               <div
+                                /* biome-ignore lint/suspicious/noArrayIndexKey: 审批上下文订单行无稳定主键,只读展示不重排 */
                                 key={i}
                                 className="flex justify-between items-center text-xs text-slate-300 bg-slate-950/40 p-2 rounded-lg border border-slate-850"
                               >

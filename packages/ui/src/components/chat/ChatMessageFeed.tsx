@@ -41,6 +41,7 @@ export function ChatMessageFeed({ isLoadingMessages, messages, scrollRef }: Chat
 
           if (isSystem) {
             return (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: 接管消息无业务 id,append-only 流不重排 */
               <div key={idx} className="flex justify-center my-2">
                 <Badge
                   variant="outline"
@@ -53,6 +54,7 @@ export function ChatMessageFeed({ isLoadingMessages, messages, scrollRef }: Chat
           }
 
           return (
+            /* biome-ignore lint/suspicious/noArrayIndexKey: 接管消息无业务 id,append-only 流不重排 */
             <div key={idx} className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
               <Avatar className="h-8 w-8 border border-slate-800 shrink-0">
                 <AvatarFallback

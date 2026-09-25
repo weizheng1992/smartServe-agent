@@ -191,8 +191,8 @@ export default function OrdersPage() {
 
                 {/* 订单明细项 */}
                 <div className="space-y-3">
-                  {order.items?.map((item, idx) => (
-                    <div key={idx} className="flex items-center space-x-4">
+                  {order.items?.map((item) => (
+                    <div key={item.skuCode || item.title || item.imageUrl} className="flex items-center space-x-4">
                       <img
                         src={item.imageUrl || 'https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=200'}
                         alt={item.title}

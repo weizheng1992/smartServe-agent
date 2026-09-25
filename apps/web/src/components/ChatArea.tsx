@@ -190,6 +190,7 @@ export function ChatArea({
                   <div className="flex flex-wrap gap-2 justify-end">
                     {m.imageUrls.map((url, i) => (
                       <div
+                        /* biome-ignore lint/suspicious/noArrayIndexKey: 图片 URL 可能重复且预览语义等价,无稳定身份键 */
                         key={i}
                         className="relative overflow-hidden rounded-xl border border-indigo-500/30 shadow-md max-w-xs"
                       >
@@ -365,6 +366,7 @@ export function ChatArea({
             <div className="flex items-center gap-2 pb-1 overflow-x-auto">
               {attachedImages.map((imgUrl, i) => (
                 <div
+                  /* biome-ignore lint/suspicious/noArrayIndexKey: 待发图片预览 URL 可重复且语义等价,无稳定身份键 */
                   key={i}
                   className="relative group flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-slate-900 p-1 pr-2 text-xs text-slate-300"
                 >

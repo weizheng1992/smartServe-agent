@@ -97,6 +97,7 @@ export function ResultCard({ data }: { data: any }) {
           </thead>
           <tbody>
             {card.rows.map((r: any, i: number) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
               <tr key={i} className="border-b border-zinc-50">
                 {card.columns.map((c: any) => (
                   <td key={c.key} className="px-3 py-1.5">
@@ -128,6 +129,7 @@ export function ResultCard({ data }: { data: any }) {
         </thead>
         <tbody>
           {card.rows.map((r: any, i: number) => (
+            /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
             <tr key={i} className="border-b border-zinc-50">
               {card.columns.map((c: any) => (
                 <td key={c.key} className="px-3 py-1.5">
@@ -159,6 +161,7 @@ function ResultTable({ rows }: { rows: Record<string, unknown>[] }) {
       </thead>
       <tbody>
         {rows.map((r, i) => (
+          /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
           <tr key={i} className="border-b border-zinc-50">
             {cols.map((c) => (
               <td key={c} className="px-3 py-1.5">

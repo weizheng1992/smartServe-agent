@@ -179,7 +179,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <div className="divide-y divide-slate-100">
               {items.map((item, idx) => (
                 <div
-                  key={(item.skuId || item.title || '') + idx}
+                  key={item.skuId || item.title || item.imageUrl}
                   className="py-2.5 flex items-start gap-3 first:pt-0 last:pb-0"
                 >
                   {item.imageUrl ? (

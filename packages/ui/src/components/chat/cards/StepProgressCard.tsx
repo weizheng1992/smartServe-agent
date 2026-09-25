@@ -84,6 +84,7 @@ export const StepProgressCard: React.FC<StepProgressCardProps> = ({ data, onActi
 
           return (
             <div
+              /* biome-ignore lint/suspicious/noArrayIndexKey: 进度步骤无 id,静态回放展示不重排 */
               key={`step_${idx}`}
               className={`relative flex items-start gap-3 rounded-lg p-2.5 transition-all ${
                 isCurrent

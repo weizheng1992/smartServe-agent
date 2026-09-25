@@ -25,8 +25,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     run('bun run db:seed');
   } catch (err) {
     throw new Error(
-      `[E2E globalSetup] 基础设施链失败(docker:up → db:push → db:seed)。` +
-        `请手动执行上述三步定位:docker 是否运行、.env 的 DATABASE_URL/REDIS_URL 是否可达。原始错误:${err}`,
+      `[E2E globalSetup] 基础设施链失败(docker:up → db:push → db:seed)。请手动执行上述三步定位:docker 是否运行、.env 的 DATABASE_URL/REDIS_URL 是否可达。原始错误:${err}`,
     );
   }
   console.log('[E2E globalSetup] 基础设施就绪 ✅');

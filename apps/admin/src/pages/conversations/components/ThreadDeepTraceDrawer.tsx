@@ -272,6 +272,7 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
                       {expandedThoughts[msg.id] && (
                         <div className="space-y-1 pt-1.5 border-t border-slate-200/60 font-mono text-[11px]">
                           {msg.thoughtSteps.map((step, sIdx) => (
+                            /* biome-ignore lint/suspicious/noArrayIndexKey: 思考步骤回放为静态展示,无稳定业务 id 且不重排 */
                             <div key={sIdx} className="flex items-start gap-1.5 text-slate-600">
                               <span className="text-emerald-600 font-bold">✓</span>
                               <div>
@@ -291,6 +292,7 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
                       <div className="text-[11px] font-bold text-amber-800 flex items-center gap-1.5">
                         <span>⚡ 触发业务工具调用:</span>
                         {msg.toolCalls.map((t, idx) => (
+                          /* biome-ignore lint/suspicious/noArrayIndexKey: 工具名徽标静态回放展示,无稳定 id 且不重排 */
                           <span key={idx} className="bg-amber-200/80 px-1.5 py-0.5 rounded text-[10px]">
                             {t.name}
                           </span>
@@ -298,6 +300,7 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
                       </div>
                       {msg.toolCalls.map((t, idx) => (
                         <div
+                          /* biome-ignore lint/suspicious/noArrayIndexKey: 工具调用详情卡静态回放展示,无稳定 id 且不重排 */
                           key={idx}
                           className="bg-white/80 p-2 rounded border border-amber-100 text-[11px] overflow-x-auto space-y-1"
                         >

@@ -133,6 +133,7 @@ export default function BoardPage() {
                 <div className="text-xs text-zinc-500">{failed.data?.message || failed.event}</div>
               )}
               {results.map((f: any, i: number) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: SseFrame 无业务 id,看板只读重放不重排 */
                 <div key={i} className="mb-2">
                   <ResultCard data={f.data} />
                   {f.data.summary ? (

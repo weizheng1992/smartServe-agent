@@ -158,8 +158,8 @@ export const OrdersListModal: React.FC<OrdersListModalProps> = ({
 
                   {/* 商品列表 */}
                   <div className="space-y-2">
-                    {order.items.map((item, idx) => (
-                      <div key={(item.skuId || item.title || '') + idx} className="flex items-center gap-3">
+                    {order.items.map((item) => (
+                      <div key={item.skuId || item.title || item.imageUrl} className="flex items-center gap-3">
                         {item.imageUrl ? (
                           <img
                             src={item.imageUrl}

@@ -23,6 +23,7 @@ export const QuickReplies: React.FC<QuickRepliesProps> = ({ data, onSelectOption
       <div className="flex flex-wrap gap-1.5">
         {data.options.map((opt, idx) => (
           <button
+            /* biome-ignore lint/suspicious/noArrayIndexKey: 快捷回复选项无 id,静态文案按钮不重排 */
             key={idx}
             type="button"
             onClick={() => onSelectOption?.(opt.action, opt.payload)}

@@ -111,6 +111,7 @@ export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {
           const isPrimary = btn.action === 'checkout_cart' || btn.action === 'go_to_checkout' || idx === 0;
           return (
             <button
+              /* biome-ignore lint/suspicious/noArrayIndexKey: 卡片动作按钮无 id,静态渲染不重排 */
               key={idx}
               type="button"
               onClick={() =>

@@ -25,6 +25,7 @@ export function LineChart({ points, unit }: { points: LinePoint[]; unit?: string
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" role="img" aria-label="趋势折线图">
       {gridVals.map((v, i) => (
+        /* biome-ignore lint/suspicious/noArrayIndexKey: SVG 网格线/数据点图元按序静态渲染,无业务身份 */
         <g key={i}>
           <line x1={pad.l} x2={w - pad.r} y1={y(v)} y2={y(v)} stroke="#f4f4f5" />
           <text x={4} y={y(v) + 3} fontSize="9" fill="#a1a1aa">
@@ -35,6 +36,7 @@ export function LineChart({ points, unit }: { points: LinePoint[]; unit?: string
       <path d={area} fill="rgba(24,24,27,0.06)" />
       <path d={line} fill="none" stroke="#18181b" strokeWidth="2" />
       {points.map((p, i) => (
+        /* biome-ignore lint/suspicious/noArrayIndexKey: SVG 网格线/数据点图元按序静态渲染,无业务身份 */
         <g key={`pt-${i}`}>
           {/* 透明大热区 + 实心小点:悬停出浏览器原生气泡(数值即看即读) */}
           <circle cx={x(i)} cy={y(p.value)} r={8} fill="transparent">
@@ -45,6 +47,7 @@ export function LineChart({ points, unit }: { points: LinePoint[]; unit?: string
       ))}
       {points.map((p, i) =>
         i % labelEvery === 0 ? (
+          /* biome-ignore lint/suspicious/noArrayIndexKey: SVG 网格线/数据点图元按序静态渲染,无业务身份 */
           <text key={i} x={x(i)} y={h - 8} fontSize="9" fill="#a1a1aa" textAnchor="middle">
             {p.label}
           </text>

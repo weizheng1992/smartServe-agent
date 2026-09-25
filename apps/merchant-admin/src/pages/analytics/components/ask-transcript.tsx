@@ -33,6 +33,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
       {frames
         .filter((f) => f.event !== 'start')
         .map((f, i) => (
+          /* biome-ignore lint/suspicious/noArrayIndexKey: AskFrame 无业务 id,append-only 对话流不重排 */
           <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
             {f.event === 'user' ? (
               <div className="rounded-xl bg-zinc-900 px-4 py-2 text-sm text-white">{f.data.message}</div>
@@ -50,6 +51,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
               <div className="space-y-2">
                 {(f.data.cards || []).map((card: any, j: number) =>
                   card.type === 'table' ? (
+                    /* biome-ignore lint/suspicious/noArrayIndexKey: 场景包子卡无 id,静态渲染不重排 */
                     <div key={j} className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
                       <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2">
                         <span className="text-xs font-medium text-zinc-500">{card.title}</span>
@@ -66,6 +68,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                         </thead>
                         <tbody>
                           {card.rows.map((r: any, k: number) => (
+                            /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
                             <tr key={k} className="border-b border-zinc-50">
                               {card.columns.map((c: any) => (
                                 <td key={c.key} className="px-4 py-2">
@@ -81,6 +84,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                       </div>
                     </div>
                   ) : (
+                    /* biome-ignore lint/suspicious/noArrayIndexKey: 场景包子卡无 id,静态渲染不重排 */
                     <div key={j} className="rounded-xl border border-zinc-200 bg-white p-4 text-sm">
                       {card.text}
                     </div>
@@ -94,6 +98,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                   <div className="mt-2 flex flex-wrap gap-2">
                     {(f.data.options || []).map((o: any, j: number) => (
                       <button
+                        /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
                         key={j}
                         type="button"
                         className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
