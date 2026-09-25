@@ -148,9 +148,9 @@ class TestOrderOverview:
             engine.compile(intent)
 
     def test_empty_entities_message_is_actionable(self, engine):
-        """拒绝文案必须给出动作提示(勾选),而非含糊的「暂未开放」。"""
+        """拒绝文案必须给出动作提示(勾选/报单号),而非含糊的「暂未开放」。"""
         intent = engine.resolve("这几笔订单的平均金额")
-        with pytest.raises(UnsupportedQuery, match="请先在订单列表中勾选订单"):
+        with pytest.raises(UnsupportedQuery, match="请先在订单列表勾选订单"):
             engine.compile(intent)
 
     def test_resolve_compare_phrasing(self, engine):
