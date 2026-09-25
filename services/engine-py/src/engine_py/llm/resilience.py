@@ -57,6 +57,14 @@ def _timeout_seconds() -> float | None:
     return raw if raw > 0 else None
 
 
+def _total_deadline_seconds() -> float:
+    """全部重试预算(2026-09-25 挂死修复):每尝试 120s × 3 次 + 退避 ≈ 6 分钟
+    才降级,用户端表现为无限 loading(实弹:进程内连接悬死 + 供应商侧故障
+    叠加)。总预算到期立即放弃剩余重试,整体失败让上层降级接管。"""
+    raw = float(os.environ.get("LLM_TOTAL_DEADLINE_SECONDS", "180"))
+    return raw if raw > 0 else None
+
+
 def _now_ms() -> float:
     return time.time() * 1000
 
@@ -181,8 +189,20 @@ async def resilient_ainvoke(attempt: Callable[[], Awaitable[Any]]) -> Any:
     attempts = 0
     max_attempts = _max_attempts()
     delay_ms = _initial_delay_ms()
+    deadline = _total_deadline_seconds()
+    started = time.time()
     while True:
         attempts += 1
+        remaining = deadline - (time.time() - started) if deadline else None
+        if remaining is not None and remaining <= 1.0:
+            # 总预算耗尽:继续重试只会让用户端 loading 更久(6 分钟级,实弹),
+            # 立即按熔断口径失败,交由上层降级接管
+            budget_err = TimeoutError(
+                f"LLM 调用总预算({deadline:.0f}s)耗尽,放弃剩余重试(attempts={attempts})"
+            )
+            print(f"[LLM Resilience] {budget_err}{_attempt_context_tag()}")
+            global_circuit_breaker.record_failure()
+            raise budget_err
         try:
             if attempts > 1:
                 await _emit_job_status(
@@ -190,7 +210,12 @@ async def resilient_ainvoke(attempt: Callable[[], Awaitable[Any]]) -> Any:
                     f"⚠️ 大模型呼叫遭遇网络阻塞或短暂波动,执行引擎正在物理触发"
                     f"【自愈抗灾重试】:正在进行第 {attempts} 次调用保障决策畅通...",
                 )
-            result = await asyncio.wait_for(attempt(), timeout=_timeout_seconds())
+            per_attempt = _timeout_seconds()
+            if remaining is not None and per_attempt is not None:
+                per_attempt = min(per_attempt, remaining)
+            elif remaining is not None:
+                per_attempt = remaining
+            result = await asyncio.wait_for(attempt(), timeout=per_attempt)
             global_circuit_breaker.record_success()  # 成功即清零连续失败计数(TS recordSuccess)
             return result
         except Exception as err:

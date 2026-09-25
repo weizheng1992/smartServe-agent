@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -382,3 +383,26 @@ class TestDegradedBreakerResult:
         assert result["loop_count"] == 0
         assert result["global_transitions_count"] == 0
         assert result["tool_errors_count"] == 0
+
+
+def test_total_deadline_caps_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """总预算闸(2026-09-25 挂死修复):每尝试各有超时时,三次慢尝试 ≈ 6 分钟
+    才降级 —— 用户端无限 loading。总预算耗尽须立即放弃,不再进入下一尝试。"""
+    import asyncio as _aio
+
+    from engine_py.llm import resilience as R
+
+    async def slow_attempt():
+        await _aio.sleep(30)  # 远超预算
+        return "ok"
+
+    monkeypatch.setattr(R, "_max_attempts", lambda: 5)
+    monkeypatch.setattr(R, "_initial_delay_ms", lambda: 1)
+    monkeypatch.setattr(R, "_timeout_seconds", lambda: 30.0)
+    monkeypatch.setenv("LLM_TOTAL_DEADLINE_SECONDS", "3")
+
+    started = time.time()
+    with pytest.raises(TimeoutError, match="总预算"):
+        asyncio.run(R.resilient_ainvoke(slow_attempt))
+    elapsed = time.time() - started
+    assert elapsed < 10, f"总预算必须在 ~3s 生效,实耗 {elapsed:.1f}s(未超10s)"
