@@ -369,7 +369,14 @@ class ApprovalGatekeeper:
                 return {"state": "approved", "approvalId": str(latest_approval.id), "isApproved": True}
         except Exception as err:
             print(f"[ApprovalGatekeeper] evaluatePendingApprovalState error: {err}")
-            return {"state": "approved", "isApproved": False}
+            # fail-closed(2026-09-25 夜审):DB 异常严禁伪装 "approved" —— 执行引擎
+            # 只拦 BLOCKED_APPROVAL_STATES,伪装 approved 即免审直落退款/改址调度。
+            return {
+                "state": "error",
+                "isApproved": False,
+                "error": f"审批状态查询失败:{err}",
+                "message": "⚠️ 审批状态查询失败，为安全起见本次操作不执行，请稍后重试。",
+            }
 
     @staticmethod
     async def list_pending_approvals(filter_opts: dict | None = None) -> list[dict]:

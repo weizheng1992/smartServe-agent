@@ -20,6 +20,11 @@ _JSON_FENCE_START_RE = re.compile(r"^```json\s*")
 # state.image_urls —— 严禁指望 LLM 从会话历史抄 URL(会错链漏链)。
 _AFTERSALE_EVIDENCE_TOOLS = frozenset({"applyAfterSale", "processRefund"})
 
+# 审批终局中必须中止执行的状态(fail-closed,2026-09-25 夜审补 "error"):
+# gatekeeper 查审批态遇 DB 异常时回 "error",若不在拦截面内即直落工具调度,
+# DB 抖动一次就免审执行退款/高额改址 —— 资金动作必须在一切未知态下终止。
+BLOCKED_APPROVAL_STATES = frozenset({"expired", "cancelled", "rejected", "error"})
+
 
 async def maybe_inject_aftersale_evidence(tool_name: str, args: dict, state: dict) -> dict:
     """售后工具凭证程序化注入(ADR-0002 Q1 + ADR-0003 Q3):
@@ -334,7 +339,7 @@ async def _execute_single_step_core(
                         print("[执行引擎] 挂起计划落库跳过:thread_id 为空,拒绝写入共享键")
                     return {"updatedStep": pending_step, "toolErrorsCount": 0, "waitingForApproval": True}
 
-                if approval_result.get("state") in ("expired", "cancelled", "rejected"):
+                if approval_result.get("state") in BLOCKED_APPROVAL_STATES:
                     failed_step = {
                         **step_to_run,
                         "status": "failed",
