@@ -4,6 +4,120 @@
 
 ---
 
+## [2.6.51] - 2026-09-25 (客服两病连修:幻觉数据源 + 时序错路由)
+
+客户端同一段实弹会话(「几个帐篷的特点和价格对比」→ 编造三款帐篷 → 「给一个表格显示」→ 回传无关订单表)牵出两个独立缺陷,均按「红环先行」诊断纪律闭环。
+
+### 🐛 Fixes
+
+- **帐篷幻觉(数据错位)**:网关 lifespan 硬编码 `sync_product_knowledge("ecommerce")`,商户真货架 32 条商品切片全挂演示租户名下 —— aurora 检索被 `rag_documents.business_id` 物理过滤看不见自己的货架,consult 降级 general_query 后 finish 零商品事实即编造「3 款帐篷 ¥399/¥699/¥899」。修复:启动同步挂载身份改 `_merchant_id()`(env `MERCHANT_ID`),`sync_product_knowledge` 去掉误导性默认值(挂载身份必显式),清除 ecommerce 名下 32 行错位切片;反向 ecommerce 引用 aurora 货架的跨租户串味一并收口。回归:gateway 接线缝(挂载必须属主 + 失败不阻断启动)+ engine 租户挂载不变量缝(切片只落被挂租户/属主检索可见/他租户不可见)。
+- **纯排版续聊误路由订单表**:messages.timestamp TEXT 列混写两格式(网关 naive 本地墙钟、引擎 UTC 带偏移),字符串比较无意义致分类器历史窗口「答在问上」,窗口里真实单号被就近捡走绑进「给一个表格显示」。修复:时序锚全面改 `created_at`(DB server_default now() 单一时钟,`short_memory.get_messages`/shadow replay 同锚,role 位次保同刻并列逻辑序);新增 `detect_pure_reformat` 确定性预检(纯排版×指代续聊收编 general_query、实体剥除,原判经 reformat_guard 提议进 candidates 留痕,先例同 metric_query/address_manage)。
+- **gateway 时间戳写入格式收口**:`conversation_repo._utc_iso` 统一写 UTC 带偏移(naive 入参按本地墙钟换算、不可解析原样透传),TEXT 列降级为展示用途;存量混格式行刻意不迁移(created_at 已承载排序,+08 假设对其他时区部署不安全)。
+- **resilience 总预算闸**:供应商侧悬死不再造成 6 分钟级无限 loading。
+- **data-agent 诊断双症状**:单行统计卡不再吃折线指令、不再出峰谷速览。
+- **merchant-admin 结果卡数值护栏**:持久化帧重放不再渲染 NaN 折线。
+
+### ✨ Features
+
+- **商品销售对比 spu_compare**:勾选 ≥2 款商品并排对比卡。
+
+### 📝 Docs
+
+- 规则与文档全量校对:merchant-admin/Data Agent 落册,计数一律实测。
+
+### ✅ 验证 (Verification,如实)
+
+- engine pytest **941 passed**(2 失败为 stash 基线同款存量:test_new_metric_families + output_order_claim_guard,与本轮无关)/ gateway **216 passed**;帐篷实弹环(直跑 run_agent)修复前 RED → 修复后 2/2 GREEN,答复引用真品名/真价/真规格,RAG 召回真切片(候选 38,top_score 0.69);时序回归 T1/T2 红→绿;dev 网关重启后启动钩子实测挂载 aurora(`{'synced': 32}`,商品切片 aurora 独占)。
+
+---
+
+## [2.6.50] - 2026-09-24 (数据 agent 全链路追踪 + 订单两修 + SFT 配置化)
+
+### ✨ Features
+
+- **analytics_trace 全链路追踪**:每次问答落 `trace_id`,覆盖 L0/L2/L3/会话/场景包各层与方法;RAG 检索日志(候选数/召回数/top_score)。
+- **SFT 训练配置化**:训练超参提取为 `configs/sft_semql.yaml`,`sft_train` 支持 `--config`(YAML 作默认,CLI 覆盖)。
+
+### 🐛 Fixes
+
+- **改址多单先反问**:多个可改地址的待发货单先让用户挑,不擅改;订单列表回传真计数。
+- **pick_silver_label 补交**:通道③脚本的缺失依赖(上一提交遗留)。
+
+---
+
+## [2.6.49] - 2026-09-23 (置信度级联 P0 + 语义路由 P1/P2 + 优惠荐品闭环 + 图表体验批)
+
+### ✨ Features
+
+- **置信度级联 P0**:LLM 精判低于路由阈值 = 真模糊,澄清反问取代静默深规划(动作域意图豁免;实弹:低置信滑进 GMV 排行答非所问)。
+- **P1 语义路由影子层**:全意图锚点例句 + 按意图阈值 + 标定脚本(影子先行不接管)。
+- **P2 蒸馏数据三通道**:澄清标签自动回填 actual_outcome(通道①);坏例审结 CLI 消化 520 条 intent_conflict 积压(通道②);历史问句词面复判批量回填(通道③)。
+- **归因族 + 看板大屏**:雾区两项指标转正。
+- **优惠荐品闭环**:「推荐优惠最大的商品」三层路由修复;荐品多轮 refine(「太贵了来点便宜的」不再复读全局榜);券核销防双花;PromotionResolution 类型化/持久层收口/荐品 N+1 根除等评审 9-12 项收口。
+- **图表与对话体验**:订单号内联详情;发送即上屏/历史持久化/速览;速览渲染落地(对话+看板)+ 勾选标签随问句上行;报告页图表重放(存档数据重绘折线/条形);人话标题 + 折线悬停读数 + 报告 CSV BOM。
+- **「销量 折线图」路由升级**:图型指令触发趋势族 + 趋势按勾选商品过滤。
+- **三件补强**:意图评测集 88 例 + L3 原生 function calling + 结果语义缓存。
+
+### 🐛 Fixes
+
+- **applyAfterSale 缺 orderId 诚实报错**(nightly 实弹):`params["orderId"]` 硬下标 KeyError 炸图执行、降级道歉文案;改 `params.get` + 缺失诚实引导「请提供订单编号」,同函数三处硬下标收口。已知残留如实记录:LLM 深规划对缺槽子任务仍可能产出多个退款工具调用(图级硬熔断话术收尾),理想行为列后续评审。
+- **商品页券角标三态**:已核销券不再误标「✓ 已领取」。
+- **优惠词族补口语变体**:「叠加减的最多的商品」不再漏进数据问答。
+- **评审优化批**:缓存键含图型/CTE 豁免护栏/permissionTag 对齐/死路由清理/FloatingAgent 类型化/组件测试 9 例/词面外置 YAML/共享 KV 基座。
+- **测试密封纪律**:测试环境默认关语义路由影子,禁加载真实 BGE。
+
+---
+
+## [2.6.48] - 2026-09-22 (数据 agent T1-T5 全链落地 + 结算页选券重构 + 四档部署方案)
+
+### ✨ Features
+
+- **Data Agent wayfinder T1-T5**:图表类型指令槽位 + 客户消费趋势折线;跨月销量折线 + volume_trend 对偶指标;对话出口族六意图 + 结果卡图表化 + 导出/存报告闭环;指定商品问法(行内商品名绑定 + spu 槽接标准族模板);客户族三意图 + 场景包多帧 + 问号切分;未命中回捞工具(增长飞轮收口);多轮会话态(session_id + Redis 会话记忆 + LLM 追问改写);常驻看板(钉卡 + 重放刷新,「不用每次提问」);类型化勾选上下文 + 内存广播 + 就地唤起。
+- **结算页选券重构**:券自选、活动券叠加统一两通道。
+- **四档部署方案**:Docker Compose 全栈(四前端 nginx 一体镜像 + gateway/迁移编排);B 压榨 override/C 监控栈/D LB 多机/E K8s manifest;分场景部署指南。
+
+### 🐛 Fixes
+
+- **勾选重建吞实体槽**:客户/活动/商品指标假诚实空(实弹修)。
+- **模型切换自适应**:thinking 拒收自动剥除 + L3 实体闭集归一 + JSON 容错。
+- **订单页时区 + 金额明细**:下单时间时区修复 + 原价/优惠/实付展示。
+- **券向问答分流**:我的券/核销记录聚焦应答。
+- **券核销防双花 + 促销三表约束补齐**。
+- **LB connection_upgrade map**:SSE/socket.io 升级头必需(nginx -t 实证)。
+
+---
+
+## [2.6.47] - 2026-09-21 (SFT 标准栈 + 云训实录 + 结算券 money bug)
+
+### ✨ Features
+
+- **SFT 换标准 transformers+peft+trl 栈**:DSW 云训记录与部署测评指南;README 补 SFT 轨(训练结果摘要/两份文档显式地址);云端 vLLM 自测实录(三问槽位全中);训练数据销案 4478 条来源 + 评测集零泄漏验证。
+
+### 🐛 Fixes
+
+- **引擎侧聊天结算券优惠不落账**:券被核销而订单全款(money bug)。
+- **核销券从「我的券」消失致商品页复领 400**:重复领取闭环修复。
+- **gmv_trend 词面补漏**:浏览器实弹抓出的 L0 覆盖缺口。
+
+---
+
+## [2.6.46] - 2026-09-20 (双训练管线落地 + CI 根因清盘 + RBAC 跨租户收口)
+
+### ✨ Features
+
+- **双训练管线**:SemQL QLoRA SFT 微调管线(用户文档路线)+ L3 自托管推理口;metric_head CPU 管线 + 数据构建器。
+- **ADR-0006 架构对照三连**:LangGraph+MetaRAG+GRPO 全家桶提案 vs 语义层轻管线;LLM 生成 SQL vs SemQL+映射引擎;QLoRA/DPO/GRPO 微调技术栈对照。
+- **CI 失败注记化**:pytest-github-actions-annotate-failures + check-run 失败行回显(匿名可读诊断通道)。
+
+### 🐛 Fixes
+
+- **RBAC 跨租户隔离收口**:全查询面补 business_id 过滤(code review 硬违规修复)。
+- **订单发货端点接 RBAC**:order:ship 权限点 + JWT 员工身份。
+- **code-review 修复包**:假租户/静默缺省/事件循环阻塞/恒真断言 + 防锁死护栏补完 + special-family 安全闸/租户过滤补漏/LIMIT 双保险。
+- **CI 常红根因清盘**:商户读写引擎 NullPool 化(跨事件循环池化连接复用致全量测试随机挂);前端单测双根因(bun 1.3.14 解包丢文件 + admin 用例依赖 dev 网关);embedding 并发回归密封化;并发用例清 lru_cache;L2 范例回放密封化。
+
+---
+
 ## [2.6.45] - 2026-09-19 (双活动对比查询族 —— 登记流水线首个闭环案例)
 
 「两个活动对比」经 agent_unanswered 机制进入视野,按 ADR-0005 登记流水线落地为 `promo_compare` 查询族:两个活动并排对比核销订单数/核销GMV/优惠总额(核销归因口径),需指明两个活动;L3 闭集/提示词支持「A 对比 B」双实体解析(entity_mention + compare_mention 各落一个活动,多命中走 clarify,单命中自动绑定)。eval 补 2 例。同轮修复:promo_compare 编译分支残留 lim 绑定参数导致 SQL 报错(调试脚本实弹抓获)。
