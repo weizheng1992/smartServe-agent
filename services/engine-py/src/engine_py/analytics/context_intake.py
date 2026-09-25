@@ -14,8 +14,8 @@ from .engine import StructuredQueryIntent
 # graph 的行内扫描与勾选合并共用本定义(单一事实源)
 INLINE_SPU_METRICS = frozenset({"gmv", "volume", "gross_profit", "margin_rate", "stock_risk"})
 
-# spu 勾选的作用面 = 标准族榜单 + 趋势族对偶(趋势按勾选商品出线)
-_SPU_FILTERABLE = INLINE_SPU_METRICS | {"volume_trend", "gmv_trend"}
+# spu 勾选的作用面 = 标准族榜单 + 趋势族对偶 + 商品对比(勾 ≥2 款并排)
+_SPU_FILTERABLE = INLINE_SPU_METRICS | {"volume_trend", "gmv_trend", "spu_compare"}
 
 # 客户族闭集(PageContext customer 勾选的作用面)
 _CUSTOMER_SLOT_METRICS = frozenset({

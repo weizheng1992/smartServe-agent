@@ -612,6 +612,26 @@ class MetricQueryEngine:
                 "LEFT JOIN merchant_spus s ON s.spu_code = COALESCE(c.spu, p.spu) "
                 "ORDER BY ABS(COALESCE(c.v, 0) - COALESCE(p.v, 0)) DESC LIMIT 50"
             )
+        elif intent.metric == "spu_compare":
+            # 商品销售对比(T5 勾选的自然延伸):勾选 ≥2 款并排出销量/GMV/订单数
+            spu_ids = (intent.entity_slot or {}).get("spu") or intent.entity_ids or []
+            if len(spu_ids) < 2:
+                raise UnsupportedQuery("请在商品列表勾选至少两个商品,再问对比(如「两个商品销售对比」)")
+            params.pop("lim", None)
+            params["entities"] = spu_ids[:20]
+            sql = (
+                'SELECT s.title AS "商品", s.category AS "品类", '
+                'COALESCE(SUM(oi.quantity), 0)::int AS "销量", '
+                'COALESCE(SUM(oi.quantity * oi.price), 0)::float AS "GMV", '
+                'COUNT(DISTINCT o.order_id)::int AS "订单数" '
+                "FROM merchant_spus s "
+                "LEFT JOIN merchant_order_items oi ON oi.spu_id = s.spu_code "
+                "LEFT JOIN merchant_orders o ON o.order_id = oi.order_id "
+                "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                "WHERE s.spu_code = ANY(:entities) "
+                "GROUP BY s.id, s.title, s.category "
+                'ORDER BY "GMV" DESC LIMIT 20'
+            )
         elif intent.metric == "customer_spend_stats":
             # 客户消费统计(阶段⑦客户族):客户实体必传,宽表单行
             params.pop("lim", None)

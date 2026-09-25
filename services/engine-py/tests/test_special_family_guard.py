@@ -33,6 +33,8 @@ _SPECIAL_METRICS: list[tuple[str, dict]] = [
     # 归因族(确定性环比分解)
     ("attribution_refund", {}),
     ("attribution_sales", {}),
+    # 商品销售对比(勾选 ≥2 款)
+    ("spu_compare", {"entity_slot": {"spu": ["S1", "S2"]}}),
     # 阶段⑥对话出口族
     ("aov", {}),
     ("order_count", {}),

@@ -1,8 +1,3 @@
-# 指标语义目录(闭集事实源)—— 由 metric_registry.py 加载器读取。
-# 词面/口径改这里即可,无需改 Python;改后必跑:
-#   AI_INTENT_L3=off uv run python scripts/run_intent_eval.py  (闸门 95%)
-# 必填键: key/label/description/domain/unit/direction/synonyms/permissionTag
-# 实体必传指标同步维护 llm_intent.ENTITY_REQUIRED;权限闭集在 rbac.ROLE_METRIC_PERMISSIONS。
 gmv:
   key: gmv
   label: 总销售额 (GMV)
@@ -1101,51 +1096,120 @@ customer_spend_trend:
   availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
-
 attribution_refund:
-    key: attribution_refund
-    label: 退货变化归因
-    description: 本月 vs 上月退货单数对比,按商品列变化最大的贡献者(确定性环比分解)。
-    domain: review
-    sourceTables: [merchant_orders, merchant_order_items]
-    expression: cur/prev refund count per spu + delta
-    sqlTemplate: merchant_db
-    businessRules:
-      - 归因只做确定性环比分解,不猜测原因(08-D1);变多/变少由行序表达
-      - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
-    direction: DESC
-    unit: 单
-    icon: "🔍"
-    aliases: [why_refund_change]
-    synonyms: [为什么退货变多, 为什么退货变少, 退货为什么变多, 退款为什么变多,
-      为什么退款变多, 退货变化归因, 为什么退货突然变多, 退货突然变多, 退货突然变少,
-      退货变多, 退货变少, 退款变多, 退款变少]
-    conflictGroup: []
-    sampleQueries: [为什么这个月退货突然变多]
-    availableDimensions: []
-    permissionTag: sales_viewer
-    verifiedConfidence: 0.9
+  key: attribution_refund
+  label: 退货变化归因
+  description: 本月 vs 上月退货单数对比,按商品列变化最大的贡献者(确定性环比分解)。
+  domain: review
+  sourceTables:
+  - merchant_orders
+  - merchant_order_items
+  expression: cur/prev refund count per spu + delta
+  sqlTemplate: merchant_db
+  businessRules:
+  - 归因只做确定性环比分解,不猜测原因(08-D1);变多/变少由行序表达
+  - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
+  direction: DESC
+  unit: 单
+  icon: 🔍
+  aliases:
+  - why_refund_change
+  synonyms:
+  - 为什么退货变多
+  - 为什么退货变少
+  - 退货为什么变多
+  - 退款为什么变多
+  - 为什么退款变多
+  - 退货变化归因
+  - 为什么退货突然变多
+  - 退货突然变多
+  - 退货突然变少
+  - 退货变多
+  - 退货变少
+  - 退款变多
+  - 退款变少
+  conflictGroup: []
+  sampleQueries:
+  - 为什么这个月退货突然变多
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
 attribution_sales:
-    key: attribution_sales
-    label: 销售变化归因
-    description: 本月 vs 上月 GMV 对比,按商品列变化最大的贡献者(确定性环比分解)。
-    domain: sales
-    sourceTables: [merchant_orders, merchant_order_items]
-    expression: cur/prev GMV per spu + delta
-    sqlTemplate: merchant_db
-    businessRules:
-      - 归因只做确定性环比分解,不猜测原因(08-D1);变好/变差由行序表达
-      - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
-    direction: DESC
-    unit: 元
-    icon: "🔍"
-    aliases: [why_sales_change]
-    synonyms: [为什么卖得变好, 为什么卖得变差, 为什么销量变多, 为什么销量变少,
-      为什么销售额变多, 为什么销售额变少, 销售变化归因, 为什么这个月卖得更好,
-      为什么这个月卖得差, 销售额变多, 销售额变少, 销量变多, 销量变少,
-      卖得更好, 卖得更差, 卖得变好, 卖得变差]
-    conflictGroup: []
-    sampleQueries: [为什么这个月销售额变多了]
-    availableDimensions: []
-    permissionTag: sales_viewer
-    verifiedConfidence: 0.9
+  key: attribution_sales
+  label: 销售变化归因
+  description: 本月 vs 上月 GMV 对比,按商品列变化最大的贡献者(确定性环比分解)。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  - merchant_order_items
+  expression: cur/prev GMV per spu + delta
+  sqlTemplate: merchant_db
+  businessRules:
+  - 归因只做确定性环比分解,不猜测原因(08-D1);变好/变差由行序表达
+  - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
+  direction: DESC
+  unit: 元
+  icon: 🔍
+  aliases:
+  - why_sales_change
+  synonyms:
+  - 为什么卖得变好
+  - 为什么卖得变差
+  - 为什么销量变多
+  - 为什么销量变少
+  - 为什么销售额变多
+  - 为什么销售额变少
+  - 销售变化归因
+  - 为什么这个月卖得更好
+  - 为什么这个月卖得差
+  - 销售额变多
+  - 销售额变少
+  - 销量变多
+  - 销量变少
+  - 卖得更好
+  - 卖得更差
+  - 卖得变好
+  - 卖得变差
+  conflictGroup: []
+  sampleQueries:
+  - 为什么这个月销售额变多了
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9
+spu_compare:
+  key: spu_compare
+  label: 商品销售对比
+  description: 勾选的商品并排对比:各自销量/GMV/订单数(有效成交口径);需勾选 ≥2 个商品。
+  domain: sales
+  sourceTables:
+  - merchant_spus
+  - merchant_order_items
+  - merchant_orders
+  expression: SUM(quantity), SUM(quantity*price), COUNT(DISTINCT order_id) FILTER spu = ANY(entities) GROUP BY spu
+  sqlTemplate: merchant_db
+  businessRules:
+  - 勾选 ≥2 商品(列表页勾选实体走 PageContext);不足两项响亮拒绝
+  - 有效成交口径,与 GMV 榜同源
+  direction: DESC
+  unit: 件
+  icon: ⚖️
+  aliases:
+  - spu_sales_compare
+  synonyms:
+  - 两个商品销售对比
+  - 商品销售对比
+  - 商品对比
+  - 这两款对比
+  - 两款对比
+  - 两个商品对比
+  - 商品销量对比
+  - 对比一下这两款
+  - 这两款哪个卖得好
+  - 两款销售对比
+  conflictGroup: []
+  sampleQueries:
+  - 两个商品销售对比
+  - 这两款哪个卖得好
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.9

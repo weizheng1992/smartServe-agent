@@ -1332,3 +1332,43 @@ class TestAttributionFamily:
         rows = events["result"]["rows"]
         top = next((x for x in rows if x["退货变化商品"] == "归因测试款"), None)
         assert top is not None and top["本月"] == 1.0 and top["变化"] == 1.0
+
+
+class TestSpuCompare:
+    """商品销售对比(勾选 ≥2 款):spu_compare 并排卡;不足两项响亮拒绝。"""
+
+    async def test_compare_with_selection(self, client, auth):
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        # 自种两款(容器 SPU 种子可能为空)
+        async with _merchant_writer_engine().begin() as c:
+            await c.execute(_t(
+                "INSERT INTO merchant_spus (id, spu_code, title, category, main_image, status) "
+                "VALUES (CAST(:id AS uuid), :code, :title, '配饰', '', 'ON_SALE') "
+                "ON CONFLICT (spu_code) DO NOTHING"
+            ), [{"id": "33333333-3333-3333-3333-333333333331", "code": "SPU-E2E-CMPA", "title": "对比测试款A"},
+                {"id": "33333333-3333-3333-3333-333333333332", "code": "SPU-E2E-CMPB", "title": "对比测试款B"}])
+        codes = ["SPU-E2E-CMPA", "SPU-E2E-CMPB"]
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "两个商品销售对比",
+            "pageContext": {"selection": {"spu": codes}},
+        })
+        assert "result" in dict(_sse_events(r)), f"DBG {_sse_events(r)} body={r.text[:300]}"
+        events = dict(_sse_events(r))
+        assert events["result"]["metric"] == "spu_compare"
+        rows = events["result"]["rows"]
+        assert 2 <= len(rows) <= 2
+        assert all("销量" in x and "GMV" in x for x in rows)
+
+    async def test_no_selection_honest_reject(self, client, auth):
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/ask", headers=boss, json={
+            "question": "两个商品销售对比",
+        })
+        events = dict(_sse_events(r))
+        assert events["unsupported"]["message"].startswith("请在商品列表勾选至少两个商品")
