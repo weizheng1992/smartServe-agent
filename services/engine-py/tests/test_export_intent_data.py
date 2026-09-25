@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -43,6 +44,18 @@ _spec = importlib.util.spec_from_file_location("export_intent_data", _SCRIPT_PAT
 assert _spec is not None and _spec.loader is not None
 export_intent_data = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(export_intent_data)
+
+
+@pytest.fixture(autouse=True)
+def _restore_env_after_main():
+    """main() 会经 _load_env_file 把 .env(含仓库根)全量 setdefault 进 os.environ
+    且脚本侧不清理 —— CLI 短进程无害,测试长进程则是跨文件污染:曾把
+    AI_RESULT_CACHE_TTL=60 泄漏给后续 analytics 测试,令其命中 Redis 陈旧缓存
+    假红(2026-09-26 夜审定位)。逐测快照恢复,进程出测试时环境原样。"""
+    snapshot = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(snapshot)
 
 
 class _AsyncSessionFacade:

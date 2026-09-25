@@ -37,6 +37,14 @@ def engine(merchant_pg):
     return MetricQueryEngine(session_ctx={"business_id": "aurora", "role": "finance_owner"})
 
 
+@pytest.fixture(autouse=True)
+def _pin_result_cache_off(monkeypatch):
+    """执行位测试一律关结果缓存。ambient AI_RESULT_CACHE_TTL(如 test_export_intent_data
+    触发脚本 _load_env_file 把仓库根 .env 全量 setdefault 进进程)曾让本模块命中
+    Redis 陈旧空结果而假红 —— 症状是 reader 工厂零调用、rows=0(2026-09-26 定位)。"""
+    monkeypatch.delenv("AI_RESULT_CACHE_TTL", raising=False)
+
+
 class TestNewFamilyResolve:
     def test_review_family_registered(self):
         assert "review_bad" in METRIC_SEMANTIC_REGISTRY
