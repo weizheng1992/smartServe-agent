@@ -12,10 +12,16 @@ import json
 from .kv import kv_get_json, kv_set_json
 
 
-def build_key(compiled_sql: str, params: dict, chart_hint: str | None = None) -> str:
+def build_key(
+    compiled_sql: str, params: dict, chart_hint: str | None = None, scope: str | None = None
+) -> str:
     # 图型指令入键:同一查询「折线」与「柱状」是不同交付,不共享缓存
+    # 作用域入键(2026-09-26 夜审):键里没有 business_id 时,不同商户同 SQL 同参
+    # 共享同一份结果 —— 商户库多租化的瞬间即成跨租户串味泄漏面;现随作用域隔离,
+    # 旧键无迁移价值,TTL 过期自然淘汰。
     digest = hashlib.sha256(
-        (compiled_sql + json.dumps(params, sort_keys=True, default=str)
+        ((scope or "") + "\x00" + compiled_sql
+         + json.dumps(params, sort_keys=True, default=str)
          + (chart_hint or "")).encode()
     ).hexdigest()[:24]
     return f"da:res:{digest}"

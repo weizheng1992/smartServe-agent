@@ -760,6 +760,7 @@ class MetricQueryEngine:
 
             cache_key = result_cache.build_key(
                 compiled.sql, compiled.params, chart_hint=compiled.chart_hint,
+                scope=(self.session_ctx or {}).get("business_id"),
             )
             cached = await result_cache.get(cache_key)
             if cached is not None:
