@@ -44,7 +44,8 @@ async def fetch_replay_inputs(limit: int) -> list[dict]:
                 await session.execute(
                     select(Message)
                     .where(Message.thread_id == thread.id, Message.role == "user")
-                    .order_by(Message.timestamp)
+                    # 同 ShortMemory.get_messages:timestamp 混写两种格式,锚 created_at
+                    .order_by(Message.created_at, Message.id)
                     .limit(1)
                 )
             ).scalar_one_or_none()

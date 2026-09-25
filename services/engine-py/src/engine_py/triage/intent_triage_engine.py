@@ -269,6 +269,48 @@ def _inject_address_manage(parsed: list[dict], input_text: str) -> list[dict]:
     ]
     return [entry, *rest]
 
+
+# 纯排版/指代续聊检出(词表缺口确定性预检,镜像 metric_query/address_manage
+# 先例,2026-09-25):分类器词表无「把上一答换个格式重绘」档位,纯排版续聊
+# 只能就近抓历史实体硬归档 —— 实弹「给一个表格显示」被误路由成订单详情表
+# (intent_logs f5bd4c40:structured_llm 判 order_status 并绑上下文单号,
+# 确定性订单快路照办)。排版/汇总形 × 交付动词共现,且无单号、无订单域
+# 话题名词、无操作动词时命中;命中即收编 general_query 走 finish 历史重绘。
+_REFORMAT_SHAPE_RE = re.compile(
+    r"(表格|列表|清单|枚举|图表|柱状|饼图|思维导图|"
+    r"换个?(格式|方式|样式|说法)|重新(整理|排版|组织|汇总)|总结一下|概括一下)",
+    re.IGNORECASE,
+)
+_REFORMAT_DELIVERY_RE = re.compile(
+    r"(显示|展示|呈现|列(?:出|个|一下)|罗列|输出|整理|排(?:成|个|一下)|给|来|做|弄|换成|改成)",
+    re.IGNORECASE,
+)
+_ORDER_TOPIC_NOUN_RE = re.compile(
+    r"(订单|物流|退款|退货|换货|发货|快递|运单|包裹|购物车|收货|地址|发票|售后|签收|账单)",
+    re.IGNORECASE,
+)
+_ACTION_OPERATION_RE = re.compile(
+    r"(申请|提交|支付|付款|下单|购买|修改|变更|取消|删除|催单|催发货|改寄|查(?:询|一下|看))",
+    re.IGNORECASE,
+)
+
+
+def detect_pure_reformat(text: str | None) -> bool:
+    """纯函数(测试缝):纯排版/指代续聊检出。
+
+    「给一个表格显示」类输入无新业务语义,只要求重绘上一答 —— 任何话题名词
+    (订单/购物车/地址等)或操作动词在场一律不命中,严禁误伤真实业务请求
+    (「订单列表给我看看」「把订单xx做成表格」都让位订单域)。
+    """
+    if not text:
+        return False
+    if EXPLICIT_ORDER_ID_RE.search(text):
+        return False
+    if _ORDER_TOPIC_NOUN_RE.search(text) or _ACTION_OPERATION_RE.search(text):
+        return False
+    return bool(_REFORMAT_SHAPE_RE.search(text) and _REFORMAT_DELIVERY_RE.search(text))
+
+
 # 文本侧域角色线索(工单04 2026-09-11):措辞维度的回退 —— 正则与判定次序
 # 逐字节保持旧实现,仅提为模块常量。文本线索优先于意图档位:措辞含加购动词
 # 时即使档位是 chat/refund 也回 cart 域(用户嘴上在说购物车)

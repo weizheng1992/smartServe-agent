@@ -48,6 +48,12 @@ def _inject_address_manage(parsed, input_text):
     return f(parsed, input_text)
 
 
+def _detect_pure_reformat(input_text):
+    from ..intent_triage_engine import detect_pure_reformat as f
+
+    return f(input_text)
+
+
 def _proposal(layer, intent, confidence=None):
     from ..intent_triage_engine import _proposal as f
 
@@ -166,6 +172,35 @@ async def judge(ctx: StageContext) -> StageVerdict:
                     **({"condition": item.condition.model_dump()} if item.condition else {}),
                 }
             )
+
+        # 词表缺口确定性预检(镜像 metric_query/address_manage 先例,2026-09-25):
+        # 「给一个表格显示」这类纯排版/指代续聊在分类器词表无归属,历史窗口里
+        # 的单号会被就近捡走 —— 实弹误路由成订单详情表(intent_logs f5bd4c40:
+        # structured_llm 判 order_status + 绑 AURORA-ORD-2026-6307,确定性订单
+        # 快路照办)。纯排版形(检出器见 detect_pure_reformat)在此收编
+        # general_query:实体剥除、单号不落 order_context,structured_llm 原判
+        # 经 reformat_guard 提议进 candidates 留痕;单 general_query 走 planner
+        # 极简旁路,finish 按正确时序的历史重绘上一答。
+        if (
+            parsed
+            and _detect_pure_reformat(input_text)
+            and (
+                parsed[0].get("intent") != "general_query"
+                or any(p["entities"].get("orderId") for p in parsed)
+            )
+        ):
+            ctx.proposals.append(
+                _proposal("reformat_guard", parsed[0]["intent"], parsed[0]["confidence"])
+            )
+            parsed = [
+                {
+                    "intent": "general_query",
+                    "confidence": max(0.85, parsed[0].get("confidence") or 0.85),
+                    "type": "primary",
+                    "entities": {},
+                    "missingSlots": [],
+                }
+            ]
 
         primary_order_id = next(
             (p["entities"]["orderId"] for p in parsed if p["entities"].get("orderId")), None

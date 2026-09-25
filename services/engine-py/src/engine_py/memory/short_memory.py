@@ -51,12 +51,17 @@ class ShortMemory:
     async def get_messages(self) -> list[dict]:
         try:
             async with get_session() as session:
+                # 排序锚用 created_at 而非 TEXT 列 timestamp:网关写 naive 本地墙钟
+                # (UTC+8 宿主机)、引擎写 UTC 带偏移,两格式字符串比较无意义 ——
+                # 曾致「给一个表格显示」历史窗口错乱,分类器在答在问上的窗口里
+                # 捡到真实单号而误路由订单意图。created_at 由 DB server_default
+                # now() 统一落库(两写入方同钟),role 序作同刻 tiebreak。
                 rows = (
                     await session.execute(
                         select(Message)
                         .where(Message.thread_id == self.thread_id)
                         .order_by(
-                            Message.timestamp,
+                            Message.created_at,
                             case(
                                 (Message.role == "system", 1),
                                 (Message.role == "user", 2),
