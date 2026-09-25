@@ -5,6 +5,17 @@ import { LineChart } from '@/components/LineChart';
 // 明确不做条形图的指标:逐笔列表/窗口列不是排行语义,画条会误导
 const NO_BAR_METRICS = new Set(['order_overview', 'customer_orders']);
 
+// 折线取行内第 2 列为值;列缺位或非数值(如对比卡第 2 列是「品类」文案)一律
+// 不是可绘制数列 —— 诚实降级表格,绝不画 NaN 图(实弹:历史持久化帧重放)
+function linePoints(rows: any[]): Array<{ label: string; value: number }> | null {
+  const points = rows.map((r: any) => {
+    const vals = Object.values(r);
+    return { label: String(vals[0] ?? ''), value: Number(vals[1]) };
+  });
+  if (!points.length || points.some((p) => !Number.isFinite(p.value))) return null;
+  return points;
+}
+
 export function rankingPoints(data: any): Array<{ label: string; value: number }> | null {
   const rows: any[] = Array.isArray(data.rows) ? data.rows : [];
   if (rows.length < 2 || NO_BAR_METRICS.has(data.metric)) return null;
@@ -24,19 +35,41 @@ export function ResultCard({ data }: { data: any }) {
     // 用户点名折线但数据点不足:诚实说明,表格呈现(不静默降级)
     return (
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-        <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{data.title || `${data.metric} · ${data.unit}`}</div>
-        <div className="px-3 py-2 text-[11px] text-zinc-400">折线至少需要 2 个数据点,当前结果不满足 —— 按表格呈现(诚实降级,未绘制空图)。</div>
+        <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">
+          {data.title || `${data.metric} · ${data.unit}`}
+        </div>
+        <div className="px-3 py-2 text-[11px] text-zinc-400">
+          折线至少需要 2 个数据点,当前结果不满足 —— 按表格呈现(诚实降级,未绘制空图)。
+        </div>
         <ResultTable rows={data.rows || []} />
       </div>
     );
   }
   if (data.chart === 'line' && Array.isArray(data.rows) && data.rows.length >= 2) {
-    const points = data.rows.map((r: any) => ({ label: String(Object.values(r)[0]), value: Number(Object.values(r)[1]) }));
+    const points = linePoints(data.rows);
+    if (!points) {
+      // 点位齐但值列非数值:该结果不是数值数列(如商品对比卡),折线无意义
+      return (
+        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+          <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">
+            {data.title || `${data.metric} · ${data.unit}`}
+          </div>
+          <div className="px-3 py-2 text-[11px] text-zinc-400">
+            该结果不是数值数列,折线图不适用 —— 按表格呈现(诚实降级,未绘制空图)。
+          </div>
+          <ResultTable rows={data.rows || []} />
+        </div>
+      );
+    }
     return (
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-        <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{data.title || `${data.metric} · ${data.unit}`}</div>
+        <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">
+          {data.title || `${data.metric} · ${data.unit}`}
+        </div>
         <LineChart points={points} unit={data.unit} />
-        {data.caliber ? <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{data.caliber}</div> : null}
+        {data.caliber ? (
+          <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{data.caliber}</div>
+        ) : null}
       </div>
     );
   }
@@ -49,12 +82,16 @@ export function ResultCard({ data }: { data: any }) {
     return (
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{card.title}</div>
-        <div className="px-3 py-2 text-[11px] text-zinc-400">该结果不是排行形状(需 ≥2 行数值),无法绘制条形图 —— 已按表格诚实呈现。</div>
+        <div className="px-3 py-2 text-[11px] text-zinc-400">
+          该结果不是排行形状(需 ≥2 行数值),无法绘制条形图 —— 已按表格诚实呈现。
+        </div>
         <table className="w-full text-[12px]">
           <thead>
             <tr className="border-b border-zinc-100 text-left text-zinc-400">
               {card.columns.map((c: any) => (
-                <th key={c.key} className="px-3 py-1.5 font-medium">{c.label}</th>
+                <th key={c.key} className="px-3 py-1.5 font-medium">
+                  {c.label}
+                </th>
               ))}
             </tr>
           </thead>
@@ -62,7 +99,9 @@ export function ResultCard({ data }: { data: any }) {
             {card.rows.map((r: any, i: number) => (
               <tr key={i} className="border-b border-zinc-50">
                 {card.columns.map((c: any) => (
-                  <td key={c.key} className="px-3 py-1.5">{String(r[c.key])}</td>
+                  <td key={c.key} className="px-3 py-1.5">
+                    {String(r[c.key])}
+                  </td>
                 ))}
               </tr>
             ))}
@@ -81,7 +120,9 @@ export function ResultCard({ data }: { data: any }) {
         <thead>
           <tr className="border-b border-zinc-100 text-left text-zinc-400">
             {card.columns.map((c: any) => (
-              <th key={c.key} className="px-3 py-1.5 font-medium">{c.label}</th>
+              <th key={c.key} className="px-3 py-1.5 font-medium">
+                {c.label}
+              </th>
             ))}
           </tr>
         </thead>
@@ -89,7 +130,9 @@ export function ResultCard({ data }: { data: any }) {
           {card.rows.map((r: any, i: number) => (
             <tr key={i} className="border-b border-zinc-50">
               {card.columns.map((c: any) => (
-                <td key={c.key} className="px-3 py-1.5">{String(r[c.key])}</td>
+                <td key={c.key} className="px-3 py-1.5">
+                  {String(r[c.key])}
+                </td>
               ))}
             </tr>
           ))}
@@ -107,13 +150,21 @@ function ResultTable({ rows }: { rows: Record<string, unknown>[] }) {
     <table className="w-full text-[12px]">
       <thead>
         <tr className="border-b border-zinc-100 text-left text-zinc-400">
-          {cols.map((c) => (<th key={c} className="px-3 py-1.5 font-medium">{c}</th>))}
+          {cols.map((c) => (
+            <th key={c} className="px-3 py-1.5 font-medium">
+              {c}
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody>
         {rows.map((r, i) => (
           <tr key={i} className="border-b border-zinc-50">
-            {cols.map((c) => (<td key={c} className="px-3 py-1.5">{String(r[c])}</td>))}
+            {cols.map((c) => (
+              <td key={c} className="px-3 py-1.5">
+                {String(r[c])}
+              </td>
+            ))}
           </tr>
         ))}
       </tbody>
