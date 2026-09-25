@@ -51,9 +51,7 @@ test.describe('🛒 聊天加购 × 商城购物车页 全链路', () => {
     await expect
       .poll(
         async () =>
-          (await engineItems(request)).some((i: any) => i.skuId === 'AURORA-SKU-001-BLK-M')
-            ? 'added'
-            : 'pending',
+          (await engineItems(request)).some((i: any) => i.skuId === 'AURORA-SKU-001-BLK-M') ? 'added' : 'pending',
         { timeout: 60_000, intervals: [500, 1000, 2000] },
       )
       .toBe('added');
@@ -95,7 +93,8 @@ test.describe('🛒 聊天加购 × 商城购物车页 全链路', () => {
     await chatSend(request, '极光三合一冲锋衣 曜石黑 M码 加入购物车');
     await expect
       .poll(
-        async () => ((await engineItems(request)).some((i: any) => i.skuId === 'AURORA-SKU-001-BLK-M') ? 'added' : 'pending'),
+        async () =>
+          (await engineItems(request)).some((i: any) => i.skuId === 'AURORA-SKU-001-BLK-M') ? 'added' : 'pending',
         { timeout: 60_000, intervals: [500, 1000, 2000] },
       )
       .toBe('added');

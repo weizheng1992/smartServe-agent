@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { afterEach } from 'vitest';
 import { cleanup, configure } from '@testing-library/react';
+import { afterEach } from 'vitest';
 
 // vitest globals 关闭时 RTL 不自动清理,统一在每个用例后卸载
 afterEach(() => cleanup());

@@ -1,5 +1,5 @@
+import { type MenuNode, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
-import { api, type MenuNode } from '@/lib/api';
 import { MenuCreateForm } from './components/menu-create-form';
 import { MenuTable } from './components/menu-table';
 
@@ -13,7 +13,9 @@ export default function MenusPage() {
   const load = useCallback(async () => {
     setMenus((await api.menus()).menus || []);
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">

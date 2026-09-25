@@ -1,9 +1,9 @@
 import '@testing-library/jest-dom/vitest';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { setSession } from '@/lib/api';
+import { gatewayUp, installLiveFetch, login } from '@/test/live-api';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { installLiveFetch, login, gatewayUp } from '@/test/live-api';
-import { setSession } from '@/lib/api';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import CustomersPage from '../index';
 
 // 回归(ADR-0005 客户详情抽屉「关不掉」):

@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Button } from 'ui';
 import { ResultCard } from '@/components/ResultCard';
 import { api } from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
+import { Button } from 'ui';
 
 type ReportRow = { id: string; title: string; timeWindow: string; createdAt: string | null };
-type Section = { metric: string; unit: string; caliber: string; chart: string | undefined; rows: Record<string, unknown>[]; cards: any[] };
+type Section = {
+  metric: string;
+  unit: string;
+  caliber: string;
+  chart: string | undefined;
+  rows: Record<string, unknown>[];
+  cards: any[];
+};
 
 /** 我的报告(T4 补强):清单 + 图表重放 —— 存档行数据按图型重绘,CSV 照常导出。 */
 export default function ReportsPage() {
@@ -15,12 +22,21 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
-    try { setReports((await api.reports.list()).reports || []); } catch (err) { setMsg(String(err)); }
+    try {
+      setReports((await api.reports.list()).reports || []);
+    } catch (err) {
+      setMsg(String(err));
+    }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   async function toggleExpand(id: string) {
-    if (openId === id) { setOpenId(null); return; }
+    if (openId === id) {
+      setOpenId(null);
+      return;
+    }
     setLoading(true);
     try {
       const detail = await api.reports.detail(id);
@@ -29,16 +45,28 @@ export default function ReportsPage() {
         const cols = list[0] ? Object.keys(list[0]) : [];
         const chart = detail.chart || (metric.endsWith('_trend') ? 'line' : undefined);
         return {
-          metric, unit: '', caliber: '', rows: list, chart, title: detail.title,
-          cards: [{
-            type: 'table', title: detail.title, columns: cols.map((k) => ({ key: k, label: k })),
-            rows: list, caliber: '',
-          }],
+          metric,
+          unit: '',
+          caliber: '',
+          rows: list,
+          chart,
+          title: detail.title,
+          cards: [
+            {
+              type: 'table',
+              title: detail.title,
+              columns: cols.map((k) => ({ key: k, label: k })),
+              rows: list,
+              caliber: '',
+            },
+          ],
         };
       });
       setSections(built);
       setOpenId(id);
-    } catch (err) { setMsg(String(err)); }
+    } catch (err) {
+      setMsg(String(err));
+    }
     setLoading(false);
   }
 
@@ -59,7 +87,9 @@ export default function ReportsPage() {
           <div className="text-sm font-medium">我的报告</div>
           <div className="mt-0.5 text-[11px] text-zinc-400">展开可重放图表(存档快照);CSV 随时可导</div>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void api.reports.create().then(load)}>＋ 生成报告</Button>
+        <Button size="sm" variant="outline" onClick={() => void api.reports.create().then(load)}>
+          ＋ 生成报告
+        </Button>
       </div>
 
       {reports.length === 0 && (
@@ -82,7 +112,9 @@ export default function ReportsPage() {
                 <Button size="sm" variant="ghost" onClick={() => void toggleExpand(r.id)}>
                   {openId === r.id ? '收起' : '展开图表'}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => downloadCsv(r.id)}>下载 CSV</Button>
+                <Button size="sm" variant="ghost" onClick={() => downloadCsv(r.id)}>
+                  下载 CSV
+                </Button>
               </div>
             </div>
             {openId === r.id && (

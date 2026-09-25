@@ -1,6 +1,6 @@
+import { type MenuNode, api } from '@/lib/api';
 import { useState } from 'react';
 import { Button } from 'ui';
-import { api, type MenuNode } from '@/lib/api';
 import { PermTree } from './perm-tree';
 
 interface Props {
@@ -30,20 +30,30 @@ export function RoleCreateForm({ tree, onMsg, onCreated }: Props) {
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <div className="text-sm font-medium">新建自定义角色</div>
       <div className="mt-1 text-[11px] text-zinc-400">
-        指标权限:默认沿用运营口径;在「菜单管理」给数据菜单挂 `metric:指标名` 按钮(如 metric:gmv)并勾给角色,即可自定义可见指标。
+        指标权限:默认沿用运营口径;在「菜单管理」给数据菜单挂 `metric:指标名` 按钮(如
+        metric:gmv)并勾给角色,即可自定义可见指标。
       </div>
       <div className="mt-3 flex flex-wrap items-start gap-3 text-xs">
         <div className="space-y-2">
-          <input className="w-44 rounded-lg border border-zinc-300 px-3 py-2" placeholder="角色标识(如 custom_ops)" value={newRole} onChange={(e) => setNewRole(e.target.value)} />
+          <input
+            className="w-44 rounded-lg border border-zinc-300 px-3 py-2"
+            placeholder="角色标识(如 custom_ops)"
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value)}
+          />
           <div>
-            <Button size="sm" disabled={!newRole || sel.size === 0} onClick={() => void create()}>创建</Button>
+            <Button size="sm" disabled={!newRole || sel.size === 0} onClick={() => void create()}>
+              创建
+            </Button>
           </div>
         </div>
         <div className="min-w-[240px] flex-1">
           <PermTree nodes={tree} selected={sel} onChange={setSel} />
         </div>
       </div>
-      <div className="mt-2 text-[11px] text-zinc-400">创建后到「员工管理」给员工分派该角色;员工在登录页以邮箱 + 种子密码(agent-all-dev)登录。</div>
+      <div className="mt-2 text-[11px] text-zinc-400">
+        创建后到「员工管理」给员工分派该角色;员工在登录页以邮箱 + 种子密码(agent-all-dev)登录。
+      </div>
     </div>
   );
 }

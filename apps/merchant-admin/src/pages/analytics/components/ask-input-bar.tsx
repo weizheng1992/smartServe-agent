@@ -29,12 +29,22 @@ export function AskInputBar({ busy, onAsk, onGenReport, reportMsg, roleName }: P
           placeholder="问点什么:上个月 GMV 趋势 / 卖得最差的商品 / 为什么退货变多了"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') send();
+          }}
         />
-        <Button onClick={send} disabled={busy}>发送</Button>
-        <Button variant="outline" onClick={onGenReport}>生成报告</Button>
+        <Button onClick={send} disabled={busy}>
+          发送
+        </Button>
+        <Button variant="outline" onClick={onGenReport}>
+          生成报告
+        </Button>
       </div>
-      {reportMsg && <div className="mt-2 text-[11px] text-zinc-400">{reportMsg}(角色:{roleName || '—'})</div>}
+      {reportMsg && (
+        <div className="mt-2 text-[11px] text-zinc-400">
+          {reportMsg}(角色:{roleName || '—'})
+        </div>
+      )}
     </div>
   );
 }

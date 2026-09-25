@@ -1,14 +1,10 @@
-import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useApprovalMachine } from "ui";
-import { authHeaders } from "@/lib/api";
-import * as pageContext from "@/lib/page-context";
-import type {
-  ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow,
-} from "./workbench.types";
+import { authHeaders } from '@/lib/api';
+import * as pageContext from '@/lib/page-context';
+import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useApprovalMachine } from 'ui';
+import type { ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow } from './workbench.types';
 
-export type {
-  ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow,
-};
+export type { ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow };
 
 const contains = (hay: string, q: string) => hay.toLowerCase().includes(q);
 
@@ -297,60 +293,124 @@ export function useWorkbenchState(initialTab: string) {
   const shippedOrdersCount = useMemo(() => orders.filter((o) => o.status === 'SHIPPED').length, [orders]);
   const refundedOrdersCount = useMemo(() => orders.filter((o) => o.status === 'REFUNDED').length, [orders]);
 
-  const filteredOrders = useMemo(() => orders.filter((o) => {
-    if (orderStatusFilter !== 'ALL' && o.status !== orderStatusFilter) return false;
-    if (orderSearchQuery.trim()) {
-      const q = orderSearchQuery.toLowerCase().trim();
-      const hit = contains(
-        `${o.order_id} ${o.customer_id} ${o.shipping_address?.recipientName || ''} ${o.shipping_address?.phone || ''} ${o.shipping_address?.fullAddress || ''} ${o.tracking_info?.trackingNumber || ''}`,
-        q,
-      );
-      if (!hit) return false;
-    }
-    return true;
-  }), [orders, orderStatusFilter, orderSearchQuery]);
+  const filteredOrders = useMemo(
+    () =>
+      orders.filter((o) => {
+        if (orderStatusFilter !== 'ALL' && o.status !== orderStatusFilter) return false;
+        if (orderSearchQuery.trim()) {
+          const q = orderSearchQuery.toLowerCase().trim();
+          const hit = contains(
+            `${o.order_id} ${o.customer_id} ${o.shipping_address?.recipientName || ''} ${o.shipping_address?.phone || ''} ${o.shipping_address?.fullAddress || ''} ${o.tracking_info?.trackingNumber || ''}`,
+            q,
+          );
+          if (!hit) return false;
+        }
+        return true;
+      }),
+    [orders, orderStatusFilter, orderSearchQuery],
+  );
 
-  const filteredConversations = useMemo(() => conversations.filter((c) => {
-    const isTakeover = c.status === 'human_takeover';
-    if (liveDeskStatusFilter === 'takeover' && !isTakeover) return false;
-    if (liveDeskStatusFilter === 'ai' && isTakeover) return false;
-    if (liveDeskSearchQuery.trim()) {
-      const q = liveDeskSearchQuery.toLowerCase().trim();
-      if (!contains(`${c.threadId || c.id} ${c.userId || ''} ${c.lastMessage || ''}`, q)) return false;
-    }
-    return true;
-  }), [conversations, liveDeskStatusFilter, liveDeskSearchQuery]);
+  const filteredConversations = useMemo(
+    () =>
+      conversations.filter((c) => {
+        const isTakeover = c.status === 'human_takeover';
+        if (liveDeskStatusFilter === 'takeover' && !isTakeover) return false;
+        if (liveDeskStatusFilter === 'ai' && isTakeover) return false;
+        if (liveDeskSearchQuery.trim()) {
+          const q = liveDeskSearchQuery.toLowerCase().trim();
+          if (!contains(`${c.threadId || c.id} ${c.userId || ''} ${c.lastMessage || ''}`, q)) return false;
+        }
+        return true;
+      }),
+    [conversations, liveDeskStatusFilter, liveDeskSearchQuery],
+  );
 
-  const filteredAuditLogs = useMemo(() => auditLogs.filter((log) => {
-    if (spiActionFilter !== 'ALL' && log.action_type !== spiActionFilter) return false;
-    if (spiSearchQuery.trim()) {
-      const q = spiSearchQuery.toLowerCase().trim();
-      if (!contains(`${log.id} ${log.order_id} ${log.action_type} ${log.idempotency_key}`, q)) return false;
-    }
-    return true;
-  }), [auditLogs, spiActionFilter, spiSearchQuery]);
+  const filteredAuditLogs = useMemo(
+    () =>
+      auditLogs.filter((log) => {
+        if (spiActionFilter !== 'ALL' && log.action_type !== spiActionFilter) return false;
+        if (spiSearchQuery.trim()) {
+          const q = spiSearchQuery.toLowerCase().trim();
+          if (!contains(`${log.id} ${log.order_id} ${log.action_type} ${log.idempotency_key}`, q)) return false;
+        }
+        return true;
+      }),
+    [auditLogs, spiActionFilter, spiSearchQuery],
+  );
 
   return {
-    orders, auditLogs,
-    approvals, setApprovals, conversations, setConversations,
-    activeThreadId, setActiveThreadId, activeThreadMessages, setActiveThreadMessages,
-    inputMessage, setInputMessage, loading, setLoading,
-    orderStatusFilter, setOrderStatusFilter, orderSearchQuery, setOrderSearchQuery,
-    approvalStatusFilter, setApprovalStatusFilter, approvalActionFilter, setApprovalActionFilter,
-    approvalSearchQuery, setApprovalSearchQuery,
-    liveDeskStatusFilter, setLiveDeskStatusFilter, liveDeskSearchQuery, setLiveDeskSearchQuery,
-    spiActionFilter, setSpiActionFilter, spiSearchQuery, setSpiSearchQuery,
-    shippingOrderId, setShippingOrderId, trackingNumberInput, setTrackingNumberInput,
-    carrierInput, setCarrierInput, selectedLog, setSelectedLog, copiedLog, setCopiedLog,
-    inspectingApproval, setInspectingApproval, isTakingOver, setIsTakingOver,
-    rejectingApprovalId, setRejectingApprovalId, rejectReasonInput, setRejectReasonInput,
+    orders,
+    auditLogs,
+    approvals,
+    setApprovals,
+    conversations,
+    setConversations,
+    activeThreadId,
+    setActiveThreadId,
+    activeThreadMessages,
+    setActiveThreadMessages,
+    inputMessage,
+    setInputMessage,
+    loading,
+    setLoading,
+    orderStatusFilter,
+    setOrderStatusFilter,
+    orderSearchQuery,
+    setOrderSearchQuery,
+    approvalStatusFilter,
+    setApprovalStatusFilter,
+    approvalActionFilter,
+    setApprovalActionFilter,
+    approvalSearchQuery,
+    setApprovalSearchQuery,
+    liveDeskStatusFilter,
+    setLiveDeskStatusFilter,
+    liveDeskSearchQuery,
+    setLiveDeskSearchQuery,
+    spiActionFilter,
+    setSpiActionFilter,
+    spiSearchQuery,
+    setSpiSearchQuery,
+    shippingOrderId,
+    setShippingOrderId,
+    trackingNumberInput,
+    setTrackingNumberInput,
+    carrierInput,
+    setCarrierInput,
+    selectedLog,
+    setSelectedLog,
+    copiedLog,
+    setCopiedLog,
+    inspectingApproval,
+    setInspectingApproval,
+    isTakingOver,
+    setIsTakingOver,
+    rejectingApprovalId,
+    setRejectingApprovalId,
+    rejectReasonInput,
+    setRejectReasonInput,
     messagesEndRef,
-    selectedOrderIds, setSelectedOrderIds, toggleOrderSelection,
-    submittingActionId, setRejectionReasons, executeApprovalAction, executeHumanReplyAction,
-    loadConversationMessages, fetchDashboardData,
-    handleApprovalAction, handleHumanReply, handleTakeover, handleSendMessage, handleShipOrder,
-    pendingApprovalsCount, paidOrdersCount, shippedOrdersCount, refundedOrdersCount,
-    filteredOrders, filteredConversations, filteredAuditLogs,
+    selectedOrderIds,
+    setSelectedOrderIds,
+    toggleOrderSelection,
+    submittingActionId,
+    setRejectionReasons,
+    executeApprovalAction,
+    executeHumanReplyAction,
+    loadConversationMessages,
+    fetchDashboardData,
+    handleApprovalAction,
+    handleHumanReply,
+    handleTakeover,
+    handleSendMessage,
+    handleShipOrder,
+    pendingApprovalsCount,
+    paidOrdersCount,
+    shippedOrdersCount,
+    refundedOrdersCount,
+    filteredOrders,
+    filteredConversations,
+    filteredAuditLogs,
   };
 }
 
@@ -364,6 +424,6 @@ export function WorkbenchProvider({ value, children }: { value: Workbench; child
 
 export function useWorkbench(): Workbench {
   const w = useContext(WorkbenchContext);
-  if (!w) throw new Error("useWorkbench 必须在 WorkbenchProvider 内使用");
+  if (!w) throw new Error('useWorkbench 必须在 WorkbenchProvider 内使用');
   return w;
 }

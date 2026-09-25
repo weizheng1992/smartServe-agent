@@ -12,7 +12,9 @@ interface Props {
 export function PermTree({ nodes, selected, onChange }: Props) {
   const render = (n: MenuNode, depth: number) => (
     <div key={n.id}>
-      <label className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-50 ${n.menuType === 'button' ? 'text-xs text-zinc-500' : 'text-[13px]'}`}>
+      <label
+        className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-50 ${n.menuType === 'button' ? 'text-xs text-zinc-500' : 'text-[13px]'}`}
+      >
         <input
           type="checkbox"
           className="accent-zinc-900"
@@ -29,5 +31,9 @@ export function PermTree({ nodes, selected, onChange }: Props) {
       )}
     </div>
   );
-  return <div className="max-h-72 overflow-y-auto rounded-lg border border-zinc-200 p-2">{nodes.map((n) => render(n, 0))}</div>;
+  return (
+    <div className="max-h-72 overflow-y-auto rounded-lg border border-zinc-200 p-2">
+      {nodes.map((n) => render(n, 0))}
+    </div>
+  );
 }

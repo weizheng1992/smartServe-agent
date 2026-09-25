@@ -19,10 +19,11 @@ function main(): never {
   }
 
   console.log('\n▶ 导入数据库(eval_runs / eval_results / eval_run_records)');
-  const res = Bun.spawnSync(
-    ['uv', 'run', 'python', '-m', 'engine_py.evals.promptfoo_import', '../../eval/.records'],
-    { cwd: resolve(REPO_ROOT, 'services/engine-py'), stdout: 'inherit', stderr: 'inherit' },
-  );
+  const res = Bun.spawnSync(['uv', 'run', 'python', '-m', 'engine_py.evals.promptfoo_import', '../../eval/.records'], {
+    cwd: resolve(REPO_ROOT, 'services/engine-py'),
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
   process.exit(res.exitCode ?? 1);
 }
 

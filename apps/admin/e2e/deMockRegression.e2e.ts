@@ -19,7 +19,10 @@ test.describe('Admin 去 mock 回归 (2026-09-13)', () => {
     await page.getByRole('tab', { name: /LangGraph 决策流/ }).click();
     await expect(page.getByText('LangGraph 节点执行遥测 (llm_call_logs)')).toBeVisible({ timeout: 10_000 });
     // 真数据二选一:有节点遥测行,或诚实空态(快轨/规则路径无 LLM 调用)
-    const nodeRows = await page.locator('body').getByText(/tokens \d/).count();
+    const nodeRows = await page
+      .locator('body')
+      .getByText(/tokens \d/)
+      .count();
     const honestEmpty = await page.getByText(/暂无已持久化的 LLM 节点遥测/).count();
     expect(nodeRows + honestEmpty).toBeGreaterThan(0);
 

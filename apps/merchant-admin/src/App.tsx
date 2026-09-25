@@ -1,19 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { api, clearSession, currentStaffEmail, hasBossSession, type MenuNode } from '@/lib/api';
+import { FloatingAgent } from '@/components/FloatingAgent';
+import { type MenuNode, api, clearSession, currentStaffEmail, hasBossSession } from '@/lib/api';
 import AnalyticsPage from '@/pages/analytics';
-import OrderWorkbench from '@/pages/order-manager';
+import BoardPage from '@/pages/board';
+import CustomersPage from '@/pages/customers';
 import ProductsPage from '@/pages/goods/products';
 import SkusPage from '@/pages/goods/skus';
 import LoginPage from '@/pages/login';
+import OrderWorkbench from '@/pages/order-manager';
 import PromotionsPage from '@/pages/promotions';
-import CustomersPage from '@/pages/customers';
+import ReportsPage from '@/pages/reports';
 import MenusPage from '@/pages/system/menus';
 import RolesPage from '@/pages/system/roles';
 import StaffPage from '@/pages/system/staff';
-import ReportsPage from '@/pages/reports';
-import BoardPage from '@/pages/board';
-import { FloatingAgent } from '@/components/FloatingAgent';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 
 function flattenMenus(nodes: MenuNode[]): Array<MenuNode & { top: string }> {
   return nodes.flatMap((n) => [
@@ -26,7 +26,16 @@ export default function App() {
   const [authed, setAuthed] = useState(() => !!localStorage.getItem('merchant-admin.token'));
   return (
     <BrowserRouter>
-      {authed ? <AdminShell onLogout={() => { clearSession(); setAuthed(false); }} /> : <LoginPage onLogin={() => setAuthed(true)} />}
+      {authed ? (
+        <AdminShell
+          onLogout={() => {
+            clearSession();
+            setAuthed(false);
+          }}
+        />
+      ) : (
+        <LoginPage onLogin={() => setAuthed(true)} />
+      )}
     </BrowserRouter>
   );
 }
@@ -49,7 +58,9 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const routable = useMemo(() => flattenMenus(menus), [menus]);
   const currentTop = routable.find((r) => location.pathname.startsWith(r.route || '###'))?.top || '';
@@ -100,7 +111,8 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
                 value={currentStaffEmail()}
                 onChange={(e) => {
                   // 切换 = 服务端换签目标员工 JWT;始终以保存的老板凭证发起
-                  api.staffSwitch(e.target.value)
+                  api
+                    .staffSwitch(e.target.value)
                     .then(() => refresh())
                     .catch((err) => alert(String(err).replace('Error: ', '')));
                 }}
@@ -112,8 +124,12 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
                 ))}
               </select>
             )}
-            <span className="text-zinc-400">{currentStaffEmail()} · {role}</span>
-            <button type="button" className="text-[11px] text-zinc-400 hover:text-zinc-900" onClick={onLogout}>退出</button>
+            <span className="text-zinc-400">
+              {currentStaffEmail()} · {role}
+            </span>
+            <button type="button" className="text-[11px] text-zinc-400 hover:text-zinc-900" onClick={onLogout}>
+              退出
+            </button>
           </div>
         </header>
 
@@ -145,6 +161,8 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
 
 function NotFoundRedirect() {
   const navigate = useNavigate();
-  useEffect(() => { navigate("/products", { replace: true }); }, [navigate]);
+  useEffect(() => {
+    navigate('/products', { replace: true });
+  }, [navigate]);
   return null;
 }

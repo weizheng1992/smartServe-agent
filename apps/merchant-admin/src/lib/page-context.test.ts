@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  clearSelection, getSelection, getSelectionLabels, setSelectionKind, subscribe, toggleKindId,
+  clearSelection,
+  getSelection,
+  getSelectionLabels,
+  setSelectionKind,
+  subscribe,
+  toggleKindId,
 } from './page-context';
 
 // page-context 是模块级单例:每例前清空互不污染
@@ -34,7 +39,10 @@ describe('page-context(类型化勾选广播库)', () => {
     expect(getSelection().order).toEqual(['A', 'B']);
     toggleKindId('order', 'A');
     expect(getSelection().order).toEqual(['B']);
-    setSelectionKind('order', Array.from({ length: 120 }, (_, i) => `O${i}`));
+    setSelectionKind(
+      'order',
+      Array.from({ length: 120 }, (_, i) => `O${i}`),
+    );
     expect(getSelection().order!.length).toBe(100);
   });
 

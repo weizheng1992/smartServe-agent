@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
 import { StaffInviteForm } from './components/staff-invite-form';
-import { StaffTable, type StaffRow } from './components/staff-table';
+import { type StaffRow, StaffTable } from './components/staff-table';
 
 // 员工管理:邀请(角色下拉动态)/ 三维筛选 / 改角色 / 停用启用。
 // 页面只做编排;表单/表格/筛选逻辑拆在同目录 components|filters 下。
@@ -14,7 +14,9 @@ export default function StaffPage() {
     setStaff((await api.staff.list()).staff || []);
     setRoles((await api.roles.list()).roles.map((r) => r.role));
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">

@@ -1,9 +1,9 @@
+import { ResultCard } from '@/components/ResultCard';
+import { api } from '@/lib/api';
+import { type SelectionMap, clearSelection, getSelection, getSelectionLabels, subscribe } from '@/lib/page-context';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
-import { ResultCard } from '@/components/ResultCard';
-import { api } from '@/lib/api';
-import { clearSelection, getSelection, getSelectionLabels, subscribe, type SelectionMap } from '@/lib/page-context';
 
 // 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由(选中数据
 // 由列表页经 localStorage 约定键上行 —— PageContext 19-D3)。
@@ -23,14 +23,7 @@ type ResultData = {
   [key: string]: unknown;
 };
 
-type AgentEvent =
-  | 'start'
-  | 'user'
-  | 'pending'
-  | 'result'
-  | 'clarify'
-  | 'unsupported'
-  | 'error';
+type AgentEvent = 'start' | 'user' | 'pending' | 'result' | 'clarify' | 'unsupported' | 'error';
 
 type AgentFrame = {
   id: number;
@@ -74,10 +67,14 @@ export function FloatingAgent({ route }: { route: string }) {
     try {
       const saved = JSON.parse(localStorage.getItem('merchant-admin.agent.history') || '[]');
       if (Array.isArray(saved) && saved.length) setFrames(saved);
-    } catch { /* 坏档忽略 */ }
+    } catch {
+      /* 坏档忽略 */
+    }
   }, []);
   useEffect(() => {
-    try { localStorage.setItem('merchant-admin.agent.history', JSON.stringify(frames.slice(-60))); } catch {}
+    try {
+      localStorage.setItem('merchant-admin.agent.history', JSON.stringify(frames.slice(-60)));
+    } catch {}
   }, [frames]);
   const askRef = useRef<(q?: string) => void>(() => {});
 
@@ -126,9 +123,11 @@ export function FloatingAgent({ route }: { route: string }) {
         ];
       });
     } catch (err) {
-      setFrames((prev) => prev
-        .filter((f) => f.id !== pendingId)
-        .concat({ id: pendingId + 10, event: 'error', data: { message: String(err) } }));
+      setFrames((prev) =>
+        prev
+          .filter((f) => f.id !== pendingId)
+          .concat({ id: pendingId + 10, event: 'error', data: { message: String(err) } }),
+      );
     }
     setBusy(false);
   }
@@ -164,7 +163,10 @@ export function FloatingAgent({ route }: { route: string }) {
       });
       setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, saved: true } : f)));
     } catch (err) {
-      setFrames((prev) => [...prev, { id: ++frameSeq, event: 'error', data: { message: `存报告失败:${String(err)}` } }]);
+      setFrames((prev) => [
+        ...prev,
+        { id: ++frameSeq, event: 'error', data: { message: `存报告失败:${String(err)}` } },
+      ]);
     }
   }
 
@@ -189,7 +191,11 @@ export function FloatingAgent({ route }: { route: string }) {
           数据分析助手
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => navigate('/board')}>
+          <button
+            type="button"
+            className="text-xs text-zinc-400 hover:text-zinc-900"
+            onClick={() => navigate('/board')}
+          >
             📌 看板
           </button>
           <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={newConversation}>
@@ -204,17 +210,19 @@ export function FloatingAgent({ route }: { route: string }) {
         <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
           上下文:{route}
         </span>
-        {(selMap.order?.length || selMap.spu?.length || selMap.customer?.length) ? (
+        {selMap.order?.length || selMap.spu?.length || selMap.customer?.length ? (
           <button
             type="button"
             onClick={() => clearSelection()}
             title="勾选会作为查询上下文,点击清除"
             className="rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700"
           >
-            已勾选 {(['order', 'spu', 'customer'] as const)
+            已勾选{' '}
+            {(['order', 'spu', 'customer'] as const)
               .filter((k) => (selMap[k]?.length || 0) > 0)
               .map((k) => `${SEL_KIND_LABEL[k]} ${selMap[k]!.length}`)
-              .join(' · ')} ✕
+              .join(' · ')}{' '}
+            ✕
           </button>
         ) : null}
       </div>
@@ -222,75 +230,81 @@ export function FloatingAgent({ route }: { route: string }) {
         {frames.length === 0 && (
           <div className="text-[11px] text-zinc-400">试试:本月销量 Top10 / 差评最多的 SKU / 会话量多少</div>
         )}
-        {frames.filter((f) => f.event !== 'start').map((f, i) => (
-          <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
-            {f.event === 'user' ? (
-              <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
-            ) : f.event === 'pending' ? (
-              <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-400">
-                正在解析问题并查询…
-              </div>
-            ) : f.event === 'clarify' ? (
-              <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm">
-                {String(f.data.question ?? '')}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {((f.data.options || []) as Array<{ label: string }>).map((o, j: number) => (
-                    <button
-                      type="button"
-                      key={j}
-                      className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
-                      onClick={() => { setQ(`按${o.label}`); }}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
+        {frames
+          .filter((f) => f.event !== 'start')
+          .map((f, i) => (
+            <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
+              {f.event === 'user' ? (
+                <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
+              ) : f.event === 'pending' ? (
+                <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-400">
+                  正在解析问题并查询…
                 </div>
-              </div>
-            ) : f.event === 'result' ? (
-              <>
-                <ResultCard data={f.data as ResultData} />
-                {(f.data as ResultData).summary ? (
-                  <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                    <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
-                    {String((f.data as ResultData).summary ?? '')}
+              ) : f.event === 'clarify' ? (
+                <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm">
+                  {String(f.data.question ?? '')}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {((f.data.options || []) as Array<{ label: string }>).map((o, j: number) => (
+                      <button
+                        type="button"
+                        key={j}
+                        className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
+                        onClick={() => {
+                          setQ(`按${o.label}`);
+                        }}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
                   </div>
-                ) : null}
-                {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
-                  <div className="mt-1.5 flex gap-2">
-                    <button
-                      type="button"
-                      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
-                      onClick={() => exportResultCsv(f.data as ResultData)}
-                    >
-                      导出 CSV
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
-                      title="钉到看板页定时重放刷新"
-                      onClick={() => pinToBoard(f.data as ResultData)}
-                    >
-                      📌 钉看板
-                    </button>
-                    <button
-                      type="button"
-                      disabled={f.saved}
-                      className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
-                      onClick={() => void saveToReport(f)}
-                    >
-                      {f.saved ? '已存入我的报告 ✓' : '存为报告'}
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="rounded-xl border border-zinc-200 bg-white p-3 text-sm">
-                {String(f.data.message ?? f.event)}
-                {f.data.caliber ? <div className="mt-1 text-[11px] text-zinc-400">口径:{String(f.data.caliber)}</div> : null}
-              </div>
-            )}
-          </div>
-        ))}
+                </div>
+              ) : f.event === 'result' ? (
+                <>
+                  <ResultCard data={f.data as ResultData} />
+                  {(f.data as ResultData).summary ? (
+                    <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                      <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
+                      {String((f.data as ResultData).summary ?? '')}
+                    </div>
+                  ) : null}
+                  {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
+                    <div className="mt-1.5 flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
+                        onClick={() => exportResultCsv(f.data as ResultData)}
+                      >
+                        导出 CSV
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
+                        title="钉到看板页定时重放刷新"
+                        onClick={() => pinToBoard(f.data as ResultData)}
+                      >
+                        📌 钉看板
+                      </button>
+                      <button
+                        type="button"
+                        disabled={f.saved}
+                        className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
+                        onClick={() => void saveToReport(f)}
+                      >
+                        {f.saved ? '已存入我的报告 ✓' : '存为报告'}
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-xl border border-zinc-200 bg-white p-3 text-sm">
+                  {String(f.data.message ?? f.event)}
+                  {f.data.caliber ? (
+                    <div className="mt-1 text-[11px] text-zinc-400">口径:{String(f.data.caliber)}</div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          ))}
         {busy && <div className="text-xs text-zinc-400">正在解析问题并查询…</div>}
       </div>
       <div className="flex shrink-0 gap-2 border-t border-zinc-100 p-3">

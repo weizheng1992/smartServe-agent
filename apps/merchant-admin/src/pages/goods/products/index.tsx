@@ -1,5 +1,5 @@
+import { type Spu, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
-import { api, type Spu } from '@/lib/api';
 import { SpuCreateForm } from './components/spu-create-form';
 import { SpuTable } from './components/spu-table';
 
@@ -12,7 +12,9 @@ export default function ProductsPage({ focusCode }: { focusCode?: string } = {})
   const load = useCallback(async () => {
     setSpus((await api.products.list()).spus || []);
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">

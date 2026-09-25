@@ -1,5 +1,5 @@
+import { type SkuStockRow, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
-import { api, type SkuStockRow } from '@/lib/api';
 import { SkuStockTable } from './components/sku-stock-table';
 
 // SKU 库存(独立库存视角页):跨 SPU 的 SKU 总表,低库存筛选 + 行内改价/改库存。
@@ -11,7 +11,9 @@ export default function SkusPage() {
   const load = useCallback(async () => {
     setSkus((await api.products.listAllSkus()).skus || []);
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">

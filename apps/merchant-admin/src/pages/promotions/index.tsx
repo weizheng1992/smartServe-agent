@@ -1,5 +1,5 @@
+import { type PromoEffect, type Promotion, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
-import { api, type PromoEffect, type Promotion } from '@/lib/api';
 import { EffectCards } from './components/effect-cards';
 import { PromoCreateForm } from './components/promo-form';
 import { PromoTable } from './components/promo-table';
@@ -19,7 +19,9 @@ export default function PromotionsPage() {
       setMsg(String(err));
     }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">

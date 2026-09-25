@@ -82,13 +82,9 @@ test.describe('商户运营台审计 (admin-readiness 04)', () => {
     // merchant_orders.total_amount 落 args.amount,商户不再盲批资金单)
     // 此前零自动化验证(code-review 2026-09-14 补钉):卡面金额必须等于
     // 快照值,严禁 ¥0.00。数据驱动:无带快照的 waiting 退款票时诚实 skip。
-    const res = await page.request.get(
-      '/api/admin/approvals?tenantId=aurora&status=waiting&actionType=processRefund',
-    );
+    const res = await page.request.get('/api/admin/approvals?tenantId=aurora&status=waiting&actionType=processRefund');
     const body = await res.json();
-    const refundTicket = (body.approvals || []).find(
-      (a: any) => typeof (a.actionPayload || {}).args?.amount === 'number',
-    );
+    const refundTicket = (body.approvals || []).find((a: any) => typeof a.actionPayload?.args?.amount === 'number');
     test.skip(!refundTicket, '无带金额快照的 waiting 退款工单(先经 /api/chat 实弹造票)');
     const expectedAmount = `¥${Number(refundTicket.actionPayload.args.amount).toFixed(2)}`;
 
@@ -130,13 +126,12 @@ test.describe('商户运营台审计 (admin-readiness 04)', () => {
     // 资金型 processRefund 终态 rejected;人工接管型 human_escalation 终态
     // resolved_by_human。以「商户台审计」自定义原因定位本次驳回的票。
     const resolved = (body.approvals || []).find((a: any) =>
-      ((a.actionPayload || {}).rejectionReason || '').includes('商户台审计'),
+      (a.actionPayload?.rejectionReason || '').includes('商户台审计'),
     );
     expect(resolved, '按驳回原因定位到本次驳回的工单').toBeTruthy();
-    const expectedStatus =
-      resolved.actionType === 'human_escalation' ? 'resolved_by_human' : 'rejected';
+    const expectedStatus = resolved.actionType === 'human_escalation' ? 'resolved_by_human' : 'rejected';
     expect(resolved.status).toBe(expectedStatus);
-    expect((resolved.actionPayload || {}).resolvedBy).toBe('merchant_operator');
+    expect(resolved.actionPayload?.resolvedBy).toBe('merchant_operator');
     await page.screenshot({ path: `${SHOT}/07_reject.png`, fullPage: false });
   });
 

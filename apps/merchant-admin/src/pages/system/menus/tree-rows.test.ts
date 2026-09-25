@@ -1,17 +1,23 @@
-import { describe, expect, it } from 'vitest';
 import type { MenuNode } from '@/lib/api';
+import { describe, expect, it } from 'vitest';
 import { flattenMenuTree, toggleCollapsed } from './tree-rows';
 
 const tree: MenuNode[] = [
   {
-    id: 'd1', name: '商品', menuType: 'directory', route: null, permCode: null,
+    id: 'd1',
+    name: '商品',
+    menuType: 'directory',
+    route: null,
+    permCode: null,
     children: [
       { id: 'm1', name: '商品列表', menuType: 'menu', route: '/products', permCode: null, children: [] },
       {
-        id: 'm2', name: 'SKU 库存', menuType: 'menu', route: '/skus', permCode: null,
-        children: [
-          { id: 'b1', name: '按钮', menuType: 'button', route: null, permCode: 'sku:x', children: [] },
-        ],
+        id: 'm2',
+        name: 'SKU 库存',
+        menuType: 'menu',
+        route: '/skus',
+        permCode: null,
+        children: [{ id: 'b1', name: '按钮', menuType: 'button', route: null, permCode: 'sku:x', children: [] }],
       },
     ],
   },
@@ -21,7 +27,10 @@ describe('flattenMenuTree', () => {
   it('全展开:深度优先平铺并带层级', () => {
     const rows = flattenMenuTree(tree, new Set());
     expect(rows.map((r) => [r.node.id, r.depth])).toEqual([
-      ['d1', 0], ['m1', 1], ['m2', 1], ['b1', 2],
+      ['d1', 0],
+      ['m1', 1],
+      ['m2', 1],
+      ['b1', 2],
     ]);
     expect(rows[0].hasChildren).toBe(true);
     expect(rows[1].hasChildren).toBe(false);

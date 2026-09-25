@@ -1,10 +1,17 @@
-import { describe, expect, it } from 'vitest';
 import type { SkuStockRow } from '@/lib/api';
+import { describe, expect, it } from 'vitest';
 import { filterSkuStock } from './filters';
 
 const row = (over: Partial<SkuStockRow>): SkuStockRow => ({
-  id: over.id || 'k1', sku_code: 'SKU-A-1', sku_title: '红色 42 码', spu_id: 's1',
-  spu_title: '越野跑鞋', price: 99, stock: 30, spec_attributes: null, ...over,
+  id: over.id || 'k1',
+  sku_code: 'SKU-A-1',
+  sku_title: '红色 42 码',
+  spu_id: 's1',
+  spu_title: '越野跑鞋',
+  price: 99,
+  stock: 30,
+  spec_attributes: null,
+  ...over,
 });
 
 const skus = [

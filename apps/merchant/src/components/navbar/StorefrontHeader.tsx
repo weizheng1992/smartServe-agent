@@ -208,10 +208,20 @@ export function StorefrontHeader({
                   {isCustomLoginOpen ? (
                     <form onSubmit={authMode === 'login' ? handleCustomLogin : handleRegister} className="space-y-2">
                       <div className="flex gap-1 text-[11px]">
-                        <button type="button" onClick={() => setAuthMode('login')}
-                          className={`flex-1 rounded px-2 py-1 ${authMode === 'login' ? 'bg-emerald-600 text-white font-bold' : 'bg-slate-100 text-slate-600'}`}>登录</button>
-                        <button type="button" onClick={() => setAuthMode('register')}
-                          className={`flex-1 rounded px-2 py-1 ${authMode === 'register' ? 'bg-emerald-600 text-white font-bold' : 'bg-slate-100 text-slate-600'}`}>注册</button>
+                        <button
+                          type="button"
+                          onClick={() => setAuthMode('login')}
+                          className={`flex-1 rounded px-2 py-1 ${authMode === 'login' ? 'bg-emerald-600 text-white font-bold' : 'bg-slate-100 text-slate-600'}`}
+                        >
+                          登录
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAuthMode('register')}
+                          className={`flex-1 rounded px-2 py-1 ${authMode === 'register' ? 'bg-emerald-600 text-white font-bold' : 'bg-slate-100 text-slate-600'}`}
+                        >
+                          注册
+                        </button>
                       </div>
                       {authMode === 'register' && (
                         <input

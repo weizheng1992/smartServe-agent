@@ -4,10 +4,18 @@ import { collectIds, toggleNode } from './perm-tree';
 
 const tree: MenuNode[] = [
   {
-    id: 'd1', name: '商品', menuType: 'directory', route: null, permCode: null,
+    id: 'd1',
+    name: '商品',
+    menuType: 'directory',
+    route: null,
+    permCode: null,
     children: [
       {
-        id: 'm1', name: '商品列表', menuType: 'menu', route: '/products', permCode: null,
+        id: 'm1',
+        name: '商品列表',
+        menuType: 'menu',
+        route: '/products',
+        permCode: null,
         children: [
           { id: 'b1', name: '商品编辑', menuType: 'button', route: null, permCode: 'prod:edit', children: [] },
         ],

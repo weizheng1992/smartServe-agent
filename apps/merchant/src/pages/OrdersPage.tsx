@@ -228,7 +228,10 @@ export default function OrdersPage() {
                         <div className="mr-3 text-right">
                           {Number(order.discountAmount || 0) > 0 && (
                             <div className="text-[11px] text-slate-400 leading-relaxed">
-                              原价 <span className="line-through">¥{Number(order.originalAmount ?? order.totalAmount).toFixed(2)}</span>
+                              原价{' '}
+                              <span className="line-through">
+                                ¥{Number(order.originalAmount ?? order.totalAmount).toFixed(2)}
+                              </span>
                               <span className="ml-1.5 font-medium text-rose-500">
                                 优惠 -¥{Number(order.discountAmount).toFixed(2)}
                               </span>

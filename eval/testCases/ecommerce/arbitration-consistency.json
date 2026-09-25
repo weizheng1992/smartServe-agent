@@ -1,14 +1,10 @@
 [
   {
     "description": "仲裁留痕一致性(实锤案例二)- 极简输入下槽位层(chat)与嵌入层(order_status)双分类跨族冲突,留痕 winner 必须与终局 intents[0] 同源(2026-09-10 工单01 仲裁留痕列)",
-    "prompts": [
-      "classifier"
-    ],
+    "prompts": ["classifier"],
     "vars": {
       "input": "我的订单",
-      "expectedIntents": [
-        "order_status"
-      ]
+      "expectedIntents": ["order_status"]
     },
     "assert": [
       {
@@ -23,14 +19,10 @@
   },
   {
     "description": "仲裁留痕一致性 - 语料泛查单口语走 Step 3 结构化 LLM 终局,留痕须记录全部层候选提议且 winner 与终局同源",
-    "prompts": [
-      "classifier"
-    ],
+    "prompts": ["classifier"],
     "vars": {
       "input": "看看我买了啥，列一下我的购买记录",
-      "expectedIntents": [
-        "order_query"
-      ]
+      "expectedIntents": ["order_query"]
     },
     "assert": [
       {
@@ -45,9 +37,7 @@
   },
   {
     "description": "锚点误吞获救(工单06)- 「买个东西怎么买」oos 锚句相似 1.000(判定4 必命中)但实为购买流程咨询:不得被 oos 罐头回复关会话,须 fallthrough 结构化精判改判(分类器实测判 shopping_guide/general_query,均非 oos;expectedIntents 列允许集,不断言单一标签)",
-    "prompts": [
-      "classifier"
-    ],
+    "prompts": ["classifier"],
     "vars": {
       "input": "买个东西怎么买",
       "expectedIntents": "[\"shopping_guide\", \"general_query\"]"

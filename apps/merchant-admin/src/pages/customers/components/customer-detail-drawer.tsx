@@ -1,8 +1,8 @@
+import { type Customer, type CustomerCoupon, api } from '@/lib/api';
+import { getSelection, setSelectionKind } from '@/lib/page-context';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
-import { api, type Customer, type CustomerCoupon } from '@/lib/api';
-import { getSelection, setSelectionKind } from '@/lib/page-context';
 
 interface AddressEntry {
   id?: string;
@@ -25,7 +25,11 @@ interface Props {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  PAID: '待发货', SHIPPED: '已发货', DELIVERED: '已送达', REFUNDED: '已退款', COMPLETED: '已完成',
+  PAID: '待发货',
+  SHIPPED: '已发货',
+  DELIVERED: '已送达',
+  REFUNDED: '已退款',
+  COMPLETED: '已完成',
 };
 
 /** 客户详情抽屉:基本信息 + 只读地址簿 + 关联优惠券 + 关联订单(跳转并勾选)。 */
@@ -43,17 +47,27 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
           const body = await res.json();
           if (alive) setOrders((body.orders || []).filter((o: any) => o.customer_id === customer.customer_id));
         }
-      } catch { /* 详情关联数据拉取失败不打断抽屉 */ }
+      } catch {
+        /* 详情关联数据拉取失败不打断抽屉 */
+      }
       try {
         const b = await api.customers.coupons(customer.customer_id);
         if (alive) setCouponList(b.coupons || []);
-      } catch { /* 同上 */ }
+      } catch {
+        /* 同上 */
+      }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [customer.customer_id]);
 
   const addresses: AddressEntry[] = (() => {
-    try { return JSON.parse(customer.addresses || '[]'); } catch { return []; }
+    try {
+      return JSON.parse(customer.addresses || '[]');
+    } catch {
+      return [];
+    }
   })();
 
   function openOrder(orderId: string) {
@@ -72,14 +86,21 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
         <div className="flex items-start justify-between">
           <div>
             <div className="text-base font-semibold">{customer.name}</div>
-            <div className="mt-0.5 text-[11px] text-zinc-400">{customer.customer_id} · {customer.phone}{customer.email ? ` · ${customer.email}` : ''}</div>
+            <div className="mt-0.5 text-[11px] text-zinc-400">
+              {customer.customer_id} · {customer.phone}
+              {customer.email ? ` · ${customer.email}` : ''}
+            </div>
             <div className="mt-1 flex gap-2 text-[11px]">
               <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500">{customer.member_level}</span>
-              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500">累计 ¥{customer.total_spent.toLocaleString()}</span>
+              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500">
+                累计 ¥{customer.total_spent.toLocaleString()}
+              </span>
               <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500">{customer.order_count} 单</span>
             </div>
           </div>
-          <Button size="sm" variant="ghost" onClick={onClose}>关闭</Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            关闭
+          </Button>
         </div>
 
         <Section title={`地址簿(${addresses.length})`}>
@@ -88,7 +109,9 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
             <div key={a.id || i} className="rounded-lg border border-zinc-100 px-3 py-2 text-xs">
               <div className="font-medium text-zinc-700">
                 {a.recipientName || '收件人'} · {a.phone || '-'}
-                {a.isDefault && <span className="ml-2 rounded bg-emerald-50 px-1 text-[10px] text-emerald-600">默认</span>}
+                {a.isDefault && (
+                  <span className="ml-2 rounded bg-emerald-50 px-1 text-[10px] text-emerald-600">默认</span>
+                )}
               </div>
               <div className="mt-0.5 text-zinc-500">{a.fullAddress || '—'}</div>
             </div>
@@ -98,8 +121,14 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
         <Section title={`关联优惠券(${coupons.length})`}>
           {coupons.length === 0 && <Empty text="暂无关联优惠券" />}
           {coupons.map((c) => (
-            <div key={c.id} className="flex items-center justify-between rounded-lg border border-zinc-100 px-3 py-2 text-xs">
-              <span>{c.name}<span className="ml-2 font-semibold text-rose-600">¥{c.value}</span></span>
+            <div
+              key={c.id}
+              className="flex items-center justify-between rounded-lg border border-zinc-100 px-3 py-2 text-xs"
+            >
+              <span>
+                {c.name}
+                <span className="ml-2 font-semibold text-rose-600">¥{c.value}</span>
+              </span>
               <span className={c.status === 'used' ? 'text-zinc-400' : 'text-emerald-600'}>
                 {c.status === 'used' ? `已使用(${c.usedOrderId || ''})` : '已领取'}
               </span>
@@ -110,13 +139,18 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
         <Section title={`关联订单(${orders.length})`}>
           {orders.length === 0 && <Empty text="名下暂无订单" />}
           {orders.map((o) => (
-            <div key={o.order_id} className="flex items-center justify-between rounded-lg border border-zinc-100 px-3 py-2 text-xs">
+            <div
+              key={o.order_id}
+              className="flex items-center justify-between rounded-lg border border-zinc-100 px-3 py-2 text-xs"
+            >
               <div>
                 <span className="font-mono text-zinc-700">{o.order_id}</span>
                 <span className="ml-2 text-zinc-500">{STATUS_LABEL[o.status] || o.status}</span>
                 <span className="ml-2">¥{o.total_amount}</span>
               </div>
-              <Button size="sm" variant="ghost" onClick={() => openOrder(o.order_id)}>在订单中查看</Button>
+              <Button size="sm" variant="ghost" onClick={() => openOrder(o.order_id)}>
+                在订单中查看
+              </Button>
             </div>
           ))}
         </Section>
@@ -135,5 +169,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function Empty({ text }: { text: string }) {
-  return <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-3 text-center text-[11px] text-zinc-400">{text}</div>;
+  return (
+    <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-3 text-center text-[11px] text-zinc-400">
+      {text}
+    </div>
+  );
 }

@@ -1,7 +1,7 @@
+import { type Spu, api } from '@/lib/api';
+import { setSelectionKind } from '@/lib/page-context';
 import { Fragment, useState } from 'react';
 import { Button } from 'ui';
-import { api, type Spu } from '@/lib/api';
-import { setSelectionKind } from '@/lib/page-context';
 import { SkuSubTable } from './sku-subtable';
 
 interface Props {
@@ -26,7 +26,11 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
   }
 
   async function saveEdit(id: string) {
-    const b = await api.products.update(id, { title: edit.title, price: Number(edit.price), stock: Number(edit.stock) });
+    const b = await api.products.update(id, {
+      title: edit.title,
+      price: Number(edit.price),
+      stock: Number(edit.stock),
+    });
     onMsg(b.success ? '✓ 已保存' : `失败:${b.message}`);
     setEditing(null);
     if (b.success) onChanged();
@@ -76,7 +80,11 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
                 </td>
                 <td className="px-4 py-2">
                   {editing === s.id ? (
-                    <input className="w-64 rounded border border-zinc-300 px-2 py-1" value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />
+                    <input
+                      className="w-64 rounded border border-zinc-300 px-2 py-1"
+                      value={edit.title}
+                      onChange={(e) => setEdit({ ...edit, title: e.target.value })}
+                    />
                   ) : (
                     s.title
                   )}
@@ -84,30 +92,57 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
                 <td className="px-4 py-2">{s.category}</td>
                 <td className="px-4 py-2">
                   {editing === s.id ? (
-                    <input className="w-20 rounded border border-zinc-300 px-2 py-1" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} />
+                    <input
+                      className="w-20 rounded border border-zinc-300 px-2 py-1"
+                      value={edit.price}
+                      onChange={(e) => setEdit({ ...edit, price: e.target.value })}
+                    />
                   ) : (
                     `¥${s.price}`
                   )}
                 </td>
                 <td className="px-4 py-2">
                   {editing === s.id ? (
-                    <input className="w-16 rounded border border-zinc-300 px-2 py-1" value={edit.stock} onChange={(e) => setEdit({ ...edit, stock: e.target.value })} />
+                    <input
+                      className="w-16 rounded border border-zinc-300 px-2 py-1"
+                      value={edit.stock}
+                      onChange={(e) => setEdit({ ...edit, stock: e.target.value })}
+                    />
                   ) : (
                     s.stock
                   )}
                 </td>
                 <td className="px-4 py-2">
-                  <span className={s.status === 'ON_SALE' ? 'text-emerald-600' : 'text-zinc-400'}>{s.status === 'ON_SALE' ? '在售' : '下架'}</span>
+                  <span className={s.status === 'ON_SALE' ? 'text-emerald-600' : 'text-zinc-400'}>
+                    {s.status === 'ON_SALE' ? '在售' : '下架'}
+                  </span>
                 </td>
                 <td className="px-4 py-2">
                   {editing === s.id ? (
-                    <Button size="sm" onClick={() => void saveEdit(s.id)}>保存</Button>
+                    <Button size="sm" onClick={() => void saveEdit(s.id)}>
+                      保存
+                    </Button>
                   ) : (
                     <div className="flex gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => { setEditing(s.id); setEdit({ title: s.title, price: String(s.price), stock: String(s.stock) }); }}>编辑</Button>
-                      <Button size="sm" variant="ghost" onClick={() => void toggleStatus(s)}>{s.status === 'ON_SALE' ? '下架' : '上架'}</Button>
-                      <Button size="sm" variant="ghost" onClick={() => toggleSkus(s)}>SKU</Button>
-                      <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void remove(s)}>删除</Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setEditing(s.id);
+                          setEdit({ title: s.title, price: String(s.price), stock: String(s.stock) });
+                        }}
+                      >
+                        编辑
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => void toggleStatus(s)}>
+                        {s.status === 'ON_SALE' ? '下架' : '上架'}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => toggleSkus(s)}>
+                        SKU
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void remove(s)}>
+                        删除
+                      </Button>
                     </div>
                   )}
                 </td>

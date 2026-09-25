@@ -40,9 +40,7 @@ describe('createFrameParser(增量)', () => {
   });
 
   it('字节级撕裂到达:跨块凑齐帧不丢不重', () => {
-    const got = framesOf([
-      'event: sta', 'rt\ndata: {"a"', ':1}\n\nevent: res', 'ult\ndata: {"b":2}\n\n',
-    ]);
+    const got = framesOf(['event: sta', 'rt\ndata: {"a"', ':1}\n\nevent: res', 'ult\ndata: {"b":2}\n\n']);
     expect(got).toEqual([
       { event: 'start', data: { a: 1 } },
       { event: 'result', data: { b: 2 } },

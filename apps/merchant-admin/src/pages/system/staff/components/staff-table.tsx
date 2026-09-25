@@ -1,7 +1,7 @@
+import { api } from '@/lib/api';
 import { useState } from 'react';
 import { Button } from 'ui';
-import { api } from '@/lib/api';
-import { filterStaff, type StaffFilter, type StaffStatusFilter } from '../filters';
+import { type StaffFilter, type StaffStatusFilter, filterStaff } from '../filters';
 import { ROLE_LABEL } from './role-label';
 
 export interface StaffRow {
@@ -49,14 +49,32 @@ export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
           value={filter.query}
           onChange={(e) => setFilter({ ...filter, query: e.target.value })}
         />
-        <select className="rounded-lg border border-zinc-300 px-2 py-1.5" value={filter.role} onChange={(e) => setFilter({ ...filter, role: e.target.value })}>
+        <select
+          className="rounded-lg border border-zinc-300 px-2 py-1.5"
+          value={filter.role}
+          onChange={(e) => setFilter({ ...filter, role: e.target.value })}
+        >
           <option value="ALL">全部角色</option>
-          {roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+          {roles.map((r) => (
+            <option key={r} value={r}>
+              {roleLabel(r)}
+            </option>
+          ))}
         </select>
-        <select className="rounded-lg border border-zinc-300 px-2 py-1.5" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value as StaffStatusFilter })}>
-          {STATUS_FILTERS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        <select
+          className="rounded-lg border border-zinc-300 px-2 py-1.5"
+          value={filter.status}
+          onChange={(e) => setFilter({ ...filter, status: e.target.value as StaffStatusFilter })}
+        >
+          {STATUS_FILTERS.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
+            </option>
+          ))}
         </select>
-        <span className="text-[11px] text-zinc-400">{rows.length} / {staff.length} 人</span>
+        <span className="text-[11px] text-zinc-400">
+          {rows.length} / {staff.length} 人
+        </span>
       </div>
       <table className="w-full text-[13px]">
         <thead>
@@ -69,24 +87,39 @@ export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
         </thead>
         <tbody>
           {rows.length === 0 && (
-            <tr><td colSpan={4} className="px-4 py-6 text-center text-xs text-zinc-400">无匹配员工(诚实空)</td></tr>
+            <tr>
+              <td colSpan={4} className="px-4 py-6 text-center text-xs text-zinc-400">
+                无匹配员工(诚实空)
+              </td>
+            </tr>
           )}
           {rows.map((s) => (
             <tr key={s.id} className="border-b border-zinc-50">
-              <td className="px-4 py-2">{s.displayName}<span className="ml-2 text-[11px] text-zinc-400">{s.email}</span></td>
+              <td className="px-4 py-2">
+                {s.displayName}
+                <span className="ml-2 text-[11px] text-zinc-400">{s.email}</span>
+              </td>
               <td className="px-4 py-2">
                 <select
                   className="rounded-lg border border-zinc-300 px-2 py-1 text-xs"
                   defaultValue={s.role}
                   onChange={(e) => void patch(s.id, { role: e.target.value })}
                 >
-                  {[...new Set([...roles, s.role])].map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                  {[...new Set([...roles, s.role])].map((r) => (
+                    <option key={r} value={r}>
+                      {roleLabel(r)}
+                    </option>
+                  ))}
                 </select>
               </td>
               <td className="px-4 py-2">{s.status === 'enabled' ? '启用' : '停用'}</td>
               <td className="px-4 py-2">
                 {s.role !== 'finance_owner' && (
-                  <Button size="sm" variant="ghost" onClick={() => void patch(s.id, { status: s.status === 'enabled' ? 'disabled' : 'enabled' })}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void patch(s.id, { status: s.status === 'enabled' ? 'disabled' : 'enabled' })}
+                  >
                     {s.status === 'enabled' ? '停用' : '启用'}
                   </Button>
                 )}

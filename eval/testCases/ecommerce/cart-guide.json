@@ -6,9 +6,7 @@
       "input": "帮我把这双透气跑鞋加入购物车",
       "expectedIntents": ["cart_manage"]
     },
-    "assert": [
-      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" }
-    ]
+    "assert": [{ "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" }]
   },
   {
     "description": "导购技能快轨 - 商品推荐请求命中 skill_fast_track",
@@ -17,8 +15,6 @@
       "input": "推荐几款适合夏天穿的透气跑鞋",
       "expectedIntents": ["shopping_guide"]
     },
-    "assert": [
-      { "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" }
-    ]
+    "assert": [{ "type": "javascript", "value": "file://scorers/intentF1.scorer.ts" }]
   }
 ]

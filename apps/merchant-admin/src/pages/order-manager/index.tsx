@@ -1,19 +1,22 @@
-import { ApprovalContextDrawer } from "ui";
-import { useWorkbench, useWorkbenchState, WorkbenchProvider } from "./workbench";
-import { OrdersTab } from './components/orders-tab';
+import { ApprovalContextDrawer } from 'ui';
 import { ApprovalsTab } from './components/approvals-tab';
 import { LiveDeskTab } from './components/live-desk-tab';
-import { SpiLogsTab } from './components/spi-logs-tab';
-import { ShipDialog } from './components/ship-dialog';
-import { RejectDialog } from './components/reject-dialog';
+import { OrdersTab } from './components/orders-tab';
 import { PayloadDialog } from './components/payload-dialog';
+import { RejectDialog } from './components/reject-dialog';
+import { ShipDialog } from './components/ship-dialog';
+import { SpiLogsTab } from './components/spi-logs-tab';
+import { WorkbenchProvider, useWorkbench, useWorkbenchState } from './workbench';
 
 /** 工作台范围(与菜单一一对应,各渲染各的):
  *  orders=订单列表;approvals=纯待办审核;live-desk=在线聊天+待办审核;spi-logs=审计流水。 */
 export type WorkbenchScope = 'orders' | 'approvals' | 'live-desk' | 'spi-logs';
 
 const PRIMARY_TAB: Record<WorkbenchScope, string> = {
-  orders: 'orders', approvals: 'approvals', 'live-desk': 'live_desk', 'spi-logs': 'spi_logs',
+  orders: 'orders',
+  approvals: 'approvals',
+  'live-desk': 'live_desk',
+  'spi-logs': 'spi_logs',
 };
 
 export default function OrderWorkbench({ scope = 'orders' }: { scope?: WorkbenchScope }) {

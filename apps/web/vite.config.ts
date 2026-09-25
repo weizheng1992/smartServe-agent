@@ -20,10 +20,7 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/ws': {
-        target: (process.env.E2E_GATEWAY_TARGET ?? 'http://localhost:4000').replace(
-          'http',
-          'ws',
-        ),
+        target: (process.env.E2E_GATEWAY_TARGET ?? 'http://localhost:4000').replace('http', 'ws'),
         ws: true,
       },
     },

@@ -1,14 +1,10 @@
 [
   {
     "description": "事故回归(实锤案例三,2026-09-09 坏了循环)- 无图无单号的模糊损坏词由嵌入层定责 refund 终局,不得再进 planner 深规划空转循环",
-    "prompts": [
-      "classifier"
-    ],
+    "prompts": ["classifier"],
     "vars": {
       "input": "我的东西坏了",
-      "expectedIntents": [
-        "refund"
-      ]
+      "expectedIntents": ["refund"]
     },
     "assert": [
       {

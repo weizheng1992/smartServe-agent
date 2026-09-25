@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { filterStaff, type StaffLike } from './filters';
+import { type StaffLike, filterStaff } from './filters';
 
 const s = (over: Partial<StaffLike>): StaffLike => ({
-  id: over.id || 'staff_x', email: over.email || 'x@aurora', displayName: over.displayName || '小明',
-  role: over.role || 'sales_viewer', status: over.status || 'enabled', ...over,
+  id: over.id || 'staff_x',
+  email: over.email || 'x@aurora',
+  displayName: over.displayName || '小明',
+  role: over.role || 'sales_viewer',
+  status: over.status || 'enabled',
+  ...over,
 });
 
 const staff = [
@@ -26,7 +30,9 @@ describe('filterStaff', () => {
   it('按角色/状态过滤,三维可叠加', () => {
     expect(filterStaff(staff, { query: '', role: 'sales_viewer', status: 'ALL' }).map((x) => x.id)).toEqual(['2']);
     expect(filterStaff(staff, { query: '', role: 'ALL', status: 'disabled' }).map((x) => x.id)).toEqual(['3']);
-    expect(filterStaff(staff, { query: '小', role: 'sales_viewer', status: 'enabled' }).map((x) => x.id)).toEqual(['2']);
+    expect(filterStaff(staff, { query: '小', role: 'sales_viewer', status: 'enabled' }).map((x) => x.id)).toEqual([
+      '2',
+    ]);
   });
 
   it('无匹配诚实空', () => {

@@ -7,7 +7,11 @@
 export type ScopeType = 'all' | 'spu';
 
 /** 范围展示文案;spuTitles 供「指定商品」回显商品标题(查不到回退编码)。 */
-export function scopeLabel(scopeType: string | null, scopeValue: string | null, spuTitles: Record<string, string> = {}): string {
+export function scopeLabel(
+  scopeType: string | null,
+  scopeValue: string | null,
+  spuTitles: Record<string, string> = {},
+): string {
   if (!scopeType || scopeType === 'all') return '全部商品';
   if (scopeType === 'spu') {
     const title = scopeValue ? spuTitles[scopeValue] : undefined;

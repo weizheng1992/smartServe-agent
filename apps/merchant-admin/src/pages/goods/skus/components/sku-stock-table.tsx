@@ -1,7 +1,7 @@
+import { type SkuStockRow, api } from '@/lib/api';
 import { useState } from 'react';
 import { Button } from 'ui';
-import { api, type SkuStockRow } from '@/lib/api';
-import { filterSkuStock, type StockFilter } from '../filters';
+import { type StockFilter, filterSkuStock } from '../filters';
 
 interface Props {
   skus: SkuStockRow[];
@@ -70,7 +70,11 @@ export function SkuStockTable({ skus, onMsg, onChanged }: Props) {
         </thead>
         <tbody>
           {rows.length === 0 && (
-            <tr><td colSpan={6} className="px-4 py-6 text-center text-xs text-zinc-400">暂无匹配 SKU(诚实空)</td></tr>
+            <tr>
+              <td colSpan={6} className="px-4 py-6 text-center text-xs text-zinc-400">
+                暂无匹配 SKU(诚实空)
+              </td>
+            </tr>
           )}
           {rows.map((k) => (
             <tr key={k.id} className="border-b border-zinc-50">
@@ -79,23 +83,41 @@ export function SkuStockTable({ skus, onMsg, onChanged }: Props) {
               <td className="px-4 py-2">{k.spu_title}</td>
               <td className="px-4 py-2">
                 {editing?.id === k.id ? (
-                  <input className="w-20 rounded border border-zinc-300 px-2 py-1" placeholder="价格" value={editing.price} onChange={(e) => setEditing({ ...editing, price: e.target.value })} />
+                  <input
+                    className="w-20 rounded border border-zinc-300 px-2 py-1"
+                    placeholder="价格"
+                    value={editing.price}
+                    onChange={(e) => setEditing({ ...editing, price: e.target.value })}
+                  />
                 ) : (
                   `¥${k.price}`
                 )}
               </td>
               <td className="px-4 py-2">
                 {editing?.id === k.id ? (
-                  <input className="w-16 rounded border border-zinc-300 px-2 py-1" placeholder="库存" value={editing.stock} onChange={(e) => setEditing({ ...editing, stock: e.target.value })} />
+                  <input
+                    className="w-16 rounded border border-zinc-300 px-2 py-1"
+                    placeholder="库存"
+                    value={editing.stock}
+                    onChange={(e) => setEditing({ ...editing, stock: e.target.value })}
+                  />
                 ) : (
                   <span className={k.stock < 50 ? 'font-semibold text-rose-600' : ''}>{k.stock}</span>
                 )}
               </td>
               <td className="px-4 py-2">
                 {editing?.id === k.id ? (
-                  <Button size="sm" onClick={() => void save()}>保存</Button>
+                  <Button size="sm" onClick={() => void save()}>
+                    保存
+                  </Button>
                 ) : (
-                  <Button size="sm" variant="ghost" onClick={() => setEditing({ id: k.id, price: String(k.price), stock: String(k.stock) })}>改价/库存</Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditing({ id: k.id, price: String(k.price), stock: String(k.stock) })}
+                  >
+                    改价/库存
+                  </Button>
                 )}
               </td>
             </tr>

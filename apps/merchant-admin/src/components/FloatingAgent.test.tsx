@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as pageContext from '@/lib/page-context';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FloatingAgent } from './FloatingAgent';
-import * as pageContext from '@/lib/page-context';
 
 // 纯单测:api 全桩,不碰真实网关
 vi.mock('@/lib/api', () => ({
@@ -38,14 +38,21 @@ beforeEach(() => {
   localStorage.clear();
   pageContext.clearSelection();
   askMock.mockResolvedValue([
-    { event: 'result', data: { metric: 'volume', unit: '件', caliber: '口径A', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] } },
+    {
+      event: 'result',
+      data: { metric: 'volume', unit: '件', caliber: '口径A', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] },
+    },
   ]);
 });
 
 describe('FloatingAgent(对话面板交互)', () => {
   it('发送后用户气泡即时上屏 + 思考占位(api 未返回时)', () => {
     let resolve!: (v: unknown) => void;
-    askMock.mockReturnValue(new Promise((r) => { resolve = r; }));
+    askMock.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
     renderAgent();
     openPanel();
     submit('品类GMV排行');
@@ -73,9 +80,10 @@ describe('FloatingAgent(对话面板交互)', () => {
   });
 
   it('历史持久化:渲染时恢复 localStorage 中的帧', () => {
-    localStorage.setItem('merchant-admin.agent.history', JSON.stringify([
-      { id: 1, event: 'user', data: { message: '昨天的提问' } },
-    ]));
+    localStorage.setItem(
+      'merchant-admin.agent.history',
+      JSON.stringify([{ id: 1, event: 'user', data: { message: '昨天的提问' } }]),
+    );
     renderAgent();
     openPanel();
     expect(screen.getByText('昨天的提问')).toBeInTheDocument();
@@ -83,9 +91,10 @@ describe('FloatingAgent(对话面板交互)', () => {
 
   it('新对话:清空面板与历史,并轮转 sessionId', async () => {
     localStorage.setItem('merchant-admin.session', 's-old');
-    localStorage.setItem('merchant-admin.agent.history', JSON.stringify([
-      { id: 1, event: 'user', data: { message: '旧对话' } },
-    ]));
+    localStorage.setItem(
+      'merchant-admin.agent.history',
+      JSON.stringify([{ id: 1, event: 'user', data: { message: '旧对话' } }]),
+    );
     renderAgent();
     openPanel();
     expect(screen.getByText('旧对话')).toBeInTheDocument();

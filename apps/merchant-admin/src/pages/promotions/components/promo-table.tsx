@@ -1,8 +1,8 @@
+import { type Promotion, type Spu, api } from '@/lib/api';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { api, type Promotion, type Spu } from '@/lib/api';
-import { RedeemPanel } from './redeem-panel';
 import { GrantPanel } from './grant-panel';
+import { RedeemPanel } from './redeem-panel';
 import { scopeLabel } from './scope';
 
 const TYPE_LABEL: Record<string, string> = {
@@ -30,7 +30,9 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
   const [granting, setGranting] = useState<Promotion | null>(null);
   const [spus, setSpus] = useState<Spu[]>([]);
 
-  useEffect(() => { void api.products.list().then((b) => setSpus(b.spus || [])); }, []);
+  useEffect(() => {
+    void api.products.list().then((b) => setSpus(b.spus || []));
+  }, []);
   const spuTitles = Object.fromEntries(spus.map((s) => [s.spu_code, s.title]));
 
   async function saveEdit(p: Promotion, name: string) {
@@ -59,14 +61,20 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
         <RedeemPanel
           promo={redeemPromo}
           onCancel={() => setRedeem(null)}
-          onDone={(m) => { onMsg(m); onChanged(); }}
+          onDone={(m) => {
+            onMsg(m);
+            onChanged();
+          }}
         />
       )}
       {granting && (
         <GrantPanel
           promoName={granting.name}
           promoId={granting.id}
-          onCancel={() => { setGranting(null); onChanged(); }}
+          onCancel={() => {
+            setGranting(null);
+            onChanged();
+          }}
           onDone={onMsg}
         />
       )}
@@ -85,14 +93,24 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
           </thead>
           <tbody>
             {promotions.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-xs text-zinc-400">暂无活动(诚实空)</td></tr>
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-xs text-zinc-400">
+                  暂无活动(诚实空)
+                </td>
+              </tr>
             )}
             {promotions.map((p) => (
               <tr key={p.id} className="border-b border-zinc-50">
                 <td className="px-4 py-2">
                   {editingId === p.id ? (
-                    <input className="w-32 rounded border border-zinc-300 px-2 py-1" defaultValue={p.name}
-                      onBlur={(e) => { void saveEdit(p, e.target.value); setEditingId(null); }} />
+                    <input
+                      className="w-32 rounded border border-zinc-300 px-2 py-1"
+                      defaultValue={p.name}
+                      onBlur={(e) => {
+                        void saveEdit(p, e.target.value);
+                        setEditingId(null);
+                      }}
+                    />
                   ) : (
                     p.name
                   )}
@@ -101,20 +119,30 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
                 <td className="px-4 py-2">{promoValueLabel(p)}</td>
                 <td className="px-4 py-2 text-zinc-500">{scopeLabel(p.scopeType, p.scopeValue, spuTitles)}</td>
                 <td className="px-4 py-2">
-                  <span className={p.status === 'active' ? 'text-emerald-600' : 'text-zinc-400'}>{p.status === 'active' ? '进行中' : '已停用'}</span>
+                  <span className={p.status === 'active' ? 'text-emerald-600' : 'text-zinc-400'}>
+                    {p.status === 'active' ? '进行中' : '已停用'}
+                  </span>
                 </td>
                 <td className="px-4 py-2">
                   <div className="flex gap-1">
                     <Button size="sm" variant="ghost" onClick={() => setEditingId(editingId === p.id ? null : p.id)}>
                       {editingId === p.id ? '取消' : '编辑'}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => void toggle(p)}>{p.status === 'active' ? '停用' : '启用'}</Button>
-                    <Button size="sm" variant="ghost" onClick={() => void removePromo(p)}>删除</Button>
+                    <Button size="sm" variant="ghost" onClick={() => void toggle(p)}>
+                      {p.status === 'active' ? '停用' : '启用'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void removePromo(p)}>
+                      删除
+                    </Button>
                     {p.status === 'active' && (
-                      <Button size="sm" variant="ghost" onClick={() => setRedeem({ promoId: p.id, promoName: p.name })}>核销</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setRedeem({ promoId: p.id, promoName: p.name })}>
+                        核销
+                      </Button>
                     )}
                     {p.status === 'active' && p.promoType === 'coupon' && (
-                      <Button size="sm" variant="ghost" onClick={() => setGranting(p)}>发券</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setGranting(p)}>
+                        发券
+                      </Button>
                     )}
                   </div>
                 </td>

@@ -1,7 +1,7 @@
+import { useCurrentUser } from '@/context/UserContext';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useNavigate, useParams } from 'react-router';
-import { useCurrentUser } from '@/context/UserContext';
 import type { ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button } from 'ui';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
@@ -37,8 +37,9 @@ export default function ProductDetailPage() {
       .then((b) => setCouponPromos((b.promotions || []).filter((p: any) => p.promoType === 'coupon')))
       .catch(() => {});
   }, [(user as any).id]);
-  useEffect(() => { refreshCoupons(); }, [refreshCoupons]);
-
+  useEffect(() => {
+    refreshCoupons();
+  }, [refreshCoupons]);
 
   useEffect(() => {
     if (!productId) return;
@@ -243,21 +244,31 @@ export default function ProductDetailPage() {
                       const status = couponStatus.get(p.id);
                       if (status === 'used') {
                         return (
-                          <span key={p.id} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-400 line-through">
+                          <span
+                            key={p.id}
+                            className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-400 line-through"
+                          >
                             已使用 ¥{p.value} 券({p.name})
                           </span>
                         );
                       }
                       if (status === 'claimed') {
                         return (
-                          <span key={p.id} className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-400">
+                          <span
+                            key={p.id}
+                            className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-zinc-400"
+                          >
                             ✓ 已领取 ¥{p.value} 券({p.name})
                           </span>
                         );
                       }
                       return (
-                        <button type="button" key={p.id} onClick={() => void claimCoupon(p.id)}
-                          className="rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-rose-600 hover:border-rose-500">
+                        <button
+                          type="button"
+                          key={p.id}
+                          onClick={() => void claimCoupon(p.id)}
+                          className="rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-rose-600 hover:border-rose-500"
+                        >
                           🎫 领 ¥{p.value} 券({p.name})
                         </button>
                       );

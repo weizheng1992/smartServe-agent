@@ -1,7 +1,7 @@
 // 网关 API 客户端(0013 收口:身份 = Bearer JWT,后端不再信任 x-user-id 头)。
 // 老板可经 /staff/switch 换签任意员工 token 体验各角色视角;原始老板凭证
 // 单独保存在 BOSS_KEY,切换动作始终以老板身份发起(非老板无权签发)。
-import { createFrameParser, parseSseFrames, type SseFrame } from '@/lib/sse';
+import { type SseFrame, createFrameParser, parseSseFrames } from '@/lib/sse';
 
 const TOKEN_KEY = 'merchant-admin.token';
 const STAFF_KEY = 'merchant-admin.staff';
@@ -27,7 +27,7 @@ export function clearSession() {
 /** 是否持有老板凭证(顶栏身份切换器仅对老板可见)。 */
 export function hasBossSession(): boolean {
   try {
-    return !!(JSON.parse(localStorage.getItem(BOSS_KEY) || 'null')?.token);
+    return !!JSON.parse(localStorage.getItem(BOSS_KEY) || 'null')?.token;
   } catch {
     return false;
   }
@@ -159,7 +159,11 @@ export const api = {
     if (!switchAs.token) throw new Error('缺少老板凭证,无法切换');
     const res = await fetch('/api/admin/analytics/staff/switch', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-tenant-id': 'aurora', Authorization: `Bearer ${switchAs.token}` },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'aurora',
+        Authorization: `Bearer ${switchAs.token}`,
+      },
       body: JSON.stringify({ staffId: email }),
     });
     const body = await res.json();
@@ -213,8 +217,10 @@ export const api = {
 
   /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录)。 */
   staff: {
-    list: async (): Promise<{ success: boolean; staff: Array<{ id: string; email: string; displayName: string; role: string; status: string }> }> =>
-      fetchJson('/api/admin/analytics/staff'),
+    list: async (): Promise<{
+      success: boolean;
+      staff: Array<{ id: string; email: string; displayName: string; role: string; status: string }>;
+    }> => fetchJson('/api/admin/analytics/staff'),
     invite: async (p: { email: string; displayName: string; role: string }) =>
       fetchJson('/api/admin/analytics/staff', { method: 'POST', body: JSON.stringify(p) }),
     update: async (id: string, patch: Partial<{ role: string; status: string; displayName: string }>) =>
@@ -223,10 +229,18 @@ export const api = {
 
   /** 菜单管理 CRUD(目录/菜单/按钮 + 权限点;系统菜单护栏在服务端)。 */
   menuAdmin: {
-    create: async (p: { name: string; menuType: string; route?: string; permCode?: string; parentId?: string | null; sort?: number }) =>
-      fetchJson('/api/admin/analytics/menus', { method: 'POST', body: JSON.stringify(p) }),
-    update: async (id: string, patch: Partial<{ name: string; route: string; permCode: string; sort: number; status: string }>) =>
-      fetchJson(`/api/admin/analytics/menus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    create: async (p: {
+      name: string;
+      menuType: string;
+      route?: string;
+      permCode?: string;
+      parentId?: string | null;
+      sort?: number;
+    }) => fetchJson('/api/admin/analytics/menus', { method: 'POST', body: JSON.stringify(p) }),
+    update: async (
+      id: string,
+      patch: Partial<{ name: string; route: string; permCode: string; sort: number; status: string }>,
+    ) => fetchJson(`/api/admin/analytics/menus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: async (id: string) => fetchJson(`/api/admin/analytics/menus/${id}`, { method: 'DELETE' }),
   },
 
@@ -246,9 +260,23 @@ export const api = {
     list: async () => (await req('/api/admin/analytics/reports')).json(),
     create: async () => (await req('/api/admin/analytics/reports', { method: 'POST', body: '{}' })).json(),
     csv: async (id: string) => (await req(`/api/admin/analytics/reports/${id}/csv`)).json(),
-    detail: async (id: string): Promise<{ success: boolean; id: string; title: string; chart: string | null; rows: Record<string, Record<string, unknown>[]> }> =>
-      (await req(`/api/admin/analytics/reports/${id}`)).json(),
-    saveFromResult: async (p: { question: string; metric: string; unit: string; caliber: string; rows: Record<string, unknown>[]; chart?: string }) =>
+    detail: async (
+      id: string,
+    ): Promise<{
+      success: boolean;
+      id: string;
+      title: string;
+      chart: string | null;
+      rows: Record<string, Record<string, unknown>[]>;
+    }> => (await req(`/api/admin/analytics/reports/${id}`)).json(),
+    saveFromResult: async (p: {
+      question: string;
+      metric: string;
+      unit: string;
+      caliber: string;
+      rows: Record<string, unknown>[];
+      chart?: string;
+    }) =>
       (
         await req('/api/admin/analytics/reports/from-result', {
           method: 'POST',
@@ -279,11 +307,20 @@ export const api = {
   promotions: {
     list: async (): Promise<{ success: boolean; promotions: Promotion[]; effect: PromoEffect }> =>
       fetchJson('/api/admin/analytics/promotions'),
-    create: async (p: { name: string; promoType: string; threshold?: number; value: number; scopeType?: string; scopeValue?: string }) =>
-      fetchJson('/api/admin/analytics/promotions', { method: 'POST', body: JSON.stringify(p) }),
+    create: async (p: {
+      name: string;
+      promoType: string;
+      threshold?: number;
+      value: number;
+      scopeType?: string;
+      scopeValue?: string;
+    }) => fetchJson('/api/admin/analytics/promotions', { method: 'POST', body: JSON.stringify(p) }),
     /** 商家向指定客户发券(仅券型/在售/同人同活动一次,服务端护栏)。 */
     grant: async (id: string, customerId: string) =>
-      fetchJson(`/api/admin/analytics/promotions/${id}/grant`, { method: 'POST', body: JSON.stringify({ customerId }) }),
+      fetchJson(`/api/admin/analytics/promotions/${id}/grant`, {
+        method: 'POST',
+        body: JSON.stringify({ customerId }),
+      }),
     update: async (id: string, patch: { name: string; value: number }) =>
       fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     setStatus: async (id: string, status: string) =>

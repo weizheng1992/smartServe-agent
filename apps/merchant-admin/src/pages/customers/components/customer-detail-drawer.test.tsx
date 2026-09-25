@@ -1,11 +1,11 @@
 import '@testing-library/jest-dom/vitest';
-import { beforeEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { setSession } from '@/lib/api';
+import { getSelection } from '@/lib/page-context';
+import { GATEWAY, gatewayUp, installLiveFetch, login } from '@/test/live-api';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { setSession } from '@/lib/api';
-import { GATEWAY, gatewayUp, installLiveFetch, login } from '@/test/live-api';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CustomerDetailDrawer } from './customer-detail-drawer';
-import { getSelection } from '@/lib/page-context';
 
 // 集成测试(真实网关 + 真实库;不 mock 数据):全只读 —— 抽屉仅拉取展示。
 const d = gatewayUp ? describe : describe.skip;

@@ -1,10 +1,15 @@
-import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input } from "ui";
-import { useWorkbench } from "../workbench";
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input } from 'ui';
+import { useWorkbench } from '../workbench';
 
 /** 订单一键发货弹窗(承运商 + 运单号;提交后锁定收货地址)。 */
 export function ShipDialog() {
   const {
-    shippingOrderId, setShippingOrderId, carrierInput, setCarrierInput, trackingNumberInput, setTrackingNumberInput,
+    shippingOrderId,
+    setShippingOrderId,
+    carrierInput,
+    setCarrierInput,
+    trackingNumberInput,
+    setTrackingNumberInput,
     handleShipOrder,
   } = useWorkbench();
 

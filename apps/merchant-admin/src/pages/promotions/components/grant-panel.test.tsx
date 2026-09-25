@@ -1,8 +1,8 @@
 import '@testing-library/jest-dom/vitest';
-import { beforeEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { api, setSession } from '@/lib/api';
 import { GATEWAY, gatewayUp, installLiveFetch, login } from '@/test/live-api';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GrantPanel } from './grant-panel';
 
 // 集成测试(真实网关 + 真实库;不 mock 数据):本用例只读 —— 发放动作的

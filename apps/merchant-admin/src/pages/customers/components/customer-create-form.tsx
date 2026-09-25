@@ -1,6 +1,6 @@
+import { api } from '@/lib/api';
 import { useState } from 'react';
 import { Button } from 'ui';
-import { api } from '@/lib/api';
 
 interface Props {
   onMsg: (m: string) => void;
@@ -27,9 +27,21 @@ export function CustomerCreateForm({ onMsg, onCreated }: Props) {
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <div className="text-sm font-medium">新增客户</div>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        <input className="w-32 rounded-lg border border-zinc-300 px-3 py-2" placeholder="姓名" value={newCust.name} onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} />
-        <input className="w-40 rounded-lg border border-zinc-300 px-3 py-2" placeholder="电话" value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} />
-        <Button size="sm" disabled={!newCust.name || !newCust.phone} onClick={() => void create()}>新增</Button>
+        <input
+          className="w-32 rounded-lg border border-zinc-300 px-3 py-2"
+          placeholder="姓名"
+          value={newCust.name}
+          onChange={(e) => setNewCust({ ...newCust, name: e.target.value })}
+        />
+        <input
+          className="w-40 rounded-lg border border-zinc-300 px-3 py-2"
+          placeholder="电话"
+          value={newCust.phone}
+          onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })}
+        />
+        <Button size="sm" disabled={!newCust.name || !newCust.phone} onClick={() => void create()}>
+          新增
+        </Button>
       </div>
     </div>
   );

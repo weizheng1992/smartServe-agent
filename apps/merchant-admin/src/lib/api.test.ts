@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
-import { beforeEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { api, authHeaders, clearSession, hasBossSession, setSession } from '@/lib/api';
 import { gatewayUp, installLiveFetch, login } from '@/test/live-api';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 集成测试(真实网关 + 真实库;不 mock 数据)。authHeaders/会话存取为纯
 // localStorage 逻辑,不依赖网络;其余走真实登录与真实业务端点。

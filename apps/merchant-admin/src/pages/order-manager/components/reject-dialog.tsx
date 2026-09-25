@@ -1,5 +1,5 @@
-import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Textarea } from "ui";
-import { useWorkbench } from "../workbench";
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Textarea } from 'ui';
+import { useWorkbench } from '../workbench';
 
 const REJECT_TEMPLATES = [
   '物流已签收，驳回退款诉求',
@@ -11,8 +11,13 @@ const REJECT_TEMPLATES = [
 /** 驳回原因弹窗:直传显式原因(工单 04 修复 state 闭包吞文案问题)。 */
 export function RejectDialog() {
   const {
-    rejectingApprovalId, setRejectingApprovalId, rejectReasonInput, setRejectReasonInput,
-    submittingActionId, setRejectionReasons, handleApprovalAction,
+    rejectingApprovalId,
+    setRejectingApprovalId,
+    rejectReasonInput,
+    setRejectReasonInput,
+    submittingActionId,
+    setRejectionReasons,
+    handleApprovalAction,
   } = useWorkbench();
 
   return (

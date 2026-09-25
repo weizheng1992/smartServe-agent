@@ -12,7 +12,9 @@ const ALL_CATEGORY = '全部';
 export default function StorefrontPage() {
   const { user } = useCurrentUser();
   const [products, setProducts] = useState<ThirdPartyProduct[]>([]);
-  const [activePromos, setActivePromos] = useState<Array<{ id: string; name: string; promoType: string; threshold: number | null; value: number }>>([]);
+  const [activePromos, setActivePromos] = useState<
+    Array<{ id: string; name: string; promoType: string; threshold: number | null; value: number }>
+  >([]);
   const [promoPrices, setPromoPrices] = useState<Record<string, { promoPrice: number; promoName: string | null }>>({});
   const [ordersCount, setOrdersCount] = useState(0);
   const [addressCount, setAddressCount] = useState(0);
@@ -43,13 +45,18 @@ export default function StorefrontPage() {
           const promoRes = await fetch('/api/store/promotions/prices', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(list.slice(0, 60).map((p: any) => ({ productId: p.product_id || p.id, price: Number(p.price) || 0 }))),
+            body: JSON.stringify(
+              list.slice(0, 60).map((p: any) => ({ productId: p.product_id || p.id, price: Number(p.price) || 0 })),
+            ),
           });
           const promoJson = await promoRes.json();
           const map: Record<string, { promoPrice: number; promoName: string | null }> = {};
-          for (const it of promoJson.prices || []) map[it.productId] = { promoPrice: it.promoPrice, promoName: it.promoName };
+          for (const it of promoJson.prices || [])
+            map[it.productId] = { promoPrice: it.promoPrice, promoName: it.promoName };
           setPromoPrices(map);
-        } catch { /* 促销价失败按原价展示 */ }
+        } catch {
+          /* 促销价失败按原价展示 */
+        }
       }
     } catch (err) {
       console.error('Failed to load products:', err);
@@ -63,7 +70,9 @@ export default function StorefrontPage() {
       const res = await fetch('/api/store/promotions');
       const body = await res.json();
       setActivePromos(body.promotions || []);
-    } catch { /* 活动横幅失败按无活动展示 */ }
+    } catch {
+      /* 活动横幅失败按无活动展示 */
+    }
   };
 
   // 统计角标数据
@@ -146,14 +155,17 @@ export default function StorefrontPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-
       {activePromos.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-2 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-700">
           <span className="font-semibold">🎁 进行中活动:</span>
           {activePromos.map((p) => (
             <span key={p.id} className="rounded-full bg-white px-2.5 py-1">
               {p.name}
-              {p.promoType === 'full_reduction' && p.threshold != null ? `(满 ¥${p.threshold} 减 ¥${p.value})` : p.promoType === 'discount' ? `(${p.value / 10} 折)` : `(¥${p.value} 券)`}
+              {p.promoType === 'full_reduction' && p.threshold != null
+                ? `(满 ¥${p.threshold} 减 ¥${p.value})`
+                : p.promoType === 'discount'
+                  ? `(${p.value / 10} 折)`
+                  : `(¥${p.value} 券)`}
             </span>
           ))}
         </div>
@@ -311,7 +323,10 @@ export default function StorefrontPage() {
                       <span className="text-[10px] text-slate-400">起售价</span>
                       <div className="flex items-baseline gap-2">
                         <span className="text-lg font-extrabold text-emerald-600">
-                          ¥{(promoPrices[String((product as any).productId)]?.promoPrice ?? Number(product.price)).toFixed(2)}
+                          ¥
+                          {(
+                            promoPrices[String((product as any).productId)]?.promoPrice ?? Number(product.price)
+                          ).toFixed(2)}
                         </span>
                         {promoPrices[String((product as any).productId)]?.promoName && (
                           <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-600">

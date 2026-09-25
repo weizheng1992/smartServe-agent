@@ -14,9 +14,7 @@ export default function (output: string) {
       parsed = JSON.parse(match[0]);
     }
 
-    const intents: string[] = (parsed.intents || [])
-      .map((i: any) => i && i.intent)
-      .filter(Boolean);
+    const intents: string[] = (parsed.intents || []).map((i: any) => i && i.intent).filter(Boolean);
     const text = String(parsed.output || '');
 
     if (intents.includes('out_of_scope')) {

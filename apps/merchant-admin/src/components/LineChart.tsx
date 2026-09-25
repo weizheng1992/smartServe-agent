@@ -27,7 +27,9 @@ export function LineChart({ points, unit }: { points: LinePoint[]; unit?: string
       {gridVals.map((v, i) => (
         <g key={i}>
           <line x1={pad.l} x2={w - pad.r} y1={y(v)} y2={y(v)} stroke="#f4f4f5" />
-          <text x={4} y={y(v) + 3} fontSize="9" fill="#a1a1aa">{Math.round(v).toLocaleString()}</text>
+          <text x={4} y={y(v) + 3} fontSize="9" fill="#a1a1aa">
+            {Math.round(v).toLocaleString()}
+          </text>
         </g>
       ))}
       <path d={area} fill="rgba(24,24,27,0.06)" />
@@ -43,7 +45,9 @@ export function LineChart({ points, unit }: { points: LinePoint[]; unit?: string
       ))}
       {points.map((p, i) =>
         i % labelEvery === 0 ? (
-          <text key={i} x={x(i)} y={h - 8} fontSize="9" fill="#a1a1aa" textAnchor="middle">{p.label}</text>
+          <text key={i} x={x(i)} y={h - 8} fontSize="9" fill="#a1a1aa" textAnchor="middle">
+            {p.label}
+          </text>
         ) : null,
       )}
       <title>{`趋势(${unit || ''}):最低 ${Math.min(...values).toLocaleString()} · 最高 ${max.toLocaleString()}`}</title>

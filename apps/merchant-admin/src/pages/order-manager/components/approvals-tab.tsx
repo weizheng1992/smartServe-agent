@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router';
 import {
   ApprovalRiskBadge,
   Badge,
@@ -8,19 +9,27 @@ import {
   diagnoseApprovalTrigger,
   getApprovalCategory,
   getApprovalContextData,
-} from "ui";
-import { useNavigate } from "react-router";
-import { useWorkbench } from "../workbench";
+} from 'ui';
+import { useWorkbench } from '../workbench';
 
 /** Tab 2: 待办审核中心 (HITL) —— AI 拦截的高危操作人工核决队列。 */
 export function ApprovalsTab() {
   const {
-    approvals, approvalStatusFilter, setApprovalStatusFilter, approvalActionFilter, setApprovalActionFilter, approvalSearchQuery, setApprovalSearchQuery,
-    submittingActionId, setRejectionReasons,
-    fetchDashboardData, handleApprovalAction,
-    setInspectingApproval, setRejectingApprovalId, setRejectReasonInput,
+    approvals,
+    approvalStatusFilter,
+    setApprovalStatusFilter,
+    approvalActionFilter,
+    setApprovalActionFilter,
+    approvalSearchQuery,
+    setApprovalSearchQuery,
+    submittingActionId,
+    setRejectionReasons,
+    fetchDashboardData,
+    handleApprovalAction,
+    setInspectingApproval,
+    setRejectingApprovalId,
+    setRejectReasonInput,
   } = useWorkbench();
-
 
   const filteredList = approvals.filter((item) => {
     if (approvalStatusFilter !== 'all' && item.status !== approvalStatusFilter) {
@@ -131,9 +140,7 @@ export function ApprovalsTab() {
           <div className="p-12 text-center space-y-3">
             <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
             <h4 className="text-sm font-bold text-slate-800">
-              {approvalStatusFilter === 'waiting'
-                ? '当前大盘一片绿灯，暂无待审核任务'
-                : '未找到符合筛选条件的审核记录'}
+              {approvalStatusFilter === 'waiting' ? '当前大盘一片绿灯，暂无待审核任务' : '未找到符合筛选条件的审核记录'}
             </h4>
             <p className="text-xs text-slate-400">
               {approvalStatusFilter === 'waiting'
@@ -173,7 +180,9 @@ function ApprovalRow({ approval }: { approval: any }) {
   const {
     submittingActionId,
     handleApprovalAction,
-    setInspectingApproval, setRejectingApprovalId, setRejectReasonInput,
+    setInspectingApproval,
+    setRejectingApprovalId,
+    setRejectReasonInput,
     setActiveThreadId,
   } = useWorkbench();
   const navigate = useNavigate();
@@ -207,19 +216,20 @@ function ApprovalRow({ approval }: { approval: any }) {
         </div>
       </td>
 
-      <td className="p-3.5"><ApprovalParams approval={approval} /></td>
+      <td className="p-3.5">
+        <ApprovalParams approval={approval} />
+      </td>
 
       <td className="p-3.5">
         <div className="font-medium text-slate-900">{approval.userId || '顾客'}</div>
-        <div
-          className="text-[10px] text-slate-400 font-mono truncate max-w-[130px]"
-          title={approval.threadId}
-        >
+        <div className="text-[10px] text-slate-400 font-mono truncate max-w-[130px]" title={approval.threadId}>
           {approval.threadId}
         </div>
       </td>
 
-      <td className="p-3.5"><ApprovalStatusBadge status={approval.status} reason={approval.reason} /></td>
+      <td className="p-3.5">
+        <ApprovalStatusBadge status={approval.status} reason={approval.reason} />
+      </td>
 
       <td className="p-3.5 text-right">
         <div className="flex items-center justify-end gap-1.5">
@@ -284,9 +294,7 @@ function ApprovalParams({ approval }: { approval: any }) {
         <div className="font-bold text-rose-600">
           ¥{ctx.refundAmount ? Number(ctx.refundAmount).toFixed(2) : '0.00'}
         </div>
-        <div className="text-[11px] text-slate-500 font-mono">
-          单号: {ctx.orderId || '未提供'}
-        </div>
+        <div className="text-[11px] text-slate-500 font-mono">单号: {ctx.orderId || '未提供'}</div>
       </div>
     );
   }
@@ -305,15 +313,10 @@ function ApprovalParams({ approval }: { approval: any }) {
   if (ctx.category === 'human') {
     return (
       <div className="space-y-0.5 max-w-xs">
-        <div
-          className="font-medium text-slate-800 line-clamp-1"
-          title={ctx.userInput || ctx.reason || ''}
-        >
+        <div className="font-medium text-slate-800 line-clamp-1" title={ctx.userInput || ctx.reason || ''}>
           诉求: {ctx.userInput || ctx.reason || '转接人工客服'}
         </div>
-        <div className="text-[11px] text-amber-600">
-          来源: {ctx.triggerSource || 'AI 对话智能升级'}
-        </div>
+        <div className="text-[11px] text-amber-600">来源: {ctx.triggerSource || 'AI 对话智能升级'}</div>
       </div>
     );
   }
@@ -342,7 +345,7 @@ function ApprovalStatusBadge({ status, reason }: { status: string; reason?: stri
     <Badge
       variant="outline"
       className={`${badge.cls} font-bold w-fit ${badge.pulse ? 'flex items-center gap-1' : ''}`}
-      title={status === 'rejected' ? (reason || '') : undefined}
+      title={status === 'rejected' ? reason || '' : undefined}
     >
       {badge.pulse && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
       {badge.text}

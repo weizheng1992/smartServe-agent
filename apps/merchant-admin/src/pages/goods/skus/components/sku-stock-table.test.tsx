@@ -1,12 +1,30 @@
 import '@testing-library/jest-dom/vitest';
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
 import type { SkuStockRow } from '@/lib/api';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { SkuStockTable } from './sku-stock-table';
 
 const skus: SkuStockRow[] = [
-  { id: 'k1', sku_code: 'SKU-A-1', sku_title: '红 42', spu_id: 's1', spu_title: '越野跑鞋', price: 99, stock: 3, spec_attributes: null },
-  { id: 'k2', sku_code: 'SKU-A-2', sku_title: '蓝 43', spu_id: 's1', spu_title: '越野跑鞋', price: 99, stock: 80, spec_attributes: null },
+  {
+    id: 'k1',
+    sku_code: 'SKU-A-1',
+    sku_title: '红 42',
+    spu_id: 's1',
+    spu_title: '越野跑鞋',
+    price: 99,
+    stock: 3,
+    spec_attributes: null,
+  },
+  {
+    id: 'k2',
+    sku_code: 'SKU-A-2',
+    sku_title: '蓝 43',
+    spu_id: 's1',
+    spu_title: '越野跑鞋',
+    price: 99,
+    stock: 80,
+    spec_attributes: null,
+  },
 ];
 
 describe('SkuStockTable', () => {

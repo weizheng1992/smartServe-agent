@@ -1,6 +1,6 @@
+import { type MenuNode, api } from '@/lib/api';
 import { Fragment, useState } from 'react';
 import { Button } from 'ui';
-import { api, type MenuNode } from '@/lib/api';
 import { flattenMenuTree, toggleCollapsed } from '../tree-rows';
 
 interface Props {
@@ -58,10 +58,16 @@ export function MenuTable({ menus, onMsg, onChanged }: Props) {
                 </td>
                 <td className="px-4 py-2 text-zinc-500">{TYPE_BADGE[node.menuType] || node.menuType}</td>
                 <td className="px-4 py-2 text-zinc-500">
-                  {node.permCode ? <code className="rounded bg-zinc-100 px-1 text-[11px]">{node.permCode}</code> : node.route || '—'}
+                  {node.permCode ? (
+                    <code className="rounded bg-zinc-100 px-1 text-[11px]">{node.permCode}</code>
+                  ) : (
+                    node.route || '—'
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right">
-                  <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void remove(node)}>删除</Button>
+                  <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void remove(node)}>
+                    删除
+                  </Button>
                 </td>
               </tr>
             </Fragment>

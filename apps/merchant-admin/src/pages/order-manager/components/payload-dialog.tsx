@@ -1,5 +1,5 @@
-import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "ui";
-import { useWorkbench } from "../workbench";
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from 'ui';
+import { useWorkbench } from '../workbench';
 
 /** SPI 调用结果 Payload 查看弹窗(复制 JSON)。 */
 export function PayloadDialog() {

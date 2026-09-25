@@ -1,6 +1,6 @@
+import { type MenuNode, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { api, type MenuNode } from '@/lib/api';
 import { RoleAssignPanel } from './components/role-assign-panel';
 import { RoleCreateForm } from './components/role-create-form';
 
@@ -27,7 +27,9 @@ export default function RolesPage() {
     // 分配权限点(老板/管理员角色自带 role:assign;也可经菜单管理勾给其他角色)
     setCanAssign((m.perms || []).includes('role:assign'));
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const boss = canAssign;
 
@@ -76,7 +78,10 @@ export default function RolesPage() {
           role={assigning}
           tree={tree}
           onSaved={setMsg}
-          onCancel={() => { setAssigning(null); void load(); }}
+          onCancel={() => {
+            setAssigning(null);
+            void load();
+          }}
         />
       )}
 

@@ -7,11 +7,15 @@ export type SelectionMap = Partial<Record<SelectionKind, string[]>>;
 
 let current: SelectionMap = {};
 // kind → (id → 人话标签):商品标题/客户名,供图表标题等人话呈现
-let labels: Partial<Record<SelectionKind, Record<string, string>>> = {};
+const labels: Partial<Record<SelectionKind, Record<string, string>>> = {};
 const listeners = new Set<(s: SelectionMap) => void>();
 
 // 旧契约残留一次性清除(迁移 2026-09-22)
-try { localStorage.removeItem('merchant-admin.selection'); } catch { /* 存储不可用忽略 */ }
+try {
+  localStorage.removeItem('merchant-admin.selection');
+} catch {
+  /* 存储不可用忽略 */
+}
 
 export function getSelection(): SelectionMap {
   return current;
@@ -51,7 +55,9 @@ export function clearSelection(): void {
 export function subscribe(fn: (s: SelectionMap) => void): () => void {
   listeners.add(fn);
   fn(current);
-  return () => { listeners.delete(fn); };
+  return () => {
+    listeners.delete(fn);
+  };
 }
 
 function emit(): void {

@@ -1,6 +1,6 @@
+import { type MenuNode, api } from '@/lib/api';
 import { useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { api, type MenuNode } from '@/lib/api';
 import { PermTree } from './perm-tree';
 
 interface Props {
@@ -19,7 +19,9 @@ export function RoleAssignPanel({ role, tree, onSaved, onCancel }: Props) {
     void api.roles.menusOf(role).then((detail) => {
       if (alive) setSel(new Set(detail.menuIds));
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [role]);
 
   async function save() {
@@ -38,8 +40,12 @@ export function RoleAssignPanel({ role, tree, onSaved, onCancel }: Props) {
         <PermTree nodes={tree} selected={sel} onChange={setSel} />
       </div>
       <div className="mt-3 flex items-center gap-2">
-        <Button size="sm" disabled={sel.size === 0} onClick={() => void save()}>保存分配</Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>取消</Button>
+        <Button size="sm" disabled={sel.size === 0} onClick={() => void save()}>
+          保存分配
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          取消
+        </Button>
       </div>
     </div>
   );

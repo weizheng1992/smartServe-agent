@@ -17,11 +17,20 @@ const loginViaApi = async (request: any) => {
   return body.data.token as string;
 };
 
-const CAPSULES = ['本月销量 Top10', '卖得最差的商品', '差评最多的 SKU', '近 30 天退款率', '售后工单概况', '客服负载概况'];
+const CAPSULES = [
+  '本月销量 Top10',
+  '卖得最差的商品',
+  '差评最多的 SKU',
+  '近 30 天退款率',
+  '售后工单概况',
+  '客服负载概况',
+];
 
 test.describe('data agent 全链路', () => {
   let token: string;
-  test.beforeAll(async ({ request }) => { token = await loginViaApi(request); });
+  test.beforeAll(async ({ request }) => {
+    token = await loginViaApi(request);
+  });
   test.beforeEach(async ({ page }) => {
     // 0013:身份 = JWT;预置老板会话(含 boss 凭证,顶栏身份切换器才可见)
     await page.addInitScript((t: string) => {
@@ -39,7 +48,10 @@ test.describe('data agent 全链路', () => {
     await expect(nav.getByText('数据分析', { exact: true })).toBeVisible();
     await expect(nav.getByText('我的报告', { exact: true })).toBeVisible();
     // 切换到仓储 → 菜单收敛(优惠活动消失)
-    await page.locator('header select').selectOption({ label: /仓储/.test('') ? '' : undefined } as never).catch(() => {});
+    await page
+      .locator('header select')
+      .selectOption({ label: /仓储/.test('') ? '' : undefined } as never)
+      .catch(() => {});
     const options = page.locator('header select option');
     const texts = (await options.allTextContents()).join('|');
     expect(texts).toContain('仓储');
@@ -50,9 +62,7 @@ test.describe('data agent 全链路', () => {
       await page.goto('/analytics');
       await page.getByRole('button', { name: capsule }).first().click();
       // 任一可接受反馈:表格卡 / 口径注记 / 诚实空 / 反问 —— 全非静默
-      await expect(
-        page.locator('text=口径:').first(),
-      ).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('text=口径:').first()).toBeVisible({ timeout: 30_000 });
     });
   }
 
