@@ -380,6 +380,25 @@ async def delete_thread(thread_id: str, user_id: str) -> str:
     return "deleted"
 
 
+def _utc_iso(raw: str | None) -> str:
+    """TEXT 列 messages.timestamp 统一写 UTC 带偏移(2026-09-25 收口)。
+
+    此前默认写 naive 本地墙钟,与引擎行(UTC 带偏移)混排成两种格式 —— 字符串
+    比较无意义,曾致时间线/记忆窗口「答在问上」(排序锚已改 created_at,本列
+    仅剩展示/导出消费,格式统一免得下一处比较重蹈)。调用方传入的 naive 值按
+    本地墙钟换算(兼容旧约定),不可解析原样透传,缺省取当前 UTC。
+    """
+    if not raw:
+        return _dt.datetime.now(_dt.UTC).isoformat()
+    try:
+        parsed = _dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return raw
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed.astimezone(_dt.UTC).isoformat()
+
+
 async def append_message(payload: dict) -> dict:
     """镜像 ConversationRepository.appendMessage(含线程自愈与 operator 角色落库)。"""
     thread_id = payload["threadId"]
@@ -396,7 +415,7 @@ async def append_message(payload: dict) -> dict:
                 ).bindparams(tid=thread_id, uid=payload.get("userId"), bid=business_id)
             )
         msg_id = payload.get("id") or str(uuid.uuid4())
-        timestamp = payload.get("timestamp") or _dt.datetime.now().isoformat()
+        timestamp = _utc_iso(payload.get("timestamp"))
         await session.execute(
             text(
                 "INSERT INTO messages (id, thread_id, business_id, role, content, cards, operator_info, image_urls, timestamp) "

@@ -440,6 +440,58 @@ class TestConversationTimelineChronologicalOrder:
         # 真实时序:用户问(早 2 分钟)在前、客服答在后;文本字符串序会倒置这对
         assert roles == ["user", "assistant"]
 
+    async def test_append_message_writes_utc_aware_timestamp(self, contract_fixtures):
+        """写入格式收口(2026-09-25):网关行 TEXT 列 timestamp 统一 UTC 带偏移,
+        与引擎行同格式 —— 混排 naive 本地曾致字符串序「答在问上」(排序锚虽已
+        改 created_at,展示/导出消费仍吃本列,格式统一免得下一处比较重蹈)。"""
+        import datetime as dt
+
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        from gateway_py.conversation_repo import append_message
+
+        thread_id = "thread_append_ts_format"
+        await append_message(
+            {
+                "threadId": thread_id,
+                "businessId": "nike",
+                "userId": "CUST-TS-FORMAT",
+                "role": "user",
+                "content": "格式收口探针",
+            }
+        )
+        await append_message(
+            {
+                "threadId": thread_id,
+                "businessId": "nike",
+                "userId": "CUST-TS-FORMAT",
+                "role": "assistant",
+                "content": "naive 传入按本地墙钟换算",
+                # 刻意 naive(DTZ001 豁免):被测对象就是 naive 入参的换算
+                "timestamp": dt.datetime(2026, 9, 25, 17, 58, 20).isoformat(),  # noqa: DTZ001
+            }
+        )
+        async with get_session() as session:
+            rows = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT role, timestamp FROM messages WHERE thread_id = :tid ORDER BY created_at, id"
+                        ).bindparams(tid=thread_id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        assert len(rows) == 2
+        for row in rows:
+            parsed = dt.datetime.fromisoformat(row["timestamp"])
+            assert parsed.tzinfo is not None, f"{row['role']} 行仍写 naive 时间戳: {row['timestamp']}"
+            assert parsed.utcoffset() == dt.timedelta(0), f"{row['role']} 行须为 UTC: {row['timestamp']}"
+        # naive 17:58 本地(宿主 UTC+8)→ 09:58 UTC
+        assert rows[1]["timestamp"].startswith("2026-09-25T09:58:20"), rows[1]["timestamp"]
+
 
 class TestStoreCartRead:
     """商城购物车只读端点(2026-09-15 单账本收口):聊天侧入车在引擎账本,
