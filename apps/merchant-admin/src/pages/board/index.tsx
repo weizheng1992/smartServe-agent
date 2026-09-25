@@ -3,11 +3,11 @@
 // 权限/闭集/口径全复用对话管线,零新后端,不碰 SQL(08-D1 同源纪律)。
 // 刷新策略:60s 轮询 + 页面不可见时暂停 + 手动立即刷新。
 
+import { ResultCard } from '@/components/ResultCard';
+import { api } from '@/lib/api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
-import { ResultCard } from '@/components/ResultCard';
-import { api } from '@/lib/api';
 
 type Pin = { id: string; question: string; route: string; pinnedAt: string };
 type ReplayState = { frames: any[] | null; error: string | null; at: string | null };
@@ -15,7 +15,11 @@ type ReplayState = { frames: any[] | null; error: string | null; at: string | nu
 const REFRESH_MS = 60_000;
 
 function loadPins(): Pin[] {
-  try { return JSON.parse(localStorage.getItem('merchant-admin.board') || '[]'); } catch { return []; }
+  try {
+    return JSON.parse(localStorage.getItem('merchant-admin.board') || '[]');
+  } catch {
+    return [];
+  }
 }
 
 function sessionId(): string {
@@ -37,24 +41,31 @@ export default function BoardPage() {
   const replay = useCallback(async (list: Pin[]) => {
     setRefreshing(true);
     const sid = sessionId();
-    await Promise.all(list.map(async (pin) => {
-      try {
-        const frames = await api.ask(pin.question, { route: pin.route, selection: [], sessionId: sid });
-        setStates((prev) => ({ ...prev, [pin.id]: { frames, error: null, at: new Date().toLocaleTimeString() } }));
-      } catch (err) {
-        setStates((prev) => ({ ...prev, [pin.id]: { frames: null, error: String(err), at: new Date().toLocaleTimeString() } }));
-      }
-    }));
+    await Promise.all(
+      list.map(async (pin) => {
+        try {
+          const frames = await api.ask(pin.question, { route: pin.route, selection: [], sessionId: sid });
+          setStates((prev) => ({ ...prev, [pin.id]: { frames, error: null, at: new Date().toLocaleTimeString() } }));
+        } catch (err) {
+          setStates((prev) => ({
+            ...prev,
+            [pin.id]: { frames: null, error: String(err), at: new Date().toLocaleTimeString() },
+          }));
+        }
+      }),
+    );
     setRefreshing(false);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 挂载时只 replay 一次,轮询走 loadPins()
   useEffect(() => {
     void replay(pins);
     timer.current = window.setInterval(() => {
       if (!document.hidden) void replay(loadPins());
     }, REFRESH_MS);
-    return () => { if (timer.current) window.clearInterval(timer.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      if (timer.current) window.clearInterval(timer.current);
+    };
   }, []);
 
   // 大屏模式:浏览器全屏 + 网格铺开(看板挂壁/投屏场景)
@@ -86,8 +97,12 @@ export default function BoardPage() {
         </div>
         <div className="flex items-center gap-2">
           {refreshing && <span className="text-[11px] text-zinc-400">刷新中…</span>}
-          <Button size="sm" variant="outline" onClick={() => void replay(loadPins())}>立即刷新</Button>
-          <Button size="sm" variant="outline" onClick={toggleBigScreen}>{bigScreen ? '退出大屏' : '⛶ 大屏'}</Button>
+          <Button size="sm" variant="outline" onClick={() => void replay(loadPins())}>
+            立即刷新
+          </Button>
+          <Button size="sm" variant="outline" onClick={toggleBigScreen}>
+            {bigScreen ? '退出大屏' : '⛶ 大屏'}
+          </Button>
         </div>
       </div>
 
@@ -108,7 +123,9 @@ export default function BoardPage() {
                 <div className="text-sm font-medium">{pin.question}</div>
                 <div className="flex items-center gap-2 text-[11px] text-zinc-400">
                   {st.at && <span>刷新于 {st.at}</span>}
-                  <button type="button" className="hover:text-zinc-900" onClick={() => removePin(pin.id)}>移除</button>
+                  <button type="button" className="hover:text-zinc-900" onClick={() => removePin(pin.id)}>
+                    移除
+                  </button>
                 </div>
               </div>
               {st.error && <div className="text-xs text-red-500">刷新失败:{st.error}</div>}
