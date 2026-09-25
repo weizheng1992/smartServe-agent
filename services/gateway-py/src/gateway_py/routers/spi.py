@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from engine_py.approvals import ApprovalGatekeeper
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -10,7 +12,14 @@ from .. import conversation_repo, hmac_signer
 
 router = APIRouter(prefix="/api/v1/spi")
 
-_VALID_API_KEYS = {"test_spi_key", "master_platform_key"}
+# SPI 静态 API-Key 集:env 优先(SPI_API_KEYS,逗号分隔),缺省回落既有两键保持
+# 行为不变 —— 硬编码密钥从源码轮换到部署面的口子(2026-09-26 夜审后项)。
+# key_{tenant}/secret_{tenant} 派生形与 HMAC 签名通道不受此集影响。
+_VALID_API_KEYS = {
+    _k.strip()
+    for _k in (os.environ.get("SPI_API_KEYS") or "test_spi_key,master_platform_key").split(",")
+    if _k.strip()
+}
 
 
 async def _authenticate(request: Request, api_key: str | None, tenant_id: str) -> None:
