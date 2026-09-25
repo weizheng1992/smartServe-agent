@@ -203,6 +203,18 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     return outcome
 
 
+# 折线指令的作用面 = 趋势族(随时间的线才有折线语义);单行统计卡/逐笔
+# 列表吃了 line 只会落到前端「数据点不足」降级,不如在后端就不认
+_TREND_LINE_METRICS = frozenset({"gmv_trend", "volume_trend", "orders_trend", "customer_spend_trend"})
+
+
+def _effective_chart(intent, result) -> str | None:
+    """图型裁决:用户指令优先,但 line 仅对趋势族生效;缺省随指标语义。"""
+    if intent.chart_hint == "line":
+        return "line" if intent.metric in _TREND_LINE_METRICS else (result.chart or None)
+    return intent.chart_hint or result.chart
+
+
 def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict:
     from .tools_registry_bridge import metric_semantic_registry
 
@@ -216,7 +228,7 @@ def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict
         "unit": result.unit,
         "caliber": result.caliber,
         # 用户图表指令(chart_hint)优先,缺省由指标语义自动推断(趋势→折线)
-        "chart": intent.chart_hint or result.chart,
+        "chart": _effective_chart(intent, result),
         "summary": _quick_summary(result, intent),
         "rows": result.rows,
         "cards": cards,

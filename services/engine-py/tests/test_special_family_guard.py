@@ -198,3 +198,52 @@ class TestMonthlyTrendRouting:
         compiled = engine.compile(StructuredQueryIntent(metric="volume_trend"))
         assert compiled.sql.rstrip().endswith("LIMIT 50")
         assert "date_trunc" not in compiled.sql
+
+
+class TestQuickSummaryShape:
+    """速览读数错位回归(实弹:活动效果总览单行卡被做峰谷,单位错标):"""
+
+    def test_single_row_stats_card_gets_no_summary(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent, QueryResult
+        from engine_py.analytics.quick_summary import quick_summary
+
+        class _R:
+            rows = [{"核销订单数": 2, "核销GMV": 2997.0, "优惠总额": 300.0}]
+            metric = "promo_effect"
+            unit = "单"
+            caliber = "x"
+            chart = None
+
+        assert quick_summary(_R(), StructuredQueryIntent(metric="promo_effect", chart_hint="line")) is None
+
+    def test_list_summary_still_works(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent, QueryResult
+        from engine_py.analytics.quick_summary import quick_summary
+
+        class _R:
+            rows = [{"productId": "A", "metricScore": 5}, {"productId": "B", "metricScore": 3}]
+            metric = "category_gmv_top"
+            unit = "元"
+            caliber = "x"
+            chart = None
+
+        s = quick_summary(_R(), StructuredQueryIntent(metric="category_gmv_top"))
+        assert "榜首" in s
+
+
+class TestChartHintScope:
+    """折线指令只对趋势族生效(实弹:单行统计卡吃 line → 前端诚实降级打扰用户):"""
+
+    def test_line_hint_ignored_for_stats_card(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.graph import _effective_chart
+
+        intent = StructuredQueryIntent(metric="promo_effect", chart_hint="line")
+        assert _effective_chart(intent, type("R", (), {"chart": None})()) is None
+
+    def test_line_hint_kept_for_trend(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.graph import _effective_chart
+
+        intent = StructuredQueryIntent(metric="gmv_trend", chart_hint="line")
+        assert _effective_chart(intent, type("R", (), {"chart": "line"})()) == "line"
