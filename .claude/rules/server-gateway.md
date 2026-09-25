@@ -5,7 +5,7 @@ paths: ["services/gateway-py/**/*"]
 
 # 服务端多租户网关与实时协同规范 (Server Gateway)
 
-本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（现有 `/api/auth/me`、`POST /api/chat/threads`、`GET /api/chat/threads`、`DELETE /api/chat/threads`、`POST /api/chat/upload`，合计 44 条；pytest 契约测试为唯一真实来源）。
+本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送、商户数据分析面与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面；pytest 契约测试为唯一真实来源）。当前注册端点共 **121 条**：analytics 39 / merchant 29 / admin 23 / crud 14 / chat 8 / auth 4 / spi 3 + `/api/health`。
 
 ## 1. 核心模块与架构规范
 
@@ -24,9 +24,10 @@ paths: ["services/gateway-py/**/*"]
    - 租户引导配置编辑（new-user-onboarding E,2026-09-10）：`PUT /api/tenant/{id}` 收 `onboardingConfig` 完整 JSON 文档——服务端 `validate_onboarding_config` 校验（未知顶层键/按钮错形 400 诚实失败,错误信息点名具体字段）,携带即整体覆写 `tenant_configs.onboarding_config`、未携带保留既有（合并式,与 spi/skills 同语义）;`GET /api/tenant/list` 回读 `onboardingConfig`（null = 未配置）供编辑面预填。**`POST /api/tenant` 创建流同语义（2026-09-10 补齐「仅编辑态」边界）**：创建即携带即写入（tenant_configs 两分支——既有行合并式仅携带时写、新行 INSERT 带列）,错形 400 且租户不落库,未携带保持未配置;admin 表单 JSON 文本域创建/编辑两态同渲染。admin 前端 JSON 文本域:非法 JSON 提交前拦截,服务端 400 经 throw→alert 可见（create/update 均 `res.success` 检查,不静默假装保存成功）。
    - 数据真实性约定（2026-09-07 起，wayfinder 005）：`/api/evals/results` 读取 `engine_py.evals.promptfoo_import` 从真实 promptfoo 运行写入的汇总行（`bun run test:prompt:record` 三套件自动入库 `eval_runs`/`eval_results` + 展示表；随机生成器已下线，`POST /api/evals/run` 返回 410 指引真实通道，响应不再携带 `isMock`）；`/api/logs` 消费 `session_metrics`/`intent_logs` 真实值，无遥测数据处返回真实 0，**严禁编造 token/延迟数字**。
    - 画像事实删除（`DELETE /api/personas/{id}`）在删除成功后调用 `engine_py.badcase.pool.record_badcase_signal` 入坏例候选池（失败静默降级，不影响删除响应）。
-4. **`routers/merchant.py` + `merchant_domain.py` / `merchant_db.py`**：商户门户店铺端与管理端路由及领域逻辑（原 Next.js Route Handlers 移植）。
-5. **`routers/spi.py` + `hmac_signer.py`**：三方 SPI v1 开放接口（HMAC-SHA256 签名 + 时间戳防重放校验）。
-6. **`routers/auth.py`**（wayfinder 001 真实化）：`POST /api/auth/login`（bcrypt 凭证校验）+ `POST /api/auth/logout`（Redis jti 黑名单）+ `GET /api/auth/me`（静默重校验,用户 UUID 漂移自愈）；JWT 30 天无刷新,`AUTH_JWT_SECRET` 生产必须显式配置（缺省密钥仅限开发）。
+4. **`routers/analytics.py`**（2026-09-19 v4）：商户数据分析面 `/api/admin/analytics/*` 39 条 —— ask SSE（帧形 `start|clarify|result|unsupported|error`，经 engine_py `analytics/` 轻管线，见 agent-engine.md §1.9）、RBAC（menus/roles/staff 三件套 + `staff/switch` 服务端换签）、报告（from-result 落库/详情/CSV）、优惠活动（CRUD/启停/发券/核销幂等）、客户、商品（SPU/SKU）。鉴权 = `x-tenant-id` 头 + Bearer JWT → `rbac.find_staff`。71 例契约钉死于 `tests/test_analytics_routes.py`。
+5. **`routers/merchant.py` + `merchant_domain.py` / `merchant_db.py`（含 `merchant_promotions_router`）**：商户门户店铺端与管理端路由及领域逻辑（原 Next.js Route Handlers 移植；商户真单/优惠/券/审计表在 `agent_merchant` 库，经 `merchant_db.py` 裸 SQL 访问）。
+6. **`routers/spi.py` + `hmac_signer.py`**：三方 SPI v1 开放接口（HMAC-SHA256 签名 + 时间戳防重放校验）。
+7. **`routers/auth.py`**（wayfinder 001 真实化）：`POST /api/auth/login`（bcrypt 凭证校验）+ `POST /api/auth/logout`（Redis jti 黑名单）+ `GET /api/auth/me`（静默重校验,用户 UUID 漂移自愈）+ 注册（联动客户档案）；JWT 30 天无刷新,`AUTH_JWT_SECRET` 生产必须显式配置（缺省密钥仅限开发）。
 
 ### 1.2 实时协同 (realtime.py)
 

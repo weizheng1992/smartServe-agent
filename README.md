@@ -45,8 +45,9 @@ smartServe-agent 是基于 **Turborepo Monorepo**、**Python FastAPI 网关** �
 │     → execute: 只读 reader 引擎(READ ONLY + 3s 超时 + SAVEPOINT)        │
 │     → 卡片: 表格/折线图(SVG) + 口径注记                                 │
 │                                                                         │
-│   14 指标: 销售5族/差评榜/退款率/售后/会话量/AI解决率/活动核销/优惠总额  │
-│   兜底分发器: LLM 不可达时优惠/券/订单状态仍确定性真答                   │
+│   37 指标 × 8 域: 销售13/客户7/活动5/库存3/评价3/退款2/利润2/会话2     │
+│   意图分层: L0 词表 → 小模型分类头 → L2 范例回放 → L3 LLM/SFT 兜底     │
+│   全层未命中 → 响亮失败落 agent_unanswered(覆盖增长闭环,不编造答案)    │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │ (与商城客服 Agent 共享: 会话/推送/卡片约定)
                                ▼
@@ -131,26 +132,29 @@ sft_dataset(词面 × 时间窗 × 品类 × limit 程序化组合, 4478 条, �
 │   └── web/                 # 轻量客服端 (Port 3000)
 │
 ├── services/
-│   ├── gateway-py/          # FastAPI 网关 (Port 4000, 170 pytest)
+│   ├── gateway-py/          # FastAPI 网关 (Port 4000, 216 pytest)
 │   │   └── src/gateway_py/routers/
-│   │       ├── analytics.py # /api/admin/analytics/*(22 条: ask SSE/menus/roles/staff/reports/promotions)
+│   │       ├── analytics.py # /api/admin/analytics/*(39 条: ask SSE/RBAC 菜单角色员工/报告/活动/客户/商品)
 │   │       └── auth.py      # login/logout/me/register(注册联动客户档案)
-│   └── engine-py/           # LangGraph 决策引擎 (790 pytest)
+│   └── engine-py/           # LangGraph 决策引擎 (942 pytest)
 │       └── src/engine_py/
-│           ├── analytics/   # ⭐ data agent 域(独立轻管线)
+│           ├── analytics/   # ⭐ data agent 域(独立轻管线,共 20 文件)
 │           │   ├── engine.py            # MetricQueryEngine(resolve/compile/execute)
 │           │   ├── sql_guard.py         # sqlglot 四层安全闸
-│           │   ├── schema_cards.py      # 商户库 schema 卡片
+│           │   ├── graph.py             # data agent 轻图(意图分层/场景包/图型仲裁)
 │           │   ├── metric_head.py       # 小模型影子接入(缝②)
+│           │   ├── llm_intent.py        # L3 LLM/SFT 意图兜底
+│           │   ├── exemplar_service.py  # query_exemplars L2 示例回放
+│           │   ├── schema_cards.py      # 商户库 schema 卡片
 │           │   ├── promotion_engine.py  # 优惠规则计算(服务端唯一算价点)
 │           │   ├── promotions.py        # 活动 CRUD+核销+审计
 │           │   ├── rbac.py              # RBAC 菜单树/角色分配/员工
-│           │   ├── report_service.py    # 报告生成(HTML+CSV)
-│           │   ├── graph.py             # data agent 轻图
-│           │   ├── exemplar_service.py  # query_exemplars L2 示例
-│           │   └── fallback_dispatcher.py  # LLM 不可达确定性兜底
-│           ├── skills/promotion_skill.py    # 客服对话优惠问答技能
-│           ├── triage/metric_head.py        # 意图分类头缝①(影子接入)
+│           │   ├── report_service.py    # 报告落库(from-result/CSV)
+│           │   ├── trace.py             # analytics_trace 逐层留痕
+│           │   └── ...(session_store/context_intake/quick_summary 等)
+│           ├── skills/fallback_dispatcher.py  # 客服侧 LLM 不可达确定性兜底(优惠/券/订单状态)
+│           ├── skills/promotion_skill.py      # 客服对话优惠问答技能
+│           ├── triage/intent_classifier.py    # 意图分类头缝①(锚点打分可替换接口)
 │           ├── scripts/training/            # 训练脚手架(README 全文档)
 │           ├── scripts/export_intent_data.py  # 数据水龙头 CLI
 │           └── training_runs/metric_head/   # 训练产物(head.pt+曲线)
@@ -187,15 +191,15 @@ sft_dataset(词面 × 时间窗 × 品类 × limit 程序化组合, 4478 条, �
 
 | 套件 | 数量 | 覆盖 |
 |---|---|---|
-| engine pytest | **790** | 意图仲裁/视觉消歧/记忆/优惠引擎/golden SQL/兜底分发器/ RBAC/报告/数据水龙头/训练流水线 |
-| gateway pytest | **170** | HTTP/SSE/socket.io 契约 + AST 沙箱 + analytics 路由(ask SSE/RBAC/报告/核销幂等) |
+| engine pytest | **942** | 意图仲裁/视觉消歧/记忆/优惠引擎/golden SQL/兜底分发器/ RBAC/报告/数据水龙头/训练流水线/data agent 管线 |
+| gateway pytest | **216** | HTTP/SSE/socket.io 契约 + AST 沙箱 + analytics 路由 39 条 71 例(ask SSE/RBAC/报告/核销幂等) |
 | merchant-admin E2E | **11** | 登录门卫/RBAC 菜单/六胶囊真答/悬浮 agent/报告/优惠 CRUD |
-| merchant-admin vitest | **29** | 菜单树/SKU 库存/客户抽屉/活动范围 |
-| promptfoo | 就绪 | 意图分类/多意图(含 promotion_query 6 例)/数据 Mapping 8 例 — 分类器用例需模型代理(11211)在线 |
+| merchant-admin vitest | **92** | ResultCard 渲染/FloatingAgent/菜单树/SKU 库存/客户抽屉/活动范围/page-context |
+| promptfoo | 就绪 | 意图分类/多意图(含 promotion_query 6 例)/数据 Mapping 8 例 — 分类器用例需模型代理在线 |
 
 ```bash
-bun run test:engine        # engine 全量 (790)
-bun run test:eval          # gateway 全量 (170)
+bun run test:engine        # engine 全量 (942)
+bun run test:eval          # gateway 全量 (216)
 bun run test:e2e           # Playwright E2E
 bun run test:prompt        # promptfoo 意图评估
 cd apps/merchant-admin && bun run build   # tsc + vite

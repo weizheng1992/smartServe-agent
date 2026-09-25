@@ -11,6 +11,7 @@
 - **启动 Admin 管控台:** `bun run dev:admin`(端口 3001,Vite 6 SPA)
 - **启动 FastAPI 网关:** `bun run dev:server`(端口 4000,`uv run uvicorn gateway_py.main:app --reload`)
 - **启动独立商户应用:** `bun run dev:merchant`(端口 3005,Vite 6 SPA;`/api/*` 与 `/spi/*` 由 Vite proxy 代理至 gateway-py)
+- **启动商户独立后台:** `bun run dev:merchant-admin`(端口 3006,Vite 6 SPA;`/api/*` 同样由 Vite proxy 代理至 gateway-py,数据分析 Agent 的宿主)
 - **启动 Temporal Worker:** `bun run worker`(`uv run python -m engine_py.temporal.worker`,任务队列 `agent-tasks-py`)
 
 ### 1.2 构建、Lint 与格式化
@@ -48,15 +49,19 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 │  - apps/web:      Vite 6 + React 19 客户端聊天 SPA(SSE、卡片)         │
 │  - apps/admin:    Vite 6 + React 19 SaaS 管控台(10 大模块)           │
 │  - apps/merchant: 独立商户门户(Vite 6 SPA;代理至 Python 网关)       │
+│  - apps/merchant-admin: 商户独立后台(3006;数据分析 Agent、RBAC、   │
+│    优惠活动、订单/商品/客户 CRUD,详见 .claude/rules/merchant-admin.md)│
 └───────────────────────────┬────────────────────────────────────────────┘
                             │ HTTP / SSE / socket.io
                             ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │              API 网关 (services/gateway-py,Python/FastAPI)             │
-│  - 44 条契约路由(39 冻结 + auth/me、chat/threads(GET/POST/DELETE)、chat/upload):│
+│  - 121 条注册端点(39 条 TS 冻结基线 + 后续扩充,均带 pytest 契约):   │
+│    analytics 39 / merchant 29 / admin 23 / crud 14 / chat 8 /        │
+│    auth 4 / spi 3 + /api/health;领域覆盖:                            │
 │    tenants、skills、approvals、聊天 SSE、conversations、RAG 文档、    │
 │    personas、guardrails、billing、logs、商户 store/admin、            │
-│    SPI v1(HMAC 签名)                                                 │
+│    数据分析 /api/admin/analytics/*(ask SSE)、SPI v1(HMAC 签名)       │
 │  - 实时:SSE(Redis Streams 事件源)+ python-socketio                  │
 │    人工接管房间(joined_room / peer_joined / typing / ...)            │
 └───────────────────────────┬────────────────────────────────────────────┘
@@ -69,7 +74,9 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 │  - 记忆:四象限记忆(Short/Long/Episodic/Task)+ 双层画像               │
 │  - Contextual RAG:上下文增强切片 + 租户过滤检索                       │
 │  - HITL:ApprovalGatekeeper(事务发件箱 + 同步 Fast-Path 恢复,        │
-│    对账 Worker 未启动,见不变量 #3)                                   │
+│    对账 Worker 由 scheduler 周期调度,见不变量 #3)                    │
+│  - Data Agent:analytics/ 独立轻管线(意图解析 ➔ 闭集 SQL 模板 ➔      │
+│    只读执行 ➔ 卡片;37 指标语义注册表,LLM 永不写 SQL)               │
 │  - 编排:Temporal 工作流(队列 agent-tasks-py)+ 本地仿真回退;        │
 │    shadow-harness 对冻结 TS 基线做 diff/replay                        │
 │  - 事件主干:Redis Streams(seq + XADD maxlen per job)                │
@@ -107,9 +114,9 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
    - NL2SQL 经 AST 解析器检查,强制仅 `SELECT`、追加 `LIMIT 50`,并在只读事务超时控制下执行。
    - 租户边界注入**未实现**(TS 基线亦无;沙箱零调用方):NL2SQL 接入前须先补齐,详见 `.claude/rules/tools-registry.md` §1.3。
 5. **零依赖共享 UI**:
-   - `apps/web` 与 `apps/admin` 使用 `@agent-all/ui` + Tailwind CSS,不得引入重型外部组件框架。
+   - 四个前端(`apps/web`、`apps/admin`、`apps/merchant`、`apps/merchant-admin`)统一使用 workspace 包 `ui`(`packages/ui`,零依赖原子组件)+ Tailwind CSS,不得引入重型外部组件框架。
 6. **契约冻结**:
-   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(现有 `/api/auth/me`、`POST /api/chat/threads`、`GET /api/chat/threads`、`DELETE /api/chat/threads`、`POST /api/chat/upload`,合计 44 条)。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
+   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面)。当前注册端点共 **121 条**:analytics 39 / merchant 29 / admin 23 / crud 14 / chat 8 / auth 4 / spi 3 + `/api/health`,其中 analytics 39 条由 `tests/test_analytics_routes.py`(71 例)专册钉死。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
 
 ---
 
@@ -117,11 +124,12 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 
 详细领域规则与编码规范按模块组织于 `.claude/rules/`:
 
-- `agent-engine.md`:LangGraph 拓扑、Skills 注册表、四象限记忆、Contextual RAG、Temporal 工作流。
+- `agent-engine.md`:LangGraph 拓扑、Skills 注册表、四象限记忆、Contextual RAG、Temporal 工作流、Data Agent 分析管线(`analytics/`)。
 - `database-schema.md`:SQLAlchemy 模型、Alembic 迁移、发件箱事件、多租户表。
 - `tools-registry.md`:工具定义、SPI/MCP 连接器、AST SQL 沙箱、指标语义注册表。
 - `server-gateway.md`:FastAPI 路由、人工接管服务、技能管理端点。
 - `admin-web.md`:10 个 CRUD 模块、统一 CRUD 套件(`useAdminCrud`、`DataTable` 等)、HITL 抽屉。
+- `merchant-admin.md`:商户独立后台(3006)、悬浮数据分析助手与 page-context 选择上行、`ResultCard` 同形渲染与诚实降级、RBAC 动态菜单。
 - `client-web.md`:客户端 SSE 聊天、多模态卡片渲染、人工接管切换。
 - `shared-ui.md`:原子设计、卡片家族规格、SVG 图标规范。
 - `observability.md`:带租户上下文的结构化日志、telemetry 追踪、token 成本统计。
@@ -138,7 +146,8 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - **Contextual RAG 与多租户**:`docs/architecture/contextual-rag.md`
 - **多模态视觉与富卡片**:`docs/architecture/multimodal-and-rich-cards.md`
 - **多实例部署指南**:`docs/architecture/multi-instance-deployment.md`(单实例假设盘点、socket.io 跨实例广播与 scheduler 单例化方案、扩容前置清单)
-- **启动与部署指南**:`docs/deployment.md`(dev Temporal 启动流程与踩坑、线上部署步骤/就绪检查/环境变量矩阵、Temporal 执行路线启用步骤)
+- **dev 启动与 Temporal 指南**:`docs/deployment.md`(dev Temporal 启动流程与踩坑、环境变量矩阵、Temporal 执行路线启用步骤)
+- **生产部署方案**:`docs/deploy.md`(Docker Compose 全栈上线:四前端 nginx 一体 / gateway / PG / Redis / Temporal,五步上线 + 运维 + 安全清单)
 
 
 ## 6. Git 提交规范

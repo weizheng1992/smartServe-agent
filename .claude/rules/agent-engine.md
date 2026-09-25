@@ -5,7 +5,7 @@ paths: ["services/engine-py/**/*"]
 
 # 智能体核心决策引擎规范 (Agent Engine)
 
-本服务是整个平台的核心中枢（`services/engine-py/src/engine_py/`），负责 LangGraph DAG 状态图调度、Skills 技能分发、四象限记忆体系、双层客户画像隔离、多模态视觉定责、Contextual RAG 检索、审批门禁与 Temporal 分布式工作流。行为规格以退役的 TS 实现为基线，由影子双跑（`shadow/`）与 pytest 契约测试钉死。
+本服务是整个平台的核心中枢（`services/engine-py/src/engine_py/`），负责 LangGraph DAG 状态图调度、Skills 技能分发、四象限记忆体系、双层客户画像隔离、多模态视觉定责、Contextual RAG 检索、审批门禁、Temporal 分布式工作流与商户数据分析独立轻管线（`analytics/`，§1.9）。行为规格以退役的 TS 实现为基线，由影子双跑（`shadow/`）与 pytest 契约测试钉死。
 
 ## 1. 核心架构与拓扑流程
 
@@ -77,6 +77,19 @@ paths: ["services/engine-py/**/*"]
 - **triage CLI**：`python -m engine_py.badcase.cli`（list/show/triage/draft/expire）；`draft` 只产 `expectedTools`/`not-contains` 断言（断言最小化，禁整句黄金答案），带 `origin: badcase:{id}` 溯源，人工并入 `eval/testCases/` 后标 `converted`。
 - **周期任务**（`scheduler.py`，随 Temporal worker 入口启动，Temporal 离线仍独立运行）：outbox 对账（30s）+ 坏例池摘要/保留期（6h）；**单实例假设**，`ENGINE_SCHEDULER_ENABLED=0` 关闭。
 
+### 1.9 Data Agent 商户数据分析管线（`analytics/`，2026-09-19 v4；与客服 DAG 完全解耦）
+
+- **定位与铁律**：**LLM 永不写 SQL** —— 意图层只把口语解析为闭集 `StructuredQueryIntent`（指标/维度/方向/时间窗），SQL 由指标模板确定性拼装（业务口径烧在模板里，退款单不可能混进销量）。路线对照与演化缝见 ADR-0004/0005/0006。
+- **指标语义注册表**：`tools_registry/metrics.yaml` **37 指标 × 8 域**（sales 13 / customer 7 / promotion 5 / inventory 3 / review 3 / refund 2 / profit 2 / session 2），每条带 label/description/expression/sqlTemplate/businessRules/unit/aliases/synonyms/`permissionTag`/sampleQueries;经 `tools_registry_bridge.metric_semantic_registry()` 消费。
+- **入口与意图分层**（`graph.py` 的 `ask`/`ask_all`;SSE 帧形 `start|clarify|result|unsupported|error`）：L0 规则解析（词表 aliases/synonyms 归一;行内商品提及逐字命中直出,零 LLM）→ 缝② `metric_head.py` 小模型分类头（bge + 线性头;`AI_METRIC_HEAD=off|shadow|on` 三态灰度,`AI_METRIC_HEAD_DIR`/`AI_METRIC_HEAD_THRESHOLD` 可调）→ L2 范例回放（`exemplar_service.py`,`query_exemplars` 余弦 ≥0.90,近零成本）→ L3 LLM 意图兜底（`llm_intent.py`;`AI_INTENT_L3` 开关;`AI_INTENT_L3_MODEL` 指定自托管 SFT 模型时走 `_sft_generate`,豁免纪律见 §2.2）。全部未命中 → **响亮失败 + `agent_unanswered` 落库**（覆盖增长闭环,ADR-0005;严禁编造兜底答案）。追问在 L0/L2 均未命中且会话有历史时,先由 LLM 改写为独立问句再走管线（改写器只产问题文本,绝不产 SQL）;软连接词不切 —— 那是 L3 的职责,规则抢跑会制造错误回答。
+- **多轮会话与页面上下文**：浏览器侧稳定 `sessionId` → Redis `da:sess:{business_id}:{session_id}`（TTL 24h,`session_store.py`）存会话上下文,管线本体无状态;`context_intake.py` 合并 pageContext 勾选（order/spu/customer 各 ≤100）与 `{kind: {id: 人话标签}}` selectionLabels（入结果标题 title_prefix）。`result_cache.py` 结果缓存 `da:res:{digest}`,`AI_RESULT_CACHE_TTL` 秒（默认 0 关）。
+- **场景包**（`_SCENARIO_PACKS`）：复合意图（一个意图 = 一组子指标）展开为多帧结果卡,`final_method="scenario"` 留痕。
+- **编译与执行**：`engine.py` 闭集 SQL 模板 + bindparams → `sql_guard.assert_safe_select`（AST 只读审计,仅 SELECT/LIMIT 约束）→ 执行按指标 `target_db` 路由:商户真账走 `agent_merchant` **只读 reader**（READ ONLY 事务 + 超时 + SAVEPOINT）,引擎侧数据走 engine_db。结果卡 = 表格/折线 + 口径注记。**图型仲裁（`graph.py::_effective_chart`）**：折线仅趋势族 `_TREND_LINE_METRICS`（gmv/volume/orders/customer_spend_trend）,其余指标一律不信 chart_hint 直通（2026-09-25 实弹:spu_compare 的 chart_hint=line 透传,前端把「品类」文案列画成 NaN 折线——双端各修一半,见 §2.2 SFT 豁免段与 merchant-admin.md §1.4）。
+- **速览纪律（`quick_summary.py`）**：峰谷/首尾变化只对多行时间序列（`*_trend`）生成;单行多列统计卡不生成（表格自明）;榜单出「共 N 项 · 榜首占比」。**非时间序列严禁出峰谷**（同一实弹事故第二症状:对比卡被读数错位成「峰值 0 件 · 谷值 0 件」）。
+- **RBAC（`rbac.py`）**：角色 `finance_owner`/`admin`/`sales_viewer`/`warehouse_operator`;指标权限 `permissionTag` 挂 metrics.yaml（现分布 sales_viewer 32 / warehouse_operator 3 / finance_owner 2,admin 全量）;菜单树/角色分配/员工 CRUD 的真源在服务端,`staff/switch` 由服务端为目标员工换签 JWT。
+- **观测与持久化**：`trace.py` 每次问答落 `analytics_trace`（`trace_id = tr_<hex12>`,覆盖 L0/L2/L3/会话/场景包各层与方法）;未命中落 `agent_unanswered`;`report_service.py` 报告服务端持久化（from-result 落库/CSV 导出,无 LLM 参与）。
+- **测试**：engine 侧 `tests/test_analytics_engine.py` / `test_data_agent_graph.py` / `test_data_agent_smoke.py` / `test_metric_head_seam.py` / `test_new_metric_families.py`;gateway 侧 39 条路由 71 例 `tests/test_analytics_routes.py`（见 server-gateway.md）。
+
 ---
 
 ## 2. 编码与维护准则
@@ -84,7 +97,7 @@ paths: ["services/engine-py/**/*"]
 1. **确定性拓扑**：修改 `graph/nodes/planner.py` 时必须严格声明 `dependencies` 依赖数组，供 `step_execution_engine.py` 并行调度。
 2. **统一调用入口**：所有 LLM 与向量 Embedding 调用必须统一走 `llm/chat.py`（`get_chat_model` / `get_embedding_model` / `get_vision_model`，lru_cache 单例）；熔断/退避/超时由 `llm/resilience.py` 的全局 CircuitBreaker 承担（2026-09-07 起，挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖），阈值经 `LLM_CIRCUIT_*` / `LLM_RETRY_*` / `LLM_TIMEOUT_SECONDS` env 可调。例外：`get_vision_model` 刻意不入韧性层 —— 视觉失败域独立，自带启发式兜底（wayfinder multimodal 003）。**bigmodel 参数兼容（2026-09-09，`_get_request_payload` 单点收口）**：glm-4.7 拒收 OpenAI 专有参数 —— `parallel_tool_calls`（任意组合 400 code 1210）、`stream:false` 与 tools 同现、`tool_choice` 对象形式；langchain `with_structured_output(function_calling)` 三者皆发，故 chat 模型统一剥前两者、把 `tool_choice` 对象**改写**为字符串 `"required"`（不能剥除——实测闲聊 prompt 下模型即不调工具，结构化解析失败；`"required"` 强制调用语义等价）。glm-4.6v 均收，vision 通路不受影响。契约由 `tests/test_llm_chat_model.py` 钉死。**思维链关闭（2026-09-09，同收口点）**：glm-4.7 默认开 thinking，琐碎调用也先生成大量 reasoning token（裸测同题 79.9s vs 关闭 7.5-18s），客服管线串行多次调用即分钟级回复；`AI_THINKING=disabled`（默认）时统一经 `extra_body` 注入 `{"thinking":{"type":"disabled"}}`（thinking 非 openai SDK 标准参数，顶层直塞 create() 即炸 unexpected keyword argument，必须走 extra_body 通道；setdefault 尊重调用方覆写；`enabled` 不注入，换不支持该参数的提供方时规避 400）。planner 深度规划走 `planner_llm()` 工厂（`bind(max_tokens=AI_PLANNER_MAX_TOKENS)`，默认 2000）——曾对「退货政策」类简单问题生成 5163 token（73.7s），封顶防失控，截断 JSON 落兜底单步计划；bind 仍包 `_ResilientChatOpenAI`，熔断/遥测不丢失。
 
-   **自托管 SFT 豁免（2026-09-20）**：`analytics/llm_intent.py::_sft_generate` 直调 `transformers.pipeline`（`AI_INTENT_L3_MODEL` 指定合并后模型目录），不经 `llm/chat.py` 统一入口 —— 该路径是「自托管模型服务本体」而非外部 LLM API 客户端，熔断/供应商遥测语义不适用；同步推理必须经 `asyncio.to_thread` 下放线程（事件循环不可阻塞）。豁免仅限 Data Agent L3 意图层，客服主链路 LLM 调用严禁绕开统一入口。
+   **自托管 SFT 豁免（2026-09-20）**：`analytics/llm_intent.py::_sft_generate` 直调 `transformers.pipeline`（`AI_INTENT_L3_MODEL` 指定合并后模型目录），不经 `llm/chat.py` 统一入口 —— 该路径是「自托管模型服务本体」而非外部 LLM API 客户端，熔断/供应商遥测语义不适用；同步推理必须经 `asyncio.to_thread` 下放线程（事件循环不可阻塞）。豁免仅限 Data Agent L3 意图层（§1.9），客服主链路 LLM 调用严禁绕开统一入口。
 3. **中文本地化日志**：Temporal Activity 与执行节点产生的所有用户态进度事件必须使用标准中文本地化文本。
 4. **无异常冷启动**：记忆检索、租户配置加载等底层逻辑必须兼容空数据与冷启动，严禁未捕获抛错阻断状态机。
 5. **环境自读取**：`config.py` 在导入时读取环境变量；任何测试基建必须先注入 `DATABASE_URL` / `REDIS_URL` 再导入 engine_py 模块。

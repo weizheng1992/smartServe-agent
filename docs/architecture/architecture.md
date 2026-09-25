@@ -1,6 +1,8 @@
 # 🚀 智能客服决策引擎：核心技术架构与源码对照文档
 
-本项目是基于 **Turborepo Monorepo**、**Bun 运行环境**、**LangGraph 决策图**、**Drizzle ORM**、**Redis** 与 **Temporal** 构建的高并发、工业级智能客服平台。
+本项目是基于 **Turborepo Monorepo**、**Bun 运行环境**、**LangGraph 决策图**、**SQLAlchemy/Alembic**、**Redis** 与 **Temporal** 构建的高并发、工业级智能客服平台。
+
+> ⚠️ **阅读须知（2026-09-22 更新）**：后端已于 2026-09 完成 1:1 Python 移植并退役原 TypeScript 实现（`apps/server` NestJS、`packages/{engine,tools,db,...}` 已从仓库删除）。§3.1–3.31 中引用的 TS 物理路径是**已退役的行为基线**，架构设计本身仍然有效;现行 Python 落点见 `services/engine-py/src/engine_py/` 与 `services/gateway-py/src/gateway_py/`,以 `.claude/rules/*.md` 与 `services/gateway-py/tests/` 契约测试为准。§3.32 起为现行 Python 架构的新增章节。
 
 以下是平台核心技术模块与对应物理代码文件的深度映射：
 
@@ -503,6 +505,8 @@ LLM 是仲裁员与终局。每一层的判定以 `{layer, intent, confidence}` 
 
 ## 3.26 🚀 新增：Text-to-SQL 与 Headless BI 指标语义注册表消歧中台 (Metric Semantic Registry v2)
 
+> 📍 **现行落点（2026-09）**：指标语义注册表已随 Python 化迁至 `services/engine-py/src/engine_py/tools_registry/metrics.yaml`（37 指标 × 8 域），经 `analytics/tools_registry_bridge.py` 消费;消费方为 Data Agent 分析管线（§3.32）。下文 TS 路径为已退役基线。
+
 针对真实多租户商业运营场景中模糊提问（如 _“查查我负责商品里卖得最好的几个”_）引发的**口径歧义（销量 vs 销售额 vs 净利润）**、**SQL 注入**与**多表 JOIN 聚合幻觉**，本项目落地了工业级指标语义层架构：
 
 ### 📂 核心文件：
@@ -701,3 +705,49 @@ LLM 是仲裁员与终局。每一层的判定以 `{layer, intent, confidence}` 
                                                                        ▼ 写入 cartContext
                                                                { lastModifiedItemId: "..." }
 ```
+
+---
+
+## 3.32 🚀 现行：商户数据分析 Data Agent 语义层轻管线 (engine_py/analytics/, 2026-09 v4)
+
+与 §3.1 客服 DAG **完全解耦**的独立轻管线,服务于 `apps/merchant-admin`(§3.33)。铁律:**LLM 永不写 SQL** —— 意图层只把口语解析为闭集 `StructuredQueryIntent`(指标/维度/方向/时间窗),SQL 由指标模板确定性拼装,业务口径烧在模板里(退款单不可能混进销量)。路线取舍见 ADR-0004(语义层 + 双 Agent 模块缝)/ ADR-0005(L3 LLM 意图 + 覆盖增长)/ ADR-0006(LangGraph+MetaRAG+GRPO 全家桶提案的逐层不采用理由)。
+
+### 📂 核心文件(现行 Python 落点):
+
+1. **意图分层管线**:`analytics/graph.py`(`ask`/`ask_all`;L0 词表 → 缝② metric_head 小模型 → L2 范例回放 → L3 LLM/SFT 兜底;`_SCENARIO_PACKS` 场景包;`_effective_chart` 图型仲裁)
+2. **指标语义注册表**:`tools_registry/metrics.yaml`(37 指标 × 8 域)+ `analytics/tools_registry_bridge.py`
+3. **小模型缝**:`analytics/metric_head.py`(bge+线性头,`AI_METRIC_HEAD=off|shadow|on` 三态灰度)与 `analytics/llm_intent.py`(`_sft_generate` 自托管 SFT,`AI_INTENT_L3_MODEL`)
+4. **编译与执行**:`analytics/engine.py`(闭集模板 + bindparams;`target_db` 路由商户只读 reader / engine_db)+ `analytics/sql_guard.py`(AST 只读审计)
+5. **多轮与缓存**:`analytics/session_store.py`(`da:sess:` TTL 24h)/ `context_intake.py`(pageContext 勾选合并)/ `result_cache.py`(`da:res:`)
+6. **呈现**:`analytics/schema_cards.py` + `analytics/quick_summary.py`(峰谷仅时间序列)
+7. **RBAC/报告/观测**:`analytics/rbac.py`(四角色 + 菜单树)/ `report_service.py`(报告落库 + CSV)/ `trace.py`(`analytics_trace` 逐层留痕)/ 未命中池 `agent_unanswered`
+8. **测试**:`services/engine-py/tests/test_analytics_engine.py` 等 + `services/gateway-py/tests/test_analytics_routes.py`(39 路由 71 例)
+
+### 💡 架构解析:
+
+- **意图分层的成本阶梯**:L0 词表零成本直出 → 缝② 小模型近零成本 → L2 余弦 ≥0.90 范例回放 → L3 才动 LLM;全层未命中**响亮失败**并落 `agent_unanswered`(严禁编造兜底答案),未命中语料反哺词表与 SFT 训练集(覆盖增长闭环)。
+- **图型仲裁在服务端**:折线仅趋势族(`gmv/volume/orders/customer_spend_trend`),其余指标不信 `chart_hint` 直通;前端 `ResultCard` 另有数值护栏(非数值值列诚实降级表格,绝不画 NaN 图)—— 双端防线各管一段(实弹:2026-09-25 对比卡折线 NaN 事故)。
+- **速览纪律**:峰谷/首尾变化只对多行时间序列生成;单行统计卡与榜单走「项数 · 榜首占比」,严禁对非时间序列读数错位。
+
+---
+
+## 3.33 🚀 现行:商户独立后台 (apps/merchant-admin, 2026-09 v4)
+
+商户员工/老板工作台,Vite 6 + React 19,端口 3006,`/api/*` 代理至 gateway-py。组件强制 workspace 包 `ui` + Tailwind。深度规范见 `.claude/rules/merchant-admin.md`。
+
+### 📂 核心文件:
+
+1. **路由与动态菜单**:`src/App.tsx`(14 条路由;侧边栏由 `GET /api/admin/analytics/menus` 下发的 MenuNode 树驱动,前端不写死导航)
+2. **悬浮数据分析助手**:`src/components/FloatingAgent.tsx`(任意路由唤起;`pageContext = {route, selection, selectionLabels, sessionId}` 上行;localStorage 历史 60 帧)
+3. **结果卡同形渲染缝**:`src/components/ResultCard.tsx`(悬浮面板/全屏问答/看板/报告详情四处共用;诚实降级纪律:折线值列非数值或 <2 点不出图)
+4. **选择上下文**:`src/lib/page-context.ts`(内存广播,**严禁 localStorage** —— 残留勾选曾两次静默污染查询)
+5. **API 收口与 SSE**:`src/lib/api.ts`(Bearer JWT 身份;老板凭证留底 + `staff/switch` 服务端换签)/ `src/lib/sse.ts`(增量帧解析)
+6. **看板与报告**:`src/pages/board/`(钉问每 60s 重放 ask)/ `src/pages/reports/`(服务端持久化 + CSV)
+7. **CRUD 页族**:`src/pages/{promotions,customers,goods/{products,skus},order-manager,system/{menus,roles,staff}}`
+8. **测试**:vitest 92 例(22 文件,与被测文件同目录)+ Playwright `e2e/merchant-admin.config.ts`
+
+### 💡 架构解析:
+
+- **身份即 JWT**(0013 收口):后端不信任 `x-user-id` 头;401 统一清会话回登录;400 级业务错误返回 body 由页面按 `success/message` 呈现。
+- **老板身份切换**:`hasBossSession()` 才可见切换器;切换动作始终以留底的老板凭证发起,服务端为目标员工换签 JWT —— 前端只是视图切换,权限真源在服务端 `permCode`。
+- **同形渲染 + 诚实降级**:改渲染行为只改 `ResultCard` 一处,四个消费面自动一致;任何图形缺失(数据点不足/值列非数值/形状不符)一律出诚实说明卡 + 表格,绝不画空图假图。
