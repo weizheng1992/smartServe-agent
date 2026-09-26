@@ -175,6 +175,20 @@ BEGIN
       FOREIGN KEY (promotion_id) REFERENCES promotions(id);
   END IF;
 END $$;
+
+-- 索引补齐(2026-09-26 夜审 ③#8):此前全库仅 reviews_spu 一枚索引,PG 外键
+-- 不自动建索引 —— 订单明细按单取行、SKU 按 SPU 取行、审计按单回溯、券按用户
+-- 列出、核销按活动查询与级联删除全部走顺序扫描。IF NOT EXISTS 幂等,存量库
+-- 随 ensure_merchant_tables 启动自愈补建。
+CREATE INDEX IF NOT EXISTS idx_merchant_orders_customer ON merchant_orders(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_merchant_orders_status ON merchant_orders(status);
+CREATE INDEX IF NOT EXISTS idx_merchant_order_items_order ON merchant_order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_merchant_order_items_spu ON merchant_order_items(spu_id);
+CREATE INDEX IF NOT EXISTS idx_merchant_skus_spu ON merchant_skus(spu_id);
+CREATE INDEX IF NOT EXISTS idx_merchant_audit_logs_order ON merchant_audit_logs(order_id);
+CREATE INDEX IF NOT EXISTS idx_user_coupons_user ON user_coupons(user_id);
+CREATE INDEX IF NOT EXISTS idx_promotion_redemptions_order ON promotion_redemptions(order_id);
+CREATE INDEX IF NOT EXISTS idx_promotion_redemptions_promo ON promotion_redemptions(promotion_id);
 """
 
 
