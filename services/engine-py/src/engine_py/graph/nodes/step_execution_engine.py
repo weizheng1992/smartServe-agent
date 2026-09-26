@@ -174,6 +174,17 @@ async def _execute_single_step_core(
 
     if parsed_tool_call is None:
         # 3. Fallback: LLM 工具选择
+        # 工具 schema 明示(症状③ 2026-09-26):只给工具名时 LLM 必然发明
+        # schema 外实参(实弹:productType/bestSelling),search_products 静默
+        # 丢弃后退化成无过滤全货架检索,垃圾品混入候选池 —— 实参名必须锚定
+        # 真实契约,取值锚定用户原话(英文步骤描述是有损转译,严禁从它造值)。
+        tool_schemas: dict = {}
+        _schema_getter = _try_import_tools()
+        if _schema_getter:
+            for _t in allowed_tools:
+                _def = _schema_getter(_t)
+                if _def is not None and getattr(_def, "schema", None):
+                    tool_schemas[_t] = _def.schema
         prompt = (
             f'We are executing step: "{step_to_run.get("description")}".\n\n'
             "CRITICAL INSTRUCTIONS FOR TOOL SELECTION:\n"
@@ -200,8 +211,14 @@ async def _execute_single_step_core(
             '(结算下单/下单), select "checkoutCart" — it creates a real merchant order from the current '
             'cart. If it mentions sales ranking or best-seller metrics with a named rankingMetric, '
             'select "queryProductRanking" with that rankingMetric (real sales data only).\n'
-            "11. Extract arguments from CONVERSATION HISTORY below.\n\n"
+            "11. ARGUMENT NAMES must match the [TOOL SCHEMAS] below EXACTLY — never invent argument names "
+            "(unknown names are silently dropped and the tool then runs unfiltered). For \"searchProducts\", "
+            "put the product noun THE USER USED (quote their original words, e.g. 裤子/帐篷/冲锋衣) into "
+            "\"query\"; do NOT translate it into English category words.\n"
+            "12. Extract argument VALUES from the USER ORIGINAL MESSAGE and conversation history below.\n\n"
             'Output raw JSON object or "NONE":\n{"toolName": "toolName", "args": {"key": "value"}}\n\n'
+            f"[TOOL SCHEMAS]\n{json.dumps(tool_schemas, ensure_ascii=False)}\n\n"
+            f"[USER ORIGINAL MESSAGE]\n{state.get('input') or ''}\n\n"
             f"[CONVERSATION HISTORY]\n{history_context}"
         )
         response = await get_chat_model().ainvoke(prompt)

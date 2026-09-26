@@ -26,6 +26,7 @@ class CartEnv:
     short_memory: list
     user_id: str | None
     thread_id: str | None
+    tenant_id: str | None = None
 
     @classmethod
     def from_context(cls, context) -> CartEnv:
@@ -37,6 +38,7 @@ class CartEnv:
             short_memory=context.short_memory or [],
             user_id=context.user_id,
             thread_id=context.thread_id,
+            tenant_id=getattr(context, "tenant_id", None),
         )
 
 
@@ -512,6 +514,69 @@ async def _add_all(env: CartEnv) -> dict:
 # ---------------------------------------------------------------------------
 # 4b. 单品加购(序数/指名直配/候选兜底)
 # ---------------------------------------------------------------------------
+async def _bestseller_search_reply(env: CartEnv) -> dict:
+    """销量榜加购反问(症状③ 2026-09-26 实弹:「把销量最好的裤子放到购物车，
+    买2件」→ 谎称店内没有裤子,货架下装裤类在售 3 款)。
+
+    榜词(销量最好/畅销/…)是**检索半**而非商品名:剥动作词与榜词取品类词,
+    查商户真货架 —— 有货列真货并把候选写回 guideContext(后续「把第1件加入
+    购物车」落真货不落垃圾);查无落既有诚实反问。销量事实只如实说「查不到
+    销量数据、无法确定卖得最好」,严禁编造榜单,也严禁宣称店内无货。
+    """
+    noun = R._ADD_ACTION_STRIP_RE.sub(" ", env.user_input)
+    noun = R._BEST_SELLER_RE.sub(" ", noun)
+    noun = noun.strip(" \t,，。.!！?？:；;的最了吧呢啊")
+    if len(noun) >= 2:
+        found = await MallDomainService.search_products(
+            {"query": noun, "businessId": env.tenant_id or "ecommerce", "limit": 5}
+        )
+        products = (found or {}).get("products") or []
+        if products:
+            list_text = "\n".join(
+                f"{i + 1}. 【{p['name']}】" + (f" ¥{p['price']}" if p.get("price") is not None else "")
+                for i, p in enumerate(products)
+            )
+            guide_context = {
+                **(env.guide_context or {}),
+                "candidateProductIds": [p["id"] for p in products],
+                "candidateProducts": [
+                    {
+                        "id": p["id"],
+                        "name": p["name"],
+                        "price": float(p["price"]) if p.get("price") is not None else 0,
+                        "stock": int(p.get("stock") or 0),
+                        "description": p.get("description"),
+                        "specs": p.get("specs"),
+                        "imageUrl": p.get("imageUrl"),
+                    }
+                    for p in products
+                ],
+            }
+            return {
+                "success": True,
+                "output": (
+                    f"关于「{noun}」的销量排序，我这边暂时查不到销量数据，无法确定卖得最好的一款。\n"
+                    f"当前店内「{noun}」在售 {len(products)} 款:\n{list_text}\n\n"
+                    "可直接说「把第1件加入购物车，买2件」，或告诉我想要的商品名与规格。🛒"
+                ),
+                "nextAction": "finish",
+                "extra": {
+                    "guideContext": guide_context,
+                    "cartContext": {**(env.cart_context or {}), "addedThisTurn": []},
+                },
+            }
+    # 品类词剥不出/货架查无 → 诚实告知,不编造、不误加
+    return {
+        "success": True,
+        "output": (
+            f"暂时没有查到与「{noun or '您说的商品'}」相关的在售商品，未加入任何商品。\n"
+            "您可以先让我为您推荐商品（例如\"推荐几款短袖\"），再说\"把第1件加入购物车\"即可！🛒"
+        ),
+        "nextAction": "finish",
+        "extra": _no_add_extra(env),
+    }
+
+
 async def _add(env: CartEnv) -> dict:
     target_sku_id = env.slots.get("skuId") or env.slots.get("productId") or ""
     target_title = "精选推荐商品"
@@ -571,6 +636,11 @@ async def _add(env: CartEnv) -> dict:
     # 检索诉求句严禁进按名直配(2026-09-15 幻影守卫回归):残词是检索半而非点名。
     if R._SEARCH_INTENT_RE.search(named_query or ""):
         named_query = ""
+    # 销量榜加购(症状③ 2026-09-26):目标未经挑款,在候选链兜底**之前**接管 ——
+    # 严禁静默落候选[0](候选池可能是上游幻觉搜索喂进的垃圾),严禁当字面
+    # 商品名直配(必然 miss 后被 finish 转述成「店内没有」)。
+    if not target_sku_id and R._BEST_SELLER_RE.search(env.user_input):
+        return await _bestseller_search_reply(env)
     if named_query:
         shelf_hit = await MallDomainService.find_shelf_sku_by_description(named_query)
         if shelf_hit:

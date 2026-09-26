@@ -4,6 +4,22 @@
 
 ---
 
+## [2.6.53] - 2026-09-26 (销量最好加购:榜词当商品名 + fallback 实参幻觉)
+
+同一商户实弹事故(08:33「把销量最好的裤子放到购物车，买2件」→「未能找到符合您要求的裤子商品」,而货架下装裤类在售 3 款),按「红环先行」诊断纪律闭环。全管线探针实锤三工具层各咬一口:`queryProductRanking`(无 category,全店榜,转述为真)→ `searchProducts`(schema 外实参被静默丢弃,无过滤全货架,垃圾测试品混入候选池)→ `skill_cart_manage`(「销量最好的裤子放到」被当字面商品名直配,必然 miss 后被 finish 拼成「店内没有」)。
+
+### 🐛 Fixes
+
+- **cart 销量榜词族当商品名直配**:`_SEARCH_INTENT_RE` 词表缺「销量最好/销量最佳/卖得最好/畅销/热卖/卖得好」,`_ADD_ACTION_STRIP_RE` 不剥「放到/放进/装进」→ 榜词残句进了按名直配,`find_shelf_sku_by_description` 必然 miss,诚实措辞包着错误事实。修复:榜词族入检索意图正则;`_add` 新增销量榜分支(`_bestseller_search_reply`)在候选链兜底**之前**接管 —— 剥动作/榜词取品类词查商户真货架,有货列真货并把候选写回 guideContext(后续「把第1件加入购物车」落真货),查无落诚实反问;严禁静默落候选[0](候选池可能是上游幻觉搜索喂进的垃圾),销量事实只如实说「查不到销量数据、无法确定卖得最好」。回归:`test_cart_bestseller_add.py`(词表缝 + 行为缝:列真裤/零入车/垃圾禁出场/候选写回,修复前红)。
+- **executor fallback 工具选择实参幻觉**:fallback prompt 只给工具名(json.dumps(allowed_tools)),无 schema、无用户原话 —— LLM 必然发明实参名(实弹 `productType: "pants"`/`bestSelling`),`search_products` 契约只有 `query/category/maxPrice/limit/sort`,schema 外字段静默丢弃后 `query=None` → 无过滤全货架检索,返回的第一批恰是 dev 库测试垃圾品,又经 guideContext 喂给下游当「店内现货」。修复:fallback prompt 装配 `[TOOL SCHEMAS]`(allowed_tools 的真实参数契约)+ `[USER ORIGINAL MESSAGE]`(参数取值锚定用户原话,严禁把品类词译成英文),明令禁止发明实参名(静默丢弃→无过滤检索的事故通道)。修复后重放实参即变契约内 `{"query": "裤子"}`。回归:`test_executor_fallback_schema.py` 钉 prompt 契约四断言。
+
+### 📝 Notes
+
+- 已知残留(非本案机制):`search_products` 的 `category` 是货架类目严格等值(`裤子` ≠ `下装裤类`),fallback LLM 即使发契约内实参也可能让该过滤查空;本轮用户可见路径已被技能层确定性分支兜住,根治方向是货架类目别名表(用户词→货架 category)下沉到检索/排行共用。
+- dev 库货架含测试垃圾品(「实证用-新增商品」「进程内实证款」等,配饰类),在无过滤检索/候选池里挤出真货 —— 数据卫生问题,建议清理。
+
+---
+
 ## [2.6.52] - 2026-09-26 (表格渲染缺口 + 咨询直答历史投毒)
 
 同一商户实弹事故(08:17 帐篷表格)的前端与后端两半,均按「红环先行」诊断纪律闭环。
