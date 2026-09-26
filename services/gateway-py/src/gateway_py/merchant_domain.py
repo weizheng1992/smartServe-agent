@@ -78,12 +78,29 @@ async def _fetch_items(conn: Any, order_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def _spu_to_product(conn: Any, spu: Any) -> dict:
-    sku_rows = (
+async def _items_by_orders(conn: Any, order_ids: list) -> dict:
+    """批量取行项目按 order_id 分组(列表页 N+1 根治;2026-09-26 夜审 ③#1)。"""
+    if not order_ids:
+        return {}
+    rows = (
         await conn.execute(
-            text("SELECT * FROM merchant_skus WHERE spu_id = :sid ORDER BY price ASC"), {"sid": spu["id"]}
+            text("SELECT * FROM merchant_order_items WHERE order_id = ANY(:oids)"),
+            {"oids": list(order_ids)},
         )
     ).mappings().all()
+    grouped: dict = {}
+    for r in rows:
+        grouped.setdefault(r["order_id"], []).append(dict(r))
+    return grouped
+
+
+async def _spu_to_product(conn: Any, spu: Any, sku_rows: list | None = None) -> dict:
+    if sku_rows is None:
+        sku_rows = (
+            await conn.execute(
+                text("SELECT * FROM merchant_skus WHERE spu_id = :sid ORDER BY price ASC"), {"sid": spu["id"]}
+            )
+        ).mappings().all()
 
     skus = []
     for row in sku_rows:
@@ -174,11 +191,8 @@ async def list_orders(params: dict) -> list[dict]:
         )
         q["lim"] = limit
         rows = (await conn.execute(text(sql), q)).mappings().all()
-        results = []
-        for row in rows:
-            items = await _fetch_items(conn, row["order_id"])
-            results.append(_order_from_row(row, items))
-        return results
+        items_grouped = await _items_by_orders(conn, [r["order_id"] for r in rows])
+        return [_order_from_row(row, items_grouped.get(row["order_id"], [])) for row in rows]
 
 
 async def get_order_detail(order_id: str) -> dict | None:
@@ -355,7 +369,18 @@ async def search_products(query: str | None = None, category: str | None = None,
                 q,
             )
         ).mappings().all()
-        return [await _spu_to_product(conn, r) for r in rows]
+        # 命中 SPU 的 SKU 一次取回按 spu_id 分组(逐 SPU 单查的 1+N 同型根治)
+        sku_grouped: dict = {}
+        if rows:
+            sku_rows = (
+                await conn.execute(
+                    text("SELECT * FROM merchant_skus WHERE spu_id = ANY(:sids) ORDER BY price ASC"),
+                    {"sids": [r["id"] for r in rows]},
+                )
+            ).mappings().all()
+            for sr in sku_rows:
+                sku_grouped.setdefault(sr["spu_id"], []).append(sr)
+        return [await _spu_to_product(conn, r, sku_grouped.get(r["id"], [])) for r in rows]
 
 
 async def get_product_detail(product_id_or_id: str) -> dict | None:
@@ -756,27 +781,33 @@ async def create_order_from_cart(
 
     try:
         async with merchant_engine().begin() as conn:
+            # 逐条目单查的 N+1 根治(2026-09-26 夜审 ③#9):一次锁定全部涉及 SKU,
+            # 再按购物车条目序做累计库存校验 —— 同码多条目语义与原逐条 UPDATE 等价
+            sku_rows = (
+                await conn.execute(
+                    text(
+                        "SELECT s.*, p.title as spu_title, p.main_image as spu_image, p.id as spu_id, p.spu_code "
+                        "FROM merchant_skus s JOIN merchant_spus p ON s.spu_id = p.id "
+                        "WHERE s.sku_code = ANY(:codes) FOR UPDATE"
+                    ),
+                    {"codes": list({item["skuCode"] for item in items})},
+                )
+            ).mappings().all()
+            sku_by_code = {r["sku_code"]: r for r in sku_rows}
+            remaining_stock = {r["sku_code"]: r["stock"] for r in sku_rows}
+            deducted: dict = {}
             for item in items:
-                sku = (
-                    await conn.execute(
-                        text(
-                            "SELECT s.*, p.title as spu_title, p.main_image as spu_image, p.id as spu_id, p.spu_code "
-                            "FROM merchant_skus s JOIN merchant_spus p ON s.spu_id = p.id "
-                            "WHERE s.sku_code = :code FOR UPDATE"
-                        ),
-                        {"code": item["skuCode"]},
-                    )
-                ).mappings().first()
+                sku = sku_by_code.get(item["skuCode"])
                 if sku is None:
                     raise _CartError(f"商品规格 [{item['skuCode']}] 不存在")
                 quantity = item.get("quantity") or 1
-                if sku["stock"] < quantity:
-                    raise _CartError(f"商品 [{sku['sku_title']}] 库存不足，当前仅剩 {sku['stock']} 件")
+                if remaining_stock[sku["sku_code"]] < quantity:
+                    raise _CartError(
+                        f"商品 [{sku['sku_title']}] 库存不足，当前仅剩 {remaining_stock[sku['sku_code']]} 件"
+                    )
 
-                await conn.execute(
-                    text("UPDATE merchant_skus SET stock = stock - :qty WHERE sku_code = :code"),
-                    {"qty": quantity, "code": item["skuCode"]},
-                )
+                remaining_stock[sku["sku_code"]] -= quantity
+                deducted[sku["sku_code"]] = deducted.get(sku["sku_code"], 0) + quantity
                 total_amount += float(sku["price"]) * quantity
                 spec_summary = " / ".join(f"{k}:{v}" for k, v in (sku["spec_attributes"] or {}).items())
                 items_to_insert.append(
@@ -791,6 +822,11 @@ async def create_order_from_cart(
                         "imageUrl": sku["image_url"] or sku["spu_image"],
                         "specSummary": spec_summary,
                     }
+                )
+            for code, qty in deducted.items():
+                await conn.execute(
+                    text("UPDATE merchant_skus SET stock = stock - :qty WHERE sku_code = :code"),
+                    {"qty": qty, "code": code},
                 )
 
             # 优惠引擎(20-D3):SAVEPOINT 隔离,失败按原价不毒化事务;
@@ -882,16 +918,19 @@ async def preview_cart_pricing(customer_id: str, items: list[dict]) -> dict:
     scope: set[str] = set()
     try:
         async with merchant_engine().connect() as conn:
+            # 逐条目单查的 N+1 根治(2026-09-26 夜审 ③#9):一次取回全部涉及 SKU
+            sku_rows = (
+                await conn.execute(
+                    text(
+                        "SELECT s.price, s.sku_code, p.spu_code FROM merchant_skus s "
+                        "JOIN merchant_spus p ON s.spu_id = p.id WHERE s.sku_code = ANY(:codes)"
+                    ),
+                    {"codes": list({item["skuCode"] for item in items})},
+                )
+            ).mappings().all()
+            price_by_code = {r["sku_code"]: r for r in sku_rows}
             for item in items:
-                sku = (
-                    await conn.execute(
-                        text(
-                            "SELECT s.price, p.spu_code FROM merchant_skus s "
-                            "JOIN merchant_spus p ON s.spu_id = p.id WHERE s.sku_code = :code LIMIT 1"
-                        ),
-                        {"code": item["skuCode"]},
-                    )
-                ).mappings().first()
+                sku = price_by_code.get(item["skuCode"])
                 if sku is None:
                     return {"success": False, "message": f"商品规格 [{item['skuCode']}] 不存在"}
                 quantity = item.get("quantity") or 1
