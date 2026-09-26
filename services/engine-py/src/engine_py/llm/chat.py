@@ -230,7 +230,12 @@ def warm_embedding_model_in_background() -> None:
     首次构造含 torch 导入、权重加载与缓存未命中时的在线拉取(秒级到分钟级),
     放后台线程可避免首个向量化请求在事件循环线程同步承担这段耗时。
     预热失败不阻断启动,降级为请求时懒加载。
+    AI_EMBEDDING_WARMUP=0 可整体关闭(测试隔离:预热线程与请求线程并发
+    encode 在 Py3.14 + torch 下曾触发 SIGSEGV,见 gateway conftest)。
     """
+
+    if os.environ.get("AI_EMBEDDING_WARMUP", "1") != "1":
+        return
 
     def _warm() -> None:
         try:
