@@ -159,15 +159,17 @@ async def register(body: RegisterIn):
     try:
         import uuid as _uuid
 
-        from engine_py.tools_registry.order_domain import _merchant_writer_engine
         from sqlalchemy import text as _t
 
-        from gateway_py.merchant_db import ensure_merchant_tables
+        from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
 
         await ensure_merchant_tables()
         customer_id = f"CUST-{_uuid.uuid4().hex[:8].upper()}"
         display = body.displayName.strip() or email.split("@")[0]
-        async with _merchant_writer_engine().begin() as conn:
+        # 分层收口:商户库写入走 gateway 自己的引擎工厂(merchant_db),不再
+        # 反向引用 engine 下划线私有 _merchant_writer_engine(两套池语义并存的
+        # 隐患,2026-09-26 夜审 ①#8)。
+        async with merchant_engine().begin() as conn:
             await conn.execute(
                 _t(
                     "INSERT INTO merchant_customers (customer_id, name, phone, member_level) "
