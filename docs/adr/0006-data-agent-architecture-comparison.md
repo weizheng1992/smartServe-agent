@@ -43,11 +43,11 @@
 
 | 提案 | 本仓现状 | 判定 |
 |---|---|---|
-| 语义层:指标字典/口径/权限,业务名词→物理表 | `metric_registry.py`(17 指标:别名/口径原文/expression/权限标签/样本问法)+ `schema_cards.py` + `StructuredQueryIntent` 闭集意图(= SemQL) | ✅ 已建,更强:DB 注册表单一事实源 + 17 号漂移断言,非 JSON 文件 |
+| 语义层:指标字典/口径/权限,业务名词→物理表 | `metric_registry.py` 加载 `metrics.yaml`(37 指标 × 8 域:别名/口径原文/expression/权限标签/样本问法;加载即校验)+ `schema_cards.py` + `StructuredQueryIntent` 闭集意图(= SemQL) | ✅ 已建,更强:YAML 注册表单一事实源 + 17 号漂移断言,非 JSON 文件 |
 | Text→SemQL→SQL,不直接 Text2SQL | L0 词表/L2 范例/L3 LLM → `StructuredQueryIntent` → `engine.compile` 模板+bindparams | ✅ 同路线,铁律 08-D1 版 |
 | sqlglot 校验/禁 DDL/只读/超时 | `sql_guard.py` 四层白名单 + 只读 reader | ✅(超时/行数上限沿 v2 规格,v3 待核对) |
 | LangGraph 七节点编排 | 轻管线(graph.py intake→resolve→compile→execute→卡片→SSE) | 🟡 刻意取舍(15 号决议:单轮问答轻管线;仓库客服主链路本就是 LangGraph,多轮/重试需求出现时迁入现成) |
-| MetaRAG 召回指标元数据(LlamaIndex/Chroma) | 闭集目录全量进提示词(17 指标)+ query_exemplars 范例向量库(L2,建成已接线) | 🟡 规模触发:指标 >50 再上召回,当前全量更稳 |
+| MetaRAG 召回指标元数据(LlamaIndex/Chroma) | 闭集目录全量进提示词(37 指标)+ query_exemplars 范例向量库(L2,建成已接线) | 🟡 规模触发:指标 >50 再上召回,当前全量更稳 |
 | 模型生成 SQL 节点 | **不做**(08-D1:LLM 只解析意图,永不写 SQL) | ✅ 提案自身也主张 SemQL 优先,节点命名与其主张自相矛盾;本仓彻底版 |
 | self_check 结果自省 | 只有诚实空/响亮失败 | ❌ 缺口,值得补(先规则版:行数 sanity/时间窗一致性/实体命中率) |
 | 结果缓存 | 无 | ❌ 缺口(高频胶囊问法全命中缓存) |
@@ -67,7 +67,7 @@
 | 项 | 不采用理由 | 重新评估触发器 |
 |---|---|---|
 | LangGraph 七节点 | 单轮问答不需要多步循环/断点;轻管线 09 号决议 | 出现多轮追问/失败重试/断点恢复需求 |
-| MetaRAG 召回 | 17 指标全量进提示词(~1.5k token)更稳;检索引入漏召风险 | 指标数 >50 或提示词超预算 |
+| MetaRAG 召回 | 37 指标全量进提示词更稳;检索引入漏召风险 | 指标数 >50 或提示词超预算 |
 | GRPO/QLoRA | 意图分类用 metric_head(bge+线性头)已够且可灰度;SQL 生成微调违反 08-D1 | metric_head 准确率不达 / 闭集外意图激增 |
 | e2b Python 沙箱 | 打破「LLM 不产出执行代码」,须独立评审(容器隔离/只读快照/非核验口径) | 深度归因/自由绘图成为真实需求 |
 | 结果缓存 | 查询频次低,收益未显 | 高频问法统计出现 |

@@ -25,13 +25,13 @@ Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
 │   └── admin/
 │       ├── CONTEXT.md
 │       └── docs/adr/                  ← apps/admin-specific decisions
-└── packages/
-    ├── engine/
+└── services/
+    ├── engine-py/
     │   ├── CONTEXT.md
-    │   └── docs/adr/                  ← packages/engine-specific decisions
-    └── db/
+    │   └── docs/adr/                  ← engine-specific decisions
+    └── gateway-py/
         ├── CONTEXT.md
-        └── docs/adr/                  ← packages/db-specific decisions
+        └── docs/adr/                  ← gateway-specific decisions
 ```
 
 ## Use the glossary's vocabulary

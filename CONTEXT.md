@@ -18,122 +18,97 @@ The card assembly layer that turns finished graph state into rich card payloads 
 
 ## Execution & Gatekeeping Subsystem
 
-### ApprovalGatekeeper (`packages/engine/src/approval/approvalGatekeeper.ts`)
+### ApprovalGatekeeper (`services/engine-py/src/engine_py/approvals/gatekeeper.py`)
 
-A deep domain gatekeeper subsystem unifying security policy evaluation, pending approval lifecycle management, and execution resumption:
+A deep domain gatekeeper subsystem unifying security policy evaluation, pending approval lifecycle management, and execution resumption (Redis SETNX 分布式锁 + 内存后备锁、决议状态机、事务发件箱与断点续跑):
 
-- **Security & Policy Rules**: Encapsulates double-refund checks against physical database status, refund auto-approval threshold evaluation against tenant business configs, and high-value shipping address change interception.
-- **Ticket Lifecycle & Concurrency**: Manages pending ticket creation (`waiting`), timeout auto-expiration (`expired`), distributed Redis SETNX / In-Memory mutual exclusion locks, and決议状态机迁移 (`approved`, `rejected`, `cancelled`, `resolved_by_human`).
-- **Resumption & IM Takeover**: Dispatches instant human IM takeover notifications and resumes suspended LangGraph Agent executions via `WorkflowOrchestrator.dispatchJob`.
+- **Security & Policy Rules**: `check_double_refund` against physical database status, `evaluate_refund_auto_approval` threshold evaluation against tenant business configs, and `evaluate_address_change_policy` high-value shipping address change interception.
+- **Ticket Lifecycle & Concurrency**: Manages pending ticket creation (`waiting`), deadline auto-expiration (`expired`), Redis SETNX locks with in-memory fallback sets, and 决议状态机迁移 (`approved`, `rejected`, `cancelled`, `resolved_by_human`) — status change and `approval_outbox_events` commit **in the same DB transaction** (transactional outbox).
+- **Resumption & IM Takeover**: Resumes suspended executions via the synchronous Fast-Path with the deterministic job id `job_resume_{approvalId}` (physically idempotent); events left `pending` by a failed dispatch are reconciled by `approvals/outbox_worker.py` (`FOR UPDATE SKIP LOCKED`, scheduled by `engine_py/scheduler.py`).
 
-### AgentMemoryEngine (`packages/engine/src/memory/agentMemoryEngine.ts`)
+### Memory Quartet (`services/engine-py/src/engine_py/memory/`)
 
-A unified 4-tier memory facade that encapsulates `ShortMemory`, `LongMemory`, `TaskMemory`, and `EpisodicMemory`:
+The TS `AgentMemoryEngine` facade was not ported as a single class; `run_agent.py` orchestrates the four tiers directly:
 
-- **Atomic Multi-Tier Gathering (`gatherContext`)**: Parallelly fetches sliding conversation history, approved long-term facts, task state, and episodic events in a single call.
-- **Turn Recording (`recordTurn`)**: Structured, non-blocking turn persistence across short messages, profile facts, task plans, and episodic events.
+- `ShortMemory` (`short_memory.py`): sliding recent-history reads from the `messages` table (with self-heal when empty); assistant rows are engine-authored, user rows are gateway-authored (single-write ownership).
+- `LongMemory` (`long_memory.py`): persona facts with cosine retrieval (hard threshold ≥ 0.65).
+- `TaskMemory` (`task_memory.py`): suspended task plans persisted the moment an approval ticket becomes visible (`skills/suspension.py` is the only implementation seam).
+- `EpisodicMemory` (`episodic_memory.py`): importance-scored business events with dual-tier tenant visibility (`scope=global` vs `scope=tenant` + `business_id`).
+- **Parallel Gathering (run_agent)**: history, long-term facts, and episodic events are fetched concurrently per turn and fed into prompt assembly; turn recording writes back assistant messages, extracted facts, plans, and events non-blockingly.
 
-### ContextAssemblyPipeline (`packages/engine/src/memory/contextAssemblyPipeline.ts`)
+### NL2SQL Sandbox — retired, zero callers
 
-A deep context assembly and token budgeting engine:
+The TS `NLMetricQueryEngine` was retired with the TS backend and **not ported** (the TS baseline already had zero call sites). The Data Agent never generates SQL text (iron rule 08-D1): intents resolve to a closed set of `StructuredQueryIntent` shapes and SQL is assembled deterministically from per-metric templates, audited read-only by `analytics/sql_guard.py` (AST SELECT-only + LIMIT). Do not route NL-to-SQL features through any generative path without a new ADR.
 
-- **Structured Context Bundling**: Assembles sliding short memory history, RAG knowledge slices, long-term customer persona facts, and episodic memory into structured prompt sections.
-- **Relevance & Token Budget Pruning**: Dynamically prunes facts and history based on confidence and target token budgets.
+### StepExecutionEngine (`services/engine-py/src/engine_py/graph/nodes/step_execution_engine.py`)
 
-### NLMetricQueryEngine (`packages/tools/src/nlQuery/nlMetricQueryEngine.ts`)
+A deep module facade that orchestrates the execution of individual task plan subtasks:
 
-A deep, consolidated Natural Language to SQL analytics compiler engine:
+- Fast-path tool matching (`try_match_executor_fast_path`) with a serial guard for skill-chain steps; independent steps dispatched concurrently
+- HITL suspension via `skills/suspension.py` (`suspend_for_approval`) — the only ticket-creation seam
+- Tool execution dispatching against a whitelisted base-tools set, plus result logging
+- User-friendly localized (中文) progress event emission
 
-- **Orthogonal AST Parsing**: Normalizes customer colloquialisms, extracts time windows (`TimeRangeResult`), resolves dimensions and group-by columns, parses dynamic value/category filters, and determines top-N / order directions.
-- **Parameterized SQL Compilation**: Safely compiles ASTs into PostgreSQL physical queries respecting multi-tenant boundaries (`business_id`) and store manager scopes without risking SQL injection.
-
-### StepExecutionEngine
-
-A deep module facade that orchestrates the execution of individual task plan subtasks. It encapsulates:
-
-- Fast-path tool matching and LLM tool parameter extraction
-- Delegation to the `ApprovalPolicyEngine` for security and financial gatekeeping
-- Tool execution dispatching and result logging
-- User-friendly localized event emission
-
-### ApprovalPolicyEngine
-
-A domain security gatekeeper enforcing financial safety rules and human-in-the-loop (HITL) policy checks:
-
-- **Double-Refund Prevention**: Checks database status to block duplicate refunds on already-refunded orders.
-- **Auto-Approval Thresholding**: Automatically approves refunds below tenant limits (default $100) without human intervention.
-- **High-Value Address Modification Gate**: Intercepts address changes on high-value orders ($100+) for human approval.
-- **Approval Ticket Lifecycle & Deadline Timeout**: Manages pending approval ticket states (`waiting`, `approved`, `rejected`, `cancelled`, `expired`) and auto-expires tickets past their 24-hour deadline.
-
-### ExecutionOutcome
-
-An immutable result domain object returned by the execution engine, containing:
-
-- Updated task plan (`nextPlan`)
-- Status (`completed`, `pending`, `failed`)
-- Execution result payload or error description
-- Transition/error counter increments
+Financial safety policy checks (double-refund, thresholds) live in `approvals/gatekeeper.py` — the TS `ApprovalPolicyEngine` class was merged there. The TS `ExecutionOutcome` value object was not ported; execution steps return plain dicts (`{task_plan updates, status, result|error, counter increments}`).
 
 ## Database & Persistence Subsystem
 
-### FakePool Simulator (`fakePool.ts`)
+### FakePool — retired with the TS backend
 
-A standalone in-memory SQL database emulator that intercepts PostgreSQL queries during offline/testing modes. It simulates 12+ relational tables (`users`, `threads`, `orders`, `products`, `messages`, `pending_approvals`, etc.) without requiring a live PostgreSQL connection.
+The in-memory SQL emulator was TS-only. The Python stack always talks to real PostgreSQL (SQLAlchemy async + Alembic migrations; contract tests spin sealed testcontainers PG+Redis via `services/gateway-py/tests/conftest.py`).
 
-### Domain Repositories (`packages/db/src/repositories/`)
+### Gateway Repositories (`services/gateway-py/src/gateway_py/`)
 
-Strongly typed domain repositories that decouple application nodes and HTTP API routes from raw database query strings:
+Domain repository modules that decouple HTTP routes from raw SQL:
 
-- `IUserRepository`: User account resolution and registration (`findOrCreateUserByEmail`).
-- `IThreadRepository`: Session thread lifecycle, multi-tenant isolation, and atomic cascade deletions (`getUserThreads`, `createThread`, `deleteThread`).
-- `IMessageRepository`: Conversational message history persistence and ordering (`getMessages`, `addMessage`).
-- `IOrderRepository`: Multi-tenant order status and logistics details lookup (`getOrder`).
+- `conversation_repo.py`: thread lifecycle (idempotent upsert, ownership guards, self-heal claiming), message persistence, takeover status machine (`update_conversation_status` with the `__unset__` sentinel for `assigned_operator_id`), timeline reads.
+- `merchant_db.py` / `merchant_domain.py`: merchant real orders/promotions/vouchers in the separate `agent_merchant` database (raw SQL, read-only reader from the engine side).
+- Engine-side ownership: SQLAlchemy models + Alembic migrations in `services/engine-py/src/engine_py/db.py` / `alembic/`.
 
 ## RAG Knowledge Subsystem
 
-### KnowledgeEngine (`packages/engine/src/rag/knowledgeEngine.ts`)
+### Contextual RAG (`services/engine-py/src/engine_py/rag/contextual_rag.py`)
 
-A unified deep module facade class for all RAG operations across multi-tenant knowledge bases:
+The RAG facade across multi-tenant knowledge bases (see `docs/architecture/contextual-rag.md`):
 
-- **Hybrid Retrieval (`search`)**: Multi-tenant safe search combining Cosine Vector similarity, Portable BM25 keyword matching, Reciprocal Rank Fusion (RRF k=60), and hybridScore >= 0.40 circuit breaker cutoff.
-- **Atomic File Hot Replacement (`replaceFile`)**: Deletes stale file chunks by source URL and re-ingests updated Markdown AST chunks, Anthropic Contextual Summaries, and vector embeddings in a single atomic pass.
-- **Granular Chunk Maintenance (`upsertChunk` & `deleteSource`)**: Direct single-chunk upserts and file-level physical cleanup.
-- **Directory Ingestion (`ingestDirectory`)**: Parallel directory parsing for Frontmatter headers (`businessId`, `category`, `title`) and LLM zero-shot category classification.
+- **Contextual Chunking**: slices gain LLM-written contextual summaries prefixed at ingestion; embeddings stored per chunk.
+- **Tenant Physical Isolation**: retrieval filters `WHERE business_id = :tenant_id` — cross-tenant policy confusion is physically blocked.
+- **Supporting Modules**: `knowledge_files.py` (file-level ingestion/replacement lifecycle) and `product_knowledge.py` (product-facing retrieval).
 
 ## API & Service Layer Subsystem
 
-### ChatSessionOrchestrator (`apps/web/app/api/chat/services/chatSessionOrchestrator.ts`)
+### Chat Router (`services/gateway-py/src/gateway_py/routers/chat.py`)
 
-A deep domain service that decouples chat session initiation, concurrency control, human support detection, and SSE streaming from HTTP route handlers:
+The chat session orchestration surface (absorbs the TS `ChatSessionOrchestrator`):
 
-- **Tenant Quota Guard Enforcement**: Verifies rate limits and token usage bounds before processing requests.
-- **Human Support Session Bypass**: Intercepts queries when an active human takeover (`waiting`) ticket exists and routes messages directly to persistence without triggering AI Agent graph execution.
-- **Request Collapsing & Deduplication**: Employs singleflight request collapsing for in-flight queries and 5-second exact text hash deduplication caching.
-- **Execution Engine Dispatching**: Seamlessly dispatches work to Temporal workflow orchestration or falls back to local LangGraph state graph.
-- **Unified SSE Event Streaming (`createEventStream`)**: Encapsulates Temporal polling loops, LangGraph event journal playback, and heartbeat keepalive frames for client streams.
+- **Job Acceptance & Dispatch**: enqueues agent jobs and drives `engine_py.run_agent.run_agent` (asyncio task with a second-level degradation net around the graph's own fallback).
+- **Human Support Session Bypass**: active human takeover (`human_takeover` status) routes messages to persistence without triggering agent graph execution.
+- **SSE Streaming (`/api/chat/{jobId}/stream`)**: event source is Redis Streams itself — `Last-Event-ID` replay re-reads the stream; heartbeats keep clients alive.
+- **Thread Management**: explicit thread create (idempotent, with onboarding greeting rows), strict-equality user listing, cascade delete preserving audit records.
 
-### ApprovalService (`apps/web/app/api/chat/services/approvalService.ts`)
+### Approval Surface (`services/gateway-py/src/gateway_py/routers/admin.py` + `engine_py.approvals.gatekeeper.process_approval_action`)
 
-A domain service that manages human-in-the-loop (HITL) approval ticket lifecycles and human agent IM sessions:
+HITL ticket lifecycle management (absorbs the TS `ApprovalService`):
 
-- **Pending Ticket Querying**: Retrieves pending approvals joined with business tenant metadata.
-- **IM Human Support Takeover**: Initiates instant human takeover (`start_human_takeover`) and records system notifications into conversation history.
-- **Concurrency & Lock Control**: Coordinates distributed Redis SETNX locking with memory fallback sets to prevent double-submit collisions.
-- **Agent Resumption Dispatching**: Atomically transitions approval ticket statuses (`approved`, `cancelled`, `rejected`, `resolved_by_human`) and resumes suspended LangGraph Agent executions with context prompts.
+- **Pending Ticket Querying**: pending approvals joined with tenant metadata for the admin queue.
+- **Concurrency & Lock Control**: Redis SETNX (`lock:approval:{id}`, PX 5000) with in-memory fallback sets to prevent double-submit collisions.
+- **Agent Resumption Dispatching**: atomically transitions ticket statuses (`approved`, `cancelled`, `rejected`, `resolved_by_human`), writes the outbox event in the same transaction, and dispatches resumption via the deterministic `job_resume_{approvalId}` Fast-Path.
 
-### AgentStreamClient (`apps/web/app/home/utils/agentStreamClient.ts`)
+### AgentStreamClient (`apps/web/src/lib/agentStreamClient.ts`)
 
 A dedicated SSE network stream client that decouples EventSource transport, event parsing, and localized node name mapping from React UI hooks:
 
 - **EventSource Transport Management**: Handles SSE connection establishment, event listener binding, and safe resource cleanup.
 - **Typed Event Dispatching**: Emits structured status, result, and error events to UI subscribers (`onStatus`, `onResult`, `onError`).
 
-### WorkflowOrchestrator (`packages/engine/src/orchestrator/workflowOrchestrator.ts`)
+### Temporal Workflow Layer (`services/engine-py/src/engine_py/temporal/`)
 
-A unified execution orchestrator and fallback defense layer encapsulating Temporal workflow dispatching and local LangGraph simulation:
+Durable execution route (absorbs the TS `WorkflowOrchestrator`):
 
-- **Adaptive Execution Routing (`dispatchJob`)**: Probes Temporal Server connectivity and dynamically routes tasks to Temporal durable workflows or falls back to local high-fidelity LangGraph simulators.
-- **Serverless Anti-Freeze & Promise Tracking**: Automatically binds execution promises to Serverless request context (`waitUntil`) and global execution tracking maps (`getJobExecution`).
+- `workflows.py`: `agentWorkflow` replays the LangGraph node loop as Temporal activities (queue `agent-tasks-py`), with status/plan/result Query handlers.
+- `activities.py`: `run_agent_state_node` bridges single graph nodes into activity executions.
+- `worker.py`: worker entrypoint (started via `bun run worker`).
+- **Local Fallback**: when Temporal is unreachable, jobs run directly as local asyncio graph executions — the gateway never hard-depends on the Temporal cluster (see `docs/deployment.md`).
 
 ## Skills Subsystem (engine-py)
 

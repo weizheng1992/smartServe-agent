@@ -26,7 +26,7 @@
 | :----------- | :------------------------------------------- | :------------------------------------------------ |
 | **标识符**   | `threadId`                                   | `jobId` / `runId`                                 |
 | **生命周期** | **长生命周期**：伴随用户与商户的终身聊天历史 | **短生命周期**：单次任务启动、挂起、恢复、至终结  |
-| **存储介质** | PostgreSQL `messages` 物理表                 | Drizzle ORM `pending_approvals` / `eval_results`  |
+| **存储介质** | PostgreSQL `messages` 物理表                 | SQLAlchemy `pending_approvals` / `eval_results`  |
 | **处理特性** | 状态持久落盘，维护历史上下文连贯性           | 物理无状态（Stateless），支持随时挂起释放与热恢复 |
 
 ### 🆕 2. 零 Fallback 级 UUID 安全会话派发
@@ -39,7 +39,7 @@
 ### 3. 双线程协作与挂起恢复流程
 
 ```
-[前端/用户发送提问] ──(携带 threadId)──> [Next.js API Gate]
+[前端/用户发送提问] ──(携带 threadId)──> [FastAPI 网关 /api/chat]
                                               │
                                               ▼ (生成全新 jobId)
                                     [runAgent(threadId, jobId)]
@@ -49,17 +49,18 @@
                                               │
                       ┌───────────────────────┴───────────────────────┐
                       ▼ (落盘)                                        ▼ (广播)
-       [Drizzle: pending_approvals]                          [SSE Stream: ⚠️安全挂起]
+       [SQLAlchemy: pending_approvals]                       [SSE Stream: ⚠️安全挂起]
    (状态: waiting, 24h Deadline, 释放算力)                 (释放物理连接, 轮询等待)
                       │                                               │
                       │ (客服/管理员在前端面板点击核准/驳回)           │
                       └───────────────────────┬───────────────────────┘
                                               ▼ (POST /api/chat/approvals)
-                                   [System 指令二次唤醒]
+                              [事务发件箱: 状态变更 + outbox 事件同事务落盘]
                                               │
-                                              ▼ (生成新 jobId_resume)
-                                    [runAgent(threadId, jobId_resume)]
+                                              ▼ (同步 Fast-Path, 确定性恢复 id)
+                              [runAgent(threadId, job_resume_{approvalId})]
                                     (读取挂起状态, 完美恢复执行流!)
+                     (Fast-Path 派发失败 → outbox_worker 对账补偿重派)
 ```
 
 ---
@@ -92,233 +93,114 @@
 
 #### ① 安全红线拦截关卡 (Executor Gatekeeper)
 
-- **物理文件**：`packages/engine/src/graph/nodes/executor.node.ts`
+- **物理文件**：`services/engine-py/src/engine_py/graph/nodes/step_execution_engine.py` + `services/engine-py/src/engine_py/approvals/gatekeeper.py`
 - **实现细节**：
-  在 Executor 节点即将调起 `getTool` 之前，通过对 `parsedToolCall.toolName === 'processRefund'` 的硬编码匹配，切入核心安全拦截：
-  ```typescript
-  // 🔒 跨请求状态精准隔离：基于执行步骤中的 approvalId 进行严格精准关联。
-  // 杜绝了由于拉取最新工单（orderBy desc limit 1）而产生跨不同订单/工具调用的审批交叉污染与泄露漏洞。
-  let latestApproval: any = null;
-  const existingApprovalId = stepToRun.result?.approvalId;
-  if (existingApprovalId) {
-    const approvalsList = await drizzle
-      .select()
-      .from(pendingApprovals)
-      .where(eq(pendingApprovals.id, existingApprovalId))
-      .limit(1);
-    latestApproval = approvalsList[0];
-  }
+  执行引擎对高危动作（`requiresApproval` / 显式资金阈值）切入 `ApprovalGatekeeper` 安全拦截；恢复时**基于执行步骤中的 approvalId 严格精准关联**，杜绝「拉最新工单」式的跨订单审批交叉污染；无精准 ID 时降级按 `actionType + 关键参数（orderId）` 一致性检索。首次遭遇高危操作（无工单或工单仍 `waiting`）时：
+  - 工单 ID 一律 **UUID 格式**（网关与引擎双重校验，PostgreSQL uuid 列强类型友好）；
+  - 挂起即持久化：`skills/suspension.py::suspend_for_approval` 是**唯一实现缝**——工单落盘、挂起计划写 TaskMemory、响应装配一次完成（恢复计划必须在审批单对 2s 轮询器可见的同一时刻已在 TaskMemory 就位）；
+  - 当前步骤强制维持 `pending`，步骤结果注入 `{waitingForApproval: true, approvalId}` 信号给 validator。
 
-  // 若无精准 ID 匹配，降级通过 actionType + 关键参数进行一致性检索
-  if (!latestApproval) {
-    const approvalsList = await drizzle
-      .select()
-      .from(pendingApprovals)
-      .where(eq(pendingApprovals.threadId, state.threadId))
-      .orderBy(desc(pendingApprovals.createdAt));
-    latestApproval = approvalsList.find((app: any) => {
-      const actionPayload = app.actionPayload || {};
-      const payloadArgs = actionPayload.args || {};
-      const currentArgs = parsedToolCall.args || {};
-      const isSameAction = app.actionType === parsedToolCall.toolName;
-      if (!isSameAction) return false;
-      if (currentArgs.orderId && payloadArgs.orderId) {
-        return (
-          String(currentArgs.orderId).trim().toLowerCase() ===
-          String(payloadArgs.orderId).trim().toLowerCase()
-        );
-      }
-      return JSON.stringify(payloadArgs) === JSON.stringify(currentArgs);
-    });
-  }
-
-  // 如果还没有记录，或者原工单状态仍是 "waiting" (代表首次遭遇高危操作)
-  if (!latestApproval || latestApproval.status === "waiting") {
-    let approvalId = latestApproval?.id;
-    if (!latestApproval) {
-      // 🔒 使用标准 RFC 4122 UUIDv4，100% 避免 PostgreSQL UUID 强类型字段写入崩溃
-      approvalId = require("node:crypto").randomUUID();
-      // 自动落盘插入一条物理工单，状态为 waiting，设置 24 小时超时
-      await drizzle.insert(pendingApprovals).values({
-        id: approvalId,
-        threadId: state.threadId,
-        actionType: parsedToolCall.toolName || "processRefund",
-        actionPayload: {
-          description: stepToRun.description,
-          args: parsedToolCall.args,
-          stepIndex: currentIndex,
-        },
-        status: "waiting",
-        deadline: new Date(Date.now() + 24 * 3600 * 1000),
-      });
-    }
-
-    // 核心：强制将当前步骤维持在 'pending'，并向 validator 传递 waitingForApproval: true 信号
-    const updatedStep = {
-      ...stepToRun,
-      status: "pending" as const,
-      result: { waitingForApproval: true, approvalId },
-    };
-    updatedSubtasks[currentIndex] = updatedStep;
-    return { taskPlan: { ...currentPlan, subtasks: updatedSubtasks } };
-  }
-  ```
+  恢复执行流经拦截关卡时，`BLOCKED_APPROVAL_STATES = {"expired", "cancelled", "rejected", "error"}` 的工单**物理阻断真实工具调用**（防重置/防重复扣款），仅装配告知性结果放行流程走向终结。
 
 #### ② 审批超时自动熔断解挂 (Timeout Auto-expiration)
 
-- **物理文件**：`packages/engine/src/graph/nodes/executor.node.ts`
+- **物理文件**：`services/engine-py/src/engine_py/approvals/gatekeeper.py`（`evaluate_pending_approval_state`）
 - **实现细节**：
-  当图重新被唤醒，或者引擎再次路由到拦截关卡时，若最新工单状态为 `waiting`，系统会原子级比对当前时间与工单的 `deadline`：
-  ```typescript
-  // ⏰ 检查处于等待中的审批工单是否已经超过截止时间 (Deadline Check)
-  if (latestApproval && latestApproval.status === "waiting") {
-    const now = new Date();
-    const isExpired =
-      latestApproval.deadline && now > new Date(latestApproval.deadline);
-
-    if (isExpired) {
-      console.log(
-        `[Approval Gate] ⏰ 审批工单 [ID: ${latestApproval.id}] 已超时自动熔断！`,
-      );
-
-      // 1. 物理更新数据库中的状态为 'expired'
-      await drizzle
-        .update(pendingApprovals)
-        .set({ status: "expired" })
-        .where(eq(pendingApprovals.id, latestApproval.id));
-
-      // 2. 标记当前步骤为 failed，并注入超时描述，解挂任务使其流向 Validator -> Finish 正常终结并告知用户
-      const updatedStep = {
-        ...stepToRun,
-        status: "failed" as const,
-        result: {
-          expiredByTimeout: true,
-          error: `人工审批已超时。大额资金退款未获得授权，暂未办理。`,
-          message: `⚠️ 安全核发超时：人工审核申请 (ID: ${latestApproval.id}) 已超过截止审批时间 (${new Date(latestApproval.deadline).toLocaleString()}) 仍未获得核准，系统已自动实施超时安全解挂熔断。退款暂未执行，请联系客服转人工处理。`,
-          approvalId: latestApproval.id,
-        },
-      };
-      updatedSubtasks[currentIndex] = updatedStep;
-      return { taskPlan: { ...currentPlan, subtasks: updatedSubtasks } };
-    }
-  }
+  当图重新被唤醒，或引擎再次路由到拦截关卡时，若最新工单状态为 `waiting`，系统会原子级比对当前时间与工单的 `deadline`（时区感知），逾期即物理更新 `status = 'expired'` 并装配告知性失败结果解挂：
+  ```python
+  if latest_approval and latest_approval.status == "waiting":
+      is_expired = bool(latest_approval.deadline and now > latest_approval.deadline)
+      if is_expired:
+          await session.execute(text(
+              "UPDATE pending_approvals SET status = 'expired' WHERE id = CAST(:aid AS uuid)"
+          ).bindparams(aid=latest_approval.id))
+          await session.commit()
+          return {"state": "expired", "approvalId": str(latest_approval.id),
+                  "error": "人工审批已超时。大额资金退款未获得授权，暂未办理。",
+                  "message": "⚠️ 安全核发超时：……系统已自动实施超时安全解挂熔断。……"}
   ```
-  - **架构优势**：避免了审批人在下班或长假期间由于无响应，导致用户的提问状态 and 后台任务被无限期“挂死”或阻塞。通过自动降级熔断，既保障了金融资金的 100% 物理红线安全，又保证了对话交互的高可靠闭环，提供了极为友好的人机协同降级体验。
+  另有**线程扫描只认领 waiting 工单**的幂等挂起纪律：`approved` 等终态工单只能经 `existingApprovalId`（审批恢复路径）复用——否则历史已批工单会被当作本次执行的授权，静默绕过 HITL 人工审核（2026-09-05 双退款事故旁路收口）。
+  - **架构优势**：避免了审批人在下班或长假期间由于无响应，导致用户的提问状态和后台任务被无限期“挂死”或阻塞。通过自动降级熔断，既保障了金融资金的 100% 物理红线安全，又保证了对话交互的高可靠闭环，提供了极为友好的人机协同降级体验。
 
 #### ③ 无状态挂起与优雅截断 (Stateless Suspension)
 
 - **物理文件**：
-  1. `packages/engine/src/graph/nodes/validator.node.ts`
-  2. `packages/engine/src/graph/buildGraph.ts`
+  1. `services/engine-py/src/engine_py/graph/nodes/validator.py`
+  2. `services/engine-py/src/engine_py/graph/build_graph.py`
 - **实现细节**：
-  - **Validator 旁路**：`validatorNode` 识别到 `step.result.waitingForApproval === true` 时，**不推进 `currentStepIndex`，保留现场原封不动返回**。
-  - **条件边截断**：在 `buildGraph.ts` 编译的条件路由中，一经检测到存在等待审批的步骤，**直接回退至 `finishNode` 并流向 `END` 终止执行**：
-  ```typescript
-  const hasWaitingStep = plan.subtasks.some(
-    (st) => st.result?.waitingForApproval,
-  );
-  if (hasWaitingStep) {
-    logger.info(
-      { threadId: state.threadId },
-      "Detected pending approval, routing to finish early to safely suspend.",
-    );
-    return "finish";
-  }
+  - **Validator 旁路**：validator 节点识别到 `step.result.waitingForApproval`（含嵌套 output 层）时，**不推进 `currentStepIndex`、不计工具错误、保留现场原封不动返回**（全程零 LLM）。
+  - **条件边截断**：在 `build_graph.py` 的 `route_after_validator` 条件路由中，一经检测到存在等待审批的步骤，**直接流向 `finish` 并终止执行**（安全挂起）：
+  ```python
+  if any((st.get("result") or {}).get("waitingForApproval") for st in subtasks):
+      return "finish"
   ```
 
 #### ④ 双向核决与热唤醒 API (REST Approvals Router)
 
-- **物理文件**：`apps/web/app/api/chat/approvals/route.ts`
+- **物理文件**：`services/gateway-py/src/gateway_py/routers/admin.py`（`/api/approvals` 与 `/api/chat/approvals` 双前缀别名）+ `engine_py.approvals.gatekeeper.process_approval_action`
 - **实现细节**：
-  提供统一的 `POST` 核决端点。客服在前端点击 “Approve (核发)” 或 “Reject (驳回)”。
-  - **如果是 Approve**：更新工单状态为 `approved`，二次唤醒时注入 `System: Human approval granted. Please execute...`
-  - **如果是 Reject**：更新工单状态为 `rejected`，将客服输入的修改建议（如：_“用户只退了一件衣服，请重新申请 $200 退款”_）写入 `rejectionReason`，注入 `System: Human approval rejected. Reason: xxx. Please replan...`
-  - **热恢复**：API 自动生成全新的 `jobId`，异步调用 `runAgent` 重启图引擎执行，完全不占用挂起期间的连接资源。
+  提供统一的 `POST` 核决端点。客服在前端点击 “Approve (核发)” 或 “Reject (驳回)”；调用方可声明 `actor/actorRole`（核准人落 `actionPayload.resolvedBy/resolvedByRole`，管理台「审批人/驳回理由」列据此显示真实来源），缺省按调用面角色（`x-role` 头）兜底。
+  - **事务发件箱**：决议状态变更与 `approval_outbox_events` 事件在**同一数据库事务**中原子提交；
+  - **如果是 Approve**：更新工单状态为 `approved`，二次唤醒时注入 `System: Human approval granted. Please execute the requested action.`
+  - **如果是 Reject**：更新工单状态为 `rejected`，将客服输入的修改建议写入 `rejectionReason`，注入 `System: Human approval rejected. Reason: xxx. Please replan...`
+  - **热恢复**：由同步 Fast-Path 以**确定性 JobId `job_resume_{approvalId}`** 派发 `run_agent` 重启图引擎（派发成功即标记事件 `completed`），完全不占用挂起期间的连接资源；Fast-Path 失败遗留的 `pending` 事件由 `approvals/outbox_worker.py` 对账补偿（`FOR UPDATE SKIP LOCKED`，10s 年龄阈值避开竞争，`processing` 停滞 >5min 重入队），由 `engine_py/scheduler.py` 每 30s 周期调度。
 
 #### ⑤ 用户主动取消操作链路 (User Cancellation Bypass)
 
 - **物理文件**：
-  1. `apps/web/app/api/chat/approvals/route.ts` (核决 POST 接口端点，支持 `action: 'cancel'`)
-  2. `packages/engine/src/graph/nodes/executor.node.ts` (执行器节点，对 `'cancelled'` 状态的防重置与无损拦截)
+  1. `services/gateway-py/src/gateway_py/routers/admin.py`（核决 POST 端点，支持 `action: 'cancel'`）
+  2. `services/engine-py/src/engine_py/approvals/gatekeeper.py` + `graph/nodes/step_execution_engine.py`（`BLOCKED_APPROVAL_STATES` 对 `'cancelled'` 的防重置与无损拦截）
 - **实现细节**：
-  - **接口接收取消决议**：在 `POST /api/chat/approvals` 中，如果用户在等待期间发起取消，前端向核决端点提交 `action: 'cancel'`。API 立即更新工单 `status` 为 `'cancelled'`，并使用如下特定系统指令重新拉起 Agent：
+  - **接口接收取消决议**：用户在等待期间发起取消时，前端向核决端点提交 `action: 'cancel'`。门禁更新工单 `status` 为 `'cancelled'`（同事务写发件箱），并使用如下特定系统指令重新拉起 Agent：
     `"System: Human approval cancelled by the user. Please stop the requested action, abort any tool calls for this refund, and explain to the user that the action has been successfully cancelled per their request."`
-  - **执行器防重入物理拦截**：当 Agent 恢复执行并流经 `executorNode` 关卡时，若检查到最新工单状态是 `'cancelled'`，立刻终止后续真实扣款调用：
-  ```typescript
-  else if (latestApproval.status === 'cancelled') {
-    console.log(`[Approval Gate] 🚫 该退款操作已被用户主动取消！工单 ID: ${latestApproval.id}`);
-
-    const updatedStep = {
-      ...stepToRun,
-      status: 'failed' as const,
-      result: {
-        cancelledByUser: true,
-        error: '用户已取消此项操作。',
-        message: '⚠️ 您已主动取消了此笔退款申请。相关操作已被物理终止。',
-        approvalId: latestApproval.id
-      }
-    };
-    updatedSubtasks[currentIndex] = updatedStep;
-    return { taskPlan: { ...currentPlan, subtasks: updatedSubtasks } };
-  }
-  ```
-  - **无损跳过与告知**：状态设为 `'failed'`（且非管理员驳回不回溯到 planner），使执行流顺畅流入 Validator -> Finish。大模型接收到取消上下文，在 Finish 节点极其柔和地宣告：“_您的退款已成功应您的要求取消，资金未发生任何划扣..._”。
+  - **执行器防重入物理拦截**：恢复执行流经拦截关卡时，命中 `BLOCKED_APPROVAL_STATES`（含 `'cancelled'`）即刻终止后续真实扣款调用，步骤标 `failed` 并装配 `cancelledByUser: true` + 告知性 message 的结果载荷。
+  - **无损跳过与告知**：状态为 `failed`（且非管理员驳回，不回溯到 planner），执行流顺畅流入 Validator -> Finish。大模型接收到取消上下文，在 Finish 节点极其柔和地宣告：“_您的退款已成功应您的要求取消，资金未发生任何划扣..._”。
 
 #### ⑥ 认知回溯与倒退规划 (Cognitive Backtracking)
 
 - **物理文件**：
-  1. `packages/engine/src/graph/buildGraph.ts`
-  2. `packages/engine/src/graph/nodes/planner.node.ts`
+  1. `services/engine-py/src/engine_py/graph/build_graph.py`（`route_after_validator`）
+  2. `services/engine-py/src/engine_py/graph/nodes/planner.py`
 - **实现细节**：
-  - **图指针打倒挡**：当核决返回驳回结果，`executorNode` 恢复执行，将当前子步骤标为 `failed`。在条件路由中，一旦探测到该状态，**强制将图指针由 validator 倒档推回 `planner` 节点**：
-  ```typescript
-  const hasJustBeenRejected = plan.subtasks.some(
-    (st) =>
-      st.status === "failed" &&
-      st.result?.rejectedByAdmin &&
-      !st.result?.replanned,
-  );
-  if (hasJustBeenRejected) {
-    logger.info(
-      { threadId: state.threadId },
-      "Detected administrator rejection, routing BACK to planner for cognitive re-planning!",
-    );
-    plan.subtasks = plan.subtasks.map((st) =>
-      st.status === "failed" && st.result?.rejectedByAdmin
-        ? { ...st, result: { ...st.result, replanned: true } }
-        : st,
-    );
-    return "planner";
-  }
+  - **图指针打倒挡**：管理员驳回后执行器恢复，将当前子步骤标 `failed` + `rejectedByAdmin: True`。条件路由一旦探测到该状态（且未带 `replanned` 标记），**强制将图指针由 validator 倒档推回 `planner` 节点**；planner 重规划后为已处理步骤打 `replanned: True`，防止同一驳回被无限回放：
+  ```python
+  if any(
+      st.get("status") == "failed"
+      and (st.get("result") or {}).get("rejectedByAdmin")
+      and not (st.get("result") or {}).get("replanned")
+      for st in subtasks
+  ):
+      return "planner"
   ```
-  - **Planner 重新受训与规划**：在 `plannerNode` 中，拉取历史步骤里的驳回原因并作为 **`[CRITICAL ADVISORY]` 强上下文**喂给 LLM，迫使其在保持原 Goal 的同时，绕开已被封死的路径，重新规划合规 the `subtasks[]`：
-  ```typescript
-  const rejectedStep = priorPlan.subtasks.find(
-    (st) => st.status === "failed" && st.result?.rejectedByAdmin,
-  );
-  if (rejectedStep) {
-    rejectionContext = `\n\n[CRITICAL ADVISORY]: A previous step "${rejectedStep.description}" was REJECTED by the Administrator.
-  Rejection feedback/reason: "${rejectedStep.result?.rejectionReason || "No reason provided"}".
-  Please replan and output an alternative approach that respects this rejection. Do NOT suggest the same rejected action. If a smaller refund was suggested, adjust the amount. If the user request cannot be fulfilled, generate a step to explain the reason politely to the user.`;
-  }
+  - **Planner 重新受训与规划**：planner 节点拉取历史步骤里的驳回原因并作为 **`[CRITICAL ADVISORY]` 强上下文**喂给 LLM，迫使其在保持原 Goal 的同时，绕开已被封死的路径，重新规划合规的 `subtasks[]`：
+  ```python
+  rejected_step = next(
+      (st for st in prior_subtasks
+       if st.get("status") == "failed" and (st.get("result") or {}).get("rejectedByAdmin")),
+      None,
+  )
+  if rejected_step:
+      rejection_reason = (rejected_step.get("result") or {}).get("rejectionReason") or "No reason provided"
+      rejection_context = (
+          f'\n\n[CRITICAL ADVISORY]: A previous step "{rejected_step.get("description")}" was '
+          f'REJECTED by the Administrator.\nRejection feedback/reason: "{rejection_reason}".\n'
+          "Please replan and output an alternative approach that respects this rejection. ..."
+      )
   ```
 
 ---
 
 ## 四、 工业级生产环境（Production）优化方向
 
-为了在千万级高并发、多商户隔离环境下保持绝对的强一致性与可用性，建议叠加以下物理优化细节：
+为了在千万级高并发、多商户隔离环境下保持绝对的强一致性与可用性，以下三项已落地（原「建议」随 Python 移植转为现状）：
 
-1. **分布式并发锁（Distributed Lock）**：
-   在核决 `POST` 接口恢复执行时，针对同一个 `threadId` 使用 **Redis 分布式锁（SETNX）**进行防护，防止在极端情况下管理员快速重复点击按钮，导致启动两个并行的 `runAgent` 造成状态紊乱。
-2. **Temporal 强一致状态流集成 (Event Sourcing)**：
-   对于超长等待（如管理员可能几天后才审批）的高价值金融工具，使用 **Temporal 状态工作流** 替换纯内存/简单轮询。
-   - 当进入 `humanReviewGate` 时，Temporal 的 Activity 发起 `workflow.ExternalSignal` 挂起；
-   - 管理员审批后，API 向 Temporal 抛送信号（Signal），热拉起工作流从 Checkpoint 精准恢复，防止服务器在审批中途发生硬件重建导致执行流丢失。
-3. **安全核决防越权（RBAC & Signature）**：
-   对 `POST /api/chat/approvals` 加设严格的商户鉴权，防止越权拦截与提权操作。
+1. **分布式并发锁（Distributed Lock）✅ 已实现**：
+   核决入口以 **Redis SETNX**（`lock:approval:{approvalId}`，PX 5000）+ 进程内 `_local_locks` 后备锁双重防护，管理员快速重复点击不会派发两个并行的 `runAgent` 造成状态紊乱（`gatekeeper.py` `process_approval_action`）。
+2. **Temporal 强一致状态流集成 (Durable Execution) ✅ 路线已建**：
+   `engine_py/temporal/` 提供 `agentWorkflow`（LangGraph 节点循环以 Activity 重放，队列 `agent-tasks-py`）+ 状态/计划/结果 Query handler，审批挂起期间执行流可从 Checkpoint 精准恢复，防服务器硬件重建丢失执行流。**诚实说明**：审批恢复的现役通道是事务发件箱 + 确定性 `job_resume_{approvalId}` 同步 Fast-Path（非 TS 提案设想的 `ExternalSignal`）；Temporal 不可达时本地 asyncio 图执行兜底，网关不硬依赖 Temporal 集群（见 `docs/deployment.md`）。
+3. **安全核决防越权（RBAC）✅ 已实现**：
+   管理面经 Bearer JWT + 商户归属校验（`rbac.find_staff`），审批人身份 `actor/actorRole` 随核决请求声明并落 `resolvedBy/resolvedByRole` 审计；analytics 面以 `x-tenant-id` 显式声明租户边界。防止越权拦截与提权操作。
 
 ---
 
-_文档编写日期：2026-07-27_
-_架构状态：全量生产编译通过 (TypeScript 100% Type-Safe)_
+_文档编写日期：2026-07-27；2026-09-26 随 Python 移植校正（决策环 = engine-py LangGraph + gatekeeper 事务发件箱 + 确定性恢复；TS 物理文件映射已全面重定位）_
