@@ -1,4 +1,5 @@
-import { authHeaders } from '@/lib/api';
+import { api, authHeaders } from '@/lib/api';
+import type { OrderAuditLog, OrderDetail } from '@/lib/api';
 import * as pageContext from '@/lib/page-context';
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApprovalMachine } from 'ui';
@@ -51,6 +52,12 @@ export function useWorkbenchState(initialTab: string) {
   const [selectedLog, setSelectedLog] = useState<AuditLogRow | null>(null);
   const [copiedLog, setCopiedLog] = useState(false);
   const [inspectingApproval, setInspectingApproval] = useState<ApprovalItem | null>(null);
+  // 订单详情抽屉(orderId null = 关闭;详情独立拉取,不随 8s 轮询整卡刷新)
+  const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
+  const [orderDetail, setOrderDetail] = useState<OrderDetail | null>(null);
+  const [detailAuditLogs, setDetailAuditLogs] = useState<OrderAuditLog[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [isTakingOver, setIsTakingOver] = useState(false);
   const [rejectingApprovalId, setRejectingApprovalId] = useState<string | null>(null);
   const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
@@ -287,6 +294,35 @@ export function useWorkbenchState(initialTab: string) {
     }
   };
 
+  /** 打开订单详情抽屉:拉详情 + 审计时间线(404/失败以 detailError 呈现,不静默空白)。 */
+  const openOrderDetail = useCallback(async (orderId: string) => {
+    setDetailOrderId(orderId);
+    setDetailLoading(true);
+    setDetailError(null);
+    setOrderDetail(null);
+    setDetailAuditLogs([]);
+    try {
+      const body = await api.orders.detail(orderId);
+      if (body.success && body.order) {
+        setOrderDetail(body.order);
+        setDetailAuditLogs(body.auditLogs || []);
+      } else {
+        setDetailError(body.error || '订单详情加载失败');
+      }
+    } catch {
+      setDetailError('网络请求失败');
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const closeOrderDetail = useCallback(() => {
+    setDetailOrderId(null);
+    setOrderDetail(null);
+    setDetailAuditLogs([]);
+    setDetailError(null);
+  }, []);
+
   // ---- 派生:计数与各域过滤集(useMemo;过滤谓词纯函数内聚在本 hook) ----
   const pendingApprovalsCount = useMemo(() => approvals.filter((a) => a.status === 'waiting').length, [approvals]);
   const paidOrdersCount = useMemo(() => orders.filter((o) => o.status === 'PAID').length, [orders]);
@@ -383,6 +419,13 @@ export function useWorkbenchState(initialTab: string) {
     setCopiedLog,
     inspectingApproval,
     setInspectingApproval,
+    detailOrderId,
+    orderDetail,
+    detailAuditLogs,
+    detailLoading,
+    detailError,
+    openOrderDetail,
+    closeOrderDetail,
     isTakingOver,
     setIsTakingOver,
     rejectingApprovalId,

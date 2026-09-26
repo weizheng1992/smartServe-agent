@@ -1,6 +1,7 @@
 import { ApprovalContextDrawer } from 'ui';
 import { ApprovalsTab } from './components/approvals-tab';
 import { LiveDeskTab } from './components/live-desk-tab';
+import { OrderDetailDrawer } from './components/order-detail-drawer';
 import { OrdersTab } from './components/orders-tab';
 import { PayloadDialog } from './components/payload-dialog';
 import { RejectDialog } from './components/reject-dialog';
@@ -67,6 +68,7 @@ function WorkbenchShell({ scope }: { scope: WorkbenchScope }) {
       />
 
       <ShipDialog />
+      <OrderDetailDrawer />
       <PayloadDialog />
       <RejectDialog />
     </div>

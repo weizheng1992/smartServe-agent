@@ -136,6 +136,51 @@ export interface CustomerCoupon {
 
 export type { SseFrame };
 
+/** 订单详情(网关 GET /api/admin/orders/{orderId};camelCase,与 storefront SPI 同形)。 */
+export interface OrderDetailItem {
+  skuId: string;
+  productId: string;
+  title: string;
+  quantity: number;
+  price: number | null;
+  imageUrl: string | null;
+  specSummary: string | null;
+}
+
+export interface OrderTracking {
+  carrier?: string;
+  trackingNumber?: string;
+  timeline?: Array<{ time?: string; status?: string; description?: string; location?: string }>;
+}
+
+export interface OrderDetail {
+  orderId: string;
+  userId: string;
+  status: string;
+  totalAmount: number;
+  discountAmount: number;
+  originalAmount: number;
+  currency: string;
+  createdAt: string;
+  shippingAddress: { recipientName?: string; phone?: string; fullAddress?: string } | null;
+  tracking: OrderTracking | null;
+  isAddressModifiable: boolean;
+  isReturnable: boolean;
+  items: OrderDetailItem[];
+}
+
+/** 订单审计时间线行(merchant_audit_logs 裸行;snake_case)。 */
+export interface OrderAuditLog {
+  id: number;
+  action_type: string;
+  order_id: string;
+  idempotency_key: string;
+  operator: string;
+  payload: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+  created_at: string;
+}
+
 export interface MenuNode {
   id: string;
   name: string;
@@ -328,5 +373,13 @@ export const api = {
     remove: async (id: string) => fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'DELETE' }),
     redeem: async (id: string, orderId: string) =>
       fetchJson(`/api/admin/analytics/promotions/${id}/redeem`, { method: 'POST', body: JSON.stringify({ orderId }) }),
+  },
+
+  /** 订单(详情;400 级错误经 fetchJson 返回 body 由调用方按 success 呈现)。 */
+  orders: {
+    detail: async (
+      orderId: string,
+    ): Promise<{ success: boolean; order?: OrderDetail; auditLogs?: OrderAuditLog[]; error?: string }> =>
+      fetchJson(`/api/admin/orders/${encodeURIComponent(orderId)}`),
   },
 };

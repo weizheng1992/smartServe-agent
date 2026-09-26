@@ -193,6 +193,21 @@ async def get_order_detail(order_id: str) -> dict | None:
         return _order_from_row(row, items)
 
 
+async def get_order_audit_logs(order_id: str) -> list[dict]:
+    """订单关联审计时间线(SPI 动作/发货/退款):商户后台订单详情抽屉消费。"""
+    await ensure_merchant_tables()
+    async with merchant_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT * FROM merchant_audit_logs WHERE order_id = :oid ORDER BY created_at ASC"),
+                {"oid": order_id},
+            )
+        ).mappings().all()
+        return [
+            {k: (v.isoformat() if isinstance(v, _dt.datetime) else v) for k, v in dict(r).items()} for r in rows
+        ]
+
+
 async def execute_order_action(req: dict, signature: str | None = None) -> dict:
     await ensure_merchant_tables()
     action_id = f"ACT_{_now_ms()}_{secrets.token_hex(2)}"

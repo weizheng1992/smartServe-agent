@@ -21,6 +21,7 @@ import { useWorkbench } from '../workbench';
 export function OrdersTab() {
   const {
     filteredOrders,
+    openOrderDetail,
     orderSearchQuery,
     orderStatusFilter,
     orders,
@@ -195,23 +196,30 @@ export function OrdersTab() {
                       )}
                     </td>
                     <td className="p-3.5 text-right">
-                      {o.status === 'PAID' ? (
+                      <div className="flex items-center justify-end gap-1.5">
                         <Button
                           type="button"
                           size="sm"
-                          onClick={() => {
-                            setShippingOrderId(o.order_id);
-                            setTrackingNumberInput(`SF${Math.floor(10000000000 + Math.random() * 90000000000)}`);
-                          }}
-                          className="bg-blue-600 text-white hover:bg-blue-500 h-7 text-xs font-semibold cursor-pointer"
+                          variant="outline"
+                          onClick={() => openOrderDetail(o.order_id)}
+                          className="h-7 cursor-pointer text-xs font-semibold"
                         >
-                          一键发货
+                          详情
                         </Button>
-                      ) : (
-                        <span className="text-slate-400 text-[11px]">
-                          {o.status === 'SHIPPED' ? '运输中' : '已归档'}
-                        </span>
-                      )}
+                        {o.status === 'PAID' && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              setShippingOrderId(o.order_id);
+                              setTrackingNumberInput(`SF${Math.floor(10000000000 + Math.random() * 90000000000)}`);
+                            }}
+                            className="bg-blue-600 text-white hover:bg-blue-500 h-7 text-xs font-semibold cursor-pointer"
+                          >
+                            一键发货
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

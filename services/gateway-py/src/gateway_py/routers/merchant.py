@@ -241,6 +241,19 @@ async def admin_orders_ship(
         return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
 
 
+@router.get("/api/admin/orders/{order_id}")
+async def admin_order_detail(order_id: str):
+    """订单详情 = 行项目(camelCase 序列化,与 storefront /spi/v1/orders/detail 同形)+ 该订单审计时间线。"""
+    try:
+        order = await mds.get_order_detail(order_id)
+        if order is None:
+            return JSONResponse(status_code=404, content={"success": False, "error": f"订单 {order_id} 不存在"})
+        logs = await mds.get_order_audit_logs(order_id)
+        return {"success": True, "order": order, "auditLogs": logs}
+    except Exception as err:
+        return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
+
+
 @router.get("/api/admin/approvals")
 async def admin_approvals(
     tenantId: str | None = Query(None),
