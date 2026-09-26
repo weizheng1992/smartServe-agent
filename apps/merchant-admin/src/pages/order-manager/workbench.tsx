@@ -1,4 +1,4 @@
-import { api, authHeaders } from '@/lib/api';
+import { api } from '@/lib/api';
 import type { OrderAuditLog, OrderDetail } from '@/lib/api';
 import * as pageContext from '@/lib/page-context';
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -70,12 +70,9 @@ export function useWorkbenchState(initialTab: string) {
   const loadConversationMessages = useCallback(async (threadId: string) => {
     if (!threadId) return;
     try {
-      const resp = await fetch(`/api/admin/conversations/${threadId}?tenantId=aurora`);
-      if (resp.ok) {
-        const json = await resp.json();
-        if (json.success && json.data) {
-          setActiveThreadMessages(json.data.messages || []);
-        }
+      const json = await api.conversations.messages(threadId);
+      if (json.success && json.data) {
+        setActiveThreadMessages(json.data.messages || []);
       }
     } catch (err) {
       console.error('Failed to fetch thread timeline:', err);
@@ -85,43 +82,35 @@ export function useWorkbenchState(initialTab: string) {
   const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      const [orderResp, appResp, convResp] = await Promise.all([
-        fetch('/api/admin/orders').catch(() => null),
-        fetch('/api/admin/approvals?tenantId=aurora').catch(() => null),
-        fetch('/api/admin/conversations?tenantId=aurora').catch(() => null),
+      // 单域失败不拖垮面板:各自 catch 落 null,成功的域照常渲染
+      const [orderData, appData, convData] = await Promise.all([
+        api.orders.list().catch(() => null),
+        api.approvals.list().catch(() => null),
+        api.conversations.list().catch(() => null),
       ]);
 
-      if (orderResp?.ok) {
-        const data = await orderResp.json();
-        if (data.success) {
-          setOrders(data.orders || []);
-          setAuditLogs(data.auditLogs || []);
-        }
+      if (orderData?.success) {
+        setOrders(orderData.orders || []);
+        setAuditLogs(orderData.auditLogs || []);
       }
 
-      if (appResp?.ok) {
-        const appData = await appResp.json();
-        if (appData.success) {
-          setApprovals(appData.approvals || []);
-        }
+      if (appData?.success) {
+        setApprovals(appData.approvals || []);
       }
 
-      if (convResp?.ok) {
-        const convData = await convResp.json();
-        if (convData.success) {
-          const rawList = convData.conversations || [];
-          const convList: ConversationItem[] = rawList.map((item: any) => ({
-            ...item,
-            id: item.id || item.threadId,
-            threadId: item.threadId || item.id,
-            lastMessage: item.lastMessage || item.lastMessageSnippet,
-          }));
-          setConversations(convList);
-          if (convList.length > 0 && !activeThreadId) {
-            const initialId = convList[0].threadId || convList[0].id;
-            setActiveThreadId(initialId);
-            loadConversationMessages(initialId);
-          }
+      if (convData?.success) {
+        const rawList = convData.conversations || [];
+        const convList: ConversationItem[] = rawList.map((item: any) => ({
+          ...item,
+          id: item.id || item.threadId,
+          threadId: item.threadId || item.id,
+          lastMessage: item.lastMessage || item.lastMessageSnippet,
+        }));
+        setConversations(convList);
+        if (convList.length > 0 && !activeThreadId) {
+          const initialId = convList[0].threadId || convList[0].id;
+          setActiveThreadId(initialId);
+          loadConversationMessages(initialId);
         }
       }
     } catch (err) {
@@ -195,14 +184,7 @@ export function useWorkbenchState(initialTab: string) {
   const handleTakeover = async (threadId: string) => {
     setIsTakingOver(true);
     try {
-      await fetch('/api/admin/approvals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          threadId,
-          action: 'start_human_takeover',
-        }),
-      });
+      await api.approvals.takeover(threadId);
       await fetchDashboardData();
       if (activeThreadId) {
         await loadConversationMessages(activeThreadId);
@@ -240,15 +222,7 @@ export function useWorkbenchState(initialTab: string) {
           apiEndpoint: '/api/admin/approvals',
         });
       } else {
-        const res = await fetch('/api/admin/approvals', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            threadId: activeThreadId,
-            action: 'start_human_takeover',
-          }),
-        });
-        const d = await res.json();
+        const d = await api.approvals.takeover(activeThreadId);
         if (d.approvalId) {
           await executeHumanReplyAction({
             approvalId: d.approvalId,
@@ -271,16 +245,11 @@ export function useWorkbenchState(initialTab: string) {
     }
 
     try {
-      const resp = await fetch('/api/admin/orders/ship', {
-        method: 'POST',
-        headers: { ...authHeaders() },
-        body: JSON.stringify({
-          orderId,
-          carrierCode: carrierInput,
-          trackingNo: trackingNumberInput.trim(),
-        }),
+      const data = await api.orders.ship({
+        orderId,
+        carrierCode: carrierInput,
+        trackingNo: trackingNumberInput.trim(),
       });
-      const data = await resp.json();
       if (data.success) {
         alert('🎉 发货成功！已流转为已发货状态并锁定收货地址');
         setShippingOrderId(null);

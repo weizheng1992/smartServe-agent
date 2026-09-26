@@ -42,11 +42,8 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch('/api/admin/orders');
-        if (res.ok) {
-          const body = await res.json();
-          if (alive) setOrders((body.orders || []).filter((o: any) => o.customer_id === customer.customer_id));
-        }
+        const body = await api.orders.list();
+        if (alive) setOrders((body.orders || []).filter((o: any) => o.customer_id === customer.customer_id));
       } catch {
         /* 详情关联数据拉取失败不打断抽屉 */
       }

@@ -1,36 +1,9 @@
 // 工作台数据形态(供各 tab 组件与 workbench hook 共用;此前内联在 504 行
 // 的 workbench.tsx 里,按功能拆分后独立成模块)。
+// 线上数据形态(DTO)真源在 lib/api.ts(2026-09-26 夜审 ⑤#3 收口:严禁页面
+// 裸 fetch 后,类型随方法同源);此处再导出保持既有 import 路径不变。
 
-export interface OrderRow {
-  order_id: string;
-  customer_id: string;
-  status: string;
-  total_amount: number;
-  shipping_address: {
-    recipientName: string;
-    phone: string;
-    fullAddress: string;
-  };
-  tracking_info?: {
-    carrier: string;
-    trackingNumber: string;
-    status: string;
-  };
-  is_address_modifiable: boolean;
-  is_returnable: boolean;
-  created_at: string;
-}
-
-export interface AuditLogRow {
-  id: string;
-  action_type: string;
-  order_id: string;
-  idempotency_key: string;
-  operator: string;
-  payload: Record<string, unknown>;
-  result: Record<string, unknown>;
-  created_at: string;
-}
+export type { OrderRow, AuditLogRow, ApprovalItem, ConversationItem, MessageItem } from '@/lib/api';
 
 export interface SkuRow {
   id: string;
@@ -55,42 +28,6 @@ export interface SpuRow {
   main_image: string;
   spec_dimensions: Array<{ name: string; values: string[] }>;
   specs: Record<string, string>;
-}
-
-export interface ApprovalItem {
-  id: string;
-  threadId: string;
-  businessId?: string;
-  userId?: string;
-  userEmail?: string;
-  actionType: string;
-  actionPayload: any;
-  status: string;
-  reason?: string;
-  deadline?: string;
-  createdAt: string;
-}
-
-export interface ConversationItem {
-  id: string;
-  threadId?: string;
-  businessId: string;
-  userId?: string;
-  status: string;
-  assignedOperatorId?: string;
-  lastMessage?: string;
-  lastMessageSnippet?: string;
-  updatedAt: string;
-  createdAt: string;
-}
-
-export interface MessageItem {
-  id: string;
-  role: 'user' | 'assistant' | 'system' | 'operator';
-  content: string;
-  cards?: any[];
-  operatorInfo?: { operatorId: string; operatorName: string };
-  timestamp: string;
 }
 
 export type WorkbenchTab = 'orders' | 'approvals' | 'live_desk' | 'spus' | 'skus' | 'spi_logs';

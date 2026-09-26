@@ -1,4 +1,4 @@
-import { setSession } from '@/lib/api';
+import { api, setSession } from '@/lib/api';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
@@ -16,13 +16,8 @@ export default function LoginPage({ onLogin }: { onLogin: (email: string) => voi
     setBusy(true);
     setErr('');
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const body = await res.json();
-      if (!body.success) throw new Error(body.error || body.message || '登录失败');
+      const body = await api.login(email, password);
+      if (!body.success || !body.data) throw new Error(body.error || body.message || '登录失败');
       setSession(body.data.token, body.data.user.email);
       onLogin(body.data.user.email);
       navigate('/analytics');

@@ -181,6 +181,74 @@ export interface OrderAuditLog {
   created_at: string;
 }
 
+/** 工作台订单行(merchant_orders 裸行;snake_case,列表/审计同源 GET /api/admin/orders)。 */
+export interface OrderRow {
+  order_id: string;
+  customer_id: string;
+  status: string;
+  total_amount: number;
+  shipping_address: {
+    recipientName: string;
+    phone: string;
+    fullAddress: string;
+  };
+  tracking_info?: {
+    carrier: string;
+    trackingNumber: string;
+    status: string;
+  };
+  is_address_modifiable: boolean;
+  is_returnable: boolean;
+  created_at: string;
+}
+
+export interface AuditLogRow {
+  id: string;
+  action_type: string;
+  order_id: string;
+  idempotency_key: string;
+  operator: string;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ApprovalItem {
+  id: string;
+  threadId: string;
+  businessId?: string;
+  userId?: string;
+  userEmail?: string;
+  actionType: string;
+  actionPayload: any;
+  status: string;
+  reason?: string;
+  deadline?: string;
+  createdAt: string;
+}
+
+export interface ConversationItem {
+  id: string;
+  threadId?: string;
+  businessId: string;
+  userId?: string;
+  status: string;
+  assignedOperatorId?: string;
+  lastMessage?: string;
+  lastMessageSnippet?: string;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface MessageItem {
+  id: string;
+  role: 'user' | 'assistant' | 'system' | 'operator';
+  content: string;
+  cards?: any[];
+  operatorInfo?: { operatorId: string; operatorName: string };
+  timestamp: string;
+}
+
 export interface MenuNode {
   id: string;
   name: string;
@@ -375,11 +443,57 @@ export const api = {
       fetchJson(`/api/admin/analytics/promotions/${id}/redeem`, { method: 'POST', body: JSON.stringify({ orderId }) }),
   },
 
-  /** 订单(详情;400 级错误经 fetchJson 返回 body 由调用方按 success 呈现)。 */
+  /** 登录(唯一无会话接口;错误以 body 呈现,不走 401 清会话跳转)。 */
+  login: async (
+    email: string,
+    password: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    message?: string;
+    data?: { token: string; user: { email: string } };
+  }> => {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    return res.json();
+  },
+
+  /** 订单(400 级错误经 fetchJson 返回 body 由调用方按 success 呈现)。 */
   orders: {
     detail: async (
       orderId: string,
     ): Promise<{ success: boolean; order?: OrderDetail; auditLogs?: OrderAuditLog[]; error?: string }> =>
       fetchJson(`/api/admin/orders/${encodeURIComponent(orderId)}`),
+    /** 列表 + 审计流水(工作台轮询数据源;snake_case 裸行)。 */
+    list: async (): Promise<{ success: boolean; orders: OrderRow[]; auditLogs: AuditLogRow[] }> =>
+      fetchJson('/api/admin/orders'),
+    /** 发货(服务端 RBAC order:ship 闸;真实世界副作用,失败以 message 呈现)。 */
+    ship: async (p: { orderId: string; carrierCode: string; trackingNo: string }): Promise<{
+      success: boolean;
+      message?: string;
+    }> => fetchJson('/api/admin/orders/ship', { method: 'POST', body: JSON.stringify(p) }),
+  },
+
+  /** 审批工单(裁决/人工回复经 useApprovalMachine 同端点)。 */
+  approvals: {
+    list: async (): Promise<{ success: boolean; approvals: ApprovalItem[]; total: number }> =>
+      fetchJson('/api/admin/approvals?tenantId=aurora'),
+    /** 人工接管开席:返回 approvalId 供人工回复直投。 */
+    takeover: async (threadId: string): Promise<{ success: boolean; approvalId?: string; error?: string }> =>
+      fetchJson('/api/admin/approvals', {
+        method: 'POST',
+        body: JSON.stringify({ threadId, action: 'start_human_takeover' }),
+      }),
+  },
+
+  /** 会话(客服工作台;tenantId 与 x-tenant-id 同值)。 */
+  conversations: {
+    list: async (): Promise<{ success: boolean; conversations: ConversationItem[] }> =>
+      fetchJson('/api/admin/conversations?tenantId=aurora'),
+    messages: async (threadId: string): Promise<{ success: boolean; data?: { messages: MessageItem[] } }> =>
+      fetchJson(`/api/admin/conversations/${encodeURIComponent(threadId)}?tenantId=aurora`),
   },
 };
