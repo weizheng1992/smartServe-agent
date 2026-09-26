@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
+  MessageText,
   RichCardRenderer,
   ShieldAlert,
   Textarea,
@@ -198,7 +199,7 @@ export function LiveDeskTab() {
                                 : 'bg-emerald-600 text-white'
                           }`}
                         >
-                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                          <MessageText text={msg.content} className="whitespace-pre-wrap" />
 
                           {/* 卡片渲染 */}
                           {msg.cards && msg.cards.length > 0 && (

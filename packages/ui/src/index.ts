@@ -30,6 +30,7 @@ export * from './components/approval/PendingApprovalCard';
 export * from './components/approval/ApprovalContextDrawer';
 export * from './components/approval/approvalUtils';
 export * from './components/chat/HumanChatModal';
+export * from './components/chat/MessageText';
 export * from './components/chat/ChatMessageFeed';
 export * from './components/chat/HumanChatFooter';
 export * from './components/chat/cards/OrderCard';

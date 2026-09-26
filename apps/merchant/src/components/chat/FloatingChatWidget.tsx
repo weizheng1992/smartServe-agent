@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 import type { OrderCardData, RichCardBlock } from 'types';
-import { Button, Input, Loader2, Paperclip, RichCardRenderer, X } from 'ui';
+import { Button, Input, Loader2, MessageText, Paperclip, RichCardRenderer, X } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
 import { readStoreCart, writeStoreCart } from '../../lib/storeCart';
 import { type RouteGreetingContext, getGreetingForRoute } from './routeGreetingConfig';
@@ -928,13 +928,13 @@ export function FloatingChatWidget({
                   )}
                   {m.text && (
                     <div
-                      className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
+                      className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs ${
                         m.role === 'user'
                           ? 'bg-emerald-600 text-white rounded-br-none'
                           : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
                       }`}
                     >
-                      {m.text}
+                      <MessageText text={m.text} className="whitespace-pre-wrap" />
                     </div>
                   )}
                   {m.cards && m.cards.length > 0 && (

@@ -1,5 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Badge, Button, DetailDrawer, Input, RichCardRenderer, Tabs, TabsContent, TabsList, TabsTrigger } from 'ui';
+import {
+  Badge,
+  Button,
+  DetailDrawer,
+  Input,
+  MessageText,
+  RichCardRenderer,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from 'ui';
 import { ConfirmDialog } from '../../../components/crud';
 import { conversationsApi } from '../../../lib/api';
 import type { ConversationRecord } from '../types';
@@ -319,7 +330,7 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
 
                   {/* 主气泡内容 */}
                   <div
-                    className={`max-w-2xl p-3.5 rounded-2xl text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
+                    className={`max-w-2xl p-3.5 rounded-2xl text-xs leading-relaxed shadow-2xs ${
                       msg.role === 'user'
                         ? 'bg-slate-900 text-white rounded-tr-xs'
                         : msg.role === 'operator'
@@ -327,7 +338,7 @@ export function ThreadDeepTraceDrawer({ isOpen, onClose, conversation, onUpdated
                           : 'bg-white text-slate-800 border border-slate-200 rounded-tl-xs'
                     }`}
                   >
-                    {msg.content}
+                    <MessageText text={msg.content} className="whitespace-pre-wrap" />
                   </div>
 
                   {/* 富交互卡片组件渲染 */}

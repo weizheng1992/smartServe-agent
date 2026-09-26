@@ -18,6 +18,7 @@ import {
   Loader2,
   Maximize2,
   MessageSquare,
+  MessageText,
   Paperclip,
   RefreshCw,
   RichCardRenderer,
@@ -224,7 +225,7 @@ export function ChatArea({
                         </span>
                       </div>
                     ) : (
-                      <p className="whitespace-pre-wrap">{m.content}</p>
+                      <MessageText text={m.content} className="whitespace-pre-wrap" />
                     )}
                   </div>
                 )}
