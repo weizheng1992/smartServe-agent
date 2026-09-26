@@ -26,7 +26,8 @@ def _load() -> dict[str, dict[str, Any]]:
     registry: dict[str, dict[str, Any]] = {}
     for key, entry in data.items():
         if not isinstance(entry, dict):
-            raise ValueError(f"metrics.yaml: 指标 {key!r} 条目必须是映射")
+            # 类型错走 TypeError(Python 惯例,ruff TRY004);缺键/不一致仍走 ValueError
+            raise TypeError(f"metrics.yaml: 指标 {key!r} 条目必须是映射")
         missing = [k for k in _REQUIRED_KEYS if k not in entry]
         if missing:
             raise ValueError(f"metrics.yaml: 指标 {key!r} 缺必填键 {missing}(响亮失败,不静默跳过)")

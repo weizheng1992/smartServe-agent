@@ -23,8 +23,7 @@ from pathlib import Path
 # L3 关闭:评测确定性层(词面/范例/规则),不烧 token、不随模型漂移
 os.environ.setdefault("AI_INTENT_L3", "off")
 
-from engine_py.analytics.engine import MetricQueryEngine, UnsupportedQuery  # noqa: E402
-from engine_py.analytics.graph import ask  # noqa: E402
+from engine_py.analytics.engine import MetricQueryEngine, UnsupportedQuery
 
 CASES_PATH = Path(__file__).resolve().parent.parent / "evals" / "intent_cases.jsonl"
 PASS_THRESHOLD = 0.95

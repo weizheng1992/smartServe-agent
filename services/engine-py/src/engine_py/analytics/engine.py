@@ -389,7 +389,8 @@ class MetricQueryEngine:
                 "orders_trend": ("COUNT(DISTINCT o.order_id)::float", "订单量", True),
                 "customer_spend_trend": ("COALESCE(SUM(o.total_amount), 0)::float", "消费", False),
             }
-            value_expr, label, needs_items = _TREND_EXPR[intent.metric]
+            # 第三位 needs_items 在趋势分支不消费(明细 JOIN 无条件追加,零点保线不断)
+            value_expr, label, _needs_items = _TREND_EXPR[intent.metric]
             items_join = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
             spu_ids = (intent.entity_slot or {}).get("spu") or []
             if spu_ids and intent.metric in ("volume_trend", "gmv_trend"):

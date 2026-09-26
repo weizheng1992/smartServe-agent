@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = yaml.safe_load(Path(cfg_args.config).read_text(encoding="utf-8")) or {}
 
     lora = {**DEFAULT_LORA, **(cfg.get("lora") or {})}
-    tr = {**{
+    tr = {
         "epochs": 3,
         "per_device_train_batch_size": 2,
         "gradient_accumulation_steps": 4,
@@ -64,8 +64,8 @@ def main(argv: list[str] | None = None) -> int:
         "report_to": [],
         "dataset_text_field": "text",
         "max_length": MAX_SEQ_LEN,
-        "eos_token": EOS,
-    }, **(cfg.get("train") or {})}
+        "eos_token": EOS
+    , **(cfg.get("train") or {})}
     eos = tr["eos_token"]
 
     parser = argparse.ArgumentParser(description="SemQL 意图 QLoRA SFT")

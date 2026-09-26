@@ -31,5 +31,5 @@ async def get(key: str) -> dict | None:
     return await kv_get_json(key)
 
 
-async def set(key: str, data: dict, ttl_seconds: int) -> None:  # noqa: A001 - 域内动词
+async def set(key: str, data: dict, ttl_seconds: int) -> None:
     await kv_set_json(key, data, ttl_seconds)

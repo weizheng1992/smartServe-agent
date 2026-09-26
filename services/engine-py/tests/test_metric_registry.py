@@ -13,8 +13,8 @@ import pytest
 
 from engine_py.tools_registry import metric_registry
 from engine_py.tools_registry.metric_registry import (
-    METRIC_SEMANTIC_REGISTRY,
     _REQUIRED_KEYS,
+    METRIC_SEMANTIC_REGISTRY,
     _load,
 )
 
@@ -83,7 +83,7 @@ class TestLoadLoudFailures:
         return _load()
 
     def test_non_mapping_entry_rejected(self, tmp_path, monkeypatch):
-        with pytest.raises(ValueError, match="条目必须是映射"):
+        with pytest.raises(TypeError, match="条目必须是映射"):
             self._load_from(tmp_path, monkeypatch, "gmv: just_a_string\n")
 
     def test_missing_required_key_rejected(self, tmp_path, monkeypatch):

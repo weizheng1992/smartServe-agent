@@ -204,7 +204,7 @@ class TestQuickSummaryShape:
     """速览读数错位回归(实弹:活动效果总览单行卡被做峰谷,单位错标):"""
 
     def test_single_row_stats_card_gets_no_summary(self, engine):
-        from engine_py.analytics.engine import StructuredQueryIntent, QueryResult
+        from engine_py.analytics.engine import StructuredQueryIntent
         from engine_py.analytics.quick_summary import quick_summary
 
         class _R:
@@ -217,7 +217,7 @@ class TestQuickSummaryShape:
         assert quick_summary(_R(), StructuredQueryIntent(metric="promo_effect", chart_hint="line")) is None
 
     def test_list_summary_still_works(self, engine):
-        from engine_py.analytics.engine import StructuredQueryIntent, QueryResult
+        from engine_py.analytics.engine import StructuredQueryIntent
         from engine_py.analytics.quick_summary import quick_summary
 
         class _R:

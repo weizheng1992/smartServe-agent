@@ -21,13 +21,13 @@ from .context_intake import (
     inline_order_ids,
     merge_into_intent,
     parse_raw_selection,
+)
+from .context_intake import (
     title_prefix as build_title_prefix,
 )
 from .engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
 from .quick_summary import quick_summary as _quick_summary
 from .trace import Trace
-
-
 
 # 纯图表切换追问(确定性快捷路):问句只含图型词 → 上一轮问句 + 图型要求重解析
 _CHART_ONLY_RE = re.compile(r"^(?:换成?|改[成为]?|用|来)?\s*(?:一?个?)?\s*(折线图?|柱状图?|条形图?|柱形图?|表格)\s*[?？]?$")
@@ -324,7 +324,7 @@ async def _rewrite_followup(question: str, history: dict) -> str | None:
         return None
 
 
-async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict, history: dict | None = None, trace: "Trace | None" = None):
+async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict, history: dict | None = None, trace: Trace | None = None):
     """L0 未命中后的两级兜底:先 L2 范例回放(近零成本),再 L3 LLM 意图(ADR-0005)。
 
     返回 (intent | clarify dict, via_llm);全部未命中 → UnsupportedQuery。
