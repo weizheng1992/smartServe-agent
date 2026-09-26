@@ -49,12 +49,29 @@ async def spi_resolve_approval(
     x_api_key: str | None = Header(None, alias="x-api-key"),
 ):
     await _authenticate(request, x_api_key, x_tenant_id or "")
+    # 核准人契约(admin-readiness 01):SPI 三方通道此前漏注入 resolvedBy/
+    # resolvedByRole 且 humanReply 恒 None(`x and None` 恒假)—— 与商户路由
+    # 已修的「审批人落库 unknown」同款漂移,在此对齐。角色须用 gatekeeper
+    # 白名词表(platform_admin/merchant_operator/system,越界收敛 system):
+    # 外部平台审核人按商户操作员声明,未带操作者的自动通道以 AGENT_SPI +
+    # system 声明机器身份。
+    actor = (str(body.get("reviewerId") or body.get("resolvedBy") or "")).strip()
+    actor_role = body.get("reviewerRole") or body.get("resolvedByRole")
+    if not actor:
+        actor = "AGENT_SPI"
+        actor_role = actor_role or "system"
+    else:
+        actor_role = actor_role or "merchant_operator"
     result = await ApprovalGatekeeper.process_approval_action(
         {
             "approvalId": approval_id,
+            "threadId": body.get("threadId"),
             "action": body.get("action"),
             "rejectionReason": body.get("rejectionReason"),
-            "humanReply": body.get("reviewerId") and None,
+            "humanReply": body.get("humanReply") or body.get("replyMessage"),
+            "isFinish": body.get("isFinish"),
+            "resolvedBy": actor,
+            "resolvedByRole": actor_role,
         }
     )
     if result.get("error"):
