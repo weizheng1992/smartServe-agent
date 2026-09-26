@@ -63,6 +63,15 @@ export function useWorkbenchState(initialTab: string) {
   const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // 轮询稳定性(2026-09-26 夜审 ③):activeThreadId 走 ref —— fetchDashboardData
+  // 不再随会话切换重建,8s 轮询间隔不被反复 clearInterval;首载完成后不再置
+  // loading,后台轮询刷新不闪整页骨架。
+  const activeThreadIdRef = useRef<string | null>(null);
+  const hasLoadedRef = useRef(false);
+
+  useEffect(() => {
+    activeThreadIdRef.current = activeThreadId;
+  }, [activeThreadId]);
 
   const { submittingActionId, setRejectionReasons, executeApprovalAction, executeHumanReplyAction } =
     useApprovalMachine('/api/admin/approvals');
@@ -81,7 +90,9 @@ export function useWorkbenchState(initialTab: string) {
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      setLoading(true);
+      if (!hasLoadedRef.current) {
+        setLoading(true);
+      }
       // 单域失败不拖垮面板:各自 catch 落 null,成功的域照常渲染
       const [orderData, appData, convData] = await Promise.all([
         api.orders.list().catch(() => null),
@@ -107,7 +118,7 @@ export function useWorkbenchState(initialTab: string) {
           lastMessage: item.lastMessage || item.lastMessageSnippet,
         }));
         setConversations(convList);
-        if (convList.length > 0 && !activeThreadId) {
+        if (convList.length > 0 && !activeThreadIdRef.current) {
           const initialId = convList[0].threadId || convList[0].id;
           setActiveThreadId(initialId);
           loadConversationMessages(initialId);
@@ -116,9 +127,10 @@ export function useWorkbenchState(initialTab: string) {
     } catch (err) {
       console.error('Failed to fetch merchant admin data:', err);
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
     }
-  }, [activeThreadId, loadConversationMessages]);
+  }, [loadConversationMessages]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -134,10 +146,13 @@ export function useWorkbenchState(initialTab: string) {
     }
   }, [activeThreadId, loadConversationMessages]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: messages.length 为滚动触发器,体内不直接读取
+  // 仅末条消息变化时滚动:数组身份每轮轮询都重建,拿它当触发器会在内容
+  // 未变时也整页平滑滚动(3s 一次的滚动抖动)
+  const lastMessageId = activeThreadMessages[activeThreadMessages.length - 1]?.id ?? '';
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lastMessageId 是派生触发器,体内刻意不读取
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeThreadMessages]);
+  }, [lastMessageId]);
 
   const handleApprovalAction = async (
     approvalId: string,
