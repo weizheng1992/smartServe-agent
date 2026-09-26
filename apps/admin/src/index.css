@@ -1,2 +1,6 @@
-@import "tailwindcss";
-@source "../../../packages/ui/src";
+/* 设计 token 唯一真源在 packages/ui/src/styles/globals.css(@theme 语义色 +
+   :root HSL 变量 + ui 包/应用源码 @source 扫描)。此前本文件自带一份
+   「tailwindcss + @source」薄壳,语义 token 缺失 —— ui 组件的
+   bg-primary/border-input/ring-ring 等类在本应用构建中不生成(Button 无底色、
+   Input 无边框色的静默缺陷,2026-09-26 夜审 ⑤#2)。 */
+@import "../../../packages/ui/src/styles/globals.css";
