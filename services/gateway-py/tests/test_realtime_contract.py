@@ -264,3 +264,106 @@ class TestSocketIoChat:
                 await operator.disconnect()
             if user.connected:
                 await user.disconnect()
+
+
+class TestSocketIoEdgeStates:
+    """断连/越权边缘态专项(2026-09-26 夜审 ④ 收口)。
+
+    五事件全协议测试只走 happy path;此处钉死三处易回归边缘:
+    1. release 传 None 显式清空 assigned_operator_id(与 ``__unset__`` 哨兵
+       「不动列」语义相反 —— 保留旧坐席会让 active 会话看起来仍被接管);
+    2. 未 join 的连接断开零广播(on_disconnect 的 threadId 守卫);
+    3. 非法租户名 connect 被服务端拒绝(_TENANT_RE 白名单)。"""
+
+    async def test_release_clears_assigned_operator(self, live_server, rt_thread):
+        import socketio as socketio_lib
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        ns = "/ws/chat"
+        operator = socketio_lib.AsyncClient(reconnection=False)
+        await operator.connect(
+            live_server, transports=["websocket"], namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_edge_op", "role": "operator"},
+        )
+        try:
+            await operator.call(
+                "join_thread", {"threadId": rt_thread, "tenantId": "nike", "role": "operator"},
+                namespace=ns, timeout=5,
+            )
+            op_id = f"op_edge_{_TS}"
+            await operator.call(
+                "takeover_conversation",
+                {"threadId": rt_thread, "tenantId": "nike", "operatorId": op_id, "operatorName": "边缘态坐席"},
+                namespace=ns, timeout=5,
+            )
+
+            async def _row():
+                async with get_session() as session:
+                    return (
+                        await session.execute(
+                            text("SELECT status, assigned_operator_id FROM threads WHERE id = :tid"),
+                            {"tid": rt_thread},
+                        )
+                    ).first()
+
+            row = await _row()
+            assert row[0] == "human_takeover"
+            assert row[1] == op_id, "takeover 必须落坐席"
+
+            await operator.call(
+                "release_takeover", {"threadId": rt_thread, "tenantId": "nike"}, namespace=ns, timeout=5
+            )
+            row = await _row()
+            assert row[0] == "active"
+            assert row[1] is None, "release 必须显式清空坐席(None ≠ __unset__ 哨兵)"
+        finally:
+            if operator.connected:
+                await operator.disconnect()
+
+    async def test_disconnect_without_join_is_silent(self, live_server, rt_thread):
+        import asyncio
+
+        import socketio as socketio_lib
+
+        ns = "/ws/chat"
+        listener = socketio_lib.AsyncClient(reconnection=False)
+        phantom = socketio_lib.AsyncClient(reconnection=False)
+        peer_events: list[dict] = []
+        listener.on(
+            "peer_disconnected", lambda p=None: peer_events.append(p or {}), namespace=ns
+        )
+        await listener.connect(
+            live_server, transports=["websocket"], namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_edge_listener", "role": "operator"},
+        )
+        await listener.call(
+            "join_thread", {"threadId": rt_thread, "tenantId": "nike", "role": "operator"},
+            namespace=ns, timeout=5,
+        )
+        # 幽灵客户端:连上但永不 join(threadId 为空)→ 断开不得广播 peer_disconnected
+        await phantom.connect(
+            live_server, transports=["websocket"], namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_edge_phantom", "role": "user"},
+        )
+        try:
+            await phantom.disconnect()
+            await asyncio.sleep(0.5)  # 负断言:给误广播留出暴露窗口
+            assert peer_events == [], "未 join 的断开不得广播 peer_disconnected"
+        finally:
+            if listener.connected:
+                await listener.disconnect()
+
+    async def test_invalid_tenant_connect_rejected(self, live_server):
+        import pytest
+        import socketio as socketio_lib
+        from socketio.exceptions import ConnectionError as SocketIOConnectionError
+
+        ns = "/ws/chat"
+        rogue = socketio_lib.AsyncClient(reconnection=False)
+        with pytest.raises(SocketIOConnectionError):
+            await rogue.connect(
+                live_server, transports=["websocket"], namespaces=[ns],
+                auth={"tenantId": "bad tenant; DROP", "userId": "u_edge_rogue", "role": "user"},
+            )
+        assert not rogue.connected
