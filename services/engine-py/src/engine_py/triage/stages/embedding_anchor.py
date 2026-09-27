@@ -17,6 +17,7 @@ from ..intent_triage_engine import (
     _is_multi_intent_candidate,
     _proposal,
 )
+from ..semantic_cache import SEMANTIC_MATCH_THRESHOLD
 from ..slot_extractor import ORDER_ID_RE, AgentIntentType
 from .context import StageContext, StageVerdict
 
@@ -40,7 +41,9 @@ async def judge(ctx: StageContext) -> StageVerdict:
         if ctx.ns.is_action_query(input_text, cache_tenant):
             print(f"[Triage] 动作形输入跳过回复缓存读取 (tenantId={cache_tenant}): {input_text[:50]}")
         else:
-            cache_hit = ctx.ns.SemanticVectorCache.find_best_semantic_match(cache_tenant, user_vector, 0.96)
+            cache_hit = ctx.ns.SemanticVectorCache.find_best_semantic_match(
+                cache_tenant, user_vector, SEMANTIC_MATCH_THRESHOLD
+            )
             if cache_hit:
                 return StageVerdict(
                     terminal=True,

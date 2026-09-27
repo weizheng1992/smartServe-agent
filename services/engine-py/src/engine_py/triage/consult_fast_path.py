@@ -37,7 +37,7 @@ import re
 from ..event_bus import emit_status
 from ..llm import CircuitBreakerOpenError, get_chat_model
 from ..tenant import get_merchant_display_name, tenant_of_state
-from .semantic_cache import SemanticVectorCache, add_query_to_semantic_cache
+from .semantic_cache import SEMANTIC_MATCH_THRESHOLD, SemanticVectorCache, add_query_to_semantic_cache
 from .slot_extractor import ORDER_ID_RE, AgentIntentType
 
 # RAG 直答最低相似度:run_agent 对任意输入都预取 2 条切片(阈值 0.4),
@@ -261,7 +261,9 @@ async def run_consult_direct_answer(state: dict, history_msgs: list[dict]) -> tu
             print(f"[Consult Fast-Path] 向量化失败,跳过缓存读写: {embed_err}")
             vector = []
     if vector:
-        cache_hit = SemanticVectorCache.find_best_semantic_match(tenant_id, vector, 0.96)
+        cache_hit = SemanticVectorCache.find_best_semantic_match(
+            tenant_id, vector, SEMANTIC_MATCH_THRESHOLD
+        )
         if cache_hit:
             return (
                 cache_hit["match"]["reply"],

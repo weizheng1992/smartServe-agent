@@ -7,6 +7,12 @@ import math
 from ..llm import get_embedding_model
 from .rule_matchers import normalize_greeting_input
 
+# 语义缓存命中阈值(Gen-3 域B收编:散落 0.96 字面收拢一处)—— 同域中文
+# 近义问句余弦远低于此,命中的都是换皮重放;调低会把「退货政策」答成
+# 「发货时效」级近邻,调高伤缓存命中率。消费方:本类默认参 +
+# consult_fast_path(咨询直答缓存先查)+ stages/embedding_anchor(Step2 读闸)。
+SEMANTIC_MATCH_THRESHOLD = 0.96
+
 DEFAULT_ANCHOR_PHRASES: dict[str, list[str]] = {
     "order_status": [
         "帮我查询订单物流状态",
@@ -76,7 +82,7 @@ class SemanticVectorCache:
 
     @classmethod
     def find_best_semantic_match(
-        cls, business_id: str, user_vector: list[float], min_similarity: float = 0.96
+        cls, business_id: str, user_vector: list[float], min_similarity: float = SEMANTIC_MATCH_THRESHOLD
     ) -> dict | None:
         clean_id = (business_id or "ecommerce").lower()
         best_match = None
