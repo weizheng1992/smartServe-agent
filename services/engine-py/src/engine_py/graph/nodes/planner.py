@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from ...approvals import find_approval_by_id, find_latest_approval_by_thread_id
 from ...config import settings
@@ -58,6 +60,15 @@ _SHOPPING_HINT_RE = re.compile(_grp(*_pick(GUIDE_CORE_FAMILY, 0, 1, 2, 3, 8)), r
 # 词面收上 intent_registry.BEST_SELLER_HINT_RE(cart resolver 同源)。
 _BEST_SELLER_RE = BEST_SELLER_HINT_RE
 
+# 三段接力轨的结算词与句中地址判据(2026-09-13):「查卖得好的短袖,把第一个
+# 加入购物车,地址是X,然后结算」—— 深规划自由发挥曾产出无执行的幻觉叙事
+# (历史幻觉单号自增殖),三段确定性编排根治。原为快轨分支内函数局部,注册表
+# 化(2026-09-27 nightly #7)提为模块级,值与词族投影逐字不变。
+_CHECKOUT_HINT_RE = re.compile(_grp(*_pick(CHECKOUT_FAMILY, 7, 6, 5)))
+_STATED_ADDR_RE = re.compile(
+    _grp(*_pick(ADDRESS_VERB_FAMILY, 12, 5, 10, 13)) + r"\s*([^,，。]+)"
+)
+
 
 def _ranking_subtask(metric_or_text: str, suffix: str) -> dict:
     """排行快轨子任务单点构造(主快轨与订单动作补偿共用)。
@@ -97,6 +108,252 @@ def planner_llm():
     熔断/遥测不丢失。
     """
     return get_chat_model().bind(max_tokens=settings.planner_max_tokens)
+
+
+# ─── 确定性快轨注册表(nightly #7 / Gen-3 一期③,2026-09-27)─────────────────
+# 「意图签名 → 子任务模板」映射表:planner 确定性快轨此前是 7 条各自为政的
+# if 分支(每加意图加一条 if,快轨区持续膨胀),现收口为有序规则表 ——
+# planner_node 自上而下首个 matches 命中即由 build 组装 (计划, 进度文案) 并
+# 直达执行链;新增快轨 = 追加一条注册,不改主循环。
+# ⚠️ 表序即优先级,重排等同改行为:metric 轨在复合轨之前(纯查询不被加购半
+# 劫持)、泛查单轨在 entity/资金纪律的订单号关联组装之前。以下 build 函数的
+# goal/description/进度文案均自原分支逐字迁移,零行为变化。
+
+
+@dataclass(frozen=True)
+class _FastTrackCtx:
+    """快轨判定上下文 —— planner_node 在进规则表前一次算定的守卫变量快照。
+
+    守卫标志全是 intents/输入文本上的纯谓词(零副作用,与旧代码无条件求值
+    同为每次必算)。唯 _general_order_list_matches 保持原求值点位:其正则对
+    input_text 裸取值(旧代码即无 `or ""` 护栏),惰性求值连病态输入
+    (state.input=None)的抛错时机都与旧分支一致。
+    """
+
+    intents: list[dict]
+    single_intent: str | None
+    input_text: str
+    has_shopping_guide: bool
+    has_cart_manage: bool
+    has_order_list: bool
+    has_order_action: bool
+    guide_hint: bool
+    has_metric: bool
+
+
+@dataclass(frozen=True)
+class _FastTrackRule:
+    """单条快轨规则:matches 命中即 build 出 (task_plan, emit_status 文案)。"""
+
+    name: str
+    matches: Callable[[_FastTrackCtx], bool]
+    build: Callable[[_FastTrackCtx], tuple[dict, str]]
+
+
+def _ft_human_escalation_build(_ctx: _FastTrackCtx) -> tuple[dict, str]:
+    return {
+        "goal": "Escalate conversation to human support operator",
+        "subtasks": [
+            {
+                "id": "step_fast_human_escalation",
+                "description": "Trigger human escalation and create pending approval ticket for customer support operator",
+                "status": "pending",
+            }
+        ],
+        "currentStepIndex": 0,
+    }, "⚡ 极速介入直达：检测到人工客服与熔断诉求，已物理生成人工转接步骤并推入执行链！"
+
+
+def _ft_metric_single_build(ctx: _FastTrackCtx) -> tuple[dict, str]:
+    # 📊 单意图 metric_query 确定性快轨(2026-09-14 nightly 巡检):ADR-0003
+    # 规则前置只保证了 triage→planner 段直通,planner→executor 段仍落 LLM
+    # 深规划自由发挥 ——「最赚钱的商品排行」_ranking_metric_from_text 明明
+    # 能解析出 gross_profit,LLM 深规划却自选 volume(利润榜变销量榜,回复
+    # 自称「利润表现优异」实为销量排序)。排行 metric 是纯词表映射,与
+    # address_manage 同理必须零 LLM 确定性执行。
+    metric = _ranking_metric_from_text(ctx.input_text or "")
+    return {
+        "goal": "Fetch real product ranking by metric",
+        "subtasks": [_ranking_subtask(metric, "0")],
+        "currentStepIndex": 0,
+    }, f"⚡ 极速直达：识别到经营排行诉求，确定性执行 {metric} 排行检索！"
+
+
+def _ft_metric_guide_build(ctx: _FastTrackCtx) -> tuple[dict, str]:
+    # 📊 指标×导购确定性快轨(遗留二期,2026-09-13):「看看GMV多少,顺便推荐
+    # 卖得好的」复合句曾依赖深规划自觉 —— LLM 偶发把 GMV 当后台数据拒答。
+    # 排行子任务 + 导购子任务确定性组装,零 LLM 拒答面;资金/订单动作在场
+    # 时不劫持(让位深规划按资金纪律编排)。
+    ranking_metric = _ranking_metric_from_text(ctx.input_text or "")
+    return {
+        "goal": "Fetch real sales metrics and shopping recommendations",
+        "subtasks": [
+            _ranking_subtask(ranking_metric, "0"),
+            {
+                "id": "step_fast_guide_1",
+                "description": f"Execute ShoppingGuideSkill for input: {ctx.input_text}",
+                "status": "pending",
+            },
+        ],
+        "currentStepIndex": 0,
+    }, "⚡ 极速规划直达：识别到经营数据+导购复合诉求，已组装排行与导购双子任务流！"
+
+
+def _ft_guide_cart_build(ctx: _FastTrackCtx) -> tuple[dict, str]:
+    # 🛒 推荐×全量加购确定性快轨(2026-09-13 一句话接力):「推荐X，都要了」
+    # 先导购(写候选,数量语义生效)后购物车全量入车 —— 零 LLM,严禁 guide
+    # 快轨单技能吞掉加购半。
+    # 结算词与句中地址(2026-09-13 三段接力):命中结算词则尾接 checkoutCart
+    # 子任务,句中带地址随子任务透传,否则落默认地址。
+    input_text = ctx.input_text
+    fast_subtasks = [
+        {
+            "id": "step_fast_guide_0",
+            "description": f"Execute ShoppingGuideSkill for input: {input_text}",
+            "status": "pending",
+        },
+        {
+            "id": "step_fast_cart_1",
+            "description": f"Execute CartSkill for input: {input_text}",
+            "status": "pending",
+        },
+    ]
+    has_checkout = bool(_CHECKOUT_HINT_RE.search(input_text or ""))
+    if has_checkout:
+        addr = _STATED_ADDR_RE.search(input_text or "")
+        shipping = (
+            f"shipping to {addr.group(1).strip()}"
+            if addr
+            else "shipping to the customer's default address"
+        )
+        fast_subtasks.append(
+            {
+                "id": "step_fast_checkout_2",
+                "description": (
+                    f"Call checkoutCart to place a real order from the current cart items, {shipping}"
+                ),
+                "status": "pending",
+            }
+        )
+    return {
+        "goal": "Recommend products then add them to cart" + (" and check out" if has_checkout else ""),
+        "subtasks": fast_subtasks,
+        "currentStepIndex": 0,
+    }, "⚡ 极速规划直达：识别到推荐+全量加购诉求，已组装导购与购物车双子任务流！"
+
+
+def _ft_bestseller_cart_build(ctx: _FastTrackCtx) -> tuple[dict, str]:
+    # 🛒 榜词加购确定性快轨(2026-09-27 立案 planner-plan-intent-alignment):
+    # cart_manage「销量榜词+加购」形态此前无任何快轨,直坠 LLM 深规划自由
+    # 发挥成 5 步(排行/加购/确认订单/改量/结算)—— 后三步用户从未请求,
+    # 转移双计撞旧熔断阈值(09:42 实弹熔断事故)。此处确定性单步收口,零
+    # LLM 规划:只排 CartSkill,技能内 2.6.53 榜词分支诚实反问在售真货,
+    # 严禁静默落候选[0]。刻意不排 queryProductRanking —— 排行是全店榜无
+    # 品类过滤,「销量最好的裤子」会被答成全店第一(2.6.53 同源谎言面),
+    # 排行步待榜单支持品类过滤后再入计划。判据不带 metric_query 否决:
+    # 「销量最好」实弹必被 triage 拆出 metric 半(09-27 实弹取证),全店
+    # 榜同样答不了品类最优,CartSkill 诚实反问是两类语义的并集正解;
+    # 非榜词的 metric 复合(「查下GMV顺便加购」)不命中榜词 RE,照旧深规划。
+    return {
+        "goal": "Add requested products to cart with honest shelf guidance",
+        "subtasks": [
+            {
+                "id": "step_fast_bestseller_cart_0",
+                "description": f"Execute CartSkill for input: {ctx.input_text}",
+                "status": "pending",
+            }
+        ],
+        "currentStepIndex": 0,
+    }, "⚡ 极速规划直达：识别到销量榜加购诉求，确定性走购物车技能诚实引导！"
+
+
+def _ft_composite_order_list_build(ctx: _FastTrackCtx) -> tuple[dict, str]:
+    fast_subtasks: list[dict] = []
+    if ctx.has_cart_manage:
+        fast_subtasks.append(
+            {"id": "step_fast_cart_0", "description": f"Execute CartSkill for input: {ctx.input_text}", "status": "pending"}
+        )
+    else:
+        fast_subtasks.append(
+            {"id": "step_fast_guide_0", "description": f"Execute ShoppingGuideSkill for input: {ctx.input_text}", "status": "pending"}
+        )
+    fast_subtasks.append(
+        {"id": "step_fast_list_orders_1", "description": "Call listUserOrders to fetch recent orders", "status": "pending"}
+    )
+    return {
+        "goal": "Execute composite shopping and order query subtasks",
+        "subtasks": fast_subtasks,
+        "currentStepIndex": 0,
+    }, f"⚡ 极速规划直达：识别到复合诉求，已智能组装 {len(fast_subtasks)} 项子任务流并投入执行引擎！"
+
+
+def _ft_general_order_list_build(_ctx: _FastTrackCtx) -> tuple[dict, str]:
+    return {
+        "goal": "List recent orders for customer",
+        "subtasks": [
+            {"id": "step_fast_list_orders", "description": "Call listUserOrders to fetch recent orders", "status": "pending"}
+        ],
+        "currentStepIndex": 0,
+    }, "⚡ 极速规划直达：检测到客户订单列表查询诉求，秒级调度 listUserOrders 工具进行物理查单！"
+
+
+def _ft_general_order_list_matches(ctx: _FastTrackCtx) -> bool:
+    # 泛查单判定与旧分支同点位求值(含 is_explicit_order_id 的裸 input_text
+    # 正则),命中条件 = 查单族泛指词面 × 单意图 × 无显式单号。
+    is_explicit_order_id = bool(_EXPLICIT_ORDER_ID_RE.search(ctx.input_text))
+    return (
+        ctx.single_intent in ("order_status", "order_query")
+        and bool(_GENERAL_ORDER_LIST_RE.search(ctx.input_text))
+        and not is_explicit_order_id
+        and len(ctx.intents) == 1
+    )
+
+
+_FAST_TRACK_RULES: tuple[_FastTrackRule, ...] = (
+    _FastTrackRule(
+        "human_escalation",
+        lambda ctx: ctx.single_intent == "human_escalation",
+        _ft_human_escalation_build,
+    ),
+    _FastTrackRule(
+        "metric_single",
+        lambda ctx: len(ctx.intents) == 1 and ctx.single_intent == "metric_query",
+        _ft_metric_single_build,
+    ),
+    _FastTrackRule(
+        "metric_x_guide",
+        lambda ctx: ctx.has_metric and ctx.guide_hint and not ctx.has_order_action and not ctx.has_cart_manage,
+        _ft_metric_guide_build,
+    ),
+    _FastTrackRule(
+        "guide_x_cart",
+        lambda ctx: ctx.has_shopping_guide and ctx.has_cart_manage and not ctx.has_order_action,
+        _ft_guide_cart_build,
+    ),
+    _FastTrackRule(
+        "bestseller_cart",
+        lambda ctx: (
+            ctx.has_cart_manage
+            and not ctx.has_shopping_guide
+            and not ctx.has_order_action
+            and not ctx.has_order_list
+            and bool(_BEST_SELLER_RE.search(ctx.input_text or ""))
+        ),
+        _ft_bestseller_cart_build,
+    ),
+    _FastTrackRule(
+        "composite_order_list",
+        lambda ctx: (ctx.has_shopping_guide or ctx.has_cart_manage)
+        and ctx.has_order_list
+        and len(ctx.intents) >= 2,
+        _ft_composite_order_list_build,
+    ),
+    _FastTrackRule(
+        "general_order_list",
+        _ft_general_order_list_matches,
+        _ft_general_order_list_build,
+    ),
+)
 
 
 async def planner_node(state: AgentState) -> dict:
@@ -375,57 +632,12 @@ async def planner_node(state: AgentState) -> dict:
                     )
                 return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
 
-        if single_intent == "human_escalation":
-            fast_plan = {
-                "goal": "Escalate conversation to human support operator",
-                "subtasks": [
-                    {
-                        "id": "step_fast_human_escalation",
-                        "description": "Trigger human escalation and create pending approval ticket for customer support operator",
-                        "status": "pending",
-                    }
-                ],
-                "currentStepIndex": 0,
-            }
-            if job_id:
-                await emit_status(
-                    job_id,
-                    "⚡ 极速介入直达：检测到人工客服与熔断诉求，已物理生成人工转接步骤并推入执行链！",
-                    node="planner",
-                    plan=fast_plan,
-                )
-            return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
-
-        # 📊 单意图 metric_query 确定性快轨(2026-09-14 nightly 巡检):ADR-0003
-        # 规则前置只保证了 triage→planner 段直通,planner→executor 段仍落 LLM
-        # 深规划自由发挥 ——「最赚钱的商品排行」_ranking_metric_from_text 明明
-        # 能解析出 gross_profit,LLM 深规划却自选 volume(利润榜变销量榜,回复
-        # 自称「利润表现优异」实为销量排序)。排行 metric 是纯词表映射,与
-        # address_manage 同理必须零 LLM 确定性执行。
-        if len(intents) == 1 and single_intent == "metric_query":
-            metric = _ranking_metric_from_text(input_text or "")
-            fast_plan = {
-                "goal": "Fetch real product ranking by metric",
-                "subtasks": [_ranking_subtask(metric, "0")],
-                "currentStepIndex": 0,
-            }
-            if job_id:
-                await emit_status(
-                    job_id,
-                    f"⚡ 极速直达：识别到经营排行诉求，确定性执行 {metric} 排行检索！",
-                    node="planner",
-                    plan=fast_plan,
-                )
-            return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
-
+        # 📋 确定性快轨注册表(nightly #7):守卫变量一次算定,规则表自上而下
+        # 首个命中即组装 (计划, 进度文案) 直达执行链。守卫标志全是纯谓词,
+        # 与旧代码同为无条件求值;表序即优先级(见 _FAST_TRACK_RULES 头注)。
         has_shopping_guide = any(i.get("intent") == "shopping_guide" for i in intents)
         has_cart_manage = any(i.get("intent") == "cart_manage" for i in intents)
         has_order_list = any(i.get("intent") in ("order_status", "order_query") for i in intents)
-
-        # 📊 指标×导购确定性快轨(遗留二期,2026-09-13):「看看GMV多少,顺便推荐
-        # 卖得好的」复合句曾依赖深规划自觉 —— LLM 偶发把 GMV 当后台数据拒答。
-        # 排行子任务 + 导购子任务确定性组装,零 LLM 拒答面;资金/订单动作在场
-        # 时不劫持(让位深规划按资金纪律编排)。
         has_order_action = any(
             i.get("intent")
             in ("refund", "order_return", "order_modify_address", "order_cancel", "order_status", "order_query")
@@ -434,172 +646,23 @@ async def planner_node(state: AgentState) -> dict:
         metric_hint = _METRIC_HINT_RE.search(input_text or "")
         guide_hint = bool(has_shopping_guide) or bool(_SHOPPING_HINT_RE.search(input_text or ""))
         has_metric = any(i.get("intent") == "metric_query" for i in intents) or bool(metric_hint)
-        if has_metric and guide_hint and not has_order_action and not has_cart_manage:
-            # cart 在场(加购/结算复合)让位三段接力轨 —— 指标轨只管纯查询+推荐
-            ranking_metric = _ranking_metric_from_text(input_text or "")
-            fast_subtasks = [
-                _ranking_subtask(ranking_metric, "0"),
-                {
-                    "id": "step_fast_guide_1",
-                    "description": f"Execute ShoppingGuideSkill for input: {input_text}",
-                    "status": "pending",
-                },
-            ]
-            fast_plan = {
-                "goal": "Fetch real sales metrics and shopping recommendations",
-                "subtasks": fast_subtasks,
-                "currentStepIndex": 0,
-            }
-            if job_id:
-                await emit_status(
-                    job_id,
-                    "⚡ 极速规划直达：识别到经营数据+导购复合诉求，已组装排行与导购双子任务流！",
-                    node="planner",
-                    plan=fast_plan,
-                )
-            return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
-
-        # 🛒 推荐×全量加购确定性快轨(2026-09-13 一句话接力):「推荐X，都要了」
-        # 先导购(写候选,数量语义生效)后购物车全量入车 —— 零 LLM,严禁 guide
-        # 快轨单技能吞掉加购半。
-        # 结算词与句中地址(2026-09-13 三段接力):「查卖得好的短袖,把第一个
-        # 加入购物车,地址是X,然后结算」—— 深规划自由发挥曾产出无执行的幻觉
-        # 叙事(历史幻觉单号自增殖),三段确定性编排根治。
-        _CHECKOUT_HINT_RE = re.compile(_grp(*_pick(CHECKOUT_FAMILY, 7, 6, 5)))
-        _STATED_ADDR_RE = re.compile(
-            _grp(*_pick(ADDRESS_VERB_FAMILY, 12, 5, 10, 13)) + r"\s*([^,，。]+)"
+        fast_ctx = _FastTrackCtx(
+            intents=intents,
+            single_intent=single_intent,
+            input_text=input_text,
+            has_shopping_guide=has_shopping_guide,
+            has_cart_manage=has_cart_manage,
+            has_order_list=has_order_list,
+            has_order_action=has_order_action,
+            guide_hint=guide_hint,
+            has_metric=has_metric,
         )
-        if (
-            has_shopping_guide
-            and has_cart_manage
-            and not has_order_action
-        ):
-            fast_subtasks = [
-                {
-                    "id": "step_fast_guide_0",
-                    "description": f"Execute ShoppingGuideSkill for input: {input_text}",
-                    "status": "pending",
-                },
-                {
-                    "id": "step_fast_cart_1",
-                    "description": f"Execute CartSkill for input: {input_text}",
-                    "status": "pending",
-                },
-            ]
-            if _CHECKOUT_HINT_RE.search(input_text or ""):
-                addr = _STATED_ADDR_RE.search(input_text or "")
-                shipping = f"shipping to {addr.group(1).strip()}" if addr else                     "shipping to the customer's default address"
-                fast_subtasks.append(
-                    {
-                        "id": "step_fast_checkout_2",
-                        "description": (
-                            f"Call checkoutCart to place a real order from the current cart items, {shipping}"
-                        ),
-                        "status": "pending",
-                    }
-                )
-            fast_plan = {
-                "goal": "Recommend products then add them to cart"
-                + (" and check out" if _CHECKOUT_HINT_RE.search(input_text or "") else ""),
-                "subtasks": fast_subtasks,
-                "currentStepIndex": 0,
-            }
+        for _rule in _FAST_TRACK_RULES:
+            if not _rule.matches(fast_ctx):
+                continue
+            fast_plan, fast_status = _rule.build(fast_ctx)
             if job_id:
-                await emit_status(
-                    job_id,
-                    "⚡ 极速规划直达：识别到推荐+全量加购诉求，已组装导购与购物车双子任务流！",
-                    node="planner",
-                    plan=fast_plan,
-                )
-            return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
-
-        # 🛒 榜词加购确定性快轨(2026-09-27 立案 planner-plan-intent-alignment):
-        # cart_manage「销量榜词+加购」形态此前无任何快轨,直坠 LLM 深规划自由
-        # 发挥成 5 步(排行/加购/确认订单/改量/结算)—— 后三步用户从未请求,
-        # 转移双计撞旧熔断阈值(09:42 实弹熔断事故)。此处确定性单步收口,零
-        # LLM 规划:只排 CartSkill,技能内 2.6.53 榜词分支诚实反问在售真货,
-        # 严禁静默落候选[0]。刻意不排 queryProductRanking —— 排行是全店榜无
-        # 品类过滤,「销量最好的裤子」会被答成全店第一(2.6.53 同源谎言面),
-        # 排行步待榜单支持品类过滤后再入计划。判据不带 metric_query 否决:
-        # 「销量最好」实弹必被 triage 拆出 metric 半(09-27 实弹取证),全店
-        # 榜同样答不了品类最优,CartSkill 诚实反问是两类语义的并集正解;
-        # 非榜词的 metric 复合(「查下GMV顺便加购」)不命中榜词 RE,照旧深规划。
-        if (
-            has_cart_manage
-            and not has_shopping_guide
-            and not has_order_action
-            and not has_order_list
-            and _BEST_SELLER_RE.search(input_text or "")
-        ):
-            cart_fast_plan = {
-                "goal": "Add requested products to cart with honest shelf guidance",
-                "subtasks": [
-                    {
-                        "id": "step_fast_bestseller_cart_0",
-                        "description": f"Execute CartSkill for input: {input_text}",
-                        "status": "pending",
-                    }
-                ],
-                "currentStepIndex": 0,
-            }
-            if job_id:
-                await emit_status(
-                    job_id,
-                    "⚡ 极速规划直达：识别到销量榜加购诉求，确定性走购物车技能诚实引导！",
-                    node="planner",
-                    plan=cart_fast_plan,
-                )
-            return {"task_plan": cart_fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
-
-        if (has_shopping_guide or has_cart_manage) and has_order_list and len(intents) >= 2:
-            fast_subtasks = []
-            if has_cart_manage:
-                fast_subtasks.append(
-                    {"id": "step_fast_cart_0", "description": f"Execute CartSkill for input: {input_text}", "status": "pending"}
-                )
-            else:
-                fast_subtasks.append(
-                    {"id": "step_fast_guide_0", "description": f"Execute ShoppingGuideSkill for input: {input_text}", "status": "pending"}
-                )
-            fast_subtasks.append(
-                {"id": "step_fast_list_orders_1", "description": "Call listUserOrders to fetch recent orders", "status": "pending"}
-            )
-            fast_plan = {
-                "goal": "Execute composite shopping and order query subtasks",
-                "subtasks": fast_subtasks,
-                "currentStepIndex": 0,
-            }
-            if job_id:
-                await emit_status(
-                    job_id,
-                    f"⚡ 极速规划直达：识别到复合诉求，已智能组装 {len(fast_subtasks)} 项子任务流并投入执行引擎！",
-                    node="planner",
-                    plan=fast_plan,
-                )
-            return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
-
-        is_explicit_order_id = bool(_EXPLICIT_ORDER_ID_RE.search(input_text))
-        is_general_order_list_query = (
-            single_intent in ("order_status", "order_query")
-            and bool(_GENERAL_ORDER_LIST_RE.search(input_text))
-            and not is_explicit_order_id
-        )
-
-        if is_general_order_list_query and len(intents) == 1:
-            fast_plan = {
-                "goal": "List recent orders for customer",
-                "subtasks": [
-                    {"id": "step_fast_list_orders", "description": "Call listUserOrders to fetch recent orders", "status": "pending"}
-                ],
-                "currentStepIndex": 0,
-            }
-            if job_id:
-                await emit_status(
-                    job_id,
-                    "⚡ 极速规划直达：检测到客户订单列表查询诉求，秒级调度 listUserOrders 工具进行物理查单！",
-                    node="planner",
-                    plan=fast_plan,
-                )
+                await emit_status(job_id, fast_status, node="planner", plan=fast_plan)
             return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
 
         entity_order_id = next(
