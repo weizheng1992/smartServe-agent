@@ -62,6 +62,8 @@ class TestIsConsultQuery:
             "把第1件加入购物车",
             "转人工",
             "顺便问下退货政策再帮我查下订单",  # 复合意图
+            "这单我不想要了,退货的话是马上就能安排吗",  # 首人称取消语(2026-09-28 确定性否决词表)
+            "商品不想要了可以退款吗",  # 取消语 × 疑问形,仍属动作请求
             "你好",  # 无咨询话题
             "今天天气怎么样",  # 话题不在店铺知识域
         ],
@@ -205,6 +207,21 @@ class TestRunConsultDirectAnswer:
         hit = asyncio.run(run_consult_direct_answer(_consult_state(), []))
         assert hit is not None and hit[0] == cfp.ROUTE_TO_ACTION_MARKER
         assert "cache_add" not in calls
+
+    def test_cancel_intent_vetoed_deterministically_before_llm(self, monkeypatch):
+        """确定性仲裁前置(2026-09-28):首人称取消/放弃语在直答调用之前由
+        代码闸直接改判路由 —— 「不想要了」族的否决曾纯靠 prompt 让 LLM 自觉,
+        hosted 模型漂移后资讯直答关会话(eval consult-fastpath 用例翻转实证)。
+        零 LLM 调用、不写语义缓存,返回形状与 LLM 否决一致 (marker, [], 0.0)。"""
+        calls = self._patch(monkeypatch)
+        state = _consult_state()
+        state["input"] = "这单我不想要了"  # 不含 _CONSULT_ACTION_RE 词条,独立验证取消语闸
+        hit = asyncio.run(run_consult_direct_answer(state, []))
+        assert hit is not None
+        assert hit[0] == cfp.ROUTE_TO_ACTION_MARKER
+        assert hit[1] == [] and hit[2] == 0.0
+        assert "answer_args" not in calls, "取消语必须在直答调用之前由代码闸否决"
+        assert "cache_add" not in calls, "改判路由不得写语义缓存"
 
 
 async def _fake_exemplars(*args, **kwargs) -> list:

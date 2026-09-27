@@ -90,6 +90,22 @@ _CONSULT_ACTION_RE = re.compile(
 # 短语裸话题(≤12 字且无疑问词也算):「退货政策」「尺码表」类省略式提问
 _CONSULT_BARE_TOPIC_RE = re.compile(r"(?:政策|策略|规定|规则|流程|手续|尺码|运费|发票|保修|保养|退换)")
 
+# 首人称取消/放弃语(2026-09-28):「不想要了」族是明确的动作形请求(弃单/
+# 退货),曾纯靠直答 prompt 的 ROUTING VETO 让 LLM 自行否决 —— hosted 模型
+# 漂移后对「这单我不想要了,退货的话是马上就能安排吗」不再返回否决标记,
+# 资讯直答关会话(eval consult-fastpath 用例翻转实证)。收编为确定性闸,
+# 单一事实源两处消费:is_consult_query 否定(Step 1.4 不入快轨,省一次
+# 直答调用)+ run_consult_direct_answer 入口直接仲裁(兜 Step 3 分类器判
+# consult 的漏网形状)。词条取「不想要」而非在册的「不想要了」—— 前者是
+# 后者的子串超集,覆盖相同且不与 REFUND_VERB_FAMILY 重复手抄(词表契约
+# test_no_registered_word_used_bare_outside_home)。⚠️ 严禁收编裸
+# 「退货|退款|退钱」—— 会击穿「退货政策」类咨询直答(与 _CONSULT_ACTION_RE
+# 同一红线)。
+_CANCEL_INTENT_RE = re.compile(
+    r"(?:不想要|不要了|不想买了|不买了)",
+    re.IGNORECASE,
+)
+
 # 冲突标记(intent-arbitration 07,2026-09-10):纯措辞侧的咨询形判定,零调用。
 # 与 is_consult_query 的分工:后者是快轨闸门(命中即直答);本标记只用于
 # 「槽位层判动作终局 × 措辞带咨询形」的冲突留痕 —— 话题词更宽(退货/退款
@@ -161,6 +177,8 @@ def is_consult_query(text: str, has_image: bool = False) -> bool:
     if ORDER_ID_RE.search(stripped):
         return False
     if _CONSULT_ACTION_RE.search(stripped):
+        return False
+    if _CANCEL_INTENT_RE.search(stripped):
         return False
     if not _CONSULT_TOPIC_RE.search(stripped):
         return False
@@ -243,6 +261,22 @@ async def run_consult_direct_answer(state: dict, history_msgs: list[dict]) -> tu
     input_text = (state.get("input") or "").strip()
     if not input_text or state.get("image_urls"):
         return None
+
+    # 🧭 确定性仲裁前置(2026-09-28):首人称取消/放弃语直接改判动作路由,
+    # 零调用 —— 不再依赖直答 LLM 遵守 ROUTING VETO(「不想要了」族的否决
+    # 曾纯靠 prompt,模型漂移后资讯直答关会话)。Step 1.4 侧经 is_consult_query
+    # 否定闸本就不入快轨,此闸兜 Step 3 分类器判 consult 的漏网形状;标记
+    # 消费语义与 LLM 否决一致(Step 1.4 fallthrough 完整管线 / Step 3 降级
+    # 保留动作形),不写语义缓存。
+    if _CANCEL_INTENT_RE.search(input_text):
+        job_id = state.get("job_id")
+        if job_id:
+            await emit_status(
+                job_id,
+                "🔎 复核为操作请求,转入任务处理管道(意图仲裁员改判)...",
+                node="triage",
+            )
+        return ROUTE_TO_ACTION_MARKER, [], 0.0
 
     tenant_id = tenant_of_state(state)
     brand_name = get_merchant_display_name(tenant_id)
