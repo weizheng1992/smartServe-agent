@@ -55,6 +55,8 @@ class Thread(Base):
 
 Index("threads_biz_status_idx", Thread.business_id, Thread.status)
 Index("threads_updated_at_idx", Thread.updated_at)
+# 侧栏/列表热路径:list_user_threads 按 user_id 等值 + updated_at 倒序
+Index("threads_user_updated_idx", Thread.user_id, Thread.updated_at)
 
 
 class Message(Base):
@@ -142,6 +144,10 @@ class SessionMetric(Base):
     resolution_status: Mapped[str] = mapped_column(Text, nullable=False)
     avg_latency_ms: Mapped[float | None] = mapped_column(Float, server_default=text("0"))
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+# 管理大盘聚合热路径:按租户 + 时间窗扫会话成本/熔断计数
+Index("session_metrics_biz_created_idx", SessionMetric.business_id, SessionMetric.created_at)
 
 
 class BadcaseCandidate(Base):
@@ -245,6 +251,10 @@ class IntentLog(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
+# /api/logs 时间倒序翻页与仲裁留痕审计扫按 created_at 切片
+Index("intent_logs_created_at_idx", IntentLog.created_at)
+
+
 class LowConfidenceLog(Base):
     __tablename__ = "low_confidence_logs"
 
@@ -268,6 +278,11 @@ class PendingApproval(Base):
     reason: Mapped[str | None] = mapped_column(Text)  # migrateColumns 幂等补充
     deadline: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+# HITL 热路径:web 2s / admin 5s 轮询按 status 扫 waiting,会话历史页按 thread_id 回查
+Index("pending_approvals_status_created_idx", PendingApproval.status, PendingApproval.created_at)
+Index("pending_approvals_thread_created_idx", PendingApproval.thread_id, PendingApproval.created_at)
 
 
 class ApprovalOutboxEvent(Base):
