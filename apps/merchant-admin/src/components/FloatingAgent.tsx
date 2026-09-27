@@ -115,11 +115,14 @@ export function FloatingAgent({ route }: { route: string }) {
         const withoutPending = prev.filter((f) => f.id !== pendingId);
         return [
           ...withoutPending,
-          ...(result as AskResultFrame[]).map((f: AskResultFrame, k: number) => ({
-            id: pendingId + 10 + k,
-            event: f.event,
-            data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
-          })),
+          // 心跳帧是传输层保活(A6),不是对话内容,不入历史
+          ...(result as AskResultFrame[])
+            .filter((f: AskResultFrame) => f.event !== 'heartbeat')
+            .map((f: AskResultFrame, k: number) => ({
+              id: pendingId + 10 + k,
+              event: f.event,
+              data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
+            })),
         ];
       });
     } catch (err) {

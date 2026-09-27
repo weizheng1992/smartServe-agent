@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+import uuid
 
 from engine_py.analytics import graph, promotions, rbac, report_service
+from engine_py.event_bus import get_client, publish_agent_event, read_agent_events
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import delete, select
 
 from gateway_py.tenant_context import require_tenant_context
@@ -46,32 +50,140 @@ async def _ctx(request: Request) -> dict:
     }
 
 
+ASK_TAIL_DEADLINE_SECONDS = 300  # 生产者意外死亡时消费端兜底收口;期间心跳续命不误杀慢问
+_ASK_PRODUCERS: set[asyncio.Task] = set()  # 持引用防 GC,done 回调自清
+
+
+def _sse_frame(seq: int, event: str, data) -> str:
+    return f"id: {seq}\n" + _sse(event, data)
+
+
+def _heartbeat() -> str:
+    return f"event: heartbeat\ndata: {json.dumps({'timestamp': int(time.time() * 1000)})}\n\n"
+
+
+def _ask_frames(outcome: dict) -> list[tuple[str, dict]]:
+    """outcome → (event, data) 帧序列;场景包/问号切分一轮回多帧。"""
+    if outcome.get("type") == "multi":
+        return [(f.get("type", "error"), f) for f in outcome.get("frames") or []]
+    return [(outcome.get("type", "error"), outcome)]
+
+
+def _ask_response(ask_id: str, gen) -> StreamingResponse:
+    return StreamingResponse(gen, media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
+        "X-Ask-Id": ask_id,
+    })
+
+
+async def _tail_ask_events(request: Request, ask_id: str, last_seq: int):
+    """SSE 消费端:先回放 seq > last_seq 的历史,再跟进直到 ``__done__`` 哨兵。
+
+    哨兵只在 Redis 流内,不出 SSE 线(客户端未知事件会掉兜底渲染,不外泄)。"""
+    client = await get_client()
+    stream_key = f"job:events:{ask_id}"
+    last_entry_id = "0"
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + ASK_TAIL_DEADLINE_SECONDS
+    while True:
+        if await request.is_disconnected():
+            return
+        if loop.time() > deadline:
+            yield _sse("error", {"message": "分析流等待超时,请重新提问"})
+            return
+        try:
+            res = await client.xread({stream_key: last_entry_id}, count=50, block=15000)
+        except RedisTimeoutError:
+            # 读超时先于 BLOCK 到期:按一次轮询到期处理,发心跳续命而非断流
+            yield _heartbeat()
+            continue
+        except Exception as err:
+            print(f"[AnalyticsSSE] ask stream read failed, closing: {err}")
+            return
+        if not res:
+            yield _heartbeat()
+            continue
+        for _key, entries in res:
+            for entry_id, fields in entries:
+                last_entry_id = entry_id
+                etype = fields.get("type", "")
+                if etype == "__done__":
+                    return
+                try:
+                    seq = int(fields.get("seq", "0"))
+                except ValueError:
+                    continue
+                if seq <= last_seq:
+                    continue
+                try:
+                    data = json.loads(fields.get("data", "null"))
+                except Exception:
+                    data = fields.get("data")
+                yield _sse_frame(seq, etype, data)
+
+
 @router.post("/api/admin/analytics/ask")
 async def analytics_ask(request: Request):
-    """一轮问答 SSE:body {question, pageContext?};事件 clarify|result|unsupported|error。"""
+    """一轮问答 SSE:body {question, pageContext?};事件 clarify|result|unsupported|error。
+
+    断线回放(2026-09-26 夜审 A6 收口):首连响应头 ``X-Ask-Id`` 返回本轮流 id,
+    每帧带 SSE ``id: seq`` 落 Redis Streams(复用 event_bus 契约,600s TTL);
+    断线重连同 body 带 ``X-Ask-Id`` + ``Last-Event-ID``(最后收到的 seq)即
+    回放剩余帧,**不重算** —— 计算挂后台任务,客户端断开不停算,与 chat
+    ``/api/chat/{jobId}/stream`` 同一事件源架构。Redis 故障静默降级为内联直排
+    (回放能力让路,当次问答照常)。"""
     ctx = await _ctx(request)
     body = await request.json()
     question = str(body.get("question") or "").strip()
     if not question:
         return JSONResponse(status_code=400, content={"success": False, "message": "question 必传"})
 
-    async def stream():
-        yield _sse("start", {"staff": ctx["display"], "role": ctx["role"]})
+    resume_id = str(request.headers.get("x-ask-id") or body.get("askId") or "").strip()
+    # Last-Event-ID:标准 SSE 头优先;fetch 断线重连塞头不便时 body.lastEventId 同义(同 chat.py 双通道)
+    last_event_id = request.headers.get("last-event-id") or str(body.get("lastEventId") or "")
+    last_seq = int(last_event_id) if last_event_id.isdigit() else 0
+
+    if resume_id:
+        if not await read_agent_events(resume_id):
+            async def gone():
+                yield _sse("error", {"message": "回放流不存在或已过期,请重新提问"})
+
+            return _ask_response(resume_id, gone())
+        return _ask_response(resume_id, _tail_ask_events(request, resume_id, last_seq))
+
+    # ---- 首连:生成 askId,start 帧同步落流,计算挂后台任务(断开不停算) ----
+    ask_id = f"ask_{uuid.uuid4().hex}"
+    if await publish_agent_event(
+        ask_id, "start", {"staff": ctx["display"], "role": ctx["role"], "askId": ask_id}
+    ) is None:
+        # Redis 故障:回放能力降级,当次问答内联直排(与历史行为一致)
+        async def inline():
+            yield _sse("start", {"staff": ctx["display"], "role": ctx["role"], "askId": ask_id})
+            try:
+                outcome = await graph.ask_all(question, ctx, body.get("pageContext"))
+            except Exception as err:
+                outcome = {"type": "error", "message": str(err)}
+            for etype, data in _ask_frames(outcome):
+                yield _sse(etype, data)
+            await asyncio.sleep(0)
+
+        return _ask_response(ask_id, inline())
+
+    async def _produce():
         try:
             outcome = await graph.ask_all(question, ctx, body.get("pageContext"))
-        except Exception as err:
-            outcome = {"type": "error", "message": str(err)}
-        if outcome.get("type") == "multi":
-            # 场景包/问号切分:一轮回多帧,前端逐帧渲染(每帧独立导出/存报告)
-            for frame in outcome.get("frames") or []:
-                yield _sse(frame.get("type", "error"), frame)
-        else:
-            yield _sse(outcome.get("type", "error"), outcome)
-        await asyncio.sleep(0)
+            for etype, data in _ask_frames(outcome):
+                await publish_agent_event(ask_id, etype, data)
+        except Exception as err:  # ask_all 本身不该抛,兜底落错误帧防流悬挂
+            await publish_agent_event(ask_id, "error", {"message": str(err)})
+        finally:
+            await publish_agent_event(ask_id, "__done__", {"askId": ask_id})
 
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
-    })
+    producer = asyncio.create_task(_produce())
+    _ASK_PRODUCERS.add(producer)
+    producer.add_done_callback(_ASK_PRODUCERS.discard)
+
+    return _ask_response(ask_id, _tail_ask_events(request, ask_id, 0))
 
 
 @router.get("/api/admin/analytics/menus")

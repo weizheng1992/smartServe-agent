@@ -3,6 +3,8 @@
 export interface SseFrame {
   event: string;
   data: any;
+  /** SSE `id:` 行(ask 流 A6 断线重连:Last-Event-ID 回放用;心跳/旧流无 id)。 */
+  id?: number;
 }
 
 /** 解析完整 text/event-stream 为帧序列:非 data 行忽略;坏 JSON 跳过(不中断流);
@@ -10,16 +12,21 @@ export interface SseFrame {
 export function parseSseFrames(text: string): SseFrame[] {
   const frames: SseFrame[] = [];
   let event = '';
+  let id: number | undefined;
   for (const line of text.split('\n')) {
     if (line.startsWith('event: ')) {
       event = line.slice(7).trim();
+    } else if (line.startsWith('id: ')) {
+      const n = Number(line.slice(4).trim());
+      if (Number.isInteger(n)) id = n;
     } else if (line.startsWith('data: ') && event) {
       try {
-        frames.push({ event, data: JSON.parse(line.slice(6)) });
+        frames.push({ event, data: JSON.parse(line.slice(6)), ...(id !== undefined ? { id } : {}) });
       } catch {
         // 跳过坏帧
       }
       event = '';
+      id = undefined;
     }
   }
   return frames;
@@ -35,10 +42,14 @@ export function createFrameParser(onFrame: (f: SseFrame) => void): (chunk: strin
       const block = buffer.slice(0, sep);
       buffer = buffer.slice(sep + 2);
       let event = '';
+      let id: number | undefined;
       let data: any;
       for (const line of block.split('\n')) {
         if (line.startsWith('event: ')) event = line.slice(7).trim();
-        else if (line.startsWith('data: ') && event) {
+        else if (line.startsWith('id: ')) {
+          const n = Number(line.slice(4).trim());
+          if (Number.isInteger(n)) id = n;
+        } else if (line.startsWith('data: ') && event) {
           try {
             data = JSON.parse(line.slice(6));
           } catch {
@@ -46,7 +57,7 @@ export function createFrameParser(onFrame: (f: SseFrame) => void): (chunk: strin
           }
         }
       }
-      if (event && data !== undefined) onFrame({ event, data });
+      if (event && data !== undefined) onFrame({ event, data, ...(id !== undefined ? { id } : {}) });
       sep = buffer.indexOf('\n\n');
     }
   };

@@ -315,29 +315,45 @@ export const api = {
     /** 流式渲染回调:每凑齐一帧即触发(帧同时聚全量返回,兼容旧用法)。 */
     onFrame?: (f: SseFrame) => void,
   ): Promise<SseFrame[]> => {
-    // SSE 经 fetch 流式读取;增量解析逐帧回调(ADR-0005 流式渲染)
-    const res = await req('/api/admin/analytics/ask', {
-      method: 'POST',
-      body: JSON.stringify({ question, pageContext }),
-    });
+    // SSE 经 fetch 流式读取;增量解析逐帧回调(ADR-0005 流式渲染)。
+    // 断线重连(夜审 A6):首连留 X-Ask-Id;网络中断携 askId+lastEventId 重试,
+    // 服务端只补剩余帧不重算(结果卡渲染按 id 去重,重放帧无害)。
     const frames: SseFrame[] = [];
-    const parser = createFrameParser((f) => {
-      frames.push(f);
-      onFrame?.(f);
-    });
-    const reader = res.body?.getReader();
-    if (reader) {
-      const decoder = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        parser(decoder.decode(value, { stream: true }));
+    let askId = '';
+    let lastEventId = 0;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await req('/api/admin/analytics/ask', {
+          method: 'POST',
+          body: JSON.stringify({
+            question,
+            pageContext,
+            ...(askId ? { askId, lastEventId } : {}),
+          }),
+        });
+        askId = res.headers.get('X-Ask-Id') || askId;
+        const parser = createFrameParser((f) => {
+          frames.push(f);
+          if (typeof f.id === 'number' && f.id > lastEventId) lastEventId = f.id;
+          onFrame?.(f);
+        });
+        const reader = res.body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            parser(decoder.decode(value, { stream: true }));
+          }
+          parser(decoder.decode());
+        } else {
+          parser(await res.text());
+        }
+        return frames;
+      } catch (err) {
+        if (attempt >= 2 || !askId) throw err;
       }
-      parser(decoder.decode());
-    } else {
-      parser(await res.text());
     }
-    return frames;
   },
 
   /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录)。 */
