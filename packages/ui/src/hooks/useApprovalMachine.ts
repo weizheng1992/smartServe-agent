@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 export interface ApprovalActionResult {
   success: boolean;
@@ -23,9 +23,21 @@ export interface ExecuteHumanReplyOptions {
   apiEndpoint?: string;
 }
 
-export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals') {
+/** 最小 fetch 结构类型:注入方无需满足完整 typeof fetch(如 preconnect)。 */
+export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+export interface ApprovalMachineOptions {
+  /** 注入应用层 fetch(如带 Authorization 的包装);缺省全局 fetch。
+   *  ui 包零依赖不变量:鉴权等横切逻辑由调用方注入,本包不 import 应用层代码。 */
+  fetcher?: FetchLike;
+}
+
+export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals', options?: ApprovalMachineOptions) {
   const [submittingActionId, setSubmittingActionId] = useState<string | null>(null);
   const [rejectionReasons, setRejectionReasons] = useState<Record<string, string>>({});
+  const injectedFetch = options?.fetcher;
+  // bind(globalThis):裸 fetch 引用在部分环境下丢失窗口上下文会 Illegal invocation
+  const doFetch = useMemo(() => injectedFetch ?? fetch.bind(globalThis), [injectedFetch]);
 
   const setRejectionReason = useCallback((approvalId: string, reason: string) => {
     setRejectionReasons((prev) => ({
@@ -55,7 +67,7 @@ export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals') {
       try {
         const reason = rejectionReason !== undefined ? rejectionReason : rejectionReasons[approvalId] || '';
 
-        const res = await fetch(apiEndpoint, {
+        const res = await doFetch(apiEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -83,7 +95,7 @@ export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals') {
         setSubmittingActionId(null);
       }
     },
-    [defaultEndpoint, rejectionReasons, clearRejectionReason],
+    [defaultEndpoint, rejectionReasons, clearRejectionReason, doFetch],
   );
 
   const executeHumanReplyAction = useCallback(
@@ -95,7 +107,7 @@ export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals') {
     }: ExecuteHumanReplyOptions): Promise<ApprovalActionResult> => {
       setSubmittingActionId(approvalId);
       try {
-        const res = await fetch(apiEndpoint, {
+        const res = await doFetch(apiEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -122,7 +134,7 @@ export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals') {
         setSubmittingActionId(null);
       }
     },
-    [defaultEndpoint],
+    [defaultEndpoint, doFetch],
   );
 
   return {

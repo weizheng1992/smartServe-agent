@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, authedFetch } from '@/lib/api';
 import type { OrderAuditLog, OrderDetail } from '@/lib/api';
 import * as pageContext from '@/lib/page-context';
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -74,7 +74,7 @@ export function useWorkbenchState(initialTab: string) {
   }, [activeThreadId]);
 
   const { submittingActionId, setRejectionReasons, executeApprovalAction, executeHumanReplyAction } =
-    useApprovalMachine('/api/admin/approvals');
+    useApprovalMachine('/api/admin/approvals', { fetcher: authedFetch });
 
   const loadConversationMessages = useCallback(async (threadId: string) => {
     if (!threadId) return;

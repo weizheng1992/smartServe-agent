@@ -57,6 +57,18 @@ async function req(path: string, init?: RequestInit) {
   return res;
 }
 
+/** 注入 ui 包 useApprovalMachine 的鉴权 fetch(夜审 A4/A5):只附加身份头与
+ *  401 收口,不吞非 2xx —— 业务错误由 hook 按 success/error 呈现。 */
+export async function authedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, { ...init, headers: { ...authHeaders(), ...(init?.headers || {}) } });
+  if (res.status === 401) {
+    clearSession();
+    location.href = '/';
+    throw new Error('401 登录已过期');
+  }
+  return res;
+}
+
 /** 域数据请求:400 级业务错误也返回 body,由页面按 success/message 呈现文案。 */
 async function fetchJson(path: string, init?: RequestInit) {
   const res = await fetch(path, {
