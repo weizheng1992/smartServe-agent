@@ -923,20 +923,26 @@ async def store_promo_price(productId: str = Query(...), price: float = Query(..
 
 @merchant_promotions_router.post("/api/store/promotions/prices")
 async def store_promo_prices_batch(items: list[dict]):
-    """批量促销价(商城商品列表;服务端唯一算价,避免前端规则漂移)。"""
-    from engine_py.analytics.promotion_engine import promo_for_spu
+    """批量促销价(商城商品列表;服务端唯一算价,避免前端规则漂移)。
+
+    活动集整批一次拉取后内存打分 —— 不逐商品重查活动(此前 200 商品 =
+    200 次活动全量 SELECT,2026-09-27 夜审 F3)。"""
+    from engine_py.analytics.promotion_engine import promo_prices_batch
     from engine_py.tools_registry.order_domain import _merchant_reader_engine
 
+    sliced = items[:200]
     async with _merchant_reader_engine().connect() as conn:
-        out = []
-        for item in items[:200]:
-            promo = await promo_for_spu(conn, str(item.get("productId")), float(item.get("price") or 0))
-            out.append({
-                "productId": item.get("productId"),
-                "originalPrice": float(item.get("price") or 0),
-                "promoPrice": promo["promoPrice"] if promo else float(item.get("price") or 0),
-                "promoName": promo["name"] if promo else None,
-            })
+        bests = await promo_prices_batch(
+            conn, [(str(i.get("productId")), float(i.get("price") or 0)) for i in sliced]
+        )
+    out = []
+    for item, promo in zip(sliced, bests):
+        out.append({
+            "productId": item.get("productId"),
+            "originalPrice": float(item.get("price") or 0),
+            "promoPrice": promo["promoPrice"] if promo else float(item.get("price") or 0),
+            "promoName": promo["name"] if promo else None,
+        })
     return {"success": True, "prices": out}
 
 

@@ -120,14 +120,15 @@ async def best_for_amount(conn, amount: float, scope_spus: set[str] | None = Non
     return scoped_best or best
 
 
-async def promo_for_spu(conn, spu_code: str, price: float) -> dict | None:
-    """商品促销价(商城展示):命中的最优活动 + 促销价。无 → None(原价展示)。"""
-    promos = [
-        p for p in await fetch_active_promos(conn)
+def _best_promo_for_spu(promos: list[dict], spu_code: str, price: float) -> dict | None:
+    """对已取出的活动集内存打分(单 SPU 展示口径)。纯函数 —— 批量端点
+    一次拉取活动集后逐商品复用,根除逐 SPU 重查活动的 N+1(2026-09-27)。"""
+    eligible = [
+        p for p in promos
         if p["scope_type"] in ("all", "spu") and (p["scope_type"] != "spu" or p["scope_value"] == spu_code)
     ]
     best: dict | None = None
-    for p in promos:
+    for p in eligible:
         discount = _compute_discount(p, price)
         if discount is None:
             continue
@@ -135,6 +136,21 @@ async def promo_for_spu(conn, spu_code: str, price: float) -> dict | None:
             best = {"promo_id": p["id"], "name": p["name"], "discount": discount,
                     "promoPrice": round(max(price - discount, 0), 2)}
     return best
+
+
+async def promo_for_spu(conn, spu_code: str, price: float) -> dict | None:
+    """商品促销价(商城展示):命中的最优活动 + 促销价。无 → None(原价展示)。"""
+    return _best_promo_for_spu(await fetch_active_promos(conn), spu_code, price)
+
+
+async def promo_prices_batch(conn, items: list[tuple[str, float]]) -> list[dict | None]:
+    """批量促销价:活动集一次拉取,逐 (spu, price) 内存打分。
+
+    入参 [(spu_code, price)];返回与入参等长的结果列表(元素同 promo_for_spu)。
+    活动数量级为个位/十位,批内共享一份候选集 —— 200 商品批量从 200 次活动
+    全量查询降为 1 次(2026-09-27 夜审 F3)。"""
+    promos = await fetch_active_promos(conn)
+    return [_best_promo_for_spu(promos, spu, price) for spu, price in items]
 
 
 async def list_usable_user_coupons(conn, user_id: str, amount: float) -> list[dict]:
