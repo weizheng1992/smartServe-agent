@@ -26,6 +26,7 @@ from ..config import settings
 from ..db import get_session
 from ..llm import get_embedding_model
 from ..tenant_config import get_tenant_config
+from ..tenant_context import resolve_business_id
 from .cache import tool_cache
 from .metric_registry import METRIC_SEMANTIC_REGISTRY
 
@@ -657,7 +658,7 @@ class OrderDomainService:
             user_id = user_id or ctx["userId"]
             business_id = business_id or ctx["businessId"]
 
-        business_id = business_id or "ecommerce"
+        business_id = resolve_business_id(business_id)  # A7:显式 > 上下文 > 默认
         if not user_id:
             return {"error": "userId is strictly required to create an order (or provide valid session threadId)."}
 
@@ -772,7 +773,7 @@ class OrderDomainService:
             target_user_id = target_user_id or ctx["userId"]
             target_business_id = target_business_id or ctx["businessId"]
 
-        target_business_id = (target_business_id or "ecommerce").lower()
+        target_business_id = resolve_business_id(target_business_id).lower()  # A7:显式 > 上下文 > 默认
 
         # TODO(Phase 1b): 租户配置 spiConnector.remote 时经 SPI 连接器远程查单(connectors/ 批次)
 
@@ -1230,7 +1231,7 @@ class OrderDomainService:
             return []
 
         query_user_id = target_user_id or options["userEmail"]
-        business_filter = (target_business_id or "ecommerce").lower()
+        business_filter = resolve_business_id(target_business_id).lower()  # A7:显式 > 上下文 > 默认
         try:
             async with get_session() as session:
                 rows = (
@@ -1289,7 +1290,7 @@ class OrderDomainService:
         if not target_user_id and not options.get("userEmail"):
             return []
 
-        business_filter = (target_business_id or "ecommerce").lower()
+        business_filter = resolve_business_id(target_business_id).lower()  # A7:显式 > 上下文 > 默认
         query_user_id = target_user_id or options["userEmail"]
 
         detailed_sql = (

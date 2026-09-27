@@ -10,6 +10,7 @@ from ..graph.nodes import executor_node, finish_node, merge_node, planner_node, 
 from ..graph.state import AgentState, to_ts_dict
 from ..memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from ..tenant import get_merchant_display_name
+from ..tenant_context import set_business_context
 
 _NODE_HANDLERS = {
     "triage": triage_node,
@@ -38,6 +39,10 @@ async def run_agent_state_node(node_name: str, ts_state: dict) -> dict:
                     business_id = row.business_id
         except Exception as err:
             print(f"[Temporal Activities] Failed to resolve thread businessId: {err}")
+
+    # 租户上下文注入(A7):与 run_agent 同语义 —— activity 每次调用独立任务
+    # 上下文,set 不跨作业泄漏,深层 ``or "ecommerce"`` 兜底优先吃此处真值。
+    set_business_context(business_id)
 
     if not state.get("longMemoryFacts") or not state.get("episodicEvents"):
         long_memory = LongMemory(state.get("userId", ""), business_id)

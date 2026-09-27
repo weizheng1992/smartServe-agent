@@ -13,6 +13,7 @@ from sqlalchemy import case, select, text
 
 from ..db import Message, Thread, get_session
 from ..tenant import sanitize_tenant_response
+from ..tenant_context import resolve_business_id
 
 # 与 TS ShortMemory.addMessage 保持一致的固定虚拟用户(线程自愈归属)
 _FALLBACK_USER_ID = "83d67d4e-104c-4325-8aa7-10d4389fc725"
@@ -39,7 +40,7 @@ def _infer_business_id(thread_id: str, explicit: str | None = None) -> str:
     for key in ("aurora", "nike", "adidas"):
         if key in lower:
             return key
-    return explicit or "ecommerce"
+    return resolve_business_id(explicit)  # A7:显式 ecommerce/None 时先吃入口上下文
 
 
 class ShortMemory:

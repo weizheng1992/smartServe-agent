@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import re
 
+from .tenant_context import current_business_id
+
 _PLACEHOLDER_RE = re.compile(r"\[([a-zA-Z0-9_-]+)\]")
 
 
 def tenant_of_state(state: dict) -> str:
-    """从 AgentState 推导租户 ID:business_config.businessId > state.business_id > 默认 ecommerce。
+    """从 AgentState 推导租户 ID:business_config.businessId > state.business_id > 上下文 > 默认 ecommerce。
 
     租户边界推导只允许这一份实现(triage 引擎与 consult 快轨共用,2026-09-09 收口),
-    任何副本漂移都是多租户隔离风险。
+    任何副本漂移都是多租户隔离风险。上下文层为 A7 新增:状态缺租户字段时(如
+    Temporal 早期节点或手工构造的状态)吃 run_agent 注入的入口真值。
     """
     business_config = state.get("business_config") or {}
     return str(
-        business_config.get("businessId") or state.get("business_id") or "ecommerce"
+        business_config.get("businessId")
+        or state.get("business_id")
+        or current_business_id()
+        or "ecommerce"
     ).lower()
 
 

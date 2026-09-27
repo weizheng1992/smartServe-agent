@@ -43,6 +43,7 @@ from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from .onboarding import build_entry_cards, resolve_onboarding_config
 from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
+from .tenant_context import set_business_context
 from .tools_registry.mall_domain import MallDomainService
 from .triage.rule_matchers import is_quick_greeting
 from .vision import normalize_image_urls
@@ -188,6 +189,11 @@ async def run_agent(job: AgentJobInput) -> dict:
     input_message = job.message
     job_id = job.job_id
 
+    # 租户上下文注入(A7):先以作业声明值立上下文,后续线程行自愈出真实值
+    # 再覆写 —— 深层记忆/领域工具的 ``or "ecommerce"`` 兜底从此优先吃上下文。
+    # 协程内 set 只影响本任务上下文副本,不跨作业泄漏,故无需 reset。
+    set_business_context(job.business_id)
+
     short_memory = ShortMemory(thread_id, 10, job.business_id)
     task_memory = TaskMemory(thread_id)
 
@@ -203,6 +209,7 @@ async def run_agent(job: AgentJobInput) -> dict:
                     resolved_biz_id = thread_row.business_id
         except Exception as g_err:
             print(f"[Quick Greeting] Failed to resolve thread businessId: {g_err}")
+        set_business_context(resolved_biz_id)  # 自愈值覆写(A7)
 
         # 同源改造(new-user-onboarding D):罐头回复消费租户 onboarding_config,
         # 与建线程欢迎行/回访轻问候同一份配置 —— 杜绝两套自我介绍。
@@ -254,6 +261,7 @@ async def run_agent(job: AgentJobInput) -> dict:
     precomputed_embedding: list[float] | None = None
 
     business_id, dynamic_config = await _resolve_business_context(thread_id, user_id, job.business_id)
+    set_business_context(business_id)  # 线程行自愈后的权威值覆写(A7)
 
     # LLM 调用归因:本次运行内全部模型调用(图节点 + 后台画像审计任务)据此
     # 落盘 llm_call_logs 的 thread_id / business_id(见 llm/telemetry.py);

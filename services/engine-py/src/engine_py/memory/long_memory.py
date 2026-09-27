@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from ..db import LongMemoryFact, get_session
 from ..llm import get_chat_model, get_embedding_model
+from ..tenant_context import resolve_business_id
 
 PHYSIOLOGICAL_RE = re.compile(
     r"脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size", re.IGNORECASE
@@ -91,7 +92,7 @@ class LongMemory:
                 else:
                     calculated_scope = "global"
                 calculated_biz_id = (
-                    explicit_business_id or self.business_id or "ecommerce"
+                    resolve_business_id(explicit_business_id or self.business_id)
                     if calculated_scope == "tenant"
                     else None
                 )

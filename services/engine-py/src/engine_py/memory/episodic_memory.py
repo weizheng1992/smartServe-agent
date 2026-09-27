@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from ..db import EpisodicEventRow, get_session
 from ..llm import get_embedding_model
+from ..tenant_context import resolve_business_id
 
 _TOKEN_SPLIT_RE = re.compile(r"[\s,，、。!！?？]+")
 
@@ -47,7 +48,9 @@ class EpisodicMemory:
         if not self.user_id:
             print("[EpisodicMemory] Cannot add event without userId")
             return
-        target_biz_id = business_id or self.business_id or "ecommerce" if scope == "tenant" else None
+        target_biz_id = (
+            resolve_business_id(business_id or self.business_id) if scope == "tenant" else None
+        )  # A7:tenant 域归属先吃入口上下文,再落平台默认
         embedding = await get_embedding_model().aembed_query(event)
         try:
             async with get_session() as session:
