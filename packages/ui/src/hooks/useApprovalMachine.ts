@@ -14,6 +14,8 @@ export interface ExecuteApprovalActionOptions {
   /** 核准人契约(admin-readiness 01):调用方声明身份;缺省由网关按调用面角色兜底 */
   actor?: string;
   actorRole?: 'platform_admin' | 'merchant_operator' | 'system';
+  /** 02 安全先行:chat 面顾客动作须携会话属主 userId 供线程归属绑定 */
+  userId?: string;
 }
 
 export interface ExecuteHumanReplyOptions {
@@ -62,6 +64,7 @@ export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals', opti
       apiEndpoint = defaultEndpoint,
       actor,
       actorRole,
+      userId,
     }: ExecuteApprovalActionOptions): Promise<ApprovalActionResult> => {
       setSubmittingActionId(approvalId);
       try {
@@ -76,6 +79,7 @@ export function useApprovalMachine(defaultEndpoint = '/api/chat/approvals', opti
             rejectionReason: action === 'reject' ? reason || '退款申请不符合政策要求。' : '',
             ...(actor ? { actor } : {}),
             ...(actorRole ? { actorRole } : {}),
+            ...(userId ? { userId } : {}),
           }),
         });
 

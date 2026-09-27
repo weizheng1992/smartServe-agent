@@ -44,6 +44,11 @@ DEFAULT_MENUS: list[dict] = [
     {"id": "d-users", "parent": None, "name": "用户", "type": "directory", "route": None, "sort": 4},
     {"id": "m-customers", "parent": "d-users", "name": "客户管理", "type": "menu", "route": "/customers", "sort": 1},
     {"id": "m-live-desk", "parent": "d-users", "name": "客服工作台", "type": "menu", "route": "/live-desk", "sort": 2},
+    # 02 安全先行(2026-09-27):工作台此前整菜单无任何权限点,按钮级收口无词可查
+    # (perm 闭包只认 button 型子节点)。占位编码 live_desk:operate,种子面与菜单
+    # 可见性对齐(老板/管理员/运营可见即持有,仓储无此菜单);坐席身份模型定档后
+    # (live-desk 地图)再细化坐席专属角色与拆分接单/接管粒度。
+    {"id": "btn-live-desk-operate", "parent": "m-live-desk", "name": "坐席操作", "type": "button", "perm": "live_desk:operate", "sort": 1},
     {"id": "d-ops", "parent": None, "name": "运营", "type": "directory", "route": None, "sort": 5},
     {"id": "m-promotions", "parent": "d-ops", "name": "优惠活动", "type": "menu", "route": "/promotions", "sort": 1},
     {"id": "btn-promo-create", "parent": "m-promotions", "name": "新建活动", "type": "button", "perm": "promo:create", "sort": 1},

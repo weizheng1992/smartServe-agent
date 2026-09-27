@@ -158,6 +158,32 @@ async def staff_auth():
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def nike_operator(seeded):
+    """socket.io 坐席身份绑定(02 安全先行)测试基建:nike 租户在职员工直签 JWT。
+
+    realtime 侧 role=operator 连接自此要求员工 JWT 且 staff.business_id 与
+    connect tenantId 一致 —— 本 fixture 提供恰好满足绑定的 nike 员工。直插行
+    而非 rbac.ensure_defaults:其种子员工 id 固定(staff_owner 等),同一库
+    跨租户二次调用会撞主键。"""
+    from engine_py.db import StaffMember, get_session
+
+    from gateway_py.routers.auth import issue_token
+
+    email = f"op-nike-{_TS}@nike.test"
+    async with get_session() as session:
+        session.add(StaffMember(
+            id=f"staff_nike_{_TS}", business_id="nike", email=email,
+            display_name="耐克坐席", role="admin", status="enabled", password_hash=None,
+        ))
+        await session.commit()
+    return {
+        "email": email,
+        "name": "耐克坐席",
+        "token": issue_token(f"staff_nike_{_TS}", email),
+    }
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def client(seeded):
     """ASGI 直连 HTTP 客户端(等价 TS Test.createTestingModule + supertest)。"""
     from gateway_py.main import app as asgi_app

@@ -7,7 +7,7 @@ import json
 import math
 
 from engine_py.approvals import ApprovalGatekeeper
-from engine_py.db import RagDocumentRow, get_session
+from engine_py.db import RagDocumentRow, StaffMember, get_session
 from engine_py.onboarding import validate_onboarding_config
 from engine_py.rag import ContextualRAG
 from engine_py.skills import SkillRegistry
@@ -549,27 +549,106 @@ async def list_approvals(
 # TS 基线 @Controller(['api/approvals', 'api/chat/approvals']) 双路径别名:
 # 前端 useApprovalMachine / useApprovals(发起接管)均 POST /api/chat/approvals,
 # Python 移植期曾漏挂该别名致核签按钮 405(wayfinder 004 修复)。
+
+# 02 安全先行(2026-09-27):本面是双面接口 —— 顾客 HITL(apps/web 审批卡/
+# 呼叫人工)与历史坐席通道共用。分面收口:人工坐席动作(human_message/
+# human_reply/human_finish)必须持员工 JWT;顾客动作(approve/reject/cancel/
+# start_human_takeover)保持可达但加线程归属绑定(userId 必须等于 thread 属主,
+# 此前匿名可凭猜测的 approvalId 核准退款)。x-role 自报头与匿名 actor 自报
+# 一并退役 —— 身份只来自 JWT 或「顾客」语义。GET 列表收口另行立项(_apps/web
+# 轮询与 admin 大盘都依赖匿名 GET)。
+_CUSTOMER_ACTIONS = frozenset({"approve", "reject", "cancel", "start_human_takeover"})
+_OPERATOR_ACTIONS = frozenset({"human_message", "human_reply", "human_finish"})
+
+
+async def _optional_staff(authorization: str | None) -> dict | None:
+    """chat 面可选身份闸:无 Authorization 头 → None(顾客语义);有头则强校验
+    (坏/登出 token 401,require_claims);有效 token 但非在职员工(平台注册
+    顾客账号)→ None 亦按顾客处理。须在主 try 之外调用,避免被兜底 except 吞。"""
+    if not (authorization or "").strip():
+        return None
+    from .auth import require_claims
+
+    claims = await require_claims(authorization)
+    email = str(claims.get("email") or "")
+    async with get_session() as session:
+        staff = (
+            await session.execute(select(StaffMember).where(StaffMember.email == email))
+        ).scalars().first()
+    if staff is None or staff.status != "enabled":
+        return None
+    return {"email": email, "staff": staff}
+
+
+async def _thread_owner(thread_id: str | None) -> str | None:
+    from engine_py.approvals.gatekeeper import _thread_owner_context
+
+    if not thread_id:
+        return None
+    async with get_session() as session:
+        return (await _thread_owner_context(session, thread_id)).get("userId")
+
+
 @approvals_router.post("/api/approvals")
 @approvals_router.post("/api/chat/approvals")
-async def resolve_approval(body: dict, request: Request):
-    # 核准人契约(admin-readiness 01):调用方可声明 actor(显示名)+actorRole,
-    # 缺省按调用面角色兜底 —— admin 面注入 platform_admin,其余按 merchant_operator。
-    # 身份落 actionPayload.resolvedBy/resolvedByRole(engine 侧透传),管理台
-    # 「审批人 / 驳回理由」列据此显示真实来源,不再只能显示模糊「人工坐席接管」。
-    actor = (body.get("actor") or "").strip()
-    actor_role = body.get("actorRole")
-    header_role = (request.headers.get("x-role") or "").strip().lower()
-    if not actor:
-        if header_role == "admin":
-            actor, actor_role = "platform_admin", "platform_admin"
-        else:
-            actor, actor_role = "merchant_operator", "merchant_operator"
-    elif not actor_role:
-        actor_role = "platform_admin" if header_role == "admin" else "merchant_operator"
+async def resolve_approval(body: dict, request: Request, authorization: str | None = Header(None)):
+    action = (body.get("action") or "").strip()
+    if action not in _CUSTOMER_ACTIONS | _OPERATOR_ACTIONS:
+        # 诚实失败:此前未知动作会落到引擎按驳回语义处理(静默错误终局)
+        raise HTTPException(status_code=400, detail=f"未知审批动作: {action or '(空)'}")
+
+    staff_ctx = await _optional_staff(authorization)
+
+    if staff_ctx is not None:
+        # 员工路径对象级租户校验(与商户面 A4 同口径):无论坐席动作还是代行
+        # 顾客动作,他租审批单一律 403 —— 否则员工可跨租户发消息/核准退款
+        record = (
+            await ApprovalGatekeeper.find_approval_by_id(body.get("approvalId") or "")
+            if body.get("approvalId")
+            else None
+        )
+        if record is not None and record.get("businessId") != staff_ctx["staff"].business_id:
+            raise HTTPException(
+                status_code=403,
+                detail=f"跨租户审批单被拒绝(员工租户 {staff_ctx['staff'].business_id})",
+            )
+
+    if action in _OPERATOR_ACTIONS:
+        if staff_ctx is None:
+            raise HTTPException(
+                status_code=401,
+                detail="人工坐席操作须经员工登录(管理台请走 /api/admin/approvals 通道)",
+            )
+        actor = (body.get("actor") or "").strip() or staff_ctx["email"]
+        actor_role = body.get("actorRole") or "merchant_operator"
+    elif staff_ctx is not None:
+        actor = (body.get("actor") or "").strip() or staff_ctx["email"]
+        actor_role = body.get("actorRole") or "merchant_operator"
+    else:
+        # 顾客动作:线程归属绑定 —— userId(body 或 x-user-id 头)必须是会话属主。
+        # 审批单/线程均不可解析时不额外造 403(落引擎自身 404/格式无效语义;
+        # UUID 主键本就不可枚举,存在性探测无增益)。
+        user_id = str(body.get("userId") or request.headers.get("x-user-id") or "").strip()
+        if not user_id:
+            raise HTTPException(status_code=400, detail="缺少 userId,无法核验会话归属")
+        thread_id = body.get("threadId")
+        record = None
+        if not thread_id and body.get("approvalId"):
+            record = await ApprovalGatekeeper.find_approval_by_id(body["approvalId"])
+            thread_id = (record or {}).get("threadId")
+        if body.get("threadId") or record is not None:
+            owner = await _thread_owner(thread_id)
+            if owner != user_id:
+                raise HTTPException(status_code=403, detail="会话归属校验失败,拒绝顾客侧操作")
+        actor, actor_role = "customer", "customer"
+
+    # 核准人契约(admin-readiness 01):身份落 actionPayload.resolvedBy/
+    # resolvedByRole(engine 侧透传),管理台「审批人 / 驳回理由」列据此显示
+    # 真实来源;customer 语义经 02 收口入引擎词表,不再伪装成运营坐席。
     options = {
         "approvalId": body.get("approvalId"),
         "threadId": body.get("threadId"),
-        "action": body.get("action"),
+        "action": action,
         "rejectionReason": body.get("rejectionReason"),
         "humanReply": body.get("humanReply") or body.get("replyMessage"),
         "isFinish": body.get("isFinish"),

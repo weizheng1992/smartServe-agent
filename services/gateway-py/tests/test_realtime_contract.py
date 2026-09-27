@@ -110,7 +110,7 @@ class TestSseStream:
 
 
 class TestSocketIoChat:
-    async def test_five_event_full_protocol(self, live_server, rt_thread):
+    async def test_five_event_full_protocol(self, live_server, rt_thread, nike_operator):
         import socketio as socketio_lib
 
         ns = "/ws/chat"
@@ -143,11 +143,13 @@ class TestSocketIoChat:
             namespaces=[ns],
             auth={"tenantId": "nike", "userId": "u_rt_user", "role": "user"},
         )
+        # 02 安全先行:operator 连接必须持员工 JWT;join/takeover 里的自报
+        # operatorId/Name 为遗留字段,服务端一律以 JWT 派生身份覆盖
         await operator.connect(
             base_url,
             transports=["websocket"],
             namespaces=[ns],
-            auth={"tenantId": "nike", "userId": "u_rt_operator", "role": "operator"},
+            auth={"tenantId": "nike", "userId": "u_rt_operator", "role": "operator", "token": nike_operator["token"]},
         )
 
         try:
@@ -168,7 +170,7 @@ class TestSocketIoChat:
                     "tenantId": "nike",
                     "role": "operator",
                     "operatorId": f"op_{_TS}",
-                    "operatorName": "契约测试坐席",
+                    "operatorName": "自报假名(应被服务端身份覆盖)",
                 },
                 namespace=ns,
                 timeout=5,
@@ -178,19 +180,19 @@ class TestSocketIoChat:
             await wait_for(lambda: any(r["event"] == "joined_room" for r in received))
             await wait_for(
                 lambda: any(
-                    r["event"] == "peer_joined" and r["payload"].get("operatorName") == "契约测试坐席"
+                    r["event"] == "peer_joined" and r["payload"].get("operatorName") == nike_operator["name"]
                     for r in received
                 )
             )
 
-            # takeover → conversation_state_changed(human_takeover,含 operatorName)
+            # takeover → conversation_state_changed(human_takeover,含服务端派生 operatorName)
             await operator.call(
                 "takeover_conversation",
                 {
                     "threadId": rt_thread,
                     "tenantId": "nike",
                     "operatorId": f"op_{_TS}",
-                    "operatorName": "契约测试坐席",
+                    "operatorName": "自报假名(应被服务端身份覆盖)",
                 },
                 namespace=ns,
                 timeout=5,
@@ -207,7 +209,8 @@ class TestSocketIoChat:
                 for r in received
                 if r["event"] == "conversation_state_changed" and r["payload"].get("status") == "human_takeover"
             )
-            assert takeover_event["payload"]["operatorName"] == "契约测试坐席"
+            assert takeover_event["payload"]["operatorId"] == nike_operator["email"]
+            assert takeover_event["payload"]["operatorName"] == nike_operator["name"]
 
             # send_message → new_message + ack {success, messageId}
             send_ack = await operator.call(
@@ -217,7 +220,7 @@ class TestSocketIoChat:
                     "tenantId": "nike",
                     "role": "operator",
                     "content": "契约测试:人工坐席消息",
-                    "operatorInfo": {"operatorId": f"op_{_TS}", "operatorName": "契约测试坐席"},
+                    "operatorInfo": {"operatorId": "spoofed", "operatorName": "自报假名"},
                 },
                 namespace=ns,
                 timeout=5,
@@ -228,6 +231,7 @@ class TestSocketIoChat:
             msg_event = next(r for r in received if r["event"] == "new_message")
             assert msg_event["payload"]["content"] == "契约测试:人工坐席消息"
             assert msg_event["payload"]["id"] == send_ack["messageId"]
+            assert msg_event["payload"]["operatorInfo"]["operatorId"] == nike_operator["email"]
 
             # typing → user_typing 广播到房间但排除发送者(双客户端语义)
             operator_events_before = sum(1 for r in received if r["event"] == "user_typing")
@@ -244,7 +248,7 @@ class TestSocketIoChat:
             # release → 第二次 conversation_state_changed
             await operator.call(
                 "release_takeover",
-                {"threadId": rt_thread, "tenantId": "nike", "operatorId": f"op_{_TS}"},
+                {"threadId": rt_thread, "tenantId": "nike"},
                 namespace=ns,
                 timeout=5,
             )
@@ -265,6 +269,65 @@ class TestSocketIoChat:
             if user.connected:
                 await user.disconnect()
 
+    async def test_operator_connect_without_token_rejected(self, live_server):
+        """02 安全先行:operator 连接缺员工 JWT → 服务端拒绝连接。"""
+        import socketio as socketio_lib
+        from socketio.exceptions import ConnectionError as SocketIOConnectionError
+
+        ns = "/ws/chat"
+        rogue = socketio_lib.AsyncClient(reconnection=False)
+        with pytest.raises(SocketIOConnectionError):
+            await rogue.connect(
+                live_server, transports=["websocket"], namespaces=[ns],
+                auth={"tenantId": "nike", "userId": "u_rogue_op", "role": "operator"},
+            )
+        assert not rogue.connected
+
+    async def test_operator_connect_tenant_mismatch_rejected(self, live_server, nike_operator):
+        """02 安全先行:员工 JWT 有效但其租户与 connect tenantId 不一致 → 拒绝。"""
+        import socketio as socketio_lib
+        from socketio.exceptions import ConnectionError as SocketIOConnectionError
+
+        ns = "/ws/chat"
+        rogue = socketio_lib.AsyncClient(reconnection=False)
+        with pytest.raises(SocketIOConnectionError):
+            await rogue.connect(
+                live_server, transports=["websocket"], namespaces=[ns],
+                auth={"tenantId": "adidas", "userId": "u_rogue_op", "role": "operator", "token": nike_operator["token"]},
+            )
+        assert not rogue.connected
+
+    async def test_takeover_from_unauthenticated_connection_denied(self, live_server, rt_thread):
+        """02 安全先行:user 连接(无员工身份)调 takeover → 事件级拒绝,状态不变。"""
+        import socketio as socketio_lib
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        ns = "/ws/chat"
+        intruder = socketio_lib.AsyncClient(reconnection=False)
+        await intruder.connect(
+            live_server, transports=["websocket"], namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_intruder", "role": "user"},
+        )
+        try:
+            ack = await intruder.call(
+                "takeover_conversation",
+                {"threadId": rt_thread, "tenantId": "nike", "operatorId": "u_intruder", "operatorName": "冒充坐席"},
+                namespace=ns, timeout=5,
+            )
+            assert ack["success"] is False
+            assert "未认证" in ack["error"]
+            async with get_session() as session:
+                row = (
+                    await session.execute(
+                        text("SELECT status FROM threads WHERE id = :tid"), {"tid": rt_thread}
+                    )
+                ).first()
+            assert row[0] != "human_takeover"
+        finally:
+            if intruder.connected:
+                await intruder.disconnect()
+
 
 class TestSocketIoEdgeStates:
     """断连/越权边缘态专项(2026-09-26 夜审 ④ 收口)。
@@ -275,7 +338,7 @@ class TestSocketIoEdgeStates:
     2. 未 join 的连接断开零广播(on_disconnect 的 threadId 守卫);
     3. 非法租户名 connect 被服务端拒绝(_TENANT_RE 白名单)。"""
 
-    async def test_release_clears_assigned_operator(self, live_server, rt_thread):
+    async def test_release_clears_assigned_operator(self, live_server, rt_thread, nike_operator):
         import socketio as socketio_lib
         from engine_py.db import get_session
         from sqlalchemy import text
@@ -284,17 +347,17 @@ class TestSocketIoEdgeStates:
         operator = socketio_lib.AsyncClient(reconnection=False)
         await operator.connect(
             live_server, transports=["websocket"], namespaces=[ns],
-            auth={"tenantId": "nike", "userId": "u_edge_op", "role": "operator"},
+            auth={"tenantId": "nike", "userId": "u_edge_op", "role": "operator", "token": nike_operator["token"]},
         )
         try:
             await operator.call(
                 "join_thread", {"threadId": rt_thread, "tenantId": "nike", "role": "operator"},
                 namespace=ns, timeout=5,
             )
-            op_id = f"op_edge_{_TS}"
+            # 坐席身份服务端派生(JWT email),客户端自报不再落库
+            op_id = nike_operator["email"]
             await operator.call(
-                "takeover_conversation",
-                {"threadId": rt_thread, "tenantId": "nike", "operatorId": op_id, "operatorName": "边缘态坐席"},
+                "takeover_conversation", {"threadId": rt_thread, "tenantId": "nike"},
                 namespace=ns, timeout=5,
             )
 
@@ -321,7 +384,7 @@ class TestSocketIoEdgeStates:
             if operator.connected:
                 await operator.disconnect()
 
-    async def test_disconnect_without_join_is_silent(self, live_server, rt_thread):
+    async def test_disconnect_without_join_is_silent(self, live_server, rt_thread, nike_operator):
         import asyncio
 
         import socketio as socketio_lib
@@ -335,7 +398,7 @@ class TestSocketIoEdgeStates:
         )
         await listener.connect(
             live_server, transports=["websocket"], namespaces=[ns],
-            auth={"tenantId": "nike", "userId": "u_edge_listener", "role": "operator"},
+            auth={"tenantId": "nike", "userId": "u_edge_listener", "role": "operator", "token": nike_operator["token"]},
         )
         await listener.call(
             "join_thread", {"threadId": rt_thread, "tenantId": "nike", "role": "operator"},

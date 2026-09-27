@@ -590,9 +590,12 @@ class ApprovalGatekeeper:
         is_finish = options.get("isFinish")
         # 核准人契约(2026-09-13 admin-readiness 01):调用方声明身份,缺省由网关
         # 按 x-role 兜底注入;落 actionPayload,与 humanReply/rejectionReason 同模式。
+        # 02 安全先行(2026-09-27):customer 入词表 —— chat 面收口后顾客动作
+        # (approve/reject/cancel/start_human_takeover)由网关注入真实顾客语义,
+        # 不再伪装成 merchant_operator(此前匿名核准在审计里显示为运营坐席)。
         resolved_by = (options.get("resolvedBy") or "").strip() or "unknown"
         resolved_by_role = options.get("resolvedByRole")
-        if resolved_by_role not in ("platform_admin", "merchant_operator", "system"):
+        if resolved_by_role not in ("platform_admin", "merchant_operator", "system", "customer"):
             resolved_by_role = "system"
 
         if action == "start_human_takeover":

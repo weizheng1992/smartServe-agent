@@ -142,6 +142,8 @@ export function useApprovals({
         approvalId,
         action,
         rejectionReason: rejectionInput,
+        // 02 安全先行:顾客动作须携会话属主 userId 供线程归属绑定
+        userId: currentUser?.id,
       });
 
       const data = result.data as any;
@@ -215,6 +217,8 @@ export function useApprovals({
         body: JSON.stringify({
           action: 'start_human_takeover',
           threadId: targetThreadId,
+          // 02 安全先行:顾客动作须携会话属主 userId 供线程归属绑定
+          userId: currentUser?.id,
         }),
       });
       const data = await res.json();

@@ -59,9 +59,10 @@ async def _outbox_events(approval_id: str) -> list[sa.Row]:
 
 
 async def _resolve(client, approval_id: str, action: str, **extra) -> dict:
+    # 02 安全先行:顾客动作须携会话属主 userId(工单 fixture 的线程属主)
     res = await client.post(
         "/api/approvals",
-        headers={"x-tenant-id": "nike"},
+        headers={"x-tenant-id": "nike", "x-user-id": "u_lifecycle"},
         json={"approvalId": approval_id, "action": action, **extra},
     )
     assert res.status_code == 200, res.text
@@ -89,7 +90,7 @@ class TestApprovalLifecycle:
         # 前端按 success/error 字段呈现(fetchJson 通道)。
         res = await client.post(
             "/api/approvals",
-            headers={"x-tenant-id": "nike"},
+            headers={"x-tenant-id": "nike", "x-user-id": "u_lifecycle"},
             json={"approvalId": aid, "action": "reject"},
         )
         assert res.status_code == 200
