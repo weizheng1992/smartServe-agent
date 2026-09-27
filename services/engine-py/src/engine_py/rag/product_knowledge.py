@@ -28,9 +28,13 @@ _SPUS_SQL = (
     "SELECT s.id, s.spu_code, s.title, s.subtitle, s.description, s.category, s.specs, s.status "
     "FROM merchant_spus s WHERE s.status = 'ON_SALE' ORDER BY s.spu_code"
 )
+# 2026-09-27 夜审 F4:SPU→SKU 从逐 SPU 查询(30 SPU = 30 往返)改为
+# uuid[] 数组一次取全,内存按 spu_id 分桶(桶内保持 price/sku_code 排序)。
+# asyncpg 严类型:参数须显式 CAST 成 uuid[],逐元素 IN 会被判 uuid = varchar 拒收。
 _SKUS_SQL = (
-    "SELECT k.sku_title, k.price, k.stock, k.spec_attributes FROM merchant_skus k "
-    "WHERE k.spu_id = CAST(:sid AS uuid) ORDER BY k.price, k.sku_code"
+    "SELECT k.spu_id::text AS spu_id, k.sku_title, k.price, k.stock, k.spec_attributes "
+    "FROM merchant_skus k WHERE k.spu_id = ANY(CAST(:sids AS uuid[])) "
+    "ORDER BY k.price, k.sku_code"
 )
 
 
@@ -97,13 +101,18 @@ async def sync_product_knowledge(business_id: str) -> dict:
         async with engine.connect() as conn:
             spus = (await conn.execute(text(_SPUS_SQL))).mappings().all()
             rows: list[dict] = []
-            for spu in spus:
-                item = dict(spu)
-                skus = (
-                    await conn.execute(text(_SKUS_SQL).bindparams(sid=str(spu["id"])))
+            if spus:
+                sids = [str(s["id"]) for s in spus]
+                sku_rows = (
+                    await conn.execute(text(_SKUS_SQL).bindparams(sids=sids))
                 ).mappings().all()
-                item["skus"] = [dict(s) for s in skus]
-                rows.append(item)
+                skus_by_spu: dict[str, list[dict]] = {}
+                for s in sku_rows:
+                    skus_by_spu.setdefault(str(s["spu_id"]), []).append(dict(s))
+                for spu in spus:
+                    item = dict(spu)
+                    item["skus"] = skus_by_spu.get(str(spu["id"]), [])
+                    rows.append(item)
     except Exception as err:
         print(f"[ProductKnowledge] 商户货架不可达,跳过商品知识同步: {err}")
         return {"synced": 0, "skipped": True}
