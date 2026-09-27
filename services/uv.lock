@@ -615,11 +615,11 @@ provides-extras = ["worker"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
     { name = "pytest-github-actions-annotate-failures", specifier = ">=0.4" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "testcontainers", extras = ["postgres"], specifier = ">=4" },
+    { name = "testcontainers", extras = ["postgres"], specifier = ">=4.8" },
 ]
 
 [[package]]
@@ -753,9 +753,11 @@ dependencies = [
     { name = "bcrypt" },
     { name = "engine-py" },
     { name = "fastapi" },
+    { name = "pydantic" },
     { name = "pyjwt" },
     { name = "python-multipart" },
     { name = "python-socketio" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "sqlglot" },
     { name = "structlog" },
     { name = "uvicorn", extra = ["standard"] },
@@ -776,9 +778,11 @@ requires-dist = [
     { name = "bcrypt", specifier = ">=4.2" },
     { name = "engine-py", editable = "engine-py" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "pydantic", specifier = ">=2.7" },
     { name = "pyjwt", specifier = ">=2.9" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "python-socketio", specifier = ">=5.11" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "sqlglot", specifier = ">=25.0" },
     { name = "structlog", specifier = ">=24.4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },

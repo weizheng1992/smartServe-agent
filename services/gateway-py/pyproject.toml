@@ -13,6 +13,9 @@ dependencies = [
     "pyjwt>=2.9",
     "bcrypt>=4.2",
     "python-multipart>=0.0.32",
+    # 路由与 repo 直接 import(非经 engine-py 透传),须显式声明
+    "pydantic>=2.7",
+    "sqlalchemy[asyncio]>=2.0",
 ]
 
 [dependency-groups]
