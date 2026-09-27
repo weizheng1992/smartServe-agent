@@ -21,6 +21,7 @@ from sqlalchemy import text
 from ..config import settings
 from ..db import get_session
 from ..llm.chat import get_chat_model, get_embedding_model
+from ..tenant_context import resolve_business_id
 from . import order_domain
 from .cache import tool_cache
 from .order_domain import OrderDomainService
@@ -681,11 +682,13 @@ class MallDomainService:
         """5. 提交售后退款/退货退款/换货工单。"""
         thread_id = params.get("threadId")
         effective_user_id = ""
-        effective_biz_id = "ecommerce"
+        effective_biz_id: str | None = None
         if thread_id:
             ctx = await OrderDomainService.get_thread_session_context(thread_id)
             effective_user_id = ctx["userId"]
             effective_biz_id = ctx["businessId"]
+        # A7:无 threadId 时先吃入口上下文,再落平台默认(不再无条件 ecommerce)
+        effective_biz_id = resolve_business_id(effective_biz_id)
 
         # 缺单号诚实报错(nightly 2026-09-23):LLM 深规划对缺槽退款复合句
         # (「看订单顺便把没发货的退了」)可能产出无 orderId 的售后子任务,
@@ -818,22 +821,20 @@ class MallDomainService:
         return expanded
 
     @staticmethod
-    async def _fetch_merchant_catalog(
-        terms: list[str] | None, category: str | None, max_price, limit: int, sort: str | None = None
-    ) -> list[dict] | None:
-        """商户真货架 SQL 检索层(agent_merchant.merchant_spus/skus)。
+    def search_terms(query: str | None) -> list[str]:
+        """检索词元公共门面(A8 收敛):剥导购 wrapper 词 + 分隔切分 + 词干
+        别名展开。网关 SPI 商品检索此前整句 ILIKE —— 整句子串对 NL 措辞
+        永远空手而归(engine 2026-09-11 同症状),收敛后两侧同一词元实现。"""
+        return MallDomainService._expand_stem_aliases(MallDomainService._extract_query_terms(query))
 
-        None=库不可达(调用方降级 engine 本地表);[]=可达查无(诚实空,
-        严禁跨目录补货)。terms 非空时词元 OR ILIKE 四列(title/subtitle/
-        category/description,对齐网关搜索先例 —— category 列必须参与:SPU
-        title 是「双肩包」不含「背包」,品类列「背包收纳」才是命中面);terms
-        为 None 是 L2 语义召回的候选池形态(硬过滤全量,无词元条件)。展示价=
-        MIN(sku.price)、库存=SUM(sku.stock),与网关 _spu_to_product 同语义;
-        排序 min_price ASC 与 engine 分支 price ASC 契约一致。热销排序不做:
-        merchant 库无销量列(全仓亦无 sales_volume),无数据源 —— 已文档化
-        限制,不合成假热度。无 SKU 的 SPU 展示价 NULL,经 HAVING 排除
-        (不可售,且 float(None) 会炸)。
-        """
+    @staticmethod
+    def catalog_match(terms: list[str] | None, category: str | None = None) -> tuple[list[str], dict, str]:
+        """商品货架 WHERE 匹配子句的唯一实现(A8 收敛):ON_SALE 门槛 + 词元
+        四列 OR ILIKE(title/subtitle/category/description)+ 标题命中优先
+        子句。engine 导购链(`_fetch_merchant_catalog`)与网关 SPI 商品检索
+        (gateway merchant_domain.search_products)共用,严禁再各自维护一份
+        匹配语义。绑定名 ``qN``/``cat``,表别名固定 ``s``(merchant_spus)。
+        返回 (conditions, params, title_hit_clause)。"""
         conditions = ["s.status = 'ON_SALE'"]
         params: dict = {}
         title_hit_clause = ""
@@ -855,6 +856,24 @@ class MallDomainService:
         if category:
             conditions.append("s.category = :cat")
             params["cat"] = category
+        return conditions, params, title_hit_clause
+
+    @staticmethod
+    async def _fetch_merchant_catalog(
+        terms: list[str] | None, category: str | None, max_price, limit: int, sort: str | None = None
+    ) -> list[dict] | None:
+        """商户真货架 SQL 检索层(agent_merchant.merchant_spus/skus)。
+
+        None=库不可达(调用方降级 engine 本地表);[]=可达查无(诚实空,
+        严禁跨目录补货)。词元匹配与 ON_SALE 门槛经 `catalog_match` 单一实现
+        (A8:与网关 SPI 商品检索同源);terms 为 None 是 L2 语义召回的候选池
+        形态(硬过滤全量,无词元条件)。展示价=MIN(sku.price)、库存=SUM(
+        sku.stock),与网关 _spu_to_product 同语义;排序 min_price ASC 与
+        engine 分支 price ASC 契约一致。热销排序不做:merchant 库无销量列
+        (全仓亦无 sales_volume),无数据源 —— 已文档化限制,不合成假热度。
+        无 SKU 的 SPU 展示价 NULL,经 HAVING 排除(不可售,且 float(None) 会炸)。
+        """
+        conditions, params, title_hit_clause = MallDomainService.catalog_match(terms, category)
         having_clauses = ["MIN(k.price) IS NOT NULL"]
         if max_price:
             having_clauses.append("MIN(k.price) <= :pmax")
@@ -1067,7 +1086,7 @@ class MallDomainService:
         category = params.get("category")
         max_price = params.get("maxPrice")
         limit = params.get("limit") or 4
-        effective_biz_id = params.get("businessId") or "ecommerce"
+        effective_biz_id = resolve_business_id(params.get("businessId"))  # A7:显式 > 上下文 > 默认
         # 词干别名展开(2026-09-12):口语统称「裤子/鞋子」→ 追加货架词素「裤/鞋」
         # 作 OR 词元 —— 商户货架与 engine 兜底两条词元路径共享;语义档仍嵌原始
         # query(0.55 阈值按原始查询定标,换表示会毁定标)。

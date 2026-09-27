@@ -10,6 +10,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any
 
+from engine_py.tools_registry.mall_domain import MallDomainService
 from sqlalchemy import text
 
 from .merchant_db import ensure_merchant_tables, merchant_engine
@@ -350,21 +351,23 @@ async def execute_order_action(req: dict, signature: str | None = None) -> dict:
 
 
 async def search_products(query: str | None = None, category: str | None = None, limit: int = 10) -> list[dict]:
+    """商品检索(SPI v1 /store 面用)。A8 收敛:词元切分与 WHERE 匹配子句
+    与 engine 导购链同源(MallDomainService.search_terms / catalog_match
+    单一实现)—— 整句 ILIKE 对口语措辞永远空手而归(engine 2026-09-11 同
+    症状)。行形状 / SKU 分组 / created_at 排序仍是网关门户契约,不动;
+    有 query 却提不出词元 = 无命中,诚实空(严禁变相浏览全货架)。"""
     await ensure_merchant_tables()
+    terms = MallDomainService.search_terms(query) if query else []
+    if query and not terms:
+        return []
+    conditions, q, _title_hit = MallDomainService.catalog_match(terms, category)
+    q["lim"] = limit
     async with merchant_engine().connect() as conn:
-        conditions = ["status = 'ON_SALE'"]
-        q: dict = {}
-        if query:
-            q["kw"] = f"%{query}%"
-            conditions.append("(title ILIKE :kw OR subtitle ILIKE :kw OR category ILIKE :kw OR description ILIKE :kw)")
-        if category:
-            q["cat"] = category
-            conditions.append("category = :cat")
-        q["lim"] = limit
         rows = (
             await conn.execute(
                 text(
-                    f"SELECT * FROM merchant_spus WHERE {' AND '.join(conditions)} ORDER BY created_at ASC LIMIT :lim"
+                    f"SELECT s.* FROM merchant_spus s WHERE {' AND '.join(conditions)} "
+                    "ORDER BY s.created_at ASC LIMIT :lim"
                 ),
                 q,
             )
