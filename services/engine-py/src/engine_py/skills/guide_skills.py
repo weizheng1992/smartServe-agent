@@ -131,6 +131,27 @@ class ShoppingGuideSkill(BaseSkill):
     # 否定购买意向(2026-09-14 N2 实报):「我不想买了/别推荐」严禁再搜索推荐
     _NEGATIVE_INTENT_RE = re.compile(r"(?:不想买|别.{0,2}推荐|不要推荐|不再推荐|停止推荐)")
 
+    # 🧳 搭配形态(2026-09-27 实弹事故):「搭配一套…装备和衣服」是多族组合
+    # 诉求。单脚整句检索下「装备」ILIKE 命中品类列「露营装备」即把 limit 全部
+    # 吃满(3 件露营装备零衣服),而「衣服」在货架零词法足迹(货架以 衬衫/
+    # T恤/裤/夹克 命名),硬命中非空又令 L2 语义补位永不触发 —— 族缺口必须
+    # 以裸锚词补一脚(裸词「衣服」经 L2 语义实测正确落 T恤/衬衫)。
+    _OUTFIT_RE = re.compile(r"(?:搭配|一套|套装|一整套)")
+
+    # 衣着族锚词:输入命中 = 有衣着诉求;商品名命中 = 该商品属衣着族。
+    # ⚠️ 孪生词表:skills/cart/resolver.py 同族词表各自维护,改这里须查彼处。
+    _CLOTHING_ANCHOR_RE = re.compile(r"衣服|服装|衣着|上衣|外套|裤子|衬衫|夹克|羽绒服|T恤|裤|鞋|靴|衫|帽|袜")
+
+    # 缺席反问(2026-09-27 实弹事故):「没有衣服呢」是顾客指出上轮推荐缺了
+    # 某族,不是新的字面搜索词 —— 整句直查词元「没有衣服」必然诚实空,空分支
+    # 再把原话当描述引用(「未能找到符合“没有衣服呢”」)二次伤害。剥否定框
+    # 取品类名词直查;仅当名词含购物锚词才劫持,订单域负句(「没有收到货」)
+    # 不劫持(那些轮次本不该路由到本技能,防御纵深)。
+    _ABSENCE_RE = re.compile(r"^(?:怎么|是不是)?没有(.+?)[呢吗么嘛]?\s*[？?]?\s*$")
+    _ABSENCE_ANCHOR_RE = re.compile(
+        r"衣服|服装|衣着|上衣|外套|裤子|衬衫|夹克|羽绒服|T恤|裤|鞋|靴|衫|帽|袜|配饰|背包|书包|装备|帐篷|睡袋|垫|包"
+    )
+
     def can_handle(self, context: SkillContext) -> bool:
         if super().can_handle(context):
             return True
@@ -144,6 +165,15 @@ class ShoppingGuideSkill(BaseSkill):
         existing_guide = context.guide_context or {}
         extracted_prefs: dict = {**(existing_guide.get("extractedPreferences") or {})}
         clarification_round = existing_guide.get("clarificationRound") or 0
+
+        # 0. 缺席反问剥否定(先于一切搜索):「没有衣服呢」→ 直查「衣服」。
+        # 检索词与空分支措辞都换成品类名词,严禁把顾客反问原话当搜索描述引用。
+        absence_topic: str | None = None
+        absence_m = self._ABSENCE_RE.match(user_input)
+        if absence_m:
+            noun = absence_m.group(1).strip()
+            if noun and self._ABSENCE_ANCHOR_RE.search(noun):
+                absence_topic = noun
 
         # 1. 偏好特征提取
         if re.search(r"男|男生|男款", user_input, re.IGNORECASE):
@@ -198,7 +228,7 @@ class ShoppingGuideSkill(BaseSkill):
             limit = max(1, min(limit, 8))
         search_res = await MallDomainService.search_products(
             {
-                "query": user_input,
+                "query": absence_topic or user_input,
                 "maxPrice": max_price,
                 "limit": limit,
                 "businessId": context.tenant_id,
@@ -206,6 +236,43 @@ class ShoppingGuideSkill(BaseSkill):
             }
         )
         products = search_res.get("products") or []
+
+        # 🧳 搭配族缺补脚(2026-09-27 实弹事故):输入含衣着锚词而首脚命中零
+        # 衣着商品(「装备」凭品类列子串吃满 limit)→ 以裸锚词补一脚,两脚
+        # 交错合并(装备×衣着交替,截断也保两族在场)。补脚仍空 → 如实标注
+        # 店内无该族,严禁静默只推单族冒充「一套」。
+        outfit_gap_note = ""
+        if (
+            products
+            and absence_topic is None
+            and self._OUTFIT_RE.search(user_input)
+            and self._CLOTHING_ANCHOR_RE.search(user_input)
+            and not any(self._CLOTHING_ANCHOR_RE.search(str(p.get("name") or "")) for p in products)
+        ):
+            anchor = self._CLOTHING_ANCHOR_RE.search(user_input).group(0)
+            second_res = await MallDomainService.search_products(
+                {
+                    "query": anchor,
+                    "maxPrice": max_price,
+                    "limit": limit,
+                    "businessId": context.tenant_id,
+                    "threadId": context.thread_id,
+                }
+            )
+            second_products = [
+                p for p in (second_res.get("products") or []) if p.get("id") not in {q["id"] for q in products}
+            ]
+            if second_products:
+                merged: list[dict] = []
+                for i in range(max(len(products), len(second_products))):
+                    if i < len(products):
+                        merged.append(products[i])
+                    if i < len(second_products):
+                        merged.append(second_products[i])
+                products = merged[: max(limit, 4)]
+            else:
+                outfit_gap_note = f"\n（店内暂无{anchor}类现货，以上为装备部分）"
+
         candidate_product_ids = [p["id"] for p in products]
 
         # 上下文指代式对比(2026-09-14 用户实报):「最贵的 背包」→「最贵的和
@@ -276,11 +343,15 @@ class ShoppingGuideSkill(BaseSkill):
         if not products:
             # 品类盘点引导(2026-09-12):诚实空不冷场 —— 告诉用户店里实际有什么,
             # 「卖得好」类模糊词落空时给可点选的真实方向,而非一句调整关键词。
+            # 缺席反问查无(2026-09-27):以品类名词如实作答,严禁引用顾客反问原话。
             overview = await MallDomainService.get_shelf_overview()
             inventory_line = (
                 "、".join(f"{o['category']}({o['spuCount']}款)" for o in overview) if overview else ""
             )
-            output = f'抱歉，暂时未能找到完全符合"{user_input}"的现货商品。'
+            if absence_topic:
+                output = f"抱歉，店内暂时没有{absence_topic}在售。"
+            else:
+                output = f'抱歉，暂时未能找到完全符合"{user_input}"的现货商品。'
             output += (
                 f"\n目前店内热卖品类：{inventory_line}，欢迎换个叫法或从这些品类挑挑看！"
                 if inventory_line
@@ -321,10 +392,31 @@ class ShoppingGuideSkill(BaseSkill):
         pref_summary = (
             f"（已结合您的偏好：{'、'.join(extracted_prefs.values())}）" if extracted_prefs else ""
         )
-        output = (
-            f"为您精选了以下推荐商品{pref_summary}：\n\n{product_summary_text}\n\n"
-            "如需加入购物车，直接对我说“把第几件加入购物车”即可！🛒"
-        )
+
+        # 💰 合计与预算结论(2026-09-27 实弹事故):此前没有任何一层算过合计,
+        # finish LLM 却宣称「总价不超过2000元」(实为 329+899+1299=2527)。
+        # 合计在此确定性算出并如实给结论,finish 终稿只许转述不许编。
+        total_line = ""
+        if len(products) >= 2:
+            total = sum(float(p.get("price") or 0) for p in products)
+            total_line = f"\n\n💰 以上 {len(products)} 件合计 ¥{total:.0f}"
+            if max_price is not None:
+                total_line += (
+                    f"，在您 ¥{max_price} 预算内"
+                    if total <= max_price
+                    else f"，已超出您 ¥{max_price} 预算，可去掉一两件或调整预算再试"
+                )
+
+        if absence_topic:
+            output = (
+                f"有的！店内这些{absence_topic}在售：\n\n{product_summary_text}{total_line}\n\n"
+                "如需把某件加入购物车，直接对我说“把第几件加入购物车”即可！🛒"
+            )
+        else:
+            output = (
+                f"为您精选了以下推荐商品{pref_summary}：\n\n{product_summary_text}{total_line}{outfit_gap_note}\n\n"
+                "如需加入购物车，直接对我说“把第几件加入购物车”即可！🛒"
+            )
 
         guide_context = {
             "candidateProductIds": candidate_product_ids,
@@ -342,7 +434,7 @@ class ShoppingGuideSkill(BaseSkill):
             ],
             "extractedPreferences": extracted_prefs,
             "clarificationRound": clarification_round + 1,
-            "lastSearchQuery": user_input,
+            "lastSearchQuery": absence_topic or user_input,
         }
         return SkillResult(
             skill_id=self.metadata["id"],

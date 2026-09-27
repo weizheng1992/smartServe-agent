@@ -49,18 +49,20 @@ async def finish_node(state: AgentState) -> dict:
     plan = state.get("task_plan") or {"subtasks": []}
     subtasks = plan.get("subtasks") or []
 
-    # 🛡️ 图级硬熔断:直接返回高保真道歉文案,免除 LLM 调用
-    if global_transitions >= 10 or tool_errors >= 3:
+    # 🛡️ 图级硬熔断:直接返回高保真道歉文案,免除 LLM 调用。
+    # 诚实纪律(2026-09-27 事故):旧文案谎称「已自动转接人工客服,1 分钟内接管」,
+    # 但熔断路径没有任何转接动作(assigned_operator_id 不变、无接管房间通知),
+    # 顾客按承诺等人工永远等不到。现改为如实指引 —— 「转人工」是规则层真实
+    # 意图(rule_matchers),回复即真触发人工接管。阈值经 build_graph 单源;
+    # 函数内延迟导入(build_graph ⇄ nodes 模块环)。
+    from ..build_graph import CIRCUIT_BREAKER_TOOL_ERRORS, CIRCUIT_BREAKER_TRANSITIONS
+
+    if global_transitions >= CIRCUIT_BREAKER_TRANSITIONS or tool_errors >= CIRCUIT_BREAKER_TOOL_ERRORS:
         apology = (
-            f"您好！我是 {brand_name} 的智能客服助手。由于当前系统网络出现短暂波动，或者底层接口响应延迟，"
-            "为了保障您的账户、资金安全，我们已经**自动为您【熔断并终止】了本次自动决策流程**。✨\n\n"
-            "我们非常重视您的体验，请您完全放心：\n"
-            "1. **资金双写安全保障**：所有高危敏感动作（如退款）均处于完全锁定状态，"
-            "绝对不会发生多扣款、重复退款 or 数据混淆。\n"
-            "2. **已为您自动转接至特级高级客服**：我已将您此前的全部沟通记录、已规划步骤以及遇到的异常参数"
-            "**自动加密转交到我们的一线资深人工客服主管**。\n\n"
-            "人工主管专员将在 **1 分钟内直接在本会话中为您接管服务并妥善解决**，请您稍等。"
-            "给您带来的不便我们深感抱歉，感谢您的宝贵耐心！👋"
+            f"您好！我是 {brand_name} 的智能客服助手。由于系统繁忙，本次自动服务已中止，"
+            "您的资金与订单安全不受任何影响。\n\n"
+            "如需人工帮助，请直接回复「**转人工**」，人工客服将尽快在本会话中为您服务；"
+            "您也可以稍后重试刚才的请求。给您带来不便，我们深表歉意！🙏"
         )
         return {"output": sanitize_tenant_response(apology, tenant_id), "short_memory": short_memory}
 
@@ -170,7 +172,11 @@ async def finish_node(state: AgentState) -> dict:
         f"6. Keep the output professional, polite, and fully in Chinese. Refer to the store strictly as {brand_name}.\n"
         "7. Under NO circumstances should you hallucinate or fabricate information about other brands. If "
         "the customer explicitly asks to query an external brand/store, politely reply that you only "
-        f"represent {brand_name}."
+        f"represent {brand_name}.\n"
+        "8. BUDGET HONESTY (预算转述纪律, 2026-09-27): The tool/skill output is the ONLY source for price "
+        "totals. NEVER claim 「总价不超过X」「合计在预算内」 unless the tool result explicitly states that "
+        "conclusion; if the tool output shows a total exceeding the customer's stated budget, you MUST "
+        "faithfully relay the overage — claiming budget compliance when the items sum over budget is a lie."
     )
 
     try:

@@ -293,3 +293,131 @@ def test_inquiry_non_spec_ask_keeps_listing(monkeypatch: pytest.MonkeyPatch) -> 
     assert called == [], "非规格问句不得触达 SKU 查询"
     assert "为您找到以下相关商品" in res["output"]
 
+
+
+# ---------- 搭配族缺补脚 + 合计预算诚实 + 缺席反问(2026-09-27 实弹事故) ----------
+# 事故:旅行搭配请求单脚整句检索,「装备」ILIKE 命中品类列「露营装备」吃满
+# limit(3 件露营装备零衣服),「衣服」货架零词法足迹;合计 2527 无人计算,
+# finish 却宣称「总价不超过2000元」;追问「没有衣服呢」被当字面搜索词。
+
+_GEAR = {
+    "id": "g_tent",
+    "name": "极光 轻量化双人双层露营帐篷",
+    "price": 1299.0,
+    "stock": 73,
+    "description": "3分钟快搭",
+    "specs": {"防水": "3000mm"},
+    "category": "露营装备",
+}
+_CLOTHES = [
+    {"id": "c_polo", "name": "极光 凉感抗菌速干机能POLO衫", "price": 269.0, "stock": 50, "description": "凉感速干", "specs": {}, "category": "潮流T恤"},
+    {"id": "c_shirt", "name": "极光 120g超轻可收纳防晒皮肤短袖衬衫", "price": 329.0, "stock": 40, "description": "UPF40+", "specs": {}, "category": "衬衫"},
+]
+
+
+def _stub_dual_family_search(monkeypatch: pytest.MonkeyPatch, gear: list[dict], clothes: list[dict]) -> list[dict]:
+    """按查询内容分流的双族桩:整句(含装备)→ 露营族;裸锚词 → 衣着族。
+    复刻真货架词法:装备硬命中、衣服零足迹靠 L2 语义才落族。"""
+    calls: list[dict] = []
+
+    async def fake_search(params: dict) -> dict:
+        calls.append(params)
+        if "装备" in (params.get("query") or ""):
+            return {"total": len(gear), "products": list(gear)}
+        return {"total": len(clothes), "products": list(clothes)}
+
+    monkeypatch.setattr(MallDomainService, "search_products", staticmethod(fake_search))
+    return calls
+
+
+def test搭配请求补脚衣着族并报真实合计(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _stub_dual_family_search(monkeypatch, [_GEAR], _CLOTHES)
+    res = _run_guide("我打算出去旅行，给我搭配一套出去旅行的装备和衣服，按照现在的季节，金额不超过2000")
+    out = res["output"]
+    assert len(calls) == 2 and calls[1]["query"] == "衣服", "衣着族必须以裸锚词补一脚"
+    assert "POLO衫" in out and "衬衫" in out, "推荐必须双族在场,禁止单族冒充一套"
+    assert "¥1897" in out, "合计必须确定性计算:1299+269+329=1897"
+    assert "在您 ¥2000 预算内" in out
+    ids = [p["id"] for p in res["extra"]["guideContext"]["candidateProducts"]]
+    assert ids == ["g_tent", "c_polo", "c_shirt"], "候选序必须与播报编号一致(购物车第N件契约)"
+
+
+def test搭配合计超预算如实告知(monkeypatch: pytest.MonkeyPatch) -> None:
+    gear = [_GEAR, {**_GEAR, "id": "g_bag", "name": "极光 高山徒步轻量化背包", "price": 899.0}]
+    clothes = [
+        _CLOTHES[0],
+        {**_CLOTHES[1], "id": "c_jacket", "name": "极光 三合一全天候户外硬壳冲锋衣", "price": 899.0},
+    ]
+    _stub_dual_family_search(monkeypatch, gear, clothes)
+    res = _run_guide("给我搭配一套旅行装备和衣服，金额不超过2000")
+    out = res["output"]
+    assert "已超出您 ¥2000 预算" in out, "超预算必须如实说,严禁宣称在预算内"
+    assert "¥3366" in out, "合计必须确定性计算:交错合并4件 1299+269+899+899=3366"
+
+
+def test缺席反问剥否定直查品类(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「没有衣服呢」是指出上轮推荐缺衣着族,不是字面搜索词 —— 剥否定框以
+    裸词「衣服」直查,播报在售真货,严禁引用顾客反问原话当搜索描述。"""
+    calls: list[dict] = []
+
+    async def fake_search(params: dict) -> dict:
+        calls.append(params)
+        return {"total": len(_CLOTHES), "products": list(_CLOTHES)}
+
+    monkeypatch.setattr(MallDomainService, "search_products", staticmethod(fake_search))
+    res = _run_guide("没有衣服呢")
+    assert calls and calls[0]["query"] == "衣服", "必须剥掉否定框只查品类名词"
+    out = res["output"]
+    assert "有的" in out and "衣服" in out
+    assert "POLO衫" in out
+    assert "没有衣服呢" not in out, "顾客反问原话不得被当搜索描述引用"
+
+
+def test缺席反问查无以品类名词如实作答(monkeypatch: pytest.MonkeyPatch) -> None:
+    """缺席框命中但货架真无该族(袜子)→ 以品类名词如实作答 + 品类盘点,
+    严禁引用「没有袜子呢」原话当搜索描述。"""
+    calls = _stub_search(monkeypatch, [])
+    _stub_overview(monkeypatch, [{"category": "衬衫", "spuCount": 4}])
+    res = _run_guide("没有袜子呢")
+    assert calls and calls[0]["query"] == "袜子"
+    assert "店内暂时没有袜子在售" in res["output"]
+    assert "目前店内热卖品类" in res["output"]
+    assert "没有袜子呢" not in res["output"]
+
+
+def test缺席反问订单域负句不劫持(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「没有收到货」无购物锚词 → 不剥框,整句照常进检索(该轮本应路由
+    订单域,此处只验证技能层不做错误劫持)。"""
+    calls = _stub_search(monkeypatch, [])
+    _stub_overview(monkeypatch, [])
+    _run_guide("没有收到货")
+    assert calls and calls[0]["query"] == "没有收到货"
+
+
+def test常规推荐给出合计与预算结论(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _stub_search(monkeypatch, _MOCK_PRODUCTS)  # 899+1299+599=2797
+    res = _run_guide("推荐跑鞋,预算800")
+    out = res["output"]
+    assert "¥2797" in out and "已超出您 ¥800 预算" in out, "合计与超预算结论必须如实"
+    assert calls[0].get("maxPrice") == 800
+
+
+def test常规推荐预算内给正向结论(monkeypatch: pytest.MonkeyPatch) -> None:
+    cheap = [
+        {"id": "cheap1", "name": "极光 速干无缝多功能魔术头巾围脖", "price": 39.0, "stock": 100, "description": "速干", "specs": {}, "category": "配饰"},
+        {"id": "cheap2", "name": "极光 宽檐透气可调节防晒空顶帽", "price": 79.0, "stock": 80, "description": "防晒", "specs": {}, "category": "配饰"},
+    ]
+    _stub_search(monkeypatch, cheap)
+    res = _run_guide("推荐防晒配饰,预算200")
+    assert "合计 ¥118" in res["output"] and "在您 ¥200 预算内" in res["output"]
+
+
+def test搭配首脚已含衣着不补脚(monkeypatch: pytest.MonkeyPatch) -> None:
+    """首脚命中已含衣着商品(品类均衡)→ 不再补第二脚,检索一次。"""
+    mixed = [
+        {**_GEAR, "id": "g1"},
+        {"id": "c1", "name": "极光 亚麻混纺透气度假休闲短袖衬衫", "price": 379.0, "stock": 30, "description": "透气", "specs": {}, "category": "衬衫"},
+    ]
+    calls = _stub_dual_family_search(monkeypatch, mixed, _CLOTHES)
+    _run_guide("给我搭配一套旅行装备和衣服，金额不超过2000")
+    assert len(calls) == 1, "衣着已在场则禁发补脚检索"
