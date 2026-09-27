@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from ..tools_registry.order_domain import _merchant_writer_engine
+from .promotion_engine import _compute_discount
 
 PROMO_TYPES = ("full_reduction", "discount", "coupon")
 
@@ -277,11 +278,13 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
         threshold = float(promo["threshold_amount"] or 0)
         if total < threshold:
             return {"error": f"订单实付 ¥{total:.2f} 未达满减门槛 ¥{threshold:.2f}"}
-        discount = float(promo["discount_value"])
-    elif promo["promo_type"] == "discount":
-        discount = round(total * (100 - float(promo["discount_value"])) / 100, 2)
-    else:
-        discount = float(promo["discount_value"])
+    # 折算规则唯一出处(_compute_discount,与结算同口径):discount 型在此被
+    # 1-99 钳制 —— 此前补录侧自算无钳制,极端配置下与结算金额分裂
+    # (2026-09-27 夜审 F6)。外层 min(discount, total) 保留:满减值可配置
+    # 超实付的边界,核销记录不得超订单实付。
+    discount = _compute_discount(promo, total)
+    if discount is None:
+        return {"error": "订单不满足活动规则,不可核销"}
     discount = min(discount, total)
 
     async with _merchant_writer_engine().begin() as conn:
