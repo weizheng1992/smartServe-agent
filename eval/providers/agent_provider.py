@@ -22,6 +22,9 @@ _REPO = Path(__file__).resolve().parents[2]
 _ENGINE_SRC = _REPO / "services" / "engine-py" / "src"
 if str(_ENGINE_SRC) not in sys.path:
     sys.path.insert(0, str(_ENGINE_SRC))
+_EVAL_LIB = _REPO / "eval" / "lib"
+if str(_EVAL_LIB) not in sys.path:
+    sys.path.insert(0, str(_EVAL_LIB))
 
 _LOOP: asyncio.AbstractEventLoop | None = None
 
@@ -48,9 +51,11 @@ def _coerce(value):
 
 
 def _metric_disambiguation(input: str) -> dict:
-    from engine_py.tools_registry.metric_registry import MetricSemanticResolver
+    # f9e737a 删 engine 侧 MetricSemanticResolver 后,消歧预言机随 eval 走
+    # (eval/lib/metric_resolver.py,数据仍读 metrics.yaml 注册表)
+    from metric_resolver import resolve
 
-    resolved = MetricSemanticResolver.resolve(input)
+    resolved = resolve(input)
     return {
         "metric": resolved["primaryMetric"]["key"],
         "hasAmbiguity": resolved["hasAmbiguity"],

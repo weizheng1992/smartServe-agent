@@ -1,7 +1,8 @@
 """指标语义消歧断言(promptfoo python assertion)— 移植 scorers/metricDisambiguation.scorer.ts。
 
 配置引用:`{"type": "python", "value": "file://scorers/metric_disambiguation.py:get_assert"}`。
-引擎调用走 engine_py.tools_registry.metric_registry(原 TS 版从 packages/tools 导入)。
+消歧预言机走 eval/lib/metric_resolver.py(f9e737a 删 engine 侧
+MetricSemanticResolver 后的 eval 侧 1:1 重建,数据读 metrics.yaml 注册表)。
 """
 
 from __future__ import annotations
@@ -13,11 +14,14 @@ _REPO = Path(__file__).resolve().parents[2]
 _ENGINE_SRC = _REPO / "services" / "engine-py" / "src"
 if str(_ENGINE_SRC) not in sys.path:
     sys.path.insert(0, str(_ENGINE_SRC))
+_EVAL_LIB = _REPO / "eval" / "lib"
+if str(_EVAL_LIB) not in sys.path:
+    sys.path.insert(0, str(_EVAL_LIB))
 
 
 def get_assert(output, context):
     try:
-        from engine_py.tools_registry.metric_registry import MetricSemanticResolver
+        from metric_resolver import resolve
 
         vars = (context or {}).get("vars") or {}
         input = vars.get("input")
@@ -32,7 +36,7 @@ def get_assert(output, context):
                 "reason": "No input or expectedMetric specified, skipping metric disambiguation check",
             }
 
-        resolution = MetricSemanticResolver.resolve(input)
+        resolution = resolve(input)
 
         is_metric_match = resolution["primaryMetric"]["key"] == expected_metric
         is_ambiguity_match = expected_ambiguity is None or resolution["hasAmbiguity"] == expected_ambiguity
