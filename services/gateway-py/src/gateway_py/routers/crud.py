@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import time
 import uuid
@@ -427,28 +428,41 @@ async def system_logs(
     level: str | None = Query(None),
     limit: int = 50,
 ):
-    async with get_session() as session:
-        # LLM 调用日志:真实每次调用一行(engine_py/llm/telemetry.py 统一落盘),
-        # 租户归因优先取 business_id 列,历史行/图外调用回退 join threads
-        llm_rows = (
-            await session.execute(
-                select(LlmCallLog, Thread)
-                .outerjoin(Thread, LlmCallLog.thread_id == Thread.id)
-                .order_by(desc(LlmCallLog.created_at))
-                .limit(limit)
-            )
-        ).all()
-        intent_rows = (
-            await session.execute(
-                select(IntentLog, Thread)
-                .outerjoin(Thread, IntentLog.thread_id == Thread.id)
-                .order_by(desc(IntentLog.created_at))
-                .limit(limit)
-            )
-        ).all()
-        metric_rows = (
-            await session.execute(select(SessionMetric).order_by(desc(SessionMetric.created_at)).limit(limit))
-        ).scalars().all()
+    # 三路查询相互独立 —— 并行取回(各自独立连接,池 10+10 充裕),
+    # 省去 admin 日志页三次串行往返(2026-09-27 夜审 F5)
+    async def _llm_q() -> list:
+        async with get_session() as session:
+            # LLM 调用日志:真实每次调用一行(engine_py/llm/telemetry.py 统一落盘),
+            # 租户归因优先取 business_id 列,历史行/图外调用回退 join threads
+            return (
+                await session.execute(
+                    select(LlmCallLog, Thread)
+                    .outerjoin(Thread, LlmCallLog.thread_id == Thread.id)
+                    .order_by(desc(LlmCallLog.created_at))
+                    .limit(limit)
+                )
+            ).all()
+
+    async def _intent_q() -> list:
+        async with get_session() as session:
+            return (
+                await session.execute(
+                    select(IntentLog, Thread)
+                    .outerjoin(Thread, IntentLog.thread_id == Thread.id)
+                    .order_by(desc(IntentLog.created_at))
+                    .limit(limit)
+                )
+            ).all()
+
+    async def _metric_q() -> list:
+        async with get_session() as session:
+            return (
+                await session.execute(
+                    select(SessionMetric).order_by(desc(SessionMetric.created_at)).limit(limit)
+                )
+            ).scalars().all()
+
+    llm_rows, intent_rows, metric_rows = await asyncio.gather(_llm_q(), _intent_q(), _metric_q())
 
     logs = []
     for l, thread_row in llm_rows:
