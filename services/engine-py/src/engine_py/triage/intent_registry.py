@@ -108,6 +108,13 @@ class IntentSpec:
     # cart / shopping_guide / order_service / chitchat 四域;文本侧线索回退
     # (购物车/导购措辞)是文本维度,留在 resolve_domain_role 本体不进表
     domain_role: str = "chitchat"
+    # 工具白名单(计划对齐单一事实源,2026-09-27 planner-plan-intent-alignment):
+    # 该意图合法调用的工具注册面真名。graph/plan_alignment.align_plan_to_intents
+    # 消费 —— LLM 深规划的子任务动词必须命中检出意图的并集,越界即剪。
+    # 空=该意图无工具面(旁路/技能自闭环),对齐闸对「无任何白名单意图」的
+    # 计划整体放行(保护未登记档位)。工具名与 tools_registry/ecommerce_tools
+    # 注册面逐字对齐,新增工具须同步此处。
+    allowed_tools: tuple[str, ...] = ()
 
 
 INTENT_REGISTRY: dict[str, IntentSpec] = {
@@ -141,6 +148,7 @@ INTENT_REGISTRY: dict[str, IntentSpec] = {
         lifecycle="active",
         notes="优惠活动/优惠券查询(2026-09-18 商城优惠闭环):在售活动列表 + 用户已领券;数据源商户库 promotions/user_coupons,只读",
         domain_role="shopping",
+        allowed_tools=("searchProducts",),
     ),
 AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         name="shopping_guide",
@@ -152,6 +160,7 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         lifecycle="active",
         prompt_category=1,
         domain_role="shopping_guide",
+        allowed_tools=("searchProducts", "queryProductRanking", "compareProducts", "queryProductReviews", "queryProductSkus"),
     ),
     AgentIntentType.CART_MANAGE: IntentSpec(
         name="cart_manage",
@@ -162,6 +171,9 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         lifecycle="active",
         prompt_category=2,
         domain_role="cart",
+        # checkoutCart 在列但受 plan_alignment.CHECKOUT_TRIGGER_RE 二次门控:
+        # 仅当前输入命中下单词族才放行(「买2件」≠「下单」)。
+        allowed_tools=("addToCart", "updateCartItem", "getCartSummary", "searchProducts", "queryProductSkus", "checkoutCart"),
     ),
     AgentIntentType.ORDER_QUERY: IntentSpec(
         name="order_query",
@@ -175,6 +187,7 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         prompt_category=3,
         notes="与 order_status 同义对;已知分叉:cards/card_synthesizer 骨架卡只认 order_status(order_query 出查单卡落空)——修复另开工单",
         domain_role="order_service",
+        allowed_tools=("getOrderStatus", "listUserOrders", "queryPackageTracking"),
     ),
     AgentIntentType.ORDER_STATUS: IntentSpec(
         name="order_status",
@@ -188,6 +201,7 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         lifecycle="active",
         prompt_category=3,
         domain_role="order_service",
+        allowed_tools=("getOrderStatus", "listUserOrders", "queryPackageTracking"),
     ),
     AgentIntentType.ORDER_MODIFY_ADDRESS: IntentSpec(
         name="order_modify_address",
@@ -199,6 +213,7 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         lifecycle="active",
         prompt_category=5,
         domain_role="order_service",
+        allowed_tools=("changeShippingAddress", "getOrderStatus", "listUserOrders"),
     ),
     AgentIntentType.ADDRESS_MANAGE: IntentSpec(
         name="address_manage",
@@ -215,6 +230,7 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         # 进类目 = 改分类器 prompt = promptfoo 类目基线重钉, deliberately 不做。
         prompt_category=None,
         domain_role="shopping_guide",
+        allowed_tools=("saveUserAddress", "getUserAddresses", "deleteUserAddress", "setDefaultAddress"),
     ),
     AgentIntentType.ORDER_CANCEL: IntentSpec(
         name="order_cancel",
@@ -242,6 +258,7 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         prompt_category=4,
         notes="与 refund 同义对;TS 冻结契约 packages/types 的 ORDER_RETURN 枚举值即 'refund'(历史归并痕迹)",
         domain_role="order_service",
+        allowed_tools=("processRefund", "applyAfterSale", "listUserOrders", "getOrderStatus"),
     ),
     AgentIntentType.REFUND: IntentSpec(
         name="refund",
@@ -256,6 +273,7 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         lifecycle="active",
         prompt_category=4,
         domain_role="order_service",
+        allowed_tools=("processRefund", "applyAfterSale", "listUserOrders", "getOrderStatus"),
     ),
     AgentIntentType.METRIC_QUERY: IntentSpec(
         name="metric_query",
@@ -267,6 +285,7 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         lifecycle="latent",
         notes="无专属快轨分支,靠 LLM 规划兜住;潜在价值:收编进 general_query 会命中零规划旁路直接终稿,指标能力即死,故不可合并",
         domain_role="order_service",
+        allowed_tools=("queryProductRanking",),
     ),
     AgentIntentType.HUMAN_ESCALATION: IntentSpec(
         name="human_escalation",

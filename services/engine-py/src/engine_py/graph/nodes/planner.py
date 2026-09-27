@@ -18,6 +18,7 @@ from ...tenant import get_merchant_display_name
 from ...triage.intent_registry import (
     EXPLICIT_ORDER_ID_RE as _EXPLICIT_ORDER_ID_RE,  # 单号正则收口 intent_registry(工单04)
 )
+from ..plan_alignment import align_plan_to_intents
 from ..state import AgentState, build_history_context
 from .utils import extract_order_id
 
@@ -36,6 +37,10 @@ _GENERAL_ORDER_LIST_RE = re.compile(
 # metric_query 后 _ranking_metric_from_text 解析成默认 volume,利润榜变销量榜。
 _METRIC_HINT_RE = re.compile(r"(?:gmv|销售额|销量|毛利|利润|赚钱|挣钱|赚多少|滞销|卖得好|卖的好)", re.IGNORECASE)
 _SHOPPING_HINT_RE = re.compile(r"(?:推荐|买什么|挑一款|选一款|哪款好)", re.IGNORECASE)
+
+# 销量榜词族(cart 榜词加购快轨,2026-09-27 立案 planner-plan-intent-alignment)。
+# ⚠️ 与 skills/cart/resolver._BEST_SELLER_RE 是孪生词表,新增措辞两处必须同步。
+_BEST_SELLER_RE = re.compile(r"(?:销量最好|销量最佳|卖得最好|最好卖|卖得好|畅销|热卖|热销|爆款)")
 
 
 def _ranking_subtask(metric_or_text: str, suffix: str) -> dict:
@@ -490,6 +495,44 @@ async def planner_node(state: AgentState) -> dict:
                 )
             return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
 
+        # 🛒 榜词加购确定性快轨(2026-09-27 立案 planner-plan-intent-alignment):
+        # cart_manage「销量榜词+加购」形态此前无任何快轨,直坠 LLM 深规划自由
+        # 发挥成 5 步(排行/加购/确认订单/改量/结算)—— 后三步用户从未请求,
+        # 转移双计撞旧熔断阈值(09:42 实弹熔断事故)。此处确定性单步收口,零
+        # LLM 规划:只排 CartSkill,技能内 2.6.53 榜词分支诚实反问在售真货,
+        # 严禁静默落候选[0]。刻意不排 queryProductRanking —— 排行是全店榜无
+        # 品类过滤,「销量最好的裤子」会被答成全店第一(2.6.53 同源谎言面),
+        # 排行步待榜单支持品类过滤后再入计划。判据不带 metric_query 否决:
+        # 「销量最好」实弹必被 triage 拆出 metric 半(09-27 实弹取证),全店
+        # 榜同样答不了品类最优,CartSkill 诚实反问是两类语义的并集正解;
+        # 非榜词的 metric 复合(「查下GMV顺便加购」)不命中榜词 RE,照旧深规划。
+        if (
+            has_cart_manage
+            and not has_shopping_guide
+            and not has_order_action
+            and not has_order_list
+            and _BEST_SELLER_RE.search(input_text or "")
+        ):
+            cart_fast_plan = {
+                "goal": "Add requested products to cart with honest shelf guidance",
+                "subtasks": [
+                    {
+                        "id": "step_fast_bestseller_cart_0",
+                        "description": f"Execute CartSkill for input: {input_text}",
+                        "status": "pending",
+                    }
+                ],
+                "currentStepIndex": 0,
+            }
+            if job_id:
+                await emit_status(
+                    job_id,
+                    "⚡ 极速规划直达：识别到销量榜加购诉求，确定性走购物车技能诚实引导！",
+                    node="planner",
+                    plan=cart_fast_plan,
+                )
+            return {"task_plan": cart_fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
+
         if (has_shopping_guide or has_cart_manage) and has_order_list and len(intents) >= 2:
             fast_subtasks = []
             if has_cart_manage:
@@ -707,6 +750,17 @@ async def planner_node(state: AgentState) -> dict:
         "order (结算下单/下单) and the product is already clear, plan a checkoutCart step; when the product "
         "is not yet chosen, plan addToCart (product clear from context) and the final reply guides them to "
         "say 结算下单. NEVER plan a step calling createOrder — it does not exist. "
+        "QUANTITY vs ORDER PLACEMENT (资金纪律): 「买N件/来两件/拍N件」 is a QUANTITY slot of addToCart — "
+        "write the quantity into the addToCart step description (e.g. addToCart quantity 2); it is NEVER an "
+        "order-placement request. ONLY explicit 结算/下单/提交订单/付款 vocabulary in the CURRENT customer "
+        "message authorizes a checkoutCart step — an add-to-cart request must NEVER produce confirmOrder or "
+        "checkoutCart subtasks, and quantity folding into addToCart means a separate modifyCart/updateCartItem "
+        "step is redundant (plan it only when the customer asks to CHANGE an existing cart item). "
+        "TOOL FIDELITY: plan only real registered tool names (getOrderStatus, processRefund, listUserOrders, "
+        "changeShippingAddress, queryProductRanking, searchProducts, queryProductSkus, queryProductReviews, "
+        "compareProducts, addToCart, updateCartItem, getCartSummary, checkoutCart, saveUserAddress, "
+        "getUserAddresses, deleteUserAddress, setDefaultAddress, applyAfterSale, queryPackageTracking) — "
+        "invented names like confirmOrder or modifyCart do not exist and will be pruned. "
         "ADDRESS FIDELITY: if the customer stated a shipping address in this turn (e.g. 地址是…/寄到…), "
         "that address belongs to the NEW order — write it into the checkoutCart step description "
         "(shipping to <address>) and NEVER plan a changeShippingAddress step against a historical order "
@@ -723,12 +777,17 @@ async def planner_node(state: AgentState) -> dict:
     try:
         response = await planner_llm().ainvoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
+        llm_plan_parsed = True
         try:
             clean_response = content.strip()
             clean_response = re.sub(r"^```json\s*", "", clean_response)
             clean_response = re.sub(r"```$", "", clean_response).strip()
             plan = json.loads(clean_response)
         except Exception:
+            # 截断/脏输出的确定性兜底:per-intent 单步,planner 亲造且与检出
+            # 意图一一对应 —— 天然对齐,不过 align 闸(闸只管 LLM 自由输出,
+            # 「Handle X process」无动词是形态而非幻觉)。
+            llm_plan_parsed = False
             plan = {
                 "goal": "Address customer request",
                 "subtasks": [
@@ -745,6 +804,21 @@ async def planner_node(state: AgentState) -> dict:
             ],
             "currentStepIndex": 0,
         }
+
+        # 🛡️ 计划后置对齐(2026-09-27 立案 planner-plan-intent-alignment):
+        # LLM 深规划的子任务逐条对齐检出意图白名单(intent_registry.allowed_tools
+        # 单一事实源),越界即剪 —— prompt 规则 8 是软约束,这里是硬约束。
+        # 仅 LLM 解析成功的计划过闸;截断兜底的 per-intent 计划系确定性构造,
+        # 天然对齐不过闸。剪枝留痕(租户/thread/被剪描述),不阻断不透出
+        # (OQ3 裁决:由 finish 终稿自然指引)。
+        pruned_steps: list[str] = []
+        if llm_plan_parsed:
+            task_plan, pruned_steps = align_plan_to_intents(intents, task_plan, input_text)
+        if pruned_steps:
+            print(
+                f"[Planner][PlanAlignment] pruned {len(pruned_steps)} out-of-intent subtask(s) "
+                f"tenant={tenant_id} thread={state.get('thread_id')}: {pruned_steps}"
+            )
 
         if job_id:
             await emit_status(
