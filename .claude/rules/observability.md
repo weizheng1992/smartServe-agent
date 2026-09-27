@@ -27,7 +27,7 @@ paths: ["services/engine-py/src/engine_py/run_agent.py", "services/engine-py/src
 - **自动驾驶解决率 (Autopilot Resolution Ratio)**：
   - 统计无需人工接管直接在智能体生命周期内闭环完成的会话比例。
   - 实时监控低置信度回退率、HITL 触发率与平均执行轮次（Step Count）。
-- **熔断落盘（2026-09-03 起）**：会话命中熔断（全局转移 ≥10 次或工具错误 ≥3 次，阈值见 `graph/build_graph.py`）时，`run_agent` 以 `resolution_status='circuit_breaker'` 落盘 `session_metrics` 并同步计入 `global_transitions_count` / `tool_errors_count`；上游 LLM 熔断（`llm/resilience.py` 全局熔断器 OPEN，2026-09-07 起）job 级降级道歉回复并落 `resolution_status='llm_circuit_breaker'`；`/api/logs` 的 `rawDetail` 透出这两个计数，坏例候选池据此单独立案。
+- **熔断落盘（2026-09-03 起）**：会话命中熔断（全局转移 ≥22 次或工具错误 ≥3 次；转移按每子任务双计（executor+validator），合法计划上限 2×MAX_PLAN_STEPS=20，2026-09-27 由 10 校准为 2×10+2 —— 旧值 10 等于「5 步计划封顶」，曾把全绿 5 步计划误判熔断截杀诚实回答，阈值见 `graph/build_graph.py`）时，`run_agent` 以 `resolution_status='circuit_breaker'` 落盘 `session_metrics` 并同步计入 `global_transitions_count` / `tool_errors_count`；上游 LLM 熔断（`llm/resilience.py` 全局熔断器 OPEN，2026-09-07 起）job 级降级道歉回复并落 `resolution_status='llm_circuit_breaker'`；`/api/logs` 的 `rawDetail` 透出这两个计数，坏例候选池据此单独立案。
 
 ---
 

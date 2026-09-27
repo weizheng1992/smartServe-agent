@@ -12,7 +12,8 @@ triage 路由:无意图 / 唯一意图为 general_query / output 已置(旁路�
 taskPlan.subtasks[0].id === 'bypass_step' → finish。
 
 validator 路由(与 TS 同序判定):
-1. 熔断:globalTransitionsCount ≥ 10 或 toolErrorsCount ≥ 3 → finish
+1. 熔断:globalTransitionsCount ≥ CIRCUIT_BREAKER_TRANSITIONS(22,每子任务
+   双计,合法上限 20) 或 toolErrorsCount ≥ 3 → finish
 2. 任一子任务 waitingForApproval → finish(HITL 安全挂起)
 3. 任一子任务 failed + rejectedByAdmin 且未 replanned → planner(认知回溯;
    replanned 标记由 planner 节点完成 —— Python 图路由不可变更状态)
@@ -27,9 +28,16 @@ from langgraph.graph import END, START, StateGraph
 from .nodes import executor_node, finish_node, merge_node, planner_node, triage_node, validator_node
 from .state import AgentState
 
-CIRCUIT_BREAKER_TRANSITIONS = 10
 CIRCUIT_BREAKER_TOOL_ERRORS = 3
 MAX_PLAN_STEPS = 10
+# 转移熔断阈值(2026-09-27 事故校准):转移按每子任务双份累加(executor +1、
+# validator +1,TS 基线同款),合法计划触顶 = 2×MAX_PLAN_STEPS = 20。旧值 10
+# 实际等于「5 步计划封顶」—— planner 把「加购买2件」拆成 5 步(排行/加购/
+# 确认/改量/结算)全绿线性执行,transitions 恰好到 10 即被误判熔断,把技能层
+# 已算好的诚实回答截杀换成道歉罐头(同问题计划规模随历史 3→4→5 步爬升,
+# 09-27 首次过线)。新值只拦真正失控(合法线性流物理上限 20,余量 +2),
+# runaway 保护仍由 tool_errors ≥3 与 MAX_PLAN_STEPS 双闸兜底。
+CIRCUIT_BREAKER_TRANSITIONS = 2 * MAX_PLAN_STEPS + 2
 
 
 def route_after_triage(state: AgentState) -> str:

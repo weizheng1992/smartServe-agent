@@ -3,7 +3,7 @@
 以密封 PG 驱动 run_agent 真实主流程:
 - 伪图注入 CircuitBreakerOpenError 模拟上游 LLM 熔断拦截(与 003 落地链路
   同构:韧性层 OPEN 拒绝 → 节点兜底豁免上抛 → 图 ainvoke 透传);
-- 图级熔断(全局转移 ≥10)走真实结果字典判定路径。
+- 图级熔断(全局转移 ≥22,2026-09-27 阈值校准)走真实结果字典判定路径。
 两路均应:session_metrics 落对应 resolution_status + badcase_candidates 入池
 (source=circuit_breaker,先验 suspected_defect),run_badcase_digest()(scheduler
 6h 周期任务同函数)摘要能消费到新信号源。
@@ -32,14 +32,15 @@ class _OpenBreakerGraph:
 
 
 class _GraphBreakerGraph:
-    """伪图:返回触绘图级熔断的结果(全局转移 12 次 ≥ 10 阈值)。"""
+    """伪图:返回触绘图级熔断的结果(全局转移 24 次 ≥ 22 阈值;2026-09-27
+    阈值校准为 2×MAX_PLAN_STEPS+2,合法双计上限 20,12 已属合法计划)。"""
 
     async def ainvoke(self, _state):
         return {
             "output": "抱歉,当前服务遇到波动。",
             "task_plan": {"subtasks": [], "currentStepIndex": 0},
             "loop_count": 5,
-            "global_transitions_count": 12,
+            "global_transitions_count": 24,
             "tool_errors_count": 1,
         }
 
@@ -160,7 +161,7 @@ def test_同一会话熔断窗口内重试不重复入池(monkeypatch):
 
 
 def test_图级熔断_同样入池且备注区分(monkeypatch):
-    """图级熔断(转移 ≥10)落 circuit_breaker 终态,入池备注携带转移/错误计数。"""
+    """图级熔断(转移 ≥22)落 circuit_breaker 终态,入池备注携带转移/错误计数。"""
     thread_id = "dbg_thread_cb_pool_graph"
     _run_agent_with_graph(monkeypatch, _GraphBreakerGraph(), thread_id)
 
@@ -169,7 +170,7 @@ def test_图级熔断_同样入池且备注区分(monkeypatch):
     assert len(rows) == 1
     assert rows[0].signal_source == "circuit_breaker"
     assert "图级熔断" in rows[0].note
-    assert "12" in rows[0].note
+    assert "24" in rows[0].note
 
 
 def test_摘要能消费新信号源(monkeypatch):
