@@ -2,12 +2,27 @@
 
 删除与改量两动词的目标解析链(序数 → 商品名 → lastModified → 首款)此前
 逐行复制两份,判据漂移即事故(2026-09-15 双规格去重判据补 skuCode 时要人肉
-同步多处);现收敛为 resolve_cart_item 一条缝。全部正则常量在此单点维护,
-动作表(actions.py)只消费不定义。"""
+同步多处);现收敛为 resolve_cart_item 一条缝。购物车专属正则在此单点维护,
+动作表(actions.py)只消费不定义;加购/结算/热销等跨层词面引用
+intent_registry 词族之家(Gen-3 域A),本模块是 lint 豁免的「词表之家」
+分册(序数/删除/桥接等单消费方面仍留本地)。"""
 
 from __future__ import annotations
 
 import re
+
+from ...triage.intent_registry import (
+    ADD_TO_CART_FAMILY,
+    ADD_TO_CART_RE,
+    ADDRESS_VERB_FAMILY,
+    BEST_SELLER_FAMILY,
+    BEST_SELLER_HINT_RE,
+    CHECKOUT_FAMILY,
+    CHECKOUT_TRIGGER_PATTERN,
+    _alt,
+    _grp,
+    _pick,
+)
 
 _ORDINAL_RE = re.compile(r"(?:把)?第\s*(\d+|[一二三四五六七八九十两])\s*[件款个双]?")
 # 数字串经 ordinal_to_index 换算(支持「第10件」多位),汉字查表
@@ -25,25 +40,32 @@ _ORDINAL_CHECKOUT_RE = re.compile(r"第[一二三四五六1-6][款个件]")
 _ADD_ALL_RE = re.compile(r"(?:全部|所有|都)")
 
 _VIEW_ONLY_RE = re.compile(
-    r"(?:查看购物车|看下购物车|购物车总价|看购物车|购物车里|购物车有什么|多少钱|算下总价|结算|去买单|去结算)"
+    r"(?:查看购物车|看下购物车|购物车总价|看购物车|购物车里|购物车有什么|多少钱|算下总价|"
+    + _alt(*_pick(CHECKOUT_FAMILY, 7, 4, 1)) + ")"
 )
-_VIEW_EXCLUDE_RE = re.compile(r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购|买第|要第|改成|修改|删除|移除|删掉)")
+_VIEW_EXCLUDE_RE = re.compile(ADD_TO_CART_RE.pattern + r"|买第|要第|改成|修改|删除|移除|删掉")
 _DELETE_RE = re.compile(r"(?:删除|移除|删掉|去掉|不要了|清空)")
 _CLEAR_RE = re.compile(r"(?:清空|全部删除|全删)")
-_ADD_RE = re.compile(r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购)")
+_ADD_RE = ADD_TO_CART_RE
 # 真·聊天下单触发(遗留二期,2026-09-13):拦截在查看分支前;裸「结算」保持
 # 查看摘要旧契约,「下单/去结算/提交订单/付款」才开真实订单。
-_CHECKOUT_RE = re.compile(r"(?:结算下单|去结算|提交订单|付款|[^\s]下单|^下单|(?:然后|再|接着|帮忙|帮我|给我)结算)")
+# 触发词面住在 intent_registry.CHECKOUT_TRIGGER_PATTERN(plan_alignment 是
+# 第二消费方);此处不带 IGNORECASE 保持本地历史编译形。
+_CHECKOUT_RE = re.compile(CHECKOUT_TRIGGER_PATTERN)
 # 否定/非结算形守卫:「我还没下单」「先不付款」「货到付款」严禁开出真单
 _CHECKOUT_NEG_RE = re.compile(r"(?:还没|没有|不用|不要|先不|暂不|别|[^\s]个下单|货到付款|未付款)")
-_CHECKOUT_ADDR_RE = re.compile(r"(?:寄到|送到|地址为|地址是|邮寄到)\s*([^,，。!！?？\n]+)")
+_CHECKOUT_ADDR_RE = re.compile(
+    _grp(*_pick(ADDRESS_VERB_FAMILY, 5, 10, 11, 12, 13)) + r"\s*([^,，。!！?？\n]+)"
+)
 # 检索/推荐诉求(2026-09-13):在场时禁用加购的历史回溯候选(幻影守卫)。
 # 销量榜词族(2026-09-26 症状③):「销量最好的裤子放购物车」曾被当字面商品名
 # 去货架直配,必然 miss 后谎称「店内没有」—— 榜词族是检索半而非点名。
-_SEARCH_INTENT_RE = re.compile(r"(?:推荐|询|问|看看|看看有|找|挑|评价|口碑|热销|爆款|有什么|销量最好|销量最佳|卖得最好|最好卖|卖得好|畅销|热卖)")
+_SEARCH_INTENT_RE = re.compile(
+    r"(?:推荐|询|问|看看|看看有|找|挑|评价|口碑|有什么|" + _alt(*BEST_SELLER_FAMILY) + ")"
+)
 # 销量榜诉求(症状③):命中即加购目标未经用户挑款,走货架检索反问,严禁
 # 静默落候选[0](候选池可能是上游幻觉搜索的垃圾)。
-_BEST_SELLER_RE = re.compile(r"(?:销量最好|销量最佳|卖得最好|最好卖|卖得好|畅销|热卖|热销|爆款)")
+_BEST_SELLER_RE = BEST_SELLER_HINT_RE
 # 订单→购物车桥接:「订单(里)的 X 加入购物车」—— X 为历史购买商品关键词
 _BRIDGE_KEYWORD_RE = re.compile(
     r"(?:订单|买过)[^。！？]{0,10}里?[面中]?的([^,，。！？]+?)(?:加入|加购|放进|放入|扔进|来一|买一)"
@@ -56,7 +78,7 @@ _HISTORY_ITEM_RE = re.compile(r"(\d+)\.\s*【([^】]+)】\s*¥?(\d+(?:\.\d+)?)")
 # 刻意不含单字「的/吧」以外的规格字 —— 「曜石黑 M码」「POLO衫」必须原样留存
 # 供货架直配评分;注意「码」不可剥(M码/L码 是规格判别词)。
 _ADD_ACTION_STRIP_RE = re.compile(
-    r"加入购物车|放进购物车|放入购物车|加购物车|加购|购物车|帮我|给我|麻烦|我想|想要|"
+    _alt(*ADD_TO_CART_FAMILY) + r"|购物车|帮我|给我|麻烦|我想|想要|"
     r"放到|放进|放入|装进|扔进|丢进|"
     r"下单|结账|来一[件个个只]|一[件个个只]|\d+\s*[件个个只]|加入|谢谢|最后|这个|那个|一下|买|要|加|吧|呗|哦|哈|把|"
     r"第\s*[0-9一二三四五六七八九十百千]*"

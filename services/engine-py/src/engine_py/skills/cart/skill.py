@@ -11,13 +11,19 @@ from __future__ import annotations
 
 import re
 
+from ...triage.intent_registry import ADD_TO_CART_RE, CHECKOUT_FAMILY
 from ..base_skill import BaseSkill
 from ..contract import SkillContext, SkillResult
 from .actions import ACTION_TABLE, CartEnv
 
+# 触发面:加购词族收上词族之家(Gen-3 域A,提至头部,.search() 真值不变,
+# fixture 语料钉死);裸「结算」保持查看摘要旧契约,不开真单(结算触发词面
+# 见 CHECKOUT_TRIGGER_PATTERN,那是下单准入门,语义不同构)。
 _CAN_HANDLE_RE = re.compile(
-    r"(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|买第|件加入|款加入|放入购物车|"
-    r"第[0-9一二三四五六七八九十两几][件款个双]|要第|删除|移除|删掉|清空|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+)"
+    ADD_TO_CART_RE.pattern
+    + r"|购物车|" + CHECKOUT_FAMILY[7]
+    + r"|买第|件加入|款加入|"
+    + r"第[0-9一二三四五六七八九十两几][件款个双]|要第|删除|移除|删掉|清空|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+"
 )
 
 

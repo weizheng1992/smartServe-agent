@@ -5,6 +5,13 @@ from __future__ import annotations
 import re
 
 from ..tools_registry.mall_domain import MallDomainService
+from ..triage.intent_registry import (
+    ABSENCE_EXTRA_FAMILY,
+    CLOTHING_ANCHOR_FAMILY,
+    GUIDE_CORE_FAMILY,
+    _alt,
+    _grp,
+)
 from .base_skill import BaseSkill
 from .contract import SkillContext, SkillResult
 
@@ -122,9 +129,7 @@ class ShoppingGuideSkill(BaseSkill):
     _PRICE_BAND_RE = re.compile(r"(?:中间价位|中间价|价位段|中等价位)")
 
     _FALLBACK_RE = re.compile(
-        r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好|跑步鞋|卫衣|夹克|热门|爆款|热销|热卖|畅销|上新|新品|卖得好|卖的好"
-        r"|最便宜|便宜点|最贵|性价比|哪个好|怎么选|有什么区别|买哪种|该用什么|需要准备什么"
-        r"|背什么|用哪种|什么包)",
+        _grp(*GUIDE_CORE_FAMILY),
         re.IGNORECASE,
     )
 
@@ -139,8 +144,8 @@ class ShoppingGuideSkill(BaseSkill):
     _OUTFIT_RE = re.compile(r"(?:搭配|一套|套装|一整套)")
 
     # 衣着族锚词:输入命中 = 有衣着诉求;商品名命中 = 该商品属衣着族。
-    # ⚠️ 孪生词表:skills/cart/resolver.py 同族词表各自维护,改这里须查彼处。
-    _CLOTHING_ANCHOR_RE = re.compile(r"衣服|服装|衣着|上衣|外套|裤子|衬衫|夹克|羽绒服|T恤|裤|鞋|靴|衫|帽|袜")
+    # 词面收上 intent_registry.CLOTHING_ANCHOR_FAMILY(Gen-3 域A,缺席面同源)。
+    _CLOTHING_ANCHOR_RE = re.compile(_alt(*CLOTHING_ANCHOR_FAMILY))
 
     # 缺席反问(2026-09-27 实弹事故):「没有衣服呢」是顾客指出上轮推荐缺了
     # 某族,不是新的字面搜索词 —— 整句直查词元「没有衣服」必然诚实空,空分支
@@ -149,7 +154,7 @@ class ShoppingGuideSkill(BaseSkill):
     # 不劫持(那些轮次本不该路由到本技能,防御纵深)。
     _ABSENCE_RE = re.compile(r"^(?:怎么|是不是)?没有(.+?)[呢吗么嘛]?\s*[？?]?\s*$")
     _ABSENCE_ANCHOR_RE = re.compile(
-        r"衣服|服装|衣着|上衣|外套|裤子|衬衫|夹克|羽绒服|T恤|裤|鞋|靴|衫|帽|袜|配饰|背包|书包|装备|帐篷|睡袋|垫|包"
+        _alt(*CLOTHING_ANCHOR_FAMILY, *ABSENCE_EXTRA_FAMILY)
     )
 
     def can_handle(self, context: SkillContext) -> bool:
@@ -202,7 +207,7 @@ class ShoppingGuideSkill(BaseSkill):
             and not extracted_prefs.get("scenario")
             and not extracted_prefs.get("gender")
             and clarification_round == 0
-            and bool(re.search(r"(?:买东西|买鞋|买衣服|推荐|逛逛)", user_input, re.IGNORECASE))
+            and bool(re.search(_grp("买东西", "买鞋", "买衣服", GUIDE_CORE_FAMILY[0], "逛逛"), user_input, re.IGNORECASE))
         )
         if is_very_vague:
             clarification_round += 1

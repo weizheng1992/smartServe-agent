@@ -21,7 +21,7 @@ import re
 from sqlalchemy import func, select
 
 from ..db import PendingApproval, Thread, get_session
-from ..triage.intent_registry import CONSULT_SIDE_INTENTS
+from ..triage.intent_registry import CONSULT_SIDE_INTENTS, REFUND_VERB_FAMILY, _alt, _pick
 from .pool import SOURCE_CLAIM_MISMATCH, SOURCE_INTENT_CONFLICT, record_badcase_signal
 
 # 咨询/兜底形意图族:不触发执行管道的类目。槽位层的 chat、快轨的 consult、
@@ -32,11 +32,14 @@ from .pool import SOURCE_CLAIM_MISMATCH, SOURCE_INTENT_CONFLICT, record_badcase_
 _CONSULT_SIDE_INTENTS = CONSULT_SIDE_INTENTS
 
 # 终稿宣称模式:宣称已发起退款/退货/审批动作。均要求「已/已经」先行,
-# 「尚未/未」类否定措辞天然不命中。
+# 「尚未/未」类否定措辞天然不命中。退款/退货词面收上词族之家投影
+# (Gen-3 域A;宣称镜像只认这两个窄词,刻意不放宽到 REFUND_VERB_RE 全族)。
 _CLAIM_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"(已|已经).{0,6}(发起|提交|办理|完成|成功|执行|通过).{0,6}(退款|退货|审批|工单|申请)"),
-    re.compile(r"(退款|退货|审批|工单|申请).{0,4}(已|已经).{0,2}(成功|完成|通过|受理|提交)"),
-    re.compile(r"已为您.{0,12}(退款|退货|发起退款|提交)"),
+    re.compile(r"(已|已经).{0,6}(发起|提交|办理|完成|成功|执行|通过).{0,6}("
+               + _alt(*_pick(REFUND_VERB_FAMILY, 0, 1)) + r"|审批|工单|申请)"),
+    re.compile("(" + _alt(*_pick(REFUND_VERB_FAMILY, 0, 1))
+               + r"|审批|工单|申请).{0,4}(已|已经).{0,2}(成功|完成|通过|受理|提交)"),
+    re.compile(r"已为您.{0,12}(" + _alt(*_pick(REFUND_VERB_FAMILY, 0, 1)) + r"|发起退款|提交)"),
 )
 
 

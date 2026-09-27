@@ -392,6 +392,129 @@ CITY_PROVINCE_MAP = {
 
 
 # ---------------------------------------------------------------------------
+# 1.7 意图判定词族之家(Gen-3 域A 裁决,2026-09-28):
+# 同一词条此前横跨 slot 建议 → 引擎快轨 → 技能 can_handle → 执行输出四层
+# 各自手抄(加购动词 N≈12 / 下单结算 N≈10 / 导购热销 N≈9 为散射 Top3)。
+# 本节收口为「家族常量 + 程序化派生」:加词只改这里的元组,各消费面
+# 引用派生结果自动跟上。IntentSpec 不持有词面,只按需引用本节常量。
+#
+# 派生手法:家族是有序元组,规整次序选定为「各消费面都是它的下标子序列」;
+# 消费面用 _pick(家族, 下标...) 选词 + _alt/_grp 拼装,保持与旧字面同形。
+# 迁移 parity 分三档钉在 tests/test_intent_vocab_home.py:
+#   byte   —— 派生串与冻结旧字面逐字节相等(组合能复现旧串的所有面);
+#   fixture —— 冻结旧字面 vs 派生 RE 在词族全量+复合句+反例语料上
+#              .search() 真值等价(纯字面交替 reordering 真值中性);
+#   inventory —— 家族每个词条都被对应派生面匹配(在册完备性)。
+#
+# 册外词扫描 lint(同测试文件):非本节家族之家模块里 re.compile 的裸
+# 交替成员若等于在册词条即红,强制新词面先入册。
+# 刻意留本地(声明例外,勿迁):
+#   ① output_guard 输出镜像 —— 刻意稍宽的剥离面,非意图判定;
+#   ② consult 否定闸(consult_fast_path)—— 词条≠同义:裸「退货|退款」
+#      进否定交替会击穿咨询直答的动作形否决,窄形是裁决本体;
+#   ③ LLM prompt 词面散文(step_execution_engine 等)—— 非正则面;
+#   ④ 子串关键词元组(executor_fast_path 的 desc-keyword 元组、
+#      mall_domain._GUIDE_WRAPPER_TERMS)—— 匹配 desc 文本/改写管道,
+#      非用户输入意图判定;greeting/refund 两旧样板之家(rule_matchers.py
+#      与 REFUND_VERB_FAMILY 所在)即家族之家分册,不在 lint 扫描之列。
+# ---------------------------------------------------------------------------
+
+
+def _alt(*items: str) -> str:
+    """词族派生:裸交替(不加分组,供外层已有分组的面拼接)。"""
+    return "|".join(items)
+
+
+def _grp(*items: str) -> str:
+    """词族派生:非捕获分组交替 (?:...)。"""
+    return "(?:" + "|".join(items) + ")"
+
+
+def _pick(family: tuple[str, ...], *idx: int) -> tuple[str, ...]:
+    """从家族元组按下标选词(下标即消费面在「规整次序」里的投影)。"""
+    return tuple(family[i] for i in idx)
+
+
+# 加购动词族(Top#1,N≈12):slot CART_MANAGE 建议 / resolver 加购与剥离 /
+# executor 加购动作 / engine cart 文本线索 / slot 负向豁免共用。
+# 次序约束:前四条都是「加购」的超串且互不为子串,「加购」必须殿后 ——
+# resolver 的剥离面(_ADD_ACTION_STRIP)按 re.sub 交替序取第一个命中,
+# 短词在前会把「加购物车」剥成「物车」。
+ADD_TO_CART_FAMILY = (
+    "加购物车", "加入购物车", "放进购物车", "放入购物车", "加购",
+)
+ADD_TO_CART_RE = re.compile(_grp(*ADD_TO_CART_FAMILY))
+
+# 下单/结算词族(Top#2,N≈10):resolver 触发与只读面 / executor 结算动作 /
+# planner 结算线索 / slot 优惠负向豁免共用。「结算」殿后防抢「结算下单」。
+CHECKOUT_FAMILY = (
+    "结算下单", "去结算", "提交订单", "付款", "去买单", "买单", "下单", "结算",
+)
+# 结算触发形状:显式结算词 ×3 + 「X下单/句首下单」形状 + 请求助动词+结算。
+# resolver._CHECKOUT_RE 与 plan_alignment.CHECKOUT_TRIGGER_RE 历史双胞胎,
+# 唯一差异是后者多 re.IGNORECASE(中文词面下无效装饰)—— 本串为两处共同字面。
+CHECKOUT_TRIGGER_PATTERN = _grp(
+    *_pick(CHECKOUT_FAMILY, 0, 1, 2, 3)
+    + (r"[^\s]下单", r"^下单", r"(?:然后|再|接着|帮忙|帮我|给我)结算")
+)
+CHECKOUT_TRIGGER_RE = re.compile(CHECKOUT_TRIGGER_PATTERN, re.IGNORECASE)
+
+# 导购核心词族(Top#3,N≈9):guide 兜底 / engine 购物文本线索 / planner
+# 购物线索 / slot SHOPPING_GUIDE 建议共用。slot 面另有导购等增补词,
+# 以「增补词在前 + 家族投影在后」的模板保持旧形。
+GUIDE_CORE_FAMILY = (
+    "推荐", "买什么", "挑一款", "选一款", "好看", "款式", "选鞋", "选衣服",
+    "哪款好", "跑步鞋", "卫衣", "夹克", "热门", "爆款", "热销", "热卖",
+    "畅销", "上新", "新品", "卖得好", "卖的好", "最便宜", "便宜点", "最贵",
+    "性价比", "哪个好", "怎么选", "有什么区别", "买哪种", "该用什么",
+    "需要准备什么", "背什么", "用哪种", "什么包",
+)
+
+# 热销榜词族(Top#3 分册):resolver 热销意图 / planner 热销线索共用,
+# 两处旧字面逐字节同形,直接共享派生 RE。
+BEST_SELLER_FAMILY = (
+    "销量最好", "销量最佳", "卖得最好", "最好卖", "卖得好", "畅销", "热卖",
+    "热销", "爆款",
+)
+BEST_SELLER_HINT_RE = re.compile(_grp(*BEST_SELLER_FAMILY))
+
+# 服饰锚点族 + 缺席增补族(guide 品类回退):「没有衣服」类缺席判定需要
+# 服饰词 × 装备词并集;两族分开维护,缺席面 = 并集派生。
+CLOTHING_ANCHOR_FAMILY = (
+    "衣服", "服装", "衣着", "上衣", "外套", "裤子", "衬衫", "夹克",
+    "羽绒服", "T恤", "裤", "鞋", "靴", "衫", "帽", "袜",
+)
+ABSENCE_EXTRA_FAMILY = (
+    "配饰", "背包", "书包", "装备", "帐篷", "睡袋", "垫", "包",
+)
+
+# 地址动词族(Top#4):slot ADDRESS_KEYWORDS / executor 输入与已述地址 /
+# planner 已述地址共用。「改派」是「改派到」的子串,殿后防抢短。
+ADDRESS_VERB_FAMILY = (
+    "改成", "改到", "送至", "送往", "送去", "寄到", "寄往", "改派到",
+    "改派", "改送", "送到", "地址为", "地址是", "邮寄到",
+)
+
+# 订单列表核心族:engine/planner 的「看订单」列表判定。slot ORDER_QUERY
+# 走 ORDER_KEYWORD_FAMILY(1.6 节)不在此列 —— 宽松抽取器与列表判定
+# 语义不同构(同 §1 单号正则的分册理由)。planner 面另拼订单/买了啥等
+# 增补词,以「增补 + 家族投影」模板保持旧形。
+ORDER_LIST_CORE_FAMILY = (
+    "我的订单", "名下.*订单", "查订单", "查询.*订单", "订单列表",
+    "看看我买了啥", "历史购买记录",
+)
+
+# 经营指标词族:planner 指标线索 / 毛利排行函数 / engine 利润排行线索
+# 共用。analytics/ 侧 metric 注册表是闭集 SQL 语义注册表,与本族不同物
+# (那边是「指标口径」,这边是「用户提到了经营话题」),勿混。
+METRIC_FAMILY = (
+    "gmv", "销售额", "销量", "毛利", "利润", "赚钱", "挣钱", "赚多少",
+    "滞销", "卖得好", "卖的好", "毛利率", "利润率", "出货量", "最卖钱",
+    "最赚钱",
+)
+
+
+# ---------------------------------------------------------------------------
 # 置信度级联(P0,2026-09-23):LLM 结构化精判即链路仲裁层,其置信度低于
 # 阈值=真模糊 —— 澄清反问取代静默深规划(实弹:低置信滑进 GMV 排行,
 # 按销量推荐答非所问)。动作域意图(cart/order_service)有自己的缺槽反问与

@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import re
 
+from ...triage.intent_registry import (
+    ADD_TO_CART_RE,
+    ADDRESS_VERB_FAMILY,
+    CHECKOUT_FAMILY,
+    _alt,
+    _grp,
+    _pick,
+)
 from .utils import extract_order_id
 
 _PURE_COMMUNICATION_RE = re.compile(
@@ -11,7 +19,10 @@ _PURE_COMMUNICATION_RE = re.compile(
 )
 _COMMUNICATION_ACTION_RE = re.compile(r"(call|invoke|execute|调用|执行)", re.IGNORECASE)
 _DESC_ADDRESS_RE = re.compile(r"with new address\s*([^\n]+)", re.IGNORECASE)
-_INPUT_ADDRESS_RE = re.compile(r"(?:改成|改到|送至|送去|寄到|地址为|地址是)\s*([^,，!！?？\n]+)", re.IGNORECASE)
+_INPUT_ADDRESS_RE = re.compile(
+    _grp(*_pick(ADDRESS_VERB_FAMILY, 0, 1, 2, 4, 5, 11, 12)) + r"\s*([^,，!！?？\n]+)",
+    re.IGNORECASE,
+)
 # 未发货语义(ADR-0001 Q2):快路径与 LLM 路径同语义,严禁快路径吞过滤
 _UNSHIPPED_RE = re.compile(r"未发货|还没发货|尚未发货")
 # saveUserAddress 六必需字段(planner 快轨子任务描述以「字段 值、」形态携带)
@@ -19,7 +30,10 @@ _SAVE_ADDR_FIELDS = ("receiverName", "receiverPhone", "province", "city", "distr
 # 排行指标提取(planner 快轨子任务描述形态:「rankingMetric gmv」)
 _RANKING_METRIC_RE = re.compile(r"rankingMetric\s+([a-z_]+)", re.IGNORECASE)
 # 顾客口述地址提取(checkoutCart 步骤描述/用户输入形态)
-_STATED_ADDRESS_RE = re.compile(r"(?:shipping to|地址是|寄到|送到|邮寄到)\s*([^,，。\n]+)", re.IGNORECASE)
+_STATED_ADDRESS_RE = re.compile(
+    _grp("shipping to", *_pick(ADDRESS_VERB_FAMILY, 12, 5, 10, 13)) + r"\s*([^,，。\n]+)",
+    re.IGNORECASE,
+)
 # 意图指向本轮推荐候选的词形(2026-09-15 S6 跨品类错单):「就要第一个/买第一件」
 # 指代本轮推荐;无本轮候选时严禁拿购物车遗留品结算
 _INTENT_TARGET_RE = re.compile(r"(?:就要|就买|买|要|拿下|选)[^,，。\n]{0,4}第[一二三四五六1-6]|第[一二三四五六1-6][款个件][^,，。\n]{0,6}(?:直接|马上)?下单")
@@ -28,8 +42,8 @@ _CART_ITSELF_RE = re.compile(r"(?:购物车里的?|车里的?|购物车的?)")
 # 复合「加购+下单」句形(2026-09-15 用户实报「说的第一个商品,为什么这么多」):
 # 同句既加购又下单 = 只买刚加的那件,结算必须范围化到本轮加购行,严禁整车
 # 把历史在车遗留品静默陪结(实弹:¥4455 订单结了 4 件没点名的旧货)
-_ADD_ACTION_RE = re.compile(r"加入购物车|放进购物车|放入购物车|加购物车|加购")
-_CHECKOUT_ACTION_RE = re.compile(r"下单|去结算|提交订单|付款|去买单")
+_ADD_ACTION_RE = ADD_TO_CART_RE
+_CHECKOUT_ACTION_RE = re.compile(_alt(*_pick(CHECKOUT_FAMILY, 6, 1, 2, 3, 4)))
 
 
 def _is_add_then_checkout(user_input: str | None) -> bool:

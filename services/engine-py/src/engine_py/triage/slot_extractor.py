@@ -12,10 +12,20 @@ from dataclasses import dataclass
 from typing import Any
 
 from .intent_registry import (
+    ADD_TO_CART_FAMILY,
+    ADDRESS_VERB_FAMILY,
+    CHECKOUT_FAMILY,
     CITY_PROVINCE_MAP,
+    GUIDE_CORE_FAMILY,
+    METRIC_FAMILY,
+    ORDER_KEYWORD_FAMILY,
+    ORDER_LIST_CORE_FAMILY,
     PROMOTION_KEYWORDS_RE,
     REFUND_VERB_RE,
     AgentIntentType,
+    _alt,
+    _grp,
+    _pick,
 )
 
 # ---------------------------------------------------------------------------
@@ -36,8 +46,11 @@ ORDER_ID_RE = re.compile(
 # 裸数字分支的负向前瞻(2026-09-12 多意图一期):1[3-9] 开头的 11 位是手机
 # 形态 ——「创建地址 张伟 13800138000 北京市…」曾被当成 orderId 去查一笔
 # 不存在的订单;严格 ORD- 通道(EXPLICIT/VISION)不受影响。
+# 地址动词族(Gen-3 域A):核心动词收上 intent_registry.ADDRESS_VERB_FAMILY
+# (executor/planner/resolver 同源),新地址/地址是为等本面形状词留本地拼装。
 ADDRESS_KEYWORDS_RE = re.compile(
-    r"(?:改成|改到|送至|送往|送去|寄到|寄往|改派到|改派|改送|新地址[是为:：]?|地址[是为:：])\s*([^,，!！?？\n]+)",
+    "(?:" + _alt(*_pick(ADDRESS_VERB_FAMILY, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9))
+    + r"|新地址[是为:：]?|地址[是为:：])" + r"\s*([^,，!！?？\n]+)",
     re.IGNORECASE,
 )
 PROVINCE_CITY_RE = re.compile(
@@ -173,15 +186,26 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
         # 结算/加购动作词在场时是「带优惠参数的结算诉求」,promotion_skill
         # 只读查询接不住,严禁吞掉 checkout 半。
         pattern=PROMOTION_KEYWORDS_RE,
+        # 负向豁免动作词收上词族之家(Gen-3 域A):CHECKOUT/ADD 两族投影,次序
+        # 即历史字面次序
         negative_pattern=re.compile(
-            r"(?:下单|去结算|结算|付款|提交订单|加入购物车|放进购物车|加购)", re.IGNORECASE
+            "(?:" + _alt(*_pick(CHECKOUT_FAMILY, 6, 1, 7, 3, 2))
+            + "|" + _alt(*_pick(ADD_TO_CART_FAMILY, 1, 2, 4)) + ")",
+            re.IGNORECASE,
         ),
     ),
     IntentRule(
         intent=AgentIntentType.CART_MANAGE,
         confidence=0.95,
+        # 加购词族收上 intent_registry.ADD_TO_CART_FAMILY(Gen-3 域A,提至
+        # 交替头部;旧串「放入购物车」散落中段、且「买第」重复两次,均为
+        # .search() 真值中性的整理,fixture 语料钉死);结算/下单动作词同源
+        # CHECKOUT_FAMILY 投影;序数/数量/删除等购物车专属形状词留本地。
         pattern=re.compile(
-            r"(?:加购物车|加入购物车|放进购物车|加购|购物车|结算|去结算|去买单|下单|查看购物车|清空购物车|购物车里|移出购物车|删除.*?购物车|从购物车.*?删除|买第|件加入|款加入|放入购物车|加第|买第|要第|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+|第[一二三四五12345两几][件款个双].*?(?:购物车|买|要|加|删|改|去)|(?:删除|移除|删掉).*?第[一二三四五12345两几][件款个双])|^(?:把)?第\s*[一二三四五12345两几]\s*[件款个双]|都要|全要|一起买",
+            _grp(*ADD_TO_CART_FAMILY)
+            + "|购物车|" + _alt(*_pick(CHECKOUT_FAMILY, 7, 1, 4, 6))
+            + r"|查看购物车|清空购物车|购物车里|移出购物车|删除.*?购物车|从购物车.*?删除|买第|件加入|款加入|加第|要第|改成\s*\d+|修改为\s*\d+|数量设为\s*\d+|第[一二三四五12345两几][件款个双].*?(?:购物车|买|要|加|删|改|去)|(?:删除|移除|删掉).*?第[一二三四五12345两几][件款个双]"
+            + r"|^(?:把)?第\s*[一二三四五12345两几]\s*[件款个双]|都要|全要|一起买",
             re.IGNORECASE,
         ),
     ),
@@ -195,25 +219,48 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
         # 2026-09-12:补入 卖得好/卖的好 —— 口语热度措辞漏判走图路径,planner 选中
         # searchProducts 工具(而非技能)时 guideContext 不刷新,下一轮"把第一件
         # 加入购物车"序数解析到上一轮 stale 候选(幻影 Nike 入车症状)。
+        # 导购核心词族收上 intent_registry.GUIDE_CORE_FAMILY(Gen-3 域A),
+        # 有什么好看/导购/推荐几款等本面增补词留本地原位拼装。
         pattern=re.compile(
-            r"(?:推荐|买什么|有什么好看|有没有|挑一款|选一款|适合.*的|找一找|推荐一款|介绍一下|哪款好|选鞋|选衣服|看商品|导购|什么牌子|款式|推荐几件|推荐几款|热门|爆款|热销|热卖|畅销|上新|新品|卖得好|卖的好)|最便宜|便宜点|最贵|性价比|哪个好|怎么选|有什么区别|买哪种|该用什么|需要准备什么|背什么|用哪种|什么包",
+            "(?:"
+            + _alt(*_pick(GUIDE_CORE_FAMILY, 0, 1))
+            + r"|有什么好看|有没有|"
+            + _alt(*_pick(GUIDE_CORE_FAMILY, 2, 3))
+            + r"|适合.*的|找一找|推荐一款|介绍一下|"
+            + _alt(*_pick(GUIDE_CORE_FAMILY, 8, 6, 7))
+            + r"|看商品|导购|什么牌子|"
+            + _alt(*GUIDE_CORE_FAMILY[5:6])
+            + r"|推荐几件|推荐几款|"
+            + _alt(*GUIDE_CORE_FAMILY[12:21])
+            + ")"
+            + "|" + _alt(*GUIDE_CORE_FAMILY[21:34]),
             re.IGNORECASE,
         ),
         # 全量加购诉求(都要/全要/一起买)不得否掉导购半 —— 「推荐X，都要了」
-                    # 是先推荐后全量入车的复合流(2026-09-13 一句话接力)
-                    negative_pattern=re.compile(r"^(?!.*(?:都要|全要|一起买)).*(?:加购物车|加入购物车|放进购物车|加购|移出购物车|清空购物车)", re.IGNORECASE),
+        # 是先推荐后全量入车的复合流(2026-09-13 一句话接力)
+        negative_pattern=re.compile(
+            r"^(?!.*(?:都要|全要|一起买)).*(?:"
+            + _alt(*_pick(ADD_TO_CART_FAMILY, 0, 1, 2, 4))
+            + r"|移出购物车|清空购物车)",
+            re.IGNORECASE,
+        ),
     ),
     IntentRule(
         intent=AgentIntentType.ORDER_MODIFY_ADDRESS,
         confidence=0.95,
+        # 修改/地址等本面形状词留本地;动词串收上 ADDRESS_VERB_FAMILY 投影
+        # (Gen-3 域A,次序保持历史字面)。
         pattern=re.compile(
-            r"(?:(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)|(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)|(?:改到|改成|送至|送往|改派到|改派|改送)\s*[^?？哪里哪儿\n]+)",
+            r"(?:(?:修改|更改|变更|换|改|更新).*?(?:收货)?(?:地址|位置|地方)|(?:收货)?(?:地址|位置|地方).*?(?:修改|更改|变更|换|改|错|变)|(?:"
+            + _alt(*_pick(ADDRESS_VERB_FAMILY, 1, 0, 2, 3, 7, 8, 9))
+            + r")\s*[^?？哪里哪儿\n]+)",
             re.IGNORECASE,
         ),
         # 设默认地址(2026-09-15 S8)是地址簿操作不是改单 —— 负向豁免,严禁
         # 反问订单号(实弹:「刚才那个地址改成默认」被截胡索要订单编号)
         negative_pattern=re.compile(
-            r"(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)"
+            "(?:" + _alt(*_pick(ADDRESS_VERB_FAMILY, 5, 2, 3, 6, 4))
+            + r")\s*(?:哪里|哪儿|哪了|何处|\?|？)"
             r"|改成默认|设为默认|设置为默认|变成默认|设默认",
             re.IGNORECASE,
         ),
@@ -232,21 +279,44 @@ INTENT_DETECTION_RULES: list[IntentRule] = [
     IntentRule(
         intent=AgentIntentType.ORDER_QUERY,
         confidence=0.92,
+        # 单字短语尾巴收上 intent_registry.ORDER_KEYWORD_FAMILY(Gen-3 域A;
+        # 查单/运单/面单 2026-09-13 漂移审计的老病灶),物流/快递复合形状词留本地。
         pattern=re.compile(
-            r"(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递|寄到哪|送至哪|到了没|查一下.*订单|查订单状态|查询.*订单|物流查询|查下订单|查订单|我的订单|名下.*订单|全部订单|查单|运单|面单)",
+            r"(?:查.*物流|物流到哪|物流信息|快递单号|快递到哪|发货了吗|包裹到哪|查快递|寄到哪|送至哪|到了没|查一下.*订单|查订单状态|"
+            + ORDER_LIST_CORE_FAMILY[3]
+            + r"|物流查询|查下订单|" + ORDER_LIST_CORE_FAMILY[2]
+            + "|" + ORDER_LIST_CORE_FAMILY[0] + "|" + ORDER_LIST_CORE_FAMILY[1]
+            + r"|全部订单|"
+            + _alt(*_pick(ORDER_KEYWORD_FAMILY, 3, 7, 8)) + ")",
             re.IGNORECASE,
         ),
-        negative_pattern=re.compile(r"(?:寄到|送至|送往|寄往|送去)\s*(?:哪里|哪儿|哪了|何处|\?|？)", re.IGNORECASE),
+        negative_pattern=re.compile(
+            "(?:" + _alt(*_pick(ADDRESS_VERB_FAMILY, 5, 2, 3, 6, 4))
+            + r")\s*(?:哪里|哪儿|哪了|何处|\?|？)",
+            re.IGNORECASE,
+        ),
     ),
     IntentRule(
         intent=AgentIntentType.METRIC_QUERY,
         confidence=0.96,
-        pattern=re.compile(r"(?:销售额|销量|出货量|毛利|利润率|gmv|滞销|排行|最卖钱|最赚钱)", re.IGNORECASE),
+        # 指标词族收上 intent_registry.METRIC_FAMILY(Gen-3 域A,planner 同源);
+        # 「排行」是本面专属词留原位,交替次序保持历史字面次序。
+        pattern=re.compile(
+            "(?:" + _alt(*_pick(METRIC_FAMILY, 1, 2, 13, 3, 12, 0, 8))
+            + "|排行|" + _alt(*_pick(METRIC_FAMILY, 14, 15)) + ")",
+            re.IGNORECASE,
+        ),
     ),
 ]
 
 _GENERAL_LIST_POSITIVE_RE = re.compile(
-    r"(?:我的订单|全部订单|名下.*订单|所有订单|历史订单|查订单|查询.*订单|查下订单|订单列表|看看我买了啥|我有哪些订单|历史购买记录|查下我买的东西)",
+    "(?:" + _alt(
+        ORDER_LIST_CORE_FAMILY[0], "全部订单",
+        ORDER_LIST_CORE_FAMILY[1], "所有订单", "历史订单",
+        ORDER_LIST_CORE_FAMILY[2], ORDER_LIST_CORE_FAMILY[3], "查下订单",
+        ORDER_LIST_CORE_FAMILY[4], ORDER_LIST_CORE_FAMILY[5], "我有哪些订单",
+        ORDER_LIST_CORE_FAMILY[6], "查下我买的东西",
+    ) + ")",
     re.IGNORECASE,
 )
 _GENERAL_LIST_LOGISTICS_RE = re.compile(

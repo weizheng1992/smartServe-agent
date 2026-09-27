@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 
+from ..triage.intent_registry import REFUND_VERB_FAMILY, _grp, _pick
 from .base_skill import BaseSkill
 from .contract import SkillContext, SkillResult
 from .suspension import suspend_for_approval
@@ -24,8 +25,14 @@ class OrderRefundSkill(BaseSkill):
     }
 
     # 与 triage REFUND_KEYWORDS_RE 对齐的文本兜底(仅用于动作嗅探/无槽位匹配,
-    # fast-track 上下文必带 activeIntent,此正则在该路径不生效)
-    _FALLBACK_RE = re.compile(r"(?:退款|退货|退钱|退单|不想要了|破损|瑕疵)", re.IGNORECASE)
+    # fast-track 上下文必带 activeIntent,此正则在该路径不生效)。动词半收上
+    # 词族之家 REFUND_VERB_FAMILY 投影;⚠️ 刻意不放宽到 REFUND_VERB_RE 全族
+    # —— can_handle 嗅探面加词即行为变更(「退了」类口语会扩大技能接单面),
+    # 破损/瑕疵是 damage 专用信号留本地(Gen-3 域A)。
+    _FALLBACK_RE = re.compile(
+        _grp(*(_pick(REFUND_VERB_FAMILY, 0, 1, 2, 3, 11) + ("破损", "瑕疵"))),
+        re.IGNORECASE,
+    )
 
     def can_handle(self, context: SkillContext) -> bool:
         if super().can_handle(context):

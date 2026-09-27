@@ -29,17 +29,29 @@ from .consult_fast_path import (  # noqa: F401 (测试 patch 面)
 )
 from .exemplar_service import search_relevant_exemplars  # noqa: F401 (测试 patch 面)
 from .intent_registry import (
+    ADD_TO_CART_FAMILY,
+    ADDRESS_VERB_FAMILY,
+    BEST_SELLER_FAMILY,
+    CHECKOUT_FAMILY,
     CONSULT_SIDE_INTENTS,
     EXPLICIT_ORDER_ID_RE,
+    GUIDE_CORE_FAMILY,
     INTENT_CLARIFY_LABELS,
     INTENT_CONFIDENCE_ROUTE,
     INTENT_REGISTRY,
     INTENT_ROUTE_THRESHOLD_OVERRIDES,
+    METRIC_FAMILY,
     MONEY_ACTION_VETO_RE,
     OPERATIONAL_ACTION_RE,  # noqa: F401 (测试 patch 面)
+    ORDER_KEYWORD_FAMILY,
     ORDER_KEYWORDS_RE,  # noqa: F401 (测试 patch 面 / embedding_anchor 经 ctx.ns 读取)
+    PROMOTION_KEYWORD_FAMILY,
     REFUND_KEYWORDS_RE,  # noqa: F401 (测试 patch 面)
+    REFUND_VERB_FAMILY,
     UNSANITIZED_TAGS_RE,  # noqa: F401 (测试 patch 面)
+    _alt,
+    _grp,
+    _pick,
 )
 from .product_disambiguator import build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, strip_punctuation_for_greeting
@@ -85,7 +97,8 @@ def _money_action_vetoed(input_text: str | None) -> bool:
 # 根因是 LLM 分类层把「利润」判成后台经营数据拒答;排行是店长在客服台的
 # 合法诉求,确定性直通 metric_query(planner→executor queryProductRanking)。
 PROFIT_RANKING_RE = re.compile(
-    r"^(?=.*(?:毛利|利润|毛利率|赚钱|挣钱|赚多少))(?=.*(?:排行|排名|top|热销|畅销|最高|前\s*\d)).+",
+    "^(?=.*(?:" + _alt(*_pick(METRIC_FAMILY, 3, 4, 11, 5, 6, 7))
+    + "))(?=.*(?:排行|排名|top|" + _alt(*_pick(BEST_SELLER_FAMILY, 7, 5)) + "|最高|前\\s*\\d)).+",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -175,8 +188,11 @@ _ADDRESS_BOOK_LIST_RE = re.compile(
     r"|^(?:地址列表|收货地址列表|地址簿列表)$"
 )
 # 设默认形(2026-09-15 S8):「刚才那个地址改成默认/设为默认地址」
+# 「改成」收上 ADDRESS_VERB_FAMILY[0](Gen-3 域A;此处是「改成…默认」形状位,
+# 与改单地址动词同字面,投影引用防漂移)
 _ADDRESS_SET_DEFAULT_RE = re.compile(
-    r"(?:改成|设为|设置为|变成|设)[^。,，\n]{0,4}默认(?:地址)?|(?:默认地址)[^。,，\n]{0,4}(?:改成|设为|设置为)"
+    r"(?:" + ADDRESS_VERB_FAMILY[0] + r"|设为|设置为|变成|设)[^。,，\n]{0,4}默认(?:地址)?"
+    r"|(?:默认地址)[^。,，\n]{0,4}(?:" + ADDRESS_VERB_FAMILY[0] + r"|设为|设置为)"
 )
 _PHONE_RE = re.compile(rf"(?<!\d)({PHONE_SHAPE})(?!\d)")
 _CHINESE_NAME_RE = re.compile(r"([\u4e00-\u9fa5]{2,4})\s*$")
@@ -282,15 +298,20 @@ _REFORMAT_SHAPE_RE = re.compile(
     re.IGNORECASE,
 )
 _REFORMAT_DELIVERY_RE = re.compile(
-    r"(显示|展示|呈现|列(?:出|个|一下)|罗列|输出|整理|排(?:成|个|一下)|给|来|做|弄|换成|改成)",
+    "(显示|展示|呈现|列(?:出|个|一下)|罗列|输出|整理|排(?:成|个|一下)|给|来|做|弄|换成|"
+    + ADDRESS_VERB_FAMILY[0] + ")",
     re.IGNORECASE,
 )
 _ORDER_TOPIC_NOUN_RE = re.compile(
-    r"(订单|物流|退款|退货|换货|发货|快递|运单|包裹|购物车|收货|地址|发票|售后|签收|账单)",
+    "(" + _alt(*_pick(ORDER_KEYWORD_FAMILY, 0, 2))
+    + "|" + _alt(*_pick(REFUND_VERB_FAMILY, 0, 1))
+    + "|换货|" + _alt(*_pick(ORDER_KEYWORD_FAMILY, 1, 5, 7))
+    + "|包裹|购物车|收货|地址|发票|售后|签收|账单)",
     re.IGNORECASE,
 )
 _ACTION_OPERATION_RE = re.compile(
-    r"(申请|提交|支付|付款|下单|购买|修改|变更|取消|删除|催单|催发货|改寄|查(?:询|一下|看))",
+    "(申请|提交|支付|" + _alt(*_pick(CHECKOUT_FAMILY, 3, 6))
+    + "|购买|修改|变更|取消|删除|催单|催发货|改寄|查(?:询|一下|看))",
     re.IGNORECASE,
 )
 
@@ -311,23 +332,31 @@ def detect_pure_reformat(text: str | None) -> bool:
     return bool(_REFORMAT_SHAPE_RE.search(text) and _REFORMAT_DELIVERY_RE.search(text))
 
 
-# 文本侧域角色线索(工单04 2026-09-11):措辞维度的回退 —— 正则与判定次序
-# 逐字节保持旧实现,仅提为模块常量。文本线索优先于意图档位:措辞含加购动词
-# 时即使档位是 chat/refund 也回 cart 域(用户嘴上在说购物车)
+# 文本侧域角色线索(工单04 2026-09-11):措辞维度的回退 —— 判定次序保持
+# 旧实现,词面收上词族之家(Gen-3 域A),单消费形状词(买它/移出/删除第)
+# 留本地。文本线索优先于意图档位:措辞含加购动词时即使档位是 chat/refund
+# 也回 cart 域(用户嘴上在说购物车)
 _CART_TEXT_HINT_RE = re.compile(
-    r"(?:加购|购物车|结算|去结算|买它|加入购物车|移出购物车|清空购物车|删除第|改成\s*\d+|修改为\s*\d+)",
+    "(?:"
+    + ADD_TO_CART_FAMILY[4]
+    + r"|购物车|" + CHECKOUT_FAMILY[7] + "|" + CHECKOUT_FAMILY[1]
+    + r"|买它|" + ADD_TO_CART_FAMILY[1]
+    + r"|移出购物车|清空购物车|删除第|改成\s*\d+|修改为\s*\d+)",
     re.IGNORECASE,
 )
 _SHOPPING_TEXT_HINT_RE = re.compile(
-    r"(?:推荐|买什么|挑一款|选一款|好看|款式|选鞋|选衣服|哪款好)", re.IGNORECASE
+    _grp(*_pick(GUIDE_CORE_FAMILY, 0, 1, 2, 3, 4, 5, 6, 7, 8)), re.IGNORECASE
 )
 # 优惠荐品线索(2026-09-22 实弹):「推荐优惠最大的商品」曾被上面的导购
 # 「推荐」线索整句截胡成 shopping_guide 域、按销量推荐答非所问 —— 优惠
 # 词面 + 荐品措辞归 promotion 域,优先级在导购线索之前、购物车线索之后
 # (「用优惠券下单」的加购语义仍最高优先)。
 _PROMO_DEAL_HINT_RE = re.compile(
-    r"(?:优惠|折扣|划算|满减|券)[^。]{0,8}(?:推荐|哪款|哪个|力度)"
-    r"|(?:推荐|哪款|哪个)[^。]{0,8}(?:优惠|折扣|划算|满减)",
+    "(?:" + _alt(*_pick(PROMOTION_KEYWORD_FAMILY, 0, 5, 7, 4, 1))
+    + ")[^。]{0,8}(?:" + GUIDE_CORE_FAMILY[0] + r"|哪款|哪个|力度)"
+    + "|(?:" + GUIDE_CORE_FAMILY[0] + r"|哪款|哪个)[^。]{0,8}(?:"
+    # 历史字面:后半的优惠词面不含「券」(荐品措辞 × 活动词面即可,券另册)
+    + _alt(*_pick(PROMOTION_KEYWORD_FAMILY, 0, 5, 7, 4)) + ")",
     re.IGNORECASE,
 )
 

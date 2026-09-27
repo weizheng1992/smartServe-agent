@@ -19,14 +19,13 @@ from __future__ import annotations
 
 import re
 
-from ..triage.intent_registry import INTENT_REGISTRY
+from ..triage.intent_registry import CHECKOUT_TRIGGER_PATTERN, INTENT_REGISTRY
 
-# 下单词族(当前输入准入门):与 skills/cart/resolver._CHECKOUT_RE 同口径
-# (裸「结算」保持查看摘要旧契约,不开真单,故不在此列)。
-CHECKOUT_TRIGGER_RE = re.compile(
-    r"(?:结算下单|去结算|提交订单|付款|[^\s]下单|^下单|(?:然后|再|接着|帮忙|帮我|给我)结算)",
-    re.IGNORECASE,
-)
+# 下单词族(当前输入准入门):词面住在 intent_registry.CHECKOUT_TRIGGER_PATTERN
+# (skills/cart/resolver._CHECKOUT_RE 是同字面孪生,Gen-3 域A 收口后共享);
+# 裸「结算」保持查看摘要旧契约,不开真单,故不在族内。IGNORECASE 为历史
+# 遗留(中文词面下无效装饰),保留不动。
+CHECKOUT_TRIGGER_RE = re.compile(CHECKOUT_TRIGGER_PATTERN, re.IGNORECASE)
 
 _TOOL_CALL_RE = re.compile(r"\b(?:Call|Use)\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
 _SKILL_CALL_RE = re.compile(r"\bExecute\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)

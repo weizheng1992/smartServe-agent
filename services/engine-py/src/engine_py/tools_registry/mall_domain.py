@@ -135,6 +135,8 @@ class MallDomainService:
     # 价格极值修饰词(2026-09-14 T3 矩阵):「最便宜的背包」曾把「便宜」混入
     # 词元稀释检索(头巾/水壶顶了真背包)—— 极值词是排序语义,剥除后由
     # search sort(price_desc)承接
+    # intent-exception(rewrite-pipeline,域A例外④:检索改写管道的剥词面,
+    # sub 交替次序即剥词语义;且 mall_domain → triage 反向 import 会成环)
     _PRICE_SUPERLATIVE_RE = re.compile(r"(?:最便宜|最贵|性价比高|性价比|便宜点|便宜)")
     # 疑问词与口语前缀清洗(2026-09-14 T3 矩阵):「最贵的冲锋衣是哪款」曾整块
     # 成词元「冲锋衣是哪款」ILIKE 必空

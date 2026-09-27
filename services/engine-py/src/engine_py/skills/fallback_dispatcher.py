@@ -22,11 +22,18 @@ from sqlalchemy import text
 from ..tools_registry import order_domain
 from ..triage.intent_registry import (
     EXPLICIT_ORDER_ID_RE,
+    ORDER_KEYWORD_FAMILY,
     PROMOTION_KEYWORDS_RE,
+    _alt,
+    _pick,
 )
 from .promotion_skill import PromotionQuerySkill
 
-_ORDER_QUERY_HINT = re.compile(r"查|物流|到哪|状态|发货", re.IGNORECASE)
+# 物流/发货单字线索收上词族之家投影(Gen-3 域A);「查/状态」是本面专属词留原位。
+_ORDER_QUERY_HINT = re.compile(
+    "查|" + _alt(*_pick(ORDER_KEYWORD_FAMILY, 2, 6)) + "|状态|" + ORDER_KEYWORD_FAMILY[1],
+    re.IGNORECASE,
+)
 
 
 async def _order_section(conn, order_id: str, user_id: str) -> str:

@@ -16,31 +16,47 @@ from ...llm import CircuitBreakerOpenError, bind_llm_call_node, get_chat_model
 from ...memory import ShortMemory
 from ...tenant import get_merchant_display_name
 from ...triage.intent_registry import (
+    ADDRESS_VERB_FAMILY,
+    BEST_SELLER_HINT_RE,
+    CHECKOUT_FAMILY,
+    GUIDE_CORE_FAMILY,
+    METRIC_FAMILY,
+    ORDER_LIST_CORE_FAMILY,
+    _alt,
+    _grp,
+    _pick,
+)
+from ...triage.intent_registry import (
     EXPLICIT_ORDER_ID_RE as _EXPLICIT_ORDER_ID_RE,  # 单号正则收口 intent_registry(工单04)
 )
 from ..plan_alignment import align_plan_to_intents
 from ..state import AgentState, build_history_context
 from .utils import extract_order_id
 
-# ⚠️ 与 slot_extractor._GENERAL_LIST_POSITIVE_RE 是孪生词表(nightly G4 钉死
+# 泛查单快轨(Gen-3 域A:核心词面上收 intent_registry.ORDER_LIST_CORE_FAMILY,
+# 支持退货/订单/买了啥等本面增补词仍留本地拼装)。⚠️ 与
+# slot_extractor._GENERAL_LIST_POSITIVE_RE 是孪生词表(nightly G4 钉死
 # 双轨),新增措辞两处必须同步 ——「看看我买了啥」曾只认 slot 侧漏 planner 快轨
 _GENERAL_ORDER_LIST_RE = re.compile(
-    r"查询.*订单|查订单|我的订单|订单列表|名下.*订单|支持退货.*订单|支持退款.*订单|可退.*订单|哪些.*订单|订单|我问订单"
-    r"|看看我买了啥|买了啥|买过啥|我买的东西|历史购买记录",
+    _alt(*(
+        _pick(ORDER_LIST_CORE_FAMILY, 3, 2, 0, 4, 1)
+        + ("支持退货.*订单", "支持退款.*订单", "可退.*订单", "哪些.*订单", "订单", "我问订单")
+        + _pick(ORDER_LIST_CORE_FAMILY, 5)
+        + ("买了啥", "买过啥", "我买的东西")
+        + _pick(ORDER_LIST_CORE_FAMILY, 6)
+    )),
     re.IGNORECASE,
 )
 
 # 指标×导购确定性快轨(遗留二期,2026-09-13):指标词族 → rankingMetric 映射
 # (METRIC_REGISTRY 5 键:gmv/volume/gross_profit/margin_rate/stock_risk)。
-# ⚠️ 与 triage.PROFIT_RANKING_RE 利润词族是孪生词表(nightly 2026-09-14 钉死):
-# triage 侧补「赚钱/挣钱/赚多少」时本表未同步 ——「最赚钱的商品排行」直通
-# metric_query 后 _ranking_metric_from_text 解析成默认 volume,利润榜变销量榜。
-_METRIC_HINT_RE = re.compile(r"(?:gmv|销售额|销量|毛利|利润|赚钱|挣钱|赚多少|滞销|卖得好|卖的好)", re.IGNORECASE)
-_SHOPPING_HINT_RE = re.compile(r"(?:推荐|买什么|挑一款|选一款|哪款好)", re.IGNORECASE)
+# 词面收上 intent_registry(METRIC_FAMILY/GUIDE_CORE_FAMILY)。
+_METRIC_HINT_RE = re.compile(_grp(*_pick(METRIC_FAMILY, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)), re.IGNORECASE)
+_SHOPPING_HINT_RE = re.compile(_grp(*_pick(GUIDE_CORE_FAMILY, 0, 1, 2, 3, 8)), re.IGNORECASE)
 
 # 销量榜词族(cart 榜词加购快轨,2026-09-27 立案 planner-plan-intent-alignment)。
-# ⚠️ 与 skills/cart/resolver._BEST_SELLER_RE 是孪生词表,新增措辞两处必须同步。
-_BEST_SELLER_RE = re.compile(r"(?:销量最好|销量最佳|卖得最好|最好卖|卖得好|畅销|热卖|热销|爆款)")
+# 词面收上 intent_registry.BEST_SELLER_HINT_RE(cart resolver 同源)。
+_BEST_SELLER_RE = BEST_SELLER_HINT_RE
 
 
 def _ranking_subtask(metric_or_text: str, suffix: str) -> dict:
@@ -61,13 +77,13 @@ def _ranking_subtask(metric_or_text: str, suffix: str) -> dict:
 
 def _ranking_metric_from_text(text: str) -> str:
     """指标词族 → 排行 metric 键(与 OrderDomainService.METRIC_REGISTRY 同名)。"""
-    if re.search(r"毛利率", text, re.IGNORECASE):
+    if re.search(_pick(METRIC_FAMILY, 11)[0], text, re.IGNORECASE):
         return "margin_rate"
-    if re.search(r"毛利|利润|赚钱|挣钱|赚多少", text, re.IGNORECASE):
+    if re.search(_alt(*_pick(METRIC_FAMILY, 3, 4, 5, 6, 7)), text, re.IGNORECASE):
         return "gross_profit"
-    if re.search(r"gmv|销售额", text, re.IGNORECASE):
+    if re.search(_alt(*_pick(METRIC_FAMILY, 0, 1)), text, re.IGNORECASE):
         return "gmv"
-    if re.search(r"滞销", text, re.IGNORECASE):
+    if re.search(_pick(METRIC_FAMILY, 8)[0], text, re.IGNORECASE):
         return "stock_risk"
     return "volume"
 
@@ -449,8 +465,10 @@ async def planner_node(state: AgentState) -> dict:
         # 结算词与句中地址(2026-09-13 三段接力):「查卖得好的短袖,把第一个
         # 加入购物车,地址是X,然后结算」—— 深规划自由发挥曾产出无执行的幻觉
         # 叙事(历史幻觉单号自增殖),三段确定性编排根治。
-        _CHECKOUT_HINT_RE = re.compile(r"(?:结算|下单|买单)")
-        _STATED_ADDR_RE = re.compile(r"(?:地址是|寄到|送到|邮寄到)\s*([^,，。]+)")
+        _CHECKOUT_HINT_RE = re.compile(_grp(*_pick(CHECKOUT_FAMILY, 7, 6, 5)))
+        _STATED_ADDR_RE = re.compile(
+            _grp(*_pick(ADDRESS_VERB_FAMILY, 12, 5, 10, 13)) + r"\s*([^,，。]+)"
+        )
         if (
             has_shopping_guide
             and has_cart_manage

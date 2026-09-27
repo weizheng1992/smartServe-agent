@@ -15,6 +15,7 @@ from datetime import UTC
 from sqlalchemy import text
 
 from ..tools_registry import order_domain
+from ..triage.intent_registry import GUIDE_CORE_FAMILY, PROMOTION_KEYWORD_FAMILY
 from .base_skill import BaseSkill
 from .contract import SkillContext, SkillResult
 from .promotion_reco import is_deal_recommendation_ask, parse_price_hint, recommend_deals
@@ -43,8 +44,9 @@ _MY_COUPON_RE = re.compile(r"(我的|我领|已领|领到|名下)[^。]{0,6}券|
 # (2026-09-23):「叠加减的最多的商品」等叠加/立减措辞同属荐品。
 # 供 promotion_reco 与本技能共用;本体的荐品判定走 parse_price_hint+ask。
 _RECOMMEND_RE = re.compile(
-    r"(推荐|哪款|哪个|什么商品|值得买|力度最大|优惠最大|最划算|便宜"
-    r"|叠加[^。]{0,4}减|减得?最[多高狠]|立减)"
+    "(" + GUIDE_CORE_FAMILY[0] + r"|哪款|哪个|什么商品|值得买|力度最大|"
+    + PROMOTION_KEYWORD_FAMILY[0] + "最大|最划算|便宜"
+    r"|叠加[^。]{0,4}减|减得?最[多高狠]|" + PROMOTION_KEYWORD_FAMILY[13] + ")"
 )
 
 
