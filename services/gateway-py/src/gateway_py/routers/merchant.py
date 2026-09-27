@@ -54,6 +54,38 @@ def _err_msg(err: BaseException) -> str:
     return str(err)
 
 
+async def _require_staff(authorization: str | None) -> dict:
+    """商户管理面统一身份闸(2026-09-26 夜审 A4 收口):Bearer JWT →
+    staff_members 在职员工 —— 401 缺/坏/登出 token(require_claims),
+    403 非员工或停用。此前本组 7 条路由仅 ship 有闸,其余裸奔(匿名即可
+    读全量会话/审批单,甚至批准退款)。按钮级权限粒度(order:view 等)
+    待权限点扩词表后另行收口,本轮统一「必须本平台在职员工」这一层。
+    调用方须在主 try 之外调用(或 except 链先放行 HTTPException),
+    避免 401/403 被兜底 except 吞成 500。"""
+    from engine_py.db import StaffMember
+    from sqlalchemy import select
+
+    from .auth import require_claims
+
+    claims = await require_claims(authorization)
+    email = str(claims.get("email") or "")
+    # JWT 只带 email(sub),租户由 DB 行带出(与 ship/登录同一身份模型)
+    async with get_session() as session:
+        staff = (await session.execute(select(StaffMember).where(StaffMember.email == email))).scalars().first()
+    if staff is None or staff.status != "enabled":
+        raise HTTPException(status_code=403, detail="非商户员工或已停用")
+    return {"email": email, "staff": staff}
+
+
+def _staff_tenant(staff, tenant_param: str | None) -> str:
+    """员工可见租户边界:参数缺省取员工真租户;显式他租与 ``all`` 聚合一律
+    403(架构不变量 #1 —— 员工可见面不得越过其租户行,跨租户列表读的
+    「all」是匿名时代遗产,员工面不再提供)。"""
+    if not tenant_param or tenant_param == staff.business_id:
+        return staff.business_id
+    raise HTTPException(status_code=403, detail=f"跨租户访问被拒绝(员工租户 {staff.business_id})")
+
+
 def _ts_ms() -> int:
     return int(time.time() * 1000)
 
@@ -144,9 +176,11 @@ async def admin_conversations(
     tenantId: str | None = Query(None),
     status: str | None = Query(None),
     search: str | None = Query(None),
+    authorization: str | None = Header(None),
 ):
+    staff = (await _require_staff(authorization))["staff"]
+    tenant_id = _staff_tenant(staff, tenantId)
     try:
-        tenant_id = tenantId or "aurora"
         gate = await check_tenant_registered(tenant_id)
         if gate is not None:
             return gate
@@ -164,9 +198,14 @@ async def admin_conversations(
 
 
 @router.get("/api/admin/conversations/{thread_id}")
-async def admin_conversation_detail(thread_id: str, tenantId: str | None = Query(None)):
+async def admin_conversation_detail(
+    thread_id: str,
+    tenantId: str | None = Query(None),
+    authorization: str | None = Header(None),
+):
+    staff = (await _require_staff(authorization))["staff"]
+    tenant_id = _staff_tenant(staff, tenantId)
     try:
-        tenant_id = tenantId or "aurora"
         gate = await check_tenant_registered(tenant_id)
         if gate is not None:
             return gate
@@ -191,7 +230,8 @@ async def admin_conversation_detail(thread_id: str, tenantId: str | None = Query
 
 
 @router.get("/api/admin/orders")
-async def admin_orders():
+async def admin_orders(authorization: str | None = Header(None)):
+    await _require_staff(authorization)
     try:
         data = await mds.get_admin_dashboard_data()
         return {"success": True, **data}
@@ -204,25 +244,12 @@ async def admin_orders_ship(
     body: dict,
     authorization: str | None = Header(None),
 ):
-    """发货 = 真实世界副作用(锁定地址/扣库存),按 RBAC order:ship 权限点闸。"""
+    """发货 = 真实世界副作用(锁定地址/扣库存),按 RBAC order:ship 权限点闸
+    (身份闸统一走 _require_staff,权限点留在本路由)。"""
     from engine_py.analytics import rbac as analytics_rbac
 
-    from .auth import require_claims
-
     try:
-        claims = await require_claims(authorization)
-        email = str(claims.get("email") or "")
-
-        from engine_py.db import StaffMember
-        from sqlalchemy import select
-
-        # JWT 只带 email(sub),租户由 DB 行带出(与 /api/auth/login 同一身份模型)
-        async with get_session() as session:
-            staff = (
-                await session.execute(select(StaffMember).where(StaffMember.email == email))
-            ).scalars().first()
-        if staff is None or staff.status != "enabled":
-            return JSONResponse(status_code=403, content={"success": False, "message": "非商户员工或已停用"})
+        staff = (await _require_staff(authorization))["staff"]
         # 权限点按员工真租户判定(2026-09-20 review:硬编码 aurora 会让他租员工按 aurora 菜单放行)
         if "order:ship" not in await analytics_rbac.perms_for_role(staff.business_id, staff.role):
             return JSONResponse(status_code=403, content={"success": False, "message": "无发货权限(order:ship)"})
@@ -242,8 +269,9 @@ async def admin_orders_ship(
 
 
 @router.get("/api/admin/orders/{order_id}")
-async def admin_order_detail(order_id: str):
+async def admin_order_detail(order_id: str, authorization: str | None = Header(None)):
     """订单详情 = 行项目(camelCase 序列化,与 storefront /spi/v1/orders/detail 同形)+ 该订单审计时间线。"""
+    await _require_staff(authorization)
     try:
         order = await mds.get_order_detail(order_id)
         if order is None:
@@ -259,15 +287,17 @@ async def admin_approvals(
     tenantId: str | None = Query(None),
     status: str | None = Query(None),
     actionType: str | None = Query(None),
+    authorization: str | None = Header(None),
 ):
+    staff = (await _require_staff(authorization))["staff"]
+    tenant = _staff_tenant(staff, tenantId)
     try:
-        tenant = tenantId or "aurora"
         gate = await check_tenant_registered(tenant)
         if gate is not None:
             return gate
         approvals = await ApprovalGatekeeper.list_pending_approvals(
             {
-                "tenantId": None if tenant == "all" else tenant,
+                "tenantId": tenant,
                 "status": None if status == "all" else status,
                 "actionType": None if actionType == "all" else actionType,
             }
@@ -278,8 +308,18 @@ async def admin_approvals(
 
 
 @router.post("/api/admin/approvals")
-async def admin_approvals_action(body: MerchantApprovalActionIn):
+async def admin_approvals_action(body: MerchantApprovalActionIn, authorization: str | None = Header(None)):
+    staff = (await _require_staff(authorization))["staff"]
     try:
+        # 对象级租户校验(夜审 A4):审批单归属他租一律 403,不依赖 gatekeeper 内部
+        if body.approvalId:
+            target = await ApprovalGatekeeper.find_approval_by_id(body.approvalId)
+            target_biz = str((target or {}).get("businessId") or "")
+            if target_biz and target_biz != staff.business_id:
+                return JSONResponse(
+                    status_code=403,
+                    content={"success": False, "error": f"审批单不属于员工租户 {staff.business_id},拒绝操作"},
+                )
         # 核准人契约(admin-readiness 01):商户控制台通道 —— 此前直调引擎漏注入
         # actor,落库恒 unknown(工单 04 审计实弹抓获);此路由即商户面,缺省 merchant_operator
         actor = (body.actor or "").strip() or "merchant_operator"

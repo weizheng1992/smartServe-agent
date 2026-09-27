@@ -49,10 +49,10 @@ async def _seed_detail_order() -> None:
 
 
 class TestMerchantAdminOrderDetail:
-    async def test_detail_returns_storefront_shape_with_items_and_scoped_audit(self, client):
+    async def test_detail_returns_storefront_shape_with_items_and_scoped_audit(self, client, staff_auth):
         """详情同形 storefront 序列化:items 行项目 + 账本三行 + 审计只含本单。"""
         await _seed_detail_order()
-        r = await client.get(f"/api/admin/orders/{_DETAIL_ORDER_ID}")
+        r = await client.get(f"/api/admin/orders/{_DETAIL_ORDER_ID}", headers=staff_auth)
         assert r.status_code == 200
         body = r.json()
         assert body["success"] is True
@@ -74,17 +74,17 @@ class TestMerchantAdminOrderDetail:
         assert logs[0]["order_id"] == _DETAIL_ORDER_ID
         assert logs[0]["action_type"] == "ship"
 
-    async def test_missing_order_is_honest_404(self, client):
-        r = await client.get("/api/admin/orders/MA-NOT-EXISTS-000")
+    async def test_missing_order_is_honest_404(self, client, staff_auth):
+        r = await client.get("/api/admin/orders/MA-NOT-EXISTS-000", headers=staff_auth)
         assert r.status_code == 404
         body = r.json()
         assert body["success"] is False
         assert "不存在" in body["error"]
 
-    async def test_orders_list_endpoint_unaffected(self, client):
-        """列表端点契约不被新详情路由截胡/改形。"""
+    async def test_orders_list_endpoint_unaffected(self, client, staff_auth):
+        """列表端点契约不被新详情路由截胡/改形(A4 收口后须在职员工身份)。"""
         await _seed_detail_order()
-        r = await client.get("/api/admin/orders")
+        r = await client.get("/api/admin/orders", headers=staff_auth)
         assert r.status_code == 200
         body = r.json()
         assert body["success"] is True

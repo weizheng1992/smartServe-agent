@@ -171,6 +171,8 @@ class ApprovalGatekeeper:
                     return {
                         "id": str(row.id),
                         "threadId": row.thread_id,
+                        # 对象级租户校验依赖(网关商户面 403 判定,夜审 A4)
+                        "businessId": row.business_id,
                         "actionType": row.action_type,
                         "actionPayload": payload,
                         "status": row.status,

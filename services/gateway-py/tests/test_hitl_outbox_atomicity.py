@@ -15,19 +15,20 @@ import sqlalchemy as sa
 
 from .conftest import _TS, create_thread
 
-pytestmark = pytest.mark.usefixtures("seeded")
+pytestmark = pytest.mark.usefixtures("seeded", "staff_auth")
 
 
 async def _insert_waiting_ticket(approval_id: str) -> str:
     from engine_py.db import get_session
 
+    # A4 收口后商户面按员工真租户做对象级校验:工单须落在员工租户(aurora)名下
     tid = f"hitl_atomic_thread_{_TS}"
-    await create_thread(tid, "u_hitl_atomic", "nike")
+    await create_thread(tid, "u_hitl_atomic", "aurora")
     async with get_session() as session:
         await session.execute(
             sa.text(
                 "INSERT INTO pending_approvals (id, thread_id, business_id, status, action_type, reason, "
-                "action_payload, deadline) VALUES (CAST(:id AS uuid), :tid, 'nike', 'waiting', 'processRefund', "
+                "action_payload, deadline) VALUES (CAST(:id AS uuid), :tid, 'aurora', 'waiting', 'processRefund', "
                 "'发件箱原子性工单', CAST('{}' AS jsonb), NOW() + INTERVAL '24 hours') "
                 "ON CONFLICT (id) DO NOTHING"
             ).bindparams(id=approval_id, tid=tid)
@@ -63,7 +64,7 @@ async def _outbox_count(approval_id: str) -> int:
 
 
 class TestOutboxAtomicity:
-    async def test_event_write_failure_rolls_back_status_change(self, client, monkeypatch):
+    async def test_event_write_failure_rolls_back_status_change(self, client, staff_auth, monkeypatch):
         aid = str(uuid.uuid4())
         await _insert_waiting_ticket(aid)
 
@@ -78,6 +79,7 @@ class TestOutboxAtomicity:
         res = await client.post(
             "/api/admin/approvals",
             json={"approvalId": aid, "action": "approve", "actor": "merchant_operator"},
+            headers=staff_auth,
         )
         assert res.status_code == 500, res.text
         assert res.json().get("success") is not True
@@ -85,7 +87,7 @@ class TestOutboxAtomicity:
         assert await _ticket_status(aid) == "waiting", "事件写入失败时工单状态必须回滚为 waiting"
         assert await _outbox_count(aid) == 0
 
-    async def test_happy_path_writes_status_and_event_together(self, client):
+    async def test_happy_path_writes_status_and_event_together(self, client, staff_auth):
         """对照组:正常裁决两写同现(与 test_approval_lifecycle_gateway 呼应)。"""
         aid = str(uuid.uuid4())
         await _insert_waiting_ticket(aid)
@@ -93,6 +95,7 @@ class TestOutboxAtomicity:
         res = await client.post(
             "/api/admin/approvals",
             json={"approvalId": aid, "action": "approve", "actor": "merchant_operator"},
+            headers=staff_auth,
         )
         assert res.status_code == 200, res.text
 

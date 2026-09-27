@@ -126,6 +126,9 @@ export default function MerchantAdminPage() {
   const [activeThreadMessages, setActiveThreadMessages] = useState<MessageItem[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  // 商户管理面统一员工鉴权(夜审 A4)后,本内嵌工作台(无员工登录身份源)
+  // 的 /api/admin/* 一律 401 —— 诚实呈现引导,严禁静默空面板假装正常
+  const [needsStaffAuth, setNeedsStaffAuth] = useState(false);
 
   // Filters & Searches
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>('ALL');
@@ -186,6 +189,10 @@ export default function MerchantAdminPage() {
         fetch('/api/admin/approvals?tenantId=aurora').catch(() => null),
         fetch('/api/admin/conversations?tenantId=aurora').catch(() => null),
       ]);
+
+      if (orderResp?.status === 401) {
+        setNeedsStaffAuth(true);
+      }
 
       if (orderResp?.ok) {
         const data = await orderResp.json();
@@ -460,6 +467,24 @@ export default function MerchantAdminPage() {
     }
     return true;
   });
+
+  if (needsStaffAuth) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center font-sans p-6">
+        <div className="bg-white rounded-lg shadow-md border border-slate-200 max-w-md p-8 text-center">
+          <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-2xl font-bold mx-auto mb-4">
+            !
+          </div>
+          <h1 className="text-lg font-semibold text-slate-900 mb-2">商户管理面已启用员工鉴权</h1>
+          <p className="text-sm text-slate-600 leading-6">
+            订单 / 审批 / 会话等管理接口现要求商户员工登录(Bearer JWT)。本内嵌工作台尚未接入员工登录,
+            请使用独立商户后台(<code className="bg-slate-100 rounded px-1">bun run dev:merchant-admin</code>
+            ,端口 3006)完成同类操作。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">

@@ -128,6 +128,36 @@ async def seeded():
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def staff_auth():
+    """商户管理面身份闸(A4 收口)测试基建:aurora 种子员工直签 JWT。
+
+    ensure_defaults 幂等种 aurora 菜单/角色/员工(身份唯一来源 staff_members);
+    另种 aurora 租户行 —— 会话/审批族路由过身份闸后还有 check_tenant_registered
+    (未注册租户 403),dev 环境 aurora 是注册租户(merchant-admin 硬编码 x-tenant-id)。
+    直签而非走 /api/auth/login —— 本 fixture 只关心「在职员工」这一身份事实,
+    密码链路归 auth 契约测试。"""
+    import uuid as _uuid
+
+    from engine_py.analytics import rbac
+    from engine_py.db import get_session
+    from sqlalchemy import text
+
+    from gateway_py.routers.auth import issue_token
+
+    await rbac.ensure_defaults("aurora")
+    async with get_session() as session:
+        await session.execute(
+            text(
+                "INSERT INTO tenants (id, business_id, name, plan_tier, status) "
+                "VALUES (CAST(:id AS uuid), 'aurora', 'Aurora 极光(测试种子)', 'free', 'active') "
+                "ON CONFLICT (business_id) DO NOTHING"
+            ).bindparams(id=str(_uuid.uuid4()))
+        )
+        await session.commit()
+    return {"Authorization": f"Bearer {issue_token('u_staff_auth', 'test@example.com')}"}
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def client(seeded):
     """ASGI 直连 HTTP 客户端(等价 TS Test.createTestingModule + supertest)。"""
     from gateway_py.main import app as asgi_app

@@ -307,16 +307,29 @@ class TestMerchantTenantGate:
         assert res.status_code == 200
         assert res.json()["success"] is True
 
-    async def test_admin_conversations_rejects_unregistered_tenant(self, client, contract_fixtures):
-        res = await client.get("/api/admin/conversations", params={"tenantId": f"ghost_{_TS}"})
+    async def test_admin_conversations_rejects_cross_tenant(self, client, contract_fixtures, staff_auth):
+        # A4 收口(2026-09-26 夜审):员工面租户边界 —— 参数租户 ≠ 员工真租户
+        # 一律 403,幽灵租户同罪;此前该路由匿名可读任意租户会话
+        res = await client.get(
+            "/api/admin/conversations", params={"tenantId": f"ghost_{_TS}"}, headers=staff_auth
+        )
         assert res.status_code == 403
-        assert res.json()["success"] is False
+        # 身份/租户闸走 HTTPException 形(detail),业务错才走 success 形
+        assert "租户" in res.json()["detail"]
 
-    async def test_admin_conversations_all_aggregate_view_passes(self, client, contract_fixtures):
-        # "all" 为聚合视图参数,非单租户扮演,不受门禁拦截
-        res = await client.get("/api/admin/conversations", params={"tenantId": "all"})
-        assert res.status_code == 200
-        assert res.json()["success"] is True
+    async def test_admin_conversations_rejects_anonymous(self, client, contract_fixtures):
+        # A4 收口:无凭证 401(此前裸奔)
+        res = await client.get("/api/admin/conversations", params={"tenantId": "aurora"})
+        assert res.status_code == 401
+
+    async def test_admin_conversations_all_aggregate_rejected_for_staff(self, client, contract_fixtures, staff_auth):
+        # A4 收口:「all」跨租户聚合是匿名时代遗产,员工可见面不得越过其租户行
+        # (不变量 #1); aurora 员工查自己租户仍 200
+        res_all = await client.get("/api/admin/conversations", params={"tenantId": "all"}, headers=staff_auth)
+        assert res_all.status_code == 403
+        res_own = await client.get("/api/admin/conversations", params={"tenantId": "aurora"}, headers=staff_auth)
+        assert res_own.status_code == 200
+        assert res_own.json()["success"] is True
 
 
 class TestStoreChatMultimodal:
@@ -1782,8 +1795,19 @@ class TestMerchantAdminApprovalsActor:
     async def test_merchant_resolve_defaults_to_merchant_operator(self, client, contract_fixtures):
         import uuid as _uuid
 
-        from engine_py.db import get_session
+        from engine_py.db import StaffMember, get_session
         from sqlalchemy import text
+
+        from gateway_py.routers.auth import issue_token
+
+        # A4 收口:商户面需在职员工身份,且审批单须归属员工真租户(对象级校验)
+        nike_email = f"nike-actor-{_TS}@test"
+        async with get_session() as session:
+            session.add(StaffMember(
+                id=f"staff_nike_actor_{_TS}", business_id="nike", email=nike_email,
+                display_name="Nike 运营", role="admin", status="enabled", password_hash="x",
+            ))
+            await session.commit()
 
         aid = str(_uuid.uuid4())
         async with get_session() as session:
@@ -1797,10 +1821,11 @@ class TestMerchantAdminApprovalsActor:
             )
             await session.commit()
 
-        res = await client.post("/api/admin/approvals", json={"approvalId": aid, "action": "approve"})
+        headers = {"Authorization": f"Bearer {issue_token('u_nike_actor', nike_email)}"}
+        res = await client.post("/api/admin/approvals", json={"approvalId": aid, "action": "approve"}, headers=headers)
         assert res.status_code == 200
 
-        listing = await client.get("/api/admin/approvals", params={"tenantId": "nike"})
+        listing = await client.get("/api/admin/approvals", params={"tenantId": "nike"}, headers=headers)
         row = next(a for a in listing.json()["approvals"] if a["id"] == aid)
         assert row["actionPayload"]["resolvedBy"] == "merchant_operator"
         assert row["actionPayload"]["resolvedByRole"] == "merchant_operator"
