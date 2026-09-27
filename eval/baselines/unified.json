@@ -1,7 +1,7 @@
 {
   "suite": "unified",
-  "pinnedAt": "2026-09-10T02:31:27.555Z",
-  "gitSha": "06273ac684b3f410477c080b3232f7c57293dc60",
+  "pinnedAt": "2026-09-27T23:25:03.830Z",
+  "gitSha": "5b9d010c495ac68a659299e8e29c12c8e95cad4d",
   "config": {
     "path": "eval/promptfooconfig.yaml",
     "sha256": "fbc30876fcf817d8e65f6bbc1376424463e33560e8931419448c705cb56d5066"
@@ -12,13 +12,13 @@
     "pass": 56,
     "fail": 0,
     "errors": 0,
-    "meanScore": 1,
+    "meanScore": 0.9982142857142857,
     "scorers": {
       "unknown": {
         "count": 53,
         "pass": 53,
         "fail": 0,
-        "meanScore": 1
+        "meanScore": 0.9981132075471698
       },
       "metric_disambiguation.py:get_assert": {
         "count": 5,
@@ -157,7 +157,7 @@
     {
       "description": "最终回复质量评测 - 双重意图复杂场景综合答复质量",
       "success": true,
-      "score": 1
+      "score": 0.95
     },
     {
       "description": "意图分类 - 拒签退货后的第二个退货申请意图识别(真跑钉靶:上下文歧义消解后单完形 order_return)",
@@ -277,7 +277,7 @@
     {
       "description": "多模态视觉评测 - 破损评级与富交互卡片回复质量",
       "success": true,
-      "score": 1
+      "score": 0.95
     },
     {
       "description": "指标语义消歧与Text-to-SQL - 模糊综合提问 (卖得最好/多维冲突组消歧)",

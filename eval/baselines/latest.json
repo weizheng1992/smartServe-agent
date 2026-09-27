@@ -1,19 +1,19 @@
 {
-  "pinnedAt": "2026-09-10T02:31:27.555Z",
-  "gitSha": "06273ac684b3f410477c080b3232f7c57293dc60",
+  "pinnedAt": "2026-09-27T23:25:03.830Z",
+  "gitSha": "5b9d010c495ac68a659299e8e29c12c8e95cad4d",
   "suites": {
     "unified": {
       "total": 56,
       "pass": 56,
       "fail": 0,
       "errors": 0,
-      "meanScore": 1,
+      "meanScore": 0.9982142857142857,
       "scorers": {
         "unknown": {
           "count": 53,
           "pass": 53,
           "fail": 0,
-          "meanScore": 1
+          "meanScore": 0.9981132075471698
         },
         "metric_disambiguation.py:get_assert": {
           "count": 5,
