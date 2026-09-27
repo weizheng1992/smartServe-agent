@@ -303,3 +303,20 @@ def test_行锁被他者占用_SKIP_LOCKED跳过且不阻塞(clean_table):
     assert row_locked.status == "pending"  # 被锁行未被触碰
     assert row_locked.retry_count == 0
     assert row_free.status == "completed"
+
+
+def test_scan_exception_is_swallowed_with_zero_summary(monkeypatch):
+    """扫描异常(如 DB 抖动)不得向上传播 —— worker 是 scheduler 周期任务,
+    抛错会炸调度循环;吞错后回零计数 summary,下一轮扫描照常重试
+    (2026-09-27 夜审 T4:吞错行为此前无测试看守)。"""
+
+    import engine_py.approvals.outbox_worker as worker_mod
+
+    def _broken_session():
+        raise RuntimeError("pg 重启中,连接被拒")
+
+    monkeypatch.setattr(worker_mod, "get_session", _broken_session)
+
+    summary = asyncio.run(worker_mod.process_pending_events())
+
+    assert summary == {"processedCount": 0, "dispatchedCount": 0, "failedCount": 0}

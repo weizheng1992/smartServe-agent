@@ -254,3 +254,80 @@ def test_ensure_seed_data_cold_start_skips_without_knowledge_files(pg_factory, m
         assert total == 0, "冷启动降级不得写入内联 SEED_DOCS 行"
 
     asyncio.run(_scenario())
+
+
+# ---------------------------------------------------------------------------
+# 4. 检索参数分支(2026-09-27 夜审 T3):'all' 上帝视角 / category 收窄 / min_score 闸
+# ---------------------------------------------------------------------------
+def test_global_god_view_all_and_none_cross_tenant(pg_factory, monkeypatch):
+    """'all'/None = 跨租户上帝视角(SaaS 管理台);不得收敛回单租户。
+    2026-09-13 修复(网关曾把 all 硬编码成 ecommerce)在此钉住。"""
+
+    async def _scenario() -> None:
+        from engine_py.rag import contextual_rag as cr
+
+        async with pg_factory.begin() as conn:
+            await conn.execute(text("DELETE FROM rag_documents"))
+        await _run_seed_twice(pg_factory, monkeypatch)
+
+        for tenant in ("all", " ALL ", None, ""):
+            results = await cr.ContextualRAG(tenant).search_relevant_docs(
+                "退换货政策尺码门店营业", limit=10, precomputed_embedding=[1.0, 0.0]
+            )
+            biz = {r["businessId"] for r in results}
+            assert len(biz) >= 2, f"tenant={tenant!r} 应跨租户召回,实得 {biz}"
+
+    asyncio.run(_scenario())
+
+
+def test_category_filter_narrows_to_matching_chunks(pg_factory, monkeypatch):
+    """category 过滤:ecommerce 同时持有 product_knowledge 与 operation_guide
+    两类切片,指定 category 后结果只落在该类内。"""
+
+    async def _scenario() -> None:
+        from engine_py.rag import contextual_rag as cr
+
+        async with pg_factory.begin() as conn:
+            await conn.execute(text("DELETE FROM rag_documents"))
+        await _run_seed_twice(pg_factory, monkeypatch)
+
+        rag = cr.ContextualRAG("ecommerce")
+        unfiltered = await rag.search_relevant_docs(
+            "退换货政策 SOP 流程", limit=10, precomputed_embedding=[1.0, 0.0]
+        )
+        cats = {r["category"] for r in unfiltered}
+        assert {"product_knowledge", "operation_guide"} <= cats, f"seed 应含两类切片,实得 {cats}"
+
+        guides = await rag.search_relevant_docs(
+            "退换货政策 SOP 流程", limit=10, precomputed_embedding=[1.0, 0.0],
+            category="operation_guide",
+        )
+        assert guides, "指定 operation_guide 应仍有召回"
+        assert {r["category"] for r in guides} == {"operation_guide"}
+
+    asyncio.run(_scenario())
+
+
+def test_min_score_gate_honest_empty(pg_factory, monkeypatch):
+    """min_score 闸:过线结果 similarity ≥ min_score;阈值抬高到不可能即诚实空。"""
+
+    async def _scenario() -> None:
+        from engine_py.rag import contextual_rag as cr
+
+        async with pg_factory.begin() as conn:
+            await conn.execute(text("DELETE FROM rag_documents"))
+        await _run_seed_twice(pg_factory, monkeypatch)
+
+        rag = cr.ContextualRAG("aurora")
+        hits = await rag.search_relevant_docs(
+            "极光潮品退换货政策", limit=3, precomputed_embedding=[1.0, 0.0]
+        )
+        assert hits
+        assert all(r["similarity"] >= 0.4 for r in hits), "默认 min_score=0.4 闸应成立"
+
+        strict = await rag.search_relevant_docs(
+            "极光潮品退换货政策", limit=3, precomputed_embedding=[1.0, 0.0], min_score=0.999999
+        )
+        assert strict == [], "阈值抬高必须诚实空,不得回落兜底切片"
+
+    asyncio.run(_scenario())

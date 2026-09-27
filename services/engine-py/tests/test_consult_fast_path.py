@@ -150,6 +150,22 @@ class TestRunConsultDirectAnswer:
         self._patch(monkeypatch, answer_exc=RuntimeError("bigmodel 5xx"))
         assert asyncio.run(run_consult_direct_answer(_consult_state(), [])) is None
 
+    def test_cache_writeback_failure_does_not_block_answer(self, monkeypatch):
+        """缓存回填抛错 → 直答结果照常返回(回填是尽力而为,不阻断主路径)。"""
+        calls = self._patch(monkeypatch)
+
+        def _broken_cache_add(business_id, query, reply, vector):
+            raise RuntimeError("redis flush 期间回填失败")
+
+        monkeypatch.setattr(cfp, "add_query_to_semantic_cache", _broken_cache_add)
+        hit = asyncio.run(run_consult_direct_answer(_consult_state(), []))
+        assert hit is not None, "回填失败不得吞掉已生成的直答"
+        answer, intents, confidence = hit
+        assert "7 天无理由" in answer
+        assert intents[0]["intent"] == "consult"
+        assert confidence == 0.95
+        assert "answer_args" in calls  # 直答确实发生过(非缓存路径)
+
     def test_circuit_breaker_propagates(self, monkeypatch):
         self._patch(
             monkeypatch,
