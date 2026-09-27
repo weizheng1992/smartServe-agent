@@ -42,6 +42,12 @@ paths: ["apps/merchant-admin/**/*"]
 
 - 钉看板 pin 存 localStorage(`.board` 上限 20):`{id, question, route, pinnedAt}`;每 60s(`REFRESH_MS`)对 pin 的问题重放 `api.ask` 刷新。重放走完整 ask 管线,`ResultCard` 渲染与悬浮面板同形。
 
+### 1.6 优惠活动页 (promotions,2026-09-27 运营闭环)
+
+- **生效态由服务端派生**:列表行的 `effectiveStatus`(disabled > ended > scheduled > running,与结算引擎窗口判定同口径)直显四态,前端严禁自行按 start/end 算;手工启停按钮仍走 `status`(active/disabled)开关,两者解耦。
+- **编辑 = 展开行一次改齐**(名称/门槛/面额/时间窗/范围/发放上限),PATCH 按「携带即更新」发全字段 —— `endAt: null` 置长期、`totalQuota: null` 清上限、`startAt` 传空保持原值(引擎 `update_promotion` 语义:区分「未传」与「传 null」);门槛仅满减携带,不把表单残留值写进库。
+- 券型行显 `已领 X/上限 Y`(发放量控,服务端 claim 闸拒超发);发券面板头部显剩余可发;行内小字效果注记 `核销 N 单 · 让利 ¥X` 来自 `redemptionCount`/`discountTotal` 聚合。
+
 ---
 
 ## 2. 编码与维护准则

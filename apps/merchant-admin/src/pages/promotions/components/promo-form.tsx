@@ -9,9 +9,27 @@ interface Props {
   onCreated: () => void;
 }
 
-const EMPTY = { name: '', promoType: 'full_reduction', threshold: '', value: '', scopeType: 'all', scopeValue: '' };
+/** datetime-local 本地当前时刻(分钟精度)。 */
+function localNow(): string {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
 
-/** 新建活动:满减/折扣可选适用范围(全部/指定商品);券型无范围(引擎语义)。 */
+const EMPTY = {
+  name: '',
+  promoType: 'full_reduction',
+  threshold: '',
+  value: '',
+  scopeType: 'all',
+  scopeValue: '',
+  startAt: localNow(),
+  endAt: '',
+  totalQuota: '',
+};
+
+/** 新建活动:满减/折扣可选适用范围(全部/指定商品);券型无范围(引擎语义)、
+ * 可设发放上限;时间窗缺省从现在开始、止空 = 长期。 */
 export function PromoCreateForm({ msg, onMsg, onCreated }: Props) {
   const [form, setForm] = useState(EMPTY);
   const [spus, setSpus] = useState<Spu[]>([]);
@@ -28,10 +46,13 @@ export function PromoCreateForm({ msg, onMsg, onCreated }: Props) {
       value: Number(form.value),
       scopeType: form.scopeType,
       scopeValue: form.scopeType === 'spu' ? form.scopeValue : undefined,
+      startAt: form.startAt || undefined,
+      endAt: form.endAt || undefined,
+      totalQuota: form.promoType === 'coupon' && form.totalQuota ? Number(form.totalQuota) : undefined,
     });
     onMsg(b.success ? `✓ 已创建「${b.name}」` : `失败:${b.message}`);
     if (b.success) {
-      setForm(EMPTY);
+      setForm({ ...EMPTY, startAt: localNow() });
       onCreated();
     }
   }
@@ -104,8 +125,33 @@ export function PromoCreateForm({ msg, onMsg, onCreated }: Props) {
         </Button>
         {msg && <span className="text-[11px] text-zinc-400">{msg}</span>}
       </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-zinc-400">有效期</span>
+        <input
+          type="datetime-local"
+          className="rounded-lg border border-zinc-300 px-3 py-2"
+          value={form.startAt}
+          onChange={(e) => setForm({ ...form, startAt: e.target.value })}
+        />
+        <span className="text-zinc-400">至</span>
+        <input
+          type="datetime-local"
+          className="rounded-lg border border-zinc-300 px-3 py-2"
+          value={form.endAt}
+          onChange={(e) => setForm({ ...form, endAt: e.target.value })}
+          placeholder="留空 = 长期"
+        />
+        {form.promoType === 'coupon' && (
+          <input
+            className="w-32 rounded-lg border border-zinc-300 px-3 py-2"
+            placeholder="发放上限(空=不限)"
+            value={form.totalQuota}
+            onChange={(e) => setForm({ ...form, totalQuota: e.target.value })}
+          />
+        )}
+      </div>
       <div className="mt-2 text-[11px] text-zinc-400">
-        注:指定商品范围当前仅满减/折扣生效,优惠按整单金额计算;券型活动全员可领可用(引擎口径);下单结算自动应用属资金口径(20-D3)。
+        注:指定商品范围当前仅满减/折扣生效,优惠按整单金额计算;券型活动全员可领可用(引擎口径)、发放上限控制总张数;时间窗外的活动不进结算(未开始/已结束);下单结算自动应用属资金口径(20-D3)。
       </div>
     </div>
   );

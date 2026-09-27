@@ -117,6 +117,18 @@ export interface Promotion {
   scopeType: string;
   scopeValue: string | null;
   status: string;
+  startAt: string | null;
+  endAt: string | null;
+  /** 发放上限(仅券型;null = 不限) */
+  totalQuota: number | null;
+  /** 已发放张数(claimed+used 都占额度) */
+  claimedCount: number;
+  usedCount: number;
+  /** 核销单数 / 让利总额(活动维度效果,行内注记用) */
+  redemptionCount: number;
+  discountTotal: number;
+  /** 服务端派生生效态:disabled > ended > scheduled > running(前端不自算) */
+  effectiveStatus: 'disabled' | 'ended' | 'scheduled' | 'running';
 }
 
 export interface PromoEffect {
@@ -455,6 +467,11 @@ export const api = {
       value: number;
       scopeType?: string;
       scopeValue?: string;
+      /** ISO / datetime-local;起缺省服务端 NOW,止空 = 长期 */
+      startAt?: string;
+      endAt?: string;
+      /** 发放上限,仅券型消费;非券型服务端忽略 */
+      totalQuota?: number;
     }) => fetchJson('/api/admin/analytics/promotions', { method: 'POST', body: JSON.stringify(p) }),
     /** 商家向指定客户发券(仅券型/在售/同人同活动一次,服务端护栏)。 */
     grant: async (id: string, customerId: string) =>
@@ -462,8 +479,21 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ customerId }),
       }),
-    update: async (id: string, patch: { name: string; value: number }) =>
-      fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    /** 编辑(PATCH):携带的 key 才参与更新(服务端区分「未传」与「传 null」)。
+     * endAt: null = 置长期;totalQuota: null = 清除上限;startAt 传空保持原值。 */
+    update: async (
+      id: string,
+      patch: Partial<{
+        name: string;
+        value: number;
+        threshold: number | null;
+        scopeType: string;
+        scopeValue: string | null;
+        startAt: string;
+        endAt: string | null;
+        totalQuota: number | null;
+      }>,
+    ) => fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     setStatus: async (id: string, status: string) =>
       fetchJson(`/api/admin/analytics/promotions/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
     remove: async (id: string) => fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'DELETE' }),

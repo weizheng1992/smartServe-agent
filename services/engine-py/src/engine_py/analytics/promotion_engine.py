@@ -71,12 +71,16 @@ def best_discount_for_amount(
 
 
 async def fetch_active_promos(conn) -> list[dict]:
+    """候选活动集(status active + 窗口内)。SELECT 必须带 start_at/end_at ——
+    2026-09-27 运营闭环修正:此前 SELECT 漏 start_at,下游 _in_window 恒读到
+    None,未来开始的活动会立即进结算;WHERE 同步补 start 闸,双层同口径。"""
     rows = (
         await conn.execute(
             text(
                 "SELECT id::text, name, promo_type, threshold_amount, discount_value, "
-                "scope_type, scope_value FROM promotions "
-                "WHERE status = 'active' AND (end_at IS NULL OR end_at > NOW())"
+                "scope_type, scope_value, start_at, end_at FROM promotions "
+                "WHERE status = 'active' AND (start_at IS NULL OR start_at <= NOW()) "
+                "AND (end_at IS NULL OR end_at > NOW())"
             )
         )
     ).mappings().all()

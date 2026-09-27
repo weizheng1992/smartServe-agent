@@ -26,7 +26,30 @@ d('GrantPanel(真实库)', () => {
     ).json();
     const real: Array<{ customer_id: string; name: string }> = listed.customers || [];
 
-    render(<GrantPanel promoName="集成测试(不发放)" promoId="none" onCancel={() => {}} onDone={() => {}} />);
+    render(
+      <GrantPanel
+        promo={{
+          id: 'none',
+          name: '集成测试(不发放)',
+          promoType: 'coupon',
+          threshold: null,
+          value: 10,
+          scopeType: 'all',
+          scopeValue: null,
+          status: 'active',
+          startAt: null,
+          endAt: null,
+          totalQuota: null,
+          claimedCount: 0,
+          usedCount: 0,
+          redemptionCount: 0,
+          discountTotal: 0,
+          effectiveStatus: 'running',
+        }}
+        onCancel={() => {}}
+        onDone={() => {}}
+      />,
+    );
 
     if (real.length === 0) {
       await waitFor(() => expect(screen.getByText('暂无匹配客户')).toBeInTheDocument());

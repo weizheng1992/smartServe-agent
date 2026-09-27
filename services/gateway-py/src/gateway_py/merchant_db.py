@@ -136,6 +136,11 @@ CREATE TABLE IF NOT EXISTS promotions (
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- 券发放总量上限(2026-09-27 运营闭环):NULL = 不限,仅券型(coupon)消费;
+-- 非券型创建时一律置 NULL。量控闸在应用层 claim_coupon(COUNT 比对),
+-- 并发超发窗口与既有领券查重同级(最终防线仍是 uq_user_promo 每人一张)。
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS total_quota INT;
+
 CREATE TABLE IF NOT EXISTS promotion_redemptions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   promotion_id UUID NOT NULL,

@@ -797,26 +797,26 @@ async def spus_delete(spu_id: str, request: Request):
 
 @router.patch("/api/admin/analytics/promotions/{promotion_id}")
 async def promotions_update(promotion_id: str, request: Request):
+    """编辑活动(2026-09-27 运营闭环):字段集扩到时间窗/范围/发放上限,SQL
+    下沉 engine `promotions.update_promotion` 单一实现(窗口校验、quota 归一、
+    审计同 create 一样收在引擎侧),路由只留 perm 闸、字段白名单与错误映射。
+    白名单兜底是刻意的:body 里的未知键(如 status)不进 patch,启停仍走
+    专用 status 路由。"""
     ctx = await _ctx(request)
     if "promo:create" not in ctx["perms"]:  # 编辑随建/改活动权限点(0013 动态化)
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     body = await request.json()
     from engine_py.analytics import promotions as P
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
-    from sqlalchemy import text as _t
 
-    sets, params = [], {"id": promotion_id}
-    if "name" in body:
-        sets.append("name = :name"); params["name"] = str(body["name"])
-    if "value" in body:
-        sets.append("discount_value = :v"); params["v"] = float(body["value"])
-    if "threshold" in body:
-        sets.append("threshold_amount = :th"); params["th"] = body["threshold"]
-    async with _merchant_writer_engine().begin() as conn:
-        if not sets:
-            return JSONResponse(status_code=400, content={"success": False, "message": "无可更新字段"})
-        await conn.execute(_t(f"UPDATE promotions SET {', '.join(sets)} WHERE id = CAST(:id AS uuid)").bindparams(**params))
-    await P._audit("promo_update", ctx["staff"], {"id": promotion_id, **body})
+    allowed = ("name", "value", "threshold", "scopeType", "scopeValue", "startAt", "endAt", "totalQuota")
+    patch = {k: body[k] for k in allowed if k in body}
+    if not patch:
+        return JSONResponse(status_code=400, content={"success": False, "message": "无可更新字段"})
+    result = await P.update_promotion(promotion_id, patch, ctx["staff"])
+    if "error" in result:
+        not_found = result["error"] == "活动不存在"
+        return JSONResponse(status_code=404 if not_found else 400,
+                            content={"success": False, "message": result["error"]})
     return {"success": True, "id": promotion_id}
 
 

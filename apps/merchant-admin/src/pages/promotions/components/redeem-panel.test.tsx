@@ -19,6 +19,14 @@ const promo: Promotion = {
   scopeType: 'all',
   scopeValue: null,
   status: 'active',
+  startAt: null,
+  endAt: null,
+  totalQuota: null,
+  claimedCount: 0,
+  usedCount: 0,
+  redemptionCount: 0,
+  discountTotal: 0,
+  effectiveStatus: 'running',
 };
 
 beforeAll(async () => {
