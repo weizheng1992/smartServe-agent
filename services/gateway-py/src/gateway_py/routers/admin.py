@@ -525,9 +525,20 @@ async def list_approvals(
     businessId: str | None = Query(None),
     status: str | None = Query(None),
     actionType: str | None = Query(None),
+    authorization: str | None = Header(None),
 ):
     ctx = get_tenant_context()
     effective_tenant = tenantId or businessId or (ctx or {}).get("tenantId")
+    # 13 GET 收口(最小面):持员工 JWT 时列表按本租户收窄,显式租户参数与
+    # 本租户不一致 403(与 POST 员工路径对象级同口径)。裸匿名维持历史放行
+    # —— apps/web 顾客审批卡轮询与 admin 大盘仍依赖匿名 GET,硬切 401 归
+    # 票 14(apps/web 接线)同批收紧;顾客 JWT/属主过滤面届时一并落。
+    staff = await _optional_staff(authorization)
+    if staff is not None:
+        staff_tenant = staff["staff"].business_id
+        if effective_tenant and str(effective_tenant).lower() != str(staff_tenant or "").lower():
+            raise HTTPException(status_code=403, detail="租户不一致,拒绝跨租户审批列表")
+        effective_tenant = staff_tenant
     try:
         approvals = await ApprovalGatekeeper.list_pending_approvals(
             {"tenantId": effective_tenant, "status": status, "actionType": actionType}

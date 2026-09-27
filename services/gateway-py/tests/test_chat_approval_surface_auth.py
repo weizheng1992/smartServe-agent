@@ -23,7 +23,7 @@ import uuid
 import pytest
 import pytest_asyncio
 
-from .conftest import _TS, create_thread
+from .conftest import _TS, CONTRACT_APPROVAL, create_thread
 
 pytestmark = pytest.mark.usefixtures("seeded")
 
@@ -159,6 +159,47 @@ class TestStaffCrossTenantAndUnknownAction:
         )
         assert res.status_code == 400
         assert "未知审批动作" in res.json()["detail"]
+
+
+class TestGetListStaffFace:
+    """GET /api/chat/approvals 收口(票 13,2026-09-28):员工面即刻生效 ——
+    持员工 JWT 时列表按 staff.business_id 收窄,显式租户参数不一致 403
+    (与 POST 员工路径对象级同口径)。裸匿名放行是**过渡语义**:apps/web
+    顾客审批卡轮询与 admin 大盘仍依赖匿名 GET,硬切 401 归票 14(apps/web
+    接线)同批收紧;顾客 JWT/属主过滤面届时一并落。"""
+
+    async def test_staff_list_narrows_to_own_tenant(self, client, nike_operator):
+        aid = str(uuid.uuid4())
+        await _insert_waiting_ticket(aid, tenant="nike")
+        res = await client.get(
+            "/api/chat/approvals",
+            params={"tenantId": "nike", "status": "waiting"},
+            headers={"Authorization": f"Bearer {nike_operator['token']}"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["tenantId"] == "nike"
+        assert body["total"] >= 1
+        assert all(item["businessId"] == "nike" for item in body["approvals"])
+
+    async def test_staff_cross_tenant_query_403(self, client, nike_operator):
+        res = await client.get(
+            "/api/chat/approvals",
+            params={"tenantId": "adidas", "status": "waiting"},
+            headers={"Authorization": f"Bearer {nike_operator['token']}"},
+        )
+        assert res.status_code == 403
+        assert "租户不一致" in res.json()["detail"]
+
+    async def test_anonymous_get_still_allowed_transient(self, client, contract_fixtures):
+        """过渡语义钉死:裸匿名 GET 现阶段仍放行(apps/web 轮询依赖),
+        且契约夹具工单可见 —— 票 14 硬切 401 时本例翻转。"""
+        res = await client.get(
+            "/api/chat/approvals",
+            params={"tenantId": "nike", "status": "waiting"},
+        )
+        assert res.status_code == 200
+        assert CONTRACT_APPROVAL in [item["id"] for item in res.json()["approvals"]]
 
 
 class TestLiveDeskButtonPermSeed:
