@@ -326,8 +326,12 @@ async def _execute_single_step_core(
                     thread_id_for_notice = state.get("thread_id") or ""
                     if thread_id_for_notice and tool_name == "processRefund":
                         try:
+                            # business_id 必须关键字传参:第二位置参数是 max_turns,
+                            # 位置传参会把租户串塞进轮数、真实 business_id 落 None,
+                            # 租户钉死完全失效转入关键词嗅探。
                             await ShortMemory(
-                                str(thread_id_for_notice), str(state.get("business_id") or "ecommerce")
+                                str(thread_id_for_notice),
+                                business_id=str(state.get("business_id") or "ecommerce"),
                             ).add_message(
                                 "assistant",
                                 f"🛠️ 该订单退款金额(¥{auto_check['groundedAmount']})超过商户免签限额"
