@@ -4,6 +4,32 @@
 
 ---
 
+## [2.6.57] - 2026-09-28 (promptfoo 基线闭环:eval 欠账修复 + 取消语确定性否决 + 基线重钉)
+
+钉死基线 06273ac(2026-09-10)后的两处老化欠账一次闭环,基线重钉至全绿(0099aad/cda80e4/916bd03 Gen-3 一期提交同批入快照,回归面重新钉牢)。
+
+### 🔍 根因
+
+1. **eval 5 例确定性 ImportError**:f9e737a(data-agent 评审重构)删 engine 侧 `MetricSemanticResolver` 改 metrics.yaml 注册表,`eval/providers/agent_provider.py` + `eval/scorers/metric_disambiguation.py` 是唯一消费方未跟改 → unified 指标消歧 5 例全挂,`runPromptfooSuite` 遇败即 throw 连带 compare 全弃。
+2. **「不想要了」否决翻转 = hosted GLM 模型漂移**:直答 prompt 的 ROUTING VETO 曾是「不想要了」族唯一的动作形否决手段,模型漂移后对「这单我不想要了,退货的话是马上就能安排吗」不再返回 `__ROUTE_TO_ACTION__`,咨询直答(7 天无理由政策)关会话,eval consult-fastpath 用例自 9-23 起稳定 FAIL。**定性非代码回归**:绿锚点 d8e1586(9-23 作者自验全绿)带正确 .env 复跑 2/2 仍红且形态与 HEAD 逐字一致——bisect 前提(绿锚点仍绿)不成立,窗口内提交全部排除。诊断副产物:worktree 跑评测必须补 .env(gitignored)——缺失时 embedding/RAG 预取静默失败走 `consult_no_rag`,失败形态(`general_query 0.9, output:null`)与真翻转完全不同,4 次早期 worktree bisect 证据全作废。
+
+### 🐛 Fixes
+
+- **指标消歧预言机随 eval 重建(8dc013a)**:`eval/lib/metric_resolver.py` 按旧 `MetricSemanticResolver.resolve` 语义 1:1 移植(最长匹配词优先/泛指×无限定×冲突组>1 歧义判定/无命中 gmv 兜底),指标数据全部读 `metrics.yaml` 单一事实源;engine 面不回填死代码。先证 5 指标 old-vs-yaml 三字段全同,再修双消费面接线。
+- **取消语确定性否决闸(5b9d010)**:`consult_fast_path.py` 新增 `_CANCEL_INTENT_RE`(「不想要」族)单一事实源两处消费——`is_consult_query` 动作形否定闸补取消语(Step 1.4 不入快轨,省一次直答调用,落规则层 order_return 反问订单号)+ `run_consult_direct_answer` 入口零调用仲裁(兜 Step 3 分类器判 consult 的漏网形状,标记消费语义与 LLM 否决一致,不写语义缓存)。词条取「不想要」子串超集覆盖在册「不想要了」,不与 `REFUND_VERB_FAMILY` 重复手抄(词表契约钉死);裸「退货|退款|退钱」维持红线严禁收编,「退货政策」类咨询直答不受影响。直答 prompt 的 ROUTING VETO 保留兜词表外形状。`.claude/rules/agent-engine.md` §1.3 同步。
+
+### 🧪 Tests
+
+- consult 相关 5 册 122 passed:新增零 LLM 否决钉子(`test_cancel_intent_vetoed_deterministically_before_llm`,断言取消语在直答调用之前由代码闸改判)+ 闸门正例两形状;词表契约 `test_intent_vocab_home.py` 全绿。eval 单例实跑 `PASS | order_return / slot_extractor`。
+- 全量回归:unified 56/56(均分 0.9982)+ planner 8/8。多轮导购消歧例(活 LLM 真跑)单次偶发 FAIL,复跑 PASS 确认为波动非回归。
+
+### 📝 Notes
+
+- **基线重钉(4f92bed)**:钉于 5b9d010c,`unified 56/56 · planner 8/8` 全绿快照;bless「不想要了」= 落 order_return 动作管道的修复后行为,咨询直答、指标消歧与其余断言口径不变。活 LLM 真跑例有单次波动,`pin` 的遇败即抛挂了重跑即可,勿当回归。
+- **并行 session 共享 git index 混提交事故(已修复)**:基线提交时 `git add` 与 `commit` 之间并行会话写入共享 index,15 个他人文件被一并打包(4b49627);`reset --soft` + `restore --staged` 拆分后重提为纯基线提交。防犯姿势:并行 session 存续时用 `git commit -- <pathspec>` 只提交指定路径,或 commit 前 `git diff --cached --name-only` 核对。
+
+---
+
 ## [2.6.56] - 2026-09-27 (旅行搭配双族覆盖 + 合计预算诚实 + 缺席反问剥否定)
 
 同一商户实弹事故(11:32「搭配一套旅行装备和衣服,不超过2000」→ 零衣服三件露营装备且宣称「总价不超过2000元」实为 2527;追问「没有衣服呢」被当字面搜索词答「未找到符合『没有衣服呢』的商品」)。红环两连发 100% 复现,REPL 探针逐层钉死三机制。
