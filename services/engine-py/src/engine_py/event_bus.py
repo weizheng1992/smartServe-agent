@@ -20,6 +20,20 @@ from .config import settings
 STREAM_MAXLEN = 200
 STREAM_TTL_SECONDS = 600
 
+# 发布四步(INCR → XADD → 2×EXPIRE)打包为单次往返的 Lua 脚本。不能简单
+# pipeline:XADD fields 里的 seq 取自同脚本 INCR 的返回值(线格式冻结,消费端
+# 按 fields.seq 断点续传),纯 pipeline 在入队时拿不到该结果。每帧 4 次串行
+# RTT → 1 次;SSE 高频帧下显著省时。两 key 带 {jobId} 同 hash tag,cluster
+# 下也落同槽。
+_PUBLISH_LUA = """
+local seq = redis.call('INCR', KEYS[2])
+redis.call('XADD', KEYS[1], 'MAXLEN', '~', ARGV[1], '*', 'seq', tostring(seq),
+           'type', ARGV[2], 'data', ARGV[3])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+redis.call('EXPIRE', KEYS[2], ARGV[4])
+return seq
+"""
+
 _client: aioredis.Redis | None = None
 
 
@@ -45,20 +59,17 @@ async def publish_agent_event(job_id: str, event_type: str, data: Any) -> int | 
     """发布一条 job 级事件,返回分配的 seq;失败静默返回 None。"""
     client = await get_client()
     try:
-        seq = await client.incr(_seq_key(job_id))
-        await client.xadd(
+        seq = await client.eval(
+            _PUBLISH_LUA,
+            2,
             _stream_key(job_id),
-            {
-                "seq": str(seq),
-                "type": event_type,
-                "data": json.dumps(data if data is not None else None, ensure_ascii=False),
-            },
-            maxlen=STREAM_MAXLEN,
-            approximate=True,
+            _seq_key(job_id),
+            STREAM_MAXLEN,  # ARGV[1]: MAXLEN ~ 上限
+            event_type,  # ARGV[2]
+            json.dumps(data if data is not None else None, ensure_ascii=False),  # ARGV[3]
+            STREAM_TTL_SECONDS,  # ARGV[4]: 两 key TTL
         )
-        await client.expire(_stream_key(job_id), STREAM_TTL_SECONDS)
-        await client.expire(_seq_key(job_id), STREAM_TTL_SECONDS)
-        return seq
+        return int(seq)
     except Exception:
         return None
 
