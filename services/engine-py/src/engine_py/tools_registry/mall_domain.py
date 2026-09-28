@@ -43,6 +43,13 @@ class _CouponAlreadyUsedError(RuntimeError):
     回滚正确但用户不知道券的事)。"""
 
 
+class _CheckoutStockRaceError(RuntimeError):
+    """并发抢购致条件扣减 rowcount=0:必须以异常退出写事务令整单回滚。
+    严禁在 begin() 上下文内裸 return —— 无异常退出即 commit,已扣行的
+    库存被提交而订单永不落库(2026-09-28 夜审修复,注释曾宣称「整单不落」
+    与实际行为相反)。"""
+
+
 class MallDomainService:
     # 导购 wrapper 词表:剥掉无商品语义的导购措辞,剩余才是检索词元。与
     # slot_extractor SHOPPING_GUIDE 规则、ShoppingGuideSkill._FALLBACK_RE
@@ -1805,10 +1812,11 @@ class MallDomainService:
                         ).bindparams(qty=r["quantity"], code=r["sku_code"])
                     )
                     if not updated.rowcount:
-                        return {
-                            "success": False,
-                            "message": f"{r['spu_title']}（{r['sku_title'] or '默认规格'}）刚刚被抢购一空，库存不足，请稍后再试。",
-                        }
+                        # 异常退出触发整单回滚:裸 return 会令 begin() 正常提交,
+                        # 前面已扣的库存无法随单回滚(_CheckoutStockRaceError 注释)
+                        raise _CheckoutStockRaceError(
+                            f"{r['spu_title']}（{r['sku_title'] or '默认规格'}）刚刚被抢购一空，库存不足，请稍后再试。"
+                        )
                     total_amount += float(r["price"]) * r["quantity"]
                     line_summaries.append(
                         f"{r['spu_title']}（{r['sku_title'] or '默认规格'}）x{r['quantity']} ¥{r['price']}"
@@ -1896,6 +1904,9 @@ class MallDomainService:
                             img=r.get("image_url"), spec=spec_summary, cost=r.get("cost_price") or 0,
                         )
                     )
+        except _CheckoutStockRaceError as race_err:
+            print(f"[MallDomain] checkout rolled back, stock race: {race_err}")
+            return {"success": False, "message": str(race_err)}
         except _CouponAlreadyUsedError as coupon_err:
             print(f"[MallDomain] checkout rolled back, coupon already used: {coupon_err}")
             return {"success": False, "message": str(coupon_err)}

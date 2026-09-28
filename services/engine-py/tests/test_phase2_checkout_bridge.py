@@ -897,6 +897,55 @@ def test_checkout_concurrent_stock_loss_no_order(pg_factory):
     assert n_orders == 0 and stock == 0, "不落单且不得打出负库存"
 
 
+def test_checkout_multiline_race_rolls_back_deducted_lines(pg_factory):
+    """多行竞态回归(2026-09-28 夜审):首行扣减成功、次行被并发抢空 →
+    整单回滚,**已扣的首行库存必须随事务还原**。修复前扣减循环内裸
+    return 令 begin() 无异常提交——首行库存蒸发且无订单(单行场景测不出,
+    恰是 test_checkout_concurrent_stock_loss_no_order 的盲区)。"""
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    async def scenario():
+        engine, me, orig, embeds = await _setup(pg_factory)
+        try:
+            _seed_cart([
+                {"skuId": "SPU-P2-BAG-SKU-0", "title": "背包", "price": 829.0, "quantity": 2},
+                {"skuId": "SPU-P2-CJ-SKU-1", "title": "冲锋衣 XL", "price": 1349.0, "quantity": 1},
+            ])
+            real_resolve = MallDomainService._resolve_purchasable_sku
+
+            async def _racy_resolve(conn, **kw):
+                row = await real_resolve(conn, **kw)
+                if row and row["sku_code"] == "SPU-P2-CJ-SKU-1":
+                    # 次行 resolve 后、条件 UPDATE 前库存被并发单抢空
+                    await conn.execute(
+                        text("UPDATE merchant_skus SET stock = 0 WHERE sku_code = 'SPU-P2-CJ-SKU-1'")
+                    )
+                return row
+
+            MallDomainService._resolve_purchasable_sku = staticmethod(_racy_resolve)
+            try:
+                result = await MallDomainService.checkout_user_cart(
+                    {"userId": UID, "shippingAddress": "上海市浦东新区世纪大道100号"}
+                )
+            finally:
+                MallDomainService._resolve_purchasable_sku = real_resolve
+            async with me.connect() as conn:
+                n_orders = (await conn.execute(
+                    text("SELECT COUNT(*) FROM merchant_orders WHERE order_id <> :h"), {"h": HISTORY_ORDER_ID}
+                )).scalar()
+                bag_stock = (await conn.execute(
+                    text("SELECT stock FROM merchant_skus WHERE sku_code='SPU-P2-BAG-SKU-0'")
+                )).scalar()
+            return result, n_orders, bag_stock
+        finally:
+            await _teardown(engine, me, orig, embeds)
+
+    result, n_orders, bag_stock = asyncio.run(scenario())
+    assert result.get("success") is False and "库存不足" in (result.get("message") or "")
+    assert n_orders == 0, "整单不落"
+    assert bag_stock == 20, f"首行已扣库存必须随整单回滚还原(期望 20,实得 {bag_stock})"
+
+
 def test_bridge_excludes_refunded_orders(pg_factory):
     """已退款单的商品不得桥接(与排行/资金口径一致)。"""
     from engine_py.tools_registry.mall_domain import MallDomainService
