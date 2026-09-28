@@ -187,6 +187,10 @@ END $$;
 -- 随 ensure_merchant_tables 启动自愈补建。
 CREATE INDEX IF NOT EXISTS idx_merchant_orders_customer ON merchant_orders(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_merchant_orders_status ON merchant_orders(status);
+-- 单列时间索引(2026-09-28 夜审):复合 (customer_id, created_at) 服务不了无
+-- customer 等值的范围/排序 —— analytics 趋势族跨 reader 按时段扫全表、管理端
+-- 「最近订单」按 created_at DESC 取Top-N,此前均顺序扫描。
+CREATE INDEX IF NOT EXISTS idx_merchant_orders_created ON merchant_orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_merchant_order_items_order ON merchant_order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_merchant_order_items_spu ON merchant_order_items(spu_id);
 CREATE INDEX IF NOT EXISTS idx_merchant_skus_spu ON merchant_skus(spu_id);
