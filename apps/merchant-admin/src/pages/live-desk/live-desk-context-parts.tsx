@@ -36,11 +36,24 @@ export function ContextSection({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full cursor-pointer items-center justify-between py-2 text-left"
+        className="flex w-full cursor-pointer items-center justify-between rounded-lg py-2 text-left transition-colors hover:bg-zinc-50"
       >
         <span className="flex items-center gap-1.5 text-[12px] font-semibold text-zinc-700">
-          {open ? '▾' : '▸'} {title}
-          {badge && <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] text-zinc-500">{badge}</span>}
+          {/* biome-ignore lint/a11y/noSvgWithoutTitle: 装饰性折叠指示箭头,开合态由 aria-expanded 表达 */}
+          <svg
+            aria-hidden
+            viewBox="0 0 16 16"
+            className={`h-3 w-3 shrink-0 text-zinc-400 transition-transform ${open ? 'rotate-90' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {title}
+          {badge && (
+            <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] font-normal text-zinc-500">{badge}</span>
+          )}
         </span>
       </button>
       {open && <div className="pb-2.5">{children}</div>}
