@@ -16,6 +16,7 @@ from engine_py.tenant_config import get_tenant_config, invalidate_cache, update_
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, select, text
+from sqlalchemy.orm import defer
 
 from .. import conversation_repo
 from ..tenant_context import get_tenant_context
@@ -723,7 +724,15 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
 async def rag_documents(tenantId: str | None = Query(None), x_tenant_id: str | None = Header(None)):
     tenant_id = tenantId or x_tenant_id
     async with get_session() as session:
-        stmt = select(RagDocumentRow).order_by(desc(RagDocumentRow.created_at))
+        # 列表页封顶 + 免拉 embedding 列(2026-09-28 夜审):此前无界全量且整行
+        # 取回 —— 每切片 384 维 JSON 串(_rag_item 用不到)全进内存,文档量增长
+        # 后该端点线性变重。响应形状不变(total = 实返条数),取最新 500 条。
+        stmt = (
+            select(RagDocumentRow)
+            .options(defer(RagDocumentRow.embedding))
+            .order_by(desc(RagDocumentRow.created_at))
+            .limit(500)
+        )
         if tenant_id and tenant_id != "all":
             stmt = stmt.where(RagDocumentRow.business_id == tenant_id)
         rows = (await session.execute(stmt)).scalars().all()
