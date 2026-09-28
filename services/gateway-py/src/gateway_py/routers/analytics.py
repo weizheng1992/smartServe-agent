@@ -27,6 +27,13 @@ from .auth import issue_token, require_claims
 
 router = APIRouter(tags=["merchant-analytics"])
 
+# ensure_defaults 进程级备忘(2026-09-28 夜审):纯幂等种子此前被 39 条端点
+# 每请求全量重扫(菜单 2 次 SELECT + 员工 1 次 SELECT + 两次空 commit,
+# 合计 6-8 次冗余往返)。每租户进程内只跑一次;DB 被外部清空时重启网关即
+# 恢复重种。rbac.ensure_defaults 本体不加备忘 —— 测试基建的显式重种调用
+# 必须保持真跑。
+_SEEDED_TENANTS: set[str] = set()
+
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
@@ -37,7 +44,9 @@ async def _ctx(request: Request) -> dict:
     tc = require_tenant_context()
     claims = await require_claims(request.headers.get("authorization"))
     business_id = tc.get("tenantId") or "aurora"
-    await rbac.ensure_defaults(business_id)
+    if business_id not in _SEEDED_TENANTS:
+        await rbac.ensure_defaults(business_id)
+        _SEEDED_TENANTS.add(business_id)
     staff = await rbac.find_staff(business_id, str(claims.get("email") or ""))
     if staff is None or staff.status != "enabled":
         raise HTTPException(status_code=403, detail="非商户员工或已停用,拒绝访问")
