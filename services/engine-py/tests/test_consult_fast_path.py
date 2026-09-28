@@ -223,6 +223,23 @@ class TestRunConsultDirectAnswer:
         assert "answer_args" not in calls, "取消语必须在直答调用之前由代码闸否决"
         assert "cache_add" not in calls, "改判路由不得写语义缓存"
 
+    def test_cancel_intent_beats_poisoned_semantic_cache(self, monkeypatch):
+        """取消语闸 × 语义缓存交叠:取消/放弃语必须先于缓存查询被闸 ——
+        即使缓存已被同形历史投毒(向量全同必命中),「我不想要了」也绝不允许
+        被资讯复放截胡关会话;闸在函数序上先于缓存读,此处以毒缓存证序。"""
+        calls = self._patch(monkeypatch)
+        monkeypatch.setattr(
+            SemanticVectorCache,
+            "_tenant_cache",
+            {"ecommerce": [{"query": "退货政策是啥", "reply": "投毒缓存答案:7 天无理由。", "vector": [1.0, 0.0, 0.0]}]},
+        )
+        state = _consult_state()
+        state["input"] = "这单我不想要了"  # input_embedding 全同毒缓存,若闸不前置必命中
+        hit = asyncio.run(run_consult_direct_answer(state, []))
+        assert hit is not None
+        assert hit[0] == cfp.ROUTE_TO_ACTION_MARKER, "取消语闸必须先于语义缓存命中"
+        assert "answer_args" not in calls
+
 
 async def _fake_exemplars(*args, **kwargs) -> list:
     return []
