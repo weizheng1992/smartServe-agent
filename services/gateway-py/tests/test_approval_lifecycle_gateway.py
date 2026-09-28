@@ -109,6 +109,23 @@ class TestApprovalLifecycle:
         events = await _outbox_events(aid)
         assert [e["event_type"] for e in events] == ["cancel_execution"]
         assert events[0]["payload"]["nextStatus"] == "cancelled"
+        # cancel 同样走确定性 resume 派发(携带「中止动作」系统提示,引擎
+        # 侧优雅收尾并告知顾客),事件体必须带同源 jobId。
+        assert events[0]["payload"]["jobId"] == f"job_resume_{aid}"
+
+        # 终局重放:二次 cancel 400「已经处理过」,且严禁追加第二条发件箱
+        # 事件 —— 否则 outbox worker 会按 cancel 语义重复派发恢复作业。
+        res = await client.post(
+            "/api/approvals",
+            headers={"x-tenant-id": "nike", "x-user-id": "u_lifecycle"},
+            json={"approvalId": aid, "action": "cancel"},
+        )
+        assert res.status_code == 200
+        body2 = res.json()
+        assert body2["statusCode"] == 400
+        assert "已经处理过" in body2["error"]
+        assert body2["error"].endswith("cancelled")
+        assert [e["event_type"] for e in await _outbox_events(aid)] == ["cancel_execution"]
 
     async def test_approve_refund_ticket_resumes_with_deterministic_job(self, client):
         aid = str(uuid.uuid4())
