@@ -304,6 +304,49 @@ export interface DeskAgentRow {
   lastSeenAt?: string | null;
 }
 
+/** GET /api/merchant/live-desk/threads/{id}/context 五项聚合(P3 坐席上下文栏)。 */
+export interface LiveDeskContext {
+  success: boolean;
+  thread: {
+    threadId: string;
+    userId?: string | null;
+    status?: string | null;
+    assignedOperatorId?: string | null;
+  };
+  /** 弱关联诚实:聊天身份 ↔ 商户 customer_id 无桥时 matched:false,前端照实呈现。 */
+  customer: {
+    matched: boolean;
+    customerId?: string;
+    name?: string;
+    phoneMasked?: string | null;
+    email?: string;
+    memberLevel?: string;
+    tags?: string[];
+    totalSpent?: number;
+    orderCount?: number;
+  };
+  recentOrders: Array<{ orderId: string; status: string; totalAmount: number; createdAt: string | null }>;
+  afterSaleTickets: Array<{
+    id: string;
+    orderId: string;
+    type: string;
+    reason: string;
+    status: string;
+    refundAmount: number;
+    createdAt: string | null;
+  }>;
+  profile: { global: string[]; tenant: string[] };
+  notes: DeskNoteItem[];
+}
+
+/** 坐席内部备注(thread_notes;仅 agent_merchant 库,顾客链路物理触不到)。 */
+export interface DeskNoteItem {
+  id: string;
+  content: string;
+  authorEmail: string;
+  createdAt: string | null;
+}
+
 export interface MenuNode {
   id: string;
   name: string;
@@ -615,5 +658,18 @@ export const api = {
       fetchJson('/api/merchant/live-desk/presence'),
     setDnd: async (enabled: boolean): Promise<{ success: boolean; dnd: boolean }> =>
       fetchJson('/api/merchant/live-desk/presence/dnd', { method: 'POST', body: JSON.stringify({ enabled }) }),
+    /** 坐席上下文五项一次聚合(单次往返);弱关联未匹配由前端诚实呈现。 */
+    context: async (threadId: string): Promise<LiveDeskContext> =>
+      fetchJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/context`),
+    noteCreate: async (threadId: string, content: string): Promise<{ success: boolean; note?: DeskNoteItem }> =>
+      fetchJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      }),
+    /** 幂等删除:重复删/非法 id 服务端都 success,前端直接对齐本地态。 */
+    noteDelete: async (threadId: string, noteId: string): Promise<{ success: boolean }> =>
+      fetchJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/notes/${encodeURIComponent(noteId)}`, {
+        method: 'DELETE',
+      }),
   },
 };

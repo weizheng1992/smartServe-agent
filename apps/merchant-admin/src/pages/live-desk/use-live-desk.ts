@@ -2,7 +2,15 @@
 // 列表/时间线走员工形态 HTTP,认领/释放/发言走 socket ack(服务端裁决原子
 // 守卫与 perm 闸,前端只呈递结果)。tenantId 与 api.ts 同取 dev 单租户
 // 'aurora'(x-tenant-id 同值,见 .claude/rules/merchant-admin.md §1.1)。
-import { type DeskAgentRow, type DeskConversationRow, api, authToken, currentStaffEmail } from '@/lib/api';
+import {
+  type DeskAgentRow,
+  type DeskConversationRow,
+  type DeskNoteItem,
+  type LiveDeskContext,
+  api,
+  authToken,
+  currentStaffEmail,
+} from '@/lib/api';
 import type { MessageItem } from '@/lib/api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Socket, io } from 'socket.io-client';
@@ -30,6 +38,7 @@ export function useLiveDesk() {
   const [dnd, setDnd] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<MessageItem[]>([]);
+  const [context, setContext] = useState<LiveDeskContext | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const socketRef = useRef<Socket | null>(null);
 
@@ -55,18 +64,32 @@ export function useLiveDesk() {
     }
   }, []);
 
-  const openThread = useCallback(async (threadId: string) => {
-    setSelectedThreadId(threadId);
-    setTimeline([]);
-    // 入房:房间广播(new_message / conversation_state_changed)必须 join 才收
-    socketRef.current?.emit('join_thread', { threadId, tenantId: TENANT_ID, role: 'operator' });
+  const loadContext = useCallback(async (threadId: string) => {
     try {
-      const body = await api.liveDesk.timeline(threadId);
-      if (body.success && body.data) setTimeline(body.data.messages || []);
-    } catch (err) {
-      console.error('[live-desk] 时间线加载失败', err);
+      const body = await api.liveDesk.context(threadId);
+      if (body.success) setContext(body);
+    } catch {
+      // 上下文栏是辅助面,失败按空态呈现不阻断时间线
     }
   }, []);
+
+  const openThread = useCallback(
+    async (threadId: string) => {
+      setSelectedThreadId(threadId);
+      setTimeline([]);
+      setContext(null); // 换会话先清旧上下文,防串栏
+      // 入房:房间广播(new_message / conversation_state_changed)必须 join 才收
+      socketRef.current?.emit('join_thread', { threadId, tenantId: TENANT_ID, role: 'operator' });
+      try {
+        const body = await api.liveDesk.timeline(threadId);
+        if (body.success && body.data) setTimeline(body.data.messages || []);
+      } catch (err) {
+        console.error('[live-desk] 时间线加载失败', err);
+      }
+      void loadContext(threadId);
+    },
+    [loadContext],
+  );
 
   // 选中线程的 ref(new_message 闭包读取最新值,不重连 socket)
   const selectedThreadIdRef = useRef<string | null>(null);
@@ -198,6 +221,39 @@ export function useLiveDesk() {
     [emitAck],
   );
 
+  // 内部备注增删(P3):就地对齐 notes 列表;增删都只动本线程面板
+  const addNote = useCallback(async (threadId: string, content: string) => {
+    try {
+      const body = await api.liveDesk.noteCreate(threadId, content);
+      if (body.success && body.note) {
+        setContext((prev) =>
+          prev && prev.thread.threadId === threadId
+            ? { ...prev, notes: [body.note as DeskNoteItem, ...prev.notes] }
+            : prev,
+        );
+        return { success: true };
+      }
+      return { success: false, error: '备注写入失败' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : '备注写入失败' };
+    }
+  }, []);
+  const removeNote = useCallback(async (threadId: string, noteId: string) => {
+    try {
+      const body = await api.liveDesk.noteDelete(threadId, noteId);
+      if (body.success) {
+        setContext((prev) =>
+          prev && prev.thread.threadId === threadId
+            ? { ...prev, notes: prev.notes.filter((n) => n.id !== noteId) }
+            : prev,
+        );
+      }
+      return { success: body.success };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : '备注删除失败' };
+    }
+  }, []);
+
   return {
     myEmail,
     conversations,
@@ -207,10 +263,13 @@ export function useLiveDesk() {
     now,
     selectedThreadId,
     timeline,
+    context,
     openThread,
     claim,
     release,
     sendMessage,
     toggleDnd,
+    addNote,
+    removeNote,
   };
 }

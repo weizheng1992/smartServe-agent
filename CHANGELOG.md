@@ -4,6 +4,30 @@
 
 ---
 
+## [2.6.60] - 2026-09-28 (live-desk P3:坐席上下文栏 —— 五项一次聚合 + 内部备注 thread_notes)
+
+客服工作台重构三期 P3(spec `docs/architecture/live-desk-rework.md` §3)。坐席认领后只有裸时间线,看不到对方是谁、买过什么、有没有售后在途,每句回复都靠追问重建语境。本版给坐席台右栏装上五项上下文:客户档案 / 最近订单 / 售后中工单 / 双层画像 / 内部备注,一次聚合单次往返。
+
+### ✨ Features
+
+- **`GET /api/merchant/live-desk/threads/{id}/context` 五项聚合**(单次往返零扇出):客户档案 + 最近订单 ≤5(merchant 库)+ 售后中工单(终态 completed/rejected/cancelled 不出现,limit 5)+ 双层画像摘要(global|tenant 分栏各 ≤6,租户隔离沿用)+ 内部备注 ≤50。鉴权与 P2 三态同源:匿名 401 / 跨租户 403 / 查无 404 / 无 `live_desk:operate` 403,租户由员工行带出不收客户端参数。
+- **弱关联诚实**:chat `threads.user_id` 与商户 `merchant_customers.customer_id` 现网无桥(三域身份无桥,spec §2.4 首项核实结论),context 按 `customer_id == user_id` 直等试配,未命中如实 `matched:false` + 空订单,**严禁伪装修配**;同域面(售后工单/双层画像)与 chat user_id 同源,可靠直查。
+- **内部备注 `thread_notes`(agent_merchant 库,本期唯一 DDL)**:幂等 `CREATE TABLE IF NOT EXISTS` 随 `ensure_merchant_tables` 启动自愈;`POST/DELETE /api/merchant/live-desk/threads/{id}/notes` 增删(写穿透走 `_merchant_writer_engine`——reader 带会级 READ ONLY,只读事务拒写;删除幂等,重复删/非法 uuid 都 success)。备注仅按线程存于商户独立库,顾客链路物理触不到,「不外发」靠构造不靠纪律;pytest 钉死顾客面三通道(历史消息/会话列表/线程列表)响应文本不含备注内容。
+- **右栏上下文栏(apps/merchant-admin 新面板)**:w-56→w-80,五项 `ContextSection` 堆叠可折叠(客户档案默认展开,其余收起带计数徽标),坐席在线态(P2)保留为第六个折叠面板;弱关联未匹配呈现「未匹配到商户客户档案(聊天身份与商户客户编号暂无关联)」,订单/工单/画像/备注各自诚实空态。备注面板输入框 + 添加 + 删除,增删就地更新 notes 列表;换会话先清旧上下文防串栏。
+
+### 🐛 Fixes
+
+- **档案聚合 SQL `GROUP BY c.customer_id` 报 GroupingError**:PG 函数依赖推导只认 PRIMARY KEY,`merchant_customers` 主键是 `id`(UUID)而 `customer_id` 仅 UNIQUE,SELECT 非聚合列被拒 → 改 `GROUP BY c.id`。
+- **merchant 库访问前懒自愈**:live_desk 三个路由在 connect 前补 `ensure_merchant_tables()`(merchant_domain 全体入口同款惯例;此前若启动后无人触达 merchant 库,首次 context 请求会在库未建时 500)。
+
+### 🧪 Tests
+
+- 新专册 `tests/test_live_desk_context.py`(8 例):鉴权矩阵(匿名 401 / 员工同租户 200 五项形状齐 / 跨租户 403·查无 404 / 无 perm 403)、弱关联诚实未匹配、notes 增查删+重复删幂等+非法 uuid 幂等、备注不外发顾客面三通道、DDL 重复执行幂等。
+- merchant-admin vitest 新 10 例(档案命中/未匹配诚实/订单行/工单行/画像分栏不合并/三区空态/备注增删回调+空白草稿拦截/折叠开合);Playwright 扩「认领后右栏出五项 + 未匹配诚实空态 + 备注增删往返」。
+- 全绿:gateway 320 passed+3 skipped / engine 1090 passed / vitest 134(28 文件)/ Playwright 2。
+
+---
+
 ## [2.6.59] - 2026-09-28 (live-desk P2:分配与坐席台独立页 —— 认领池 + presence + /agent-desk 三栏)
 
 客服工作台重构二期 P2(spec `docs/architecture/live-desk-rework.md` §3)。P1 把接管真源收敛到 threads 表后,呼叫中(排队)会话还没有认领路由:谁先点到归谁靠运气、坐席在线不可知、无人应答的呼叫会永远挂着。本版补齐分配面:认领池原子守卫、排队等待最久置顶、presence 在线真源、排队超时回落,并给坐席独立的三栏工作台新页。

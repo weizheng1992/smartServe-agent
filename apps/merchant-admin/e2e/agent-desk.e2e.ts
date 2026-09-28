@@ -145,3 +145,67 @@ test.describe('坐席台 认领→回复→顾客收到(P2 socket 往返)', () =
     }
   });
 });
+
+/**
+ * 坐席上下文栏 P3 浏览器全链路(live-desk-rework spec §3 P3 验收行):
+ * 认领后右栏五项出现;弱关联未匹配诚实空态;内部备注添加/删除往返。
+ */
+test.describe('坐席上下文栏五项(P3)', () => {
+  let token: string;
+  const threadId = `e2e_ctx_${Date.now()}`;
+  const userId = `u_e2e_ctx_${Date.now()}`;
+
+  test.beforeAll(async ({ request }) => {
+    token = await loginViaApi(request);
+    const res = await request.post(`${GW}/api/chat/threads`, {
+      headers: { Authorization: `Bearer ${token}`, 'x-tenant-id': 'aurora' },
+      data: { threadId, userId, businessId: 'aurora' },
+    });
+    expect(res.ok()).toBeTruthy();
+    const q = await request.post(`${GW}/api/conversations/${threadId}/status`, {
+      headers: { Authorization: `Bearer ${token}`, 'x-tenant-id': 'aurora' },
+      data: { status: 'human_takeover' },
+    });
+    expect(q.ok()).toBeTruthy();
+  });
+
+  const presetAuth = async (page: Page) => {
+    await page.addInitScript(
+      (s: { token: string; email: string }) => {
+        localStorage.setItem('merchant-admin.token', s.token);
+        localStorage.setItem('merchant-admin.staff', s.email);
+        localStorage.setItem('merchant-admin.boss', JSON.stringify(s));
+      },
+      { token, email: STAFF.email },
+    );
+  };
+
+  test('认领后右栏出五项,未匹配档案诚实,备注增删往返', async ({ page }) => {
+    await presetAuth(page);
+    await page.goto('/agent-desk');
+    const row = page.locator('[data-testid="conversation-row"]', { hasText: userId }).first();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    // 认领 → openThread 拉五项聚合
+    await page.locator('[data-testid="claim-button"]').first().click();
+    await expect(page.getByText('我接管中').first()).toBeVisible({ timeout: 15_000 });
+
+    // 五项 section 出现(客户档案默认展开,其余可折叠)
+    for (const sec of ['customer', 'orders', 'tickets', 'profile', 'notes']) {
+      await expect(page.getByTestId(`ctx-section-${sec}`)).toBeVisible({ timeout: 15_000 });
+    }
+    // 弱关联诚实:e2e 造的 userId 无商户档案 → 未匹配空态,严禁伪装修配
+    await expect(page.getByTestId('ctx-customer-unmatched')).toContainText(
+      '未匹配到商户客户档案(聊天身份与商户客户编号暂无关联)',
+    );
+
+    // 内部备注往返:展开 → 添加 → 行出现 → 删除 → 行消失
+    await page.getByRole('button', { name: /内部备注/ }).click();
+    const marker = `e2e内部备注_${Date.now()}`;
+    await page.getByTestId('ctx-note-input').fill(marker);
+    await page.getByTestId('ctx-note-add').click();
+    await expect(page.getByTestId('ctx-note-row')).toContainText(marker, { timeout: 10_000 });
+    await page.getByTestId('ctx-note-remove').click();
+    await expect(page.getByTestId('ctx-note-row')).toHaveCount(0, { timeout: 10_000 });
+  });
+});

@@ -194,6 +194,19 @@ CREATE INDEX IF NOT EXISTS idx_merchant_audit_logs_order ON merchant_audit_logs(
 CREATE INDEX IF NOT EXISTS idx_user_coupons_user ON user_coupons(user_id);
 CREATE INDEX IF NOT EXISTS idx_promotion_redemptions_order ON promotion_redemptions(order_id);
 CREATE INDEX IF NOT EXISTS idx_promotion_redemptions_promo ON promotion_redemptions(promotion_id);
+
+-- 坐席内部备注(live-desk-rework P3,spec §2.4):顾客链路物理触不到
+-- agent_merchant 库,「不外发」靠构造不靠纪律(前车之鉴:list_user_threads
+-- 全量回显 threads.metadata)。按线程存,顾客不可见;幂等 DDL 随启动自愈。
+CREATE TABLE IF NOT EXISTS thread_notes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  thread_id TEXT NOT NULL,
+  business_id TEXT NOT NULL,
+  author_email TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_thread_notes_thread ON thread_notes(thread_id, created_at DESC);
 """
 
 

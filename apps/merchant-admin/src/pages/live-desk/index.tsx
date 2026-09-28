@@ -1,8 +1,17 @@
 import { useMemo, useState } from 'react';
-// 坐席台独立页(live-desk-rework P2):三栏 —— 左会话池(排队等待最久置顶)/
-// 中时间线(认领后回复)/ 右坐席在线态。旧 /live-desk tab(OrderWorkbench)
-// 并存不动作回退面;本页是 spec §3 P2 的正式坐席工作台。
+// 坐席台独立页(live-desk-rework P2/P3):三栏 —— 左会话池(排队等待最久置顶)/
+// 中时间线(认领后回复)/ 右坐席上下文栏(五项,spec §2.4)+ 坐席在线态。
+// 旧 /live-desk tab(OrderWorkbench)并存不动作回退面;本页是 spec §3
+// P2/P3 的正式坐席工作台。
 import { Button } from 'ui';
+import {
+  ContextCustomer,
+  ContextNotes,
+  ContextOrders,
+  ContextProfile,
+  ContextSection,
+  ContextTickets,
+} from './live-desk-context-parts';
 import { type DeskTab, filterConversations, sortQueueFirst } from './live-desk-model';
 import { ConversationRow, DeskStateBadge } from './live-desk-parts';
 import { useLiveDesk } from './use-live-desk';
@@ -51,6 +60,17 @@ export default function LiveDeskPage() {
     setDraft('');
     const ack = await desk.sendMessage(desk.selectedThreadId, content);
     if (!ack.success) setNotice(ack.error || '发送失败');
+  };
+
+  const doAddNote = async (content: string) => {
+    if (!desk.selectedThreadId) return;
+    const r = await desk.addNote(desk.selectedThreadId, content);
+    if (!r.success) setNotice(('error' in r && r.error) || '备注写入失败');
+  };
+
+  const doRemoveNote = async (noteId: string) => {
+    if (!desk.selectedThreadId) return;
+    await desk.removeNote(desk.selectedThreadId, noteId);
   };
 
   return (
@@ -177,38 +197,82 @@ export default function LiveDeskPage() {
         )}
       </section>
 
-      {/* 右:坐席在线态 */}
-      <aside className="flex w-56 shrink-0 flex-col rounded-xl border border-zinc-200 bg-white p-3">
-        <div className="text-[13px] font-semibold">坐席({desk.agents.length})</div>
-        <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto">
-          {desk.agents.length === 0 && <div className="text-[11px] text-zinc-400">暂无坐席在线</div>}
-          {desk.agents.map((a) => (
-            <div key={a.email} className="flex items-center justify-between" data-testid="desk-agent-row">
-              <span className="truncate text-[12px] text-zinc-700">{a.name || a.email}</span>
-              <span
-                className={`shrink-0 rounded-full px-1.5 text-[10px] ${
-                  a.dnd
-                    ? 'bg-zinc-200 text-zinc-500'
-                    : a.online
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-zinc-100 text-zinc-400'
-                }`}
+      {/* 右:坐席上下文栏(P3 五项,spec §2.4)+ 坐席在线态 */}
+      <aside className="flex w-80 shrink-0 flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          {desk.context && selected ? (
+            <>
+              <ContextSection title="客户档案" testId="ctx-section-customer" defaultOpen>
+                <ContextCustomer context={desk.context} />
+              </ContextSection>
+              <ContextSection
+                title="最近订单"
+                testId="ctx-section-orders"
+                badge={desk.context.recentOrders.length ? String(desk.context.recentOrders.length) : undefined}
               >
-                {a.dnd ? '免打扰' : a.online ? '在线' : '离线'}
-              </span>
+                <ContextOrders context={desk.context} />
+              </ContextSection>
+              <ContextSection
+                title="售后工单"
+                testId="ctx-section-tickets"
+                badge={desk.context.afterSaleTickets.length ? String(desk.context.afterSaleTickets.length) : undefined}
+              >
+                <ContextTickets context={desk.context} />
+              </ContextSection>
+              <ContextSection title="客户画像" testId="ctx-section-profile">
+                <ContextProfile context={desk.context} />
+              </ContextSection>
+              <ContextSection
+                title="内部备注"
+                testId="ctx-section-notes"
+                badge={desk.context.notes.length ? String(desk.context.notes.length) : undefined}
+              >
+                <ContextNotes
+                  context={desk.context}
+                  onAdd={(content) => void doAddNote(content)}
+                  onRemove={(n) => void doRemoveNote(n.id)}
+                />
+              </ContextSection>
+            </>
+          ) : (
+            <div className="py-2 text-center text-[11px] text-zinc-400">
+              {selected ? '上下文加载中…' : '选择会话后展示坐席上下文'}
             </div>
-          ))}
+          )}
+
+          {/* 坐席在线态(P2 保留,可折叠) */}
+          <ContextSection title={`坐席(${desk.agents.length})`} testId="ctx-section-agents" defaultOpen>
+            <div className="space-y-1.5">
+              {desk.agents.length === 0 && <div className="text-[11px] text-zinc-400">暂无坐席在线</div>}
+              {desk.agents.map((a) => (
+                <div key={a.email} className="flex items-center justify-between" data-testid="desk-agent-row">
+                  <span className="truncate text-[12px] text-zinc-700">{a.name || a.email}</span>
+                  <span
+                    className={`shrink-0 rounded-full px-1.5 text-[10px] ${
+                      a.dnd
+                        ? 'bg-zinc-200 text-zinc-500'
+                        : a.online
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-zinc-100 text-zinc-400'
+                    }`}
+                  >
+                    {a.dnd ? '免打扰' : a.online ? '在线' : '离线'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <label className="mt-3 flex cursor-pointer items-center justify-between border-t border-zinc-100 pt-2 text-[12px] text-zinc-600">
+              免打扰
+              <input
+                type="checkbox"
+                data-testid="desk-dnd-toggle"
+                checked={desk.dnd}
+                onChange={(e) => void desk.toggleDnd(e.target.checked)}
+                className="h-4 w-4"
+              />
+            </label>
+          </ContextSection>
         </div>
-        <label className="mt-3 flex cursor-pointer items-center justify-between border-t border-zinc-100 pt-3 text-[12px] text-zinc-600">
-          免打扰
-          <input
-            type="checkbox"
-            data-testid="desk-dnd-toggle"
-            checked={desk.dnd}
-            onChange={(e) => void desk.toggleDnd(e.target.checked)}
-            className="h-4 w-4"
-          />
-        </label>
       </aside>
     </div>
   );
