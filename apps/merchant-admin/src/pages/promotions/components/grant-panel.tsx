@@ -38,8 +38,7 @@ export function GrantPanel({ promo, onCancel, onDone }: Props) {
     }
   }
 
-  const remaining =
-    promo.totalQuota != null && claimed != null ? Math.max(promo.totalQuota - claimed, 0) : null;
+  const remaining = promo.totalQuota != null && claimed != null ? Math.max(promo.totalQuota - claimed, 0) : null;
 
   return (
     <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">

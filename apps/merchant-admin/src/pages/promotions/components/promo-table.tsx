@@ -212,7 +212,11 @@ export function PromoTable({ promotions, onMsg, onChanged }: Props) {
                           删除
                         </Button>
                         {p.effectiveStatus === 'running' && (
-                          <Button size="sm" variant="ghost" onClick={() => setRedeem({ promoId: p.id, promoName: p.name })}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setRedeem({ promoId: p.id, promoName: p.name })}
+                          >
                             核销
                           </Button>
                         )}
