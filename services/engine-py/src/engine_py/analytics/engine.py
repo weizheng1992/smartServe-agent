@@ -767,12 +767,16 @@ class MetricQueryEngine:
             if cached is not None:
                 age = max(int(time.time() - cached["ts"]), 0)
                 caliber = _CALIBERS.get(compiled.metric, "有效订单聚合(排除退款/取消单)")
+                # chart 与执行路同公式(仅指标语义 auto):严禁吃 chart_hint —— 非趋势
+                # 指标带 line 指令时预污染 result.chart,会把 graph._effective_chart
+                # 的「折线仅趋势族」仲裁架空成透传(2026-09-25 折线事故在缓存
+                # AI_RESULT_CACHE_TTL>0 时复发的通路)
                 auto_chart = "line" if compiled.metric.endswith("_trend") else None
                 return QueryResult(
                     rows=cached["rows"], metric=compiled.metric,
                     unit=metric_semantic_registry()[compiled.metric]["unit"],
                     caliber=f"{caliber}(缓存读,数据时刻 ≈{age}s 前)",
-                    chart=compiled.chart_hint or auto_chart,
+                    chart=auto_chart,
                 )
 
         if getattr(compiled, "target_db", "merchant_db") == "engine_db":
