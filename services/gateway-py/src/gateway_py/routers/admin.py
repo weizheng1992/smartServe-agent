@@ -6,6 +6,7 @@ import datetime as _dt
 import json
 import math
 
+from engine_py.analytics import rbac
 from engine_py.approvals import ApprovalGatekeeper
 from engine_py.db import RagDocumentRow, StaffMember, get_session
 from engine_py.onboarding import validate_onboarding_config
@@ -571,7 +572,14 @@ async def list_approvals(
 _CUSTOMER_ACTIONS = frozenset({"approve", "reject", "cancel", "start_human_takeover"})
 # P1(live-desk-rework spec §2.1):release_takeover 为线程级员工动作 ——
 # 释放语义 = 写真源(threads → active + 坐席清空),无审批单,JWT 闸同坐席动作。
-_OPERATOR_ACTIONS = frozenset({"human_message", "human_reply", "human_finish", "release_takeover"})
+# P4(spec §2.7):human_reply 退役 —— 消息与工单显式解耦,坐席发言一律走
+# socket send_message,本面白名单移除即 400「未知审批动作」;human_finish 仍有
+# useApprovalMachine(禁区 admin/web)消费,退役挪 P5 与禁区配合同批;SPI 与
+# 管理台旧通道(/api/admin/approvals)直通引擎白名单,P5 一并收口。
+_OPERATOR_ACTIONS = frozenset({"human_message", "human_finish", "release_takeover"})
+# P4(spec §2.6):台内一等批驳闸 —— 员工代行 approve/reject 须持
+# live_desk:approve(顾客通道无 JWT,仍走 userId 归属绑定,不受此闸)。
+_STAFF_REVIEW_ACTIONS = frozenset({"approve", "reject"})
 
 
 async def _optional_staff(authorization: str | None) -> dict | None:
@@ -645,6 +653,13 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
                     status_code=403,
                     detail=f"会话不属于员工租户 {staff_ctx['staff'].business_id},拒绝释放",
                 )
+        # P4 台内一等批驳(spec §2.6):员工代行批/驳须持 live_desk:approve ——
+        # 退款核准是资金语义,不放给无批驳权限的普通坐席(查询 perms_for_role,
+        # finance_owner 兜底全量,与 live_desk:operate 闸同查法)。
+        if action in _STAFF_REVIEW_ACTIONS:
+            staff = staff_ctx["staff"]
+            if "live_desk:approve" not in await rbac.perms_for_role(staff.business_id, staff.role):
+                raise HTTPException(status_code=403, detail="无工单批驳权限(live_desk:approve)")
 
     if action in _OPERATOR_ACTIONS:
         if staff_ctx is None:

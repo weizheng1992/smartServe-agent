@@ -661,6 +661,18 @@ export const api = {
     /** 坐席上下文五项一次聚合(单次往返);弱关联未匹配由前端诚实呈现。 */
     context: async (threadId: string): Promise<LiveDeskContext> =>
       fetchJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/context`),
+    /** 待批工单(P4 台内批驳;员工 JWT 本租户收窄,threadId 由前端就地过滤)。 */
+    pendingApprovals: async (): Promise<{ success: boolean; approvals: ApprovalItem[] }> =>
+      fetchJson('/api/chat/approvals?status=waiting'),
+    /** 批/驳(P4 spec §2.6):员工代行走 /api/chat/approvals,服务端闸
+     *  live_desk:approve;400 级业务错误(403 无权限/已处理过)照 fetchJson
+     *  语义返回 body,由调用方按 error/detail 呈现。 */
+    resolveApproval: async (body: {
+      approvalId: string;
+      action: 'approve' | 'reject';
+      rejectionReason?: string;
+    }): Promise<{ success?: boolean; status?: string; error?: string; detail?: string }> =>
+      fetchJson('/api/chat/approvals', { method: 'POST', body: JSON.stringify(body) }),
     noteCreate: async (threadId: string, content: string): Promise<{ success: boolean; note?: DeskNoteItem }> =>
       fetchJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/notes`, {
         method: 'POST',

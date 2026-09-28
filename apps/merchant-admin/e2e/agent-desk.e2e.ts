@@ -8,8 +8,8 @@
  *      刷新)。
  * 顾客侧以 Node socket.io-client 直连 4000 网关;坐席侧走真实 3006 页面。
  */
-import { expect, test, type Page } from '@playwright/test';
-import { io, type Socket } from 'socket.io-client';
+import { type Page, expect, test } from '@playwright/test';
+import { type Socket, io } from 'socket.io-client';
 
 const GW = 'http://localhost:4000';
 const STAFF = { email: 'test@example.com', password: 'agent-all-dev' };
@@ -109,15 +109,16 @@ test.describe('坐席台 认领→回复→顾客收到(P2 socket 往返)', () =
       }
       expect(online).toBe(true);
 
-      // ② 认领:状态条切「我接管中」(服务端原子守卫裁决)
-      await page.locator('[data-testid="claim-button"]').first().click();
-      await expect(page.getByText('我接管中').first()).toBeVisible({ timeout: 15_000 });
+      // ② 认领:状态条切「我接管中」(服务端原子守卫裁决)。认领按钮取
+      // 本轮行内部 —— 列表存在历史残留行,全局 first() 会认领到旧行。
+      await row.getByTestId('claim-button').click();
+      await expect(row.getByText('我接管中')).toBeVisible({ timeout: 15_000 });
 
       // ③ 坐席回复 → 顾客实时收到
       const reply = '您好,我是人工客服,有什么可以帮您?';
       const got = waitNewMessage(customer, (p) => p.role === 'operator' && p.content === reply, 15_000);
       await page.getByPlaceholder('回复顾客…').fill(reply);
-      await page.getByRole('button', { name: '发送' }).click();
+      await page.getByRole('button', { name: '发送', exact: true }).click();
       const msg = await got;
       expect(msg.threadId).toBe(threadId);
 
@@ -140,6 +141,114 @@ test.describe('坐席台 认领→回复→顾客收到(P2 socket 往返)', () =
         setTimeout(() => resolve({ success: false }), 10_000);
       });
       expect(await seenOnDesk).toBe(true);
+    } finally {
+      customer.disconnect();
+    }
+  });
+});
+
+/**
+ * P4 消息可靠性(live-desk-rework spec §3 P4 验收行)。
+ * 台内批驳卡不设浏览器用例:waiting escalation 工单只能由引擎链路产生
+ * (gatekeeper 内部创建;socket takeover 产的是 resolved_by_human 终局,
+ * 无 HTTP 造法),批驳语义已由 pytest 专册(test_live_desk_p4_decouple)
+ * 与 vitest(use-live-desk.test)双层钉死,此处不重复。
+ */
+test.describe('P4:ack 失败回滚 + typing 指示', () => {
+  let token: string;
+
+  test.beforeAll(async ({ request }) => {
+    token = await loginViaApi(request);
+  });
+
+  /** 建线程 + 摆排队态(human_takeover + 无坐席 = 呼叫中),两条用例共用。 */
+  const seedQueuingThread = async (request: any, threadId: string, userId: string) => {
+    const res = await request.post(`${GW}/api/chat/threads`, {
+      headers: { Authorization: `Bearer ${token}`, 'x-tenant-id': 'aurora' },
+      data: { threadId, userId, businessId: 'aurora' },
+    });
+    expect(res.ok()).toBeTruthy();
+    const q = await request.post(`${GW}/api/conversations/${threadId}/status`, {
+      headers: { Authorization: `Bearer ${token}`, 'x-tenant-id': 'aurora' },
+      data: { status: 'human_takeover' },
+    });
+    expect(q.ok()).toBeTruthy();
+  };
+
+  const presetAuth = async (page: Page) => {
+    await page.addInitScript(
+      (s: { token: string; email: string }) => {
+        localStorage.setItem('merchant-admin.token', s.token);
+        localStorage.setItem('merchant-admin.staff', s.email);
+        localStorage.setItem('merchant-admin.boss', JSON.stringify(s));
+      },
+      { token, email: STAFF.email },
+    );
+  };
+
+  test('socket 掐断后发送:ack 失败如实提示,时间线回真源不残留乐观气泡', async ({ page, request }) => {
+    const threadId = `e2e_p4ack_${Date.now()}`;
+    const userId = `u_e2e_p4ack_${Date.now()}`;
+    await seedQueuingThread(request, threadId, userId);
+    await presetAuth(page);
+    await page.goto('/agent-desk');
+    const row = page.locator('[data-testid="conversation-row"]', { hasText: userId }).first();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    // 正常通路认领(socket ack 裁决;行内定位,残留行不吃全局 first())
+    await row.getByTestId('claim-button').click();
+    await expect(row.getByText('我接管中')).toBeVisible({ timeout: 15_000 });
+
+    // 掐断 socket.io(HTTP /api/* 不受影响)后重载:坐席页 socket 重连
+    // 失败 → emitAck 走「未连接实时通道」失败分支,时间线走 HTTP 真源。
+    // 坐席页 transports 硬编码 websocket,page.route 拦不到 ws 帧,须
+    // routeWebSocket 直接拒握手。
+    await page.routeWebSocket('**/socket.io**', (ws) => ws.close());
+    await page.reload();
+    const rowAfter = page.locator('[data-testid="conversation-row"]', { hasText: userId }).first();
+    await expect(rowAfter).toBeVisible({ timeout: 30_000 });
+    await rowAfter.click();
+    const box = page.getByPlaceholder('回复顾客…');
+    await expect(box).toBeVisible({ timeout: 15_000 });
+
+    const ghost = `断连发送_${Date.now()}`;
+    await box.fill(ghost);
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+
+    // ack 失败 notice 如实呈现
+    await expect(page.getByText('未连接实时通道')).toBeVisible({ timeout: 15_000 });
+    // 时间线回真源(openThread 重拉):乐观气泡被冲掉,不残留
+    await expect(page.getByTestId('desk-timeline')).not.toContainText(ghost, { timeout: 15_000 });
+  });
+
+  test('顾客输入中 → 坐席台亮「对方正在输入…」,2.5s 保持窗后熄灭', async ({ page, request }) => {
+    const threadId = `e2e_p4typ_${Date.now()}`;
+    const userId = `u_e2e_p4typ_${Date.now()}`;
+    await seedQueuingThread(request, threadId, userId);
+    await presetAuth(page);
+    const customer = await connectCustomer(userId);
+    try {
+      const joined = await new Promise<any>((resolve) => {
+        customer.emit('join_thread', { threadId, tenantId: 'aurora', role: 'user' }, (ack: any) => resolve(ack));
+        setTimeout(() => resolve({ success: false }), 10_000);
+      });
+      expect(joined?.success ?? true).toBeTruthy();
+
+      await page.goto('/agent-desk');
+      const row = page.locator('[data-testid="conversation-row"]', { hasText: userId }).first();
+      await expect(row).toBeVisible({ timeout: 30_000 });
+      await row.getByTestId('claim-button').click();
+      await expect(row.getByText('我接管中')).toBeVisible({ timeout: 15_000 });
+
+      // 顾客 typing(服务端透传广播,skip_sid 排除发送者)。连发模拟持续
+      // 输入:坐席 join_thread 入房与广播存在往返竞态,单发可能落在入房前
+      for (let i = 0; i < 4; i++) {
+        customer.emit('typing', { threadId, tenantId: 'aurora', role: 'user' });
+        await page.waitForTimeout(600);
+      }
+      await expect(page.getByTestId('desk-typing')).toBeVisible({ timeout: 10_000 });
+      // 保持窗(2.5s)过后自动熄灭
+      await expect(page.getByTestId('desk-typing')).toBeHidden({ timeout: 6_000 });
     } finally {
       customer.disconnect();
     }
@@ -186,9 +295,9 @@ test.describe('坐席上下文栏五项(P3)', () => {
     const row = page.locator('[data-testid="conversation-row"]', { hasText: userId }).first();
     await expect(row).toBeVisible({ timeout: 30_000 });
 
-    // 认领 → openThread 拉五项聚合
-    await page.locator('[data-testid="claim-button"]').first().click();
-    await expect(page.getByText('我接管中').first()).toBeVisible({ timeout: 15_000 });
+    // 认领 → openThread 拉五项聚合(行内定位,残留行不吃全局 first())
+    await row.getByTestId('claim-button').click();
+    await expect(row.getByText('我接管中')).toBeVisible({ timeout: 15_000 });
 
     // 五项 section 出现(客户档案默认展开,其余可折叠)
     for (const sec of ['customer', 'orders', 'tickets', 'profile', 'notes']) {

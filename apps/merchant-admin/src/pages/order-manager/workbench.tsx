@@ -1,13 +1,60 @@
-import { api, authedFetch } from '@/lib/api';
+import { api, authToken, authedFetch, currentStaffEmail } from '@/lib/api';
 import type { OrderAuditLog, OrderDetail } from '@/lib/api';
 import * as pageContext from '@/lib/page-context';
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type Socket, io } from 'socket.io-client';
 import { useApprovalMachine } from 'ui';
 import type { ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow } from './workbench.types';
 
 export type { ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow };
 
 const contains = (hay: string, q: string) => hay.toLowerCase().includes(q);
+
+/** P4 消息/工单显式解耦(spec §2.7):回退面坐席发言走 socket send_message,
+ *  不再借道/新造审批工单 —— 此前「找 waiting 工单否则先 takeover 再 human_reply」
+ *  会把普通聊天偷换为工单回复,并把转人工工单当消息通道吞掉。连接懒建:首条
+ *  消息才拨号;拨号/发送失败清缓存下次重拨。clientMsgId 幂等透传(P4 §2.7)。 */
+let deskSocketPromise: Promise<Socket> | null = null;
+function deskSocket(): Promise<Socket> {
+  if (!deskSocketPromise) {
+    deskSocketPromise = new Promise<Socket>((resolve, reject) => {
+      const socket = io('/ws/chat', {
+        path: '/socket.io',
+        transports: ['websocket'],
+        auth: { tenantId: 'aurora', userId: currentStaffEmail(), role: 'operator', token: authToken() },
+        reconnection: true,
+      });
+      const timer = setTimeout(() => reject(new Error('实时通道连接超时')), 8_000);
+      socket.on('connect', () => {
+        clearTimeout(timer);
+        resolve(socket);
+      });
+      socket.on('connect_error', (err: Error) => {
+        clearTimeout(timer);
+        deskSocketPromise = null;
+        socket.close();
+        reject(err);
+      });
+    });
+  }
+  return deskSocketPromise;
+}
+
+async function emitDeskMessage(threadId: string, content: string, clientMsgId: string): Promise<void> {
+  const socket = await deskSocket();
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('发送响应超时,请重试')), 8_000);
+    socket.emit(
+      'send_message',
+      { threadId, tenantId: 'aurora', role: 'operator', content, clientMsgId },
+      (ack: { success: boolean; error?: string } | undefined) => {
+        clearTimeout(timer);
+        if (ack?.success) resolve();
+        else reject(new Error(ack?.error || '发送失败'));
+      },
+    );
+  });
+}
 
 /** 集中式状态 hook(功能域:订单/审批/客服/审计;商品库有独立页,不再入工作台)。
  *  派生集合(计数/过滤)useMemo 化:任一 state 变化不再整树逐项重算。 */
@@ -235,39 +282,28 @@ export function useWorkbenchState(initialTab: string) {
       setInputMessage('');
     }
 
-    // Optimistic append(P1:坐席消息落 role='operator',无前缀 —— 服务端
-    // 写侧已退役 "[商户客服] " 拼接,气泡按 role 渲染;落库后被轮询刷新对齐)
+    // Optimistic append(P1:坐席消息落 role='operator',无前缀;P4 起走
+    // socket send_message 直发,消息与工单彻底解耦 —— 不再吞 waiting 工单
+    // 当回复通道,也不再为发一条消息暗造接管工单)
+    const clientMsgId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `opt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const optMsg: MessageItem = {
-      id: `opt_${Date.now()}`,
+      id: clientMsgId,
       role: 'operator',
       content: msg,
       timestamp: new Date().toISOString(),
     };
-    setActiveThreadMessages((prev) => [...prev, optMsg]);
+    setActiveThreadMessages((prev) => (prev.some((m) => m.id === clientMsgId) ? prev : [...prev, optMsg]));
 
     try {
-      const app = approvals.find((a) => a.threadId === activeThreadId && a.status === 'waiting');
-      if (app) {
-        await executeHumanReplyAction({
-          approvalId: app.id,
-          replyMessage: msg,
-          isFinish: false,
-          apiEndpoint: '/api/admin/approvals',
-        });
-      } else {
-        const d = await api.approvals.takeover(activeThreadId);
-        if (d.approvalId) {
-          await executeHumanReplyAction({
-            approvalId: d.approvalId,
-            replyMessage: msg,
-            isFinish: false,
-            apiEndpoint: '/api/admin/approvals',
-          });
-        }
-      }
+      await emitDeskMessage(activeThreadId, msg, clientMsgId);
       await loadConversationMessages(activeThreadId);
     } catch (err) {
+      // 回滚 = 重拉真源:没落库则乐观行消失;落库而 ack 未达则如实显示
       console.error('Failed to send live message:', err);
+      await loadConversationMessages(activeThreadId);
     }
   };
 

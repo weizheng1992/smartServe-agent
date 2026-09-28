@@ -28,6 +28,10 @@ from . import conversation_repo
 
 NAMESPACE = "/ws/chat"
 _TENANT_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+# P4 消息幂等(live-desk-rework spec §2.7):客户端去重键 = UUID/雪花形短标识,
+# 透传 messages.id;ON CONFLICT DO NOTHING 重放静默,ack 回既有 id。非法值
+# (空/超长/奇异字符)忽略回落服务端 uuid4,幂等退化为无键直写。
+_CLIENT_MSG_ID_RE = re.compile(r"^[0-9a-zA-Z-]{8,64}$")
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*", namespaces=NAMESPACE)
 
@@ -331,6 +335,12 @@ async def on_send_message(sid: str, data: dict):
     if _tenant_mismatch(sid, data):
         return {"success": False, "error": "会话租户与连接租户不一致"}
 
+    # P4 消息幂等(spec §2.7):clientMsgId 合法即透传为消息主键 —— 重发/断线
+    # 重连重放经 append_message 的 ON CONFLICT DO NOTHING 静默去重,ack 仍回
+    # 既有 id,前端据以对齐乐观气泡(重放不产生第二条时间线行)。
+    client_msg_id = str(data.get("clientMsgId") or "").strip()
+    if not _CLIENT_MSG_ID_RE.fullmatch(client_msg_id):
+        client_msg_id = ""
     saved = await conversation_repo.append_message(
         {
             "threadId": thread_id,
@@ -339,6 +349,7 @@ async def on_send_message(sid: str, data: dict):
             "content": content,
             "cards": cards,
             "operatorInfo": operator_info,
+            **({"id": client_msg_id} if client_msg_id else {}),
         }
     )
     room = _room(thread_id, tenant_id)

@@ -711,7 +711,18 @@ class ApprovalGatekeeper:
                         next_status = "approved"
                 elif action == "cancel":
                     next_status = "cancelled"
-                elif action in ("human_finish", "human_reply") or record.action_type == "human_escalation":
+                elif record.action_type == "human_escalation":
+                    # live-desk-rework P4(spec §2.6):批驳 ≠ 结束人工服务 ——
+                    # 升级工单被驳只落 rejected 终局,不发「[人工客服]」文案、
+                    # 不释放会话;接管真源保持,直至坐席显式释放/掉线超时。
+                    # 此前 reject 误落下方 human_finish 分支被连带释放,坐席
+                    # 台批转人工申请后顾客被静默踢回 AI。
+                    next_status = "rejected"
+                elif action in ("human_finish", "human_reply"):
+                    # P4 注:human_reply 网关 HTTP 面已退役(_OPERATOR_ACTIONS
+                    # 移除);引擎分支保留至 P5,供 SPI / 管理台旧通道
+                    # (/api/admin/approvals) 与 useApprovalMachine 的
+                    # human_finish 同批退役时一并收口。
                     next_status = "resolved_by_human"
                     if human_reply and human_reply.strip():
                         reply_text = human_reply.strip()

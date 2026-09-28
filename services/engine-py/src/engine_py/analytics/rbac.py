@@ -49,6 +49,10 @@ DEFAULT_MENUS: list[dict] = [
     # 可见性对齐(老板/管理员/运营可见即持有,仓储无此菜单);坐席身份模型定档后
     # (live-desk 地图)再细化坐席专属角色与拆分接单/接管粒度。
     {"id": "btn-live-desk-operate", "parent": "m-live-desk", "name": "坐席操作", "type": "button", "perm": "live_desk:operate", "sort": 1},
+    # live-desk-rework P4(spec §2.6):工单批驳一等权限点 —— 台内嵌批驳卡与
+    # 员工代行 approve/reject(/api/chat/approvals)都过此闸;退款核准是资金
+    # 语义,与接单/发言(live_desk:operate)分粒度,不放给无批驳权限的坐席。
+    {"id": "btn-live-desk-approve", "parent": "m-live-desk", "name": "工单批驳", "type": "button", "perm": "live_desk:approve", "sort": 2},
     # live-desk-rework P2(spec §3 灰度):新坐席台独立页 —— 灰度开关就是本菜单的
     # 角色可见性,零新 env。先只授老板/管理员(sales_viewer 种子排除,见
     # _GREY_RELEASE_MENUS);support_agent 稳后放;旧 /live-desk tab 并存至 P5 退役。
@@ -85,8 +89,9 @@ DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
     ],
     # live-desk-rework §2.2:专职客服 = 客服工作台 + 客户管理,不给数据分析/
     # 订单/商品/优惠/系统面(商户招客服不泄经营数据);新坐席台按灰度暂不授。
+    # P4:客服本职含工单批驳(btn-live-desk-approve,live_desk:approve)。
     "support_agent": [
-        "d-users", "m-customers", "m-live-desk", "btn-live-desk-operate",
+        "d-users", "m-customers", "m-live-desk", "btn-live-desk-operate", "btn-live-desk-approve",
     ],
 }
 

@@ -3,7 +3,8 @@
 POST /api/approvals(别名 /api/chat/approvals)是双面接口:顾客 HITL
 (apps/web 审批卡 / 呼叫人工)与历史坐席通道共用。收口后的分面语义:
 
-1. 人工坐席动作(human_message/human_reply/human_finish):必须持员工 JWT,
+1. 人工坐席动作(human_message/human_finish;human_reply 已于 live-desk-rework
+   P4 白名单退役,见 test_live_desk_p4_decouple.py):必须持员工 JWT,
    匿名 401 —— 此前匿名可自报 actor 以坐席身份发消息/结案;
 2. 顾客动作(approve/reject/cancel/start_human_takeover):保持可达但加线程
    归属绑定(userId 须为会话属主)—— 此前匿名可凭猜测的 approvalId 核准退款;

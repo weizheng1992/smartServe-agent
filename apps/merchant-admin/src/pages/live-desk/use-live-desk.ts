@@ -1,8 +1,11 @@
-// 坐席台数据面 hook(live-desk-rework P2):socket.io operator 连接即在线,
+// 坐席台数据面 hook(live-desk-rework P2/P4):socket.io operator 连接即在线,
 // 列表/时间线走员工形态 HTTP,认领/释放/发言走 socket ack(服务端裁决原子
-// 守卫与 perm 闸,前端只呈递结果)。tenantId 与 api.ts 同取 dev 单租户
-// 'aurora'(x-tenant-id 同值,见 .claude/rules/merchant-admin.md §1.1)。
+// 守卫与 perm 闸,前端只呈递结果)。P4:发言带 clientMsgId 幂等(乐观气泡 +
+// 失败回真源重同步)、typing 输入态收发、工单批驳走 /api/chat/approvals。
+// tenantId 与 api.ts 同取 dev 单租户 'aurora'(x-tenant-id 同值,见
+// .claude/rules/merchant-admin.md §1.1)。
 import {
+  type ApprovalItem,
   type DeskAgentRow,
   type DeskConversationRow,
   type DeskNoteItem,
@@ -21,6 +24,8 @@ const PRESENCE_REFRESH_MS = 20_000;
 const PRESENCE_PING_MS = 30_000;
 const NOW_TICK_MS = 1_000; // 排队等待计时刷新
 const ACK_TIMEOUT_MS = 8_000;
+const TYPING_THROTTLE_MS = 1_500; // 输入态上行节流
+const TYPING_HOLD_MS = 2_500; // 「对方正在输入」显示保持窗
 
 export interface LiveDeskAck {
   success: boolean;
@@ -39,8 +44,12 @@ export function useLiveDesk() {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<MessageItem[]>([]);
   const [context, setContext] = useState<LiveDeskContext | null>(null);
+  const [pendingTicket, setPendingTicket] = useState<ApprovalItem | null>(null);
+  const [peerTyping, setPeerTyping] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const socketRef = useRef<Socket | null>(null);
+  const typingSentAtRef = useRef(0); // 上行节流
+  const typingHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null); // 显示保持窗
 
   const loadConversations = useCallback(async () => {
     try {
@@ -73,11 +82,24 @@ export function useLiveDesk() {
     }
   }, []);
 
+  // 本会话待批工单(P4 台内批驳):员工 JWT 列表本租户收窄,threadId 就地过滤。
+  const loadPendingTicket = useCallback(async (threadId: string) => {
+    try {
+      const body = await api.liveDesk.pendingApprovals();
+      if (body.success) {
+        setPendingTicket(body.approvals.find((a) => a.threadId === threadId) || null);
+      }
+    } catch {
+      // 待批卡是辅助面,拉取失败按无工单呈现,不阻断时间线
+    }
+  }, []);
+
   const openThread = useCallback(
     async (threadId: string) => {
       setSelectedThreadId(threadId);
       setTimeline([]);
       setContext(null); // 换会话先清旧上下文,防串栏
+      setPendingTicket(null);
       // 入房:房间广播(new_message / conversation_state_changed)必须 join 才收
       socketRef.current?.emit('join_thread', { threadId, tenantId: TENANT_ID, role: 'operator' });
       try {
@@ -87,8 +109,9 @@ export function useLiveDesk() {
         console.error('[live-desk] 时间线加载失败', err);
       }
       void loadContext(threadId);
+      void loadPendingTicket(threadId);
     },
-    [loadContext],
+    [loadContext, loadPendingTicket],
   );
 
   // 选中线程的 ref(new_message 闭包读取最新值,不重连 socket)
@@ -122,10 +145,19 @@ export function useLiveDesk() {
     socket.on('new_message', (payload: { threadId?: string }) => {
       if (payload?.threadId && payload.threadId === selectedThreadIdRef.current) void openThread(payload.threadId);
     });
+    // P4 typing 接线:对端输入态透传广播(skip_sid 已排除发送者);仅顾客侧
+    // 输入点亮「对方正在输入」,同事坐席的输入态不显示。
+    socket.on('user_typing', (payload: { threadId?: string; role?: string }) => {
+      if (payload?.threadId !== selectedThreadIdRef.current || payload?.role === 'operator') return;
+      setPeerTyping(true);
+      if (typingHoldRef.current) clearTimeout(typingHoldRef.current);
+      typingHoldRef.current = setTimeout(() => setPeerTyping(false), TYPING_HOLD_MS);
+    });
     return () => {
       socket.close();
       socketRef.current = null;
       setConnected(false);
+      if (typingHoldRef.current) clearTimeout(typingHoldRef.current);
     };
     // loadConversations/openThread 均为稳定 useCallback;myEmail 为稳定字符串,
     // 不会引发重连
@@ -199,13 +231,57 @@ export function useLiveDesk() {
     },
     [emitAck, loadConversations],
   );
+  // P4 typing 上行:输入即节流 emit;服务端透传广播给房间内其他人。
+  const emitTyping = useCallback((threadId: string) => {
+    const now = Date.now();
+    if (now - typingSentAtRef.current < TYPING_THROTTLE_MS) return;
+    typingSentAtRef.current = now;
+    socketRef.current?.emit('typing', { threadId, tenantId: TENANT_ID, role: 'operator' });
+  }, []);
+
   const sendMessage = useCallback(
     async (threadId: string, content: string) => {
-      const ack = await emitAck('send_message', { threadId, tenantId: TENANT_ID, content });
-      if (ack.success) await openThread(threadId); // 发完即对齐时间线(含自己一行)
+      // P4 消息幂等(spec §2.7):客户端 UUID 作消息主键 —— 先挂乐观气泡,
+      // ack 成功即整表重同步(服务端真相同 id 单行);失败/超时不盲删,重拉
+      // 时间线以真源裁决(重放可能已落库,只有 ack 未达)。重放静默由服务端
+      // ON CONFLICT DO NOTHING 保证,ack 恒回既有 messageId。
+      const clientMsgId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setTimeline((prev) =>
+        prev.some((m) => m.id === clientMsgId)
+          ? prev
+          : [...prev, { id: clientMsgId, role: 'operator', content, timestamp: new Date().toISOString() }],
+      );
+      const ack = await emitAck('send_message', { threadId, tenantId: TENANT_ID, content, clientMsgId });
+      // 发完即对齐时间线;ack 失败(含超时)同样回真源 —— 没落库则乐观行消失
+      // (回滚),落库而 ack 未达则如实显示,盲删会把已落库真消息一并抹掉。
+      await openThread(threadId);
       return ack;
     },
     [emitAck, openThread],
+  );
+
+  // P4 台内批驳(spec §2.6):员工代行 approve/reject 走 /api/chat/approvals,
+  // 服务端闸 live_desk:approve(403 如实透传);批驳后不自动释放,工单终局
+  // 只刷新待批卡与列表。
+  const reviewTicket = useCallback(
+    async (approvalId: string, action: 'approve' | 'reject', rejectionReason?: string) => {
+      try {
+        const body = await api.liveDesk.resolveApproval({ approvalId, action, rejectionReason });
+        if (body.success) {
+          const tid = selectedThreadIdRef.current;
+          if (tid) void loadPendingTicket(tid);
+          void loadConversations();
+          return { success: true };
+        }
+        return { success: false, error: body.detail || body.error || '批驳失败' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : '批驳失败' };
+      }
+    },
+    [loadPendingTicket, loadConversations],
   );
   const toggleDnd = useCallback(
     async (enabled: boolean) => {
@@ -264,10 +340,14 @@ export function useLiveDesk() {
     selectedThreadId,
     timeline,
     context,
+    pendingTicket,
+    peerTyping,
     openThread,
     claim,
     release,
     sendMessage,
+    emitTyping,
+    reviewTicket,
     toggleDnd,
     addNote,
     removeNote,

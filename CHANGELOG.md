@@ -4,6 +4,33 @@
 
 ---
 
+## [2.6.61] - 2026-09-28 (live-desk P4:工单联动 + 消息可靠性 —— 台内批驳 / human_reply 退役 / clientMsgId 幂等 / typing)
+
+客服工作台重构四期 P4(spec `docs/architecture/live-desk-rework.md` §3)。此前工单批驳只能去工作台审批 tab,消息与工单互相纠缠:坐席发普通聊天会被偷换成工单回复,批驳升级工单会连会话一起释放,断网重发可能落双份消息。本版把批驳嵌进坐席台、把消息与工单彻底解耦、给消息上幂等键、接通输入态。
+
+### ✨ Features
+
+- **台内工单批驳卡(坐席台内嵌,spec §2.6)**:选中会话若挂 waiting 工单,时间线上方出琥珀批驳卡(actionType badge + 理由),「通过 / 驳回(可填理由)」就地处理,成功后刷新待批卡与会话列表。批/驳走员工代行通道 `POST /api/chat/approvals`(员工 JWT 租户收窄),新闸 `live_desk:approve`:无权限 403 detail「无工单批驳权限(live_desk:approve)」如实透传;RBAC 种子加按钮节点 `btn-live-desk-approve`(m-live-desk 下)并授予 support_agent,finance_owner 全量按钮天然通过,warehouse_operator 闭包不含自动 403。
+- **批驳 ≠ 结束人工服务**:gatekeeper 把 escalation 从 human_finish/human_reply 分支拆出优先分支 —— 批驳升级工单只落 `rejected` 终局,不发「[人工客服]」文案、不 `release_takeover`、不发「服务已结束」系统消息;接管真源保持,直至坐席显式释放/掉线超时。
+- **clientMsgId 消息幂等(spec §2.7)**:socket `send_message` 收 `clientMsgId`(正则 `^[0-9a-zA-Z-]{8,64}$`,非法静默回落服务端 uuid)透传为 `messages.id`;重放经 `ON CONFLICT DO NOTHING` 静默,ack 恒回既有 messageId,`new_message` 照常广播(前端按 id 去重);`unread_count` 仅在新行落库(rowcount>0)时 +1,重放不多计。
+- **typing 输入态**:服务端零新增(`typing` → `user_typing` 房间透传 + skip_sid,契约既有);坐席输入上行节流 1.5s,对端显示保持窗 2.5s,同事坐席(role=operator)的输入态不点亮。
+- **前端幂等发送链**:坐席台与工作台回退面发言均先挂 clientMsgId 乐观气泡,ack 成功/失败(含超时)都整表回真源重同步 —— 没落库则乐观行消失(回滚),落库而 ack 未达则如实显示,严禁盲删(会把已落库真消息一并抹掉)。
+- **消息/工单显式解耦(工作台回退面)**:坐席发言改走 socket `send_message` 直发,删除「找 waiting 工单否则先 takeover 再 human_reply」的偷换逻辑 —— 普通聊天不再吞掉转人工工单当回复通道,也不再为发一条消息暗造接管工单(`handleHumanReply` 显式入口保留至 P5)。
+
+### 🚑 Retirements
+
+- **`human_reply` 网关 HTTP 面退役**:员工(`/api/chat/approvals`)与顾客(`/api/approvals`)通道移出 `_OPERATOR_ACTIONS` 白名单,请求即 400「未知审批动作」;`/api/admin/approvals` 管理台通道与 SPI 直通 gatekeeper 不受影响,引擎分支保留至 P5(与 human_finish 一同收口,`useApprovalMachine` 在 packages/ui,消费方含 admin/web 禁区)。
+
+### 🧪 Tests
+
+- 新专册 `services/gateway-py/tests/test_live_desk_p4_decouple.py`(9 例):human_reply 双路径 400(human_finish 未退役对照)、staff reject 200 / warehouse_operator 403 / 顾客不受闸、批驳后 rejected 终局 + threads 保持 human_takeover + 无结束文案、clientMsgId 重放双 ack 同 id + 恰好 2 条广播 + DB 单行 + unread 不重复计、坏 id 服务端 uuid 回落。
+- merchant-admin vitest 新 `use-live-desk.test.tsx`(8 例):乐观气泡先行 + 整表对齐真源、ack 失败已落库如实显示 / 未落库回滚、批驳 403 detail 透传 + 网络异常 + 成功后刷新不释放、typing 对端过滤 + 2.5s 保持窗、上行 1.5s 节流。
+- Playwright `agent-desk.e2e.ts` 扩 P4 两条:「socket 掐断后发送(routeWebSocket 拒握手)→ ack 失败如实提示 + 时间线回真源不残留乐观气泡」「顾客 typing → 坐席台亮『对方正在输入…』→ 2.5s 后熄灭」。
+- **e2e 稳定性修复**:会话列表存在历史残留行时,全局 `claim-button first()` 会认领到旧行导致后续断言全错位(P2 间歇挂根因)—— P2/P3/P4 全部改行内定位,「发送」按钮 `exact:true` 防欢迎语残留子串误配。
+- 全绿:gateway 329 passed+3 skipped / engine 1090 passed / vitest 142(29 文件)/ Playwright agent-desk 4 条。
+
+---
+
 ## [2.6.60] - 2026-09-28 (live-desk P3:坐席上下文栏 —— 五项一次聚合 + 内部备注 thread_notes)
 
 客服工作台重构三期 P3(spec `docs/architecture/live-desk-rework.md` §3)。坐席认领后只有裸时间线,看不到对方是谁、买过什么、有没有售后在途,每句回复都靠追问重建语境。本版给坐席台右栏装上五项上下文:客户档案 / 最近订单 / 售后中工单 / 双层画像 / 内部备注,一次聚合单次往返。

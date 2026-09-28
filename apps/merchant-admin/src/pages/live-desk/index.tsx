@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-// 坐席台独立页(live-desk-rework P2/P3):三栏 —— 左会话池(排队等待最久置顶)/
-// 中时间线(认领后回复)/ 右坐席上下文栏(五项,spec §2.4)+ 坐席在线态。
-// 旧 /live-desk tab(OrderWorkbench)并存不动作回退面;本页是 spec §3
-// P2/P3 的正式坐席工作台。
+// 坐席台独立页(live-desk-rework P2/P3/P4):三栏 —— 左会话池(排队等待最久
+// 置顶)/ 中时间线(认领后回复 + 待批工单批驳卡)/ 右坐席上下文栏(五项,
+// spec §2.4)+ 坐席在线态。旧 /live-desk tab(OrderWorkbench)并存不动作回退面;
+// 本页是 spec §3 P2-P4 的正式坐席工作台。
 import { Button } from 'ui';
 import {
   ContextCustomer,
@@ -29,6 +29,26 @@ export default function LiveDeskPage() {
   const [draft, setDraft] = useState('');
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+
+  // P4 台内批驳:批/驳都走员工代行通道,403(无 live_desk:approve)与
+  // 「已处理过」(400)按服务端文案如实呈现;批驳后不自动释放,仅刷新待批卡。
+  const doReview = async (action: 'approve' | 'reject') => {
+    if (!desk.pendingTicket || reviewing) return;
+    setReviewing(true);
+    setNotice('');
+    const r = await desk.reviewTicket(
+      desk.pendingTicket.id,
+      action,
+      action === 'reject' ? rejectReason.trim() : undefined,
+    );
+    setReviewing(false);
+    setRejectOpen(false);
+    setRejectReason('');
+    if (!r.success) setNotice(r.error || '批驳失败');
+  };
 
   const visible = useMemo(
     () => sortQueueFirst(filterConversations(desk.conversations, desk.myEmail, tab, keyword)),
@@ -143,6 +163,66 @@ export default function LiveDeskPage() {
                 </Button>
               )}
             </div>
+            {/* P4 台内批驳卡:本会话待批工单内嵌批/驳(spec §2.6) */}
+            {desk.pendingTicket && (
+              <div className="border-b border-amber-100 bg-amber-50/70 px-4 py-2.5" data-testid="desk-ticket-card">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-semibold text-amber-700">本会话待批工单</span>
+                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+                    {desk.pendingTicket.actionType}
+                  </span>
+                  {desk.pendingTicket.reason && (
+                    <span
+                      className="min-w-0 flex-1 truncate text-[11px] text-zinc-500"
+                      title={desk.pendingTicket.reason}
+                    >
+                      {desk.pendingTicket.reason}
+                    </span>
+                  )}
+                  <span className="ml-auto flex shrink-0 gap-1.5">
+                    <Button
+                      variant="outline"
+                      className="h-6 px-2 text-[11px]"
+                      data-testid="desk-ticket-approve"
+                      disabled={reviewing}
+                      onClick={() => void doReview('approve')}
+                    >
+                      通过
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-6 px-2 text-[11px]"
+                      data-testid="desk-ticket-reject"
+                      disabled={reviewing}
+                      onClick={() => setRejectOpen((v) => !v)}
+                    >
+                      驳回
+                    </Button>
+                  </span>
+                </div>
+                {rejectOpen && (
+                  <div className="mt-2 flex gap-1.5">
+                    <input
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && void doReview('reject')}
+                      placeholder="驳回理由(可选)"
+                      data-testid="desk-ticket-reason"
+                      className="flex-1 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-[12px] outline-none focus:border-zinc-400"
+                    />
+                    <Button
+                      variant="outline"
+                      className="h-8 px-3 text-[11px]"
+                      data-testid="desk-ticket-confirm-reject"
+                      disabled={reviewing}
+                      onClick={() => void doReview('reject')}
+                    >
+                      确认驳回
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4" data-testid="desk-timeline">
               {desk.timeline.map((m) => (
                 <div
@@ -166,11 +246,20 @@ export default function LiveDeskPage() {
             </div>
             <div className="border-t border-zinc-100 p-3">
               {notice && <div className="mb-2 text-[11px] text-red-500">{notice}</div>}
+              {/* P4 typing 接线:顾客输入态(服务端 user_typing 透传,2.5s 保持窗) */}
+              {desk.peerTyping && (
+                <div className="mb-1 text-[11px] text-zinc-400" data-testid="desk-typing">
+                  对方正在输入…
+                </div>
+              )}
               {mineSelected ? (
                 <div className="flex gap-2">
                   <input
                     value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
+                    onChange={(e) => {
+                      setDraft(e.target.value);
+                      if (desk.selectedThreadId) desk.emitTyping(desk.selectedThreadId);
+                    }}
                     onKeyDown={(e) => e.key === 'Enter' && void doSend()}
                     placeholder="回复顾客…"
                     className="flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-[12px] outline-none focus:border-zinc-400"
