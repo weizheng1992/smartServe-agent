@@ -22,6 +22,9 @@ import re
 
 import socketio
 
+from engine_py.approvals import takeover
+from engine_py.config import settings
+
 from . import conversation_repo
 
 NAMESPACE = "/ws/chat"
@@ -136,6 +139,18 @@ async def on_disconnect(sid: str):
             room=room,
             namespace=NAMESPACE,
         )
+    # P1 掉线超时释放(live-desk-rework spec §2.1):坐席掉线给其名下全部接管
+    # 会话写 DB 释放 deadline;权威释放由 engine scheduler 幂等扫描执行
+    # (多实例约束:进程内计时器仅可作 UX 提示,spec §6)。重连(join/认领/
+    # 发言)即取消。P1 前端零 socket,机制先钉契约,P2 坐席面接入后全面生效。
+    operator_email = (info or {}).get("staff", {}).get("email")
+    if operator_email:
+        try:
+            n = await takeover.mark_disconnect_deadlines(operator_email, settings.takeover_release_timeout_seconds)
+            if n:
+                print(f"[Realtime] 坐席 {operator_email} 掉线,已对 {n} 个接管会话写释放计时({settings.takeover_release_timeout_seconds:.0f}s)")
+        except Exception as err:
+            print(f"[Realtime] 释放计时写入失败(不阻断断线流程): {err}")
 
 
 @sio.on("join_thread", namespace=NAMESPACE)
@@ -152,6 +167,13 @@ async def on_join_thread(sid: str, data: dict):
     room = _room(thread_id, tenant_id)
     connected_clients[sid] = {**connected_clients.get(sid, {}), "threadId": thread_id, "tenantId": tenant_id, "role": role}
     await sio.enter_room(sid, room, namespace=NAMESPACE)
+
+    # P1:坐席加入房间 = 重连/在岗信号,取消其名下接管会话的掉线释放计时
+    if staff is not None:
+        try:
+            await takeover.cancel_disconnect_deadlines(staff["email"])
+        except Exception as err:
+            print(f"[Realtime] 释放计时取消失败(不阻断入房): {err}")
 
     await sio.emit("joined_room", {"room": room, "threadId": thread_id, "tenantId": tenant_id}, to=sid, namespace=NAMESPACE)
     await sio.emit(
@@ -182,7 +204,9 @@ async def on_takeover(sid: str, data: dict):
     # 服务端身份派生:客户端自报 operatorId/Name 不再采信(02 安全先行)
     operator_id, operator_name = staff["email"], staff["name"]
 
-    await conversation_repo.update_conversation_status(thread_id, tenant_id, "human_takeover", operator_id)
+    # P1 真源归一:socket 链与 HTTP 链同经 takeover 模块写真源(认领即清
+    # 掉线释放计时;business_id 收租户 WHERE,与 update_conversation_status 同口径)
+    await takeover.assign_operator(thread_id, operator_id, business_id=tenant_id)
     sys_msg = await conversation_repo.append_message(
         {
             "threadId": thread_id,
@@ -219,7 +243,9 @@ async def on_release_takeover(sid: str, data: dict):
         return {"success": False, "error": "坐席身份未认证,须以员工 JWT 建立 operator 连接"}
     if _tenant_mismatch(sid, data):
         return {"success": False, "error": "会话租户与坐席所属租户不一致"}
-    await conversation_repo.update_conversation_status(thread_id, tenant_id, "active", None)
+    # P1 真源归一:释放条件 UPDATE 幂等(重复释放不重复落系统消息);
+    # business_id 收租户 WHERE,严防跨租户释放。
+    await takeover.release_takeover(thread_id, business_id=tenant_id)
     sys_msg = await conversation_repo.append_message(
         {
             "threadId": thread_id,

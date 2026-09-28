@@ -24,9 +24,11 @@ export function LiveDeskTab() {
     activeThreadMessages,
     fetchDashboardData,
     filteredConversations,
+    handleRelease,
     handleSendMessage,
     handleTakeover,
     inputMessage,
+    isReleasing,
     isTakingOver,
     liveDeskSearchQuery,
     liveDeskStatusFilter,
@@ -37,6 +39,9 @@ export function LiveDeskTab() {
     setLiveDeskSearchQuery,
     setLiveDeskStatusFilter,
   } = useWorkbench();
+  // 当前会话接管态来自真源快照(8s 轮询):接管中 → 头部按钮切「释放回 AI」
+  const activeConversation = filteredConversations.find((c) => (c.threadId || c.id) === activeThreadId);
+  const activeInTakeover = activeConversation?.status === 'human_takeover';
   return (
     <>
       <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col md:flex-row h-[700px]">
@@ -152,15 +157,27 @@ export function LiveDeskTab() {
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => handleTakeover(activeThreadId)}
-                    disabled={isTakingOver}
-                    className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold h-8 cursor-pointer"
-                  >
-                    <span>🚨 主动接管会话</span>
-                  </Button>
+                  {activeInTakeover ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => handleRelease(activeThreadId)}
+                      disabled={isReleasing}
+                      className="bg-slate-600 hover:bg-slate-500 text-white text-xs font-semibold h-8 cursor-pointer"
+                    >
+                      <span>{isReleasing ? '释放中...' : '✅ 释放回 AI 托管'}</span>
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => handleTakeover(activeThreadId)}
+                      disabled={isTakingOver}
+                      className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold h-8 cursor-pointer"
+                    >
+                      <span>🚨 主动接管会话</span>
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -172,7 +189,11 @@ export function LiveDeskTab() {
                   activeThreadMessages.map((msg, idx) => {
                     const isUser = msg.role === 'user';
                     const isSystem = msg.role === 'system';
-                    const isOperator = msg.content?.startsWith('[人工客服]') || msg.content?.startsWith('[商户客服]');
+                    // P1 写侧落 role='operator';前缀判定保留作老数据读侧兼容(P5 清除)
+                    const isOperator =
+                      msg.role === 'operator' ||
+                      msg.content?.startsWith('[人工客服]') ||
+                      msg.content?.startsWith('[商户客服]');
 
                     if (isSystem) {
                       return (
@@ -187,8 +208,12 @@ export function LiveDeskTab() {
                     return (
                       <div key={msg.id || idx} className={`flex flex-col ${isUser ? 'items-start' : 'items-end'}`}>
                         <span className="text-[10px] text-slate-400 mb-1 px-1">
-                          {isUser ? '👤 顾客' : isOperator ? '👨‍💼 商户客服' : '🤖 AI 助手'} ·{' '}
-                          {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
+                          {isUser
+                            ? '👤 顾客'
+                            : isOperator
+                              ? `👨‍💼 ${msg.operatorInfo?.operatorName || '商户客服'}`
+                              : '🤖 AI 助手'}{' '}
+                          · {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
                         </span>
                         <div
                           className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs shadow-2xs leading-relaxed ${

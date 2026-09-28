@@ -545,6 +545,12 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ threadId, action: 'start_human_takeover' }),
       }),
+    /** 释放接管回 AI(P1 事故止血):写真源 threads → active,幂等。 */
+    release: async (threadId: string): Promise<{ success: boolean; released?: boolean; error?: string }> =>
+      fetchJson('/api/admin/approvals', {
+        method: 'POST',
+        body: JSON.stringify({ threadId, action: 'release_takeover' }),
+      }),
   },
 
   /** 会话(客服工作台;tenantId 与 x-tenant-id 同值)。 */

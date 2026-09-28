@@ -34,9 +34,11 @@ def test_开关关闭_周期任务整体不启动(monkeypatch, flag):
 
 def test_默认任务清单_对账30s坏例摘要6h():
     tasks = {t.name: t for t in default_tasks()}
-    assert set(tasks) == {"outbox_reconcile", "badcase_digest"}
+    # P1(live-desk-rework):接管掉线超时释放扫描 30s 入列
+    assert set(tasks) == {"outbox_reconcile", "badcase_digest", "takeover_release"}
     assert tasks["outbox_reconcile"].interval_seconds == 30.0
     assert tasks["badcase_digest"].interval_seconds == 6 * 3600.0
+    assert tasks["takeover_release"].interval_seconds == 30.0
 
 
 def _run_until(coro_factory, predicate, budget_s: float = 2.0) -> None:

@@ -569,7 +569,9 @@ async def list_approvals(
 # 一并退役 —— 身份只来自 JWT 或「顾客」语义。GET 列表收口另行立项(_apps/web
 # 轮询与 admin 大盘都依赖匿名 GET)。
 _CUSTOMER_ACTIONS = frozenset({"approve", "reject", "cancel", "start_human_takeover"})
-_OPERATOR_ACTIONS = frozenset({"human_message", "human_reply", "human_finish"})
+# P1(live-desk-rework spec §2.1):release_takeover 为线程级员工动作 ——
+# 释放语义 = 写真源(threads → active + 坐席清空),无审批单,JWT 闸同坐席动作。
+_OPERATOR_ACTIONS = frozenset({"human_message", "human_reply", "human_finish", "release_takeover"})
 
 
 async def _optional_staff(authorization: str | None) -> dict | None:
@@ -600,6 +602,16 @@ async def _thread_owner(thread_id: str | None) -> str | None:
         return (await _thread_owner_context(session, thread_id)).get("userId")
 
 
+async def _thread_business_id(thread_id: str | None) -> str | None:
+    """线程归属租户(P1 release_takeover 线程级租户校验用),未知返回 None。"""
+    from engine_py.approvals.gatekeeper import _thread_owner_context
+
+    if not thread_id:
+        return None
+    async with get_session() as session:
+        return (await _thread_owner_context(session, thread_id)).get("businessId")
+
+
 @approvals_router.post("/api/approvals")
 @approvals_router.post("/api/chat/approvals")
 async def resolve_approval(body: dict, request: Request, authorization: str | None = Header(None)):
@@ -623,6 +635,16 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
                 status_code=403,
                 detail=f"跨租户审批单被拒绝(员工租户 {staff_ctx['staff'].business_id})",
             )
+        # release_takeover 是线程级动作(无审批单):按线程归属校验租户,
+        # 严防员工凭猜测的 threadId 跨租户释放他人接管会话。归属未知(business_id
+        # 为 NULL 的存量线程)不额外拦,与上方审批校验同 fail-open 口径。
+        if action == "release_takeover" and body.get("threadId"):
+            thread_biz = await _thread_business_id(body["threadId"])
+            if thread_biz and thread_biz != staff_ctx["staff"].business_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"会话不属于员工租户 {staff_ctx['staff'].business_id},拒绝释放",
+                )
 
     if action in _OPERATOR_ACTIONS:
         if staff_ctx is None:
@@ -656,6 +678,8 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
     # 核准人契约(admin-readiness 01):身份落 actionPayload.resolvedBy/
     # resolvedByRole(engine 侧透传),管理台「审批人 / 驳回理由」列据此显示
     # 真实来源;customer 语义经 02 收口入引擎词表,不再伪装成运营坐席。
+    # P1 坐席身份(spec §2.2):operator 快照由服务端从员工 JWT 派生
+    # (operatorId=email / operatorName=display_name),客户端自报不采信。
     options = {
         "approvalId": body.get("approvalId"),
         "threadId": body.get("threadId"),
@@ -665,6 +689,14 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
         "isFinish": body.get("isFinish"),
         "resolvedBy": actor,
         "resolvedByRole": actor_role,
+        "operator": (
+            {
+                "operatorId": staff_ctx["email"],
+                "operatorName": staff_ctx["staff"].display_name or staff_ctx["email"],
+            }
+            if staff_ctx is not None
+            else None
+        ),
     }
     return await ApprovalGatekeeper.process_approval_action(options)
 

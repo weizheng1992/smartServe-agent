@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from .approvals.outbox_worker import process_pending_events
+from .approvals.takeover import release_expired_takeovers
 from .badcase.digest import run_badcase_digest
 
 
@@ -32,9 +33,18 @@ async def _outbox_reconcile_tick() -> None:
         print(f"[Scheduler:outbox_reconcile] 对账扫描: {summary}")
 
 
+async def _takeover_release_tick() -> None:
+    # live-desk-rework P1(spec §2.1):掉线超时释放的权威路径 —— DB deadline
+    # + 幂等扫描,与排队超时回落(P2)共用扫描回路形态;重复扫描 0 行。
+    released = await release_expired_takeovers()
+    if released:
+        print(f"[Scheduler:takeover_release] 掉线超时自动释放: {released}")
+
+
 def default_tasks() -> list[PeriodicTask]:
     return [
         PeriodicTask(name="outbox_reconcile", interval_seconds=30.0, func=_outbox_reconcile_tick),
+        PeriodicTask(name="takeover_release", interval_seconds=30.0, func=_takeover_release_tick),
         PeriodicTask(name="badcase_digest", interval_seconds=6 * 3600.0, func=run_badcase_digest),
     ]
 

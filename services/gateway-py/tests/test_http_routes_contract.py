@@ -1800,9 +1800,10 @@ class TestLogs:
 
 class TestMerchantAdminApprovalsActor:
     """商户控制台 resolve 通道的核准人契约(admin-readiness 04 审计抓获):
-    此前直调引擎漏注入 actor,商户面决议落库恒 unknown。"""
+    此前直调引擎漏注入 actor,商户面决议落库恒 unknown;P1 真源化后缺省
+    取员工 JWT 真身(显式 actor 仍尊重)。"""
 
-    async def test_merchant_resolve_defaults_to_merchant_operator(self, client, contract_fixtures):
+    async def test_merchant_resolve_actor缺省取员工JWT真身(self, client, contract_fixtures):
         import uuid as _uuid
 
         from engine_py.db import StaffMember, get_session
@@ -1837,7 +1838,9 @@ class TestMerchantAdminApprovalsActor:
 
         listing = await client.get("/api/admin/approvals", params={"tenantId": "nike"}, headers=headers)
         row = next(a for a in listing.json()["approvals"] if a["id"] == aid)
-        assert row["actionPayload"]["resolvedBy"] == "merchant_operator"
+        # P1 真源化(live-desk-rework spec §2.2):缺省 actor 取员工 JWT 真身,
+        # 不再兜底自报 merchant_operator(审计此前恒匿名伪身份);角色语义保留
+        assert row["actionPayload"]["resolvedBy"] == nike_email
         assert row["actionPayload"]["resolvedByRole"] == "merchant_operator"
 
 

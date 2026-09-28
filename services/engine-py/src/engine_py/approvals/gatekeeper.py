@@ -23,6 +23,7 @@ from ..badcase.pool import SOURCE_APPROVAL_REJECTED, SOURCE_HUMAN_TAKEOVER, reco
 from ..db import ApprovalOutboxEvent, Message, PendingApproval, get_session
 from ..event_bus import emit_status, get_client, publish_agent_event
 from ..memory.short_memory import _FALLBACK_USER_ID
+from . import takeover
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE
@@ -53,6 +54,24 @@ async def _add_system_message(thread_id: str, role: str, content: str) -> str:
     # TS 侧经进程内 emitter 广播 thread:message;Python 侧发布到事件总线供 gateway-py 消费
     await publish_agent_event(
         f"thread:{thread_id}", "message", {"id": msg_id, "role": role, "content": content, "timestamp": now}
+    )
+    return msg_id
+
+
+async def _add_operator_message(thread_id: str, content: str, operator: dict) -> str:
+    """坐席消息落列(live-desk-rework P1,spec §2.1):``role='operator'`` +
+    ``operator_info`` JSONB 快照 —— ``"[人工客服] "`` 前缀拼接退役,身份快照
+    保证坐席改名不篡改历史发言;老数据前缀读侧兼容保留,不做历史回填。"""
+    msg_id = str(uuid.uuid4())
+    now = _dt.datetime.now().isoformat()
+    operator_info = {"operatorId": operator.get("operatorId"), "operatorName": operator.get("operatorName")}
+    async with get_session() as session:
+        session.add(
+            Message(id=msg_id, thread_id=thread_id, role="operator", content=content, operator_info=operator_info, timestamp=now)
+        )
+        await session.commit()
+    await publish_agent_event(
+        f"thread:{thread_id}", "message", {"id": msg_id, "role": "operator", "content": content, "operatorInfo": operator_info, "timestamp": now}
     )
     return msg_id
 
@@ -497,6 +516,9 @@ class ApprovalGatekeeper:
     @staticmethod
     async def start_human_takeover(thread_id: str = "default_thread", default_user_id: str = _FALLBACK_USER_ID) -> dict:
         await _ensure_thread_exists(thread_id, default_user_id)
+        # P1 真源双写(spec §2.1):工单退化为审计,接管活态写真源 ——
+        # human_takeover 且坐席空 = 呼叫中/排队;坐席认领由 operator 通道落列。
+        await takeover.mark_takeover_requested(thread_id)
 
         async with get_session() as session:
             existing = (
@@ -597,9 +619,32 @@ class ApprovalGatekeeper:
         resolved_by_role = options.get("resolvedByRole")
         if resolved_by_role not in ("platform_admin", "merchant_operator", "system", "customer"):
             resolved_by_role = "system"
+        # P1 坐席身份(live-desk-rework spec §2.2):由网关从员工 JWT 派生
+        # (operatorId=email / operatorName=display_name),客户端自报不采信。
+        operator = options.get("operator") or None
 
         if action == "start_human_takeover":
-            return await ApprovalGatekeeper.start_human_takeover(thread_id or "default_thread")
+            result = await ApprovalGatekeeper.start_human_takeover(thread_id or "default_thread")
+            # 员工通道接管(网关注入坐席身份)= 认领,真源直接落坐席;
+            # 顾客呼叫通道无 operator → 坐席空,保持呼叫中/排队形态。
+            if operator and operator.get("operatorId") and result.get("success"):
+                await takeover.assign_operator(
+                    (result.get("approval") or {}).get("threadId") or thread_id or "default_thread",
+                    operator["operatorId"],
+                )
+            return result
+
+        if action == "release_takeover":
+            # P1 事故止血(spec §2.1):HTTP 释放端点语义,员工通道 JWT 闸在
+            # 路由层。条件 UPDATE 幂等 —— 重复释放 0 行,不重复落系统消息。
+            if not thread_id:
+                return {"error": "threadId is required for release_takeover", "statusCode": 400}
+            released = await takeover.release_takeover(thread_id)
+            if released:
+                await _add_system_message(
+                    thread_id, "system", "【系统提示】人工客服服务已结束，已成功为您切回 AI 智能助手。"
+                )
+            return {"success": True, "threadId": thread_id, "status": "active", "released": released}
 
         if not approval_id or not action:
             return {"error": "approvalId and action are required", "statusCode": 400}
@@ -639,7 +684,15 @@ class ApprovalGatekeeper:
 
                 if action in ("human_message",) or (action == "human_reply" and is_finish is False):
                     if human_reply and human_reply.strip():
-                        await _add_system_message(record.thread_id, "assistant", f"[人工客服] {human_reply.strip()}")
+                        reply_text = human_reply.strip()
+                        if operator and operator.get("operatorId"):
+                            # P1 双写(spec §2.1):坐席发言 = 接管中 + 认领真源
+                            # (顺带清掉线释放计时);消息落 role='operator' 列。
+                            await takeover.assign_operator(record.thread_id, operator["operatorId"])
+                            await _add_operator_message(record.thread_id, reply_text, operator)
+                        else:
+                            # 无身份旧通道兜底:维持前缀写(读侧兼容形态,P5 退役)
+                            await _add_system_message(record.thread_id, "assistant", f"[人工客服] {reply_text}")
                     return {"success": True, "isHumanActive": True, "threadId": record.thread_id}
 
                 if record.status != "waiting":
@@ -661,7 +714,14 @@ class ApprovalGatekeeper:
                 elif action in ("human_finish", "human_reply") or record.action_type == "human_escalation":
                     next_status = "resolved_by_human"
                     if human_reply and human_reply.strip():
-                        await _add_system_message(record.thread_id, "assistant", f"[人工客服] {human_reply.strip()}")
+                        reply_text = human_reply.strip()
+                        if operator and operator.get("operatorId"):
+                            await _add_operator_message(record.thread_id, reply_text, operator)
+                        else:
+                            await _add_system_message(record.thread_id, "assistant", f"[人工客服] {reply_text}")
+                    # P1 双写(spec §2.1):人工阶段结束 → 释放回 active,
+                    # AI 暂停闸随真源状态自然解除;幂等,非接管态 0 行无副作用。
+                    await takeover.release_takeover(record.thread_id)
                     await _add_system_message(
                         record.thread_id, "system", "【系统提示】人工客服服务已结束，已成功为您切回 AI 智能助手。"
                     )

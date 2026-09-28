@@ -15,6 +15,7 @@ import os
 import time
 import uuid as _uuid
 
+from engine_py.approvals import takeover
 from engine_py.approvals.gatekeeper import ApprovalGatekeeper
 from engine_py.db import get_session
 from engine_py.event_bus import get_client as get_redis
@@ -307,6 +308,16 @@ async def admin_approvals(
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
+async def _thread_business_id(thread_id: str | None) -> str | None:
+    """线程归属租户(P1 release_takeover 线程级租户校验用),未知返回 None。"""
+    from engine_py.approvals.gatekeeper import _thread_owner_context
+
+    if not thread_id:
+        return None
+    async with get_session() as session:
+        return (await _thread_owner_context(session, thread_id)).get("businessId")
+
+
 @router.post("/api/admin/approvals")
 async def admin_approvals_action(body: MerchantApprovalActionIn, authorization: str | None = Header(None)):
     staff = (await _require_staff(authorization))["staff"]
@@ -320,9 +331,20 @@ async def admin_approvals_action(body: MerchantApprovalActionIn, authorization: 
                     status_code=403,
                     content={"success": False, "error": f"审批单不属于员工租户 {staff.business_id},拒绝操作"},
                 )
+        # P1(live-desk-rework spec §2.1):release_takeover 是线程级动作(无审批单),
+        # 按线程归属校验租户;归属未知(business_id NULL 存量线程)fail-open 同上。
+        if (body.action or "").strip() == "release_takeover" and body.threadId:
+            thread_biz = await _thread_business_id(body.threadId)
+            if thread_biz and thread_biz != staff.business_id:
+                return JSONResponse(
+                    status_code=403,
+                    content={"success": False, "error": f"会话不属于员工租户 {staff.business_id},拒绝释放"},
+                )
         # 核准人契约(admin-readiness 01):商户控制台通道 —— 此前直调引擎漏注入
-        # actor,落库恒 unknown(工单 04 审计实弹抓获);此路由即商户面,缺省 merchant_operator
-        actor = (body.actor or "").strip() or "merchant_operator"
+        # actor,落库恒 unknown(工单 04 审计实弹抓获)。P1 真源化(spec §2.2):
+        # 缺省取员工 JWT 真身,不再兜底自报 merchant_operator;operator 快照
+        # 同源派生,坐席消息落列与认领真源均据此落座。
+        actor = (body.actor or "").strip() or staff.email
         actor_role = body.actorRole or "merchant_operator"
         result = await ApprovalGatekeeper.process_approval_action(
             {
@@ -334,6 +356,10 @@ async def admin_approvals_action(body: MerchantApprovalActionIn, authorization: 
                 "isFinish": body.isFinish,
                 "resolvedBy": actor,
                 "resolvedByRole": actor_role,
+                "operator": {
+                    "operatorId": staff.email,
+                    "operatorName": staff.display_name or staff.email,
+                },
             }
         )
         if result.get("error"):
@@ -571,6 +597,23 @@ async def store_chat(body: dict):
                 "imageUrls": image_urls or None,
             }
         )
+
+        # P1 AI 暂停闸(live-desk-rework spec §2.1):接管期该会话全部轮次
+        # 不建作业不调 LLM,用户消息照常落库;release 后下一条自然走 AI。
+        # 入队前的第二顾客入口(dispatch_chat 之外唯一 AI 直跑通道),同闸。
+        if await takeover.is_human_takeover(thread_id):
+            paused_output = "您的消息已由人工客服接待，请稍候人工坐席回复。"
+            return {
+                "success": True,
+                "messageId": "",
+                "jobId": "",
+                "threadId": thread_id,
+                "userId": user_id,
+                "output": paused_output,
+                "result": paused_output,
+                "cards": [],
+                "isHumanActive": True,
+            }
 
         final_state = await run_agent(
             AgentJobInput(

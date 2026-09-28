@@ -80,5 +80,12 @@ class Settings:
         default_factory=lambda: float(_env("AI_MALL_QUERY_REWRITE_TIMEOUT_SECONDS", "2.0"))
     )
 
+    # 人工接管掉线释放超时(live-desk-rework P1,spec §2.1):坐席掉线后其名下
+    # 接管会话在此时限内未重连即由 scheduler 幂等扫描自动释放回 AI(60~120s 档;
+    # 权威路径 = DB deadline + 扫描,进程内计时器仅 UX 提示)
+    takeover_release_timeout_seconds: float = field(
+        default_factory=lambda: float(_env("AI_TAKEOVER_RELEASE_TIMEOUT_SECONDS", "90"))
+    )
+
 
 settings = Settings()

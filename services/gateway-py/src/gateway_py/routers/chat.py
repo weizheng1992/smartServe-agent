@@ -13,6 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
+from engine_py.approvals import takeover
 from engine_py.db import get_session
 from engine_py.event_bus import get_client, read_agent_events
 from engine_py.onboarding import build_entry_cards, resolve_onboarding_config
@@ -122,6 +123,33 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             "imageUrls": body.imageUrls,
         }
     )
+
+    # P1 AI 暂停闸(live-desk-rework spec §2.1):建作业前读 threads 真源,
+    # 接管期该会话全部轮次不建作业不调 LLM,用户消息照常落库;release 后
+    # 下一条自然走 AI。响应形状复用既有 isHumanActive 契约 —— apps/web
+    # useChatMessages 已有消费方(移除 loader + 重拉历史),零前端改动。
+    if await takeover.is_human_takeover(effective_thread_id):
+        if body.sync:
+            paused_output = "您的消息已由人工客服接待，请稍候人工坐席回复。"
+            return {
+                "success": True,
+                "jobId": "",
+                "threadId": effective_thread_id,
+                "userId": effective_user_id,
+                "output": paused_output,
+                "result": paused_output,
+                "cards": [],
+                "isHumanActive": True,
+                "isTemporalMode": False,
+            }
+        return {
+            "success": True,
+            "jobId": "",
+            "threadId": effective_thread_id,
+            "userId": effective_user_id,
+            "isHumanActive": True,
+            "isTemporalMode": False,
+        }
 
     job = AgentJobInput(
         jobId=job_id,

@@ -59,6 +59,7 @@ export function useWorkbenchState(initialTab: string) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [isTakingOver, setIsTakingOver] = useState(false);
+  const [isReleasing, setIsReleasing] = useState(false);
   const [rejectingApprovalId, setRejectingApprovalId] = useState<string | null>(null);
   const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
 
@@ -166,10 +167,8 @@ export function useWorkbenchState(initialTab: string) {
       approvalId,
       action,
       rejectionReason: action === 'reject' ? (explicitReason ?? undefined) : undefined,
-      // 核准人契约(admin-readiness 01):商户面声明身份;控制台暂无登录账号,
-      // 以调用面角色声明,接入真实账号后替换为操作员显示名即可,契约不变
-      actor: 'merchant_operator',
-      actorRole: 'merchant_operator',
+      // 核准人真源化(P1,spec §2.2):不再自报 actor —— 网关从员工 JWT
+      // 派生 resolvedBy/operator,坐席消息落列与审计据此落座
       apiEndpoint: '/api/admin/approvals',
     });
     if (result.success) {
@@ -211,6 +210,24 @@ export function useWorkbenchState(initialTab: string) {
     }
   };
 
+  /** 释放接管回 AI(P1 事故止血,spec §2.1):写真源 threads → active,
+   *  AI 暂停闸随状态自然解除;服务端条件 UPDATE 幂等,重复点无副作用。 */
+  const handleRelease = async (threadId: string) => {
+    setIsReleasing(true);
+    try {
+      const res = await api.approvals.release(threadId);
+      if (res.success === false && res.error) {
+        alert(res.error);
+      }
+      await fetchDashboardData();
+      await loadConversationMessages(threadId);
+    } catch (err) {
+      console.error('Release failed:', err);
+    } finally {
+      setIsReleasing(false);
+    }
+  };
+
   const handleSendMessage = async (customText?: string) => {
     const msg = (customText || inputMessage).trim();
     if (!msg || !activeThreadId) return;
@@ -218,11 +235,12 @@ export function useWorkbenchState(initialTab: string) {
       setInputMessage('');
     }
 
-    // Optimistic append
+    // Optimistic append(P1:坐席消息落 role='operator',无前缀 —— 服务端
+    // 写侧已退役 "[商户客服] " 拼接,气泡按 role 渲染;落库后被轮询刷新对齐)
     const optMsg: MessageItem = {
       id: `opt_${Date.now()}`,
-      role: 'assistant',
-      content: `[商户客服] ${msg}`,
+      role: 'operator',
+      content: msg,
       timestamp: new Date().toISOString(),
     };
     setActiveThreadMessages((prev) => [...prev, optMsg]);
@@ -412,6 +430,7 @@ export function useWorkbenchState(initialTab: string) {
     closeOrderDetail,
     isTakingOver,
     setIsTakingOver,
+    isReleasing,
     rejectingApprovalId,
     setRejectingApprovalId,
     rejectReasonInput,
@@ -429,6 +448,7 @@ export function useWorkbenchState(initialTab: string) {
     handleApprovalAction,
     handleHumanReply,
     handleTakeover,
+    handleRelease,
     handleSendMessage,
     handleShipOrder,
     pendingApprovalsCount,
