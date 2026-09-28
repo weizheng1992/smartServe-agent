@@ -416,7 +416,7 @@ async def append_message(payload: dict) -> dict:
             )
         msg_id = payload.get("id") or str(uuid.uuid4())
         timestamp = _utc_iso(payload.get("timestamp"))
-        await session.execute(
+        inserted = await session.execute(
             text(
                 "INSERT INTO messages (id, thread_id, business_id, role, content, cards, operator_info, image_urls, timestamp) "
                 "VALUES (:mid, :tid, :bid, :role, :content, CAST(:cards AS jsonb), CAST(:opinfo AS jsonb), "
@@ -434,6 +434,15 @@ async def append_message(payload: dict) -> dict:
                 ts=timestamp,
             )
         )
+        # P2 激活 unread_count 存量死列(live-desk-rework §2.3):顾客消息落库单点
+        # +1,坐席打开时间线清零(reset_unread),仅坐席台展示。ON CONFLICT 未插入
+        # (clientMsgId 幂等重放,P4)不计数。
+        if payload.get("role") == "user" and (inserted.rowcount or 0) > 0:
+            await session.execute(
+                text("UPDATE threads SET unread_count = COALESCE(unread_count, 0) + 1 WHERE id = :tid").bindparams(
+                    tid=thread_id
+                )
+            )
         await session.execute(text("UPDATE threads SET updated_at = NOW() WHERE id = :tid").bindparams(tid=thread_id))
         await session.commit()
     return {

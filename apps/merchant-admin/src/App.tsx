@@ -5,6 +5,7 @@ import BoardPage from '@/pages/board';
 import CustomersPage from '@/pages/customers';
 import ProductsPage from '@/pages/goods/products';
 import SkusPage from '@/pages/goods/skus';
+import LiveDeskPage from '@/pages/live-desk';
 import LoginPage from '@/pages/login';
 import OrderWorkbench from '@/pages/order-manager';
 import PromotionsPage from '@/pages/promotions';
@@ -140,6 +141,8 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/orders" element={<OrderWorkbench scope="orders" />} />
             <Route path="/live-desk" element={<OrderWorkbench scope="live-desk" />} />
+            {/* 坐席台独立页(P2);旧 /live-desk 并存作回退面 */}
+            <Route path="/agent-desk" element={<LiveDeskPage />} />
             <Route path="/promotions" element={<PromotionsPage />} />
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/menus" element={<MenusPage />} />

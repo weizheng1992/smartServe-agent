@@ -18,7 +18,7 @@ from engine_py.db import get_session
 from engine_py.event_bus import get_client, read_agent_events
 from engine_py.onboarding import build_entry_cards, resolve_onboarding_config
 from engine_py.run_agent import AgentJobInput, run_agent
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -392,11 +392,45 @@ async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Qu
 
 
 @router.get("/messages")
-async def chat_messages(threadId: str | None = Query(None), businessId: str | None = Query(None)):
+async def chat_messages(
+    threadId: str | None = Query(None),
+    businessId: str | None = Query(None),
+    authorization: str | None = Header(None),
+):
     if not threadId:
         return {"success": True, "messages": []}
     timeline = await conversation_repo.get_conversation_timeline(threadId, businessId)
+    await _maybe_clear_unread(threadId, authorization)
     return {"success": True, "thread": timeline["thread"] if timeline else None, "messages": (timeline or {}).get("messages", [])}
+
+
+async def _maybe_clear_unread(thread_id: str, authorization: str | None) -> None:
+    """P2 未读清零(live-desk-rework §2.3):持 live_desk:operate 的员工打开
+    时间线即清零。顾客侧(apps/web 轮询/商户门户)匿名调用 —— 无 JWT 不断言
+    身份直接跳过,未读语义不受影响;清零失败静默(纯展示增强)。"""
+    from engine_py.analytics import rbac
+    from engine_py.db import StaffMember
+    from sqlalchemy import select
+
+    from .auth import require_claims
+
+    raw = str(authorization or "").strip()
+    if not raw:
+        return
+    try:
+        claims = await require_claims(raw if raw.startswith("Bearer ") else f"Bearer {raw}")
+        email = str(claims.get("email") or "")
+        async with get_session() as session:
+            staff = (
+                await session.execute(select(StaffMember).where(StaffMember.email == email))
+            ).scalars().first()
+        if staff is None or staff.status != "enabled":
+            return
+        if "live_desk:operate" not in await rbac.perms_for_role(staff.business_id, staff.role):
+            return
+        await takeover.reset_unread(thread_id, business_id=staff.business_id)
+    except Exception:
+        return
 
 
 @router.get("/orders")

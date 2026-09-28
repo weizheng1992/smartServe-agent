@@ -26,6 +26,12 @@ export default defineConfig({
         target: GATEWAY_URL,
         changeOrigin: true,
       },
+      // socket.io(坐席台实时通道;ws 升级必须显式开启)
+      '/socket.io': {
+        target: GATEWAY_URL,
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   build: {

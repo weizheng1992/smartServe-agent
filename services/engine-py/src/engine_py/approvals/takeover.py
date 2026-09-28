@@ -32,8 +32,12 @@ async def mark_takeover_requested(thread_id: str) -> None:
         await session.commit()
 
 
-async def assign_operator(thread_id: str, operator_email: str, business_id: str | None = None) -> None:
+async def assign_operator(thread_id: str, operator_email: str, business_id: str | None = None) -> bool:
     """坐席认领/发言 → 接管中 + 认领坐席;清掉线释放 deadline(认领即活人在线)。
+
+    P2 认领池原子守卫(spec §2.3):``WHERE assigned_operator_id IS NULL OR = :op``
+    —— 两坐席同抢只成一人,败者得 False 收「已被认领」;本坐席重复认领幂等成真。
+    抢单防线不依赖进程内存(多实例天然安全)。
 
     ``business_id`` 提供时收租户 WHERE(socket 链传入,与 update_conversation_status
     同口径);gatekeeper 内部路径线程归属已由路由层校验,不传。
@@ -41,15 +45,47 @@ async def assign_operator(thread_id: str, operator_email: str, business_id: str 
     sql = (
         "UPDATE threads SET status = 'human_takeover', assigned_operator_id = :op, "
         "updated_at = NOW(), metadata = COALESCE(metadata, '{}'::jsonb) - 'takeover_release_at' "
-        "WHERE id = :tid"
+        "WHERE id = :tid AND (assigned_operator_id IS NULL OR assigned_operator_id = :op)"
     )
     params: dict = {"op": operator_email, "tid": thread_id}
     if business_id:
         sql += " AND business_id = :biz"
         params["biz"] = business_id
+    sql += " RETURNING id"
     async with get_session() as session:
-        await session.execute(text(sql).bindparams(**params))
+        claimed = (await session.execute(text(sql).bindparams(**params))).scalar() is not None
         await session.commit()
+    return claimed
+
+
+async def thread_state(thread_id: str) -> dict:
+    """threads 真源形状(live-desk-rework §4:conversation_state_changed 统一
+    载荷 status/assignedOperatorId/unreadCount)。线程不存在回空态。"""
+    async with get_session() as session:
+        row = (
+            await session.execute(
+                text("SELECT status, assigned_operator_id, COALESCE(unread_count, 0) FROM threads WHERE id = :tid").bindparams(
+                    tid=thread_id
+                )
+            )
+        ).first()
+    if row is None:
+        return {"status": "active", "assignedOperatorId": None, "unreadCount": 0}
+    return {"status": row[0] or "active", "assignedOperatorId": row[1], "unreadCount": int(row[2] or 0)}
+
+
+async def reset_unread(thread_id: str, business_id: str | None = None) -> bool:
+    """坐席打开时间线 → 未读清零(P2 激活存量死列;仅坐席台展示,顾客端不同步)。
+    幂等;``business_id`` 提供时收租户 WHERE。"""
+    sql = "UPDATE threads SET unread_count = 0 WHERE id = :tid AND COALESCE(unread_count, 0) <> 0"
+    params: dict = {"tid": thread_id}
+    if business_id:
+        sql += " AND business_id = :biz"
+        params["biz"] = business_id
+    async with get_session() as session:
+        result = await session.execute(text(sql).bindparams(**params))
+        await session.commit()
+    return (result.rowcount or 0) > 0
 
 
 async def release_takeover(thread_id: str, business_id: str | None = None) -> bool:
@@ -118,6 +154,7 @@ async def cancel_disconnect_deadlines(operator_email: str) -> int:
 
 
 _RELEASE_NOTICE = "【系统提示】人工客服暂时离线超时，会话已自动释放，已为您切回 AI 智能助手。"
+_QUEUE_FALLBACK_NOTICE = "【系统提示】当前人工坐席全忙，已为您切回 AI 智能助手继续服务；如需人工客服请再次呼叫。"
 
 
 async def release_expired_takeovers() -> list[str]:
@@ -142,4 +179,32 @@ async def release_expired_takeovers() -> list[str]:
             from .gatekeeper import _add_system_message
 
             await _add_system_message(str(thread_id), "system", _RELEASE_NOTICE)
+    return released
+
+
+_QUEUE_EXPIRED_SQL = (
+    "SELECT id FROM threads "
+    "WHERE status = 'human_takeover' AND assigned_operator_id IS NULL "
+    "AND jsonb_exists(COALESCE(metadata, '{}'::jsonb), 'takeover_requested_at') "
+    "AND (metadata->>'takeover_requested_at')::timestamptz < NOW() - make_interval(secs => :secs)"
+)
+
+
+async def release_expired_queue_waits(timeout_seconds: float) -> list[str]:
+    """排队超时回落 AI 扫描(live-desk-rework §2.3,默认 ≈5min 可配):呼叫后无人
+    认领 → 自动回 ``active`` + system 告知,AI 暂停闸随状态自然解除,顾客可再次
+    呼叫。与掉线超时释放(:func:`release_expired_takeovers`)共用 scheduler 扫描
+    回路 —— 两个超时一个 worker。幂等:重复扫描 0 行(条件 UPDATE 裁决)。
+    """
+    async with get_session() as session:
+        rows = (
+            await session.execute(text(_QUEUE_EXPIRED_SQL).bindparams(secs=timeout_seconds))
+        ).scalars().all()
+    released: list[str] = []
+    for thread_id in rows:
+        if await release_takeover(str(thread_id)):
+            released.append(str(thread_id))
+            from .gatekeeper import _add_system_message
+
+            await _add_system_message(str(thread_id), "system", _QUEUE_FALLBACK_NOTICE)
     return released

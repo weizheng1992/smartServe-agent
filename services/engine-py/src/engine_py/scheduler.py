@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from .approvals.outbox_worker import process_pending_events
-from .approvals.takeover import release_expired_takeovers
+from .approvals.takeover import release_expired_queue_waits, release_expired_takeovers
 from .badcase.digest import run_badcase_digest
 
 
@@ -34,11 +34,16 @@ async def _outbox_reconcile_tick() -> None:
 
 
 async def _takeover_release_tick() -> None:
-    # live-desk-rework P1(spec §2.1):掉线超时释放的权威路径 —— DB deadline
-    # + 幂等扫描,与排队超时回落(P2)共用扫描回路形态;重复扫描 0 行。
+    # live-desk-rework P1(spec §2.1)+ P2(spec §2.3):两个超时一个 worker ——
+    # 掉线超时释放与排队超时回落同为 DB 时间戳 + 幂等扫描的权威路径。
+    from .config import settings
+
     released = await release_expired_takeovers()
     if released:
         print(f"[Scheduler:takeover_release] 掉线超时自动释放: {released}")
+    fallen = await release_expired_queue_waits(settings.queue_fallback_timeout_seconds)
+    if fallen:
+        print(f"[Scheduler:queue_fallback] 排队超时回落 AI: {fallen}")
 
 
 def default_tasks() -> list[PeriodicTask]:

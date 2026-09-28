@@ -4,6 +4,35 @@
 
 ---
 
+## [2.6.59] - 2026-09-28 (live-desk P2:分配与坐席台独立页 —— 认领池 + presence + /agent-desk 三栏)
+
+客服工作台重构二期 P2(spec `docs/architecture/live-desk-rework.md` §3)。P1 把接管真源收敛到 threads 表后,呼叫中(排队)会话还没有认领路由:谁先点到归谁靠运气、坐席在线不可知、无人应答的呼叫会永远挂着。本版补齐分配面:认领池原子守卫、排队等待最久置顶、presence 在线真源、排队超时回落,并给坐席独立的三栏工作台新页。
+
+### ✨ Features
+
+- **认领池原子守卫(`takeover.assign_operator`)**:单条条件 UPDATE(`assigned_operator_id IS NULL` 才可写),并发双认领一成一败;败者 socket ack `success:false, error:'会话已被其他坐席认领'`,房间级 `conversation_state_changed` 广播新归属。认领即清 `unread_count`。
+- **队列等待最久置顶**:排队组按 `metadata.takeover_requested_at` 升序排在列表最前(呼叫越久越靠上),非排队组维持 `updated_at` DESC;纯函数 `sortQueueFirst` 服务于坐席台列表,不改服务端排序契约。
+- **坐席 presence 真源(`approvals/presence.py` + `GET /api/merchant/live-desk/presence`)**:socket.io 以 role=operator 连接即登记在线(员工 JWT + 租户一致校验,connect 即心跳),TTL 90s 不续即过期;`presence_dnd` / `POST .../presence/dnd` 免打扰开关落 presence 表。HTTP 侧走员工形态,Bearer JWT + x-tenant-id。
+- **排队超时回落 AI(scheduler `queue_fallback`,默认 300s)**:呼叫人工后无人认领超时限即条件回 `active` + 落 system「暂无可用客服,已切回智能助手」,与掉线释放共用扫描回路,重复扫描 0 行幂等;`AI_QUEUE_FALLBACK_TIMEOUT_SECONDS` 可调。
+- **support_agent 角色与 operate perm 闸**:RBAC 新增专职客服角色(仅客服工作台+客户管理,不给数据/订单/商品/优惠/系统面);接管/坐席发言/释放三路过 `live_desk:operate` perm 闸,员工 JWT 真身裁决。新坐席台菜单 `m-agent-desk` 灰度发布:先授老板/管理员(sales_viewer 种子排除),零新 env,稳后放 support_agent。
+- **`/agent-desk` 三栏坐席台(apps/merchant-admin 新页)**:左栏会话池(全部/排队/我的 tab + 关键词过滤 + 四态徽标 AI 托管/排队中带 mm:ss 计时/我接管/同事接管);中栏时间线(接管中才出回复框,认领/释放/发言走 socket ack,8s 超时兜底);右栏坐席在线列表 + 免打扰开关。旧 `/live-desk` tab 并存作回退面,回退=菜单下线新页。列表即时对齐三通道:claim/release ack 就地更新 + socket 广播 + 30s 兜底轮询;打开会话即 `join_thread` 入房收 `new_message` 实时刷时间线。
+
+### 🐛 Fixes
+
+- **多租户菜单种子撞主键**:`menus.id` 是全局唯一主键而 `business_id` 只是普通列,裸 id 双租户必撞(谁先种谁赢)。aurora 保持历史裸 id,其余租户一律 `{id}:{business_id}` 后缀隔离(parent 链同步后缀,perm_code 不变);`ensure_menu_seed` 从 `ensure_defaults` 拆出供测试基建单独补菜单面。
+
+### 🧪 Tests
+
+- 新专册 `test_live_desk_claim_queue.py`(认领并发双请求一成一败/排队置顶字段链/unread 计数/回落扫描幂等/回落后 AI 恢复)、`test_live_desk_presence.py`(连接登记/TTL 过期/心跳续期/免打扰 HTTP+socket 双通道);`test_live_desk_takeover_source_of_truth.py` 扩认领守卫语义(他人占座行 assign 正确失败);realtime 契约补 takeover 败者 ack 与 perm 三态(无 perm 403/有 perm 通过/跨租户拒绝)。
+- merchant-admin vitest 新 16 例(四态派生/排队计时/排序置顶不改入参/tab+关键词过滤/状态条与认领按钮交互/未读徽标);首条坐席台 Playwright `e2e/agent-desk.e2e.ts`「坐席连接在线→认领→回复→顾客 socket 实时收到→顾客回话坐席时间线实时出现」全链路,并补齐 `e2e/merchant-admin.config.ts`(此前 merchant-admin 无 playwright 配置)。全绿:gateway 312 passed+3 skipped / engine 1090 / vitest 124(27 文件)/ Playwright 13。
+
+### 📝 Notes
+
+- e2e 实测坑:addInitScript **不捕获闭包**——回调里引用 Node 侧常量在浏览器是 ReferenceError,且崩在前序语句之后时表现为「部分 localStorage 键静默缺失」(token 写入成功、staff 键缺失,页面照常加载但身份判定错位)。注入值一律走参数传。
+- socket 房间语义:会话级广播(`conversation_state_changed`/`new_message`)是房间级,socket 未 `join_thread` 就收不到——依赖广播做 UI 对齐的路径必须自己入房或另设兜底。
+
+---
+
 ## [2.6.58] - 2026-09-28 (live-desk P1:接管真源化 —— threads 复合状态 + AI 暂停闸 + 释放回 AI 托管)
 
 商户客服工作台重构一期 P1(spec `docs/architecture/live-desk-rework.md`,真源归一+丙·混合基座)。钉死的实弹事故:接管/释放曾经只是 socket 事件与工单表皮——坐席「接管」后 threads 仍是 active,顾客消息继续进引擎排队;「释放」更无任何实现,会话回不到 AI 托管,**释放后 AI 永久哑火**。本版把接管状态机的真源收敛到 threads 表,并给 AI 侧装上暂停闸与掉线兜底。

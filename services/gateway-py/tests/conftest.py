@@ -162,13 +162,17 @@ async def nike_operator(seeded):
     """socket.io 坐席身份绑定(02 安全先行)测试基建:nike 租户在职员工直签 JWT。
 
     realtime 侧 role=operator 连接自此要求员工 JWT 且 staff.business_id 与
-    connect tenantId 一致 —— 本 fixture 提供恰好满足绑定的 nike 员工。直插行
+    connect tenantId 一致 —— 本 fixture 提供恰好满足绑定的 nike 员工。直插员工行
     而非 rbac.ensure_defaults:其种子员工 id 固定(staff_owner 等),同一库
-    跨租户二次调用会撞主键。"""
+    跨租户二次调用会撞主键;菜单/角色面无此约束,经 ensure_menu_seed 幂等补齐
+    (live-desk P2 起接管/发言/释放三路过 live_desk:operate perm 闸,admin 角色
+    的权限闭包来自 nike 的 role_menus ⨝ menus)。"""
+    from engine_py.analytics import rbac
     from engine_py.db import StaffMember, get_session
 
     from gateway_py.routers.auth import issue_token
 
+    await rbac.ensure_menu_seed("nike")
     email = f"op-nike-{_TS}@nike.test"
     async with get_session() as session:
         session.add(StaffMember(

@@ -353,12 +353,17 @@ class TestTakeoverReleaseTimeoutScan:
         from engine_py.approvals import takeover
 
         tid, _uid = await _mk_thread("to_deadline", business_id="nike")
-        await _force_takeover(tid, "op-dl")
 
         op_email = "op-dl@nike.test"
-        assert await takeover.mark_disconnect_deadlines(op_email, 90) == 0  # 非其名下
-        await takeover.assign_operator(tid, op_email)
+        # 对照线:他人名下接管线程不随本坐席掉线计时(直插造数,不经认领守卫)
+        tid_peer, _ = await _mk_thread("to_deadline_peer", business_id="nike")
+        await _force_takeover(tid_peer, "peer-dl@nike.test")
+        # 本坐席从无主态认领起手 —— P2 守卫下 assign 他人占座行会正确失败(见认领池专册)
+        await _force_takeover(tid, None)
+        assert await takeover.mark_disconnect_deadlines(op_email, 90) == 0  # 尚非其名下
+        assert await takeover.assign_operator(tid, op_email) is True
         assert await takeover.mark_disconnect_deadlines(op_email, 90) == 1
+        assert (await _thread_row(tid_peer))["deadline"] is None  # 只扫本坐席名下
         first = (await _thread_row(tid))["deadline"]
 
         # 仅首次生效:重连前的重复掉线不刷新计时

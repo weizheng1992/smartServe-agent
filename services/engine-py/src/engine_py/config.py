@@ -87,5 +87,11 @@ class Settings:
         default_factory=lambda: float(_env("AI_TAKEOVER_RELEASE_TIMEOUT_SECONDS", "90"))
     )
 
+    # 排队超时回落 AI(live-desk-rework P2,spec §2.3):呼叫人工后无人认领超此
+    # 限时即回 active + system 告知,与掉线释放共用 scheduler 扫描回路
+    queue_fallback_timeout_seconds: float = field(
+        default_factory=lambda: float(_env("AI_QUEUE_FALLBACK_TIMEOUT_SECONDS", "300"))
+    )
+
 
 settings = Settings()

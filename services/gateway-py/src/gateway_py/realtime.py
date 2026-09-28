@@ -21,8 +21,7 @@ import datetime as _dt
 import re
 
 import socketio
-
-from engine_py.approvals import takeover
+from engine_py.approvals import presence, takeover
 from engine_py.config import settings
 
 from . import conversation_repo
@@ -84,6 +83,20 @@ def _staff_of(sid: str) -> dict | None:
     return (connected_clients.get(sid) or {}).get("staff")
 
 
+async def _has_operate_perm(tenant_id: str, staff: dict) -> bool:
+    """live_desk:operate 闸(live-desk-rework §2.2,照 order:ship 的
+    perms_for_role 先例):接管/发言/释放三路坐席动作逐路校验;权限点按员工
+    真租户的角色菜单闭包判定,角色管理页勾选即生效。租户即 connect 时与
+    staff.business_id 校验一致的 tenantId。"""
+    from engine_py.analytics import rbac
+
+    try:
+        return "live_desk:operate" in await rbac.perms_for_role(tenant_id, str(staff.get("role") or ""))
+    except Exception as err:
+        print(f"[Realtime] perm 判定失败(按无权限处理): {err}")
+        return False
+
+
 def _tenant_mismatch(sid: str, data: dict) -> bool:
     """事件租户必须与 connect 租户一致 —— 防同连接中途换租户join他商户房间。"""
     record = connected_clients.get(sid) or {}
@@ -124,6 +137,12 @@ async def on_connect(sid: str, environ, auth=None):
             "name": staff.display_name,
             "role": staff.role,
         }
+        # P2 在线态(spec §2.3):连接态即在线 —— 坐席 connect 即点亮 presence
+        # (Redis TTL 心跳;仅展示,不作分配闸),后续 join/ping/发言续期
+        try:
+            await presence.heartbeat(clean_tenant, staff.email)
+        except Exception as err:
+            print(f"[Realtime] presence 心跳失败(不阻断连接): {err}")
     connected_clients[sid] = record
     return True
 
@@ -144,6 +163,11 @@ async def on_disconnect(sid: str):
     # (多实例约束:进程内计时器仅可作 UX 提示,spec §6)。重连(join/认领/
     # 发言)即取消。P1 前端零 socket,机制先钉契约,P2 坐席面接入后全面生效。
     operator_email = (info or {}).get("staff", {}).get("email")
+    if operator_email and info.get("tenantId"):
+        try:
+            await presence.drop(info["tenantId"], operator_email)
+        except Exception as err:
+            print(f"[Realtime] presence 离线失败(不阻断断线流程): {err}")
     if operator_email:
         try:
             n = await takeover.mark_disconnect_deadlines(operator_email, settings.takeover_release_timeout_seconds)
@@ -168,12 +192,17 @@ async def on_join_thread(sid: str, data: dict):
     connected_clients[sid] = {**connected_clients.get(sid, {}), "threadId": thread_id, "tenantId": tenant_id, "role": role}
     await sio.enter_room(sid, room, namespace=NAMESPACE)
 
-    # P1:坐席加入房间 = 重连/在岗信号,取消其名下接管会话的掉线释放计时
+    # P1:坐席加入房间 = 重连/在岗信号,取消其名下接管会话的掉线释放计时;
+    # P2:同信号续期 presence 心跳
     if staff is not None:
         try:
             await takeover.cancel_disconnect_deadlines(staff["email"])
         except Exception as err:
             print(f"[Realtime] 释放计时取消失败(不阻断入房): {err}")
+        try:
+            await presence.heartbeat(tenant_id, staff["email"])
+        except Exception as err:
+            print(f"[Realtime] presence 心跳失败(不阻断入房): {err}")
 
     await sio.emit("joined_room", {"room": room, "threadId": thread_id, "tenantId": tenant_id}, to=sid, namespace=NAMESPACE)
     await sio.emit(
@@ -201,12 +230,17 @@ async def on_takeover(sid: str, data: dict):
         return {"success": False, "error": "坐席身份未认证,须以员工 JWT 建立 operator 连接"}
     if _tenant_mismatch(sid, data):
         return {"success": False, "error": "会话租户与坐席所属租户不一致"}
+    if not await _has_operate_perm(tenant_id, staff):
+        return {"success": False, "error": "无坐席操作权限(live_desk:operate)"}
     # 服务端身份派生:客户端自报 operatorId/Name 不再采信(02 安全先行)
     operator_id, operator_name = staff["email"], staff["name"]
 
-    # P1 真源归一:socket 链与 HTTP 链同经 takeover 模块写真源(认领即清
-    # 掉线释放计时;business_id 收租户 WHERE,与 update_conversation_status 同口径)
-    await takeover.assign_operator(thread_id, operator_id, business_id=tenant_id)
+    # P1 真源归一 + P2 认领池原子守卫(spec §2.3):认领即清掉线释放计时;
+    # business_id 收租户 WHERE。两坐席同抢只成一人,败者收「已被认领」且不落
+    # 系统消息不广播。
+    claimed = await takeover.assign_operator(thread_id, operator_id, business_id=tenant_id)
+    if not claimed:
+        return {"success": False, "error": "会话已被其他坐席认领"}
     sys_msg = await conversation_repo.append_message(
         {
             "threadId": thread_id,
@@ -216,12 +250,13 @@ async def on_takeover(sid: str, data: dict):
             "operatorInfo": {"operatorId": operator_id, "operatorName": operator_name},
         }
     )
+    state = await takeover.thread_state(thread_id)
     room = _room(thread_id, tenant_id)
     await sio.emit(
         "conversation_state_changed",
         {
             "threadId": thread_id,
-            "status": "human_takeover",
+            **state,
             "operatorId": operator_id,
             "operatorName": operator_name,
             "systemMessage": sys_msg,
@@ -230,19 +265,24 @@ async def on_takeover(sid: str, data: dict):
         namespace=NAMESPACE,
     )
     await _publish_ws_event(
-        "conversation_state_changed", room, {"threadId": thread_id, "status": "human_takeover", "operatorId": operator_id, "operatorName": operator_name}
+        "conversation_state_changed",
+        room,
+        {"threadId": thread_id, **state, "operatorId": operator_id, "operatorName": operator_name},
     )
-    return {"success": True, "status": "human_takeover"}
+    return {"success": True, "status": "human_takeover", **state}
 
 
 @sio.on("release_takeover", namespace=NAMESPACE)
 async def on_release_takeover(sid: str, data: dict):
     thread_id = data.get("threadId", "")
     tenant_id = data.get("tenantId", "")
-    if _staff_of(sid) is None:
+    staff = _staff_of(sid)
+    if staff is None:
         return {"success": False, "error": "坐席身份未认证,须以员工 JWT 建立 operator 连接"}
     if _tenant_mismatch(sid, data):
         return {"success": False, "error": "会话租户与坐席所属租户不一致"}
+    if not await _has_operate_perm(tenant_id, staff):
+        return {"success": False, "error": "无坐席操作权限(live_desk:operate)"}
     # P1 真源归一:释放条件 UPDATE 幂等(重复释放不重复落系统消息);
     # business_id 收租户 WHERE,严防跨租户释放。
     await takeover.release_takeover(thread_id, business_id=tenant_id)
@@ -254,15 +294,16 @@ async def on_release_takeover(sid: str, data: dict):
             "content": "人工客服已结束接管，已重新切换为 AI 智能助手为您服务。",
         }
     )
+    state = await takeover.thread_state(thread_id)
     room = _room(thread_id, tenant_id)
     await sio.emit(
         "conversation_state_changed",
-        {"threadId": thread_id, "status": "active", "systemMessage": sys_msg},
+        {"threadId": thread_id, **state, "systemMessage": sys_msg},
         room=room,
         namespace=NAMESPACE,
     )
-    await _publish_ws_event("conversation_state_changed", room, {"threadId": thread_id, "status": "active"})
-    return {"success": True, "status": "active"}
+    await _publish_ws_event("conversation_state_changed", room, {"threadId": thread_id, **state})
+    return {"success": True, "status": "active", **state}
 
 
 @sio.on("send_message", namespace=NAMESPACE)
@@ -277,6 +318,8 @@ async def on_send_message(sid: str, data: dict):
         # 可自报任意 role(operator/assistant/system)伪造任意来源的时间线
         if str(data.get("role") or "operator") != "operator":
             return {"success": False, "error": "员工连接仅能以 operator 身份发言"}
+        if not await _has_operate_perm(tenant_id, staff):
+            return {"success": False, "error": "无坐席操作权限(live_desk:operate)"}
         role = "operator"
         operator_info = {"operatorId": staff["email"], "operatorName": staff["name"]}
     else:
@@ -322,3 +365,35 @@ async def on_typing(sid: str, data: dict):
         return {"success": False, "error": "会话租户与连接租户不一致"}
     room = _room(thread_id, tenant_id)
     await sio.emit("user_typing", data, room=room, namespace=NAMESPACE, skip_sid=sid)
+
+
+@sio.on("presence_ping", namespace=NAMESPACE)
+async def on_presence_ping(sid: str, data: dict | None = None):
+    """P2 在线态心跳(空闲坐席保活;spec §2.3 TTL 心跳)。仅认证坐席生效。"""
+    staff = _staff_of(sid)
+    if staff is None:
+        return {"success": False, "error": "坐席身份未认证"}
+    tenant_id = (connected_clients.get(sid) or {}).get("tenantId") or ""
+    try:
+        await presence.heartbeat(tenant_id, staff["email"])
+    except Exception as err:
+        print(f"[Realtime] presence 心跳失败: {err}")
+        return {"success": False, "error": "presence 暂不可用"}
+    return {"success": True}
+
+
+@sio.on("presence_dnd", namespace=NAMESPACE)
+async def on_presence_dnd(sid: str, data: dict):
+    """P2 手动免打扰自拨(socket 通道;HTTP /api/merchant/live-desk/presence/dnd
+    同语义)。仅改自己的开关。"""
+    staff = _staff_of(sid)
+    if staff is None:
+        return {"success": False, "error": "坐席身份未认证"}
+    tenant_id = (connected_clients.get(sid) or {}).get("tenantId") or ""
+    enabled = bool((data or {}).get("enabled"))
+    try:
+        await presence.set_dnd(tenant_id, staff["email"], enabled)
+    except Exception as err:
+        print(f"[Realtime] presence 免打扰失败: {err}")
+        return {"success": False, "error": "presence 暂不可用"}
+    return {"success": True, "dnd": enabled}

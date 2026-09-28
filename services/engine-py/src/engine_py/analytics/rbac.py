@@ -19,10 +19,10 @@ from sqlalchemy import delete, select
 
 from ..db import Menu, RoleMenu, StaffMember, get_session
 
-ROLES = ("finance_owner", "admin", "sales_viewer", "warehouse_operator")
+ROLES = ("finance_owner", "admin", "sales_viewer", "warehouse_operator", "support_agent")
 # 管理角色:可分配权限/管理系统配置(老板+管理员);老板额外保留防锁死护栏
 MANAGER_ROLES = ("finance_owner", "admin")
-SYSTEM_MENU_IDS = ("m-analytics", "m-reports", "m-board", "m-products", "m-orders", "m-customers", "m-promotions", "m-menus", "m-roles", "m-staff")
+SYSTEM_MENU_IDS = ("m-analytics", "m-reports", "m-board", "m-products", "m-orders", "m-customers", "m-promotions", "m-menus", "m-roles", "m-staff", "m-agent-desk")
 
 # 默认菜单树(16 号原型同构;menu_type: directory|menu|button)。
 # 0014:售后审批不再独立成菜单 —— 待办审核并入「客服工作台」页内呈现。
@@ -49,6 +49,10 @@ DEFAULT_MENUS: list[dict] = [
     # 可见性对齐(老板/管理员/运营可见即持有,仓储无此菜单);坐席身份模型定档后
     # (live-desk 地图)再细化坐席专属角色与拆分接单/接管粒度。
     {"id": "btn-live-desk-operate", "parent": "m-live-desk", "name": "坐席操作", "type": "button", "perm": "live_desk:operate", "sort": 1},
+    # live-desk-rework P2(spec §3 灰度):新坐席台独立页 —— 灰度开关就是本菜单的
+    # 角色可见性,零新 env。先只授老板/管理员(sales_viewer 种子排除,见
+    # _GREY_RELEASE_MENUS);support_agent 稳后放;旧 /live-desk tab 并存至 P5 退役。
+    {"id": "m-agent-desk", "parent": "d-users", "name": "坐席工作台", "type": "menu", "route": "/agent-desk", "sort": 3},
     {"id": "d-ops", "parent": None, "name": "运营", "type": "directory", "route": None, "sort": 5},
     {"id": "m-promotions", "parent": "d-ops", "name": "优惠活动", "type": "menu", "route": "/promotions", "sort": 1},
     {"id": "btn-promo-create", "parent": "m-promotions", "name": "新建活动", "type": "button", "perm": "promo:create", "sort": 1},
@@ -68,14 +72,21 @@ DEFAULT_MENUS: list[dict] = [
 # 为真):种子面与原硬编码 _perms() 等效 —— 运营无商品编辑/发货/系统管理,
 # 仓储无报告生成/导出。
 _SALES_DENY_BUTTONS = {"btn-prod-edit", "btn-order-ship", "btn-menu-create", "btn-role-assign", "btn-staff-invite"}
+# 灰度中菜单(live-desk-rework §3):运营暂不可见,稳后并入其种子面
+_GREY_RELEASE_MENUS = {"m-agent-desk"}
 DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
     "finance_owner": [m["id"] for m in DEFAULT_MENUS],
     "admin": [m["id"] for m in DEFAULT_MENUS],
-    "sales_viewer": [m["id"] for m in DEFAULT_MENUS if m["id"] not in _SALES_DENY_BUTTONS],
+    "sales_viewer": [m["id"] for m in DEFAULT_MENUS if m["id"] not in _SALES_DENY_BUTTONS and m["id"] not in _GREY_RELEASE_MENUS],
     "warehouse_operator": [
         "d-data", "m-analytics", "m-reports", "m-board",
         "d-orders", "m-orders", "btn-order-ship", "m-spi-logs",
         "d-system", "m-menus", "btn-menu-create", "m-roles", "btn-role-assign", "m-staff", "btn-staff-invite",
+    ],
+    # live-desk-rework §2.2:专职客服 = 客服工作台 + 客户管理,不给数据分析/
+    # 订单/商品/优惠/系统面(商户招客服不泄经营数据);新坐席台按灰度暂不授。
+    "support_agent": [
+        "d-users", "m-customers", "m-live-desk", "btn-live-desk-operate",
     ],
 }
 
@@ -100,18 +111,29 @@ def seed_password_hash() -> str:
     ).decode()
 
 
-async def ensure_defaults(business_id: str) -> None:
-    """种子幂等:菜单树/角色分配/三档员工账号(员工补密码,可真实登录)。"""
+async def ensure_menu_seed(business_id: str) -> None:
+    """菜单树 + 角色分配种子(幂等)。从 ensure_defaults 拆出:测试基建可单独
+    为任意租户补菜单面(如 realtime 契约的 nike 坐席需持 live_desk:operate),
+    不触碰员工种子(员工 id 固定,跨租户直插会撞主键)。
+
+    id 策略(live-desk P2 实测教训):``menus.id`` 是**全局唯一**主键而
+    business_id 只是普通列 —— 裸 id 双租户必撞(谁先种谁赢,第二家
+    UniqueViolationError)。aurora 作为冻结契约与 dev 的既定租户保持历史裸 id;
+    其余租户一律 ``{id}:{business_id}`` 后缀隔离(parent 链同步后缀),
+    perm_code 不变,角色闭包查询按 business_id 过滤后语义等同。"""
+    suffix = "" if business_id == "aurora" else f":{business_id}"
     async with get_session() as session:
         existing = {
             m.id for m in
             (await session.execute(select(Menu).where(Menu.business_id == business_id))).scalars()
         }
         for m in DEFAULT_MENUS:
-            if m["id"] not in existing:
+            mid = m["id"] + suffix
+            if mid not in existing:
                 session.add(Menu(
-                    id=m["id"], business_id=business_id, parent_id=m["parent"], name=m["name"],
-                    menu_type=m["type"], route=m.get("route"), perm_code=m.get("perm"),
+                    id=mid, business_id=business_id,
+                    parent_id=(m["parent"] + suffix) if m.get("parent") else None,
+                    name=m["name"], menu_type=m["type"], route=m.get("route"), perm_code=m.get("perm"),
                     sort_order=m.get("sort", 0), status="enabled",
                 ))
         existing_rm = {
@@ -120,8 +142,16 @@ async def ensure_defaults(business_id: str) -> None:
         }
         for role, menu_ids in DEFAULT_ROLE_MENUS.items():
             for mid in menu_ids:
-                if (role, mid) not in existing_rm:
-                    session.add(RoleMenu(role=role, menu_id=mid, business_id=business_id))
+                rid = mid + suffix
+                if (role, rid) not in existing_rm:
+                    session.add(RoleMenu(role=role, menu_id=rid, business_id=business_id))
+        await session.commit()
+
+
+async def ensure_defaults(business_id: str) -> None:
+    """种子幂等:菜单树/角色分配/三档员工账号(员工补密码,可真实登录)。"""
+    await ensure_menu_seed(business_id)
+    async with get_session() as session:
         rows = (
             await session.execute(select(StaffMember).where(StaffMember.business_id == business_id))
         ).scalars().all()

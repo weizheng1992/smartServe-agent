@@ -273,6 +273,37 @@ export interface MessageItem {
   timestamp: string;
 }
 
+/** GET /api/conversations 行(threads 真源 camelCase 透传;坐席台 P2 数据源)。 */
+export interface DeskConversationRow {
+  threadId: string;
+  businessId: string;
+  userId?: string | null;
+  status: string;
+  assignedOperatorId?: string | null;
+  unreadCount?: number;
+  tags?: string[];
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageSnippet?: string | null;
+  lastMessageRole?: string | null;
+  lastMessageTime?: string | null;
+  messageCount?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  llmCalls?: number;
+}
+
+/** GET /api/merchant/live-desk/presence 行(员工行 ⨝ presence 汇总)。 */
+export interface DeskAgentRow {
+  email: string;
+  name: string;
+  role: string;
+  online: boolean;
+  dnd: boolean;
+  lastSeenAt?: string | null;
+}
+
 export interface MenuNode {
   id: string;
   name: string;
@@ -559,5 +590,30 @@ export const api = {
       fetchJson('/api/admin/conversations?tenantId=aurora'),
     messages: async (threadId: string): Promise<{ success: boolean; data?: { messages: MessageItem[] } }> =>
       fetchJson(`/api/admin/conversations/${encodeURIComponent(threadId)}?tenantId=aurora`),
+  },
+
+  /** 坐席台(live-desk-rework P2;员工 JWT,持 live_desk:operate 打开时间线顺带清未读)。 */
+  liveDesk: {
+    /** 全租户会话列表(threads 真源;status=search= 分页可选)。 */
+    conversations: async (params?: { status?: string; search?: string; limit?: number; offset?: number }) => {
+      const qs = new URLSearchParams();
+      if (params?.status && params.status !== 'all') qs.set('status', params.status);
+      if (params?.search) qs.set('search', params.search);
+      qs.set('limit', String(params?.limit ?? 100));
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return fetchJson(`/api/conversations${suffix}`) as Promise<{
+        success: boolean;
+        tenantId: string;
+        conversations: DeskConversationRow[];
+        total: number;
+      }>;
+    },
+    timeline: async (threadId: string): Promise<{ success: boolean; data?: { messages: MessageItem[] } }> =>
+      fetchJson(`/api/conversations/${encodeURIComponent(threadId)}`),
+    /** 坐席在线态(员工行 ⨝ presence;Redis 不可用如实空态)。 */
+    presence: async (): Promise<{ success: boolean; tenantId: string; agents: DeskAgentRow[] }> =>
+      fetchJson('/api/merchant/live-desk/presence'),
+    setDnd: async (enabled: boolean): Promise<{ success: boolean; dnd: boolean }> =>
+      fetchJson('/api/merchant/live-desk/presence/dnd', { method: 'POST', body: JSON.stringify({ enabled }) }),
   },
 };
