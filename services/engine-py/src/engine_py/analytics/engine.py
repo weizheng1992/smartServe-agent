@@ -135,9 +135,13 @@ class MetricQueryEngine:
             if hit[0].endswith("_trend") and re.search(r"排行|排名|榜单|榜|top\s*\d*", clean):
                 hit = ({"gmv_trend": "gmv", "volume_trend": "volume"}.get(hit[0], hit[0]), hit[1])
 
+        # 分类头同一次 resolve 只打一次分:shadow 对比与 on 接管共用这一次结果。
+        # 此前 hit 未命中时上方 shadow 块与下方 on 块各 predict 一遍(同问句双跑)。
+        head_call: tuple[str, float] | None = None
         if self._head is not None:
             try:
                 head_label, head_conf = self._head.predict(question)
+                head_call = (head_label, head_conf)
                 if hit is not None and head_label != hit[0]:
                     print(
                         f"[MetricHead][shadow] 不一致: L0={hit[0]} head={head_label}({head_conf:.2f})"
@@ -149,9 +153,9 @@ class MetricQueryEngine:
         if hit is None:
             # 缝② on 模式:L0 未命中 → 分类头接管(低置信仍放行 L3,不许静默错分);
             # 槽位(limit/时间窗/品类)与 L0 命中路同源解析(0014 缺口修复)
-            if self._head is not None:
+            if head_call is not None:
                 try:
-                    head_label, head_conf = self._head.predict(question)
+                    head_label, head_conf = head_call
                     if head_label in registry and head_conf >= self._head_threshold:
                         print(f"[MetricHead][on] 接管: {head_label}({head_conf:.2f}) question={question[:40]!r}")
                         limit2, time2, cat2 = self._extract_slots(clean)

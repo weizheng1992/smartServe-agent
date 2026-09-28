@@ -3,19 +3,22 @@
 契约:问句 → 闭集标签 + 置信度。加载 run 目录四件(labels.json / head.pt /
 config.snapshot.toml;encoder 名从快照读,保证与训练同分布)。
 
-三态由 AI_METRIC_HEAD 控制(get_metric_head 工厂在 llm/chat):
+三态由 AI_METRIC_HEAD 控制(get_metric_head 本地工厂):
 - 空/anchor:不启用(纯 L0+L3 现状)
 - shadow:并行打分只记日志,不改判定(影子跑对比期)
 - on:L0 未命中处插分类头结果,低置信仍放行 L3 —— 11-D1「模型即 adapter」
 
-回滚 = 移除环境变量(不改编排)。encoder 加载懒执行;进程内单例由工厂
-lru_cache 保证,与判重缓存共享同一 bge 底座时无额外大内存。
+回滚 = 移除环境变量(不改编排)。encoder 加载懒执行;head.pt 的 torch.load
+由工厂按 run_dir 键控的 lru_cache 保证进程内只跑一次(env 三态与产物存在性
+每次调用都读 —— 测试按用例切 mode/dir 必须即时生效,缓存只收昂贵的加载),
+与判重缓存共享同一 bge 底座时无额外大内存。
 """
 
 from __future__ import annotations
 
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +83,12 @@ def get_metric_head() -> MetricHead | None:
         print(f"[MetricHead] AI_METRIC_HEAD={mode} 但产物缺失: {run_dir} —— 响亮降级为不启用")
         return None
     try:
-        return MetricHead(run_dir)
+        return _load_head_cached(run_dir)
     except Exception as err:
         print(f"[MetricHead] 加载失败({err}),降级为不启用")
         return None
+
+
+@lru_cache(maxsize=1)
+def _load_head_cached(run_dir: str) -> MetricHead:
+    return MetricHead(run_dir)
