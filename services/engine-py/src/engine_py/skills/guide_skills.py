@@ -157,6 +157,18 @@ class ShoppingGuideSkill(BaseSkill):
         _alt(*CLOTHING_ANCHOR_FAMILY, *ABSENCE_EXTRA_FAMILY)
     )
 
+    # 承接式反问(A-not-B,2026-09-28 实弹):「两件短袖呢，不用帐篷吗？」
+    # —— 前半承接上轮推荐(数量+品类+呢),后半指出缺席族。_ABSENCE_RE 只认
+    # 「(没有)X」框,此形态接不住:整句当字面搜索词必诚实空,空分支再引用
+    # 原话(finish 终稿还曲解成「不希望包含帐篷」的过滤条件)。捕获「不用/
+    # 不要/不带/不需 X 吗」框内品类词,锚词校验同缺席反问纪律;框锚定句尾
+    # 防中间形态误抢(「不用帐篷的话可以…」),框内词无锚词不劫持(「不用
+    # 退了吗」是动作域)。词条均不在册(词表契约),锚词走家族引用拼接。
+    # 语气词含 啊/呀/吧(「是不是不用睡袋啊」同为缺席指出)。
+    _A_NOT_B_RE = re.compile(
+        r"(?:不用|不要|不需|不带)(?:带|用)?\s*([^,，。?？!!\s]{1,6}?)[呢吗么嘛啊呀吧]\s*[？?]*\s*$"
+    )
+
     def can_handle(self, context: SkillContext) -> bool:
         if super().can_handle(context):
             return True
@@ -179,6 +191,18 @@ class ShoppingGuideSkill(BaseSkill):
             noun = absence_m.group(1).strip()
             if noun and self._ABSENCE_ANCHOR_RE.search(noun):
                 absence_topic = noun
+
+        # 0b. 承接式反问剥框(同纪律,A-not-B 形态):「两件短袖呢，不用帐篷
+        # 吗？」→ 直查「帐篷」。前半承接语的数量词(「两件」指上轮短袖)不是
+        # 本次推荐数量,命中后跳过数量解析(见步骤 3)。
+        absence_rhetoric = False
+        if absence_topic is None:
+            rhetoric_m = self._A_NOT_B_RE.search(user_input)
+            if rhetoric_m:
+                noun = rhetoric_m.group(1).strip()
+                if noun and self._ABSENCE_ANCHOR_RE.search(noun):
+                    absence_topic = noun
+                    absence_rhetoric = True
 
         # 1. 偏好特征提取
         if re.search(r"男|男生|男款", user_input, re.IGNORECASE):
@@ -224,7 +248,11 @@ class ShoppingGuideSkill(BaseSkill):
         # 数量语义(2026-09-12 用户实报「我要2个商品」被无视):「N个/N件」
         # 显式数量 → 推荐 N 款(上限 8,与品类快捷区一致);「几件/几款」
         # 或未提 → 维持默认 3。
-        requested_count = re.search(r"([2-9]|1[0]|两|三|四|五|六|七|八|九|十)\s*[个件款条双只]", user_input)
+        requested_count = (
+            None
+            if absence_rhetoric
+            else re.search(r"([2-9]|1[0]|两|三|四|五|六|七|八|九|十)\s*[个件款条双只]", user_input)
+        )
         limit = 3
         if requested_count:
             raw = requested_count.group(1)

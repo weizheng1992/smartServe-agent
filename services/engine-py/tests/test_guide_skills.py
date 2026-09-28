@@ -394,6 +394,53 @@ def test缺席反问订单域负句不劫持(monkeypatch: pytest.MonkeyPatch) ->
     assert calls and calls[0]["query"] == "没有收到货"
 
 
+# ---------- 承接式反问(A-not-B,2026-09-28 实弹 #2) ----------
+# 「两件短袖呢，不用帐篷吗？」—— 前半承接上轮推荐(数量+品类+呢),后半
+# 指出缺席族。既有 _ABSENCE_RE 只认「(没有)X」框,接不住「不用X吗」反问:
+# 整句当字面搜索词查无,空分支再引用原话(finish 终稿还曲解成「不希望
+# 包含帐篷」的过滤条件)。期望:剥出反问缺席族直查,纪律与「没有X呢」同源。
+
+def test承接反问剥缺席族直查品类(monkeypatch: pytest.MonkeyPatch) -> None:
+    """必须剥出「不用X吗」反问框中的品类词直查,严禁整句当字面搜索词;
+    前半承接语的数量词(「两件」指上轮短袖)不得迁移为本次推荐数量。"""
+    calls = _stub_search(monkeypatch, [_GEAR])
+    res = _run_guide("两件短袖呢，不用帐篷吗？")
+    assert calls, "必须发起检索"
+    assert calls[0]["query"] == "帐篷", (
+        f"必须剥出反问缺席族「帐篷」直查,实际 query={calls[0]['query']!r}"
+    )
+    assert calls[0]["limit"] == 3, "前半承接语「两件」不是本次推荐数量,须回默认 3"
+    out = res["output"]
+    assert "帐篷" in out, "剥出的缺席族在售时应播报该族真货"
+    assert "两件短袖呢" not in out, "顾客反问原话不得被当搜索描述引用"
+
+    # 啊/呀/吧 同属反问语气词(「是不是不用睡袋啊」同为缺席指出)
+    calls.clear()
+    _run_guide("是不是不用睡袋啊？")
+    assert calls and calls[0]["query"] == "睡袋"
+
+
+def test承接反问查无以品类名词如实作答(monkeypatch: pytest.MonkeyPatch) -> None:
+    """反问缺席族命中但货架真无 → 以品类名词如实作答 + 品类盘点,严禁
+    引用整句原话当搜索描述(实弹曲解症状的上游)。"""
+    calls = _stub_search(monkeypatch, [])
+    _stub_overview(monkeypatch, [{"category": "衬衫", "spuCount": 4}])
+    res = _run_guide("两件短袖呢，不用帐篷吗？")
+    assert calls and calls[0]["query"] == "帐篷"
+    assert "店内暂时没有帐篷在售" in res["output"]
+    assert "目前店内热卖品类" in res["output"]
+    assert "两件短袖呢" not in res["output"]
+
+
+def test承接反问无锚词不劫持(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「不用退了吗」的框内词无购物锚词 → 不劫持,整句照常进检索
+    (动作域句子本不该路由到本技能,技能层不做错误劫持)。"""
+    calls = _stub_search(monkeypatch, [])
+    _stub_overview(monkeypatch, [])
+    _run_guide("这个不用退了吗")
+    assert calls and calls[0]["query"] == "这个不用退了吗"
+
+
 def test常规推荐给出合计与预算结论(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _stub_search(monkeypatch, _MOCK_PRODUCTS)  # 899+1299+599=2797
     res = _run_guide("推荐跑鞋,预算800")
