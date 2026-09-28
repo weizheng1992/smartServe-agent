@@ -102,12 +102,15 @@ class ShortMemory:
         clean_content = "" if content is None else str(content)
         try:
             async with get_session() as session:
-                # 线程自愈(镜像 db.createThread:存在则刷新,不存在则建)
+                # 线程自愈(镜像 db.createThread:存在则刷新,不存在则建)。
+                # 冲突分支只续 updated_at、严禁覆盖 business_id —— 与 run_agent
+                # _ensure_thread 同一不变量:审批恢复等缺省派发路径推断出的租户
+                # 不得把既有线程静默搬家。
                 await session.execute(
                     text(
                         'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") '
                         "VALUES (:tid, :uid, :bid, 'active', NOW(), NOW()) "
-                        'ON CONFLICT (id) DO UPDATE SET "updated_at" = NOW(), "business_id" = EXCLUDED."business_id"'
+                        'ON CONFLICT (id) DO UPDATE SET "updated_at" = NOW()'
                     ).bindparams(tid=self.thread_id, uid=_FALLBACK_USER_ID, bid=self.business_id)
                 )
                 session.add(

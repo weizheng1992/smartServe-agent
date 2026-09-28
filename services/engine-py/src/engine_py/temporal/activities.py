@@ -103,7 +103,8 @@ async def run_agent_state_node(node_name: str, ts_state: dict) -> dict:
         py_state["cards"] = final_cards
 
         if py_state.get("output"):
-            short_memory = ShortMemory(state.get("threadId", ""))
+            # 与 Episodic/Long 同源补传显式租户:审批恢复路径推断兜底已在此前解析
+            short_memory = ShortMemory(state.get("threadId", ""), business_id=business_id)
             episodic_memory = EpisodicMemory(state.get("userId", ""), business_id)
             long_memory = LongMemory(state.get("userId", ""), business_id)
             # 用户行归网关持久化(005 治理):Temporal 路径同样零写用户行
