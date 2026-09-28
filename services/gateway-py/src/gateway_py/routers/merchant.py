@@ -730,9 +730,13 @@ async def store_chat_messages(
         include_older = includeOlder == "true" or allHistory == "true"
         all_historical_messages: list | None = None
         if include_older and user_threads:
+            # 各线程时间线互不依赖,并行拉取 —— 上限 50 线程此前串行逐个往返,
+            # allHistory 模式一次请求就是 50 次串行 DB 查询(2026-09-28 夜审)。
+            timelines = await asyncio.gather(
+                *(get_conversation_timeline(t["threadId"], tenant) for t in user_threads)
+            )
             all_msgs: list[dict] = []
-            for t in user_threads:
-                tl = await get_conversation_timeline(t["threadId"], tenant)
+            for t, tl in zip(user_threads, timelines):
                 if tl and tl.get("messages"):
                     all_msgs.extend({**m, "threadId": t["threadId"]} for m in tl["messages"])
 
