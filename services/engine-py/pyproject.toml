@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Agent 决策引擎的 Python 重写(Phase 1 影子替换 packages/engine)"
 requires-python = ">=3.12"
 dependencies = [
-    "langgraph>=0.2",
+    "langgraph>=1.0",
     "langchain-openai>=0.2",
     "redis>=5.0",
     "pydantic>=2.7",
@@ -15,6 +15,9 @@ dependencies = [
     "sentence-transformers>=5.2",
     "langchain-huggingface>=1.2",
     "bcrypt>=4.2",
+    # 运行时直接 import(此前靠 gateway 声明/传递依赖透传,单独安装即 ImportError)
+    "sqlglot>=25.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

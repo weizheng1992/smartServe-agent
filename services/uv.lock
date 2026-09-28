@@ -577,9 +577,11 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "redis" },
     { name = "sentence-transformers" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "sqlglot" },
 ]
 
 [package.optional-dependencies]
@@ -604,11 +606,13 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "langchain-huggingface", specifier = ">=1.2" },
     { name = "langchain-openai", specifier = ">=0.2" },
-    { name = "langgraph", specifier = ">=0.2" },
+    { name = "langgraph", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", specifier = ">=5.0" },
     { name = "sentence-transformers", specifier = ">=5.2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+    { name = "sqlglot", specifier = ">=25.0" },
     { name = "temporalio", marker = "extra == 'worker'", specifier = ">=1.4" },
 ]
 provides-extras = ["worker"]
