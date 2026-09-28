@@ -95,10 +95,27 @@ describe('AskTranscript', () => {
     ]);
     expect(screen.getByText('AURORA-ORD-1')).toBeInTheDocument();
     expect(screen.getByText('待发货')).toBeInTheDocument();
+    // 金额口径与订单管理页一致 toFixed(2)
+    expect(screen.getByText('¥99.00')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '在订单中查看' }));
     expect(getSelection().order).toContain('AURORA-ORD-1');
     // 违禁键不得复活(残留勾选曾两次静默污染查询,merchant-admin.md §1.3)
     expect(localStorage.getItem('merchant-admin.selection')).toBeNull();
+  });
+
+  it('customer_orders 金额缺值诚实「—」,绝不显示 NaN', () => {
+    renderTranscript([
+      {
+        event: 'result',
+        data: {
+          metric: 'customer_orders',
+          unit: '单',
+          caliber: '客户订单',
+          rows: [{ order_id: 'AURORA-ORD-2', status: 'PAID', total_amount: null, created_at: '09-19 10:00' }],
+        },
+      },
+    ]);
+    expect(screen.getByText('¥—')).toBeInTheDocument();
   });
 
   it('折线走 ResultCard 唯一渲染缝:值列非数值 → 诚实降级表格,不画 NaN 网线', () => {

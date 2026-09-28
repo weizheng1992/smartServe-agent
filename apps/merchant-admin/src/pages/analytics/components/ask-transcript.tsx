@@ -38,59 +38,15 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
             {f.event === 'user' ? (
               <div className="rounded-xl bg-zinc-900 px-4 py-2 text-sm text-white">{f.data.message}</div>
             ) : f.event === 'result' && f.data.metric === 'customer_orders' && Array.isArray(f.data.rows) ? (
+              // 行级「在订单中查看」跳转是 analytics 全屏问答页独有的交互特例
+              // (静态渲染与 ResultCard 同口径);其余 result 帧一律走唯一渲染缝。
               <CustomerOrdersCard rows={f.data.rows} caliber={f.data.caliber} onJump={jumpToOrder} />
-            ) : f.event === 'result' &&
-              f.data.chart === 'line' &&
-              Array.isArray(f.data.rows) &&
-              f.data.rows.length >= 2 ? (
-              // 唯一渲染缝(merchant-admin.md §1.4):折线走 ResultCard,自带
-              // 值列 Number.isFinite 护栏 —— 历史帧重放遇非数值列诚实降级表格,
-              // 绝不画 NaN 网线(2026-09-25 此旁路曾复现已修复的实弹事故)。
-              <ResultCard data={f.data} />
             ) : f.event === 'result' ? (
-              <div className="space-y-2">
-                {(f.data.cards || []).map((card: any, j: number) =>
-                  card.type === 'table' ? (
-                    /* biome-ignore lint/suspicious/noArrayIndexKey: 场景包子卡无 id,静态渲染不重排 */
-                    <div key={j} className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-                      <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2">
-                        <span className="text-xs font-medium text-zinc-500">{card.title}</span>
-                      </div>
-                      <table className="w-full text-[13px]">
-                        <thead>
-                          <tr className="border-b border-zinc-100 text-left text-zinc-400">
-                            {card.columns.map((c: any) => (
-                              <th key={c.key} className="px-4 py-2 font-medium">
-                                {c.label}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {card.rows.map((r: any, k: number) => (
-                            /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
-                            <tr key={k} className="border-b border-zinc-50">
-                              {card.columns.map((c: any) => (
-                                <td key={c.key} className="px-4 py-2">
-                                  {String(r[c.key])}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <div className="border-t border-zinc-100 px-4 py-1.5 text-[11px] text-zinc-400">
-                        口径:{card.caliber}
-                      </div>
-                    </div>
-                  ) : (
-                    /* biome-ignore lint/suspicious/noArrayIndexKey: 场景包子卡无 id,静态渲染不重排 */
-                    <div key={j} className="rounded-xl border border-zinc-200 bg-white p-4 text-sm">
-                      {card.text}
-                    </div>
-                  ),
-                )}
-              </div>
+              // 唯一渲染缝(merchant-admin.md §1.4):折线/条形/诚实降级/文本卡
+              // 全在共享 ResultCard —— 折线值列 Number.isFinite 护栏(2026-09-25
+              // 此旁路自绘表格曾复现已修复的 NaN 网线事故)、排行自动条形、
+              // 「数据点不足」降级均与悬浮面板/看板/报告四处同形。
+              <ResultCard data={f.data} />
             ) : (
               <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm">
                 {f.data.message || f.event}
@@ -126,6 +82,14 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
   );
 }
 
+/** 金额口径与订单管理页一致(toFixed(2));缺值/坏值诚实「—」—— 注意
+ *  Number(null) === 0,必须先挡空值,否则缺金额渲染成假 ¥0.00。 */
+function formatAmount(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : '—';
+}
+
 /** 客户订单列表卡:行级「在订单中查看」跳订单管理并勾选。 */
 function CustomerOrdersCard({ rows, caliber, onJump }: { rows: any[]; caliber: string; onJump: (id: string) => void }) {
   return (
@@ -149,7 +113,7 @@ function CustomerOrdersCard({ rows, caliber, onJump }: { rows: any[]; caliber: s
               <tr key={r.order_id || k} className="border-b border-zinc-50">
                 <td className="px-4 py-2 font-mono">{r.order_id}</td>
                 <td className="px-4 py-2">{ORDER_STATUS[r.status] || r.status}</td>
-                <td className="px-4 py-2">¥{Number(r.total_amount).toLocaleString()}</td>
+                <td className="px-4 py-2">¥{formatAmount(r.total_amount)}</td>
                 <td className="px-4 py-2 text-zinc-500">{r.created_at}</td>
                 <td className="px-4 py-2 text-right">
                   <button

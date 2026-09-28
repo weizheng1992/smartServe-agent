@@ -37,6 +37,7 @@ paths: ["apps/merchant-admin/**/*"]
   - 条形:`rankingPoints` 需 ≥2 行且末列数值,取前 10;`NO_BAR_METRICS`(`order_overview`/`customer_orders` 逐笔列表)永不画条;`chart='bar'` 用户指令但形状不符 → 诚实说明卡 + 表格。
   - `chart='table'` 尊重用户指令,不画图。
 - 「折线仅趋势族」是**服务端**约定(`engine_py/analytics/graph.py` `_effective_chart`);前端数值护栏是历史帧重放/服务端回归时的最后防线,两层都不可拆。
+- analytics 全屏问答页(`ask-transcript.tsx`)唯一例外是 `customer_orders` 的 `CustomerOrdersCard` —— 行级「在订单中查看」跳转是本页独有交互;其余 result 帧一律交 `ResultCard`,严禁自绘表格(2026-09-25 NaN 网线事故的自绘旁路已收口)。订单金额口径与订单管理页一致 `toFixed(2)`,缺值/坏值诚实「—」(`Number(null) === 0` 必须先挡,否则缺金额渲染成假 ¥0.00)。
 
 ### 1.5 看板页 (board)
 
