@@ -4,6 +4,33 @@
 
 ---
 
+## [2.6.58] - 2026-09-28 (live-desk P1:接管真源化 —— threads 复合状态 + AI 暂停闸 + 释放回 AI 托管)
+
+商户客服工作台重构一期 P1(spec `docs/architecture/live-desk-rework.md`,真源归一+丙·混合基座)。钉死的实弹事故:接管/释放曾经只是 socket 事件与工单表皮——坐席「接管」后 threads 仍是 active,顾客消息继续进引擎排队;「释放」更无任何实现,会话回不到 AI 托管,**释放后 AI 永久哑火**。本版把接管状态机的真源收敛到 threads 表,并给 AI 侧装上暂停闸与掉线兜底。
+
+### ✨ Features
+
+- **真源复合语义(`threads` 表)**:`status='human_takeover'` 且 `assigned_operator_id IS NULL` = 呼叫中/排队;非空 = 接管中。HTTP 链(gatekeeper)与 socket 链(realtime)经新模块 `engine_py/approvals/takeover.py` 同写一源;`human_escalation` 工单退化为审计资产,不再承载状态。排队时长取 `metadata.takeover_requested_at`(同接管期只记首次,释放后再入起新期)。
+- **AI 暂停闸(chat dispatch 入队前)**:建作业前读真源,接管期该会话全部轮次不建作业不调 LLM——响应 `jobId:''`+`isHumanActive:true`(复用 apps/web 既有契约,零前端改动),sync 形状给诚实文案「您的消息已由人工客服接待」;用户消息照常落库。release 后下一条自然走 AI,无恢复仪式。
+- **释放回 AI 托管(`release_takeover` 线程级员工动作)**:条件 UPDATE(`status` 必须正处接管态)保证幂等——重复释放 0 行、不重复落系统消息;线程归属租户校验,员工凭猜测 threadId 跨租户释放一律 403;未知线程 fail-open `released:false`。释放落系统消息「已为您切回 AI 智能助手」。
+- **掉线超时释放(权威路径=DB deadline+scheduler 扫描)**:坐席 socket 断开 → 其名下接管会话写 `metadata.takeover_release_at = NOW()+timeout`(首个 deadline 优先,重连取消,幂等);scheduler 新增 `takeover_release` 周期任务(30s)扫描过期会话条件释放+落「暂时离线超时」系统消息。进程内计时器仅可作 UX 提示,不可作唯一路径(多实例约束,spec §6);改状态一律走同源 `takeover.py`,socket 链不再各写各的。
+- **坐席消息写侧落列**:`human_reply` 落 `role='operator'`+`operator_info`(operatorId/operatorName),退役 `[商户客服] ` 文本前缀拼接;前端气泡按 role 渲染,操作者标签读 `operator_info`。
+- **工作台释放按钮(merchant-admin)**:接管中会话头部按钮切换「🚨 主动接管会话 ⇄ ✅ 释放回 AI 托管」(isReleasing 防抖);接管态来自 8s 真源快照派生,操作后立即刷新不等轮询。
+
+### 🧪 Tests
+
+- 新专册 `tests/test_live_desk_takeover_source_of_truth.py` 13 例:双写一致性(匿名呼叫排队→员工认领→operator 行落列→release 复位)、暂停闸三条链(sync/async dispatch+store_chat,接管期不建作业、release 后恢复建作业)、超时释放(扫描释放+重复扫描 0 行+未来 deadline 与排队态不释放+deadline 首写优先/取消幂等)、release 语义(幂等/跨租户 403 真源分毫未动/未知线程 fail-open)。
+- 契约随批:审批 actor 缺省改员工 JWT 真身(`test_http_routes_contract.py`);engine 调度任务清单加 `takeover_release`(30s)。全绿:gateway 290 passed / engine 1090 passed / merchant-admin vitest 108 / merchant-admin E2E 12 passed。
+- **事故回绿钉(首条 live-desk Playwright)**:`e2e/live-desk.e2e.ts` 浏览器全链路「点接管→按钮切换→暂停闸 API 断言→点释放→恢复建作业→真引擎 assistant 行落历史(排除 welcome/greet 引导行,真实 LLM 往返)」——红了即释放后 AI 哑火事故回潮。
+
+### 📝 Notes
+
+- 已知既有 flake(非本案,待另案):`merchant_domain.py` 两处随机单号 `AURORA-ORD-2026-{randint(1000,9999)}`,套件内多单生日碰撞偶发 UniqueViolation。
+- P2+(工单面板/SOP 辅助/满意度回执等)按 spec 五期分期续作;接管排队态(operator NULL)的认领路由与播报属 P2 面。
+- dev 实操坑(已入记忆):4000 端口曾为隔夜手拉进程(无 `--reload`),P1 代码对其不可见,症状像「新功能失效」;验证新功能前先核对网关进程启动时间 vs 源码 mtime。
+
+---
+
 ## [2.6.57] - 2026-09-28 (promptfoo 基线闭环:eval 欠账修复 + 取消语确定性否决 + 基线重钉)
 
 钉死基线 06273ac(2026-09-10)后的两处老化欠账一次闭环,基线重钉至全绿(0099aad/cda80e4/916bd03 Gen-3 一期提交同批入快照,回归面重新钉牢)。
