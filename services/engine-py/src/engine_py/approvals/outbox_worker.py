@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
 
 from sqlalchemy import and_, func, or_, select, text, update
 
@@ -26,10 +25,10 @@ async def process_pending_events(older_than_ms: int = 10_000) -> dict:
     """执行一次对账补偿扫描(默认仅处理 10s 前事件,避免与同步 Fast-Path 竞争)。"""
     summary = {"processedCount": 0, "dispatchedCount": 0, "failedCount": 0}
     try:
-        now = _dt.datetime.now()
-        age_cutoff = now - _dt.timedelta(milliseconds=older_than_ms)
-        stale_cutoff = now - _dt.timedelta(minutes=5)
-
+        # 年龄/停滞阈值一律下沉 SQL 侧 NOW() 比较 —— 时间戳列存的是数据库
+        # 时钟(naive UTC),Python 本地 naive now 在非 UTC 时区(如 UTC+8)
+        # 下偏差整整个时区:新鲜事件瞬间「8 小时龄」越过 10s 竞争阈值抢跑
+        # Fast-Path,processing 停滞检测同样失真(2026-09-29 夜审新测试实证)。
         async with get_session() as session:
             events = (
                 (
@@ -41,10 +40,16 @@ async def process_pending_events(older_than_ms: int = 10_000) -> dict:
                                 and_(
                                     ApprovalOutboxEvent.status == "processing",
                                     func.coalesce(ApprovalOutboxEvent.updated_at, ApprovalOutboxEvent.created_at)
-                                    <= stale_cutoff,
+                                    <= text("NOW() - INTERVAL '5 minutes'"),
                                 ),
                             ),
                             (ApprovalOutboxEvent.retry_count or 0) < 5,
+                            # 年龄阈值:新鲜事件留给同步 Fast-Path,补偿链不抢跑
+                            or_(
+                                ApprovalOutboxEvent.status == "processing",
+                                ApprovalOutboxEvent.created_at
+                                <= text(f"NOW() - INTERVAL '{int(older_than_ms)} milliseconds'"),
+                            ),
                         )
                         .order_by(ApprovalOutboxEvent.created_at.desc())
                         .limit(20)
@@ -55,19 +60,14 @@ async def process_pending_events(older_than_ms: int = 10_000) -> dict:
                 .all()
             )
 
-            eligible = []
-            for e in events:
-                if e.status == "processing" or (e.created_at or now) <= age_cutoff:
-                    eligible.append(e)
-
-            for event in eligible:
+            for event in events:
                 await session.execute(
                     update(ApprovalOutboxEvent)
                     .where(ApprovalOutboxEvent.id == event.id)
                     .values(
                         status="processing",
                         retry_count=(event.retry_count or 0) + 1,
-                        updated_at=now,
+                        updated_at=func.now(),
                     )
                 )
                 await session.commit()  # 释放行锁,派发转后台

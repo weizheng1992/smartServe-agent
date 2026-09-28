@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
 import sys
 import types
 import uuid
@@ -96,7 +95,11 @@ def _mk_event(
     retry: int = 0,
     payload: dict | None = None,
 ) -> ApprovalOutboxEvent:
-    now = _dt.datetime.now()
+    # 时间戳必须相对 **数据库时钟**(NOW() - interval),与生产写入路径
+    # (server_default now())同源 —— Python 本地 naive now 在非 UTC 时区
+    # 下与库内 naive UTC 相差整个时区,造出的「龄」是假的(2026-09-29
+    # 夜审实证:gateway 侧用 PG NOW() 造戳的用例抓到 worker 时区 bug,
+    # 本文件旧造戳方式恰好掩盖了它)。
     return ApprovalOutboxEvent(
         id=uuid.uuid4(),
         approval_id=str(uuid.uuid4()),
@@ -106,8 +109,8 @@ def _mk_event(
         status=status,
         retry_count=retry,
         error_message="prev round failed" if status == "failed" else None,
-        created_at=now - _dt.timedelta(seconds=age_s),
-        updated_at=now - _dt.timedelta(seconds=updated_age_s if updated_age_s is not None else age_s),
+        created_at=text(f"NOW() - INTERVAL '{int(age_s)} seconds'"),
+        updated_at=text(f"NOW() - INTERVAL '{int(updated_age_s if updated_age_s is not None else age_s)} seconds'"),
     )
 
 
