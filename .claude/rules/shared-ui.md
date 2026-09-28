@@ -5,13 +5,13 @@ paths: ["packages/ui/**/*"]
 
 # 共享 UI 与富交互卡片规范 (Shared UI & Cards)
 
-本工作区是整个 Monorepo 的共享 UI 资产库，为客户端对话应用 (`apps/web`) 和管理后台 (`apps/admin`) 提供一致、高质感、零外部依赖的基础组件与多模态富交互卡片。
+本工作区是整个 Monorepo 的共享 UI 资产库，为四个前端（客户端对话应用 `apps/web`、管理后台 `apps/admin`、商户门户 `apps/merchant`、商户独立后台 `apps/merchant-admin`）提供一致、高质感的基础组件与多模态富交互卡片。
 
 ## 1. 核心设计哲学与规范
 
-### 1.1 零外部依赖原子设计 (Zero External Dependency)
+### 1.1 无头原子设计收敛于 ui 包（Zero Component-Library Dependency）
 
-- **无三方重量级 UI 库绑定**：所有组件（Button, Badge, Input, Modal, Drawer, Table, Tabs 等）均基于原生 React + Tailwind CSS 纯手工打造，杜绝臃肿的外部库依赖。
+- **无三方重量级 UI 库绑定**：所有组件（Button, Badge, Input, Modal, Drawer, Table, Tabs 等）均基于原生 React + Tailwind CSS 纯手工打造；「零依赖」的准确语义是**无头原子依赖收敛于 `packages/ui` 一处、四个 app 零组件库依赖**（ui 包自身以 react 为 peer dependency,样式由宿主 app 的 Tailwind 提供），并非凭空无依赖。
 - **高可定制与模块化**：严格遵循 props 驱动与受控/非受控模式标准，提供精准的 TypeScript 类型定义。
 
 ### 1.2 多模态富交互卡片族谱 (Interactive Card Family)
