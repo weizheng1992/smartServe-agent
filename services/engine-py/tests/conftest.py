@@ -19,6 +19,24 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _reset_global_circuit_breaker():
+    """进程级全局熔断器逐测重置。
+
+    熔断器是 lru_cache 单例,跨测试文件共享;任何一处故意触发失败的测试
+    (韧性/遥测/坏例类)留下的 OPEN 态会让其后所有真实走 LLM 客户端的测试
+    吃 CircuitBreakerOpenError —— 时序敏感,全量跑时偶发(2026-09-29 夜审
+    实证:test_llm_chat_model 2 例被上游遗留 OPEN 态击穿,单跑即绿)。
+    测前测后各重置一次;测试内部自行开闸断言的行为不受影响。
+    """
+    from engine_py.llm.resilience import global_circuit_breaker
+
+    global_circuit_breaker.reset()
+    yield
+    global_circuit_breaker.reset()
+
+
 # 环境变量注入必须先于任何 engine_py 导入
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://u:p@localhost:5432/test_unused")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
