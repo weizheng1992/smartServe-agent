@@ -47,7 +47,7 @@
 
 ### 🧪 Tests
 
-- consult 相关 5 册 122 passed:新增零 LLM 否决钉子(`test_cancel_intent_vetoed_deterministically_before_llm`,断言取消语在直答调用之前由代码闸改判)+ 闸门正例两形状;词表契约 `test_intent_vocab_home.py` 全绿。eval 单例实跑 `PASS | order_return / slot_extractor`。
+- consult 相关 5 册 70 passed + 词表契约 10 例:新增零 LLM 否决钉子(`test_cancel_intent_vetoed_deterministically_before_llm`,断言取消语在直答调用之前由代码闸改判)+ 闸门正例两形状;词表契约 `test_intent_vocab_home.py` 全绿。eval 单例实跑 `PASS | order_return / slot_extractor`。
 - 全量回归:unified 56/56(均分 0.9982)+ planner 8/8。多轮导购消歧例(活 LLM 真跑)单次偶发 FAIL,复跑 PASS 确认为波动非回归。
 
 ### 📝 Notes
