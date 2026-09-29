@@ -71,11 +71,45 @@ export function FloatingAgent({ route }: { route: string }) {
       /* 坏档忽略 */
     }
   }, []);
+  // 落盘防抖(夜审 2026-09-29):SSE 流式期间逐帧 setFrames 曾逐帧全量
+  // JSON.stringify 同步写、阻塞主线程 —— 800ms 拖尾合流。仅「非空→空」
+  // (新对话清空)立即落盘空数组保持同步语义;空→空(挂载初态)不写,
+  // 避免把待恢复的历史抹掉;卸载 flush 尾帧,关面板不丢对话。
+  const latestFramesRef = useRef<AgentFrame[]>(frames);
+  const prevLenRef = useRef(frames.length);
+  const historyFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    try {
-      localStorage.setItem('merchant-admin.agent.history', JSON.stringify(frames.slice(-60)));
-    } catch {}
+    const wasPopulated = prevLenRef.current > 0;
+    prevLenRef.current = frames.length;
+    latestFramesRef.current = frames;
+    if (historyFlushRef.current) clearTimeout(historyFlushRef.current);
+    if (frames.length === 0) {
+      if (wasPopulated) {
+        try {
+          localStorage.setItem('merchant-admin.agent.history', '[]');
+        } catch {}
+      }
+      return;
+    }
+    historyFlushRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem('merchant-admin.agent.history', JSON.stringify(frames.slice(-60)));
+      } catch {}
+    }, 800);
   }, [frames]);
+  useEffect(
+    () => () => {
+      if (historyFlushRef.current) clearTimeout(historyFlushRef.current);
+      if (latestFramesRef.current.length === 0) return;
+      try {
+        localStorage.setItem(
+          'merchant-admin.agent.history',
+          JSON.stringify(latestFramesRef.current.slice(-60)),
+        );
+      } catch {}
+    },
+    [],
+  );
   const askRef = useRef<(q?: string) => void>(() => {});
 
   // 就地唤起(如订单页「向 AI 提问」):开面板 + 自动提问,不跳页
