@@ -15,6 +15,7 @@ tests/test_http_routes_contract.py 的 auth 用例钉死。
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import functools
 import logging
@@ -118,9 +119,9 @@ async def login(body: LoginIn):
         stored_hash, subject = user.password_hash, str(user.id)
 
     if stored_hash is not None:
-        ok = bcrypt.checkpw(body.password.encode(), stored_hash.encode())
+        ok = await asyncio.to_thread(bcrypt.checkpw, body.password.encode(), stored_hash.encode())
     else:
-        bcrypt.checkpw(body.password.encode(), _dummy_hash())  # 等时:未知邮箱不提前返回
+        await asyncio.to_thread(bcrypt.checkpw, body.password.encode(), _dummy_hash())  # 等时:未知邮箱不提前返回
         ok = False
     if not ok:
         return _unauthorized("邮箱或密码错误")
@@ -148,7 +149,9 @@ async def register(body: RegisterIn):
         ).scalar_one_or_none()
         if exists is not None:
             return JSONResponse(status_code=409, content={"success": False, "message": "该邮箱已注册,请直接登录"})
-        password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
+        password_hash = (
+            await asyncio.to_thread(bcrypt.hashpw, body.password.encode(), bcrypt.gensalt())
+        ).decode()
         user = User(email=email, password_hash=password_hash)
         session.add(user)
         await session.commit()
