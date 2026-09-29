@@ -151,6 +151,49 @@ describe('sendMessage 幂等发送(P4 §2.7)', () => {
   });
 });
 
+describe('openThread 同会话重入(2026-09-29 防抖动)', () => {
+  it('new_message 回环重入不塌空时间线(塌空即「发消息抖一下」),换会话仍清防串栏', async () => {
+    const { result } = await renderDesk();
+    mocks.timeline.mockResolvedValue({
+      success: true,
+      data: { messages: [{ id: 'u1', role: 'user', content: 'hi' }] },
+    });
+    await act(async () => {
+      await result.current.openThread('t1');
+    });
+    expect(result.current.timeline).toHaveLength(1);
+    // 同会话重入(服务端 new_message 房间回环/发送后对齐真源):拉取在途时
+    // 时间线保持不闪空 —— 旧实现先 setTimeline([]) 再重灌,中间帧塌 0 即抖动。
+    // 挂起拉取才能观测到旧实现的中间塌空帧(终态两边相同,终态断言钉不住)。
+    mocks.timeline.mockImplementation(() => new Promise(() => {}));
+    await act(async () => {
+      void result.current.openThread('t1');
+    });
+    expect(result.current.timeline).toHaveLength(1);
+    // 换会话:同步清旧时间线防串栏(拉取失败也不残留上一会话的消息)
+    mocks.timeline.mockRejectedValue(new Error('断网'));
+    await act(async () => {
+      await result.current.openThread('t2');
+    });
+    expect(result.current.timeline).toHaveLength(0);
+  });
+
+  it('join_thread 每会话只发一次(重入不再重复入房)', async () => {
+    const { result } = await renderDesk();
+    await act(async () => {
+      await result.current.openThread('t1');
+    });
+    await act(async () => {
+      await result.current.openThread('t1');
+    });
+    await act(async () => {
+      await result.current.openThread('t2');
+    });
+    const joins = mocks.emit.mock.calls.filter(([e]) => e === 'join_thread');
+    expect(joins.map(([, p]) => (p as { threadId: string }).threadId)).toEqual(['t1', 't2']);
+  });
+});
+
 describe('reviewTicket 台内批驳(P4 §2.6)', () => {
   it('403/400 的服务端 detail 如实透传,不吞进通用文案', async () => {
     const { result } = await renderDesk();

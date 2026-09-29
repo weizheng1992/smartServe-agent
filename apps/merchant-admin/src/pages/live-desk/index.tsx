@@ -1,5 +1,5 @@
 import type { MessageItem } from '@/lib/api';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 // 坐席台独立页(live-desk-rework P2/P3/P4):台面顶栏(排队/我的计数 + 实时
 // 连接态)+ 三栏 —— 左会话池(排队等待最久置顶)/ 中时间线(认领后回复 +
 // 待批工单批驳卡)/ 右坐席上下文栏(五项,spec §2.4)+ 坐席在线态。
@@ -143,14 +143,19 @@ export default function LiveDeskPage() {
   // 时间线视口贴底(2026-09-29 实弹:聊天记录打开总停在顶部=最旧消息,
   // 最新消息沉在视口外):切换会话无条件回底部;新消息仅当操作员原本
   // 贴底(没在翻历史)才跟随,离底阅读时不劫持滚动位置。
+  // 用 useLayoutEffect:提交后、绘制前写 scrollTop —— useEffect 会在
+  // 绘制后瞬移,乐观气泡先以旧视口画一帧再跳底,即「发消息抖一下」。
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const stickBottom = useRef(true);
-  useEffect(() => {
+  // 两处依赖均为「触发器」而非读取值(effect 体只写 scrollTop),刻意不进函数体
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 触发器依赖:会话切换即回底
+  useLayoutEffect(() => {
     stickBottom.current = true;
     const el = timelineRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [desk.selectedThreadId]);
-  useEffect(() => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 触发器依赖:消息数变化即贴底跟随
+  useLayoutEffect(() => {
     const el = timelineRef.current;
     if (el && stickBottom.current) el.scrollTop = el.scrollHeight;
   }, [desk.timeline.length]);

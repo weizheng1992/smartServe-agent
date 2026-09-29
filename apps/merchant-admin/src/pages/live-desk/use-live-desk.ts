@@ -50,6 +50,7 @@ export function useLiveDesk() {
   const socketRef = useRef<Socket | null>(null);
   const typingSentAtRef = useRef(0); // 上行节流
   const typingHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null); // 显示保持窗
+  const joinedRoomsRef = useRef<Set<string>>(new Set()); // 已入房集合(join 去重,重连清空重进)
 
   const loadConversations = useCallback(async () => {
     try {
@@ -94,14 +95,30 @@ export function useLiveDesk() {
     }
   }, []);
 
+  // 选中线程的 ref(闭包读取最新值:new_message 回环与同会话重入判定,不重连 socket)
+  const selectedThreadIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedThreadIdRef.current = selectedThreadId;
+  }, [selectedThreadId]);
+
   const openThread = useCallback(
     async (threadId: string) => {
+      // 同会话重入(new_message 房间回环、发送后对齐真源)不清态 —— 塌空再
+      // 重灌即实弹「每次发消息抖一下」(时间线闪空 + 右栏闪白 + 滚动跳位);
+      // 仅真正切换会话才清旧时间线/上下文/待批卡(防串栏)。
+      const switching = selectedThreadIdRef.current !== threadId;
       setSelectedThreadId(threadId);
-      setTimeline([]);
-      setContext(null); // 换会话先清旧上下文,防串栏
-      setPendingTicket(null);
-      // 入房:房间广播(new_message / conversation_state_changed)必须 join 才收
-      socketRef.current?.emit('join_thread', { threadId, tenantId: TENANT_ID, role: 'operator' });
+      if (switching) {
+        setTimeline([]);
+        setContext(null);
+        setPendingTicket(null);
+      }
+      // 入房:房间广播(new_message / conversation_state_changed)必须 join 才收;
+      // 已入房去重(重连时 connect 钩子清集合并对当前会话重进)
+      if (!joinedRoomsRef.current.has(threadId)) {
+        joinedRoomsRef.current.add(threadId);
+        socketRef.current?.emit('join_thread', { threadId, tenantId: TENANT_ID, role: 'operator' });
+      }
       try {
         const body = await api.liveDesk.timeline(threadId);
         if (body.success && body.data) setTimeline(body.data.messages || []);
@@ -114,12 +131,6 @@ export function useLiveDesk() {
     [loadContext, loadPendingTicket],
   );
 
-  // 选中线程的 ref(new_message 闭包读取最新值,不重连 socket)
-  const selectedThreadIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    selectedThreadIdRef.current = selectedThreadId;
-  }, [selectedThreadId]);
-
   // socket.io operator 连接(员工 JWT 必须有效且租户一致,服务端裁)
   useEffect(() => {
     if (!authToken()) return;
@@ -130,7 +141,17 @@ export function useLiveDesk() {
       reconnection: true,
     });
     socketRef.current = socket;
-    socket.on('connect', () => setConnected(true));
+    socket.on('connect', () => {
+      setConnected(true);
+      // 重连后房间成员资格失效:清已入房集合,并对当前选中会话立即重进,
+      // 否则断线期间打开的会话要等手动重点一次才恢复实时广播
+      joinedRoomsRef.current.clear();
+      const tid = selectedThreadIdRef.current;
+      if (tid) {
+        joinedRoomsRef.current.add(tid);
+        socket.emit('join_thread', { threadId: tid, tenantId: TENANT_ID, role: 'operator' });
+      }
+    });
     socket.on('disconnect', () => setConnected(false));
     socket.on('connect_error', () => setConnected(false));
     // 认领/释放广播:就地更新行(threads 真源三键 status/assignedOperatorId/unreadCount)
