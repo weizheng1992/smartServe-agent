@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import datetime as _dt
-
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..db import TaskMemoryRow, get_session
 
@@ -36,13 +34,16 @@ class TaskMemory:
                 ).scalar_one_or_none()
                 if row:
                     row.pending_intents = state
-                    row.updated_at = _dt.datetime.now()
+                    # updated_at 落 DB 钟(server_default now() 同源 UTC):
+                    # 本地 naive now 在非 UTC 部署下覆写成未来 8h 的混源时间戳
+                    # (2026-09-29 夜审 F15 波及复核)
+                    row.updated_at = func.now()
                 else:
                     session.add(
                         TaskMemoryRow(
                             thread_id=self.thread_id,
                             pending_intents=state,
-                            updated_at=_dt.datetime.now(),
+                            # 新建走列默认(server_default now()),不手填本地钟
                         )
                     )
                 await session.commit()

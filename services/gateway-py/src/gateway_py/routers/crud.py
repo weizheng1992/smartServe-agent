@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
 import time
 import uuid
 
@@ -21,7 +20,7 @@ from engine_py.db import (
 )
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import desc, select, text
+from sqlalchemy import desc, func, select, text
 
 router = APIRouter()
 
@@ -104,7 +103,10 @@ async def update_guardrail(rule_id: str, body: dict, x_tenant_id: str | None = H
                 setattr(row, column, body[key])
         if body.get("isEnabled") is not None:
             row.is_enabled = body["isEnabled"]
-        row.updated_at = _dt.datetime.now()
+        # updated_at 落 DB 钟(func.now(),与列 server_default 同源 UTC)——
+        # 本地 naive now 在非 UTC 部署下覆写成未来 8h 的混源时间戳
+        # (2026-09-29 夜审 F15 波及复核)
+        row.updated_at = func.now()
         await session.commit()
         await session.refresh(row)
     return {"success": True, "data": _guardrail_item(row)}
@@ -299,12 +301,11 @@ async def update_quota(body: QuotaIn):
         ).scalar_one_or_none()
         if existing:
             existing.monthly_limit_tokens = body.monthlyLimitTokens
-            existing.updated_at = _dt.datetime.now()
+            existing.updated_at = func.now()
         else:
+            # updated_at 走列默认(server_default now(),UTC),不手填本地钟
             session.add(
-                TenantBillingQuota(
-                    business_id=body.businessId, monthly_limit_tokens=body.monthlyLimitTokens, updated_at=_dt.datetime.now()
-                )
+                TenantBillingQuota(business_id=body.businessId, monthly_limit_tokens=body.monthlyLimitTokens)
             )
         await session.commit()
     usages = await billing_usages()
