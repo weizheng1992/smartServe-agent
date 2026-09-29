@@ -165,11 +165,11 @@ class TestGetRecentProductLines:
         async def fake_list(_user_id):
             return orders
 
-        async def fake_items(order_id):
-            return items_by_order.get(order_id, [])
+        async def fake_items_bulk(order_ids):
+            return {oid: items_by_order.get(oid, []) for oid in order_ids}
 
         monkeypatch.setattr(order_domain, "_list_merchant_orders", fake_list)
-        monkeypatch.setattr(order_domain, "_fetch_merchant_order_items", fake_items)
+        monkeypatch.setattr(order_domain, "_fetch_merchant_order_items_bulk", fake_items_bulk)
 
     @staticmethod
     def _wire_engine_detailed(monkeypatch, orders: list[dict]):
@@ -228,12 +228,12 @@ class TestGetRecentProductLines:
         async def fake_list(_user_id):
             return [{"orderId": f"ORD-{n}"} for n in range(8)]
 
-        async def fake_items(order_id):
-            fetched_order_ids.append(order_id)
-            return [{"name": f"商品{order_id}", "quantity": 1}]
+        async def fake_items_bulk(order_ids):
+            fetched_order_ids.extend(order_ids)  # 一次 IN 查询(F15 批量化),不再逐单 await
+            return {oid: [{"name": f"商品{oid}", "quantity": 1}] for oid in order_ids}
 
         monkeypatch.setattr(order_domain, "_list_merchant_orders", fake_list)
-        monkeypatch.setattr(order_domain, "_fetch_merchant_order_items", fake_items)
+        monkeypatch.setattr(order_domain, "_fetch_merchant_order_items_bulk", fake_items_bulk)
 
         lines = asyncio.run(OrderDomainService.get_recent_product_lines("CUST-8801", limit=5))
         assert len(lines) == MAX_CANDIDATE_ORDERS

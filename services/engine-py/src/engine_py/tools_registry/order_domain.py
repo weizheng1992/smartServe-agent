@@ -17,8 +17,9 @@ import re
 import time
 import uuid
 from functools import lru_cache
+from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -215,6 +216,16 @@ async def _find_merchant_order(order_id: str, user_id: str) -> dict | None:
         return None
 
 
+def _merchant_item_row_to_item(r: Any) -> dict:
+    return {
+        "productId": r.get("spu_id") or r.get("sku_code"),
+        "name": r.get("title") or "商户商品",
+        "description": r.get("spec_summary") or "",
+        "quantity": int(r.get("quantity") or 1),
+        "priceAtPurchase": float(r.get("price") or 0),
+    }
+
+
 async def _fetch_merchant_order_items(order_id: str) -> list[dict]:
     try:
         async with _merchant_reader_engine().connect() as conn:
@@ -227,19 +238,39 @@ async def _fetch_merchant_order_items(order_id: str) -> list[dict]:
                 .mappings()
                 .all()
             )
-            return [
-                {
-                    "productId": r.get("spu_id") or r.get("sku_code"),
-                    "name": r.get("title") or "商户商品",
-                    "description": r.get("spec_summary") or "",
-                    "quantity": int(r.get("quantity") or 1),
-                    "priceAtPurchase": float(r.get("price") or 0),
-                }
-                for r in rows
-            ]
+            return [_merchant_item_row_to_item(r) for r in rows]
     except Exception as err:
         print(f"[OrderDomainService] merchant items unavailable: {err}")
         return []
+
+
+async def _fetch_merchant_order_items_bulk(order_ids: list[str]) -> dict[str, list[dict]]:
+    """多单商品行一次 IN 查询、按单分组(get_recent_product_lines 候选池用,
+    消灭逐单 await 的 N+1;夜审 2026-09-29)。失败语义与单单版一致:空映射,
+    调用方按无商品行降级。"""
+    if not order_ids:
+        return {}
+    try:
+        async with _merchant_reader_engine().connect() as conn:
+            rows = (
+                (
+                    await conn.execute(
+                        text("SELECT * FROM merchant_order_items WHERE order_id IN :oids").bindparams(
+                            bindparam("oids", expanding=True)
+                        ),
+                        {"oids": list(order_ids)},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        grouped: dict[str, list[dict]] = {}
+        for r in rows:
+            grouped.setdefault(str(r.get("order_id") or ""), []).append(_merchant_item_row_to_item(r))
+        return grouped
+    except Exception as err:
+        print(f"[OrderDomainService] merchant items unavailable: {err}")
+        return {}
 
 
 async def _update_merchant_order(order_id: str, *, status: str | None = None, shipping_address: dict | None = None) -> None:
@@ -1413,19 +1444,19 @@ class OrderDomainService:
         if not user_id:
             return []
 
-        # 1) 商户门户真单(先截断再拉商品行,避免超限单白查 items)
+        # 1) 商户门户真单(先截断再拉商品行,避免超限单白查 items;
+        # 商品行一次 IN 查询按单分组,不再逐单 await 的 N+1 —— 夜审 2026-09-29)
         merchant_orders = await _list_merchant_orders(user_id)
         if merchant_orders:
+            oids = [str(order["orderId"]) for order in merchant_orders[:limit] if order.get("orderId")]
+            items_by_order = await _fetch_merchant_order_items_bulk(oids)
             lines: list[dict] = []
-            for order in merchant_orders[:limit]:
-                oid = order.get("orderId")
-                if not oid:
-                    continue
-                for item in await _fetch_merchant_order_items(str(oid)):
+            for oid in oids:
+                for item in items_by_order.get(oid, []):
                     if item.get("name"):
                         lines.append(
                             {
-                                "orderId": str(oid),
+                                "orderId": oid,
                                 "productName": str(item["name"]),
                                 "quantity": int(item.get("quantity") or 1),
                             }
