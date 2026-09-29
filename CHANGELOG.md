@@ -4,6 +4,19 @@
 
 ---
 
+## [2.6.64] - 2026-09-29 (导购搭配语义守卫:searchProducts 子任务不再截胡「搭配一套」)
+
+2.6.56 搭配双族修复的同形残余(实弹复发):同一句「搭配一套…装备和衣服」9-27 走技能路径出双族+合计预算,9-29 却只推 2 件短袖衬衫(「之前只有装备,现在只有衣服了」)。取证:路由判 shopping_guide 正确、货架静态、mall_domain 未变 —— 分叉在 executor 工具选择:搭配请求可被写成 `searchProducts` 工具子任务(query 自拟单脚),工具路径没有技能 SOP 的搭配族补脚/交错合并/合计预算,必然单族输出。机制层缺口与 LLM 分叉概率无关,确定性存在。
+
+### 🐛 Fixes
+
+- **executor 搭配语义守卫**(`graph/nodes/step_execution_engine.py` 调度前):工具选择两条来路(fast-path 关键词 / fallback LLM)给出的 `searchProducts`,只要用户输入呈搭配形态(搭配/一套/套装 × 衣着锚词)一律在物理调度前改路由 `skill_shopping_guide`(args=整句 userInput,同 fast-path 契约)。判据直接引用 `ShoppingGuideSkill._OUTFIT_RE`/`_CLOTHING_ANCHOR_RE` 类属性正则——单一事实源,与技能内搭配补脚永不漂移;不依赖 LLM 自觉(同取消语闸哲学:确定性代码闸收编 prompt 约束)。无搭配形态的普通检索与「搭配」无衣着锚词句均不劫持(双条件闸)。
+
+### 🧪 Tests
+
+- 新增 executor 搭配守卫册 3 例(`tests/test_executor_outfit_reroute.py`):搭配句被写成 searchProducts 子任务 → 断言改路由+双族在场+检索 query=整句(红环实证:修前 `searchProducts` 单脚);普通检索不走守卫;「搭配」无衣着锚词不劫持。
+- 回归:guide 册 26 + executor fallback schema/fast-path + 邻接(plan_alignment / skill_contract_golden / double_refund / cart_phantom)合计 80 passed;ruff 干净。graph 级实弹复验受 bigmodel 间歇闪断阻(重试 3 连挂,环境性),机制层由确定性缝测钉死。
+
 ## [2.6.63] - 2026-09-28 (导购承接式反问修复:「不用帐篷吗」不再整句当字面搜索词)
 
 2.6.56 缺席反问剥否定的同族残余(实弹续聊轮次):顾客旅行搭配推荐(4 件含 2 短袖、无帐篷)后追问「两件短袖呢,不用帐篷吗?」,系统把整句当字面搜索词检索(必诚实空),空分支再引用原话,finish 终稿还把反问曲解成「不希望包含帐篷」的过滤条件——语义双伤。既有 `_ABSENCE_RE` 只认「(怎么|是不是)没有X呢」框,接不住「不用X吗」反问形态。
