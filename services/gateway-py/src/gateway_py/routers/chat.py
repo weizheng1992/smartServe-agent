@@ -128,9 +128,10 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
     # 接管期该会话全部轮次不建作业不调 LLM,用户消息照常落库;release 后
     # 下一条自然走 AI。响应形状复用既有 isHumanActive 契约 —— apps/web
     # useChatMessages 已有消费方(移除 loader + 重拉历史),零前端改动。
-    if await takeover.is_human_takeover(effective_thread_id):
+    # 文案按认领态分形(paused_reply,2026-09-29 诚实化):排队中不说「已接待」。
+    paused_output = await takeover.paused_reply(effective_thread_id)
+    if paused_output is not None:
         if body.sync:
-            paused_output = "您的消息已由人工客服接待，请稍候人工坐席回复。"
             return {
                 "success": True,
                 "jobId": "",

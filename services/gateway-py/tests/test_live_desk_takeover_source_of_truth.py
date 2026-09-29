@@ -256,6 +256,8 @@ class TestPauseGate:
         body3 = res3.json()
         assert body3["jobId"] == ""
         assert body3["isHumanActive"] is True
+        # 文案分形(2026-09-29 诚实化):staff_auth 通道的 start_human_takeover
+        # = 员工接管(引擎注入 operator 落认领),此处已是认领态 →「已接待」文案
         assert body3["output"] == "您的消息已由人工客服接待，请稍候人工坐席回复。"
         assert body3["cards"] == []
 
@@ -272,6 +274,21 @@ class TestPauseGate:
         # 用户行照常落库(三条轮次全在,闸不吞消息)
         user_rows = [m for m in await _msgs(tid) if m["role"] == "user"]
         assert len(user_rows) == 3
+
+        # 排队文案分形(2026-09-29 诚实化):顾客呼叫通道(无员工 JWT)坐席空
+        # = 呼叫中/排队,同闸须回「排队等待接入」而非「已接待」
+        tid2, uid2 = await _mk_thread("pg_pause_queued")
+        res6 = await client.post(
+            "/api/chat/approvals",
+            json={"action": "start_human_takeover", "threadId": tid2, "userId": uid2},
+        )
+        assert res6.json()["success"] is True
+        res7 = await client.post(
+            "/api/store/chat",
+            json={"message": "排队中", "threadId": tid2, "userId": uid2, "businessId": "aurora"},
+        )
+        assert res7.json()["isHumanActive"] is True
+        assert res7.json()["output"] == "已为您呼叫人工客服，正在排队等待接入，人工客服接入后将在本会话回复您。"
 
     async def test_release后恢复建作业(self, client, staff_auth, monkeypatch):
         tid, uid = await _mk_thread("pg_resume")

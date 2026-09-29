@@ -121,6 +121,21 @@ async def is_human_takeover(thread_id: str) -> bool:
     return status == "human_takeover"
 
 
+_PAUSED_CLAIMED_NOTICE = "您的消息已由人工客服接待，请稍候人工坐席回复。"
+_PAUSED_QUEUED_NOTICE = "已为您呼叫人工客服，正在排队等待接入，人工客服接入后将在本会话回复您。"
+
+
+async def paused_reply(thread_id: str) -> str | None:
+    """AI 暂停闸的顾客文案(网关各入队入口共用,2026-09-29 诚实化):接管态按
+    认领与否分形 —— 排队中不说「已接待」(此前排队也回「已由人工客服接待」,
+    坐席根本没接入,与实弹「转人工后人工不能接管」投诉同源的文案失真);
+    认领后才承诺坐席回复。未接管回 None(调用方照常跑 AI)。"""
+    state = await thread_state(thread_id)
+    if state["status"] != "human_takeover":
+        return None
+    return _PAUSED_CLAIMED_NOTICE if state["assignedOperatorId"] else _PAUSED_QUEUED_NOTICE
+
+
 async def mark_disconnect_deadlines(operator_email: str, timeout_seconds: float) -> int:
     """坐席掉线 → 其名下接管会话写释放 deadline。仅对尚无 deadline 的会话生效
     (首个 deadline 优先;重连取消后再次掉线才起新计时)。"""

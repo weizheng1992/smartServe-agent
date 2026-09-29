@@ -74,12 +74,13 @@ async def finish_node(state: AgentState) -> dict:
             approval_step.get("description") or ""
         ).lower()
         if is_human_escalation:
+            # 诚实化(2026-09-29 实弹):旧文案承诺「加密推送到主管接管队列 /
+            # 1 分钟内接管」而系统并无队列与时效保证 —— 过度承诺即投诉源。
+            # 现实语义:工单已建 + 接管活态翻「呼叫中」,坐席认领后消息经桥
+            # 实时送达;无人认领由排队超时回落 AI(诚实告知,可再次呼叫)。
             escalation_reply = (
-                f"您好！我是 {brand_name} 的智能客服助手。已为您**成功触发人工客服接入流程**。✨\n\n"
-                "我们已锁定了当前会话，并将您的提问、已知订单数据与完整历史沟通记录"
-                "**加密推送到资深人工客服主管接管队列**。\n\n"
-                "人工主管专员将在 **1 分钟内直接在本会话中为您接管服务并回应**，请您稍等。"
-                "如您有更多细节补充，也可以直接在此留言！👋"
+                f"您好！我是 {brand_name} 的智能客服助手，已为您呼叫人工客服。📞\n\n"
+                "人工客服将尽快在本会话接入并回复您；接入前您也可以继续留言补充问题。"
             )
             return {"output": sanitize_tenant_response(escalation_reply, tenant_id), "short_memory": short_memory}
 

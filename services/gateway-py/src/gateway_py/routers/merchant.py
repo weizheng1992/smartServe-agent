@@ -599,8 +599,9 @@ async def store_chat(body: dict):
         # P1 AI 暂停闸(live-desk-rework spec §2.1):接管期该会话全部轮次
         # 不建作业不调 LLM,用户消息照常落库;release 后下一条自然走 AI。
         # 入队前的第二顾客入口(dispatch_chat 之外唯一 AI 直跑通道),同闸。
-        if await takeover.is_human_takeover(thread_id):
-            paused_output = "您的消息已由人工客服接待，请稍候人工坐席回复。"
+        # 文案按认领态分形(paused_reply,2026-09-29 诚实化):排队中不说「已接待」。
+        paused_output = await takeover.paused_reply(thread_id)
+        if paused_output is not None:
             return {
                 "success": True,
                 "messageId": "",

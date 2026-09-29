@@ -33,6 +33,7 @@ paths: ["services/gateway-py/**/*"]
 
 - **socket.io 房间模型**：operator + user 双客户端按 `thread:{threadId}` 房间接入；joined_room ack 仅回发送者，`peer_joined` 房间广播。
 - **接管状态机**：`takeover` / `release`（支持 `"__unset__"` 哨兵显式清空坐席字段）→ 广播 `conversation_state_changed`；`send_message` → `new_message` + ack；`typing` 事件 `skip_sid` 排除发送者本人。
+- **坐席认领闸（2026-09-29 实弹）**：`send_message` 坐席路（role=operator）发言前对齐认领池守卫 —— 未接管会话禁言（AI 托管中直插真人发言会让顾客端真人/AI 各说各话）、已被他人认领拒绝；呼叫中（`human_takeover` + 坐席空）首发即原子认领（与认领按钮同一 `assign_operator` 守卫，两坐席同抢只成一人，败者收「已被认领」）并广播 `conversation_state_changed` 让对方坐席台就地对齐。坐席台 sendMessage 无需先点接管，发言即认领。顾客 role=user 不设闸（弱身份模型）。
 - **租户校验**：`tenantId` 正则 `^[a-zA-Z0-9_-]{1,64}`，非法直接拒绝连接。
 
 ### 1.3 多租户鉴权与上下文传递

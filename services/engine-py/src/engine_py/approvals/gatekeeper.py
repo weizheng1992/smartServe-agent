@@ -483,6 +483,18 @@ class ApprovalGatekeeper:
         current_index = params["currentIndex"]
         action_type = params["actionType"]
 
+        # 顾客排队接线(2026-09-29 实弹):human_escalation 工单落接管活态
+        # 「呼叫中」(threads 真源 status=human_takeover + 坐席空)—— 此前只写
+        # 审计工单,P1 排队机制(mark_takeover_requested / 坐席台呼叫中置顶 /
+        # 排队超时回落 AI)零生产调用方,顾客文案承诺的队列物理不存在。接线后
+        # 暂停闸立即生效(顾客不再收到重复罐头),坐席认领/超时回落照既有扫描
+        # 回路走。重复呼叫幂等(同接管期 requested_at 取首次;回落后再呼起新期)。
+        if action_type == "human_escalation":
+            try:
+                await takeover.mark_takeover_requested(thread_id)
+            except Exception as q_err:
+                print(f"[ApprovalGatekeeper] 转人工排队接线失败(工单已建,不阻断): {q_err}")
+
         updated_step = {
             **step_to_run,
             "status": "completed",

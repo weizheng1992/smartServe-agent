@@ -339,6 +339,37 @@ async def on_send_message(sid: str, data: dict):
     if _tenant_mismatch(sid, data):
         return {"success": False, "error": "会话租户与连接租户不一致"}
 
+    # 认领闸(2026-09-29 实弹):坐席发言路对齐认领池守卫 —— 未接管会话禁言
+    # (AI 托管中直插真人发言,顾客端真人/AI 各说各话);呼叫中(接管态+坐席空)
+    # 首发即原子认领(与认领按钮同一 assign_operator 守卫,两坐席同抢只成一人,
+    # 败者收「已被认领」);已被他人认领则拒绝。坐席台 sendMessage 不先点接管,
+    # 发言即认领保证 UX 不断。顾客 role=user 不设闸(弱身份模型)。
+    if role == "operator":
+        state = await takeover.thread_state(thread_id)
+        if state.get("status") != "human_takeover":
+            return {"success": False, "error": "会话未被接管：请先认领会话后再发言"}
+        assigned = state.get("assignedOperatorId")
+        if assigned and assigned != staff["email"]:
+            return {"success": False, "error": "会话已被其他坐席认领，无法发言"}
+        if not assigned:
+            if not await takeover.assign_operator(thread_id, staff["email"], business_id=tenant_id):
+                return {"success": False, "error": "会话已被其他坐席认领，无法发言"}
+            # 广播认领结果:其他坐席的会话列表据 conversation_state_changed
+            # 就地对齐(use-live-desk 认领/释放广播同通道),呼叫中行不滞留
+            state = await takeover.thread_state(thread_id)
+            room = _room(thread_id, tenant_id)
+            await sio.emit(
+                "conversation_state_changed",
+                {"threadId": thread_id, **state, "operatorId": staff["email"], "operatorName": staff["name"]},
+                room=room,
+                namespace=NAMESPACE,
+            )
+            await _publish_ws_event(
+                "conversation_state_changed",
+                room,
+                {"threadId": thread_id, **state, "operatorId": staff["email"], "operatorName": staff["name"]},
+            )
+
     # P4 消息幂等(spec §2.7):clientMsgId 合法即透传为消息主键 —— 重发/断线
     # 重连重放经 append_message 的 ON CONFLICT DO NOTHING 静默去重,ack 仍回
     # 既有 id,前端据以对齐乐观气泡(重放不产生第二条时间线行)。

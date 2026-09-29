@@ -440,9 +440,8 @@ class TestSocketIoEdgeStates:
         「已接管」连发数条,顾客一条收不到只会回「?」。真栈验证:socket 落库
         后,顾客 SSE 流须在窗口内收到同 id 同内容的 operator 帧。
         """
-        import socketio as socketio_lib
-
         import httpx
+        import socketio as socketio_lib
 
         ns = "/ws/chat"
         content = f"回归钉:坐席消息须达顾客 SSE {_TS}"
@@ -454,6 +453,11 @@ class TestSocketIoEdgeStates:
             auth={"tenantId": "nike", "userId": "u_rt_operator", "role": "operator", "token": nike_operator["token"]},
         )
         try:
+            # 认领闸(2026-09-29):坐席发言前须处接管态 —— 先认领再开流
+            takeover_ack = await operator.call(
+                "takeover_conversation", {"threadId": rt_thread, "tenantId": "nike"}, namespace=ns, timeout=5
+            )
+            assert takeover_ack["success"] is True
             raw = ""
             sent = False
             timeout = httpx.Timeout(10.0, read=20.0)
@@ -483,5 +487,127 @@ class TestSocketIoEdgeStates:
             assert content in raw, f"坐席消息未达顾客 SSE 频道: {raw[-400:]}"
             assert '"role": "operator"' in raw
         finally:
+            # 还原模块级共享线程状态(后续测试不背接管态);顺带钉释放桥
+            await operator.call(
+                "release_takeover", {"threadId": rt_thread, "tenantId": "nike"}, namespace=ns, timeout=5
+            )
             if operator.connected:
                 await operator.disconnect()
+
+    async def test_send_to_active_thread_rejected(self, live_server, rt_thread, nike_operator):
+        """认领闸(2026-09-29):未接管(active)会话坐席禁言 —— 此前坐席可对
+        AI 托管中的会话直插 operator 发言,顾客端出现「AI 与真人各说各话」;
+        实弹事故里 14:45 转人工后 AI 罐头与坐席发言混流的第二根源。"""
+        import socketio as socketio_lib
+        from engine_py.approvals import takeover
+
+        ns = "/ws/chat"
+        operator = socketio_lib.AsyncClient(reconnection=False)
+        await operator.connect(
+            live_server, transports=["websocket"], namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_gate_op", "role": "operator", "token": nike_operator["token"]},
+        )
+        try:
+            ack = await operator.call(
+                "send_message",
+                {"threadId": rt_thread, "tenantId": "nike", "role": "operator", "content": "未认领禁言"},
+                namespace=ns, timeout=5,
+            )
+            assert ack["success"] is False
+            assert "未被接管" in ack["error"]
+            assert (await takeover.thread_state(rt_thread))["status"] == "active"
+        finally:
+            if operator.connected:
+                await operator.disconnect()
+
+    async def test_send_to_queued_thread_auto_claims(self, live_server, nike_operator):
+        """认领闸的 UX 面(2026-09-29):呼叫中(接管态+坐席空)首发即原子认领
+        —— 坐席台 sendMessage 不先点接管(live-desk P2 认领池语义「败者得
+        False」在发言路同样成立),落库后真源必须已带认领坐席。"""
+        import socketio as socketio_lib
+        from engine_py.approvals import takeover
+
+        tid = f"rt_auto_claim_{_TS}"
+        await create_thread(tid, "u_auto_claim", "nike")
+        await takeover.mark_takeover_requested(tid)  # 顾客呼叫:排队态
+        assert (await takeover.thread_state(tid))["assignedOperatorId"] is None
+
+        ns = "/ws/chat"
+        operator = socketio_lib.AsyncClient(reconnection=False)
+        await operator.connect(
+            live_server, transports=["websocket"], namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_auto_claim_op", "role": "operator", "token": nike_operator["token"]},
+        )
+        try:
+            ack = await operator.call(
+                "send_message",
+                {"threadId": tid, "tenantId": "nike", "role": "operator", "content": "发言即认领"},
+                namespace=ns, timeout=5,
+            )
+            assert ack["success"] is True
+            state = await takeover.thread_state(tid)
+            assert state["status"] == "human_takeover"
+            assert state["assignedOperatorId"] == nike_operator["email"], "排队首发必须自动落认领"
+        finally:
+            if operator.connected:
+                await operator.disconnect()
+
+    async def test_send_to_other_operator_claim_rejected(self, live_server, nike_operator):
+        """认领闸的守卫面(2026-09-29):会话已被坐席 A 认领,坐席 B 发言被拒
+        —— assign_operator 原子守卫的发言路对齐(两坐席同抢只成一人)。"""
+        import socketio as socketio_lib
+        from engine_py.analytics import rbac
+        from engine_py.approvals import takeover
+        from engine_py.db import StaffMember, get_session
+
+        from gateway_py.routers.auth import issue_token
+
+        tid = f"rt_dual_op_{_TS}"
+        await create_thread(tid, "u_dual_op", "nike")
+
+        # 坐席 B:直插员工行直签 JWT(与 nike_operator fixture 同基建)
+        await rbac.ensure_menu_seed("nike")
+        email_b = f"op-nike-b-{_TS}@nike.test"
+        async with get_session() as session:
+            session.add(StaffMember(
+                id=f"staff_nike_b_{_TS}", business_id="nike", email=email_b,
+                display_name="耐克坐席B", role="admin", status="enabled", password_hash=None,
+            ))
+            await session.commit()
+
+        ns = "/ws/chat"
+        op_a = socketio_lib.AsyncClient(reconnection=False)
+        op_b = socketio_lib.AsyncClient(reconnection=False)
+        await op_a.connect(
+            live_server, transports=["websocket"], namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_op_a", "role": "operator", "token": nike_operator["token"]},
+        )
+        await op_b.connect(
+            live_server, transports=["websocket"], namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_op_b", "role": "operator", "token": issue_token(f"staff_nike_b_{_TS}", email_b)},
+        )
+        try:
+            claim_a = await op_a.call(
+                "takeover_conversation", {"threadId": tid, "tenantId": "nike"}, namespace=ns, timeout=5
+            )
+            assert claim_a["success"] is True
+            ack_b = await op_b.call(
+                "send_message",
+                {"threadId": tid, "tenantId": "nike", "role": "operator", "content": "他人认领禁言"},
+                namespace=ns, timeout=5,
+            )
+            assert ack_b["success"] is False
+            assert "认领" in ack_b["error"]
+            # 认领路同一守卫:B 显式接管同样被拒,真源认领人不变
+            claim_b = await op_b.call(
+                "takeover_conversation", {"threadId": tid, "tenantId": "nike"}, namespace=ns, timeout=5
+            )
+            assert claim_b["success"] is False
+            assert (await takeover.thread_state(tid))["assignedOperatorId"] == nike_operator["email"]
+        finally:
+            await op_a.call(
+                "release_takeover", {"threadId": tid, "tenantId": "nike"}, namespace=ns, timeout=5
+            )
+            for c in (op_a, op_b):
+                if c.connected:
+                    await c.disconnect()
