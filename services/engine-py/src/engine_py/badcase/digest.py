@@ -18,7 +18,11 @@ DISMISSED_TTL_DAYS = 30
 
 async def run_badcase_digest() -> dict:
     """输出池分布摘要,并执行保留期:过期 candidate 自动转 dismissed、过期 dismissed 清除。"""
-    now = _dt.datetime.now()
+    # 保留期阈值与库钟同源(UTC):created_at/updated_at 由 server_default
+    # now() 落 naive UTC,本地 naive now 在非 UTC 部署下偏整个时区
+    # (2026-09-29 夜审 F15 波及复核;90d/30d 量级下偏差不致命,但同型
+    # 比较一处不漏)。updated_at 回写同样落 UTC,避免混源。
+    now = _dt.datetime.now(_dt.UTC).replace(tzinfo=None)
     summary: dict = {"distribution": {}, "expired": 0, "purged": 0}
     try:
         async with get_session() as session:
