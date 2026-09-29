@@ -1,11 +1,11 @@
 ---
-description: 工具注册中心、标准 SPI/MCP 连接器、AST NL2SQL 安全沙箱与指标语义注册表规范
-paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/gateway-py/src/gateway_py/routers/spi.py", "services/gateway-py/src/gateway_py/sandbox.py", "services/gateway-py/src/gateway_py/hmac_signer.py"]
+description: 工具注册中心、标准 SPI/MCP 连接器、只读 SQL 安全守卫与指标语义注册表规范
+paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/engine-py/src/engine_py/analytics/sql_guard.py", "services/gateway-py/src/gateway_py/routers/spi.py", "services/gateway-py/src/gateway_py/hmac_signer.py"]
 ---
 
 # 工具生态与安全沙箱规范 (Tools & Sandboxes)
 
-本模块负责智能体外部工具注册中心（`services/engine-py/src/engine_py/tools_registry/`）、标准 SPI 开放连接器（`services/gateway-py/src/gateway_py/`）、只读 AST NL2SQL 分析沙箱及指标语义注册表。
+本模块负责智能体外部工具注册中心（`services/engine-py/src/engine_py/tools_registry/`）、标准 SPI 开放连接器（`services/gateway-py/src/gateway_py/`）、只读 SQL 安全守卫（`services/engine-py/src/engine_py/analytics/sql_guard.py`）及指标语义注册表。
 
 ## 1. 核心架构与工具分类
 
@@ -23,14 +23,14 @@ paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/gatewa
   - 外部服务调用必须校验 HMAC-SHA256 签名与时间戳（防重放攻击，窗口 ≤ 300 秒）。
   - 内置 SSRF 白名单防护网关，阻断私有内网 IP（`10.0.0.0/8`, `127.0.0.0/8`, `192.168.0.0/16`）的非法穿透。
 
-### 1.3 AST 参数化只读 NL2SQL 沙箱 (`gateway_py/sandbox.py`)
+### 1.3 AST 参数化只读 SQL 守卫 (`engine_py/analytics/sql_guard.py`,2026-09-30 收口)
 
-- **AST 语法树只读审计**：通过 SQL Parser（sqlglot）将 LLM 生成的 SQL 解析为抽象语法树（AST）。
-- **硬性安全防护**：
-  - 严禁包含 `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `GRANT` 等写语句。
-  - 强制注入只读保护：`LIMIT 50`。
-  - 阻断系统表穿透（`information_schema`, `pg_catalog` 等，限定名 catalog/db/name 逐段比对）。
-- **租户边界注入：未实现（2026-09-05 盘点）**：沙箱当前**不注入** `AND business_id = :tenantId`（TS 基线亦无此行为，属文档先行于实现）。沙箱零调用方；NL2SQL 真正接入时必须先补齐——需按表内省 `business_id` 列后改写 WHERE,届时调用方以参数化绑定传租户值，严禁字符串拼接。在此之前任何调用方必须自行携带租户过滤条件。
+- **旧 gateway 沙箱已删除**：`gateway_py/sandbox.py` 自 TS 基线移植后**零生产调用方**（唯一 importer 是其自测），2026-09-30 夜审确认为死代码连同 `tests/test_sandbox.py` 一并移除；其「租户边界注入未实现」缺口不再适用。
+- **现役守卫 = `analytics/sql_guard.py`**（Data Agent 编译链唯一 SQL 闸，`engine.py` 每条模板编译后必经 `assert_safe_select`）：
+  - **解析层**：sqlglot parse → 单语句断言 → AST 白名单（仅 SELECT/UNION/子查询/CTE，`INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/GRANT` 等一律 `UnsafeSqlError`）→ **表白名单**（sqlglot qualify 对照 schema 卡片,挡幻觉表;语句内 CTE 别名豁免）→ 危险函数黑名单（`pg_sleep`/`dblink`/`pg_read_file`/`lo_import`/`pg_terminate_backend`）。
+  - **编译层断言**：`require_business_id=True` 时 AST 必须含 `business_id` 谓词 —— 租户边界由**服务端模板注入**后不可被剥离（旧沙箱「调用方自携过滤」的弱契约已由该断言取代）。
+  - **DB 层纵深**：商户真账走只读 reader（READ ONLY 事务 + 超时 + SAVEPOINT），见 agent-engine.md §1.9;选型否决留档：pglast（GPL 法务）、sqlparse（non-validating 不可作安全边界）。
+- **接线纪律**：任何新的 NL2SQL/自由查询入口必须先接 `assert_safe_select`（白名单 SQL 模板编译后审计）再执行,严禁绕闸直连;新增自由 SQL 能力前须先扩 schema 卡片与表白名单,严禁字符串拼接租户值。
 
 ### 1.4 指标语义注册表 (`tools_registry/metric_registry.py` + `metrics.yaml`,2026-09-25 校对)
 

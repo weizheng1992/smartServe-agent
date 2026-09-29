@@ -110,9 +110,9 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
    - 审批状态变更与 `approval_outbox_events` 事件在**同一数据库事务**中原子提交。
    - 恢复机制(2026-09-03 起):审批通过/驳回/取消后,由 gatekeeper 的**同步 Fast-Path** 以确定性 JobId `job_resume_${approvalId}` 派发 `run_agent` 恢复执行,派发成功即标记事件 `completed`;Fast-Path 失败遗留的 `pending` 事件由 `approvals/outbox_worker.py` 对账补偿(`FOR UPDATE SKIP LOCKED`,10s 年龄阈值避开竞争,`processing` 停滞 >5min 重入队)。
    - 对账补偿与坏例池摘要等周期任务由 `engine_py/scheduler.py` 统一调度,随 Temporal worker 入口启动(Temporal 离线时仍独立运行)。**单实例假设**,多实例部署前需分布式锁或迁移 Temporal Schedule;`ENGINE_SCHEDULER_ENABLED=0` 可整体关闭。
-4. **参数化 AST SQL 沙箱**:
-   - NL2SQL 经 AST 解析器检查,强制仅 `SELECT`、追加 `LIMIT 50`,并在只读事务超时控制下执行。
-   - 租户边界注入**未实现**(TS 基线亦无;沙箱零调用方):NL2SQL 接入前须先补齐,详见 `.claude/rules/tools-registry.md` §1.3。
+4. **参数化 AST 只读 SQL 守卫**:
+   - Data Agent 的每条指标 SQL 由闭集模板编译,经 `engine_py/analytics/sql_guard.py` AST 审计(仅 SELECT、表白名单、危险函数黑名单),商户真账在只读事务超时控制下执行。
+   - 租户边界由服务端模板注入 + `require_business_id` 编译层断言(谓词不可被剥离)。任何新的自由查询入口必须先接该守卫,严禁绕闸直连,详见 `.claude/rules/tools-registry.md` §1.3(旧 gateway 沙箱 2026-09-30 作为零调用方死代码删除)。
 5. **零依赖共享 UI**:
    - 四个前端(`apps/web`、`apps/admin`、`apps/merchant`、`apps/merchant-admin`)统一使用 workspace 包 `ui`(`packages/ui`,零依赖原子组件)+ Tailwind CSS,不得引入重型外部组件框架。
 6. **契约冻结**:
