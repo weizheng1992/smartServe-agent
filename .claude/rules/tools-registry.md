@@ -34,7 +34,7 @@ paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/gatewa
 
 ### 1.4 指标语义注册表 (`tools_registry/metric_registry.py` + `metrics.yaml`,2026-09-25 校对)
 
-- **闭集事实源 = `metrics.yaml`**：**37 指标 × 8 域**（sales 13 / customer 7 / promotion 5 / inventory 3 / review 3 / refund 2 / profit 2 / session 2），每条带 label/description/expression/sqlTemplate/businessRules/unit/aliases/synonyms/`permissionTag`/sampleQueries。`metric_registry.py` 只做**加载与校验**（缺必填键/空表/key 与条目名不一致一律 raise 响亮失败，不静默跳过），导出 `METRIC_SEMANTIC_REGISTRY`。
+- **闭集事实源 = `metrics.yaml`**：**38 指标 × 8 域**（sales 13 / customer 7 / promotion 6 / inventory 3 / review 3 / refund 2 / profit 2 / session 2），每条带 label/description/expression/sqlTemplate/businessRules/unit/aliases/synonyms/`permissionTag`/sampleQueries。`metric_registry.py` 只做**加载与校验**（缺必填键/空表/key 与条目名不一致一律 raise 响亮失败，不静默跳过），导出 `METRIC_SEMANTIC_REGISTRY`。
 - **消费方**：Data Agent 分析管线经 `analytics/tools_registry_bridge.py`（防 tools_registry ↔ analytics 循环导入的桥）读取；意图解析在 `analytics/engine.py::MetricQueryEngine.resolve`（L0 词表 → 缝②小模型 → L2 范例 → L3 LLM 分层，详见 agent-engine.md §1.9）；SQL 由闭集模板编译渲染（dimensions/groupBy/formula/filters/direction/limit 占位符），经 `analytics/sql_guard.py` AST 审计后执行。
 - **评测联动**：与 promptfoo 指标消歧评测（`eval/scorers/metric_disambiguation.py`）共用同一词表。
 

@@ -29,6 +29,7 @@ _CALIBERS = {
     "after_sale_overview": "售后工单按状态分布计数(after_sale_tickets 真算)",
     "order_overview": "对页面勾选订单逐笔展示(订单号/状态/金额/时间),合计与均值随行列出,便于两单对比",
     "promo_effect": "活动口径 = 核销记录关联订单(真实归因;自然流量不计入),GMV 为核销订单实付合计",
+    "promo_gmv_total": "活动口径 = 核销记录关联订单(真实归因;自然流量不计入),GMV 为核销订单实付合计",
     "promo_sku_compare": "活动内对比 = 该活动核销订单的商品明细聚合;目标款在「对比分组」列标记",
     "customer_orders": "客户订单 = 名下全部订单按下单时间倒序",
     "promo_compare": "双活动对比 = 各自核销记录关联订单聚合(真实归因;自然流量不计入)",
@@ -372,6 +373,23 @@ class MetricQueryEngine:
                 "FROM promotion_redemptions r JOIN promotions p ON p.id = r.promotion_id "
                 f"WHERE 1=1 {time_clause} "
                 f'GROUP BY p.name ORDER BY "metricScore" {direction} LIMIT :lim'
+            )
+        elif intent.metric == "promo_gmv_total":
+            # 实弹修(2026-09-29):「哪一个活动收益好」的活动维度排行 —— 核销
+            # 关联 GMV 按活动聚合。词表此前无「活动收益」词面,L0 落空后 L3 曾把
+            # 该问法误路由成商品 gmv 榜(答非所问);口径与 promo_effect/promo_compare
+            # 同源(真实归因,自然流量不计入)。GROUP BY 带 p.id 防同名活动合并。
+            if intent.time_window:
+                time_clause = "AND r.created_at >= :window_start"
+                params["window_start"] = self._window_start(intent.time_window)
+            sql = (
+                'SELECT p.name AS "productId", '
+                'COALESCE(SUM(o.total_amount), 0)::float AS "metricScore" '
+                "FROM promotion_redemptions r "
+                "JOIN promotions p ON p.id = r.promotion_id "
+                "JOIN merchant_orders o ON o.order_id = r.order_id "
+                f"WHERE 1=1 {time_clause} "
+                f'GROUP BY p.name, p.id ORDER BY "metricScore" {direction} LIMIT :lim'
             )
         elif intent.metric == "after_sale_overview":
             if intent.time_window:

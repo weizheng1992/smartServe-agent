@@ -23,6 +23,8 @@ _SPECIAL_METRICS: list[tuple[str, dict]] = [
     ("ai_resolution_rate", {}),
     ("promo_orders", {}),
     ("promo_discount_total", {}),
+    # 活动核销GMV排行(实弹修 2026-09-29:「哪一个活动收益好」的确定性落点)
+    ("promo_gmv_total", {}),
     ("after_sale_overview", {}),
     ("gmv_trend", {}),
     ("order_overview", {"entity_ids": ["ORD-1"]}),
@@ -198,6 +200,40 @@ class TestMonthlyTrendRouting:
         compiled = engine.compile(StructuredQueryIntent(metric="volume_trend"))
         assert compiled.sql.rstrip().endswith("LIMIT 50")
         assert "date_trunc" not in compiled.sql
+
+
+class TestPromoRevenueRouting:
+    """实弹修(2026-09-29):「哪一个活动收益好」问的是活动排行,曾因促销家族
+    词表无「活动收益」词面而 L0 落空,L3 把该问法误路由成商品 gmv 榜
+    (trace: layers=[L3→gmv];错答还沉淀进 L2 范例池持续污染)。
+    修法 = 促销家族新增 promo_gmv_total(核销关联 GMV 按活动排行),词面
+    锚定「活动收益」族 —— 解析回到闭集词面,零 LLM 依赖。"""
+
+    @pytest.mark.parametrize(("question",), [
+        ("哪一个活动收益好",),
+        ("哪个活动收益最高",),
+        ("活动GMV排行",),
+        ("各活动带来多少流水",),
+    ])
+    def test_activity_revenue_routes_to_promotion_family(self, engine, question):
+        intent = engine.resolve(question)
+        assert intent.metric == "promo_gmv_total"
+
+    def test_activity_revenue_compiles_promotion_ranking_not_spu(self, engine):
+        """编译形状必须是活动维度排行,绝不允许再落销售族商品榜模板。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        compiled = engine.compile(StructuredQueryIntent(metric="promo_gmv_total"))
+        sql = compiled.sql
+        assert "promotion_redemptions" in sql and "promotions" in sql and "merchant_orders" in sql
+        assert "SUM(o.total_amount)" in sql
+        assert "GROUP BY p.name, p.id" in sql
+        assert "merchant_spus" not in sql
+
+    def test_product_revenue_question_stays_profit_family(self, engine):
+        """负对照:不带「活动」的收益问法仍归商品毛利,不被新词面劫持。"""
+        intent = engine.resolve("收益最高的商品")
+        assert intent.metric == "gross_profit"
 
 
 class TestQuickSummaryShape:

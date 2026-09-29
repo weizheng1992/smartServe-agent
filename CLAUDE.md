@@ -76,7 +76,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 │  - HITL:ApprovalGatekeeper(事务发件箱 + 同步 Fast-Path 恢复,        │
 │    对账 Worker 由 scheduler 周期调度,见不变量 #3)                    │
 │  - Data Agent:analytics/ 独立轻管线(意图解析 ➔ 闭集 SQL 模板 ➔      │
-│    只读执行 ➔ 卡片;37 指标语义注册表,LLM 永不写 SQL)               │
+│    只读执行 ➔ 卡片;38 指标语义注册表,LLM 永不写 SQL)               │
 │  - 编排:Temporal 工作流(队列 agent-tasks-py)+ 本地仿真回退;        │
 │    shadow-harness 对冻结 TS 基线做 diff/replay                        │
 │  - 事件主干:Redis Streams(seq + XADD maxlen per job)                │

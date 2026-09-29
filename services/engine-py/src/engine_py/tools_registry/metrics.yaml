@@ -372,6 +372,42 @@ promo_discount_total:
   availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.95
+promo_gmv_total:
+  key: promo_gmv_total
+  label: 活动核销GMV
+  description: 统计周期内各优惠活动核销记录关联订单的实付总额,按活动排行;核销归因口径(自然流量不计入)。
+  domain: promotion
+  sourceTables:
+  - promotions
+  - promotion_redemptions
+  - merchant_orders
+  expression: SUM(o.total_amount) GROUP BY promo
+  sqlTemplate: merchant_db
+  businessRules:
+  - 核销关联口径:仅统计该活动核销记录关联的订单
+  - 同活动多笔核销按订单实付累加,排行取实付合计
+  direction: DESC
+  unit: 元
+  icon: 🏆
+  aliases:
+  - promo_gmv
+  synonyms:
+  - 活动收益
+  - 哪个活动收益
+  - 活动gmv
+  - 活动GMV
+  - 活动流水
+  - 活动带来多少流水
+  - 活动卖得好
+  conflictGroup:
+  - promotion_family
+  sampleQueries:
+  - 哪一个活动收益好
+  - 各活动核销GMV排行
+  - 哪个活动带来的流水最多
+  availableDimensions: []
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95
 gmv_trend:
   key: gmv_trend
   label: GMV 趋势

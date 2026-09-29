@@ -1,9 +1,9 @@
 """指标语义注册表契约(metrics.yaml 闭集事实源;2026-09-26 夜审 ④ 测试补强)。
 
-37 指标 × 8 域是 Data Agent 意图层的闭集边界。此前加载校验 `_load` 的四条
+38 指标 × 8 域是 Data Agent 意图层的闭集边界。此前加载校验 `_load` 的四条
 响亮失败分支(条目非映射 / 缺必填键 / key 不一致 / 空注册表)零测试 ——
 坏条目若被静默跳过只能靠快照计数兜底;域分布与 RBAC permissionTag 盘点
-(sales_viewer 32 / warehouse_operator 3 / finance_owner 2)一并钉死,
+(sales_viewer 33 / warehouse_operator 3 / finance_owner 2)一并钉死,
 改 YAML 必然撞到本文件,防止闭集无声漂移。
 """
 
@@ -21,7 +21,7 @@ from engine_py.tools_registry.metric_registry import (
 _EXPECTED_DOMAINS = {
     "sales": 13,
     "customer": 7,
-    "promotion": 5,
+    "promotion": 6,
     "inventory": 3,
     "review": 3,
     "refund": 2,
@@ -29,12 +29,12 @@ _EXPECTED_DOMAINS = {
     "session": 2,
 }
 
-_EXPECTED_TAGS = {"sales_viewer": 32, "warehouse_operator": 3, "finance_owner": 2}
+_EXPECTED_TAGS = {"sales_viewer": 33, "warehouse_operator": 3, "finance_owner": 2}
 
 
 class TestRegistrySnapshot:
-    def test_37_metrics_closed_set(self):
-        assert len(METRIC_SEMANTIC_REGISTRY) == 37, "闭集增删必须显式更新快照与规则文档"
+    def test_metric_closed_set(self):
+        assert len(METRIC_SEMANTIC_REGISTRY) == 38, "闭集增删必须显式更新快照与规则文档"
 
     def test_domain_distribution_pinned(self):
         counts: dict[str, int] = {}
