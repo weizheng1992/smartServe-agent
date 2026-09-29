@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +19,14 @@ from ..tools_registry.order_domain import _merchant_writer_engine
 from .promotion_engine import _compute_discount
 
 PROMO_TYPES = ("full_reduction", "discount", "coupon")
+
+
+def _utcnow() -> datetime:
+    """窗口比较钟统一 UTC(2026-09-29 夜审 F15 波及复核):promotions 表的
+    start_at/end_at 由列默认 NOW() 落 naive UTC,Python 本地 naive now 在非
+    UTC 部署下偏整个时区 —— 旧实现让结算 _in_window 把未来 8h 内要结束的
+    活动整体砍出候选、已结束活动仍可补录核销、生效态显示双向错位。"""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _parse_ts(raw) -> datetime | None:
@@ -80,7 +88,7 @@ async def list_promotions() -> list[dict]:
     uq_user_promo(promotion_id 首列)与 idx_promotion_redemptions_promo
     兜住子查询走索引,LIMIT 100 规模下无压力。
     """
-    now = datetime.now()
+    now = _utcnow()
     async with _merchant_writer_engine().connect() as conn:
         rows = (
             await conn.execute(
@@ -240,7 +248,7 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
     窗口判定与结算 _in_window 同口径(2026-09-27 运营闭环):消除「列表看着
     已结束/未开始,补录核销却照收」的口径分裂。
     """
-    now = datetime.now()
+    now = _utcnow()
     async with _merchant_writer_engine().connect() as conn:
         promo = (
             await conn.execute(

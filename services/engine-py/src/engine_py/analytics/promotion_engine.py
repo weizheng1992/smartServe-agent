@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 
@@ -36,7 +36,11 @@ def _compute_discount(promo: dict, amount: float) -> float | None:
 
 
 def _in_window(promo: dict, now: datetime | None = None) -> bool:
-    now = now or datetime.now()
+    # 缺省钟必须与库钟同源(UTC):本地 naive now 在非 UTC 部署下把未来
+    # 8h 内要结束的活动误判已结束,整体砍出结算候选(2026-09-29 夜审
+    # F15 波及复核;fetch_active_promos 的 SQL 闸用 NOW(),此处是它的
+    # Python 侧复检,两钟不一致时复检反而有害)。
+    now = now or datetime.now(UTC).replace(tzinfo=None)
     start = promo.get("start_at")
     end = promo.get("end_at")
     if start and now < start:

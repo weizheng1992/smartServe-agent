@@ -39,6 +39,16 @@ class TestWindow:
         assert not _in_window(p, datetime(2026, 10, 1, tzinfo=UTC))
         assert _in_window({"start_at": None, "end_at": None}, datetime(2026, 9, 15, tzinfo=UTC))
 
+    def test_default_clock_is_utc_not_local(self):
+        """缺省钟与库钟同源(UTC):start_at/end_at 由 NOW() 列默认落 naive UTC,
+        本地 naive now(本机 UTC+8)把「4h 后结束」误判已结束 —— 结算候选被
+        整体砍掉未来 8h 内到期的活动(2026-09-29 夜审 F15 波及复核;旧实现
+        本用例必红)。"""
+        from datetime import datetime, timedelta
+
+        soon_end = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=4)
+        assert _in_window({"start_at": None, "end_at": soon_end})
+
 
 class TestFetchActivePromosWindow:
     """结算候选窗口闸(2026-09-27 运营闭环;密封 PG,promotions 表为 merchant

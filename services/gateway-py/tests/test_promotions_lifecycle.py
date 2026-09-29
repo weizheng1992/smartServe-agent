@@ -9,7 +9,7 @@ tests/test_promotion_engine.py 钉死,两侧同口径。
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -121,12 +121,21 @@ class TestPromotionsLifecycle:
 
         await ensure_merchant_tables()
         created = await self._create(client, boss, "E2E 改窗", "full_reduction", threshold=100, value=10)
-        now = datetime.now()
+        # 造数钟与被测比较钟同源:服务端窗口比较走 UTC 库钟(_utcnow /
+        # SQL NOW(),2026-09-29 F15 复核),-5min 边际吃不下本地钟的时区偏移;
+        # naive 输入(前端 datetime-local)的口径另票处理。
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         try:
             patched = await client.patch(
                 f"/api/admin/analytics/promotions/{created['id']}",
                 headers=boss,
-                json={"endAt": (now - timedelta(minutes=5)).isoformat()},
+                # 起点同步挪到过去:start_at 缺省 = 创建时刻(SQL NOW()),UTC
+                # 纯净语义下「end 早于 start 5min」本就是坏窗(旧造数靠本地钟
+                # 8h 时差才碰巧合法);起点终点一起改才是真实的「改为已过期」。
+                json={
+                    "startAt": (now - timedelta(days=2)).isoformat(),
+                    "endAt": (now - timedelta(minutes=5)).isoformat(),
+                },
             )
             assert patched.status_code == 200, patched.text
             by_id = await self._listed_by_id(client, boss)
