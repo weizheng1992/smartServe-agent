@@ -17,6 +17,7 @@ import {
 import type { MessageItem } from '@/lib/api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Socket, io } from 'socket.io-client';
+import { deriveConversationState } from './live-desk-model';
 
 const TENANT_ID = 'aurora';
 const LIST_REFRESH_MS = 30_000; // 兜底轮询(socket 事件即时增量,轮询防漏)
@@ -185,13 +186,24 @@ export function useLiveDesk() {
   }, [loadConversations, openThread, myEmail]);
 
   // 初始加载 + 兜底轮询 + 排队计时 tick
+  // now 是 hook 级 state,唯一消费点是排队等待计时;每秒无条件 setNow 会让
+  // 坐席台整树(共用 OrderWorkbench 的重表)空转重渲 —— 仅存在排队会话时
+  // 推进(夜审 2026-09-29),队列出现即刻校准一次,不等下个 tick。
+  const hasQueuedRef = useRef(false);
+  useEffect(() => {
+    const queued = conversations.some((c) => deriveConversationState(c, '__any__') === 'queuing');
+    if (queued && !hasQueuedRef.current) setNow(Date.now());
+    hasQueuedRef.current = queued;
+  }, [conversations]);
   useEffect(() => {
     void loadConversations();
     void loadPresence();
     const timers = [
       setInterval(() => void loadConversations(), LIST_REFRESH_MS),
       setInterval(() => void loadPresence(), PRESENCE_REFRESH_MS),
-      setInterval(() => setNow(Date.now()), NOW_TICK_MS),
+      setInterval(() => {
+        if (hasQueuedRef.current) setNow(Date.now());
+      }, NOW_TICK_MS),
     ];
     return () => timers.forEach(clearInterval);
   }, [loadConversations, loadPresence]);
