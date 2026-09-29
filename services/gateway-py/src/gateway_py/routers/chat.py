@@ -15,7 +15,7 @@ from pathlib import Path
 
 from engine_py.approvals import takeover
 from engine_py.db import get_session
-from engine_py.event_bus import get_client, read_agent_events
+from engine_py.event_bus import get_client, read_agent_events, stream_key
 from engine_py.onboarding import build_entry_cards, resolve_onboarding_config
 from engine_py.run_agent import AgentJobInput, run_agent
 from fastapi import APIRouter, File, Header, HTTPException, Query, Request, UploadFile
@@ -335,7 +335,7 @@ async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Qu
     async def frame_stream():
         yield ""  # 让响应头立刻落地
         client = await get_client()
-        stream_key = f"job:events:{job_id}"
+        stream = stream_key(job_id)
         last_entry_id = "0"
         history = await read_agent_events(job_id)
         finished = False
@@ -353,7 +353,7 @@ async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Qu
             if await request.is_disconnected():
                 return
             try:
-                res = await client.xread({stream_key: last_entry_id}, count=50, block=15000)
+                res = await client.xread({stream: last_entry_id}, count=50, block=15000)
             except RedisTimeoutError:
                 # 客户端读超时先于 BLOCK 到期(redis-py socket_timeout 配置过小等):
                 # 按一次轮询到期处理,发心跳续命而不是掐断整个流。

@@ -15,7 +15,7 @@ import time
 import uuid
 
 from engine_py.analytics import graph, promotions, rbac, report_service
-from engine_py.event_bus import get_client, publish_agent_event, read_agent_events
+from engine_py.event_bus import get_client, publish_agent_event, read_agent_events, stream_key
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -90,7 +90,7 @@ async def _tail_ask_events(request: Request, ask_id: str, last_seq: int):
 
     哨兵只在 Redis 流内,不出 SSE 线(客户端未知事件会掉兜底渲染,不外泄)。"""
     client = await get_client()
-    stream_key = f"job:events:{ask_id}"
+    stream = stream_key(ask_id)
     last_entry_id = "0"
     loop = asyncio.get_event_loop()
     deadline = loop.time() + ASK_TAIL_DEADLINE_SECONDS
@@ -101,7 +101,7 @@ async def _tail_ask_events(request: Request, ask_id: str, last_seq: int):
             yield _sse("error", {"message": "分析流等待超时,请重新提问"})
             return
         try:
-            res = await client.xread({stream_key: last_entry_id}, count=50, block=15000)
+            res = await client.xread({stream: last_entry_id}, count=50, block=15000)
         except RedisTimeoutError:
             # 读超时先于 BLOCK 到期:按一次轮询到期处理,发心跳续命而非断流
             yield _heartbeat()

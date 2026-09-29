@@ -37,7 +37,10 @@ return seq
 _client: aioredis.Redis | None = None
 
 
-def _stream_key(job_id: str) -> str:
+def stream_key(job_id: str) -> str:
+    """作业事件流 key 的唯一真源(公开导出):网关 SSE 消费端(gateway_py
+    routers/chat.py、analytics.py)须经此处取 key,严禁再手写字面量副本 ——
+    格式一改 SSE 即静默断流(夜审 2026-09-29 收口)。"""
     return f"job:events:{job_id}"
 
 
@@ -62,7 +65,7 @@ async def publish_agent_event(job_id: str, event_type: str, data: Any) -> int | 
         seq = await client.eval(
             _PUBLISH_LUA,
             2,
-            _stream_key(job_id),
+            stream_key(job_id),
             _seq_key(job_id),
             STREAM_MAXLEN,  # ARGV[1]: MAXLEN ~ 上限
             event_type,  # ARGV[2]
@@ -78,7 +81,7 @@ async def read_agent_events(job_id: str) -> list[dict]:
     """读取 job 事件流全部历史条目(SSE 断线重连按 Last-Event-ID 回放用)。"""
     client = await get_client()
     try:
-        entries = await client.xrange(_stream_key(job_id), min="-", max="+")
+        entries = await client.xrange(stream_key(job_id), min="-", max="+")
     except Exception:
         return []
     events: list[dict] = []
