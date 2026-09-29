@@ -16,6 +16,7 @@ dependencies = [
     # 路由与 repo 直接 import(非经 engine-py 透传),须显式声明
     "pydantic>=2.7",
     "sqlalchemy[asyncio]>=2.0",
+    "redis>=5.0",
 ]
 
 [dependency-groups]
