@@ -119,6 +119,21 @@ describe('ResultCard(结果卡同形渲染)', () => {
     expect(screen.getByText('诚实空')).toBeInTheDocument();
   });
 
+  it('单元格缺值诚实「—」,不出 "null"/"undefined" 字面量(夜审 2026-09-29)', () => {
+    // 实弹:宽表某行缺列(null/undefined)时 String() 直出 "null" 字面量
+    const { container } = render(
+      <ResultCard
+        data={tableCard([
+          { productId: 'SKU-1', metricScore: 100 },
+          { productId: null, metricScore: undefined },
+        ])}
+      />,
+    );
+    expect(container.textContent).not.toContain('null');
+    expect(container.textContent).not.toContain('undefined');
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
+
   it('宽表可横向滚动:三处表格(主表/诚实降级/折线降级)均包 overflow-x-auto', () => {
     // 实弹(2026-09-29):宽表(UUID 列/多列对比卡)被卡片根 overflow-hidden
     // 直接裁剪,无左右滚动。jsdom 无布局,断言滚动容器结构存在。

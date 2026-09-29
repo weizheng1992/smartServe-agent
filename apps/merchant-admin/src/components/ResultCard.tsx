@@ -5,6 +5,12 @@ import { LineChart } from '@/components/LineChart';
 // 明确不做条形图的指标:逐笔列表/窗口列不是排行语义,画条会误导
 const NO_BAR_METRICS = new Set(['order_overview', 'customer_orders']);
 
+// 单元格诚实呈现:缺值渲染「—」,不出 "null"/"undefined" 字面量(同页金额
+// 口径 toFixed(2)+「—」同律,夜审 2026-09-29 收口)
+function cellText(v: unknown): string {
+  return v === null || v === undefined || v === '' ? '—' : String(v);
+}
+
 // 折线取行内第 2 列为值;列缺位或非数值(如对比卡第 2 列是「品类」文案)一律
 // 不是可绘制数列 —— 诚实降级表格,绝不画 NaN 图(实弹:历史持久化帧重放)
 function linePoints(rows: any[]): Array<{ label: string; value: number }> | null {
@@ -102,7 +108,7 @@ export function ResultCard({ data }: { data: any }) {
                 <tr key={i} className="border-b border-zinc-50">
                   {card.columns.map((c: any) => (
                     <td key={c.key} className="px-3 py-1.5">
-                      {String(r[c.key])}
+                      {cellText(r[c.key])}
                     </td>
                   ))}
                 </tr>
@@ -137,7 +143,7 @@ export function ResultCard({ data }: { data: any }) {
               <tr key={i} className="border-b border-zinc-50">
                 {card.columns.map((c: any) => (
                   <td key={c.key} className="px-3 py-1.5">
-                    {String(r[c.key])}
+                    {cellText(r[c.key])}
                   </td>
                 ))}
               </tr>
@@ -171,7 +177,7 @@ function ResultTable({ rows }: { rows: Record<string, unknown>[] }) {
             <tr key={i} className="border-b border-zinc-50">
               {cols.map((c) => (
                 <td key={c} className="px-3 py-1.5">
-                  {String(r[c])}
+                  {cellText(r[c])}
                 </td>
               ))}
             </tr>
