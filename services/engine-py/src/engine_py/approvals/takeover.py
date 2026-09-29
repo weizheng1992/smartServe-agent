@@ -98,7 +98,7 @@ async def release_takeover(thread_id: str, business_id: str | None = None) -> bo
     sql = (
         "UPDATE threads SET status = 'active', assigned_operator_id = NULL, "
         "updated_at = NOW(), metadata = COALESCE(metadata, '{}'::jsonb) "
-        "    - 'takeover_release_at' - 'takeover_requested_at' "
+        "    - 'takeover_release_at' - 'takeover_requested_at' - 'paused_notice_episode' "
         "WHERE id = :tid AND status = 'human_takeover'"
     )
     params: dict = {"tid": thread_id}
@@ -126,14 +126,54 @@ _PAUSED_QUEUED_NOTICE = "已为您呼叫人工客服，正在排队等待接入�
 
 
 async def paused_reply(thread_id: str) -> str | None:
-    """AI 暂停闸的顾客文案(网关各入队入口共用,2026-09-29 诚实化):接管态按
-    认领与否分形 —— 排队中不说「已接待」(此前排队也回「已由人工客服接待」,
-    坐席根本没接入,与实弹「转人工后人工不能接管」投诉同源的文案失真);
-    认领后才承诺坐席回复。未接管回 None(调用方照常跑 AI)。"""
+    """AI 暂停闸的顾客文案(纯读形态,测试与展示用):接管态按认领与否分形 ——
+    排队中不说「已接待」(此前排队也回「已由人工客服接待」,坐席根本没接入,
+    与实弹「转人工后人工不能接管」投诉同源的文案失真);认领后才承诺坐席回复。
+    未接管回 None(调用方照常跑 AI)。生产入队闸请用 :func:`paused_gate`。"""
     state = await thread_state(thread_id)
     if state["status"] != "human_takeover":
         return None
     return _PAUSED_CLAIMED_NOTICE if state["assignedOperatorId"] else _PAUSED_QUEUED_NOTICE
+
+
+async def paused_gate(thread_id: str) -> tuple[bool, str | None]:
+    """生产入队闸(2026-09-29 防复读):返回 ``(paused, notice)``。
+
+    ``paused=True`` 期间该会话轮次不建作业不调 LLM(与 paused_reply 同判据);
+    ``notice`` 仅**每接管期首轮触闸**时给出,其后轮次回 None(静默)—— 实弹:
+    顾客每条消息都收到「已由人工客服接待」罐头,接管期里刷屏,真回复反而
+    被淹没。接管期(episode)= ``metadata.takeover_requested_at``(同一接管期
+    只记首次,释放即清;socket 链起手无 requested_at 时以空串为期,语义不变)。
+    提示槽用条件 UPDATE 原子认领:并发轮次只有一条拿到 notice,其余静默。
+    标记值带 ``:`` 前缀存储 —— 空接管期(socket 链起手无 requested_at)的
+    「标记缺失」与「本期已认领」不得都折叠成空串,否则首轮就静默。
+    """
+    async with get_session() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT status, assigned_operator_id, "
+                    "COALESCE(metadata->>'takeover_requested_at', '') FROM threads WHERE id = :tid"
+                ).bindparams(tid=thread_id)
+            )
+        ).first()
+        if row is None or (row[0] or "active") != "human_takeover":
+            return False, None
+        episode = f":{row[2] or ''}"
+        claimed = (
+            await session.execute(
+                text(
+                    "UPDATE threads SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), "
+                    "'{paused_notice_episode}', to_jsonb(:ep)) "
+                    "WHERE id = :tid AND COALESCE(metadata->>'paused_notice_episode', '') IS DISTINCT FROM :ep "
+                    "RETURNING 1"
+                ).bindparams(tid=thread_id, ep=episode)
+            )
+        ).first()
+        await session.commit()
+    if claimed is None:
+        return True, None
+    return True, (_PAUSED_CLAIMED_NOTICE if row[1] else _PAUSED_QUEUED_NOTICE)
 
 
 async def mark_disconnect_deadlines(operator_email: str, timeout_seconds: float) -> int:

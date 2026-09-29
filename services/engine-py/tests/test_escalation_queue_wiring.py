@@ -151,6 +151,54 @@ def test_claim_switches_reply_and_queue_fallback_releases(pg_factory):
     _run(_body())
 
 
+def test_gate_notice_only_first_round_then_silent(pg_factory):
+    """防复读契约(paused_gate,2026-09-29 实弹第二幕):顾客每条消息都收
+    「已由人工客服接待」罐头,接管期刷屏。提示槽每接管期只认领一次:首轮
+    给分形文案,其后静默;认领切换不重置期(坐席真人回复才是信号);释放
+    清标记,新接管期(含 socket 链无 requested_at 的空期)再给。"""
+    async def _body():
+        tid = f"gate_dedup_{uuid_hex()}"
+        await _mk_thread(tid)
+
+        await _create_ticket(tid, "human_escalation")
+
+        paused, notice = await takeover.paused_gate(tid)
+        assert paused and notice and _QUEUED_MARK in notice
+        # 其后轮次静默,闸不撤
+        assert await takeover.paused_gate(tid) == (True, None)
+        assert await takeover.paused_gate(tid) == (True, None)
+
+        # 认领不重置接管期:坐席已接入,罐头依旧不再出(真人回复即信号)
+        assert await takeover.assign_operator(tid, "op@aurora") is True
+        assert await takeover.paused_gate(tid) == (True, None)
+
+        # 释放清标记 → 新接管期首轮再给(HTTP 链:mark_takeover_requested 新期)
+        assert await takeover.release_takeover(tid) is True
+        assert await takeover.paused_gate(tid) == (False, None)
+        await takeover.mark_takeover_requested(tid)
+        paused2, notice2 = await takeover.paused_gate(tid)
+        assert paused2 and notice2 and _QUEUED_MARK in notice2
+        assert await takeover.paused_gate(tid) == (True, None)
+
+        # socket 链起手(update_conversation_status 直翻状态,不写 requested_at)
+        # 以空串为期:同样首轮给、其后静默 —— 实弹 live 库 e2e_* 残留即此形态
+        assert await takeover.release_takeover(tid) is True
+        from sqlalchemy import text as _text
+
+        from engine_py.db import get_session as _gs
+
+        async with _gs() as session:
+            await session.execute(
+                _text("UPDATE threads SET status = 'human_takeover' WHERE id = :t").bindparams(t=tid)
+            )
+            await session.commit()
+        paused3, notice3 = await takeover.paused_gate(tid)
+        assert paused3 and notice3
+        assert await takeover.paused_gate(tid) == (True, None)
+
+    _run(_body())
+
+
 def test_queue_fallback_releases_unclaimed_wait(pg_factory):
     async def _body():
         tid = f"esc_expire_{uuid_hex()}"

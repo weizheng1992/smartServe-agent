@@ -644,12 +644,23 @@ export function FloatingChatWidget({
       });
 
       const data = await res.json();
-      const replyText = data.output || data.result || '抱歉，客服服务遇到一点小问题，请稍候再试。';
+      // 人工接管静默轮(2026-09-29 罐头防复读):闸内非首轮 isHumanActive=true
+      // 且无 output —— 顾客消息已落库,坐席稍后真人回复,不插占位气泡、
+      // 也不回退「服务遇到问题」道歉文案(空 output ≠ 故障)。
+      const rawText: string = data.output || data.result || '';
+      const humanSilent = data.isHumanActive && !rawText;
+      const replyText = rawText || (humanSilent ? '' : '抱歉，客服服务遇到一点小问题，请稍候再试。');
       const replyCards = Array.isArray(data.cards) ? data.cards : [];
       const msgId = data.messageId || `ast_${Date.now()}`;
 
       if (replyCards.length > 0) {
         syncCartToLocalStorage(replyCards, msgId);
+      }
+
+      if (humanSilent && replyCards.length === 0) {
+        // 静默轮:只重拉历史(顾客行已在服务端落库),不插 assistant 气泡
+        fetchHistory();
+        return;
       }
 
       setMessages((prev) => {

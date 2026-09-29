@@ -7,7 +7,9 @@ threads.status + assigned_operator_id 是接管活态唯一真源(复合语义:
    坐席发言落 ``role='operator'`` + operator_info(前缀拼接退役);
    释放 → active,系统提示恰落一条。
 ② AI 暂停闸:接管期 dispatch/store_chat 用户行照常落库但**不建作业**
-   (jobId=""+isHumanActive),release 后下一条自然恢复建作业。
+   (jobId=""+isHumanActive),release 后下一条自然恢复建作业;提示文案
+   每接管期只说一次(paused_gate 原子提示槽,首轮给排队/已接待分形,
+   其后轮次静默 output="")。
 ③ 掉线超时释放:权威 = DB deadline + ``release_expired_takeovers`` 幂等
    扫描(过期释放、重复扫描 0 行、未来 deadline 不动、排队态不动);
    掉线写 deadline 仅首次生效,重连信号取消。
@@ -236,7 +238,21 @@ class TestPauseGate:
         assert res.json()["success"] is True
         assert await takeover.is_human_takeover(tid) is True
 
-        # 顾客入口①:dispatch_chat(异步建作业链)
+        # 顾客入口①:store_chat(商户门户直跑链)—— 首轮触闸,拿本期唯一文案。
+        # 文案分形(2026-09-29 诚实化):staff_auth 通道的 start_human_takeover
+        # = 员工接管(引擎注入 operator 落认领),此处已是认领态 →「已接待」文案
+        res3 = await client.post(
+            "/api/store/chat",
+            json={"message": "人工在吗", "threadId": tid, "userId": uid, "businessId": "aurora"},
+        )
+        assert res3.status_code == 200
+        body3 = res3.json()
+        assert body3["jobId"] == ""
+        assert body3["isHumanActive"] is True
+        assert body3["output"] == "您的消息已由人工客服接待，请稍候人工坐席回复。"
+        assert body3["cards"] == []
+
+        # 顾客入口②:dispatch_chat(异步建作业链)—— 第二轮起静默
         res2 = await client.post(
             "/api/chat",
             json={"message": "还在吗", "threadId": tid, "userId": uid, "businessId": "aurora"},
@@ -246,22 +262,19 @@ class TestPauseGate:
         assert body2["success"] is True
         assert body2["jobId"] == ""  # 诚实:无作业
         assert body2["isHumanActive"] is True
+        assert body2.get("output", "") == ""  # 防复读:非首轮不给文案
 
-        # 顾客入口②:store_chat(商户门户直跑链),同闸同文案
-        res3 = await client.post(
+        # 防复读(paused_gate,2026-09-29 实弹):store 第三轮同样静默 ——
+        # output 空、isHumanActive 仍真(闸不撤,只是不再刷罐头)
+        res5 = await client.post(
             "/api/store/chat",
-            json={"message": "人工在吗", "threadId": tid, "userId": uid, "businessId": "aurora"},
+            json={"message": "然后呢", "threadId": tid, "userId": uid, "businessId": "aurora"},
         )
-        assert res3.status_code == 200
-        body3 = res3.json()
-        assert body3["jobId"] == ""
-        assert body3["isHumanActive"] is True
-        # 文案分形(2026-09-29 诚实化):staff_auth 通道的 start_human_takeover
-        # = 员工接管(引擎注入 operator 落认领),此处已是认领态 →「已接待」文案
-        assert body3["output"] == "您的消息已由人工客服接待，请稍候人工坐席回复。"
-        assert body3["cards"] == []
+        body5 = res5.json()
+        assert body5["isHumanActive"] is True
+        assert body5["output"] == ""
 
-        # sync 直跑链同闸
+        # sync 直跑链同闸(同样静默轮)
         res4 = await client.post(
             "/api/chat",
             json={"message": "同步链也要闸", "threadId": tid, "userId": uid, "businessId": "aurora", "sync": True},
@@ -271,9 +284,9 @@ class TestPauseGate:
         assert body4["isHumanActive"] is True
         assert "智能客服已为您处理完毕" not in (body4.get("output") or "")
 
-        # 用户行照常落库(三条轮次全在,闸不吞消息)
+        # 用户行照常落库(四条轮次全在,闸不吞消息)
         user_rows = [m for m in await _msgs(tid) if m["role"] == "user"]
-        assert len(user_rows) == 3
+        assert len(user_rows) == 4
 
         # 排队文案分形(2026-09-29 诚实化):顾客呼叫通道(无员工 JWT)坐席空
         # = 呼叫中/排队,同闸须回「排队等待接入」而非「已接待」
@@ -289,6 +302,13 @@ class TestPauseGate:
         )
         assert res7.json()["isHumanActive"] is True
         assert res7.json()["output"] == "已为您呼叫人工客服，正在排队等待接入，人工客服接入后将在本会话回复您。"
+        # 排队期第二条同样静默(顾客消息照落库,不再刷罐头)
+        res8 = await client.post(
+            "/api/store/chat",
+            json={"message": "还在排队吗", "threadId": tid2, "userId": uid2, "businessId": "aurora"},
+        )
+        assert res8.json()["isHumanActive"] is True
+        assert res8.json()["output"] == ""
 
     async def test_release后恢复建作业(self, client, staff_auth, monkeypatch):
         tid, uid = await _mk_thread("pg_resume")

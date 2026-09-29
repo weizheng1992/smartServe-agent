@@ -128,17 +128,18 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
     # 接管期该会话全部轮次不建作业不调 LLM,用户消息照常落库;release 后
     # 下一条自然走 AI。响应形状复用既有 isHumanActive 契约 —— apps/web
     # useChatMessages 已有消费方(移除 loader + 重拉历史),零前端改动。
-    # 文案按认领态分形(paused_reply,2026-09-29 诚实化):排队中不说「已接待」。
-    paused_output = await takeover.paused_reply(effective_thread_id)
-    if paused_output is not None:
+    # 文案按认领态分形且每接管期只说一次(paused_gate,2026-09-29 防复读):
+    # 首轮给排队/已接待提示,其后轮次静默,不刷屏。
+    paused, paused_output = await takeover.paused_gate(effective_thread_id)
+    if paused:
         if body.sync:
             return {
                 "success": True,
                 "jobId": "",
                 "threadId": effective_thread_id,
                 "userId": effective_user_id,
-                "output": paused_output,
-                "result": paused_output,
+                "output": paused_output or "",
+                "result": paused_output or "",
                 "cards": [],
                 "isHumanActive": True,
                 "isTemporalMode": False,
@@ -148,6 +149,7 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             "jobId": "",
             "threadId": effective_thread_id,
             "userId": effective_user_id,
+            "output": paused_output or "",
             "isHumanActive": True,
             "isTemporalMode": False,
         }

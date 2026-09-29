@@ -1,5 +1,5 @@
 import type { MessageItem } from '@/lib/api';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 // 坐席台独立页(live-desk-rework P2/P3/P4):台面顶栏(排队/我的计数 + 实时
 // 连接态)+ 三栏 —— 左会话池(排队等待最久置顶)/ 中时间线(认领后回复 +
 // 待批工单批驳卡)/ 右坐席上下文栏(五项,spec §2.4)+ 坐席在线态。
@@ -139,6 +139,21 @@ export default function LiveDeskPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [reviewing, setReviewing] = useState(false);
+
+  // 时间线视口贴底(2026-09-29 实弹:聊天记录打开总停在顶部=最旧消息,
+  // 最新消息沉在视口外):切换会话无条件回底部;新消息仅当操作员原本
+  // 贴底(没在翻历史)才跟随,离底阅读时不劫持滚动位置。
+  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const stickBottom = useRef(true);
+  useEffect(() => {
+    stickBottom.current = true;
+    const el = timelineRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [desk.selectedThreadId]);
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (el && stickBottom.current) el.scrollTop = el.scrollHeight;
+  }, [desk.timeline.length]);
 
   // P4 台内批驳:批/驳都走员工代行通道,403(无 live_desk:approve)与
   // 「已处理过」(400)按服务端文案如实呈现;批驳后不自动释放,仅刷新待批卡。
@@ -360,7 +375,15 @@ export default function LiveDeskPage() {
                   )}
                 </div>
               )}
-              <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-4" data-testid="desk-timeline">
+              <div
+                ref={timelineRef}
+                onScroll={() => {
+                  const el = timelineRef.current;
+                  if (el) stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+                }}
+                className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-4"
+                data-testid="desk-timeline"
+              >
                 {desk.timeline.map((m, i) => {
                   const day = sameDay(m.timestamp);
                   const prevDay = i > 0 ? sameDay(desk.timeline[i - 1].timestamp) : null;
