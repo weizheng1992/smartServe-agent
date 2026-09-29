@@ -20,7 +20,8 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: 'cd services/gateway-py && uv run --env-file ../../.env uvicorn gateway_py.main:app --host 127.0.0.1 --port 4000',
+      command:
+        'cd services/gateway-py && uv run --env-file ../../.env uvicorn gateway_py.main:app --host 127.0.0.1 --port 4000',
       url: 'http://localhost:4000/api/health',
       reuseExistingServer: true,
       timeout: 120 * 1000,
