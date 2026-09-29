@@ -11,7 +11,7 @@ MetricQueryEngine 深模块三方法 + 四错误模式 + 两不变量:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -55,7 +55,7 @@ class TestResolve:
         与 outbox 阈值下沉 SQL NOW() 同纪律;此处比较在 Python 侧拼参,
         故取 UTC 钟)。"""
         start = engine._window_start({"kind": "last_7d"})
-        utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        utc_now = datetime.now(UTC).replace(tzinfo=None)
         assert abs((utc_now - start).total_seconds() - 7 * 86400) < 5
 
     def test_window_start_month_boundary_is_utc_aligned(self, engine):
@@ -63,7 +63,7 @@ class TestResolve:
         月界)同口径,而非本地月末推出的月首。"""
         start = engine._window_start({"kind": "last_month"})
         utc_first = (
-            datetime.now(timezone.utc)
+            datetime.now(UTC)
             .replace(tzinfo=None)
             .replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         )

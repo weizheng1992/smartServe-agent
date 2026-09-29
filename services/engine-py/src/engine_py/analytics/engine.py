@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .schema_cards import compile_safe_schema_card
@@ -828,7 +828,7 @@ class MetricQueryEngine:
         # naive UTC,本地 naive now 在非 UTC 部署下让所有相对时间窗整体偏移
         # 时区(2026-09-29 夜审 F15 波及复核);月对齐分支与同文件
         # date_trunc('month', CURRENT_DATE)(UTC 月界)同口径。
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         if kind == "last_month":
             first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             return (first - timedelta(days=1)).replace(day=1)
