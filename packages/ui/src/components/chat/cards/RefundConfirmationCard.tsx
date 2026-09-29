@@ -2,20 +2,12 @@
 
 import type React from 'react';
 import type { RefundConfirmationData } from 'types';
+import { formatAmount } from '../../../lib/utils';
 import { Clock, ShieldCheck } from '../../icons';
 
 export interface RefundConfirmationCardProps {
   data: RefundConfirmationData;
   onConfirm?: () => void;
-}
-
-function formatAmount(val: unknown): string {
-  if (typeof val === 'number') return val.toFixed(2);
-  if (typeof val === 'string') {
-    const num = Number.parseFloat(val.replace(/[^0-9.-]/g, ''));
-    return Number.isNaN(num) ? '0.00' : num.toFixed(2);
-  }
-  return '0.00';
 }
 
 export const RefundConfirmationCard: React.FC<RefundConfirmationCardProps> = ({ data, onConfirm }) => {

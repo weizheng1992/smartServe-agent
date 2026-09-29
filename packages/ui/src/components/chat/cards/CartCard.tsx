@@ -2,20 +2,12 @@
 
 import type React from 'react';
 import type { CartCardData } from 'types';
+import { formatAmount } from '../../../lib/utils';
 import { ArrowRight, CheckCircle2, ShoppingCart, Trash2 } from '../../icons';
 
 export interface CartCardProps {
   data: CartCardData;
   onAction?: (action: string, payload?: Record<string, unknown>) => void;
-}
-
-function formatAmount(val: unknown): string {
-  if (typeof val === 'number') return val.toFixed(2);
-  if (typeof val === 'string') {
-    const num = Number.parseFloat(val.replace(/[^0-9.-]/g, ''));
-    return Number.isNaN(num) ? '0.00' : num.toFixed(2);
-  }
-  return '0.00';
 }
 
 export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {

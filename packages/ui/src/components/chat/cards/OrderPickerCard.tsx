@@ -2,21 +2,13 @@
 
 import React, { useState } from 'react';
 import type { OrderCardData, OrderPickerCardData } from 'types';
+import { formatAmount } from '../../../lib/utils';
 import { ArrowRight, CheckCircle2, Package, Sparkles, Truck, X } from '../../icons';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../ui/dialog';
 
 export interface OrderPickerCardProps {
   data: OrderPickerCardData;
   onAction?: (action: string, payload?: Record<string, unknown>) => void;
-}
-
-function formatAmount(val: unknown): string {
-  if (typeof val === 'number') return val.toFixed(2);
-  if (typeof val === 'string') {
-    const num = Number.parseFloat(val.replace(/[^0-9.-]/g, ''));
-    return Number.isNaN(num) ? '0.00' : num.toFixed(2);
-  }
-  return '0.00';
 }
 
 export const OrderPickerCard: React.FC<OrderPickerCardProps> = ({ data, onAction }) => {
