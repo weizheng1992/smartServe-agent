@@ -752,7 +752,7 @@ export function FloatingChatWidget({
 
       {/* 客服对话挂件窗口 */}
       {isOpen && (
-        <div className="fixed bottom-20 right-6 z-50 w-96 max-w-[calc(100vw-2rem)] h-[520px] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4">
+        <div className="fixed bottom-20 right-6 z-50 w-96 max-w-[calc(100vw-2rem)] h-[520px] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="bg-emerald-700 text-white px-4 py-3 flex items-center justify-between">
             <div className="flex items-center space-x-2">

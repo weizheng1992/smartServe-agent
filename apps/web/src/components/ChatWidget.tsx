@@ -145,7 +145,7 @@ export function ChatWidget({
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end font-sans">
       {/* 💬 Expanded Chatbot Container */}
       {isOpen && (
-        <div className="w-[380px] h-[580px] mb-4 bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-200">
+        <div className="w-[380px] h-[580px] mb-4 bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div
             className="p-4 flex items-center justify-between text-white border-b border-slate-800"
