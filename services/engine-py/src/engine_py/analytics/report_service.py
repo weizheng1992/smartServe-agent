@@ -7,6 +7,7 @@ LLM 只组织结论语言 —— 本模块结论段为模板拼接(不编造任�
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -16,7 +17,7 @@ from datetime import datetime
 from sqlalchemy import select
 
 from ..db import AnalyticsReport, get_session
-from .engine import MetricQueryEngine, UnsupportedQuery
+from .engine import MetricQueryEngine, StructuredQueryIntent
 
 REPORT_METRICS = ["gmv", "volume", "refund_rate", "session_volume"]
 
@@ -47,19 +48,24 @@ def _html_report(title: str, sections: list[dict]) -> str:
 async def generate_report(business_id: str, generated_by: str, time_window: dict | None = None) -> dict:
     """四族批量执行 → 落库 analytics_reports;单指标失败如实记入 sections(error 行)。"""
     engine = MetricQueryEngine(session_ctx={"business_id": business_id, "role": "finance_owner"})
-    sections: list[dict] = []
-    rows_all: dict[str, list] = {}
-    for metric in REPORT_METRICS:
-        try:
-            from .engine import StructuredQueryIntent
 
+    async def _one(metric: str) -> tuple[dict, list]:
+        try:
             intent = StructuredQueryIntent(metric=metric, direction="DESC", limit=5, time_window=time_window)
             result = await engine.execute_async(engine.compile(intent))
-            sections.append({"metric": result.metric, "unit": result.unit, "caliber": result.caliber, "rows": result.rows})
-            rows_all[metric] = result.rows
-        except (UnsupportedQuery, Exception) as err:
-            sections.append({"metric": metric, "unit": "-", "caliber": f"该指标执行失败:{err}", "rows": []})
-            rows_all[metric] = []
+            return (
+                {"metric": result.metric, "unit": result.unit, "caliber": result.caliber, "rows": result.rows},
+                result.rows,
+            )
+        except Exception as err:  # 单指标失败如实记行,不炸整份报告(诚实原则)
+            return ({"metric": metric, "unit": "-", "caliber": f"该指标执行失败:{err}", "rows": []}, [])
+
+    # 四族指标互不依赖,execute_async 每次自开独立会话/连接 —— 并发执行省整份
+    # 报告时延;gather 保序(sections 顺序仍 = REPORT_METRICS 顺序),单指标失败
+    # 照旧如实记行(夜审 2026-09-29)
+    pairs = await asyncio.gather(*(_one(m) for m in REPORT_METRICS))
+    sections = [p[0] for p in pairs]
+    rows_all = dict(zip(REPORT_METRICS, (p[1] for p in pairs), strict=True))
 
     title = f"{business_id} 经营报告 · {datetime.now().strftime('%Y-%m-%d')}"
     html = _html_report(title, sections)

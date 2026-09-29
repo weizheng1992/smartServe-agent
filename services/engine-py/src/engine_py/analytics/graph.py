@@ -10,6 +10,7 @@ T3 多轮会话(wayfinder dynamic-analytics):session_id → 会话记忆(Redis);
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -249,23 +250,25 @@ async def _run_scenario(intent: StructuredQueryIntent, session_ctx: dict) -> dic
     某节失败不影响整包:该节以 error 帧如实呈现(诚实原则,不吞不编)。
     """
     engine = MetricQueryEngine(session_ctx=session_ctx)
-    frames: list[dict] = []
-    for sub_metric in _SCENARIO_PACKS[intent.metric]:
+
+    async def _one(sub_metric: str) -> dict:
         sub = StructuredQueryIntent(
             metric=sub_metric, direction=intent.direction, limit=intent.limit,
             time_window=intent.time_window, category=intent.category,
             entity_slot=dict(intent.entity_slot),
             chart_hint=intent.chart_hint,
         )
-        label = sub_metric
         try:
-            compiled = engine.compile(sub)
-            result = await engine.execute_async(compiled)
-            frames.append(_result_frame(label, result, sub))
+            result = await engine.execute_async(engine.compile(sub))
+            return _result_frame(sub_metric, result, sub)
         except UnsupportedQuery as err:
-            frames.append({"type": "unsupported", "message": str(err), "detail": sub_metric})
+            return {"type": "unsupported", "message": str(err), "detail": sub_metric}
         except Exception as err:
-            frames.append({"type": "error", "message": f"{sub_metric} 执行失败(已如实报告)", "detail": str(err)})
+            return {"type": "error", "message": f"{sub_metric} 执行失败(已如实报告)", "detail": str(err)}
+
+    # 各节互不依赖,execute_async 每次自开独立会话/连接 —— 并发执行省整包时延;
+    # gather 保序(frames 顺序仍 = pack 顺序),单节失败照旧不炸整包(夜审 2026-09-29)
+    frames = list(await asyncio.gather(*(_one(m) for m in _SCENARIO_PACKS[intent.metric])))
     return {"type": "multi", "frames": frames}
 
 
