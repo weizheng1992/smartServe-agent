@@ -11,6 +11,8 @@ MetricQueryEngine 深模块三方法 + 四错误模式 + 两不变量:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from engine_py.analytics.engine import MetricQueryEngine, QueryResult, UnsupportedQuery
@@ -45,6 +47,27 @@ class TestResolve:
         intent = engine.resolve("上个月的销量排行")
         assert intent.metric == "volume" and intent.time_window is not None
         assert intent.time_window["kind"] == "last_month"
+
+    def test_window_start_aligns_utc_clock(self, engine):
+        """窗口下界与库钟同源(UTC):created_at 由 server_default now() 落
+        naive UTC,本地 naive now 在非 UTC 部署(本机 UTC+8)让相对时间窗
+        整体偏移时区 —— 旧实现下本用例必红(2026-09-29 夜审 F15 波及复核,
+        与 outbox 阈值下沉 SQL NOW() 同纪律;此处比较在 Python 侧拼参,
+        故取 UTC 钟)。"""
+        start = engine._window_start({"kind": "last_7d"})
+        utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        assert abs((utc_now - start).total_seconds() - 7 * 86400) < 5
+
+    def test_window_start_month_boundary_is_utc_aligned(self, engine):
+        """last_month 月界与同文件 date_trunc('month', CURRENT_DATE)(UTC
+        月界)同口径,而非本地月末推出的月首。"""
+        start = engine._window_start({"kind": "last_month"})
+        utc_first = (
+            datetime.now(timezone.utc)
+            .replace(tzinfo=None)
+            .replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        )
+        assert start == (utc_first - timedelta(days=1)).replace(day=1)
 
     def test_no_hit_is_unsupported_never_silent_gmv(self, engine):
         """08-P1 铁律:未命中必须 unsupported,严禁静默兜底 gmv。"""
