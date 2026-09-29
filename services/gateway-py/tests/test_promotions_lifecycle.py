@@ -9,7 +9,7 @@ tests/test_promotion_engine.py 钉死,两侧同口径。
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -124,7 +124,7 @@ class TestPromotionsLifecycle:
         # 造数钟与被测比较钟同源:服务端窗口比较走 UTC 库钟(_utcnow /
         # SQL NOW(),2026-09-29 F15 复核),-5min 边际吃不下本地钟的时区偏移;
         # naive 输入(前端 datetime-local)的口径另票处理。
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         try:
             patched = await client.patch(
                 f"/api/admin/analytics/promotions/{created['id']}",
