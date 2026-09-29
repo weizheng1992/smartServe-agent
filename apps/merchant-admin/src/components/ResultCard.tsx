@@ -85,6 +85,42 @@ export function ResultCard({ data }: { data: any }) {
         <div className="px-3 py-2 text-[11px] text-zinc-400">
           该结果不是排行形状(需 ≥2 行数值),无法绘制条形图 —— 已按表格诚实呈现。
         </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="border-b border-zinc-100 text-left text-zinc-400">
+                {card.columns.map((c: any) => (
+                  <th key={c.key} className="px-3 py-1.5 font-medium">
+                    {c.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {card.rows.map((r: any, i: number) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
+                <tr key={i} className="border-b border-zinc-50">
+                  {card.columns.map((c: any) => (
+                    <td key={c.key} className="px-3 py-1.5">
+                      {String(r[c.key])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{card.caliber}</div>
+      </div>
+    );
+  }
+  const header = data.title || card.title;
+  return (
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+      <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{header}</div>
+      {bars ? <BarChart points={bars} unit={data.unit} /> : null}
+      {/* 宽表(UUID 列/多列卡)在面板窄容器里必须可左右滚,卡片根 overflow-hidden 不裁数据 */}
+      <div className="overflow-x-auto">
         <table className="w-full text-[12px]">
           <thead>
             <tr className="border-b border-zinc-100 text-left text-zinc-400">
@@ -108,38 +144,7 @@ export function ResultCard({ data }: { data: any }) {
             ))}
           </tbody>
         </table>
-        <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{card.caliber}</div>
       </div>
-    );
-  }
-  const header = data.title || card.title;
-  return (
-    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-      <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{header}</div>
-      {bars ? <BarChart points={bars} unit={data.unit} /> : null}
-      <table className="w-full text-[12px]">
-        <thead>
-          <tr className="border-b border-zinc-100 text-left text-zinc-400">
-            {card.columns.map((c: any) => (
-              <th key={c.key} className="px-3 py-1.5 font-medium">
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {card.rows.map((r: any, i: number) => (
-            /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
-            <tr key={i} className="border-b border-zinc-50">
-              {card.columns.map((c: any) => (
-                <td key={c.key} className="px-3 py-1.5">
-                  {String(r[c.key])}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
       <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{card.caliber}</div>
     </div>
   );
@@ -149,28 +154,30 @@ function ResultTable({ rows }: { rows: Record<string, unknown>[] }) {
   if (!rows.length) return null;
   const cols = Object.keys(rows[0]);
   return (
-    <table className="w-full text-[12px]">
-      <thead>
-        <tr className="border-b border-zinc-100 text-left text-zinc-400">
-          {cols.map((c) => (
-            <th key={c} className="px-3 py-1.5 font-medium">
-              {c}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
-          <tr key={i} className="border-b border-zinc-50">
+    <div className="overflow-x-auto">
+      <table className="w-full text-[12px]">
+        <thead>
+          <tr className="border-b border-zinc-100 text-left text-zinc-400">
             {cols.map((c) => (
-              <td key={c} className="px-3 py-1.5">
-                {String(r[c])}
-              </td>
+              <th key={c} className="px-3 py-1.5 font-medium">
+                {c}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            /* biome-ignore lint/suspicious/noArrayIndexKey: 通用结果表行无稳定业务主键,按序静态渲染 */
+            <tr key={i} className="border-b border-zinc-50">
+              {cols.map((c) => (
+                <td key={c} className="px-3 py-1.5">
+                  {String(r[c])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
