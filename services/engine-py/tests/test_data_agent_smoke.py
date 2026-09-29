@@ -19,6 +19,8 @@ SMOKE_CASES = [
     ("上个月 GMV 最高的商品", "gmv", "DESC"),
     ("压货最严重的商品", "stock_risk", "DESC"),
     ("销售额最高的商品 Top 20", "gmv", "DESC"),
+    # 夜审 2026-09-29 补员:38 指标里唯一零测试提及的客户消费趋势(行内客户绑定 + 趋势族)
+    ("张伟的消费走势", "customer_spend_trend", "ASC"),
 ]
 
 
@@ -32,7 +34,15 @@ def test_smoke_chain(engine, question, metric, direction):
     intent = engine.resolve(question)
     assert intent.metric == metric and intent.direction == direction
     compiled = engine.compile(intent)
-    assert ":lim" in compiled.sql or intent.metric in ("review_bad", "refund_rate", "session_volume", "ai_resolution_rate", "after_sale_overview")
+    # 无 :lim 槽位的模板必须带字面 LIMIT(趋势族/状态族窗口固定,50 行双保险)
+    assert ":lim" in compiled.sql or intent.metric in (
+        "review_bad",
+        "refund_rate",
+        "session_volume",
+        "ai_resolution_rate",
+        "after_sale_overview",
+        "customer_spend_trend",
+    )
 
 
 def test_smoke_honest_reject(engine):

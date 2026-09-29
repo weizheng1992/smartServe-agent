@@ -46,6 +46,8 @@ _SPECIAL_METRICS: list[tuple[str, dict]] = [
     ("customer_spend_top", {}),
     # 阶段⑦客户族/环比/走势/货值(场景包 biz_overview/customer_panorama 由编排层展开,不经编译器)
     ("orders_trend", {}),
+    # 客户消费趋势(夜审 2026-09-29:38 指标唯一零测试提及的漏网,闭集补员)
+    ("customer_spend_trend", {}),
     ("stock_value", {}),
     ("gmv_mom", {}),
     ("customer_spend_stats", {"entity_slot": {"customer": ["C1"]}}),
