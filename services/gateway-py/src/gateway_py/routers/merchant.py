@@ -27,13 +27,17 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
 from .. import merchant_domain as mds
-from ..conversation_repo import append_message, get_conversation_timeline, list_conversations
+from ..conversation_repo import (
+    THREAD_CHANNEL,
+    append_message,
+    get_conversation_timeline,
+    list_conversations,
+    publish_thread_message,
+)
 from ..hmac_signer import verify as hmac_verify
 
 router = APIRouter()
 merchant_promotions_router = APIRouter()
-
-THREAD_CHANNEL = "thread:{thread_id}:message"
 
 
 class MerchantApprovalActionIn(BaseModel):
@@ -529,15 +533,9 @@ async def store_order_detail(order_id: str):
 # ---------------------------------------------------------------------------
 # /api/store/chat — AI 客服(同步 dispatch + Redis 频道推送 + SSE 流)
 # ---------------------------------------------------------------------------
-
-
-async def publish_thread_message(thread_id: str, payload: dict) -> None:
-    try:
-        client = await get_redis()
-        if client is not None:
-            await client.publish(THREAD_CHANNEL.format(thread_id=thread_id), json.dumps(payload, ensure_ascii=False))
-    except Exception as err:
-        print(f"[MerchantChat] Redis publish thread message failed: {err}")
+# publish_thread_message 收口至 conversation_repo(2026-09-29):顾客侧实时
+# 频道 thread:{id}:message 的发布函数唯一化,坐席/系统消息桥接(realtime.py)
+# 与 AI 回复(store_chat)共用同一缝,严防两套频道再分叉。
 
 
 @router.get("/api/store/cart")

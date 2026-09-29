@@ -430,3 +430,58 @@ class TestSocketIoEdgeStates:
                 auth={"tenantId": "bad tenant; DROP", "userId": "u_edge_rogue", "role": "user"},
             )
         assert not rogue.connected
+
+    async def test_operator_message_reaches_store_sse(self, live_server, rt_thread, nike_operator):
+        """坐席消息必须桥进顾客 store SSE 频道(thread:{id}:message)。
+
+        回归钉(2026-09-29 实弹):坐席 send_message 此前只走 socket 房间广播 +
+        ws:events 频道(无消费者),而商户商城顾客端(apps/merchant)唯一实时
+        耳朵是 GET /api/store/chat/stream 订阅的 thread:{id}:message —— 坐席
+        「已接管」连发数条,顾客一条收不到只会回「?」。真栈验证:socket 落库
+        后,顾客 SSE 流须在窗口内收到同 id 同内容的 operator 帧。
+        """
+        import socketio as socketio_lib
+
+        import httpx
+
+        ns = "/ws/chat"
+        content = f"回归钉:坐席消息须达顾客 SSE {_TS}"
+        operator = socketio_lib.AsyncClient(reconnection=False)
+        await operator.connect(
+            live_server,
+            transports=["websocket"],
+            namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_rt_operator", "role": "operator", "token": nike_operator["token"]},
+        )
+        try:
+            raw = ""
+            sent = False
+            timeout = httpx.Timeout(10.0, read=20.0)
+            async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client, client.stream(
+                "GET", f"/api/store/chat/stream?threadId={rt_thread}"
+            ) as res:
+                assert res.status_code == 200
+                # 单循环双闸(httpx 流只能消费一次):先等到 connected 帧(订阅
+                # 就绪)再让坐席发言 —— 镜像顾客端真实时序(EventSource 常驻
+                # 先挂);Redis pub/sub 无重放,订阅前发布的帧物理不可见。
+                # 桥通则坐席帧即时到达;read=20s 兜底 heartbeat 节拍(15s)前必判。
+                async for chunk in res.aiter_text():
+                    raw += chunk
+                    if not sent and "event: connected" in raw:
+                        sent = True
+                        send_ack = await operator.call(
+                            "send_message",
+                            {"threadId": rt_thread, "tenantId": "nike", "role": "operator", "content": content},
+                            namespace=ns,
+                            timeout=5,
+                        )
+                        assert send_ack["success"] is True
+                    if sent and content in raw:
+                        break
+
+            assert sent, "SSE 流未就绪(connected 帧未到)"
+            assert content in raw, f"坐席消息未达顾客 SSE 频道: {raw[-400:]}"
+            assert '"role": "operator"' in raw
+        finally:
+            if operator.connected:
+                await operator.disconnect()

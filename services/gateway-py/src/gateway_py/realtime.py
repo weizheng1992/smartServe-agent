@@ -254,6 +254,8 @@ async def on_takeover(sid: str, data: dict):
             "operatorInfo": {"operatorId": operator_id, "operatorName": operator_name},
         }
     )
+    # 顾客侧桥:接入通知同步送达顾客 SSE(顾客须知道对面已换成真人)
+    await conversation_repo.publish_thread_message(thread_id, sys_msg)
     state = await takeover.thread_state(thread_id)
     room = _room(thread_id, tenant_id)
     await sio.emit(
@@ -298,6 +300,8 @@ async def on_release_takeover(sid: str, data: dict):
             "content": "人工客服已结束接管，已重新切换为 AI 智能助手为您服务。",
         }
     )
+    # 顾客侧桥:释放通知同步送达顾客 SSE
+    await conversation_repo.publish_thread_message(thread_id, sys_msg)
     state = await takeover.thread_state(thread_id)
     room = _room(thread_id, tenant_id)
     await sio.emit(
@@ -352,6 +356,24 @@ async def on_send_message(sid: str, data: dict):
             **({"id": client_msg_id} if client_msg_id else {}),
         }
     )
+    # 顾客侧桥(2026-09-29 实弹修复):坐席消息同步发布 thread:{id}:message,
+    # 商户商城 SSE(/api/store/chat/stream)才能实时送达 —— 此前只走 socket
+    # 房间 + ws:events(无消费方),顾客端无 socket.io 客户端,坐席「已接管」
+    # 顾客仍只见「?」。仅桥 operator:顾客自有消息已在端上乐观呈现,补发反致
+    # 双气泡(乐观 id ≠ 服务端 id,按 id 去重不命中)。
+    if role == "operator":
+        await conversation_repo.publish_thread_message(
+            thread_id,
+            {
+                "id": saved["id"],
+                "threadId": thread_id,
+                "role": role,
+                "content": content,
+                "cards": cards,
+                "operatorInfo": operator_info,
+                "timestamp": saved.get("timestamp"),
+            },
+        )
     room = _room(thread_id, tenant_id)
     msg_payload = {
         "id": saved["id"],

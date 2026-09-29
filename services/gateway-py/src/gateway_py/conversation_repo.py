@@ -9,6 +9,10 @@ import uuid
 from engine_py.db import get_session
 from sqlalchemy import text
 
+# 顾客侧实时频道(store SSE /api/store/chat/stream 订阅转发,商户商城顾客端
+# 唯一实时耳朵)。坐席/系统消息落库后必须桥接此频道,见 publish_thread_message。
+THREAD_CHANNEL = "thread:{thread_id}:message"
+
 
 async def list_conversations(
     business_id: str,
@@ -453,3 +457,25 @@ async def append_message(payload: dict) -> dict:
         "imageUrls": payload.get("imageUrls"),
         "timestamp": timestamp,
     }
+
+
+async def publish_thread_message(thread_id: str, payload: dict) -> None:
+    """向顾客侧实时频道 thread:{id}:message 发布一帧(store SSE 订阅转发)。
+
+    2026-09-29 实弹修复:坐席 socket 发言与接管/释放系统消息此前只走
+    socket 房间广播 + ws:events 频道(无消费方),而商户商城顾客端
+    (apps/merchant FloatingChatWidget)没有 socket.io 客户端,唯一实时
+    耳朵是本频道 —— 表现为坐席「已接管」连发数条,顾客一条收不到只会回
+    「?」。发布失败只打日志不抛:实时增强不回滚已落库真消息,顾客刷新
+    走历史接口仍可见。
+    """
+    try:
+        from engine_py.event_bus import get_client
+
+        client = await get_client()
+        if client is not None:
+            await client.publish(
+                THREAD_CHANNEL.format(thread_id=thread_id), json.dumps(payload, ensure_ascii=False)
+            )
+    except Exception as err:
+        print(f"[ConversationRepo] Redis publish thread message failed: {err}")
