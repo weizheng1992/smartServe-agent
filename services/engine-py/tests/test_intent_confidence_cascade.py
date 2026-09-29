@@ -9,8 +9,11 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from dataclasses import dataclass, field
 from typing import Any
+
+import pytest
 
 from engine_py.triage.intent_registry import (
     INTENT_CLARIFY_LABELS,
@@ -176,3 +179,36 @@ class TestLlmRefineCascadeWiring:
         assert engine.bypass_calls == [], "高置信严禁澄清"
         result = verdict.result
         assert result["intents"][0]["intent"] == "promotion_query"
+
+    def test_classify_exception_falls_back_to_general_query(self, monkeypatch):
+        """仲裁器抛普通异常 → 降级 general_query(0.5)终局,留痕 structured_llm_fallback
+        (夜审 2026-09-29 补:异常回退分支此前零测试)。"""
+        from engine_py.triage.stages import LlmRefineStage
+
+        async def boom(*a, **kw):
+            raise RuntimeError("精判模型超时")
+
+        monkeypatch.setattr(sys.modules[__name__], "classify", boom)
+        engine = _FakeEngine()
+        verdict = asyncio.run(LlmRefineStage.judge(_make_ctx(engine, "帮我搞一下那个东西")))
+        assert verdict.terminal is True
+        assert engine.bypass_calls == [], "异常回退是意图兜底,严禁误入澄清旁路"
+        assert engine.log_calls, "回退意图必须留痕 intent_logs"
+        intents = verdict.result["intents"]
+        assert intents[0]["intent"] == "general_query"
+        assert intents[0]["confidence"] == 0.5
+
+    def test_circuit_breaker_open_propagates(self, monkeypatch):
+        """上游 LLM 熔断非节点级可恢复:必须上抛走 job 级降级,严禁就地吞成回退意图。"""
+        from engine_py.llm import CircuitBreakerOpenError
+        from engine_py.triage.stages import LlmRefineStage
+
+        async def open_cb(*a, **kw):
+            # status 必须是快照 dict(state/nextAttemptInMs),传 str 会在构造时炸 TypeError
+            raise CircuitBreakerOpenError({"state": "open", "nextAttemptInMs": 3000})
+
+        monkeypatch.setattr(sys.modules[__name__], "classify", open_cb)
+        engine = _FakeEngine()
+        with pytest.raises(CircuitBreakerOpenError):
+            asyncio.run(LlmRefineStage.judge(_make_ctx(engine, "随便说说")))
+        assert engine.log_calls == [], "熔断上抛严禁误落回退留痕"
