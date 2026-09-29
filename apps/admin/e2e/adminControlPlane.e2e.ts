@@ -14,7 +14,7 @@ test.describe('Admin SaaS Control Plane E2E Tests', () => {
   });
 
   test('should render Admin Layout and navigation items properly', async ({ page }) => {
-    await expect(page.locator('text=Agent Control Plane')).toBeVisible();
+    await expect(page.locator('text=智能体管控台')).toBeVisible();
     // 必须锚定侧栏 link 角色:/tenants 页面 h2 标题与导航同名,纯 text= 会 strict mode 撞车
     await expect(page.getByRole('link', { name: '商户租户管理' })).toBeVisible();
     await expect(page.getByRole('link', { name: '全景会话回放' })).toBeVisible();

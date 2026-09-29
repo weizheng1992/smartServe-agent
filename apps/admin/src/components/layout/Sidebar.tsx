@@ -220,7 +220,7 @@ export function Sidebar() {
           CP
         </div>
         <div>
-          <h1 className="text-sm font-semibold text-slate-900 leading-tight">Agent Control Plane</h1>
+          <h1 className="text-sm font-semibold text-slate-900 leading-tight">智能体管控台</h1>
           <p className="text-[10px] text-slate-400 font-medium">SaaS 多租户管理中台</p>
         </div>
       </div>

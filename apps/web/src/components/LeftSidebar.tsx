@@ -216,10 +216,10 @@ export function LeftSidebar({
       {/* 底部探针参数 */}
       <div className="p-4 border-t border-slate-800/80 bg-slate-950/20">
         <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 p-2.5 space-y-1">
-          <span className="text-[8px] text-slate-500 font-mono tracking-widest uppercase block">PERSISTENT CACHE</span>
+          <span className="text-[8px] text-slate-500 font-mono tracking-widest uppercase block">持久缓存</span>
           <div className="flex items-center gap-1.5 text-[10px] text-slate-300 font-mono">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-            <span className="truncate">Local Storage Hydrated</span>
+            <span className="truncate">本地缓存已加载</span>
           </div>
         </div>
       </div>

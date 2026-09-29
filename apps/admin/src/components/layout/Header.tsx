@@ -101,8 +101,8 @@ export function Header() {
             AD
           </div>
           <div className="hidden sm:block text-left">
-            <div className="text-xs font-semibold text-slate-800">Admin Platform</div>
-            <div className="text-[10px] text-slate-400">Super Admin</div>
+            <div className="text-xs font-semibold text-slate-800">管理控制台</div>
+            <div className="text-[10px] text-slate-400">超级管理员</div>
           </div>
         </div>
       </div>
