@@ -108,6 +108,49 @@ class TestSseStream:
         assert "id: 3" in raw
         assert "id: 1\n" not in raw
 
+    async def test_client_abort_midstream_then_reconnect(self, live_server):
+        """客户端中途断开:SSE 泵随连接终止且服务端不受污染;作业事件主干
+        照常累积,重连按 Last-Event-ID 只补缺失帧(夜审 2026-09-29 补:
+        SSE 中途断流此前零测试 —— 观察面断开不等于事件面蒸发)。"""
+        import httpx
+        from engine_py.event_bus import emit
+
+        job_id = f"job_rt_abort_{_TS}"
+        timeout = httpx.Timeout(10.0, read=30.0)
+        # 连接前灌入首帧:断流测试的读窗即刻可达,不依赖灌入竞态
+        await emit(job_id, "thought", {"jobId": job_id, "step": "断流前帧"})
+        await asyncio.sleep(0.1)
+
+        async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client:
+
+            async def read_first_then_abort():
+                async with client.stream("GET", f"/api/chat/{job_id}/stream") as res:
+                    assert res.status_code == 200
+                    buf = ""
+                    async for chunk in res.aiter_text():
+                        buf += chunk
+                        if "event: thought" in buf:
+                            return  # 帧体读到即退出 stream 上下文 = 客户端中途断开
+
+            # 断开必须干脆(服务端若挂死泵,uvicorn 取消会话时此处会超时暴露)
+            await asyncio.wait_for(read_first_then_abort(), 10)
+
+        # 断开后事件照常入流(作业面独立于观察面),重连只补缺失帧
+        await emit(job_id, "thought", {"jobId": job_id, "step": "断流后新帧"})
+        raw = ""
+        async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client:
+            async with client.stream(
+                "GET", f"/api/chat/{job_id}/stream", headers={"last-event-id": "1"}
+            ) as res:
+                assert res.status_code == 200
+                async for chunk in res.aiter_text():
+                    raw += chunk
+                    if "断流后新帧" in raw:
+                        break
+
+        assert re.search(r"^id: 2\nevent: thought.*断流后新帧", raw, re.S), "重连必须以 id 2 补发断流后新帧"
+        assert "id: 1\n" not in raw, "已收帧(seq=1)严禁重放"
+
 
 class TestSocketIoChat:
     async def test_five_event_full_protocol(self, live_server, rt_thread, nike_operator):
