@@ -126,10 +126,16 @@ async def best_for_amount(conn, amount: float, scope_spus: set[str] | None = Non
 
 def _best_promo_for_spu(promos: list[dict], spu_code: str, price: float) -> dict | None:
     """对已取出的活动集内存打分(单 SPU 展示口径)。纯函数 —— 批量端点
-    一次拉取活动集后逐商品复用,根除逐 SPU 重查活动的 N+1(2026-09-27)。"""
+    一次拉取活动集后逐商品复用,根除逐 SPU 重查活动的 N+1(2026-09-27)。
+
+    券型不算商品让利(与 best_discount_for_amount 同律):券是订单级核销
+    (须领取+未用+结算选中),按单件价格把券折进「优惠价」会广告出结算
+    永远给不出的价(2026-09-29 实弹:新客50元券令咖啡套装卡显 ¥279,
+    结账不可达)。"""
     eligible = [
         p for p in promos
-        if p["scope_type"] in ("all", "spu") and (p["scope_type"] != "spu" or p["scope_value"] == spu_code)
+        if p["promo_type"] != "coupon"
+        and p["scope_type"] in ("all", "spu") and (p["scope_type"] != "spu" or p["scope_value"] == spu_code)
     ]
     best: dict | None = None
     for p in eligible:

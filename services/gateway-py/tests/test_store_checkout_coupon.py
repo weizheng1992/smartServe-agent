@@ -414,6 +414,30 @@ async def test_promo_engine_failure_settles_at_original_price(client, contract_f
         await _cleanup()
 
 
+async def test_promo_price_display_excludes_coupons(client, contract_fixtures):
+    """商品促销价展示永不含券型(2026-09-29 实弹:新客50元券被当商品让利,
+    商城卡广告 ¥279 结算永远给不出 —— 券是订单级核销,非单件价格)。
+    展示口径与 best_discount_for_amount(荐品)同律:券型不算商品让利。"""
+    await _seed_catalog()
+    await _seed_coupon(_UID, 50)  # 对 300 是最大让利(修复前会以 ¥250 胜出展示)
+    await _seed_activity(300, 30)  # 修复后应胜出的展示活动:满300减30 → ¥270
+    try:
+        res = await client.post(
+            "/api/store/promotions/prices",
+            json=[{"productId": _SPUCODE, "price": _PRICE}],
+        )
+        assert res.status_code == 200, res.text
+        prices = res.json()["prices"]
+        assert len(prices) == 1
+        item = prices[0]
+        assert item["promoName"] is not None, "满减活动应作为商品让利展示"
+        assert "券" not in item["promoName"], f"券型严禁折进商品促销价: {item}"
+        assert float(item["promoPrice"]) == 270.0
+        assert float(item["originalPrice"]) == _PRICE
+    finally:
+        await _cleanup()
+
+
 async def test_checkout_preview_readonly(client, contract_fixtures):
     """试算端点:原价/活动/券包逐张可用性,且完全只读(零订单零核销)。"""
     await _seed_catalog()
