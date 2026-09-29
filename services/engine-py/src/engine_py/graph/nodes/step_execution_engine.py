@@ -237,6 +237,27 @@ async def _execute_single_step_core(
     if parsed_tool_call and parsed_tool_call.get("toolName") in allowed_tools:
         tool_name = parsed_tool_call["toolName"]
         args = await maybe_inject_aftersale_evidence(tool_name, parsed_tool_call.get("args") or {}, state)
+
+        # 🧳 搭配语义守卫(2026-09-29 实弹「之前只有装备,现在只有衣服」):工具
+        # 选择两条来路(fast-path 关键词 / fallback LLM)都可能把搭配请求写成
+        # searchProducts 工具子任务(query 自拟单脚)—— 工具路径没有技能 SOP
+        # 的搭配族补脚/交错合并/合计预算,实弹只推 2 衬衫零装备(同句走技能
+        # 路径是双族+合计)。输入呈搭配形态(搭配/一套/套装 × 衣着锚词)一律
+        # 在物理调度前改路由 ShoppingGuideSkill;判据直接引用技能类属性正则
+        # (单一事实源,与技能内补脚永不漂移),不依赖 LLM 自觉 —— 同取消语闸
+        # 哲学:确定性代码闸收编 prompt 约束。
+        if tool_name == "searchProducts":
+            _skills_registry = _try_import_skills()
+            _guide_cls = _skills_registry.get_skill("skill_shopping_guide") if _skills_registry else None
+            _guard_input = state.get("input") or ""
+            if (
+                _guide_cls is not None
+                and _guide_cls._OUTFIT_RE.search(_guard_input)
+                and _guide_cls._CLOTHING_ANCHOR_RE.search(_guard_input)
+            ):
+                tool_name = "skill_shopping_guide"
+                args = {"userInput": _guard_input}
+
         order_id = args.get("orderId")
 
         # 4.1 重复退款防护拦截(三源判定,商户真单按用户归属匹配)
