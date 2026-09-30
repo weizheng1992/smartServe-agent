@@ -387,9 +387,16 @@ def _eval_item(r: EvalRunRecordRow) -> dict:
 
 
 @router.get("/api/evals/results")
-async def eval_results():
+async def eval_results(limit: int = Query(200, ge=1, le=1000)):
+    """评测批次历史(追加型日志表,newest-first)。
+
+    2026-09-30 夜审:原实现无界全表扫,随 test:prompt:record 累积线性变慢;
+    现默认回最近 200 条(与 /api/logs limit 参数同款先例),调用方可显式
+    放大至 1000。admin 评测页语义即「最近批次」。
+    """
     async with get_session() as session:
-        rows = (await session.execute(select(EvalRunRecordRow).order_by(desc(EvalRunRecordRow.created_at)))).scalars().all()
+        stmt = select(EvalRunRecordRow).order_by(desc(EvalRunRecordRow.created_at)).limit(limit)
+        rows = (await session.execute(stmt)).scalars().all()
     data = [_eval_item(r) for r in rows]
     return {"success": True, "total": len(data), "data": data}
 
