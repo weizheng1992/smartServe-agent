@@ -4,11 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { EffectCards } from './effect-cards';
 
 describe('EffectCards', () => {
-  it('无数据时诚实占位(— 与 ¥0)', () => {
+  it('无数据时三卡统一诚实占位(—,严禁 ¥0 冒充零优惠)', () => {
     render(<EffectCards effect={null} />);
     expect(screen.getByText('进行中活动').previousElementSibling).toHaveTextContent('—');
     expect(screen.getByText('累计核销单数').previousElementSibling).toHaveTextContent('—');
-    expect(screen.getByText('累计优惠金额').previousElementSibling).toHaveTextContent('¥0');
+    expect(screen.getByText('累计优惠金额').previousElementSibling).toHaveTextContent('—');
   });
 
   it('有数据时渲染真实统计值', () => {
