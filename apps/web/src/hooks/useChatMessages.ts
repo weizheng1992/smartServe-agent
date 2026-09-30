@@ -163,6 +163,16 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
         },
         onError: (err) => {
           console.error('[useChatMessages] SSE Stream error:', err);
+          // 流中断诚实降级(2026-09-30 夜审):AgentStreamClient 的 error 监听
+          // 已显式 close(),不会自动重连 —— 加载气泡必须就地转错误文案,
+          // 否则「打字中」永挂且无任何提示(POST 失败路径同款处理)。
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.isLoading && m.jobId === jobId
+                ? { role: 'assistant', content: '连接中断，本次回复未能完成，请重新发送或稍后重试。' }
+                : m,
+            ),
+          );
           setIsSubmitting(false);
           setCurrentStepText('');
           setActivePlan(null);
