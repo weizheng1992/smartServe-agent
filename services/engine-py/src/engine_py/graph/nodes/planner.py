@@ -568,6 +568,9 @@ async def planner_node(state: AgentState) -> dict:
                     "currentStepIndex": 0,
                 }
             elif addr_entities.get("addressAction") == "delete":
+                # persona-hardening 14(2026-09-30):本分支曾在此被下方 set_default
+                # 计划无条件覆盖(无 elif 隔开)—— 删地址实际派发 setDefaultAddress,
+                # 副作用与用户诉求相反。delete 回归本义,set_default 另立分支。
                 fast_plan = {
                     "goal": "Delete saved delivery addresses for customer",
                     "subtasks": [
@@ -583,6 +586,7 @@ async def planner_node(state: AgentState) -> dict:
                     ],
                     "currentStepIndex": 0,
                 }
+            elif addr_entities.get("addressAction") == "set_default":
                 target = (input_text or "").strip()
                 fast_plan = {
                     "goal": "Set default delivery address for customer",

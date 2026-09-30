@@ -128,6 +128,14 @@ def try_match_executor_fast_path(
         if args is not None:
             return {"toolName": "saveUserAddress", "args": args}
 
+    # persona-hardening 14(2026-09-30):delete/setDefault 必须先于 getUserAddresses
+    # 列表分支 —— 快轨描述的歧义子句(「If ambiguous, call getUserAddresses first」)
+    # 会让子串匹配抢跑,删地址被误配成只读列表。写工具名特异性高,先判。
+    if "deleteuseraddress" in desc_lower and "deleteUserAddress" in allowed_tools:
+        return {"toolName": "deleteUserAddress", "args": {}}
+    if "setdefaultaddress" in desc_lower and "setDefaultAddress" in allowed_tools:
+        return {"toolName": "setDefaultAddress", "args": {}}
+
     if (
         any(kw in desc_lower for kw in ("getuseraddresses", "地址簿列表", "收货地址列表"))
         and "getUserAddresses" in allowed_tools
@@ -152,10 +160,6 @@ def try_match_executor_fast_path(
     # "cart" 会命中下方购物车技能分支,必须先行。地址保真(2026-09-13 用户
     # 实报):深规划把顾客给的地址写进步骤描述,快路径提取为显式地址 ——
     # 严禁静默回落地址簿默认地址。
-    if "deleteuseraddress" in desc_lower and "deleteUserAddress" in allowed_tools:
-        return {"toolName": "deleteUserAddress", "args": {}}
-    if "setdefaultaddress" in desc_lower and "setDefaultAddress" in allowed_tools:
-        return {"toolName": "setDefaultAddress", "args": {}}
     if "checkoutcart" in desc_lower and "checkoutCart" in allowed_tools:
         # S6 守卫(2026-09-15):意图指向本轮推荐候选(第N个下单)但本轮无候选
         # —— 检索轮追问形输入未产出推荐,序数悬空,拿购物车遗留品结算是

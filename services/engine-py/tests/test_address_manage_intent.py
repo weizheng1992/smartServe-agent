@@ -290,14 +290,19 @@ class _FakeShortMemoryPlanner:
 
 
 class TestPlannerFastTrack:
-    def _plan(self, monkeypatch: pytest.MonkeyPatch, intents: list[dict]) -> dict:
+    def _plan(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        intents: list[dict],
+        input_text: str = "创建一个新的地址",
+    ) -> dict:
         monkeypatch.setattr(planner_mod, "ShortMemory", _FakeShortMemoryPlanner)
 
         def _no_llm(*args, **kwargs):
             raise AssertionError("address_manage 快轨不得消耗 LLM")
 
         monkeypatch.setattr(planner_mod, "planner_llm", _no_llm)
-        state = {"intents": intents, "input": "创建一个新的地址", "short_memory": []}
+        state = {"intents": intents, "input": input_text, "short_memory": []}
         return asyncio.run(planner_mod.planner_node(state))
 
     def test_save_variant_plans_save_user_address(self, monkeypatch):
@@ -341,6 +346,91 @@ class TestPlannerFastTrack:
         subtasks = result["task_plan"]["subtasks"]
         assert len(subtasks) == 1
         assert "getUserAddresses" in subtasks[0]["description"]
+
+    def test_delete_variant_plans_delete_user_address(self, monkeypatch):
+        """persona-hardening 14:delete 分支曾被 set_default 计划无条件覆盖 ——
+        删地址实际派发 setDefaultAddress(错工具且副作用相反)。钉死 delete
+        派发 deleteUserAddress,描述不得夹带 setDefault。"""
+        result = self._plan(
+            monkeypatch,
+            [
+                {
+                    "intent": "address_manage",
+                    "confidence": 0.9,
+                    "type": "primary",
+                    "entities": {"addressAction": "delete"},
+                }
+            ],
+            input_text="帮我删掉王五的那个收货地址",
+        )
+        subtasks = result["task_plan"]["subtasks"]
+        assert len(subtasks) == 1
+        assert "deleteUserAddress" in subtasks[0]["description"]
+        assert "setDefaultAddress" not in subtasks[0]["description"]
+
+    def test_set_default_variant_plans_set_default_address(self, monkeypatch):
+        """set_default 档此前无分支(fast_plan=None 落深规划,快轨缺席),
+        补分支后钉死零 LLM 直达。"""
+        result = self._plan(
+            monkeypatch,
+            [
+                {
+                    "intent": "address_manage",
+                    "confidence": 0.9,
+                    "type": "primary",
+                    "entities": {"addressAction": "set_default"},
+                }
+            ],
+            input_text="把王五的地址设为默认地址",
+        )
+        subtasks = result["task_plan"]["subtasks"]
+        assert len(subtasks) == 1
+        assert "setDefaultAddress" in subtasks[0]["description"]
+        assert "王五" in subtasks[0]["description"], "receiverName 线索必须随描述下行"
+
+    def test_delete_and_set_default_descs_match_executor_fast_path(self, monkeypatch):
+        """端到端缝(写路死教训):两档子任务描述必须被执行器确定性快路径
+        直配成对应真工具调用。"""
+        from engine_py.graph.nodes.executor_fast_path import try_match_executor_fast_path
+        from engine_py.graph.nodes.step_execution_engine import _base_executor_tools
+
+        delete_result = self._plan(
+            monkeypatch,
+            [
+                {
+                    "intent": "address_manage",
+                    "confidence": 0.9,
+                    "type": "primary",
+                    "entities": {"addressAction": "delete"},
+                }
+            ],
+            input_text="帮我删掉王五的那个收货地址",
+        )
+        matched = try_match_executor_fast_path(
+            delete_result["task_plan"]["subtasks"][0]["description"],
+            "帮我删掉王五的那个收货地址",
+            list(_base_executor_tools),
+        )
+        assert matched is not None and matched["toolName"] == "deleteUserAddress"
+
+        default_result = self._plan(
+            monkeypatch,
+            [
+                {
+                    "intent": "address_manage",
+                    "confidence": 0.9,
+                    "type": "primary",
+                    "entities": {"addressAction": "set_default"},
+                }
+            ],
+            input_text="把王五的地址设为默认地址",
+        )
+        matched = try_match_executor_fast_path(
+            default_result["task_plan"]["subtasks"][0]["description"],
+            "把王五的地址设为默认地址",
+            list(_base_executor_tools),
+        )
+        assert matched is not None and matched["toolName"] == "setDefaultAddress"
 
     def test_compound_at_planner_goes_deep_planning_not_single_fast_track(self, monkeypatch):
         """评审缺陷修复:A1 复合形(address_manage+cart_manage)到 planner 不得
