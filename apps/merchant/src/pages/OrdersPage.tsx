@@ -201,7 +201,8 @@ export default function OrdersPage() {
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-bold text-slate-900 truncate">{item.title}</div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
-                          规格: {item.skuTitle || item.skuCode || '标准规格'}
+                          {/* 回退顺序与 OrderDetailPage 同型:specSummary 优先,否则一律「标准规格」 */}
+                          规格: {item.specSummary || item.skuTitle || item.skuCode || '标准规格'}
                         </div>
                         <div className="text-xs font-semibold text-slate-700 mt-1">
                           ¥{Number(item.price).toFixed(2)} × {item.quantity} 件

@@ -46,7 +46,12 @@ export default function StorefrontPage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(
-              list.slice(0, 60).map((p: any) => ({ productId: p.product_id || p.id, price: Number(p.price) || 0 })),
+              // 商品 DTO 只产 camelCase productId(merchant_domain._spu_to_product):
+              // 曾发 p.product_id || p.id 双双 undefined,网关 str(None)="None",
+              // 活动打分对鬼 id 永远落空,促销价回填整条死路(全树审查 2026-09-30)
+              list
+                .slice(0, 60)
+                .map((p: any) => ({ productId: p.productId, price: Number(p.price) || 0 })),
             ),
           });
           const promoJson = await promoRes.json();
