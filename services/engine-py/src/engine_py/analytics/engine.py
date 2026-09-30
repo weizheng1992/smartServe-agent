@@ -260,7 +260,9 @@ class MetricQueryEngine:
             return self._compile_special_family(intent, business_id)
 
         sql = (
-            'SELECT s.id::text AS "productId", s.title AS "name", s.category, '
+            # title 必须先于 id 出列:条形图标签/速览榜首/表格首列全部取首个文本列,
+            # s.id 是商户库 UUID,首列放它 = 排行卡全变 UUID(实弹 2026-09-30)
+            'SELECT s.title AS "name", s.id::text AS "productId", s.category, '
             "COALESCE(SUM(k.stock), 0)::int AS stock, "
             f"{metric_expr} AS \"metricScore\" "
             "FROM merchant_spus s "

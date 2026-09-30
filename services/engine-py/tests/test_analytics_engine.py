@@ -162,6 +162,19 @@ class TestCompile:
             assert table in card["tables"]
 
 
+class TestLabelFirstColumn:
+    """销量族模板人话标签契约(实弹 2026-09-30:「本月销量 Top10」的条形图标签、
+    速览「榜首 X」、表格首列全部取首个文本列,而模板把 productId(s.id,商户库
+    UUID)放首列 —— 用户看到的是 UUID 排行。title 必须先于 id 出列。"""
+
+    @pytest.mark.parametrize("metric", ["gmv", "volume", "gross_profit", "margin_rate", "stock_risk"])
+    def test_sales_family_name_precedes_product_id(self, engine, metric):
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        compiled = engine.compile(StructuredQueryIntent(metric=metric))
+        assert compiled.sql.index('s.title AS "name"') < compiled.sql.index('s.id::text AS "productId"')
+
+
 class TestExecute:
     def test_honest_empty_and_error_contract(self, engine, monkeypatch):
         """execute 的 rows 走真实 DB;此处只验契约形状:QueryResult 必带口径注记。"""
