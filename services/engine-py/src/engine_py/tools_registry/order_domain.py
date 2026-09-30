@@ -38,6 +38,23 @@ def _sf_tracking() -> str:
     return f"SF{random.randint(1_000_000_000, 9_999_999_999)}"
 
 
+def _refund_window_lapse_days(estimated_delivery: str, now: _dt.datetime | None = None) -> int:
+    """送达时效已过天数 —— 钟口径一律 naive-UTC,与库钟 server_default now() 同源
+    (b195f39 / 36cfd4f 同一惯例)。旧实现 naive 送达时间直对本地 datetime.now(),
+    UTC+8 下时效凭空多算 8h,临期订单被误拦。aware 输入(商户 SPI ISO 串)折算
+    UTC 再剥 naive;naive 输入按 DB 钟的 UTC 语义直读;解析失败按刚送达处理
+    (fail-open 0 天,维持 wayfinder 004 前口径)。``now`` 可注入供测试冻结时钟。
+    """
+    now_utc = now or _dt.datetime.now(_dt.UTC).replace(tzinfo=None)
+    try:
+        delivery_date = _dt.datetime.fromisoformat(str(estimated_delivery))
+    except ValueError:
+        return 0
+    if delivery_date.tzinfo is not None:
+        delivery_date = delivery_date.astimezone(_dt.UTC).replace(tzinfo=None)
+    return abs((now_utc - delivery_date).days)
+
+
 # ---------------------------------------------------------------------------
 # 商户门户独立库(agent_merchant)只读直连 —— 商户真单的事实源。
 # 商城下单只写 merchant_orders;聊天查单若仅看 engine 本地 orders 表,
@@ -550,19 +567,11 @@ class OrderDomainService:
                 "status": "already_refunded",
             }
 
-        # SOP Policy Guardrail 物理时效比对
+        # SOP Policy Guardrail 物理时效比对(naive-UTC 钟口径,见 _refund_window_lapse_days)
         diff_days = 0
         estimated_delivery = order.get("estimatedDelivery")
         if estimated_delivery:
-            try:
-                delivery_date = _dt.datetime.fromisoformat(str(estimated_delivery))
-            except ValueError:
-                delivery_date = _dt.datetime.now()
-            # 送达时间可能带时区偏移(PG timestamptz 落 text 列 / 商户 SPI ISO 串),
-            # 与 naive 的 datetime.now() 直接相减会 TypeError 炸掉整次退款(wayfinder 004)
-            if delivery_date.tzinfo is not None:
-                delivery_date = delivery_date.astimezone().replace(tzinfo=None)
-            diff_days = abs((_dt.datetime.now() - delivery_date).days)
+            diff_days = _refund_window_lapse_days(estimated_delivery)
             if diff_days > return_window_days:
                 return {
                     "error": (

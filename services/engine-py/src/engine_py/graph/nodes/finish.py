@@ -264,10 +264,10 @@ async def finish_node(state: AgentState) -> dict:
             from engine_py.skills.fallback_dispatcher import deterministic_fallback_answer
 
             fallback_output = await deterministic_fallback_answer(
-                state.get("input") or state.get("input_text") or "",
+                input_text,
                 state.get("thread_id"),
-                state.get("userId") or state.get("user_id") or "",
-                state.get("businessId") or "aurora",
+                state.get("user_id") or "",
+                tenant_id,  # 函数顶部 _resolve_tenant_id 的现成答案(business_config → 库查线程)
             )
         except Exception as fb_err:
             print(f"[Finish] 确定性兜底失败: {fb_err}")

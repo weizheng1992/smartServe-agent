@@ -372,7 +372,7 @@ async def run_agent(job: AgentJobInput) -> dict:
             from .skills.fallback_dispatcher import deterministic_fallback_answer
 
             fallback_output = await deterministic_fallback_answer(
-                input_message, thread_id, user_id, job.businessId
+                input_message, thread_id, user_id, job.business_id
             )
             if fallback_output:
                 result = {**result, "output": fallback_output}
@@ -390,7 +390,7 @@ async def run_agent(job: AgentJobInput) -> dict:
             from .skills.fallback_dispatcher import deterministic_fallback_answer
 
             fallback_output = await deterministic_fallback_answer(
-                input_message, thread_id, user_id, job.businessId
+                input_message, thread_id, user_id, job.business_id
             )
             if fallback_output:
                 result = {**result, "output": fallback_output}
