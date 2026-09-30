@@ -5,40 +5,7 @@ import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { LogisticsModal } from '../components/orders/LogisticsModal';
 import { OrderDetailModal } from '../components/orders/OrderDetailModal';
 import { useCurrentUser } from '../context/UserContext';
-
-function parseAddress(addr: any) {
-  if (!addr) {
-    return {
-      recipientName: '张伟',
-      phone: '13800138000',
-      fullAddress: '北京市海淀区中关村南大街1号院8号楼1201室',
-    };
-  }
-  if (typeof addr === 'string') {
-    try {
-      const parsed = JSON.parse(addr);
-      if (typeof parsed === 'object' && parsed !== null) {
-        return {
-          recipientName: parsed.recipientName || '张伟',
-          phone: parsed.phone || '13800138000',
-          fullAddress: parsed.fullAddress || addr,
-        };
-      }
-    } catch {
-      // plain text string
-    }
-    return {
-      recipientName: '张伟',
-      phone: '13800138000',
-      fullAddress: addr,
-    };
-  }
-  return {
-    recipientName: addr.recipientName || '张伟',
-    phone: addr.phone || '13800138000',
-    fullAddress: addr.fullAddress || '北京市海淀区中关村南大街1号院8号楼1201室',
-  };
-}
+import { parseShippingAddress } from '../lib/shippingAddress';
 
 export default function OrdersPage() {
   const { user } = useCurrentUser();
@@ -214,7 +181,7 @@ export default function OrdersPage() {
 
                 {/* 底部收货人与操作栏 */}
                 {(() => {
-                  const addrInfo = parseAddress(order.shippingAddress);
+                  const addrInfo = parseShippingAddress(order.shippingAddress);
                   return (
                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                       <div className="space-y-0.5">

@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { ThirdPartyOrder } from 'types';
 import { Badge, Button, Dialog, DialogContent, DialogHeader, DialogTitle } from 'ui';
+import { parseShippingAddress } from '../../lib/shippingAddress';
 
 interface OrderDetailModalProps {
   isOpen: boolean;
@@ -8,40 +9,6 @@ interface OrderDetailModalProps {
   order: ThirdPartyOrder | null;
   onOpenLogistics: (order: ThirdPartyOrder) => void;
   onOpenChatWithOrder: (orderId: string, initialPrompt?: string) => void;
-}
-
-function parseAddress(addr: any) {
-  if (!addr) {
-    return {
-      recipientName: '张伟',
-      phone: '13800138000',
-      fullAddress: '北京市海淀区中关村南大街1号院8号楼1201室',
-    };
-  }
-  if (typeof addr === 'string') {
-    try {
-      const parsed = JSON.parse(addr);
-      if (typeof parsed === 'object' && parsed !== null) {
-        return {
-          recipientName: parsed.recipientName || '张伟',
-          phone: parsed.phone || '13800138000',
-          fullAddress: parsed.fullAddress || addr,
-        };
-      }
-    } catch {
-      // plain text string
-    }
-    return {
-      recipientName: '张伟',
-      phone: '13800138000',
-      fullAddress: addr,
-    };
-  }
-  return {
-    recipientName: addr.recipientName || '张伟',
-    phone: addr.phone || '13800138000',
-    fullAddress: addr.fullAddress || '北京市海淀区中关村南大街1号院8号楼1201室',
-  };
 }
 
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
@@ -159,7 +126,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </div>
 
             {(() => {
-              const addrInfo = parseAddress(order.shippingAddress);
+              const addrInfo = parseShippingAddress(order.shippingAddress);
               return (
                 <div className="text-xs text-slate-700 space-y-1">
                   <div>

@@ -2,46 +2,13 @@ import type React from 'react';
 import { useState } from 'react';
 import type { ThirdPartyOrder } from 'types';
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from 'ui';
+import { parseShippingAddress } from '../../lib/shippingAddress';
 
 interface LogisticsModalProps {
   isOpen: boolean;
   onClose: () => void;
   order: ThirdPartyOrder | null;
   onOpenChatWithOrder: (orderId: string) => void;
-}
-
-function parseAddress(addr: any) {
-  if (!addr) {
-    return {
-      recipientName: '张伟',
-      phone: '13800138000',
-      fullAddress: '北京市海淀区中关村南大街1号院8号楼1201室',
-    };
-  }
-  if (typeof addr === 'string') {
-    try {
-      const parsed = JSON.parse(addr);
-      if (typeof parsed === 'object' && parsed !== null) {
-        return {
-          recipientName: parsed.recipientName || '张伟',
-          phone: parsed.phone || '13800138000',
-          fullAddress: parsed.fullAddress || addr,
-        };
-      }
-    } catch {
-      // plain text string
-    }
-    return {
-      recipientName: '张伟',
-      phone: '13800138000',
-      fullAddress: addr,
-    };
-  }
-  return {
-    recipientName: addr.recipientName || '张伟',
-    phone: addr.phone || '13800138000',
-    fullAddress: addr.fullAddress || '北京市海淀区中关村南大街1号院8号楼1201室',
-  };
 }
 
 export const LogisticsModal: React.FC<LogisticsModalProps> = ({ isOpen, onClose, order, onOpenChatWithOrder }) => {
@@ -100,7 +67,7 @@ export const LogisticsModal: React.FC<LogisticsModalProps> = ({ isOpen, onClose,
             <div className="text-right">
               <span>目的地：</span>
               <span className="text-slate-300 ml-1">
-                {parseAddress(order.shippingAddress).fullAddress.substring(0, 10)}
+                {parseShippingAddress(order.shippingAddress).fullAddress.substring(0, 10)}
                 ...
               </span>
             </div>

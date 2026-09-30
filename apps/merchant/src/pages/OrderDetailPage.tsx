@@ -4,40 +4,7 @@ import { useParams } from 'react-router';
 import type { ThirdPartyOrder } from 'types';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { LogisticsModal } from '../components/orders/LogisticsModal';
-
-function parseAddress(addr: any) {
-  if (!addr) {
-    return {
-      recipientName: '张伟',
-      phone: '13800138000',
-      fullAddress: '北京市海淀区中关村南大街1号院8号楼1201室',
-    };
-  }
-  if (typeof addr === 'string') {
-    try {
-      const parsed = JSON.parse(addr);
-      if (typeof parsed === 'object' && parsed !== null) {
-        return {
-          recipientName: parsed.recipientName || '张伟',
-          phone: parsed.phone || '13800138000',
-          fullAddress: parsed.fullAddress || addr,
-        };
-      }
-    } catch {
-      // plain text string
-    }
-    return {
-      recipientName: '张伟',
-      phone: '13800138000',
-      fullAddress: addr,
-    };
-  }
-  return {
-    recipientName: addr.recipientName || '张伟',
-    phone: addr.phone || '13800138000',
-    fullAddress: addr.fullAddress || '北京市海淀区中关村南大街1号院8号楼1201室',
-  };
-}
+import { parseShippingAddress } from '../lib/shippingAddress';
 
 export default function SingleOrderDetailPage() {
   const params = useParams();
@@ -167,7 +134,7 @@ export default function SingleOrderDetailPage() {
 
         {/* 配送信息 */}
         {(() => {
-          const addrInfo = parseAddress(order.shippingAddress);
+          const addrInfo = parseShippingAddress(order.shippingAddress);
           return (
             <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xs space-y-3">
               <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">📍 配送收货信息</h2>
