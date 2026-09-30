@@ -10,6 +10,11 @@
 6. CardSynthesizer 卡片合成
 7. 终态 `${jobId}:result` 事件收口发布
 
+收口(Settle,内部缝):4/6/7 及坏例信号入池、订单宣称反幻觉闸、记忆回写、
+任务记忆落库,全部内聚在私有缝 `_settle_turn` —— 图后持久化的唯一实现,
+顺序即契约(ADR-0007:旧 Temporal activity 手抄的第二份收口已随路线退役,
+漂移类 bug 失去存在条件)。
+
 TODO(Phase 1b):token 累计已由 llm/telemetry.py 落盘 llm_call_logs 并聚合
 (2026-09-05 起,total_tokens 为本次运行真实 usage 总和);熔断/退避/超时已由
 llm/resilience.py 承担(2026-09-07,wayfinder 003)。
@@ -181,6 +186,213 @@ async def _report_langsmith_feedback(is_success: bool, comment: str) -> None:
                 )
     except Exception as telemetry_err:
         print(f"[LangSmith Telemetry] Error uploading feedback to LangSmith: {telemetry_err}")
+
+
+async def _settle_turn(
+    result: AgentState,
+    *,
+    job: AgentJobInput,
+    business_id: str,
+    llm_breaker_fired: bool,
+    graph_error_fired: bool,
+    elapsed_latency_ms: float,
+    saved_guide_context: dict | None,
+    saved_cart_context: dict | None,
+    saved_order_context: dict | None,
+) -> dict:
+    """收口(内部缝):图终态 → 交付调用方之间的唯一持久化段,顺序即契约。
+
+    遥测落盘(token 聚合 + session_metrics + 熔断/宣称坏例信号)→ 订单宣称
+    反幻觉闸 → 富媒体卡片合成 → 助手回复回写三路记忆 → 任务记忆落库 →
+    `${jobId}:result` 事件发布。各段自吞错不阻断交付;返回值即调用方交付的
+    final_result。身份实参(business_id 为线程行自愈后的权威租户)由 run_agent
+    显式递入 —— 降级臂结果里没有 business_config,收口不得依赖图终态携带租户。
+    """
+    thread_id = job.thread_id
+    user_id = job.user_id
+    input_message = job.message
+    job_id = job.job_id
+    short_memory = ShortMemory(thread_id, 10, business_id)
+    task_memory = TaskMemory(thread_id)
+    long_memory = LongMemory(user_id, business_id)
+    episodic_memory = EpisodicMemory(user_id, business_id)
+
+    # 🪙 SaaS 遥测:算力消耗 / 成本换算 / 图决策深度 / 解挂状态
+    try:
+        # 等待本运行派发的 llm_call_logs 落盘任务收口,再取真实 usage 累计
+        await drain_llm_call_writes(thread_id)
+        total_tokens = take_thread_token_total(thread_id)
+        cost_usd = (total_tokens / 1_000_000) * 0.15
+        node_transitions = result.get("loop_count") or 3
+
+        # 🛡️ 图级熔断落盘:10 步/3 错触发时 resolution_status = circuit_breaker(终态优先于子任务状态)
+        global_transitions = result.get("global_transitions_count") or 0
+        tool_errors = result.get("tool_errors_count") or 0
+        breaker_fired = (
+            global_transitions >= CIRCUIT_BREAKER_TRANSITIONS or tool_errors >= CIRCUIT_BREAKER_TOOL_ERRORS
+        )
+
+        # 🛡️ LLM 熔断落盘(resilience.py 全局熔断器拦截):job 级终态,优先于图级判定
+        if llm_breaker_fired:
+            resolution_status = "llm_circuit_breaker"
+            is_success = False
+            feedback_comment = "Upstream LLM circuit breaker open; job degraded with apology fallback."
+        elif graph_error_fired:
+            resolution_status = "graph_error_degraded"
+            is_success = False
+            feedback_comment = "Graph execution raised; job degraded with apology fallback."
+        else:
+            resolution_status = "circuit_breaker" if breaker_fired else "resolved_auto"
+            is_success = not breaker_fired
+            feedback_comment = (
+                "Circuit breaker tripped: hard degradation with apology fallback."
+                if breaker_fired
+                else "All planned subtasks completed successfully."
+            )
+
+        plan = result.get("task_plan") or {}
+        subtasks = plan.get("subtasks") or []
+        if subtasks and not breaker_fired:
+            has_pending = any((st.get("result") or {}).get("waitingForApproval") for st in subtasks)
+            has_cancelled = any((st.get("result") or {}).get("cancelledByUser") for st in subtasks)
+            has_expired = any((st.get("result") or {}).get("expiredByTimeout") for st in subtasks)
+            has_rejected = any(
+                st.get("status") == "failed" and (st.get("result") or {}).get("rejectedByAdmin")
+                for st in subtasks
+            )
+            has_failed = any(st.get("status") == "failed" for st in subtasks)
+
+            if has_pending:
+                resolution_status = "waiting_approval"
+            elif has_cancelled:
+                resolution_status = "cancelled"
+            elif has_expired:
+                resolution_status = "expired"
+            elif has_rejected:
+                resolution_status = "rejected"
+            elif has_failed:
+                resolution_status = "failed"
+                is_success = False
+                feedback_comment = "Some planned subtasks failed validation or execution."
+
+        if os.environ.get("LANGCHAIN_API_KEY"):
+            asyncio.create_task(_report_langsmith_feedback(is_success, feedback_comment))
+
+        async with get_session() as session:
+            session.add(
+                SessionMetric(
+                    business_id=business_id,
+                    thread_id=thread_id,
+                    total_tokens=total_tokens,
+                    calculated_cost_usd=cost_usd,
+                    node_transitions_count=node_transitions,
+                    global_transitions_count=global_transitions,
+                    tool_errors_count=tool_errors,
+                    resolution_status=resolution_status,
+                    avg_latency_ms=elapsed_latency_ms,
+                )
+            )
+            await session.commit()
+
+        # 📥 熔断信号入坏例池(wayfinder 006):被熔断打断的会话以会话为评审
+        # 单位入池(先验 suspected_defect,人审定性,见 badcase/pool.py)。
+        # 挂点定案:收口处而非状态机翻转处 —— 翻转可能发生在无会话归属的
+        # 后台调用,而池以会话为评审单位,与 session_metrics 熔断落盘(003
+        # 数据源)同位;dedupe=True 使 OPEN 窗口内同一会话多次回合只入池一次;
+        # 入池失败静默降级不阻断主流程(内建)。
+        if llm_breaker_fired or graph_error_fired or breaker_fired:
+            await record_badcase_signal(
+                SOURCE_CIRCUIT_BREAKER,
+                conversation_ref=f"thread:{thread_id}",
+                business_id=business_id,
+                dedupe=True,
+                note=(
+                    "上游 LLM 熔断(OPEN)拦截,会话降级道歉回复"
+                    if llm_breaker_fired
+                    else (
+                        "图执行未捕获异常,降级道歉回复"
+                        if graph_error_fired
+                        else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
+                    )
+                ),
+            )
+
+        # 🔍 宣称与落库不符信号入池(intent-arbitration 02):终稿宣称已退款/
+        # 已提交审批 × 审批表整会话零记录 → 候选行(先验 suspected_defect)。
+        # ORD-77777 编造审批一类:幽灵单拦截挡住了开单,终稿幻觉的宣称仍要
+        # 能被捕到;入池静默降级不阻断收口。
+        await record_claim_mismatch_if_any(
+            thread_id,
+            business_id,
+            str(result.get("output") or ""),
+        )
+    except Exception as metrics_err:
+        print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
+
+    # 🛡️ 订单宣称反幻觉硬闸(2026-09-13 用户实报):复合流被判单导购终局后
+    # LLM 叙事宣称「已成功结算下单/订单号 2477」—— 单号实为上轮幻觉残留在
+    # 历史里的假号(幻觉自增殖)。收口确定性校验:宣称单号必须来自本轮
+    # checkoutCart 真实结果,否则剥离宣称+诚实说明,幻觉不进对话历史。
+    try:
+        from .graph.nodes.output_guard import sanitize_order_claims
+
+        result["output"] = await sanitize_order_claims(
+            str(result.get("output") or ""), result.get("task_plan")
+        )
+    except Exception as guard_err:
+        print(f"[runAgent] 订单宣称校验失败(放行原文,不阻断): {guard_err!r}")
+
+    # 🗂️ 富媒体卡片合成(ADR-0001:场景化快捷回复;域卡片优先作基座,
+    # 场景组统一追加;购物轮实查真货架品类喂 chips,不可达诚实空)
+    shelf_categories = await CardSynthesizer.fetch_shelf_categories(result.get("intents"), thread_id)
+    final_cards = CardSynthesizer.synthesize_cards(
+        {
+            "taskPlan": result.get("task_plan"),
+            "intents": result.get("intents"),
+            "damageAssessment": result.get("damage_assessment"),
+            "existingCards": result.get("cards") or [],
+            "shelfCategories": shelf_categories,
+        }
+    )
+
+    # 助手回复回写三路记忆(回复已产出,持久化失败不阻断交付)
+    if result.get("output"):
+        try:
+            await short_memory.add_message("assistant", result["output"], final_cards)
+            await episodic_memory.add_event(
+                f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
+            )
+            await long_memory.extract_and_store_fact(result["output"], input_message)
+        except Exception as mem_err:
+            print(f"[runAgent] 回复已交付,记忆回写失败(不阻断): {mem_err!r}")
+
+    # 持久化任务记忆与领域上下文
+    task_plan_to_save = result.get("task_plan") or {
+        "goal": "Multi-turn conversational assistance",
+        "subtasks": [],
+        "currentStepIndex": 0,
+    }
+    try:
+        await task_memory.save_task_state(
+            {
+                **task_plan_to_save,
+                "guideContext": result.get("guide_context") or saved_guide_context,
+                "cartContext": result.get("cart_context") or saved_cart_context,
+                "orderContext": result.get("order_context") or saved_order_context,
+            }
+        )
+    except Exception as tm_err:
+        print(f"[runAgent] 任务状态落库失败(不阻断): {tm_err!r}")
+
+    final_result = {**to_ts_dict(result), "cards": final_cards}
+
+    if job_id:
+        try:
+            await publish_agent_event(job_id, "result", final_result)
+        except Exception as pub_err:
+            print(f"[runAgent] 结果事件发布失败(sync 返回值仍完整): {pub_err!r}")
+
+    return final_result
 
 
 async def run_agent(job: AgentJobInput) -> dict:
@@ -398,179 +610,17 @@ async def run_agent(job: AgentJobInput) -> dict:
             print(f"[runAgent] 确定性兜底失败,保留道歉罐头: {fb_err}")
     elapsed_latency_ms = (time.time() - start_time) * 1000
 
-    # 🪙 SaaS 遥测:算力消耗 / 成本换算 / 图决策深度 / 解挂状态
-    try:
-        # 等待本运行派发的 llm_call_logs 落盘任务收口,再取真实 usage 累计
-        await drain_llm_call_writes(thread_id)
-        total_tokens = take_thread_token_total(thread_id)
-        cost_usd = (total_tokens / 1_000_000) * 0.15
-        node_transitions = result.get("loop_count") or 3
-
-        # 🛡️ 图级熔断落盘:10 步/3 错触发时 resolution_status = circuit_breaker(终态优先于子任务状态)
-        global_transitions = result.get("global_transitions_count") or 0
-        tool_errors = result.get("tool_errors_count") or 0
-        breaker_fired = (
-            global_transitions >= CIRCUIT_BREAKER_TRANSITIONS or tool_errors >= CIRCUIT_BREAKER_TOOL_ERRORS
-        )
-
-        # 🛡️ LLM 熔断落盘(resilience.py 全局熔断器拦截):job 级终态,优先于图级判定
-        if llm_breaker_fired:
-            resolution_status = "llm_circuit_breaker"
-            is_success = False
-            feedback_comment = "Upstream LLM circuit breaker open; job degraded with apology fallback."
-        elif graph_error_fired:
-            resolution_status = "graph_error_degraded"
-            is_success = False
-            feedback_comment = "Graph execution raised; job degraded with apology fallback."
-        else:
-            resolution_status = "circuit_breaker" if breaker_fired else "resolved_auto"
-            is_success = not breaker_fired
-            feedback_comment = (
-                "Circuit breaker tripped: hard degradation with apology fallback."
-                if breaker_fired
-                else "All planned subtasks completed successfully."
-            )
-
-        plan = result.get("task_plan") or {}
-        subtasks = plan.get("subtasks") or []
-        if subtasks and not breaker_fired:
-            has_pending = any((st.get("result") or {}).get("waitingForApproval") for st in subtasks)
-            has_cancelled = any((st.get("result") or {}).get("cancelledByUser") for st in subtasks)
-            has_expired = any((st.get("result") or {}).get("expiredByTimeout") for st in subtasks)
-            has_rejected = any(
-                st.get("status") == "failed" and (st.get("result") or {}).get("rejectedByAdmin")
-                for st in subtasks
-            )
-            has_failed = any(st.get("status") == "failed" for st in subtasks)
-
-            if has_pending:
-                resolution_status = "waiting_approval"
-            elif has_cancelled:
-                resolution_status = "cancelled"
-            elif has_expired:
-                resolution_status = "expired"
-            elif has_rejected:
-                resolution_status = "rejected"
-            elif has_failed:
-                resolution_status = "failed"
-                is_success = False
-                feedback_comment = "Some planned subtasks failed validation or execution."
-
-        if os.environ.get("LANGCHAIN_API_KEY"):
-            asyncio.create_task(_report_langsmith_feedback(is_success, feedback_comment))
-
-        async with get_session() as session:
-            session.add(
-                SessionMetric(
-                    business_id=dynamic_config["businessId"],
-                    thread_id=thread_id,
-                    total_tokens=total_tokens,
-                    calculated_cost_usd=cost_usd,
-                    node_transitions_count=node_transitions,
-                    global_transitions_count=global_transitions,
-                    tool_errors_count=tool_errors,
-                    resolution_status=resolution_status,
-                    avg_latency_ms=elapsed_latency_ms,
-                )
-            )
-            await session.commit()
-
-        # 📥 熔断信号入坏例池(wayfinder 006):被熔断打断的会话以会话为评审
-        # 单位入池(先验 suspected_defect,人审定性,见 badcase/pool.py)。
-        # 挂点定案:run_agent 会话收口处而非状态机翻转处 —— 翻转可能发生在
-        # 无会话归属的后台调用,而池以会话为评审单位,与 session_metrics
-        # 熔断落盘(003 数据源)同位;dedupe=True 使 OPEN 窗口内同一会话多次
-        # 回合只入池一次;入池失败静默降级不阻断主流程(内建)。
-        if llm_breaker_fired or graph_error_fired or breaker_fired:
-            await record_badcase_signal(
-                SOURCE_CIRCUIT_BREAKER,
-                conversation_ref=f"thread:{thread_id}",
-                business_id=dynamic_config["businessId"],
-                dedupe=True,
-                note=(
-                    "上游 LLM 熔断(OPEN)拦截,会话降级道歉回复"
-                    if llm_breaker_fired
-                    else (
-                        "图执行未捕获异常,降级道歉回复"
-                        if graph_error_fired
-                        else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
-                    )
-                ),
-            )
-
-        # 🔍 宣称与落库不符信号入池(intent-arbitration 02):终稿宣称已退款/
-        # 已提交审批 × 审批表整会话零记录 → 候选行(先验 suspected_defect)。
-        # ORD-77777 编造审批一类:幽灵单拦截挡住了开单,终稿幻觉的宣称仍要
-        # 能被捕到;入池静默降级不阻断收口。
-        await record_claim_mismatch_if_any(
-            thread_id,
-            dynamic_config["businessId"],
-            str(result.get("output") or ""),
-        )
-    except Exception as metrics_err:
-        print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
-
-    # 🛡️ 订单宣称反幻觉硬闸(2026-09-13 用户实报):复合流被判单导购终局后
-    # LLM 叙事宣称「已成功结算下单/订单号 2477」—— 单号实为上轮幻觉残留在
-    # 历史里的假号(幻觉自增殖)。收口确定性校验:宣称单号必须来自本轮
-    # checkoutCart 真实结果,否则剥离宣称+诚实说明,幻觉不进对话历史。
-    try:
-        from .graph.nodes.output_guard import sanitize_order_claims
-
-        result["output"] = await sanitize_order_claims(
-            str(result.get("output") or ""), result.get("task_plan")
-        )
-    except Exception as guard_err:
-        print(f"[runAgent] 订单宣称校验失败(放行原文,不阻断): {guard_err!r}")
-
-    # 🗂️ 富媒体卡片合成(ADR-0001:场景化快捷回复;域卡片优先作基座,
-    # 场景组统一追加;购物轮实查真货架品类喂 chips,不可达诚实空)
-    shelf_categories = await CardSynthesizer.fetch_shelf_categories(result.get("intents"), thread_id)
-    final_cards = CardSynthesizer.synthesize_cards(
-        {
-            "taskPlan": result.get("task_plan"),
-            "intents": result.get("intents"),
-            "damageAssessment": result.get("damage_assessment"),
-            "existingCards": result.get("cards") or [],
-            "shelfCategories": shelf_categories,
-        }
+    # 收口(内部缝,ADR-0007):图后持久化段整体内聚在 _settle_turn —— 遥测/
+    # 坏例/反幻觉闸/卡片/记忆/任务记忆/结果事件,顺序即契约。身份实参显式
+    # 递入:降级臂结果没有 business_config,收口不得依赖图终态携带租户。
+    return await _settle_turn(
+        result,
+        job=job,
+        business_id=business_id,
+        llm_breaker_fired=llm_breaker_fired,
+        graph_error_fired=graph_error_fired,
+        elapsed_latency_ms=elapsed_latency_ms,
+        saved_guide_context=saved_guide_context,
+        saved_cart_context=saved_cart_context,
+        saved_order_context=saved_order_context,
     )
-
-    # 助手回复回写三路记忆(回复已产出,持久化失败不阻断交付)
-    if result.get("output"):
-        try:
-            await short_memory.add_message("assistant", result["output"], final_cards)
-            await episodic_memory.add_event(
-                f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
-            )
-            await long_memory.extract_and_store_fact(result["output"], input_message)
-        except Exception as mem_err:
-            print(f"[runAgent] 回复已交付,记忆回写失败(不阻断): {mem_err!r}")
-
-    # 持久化任务记忆与领域上下文
-    task_plan_to_save = result.get("task_plan") or {
-        "goal": "Multi-turn conversational assistance",
-        "subtasks": [],
-        "currentStepIndex": 0,
-    }
-    try:
-        await task_memory.save_task_state(
-            {
-                **task_plan_to_save,
-                "guideContext": result.get("guide_context") or saved_guide_context,
-                "cartContext": result.get("cart_context") or saved_cart_context,
-                "orderContext": result.get("order_context") or saved_order_context,
-            }
-        )
-    except Exception as tm_err:
-        print(f"[runAgent] 任务状态落库失败(不阻断): {tm_err!r}")
-
-    final_result = {**to_ts_dict(result), "cards": final_cards}
-
-    if job_id:
-        try:
-            await publish_agent_event(job_id, "result", final_result)
-        except Exception as pub_err:
-            print(f"[runAgent] 结果事件发布失败(sync 返回值仍完整): {pub_err!r}")
-
-    return final_result
