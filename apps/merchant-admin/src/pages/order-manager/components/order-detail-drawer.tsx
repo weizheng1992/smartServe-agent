@@ -67,9 +67,11 @@ export function OrderDetailDrawer() {
                   <div className="mt-0.5 flex items-center justify-between text-zinc-500">
                     <span>{it.specSummary || '—'}</span>
                     <span>
-                      ¥{(it.price ?? 0).toFixed(2)} × {it.quantity}
+                      {/* price 可空(DB 无价,DTO price: number | null):缺值诚实「—」,
+                          ?? 0 会把缺价渲染成假 ¥0.00(merchant-admin.md §1.4 纪律) */}
+                      {it.price == null ? '—' : `¥${it.price.toFixed(2)}`} × {it.quantity}
                       <span className="ml-2 font-semibold text-zinc-700">
-                        小计 ¥{((it.price ?? 0) * it.quantity).toFixed(2)}
+                        小计 {it.price == null ? '—' : `¥${(it.price * it.quantity).toFixed(2)}`}
                       </span>
                     </span>
                   </div>
@@ -159,7 +161,8 @@ function AmountCell({
           strong ? 'text-zinc-900' : muted ? 'text-zinc-500 line-through' : accent ? 'text-rose-600' : 'text-zinc-700'
         }`}
       >
-        ¥{value.toFixed(2)}
+        {/* 合同漂移防护:非数值(undefined/null/NaN)诚实「—」,不崩不画假 ¥0.00 */}
+        {Number.isFinite(value) ? `¥${value.toFixed(2)}` : '—'}
       </div>
     </div>
   );

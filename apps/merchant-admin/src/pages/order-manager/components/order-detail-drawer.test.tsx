@@ -109,4 +109,23 @@ describe('OrderDetailDrawer(中心态注入,不依赖网关)', () => {
     expect(screen.getByText('收货地址修改成功')).toBeInTheDocument();
     expect(screen.queryByText('MODIFY_ADDRESS')).not.toBeInTheDocument();
   });
+
+  it('行项目缺价(price=null):单价与小计诚实「—」,严禁假 ¥0.00', () => {
+    const Wrap = withWb({
+      detailOrderId: 'MA-TEST-001',
+      orderDetail: {
+        ...ORDER,
+        items: [{ ...ORDER.items[0]!, price: null }],
+      },
+    });
+    render(
+      <Wrap>
+        <OrderDetailDrawer />
+      </Wrap>,
+    );
+    expect(screen.getByText('极光轻量三防连帽冲锋衣')).toBeInTheDocument();
+    expect(screen.getByText(/— × 1/)).toBeInTheDocument();
+    expect(screen.getByText(/小计 —/)).toBeInTheDocument();
+    expect(screen.queryByText(/¥0\.00/)).not.toBeInTheDocument();
+  });
 });
