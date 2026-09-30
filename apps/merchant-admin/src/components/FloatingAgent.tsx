@@ -102,10 +102,7 @@ export function FloatingAgent({ route }: { route: string }) {
       if (historyFlushRef.current) clearTimeout(historyFlushRef.current);
       if (latestFramesRef.current.length === 0) return;
       try {
-        localStorage.setItem(
-          'merchant-admin.agent.history',
-          JSON.stringify(latestFramesRef.current.slice(-60)),
-        );
+        localStorage.setItem('merchant-admin.agent.history', JSON.stringify(latestFramesRef.current.slice(-60)));
       } catch {}
     },
     [],
