@@ -1,8 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
-import { useAdminTenantStore } from '../../store/tenantStore';
 import { personasApi } from '../../lib/api';
+import { useAdminTenantStore } from '../../store/tenantStore';
 import { PersonaFormModal } from './components/PersonaFormModal';
 import type { PersonaRecord } from './types';
 
@@ -272,8 +272,8 @@ export function PersonasPage() {
           className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer text-left"
         >
           <span className="text-xs font-medium text-amber-800">
-            ⏳ 有 <span className="font-bold">{pendingCount}</span>{' '}
-            条待核实画像等待审核 —— 中置信抽取不参与召回,需人工批复生效或驳回
+            ⏳ 有 <span className="font-bold">{pendingCount}</span> 条待核实画像等待审核 ——
+            中置信抽取不参与召回,需人工批复生效或驳回
           </span>
           <span className="text-xs font-semibold text-amber-700 shrink-0 ml-3">去审核 →</span>
         </button>
