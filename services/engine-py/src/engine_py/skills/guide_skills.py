@@ -180,7 +180,8 @@ class ShoppingGuideSkill(BaseSkill):
     async def execute(self, context: SkillContext) -> SkillResult:
         user_input = context.input.strip()
         existing_guide = context.guide_context or {}
-        extracted_prefs: dict = {**(existing_guide.get("extractedPreferences") or {})}
+        carried_prefs: dict = {**(existing_guide.get("extractedPreferences") or {})}
+        extracted_prefs: dict = {**carried_prefs}
         clarification_round = existing_guide.get("clarificationRound") or 0
 
         # 0. 缺席反问剥否定(先于一切搜索):「没有衣服呢」→ 直查「衣服」。
@@ -204,25 +205,40 @@ class ShoppingGuideSkill(BaseSkill):
                     absence_topic = noun
                     absence_rhetoric = True
 
-        # 1. 偏好特征提取
+        # 1. 偏好特征提取(命中即记 touched = 本轮实际说出的偏好键)
+        touched: set[str] = set()
         if re.search(r"男|男生|男款", user_input, re.IGNORECASE):
             extracted_prefs["gender"] = "男款"
+            touched.add("gender")
         if re.search(r"女|女生|女款", user_input, re.IGNORECASE):
             extracted_prefs["gender"] = "女款"
+            touched.add("gender")
         if re.search(r"透气|清爽|夏", user_input, re.IGNORECASE):
             extracted_prefs["feature"] = "透气轻便"
+            touched.add("feature")
         if re.search(r"缓震|护膝|慢跑|马", user_input, re.IGNORECASE):
             extracted_prefs["scenario"] = "专业缓震慢跑"
+            touched.add("scenario")
         if re.search(r"黑|白|红", user_input):
             color_match = re.search(r"(?:黑|白|红|蓝|灰)色?", user_input)
             if color_match:
                 extracted_prefs["color"] = color_match.group(0)
+                touched.add("color")
 
         budget_match = re.search(r"(?:预算|低于|不超过|最高|价位)\s*(\d+)", user_input)
         max_price = None
         if budget_match:
             max_price = int(budget_match.group(1))
             extracted_prefs["budget"] = f"¥{max_price}以内"
+            touched.add("budget")
+
+        # 本轮实际说出的偏好(诚实口径,2026-09-30 实弹「我是新的问题，还带有
+        # 2500」):「已结合您的偏好」只准声明本轮真实依据 —— 承接的旧偏好从不
+        # 参与检索(search_products 只吃本轮 max_price 与原始 query),把它宣进
+        # 「已结合」就是广告出没有发生的结合(昨日旅行 2500 预算混进今日「出去
+        # 游玩」推荐语)。承接面仍照旧累积入库(is_very_vague 连续性依赖),只是
+        # 永不上展示句;本轮重述的键(如「我喜欢黑色」)如实再上。
+        current_turn_prefs = {k: extracted_prefs[k] for k in touched}
 
         # 2. 超模糊查询多轮追问
         is_very_vague = (
@@ -423,7 +439,7 @@ class ShoppingGuideSkill(BaseSkill):
 
         product_summary_text = "\n\n".join(self._format_candidate(p, idx) for idx, p in enumerate(products))
         pref_summary = (
-            f"（已结合您的偏好：{'、'.join(extracted_prefs.values())}）" if extracted_prefs else ""
+            f"（已结合您的偏好：{'、'.join(current_turn_prefs.values())}）" if current_turn_prefs else ""
         )
 
         # 💰 合计与预算结论(2026-09-27 实弹事故):此前没有任何一层算过合计,
