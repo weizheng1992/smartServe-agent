@@ -77,7 +77,8 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
             'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=800&auto=format&fit=crop&q=60',
           price: Number(item.price || 899.0),
           quantity: Number(item.quantity || 1),
-          stock: 99,
+          // 聊天快照行不带库存,存 null(诚实未知);此前编造 99 会让 + 按钮帽与展示骗人
+          stock: null,
           specAttributes: {},
           selected: true,
         });
@@ -103,7 +104,7 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
       existingCart.push(...reconciled);
     }
 
-    writeStoreCart(existingCart as any);
+    writeStoreCart(existingCart);
   } catch (err) {
     console.warn('[FloatingChatWidget] Failed to sync cart to localStorage:', err);
   }
@@ -225,12 +226,16 @@ export function FloatingChatWidget({
   const prevScrollHeightRef = useRef<number>(0);
   const isInitialLoadRef = useRef(true);
 
-  // 消息变动时自动持久化至本地缓存 (按用户与会话隔离)
+  // 消息变动时自动持久化至本地缓存 (按用户与会话隔离)。
+  // 只存最近 60 条(与 merchant-admin FloatingAgent 同型上限):本地缓存仅是
+  // 暖启动加速,服务端历史才是事实源(触顶加载可重取更早消息);卡片消息体积
+  // 大,不设上限会在 localStorage 5MB 配额上 QuotaExceeded,catch 后整份缓存
+  // 静默蒸发,比少存更糟。
   useEffect(() => {
     if (typeof window === 'undefined' || !user?.id || !threadId) return;
     if (messages.length > 0) {
       try {
-        localStorage.setItem(`aurora_chat_msgs_${user.id}_${threadId}`, JSON.stringify(messages));
+        localStorage.setItem(`aurora_chat_msgs_${user.id}_${threadId}`, JSON.stringify(messages.slice(-60)));
       } catch {
         // ignore
       }
@@ -348,7 +353,8 @@ export function FloatingChatWidget({
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
             setThreadId(activeTid);
-            setMessages(parsed);
+            // 读侧同样截尾:写入上限之前的历史存档可能已超限(无上限时代写下的)
+            setMessages(parsed.slice(-60));
             fetchHistory(activeTid);
             return;
           }

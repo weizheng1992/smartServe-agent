@@ -77,7 +77,7 @@ export default function CartPage() {
           imageUrl: r.imageUrl || '',
           price: Number(r.price) || 0,
           quantity: Math.max(1, Number(r.quantity) || 1),
-          stock: 99,
+          stock: typeof r.stock === 'number' ? r.stock : null,
           specAttributes: r.spec || {},
           selected: true,
         }));
@@ -107,7 +107,9 @@ export default function CartPage() {
   const handleUpdateQuantity = (skuCode: string, delta: number) => {
     const updated = cart.map((item) => {
       if (item.skuCode === skuCode) {
-        const newQty = Math.max(1, Math.min(item.stock, item.quantity + delta));
+        // stock=null(聊天/引擎合流行,库存未知)不设上限帽,由结算侧服务端校验兜底
+        const capped = item.stock == null ? item.quantity + delta : Math.min(item.stock, item.quantity + delta);
+        const newQty = Math.max(1, capped);
         return { ...item, quantity: newQty };
       }
       return item;
@@ -353,7 +355,7 @@ export default function CartPage() {
                       <button
                         type="button"
                         onClick={() => handleUpdateQuantity(item.skuCode, 1)}
-                        disabled={item.quantity >= item.stock}
+                        disabled={item.stock != null && item.quantity >= item.stock}
                         className="px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-30"
                       >
                         +

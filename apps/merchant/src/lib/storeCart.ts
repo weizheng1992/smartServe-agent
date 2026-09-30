@@ -22,7 +22,8 @@ export interface StoreCartItem {
   imageUrl: string;
   price: number;
   quantity: number;
-  stock: number;
+  /** null = 库存未知(聊天同步/引擎合流行不带库存,严禁编造兜底值) */
+  stock: number | null;
   specAttributes: Record<string, string>;
   selected: boolean;
 }
@@ -37,6 +38,7 @@ export function normalizeStoreCartItem(raw: unknown): StoreCartItem | null {
   const skuCode: string | undefined = item.skuCode || sku.skuCode;
   if (!skuCode) return null;
   const price = Number(item.price ?? sku.price ?? product.price ?? 0);
+  const stock = item.stock ?? sku.stock;
   return {
     id: item.id || skuCode,
     spuId: item.spuId || product.spuId || product.productId || product.id || '',
@@ -46,7 +48,7 @@ export function normalizeStoreCartItem(raw: unknown): StoreCartItem | null {
     imageUrl: item.imageUrl || sku.imageUrl || product.imageUrl || '',
     price: Number.isFinite(price) ? price : 0,
     quantity: Math.max(1, Number(item.quantity) || 1),
-    stock: Number(item.stock ?? sku.stock ?? 0) || 0,
+    stock: typeof stock === 'number' && Number.isFinite(stock) ? stock : null,
     specAttributes: item.specAttributes || sku.specAttributes || {},
     selected: item.selected !== false,
   };
@@ -85,7 +87,7 @@ export function addStoreCartItem(product: ThirdPartyProduct, sku: ThirdPartySku,
       imageUrl: sku.imageUrl || product.imageUrl || '',
       price: Number(sku.price),
       quantity,
-      stock: sku.stock ?? 0,
+      stock: sku.stock,
       specAttributes: sku.specAttributes || {},
       selected: true,
     });
