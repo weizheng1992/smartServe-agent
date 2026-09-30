@@ -453,29 +453,38 @@ class OrderDomainService:
                 ).mappings().all()
 
                 if item_rows:
+                    # 商品补全一次 IN 批查(2026-09-30 夜审:旧行为循环内逐单
+                    # SELECT,每行一次往返 + SAVEPOINT;N 件商品 N 次往返)
+                    prod_ids = [
+                        pid
+                        for pid in (
+                            row.get("product_id") or row.get("productId") for row in item_rows
+                        )
+                        if pid
+                    ]
+                    prod_map: dict[Any, dict] = {}
+                    if prod_ids:
+                        try:
+                            # SAVEPOINT 隔离:批量补全失败不中止外层事务
+                            async with session.begin_nested():
+                                prod_rows = (
+                                    await session.execute(
+                                        text(
+                                            'SELECT * FROM "products" WHERE "id" = ANY(:pids)'
+                                        ).bindparams(pids=list(prod_ids))
+                                    )
+                                ).mappings().all()
+                                prod_map = {row.get("id"): row for row in prod_rows}
+                        except Exception as prod_err:
+                            print(f"[订单详情] 商品信息批量补全失败({len(prod_ids)} 项): {prod_err}")
                     for item_row in item_rows:
                         prod_id = item_row.get("product_id") or item_row.get("productId")
-                        prod_name = "未知商品"
-                        prod_desc = ""
-                        try:
-                            # SAVEPOINT 隔离:单条商品补全失败不中止外层事务,
-                            # 否则循环内后续查询连坐 InFailedSqlTransaction
-                            async with session.begin_nested():
-                                prod = (
-                                    await session.execute(
-                                        text('SELECT * FROM "products" WHERE "id" = :pid').bindparams(pid=prod_id)
-                                    )
-                                ).mappings().first()
-                                if prod:
-                                    prod_name = prod.get("name") or "未知商品"
-                                    prod_desc = prod.get("description") or ""
-                        except Exception as prod_err:
-                            print(f"[订单详情] 商品信息补全失败 product={prod_id}: {prod_err}")
+                        prod = prod_map.get(prod_id) if prod_id is not None else None
                         items.append(
                             {
                                 "productId": prod_id,
-                                "name": prod_name,
-                                "description": prod_desc,
+                                "name": (prod.get("name") if prod else None) or "未知商品",
+                                "description": (prod.get("description") if prod else "") or "",
                                 "quantity": int(item_row.get("quantity") or 1),
                                 "priceAtPurchase": float(item_row.get("price_at_purchase") or item_row.get("priceAtPurchase") or 0),
                             }
