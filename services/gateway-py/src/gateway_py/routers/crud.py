@@ -196,6 +196,14 @@ async def list_personas(
 
 @router.post("/api/personas", status_code=201)
 async def create_persona(body: PersonaFactIn, x_tenant_id: str | None = Header(None)):
+    # 🛡️ 铸造面同闸(persona-hardening 06 补 05 不对称):global 画像只归平台
+    # 视角铸造,具名租户头不得借 POST 造出全员可见事实(与 PUT/DELETE 闸同不变量)。
+    if body.scope == "global" and x_tenant_id and x_tenant_id != "all":
+        raise HTTPException(
+            403,
+            f"Named tenant '{x_tenant_id}' cannot mint global persona facts "
+            "(global facts are platform-managed; switch to tenantId=all)",
+        )
     async with get_session() as session:
         row = LongMemoryFact(
             user_id=body.userId or "u_guest",

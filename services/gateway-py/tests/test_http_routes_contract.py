@@ -1553,9 +1553,8 @@ class TestPersonas:
         附带(scope 缺省回填 global 与 DB/召回/坐席台四方同向)、本租户行可见、
         他租户行不可见;变更面由属主闸收紧(读得到改不了,403),平台视角
         (tenantId=all)不受限。"""
-        from sqlalchemy import select
-
         from engine_py.db import LongMemoryFact, get_session
+        from sqlalchemy import select
 
         async with get_session() as session:
             rows = [
@@ -1589,16 +1588,164 @@ class TestPersonas:
                 f"/api/personas/{seeded_ids[2]}", headers={"x-tenant-id": "nike"}, json={"confidence": 0.95}
             )
             assert put_own.status_code == 200
+            del_foreign = await client.delete(f"/api/personas/{seeded_ids[1]}", headers={"x-tenant-id": "nike"})
+            assert del_foreign.status_code == 403
 
-            # 平台视角不受限:all 头可改 global,回填仍是 global
+            # 铸造面同闸(06 补 05 不对称):具名租户不得 POST scope=global 铸平台级事实
+            post_global_named = await client.post(
+                "/api/personas",
+                headers={"x-tenant-id": "nike"},
+                json={"userId": "u_gate_nike", "fact": "越权铸造-契约", "businessId": "nike", "scope": "global"},
+            )
+            assert post_global_named.status_code == 403
+
+            # 平台视角不受限:all 头可改 global,回填仍是 global;亦可铸造 global
             put_platform = await client.put(
                 f"/api/personas/{seeded_ids[0]}", headers={"x-tenant-id": "all"}, json={"confidence": 0.88}
             )
             assert put_platform.status_code == 200
             assert put_platform.json()["data"]["scope"] == "global"
+            post_global_platform = await client.post(
+                "/api/personas",
+                headers={"x-tenant-id": "all"},
+                json={"userId": "u_gate_platform", "fact": "平台铸造-契约", "scope": "global"},
+            )
+            assert post_global_platform.status_code == 201
+            assert post_global_platform.json()["data"]["scope"] == "global"
+            minted_del = await client.delete(
+                f"/api/personas/{post_global_platform.json()['data']['id']}", headers={"x-tenant-id": "all"}
+            )
+            assert minted_del.status_code == 200
         finally:
             async with get_session() as session:
                 for fid in seeded_ids:
+                    row = (
+                        await session.execute(select(LongMemoryFact).where(LongMemoryFact.id == fid))
+                    ).scalar_one_or_none()
+                    if row:
+                        await session.delete(row)
+                await session.commit()
+
+    async def test_delete_records_badcase_signal_and_silent_degradation(
+        self, client, contract_fixtures, monkeypatch
+    ):
+        """persona-hardening 06:删除画像 → 坏例池信号入池(persona_fact_deleted,
+        suspected_defect 先验,ref=fact:<id>,note 带用户);池写失败静默降级,
+        绝不阻断删除响应(标差是旁路,不是主链路)。"""
+        from engine_py.db import BadcaseCandidate, LongMemoryFact, get_session
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy import select
+
+        fact_ids: list[str] = []
+
+        async def _seed_fact(user_id: str) -> str:
+            async with get_session() as session:
+                row = LongMemoryFact(user_id=user_id, fact="契约-待删除", scope="tenant", business_id="nike")
+                session.add(row)
+                await session.commit()
+                return str(row.id)
+
+        fact_ids.append(await _seed_fact("u_bc_nike"))
+        try:
+            del_res = await client.delete(f"/api/personas/{fact_ids[0]}", headers={"x-tenant-id": "nike"})
+            assert del_res.status_code == 200
+
+            async with get_session() as session:
+                signal = (
+                    (
+                        await session.execute(
+                            select(BadcaseCandidate).where(
+                                BadcaseCandidate.conversation_ref == f"fact:{fact_ids[0]}"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+            assert signal is not None
+            assert signal.signal_source == "persona_fact_deleted"
+            assert signal.business_id == "nike"
+            assert signal.suggested_class == "suspected_defect"  # SOURCE_PRIORS 先验
+            assert signal.status == "candidate"
+            assert "u_bc_nike" in (signal.note or "")
+
+            # 池写失败静默降级:池侧 get_session 直接炸,删除仍 200 不受染
+            def _pool_down(*_args, **_kwargs):
+                raise RuntimeError("badcase pool unavailable")
+
+            monkeypatch.setattr("engine_py.badcase.pool.get_session", _pool_down)
+            fact_ids.append(await _seed_fact("u_bc_nike2"))
+            del_res2 = await client.delete(f"/api/personas/{fact_ids[1]}", headers={"x-tenant-id": "nike"})
+            assert del_res2.status_code == 200
+            assert del_res2.json()["success"] is True
+        finally:
+            monkeypatch.undo()
+            async with get_session() as session:
+                for fid in fact_ids:
+                    row = (
+                        await session.execute(select(LongMemoryFact).where(LongMemoryFact.id == fid))
+                    ).scalar_one_or_none()
+                    if row:
+                        await session.delete(row)
+                await session.execute(
+                    sa_delete(BadcaseCandidate).where(
+                        BadcaseCandidate.conversation_ref.in_([f"fact:{fid}" for fid in fact_ids])
+                    )
+                )
+                await session.commit()
+
+    async def test_list_tenant_filter_matrix_and_dto_backfill(self, client, contract_fixtures):
+        """persona-hardening 06:list 租户过滤矩阵(05 口径)—— 具名租户只见本店 +
+        global/NULL 只读附带,tenantId=all 见全部,跨租户不可见;_persona_item
+        缺省回填(confidence/source/status/scope/businessId)一并钉死。"""
+        from engine_py.db import LongMemoryFact, get_session
+        from sqlalchemy import select, update
+
+        async with get_session() as session:
+            rows = [
+                LongMemoryFact(user_id="u_mtx_nike", fact="nike 私有-矩阵", scope="tenant", business_id="nike"),
+                LongMemoryFact(user_id="u_mtx_aurora", fact="aurora 私有-矩阵", scope="tenant", business_id="aurora"),
+                LongMemoryFact(user_id="u_mtx_global", fact="global 显式-矩阵", scope="global", business_id=None),
+                LongMemoryFact(user_id="u_mtx_null", fact="scope NULL-矩阵", scope=None, business_id=None),
+            ]
+            session.add_all(rows)
+            await session.commit()
+            nike_id, aurora_id, global_id, null_id = (str(r.id) for r in rows)
+            # DB 列全可空:置 NULL 打 _persona_item 的缺省回填分支
+            await session.execute(
+                update(LongMemoryFact)
+                .where(LongMemoryFact.id == null_id)
+                .values(confidence=None, source=None, status=None)
+            )
+            await session.commit()
+        try:
+            nike_view = (await client.get("/api/personas", params={"tenantId": "nike"})).json()
+            assert nike_view["tenantId"] == "nike"
+            nike_ids = {f["id"] for f in nike_view["data"]}
+            assert {nike_id, global_id, null_id} <= nike_ids
+            assert aurora_id not in nike_ids
+
+            aurora_ids = {
+                f["id"] for f in (await client.get("/api/personas", params={"tenantId": "aurora"})).json()["data"]
+            }
+            assert aurora_id in aurora_ids
+            assert nike_id not in aurora_ids
+
+            all_ids = {
+                f["id"] for f in (await client.get("/api/personas", params={"tenantId": "all"})).json()["data"]
+            }
+            assert {nike_id, aurora_id, global_id, null_id} <= all_ids
+
+            by_id = {f["id"]: f for f in nike_view["data"]}
+            assert by_id[global_id]["scope"] == "global"
+            assert by_id[global_id]["businessId"] == "global"
+            assert by_id[null_id]["scope"] == "global"  # NULL scope ≡ global(四方同向)
+            assert by_id[null_id]["confidence"] == 1.0
+            assert by_id[null_id]["source"] == "chat_dialogue_inference"
+            assert by_id[null_id]["status"] == "approved"
+        finally:
+            async with get_session() as session:
+                for fid in (nike_id, aurora_id, global_id, null_id):
                     row = (
                         await session.execute(select(LongMemoryFact).where(LongMemoryFact.id == fid))
                     ).scalar_one_or_none()
