@@ -1671,7 +1671,9 @@ export default function MerchantAdminPage() {
 
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <div className="text-slate-500 font-medium">API 签名密钥 (HMAC-SHA256 Secret)</div>
-                  <div className="font-mono text-slate-900 font-bold mt-1">aurora_secret_key_8899</div>
+                  {/* 密钥属服务端持有物,严禁明文上 UI(全树审查 2026-09-30:
+                      401 员工闸一关即公开泄露;真实值在网关 env,前端永不读 */}
+                  <div className="font-mono text-slate-900 font-bold mt-1">••••••••（已配置 · 仅服务端持有）</div>
                 </div>
               </div>
             </div>
