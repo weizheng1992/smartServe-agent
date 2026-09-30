@@ -5,6 +5,8 @@ import { defineConfig } from 'vitest/config';
 
 // 服务端 API 已迁移至 gateway-py(FastAPI, 端口 4000)。
 // /api/* 与 /spi/* 由 Vite dev server 代理至网关(替代原 Next.js rewrites)。
+// /spi 必须带尾斜杠:客户端路由 /spi-logs 不带斜杠前缀比对,裸 '/spi' 会把它截胡给网关
+// (刷新审计流水页即 404/代理错误;契约见 src/vite-proxy-routes.test.ts)。
 const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:4000';
 
 export default defineConfig({
@@ -22,7 +24,7 @@ export default defineConfig({
         target: GATEWAY_URL,
         changeOrigin: true,
       },
-      '/spi': {
+      '/spi/': {
         target: GATEWAY_URL,
         changeOrigin: true,
       },
