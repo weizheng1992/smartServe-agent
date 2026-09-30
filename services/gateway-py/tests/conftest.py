@@ -51,6 +51,11 @@ def _bootstrap_sealed_env() -> None:
     # 关后台 embedding 预热:预热线程与请求线程并发 encode 在 Py3.14 + torch 下
     # 曾触发 SIGSEGV(本地 bge 单例本就只该串行);测试按需走请求时懒加载
     os.environ.setdefault("AI_EMBEDDING_WARMUP", "0")
+    # LLM 配置 fail-fast(persona-hardening 09):缺省已改「空值 + 首用拒启」,
+    # 测试进程显式注入不可用标记值过 lifespan/首用校验 —— 套件不依赖真实 LLM
+    # (契约全桩),意外真拨则 127.0.0.1:1 即时连接拒绝,失败点显式可见
+    os.environ.setdefault("AI_BASE_URL", "http://127.0.0.1:1/unavailable")
+    os.environ.setdefault("AI_MODEL", "unavailable-in-tests")
     if not _CONTAINERS and os.environ.get("AGENT_ALL_TEST_USE_EXTERNAL") != "1":
         # Docker Desktop(macOS)默认 context 指向 ~/.docker/run/docker.sock,该路径挂进
         # ryuk 容器不通(Desktop 仅对 /var/run/docker.sock 做特权 socket 转发)→ ryuk

@@ -17,6 +17,43 @@ def _env(key: str, default: str) -> str:
     return value if value else default
 
 
+class ConfigError(RuntimeError):
+    """必需配置缺失/非法 —— 拒绝以死端口或垃圾缺省静默启动(persona-hardening 09)。"""
+
+
+def ensure_llm_config(cfg: Settings | None = None) -> None:
+    """LLM 必需配置校验(persona-hardening 09,2026-09-30)。
+
+    缺省即拒启的项:AI_BASE_URL / AI_MODEL —— 二者曾有死端口/异厂模型缺省
+    (127.0.0.1:11211 与 gemini-3.5-flash,均为 TS 时代遗留),漏带 --env-file
+    手拉网关时静默回退,症状像管线 bug 实为 env 没进进程(2026-09 实弹前科,
+    见 memory「手拉网关必须带 --env-file」)。
+
+    挂点为 LLM 首用(get_chat_model/get_vision_model 及 embedding 的 openai
+    分支)+ gateway lifespan / worker 入口 —— 而非 Settings() 构造期:alembic
+    (db:push)与 db:seed 等不涉 LLM 的脚本 import 本模块时不得被牵连拒启。
+
+    宽于拒启的项:AI_API_KEY 缺省 "dummy" 仅显式告警(本地 mock 端点合法;
+    真实端点会 401,失败点近因可辨)。DATABASE_URL / REDIS_URL 维持本地开发
+    缺省不动 —— 连接拒绝即时且响亮,无静默错配面。
+    """
+    cfg = cfg if cfg is not None else settings
+    missing = [
+        name
+        for name, value in (("AI_BASE_URL", cfg.llm_base_url), ("AI_MODEL", cfg.llm_model))
+        if not value
+    ]
+    if missing:
+        raise ConfigError(
+            f"必需环境变量 {' / '.join(missing)} 未设置,拒绝以垃圾缺省静默启动"
+            "(前科:缺省曾回退 127.0.0.1:11211 死端口,症状像管线 bug 实为 env 没进进程)。"
+            "手拉服务请带 --env-file 指向仓库根 .env,或显式 export 这些变量;"
+            "评测 provider 由 bun 自动加载根 .env。"
+        )
+    if cfg.llm_api_key == "dummy":
+        print("[config] ⚠️ AI_API_KEY 仍为缺省 'dummy' —— 真实端点将 401;本地 mock 端点可忽略")
+
+
 def _database_url() -> str:
     """DATABASE_URL 归一:TS 遗留的 postgres:// 方言串转 SQLAlchemy 可用的 postgresql+asyncpg。
 
@@ -40,10 +77,13 @@ class Settings:
     # 影子期独立队列;切流后与 TS 共用 agent-tasks
     temporal_task_queue: str = field(default_factory=lambda: _env("TEMPORAL_TASK_QUEUE", "agent-tasks-py"))
 
-    # 环境变量名与 .env.example / turbo.json globalEnv 对齐为 AI_* 前缀
-    llm_base_url: str = field(default_factory=lambda: _env("AI_BASE_URL", "http://127.0.0.1:11211/api/openai/v1"))
+    # 环境变量名与 .env.example / turbo.json globalEnv 对齐为 AI_* 前缀。
+    # base_url/model 刻意无缺省(空串)——垃圾缺省(TS 时代的死端口 11211 与
+    # gemini 模型名)曾令漏带 --env-file 的进程静默错配;校验见 ensure_llm_config
+    # (LLM 首用 + gateway lifespan / worker 入口拒启),import 本模块不受牵连。
+    llm_base_url: str = field(default_factory=lambda: _env("AI_BASE_URL", ""))
     llm_api_key: str = field(default_factory=lambda: _env("AI_API_KEY", "dummy"))
-    llm_model: str = field(default_factory=lambda: _env("AI_MODEL", "gemini-3.5-flash:latest"))
+    llm_model: str = field(default_factory=lambda: _env("AI_MODEL", ""))
     # embedding 提供方:local = 进程内免费本地推理(默认,离线可用);openai = 走 AI_BASE_URL 的 /embeddings(需付费资源包)
     embedding_provider: str = field(default_factory=lambda: _env("AI_EMBEDDING_PROVIDER", "local"))
     embedding_model: str = field(default_factory=lambda: _env("AI_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"))

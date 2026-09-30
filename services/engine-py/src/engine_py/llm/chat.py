@@ -32,7 +32,7 @@ from langchain_core.callbacks import BaseCallbackManager
 from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-from ..config import settings
+from ..config import ensure_llm_config, settings
 from .resilience import resilient_ainvoke, resilient_invoke
 from .telemetry import LlmCallTelemetryHandler
 
@@ -173,6 +173,9 @@ class _ResilientChatOpenAI(ChatOpenAI):
 
 @lru_cache(maxsize=1)
 def get_chat_model() -> ChatOpenAI:
+    # persona-hardening 09:LLM 首用即校验 —— 缺 AI_BASE_URL/AI_MODEL 时这里
+    # 以点名 ConfigError 拒启,不再带死端口缺省去拨连接错误远因难寻的空炮
+    ensure_llm_config(settings)
     return _ResilientChatOpenAI(
         model=settings.llm_model,
         api_key=settings.llm_api_key,
@@ -185,6 +188,7 @@ def get_vision_model() -> ChatOpenAI:
     """视觉模型工厂(wayfinder multimodal 003):独立模型名/超时,复用 AI_* 的
     base_url 与 key。刻意不走 _ResilientChatOpenAI —— vision 失败域独立,自带
     启发式兜底,不入全局熔断与逐调用遥测。"""
+    ensure_llm_config(settings)
     return ChatOpenAI(
         model=settings.vision_model,
         api_key=settings.llm_api_key,
@@ -217,6 +221,9 @@ def get_embedding_model() -> Embeddings:
                 f"经 {os.environ['HF_ENDPOINT']} 在线拉取 {settings.embedding_model}"
             )
             return _SerializedEmbeddings(HuggingFaceEmbeddings(model_name=settings.embedding_model))
+    # openai 提供方走 AI_BASE_URL,与对话模型同受 fail-fast 校验;local 分支
+    # 纯进程内推理不涉端点,不校验(db 类脚本 import 本模块不得被牵连)
+    ensure_llm_config(settings)
     return OpenAIEmbeddings(
         model=settings.embedding_model,
         api_key=settings.llm_api_key,

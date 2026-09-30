@@ -19,7 +19,16 @@ from ..config import settings
 
 
 async def main() -> None:
+    from ..config import ensure_llm_config
     from ..scheduler import start_scheduler
+
+    # persona-hardening 09:启动期 LLM 配置 fail-fast(与 gateway lifespan 同闸)
+    try:
+        ensure_llm_config()
+    except Exception as startup_err:
+        raise SystemExit(f"[Temporal Worker] LLM 配置校验失败: {startup_err}") from startup_err
+
+    scheduler_task = asyncio.create_task(start_scheduler())
 
     scheduler_task = asyncio.create_task(start_scheduler())
 

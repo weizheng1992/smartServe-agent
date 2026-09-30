@@ -44,6 +44,14 @@ async def _sync_product_knowledge_on_startup() -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    # persona-hardening 09:启动期 LLM 配置 fail-fast —— 漏带 --env-file 时在
+    # 这里即死并点名缺失变量,不带死端口缺省起来接第一单才炸(2026-09 实弹前科)
+    try:
+        from engine_py.config import ensure_llm_config
+
+        ensure_llm_config()
+    except Exception as startup_err:
+        raise SystemExit(f"[Startup] LLM 配置校验失败: {startup_err}") from startup_err
     await _sync_product_knowledge_on_startup()
     yield
 

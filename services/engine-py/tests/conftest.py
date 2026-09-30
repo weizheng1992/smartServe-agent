@@ -43,6 +43,11 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 # 测试密封(P1 影子路由):语义路由会加载真实 BGE —— 测试环境默认关闭,
 # 路由逻辑由 test_semantic_routes.py 用合成向量钉死
 os.environ.setdefault("SEMANTIC_ROUTER_MODE", "off")
+# LLM 配置 fail-fast(persona-hardening 09):缺省已改「空值 + 首用拒启」,
+# 测试进程显式注入不可用标记值 —— 套件不依赖真实 LLM(全桩/mock 吸收),
+# 意外真拨则 127.0.0.1:1 即时连接拒绝,与旧死端口缺省等价但显式可见
+os.environ.setdefault("AI_BASE_URL", "http://127.0.0.1:1/unavailable")
+os.environ.setdefault("AI_MODEL", "unavailable-in-tests")
 
 ENGINE_DIR = Path(__file__).resolve().parents[1]
 
