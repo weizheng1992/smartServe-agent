@@ -814,7 +814,8 @@ export default function MerchantAdminPage() {
                               size="sm"
                               onClick={() => {
                                 setShippingOrderId(o.order_id);
-                                setTrackingNumberInput(`SF${Math.floor(10000000000 + Math.random() * 90000000000)}`);
+                                // 运单号必须商户实填:随机预填号提交即成真账面假物流
+                                setTrackingNumberInput('');
                               }}
                               className="bg-blue-600 text-white hover:bg-blue-500 h-7 text-xs font-semibold cursor-pointer"
                             >

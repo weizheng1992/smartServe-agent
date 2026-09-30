@@ -212,7 +212,9 @@ export function OrdersTab() {
                             size="sm"
                             onClick={() => {
                               setShippingOrderId(o.order_id);
-                              setTrackingNumberInput(`SF${Math.floor(10000000000 + Math.random() * 90000000000)}`);
+                              // 运单号必须商户实填:随机预填号一旦提交即成真账面
+                              // 假物流(顾客按假单查件永远查无),弹窗侧空值已闸
+                              setTrackingNumberInput('');
                             }}
                             className="bg-blue-600 text-white hover:bg-blue-500 h-7 text-xs font-semibold cursor-pointer"
                           >
