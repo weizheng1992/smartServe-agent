@@ -1,4 +1,4 @@
-# 生产编排:四前端(nginx 一体) + gateway + migrate + PG/Redis + Temporal/Worker(可选)
+# 生产编排:四前端(nginx 一体) + gateway + migrate + PG/Redis
 # 用法见 docs/deploy.md;基础设施与本地开发共用仓库根 docker-compose.yml,两者不冲突
 
 name: smartserve-prod
@@ -33,13 +33,6 @@ services:
       retries: 10
     restart: unless-stopped
     # ports: ["6379:6379"]
-
-  # 可选:周期任务(HITL 对账/超时扫描)。启用: --profile temporal
-  temporal:
-    image: temporalio/dev-server:latest
-    profiles: ["temporal"]
-    command: ["--ip", "0.0.0.0", "--port", "7233"]
-    restart: unless-stopped
 
   # 一次性:alembic 迁移,gateway 等它成功后才启动
   migrate:
@@ -77,22 +70,6 @@ services:
       timeout: 10s
       retries: 10
       start_period: 180s   # 首启需下载 bge 本地 embedding 模型(卷缓存后重启秒过)
-    restart: unless-stopped
-
-  # 可选:Temporal Worker,随 --profile temporal 启用
-  worker:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.gateway
-    profiles: ["temporal"]
-    env_file: .env.prod
-    working_dir: /app/services/engine-py
-    command: ["uv", "run", "--no-sync", "python", "-m", "engine_py.temporal.worker"]
-    depends_on:
-      temporal:
-        condition: service_started
-      gateway:
-        condition: service_healthy
     restart: unless-stopped
 
   web:

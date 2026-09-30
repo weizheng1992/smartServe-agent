@@ -3,7 +3,7 @@
 员工鉴权面(0013 收口):身份 = Bearer JWT 的 email claim → staff_members
 (员工密码真实登录;不再信任 x-user-id 头,未识别员工 403 而非回落老板)。
 按钮/指标权限按 role_menus 动态派生(rbac.perms_for_role,勾选即生效)。
-轻管线直调 engine(analytics 包),不走 Temporal(15 号决议)。
+轻管线直调 engine(analytics 包),不经回合管线(15 号决议;Temporal 路线已退役,ADR-0007)。
 SSE 帧:event: clarify|result|unsupported|error。
 """
 

@@ -234,7 +234,7 @@ Agent 发布完成后,必须进行端到端的**分布式链路追踪(Distribute
 | **前置清理** ✅ 已落地(2026-09-03) | `/api/logs` 接 `session_metrics` 真实值(无数据处返回真实 0,不再编造 token/延迟);`/api/evals/run` 响应显式携带 `isMock: true` 并从坏例看板数据源排除(该 isMock 方案已于 2026-09-07 被 wayfinder 005 取代:路由 410 退役,见附录 2) | 无 |
 | **v1** ✅ 已落地(2026-09-03) | `badcase_candidates` 表(Alembic `0002`)+ 三信号点挂接入池 + 熔断落盘 `session_metrics` + `scheduler.py` 周期任务框架(outbox 对账修复 + 坏例池摘要/保留期)+ 已知值脱敏 + triage CLI(`python -m engine_py.badcase.cli`) | **零**(不动 39 路由冻结契约) |
 | **v3.1** | 踩/赞 UI + feedback 路由 + Admin 坏例池 CRUD 模块 + 补 pytest 契约测试 + 更新 `.claude/rules/server-gateway.md` 路由计数 | 显式契约修订 |
-| **二期** | 隐式信号(首位:"答后即转人工",信噪比高于踩)、Playwright 自动补签(待 E2E 基建修复)、周期任务迁移 Temporal Schedule(多实例部署前) | 随批评估 |
+| **二期** | 隐式信号(首位:"答后即转人工",信噪比高于踩)、Playwright 自动补签(待 E2E 基建修复)、多实例前周期任务加 Redis 分布式锁(ADR-0007 后无 Temporal Schedule 选项,见 multi-instance-deployment §3.1 方案 B) | 随批评估 |
 
 ---
 

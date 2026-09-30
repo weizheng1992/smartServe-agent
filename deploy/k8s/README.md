@@ -22,7 +22,6 @@ kubectl apply -f 40-tei-deployment.yaml          # embedding 先就绪
 kubectl apply -f 50-migrate-job.yaml             # 等 Job Completed
 kubectl apply -f 10-gateway-deployment.yaml -f 11-gateway-service-hpa.yaml
 kubectl apply -f 20-web-deployment.yaml
-kubectl apply -f 30-worker-deployment.yaml       # 可选(需 Temporal)
 kubectl apply -f 60-ingress.yaml
 ```
 
@@ -31,5 +30,4 @@ kubectl apply -f 60-ingress.yaml
 - **uploads 多副本**:manifest 用的是 RWO PVC 示例——多副本跨节点会挂载失败,
   换 RWX 存储类(如 CephFS/NAS)或改对象存储(OSS/COS + 预签名 URL)
 - **TEI**:单副本足够(embedding 轻量);模型缓存用 emptyDir,Pod 重建重下 ~100MB
-- **Temporal**:自托管官方 chart 或云版;`30-worker` 依赖其就绪
 - 域名占位 `*.mall.example.com`,Ingress TLS 用 cert-manager 注解补

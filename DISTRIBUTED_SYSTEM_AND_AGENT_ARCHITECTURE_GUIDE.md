@@ -2,6 +2,13 @@
 
 _(原 KAFKA_AND_BOTTLENECK_GUIDE 升级重构版)_
 
+> **状态注记(2026-09-30)**:本文为**设计方法论指南**,代码示例与 §七 对照表锚定的是
+> TS 时代架构(`packages/engine`、`apps/server`,已于 2026-09 退役)。Temporal 在本文
+> 中作为**持久化执行的选型教学**出现;本仓库实际的 Temporal 执行路线已于
+> 2026-09-30 退役删除(ADR-0007,零生产 submitter + 收口接线漂移),当前唯一执行
+> 路径为网关进程内 `run_agent` 直跑。若重引入持久化执行,须按 ADR-0007 重引入条款
+> 新立 ADR——届时本文方案 2/方案 3 的权衡分析仍然有效。
+
 本文档全面梳理了现代分布式系统与大模型 Agent 架构中关于**数据库选型（Database Selection）、缓存与并发治理（Caching & Concurrency）、状态持久化（State Persistence）、失败恢复与断点续跑（Failure & Resume）、消息堆积与瓶颈诊断（Kafka & Bottleneck Diagnostics）**的最新主流方案、设计权衡、代码示例以及在真实工程中的落地实践。
 
 ---

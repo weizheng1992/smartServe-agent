@@ -196,8 +196,8 @@
 
 1. **分布式并发锁（Distributed Lock）✅ 已实现**：
    核决入口以 **Redis SETNX**（`lock:approval:{approvalId}`，PX 5000）+ 进程内 `_local_locks` 后备锁双重防护，管理员快速重复点击不会派发两个并行的 `runAgent` 造成状态紊乱（`gatekeeper.py` `process_approval_action`）。
-2. **Temporal 强一致状态流集成 (Durable Execution) ✅ 路线已建**：
-   `engine_py/temporal/` 提供 `agentWorkflow`（LangGraph 节点循环以 Activity 重放，队列 `agent-tasks-py`）+ 状态/计划/结果 Query handler，审批挂起期间执行流可从 Checkpoint 精准恢复，防服务器硬件重建丢失执行流。**诚实说明**：审批恢复的现役通道是事务发件箱 + 确定性 `job_resume_{approvalId}` 同步 Fast-Path（非 TS 提案设想的 `ExternalSignal`）；Temporal 不可达时本地 asyncio 图执行兜底，网关不硬依赖 Temporal 集群（见 `docs/deployment.md`）。
+2. **持久化执行 (Durable Execution) —— 2026-09-30 改判（ADR-0007）**：
+   Temporal 路线曾以 Activity 重放方式建成（`engine_py/temporal/`），因全仓零生产 submitter 且其手抄收口接线对回合管线漂移，已整体退役删除；重引入须新立 ADR（ADR-0007 重引入条款）。**现役审批恢复通道只有一条**：事务发件箱 + 确定性 `job_resume_{approvalId}` 同步 Fast-Path，失败遗留事件由 `outbox_worker` 对账补偿（scheduler 随网关 lifespan,`ENGINE_SCHEDULER_ENABLED` 总闸）；进程内 asyncio 图执行即唯一执行形态,无第二适配器。
 3. **安全核决防越权（RBAC）✅ 已实现**：
    管理面经 Bearer JWT + 商户归属校验（`rbac.find_staff`），审批人身份 `actor/actorRole` 随核决请求声明并落 `resolvedBy/resolvedByRole` 审计；analytics 面以 `x-tenant-id` 显式声明租户边界。防止越权拦截与提权操作。
 

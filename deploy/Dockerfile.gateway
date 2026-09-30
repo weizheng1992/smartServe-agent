@@ -1,4 +1,4 @@
-# gateway-py + engine-py(uv workspace)——FastAPI 网关与 Temporal Worker 共用此镜像
+# gateway-py + engine-py(uv workspace)——FastAPI 网关唯一后端镜像(周期任务随 lifespan)
 # 含 engine 的 torch/sentence-transformers(本地 embedding),镜像体积以 GB 计属预期
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 

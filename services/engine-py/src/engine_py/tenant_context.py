@@ -1,10 +1,10 @@
 """引擎侧租户上下文(ContextVar,A7 收口)。
 
 gateway 进程有 ``TenantContextMiddleware`` 承载请求级租户;engine 进程(直跑
-``run_agent``、Temporal worker、脚本)此前没有任何租户上下文 —— 深层模块各自
+``run_agent``、脚本)此前没有任何租户上下文 —— 深层模块各自
 ``or "ecommerce"`` 静默兜底,显式租户断供时错绑主站且不留痕(潜伏面)。
 
-- 入口注入:``run_agent`` / Temporal activities 解析出真实 business_id(线程行
+- 入口注入:``run_agent`` 解析出真实 business_id(线程行
   自愈后)调 ``set_business_context``;asyncio 子任务与线程池自动继承拷贝,
   协程内 set 只影响本任务上下文,不跨作业泄漏。
 - 深层解析:``resolve_business_id`` = 显式参数 > 上下文 > 平台默认(仅此路径

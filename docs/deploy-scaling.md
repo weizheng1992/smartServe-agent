@@ -142,7 +142,8 @@ docker compose -p smartserve-green -f deploy/docker-compose.prod.yml up -d --bui
    无会话粘性需求（SSE 是单连接语义，任意副本可服务）。限流的
    `RATE_LIMIT_TRUSTED_PROXIES` 加入 SLB 网段，否则限流按 LB IP 计
 4. **静态上 CDN**：四前端构建产物上传 OSS+CDN，源站只留 `/api`
-5. **Temporal**：迁自托管 Temporal 集群或云版，Worker 与 gateway 同机部署即可
+5. **周期任务**：随 gateway lifespan 在场（ADR-0007），多实例前先落 Redis 分布式锁
+   （`docs/architecture/multi-instance-deployment.md` §3.1 方案 B）
 
 ### 3.3 容量参考
 
@@ -169,7 +170,6 @@ Deployment+Service+HPA/web/worker/TEI/migrate Job/Ingress + README 含 apply
 | `volumes:` | PVC（pg_data → 云盘 StorageClass）/ Secret 挂载 |
 | `deploy/.env.prod` | Secret（AI key/JWT/DB 密码）+ ConfigMap（开关类） |
 | `migrate` 一次性服务 | Job（pre-install hook 或独立 Job，滚动前跑） |
-| `--profile temporal` | 独立 Helm release（temporal 官方 chart） |
 | 副本数手工 | HPA（CPU 60% 目标，min 2 max 10） |
 
 健康检查沿用：`/api/health` 作 liveness+readiness probe；`start_period: 180s`

@@ -27,7 +27,7 @@
 ## 实现要点
 
 - `CardSynthesizer.synthesize_cards` 收编基座裁决(域卡片优先)+ 场景组追加;`fetch_shelf_categories(intents, thread_id)` 购物轮实查、非购物轮零查库、失败诚实空。
-- `run_agent.py` 与 `temporal/activities.py`(双模运行引擎另一路)使用**同一合成接线**,严禁两路漂移(2.6.8 先例)。
+- ~~`run_agent.py` 与 `temporal/activities.py`(双模运行引擎另一路)使用**同一合成接线**,严禁两路漂移(2.6.8 先例)。~~〔2026-09-30 改判(ADR-0007):Temporal 路线退役删除,双模收敛为 `run_agent` 单一深模块,本条约束随第二条执行路径消失。〕
 - 技能自带的 quick_replies(如破损照片消歧组)是更具体的场景行:**first-wins** 原样保留,不再追加场景组,严禁一屏双胶囊。
 - `list_user_orders(shipping_status)`:UNSHIPPED/SHIPPED/DELIVERED,存储值大小写不敏感;**UNSHIPPED = 仍在等待出货**(排除 shipped/delivered/refunded/cancelled——退款/取消单永不出货,算「未发货」会误导用户以为还有包裹在路上;2026-09-12 实弹对 CUST-8801 两笔 REFUNDED 单修正);非法值诚实报错,严禁静默全量;两路查单(商户真单/engine 本地表)走同一纯函数 `_apply_shipping_filter`。
 - executor 快路径(`try_match_executor_fast_path`)对「名下订单」类描述与 LLM 路径**同语义**:描述或输入含「未发货/还没发货/尚未发货」时传 `shippingStatus: "UNSHIPPED"`,严禁快路径吞过滤。

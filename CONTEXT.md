@@ -102,14 +102,17 @@ A dedicated SSE network stream client that decouples EventSource transport, even
 - **EventSource Transport Management**: Handles SSE connection establishment, event listener binding, and safe resource cleanup.
 - **Typed Event Dispatching**: Emits structured status, result, and error events to UI subscribers (`onStatus`, `onResult`, `onError`).
 
-### Temporal Workflow Layer (`services/engine-py/src/engine_py/temporal/`)
+### Turn Pipeline (回合管线) (`services/engine-py/src/engine_py/run_agent.py`)
 
-Durable execution route (absorbs the TS `WorkflowOrchestrator`):
+One conversational turn = one deep module. The public interface is `run_agent(job) -> dict`, and every entry scenario crosses this single seam: gateway chat dispatch, approval resumption (`job_resume_{approvalId}`), shadow replay (ADR-0007). Internally three sections, none of which are part of the interface:
 
-- `workflows.py`: `agentWorkflow` replays the LangGraph node loop as Temporal activities (queue `agent-tasks-py`), with status/plan/result Query handlers.
-- `activities.py`: `run_agent_state_node` bridges single graph nodes into activity executions.
-- `worker.py`: worker entrypoint (started via `bun run worker`).
-- **Local Fallback**: when Temporal is unreachable, jobs run directly as local asyncio graph executions — the gateway never hard-depends on the Temporal cluster (see `docs/deployment.md`).
+- **Entry pre-assembly (入口预装配)**: greeting/onboarding bypass, image normalization, tenant-context injection, concurrent memory + RAG gathering.
+- **Graph execution (图执行)**: the LangGraph DAG (triage → planner → merge → exec ⇄ validator → finish) with its two degradation arms (LLM circuit breaker / graph error → deterministic fallback).
+- **Settle (收口)**: the post-graph persistence section — card synthesis → memory writes (assistant row, persona facts, episodic events) → task-memory plans → badcase signals → LLM token aggregation → session metrics. This is the internal seam's name; ADR-0007 and the wiring tests refer to it by this term.
+
+### Temporal Workflow Layer — retired (ADR-0007)
+
+The durable-execution route (`temporal/workflows.py` / `activities.py` / `worker.py`) was deleted on 2026-09-30: zero production starters existed, and its hand-copied settle wiring had already drifted from the pipeline. Periodic tasks (outbox reconcile / takeover release / badcase digest) now live in the gateway lifespan via `engine_py/scheduler.py`. Reintroducing durable execution in any shape requires a new ADR answering the two questions this retirement settled: who starts the workflows, and how the second copy of the settle wiring stays drift-free.
 
 ## Skills Subsystem (engine-py)
 

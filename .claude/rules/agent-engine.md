@@ -1,11 +1,11 @@
 ---
-description: LangGraph 状态机决策图、Skills 技能开放架构、Temporal 工作流编排、四象限记忆与双层画像隔离规范
+description: LangGraph 状态机决策图、Skills 技能开放架构、回合管线编排（ADR-0007）、四象限记忆与双层画像隔离规范
 paths: ["services/engine-py/**/*"]
 ---
 
 # 智能体核心决策引擎规范 (Agent Engine)
 
-本服务是整个平台的核心中枢（`services/engine-py/src/engine_py/`），负责 LangGraph DAG 状态图调度、Skills 技能分发、四象限记忆体系、双层客户画像隔离、多模态视觉定责、Contextual RAG 检索、审批门禁、Temporal 分布式工作流与商户数据分析独立轻管线（`analytics/`，§1.9）。行为规格以退役的 TS 实现为基线，由影子双跑（`shadow/`）与 pytest 契约测试钉死。
+本服务是整个平台的核心中枢（`services/engine-py/src/engine_py/`），负责 LangGraph DAG 状态图调度、Skills 技能分发、四象限记忆体系、双层客户画像隔离、多模态视觉定责、Contextual RAG 检索、审批门禁、回合管线编排与商户数据分析独立轻管线（`analytics/`，§1.9）。行为规格以退役的 TS 实现为基线，由影子双跑（`shadow/`）与 pytest 契约测试钉死。
 
 ## 1. 核心架构与拓扑流程
 
@@ -16,7 +16,7 @@ paths: ["services/engine-py/**/*"]
   - 起点 ➔ `triage`（意图分流与多模态感知）
   - 分流分支：日常寒暄/简单单意图走**极速直达旁路**（`executor_fast_path.py`）直接路由至 `finish`；复杂多意图路由至 `planner`。
   - 核心执行环：`planner` ➔ `merge` ➔ 循环 [`executor` ⇄ `validator`] ➔ 校验通过进入 `finish`；未通过或需回溯时退回 `executor`。
-- **双模运行引擎**：优先连接 Temporal 工作流（端口 `7239`，队列 `agent-tasks-py`）编译执行 `temporal/workflows.py`；当 Temporal 离线时平滑回退至本地 LangGraph 仿真模拟器。
+- **回合管线单一深模块（ADR-0007，2026-09-30）**：`run_agent(job) -> dict` 是一回合的唯一接口与唯一执行路径（gateway 派发 / 审批恢复 / 影子回放三调用方共用）；图后收口（卡片合成 ➔ 记忆写入 ➔ task 记忆 ➔ 坏例信号 ➔ token 聚合 ➔ assistant 落库）内聚为私有内部缝。旧「Temporal 工作流 + 本地仿真回退」双模已于 2026-09-30 退役删除（全仓零 `start_workflow` 启动方、Temporal 侧收口接线漂移实证），重引入持久化执行须新立 ADR（`docs/adr/0007-temporal-execution-route-retired.md`）。
 - **事件主干**：用户态进度事件经 `event_bus.py` 写入 Redis Streams（INCR 序号 + XADD maxlen），网关 SSE 直接以该流为事件源。
 
 ### 1.2 Skills 技能分发与开放集成架构 (Skills Pipeline)
@@ -47,7 +47,7 @@ paths: ["services/engine-py/**/*"]
 > **「画像」三义辨析(persona-hardening 08,2026-09-30)**：本节「画像/双层画像」专指**记忆画像**——`long_memory_facts` 事实行（`memory/long_memory.py`，admin personas 模块 CRUD 的同一数据）。仓库另有两处同词异义，互不相通：Data Agent 的 `customer_profile` **商户宽表**（`analytics/engine.py`，客户分析指标源）与商品**口碑画像**（商品评价查询，`tools_registry/mall_domain.py`）。跨文档检索先分清域，防误汇。
 
 - **短期记忆 (`memory/short_memory.py`)**：基于 `messages` 物理表读取最近 10 轮对话，内存为空时触发自愈补全。
-- **消息写所有权(multimodal 005 治理)**：用户行唯一由**网关**写入(dispatch/SPI/商户 store_chat 三个入口,唯一持有 `imageUrls` 的位置;store_chat 补写系 2026-09-09 修复——商户用户消息此前完全不落库,历史恢复缺用户行);引擎侧零写用户行(`run_agent` 主链/问候旁路/Temporal activity 均不插,历史经 `short_memory.get_messages` 读网关副本),否则时间线双插 user×2(一行带图一行不带)。assistant 行仍归引擎(`short_memory.add_message`),由 `test_user_message_single_write.py` 钉死;唯一例外是网关建线程时写入的 welcome/greet 引导行(new-user-onboarding C,详见 server-gateway.md §1.1)。
+- **消息写所有权(multimodal 005 治理)**：用户行唯一由**网关**写入(dispatch/SPI/商户 store_chat 三个入口,唯一持有 `imageUrls` 的位置;store_chat 补写系 2026-09-09 修复——商户用户消息此前完全不落库,历史恢复缺用户行);引擎侧零写用户行(`run_agent` 主链/问候旁路均不插,历史经 `short_memory.get_messages` 读网关副本),否则时间线双插 user×2(一行带图一行不带)。assistant 行仍归引擎(`short_memory.add_message`),由 `test_user_message_single_write.py` 钉死;唯一例外是网关建线程时写入的 welcome/greet 引导行(new-user-onboarding C,详见 server-gateway.md §1.1)。
 - **长期偏好记忆 (`memory/long_memory.py`)**：审计 Agent 提取用户习惯，向量化存储至 `long_memory_facts`，检索时基于余弦相似度（硬阈值 ≥ 0.55，03 裁决维持——提档会砍光纯关键词命中的地板分，重定标等 07 抽取 eval 出数据）召回 Top-5。召回事实以 `[USER PROFILE MEMORY]` 结构块注入 **finish 终稿单点**（11 落地：approved-only + 租户可见 + ≤5 条，块指令含防复读闸——严禁据此宣称「已按您的偏好过滤」；consult 直答快轨刻意不在注入面）。
 - **情境记忆 (`memory/episodic_memory.py`)**：关键业务事件按重要性（1-10分）向量化落盘，检索阈值同为 ≥0.55，经 `[MEMORY OF PAST EVENTS]` 块与长期画像同批注入 finish 终稿（03 Q3 泛化，11 落地）。
 - **任务记忆 (`memory/task_memory.py`)**：持久化保存挂起和未完成的任务规划步骤。
@@ -66,7 +66,7 @@ paths: ["services/engine-py/**/*"]
 - **幽灵单前置拦截**（执行器 4.1.1，2026-09-09 OCR 事故收口）：`processRefund` 开 HITL 工单**之前**，经 `check_double_refund` 的 `orderFound` 契约（`find_order_by_id` 三源按归属查询，异常 fail-open）对三库查无此单（或非本人归属）的单号诚实失败（"未查询到订单 [X]，或该订单不属于当前账户"）——旧行为直达 waiting 工单且 finish 终稿谎称"已为您发起退款申请"（图内 OCR 与文本敲错单号同罪）。技能 fast-track 路径本就有同款校验（`order_skills.py`），执行器在此对齐。
 - **事务发件箱（Transactional Outbox）**：审批动作与 `approval_outbox_events` 事件在同一数据库事务中原子提交。
 - **转人工排队接线与暂停文案分形（2026-09-29 实弹）**：`create_pending_approval_ticket` 收到 `human_escalation` 即 `takeover.mark_takeover_requested` —— threads 真源翻 `human_takeover` + 坐席空（呼叫中），首记 `metadata.takeover_requested_at`（重复呼叫不刷新，排队时长取最早呼叫），接线失败只 print 不阻断工单主契约；非 escalation 工单（退款等）不动接管态。此前排队机制（坐席台呼叫中置顶、`release_expired_queue_waits` 超时回落）整套建成但零生产调用方，顾客「转人工」后 AI 照常复答罐头。暂停闸文案 `paused_gate` 按认领态分形且**每接管期只说一次**（2026-09-29 防复读，实弹第二幕：顾客每条消息都收「已由人工客服接待」罐头刷屏）：条件 UPDATE 原子提示槽，episode = `metadata.takeover_requested_at`（socket 链空期同语义，标记值带 `:` 前缀防缺失/已认领折叠）；首轮给呼叫中「已为您呼叫人工客服，正在排队等待接入…」/ 已认领「已由人工客服接待」，其后轮次静默 output=""（顾客端不插占位气泡、不回退道歉文案），非 takeover 回 None（AI 照常）；chat/merchant 两路由消费。finish 转人工终稿严禁无队列过度承诺（「加密推送到主管队列 / 1 分钟内接管」已废）。契约：`tests/test_escalation_queue_wiring.py`。
-- **确定性去重恢复**：恢复任务采用确定性标识 `job_resume_${approvalId}`。恢复由 `process_approval_action` 的同步 Fast-Path 派发（派发失败事件留 `pending`）；`outbox_worker.process_pending_events` 为失败事件的对账补偿（`FOR UPDATE SKIP LOCKED` 防多实例重复、10s 年龄阈值避开与 Fast-Path 竞争、`processing` 停滞 >5min 重入队），由 `scheduler.py` 周期调度（30s 间隔，随 Temporal worker 入口启动，单实例假设，`ENGINE_SCHEDULER_ENABLED=0` 关闭；2026-09-03 修复接入）。
+- **确定性去重恢复**：恢复任务采用确定性标识 `job_resume_${approvalId}`。恢复由 `process_approval_action` 的同步 Fast-Path 派发（派发失败事件留 `pending`）；`outbox_worker.process_pending_events` 为失败事件的对账补偿（`FOR UPDATE SKIP LOCKED` 防多实例重复、10s 年龄阈值避开与 Fast-Path 竞争、`processing` 停滞 >5min 重入队），由 `scheduler.py` 周期调度（30s 间隔，随 gateway lifespan 启动（ADR-0007），单实例假设，`ENGINE_SCHEDULER_ENABLED=0` 关闭；2026-09-03 修复接入）。
 
 ### 1.7 影子双跑与回放 (`shadow/diff.py` & `shadow/replay.py`)
 
@@ -78,7 +78,7 @@ paths: ["services/engine-py/**/*"]
 - **信号源与先验**（`badcase/pool.py`）：人工接管 `human_takeover` / 画像事实删除 `persona_fact_deleted`（→ `suspected_defect`）/ 审批驳回 `approval_rejected`（→ `expected_behavior`）/ 熔断 `circuit_breaker`（→ `suspected_defect`；2026-09-07 起接入，挂 `run_agent` 会话收口处 —— 上游 LLM 熔断与图级熔断（转移 ≥22 / 工具错误 ≥3，2026-09-27 校准）两路均入池，挂点与 `session_metrics` 熔断落盘同位）/ 意图冲突 `intent_conflict` 与 宣称落库不符 `intent_mismatch`（→ `neutral`，intent-arbitration 02，2026-09-10：挂 `log_intent_to_db` 单点落库后，`detect_intent_conflict` 判 candidates 跨意图族（动作形 × 咨询侧，须来自**不同层**，单层内多意图不算）即入池；`intent_mismatch` 针对 LLM 精判宣称 out_of_scope × 落库 general_query 的矛盾行 —— 与 §1.3 仲裁留痕同源消费，也是冲突触发仲裁（07）的数据底盘）。入池接口 `record_badcase_signal` 失败静默降级（print 不吞错），**严禁阻断宿主事务**。
 - **脱敏两层管道**（`badcase/redaction.py`）：库内已知值精确替换（地址/收件人/邮箱）➔ `scrubber` 正则兜底；`show` 输出"原文 vs 脱敏对照"，回归用例输入必须取脱敏侧（仓库零原始数据）。
 - **triage CLI**：`python -m engine_py.badcase.cli`（list/show/triage/draft/expire）；`draft` 只产 `expectedTools`/`not-contains` 断言（断言最小化，禁整句黄金答案），带 `origin: badcase:{id}` 溯源，人工并入 `eval/testCases/` 后标 `converted`。
-- **周期任务**（`scheduler.py`，随 Temporal worker 入口启动，Temporal 离线仍独立运行）：outbox 对账（30s）+ 坏例池摘要/保留期（6h）；**单实例假设**，`ENGINE_SCHEDULER_ENABLED=0` 关闭。
+- **周期任务**（`scheduler.py`，随 gateway lifespan 启动，ADR-0007）：outbox 对账（30s）+ 接管/排队超时释放（30s）+ 坏例池摘要/保留期（6h）；**单实例假设**，`ENGINE_SCHEDULER_ENABLED=0` 关闭。
 
 ### 1.9 Data Agent 商户数据分析管线（`analytics/`，2026-09-19 v4；与客服 DAG 完全解耦）
 
@@ -101,6 +101,6 @@ paths: ["services/engine-py/**/*"]
 2. **统一调用入口**：所有 LLM 与向量 Embedding 调用必须统一走 `llm/chat.py`（`get_chat_model` / `get_embedding_model` / `get_vision_model`，lru_cache 单例）；熔断/退避/超时由 `llm/resilience.py` 的全局 CircuitBreaker 承担（2026-09-07 起，挂 `_ResilientChatOpenAI` 公共 invoke/ainvoke 全覆盖），阈值经 `LLM_CIRCUIT_*` / `LLM_RETRY_*` / `LLM_TIMEOUT_SECONDS` env 可调。例外：`get_vision_model` 刻意不入韧性层 —— 视觉失败域独立，自带启发式兜底（wayfinder multimodal 003）。**bigmodel 参数兼容（2026-09-09，`_get_request_payload` 单点收口）**：glm-4.7 拒收 OpenAI 专有参数 —— `parallel_tool_calls`（任意组合 400 code 1210）、`stream:false` 与 tools 同现、`tool_choice` 对象形式；langchain `with_structured_output(function_calling)` 三者皆发，故 chat 模型统一剥前两者、把 `tool_choice` 对象**改写**为字符串 `"required"`（不能剥除——实测闲聊 prompt 下模型即不调工具，结构化解析失败；`"required"` 强制调用语义等价）。glm-4.6v 均收，vision 通路不受影响。契约由 `tests/test_llm_chat_model.py` 钉死。**思维链关闭（2026-09-09，同收口点）**：glm-4.7 默认开 thinking，琐碎调用也先生成大量 reasoning token（裸测同题 79.9s vs 关闭 7.5-18s），客服管线串行多次调用即分钟级回复；`AI_THINKING=disabled`（默认）时统一经 `extra_body` 注入 `{"thinking":{"type":"disabled"}}`（thinking 非 openai SDK 标准参数，顶层直塞 create() 即炸 unexpected keyword argument，必须走 extra_body 通道；setdefault 尊重调用方覆写；`enabled` 不注入，换不支持该参数的提供方时规避 400）。planner 深度规划走 `planner_llm()` 工厂（`bind(max_tokens=AI_PLANNER_MAX_TOKENS)`，默认 2000）——曾对「退货政策」类简单问题生成 5163 token（73.7s），封顶防失控，截断 JSON 落兜底单步计划；bind 仍包 `_ResilientChatOpenAI`，熔断/遥测不丢失。
 
    **自托管 SFT 豁免（2026-09-20）**：`analytics/llm_intent.py::_sft_generate` 直调 `transformers.pipeline`（`AI_INTENT_L3_MODEL` 指定合并后模型目录），不经 `llm/chat.py` 统一入口 —— 该路径是「自托管模型服务本体」而非外部 LLM API 客户端，熔断/供应商遥测语义不适用；同步推理必须经 `asyncio.to_thread` 下放线程（事件循环不可阻塞）。豁免仅限 Data Agent L3 意图层（§1.9），客服主链路 LLM 调用严禁绕开统一入口。
-3. **中文本地化日志**：Temporal Activity 与执行节点产生的所有用户态进度事件必须使用标准中文本地化文本。
+3. **中文本地化日志**：执行节点产生的所有用户态进度事件必须使用标准中文本地化文本。
 4. **无异常冷启动**：记忆检索、租户配置加载等底层逻辑必须兼容空数据与冷启动，严禁未捕获抛错阻断状态机。
 5. **环境自读取**：`config.py` 在导入时读取环境变量；任何测试基建必须先注入 `DATABASE_URL` / `REDIS_URL` 再导入 engine_py 模块。

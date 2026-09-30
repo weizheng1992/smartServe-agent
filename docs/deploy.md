@@ -5,7 +5,7 @@
 > 多机水平扩展（§3）/ K8s（§4），每档含架构与操作步骤（设计稿，采用前需目标环境验证）。
 >
 > 一套 `deploy/` 目录 = 服务器完整上线能力：四个前端（nginx 一体镜像）、
-> gateway（FastAPI）、Temporal Worker（可选）、PostgreSQL/Redis/Temporal。
+> gateway（FastAPI，周期任务随 lifespan）、PostgreSQL/Redis。
 > 训练产物（SFT adapter）的部署另见 [sft-deploy-eval.md](sft-deploy-eval.md)。
 
 ## 一、架构总览
@@ -17,8 +17,7 @@
                     │                              ├── PostgreSQL 15 (pg_data 卷, 不暴露宿主)
                     │                              ├── Redis 7     (redis_data 卷, 不暴露宿主)
                     │                              ├── uploads 卷 (/data/uploads 聊天附件)
-                    │                              ├── hf_cache 卷 (bge 本地 embedding 模型)
-                    │                              └── Temporal + Worker (--profile temporal 可选)
+                    │                              └── hf_cache 卷 (bge 本地 embedding 模型)
                     └── LLM: AI_BASE_URL 指向服务器可达的 OpenAI 兼容端点(外置)
 ```
 
@@ -77,19 +76,15 @@ docker compose -f docker-compose.prod.yml run --rm gateway \
   sh -c 'cd gateway-py && uv run --no-sync python -m gateway_py.merchant_seed'
 ```
 
-**Temporal 周期任务**（HITL 对账/超时扫描，不需要就不开）：
-
-```bash
-docker compose -f deploy/docker-compose.prod.yml --profile temporal up -d
-```
+**周期任务**（HITL 对账/超时扫描/坏例摘要）随 gateway lifespan 自动在场，无需单独启用。
 
 ## 四、镜像说明
 
 | 镜像 | Dockerfile | 内容 | 预期体积 |
 |---|---|---|---|
-| gateway（worker 共用） | `deploy/Dockerfile.gateway` | uv workspace 安装 engine-py+gateway-py（含 torch/bge），CMD uvicorn | 4~6GB |
+| gateway | `deploy/Dockerfile.gateway` | uv workspace 安装 engine-py+gateway-py（含 torch/bge），CMD uvicorn | 4~6GB |
 | web | `deploy/Dockerfile.web` | bun 1.4 构建四个 Vite 应用 → nginx:1.27 四站点静态 | ~200MB |
-| postgres/redis/temporal | 官方镜像 | 数据与队列 | 官方体积 |
+| postgres/redis | 官方镜像 | 数据 | 官方体积 |
 
 设计细节：
 
@@ -141,7 +136,6 @@ bun install                                        # 前端依赖
 bun run build                                      # 四前端 dist
 # 各服务用 systemd 跑:
 #   gateway:  cd services && uv run uvicorn gateway_py.main:app --port 4000
-#   worker:   cd services/engine-py && uv run python -m engine_py.temporal.worker
 #   四前端:   任一 nginx 静态服务 apps/*/dist(配置抄 deploy/nginx.conf)
 ```
 

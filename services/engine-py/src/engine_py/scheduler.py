@@ -1,8 +1,10 @@
 """周期任务框架 — 第五阶段 v1 落地载体。
 
 单进程 asyncio 调度:固定间隔 + 抖动、逐 tick 容错、启动自检日志。
-部署假设:**单实例**(与当前本地/影子期部署一致)。多实例部署前需引入分布式锁
-或将周期任务迁移至 Temporal Schedule(见 docs/agent-lifecycle-testing.md 第五阶段落地批次)。
+宿主:gateway lifespan(ADR-0007,2026-09-30)—— Temporal 执行路线退役后
+随网关进程运行,dev:all 自带对账兜底,不再有独立 worker 入口。
+部署假设:**单实例**(与当前部署一致)。多实例部署前需引入分布式锁或为
+周期任务另立编排裁决(见 docs/architecture/multi-instance-deployment.md)。
 
 环境开关:``ENGINE_SCHEDULER_ENABLED=0`` 整体关闭(多实例部署时仅保留一个调度实例)。
 """

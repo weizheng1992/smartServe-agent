@@ -232,7 +232,7 @@ def get_embedding_model() -> Embeddings:
 
 
 def warm_embedding_model_in_background() -> None:
-    """后台线程预热 embedding 单例(网关 / Temporal Worker 启动时调用)。
+    """后台线程预热 embedding 单例(网关启动时调用)。
 
     首次构造含 torch 导入、权重加载与缓存未命中时的在线拉取(秒级到分钟级),
     放后台线程可避免首个向量化请求在事件循环线程同步承担这段耗时。

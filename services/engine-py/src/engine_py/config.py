@@ -2,7 +2,6 @@
 
 对齐来源:
 - packages/tools/src/cache.ts(REDIS_URL 默认)
-- packages/engine/src/temporal/client.ts(TEMPORAL_ADDRESS 默认)
 - packages/engine/src/llm/callLLMWithRetry.ts(LLM 代理与模型名)
 """
 
@@ -71,11 +70,6 @@ def _database_url() -> str:
 class Settings:
     database_url: str = field(default_factory=_database_url)
     redis_url: str = field(default_factory=lambda: _env("REDIS_URL", "redis://:redis_password@127.0.0.1:6379"))
-
-    temporal_address: str = field(default_factory=lambda: _env("TEMPORAL_ADDRESS", "127.0.0.1:7239"))
-    temporal_namespace: str = field(default_factory=lambda: _env("TEMPORAL_NAMESPACE", "default"))
-    # 影子期独立队列;切流后与 TS 共用 agent-tasks
-    temporal_task_queue: str = field(default_factory=lambda: _env("TEMPORAL_TASK_QUEUE", "agent-tasks-py"))
 
     # 环境变量名与 .env.example / turbo.json globalEnv 对齐为 AI_* 前缀。
     # base_url/model 刻意无缺省(空串)——垃圾缺省(TS 时代的死端口 11211 与

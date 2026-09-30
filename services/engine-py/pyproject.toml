@@ -20,10 +20,6 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
-[project.optional-dependencies]
-# Temporal worker(影子期独立 task queue agent-tasks-py)
-worker = ["temporalio>=1.4"]
-
 [dependency-groups]
 # outbox 对账等 DB 语义测试经 testcontainers 起 PG(镜像 gateway-py 密封测试模式;Docker 不可用时自动 skip)
 dev = ["ruff>=0.6", "pytest>=8.3", "pytest-asyncio>=1.0", "testcontainers[postgres]>=4.8", "pytest-github-actions-annotate-failures>=0.4"]

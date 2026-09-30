@@ -584,11 +584,6 @@ dependencies = [
     { name = "sqlglot" },
 ]
 
-[package.optional-dependencies]
-worker = [
-    { name = "temporalio" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -613,9 +608,7 @@ requires-dist = [
     { name = "sentence-transformers", specifier = ">=5.2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "sqlglot", specifier = ">=25.0" },
-    { name = "temporalio", marker = "extra == 'worker'", specifier = ">=1.4" },
 ]
-provides-extras = ["worker"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1527,18 +1520,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nexus-rpc"
-version = "1.4.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/35/d5/cd1ffb202b76ebc1b33c1332a3416e55a39929006982adc2b1eb069aaa9b/nexus_rpc-1.4.0.tar.gz", hash = "sha256:3b8b373d4865671789cc43623e3dc0bcbf192562e40e13727e17f1c149050fba", size = 82367, upload-time = "2026-02-25T22:01:34.053Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/52/6327a5f4fda01207205038a106a99848a41c83e933cd23ea2cab3d2ebc6c/nexus_rpc-1.4.0-py3-none-any.whl", hash = "sha256:14c953d3519113f8ccec533a9efdb6b10c28afef75d11cdd6d422640c40b3a49", size = 29645, upload-time = "2026-02-25T22:01:33.122Z" },
-]
-
-[[package]]
 name = "numpy"
 version = "2.5.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1981,21 +1962,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/88/fb/46dad6c0ae49ed230ab1b16c890c2b6314e2403e6c412976f4a72d64a527/propcache-0.5.2-cp314-cp314t-win_amd64.whl", hash = "sha256:d447bb0b3054be5818458fbb171208b1d9ff11eba14e18ca18b90cbb45767370", size = 47764, upload-time = "2026-05-08T21:02:07.353Z" },
     { url = "https://files.pythonhosted.org/packages/e7/c4/a47d0a63aa309d10d59ede6e9d4cff03a344a79d1f0f4cd0cd74997b53e0/propcache-0.5.2-cp314-cp314t-win_arm64.whl", hash = "sha256:fe67a3d11cd9b4efabfa45c3d00ffba2b26811442a73a581a94b67c2b5faccf6", size = 41140, upload-time = "2026-05-08T21:02:09.065Z" },
     { url = "https://files.pythonhosted.org/packages/3a/ed/1cdcab6ba3d6ab7feca11fc14f0eeea80755bb53ef4e892079f31b10a25f/propcache-0.5.2-py3-none-any.whl", hash = "sha256:be1ddfcbb376e3de5d2e2db1d58d6d67463e6b4f9f040c000de8e300295465fe", size = 14036, upload-time = "2026-05-08T21:02:10.673Z" },
-]
-
-[[package]]
-name = "protobuf"
-version = "7.36.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/86/73/f66c748df06e7fe24e658eddd600d19c4b40bad836c97ce2d0ad9851fb6b/protobuf-7.36.1.tar.gz", hash = "sha256:d0f6470f0ce2b84e3feaea2d4b816378b37ba4d4aa08a274305373de93e2d524", size = 512499, upload-time = "2026-08-31T22:40:04.667Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f7/6c/3a54a58f2948b0f485df9ecdd06590f15d0a7abf46a89d50c3de709ff4ff/protobuf-7.36.1-cp310-abi3-macosx_10_9_universal2.whl", hash = "sha256:3cf2ee25d006cee57294a1196ea43b37feb78e0dcd1e8af5c1aeddb777655aca", size = 456046, upload-time = "2026-08-31T22:39:56.865Z" },
-    { url = "https://files.pythonhosted.org/packages/6e/08/9f9548793c771095245c0eeaf0c84b76b16a5ef26158043d456f551344a0/protobuf-7.36.1-cp310-abi3-manylinux2014_aarch64.whl", hash = "sha256:43d3d37b1eb24c113b9b7d02008cac44e423f00b611b7781ae998d7623972969", size = 344226, upload-time = "2026-08-31T22:39:58.263Z" },
-    { url = "https://files.pythonhosted.org/packages/fe/51/1bdbd612fa3c51e42ea6f45d05e84dc748ddcd2663e1aa1e89a00a33facd/protobuf-7.36.1-cp310-abi3-manylinux2014_s390x.whl", hash = "sha256:39c518c05586c016d7874ff6079ee115bcec1ea5fbb1d177fbf7867ef4c67e44", size = 357229, upload-time = "2026-08-31T22:39:59.198Z" },
-    { url = "https://files.pythonhosted.org/packages/22/df/c799fe7a05ef16ba853a59db01f3a2c5f7d0676469589ccc4874f76a2a88/protobuf-7.36.1-cp310-abi3-manylinux2014_x86_64.whl", hash = "sha256:97198b77e369a0abd8e262b8f6c7266c55ddb796a3a12c76d7b8881188ed83aa", size = 343228, upload-time = "2026-08-31T22:40:00.179Z" },
-    { url = "https://files.pythonhosted.org/packages/3d/33/d4724ec5d86d496fe4108e220618aa0837ad3423a7af7ccdd9684ccc77c8/protobuf-7.36.1-cp310-abi3-win32.whl", hash = "sha256:0b53ce95272aad50ad25d7ff03373743209822e8ba42ea7fad27d2bee1547d00", size = 443002, upload-time = "2026-08-31T22:40:01.32Z" },
-    { url = "https://files.pythonhosted.org/packages/db/37/155788a0d8daded960375af604202805308169f9b859419ea0aa370946e2/protobuf-7.36.1-cp310-abi3-win_amd64.whl", hash = "sha256:51139351435d9b43d88a55eaa49fb6f737fbb478fb0cbf2cf694d1a04a9d3363", size = 456518, upload-time = "2026-08-31T22:40:02.494Z" },
-    { url = "https://files.pythonhosted.org/packages/39/ca/c47f91d3cab175b01fd8c4f0d80fdf8613be876cc616e66ad281a59c5ddf/protobuf-7.36.1-py3-none-any.whl", hash = "sha256:7d951e46b3f963d6c264c367c437921de9d5aedd9c3f9612b9077736b4e3ad5c", size = 179813, upload-time = "2026-08-31T22:40:03.54Z" },
 ]
 
 [[package]]
@@ -2710,27 +2676,6 @@ wheels = [
 ]
 
 [[package]]
-name = "temporalio"
-version = "1.32.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "nexus-rpc" },
-    { name = "protobuf" },
-    { name = "types-protobuf" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/1b/d8/18cf5bbbcc4b4c884d7723c9b54bf8d1d2556d9fbef3e99599dd3db12034/temporalio-1.32.0.tar.gz", hash = "sha256:2cfa50ec7ebdab66902b80c3a09da3258883d68540811ebfbf44f7f293a4d7d0", size = 2997642, upload-time = "2026-08-24T21:24:37.631Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/0b/adad9dcd8b96c760cd04dcc75f0a0f136aabdb78c4b180219589749469a4/temporalio-1.32.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:47c128732e5d49235c9daeeb084d55093cee5ebc200ccc3afaeb4468f08d809e", size = 13796063, upload-time = "2026-08-24T21:24:16.638Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/84/6cc96518a2aff3ce9fb132479811bb29db563fbcdc947c279df8f089721a/temporalio-1.32.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:e78a209dc5ef3303bc6a3033fe11ffd813b778e4b176ec18d20386d65952daa9", size = 13467827, upload-time = "2026-08-24T21:24:19.731Z" },
-    { url = "https://files.pythonhosted.org/packages/92/d0/720e5e9bb51ae1af6b9fea4d5c56d6ac6e94fbf4c8b86a6b0b318b6aef1e/temporalio-1.32.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a86be3a6d237ea6cc2d632015a5df4cead2aa3143b9601721428b53b87df81e2", size = 13854003, upload-time = "2026-08-24T21:24:22.743Z" },
-    { url = "https://files.pythonhosted.org/packages/e9/6b/8c8973ad314efc8c124e9a0f602ae96533c7e624b3cde7fcc9704aa46dd2/temporalio-1.32.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4dd44a60ba54901560011a32f085353c0f5e7dac6b8d7a7e0c7c4ba508c6bf5d", size = 14193177, upload-time = "2026-08-24T21:24:25.849Z" },
-    { url = "https://files.pythonhosted.org/packages/5b/ad/7496f8424a6ccc9b6ce6c629f9375744e8a439e9a692bd27b4f77b99977a/temporalio-1.32.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6a7100b1f1bf781f8f1800f89bb787b3dd7ce883e78603442d0c7a40e1143a86", size = 13920043, upload-time = "2026-08-24T21:24:28.667Z" },
-    { url = "https://files.pythonhosted.org/packages/5b/16/73fa24d69e70035323217e87d33cb3df6415e1906db07b2112c9a6b09e33/temporalio-1.32.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:311abb9f0650f4ad9f24944ef16d8ed47954ddc3075c1e8c73dcd968d70ccdce", size = 14309243, upload-time = "2026-08-24T21:24:31.727Z" },
-    { url = "https://files.pythonhosted.org/packages/07/72/4a49f38f294f9cc1ba15c0b5272adfa7d2a0da38e924ed7f0b1ea2e5bbc9/temporalio-1.32.0-cp310-abi3-win_amd64.whl", hash = "sha256:158386bcd9a6dce1ab63d732fc967c5a5830e15c3012ffaa4b8772bdac099e0f", size = 15196754, upload-time = "2026-08-24T21:24:34.931Z" },
-]
-
-[[package]]
 name = "tenacity"
 version = "9.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2958,15 +2903,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/16/f7/57713ba479fd405eb76de31404b2c744c289e336b2d999511ebf51e496f7/typer-0.27.2.tar.gz", hash = "sha256:269b7eb9d3c202ca84b4bc9618cb04ebb43d3d4d1e567e4c768607232c05f945", size = 204045, upload-time = "2026-08-28T10:26:55.046Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/bf/205d0004930ede8f542fb58f601526fccf4ae7626075ca1e6c4de5d3d652/typer-0.27.2-py3-none-any.whl", hash = "sha256:b3a5fc4342d5fc8fda8fc3010b1cf117e9249aab7fae800c2eff62fd3842d97d", size = 123130, upload-time = "2026-08-28T10:26:53.752Z" },
-]
-
-[[package]]
-name = "types-protobuf"
-version = "7.35.1.20260827"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/44/07/541ffc94a4baee7d92ec91d91018aa684f97ece608b74619863e3cfd9cb3/types_protobuf-7.35.1.20260827.tar.gz", hash = "sha256:5a98c18177cfd968d6a0de55ecfc4221aa829ef88bcd86104298e028516b04af", size = 69646, upload-time = "2026-08-27T12:06:04.93Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/e2/7ce7c4802bcf3732155dedc23fe3d2b506a387d6b42da61261886f42af80/types_protobuf-7.35.1.20260827-py3-none-any.whl", hash = "sha256:7cc452a012678a6a889287d4cb702ea54b9f90a6ab0f3aa4c019d21f3ae7529b", size = 86412, upload-time = "2026-08-27T12:06:03.826Z" },
 ]
 
 [[package]]

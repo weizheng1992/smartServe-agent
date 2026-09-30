@@ -33,7 +33,7 @@ from engine_py.db import ApprovalOutboxEvent
 
 
 class _FakeRunAgent:
-    """记录派发入参;``error`` 非空时模拟 Temporal/执行失败。"""
+    """记录派发入参;``error`` 非空时模拟恢复执行失败。"""
 
     def __init__(self) -> None:
         self.calls: list = []
@@ -206,14 +206,14 @@ def test_派发异常_事件转failed并留痕(clean_table):
     asyncio.run(_insert(factory, ev))
 
     fake = _FakeRunAgent()
-    fake.error = RuntimeError("boom: temporal queue unreachable")
+    fake.error = RuntimeError("boom: resume dispatch unreachable")
     with _stub_run_agent(fake):
         summary = asyncio.run(_process_and_drain(older_than_ms=0))
 
     assert summary["dispatchedCount"] == 1
     row = asyncio.run(_fetch(factory, ev.id))
     assert row.status == "failed"
-    assert "boom: temporal queue unreachable" in (row.error_message or "")
+    assert "boom: resume dispatch unreachable" in (row.error_message or "")
     assert row.retry_count == 1
 
 

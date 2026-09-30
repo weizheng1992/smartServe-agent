@@ -14,7 +14,7 @@ def tenant_of_state(state: dict) -> str:
 
     租户边界推导只允许这一份实现(triage 引擎与 consult 快轨共用,2026-09-09 收口),
     任何副本漂移都是多租户隔离风险。上下文层为 A7 新增:状态缺租户字段时(如
-    Temporal 早期节点或手工构造的状态)吃 run_agent 注入的入口真值。
+    手工构造的状态)吃 run_agent 注入的入口真值。
     """
     business_config = state.get("business_config") or {}
     return str(

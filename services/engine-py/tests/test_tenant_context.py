@@ -1,8 +1,8 @@
 """引擎侧租户上下文契约(A7 收口)。
 
 此前 engine 进程没有租户上下文 —— 深层模块各自 ``or "ecommerce"`` 静默兜底,
-显式租户断供时错绑主站且不留痕。收口后:入口(run_agent / Temporal
-activities)注入,深层解析 = 显式参数 > 上下文 > 平台默认(响亮告警)。
+显式租户断供时错绑主站且不留痕。收口后:入口(run_agent)注入,深层解析 =
+显式参数 > 上下文 > 平台默认(响亮告警)。
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ class TestPropagation:
 class TestDeepSites:
     def test_tenant_of_state_falls_back_to_context(self):
         set_business_context("nike")
-        # 状态缺租户字段(Temporal 早期节点/手工构造状态)时吃入口真值
+        # 状态缺租户字段(手工构造状态/图中间节点直调)时吃入口真值
         assert tenant_of_state({"input": "你好"}) == "nike"
 
     def test_tenant_of_state_state_still_authority(self):

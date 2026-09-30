@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from engine_py.llm import warm_embedding_model_in_background
@@ -53,7 +54,18 @@ async def _lifespan(app: FastAPI):
     except Exception as startup_err:
         raise SystemExit(f"[Startup] LLM 配置校验失败: {startup_err}") from startup_err
     await _sync_product_knowledge_on_startup()
-    yield
+    # 周期任务随网关宿主(ADR-0007:Temporal 执行路线退役后,scheduler 的唯一
+    # 宿主)—— outbox 对账 / 接管释放 / 坏例摘要。dev:all 从此自带对账兜底,
+    # 不再依赖单独的 worker 进程(旧痛点:审批批了没反应,对账根本没人跑)。
+    # 开关闸在 start_scheduler 内部(ENGINE_SCHEDULER_ENABLED=0 即空转返回)。
+    # 延迟导入:模块加载期不连带 outbox/badcase 全链。
+    from engine_py.scheduler import start_scheduler
+
+    scheduler_task = asyncio.create_task(start_scheduler())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
 
 
 fastapi_app = FastAPI(title="agent-all gateway-py", version="0.1.0", lifespan=_lifespan)

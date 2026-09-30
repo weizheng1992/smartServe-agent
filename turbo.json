@@ -7,7 +7,6 @@
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
     "POSTGRES_DB",
-    "TEMPORAL_ADDRESS",
     "AI_BASE_URL",
     "AI_API_KEY",
     "AI_MODEL",

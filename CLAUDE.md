@@ -12,7 +12,6 @@
 - **启动 FastAPI 网关:** `bun run dev:server`(端口 4000,`uv run uvicorn gateway_py.main:app --reload`)
 - **启动独立商户应用:** `bun run dev:merchant`(端口 3005,Vite 6 SPA;`/api/*` 与 `/spi/*` 由 Vite proxy 代理至 gateway-py)
 - **启动商户独立后台:** `bun run dev:merchant-admin`(端口 3006,Vite 6 SPA;`/api/*` 同样由 Vite proxy 代理至 gateway-py,数据分析 Agent 的宿主)
-- **启动 Temporal Worker:** `bun run worker`(`uv run python -m engine_py.temporal.worker`,任务队列 `agent-tasks-py`)
 
 ### 1.2 构建、Lint 与格式化
 
@@ -32,7 +31,6 @@
 ### 1.4 数据库与基础设施
 
 - **启动核心 Docker 服务:** `bun run docker:up`(PostgreSQL + Redis)
-- **启动 Temporal 集群:** `bun run docker:temporal`
 - **停止 Docker 服务:** `bun run docker:down`
 - **应用 Schema 迁移:** `bun run db:push`(Alembic `upgrade head`,在 `services/engine-py` 中执行)
 - **数据库播种:** `bun run db:seed`(engine 播种 + 第三方播种 + 商户播种)
@@ -77,7 +75,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 │    对账 Worker 由 scheduler 周期调度,见不变量 #3)                    │
 │  - Data Agent:analytics/ 独立轻管线(意图解析 ➔ 闭集 SQL 模板 ➔      │
 │    只读执行 ➔ 卡片;38 指标语义注册表,LLM 永不写 SQL)               │
-│  - 编排:Temporal 工作流(队列 agent-tasks-py)+ 本地仿真回退;        │
+│  - 回合管线:run_agent 单一深模块(ADR-0007,Temporal 路线已退役);   │
 │    shadow-harness 对冻结 TS 基线做 diff/replay                        │
 │  - 事件主干:Redis Streams(seq + XADD maxlen per job)                │
 │  - DB 所有权:SQLAlchemy 模型 + Alembic 迁移                           │
@@ -109,7 +107,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
    - 敏感动作(超阈值退款、地址修改)挂起执行并写入 `pending_approvals`。
    - 审批状态变更与 `approval_outbox_events` 事件在**同一数据库事务**中原子提交。
    - 恢复机制(2026-09-03 起):审批通过/驳回/取消后,由 gatekeeper 的**同步 Fast-Path** 以确定性 JobId `job_resume_${approvalId}` 派发 `run_agent` 恢复执行,派发成功即标记事件 `completed`;Fast-Path 失败遗留的 `pending` 事件由 `approvals/outbox_worker.py` 对账补偿(`FOR UPDATE SKIP LOCKED`,10s 年龄阈值避开竞争,`processing` 停滞 >5min 重入队)。
-   - 对账补偿与坏例池摘要等周期任务由 `engine_py/scheduler.py` 统一调度,随 Temporal worker 入口启动(Temporal 离线时仍独立运行)。**单实例假设**,多实例部署前需分布式锁或迁移 Temporal Schedule;`ENGINE_SCHEDULER_ENABLED=0` 可整体关闭。
+   - 对账补偿与坏例池摘要等周期任务由 `engine_py/scheduler.py` 统一调度,随 **gateway lifespan** 启动(ADR-0007:Temporal 执行路线 2026-09-30 退役,重引入须新立 ADR)。**单实例假设**,多实例部署前需分布式锁或为周期任务另立编排裁决;`ENGINE_SCHEDULER_ENABLED=0` 可整体关闭。
 4. **参数化 AST 只读 SQL 守卫**:
    - Data Agent 的每条指标 SQL 由闭集模板编译,经 `engine_py/analytics/sql_guard.py` AST 审计(仅 SELECT、表白名单、危险函数黑名单),商户真账在只读事务超时控制下执行。
    - 租户边界由服务端模板注入 + `require_business_id` 编译层断言(谓词不可被剥离)。任何新的自由查询入口必须先接该守卫,严禁绕闸直连,详见 `.claude/rules/tools-registry.md` §1.3(旧 gateway 沙箱 2026-09-30 作为零调用方死代码删除)。
@@ -124,7 +122,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 
 详细领域规则与编码规范按模块组织于 `.claude/rules/`:
 
-- `agent-engine.md`:LangGraph 拓扑、Skills 注册表、四象限记忆、Contextual RAG、Temporal 工作流、Data Agent 分析管线(`analytics/`)。
+- `agent-engine.md`:LangGraph 拓扑、Skills 注册表、四象限记忆、Contextual RAG、回合管线(ADR-0007)、Data Agent 分析管线(`analytics/`)。
 - `database-schema.md`:SQLAlchemy 模型、Alembic 迁移、发件箱事件、多租户表。
 - `tools-registry.md`:工具定义、SPI/MCP 连接器、AST SQL 沙箱、指标语义注册表。
 - `server-gateway.md`:FastAPI 路由、人工接管服务、技能管理端点。
@@ -146,8 +144,9 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - **Contextual RAG 与多租户**:`docs/architecture/contextual-rag.md`
 - **多模态视觉与富卡片**:`docs/architecture/multimodal-and-rich-cards.md`
 - **多实例部署指南**:`docs/architecture/multi-instance-deployment.md`(单实例假设盘点、socket.io 跨实例广播与 scheduler 单例化方案、扩容前置清单)
-- **dev 启动与 Temporal 指南**:`docs/deployment.md`(dev Temporal 启动流程与踩坑、环境变量矩阵、Temporal 执行路线启用步骤)
-- **生产部署方案**:`docs/deploy.md`(Docker Compose 全栈上线:四前端 nginx 一体 / gateway / PG / Redis / Temporal,五步上线 + 运维 + 安全清单)
+- **dev 启动指南**:`docs/deployment.md`(dev 启动流程与踩坑、环境变量矩阵)
+- **生产部署方案**:`docs/deploy.md`(Docker Compose 全栈上线:四前端 nginx 一体 / gateway / PG / Redis,五步上线 + 运维 + 安全清单)
+- **架构决策记录**:`docs/adr/`(0001-0007;0007 = Temporal 执行路线退役)
 
 
 ## 6. Git 提交规范

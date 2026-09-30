@@ -142,7 +142,6 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
                 "result": paused_output or "",
                 "cards": [],
                 "isHumanActive": True,
-                "isTemporalMode": False,
             }
         return {
             "success": True,
@@ -151,7 +150,6 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             "userId": effective_user_id,
             "output": paused_output or "",
             "isHumanActive": True,
-            "isTemporalMode": False,
         }
 
     job = AgentJobInput(
@@ -186,14 +184,12 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             "output": output,
             "result": output,
             "cards": final_state.get("cards") or [],
-            "isTemporalMode": False,
         }
     return {
         "success": True,
         "jobId": job_id,
         "threadId": effective_thread_id,
         "userId": effective_user_id,
-        "isTemporalMode": False,
     }
 
 
