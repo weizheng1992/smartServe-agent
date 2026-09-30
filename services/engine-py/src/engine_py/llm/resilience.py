@@ -6,6 +6,9 @@
   一致 —— 熔断的是"上游 LLM 服务可用性",与租户/模型无关。
 - **指数退避**:最多 3 次尝试(默认),初始 1s 逐次翻倍;只有穷尽重试后的
   最终失败才计入熔断计数(TS 语义:中间重试成功即 record_success 清零)。
+  终端失败(穷尽/总预算耗尽)若恰好触发跳闸 OPEN,改抛
+  CircuitBreakerOpenError —— 跳闸即终端失败的真语义,节点穿透闸据此把
+  job 级道歉降级接住(2026-09-30,详见 ``_trip_or_original``)。
 - **超时**:每次尝试以 ``asyncio.wait_for`` 包裹(LLM_TIMEOUT_SECONDS,默认
   120s;≤0 视为关闭),超时视同失败参与退避与熔断。同步 invoke 无此层
   (引擎运行时全异步,同步路径仅供测试/脚本)。
@@ -175,6 +178,21 @@ def _breaker_reject_status() -> dict[str, Any] | None:
     return None
 
 
+def _trip_or_original(err: Exception) -> Exception:
+    """终端失败(重试穷尽/总预算耗尽)的异常裁决:``record_failure`` 若恰好
+    把熔断推至 OPEN,改抛 CircuitBreakerOpenError —— 跳闸即本轮终端失败的
+    真语义,须经节点穿透闸(finish/planner/validator/consult_fast_path/
+    llm_refine 前置上抛)接 run_agent 的 job 级道歉降级与
+    resolution_status='llm_circuit_breaker' 落盘;否则当终端调用恰为该轮
+    唯一 LLM 调用时(意图收敛后咨询类常如此),原始 ConnectionError 被节点
+    generic except 吃成「已由客服系统处理」罐头,诚实降级永不触达
+    (2026-09-30 熔断 E2E 实弹定位)。未跳闸(阈内失败)保持原始异常,
+    节点级兜底照旧 —— 瞬时抖动的容错语义不变。"""
+    if global_circuit_breaker.state == "OPEN":
+        return CircuitBreakerOpenError(global_circuit_breaker.get_status())
+    return err
+
+
 async def resilient_ainvoke(attempt: Callable[[], Awaitable[Any]]) -> Any:
     """异步调用韧性包裹:熔断拒绝 → 指数退避重试 → 每次尝试超时中断。
 
@@ -202,6 +220,10 @@ async def resilient_ainvoke(attempt: Callable[[], Awaitable[Any]]) -> Any:
             )
             print(f"[LLM Resilience] {budget_err}{_attempt_context_tag()}")
             global_circuit_breaker.record_failure()
+            terminal = _trip_or_original(budget_err)
+            if terminal is not budget_err:
+                await _emit_job_status("circuit_breaker_open", terminal.args[0])
+                raise terminal from budget_err
             raise budget_err
         try:
             if attempts > 1:
@@ -222,6 +244,10 @@ async def resilient_ainvoke(attempt: Callable[[], Awaitable[Any]]) -> Any:
             print(f"[LLM Resilience] 第 {attempts} 次尝试失败{_attempt_context_tag()}: {err}")
             if attempts >= max_attempts:
                 global_circuit_breaker.record_failure()
+                terminal = _trip_or_original(err)
+                if terminal is not err:
+                    await _emit_job_status("circuit_breaker_open", terminal.args[0])
+                    raise terminal from err
                 raise
             await _sleep(delay_ms / 1000)
             delay_ms *= 2
@@ -246,6 +272,6 @@ def resilient_invoke(attempt: Callable[[], Any]) -> Any:
             print(f"[LLM Resilience] 第 {attempts} 次尝试失败{_attempt_context_tag()}: {err}")
             if attempts >= max_attempts:
                 global_circuit_breaker.record_failure()
-                raise
+                raise _trip_or_original(err) from err
             time.sleep(delay_ms / 1000)
             delay_ms *= 2

@@ -230,6 +230,87 @@ class TestResilientAinvoke:
         assert asyncio.run(resilient_ainvoke(slowish)) == "ok"
 
 
+class TestTerminalTripConversion:
+    """终端失败即熔断事件(2026-09-30):穷尽重试/总预算耗尽的 record_failure
+    若把熔断推至 OPEN,须改抛 CircuitBreakerOpenError —— 意图收敛后,咨询类
+    输入整轮常只有 finish 一枪 LLM,原始 ConnectionError 会被节点 generic
+    except 吃成「已由客服系统处理」罐头,道歉降级与 llm_circuit_breaker 落盘
+    永不触达(E2E 实弹定位)。未跳闸的阈内失败保持原始异常不变。"""
+
+    def test_exhaustion_that_trips_breaker_raises_open_error(self, monkeypatch):
+        monkeypatch.setenv("LLM_CIRCUIT_MAX_FAILURES", "1")
+        TestResilientAinvoke._capture_sleep(monkeypatch)
+        original = RuntimeError("provider down")
+
+        def always_fails():
+            async def _call():
+                raise original
+
+            return _call()
+
+        with pytest.raises(CircuitBreakerOpenError) as exc_info:
+            asyncio.run(resilient_ainvoke(always_fails))
+        assert exc_info.value.status["state"] == "OPEN"
+        assert exc_info.value.__cause__ is original  # 原始异常保留在因果链上
+        assert global_circuit_breaker.get_status()["state"] == "OPEN"
+
+    def test_exhaustion_below_threshold_keeps_original_error(self, monkeypatch):
+        monkeypatch.setenv("LLM_CIRCUIT_MAX_FAILURES", "5")
+        TestResilientAinvoke._capture_sleep(monkeypatch)
+
+        def always_fails():
+            async def _call():
+                raise RuntimeError("provider down")
+
+            return _call()
+
+        with pytest.raises(RuntimeError, match="provider down"):
+            asyncio.run(resilient_ainvoke(always_fails))
+
+    def test_sync_trip_raises_open_error(self, monkeypatch):
+        monkeypatch.setenv("LLM_CIRCUIT_MAX_FAILURES", "1")
+        monkeypatch.setattr(resilience.time, "sleep", lambda _: None)
+
+        def always_fails():
+            raise RuntimeError("sync down")
+
+        with pytest.raises(CircuitBreakerOpenError) as exc_info:
+            resilient_invoke(always_fails)
+        assert exc_info.value.__cause__ is not None
+
+    def test_budget_exhaustion_trip_raises_open_error(self, monkeypatch):
+        monkeypatch.setenv("LLM_CIRCUIT_MAX_FAILURES", "1")
+        monkeypatch.setenv("LLM_TOTAL_DEADLINE_SECONDS", "0.5")
+        monkeypatch.setattr(resilience, "_max_attempts", lambda: 5)
+        monkeypatch.setattr(resilience, "_timeout_seconds", lambda: 5.0)
+
+        async def slow_attempt():
+            await asyncio.sleep(5)
+
+        with pytest.raises(CircuitBreakerOpenError) as exc_info:
+            asyncio.run(resilient_ainvoke(slow_attempt))
+        assert exc_info.value.status["state"] == "OPEN"
+
+    def test_trip_emits_circuit_status_to_bound_job(self, monkeypatch):
+        monkeypatch.setenv("LLM_CIRCUIT_MAX_FAILURES", "1")
+        TestResilientAinvoke._capture_sleep(monkeypatch)
+        events = TestJobStatusEmission._capture_publish(monkeypatch)
+        bind_llm_call_context(thread_id="t9", business_id="b9", job_id="job_trip")
+
+        def always_fails():
+            async def _call():
+                raise RuntimeError("provider down")
+
+            return _call()
+
+        with pytest.raises(CircuitBreakerOpenError):
+            asyncio.run(resilient_ainvoke(always_fails))
+        breaker_events = [e for e in events if e[2].get("status") == "circuit_breaker_open"]
+        assert len(breaker_events) == 1
+        assert breaker_events[0][0] == "job_trip"
+        assert "熔断" in breaker_events[0][2]["message"]
+
+
 class TestResilientInvoke:
     def test_sync_path_retries_and_reraises(self, monkeypatch):
         monkeypatch.setenv("LLM_RETRY_MAX_ATTEMPTS", "2")
