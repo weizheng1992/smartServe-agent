@@ -120,16 +120,49 @@ class TestAdversarialInput:
             assert out["type"] != "result", f"{q!r} → {out['type']}"
             assert out["type"] in ("unsupported", "clarify", "error"), f"{q!r} → {out['type']}"
 
-    def test_payload_never_enters_sql_or_params(self, stub_execute):
+    def test_injection_rejected_before_fallback_llm(self, monkeypatch):
+        """注入形状闸(2026-10-01 夜审):L0 未命中的注入语料必须在 L2/L3 兜底
+        之前确定性拒绝 —— 兜底 LLM 曾对「'; DROP TABLE users; -- 销量排行」
+        抽出尾部指标词放行成 result 帧。钉死:对抗语料的裁决绝不触达活 LLM。"""
+        async def _forbidden(*args, **kwargs):
+            raise AssertionError(f"注入语料不应触达 L2/L3 兜底: {args!r}")
+
+        monkeypatch.setattr(graph, "_fallback_intent", _forbidden)
+        for q in self.INJECTIONS:
+            out = asyncio.run(graph.ask(q, {"business_id": "aurora", "role": "finance_owner"}))
+            assert out["type"] == "unsupported", f"{q!r} → {out['type']}"
+
+    def test_payload_never_enters_sql_or_params(self, monkeypatch):
+        """载荷封锁(2026-10-01 夜审收紧):含注入形状的问句在执行之前就被形状
+        闸拒绝,载荷连 SQL/参数的面都见不到;纯净问句的执行面 SQL 是闭集模板、
+        参数无注入词形。原版钉「尾部不干扰解析、照常出 result」,与
+        test_injection_never_yields_result 的安全不变量互相矛盾 —— 同形语料
+        同样 L0 词面命中,不可能一个出 result 一个不出;安全不变量优先。"""
+        captured: dict = {}
+
+        async def _fake(self, compiled, session_ctx=None):
+            captured["calls"] = captured.get("calls", 0) + 1
+            captured["sql"] = compiled.sql
+            captured["params"] = compiled.params
+            return QueryResult(
+                rows=[{"productId": "SPU-A", "metricScore": 1.0}],
+                metric=compiled.metric, unit=compiled.unit, caliber="测试口径",
+            )
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
         out = asyncio.run(
+            graph.ask("销售额最高的商品", {"business_id": "aurora", "role": "finance_owner"})
+        )
+        assert out["type"] == "result"
+        sql, params = captured["sql"], captured["params"]
+        assert "drop" not in sql.lower() and "delete" not in sql.lower() and "union" not in sql.lower()
+        assert "DROP" not in str(params) and "union" not in str(params).lower()
+
+        out_dirty = asyncio.run(
             graph.ask("销售额最高的商品 ; DROP TABLE users", {"business_id": "aurora", "role": "finance_owner"})
         )
-        if out["type"] != "result":
-            pytest.fail("词面「销售额最高的商品」应命中指标(注入尾部不得干扰解析)")
-        sql, params = stub_execute["sql"], stub_execute["params"]
-        assert "drop" not in sql.lower() and "delete" not in sql.lower()
-        assert "DROP TABLE users" not in sql
-        assert "DROP" not in str(params) and "union" not in str(params).lower()
+        assert out_dirty["type"] == "unsupported", f"注入尾部应被形状闸拒绝: {out_dirty['type']}"
+        assert captured["calls"] == 1, "注入尾部的问句不得触发第二次执行"
 
     def test_unregistered_metric_template_rejects_loud(self):
         """闭集双闸:注册表外指标名在 compile 入口 KeyError 拒绝;若某日注册表

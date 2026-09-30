@@ -33,6 +33,21 @@ from .trace import Trace
 # 纯图表切换追问(确定性快捷路):问句只含图型词 → 上一轮问句 + 图型要求重解析
 _CHART_ONLY_RE = re.compile(r"^(?:换成?|改[成为]?|用|来)?\s*(?:一?个?)?\s*(折线图?|柱状图?|条形图?|柱形图?|表格)\s*[?？]?$")
 
+# 注入形状闸(2026-10-01 夜审):语料携带 SQL 写关键词串联 / UNION SELECT /
+# 指令覆盖语等注入形状时,先于 L0/L2/L3 全部分层确定性拒绝。实证:此类语料
+# 会被 L0 词面命中照常出 result 帧(「'; DROP TABLE users; -- 销量排行」命中
+# volume、「销售额最高的商品; DELETE FROM orders」命中 gmv),违反「注入语料
+# 绝不出 result」安全不变量。合法数据问句不携带这些形状(中文数据问句不含
+# 「; 写关键词」/「UNION SELECT」/指令覆盖语);闭集模板 + 绑定参数 + 只读
+# 事务仍是数据面唯一出口,此闸属呈现层诚实纪律,不承担数据面安全职责。
+_INJECTION_SHAPE_RE = re.compile(
+    r";\s*(?:drop|delete|insert|update|alter|truncate)\b"
+    r"|\bunion\s+select\b"
+    r"|忽略(?:之前|先前|以上|前面)?(?:的)?(?:所有)?指令"
+    r"|\bignore\s+previous\s+instructions?\b",
+    re.IGNORECASE,
+)
+
 
 def build_cards(question: str, result: Any, intent: StructuredQueryIntent | None = None) -> list[dict]:
     """QueryResult → 卡片(表格为主基座;指标元数据+口径注记必带 —— 诚实呈现)。"""
@@ -80,6 +95,13 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
     trace = Trace(business_id, session_ctx.get("role", "finance_owner"), question)
     if history:
         trace.add_layer("session", followed_up=True)
+
+    # 注入形状闸(先于 L0/L2/L3 全部分层,见 _INJECTION_SHAPE_RE 注):
+    # 响亮拒绝 + 落库,注入语料的裁决绝不交给词面命中或兜底 LLM
+    if _INJECTION_SHAPE_RE.search(question):
+        await _log_unanswered(session_ctx, question)
+        await trace.record("unsupported", final_method="injection_guard")
+        return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": "问句含注入形状,已拒绝处理"}
 
     try:
         intent = engine.resolve(question)
