@@ -44,10 +44,12 @@ paths: ["services/engine-py/**/*"]
 
 ### 1.4 四象限记忆与双层画像隔离 (Quad-Memory & Dual-Tier Persona)
 
+> **「画像」三义辨析(persona-hardening 08,2026-09-30)**：本节「画像/双层画像」专指**记忆画像**——`long_memory_facts` 事实行（`memory/long_memory.py`，admin personas 模块 CRUD 的同一数据）。仓库另有两处同词异义，互不相通：Data Agent 的 `customer_profile` **商户宽表**（`analytics/engine.py`，客户分析指标源）与商品**口碑画像**（商品评价查询，`tools_registry/mall_domain.py`）。跨文档检索先分清域，防误汇。
+
 - **短期记忆 (`memory/short_memory.py`)**：基于 `messages` 物理表读取最近 10 轮对话，内存为空时触发自愈补全。
 - **消息写所有权(multimodal 005 治理)**：用户行唯一由**网关**写入(dispatch/SPI/商户 store_chat 三个入口,唯一持有 `imageUrls` 的位置;store_chat 补写系 2026-09-09 修复——商户用户消息此前完全不落库,历史恢复缺用户行);引擎侧零写用户行(`run_agent` 主链/问候旁路/Temporal activity 均不插,历史经 `short_memory.get_messages` 读网关副本),否则时间线双插 user×2(一行带图一行不带)。assistant 行仍归引擎(`short_memory.add_message`),由 `test_user_message_single_write.py` 钉死;唯一例外是网关建线程时写入的 welcome/greet 引导行(new-user-onboarding C,详见 server-gateway.md §1.1)。
-- **长期偏好记忆 (`memory/long_memory.py`)**：大模型提取用户习惯，向量化存储至 `long_memory_facts`，检索时基于余弦相似度（硬阈值 ≥ 0.65）召回 Top-5。
-- **情境记忆 (`memory/episodic_memory.py`)**：关键业务事件按重要性（1-10分）向量化落盘。
+- **长期偏好记忆 (`memory/long_memory.py`)**：审计 Agent 提取用户习惯，向量化存储至 `long_memory_facts`，检索时基于余弦相似度（硬阈值 ≥ 0.55，03 裁决维持——提档会砍光纯关键词命中的地板分，重定标等 07 抽取 eval 出数据）召回 Top-5。召回事实以 `[USER PROFILE MEMORY]` 结构块注入 **finish 终稿单点**（11 落地：approved-only + 租户可见 + ≤5 条，块指令含防复读闸——严禁据此宣称「已按您的偏好过滤」；consult 直答快轨刻意不在注入面）。
+- **情境记忆 (`memory/episodic_memory.py`)**：关键业务事件按重要性（1-10分）向量化落盘，检索阈值同为 ≥0.55，经 `[MEMORY OF PAST EVENTS]` 块与长期画像同批注入 finish 终稿（03 Q3 泛化，11 落地）。
 - **任务记忆 (`memory/task_memory.py`)**：持久化保存挂起和未完成的任务规划步骤。
 - **双层画像物理隔离**：
   - 严格区分 `scope: 'global'`（客观生理属性，如脚长/过敏史）与 `scope: 'tenant'`（品牌专属偏好/会员积分）。

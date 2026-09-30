@@ -31,10 +31,11 @@ A deep domain gatekeeper subsystem unifying security policy evaluation, pending 
 The TS `AgentMemoryEngine` facade was not ported as a single class; `run_agent.py` orchestrates the four tiers directly:
 
 - `ShortMemory` (`short_memory.py`): sliding recent-history reads from the `messages` table (with self-heal when empty); assistant rows are engine-authored, user rows are gateway-authored (single-write ownership).
-- `LongMemory` (`long_memory.py`): persona facts with cosine retrieval (hard threshold ≥ 0.65).
+- `LongMemory` (`long_memory.py`): persona facts with cosine retrieval (hard threshold ≥ 0.55).
 - `TaskMemory` (`task_memory.py`): suspended task plans persisted the moment an approval ticket becomes visible (`skills/suspension.py` is the only implementation seam).
 - `EpisodicMemory` (`episodic_memory.py`): importance-scored business events with dual-tier tenant visibility (`scope=global` vs `scope=tenant` + `business_id`).
-- **Parallel Gathering (run_agent)**: history, long-term facts, and episodic events are fetched concurrently per turn and fed into prompt assembly; turn recording writes back assistant messages, extracted facts, plans, and events non-blockingly.
+- **Parallel Gathering (run_agent)**: history, long-term facts, and episodic events are fetched concurrently per turn and injected into the finish-node final-answer assembly (`[USER PROFILE MEMORY]` / `[MEMORY OF PAST EVENTS]` blocks with an anti-echo gate; the consult fast-path deliberately bypasses injection); turn recording writes back assistant messages, extracted facts, plans, and events non-blockingly.
+- **Naming note ("persona" is overloaded)**: here it means the **memory persona** (`long_memory_facts`). Two unrelated homonyms: the Data Agent `customer_profile` merchant wide table (`analytics/engine.py`) and the product review-reputation profile (evaluation queries in `tools_registry/mall_domain.py`). See `agent-engine.md` §1.4 for the full disambiguation.
 
 ### NL2SQL Sandbox — retired, zero callers
 

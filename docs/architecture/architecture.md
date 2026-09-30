@@ -623,7 +623,7 @@ LLM 是仲裁员与终局。每一层的判定以 `{layer, intent, confidence}` 
 - **读取流 (Read Pipeline)**：
   1. `runAgent` 入口通过 `Promise.allSettled` 并行检索 Short + Long + Episodic + Contextual RAG；
   2. 基于 `userId` 与当前 `tenantId` 施加严格隔离过滤器；
-  3. 余弦相似度门禁过滤（Long $\ge 0.65$, Episodic $\ge 0.55$）；
+  3. 余弦相似度门禁过滤（Long $\ge 0.65$, Episodic $\ge 0.55$；**注:此为退役 TS 实现的历史口径——现 Python 实现 `long_memory.py`/`episodic_memory.py` 两侧均 0.55,见 `.claude/rules/agent-engine.md` §1.4**）；
   4. 压缩拼接至系统提示词中的 Context Wallet。
 
 ---
