@@ -11,6 +11,7 @@ from ...triage.intent_registry import (
     _alt,
     _grp,
     _pick,
+    infer_preference_type,
 )
 from .utils import extract_order_id
 
@@ -89,7 +90,6 @@ def try_match_executor_fast_path(
     cart_last_added: list[str] | None = None,
 ) -> dict | None:
     desc_lower = description.lower()
-    input_lower = (user_input or "").lower()
     extracted_order_id = extract_order_id(description, user_input, short_memory)
 
     # 🛡️ 纯沟通/展示/询问步骤不作为物理工具执行
@@ -234,16 +234,18 @@ def try_match_executor_fast_path(
         any(kw in desc_lower for kw in ("preference", "recorduserpreference", "偏好", "尺码", "鞋码"))
         and "recordUserPreference" in allowed_tools
     ):
-        pref_type = "other"
-        if any(kw in input_lower for kw in ("码", "尺码", "size")):
-            pref_type = "size"
-        elif any(kw in input_lower for kw in ("色", "颜色", "color")):
-            pref_type = "color"
-        elif any(kw in input_lower for kw in ("牌", "品牌", "brand")):
-            pref_type = "brand"
+        # 🧠 偏好值取值(persona-hardening 12,2026-09-30):planner 快轨在描述里
+        # 内嵌 `Stated preference: <值>` —— 检测器抽取的明示偏好值优先于整句
+        # user_input(整句会把问句/修饰语当偏好值存进画像,04 号票残留);
+        # 无明示抽取时回退整句,存量行为不变。类型推断统一走
+        # infer_preference_type(尺码优先于色/牌,单一事实源)。
+        stated_match = re.search(r"Stated preference:\s*([^\n]+?)(?:\.|$)", description or "")
+        stated = stated_match.group(1).strip() if stated_match else ""
+        preference_value = stated or (user_input or "").strip()
+        pref_type = infer_preference_type(description or "") if stated else infer_preference_type(user_input or "")
         return {
             "toolName": "recordUserPreference",
-            "args": {"preferenceType": pref_type, "preferenceValue": user_input},
+            "args": {"preferenceType": pref_type, "preferenceValue": preference_value},
         }
 
     return None

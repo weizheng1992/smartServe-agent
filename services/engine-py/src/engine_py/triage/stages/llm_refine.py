@@ -48,6 +48,12 @@ def _inject_address_manage(parsed, input_text):
     return f(parsed, input_text)
 
 
+def _inject_preference_record(parsed, input_text):
+    from ..intent_triage_engine import _inject_preference_record as f
+
+    return f(parsed, input_text)
+
+
 def _detect_pure_reformat(input_text):
     from ..intent_triage_engine import detect_pure_reformat as f
 
@@ -212,6 +218,11 @@ async def judge(ctx: StageContext) -> StageVerdict:
         # 建地址形(可复合下单/导购)在此提为 primary,A1「建地址+下单寄新
         # 地址」由此双意图进 planner。
         parsed = _inject_address_manage(parsed, input_text)
+
+        # 偏好记录复合注入(persona-hardening 12,2026-09-30):分类器词表无
+        # 该档位,显式记录形(可复合导购/下单)在此提为 primary —— 否则深规划
+        # 的记录子任务被对齐闸整批剪除,写路死(address_manage 同款)。
+        parsed = _inject_preference_record(parsed, input_text)
 
         # 📷 意图浮现点消歧 · Step 3(2026-09-09):分类器判出售后意图、带图
         # 且全链无单号(文本/OCR/上下文)时同样过商品消歧 —— 与判定 3 同理,

@@ -32,9 +32,11 @@ class TestRegistryAlignment:
             v for k, v in vars(reg.AgentIntentType).items() if not k.startswith("_")
         }
         assert set(INTENT_REGISTRY) == type_values
-        # 16 档:2026-09-12 多意图 address_manage(规则层产出)之后,
-        # 2026-09-18 优惠闭环新增 promotion_query(规则层产出,词表单一事实源)
-        assert len(INTENT_REGISTRY) == 16
+        # 17 档:2026-09-12 多意图 address_manage(规则层产出)之后,
+        # 2026-09-18 优惠闭环新增 promotion_query(规则层产出,词表单一事实源),
+        # 2026-09-30 persona-hardening 新增 preference_record(规则层产出,
+        # prompt_category=None,分类器零影响)
+        assert len(INTENT_REGISTRY) == 17
 
     def test_slot_extractor_reexports_same_class(self):
         # 定义已迁 intent_registry,slot_extractor.AgentIntentType 是同一类对象
@@ -93,14 +95,23 @@ class TestCategoryGuidelines:
         # INTENT_DETECTION_RULES,或 triage 专属检测器(intermediate/candidate
         # 例外:chat 是闸门中间信号,out_of_scope 只作候选)。
         # metric_query 即规则层产出、无类目;address_manage 产出层是
-        # intent_triage_engine.detect_address_manage(判定 1.6 + Step3 注入器)。
-        from engine_py.triage.intent_triage_engine import detect_address_manage
+        # intent_triage_engine.detect_address_manage(判定 1.6 + Step3 注入器);
+        # preference_record 产出层是 detect_preference_record(判定 1.7 +
+        # Step3 注入器,persona-hardening 12)。
+        from engine_py.triage.intent_triage_engine import (
+            detect_address_manage,
+            detect_preference_record,
+        )
 
         terminal = set(reg.terminal_intents())
         prompt_covered = set(reg.prompt_category_intents())
         rule_covered = {r.intent for r in slot_extractor.INTENT_DETECTION_RULES}
-        detector_covered = {reg.AgentIntentType.ADDRESS_MANAGE}
+        detector_covered = {
+            reg.AgentIntentType.ADDRESS_MANAGE,
+            reg.AgentIntentType.PREFERENCE_RECORD,
+        }
         assert detect_address_manage("看看我的收货地址") is not None, "检测器生产层失活"
+        assert detect_preference_record("帮我记一下我的偏好:买包只买黑色的") is not None, "检测器生产层失活"
         orphans = terminal - (prompt_covered | rule_covered | detector_covered)
         assert not orphans, orphans
 

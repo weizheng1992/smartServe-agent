@@ -15,6 +15,7 @@ from ..intent_triage_engine import (
     REFUND_KEYWORDS_RE,
     _address_manage_intent_entry,
     _is_multi_intent_candidate,
+    _preference_record_intent_entry,
     _proposal,
 )
 from ..semantic_cache import SEMANTIC_MATCH_THRESHOLD
@@ -159,6 +160,31 @@ async def judge(ctx: StageContext) -> StageVerdict:
                     arbitration_reason="address_manage_precheck",
                 )
                 return StageVerdict(terminal=True, result=await _terminal(ctx, addr_intents))
+
+        # 判定 1.7(persona-hardening 12,2026-09-30):显式记录偏好规则前置 ——
+        # recordUserPreference 派发层白名单在册、意图层零注册,PlanAlignment
+        # 必剪,对话面写路死 + finish 假宣称「已成功记录」(10 号票实弹)。
+        # 纯记录形确定性直通 preference_record,零结构化调用;复合形让位
+        # Step3 注入器(address_manage 同款纪律)。
+        from ..intent_triage_engine import detect_preference_record
+
+        if not _is_multi_intent_candidate(input_text):
+            detected_pref = detect_preference_record(input_text)
+            if detected_pref is not None:
+                pref_intents = [_preference_record_intent_entry(detected_pref)]
+                await ctx.engine.log_intent_to_db(
+                    thread_id,
+                    input_text,
+                    pref_intents,
+                    "rule",
+                    0.9,
+                    candidates=[
+                        *ctx.proposals,
+                        _proposal("rule", AgentIntentType.PREFERENCE_RECORD, 0.9),
+                    ],
+                    arbitration_reason="preference_record_precheck",
+                )
+                return StageVerdict(terminal=True, result=await _terminal(ctx, pref_intents))
 
         # 判定 2: 物流/订单状态查询直达
         # 多意图不打断(2026-09-12):关键词分支对复合候选形让位(同判定 3 注)

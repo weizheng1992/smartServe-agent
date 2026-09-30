@@ -52,6 +52,7 @@ from .intent_registry import (
     _alt,
     _grp,
     _pick,
+    infer_preference_type,
 )
 from .product_disambiguator import build_select_card, disambiguate_product
 from .semantic_cache import SemanticVectorCache, strip_punctuation_for_greeting
@@ -278,6 +279,76 @@ def _inject_address_manage(parsed: list[dict], input_text: str) -> list[dict]:
     if detected is None:
         return parsed
     entry = _address_manage_intent_entry(detected)
+    rest = [
+        {**item, "type": "secondary"}
+        for item in parsed
+        if item.get("intent") != AgentIntentType.GENERAL_QUERY
+    ]
+    return [entry, *rest]
+
+
+# 显式记录偏好词形(persona-hardening 12,2026-09-30):「帮我记一下我的偏好:…」
+# 「记住我喜欢黑色」。动词 × 宾语双锚定,缺一不命中 —— 陈述形(「我不喜欢黑色」)
+# 归审计 Agent 被动抽取,询问形(「偏好设置在哪」)无记录动词,本意图只收
+# 显式记录请求;否定形(「不用记/别记」)显式排除。判定优先级:先正形
+# (动词在前)再倒形(「把…这个偏好保存一下」)。
+_PREF_RECORD_VERB = r"(?:帮我|给我|请|麻烦)?(?:记一下|记住|记录|记下|保存|记上)(?:一下|个)?"
+_PREF_RECORD_OBJ = r"(?:偏好|喜好|喜欢|习惯)"
+_PREF_RECORD_RE = re.compile(
+    _PREF_RECORD_VERB + r"[,:：，、\s]{0,2}(?:我的|我|用户的)?" + _PREF_RECORD_OBJ
+    + r"|" + _PREF_RECORD_OBJ + r"[^。,，\n]{0,12}" + _PREF_RECORD_VERB,
+    re.IGNORECASE,
+)
+_PREF_RECORD_NEGATIVE_RE = re.compile(
+    r"(?:不用|不要|别|不想|无需)" + _PREF_RECORD_VERB
+)
+# 明示偏好值形(M2 实弹句):「偏好:买包只买黑色的」冒号后即值,严禁整句
+# 当偏好值落库(04 遗留缺陷的确定性路径修正)。
+_PREF_STATED_VALUE_RE = re.compile(r"(?:偏好|喜好|喜欢)[^:：\n]{0,4}[:：]\s*([^,，。\n]+)")
+
+
+def detect_preference_record(text: str | None) -> dict | None:
+    """纯函数(测试缝):显式记录偏好意图检出(address_manage 同款规约)。
+
+    返回 None=非显式记录请求;{"entities": {"statedPreference"?, "preferenceType"},
+    "missingSlots": []}。statedPreference 仅在「偏好:值」明示形在场时抽取;
+    preferenceType 经 infer_preference_type 词族推断(单一事实源,与执行器
+    快路径同规,永不漂移)。
+    """
+    if not text:
+        return None
+    if _PREF_RECORD_NEGATIVE_RE.search(text):
+        return None
+    if not _PREF_RECORD_RE.search(text):
+        return None
+    entities: dict = {"preferenceType": "other"}
+    stated = _PREF_STATED_VALUE_RE.search(text)
+    if stated and stated.group(1).strip():
+        value = stated.group(1).strip()
+        entities["statedPreference"] = value
+        entities["preferenceType"] = infer_preference_type(value)
+    return {"entities": entities, "missingSlots": []}
+
+
+def _preference_record_intent_entry(detected: dict) -> dict:
+    """preference_record 终局条目单点构造(判定 1.7 直通与 Step3 注入器共用)。"""
+    return {
+        "intent": AgentIntentType.PREFERENCE_RECORD,
+        "confidence": 0.9,
+        "type": "primary",
+        "entities": dict(detected["entities"]),
+        "missingSlots": list(detected.get("missingSlots") or []),
+    }
+
+
+def _inject_preference_record(parsed: list[dict], input_text: str) -> list[dict]:
+    """Step3 复合注入(纯函数,测试缝):显式记录偏好的复合形(「记住我的
+    喜好,再推荐背包」)不进判定 1.7 直通,由本注入器提为 primary ——
+    分类器词表无该档位只会丢它;general_query 丢弃,其余保序降 secondary。"""
+    detected = detect_preference_record(input_text)
+    if detected is None:
+        return parsed
+    entry = _preference_record_intent_entry(detected)
     rest = [
         {**item, "type": "secondary"}
         for item in parsed

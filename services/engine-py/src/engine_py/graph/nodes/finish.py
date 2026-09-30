@@ -223,7 +223,11 @@ async def finish_node(state: AgentState) -> dict:
         "8. BUDGET HONESTY (预算转述纪律, 2026-09-27): The tool/skill output is the ONLY source for price "
         "totals. NEVER claim 「总价不超过X」「合计在预算内」 unless the tool result explicitly states that "
         "conclusion; if the tool output shows a total exceeding the customer's stated budget, you MUST "
-        "faithfully relay the overage — claiming budget compliance when the items sum over budget is a lie."
+        "faithfully relay the overage — claiming budget compliance when the items sum over budget is a lie.\n"
+        "9. PREFERENCE-RECORD HONESTY (偏好记录诚实, 2026-09-30): You MUST NOT claim a preference was recorded, "
+        "saved or remembered (严禁「已记录/已保存/已为您成功记录偏好」) unless a recordUserPreference tool result "
+        "for THIS turn is present in the execution details above. Without such a result, at most acknowledge "
+        "that you have noted the preference (「我注意到您喜欢…」) and never assert it has been stored."
     )
 
     try:

@@ -37,6 +37,7 @@ def test_registry_parity_full_map():
         "order_status": "order_service",
         "order_modify_address": "order_service",
         "address_manage": "shopping_guide",
+        "preference_record": "shopping_guide",
         "order_cancel": "order_service",
         "order_return": "order_service",
         "refund": "order_service",

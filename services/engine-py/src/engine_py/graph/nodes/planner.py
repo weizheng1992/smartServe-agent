@@ -632,6 +632,40 @@ async def planner_node(state: AgentState) -> dict:
                     )
                 return {"task_plan": fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
 
+        # 🧠 偏好记录快轨(persona-hardening 12,2026-09-30):单 preference_record
+        # 直达 recordUserPreference 子任务,零 LLM —— 写动作必须确定性。实弹:
+        # 深规划的记录子任务被对齐闸整批剪除(意图层白名单缺注册),写路死,
+        # finish 还即兴假宣称「已成功记录」。检测器抽取的明示偏好值随描述
+        # 下行,执行器快路径直配成真工具调用。
+        if len(intents) == 1 and single_intent == "preference_record":
+            pref_entities = intents[0].get("entities") or {}
+            stated = str(pref_entities.get("statedPreference") or "").strip()
+            pref_desc = (
+                "Call recordUserPreference to record the customer's stated preference. "
+                f"Customer said: {input_text}."
+            )
+            if stated:
+                pref_desc += f" Stated preference: {stated}."
+            pref_fast_plan = {
+                "goal": "Record the customer's stated preference into profile memory",
+                "subtasks": [
+                    {
+                        "id": "step_fast_record_preference",
+                        "description": pref_desc,
+                        "status": "pending",
+                    }
+                ],
+                "currentStepIndex": 0,
+            }
+            if job_id:
+                await emit_status(
+                    job_id,
+                    "⚡ 极速直达：识别到偏好记录诉求，已直达画像记录工具执行链！",
+                    node="planner",
+                    plan=pref_fast_plan,
+                )
+            return {"task_plan": pref_fast_plan, "short_memory": short_memory, "global_transitions_count": 1}
+
         # 📋 确定性快轨注册表(nightly #7):守卫变量一次算定,规则表自上而下
         # 首个命中即组装 (计划, 进度文案) 直达执行链。守卫标志全是纯谓词,
         # 与旧代码同为无条件求值;表序即优先级(见 _FAST_TRACK_RULES 头注)。
@@ -840,8 +874,12 @@ async def planner_node(state: AgentState) -> dict:
         "TOOL FIDELITY: plan only real registered tool names (getOrderStatus, processRefund, listUserOrders, "
         "changeShippingAddress, queryProductRanking, searchProducts, queryProductSkus, queryProductReviews, "
         "compareProducts, addToCart, updateCartItem, getCartSummary, checkoutCart, saveUserAddress, "
-        "getUserAddresses, deleteUserAddress, setDefaultAddress, applyAfterSale, queryPackageTracking) — "
+        "getUserAddresses, deleteUserAddress, setDefaultAddress, recordUserPreference, applyAfterSale, "
+        "queryPackageTracking) — "
         "invented names like confirmOrder or modifyCart do not exist and will be pruned. "
+        "PREFERENCE FIDELITY: for explicit preference-recording requests (记住/记录/保存 我的偏好, intent "
+        "preference_record), plan a recordUserPreference step written in verb form (Call recordUserPreference ...) "
+        "— it is a real capability; do not merely narrate that the preference will be remembered. "
         "ADDRESS FIDELITY: if the customer stated a shipping address in this turn (e.g. 地址是…/寄到…), "
         "that address belongs to the NEW order — write it into the checkoutCart step description "
         "(shipping to <address>) and NEVER plan a changeShippingAddress step against a historical order "

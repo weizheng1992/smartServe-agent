@@ -22,6 +22,7 @@ class AgentIntentType:
     SHOPPING_GUIDE = "shopping_guide"
     ORDER_MODIFY_ADDRESS = "order_modify_address"
     ADDRESS_MANAGE = "address_manage"
+    PREFERENCE_RECORD = "preference_record"
     ORDER_CANCEL = "order_cancel"
     ORDER_RETURN = "order_return"
     ORDER_QUERY = "order_query"
@@ -231,6 +232,23 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         prompt_category=None,
         domain_role="shopping_guide",
         allowed_tools=("saveUserAddress", "getUserAddresses", "deleteUserAddress", "setDefaultAddress"),
+    ),
+    AgentIntentType.PREFERENCE_RECORD: IntentSpec(
+        name="preference_record",
+        family="shopping",
+        consumers=(
+            "triage 判定 1.7 偏好记录规则前置(arbitration_reason=preference_record_precheck)",
+            "Step3 复合注入(_inject_preference_record,复合形 primary)",
+            "planner 快轨 → recordUserPreference",
+        ),
+        lifecycle="active",
+        # 规则层产出意图(address_manage 先例,persona-hardening 12,2026-09-30):
+        # 显式「记录偏好」请求此前无档位可落 —— recordUserPreference 在派发层
+        # 白名单(_base_executor_tools)在册、意图层零注册,PlanAlignment 必剪,
+        # 对话面写路死(实弹:tool_record 0 行)+ finish 假宣称「已成功记录」。
+        prompt_category=None,
+        domain_role="shopping_guide",
+        allowed_tools=("recordUserPreference",),
     ),
     AgentIntentType.ORDER_CANCEL: IntentSpec(
         name="order_cancel",
@@ -512,6 +530,24 @@ METRIC_FAMILY = (
     "滞销", "卖得好", "卖的好", "毛利率", "利润率", "出货量", "最卖钱",
     "最赚钱",
 )
+
+# 偏好类型推断词族(persona-hardening 12,2026-09-30):recordUserPreference
+# 写路的 preferenceType 推断单一事实源。有序元组 = 判定优先级(尺码先于
+# 颜色:「L码」不该因含「色」字误判 color);消费方 intent_triage_engine
+# .detect_preference_record 与 executor_fast_path recordUserPreference 分支。
+# 「码」是「尺码」的超串、后置防抢短,与加购词族同款次序约束。
+PREFERENCE_TYPE_HINT_FAMILY = (
+    ("尺码", "size"), ("码", "size"), ("颜色", "color"), ("色", "color"),
+    ("品牌", "brand"), ("牌", "brand"),
+)
+
+
+def infer_preference_type(text: str) -> str:
+    """偏好类型推断(纯函数):按词族优先级取首个命中,无命中归 other。"""
+    for hint, pref_type in PREFERENCE_TYPE_HINT_FAMILY:
+        if hint in text:
+            return pref_type
+    return "other"
 
 
 # ---------------------------------------------------------------------------
