@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 
 import pytest
 from sqlalchemy import text
