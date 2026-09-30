@@ -18,6 +18,12 @@ PHYSIOLOGICAL_RE = re.compile(
 )
 _LINE_SPLIT_RE = re.compile(r"[\s,，、。!！?？\-_]+")
 
+# 回声去重阈值(persona-hardening 13,2026-09-30):注入的画像事实经 finish
+# 措辞回到回复里,审计把 assistant 自述又抽成新事实 —— 与该用户既有事实
+# (approved + pending 皆算,pending 也在待审队列里)余弦 ≥ 此值即判回声弃落。
+# 取 0.90,与范例回放(L2)近重复线同档;低于此值算真新事实照常落库。
+_ECHO_DEDUP_THRESHOLD = 0.90
+
 # 画像审计 Agent 的系统提示词与 prompt 装配/解析提为模块级单一事实源
 # (persona-hardening 07):eval/providers/persona_provider.py import 同一装配,
 # 评测与生产永不漂移;_run_profile_audit 只负责订单流水获取、路由与落库。
@@ -32,6 +38,10 @@ PROFILE_AUDIT_SYSTEM_PROMPT = """
    - 特定品牌/商户专属的偏好或历史，例如：耐克 Flyknit/Air Jordan 偏好、阿迪达斯椰子鞋偏好、商户专享优惠券使用习惯、特定店铺客服互动偏好。
    - 这类事实严格归属于当前商户，严禁泄漏给其它竞品商户。
 
+[CRITICAL ECHO RULE]:
+Assistant 回复中对已注入画像事实的引用或转述（例如「根据您偏好黑色的习惯」）不算用户新陈述，
+严禁将其作为新事实输出 —— 只提炼【用户】本人本轮明确表达的新偏好。
+
 [CRITICAL INSTRUCTIONS]:
 请不要生成任何解释性废话。你必须只输出一个合规的 JSON 对象，包含以下字段：
 {
@@ -40,8 +50,7 @@ PROFILE_AUDIT_SYSTEM_PROMPT = """
     {
       "fact": string,
       "scope": "global" | "tenant",
-      "confidence": number,
-      "source": string
+      "confidence": number
     }
   ]
 }
@@ -206,11 +215,33 @@ class LongMemory:
                 print("[Profiler Agent] 🍃 画像审计完成：本轮会话未检测到新的偏好特征变动。")
                 return
 
+            # 回声去重基线:该用户既有事实向量(approved + pending 皆算,
+            # pending 也在待审队列里),解析失败的行跳过不参与比对
+            try:
+                from sqlalchemy import select
+
+                async with get_session() as session:
+                    existing_rows = (
+                        (await session.execute(select(LongMemoryFact).where(LongMemoryFact.user_id == self.user_id)))
+                        .scalars()
+                        .all()
+                    )
+                existing_embeddings = [
+                    emb for emb in (_parse_embedding(r.embedding) for r in existing_rows) if emb
+                ]
+            except Exception as echo_err:
+                print(f"[Profiler Agent] 回声去重基线加载失败,本轮跳过去重: {echo_err}")
+                existing_embeddings = []
+
             for item in audit_result["extractedFacts"]:
                 try:
                     fact_text = item if isinstance(item, str) else item.get("fact")
                     confidence = 1.0 if isinstance(item, str) else item.get("confidence") or 1.0
-                    source = "agent_audit_legacy" if isinstance(item, str) else item.get("source") or "agent_audit"
+                    # source 钉枚举(persona-hardening 13,2026-09-30):写时不信
+                    # LLM 自填 —— 实弹模型把 source 填成中文叙述散文(「本轮对话
+                    # -用户主动提及徒步行程」),归因查询全废。审计 Agent 产物
+                    # 一律 agent_audit(legacy 字符串项形状照旧 agent_audit_legacy)。
+                    source = "agent_audit_legacy" if isinstance(item, str) else "agent_audit"
 
                     # 置信度红线路由:<0.60 丢弃;>=0.85 approved;其余 pending
                     if confidence < 0.6:
@@ -235,6 +266,21 @@ class LongMemory:
                     )
 
                     embedding = await get_embedding_model().aembed_query(fact_text)
+
+                    # 回声再吸收去重(persona-hardening 13,2026-09-30):注入的
+                    # 画像事实经 finish 措辞回到回复里,审计把 assistant 自述又
+                    # 抽成新事实(实弹:conf 0.6 pending 重复污染待审队列)。
+                    # 与该用户既有事实(approved+pending)余弦 ≥ 阈值即判回声弃落。
+                    if any(
+                        _cosine(embedding, existing) >= _ECHO_DEDUP_THRESHOLD
+                        for existing in existing_embeddings
+                    ):
+                        print(
+                            "[Profiler Agent] 🔄 回声事实弃落(与既有画像近重复): "
+                            f"{fact_text}"
+                        )
+                        continue
+
                     async with get_session() as session:
                         session.add(
                             LongMemoryFact(
