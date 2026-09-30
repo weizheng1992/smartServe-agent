@@ -268,6 +268,83 @@ class TestQuickSummaryShape:
         s = quick_summary(_R(), StructuredQueryIntent(metric="category_gmv_top"))
         assert "榜首" in s
 
+    def test_ranking_summary_multi_sentence_facts(self, engine):
+        """速览扩容(实弹 2026-09-30:一句话速览太瘦,用户要「简单的几句话」):
+        纯算术多句事实 —— 规模/合计、榜首占比、前三集中度、末位对照;
+        每个数字都来自真实结果行,零编造。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.quick_summary import quick_summary
+
+        class _R:
+            rows = [
+                {"name": "极光老爹鞋", "productId": "u1", "metricScore": 8},
+                {"name": "云朵卫衣", "productId": "u2", "metricScore": 5},
+                {"name": "基础白 Tee", "productId": "u3", "metricScore": 2},
+            ]
+            metric = "volume"
+            unit = "件"
+            caliber = "x"
+            chart = None
+
+        s = quick_summary(_R(), StructuredQueryIntent(metric="volume"))
+        assert "共 3 项" in s and "合计 15" in s
+        assert "榜首 极光老爹鞋 8" in s and "占 53%" in s
+        assert "前三名合计占 100%" in s
+        assert "末位 基础白 Tee 2" in s and "约为榜首的 25%" in s
+
+    def test_ranking_summary_head_is_first_row_not_max(self, engine):
+        """「榜首」是榜面语义(结果第一行)不是最大值语义:ASC「卖得最差」榜
+        头名就是最差的那个,拿 max 冒充榜首是答反方向(实弹 ASC 榜措辞错位)。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.quick_summary import quick_summary
+
+        class _R:
+            rows = [
+                {"name": "慢销品", "productId": "u1", "metricScore": 1},
+                {"name": "热销品", "productId": "u2", "metricScore": 9},
+            ]
+            metric = "volume"
+            unit = "件"
+            caliber = "x"
+            chart = None
+
+        s = quick_summary(_R(), StructuredQueryIntent(metric="volume", direction="ASC"))
+        assert "榜首 慢销品 1" in s
+
+    def test_ranking_summary_two_rows_skips_concentration(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.quick_summary import quick_summary
+
+        class _R:
+            rows = [{"name": "A", "metricScore": 3}, {"name": "B", "metricScore": 1}]
+            metric = "volume"
+            unit = "件"
+            caliber = "x"
+            chart = None
+
+        s = quick_summary(_R(), StructuredQueryIntent(metric="volume"))
+        assert "前三名" not in s and "末位" not in s
+
+    def test_trend_summary_keeps_peak_valley_and_adds_mean(self, engine):
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.quick_summary import quick_summary
+
+        class _R:
+            rows = [
+                {"day": "09-01", "metricScore": 100.0},
+                {"day": "09-02", "metricScore": 200.0},
+                {"day": "09-03", "metricScore": 300.0},
+            ]
+            metric = "gmv_trend"
+            unit = "元"
+            caliber = "x"
+            chart = "line"
+
+        s = quick_summary(_R(), StructuredQueryIntent(metric="gmv_trend"))
+        assert "峰值 300" in s and "谷值 100" in s
+        assert "期末较期初升 200%" in s
+        assert "期间均值 200" in s
+
 
 class TestChartHintScope:
     """折线指令只对趋势族生效(实弹:单行统计卡吃 line → 前端诚实降级打扰用户):"""
