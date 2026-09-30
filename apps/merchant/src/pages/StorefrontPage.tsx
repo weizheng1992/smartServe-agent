@@ -82,10 +82,10 @@ export default function StorefrontPage() {
       const totalCart = readStoreCart().reduce((sum, it) => sum + it.quantity, 0);
       setCartCount(totalCart);
 
-      // 订单与地址数量
+      // 订单与地址数量(地址契约只认 userId,发 customerId 恒回落张伟)
       const [ordRes, addrRes] = await Promise.all([
         fetch(`/api/store/orders?customerId=${targetUserId}`),
-        fetch(`/api/store/addresses?customerId=${targetUserId}`),
+        fetch(`/api/store/addresses?userId=${targetUserId}`),
       ]);
       const ordJson = await ordRes.json();
       const addrJson = await addrRes.json();

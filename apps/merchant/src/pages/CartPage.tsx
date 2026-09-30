@@ -31,15 +31,20 @@ export default function CartPage() {
     message?: string;
   } | null>(null);
 
-  // 加载购物车和地址数据
+  // 加载购物车(本地存档缓存,引擎车在下方按身份合流)
   useEffect(() => {
     // 经单一所有者归一读取(2026-09-14 NaN 事故):历史嵌套 {product, sku} 条目
     // 在读取侧提平自愈,已中毒的本地存档无需清缓存
     setCart(readStoreCart());
+  }, []);
 
+  // 地址簿随身份拉取:网关契约只认 userId(缺省回落 CUST-8801=张伟),
+  // 曾因裸调无参/发 customerId 被静默忽略 —— 切到李娜/王强仍显示张伟地址(实弹 2026-09-30)
+  useEffect(() => {
+    if (!user.id) return;
     const fetchAddresses = async () => {
       try {
-        const res = await fetch('/api/store/addresses');
+        const res = await fetch(`/api/store/addresses?userId=${encodeURIComponent(user.id)}`);
         const data = await res.json();
         if (data.success && data.addresses) {
           setAddresses(data.addresses);
@@ -51,7 +56,7 @@ export default function CartPage() {
       }
     };
     fetchAddresses();
-  }, []);
+  }, [user.id]);
 
   // 引擎车合流(2026-09-15 单账本收口):聊天侧入车在引擎账本(Redis),本地
   // 存档只是缓存 —— 聊天加购后商城页永远少一件,且回复瞬间的前端卡片同步一
@@ -515,23 +520,27 @@ export default function CartPage() {
         selectedAddressId={selectedAddress?.id}
         onSelectAddress={(addr) => setSelectedAddress(addr)}
         onAddAddress={async (newAddr) => {
+          // 失败必须上抛:AddressModal 的 errorMsg 分支只吃 throw,
+          // 吞错会让弹窗把失败当成功收表单(错误死路)
+          let data: { success?: boolean; address?: CustomerAddress; error?: string };
           try {
             const res = await fetch('/api/store/addresses', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                customerId: user.id || 'CUST-8801',
+                userId: user.id,
                 ...newAddr,
               }),
             });
-            const data = await res.json();
-            if (data.success && data.address) {
-              setAddresses((prev) => [data.address, ...prev]);
-              setSelectedAddress(data.address);
-            }
+            data = await res.json();
           } catch {
-            // ignore
+            throw new Error('网络异常，保存地址失败，请重试');
           }
+          if (!data.success || !data.address) {
+            throw new Error(String(data.error || '保存地址失败，请重试'));
+          }
+          setAddresses((prev) => [data.address!, ...prev]);
+          setSelectedAddress(data.address);
         }}
       />
     </div>

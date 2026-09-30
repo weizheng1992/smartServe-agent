@@ -3,8 +3,10 @@ import { Link } from 'react-router';
 import { Button, Input } from 'ui';
 import type { CustomerAddress } from '../components/address/AddressModal';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
+import { useCurrentUser } from '../context/UserContext';
 
 export default function AddressesPage() {
+  const { user } = useCurrentUser();
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -23,7 +25,9 @@ export default function AddressesPage() {
   const fetchAddresses = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/store/addresses?customerId=CUST-8801');
+      // 网关契约只认 userId:曾硬编码 customerId=CUST-8801 被静默忽略,
+      // 恒回落张伟地址,切换身份整页失效(实弹 2026-09-30)
+      const res = await fetch(`/api/store/addresses?userId=${encodeURIComponent(user.id)}`);
       const data = await res.json();
       if (data.success && data.addresses) {
         setAddresses(data.addresses);
@@ -35,10 +39,10 @@ export default function AddressesPage() {
     }
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 挂载时拉取一次地址列表
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fetchAddresses 随身份变化重拉,组件内定义无需入依赖
   useEffect(() => {
     fetchAddresses();
-  }, []);
+  }, [user.id]);
 
   const handleAddAddress = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +57,7 @@ export default function AddressesPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerId: 'CUST-8801',
+          userId: user.id,
           recipientName,
           phone,
           province,
