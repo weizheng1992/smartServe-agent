@@ -15,7 +15,39 @@ import sqlglot
 from sqlglot import exp
 
 _ALLOWED_NODE_TYPES = (exp.Select, exp.Union, exp.Subquery, exp.With, exp.CTE, exp.Order, exp.Limit, exp.Column, exp.Table, exp.Alias, exp.Star)
-_FORBIDDEN_FUNCTIONS = {"pg_sleep", "dblink", "pg_read_file", "lo_import", "pg_terminate_backend"}
+# 危险函数黑名单(纵深一层,DB 侧另有 READ ONLY 事务兜底):睡眠拖库 /
+# 跨库穿透 / 文件读取 / 大对象导入导出 / 后端进程控制 / 会话设置篡改。
+_FORBIDDEN_FUNCTIONS = {
+    "pg_sleep",
+    "pg_sleep_for",
+    "pg_sleep_until",
+    "dblink",
+    "dblink_send",
+    "dblink_exec",
+    "dblink_connect",
+    "pg_read_file",
+    "pg_read_binary_file",
+    "pg_ls_dir",
+    "pg_stat_file",
+    "lo_import",
+    "lo_export",
+    "lo_get",
+    "lo_put",
+    "pg_terminate_backend",
+    "pg_cancel_backend",
+    "pg_reload_conf",
+    "pg_current_setting",
+    "set_config",
+}
+
+
+def _func_name(node: exp.Expression) -> str:
+    """取函数小写名。sqlglot 未知名函数解析为 exp.Anonymous 且 sql_name()
+    恒返回 'ANONYMOUS'(2026-10-01 夜审实证)—— 真名在 .this,不取则黑名单
+    对 pg_sleep/dblink 等一律漏放。"""
+    if isinstance(node, exp.Anonymous):
+        return str(node.this or "").lower()
+    return node.sql_name().lower()
 
 
 class UnsafeSqlError(Exception):
@@ -41,8 +73,8 @@ def _cte_aliases(expr: exp.Expression) -> set[str]:
 def _validate_expression(expr: exp.Expression, allowed_tables: set[str] | None) -> None:
     cte_names = _cte_aliases(expr)
     for node in expr.walk():
-        if isinstance(node, exp.Func) and node.sql_name().lower() in _FORBIDDEN_FUNCTIONS:
-            raise UnsafeSqlError(f"危险函数: {node.sql_name()}")
+        if isinstance(node, exp.Func) and _func_name(node) in _FORBIDDEN_FUNCTIONS:
+            raise UnsafeSqlError(f"危险函数: {_func_name(node)}")
         if isinstance(node, (exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop, exp.Alter, exp.TruncateTable, exp.Grant, exp.Command)):
             raise UnsafeSqlError(f"非查询语句: {type(node).__name__}")
         if isinstance(node, exp.Table):
@@ -65,8 +97,16 @@ def reject_unsafe(sql: str, schema: dict, require_business_id: bool = False) -> 
     allowed_tables = set(schema.get("tables", {})) if schema else None
     _validate_expression(stmt, allowed_tables)
 
-    if require_business_id and "business_id" not in sql:
-        raise UnsafeSqlError("缺租户谓词 business_id")
+    if require_business_id:
+        # AST 列引用断言(2026-10-01 夜审收紧,原为裸子串 "business_id" in sql
+        # —— 注释/字符串字面量即可满足,谓词剥离形同虚设)。仅认真实列引用:
+        # 模板注入形态 `WHERE business_id = :business_id` 的 Column 节点;
+        # 绑定参数(:business_id)、表名、别名、注释均不算谓词。
+        has_predicate = any(
+            isinstance(node, exp.Column) and node.name == "business_id" for node in stmt.walk()
+        )
+        if not has_predicate:
+            raise UnsafeSqlError("缺租户谓词 business_id")
 
 
 def assert_safe_select(sql: str, schema: dict, require_business_id: bool = False):
