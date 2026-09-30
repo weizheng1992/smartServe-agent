@@ -4,7 +4,8 @@ import type { ThirdPartyProduct, ThirdPartySku } from 'types';
 //
 // 事故:localStorage `aurora_store_cart` 曾有三个写入方两种形状 —— 商城列表
 // 弹窗与商品详情页写嵌套 {product, sku, quantity, selected},聊天悬浮窗写
-// 扁平条目;而 CartPage 直接把存档断言成扁平 CartItem[](CartDrawer 契约),
+// 扁平条目;而 CartPage 直接把存档断言成扁平 CartItem[](CartDrawer 契约,
+// 该组件已删,形状收编为本模块 StoreCartItem),
 // 嵌套条目取 item.price 得 undefined,Number(undefined)=NaN → 购物车页
 // 「¥NaN」,且 skuCode/title/stock 全丢、结算载荷 skuCode=undefined。
 // 收口:读写一律走本模块 —— 写入方产扁平形状,读取侧归一旧嵌套条目

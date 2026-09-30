@@ -28,7 +28,6 @@ export default function StorefrontPage() {
   const [selectedAttrs, setSelectedAttrs] = useState<Record<string, string>>({});
   const [buyQuantity, setBuyQuantity] = useState(1);
   const [showSpecsModal, setShowSpecsModal] = useState<ThirdPartyProduct | null>(null);
-  const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [cartSuccessNotice, setCartSuccessNotice] = useState<string | null>(null);
 
   // 获取商品列表

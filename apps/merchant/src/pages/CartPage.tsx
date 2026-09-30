@@ -1,14 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { Button } from 'ui';
 import { AddressModal, type CustomerAddress } from '../components/address/AddressModal';
-import type { CartItem } from '../components/cart/CartDrawer';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { useCurrentUser } from '../context/UserContext';
-import { readStoreCart, writeStoreCart } from '../lib/storeCart';
+import { type StoreCartItem, readStoreCart, writeStoreCart } from '../lib/storeCart';
 
 export default function CartPage() {
-  const navigate = useNavigate();
   const { user } = useCurrentUser();
   // 选券重构(2026-09-22):券由用户自选,不再「结算自动抵扣」。
   // preview 为服务端只读试算(原价/活动/券包逐张可用性),金额口径与下单一致
@@ -21,7 +19,7 @@ export default function CartPage() {
   } | null>(null);
   // 'none'=明确不用券;具体 id=自选券(与活动叠加:活动先减,券按余额抵扣)
   const [selectedCouponId, setSelectedCouponId] = useState<string>('none');
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<StoreCartItem[]>([]);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<CustomerAddress | null>(null);
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
@@ -70,7 +68,7 @@ export default function CartPage() {
         const res = await fetch(`/api/store/cart?customerId=${encodeURIComponent(user.id)}`);
         const data = await res.json();
         if (!data.success || !Array.isArray(data.items) || data.items.length === 0) return;
-        const engineRows: CartItem[] = data.items.map((r: any) => ({
+        const engineRows: StoreCartItem[] = data.items.map((r: any) => ({
           id: r.skuCode || r.skuId,
           spuId: r.spuId || r.skuId,
           skuCode: r.skuCode || r.skuId,
@@ -91,7 +89,7 @@ export default function CartPage() {
             (it) => !engineKeys.has(it.skuCode) && !engineKeys.has(it.spuId) && !engineKeys.has(it.id),
           );
           const merged = [...engineRows, ...localOnly];
-          writeStoreCart(merged as any);
+          writeStoreCart(merged);
           return merged;
         });
       } catch {
@@ -101,7 +99,7 @@ export default function CartPage() {
     fetchEngineCart();
   }, [user.id]);
 
-  const saveCart = (newCart: CartItem[]) => {
+  const saveCart = (newCart: StoreCartItem[]) => {
     setCart(newCart);
     writeStoreCart(newCart);
   };

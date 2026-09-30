@@ -125,7 +125,6 @@ export default function MerchantAdminPage() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [activeThreadMessages, setActiveThreadMessages] = useState<MessageItem[]>([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [loading, setLoading] = useState(true);
   // 商户管理面统一员工鉴权(夜审 A4)后,本内嵌工作台(无员工登录身份源)
   // 的 /api/admin/* 一律 401 —— 诚实呈现引导,严禁静默空面板假装正常
   const [needsStaffAuth, setNeedsStaffAuth] = useState(false);
@@ -183,7 +182,6 @@ export default function MerchantAdminPage() {
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      setLoading(true);
       const [orderResp, appResp, convResp] = await Promise.all([
         fetch('/api/admin/orders').catch(() => null),
         fetch('/api/admin/approvals?tenantId=aurora').catch(() => null),
@@ -231,8 +229,6 @@ export default function MerchantAdminPage() {
       }
     } catch (err) {
       console.error('Failed to fetch merchant admin data:', err);
-    } finally {
-      setLoading(false);
     }
   }, [activeThreadId, loadConversationMessages]);
 
