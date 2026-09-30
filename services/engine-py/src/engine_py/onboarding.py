@@ -21,11 +21,26 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from sqlalchemy import text
 
 from .db import get_session
+
+# 60 秒进程内缓存(2026-09-30 夜审对齐 tenant_config.get_tenant_config 先例):
+# 问候旁路/建线程引导行是高频路径,免每次两连查。admin 编辑面经
+# tenant_config.invalidate_cache 连带失效(同批三处调用点),测试经本模块
+# invalidate_onboarding_cache 显式失效。
+_CACHE: dict[str, tuple[dict, float]] = {}
+_TTL_SECONDS = 60.0
+
+
+def invalidate_onboarding_cache(business_id: str | None = None) -> None:
+    if business_id:
+        _CACHE.pop(business_id.lower().strip(), None)
+    else:
+        _CACHE.clear()
 
 # ---- 平台默认文案(调研口径:2-3 句、每句一事、单一召唤、按钮 3-5 个)----
 PLATFORM_ONBOARDING: dict[str, Any] = {
@@ -139,9 +154,14 @@ async def resolve_onboarding_config(business_id: str = "ecommerce") -> dict[str,
     消费方(网关落库 / 引擎罐头回复)直接可用,无需再处理占位符。
     """
     clean_id = (business_id or "ecommerce").lower().strip()
+    cached = _CACHE.get(clean_id)
+    if cached and time.time() - cached[1] < _TTL_SECONDS:
+        return cached[0]
+
     brand = _default_brand(clean_id)
     raw_config: Any = None
     welcome_message: str | None = None
+    db_ok = True
 
     try:
         async with get_session() as session:
@@ -165,6 +185,7 @@ async def resolve_onboarding_config(business_id: str = "ecommerce") -> dict[str,
                 raw_config = cfg_row["onboarding_config"] if isinstance(cfg_row["onboarding_config"], dict) else None
                 welcome_message = cfg_row["welcome_message"] if isinstance(cfg_row["welcome_message"], str) else None
     except Exception as err:
+        db_ok = False
         print(f"[Onboarding] Failed to load tenant onboarding config for {clean_id}: {err}")
 
     has_config = isinstance(raw_config, dict)
@@ -193,7 +214,7 @@ async def resolve_onboarding_config(business_id: str = "ecommerce") -> dict[str,
         else [dict(item) for item in PLATFORM_ONBOARDING["quickReplies"]]
     )
 
-    return {
+    result = {
         "businessId": clean_id,
         "brandName": brand,
         "welcomeText": welcome_text,
@@ -201,6 +222,10 @@ async def resolve_onboarding_config(business_id: str = "ecommerce") -> dict[str,
         "quickRepliesTitle": _field("quickRepliesTitle", PLATFORM_ONBOARDING["quickRepliesTitle"]),
         "quickReplies": quick_replies,
     }
+    if db_ok:
+        # DB 异常回落不缓存:瞬时故障不应把平台默认钉死 60 秒
+        _CACHE[clean_id] = (result, time.time())
+    return result
 
 
 def build_entry_cards(config: dict[str, Any]) -> list[dict[str, Any]]:

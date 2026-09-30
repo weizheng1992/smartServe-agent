@@ -20,6 +20,11 @@ _TTL_SECONDS = 60.0
 
 
 def invalidate_cache(business_id: str | None = None) -> None:
+    # 连带失效 onboarding 缓存(2026-09-30 夜审):admin 租户编辑面的三处
+    # 调用点只调本函数,引导话术缓存必须同批清,否则改文案 60 秒不生效。
+    from .onboarding import invalidate_onboarding_cache
+
+    invalidate_onboarding_cache(business_id)
     if business_id:
         _CACHE.pop(business_id.lower().strip(), None)
     else:

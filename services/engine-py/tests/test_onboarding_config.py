@@ -23,6 +23,7 @@ from engine_py.db import get_session
 from engine_py.onboarding import (
     PLATFORM_ONBOARDING,
     build_entry_cards,
+    invalidate_onboarding_cache,
     resolve_onboarding_config,
     validate_onboarding_config,
 )
@@ -57,6 +58,9 @@ def _seed_tenant(onboarding: dict | None, welcome_message: str | None = None) ->
                 )
             )
             await session.commit()
+        # resolve_onboarding_config 带 60s 进程内缓存(2026-09-30 夜审),
+        # 改库后必须失效,否则同一 _BID 的多组用例互相读到陈旧配置
+        invalidate_onboarding_cache(_BID)
 
     asyncio.run(_run())
 
@@ -161,6 +165,7 @@ def test_解析_全缺回落平台默认_无租户行降级品牌名():
             await session.commit()
 
     asyncio.run(_clear())
+    invalidate_onboarding_cache("onboard-nobody")
     cfg = asyncio.run(resolve_onboarding_config("onboard-nobody"))
     assert cfg["brandName"] == "Onboard-nobody 官方旗舰店"
     assert cfg["welcomeText"] == PLATFORM_ONBOARDING["welcomeText"].replace("{brand}", cfg["brandName"])
@@ -190,3 +195,65 @@ def test_入口卡_形状与既有quick_replies链路对齐():
     for opt in card["data"]["options"]:
         assert set(opt) >= {"label", "action", "payload"}
         assert opt["action"] in {"send_message", "trigger_upload"}
+
+
+# ---- 60s 进程内缓存(2026-09-30 夜审对齐 tenant_config 先例)----
+
+
+def test_缓存_TTL内直读不回库_失效后重新解析():
+    """TTL 内改库不失效(这正是缓存的意义);失效后重新读到新配置 ——
+    admin 编辑面经 tenant_config.invalidate_cache 连带失效走的就是这条路径。"""
+    invalidate_onboarding_cache(_BID)
+    _seed_tenant({"welcomeText": "缓存首版 {brand}"})
+    first = asyncio.run(resolve_onboarding_config(_BID))
+    assert first["welcomeText"] == "缓存首版 极光潮品官方旗舰店"
+
+    # 绕过失效点直改库:TTL 内解析结果不变(读缓存)
+    async def _mutate_silently() -> None:
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "UPDATE tenant_configs SET onboarding_config = "
+                    "CAST(:cfg AS JSONB) WHERE business_id = :bid"
+                ).bindparams(cfg='{"welcomeText": "缓存期内悄悄改的"}', bid=_BID)
+            )
+            await session.commit()
+
+    asyncio.run(_mutate_silently())
+    second = asyncio.run(resolve_onboarding_config(_BID))
+    assert second["welcomeText"] == "缓存首版 极光潮品官方旗舰店"
+
+    # 显式失效(= admin 编辑路径):重新解析读到新配置
+    invalidate_onboarding_cache(_BID)
+    third = asyncio.run(resolve_onboarding_config(_BID))
+    assert third["welcomeText"] == "缓存期内悄悄改的"
+
+
+def test_缓存_按租户隔离_invalidate单租户不伤他租():
+    invalidate_onboarding_cache("cache-iso-a")
+    invalidate_onboarding_cache("cache-iso-b")
+    _seed_tenant({"welcomeText": "A 租户"})  # _seed_tenant 内部已失效 _BID
+    a = asyncio.run(resolve_onboarding_config(_BID))
+    assert a["businessId"] == _BID
+
+    invalidate_onboarding_cache("cache-iso-a")
+    # 单租户失效后,_BID 的缓存仍在(TTL 内不再回库)—— 覆写 DB 为哨兵值验证
+    async def _mutate_silently() -> None:
+        async with get_session() as session:
+            await session.execute(
+                text(
+                    "UPDATE tenant_configs SET onboarding_config = "
+                    "CAST(:cfg AS JSONB) WHERE business_id = :bid"
+                ).bindparams(cfg='{"welcomeText": "B 哨兵"}', bid=_BID)
+            )
+            await session.commit()
+
+    asyncio.run(_mutate_silently())
+    again = asyncio.run(resolve_onboarding_config(_BID))
+    assert again["welcomeText"] == "A 租户"  # 仍读缓存,未被误清
+
+    invalidate_onboarding_cache(_BID)
+    invalidate_onboarding_cache(None)  # 全清兜底语义仍可用
+    _seed_tenant({"welcomeText": "重建 {brand}"})
+    final = asyncio.run(resolve_onboarding_config(_BID))
+    assert final["welcomeText"] == "重建 极光潮品官方旗舰店"
