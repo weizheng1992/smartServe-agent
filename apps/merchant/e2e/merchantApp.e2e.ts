@@ -80,32 +80,18 @@ test.describe('🛍️ 极光潮品商户商城与管理后台端到端测试 (M
     await expect(chatModal).toContainText('修改未发货订单地址');
   });
 
-  test('3. 商户管理后台 (Admin) 订单中心、SKU 库存与 SPI 审计日志流水', async ({ page }) => {
-    // 1. 访问商户管理后台
+  test('3. 商户管理后台 (Admin):员工身份闸生效,匿名只见引导卡', async ({ page }) => {
+    // c7b26cd(2026-09-27)后 /api/admin/* 族要求员工 Bearer JWT,内嵌台无
+    // 身份源 —— 旧用例(订单中心/SKU 库存/SPI 审计 Tab 点击)审计的是匿名
+    // 裸奔面,已不可能通过;现钉身份闸契约:引导卡 + 指路 3006 + 无业务数据。
     await page.goto('http://localhost:3005/admin');
 
-    // 2. 校验后台 Header 与数据指标卡
-    await expect(page.locator('header')).toContainText('极光潮品商户后台管理系统');
-    await expect(page.locator('body')).toContainText('累计订单总数');
-    await expect(page.locator('body')).toContainText('SPU 库');
+    await expect(page.getByText('商户管理面已启用员工鉴权')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('端口 3006')).toBeVisible();
 
-    // 3. 校验订单中心列表
-    const orderRows = page.locator('tbody tr');
-    await expect(orderRows.first()).toBeVisible({ timeout: 10000 });
-    const orderCount = await orderRows.count();
-    expect(orderCount).toBeGreaterThanOrEqual(1);
-
-    // 4. 切换到「🔌 SPI 开放审计流水」Tab
-    const auditTab = page.locator("button:has-text('SPI 开放审计流水')");
-    await auditTab.click();
-
-    // 5. 校验审计流水表格展示
-    await expect(page.locator('body')).toContainText('来自 Agent 平台的实时 SPI 调度审计流水');
-
-    // 6. 切换到「📦 SKU 规格库存」Tab
-    const inventoryTab = page.locator("button:has-text('SKU 规格库存')");
-    await inventoryTab.click();
-    await expect(page.locator('body')).toContainText('SKU 编码');
-    await expect(page.locator('body')).toContainText('当前可用库存');
+    const body = await page.locator('body').innerText();
+    expect(body).not.toContain('累计订单总数');
+    expect(body).not.toContain('SPI 开放审计流水');
+    expect(body).not.toContain('SKU 规格库存');
   });
 });
