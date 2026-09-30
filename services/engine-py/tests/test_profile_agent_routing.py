@@ -4,10 +4,10 @@
 - 置信度红线路由(`_run_profile_audit`):<0.60 丢弃 / >=0.85 approved / 其余 pending,含 0.60/0.85 边界;
 - 审计侧 scope 判定链:显式声明 > LLM 判定 > 生理特征正则 global > 商户上下文(非 ecommerce 即 tenant);
 - JSON 解析容错:markdown 围栏剥壳可解析;非法 JSON 吞异常零落库;
-- recordUserPreference 工具写路**现状钉死**:thread 上下文明明解析出 businessId,
-  工具却整体丢弃 —— 落 DB 默认 scope=global + business_id NULL + source=regex_fallback
-  (租户偏好误升全局画像、归因失真)。此为缺陷曝光用例,persona-hardening 04
-  修复后翻转断言,勿当契约真值。
+- recordUserPreference 工具写路(persona-hardening 04 修复后):租户上下文
+  落列 —— 非 ecommerce 真商户 → scope=tenant + business_id,ecommerce 演示
+  租户 → global,归因 source=tool_record;fast-path 直连与深度规划同缝同归因。
+  (修复前缺陷曝光用例曾钉 DB 默认 global+NULL+regex_fallback,已翻转。)
 
 审计任务在产线经 extract_and_store_fact 的 fire-and-forget create_task 派生;
 测试直调 `_run_profile_audit` 取确定性,不追逐后台任务时序。
@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy import select, text
 
 from engine_py.db import LongMemoryFact
+from engine_py.graph.nodes.executor_fast_path import try_match_executor_fast_path
 from engine_py.memory.long_memory import LongMemory
 from engine_py.tools_registry.order_domain import OrderDomainService
 
@@ -257,12 +258,12 @@ def _seed_thread(factory, thread_id: str, user_id: str | None, business_id: str)
     asyncio.run(_go())
 
 
-def test_工具写路_现状_线程租户上下文被整体丢弃(clean_profile_tables):
-    """缺陷钉死:thread 会话明明白白解析出 user+businessId(nike),工具写
-    LongMemoryFact 却不带 scope/business_id/status/source —— 落 DB 默认
-    global+NULL+approved,source 误借 regex_fallback。租户内偏好被误升全局
-    画像且归因失真。persona-hardening 04 修复后本断言翻转为
-    (tenant, nike, source=tool_record 或同义归因)。"""
+def test_工具写路_线程租户上下文落列(clean_profile_tables):
+    """persona-hardening 04 修复钉死:thread 会话解析出的 user+businessId(nike)
+    必须落列 —— scope=tenant 且 business_id=nike,归因 source=tool_record;
+    显式登记是顾客第一手陈述,confidence=1.0 即批 approved。
+    修复前此处为红:缺陷曾落 DB 默认 global+NULL+regex_fallback
+    (租户偏好误升全局画像、归因失真)。"""
     factory = clean_profile_tables
     _seed_thread(factory, "t-prof-ctx", "CUST-T1", "nike")
     with _fake_models():
@@ -272,9 +273,24 @@ def test_工具写路_现状_线程租户上下文被整体丢弃(clean_profile_
     assert len(rows) == 1
     row = rows[0]
     assert row["fact"] == "[User color preference]: 黑色"
-    # —— 缺陷三连(04 翻转点)——
-    assert (row["scope"], row["business_id"]) == ("global", None)
-    assert row["source"] == "regex_fallback"
+    # —— 04 修复点:租户归因 + 诚实 source ——
+    assert (row["scope"], row["business_id"]) == ("tenant", "nike")
+    assert row["source"] == "tool_record"
+    assert (row["status"], row["confidence"], row["type"]) == ("approved", 1.0, "preference")
+
+
+def test_工具写路_ecommerce演示租户落global(clean_profile_tables):
+    """ecommerce 伪租户(引擎演示租户)对齐审计侧 extract_and_store_fact 的
+    fallback 档:scope=global 且 business_id 不落列 —— 两条写路同规。"""
+    factory = clean_profile_tables
+    _seed_thread(factory, "t-prof-ecom", "CUST-T3", "ecommerce")
+    with _fake_models():
+        res = asyncio.run(OrderDomainService.record_user_preference("size", "42码", thread_id="t-prof-ecom"))
+    assert res.get("success") is True, res
+    rows = _rows_of(factory, "CUST-T3")
+    assert len(rows) == 1
+    assert (rows[0]["scope"], rows[0]["business_id"]) == ("global", None)
+    assert rows[0]["source"] == "tool_record"
 
 
 def test_工具写路_缺threadId拒绝(clean_profile_tables):
@@ -288,3 +304,32 @@ def test_工具写路_匿名线程拒绝(clean_profile_tables):
     res = asyncio.run(OrderDomainService.record_user_preference("color", "黑色", thread_id="t-prof-anon"))
     assert "error" in res and "user context" in res["error"]
     assert _rows_of(factory, "CUST-T2") == []
+
+
+def test_工具写路_fastpath直连同归因(clean_profile_tables):
+    """fast-path 确定性直连(executor_fast_path.try_match_executor_fast_path)
+    与深度规划共用同一写缝:matcher 只产 toolName/args,threadId 由执行引擎
+    派发时统一注入(step_execution_engine),租户归因必须在直连路线同样生效 ——
+    本例按派发形状合并 args 后走真写路断言 (tenant, nike, tool_record)。"""
+    factory = clean_profile_tables
+    _seed_thread(factory, "t-prof-fp", "CUST-T4", "nike")
+
+    matched = try_match_executor_fast_path(
+        "登记顾客偏好", "我喜欢黑色", ["recordUserPreference"]
+    )
+    assert matched is not None and matched["toolName"] == "recordUserPreference"
+    assert matched["args"]["preferenceType"] == "color"
+
+    # 执行引擎派发形状:threadId 统一注入 args(step_execution_engine L326)
+    args = {**matched["args"], "threadId": "t-prof-fp"}
+    with _fake_models():
+        res = asyncio.run(
+            OrderDomainService.record_user_preference(
+                args["preferenceType"], args["preferenceValue"], thread_id=args["threadId"]
+            )
+        )
+    assert res.get("success") is True, res
+    rows = _rows_of(factory, "CUST-T4")
+    assert len(rows) == 1
+    assert (rows[0]["scope"], rows[0]["business_id"]) == ("tenant", "nike")
+    assert rows[0]["source"] == "tool_record"

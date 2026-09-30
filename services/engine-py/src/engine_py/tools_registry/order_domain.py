@@ -1049,6 +1049,15 @@ class OrderDomainService:
 
             from ..db import LongMemoryFact
 
+            # 🛡️ 双层画像归因(persona-hardening 04):工具写路对齐审计侧
+            # extract_and_store_fact 的 fallback 档 —— 非 ecommerce 真商户 →
+            # tenant + business_id 落列;ecommerce 演示租户 → global 不落列。
+            # 显式登记是顾客第一手陈述:confidence=1.0 即批 approved;
+            # source=tool_record 与审计侧 llm_judged/regex_fallback 区分归因
+            # (修复前全吃 DB 默认:global+NULL+regex_fallback,租户偏好误升全局画像)。
+            business_id = ctx.get("businessId") or ""
+            is_tenant_scope = bool(business_id) and business_id != "ecommerce"
+
             async with get_session() as session:
                 session.add(
                     LongMemoryFact(
@@ -1056,6 +1065,11 @@ class OrderDomainService:
                         fact=fact_text,
                         embedding=serialized_embedding,
                         type="preference",
+                        scope="tenant" if is_tenant_scope else "global",
+                        business_id=business_id if is_tenant_scope else None,
+                        confidence=1.0,
+                        status="approved",
+                        source="tool_record",
                     )
                 )
                 await session.commit()
