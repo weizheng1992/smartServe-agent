@@ -3,8 +3,9 @@ import { useLocation } from 'react-router';
 import type { OrderCardData, RichCardBlock } from 'types';
 import { Button, Input, Loader2, MessageText, Paperclip, RichCardRenderer, X } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
+import { STOREFRONT_CHAT_OPEN_EVENT, type StorefrontChatOpenDetail } from '../../lib/chatBridge';
 import { readStoreCart, writeStoreCart } from '../../lib/storeCart';
-import { type RouteGreetingContext, getGreetingForRoute } from './routeGreetingConfig';
+import { getGreetingForRoute } from './routeGreetingConfig';
 
 interface ChatMessage {
   id: string;
@@ -200,11 +201,7 @@ const CARD_ACTION_STRATEGIES: Record<string, (payload: Record<string, any>) => C
   }),
 };
 
-export function FloatingChatWidget({
-  contextOverride,
-}: {
-  contextOverride?: Partial<RouteGreetingContext>;
-}) {
+export function FloatingChatWidget() {
   const { pathname } = useLocation();
   const { user } = useCurrentUser();
   const [isOpen, setIsOpen] = useState(false);
@@ -389,7 +386,7 @@ export function FloatingChatWidget({
           }
           const greetingText = getGreetingForRoute({
             pathname,
-            ...contextOverride,
+            cartItemCount: readStoreCart().length,
           });
           setMessages([
             {
@@ -410,7 +407,7 @@ export function FloatingChatWidget({
         setThreadId(freshTid);
         const greetingText = getGreetingForRoute({
           pathname,
-          ...contextOverride,
+          cartItemCount: readStoreCart().length,
         });
         setMessages([
           {
@@ -433,7 +430,7 @@ export function FloatingChatWidget({
     if (messages.length === 1 && messages[0].id.startsWith('msg_init_')) {
       const greetingText = getGreetingForRoute({
         pathname,
-        ...contextOverride,
+        cartItemCount: readStoreCart().length,
       });
       setMessages([
         {
@@ -524,6 +521,18 @@ export function FloatingChatWidget({
     if (selectedImage) lightboxRef.current?.focus();
   }, [selectedImage]);
 
+  // 页面 → 客服窗打开桥(订单弹窗「咨询客服」经 chatBridge 广播):开窗并预填
+  // 咨询语,不自动发送 —— 意图免打字,发送权留给顾客
+  useEffect(() => {
+    const open = (e: Event) => {
+      const detail = (e as CustomEvent<StorefrontChatOpenDetail>).detail || {};
+      setIsOpen(true);
+      if (detail.message) setInput(detail.message);
+    };
+    window.addEventListener(STOREFRONT_CHAT_OPEN_EVENT, open);
+    return () => window.removeEventListener(STOREFRONT_CHAT_OPEN_EVENT, open);
+  }, []);
+
   // 滚动到底部 (仅在用户主动发信或接收新回复时平滑滚动)
   // biome-ignore lint/correctness/useExhaustiveDependencies: messages.length 为滚动触发器,体内不直接读取
   useEffect(() => {
@@ -544,7 +553,7 @@ export function FloatingChatWidget({
     }
     const greetingText = getGreetingForRoute({
       pathname,
-      ...contextOverride,
+      cartItemCount: readStoreCart().length,
     });
     setMessages([
       {
@@ -644,7 +653,7 @@ export function FloatingChatWidget({
           })),
           routeContext: {
             pathname,
-            ...contextOverride,
+            cartItemCount: readStoreCart().length,
           },
         }),
       });

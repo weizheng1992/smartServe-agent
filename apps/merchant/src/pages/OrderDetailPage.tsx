@@ -4,6 +4,7 @@ import { useParams } from 'react-router';
 import type { ThirdPartyOrder } from 'types';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { LogisticsModal } from '../components/orders/LogisticsModal';
+import { openStorefrontChat } from '../lib/chatBridge';
 import { parseShippingAddress } from '../lib/shippingAddress';
 
 export default function SingleOrderDetailPage() {
@@ -154,7 +155,7 @@ export default function SingleOrderDetailPage() {
         isOpen={isLogisticsOpen}
         onClose={() => setIsLogisticsOpen(false)}
         order={order}
-        onOpenChatWithOrder={() => {}}
+        onOpenChatWithOrder={(orderId) => openStorefrontChat({ message: `帮我查一下订单 ${orderId} 的最新物流进度` })}
       />
     </div>
   );

@@ -5,6 +5,7 @@ import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { LogisticsModal } from '../components/orders/LogisticsModal';
 import { OrderDetailModal } from '../components/orders/OrderDetailModal';
 import { useCurrentUser } from '../context/UserContext';
+import { openStorefrontChat } from '../lib/chatBridge';
 import { parseShippingAddress } from '../lib/shippingAddress';
 
 export default function OrdersPage() {
@@ -252,14 +253,16 @@ export default function OrdersPage() {
           setSelectedLogisticsOrder(order);
           setIsLogisticsModalOpen(true);
         }}
-        onOpenChatWithOrder={() => {}}
+        onOpenChatWithOrder={(orderId, initialPrompt) =>
+          openStorefrontChat({ message: initialPrompt || `我想咨询订单 ${orderId}` })
+        }
       />
 
       <LogisticsModal
         isOpen={isLogisticsModalOpen}
         onClose={() => setIsLogisticsModalOpen(false)}
         order={selectedLogisticsOrder}
-        onOpenChatWithOrder={() => {}}
+        onOpenChatWithOrder={(orderId) => openStorefrontChat({ message: `帮我查一下订单 ${orderId} 的最新物流进度` })}
       />
     </div>
   );
