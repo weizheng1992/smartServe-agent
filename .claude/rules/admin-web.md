@@ -1,26 +1,27 @@
 ---
-description: Vite 6 SPA 管理后台控制台、10 大路由 CRUD 模块、统一组件套件与 HITL 人工审核台规范
+description: Vite 6 SPA 管理后台控制台、11 大路由 CRUD 模块、统一组件套件与 HITL 人工审核台规范
 paths: ["apps/admin/**/*"]
 ---
 
 # 管理控制台应用规范 (Admin Control Plane)
 
-本应用是企业级 SaaS 运营与决策中枢，采用 Vite 6 + React 19 SPA 架构，负责 10 大业务模块的统一 CRUD 管理、实时人工审核与干预、会话接管以及多租户穿透运营。
+本应用是企业级 SaaS 运营与决策中枢，采用 Vite 6 + React 19 SPA 架构，负责 11 大业务模块的统一 CRUD 管理、实时人工审核与干预、会话接管以及多租户穿透运营。
 
 ## 1. 核心架构与模块规范
 
-### 1.1 10 大路由级 CRUD 业务模块
+### 1.1 11 大路由级业务模块(与 `App.tsx` 路由表/Sidebar 一一对应,2026-10-01 校对)
 
-- `/conversations`：多租户会话浏览器，支持 Live Desk 人工实时接管、消息发送与会话链路审计。
-- `/orders`：电商订单主数据管理与订单状态监控。
-- `/approvals`：HITL 人工审批工作台，支持多 Tab 上下文抽屉（Timeline 决策轨迹、Payload 原始入参、Trace View 链路追踪）。
-- `/skills-tools`：技能与工具注册中心，配置 SOP 门禁、阈值覆盖（退款上限、有效天数等）与开关。
-- `/knowledge`：Contextual RAG 知识库管理、文档切片与向量化状态监控。
-- `/tenants`：SaaS 多租户管理与商户接入配置。
-- `/memory`：双层用户画像与长期记忆查询调试。
-- `/telemetry`：SaaS 遥测大盘、Token 消耗账单与自动驾驶解决率分析。
-- `/users`：客户主数据与关联收货地址管理。
-- `/settings`：系统全局参数配置。
+- `/dashboard`：全局指标大盘,六卡库内真算(活跃租户/Autopilot 率/HITL 待审批/LLM 24h),30s 轮询,严禁编造宣传数字。
+- `/tenants`：SaaS 多租户管理与商户接入配置(内置域删除保护、SPI/技能/引导配置编辑)。
+- `/conversations`：全景会话回放浏览器,支持 Live Desk 人工实时接管、消息发送与结单归档。
+- `/audits`：审批与风控审计,HITL 人工审批工作台(状态档位含 `resolved_by_human` 已接管完结)。
+- `/personas`：人物画像事实素描,双层画像(scope global/tenant)记忆查询与铸造闸管理。
+- `/rag-studio`：知识库与检索演练,Contextual RAG 切片管理 + 在线检索演练台。
+- `/skills-tools`：技能与 MCP 工具市场,配置 SOP 门禁、阈值覆盖(退款上限、有效天数等)与开关。
+- `/evals`：评测与 Prompt 实验,promptfoo 批次历史与逐用例下钻(真实评测通道,无随机生成)。
+- `/billing`：计量计费与配额,Token 用量与月度配额管理。
+- `/guardrails`：安全合规与围栏,护栏规则 CRUD。
+- `/system-logs`：系统与 LLM 日志,session_metrics/intent_logs 遥测消费,无数据处真实 0。
 
 ### 1.2 统一 CRUD 核心组件套件 (`src/components/common/`)
 

@@ -45,7 +45,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 ┌────────────────────────────────────────────────────────────────────────┐
 │                      前端应用 (apps/, TypeScript)                      │
 │  - apps/web:      Vite 6 + React 19 客户端聊天 SPA(SSE、卡片)         │
-│  - apps/admin:    Vite 6 + React 19 SaaS 管控台(10 大模块)           │
+│  - apps/admin:    Vite 6 + React 19 SaaS 管控台(11 大模块)           │
 │  - apps/merchant: 独立商户门户(Vite 6 SPA;代理至 Python 网关)       │
 │  - apps/merchant-admin: 商户独立后台(3006;数据分析 Agent、RBAC、   │
 │    优惠活动、订单/商品/客户 CRUD,详见 .claude/rules/merchant-admin.md)│

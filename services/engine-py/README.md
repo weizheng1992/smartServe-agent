@@ -50,9 +50,5 @@ python -m engine_py.shadow.diff --ts ts_results.jsonl --py py_results.jsonl
 门禁 = promptfoo 三套基线无回归(`bun run test:prompt:compare`)+
 影子差异清零(intentMatchRate / toolMatchRate = 100%,错误清零)。
 
-## Temporal Worker
-
-```bash
-# 影子期独立队列 agent-tasks-py(与 TS 的 agent-tasks 物理隔离)
-python -m engine_py.temporal.worker
-```
+> Temporal 执行路线已于 2026-09-30 退役删除(ADR-0007):回合管线收口为
+> `run_agent` 单一深模块,`engine_py/temporal/` 目录已不存在,本节旧命令作废。
