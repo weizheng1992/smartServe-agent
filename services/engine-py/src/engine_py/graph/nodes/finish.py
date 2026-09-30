@@ -109,6 +109,52 @@ async def finish_node(state: AgentState) -> dict:
             "explanation on these rules."
         )
 
+    # 🧠 画像/情境记忆注入(persona-hardening 03 裁决:终稿单点 + 防复读闸)
+    # bug#2 教训制度化:画像参与措辞 ≠ 参与检索 —— 块指令明写「未参与当轮
+    # 过滤时严禁宣称已按偏好过滤」。空召回零渲染零 token。
+    # 上限与召回侧同源(画像 Top-5 / 情境 Top-3):召回调大 limit 时须同步。
+    profile_limit, events_limit, text_cap = 5, 3, 80
+
+    def _memory_lines(items: list, text_key: str, limit: int, tag=None) -> list[str]:
+        lines: list[str] = []
+        for item in items[:limit]:
+            text = str(item.get(text_key) or "").strip() if isinstance(item, dict) else str(item or "").strip()
+            if not text:
+                continue
+            if len(text) > text_cap:
+                text = text[:text_cap] + "…"
+            prefix = f"[{tag(item)}] " if tag else ""
+            # 编号只给实际渲染行,空文本行跳号
+            lines.append(f"{len(lines) + 1}. {prefix}{text}")
+        return lines
+
+    def _scope_tag(fact) -> str:
+        # 缺失 scope 兜底 global 与系统语义同向:召回侧 `row.scope or "global"`
+        # 已归并,DB 默认即 global;可见性闸在召回 _tenant_visible,渲染侧
+        # 不构成 tenant 事实误标全局的泄漏面。
+        return fact.get("scope") if isinstance(fact, dict) and fact.get("scope") in ("global", "tenant") else "global"
+
+    persona_context = ""
+    persona_lines = _memory_lines(state.get("long_memory_facts") or [], "fact", profile_limit, tag=_scope_tag)
+    if persona_lines:
+        persona_context = (
+            "\n\n[USER PROFILE MEMORY]:\n" + "\n".join(persona_lines) + "\n"
+            "These are the customer's approved profile facts. Reference them ONLY when relevant to the "
+            "current question (e.g. size conversion, recommendation phrasing, continuity of past topics). "
+            "They were NOT applied to filter or search products in this turn — you MUST NOT claim that "
+            "recommendations were filtered, selected, or combined based on these preferences unless such "
+            "filtering actually happened in this turn's retrieval (the current tool results show it)."
+        )
+
+    episodic_context = ""
+    event_lines = _memory_lines(state.get("episodic_events") or [], "event", events_limit)
+    if event_lines:
+        episodic_context = (
+            "\n\n[MEMORY OF PAST EVENTS]:\n" + "\n".join(event_lines) + "\n"
+            "These are the customer's past business events with this store; mention them only when "
+            "relevant for conversational continuity."
+        )
+
     default_system_prompt = (
         f"You are an advanced, professional AI Customer Support Agent representing {brand_name}. "
         "Help users resolve order, shipping, and refund queries."
@@ -149,7 +195,7 @@ async def finish_node(state: AgentState) -> dict:
         "Formulate a clean, professional, and helpful customer support message in Chinese.\n"
         f'Customer Question: "{input_text}"\n'
         "The plan execution details (the ultimate truth from physical database) are: "
-        f"{json.dumps(subtasks, ensure_ascii=False, default=str)}{rag_context}{history_context}"
+        f"{json.dumps(subtasks, ensure_ascii=False, default=str)}{rag_context}{persona_context}{episodic_context}{history_context}"
         "Locally discussed details might also reside in the conversation history above.\n\n"
         "CRITICAL RULES (最高行为准则 - 严禁幻觉与跨租户泄露):\n"
         '1. If the customer is asking about what was just discussed, what actions were just performed in '
