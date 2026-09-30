@@ -21,6 +21,10 @@ import { expect, test } from '@playwright/test';
 
 const SHOT = '.scratch/admin-console-readiness/assets/merchant-console';
 
+// 商户门户独立端口(3005):/api/* 相对请求与 /admin、/ 相对 goto 都吃本文件
+// 的 baseURL 覆写 —— 主套件默认 baseURL 是 apps/web 的 3000,不覆写必败。
+test.use({ baseURL: 'http://localhost:3005' });
+
 test.describe('商户内嵌运营台:身份闸契约 (admin-readiness 04)', () => {
   test('管理族 API 匿名必 401(订单/审批/会话三族抽查)', async ({ page }) => {
     for (const path of [

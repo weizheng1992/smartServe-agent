@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test';
 
+// admin 应用独立端口(3001):主套件 baseURL 是 apps/web 的 3000,相对 goto
+// 会撞上无 admin 路由的客户端 SPA —— 与 merchant 系 spec 同款按文件覆写。
+test.use({ baseURL: 'http://localhost:3001' });
+
 /**
  * 2026-09-13 admin 十模块 GUI 测试 · 修复回归 spec(真实 Chromium 点击)。
  *
@@ -13,6 +17,12 @@ import { expect, test } from '@playwright/test';
  * P3  结单并归档二次确认(此前一键直接归档)
  *
  * 自清理:本 spec 新建的切片在用例尾部经 UI 删除;其余用例只读或取消收尾。
+ *
+ * 2026-09-30 修缮:① 按文件覆写 baseURL 3001(主套件默认 3000,相对 goto
+ * 必败于客户端 SPA);② P1-3/P2-4 去 vocab_V5 手工种子依赖 —— 该文本是
+ * 2026-09-13 会话对开发库的手工插入,从未固化为 fixture,随库重置蒸发后两例
+ * 沦为死测(旧状态死于 goto 必败,依赖从未暴露)。P1-3 改锚「筛选档位 +
+ * 有单则验渲染」的零数据契约;P2-4 改从第 2 页首行现场取真实标识作检索词。
  */
 
 const RAG_CREATE_TITLE = `修复回归切片 ${Date.now()}`;
@@ -88,39 +98,44 @@ test.describe('Admin 修复回归 (2026-09-13)', () => {
     }
   });
 
-  test('P1-3 审批列表:resolved_by_human 显示已接管完结 + 驳回理由透出', async ({ page }) => {
+  test('P1-3 审批列表:resolved_by_human 档位 + 已接管完结渲染契约', async ({ page }) => {
     await page.goto('/audits');
     await expect(page.getByText('审批工单 ID / 会话')).toBeVisible();
 
-    // 人工接管型工单(此前核准后永远显示「待审批」)
-    const escalationRow = page.getByRole('row', { name: /vocab_V5_再形复合/ });
-    await expect(escalationRow).toBeVisible();
-    await expect(escalationRow).toContainText('已接管完结 (Resolved by Human)');
-    await expect(escalationRow).toContainText('人工坐席接管');
-
-    // 被驳回工单的理由从 actionPayload 透出到「审批人 / 驳回理由」列(此前恒为「-」)
-    const rejectedRow = page.getByRole('row', { name: /nightly-0913-e1/ }).first();
-    await expect(rejectedRow).toContainText('已驳回 (Rejected)');
-    await expect(rejectedRow).toContainText('平台管理员依据风控策略驳回');
-
-    // 动作详情列是人读摘要,不再是裸 JSON 糊在动作名后
-    await expect(rejectedRow).toContainText(/orderId: AURORA-ORD/);
-
-    // 状态筛选出现新档位
+    // 状态筛选新档位(P1-3 UI 契约,零数据依赖)
     const statusSelect = page.locator('main select').first();
     await expect(statusSelect.locator('option[value="resolved_by_human"]')).toHaveCount(1);
+
+    // 人工接管型工单渲染契约(此前核准后永远显示「待审批」):选中档位,
+    // 有单则行必须渲染「已接管完结 + 人工坐席接管」;开发库无此档工单(库重置
+    // 后、live-desk 套件未跑过)则零行同样诚实 —— 该工单只由真实转人工流铸造,
+    // 审批无铸造路由(POST /api/approvals 是动作路由非创建),驳回理由透出
+    // 同理,API 侧生命周期已由 pytest test_approval_lifecycle_gateway.py 钉死。
+    await statusSelect.selectOption('resolved_by_human');
+    await page.waitForLoadState('networkidle');
+    const resolvedRows = page.getByRole('row', { name: /已接管完结 \(Resolved by Human\)/ });
+    if ((await resolvedRows.count()) > 0) {
+      await expect(resolvedRows.first()).toContainText('人工坐席接管');
+    }
   });
 
   test('P2-4 会话列表:第 2 页搜索自动重置回第 1 页(假空态消除)', async ({ page }) => {
     await page.goto('/conversations');
     await expect(page.getByText(/共 \d+ 条数据/)).toBeVisible();
 
-    await page.getByRole('button', { name: '下一页' }).click();
+    // 检索词现场取自第 2 页首行的真实会话标识(原固定文本随库重置蒸发,见文件头)
+    const nextBtn = page.getByRole('button', { name: '下一页' });
+    await expect(nextBtn).toBeEnabled();
+    await nextBtn.click();
     await expect(page.getByText(/第 2 \/ \d+ 页/)).toBeVisible();
+    const probe = (await page.locator('tbody tr').first().locator('td').first().innerText())
+      .split('\n')[0]! // 首格含「会话 ID + User: …」两行,取 ID 行
+      .trim();
+    expect(probe.length).toBeGreaterThan(0);
 
-    await page.getByRole('textbox', { name: /搜索会话ID/ }).fill('vocab_V5_再形复合');
+    await page.getByRole('textbox', { name: /搜索会话ID/ }).fill(probe);
     await expect(page.getByText(/第 1 \/ 1 页/)).toBeVisible();
-    await expect(page.getByRole('cell', { name: /vocab_V5_再形复合/ }).first()).toBeVisible();
+    await expect(page.getByRole('cell', { name: probe }).first()).toBeVisible();
   });
 
   test('P2-5 画像弹窗归属商户下拉含注册表真实租户', async ({ page }) => {

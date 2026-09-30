@@ -14,6 +14,8 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: '.',
   testMatch: [/circuit-breaker\.e2e\.ts$/],
+  // .claude/worktrees 是 agent 会话的临时检出副本,非套件成员(与主配置同款防误收)
+  testIgnore: [/[\\/]\.claude[\\/]worktrees[\\/]/],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,

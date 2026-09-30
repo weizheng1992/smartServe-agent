@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test';
 
+// admin 应用独立端口(3001):主套件 baseURL 是 apps/web 的 3000,相对 goto
+// 会撞上无 admin 路由的客户端 SPA —— 与 merchant 系 spec 同款按文件覆写。
+test.use({ baseURL: 'http://localhost:3001' });
+
 /**
  * 2026-09-13 去mock回归(real-data-only 收尾):
  * 1. 会话「LangGraph 决策流」Tab 只渲染 llm_call_logs 真遥测或诚实空态,

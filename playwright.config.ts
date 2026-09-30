@@ -4,8 +4,14 @@ export default defineConfig({
   testDir: '.',
   testMatch: ['apps/**/e2e/**/*.e2e.ts'],
   // 熔断 spec 由 playwright.breaker.config.ts 独占运行(独立网关注入死 LLM);
+  // merchant-admin 套件由 apps/merchant-admin/e2e/merchant-admin.config.ts 独占
+  // 运行(baseURL 3006 + 专属 webServer),主套件 baseURL 3000 下相对 goto 必败;
   // .claude/worktrees 是 agent 会话的临时检出副本,非套件成员(曾整目录被收集成幽灵重复用例)
-  testIgnore: [/circuit-breaker\.e2e\.ts$/, /[\\/]\.claude[\\/]worktrees[\\/]/],
+  testIgnore: [
+    /circuit-breaker\.e2e\.ts$/,
+    /[\\/]apps[\\/]merchant-admin[\\/]e2e[\\/]/,
+    /[\\/]\.claude[\\/]worktrees[\\/]/,
+  ],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

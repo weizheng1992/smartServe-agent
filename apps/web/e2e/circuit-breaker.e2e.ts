@@ -21,10 +21,14 @@ test.describe('LLM 上游熔断降级 E2E', () => {
     const messageInput = page.locator('input[placeholder*="发送您的业务诉求"]');
     await expect(messageInput).toBeEnabled({ timeout: 15_000 });
 
-    // 输入必须真正抵达 triage Step 3 大模型精判:问候/订单查询/退款查询都有
-    // 规则或 embedding 锚点直达旁路(判定 1/2/3),零 LLM 调用则熔断永不触发
-    // (实测「查订单发货状态」全程确定性履约)。价保咨询无订单/退款关键词,
-    // 实测钉死:LLM 调用 1 失败 → 熔断 OPEN → planner 调用 2 被拒 → 降级道歉。
+    // 输入必须真正抵达至少一次 LLM 调用:问候/订单查询/退款查询都有规则或
+    // embedding 锚点直达旁路(判定 1/2/3),零 LLM 调用则熔断永不触发(实测
+    // 「查订单发货状态」全程确定性履约)。价保咨询无订单/退款关键词,RAG
+    // top_score 0.52 < 0.55 拒绝 consult 快轨 → 整轮唯一 LLM 调用就是 finish
+    // 终稿 —— 它穷尽重试后恰好把熔断推至 OPEN,韧性层改抛
+    // CircuitBreakerOpenError(2026-09-30 _trip_or_original;此前原始
+    // ConnectionError 被 finish 兜底吃成罐头,道歉永不触达),经 finish 穿透
+    // 闸接 run_agent 的 job 级降级道歉。
     await messageInput.fill('我想了解一下你们平台的价保规则是怎么样的，可以详细说明一下吗');
     await page.locator('button:has-text("发送")').click();
 
