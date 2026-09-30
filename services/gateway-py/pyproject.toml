@@ -8,8 +8,6 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "python-socketio>=5.11",
     "engine-py",
-    "sqlglot>=25.0",
-    "structlog>=24.4",
     "pyjwt>=2.9",
     "bcrypt>=4.2",
     "python-multipart>=0.0.32",
