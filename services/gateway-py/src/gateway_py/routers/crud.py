@@ -141,13 +141,31 @@ def _persona_item(r: LongMemoryFact) -> dict:
         "id": str(r.id),
         "userId": r.user_id,
         "businessId": r.business_id or "global",
-        "scope": r.scope or "tenant",
+        # 缺省回填 'global' 与 DB server_default、召回语义(row.scope or 'global')、
+        # 坐席台三方同向(persona-hardening 05 裁决)—— 回填 'tenant' 会让运营误判
+        # 全局可见的事实为本店私有。
+        "scope": r.scope or "global",
         "fact": r.fact,
         "confidence": 1.0 if r.confidence is None else r.confidence,
         "source": r.source or "chat_dialogue_inference",
         "status": r.status or "approved",
         "createdAt": _date_str(r.created_at),
     }
+
+
+def _assert_persona_mutable(row: LongMemoryFact, tenant_id: str | None) -> None:
+    """🛡️ 租户属主闸(persona-hardening 05):具名租户头只能改本租户 tenant 行;
+    global 画像全员可见故只归平台(tenantId=all / 无头)管,具名租户变更一律 403
+    —— 否则任一租户可借可见性改写所有租户共享的全局画像。"""
+    if not tenant_id or tenant_id == "all":
+        return
+    if (row.scope or "global") == "tenant" and row.business_id == tenant_id:
+        return
+    raise HTTPException(
+        403,
+        f"Persona fact is outside tenant '{tenant_id}' ownership "
+        "(global facts are platform-managed; switch to tenantId=all to administer them)",
+    )
 
 
 @router.get("/api/personas")
@@ -160,7 +178,15 @@ async def list_personas(
     async with get_session() as session:
         stmt = select(LongMemoryFact).order_by(desc(LongMemoryFact.created_at))
         if tenant_id and tenant_id != "all":
-            stmt = stmt.where(LongMemoryFact.business_id == tenant_id)
+            # 🛡️ 具名租户视图与坐席台同口径(persona-hardening 05):global 画像
+            # (scope global/NULL,召回侧全员可见)只读附带 + 本租户行 ——
+            # 运营看到的画像面 = 该店客服真实生效的画像面;编辑权由
+            # _assert_persona_mutable 闸收紧。
+            stmt = stmt.where(
+                (LongMemoryFact.business_id == tenant_id)
+                | (LongMemoryFact.scope == "global")
+                | (LongMemoryFact.scope.is_(None))
+            )
         if userId:
             stmt = stmt.where(LongMemoryFact.user_id == userId)
         rows = (await session.execute(stmt)).scalars().all()
@@ -194,6 +220,7 @@ async def update_persona(fact_id: str, body: dict, x_tenant_id: str | None = Hea
         ).scalar_one_or_none()
         if not row:
             raise HTTPException(404, f"Persona memory fact '{fact_id}' not found in database")
+        _assert_persona_mutable(row, x_tenant_id)
         if body.get("fact") is not None:
             row.fact = body["fact"]
         if body.get("confidence") is not None:
@@ -213,6 +240,7 @@ async def delete_persona(fact_id: str, x_tenant_id: str | None = Header(None)):
         ).scalar_one_or_none()
         if not row:
             raise HTTPException(404, f"Persona memory fact '{fact_id}' not found in database")
+        _assert_persona_mutable(row, x_tenant_id)
         # 📥 Bad-Case 信号上下文:删除前捕获引用(事实原文不复制入池)
         fact_user_id = row.user_id
         fact_business_id = row.business_id or "ecommerce"

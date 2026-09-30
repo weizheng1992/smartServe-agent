@@ -1548,6 +1548,64 @@ class TestPersonas:
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
 
+    async def test_named_tenant_view_global_readonly_and_ownership_gate(self, client, contract_fixtures):
+        """persona-hardening 05:具名租户视图与坐席台同口径 —— global 画像只读
+        附带(scope 缺省回填 global 与 DB/召回/坐席台四方同向)、本租户行可见、
+        他租户行不可见;变更面由属主闸收紧(读得到改不了,403),平台视角
+        (tenantId=all)不受限。"""
+        from sqlalchemy import select
+
+        from engine_py.db import LongMemoryFact, get_session
+
+        async with get_session() as session:
+            rows = [
+                LongMemoryFact(user_id="u_gate_global", fact="全局事实-契约", scope="global", business_id=None),
+                LongMemoryFact(user_id="u_gate_aurora", fact="aurora 私有-契约", scope="tenant", business_id="aurora"),
+                LongMemoryFact(user_id="u_gate_nike", fact="nike 私有-契约", scope="tenant", business_id="nike"),
+            ]
+            session.add_all(rows)
+            await session.commit()
+            seeded_ids = [str(r.id) for r in rows]
+        try:
+            list_res = await client.get("/api/personas", params={"tenantId": "nike"})
+            assert list_res.status_code == 200
+            by_id = {f["id"]: f for f in list_res.json()["data"]}
+            assert seeded_ids[0] in by_id and by_id[seeded_ids[0]]["scope"] == "global"
+            assert seeded_ids[2] in by_id
+            assert seeded_ids[1] not in by_id
+
+            # 具名租户变更面:global 403(读得到改不了)/ 他租户 403 / 本租户 200
+            put_global = await client.put(
+                f"/api/personas/{seeded_ids[0]}", headers={"x-tenant-id": "nike"}, json={"confidence": 0.5}
+            )
+            assert put_global.status_code == 403
+            del_global = await client.delete(f"/api/personas/{seeded_ids[0]}", headers={"x-tenant-id": "nike"})
+            assert del_global.status_code == 403
+            put_foreign = await client.put(
+                f"/api/personas/{seeded_ids[1]}", headers={"x-tenant-id": "nike"}, json={"confidence": 0.5}
+            )
+            assert put_foreign.status_code == 403
+            put_own = await client.put(
+                f"/api/personas/{seeded_ids[2]}", headers={"x-tenant-id": "nike"}, json={"confidence": 0.95}
+            )
+            assert put_own.status_code == 200
+
+            # 平台视角不受限:all 头可改 global,回填仍是 global
+            put_platform = await client.put(
+                f"/api/personas/{seeded_ids[0]}", headers={"x-tenant-id": "all"}, json={"confidence": 0.88}
+            )
+            assert put_platform.status_code == 200
+            assert put_platform.json()["data"]["scope"] == "global"
+        finally:
+            async with get_session() as session:
+                for fid in seeded_ids:
+                    row = (
+                        await session.execute(select(LongMemoryFact).where(LongMemoryFact.id == fid))
+                    ).scalar_one_or_none()
+                    if row:
+                        await session.delete(row)
+                await session.commit()
+
 
 class TestGuardrails:
     async def test_crud_roundtrip(self, client, contract_fixtures):

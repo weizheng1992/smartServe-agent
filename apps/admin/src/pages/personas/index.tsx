@@ -1,6 +1,7 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
+import { useAdminTenantStore } from '../../store/tenantStore';
 import { personasApi } from '../../lib/api';
 import { PersonaFormModal } from './components/PersonaFormModal';
 import type { PersonaRecord } from './types';
@@ -8,6 +9,15 @@ import type { PersonaRecord } from './types';
 export * from './types';
 
 export function PersonasPage() {
+  const { selectedTenantId } = useAdminTenantStore();
+  // 具名租户视图的 global 画像只读附带(persona-hardening 05,与坐席台同口径):
+  // 平台视角(all)全量可管;具名租户只能变更本租户 tenant 行,global 行读得到改不了
+  const canMutateRow = useCallback(
+    (row: PersonaRecord) =>
+      selectedTenantId === 'all' || (row.scope !== 'global' && row.businessId === selectedTenantId),
+    [selectedTenantId],
+  );
+
   const fetchPersonasList = useCallback(async ({ tenantId }: { tenantId: string }) => {
     try {
       const res = await personasApi.list(tenantId === 'all' ? undefined : tenantId);
@@ -36,6 +46,7 @@ export function PersonasPage() {
   }, []);
 
   const {
+    data,
     paginatedData,
     total,
     currentPage,
@@ -64,7 +75,8 @@ export function PersonasPage() {
     deleteApi: deletePersonaApi,
     tenantKey: 'businessId' as keyof PersonaRecord,
     filterFn: (item, query, status, tenantId) => {
-      if (tenantId !== 'all' && item.businessId !== tenantId) return false;
+      // global 画像在具名租户视图只读附带(网关已附带返回),不在客户端再筛掉
+      if (tenantId !== 'all' && item.businessId !== tenantId && item.scope !== 'global') return false;
       if (status && item.status !== status) return false;
       if (query.trim()) {
         const q = query.toLowerCase();
@@ -79,6 +91,17 @@ export function PersonasPage() {
   });
 
   const [formData, setFormData] = useState<Partial<PersonaRecord>>({});
+
+  // 待审闭环(persona-hardening 05):中置信抽取落 pending,召回侧不消费,
+  // 唯一翻案通道在此 —— 计数角标 + 一键批/驳(updateItem 走既有 PUT 通道)
+  const pendingCount = useMemo(() => data.filter((r) => r.status === 'pending').length, [data]);
+
+  const reviewItem = useCallback(
+    (row: PersonaRecord, status: 'approved' | 'rejected') => {
+      updateItem('id', { ...row, status });
+    },
+    [updateItem],
+  );
 
   const handleOpenCreate = () => {
     setFormData({
@@ -129,6 +152,11 @@ export function PersonasPage() {
           >
             {row.businessId.toUpperCase()}
           </span>
+          {row.scope === 'global' && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium mt-0.5 ml-1 bg-slate-100 text-slate-600 border border-slate-200">
+              全局可见
+            </span>
+          )}
         </div>
       ),
     },
@@ -184,29 +212,72 @@ export function PersonasPage() {
       key: 'actions',
       header: '操作',
       align: 'right' as const,
-      render: (row: PersonaRecord) => (
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => handleOpenEdit(row)}
-            className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-          >
-            编辑
-          </button>
-          <button
-            type="button"
-            onClick={() => setItemToDelete(row)}
-            className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-          >
-            废弃删除
-          </button>
-        </div>
-      ),
+      render: (row: PersonaRecord) => {
+        const mutable = canMutateRow(row);
+        const lockTitle = mutable ? undefined : 'global 画像全员可见,由平台视角(tenantId=all)管理';
+        return (
+          <div className="flex items-center justify-end gap-2">
+            {row.status === 'pending' && (
+              <>
+                <button
+                  type="button"
+                  disabled={!mutable}
+                  title={lockTitle ?? '批复生效:该画像将参与召回'}
+                  onClick={() => reviewItem(row, 'approved')}
+                  className="text-xs text-emerald-600 hover:text-emerald-800 font-medium px-2 py-1 rounded hover:bg-emerald-50 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                >
+                  批准
+                </button>
+                <button
+                  type="button"
+                  disabled={!mutable}
+                  title={lockTitle ?? '驳回:该画像永不参与召回'}
+                  onClick={() => reviewItem(row, 'rejected')}
+                  className="text-xs text-slate-500 hover:text-slate-700 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                >
+                  驳回
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              disabled={!mutable}
+              title={lockTitle}
+              onClick={() => handleOpenEdit(row)}
+              className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            >
+              编辑
+            </button>
+            <button
+              type="button"
+              disabled={!mutable}
+              title={lockTitle}
+              onClick={() => setItemToDelete(row)}
+              className="text-xs text-rose-600 hover:text-rose-800 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            >
+              废弃删除
+            </button>
+          </div>
+        );
+      },
     },
   ];
 
   return (
     <div className="space-y-4">
+      {pendingCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setStatusFilter('pending')}
+          className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer text-left"
+        >
+          <span className="text-xs font-medium text-amber-800">
+            ⏳ 有 <span className="font-bold">{pendingCount}</span>{' '}
+            条待核实画像等待审核 —— 中置信抽取不参与召回,需人工批复生效或驳回
+          </span>
+          <span className="text-xs font-semibold text-amber-700 shrink-0 ml-3">去审核 →</span>
+        </button>
+      )}
       <FilterBar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -215,7 +286,7 @@ export function PersonasPage() {
         onStatusChange={setStatusFilter}
         statusOptions={[
           { label: '已生效 (Approved)', value: 'approved' },
-          { label: '待核实 (Pending)', value: 'pending' },
+          { label: `待核实 (Pending)${pendingCount > 0 ? ` · ${pendingCount}` : ''}`, value: 'pending' },
           { label: '已废弃 (Rejected)', value: 'rejected' },
         ]}
         showTenantFilter={true}
