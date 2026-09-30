@@ -21,6 +21,7 @@ from engine_py.db import (
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select, text
+from sqlalchemy.orm import defer
 
 router = APIRouter()
 
@@ -189,6 +190,9 @@ async def list_personas(
             )
         if userId:
             stmt = stmt.where(LongMemoryFact.user_id == userId)
+        # 384 维 embedding 串(每行数 KB)列表面零消费(_persona_item 不取),
+        # defer 掉免全表拖载(与 admin RAG 文档列表 defer 同款,2026-09-30 夜审)
+        stmt = stmt.options(defer(LongMemoryFact.embedding))
         rows = (await session.execute(stmt)).scalars().all()
     data = [_persona_item(r) for r in rows]
     return {"success": True, "tenantId": tenant_id or "all", "total": len(data), "data": data}
