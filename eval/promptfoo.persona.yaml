@@ -1,0 +1,16 @@
+description: "画像审计 Agent 抽取质量评测(persona-hardening 07;抽取成立性/scope 双层判定/置信档位路由)"
+
+prompts:
+  - "{{conversation}}"
+
+# 直调画像审计 provider:prompt 装配与围栏解析 import 生产同一实现,
+# LLM 走统一入口 get_chat_model(生产参数同链),仅省去订单流水 SQL 与落库
+providers:
+  - "file://providers/persona_provider.py:call_api"
+
+defaultTest:
+  options:
+    provider: "file://providers/persona_provider.py:call_api"
+
+tests:
+  - testCases/persona/extraction.json

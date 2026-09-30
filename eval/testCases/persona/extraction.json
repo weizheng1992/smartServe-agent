@@ -1,0 +1,98 @@
+[
+  {
+    "description": "生理特征 - 脚长/尺码应判 global(跨商户通用,persona-hardening 07)",
+    "vars": {
+      "userQuery": "我脚长 270mm,平时穿 44 码,帮我推荐一双跑鞋",
+      "conversation": "好的,已为您记录脚长 270mm(44 码),为您推荐以下 44 码跑鞋。",
+      "pastOrders": "[]",
+      "expectFacts": "[{\"scope\":\"global\",\"pattern\":\"270|44\"}]"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/personaExtraction.scorer.ts" }
+    ]
+  },
+  {
+    "description": "生理特征 - 布料过敏原应判 global(生理红线路径)",
+    "vars": {
+      "userQuery": "注意一下,我对羊毛过敏,别给我推荐羊毛材质的衣服",
+      "conversation": "明白了,已记录您的羊毛过敏情况,后续为您过滤羊毛材质商品。",
+      "pastOrders": "[]",
+      "expectFacts": "[{\"scope\":\"global\",\"pattern\":\"羊毛|过敏\"}]"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/personaExtraction.scorer.ts" }
+    ]
+  },
+  {
+    "description": "租户品牌偏好 - 耐克 Flyknit 应判 tenant(nike 流水上下文)",
+    "vars": {
+      "userQuery": "我还是最喜欢你们家的 Flyknit 鞋面,上脚包裹感特别好",
+      "conversation": "感谢您对 Nike Flyknit 科技的喜爱!新到的 Flyknit 鞋款为您优先展示。",
+      "pastOrders": "[{\"orderId\":\"ORD-NIKE-001\",\"status\":\"delivered\",\"productName\":\"Nike Air Zoom Pegasus 跑鞋\",\"totalAmount\":899},{\"orderId\":\"ORD-NIKE-002\",\"status\":\"delivered\",\"productName\":\"Nike Flyknit Racer\",\"totalAmount\":1099}]",
+      "expectFacts": "[{\"scope\":\"tenant\",\"pattern\":\"Flyknit|耐克|Nike\"}]"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/personaExtraction.scorer.ts" }
+    ]
+  },
+  {
+    "description": "租户品牌偏好 - 阿迪 Boost 底应判 tenant(adidas 流水上下文,防 tenant 判成一刀切 global)",
+    "vars": {
+      "userQuery": "穿的这几双 Boost 底是真舒服,以后跑步鞋我就认阿迪达斯了",
+      "conversation": "谢谢您对 adidas Boost 中底的认可!新品 Boost 系列已为您加入推荐。",
+      "pastOrders": "[{\"orderId\":\"ORD-ADIDAS-001\",\"status\":\"delivered\",\"productName\":\"adidas Ultraboost 22\",\"totalAmount\":1299}]",
+      "expectFacts": "[{\"scope\":\"tenant\",\"pattern\":\"Boost|阿迪|adidas\"}]"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/personaExtraction.scorer.ts" }
+    ]
+  },
+  {
+    "description": "显式声明 - 明确只收顺丰应高置信 approved 档(>= 0.85,显式胜出)",
+    "vars": {
+      "userQuery": "跟你说清楚,我收货只认顺丰,发其他快递我一律拒收",
+      "conversation": "已为您备注:收货仅接收顺丰配送,其他承运商将拒收。",
+      "pastOrders": "[]",
+      "expectFacts": "[{\"scope\":\"global\",\"pattern\":\"顺丰\",\"minConfidence\":0.85}]"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/personaExtraction.scorer.ts" }
+    ]
+  },
+  {
+    "description": "模糊表述 - 随口一说不得出 approved 档事实(丢弃或 pending,禁 >= 0.85)",
+    "vars": {
+      "userQuery": "随便看看吧,最近可能想换换穿搭风格,也说不好要啥",
+      "conversation": "好的,您可以先随便逛逛,有喜欢的随时告诉我,我来帮您找。",
+      "pastOrders": "[]",
+      "forbidApproved": "true"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/personaExtraction.scorer.ts" }
+    ]
+  },
+  {
+    "description": "混合对话 - 生理(脚长)+ 品牌偏好(Air Jordan)同轮应双 scope 各归其位",
+    "vars": {
+      "userQuery": "我脚长 265mm,而且我就爱 Air Jordan 这个系列,帮我看看新品",
+      "conversation": "已记录您 265mm 脚长。作为 Air Jordan 系列爱好者,新品 AJ 已为您优先展示。",
+      "pastOrders": "[{\"orderId\":\"ORD-NIKE-003\",\"status\":\"delivered\",\"productName\":\"Air Jordan 1 Mid\",\"totalAmount\":999}]",
+      "expectFacts": "[{\"scope\":\"global\",\"pattern\":\"265\"},{\"scope\":\"tenant\",\"pattern\":\"Jordan|乔丹\"}]"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/personaExtraction.scorer.ts" }
+    ]
+  },
+  {
+    "description": "负对照 - 纯寒暄不得产出任何偏好事实(hasNewPreference=false)",
+    "vars": {
+      "userQuery": "今天天气真不错,心情很好",
+      "conversation": "天气好心情也会更好呢,祝您购物愉快,有需要随时找我。",
+      "pastOrders": "[]",
+      "expectNoFacts": "true"
+    },
+    "assert": [
+      { "type": "javascript", "value": "file://scorers/personaExtraction.scorer.ts" }
+    ]
+  }
+]

@@ -18,6 +18,55 @@ PHYSIOLOGICAL_RE = re.compile(
 )
 _LINE_SPLIT_RE = re.compile(r"[\s,，、。!！?？\-_]+")
 
+# 画像审计 Agent 的系统提示词与 prompt 装配/解析提为模块级单一事实源
+# (persona-hardening 07):eval/providers/persona_provider.py import 同一装配,
+# 评测与生产永不漂移;_run_profile_audit 只负责订单流水获取、路由与落库。
+PROFILE_AUDIT_SYSTEM_PROMPT = """
+你是一位世界级的消费者行为学家与多租户用户画像专家。你的职责是通过分析【用户最新的对话细节】与【历史购买流水】，提炼出符合该用户特征的个性化消费画像标签，严格判定画像的生效作用域 (scope: 'global' | 'tenant')，并进行置信度（Confidence）评估。
+
+[CRITICAL DUAL-TIER SCOPE RULES]:
+1. 'global'（全局生理/客观事实）：
+   - 用户客观生理特征，例如：脚长(如 270mm/265mm)、身高、体重、衣服标准尺码(如 XL/L)、布料过敏原(如 羊毛过敏、聚酯纤维过敏)、常用快递偏好(如 优先顺丰)。
+   - 这类事实跨所有商户通用，不涉及具体商户私域利益。
+2. 'tenant'（特定商户私域偏好）：
+   - 特定品牌/商户专属的偏好或历史，例如：耐克 Flyknit/Air Jordan 偏好、阿迪达斯椰子鞋偏好、商户专享优惠券使用习惯、特定店铺客服互动偏好。
+   - 这类事实严格归属于当前商户，严禁泄漏给其它竞品商户。
+
+[CRITICAL INSTRUCTIONS]:
+请不要生成任何解释性废话。你必须只输出一个合规的 JSON 对象，包含以下字段：
+{
+  "hasNewPreference": boolean,
+  "extractedFacts": [
+    {
+      "fact": string,
+      "scope": "global" | "tenant",
+      "confidence": number,
+      "source": string
+    }
+  ]
+}
+"""
+
+
+def build_profile_audit_prompt(
+    past_orders: list[dict], user_query: str, assistant_response: str
+) -> str:
+    """装配画像审计 prompt(与 _run_profile_audit 生产调用同一份)。"""
+    return (
+        f"{PROFILE_AUDIT_SYSTEM_PROMPT}\n\n[INPUT CONTEXT]:\n"
+        f"1. 🛍️ 用户历史购买流水 (SQL Transaction Stream):\n"
+        f"{json.dumps(past_orders, ensure_ascii=False, indent=2, default=str)}\n\n"
+        f'2. 💬 本轮最新聊天交互 (Conversational Context):\n- Customer: "{user_query}"\n'
+        f'- Assistant: "{assistant_response}"\n\n请进行画像分析并返回结果 JSON：\n'
+    )
+
+
+def parse_profile_audit_response(content: str) -> dict:
+    """解析画像审计返回(LLM 围栏 JSON 剥壳),与生产解析同一实现。"""
+    clean_json = re.sub(r"^```json\s*", "", content.strip())
+    clean_json = re.sub(r"```$", "", clean_json).strip()
+    return json.loads(clean_json)
+
 
 def _cosine(a: list[float], b: list[float]) -> float:
     if len(a) != len(b):
@@ -146,45 +195,12 @@ class LongMemory:
         except Exception as sql_err:
             print(f"[Profiler Agent] Failed to fetch SQL transaction stream for audit: {sql_err}")
 
-        system_prompt = """
-你是一位世界级的消费者行为学家与多租户用户画像专家。你的职责是通过分析【用户最新的对话细节】与【历史购买流水】，提炼出符合该用户特征的个性化消费画像标签，严格判定画像的生效作用域 (scope: 'global' | 'tenant')，并进行置信度（Confidence）评估。
-
-[CRITICAL DUAL-TIER SCOPE RULES]:
-1. 'global'（全局生理/客观事实）：
-   - 用户客观生理特征，例如：脚长(如 270mm/265mm)、身高、体重、衣服标准尺码(如 XL/L)、布料过敏原(如 羊毛过敏、聚酯纤维过敏)、常用快递偏好(如 优先顺丰)。
-   - 这类事实跨所有商户通用，不涉及具体商户私域利益。
-2. 'tenant'（特定商户私域偏好）：
-   - 特定品牌/商户专属的偏好或历史，例如：耐克 Flyknit/Air Jordan 偏好、阿迪达斯椰子鞋偏好、商户专享优惠券使用习惯、特定店铺客服互动偏好。
-   - 这类事实严格归属于当前商户，严禁泄漏给其它竞品商户。
-
-[CRITICAL INSTRUCTIONS]:
-请不要生成任何解释性废话。你必须只输出一个合规的 JSON 对象，包含以下字段：
-{
-  "hasNewPreference": boolean,
-  "extractedFacts": [
-    {
-      "fact": string,
-      "scope": "global" | "tenant",
-      "confidence": number,
-      "source": string
-    }
-  ]
-}
-"""
-        audit_prompt = (
-            f"{system_prompt}\n\n[INPUT CONTEXT]:\n"
-            f"1. 🛍️ 用户历史购买流水 (SQL Transaction Stream):\n"
-            f"{json.dumps(past_orders, ensure_ascii=False, indent=2, default=str)}\n\n"
-            f'2. 💬 本轮最新聊天交互 (Conversational Context):\n- Customer: "{user_query}"\n'
-            f'- Assistant: "{assistant_response}"\n\n请进行画像分析并返回结果 JSON：\n'
-        )
+        audit_prompt = build_profile_audit_prompt(past_orders, user_query, assistant_response)
 
         try:
             response = await get_chat_model().ainvoke(audit_prompt)
             content = response.content if hasattr(response, "content") else str(response)
-            clean_json = re.sub(r"^```json\s*", "", content.strip())
-            clean_json = re.sub(r"```$", "", clean_json).strip()
-            audit_result = json.loads(clean_json)
+            audit_result = parse_profile_audit_response(content)
 
             if not audit_result.get("hasNewPreference") or not audit_result.get("extractedFacts"):
                 print("[Profiler Agent] 🍃 画像审计完成：本轮会话未检测到新的偏好特征变动。")

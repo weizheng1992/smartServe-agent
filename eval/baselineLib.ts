@@ -5,16 +5,19 @@ export const REPO_ROOT = resolve(__dirname, '..');
 export const BASELINE_DIR = resolve(__dirname, 'baselines');
 
 export interface SuiteDef {
-  name: 'unified' | 'planner';
+  name: 'unified' | 'planner' | 'persona';
   config: string;
 }
 
 // classify 分册已退役(2026-09-10 工单03):其 7 个意图用例早已 1:1 收编进
 // 统一套件,且统一套件的意图用例自此走生产瀑布真跑(非回声),分类回归
 // 由 unified 基线一力承担;独立 classify 分册成为纯冗余。
+// persona 分册入列(persona-hardening 07):画像审计抽取质量;活 LLM 例偶发
+// 波动属已知,基线首次钉定随下次整体重钉(test:prompt:pin -- --update)进行。
 export const SUITES: SuiteDef[] = [
   { name: 'unified', config: 'eval/promptfooconfig.yaml' },
   { name: 'planner', config: 'eval/promptfoo.planner.yaml' },
+  { name: 'persona', config: 'eval/promptfoo.persona.yaml' },
 ];
 
 export interface ScorerAggregate {

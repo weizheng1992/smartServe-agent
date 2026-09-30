@@ -35,7 +35,8 @@
     "test:prompt:compare": "bun eval/compareBaselines.ts",
     "test:prompt:record": "bun eval/recordEvals.ts",
     "evals:import": "cd services/engine-py && uv run python -m engine_py.evals.promptfoo_import ../../eval/.records",
-    "test:prompt:data": "promptfoo eval -c eval/promptfoo.data.yaml --no-write --no-cache"
+    "test:prompt:data": "promptfoo eval -c eval/promptfoo.data.yaml --no-write --no-cache",
+    "test:prompt:persona": "promptfoo eval -c eval/promptfoo.persona.yaml --no-write --no-cache"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
