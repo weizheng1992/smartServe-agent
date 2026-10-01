@@ -68,10 +68,14 @@ def build_cards(question: str, result: Any, intent: StructuredQueryIntent | None
     }]
 
 
-async def ask(question: str, session_ctx: dict, page_context: dict | None = None) -> dict:
+async def ask(
+    question: str, session_ctx: dict, page_context: dict | None = None, *, persist_session: bool = True
+) -> dict:
     """一轮问答:intake(含 PageContext)→ resolve → clarify|execute → 卡片。
 
     返回 {type: clarify|result|unsupported|error, ...}(gateway SSE 直接序列化)。
+    persist_session=False 供 ask_all 并发段禁用逐段直接落账(避免完成序竞写):
+    save-worthy 载荷改随帧以 `_sessionPayload` 带回,由 ask_all 按输入序单点收口。
     """
     engine = MetricQueryEngine(session_ctx=session_ctx)
     from .rbac import allowed_metrics_for_role
@@ -195,10 +199,12 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         outcome = await _run_scenario(intent, session_ctx)
         await trace.record(outcome.get("type", "error"), final_metric=intent.metric,
                            final_method="scenario", row_count=len(outcome.get("frames") or []))
+        payload = {"last_question": effective_question, "intent": intent.__dict__}
         if session_id:
-            await session_store.save(business_id, session_id, {
-                "last_question": effective_question, "intent": intent.__dict__,
-            })
+            if persist_session:
+                await session_store.save(business_id, session_id, payload)
+            else:
+                outcome["_sessionPayload"] = payload  # 并发段:载荷随帧带回,ask_all 收口
         return outcome
 
     try:
@@ -221,11 +227,13 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         sql_template=intent.metric, row_count=len(result.rows or []),
         cache_hit=cache_hit,
     )
+    # 只存问句与意图,不存结果(数据现查);unsupported/error 不污染历史
     if session_id:
-        # 只存问句与意图,不存结果(数据现查);unsupported/error 不污染历史
-        await session_store.save(business_id, session_id, {
-            "last_question": effective_question, "intent": intent.__dict__,
-        })
+        payload = {"last_question": effective_question, "intent": intent.__dict__}
+        if persist_session:
+            await session_store.save(business_id, session_id, payload)
+        else:
+            outcome["_sessionPayload"] = payload  # 并发段:载荷随帧带回,ask_all 收口
     return outcome
 
 
@@ -302,18 +310,37 @@ async def ask_all(question: str, session_ctx: dict, page_context: dict | None = 
 
     单段时行为与 ask() 完全一致;切分只认 ?/?(确定性标点),「和/顺便」等
     软连接词不切 —— 那是 L3 自由分解的职责,规则抢跑会制造错误回答。
-    """
-    import re as _re
 
-    parts = [p.strip() for p in _re.split(r"[??]", question or "") if p.strip()]
+    各段互不依赖(execute_async 每次自开独立会话/连接),gather 并发省整包
+    时延(2026-10-02 夜审:逐段 await 是 N 段时延之和)。会话收口:各段以
+    persist_session=False 执行、载荷随帧带回,此处按**输入序**取最后一个
+    save-worthy 段单点落账 —— 与串行版「逐段 save、后段覆盖前段」的最终态
+    一致(末段 unsupported/error 时保留前一个成功段的历史),且与完成序无关。
+    """
+    parts = [p.strip() for p in re.split(r"[??]", question or "") if p.strip()]
     if len(parts) <= 1:
         return await ask(question, session_ctx, page_context)
-    frames: list[dict] = []
-    for part in parts:
+
+    async def _one(part: str) -> dict:
         try:
-            frames.append(await ask(part, session_ctx, page_context))
+            return await ask(part, session_ctx, page_context, persist_session=False)
         except Exception as err:
-            frames.append({"type": "error", "message": f"「{part}」执行失败(已如实报告)", "detail": str(err)})
+            return {"type": "error", "message": f"「{part}」执行失败(已如实报告)", "detail": str(err)}
+
+    frames = list(await asyncio.gather(*(_one(part) for part in parts)))
+
+    session_id = str((page_context or {}).get("sessionId") or "")
+    if session_id:
+        last_payload = None
+        for frame in frames:  # 弹走私键(不入 SSE 线格式),输入序取最后 save-worthy
+            payload = frame.pop("_sessionPayload", None)
+            if payload is not None:
+                last_payload = payload
+        if last_payload is not None:
+            await session_store.save(session_ctx["business_id"], session_id, last_payload)
+    else:
+        for frame in frames:
+            frame.pop("_sessionPayload", None)
     return {"type": "multi", "frames": frames}
 
 

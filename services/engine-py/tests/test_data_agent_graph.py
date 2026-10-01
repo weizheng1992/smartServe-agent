@@ -178,3 +178,100 @@ class TestAdversarialInput:
                     time_window=None, category=None, chart_hint=None,
                 )
             )
+
+
+class TestAskAllParallel:
+    """ask_all gather 并发(2026-10-02 夜审性能项):段间无依赖 → 并发省整包
+    时延。钉三性质:① 帧序 = 输入序(与完成序无关);② 会话收口 = 输入序最后
+    一个成功段、单点落账(与串行版逐段覆盖的最终态一致);③ 执行面真并发
+    (串行版 max=1)。"""
+
+    CTX = {"business_id": "aurora", "role": "finance_owner"}
+
+    @staticmethod
+    def _stub_execute(monkeypatch, *, delay: float = 0.0, state: dict | None = None):
+        async def _fake(self, compiled, session_ctx=None):
+            if state is not None:
+                state["cur"] = state.get("cur", 0) + 1
+                state["max"] = max(state.get("max", 0), state["cur"])
+            if delay:
+                await asyncio.sleep(delay)
+            if state is not None:
+                state["cur"] -= 1
+            return QueryResult(
+                rows=[{"productId": "SPU-A", "metricScore": 1.0}],
+                metric=compiled.metric, unit=compiled.unit, caliber="测试口径",
+            )
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
+
+    def test_frames_keep_input_order_not_completion_order(self, stub_execute, monkeypatch):
+        """首段慢、末段快:gather 后帧序仍 = 问句切分序。"""
+        state: dict = {}
+        self._stub_execute(monkeypatch, delay=0.1, state=state)
+
+        async def _fast(self, compiled, session_ctx=None):
+            return QueryResult(rows=[], metric=compiled.metric, unit=compiled.unit, caliber="快")
+
+        # 首段「销售额排行」走桩(慢);末段换成不存在的问句走 unsupported(快)
+        out = asyncio.run(graph.ask_all("销售额排行?今天心情如何?", self.CTX))
+        assert out["type"] == "multi" and len(out["frames"]) == 2
+        assert out["frames"][0]["type"] == "result"
+        assert out["frames"][1]["type"] == "unsupported"
+
+    @staticmethod
+    def _patch_session(monkeypatch, saved: list):
+        async def _no_history(business_id, session_id):
+            return None
+
+        async def _fake_save(business_id, session_id, payload):
+            saved.append((business_id, session_id, payload))
+
+        monkeypatch.setattr(graph.session_store, "load", _no_history)
+        monkeypatch.setattr(graph.session_store, "save", _fake_save)
+
+    def test_session_settles_to_last_successful_segment(self, stub_execute, monkeypatch):
+        """末段 unsupported:收口回退到最后一个成功段(串行版逐段落账的最终态
+        = 前段历史保留,不得因并行化丢失)。"""
+        saved: list = []
+        self._patch_session(monkeypatch, saved)
+        out = asyncio.run(graph.ask_all(
+            "销售额排行?今天心情如何?", self.CTX, {"sessionId": "s-askall"},
+        ))
+        assert [f["type"] for f in out["frames"]] == ["result", "unsupported"]
+        assert len(saved) == 1, f"单点收口恰一次,实落账 {len(saved)} 次"
+        business_id, session_id, payload = saved[0]
+        assert business_id == "aurora" and session_id == "s-askall"
+        assert payload["last_question"] == "销售额排行"
+
+    def test_session_settles_to_last_when_tail_wins(self, stub_execute, monkeypatch):
+        """末段成功:落账恰一次,last_question = 末段问句(后段覆盖前段)。"""
+        saved: list = []
+        self._patch_session(monkeypatch, saved)
+        out = asyncio.run(graph.ask_all(
+            "今天心情如何?销售额排行", self.CTX, {"sessionId": "s-askall"},
+        ))
+        assert [f["type"] for f in out["frames"]] == ["unsupported", "result"]
+        assert len(saved) == 1
+        assert saved[0][2]["last_question"] == "销售额排行"
+        # 私键不得漏进 SSE 线格式
+        assert all("_sessionPayload" not in f for f in out["frames"])
+
+    def test_session_not_saved_when_all_segments_fail(self, stub_execute, monkeypatch):
+        """全段不产出 save-worthy 结果(unsupported/error):零落账,历史不污染。"""
+        saved: list = []
+        self._patch_session(monkeypatch, saved)
+        out = asyncio.run(graph.ask_all(
+            "今天心情如何?今天心情如何?", self.CTX, {"sessionId": "s-askall"},
+        ))
+        assert all(f["type"] == "unsupported" for f in out["frames"])
+        assert saved == []
+
+    def test_segments_actually_overlap(self, stub_execute, monkeypatch):
+        """并发证明:三段同时在场执行(串行版计数器 max 恒为 1)。"""
+        state: dict = {"cur": 0, "max": 0}
+        self._stub_execute(monkeypatch, delay=0.2, state=state)
+        out = asyncio.run(graph.ask_all("销售额排行?销售额排行?销售额排行", self.CTX))
+        assert out["type"] == "multi" and len(out["frames"]) == 3
+        assert all(f["type"] == "result" for f in out["frames"])
+        assert state["max"] >= 2, f"段间应并发执行,实测最大并发 {state['max']}"
