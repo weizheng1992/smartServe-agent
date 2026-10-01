@@ -689,6 +689,7 @@ class ApprovalGatekeeper:
         lock_key = f"lock:approval:{approval_id}"
         lock_acquired = False
         fallback_acquired = False
+        redis_answered = False  # SETNX 有确定性答复(含「锁被持」):内存兜底只服务 Redis 不可用
 
         try:
             client = await get_client()
@@ -697,12 +698,15 @@ class ApprovalGatekeeper:
         if client is not None:
             try:
                 result = await client.set(lock_key, "locked", px=5000, nx=True)
+                redis_answered = True
                 lock_acquired = result is not None and str(result).upper() == "OK"
             except Exception as err:
                 print(f"[ApprovalGatekeeper Lock] Redis SETNX failed, falling back to memory lock: {err}")
 
         if not lock_acquired:
-            if lock_key in _local_locks:
+            # 「锁被持」必须直接 409:若当 Redis 不可用落内存兜底,并发双批会
+            # 双双放行 → 双开 resume 事件 + 重复恢复执行(2026-10-02 夜审修复)
+            if redis_answered or lock_key in _local_locks:
                 return {"error": "请勿重复提交，审批正在处理中...", "statusCode": 409}
             _local_locks.add(lock_key)
             fallback_acquired = True
