@@ -320,11 +320,11 @@ LLM 是仲裁员与终局。每一层的判定以 `{layer, intent, confidence}` 
 
 ### 📂 核心文件：
 
-- **反向代理网关**：`apps/admin/next.config.js`
+- **反向代理网关**：`apps/admin/vite.config.ts`（server.proxy）
 
 ### 💡 架构解析：
 
-- **双向透明 Rewrites 代理**：管理端后台在 Next.js 的路由层内物理配置了 `rewrites` 代理重写。所有发送至 `http://localhost:3001/api/*` 的流量会被 Next.js 底层核心引擎透明、安全、极速地代理转发至主服务 `http://localhost:3000/api/*`，免去了重复编写 API controller，100% 杜绝跨域预检请求（Preflight）的 404 崩溃。
+- **双向透明 proxy 代理**：管理端后台在 Vite 的 dev server 层配置了 `server.proxy` 代理转发。所有发送至 `http://localhost:3001/api/*` 的流量会被 Vite 底层透明、安全、极速地代理转发至主服务 `http://localhost:4000`（gateway-py），免去了重复编写 API controller，100% 杜绝跨域预检请求（Preflight）的 404 崩溃。
 
 ---
 

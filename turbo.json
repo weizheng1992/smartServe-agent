@@ -12,7 +12,9 @@
     "AI_MODEL",
     "AI_EMBEDDING_MODEL",
     "AI_EMBEDDING_PROVIDER",
-    "NODE_ENV"
+    "NODE_ENV",
+    "GATEWAY_URL",
+    "E2E_GATEWAY_TARGET"
   ],
   "tasks": {
     "build": {
@@ -23,7 +25,6 @@
       "cache": false,
       "persistent": true
     },
-    "lint": {},
     "test": {
       "cache": false
     }
