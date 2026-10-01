@@ -19,6 +19,21 @@ const CARRIER_LABEL: Record<string, string> = {
   EMS: '邮政 EMS',
 };
 
+// 诚实呈现:缺值/坏值一律「—」,严禁 Number(null)===0 冒充 ¥0.00 / Invalid Date
+const fmtMoney = (v: unknown): string => {
+  const n = Number(v);
+  return v != null && v !== '' && Number.isFinite(n) ? n.toFixed(2) : '—';
+};
+const fmtDate = (v: unknown): string => {
+  if (v == null || v === '') return '—';
+  const d = new Date(v as string | number);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+};
+const toNum = (v: unknown): number | null => {
+  const n = Number(v);
+  return v != null && v !== '' && Number.isFinite(n) ? n : null;
+};
+
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   isOpen,
   onClose,
@@ -71,9 +86,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const statusBadge = getStatusBadge(order.status);
   const items = order.items || [];
   // 账本语义:totalAmount=实付,discountAmount=优惠,originalAmount=原价
-  const totalAmount = Number(order.totalAmount || 0);
-  const discountAmount = Number(order.discountAmount || 0);
-  const originalAmount = Number(order.originalAmount ?? totalAmount + discountAmount);
+  // 优惠缺值按无优惠(0)参与判定;实付缺值保持 null 供「—」呈现,严禁冒充 ¥0.00
+  const totalAmount = toNum(order.totalAmount);
+  const discountAmount = toNum(order.discountAmount) ?? 0;
+  const originalAmount = toNum(order.originalAmount) ?? (totalAmount != null ? totalAmount + discountAmount : null);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -112,7 +128,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
             <div className="text-right">
               <div className="text-xs text-slate-500">下单时间</div>
-              <div className="text-xs font-mono text-slate-700 mt-1">{new Date(order.createdAt).toLocaleString()}</div>
+              <div className="text-xs font-mono text-slate-700 mt-1">{fmtDate(order.createdAt)}</div>
             </div>
           </div>
 
@@ -157,37 +173,41 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <h4 className="text-xs font-bold text-slate-900">商品清单 ({items.length})</h4>
 
             <div className="divide-y divide-slate-100">
-              {items.map((item, idx) => (
-                <div
-                  key={item.skuId || item.title || item.imageUrl}
-                  className="py-2.5 flex items-start gap-3 first:pt-0 last:pb-0"
-                >
-                  {item.imageUrl ? (
-                    <img
-                      src={item.imageUrl}
-                      alt={item.title}
-                      className="w-14 h-14 object-cover rounded-lg border border-slate-200 shrink-0 bg-slate-50"
-                    />
-                  ) : (
-                    <div className="w-14 h-14 bg-slate-100 rounded-lg flex items-center justify-center text-xl shrink-0">
-                      📦
-                    </div>
-                  )}
+              {items.map((item, idx) => {
+                const itemPrice = toNum(item.price);
+                const itemQty = toNum(item.quantity);
+                return (
+                  <div
+                    key={item.skuId || item.title || item.imageUrl}
+                    className="py-2.5 flex items-start gap-3 first:pt-0 last:pb-0"
+                  >
+                    {item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt={item.title}
+                        className="w-14 h-14 object-cover rounded-lg border border-slate-200 shrink-0 bg-slate-50"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 bg-slate-100 rounded-lg flex items-center justify-center text-xl shrink-0">
+                        📦
+                      </div>
+                    )}
 
-                  <div className="flex-1 min-w-0">
-                    <h5 className="text-xs font-bold text-slate-900 truncate">{item.title}</h5>
-                    {item.specSummary && <p className="text-[11px] text-slate-500 mt-0.5">{item.specSummary}</p>}
-                    <div className="flex items-center justify-between mt-1.5 text-xs">
-                      <span className="text-slate-500">
-                        ¥{Number(item.price).toFixed(2)} × {item.quantity}
-                      </span>
-                      <span className="font-bold text-slate-900">
-                        ¥{(Number(item.price) * item.quantity).toFixed(2)}
-                      </span>
+                    <div className="flex-1 min-w-0">
+                      <h5 className="text-xs font-bold text-slate-900 truncate">{item.title}</h5>
+                      {item.specSummary && <p className="text-[11px] text-slate-500 mt-0.5">{item.specSummary}</p>}
+                      <div className="flex items-center justify-between mt-1.5 text-xs">
+                        <span className="text-slate-500">
+                          ¥{fmtMoney(item.price)} × {itemQty ?? '—'}
+                        </span>
+                        <span className="font-bold text-slate-900">
+                          {itemPrice != null && itemQty != null ? `¥${(itemPrice * itemQty).toFixed(2)}` : '—'}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -195,26 +215,21 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2 text-xs">
             <div className="flex justify-between text-slate-600">
               <span>商品总金额</span>
-              <span>¥{originalAmount.toFixed(2)}</span>
+              <span>{originalAmount != null ? `¥${originalAmount.toFixed(2)}` : '—'}</span>
             </div>
             <div className="flex justify-between text-slate-600">
               <span>运费 (极光顺丰包邮)</span>
               <span className="text-emerald-600 font-semibold">¥0.00 (包邮)</span>
             </div>
-            {discountAmount > 0 ? (
+            {discountAmount > 0 && (
               <div className="flex justify-between font-medium text-rose-600">
                 <span>优惠抵扣（活动/优惠券）</span>
                 <span>-¥{discountAmount.toFixed(2)}</span>
               </div>
-            ) : (
-              <div className="flex justify-between text-slate-600">
-                <span>SVIP 会员立减</span>
-                <span className="text-emerald-600">-¥0.00</span>
-              </div>
             )}
             <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold">
               <span className="text-slate-900">实付款</span>
-              <span className="text-emerald-700 text-base font-extrabold">¥{totalAmount.toFixed(2)}</span>
+              <span className="text-emerald-700 text-base font-extrabold">¥{fmtMoney(order.totalAmount)}</span>
             </div>
           </div>
         </div>
