@@ -62,24 +62,26 @@ class ShortMemory:
                         select(Message)
                         .where(Message.thread_id == self.thread_id)
                         .order_by(
-                            Message.created_at,
+                            Message.created_at.desc(),
                             case(
                                 (Message.role == "system", 1),
                                 (Message.role == "user", 2),
                                 (Message.role == "assistant", 3),
                                 else_=4,
-                            ),
-                            Message.id,
+                            ).desc(),
+                            Message.id.desc(),
                         )
+                        .limit(self.max_turns * 2)
                     )
                 ).scalars().all()
+                rows.reverse()  # 窗口内恢复时间正序
 
                 thread_row = (
                     await session.execute(select(Thread).where(Thread.id == self.thread_id).limit(1))
                 ).scalar_one_or_none()
                 business_id = (thread_row.business_id if thread_row else None) or self.business_id or "ecommerce"
 
-                sliced = list(rows)[-(self.max_turns * 2) :]
+                sliced = list(rows)
                 return [
                     {
                         "role": m.role,
