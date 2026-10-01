@@ -1281,6 +1281,8 @@ class TestChatNonLlm:
         assert "content" in body["messages"][0]
 
     async def test_orders_returns_array(self, client, contract_fixtures):
+        # 2026-10-02 起路由改调 OrderDomainService.list_user_orders 门面:
+        # 商户真单优先、engine 本地表兜底,不再内联裸 SQL 漏商户库。
         res = await client.get(
             "/api/chat/orders", params={"userId": "CUST-8801", "businessId": "ecommerce"}
         )
@@ -1288,6 +1290,53 @@ class TestChatNonLlm:
         body = res.json()
         assert body["success"] is True
         assert isinstance(body["orders"], list)
+
+    async def test_orders_shape_camelcase_contract(self):
+        """审批抽屉订单区线格式钉死(_serialize_context_order 纯函数):
+        门面两类来源行 —— 商户真单(shippingAddress 为 dict,收货人在地址对象内)
+        与 engine 演示单(snake_case 文本列)—— 统一映射为 packages/types
+        UserOrderRecord camelCase;金额缺值诚实 None,严禁 or 0 伪造 ¥0.00
+        (抽屉侧对非数值渲染「—」)。"""
+        from gateway_py.routers.chat import _serialize_context_order
+
+        merchant_row = {
+            "orderId": "M-1",
+            "status": "PAID",
+            "totalAmount": 399.0,
+            "currency": "CNY",
+            "carrier": "顺丰速运 (SF Express)",
+            "trackingNumber": "SF123",
+            "businessId": "aurora",
+            "createdAt": "2026-09-30T10:00:00",
+            "shippingAddress": {
+                "recipientName": "李雷",
+                "phone": "13800000000",
+                "fullAddress": "上海市浦东新区测试路1号",
+            },
+        }
+        out = _serialize_context_order(merchant_row)
+        assert out["orderId"] == "M-1"
+        assert out["status"] == "PAID"
+        assert out["totalAmount"] == 399.0
+        assert out["recipientName"] == "李雷"
+        assert out["phone"] == "13800000000"
+        assert out["shippingAddress"] == "上海市浦东新区测试路1号"
+        assert out["createdAt"] == "2026-09-30T10:00:00"
+
+        engine_row = {
+            "orderId": "ORD-9001",
+            "status": "shipped",
+            "totalAmount": None,
+            "trackingNumber": None,
+            "estimatedDelivery": None,
+            "businessId": "ecommerce",
+            "shipping_address": "北京市朝阳区测试路2号",
+        }
+        out2 = _serialize_context_order(engine_row)
+        assert out2["totalAmount"] is None
+        assert out2["shippingAddress"] == "北京市朝阳区测试路2号"
+        assert out2["recipientName"] is None
+        assert out2["trackingNumber"] is None
 
 
 class TestChatImagePersistence:

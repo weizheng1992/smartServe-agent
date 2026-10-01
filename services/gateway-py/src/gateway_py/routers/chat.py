@@ -22,7 +22,6 @@ from fastapi import APIRouter, File, Header, HTTPException, Query, Request, Uplo
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from redis.exceptions import TimeoutError as RedisTimeoutError
-from sqlalchemy import text
 
 from .. import conversation_repo
 
@@ -432,25 +431,69 @@ async def _maybe_clear_unread(thread_id: str, authorization: str | None) -> None
         return
 
 
+def _iso_or_none(value: object) -> str | None:
+    """datetime/date → ISO 串;其余原样(UserOrderRecord.createdAt 消费方按字符串判定)。"""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()  # type: ignore[no-any-return]
+    return value if isinstance(value, str) else None  # type: ignore[return-value]
+
+
+def _serialize_context_order(ord_row: dict) -> dict:
+    """门面订单行 → packages/types UserOrderRecord 线格式(camelCase)。
+
+    两类来源形态各异:商户真单 shippingAddress 为 dict(recipientName/phone/
+    fullAddress),收货人/电话须从地址对象内提取;engine 演示单为 snake_case
+    文本列。金额/时间原值直出(契约要求 number/string,库列非空),缺值诚实
+    None 由前端占位,严禁编造金额或「张伟/13800138000」式伪造地址。"""
+    shipping = ord_row.get("shippingAddress") or ord_row.get("shipping_address")
+    recipient_name: str | None = None
+    phone: str | None = None
+    if isinstance(shipping, dict):
+        recipient_name = shipping.get("recipientName") or None
+        phone = shipping.get("phone") or None
+        shipping = shipping.get("fullAddress") or None
+    raw_total = ord_row.get("totalAmount")
+    if raw_total is None:
+        raw_total = ord_row.get("total_amount")
+    try:
+        total_amount: float | None = float(raw_total) if raw_total is not None else None
+    except (TypeError, ValueError):
+        total_amount = None
+    return {
+        "orderId": str(ord_row.get("orderId") or ord_row.get("order_id") or ""),
+        "status": str(ord_row.get("status") or ""),
+        "totalAmount": total_amount,
+        "currency": ord_row.get("currency"),
+        "carrier": ord_row.get("carrier"),
+        "trackingNumber": ord_row.get("trackingNumber") or ord_row.get("tracking_number"),
+        "estimatedDelivery": _iso_or_none(ord_row.get("estimatedDelivery") or ord_row.get("estimated_delivery")),
+        "recipientName": recipient_name,
+        "phone": phone,
+        "shippingAddress": shipping if isinstance(shipping, str) else None,
+        "createdAt": _iso_or_none(ord_row.get("createdAt")),
+        "businessId": ord_row.get("businessId"),
+    }
+
+
 @router.get("/orders")
-async def chat_orders(userId: str = "CUST-8801", businessId: str = "ecommerce"):
-    async with get_session() as session:
-        rows = (
-            (
-                await session.execute(
-                    text(
-                        'SELECT o.order_id, o.status, o.carrier, o.tracking_number, o.estimated_delivery, '
-                        'o.total_amount, o.created_at, '
-                        "COALESCE(o.recipient_name, ua.receiver_name) AS recipient_name, "
-                        "COALESCE(o.phone, ua.receiver_phone) AS phone, "
-                        "COALESCE(o.shipping_address, ua.full_address) AS full_address "
-                        "FROM orders o LEFT JOIN user_addresses ua ON o.address_id = ua.id "
-                        "WHERE o.business_id = :bid AND (o.user_id = :uid OR :uid = 'all') "
-                        "ORDER BY o.created_at DESC LIMIT 20"
-                    ).bindparams(bid=businessId.lower().strip(), uid=userId)
-                )
-            )
-            .mappings()
-            .all()
-        )
-    return {"success": True, "orders": [dict(r) for r in rows]}
+async def chat_orders(
+    userId: str | None = None,
+    businessId: str | None = None,
+    threadId: str | None = None,
+):
+    """审批上下文抽屉的历史订单(唯一消费方 packages/ui ApprovalContextDrawer)。
+
+    2026-10-02 起改调 OrderDomainService.list_user_orders 门面:商户门户真单
+    (agent_merchant.merchant_orders)优先、engine 本地表兜底 —— 此前内联裸 SQL
+    只查 engine 表,商城真单顾客的抽屉「购买记录」恒空。归属严格等值匹配
+    (门面语义),不再保留 `userId='all'` 跨用户枚举口子;threadId 缺参数时可由
+    会话上下文推导归属。"""
+    from engine_py.tools_registry.order_domain import OrderDomainService
+
+    result = await OrderDomainService.list_user_orders(
+        thread_id=threadId or None, user_id=userId or None, business_id=businessId or None
+    )
+    if isinstance(result, dict) and result.get("error") and not result.get("orders"):
+        return {"success": False, "error": str(result["error"]), "orders": []}
+    orders = result.get("orders") if isinstance(result, dict) else None
+    return {"success": True, "orders": [_serialize_context_order(o) for o in orders or []]}

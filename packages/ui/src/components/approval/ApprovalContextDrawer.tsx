@@ -577,8 +577,11 @@ export function ApprovalContextDrawer({
                             )}
                           </div>
                           <div className="flex items-center gap-2">
+                            {/* 诚实降级:金额缺值/坏值显「—」,严禁 toFixed 崩渲染或冒充 ¥0.00 */}
                             <span className="text-xs font-bold font-mono text-rose-400">
-                              ¥ {ord.totalAmount.toFixed(2)}
+                              {typeof ord.totalAmount === 'number' && Number.isFinite(ord.totalAmount)
+                                ? `¥ ${ord.totalAmount.toFixed(2)}`
+                                : '—'}
                             </span>
                             <Badge
                               variant="outline"
@@ -631,7 +634,10 @@ export function ApprovalContextDrawer({
                               >
                                 <span className="font-medium text-slate-200 truncate pr-2">{it.productName}</span>
                                 <span className="font-mono text-slate-400 shrink-0">
-                                  ¥ {it.price.toFixed(2)} × {it.quantity}
+                                  {/* 诚实降级:单价缺值/坏值显「—」,不冒充 ¥0.00 */}
+                                  {typeof it.price === 'number' && Number.isFinite(it.price)
+                                    ? `¥ ${it.price.toFixed(2)} × ${it.quantity}`
+                                    : `— × ${it.quantity}`}
                                 </span>
                               </div>
                             ))}
