@@ -6,12 +6,16 @@ import { LogisticsModal } from '../components/orders/LogisticsModal';
 import { OrderDetailModal } from '../components/orders/OrderDetailModal';
 import { useCurrentUser } from '../context/UserContext';
 import { openStorefrontChat } from '../lib/chatBridge';
+import { fmtMoney } from '../lib/format';
 import { parseShippingAddress } from '../lib/shippingAddress';
 
 export default function OrdersPage() {
   const { user } = useCurrentUser();
   const [orders, setOrders] = useState<ThirdPartyOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  // 诚实失败(OrderDetailPage 同型):加载失败必须可见,
+  // 严禁 catch 吞错后渲染「暂无相关订单」误导用户去逛商城
+  const [error, setError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState('ALL');
 
   const [selectedDetailOrder, setSelectedDetailOrder] = useState<ThirdPartyOrder | null>(null);
@@ -21,6 +25,7 @@ export default function OrdersPage() {
 
   const fetchOrders = async (status = 'ALL', targetUserId = user.id) => {
     setLoading(true);
+    setError(null);
     try {
       const url =
         status === 'ALL'
@@ -30,9 +35,11 @@ export default function OrdersPage() {
       const data = await res.json();
       if (data.success && data.orders) {
         setOrders(data.orders);
+      } else {
+        setError(data.error || '订单数据加载失败,请稍后重试');
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '订单数据加载失败,请稍后重试');
     } finally {
       setLoading(false);
     }
@@ -124,6 +131,19 @@ export default function OrdersPage() {
               <span>正在获取订单数据...</span>
             </div>
           </div>
+        ) : error ? (
+          <div className="bg-white rounded-2xl p-12 border border-slate-200 text-center max-w-xl mx-auto my-8">
+            <div className="text-5xl mb-3">⚠️</div>
+            <h2 className="text-base font-bold text-slate-800">订单加载失败</h2>
+            <p className="text-xs text-slate-400 mt-1">{error}</p>
+            <button
+              type="button"
+              onClick={() => fetchOrders(filterStatus, user.id)}
+              className="mt-6 px-5 py-2.5 bg-slate-900 text-white text-xs font-semibold rounded-xl hover:bg-slate-800 shadow-xs transition cursor-pointer"
+            >
+              重新加载
+            </button>
+          </div>
         ) : orders.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 border border-slate-200 text-center max-w-xl mx-auto my-8">
             <div className="text-5xl mb-3">📋</div>
@@ -173,7 +193,7 @@ export default function OrdersPage() {
                           规格: {item.specSummary || item.skuTitle || item.skuCode || '标准规格'}
                         </div>
                         <div className="text-xs font-semibold text-slate-700 mt-1">
-                          ¥{Number(item.price).toFixed(2)} × {item.quantity} 件
+                          ¥{fmtMoney(item.price)} × {item.quantity} 件
                         </div>
                       </div>
                     </div>
@@ -199,18 +219,16 @@ export default function OrdersPage() {
                             <div className="text-[11px] text-slate-400 leading-relaxed">
                               原价{' '}
                               <span className="line-through">
-                                ¥{Number(order.originalAmount ?? order.totalAmount).toFixed(2)}
+                                ¥{fmtMoney(order.originalAmount ?? order.totalAmount)}
                               </span>
                               <span className="ml-1.5 font-medium text-rose-500">
-                                优惠 -¥{Number(order.discountAmount).toFixed(2)}
+                                优惠 -¥{fmtMoney(order.discountAmount)}
                               </span>
                             </div>
                           )}
                           <div>
                             <span className="text-slate-500 text-[11px]">实付金额:</span>
-                            <strong className="text-emerald-700 text-sm ml-1">
-                              ¥{Number(order.totalAmount).toFixed(2)}
-                            </strong>
+                            <strong className="text-emerald-700 text-sm ml-1">¥{fmtMoney(order.totalAmount)}</strong>
                           </div>
                         </div>
 

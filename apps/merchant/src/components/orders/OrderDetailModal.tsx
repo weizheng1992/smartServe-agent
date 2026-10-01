@@ -1,6 +1,7 @@
 import type React from 'react';
 import type { ThirdPartyOrder } from 'types';
 import { Badge, Button, Dialog, DialogContent, DialogHeader, DialogTitle } from 'ui';
+import { fmtDate, fmtMoney, toNum } from '../../lib/format';
 import { parseShippingAddress } from '../../lib/shippingAddress';
 
 interface OrderDetailModalProps {
@@ -17,21 +18,6 @@ const CARRIER_LABEL: Record<string, string> = {
   JD: '京东快递',
   ZTO: '中通快递',
   EMS: '邮政 EMS',
-};
-
-// 诚实呈现:缺值/坏值一律「—」,严禁 Number(null)===0 冒充 ¥0.00 / Invalid Date
-const fmtMoney = (v: unknown): string => {
-  const n = Number(v);
-  return v != null && v !== '' && Number.isFinite(n) ? n.toFixed(2) : '—';
-};
-const fmtDate = (v: unknown): string => {
-  if (v == null || v === '') return '—';
-  const d = new Date(v as string | number);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
-};
-const toNum = (v: unknown): number | null => {
-  const n = Number(v);
-  return v != null && v !== '' && Number.isFinite(n) ? n : null;
 };
 
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
