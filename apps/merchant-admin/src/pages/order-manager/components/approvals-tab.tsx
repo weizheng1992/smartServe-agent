@@ -292,7 +292,10 @@ function ApprovalParams({ approval }: { approval: any }) {
     return (
       <div className="space-y-0.5">
         <div className="font-bold text-rose-600">
-          ¥{ctx.refundAmount ? Number(ctx.refundAmount).toFixed(2) : '0.00'}
+          {/* 缺值/坏值诚实「—」:Number(null)===0 会把缺失金额渲染成假 ¥0.00 */}
+          {ctx.refundAmount != null && ctx.refundAmount !== '' && Number.isFinite(Number(ctx.refundAmount))
+            ? `¥${Number(ctx.refundAmount).toFixed(2)}`
+            : '—'}
         </div>
         <div className="text-[11px] text-slate-500 font-mono">单号: {ctx.orderId || '未提供'}</div>
       </div>
