@@ -425,7 +425,14 @@ class ApprovalGatekeeper:
                 params["action_type"] = filter_opts["actionType"]
             if conditions:
                 sql += " WHERE " + " AND ".join(conditions)
-            sql += " ORDER BY pa.created_at DESC"
+            # 审批是只增不减的审计资产,无界全量 + 前端 2s 轮询 = 线性恶化热路径;
+            # 默认只回最新 200 条(活跃会话的工单必在最新段),limit=0 显式取全量。
+            limit = filter_opts.get("limit", 200)
+            if limit:
+                sql += " ORDER BY pa.created_at DESC LIMIT :limit"
+                params["limit"] = int(limit)
+            else:
+                sql += " ORDER BY pa.created_at DESC"
             rows = (await session.execute(text(sql).bindparams(**params))).mappings().all()
             return [
                 {
