@@ -10,6 +10,7 @@ from sqlalchemy import select, text
 
 from ..db import RagDocumentRow, get_session
 from ..llm import get_embedding_model
+from ..vectors import cosine_similarity, parse_embedding  # 余弦/解析单一实现(vectors.py)
 from .knowledge_files import load_knowledge_chunks
 
 _TOKENIZE_RE = re.compile(r"[a-z0-9]+|[一-龥]")
@@ -66,24 +67,6 @@ def reciprocal_rank_fusion(vector_rank: list[dict], bm25_rank: list[dict], k: in
     _apply(vector_rank)
     _apply(bm25_rank)
     return rrf_scores
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    if len(a) != len(b):
-        return 0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-    return dot / norm if norm else 0
-
-
-def _parse_embedding(raw) -> list[float] | None:
-    if not raw:
-        return None
-    try:
-        value = json.loads(raw) if isinstance(raw, str) else raw
-        return value if isinstance(value, list) else None
-    except Exception:
-        return None
 
 
 class ContextualRAG:
@@ -216,8 +199,8 @@ class ContextualRAG:
             if category and row_meta.get("category") and row_meta.get("category") != category:
                 continue
 
-            embedding_array = _parse_embedding(row.embedding)
-            similarity = _cosine(query_embedding, embedding_array) if embedding_array else 0
+            embedding_array = parse_embedding(row.embedding)
+            similarity = cosine_similarity(query_embedding, embedding_array) if embedding_array else 0
             doc_embeddings[str(row.id)] = similarity
             docs_with_tokens.append(
                 {

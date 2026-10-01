@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import math
 import random
 import re
 import secrets
@@ -22,19 +21,10 @@ from ..config import settings
 from ..db import get_session
 from ..llm.chat import get_chat_model, get_embedding_model
 from ..tenant_context import resolve_business_id
+from ..vectors import cosine_similarity  # 余弦单一实现(vectors.py)
 from . import order_domain
 from .cache import tool_cache
 from .order_domain import OrderDomainService
-
-
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """余弦相似度(与 rag/contextual_rag.py 同源实现,零范数防御)。"""
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if not norm_a or not norm_b:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 class _CouponAlreadyUsedError(RuntimeError):
@@ -1021,7 +1011,7 @@ class MallDomainService:
             candidate_vectors = await MallDomainService._ensure_spu_embeddings(candidates)
             scored: list[tuple[float, dict]] = []
             for product, vector in zip(candidates, candidate_vectors, strict=True):
-                similarity = _cosine_similarity(query_vector, vector)
+                similarity = cosine_similarity(query_vector, vector)
                 if similarity >= settings.mall_semantic_min_similarity:
                     scored.append((similarity, product))
             scored.sort(key=lambda pair: pair[0], reverse=True)

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import math
-
 from ..llm import get_embedding_model
+from ..vectors import cosine_similarity  # 余弦单一实现(vectors.py),本名保留转发供 exemplar_service 消费
 from .rule_matchers import normalize_greeting_input
 
 # 语义缓存命中阈值(Gen-3 域B收编:散落 0.96 字面收拢一处)—— 同域中文
@@ -50,16 +49,6 @@ DEFAULT_ANCHOR_PHRASES: dict[str, list[str]] = {
         "附近好吃的餐馆有哪些",
     ],
 }
-
-
-def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-    if len(vec_a) != len(vec_b):
-        return 0
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-    denom = norm_a * norm_b
-    return dot / denom if denom else 0
 
 
 class SemanticVectorCache:

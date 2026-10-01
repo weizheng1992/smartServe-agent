@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import math
 import re
 
 from sqlalchemy import text
@@ -12,6 +11,7 @@ from sqlalchemy import text
 from ..db import LongMemoryFact, get_session
 from ..llm import get_chat_model, get_embedding_model
 from ..tenant_context import resolve_business_id
+from ..vectors import cosine_similarity, parse_embedding
 
 PHYSIOLOGICAL_RE = re.compile(
     r"脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size", re.IGNORECASE
@@ -75,24 +75,6 @@ def parse_profile_audit_response(content: str) -> dict:
     clean_json = re.sub(r"^```json\s*", "", content.strip())
     clean_json = re.sub(r"```$", "", clean_json).strip()
     return json.loads(clean_json)
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    if len(a) != len(b):
-        return 0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-    return dot / norm if norm else 0
-
-
-def _parse_embedding(raw) -> list[float] | None:
-    if not raw:
-        return None
-    try:
-        value = json.loads(raw) if isinstance(raw, str) else raw
-        return value if isinstance(value, list) else None
-    except Exception:
-        return None
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -227,7 +209,7 @@ class LongMemory:
                         .all()
                     )
                 existing_embeddings = [
-                    emb for emb in (_parse_embedding(r.embedding) for r in existing_rows) if emb
+                    emb for emb in (parse_embedding(r.embedding) for r in existing_rows) if emb
                 ]
             except Exception as echo_err:
                 print(f"[Profiler Agent] 回声去重基线加载失败,本轮跳过去重: {echo_err}")
@@ -272,7 +254,7 @@ class LongMemory:
                     # 抽成新事实(实弹:conf 0.6 pending 重复污染待审队列)。
                     # 与该用户既有事实(approved+pending)余弦 ≥ 阈值即判回声弃落。
                     if any(
-                        _cosine(embedding, existing) >= _ECHO_DEDUP_THRESHOLD
+                        cosine_similarity(embedding, existing) >= _ECHO_DEDUP_THRESHOLD
                         for existing in existing_embeddings
                     ):
                         print(
@@ -346,8 +328,8 @@ class LongMemory:
         query_tokens = _query_tokens(query)
         scored = []
         for row in visible_rows:
-            embedding_array = _parse_embedding(row.embedding)
-            similarity = _cosine(query_embedding, embedding_array) if embedding_array else 0
+            embedding_array = parse_embedding(row.embedding)
+            similarity = cosine_similarity(query_embedding, embedding_array) if embedding_array else 0
 
             fact_lower = (row.fact or "").lower()
             keyword_matches = sum(1 for token in query_tokens if token in fact_lower)

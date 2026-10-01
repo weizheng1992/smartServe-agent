@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 
 from sqlalchemy import select
@@ -11,26 +10,9 @@ from sqlalchemy import select
 from ..db import EpisodicEventRow, get_session
 from ..llm import get_embedding_model
 from ..tenant_context import resolve_business_id
+from ..vectors import cosine_similarity, parse_embedding
 
 _TOKEN_SPLIT_RE = re.compile(r"[\s,，、。!！?？]+")
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    if len(a) != len(b):
-        return 0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-    return dot / norm if norm else 0
-
-
-def _parse_embedding(raw) -> list[float] | None:
-    if not raw:
-        return None
-    try:
-        value = json.loads(raw) if isinstance(raw, str) else raw
-        return value if isinstance(value, list) else None
-    except Exception:
-        return None
 
 
 class EpisodicMemory:
@@ -112,8 +94,8 @@ class EpisodicMemory:
         query_tokens = [t for t in _TOKEN_SPLIT_RE.split(query.lower()) if len(t) >= 2]
         scored = []
         for row in visible_rows:
-            embedding_array = _parse_embedding(row.embedding)
-            similarity = _cosine(query_embedding, embedding_array) if embedding_array else 0
+            embedding_array = parse_embedding(row.embedding)
+            similarity = cosine_similarity(query_embedding, embedding_array) if embedding_array else 0
             content_lower = (row.content or "").lower()
             keyword_matches = sum(1 for token in query_tokens if token in content_lower)
             keyword_score = (keyword_matches / len(query_tokens)) * 0.95 if query_tokens else 0
