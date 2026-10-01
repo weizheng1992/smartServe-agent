@@ -57,7 +57,10 @@ export function DashboardPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  const totalSessions = data?.sessions.total ?? 0;
+  // 诚实呈现:data 未加载(首载/失败)时显「—」,严禁 ?? 0 把「暂无数据」
+  // 渲染成假 0(0 只在库内真算返回后出现,COALESCE 的 0 是真零)
+  const totalSessions = data?.sessions.total;
+  const num = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString());
   const pct = (v: number | undefined) => (v === undefined ? '—' : `${(v * 100).toFixed(1)}%`);
 
   return (
@@ -81,15 +84,14 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className={CARD_CLASS}>
           <div className={LABEL_CLASS}>活跃租户数(近 7 天)</div>
-          <div className={VALUE_CLASS}>{(data?.activeTenants ?? 0).toLocaleString()}</div>
+          <div className={VALUE_CLASS}>{num(data?.activeTenants)}</div>
           <div className="text-[10px] text-slate-400 mt-0.5">有真实会话落账的业务域</div>
         </div>
         <div className={CARD_CLASS}>
           <div className={LABEL_CLASS}>Autopilot 率(AI 自动解决)</div>
           <div className="text-2xl font-bold text-emerald-600 mt-1">{pct(data?.autopilotRate)}</div>
           <div className="text-[10px] text-slate-400 mt-0.5">
-            resolved_auto / 会话总数({(data?.sessions.distribution.resolved_auto ?? 0).toLocaleString()} /{' '}
-            {totalSessions.toLocaleString()})
+            resolved_auto / 会话总数({num(data?.sessions.distribution.resolved_auto)} / {num(totalSessions)})
           </div>
         </div>
         <div className={CARD_CLASS}>
@@ -99,7 +101,7 @@ export function DashboardPage() {
               (data?.approvals.waiting ?? 0) > 0 ? 'text-amber-600' : 'text-slate-900'
             }`}
           >
-            {(data?.approvals.waiting ?? 0).toLocaleString()}
+            {num(data?.approvals.waiting)}
           </div>
           <div className="text-[10px] text-slate-400 mt-0.5">
             {(data?.approvals.waiting ?? 0) > 0 ? `最老积压 ${data?.approvals.oldestWaitingMinutes} 分钟` : '无积压'}
@@ -107,21 +109,22 @@ export function DashboardPage() {
         </div>
         <div className={CARD_CLASS}>
           <div className={LABEL_CLASS}>Token 累计消耗</div>
-          <div className={VALUE_CLASS}>{(data?.usage.tokens ?? 0).toLocaleString()}</div>
+          <div className={VALUE_CLASS}>{num(data?.usage.tokens)}</div>
           <div className="text-[10px] text-slate-400 mt-0.5">
-            成本折算 ${(data?.usage.costUsd ?? 0).toFixed(3)} USD(与计费页同源)
+            成本折算 {data ? `$${data.usage.costUsd.toFixed(3)} USD` : '—'}(与计费页同源)
           </div>
         </div>
         <div className={CARD_CLASS}>
           <div className={LABEL_CLASS}>LLM 调用(近 24h)</div>
-          <div className={VALUE_CLASS}>{(data?.llm24h.calls ?? 0).toLocaleString()}</div>
+          <div className={VALUE_CLASS}>{num(data?.llm24h.calls)}</div>
           <div className="text-[10px] text-slate-400 mt-0.5">
-            平均延迟 {data?.llm24h.avgLatencyMs ?? 0}ms · ${(data?.llm24h.costUsd ?? 0).toFixed(3)}
+            平均延迟 {data ? `${data.llm24h.avgLatencyMs}ms` : '—'} ·{' '}
+            {data ? `$${data.llm24h.costUsd.toFixed(3)}` : '—'}
           </div>
         </div>
         <div className={CARD_CLASS}>
           <div className={LABEL_CLASS}>人工接管会话</div>
-          <div className={VALUE_CLASS}>{(data?.threads.humanTakeover ?? 0).toLocaleString()}</div>
+          <div className={VALUE_CLASS}>{num(data?.threads.humanTakeover)}</div>
           <div className="text-[10px] text-slate-400 mt-0.5">assigned_operator 非空的历史会话</div>
         </div>
       </div>
@@ -129,9 +132,11 @@ export function DashboardPage() {
       <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs">
         <div className="flex items-center justify-between mb-3">
           <span className="text-xs font-semibold text-slate-700">会话状态分布(session_metrics 全量)</span>
-          <span className="text-[11px] text-slate-400">共 {totalSessions.toLocaleString()} 条落账</span>
+          <span className="text-[11px] text-slate-400">共 {num(totalSessions)} 条落账</span>
         </div>
-        {totalSessions === 0 ? (
+        {totalSessions == null ? (
+          <div className="text-xs text-slate-400 py-6 text-center">—</div>
+        ) : totalSessions === 0 ? (
           <div className="text-xs text-slate-400 py-6 text-center">暂无会话遥测落账</div>
         ) : (
           <>
