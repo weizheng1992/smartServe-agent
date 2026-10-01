@@ -96,6 +96,22 @@ async def _thread_owner_context(session, thread_id: str) -> dict:
     }
 
 
+async def thread_owner_id(thread_id: str | None) -> str | None:
+    """线程归属用户(网关审批/接管面共用);无 thread_id 或线程不存在诚实 None。"""
+    if not thread_id:
+        return None
+    async with get_session() as session:
+        return (await _thread_owner_context(session, thread_id)).get("userId")
+
+
+async def thread_business_id(thread_id: str | None) -> str | None:
+    """线程归属租户(live-desk release_takeover 线程级租户校验用);未知诚实 None。"""
+    if not thread_id:
+        return None
+    async with get_session() as session:
+        return (await _thread_owner_context(session, thread_id)).get("businessId")
+
+
 class ApprovalGatekeeper:
     @staticmethod
     async def check_double_refund(order_id: str, user_id: str | None = None) -> dict:

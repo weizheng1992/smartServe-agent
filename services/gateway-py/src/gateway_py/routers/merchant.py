@@ -16,7 +16,7 @@ import time
 import uuid as _uuid
 
 from engine_py.approvals import takeover
-from engine_py.approvals.gatekeeper import ApprovalGatekeeper
+from engine_py.approvals.gatekeeper import ApprovalGatekeeper, thread_business_id
 from engine_py.db import get_session
 from engine_py.event_bus import get_client as get_redis
 from engine_py.run_agent import AgentJobInput, run_agent
@@ -312,16 +312,6 @@ async def admin_approvals(
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
-async def _thread_business_id(thread_id: str | None) -> str | None:
-    """线程归属租户(P1 release_takeover 线程级租户校验用),未知返回 None。"""
-    from engine_py.approvals.gatekeeper import _thread_owner_context
-
-    if not thread_id:
-        return None
-    async with get_session() as session:
-        return (await _thread_owner_context(session, thread_id)).get("businessId")
-
-
 @router.post("/api/admin/approvals")
 async def admin_approvals_action(body: MerchantApprovalActionIn, authorization: str | None = Header(None)):
     staff = (await _require_staff(authorization))["staff"]
@@ -338,7 +328,7 @@ async def admin_approvals_action(body: MerchantApprovalActionIn, authorization: 
         # P1(live-desk-rework spec §2.1):release_takeover 是线程级动作(无审批单),
         # 按线程归属校验租户;归属未知(business_id NULL 存量线程)fail-open 同上。
         if (body.action or "").strip() == "release_takeover" and body.threadId:
-            thread_biz = await _thread_business_id(body.threadId)
+            thread_biz = await thread_business_id(body.threadId)
             if thread_biz and thread_biz != staff.business_id:
                 return JSONResponse(
                     status_code=403,

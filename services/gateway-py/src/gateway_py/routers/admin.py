@@ -8,6 +8,7 @@ import math
 
 from engine_py.analytics import rbac
 from engine_py.approvals import ApprovalGatekeeper
+from engine_py.approvals.gatekeeper import thread_business_id, thread_owner_id  # 线程归属单一实现(gatekeeper)
 from engine_py.db import RagDocumentRow, StaffMember, get_session
 from engine_py.onboarding import validate_onboarding_config
 from engine_py.rag import ContextualRAG
@@ -607,25 +608,6 @@ async def _optional_staff(authorization: str | None) -> dict | None:
     return {"email": email, "staff": staff}
 
 
-async def _thread_owner(thread_id: str | None) -> str | None:
-    from engine_py.approvals.gatekeeper import _thread_owner_context
-
-    if not thread_id:
-        return None
-    async with get_session() as session:
-        return (await _thread_owner_context(session, thread_id)).get("userId")
-
-
-async def _thread_business_id(thread_id: str | None) -> str | None:
-    """线程归属租户(P1 release_takeover 线程级租户校验用),未知返回 None。"""
-    from engine_py.approvals.gatekeeper import _thread_owner_context
-
-    if not thread_id:
-        return None
-    async with get_session() as session:
-        return (await _thread_owner_context(session, thread_id)).get("businessId")
-
-
 @approvals_router.post("/api/approvals")
 @approvals_router.post("/api/chat/approvals")
 async def resolve_approval(body: dict, request: Request, authorization: str | None = Header(None)):
@@ -653,7 +635,7 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
         # 严防员工凭猜测的 threadId 跨租户释放他人接管会话。归属未知(business_id
         # 为 NULL 的存量线程)不额外拦,与上方审批校验同 fail-open 口径。
         if action == "release_takeover" and body.get("threadId"):
-            thread_biz = await _thread_business_id(body["threadId"])
+            thread_biz = await thread_business_id(body["threadId"])
             if thread_biz and thread_biz != staff_ctx["staff"].business_id:
                 raise HTTPException(
                     status_code=403,
@@ -691,7 +673,7 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
             record = await ApprovalGatekeeper.find_approval_by_id(body["approvalId"])
             thread_id = (record or {}).get("threadId")
         if body.get("threadId") or record is not None:
-            owner = await _thread_owner(thread_id)
+            owner = await thread_owner_id(thread_id)
             if owner != user_id:
                 raise HTTPException(status_code=403, detail="会话归属校验失败,拒绝顾客侧操作")
         actor, actor_role = "customer", "customer"
