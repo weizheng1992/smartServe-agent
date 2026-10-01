@@ -240,6 +240,13 @@ class ShoppingGuideSkill(BaseSkill):
         # 永不上展示句;本轮重述的键(如「我喜欢黑色」)如实再上。
         current_turn_prefs = {k: extracted_prefs[k] for k in touched}
 
+        # 颜色真折进检索(2026-10-01 实弹「我喜欢黑色…」):本轮说出的颜色此前
+        # 只上展示句(「已结合您的偏好:黑色」)而检索零消费 —— 宣了结合零结合。
+        # 经 search_products color 参数走 catalog_match 的 SKU spec 级 EXISTS
+        # (颜色只活在 merchant_skus.spec_attributes,SPU 词面结构上看不见)。
+        # 承接面旧颜色照旧严禁折入(对齐 2026-09-30 陈旧偏好契约)。
+        color_pref = current_turn_prefs.get("color")
+
         # 2. 超模糊查询多轮追问
         is_very_vague = (
             len(user_input) <= 4
@@ -279,6 +286,7 @@ class ShoppingGuideSkill(BaseSkill):
             {
                 "query": absence_topic or user_input,
                 "maxPrice": max_price,
+                "color": color_pref,
                 "limit": limit,
                 "businessId": context.tenant_id,
                 "threadId": context.thread_id,
@@ -303,6 +311,7 @@ class ShoppingGuideSkill(BaseSkill):
                 {
                     "query": anchor,
                     "maxPrice": max_price,
+                    "color": color_pref,
                     "limit": limit,
                     "businessId": context.tenant_id,
                     "threadId": context.thread_id,

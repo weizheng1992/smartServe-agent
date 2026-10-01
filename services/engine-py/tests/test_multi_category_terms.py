@@ -192,7 +192,7 @@ def test_unreachable_db_single_fallback_fetch(monkeypatch: pytest.MonkeyPatch) -
     """库不可达时多词元路径立即中断交给降级链,严禁 N 个词元 N 次失败连接。"""
     calls = []
 
-    async def fake_fetch(terms, category, max_price, limit):
+    async def fake_fetch(terms, category, max_price, limit, sort=None, color=None):
         calls.append(terms)
 
     monkeypatch.setattr(MallDomainService, "_fetch_merchant_catalog", staticmethod(fake_fetch))

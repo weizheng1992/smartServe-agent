@@ -122,6 +122,11 @@ class MallDomainService:
     _TERM_STEM_ALIASES: dict[str, tuple[str, ...]] = {
         "裤子": ("裤",),
         "鞋子": ("鞋",),
+        # 衣族统称(2026-10-01 实弹「推荐衣服和背包」0 衣服 + 2 包):货架四列
+        # 词面无「衣服」子串(以 衬衫/T恤/夹克/冲锋衣/羽绒/裤/POLO 命名),
+        # 词元脚恒空被多词元轮转静默丢族,%背包% 一族独吞 limit。别名只在核实
+        # 过货架词素后收录(同上纪律),词素面经 get_shelf_overview 实核。
+        "衣服": ("衬衫", "T恤", "夹克", "冲锋衣", "羽绒", "裤", "POLO"),
         # 包类口语名(2026-09-13):「登山包」子串不在「高山徒步轻量化背包」中,
         # 词素(背包/包)补匹配面
         "登山包": ("背包",),
@@ -837,13 +842,21 @@ class MallDomainService:
         return MallDomainService._expand_stem_aliases(MallDomainService._extract_query_terms(query))
 
     @staticmethod
-    def catalog_match(terms: list[str] | None, category: str | None = None) -> tuple[list[str], dict, str]:
+    def catalog_match(
+        terms: list[str] | None, category: str | None = None, color: str | None = None
+    ) -> tuple[list[str], dict, str]:
         """商品货架 WHERE 匹配子句的唯一实现(A8 收敛):ON_SALE 门槛 + 词元
         四列 OR ILIKE(title/subtitle/category/description)+ 标题命中优先
         子句。engine 导购链(`_fetch_merchant_catalog`)与网关 SPI 商品检索
         (gateway merchant_domain.search_products)共用,严禁再各自维护一份
-        匹配语义。绑定名 ``qN``/``cat``,表别名固定 ``s``(merchant_spus)。
-        返回 (conditions, params, title_hit_clause)。"""
+        匹配语义。绑定名 ``qN``/``cat``/``colr``,表别名固定 ``s``
+        (merchant_spus)。返回 (conditions, params, title_hit_clause)。
+
+        颜色过滤(2026-10-01 实弹「我喜欢黑色…」宣了结合零结合):颜色只活在
+        merchant_skus.spec_attributes->>'颜色'(曜石黑/石墨黑),SPU 四列词面
+        无「黑」——词元路径结构上看不见颜色,必须 SKU 级 EXISTS 显式过滤。
+        词素归一剥尾缀「色」(黑色→黑),子串接住 曜石黑/石墨黑/黑 全族;
+        有货 SKU 才算数(kc.stock > 0),缺货配色不冒充现货推荐。"""
         conditions = ["s.status = 'ON_SALE'"]
         params: dict = {}
         title_hit_clause = ""
@@ -865,11 +878,23 @@ class MallDomainService:
         if category:
             conditions.append("s.category = :cat")
             params["cat"] = category
+        if color:
+            color_stem = color.rstrip("色") or color
+            conditions.append(
+                "EXISTS (SELECT 1 FROM merchant_skus kc WHERE kc.spu_id = s.id "
+                "AND kc.stock > 0 AND kc.spec_attributes->>'颜色' ILIKE :colr)"
+            )
+            params["colr"] = f"%{color_stem}%"
         return conditions, params, title_hit_clause
 
     @staticmethod
     async def _fetch_merchant_catalog(
-        terms: list[str] | None, category: str | None, max_price, limit: int, sort: str | None = None
+        terms: list[str] | None,
+        category: str | None,
+        max_price,
+        limit: int,
+        sort: str | None = None,
+        color: str | None = None,
     ) -> list[dict] | None:
         """商户真货架 SQL 检索层(agent_merchant.merchant_spus/skus)。
 
@@ -881,8 +906,9 @@ class MallDomainService:
         engine 分支 price ASC 契约一致。热销排序不做:merchant 库无销量列
         (全仓亦无 sales_volume),无数据源 —— 已文档化限制,不合成假热度。
         无 SKU 的 SPU 展示价 NULL,经 HAVING 排除(不可售,且 float(None) 会炸)。
+        color 经 catalog_match 编译为 SKU spec 级 EXISTS(2026-10-01)。
         """
-        conditions, params, title_hit_clause = MallDomainService.catalog_match(terms, category)
+        conditions, params, title_hit_clause = MallDomainService.catalog_match(terms, category, color)
         having_clauses = ["MIN(k.price) IS NOT NULL"]
         if max_price:
             having_clauses.append("MIN(k.price) <= :pmax")
@@ -978,16 +1004,16 @@ class MallDomainService:
 
     @staticmethod
     async def _semantic_recall_merchant_catalog(
-        query: str, category: str | None, max_price, limit: int
+        query: str, category: str | None, max_price, limit: int, color: str | None = None
     ) -> list[dict] | None:
         """L2 语义召回补位(2026-09-11):词元 ILIKE 查空时 bge 余弦 top-k。
 
         返回契约与 _fetch_merchant_catalog 一致(None=能力不可用,[]=无命中)。
-        候选池吃满硬过滤(status/category/maxPrice)但不吃词元条件;命中按
+        候选池吃满硬过滤(status/category/maxPrice/color)但不吃词元条件;命中按
         相似度 DESC 输出 —— 语义档的价值就是相关性排序(min_price ASC 只属
         词元/浏览路径)。嵌入异常降级 None → 调用方落诚实空,绝不阻断检索。
         """
-        candidates = await MallDomainService._fetch_merchant_catalog(None, category, max_price, 200)
+        candidates = await MallDomainService._fetch_merchant_catalog(None, category, max_price, 200, color=color)
         if candidates is None or not candidates:
             return candidates
         try:
@@ -1089,11 +1115,14 @@ class MallDomainService:
 
     @staticmethod
     async def search_products(params: dict) -> dict:
-        """6. 商品检索与导购选品。sort: "price_desc" 按价格降序(「最贵的X」)。"""
+        """6. 商品检索与导购选品。sort: "price_desc" 按价格降序(「最贵的X」)。
+        color:本轮说出的颜色偏好(SKU spec 级过滤,2026-10-01)—— 上游导购
+        技能把「我喜欢黑色」的「黑色」显式传入,严禁只留在展示句里广告。"""
         query = params.get("query")
         sort_mode = params.get("sort")
         category = params.get("category")
         max_price = params.get("maxPrice")
+        color = params.get("color")
         limit = params.get("limit") or 4
         effective_biz_id = resolve_business_id(params.get("businessId"))  # A7:显式 > 上下文 > 默认
         # 词干别名展开(2026-09-12):口语统称「裤子/鞋子」→ 追加货架词素「裤/鞋」
@@ -1122,7 +1151,7 @@ class MallDomainService:
             per_term_lists: list[list[dict]] = []
             for term in base_terms:
                 rows = await MallDomainService._fetch_merchant_catalog(
-                    MallDomainService._expand_stem_aliases([term]), category, max_price, limit
+                    MallDomainService._expand_stem_aliases([term]), category, max_price, limit, color=color
                 )
                 if rows is None:
                     # 库不可达:立即中断,跳过词元单查,交给既有降级链
@@ -1149,13 +1178,13 @@ class MallDomainService:
                 merchant_products = merged
         if merchant_products is None and not merchant_unreachable:
             merchant_products = await MallDomainService._fetch_merchant_catalog(
-                terms, category, max_price, limit, sort=sort_mode
+                terms, category, max_price, limit, sort=sort_mode, color=color
             )
         if merchant_products is not None:
             if not merchant_products and query and settings.mall_semantic_enabled:
                 merchant_products = (
                     await MallDomainService._semantic_recall_merchant_catalog(
-                        query, category, max_price, limit
+                        query, category, max_price, limit, color=color
                     )
                     or []
                 )
@@ -1170,7 +1199,7 @@ class MallDomainService:
                 if rewritten:
                     merchant_products = (
                         await MallDomainService._fetch_merchant_catalog(
-                            MallDomainService._expand_stem_aliases(rewritten), category, max_price, limit
+                            MallDomainService._expand_stem_aliases(rewritten), category, max_price, limit, color=color
                         )
                         or []
                     )
@@ -1195,6 +1224,11 @@ class MallDomainService:
             if max_price:
                 conditions.append("price <= :pmax")
                 query_params["pmax"] = max_price
+            if color:
+                # 本地表无 SKU spec,颜色只能词面 best-effort(name/description);
+                # 颜色语义主属商户真货架 catalog_match 的 SKU 级 EXISTS。
+                conditions.append("(name ILIKE :colr OR description ILIKE :colr)")
+                query_params["colr"] = f"%{color.rstrip('色') or color}%"
             where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
             async with get_session() as session:
