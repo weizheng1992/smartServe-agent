@@ -69,11 +69,13 @@ export function TenantFormModal({
             <Label className="block text-xs font-semibold text-slate-700 mb-1">退款风控阈值 (元)</Label>
             <Input
               type="number"
-              value={formData.refundLimit ?? 300}
+              value={formData.refundLimit ?? ''}
+              placeholder="未配置(编辑留空 = 不修改)"
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  refundLimit: Number(e.target.value),
+                  // 留空 = 不携带,服务端保留既有阈值;严禁拿展示默认值冒充已配置
+                  refundLimit: e.target.value === '' ? undefined : Number(e.target.value),
                 })
               }
               className="w-full h-8 text-xs bg-slate-50 border-slate-200"

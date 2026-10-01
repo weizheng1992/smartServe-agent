@@ -21,14 +21,15 @@ export function TenantsPage() {
           name: t.name,
           industry: t.industry || '综合电商',
           channel: t.channel || 'Web Widget',
-          apiKey: t.apiKey || `key_${t.id}_sec`,
-          refundLimit: t.refundLimit || 300,
+          // 未配置即 null,列表诚实显「未配置」;严禁编造密钥/阈值/回调地址/入驻日期
+          apiKey: t.apiKey ?? null,
+          refundLimit: t.refundLimit ?? null,
           autoEscalation: t.autoEscalation ?? true,
-          webhookUrl: t.webhookUrl || `https://api.${t.id}.com/webhook`,
+          webhookUrl: t.webhookUrl ?? null,
           status: (t.status as any) || 'active',
           // 内置业务域标记(admin-readiness 02):builtin 行禁删禁停用
           planTier: t.planTier || 'free',
-          createdAt: t.createdAt ? new Date(t.createdAt).toISOString().split('T')[0] : '2026-01-01',
+          createdAt: t.createdAt ? new Date(t.createdAt).toISOString().split('T')[0] : null,
           onboardingConfig: t.onboardingConfig ?? null,
         }));
         return mergedTenants;
@@ -243,17 +244,26 @@ export function TenantsPage() {
       header: 'API Key / SPI Webhook',
       render: (row: TenantRecord) => (
         <div>
-          <div className="text-xs font-mono text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 inline-block">
-            {row.apiKey}
-          </div>
-          <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5">{row.webhookUrl}</div>
+          {row.apiKey ? (
+            <div className="text-xs font-mono text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 inline-block">
+              {row.apiKey}
+            </div>
+          ) : (
+            <div className="text-xs text-slate-400">未配置</div>
+          )}
+          <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5">{row.webhookUrl || 'Webhook 未配置'}</div>
         </div>
       ),
     },
     {
       key: 'refundLimit',
       header: '风控阈值 (退款)',
-      render: (row: TenantRecord) => <span className="font-semibold text-slate-800">¥{row.refundLimit}</span>,
+      render: (row: TenantRecord) =>
+        row.refundLimit != null ? (
+          <span className="font-semibold text-slate-800">¥{row.refundLimit}</span>
+        ) : (
+          <span className="text-xs text-slate-400">未配置</span>
+        ),
     },
     {
       key: 'status',

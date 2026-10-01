@@ -204,7 +204,7 @@ export const tenantsApi = {
   create: (body: {
     id: string;
     name: string;
-    apiKey?: string;
+    apiKey?: string | null;
     industry?: string;
     config?: Record<string, any>;
     // 新用户引导配置(2026-09-10):创建即携带,服务端 schema 校验后写入,
@@ -223,9 +223,10 @@ export const tenantsApi = {
     body: {
       name: string;
       status?: string;
-      webhookUrl?: string;
-      apiKey?: string;
-      refundLimit?: number;
+      webhookUrl?: string | null;
+      apiKey?: string | null;
+      // null = 租户未配置(诚实回读);undefined/缺省 = 不修改,服务端保留既有
+      refundLimit?: number | null;
       industry?: string;
       onboardingConfig?: Record<string, any> | null;
     },

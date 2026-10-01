@@ -108,6 +108,12 @@ class TestTenant:
         created = next((t for t in list_after_create.json()["tenants"] if t["id"] == ct_id), None)
         assert created is not None
 
+        # 未配置 SPI 的租户:密钥/回调地址/退款阈值诚实回 null,
+        # 严禁编造默认值(key_x_sec / 300 / localhost:3005 曾是编造重灾区)
+        assert created["apiKey"] is None
+        assert created["webhookUrl"] is None
+        assert created["refundLimit"] is None
+
         del_res = await client.delete(f"/api/tenant/{created['id']}")
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True

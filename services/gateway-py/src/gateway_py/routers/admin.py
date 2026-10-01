@@ -184,13 +184,15 @@ async def tenant_list():
                         "name": row["name"],
                         "industry": row["industry"] or "综合零售",
                         "channel": "Web + Mobile + SPI",
-                        "apiKey": spi.get("apiSecret") or f"key_{row['business_id']}_sec",
-                        "refundLimit": refund_limit or 300,
+                        # 未配置即回 null,前端「未配置」态呈现(数据真实性约定:严禁编造
+                        # 密钥/风控阈值/Webhook 地址——update 路由对 falsy 值不覆写,回传安全)
+                        "apiKey": spi.get("apiSecret"),
+                        "refundLimit": refund_limit,
                         "autoEscalation": True,
-                        "webhookUrl": spi.get("spiBaseUrl") or "http://localhost:3005",
+                        "webhookUrl": spi.get("spiBaseUrl"),
                         "status": row["status"] or "active",
                         "planTier": row["plan_tier"] or "free",
-                        "createdAt": row["created_at"].isoformat().split("T")[0] if row["created_at"] else "2026-01-01",
+                        "createdAt": row["created_at"].isoformat().split("T")[0] if row["created_at"] else None,
                         # 编辑面回读(new-user-onboarding E):无配置租户回 None,
                         # 前端 JSON 文本域以「未配置」态呈现而非伪造默认值
                         "onboardingConfig": (
@@ -250,13 +252,16 @@ async def create_tenant(body: TenantCreateIn):
         if onboarding_errors:
             raise HTTPException(400, f"onboardingConfig 校验失败: {'; '.join(onboarding_errors)}")
 
-    spi_config = {
-        "mode": "remote_spi",
-        "spiBaseUrl": webhook_url or "http://localhost:3005",
-        "apiSecret": body.apiKey or f"key_{clean_id}_sec",
-        "timeoutMs": 5000,
-    }
-    skills_config = {"skill_order_refund": {"enabled": True, "approvalThresholdAmount": refund_limit or 300}}
+    # 未配置即不落库(数据真实性约定):编造密钥/回调地址/阈值曾是 create/list
+    # 两处重灾区,且 spi_config.apiSecret 全仓零消费方,SPI 鉴权走 env + 派生形
+    spi_config = {"mode": "remote_spi", "timeoutMs": 5000}
+    if webhook_url:
+        spi_config["spiBaseUrl"] = webhook_url
+    if body.apiKey:
+        spi_config["apiSecret"] = body.apiKey
+    skills_config = {"skill_order_refund": {"enabled": True}}
+    if refund_limit is not None:
+        skills_config["skill_order_refund"]["approvalThresholdAmount"] = refund_limit
 
     async with get_session() as session:
         await session.execute(
