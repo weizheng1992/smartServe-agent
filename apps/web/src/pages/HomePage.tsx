@@ -119,6 +119,12 @@ export function HomePage() {
     triggerStream,
   });
 
+  // 快照灯箱 a11y:遮罩可聚焦 + Escape 关闭(merchant FloatingChatWidget 同型)
+  const screenshotLightboxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selectedScreenshot) screenshotLightboxRef.current?.focus();
+  }, [selectedScreenshot]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -220,7 +226,13 @@ export function HomePage() {
       />
 
       {selectedScreenshot && (
-        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center p-6">
+        <div
+          ref={screenshotLightboxRef}
+          tabIndex={-1}
+          role="presentation"
+          onKeyDown={(e) => e.key === 'Escape' && setSelectedScreenshot(null)}
+          className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center p-6 outline-none"
+        >
           <Card className="bg-slate-900 border-slate-800 max-w-4xl w-full overflow-hidden shadow-2xl">
             <CardHeader className="px-6 py-4 border-b border-slate-800 flex flex-row justify-between items-center space-y-0">
               <div className="flex items-center space-x-2.5">
@@ -231,6 +243,7 @@ export function HomePage() {
                 variant="ghost"
                 size="icon"
                 onClick={() => setSelectedScreenshot(null)}
+                aria-label="关闭大图"
                 className="h-8 w-8 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg"
               >
                 <X className="h-4.5 w-4.5" />
