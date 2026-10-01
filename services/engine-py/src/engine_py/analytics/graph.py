@@ -104,7 +104,10 @@ async def ask(question: str, session_ctx: dict, page_context: dict | None = None
         return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": "问句含注入形状,已拒绝处理"}
 
     try:
-        intent = engine.resolve(question)
+        # resolve 内含分类头同步 torch 推理(shadow/on 灰度期每次必打分,首次还
+        # 要加载模型权重),直调会阻塞事件循环 —— 与 llm_intent._sft_generate
+        # 同纪律,下放线程执行。
+        intent = await asyncio.to_thread(engine.resolve, question)
         trace.add_layer("L0", metric=intent.metric if not isinstance(intent, dict) else "clarify")
     except UnsupportedQuery:
         # L2 范例回放 → L3 LLM 意图兜底(ADR-0005);全部未命中 → 响亮失败 + 落库
@@ -392,7 +395,7 @@ async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx
             if trace:
                 trace.add_layer("rewrite", rewritten=rewritten[:40])
             try:
-                hit = MetricQueryEngine(session_ctx=session_ctx).resolve(rewritten)
+                hit = await asyncio.to_thread(MetricQueryEngine(session_ctx=session_ctx).resolve, rewritten)
                 if isinstance(hit, StructuredQueryIntent):
                     return hit, False, rewritten
             except UnsupportedQuery:
