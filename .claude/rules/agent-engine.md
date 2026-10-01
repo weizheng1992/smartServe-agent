@@ -21,7 +21,7 @@ paths: ["services/engine-py/**/*"]
 
 ### 1.2 Skills 技能分发与开放集成架构 (Skills Pipeline)
 
-- **技能基类 (`skills/base_skill.py`)**：所有业务技能（如 `OrderRefundSkill`）必须继承 `BaseSkill`，提供统一的元数据、依赖工具声明、SOP 策略以及多阶段执行管道（`validate` ➔ `pre_execute` ➔ `execute` ➔ `post_execute`）。
+- **技能基类 (`skills/base_skill.py`)**：所有业务技能（如 `OrderRefundSkill`）必须继承 `BaseSkill`，提供统一的声明式元数据（`id`/`name`(SOP 名)/`description`/`triggerIntents`/`requiredTools`/`requiresApproval`/`approvalThresholdAmount`）、`can_handle` 触发匹配（触发意图或兜底正则）、租户配置覆写（`get_effective_config`/`get_effective_approval_threshold`）与单段抽象 `execute` —— SOP 校验（退款时效/双退款检查）与 HITL 挂起（`suspend_for_approval`）在技能实现内自治；执行器对技能单段调起，**不存在** `validate`/`pre_execute`/`post_execute` 生命周期钩子（旧文档描述的 TS 管道未随移植落地）。
 - **执行器调度 (`graph/nodes/step_execution_engine.py`)**：
   - 优先通过 Skills 注册表检索匹配的 Skill 实例执行业务逻辑；
   - 若无特定 Skill，则回退至标准 Tool 工具分发执行（`asyncio.gather` 并行调度依赖无关节点）。

@@ -101,7 +101,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
    - 双层画像记忆严格区分 `scope = 'global'`(通用用户特征)与 `scope = 'tenant'`(品牌专属偏好)。
 2. **Skills 与工具执行管道**:
    - 遵循 `Planner ➔ Skill ➔ SPI/MCP Connector ➔ Service/DB`。
-   - 业务动作继承 `BaseSkill`,带声明式 SOP 校验、生命周期钩子(`pre_execute`、`execute`、`post_execute`)与租户配置覆写。
+   - 业务动作继承 `BaseSkill`:声明式元数据(`triggerIntents`/`requiredTools`/`requiresApproval`/`approvalThresholdAmount`)+ `can_handle` 触发匹配 + 租户配置覆写(`get_effective_config`/`get_effective_approval_threshold`)+ 单段抽象 `execute`(SOP 校验与 HITL 挂起在技能实现内自治,如 OrderRefundSkill 的双退款检查与 `suspend_for_approval`);无 `pre_execute`/`post_execute` 生命周期钩子。
    - 底层外部集成使用 HMAC-SHA256 签名、防重放与带 SSRF 防护的连接器。
 3. **HITL 审批与事务发件箱**:
    - 敏感动作(超阈值退款、地址修改)挂起执行并写入 `pending_approvals`。
