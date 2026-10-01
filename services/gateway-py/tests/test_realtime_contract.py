@@ -138,17 +138,16 @@ class TestSseStream:
         # 断开后事件照常入流(作业面独立于观察面),重连只补缺失帧
         await emit(job_id, "thought", {"jobId": job_id, "step": "断流后新帧"})
         raw = ""
-        async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client:
-            async with client.stream(
-                "GET", f"/api/chat/{job_id}/stream", headers={"last-event-id": "1"}
-            ) as res:
-                assert res.status_code == 200
-                async for chunk in res.aiter_text():
-                    raw += chunk
-                    if "断流后新帧" in raw:
-                        break
+        async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client, client.stream(
+            "GET", f"/api/chat/{job_id}/stream", headers={"last-event-id": "1"}
+        ) as res:
+            assert res.status_code == 200
+            async for chunk in res.aiter_text():
+                raw += chunk
+                if "断流后新帧" in raw:
+                    break
 
-        assert re.search(r"^id: 2\nevent: thought.*断流后新帧", raw, re.S), "重连必须以 id 2 补发断流后新帧"
+        assert re.search(r"^id: 2\nevent: thought.*断流后新帧", raw, re.DOTALL), "重连必须以 id 2 补发断流后新帧"
         assert "id: 1\n" not in raw, "已收帧(seq=1)严禁重放"
 
 
