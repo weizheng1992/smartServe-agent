@@ -196,7 +196,12 @@ export function RagStudioPage() {
     {
       key: 'tokenCount',
       header: 'Tokens',
-      render: (row: KnowledgeChunkRecord) => <span className="text-xs font-mono text-slate-500">{row.tokenCount}</span>,
+      // 前后端同款字符数 ×1.3 估算(无 tokenizer),标「≈」严禁冒充精确计数
+      render: (row: KnowledgeChunkRecord) => (
+        <span className="text-xs font-mono text-slate-500" title="按字符数 ×1.3 估算">
+          ≈{row.tokenCount}
+        </span>
+      ),
     },
     {
       key: 'updatedAt',
