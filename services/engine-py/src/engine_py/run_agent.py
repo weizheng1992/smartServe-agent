@@ -355,16 +355,24 @@ async def _settle_turn(
         }
     )
 
-    # 助手回复回写三路记忆(回复已产出,持久化失败不阻断交付)
+    # 助手回复回写三路记忆(回复已产出,持久化失败不阻断交付)。
+    # 三象限各自独立降级:单路失败只吞本路,严禁一个 try 连坐——
+    # 否则 episodic 抛错会静默跳过 long 事实抽取(2026-10-02 夜审收口)。
     if result.get("output"):
         try:
             await short_memory.add_message("assistant", result["output"], final_cards)
+        except Exception as mem_err:
+            print(f"[runAgent] 短期记忆回写失败(不阻断): {mem_err!r}")
+        try:
             await episodic_memory.add_event(
                 f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
             )
+        except Exception as mem_err:
+            print(f"[runAgent] 情境记忆回写失败(不阻断): {mem_err!r}")
+        try:
             await long_memory.extract_and_store_fact(result["output"], input_message)
         except Exception as mem_err:
-            print(f"[runAgent] 回复已交付,记忆回写失败(不阻断): {mem_err!r}")
+            print(f"[runAgent] 长期记忆回写失败(不阻断): {mem_err!r}")
 
     # 持久化任务记忆与领域上下文
     task_plan_to_save = result.get("task_plan") or {

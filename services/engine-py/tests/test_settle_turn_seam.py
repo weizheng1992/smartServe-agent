@@ -331,3 +331,47 @@ def test_empty_output_skips_memory_writes_but_still_settles(monkeypatch, pg_fact
     assert stubs.log[-1] == "publish_result", "无输出轮照常发布 result 事件"
     # 反幻觉闸把无输出轮规范化为空串(键存在、值为空),严禁编造文案
     assert final["output"] == ""
+
+
+class TestMemoryWriteIndependence:
+    """三路记忆回写独立降级(2026-10-02 夜审收口):三写曾包在同一个 try 里,
+    episodic 抛错会静默连坐跳过 long 事实抽取 —— 单路失败只吞本路。"""
+
+    @pytest.mark.usefixtures("pg_factory")
+    def test_episodic_failure_does_not_skip_long_extraction(self, monkeypatch, pg_factory):
+        tid = "t-seam-episodic-boom"
+        stubs = _SettleStubs()
+        stubs.patch(monkeypatch)
+        module = importlib.import_module("engine_py.run_agent")
+
+        async def boom(self, summary, score):
+            raise RuntimeError("episodic embedding unavailable")
+
+        monkeypatch.setattr(module.EpisodicMemory, "add_event", boom)
+
+        _seed_thread(pg_factory, thread_id=tid)
+        final = asyncio.run(_settle(stubs, _happy_result(), job=_make_job(thread_id=tid)))
+
+        assert "episodic_event" not in stubs.log, "故障路不得落事件"
+        assert stubs.short_adds and stubs.long_facts, "短期行与长期事实抽取严禁被连坐跳过"
+        assert stubs.log[-1] == "publish_result", "交付照常发布"
+        assert final["output"] == "您的订单已发出,预计三天内送达。"
+
+    @pytest.mark.usefixtures("pg_factory")
+    def test_short_memory_failure_does_not_skip_episodic_and_long(self, monkeypatch, pg_factory):
+        tid = "t-seam-short-boom"
+        stubs = _SettleStubs()
+        stubs.patch(monkeypatch)
+        module = importlib.import_module("engine_py.run_agent")
+
+        async def boom(self, role, content, cards=None):
+            raise RuntimeError("messages table unavailable")
+
+        monkeypatch.setattr(module.ShortMemory, "add_message", boom)
+
+        _seed_thread(pg_factory, thread_id=tid)
+        asyncio.run(_settle(stubs, _happy_result(), job=_make_job(thread_id=tid)))
+
+        assert stubs.short_adds == []
+        assert stubs.episodic_adds and stubs.long_facts, "情境与长期两路照常回写"
+        assert "task_memory" in stubs.log and stubs.log[-1] == "publish_result"
