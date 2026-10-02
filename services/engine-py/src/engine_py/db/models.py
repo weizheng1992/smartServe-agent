@@ -253,6 +253,9 @@ class IntentLog(Base):
 
 # /api/logs 时间倒序翻页与仲裁留痕审计扫按 created_at 切片
 Index("intent_logs_created_at_idx", IntentLog.created_at)
+# 仲裁留痕按会话回查(triage/labeling.py 标注水龙头 thread 点查):
+# (thread_id, created_at) 复合,与 pending_approvals_thread_created_idx 同形状
+Index("intent_logs_thread_created_idx", IntentLog.thread_id, IntentLog.created_at)
 
 
 class LowConfidenceLog(Base):
