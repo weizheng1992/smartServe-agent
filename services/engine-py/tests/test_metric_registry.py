@@ -109,3 +109,24 @@ class TestLoadLoudFailures:
         assert registry["gmv"]["conflictGroup"] == []
         assert registry["gmv"]["sampleQueries"] == []
         assert registry["gmv"]["availableDimensions"] == []
+
+
+class TestTrainingTomlSync:
+    """训练轨配置 ↔ 注册表闭集同源缝(2026-10-02 夜审:metric_head.toml 曾停
+    留在 11 label,落后 38 闭集 28 个指标,新族 promo_*/customer_* 永远落
+    unsupported 放行 L3)。闭集增删时本测试强制同步训练配置。"""
+
+    def test_metric_head_labels_track_registry(self):
+        import tomllib
+        from pathlib import Path
+
+        cfg_path = Path(__file__).resolve().parents[1] / "scripts/training/configs/metric_head.toml"
+        with open(cfg_path, "rb") as f:
+            labels = set(tomllib.load(f)["task"]["labels"])
+
+        expected = set(METRIC_SEMANTIC_REGISTRY) - {"order_overview"} | {"unsupported"}
+        assert labels == expected, (
+            "metric_head.toml labels 与注册表闭集漂移"
+            f"(缺 {sorted(expected - labels)},多 {sorted(labels - expected)});"
+            "新指标登记时同步训练配置(order_overview 实体概览刻意除外)"
+        )

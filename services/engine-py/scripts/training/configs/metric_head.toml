@@ -6,11 +6,19 @@ name = "metric_head"
 input_field = "query"
 label_field = "label"
 # 与 metric_registry 登记指标保持同源(新指标登记时同步改这里)
-# 与 METRIC_SEMANTIC_REGISTRY 同源(2026-09-18:含阶段③新族;order_overview 实体概览除外)
+# 与 METRIC_SEMANTIC_REGISTRY 同源(2026-10-02 重对齐 38 闭集;order_overview
+# 实体概览除外);同源契约由 tests/test_metric_registry.py 钉死,漂移即红。
 labels = [
-  "gmv", "volume", "gross_profit", "margin_rate", "stock_risk",
-  "review_bad", "refund_rate", "after_sale_overview", "session_volume", "ai_resolution_rate",
-  "gmv_trend",
+  "gmv", "volume", "gross_profit", "margin_rate",
+  "stock_risk", "review_bad", "refund_rate", "session_volume",
+  "promo_orders", "promo_discount_total", "promo_gmv_total", "gmv_trend",
+  "volume_trend", "after_sale_overview", "ai_resolution_rate", "promo_effect",
+  "promo_sku_compare", "promo_compare", "customer_orders", "aov",
+  "order_count", "review_good", "zero_sales", "category_gmv_top",
+  "customer_spend_top", "customer_spend_stats", "customer_coupons", "customer_profile",
+  "customer_panorama", "biz_overview", "gmv_mom", "orders_trend",
+  "stock_value", "customer_spend_trend", "attribution_refund", "attribution_sales",
+  "spu_compare",
   "unsupported",   # 闭集外 → 放行 L3 LLM 兜底,不许静默错分
 ]
 

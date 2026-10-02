@@ -15,7 +15,8 @@ echo "③ 训练"
 uv run python scripts/training/train.py --config scripts/training/configs/metric_head.toml
 
 echo "④ 评估"
-uv run python scripts/training/evaluate.py --config scripts/training/configs/metric_head.toml
+uv run python scripts/training/evaluate.py --run-dir training_runs/metric_head \
+  --data training_data/metric_head/processed/heldout.jsonl
 
 echo ""
 echo "=== metric_head 训练完成,产物: training_runs/metric_head/ ==="
