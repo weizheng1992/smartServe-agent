@@ -15,6 +15,7 @@ import {
   User,
   X,
 } from 'ui';
+import { resolveCardActionMessage } from '../lib/cardActions';
 
 export interface ChatWidgetProps {
   businessId?: string;
@@ -24,19 +25,6 @@ export interface ChatWidgetProps {
   welcomeText?: string;
   initialOpen?: boolean;
 }
-
-// 🎯 声明式卡片交互动作处理器映射表 (Table-Driven Dispatcher)
-const CARD_ACTION_HANDLERS: Record<string, (payload: Record<string, any>) => string | null> = {
-  select_order: (p) => (p.orderId ? `已选定订单 ${p.orderId}，请帮我查询该订单的具体信息和最新物流进度。` : null),
-  send_message: (p) => (p.text ? String(p.text) : null),
-  track_order: (p) => (p.orderId ? `帮我查一下订单 ${p.orderId} 的物流轨迹` : null),
-  request_refund: (p) => (p.orderId ? `帮我申请订单 ${p.orderId} 的退款` : null),
-  confirm_refund: (p) => (p.orderId ? `我已确认提交订单 ${p.orderId} 的退款核签` : null),
-  submit_return_tracking: (p) => (p.value ? `我已寄出商品，寄件快递单号为 ${p.value}，请跟进质检验收` : null),
-  submit_step_action: (p) => (p.value ? `我已提交业务步骤信息：${p.value}` : null),
-  add_to_cart_interactive: (p) => `我想将 ${p.title}（规格: ${p.skuTitle || p.skuId}）购买 ${p.quantity} 件加入购物车`,
-  buy_now_interactive: (p) => `我想立即购买 ${p.title}（规格: ${p.skuTitle || p.skuId}）共 ${p.quantity} 件`,
-};
 
 export function ChatWidget({
   businessId = 'ecommerce',
@@ -132,8 +120,7 @@ export function ChatWidget({
   };
 
   const handleCardAction = (action: string, payload: Record<string, unknown> = {}) => {
-    const handler = CARD_ACTION_HANDLERS[action];
-    const message = handler ? handler(payload) : typeof payload.query === 'string' ? payload.query : null;
+    const message = resolveCardActionMessage(action, payload);
 
     if (message) {
       const cardPayload = payload.order ? [{ type: 'order_card', data: payload.order }] : undefined;

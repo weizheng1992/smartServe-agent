@@ -27,6 +27,7 @@ import {
   XCircle,
 } from 'ui';
 import type { Message } from '../hooks/types';
+import { resolveCardActionMessage } from '../lib/cardActions';
 
 interface ChatAreaProps {
   activeThreadId: string;
@@ -109,18 +110,14 @@ export function ChatArea({
   };
 
   const handleCardAction = (action: string, payload?: Record<string, unknown>) => {
-    if (action === 'send_message' && payload?.text) {
-      handleSend(undefined, String(payload.text), []);
-    } else if (action === 'select_order' && payload?.orderId) {
-      handleSend(undefined, `查询订单 ${payload.orderId} 的详细信息与可选业务`, []);
-    } else if (action === 'track_order' && payload?.orderId) {
-      handleSend(undefined, `帮我查一下 ${payload.orderId} 的物流轨迹`, []);
-    } else if (action === 'request_refund' && payload?.orderId) {
-      handleSend(undefined, `帮我申请订单 ${payload.orderId} 的退款`, []);
-    } else if (action === 'confirm_refund' && payload?.orderId) {
-      handleSend(undefined, `我已确认提交订单 ${payload.orderId} 的退款核签`, []);
-    } else if (action === 'trigger_upload') {
+    // trigger_upload 是组件局部副作用(开文件选择器),不产消息,不进共享表
+    if (action === 'trigger_upload') {
       fileInputRef.current?.click();
+      return;
+    }
+    const message = resolveCardActionMessage(action, payload ?? {});
+    if (message) {
+      handleSend(undefined, message, []);
     }
   };
 
