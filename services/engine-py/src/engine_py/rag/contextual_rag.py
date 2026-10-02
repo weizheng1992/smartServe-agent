@@ -11,9 +11,34 @@ from sqlalchemy import select, text
 from ..db import RagDocumentRow, get_session
 from ..llm import get_embedding_model
 from ..vectors import cosine_similarity, parse_embedding  # 余弦/解析单一实现(vectors.py)
-from .knowledge_files import load_knowledge_chunks
+from .knowledge_files import default_knowledge_dir, load_knowledge_chunks
 
 _TOKENIZE_RE = re.compile(r"[a-z0-9]+|[一-龥]")
+
+
+# ── 自愈播种进程级节流(2026-10-02 夜审修复D)──────────────────────────────
+# search_relevant_docs 曾每次检索都无条件全量自愈:磁盘重读 knowledge 文件 +
+# rag_documents 全表 GROUP BY+MD5 比对,每回合检索白付两份全额成本。现以
+# 知识目录指纹(mtime_ns+size,零读取成本)作进程级闸:指纹未变即短路;
+# 变了(新增/修订知识文件)才重跑 —— 2026-09-13「新文件/修订免手动清库」
+# 语义原样保留,只省去无变化时的重复全量自愈。失败不置位,下次检索继续
+# 自愈重试。已知边界:绕过文件直接清库(库侧漂移)不再被逐检索感知,须
+# 改动知识文件或重启进程触发(db:seed/docker 流程本就伴随重启)。
+_last_ensured_fp: tuple | None = None
+
+
+def _knowledge_fingerprint() -> tuple:
+    """知识目录指纹:逐文件 (name, mtime_ns, size)。任何文件新增/修订都会
+    改变 mtime —— 测试注入 loader 时可覆写本缝模拟文件变更。"""
+    try:
+        return tuple(
+            sorted(
+                (p.name, p.stat().st_mtime_ns, p.stat().st_size)
+                for p in default_knowledge_dir().glob("*.md")
+            )
+        )
+    except OSError:
+        return ("unreadable",)
 
 
 def tokenize(text: str) -> list[str]:
@@ -84,17 +109,31 @@ class ContextualRAG:
         2026-09-13 升级为 source 级补齐:原先只在「表全空」时播种,新增知识
         文件对已播种库永远不生效(商品知识文档因此不可见)。现按
         (business_id, source_url) 键比对,缺失的文件单独补灌 —— 幂等,已有
-        文件零嵌入开销。"""
+        文件零嵌入开销。
+
+        2026-10-02 进程级指纹闸(夜审修复D):目录指纹未变即短路,不再逐检索
+        重付磁盘重读+全表比对;文件新增/修订改变 mtime,闸即刻重开(补灌语义
+        不延迟)。失败不置位,下次检索继续自愈重试。"""
+        global _last_ensured_fp
+        fp = _knowledge_fingerprint()
+        if fp == _last_ensured_fp:
+            return
+        if await self._seed_attempt():
+            _last_ensured_fp = fp
+
+    async def _seed_attempt(self) -> bool:
+        """跑一轮完整自愈播种;True = 状态已确保(无 stale 或补灌成功),
+        调用方方可置指纹位;False = 文件不可读/库失败,不得缓存。"""
         try:
             async with get_session() as session:
                 try:
                     chunks = load_knowledge_chunks()
                 except Exception as files_err:
                     print(f"[RAG] Knowledge files unreadable, skip self-healing seed: {files_err}")
-                    return
+                    return False
                 if not chunks:
                     print("[RAG] docs/knowledge 无可摄取切片,跳过自愈播种(不回退内联写死内容)")
-                    return
+                    return True
                 # 文件级内容哈希比对(2026-09-13):新文件补灌,内容变更的
                 # 文件整组重灌 —— 知识文档修订后无需手动清库
                 existing_rows = (
@@ -127,7 +166,7 @@ class ContextualRAG:
                     if have is None or have[0] != want_n or have[1] != want_sha:
                         stale_keys.add(key)
                 if not stale_keys:
-                    return
+                    return True
                 pending = [c for c in chunks if (c.business_id, c.source_url) in stale_keys]
                 for key in stale_keys:
                     await session.execute(
@@ -152,8 +191,10 @@ class ContextualRAG:
                     session.add_all(rows)
                     await session.commit()
                     print(f"[RAG] Self-healing seed appended {len(rows)} chunks from {len({(c.business_id, c.source_url) for c in pending})} new knowledge source(s)")
+                return True
         except Exception as err:
             print(f"[RAG] Self-healing seed failed (possibly due to offline/mocked DB): {err}")
+            return False
 
     async def search_relevant_docs(
         self,

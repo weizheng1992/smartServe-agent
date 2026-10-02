@@ -80,6 +80,7 @@ _MERCHANT_DDL = [
       subtitle TEXT,
       description TEXT,
       category TEXT NOT NULL DEFAULT '下装裤类',
+      main_image TEXT,
       specs JSONB DEFAULT '{}'::jsonb,
       status TEXT NOT NULL DEFAULT 'ON_SALE',
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -325,6 +326,13 @@ class TestSelfHealingSourceTopUp:
 
         monkeypatch.setattr("engine_py.rag.contextual_rag.load_knowledge_chunks", _two_files)
 
+        # 指纹闸(2026-10-02 修复D):注入哨兵指纹并清置位,保证本例 ensure
+        # 真正跑 attempt(同进程前序测试可能已缓存真实目录指纹而短路)
+        monkeypatch.setattr(
+            "engine_py.rag.contextual_rag._knowledge_fingerprint", lambda: ("case-new-file",)
+        )
+        monkeypatch.setattr("engine_py.rag.contextual_rag._last_ensured_fp", None)
+
         class _FakeEmbed:
             async def aembed_query(self, text_val: str) -> list[float]:
                 return [0.5, 0.5]
@@ -371,6 +379,14 @@ class TestSelfHealingSourceTopUp:
 
         monkeypatch.setattr("engine_py.rag.contextual_rag.load_knowledge_chunks", _one_file)
 
+        # 指纹闸(2026-10-02 修复D):文件修订 = 目录指纹变更,闸重开才重跑。
+        # 两次 ensure 各见一版指纹,忠实模拟磁盘上文件被编辑。
+        fp_seq = iter([("rev-v1",), ("rev-v2",)])
+        monkeypatch.setattr(
+            "engine_py.rag.contextual_rag._knowledge_fingerprint", lambda: next(fp_seq)
+        )
+        monkeypatch.setattr("engine_py.rag.contextual_rag._last_ensured_fp", None)
+
         class _FakeEmbed:
             async def aembed_query(self, text_val: str) -> list[float]:
                 return [0.5, 0.5]
@@ -410,6 +426,17 @@ class TestSelfHealingSourceTopUp:
 
         monkeypatch.setattr("engine_py.rag.contextual_rag.load_knowledge_chunks", _one_file)
 
+        # 指纹闸(2026-10-02 修复D):每次 ensure 给新指纹,令两次都真跑
+        # attempt —— 本例钉的是补灌本体幂等,不是闸短路
+        fp_calls = {"n": 0}
+
+        def _per_call_fp():
+            fp_calls["n"] += 1
+            return (f"call-{fp_calls['n']}",)
+
+        monkeypatch.setattr("engine_py.rag.contextual_rag._knowledge_fingerprint", _per_call_fp)
+        monkeypatch.setattr("engine_py.rag.contextual_rag._last_ensured_fp", None)
+
         class _FakeEmbed:
             async def aembed_query(self, text_val: str) -> list[float]:
                 return [0.5, 0.5]
@@ -430,6 +457,89 @@ class TestSelfHealingSourceTopUp:
                 )).scalar()
 
         assert asyncio.run(scenario()) == 1
+
+
+# ── 自愈播种进程级指纹闸(2026-10-02 夜审修复D)───────────────────────────
+
+
+class TestSeedGate:
+    def _stub_attempt(self, monkeypatch, result: bool) -> dict:
+        import engine_py.rag.contextual_rag as cr
+
+        ran = {"n": 0}
+
+        async def _attempt(self):
+            ran["n"] += 1
+            return result
+
+        monkeypatch.setattr(cr.ContextualRAG, "_seed_attempt", _attempt)
+        return ran
+
+    def test_unchanged_fingerprint_short_circuits(self, monkeypatch):
+        """指纹未变:再次检索不再重跑全量自愈 —— 磁盘重读+全表 GROUP BY 比对
+        不进每回合热路径(修复D本体契约)。"""
+        import engine_py.rag.contextual_rag as cr
+
+        monkeypatch.setattr(cr, "_knowledge_fingerprint", lambda: ("fp",))
+        monkeypatch.setattr(cr, "_last_ensured_fp", None)
+        ran = self._stub_attempt(monkeypatch, result=True)
+
+        rag = cr.ContextualRAG("ecommerce")
+        asyncio.run(rag._ensure_seed_data())
+        asyncio.run(rag._ensure_seed_data())
+        assert ran["n"] == 1, "指纹未变必须短路,严禁逐检索重付全量自愈"
+
+    def test_fingerprint_change_reopens_gate(self, monkeypatch):
+        """文件新增/修订 → 指纹变更 → 闸重开重跑(2026-09-13「免手动清库」
+        语义原样保留,只是无变化时不再逐检索重付)。"""
+        import engine_py.rag.contextual_rag as cr
+
+        fp_seq = iter([("v1",), ("v2",), ("v2",)])
+        monkeypatch.setattr(cr, "_knowledge_fingerprint", lambda: next(fp_seq))
+        monkeypatch.setattr(cr, "_last_ensured_fp", None)
+        ran = self._stub_attempt(monkeypatch, result=True)
+
+        rag = cr.ContextualRAG("ecommerce")
+        asyncio.run(rag._ensure_seed_data())  # v1 首见 → 跑
+        asyncio.run(rag._ensure_seed_data())  # v2 文件变更 → 重跑
+        asyncio.run(rag._ensure_seed_data())  # v2 未变 → 短路
+        assert ran["n"] == 2
+
+    def test_failed_attempt_not_cached(self, monkeypatch):
+        """失败不置位:文件不可读/库失败不得被缓存成「已确保」,
+        下次检索继续自愈重试。"""
+        import engine_py.rag.contextual_rag as cr
+
+        monkeypatch.setattr(cr, "_knowledge_fingerprint", lambda: ("fp",))
+        monkeypatch.setattr(cr, "_last_ensured_fp", None)
+        ran = self._stub_attempt(monkeypatch, result=False)
+
+        rag = cr.ContextualRAG("ecommerce")
+        asyncio.run(rag._ensure_seed_data())
+        asyncio.run(rag._ensure_seed_data())
+        assert ran["n"] == 2, "失败严禁缓存,闸必须保持常开"
+
+
+class TestSearchEmbeddingDegradation:
+    def test_embedding_failure_returns_honest_empty_without_db(self, monkeypatch):
+        """查询嵌入失败 → 诚实空列表、不触库、异常不炸回合
+        (与库失败降级同标准 real-data-only;此前零直测)。"""
+        import engine_py.rag.contextual_rag as cr
+
+        class _BoomEmbed:
+            async def aembed_query(self, _text):
+                raise RuntimeError("embedding service down")
+
+        def _no_db():
+            raise AssertionError("嵌入失败降级不得触库")
+
+        monkeypatch.setattr(cr, "get_embedding_model", lambda: _BoomEmbed())
+        monkeypatch.setattr(cr, "get_session", _no_db)
+        monkeypatch.setattr(cr, "_knowledge_fingerprint", lambda: ("cached",))
+        monkeypatch.setattr(cr, "_last_ensured_fp", ("cached",))
+
+        result = asyncio.run(cr.ContextualRAG("ecommerce").search_relevant_docs("退货政策"))
+        assert result == [], "嵌入失败必须诚实空"
 
 
 # ── 咨询闸商品知识信号 ───────────────────────────────────────────────────

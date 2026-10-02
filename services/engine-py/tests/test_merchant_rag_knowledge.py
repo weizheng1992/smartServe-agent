@@ -207,6 +207,10 @@ def test_ensure_seed_data_cold_start_reads_knowledge_files(pg_factory, monkeypat
 
         monkeypatch.setattr(cr, "get_embedding_model", lambda: _FakeEmbeddingModel())
 
+        # 指纹闸(2026-10-02 修复D):清置位,保证冷启动自愈真正跑
+        # (同进程前序测试可能已缓存真实目录指纹而短路)
+        monkeypatch.setattr(cr, "_last_ensured_fp", None)
+
         async with pg_factory.begin() as conn:
             await conn.execute(text("DELETE FROM rag_documents"))
 
@@ -238,6 +242,8 @@ def test_ensure_seed_data_cold_start_skips_without_knowledge_files(pg_factory, m
         from engine_py.rag import contextual_rag as cr
 
         monkeypatch.setattr(cr, "load_knowledge_chunks", lambda *args, **kwargs: [])
+        # 指纹闸(2026-10-02 修复D):清置位,保证「跳过播种」分支真正走到
+        monkeypatch.setattr(cr, "_last_ensured_fp", None)
 
         async with pg_factory.begin() as conn:
             await conn.execute(text("DELETE FROM rag_documents"))
