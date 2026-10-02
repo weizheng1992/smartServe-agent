@@ -2,7 +2,7 @@
 
 - /api/admin/*:商户运营台(会话接管、订单发货、HITL 审批)
 - /api/store/*:门店前台(商品、地址、下单、AI 客服聊天 + SSE)
-- /spi/v1/*:对外 SPI 合同(HMAC 可选签名,success/data/timestamp 信封)
+- /spi/v1/*:对外 SPI 合同(HMAC 强制签名 + nonce 防重放,success/data/timestamp 信封)
 - SSE 推送通道:Redis pub/sub 频道 ``thread:{threadId}:message``(替代 TS 进程内 agentEventEmitter)
 """
 
@@ -168,6 +168,16 @@ async def verify_spi_request(
     ok = hmac_verify(secret, signature, method, path, timestamp, nonce, body)
     if not ok:
         return False, "Invalid HMAC-SHA256 signature"
+    # nonce 防重放(2026-10-02 code-review:此前 nonce 收而不查重,同一签名
+    # 300s 窗口内可无限重放 —— tools-registry §1.2「防重放」从此完整兑现)。
+    # Redis 不可用 fail-open(与 rate_limit 同一取向),不阻断正常签名流。
+    try:
+        client = await get_redis()
+        if client is not None:
+            if not await client.set(f"spi:nonce:{nonce}", "1", nx=True, ex=300):
+                return False, "Replayed nonce (anti-replay window 300s)"
+    except Exception as err:
+        print(f"[SPI] nonce 防重放 Redis 不可用,fail-open: {err}")
     return True, None
 
 
@@ -754,9 +764,34 @@ async def store_chat_messages(
 
 
 @router.get("/api/store/chat/stream")
-async def store_chat_stream(threadId: str | None = Query(None)):
+async def store_chat_stream(
+    threadId: str | None = Query(None),
+    businessId: str | None = Query(None),
+    tenantId: str | None = Query(None),
+):
     if not threadId:
         return Response("Missing threadId parameter", status_code=400)
+
+    # 多租户属主闸(2026-10-02 code-review:此前仅凭 threadId 即订阅 pub/sub,
+    # 知道线程 id 便可无限听他商会话实时流 —— sibling store_chat_messages 有
+    # 注册闸+属主校验而此处裸奔)。闸必须在 StreamingResponse 之前落定。
+    tenant = (businessId or tenantId or "aurora").lower().strip()
+    gate = await check_tenant_registered(tenant)
+    if gate is not None:
+        return gate
+    async with get_session() as session:
+        owner_row = (
+            await session.execute(
+                text("SELECT business_id FROM threads WHERE id = :tid").bindparams(tid=threadId)
+            )
+        ).first()
+    if owner_row is None:
+        return JSONResponse(status_code=404, content={"success": False, "error": f"会话 {threadId} 不存在"})
+    owner = str(owner_row[0] or "").lower().strip()
+    if owner != tenant:
+        return JSONResponse(
+            status_code=403, content={"success": False, "error": "会话不属于该商户,拒绝订阅"}
+        )
 
     channel = THREAD_CHANNEL.format(thread_id=threadId)
 
@@ -811,7 +846,9 @@ async def store_chat_stream(threadId: str | None = Query(None)):
 
 
 # ---------------------------------------------------------------------------
-# /spi/v1 — 对外 SPI 合同(HMAC 可选)
+# /spi/v1 — 对外 SPI 合同(HMAC 强制;2026-10-02 code-review:四条 GET 此前
+# require_signature=False 免签名放行,商户订单/用户 PII 裸奔,违背
+# tools-registry §1.2,也对不上 merchant-onboarding-guide 已宣称的验签防护)
 # ---------------------------------------------------------------------------
 
 
@@ -825,7 +862,7 @@ async def spi_products_search(
     try:
         ok, error = await verify_spi_request(
             request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=False,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})
@@ -843,7 +880,7 @@ async def spi_user_info(request: Request, userId: str | None = Query(None), user
     try:
         ok, error = await verify_spi_request(
             request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=False,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})
@@ -864,7 +901,7 @@ async def spi_orders_list(
     try:
         ok, error = await verify_spi_request(
             request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=False,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})
@@ -882,7 +919,7 @@ async def spi_orders_detail(request: Request, orderId: str | None = Query(None))
     try:
         ok, error = await verify_spi_request(
             request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=False,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})

@@ -453,7 +453,8 @@ export function FloatingChatWidget() {
 
     let eventSource: EventSource | null = null;
     try {
-      eventSource = new EventSource(`/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}`);
+      // businessId 参与服务端属主闸(2026-10-02):stream 路由收多租户闸后需自报身份
+      eventSource = new EventSource(`/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}&businessId=aurora`);
 
       eventSource.addEventListener('message', (e) => {
         try {

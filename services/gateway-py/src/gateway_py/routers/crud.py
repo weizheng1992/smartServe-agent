@@ -90,7 +90,14 @@ async def create_guardrail(body: GuardrailRuleIn, x_tenant_id: str | None = Head
 @router.put("/api/guardrails/{rule_id}")
 async def update_guardrail(rule_id: str, body: dict, x_tenant_id: str | None = Header(None)):
     async with get_session() as session:
-        row = (await session.execute(select(GuardrailRule).where(GuardrailRule.id == rule_id))).scalar_one_or_none()
+        stmt = select(GuardrailRule).where(GuardrailRule.id == rule_id)
+        # 租户所有权闸(2026-10-02 code-review:此前按 id 裸查,具名租户凭 id
+        # 可改删他租/平台 all 的安全规则 —— list 有租户过滤而写没有,与
+        # persona 的 _assert_persona_mutable 同款缺口)。查无/他租一律 404,
+        # 存在性不外泄;缺头或 all(平台管理面)保持平台全域写。
+        if x_tenant_id and x_tenant_id != "all":
+            stmt = stmt.where(GuardrailRule.business_id == x_tenant_id)
+        row = (await session.execute(stmt)).scalar_one_or_none()
         if not row:
             raise HTTPException(404, f"Guardrail rule '{rule_id}' not found in database")
         for key, column in (
@@ -116,7 +123,11 @@ async def update_guardrail(rule_id: str, body: dict, x_tenant_id: str | None = H
 @router.delete("/api/guardrails/{rule_id}")
 async def delete_guardrail(rule_id: str, x_tenant_id: str | None = Header(None)):
     async with get_session() as session:
-        row = (await session.execute(select(GuardrailRule).where(GuardrailRule.id == rule_id))).scalar_one_or_none()
+        stmt = select(GuardrailRule).where(GuardrailRule.id == rule_id)
+        # 租户所有权闸(同 update_guardrail,2026-10-02 code-review)
+        if x_tenant_id and x_tenant_id != "all":
+            stmt = stmt.where(GuardrailRule.business_id == x_tenant_id)
+        row = (await session.execute(stmt)).scalar_one_or_none()
         if not row:
             raise HTTPException(404, f"Guardrail rule '{rule_id}' not found in database")
         await session.delete(row)

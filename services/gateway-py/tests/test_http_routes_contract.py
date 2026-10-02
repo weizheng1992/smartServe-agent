@@ -2112,6 +2112,9 @@ class TestMerchantStoreChatStream:
 
     走 live_server 而非 session 级 ``client``(ASGITransport):SSE 通道不依赖
     种子租户数据,且 in-process 传输下"订阅后 publish"结构性死锁(见用例内注释)。
+
+    2026-10-02 属主闸收口:订阅须 threadId 真实存在且 businessId 与属主一致,
+    匿名缺省不再通行(此前仅凭 threadId 即可订阅任意他会话实时流)。
     """
 
     async def test_stream_returns_sse_and_relays_pubsub(self, live_server):
@@ -2124,11 +2127,14 @@ class TestMerchantStoreChatStream:
         # SSE 必须走真网络栈:ASGITransport 把 app 跑完才进 stream 上下文,
         # "订阅后 publish、断言转发"在 in-process 传输下结构性死锁。
         thread_id = f"merchant_stream_{_TS}"
+        await create_thread(thread_id, "u_stream_contract", "nike")
         timeout = httpx.Timeout(10.0, read=30.0)
 
         async with (
             httpx.AsyncClient(base_url=live_server, timeout=timeout) as client,
-            client.stream("GET", "/api/store/chat/stream", params={"threadId": thread_id}) as res,
+            client.stream(
+                "GET", "/api/store/chat/stream", params={"threadId": thread_id, "businessId": "nike"}
+            ) as res,
         ):
                 assert res.status_code == 200
                 assert "text/event-stream" in res.headers["content-type"]

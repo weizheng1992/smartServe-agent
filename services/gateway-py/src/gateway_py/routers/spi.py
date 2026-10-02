@@ -40,6 +40,16 @@ async def _authenticate(request: Request, api_key: str | None, tenant_id: str) -
     raise HTTPException(401, "Unauthorized SPI access: invalid api key or signature")
 
 
+def _require_tenant_header(x_tenant_id: str | None) -> str:
+    """escalation 双路由的租户闸(2026-10-02 code-review):此前无头时
+    reply/close 以 business_id=None 零过滤读任意租户会话、close 按缺省
+    'ecommerce' 落写 —— 不变量 #1「每条查询必须携带租户」在此收口。"""
+    clean = (x_tenant_id or "").strip().lower()
+    if not clean:
+        raise HTTPException(400, "x-tenant-id header is required for SPI escalation routes")
+    return clean
+
+
 @router.post("/approvals/{approval_id}/resolve")
 async def spi_resolve_approval(
     approval_id: str,
@@ -94,13 +104,14 @@ async def spi_escalation_reply(
     x_api_key: str | None = Header(None, alias="x-api-key"),
 ):
     await _authenticate(request, x_api_key, x_tenant_id or "")
-    timeline = await conversation_repo.get_conversation_timeline(thread_id, x_tenant_id)
+    tenant = _require_tenant_header(x_tenant_id)
+    timeline = await conversation_repo.get_conversation_timeline(thread_id, tenant)
     if not timeline:
         raise HTTPException(404, f"Conversation '{thread_id}' not found")
     await conversation_repo.append_message(
         {
             "threadId": thread_id,
-            "businessId": x_tenant_id or timeline["thread"]["businessId"],
+            "businessId": tenant,
             "role": "assistant",
             "content": body.message,
             "operatorInfo": {"operatorId": body.operatorId, "operatorName": body.operatorName},
@@ -117,8 +128,9 @@ async def spi_escalation_close(
     x_api_key: str | None = Header(None, alias="x-api-key"),
 ):
     await _authenticate(request, x_api_key, x_tenant_id or "")
-    timeline = await conversation_repo.get_conversation_timeline(thread_id, x_tenant_id)
+    tenant = _require_tenant_header(x_tenant_id)
+    timeline = await conversation_repo.get_conversation_timeline(thread_id, tenant)
     if not timeline:
         raise HTTPException(404, f"Conversation '{thread_id}' not found")
-    await conversation_repo.update_conversation_status(thread_id, x_tenant_id or "ecommerce", "resolved")
+    await conversation_repo.update_conversation_status(thread_id, tenant, "resolved")
     return {"success": True, "threadId": thread_id, "status": "resolved"}

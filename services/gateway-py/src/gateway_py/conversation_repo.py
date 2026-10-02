@@ -133,19 +133,16 @@ async def get_conversation_timeline(thread_id: str, business_id: str | None = No
             return None
 
         actual_biz_id = str(thread_row["business_id"] or "ecommerce").lower()
-        # 🛡️ 多租户身份校验与自愈补全(镜像 TS 逻辑)
+        # 🛡️ 多租户身份校验(自愈收口 2026-10-02 code-review):跨租户一律隔离
+        # 为空,严禁改判归属、不落任何 UPDATE。旧「自愈补全(镜像 TS 逻辑)」的
+        # 两条改判路径 —— actual=='ecommerce' 图章认领、租户名是 threadId 子串
+        # 认领 —— 都是夺权面:拿他租线程 id 请求即可把会话改判到自己名下并整段
+        # 读出(header+猜名)。threads.business_id 本就 NOT NULL(models.py:46),
+        # 「无主认领」无从发生;建线程 upsert 的「无主线程自愈认领」是
+        # chat.py 的另一条路径,不受此处收口影响。
         if clean_biz_id and clean_biz_id != "all":
             if actual_biz_id != clean_biz_id:
-                if actual_biz_id == "ecommerce" or clean_biz_id in clean_thread_id.lower():
-                    await session.execute(
-                        text("UPDATE threads SET business_id = :bid, updated_at = NOW() WHERE id = :tid").bindparams(
-                            bid=clean_biz_id, tid=clean_thread_id
-                        )
-                    )
-                    await session.commit()
-                    actual_biz_id = clean_biz_id
-                else:
-                    return None  # 跨租户访问 → 隔离为空
+                return None  # 跨租户访问 → 隔离为空
 
         messages = (
             (
