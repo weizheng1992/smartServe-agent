@@ -473,3 +473,94 @@ async def test_checkout_preview_readonly(client, contract_fixtures):
         assert await _coupon_status(big) == "claimed"
     finally:
         await _cleanup()
+
+
+class _SeqRandom:
+    """受控随机源:按序吐候选段位,耗尽后恒返 b(永不触发重试耗尽分支)。"""
+
+    def __init__(self, values: list[int]) -> None:
+        self._values = list(values)
+
+    def randint(self, a: int, b: int) -> int:
+        return self._values.pop(0) if self._values else b
+
+
+async def _seed_existing_order(order_id: str) -> None:
+    async with merchant_engine().begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, "
+                "currency, shipping_address, is_returnable, is_address_modifiable) "
+                "VALUES (:o, :u, 'PAID', 1, 0, 'CNY', CAST('{}' AS jsonb), TRUE, TRUE)"
+            ).bindparams(o=order_id, u=_UID)
+        )
+
+
+async def test_order_id_collision_retries_to_free_id(client, contract_fixtures, monkeypatch):
+    """订单号生成闸(2026-10-02 夜审实弹 5189468 后补钉):随机段撞上种子/存量
+    订单必须查重重试,而非直插 duplicate key 500。购物车与单件直购两条下单
+    路径共用同一 _generate_order_id 六次闸。"""
+    from gateway_py import merchant_domain
+
+    await _seed_catalog()
+    await _seed_existing_order("AURORA-ORD-2026-4242")
+    try:
+        # 购物车路径:首个候选 4242 撞库,次选 7707 落单
+        monkeypatch.setattr(merchant_domain, "random", _SeqRandom([4242, 7707]))
+        res = await client.post(
+            "/api/store/orders",
+            json={"customerId": _UID, "items": [{"skuCode": _SKUCODE, "quantity": 1}]},
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["success"] is True
+        assert res.json()["orderId"] == "AURORA-ORD-2026-7707"
+
+        # 单件直购路径(place_order)同闸:候选 4242 撞库,次选 7708 落单
+        monkeypatch.setattr(merchant_domain, "random", _SeqRandom([4242, 7708]))
+        res2 = await client.post(
+            "/api/store/orders",
+            json={"customerId": _UID, "skuCode": _SKUCODE, "quantity": 1},
+        )
+        assert res2.status_code == 200, res2.text
+        assert res2.json()["success"] is True
+        assert res2.json()["orderId"] == "AURORA-ORD-2026-7708"
+    finally:
+        await _cleanup()
+
+
+async def test_order_id_exhausted_returns_honest_failure(client, contract_fixtures, monkeypatch):
+    """六次候选全撞:诚实 success False(_CartError 块外翻译),整体回滚
+    零落单,绝不 500 半截写入。"""
+    from gateway_py import merchant_domain
+
+    await _seed_catalog()
+    await _seed_existing_order("AURORA-ORD-2026-4242")
+    try:
+
+        class _Always:
+            def randint(self, a: int, b: int) -> int:
+                return 4242
+
+        monkeypatch.setattr(merchant_domain, "random", _Always())
+        res = await client.post(
+            "/api/store/orders",
+            json={"customerId": _UID, "items": [{"skuCode": _SKUCODE, "quantity": 1}]},
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["success"] is False
+        assert "订单号生成冲突" in body["message"]
+        # 整体回滚:仅剩预置的 4242 一行,库存未扣
+        async with merchant_engine().connect() as conn:
+            count = (
+                await conn.execute(
+                    text("SELECT count(*) FROM merchant_orders WHERE customer_id = :u").bindparams(u=_UID)
+                )
+            ).scalar()
+            stock = (
+                await conn.execute(text("SELECT stock FROM merchant_skus WHERE sku_code = :c").bindparams(c=_SKUCODE))
+            ).scalar()
+        assert count == 1
+        assert stock == 99
+    finally:
+        await _cleanup()

@@ -429,7 +429,6 @@ async def place_order(params: dict) -> dict:
         if sku["stock"] < quantity:
             return {"success": False, "message": f"库存不足：{sku['sku_title']} 当前剩余 {sku['stock']} 件"}
 
-        order_id = f"AURORA-ORD-2026-{random.randint(1000, 9999)}"
         pay_amount = float(sku["price"]) * quantity
         spec_summary = " / ".join(f"{k}:{v}" for k, v in (sku["spec_attributes"] or {}).items())
 
@@ -437,6 +436,7 @@ async def place_order(params: dict) -> dict:
     # success False —— 严禁在事务块内 return 造成半截写入被隐式提交
     try:
         async with merchant_engine().begin() as conn:
+            order_id = await _generate_order_id(conn)
             # 优惠引擎(20-D3):SAVEPOINT 隔离,失败按原价结算不毒化事务
             try:
                 promo = await _resolve_promotion(
@@ -675,6 +675,24 @@ class _CartError(Exception):
         self.message = message
 
 
+async def _generate_order_id(conn: Any) -> str:
+    """订单号生成:AURORA-ORD-2026-XXXX 随机段带唯一性查重重试(六次闸)。
+
+    裸 randint 在种子/存量订单面前是 ~0.5%/单的唯一键碰撞(种子占 9081-9106
+    等 40+ 段位,2026-10-02 夜审实弹:结算 500 duplicate key 9106)。须在写入
+    事务内调用 —— 查重与 INSERT 同连接,六次全撞抛 _CartError 走整体回滚,
+    语义与 engine 侧 mall_domain.create_order_from_cart 的生成闸对齐。
+    """
+    for _ in range(6):
+        candidate = f"AURORA-ORD-2026-{random.randint(1000, 9999)}"
+        exists = (
+            await conn.execute(text("SELECT 1 FROM merchant_orders WHERE order_id = :o").bindparams(o=candidate))
+        ).scalar()
+        if not exists:
+            return candidate
+    raise _CartError("订单号生成冲突，请稍后重试。")
+
+
 @dataclass(frozen=True)
 class PromoPart:
     """单笔优惠(活动或券)的结算切片。"""
@@ -778,12 +796,12 @@ async def create_order_from_cart(
         return {"success": False, "message": "结算购物车条目不能为空"}
     await ensure_merchant_tables()
 
-    order_id = f"AURORA-ORD-2026-{random.randint(1000, 9999)}"
     items_to_insert: list[dict] = []
     total_amount = 0.0
 
     try:
         async with merchant_engine().begin() as conn:
+            order_id = await _generate_order_id(conn)
             # 逐条目单查的 N+1 根治(2026-09-26 夜审 ③#9):一次锁定全部涉及 SKU,
             # 再按购物车条目序做累计库存校验 —— 同码多条目语义与原逐条 UPDATE 等价
             sku_rows = (
