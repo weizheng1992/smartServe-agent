@@ -31,7 +31,9 @@ class _FakeRedis:
         if self.fail:
             raise RuntimeError("redis down")
         self.set_calls.append(key)
-        return None if self.hold else "OK"
+        # redis-py 真实语义(bool_ok 回调):成功 True / 被持 None —— 初版桩返回
+        # 字符串 "OK" 与真客户端漂移,正是「成功被当成锁被持」事故的盲区根源
+        return None if self.hold else True
 
     async def delete(self, key):
         self.deleted.append(key)
@@ -58,6 +60,18 @@ def test_setnx_lock_held_returns_409_without_local_fallback(monkeypatch):
     assert out["statusCode"] == 409 and "请勿重复提交" in out["error"]
     assert gk._local_locks == set(), "「锁被持」不得落内存兜底"
     assert fake.deleted == []
+
+
+def test_setnx_acquired_proceeds_past_lock_gate(pg_factory, monkeypatch):
+    """SETNX 成功(真客户端 bool_ok 返回 True)→ 必须过闸进工单查询(查无 404),
+    严禁误判「锁被持」409 —— 夜审初版 `str(result).upper()=="OK"` 对真客户端
+    恒假,每一次审批动作都 409,HITL 全断(2026-10-02 实测收口)。"""
+    fake = _FakeRedis()
+    _patch_client(monkeypatch, fake)
+    out = asyncio.run(gk.ApprovalGatekeeper.process_approval_action(_approval_request(str(uuid.uuid4()))))
+    assert out["statusCode"] == 404, f"应穿过锁闸到工单查询: {out}"
+    assert fake.set_calls and gk._local_locks == set()
+    assert fake.deleted, "持锁方 finally 必释放 Redis 锁"
 
 
 def test_redis_unavailable_falls_back_and_releases(pg_factory, monkeypatch):

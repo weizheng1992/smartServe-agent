@@ -699,7 +699,11 @@ class ApprovalGatekeeper:
             try:
                 result = await client.set(lock_key, "locked", px=5000, nx=True)
                 redis_answered = True
-                lock_acquired = result is not None and str(result).upper() == "OK"
+                # redis-py SET NX 经 bool_ok 回调成功返回 Python True / 被持返回
+                # None,不是字符串 "OK" —— `str(result).upper()=="OK"` 对真客户端
+                # 恒假,每一次审批动作都 409(2026-10-02 实测钉死;契约桩已同步
+                # True 语义,兼容字符串 "OK" 仅防手写桩漂移)。
+                lock_acquired = result is True or result == "OK"
             except Exception as err:
                 print(f"[ApprovalGatekeeper Lock] Redis SETNX failed, falling back to memory lock: {err}")
 
