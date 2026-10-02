@@ -594,10 +594,10 @@ async def staff_update(staff_id: str, request: Request):
 @router.get("/api/admin/analytics/customers")
 async def customers_list(request: Request):
     await _ctx(request)
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
     from sqlalchemy import text as _text
 
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         rows = (
             await conn.execute(_text(
                 "SELECT c.customer_id, c.name, c.phone, COALESCE(c.email, '') AS email, "
@@ -617,10 +617,10 @@ async def customers_list(request: Request):
 async def customer_coupons(customer_id: str, request: Request):
     """客户关联优惠券(user_id 与商户客户档案同源;含已使用)。"""
     await _ctx(request)
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
     from sqlalchemy import text as _text
 
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         rows = (
             await conn.execute(_text(
                 "SELECT uc.id::text AS id, p.name, p.discount_value::float AS value, uc.status, "
@@ -644,10 +644,10 @@ async def customer_update(customer_id: str, request: Request):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可编辑客户"})
     body = await request.json()
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _text
 
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         result = await conn.execute(
             _text("UPDATE merchant_customers SET member_level = :lv, updated_at = NOW() WHERE customer_id = :cid")
             .bindparams(lv=str(body.get("memberLevel") or "VIP"), cid=customer_id)
@@ -703,10 +703,10 @@ def _spu_cols():
 @router.get("/api/admin/analytics/spus")
 async def spus_list(request: Request):
     await _ctx(request)
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         rows = (await conn.execute(_t(
             _spu_cols() + "GROUP BY s.id, s.spu_code, s.title, s.category, s.status ORDER BY s.title LIMIT 200"
         ))).mappings().all()
@@ -727,12 +727,12 @@ async def spus_create(request: Request):
         return JSONResponse(status_code=400, content={"success": False, "message": "title/category/price 必传"})
     import uuid as _u
 
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
     spu_id = str(_u.uuid4())
     code = f"SPU-{_u.uuid4().hex[:8].upper()}"
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         # asyncpg 严格类型:varchar 入 uuid 列必须显式 CAST(update/delete 同款写法);
         # main_image/sku_title/spec_attributes 为 NOT NULL,新建时落诚实默认值
         await conn.execute(_t(
@@ -753,10 +753,10 @@ async def spus_update(spu_id: str, request: Request):
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     body = await request.json()
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         if "status" in body:
             if body["status"] not in ("ON_SALE", "OFF_SALE"):
                 return JSONResponse(status_code=400, content={"success": False, "message": "status ∈ ON_SALE|OFF_SALE"})
@@ -781,10 +781,10 @@ async def spus_delete(spu_id: str, request: Request):
     ctx = await _ctx(request)
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         code = (await conn.execute(_t("SELECT spu_code FROM merchant_spus WHERE id = CAST(:id AS uuid)")
                                   .bindparams(id=spu_id))).scalar()
         if not code:
@@ -835,10 +835,10 @@ async def promotions_delete(promotion_id: str, request: Request):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可删除活动"})
     from engine_py.analytics import promotions as P
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         used = (await conn.execute(_t(
             "SELECT 1 FROM promotion_redemptions WHERE promotion_id = CAST(:id AS uuid) LIMIT 1"
         ).bindparams(id=promotion_id))).first()
@@ -864,11 +864,11 @@ async def customers_create(request: Request):
         return JSONResponse(status_code=400, content={"success": False, "message": "name/phone 必传"})
     import uuid as _u
 
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
     cid = f"CUST-{_u.uuid4().hex[:8].upper()}"
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         await conn.execute(_t(
             "INSERT INTO merchant_customers (customer_id, name, phone, member_level) "
             "VALUES (:cid, :n, :p, :lv)"
@@ -881,10 +881,10 @@ async def customers_delete(customer_id: str, request: Request):
     ctx = await _ctx(request)
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可删除客户"})
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         has_orders = (await conn.execute(_t(
             "SELECT 1 FROM merchant_orders WHERE customer_id = :c LIMIT 1").bindparams(c=customer_id))).first()
         if has_orders:
@@ -901,10 +901,10 @@ async def skus_stock_list(request: Request):
     """跨 SPU 的 SKU 库存总表(SKU 库存菜单独立视角;行内改价/改库存走
     既有 PATCH /skus/{id};低库存阈值口径与工作台一致,前端过滤)。"""
     await _ctx(request)
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         rows = (await conn.execute(_t(
             "SELECT k.id::text AS id, k.sku_code, k.sku_title, s.id::text AS spu_id, "
             "s.title AS spu_title, k.price::float AS price, k.stock, "
@@ -918,10 +918,10 @@ async def skus_stock_list(request: Request):
 @router.get("/api/admin/analytics/spus/{spu_id}/skus")
 async def skus_list(spu_id: str, request: Request):
     await _ctx(request)
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         rows = (await conn.execute(_t(
             "SELECT id::text, sku_code, sku_title, price::float AS price, stock, "
             "spec_attributes::text AS spec_attributes FROM merchant_skus "
@@ -941,12 +941,12 @@ async def skus_create(spu_id: str, request: Request):
         return JSONResponse(status_code=400, content={"success": False, "message": "price 必传"})
     import uuid as _u
 
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
     sku_code = f"SKU-{_u.uuid4().hex[:10].upper()}"
     spec = body.get("specAttributes") or {}
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         spu = (await conn.execute(_t("SELECT spu_code FROM merchant_spus WHERE id = CAST(:id AS uuid)")
                                   .bindparams(id=spu_id))).first()
         if not spu:
@@ -966,7 +966,7 @@ async def skus_update(sku_id: str, request: Request):
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     body = await request.json()
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
     sets, params = [], {"id": sku_id}
@@ -979,7 +979,7 @@ async def skus_update(sku_id: str, request: Request):
         params["skuTitle"] = str(body["skuTitle"])
     if not sets:
         return JSONResponse(status_code=400, content={"success": False, "message": "无可更新字段"})
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         await conn.execute(_t(f"UPDATE merchant_skus SET {', '.join(sets)} WHERE id = CAST(:id AS uuid)").bindparams(**params))
     return {"success": True, "id": sku_id}
 
@@ -989,10 +989,10 @@ async def skus_delete(sku_id: str, request: Request):
     ctx = await _ctx(request)
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
-    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         sold = (await conn.execute(_t(
             "SELECT 1 FROM merchant_order_items WHERE sku_code = "
             "(SELECT sku_code FROM merchant_skus WHERE id = CAST(:id AS uuid)) LIMIT 1"

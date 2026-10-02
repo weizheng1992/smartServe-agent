@@ -171,7 +171,8 @@ async def register(body: RegisterIn):
         display = body.displayName.strip() or email.split("@")[0]
         # 分层收口:商户库写入走 gateway 自己的引擎工厂(merchant_db),不再
         # 反向引用 engine 下划线私有 _merchant_writer_engine(两套池语义并存的
-        # 隐患,2026-09-26 夜审 ①#8)。
+        # 隐患,2026-09-26 夜审 ①#8)。确需 engine 侧商户库引擎的跨包消费一律走
+        # order_domain 公开访问器 merchant_reader/writer_engine(2026-10-02 修复F)。
         async with merchant_engine().begin() as conn:
             await conn.execute(
                 _t(

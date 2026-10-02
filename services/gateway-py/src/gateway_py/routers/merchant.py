@@ -968,9 +968,9 @@ async def spi_orders_action(request: Request):
 async def store_promotions():
     """在售活动列表(商城首页/商品页展示;仅 active 且未过期)。"""
     from engine_py.analytics.promotion_engine import fetch_active_promos
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
 
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         promos = await fetch_active_promos(conn)
     return {
         "success": True,
@@ -987,9 +987,9 @@ async def store_promotions():
 async def store_promo_price(productId: str = Query(...), price: float = Query(...)):
     """单商品促销价(划线价展示;无可用活动返回原价)。"""
     from engine_py.analytics.promotion_engine import promo_for_spu
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
 
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         promo = await promo_for_spu(conn, productId, price)
     if not promo:
         return {"success": True, "originalPrice": price, "promoPrice": price, "promoName": None}
@@ -1002,10 +1002,10 @@ async def store_promo_prices_batch(items: list[dict]):
     活动集整批一次拉取后内存打分 —— 不逐商品重查活动(此前 200 商品 =
     200 次活动全量 SELECT,2026-09-27 夜审 F3)。"""
     from engine_py.analytics.promotion_engine import promo_prices_batch
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
 
     sliced = items[:200]
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         bests = await promo_prices_batch(
             conn, [(str(i.get("productId")), float(i.get("price") or 0)) for i in sliced]
         )
@@ -1023,10 +1023,10 @@ async def store_promo_prices_batch(items: list[dict]):
 @merchant_promotions_router.get("/api/store/promotions/by-order")
 async def store_promo_by_order(orderId: str = Query(...)):
     """订单优惠关联(商城订单展示原价/优惠/实付)。"""
-    from engine_py.tools_registry.order_domain import _merchant_reader_engine
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
     from sqlalchemy import text as _t
 
-    async with _merchant_reader_engine().connect() as conn:
+    async with merchant_reader_engine().connect() as conn:
         row = (
             await conn.execute(_t(
                 "SELECT p.name AS promo_name, r.discount_amount AS discount, p.promo_type "

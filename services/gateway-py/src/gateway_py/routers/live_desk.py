@@ -191,7 +191,7 @@ async def live_desk_thread_context(thread_id: str, authorization: str | None = H
         profile_tenant = [f.fact for f in facts if f.scope == "tenant"][:_PROFILE_LIMIT]
 
         # merchant 库:弱关联直等试配 + 命中时档案/订单;未匹配如实空(不编造)
-        from engine_py.tools_registry.order_domain import _merchant_reader_engine
+        from engine_py.tools_registry.order_domain import merchant_reader_engine
         from sqlalchemy import text as _text
 
         from gateway_py.merchant_db import ensure_merchant_tables
@@ -200,7 +200,7 @@ async def live_desk_thread_context(thread_id: str, authorization: str | None = H
         customer = {"matched": False}
         recent_orders: list[dict] = []
         notes: list[dict] = []
-        async with _merchant_reader_engine().connect() as conn:
+        async with merchant_reader_engine().connect() as conn:
             if user_id:
                 row = (
                     await conn.execute(
@@ -303,14 +303,14 @@ async def live_desk_note_create(thread_id: str, body: NoteCreate, authorization:
         tenant = staff.business_id
         await _load_thread_scoped(thread_id, tenant)
 
-        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from engine_py.tools_registry.order_domain import merchant_writer_engine
         from sqlalchemy import text as _text
 
         from gateway_py.merchant_db import ensure_merchant_tables
 
         await ensure_merchant_tables()
         # 写穿透走 writer(reader 带会话级 READ ONLY,INSERT 必被只读事务拒绝)
-        async with _merchant_writer_engine().begin() as conn:
+        async with merchant_writer_engine().begin() as conn:
             row = (
                 await conn.execute(
                     _text(
@@ -349,13 +349,13 @@ async def live_desk_note_delete(thread_id: str, note_id: str, authorization: str
         except ValueError:
             return {"success": True}  # 非法 uuid 当查无,幂等不炸
 
-        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from engine_py.tools_registry.order_domain import merchant_writer_engine
         from sqlalchemy import text as _text
 
         from gateway_py.merchant_db import ensure_merchant_tables
 
         await ensure_merchant_tables()
-        async with _merchant_writer_engine().begin() as conn:
+        async with merchant_writer_engine().begin() as conn:
             await conn.execute(
                 _text("DELETE FROM thread_notes WHERE id = CAST(:nid AS uuid) AND thread_id = :tid AND business_id = :bid"),
                 {"nid": note_uuid, "tid": thread_id, "bid": tenant},

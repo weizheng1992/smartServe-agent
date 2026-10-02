@@ -104,6 +104,24 @@ def _merchant_writer_engine():
     return create_async_engine(_merchant_engine_url(), poolclass=NullPool)
 
 
+# ---------------------------------------------------------------------------
+# 公开访问器(2026-10-02 夜审修复F):gateway analytics/merchant/live_desk
+# 的商户库读写此前逐处直触上方下划线私有面(45 处跨包引用)。语义与私有位
+# 完全一致 —— reader 的只读纵深(READ ONLY + 3s 超时)是刻意的,跨包消费
+# 严禁图省事换 merchant_db.merchant_engine() 的 QueuePool 读写位。
+# ---------------------------------------------------------------------------
+
+
+def merchant_reader_engine():
+    """商户库只读引擎公开访问器;语义与缓存行为见 _merchant_reader_engine。"""
+    return _merchant_reader_engine()
+
+
+def merchant_writer_engine():
+    """商户库写穿透引擎公开访问器;语义与缓存行为见 _merchant_writer_engine。"""
+    return _merchant_writer_engine()
+
+
 async def merchant_order_snapshot(order_id: str) -> dict | None:
     """商户镜像库单行快照(共享查询门面,2026-09-14 code-review 消重):
     output_guard 宣称核验与 gatekeeper 退款金额回照此前各写一份裸 SQL 且
