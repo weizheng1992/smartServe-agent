@@ -504,7 +504,9 @@ class TestSocketIoEdgeStates:
             sent = False
             timeout = httpx.Timeout(10.0, read=20.0)
             async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client, client.stream(
-                "GET", f"/api/store/chat/stream?threadId={rt_thread}"
+                # businessId 自报(2026-10-02 属主闸,29beb83):流订阅必须携带
+                # 商户身份,缺省回落 aurora 与本线程属主 nike 不符即 403
+                "GET", f"/api/store/chat/stream?threadId={rt_thread}&businessId=nike"
             ) as res:
                 assert res.status_code == 200
                 # 单循环双闸(httpx 流只能消费一次):先等到 connected 帧(订阅
