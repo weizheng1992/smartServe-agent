@@ -54,9 +54,9 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
                             ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │              API 网关 (services/gateway-py,Python/FastAPI)             │
-│  - 121 条注册端点(39 条 TS 冻结基线 + 后续扩充,均带 pytest 契约):   │
-│    analytics 39 / merchant 29 / admin 23 / crud 14 / chat 8 /        │
-│    auth 4 / spi 3 + /api/health;领域覆盖:                            │
+│  - 127 条注册端点(39 条 TS 冻结基线 + 后续扩充,均带 pytest 契约):   │
+│    analytics 39 / merchant 30 / admin 23 / crud 14 / chat 8 /        │
+│    auth 4 / spi 3 / live_desk 5 + /api/health;领域覆盖:              │
 │    tenants、skills、approvals、聊天 SSE、conversations、RAG 文档、    │
 │    personas、guardrails、billing、logs、商户 store/admin、            │
 │    数据分析 /api/admin/analytics/*(ask SSE)、SPI v1(HMAC 签名)       │
@@ -114,7 +114,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 5. **零依赖共享 UI**:
    - 四个前端(`apps/web`、`apps/admin`、`apps/merchant`、`apps/merchant-admin`)统一使用 workspace 包 `ui`(`packages/ui`,零依赖原子组件)+ Tailwind CSS,不得引入重型外部组件框架。
 6. **契约冻结**:
-   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面)。当前注册端点共 **121 条**:analytics 39 / merchant 29 / admin 23 / crud 14 / chat 8 / auth 4 / spi 3 + `/api/health`,其中 analytics 39 条由 `tests/test_analytics_routes.py`(71 例)专册钉死。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
+   - 39 条 TS 基线 HTTP 路由、SSE 线格式与 socket.io 事件冻结;冻结集合外新增路由须同批补 pytest 契约测试(早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面)。当前注册端点共 **127 条**:analytics 39 / merchant 30 / admin 23 / crud 14 / chat 8 / auth 4 / spi 3 / live_desk 5 + `/api/health`,其中 analytics 39 条由 `tests/test_analytics_routes.py`(71 例)专册钉死。pytest 契约套件(`services/gateway-py/tests/`)是事实标准。
 
 ---
 

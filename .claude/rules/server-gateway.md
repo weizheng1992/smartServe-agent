@@ -5,7 +5,7 @@ paths: ["services/gateway-py/**/*"]
 
 # 服务端多租户网关与实时协同规范 (Server Gateway)
 
-本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送、商户数据分析面与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面；pytest 契约测试为唯一真实来源）。当前注册端点共 **121 条**：analytics 39 / merchant 29 / admin 23 / crud 14 / chat 8 / auth 4 / spi 3 + `/api/health`。
+本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送、商户数据分析面与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面；pytest 契约测试为唯一真实来源）。当前注册端点共 **127 条**：analytics 39 / merchant 30 / admin 23 / crud 14 / chat 8 / auth 4 / spi 3 / live_desk 5 + `/api/health`。
 
 ## 1. 核心模块与架构规范
 
