@@ -37,13 +37,20 @@ _SPI_GET_PATHS = (
 )
 
 
-def _signed_headers(method: str, path: str, secret: str = _SPI_SECRET, nonce: str | None = None, ts: str | None = None) -> dict:
+def _signed_headers(
+    method: str,
+    path: str,
+    secret: str = _SPI_SECRET,
+    nonce: str | None = None,
+    ts: str | None = None,
+    body: str = "",
+) -> dict:
     from gateway_py.hmac_signer import sign
 
     ts = ts or str(int(time.time() * 1000))
     nonce = nonce or uuid.uuid4().hex
     return {
-        "x-signature": sign(secret, method, path, ts, nonce, ""),
+        "x-signature": sign(secret, method, path, ts, nonce, body),
         "x-timestamp": ts,
         "x-nonce": nonce,
     }
@@ -247,3 +254,62 @@ class TestSpiEscalationTenantHeader:
             json={},
         )
         assert res.status_code == 404
+
+
+class TestSpiOrdersActionContract:
+    """POST /spi/v1/orders/action(2026-10-02 夜审测试补强):唯一一条 POST 形
+    SPI 端点,签名覆盖请求体(与四条 GET 空 body 签名不同源),且直通
+    execute_order_action 业务动作 —— 未签名/过期戳/nonce 重放/缺参/阳性穿透
+    五形态在此钉死。"""
+
+    _PATH = "/spi/v1/orders/action"
+
+    async def _post(self, client, monkeypatch, *, body: str, nonce: str | None = None, ts: str | None = None, secret: str = _SPI_SECRET, sign_body: str | None = None):
+        monkeypatch.setenv("MERCHANT_API_SECRET", _SPI_SECRET)
+        headers = _signed_headers("POST", self._PATH, secret=secret, nonce=nonce, ts=ts, body=body if sign_body is None else sign_body)
+        return await client.post(self._PATH, content=body, headers=headers)
+
+    async def test_unsigned_rejected_401(self, client, monkeypatch):
+        monkeypatch.setenv("MERCHANT_API_SECRET", _SPI_SECRET)
+        res = await client.post(self._PATH, json={"orderId": "X", "actionType": "cancel"})
+        assert res.status_code == 401
+        assert "signature" in res.json()["message"]
+
+    async def test_body_tamper_rejected_401(self, client, monkeypatch):
+        """签名按原体计算、请求体被换 → 401(POST 形签名必须覆盖 body)。"""
+        body = '{"orderId":"AURORA-ORD-2026-9081","actionType":"cancel"}'
+        res = await self._post(client, monkeypatch, body=body, sign_body='{"orderId":"X","actionType":"refund"}')
+        assert res.status_code == 401
+
+    async def test_stale_timestamp_rejected_401(self, client, monkeypatch):
+        body = '{"orderId":"X","actionType":"cancel"}'
+        res = await self._post(client, monkeypatch, body=body, ts=str(int(time.time() * 1000) - 301_000))
+        assert res.status_code == 401
+        assert "expired" in res.json()["message"]
+
+    async def test_replayed_nonce_rejected_401(self, client, monkeypatch):
+        body = '{"orderId":"REPLAY-ACTION-1","actionType":"cancel"}'
+        first = await self._post(client, monkeypatch, body=body, nonce="replay-action-nonce-0001")
+        assert first.status_code == 200, "首刷过验签进业务(查无此单 success False 可)"
+        second = await self._post(client, monkeypatch, body=body, nonce="replay-action-nonce-0001")
+        assert second.status_code == 401
+        assert "Replayed" in second.json()["message"]
+
+    async def test_missing_order_id_or_action_type_400(self, client, monkeypatch):
+        monkeypatch.setenv("MERCHANT_API_SECRET", _SPI_SECRET)
+        for payload in ('{"actionType":"cancel"}', '{"orderId":"X"}'):
+            headers = _signed_headers("POST", self._PATH, body=payload)
+            res = await client.post(self._PATH, content=payload, headers=headers)
+            assert res.status_code == 400
+            assert "orderId and actionType" in res.json()["message"]
+
+    async def test_valid_signature_reaches_business_logic(self, client, monkeypatch):
+        """阳性穿透:合法签名进业务层 —— 查无此单走 execute_order_action 的
+        诚实 success False(200 信封),而非验签层挡回。"""
+        body = '{"orderId":"SPI-ACTION-NO-SUCH-ORDER","actionType":"cancel"}'
+        res = await self._post(client, monkeypatch, body=body)
+        assert res.status_code == 200
+        payload = res.json()
+        assert payload["success"] is False
+        assert payload["data"]["message"] == "订单 [SPI-ACTION-NO-SUCH-ORDER] 不存在"
+        assert "timestamp" in payload
