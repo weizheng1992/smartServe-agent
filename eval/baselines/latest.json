@@ -1,6 +1,6 @@
 {
-  "pinnedAt": "2026-10-02T14:32:51.454Z",
-  "gitSha": "29beb834a346f8379fa64c94619bbb7e36bfb286",
+  "pinnedAt": "2026-10-03T02:24:49.002Z",
+  "gitSha": "798fdc611b3c002530c76fec9146f5622fe587af",
   "suites": {
     "unified": {
       "total": 58,
@@ -13,7 +13,7 @@
           "count": 58,
           "pass": 58,
           "fail": 0,
-          "meanScore": 0.9908620689655172
+          "meanScore": 0.9920689655172414
         },
         "metric_disambiguation.py:get_assert": {
           "count": 5,
@@ -97,7 +97,7 @@
           "count": 1,
           "pass": 1,
           "fail": 0,
-          "meanScore": 0
+          "meanScore": 1
         }
       }
     },
