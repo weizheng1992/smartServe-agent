@@ -11,8 +11,6 @@ import asyncio
 import re
 from typing import Any
 
-from sqlalchemy import text
-
 from ..badcase.intent_signals import record_intent_conflict_if_any
 from ..db import IntentLog, LowConfidenceLog, get_session
 from ..event_bus import emit_job_result, emit_status
@@ -22,6 +20,7 @@ from ..skills import is_action_query  # noqa: F401 (测试 patch 面)
 from ..skills.contract import SkillContext
 from ..tenant import sanitize_tenant_response, tenant_of_state
 from ..vision import analyze_images  # noqa: F401 (测试 patch 面)
+from . import labeling
 from .consult_fast_path import (  # noqa: F401 (测试 patch 面)
     is_consult_query,
     is_consult_shaped_marker,
@@ -591,32 +590,9 @@ class IntentTriageEngine:
 
     @staticmethod
     async def backfill_clarify_outcome(thread_id: str, winner: str | None) -> int:
-        """把澄清后首轮终局 winner 写回该线程最新待回填的澄清行。
-
-        只回填 actual_outcome IS NULL 且 method='confidence_cascade' 的最近
-        一行(多轮连续澄清只认最后一次);30 分钟窗口 —— 用户隔天回来的
-        无关消息不该给昨天的澄清贴标签。静默降级,绝不阻断会话;返回影响
-        行数(0=无待回填/失败)。
-        """
-        if not thread_id or not winner:
-            return 0
-        try:
-            async with get_session() as session:
-                result = await session.execute(
-                    text(
-                        "UPDATE intent_logs SET actual_outcome = :w "
-                        "WHERE id = (SELECT id FROM intent_logs "
-                        "  WHERE thread_id = :t AND method = 'confidence_cascade' "
-                        "    AND actual_outcome IS NULL "
-                        "    AND created_at >= NOW() - INTERVAL '30 minutes' "
-                        "  ORDER BY created_at DESC LIMIT 1)"
-                    ).bindparams(t=thread_id, w=winner)
-                )
-                await session.commit()
-                return result.rowcount or 0
-        except Exception as err:
-            print(f"[Triage] 澄清标签回填失败,已跳过 (threadId={thread_id}): {err}")
-            return 0
+        """通道①薄委托 —— 实现见 ``triage/labeling.py``(标注水龙头:三通道
+        资格谓词与回写 SQL 唯一实现,互斥契约由 tests/test_outcome_labeling.py 钉死)。"""
+        return await labeling.backfill_clarify_outcome(thread_id, winner)
 
     @staticmethod
     async def log_low_confidence_to_db(thread_id: str, input_text: str, candidates: Any) -> None:

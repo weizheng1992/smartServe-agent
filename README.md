@@ -90,7 +90,7 @@ data agent: 「各活动核销订单数」「优惠总额」→ 与造数逐笔�
     回滚 = 移除环境变量
 ```
 
-- 数据水龙头：`scripts/export_intent_data.py`（intent_logs/badcase 持续积累，真实库已 1966+ 行）
+- 数据水龙头：`services/engine-py/src/engine_py/intent_flywheel/export_intent_data.py`（`python -m engine_py.intent_flywheel.export_intent_data`；intent_logs/badcase 持续积累，真实库已 1966+ 行）
 - 完整文档：[docs/training/metric-head-training.md](docs/training/metric-head-training.md)（数据源/格式/库/参数/部署全链路）
 - 训练脚手架：`services/engine-py/scripts/training/`（README 含复现三命令）
 
@@ -137,7 +137,7 @@ sft_dataset(词面 × 时间窗 × 品类 × limit 程序化组合, 4478 条, �
 │   │       ├── analytics.py # /api/admin/analytics/*(39 条: ask SSE/RBAC 菜单角色员工/报告/活动/客户/商品)
 │   │       └── auth.py      # login/logout/me/register(注册联动客户档案)
 │   └── engine-py/           # LangGraph 决策引擎 (942 pytest)
-│       └── src/engine_py/
+│       ├── src/engine_py/
 │           ├── analytics/   # ⭐ data agent 域(独立轻管线,共 20 文件)
 │           │   ├── engine.py            # MetricQueryEngine(resolve/compile/execute)
 │           │   ├── sql_guard.py         # sqlglot 四层安全闸
@@ -155,9 +155,9 @@ sft_dataset(词面 × 时间窗 × 品类 × limit 程序化组合, 4478 条, �
 │           ├── skills/fallback_dispatcher.py  # 客服侧 LLM 不可达确定性兜底(优惠/券/订单状态)
 │           ├── skills/promotion_skill.py      # 客服对话优惠问答技能
 │           ├── triage/intent_classifier.py    # 意图分类头缝①(锚点打分可替换接口)
-│           ├── scripts/training/            # 训练脚手架(README 全文档)
-│           ├── scripts/export_intent_data.py  # 数据水龙头 CLI
-│           └── training_runs/metric_head/   # 训练产物(head.pt+曲线)
+│           └── intent_flywheel/             # ⭐ 意图数据飞轮 CLI(python -m engine_py.intent_flywheel.* 七件)
+│       ├── scripts/training/               # 训练脚手架(README 全文档;二步收编)
+│       └── training_runs/metric_head/      # 训练产物(head.pt+曲线)
 │
 ├── packages/{types,ui}/     # 冻结契约类型 + 共享 UI 组件库
 ├── eval/                    # promptfoo 评测(意图/多意图/数据Mapping + providers)
@@ -167,7 +167,7 @@ sft_dataset(词面 × 时间窗 × 品类 × limit 程序化组合, 4478 条, �
 │   ├── adr/0005-*.md                    # data agent LLM 意图(并行会话)
 │   ├── training/metric-head-training.md # 小模型训练完整文档
 │   └── wayfinder/mall-data-agent-split/ # 规划图谱(20 决策票全档)
-└── scripts/                 # 数据水龙头等工具脚本
+└── scripts/                 # 仓库级工具脚本(意图矩阵评测/调试)
 ```
 
 ---

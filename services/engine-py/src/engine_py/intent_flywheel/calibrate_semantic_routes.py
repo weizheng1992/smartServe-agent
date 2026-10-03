@@ -1,7 +1,7 @@
 """语义路由阈值标定脚本(services/engine-py 下运行):
 
-    uv run python scripts/calibrate_semantic_routes.py --cases evals/intent_cases.jsonl
-    uv run python scripts/calibrate_semantic_routes.py --cases my_devset.jsonl --show-distribution
+    uv run python -m engine_py.intent_flywheel.calibrate_semantic_routes --cases evals/intent_cases.jsonl
+    uv run python -m engine_py.intent_flywheel.calibrate_semantic_routes --cases my_devset.jsonl --show-distribution
 
 输入 JSONL 每行 {"text": "...", "intent": "promotion_query"}(text 键兼容
 question)。对每条样本算与全部路由锚点的余弦,按意图聚合得分分布,遍历
@@ -15,11 +15,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from engine_py.triage.semantic_cache import (
     SemanticVectorCache,
@@ -29,6 +24,8 @@ from engine_py.triage.semantic_routes import (
     SEMANTIC_ROUTES,
     SemanticIntentRouter,
 )
+
+from .common import load_jsonl
 
 CANDIDATE_THRESHOLDS = [round(0.70 + 0.01 * i, 2) for i in range(26)]  # 0.70~0.95
 
@@ -40,16 +37,12 @@ async def main() -> int:
     args = parser.parse_args()
 
     cases: list[dict] = []
-    with open(args.cases, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            item = json.loads(line)
-            text_value = item.get("text") or item.get("question") or ""
-            intent = item.get("intent")
-            if text_value and intent in SEMANTIC_ROUTES:
-                cases.append({"text": text_value, "intent": intent})
+    for item in load_jsonl(args.cases):
+        # text 键兼容 question(run_intent_eval 评测集用 question)
+        text_value = item.get("text") or item.get("question") or ""
+        intent = item.get("intent")
+        if text_value and intent in SEMANTIC_ROUTES:
+            cases.append({"text": text_value, "intent": intent})
     if not cases:
         print("没有可标定样本(需命中 SEMANTIC_ROUTES 中的意图)")
         return 1

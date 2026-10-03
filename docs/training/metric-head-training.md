@@ -40,7 +40,7 @@
 
 ### 2.2 持续供给（生产流量，水龙头自动积累）
 
-- 采集 CLI：`scripts/export_intent_data.py --source intent|low_confidence|badcase`（JSONL，同格式）
+- 采集 CLI：`python -m engine_py.intent_flywheel.export_intent_data --source intent|low_confidence|badcase`（JSONL，同格式）
 - 来源表：engine 库 `intent_logs`（每次意图判定落一行）/ `low_confidence_logs`（低置信子集）/ `badcase_candidates`（冲突信号，含 thread_id 可回联原文）
 - 实测积累：intent_logs 1966 行（约两周）、badcase 547 行；去重后唯一句增速约 5–10/天
 - `intent_logs` 表本身无 TTL，数据持续保留

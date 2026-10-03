@@ -1,6 +1,6 @@
 """意图解析评测跑分器(services/engine-py 下运行):
 
-    AI_INTENT_L3=off uv run python scripts/run_intent_eval.py [--show-fails]
+    AI_INTENT_L3=off uv run python -m engine_py.intent_flywheel.run_intent_eval [--show-fails]
 
 - 确定性评测:L3 关闭,只考察 L0 词面 / L2 范例 / 语义规则的解析质量;
 - 主指标 = metric 路由准确率(≥95% 才算达标,否则退出码 1);
@@ -18,14 +18,11 @@ import asyncio
 import json
 import os
 import sys
-from pathlib import Path
-
-# L3 关闭:评测确定性层(词面/范例/规则),不烧 token、不随模型漂移
-os.environ.setdefault("AI_INTENT_L3", "off")
 
 from engine_py.analytics.engine import MetricQueryEngine, UnsupportedQuery
 
-CASES_PATH = Path(__file__).resolve().parent.parent / "evals" / "intent_cases.jsonl"
+from .common import EVAL_CASES_PATH, load_jsonl
+
 PASS_THRESHOLD = 0.95
 
 
@@ -61,7 +58,7 @@ async def eval_case(case: dict, engine: MetricQueryEngine) -> dict:
 
 
 async def main_async(show_fails: bool) -> int:
-    cases = [json.loads(line) for line in CASES_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+    cases = load_jsonl(EVAL_CASES_PATH)
     l3_cases = [c for c in cases if c.get("layer") == "L3"]
     cases = [c for c in cases if c.get("layer") != "L3"]
     engine = MetricQueryEngine(session_ctx={"business_id": "aurora", "role": "finance_owner"})
@@ -100,6 +97,9 @@ async def main_async(show_fails: bool) -> int:
 
 
 def main() -> None:
+    # L3 关闭:评测确定性层(词面/范例/规则),不烧 token、不随模型漂移;
+    # 放 main() 而非模块层 —— 读取点 llm_intent 惰性查 env,import 本模块零环境副作用
+    os.environ.setdefault("AI_INTENT_L3", "off")
     parser = argparse.ArgumentParser()
     parser.add_argument("--show-fails", action="store_true", help="JSON 形式输出失败明细")
     args = parser.parse_args()

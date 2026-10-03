@@ -22,31 +22,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 from pathlib import Path
 
 from sqlalchemy import desc, select
 
 from ..db import BadcaseCandidate, Message, PendingApproval, get_session
+from ..intent_flywheel.common import load_env_file
 from .digest import run_badcase_digest
 from .pool import SOURCE_PRIORS
 from .redaction import redact_text
 
 # draft 允许的状态:confirmed(评审确认)后才能起草;converted 后禁止重复起草
 _DRAFT_ALLOWED_STATUS = ("candidate", "confirmed")
-
-
-def _load_env_file() -> None:
-    """轻量 .env 加载(项目无 python-dotenv 依赖,不引入):仅 setdefault 不覆盖已有环境变量。"""
-    # parents[3] = services/engine-py,parents[5] = 仓库根
-    for env_path in (Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env", Path(__file__).resolve().parents[5] / ".env"):
-        if env_path.is_file():
-            for line in env_path.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, value = line.partition("=")
-                    os.environ.setdefault(key.strip(), value.strip().strip("'\""))
-            break
 
 
 def _short_id(c: BadcaseCandidate) -> str:
@@ -235,7 +222,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    _load_env_file()
+    load_env_file()
     args = _build_parser().parse_args(argv)
     asyncio.run(args.func(args))
 

@@ -7,9 +7,9 @@
 
 用法(services/engine-py 下)::
 
-    uv run python scripts/review_badcase.py list [--limit 20]
-    uv run python scripts/review_badcase.py label <badcase_id> --intent promotion_query
-    uv run python scripts/review_badcase.py dismiss <badcase_id>
+    uv run python -m engine_py.intent_flywheel.review_badcase list [--limit 20]
+    uv run python -m engine_py.intent_flywheel.review_badcase label <badcase_id> --intent promotion_query
+    uv run python -m engine_py.intent_flywheel.review_badcase dismiss <badcase_id>
 
 label 语义:该坏例对应线程的「用户真实意图」是 --intent;找不到可回写的
 intent_logs 行时仍标记坏例为 labeled 并在 stderr 提示(标签可能已被通道①
@@ -21,15 +21,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import sys
 import uuid
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from sqlalchemy import select, text
 
 from engine_py.db import BadcaseCandidate, get_session
+from engine_py.triage import labeling
 
 STATUS_LABELED = "labeled"
 STATUS_DISMISSED = "dismissed"
@@ -78,7 +75,8 @@ async def list_pending(limit: int = 20) -> list[dict]:
 
 async def label_badcase(badcase_id: str, intent: str) -> dict:
     """人审定性:回写线程最近一条待回填 intent_logs 的 actual_outcome,
-    坏例置 labeled。返回 {labeled_badcase, backfilled_rows, thread_id}。"""
+    坏例置 labeled。返回 {labeled_badcase, backfilled_rows, thread_id}。
+    回写走标注水龙头通道②核(不限 method、与坏例状态同事务)。"""
     async with get_session() as session:
         row = (
             await session.execute(
@@ -90,19 +88,13 @@ async def label_badcase(badcase_id: str, intent: str) -> dict:
         if row.status != "candidate":
             return {"error": f"坏例已审结(status={row.status}),拒绝重复定性"}
         thread_id = _thread_ref(row.conversation_ref)
-        result = await session.execute(
-            text(
-                "UPDATE intent_logs SET actual_outcome = :w "
-                "WHERE id = (SELECT id FROM intent_logs WHERE thread_id = :t "
-                "  AND actual_outcome IS NULL ORDER BY created_at DESC LIMIT 1)"
-            ).bindparams(t=thread_id, w=intent)
-        )
+        backfilled = await labeling.backfill_pending_outcome(session, thread_id, intent)
         row.status = STATUS_LABELED
         row.note = (row.note or "") + f" | 人审定性: {intent}"
         await session.commit()
         return {
             "labeled_badcase": badcase_id,
-            "backfilled_rows": result.rowcount or 0,
+            "backfilled_rows": backfilled,
             "thread_id": thread_id,
         }
 

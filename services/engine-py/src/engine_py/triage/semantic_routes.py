@@ -6,7 +6,7 @@ _ROUTER_MODE=shadow,默认)下只产 proposals 不接管路由 —— 误路由�
 池 intent_conflict 增速验证后,再切 takeover 由 skill_fast_track 直达。
 设计文档:docs/intent-routing-upgrade-plan.md。
 
-阈值纪律:初始值人工给定,标定脚本(scripts/calibrate_semantic_routes.py)
+阈值纪律:初始值人工给定,标定脚本(engine_py.intent_flywheel.calibrate_semantic_routes)
 用 nightly 矩阵/评测集问句按最优 F1 重算 —— 没有跑分,调参是盲调。
 """
 

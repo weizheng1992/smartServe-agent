@@ -9,7 +9,7 @@
 - error       : 执行异常(需排查,非语义问题)。
 
 用法(services/engine-py 下):
-  uv run python scripts/backhaul_unanswered.py --business aurora [--role finance_owner] [--limit 50]
+  uv run python -m engine_py.intent_flywheel.backhaul_unanswered --business aurora [--role finance_owner] [--limit 50]
 """
 
 from __future__ import annotations

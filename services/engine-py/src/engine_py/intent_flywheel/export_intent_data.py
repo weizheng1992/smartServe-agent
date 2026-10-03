@@ -17,9 +17,9 @@
 
 用法(在 ``services/engine-py`` 下执行)::
 
-    uv run python scripts/export_intent_data.py --source intent \
+    uv run python -m engine_py.intent_flywheel.export_intent_data --source intent \
         --since 2026-09-01 --until 2026-09-17T23:59:59 --out /tmp/intent.jsonl
-    uv run python scripts/export_intent_data.py --source badcase            # stdout
+    uv run python -m engine_py.intent_flywheel.export_intent_data --source badcase  # stdout
 
 ``--since/--until`` 接受 ISO 日期或日期时间(均含端点);带时区视为 UTC 后
 取整为 naive(表内 created_at 为 DB 服务器 now() 的 naive 时间)。缺省全量,
@@ -30,16 +30,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
-import os
 import sys
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 
 from engine_py.db import BadcaseCandidate, IntentLog, LowConfidenceLog, get_session
+
+from .common import load_env_file, write_jsonl
 
 SOURCE_INTENT = "intent"
 SOURCE_LOW_CONFIDENCE = "low_confidence"
@@ -142,32 +141,6 @@ async def collect_records(
     return [row_to_record(source, row) for row in rows]
 
 
-def write_jsonl(records: list[dict], out: str | None) -> None:
-    """写 JSONL:``out`` 为空或 '-' 打到 stdout,否则写文件(父目录自动创建)。"""
-    lines = [json.dumps(record, ensure_ascii=False, default=str) for record in records]
-    if out and out != "-":
-        path = Path(out)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
-    else:
-        for line in lines:
-            print(line)
-
-
-def _load_env_file() -> None:
-    """轻量 .env 加载(与 badcase.cli 同策略:setdefault 不覆盖已有环境变量)。"""
-    # parents[1] = services/engine-py,parents[3] = 仓库根
-    here = Path(__file__).resolve()
-    for env_path in (Path.cwd() / ".env", here.parents[1] / ".env", here.parents[3] / ".env"):
-        if env_path.is_file():
-            for line in env_path.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, value = line.partition("=")
-                    os.environ.setdefault(key.strip(), value.strip().strip("'\""))
-            break
-
-
 async def _run(args: argparse.Namespace) -> int:
     since = parse_ts(args.since, "since") if args.since else None
     until = parse_ts(args.until, "until") if args.until else None
@@ -181,7 +154,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="export_intent_data.py",
+        prog="python -m engine_py.intent_flywheel.export_intent_data",
         description="意图数据水龙头:按时间窗导出 intent_logs / low_confidence_logs / badcase_candidates 为 JSONL",
     )
     parser.add_argument("--source", required=True, choices=SOURCES, help="导出哪张表")
@@ -192,7 +165,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    _load_env_file()
+    load_env_file()
     args = _build_parser().parse_args(argv)
     return asyncio.run(_run(args))
 

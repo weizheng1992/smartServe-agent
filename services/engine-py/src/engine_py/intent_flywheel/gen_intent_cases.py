@@ -1,4 +1,4 @@
-"""生成意图评测数据集(scripts/run_intent_eval.py 的输入)。
+"""生成意图评测数据集(engine_py.intent_flywheel.run_intent_eval 的输入)。
 
 来源三路:
 1. metric_registry 每指标的 sampleQueries(应答面,期望 = 对应指标);
@@ -9,10 +9,9 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from engine_py.tools_registry.metric_registry import METRIC_SEMANTIC_REGISTRY as metric_registry
+
+from .common import EVAL_CASES_PATH, write_jsonl
 
 CASES: list[dict] = []
 
@@ -102,14 +101,11 @@ CASES = list(dedup.values())
 for q in ["今天心情如何", "帮我算算公司估值", "今天天气怎么样"]:
     CASES.append({"question": q, "expect_unsupported": True, "source": "longtail"})
 
-OUT = Path(__file__).resolve().parent.parent / "evals" / "intent_cases.jsonl"
+OUT = EVAL_CASES_PATH
 
 
 def main() -> None:
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    with OUT.open("w", encoding="utf-8") as f:
-        for c in CASES:
-            f.write(json.dumps(c, ensure_ascii=False) + "\n")
+    write_jsonl(CASES, OUT)
     by_source = {}
     for c in CASES:
         by_source[c["source"]] = by_source.get(c["source"], 0) + 1

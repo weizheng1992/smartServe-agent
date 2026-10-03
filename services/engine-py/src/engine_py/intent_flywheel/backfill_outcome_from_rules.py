@@ -3,12 +3,13 @@
 对 actual_outcome 为空的历史 intent_logs 行,用 SlotExtractor 词面规则
 (L0,零 LLM,与 run_intent_eval 同纪律)复判:恰好一条规则高置信命中才
 写标签;多规则歧义/零命中/低置信跳过 —— 歧义句留给通道①(澄清自动
-回填)与通道②(人审 label),严禁硬贴。
+回填)与通道②(人审 label),严禁硬贴。资格谓词与回写走标注水龙头
+(triage/labeling.py,排除 confidence_cascade 的唯一事实点)。
 
 用法(services/engine-py 下)::
 
-    uv run python scripts/backfill_outcome_from_rules.py --dry-run     # 只看分布
-    uv run python scripts/backfill_outcome_from_rules.py --limit 2000  # 实际回填
+    uv run python -m engine_py.intent_flywheel.backfill_outcome_from_rules --dry-run     # 只看分布
+    uv run python -m engine_py.intent_flywheel.backfill_outcome_from_rules --limit 2000  # 实际回填
 
 安全:单规则才贴(歧义跳过);跳过行下次运行自然重试(仍 NULL);影
 响行数与分布打到 stdout。跑完接 run_intent_eval 语义不冲突 —— 本脚本
@@ -19,20 +20,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
 from collections import Counter
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
-from sqlalchemy import text
 
 from engine_py.db import get_session
+from engine_py.triage import labeling
 from engine_py.triage.slot_extractor import SlotExtractor
-
-# 澄清行是「判定层都拿不准」的句子,其标签走通道①(用户后续选择);
-# 在此复判等于给歧义句硬贴 —— 严禁。
-_EXCLUDED_METHODS = ("confidence_cascade",)
 
 
 async def main() -> int:
@@ -42,16 +34,7 @@ async def main() -> int:
     args = parser.parse_args()
 
     async with get_session() as session:
-        rows = (
-            await session.execute(
-                text(
-                    "SELECT id, input_text, method FROM intent_logs "
-                    "WHERE actual_outcome IS NULL AND COALESCE(input_text, '') <> '' "
-                    "AND (method IS NULL OR method <> ALL(:excluded)) "
-                    "ORDER BY created_at DESC LIMIT :limit"
-                ).bindparams(excluded=list(_EXCLUDED_METHODS), limit=args.limit)
-            )
-        ).all()
+        rows = await labeling.backfillable_rows(session, limit=args.limit)
 
     labeled: list[tuple[str, str]] = []  # (id, silver)
     skipped_multi = skipped_none = skipped_lowconf = 0
@@ -80,11 +63,7 @@ async def main() -> int:
     written = 0
     async with get_session() as session:
         for row_id, silver in labeled:
-            result = await session.execute(
-                text("UPDATE intent_logs SET actual_outcome = :s WHERE id = :i").bindparams(
-                    s=silver, i=row_id)
-            )
-            written += result.rowcount or 0
+            written += await labeling.write_outcome_by_id(session, row_id, silver)
         await session.commit()
     print(f"回填完成: {written} 行")
     return 0

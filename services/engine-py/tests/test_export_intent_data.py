@@ -1,7 +1,8 @@
 """意图数据导出 CLI(07 最小数据水龙头)。
 
-scripts/export_intent_data.py 不在 engine_py 包内,经 importlib 按路径加载;
-DB 侧用内存 sqlite 建三张目标表造数(不依赖真实 postgres):JSONB 的 DDL
+``engine_py.intent_flywheel.export_intent_data`` 为包内 module,常规 import
+(零路径 hack,由 test_flywheel_importable.py 钉死);DB 侧用内存 sqlite 建
+三张目标表造数(不依赖真实 postgres):JSONB 的 DDL
 在 sqlite 方言下经 ``compiles`` 钩子降级为 JSON,server_default(now()/
 gen_random_uuid())不适用 sqlite → 造数时显式给全 id/created_at/updated_at。
 时间窗/排序走真实 SQL 过滤,async 路径用只实现 ``execute`` 的同步会话门面。
@@ -10,13 +11,11 @@ gen_random_uuid())不适用 sqlite → 造数时显式给全 id/created_at/updat
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import json
 import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -25,6 +24,8 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 
 from engine_py.db.models import BadcaseCandidate, Base, IntentLog, LowConfidenceLog
+from engine_py.intent_flywheel import export_intent_data
+from engine_py.intent_flywheel.common import write_jsonl
 
 
 # sqlite 方言下把 JSONB DDL 降级为通用 JSON(值序列化本就复用 sqlalchemy.JSON)
@@ -38,20 +39,12 @@ def _naive(*args: int) -> datetime:
     return datetime(*args)  # noqa: DTZ001
 
 
-# 按路径加载 scripts/ 下的 CLI(非包成员,无法常规 import)
-_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "export_intent_data.py"
-_spec = importlib.util.spec_from_file_location("export_intent_data", _SCRIPT_PATH)
-assert _spec is not None and _spec.loader is not None
-export_intent_data = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(export_intent_data)
-
-
 @pytest.fixture(autouse=True)
 def _restore_env_after_main():
-    """main() 会经 _load_env_file 把 .env(含仓库根)全量 setdefault 进 os.environ
-    且脚本侧不清理 —— CLI 短进程无害,测试长进程则是跨文件污染:曾把
-    AI_RESULT_CACHE_TTL=60 泄漏给后续 analytics 测试,令其命中 Redis 陈旧缓存
-    假红(2026-09-26 夜审定位)。逐测快照恢复,进程出测试时环境原样。"""
+    """main() 会经 common.load_env_file 把 .env(含仓库根)全量 setdefault 进
+    os.environ 且 CLI 侧不清理 —— CLI 短进程无害,测试长进程则是跨文件污染:
+    曾把 AI_RESULT_CACHE_TTL=60 泄漏给后续 analytics 测试,令其命中 Redis 陈旧
+    缓存假红(2026-09-26 夜审定位)。逐测快照恢复,进程出测试时环境原样。"""
     snapshot = dict(os.environ)
     yield
     os.environ.clear()
@@ -258,14 +251,14 @@ class TestWriteJsonl:
             {"source": "intent", "query": "q2", "intent": None},
         ]
         out = tmp_path / "sub" / "out.jsonl"
-        export_intent_data.write_jsonl(records, str(out))
+        write_jsonl(records, str(out))
         lines = out.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 2
         assert json.loads(lines[0])["query"] == "q1"
         assert out.read_text(encoding="utf-8").endswith("}\n")
 
     def test_write_to_stdout(self, capsys):
-        export_intent_data.write_jsonl([{"source": "badcase", "id": "x"}], None)
+        write_jsonl([{"source": "badcase", "id": "x"}], None)
         assert json.loads(capsys.readouterr().out)["id"] == "x"
 
 

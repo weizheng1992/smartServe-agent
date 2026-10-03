@@ -2,7 +2,7 @@
 
 词面/口径外置 YAML:非 Python 改动也能提词面 PR;加载即校验必填键,
 坏条目响亮报错(08-P1 纪律延伸到配置面)。改 YAML 后必跑:
-  AI_INTENT_L3=off uv run python scripts/run_intent_eval.py  (闸门 95%)
+  AI_INTENT_L3=off uv run python -m engine_py.intent_flywheel.run_intent_eval  (闸门 95%)
 """
 
 from __future__ import annotations

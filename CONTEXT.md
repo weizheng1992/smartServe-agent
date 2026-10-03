@@ -124,3 +124,13 @@ CartManageSkill is a thin shell over `ACTION_TABLE` — verbs (checkout / order-
 
 ### HITL Suspension Seam (`services/engine-py/src/engine_py/skills/suspension.py`)
 `persist_suspended_plan` / `suspend_for_approval` are the only implementations of ticket creation + immediate plan persistence + response assembly (wayfinder 004: the recovery plan must hit TaskMemory the moment the approval ticket becomes visible to the 2s poller — the address-skill copy of this invariant used to sit after an unconditional `return` and never ran).
+
+## Intent Data Flywheel Subsystem (engine-py)
+
+### Labeling Faucet / 标注水龙头 (`services/engine-py/src/engine_py/triage/labeling.py`)
+
+「谁有资格写 `intent_logs.actual_outcome`」的唯一事实点 —— silver label 三通道的资格谓词与回写 SQL 收敛于一个 module,三通道互补关系(①置信级联独占 `confidence_cascade` + 30 分钟窗,在线热路径、自管事务静默降级;②人审定性不限 method、借用调用方 session 与坏例状态同事务;③规则复判排除 `confidence_cascade` 批量贴)由此单点可查。铁律:**一次写入**(任何通道对已回填行零影响,资格谓词 IS NULL 门槛 + 回写时再验,先到先得);时间资格 Python 侧参数化(严禁 `NOW() - INTERVAL` PG-only 手写 SQL);全 ORM,严禁绕开本 module 手写 actual_outcome 回写 SQL。互斥契约由 `tests/test_outcome_labeling.py` 一册钉死(sqlite 密封);通道①端到端回归另见 `test_intent_outcome_backfill.py`(容器 DB)。消费方:在线侧 `IntentTriageEngine.backfill_clarify_outcome`(薄委托)、离线侧 `intent_flywheel/review_badcase.py` 与 `backfill_outcome_from_rules.py`(adapter)。
+
+### intent_flywheel package (`services/engine-py/src/engine_py/intent_flywheel/`)
+
+意图数据飞轮的包内 module 群,唯一入口 `python -m engine_py.intent_flywheel.<cli>`(backhaul_unanswered / export_intent_data / review_badcase / backfill_outcome_from_rules / gen_intent_cases / run_intent_eval / calibrate_semantic_routes 七件);`common.py` 持有 JSONL 读写(stdout 管道语义,`out` 为空或 `-` 打 stdout)与 CLI .env 装载(CWD → engine-py → 仓库根,setdefault 不覆盖)的唯一实现。测试面 = 常规 import(由 `tests/test_flywheel_importable.py` 钉死,sys.path 引导 hack 禁止回归)。评测集常量 `EVAL_CASES_PATH` 指向 `services/engine-py/evals/intent_cases.jsonl`(gen 写 / eval 读 / calibrate 可选输入)。训练轨(`scripts/training/`)为二步收编,随训练 artifacts 缝归位。

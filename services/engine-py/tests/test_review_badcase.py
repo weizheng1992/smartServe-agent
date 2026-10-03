@@ -1,25 +1,20 @@
-"""坏例审结回填回归(P2 通道②,2026-09-23):review_badcase.py 的人审定性
+"""坏例审结回填回归(P2 通道②,2026-09-23):review_badcase 的人审定性
 把真实意图写回线程最近待回填 intent_logs 行,坏例状态 candidate→labeled;
 dismiss 不动标签;已审结拒绝重复定性。
 
-走真实 get_session(容器 DB);脚本函数以模块导入方式复用(sys.path 注入
-与 export_intent_data 同款)。
+走真实 get_session(容器 DB);函数为包内 module(engine_py.intent_flywheel
+.review_badcase),常规 import。
 """
 
 from __future__ import annotations
 
 import asyncio
-import sys
 import uuid as _uuid
-from pathlib import Path
 
 from sqlalchemy import text
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
-from review_badcase import dismiss_badcase, label_badcase, list_pending
-
 from engine_py.db import get_session
+from engine_py.intent_flywheel.review_badcase import dismiss_badcase, label_badcase, list_pending
 
 _TID = "thread-review-badcase-test"
 
