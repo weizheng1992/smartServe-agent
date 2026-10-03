@@ -21,7 +21,7 @@ import importlib
 
 import pytest
 
-from engine_py.llm.resilience import CircuitBreakerOpenError
+from engine_py.llm.resilience import CircuitBreakerOpenError, ContentFilterError
 
 FAKE_FALLBACK_ANSWER = "【兜底】在售活动与您的可用券已如实列出。"
 
@@ -163,3 +163,86 @@ def test_window_boundary_not_inflated_by_local_clock():
 
 def test_unparseable_delivery_fails_open_zero_days():
     assert _lapse("不是日期", _naive_utc(2026, 9, 30)) == 0
+
+
+# ── 终端兜底诚实化(2026-10-03 内容过滤实弹)────────────────────────────────
+# 旧终端罐头谎称「已由客服系统处理」并拼工具 JSON 详情(output_guard 还得
+# 专门剥离),实际什么都没发生 —— 过度承诺即投诉源。内容过滤(400 code
+# 1301)确定性拒绝时同理:词面可路由部分真答,答不了才诚实拒答。
+
+
+class _NoneFallback:
+    """桩:分发器无能力命中,返回 None。"""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def __call__(self, question, thread_id, user_id, business_id="aurora"):
+        self.calls.append(question)
+
+
+class _FilteredModel:
+    async def ainvoke(self, _prompt):
+        raise ContentFilterError("供应商内容过滤拦截输入(code 1301): 故意触发")
+
+
+_FINISH_STATE = {
+    "input": "你们支持比特币支付吗？",
+    "thread_id": "t-finish-honest",
+    "user_id": "CUST-FINISH-HONEST",
+    "business_config": {"businessId": "nike"},
+    "short_memory": [{"role": "user", "content": "你们支持比特币支付吗？"}],
+    "intents": [],
+    "task_plan": {"subtasks": []},
+}
+
+
+def _run_finish(monkeypatch, model) -> dict:
+    finish_module = importlib.import_module("engine_py.graph.nodes.finish")
+    monkeypatch.setattr(finish_module, "get_chat_model", lambda: model)
+    return asyncio.run(finish_module.finish_node(dict(_FINISH_STATE)))
+
+
+def test_content_filter_routes_deterministic_answer_first(monkeypatch):
+    """过滤输入词面可路由(如夹带显式单号)的部分仍由确定性兜底真答。"""
+    spy = _FallbackSpy()
+    monkeypatch.setattr("engine_py.skills.fallback_dispatcher.deterministic_fallback_answer", spy)
+
+    result = _run_finish(monkeypatch, _FilteredModel())
+
+    assert result["output"] == FAKE_FALLBACK_ANSWER, "词面可路由部分必须真答,不得直接拒答"
+    assert spy.calls, "内容过滤臂必须真正调到确定性兜底"
+    question, thread_id, user_id, business_id = spy.calls[0]
+    assert (question, thread_id, user_id) == ("你们支持比特币支付吗？", "t-finish-honest", "CUST-FINISH-HONEST")
+    assert business_id == "nike", "内容过滤臂身份接线与 generic 臂同口径"
+
+
+def test_content_filter_dead_end_honest_refusal(monkeypatch):
+    none_fb = _NoneFallback()
+    monkeypatch.setattr("engine_py.skills.fallback_dispatcher.deterministic_fallback_answer", none_fb)
+
+    result = _run_finish(monkeypatch, _FilteredModel())
+
+    out = result["output"]
+    assert none_fb.calls, "内容过滤臂必须先过确定性兜底再拒答"
+    assert "暂不支持在线解答" in out, f"必须诚实拒答: {out}"
+    assert "客服系统处理" not in out, "严禁谎称已处理"
+    assert "执行详情" not in out, "工具 JSON 详情不得拼进话术"
+
+
+def test_generic_failure_dead_end_honest_degradation(monkeypatch):
+    """generic 终端(旧谎报罐头位置):如实告知未完成 + 指引重试/转人工。"""
+
+    class _BoomModel:
+        async def ainvoke(self, _prompt):
+            raise RuntimeError("LLM 终稿失败(测试桩)")
+
+    none_fb = _NoneFallback()
+    monkeypatch.setattr("engine_py.skills.fallback_dispatcher.deterministic_fallback_answer", none_fb)
+
+    result = _run_finish(monkeypatch, _BoomModel())
+
+    out = result["output"]
+    assert "暂时未能完成处理" in out, f"必须如实告知未完成: {out}"
+    assert "转人工" in out, "须指引真实存在的规则层转人工意图"
+    assert "客服系统处理" not in out and "执行详情" not in out

@@ -38,7 +38,7 @@
     ]
   },
   {
-    "description": "RAG 防幻觉特殊场景评估 - 知识库无相关信息时拒绝编造 (Out-of-Domain Robustness,端到端真跑:知识库无虚拟货币支付条款,门禁=严禁编造支持;engine 现行为为系统话术式兜底,是否须升级为明示不支持见坏例池,weight=0 观察位不计分)",
+    "description": "RAG 防幻觉特殊场景评估 - 知识库无相关信息时拒绝编造 (Out-of-Domain Robustness,端到端真跑:知识库无虚拟货币支付条款,门禁=严禁编造支持;「比特币」词元触发供应商内容过滤 1301,引擎经 ContentFilterError 快败臂诚实拒答(2026-10-03),明示不支持/引导人工均属合规,weight=0 观察位不计分)",
     "prompts": ["customer_service"],
     "vars": {
       "input": "我想用比特币或虚拟货币支付我的订单，你们支持比特币付款吗？",

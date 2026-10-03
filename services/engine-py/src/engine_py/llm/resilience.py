@@ -146,6 +146,28 @@ class CircuitBreakerOpenError(RuntimeError):
         )
 
 
+class ContentFilterError(RuntimeError):
+    """供应商内容过滤确定性拒绝(bigmodel 400 contentFilter code 1301)。
+
+    输入侧敏感词拦截对同一输入**必然同判**(2026-10-03 实弹:「比特币」类
+    咨询三连重试全 400),重试纯属白烧退避;且不计熔断 —— 服务在线应答,
+    被拒的是这一条输入,熔断器熔的是"上游可用性",语义不符。
+    节点层(finish)据此给诚实拒答话术,严禁落「已由客服系统处理」谎报罐头。
+    """
+
+
+def _as_content_filter_error(err: Exception) -> ContentFilterError | None:
+    """识别 bigmodel 输入侧内容过滤(400 contentFilter + code 1301)。
+
+    窄匹配 1301 码:其他过滤形态(如输出侧 level/role 变体)不在确定性
+    同判保证内,保持既有重试语义,防误伤。
+    """
+    text = str(err)
+    if "contentFilter" in text and "1301" in text:
+        return ContentFilterError(f"供应商内容过滤拦截输入(code 1301): {text[:300]}")
+    return None
+
+
 async def _sleep(delay_s: float) -> None:
     """退避等待(独立函数便于测试截获退避序列)。"""
     await asyncio.sleep(delay_s)
@@ -242,6 +264,11 @@ async def resilient_ainvoke(attempt: Callable[[], Awaitable[Any]]) -> Any:
             return result
         except Exception as err:
             print(f"[LLM Resilience] 第 {attempts} 次尝试失败{_attempt_context_tag()}: {err}")
+            filtered = _as_content_filter_error(err)
+            if filtered is not None:
+                # 确定性内容过滤:重试必然同判,快速失败;不计熔断(服务在线)
+                await _emit_job_status("content_filter", filtered.args[0])
+                raise filtered from err
             if attempts >= max_attempts:
                 global_circuit_breaker.record_failure()
                 terminal = _trip_or_original(err)
@@ -270,6 +297,9 @@ def resilient_invoke(attempt: Callable[[], Any]) -> Any:
             return result
         except Exception as err:
             print(f"[LLM Resilience] 第 {attempts} 次尝试失败{_attempt_context_tag()}: {err}")
+            filtered = _as_content_filter_error(err)
+            if filtered is not None:
+                raise filtered from err
             if attempts >= max_attempts:
                 global_circuit_breaker.record_failure()
                 raise _trip_or_original(err) from err

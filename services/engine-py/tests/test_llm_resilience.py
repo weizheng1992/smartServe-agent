@@ -15,6 +15,7 @@ from engine_py.llm import resilience
 from engine_py.llm.resilience import (
     CircuitBreaker,
     CircuitBreakerOpenError,
+    ContentFilterError,
     global_circuit_breaker,
     resilient_ainvoke,
     resilient_invoke,
@@ -487,3 +488,74 @@ def test_total_deadline_caps_retries(monkeypatch: pytest.MonkeyPatch) -> None:
         asyncio.run(R.resilient_ainvoke(slow_attempt))
     elapsed = time.time() - started
     assert elapsed < 10, f"总预算必须在 ~3s 生效,实耗 {elapsed:.1f}s(未超10s)"
+
+
+class TestContentFilterFastFail:
+    """供应商内容过滤确定性拒绝快败(2026-10-03「比特币」实弹)。
+
+    bigmodel 400 contentFilter(code 1301)对同一输入必然同判:实弹三连
+    重试全 400,白烧退避后穿透 finish 落「已由客服系统处理」谎报罐头。
+    快败 + 不计熔断 —— 服务在线应答,被拒的是这一条输入;熔断器熔的是
+    "上游可用性",把确定性过滤计入会错误推动全局跳闸。"""
+
+    @staticmethod
+    def _filtered_call(counter: dict | None = None):
+        def _factory():
+            async def _call():
+                if counter is not None:
+                    counter["n"] += 1
+                raise RuntimeError(
+                    "Error code: 400 - {'contentFilter': [{'level': 3, 'role': 'user'}], "
+                    "'error': {'code': '1301', 'message': "
+                    "'系统检测到输入或生成内容可能包含不安全或敏感内容'}}"
+                )
+
+            return _call()
+
+        return _factory
+
+    def test_fast_fail_without_retry(self):
+        counter = {"n": 0}
+        with pytest.raises(ContentFilterError, match="1301"):
+            asyncio.run(resilient_ainvoke(self._filtered_call(counter)))
+        assert counter["n"] == 1, "内容过滤必须一次快败,严禁退避重试(实弹三连 400)"
+
+    def test_does_not_trip_breaker(self):
+        def _factory():
+            async def _call():
+                raise RuntimeError("Error code: 400 - {'contentFilter': [], 'error': {'code': '1301'}}")
+
+            return _call()
+
+        with pytest.raises(ContentFilterError):
+            asyncio.run(resilient_ainvoke(_factory))
+        status = global_circuit_breaker.get_status()
+        assert status["state"] == "CLOSED", "服务在线,过滤拒绝不得计入熔断失败"
+        assert status["failureCount"] == 0
+
+    def test_non_1301_filter_shapes_keep_retry_semantics(self, monkeypatch):
+        """窄匹配防误伤:非 1301 形态(如输出侧过滤)不承诺确定性同判,照旧重试。"""
+        TestResilientAinvoke._capture_sleep(monkeypatch)
+        counter = {"n": 0}
+
+        def _factory():
+            async def _call():
+                counter["n"] += 1
+                raise RuntimeError("Error code: 400 - {'contentFilter': [{'level': 2, 'role': 'model'}]}")
+
+            return _call()
+
+        with pytest.raises(RuntimeError, match="role': 'model'"):
+            asyncio.run(resilient_ainvoke(_factory))
+        assert counter["n"] == 3, "非 1301 过滤形态保持既有重试语义"
+
+    def test_sync_invoke_fast_fail(self):
+        calls = {"n": 0}
+
+        def _attempt():
+            calls["n"] += 1
+            raise RuntimeError("Error code: 400 - {'contentFilter': [{'level': 3}], 'error': {'code': '1301'}}")
+
+        with pytest.raises(ContentFilterError):
+            resilient_invoke(_attempt)
+        assert calls["n"] == 1

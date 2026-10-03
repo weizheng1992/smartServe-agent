@@ -7,7 +7,12 @@ from .chat import (
     get_vision_model,
     warm_embedding_model_in_background,
 )
-from .resilience import CircuitBreaker, CircuitBreakerOpenError, global_circuit_breaker
+from .resilience import (
+    CircuitBreaker,
+    CircuitBreakerOpenError,
+    ContentFilterError,
+    global_circuit_breaker,
+)
 from .telemetry import (
     bind_llm_call_context,
     bind_llm_call_node,
@@ -18,6 +23,7 @@ from .telemetry import (
 __all__ = [
     "CircuitBreaker",
     "CircuitBreakerOpenError",
+    "ContentFilterError",
     "bind_llm_call_context",
     "bind_llm_call_node",
     "drain_llm_call_writes",

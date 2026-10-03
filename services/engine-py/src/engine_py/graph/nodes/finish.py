@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from ...llm import CircuitBreakerOpenError, bind_llm_call_node, get_chat_model
+from ...llm import CircuitBreakerOpenError, ContentFilterError, bind_llm_call_node, get_chat_model
 from ...memory import ShortMemory
 from ...skills import is_action_query
 from ...tenant import get_merchant_display_name, sanitize_tenant_response
@@ -36,6 +36,27 @@ async def _resolve_tenant_id(state: dict) -> str:
         except Exception as err:
             print(f"[FinishNode] Failed to resolve thread tenantId: {err}")
     return tenant_id
+
+
+async def _deterministic_fallback(
+    state: dict, input_text: str, tenant_id: str
+) -> str | None:
+    """词面可路由部分(优惠/显式单号查单)的确定性真答兜底,两降级臂共用。
+
+    LLM 不可达(熔断/内容过滤/网络)不等于无话可答 —— 能真答的照答,
+    答不了返回 None 交还调用方选择各自诚实话术。"""
+    try:
+        from engine_py.skills.fallback_dispatcher import deterministic_fallback_answer
+
+        return await deterministic_fallback_answer(
+            input_text,
+            state.get("thread_id"),
+            state.get("user_id") or "",
+            tenant_id,  # 函数顶部 _resolve_tenant_id 的现成答案(business_config → 库查线程)
+        )
+    except Exception as fb_err:
+        print(f"[Finish] 确定性兜底失败: {fb_err}")
+        return None
 
 
 async def finish_node(state: AgentState) -> dict:
@@ -259,29 +280,37 @@ async def finish_node(state: AgentState) -> dict:
         # 上游 LLM 熔断非节点级可恢复:上抛 run_agent 走 job 级降级道歉
         # + session_metrics 落 llm_circuit_breaker(兜底仅面向解析/输出类失败)
         raise
+    except ContentFilterError as err:
+        # 供应商内容过滤(400 code 1301)确定性拦截,不可重试、不计熔断。
+        # 词面可路由的部分(显式单号等)仍由确定性兜底真答;答不了才诚实
+        # 拒答并指引人工 —— 严禁落「已由客服系统处理」谎报罐头
+        # (2026-10-03「比特币」类咨询实弹:三连重试全 400 穿透到谎报)。
+        print(f"[Finish] 供应商内容过滤拦截(确定性,不重试): {err}")
+        fallback_output = await _deterministic_fallback(state, input_text, tenant_id)
+        if fallback_output:
+            return {"output": fallback_output, "short_memory": short_memory}
+        refusal = (
+            "您好！您咨询的内容暂不支持在线解答，建议您换个方式描述您的问题，"
+            "或直接回复「**转人工**」获取人工客服帮助。"
+        )
+        return {"output": sanitize_tenant_response(refusal, tenant_id), "short_memory": short_memory}
     except Exception as err:
         print(f"finishNode failed, using fallback summary: {err}")
         # 确定性兜底分发器(2026-09-19「兜底什么回答什么」):LLM 终稿失败时,
         # 词面可路由的问题(优惠/券/订单状态)仍由数据技能/真实查询回答;
         # 无能力命中才保留罐头。数据诚实铁律:只答真实查到的。
-        try:
-            from engine_py.skills.fallback_dispatcher import deterministic_fallback_answer
-
-            fallback_output = await deterministic_fallback_answer(
-                input_text,
-                state.get("thread_id"),
-                state.get("user_id") or "",
-                tenant_id,  # 函数顶部 _resolve_tenant_id 的现成答案(business_config → 库查线程)
-            )
-        except Exception as fb_err:
-            print(f"[Finish] 确定性兜底失败: {fb_err}")
-            fallback_output = None
+        fallback_output = await _deterministic_fallback(state, input_text, tenant_id)
         if fallback_output:
             return {"output": fallback_output, "short_memory": short_memory}
-        fallback_details = json.dumps(
-            [st.get("result") for st in subtasks], ensure_ascii=False, default=str
+        # 终端兜底诚实化(2026-10-03):旧罐头谎称「已由客服系统处理」并把工具
+        # JSON 详情拼进话术(output_guard 还得专门剥离),实际什么都没发生 ——
+        # 过度承诺即投诉源(同 2026-09-27 熔断文案事故口径)。现如实告知未完成
+        # + 指引重试/转人工(「转人工」是规则层真实意图,回复即真触发接管)。
+        honest_degraded = (
+            f"您好！我是 {brand_name} 的智能客服助手。非常抱歉，您的问题暂时未能完成处理，"
+            "请您稍后重试，或直接回复「**转人工**」获取人工客服帮助。给您带来不便，我们深表歉意！🙏"
         )
         return {
-            "output": f"您好！您的请求已由 {brand_name} 客服系统处理。执行详情：{fallback_details}",
+            "output": sanitize_tenant_response(honest_degraded, tenant_id),
             "short_memory": short_memory,
         }
