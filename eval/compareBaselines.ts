@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import {
@@ -9,6 +9,7 @@ import {
   baselinePath,
   extractCases,
   readBaseline,
+  readPromptfooSummary,
   runPromptfooSuite,
   summarizeSuite,
 } from './baselineLib';
@@ -21,17 +22,6 @@ interface SuiteComparison {
   current: SuiteSummary;
   currentCases: BaselineCase[];
   regressions: string[];
-}
-
-function readRawSummary(filePath: string) {
-  if (!existsSync(filePath)) {
-    throw new Error(`结果文件不存在: ${filePath}`);
-  }
-  const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
-  if (!Array.isArray(raw.results)) {
-    throw new Error(`结果文件缺少 results 数组: ${filePath}`);
-  }
-  return raw;
 }
 
 function compareSuite(baseline: SuiteBaseline, current: SuiteSummary, currentCases: BaselineCase[]): string[] {
@@ -112,7 +102,7 @@ async function compareBaselines() {
 
     console.log(`▶ 获取 [${suite.name}] 当前结果 ...`);
     const raw = resultsDir
-      ? readRawSummary(resolve(resultsDir, `${suite.name}.json`))
+      ? readPromptfooSummary(resolve(resultsDir, `${suite.name}.json`))
       : runPromptfooSuite(suite, resolve(workDir, `${suite.name}.json`));
 
     const current = summarizeSuite(raw);

@@ -1,7 +1,7 @@
 {
   "suite": "planner",
-  "pinnedAt": "2026-09-27T23:25:03.830Z",
-  "gitSha": "5b9d010c495ac68a659299e8e29c12c8e95cad4d",
+  "pinnedAt": "2026-10-02T14:32:51.454Z",
+  "gitSha": "29beb834a346f8379fa64c94619bbb7e36bfb286",
   "config": {
     "path": "eval/promptfoo.planner.yaml",
     "sha256": "ccb0e91fd7b84e93c353e825c297e4de8a08a75dd70ca8ebb39c9ccb37622170"

@@ -1,19 +1,19 @@
 {
-  "pinnedAt": "2026-09-27T23:25:03.830Z",
-  "gitSha": "5b9d010c495ac68a659299e8e29c12c8e95cad4d",
+  "pinnedAt": "2026-10-02T14:32:51.454Z",
+  "gitSha": "29beb834a346f8379fa64c94619bbb7e36bfb286",
   "suites": {
     "unified": {
-      "total": 56,
-      "pass": 56,
+      "total": 58,
+      "pass": 58,
       "fail": 0,
       "errors": 0,
-      "meanScore": 0.9982142857142857,
+      "meanScore": 0.9941379310344828,
       "scorers": {
         "unknown": {
-          "count": 53,
-          "pass": 53,
+          "count": 58,
+          "pass": 58,
           "fail": 0,
-          "meanScore": 0.9981132075471698
+          "meanScore": 0.9908620689655172
         },
         "metric_disambiguation.py:get_assert": {
           "count": 5,
@@ -75,19 +75,13 @@
           "fail": 0,
           "meanScore": 1
         },
-        "context.vars.context.includes('Nike 会员') && context.vars.context.includes('30 天') && (output.includes('30') || output.includes('退'))": {
+        "output.includes('淮海中路') && (output.includes('10') || output.includes('22'))": {
           "count": 1,
           "pass": 1,
           "fail": 0,
           "meanScore": 1
         },
-        "output.includes('30') && (output.includes('退货') || output.includes('退款')) && !output.includes('不支持')": {
-          "count": 1,
-          "pass": 1,
-          "fail": 0,
-          "meanScore": 1
-        },
-        "output.includes('Nike') || output.includes('会员') || output.includes('试穿')": {
+        "(output.includes('软毛刷') || output.includes('中性洗涤剂')) && (output.includes('阴干') || output.includes('自然风干') || output.includes('通风'))": {
           "count": 1,
           "pass": 1,
           "fail": 0,
@@ -99,21 +93,30 @@
           "fail": 0,
           "meanScore": 1
         },
-        "抱歉": {
+        "output.includes('未找到') || output.includes('不提供') || output.includes('无法') || output.includes('抱歉') || output.includes('暂不')": {
           "count": 1,
           "pass": 1,
           "fail": 0,
-          "meanScore": 1
-        },
-        "output.includes('未找到') || output.includes('不提供') || output.includes('无法') || output.includes('抱歉')": {
-          "count": 1,
-          "pass": 1,
+          "meanScore": 0
+        }
+      }
+    },
+    "planner": {
+      "total": 8,
+      "pass": 8,
+      "fail": 0,
+      "errors": 0,
+      "meanScore": 1,
+      "scorers": {
+        "unknown": {
+          "count": 8,
+          "pass": 8,
           "fail": 0,
           "meanScore": 1
         }
       }
     },
-    "planner": {
+    "persona": {
       "total": 8,
       "pass": 8,
       "fail": 0,

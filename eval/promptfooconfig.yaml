@@ -35,3 +35,4 @@ tests:
   - testCases/legal/single-intent.json
   - testCases/security/injection.json
   - testCases/ecommerce/rag-evaluation.json
+  - testCases/ecommerce/multi-tenant.json

@@ -1,15 +1,16 @@
 # Promptfoo 基线 (Eval Baselines)
 
-本目录存放两套 promptfoo 评测的**钉定基线**,它是"后端 Python 化迁移"(Phase 1 engine-py 重写)的
+本目录存放三套 promptfoo 评测的**钉定基线**,它是"后端 Python 化迁移"(Phase 1 engine-py 重写)的
 **等价性验收门禁**:TS 引擎重写为 Python 后,`bun run test:prompt:compare` 必须与基线对齐才允许切流。
 
 ## 套件构成
 
 | 基线文件 | 配置 | 覆盖内容 |
 |---|---|---|
-| `unified.json` | `eval/promptfooconfig.yaml` | 统一 E2E 大盘:意图分类(生产瀑布真跑)、任务规划、槽位反问、端到端回答质量、咨询直答快轨、事故回归 |
+| `unified.json` | `eval/promptfooconfig.yaml` | 统一 E2E 大盘:意图分类(生产瀑布真跑)、任务规划、槽位反问、端到端回答质量、咨询直答快轨、事故回归、多租户品牌隔离、安全注入、RAG 忠实度 |
 | `planner.json` | `eval/promptfoo.planner.yaml` | Planner 提示词回归(toolAccuracy scorer) |
-| `latest.json` | — | 两套摘要的合并索引(不含逐用例明细) |
+| `persona.json` | `eval/promptfoo.persona.yaml` | 画像审计抽取质量(抽取成立性/scope 双层判定/置信档位路由) |
+| `latest.json` | — | 三套摘要的合并索引(不含逐用例明细) |
 
 每个基线文件记录:结果摘要(pass/fail、各 scorer 聚合分)、逐用例通过明细、钉定时间、git SHA、
 所用 yaml 的 sha256、promptfoo 版本——任何一项漂移都可追溯。
@@ -20,10 +21,10 @@
 # 首次钉定基线(任一基线已存在时拒绝执行,防无意漂移)
 bun run test:prompt:pin
 
-# 现场重跑两套并与基线对比;任一回归即 exit 1
+# 现场重跑三套并与基线对比;任一回归即 exit 1
 bun run test:prompt:compare
 
-# 复用已有结果目录(文件名须为 unified.json / planner.json,内容为 promptfoo -o 的 JSON 输出)
+# 复用已有结果目录(文件名须为 unified.json / planner.json / persona.json,内容为 promptfoo -o 的 JSON 输出)
 bun run test:prompt:compare -- --results-dir /path/to/results
 ```
 

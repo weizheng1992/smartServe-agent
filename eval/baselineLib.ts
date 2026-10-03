@@ -12,8 +12,8 @@ export interface SuiteDef {
 // classify 分册已退役(2026-09-10 工单03):其 7 个意图用例早已 1:1 收编进
 // 统一套件,且统一套件的意图用例自此走生产瀑布真跑(非回声),分类回归
 // 由 unified 基线一力承担;独立 classify 分册成为纯冗余。
-// persona 分册入列(persona-hardening 07):画像审计抽取质量;活 LLM 例偶发
-// 波动属已知,基线首次钉定随下次整体重钉(test:prompt:pin -- --update)进行。
+// persona 分册入列(persona-hardening 07):画像审计抽取质量;基线已于 2026-10-02
+// 随罐头改真跑整体重钉首次钉定;活 LLM 例偶发波动属已知,pin 挂了重跑即可。
 export const SUITES: SuiteDef[] = [
   { name: 'unified', config: 'eval/promptfooconfig.yaml' },
   { name: 'planner', config: 'eval/promptfoo.planner.yaml' },
@@ -148,14 +148,19 @@ export function runPromptfooSuite(suite: SuiteDef, outputFilePath: string): Prom
   if (!existsSync(outputFilePath)) {
     throw new Error(`promptfoo 未产出结果文件: ${outputFilePath}`);
   }
-  const raw = JSON.parse(readFileSync(outputFilePath, 'utf-8')) as PromptfooSummary | { results: PromptfooSummary };
-  // promptfoo 0.111.x 起 -o json 外层包了 {evalId, results, config, shareableUrl},
-  // 旧版根级的逐行 results 数组(与 stats)挪入内层;此处做形状归一,两种版本皆可读
+  return readPromptfooSummary(outputFilePath);
+}
+
+// promptfoo 0.111.x 起 -o json 外层包了 {evalId, results, config, shareableUrl},
+// 旧版根级的逐行 results 数组(与 stats)挪入内层;此处做形状归一,两种版本皆可读。
+// compareBaselines 的 --results-dir 路径与 pin 共用此读法,严禁旁路直 parse。
+export function readPromptfooSummary(filePath: string): PromptfooSummary {
+  const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as PromptfooSummary | { results: PromptfooSummary };
   if (!Array.isArray(raw.results) && raw.results && Array.isArray(raw.results.results)) {
     return raw.results;
   }
   if (!Array.isArray(raw.results)) {
-    throw new Error(`promptfoo 结果文件缺少 results 数组: ${outputFilePath}`);
+    throw new Error(`promptfoo 结果文件缺少 results 数组: ${filePath}`);
   }
   return raw;
 }

@@ -1,6 +1,6 @@
 /** 真实评测记录 + 入库(wayfinder 005)。
  *
- * 依次跑三套 promptfoo 套件(unified / planner / classify)落盘到
+ * 依次跑三套 promptfoo 套件(unified / planner / persona)落盘到
  * eval/.records/<suite>.json,再调 engine-py 导入 CLI 把结果写入
  * eval_runs / eval_results + eval_run_records 展示汇总行(admin 评测页)。
  * 用法:bun run test:prompt:record

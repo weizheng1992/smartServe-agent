@@ -1,0 +1,67 @@
+{
+  "suite": "persona",
+  "pinnedAt": "2026-10-02T14:32:51.454Z",
+  "gitSha": "29beb834a346f8379fa64c94619bbb7e36bfb286",
+  "config": {
+    "path": "eval/promptfoo.persona.yaml",
+    "sha256": "a0d28a6ae1f1e5ae23daa12372b49ce4dd7f39f6c62053423144d6c08fb29db2"
+  },
+  "promptfooVersion": "0.111.1",
+  "summary": {
+    "total": 8,
+    "pass": 8,
+    "fail": 0,
+    "errors": 0,
+    "meanScore": 1,
+    "scorers": {
+      "unknown": {
+        "count": 8,
+        "pass": 8,
+        "fail": 0,
+        "meanScore": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "description": "生理特征 - 脚长/尺码应判 global(跨商户通用,persona-hardening 07)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "生理特征 - 布料过敏原应判 global(生理红线路径)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "租户品牌偏好 - 耐克 Flyknit 应判 tenant(nike 流水上下文)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "租户品牌偏好 - 阿迪 Boost 底应判 tenant(adidas 流水上下文,防 tenant 判成一刀切 global)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "显式声明 - 明确只收顺丰应高置信 approved 档(>= 0.85,显式胜出)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "模糊表述 - 随口一说不得出 approved 档事实(丢弃或 pending,禁 >= 0.85)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "混合对话 - 生理(脚长)+ 品牌偏好(Air Jordan)同轮应双 scope 各归其位",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "负对照 - 纯寒暄不得产出任何偏好事实(hasNewPreference=false)",
+      "success": true,
+      "score": 1
+    }
+  ]
+}

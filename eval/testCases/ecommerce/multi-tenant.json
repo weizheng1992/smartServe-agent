@@ -1,31 +1,31 @@
 [
   {
-    "description": "多租户品牌自识别 - Adidas 官方旗舰店查单自称与隔离",
+    "description": "多租户品牌自识别 - Adidas 运动专营查单自称与隔离(端到端真跑:种子用户在 adidas 名下 2 笔真实订单,断言自营品牌露出、不串他牌、无 [ECOMMERCE] 前缀幻觉)",
     "vars": {
       "input": "我的订单",
       "businessId": "adidas",
-      "expectedBrand": "Adidas 官方旗舰店",
-      "expectedTools": ["listUserOrders"]
+      "expectedBrand": "Adidas",
+      "forbiddenBrand": "Nike"
     },
     "assert": [
       {
         "type": "javascript",
-        "value": "output.includes('Adidas') && !output.includes('[ECOMMERCE]') && !output.includes('无法为您提供')"
+        "value": "file://scorers/brandIsolation.scorer.ts"
       }
     ]
   },
   {
-    "description": "多租户品牌自识别 - Nike 官方专营店查单自称与隔离",
+    "description": "多租户品牌自识别 - Nike 官方旗舰店查单自称与隔离(端到端真跑:种子用户在 nike 名下 1 笔真实订单,断言自营品牌露出、不串他牌)",
     "vars": {
       "input": "我的订单",
       "businessId": "nike",
-      "expectedBrand": "Nike 官方旗舰店",
-      "expectedTools": ["listUserOrders"]
+      "expectedBrand": "Nike",
+      "forbiddenBrand": "Adidas"
     },
     "assert": [
       {
         "type": "javascript",
-        "value": "output.includes('Nike') && !output.includes('[ECOMMERCE]') && !output.includes('无法为您提供')"
+        "value": "file://scorers/brandIsolation.scorer.ts"
       }
     ]
   }

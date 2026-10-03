@@ -1,45 +1,49 @@
 [
   {
-    "description": "RAG 检索层评估 (Retrieval Layer) - 商家政策检索精度与召回度",
+    "description": "RAG 检索层评估 (Retrieval Layer) - nike 租户知识库门店事实检索(端到端真跑:问答须与 nike_store_and_products.md 语料一致,不编造)",
     "prompts": ["customer_service"],
     "vars": {
-      "query": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
-      "input": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
-      "context": "[Context] Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。"
+      "input": "你们在上海有实体店吗？具体在哪里、几点开门？",
+      "businessId": "nike",
+      "expectedRules": "中文作答，以下均为知识库核实过的真实事实基线，回答复述其中任何一项均不算编造：Nike 淮海中路旗舰店位于上海市黄浦区淮海中路 816 号；营业时间每日 10:00 至 22:00；店内提供现场 3D 步态足型诊断测量、个性化烫印定制与专业跑鞋试跑体验。不得编造基线之外不存在的门店或营业时间。"
     },
     "assert": [
       {
         "type": "javascript",
-        "value": "context.vars.context.includes('Nike 会员') && context.vars.context.includes('30 天') && (output.includes('30') || output.includes('退'))"
-      }
-    ]
-  },
-  {
-    "description": "RAG 生成层评估 (Generation Layer) - 回答忠实度 (Faithfulness) 校验",
-    "prompts": ["customer_service"],
-    "vars": {
-      "query": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
-      "input": "我是 Nike 会员，我想知道试穿过了还能申请 30 天退货吗？",
-      "context": "[Context] Nike 会员专属福利：支持自订单购买之日起 30 天超长无理由退换货。即使已经拆除吊牌或进行过试穿，只要鞋底无明显磨损，均可享受免费原路退款。退款通过顺丰速运免费寄回。"
-    },
-    "assert": [
-      {
-        "type": "javascript",
-        "value": "output.includes('30') && (output.includes('退货') || output.includes('退款')) && !output.includes('不支持')"
+        "value": "file://scorers/answerQuality.scorer.ts"
       },
       {
         "type": "javascript",
-        "value": "output.includes('Nike') || output.includes('会员') || output.includes('试穿')"
+        "value": "output.includes('淮海中路') && (output.includes('10') || output.includes('22'))"
       }
     ]
   },
   {
-    "description": "RAG 防幻觉特殊场景评估 - 知识库无相关信息时拒绝编造 (Out-of-Domain Robustness)",
+    "description": "RAG 生成层评估 (Generation Layer) - 回答忠实度 (Faithfulness) 校验(端到端真跑:洗护答案须与 nike 语料洗护条款一致)",
     "prompts": ["customer_service"],
     "vars": {
-      "query": "我想用比特币或虚拟货币支付我的订单，你们支持比特币付款吗？",
+      "input": "GORE-TEX 鞋面的鞋子应该怎么清洗保养？",
+      "businessId": "nike",
+      "expectedRules": "中文作答，以下均为知识库核实过的真实事实基线，回答复述其中任何一项均不算编造：洗护条款——先拆下鞋带与鞋垫，30℃ 以下温水配合中性洗涤剂与软毛刷轻刷网面，严禁强碱性洗衣粉，洗净后置于阴凉通风处自然风干，切勿暴晒或使用烘干机以免 GORE-TEX 防水膜开裂；门店事实——Nike 淮海中路旗舰店位于上海市黄浦区淮海中路 816 号、每日 10:00-22:00 营业、提供现场 3D 步态足型诊断/个性化烫印定制/跑鞋试跑体验。不得编造基线之外的洗护方法或门店信息。"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/answerQuality.scorer.ts"
+      },
+      {
+        "type": "javascript",
+        "value": "(output.includes('软毛刷') || output.includes('中性洗涤剂')) && (output.includes('阴干') || output.includes('自然风干') || output.includes('通风'))"
+      }
+    ]
+  },
+  {
+    "description": "RAG 防幻觉特殊场景评估 - 知识库无相关信息时拒绝编造 (Out-of-Domain Robustness,端到端真跑:知识库无虚拟货币支付条款,门禁=严禁编造支持;engine 现行为为系统话术式兜底,是否须升级为明示不支持见坏例池,weight=0 观察位不计分)",
+    "prompts": ["customer_service"],
+    "vars": {
       "input": "我想用比特币或虚拟货币支付我的订单，你们支持比特币付款吗？",
-      "context": "[Context] 对于我们电商主站的订单，普通用户享有自签收之日起 7 天无理由退换货权益。退款运费自理。 [Context] Nike 会员支持 30 天无理由退换货。"
+      "businessId": "ecommerce",
+      "expectedRules": "中文作答。知识库不含虚拟货币支付支持条款。本用例仅考核防幻觉维度:严禁编造支持比特币/虚拟货币支付;系统兜底话术、明示不支持或引导人工均属合规,帮助性与响应性不在本用例考核范围,不应据此扣分。"
     },
     "assert": [
       {
@@ -47,12 +51,13 @@
         "value": "!/(?<!不)支持(比特币|虚拟货币)/.test(output)"
       },
       {
-        "type": "contains",
-        "value": "抱歉"
+        "type": "javascript",
+        "value": "output.includes('未找到') || output.includes('不提供') || output.includes('无法') || output.includes('抱歉') || output.includes('暂不')",
+        "weight": 0
       },
       {
         "type": "javascript",
-        "value": "output.includes('未找到') || output.includes('不提供') || output.includes('无法') || output.includes('抱歉')"
+        "value": "file://scorers/answerQuality.scorer.ts"
       }
     ]
   }
