@@ -15,6 +15,10 @@ from .knowledge_files import default_knowledge_dir, load_knowledge_chunks
 
 _TOKENIZE_RE = re.compile(r"[a-z0-9]+|[一-龥]")
 
+# 检索候选集封顶(P5,2026-10-03):无 pgvector,余弦打分只能在 Python 侧;
+# 上限 500 + created_at/id 确定性新序保行为可预期(现实语料远低于此)。
+RAG_SEARCH_CANDIDATE_CAP = 500
+
 
 # ── 自愈播种进程级节流(2026-10-02 夜审修复D)──────────────────────────────
 # search_relevant_docs 曾每次检索都无条件全量自愈:磁盘重读 knowledge 文件 +
@@ -219,6 +223,12 @@ class ContextualRAG:
                 stmt = select(RagDocumentRow)
                 if self.business_id:
                     stmt = stmt.where(RagDocumentRow.business_id == self.business_id)
+                # 候选集封顶(P5,2026-10-03):余弦打分在 Python 侧,旧行为全表
+                # 拉取随语料线性膨胀。上限 500 + 确定性新序(created_at/id 双键)
+                # —— 现实语料远低于此行为不变;超限语料旧 chunk 让位新 chunk
+                # (新鲜语料优先,与语义缓存/范例回收同一取向)。
+                stmt = stmt.order_by(RagDocumentRow.created_at.desc(), RagDocumentRow.id.desc())
+                stmt = stmt.limit(RAG_SEARCH_CANDIDATE_CAP)
                 rows = (await session.execute(stmt)).scalars().all()
         except Exception as db_err:
             # 库失败诚实空(2026-09-12):旧「Local Fake RAG」演示切片兜底退役,

@@ -295,13 +295,20 @@ class LongMemory:
             from sqlalchemy import select
 
             async with get_session() as session:
+                # 候选集封顶(P6,2026-10-03):余弦打分在 Python 侧,旧行为全量
+                # 拉取该用户 approved 事实随画像增长线性膨胀。上限 500 + 确定性
+                # 新序(created_at/id 双键)—— 现实画像远低于此行为不变;超限
+                # 时新事实让旧事实让位(新偏好覆盖旧偏好的自然取向)。
                 rows = (
                     (
                         await session.execute(
-                            select(LongMemoryFact).where(
+                            select(LongMemoryFact)
+                            .where(
                                 LongMemoryFact.user_id == self.user_id,
                                 LongMemoryFact.status == "approved",
                             )
+                            .order_by(LongMemoryFact.created_at.desc(), LongMemoryFact.id.desc())
+                            .limit(500)
                         )
                     )
                     .scalars()
