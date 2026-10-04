@@ -104,3 +104,4 @@ services/engine-py/training_data/sft/adapter/
 
 # 生产密钥文件(仅模板 .env.prod.example 入库)
 deploy/.env.prod
+eval/nightly/results/
