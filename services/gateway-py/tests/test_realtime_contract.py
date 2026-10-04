@@ -655,3 +655,83 @@ class TestSocketIoEdgeStates:
             for c in (op_a, op_b):
                 if c.connected:
                     await c.disconnect()
+
+
+class TestWsEventsBroadcast:
+    """跨实例 ws:events 广播契约(T10,2026-10-03 补零测试):发布侧现状
+    只发不收(消费方后续接入),双通道单点 _broadcast_state_changed 的线形状
+    与 fire-and-forget 纪律在此钉死,消费方接入时即有契可依。
+
+    socket 载荷可含 systemMessage;ws:events 恒不含(与历史一致);
+    Redis 故障/客户端缺席必须静默不炸主流程。
+    """
+
+    @staticmethod
+    def _capture_publish(monkeypatch) -> list[tuple[str, str]]:
+        """桩掉 event_bus.get_client,捕获 (channel, payload) 发布调用。"""
+        import json as _json
+
+        published: list[tuple[str, str]] = []
+
+        class _FakeClient:
+            async def publish(self, channel: str, raw: str):
+                published.append((channel, raw))
+
+        async def _fake_get_client():
+            return _FakeClient()
+
+        monkeypatch.setattr("engine_py.event_bus.get_client", _fake_get_client)
+        monkeypatch.setattr(_json, "dumps", _json.dumps)  # 保守锚定,防未来局部 import 漂移
+        return published
+
+    @staticmethod
+    def _stub_state(monkeypatch, state: dict):
+        async def _fake_thread_state(thread_id):
+            return state
+
+        monkeypatch.setattr("gateway_py.realtime.takeover.thread_state", _fake_thread_state)
+
+    async def test_ws_events_envelope_and_no_system_message(self, monkeypatch):
+        from gateway_py import realtime
+
+        published = self._capture_publish(monkeypatch)
+        self._stub_state(monkeypatch, {"status": "human_takeover", "operator": None})
+        operator = {"email": "op@aurora", "name": "坐席甲"}
+        system_message = {"id": "m1", "content": "已由人工客服接待"}
+
+        await realtime._broadcast_state_changed(
+            "t-1", "nike", operator=operator, system_message=system_message,
+        )
+
+        assert published, "ws:events 未发布"
+        channel, raw = published[-1]
+        assert channel == "ws:events"
+        envelope = __import__("json").loads(raw)
+        assert envelope["event"] == "conversation_state_changed"
+        assert envelope["room"] == "tenant:nike:thread:t-1"
+        assert "systemMessage" not in envelope["data"], "ws:events 线形状恒不含 systemMessage"
+        assert envelope["data"]["operatorId"] == "op@aurora"
+        assert envelope["data"]["status"] == "human_takeover"
+
+    async def test_publish_failure_is_swallowed(self, monkeypatch):
+        """fire-and-forget 纪律:Redis 故障只打印,严禁炸状态变更主流程。"""
+        from gateway_py import realtime
+
+        async def _broken_get_client():
+            raise RuntimeError("redis down")
+
+        monkeypatch.setattr("engine_py.event_bus.get_client", _broken_get_client)
+        self._stub_state(monkeypatch, {"status": "ai_takeover"})
+        state = await realtime._broadcast_state_changed("t-2", "nike")
+        assert state == {"status": "ai_takeover"}
+
+    async def test_client_absence_is_silent(self, monkeypatch):
+        from gateway_py import realtime
+
+        async def _none_get_client():
+            return None
+
+        monkeypatch.setattr("engine_py.event_bus.get_client", _none_get_client)
+        self._stub_state(monkeypatch, {"status": "ai_takeover"})
+        state = await realtime._broadcast_state_changed("t-3", "adidas")
+        assert state == {"status": "ai_takeover"}
