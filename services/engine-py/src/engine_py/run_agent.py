@@ -163,6 +163,21 @@ def _degraded_apology_result() -> dict:
     }
 
 
+_langsmith_client: object | None = None  # httpx.AsyncClient,懒建进程级复用(P11)
+
+
+def _get_langsmith_client():
+    """进程级复用 httpx 客户端(P11,2026-10-03):旧实现每回合
+    `async with httpx.AsyncClient()` 新建连接池 + TLS 握手,遥测白付全额;
+    httpx 客户端线程安全可跨请求复用,与 llm/chat 的 lru_cache 单例同纪律。"""
+    global _langsmith_client
+    import httpx
+
+    if _langsmith_client is None or getattr(_langsmith_client, "is_closed", False):
+        _langsmith_client = httpx.AsyncClient(timeout=10.0)
+    return _langsmith_client
+
+
 async def _report_langsmith_feedback(is_success: bool, comment: str) -> None:
     """后台 fire-and-forget 上报 LangSmith 语义反馈(TS 侧无 runId 桥接,标记简化)。"""
     api_key = os.environ.get("LANGCHAIN_API_KEY")
@@ -170,20 +185,18 @@ async def _report_langsmith_feedback(is_success: bool, comment: str) -> None:
         return
     endpoint = os.environ.get("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
     try:
-        import httpx
-
-        async with httpx.AsyncClient() as client:
-            for key in ("correctness", "success"):
-                await client.post(
-                    f"{endpoint}/feedback",
-                    headers={"x-api-key": api_key, "Content-Type": "application/json"},
-                    json={
-                        "key": key,
-                        "score": 1.0 if is_success else 0.0,
-                        "value": "success" if is_success else "failure",
-                        "comment": comment,
-                    },
-                )
+        client = _get_langsmith_client()
+        for key in ("correctness", "success"):
+            await client.post(
+                f"{endpoint}/feedback",
+                headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                json={
+                    "key": key,
+                    "score": 1.0 if is_success else 0.0,
+                    "value": "success" if is_success else "failure",
+                    "comment": comment,
+                },
+            )
     except Exception as telemetry_err:
         print(f"[LangSmith Telemetry] Error uploading feedback to LangSmith: {telemetry_err}")
 
