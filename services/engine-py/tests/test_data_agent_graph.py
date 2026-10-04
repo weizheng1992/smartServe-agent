@@ -96,6 +96,37 @@ class TestGraphAsk:
         assert out["type"] == "error" and "如实" in out["message"]
 
 
+class TestEntityGateDispatch:
+    """编译期实体闸的类型化分派(2026-10-03):isinstance 取代异常消息词面嗅探
+    (旧代码 `"勾选" in str(err)`)—— EntityGateRequired 出 hint 原文,
+    真 UnsupportedQuery 才替换 generic「该指标暂未开放」;detail 恒为原文。
+    """
+
+    def test_entity_gate_hint_surfaces_verbatim(self, monkeypatch):
+        from engine_py.analytics.engine import EntityGateRequired
+
+        def _gate(self, intent, session_ctx=None):
+            raise EntityGateRequired("请先指明活动(如「开学季活动卖得怎么样」)")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "compile", _gate)
+        out = asyncio.run(graph.ask("销售额最高的商品", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "unsupported"
+        assert out["message"] == "请先指明活动(如「开学季活动卖得怎么样」)"
+        assert out["detail"] == out["message"]
+
+    def test_plain_unsupported_replaced_by_generic(self, monkeypatch):
+        from engine_py.analytics.engine import UnsupportedQuery
+
+        def _plain(self, intent, session_ctx=None):
+            raise UnsupportedQuery("指标尚未登记执行模板")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "compile", _plain)
+        out = asyncio.run(graph.ask("销售额最高的商品", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "unsupported"
+        assert out["message"] == "该指标暂未开放"
+        assert out["detail"] == "指标尚未登记执行模板"
+
+
 class TestAdversarialInput:
     """对抗输入(2026-09-28 夜审测试缺口①):注入语料不得解锁结果/污染 SQL。
 

@@ -26,7 +26,7 @@ from .context_intake import (
 from .context_intake import (
     title_prefix as build_title_prefix,
 )
-from .engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
+from .engine import EntityGateRequired, MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
 from .quick_summary import quick_summary as _quick_summary
 from .trace import Trace
 
@@ -211,8 +211,10 @@ async def ask(
         compiled = engine.compile(intent)
         result = await engine.execute_async(compiled)
     except UnsupportedQuery as err:
-        # 编译期实体闸(如「未勾选订单」)→ 诚实 unsupported 帧并给出动作提示
-        message = str(err) if "勾选" in str(err) else "该指标暂未开放"
+        # 编译期实体闸(EntityGateRequired,「补一句话即可继续」)→ hint 原文
+        # 透传;真不支持才替换 generic 文案。2026-10-03 类型化前靠嗅探消息词面
+        # (「勾选」)分流,另外四处可行动引导被吞成「该指标暂未开放」。
+        message = err.hint if isinstance(err, EntityGateRequired) else "该指标暂未开放"
         await trace.record("unsupported", final_metric=intent.metric)
         return {"type": "unsupported", "message": message, "detail": str(err)}
     except Exception as err:
@@ -220,7 +222,8 @@ async def ask(
         return {"type": "error", "message": "查询执行失败(已如实报告,未生成估算数据)", "detail": str(err)}
 
     outcome = _result_frame(effective_question, result, intent, title_prefix)
-    cache_hit = "缓存读" in (result.caliber or "")
+    # 缓存命中是机器语义,读字段不解析展示串(口径注记的「缓存读」词面只给人看)
+    cache_hit = result.from_cache
     await trace.record(
         outcome.get("type", "error"), final_metric=intent.metric,
         final_method="cache" if cache_hit else "template",

@@ -15,7 +15,12 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-from engine_py.analytics.engine import MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
+from engine_py.analytics.engine import (
+    EntityGateRequired,
+    MetricQueryEngine,
+    StructuredQueryIntent,
+    UnsupportedQuery,
+)
 from engine_py.tools_registry.metric_registry import METRIC_SEMANTIC_REGISTRY
 
 try:
@@ -177,6 +182,38 @@ class TestOrderOverview:
         assert compiled.target_db == "merchant_db"
         assert compiled.params["entities"] == ["AURORA-ORD-2026-9081", "AURORA-ORD-2026-9083"]
         assert "ANY(:entities)" in compiled.sql
+
+
+class TestEntityGateTyped:
+    """编译期实体闸类型化(2026-10-03):六处「补一句话即可继续」的闸升格
+    EntityGateRequired(UnsupportedQuery 子类),呈现层 isinstance 分派取代
+    异常消息词面嗅探 —— 「请先指明活动」类引导不再被吞成「该指标暂未开放」。
+    """
+
+    GATES = [
+        ("order_overview", "请先在订单列表勾选订单"),
+        ("promo_compare", "请指明两个活动"),
+        ("promo_effect", "请先指明活动"),
+        ("promo_sku_compare", "请先指明活动"),
+        ("customer_orders", "请先指明客户"),
+        ("spu_compare", "请在商品列表勾选至少两个商品"),
+    ]
+
+    @pytest.mark.parametrize(("metric", "hint_fragment"), GATES)
+    def test_six_gates_raise_typed_hint(self, metric, hint_fragment):
+        # 闸在 compile 内 SQL 执行前即抛,不触库 —— 直构引擎,免容器依赖
+        eng = MetricQueryEngine(session_ctx={"business_id": "aurora"})
+        with pytest.raises(EntityGateRequired) as exc:
+            eng.compile(StructuredQueryIntent(metric=metric))
+        assert hint_fragment in exc.value.hint
+        assert str(exc.value) == exc.value.hint  # 场景包 str(err) 消费点零改写兼容
+
+    @pytest.mark.parametrize(("metric", "_"), GATES)
+    def test_gates_are_unsupported_query_subtype(self, metric, _):
+        """子类化契约:所有既有 except UnsupportedQuery(场景包/L3 兜底)行为不变。"""
+        eng = MetricQueryEngine(session_ctx={"business_id": "aurora"})
+        with pytest.raises(UnsupportedQuery):
+            eng.compile(StructuredQueryIntent(metric=metric))
 
 
 class TestQueryExemplars:

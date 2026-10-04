@@ -65,3 +65,14 @@ def test_cache_hit_nontrend_ignores_line_hint(monkeypatch, metric):
     assert _effective_chart(intent, result) is None, (
         "仲裁单点读到干净 result.chart 后,非趋势指标的 line 指令必须落「缺省随指标语义」"
     )
+
+
+def test_cache_hit_flags_from_cache(monkeypatch):
+    """缓存命中是机器语义,走 QueryResult.from_cache 字段(2026-10-03);
+    trace 归类不得再解析口径注记的「缓存读」词面 —— 文案与行为解耦。"""
+    _prime_cache(monkeypatch, rows=[{"v": 1.0}])
+    monkeypatch.setenv("AI_RESULT_CACHE_TTL", "60")
+    engine = MetricQueryEngine(session_ctx={"business_id": "aurora"})
+    result = __import__("asyncio").run(engine.execute_async(_compiled("gmv")))
+    assert result.from_cache is True
+    assert "缓存读" in result.caliber  # 口径注记原样保留(诚实呈现),仅不再被解析

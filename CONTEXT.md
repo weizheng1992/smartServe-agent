@@ -41,6 +41,8 @@ The TS `AgentMemoryEngine` facade was not ported as a single class; `run_agent.p
 
 The TS `NLMetricQueryEngine` was retired with the TS backend and **not ported** (the TS baseline already had zero call sites). The Data Agent never generates SQL text (iron rule 08-D1): intents resolve to a closed set of `StructuredQueryIntent` shapes and SQL is assembled deterministically from per-metric templates, audited read-only by `analytics/sql_guard.py` (AST SELECT-only + LIMIT). Do not route NL-to-SQL features through any generative path without a new ADR.
 
+**Entity gate vs unsupported are distinct concepts (2026-10-03)**: compile-time entity gates ("勾选两单再对比" — one sentence away from answerable) raise `EntityGateRequired(UnsupportedQuery)` carrying `.hint`; the presentation layer dispatches by `isinstance`, never by sniffing exception/caliber text. Machine semantics travel in fields (`QueryResult.from_cache`), display strings are for humans only.
+
 ### StepExecutionEngine (`services/engine-py/src/engine_py/graph/nodes/step_execution_engine.py`)
 
 A deep module facade that orchestrates the execution of individual task plan subtasks:

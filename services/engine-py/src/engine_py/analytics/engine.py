@@ -40,6 +40,23 @@ class UnsupportedQuery(Exception):
     """问句落在已注册指标空间之外(响亮失败,呈现层给可选问法)。"""
 
 
+class EntityGateRequired(UnsupportedQuery):
+    """编译期实体闸(2026-10-03 类型化):「补一句话即可继续」的可行动引导,
+    与「该指标暂未开放」的真不支持语义分家。
+
+    此前 six 处闸(勾选订单/勾选商品/指明活动×2/指明客户/双活动对比)与
+    真不支持共用 UnsupportedQuery,呈现层只能靠嗅探异常消息词面(「勾选」)
+    决定透传还是替换 generic 文案 —— 另外 4 处引导被吞成「该指标暂未开放」,
+    商户明明补一句话就能继续查。hint 携带完整用户文案;str(err) == hint,
+    场景包等既有 str(err) 消费点零改写。子类化保证所有 except UnsupportedQuery
+    行为不变(场景包 _run_scenario / llm_intent 兜底层)。
+    """
+
+    def __init__(self, hint: str) -> None:
+        self.hint = hint
+        super().__init__(hint)
+
+
 @dataclass(frozen=True)
 class StructuredQueryIntent:
     metric: str
@@ -62,6 +79,9 @@ class QueryResult:
     caliber: str  # 口径注记(呈现层展示;数据诚实铁律)
     source: str = "metric_template"
     chart: str | None = None  # line=折线(时间序列);None=默认表格
+    # 机器语义走字段,不靠解析展示串(2026-10-03:trace 归类曾从 caliber 词面
+    # 抠「缓存读」,文案一改 trace 静默变脸;口径注记本身原样保留给商户看)
+    from_cache: bool = False
 
 
 class MetricQueryEngine:
@@ -457,7 +477,7 @@ class MetricQueryEngine:
             # 对比类问法可直接看每单差异;实体来自 PageContext 勾选(必传)。
             params.pop("lim", None)  # 逐笔展示无 LIMIT 槽位,显式 50 行双保险
             if not intent.entity_ids:
-                raise UnsupportedQuery("请先在订单列表勾选订单,或直接在问句里写订单号(如 AURORA-ORD-2026-1737)")
+                raise EntityGateRequired("请先在订单列表勾选订单,或直接在问句里写订单号(如 AURORA-ORD-2026-1737)")
             sql = (
                 'SELECT o.order_id AS "订单号", o.status AS "状态", '
                 'o.total_amount::float AS "金额", '
@@ -473,7 +493,7 @@ class MetricQueryEngine:
             params.pop("lim", None)  # 并排两行无 LIMIT 槽位
             promo_ids = (intent.entity_slot or {}).get("promotion") or []
             if len(promo_ids) < 2:
-                raise UnsupportedQuery("请指明两个活动,如「活动A 对比 活动B」")
+                raise EntityGateRequired("请指明两个活动,如「活动A 对比 活动B」")
             params["entities"] = promo_ids[:10]
             sql = (
                 'SELECT p.name AS "活动", '
@@ -500,7 +520,7 @@ class MetricQueryEngine:
             params.pop("lim", None)
             promo_ids = (intent.entity_slot or {}).get("promotion") or []
             if not promo_ids:
-                raise UnsupportedQuery("请先指明活动(如「开学季活动卖得怎么样」)")
+                raise EntityGateRequired("请先指明活动(如「开学季活动卖得怎么样」)")
             if intent.time_window:
                 time_clause = "AND r.created_at >= :window_start"
                 params["window_start"] = self._window_start(intent.time_window)
@@ -517,7 +537,7 @@ class MetricQueryEngine:
             # ADR-0005 活动内商品对比:核销订单的商品明细按款聚合;可标目标款
             promo_ids = (intent.entity_slot or {}).get("promotion") or []
             if not promo_ids:
-                raise UnsupportedQuery("请先指明活动(如「开学季活动里冲锋衣对比其他款」)")
+                raise EntityGateRequired("请先指明活动(如「开学季活动里冲锋衣对比其他款」)")
             params["entities"] = promo_ids[:20]
             params["targets"] = (intent.entity_slot or {}).get("spu") or []
             sql = (
@@ -536,7 +556,7 @@ class MetricQueryEngine:
             # ADR-0005 客户订单列表(实体列表卡;前端订单行可跳订单管理)
             cust_ids = (intent.entity_slot or {}).get("customer") or []
             if not cust_ids:
-                raise UnsupportedQuery("请先指明客户(如「张三最近的订单」)")
+                raise EntityGateRequired("请先指明客户(如「张三最近的订单」)")
             params["entities"] = cust_ids[:20]
             sql = (
                 'SELECT o.order_id AS "order_id", o.status AS "status", '
@@ -641,7 +661,7 @@ class MetricQueryEngine:
             # 商品销售对比(T5 勾选的自然延伸):勾选 ≥2 款并排出销量/GMV/订单数
             spu_ids = (intent.entity_slot or {}).get("spu") or intent.entity_ids or []
             if len(spu_ids) < 2:
-                raise UnsupportedQuery("请在商品列表勾选至少两个商品,再问对比(如「两个商品销售对比」)")
+                raise EntityGateRequired("请在商品列表勾选至少两个商品,再问对比(如「两个商品销售对比」)")
             params.pop("lim", None)
             params["entities"] = spu_ids[:20]
             sql = (
@@ -801,6 +821,7 @@ class MetricQueryEngine:
                     unit=metric_semantic_registry()[compiled.metric]["unit"],
                     caliber=f"{caliber}(缓存读,数据时刻 ≈{age}s 前)",
                     chart=auto_chart,
+                    from_cache=True,
                 )
 
         if getattr(compiled, "target_db", "merchant_db") == "engine_db":
