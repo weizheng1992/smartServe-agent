@@ -835,18 +835,15 @@ async def promotions_delete(promotion_id: str, request: Request):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可删除活动"})
     from engine_py.analytics import promotions as P
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text as _t
 
-    async with merchant_writer_engine().begin() as conn:
-        used = (await conn.execute(_t(
-            "SELECT 1 FROM promotion_redemptions WHERE promotion_id = CAST(:id AS uuid) LIMIT 1"
-        ).bindparams(id=promotion_id))).first()
-        if used:
-            return JSONResponse(status_code=400, content={"success": False, "message": "已有核销记录,只可停用不可删除"})
-        await conn.execute(_t("DELETE FROM promotions WHERE id = CAST(:id AS uuid)").bindparams(id=promotion_id))
-    await P._audit("promo_delete", ctx["staff"], {"id": promotion_id})
-    return {"success": True}
+    # 业务规则(核销保护/查无 404/审计)住 promotions.delete_promotion 单点,
+    # 路由只留权限闸与 error-key → HTTP 映射(2026-10-03 自本路由下沉)
+    result = await P.delete_promotion(promotion_id, ctx["staff"])
+    if "error" in result:
+        not_found = result["error"] == "活动不存在"
+        return JSONResponse(status_code=404 if not_found else 400,
+                            content={"success": False, "message": result["error"]})
+    return {"success": True, "id": promotion_id}
 
 
 # ---------------- 客户 新增/删除(20 号补齐) ----------------

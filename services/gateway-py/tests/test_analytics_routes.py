@@ -339,6 +339,51 @@ class TestPromotions:
                                      headers=boss, json={"status": "disabled"})
         assert disabled.status_code == 200 and disabled.json()["status"] == "disabled"
 
+    async def test_delete_promotion_contract(self, client, auth):
+        """删除活动契约(2026-10-03 业务自路由下沉 promotions.delete_promotion):
+        查无 404「活动不存在」/ 无核销可删 200 且列表消失 / 已核销 400 保护
+        (核销行是 ADR-0005 归因口径真源,不可随删除蒸发)。"""
+        from engine_py.tools_registry.order_domain import merchant_writer_engine
+        from sqlalchemy import text as _t
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        gone = await client.delete(
+            "/api/admin/analytics/promotions/00000000-0000-0000-0000-000000000000", headers=boss
+        )
+        assert gone.status_code == 404 and "活动不存在" in gone.json()["message"]
+
+        created = await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "可删活动", "promoType": "full_reduction", "threshold": 100, "value": 10,
+        })
+        pid = created.json()["id"]
+        deleted = await client.delete(f"/api/admin/analytics/promotions/{pid}", headers=boss)
+        assert deleted.status_code == 200 and deleted.json()["success"] is True
+        listed = await client.get("/api/admin/analytics/promotions", headers=boss)
+        assert all(p["id"] != pid for p in listed.json()["promotions"])
+
+        # 核销保护臂:种真实订单(与生产同链路写引擎)→ 补录核销 → 删除被拒
+        guarded = await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "核销保护活动", "promoType": "full_reduction", "threshold": 100, "value": 10,
+        })
+        gpid = guarded.json()["id"]
+        async with merchant_writer_engine().begin() as conn:
+            await conn.execute(_t(
+                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
+                "VALUES ('AURORA-ORD-2026-9081', 'CUST-8801', 'PAID', 1299.00, "
+                "'{\"fullAddress\": \"E2E 测试地址\"}'::jsonb) "
+                "ON CONFLICT (order_id) DO UPDATE SET total_amount = 1299.00"
+            ))
+        redeemed = await client.post(f"/api/admin/analytics/promotions/{gpid}/redeem",
+                                     headers=boss, json={"orderId": "AURORA-ORD-2026-9081"})
+        assert redeemed.status_code == 200
+        blocked = await client.delete(f"/api/admin/analytics/promotions/{gpid}", headers=boss)
+        assert blocked.status_code == 400 and "已有核销记录" in blocked.json()["message"]
+        still_there = await client.get("/api/admin/analytics/promotions", headers=boss)
+        assert any(p["id"] == gpid for p in still_there.json()["promotions"])
+
     async def test_warehouse_cannot_create_403(self, client, auth):
         boss = await auth()
         sw = await client.post("/api/admin/analytics/staff/switch", headers=boss, json={"staffId": "wh@aurora"})

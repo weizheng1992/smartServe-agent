@@ -240,6 +240,32 @@ async def set_promotion_status(promotion_id: str, status: str, operator: str) ->
     return {"id": promotion_id, "status": status}
 
 
+async def delete_promotion(promotion_id: str, operator: str) -> dict:
+    """删除活动(2026-10-03 自 gateway 路由下沉,业务规则单点):已有核销记录
+    的活动不可删只可停用 —— 核销行是活动效果归因(ADR-0005 核销关联口径)的
+    真源,随删除蒸发即静默改写历史口径。查无此活动按「活动不存在」报错
+    (与 set_promotion_status 同键);核销检查与 DELETE 同事务,封住检查-
+    删除间隙新核销插入的 TOCTOU 缝。"""
+    async with merchant_writer_engine().begin() as conn:
+        used = (
+            await conn.execute(
+                text(
+                    "SELECT p.id, EXISTS(SELECT 1 FROM promotion_redemptions r WHERE r.promotion_id = p.id) AS used "
+                    "FROM promotions p WHERE p.id = CAST(:id AS uuid)"
+                ).bindparams(id=promotion_id)
+            )
+        ).first()
+        if not used:
+            return {"error": "活动不存在"}
+        if used.used:
+            return {"error": "已有核销记录,只可停用不可删除"}
+        await conn.execute(
+            text("DELETE FROM promotions WHERE id = CAST(:id AS uuid)").bindparams(id=promotion_id)
+        )
+    await _audit("promo_delete", operator, {"id": promotion_id})
+    return {"id": promotion_id}
+
+
 async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
     """补录核销(20-D4 订单↔优惠关联):对已存在的订单登记某活动的优惠金额。
 
