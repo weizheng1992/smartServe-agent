@@ -452,65 +452,89 @@ export function FloatingChatWidget() {
     if (!threadId || !isOpen) return;
 
     let eventSource: EventSource | null = null;
-    try {
-      // businessId 参与服务端属主闸(2026-10-02):stream 路由收多租户闸后需自报身份
-      eventSource = new EventSource(`/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}&businessId=aurora`);
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    let disposed = false;
+    // P7(2026-10-03):EventSource 对 4xx(属主闸 403/线程 404)也会自动重连,
+    // 重连必然同结果 = 无限重连风暴打在服务端租户闸上。改显式指数退避重建:
+    // 出错即 close 浏览器自动重连,1s→2s→…上限 30s,open 即重置;连败到上限
+    // 后停止(线程已删/身份不符时重试无意义),effect 重跑自然重建。
+    const MAX_RETRY = 6;
 
-      eventSource.addEventListener('message', (e) => {
-        try {
-          const msgData = JSON.parse(e.data);
-          if (msgData?.content) {
-            const incomingText = String(msgData.content).trim();
-            const incomingId = msgData.id || `sse_${Date.now()}`;
-            const incomingRole = msgData.role === 'user' ? 'user' : 'assistant';
-            const incomingCards = Array.isArray(msgData.cards) ? msgData.cards : [];
+    const connect = () => {
+      if (disposed) return;
+      try {
+        // businessId 参与服务端属主闸(2026-10-02):stream 路由收多租户闸后需自报身份
+        eventSource = new EventSource(
+          `/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}&businessId=aurora`,
+        );
 
-            if (incomingCards.length > 0) {
-              // 幂等键用服务端 messageId(msgData.id);无 id 的兜底消息跳过幂等直接同步
-              syncCartToLocalStorage(incomingCards, msgData.id);
+        eventSource.onopen = () => {
+          retryCount = 0;
+        };
+
+        eventSource.addEventListener('message', (e) => {
+          try {
+            const msgData = JSON.parse(e.data);
+            if (msgData?.content) {
+              const incomingText = String(msgData.content).trim();
+              const incomingId = msgData.id || `sse_${Date.now()}`;
+              const incomingRole = msgData.role === 'user' ? 'user' : 'assistant';
+              const incomingCards = Array.isArray(msgData.cards) ? msgData.cards : [];
+
+              if (incomingCards.length > 0) {
+                // 幂等键用服务端 messageId(msgData.id);无 id 的兜底消息跳过幂等直接同步
+                syncCartToLocalStorage(incomingCards, msgData.id);
+              }
+
+              setMessages((prev) => {
+                // 幂等去重仅按 id(SSE payload 的 id 与 POST 响应的 messageId 同源)。
+                // 不能按文本匹配:同一问题的模板化回复逐字节相同,文本去重会吞掉
+                // 后续轮次的合法回复(表现为"无实时返回,刷新后才出现")。
+                const alreadyExists = incomingId && prev.some((m) => m.id === incomingId);
+                if (alreadyExists) return prev;
+
+                return [
+                  ...prev,
+                  {
+                    id: incomingId,
+                    role: incomingRole,
+                    text: incomingText,
+                    cards: incomingCards,
+                    time: msgData.timestamp
+                      ? new Date(msgData.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : new Date().toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        }),
+                  },
+                ];
+              });
             }
-
-            setMessages((prev) => {
-              // 幂等去重仅按 id(SSE payload 的 id 与 POST 响应的 messageId 同源)。
-              // 不能按文本匹配:同一问题的模板化回复逐字节相同,文本去重会吞掉
-              // 后续轮次的合法回复(表现为"无实时返回,刷新后才出现")。
-              const alreadyExists = incomingId && prev.some((m) => m.id === incomingId);
-              if (alreadyExists) return prev;
-
-              return [
-                ...prev,
-                {
-                  id: incomingId,
-                  role: incomingRole,
-                  text: incomingText,
-                  cards: incomingCards,
-                  time: msgData.timestamp
-                    ? new Date(msgData.timestamp).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                    : new Date().toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      }),
-                },
-              ];
-            });
+          } catch (err) {
+            console.warn('[SSE] Failed to parse SSE message event:', err);
           }
-        } catch (err) {
-          console.warn('[SSE] Failed to parse SSE message event:', err);
-        }
-      });
+        });
 
-      eventSource.onerror = (err) => {
-        // SSE 断线将由浏览器 EventSource 机制自动安全重连
-        console.debug('[SSE] EventSource connection info:', err);
-      };
-    } catch (err) {
-      console.warn('[SSE] Failed to initialize EventSource:', err);
-    }
+        eventSource.onerror = () => {
+          // P7:close 掉浏览器自动重连,显式指数退避后重建(避免 4xx 无限风暴)
+          eventSource?.close();
+          if (disposed || retryCount >= MAX_RETRY) return;
+          const delay = Math.min(1000 * 2 ** retryCount, 30_000);
+          retryCount += 1;
+          retryTimer = setTimeout(connect, delay);
+        };
+      } catch (err) {
+        console.warn('[SSE] Failed to initialize EventSource:', err);
+      }
+    };
 
     return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       if (eventSource) {
         eventSource.close();
       }
