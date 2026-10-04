@@ -27,11 +27,13 @@ def quick_summary(result, intent) -> str | None:
     vals = [float(r[vcol]) for r in numeric_rows]
     # 峰谷/首尾变化只对「多行时间序列」有意义;单行多列统计卡(如活动效果
     # 总览:订单数/GMV/优惠额三列)拿末列当值做峰谷是读数错位(实弹踩坑)
-    is_time_series = intent.metric.endswith("_trend")
+    from .chart_policy import is_trend_family
+
+    is_time_series = is_trend_family(intent.metric)
     if not is_time_series:
         if len(rows) < 2:
             return None
-    elif (intent.chart_hint or result.chart) == "line" or intent.metric.endswith("_trend"):
+    else:
         top_v, low_v = max(vals), min(vals)
         delta = ((vals[-1] - vals[0]) * 100.0 / vals[0]) if vals[0] else None
         trend = "首尾持平" if not delta else f"期末较期初{'升' if delta > 0 else '降'} {abs(delta):.0f}%"

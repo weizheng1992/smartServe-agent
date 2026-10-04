@@ -17,7 +17,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from . import session_store
+from . import chart_policy, session_store
 from .context_intake import INLINE_SPU_METRICS as _INLINE_SPU_METRICS
 from .context_intake import (
     inline_order_ids,
@@ -178,14 +178,11 @@ async def ask(
         from . import dimensions
 
         candidates = await dimensions.list_candidates(missing_kind)
-        # 客户候选 label 是「名 · 手机号」复合串,逐字匹配只看纯名(name 键);
-        # 其余种类 name 键缺省回落 label
-        mentioned = [
-            c for c in candidates
-            if (c.get("name") or c["label"]) in effective_question or c["id"] in effective_question
-        ]
-        if len(mentioned) == 1:
-            intent.entity_slot[missing_kind] = [mentioned[0]["id"]]
+        # 逐字消歧唯一绑定(dimensions.bind_literal 单点,2026-10-03 收口):
+        # 客户候选 label 是「名 · 手机号」复合串,纯名 name 键优先
+        hit = dimensions.bind_literal(effective_question, candidates, fields=("name", "label", "id"))
+        if hit is not None:
+            intent.entity_slot[missing_kind] = [hit["id"]]
         else:
             return Clarify(
                 kind="entity",
@@ -247,18 +244,6 @@ async def ask(
     return outcome
 
 
-# 折线指令的作用面 = 趋势族(随时间的线才有折线语义);单行统计卡/逐笔
-# 列表吃了 line 只会落到前端「数据点不足」降级,不如在后端就不认
-_TREND_LINE_METRICS = frozenset({"gmv_trend", "volume_trend", "orders_trend", "customer_spend_trend"})
-
-
-def _effective_chart(intent, result) -> str | None:
-    """图型裁决:用户指令优先,但 line 仅对趋势族生效;缺省随指标语义。"""
-    if intent.chart_hint == "line":
-        return "line" if intent.metric in _TREND_LINE_METRICS else (result.chart or None)
-    return intent.chart_hint or result.chart
-
-
 def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict:
     from .tools_registry_bridge import metric_semantic_registry
 
@@ -271,8 +256,9 @@ def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict
         "metric": result.metric,
         "unit": result.unit,
         "caliber": result.caliber,
-        # 用户图表指令(chart_hint)优先,缺省由指标语义自动推断(趋势→折线)
-        "chart": _effective_chart(intent, result),
+        # 用户图表指令(chart_hint)优先,缺省由指标语义自动推断(趋势→折线);
+        # 仲裁唯一出处 chart_policy.decide(2026-10-03 收口)
+        "chart": chart_policy.decide(intent.chart_hint, intent.metric, result.chart),
         "summary": _quick_summary(result, intent),
         "rows": result.rows,
         "cards": cards,

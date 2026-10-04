@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from . import chart_policy
 from .schema_cards import compile_safe_schema_card
 from .sql_guard import UnsafeSqlError, assert_safe_select
 from .tools_registry_bridge import metric_semantic_registry
@@ -686,15 +687,14 @@ class MetricQueryEngine:
                 age = max(int(time.time() - cached["ts"]), 0)
                 caliber = _CALIBERS.get(compiled.metric, "有效订单聚合(排除退款/取消单)")
                 # chart 与执行路同公式(仅指标语义 auto):严禁吃 chart_hint —— 非趋势
-                # 指标带 line 指令时预污染 result.chart,会把 graph._effective_chart
+                # 指标带 line 指令时预污染 result.chart,会把 chart_policy.decide
                 # 的「折线仅趋势族」仲裁架空成透传(2026-09-25 折线事故在缓存
                 # AI_RESULT_CACHE_TTL>0 时复发的通路)
-                auto_chart = "line" if compiled.metric.endswith("_trend") else None
                 return QueryResult(
                     rows=cached["rows"], metric=compiled.metric,
                     unit=metric_semantic_registry()[compiled.metric]["unit"],
                     caliber=f"{caliber}(缓存读,数据时刻 ≈{age}s 前)",
-                    chart=auto_chart,
+                    chart=chart_policy.auto_chart(compiled.metric),
                     from_cache=True,
                 )
 
@@ -719,7 +719,7 @@ class MetricQueryEngine:
                 int(ttl),
             )
         caliber = _CALIBERS.get(compiled.metric, "有效订单聚合(排除退款/取消单)")
-        chart = "line" if compiled.metric.endswith("_trend") else None
+        chart = chart_policy.auto_chart(compiled.metric)
         return QueryResult(
             rows=[dict(r) for r in rows],
             metric=compiled.metric,

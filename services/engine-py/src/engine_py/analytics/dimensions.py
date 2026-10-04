@@ -106,6 +106,22 @@ class UnsupportedEntityKind(Exception):
     """未知实体种类(编程错误,非用户问题)。"""
 
 
+def bind_literal(question: str, candidates: list[dict], fields: tuple[str, ...] = ("label",)) -> dict | None:
+    """逐字消歧唯一绑定(2026-10-03 收口两份拷贝:graph 缺实体反问前自动绑定
+    × llm_intent L3 实体槽解析):问句里逐字写明**唯一**候选 → 返回该候选;
+    零/多命中 → None(调用方保守放行或反问,绝不猜)。
+
+    fields 为参与匹配的候选字段(任一命中即算):graph 用
+    ("name", "label", "id")(客户候选 label 是「名 · 手机号」复合串,纯名
+    name 键优先);llm_intent 用 ("label",)。纯函数零 IO。
+    """
+    matched = [
+        c for c in candidates
+        if any((v := c.get(f)) and str(v) in question for f in fields)
+    ]
+    return matched[0] if len(matched) == 1 else None
+
+
 async def entity_ids_exist(kind: str, ids: list[str]) -> bool:
     """意图实体槽引用的实体是否仍存在(L2 范例回放前校验;陈旧 → 停用范例)。"""
     if not ids:

@@ -350,15 +350,11 @@ class TestChartHintScope:
     """折线指令只对趋势族生效(实弹:单行统计卡吃 line → 前端诚实降级打扰用户):"""
 
     def test_line_hint_ignored_for_stats_card(self, engine):
-        from engine_py.analytics.engine import StructuredQueryIntent
-        from engine_py.analytics.graph import _effective_chart
+        from engine_py.analytics.chart_policy import decide
 
-        intent = StructuredQueryIntent(metric="promo_effect", chart_hint="line")
-        assert _effective_chart(intent, type("R", (), {"chart": None})()) is None
+        assert decide("line", "promo_effect", None) is None
 
     def test_line_hint_kept_for_trend(self, engine):
-        from engine_py.analytics.engine import StructuredQueryIntent
-        from engine_py.analytics.graph import _effective_chart
+        from engine_py.analytics.chart_policy import decide
 
-        intent = StructuredQueryIntent(metric="gmv_trend", chart_hint="line")
-        assert _effective_chart(intent, type("R", (), {"chart": "line"})()) == "line"
+        assert decide("line", "gmv_trend", "line") == "line"

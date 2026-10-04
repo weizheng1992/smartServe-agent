@@ -16,8 +16,8 @@ import types
 
 import pytest
 
+from engine_py.analytics.chart_policy import decide, trend_family
 from engine_py.analytics.engine import MetricQueryEngine
-from engine_py.analytics.graph import _TREND_LINE_METRICS, _effective_chart
 
 pytestmark = pytest.mark.usefixtures("pg_factory")
 
@@ -42,15 +42,14 @@ async def _fake_set(key: str, payload: dict, ttl: int) -> None:
     return None
 
 
-@pytest.mark.parametrize("metric", sorted(_TREND_LINE_METRICS))
+@pytest.mark.parametrize("metric", sorted(trend_family()))
 def test_cache_hit_trend_family_keeps_line(monkeypatch, metric):
     _prime_cache(monkeypatch, rows=[{"d": "2026-09-01", "v": 1.0}, {"d": "2026-09-02", "v": 2.0}])
     monkeypatch.setenv("AI_RESULT_CACHE_TTL", "60")
     engine = MetricQueryEngine(session_ctx={"business_id": "aurora"})
     result = __import__("asyncio").run(engine.execute_async(_compiled(metric)))
     assert result.chart == "line", "趋势指标缓存命中仍应随指标语义出折线"
-    intent = types.SimpleNamespace(chart_hint="line", metric=metric)
-    assert _effective_chart(intent, result) == "line"
+    assert decide("line", metric, result.chart) == "line"
 
 
 @pytest.mark.parametrize("metric", ["spu_compare", "customer_orders"])
@@ -61,8 +60,7 @@ def test_cache_hit_nontrend_ignores_line_hint(monkeypatch, metric):
     engine = MetricQueryEngine(session_ctx={"business_id": "aurora"})
     result = __import__("asyncio").run(engine.execute_async(_compiled(metric)))
     assert result.chart is None, "命中路不得吃 chart_hint 预污染 result.chart"
-    intent = types.SimpleNamespace(chart_hint="line", metric=metric)
-    assert _effective_chart(intent, result) is None, (
+    assert decide("line", metric, result.chart) is None, (
         "仲裁单点读到干净 result.chart 后,非趋势指标的 line 指令必须落「缺省随指标语义」"
     )
 
