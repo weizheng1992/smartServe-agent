@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from dataclasses import replace as _dc_replace
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -26,7 +27,13 @@ from .context_intake import (
 from .context_intake import (
     title_prefix as build_title_prefix,
 )
-from .engine import EntityGateRequired, MetricQueryEngine, StructuredQueryIntent, UnsupportedQuery
+from .engine import (
+    Clarify,
+    EntityGateRequired,
+    MetricQueryEngine,
+    StructuredQueryIntent,
+    UnsupportedQuery,
+)
 from .quick_summary import quick_summary as _quick_summary
 from .trace import Trace
 
@@ -112,7 +119,7 @@ async def ask(
         # 要加载模型权重),直调会阻塞事件循环 —— 与 llm_intent._sft_generate
         # 同纪律,下放线程执行。
         intent = await asyncio.to_thread(engine.resolve, question)
-        trace.add_layer("L0", metric=intent.metric if not isinstance(intent, dict) else "clarify")
+        trace.add_layer("L0", metric=intent.metric if isinstance(intent, StructuredQueryIntent) else "clarify")
     except UnsupportedQuery:
         # L2 范例回放 → L3 LLM 意图兜底(ADR-0005);全部未命中 → 响亮失败 + 落库
         rewritten_q = None
@@ -122,12 +129,13 @@ async def ask(
             await _log_unanswered(session_ctx, question)
             await trace.record("unsupported", final_method="none")
             return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": str(err)}
-        if isinstance(intent, dict) and intent.get("clarify"):
-            intent.setdefault("originalQuestion", rewritten_q or question)  # 实体反问回问时带上有效问句
+        if isinstance(intent, Clarify):
+            if intent.original_question is None:
+                intent = _dc_replace(intent, original_question=rewritten_q or question)  # 实体反问回问时带上有效问句
             await trace.record("clarify")
-            return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
+            return _clarify_frame(intent, allowed)
         # 兜底结果同样过角色闭集(防御纵深:resolver 替换/演化时不放行越权)
-        if not isinstance(intent, dict) and allowed and intent.metric not in allowed:
+        if isinstance(intent, StructuredQueryIntent) and allowed and intent.metric not in allowed:
             await _log_unanswered(session_ctx, question)
             return {"type": "unsupported", "message": "当前角色无权查看该指标", "detail": intent.metric}
     else:
@@ -136,9 +144,9 @@ async def ask(
     # 改写问句优先:指代已替换成实体名,实体逐字绑定/行内扫描/落存都用它
     effective_question = rewritten_q or question
 
-    if isinstance(intent, dict) and intent.get("clarify"):
+    if isinstance(intent, Clarify):
         await trace.record("clarify")
-        return {"type": "clarify", **_filter_clarify_options(intent, allowed)}
+        return _clarify_frame(intent, allowed)
 
     # 勾选/订单号/标题前缀 intake(context_intake 单一职责模块)
     sel_orders, sel_spu, sel_cust = parse_raw_selection((page_context or {}).get("selection"))
@@ -179,13 +187,12 @@ async def ask(
         if len(mentioned) == 1:
             intent.entity_slot[missing_kind] = [mentioned[0]["id"]]
         else:
-            return {
-                "type": "clarify",
-                "clarifyKind": "entity",
-                "question": f"请选择{dimensions.kind_label(missing_kind)}——",
-                "originalQuestion": effective_question,
-                "options": [{"label": c["label"]} for c in candidates],
-            }
+            return Clarify(
+                kind="entity",
+                question=f"请选择{dimensions.kind_label(missing_kind)}——",
+                options=[{"label": c["label"]} for c in candidates],
+                original_question=effective_question,
+            ).to_frame()
 
     if allowed is not None and intent.metric not in allowed:
         await trace.record("unsupported", final_metric=intent.metric)
@@ -385,7 +392,7 @@ async def _rewrite_followup(question: str, history: dict) -> str | None:
 async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict, history: dict | None = None, trace: Trace | None = None):
     """L0 未命中后的两级兜底:先 L2 范例回放(近零成本),再 L3 LLM 意图(ADR-0005)。
 
-    返回 (intent | clarify dict, via_llm);全部未命中 → UnsupportedQuery。
+    返回 (StructuredQueryIntent | Clarify, via_llm);全部未命中 → UnsupportedQuery。
     """
     from . import dimensions, exemplar_service
 
@@ -437,12 +444,15 @@ async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx
         intent = await llm_resolve(question, allowed, session_ctx.get("business_id") or "")
     except _EntityClarify as entity_clarify:
         print(f"[L3] 实体反问({entity_clarify.kind}): {len(entity_clarify.candidates)} 候选")
-        return {
-            "clarify": True,
-            "clarifyKind": "entity",
-            "question": f"请选择{dimensions.kind_label(entity_clarify.kind)}——",
-            "options": [{"label": c["label"]} for c in entity_clarify.candidates],
-        }, False, None
+        return (
+            Clarify(
+                kind="entity",
+                question=f"请选择{dimensions.kind_label(entity_clarify.kind)}——",
+                options=[{"label": c["label"]} for c in entity_clarify.candidates],
+            ),
+            False,
+            None,
+        )
     if isinstance(intent, StructuredQueryIntent):
         try:
             await exemplar_service.add_exemplar(
@@ -467,20 +477,20 @@ def _missing_entity_kind(intent) -> str | None:
     """新族必填实体缺失(经 L0 词表/范例直出、未经实体解析)→ 反问实体。"""
     from .llm_intent import ENTITY_REQUIRED
 
-    if isinstance(intent, dict):
-        return None
+    if not isinstance(intent, StructuredQueryIntent):
+        return None  # Clarify 等非意图结果无实体槽可言
     kind = ENTITY_REQUIRED.get(intent.metric)
     if kind and not (intent.entity_slot or {}).get(kind):
         return kind
     return None
 
 
-def _filter_clarify_options(clarify: dict, allowed: list[str] | None) -> dict:
-    """反问选项按角色指标闭集过滤(13 号票;实体类选项无 key,不过滤)。"""
-    options = clarify.get("options") or []
+def _clarify_frame(clarify: Clarify, allowed: list[str] | None) -> dict:
+    """反问帧:选项按角色指标闭集过滤(13 号票;实体类选项无 key,不过滤)。"""
+    options = clarify.options or []
     if allowed is not None and options and all("key" in o for o in options):
-        clarify["options"] = [o for o in options if o.get("key") in allowed]
-    return clarify
+        clarify = _dc_replace(clarify, options=[o for o in options if o.get("key") in allowed])
+    return clarify.to_frame()
 
 
 async def _log_unanswered(session_ctx: dict, question: str) -> None:

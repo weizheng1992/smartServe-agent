@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from engine_py.analytics.engine import MetricQueryEngine, QueryResult, UnsupportedQuery
+from engine_py.analytics.engine import Clarify, MetricQueryEngine, QueryResult, UnsupportedQuery
 from engine_py.analytics.schema_cards import merchant_schema_card
 from engine_py.analytics.sql_guard import assert_safe_select, reject_unsafe
 
@@ -75,9 +75,10 @@ class TestResolve:
             engine.resolve("今天心情怎么样")
 
     def test_ambiguous_returns_clarification_with_conflict_group(self, engine):
+        # 2026-10-03 起反问是一等公民:Clarify 类型(kind=metric),不再是裸 dict
         result = engine.resolve("卖得最好的商品")
-        assert isinstance(result, dict) and result.get("clarify") is True
-        keys = {c["key"] for c in result["options"]}
+        assert isinstance(result, Clarify) and result.kind == "metric"
+        keys = {c["key"] for c in result.options}
         assert {"gmv", "volume"} <= keys  # conflictGroup sales_performance_ranking
 
     def test_limit_extracted_and_clamped(self, engine):

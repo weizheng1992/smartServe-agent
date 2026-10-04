@@ -1,6 +1,6 @@
 """L0 同义词归一 + MetricQueryEngine 深模块(09-D5 接口冻结;08-D1 路线)。
 
-resolve:问句 → StructuredQueryIntent(闭集标签) | ClarificationRequest(反问);
+resolve:问句 → StructuredQueryIntent(闭集标签) | Clarify(反问;2026-10-03 一等公民);
 未命中抛 UnsupportedQuery —— 08-P1:废除静默兜底 gmv。
 compile:意图 → CompiledSQL(fragment 闭集 + bindparams;business_id 服务端注入;
 LIMIT clamp 1-50;sql_guard 校验后 AST 断言)。
@@ -12,7 +12,6 @@ LLM 的位置在 L3(未来 adapter,接口同 resolve);本模块词面层零 LLM 
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -71,6 +70,28 @@ class StructuredQueryIntent:
     entity_slot: dict[str, list[str]] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class Clarify:
+    """解析缝一等公民(2026-10-03):「落在闭集内但缺实体/指标待选」的反问结果
+    与 Intent 同为 resolve 的合法返回,取代裸 dict + isinstance 嗅探。
+
+    kind: metric=词面泛指需选指标(conflictGroup)/entity=实体需点选;
+    to_frame 产出 SSE 帧形状 —— 旧帧里的死键 "clarify": True 无任何消费方
+    (前端只读 clarifyKind/options),归一时删除;metric 帧补 clarifyKind
+    (加法,无害)。originalQuestion 供实体点选后回问原句。"""
+
+    kind: str  # "metric" | "entity"
+    question: str
+    options: list[dict]
+    original_question: str | None = None
+
+    def to_frame(self) -> dict:
+        frame = {"type": "clarify", "clarifyKind": self.kind, "question": self.question, "options": self.options}
+        if self.original_question:
+            frame["originalQuestion"] = self.original_question
+        return frame
+
+
 @dataclass
 class QueryResult:
     rows: list[dict]
@@ -88,166 +109,19 @@ class MetricQueryEngine:
     """09-D5 冻结接口。session_ctx 由调用方传入(business_id/role);本模块内
     business_id 只进绑定参数,不拼接 SQL 文本。"""
 
-    _LIMIT_RE = re.compile(r"top\s*(\d+)", re.IGNORECASE)
-    _REVERSE_WORDS = ("最差", "垫底", "最烂", "卖不动", "不走量", "最低", "最少")
-    # 反向词族自带指标指向(词表全正向,反向问句不命中同义词 — 03 号票 L0 缺口)
-    _REVERSE_METRIC_HINTS = (
-        ("卖得最差", "gmv"), ("卖得差", "gmv"), ("销售额最低", "gmv"), ("流水最低", "gmv"),
-        ("销量最低", "volume"), ("卖得最少", "volume"), ("件数最少", "volume"),
-    )
-    _GENERIC_POSITIVE = ("卖得最好", "卖得好", "最好", "爆款", "畅销")
-    _GENERIC_HINTS = (("卖得最好", ("gmv", "volume")), ("卖得好", ("gmv", "volume")), ("最好", ("gmv", "volume")))
-    _TIME_PATTERNS = (
-        ("last_month", re.compile(r"上个月|上月")),
-        ("last_7d", re.compile(r"最近\s*(一|7)\s*天|近\s*7\s*天")),
-        ("last_30d", re.compile(r"最近\s*(三十|30)\s*天|近\s*(三十|30)\s*天")),
-        # 跨月统计(用户实弹诉求):近/最近/过去 N 个月、「几个月的销量」(N 缺省 6);
-        # 纯「每月/按月/月度」无 N 同样切月粒度(N 缺省 6)
-        ("last_months", re.compile(r"(?:(?:近|最近|过去)\s*)?(\d{1,2}|[一两二三四五六七八九十几]+)\s*个月的?")),
-        ("last_months", re.compile(r"每月|按月|月度")),
-    )
-    _CN_MONTH_NUMS = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
-                      "七": 7, "八": 8, "九": 9, "十": 10, "几": 6}
-
     def __init__(self, session_ctx: dict | None = None, resolver: Any | None = None) -> None:
         self.session_ctx = session_ctx or {}
-        self._resolver = resolver  # 注入式 resolver(测试/显式 adapter)
-        # 11-D1 缝②:分类头三态(shadow=并行打分只记日志 / on=L0 未命中处接管;
-        # 默认不启用)。懒加载由工厂保证,进程内单例。
-        from .metric_head import get_metric_head
+        self._resolver = resolver  # 注入式 resolver(测试/显式 adapter;换整个 L0 的缝)
 
-        self._head = get_metric_head()
-        self._head_threshold = float(os.environ.get("AI_METRIC_HEAD_THRESHOLD", "0.5"))
-
-    # ---------------- resolve(L0 词面归一) ----------------
-    def resolve(self, question: str, session_ctx: dict | None = None) -> StructuredQueryIntent | dict:
-        clean = (question or "").strip().lower()
-        if not clean:
-            raise UnsupportedQuery("空问题")
-
-        if self._resolver is not None:  # 缝②:训练产物优先
+    # ---------------- resolve(L0 词面归一;2026-10-03 归位 l0_lexicon) ----------------
+    def resolve(self, question: str, session_ctx: dict | None = None) -> StructuredQueryIntent | Clarify:
+        """冻结接口 09-D5:词表/槽位/图表指令/缝②分类头在 l0_lexicon 独居
+        (与 L2/L3 同粒度);本方法只保留注入式 resolver 缝(训练产物优先)。"""
+        if self._resolver is not None:
             return self._resolver(question)
+        from .l0_lexicon import resolve_question
 
-        registry = metric_semantic_registry()
-        hit: tuple[str, str] | None = None
-        matched_words: list[tuple[str, str]] = []
-        for phrase, hinted_key in self._REVERSE_METRIC_HINTS:
-            if phrase in clean:
-                matched_words.append((hinted_key, phrase))
-        if not matched_words:
-            for phrase, hinted_keys in self._GENERIC_HINTS:
-                if phrase in clean:
-                    matched_words.extend((k, phrase) for k in hinted_keys)
-        for key, metric in registry.items():
-            # 匹配词记录实际命中的词面(key/label 各自),不记整段 label —— 否则
-            # key 命中会以 label 长度参与最长优先,压过更具体的趋势类条目(实弹修)
-            if key in clean:
-                matched_words.append((key, key))
-            elif metric["label"].lower() in clean:
-                matched_words.append((key, metric["label"]))
-            for syn in metric.get("synonyms") or []:
-                if syn.lower() in clean:
-                    matched_words.append((key, syn))
-        if matched_words:
-            matched_words.sort(key=lambda p: len(p[1]), reverse=True)
-            hit = (matched_words[0][0], matched_words[0][1])
-            # 榜/排行语义优先于趋势:「上个月的销量排行」问的是榜单不是折线;
-            # 时间窗照常生效(_trend → 对应榜单指标),趋势问法不受影响。
-            if hit[0].endswith("_trend") and re.search(r"排行|排名|榜单|榜|top\s*\d*", clean):
-                hit = ({"gmv_trend": "gmv", "volume_trend": "volume"}.get(hit[0], hit[0]), hit[1])
-
-        # 分类头同一次 resolve 只打一次分:shadow 对比与 on 接管共用这一次结果。
-        # 此前 hit 未命中时上方 shadow 块与下方 on 块各 predict 一遍(同问句双跑)。
-        head_call: tuple[str, float] | None = None
-        if self._head is not None:
-            try:
-                head_label, head_conf = self._head.predict(question)
-                head_call = (head_label, head_conf)
-                if hit is not None and head_label != hit[0]:
-                    print(
-                        f"[MetricHead][shadow] 不一致: L0={hit[0]} head={head_label}({head_conf:.2f})"
-                        f" question={question[:40]!r}"
-                    )
-            except Exception as head_err:
-                print(f"[MetricHead] 打分失败(放行 L0/L3): {head_err}")
-
-        if hit is None:
-            # 缝② on 模式:L0 未命中 → 分类头接管(低置信仍放行 L3,不许静默错分);
-            # 槽位(limit/时间窗/品类)与 L0 命中路同源解析(0014 缺口修复)
-            if head_call is not None:
-                try:
-                    head_label, head_conf = head_call
-                    if head_label in registry and head_conf >= self._head_threshold:
-                        print(f"[MetricHead][on] 接管: {head_label}({head_conf:.2f}) question={question[:40]!r}")
-                        limit2, time2, cat2 = self._extract_slots(clean)
-                        return StructuredQueryIntent(
-                            metric=head_label, direction=registry[head_label]["direction"],
-                            limit=limit2, time_window=time2, category=cat2,
-                            chart_hint=self._parse_chart_hint(clean),
-                        )
-                except UnsupportedQuery:
-                    pass
-                except Exception as head_err:
-                    print(f"[MetricHead] on 模式打分失败: {head_err}")
-            raise UnsupportedQuery(f"未命中已注册指标(闭集={list(registry)})")
-
-        metric_key = hit[0]
-
-        # 折线图指令 × 基础销量/金额指标 → 升级为趋势族(「销量 折线图」问的是
-        # 随时间的线,不是榜单);榜单语义(榜/排行/Top)优先,不升级。
-        # chart_hint 在此提前解析,兼作升级触发器。
-        chart_hint = self._parse_chart_hint(clean)
-        if chart_hint == "line" and metric_key in ("gmv", "volume", "order_count") and not re.search(r"排行|排名|榜|top\s*\d*", clean):
-            metric_key = {"gmv": "gmv_trend", "volume": "volume_trend", "order_count": "orders_trend"}[metric_key]
-        metric = registry[metric_key]
-
-        # 反向词 → 方向翻转(03-L0 决议);正向泛指词 × 多销售指标 → 反问
-        reverse = any(w in clean for w in self._REVERSE_WORDS)
-        direction = ("ASC" if metric["direction"] == "DESC" else "DESC") if reverse else metric["direction"]
-
-        group = metric.get("conflictGroup") or []
-        if group and any(w in clean for w in self._GENERIC_POSITIVE) and not any(
-            w in clean for w in ("金额", "件数", "销量", "销售额", "毛利", "利润", "流水", "营业额", "库存")
-        ):
-            siblings = [m for m in registry.values() if group[0] in (m.get("conflictGroup") or [])]
-            if len(siblings) > 1:
-                return {
-                    "clarify": True,
-                    "question": f"「{question[:20]}」是指——",
-                    "options": [{"key": m["key"], "label": m["label"], "intent": {"metric": m["key"], "direction": m["direction"]}} for m in siblings],
-                }
-
-        limit, time_window, category = self._extract_slots(clean)
-
-        return StructuredQueryIntent(metric=metric_key, direction=direction, limit=limit, time_window=time_window, category=category, chart_hint=chart_hint)
-
-    _CHART_HINTS = (
-        ("line", re.compile(r"折线|曲线|趋势图")),
-        ("bar", re.compile(r"柱状|条形|柱形")),
-        ("table", re.compile(r"表格")),
-    )
-
-    def _parse_chart_hint(self, clean: str) -> str | None:
-        """图表类型指令槽(Q3):用户点名图型时覆盖卡片自动推断。"""
-        return next((v for v, pat in self._CHART_HINTS if pat.search(clean)), None)
-
-    def _extract_slots(self, clean: str) -> tuple[int, dict | None, str | None]:
-        """开放槽位解析(limit/时间窗/品类);L0 命中路与分类头 on 路径共用。"""
-        limit_match = self._LIMIT_RE.search(clean)
-        limit = min(max(int(limit_match.group(1)) if limit_match else 5, 1), 50)
-        time_window: dict | None = None
-        for kind, pat in self._TIME_PATTERNS:
-            m = pat.search(clean)
-            if m:
-                time_window = {"kind": kind}
-                if kind == "last_months":
-                    raw = m.group(1) if m.groups() else None
-                    n = int(raw) if raw and raw.isdigit() else self._CN_MONTH_NUMS.get(raw or "", 6)
-                    time_window["n"] = min(max(n, 1), 24)
-                break
-        cat_match = re.search(r"(户外机能|潮流T恤|下装裤类|潮流鞋靴|背包收纳|露营装备|衬衫|配饰|运动配件)", clean, re.IGNORECASE)
-        category = cat_match.group(1) if cat_match else None
-        return limit, time_window, category
+        return resolve_question(question)
 
     # ---------------- compile(模板拼装;LLM 不参与) ----------------
     def compile(self, intent: StructuredQueryIntent | dict, session_ctx: dict | None = None) -> Any:
