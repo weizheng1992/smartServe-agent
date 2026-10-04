@@ -24,7 +24,7 @@ async def resolve_entity(kind: str, mention: str, limit: int = 8) -> list[dict]:
         return []
     if kind not in _ENTITY_KINDS:
         raise UnsupportedEntityKind(kind)
-    async with order_domain._merchant_reader_engine().connect() as conn:
+    async with order_domain.merchant_reader_engine().connect() as conn:
         if kind == "promotion":
             rows = (
                 await conn.execute(text(
@@ -60,7 +60,7 @@ async def find_inline_spu_mentions(question: str) -> list[dict]:
     q = (question or "").strip()
     if len(q) < 6:
         return []
-    async with order_domain._merchant_reader_engine().connect() as conn:
+    async with order_domain.merchant_reader_engine().connect() as conn:
         rows = (
             await conn.execute(text(
                 "SELECT spu_code AS id, title AS label FROM merchant_spus "
@@ -76,7 +76,7 @@ async def list_candidates(kind: str, limit: int = 8) -> list[dict]:
     """未指明实体时的候选清单(clarify 反问选项;按最近/最大取前 N)。"""
     if kind not in _ENTITY_KINDS:
         raise UnsupportedEntityKind(kind)
-    async with order_domain._merchant_reader_engine().connect() as conn:
+    async with order_domain.merchant_reader_engine().connect() as conn:
         if kind == "promotion":
             rows = (
                 await conn.execute(text(
@@ -115,7 +115,7 @@ async def entity_ids_exist(kind: str, ids: list[str]) -> bool:
         "customer": ("merchant_customers", "customer_id"),
         "spu": ("merchant_spus", "spu_code"),
     }[kind]
-    async with order_domain._merchant_reader_engine().connect() as conn:
+    async with order_domain.merchant_reader_engine().connect() as conn:
         row = (
             await conn.execute(text(
                 f"SELECT COUNT(*) AS n FROM {table} WHERE {col} = ANY(:ids)"

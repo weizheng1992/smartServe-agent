@@ -832,8 +832,9 @@ class MetricQueryEngine:
         else:
             from ..tools_registry import order_domain
 
-            # 运行时读取模块属性(测试替换 reader 工厂,静态引用会绕过 patch)
-            async with order_domain._merchant_reader_engine().connect() as conn:
+            # 公开访问器 + 运行时读取模块属性(测试替换 reader 工厂,静态引用会绕过 patch;
+            # 访问器 call-time 委托私有位,既有对私有工厂的 patch 照常生效)
+            async with order_domain.merchant_reader_engine().connect() as conn:
                 rows = (await conn.execute(text(compiled.sql).bindparams(**compiled.params))).mappings().all()
         if cache_key and ttl > 0:
             from . import result_cache

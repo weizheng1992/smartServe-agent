@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from ..tools_registry.order_domain import _merchant_writer_engine
+from ..tools_registry.order_domain import merchant_writer_engine
 from .promotion_engine import _compute_discount
 
 PROMO_TYPES = ("full_reduction", "discount", "coupon")
@@ -70,7 +70,7 @@ def _effective_status(status: str, start_at, end_at, now: datetime) -> str:
 async def _audit(action: str, operator: str, payload: dict) -> None:
     """审计(20-D5):写操作落 merchant_audit_logs;失败不炸主流程但打印。"""
     try:
-        async with _merchant_writer_engine().begin() as conn:
+        async with merchant_writer_engine().begin() as conn:
             await conn.execute(
                 text(
                     "INSERT INTO merchant_audit_logs (action_type, order_id, idempotency_key, operator, payload) "
@@ -89,7 +89,7 @@ async def list_promotions() -> list[dict]:
     兜住子查询走索引,LIMIT 100 规模下无压力。
     """
     now = _utcnow()
-    async with _merchant_writer_engine().connect() as conn:
+    async with merchant_writer_engine().connect() as conn:
         rows = (
             await conn.execute(
                 text(
@@ -137,7 +137,7 @@ async def create_promotion(payload: dict, operator: str) -> dict:
     except ValueError as err:
         return {"error": f"时间窗/发放上限不合法:{err}"}
     promo_id = str(uuid.uuid4())
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         await conn.execute(
             text(
                 "INSERT INTO promotions (id, name, promo_type, threshold_amount, discount_value, scope_type, scope_value, "
@@ -169,7 +169,7 @@ async def update_promotion(promotion_id: str, patch: dict, operator: str) -> dic
     的起止(单改一端与库内另一端合判)。上限可缩到已发放数以下 —— 量控闸在
     领取时点,缩额只冻结后续发放,不追回已发券。
     """
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         row = (
             await conn.execute(
                 text(
@@ -230,7 +230,7 @@ async def update_promotion(promotion_id: str, patch: dict, operator: str) -> dic
 async def set_promotion_status(promotion_id: str, status: str, operator: str) -> dict:
     if status not in ("active", "disabled"):
         return {"error": "status ∈ active|disabled"}
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         result = await conn.execute(
             text("UPDATE promotions SET status = :s WHERE id = CAST(:id AS uuid)").bindparams(s=status, id=promotion_id)
         )
@@ -249,7 +249,7 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
     已结束/未开始,补录核销却照收」的口径分裂。
     """
     now = _utcnow()
-    async with _merchant_writer_engine().connect() as conn:
+    async with merchant_writer_engine().connect() as conn:
         promo = (
             await conn.execute(
                 text("SELECT promo_type, threshold_amount, discount_value, status, start_at, end_at "
@@ -295,7 +295,7 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
         return {"error": "订单不满足活动规则,不可核销"}
     discount = min(discount, total)
 
-    async with _merchant_writer_engine().begin() as conn:
+    async with merchant_writer_engine().begin() as conn:
         await conn.execute(
             text("INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
                  "VALUES (CAST(:pid AS uuid), :oid, :amt)").bindparams(pid=promotion_id, oid=order_id, amt=discount)
@@ -312,7 +312,7 @@ async def claim_coupon(promotion_id: str, user_id: str) -> dict:
     个位数(每人限领 1 的 uq_user_promo 仍是最终防线),运营口径可接受;
     预算上限/每人限领 N 张明确不做(触碰结算资金口径 20-D3,留下一轮)。
     """
-    async with _merchant_writer_engine().connect() as conn:
+    async with merchant_writer_engine().connect() as conn:
         promo = (
             await conn.execute(
                 text("SELECT promo_type, status, total_quota FROM promotions WHERE id = CAST(:id AS uuid)").bindparams(id=promotion_id)
@@ -339,7 +339,7 @@ async def claim_coupon(promotion_id: str, user_id: str) -> dict:
             if int(issued or 0) >= promo["total_quota"]:
                 return {"error": "券发放已达上限,无法领取"}
     try:
-        async with _merchant_writer_engine().begin() as conn:
+        async with merchant_writer_engine().begin() as conn:
             await conn.execute(
                 text("INSERT INTO user_coupons (promotion_id, user_id) VALUES (CAST(:id AS uuid), :u)")
                 .bindparams(id=promotion_id, u=user_id)
@@ -356,7 +356,7 @@ async def my_coupons(user_id: str) -> list[dict]:
     """我的券:claimed(可用)+ used(已核销)全量带 status —— 核销态必须仍在
     列表(2026-09-21 bug:修前只回 claimed,商品页 claimedIds 丢记录,领券按钮
     复现,重复领取 400「已领取过该券」);可用性由消费方按 status 过滤。"""
-    async with _merchant_writer_engine().connect() as conn:
+    async with merchant_writer_engine().connect() as conn:
         rows = (
             await conn.execute(
                 text(
@@ -404,7 +404,7 @@ async def mark_coupon_used(conn, coupon_row_id: str, order_id: str) -> bool:
 
 async def effect_overview() -> dict:
     """效果速览(20-D4):核销单数/优惠总额/最近核销;真实聚合,零活动诚实空。"""
-    async with _merchant_writer_engine().connect() as conn:
+    async with merchant_writer_engine().connect() as conn:
         row = (
             await conn.execute(
                 text(
