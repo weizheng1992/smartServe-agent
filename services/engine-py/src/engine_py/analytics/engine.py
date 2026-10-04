@@ -181,7 +181,7 @@ class MetricQueryEngine:
         time_clause = ""
         if intent.time_window:
             time_clause = "AND o.created_at >= :window_start"
-            params["window_start"] = self._window_start(intent.time_window)
+            params["window_start"] = window_start(intent.time_window)
         category_clause = ""
         if intent.category:
             category_clause = "AND s.category = :cat"
@@ -230,7 +230,7 @@ class MetricQueryEngine:
         if intent.metric == "review_bad":
             if intent.time_window:
                 time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 'SELECT s.title AS "productId", COUNT(*) AS "metricScore" '
                 "FROM merchant_product_reviews r JOIN merchant_spus s ON s.id = r.spu_id "
@@ -240,7 +240,7 @@ class MetricQueryEngine:
         elif intent.metric == "refund_rate":
             if intent.time_window:
                 time_clause = "AND o.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 'SELECT oi.spu_id AS "productId", '
                 "ROUND(COALESCE(SUM(CASE WHEN o.status = 'REFUNDED' THEN oi.quantity ELSE 0 END), 0)::numeric "
@@ -252,7 +252,7 @@ class MetricQueryEngine:
         elif intent.metric == "session_volume":
             if intent.time_window:
                 time_clause = "AND created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 "SELECT '__total__' AS \"productId\", COUNT(*)::int AS \"metricScore\" "
                 f"FROM session_metrics WHERE business_id = :business_id {time_clause} LIMIT :lim"
@@ -260,7 +260,7 @@ class MetricQueryEngine:
         elif intent.metric in ("promo_orders", "promo_discount_total"):
             if intent.time_window:
                 time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             value_expr = (
                 "COUNT(DISTINCT r.order_id)" if intent.metric == "promo_orders" else "COALESCE(SUM(r.discount_amount), 0)::float"
             )
@@ -278,7 +278,7 @@ class MetricQueryEngine:
             # 同源(真实归因,自然流量不计入)。GROUP BY 带 p.id 防同名活动合并。
             if intent.time_window:
                 time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 'SELECT p.name AS "productId", '
                 'COALESCE(SUM(o.total_amount), 0)::float AS "metricScore" '
@@ -291,7 +291,7 @@ class MetricQueryEngine:
         elif intent.metric == "after_sale_overview":
             if intent.time_window:
                 time_clause = "AND created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 'SELECT status AS "productId", COUNT(*)::int AS "metricScore" '
                 f"FROM after_sale_tickets WHERE business_id = :business_id {time_clause} "
@@ -384,7 +384,7 @@ class MetricQueryEngine:
         elif intent.metric == "ai_resolution_rate":
             if intent.time_window:
                 time_clause = "AND created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 "SELECT '__total__' AS \"productId\", ROUND(COALESCE(SUM(CASE WHEN resolution_status = 'resolved_auto' "
                 "THEN 1 ELSE 0 END), 0)::numeric * 100 / GREATEST(COUNT(*), 1), 2)::float AS \"metricScore\" "
@@ -398,7 +398,7 @@ class MetricQueryEngine:
                 raise EntityGateRequired("请先指明活动(如「开学季活动卖得怎么样」)")
             if intent.time_window:
                 time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             params["entities"] = promo_ids[:20]
             sql = (
                 'SELECT COUNT(DISTINCT r.order_id) AS "核销订单数", '
@@ -445,7 +445,7 @@ class MetricQueryEngine:
             params.pop("lim", None)  # 单行聚合,LIMIT 1 字面兜底
             if intent.time_window:
                 time_clause = "AND o.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             value_expr = (
                 "ROUND(AVG(o.total_amount), 2)::float" if intent.metric == "aov" else "COUNT(*)::int"
             )
@@ -458,7 +458,7 @@ class MetricQueryEngine:
             # 好评榜(与差评榜对偶:rating ≥ 4;评价表 spu_id 为 uuid,join 取商品标题)
             if intent.time_window:
                 time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 'SELECT s.title AS "productId", COUNT(*) AS "metricScore" '
                 "FROM merchant_product_reviews r JOIN merchant_spus s ON s.id = r.spu_id "
@@ -478,7 +478,7 @@ class MetricQueryEngine:
         elif intent.metric == "category_gmv_top":
             if intent.time_window:
                 time_clause = "AND o.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 'SELECT s.category AS "productId", '
                 'COALESCE(SUM(oi.quantity * oi.price), 0)::float AS "metricScore" '
@@ -491,7 +491,7 @@ class MetricQueryEngine:
         elif intent.metric == "customer_spend_top":
             if intent.time_window:
                 time_clause = "AND o.created_at >= :window_start"
-                params["window_start"] = self._window_start(intent.time_window)
+                params["window_start"] = window_start(intent.time_window)
             sql = (
                 'SELECT c.name AS "productId", c.phone AS "phone", '
                 'COALESCE(SUM(o.total_amount), 0)::float AS "metricScore" '
@@ -738,28 +738,32 @@ class MetricQueryEngine:
             return asyncio.run(self.execute_async(compiled, session_ctx))
         raise RuntimeError("execute() 不能在事件循环内调用;请 await execute_async()")
 
-    def _window_start(self, window: dict) -> datetime:
-        kind = window.get("kind")
-        # 窗口下界必须与库钟同源(UTC):created_at 由 server_default now() 落
-        # naive UTC,本地 naive now 在非 UTC 部署下让所有相对时间窗整体偏移
-        # 时区(2026-09-29 夜审 F15 波及复核);月对齐分支与同文件
-        # date_trunc('month', CURRENT_DATE)(UTC 月界)同口径。
-        now = datetime.now(UTC).replace(tzinfo=None)
-        if kind == "last_month":
-            first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            return (first - timedelta(days=1)).replace(day=1)
-        if kind == "last_7d":
-            return now - timedelta(days=7)
-        if kind == "last_30d":
-            return now - timedelta(days=30)
-        if kind == "last_months":
-            # 含当月共 n 个月 → 起点 = n-1 个月前的月初(月对齐)
-            first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            month = first
-            for _ in range(max(int(window.get("n") or 6), 1) - 1):
-                month = (month - timedelta(days=1)).replace(day=1)
-            return month
-        raise UnsupportedQuery(f"未知时间窗 {kind}")
+def window_start(window: dict, now: datetime | None = None) -> datetime:
+    """相对时间窗下界(公共纯函数,2026-10-03 自私有方法归位为可直测面):
+    kind ∈ last_month/last_7d/last_30d/last_months。
+
+    窗口下界必须与库钟同源(UTC):created_at 由 server_default now() 落
+    naive UTC,本地 naive now 在非 UTC 部署下让所有相对时间窗整体偏移
+    时区(2026-09-29 夜审 F15 波及复核);月对齐分支与
+    date_trunc('month', CURRENT_DATE)(UTC 月界)同口径。
+    """
+    kind = window.get("kind")
+    now = now or datetime.now(UTC).replace(tzinfo=None)
+    if kind == "last_month":
+        first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return (first - timedelta(days=1)).replace(day=1)
+    if kind == "last_7d":
+        return now - timedelta(days=7)
+    if kind == "last_30d":
+        return now - timedelta(days=30)
+    if kind == "last_months":
+        # 含当月共 n 个月 → 起点 = n-1 个月前的月初(月对齐)
+        first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month = first
+        for _ in range(max(int(window.get("n") or 6), 1) - 1):
+            month = (month - timedelta(days=1)).replace(day=1)
+        return month
+    raise UnsupportedQuery(f"未知时间窗 {kind}")
 
 
 @dataclass(frozen=True)

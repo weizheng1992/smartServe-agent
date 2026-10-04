@@ -15,7 +15,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from engine_py.analytics.engine import Clarify, MetricQueryEngine, QueryResult, UnsupportedQuery
+from engine_py.analytics.engine import (
+    Clarify,
+    MetricQueryEngine,
+    QueryResult,
+    UnsupportedQuery,
+    window_start,
+)
 from engine_py.analytics.schema_cards import merchant_schema_card
 from engine_py.analytics.sql_guard import assert_safe_select, reject_unsafe
 
@@ -54,14 +60,14 @@ class TestResolve:
         整体偏移时区 —— 旧实现下本用例必红(2026-09-29 夜审 F15 波及复核,
         与 outbox 阈值下沉 SQL NOW() 同纪律;此处比较在 Python 侧拼参,
         故取 UTC 钟)。"""
-        start = engine._window_start({"kind": "last_7d"})
+        start = window_start({"kind": "last_7d"})
         utc_now = datetime.now(UTC).replace(tzinfo=None)
         assert abs((utc_now - start).total_seconds() - 7 * 86400) < 5
 
     def test_window_start_month_boundary_is_utc_aligned(self, engine):
         """last_month 月界与同文件 date_trunc('month', CURRENT_DATE)(UTC
         月界)同口径,而非本地月末推出的月首。"""
-        start = engine._window_start({"kind": "last_month"})
+        start = window_start({"kind": "last_month"})
         utc_first = (
             datetime.now(UTC)
             .replace(tzinfo=None)

@@ -73,7 +73,7 @@ class Trace:
     def add_layer(self, layer: str, **detail) -> None:
         self.layers.append({"layer": layer, **detail})
 
-    async def record(
+    def build_row(
         self,
         outcome: str,
         final_metric: str | None = None,
@@ -81,9 +81,10 @@ class Trace:
         sql_template: str | None = None,
         row_count: int | None = None,
         cache_hit: bool = False,
-    ) -> None:
+    ) -> dict:
+        """落库行装配(纯函数,2026-10-03 抽出可直测:行形状契约的唯一出处)。"""
         duration_ms = int((time.perf_counter() - self.started) * 1000)
-        row = {
+        return {
             "business_id": self.business_id,
             "role": self.role,
             "trace_id": self.trace_id,
@@ -97,6 +98,19 @@ class Trace:
             "duration_ms": duration_ms,
             "outcome": outcome,
         }
+
+    async def record(
+        self,
+        outcome: str,
+        final_metric: str | None = None,
+        final_method: str | None = None,
+        sql_template: str | None = None,
+        row_count: int | None = None,
+        cache_hit: bool = False,
+    ) -> None:
+        row = self.build_row(
+            outcome, final_metric, final_method, sql_template, row_count, cache_hit,
+        )
         try:
             await _ensure_table()
             async with get_session() as session:

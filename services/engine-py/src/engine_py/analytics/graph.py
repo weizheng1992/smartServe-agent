@@ -124,7 +124,7 @@ async def ask(
         # L2 范例回放 → L3 LLM 意图兜底(ADR-0005);全部未命中 → 响亮失败 + 落库
         rewritten_q = None
         try:
-            intent, _, rewritten_q = await _fallback_intent(question, allowed, session_ctx, history=history, trace=trace)
+            intent, _, rewritten_q = await fallback_intent(question, allowed, session_ctx, history=history, trace=trace)
         except UnsupportedQuery as err:
             await _log_unanswered(session_ctx, question)
             await trace.record("unsupported", final_method="none")
@@ -375,8 +375,9 @@ async def _rewrite_followup(question: str, history: dict) -> str | None:
         return None
 
 
-async def _fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict, history: dict | None = None, trace: Trace | None = None):
-    """L0 未命中后的两级兜底:先 L2 范例回放(近零成本),再 L3 LLM 意图(ADR-0005)。
+async def fallback_intent(question: str, allowed: list[str] | None, session_ctx: dict, history: dict | None = None, trace: Trace | None = None):
+    """L0 未命中后的两级兜底(公共面:测试/工具经此注入或观察 L2/L3 阶梯):
+    先 L2 范例回放(近零成本),再 L3 LLM 意图(ADR-0005)。
 
     返回 (StructuredQueryIntent | Clarify, via_llm);全部未命中 → UnsupportedQuery。
     """

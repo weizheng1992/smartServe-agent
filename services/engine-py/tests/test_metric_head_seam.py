@@ -88,23 +88,6 @@ def run_dir(tmp_path_factory) -> Path:
     return _train_tiny(tmp_path_factory.mktemp("head"))
 
 
-def _engine_with_head(monkeypatch, run_dir: Path, mode: str):
-    from engine_py.analytics import metric_head as mh
-
-    monkeypatch.setenv("AI_METRIC_HEAD", mode)
-    monkeypatch.setenv("AI_METRIC_HEAD_DIR", str(run_dir))
-    monkeypatch.setenv("AI_METRIC_HEAD_THRESHOLD", "0.5")
-    # 进程内工厂缓存失效(mode 变化必须重读)
-
-    monkeypatch.delenv("AI_METRIC_HEAD", raising=False)
-    # MetricQueryEngine.__init__ 直接调 get_metric_head(analytics 本地工厂)
-    monkeypatch.setattr(
-        "engine_py.analytics.metric_head.get_metric_head", lambda: mh.get_metric_head()
-    )
-    monkeypatch.setattr("engine_py.llm.chat.get_intent_classifier", lambda: None)  # 不触意图缝
-    return MetricQueryEngine(session_ctx={"business_id": "aurora", "role": "finance_owner"})
-
-
 class TestHeadModes:
     def test_default_off_is_pure_l0(self, monkeypatch):
         monkeypatch.delenv("AI_METRIC_HEAD", raising=False)

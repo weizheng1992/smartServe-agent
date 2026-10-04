@@ -158,7 +158,7 @@ class TestAdversarialInput:
         async def _forbidden(*args, **kwargs):
             raise AssertionError(f"注入语料不应触达 L2/L3 兜底: {args!r}")
 
-        monkeypatch.setattr(graph, "_fallback_intent", _forbidden)
+        monkeypatch.setattr(graph, "fallback_intent", _forbidden)
         for q in self.INJECTIONS:
             out = asyncio.run(graph.ask(q, {"business_id": "aurora", "role": "finance_owner"}))
             assert out["type"] == "unsupported", f"{q!r} → {out['type']}"
@@ -275,6 +275,7 @@ class TestAskAllParallel:
         assert business_id == "aurora" and session_id == "s-askall"
         assert payload["last_question"] == "销售额排行"
 
+
     def test_session_settles_to_last_when_tail_wins(self, stub_execute, monkeypatch):
         """末段成功:落账恰一次,last_question = 末段问句(后段覆盖前段)。"""
         saved: list = []
@@ -306,3 +307,41 @@ class TestAskAllParallel:
         assert out["type"] == "multi" and len(out["frames"]) == 3
         assert all(f["type"] == "result" for f in out["frames"])
         assert state["max"] >= 2, f"段间应并发执行,实测最大并发 {state['max']}"
+
+
+class TestScenarioPacks:
+    """场景包帧形(唯一复合意图机制,此前零直测;2026-10-03 C6 补册):
+    biz_overview → 多帧结果卡,帧序 = 包序,单节失败以 error 帧隔离不炸整包
+    (诚实原则:某节失败如实呈现,其余节照常出数)。"""
+
+    PACK = ["gmv", "order_count", "aov", "session_volume", "refund_rate"]
+
+    def test_biz_overview_frames_in_pack_order(self, stub_execute, monkeypatch):
+        async def _allow_all(business_id, role):
+            return None
+
+        monkeypatch.setattr("engine_py.analytics.rbac.allowed_metrics_for_role", _allow_all)
+        out = asyncio.run(graph.ask("经营概览", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "multi"
+        assert [f.get("metric") for f in out["frames"]] == self.PACK
+        assert all(f["type"] == "result" for f in out["frames"])
+        assert all(f["cards"] for f in out["frames"]), "每节独立卡(独立口径注记/可导出)"
+
+    def test_section_failure_is_isolated(self, stub_execute, monkeypatch):
+        async def _allow_all(business_id, role):
+            return None
+
+        async def _partial(self, compiled, session_ctx=None):
+            if compiled.metric == "aov":
+                raise RuntimeError("boom")
+            return QueryResult(
+                rows=[{"v": 1.0}], metric=compiled.metric, unit="件", caliber="测试口径",
+            )
+
+        monkeypatch.setattr("engine_py.analytics.rbac.allowed_metrics_for_role", _allow_all)
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _partial)
+        out = asyncio.run(graph.ask("经营概览", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "multi" and len(out["frames"]) == len(self.PACK)
+        failed = out["frames"][2]
+        assert failed["type"] == "error" and "已如实报告" in failed["message"]
+        assert all(f["type"] == "result" for i, f in enumerate(out["frames"]) if i != 2)
