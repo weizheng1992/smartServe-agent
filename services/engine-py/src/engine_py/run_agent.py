@@ -50,6 +50,7 @@ from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
 from .tenant_context import set_business_context
 from .tools_registry.mall_domain import MallDomainService
+from .triage.intent_registry import CONSULT_SIDE_INTENTS
 from .triage.rule_matchers import is_quick_greeting
 from .vision import normalize_image_urls
 
@@ -377,9 +378,20 @@ async def _settle_turn(
         except Exception as mem_err:
             print(f"[runAgent] 短期记忆回写失败(不阻断): {mem_err!r}")
         try:
-            await episodic_memory.add_event(
-                f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
-            )
+            # P3(2026-10-03):情境记忆只记业务动作回合 —— 旧实现每回合无条件写
+            # 「Handled conversation thread...」样板并白付一次 embedding:既稀释
+            # [MEMORY OF PAST EVENTS] 的召回面,又徒增每回合成本。动作形回合
+            # (退款/改址/购物车等,以 consult 侧意图补集为口径,复用
+            # intent_registry 仲裁同源集合)才入池;纯问答由 long_memory 画像
+            # 抽取承载,寒暄走问候旁路本就不到这里。
+            _turn_intents = {
+                str(i.get("intent") or "").strip().lower() for i in result.get("intents") or []
+            }
+            _action_intents = _turn_intents - CONSULT_SIDE_INTENTS - {""}
+            if _action_intents or result.get("damage_assessment"):
+                await episodic_memory.add_event(
+                    f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
+                )
         except Exception as mem_err:
             print(f"[runAgent] 情境记忆回写失败(不阻断): {mem_err!r}")
         try:
@@ -493,7 +505,22 @@ async def run_agent(job: AgentJobInput) -> dict:
     rag_docs: list = []
     precomputed_embedding: list[float] | None = None
 
-    business_id, dynamic_config = await _resolve_business_context(thread_id, user_id, job.business_id)
+    # P4(2026-10-03):租户解析(线程自愈+配置读取,多次 DB 往返)与问句
+    # embedding 互相独立 —— 旧实现串行 await 白付一段时延,gather 并行;
+    # embedding 失败自吞为 None(三路检索各自无 embedding 降级语义不变)。
+    async def _precompute_embedding() -> list[float] | None:
+        if len(input_message.strip()) <= 3:
+            return None
+        try:
+            return await get_embedding_model().aembed_query(input_message)
+        except Exception as embed_err:
+            print(f"[runAgent] Failed to precompute embedding for Single-Embedding Injection: {embed_err}")
+            return None
+
+    (business_id, dynamic_config), precomputed_embedding = await asyncio.gather(
+        _resolve_business_context(thread_id, user_id, job.business_id),
+        _precompute_embedding(),
+    )
     set_business_context(business_id)  # 线程行自愈后的权威值覆写(A7)
 
     # LLM 调用归因:本次运行内全部模型调用(图节点 + 后台画像审计任务)据此
@@ -506,10 +533,6 @@ async def run_agent(job: AgentJobInput) -> dict:
 
     if len(input_message.strip()) > 3:
         contextual_rag = ContextualRAG(business_id)
-        try:
-            precomputed_embedding = await get_embedding_model().aembed_query(input_message)
-        except Exception as embed_err:
-            print(f"[runAgent] Failed to precompute embedding for Single-Embedding Injection: {embed_err}")
 
         facts_res, events_res, rag_res = await asyncio.gather(
             long_memory.search_relevant_facts(input_message, precomputed_embedding),
