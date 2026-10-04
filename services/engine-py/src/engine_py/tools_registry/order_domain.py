@@ -376,6 +376,25 @@ async def _update_merchant_order(order_id: str, *, status: str | None = None, sh
         print(f"[OrderDomainService] merchant write-through failed: {err}")
 
 
+async def _mark_merchant_order_refunded(order_id: str) -> int | None:
+    """商户真单退款落账(条件 UPDATE,2026-10-03 TOCTOU 收口的商户侧硬闸):
+    返回 rowcount —— >0 本流赢得写入;0 已被并发流/先前流退款;None 写穿透
+    异常(调用方须诚实拒单,严禁照报退款成功)。商户真单在引擎 orders 表
+    无行,退款幂等闸必须落在商户真账上。"""
+    try:
+        async with _merchant_writer_engine().begin() as conn:
+            gate = await conn.execute(
+                text(
+                    "UPDATE merchant_orders SET status = 'REFUNDED', updated_at = NOW() "
+                    "WHERE order_id = :oid AND status != 'REFUNDED'"
+                ).bindparams(oid=order_id)
+            )
+            return gate.rowcount
+    except Exception as err:
+        print(f"[OrderDomainService] merchant refund write-through failed: {err}")
+        return None
+
+
 class OrderDomainService:
     @staticmethod
     async def get_thread_session_context(thread_id: str | None) -> dict:
@@ -661,28 +680,67 @@ class OrderDomainService:
                 }
 
         effective_order_id = order.get("orderId") or order_id
+        source = str(order.get("source") or "engine")
+        # 幂等硬闸(2026-10-03 TOCTOU 收口,双退款事故类的并发面):T1 读状态与
+        # T2 物理写之间,并发退款流(双审批恢复 / 技能快轨撞审批恢复)可双双读到
+        # 未退再双双写入 —— 各源账本物理写全改条件 UPDATE,输者与本函数入口的
+        # already_refunded 同款诚实拒绝,不再产第二份退款回执/审计链。
+        # 商户真单在引擎 orders 表无行,硬闸落在商户真账;三方单账本即镜像表
+        # (T1 读来源),闸落镜像表;引擎单闸 orders 表。
+        gate_won = True
         async with get_session() as session:
-            await session.execute(
-                text("UPDATE \"orders\" SET status = 'refunded' WHERE \"order_id\" = :oid").bindparams(
-                    oid=effective_order_id
+            if source == "third_party":
+                gate = await session.execute(
+                    text(
+                        "UPDATE \"third_party_orders\" SET order_status = 'REFUNDED' "
+                        "WHERE \"ext_order_sn\" = :oid AND order_status != 'REFUNDED'"
+                    ).bindparams(oid=effective_order_id)
                 )
-            )
-            # 三方镜像表为旁路,以 SAVEPOINT 隔离:表缺失(未跑三方种子)/更新异常
-            # 只回滚自身 —— 此前裸 except 吞掉异常但事务已中止,主退款 UPDATE
-            # 随后的 commit 静默失效,工具却照报"退款成功"(wayfinder 004 密封容器实测)
-            try:
-                async with session.begin_nested():
-                    await session.execute(
-                        text(
-                            "UPDATE \"third_party_orders\" SET order_status = 'REFUNDED' WHERE \"ext_order_sn\" = :oid"
-                        ).bindparams(oid=effective_order_id)
-                    )
-            except Exception as tp_err:
-                print(f"[退款执行] 三方镜像表更新失败(SAVEPOINT 已隔离,主退款继续) order={effective_order_id}: {tp_err}")
+                gate_won = bool(gate.rowcount)
+            else:
+                gate = await session.execute(
+                    text(
+                        "UPDATE \"orders\" SET status = 'refunded' "
+                        "WHERE \"order_id\" = :oid AND lower(\"status\") != 'refunded'"
+                    ).bindparams(oid=effective_order_id)
+                )
+                gate_won = bool(gate.rowcount)
+            if source != "third_party" and gate_won:
+                # 三方镜像表为旁路,以 SAVEPOINT 隔离:表缺失(未跑三方种子)/更新异常
+                # 只回滚自身 —— 此前裸 except 吞掉异常但事务已中止,主退款 UPDATE
+                # 随后的 commit 静默失效,工具却照报"退款成功"(wayfinder 004 密封容器实测)
+                try:
+                    async with session.begin_nested():
+                        await session.execute(
+                            text(
+                                "UPDATE \"third_party_orders\" SET order_status = 'REFUNDED' "
+                                "WHERE \"ext_order_sn\" = :oid AND order_status != 'REFUNDED'"
+                            ).bindparams(oid=effective_order_id)
+                        )
+                except Exception as tp_err:
+                    print(f"[退款执行] 三方镜像表更新失败(SAVEPOINT 已隔离,主退款继续) order={effective_order_id}: {tp_err}")
             await session.commit()
 
-        if order.get("source") == "merchant":
-            await _update_merchant_order(effective_order_id, status="REFUNDED")
+        if source == "merchant":
+            merchant_rows = await _mark_merchant_order_refunded(effective_order_id)
+            if merchant_rows == 0:
+                return {
+                    "error": f"⚠️ 退款拦截：订单 {order_id} 已处于【已退款】状态，禁止重复退款。",
+                    "orderId": order_id,
+                    "status": "already_refunded",
+                }
+            if merchant_rows is None:
+                return {
+                    "error": "⚠️ 退款执行失败：商户真账写入异常，退款未生效（已如实报告，未生成回执）。",
+                    "orderId": order_id,
+                    "status": "merchant_write_failed",
+                }
+        elif not gate_won:
+            return {
+                "error": f"⚠️ 退款拦截：订单 {order_id} 已处于【已退款】状态，禁止重复退款。",
+                "orderId": order_id,
+                "status": "already_refunded",
+            }
 
         await tool_cache.delete(f"cache:order_status:{order_id}")
 

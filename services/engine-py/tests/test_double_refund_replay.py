@@ -395,6 +395,53 @@ def test_refund_intent_without_order_id_must_clarify():
     )
 
 
+def test_concurrent_refund_single_winner(pg_factory):
+    """TOCTOU 收口契约(2026-10-03):两路并发退款同一商户真单,恰一路成功、
+    一路诚实 already_refunded,商户账只翻一次。
+
+    事故类并发面:T1 读状态与 T2 物理写之间无闸时,双审批恢复/技能快轨撞
+    审批恢复可双双读到未退再双双写入 —— 物理写改条件 UPDATE 后输者必须
+    落败(条件行数=0),不得产出第二份退款回执。
+    """
+    asyncio.run(_concurrent_refund_scenario(pg_factory))
+
+
+async def _concurrent_refund_scenario(pg_factory):
+    from engine_py.tools_registry import order_domain
+    from engine_py.tools_registry.order_domain import OrderDomainService
+
+    engine, merchant_engine, original_reader = await _setup(pg_factory)
+    # 事故种子是 REFUNDED 单;TOCTOU 场景要一笔在售可退单,翻回 PAID
+    async with merchant_engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE merchant_orders SET status = 'PAID' WHERE order_id = :o").bindparams(o=REPRO_ORDER)
+        )
+    original_writer = order_domain._merchant_writer_engine
+    order_domain._merchant_writer_engine = lambda: merchant_engine
+    try:
+        results = await asyncio.gather(*(
+            OrderDomainService.process_refund(REPRO_ORDER, "并发退款压测", thread_id=REPRO_THREAD)
+            for _ in range(2)
+        ))
+
+        outcomes = [str(r.get("status") or ("error" if r.get("error") else "?")) for r in results]
+        winners = [r for r in results if r.get("status") == "refunded"]
+        losers = [r for r in results if r.get("status") == "already_refunded"]
+        assert len(winners) == 1, f"恰一路退款成功,实得 {outcomes}"
+        assert len(losers) == 1, f"其余路必须诚实 already_refunded,实得 {outcomes}"
+
+        async with merchant_engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    text("SELECT status FROM merchant_orders WHERE order_id = :o").bindparams(o=REPRO_ORDER)
+                )
+            ).mappings().first()
+        assert row["status"] == "REFUNDED", f"商户账只应翻一次,实得 {row['status']}"
+    finally:
+        order_domain._merchant_writer_engine = original_writer
+        await _teardown(engine, merchant_engine, original_reader)
+
+
 def test_suspension_persists_task_plan_immediately(pg_factory):
     """回归钉(wayfinder 004):步骤挂起等待审批的瞬间,挂起计划必须已写入 task_memory。
 
