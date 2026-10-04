@@ -50,8 +50,17 @@ export function useAdminDashboardData() {
 
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 5000); // Auto refresh every 5 seconds for high fidelity logs!
-    return () => clearInterval(interval);
+    // P8(2026-10-03):轮询挂 visibility 闸 —— 后台标签页跳过请求,回前台立即补一轮。
+    const tick = () => {
+      if (document.hidden) return;
+      fetchDashboardData();
+    };
+    const interval = setInterval(tick, 5000); // Auto refresh every 5 seconds for high fidelity logs!
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [fetchDashboardData]);
 
   const handleApprovalAction = async (approvalId: string, action: 'approve' | 'reject') => {

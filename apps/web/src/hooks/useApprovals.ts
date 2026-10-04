@@ -119,9 +119,19 @@ export function useApprovals({
     };
 
     fetchApprovals();
-    const intervalId = setInterval(fetchApprovals, 2000); // 2秒轮询一次，高敏捷反馈！
+    // P8(2026-10-03):轮询挂 visibility 闸 —— 后台标签页跳过请求(服务端 2s
+    // 轮询线性恶化已由审批列表封顶兜底,此处砍掉无观察者的纯浪费);回前台立即补一轮保敏捷。
+    const tick = () => {
+      if (document.hidden) return;
+      fetchApprovals();
+    };
+    const intervalId = setInterval(tick, 2000); // 2秒轮询一次，高敏捷反馈！
+    document.addEventListener('visibilitychange', tick);
 
-    return () => clearInterval(intervalId);
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [activeThreadId, loadHistory, fetchThreads, syncPollCountRef]);
 
   // 2. 提交管理员审批决议（Approved / Rejected）并恢复 Agent 决策执行
