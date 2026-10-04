@@ -231,134 +231,148 @@ async def _settle_turn(
     long_memory = LongMemory(user_id, business_id)
     episodic_memory = EpisodicMemory(user_id, business_id)
 
-    # 🪙 SaaS 遥测:算力消耗 / 成本换算 / 图决策深度 / 解挂状态
-    try:
-        # 等待本运行派发的 llm_call_logs 落盘任务收口,再取真实 usage 累计
-        await drain_llm_call_writes(thread_id)
-        total_tokens = take_thread_token_total(thread_id)
-        cost_usd = (total_tokens / 1_000_000) * 0.15
-        node_transitions = result.get("loop_count") or 3
+    # ── P2(2026-10-03):收口四条独立泳道并行(旧实现遥测→坏例→宣称闸→卡片→
+    # 记忆→任务记忆全串行 await 链,时延为各段之和)。依赖契约:
+    #   · drain→take 在遥测泳道内保持串行(先收口落盘再取真值);
+    #   · claim_mismatch 读 pre-guard 原文快照(与旧顺序语义一致,先取快照防
+    #     与 sanitize 泳动同字典竞写);
+    #   · 记忆回写在 join 之后(必须见 sanitize 后终稿与最终卡片);
+    #   · result 事件恒最后(交付信号)。各泳道自吞异常,降级粒度不变。
 
-        # 🛡️ 图级熔断落盘:10 步/3 错触发时 resolution_status = circuit_breaker(终态优先于子任务状态)
-        global_transitions = result.get("global_transitions_count") or 0
-        tool_errors = result.get("tool_errors_count") or 0
-        breaker_fired = (
-            global_transitions >= CIRCUIT_BREAKER_TRANSITIONS or tool_errors >= CIRCUIT_BREAKER_TOOL_ERRORS
-        )
+    output_before_guard = str(result.get("output") or "")
 
-        # 🛡️ LLM 熔断落盘(resilience.py 全局熔断器拦截):job 级终态,优先于图级判定
-        if llm_breaker_fired:
-            resolution_status = "llm_circuit_breaker"
-            is_success = False
-            feedback_comment = "Upstream LLM circuit breaker open; job degraded with apology fallback."
-        elif graph_error_fired:
-            resolution_status = "graph_error_degraded"
-            is_success = False
-            feedback_comment = "Graph execution raised; job degraded with apology fallback."
-        else:
-            resolution_status = "circuit_breaker" if breaker_fired else "resolved_auto"
-            is_success = not breaker_fired
-            feedback_comment = (
-                "Circuit breaker tripped: hard degradation with apology fallback."
-                if breaker_fired
-                else "All planned subtasks completed successfully."
+    async def _settle_metrics_lane() -> None:
+        """遥测泳道:drain → 真值取数 → 状态判定 → LangSmith 派发 → metrics 落盘 → 熔断坏例入池。"""
+        try:
+            await drain_llm_call_writes(thread_id)
+            total_tokens = take_thread_token_total(thread_id)
+            cost_usd = (total_tokens / 1_000_000) * 0.15
+            node_transitions = result.get("loop_count") or 3
+
+            # 🛡️ 图级熔断落盘:10 步/3 错触发时 resolution_status = circuit_breaker(终态优先于子任务状态)
+            global_transitions = result.get("global_transitions_count") or 0
+            tool_errors = result.get("tool_errors_count") or 0
+            breaker_fired = (
+                global_transitions >= CIRCUIT_BREAKER_TRANSITIONS or tool_errors >= CIRCUIT_BREAKER_TOOL_ERRORS
             )
 
-        plan = result.get("task_plan") or {}
-        subtasks = plan.get("subtasks") or []
-        if subtasks and not breaker_fired:
-            has_pending = any((st.get("result") or {}).get("waitingForApproval") for st in subtasks)
-            has_cancelled = any((st.get("result") or {}).get("cancelledByUser") for st in subtasks)
-            has_expired = any((st.get("result") or {}).get("expiredByTimeout") for st in subtasks)
-            has_rejected = any(
-                st.get("status") == "failed" and (st.get("result") or {}).get("rejectedByAdmin")
-                for st in subtasks
-            )
-            has_failed = any(st.get("status") == "failed" for st in subtasks)
-
-            if has_pending:
-                resolution_status = "waiting_approval"
-            elif has_cancelled:
-                resolution_status = "cancelled"
-            elif has_expired:
-                resolution_status = "expired"
-            elif has_rejected:
-                resolution_status = "rejected"
-            elif has_failed:
-                resolution_status = "failed"
+            # 🛡️ LLM 熔断落盘(resilience.py 全局熔断器拦截):job 级终态,优先于图级判定
+            if llm_breaker_fired:
+                resolution_status = "llm_circuit_breaker"
                 is_success = False
-                feedback_comment = "Some planned subtasks failed validation or execution."
-
-        if os.environ.get("LANGCHAIN_API_KEY"):
-            asyncio.create_task(_report_langsmith_feedback(is_success, feedback_comment))
-
-        async with get_session() as session:
-            session.add(
-                SessionMetric(
-                    business_id=business_id,
-                    thread_id=thread_id,
-                    total_tokens=total_tokens,
-                    calculated_cost_usd=cost_usd,
-                    node_transitions_count=node_transitions,
-                    global_transitions_count=global_transitions,
-                    tool_errors_count=tool_errors,
-                    resolution_status=resolution_status,
-                    avg_latency_ms=elapsed_latency_ms,
+                feedback_comment = "Upstream LLM circuit breaker open; job degraded with apology fallback."
+            elif graph_error_fired:
+                resolution_status = "graph_error_degraded"
+                is_success = False
+                feedback_comment = "Graph execution raised; job degraded with apology fallback."
+            else:
+                resolution_status = "circuit_breaker" if breaker_fired else "resolved_auto"
+                is_success = not breaker_fired
+                feedback_comment = (
+                    "Circuit breaker tripped: hard degradation with apology fallback."
+                    if breaker_fired
+                    else "All planned subtasks completed successfully."
                 )
-            )
-            await session.commit()
 
-        # 📥 熔断信号入坏例池(wayfinder 006):被熔断打断的会话以会话为评审
-        # 单位入池(先验 suspected_defect,人审定性,见 badcase/pool.py)。
-        # 挂点定案:收口处而非状态机翻转处 —— 翻转可能发生在无会话归属的
-        # 后台调用,而池以会话为评审单位,与 session_metrics 熔断落盘(003
-        # 数据源)同位;dedupe=True 使 OPEN 窗口内同一会话多次回合只入池一次;
-        # 入池失败静默降级不阻断主流程(内建)。
-        if llm_breaker_fired or graph_error_fired or breaker_fired:
-            await record_badcase_signal(
-                SOURCE_CIRCUIT_BREAKER,
-                conversation_ref=f"thread:{thread_id}",
-                business_id=business_id,
-                dedupe=True,
-                note=(
-                    "上游 LLM 熔断(OPEN)拦截,会话降级道歉回复"
-                    if llm_breaker_fired
-                    else (
-                        "图执行未捕获异常,降级道歉回复"
-                        if graph_error_fired
-                        else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
+            plan = result.get("task_plan") or {}
+            subtasks = plan.get("subtasks") or []
+            if subtasks and not breaker_fired:
+                has_pending = any((st.get("result") or {}).get("waitingForApproval") for st in subtasks)
+                has_cancelled = any((st.get("result") or {}).get("cancelledByUser") for st in subtasks)
+                has_expired = any((st.get("result") or {}).get("expiredByTimeout") for st in subtasks)
+                has_rejected = any(
+                    st.get("status") == "failed" and (st.get("result") or {}).get("rejectedByAdmin")
+                    for st in subtasks
+                )
+                has_failed = any(st.get("status") == "failed" for st in subtasks)
+
+                if has_pending:
+                    resolution_status = "waiting_approval"
+                elif has_cancelled:
+                    resolution_status = "cancelled"
+                elif has_expired:
+                    resolution_status = "expired"
+                elif has_rejected:
+                    resolution_status = "rejected"
+                elif has_failed:
+                    resolution_status = "failed"
+                    is_success = False
+                    feedback_comment = "Some planned subtasks failed validation or execution."
+
+            if os.environ.get("LANGCHAIN_API_KEY"):
+                asyncio.create_task(_report_langsmith_feedback(is_success, feedback_comment))
+
+            async with get_session() as session:
+                session.add(
+                    SessionMetric(
+                        business_id=business_id,
+                        thread_id=thread_id,
+                        total_tokens=total_tokens,
+                        calculated_cost_usd=cost_usd,
+                        node_transitions_count=node_transitions,
+                        global_transitions_count=global_transitions,
+                        tool_errors_count=tool_errors,
+                        resolution_status=resolution_status,
+                        avg_latency_ms=elapsed_latency_ms,
                     )
-                ),
-            )
+                )
+                await session.commit()
 
-        # 🔍 宣称与落库不符信号入池(intent-arbitration 02):终稿宣称已退款/
-        # 已提交审批 × 审批表整会话零记录 → 候选行(先验 suspected_defect)。
-        # ORD-77777 编造审批一类:幽灵单拦截挡住了开单,终稿幻觉的宣称仍要
-        # 能被捕到;入池静默降级不阻断收口。
-        await record_claim_mismatch_if_any(
-            thread_id,
-            business_id,
-            str(result.get("output") or ""),
-        )
-    except Exception as metrics_err:
-        print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
+            # 📥 熔断信号入坏例池(wayfinder 006):被熔断打断的会话以会话为评审
+            # 单位入池(先验 suspected_defect,人审定性,见 badcase/pool.py)。
+            # 挂点定案:收口处而非状态机翻转处 —— 翻转可能发生在无会话归属的
+            # 后台调用,而池以会话为评审单位,与 session_metrics 熔断落盘(003
+            # 数据源)同位;dedupe=True 使 OPEN 窗口内同一会话多次回合只入池一次;
+            # 入池失败静默降级不阻断主流程(内建)。
+            if llm_breaker_fired or graph_error_fired or breaker_fired:
+                await record_badcase_signal(
+                    SOURCE_CIRCUIT_BREAKER,
+                    conversation_ref=f"thread:{thread_id}",
+                    business_id=business_id,
+                    dedupe=True,
+                    note=(
+                        "上游 LLM 熔断(OPEN)拦截,会话降级道歉回复"
+                        if llm_breaker_fired
+                        else (
+                            "图执行未捕获异常,降级道歉回复"
+                            if graph_error_fired
+                            else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
+                        )
+                    ),
+                )
+        except Exception as metrics_err:
+            print(f"[SaaS Telemetry] Failed to persist session metrics in physical table: {metrics_err}")
 
-    # 🛡️ 订单宣称反幻觉硬闸(2026-09-13 用户实报):复合流被判单导购终局后
-    # LLM 叙事宣称「已成功结算下单/订单号 2477」—— 单号实为上轮幻觉残留在
-    # 历史里的假号(幻觉自增殖)。收口确定性校验:宣称单号必须来自本轮
-    # checkoutCart 真实结果,否则剥离宣称+诚实说明,幻觉不进对话历史。
-    try:
-        from .graph.nodes.output_guard import sanitize_order_claims
+    async def _settle_claim_lane() -> None:
+        """宣称不符信号泳道:读 pre-guard 原文快照(与旧串行顺序语义一致)。"""
+        try:
+            # 🔍 宣称与落库不符信号入池(intent-arbitration 02):终稿宣称已退款/
+            # 已提交审批 × 审批表整会话零记录 → 候选行(先验 suspected_defect)。
+            # ORD-77777 编造审批一类:幽灵单拦截挡住了开单,终稿幻觉的宣称仍要
+            # 能被捕到;入池静默降级不阻断收口。
+            await record_claim_mismatch_if_any(thread_id, business_id, output_before_guard)
+        except Exception as claim_err:
+            print(f"[runAgent] 宣称不符信号入池失败(不阻断): {claim_err!r}")
 
-        result["output"] = await sanitize_order_claims(
-            str(result.get("output") or ""), result.get("task_plan")
-        )
-    except Exception as guard_err:
-        print(f"[runAgent] 订单宣称校验失败(放行原文,不阻断): {guard_err!r}")
+    async def _settle_guard_lane() -> None:
+        """订单宣称反幻觉硬闸泳道:终稿宣称单号必须来自本轮 checkoutCart 真实结果。"""
+        try:
+            from .graph.nodes.output_guard import sanitize_order_claims
+
+            result["output"] = await sanitize_order_claims(output_before_guard, result.get("task_plan"))
+        except Exception as guard_err:
+            print(f"[runAgent] 订单宣称校验失败(放行原文,不阻断): {guard_err!r}")
+
+    shelf_task = CardSynthesizer.fetch_shelf_categories(result.get("intents"), thread_id)
+    _, _, _, shelf_categories = await asyncio.gather(
+        _settle_metrics_lane(),
+        _settle_claim_lane(),
+        _settle_guard_lane(),
+        shelf_task,
+    )
 
     # 🗂️ 富媒体卡片合成(ADR-0001:场景化快捷回复;域卡片优先作基座,
     # 场景组统一追加;购物轮实查真货架品类喂 chips,不可达诚实空)
-    shelf_categories = await CardSynthesizer.fetch_shelf_categories(result.get("intents"), thread_id)
     final_cards = CardSynthesizer.synthesize_cards(
         {
             "taskPlan": result.get("task_plan"),
@@ -369,53 +383,74 @@ async def _settle_turn(
         }
     )
 
-    # 助手回复回写三路记忆(回复已产出,持久化失败不阻断交付)。
-    # 三象限各自独立降级:单路失败只吞本路,严禁一个 try 连坐——
+    # 助手回复回写三路记忆 + 任务记忆落库(join 后四路并行;回复已产出,
+    # 持久化失败不阻断交付)。各象限独立降级:单路失败只吞本路,严禁连坐——
     # 否则 episodic 抛错会静默跳过 long 事实抽取(2026-10-02 夜审收口)。
-    if result.get("output"):
-        try:
-            await short_memory.add_message("assistant", result["output"], final_cards)
-        except Exception as mem_err:
-            print(f"[runAgent] 短期记忆回写失败(不阻断): {mem_err!r}")
-        try:
-            # P3(2026-10-03):情境记忆只记业务动作回合 —— 旧实现每回合无条件写
-            # 「Handled conversation thread...」样板并白付一次 embedding:既稀释
-            # [MEMORY OF PAST EVENTS] 的召回面,又徒增每回合成本。动作形回合
-            # (退款/改址/购物车等,以 consult 侧意图补集为口径,复用
-            # intent_registry 仲裁同源集合)才入池;纯问答由 long_memory 画像
-            # 抽取承载,寒暄走问候旁路本就不到这里。
-            _turn_intents = {
-                str(i.get("intent") or "").strip().lower() for i in result.get("intents") or []
-            }
-            _action_intents = _turn_intents - CONSULT_SIDE_INTENTS - {""}
-            if _action_intents or result.get("damage_assessment"):
-                await episodic_memory.add_event(
-                    f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
-                )
-        except Exception as mem_err:
-            print(f"[runAgent] 情境记忆回写失败(不阻断): {mem_err!r}")
-        try:
-            await long_memory.extract_and_store_fact(result["output"], input_message)
-        except Exception as mem_err:
-            print(f"[runAgent] 长期记忆回写失败(不阻断): {mem_err!r}")
-
-    # 持久化任务记忆与领域上下文
     task_plan_to_save = result.get("task_plan") or {
         "goal": "Multi-turn conversational assistance",
         "subtasks": [],
         "currentStepIndex": 0,
     }
-    try:
-        await task_memory.save_task_state(
-            {
-                **task_plan_to_save,
-                "guideContext": result.get("guide_context") or saved_guide_context,
-                "cartContext": result.get("cart_context") or saved_cart_context,
-                "orderContext": result.get("order_context") or saved_order_context,
-            }
-        )
-    except Exception as tm_err:
-        print(f"[runAgent] 任务状态落库失败(不阻断): {tm_err!r}")
+
+    async def _task_memory_lane():
+        try:
+            await task_memory.save_task_state(
+                {
+                    **task_plan_to_save,
+                    "guideContext": result.get("guide_context") or saved_guide_context,
+                    "cartContext": result.get("cart_context") or saved_cart_context,
+                    "orderContext": result.get("order_context") or saved_order_context,
+                }
+            )
+        except Exception as tm_err:
+            print(f"[runAgent] 任务状态落库失败(不阻断): {tm_err!r}")
+
+    if result.get("output"):
+        async def _short_lane():
+            try:
+                await short_memory.add_message("assistant", result["output"], final_cards)
+            except Exception as mem_err:
+                print(f"[runAgent] 短期记忆回写失败(不阻断): {mem_err!r}")
+
+        async def _episodic_lane():
+            try:
+                # P3(2026-10-03):情境记忆只记业务动作回合 —— 旧实现每回合无条件写
+                # 「Handled conversation thread...」样板并白付一次 embedding:既稀释
+                # [MEMORY OF PAST EVENTS] 的召回面,又徒增每回合成本。动作形回合
+                # (退款/改址/购物车等,以 consult 侧意图补集为口径,复用
+                # intent_registry 仲裁同源集合)才入池;纯问答由 long_memory 画像
+                # 抽取承载,寒暄走问候旁路本就不到这里。
+                _turn_intents = {
+                    str(i.get("intent") or "").strip().lower() for i in result.get("intents") or []
+                }
+                _action_intents = _turn_intents - CONSULT_SIDE_INTENTS - {""}
+                if _action_intents or result.get("damage_assessment"):
+                    await episodic_memory.add_event(
+                        f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
+                    )
+            except Exception as mem_err:
+                print(f"[runAgent] 情境记忆回写失败(不阻断): {mem_err!r}")
+
+        async def _long_lane():
+            try:
+                await long_memory.extract_and_store_fact(result["output"], input_message)
+            except Exception as mem_err:
+                print(f"[runAgent] 长期记忆回写失败(不阻断): {mem_err!r}")
+
+        await asyncio.gather(_short_lane(), _episodic_lane(), _long_lane(), _task_memory_lane())
+    else:
+        # 无 output(降级/空终稿):任务记忆仍须落库(挂起计划等恢复状态依赖它)
+        try:
+            await task_memory.save_task_state(
+                {
+                    **task_plan_to_save,
+                    "guideContext": result.get("guide_context") or saved_guide_context,
+                    "cartContext": result.get("cart_context") or saved_cart_context,
+                    "orderContext": result.get("order_context") or saved_order_context,
+                }
+            )
+        except Exception as tm_err:
+            print(f"[runAgent] 任务状态落库失败(不阻断): {tm_err!r}")
 
     final_result = {**to_ts_dict(result), "cards": final_cards}
 
