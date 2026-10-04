@@ -4,7 +4,8 @@
 memory/episodic_memory、rag/contextual_rag、tools_registry/mall_domain、
 triage/semantic_cache 正本),零范数/维度不等的防御口径各自漂移风险高
 —— 2026-10-02 夜审收敛到本模块,旧位一律转发导入(semantic_cache 保留
-公开名 cosine_similarity 供 triage/analytics 两个 exemplar_service 消费)。"""
+公开名 cosine_similarity 供 triage 域内消费;analytics 侧 2026-10-03 起直取
+本模块,analytics→triage 的转发域边已撤,裁决见 docs/adr/0008)。"""
 
 from __future__ import annotations
 

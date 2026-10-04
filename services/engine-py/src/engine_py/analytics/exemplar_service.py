@@ -4,6 +4,9 @@
 get_embedding_model,与判重缓存同底座);阈值默认 0.90(比意图示例 0.05 严,
 分析问句错配代价高)。命中即回放其结构化查询意图 —— L0 未命中处的 few-shot
 先例层;低分不兜底(诚实 UnsupportedQuery 路线不变)。
+
+与 triage/exemplar_service(意图 few-shot 喂给)检索语义六轴互斥,不合并
+—— 裁决见 docs/adr/0008;余弦单一实现在 vectors.py。
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import uuid
 from sqlalchemy import select
 
 from ..db import QueryExemplar, get_session
-from ..triage.semantic_cache import cosine_similarity
+from ..vectors import cosine_similarity
 
 GLOBAL_POOL = "__global__"
 MATCH_THRESHOLD = 0.90
