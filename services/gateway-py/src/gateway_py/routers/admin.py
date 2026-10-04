@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as _dt
-import json
 import math
 
 from engine_py.analytics import rbac
@@ -13,13 +12,13 @@ from engine_py.db import RagDocumentRow, get_session
 from engine_py.onboarding import validate_onboarding_config
 from engine_py.rag import ContextualRAG
 from engine_py.skills import SkillRegistry
-from engine_py.tenant_config import get_tenant_config, invalidate_cache, update_tenant_skill_config
+from engine_py.tenant_config import get_tenant_config, update_tenant_skill_config
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, select, text
 from sqlalchemy.orm import defer
 
-from .. import conversation_repo
+from .. import conversation_repo, tenant_admin
 from ..approval_actions import (
     CUSTOMER_ACTIONS,
     OPERATOR_ACTIONS,
@@ -158,90 +157,11 @@ async def platform_overview():
 @router.get("/api/tenant/list")
 async def tenant_list():
     try:
-        async with get_session() as session:
-            rows = (
-                (
-                    await session.execute(
-                        text(
-                            "SELECT t.business_id, t.name, t.status, t.industry, t.created_at, t.plan_tier, "
-                            "tc.spi_config, tc.skills_config, tc.onboarding_config "
-                            "FROM tenants t LEFT JOIN tenant_configs tc ON LOWER(t.business_id) = LOWER(tc.business_id) "
-                            "ORDER BY t.created_at DESC"
-                        )
-                    )
-                )
-                .mappings()
-                .all()
-            )
-        if rows:
-            tenants = []
-            for row in rows:
-                spi = row["spi_config"] if isinstance(row["spi_config"], dict) else {}
-                skills_cfg = row["skills_config"] if isinstance(row["skills_config"], dict) else {}
-                refund_cfg = skills_cfg.get("skill_order_refund")
-                refund_limit = (
-                    refund_cfg.get("approvalThresholdAmount")
-                    if isinstance(refund_cfg, dict) and refund_cfg.get("approvalThresholdAmount") is not None
-                    else None
-                )
-                tenants.append(
-                    {
-                        "id": row["business_id"],
-                        "name": row["name"],
-                        "industry": row["industry"] or "综合零售",
-                        "channel": "Web + Mobile + SPI",
-                        # 未配置即回 null,前端「未配置」态呈现(数据真实性约定:严禁编造
-                        # 密钥/风控阈值/Webhook 地址——update 路由对 falsy 值不覆写,回传安全)
-                        "apiKey": spi.get("apiSecret"),
-                        "refundLimit": refund_limit,
-                        "autoEscalation": True,
-                        "webhookUrl": spi.get("spiBaseUrl"),
-                        "status": row["status"] or "active",
-                        "planTier": row["plan_tier"] or "free",
-                        "createdAt": row["created_at"].isoformat().split("T")[0] if row["created_at"] else None,
-                        # 编辑面回读(new-user-onboarding E):无配置租户回 None,
-                        # 前端 JSON 文本域以「未配置」态呈现而非伪造默认值
-                        "onboardingConfig": (
-                            row["onboarding_config"] if isinstance(row["onboarding_config"], dict) else None
-                        ),
-                    }
-                )
-            return {"success": True, "tenants": tenants}
-        return {"success": True, "tenants": []}
+        tenants = await tenant_admin.list_tenant_summaries()
+        return {"success": True, "tenants": tenants}
     except Exception as err:
         print(f"[TenantService] Failed to query PostgreSQL tenants table: {err}")
         return {"success": True, "tenants": [], "message": "租户注册表暂不可用，请稍后重试"}
-
-
-async def _insert_tenant_configs(
-    session,
-    *,
-    business_id: str,
-    name: str,
-    spi_config: dict,
-    skills_config: dict,
-    onboarding: dict | None,
-) -> None:
-    """tenant_configs 新行 INSERT 单点(架构审查 #6):create 与 update-缺行
-    两分支此前逐字各抄 18 行,列清单漂移风险收拢于此。"""
-    await session.execute(
-        text(
-            "INSERT INTO tenant_configs (business_id, system_prompt, welcome_message, status, version, "
-            "spi_config, enabled_skills, skills_config, onboarding_config) "
-            "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), "
-            "CAST(:skills AS jsonb), CAST(:onboarding AS jsonb))"
-        ).bindparams(
-            bid=business_id,
-            prompt=f"You are the official AI Customer Support Agent for {name}.",
-            welcome=f"您好！欢迎来到 {name}，请问有什么可以帮您？",
-            spi=json.dumps(spi_config),
-            skills_arr=json.dumps(
-                ["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]
-            ),
-            skills=json.dumps(skills_config),
-            onboarding=json.dumps(onboarding) if onboarding is not None else None,
-        )
-    )
 
 
 class TenantCreateIn(BaseModel):
@@ -278,10 +198,6 @@ async def create_tenant(body: TenantCreateIn):
         raise HTTPException(400, "Tenant ID and Name are required")
 
     cfg = body.config or {}
-    industry = body.industry or cfg.get("industry")
-    webhook_url = body.webhookUrl or cfg.get("webhookUrl")
-    refund_limit = body.refundLimit if body.refundLimit is not None else cfg.get("refundLimit")
-
     # 与 PUT 同语义的服务端 schema 校验:JSON 手编错形诚实失败(400),
     # 而非落库后在首访欢迎/引擎旁路两处静默回落平台默认
     if body.onboardingConfig is not None:
@@ -289,62 +205,18 @@ async def create_tenant(body: TenantCreateIn):
         if onboarding_errors:
             raise HTTPException(400, f"onboardingConfig 校验失败: {'; '.join(onboarding_errors)}")
 
-    # 未配置即不落库(数据真实性约定):编造密钥/回调地址/阈值曾是 create/list
-    # 两处重灾区,且 spi_config.apiSecret 全仓零消费方,SPI 鉴权走 env + 派生形
-    spi_config = {"mode": "remote_spi", "timeoutMs": 5000}
-    if webhook_url:
-        spi_config["spiBaseUrl"] = webhook_url
-    if body.apiKey:
-        spi_config["apiSecret"] = body.apiKey
-    skills_config = {"skill_order_refund": {"enabled": True}}
-    if refund_limit is not None:
-        skills_config["skill_order_refund"]["approvalThresholdAmount"] = refund_limit
-
-    async with get_session() as session:
-        await session.execute(
-            text(
-                "INSERT INTO tenants (business_id, name, plan_tier, status, industry) "
-                "VALUES (:bid, :name, 'enterprise', :status, :industry) "
-                "ON CONFLICT (business_id) DO UPDATE SET name = EXCLUDED.name, status = EXCLUDED.status, "
-                "industry = COALESCE(EXCLUDED.industry, tenants.industry)"
-            ).bindparams(bid=clean_id, name=body.name, status=body.status or "active", industry=industry)
-        )
-        existing = (
-            await session.execute(
-                text("SELECT id FROM tenant_configs WHERE LOWER(business_id) = :bid LIMIT 1").bindparams(bid=clean_id)
-            )
-        ).scalar_one_or_none()
-        if existing:
-            # 合并式:仅当请求携带 onboardingConfig 时写入(重建既有租户未携带 → 不动既有引导配置)
-            if body.onboardingConfig is not None:
-                await session.execute(
-                    text(
-                        "UPDATE tenant_configs SET spi_config = :spi, skills_config = :skills, "
-                        "onboarding_config = CAST(:onboarding AS jsonb), updated_at = NOW() WHERE id = :cid"
-                    ).bindparams(
-                        spi=json.dumps(spi_config),
-                        skills=json.dumps(skills_config),
-                        onboarding=json.dumps(body.onboardingConfig),
-                        cid=existing,
-                    )
-                )
-            else:
-                await session.execute(
-                    text("UPDATE tenant_configs SET spi_config = :spi, skills_config = :skills, updated_at = NOW() WHERE id = :cid").bindparams(
-                        spi=json.dumps(spi_config), skills=json.dumps(skills_config), cid=existing
-                    )
-                )
-        else:
-            await _insert_tenant_configs(
-                session,
-                business_id=clean_id,
-                name=body.name,
-                spi_config=spi_config,
-                skills_config=skills_config,
-                onboarding=body.onboardingConfig,
-            )
-        await session.commit()
-    invalidate_cache(clean_id)
+    # SQL 与配置组装语义在 tenant_admin 域(架构审查 #6);平铺字段与嵌套
+    # config 取并集(平铺优先)是本 DTO 的呈现语义,留在适配层
+    await tenant_admin.upsert_tenant(
+        business_id=clean_id,
+        name=body.name,
+        status=body.status,
+        industry=body.industry or cfg.get("industry"),
+        webhook_url=body.webhookUrl or cfg.get("webhookUrl"),
+        api_key=body.apiKey,
+        refund_limit=body.refundLimit if body.refundLimit is not None else cfg.get("refundLimit"),
+        onboarding_config=body.onboardingConfig,
+    )
     return {"success": True, "businessId": clean_id}
 
 
@@ -354,107 +226,36 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
     if not body.name:
         raise HTTPException(400, "Tenant Name is required")
 
-    # 服务端 schema 校验(new-user-onboarding E):JSON 手编错形必须诚实失败,
-    # 而非落库后在首访欢迎/引擎旁路两处静默回落平台默认
+    # 服务端 schema 校验(new-user-onboarding E):JSON 手编错形必须诚实失败
     if body.onboardingConfig is not None:
         onboarding_errors = validate_onboarding_config(body.onboardingConfig)
         if onboarding_errors:
             raise HTTPException(400, f"onboardingConfig 校验失败: {'; '.join(onboarding_errors)}")
 
-    async with get_session() as session:
-        existing = (
-            await session.execute(
-                text("SELECT id, plan_tier FROM tenants WHERE LOWER(business_id) = :bid LIMIT 1").bindparams(bid=clean_id)
-            )
-        ).mappings().first()
-        if not existing:
-            raise HTTPException(404, f"Tenant '{business_id}' not found")
-        # 内置业务域保护(admin-readiness 02):builtin 是 nightly 评测/密封契约的
-        # 依赖基线,禁停用(名称/行业仍可改);一行误删全线爆炸
-        if existing["plan_tier"] == "builtin" and (body.status or "active") != "active":
-            raise HTTPException(403, f"内置业务域 '{business_id}' 不可停用")
-
-        await session.execute(
-            text(
-                "UPDATE tenants SET name = :name, status = :status, industry = COALESCE(:industry, industry) "
-                "WHERE LOWER(business_id) = :bid"
-            ).bindparams(name=body.name, status=body.status or "active", industry=body.industry, bid=clean_id)
+    try:
+        await tenant_admin.update_tenant(
+            business_id=clean_id,
+            name=body.name,
+            status=body.status,
+            industry=body.industry,
+            webhook_url=body.webhookUrl,
+            api_key=body.apiKey,
+            refund_limit=body.refundLimit,
+            onboarding_config=body.onboardingConfig,
         )
-
-        # 合并式覆写 tenant_configs:仅更新请求显式携带的字段,避免整份覆写丢失既有配置
-        cfg_row = (
-            await session.execute(
-                text(
-                    "SELECT id, spi_config, skills_config, onboarding_config FROM tenant_configs "
-                    "WHERE LOWER(business_id) = :bid LIMIT 1"
-                ).bindparams(bid=clean_id)
-            )
-        ).mappings().first()
-        spi = dict(cfg_row["spi_config"]) if isinstance(cfg_row and cfg_row["spi_config"], dict) else {}
-        skills = dict(cfg_row["skills_config"]) if isinstance(cfg_row and cfg_row["skills_config"], dict) else {}
-        if body.webhookUrl:
-            spi["spiBaseUrl"] = body.webhookUrl
-        if body.apiKey:
-            spi["apiSecret"] = body.apiKey
-        spi.setdefault("mode", "remote_spi")
-        spi.setdefault("timeoutMs", 5000)
-        if body.refundLimit is not None:
-            refund_cfg = skills.get("skill_order_refund")
-            refund_cfg = dict(refund_cfg) if isinstance(refund_cfg, dict) else {}
-            refund_cfg["enabled"] = refund_cfg.get("enabled", True)
-            refund_cfg["approvalThresholdAmount"] = body.refundLimit
-            skills["skill_order_refund"] = refund_cfg
-        # onboarding_config:请求携带即整体覆写(完整 schema 文档),未携带保留既有
-        onboarding = (
-            dict(body.onboardingConfig)
-            if body.onboardingConfig is not None
-            else (dict(cfg_row["onboarding_config"]) if isinstance(cfg_row and cfg_row["onboarding_config"], dict) else None)
-        )
-
-        if cfg_row:
-            await session.execute(
-                text(
-                    "UPDATE tenant_configs SET spi_config = CAST(:spi AS jsonb), skills_config = CAST(:skills AS jsonb), "
-                    "onboarding_config = CAST(:onboarding AS jsonb), updated_at = NOW() WHERE id = :cid"
-                ).bindparams(
-                    spi=json.dumps(spi),
-                    skills=json.dumps(skills),
-                    onboarding=json.dumps(onboarding) if onboarding is not None else None,
-                    cid=cfg_row["id"],
-                )
-            )
-        else:
-            await _insert_tenant_configs(
-                session,
-                business_id=clean_id,
-                name=body.name,
-                spi_config=spi,
-                skills_config=skills,
-                onboarding=onboarding,
-            )
-        await session.commit()
-    invalidate_cache(clean_id)
+    except LookupError as err:
+        raise HTTPException(404, str(err)) from None
+    except PermissionError as err:
+        raise HTTPException(403, str(err)) from None
     return {"success": True, "businessId": clean_id}
 
 
 @router.delete("/api/tenant/{business_id}")
 async def delete_tenant(business_id: str):
-    clean_id = business_id.lower().strip()
-    async with get_session() as session:
-        plan_tier = (
-            await session.execute(
-                text("SELECT plan_tier FROM tenants WHERE LOWER(business_id) = :bid LIMIT 1").bindparams(bid=clean_id)
-            )
-        ).scalar_one_or_none()
-        # 内置业务域保护(admin-readiness 02):builtin 是评测/契约依赖基线,禁删
-        if plan_tier == "builtin":
-            raise HTTPException(403, f"内置业务域 '{business_id}' 不可删除(生产可用 SEED_BUILTIN_TENANTS 控制播种)")
-        await session.execute(
-            text("DELETE FROM tenant_configs WHERE LOWER(business_id) = :bid").bindparams(bid=clean_id)
-        )
-        await session.execute(text("DELETE FROM tenants WHERE LOWER(business_id) = :bid").bindparams(bid=clean_id))
-        await session.commit()
-    invalidate_cache(clean_id)
+    try:
+        await tenant_admin.delete_tenant(business_id=business_id.lower().strip())
+    except PermissionError as err:
+        raise HTTPException(403, str(err)) from None
     return {"success": True}
 
 

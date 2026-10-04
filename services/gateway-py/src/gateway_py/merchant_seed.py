@@ -29,6 +29,7 @@ import asyncio
 import json
 import zlib
 
+from engine_py.tools_registry.order_domain import insert_merchant_order_item
 from sqlalchemy import text
 
 from .merchant_db import ensure_merchant_tables, merchant_engine
@@ -1295,24 +1296,22 @@ async def seed_merchant_data() -> None:
                 },
             )
             for it in order["items"]:
-                await conn.execute(
-                    text(
-                        "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, "
-                        "price, image_url, spec_summary, cost_at_purchase) "
-                        "VALUES (:oid, :spu, :sku, :t, :sku_title, :q, :p, :img, :spec, :cost)"
-                    ),
-                    {
-                        "oid": order["order_id"],
-                        "spu": it["spu"],
-                        "sku": it["sku"],
-                        "t": it["title"],
-                        "sku_title": it["sku_title"],
-                        "q": it["quantity"],
-                        "p": it["price"],
-                        "img": it["image"],
-                        "spec": it["spec"],
-                        "cost": _demo_cost(it["price"], it["sku"]),
-                    },
+                # 行项目走共享插入单点(架构审查 #4 步3):历史单回填的列清单与
+                # checkout 共享 helper 完全一致,采纳后全仓该列清单只剩一处;
+                # 主单 INSERT 保留本地 —— 历史回填写(变状态/追踪/回溯 created_at)
+                # 与 checkout 语义不同,强扭只会浅化 helper 接口
+                await insert_merchant_order_item(
+                    conn,
+                    order_id=order["order_id"],
+                    spu_id=it["spu"],
+                    sku_code=it["sku"],
+                    title=it["title"],
+                    sku_title=it["sku_title"],
+                    quantity=it["quantity"],
+                    price=it["price"],
+                    image_url=it["image"],
+                    spec_summary=it["spec"],
+                    cost_at_purchase=_demo_cost(it["price"], it["sku"]),
                 )
 
         # 行数断言:播种静默假绿防线(DELETE 后按清单逐条 INSERT,缺行/多行必须炸出来)
