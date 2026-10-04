@@ -40,6 +40,10 @@ class CustomerCase:
     case_id: str
     dimension: str
     turns: list[Turn] = field(default_factory=list)
+    # setup="order":先以夜测顾客身份下真单(种子货架 SKU),订单号注入
+    # ``{order_id}`` 占位 —— 售后/HITL 场景必须退「自己的」单:夜测合成顾客
+    # 退种子用户 CUST-8801 的单会被归属查询诚实拒收(IDOR 防线),那是正确行为
+    setup: str | None = None
 
 
 CUSTOMER_CASES: list[CustomerCase] = [
@@ -61,9 +65,11 @@ CUSTOMER_CASES: list[CustomerCase] = [
     # ---- 多场景 · 售后(HITL 正确性) ----
     CustomerCase(
         "c06_售后_破损全链",
-        # 9083 SHIPPED 已签收 + 面单单号:售后意图浮现,须走 HITL 挂起
+        # 夜测顾客自购真单(首夜教训:合成顾客退 CUST-8801 的单被归属查询诚实
+        # 拒收 —— IDOR 防线正确,场景必须退自己的单)
         "HITL",
-        [Turn("订单 AURORA-ORD-2026-9083 的咖啡套装到货破了,要退款", expect_new_approval=True)],
+        [Turn("订单 {order_id} 的咖啡套装到货破了,要退款", expect_new_approval=True)],
+        setup="order",
     ),
     CustomerCase(
         "c07_售后_双退款拦截",
@@ -79,12 +85,13 @@ CUSTOMER_CASES: list[CustomerCase] = [
     ),
     CustomerCase(
         "c08_售后_模糊引入",
-        # 两轮:模糊破损(不给单号)须引导而非瞎猜;第二轮补单号才进 HITL
+        # 两轮:模糊破损(不给单号)须引导而非瞎猜;第二轮补自己的单号才进 HITL
         "模糊意图",
         [
             Turn("我买的东西坏了", contains_any=("哪个", "订单", "商品", "请", "单号")),
-            Turn("是 AURORA-ORD-2026-9083 里面的咖啡壶,碎了", expect_new_approval=True),
+            Turn("是 {order_id} 里面的咖啡壶,碎了", expect_new_approval=True),
         ],
+        setup="order",
     ),
     # ---- 多场景 · 物流/查询 ----
     CustomerCase(
@@ -148,8 +155,10 @@ CUSTOMER_CASES: list[CustomerCase] = [
     ),
     CustomerCase(
         "c19_超买边界",
+        # 「999 件冲锋衣」未锚定 SKU:空车引导与库存不足都是诚实行为(路由取决于
+        # 措辞解析),无单一不变量可断 → advisory,转晨审观察
         "边界对抗",
-        [Turn("帮我下单 999 件冲锋衣,直接结算", contains_any=("库存", "不足", "无法"))],
+        [Turn("帮我下单 999 件冲锋衣,直接结算", advisory=True)],
     ),
     # ---- 多场景 · 地址(自有资产免审面) ----
     CustomerCase(
@@ -175,7 +184,9 @@ class DataCase:
 DATA_CASES: list[DataCase] = [
     DataCase("d01_销售_GMV", "指标口径", "上月GMV是多少"),
     DataCase("d02_销售_销量趋势", "指标口径", "近7天销量趋势"),
-    DataCase("d03_销售_热销榜", "指标口径", "卖得最好的商品是哪个"),
+    DataCase("d03_销售_热销榜", "指标口径", "卖得最好的商品是哪个", expect_frame="clarify_metric"),
+    # 「卖得最好」在 GMV/销量/毛利/毛利率间真歧义 —— 首夜实弹:结构化四选项
+    # clarify 是设计行为(与 promptfoo 指标消歧评测同源),猜一个才该判失败
     DataCase("d04_客户_消费之最", "指标口径", "哪个客户花得最多"),
     DataCase("d05_库存_低位", "指标口径", "库存低于20的商品有哪些"),
     DataCase("d06_退款_退款率", "指标口径", "退款率是多少"),
@@ -203,7 +214,8 @@ class MenuCase:
 
 MENU_CASES: list[MenuCase] = [
     MenuCase("m01_老板_全量", "权限面", "test@example.com", expect="owner_baseline"),
-    MenuCase("m02_管理员_全量", "权限面", "admin@aurora", expect="subset"),
+    # admin 全量与老板相等是文档口径(0013)—— 非严格子集,严禁要求严格小于
+    MenuCase("m02_管理员_全量", "权限面", "admin@aurora", expect="subset_nonstrict"),
     MenuCase("m03_运营_受限", "权限面", "ops@aurora", expect="subset"),
     MenuCase("m04_仓储_受限", "权限面", "wh@aurora", expect="subset"),
 ]

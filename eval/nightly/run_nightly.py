@@ -98,10 +98,41 @@ async def approvals_waiting(client: httpx.AsyncClient, thread_id: str) -> set[st
     }
 
 
+async def _create_nightly_order(client, customer_id: str) -> str:
+    """夜测顾客自购真单(种子货架咖啡套装 ×1):售后/HITL 场景的归属前置。"""
+    r = await client.get("/api/store/products")
+    sku_code = ""
+    for p in r.json().get("products") or []:
+        if "咖啡" in str(p.get("title") or ""):
+            skus = p.get("skus") or []
+            sku_code = str(skus[0].get("skuCode")) if skus else ""
+            break
+    if not sku_code:
+        return ""
+    r = await client.post(
+        "/api/store/orders",
+        json={
+            "customerId": customer_id,
+            "skuCode": sku_code,
+            "quantity": 1,
+            "recipientName": "夜测",
+            "recipientPhone": "13800001111",
+            "shippingAddress": "北京市海淀区夜测路 1 号",
+        },
+        timeout=60,
+    )
+    return str((r.json() or {}).get("orderId") or "")
+
+
 async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set[str], budget: dict) -> dict:
     """跑一个客服场景(多轮连续 threadId);返回逐轮结果与裁决。"""
     thread_id = f"nightly_{case.case_id}_{int(time.time())}"
     customer_id = f"{CUST_PREFIX}_{case.case_id}"
+    order_id = ""
+    if case.setup == "order":
+        order_id = await _create_nightly_order(client, customer_id)
+        if order_id:
+            created_ids.add(order_id)
     turns_out = []
     verdict_fail = []
     prior_approvals = await approvals_waiting(client, thread_id)
@@ -112,10 +143,11 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
             continue
         budget["turns"] += 1
         t0 = time.monotonic()
+        message = turn.message.replace("{order_id}", order_id) if order_id else turn.message.replace("{order_id}", "AURORA-ORD-2026-0000")
         try:
             r = await client.post(
                 "/api/store/chat",
-                json={"message": turn.message, "businessId": TENANT, "userId": customer_id, "threadId": thread_id},
+                json={"message": message, "businessId": TENANT, "userId": customer_id, "threadId": thread_id},
                 timeout=TURN_TIMEOUT,
             )
             latency = round(time.monotonic() - t0, 1)
@@ -130,7 +162,7 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
                 verdict_fail.append(f"轮{i} 请求异常 {err!r}")
             continue
 
-        row = {"turn": i, "message": turn.message, "output": output[:1200], "latency_s": latency}
+        row = {"turn": i, "message": message, "output": output[:1200], "latency_s": latency}
         fails = []
         # 场景信号
         if turn.contains_any:
@@ -231,18 +263,24 @@ async def run_data_case(client, tokens: dict[str, str], case, budget: dict) -> d
                 "ok": False, "error": repr(err), "fails": [f"请求异常 {err!r}"],
                 "latency_s": round(time.monotonic() - t0, 1)}
     latency = round(time.monotonic() - t0, 1)
-    types = [ev for ev, _ in frames if ev != "heartbeat"]
+    typed = [(ev, data) for ev, data in frames if ev != "heartbeat"]
+    types = [ev for ev, _ in typed]
     has_result = "result" in types
-    honest_alt = bool(set(types) & {"unsupported", "error", "clarify"})
     if case.expect_frame == "result" and not has_result:
         fails.append(f"未出结果帧,实际 {types}")
     if case.expect_frame == "not_result" and has_result:
         fails.append(f"越权出结果帧 {types}(应 unsupported/error/clarify)")
+    if case.expect_frame == "clarify_metric":
+        cl = next((d for ev, d in typed if ev == "clarify"), {})
+        if "clarify" not in types or str((cl or {}).get("clarifyKind")) != "metric":
+            fails.append(f"指标歧义须出 metric clarify,实际 {types} {str(cl)[:160]}")
     if r.status_code != 200:
         fails.append(f"HTTP {r.status_code}")
     ok = not fails or case.advisory
     return {"kind": "data", "case_id": case.case_id, "dimension": case.dimension,
-            "question": case.question, "frames": types, "ok": ok, "fails": fails,
+            "question": case.question, "frames": types,
+            "frame_payloads": [{"event": ev, "data": d} for ev, d in typed],
+            "ok": ok, "fails": fails,
             "advisory": case.advisory, "latency_s": latency, "staff": case.staff_email}
 
 
@@ -280,6 +318,7 @@ async def run_menu_case(client, owner_perms: set[str], case, tokens: dict[str, s
         fails.append(f"角色回显 {role} ≠ finance_owner")
     if case.expect == "subset" and len(perms) >= len(owner_perms):
         fails.append(f"受限角色按钮数 {len(perms)} 未小于老板 {len(owner_perms)}")
+    # subset_nonstrict:admin 全量与老板相等是文档口径(0013),只断 ⊆ 与非空
     return {"kind": "menu", "case_id": case.case_id, "dimension": case.dimension,
             "ok": not fails, "fails": fails, "role": role,
             "menus_count": len(menus), "perms_count": len(perms), "perms": sorted(perms)}
@@ -324,7 +363,30 @@ async def cleanup() -> dict:
             await conn.execute(_t("DELETE FROM merchant_orders WHERE order_id = ANY(:oids)"), {"oids": ids})
             deleted_orders = len(ids)
             await conn.execute(_t("DELETE FROM merchant_customers WHERE customer_id LIKE :p"), {"p": f"{CUST_PREFIX}%"})
-    return {"deleted_orders": deleted_orders, "stock_restored": restored}
+    # engine 侧夜测残留:HITL 工单 + 发件箱事件(线程 nightly_ 前缀)。
+    # pending_approvals.id 是 uuid、approval_id 是 text —— asyncpg 严格类型,
+    # JOIN 必须显式 CAST(uuid = text 无隐式操作符,首夜实弹)
+    from engine_py.db import get_session
+
+    purged = 0
+    async with get_session() as session:
+        ev_rows = (
+            await session.execute(
+                _t(
+                    "SELECT e.id FROM approval_outbox_events e "
+                    "JOIN pending_approvals a ON a.id = CAST(e.approval_id AS uuid) "
+                    "WHERE a.thread_id LIKE 'nightly_%'"
+                )
+            )
+        ).scalars().all()
+        if ev_rows:
+            await session.execute(
+                _t("DELETE FROM approval_outbox_events WHERE id = ANY(:eids)"), {"eids": list(ev_rows)}
+            )
+        res = await session.execute(_t("DELETE FROM pending_approvals WHERE thread_id LIKE 'nightly_%'"))
+        purged = res.rowcount or 0
+        await session.commit()
+    return {"deleted_orders": deleted_orders, "stock_restored": restored, "nightly_approvals_purged": purged}
 
 
 def render_report(results: list[dict], out: Path, night: str, env_ok: bool) -> None:
@@ -443,11 +505,16 @@ async def main() -> int:
     except Exception as err:
         print(f"[Nightly] 坏例池入池失败(不阻断): {err!r}")
 
-    cleanup_stats = await cleanup()
+    # 报告先落盘(主产物);清理是卫生,失败降级记录不许吞报告
     (OUT_DIR / "results.jsonl").write_text(
         "\n".join(json.dumps(r, ensure_ascii=False, default=str) for r in results) + "\n"
     )
     render_report(results, OUT_DIR / "report.html", NIGHT, env_ok)
+    try:
+        cleanup_stats = await cleanup()
+    except Exception as err:
+        cleanup_stats = {"error": repr(err)[:300]}
+        print(f"[Nightly] 清理失败(不吞报告,留待人工): {err!r}")
     failed = [r for r in results if not r["ok"] and not r.get("advisory") and not r.get("skipped")]
     print(f"[Nightly] 完成:严格用例失败 {len(failed)};报告 {OUT_DIR / 'report.html'};清理 {cleanup_stats}")
     return 1 if failed else 0
