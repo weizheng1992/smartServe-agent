@@ -10,23 +10,15 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from ..tools_registry.order_domain import merchant_writer_engine
-from .promotion_engine import _compute_discount
+from .promo_kernel import compute_discount, effective_status, utcnow
 
 PROMO_TYPES = ("full_reduction", "discount", "coupon")
-
-
-def _utcnow() -> datetime:
-    """窗口比较钟统一 UTC(2026-09-29 夜审 F15 波及复核):promotions 表的
-    start_at/end_at 由列默认 NOW() 落 naive UTC,Python 本地 naive now 在非
-    UTC 部署下偏整个时区 —— 旧实现让结算 _in_window 把未来 8h 内要结束的
-    活动整体砍出候选、已结束活动仍可补录核销、生效态显示双向错位。"""
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _parse_ts(raw) -> datetime | None:
@@ -55,19 +47,7 @@ def _normalize_quota(promo_type: str, raw) -> int | None:
     return quota
 
 
-def _effective_status(status: str, start_at, end_at, now: datetime) -> str:
-    """生效态派生(与结算 _in_window 同口径,服务端推导,前端不自算):
-    disabled > ended(过 end_at)> scheduled(未到 start_at)> running。"""
-    if status == "disabled":
-        return "disabled"
-    if end_at and now >= end_at:
-        return "ended"
-    if start_at and now < start_at:
-        return "scheduled"
-    return "running"
-
-
-async def _audit(action: str, operator: str, payload: dict) -> None:
+async def audit(action: str, operator: str, payload: dict) -> None:
     """审计(20-D5):写操作落 merchant_audit_logs;失败不炸主流程但打印。"""
     try:
         async with merchant_writer_engine().begin() as conn:
@@ -88,7 +68,7 @@ async def list_promotions() -> list[dict]:
     uq_user_promo(promotion_id 首列)与 idx_promotion_redemptions_promo
     兜住子查询走索引,LIMIT 100 规模下无压力。
     """
-    now = _utcnow()
+    now = utcnow()
     async with merchant_writer_engine().connect() as conn:
         rows = (
             await conn.execute(
@@ -116,7 +96,7 @@ async def list_promotions() -> list[dict]:
             "usedCount": int(r["used_count"]),
             "redemptionCount": int(r["redemption_count"]),
             "discountTotal": float(r["discount_total"]),
-            "effectiveStatus": _effective_status(r["status"], r["start_at"], r["end_at"], now),
+            "effectiveStatus": effective_status(r["status"], r["start_at"], r["end_at"], now),
         }
         for r in rows
     ]
@@ -150,7 +130,7 @@ async def create_promotion(payload: dict, operator: str) -> dict:
                 sa=start_at, ea=end_at, tq=total_quota,
             )
         )
-    await _audit("promo_create", operator, {
+    await audit("promo_create", operator, {
         "id": promo_id, "name": name, "promoType": promo_type,
         "startAt": start_at.isoformat() if start_at else None,
         "endAt": end_at.isoformat() if end_at else None,
@@ -218,7 +198,7 @@ async def update_promotion(promotion_id: str, patch: dict, operator: str) -> dic
                 sa=start_at, ea=end_at, tq=total_quota,
             )
         )
-    await _audit("promo_update", operator, {
+    await audit("promo_update", operator, {
         "id": promotion_id, "name": name,
         "startAt": start_at.isoformat() if start_at else None,
         "endAt": end_at.isoformat() if end_at else None,
@@ -236,7 +216,7 @@ async def set_promotion_status(promotion_id: str, status: str, operator: str) ->
         )
         if result.rowcount == 0:
             return {"error": "活动不存在"}
-    await _audit("promo_status", operator, {"id": promotion_id, "status": status})
+    await audit("promo_status", operator, {"id": promotion_id, "status": status})
     return {"id": promotion_id, "status": status}
 
 
@@ -262,7 +242,7 @@ async def delete_promotion(promotion_id: str, operator: str) -> dict:
         await conn.execute(
             text("DELETE FROM promotions WHERE id = CAST(:id AS uuid)").bindparams(id=promotion_id)
         )
-    await _audit("promo_delete", operator, {"id": promotion_id})
+    await audit("promo_delete", operator, {"id": promotion_id})
     return {"id": promotion_id}
 
 
@@ -274,7 +254,7 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
     窗口判定与结算 _in_window 同口径(2026-09-27 运营闭环):消除「列表看着
     已结束/未开始,补录核销却照收」的口径分裂。
     """
-    now = _utcnow()
+    now = utcnow()
     async with merchant_writer_engine().connect() as conn:
         promo = (
             await conn.execute(
@@ -312,11 +292,11 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
         threshold = float(promo["threshold_amount"] or 0)
         if total < threshold:
             return {"error": f"订单实付 ¥{total:.2f} 未达满减门槛 ¥{threshold:.2f}"}
-    # 折算规则唯一出处(_compute_discount,与结算同口径):discount 型在此被
+    # 折算规则唯一出处(promo_kernel.compute_discount,与结算同口径):discount 型在此被
     # 1-99 钳制 —— 此前补录侧自算无钳制,极端配置下与结算金额分裂
     # (2026-09-27 夜审 F6)。外层 min(discount, total) 保留:满减值可配置
     # 超实付的边界,核销记录不得超订单实付。
-    discount = _compute_discount(promo, total)
+    discount = compute_discount(promo, total)
     if discount is None:
         return {"error": "订单不满足活动规则,不可核销"}
     discount = min(discount, total)
@@ -326,7 +306,7 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
             text("INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
                  "VALUES (CAST(:pid AS uuid), :oid, :amt)").bindparams(pid=promotion_id, oid=order_id, amt=discount)
         )
-    await _audit("promo_redeem", operator, {"promotionId": promotion_id, "orderId": order_id, "discount": discount})
+    await audit("promo_redeem", operator, {"promotionId": promotion_id, "orderId": order_id, "discount": discount})
     return {"promotionId": promotion_id, "orderId": order_id, "discount": discount}
 
 
@@ -374,7 +354,7 @@ async def claim_coupon(promotion_id: str, user_id: str) -> dict:
         # 并发双领兜底:应用层查重与应用层插入之间存在窗口,唯一约束(uq_user_promo)
         # 是最终防线 —— 冲突即视为已领取,与串行语义一致
         return {"error": "已领取过该券"}
-    await _audit("coupon_claim", user_id, {"promotionId": promotion_id})
+    await audit("coupon_claim", user_id, {"promotionId": promotion_id})
     return {"promotionId": promotion_id, "userId": user_id}
 
 

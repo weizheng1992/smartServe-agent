@@ -300,9 +300,9 @@ async def set_role_menus(business_id: str, role: str, menu_ids: list[str], opera
         await session.commit()
     try:  # 审计(20-D5):失败打印不阻断(与写穿透同策略)
 
-        from .promotions import _audit
+        from .promotions import audit
 
-        await _audit("rbac_role_menus", operator, {"role": role, "menuIds": menu_ids, "businessId": business_id})
+        await audit("rbac_role_menus", operator, {"role": role, "menuIds": menu_ids, "businessId": business_id})
     except Exception as err:
         print(f"[RBAC] audit failed: {err}")
 

@@ -11,43 +11,15 @@
 - discount: discount_value 为折扣率(85 = 8.5 折) → 优惠 = 原价 × (100-值)%;
 - coupon: 券面额 discount_value(结算自动应用,无门槛)。
 只取 status='active' 且在有效期内;多活动可满足时取优惠额最大者;金额永不为负。
+
+生效态/窗口/折扣公式唯一出处见 promo_kernel(2026-10-03 收口)。
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from sqlalchemy import text
 
-
-def _compute_discount(promo: dict, amount: float) -> float | None:
-    """单活动对金额的优惠额;不满足门槛返回 None。规则唯一出处。"""
-    ptype = promo["promo_type"]
-    value = float(promo["discount_value"])
-    if ptype == "full_reduction":
-        threshold = float(promo["threshold_amount"] or 0)
-        return value if amount >= threshold else None
-    if ptype == "discount":
-        rate = min(max(value, 1.0), 99.0)
-        return round(amount * (100 - rate) / 100, 2)
-    if ptype == "coupon":
-        return min(value, amount)
-    return None
-
-
-def _in_window(promo: dict, now: datetime | None = None) -> bool:
-    # 缺省钟必须与库钟同源(UTC):本地 naive now 在非 UTC 部署下把未来
-    # 8h 内要结束的活动误判已结束,整体砍出结算候选(2026-09-29 夜审
-    # F15 波及复核;fetch_active_promos 的 SQL 闸用 NOW(),此处是它的
-    # Python 侧复检,两钟不一致时复检反而有害)。
-    now = now or datetime.now(UTC).replace(tzinfo=None)
-    start = promo.get("start_at")
-    end = promo.get("end_at")
-    if start and now < start:
-        return False
-    if end and now > end:
-        return False
-    return True
+from .promo_kernel import compute_discount, in_window
 
 
 def best_discount_for_amount(
@@ -63,7 +35,7 @@ def best_discount_for_amount(
             continue
         if p.get("scope_type") == "spu" and p.get("scope_value") != spu_code:
             continue
-        discount = _compute_discount(p, price)
+        discount = compute_discount(p, price)
         if discount is None:
             continue
         if not best or discount > best["discount"]:
@@ -76,7 +48,7 @@ def best_discount_for_amount(
 
 async def fetch_active_promos(conn) -> list[dict]:
     """候选活动集(status active + 窗口内)。SELECT 必须带 start_at/end_at ——
-    2026-09-27 运营闭环修正:此前 SELECT 漏 start_at,下游 _in_window 恒读到
+    2026-09-27 运营闭环修正:此前 SELECT 漏 start_at,下游 in_window 恒读到
     None,未来开始的活动会立即进结算;WHERE 同步补 start 闸,双层同口径。"""
     rows = (
         await conn.execute(
@@ -99,7 +71,7 @@ async def best_for_amount(conn, amount: float, scope_spus: set[str] | None = Non
     按原价结算,诚实无优惠)。
     """
     promos = await fetch_active_promos(conn)
-    promos = [p for p in promos if _in_window(p)]
+    promos = [p for p in promos if in_window(p)]
     if exclude_coupon:
         promos = [p for p in promos if p["promo_type"] != "coupon"]  # 券类须用户领取后使用(20-D4)
     best: dict | None = None
@@ -109,7 +81,7 @@ async def best_for_amount(conn, amount: float, scope_spus: set[str] | None = Non
         if p["scope_type"] == "spu" and scope_spus is not None:
             if p["scope_value"] not in scope_spus:
                 continue
-        discount = _compute_discount(p, amount)
+        discount = compute_discount(p, amount)
         if discount is None:
             continue
         candidate = {
@@ -139,7 +111,7 @@ def _best_promo_for_spu(promos: list[dict], spu_code: str, price: float) -> dict
     ]
     best: dict | None = None
     for p in eligible:
-        discount = _compute_discount(p, price)
+        discount = compute_discount(p, price)
         if discount is None:
             continue
         if not best or discount > best["discount"]:
@@ -181,7 +153,7 @@ async def list_usable_user_coupons(conn, user_id: str, amount: float) -> list[di
     ).mappings().all()
     coupons: list[dict] = []
     for r in rows:
-        discount = _compute_discount(dict(r), amount)
+        discount = compute_discount(dict(r), amount)
         if discount is None:
             continue
         coupons.append(
