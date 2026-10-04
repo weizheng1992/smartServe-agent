@@ -117,7 +117,9 @@ def _happy_result() -> dict:
             "currentStepIndex": 1,
         },
         "loop_count": 5,
-        "intents": [],
+        # 查订单 = order_query(非 consult 侧动作形):P3 起情境记忆只记动作回合,
+        # 本 fixture 需要驱动 episodic 写回臂,故携带真实动作意图
+        "intents": [{"intent": "order_query", "confidence": 0.9}],
     }
 
 
@@ -189,8 +191,12 @@ def test_happy_turn_settles_full_chain_in_order(monkeypatch, pg_factory):
     _seed_thread(pg_factory)
     final = asyncio.run(_settle(stubs, _happy_result()))
 
-    # 顺序即契约:token 收口 → 计量 → 宣称校验 → 三路记忆 → 任务记忆 → result 事件
-    assert stubs.log == [
+    # 顺序契约(P2 泳道化后收窄):drain→take 保持串行为遥测前两步,
+    # publish_result 恒最后(交付信号);其余步(宣称校验/三路记忆/任务记忆)
+    # 并行泳道,彼此顺序不再确定 —— 只断言全步恰一次发生。
+    assert stubs.log[:2] == ["drain_tokens", "take_total"]
+    assert stubs.log[-1] == "publish_result"
+    assert sorted(stubs.log) == sorted([
         "drain_tokens",
         "take_total",
         "claim_check",
@@ -199,7 +205,7 @@ def test_happy_turn_settles_full_chain_in_order(monkeypatch, pg_factory):
         "long_fact",
         "task_memory",
         "publish_result",
-    ]
+    ])
     # 快乐轮无降级旗标,坏例信号不入池
     assert stubs.badcase_calls == []
 
