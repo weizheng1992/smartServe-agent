@@ -10,7 +10,7 @@ const tableCard = (rows: Record<string, unknown>[]) => ({
   rows,
   cards: [
     {
-      type: 'table',
+      type: 'table' as const,
       title: '品类GMV榜 · 元',
       columns: [
         { key: 'productId', label: 'productId' },

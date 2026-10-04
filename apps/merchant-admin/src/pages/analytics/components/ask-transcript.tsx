@@ -1,8 +1,9 @@
 import { ResultCard } from '@/components/ResultCard';
+import { type AskClarifyOption, type AskFrame, type AskRow } from '@/lib/analytics-frames';
+
+export type { AskFrame };
 import { getSelection, setSelectionKind } from '@/lib/page-context';
 import { useNavigate } from 'react-router';
-
-export type AskFrame = { event: string; data: any };
 
 const ORDER_STATUS: Record<string, string> = {
   PAID: '待发货',
@@ -40,7 +41,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
             ) : f.event === 'result' && f.data.metric === 'customer_orders' && Array.isArray(f.data.rows) ? (
               // 行级「在订单中查看」跳转是 analytics 全屏问答页独有的交互特例
               // (静态渲染与 ResultCard 同口径);其余 result 帧一律走唯一渲染缝。
-              <CustomerOrdersCard rows={f.data.rows} caliber={f.data.caliber} onJump={jumpToOrder} />
+              <CustomerOrdersCard rows={f.data.rows} caliber={f.data.caliber ?? ''} onJump={jumpToOrder} />
             ) : f.event === 'result' ? (
               // 唯一渲染缝(merchant-admin.md §1.4):折线/条形/诚实降级/文本卡
               // 全在共享 ResultCard —— 折线值列 Number.isFinite 护栏(2026-09-25
@@ -52,7 +53,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                 {f.data.message || f.event}
                 {f.event === 'clarify' && (
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {(f.data.options || []).map((o: any, j: number) => (
+                    {(f.data.options || []).map((o: AskClarifyOption, j: number) => (
                       <button
                         /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
                         key={j}
@@ -82,6 +83,10 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
   );
 }
 
+function orderCell(v: unknown): string {
+  return v === null || v === undefined ? '' : String(v);
+}
+
 /** 金额口径与订单管理页一致(toFixed(2));缺值/坏值诚实「—」—— 注意
  *  Number(null) === 0,必须先挡空值,否则缺金额渲染成假 ¥0.00。 */
 function formatAmount(v: unknown): string {
@@ -91,7 +96,11 @@ function formatAmount(v: unknown): string {
 }
 
 /** 客户订单列表卡:行级「在订单中查看」跳订单管理并勾选。 */
-function CustomerOrdersCard({ rows, caliber, onJump }: { rows: any[]; caliber: string; onJump: (id: string) => void }) {
+function CustomerOrdersCard({
+  rows,
+  caliber,
+  onJump,
+}: { rows: AskRow[]; caliber: string; onJump: (id: string) => void }) {
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
       <div className="border-b border-zinc-100 px-4 py-2 text-xs font-medium text-zinc-500">客户订单</div>
@@ -110,16 +119,16 @@ function CustomerOrdersCard({ rows, caliber, onJump }: { rows: any[]; caliber: s
           </thead>
           <tbody>
             {rows.map((r, k) => (
-              <tr key={r.order_id || k} className="border-b border-zinc-50">
-                <td className="px-4 py-2 font-mono">{r.order_id}</td>
-                <td className="px-4 py-2">{ORDER_STATUS[r.status] || r.status}</td>
+              <tr key={orderCell(r.order_id) || k} className="border-b border-zinc-50">
+                <td className="px-4 py-2 font-mono">{orderCell(r.order_id)}</td>
+                <td className="px-4 py-2">{ORDER_STATUS[orderCell(r.status)] || orderCell(r.status)}</td>
                 <td className="px-4 py-2">¥{formatAmount(r.total_amount)}</td>
-                <td className="px-4 py-2 text-zinc-500">{r.created_at}</td>
+                <td className="px-4 py-2 text-zinc-500">{orderCell(r.created_at)}</td>
                 <td className="px-4 py-2 text-right">
                   <button
                     type="button"
                     className="cursor-pointer text-xs text-blue-600 hover:text-blue-700"
-                    onClick={() => onJump(r.order_id)}
+                    onClick={() => onJump(orderCell(r.order_id))}
                   >
                     在订单中查看
                   </button>

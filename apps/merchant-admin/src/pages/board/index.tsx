@@ -4,13 +4,14 @@
 // 刷新策略:60s 轮询 + 页面不可见时暂停 + 手动立即刷新。
 
 import { ResultCard } from '@/components/ResultCard';
+import { type AskFrame } from '@/lib/analytics-frames';
 import { api } from '@/lib/api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
 
 type Pin = { id: string; question: string; route: string; pinnedAt: string };
-type ReplayState = { frames: any[] | null; error: string | null; at: string | null };
+type ReplayState = { frames: AskFrame[] | null; error: string | null; at: string | null };
 
 const REFRESH_MS = 60_000;
 

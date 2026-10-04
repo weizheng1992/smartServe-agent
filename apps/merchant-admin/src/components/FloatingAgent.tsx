@@ -1,4 +1,5 @@
 import { ResultCard } from '@/components/ResultCard';
+import { type AskCard } from '@/lib/analytics-frames';
 import { api } from '@/lib/api';
 import { type SelectionMap, clearSelection, getSelection, getSelectionLabels, subscribe } from '@/lib/page-context';
 import { useEffect, useRef, useState } from 'react';
@@ -19,7 +20,7 @@ type ResultData = {
   title?: string;
   __question?: string;
   rows: Record<string, unknown>[];
-  cards?: Array<Record<string, unknown>>;
+  cards?: AskCard[];
   [key: string]: unknown;
 };
 

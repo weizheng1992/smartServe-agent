@@ -1,4 +1,5 @@
 import { ResultCard } from '@/components/ResultCard';
+import { type AskCard } from '@/lib/analytics-frames';
 import { api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
@@ -10,7 +11,7 @@ type Section = {
   caliber: string;
   chart: string | undefined;
   rows: Record<string, unknown>[];
-  cards: any[];
+  cards: AskCard[];
 };
 
 /** 我的报告(T4 补强):清单 + 图表重放 —— 存档行数据按图型重绘,CSV 照常导出。 */
