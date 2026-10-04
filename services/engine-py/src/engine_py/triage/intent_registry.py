@@ -37,6 +37,15 @@ class AgentIntentType:
     OUT_OF_SCOPE = "out_of_scope"
 
 
+REGISTERED_INTENTS = frozenset(
+    v for k, v in vars(AgentIntentType).items()
+    if not k.startswith("_") and isinstance(v, str)
+)
+"""注册意图闭集的机读面(A5,2026-10-03):技能 triggerIntents 等声明面
+必须 ⊆ 本集 —— can_handle 是原样成员判断,声明了注册表外词即永不命中的
+死词,主匹配路径名存实亡。契约由 tests/test_skill_trigger_intents_registered.py 钉死。"""
+
+
 # 咨询/兜底形意图族(动作形 × 咨询形口径的咨询侧,工单04 2026-09-11 上移单一
 # 来源):badcase/intent_signals 冲突检测与 triage Step3 consult 降级两消费方
 # 共用。成员口径与 badcase 侧历史集合逐字一致;"chitchat" 非注册表档位 ——
@@ -257,9 +266,9 @@ AgentIntentType.SHOPPING_GUIDE: IntentSpec(
         lifecycle="latent",
         prompt_category=6,
         notes=(
-            "已知缺口:planner 快轨集合不含它;order_skills triggerIntents 注册的是"
-            "大写 'ORDER_CANCEL'(技能匹配大小写敏感,小写终局永不命中);无专属取消工具。"
-            "潜在价值:与 general_query 零规划旁路区分(收编会丢「取消」语义)。修复另开工单"
+            "已知缺口:planner 快轨集合不含它;无专属取消工具,技能侧刻意不收编本档位"
+            "(A5 清死词 2026-10-03 顺带移除了永不命中的大写 'ORDER_CANCEL' 声明 —— "
+            "收编会丢「取消」语义,维持 general_query 零规划旁路)。修复另开工单"
         ),
         domain_role="order_service",
     ),

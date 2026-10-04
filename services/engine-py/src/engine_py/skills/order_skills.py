@@ -17,7 +17,7 @@ class OrderRefundSkill(BaseSkill):
         "name": "售后退款与理赔 SOP",
         "description": "支持退款时效校验、多模态破损阶梯赔付计算、HITL 高危金额安全门禁拦截与凭证核签",
         "category": "after_sale",
-        "triggerIntents": ["ORDER_RETURN", "ORDER_CANCEL", "refund", "process_refund"],
+        "triggerIntents": ["order_return", "refund"],  # A5 清死词:UPPER 变体大小写敏感永不命中;process_refund 是工具名非意图;order_cancel 刻意不收编(无专属取消工具,见 intent_registry lifecycle)
         "requiredTools": ["getOrderDetail", "executeOrderAction"],
         "requiresApproval": True,
         "approvalThresholdAmount": 50,
@@ -161,7 +161,7 @@ class OrderAddressModificationSkill(BaseSkill):
         "name": "极速改地址 SOP",
         "description": "校验订单履约状态并执行地址变更，支持三级地址合规格式化与变更卡片渲染",
         "category": "after_sale",
-        "triggerIntents": ["ORDER_MODIFY_ADDRESS", "modify_address", "order_modify_address"],
+        "triggerIntents": ["order_modify_address"],  # A5 清死词:UPPER 变体与 modify_address 均非注册表档位
         "requiredTools": ["getOrderDetail", "executeOrderAction"],
         "version": "1.0.0",
     }

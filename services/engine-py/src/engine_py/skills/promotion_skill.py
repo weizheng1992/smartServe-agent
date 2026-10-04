@@ -66,7 +66,7 @@ class PromotionQuerySkill(BaseSkill):
         "name": "优惠活动与优惠券查询 SOP",
         "description": "查询在售优惠活动(满减/折扣/券)、用户券包与优惠力度荐品;只读",
         "category": "pre_sale",
-        "triggerIntents": ["promotion_query", "coupon_query"],
+        "triggerIntents": ["promotion_query"],  # A5 清死词:coupon_query 未登记(类目指南把优惠问句归 promotion_query)
         "requiredTools": [],
         "version": "1.3.0",
     }

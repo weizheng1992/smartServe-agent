@@ -50,7 +50,7 @@ class CartManageSkill(BaseSkill):
         "name": "交易与购物车管理 Agent SOP",
         "description": "参数核验、加购、商品规格变更、购物车结算与优惠汇总",
         "category": "in_sale",
-        "triggerIntents": ["cart_manage", "cart_add", "cart_update"],
+        "triggerIntents": ["cart_manage"],  # A5 清死词:cart_add/cart_update 非注册表档位
         "requiredTools": ["addToCart", "getCartSummary", "updateCartItem"],
         "version": "2.0.0",
     }

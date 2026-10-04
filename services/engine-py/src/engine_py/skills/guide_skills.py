@@ -25,7 +25,7 @@ class ProductInquirySkill(BaseSkill):
         "name": "商品导购与现货库存查询 SOP",
         "description": "穿透查询第三方商品目录、实时 SKU 现货库存及商品推荐",
         "category": "pre_sale",
-        "triggerIntents": ["PRODUCT_INQUIRY", "product_query", "general_query", "mall_search"],
+        "triggerIntents": ["general_query"],  # A5 清死词:PRODUCT_INQUIRY/product_query/mall_search 均非注册表档位
         "requiredTools": ["searchProducts"],
         "version": "1.0.0",
     }
@@ -113,7 +113,7 @@ class ShoppingGuideSkill(BaseSkill):
         "name": "商品智能导购与选品推荐 Agent SOP",
         "description": "多轮偏好挖掘、商品库深度检索、多维参数比对与候选集维护",
         "category": "pre_sale",
-        "triggerIntents": ["shopping_guide", "general_query", "product_query", "PRODUCT_INQUIRY"],
+        "triggerIntents": ["shopping_guide", "general_query"],  # A5 清死词:product_query/PRODUCT_INQUIRY 非注册表档位
         "requiredTools": ["searchProducts", "compareProducts", "queryProductSkus"],
         "version": "1.0.0",
     }
