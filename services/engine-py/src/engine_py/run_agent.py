@@ -479,14 +479,26 @@ async def run_agent(job: AgentJobInput) -> dict:
 
     # 1. 🚀 毫秒级极速直达旁路:纯问候/身份问句零模型开销
     if is_quick_greeting(input_message):
+        # P9(2026-10-03):问候旁路曾对同一行三连串行 DB 往返(SELECT 自愈 →
+        # onboarding → _ensure_thread upsert)。现 upsert 带 RETURNING 一次拿到
+        # 权威 business_id(ON CONFLICT 只续 updated_at 不覆盖归属 —— 返回值即
+        # 库内真源,归属冻结不变量原样),往返 3→2;onboarding 仍需权威值后
+        # 解析(问候文案按租户),保留串行。
         resolved_biz_id = job.business_id or "ecommerce"
         try:
             async with get_session() as session:
-                thread_row = (
-                    await session.execute(select(Thread).where(Thread.id == thread_id).limit(1))
-                ).scalar_one_or_none()
-                if thread_row and thread_row.business_id:
-                    resolved_biz_id = thread_row.business_id
+                stored_business_id = (
+                    await session.execute(
+                        text(
+                            'INSERT INTO threads (id, "user_id", "business_id", status, "created_at", "updated_at") '
+                            "VALUES (:tid, :uid, :bid, 'active', NOW(), NOW()) "
+                            'ON CONFLICT (id) DO UPDATE SET "updated_at" = NOW() '
+                            'RETURNING "business_id"'
+                        ).bindparams(tid=thread_id, uid=user_id, bid=resolved_biz_id)
+                    )
+                ).scalar()
+                if stored_business_id:
+                    resolved_biz_id = stored_business_id
         except Exception as g_err:
             print(f"[Quick Greeting] Failed to resolve thread businessId: {g_err}")
         set_business_context(resolved_biz_id)  # 自愈值覆写(A7)
@@ -496,11 +508,6 @@ async def run_agent(job: AgentJobInput) -> dict:
         onboarding = await resolve_onboarding_config(resolved_biz_id)
         greeting_text = onboarding["welcomeText"]
         greeting_cards = build_entry_cards(onboarding)
-
-        try:
-            await _ensure_thread(thread_id, user_id, job.business_id)
-        except Exception as thread_err:
-            print(f"[DB] Failed to ensure thread exists for quick greeting: {thread_err}")
 
         # 用户行归网关持久化(005 治理):旁路只落问候 assistant 行(带入口卡)
         await short_memory.add_message("assistant", greeting_text, cards=greeting_cards)
