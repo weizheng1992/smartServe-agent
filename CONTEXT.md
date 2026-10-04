@@ -80,6 +80,16 @@ The RAG facade across multi-tenant knowledge bases (see `docs/architecture/conte
 
 ## API & Service Layer Subsystem
 
+### Gateway 深 module 三缝(架构审查落地,2026-10-04)
+
+`services/gateway-py/src/gateway_py/` 的三个共享缝,路由声明、不再各自装配:
+
+- **`tenant_scope.py`(租户边界与员工身份闸)**:身份解析(`resolve_staff` / `require_staff` / `optional_staff`,JWT→在职员工,租户由 DB 行带出)、租户边界(`bound_tenant`,他租/`all` 聚合 403)、商户注册表闸(`ensure_tenant_registered`,raise 型 fail-closed)、`same_tenant` 谓词与 `staff_scope` Depends。**两形规则**(契约钉死):身份/租户闸走 HTTPException `{"detail"}` 形,业务闸走 `GateError` → 全局 handler 渲染 `{"success": false, error|message}`。
+- **`approval_actions.py`(审批动作装配)**:HITL 动作三通道(商户运营台 / 管理台顾客+坐席 / SPI)共享的机制单点 —— 动作词表(`CUSTOMER_ACTIONS`/`OPERATOR_ACTIONS`/`STAFF_REVIEW_ACTIONS`/`SPI_ACTIONS`)、对象级租户闸(ensure_*=success 形 / assert_*=detail 形)、humanReply 别名、operator 快照、引擎载荷装配。SPI 通道归属闸 2026-10-04 收口(全局 key 不得跨租户核销工单)。
+- **`sse_tail.py`(SSE 读流泵)**:chat / analytics ask / merchant store 三份手抄泵的归一单点 —— `tail_stream`(历史回放 + XREAD 尾随 + 心跳 + 终局收口,`__done__` 类哨兵不出 SSE 线)、`tail_pubsub`(顾客侧频道 adapter)、`streaming_headers`。测试桩点唯一:monkeypatch 本 module 的 `get_client` / `read_agent_events`。
+
+配套单点:engine 侧 `engine_py/db/merchant_access.py`(agent_merchant 库 URL 解析与 reader/writer/gateway 三执行位构造)、`order_domain.generate_order_id`(订单号六次闸,两包同一机制)与 `insert_merchant_order(_item)`(真账 INSERT 列清单唯一);gateway 侧 `approval_actions` 动作词表与 `conversation_repo.thread_owner`(线程属主访问器)。`conversation_repo.update_conversation_status` 内嵌接管不变量:任何把 human_takeover 线程改走的状态写自动清除暂停闸元数据键(坐席字段保留为审计痕迹,契约钉死)。
+
 ### Chat Router (`services/gateway-py/src/gateway_py/routers/chat.py`)
 
 The chat session orchestration surface (absorbs the TS `ChatSessionOrchestrator`):

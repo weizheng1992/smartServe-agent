@@ -21,6 +21,7 @@ from .rate_limit import RateLimitMiddleware
 from .realtime import sio
 from .routers import admin, analytics, auth, chat, crud, live_desk, merchant, spi
 from .tenant_context import TenantContextMiddleware, _PermissionError
+from .tenant_scope import GateError
 
 
 async def _sync_product_knowledge_on_startup() -> None:
@@ -96,6 +97,16 @@ async def permission_error_handler(request: Request, exc: _PermissionError):
 @fastapi_app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
     return JSONResponse(status_code=400, content={"statusCode": 400, "message": str(exc)})
+
+
+@fastapi_app.exception_handler(GateError)
+async def gate_error_handler(request: Request, exc: GateError):
+    """身份/租户闸统一信封(tenant_scope 模块的呈现单点):{"success": false, <field>}。
+
+    field 缺省 "error"(server-gateway §1.4 统一格式);个别面钉死的历史键名
+    (如坐席台权限闸的 "message")由 GateError.field 覆写,机制仍单点。
+    """
+    return JSONResponse(status_code=exc.status_code, content={"success": False, exc.field: str(exc.detail)})
 
 
 @fastapi_app.get("/api/health")

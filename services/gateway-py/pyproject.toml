@@ -61,3 +61,8 @@ ignore = [
   "TRY004",
   "SIM102",
 ]
+
+# FastAPI 依赖注入标记是声明式默认值而非可变默认(B008 误报):
+# Depends/File 进 DI 白名单,免逐处 noqa(chat.py upload 的既有 noqa 先例止增)
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File"]

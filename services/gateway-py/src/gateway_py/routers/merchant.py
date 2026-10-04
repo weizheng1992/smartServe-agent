@@ -16,17 +16,24 @@ import time
 import uuid as _uuid
 
 from engine_py.approvals import takeover
-from engine_py.approvals.gatekeeper import ApprovalGatekeeper, thread_business_id
-from engine_py.db import get_session
+from engine_py.approvals.gatekeeper import ApprovalGatekeeper
 from engine_py.event_bus import get_client as get_redis
 from engine_py.run_agent import AgentJobInput, run_agent
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
-from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import text
 
+from .. import conversation_repo
 from .. import merchant_domain as mds
+from ..approval_actions import (
+    actor_from_staff,
+    build_payload,
+    ensure_approval_owned,
+    ensure_thread_owned,
+    human_reply,
+    operator_snapshot,
+)
 from ..conversation_repo import (
     THREAD_CHANNEL,
     append_message,
@@ -35,6 +42,14 @@ from ..conversation_repo import (
     publish_thread_message,
 )
 from ..hmac_signer import verify as hmac_verify
+from ..sse_tail import streaming_headers, tail_pubsub
+from ..tenant_scope import (
+    GateError,
+    TenantScope,
+    ensure_tenant_registered,
+    same_tenant,
+    staff_scope,
+)
 
 router = APIRouter()
 merchant_promotions_router = APIRouter()
@@ -59,83 +74,14 @@ def _err_msg(err: BaseException) -> str:
     return str(err)
 
 
-async def _require_staff(authorization: str | None) -> dict:
-    """商户管理面统一身份闸(2026-09-26 夜审 A4 收口):Bearer JWT →
-    staff_members 在职员工 —— 401 缺/坏/登出 token(require_claims),
-    403 非员工或停用。此前本组 7 条路由仅 ship 有闸,其余裸奔(匿名即可
-    读全量会话/审批单,甚至批准退款)。按钮级权限粒度(order:view 等)
-    待权限点扩词表后另行收口,本轮统一「必须本平台在职员工」这一层。
-    调用方须在主 try 之外调用(或 except 链先放行 HTTPException),
-    避免 401/403 被兜底 except 吞成 500。"""
-    from engine_py.db import StaffMember
-    from sqlalchemy import select
-
-    from .auth import require_claims
-
-    claims = await require_claims(authorization)
-    email = str(claims.get("email") or "")
-    # JWT 只带 email(sub),租户由 DB 行带出(与 ship/登录同一身份模型)
-    async with get_session() as session:
-        staff = (await session.execute(select(StaffMember).where(StaffMember.email == email))).scalars().first()
-    if staff is None or staff.status != "enabled":
-        raise HTTPException(status_code=403, detail="非商户员工或已停用")
-    return {"email": email, "staff": staff}
-
-
-def _staff_tenant(staff, tenant_param: str | None) -> str:
-    """员工可见租户边界:参数缺省取员工真租户;显式他租与 ``all`` 聚合一律
-    403(架构不变量 #1 —— 员工可见面不得越过其租户行,跨租户列表读的
-    「all」是匿名时代遗产,员工面不再提供)。"""
-    if not tenant_param or tenant_param == staff.business_id:
-        return staff.business_id
-    raise HTTPException(status_code=403, detail=f"跨租户访问被拒绝(员工租户 {staff.business_id})")
+# 身份/租户闸收口(架构审查 #1,2026-10-04):_require_staff / _staff_tenant /
+# check_tenant_registered 三种手写形态上收 tenant_scope 深模块(Depends 前置闸,
+# 401/403 不再可能被处理器内兜底 except 吞成 500);注册闸改 raise 型
+# ensure_tenant_registered,gate-or-None 透出咒语(曾复制 6 份)随之清零。
 
 
 def _ts_ms() -> int:
     return int(time.time() * 1000)
-
-
-# ---------------------------------------------------------------------------
-# 商户注册门禁(A档,2026-09-04)
-# ---------------------------------------------------------------------------
-
-
-async def check_tenant_registered(business_id: str | None) -> JSONResponse | None:
-    """校验客户端自报的 businessId/tenantId 已在 ``tenants`` 注册表登记且 ``status='active'``。
-
-    背景:此前商户服务路径(门店聊天/会话读取/运营台)从不咨询注册表 —— 任意自报
-    租户(实测 ghost-tenant-999)可获全套引擎服务,并以"X 官方商城"品牌扮演作出
-    回复。本门禁仅约束商户路径;平台主站 ``/api/chat`` 通路不受限(内置租户
-    ecommerce/nike/adidas 不走商户入驻)。
-
-    返回 ``None`` = 放行;返回 ``JSONResponse`` = 调用方直接透出
-    (403 未注册/已停用,503 注册表不可用 —— fail-closed:宁可拒绝服务,
-    不可放行未注册租户)。"all" 为聚合视图参数,非单租户扮演,直接放行。
-    """
-    clean = (business_id or "").strip().lower()
-    if clean == "all":
-        return None
-    try:
-        async with get_session() as session:
-            row = (
-                await session.execute(
-                    text("SELECT status FROM tenants WHERE LOWER(business_id) = :bid LIMIT 1"),
-                    {"bid": clean},
-                )
-            ).first()
-    except Exception as err:
-        print(f"[TenantGate] tenants 注册表查询失败(fail-closed 拒绝请求): {err}")
-        return JSONResponse(
-            status_code=503,
-            content={"success": False, "error": "租户注册表暂不可用，请稍后重试"},
-        )
-    if row is None or str(row[0] or "").lower() != "active":
-        print(f"[TenantGate] 拒绝未注册/已停用商户租户: {business_id!r}")
-        return JSONResponse(
-            status_code=403,
-            content={"success": False, "error": f"商户 '{business_id}' 未入驻或已停用，请联系平台完成商户注册"},
-        )
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -188,17 +134,13 @@ async def verify_spi_request(
 
 @router.get("/api/admin/conversations")
 async def admin_conversations(
-    tenantId: str | None = Query(None),
     status: str | None = Query(None),
     search: str | None = Query(None),
-    authorization: str | None = Header(None),
+    scope: TenantScope = Depends(staff_scope),
 ):
-    staff = (await _require_staff(authorization))["staff"]
-    tenant_id = _staff_tenant(staff, tenantId)
+    tenant_id = scope.tenant
+    await ensure_tenant_registered(tenant_id)
     try:
-        gate = await check_tenant_registered(tenant_id)
-        if gate is not None:
-            return gate
         res = await list_conversations(
             business_id=tenant_id,
             status=None if status == "all" else status,
@@ -215,15 +157,11 @@ async def admin_conversations(
 @router.get("/api/admin/conversations/{thread_id}")
 async def admin_conversation_detail(
     thread_id: str,
-    tenantId: str | None = Query(None),
-    authorization: str | None = Header(None),
+    scope: TenantScope = Depends(staff_scope),
 ):
-    staff = (await _require_staff(authorization))["staff"]
-    tenant_id = _staff_tenant(staff, tenantId)
+    tenant_id = scope.tenant
+    await ensure_tenant_registered(tenant_id)
     try:
-        gate = await check_tenant_registered(tenant_id)
-        if gate is not None:
-            return gate
         timeline = await get_conversation_timeline(thread_id, tenant_id)
         now = _dt.datetime.now().isoformat()
         data = timeline or {
@@ -245,8 +183,7 @@ async def admin_conversation_detail(
 
 
 @router.get("/api/admin/orders")
-async def admin_orders(authorization: str | None = Header(None)):
-    await _require_staff(authorization)
+async def admin_orders(scope: TenantScope = Depends(staff_scope)):
     try:
         data = await mds.get_admin_dashboard_data()
         return {"success": True, **data}
@@ -257,14 +194,14 @@ async def admin_orders(authorization: str | None = Header(None)):
 @router.post("/api/admin/orders/ship")
 async def admin_orders_ship(
     body: dict,
-    authorization: str | None = Header(None),
+    scope: TenantScope = Depends(staff_scope),
 ):
     """发货 = 真实世界副作用(锁定地址/扣库存),按 RBAC order:ship 权限点闸
-    (身份闸统一走 _require_staff,权限点留在本路由)。"""
+    (身份/租户闸前置走 tenant_scope.staff_scope,权限点留在本路由)。"""
     from engine_py.analytics import rbac as analytics_rbac
 
+    staff = scope.staff
     try:
-        staff = (await _require_staff(authorization))["staff"]
         # 权限点按员工真租户判定(2026-09-20 review:硬编码 aurora 会让他租员工按 aurora 菜单放行)
         if "order:ship" not in await analytics_rbac.perms_for_role(staff.business_id, staff.role):
             return JSONResponse(status_code=403, content={"success": False, "message": "无发货权限(order:ship)"})
@@ -284,9 +221,8 @@ async def admin_orders_ship(
 
 
 @router.get("/api/admin/orders/{order_id}")
-async def admin_order_detail(order_id: str, authorization: str | None = Header(None)):
+async def admin_order_detail(order_id: str, scope: TenantScope = Depends(staff_scope)):
     """订单详情 = 行项目(camelCase 序列化,与 storefront /spi/v1/orders/detail 同形)+ 该订单审计时间线。"""
-    await _require_staff(authorization)
     try:
         order = await mds.get_order_detail(order_id)
         if order is None:
@@ -299,17 +235,13 @@ async def admin_order_detail(order_id: str, authorization: str | None = Header(N
 
 @router.get("/api/admin/approvals")
 async def admin_approvals(
-    tenantId: str | None = Query(None),
     status: str | None = Query(None),
     actionType: str | None = Query(None),
-    authorization: str | None = Header(None),
+    scope: TenantScope = Depends(staff_scope),
 ):
-    staff = (await _require_staff(authorization))["staff"]
-    tenant = _staff_tenant(staff, tenantId)
+    tenant = scope.tenant
+    await ensure_tenant_registered(tenant)
     try:
-        gate = await check_tenant_registered(tenant)
-        if gate is not None:
-            return gate
         approvals = await ApprovalGatekeeper.list_pending_approvals(
             {
                 "tenantId": tenant,
@@ -323,48 +255,32 @@ async def admin_approvals(
 
 
 @router.post("/api/admin/approvals")
-async def admin_approvals_action(body: MerchantApprovalActionIn, authorization: str | None = Header(None)):
-    staff = (await _require_staff(authorization))["staff"]
+async def admin_approvals_action(body: MerchantApprovalActionIn, scope: TenantScope = Depends(staff_scope)):
+    staff = scope.staff
+    # 装配上收 approval_actions(架构审查 #2):对象级租户闸 / actor 派生 /
+    # humanReply 别名 / operator 快照 / 引擎载荷,三通道机制单点;本面保留
+    # 权限画像(本租全权,无白名单)与结果错误映射(包装 success 形)。
     try:
-        # 对象级租户校验(夜审 A4):审批单归属他租一律 403,不依赖 gatekeeper 内部
-        if body.approvalId:
-            target = await ApprovalGatekeeper.find_approval_by_id(body.approvalId)
-            target_biz = str((target or {}).get("businessId") or "")
-            if target_biz and target_biz != staff.business_id:
-                return JSONResponse(
-                    status_code=403,
-                    content={"success": False, "error": f"审批单不属于员工租户 {staff.business_id},拒绝操作"},
-                )
+        await ensure_approval_owned(body.approvalId, staff.business_id)
         # P1(live-desk-rework spec §2.1):release_takeover 是线程级动作(无审批单),
         # 按线程归属校验租户;归属未知(business_id NULL 存量线程)fail-open 同上。
-        if (body.action or "").strip() == "release_takeover" and body.threadId:
-            thread_biz = await thread_business_id(body.threadId)
-            if thread_biz and thread_biz != staff.business_id:
-                return JSONResponse(
-                    status_code=403,
-                    content={"success": False, "error": f"会话不属于员工租户 {staff.business_id},拒绝释放"},
-                )
-        # 核准人契约(admin-readiness 01):商户控制台通道 —— 此前直调引擎漏注入
-        # actor,落库恒 unknown(工单 04 审计实弹抓获)。P1 真源化(spec §2.2):
-        # 缺省取员工 JWT 真身,不再兜底自报 merchant_operator;operator 快照
-        # 同源派生,坐席消息落列与认领真源均据此落座。
-        actor = (body.actor or "").strip() or staff.email
-        actor_role = body.actorRole or "merchant_operator"
+        if (body.action or "").strip() == "release_takeover":
+            await ensure_thread_owned(body.threadId, staff.business_id)
+        # 核准人契约(admin-readiness 01):缺省取员工 JWT 真身,不再兜底自报
+        # merchant_operator;operator 快照同源派生,坐席消息落列与认领真源据此落座。
+        actor, actor_role = actor_from_staff(staff, body_actor=body.actor, body_role=body.actorRole)
         result = await ApprovalGatekeeper.process_approval_action(
-            {
-                "approvalId": body.approvalId,
-                "threadId": body.threadId,
-                "action": body.action,
-                "rejectionReason": body.rejectionReason,
-                "humanReply": body.humanReply or body.replyMessage,
-                "isFinish": body.isFinish,
-                "resolvedBy": actor,
-                "resolvedByRole": actor_role,
-                "operator": {
-                    "operatorId": staff.email,
-                    "operatorName": staff.display_name or staff.email,
-                },
-            }
+            build_payload(
+                approval_id=body.approvalId,
+                thread_id=body.threadId,
+                action=body.action,
+                rejection_reason=body.rejectionReason,
+                human_reply_value=human_reply(body.humanReply, body.replyMessage),
+                is_finish=body.isFinish,
+                resolved_by=actor,
+                resolved_by_role=actor_role,
+                operator=operator_snapshot(staff.email, staff.display_name),
+            )
         )
         if result.get("error"):
             return JSONResponse(
@@ -372,6 +288,8 @@ async def admin_approvals_action(body: MerchantApprovalActionIn, authorization: 
                 content={"success": False, "error": result["error"]},
             )
         return {"success": True, **result}
+    except HTTPException:
+        raise
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
@@ -567,21 +485,20 @@ async def store_cart(customerId: str | None = None):
 
 @router.post("/api/store/chat")
 async def store_chat(body: dict):
+    effective_message = (body.get("message") or body.get("input") or "").strip()
+    image_urls = [u for u in (body.get("imageUrls") or []) if isinstance(u, str) and u.strip()]
+    # 空文本但有图放行(兜底文案由前端补,对齐 /api/chat 语义);两者皆空才拒
+    if not effective_message and not image_urls:
+        return JSONResponse(status_code=400, content={"success": False, "error": "消息内容不能为空"})
+
+    business_id = body.get("businessId") or "aurora"
+    user_id = body.get("userId") or "CUST-8801"
+    thread_id = body.get("threadId") or f"merchant_thread_{user_id}_{business_id}"
+    job_id = f"job_{_ts_ms()}_{uuid4_hex(7)}"
+
+    # 注册闸 raise 型(架构审查 #1):置于兜底 except 作用域之外,GateError 直穿
+    await ensure_tenant_registered(business_id)
     try:
-        effective_message = (body.get("message") or body.get("input") or "").strip()
-        image_urls = [u for u in (body.get("imageUrls") or []) if isinstance(u, str) and u.strip()]
-        # 空文本但有图放行(兜底文案由前端补,对齐 /api/chat 语义);两者皆空才拒
-        if not effective_message and not image_urls:
-            return JSONResponse(status_code=400, content={"success": False, "error": "消息内容不能为空"})
-
-        business_id = body.get("businessId") or "aurora"
-        user_id = body.get("userId") or "CUST-8801"
-        thread_id = body.get("threadId") or f"merchant_thread_{user_id}_{business_id}"
-        job_id = f"job_{_ts_ms()}_{uuid4_hex(7)}"
-
-        gate = await check_tenant_registered(business_id)
-        if gate is not None:
-            return gate
 
         # 用户行持久化归网关(005 治理:引擎零写用户行)——store_chat 此前漏写,
         # 005 后 merchant 用户消息不落库、历史恢复缺用户行;多模态 imageUrls 一并入库
@@ -656,6 +573,22 @@ async def store_chat(body: dict):
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
 
+def _thread_belongs(item: dict, user_id: str | None, pg_user_id: str | None) -> bool:
+    """线程归属五分支启发式(纯函数,无 IO 可直测):userId 等值 / PG 用户 id
+    等值 / 线程 id 子串 / 后缀 / 前缀。归属误判即跨用户泄漏(安全语义代码),
+    提为模块级纯函数后谓词组合可直接单测,不必起全栈(testcontainers)。"""
+    if not user_id:
+        return False
+    tid = item.get("threadId") or ""
+    return bool(
+        item.get("userId") == user_id
+        or (pg_user_id and item.get("userId") == pg_user_id)
+        or f"_{user_id}_" in tid
+        or tid.endswith(f"_{user_id}")
+        or tid.startswith(user_id)
+    )
+
+
 def uuid4_hex(n: int) -> str:
     raw = _uuid.uuid4().hex
     return raw[:n] if len(raw) >= n else raw
@@ -671,12 +604,10 @@ async def store_chat_messages(
     includeOlder: str | None = Query(None),
     allHistory: str | None = Query(None),
 ):
+    tenant = businessId or tenantId or "aurora"
+    # 注册闸 raise 型,置于兜底 except 作用域之外(架构审查 #1)
+    await ensure_tenant_registered(tenant)
     try:
-        tenant = businessId or tenantId or "aurora"
-        gate = await check_tenant_registered(tenant)
-        if gate is not None:
-            return gate
-
         pg_user_id: str | None = None
         if userId:
             try:
@@ -698,19 +629,9 @@ async def store_chat_messages(
 
         list_res = await list_conversations(business_id=tenant, user_id=userId, limit=50, offset=0)
 
-        def _belongs(item: dict) -> bool:
-            if not userId:
-                return False
-            tid = item.get("threadId") or ""
-            return bool(
-                item.get("userId") == userId
-                or (pg_user_id and item.get("userId") == pg_user_id)
-                or f"_{userId}_" in tid
-                or tid.endswith(f"_{userId}")
-                or tid.startswith(userId)
-            )
-
-        user_threads = [item for item in (list_res.get("items") or []) if _belongs(item)]
+        user_threads = [
+            item for item in (list_res.get("items") or []) if _thread_belongs(item, userId, pg_user_id)
+        ]
 
         if not threadId and user_threads:
             active = next((t for t in user_threads if t.get("lastMessageSnippet")), None)
@@ -765,6 +686,7 @@ async def store_chat_messages(
 
 @router.get("/api/store/chat/stream")
 async def store_chat_stream(
+    request: Request,
     threadId: str | None = Query(None),
     businessId: str | None = Query(None),
     tenantId: str | None = Query(None),
@@ -774,74 +696,29 @@ async def store_chat_stream(
 
     # 多租户属主闸(2026-10-02 code-review:此前仅凭 threadId 即订阅 pub/sub,
     # 知道线程 id 便可无限听他商会话实时流 —— sibling store_chat_messages 有
-    # 注册闸+属主校验而此处裸奔)。闸必须在 StreamingResponse 之前落定。
+    # 注册闸+属主校验而此处裸奔)。闸必须在 StreamingResponse 之前落定;
+    # raise 型 GateError 直穿(信封 {"success", "error"} 与历史 JSONResponse 同形)。
     tenant = (businessId or tenantId or "aurora").lower().strip()
-    gate = await check_tenant_registered(tenant)
-    if gate is not None:
-        return gate
-    async with get_session() as session:
-        owner_row = (
-            await session.execute(
-                text("SELECT business_id FROM threads WHERE id = :tid").bindparams(tid=threadId)
-            )
-        ).first()
-    if owner_row is None:
-        return JSONResponse(status_code=404, content={"success": False, "error": f"会话 {threadId} 不存在"})
-    owner = str(owner_row[0] or "").lower().strip()
-    if owner != tenant:
-        return JSONResponse(
-            status_code=403, content={"success": False, "error": "会话不属于该商户,拒绝订阅"}
-        )
+    await ensure_tenant_registered(tenant)
+    # 属主闸走 repo.thread_owner 访问器(架构审查 #5:此前裸 SQL 直查 threads
+    # 是线程归属的第三种接口形状)
+    owner = await conversation_repo.thread_owner(threadId)
+    if owner is None:
+        raise GateError(404, f"会话 {threadId} 不存在")
+    if not same_tenant(owner, tenant):
+        raise GateError(403, "会话不属于该商户,拒绝订阅")
 
-    channel = THREAD_CHANNEL.format(thread_id=threadId)
-
-    async def event_stream():
-        yield f"event: connected\ndata: {json.dumps({'threadId': threadId, 'timestamp': _ts_ms()})}\n\n"
-        pubsub = None
-        client = None
-        try:
-            client = await get_redis()
-            if client is not None:
-                pubsub = client.pubsub()
-                await pubsub.subscribe(channel)
-        except Exception as err:
-            print(f"[MerchantChatStream] Redis subscribe failed: {err}")
-
-        try:
-            while True:
-                if pubsub is not None:
-                    # 阻塞式等待(客户端 socket_timeout 需 > timeout,见 event_bus.get_client):
-                    # 非阻塞轮询 + sleep 的写法会让每条消息延迟 15~30s 才转发——
-                    # get_message(timeout=0) 首轮吞不掉已到达的消息,须下一轮才可见。
-                    try:
-                        msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
-                    except (TimeoutError, RedisTimeoutError):
-                        msg = None
-                    if msg and msg.get("type") == "message":
-                        data = msg.get("data")
-                        if isinstance(data, bytes):
-                            data = data.decode()
-                        yield f"event: message\ndata: {data}\n\n"
-                        continue
-                else:
-                    await asyncio.sleep(15.0)
-                yield f"event: heartbeat\ndata: {json.dumps({'timestamp': _ts_ms()})}\n\n"
-        finally:
-            if pubsub is not None:
-                try:
-                    await pubsub.unsubscribe(channel)
-                    await pubsub.aclose()
-                except Exception:
-                    pass
-
+    # 读流泵上收 sse_tail(架构审查 #3):pub/sub 作第二个 adapter,顺带补齐
+    # Stream 泵既有而本面缺失的断连检查;线格式(connected 首帧/message 裸透传/
+    # 心跳)与历史逐字节一致。
     return StreamingResponse(
-        event_stream(),
+        tail_pubsub(
+            THREAD_CHANNEL.format(thread_id=threadId),
+            connected_payload={"threadId": threadId, "timestamp": _ts_ms()},
+            disconnected=request.is_disconnected,
+        ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=streaming_headers(),
     )
 
 

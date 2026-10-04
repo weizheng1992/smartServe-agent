@@ -11,18 +11,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 
 from engine_py.analytics import graph, promotions, rbac, report_service
-from engine_py.event_bus import get_client, publish_agent_event, read_agent_events, stream_key
+from engine_py.event_bus import publish_agent_event, read_agent_events
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import delete, select
 
 from gateway_py.tenant_context import require_tenant_context
 
+from .. import sse_tail
 from .auth import issue_token, require_claims
 
 router = APIRouter(tags=["merchant-analytics"])
@@ -36,6 +35,7 @@ _SEEDED_TENANTS: set[str] = set()
 
 
 def _sse(event: str, data: dict) -> str:
+    """首连/gone/内联降级路径的帧渲染(读流泵的帧渲染在 sse_tail 单点)。"""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
@@ -63,14 +63,6 @@ ASK_TAIL_DEADLINE_SECONDS = 300  # 生产者意外死亡时消费端兜底收口
 _ASK_PRODUCERS: set[asyncio.Task] = set()  # 持引用防 GC,done 回调自清
 
 
-def _sse_frame(seq: int, event: str, data) -> str:
-    return f"id: {seq}\n" + _sse(event, data)
-
-
-def _heartbeat() -> str:
-    return f"event: heartbeat\ndata: {json.dumps({'timestamp': int(time.time() * 1000)})}\n\n"
-
-
 def _ask_frames(outcome: dict) -> list[tuple[str, dict]]:
     """outcome → (event, data) 帧序列;场景包/问号切分一轮回多帧。"""
     if outcome.get("type") == "multi":
@@ -86,49 +78,21 @@ def _ask_response(ask_id: str, gen) -> StreamingResponse:
 
 
 async def _tail_ask_events(request: Request, ask_id: str, last_seq: int):
-    """SSE 消费端:先回放 seq > last_seq 的历史,再跟进直到 ``__done__`` 哨兵。
-
-    哨兵只在 Redis 流内,不出 SSE 线(客户端未知事件会掉兜底渲染,不外泄)。"""
-    client = await get_client()
-    stream = stream_key(ask_id)
-    last_entry_id = "0"
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + ASK_TAIL_DEADLINE_SECONDS
-    while True:
-        if await request.is_disconnected():
-            return
-        if loop.time() > deadline:
-            yield _sse("error", {"message": "分析流等待超时,请重新提问"})
-            return
-        try:
-            res = await client.xread({stream: last_entry_id}, count=50, block=15000)
-        except RedisTimeoutError:
-            # 读超时先于 BLOCK 到期:按一次轮询到期处理,发心跳续命而非断流
-            yield _heartbeat()
-            continue
-        except Exception as err:
-            print(f"[AnalyticsSSE] ask stream read failed, closing: {err}")
-            return
-        if not res:
-            yield _heartbeat()
-            continue
-        for _key, entries in res:
-            for entry_id, fields in entries:
-                last_entry_id = entry_id
-                etype = fields.get("type", "")
-                if etype == "__done__":
-                    return
-                try:
-                    seq = int(fields.get("seq", "0"))
-                except ValueError:
-                    continue
-                if seq <= last_seq:
-                    continue
-                try:
-                    data = json.loads(fields.get("data", "null"))
-                except Exception:
-                    data = fields.get("data")
-                yield _sse_frame(seq, etype, data)
+    """SSE 消费端:读流泵上收 sse_tail(架构审查 #3)—— 回放/心跳/断连/坏 seq/
+    JSON 回落单点;``__done__`` 哨兵只判收口不出 SSE 线(客户端未知事件掉兜底
+    渲染,不外泄);生产者意外死亡由 300s 兜底死线以 error 帧收口,期间心跳续命。"""
+    async for chunk in sse_tail.tail_stream(
+        ask_id,
+        last_seq=last_seq,
+        disconnected=request.is_disconnected,
+        stop_on=frozenset({"__done__"}),
+        emit_stop=False,
+        stop_grace=0.0,
+        deadline_seconds=ASK_TAIL_DEADLINE_SECONDS,
+        deadline_frame=("error", {"message": "分析流等待超时,请重新提问"}),
+        error_prefix="AnalyticsSSE",
+    ):
+        yield chunk
 
 
 @router.post("/api/admin/analytics/ask")

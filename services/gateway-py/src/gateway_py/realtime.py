@@ -59,25 +59,18 @@ async def _publish_ws_event(event: str, room: str, data) -> None:
 async def _staff_from_token(token: str | None):
     """Bearer JWT → 在职员工(02 安全先行);缺/坏/登出 token 或非在职员工
     返回 None(socket 侧以拒绝连接呈现,非 HTTP 401)。接受裸 token 与
-    Bearer 前缀两种形态(login data.token 为裸值)。"""
+    Bearer 前缀两种形态(login data.token 为裸值)。
+
+    身份解析上收 tenant_scope.resolve_staff(架构审查 #5)—— 此前 socket 侧
+    手搓 JWT→staff 查库是坐席身份 adapter 的第三份抄本。"""
+    from .tenant_scope import resolve_staff
+
     raw = str(token or "").strip()
     if not raw:
         return None
     try:
-        from engine_py.db import StaffMember, get_session
-        from sqlalchemy import select
-
-        from .routers.auth import require_claims
-
-        claims = await require_claims(raw if raw.startswith("Bearer ") else f"Bearer {raw}")
-        email = str(claims.get("email") or "")
-        async with get_session() as session:
-            staff = (
-                await session.execute(select(StaffMember).where(StaffMember.email == email))
-            ).scalars().first()
-        if staff is None or staff.status != "enabled":
-            return None
-        return staff
+        identity = await resolve_staff(raw if raw.startswith("Bearer ") else f"Bearer {raw}")
+        return identity.staff if identity is not None else None
     except Exception:
         return None
 
@@ -88,17 +81,57 @@ def _staff_of(sid: str) -> dict | None:
 
 
 async def _has_operate_perm(tenant_id: str, staff: dict) -> bool:
-    """live_desk:operate 闸(live-desk-rework §2.2,照 order:ship 的
-    perms_for_role 先例):接管/发言/释放三路坐席动作逐路校验;权限点按员工
-    真租户的角色菜单闭包判定,角色管理页勾选即生效。租户即 connect 时与
-    staff.business_id 校验一致的 tenantId。"""
-    from engine_py.analytics import rbac
+    """live_desk:operate 闸(live-desk-rework §2.2):接管/发言/释放三路坐席
+    动作逐路校验。判定上收 tenant_scope.has_perm(fail-closed 单点,架构审查 #5)。"""
+    from .tenant_scope import has_perm
 
-    try:
-        return "live_desk:operate" in await rbac.perms_for_role(tenant_id, str(staff.get("role") or ""))
-    except Exception as err:
-        print(f"[Realtime] perm 判定失败(按无权限处理): {err}")
-        return False
+    return await has_perm(tenant_id, str(staff.get("role") or ""), "live_desk:operate")
+
+
+async def _append_takeover_system_message(
+    thread_id: str, tenant_id: str, content: str, operator: dict | None = None
+) -> dict:
+    """接管期系统消息 + 顾客侧桥(single point):落库 role=system 并同步发布
+    thread:{id}:message 顾客 SSE —— on_takeover / on_release_takeover 两处
+    逐行同构的编排收拢于此。"""
+    msg = await conversation_repo.append_message(
+        {
+            "threadId": thread_id,
+            "businessId": tenant_id,
+            "role": "system",
+            "content": content,
+            **({"operatorInfo": operator} if operator else {}),
+        }
+    )
+    await conversation_repo.publish_thread_message(thread_id, msg)
+    return msg
+
+
+async def _broadcast_state_changed(
+    thread_id: str,
+    tenant_id: str,
+    *,
+    operator: dict | None = None,
+    system_message: dict | None = None,
+) -> dict:
+    """状态变更双通道广播(socket 房间 + ws:events)single point。
+
+    线形状:socket 载荷可含 systemMessage;ws:events 恒不含(与历史一致)。"""
+    state = await takeover.thread_state(thread_id)
+    room = _room(thread_id, tenant_id)
+    payload = {"threadId": thread_id, **state}
+    if operator is not None:
+        payload["operatorId"] = operator.get("email")
+        payload["operatorName"] = operator.get("name")
+    if system_message is not None:
+        payload["systemMessage"] = system_message
+    await sio.emit("conversation_state_changed", payload, room=room, namespace=NAMESPACE)
+    await _publish_ws_event(
+        "conversation_state_changed",
+        room,
+        {k: v for k, v in payload.items() if k != "systemMessage"},
+    )
+    return state
 
 
 def _tenant_mismatch(sid: str, data: dict) -> bool:
@@ -241,39 +274,18 @@ async def on_takeover(sid: str, data: dict):
 
     # P1 真源归一 + P2 认领池原子守卫(spec §2.3):认领即清掉线释放计时;
     # business_id 收租户 WHERE。两坐席同抢只成一人,败者收「已被认领」且不落
-    # 系统消息不广播。
+    # 系统消息不广播。系统消息/顾客桥/双通道广播编排收拢于本文件 helper。
     claimed = await takeover.assign_operator(thread_id, operator_id, business_id=tenant_id)
     if not claimed:
         return {"success": False, "error": "会话已被其他坐席认领"}
-    sys_msg = await conversation_repo.append_message(
-        {
-            "threadId": thread_id,
-            "businessId": tenant_id,
-            "role": "system",
-            "content": f"人工客服【{operator_name}】已接入会话，AI 智能体已暂停托管。",
-            "operatorInfo": {"operatorId": operator_id, "operatorName": operator_name},
-        }
+    sys_msg = await _append_takeover_system_message(
+        thread_id,
+        tenant_id,
+        f"人工客服【{operator_name}】已接入会话，AI 智能体已暂停托管。",
+        operator={"operatorId": operator_id, "operatorName": operator_name},
     )
-    # 顾客侧桥:接入通知同步送达顾客 SSE(顾客须知道对面已换成真人)
-    await conversation_repo.publish_thread_message(thread_id, sys_msg)
-    state = await takeover.thread_state(thread_id)
-    room = _room(thread_id, tenant_id)
-    await sio.emit(
-        "conversation_state_changed",
-        {
-            "threadId": thread_id,
-            **state,
-            "operatorId": operator_id,
-            "operatorName": operator_name,
-            "systemMessage": sys_msg,
-        },
-        room=room,
-        namespace=NAMESPACE,
-    )
-    await _publish_ws_event(
-        "conversation_state_changed",
-        room,
-        {"threadId": thread_id, **state, "operatorId": operator_id, "operatorName": operator_name},
+    state = await _broadcast_state_changed(
+        thread_id, tenant_id, operator={"email": operator_id, "name": operator_name}, system_message=sys_msg
     )
     return {"success": True, "status": "human_takeover", **state}
 
@@ -292,25 +304,10 @@ async def on_release_takeover(sid: str, data: dict):
     # P1 真源归一:释放条件 UPDATE 幂等(重复释放不重复落系统消息);
     # business_id 收租户 WHERE,严防跨租户释放。
     await takeover.release_takeover(thread_id, business_id=tenant_id)
-    sys_msg = await conversation_repo.append_message(
-        {
-            "threadId": thread_id,
-            "businessId": tenant_id,
-            "role": "system",
-            "content": "人工客服已结束接管，已重新切换为 AI 智能助手为您服务。",
-        }
+    sys_msg = await _append_takeover_system_message(
+        thread_id, tenant_id, "人工客服已结束接管，已重新切换为 AI 智能助手为您服务。"
     )
-    # 顾客侧桥:释放通知同步送达顾客 SSE
-    await conversation_repo.publish_thread_message(thread_id, sys_msg)
-    state = await takeover.thread_state(thread_id)
-    room = _room(thread_id, tenant_id)
-    await sio.emit(
-        "conversation_state_changed",
-        {"threadId": thread_id, **state, "systemMessage": sys_msg},
-        room=room,
-        namespace=NAMESPACE,
-    )
-    await _publish_ws_event("conversation_state_changed", room, {"threadId": thread_id, **state})
+    state = await _broadcast_state_changed(thread_id, tenant_id, system_message=sys_msg)
     return {"success": True, "status": "active", **state}
 
 
@@ -356,18 +353,8 @@ async def on_send_message(sid: str, data: dict):
                 return {"success": False, "error": "会话已被其他坐席认领，无法发言"}
             # 广播认领结果:其他坐席的会话列表据 conversation_state_changed
             # 就地对齐(use-live-desk 认领/释放广播同通道),呼叫中行不滞留
-            state = await takeover.thread_state(thread_id)
-            room = _room(thread_id, tenant_id)
-            await sio.emit(
-                "conversation_state_changed",
-                {"threadId": thread_id, **state, "operatorId": staff["email"], "operatorName": staff["name"]},
-                room=room,
-                namespace=NAMESPACE,
-            )
-            await _publish_ws_event(
-                "conversation_state_changed",
-                room,
-                {"threadId": thread_id, **state, "operatorId": staff["email"], "operatorName": staff["name"]},
+            await _broadcast_state_changed(
+                thread_id, tenant_id, operator={"email": staff["email"], "name": staff["name"]}
             )
 
     # P4 消息幂等(spec §2.7):clientMsgId 合法即透传为消息主键 —— 重发/断线

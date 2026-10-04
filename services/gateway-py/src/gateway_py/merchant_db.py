@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-import os
 import re
 
 from engine_py.config import settings
+from engine_py.db.merchant_access import gateway_engine, merchant_database_url
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -215,13 +215,17 @@ CREATE INDEX IF NOT EXISTS idx_thread_notes_thread ON thread_notes(thread_id, cr
 
 
 def _merchant_db_url() -> str:
-    url = os.environ.get("MERCHANT_DATABASE_URL")
-    if url:
-        return url
-    base = settings.database_url
-    if base:
-        return re.sub(r"/[^/]+$", "/agent_merchant", base)
-    return "postgres://agent_user:agent_password@localhost:5432/agent_merchant"
+    """薄委托:URL 解析单点在 engine_py.db.merchant_access(架构审查 #4 步1)。"""
+    return merchant_database_url()
+
+
+def _normalize(url: str) -> str:
+    """postgres(ql):// → asyncpg 驱动(仅自愈建库 bootstrap 引擎用)。"""
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
 
 
 def _platform_db_url() -> str:
@@ -232,15 +236,7 @@ def _platform_db_url() -> str:
     return re.sub(r"/[^/]+$", "/agent_platform", _merchant_db_url())
 
 
-def _normalize(url: str) -> str:
-    if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+asyncpg://", 1)
-    if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return url
-
-
-_engine = create_async_engine(_normalize(_merchant_db_url()), pool_size=10, max_overflow=0, pool_pre_ping=True)
+_engine = gateway_engine()
 _tables_initialized = False
 
 

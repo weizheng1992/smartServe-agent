@@ -5,12 +5,12 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-import random
 import secrets
 from dataclasses import dataclass
 from typing import Any
 
 from engine_py.tools_registry.mall_domain import MallDomainService
+from engine_py.tools_registry.order_domain import insert_merchant_order, insert_merchant_order_item
 from sqlalchemy import text
 
 from .merchant_db import ensure_merchant_tables, merchant_engine
@@ -455,30 +455,33 @@ async def place_order(params: dict) -> dict:
             discount = promo.discount
             promo_name = promo.promo_name
 
-            await conn.execute(
-                text("UPDATE merchant_skus SET stock = stock - :qty WHERE sku_code = :code"),
-                {"qty": quantity, "code": params["skuCode"]},
-            )
-            await conn.execute(
+            # 条件 UPDATE(stock >= :qty)原子防超卖(架构审查 #4 步2:与 engine
+            # checkout 同一扣减机制,替换旧的无守卫 UPDATE —— 事务外的库存预检
+            # 只是诚实文案,resolve 与扣减之间的 COMMITTED 快照可被并发单改掉)。
+            # rowcount=0 即并发失利:抛 _CartError 整体回滚,严禁裸 return 令
+            # begin() 把前面已扣的库存提交成半截写入(engine 同款注释语义)。
+            decremented = await conn.execute(
                 text(
-                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
-                    "shipping_address, is_returnable, is_address_modifiable) "
-                    "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', :addr, TRUE, TRUE)"
+                    "UPDATE merchant_skus SET stock = stock - :qty "
+                    "WHERE sku_code = :code AND stock >= :qty"
+                ).bindparams(qty=quantity, code=params["skuCode"])
+            )
+            if not decremented.rowcount:
+                raise _CartError(f"{sku['sku_title']} 刚刚被抢购一空，库存不足，请稍后再试。")
+            await insert_merchant_order(
+                conn,
+                order_id=order_id,
+                customer_id=params["customerId"],
+                total_amount=pay_amount - discount,
+                discount_amount=discount,
+                shipping_address_json=json.dumps(
+                    {
+                        "recipientName": params.get("recipientName", "张伟"),
+                        "phone": params.get("recipientPhone", "13800138000"),
+                        "fullAddress": params.get("shippingAddress") or "北京市海淀区中关村南大街1号院8号楼1201室",
+                    },
+                    ensure_ascii=False,
                 ),
-                {
-                    "oid": order_id,
-                    "cid": params["customerId"],
-                    "amt": round(pay_amount - discount, 2),
-                    "disc": round(discount, 2),
-                    "addr": json.dumps(
-                        {
-                            "recipientName": params.get("recipientName", "张伟"),
-                            "phone": params.get("recipientPhone", "13800138000"),
-                            "fullAddress": params.get("shippingAddress") or "北京市海淀区中关村南大街1号院8号楼1201室",
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
             )
             if promo.coupon_row_id:
                 from engine_py.analytics import promotions as _promo_svc
@@ -490,22 +493,20 @@ async def place_order(params: dict) -> dict:
                 await _record_promo_redemption(conn, promo.activity.promo_id, order_id, promo.activity.discount)
             if promo.coupon:
                 await _record_promo_redemption(conn, promo.coupon.promo_id, order_id, promo.coupon.discount)
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price, "
-                    "image_url, spec_summary) VALUES (:oid, :spu, :code, :t, :st, :qty, :price, :img, :spec)"
-                ),
-                {
-                    "oid": order_id,
-                    "spu": str(sku["spu_id"]),
-                    "code": sku["sku_code"],
-                    "t": sku["spu_title"],
-                    "st": sku["sku_title"],
-                    "qty": quantity,
-                    "price": sku["price"],
-                    "img": sku["image_url"] or sku["spu_image"],
-                    "spec": spec_summary,
-                },
+            await insert_merchant_order_item(
+                conn,
+                order_id=order_id,
+                spu_id=sku["spu_id"],
+                sku_code=sku["sku_code"],
+                title=sku["spu_title"],
+                sku_title=sku["sku_title"],
+                quantity=quantity,
+                price=sku["price"],
+                image_url=sku["image_url"] or sku["spu_image"],
+                spec_summary=spec_summary,
+                # ADR-0003 成交进价快照(架构审查 #4 步3 补漏):此前本路径漏写,
+                # 该行毛利按 0 成本虚增
+                cost_at_purchase=float(sku.get("cost_price") or 0),
             )
     except _CartError as err:
         return {"success": False, "message": err.message}
@@ -676,21 +677,15 @@ class _CartError(Exception):
 
 
 async def _generate_order_id(conn: Any) -> str:
-    """订单号生成:AURORA-ORD-2026-XXXX 随机段带唯一性查重重试(六次闸)。
+    """订单号生成闸:机制单点在 engine order_domain.generate_order_id
+    (架构审查 #4 步2,2026-10-04 —— 此前与 mall_domain.checkout 内联 loop
+    靠注释互指对齐);本面只做通道语义翻译:六次全撞 → _CartError 整体回滚。"""
+    from engine_py.tools_registry.order_domain import generate_order_id
 
-    裸 randint 在种子/存量订单面前是 ~0.5%/单的唯一键碰撞(种子占 9081-9106
-    等 40+ 段位,2026-10-02 夜审实弹:结算 500 duplicate key 9106)。须在写入
-    事务内调用 —— 查重与 INSERT 同连接,六次全撞抛 _CartError 走整体回滚,
-    语义与 engine 侧 mall_domain.create_order_from_cart 的生成闸对齐。
-    """
-    for _ in range(6):
-        candidate = f"AURORA-ORD-2026-{random.randint(1000, 9999)}"
-        exists = (
-            await conn.execute(text("SELECT 1 FROM merchant_orders WHERE order_id = :o").bindparams(o=candidate))
-        ).scalar()
-        if not exists:
-            return candidate
-    raise _CartError("订单号生成冲突，请稍后重试。")
+    candidate = await generate_order_id(conn)
+    if candidate is None:
+        raise _CartError("订单号生成冲突，请稍后重试。")
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -869,19 +864,13 @@ async def create_order_from_cart(
             discount = promo.discount
             promo_name = promo.promo_name
 
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
-                    "shipping_address, is_returnable, is_address_modifiable) "
-                    "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', :addr, TRUE, TRUE)"
-                ),
-                {
-                    "oid": order_id,
-                    "cid": customer_id,
-                    "amt": round(total_amount - discount, 2),
-                    "disc": round(discount, 2),
-                    "addr": json.dumps(shipping_address, ensure_ascii=False),
-                },
+            await insert_merchant_order(
+                conn,
+                order_id=order_id,
+                customer_id=customer_id,
+                total_amount=total_amount - discount,
+                discount_amount=discount,
+                shipping_address_json=json.dumps(shipping_address, ensure_ascii=False),
             )
             if promo.coupon_row_id:
                 from engine_py.analytics import promotions as _promo_svc
@@ -894,22 +883,18 @@ async def create_order_from_cart(
             if promo.coupon:
                 await _record_promo_redemption(conn, promo.coupon.promo_id, order_id, promo.coupon.discount)
             for oi in items_to_insert:
-                await conn.execute(
-                    text(
-                        "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, "
-                        "price, image_url, spec_summary) VALUES (:oid, :spu, :code, :t, :st, :qty, :price, :img, :spec)"
-                    ),
-                    {
-                        "oid": order_id,
-                        "spu": oi["spuId"],
-                        "code": oi["skuCode"],
-                        "t": oi["spuTitle"],
-                        "st": oi["skuTitle"],
-                        "qty": oi["quantity"],
-                        "price": oi["price"],
-                        "img": oi["imageUrl"],
-                        "spec": oi["specSummary"],
-                    },
+                await insert_merchant_order_item(
+                    conn,
+                    order_id=order_id,
+                    spu_id=oi["spuId"],
+                    sku_code=oi["skuCode"],
+                    title=oi["spuTitle"],
+                    sku_title=oi["skuTitle"],
+                    quantity=oi["quantity"],
+                    price=oi["price"],
+                    image_url=oi["imageUrl"],
+                    spec_summary=oi["specSummary"],
+                    cost_at_purchase=float(oi.get("costPrice") or 0),
                 )
     except _CartError as err:
         return {"success": False, "message": err.message}

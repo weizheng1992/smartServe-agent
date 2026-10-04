@@ -154,7 +154,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - **提交信息**：只写提交说明本身，不添加任何其他内容——不加 `Co-Authored-By`、`Generated with Claude Code` 之类的尾注或署名。
 
 
-当上下文占用超过 60% 时，主动提醒我执行 `/compact` 压缩。
+当上下文占用超过 40% 时，主动提醒我执行 `/compact` 压缩（1M 窗口下约 40 万 token；超长上下文注意力衰减明显，宁早勿晚，仍留 35% 手动压缩余地于 75% autocompact 之前）。
 压缩时保留：代码变更记录、待办清单、核心问题定位、测试结果；丢弃探索过程和冗余解释。
 
 

@@ -206,12 +206,25 @@ async def update_conversation_status(
     assigned_operator_id: object = "__unset__",
     tags: list | None = None,
 ) -> dict | None:
+    """状态更新(接管不变量内嵌,架构审查 #5):本 repo 是 threads.status 的
+    唯一写入口 —— 任何把 human_takeover 线程改走的状态写(管理台任意值透传 /
+    SPI close)在此自动清除接管元数据键(与 engine takeover.release 同一清单:
+    takeover_release_at / takeover_requested_at / paused_notice_episode),杜绝
+    「状态改走了、暂停闸 episode 标记成孤儿」的第二写路径漂移。坐席字段不动:
+    assigned_operator_id 是审计痕迹(谁接管的),状态迁移不得顺手抹掉 —— 哨兵
+    缺省保留语义由 test_realtime_takeover_edges 钉死。"""
     async with get_session() as session:
         sets = ["status = :status", "updated_at = NOW()"]
         params: dict = {"tid": thread_id, "bid": business_id, "status": status}
         if assigned_operator_id != "__unset__":
             sets.append("assigned_operator_id = :op")
             params["op"] = assigned_operator_id
+        sets.append(
+            "metadata = CASE WHEN :status <> 'human_takeover' AND status = 'human_takeover' "
+            "THEN COALESCE(metadata, '{}'::jsonb) "
+            "    - 'takeover_release_at' - 'takeover_requested_at' - 'paused_notice_episode' "
+            "ELSE metadata END"
+        )
         if tags is not None:
             sets.append("tags = CAST(:tags AS jsonb)")
             params["tags"] = json.dumps(tags)
@@ -232,6 +245,22 @@ async def update_conversation_status(
             "assignedOperatorId": row["assigned_operator_id"],
             "updatedAt": row["updated_at"].isoformat() if row["updated_at"] else None,
         }
+
+
+async def thread_owner(thread_id: str) -> str | None:
+    """线程属主租户(business_id);查无 → None。
+
+    路由层属主闸的廉价访问器(架构审查 #5):此前 store 流订阅裸 SQL 直查、
+    live_desk _load_thread_scoped 自抛 404/403、timeline 返 None —— 同一
+    「线程归属」三种接口形状。读属主走这里,裁决(403/404 形状)留在各面。
+    """
+    async with get_session() as session:
+        row = (
+            await session.execute(
+                text("SELECT business_id FROM threads WHERE id = :tid").bindparams(tid=thread_id)
+            )
+        ).first()
+    return str(row[0]) if row and row[0] is not None else None
 
 
 async def create_thread(thread_id: str, business_id: str, user_id: str | None = None) -> dict | None:

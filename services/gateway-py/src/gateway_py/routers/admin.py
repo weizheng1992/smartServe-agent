@@ -8,8 +8,8 @@ import math
 
 from engine_py.analytics import rbac
 from engine_py.approvals import ApprovalGatekeeper
-from engine_py.approvals.gatekeeper import thread_business_id, thread_owner_id  # 线程归属单一实现(gatekeeper)
-from engine_py.db import RagDocumentRow, StaffMember, get_session
+from engine_py.approvals.gatekeeper import thread_owner_id  # 线程归属单一实现(gatekeeper)
+from engine_py.db import RagDocumentRow, get_session
 from engine_py.onboarding import validate_onboarding_config
 from engine_py.rag import ContextualRAG
 from engine_py.skills import SkillRegistry
@@ -20,16 +20,21 @@ from sqlalchemy import desc, select, text
 from sqlalchemy.orm import defer
 
 from .. import conversation_repo
+from ..approval_actions import (
+    CUSTOMER_ACTIONS,
+    OPERATOR_ACTIONS,
+    STAFF_REVIEW_ACTIONS,
+    actor_from_staff,
+    assert_approval_owned,
+    assert_thread_owned,
+    build_payload,
+    human_reply,
+    operator_snapshot,
+)
 from ..tenant_context import get_tenant_context
+from ..tenant_scope import optional_staff, require_tenant, same_tenant
 
 router = APIRouter()
-
-
-def _require_tenant() -> dict:
-    ctx = get_tenant_context()
-    if ctx and ctx.get("tenantId"):
-        return ctx
-    raise HTTPException(403, "Forbidden: tenant context required (x-tenant-id header)")
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +42,7 @@ def _require_tenant() -> dict:
 # ---------------------------------------------------------------------------
 @router.get("/api/tenant/ping")
 async def tenant_ping(x_tenant_id: str | None = Header(None)):
-    ctx = _require_tenant()
+    ctx = require_tenant()
     config = await get_tenant_config(ctx["tenantId"])
     return {
         "success": True,
@@ -208,6 +213,37 @@ async def tenant_list():
         return {"success": True, "tenants": [], "message": "租户注册表暂不可用，请稍后重试"}
 
 
+async def _insert_tenant_configs(
+    session,
+    *,
+    business_id: str,
+    name: str,
+    spi_config: dict,
+    skills_config: dict,
+    onboarding: dict | None,
+) -> None:
+    """tenant_configs 新行 INSERT 单点(架构审查 #6):create 与 update-缺行
+    两分支此前逐字各抄 18 行,列清单漂移风险收拢于此。"""
+    await session.execute(
+        text(
+            "INSERT INTO tenant_configs (business_id, system_prompt, welcome_message, status, version, "
+            "spi_config, enabled_skills, skills_config, onboarding_config) "
+            "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), "
+            "CAST(:skills AS jsonb), CAST(:onboarding AS jsonb))"
+        ).bindparams(
+            bid=business_id,
+            prompt=f"You are the official AI Customer Support Agent for {name}.",
+            welcome=f"您好！欢迎来到 {name}，请问有什么可以帮您？",
+            spi=json.dumps(spi_config),
+            skills_arr=json.dumps(
+                ["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]
+            ),
+            skills=json.dumps(skills_config),
+            onboarding=json.dumps(onboarding) if onboarding is not None else None,
+        )
+    )
+
+
 class TenantCreateIn(BaseModel):
     id: str
     name: str
@@ -299,23 +335,13 @@ async def create_tenant(body: TenantCreateIn):
                     )
                 )
         else:
-            await session.execute(
-                text(
-                    "INSERT INTO tenant_configs (business_id, system_prompt, welcome_message, status, version, "
-                    "spi_config, enabled_skills, skills_config, onboarding_config) "
-                    "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), "
-                    "CAST(:skills AS jsonb), CAST(:onboarding AS jsonb))"
-                ).bindparams(
-                    bid=clean_id,
-                    prompt=f"You are the official AI Customer Support Agent for {body.name}.",
-                    welcome=f"您好！欢迎来到 {body.name}，请问有什么可以帮您？",
-                    spi=json.dumps(spi_config),
-                    skills_arr=json.dumps(
-                        ["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]
-                    ),
-                    skills=json.dumps(skills_config),
-                    onboarding=json.dumps(body.onboardingConfig) if body.onboardingConfig is not None else None,
-                )
+            await _insert_tenant_configs(
+                session,
+                business_id=clean_id,
+                name=body.name,
+                spi_config=spi_config,
+                skills_config=skills_config,
+                onboarding=body.onboardingConfig,
             )
         await session.commit()
     invalidate_cache(clean_id)
@@ -398,23 +424,13 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
                 )
             )
         else:
-            await session.execute(
-                text(
-                    "INSERT INTO tenant_configs (business_id, system_prompt, welcome_message, status, version, "
-                    "spi_config, enabled_skills, skills_config, onboarding_config) "
-                    "VALUES (:bid, :prompt, :welcome, 'published', 1, CAST(:spi AS jsonb), CAST(:skills_arr AS jsonb), "
-                    "CAST(:skills AS jsonb), CAST(:onboarding AS jsonb))"
-                ).bindparams(
-                    bid=clean_id,
-                    prompt=f"You are the official AI Customer Support Agent for {body.name}.",
-                    welcome=f"您好！欢迎来到 {body.name}，请问有什么可以帮您？",
-                    spi=json.dumps(spi),
-                    skills_arr=json.dumps(
-                        ["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]
-                    ),
-                    skills=json.dumps(skills),
-                    onboarding=json.dumps(onboarding) if onboarding is not None else None,
-                )
+            await _insert_tenant_configs(
+                session,
+                business_id=clean_id,
+                name=body.name,
+                spi_config=spi,
+                skills_config=skills,
+                onboarding=onboarding,
             )
         await session.commit()
     invalidate_cache(clean_id)
@@ -452,7 +468,7 @@ async def skills_registry():
 
 @router.get("/api/skills/config")
 async def skills_config(x_tenant_id: str | None = Header(None)):
-    ctx = _require_tenant()
+    ctx = require_tenant()
     skills = await _tenant_skills(ctx["tenantId"])
     return {"success": True, "tenantId": ctx["tenantId"], "skills": skills}
 
@@ -487,7 +503,7 @@ async def _tenant_skills(tenant_id: str) -> list[dict]:
 
 @router.put("/api/skills/config")
 async def update_skills_config(body: dict, x_tenant_id: str | None = Header(None)):
-    ctx = _require_tenant()
+    ctx = require_tenant()
     if body.get("skillId"):
         updated = await update_tenant_skill_config(ctx["tenantId"], body["skillId"], body)
         return {
@@ -502,14 +518,14 @@ async def update_skills_config(body: dict, x_tenant_id: str | None = Header(None
 
 @router.get("/api/skills/tenant")
 async def skills_tenant_alias(x_tenant_id: str | None = Header(None)):
-    ctx = _require_tenant()
+    ctx = require_tenant()
     skills = await _tenant_skills(ctx["tenantId"])
     return {"success": True, "tenantId": ctx["tenantId"], "skills": skills}
 
 
 @router.patch("/api/skills/tenant/{skill_id}")
 async def update_tenant_skill(skill_id: str, body: dict, x_tenant_id: str | None = Header(None)):
-    ctx = _require_tenant()
+    ctx = require_tenant()
     updated = await update_tenant_skill_config(ctx["tenantId"], skill_id, body)
     return {
         "success": True,
@@ -541,10 +557,10 @@ async def list_approvals(
     # 本租户不一致 403(与 POST 员工路径对象级同口径)。裸匿名维持历史放行
     # —— apps/web 顾客审批卡轮询与 admin 大盘仍依赖匿名 GET,硬切 401 归
     # 票 14(apps/web 接线)同批收紧;顾客 JWT/属主过滤面届时一并落。
-    staff = await _optional_staff(authorization)
+    staff = await optional_staff(authorization)
     if staff is not None:
-        staff_tenant = staff["staff"].business_id
-        if effective_tenant and str(effective_tenant).lower() != str(staff_tenant or "").lower():
+        staff_tenant = staff.staff.business_id
+        if effective_tenant and not same_tenant(effective_tenant, staff_tenant):
             raise HTTPException(status_code=403, detail="租户不一致,拒绝跨租户审批列表")
         effective_tenant = staff_tenant
     try:
@@ -571,95 +587,63 @@ async def list_approvals(
 
 # 02 安全先行(2026-09-27):本面是双面接口 —— 顾客 HITL(apps/web 审批卡/
 # 呼叫人工)与历史坐席通道共用。分面收口:人工坐席动作(human_message/
-# human_reply/human_finish)必须持员工 JWT;顾客动作(approve/reject/cancel/
+# human_finish)必须持员工 JWT;顾客动作(approve/reject/cancel/
 # start_human_takeover)保持可达但加线程归属绑定(userId 必须等于 thread 属主,
 # 此前匿名可凭猜测的 approvalId 核准退款)。x-role 自报头与匿名 actor 自报
 # 一并退役 —— 身份只来自 JWT 或「顾客」语义。GET 列表收口另行立项(_apps/web
 # 轮询与 admin 大盘都依赖匿名 GET)。
-_CUSTOMER_ACTIONS = frozenset({"approve", "reject", "cancel", "start_human_takeover"})
-# P1(live-desk-rework spec §2.1):release_takeover 为线程级员工动作 ——
-# 释放语义 = 写真源(threads → active + 坐席清空),无审批单,JWT 闸同坐席动作。
-# P4(spec §2.7):human_reply 退役 —— 消息与工单显式解耦,坐席发言一律走
-# socket send_message,本面白名单移除即 400「未知审批动作」;human_finish 仍有
-# useApprovalMachine(禁区 admin/web)消费,退役挪 P5 与禁区配合同批;SPI 与
-# 管理台旧通道(/api/admin/approvals)直通引擎白名单,P5 一并收口。
-_OPERATOR_ACTIONS = frozenset({"human_message", "human_finish", "release_takeover"})
-# P4(spec §2.6):台内一等批驳闸 —— 员工代行 approve/reject 须持
-# live_desk:approve(顾客通道无 JWT,仍走 userId 归属绑定,不受此闸)。
-_STAFF_REVIEW_ACTIONS = frozenset({"approve", "reject"})
+# 动作词表上收 approval_actions(架构审查 #2):CUSTOMER_ACTIONS /
+# OPERATOR_ACTIONS / STAFF_REVIEW_ACTIONS 是三通道共享的领域词汇唯一权威。
+# P1(spec §2.1):release_takeover 为线程级员工动作。P4(spec §2.7):human_reply
+# 退役 —— 坐席发言一律走 socket send_message,白名单移除即 400;human_finish
+# 仍有 useApprovalMachine(禁区 admin/web)消费,退役挪 P5。
 
 
-async def _optional_staff(authorization: str | None) -> dict | None:
-    """chat 面可选身份闸:无 Authorization 头 → None(顾客语义);有头则强校验
-    (坏/登出 token 401,require_claims);有效 token 但非在职员工(平台注册
-    顾客账号)→ None 亦按顾客处理。须在主 try 之外调用,避免被兜底 except 吞。"""
-    if not (authorization or "").strip():
-        return None
-    from .auth import require_claims
-
-    claims = await require_claims(authorization)
-    email = str(claims.get("email") or "")
-    async with get_session() as session:
-        staff = (
-            await session.execute(select(StaffMember).where(StaffMember.email == email))
-        ).scalars().first()
-    if staff is None or staff.status != "enabled":
-        return None
-    return {"email": email, "staff": staff}
+# 可选身份闸上收 tenant_scope(架构审查 #1):_optional_staff → optional_staff,
+# 坏 token 401 与非员工 None 语义不变;返回 StaffIdentity(属性访问)。
 
 
 @approvals_router.post("/api/approvals")
 @approvals_router.post("/api/chat/approvals")
 async def resolve_approval(body: dict, request: Request, authorization: str | None = Header(None)):
     action = (body.get("action") or "").strip()
-    if action not in _CUSTOMER_ACTIONS | _OPERATOR_ACTIONS:
+    if action not in CUSTOMER_ACTIONS | OPERATOR_ACTIONS:
         # 诚实失败:此前未知动作会落到引擎按驳回语义处理(静默错误终局)
         raise HTTPException(status_code=400, detail=f"未知审批动作: {action or '(空)'}")
 
-    staff_ctx = await _optional_staff(authorization)
+    staff_ctx = await optional_staff(authorization)
 
     if staff_ctx is not None:
         # 员工路径对象级租户校验(与商户面 A4 同口径):无论坐席动作还是代行
-        # 顾客动作,他租审批单一律 403 —— 否则员工可跨租户发消息/核准退款
-        record = (
-            await ApprovalGatekeeper.find_approval_by_id(body.get("approvalId") or "")
-            if body.get("approvalId")
-            else None
-        )
-        if record is not None and record.get("businessId") != staff_ctx["staff"].business_id:
-            raise HTTPException(
-                status_code=403,
-                detail=f"跨租户审批单被拒绝(员工租户 {staff_ctx['staff'].business_id})",
-            )
-        # release_takeover 是线程级动作(无审批单):按线程归属校验租户,
-        # 严防员工凭猜测的 threadId 跨租户释放他人接管会话。归属未知(business_id
-        # 为 NULL 的存量线程)不额外拦,与上方审批校验同 fail-open 口径。
-        if action == "release_takeover" and body.get("threadId"):
-            thread_biz = await thread_business_id(body["threadId"])
-            if thread_biz and thread_biz != staff_ctx["staff"].business_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"会话不属于员工租户 {staff_ctx['staff'].business_id},拒绝释放",
-                )
+        # 顾客动作,他租审批单一律 403 —— 否则员工可跨租户发消息/核准退款。
+        # 闸机制上收 approval_actions.assert_*(detail 形,文案契约钉死)。
+        tenant = staff_ctx.staff.business_id
+        await assert_approval_owned(body.get("approvalId"), tenant)
+        # release_takeover 是线程级动作(无审批单):按线程归属校验租户,严防
+        # 员工凭猜测的 threadId 跨租户释放他人接管会话;归属未知 fail-open。
+        if action == "release_takeover":
+            await assert_thread_owned(body.get("threadId"), tenant)
         # P4 台内一等批驳(spec §2.6):员工代行批/驳须持 live_desk:approve ——
         # 退款核准是资金语义,不放给无批驳权限的普通坐席(查询 perms_for_role,
         # finance_owner 兜底全量,与 live_desk:operate 闸同查法)。
-        if action in _STAFF_REVIEW_ACTIONS:
-            staff = staff_ctx["staff"]
+        if action in STAFF_REVIEW_ACTIONS:
+            staff = staff_ctx.staff
             if "live_desk:approve" not in await rbac.perms_for_role(staff.business_id, staff.role):
                 raise HTTPException(status_code=403, detail="无工单批驳权限(live_desk:approve)")
 
-    if action in _OPERATOR_ACTIONS:
+    if action in OPERATOR_ACTIONS:
         if staff_ctx is None:
             raise HTTPException(
                 status_code=401,
                 detail="人工坐席操作须经员工登录(管理台请走 /api/admin/approvals 通道)",
             )
-        actor = (body.get("actor") or "").strip() or staff_ctx["email"]
-        actor_role = body.get("actorRole") or "merchant_operator"
+        actor, actor_role = actor_from_staff(
+            staff_ctx.staff, body_actor=body.get("actor"), body_role=body.get("actorRole")
+        )
     elif staff_ctx is not None:
-        actor = (body.get("actor") or "").strip() or staff_ctx["email"]
-        actor_role = body.get("actorRole") or "merchant_operator"
+        actor, actor_role = actor_from_staff(
+            staff_ctx.staff, body_actor=body.get("actor"), body_role=body.get("actorRole")
+        )
     else:
         # 顾客动作:线程归属绑定 —— userId(body 或 x-user-id 头)必须是会话属主。
         # 审批单/线程均不可解析时不额外造 403(落引擎自身 404/格式无效语义;
@@ -681,27 +665,24 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
     # 核准人契约(admin-readiness 01):身份落 actionPayload.resolvedBy/
     # resolvedByRole(engine 侧透传),管理台「审批人 / 驳回理由」列据此显示
     # 真实来源;customer 语义经 02 收口入引擎词表,不再伪装成运营坐席。
-    # P1 坐席身份(spec §2.2):operator 快照由服务端从员工 JWT 派生
-    # (operatorId=email / operatorName=display_name),客户端自报不采信。
-    options = {
-        "approvalId": body.get("approvalId"),
-        "threadId": body.get("threadId"),
-        "action": action,
-        "rejectionReason": body.get("rejectionReason"),
-        "humanReply": body.get("humanReply") or body.get("replyMessage"),
-        "isFinish": body.get("isFinish"),
-        "resolvedBy": actor,
-        "resolvedByRole": actor_role,
-        "operator": (
-            {
-                "operatorId": staff_ctx["email"],
-                "operatorName": staff_ctx["staff"].display_name or staff_ctx["email"],
-            }
-            if staff_ctx is not None
-            else None
-        ),
-    }
-    return await ApprovalGatekeeper.process_approval_action(options)
+    # P1 坐席身份(spec §2.2):operator 快照由服务端从员工 JWT 派生,客户端自报不采信。
+    return await ApprovalGatekeeper.process_approval_action(
+        build_payload(
+            approval_id=body.get("approvalId"),
+            thread_id=body.get("threadId"),
+            action=action,
+            rejection_reason=body.get("rejectionReason"),
+            human_reply_value=human_reply(body.get("humanReply"), body.get("replyMessage")),
+            is_finish=body.get("isFinish"),
+            resolved_by=actor,
+            resolved_by_role=actor_role,
+            operator=(
+                operator_snapshot(staff_ctx.email, staff_ctx.staff.display_name)
+                if staff_ctx is not None
+                else None
+            ),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

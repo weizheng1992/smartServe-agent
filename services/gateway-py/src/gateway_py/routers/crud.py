@@ -26,8 +26,10 @@ from sqlalchemy.orm import defer
 router = APIRouter()
 
 
-def _date_str(value) -> str:
-    return value.isoformat().split("T")[0] if value else "2026-02-23"
+def _date_str(value) -> str | None:
+    """日期列 → YYYY-MM-DD;空值诚实 None(架构审查 #6:此前的 "2026-02-23"
+    编造兜底让空值行伪装成有日期,违数据真实性约定)。"""
+    return value.isoformat().split("T")[0] if value else None
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +323,9 @@ async def billing_usages():
         total_tokens = int(m["totalTokens"]) if m else 0
         sessions_count = int(m["sessionsCount"]) if m else 0
         auto_count = int(m["autoCount"]) if m else 0
-        autopilot_rate = round(auto_count / sessions_count, 2) if sessions_count > 0 else 0.95
+        # 无会话数据 → 诚实 0(架构审查 #6:此前的 0.95 编造兜底违「无遥测数据处
+        # 返回真实 0」数据真实性约定)
+        autopilot_rate = round(auto_count / sessions_count, 2) if sessions_count > 0 else 0.0
         usage_rate = total_tokens / limit if limit > 0 else 0
         billing_status = "exceeded" if usage_rate >= 1.0 else "warning" if usage_rate >= 0.8 else "normal"
         data.append(
@@ -544,7 +548,7 @@ async def system_logs(
                     "node": l.node,
                     "costUsd": l.cost_usd,
                 },
-                "timestamp": l.created_at.strftime("%Y-%m-%d %H:%M:%S") if l.created_at else "2026-02-23 18:00:00",
+                "timestamp": l.created_at.strftime("%Y-%m-%d %H:%M:%S") if l.created_at else None,
             }
         )
     for l, thread_row in intent_rows:
@@ -567,7 +571,7 @@ async def system_logs(
                     "predictedIntents": l.predicted_intents,
                     "confidence": l.confidence,
                 },
-                "timestamp": l.created_at.strftime("%Y-%m-%d %H:%M:%S") if l.created_at else "2026-02-23 18:00:00",
+                "timestamp": l.created_at.strftime("%Y-%m-%d %H:%M:%S") if l.created_at else None,
             }
         )
     for m in metric_rows:
@@ -592,7 +596,7 @@ async def system_logs(
                     "globalTransitionsCount": m.global_transitions_count or 0,
                     "toolErrorsCount": m.tool_errors_count or 0,
                 },
-                "timestamp": m.created_at.strftime("%Y-%m-%d %H:%M:%S") if m.created_at else "2026-02-23 18:00:00",
+                "timestamp": m.created_at.strftime("%Y-%m-%d %H:%M:%S") if m.created_at else None,
             }
         )
 

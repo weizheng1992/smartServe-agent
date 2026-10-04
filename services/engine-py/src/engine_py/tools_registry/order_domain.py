@@ -11,20 +11,15 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
-import os
 import random
 import re
 import time
 import uuid
-from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import bindparam, text
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import NullPool
 
-from ..config import settings
-from ..db import get_session
+from ..db import get_session, merchant_access
 from ..llm import get_embedding_model
 from ..tenant_config import get_tenant_config
 from ..tenant_context import resolve_business_id
@@ -59,49 +54,21 @@ def _refund_window_lapse_days(estimated_delivery: str, now: _dt.datetime | None 
 # 商户门户独立库(agent_merchant)只读直连 —— 商户真单的事实源。
 # 商城下单只写 merchant_orders;聊天查单若仅看 engine 本地 orders 表,
 # 将与商户门户"我的订单"列表视图永久不一致(2026-09-05 修复)。
+# URL 解析与引擎构造上收 db.merchant_access 单点(架构审查 #4 步1,2026-10-04);
+# 本文件保留私有名(测试整体替换 _merchant_reader_engine 的桩点)作薄委托。
 # ---------------------------------------------------------------------------
 
 
 def _merchant_engine_url() -> str:
-    """商户库连接串(读写共用解析;MERCHANT_DATABASE_URL 优先,回落主库同名库)。"""
-    url = os.environ.get("MERCHANT_DATABASE_URL")
-    if not url:
-        base = settings.database_url or "postgres://agent_user:agent_password@localhost:5432/agent_platform"
-        url = re.sub(r"/[^/]+$", "/agent_merchant", base)
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-    elif url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return url
+    return merchant_access.merchant_database_url()
 
 
-@lru_cache(maxsize=1)
 def _merchant_reader_engine():
-    """只读引擎(阶段①收口,wayfinder 09-D4):会话级 READ ONLY + 3s 语句超时,
-    为阶段②数据分析只读沙箱提供已物理分离的执行位;写穿透一律走
-    _merchant_writer_engine,严禁复用本引擎。
-
-    NullPool(非 Pool):引擎被 lru_cache 跨事件循环复用 —— QueuePool 的池化
-    asyncpg 连接绑定建连时的循环,测试端每个测试独立 asyncio.run,复用必炸
-    (conftest 同款教训);NullPool 每次取用新建连接、归还即关,循环安全。"""
-    return create_async_engine(
-        _merchant_engine_url(),
-        poolclass=NullPool,
-        connect_args={
-            "server_settings": {
-                "default_transaction_read_only": "on",
-                "statement_timeout": "3000",
-            }
-        },
-    )
+    return merchant_access.reader_engine()
 
 
-@lru_cache(maxsize=1)
 def _merchant_writer_engine():
-    """写穿透引擎(与 reader 同 URL 不同位):退款/地址写穿透的独占执行位,
-    不带任何只读标记 —— 读写物理分离后 reader 才能安全收紧为只读角色。
-    NullPool 理由同 reader:缓存引擎 + 池化连接跨循环复用必炸。"""
-    return create_async_engine(_merchant_engine_url(), poolclass=NullPool)
+    return merchant_access.writer_engine()
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +87,86 @@ def merchant_reader_engine():
 def merchant_writer_engine():
     """商户库写穿透引擎公开访问器;语义与缓存行为见 _merchant_writer_engine。"""
     return _merchant_writer_engine()
+
+
+ORDER_ID_ATTEMPTS = 6
+
+
+async def generate_order_id(conn, *, attempts: int = ORDER_ID_ATTEMPTS) -> str | None:
+    """订单号生成闸唯一实现(架构审查 #4 步2,2026-10-04):AURORA-ORD-2026-XXXX
+    随机段带唯一性查重重试 —— 裸 randint 在种子/存量订单面前是 ~0.5%/单的唯一键
+    碰撞(种子占 9081-9106 等 40+ 段位,2026-10-02 夜审实弹 duplicate key 9106)。
+
+    须在写入事务内调用 —— 查重与 INSERT 同连接。六次全撞返回 None,由调用方
+    按各自通道语义翻译(gateway _CartError 回滚拒单 / engine checkout
+    success False);此前的双实现(本文件 checkout 内联 loop 与 gateway
+    merchant_domain._generate_order_id)靠注释互指对齐,从此代码单点。
+    """
+    for _ in range(attempts):
+        candidate = f"AURORA-ORD-2026-{random.randint(1000, 9999)}"
+        exists = (
+            await conn.execute(text("SELECT 1 FROM merchant_orders WHERE order_id = :o").bindparams(o=candidate))
+        ).scalar()
+        if not exists:
+            return candidate
+    return None
+
+
+async def insert_merchant_order(
+    conn,
+    *,
+    order_id: str,
+    customer_id: str,
+    total_amount: float,
+    discount_amount: float,
+    shipping_address_json: str,
+) -> None:
+    """商户真账主单插入单点(架构审查 #4 步3,2026-10-04):INSERT 列清单此前
+    四份独立维护(本文件 checkout / gateway place_order / gateway
+    create_order_from_cart / merchant_seed),漏列即静默失真 —— ADR-0003 毛利
+    口径直 SUM cost_at_purchase,而 gateway 单件直购路径恰漏写该列。
+
+    账本语义:status 恒 PAID、CNY;total_amount=实付(原价−优惠),
+    discount_amount=优惠额(3c4c843 口径)。地址以 jsonb CAST 显式落列。
+    """
+    await conn.execute(
+        text(
+            "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
+            "shipping_address, is_returnable, is_address_modifiable) "
+            "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', CAST(:addr AS jsonb), TRUE, TRUE)"
+        ).bindparams(
+            oid=order_id, cid=customer_id, amt=round(total_amount, 2),
+            disc=round(discount_amount, 2), addr=shipping_address_json,
+        )
+    )
+
+
+async def insert_merchant_order_item(
+    conn,
+    *,
+    order_id: str,
+    spu_id,
+    sku_code: str,
+    title: str,
+    sku_title: str,
+    quantity: int,
+    price,
+    image_url=None,
+    spec_summary=None,
+    cost_at_purchase=0.0,
+) -> None:
+    """行项目插入单点:cost_at_purchase 成交进价快照必写(ADR-0003,漏写即
+    该行毛利按 0 成本虚增)。"""
+    await conn.execute(
+        text(
+            "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price, "
+            "image_url, spec_summary, cost_at_purchase) VALUES "
+            "(:oid, :spu, :code, :t, :st, :qty, :price, :img, :spec, :cost)"
+        ).bindparams(
+            oid=order_id, spu=str(spu_id), code=sku_code, t=title, st=sku_title,
+            qty=quantity, price=price, img=image_url, spec=spec_summary, cost=cost_at_purchase,
+        )
+    )
 
 
 async def merchant_order_snapshot(order_id: str) -> dict | None:

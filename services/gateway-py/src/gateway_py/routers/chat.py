@@ -14,16 +14,15 @@ import uuid
 from pathlib import Path
 
 from engine_py.approvals import takeover
-from engine_py.db import get_session
-from engine_py.event_bus import get_client, read_agent_events, stream_key
 from engine_py.onboarding import build_entry_cards, resolve_onboarding_config
 from engine_py.run_agent import AgentJobInput, run_agent
 from fastapi import APIRouter, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from .. import conversation_repo
+from .. import conversation_repo, sse_tail
+from ..sse_tail import streaming_headers
+from ..tenant_scope import optional_staff
 
 router = APIRouter(prefix="/api/chat")
 
@@ -48,7 +47,7 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/upload")
-async def upload_chat_image(file: UploadFile = File(...)):  # noqa: B008 — FastAPI 依赖注入惯用法
+async def upload_chat_image(file: UploadFile = File(...)):  # FastAPI 依赖注入惯用法(ruff B008 白名单见 pyproject)
     """接收聊天图片,UUID 落盘本地 uploads 目录,回 /api/uploads/ 静态 URL。
 
     前端契约(ChatArea.tsx):成功顶层 {success, url} 直接入 attachedImages;
@@ -324,68 +323,20 @@ async def _sse_frame(seq: int, event: str, data) -> str:
 
 @router.get("/{job_id}/stream")
 async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Query(None)):
+    """SSE 事件流 — 读流泵上收 sse_tail(架构审查 #3):Last-Event-ID 回放、
+    心跳、断连、坏 seq、JSON 回落、result 优雅收口均为三 SSE 面共享的单点机制;
+    本面只声明 Last-Event-ID 起点(+CORS 头)。"""
     last_event_id_header = request.headers.get("last-event-id") or lastEventId
     last_seq = int(last_event_id_header) if last_event_id_header and last_event_id_header.isdigit() else 0
-
-    async def frame_stream():
-        yield ""  # 让响应头立刻落地
-        client = await get_client()
-        stream = stream_key(job_id)
-        last_entry_id = "0"
-        history = await read_agent_events(job_id)
-        finished = False
-        for event in history:
-            last_entry_id = event["entryId"]
-            if event["seq"] > last_seq:
-                yield await _sse_frame(event["seq"], event["type"], event["data"])
-                if event["type"] == "result":
-                    finished = True
-        if finished:
-            await asyncio.sleep(0.2)
-            return
-
-        while True:
-            if await request.is_disconnected():
-                return
-            try:
-                res = await client.xread({stream: last_entry_id}, count=50, block=15000)
-            except RedisTimeoutError:
-                # 客户端读超时先于 BLOCK 到期(redis-py socket_timeout 配置过小等):
-                # 按一次轮询到期处理,发心跳续命而不是掐断整个流。
-                yield f"event: heartbeat\ndata: {json.dumps({'timestamp': int(time.time() * 1000)})}\n\n"
-                continue
-            except Exception as err:
-                print(f"[ChatSSE] event bus read failed, closing stream: {err}")
-                return
-            if not res:
-                yield f"event: heartbeat\ndata: {json.dumps({'timestamp': int(time.time() * 1000)})}\n\n"
-                continue
-            for _key, entries in res:
-                for entry_id, fields in entries:
-                    last_entry_id = entry_id
-                    try:
-                        seq = int(fields.get("seq", "0"))
-                    except ValueError:
-                        continue
-                    event_type = fields.get("type", "")
-                    try:
-                        data = json.loads(fields.get("data", "null"))
-                    except Exception:
-                        data = fields.get("data")
-                    yield await _sse_frame(seq, event_type, data)
-                    if event_type == "result":
-                        await asyncio.sleep(0.2)
-                        return
-
     return StreamingResponse(
-        frame_stream(),
+        sse_tail.tail_stream(
+            job_id,
+            last_seq=last_seq,
+            disconnected=request.is_disconnected,
+            error_prefix="ChatSSE",
+        ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "X-Accel-Buffering": "no",
-        },
+        headers=streaming_headers(cors=True),
     )
 
 
@@ -405,28 +356,18 @@ async def chat_messages(
 async def _maybe_clear_unread(thread_id: str, authorization: str | None) -> None:
     """P2 未读清零(live-desk-rework §2.3):持 live_desk:operate 的员工打开
     时间线即清零。顾客侧(apps/web 轮询/商户门户)匿名调用 —— 无 JWT 不断言
-    身份直接跳过,未读语义不受影响;清零失败静默(纯展示增强)。"""
-    from engine_py.analytics import rbac
-    from engine_py.db import StaffMember
-    from sqlalchemy import select
+    身份直接跳过,未读语义不受影响;清零失败静默(纯展示增强)。
+    身份解析上收 tenant_scope.optional_staff(架构审查 #1),坏 token 的 401
+    在此仍按展示增强语义静默吞掉。"""
+    from ..tenant_scope import has_perm
 
-    from .auth import require_claims
-
-    raw = str(authorization or "").strip()
-    if not raw:
-        return
     try:
-        claims = await require_claims(raw if raw.startswith("Bearer ") else f"Bearer {raw}")
-        email = str(claims.get("email") or "")
-        async with get_session() as session:
-            staff = (
-                await session.execute(select(StaffMember).where(StaffMember.email == email))
-            ).scalars().first()
-        if staff is None or staff.status != "enabled":
+        identity = await optional_staff(authorization)
+        if identity is None:
             return
-        if "live_desk:operate" not in await rbac.perms_for_role(staff.business_id, staff.role):
+        if not await has_perm(identity.staff.business_id, identity.staff.role, "live_desk:operate"):
             return
-        await takeover.reset_unread(thread_id, business_id=staff.business_id)
+        await takeover.reset_unread(thread_id, business_id=identity.staff.business_id)
     except Exception:
         return
 

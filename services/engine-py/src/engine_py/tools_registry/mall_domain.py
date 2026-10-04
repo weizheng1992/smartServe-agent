@@ -1809,18 +1809,9 @@ class MallDomainService:
                         "failures": failures,
                     }
 
-                # 订单号查重(AURORA-ORD-2026-XXXX 与种子/商城页同格式)
-                order_id = ""
-                for _ in range(6):
-                    candidate = f"AURORA-ORD-2026-{random.randint(1000, 9999)}"
-                    exists = (
-                        await conn.execute(
-                            text("SELECT 1 FROM merchant_orders WHERE order_id = :o").bindparams(o=candidate)
-                        )
-                    ).scalar()
-                    if not exists:
-                        order_id = candidate
-                        break
+                # 订单号生成闸上收 order_domain.generate_order_id 单点
+                # (架构审查 #4 步2:与 gateway merchant_domain 同一机制)
+                order_id = await order_domain.generate_order_id(conn)
                 if not order_id:
                     return {"success": False, "message": "订单号生成冲突，请稍后重试。"}
 
@@ -1902,31 +1893,24 @@ class MallDomainService:
                 # (原价−优惠),discount_amount=优惠额。此前只写原价且无优惠列 ——
                 # 券被核销而订单页显示全款(订单 1155 实证 ¥50 券白烧)。
                 _discount = promo_applied["discount"] if promo_applied else 0.0
-                await conn.execute(
-                    text(
-                        "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
-                        "shipping_address, is_returnable, is_address_modifiable) "
-                        "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', CAST(:addr AS jsonb), TRUE, TRUE)"
-                    ).bindparams(
-                        oid=order_id, cid=user_id,
-                        amt=round(total_amount - _discount, 2), disc=round(_discount, 2),
-                        addr=json.dumps(addr_dict, ensure_ascii=False),
-                    )
+                # 主单/行项目插入走 order_domain 共享单点(架构审查 #4 步3)
+                await order_domain.insert_merchant_order(
+                    conn,
+                    order_id=order_id, customer_id=user_id,
+                    total_amount=total_amount - _discount, discount_amount=_discount,
+                    shipping_address_json=json.dumps(addr_dict, ensure_ascii=False),
                 )
                 for r in resolved:
                     spec_summary = " / ".join(
                         f"{k}:{v}" for k, v in (r.get("spec_attributes") or {}).items()
                     )
-                    await conn.execute(
-                        text(
-                            "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, "
-                            "quantity, price, image_url, spec_summary, cost_at_purchase) VALUES "
-                            "(:oid, :spu, :code, :t, :st, :qty, :price, :img, :spec, :cost)"
-                        ).bindparams(
-                            oid=order_id, spu=str(r["spu_code"]), code=r["sku_code"], t=r["spu_title"],
-                            st=r["sku_title"] or "", qty=r["quantity"], price=r["price"],
-                            img=r.get("image_url"), spec=spec_summary, cost=r.get("cost_price") or 0,
-                        )
+                    await order_domain.insert_merchant_order_item(
+                        conn,
+                        order_id=order_id, spu_id=r["spu_code"], sku_code=r["sku_code"],
+                        title=r["spu_title"], sku_title=r["sku_title"] or "",
+                        quantity=r["quantity"], price=r["price"],
+                        image_url=r.get("image_url"), spec_summary=spec_summary,
+                        cost_at_purchase=r.get("cost_price") or 0,
                     )
         except _CheckoutStockRaceError as race_err:
             print(f"[MallDomain] checkout rolled back, stock race: {race_err}")
