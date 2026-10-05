@@ -222,3 +222,43 @@ def test_triage层问候兜底同源消费配置(monkeypatch):
     assert len(calls) == 1
     assert calls[0]["method"] == "rule"
     assert calls[0]["arbitration_reason"] == "rule_greeting"
+
+
+def test_旁路发布失败臂_事件总线故障问候照常交付(monkeypatch):
+    """T3(2026-10-03 重核):旁路发布失败臂 —— 事件总线/短记不可达时问候照常
+    交付(sync 返回值完整),与主链 settle 发布护栏同纪律;旁路曾裸奔,
+    Redis 故障 = 秒级问候作业直接抛错。"""
+    import importlib
+
+    run_agent_module = importlib.import_module("engine_py.run_agent")
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("event bus unavailable")
+
+    monkeypatch.setattr(run_agent_module, "emit_status", _boom)
+    monkeypatch.setattr(run_agent_module, "emit_job_result", _boom)
+
+    result = _run("onb_greet_t3_publish", "你好")
+
+    assert "智能客服小助手" in result["output"], "发布炸了问候也必须交付"
+    assert (result.get("cards") or [{}])[0].get("type") == "quick_replies"
+
+
+def test_旁路落库失败臂_短记故障问候照常交付(monkeypatch):
+    """T3 同臂第二钉:assistant 行落库失败自吞,问候交付不受影响。"""
+    import importlib
+
+    run_agent_module = importlib.import_module("engine_py.run_agent")
+
+    class _BoomShort:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def add_message(self, *args, **kwargs):
+            raise RuntimeError("messages table unavailable")
+
+    monkeypatch.setattr(run_agent_module, "ShortMemory", _BoomShort)
+
+    result = _run("onb_greet_t3_mem", "你好")
+
+    assert "智能客服小助手" in result["output"]

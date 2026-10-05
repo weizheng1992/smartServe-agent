@@ -509,8 +509,13 @@ async def run_agent(job: AgentJobInput) -> dict:
         greeting_text = onboarding["welcomeText"]
         greeting_cards = build_entry_cards(onboarding)
 
-        # 用户行归网关持久化(005 治理):旁路只落问候 assistant 行(带入口卡)
-        await short_memory.add_message("assistant", greeting_text, cards=greeting_cards)
+        # 用户行归网关持久化(005 治理):旁路只落问候 assistant 行(带入口卡)。
+        # T3(2026-10-03 重核):旁路落库失败自吞不炸问候(纯旁路无 LLM 成本,
+        # 落库失败不该把秒级问候变成 5xx)。
+        try:
+            await short_memory.add_message("assistant", greeting_text, cards=greeting_cards)
+        except Exception as mem_err:
+            print(f"[runAgent] 问候旁路 assistant 行落库失败(不阻断): {mem_err!r}")
 
         greeting_result = {
             "output": greeting_text,
@@ -530,14 +535,20 @@ async def run_agent(job: AgentJobInput) -> dict:
         }
 
         if job_id:
-            await emit_status(
-                job_id,
-                "极速通道：已秒级识别您所发送的日常打招呼，为您载入高画质欢迎界面...",
-                node="triage",
-                plan=greeting_result["taskPlan"],
-            )
-            await asyncio.sleep(0.1)
-            await emit_job_result(job_id, greeting_text, greeting_result["taskPlan"], greeting_cards)
+            # T3:旁路发布失败臂 —— 事件总线不可达时问候照常交付(sync 返回值
+            # 完整),与主链 settle 的发布护栏同纪律;旁路曾裸奔,Redis 故障 =
+            # 问候作业直接抛错。
+            try:
+                await emit_status(
+                    job_id,
+                    "极速通道：已秒级识别您所发送的日常打招呼，为您载入高画质欢迎界面...",
+                    node="triage",
+                    plan=greeting_result["taskPlan"],
+                )
+                await asyncio.sleep(0.1)
+                await emit_job_result(job_id, greeting_text, greeting_result["taskPlan"], greeting_cards)
+            except Exception as pub_err:
+                print(f"[runAgent] 问候旁路事件发布失败(sync 返回值仍完整): {pub_err!r}")
 
         return greeting_result
 
