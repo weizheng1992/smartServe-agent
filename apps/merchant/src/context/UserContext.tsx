@@ -44,10 +44,39 @@ const UserContext = createContext<UserContextValue | null>(null);
 
 const STORAGE_KEY = 'aurora_merchant_current_user';
 
+// U2(2026-10-05)游客身份语义:匿名访客不再静默冒充真实种子客户
+// (张伟/CUST-8801)—— 购物车/聊天/订单曾全部记到真人名下。现默认为
+// 浏览器级稳定游客身份(guest-* 命名空间,与 CUST-* 真客隔断),预设身份
+// 保留为显式切换的演示通道。
+const GUEST_ID_KEY = 'aurora_merchant_guest_id';
+
+function ensureGuestId(): string {
+  try {
+    let id = localStorage.getItem(GUEST_ID_KEY);
+    if (!id) {
+      id = `guest-${Math.random().toString(16).slice(2, 10)}`;
+      localStorage.setItem(GUEST_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return 'guest-session';
+  }
+}
+
+function guestUser(): MerchantUser {
+  return {
+    id: ensureGuestId(),
+    name: '游客',
+    phone: '',
+    tier: '游客',
+    defaultAddress: '',
+  };
+}
+
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  // 从 localStorage 同步初始化当前用户:若延迟到 useEffect 再恢复,首帧会以预设
-  // 用户(张伟/CUST-8801)渲染,聊天挂件等子组件将用错误身份发起请求,并把该
-  // 预设用户的活跃线程劫持进当前视图(身份竞态)。
+  // 从 localStorage 同步初始化当前用户:若延迟到 useEffect 再恢复,首帧会以
+  // 初始身份渲染,聊天挂件等子组件将用错误身份发起请求(身份竞态)。无显式
+  // 选择(U2)回落游客身份,不再冒充预设真实客户。
   const [user, setUser] = useState<MerchantUser>(() => {
     try {
       const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
@@ -60,7 +89,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
-    return PRESET_USERS[0];
+    return guestUser();
   });
 
   const switchUser = (newUser: MerchantUser) => {
@@ -74,7 +103,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const loginUser = (custom: Partial<MerchantUser>) => {
     const updated: MerchantUser = {
-      id: custom.id || `CUST-${Math.floor(1000 + Math.random() * 9000)}`,
+      // U2:CUST-1000~9000 随机段与种子真客(CUST-8801 等)同域可撞;web 自助
+      // 身份走 CUST-WEB-* 专用命名空间
+      id: custom.id || `CUST-WEB-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       name: custom.name || '极光顾客',
       phone: custom.phone || '13800138000',
       tier: custom.tier || '注册会员',

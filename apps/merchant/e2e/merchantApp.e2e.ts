@@ -14,6 +14,21 @@ test.describe('🛍️ 极光潮品商户商城与管理后台端到端测试 (M
   });
 
   test('1. 商城前台浏览商品、选规格加购与查看我的订单', async ({ page }) => {
+    // U2(2026-10-05):默认身份已是游客;本用例验「已选预设顾客」视图,
+    // 显式注入张伟身份(注入值走参数字面量,严禁引用 Node 闭包常量)
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'aurora_merchant_current_user',
+        JSON.stringify({
+          id: 'CUST-8801',
+          name: '张伟',
+          phone: '13800138000',
+          tier: '黑金SVIP',
+          defaultAddress: '北京市海淀区中关村南大街1号院8号楼1201室',
+        }),
+      );
+    });
+
     // 1. 访问商户商城前台
     await page.goto('http://localhost:3005/');
     await expect(page).toHaveTitle(/极光潮品/);
