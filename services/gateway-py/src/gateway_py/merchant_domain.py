@@ -663,9 +663,20 @@ async def save_customer_address(customer_id: str, addr: dict) -> dict:
         updated.append(formatted)
 
     async with merchant_engine().begin() as conn:
+        # T7 契约揪出(2026-10-06):首存客户此前 UPDATE 0 行 —— 地址静默丢失
+        # 却照报 success。upsert 建档+落地址一步原子(customer_id UNIQUE)。
         await conn.execute(
-            text("UPDATE merchant_customers SET addresses = :a WHERE customer_id = :cid"),
-            {"a": json.dumps(updated, ensure_ascii=False), "cid": customer_id},
+            text(
+                "INSERT INTO merchant_customers (customer_id, name, phone, addresses) "
+                "VALUES (:cid, :name, :phone, CAST(:a AS jsonb)) "
+                "ON CONFLICT (customer_id) DO UPDATE SET addresses = CAST(:a AS jsonb), updated_at = NOW()"
+            ),
+            {
+                "cid": customer_id,
+                "name": addr.get("recipientName") or customer_id,
+                "phone": addr.get("phone") or "",
+                "a": json.dumps(updated, ensure_ascii=False),
+            },
         )
     return {"success": True, "address": formatted, "addresses": updated}
 
