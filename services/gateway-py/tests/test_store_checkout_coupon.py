@@ -500,13 +500,15 @@ async def test_order_id_collision_retries_to_free_id(client, contract_fixtures, 
     """订单号生成闸(2026-10-02 夜审实弹 5189468 后补钉):随机段撞上种子/存量
     订单必须查重重试,而非直插 duplicate key 500。购物车与单件直购两条下单
     路径共用同一 _generate_order_id 六次闸。"""
-    from gateway_py import merchant_domain
+    from engine_py.tools_registry import order_domain
 
     await _seed_catalog()
     await _seed_existing_order("AURORA-ORD-2026-4242")
     try:
         # 购物车路径:首个候选 4242 撞库,次选 7707 落单
-        monkeypatch.setattr(merchant_domain, "random", _SeqRandom([4242, 7707]))
+        # (生成闸机制单点在 order_domain.generate_order_id,架构审查 #4 步2 起
+        #  patch 该单点即可同时覆盖购物车与单件直购两条下单路径)
+        monkeypatch.setattr(order_domain, "random", _SeqRandom([4242, 7707]))
         res = await client.post(
             "/api/store/orders",
             json={"customerId": _UID, "items": [{"skuCode": _SKUCODE, "quantity": 1}]},
@@ -516,7 +518,7 @@ async def test_order_id_collision_retries_to_free_id(client, contract_fixtures, 
         assert res.json()["orderId"] == "AURORA-ORD-2026-7707"
 
         # 单件直购路径(place_order)同闸:候选 4242 撞库,次选 7708 落单
-        monkeypatch.setattr(merchant_domain, "random", _SeqRandom([4242, 7708]))
+        monkeypatch.setattr(order_domain, "random", _SeqRandom([4242, 7708]))
         res2 = await client.post(
             "/api/store/orders",
             json={"customerId": _UID, "skuCode": _SKUCODE, "quantity": 1},
@@ -531,7 +533,7 @@ async def test_order_id_collision_retries_to_free_id(client, contract_fixtures, 
 async def test_order_id_exhausted_returns_honest_failure(client, contract_fixtures, monkeypatch):
     """六次候选全撞:诚实 success False(_CartError 块外翻译),整体回滚
     零落单,绝不 500 半截写入。"""
-    from gateway_py import merchant_domain
+    from engine_py.tools_registry import order_domain
 
     await _seed_catalog()
     await _seed_existing_order("AURORA-ORD-2026-4242")
@@ -541,7 +543,7 @@ async def test_order_id_exhausted_returns_honest_failure(client, contract_fixtur
             def randint(self, a: int, b: int) -> int:
                 return 4242
 
-        monkeypatch.setattr(merchant_domain, "random", _Always())
+        monkeypatch.setattr(order_domain, "random", _Always())
         res = await client.post(
             "/api/store/orders",
             json={"customerId": _UID, "items": [{"skuCode": _SKUCODE, "quantity": 1}]},
