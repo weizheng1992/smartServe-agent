@@ -1,13 +1,15 @@
 """聊天 SSE 流边缘分支专册(2026-10-01 夜审补缺;此前 96 契约只钉主链路)。
 
-钉死 `routers/chat.py::sse_stream` 的五条边缘语义:
+钉死 SSE 读流泵(架构审查 #3 起上收 `gateway_py.sse_tail`,chat/ask/store
+三面共享)的五条边缘语义:
 1. Last-Event-ID:非数字回落 0(全量重放)、数字增量重放、header 优先于 query;
 2. 历史含 result → 优雅关闭,绝不进轮询;
 3. RedisTimeoutError(客户端读超时先于 BLOCK 到期)→ 心跳续命而非掐流;
 4. 空轮询 → 心跳;
 5. 事件总线读失败 → 响亮关流(打印 + 终止);坏 seq 字段条目跳过不炸流。
 
-协作方(get_client / read_agent_events)全部 monkeypatch,零真 Redis。
+协作方(get_client / read_agent_events)在唯一桩点 sse_tail 上 monkeypatch,
+零真 Redis(此前三路由各持一份私有绑定,逐副本 patch)。
 无 result 的事件流永不自行终止,重放用例一律以一条 result 活动条目收流。
 """
 
@@ -19,6 +21,7 @@ import json
 import pytest
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from gateway_py import sse_tail
 from gateway_py.routers import chat as chat_router
 
 
@@ -79,8 +82,8 @@ def wire_event_bus(monkeypatch):
         async def _read_history(job_id):
             return list(history)
 
-        monkeypatch.setattr(chat_router, "get_client", _get_client)
-        monkeypatch.setattr(chat_router, "read_agent_events", _read_history)
+        monkeypatch.setattr(sse_tail, "get_client", _get_client)
+        monkeypatch.setattr(sse_tail, "read_agent_events", _read_history)
         return client
 
     return install
