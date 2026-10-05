@@ -513,7 +513,7 @@ class TestConversationTimelineChronologicalOrder:
         expected_utc = (
             dt.datetime(2026, 9, 25, 17, 58, 20)
             .astimezone()  # naive 视作宿主本地时区
-            .astimezone(dt.timezone.utc)
+            .astimezone(dt.UTC)
             .strftime("%Y-%m-%dT%H:%M:%S")
         )
         assert rows[1]["timestamp"].startswith(expected_utc), rows[1]["timestamp"]
