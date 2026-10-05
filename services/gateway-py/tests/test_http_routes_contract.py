@@ -508,8 +508,15 @@ class TestConversationTimelineChronologicalOrder:
             parsed = dt.datetime.fromisoformat(row["timestamp"])
             assert parsed.tzinfo is not None, f"{row['role']} 行仍写 naive 时间戳: {row['timestamp']}"
             assert parsed.utcoffset() == dt.timedelta(0), f"{row['role']} 行须为 UTC: {row['timestamp']}"
-        # naive 17:58 本地(宿主 UTC+8)→ 09:58 UTC
-        assert rows[1]["timestamp"].startswith("2026-09-25T09:58:20"), rows[1]["timestamp"]
+        # naive 17:58 本地墙钟 → UTC 换算期望按宿主时区现算(CI 是 UTC runner,
+        # 写死 +8 的 09:58 前缀在 UTC 宿主上 17:58 本地即 17:58Z,必炸)
+        expected_utc = (
+            dt.datetime(2026, 9, 25, 17, 58, 20)
+            .astimezone()  # naive 视作宿主本地时区
+            .astimezone(dt.timezone.utc)
+            .strftime("%Y-%m-%dT%H:%M:%S")
+        )
+        assert rows[1]["timestamp"].startswith(expected_utc), rows[1]["timestamp"]
 
 
 class TestStoreCartRead:
