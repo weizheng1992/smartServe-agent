@@ -1,6 +1,8 @@
 # 夜间 agent 评测(每晚 23:00)
 
-真实 LLM 会话评测两类 agent,由 Claude durable cron 驱动(23:00 档):
+真实 LLM 会话评测两类 agent,由 Claude durable cron 驱动(23:00 档;
+评测收尾后同任务追加一轮 code-review:基点 = 昨晚评审收尾提交,当日无提交跳过,
+小问题直接修、行为代码改动须全量 pytest+ruff 验证、设计级争议列晨审):
 
 - **商城客服 agent**:`POST /api/store/chat`(33 场景:多场景/全链购物[导购→序数加购→地址簿建档→结算真单]/多模态/多意图复合/模糊意图/多轮指代改口/边界对抗[XSS·超长·空消息·注入]/HITL 正确性·转人工排队/会话隔离)
 - **Data Agent**:`POST /api/admin/analytics/ask`(21 问:指标族扩面[评价/促销/会话/客户]/场景包/多轮追问改写[pageContext.sessionId]/诚实性[乱语·不存在指标·编造指令·写操作]/**权限面**——运营问毛利、仓储问 GMV 必须被拦,老板放行)
