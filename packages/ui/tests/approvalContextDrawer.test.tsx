@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import React from 'react';
+import { renderToString } from 'react-dom/server';
 import type { Approval } from 'types';
 import { type ApprovalContextDetail, ApprovalContextDrawer } from '../src/components/approval/ApprovalContextDrawer';
 import { diagnoseApprovalTrigger } from '../src/components/approval/approvalUtils';
@@ -173,6 +174,51 @@ describe('Admin Approval Trigger Diagnosis & Context Drawer (TDD)', () => {
       expect(element.type).toBe(ApprovalContextDrawer);
       expect(element.props.isOpen).toBe(true);
       expect(element.props.approval?.id).toBe('app_audit_test_01');
+    });
+
+    it('D8 诚实化:无 initialDetail 时基线详情零编造(空态文案 + 真实输入回放)', () => {
+      // 旧 fallback 曾编造「已发货/¥399/顺丰 SF8899776655/热销精选商品/Gold VIP/
+      // 偏好正品直邮」全套假数据,审核员在假订单上做退款裁决 —— 现基线只放
+      // 工单载荷里的真实用户输入,订单/画像空态等异步真拉取。
+      const handleNoop = mock(async () => {});
+      const approval: Approval = {
+        id: 'app_d8_honest_01',
+        threadId: 'thread_d8_01',
+        businessId: 'nike',
+        status: 'waiting',
+        actionType: 'processRefund',
+        reason: '退款审核',
+        actionPayload: {
+          orderId: 'ORD-NIKE-D8',
+          refundAmount: 258.0,
+          userInput: '鞋子开胶了,帮我退款',
+        },
+      };
+
+      const html = renderToString(
+        React.createElement(ApprovalContextDrawer, {
+          isOpen: true,
+          onClose: mock(() => {}),
+          approval,
+          onApprove: handleNoop,
+          onReject: handleNoop,
+          onHumanReply: handleNoop,
+        }),
+      );
+
+      // 编造数据零残留
+      expect(html).not.toContain('SF8899776655');
+      expect(html).not.toContain('顺丰速运');
+      expect(html).not.toContain('热销精选商品');
+      expect(html).not.toContain('Gold VIP');
+      expect(html).not.toContain('正品直邮');
+      // 诚实空态:订单/画像页签徽章计数归零(空态文案在非默认页签内,SSR 只渲染默认页;
+      // React SSR 在动态计数两侧插 <!-- --> 注释,断言前缀即可)
+      expect(html).toContain('购买记录与历史订单 (');
+      expect(html).toContain('用户信息与画像 (');
+      expect(html).toContain('鞋子开胶了,帮我退款');
+      // 工单载荷里的真实单号照常展示(诊断/目标单信息,非编造)
+      expect(html).toContain('ORD-NIKE-D8');
     });
   });
 });

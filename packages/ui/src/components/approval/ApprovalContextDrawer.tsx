@@ -96,28 +96,11 @@ export function ApprovalContextDrawer({
     if (initialDetail) {
       setDetail(initialDetail);
     } else if (approval) {
-      // Create a fallback baseline detail immediately from approval payload
+      // 基线详情(D8 诚实化,2026-10-03):只放工单载荷里的**真实**上下文
+      // (用户输入回放);订单/画像一律空态等异步真拉取 —— 曾编造
+      // 「已发货/¥399/顺丰 SF8899776655/热销精选商品/Gold VIP/偏好正品直邮」
+      // 全套假数据,审核员在假订单上做退款裁决。渲染层空态文案已就位。
       const ctx = getApprovalContextData(approval);
-      const fallbackOrders: UserOrderRecord[] = ctx.orderId
-        ? [
-            {
-              orderId: ctx.orderId,
-              status: 'shipped',
-              totalAmount: typeof ctx.refundAmount === 'number' ? ctx.refundAmount : 399.0,
-              carrier: '顺丰速运',
-              trackingNumber: 'SF8899776655',
-              createdAt: typeof approval.createdAt === 'string' ? approval.createdAt : new Date().toISOString(),
-              items: [
-                {
-                  productName: `${approval.businessId?.toUpperCase() || '品牌'} 热销精选商品`,
-                  price: typeof ctx.refundAmount === 'number' ? ctx.refundAmount : 399.0,
-                  quantity: 1,
-                },
-              ],
-            },
-          ]
-        : [];
-
       const fallbackMessages: ChatMessageRecord[] = ctx.userInput
         ? [
             {
@@ -133,7 +116,7 @@ export function ApprovalContextDrawer({
         (approval as any).userId ||
         (approval as any).userEmail ||
         (approval.actionPayload?.userId as string) ||
-        'user_sess_current';
+        undefined;
       const targetUserEmail = (approval as any).userEmail || undefined;
 
       setDetail({
@@ -142,16 +125,8 @@ export function ApprovalContextDrawer({
           userId: targetUserId,
           email: targetUserEmail,
           businessId: approval.businessId || 'ecommerce',
-          vipLevel: 'Gold VIP',
-          preferences: [
-            {
-              fact: `偏好 ${approval.businessId?.toUpperCase() || '商城'} 正品直邮`,
-              confidence: 0.95,
-              status: 'approved',
-            },
-          ],
         },
-        orders: fallbackOrders,
+        orders: [],
         messages: fallbackMessages,
       });
 
@@ -482,9 +457,11 @@ export function ApprovalContextDrawer({
                       <h4 className="text-sm font-bold text-slate-100 font-mono">
                         {detail?.user?.userId || 'guest_user'}
                       </h4>
-                      <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/40 text-[10px] font-mono">
-                        {detail?.user?.vipLevel || 'VIP 客户'}
-                      </Badge>
+                      {detail?.user?.vipLevel ? (
+                        <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/40 text-[10px] font-mono">
+                          {detail.user.vipLevel}
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
                       归属商户:{' '}
