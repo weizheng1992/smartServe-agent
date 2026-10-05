@@ -39,7 +39,7 @@ BASE = os.environ.get("NIGHTLY_BASE_URL", "http://localhost:4000")
 TENANT = "aurora"
 STAFF_EMAIL = os.environ.get("NIGHTLY_STAFF_EMAIL", "test@example.com")
 STAFF_PASSWORD = os.environ.get("NIGHTLY_STAFF_PASSWORD", "agent-all-dev")
-MAX_TURNS = 90
+MAX_TURNS = 130
 TURN_TIMEOUT = 90.0
 NIGHT = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 CUST_PREFIX = "NIGHTLY"
@@ -127,7 +127,9 @@ async def _create_nightly_order(client, customer_id: str) -> str:
 async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set[str], budget: dict) -> dict:
     """跑一个客服场景(多轮连续 threadId);返回逐轮结果与裁决。"""
     thread_id = f"nightly_{case.case_id}_{int(time.time())}"
-    customer_id = f"{CUST_PREFIX}_{case.case_id}"
+    # 顾客 id 带每夜唯一后缀:引擎侧购物车按 userId 挂账(Redis),case_id 恒定
+    # 会跨跑残留(首夜实弹:上次失败跑的瑜伽垫混进本次结算)
+    customer_id = f"{CUST_PREFIX}_{case.case_id}_{NIGHT}"
     order_id = ""
     if case.setup == "order":
         order_id = await _create_nightly_order(client, customer_id)
@@ -136,6 +138,7 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
     turns_out = []
     verdict_fail = []
     prior_approvals = await approvals_waiting(client, thread_id)
+    customer_order_ids: set[str] = set()
     ok = True
     for i, turn in enumerate(case.turns, 1):
         if budget["turns"] >= MAX_TURNS:
@@ -145,9 +148,11 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
         t0 = time.monotonic()
         message = turn.message.replace("{order_id}", order_id) if order_id else turn.message.replace("{order_id}", "AURORA-ORD-2026-0000")
         try:
+            images = [budget.get("image_map", {}).get(u, u) for u in turn.image_urls]
             r = await client.post(
                 "/api/store/chat",
-                json={"message": message, "businessId": TENANT, "userId": customer_id, "threadId": thread_id},
+                json={"message": message, "businessId": TENANT, "userId": customer_id, "threadId": thread_id,
+                      **({"imageUrls": images} if images else {})},
                 timeout=TURN_TIMEOUT,
             )
             latency = round(time.monotonic() - t0, 1)
@@ -162,8 +167,20 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
                 verdict_fail.append(f"轮{i} 请求异常 {err!r}")
             continue
 
-        row = {"turn": i, "message": message, "output": output[:1200], "latency_s": latency}
+        row = {"turn": i, "message": message[:200], "output": output[:1200], "latency_s": latency}
         fails = []
+        # 传输层契约断言(空消息 400 等):不走 LLM 判分
+        if turn.expect_http is not None:
+            if r.status_code != turn.expect_http:
+                fails.append(f"HTTP {r.status_code} ≠ 期望 {turn.expect_http}")
+            row["http"] = r.status_code
+            if fails and not turn.advisory:
+                ok = False
+                verdict_fail.extend(f"轮{i}: {f}" for f in fails)
+            row["fails"] = fails
+            turns_out.append(row)
+            prior_approvals = await approvals_waiting(client, thread_id)
+            continue
         # 场景信号
         if turn.contains_any:
             if not any(kw.lower() in output.lower() for kw in turn.contains_any):
@@ -185,12 +202,32 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
         if turn.expect_no_new_approval and new:
             fails.append("不应挂起却新建了审批单")
         prior_approvals = now_waiting
-        # 全局编造检查:回答中的商户单号必须在种子集 ∪ 本夜新建;用户自己报出的
-        # 单号被诚实回显(「未查询到订单 X」)不算编造 —— 编造 = 无中生有,不是回声
+        # 全局编造检查:回答中的商户单号必须在种子集 ∪ 本夜新建 ∪ 本顾客真实订单;
+        # 用户自己报出的单号被诚实回显(「未查询到订单 X」)不算编造 —— 编造 =
+        # 无中生有,不是回声。聊天结算当轮生成的单号不在任何预登记集里 →
+        # 未知名号先查本顾客订单刷新(存在即真实),查无才判编造
         for frag in _ORDER_ID_RE.findall(output):
             oid = f"AURORA-ORD-2026-{frag}"
-            if oid not in seeded_ids | created_ids and oid not in turn.message:
+            if oid in seeded_ids | created_ids | customer_order_ids or oid in turn.message:
+                continue
+            try:
+                r2 = await client.get("/api/store/orders",
+                                      params={"customerId": customer_id, "limit": 50})
+                for o in (r2.json() or {}).get("orders") or []:
+                    created_ids.add(str(o.get("orderId") or ""))
+                    customer_order_ids.add(str(o.get("orderId") or ""))
+            except Exception:
+                pass
+            if oid not in created_ids and oid not in turn.message:
                 fails.append(f"编造单号 {oid}")
+        # 转人工排队:线程真源须翻 human_takeover(engine takeover.mark_takeover_requested)
+        if turn.expect_takeover:
+            tr = await client.get("/api/store/chat/messages",
+                                  params={"threadId": thread_id, "businessId": TENANT})
+            tstatus = str(((tr.json() or {}).get("thread") or {}).get("status") or "")
+            row["thread_status"] = tstatus
+            if tstatus != "human_takeover":
+                fails.append(f"转人工未接管: thread.status={tstatus or '未知'}")
         if fails and not turn.advisory:
             ok = False
             verdict_fail.extend(f"轮{i}: {f}" for f in fails)
@@ -247,21 +284,33 @@ async def run_data_case(client, tokens: dict[str, str], case, budget: dict) -> d
     if not token:
         return {"kind": "data", "case_id": case.case_id, "dimension": case.dimension,
                 "ok": False, "fails": [f"员工 {case.staff_email} 无 token"], "advisory": case.advisory}
-    budget["turns"] += 1
+    budget["turns"] += len(case.turns) if case.turns else 1
     t0 = time.monotonic()
     fails: list[str] = []
-    try:
-        r = await client.post(
-            "/api/admin/analytics/ask",
-            headers={"x-tenant-id": TENANT, "Authorization": f"Bearer {token}"},
-            json={"question": case.question},
-            timeout=TURN_TIMEOUT,
-        )
-        frames = _parse_sse(r.text) if r.status_code == 200 else []
-    except Exception as err:
-        return {"kind": "data", "case_id": case.case_id, "dimension": case.dimension,
-                "ok": False, "error": repr(err), "fails": [f"请求异常 {err!r}"],
-                "latency_s": round(time.monotonic() - t0, 1)}
+    questions = case.turns or [case.question]
+    session_id = f"nightly_{case.case_id}"
+    qa_rows: list[dict] = []
+    frames: list[tuple[str, dict]] = []
+    status_code = 0
+    for qi, q in enumerate(questions, 1):
+        try:
+            body = {"question": q}
+            if case.turns:
+                body["pageContext"] = {"sessionId": session_id}
+            r = await client.post(
+                "/api/admin/analytics/ask",
+                headers={"x-tenant-id": TENANT, "Authorization": f"Bearer {token}"},
+                json=body,
+                timeout=TURN_TIMEOUT,
+            )
+            status_code = r.status_code
+            frames = _parse_sse(r.text) if r.status_code == 200 else []
+        except Exception as err:
+            return {"kind": "data", "case_id": case.case_id, "dimension": case.dimension,
+                    "ok": False, "error": repr(err), "fails": [f"请求异常 {err!r}"],
+                    "latency_s": round(time.monotonic() - t0, 1)}
+        qa_rows.append({"q": q, "frames": [ev for ev, _ in frames if ev != "heartbeat"],
+                        "payloads": [{"event": ev, "data": d} for ev, d in frames if ev != "heartbeat"]})
     latency = round(time.monotonic() - t0, 1)
     typed = [(ev, data) for ev, data in frames if ev != "heartbeat"]
     types = [ev for ev, _ in typed]
@@ -278,7 +327,7 @@ async def run_data_case(client, tokens: dict[str, str], case, budget: dict) -> d
         fails.append(f"HTTP {r.status_code}")
     ok = not fails or case.advisory
     return {"kind": "data", "case_id": case.case_id, "dimension": case.dimension,
-            "question": case.question, "frames": types,
+            "question": case.question, "frames": types, "qa": qa_rows,
             "frame_payloads": [{"event": ev, "data": d} for ev, d in typed],
             "ok": ok, "fails": fails,
             "advisory": case.advisory, "latency_s": latency, "staff": case.staff_email}
@@ -327,6 +376,97 @@ async def run_menu_case(client, owner_perms: set[str], case, tokens: dict[str, s
 # ---------------------------------------------------------------------------
 # 清理与报告
 # ---------------------------------------------------------------------------
+
+
+async def run_isolation_case(client) -> dict:
+    """会话隔离(确定性,零 LLM 断言):顾客 X 的线程绝不出现在顾客 Y 的列表。"""
+    x_user, y_user = f"{CUST_PREFIX}_iso_x", f"{CUST_PREFIX}_iso_y"
+    thread_id = f"nightly_iso_{int(time.time())}"
+    r = await client.post("/api/store/chat", json={
+        "message": "在吗", "businessId": TENANT, "userId": x_user, "threadId": thread_id,
+    }, timeout=TURN_TIMEOUT)
+    if r.status_code != 200:
+        return {"kind": "perf", "case_id": "c23_会话隔离", "dimension": "多场景·会话",
+                "ok": False, "fails": [f"X 建线程 HTTP {r.status_code}"]}
+    ry = await client.get("/api/store/chat/messages",
+                          params={"userId": y_user, "businessId": TENANT})
+    y_threads = (ry.json() or {}).get("userThreads") or []
+    leak = [t for t in y_threads if t.get("threadId") == thread_id]
+    rx = await client.get("/api/store/chat/messages",
+                          params={"userId": x_user, "businessId": TENANT, "threadId": thread_id})
+    x_sees = (rx.json() or {}).get("threadId") == thread_id
+    await client.request("DELETE", "/api/chat/threads",
+                         params={"threadId": thread_id, "userId": x_user})
+    fails = []
+    if leak:
+        fails.append("X 的线程泄漏进 Y 的会话列表")
+    if not x_sees:
+        fails.append("X 自己反而看不到自己的线程")
+    return {"kind": "perf", "case_id": "c23_会话隔离", "dimension": "多场景·会话",
+            "ok": not fails, "fails": fails}
+
+
+async def run_concurrency(client) -> dict:
+    """5 路并发真实会话:不 500、不串话、并发延迟记录(优化预算数据源)。"""
+    async def one(i: int):
+        t0 = time.monotonic()
+        try:
+            r = await client.post("/api/store/chat", json={
+                "message": "推荐一款背包", "businessId": TENANT,
+                "userId": f"{CUST_PREFIX}_conc_{i}", "threadId": f"nightly_conc_{i}",
+            }, timeout=120)
+            ok = r.status_code == 200 and (r.json() or {}).get("success") is True
+            return r.status_code, round(time.monotonic() - t0, 1), ok
+        except Exception as err:
+            return 0, round(time.monotonic() - t0, 1), repr(err)[:80]
+
+    rs = await asyncio.gather(*(one(i) for i in range(5)))
+    fails = [f"并发路{i}: HTTP {s} / {err if isinstance(err, str) else ''}"
+             for i, (s, _, ok) in enumerate(rs) if s != 200 or ok is not True]
+    for i in range(5):
+        await client.request("DELETE", "/api/chat/threads",
+                             params={"threadId": f"nightly_conc_{i}", "userId": f"{CUST_PREFIX}_conc_{i}"})
+    return {"kind": "perf", "case_id": "p01_并发5路", "dimension": "优化·并发",
+            "ok": not fails, "fails": fails, "latencies": [l for _, l, _ in rs]}
+
+
+async def run_sse_bridge(client) -> dict:
+    """顾客侧 SSE 桥存活:订阅 store 流后 AI 回复须在 35s 内以 message 帧送达。"""
+    thread_id = f"nightly_sse_{int(time.time())}"
+    got = {"message": False}
+    stop = {"stop": False}
+
+    # 属主闸前置:store 流订阅要求线程已存在(查无 404 掐流是正确行为)——
+    # 先显式建线程,再开流,再发消息(首夜实弹:流先开订阅即 404 空收)
+    await client.post("/api/chat/threads", json={
+        "threadId": thread_id, "businessId": TENANT, "userId": f"{CUST_PREFIX}_sse",
+    }, timeout=30)
+
+    async def listen():
+        async with client.stream("GET", "/api/store/chat/stream",
+                                 params={"threadId": thread_id, "businessId": TENANT},
+                                 timeout=45) as resp:
+            async for chunk in resp.aiter_text():
+                if "event: message" in chunk:
+                    got["message"] = True
+                    return
+                if stop["stop"]:
+                    return
+
+    task = asyncio.create_task(listen())
+    await asyncio.sleep(1.5)
+    await client.post("/api/store/chat", json={
+        "message": "在吗,推荐一款背包", "businessId": TENANT,
+        "userId": f"{CUST_PREFIX}_sse", "threadId": thread_id,
+    }, timeout=TURN_TIMEOUT)
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=35)
+    except asyncio.TimeoutError:
+        stop["stop"] = True
+    await client.request("DELETE", "/api/chat/threads",
+                         params={"threadId": thread_id, "userId": f"{CUST_PREFIX}_sse"})
+    return {"kind": "perf", "case_id": "p02_SSE桥存活", "dimension": "优化·实时",
+            "ok": got["message"], "fails": [] if got["message"] else ["35s 内未收到顾客侧 message 帧"]}
 
 
 async def cleanup() -> dict:
@@ -389,7 +529,7 @@ async def cleanup() -> dict:
     return {"deleted_orders": deleted_orders, "stock_restored": restored, "nightly_approvals_purged": purged}
 
 
-def render_report(results: list[dict], out: Path, night: str, env_ok: bool) -> None:
+def render_report(results: list[dict], out: Path, night: str, env_ok: bool, perf: str = "") -> None:
     cust = [r for r in results if r["kind"] == "customer"]
     data = [r for r in results if r["kind"] == "data"]
     strict = [r for r in results if not r.get("advisory") and not r.get("skipped")]
@@ -422,6 +562,7 @@ td,th{{border:1px solid #ddd;padding:6px 8px;vertical-align:top;font-size:13px;t
 <h1>夜间 agent 评测 · {night}</h1>
 <p>严格用例 <b>{len(passed)}/{len(strict)}</b> 通过 · 失败 <b style="color:#c0392b">{len(failed)}</b> ·
 轮延迟 p50 ≈ {p50}s · 环境 {'正常' if env_ok else '异常'} · 总轮次见 results.jsonl</p>
+<p class="skip">{perf}</p>
 <h2>明细</h2><table><tr><th></th><th>用例</th><th>维度</th><th>失败原因</th><th>延迟s</th><th>转录</th></tr>{rows}</table>
 <p class="skip">skipped 场景因轮次预算未执行,详见 results.jsonl。</p></body></html>""")
 
@@ -445,12 +586,24 @@ async def main() -> int:
         seeded_ids = {o["order_id"] for o in ms._ORDERS}
         created_ids: set[str] = set()
 
+        uploads = ROOT / "public" / "uploads"
+        first_png = next((f"/api/uploads/{f.name}" for f in sorted(uploads.glob("*.png"))), "") if uploads.exists() else ""
+        if first_png:
+            budget["image_map"] = {"@UPLOADS_FIRST_PNG": first_png}
+
+        only = [x for x in os.environ.get("NIGHTLY_CASES", "").split(",") if x.strip()]
         for case in CUSTOMER_CASES:
+            if only and not any(case.case_id.startswith(x) for x in only):
+                continue
             if os.environ.get("NIGHTLY_SMOKE") and case.case_id not in ("c01_导购_冲锋衣", "c15_幽灵单号_诚实查无"):
                 continue
             res = await run_customer_case(client, case, seeded_ids, created_ids, budget)
             results.append(res)
             print(("[PASS] " if res["ok"] else "[FAIL] ") + res["case_id"] + ("" if res["ok"] else "  ← " + "; ".join(res["fails"])))
+
+        # 会话隔离(确定性):X 的线程不得泄漏进 Y 的列表
+        # isolation kind=perf,统一由性能打印循环输出(避免双重打印)
+        results.append(await run_isolation_case(client))
 
         # Data Agent + 菜单矩阵:按需登录各角色(token 缓存)
         needed_staff = {c.staff_email for c in DATA_CASES} | {c.staff_email for c in MENU_CASES}
@@ -469,6 +622,8 @@ async def main() -> int:
 
         if tokens.get(STAFF_EMAIL):
             for case in DATA_CASES:
+                if only and not any(case.case_id.startswith(x) for x in only):
+                    continue
                 if os.environ.get("NIGHTLY_SMOKE") and case.case_id not in ("d01_销售_GMV", "d11_权限_运营问毛利"):
                     continue
                 results.append(await run_data_case(client, tokens, case, budget))
@@ -476,7 +631,7 @@ async def main() -> int:
                 print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
             # 菜单/按钮矩阵:每轮以老板实时全量做基线
-            smoke_menus = [c for c in MENU_CASES if not os.environ.get("NIGHTLY_SMOKE") or c.case_id in ("m01_老板_全量", "m03_运营_受限")]
+            smoke_menus = [c for c in MENU_CASES if (not os.environ.get("NIGHTLY_SMOKE") or c.case_id in ("m01_老板_全量", "m03_运营_受限")) and (not only or any(c.case_id.startswith(x) for x in only))]
             for case in smoke_menus:
                 owner_perms = await _owner_perms(client, tokens)
                 r = await run_menu_case(client, owner_perms, case, tokens)
@@ -489,6 +644,18 @@ async def main() -> int:
                 if ops and wh and ops == wh:
                     results.append({"kind": "menu", "case_id": "m05_角色分档", "dimension": "权限面",
                                     "ok": False, "fails": ["运营与仓储按钮闭集相同,角色分档失效"], "advisory": False})
+
+        # 优化维度:并发 + SSE 桥存活(延迟数据供性能预算);
+        # 定向切片(NIGHTLY_CASES)未点名 p 前缀时记 skipped 不真跑
+        perf_only = [x for x in only if x.startswith("p")]
+        if os.environ.get("NIGHTLY_SMOKE") or (only and not perf_only):
+            results.append({"kind": "perf", "case_id": "perf_skipped", "dimension": "优化",
+                            "ok": True, "skipped": True, "fails": []})
+        else:
+            results.append(await run_concurrency(client))
+            results.append(await run_sse_bridge(client))
+        for r in [x for x in results if x.get("kind") == "perf"]:
+            print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
     # 失败喂飞轮(客服侧;坏例池静默降级,不阻断)
     try:
@@ -509,7 +676,14 @@ async def main() -> int:
     (OUT_DIR / "results.jsonl").write_text(
         "\n".join(json.dumps(r, ensure_ascii=False, default=str) for r in results) + "\n"
     )
-    render_report(results, OUT_DIR / "report.html", NIGHT, env_ok)
+    lat_all = [t.get("latency_s") for r in results for t in (r.get("turns") or [])
+               if isinstance(t, dict) and t.get("latency_s")]
+    lat_all += [x.get("latency_s") for x in results if x.get("latency_s")]
+    lat_all = sorted(x for x in lat_all if isinstance(x, (int, float)))
+    p50v = lat_all[len(lat_all) // 2] if lat_all else 0
+    p95v = lat_all[int(len(lat_all) * 0.95)] if lat_all else 0
+    perf = f"性能:p50={p50v}s · p95={p95v}s · max={max(lat_all) if lat_all else 0}s(预算 advisory,基线学习期)"
+    render_report(results, OUT_DIR / "report.html", NIGHT, env_ok, perf)
     try:
         cleanup_stats = await cleanup()
     except Exception as err:

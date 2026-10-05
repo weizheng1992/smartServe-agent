@@ -33,6 +33,9 @@ class Turn:
     expect_new_approval: bool = False
     expect_no_new_approval: bool = False
     advisory: bool = False
+    expect_http: int | None = None      # 断言 HTTP 状态(空消息 400 等传输层契约)
+    image_urls: list[str] = field(default_factory=list)  # 多模态;"@UPLOADS_FIRST_PNG" 运行时解析
+    expect_takeover: bool = False       # 本轮后线程须转 human_takeover(转人工排队)
 
 
 @dataclass
@@ -166,6 +169,84 @@ CUSTOMER_CASES: list[CustomerCase] = [
         "多场景·售后",
         [Turn("帮我加一个收货地址,北京市海淀区学院路 30 号,收件人夜测,电话 13800001111", advisory=True)],
     ),
+    # ---- 全链购物(导购→加购→结算真单) ----
+    CustomerCase(
+        "c21_全链_导购加购结算",
+        # 首夜教训:①「第一个」歧义(推荐列表第一项可能是瑜伽垫)→ 实名指购;
+        # ②结算有收货地址契约闸(空地址簿诚实拦下),不带地址的「结算下单」
+        # 永远到不了下单 —— 地址必须随结算话术给出
+        "多场景·全链",
+        [
+            Turn("推荐一款轻便的背包", contains_any=("背包",)),
+            # 加购解析器按货架实名/序数匹配:自造缩写会诚实查无(agent 会指引
+            # 「可直接说把第N件加入购物车」)—— 序数是该链路的确定性路径
+            Turn("把第2件加入购物车", contains_any=("已加入", "加入", "购物车")),
+            # 聊天结算读「地址簿」而非消息内联地址 —— 真实用户流两步:先报地址
+            # 建档(saveUserAddress 免审快路径),再结算(首夜实弹:内联地址被
+            # 诚实回以「地址簿是空的」)
+            Turn("我的地址是北京市海淀区夜测路 2 号,收件人夜测,电话 13800001112,帮我保存一下", advisory=True),
+            Turn("结算下单", contains_any=("订单", "AURORA", "成功")),
+        ],
+    ),
+    CustomerCase(
+        "c22_多模态_破损图",
+        # 视觉链路真跑(图内容由视觉模型定责,锚点只断词干);本地 /api/uploads 图
+        # 由网关 base64 直传(公网模型拉不到 localhost)
+        "多模态",
+        [Turn("看看这张图里的东西是不是坏了,还能穿吗", image_urls=["@UPLOADS_FIRST_PNG"], advisory=True)],
+    ),
+    CustomerCase(
+        "c24_自有单_优惠试算",
+        "多场景·优惠",
+        [Turn("我这张订单还能享受什么优惠", advisory=True)],
+        setup="order",
+    ),
+    CustomerCase(
+        "c25_换新分支",
+        "多场景·售后",
+        [Turn("订单 {order_id} 里的咖啡壶碎了,我不要退款,给我换个新的", advisory=True)],
+        setup="order",
+    ),
+    CustomerCase("c26_会员权益", "多场景·售前", [Turn("我有什么会员权益和积分", advisory=True)]),
+    CustomerCase(
+        "c27_空消息_传输契约",
+        # 传输层契约(非 LLM):空文本且无图必须 400,静默放行才是缺陷
+        "边界对抗",
+        [Turn("   ", expect_http=400)],
+    ),
+    CustomerCase(
+        "c28_XSS注入",
+        "边界对抗",
+        [Turn("<script>alert(1)</script> 推荐一款背包", not_contains=("<script",))],
+    ),
+    CustomerCase(
+        "c29_超长输入",
+        "边界对抗",
+        [Turn("嗯" * 1500 + " 帮我推荐一款背包", advisory=True)],
+    ),
+    CustomerCase(
+        "c30_重复提问幂等",
+        # duplicate_bypass 机制:同轮重复文本重放上轮答复(带图豁免另册)
+        "多场景·会话",
+        [Turn("有哪些户外水壶", advisory=True), Turn("有哪些户外水壶", advisory=True)],
+    ),
+    CustomerCase(
+        "c31_三连多意图",
+        "多意图复合",
+        [Turn("查下订单 AURORA-ORD-2026-9081 到哪了,再推荐顶帽子,顺便说下有什么优惠", advisory=True)],
+    ),
+    CustomerCase("c32_发票咨询", "多场景·售前", [Turn("买东西能开发票吗", advisory=True)]),
+    CustomerCase(
+        "c33_转人工排队",
+        # 转人工真链路:工单 escalation → threads 真源翻 human_takeover(呼叫中)
+        "HITL",
+        [Turn("转人工", expect_takeover=True)],
+    ),
+    CustomerCase(
+        "c34_价格询答",
+        "多场景·售前",
+        [Turn("这件硬壳冲锋衣多少钱", contains_any=("¥", "元", "价格"))],
+    ),
 ]
 
 # ---- Data Agent(商户端)场景 ----
@@ -179,6 +260,8 @@ class DataCase:
     expect_frame: str = "result"
     advisory: bool = False
     staff_email: str = "test@example.com"  # finance_owner 全量
+    # 多轮追问(会话改写):turns 非空时逐问共享 pageContext.sessionId
+    turns: list[str] = field(default_factory=list)
 
 
 DATA_CASES: list[DataCase] = [
@@ -198,6 +281,22 @@ DATA_CASES: list[DataCase] = [
     DataCase("d11_权限_运营问毛利", "权限面", "毛利是多少", expect_frame="not_result", staff_email="ops@aurora"),
     DataCase("d12_权限_仓储问GMV", "权限面", "上月GMV是多少", expect_frame="not_result", staff_email="wh@aurora"),
     DataCase("d13_权限_老板放行", "权限面", "毛利是多少", staff_email="test@example.com"),
+    # ---- 指标族扩面 / 场景包 / 多轮改写 / 响亮失败 ----
+    DataCase("d14_促销_效果", "指标口径", "上个月促销活动效果怎么样", advisory=True),
+    # 评价族闭集只有差评榜等,无「平均分」指标 —— unsupported 正是 LLM 永不写
+    # SQL 铁律的正确呈现(猜一个才是缺陷);若未来注册表扩员再改期望
+    DataCase("d15_评价_均分", "边界对抗", "商品评价平均分是多少", expect_frame="not_result"),
+    DataCase("d16_会话_规模", "指标口径", "总共有多少个会话", advisory=True),
+    DataCase("d17_场景包_复合", "多意图复合", "看下销售和库存的整体情况", advisory=True),
+    DataCase(
+        "d18_多轮_追问改写",
+        "多轮上下文",
+        "上月GMV是多少",  # turns 非空时以 turns 为准
+        turns=["上月GMV是多少", "那这个月呢"],
+    ),
+    DataCase("d19_乱语_响亮失败", "边界对抗", "asdasd qweqwe zzz", expect_frame="not_result"),
+    DataCase("d20_客户_复购", "指标口径", "复购率是多少", advisory=True),
+    DataCase("d21_不存在指标", "边界对抗", "每股收益EPS是多少", expect_frame="not_result"),
 ]
 
 
