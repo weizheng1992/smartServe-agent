@@ -1,4 +1,11 @@
 import React, { useEffect, useState } from 'react';
+
+// D9(2026-10-05)诚实计价:缺价行(价格缺失/零/坏值)不得以 ¥0 静默入合计 ——
+// 旧行为让「看着像 0 元可买」的假合计进结算面板;合计只计有价行,缺价行
+// 显「价格待确认」并在结算区提示。结算本身不受影响:服务端按 DB 真价试算。
+function hasPrice(item: { price: number }): boolean {
+  return Number.isFinite(Number(item.price)) && Number(item.price) > 0;
+}
 import { Link } from 'react-router';
 import { Button } from 'ui';
 import { AddressModal, type CustomerAddress } from '../components/address/AddressModal';
@@ -138,7 +145,8 @@ export default function CartPage() {
   };
 
   const selectedItems = cart.filter((it) => it.selected);
-  const totalPrice = selectedItems.reduce((sum, it) => sum + Number(it.price) * it.quantity, 0);
+  const unpricedSelectedCount = selectedItems.filter((it) => !hasPrice(it)).length;
+  const totalPrice = selectedItems.filter(hasPrice).reduce((sum, it) => sum + Number(it.price) * it.quantity, 0);
   const totalCount = selectedItems.reduce((sum, it) => sum + it.quantity, 0);
 
   // 试算随选中项变化重拉(cartKey 收敛依赖:同商品同数量不重复请求);
@@ -335,7 +343,7 @@ export default function CartPage() {
                       </Link>
                       <div className="text-[11px] text-slate-500 mt-0.5">规格: {item.skuTitle}</div>
                       <div className="text-emerald-700 font-extrabold text-sm mt-1">
-                        ¥{Number(item.price).toFixed(2)}
+                        {hasPrice(item) ? `¥${Number(item.price).toFixed(2)}` : '价格待确认'}
                       </div>
                     </div>
 
@@ -491,6 +499,11 @@ export default function CartPage() {
                     <div className="flex justify-between font-semibold text-rose-600">
                       <span>合计已优惠</span>
                       <span>-¥{totalSaved.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {unpricedSelectedCount > 0 && (
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[11px] text-amber-800">
+                      有 {unpricedSelectedCount} 件商品价格待确认,未计入合计;结算时以服务端实际价格为准。
                     </div>
                   )}
                   <div className="border-t border-slate-100 pt-2 flex justify-between items-baseline">
