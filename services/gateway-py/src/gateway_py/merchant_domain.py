@@ -640,6 +640,83 @@ async def insert_customer(
     )
 
 
+# ── 客户域(A2 下沉,2026-10-06):CRUD 业务逻辑自 analytics 路由层迁入,
+# 路由只留权限闸与 error-key → HTTP 映射(与 promotions.delete_promotion 同款形状)。
+# 事务由各函数自持(writer 位),读走 reader 位。
+
+
+async def customer_coupons_list(customer_id: str) -> list[dict]:
+    """客户名下券列表(核销/发券面板回显)。"""
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
+    from sqlalchemy import text
+
+    async with merchant_reader_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT uc.id::text AS id, p.name, p.discount_value::float AS value, uc.status, "
+                    "uc.claimed_at, uc.used_order_id "
+                    "FROM user_coupons uc JOIN promotions p ON p.id = uc.promotion_id "
+                    "WHERE uc.user_id = :cid ORDER BY uc.claimed_at DESC LIMIT 50"
+                ).bindparams(cid=customer_id)
+            )
+        ).mappings().all()
+    return [
+        {
+            "id": r["id"], "name": r["name"], "value": r["value"], "status": r["status"],
+            "claimedAt": r["claimed_at"].isoformat() if r["claimed_at"] else None,
+            "usedOrderId": r["used_order_id"],
+        }
+        for r in rows
+    ]
+
+
+async def update_customer_member_level(customer_id: str, member_level: str) -> dict:
+    """会员级编辑;查无返回 error-key。"""
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+    from sqlalchemy import text
+
+    async with merchant_writer_engine().begin() as conn:
+        result = await conn.execute(
+            text("UPDATE merchant_customers SET member_level = :lv, updated_at = NOW() WHERE customer_id = :cid")
+            .bindparams(lv=str(member_level or "VIP"), cid=customer_id)
+        )
+        if result.rowcount == 0:
+            return {"error": "客户不存在"}
+    return {"customerId": customer_id, "memberLevel": member_level}
+
+
+async def create_customer_record(name: str, phone: str, member_level: str = "VIP") -> dict:
+    """新增客户(uuid 段 cid + 建档单点)。"""
+    import uuid as _u
+
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+
+    cid = f"CUST-{_u.uuid4().hex[:8].upper()}"
+    async with merchant_writer_engine().begin() as conn:
+        await insert_customer(conn, customer_id=cid, name=name, phone=phone, member_level=member_level)
+    return {"customerId": cid}
+
+
+async def delete_customer(customer_id: str) -> dict:
+    """删除客户(订单引用护栏:名下有订单不可删)。"""
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+    from sqlalchemy import text
+
+    async with merchant_writer_engine().begin() as conn:
+        has_orders = (
+            await conn.execute(
+                text("SELECT 1 FROM merchant_orders WHERE customer_id = :c LIMIT 1").bindparams(c=customer_id)
+            )
+        ).first()
+        if has_orders:
+            return {"error": "客户名下有订单,不可删除"}
+        await conn.execute(
+            text("DELETE FROM merchant_customers WHERE customer_id = :c").bindparams(c=customer_id)
+        )
+    return {"success": True}
+
+
 def mask_phone(phone: str | None) -> str | None:
     """手机脱敏(A11 归位,2026-10-06:自 live_desk 路由迁入领域层):前 3 后 4,
     非 11 位只露后 4。凡向坐席/管理面呈现顾客手机号一律经此。"""

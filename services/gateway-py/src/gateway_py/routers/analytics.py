@@ -13,7 +13,7 @@ import asyncio
 import json
 import uuid
 
-from engine_py.analytics import graph, promotions, rbac, report_service
+from engine_py.analytics import feedback_service, graph, promotions, rbac, report_service
 from engine_py.event_bus import publish_agent_event, read_agent_events
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -21,6 +21,7 @@ from sqlalchemy import delete, select
 
 from gateway_py.tenant_context import require_tenant_context
 
+from .. import merchant_domain as mds
 from .. import sse_tail
 from .auth import issue_token, require_claims
 
@@ -582,25 +583,8 @@ async def customers_list(request: Request):
 async def customer_coupons(customer_id: str, request: Request):
     """客户关联优惠券(user_id 与商户客户档案同源;含已使用)。"""
     await _ctx(request)
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-    from sqlalchemy import text as _text
-
-    async with merchant_reader_engine().connect() as conn:
-        rows = (
-            await conn.execute(_text(
-                "SELECT uc.id::text AS id, p.name, p.discount_value::float AS value, uc.status, "
-                "uc.claimed_at, uc.used_order_id "
-                "FROM user_coupons uc JOIN promotions p ON p.id = uc.promotion_id "
-                "WHERE uc.user_id = :cid ORDER BY uc.claimed_at DESC LIMIT 50"
-            ).bindparams(cid=customer_id))
-        ).mappings().all()
-    return {"success": True, "coupons": [
-        {
-            "id": r["id"], "name": r["name"], "value": r["value"], "status": r["status"],
-            "claimedAt": r["claimed_at"].isoformat() if r["claimed_at"] else None,
-            "usedOrderId": r["used_order_id"],
-        } for r in rows
-    ]}
+    coupons = await mds.customer_coupons_list(customer_id)
+    return {"success": True, "coupons": coupons}
 
 
 @router.patch("/api/admin/analytics/customers/{customer_id}")
@@ -609,17 +593,10 @@ async def customer_update(customer_id: str, request: Request):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可编辑客户"})
     body = await request.json()
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text as _text
-
-    async with merchant_writer_engine().begin() as conn:
-        result = await conn.execute(
-            _text("UPDATE merchant_customers SET member_level = :lv, updated_at = NOW() WHERE customer_id = :cid")
-            .bindparams(lv=str(body.get("memberLevel") or "VIP"), cid=customer_id)
-        )
-        if result.rowcount == 0:
-            return JSONResponse(status_code=404, content={"success": False, "message": "客户不存在"})
-    return {"success": True, "customerId": customer_id, "memberLevel": body.get("memberLevel")}
+    result = await mds.update_customer_member_level(customer_id, body.get("memberLevel") or "VIP")
+    if "error" in result:
+        return JSONResponse(status_code=404, content={"success": False, "message": result["error"]})
+    return {"success": True, **result}
 
 
 # ---------------- 优惠核销(订单↔优惠关联;20-D4) ----------------
@@ -824,19 +801,8 @@ async def customers_create(request: Request):
     phone = str(body.get("phone") or "").strip()
     if not name or not phone:
         return JSONResponse(status_code=400, content={"success": False, "message": "name/phone 必传"})
-    import uuid as _u
-
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-
-    cid = f"CUST-{_u.uuid4().hex[:8].upper()}"
-    from .. import merchant_domain
-
-    async with merchant_writer_engine().begin() as conn:
-        await merchant_domain.insert_customer(
-            conn, customer_id=cid, name=name, phone=phone,
-            member_level=body.get("memberLevel") or "VIP",
-        )
-    return {"success": True, "customerId": cid}
+    result = await mds.create_customer_record(name, phone, body.get("memberLevel") or "VIP")
+    return {"success": True, **result}
 
 
 @router.delete("/api/admin/analytics/customers/{customer_id}")
@@ -844,15 +810,9 @@ async def customers_delete(customer_id: str, request: Request):
     ctx = await _ctx(request)
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可删除客户"})
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text as _t
-
-    async with merchant_writer_engine().begin() as conn:
-        has_orders = (await conn.execute(_t(
-            "SELECT 1 FROM merchant_orders WHERE customer_id = :c LIMIT 1").bindparams(c=customer_id))).first()
-        if has_orders:
-            return JSONResponse(status_code=400, content={"success": False, "message": "客户名下有订单,不可删除"})
-        await conn.execute(_t("DELETE FROM merchant_customers WHERE customer_id = :c").bindparams(c=customer_id))
+    result = await mds.delete_customer(customer_id)
+    if "error" in result:
+        return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
     return {"success": True}
 
 
