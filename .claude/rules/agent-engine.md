@@ -68,9 +68,11 @@ paths: ["services/engine-py/**/*"]
 - **转人工排队接线与暂停文案分形（2026-09-29 实弹）**：`create_pending_approval_ticket` 收到 `human_escalation` 即 `takeover.mark_takeover_requested` —— threads 真源翻 `human_takeover` + 坐席空（呼叫中），首记 `metadata.takeover_requested_at`（重复呼叫不刷新，排队时长取最早呼叫），接线失败只 print 不阻断工单主契约；非 escalation 工单（退款等）不动接管态。此前排队机制（坐席台呼叫中置顶、`release_expired_queue_waits` 超时回落）整套建成但零生产调用方，顾客「转人工」后 AI 照常复答罐头。暂停闸文案 `paused_gate` 按认领态分形且**每接管期只说一次**（2026-09-29 防复读，实弹第二幕：顾客每条消息都收「已由人工客服接待」罐头刷屏）：条件 UPDATE 原子提示槽，episode = `metadata.takeover_requested_at`（socket 链空期同语义，标记值带 `:` 前缀防缺失/已认领折叠）；首轮给呼叫中「已为您呼叫人工客服，正在排队等待接入…」/ 已认领「已由人工客服接待」，其后轮次静默 output=""（顾客端不插占位气泡、不回退道歉文案），非 takeover 回 None（AI 照常）；chat/merchant 两路由消费。finish 转人工终稿严禁无队列过度承诺（「加密推送到主管队列 / 1 分钟内接管」已废）。契约：`tests/test_escalation_queue_wiring.py`。
 - **确定性去重恢复**：恢复任务采用确定性标识 `job_resume_${approvalId}`。恢复由 `process_approval_action` 的同步 Fast-Path 派发（派发失败事件留 `pending`）；`outbox_worker.process_pending_events` 为失败事件的对账补偿（`FOR UPDATE SKIP LOCKED` 防多实例重复、10s 年龄阈值避开与 Fast-Path 竞争、`processing` 停滞 >5min 重入队），由 `scheduler.py` 周期调度（30s 间隔，随 gateway lifespan 启动（ADR-0007），单实例假设，`ENGINE_SCHEDULER_ENABLED=0` 关闭；2026-09-03 修复接入）。
 
-### 1.7 影子双跑与回放 (`shadow/diff.py` & `shadow/replay.py`)
+### 1.7 影子双跑与回放 —— 已退役(ADR-0009,2026-10-06)
 
-- 迁移验收期工具：对冻结的 TS 基线输出做逐字段 diff 与历史流量回放；基线钉死后仅作回归参考。
+- TS 基线钉死后的回归参考工具(`shadow/diff.py`/`replay.py`,207 行)全仓零调用方,已随 ADR-0009 删除;TS 行为由 pytest 契约测试套件钉死。重引入差分回放设施须新 ADR。
+- 澄清:仓内其余 "shadow" 字样均为活跃灰度机制,与本案无关 —— `triage/semantic_routes.py` 的 `MODE_SHADOW`(语义路由只产提议不接管)与 `metric_head`/`l0_lexicon` 的 shadow 模式(分类头并行打分只记日志)。
+- 同 ADR 裁决:takeover 业务逻辑维持 `engine_py/approvals/` 现状不迁包(四消费面已走公共面,迁包收益不抵牵动面)。
 
 ### 1.8 坏例候选池与周期任务调度 (`badcase/` & `scheduler.py`,2026-09-03 第五阶段 v1)
 
