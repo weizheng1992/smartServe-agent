@@ -201,6 +201,20 @@ async def client(seeded):
         yield c
 
 
+@pytest_asyncio.fixture(scope="session", loop_scope="session", autouse=True)
+async def _ensure_merchant_db():
+    """agent_merchant 库/表自愈先行(DDL 竞态系统性收口,2026-10-06)。
+
+    此前该库靠「套件里更早的 store/checkout 用例先跑 ensure_merchant_tables」
+    隐式建立 —— 子集运行(pytest 文件::单例 -k)时先行用例直连未建库即
+    InvalidCatalogName 红(整族顺序flake)。autouse session 级自愈幂等
+    (建过即 _tables_initialized 短路),顺序依赖整族消除。
+    """
+    from gateway_py.merchant_db import ensure_merchant_tables
+
+    await ensure_merchant_tables()
+
+
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def contract_fixtures(seeded):
     """契约 fixtures:contract 线程 + 消息 + 待审批单(等价 TS beforeAll 尾段)。"""
