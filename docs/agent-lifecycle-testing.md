@@ -66,7 +66,7 @@
 
 真实生产环境的用户输入具有无限可能性,因此在完全切流前,必须进行 **Shadow Mode(暗网双跑)**,验证新 Agent 在海量生产请求下的并发吞吐与稳定性。
 
-ℹ️现状:线上暗网双跑**未实现**。现存资产是离线 shadow 回放器(`engine_py/shadow/replay.py` + `shadow/diff.py`),与 `eval/pinBaselines.ts` / `compareBaselines.ts` 配合,用作 TS→Python 迁移的等价性门禁。历史版本的 Next.js `/api/chat` 双跑伪代码对应的 `apps/web/app/api/chat/route.ts` **从未存在**(apps/web 为 Vite 6 SPA),已移除。
+ℹ️现状:线上暗网双跑**未实现**。离线 shadow 回放器(`engine_py/shadow/replay.py` + `shadow/diff.py`)已随 **ADR-0009(2026-10-06)退役删除** —— TS 基线钉死后零调用方,TS 行为由 pytest 契约测试套件钉死,重引入差分回放设施须新 ADR。历史版本的 Next.js `/api/chat` 双跑伪代码对应的 `apps/web/app/api/chat/route.ts` **从未存在**(apps/web 为 Vite 6 SPA),已移除。
 
 🎯目标态:线上双跑的挂点在 FastAPI gateway 的 chat 路由(`services/gateway-py/src/gateway_py/routers/chat.py`,`POST /api/chat`):
 

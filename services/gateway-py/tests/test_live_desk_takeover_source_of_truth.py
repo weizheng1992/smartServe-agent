@@ -227,7 +227,6 @@ class TestPauseGate:
             raise AssertionError("接管期不允许建作业/调引擎")
 
         monkeypatch.setattr("gateway_py.chat_turn.run_agent", _fake_run_agent)
-        monkeypatch.setattr("gateway_py.chat_turn.run_agent", _fake_run_agent)
 
         tid, uid = await _mk_thread("pg_pause")
         res = await client.post(
