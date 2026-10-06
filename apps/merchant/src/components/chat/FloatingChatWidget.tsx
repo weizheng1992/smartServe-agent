@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
-import type { OrderCardData, RichCardBlock } from 'types';
+import { CARD_ACTIONS, type CardActionName, type OrderCardData, type RichCardBlock } from 'types';
 import { Button, Input, Loader2, MessageText, Paperclip, RichCardRenderer, X } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
 import { STOREFRONT_CHAT_OPEN_EVENT, type StorefrontChatOpenDetail } from '../../lib/chatBridge';
@@ -134,7 +134,8 @@ interface CardActionResult {
   url?: string;
 }
 
-const CARD_ACTION_STRATEGIES: Record<string, (payload: Record<string, any>) => CardActionResult | null> = {
+// F3(2026-10-06):键集类型化 CardActionName —— 与 web 表同源 types 目录
+const CARD_ACTION_STRATEGIES: Record<CardActionName, (payload: Record<string, any>) => CardActionResult | null> = {
   select_order: (p) => {
     if (!p.orderId) return null;
     const orderIdStr = String(p.orderId);
@@ -170,7 +171,6 @@ const CARD_ACTION_STRATEGIES: Record<string, (payload: Record<string, any>) => C
     };
   },
   checkout_cart: () => ({ type: 'redirect', url: '/cart' }),
-  go_to_checkout: () => ({ type: 'redirect', url: '/cart' }),
   view_cart: () => ({ type: 'redirect', url: '/cart' }),
   clear_cart: () => ({ type: 'message', message: '清空购物车' }),
   send_message: (p) => (p.text ? { type: 'message', message: String(p.text) } : null),
@@ -761,7 +761,9 @@ export function FloatingChatWidget() {
       return;
     }
 
-    const strategy = CARD_ACTION_STRATEGIES[action];
+    // F3:表键集经 CardActionName 编译期穷举;运行时未登记动作查不到 strategy
+    // 返回 null,由调用方 fallback(不猜)
+    const strategy = (CARD_ACTION_STRATEGIES as Record<string, (p: Record<string, any>) => CardActionResult | null>)[action];
     const result = strategy
       ? strategy(payload)
       : typeof payload.query === 'string'

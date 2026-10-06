@@ -13,7 +13,11 @@ export type CardActionPayload = Record<string, any>;
 
 export type CardActionHandler = (p: CardActionPayload) => string | null;
 
-export const CARD_ACTION_HANDLERS: Record<string, CardActionHandler> = {
+import { CARD_ACTIONS, type CardActionName } from 'types';
+
+/** F3(2026-10-06):键集类型化 CardActionName —— 与 merchant 表同源 types 目录,
+ *  缺键(引擎新动作未登记)/多键(死词)在编译期双红灯。 */
+export const CARD_ACTION_HANDLERS: Record<CardActionName, CardActionHandler> = {
   send_message: (p) => (p.text ? String(p.text) : null),
   select_order: (p) => (p.orderId ? `查询订单 ${p.orderId} 的详细信息与可选业务` : null),
   track_order: (p) => (p.orderId ? `帮我查一下订单 ${p.orderId} 的物流轨迹` : null),
@@ -30,6 +34,8 @@ export const CARD_ACTION_HANDLERS: Record<string, CardActionHandler> = {
 
 /** 查表解析卡片动作;未登记动作回落 payload.query(卡片自带原始问句)。 */
 export function resolveCardActionMessage(action: string, payload: CardActionPayload): string | null {
-  const handler = CARD_ACTION_HANDLERS[action];
+  // F3:表键集经 CardActionName 编译期穷举;运行时未登记动作查不到 handler,
+  // 回落 payload.query(卡片自带原始问句)—— 修复A 语义保留
+  const handler = (CARD_ACTION_HANDLERS as Record<string, CardActionHandler>)[action];
   return handler ? handler(payload) : typeof payload.query === 'string' ? payload.query : null;
 }

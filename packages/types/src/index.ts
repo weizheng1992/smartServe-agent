@@ -1,6 +1,7 @@
 export * from './agent';
 export * from './approval';
 export * from './card';
+export * from './card-actions';
 export * from './config';
 export * from './db';
 export * from './event';
