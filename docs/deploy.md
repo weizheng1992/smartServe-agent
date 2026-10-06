@@ -130,7 +130,7 @@ healthcheck + 依赖编排（gateway 等 migrate 成功、web 等 gateway 健康
 ## 七、裸机替代方案（不用 Docker 时）
 
 ```bash
-# 前提: python3.12 + uv、bun 1.4、PostgreSQL15、Redis7 装好
+# 前提: python3.14 + uv、bun 1.4、PostgreSQL15、Redis7 装好(uv 读 services/.python-version 自动装对版本;夜审 B2:与 CI/本地 venv 对齐,旧文 3.12 与实际运行时漂移)
 uv sync --directory services                       # Python 依赖
 bun install                                        # 前端依赖
 bun run build                                      # 四前端 dist
