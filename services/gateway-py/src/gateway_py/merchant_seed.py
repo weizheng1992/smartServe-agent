@@ -1258,7 +1258,7 @@ async def seed_merchant_data() -> None:
                     {"spu": str(spu_id), "cust": None, "rating": rating, "content": content},
                 )
 
-        from .. import merchant_domain
+        from gateway_py import merchant_domain  # 绝对导入:seed 会被以顶级模块方式执行,相对导入越界
 
         await merchant_domain.insert_customer(
             conn,
