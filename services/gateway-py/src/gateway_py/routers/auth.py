@@ -162,8 +162,6 @@ async def register(body: RegisterIn):
     try:
         import uuid as _uuid
 
-        from sqlalchemy import text as _t
-
         from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
 
         await ensure_merchant_tables()
@@ -174,12 +172,9 @@ async def register(body: RegisterIn):
         # 隐患,2026-09-26 夜审 ①#8)。确需 engine 侧商户库引擎的跨包消费一律走
         # order_domain 公开访问器 merchant_reader/writer_engine(2026-10-02 修复F)。
         async with merchant_engine().begin() as conn:
-            await conn.execute(
-                _t(
-                    "INSERT INTO merchant_customers (customer_id, name, phone, member_level) "
-                    "VALUES (:cid, :n, :p, 'VIP')"
-                ).bindparams(cid=customer_id, n=display, p="")
-            )
+            from .. import merchant_domain
+
+            await merchant_domain.insert_customer(conn, customer_id=customer_id, name=display, phone="")
     except Exception as err:
         logging.getLogger(__name__).warning("注册客户档案建档失败: %s", err)
 

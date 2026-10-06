@@ -827,14 +827,15 @@ async def customers_create(request: Request):
     import uuid as _u
 
     from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text as _t
 
     cid = f"CUST-{_u.uuid4().hex[:8].upper()}"
+    from .. import merchant_domain
+
     async with merchant_writer_engine().begin() as conn:
-        await conn.execute(_t(
-            "INSERT INTO merchant_customers (customer_id, name, phone, member_level) "
-            "VALUES (:cid, :n, :p, :lv)"
-        ).bindparams(cid=cid, n=name, p=phone, lv=body.get("memberLevel") or "VIP"))
+        await merchant_domain.insert_customer(
+            conn, customer_id=cid, name=name, phone=phone,
+            member_level=body.get("memberLevel") or "VIP",
+        )
     return {"success": True, "customerId": cid}
 
 

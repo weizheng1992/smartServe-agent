@@ -1258,24 +1258,24 @@ async def seed_merchant_data() -> None:
                     {"spu": str(spu_id), "cust": None, "rating": rating, "content": content},
                 )
 
-        await conn.execute(
-            text(
-                "INSERT INTO merchant_customers (customer_id, name, phone, email, member_level, addresses, tags) "
-                "VALUES ('CUST-8801', '张伟', '13800138000', 'zhangwei@example.com', '黑金SVIP', :addrs, :tags)"
-            ),
-            {
-                # 地址与订单侧 shipping_address 同源:复用 _ADDR_* 常量,不再三字段逐字双写
-                "addrs": json.dumps(
-                    [
-                        {"id": "addr_01", **_ADDR_GUOMAO, "isDefault": True},
-                        {"id": "addr_02", **_ADDR_ZHONGGUANCUN, "isDefault": False},
-                    ],
-                    ensure_ascii=False,
-                ),
-                "tags": json.dumps(["高净值客户", "户外发烧友", "偏好曜石黑配色"], ensure_ascii=False),
-            },
-        )
+        from .. import merchant_domain
 
+        await merchant_domain.insert_customer(
+            conn,
+            customer_id="CUST-8801",
+            name="张伟",
+            phone="13800138000",
+            email="zhangwei@example.com",
+            member_level="黑金SVIP",
+            addresses=json.dumps(
+                [
+                    {"id": "addr_01", **_ADDR_GUOMAO, "isDefault": True},
+                    {"id": "addr_02", **_ADDR_ZHONGGUANCUN, "isDefault": False},
+                ],
+                ensure_ascii=False,
+            ),
+            tags=json.dumps(["高净值客户", "户外发烧友", "偏好曜石黑配色"], ensure_ascii=False),
+        )
         for order in _ORDERS:
             await conn.execute(
                 text(

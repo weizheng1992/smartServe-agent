@@ -612,6 +612,34 @@ async def get_admin_dashboard_data() -> dict:
         }
 
 
+async def insert_customer(
+    conn,
+    *,
+    customer_id: str,
+    name: str,
+    phone: str = "",
+    email: str | None = None,
+    member_level: str = "VIP",
+    addresses: str = "[]",
+    tags: str = "[]",
+) -> None:
+    """客户建档单点(A6 收口,2026-10-06):注册联动(auth)/管理面新增
+    (analytics)/种子(merchant_seed)曾各持一份列清单 —— schema 增删 NOT NULL
+    列时三处独立断裂。列清单自此处唯一;连接与事务由调用方持有。"""
+    from sqlalchemy import text
+
+    await conn.execute(
+        text(
+            "INSERT INTO merchant_customers (customer_id, name, phone, email, member_level, addresses, tags) "
+            "VALUES (:cid, :n, :p, :e, :lv, CAST(:addr AS jsonb), CAST(:tags AS jsonb))"
+        ),
+        {
+            "cid": customer_id, "n": name, "p": phone, "e": email,
+            "lv": member_level, "addr": addresses, "tags": tags,
+        },
+    )
+
+
 def mask_phone(phone: str | None) -> str | None:
     """手机脱敏(A11 归位,2026-10-06:自 live_desk 路由迁入领域层):前 3 后 4,
     非 11 位只露后 4。凡向坐席/管理面呈现顾客手机号一律经此。"""
