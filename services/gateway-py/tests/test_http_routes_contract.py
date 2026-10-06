@@ -343,12 +343,12 @@ class TestStoreChatMultimodal:
     落库(005 治理后引擎零写用户行,store_chat 漏写会导致 merchant 用户消息不落库)。"""
 
     async def test_store_chat_with_images_persists_and_restores(self, client, contract_fixtures, monkeypatch):
-        # 拦截 run_agent:merchant.py 顶层 `from engine_py.run_agent import run_agent`,
+        # 拦截 run_agent(受理脊单点 chat_turn,A3 后 run_agent 只在此被调用):
         # 必须补丁 router 命名空间的引用;且 store_chat 会解引用 final_state,桩须返回 dict
         async def _fake_run_agent(job):
             return {"output": "已收到您的图片(测试桩)", "cards": []}
 
-        monkeypatch.setattr("gateway_py.routers.merchant.run_agent", _fake_run_agent)
+        monkeypatch.setattr("gateway_py.chat_turn.run_agent", _fake_run_agent)
 
         thread_id = f"merchant_thread_img_{random.randint(10**6, 10**7)}"
         image_urls = ["/api/uploads/contract_store_a.png", "/api/uploads/contract_store_b.png"]
@@ -380,7 +380,7 @@ class TestStoreChatMultimodal:
         async def _fake_run_agent(job):
             return {"output": "已收到您的咨询(测试桩)", "cards": []}
 
-        monkeypatch.setattr("gateway_py.routers.merchant.run_agent", _fake_run_agent)
+        monkeypatch.setattr("gateway_py.chat_turn.run_agent", _fake_run_agent)
 
         thread_id = f"merchant_thread_plain_{random.randint(10**6, 10**7)}"
         res = await client.post(

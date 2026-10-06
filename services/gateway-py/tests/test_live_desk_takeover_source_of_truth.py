@@ -221,13 +221,13 @@ class TestPauseGate:
     async def test_接管期不建作业_用户行照常落库(self, client, staff_auth, monkeypatch):
         from engine_py.approvals import takeover
 
-        # 拦截 run_agent(chat/merchant 两路由顶层绑定,patch 模块属性即生效):
+        # 拦截 run_agent(受理脊单点 chat_turn,A3 后两路由均经此):
         # 若闸失效,真引擎会在后台被拉起(封顶密封环境不可接受)
         async def _fake_run_agent(job):
             raise AssertionError("接管期不允许建作业/调引擎")
 
-        monkeypatch.setattr("gateway_py.routers.chat.run_agent", _fake_run_agent)
-        monkeypatch.setattr("gateway_py.routers.merchant.run_agent", _fake_run_agent)
+        monkeypatch.setattr("gateway_py.chat_turn.run_agent", _fake_run_agent)
+        monkeypatch.setattr("gateway_py.chat_turn.run_agent", _fake_run_agent)
 
         tid, uid = await _mk_thread("pg_pause")
         res = await client.post(
@@ -321,7 +321,7 @@ class TestPauseGate:
         async def _fake_run_agent(job):
             return {"output": "AI 已恢复接管"}
 
-        monkeypatch.setattr("gateway_py.routers.chat.run_agent", _fake_run_agent)
+        monkeypatch.setattr("gateway_py.chat_turn.run_agent", _fake_run_agent)
 
         # 释放前:闸住
         res = await client.post(

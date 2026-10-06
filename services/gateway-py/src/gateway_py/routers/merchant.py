@@ -15,16 +15,14 @@ import os
 import time
 import uuid as _uuid
 
-from engine_py.approvals import takeover
 from engine_py.approvals.gatekeeper import ApprovalGatekeeper
 from engine_py.event_bus import get_client as get_redis
-from engine_py.run_agent import AgentJobInput, run_agent
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from .. import conversation_repo
+from .. import chat_turn, conversation_repo
 from .. import merchant_domain as mds
 from ..approval_actions import (
     actor_from_staff,
@@ -36,7 +34,6 @@ from ..approval_actions import (
 )
 from ..conversation_repo import (
     THREAD_CHANNEL,
-    append_message,
     get_conversation_timeline,
     list_conversations,
     publish_thread_message,
@@ -500,52 +497,35 @@ async def store_chat(body: dict):
     await ensure_tenant_registered(business_id)
     try:
 
-        # 用户行持久化归网关(005 治理:引擎零写用户行)——store_chat 此前漏写,
-        # 005 后 merchant 用户消息不落库、历史恢复缺用户行;多模态 imageUrls 一并入库
-        await append_message(
-            {
-                "threadId": thread_id,
-                "businessId": business_id,
-                "userId": user_id,
-                "role": "user",
-                "content": effective_message,
-                "imageUrls": image_urls or None,
-            }
+        # A3(2026-10-06):受理脊(用户行落库 → P1 暂停闸 → run_agent)上收
+        # chat_turn 单点,dispatch_chat 同脊共享;注册闸/顾客 SSE 发布/信封留本路由。
+        turn = await chat_turn.accept_chat_turn(
+            thread_id=thread_id,
+            user_id=user_id,
+            business_id=business_id,
+            message=effective_message,
+            image_urls=image_urls,
+            # 商户门户商城车(2026-09-14 空车谎报收口):引擎空车时水合,
+            # 见 MallDomainService.hydrate_cart_from_storefront
+            store_cart=[it for it in (body.get("storeCart") or []) if isinstance(it, dict)],
+            sync=True,
+            job_id=job_id,
         )
-
-        # P1 AI 暂停闸(live-desk-rework spec §2.1):接管期该会话全部轮次
-        # 不建作业不调 LLM,用户消息照常落库;release 后下一条自然走 AI。
-        # 入队前的第二顾客入口(dispatch_chat 之外唯一 AI 直跑通道),同闸。
-        # 文案按认领态分形且每接管期只说一次(paused_gate,2026-09-29 防复读):
-        # 首轮给排队/已接待提示,其后轮次静默(output 空),顾客端不插占位气泡。
-        paused, paused_output = await takeover.paused_gate(thread_id)
-        if paused:
+        if turn["paused"]:
             return {
                 "success": True,
                 "messageId": "",
                 "jobId": "",
                 "threadId": thread_id,
                 "userId": user_id,
-                "output": paused_output or "",
-                "result": paused_output or "",
+                "output": turn["output"],
+                "result": turn["output"],
                 "cards": [],
                 "isHumanActive": True,
             }
 
-        final_state = await run_agent(
-            AgentJobInput(
-                jobId=job_id,
-                threadId=thread_id,
-                userId=user_id,
-                businessId=business_id,
-                message=effective_message,
-                imageUrls=image_urls,
-                # 商户门户商城车(2026-09-14 空车谎报收口):引擎空车时水合,
-                # 见 MallDomainService.hydrate_cart_from_storefront
-                storeCart=[it for it in (body.get("storeCart") or []) if isinstance(it, dict)],
-            )
-        )
-        output = final_state.get("output") or final_state.get("result") or "极光潮品智能客服已为您处理完毕。"
+        state = turn["state"] or {}
+        output = turn["output"] or state.get("result") or "极光潮品智能客服已为您处理完毕。"
         message_id = f"ast_{_ts_ms()}_{uuid4_hex(5)}"
 
         await publish_thread_message(
@@ -554,7 +534,7 @@ async def store_chat(body: dict):
                 "id": message_id,
                 "role": "assistant",
                 "content": output,
-                "cards": final_state.get("cards") or [],
+                "cards": turn["cards"],
                 "timestamp": _dt.datetime.now().isoformat(),
             },
         )
@@ -567,7 +547,7 @@ async def store_chat(body: dict):
             "userId": user_id,
             "output": output,
             "result": output,
-            "cards": final_state.get("cards") or [],
+            "cards": turn["cards"],
         }
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})

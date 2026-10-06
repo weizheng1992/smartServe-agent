@@ -6,7 +6,6 @@ SSE 直接消费 Phase 1a 事件主干(Redis Streams),与 TS pipeSSEFromStream �
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import time
@@ -15,12 +14,11 @@ from pathlib import Path
 
 from engine_py.approvals import takeover
 from engine_py.onboarding import build_entry_cards, resolve_onboarding_config
-from engine_py.run_agent import AgentJobInput, run_agent
 from fastapi import APIRouter, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .. import conversation_repo, sse_tail
+from .. import chat_turn, conversation_repo, sse_tail
 from ..sse_tail import streaming_headers
 from ..tenant_scope import optional_staff
 
@@ -109,83 +107,77 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
     effective_user_id = body.userId or "CUST-8801"
     tenant_header = request.headers.get("x-tenant-id") or request.headers.get("x-business-id")
     effective_business_id = body.businessId or tenant_header or "ecommerce"
-    job_id = f"job_{int(time.time() * 1000)}_{uuid.uuid4().hex[:9]}"
 
-    await conversation_repo.append_message(
-        {
-            "threadId": effective_thread_id,
-            "businessId": effective_business_id,
-            "userId": effective_user_id,
-            "role": "user",
-            "content": effective_message,
-            "imageUrls": body.imageUrls,
-        }
-    )
-
-    # P1 AI 暂停闸(live-desk-rework spec §2.1):建作业前读 threads 真源,
-    # 接管期该会话全部轮次不建作业不调 LLM,用户消息照常落库;release 后
-    # 下一条自然走 AI。响应形状复用既有 isHumanActive 契约 —— apps/web
-    # useChatMessages 已有消费方(移除 loader + 重拉历史),零前端改动。
-    # 文案按认领态分形且每接管期只说一次(paused_gate,2026-09-29 防复读):
-    # 首轮给排队/已接待提示,其后轮次静默,不刷屏。
-    paused, paused_output = await takeover.paused_gate(effective_thread_id)
-    if paused:
-        if body.sync:
+    # A3(2026-10-06):受理脊(用户行落库 → P1 暂停闸 → run_agent)上收
+    # chat_turn 单点,store_chat 同脊共享;sync 降级文案与信封形状留本路由。
+    # 兜底降级(2026-09-12):run_agent 已做图级降级网,此处再兜一层 —— 任何
+    # 残余异常不再以 HTTP 500 + ASGI 堆栈裸露给客户端(上游 429 实测),而是
+    # 与熔断路径同形的诚实道歉文案(降级伞随受理脊上收取到受理全链)。
+    if body.sync:
+        try:
+            turn = await chat_turn.accept_chat_turn(
+                thread_id=effective_thread_id,
+                user_id=effective_user_id,
+                business_id=effective_business_id,
+                message=effective_message,
+                image_urls=body.imageUrls,
+                store_cart=body.storeCart,
+                sync=True,
+            )
+        except Exception as agent_err:
+            print(f"[Chat] agent job raised, graceful degrade: {agent_err!r}")
+            turn = {
+                "paused": False, "jobId": "", "state": None,
+                "output": "非常抱歉，智能服务当前遇到上游模型波动，暂时无法处理您的请求。请稍后再试，或选择人工客服协助。",
+                "cards": [],
+            }
+        if turn["paused"]:
+            # P1 暂停闸 sync 臂:接管期不建作业(output = 分形暂停文案),
+            # 信封复用 isHumanActive 契约(web useChatMessages 消费方)。
             return {
                 "success": True,
                 "jobId": "",
                 "threadId": effective_thread_id,
                 "userId": effective_user_id,
-                "output": paused_output or "",
-                "result": paused_output or "",
+                "output": turn["output"],
+                "result": turn["output"],
                 "cards": [],
                 "isHumanActive": True,
             }
+        output = turn["output"] or "智能客服已为您处理完毕。"
+        return {
+            "success": True,
+            "jobId": turn["jobId"],
+            "threadId": effective_thread_id,
+            "userId": effective_user_id,
+            "output": output,
+            "result": output,
+            "cards": turn["cards"],
+        }
+
+    turn = await chat_turn.accept_chat_turn(
+        thread_id=effective_thread_id,
+        user_id=effective_user_id,
+        business_id=effective_business_id,
+        message=effective_message,
+        image_urls=body.imageUrls,
+        store_cart=body.storeCart,
+        sync=False,
+    )
+    if turn["paused"]:
+        # P1 AI 暂停闸:接管期不建作业不调 LLM,消息照常落库;信封复用
+        # isHumanActive 契约(apps/web useChatMessages 消费方,零前端改动)。
         return {
             "success": True,
             "jobId": "",
             "threadId": effective_thread_id,
             "userId": effective_user_id,
-            "output": paused_output or "",
+            "output": turn["output"],
             "isHumanActive": True,
-        }
-
-    job = AgentJobInput(
-        jobId=job_id,
-        threadId=effective_thread_id,
-        userId=effective_user_id,
-        businessId=effective_business_id,
-        message=effective_message,
-        imageUrls=body.imageUrls or [],
-        storeCart=body.storeCart or [],
-    )
-    task = asyncio.create_task(run_agent(job))
-
-    if body.sync:
-        # 兜底降级(2026-09-12):run_agent 已做图级降级网,此处再兜一层 ——
-        # 任何残余异常不再以 HTTP 500 + ASGI 堆栈裸露给客户端(上游 429 实测),
-        # 而是与熔断路径同形的诚实道歉文案。
-        try:
-            final_state = await task
-        except Exception as agent_err:
-            print(f"[Chat] agent job raised, graceful degrade: {agent_err!r}")
-            final_state = {
-                "output": "非常抱歉，智能服务当前遇到上游模型波动，暂时无法处理您的请求。请稍后再试，或选择人工客服协助。",
-                "cards": [],
-            }
-        output = final_state.get("output") or "智能客服已为您处理完毕。"
-        return {
-            "success": True,
-            "jobId": job_id,
-            "threadId": effective_thread_id,
-            "userId": effective_user_id,
-            "output": output,
-            "result": output,
-            "cards": final_state.get("cards") or [],
         }
     return {
         "success": True,
-        "jobId": job_id,
+        "jobId": turn["jobId"],
         "threadId": effective_thread_id,
         "userId": effective_user_id,
     }
