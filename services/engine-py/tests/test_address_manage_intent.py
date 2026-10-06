@@ -113,6 +113,41 @@ class TestDetectAddressManage:
     def test_explicit_order_id_vetoes_create_form(self):
         assert detect_address_manage("把订单ORD-123改到新创建的地址") is None
 
+    def test_inverted_save_with_full_payload(self):
+        """倒装保存形(nightly 2026-10-06 c21 实弹):「我的地址是…,收件人X,
+        电话Y,帮我保存一下」动词后置,旧「动词+地址」语序漏检出 → 漂给 LLM
+        分类面曾漂成 order_modify_address 要订单号,地址不落库结算被闸。"""
+        detected = detect_address_manage(
+            "我的地址是北京市海淀区夜测路 2 号,收件人夜测,电话 13800001122,帮我保存一下"
+        )
+        assert detected is not None
+        assert detected["mode"] == "save"
+        assert detected["entities"]["receiverName"] == "夜测"
+        assert detected["entities"]["receiverPhone"] == "13800001122"
+        assert detected["entities"]["fullAddress"] == "北京市海淀区夜测路 2 号"
+        assert detected["entities"]["district"] == "海淀区"
+        assert detected["missingSlots"] == []
+
+    def test_inverted_without_save_verb_is_none(self):
+        """缺显式保存动词(纯陈述地址)不命中 —— 双锚定保守纪律,留给 LLM 面。"""
+        assert (
+            detect_address_manage("我的地址是北京市海淀区夜测路 2 号,收件人夜测,电话 13800001122")
+            is None
+        )
+
+    def test_inverted_incomplete_triple_is_none(self):
+        """三件套结构不全(缺收件人/电话)不命中,严禁瞎猜落库。"""
+        assert detect_address_manage("我的地址是北京市海淀区夜测路 2 号,帮我保存一下") is None
+
+    def test_inverted_order_id_veto_still_applies(self):
+        """倒装形同样受 ORD- 单号守卫:改单地址语境让位订单域。"""
+        assert (
+            detect_address_manage(
+                "订单ORD-456的地址改成北京市海淀区夜测路 2 号,收件人夜测,电话 13800001122,帮我保存一下"
+            )
+            is None
+        )
+
     def test_modify_address_is_not_create(self):
         assert detect_address_manage("修改收货地址为上海市浦东新区") is None
 

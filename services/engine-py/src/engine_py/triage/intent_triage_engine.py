@@ -197,6 +197,38 @@ _ADDRESS_SET_DEFAULT_RE = re.compile(
 _PHONE_RE = re.compile(rf"(?<!\d)({PHONE_SHAPE})(?!\d)")
 _CHINESE_NAME_RE = re.compile(r"([\u4e00-\u9fa5]{2,4})\s*$")
 _ADDRESS_SAVE_REQUIRED = ("receiverName", "receiverPhone", "province", "city", "district", "detailAddress")
+# \u5012\u88c5\u4fdd\u5b58\u5f62(nightly 2026-10-06 c21 \u5b9e\u5f39):\u300c\u6211\u7684\u5730\u5740\u662f\u2026,\u6536\u4ef6\u4ebaX,\u7535\u8bddY,\u5e2e\u6211
+# \u4fdd\u5b58\u4e00\u4e0b\u300d\u2014\u2014 \u5730\u5740\u524d\u7f6e\u3001\u4fdd\u5b58\u52a8\u8bcd\u540e\u7f6e,_ADDRESS_CREATE_PAYLOAD_RE \u7684\u300c\u52a8\u8bcd+\u5730\u5740\u300d
+# \u8bed\u5e8f\u4e0d\u547d\u4e2d \u2192 \u89c4\u5219\u524d\u7f6e\u5931\u5b88\u6f0f\u7ed9 LLM \u5206\u7c7b\u9762,\u6f02\u6210 order_modify_address \u8981\u8ba2\u5355\u53f7
+# (A11 \u540c\u75c5\u7076\u7b2c\u4e09\u79cd\u8bcd\u8868\u5f62),\u5730\u5740\u4e0d\u843d\u5e93\u3001\u7ed3\u7b97\u88ab\u8bda\u5b9e\u95f8\u3002\u53cc\u951a\u5b9a\u4fdd\u5b88\u6536\u53e3:
+# \u7ed3\u6784\u5316\u4e09\u4ef6\u5957(\u5730\u5740=,\u6536\u4ef6\u4eba=,\u7535\u8bdd=\u6570\u5b57)\u00d7 \u663e\u5f0f\u4fdd\u5b58\u52a8\u8bcd,\u7f3a\u4e00\u4e0d\u547d\u4e2d;
+# \u7f3a\u4ef6\u8d70 missingSlots \u8868\u8fbe,\u4e25\u7981\u778e\u731c\u843d\u5e93\u3002
+_ADDRESS_INVERTED_RE = re.compile(
+    r"(?:\u6211\u7684)?(?:\u6536\u8d27)?\u5730\u5740[\u662f\u4e3a:\uff1a]\s*(?P<addr>[^,\uff0c;\uff1b\n]+)"
+    r"[,\uff0c;\uff1b]\s*(?:\u6536\u4ef6\u4eba|\u6536\u8d27\u4eba|\u8054\u7cfb\u4eba|\u59d3\u540d)[:\uff1a]?\s*(?P<name>[\u4e00-\u9fa5]{2,4})"
+    r"\s*[,\uff0c;\uff1b]\s*(?:\u7535\u8bdd|\u624b\u673a|\u8054\u7cfb\u7535\u8bdd)[:\uff1a]?\s*(?P<phone>" + PHONE_SHAPE + r")"
+)
+_ADDRESS_EXPLICIT_SAVE_RE = re.compile(r"\u4fdd\u5b58|\u5b58\u4e00\u4e0b|\u8bb0\u4e00\u4e0b|\u5b58\u5230\u5730\u5740\u7c3f|\u5b58\u8fdb\u5730\u5740\u7c3f|\u5e2e\u6211\u5b58")
+
+
+def _detect_address_save_inverted(text: str) -> dict | None:
+    """\u5012\u88c5\u4fdd\u5b58\u5f62\u68c0\u51fa(\u7eaf\u51fd\u6570,\u6d4b\u8bd5\u7f1d;\u4ec5 _ADDRESS_CREATE_PAYLOAD_RE \u672a\u547d\u4e2d\u65f6
+    \u515c\u5e95\u8c03\u7528,\u4e0d\u6539\u53d8\u65e2\u6709\u8bed\u5e8f\u884c\u4e3a)\u3002ORD- \u5355\u53f7\u8ba9\u4f4d\u8ba2\u5355\u57df\u7684\u5b88\u536b\u5728
+    detect_address_manage \u5165\u53e3\u5df2\u5148\u884c\u3002"""
+    if not _ADDRESS_EXPLICIT_SAVE_RE.search(text):
+        return None
+    m = _ADDRESS_INVERTED_RE.search(text)
+    if not m:
+        return None
+    entities: dict = {"addressAction": "save"}
+    entities["fullAddress"] = m.group("addr").strip(" ,\uff0c:\uff1a-\u2014")
+    entities["receiverName"] = m.group("name")
+    entities["receiverPhone"] = m.group("phone")
+    parsed_addr = parse_chinese_address(entities["fullAddress"])
+    if parsed_addr:
+        entities.update(parsed_addr)
+    missing = [key for key in _ADDRESS_SAVE_REQUIRED if not entities.get(key)]
+    return {"mode": "save", "entities": entities, "missingSlots": missing}
 
 
 def _address_manage_intent_entry(detected: dict) -> dict:
@@ -243,7 +275,7 @@ def detect_address_manage(text: str | None) -> dict | None:
         }
     payload_match = _ADDRESS_CREATE_PAYLOAD_RE.search(text)
     if not payload_match:
-        return None
+        return _detect_address_save_inverted(text)
     entities: dict = {"addressAction": "save"}
     payload = (payload_match.group(1) or "").strip()
     payload = _ADDRESS_PAYLOAD_TRUNCATE_RE.split(payload)[0].strip()
