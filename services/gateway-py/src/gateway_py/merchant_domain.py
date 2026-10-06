@@ -717,6 +717,230 @@ async def delete_customer(customer_id: str) -> dict:
     return {"success": True}
 
 
+# ── SPU/SKU 目录域(A2 之二,2026-10-06):增删改查自 analytics 路由层迁入。
+# 删除护栏(成交记录)与字段级更新白名单属目录业务规则,住领域层;
+# 路由只留 prod:edit 权限闸与 error-key → HTTP 映射。
+
+
+async def spus_list() -> list[dict]:
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
+    from sqlalchemy import text
+
+    async with merchant_reader_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT s.id::text AS id, s.spu_code, s.title, s.category, s.status, "
+                    "COALESCE(MIN(k.price), 0)::float AS price, COALESCE(SUM(k.stock), 0)::int AS stock "
+                    "FROM merchant_spus s LEFT JOIN merchant_skus k ON k.spu_id = s.id "
+                    "GROUP BY s.id, s.spu_code, s.title, s.category, s.status ORDER BY s.title LIMIT 200"
+                )
+            )
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def create_spu(title: str, category: str, price: float, stock: int) -> dict:
+    """新建 SPU + 默认 SKU 一体(异步pg 严格类型:uuid 列显式 CAST;
+    main_image/sku_title/spec_attributes NOT NULL,落诚实默认值)。"""
+    import uuid as _u
+
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+    from sqlalchemy import text
+
+    spu_id = str(_u.uuid4())
+    code = f"SPU-{_u.uuid4().hex[:8].upper()}"
+    async with merchant_writer_engine().begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO merchant_spus (id, spu_code, title, category, main_image, status) "
+                "VALUES (CAST(:id AS uuid), :code, :t, :cat, '', 'ON_SALE')"
+            ).bindparams(id=spu_id, code=code, t=title, cat=category)
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, spec_attributes, price, stock) "
+                "VALUES (CAST(:id AS uuid), CAST(:spu AS uuid), :code, :st, CAST(:attrs AS jsonb), :price, :stock)"
+            ).bindparams(
+                id=str(_u.uuid4()), spu=spu_id, code=code + "-SKU-1",
+                st=f"{title} 默认款", attrs="{}", price=float(price), stock=stock,
+            )
+        )
+    return {"id": spu_id, "spuCode": code}
+
+
+async def update_spu(spu_id: str, body: dict) -> dict:
+    """字段级更新(status/title/price/stock 携带即改;价格/库存落首个 SKU)。"""
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+    from sqlalchemy import text
+
+    if "status" in body and body["status"] not in ("ON_SALE", "OFF_SALE"):
+        return {"error": "status ∈ ON_SALE|OFF_SALE"}
+    async with merchant_writer_engine().begin() as conn:
+        if "status" in body:
+            await conn.execute(
+                text("UPDATE merchant_spus SET status = :s WHERE id = CAST(:id AS uuid)")
+                .bindparams(s=body["status"], id=spu_id)
+            )
+        if "title" in body:
+            await conn.execute(
+                text("UPDATE merchant_spus SET title = :t WHERE id = CAST(:id AS uuid)")
+                .bindparams(t=str(body["title"]), id=spu_id)
+            )
+        if "price" in body:
+            await conn.execute(
+                text(
+                    "UPDATE merchant_skus SET price = :p WHERE id = "
+                    "(SELECT id FROM merchant_skus WHERE spu_id = CAST(:id AS uuid) LIMIT 1)"
+                ).bindparams(p=float(body["price"]), id=spu_id)
+            )
+        if "stock" in body:
+            await conn.execute(
+                text(
+                    "UPDATE merchant_skus SET stock = :s WHERE id = "
+                    "(SELECT id FROM merchant_skus WHERE spu_id = CAST(:id AS uuid) LIMIT 1)"
+                ).bindparams(s=int(body["stock"]), id=spu_id)
+            )
+    return {"id": spu_id}
+
+
+async def delete_spu(spu_id: str) -> dict:
+    """删除 SPU(成交引用护栏:有订单明细不可删,可下架)。"""
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+    from sqlalchemy import text
+
+    async with merchant_writer_engine().begin() as conn:
+        code = (
+            await conn.execute(
+                text("SELECT spu_code FROM merchant_spus WHERE id = CAST(:id AS uuid)").bindparams(id=spu_id)
+            )
+        ).scalar()
+        if not code:
+            return {"error": "商品不存在"}
+        referenced = (
+            await conn.execute(
+                text("SELECT 1 FROM merchant_order_items WHERE spu_id = :c LIMIT 1").bindparams(c=code)
+            )
+        ).first()
+        if referenced:
+            return {"error": "该商品已有成交记录,不可删除(可下架 OFF_SALE)"}
+        await conn.execute(text("DELETE FROM merchant_skus WHERE spu_id = CAST(:id AS uuid)").bindparams(id=spu_id))
+        await conn.execute(text("DELETE FROM merchant_spus WHERE id = CAST(:id AS uuid)").bindparams(id=spu_id))
+    return {"success": True}
+
+
+async def skus_stock_list() -> list[dict]:
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
+    from sqlalchemy import text
+
+    async with merchant_reader_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT k.id::text AS id, k.sku_code, k.sku_title, s.id::text AS spu_id, "
+                    "s.title AS spu_title, k.price::float AS price, k.stock, "
+                    "k.spec_attributes::text AS spec_attributes "
+                    "FROM merchant_skus k JOIN merchant_spus s ON s.id = k.spu_id "
+                    "ORDER BY k.sku_code LIMIT 500"
+                )
+            )
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def skus_list(spu_id: str) -> list[dict]:
+    from engine_py.tools_registry.order_domain import merchant_reader_engine
+    from sqlalchemy import text
+
+    async with merchant_reader_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT id::text, sku_code, sku_title, price::float AS price, stock, "
+                    "spec_attributes::text AS spec_attributes FROM merchant_skus "
+                    "WHERE spu_id = CAST(:id AS uuid) ORDER BY sku_code"
+                ).bindparams(id=spu_id)
+            )
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def create_sku(spu_id: str, body: dict) -> dict:
+    """新增 SKU(目标 SPU 存在性校验在领域层)。"""
+    import json as _json
+    import uuid as _u
+
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+    from sqlalchemy import text
+
+    price = body.get("price")
+    if price is None:
+        return {"error": "price 必传"}
+    sku_code = f"SKU-{_u.uuid4().hex[:10].upper()}"
+    spec = body.get("specAttributes") or {}
+    async with merchant_writer_engine().begin() as conn:
+        spu = (
+            await conn.execute(
+                text("SELECT spu_code FROM merchant_spus WHERE id = CAST(:id AS uuid)").bindparams(id=spu_id)
+            )
+        ).first()
+        if not spu:
+            return {"error": "SPU 不存在"}
+        await conn.execute(
+            text(
+                "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, price, stock, spec_attributes) "
+                "VALUES (:id, CAST(:spu AS uuid), :code, :title, :price, :stock, CAST(:spec AS jsonb))"
+            ).bindparams(
+                id=str(_u.uuid4()), spu=spu_id, code=sku_code,
+                title=body.get("skuTitle") or "", price=float(price),
+                stock=int(body.get("stock") or 0), spec=_json.dumps(spec, ensure_ascii=False),
+            )
+        )
+    return {"skuCode": sku_code}
+
+
+async def update_sku(sku_id: str, body: dict) -> dict:
+    """SKU 字段级更新(price/stock/skuTitle 白名单;空补丁诚实拒绝)。"""
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+    from sqlalchemy import text
+
+    sets, params = [], {"id": sku_id}
+    for field in ("price", "stock"):
+        if field in body:
+            sets.append(f"{field} = :{field}")
+            params[field] = float(body[field]) if field == "price" else int(body[field])
+    if "skuTitle" in body:
+        sets.append("sku_title = :skuTitle")
+        params["skuTitle"] = str(body["skuTitle"])
+    if not sets:
+        return {"error": "无可更新字段"}
+    async with merchant_writer_engine().begin() as conn:
+        await conn.execute(
+            text(f"UPDATE merchant_skus SET {', '.join(sets)} WHERE id = CAST(:id AS uuid)").bindparams(**params)
+        )
+    return {"id": sku_id}
+
+
+async def delete_sku(sku_id: str) -> dict:
+    """删除 SKU(成交引用护栏:已有成交不可删,可改库存为 0)。"""
+    from engine_py.tools_registry.order_domain import merchant_writer_engine
+    from sqlalchemy import text
+
+    async with merchant_writer_engine().begin() as conn:
+        sold = (
+            await conn.execute(
+                text(
+                    "SELECT 1 FROM merchant_order_items WHERE sku_code = "
+                    "(SELECT sku_code FROM merchant_skus WHERE id = CAST(:id AS uuid)) LIMIT 1"
+                ).bindparams(id=sku_id)
+            )
+        ).first()
+        if sold:
+            return {"error": "该 SKU 已有成交,不可删除(可改库存为 0)"}
+        await conn.execute(text("DELETE FROM merchant_skus WHERE id = CAST(:id AS uuid)").bindparams(id=sku_id))
+    return {"success": True}
+
+
 def mask_phone(phone: str | None) -> str | None:
     """手机脱敏(A11 归位,2026-10-06:自 live_desk 路由迁入领域层):前 3 后 4,
     非 11 位只露后 4。凡向坐席/管理面呈现顾客手机号一律经此。"""
