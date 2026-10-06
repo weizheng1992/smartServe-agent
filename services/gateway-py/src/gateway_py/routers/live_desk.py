@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from .. import merchant_domain
 from ..tenant_scope import GateError, require_staff
 
 router = APIRouter()
@@ -98,16 +99,6 @@ _TICKETS_LIMIT = 5
 
 class NoteCreate(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
-
-
-def _mask_phone(phone: str | None) -> str | None:
-    """坐席栏手机脱敏(138****8000):前 3 后 4,非 11 位只露后 4。"""
-    if not phone:
-        return None
-    digits = phone.strip()
-    if len(digits) >= 8:
-        return f"{digits[:3]}****{digits[-4:]}"
-    return f"****{digits[-4:]}" if digits else None
 
 
 async def _load_thread_scoped(thread_id: str, tenant: str) -> Thread:
@@ -198,9 +189,8 @@ async def live_desk_thread_context(thread_id: str, authorization: str | None = H
                         _text(
                             "SELECT c.customer_id, c.name, c.phone, COALESCE(c.email,'') AS email, "
                             "c.member_level, COALESCE(c.tags,'[]'::jsonb)::text AS tags, "
-                            "COALESCE(SUM(o.total_amount),0)::float AS total_spent, "
-                            "COUNT(o.order_id)::int AS order_count "
-                            "FROM merchant_customers c LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
+                            f"{merchant_domain.CUSTOMER_SPEND_AGG} "
+                            f"{merchant_domain.CUSTOMER_SPEND_JOIN} "
                             "WHERE c.customer_id = :cid GROUP BY c.id"
                         ),
                         {"cid": user_id},
@@ -211,7 +201,7 @@ async def live_desk_thread_context(thread_id: str, authorization: str | None = H
                         "matched": True,
                         "customerId": row["customer_id"],
                         "name": row["name"],
-                        "phoneMasked": _mask_phone(row["phone"]),
+                        "phoneMasked": merchant_domain.mask_phone(row["phone"]),
                         "email": row["email"],
                         "memberLevel": row["member_level"],
                         "tags": json.loads(row["tags"]) if row["tags"] else [],

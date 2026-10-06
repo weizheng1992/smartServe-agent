@@ -612,6 +612,27 @@ async def get_admin_dashboard_data() -> dict:
         }
 
 
+def mask_phone(phone: str | None) -> str | None:
+    """手机脱敏(A11 归位,2026-10-06:自 live_desk 路由迁入领域层):前 3 后 4,
+    非 11 位只露后 4。凡向坐席/管理面呈现顾客手机号一律经此。"""
+    if not phone:
+        return None
+    digits = phone.strip()
+    if len(digits) >= 8:
+        return f"{digits[:3]}****{digits[-4:]}"
+    return f"****{digits[-4:]}" if digits else None
+
+
+# 客户消费聚合口径单点(A7,2026-10-06):analytics 客户列表与 live_desk 坐席
+# 上下文曾各写一份 SUM/COUNT —— 加退款排除一类口径变更只改其一即静默分叉。
+CUSTOMER_SPEND_JOIN = (
+    "FROM merchant_customers c LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id"
+)
+CUSTOMER_SPEND_AGG = (
+    "COALESCE(SUM(o.total_amount),0)::float AS total_spent, COUNT(o.order_id)::int AS order_count"
+)
+
+
 async def get_customer_addresses(customer_id: str = "CUST-8801") -> list[dict]:
     await ensure_merchant_tables()
     async with merchant_engine().connect() as conn:

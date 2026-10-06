@@ -561,15 +561,16 @@ async def customers_list(request: Request):
     from engine_py.tools_registry.order_domain import merchant_reader_engine
     from sqlalchemy import text as _text
 
+    from .. import merchant_domain as _mds
+
     async with merchant_reader_engine().connect() as conn:
         rows = (
             await conn.execute(_text(
                 "SELECT c.customer_id, c.name, c.phone, COALESCE(c.email, '') AS email, "
                 "COALESCE(c.member_level, 'VIP') AS member_level, "
                 "COALESCE(c.addresses, '[]'::jsonb)::text AS addresses, "
-                "COALESCE(SUM(o.total_amount), 0)::float AS total_spent, COUNT(o.order_id) AS order_count "
-                "FROM merchant_customers c "
-                "LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
+                f"{_mds.CUSTOMER_SPEND_AGG} "
+                f"{_mds.CUSTOMER_SPEND_JOIN} "
                 "GROUP BY c.customer_id, c.name, c.phone, c.email, c.member_level, c.addresses "
                 "ORDER BY total_spent DESC LIMIT 100"
             ))
