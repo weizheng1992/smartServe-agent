@@ -146,7 +146,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - **多实例部署指南**:`docs/architecture/multi-instance-deployment.md`(单实例假设盘点、socket.io 跨实例广播与 scheduler 单例化方案、扩容前置清单)
 - **dev 启动指南**:`docs/deployment.md`(dev 启动流程与踩坑、环境变量矩阵)
 - **生产部署方案**:`docs/deploy.md`(Docker Compose 全栈上线:四前端 nginx 一体 / gateway / PG / Redis,五步上线 + 运维 + 安全清单)
-- **架构决策记录**:`docs/adr/`(0001-0007;0007 = Temporal 执行路线退役)
+- **架构决策记录**:`docs/adr/`(0001-0011;0007 = Temporal 路线退役,0010 = Data Agent 分层信任架构,0011 = 归因增强边界·提议待裁决)
 
 
 ## 6. Git 提交规范

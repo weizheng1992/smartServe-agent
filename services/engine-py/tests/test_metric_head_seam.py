@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -116,7 +117,15 @@ class TestHeadModes:
             e.resolve("zzz 完全无关问题")  # shadow 下不改变「响亮拒绝」
 
     def test_graph_ask_role_filter_still_applies_with_head(self, monkeypatch, run_dir):
-        """on 模式下越权指标仍被拒(分类头不绕过权限)。"""
+        """on 模式下越权指标仍被拒(分类头不绕过权限)。
+
+        需要 engine_db 真连接(角色闭集查库):conftest 的毒丸缺省
+        DATABASE_URL(u:p@…/test_unused)下该前提不成立 —— 显式跳过并注明
+        原因,不以三连红鲱鱼污染批次(2026-10-07 定性,直调脚本同 env 验证
+        引擎行为正确;真验证方式见 .scratch/data-agent-tiered-trust/issues/08)。
+        """
+        if os.environ.get("DATABASE_URL", "").endswith("/test_unused"):
+            pytest.skip("DATABASE_URL 为 conftest 毒丸缺省:本用例需真实 engine_db(export 真库连接串后运行)")
         monkeypatch.setenv("AI_METRIC_HEAD", "on")
         monkeypatch.setenv("AI_METRIC_HEAD_DIR", str(run_dir))
         out = asyncio.run(graph.ask("gmv 排行", {"business_id": "aurora", "role": "warehouse_operator"}))
