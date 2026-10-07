@@ -100,7 +100,7 @@ export const CartCard: React.FC<CartCardProps> = ({ data, onAction }) => {
       {/* Action Buttons */}
       <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-750/70 pt-3">
         {effectiveActions.map((btn, idx) => {
-          const isPrimary = btn.action === 'checkout_cart' || btn.action === 'go_to_checkout' || idx === 0;
+          const isPrimary = btn.action === 'checkout_cart' || idx === 0;
           return (
             <button
               /* biome-ignore lint/suspicious/noArrayIndexKey: 卡片动作按钮无 id,静态渲染不重排 */

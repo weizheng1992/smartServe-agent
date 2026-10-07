@@ -9,11 +9,13 @@
 // 的「去结算」/ resolver 查看分支「查看购物车」/ _CLEAR_RE「清空」);
 // 裸「结算」是查看摘要旧契约,严禁作 checkout_cart 文案。
 
-export type CardActionPayload = Record<string, any>;
+// payload 形状单一事实源在 types 目录(F3 收口补全,2026-10-07 夜评):本地
+// Record<string, any> 宽类型曾使 payload 字段拼写在 web 侧零检查
+import { type CardActionName, type CardActionPayload } from 'types';
+
+export type { CardActionPayload };
 
 export type CardActionHandler = (p: CardActionPayload) => string | null;
-
-import { CARD_ACTIONS, type CardActionName } from 'types';
 
 /** F3(2026-10-06):键集类型化 CardActionName —— 与 merchant 表同源 types 目录,
  *  缺键(引擎新动作未登记)/多键(死词)在编译期双红灯。 */

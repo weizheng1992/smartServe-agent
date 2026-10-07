@@ -1,5 +1,30 @@
 import { describe, expect, test } from 'bun:test';
+import { CARD_ACTIONS } from 'types';
 import { CARD_ACTION_HANDLERS, resolveCardActionMessage } from './cardActions';
+
+describe('cardActions 卡片动作目录闭集(F3 契约,2026-10-07 夜评补钉)', () => {
+  test('CARD_ACTIONS 目录闭集:引擎新动作须显式改此册(编译期穷举之外的运行时钉)', () => {
+    const expected: string[] = [
+      'send_message',
+      'select_order',
+      'track_order',
+      'request_refund',
+      'confirm_refund',
+      'submit_return_tracking',
+      'submit_step_action',
+      'add_to_cart_interactive',
+      'buy_now_interactive',
+      'checkout_cart',
+      'view_cart',
+      'clear_cart',
+    ];
+    expect([...CARD_ACTIONS].sort() as string[]).toEqual(expected.sort());
+  });
+
+  test('分发表键集与目录闭集严格相等(缺键=引擎新动作未接,多键=死词)', () => {
+    expect(Object.keys(CARD_ACTION_HANDLERS).sort()).toEqual([...CARD_ACTIONS].sort());
+  });
+});
 
 describe('cardActions 卡片动作分发表(2026-10-02 夜审修复A)', () => {
   test('引擎购物车卡实发的三动作必须产消息(此前两处消费方均为死按钮)', () => {
