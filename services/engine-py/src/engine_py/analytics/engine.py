@@ -19,7 +19,7 @@ from typing import Any
 from . import chart_policy
 from .schema_cards import compile_safe_schema_card
 from .sql_guard import UnsafeSqlError, assert_safe_select
-from .tools_registry_bridge import metric_semantic_registry
+from .tools_registry_bridge import metric_semantic_registry, valid_dealing_where
 
 _CALIBERS = {
     "review_bad": "差评口径 = rating ≤ 2(商户真实评价)",
@@ -259,7 +259,7 @@ class MetricQueryEngine:
                 label = "退货变化"
             else:
                 cur_expr = "COALESCE(SUM(oi.quantity * oi.price), 0)"
-                status_clause = "AND o.status NOT IN ('REFUNDED', 'CANCELLED')"
+                status_clause = f"AND {valid_dealing_where('o')}"
                 label = "销售变化"
             sql = (
                 "WITH cur AS ("
@@ -296,7 +296,7 @@ class MetricQueryEngine:
                 "FROM merchant_spus s "
                 "LEFT JOIN merchant_order_items oi ON oi.spu_id = s.spu_code "
                 "LEFT JOIN merchant_orders o ON o.order_id = oi.order_id "
-                "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"AND {valid_dealing_where('o')} "
                 "WHERE s.spu_code = ANY(:entities) "
                 "GROUP BY s.id, s.title, s.category "
                 'ORDER BY "GMV" DESC LIMIT 20'
@@ -313,7 +313,7 @@ class MetricQueryEngine:
                 "to_char(MAX(o.created_at), 'MM-DD HH24:MI') AS \"最近下单\" "
                 "FROM merchant_customers c "
                 "LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
-                "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"AND {valid_dealing_where('o')} "
                 "WHERE c.customer_id = ANY(:entities) "
                 "GROUP BY c.customer_id, c.name, c.member_level LIMIT 1"
             )
@@ -343,14 +343,14 @@ class MetricQueryEngine:
                 "JOIN merchant_order_items oi ON oi.order_id = o2.order_id "
                 "JOIN merchant_spus s ON s.spu_code = oi.spu_id "
                 "WHERE o2.customer_id = c.customer_id "
-                "AND o2.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"AND {valid_dealing_where('o2')} "
                 'GROUP BY s.category ORDER BY SUM(oi.quantity * oi.price) DESC LIMIT 1) AS "最爱品类", '
                 '(SELECT COUNT(*) FROM user_coupons uc WHERE uc.user_id = c.customer_id)::int AS "领券数", '
                 "(SELECT COUNT(*) FROM user_coupons uc WHERE uc.user_id = c.customer_id "
                 "AND uc.status = 'used')::int AS \"用券数\" "
                 "FROM merchant_customers c "
                 "LEFT JOIN merchant_orders o ON o.customer_id = c.customer_id "
-                "AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"AND {valid_dealing_where('o')} "
                 "WHERE c.customer_id = ANY(:entities) "
                 "GROUP BY c.customer_id, c.name, c.member_level, c.created_at LIMIT 1"
             )
@@ -365,13 +365,13 @@ class MetricQueryEngine:
                 "(SELECT COALESCE(SUM(oi.quantity * oi.price), 0)::float AS cur, "
                 "0.0::float AS prev FROM merchant_orders o "
                 "JOIN merchant_order_items oi ON oi.order_id = o.order_id "
-                "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"WHERE {valid_dealing_where('o')} "
                 "AND o.created_at >= date_trunc('month', CURRENT_DATE)) "
                 "UNION ALL "
                 "(SELECT 0.0::float AS cur, "
                 "COALESCE(SUM(oi.quantity * oi.price), 0)::float AS prev FROM merchant_orders o "
                 "JOIN merchant_order_items oi ON oi.order_id = o.order_id "
-                "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"WHERE {valid_dealing_where('o')} "
                 "AND o.created_at >= date_trunc('month', CURRENT_DATE) - INTERVAL '1 month' "
                 "AND o.created_at < date_trunc('month', CURRENT_DATE))"
                 ") t LIMIT 1"

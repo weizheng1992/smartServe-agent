@@ -124,3 +124,12 @@ def _load() -> dict[str, Any]:
 
 
 SEMANTIC_MODEL: dict[str, Any] = _load()
+
+
+def valid_dealing_where(alias: str = "o") -> str:
+    """有效成交谓词(单一事实源,2026-10-07 架构评审候选二):退款/取消单不计入
+    真实成交 —— 声明即口径(实体列注释与维度枚举的互验见 test_metric_registry)。
+    消费方:analytics/semantic_compiler、analytics/engine._compile_bespoke_family、
+    tools_registry/order_domain.query_product_ranking(经 bridge 惰性取用,
+    防包循环)。加状态或改口径只改此处;状态集互验钉在 test_metric_registry。"""
+    return f"{alias}.status NOT IN ('REFUNDED', 'CANCELLED')"

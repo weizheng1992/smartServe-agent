@@ -25,6 +25,7 @@ from ..tenant_config import get_tenant_config
 from ..tenant_context import resolve_business_id
 from .cache import tool_cache
 from .metric_registry import METRIC_SEMANTIC_REGISTRY
+from .semantic_model import valid_dealing_where
 
 _AMOUNT_STRIP_RE = re.compile(r"[^0-9.]")
 
@@ -1351,7 +1352,7 @@ class OrderDomainService:
                 "SUM(oi.quantity * oi.cost_at_purchase) AS cost "
                 "FROM merchant_order_items oi "
                 "JOIN merchant_orders o ON o.order_id = oi.order_id "
-                "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
+                f"WHERE {valid_dealing_where('o')} "
                 "GROUP BY oi.spu_id"
                 ") agg ON agg.spu_id = s.spu_code "
                 f"WHERE s.status = 'ON_SALE' {category_clause} "

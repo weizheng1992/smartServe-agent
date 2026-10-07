@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from .schema_cards import compile_safe_schema_card
 from .sql_guard import UnsafeSqlError, assert_safe_select
-from .tools_registry_bridge import metric_semantic_registry, semantic_model
+from .tools_registry_bridge import metric_semantic_registry, semantic_model, valid_dealing_where
 
 if TYPE_CHECKING:  # 仅类型位;运行时惰性 import 防 engine ↔ compiler 环
     from .engine import CompiledSQL, StructuredQueryIntent
@@ -197,7 +197,7 @@ def _shape_trend(intent: StructuredQueryIntent, block: dict[str, Any], business_
             "SELECT to_char(d.month, 'YYYY-MM') AS \"月份\", "
             f"{block['measure']} AS \"{block['label']}\" "
             + _TREND_MONTH_SPINE.format(months=months)
-            + f"AND o.status NOT IN ('REFUNDED', 'CANCELLED') {customer_clause}"
+            + f"AND {valid_dealing_where('o')} {customer_clause}"
             f"{items_join}"
             "GROUP BY d.month ORDER BY d.month LIMIT 50"
         )
@@ -206,7 +206,7 @@ def _shape_trend(intent: StructuredQueryIntent, block: dict[str, Any], business_
             "SELECT to_char(d.day, 'MM-DD') AS \"日期\", "
             f"{block['measure']} AS \"{block['label']}\" "
             + _TREND_DAY_SPINE
-            + f"AND o.status NOT IN ('REFUNDED', 'CANCELLED') {customer_clause}"
+            + f"AND {valid_dealing_where('o')} {customer_clause}"
             f"{items_join}"
             "GROUP BY d.day ORDER BY d.day LIMIT 50"
         )
@@ -246,7 +246,7 @@ def _shape_spu_rank(intent: StructuredQueryIntent, block: dict[str, Any], busine
         "SUM(oi.quantity) AS metric_score "
         "FROM merchant_order_items oi "
         "JOIN merchant_orders o ON o.order_id = oi.order_id "
-        "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') {time_clause} "
+        f"WHERE {valid_dealing_where('o')} {{time_clause}} "
         "GROUP BY oi.spu_id"
         ") agg ON agg.spu_id = s.spu_code "
         "WHERE s.status = 'ON_SALE' {category_clause} "
