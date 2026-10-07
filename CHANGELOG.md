@@ -29,6 +29,69 @@
 
 ---
 
+## [2.6.72] - 2026-10-06 (夜审 A/B/T 编号大收口 + 答案反馈闭环 v3.1 + 意图路由 error-key 机器键)
+
+### ✨ Features
+
+- **答案反馈闭环 v3.1**(`901cd6a`):analytics_trace 终局帧盖 traceId 章 + `POST /api/admin/analytics/feedback` 第 40 条路由 + 台账/坏例池扇出单点 feedback_service + 👍/👎 UI 共享组件(同 traceId 组尾一评,unsupported 仅 👎,👎 可附备注);夜测 07+08 半环补全。
+
+### 🔧 Refactors
+
+- **意图路由 error-key 机器键**(`6eb2d1c`):领域 not_found 类错误改 `{error, message}` 键形,路由 `_error_response` 单点映射,四处中文词面等值分叉清零;九条 CRUD 路由 + store_chat 入参 DTO 化(PATCH「携带即改」exclude_unset 保真)。
+- **chat_turn 受理脊单点**(A3,`8b72a08`):chat dispatch 与 merchant store_chat 同段编排上收 `accept_chat_turn`(降级伞随脊收取到受理全链);SPU/SKU 目录域 CRUD 下沉 merchant_domain(A2 完结,路由层 966→830 行);客户面 CRUD 四路由同沉(A2 之一)。
+- **卡片动作目录入 types 包**(F3,`ac9b8fd`/`0f77512`):CARD_ACTIONS 单点 + 类型化当场抓到 merchant 独有 go_to_checkout 死键;dispatch async 臂补降级伞(夜评 #2);夜评文档/测试小修两处(`33f0ecf`)。
+
+### 🐛 Fixes
+
+- **首存客户地址静默丢失**(T7,`c543ed4`):save_customer_address 对无档客户 UPDATE 0 行,首个地址静默蒸发却照报 success——改 upsert 建档+落地址一步原子;目录/地址面契约册四组钉死。
+- **地址簿倒装保存形词表缺口**(nightly c21 复发,A11 同病灶第三形,`b86a369`):「我的地址是…帮我保存一下」地址前置动词后置漏规则,补 `_detect_address_save_inverted` 双锚定保守收口;缺件走 missingSlots 严禁瞎猜。
+- feedback 路由半成品误卷 main 热修剥离(`decebe0`,并行会话历史找回续作);shadow/ 影子双跑退役删除 + ADR-0009(`6c7bf85`,207 行零调用方回归工具,ADR 同册裁决 takeover 迁包维持现状)。
+
+## [2.6.71] - 2026-10-05 (游客/缺价诚实化 + 夜测扩容 58 用例)
+
+- **游客身份语义收口**(U2):匿名访客曾静默冒充种子客户张伟/CUST-8801;**购物车缺价行诚实计价**(D9/U1):缺价/零价行曾以 ¥0 静默入合计;**审批抽屉 fallback 诚实化**(D8/U5):无详情兜底曾编造全套订单(已发货/¥399)。
+- 夜测扩容 58 用例 + 优化维度(全链购物/多模态/权限面扩编/并发与 SSE 桥,四条场景纪律实弹);c17 无中生有锚点词干化(「暂未查询到/暂不销售」变体击穿整词锚)。
+
+## [2.6.70] - 2026-10-04 (夜间评测基建 + run_agent 性能批 + analytics 深化四项 + 双退款 TOCTOU)
+
+- **feat: 夜间 agent 评测基建**(23:00 自续期档):商城客服 + Data Agent + 商户端 RBAC 矩阵,真实 LLM 会话;夜测首跑 5 败全数归因修复。
+- **run_agent 性能批(夜审 P 系列)**:图后收口四条独立泳道并行(P2)、租户解析与问句 embedding 并行 + 情境记忆只记业务动作回合(P3/P4)、RAG 与 long_memory 检索候选集封顶(P5/P6)、SSE 重连风暴收口(P7)、审批与大盘轮询挂 visibility 闸(P8)、问候旁路 DB 往返 3→2(P9)、LangSmith httpx 客户端进程级复用(P11)。
+- **analytics 深化四项**:图表仲裁归位 chart_policy 单点、解析缝一等公民化(Clarify 取代裸 dict ×7)、促销语义内核收口 promo_kernel、编译期实体闸类型化 EntityGateRequired(六处「补一句话即可继续」不再被吞);意图示例/查询示例两服务不合并立 ADR-0008(夜审 A9)。
+- **fix: 双退款 TOCTOU 收口**(T1 读状态与 T2 物理写之间无闸);skills triggerIntents 死词清场 + 注册表闭集契约钉死(A5);跨实例 ws:events 广播契约三钉(T10);analytics 帧形状契约入 types(F4,告别 data:any);架构审查四缝落地(身份闸/审批装配/SSE 泵/商户库连接收敛单点)。
+
+## [2.6.69] - 2026-10-03 (内容过滤双洞 + 假绿治理 + 意图飞轮收编)
+
+- **fix: bigmodel 内容过滤 1301 穿透谎报罐头双洞收口**——resilience 判 ContentFilterError 一次快败(重试必然同判、不计熔断),finish 两臂诚实降级;三册基线随修复重钉全绿(unified 58 + planner 8 + persona 8)。
+- **罐头改真跑假绿治理**:agent_provider 四族罐头与静默 except 铲除,e2e 绑种子真数据;意图数据飞轮 scripts 七件收编 `engine_py.intent_flywheel` 包。
+- **fix: 下单订单号裸 randint 直插唯一键碰撞 500**(实弹 duplicate key 9106);商户库引擎跨包消费收口 order_domain 公开访问器;intent_logs 补会话维度索引;RAG 自愈播种进程级指纹闸;cardActions.ts 收敛 web 卡片动作 if 链。
+- 测试补员:analytics/rbac 纯逻辑十九钉、AgentStreamClient 帧解析五钉、SPI POST 六钉、store SSE 桥 businessId 属主闸;注册端点计数 121→127 以代码实数为准。
+
+## [2.6.68] - 2026-10-02 (SPI 四洞 + 审批 SETNX 误判 + 三路召回降级)
+
+- **fix: /spi/v1 四条 GET 强制 HMAC + nonce 防重放**,租户隔离四洞收口;**fix: 审批 SETNX 成功误判「锁被持」**(redis-py bool_ok 回调)每次审批 409 HITL 全断。
+- 三路召回 gather 独立降级契约 + 三路记忆回写拆独立 try(单路抛错曾连坐 long 事实抽取静默跳过);planner HOT-RESUME 计划保全与驳回回溯契约;训练轨两处断裂收口;退款审批卡缺失金额诚实「—」;租户接入配置诚实化(密钥/回调/阈值不再编造)。
+
+## [2.6.67] - 2026-10-01 (依赖卫生 + 注入形状闸 + 诚实化批)
+
+- **fix: Data Agent 注入形状确定性闸**——带注入形状问句先于全部分层响亮拒绝(注入语料曾出 result 帧);sql_guard 危险函数 Anonymous 真名比对修复整族漏放。
+- **fix: /spi 签名密钥明文下 UI 两处收口**;订单 SHIPPED 承运商如实显示、一键发货去随机运单号预填、订单抽屉缺价诚实「—」、效果速览无数据降级、SSE 中断「打字中」永挂转诚实错误。
+- perf: L0 resolve 下放 to_thread(torch 推理不阻塞事件循环)、审批列表 200 封顶、短期记忆 SQL 侧截断、personas 列表 defer embedding、evals results 加 limit;依赖卫生(workspace types 零消费/ui peerDeps/turbo env 透传);导购颜色偏好 SKU 级过滤 + 衣族词元别名。
+
+## [2.6.66] - 2026-09-30 (persona-hardening 开篇 + Temporal 退役 + 性能批)
+
+- **feat: 画像/情境召回注入 finish 终稿** + 待审画像审核闭环与租户视图口径 + recordUserPreference 对话写路与双层画像归因(persona-hardening 系列 02-11);画像文档对齐(阈值如实改口、「画像」三义辨析)。
+- **refactor: Temporal 执行路线退役删除**(ADR-0007,回合管线收敛单一深模块,scheduler 随网关宿主);删除零调用方 NL2SQL 沙箱死代码(守卫职责收口 analytics/sql_guard)。
+- **fix: 确定性兜底三处身份失真**(熔断降级首次真正可达);AI_BASE_URL/AI_MODEL 缺省即拒启(杀死死端口静默兜底);购物车库存诚实化(stock 99 伪造收口);地址链路顾客错挂;促销价回填死路。
+- perf: onboarding 60s 缓存、getOrderStatus N+1 收口 IN 批查、场景包与经营报告并发、Redis 流 key 单点化;测试:SSE 断流契约/llm 仲裁异常/triage 异常分支/38 指标闭集守卫补员。
+
+## [2.6.65] - 2026-09-29 (人工接管真接线 + 前端诚实化 + 依赖卫生)
+
+- **fix: 转人工真接线排队 + 坐席认领闸 + 坐席消息桥进顾客 store SSE**——人工接管后顾客终于能收到真人回复;暂停闸罐头每接管期只说一次;坐席台时间线贴底、发消息抖动修复。
+- 前端诚实化:ResultCard 缺值「—」、聊天卡金额缺值/坏值不再渲染假 ¥0.00、用户可见英文残句中文化、animate 死类替换;FloatingAgent 流式落盘防抖。
+- 依赖卫生:zod 降 devDependency、web/admin 装而未用依赖清理、biome 孤儿 ignore 清理、gateway 补 redis 显式依赖;perf: bcrypt 哈希校验下放线程池。
+
+---
+
 ## [2.6.64] - 2026-09-29 (导购搭配语义守卫:searchProducts 子任务不再截胡「搭配一套」)
 
 2.6.56 搭配双族修复的同形残余(实弹复发):同一句「搭配一套…装备和衣服」9-27 走技能路径出双族+合计预算,9-29 却只推 2 件短袖衬衫(「之前只有装备,现在只有衣服了」)。取证:路由判 shopping_guide 正确、货架静态、mall_domain 未变 —— 分叉在 executor 工具选择:搭配请求可被写成 `searchProducts` 工具子任务(query 自拟单脚),工具路径没有技能 SOP 的搭配族补脚/交错合并/合计预算,必然单族输出。机制层缺口与 LLM 分叉概率无关,确定性存在。
