@@ -227,6 +227,23 @@ async def ask(
             "message": "当前角色无权查看该指标(反问选项集已过滤,此处为直接问越权指标的兜底拒绝)。",
         }, trace)
 
+    # 确定性组合升级(ADR-0011 语感直通):总量形指标 × 维度拆分语感 → 组合
+    # 查询(零 LLM;「各品牌净销售额对比」不再答成总量单行)。指标已过角色闸,
+    # 品类相容闸在 breakdown_reroute 内。
+    from .composition import breakdown_reroute
+
+    reroute = breakdown_reroute(effective_question, intent)
+    if reroute is not None:
+        frame = await _composed_frame(effective_question, reroute, session_ctx, engine, trace)
+        if frame is not None:
+            payload = {"last_question": effective_question, "intent": reroute.__dict__}
+            if session_id:
+                if persist_session:
+                    await session_store.save(business_id, session_id, payload)
+                else:
+                    frame["_sessionPayload"] = payload
+            return frame
+
     # 场景包(L2 复合意图):一个意图 = 一组子查询,展开为多帧结果卡
     if intent.metric in _SCENARIO_PACKS:
         outcome = await _run_scenario(intent, session_ctx)
@@ -569,16 +586,26 @@ async def _composition_route(question: str, allowed: list[str] | None, session_c
             return None
         entity_ids = [hit["id"]]
 
-    try:
-        compiled = composition.compile_composition(comp, session_ctx["business_id"], entity_ids)
-        result = await engine.execute_async(compiled)
-    except UnsupportedQuery as err:
-        print(f"[T1] 组合编译拒绝: {err}")
-        return None
-    except Exception as err:
-        print(f"[T1] 组合执行失败(放行 unsupported): {err}")
-        return None
+    return await _composed_frame(question, comp, session_ctx, engine, trace, entity_ids=entity_ids)
 
+
+async def _composed_frame(
+    question: str, comp, session_ctx: dict, engine: MetricQueryEngine, trace: Trace,
+    result=None, entity_ids: list[str] | None = None,
+) -> dict | None:
+    """组合帧构建(T1 两条入口共用:LLM 组合路由 / 语感直通)。"""
+    from . import composition
+
+    if result is None:
+        try:
+            compiled = composition.compile_composition(comp, session_ctx["business_id"], entity_ids or [])
+            result = await engine.execute_async(compiled)
+        except UnsupportedQuery as err:
+            print(f"[T1] 组合编译拒绝: {err}")
+            return None
+        except Exception as err:
+            print(f"[T1] 组合执行失败(放行原路径): {err}")
+            return None
     # 组合面用轻量意图占位(复用 _result_frame 的标题/图表/速览管线);
     # 时间平移帧换归因速览(票 10 阶段 A:净变化 + 主因贡献,确定性零叙事)
     shim = StructuredQueryIntent(
@@ -608,7 +635,7 @@ async def _composition_route(question: str, allowed: list[str] | None, session_c
         frame.get("type", "error"), final_metric=comp.metric,
         final_method="composition", row_count=len(result.rows or []),
     )
-    return frame, comp
+    return frame
 
 
 async def _explore_route(question: str, session_ctx: dict, trace: Trace):

@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from engine_py.analytics import composition
 from engine_py.analytics.composition import (
     CompositionQuery,
     CompositionRejected,
@@ -250,3 +251,47 @@ class TestAttributionRelatedAndNarrative:
 
         rows = [{"品类": "A", "本期": 53515.0, "上期": 60000.0, "变化": -6485.0}]
         assert _narrative_traceable("净变化 -6,485。", rows, None)
+
+
+class TestBreakdownReroute:
+    """确定性组合升级(维度拆分语感直通):总量形 × 拆分语感 → 组合查询。"""
+
+    from engine_py.analytics.engine import StructuredQueryIntent as _SQI
+
+    def _intent(self, metric="net_sales", **kw):
+        return self._SQI(metric=metric, **kw)
+
+    def test_brand_breakdown_reroute(self, monkeypatch):
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        comp = composition.breakdown_reroute("各品牌净销售额对比", self._intent("net_sales"))
+        assert comp is not None and comp.dimension == "brand" and comp.metric == "net_sales"
+
+    def test_region_with_time_backfill(self, monkeypatch):
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        comp = composition.breakdown_reroute("按区域的上月订单量", self._intent("order_count", time_window={"kind": "last_month"}))
+        assert comp is not None and comp.dimension == "region" and comp.time_window["kind"] == "last_month"
+
+    def test_no_cue_no_reroute(self, monkeypatch):
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        assert composition.breakdown_reroute("净销售额多少", self._intent("net_sales")) is None
+
+    def test_dim_rank_metric_no_reroute(self, monkeypatch):
+        """命中指标已自带维度拆分(品类GMV榜)→ 不升级。"""
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        assert composition.breakdown_reroute("各品类GMV榜", self._intent("category_gmv_top")) is None
+
+    def test_env_off_no_reroute(self, monkeypatch):
+        monkeypatch.delenv("AI_T1_COMPOSE", raising=False)
+        assert composition.breakdown_reroute("各品牌净销售额对比", self._intent("net_sales")) is None
+
+    def test_category_incompatible_dimension_no_reroute(self, monkeypatch):
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        comp = composition.breakdown_reroute(
+            "衬衫的各客户净销售额", self._intent("net_sales", category="衬衫")
+        )
+        assert comp is None  # 品类过滤挂 SPU 表,客户维度不可组合,宁可不升级
+
+    def test_compare_previous_cue(self, monkeypatch):
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        comp = composition.breakdown_reroute("各品类净销售额环比", self._intent("net_sales"))
+        assert comp is not None and comp.compare_previous is True

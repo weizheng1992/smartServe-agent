@@ -502,3 +502,60 @@ async def attribute_narrative(comp: CompositionQuery, rows: list[dict], summary:
         print("[归因叙事] 数字不可溯源,整段丢弃(隔离章硬校验)")
         return None
     return {"text": text, "badge": NARRATIVE_BADGE}
+
+# ---------------- 确定性组合升级(维度拆分语感直通;零 LLM) ----------------
+
+# 语感:「各/按 + 维度词」或「维度词 + 分布/对比/排行」;环比/同比 → 时间平移
+_BREAKDOWN_RE = re.compile(
+    r"(?:各|按)\s*(品牌|区域|城市|品类|客户|活动)"
+    r"|(品牌|区域|城市|品类|客户|活动)(?:的)?(?:分布|对比|排行)"
+)
+_COMPARE_PREV_RE = re.compile(r"环比|同比|对比上期|较上期")
+_DIM_WORD_MAP = {"品牌": "brand", "区域": "region", "城市": "city", "品类": "category", "客户": "customer", "活动": "promotion"}
+
+
+def breakdown_reroute(question: str, intent) -> CompositionQuery | None:
+    """维度拆分语感 → 确定性组合升级(live 缺口实弹:「各品牌净销售额对比」被
+    L0 词林命中答成总量单行,答非所问但数字没错 —— 最隐蔽的错答形态)。
+
+    触发条件(全部满足):T1 开闸 ∧ 命中指标为总量形(total_single,无法呈现
+    拆分)∧ 问句携带维度拆分语感 ∧ 维度在语义模型目录。零 LLM:维度词映射
+    与槽位全部确定性提取;不满足返回 None(调用方照常走 T0)。
+    """
+    from .engine import StructuredQueryIntent
+    from .semantic_compiler import _compile_blocks
+    from .tools_registry_bridge import semantic_model
+
+    if not (isinstance(intent, StructuredQueryIntent) and composition_enabled()):
+        return None
+    block = _compile_blocks().get(intent.metric) or {}
+    if block.get("shape") != "total_single":
+        return None
+    match = _BREAKDOWN_RE.search(question or "")
+    if not match:
+        return None
+    word = next((w for w in match.groups() if w), None)
+    dimension = _DIM_WORD_MAP.get(word or "")
+    if dimension not in semantic_model()["dimensions"]:
+        return None
+    if intent.category and dimension not in (None, "category", "spu"):
+        return None  # 品类过滤挂在 SPU 表:客户/活动/区域维度不可组合,宁可不升级
+    time_window = intent.time_window
+    compare_previous = bool(_COMPARE_PREV_RE.search(question or ""))
+    if time_window is None and compare_previous:
+        from .l0_lexicon import extract_slots
+
+        _, slot_time, _slot_category = extract_slots((question or "").strip().lower())
+        time_window = slot_time
+    return CompositionQuery(
+        metric=intent.metric,
+        dimension=dimension,
+        direction=intent.direction,
+        limit=intent.limit,
+        time_window=time_window,
+        compare_previous=compare_previous,
+        category=intent.category,
+        source_question=question,
+    )
+
+
