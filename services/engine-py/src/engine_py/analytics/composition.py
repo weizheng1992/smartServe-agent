@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
+
 if TYPE_CHECKING:  # 运行时惰性 import(engine ↔ composition 防环)
     from .engine import CompiledSQL
 
@@ -45,6 +47,21 @@ class CompositionQuery:
 
 class CompositionRejected(Exception):
     """组合查询落在语义层闭集之外(响亮失败;呈现层归 unsupported,落库飞轮)。"""
+
+
+class _ComposeOut(BaseModel):
+    """组合解析的 LLM 输出形(bind_tools 工具契约;与 L3 同机制)。"""
+
+    metric: str
+    dimension: str | None = None
+    direction: str = "DESC"
+    limit: int = 10
+    time_kind: str | None = None
+    time_n: int | None = None
+    compare_previous: bool = False
+    category: str | None = None
+    entity_kind: str | None = None
+    entity_mention: str | None = None
 
 
 # ---------------- 解析(LLM 组合理解;grounding = 语义模型目录) ----------------
@@ -95,25 +112,32 @@ async def compose_resolve(question: str, allowed: list[str] | None) -> Compositi
         + composition_catalog()
     )
     user = _json.dumps({"question": question, "allowed_metrics": allowed}, ensure_ascii=False)
-    from pydantic import BaseModel
-
-    class _ComposeOut(BaseModel):
-        metric: str
-        dimension: str | None = None
-        direction: str = "DESC"
-        limit: int = 10
-        time_kind: str | None = None
-        time_n: int | None = None
-        compare_previous: bool = False
-        category: str | None = None
-        entity_kind: str | None = None
-        entity_mention: str | None = None
-
-    model = get_chat_model().with_structured_output(_ComposeOut)
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    out: _ComposeOut = await model.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    messages = [SystemMessage(content=system), HumanMessage(content=user)]
+    out = await _invoke_compose_out(get_chat_model(), messages)
     return _validate(out, allowed, question)
+
+
+async def _invoke_compose_out(model, messages) -> _ComposeOut:
+    """结构化解析主路 = bind_tools(L3 同机制,glm-4.7 兼容由 llm/chat 单点收口);
+    live eval 六/八轮实弹:with_structured_output 在 bigmodel 端偶发退化成
+    围栏 JSON 文本/空响应 —— 降为文本路径,用 L3 同源 _parse_llm_json 手解
+    (剥围栏),仍败才响亮。"""
+    from .llm_intent import _content_text, _parse_llm_json
+
+    try:
+        tool_model = model.bind_tools([_ComposeOut], tool_choice="required")
+        resp = await tool_model.ainvoke(messages)
+        for tc in getattr(resp, "tool_calls", None) or []:
+            args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)
+            if args:
+                return _ComposeOut(**args)
+        print("[T1] function calling 未产出工具调用,回落文本解析")
+    except Exception as tool_err:
+        print(f"[T1] function calling 不可用,回落文本解析: {tool_err}")
+    resp = await model.ainvoke(messages)
+    return _ComposeOut(**_parse_llm_json(_content_text(resp)))
 
 
 def _validate(out: Any, allowed: list[str] | None, question: str) -> CompositionQuery:
@@ -136,6 +160,11 @@ def _validate(out: Any, allowed: list[str] | None, question: str) -> Composition
         raise CompositionRejected(f"维度 {out.dimension!r} 不在语义层目录内")
     if out.category is None and slot_category:
         out.category = slot_category
+    # 维度词回声归一(live eval 九轮实弹):「各品类销售额」的 LLM 把「品类」
+    # 这个维度词当过滤值回填 —— 维度词是切片轴不是取值,丢弃
+    _DIM_WORDS = {"品类", "品牌", "区域", "城市", "客户", "活动", "类目"}
+    if out.category in _DIM_WORDS:
+        out.category = None
     if out.category is not None:
         enum_values = dims.get("category", {}).get("values") or []
         if out.category not in enum_values:
@@ -453,7 +482,14 @@ def _narrative_traceable(text: str, rows: list[dict], summary: str | None) -> bo
         return out
 
     allowed = _numbers(str([v for r in rows for v in r.values()])) | (_numbers(summary) if summary else set())
-    return _numbers(text) <= allowed
+
+    def _traceable(token: float) -> bool:
+        """舍入容差 + 符号自由:LLM 复算百分比常差 0.1(-90.9% vs 卡上 -91.0%);
+        中文的方向由动词承载(「净减少 24,879」= 卡上 -24,879),故按绝对值
+        比对。舍入级偏差(≤max(0.5, 0.5%))视为同值;超出 = 编造,必死。"""
+        return any(abs(abs(token) - abs(a)) <= max(0.5, abs(a) * 0.005) for a in allowed)
+
+    return all(_traceable(t) for t in _numbers(text))
 
 
 def _narrative_context(comp: CompositionQuery, rows: list[dict], summary: str | None) -> str:

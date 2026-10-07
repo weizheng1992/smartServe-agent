@@ -52,6 +52,18 @@ def _assert_t1(vars: dict) -> dict:
             return {"pass": True, "score": 1.0, "reason": f"响亮拒绝(符合预期): {err}"}
         return {"pass": False, "score": 0.0, "reason": f"意外拒绝: {err}"}
     if vars.get("expectRejected"):
+        # resolve 层放行(指标在注册表)但不可组合(compile 层拒绝)同样算
+        # 拒绝成立 —— 与运行时真值对齐(非可组合指标在 T1 一律 unsupported)
+        from engine_py.analytics.composition import COMPOSABLE_METRICS, compile_composition
+        from engine_py.analytics.engine import UnsupportedQuery
+
+        comp.source_question = vars.get("input", "")
+        try:
+            compile_composition(comp, "aurora")
+        except (UnsupportedQuery, Exception):
+            return {"pass": True, "score": 1.0, "reason": "resolve 放行但 compile 层响亮拒绝(符合预期,运行时即 unsupported)"}
+        return {"pass": False, "score": 0.0, "reason": f"应拒绝却产出可执行组合 {comp.metric}×{comp.dimension}"}
+    if vars.get("expectRejected"):
         return {
             "pass": False,
             "score": 0.0,

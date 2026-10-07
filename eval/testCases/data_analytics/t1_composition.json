@@ -165,16 +165,15 @@
   ]
  },
  {
-  "description": "T1 组合 - 角色闭集拒绝(毛利率不在 allowed;确定性措辞:裸「毛利最高」在新组合规则下模型偶发空响应,见 eval/results 轮次记录)",
+  "description": "T1 组合 - 角色闭集拒绝(可组合指标不在 allowed;确定性措辞)",
   "vars": {
    "channel": "t1",
-   "input": "按品类看毛利率的分布",
+   "input": "各区域的销量分布",
    "allowed": [
     "gmv",
-    "volume",
+    "net_sales",
     "order_count",
-    "aov",
-    "refund_rate"
+    "aov"
    ],
    "expectRejected": true
   },
