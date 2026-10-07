@@ -97,6 +97,12 @@ def _generate_thread_id() -> str:
     return f"thread_{int(time.time() * 1000)}_{uuid.uuid4().hex[:5]}"
 
 
+# 两臂共用的降级道歉文案(上游模型波动/受理脊残余异常;单一事实源防复制漂移)
+_DEGRADED_APOLOGY = (
+    "非常抱歉，智能服务当前遇到上游模型波动，暂时无法处理您的请求。请稍后再试，或选择人工客服协助。"
+)
+
+
 @router.post("")
 async def dispatch_chat(body: DispatchChatIn, request: Request):
     effective_message = (body.message or body.input or "").strip()
@@ -112,7 +118,9 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
     # chat_turn 单点,store_chat 同脊共享;sync 降级文案与信封形状留本路由。
     # 兜底降级(2026-09-12):run_agent 已做图级降级网,此处再兜一层 —— 任何
     # 残余异常不再以 HTTP 500 + ASGI 堆栈裸露给客户端(上游 429 实测),而是
-    # 与熔断路径同形的诚实道歉文案(降级伞随受理脊上收取到受理全链)。
+    # 与熔断路径同形的诚实道歉文案(降级伞随受理脊上收取到受理全链;
+    # 2026-10-07 夜评 #2:async 臂同伞 —— 受理脊 append 失败两臂同降,
+    # 不再裸 500)。
     if body.sync:
         try:
             turn = await chat_turn.accept_chat_turn(
@@ -128,7 +136,7 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             print(f"[Chat] agent job raised, graceful degrade: {agent_err!r}")
             turn = {
                 "paused": False, "jobId": "", "state": None,
-                "output": "非常抱歉，智能服务当前遇到上游模型波动，暂时无法处理您的请求。请稍后再试，或选择人工客服协助。",
+                "output": _DEGRADED_APOLOGY,
                 "cards": [],
             }
         if turn["paused"]:
@@ -155,15 +163,28 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             "cards": turn["cards"],
         }
 
-    turn = await chat_turn.accept_chat_turn(
-        thread_id=effective_thread_id,
-        user_id=effective_user_id,
-        business_id=effective_business_id,
-        message=effective_message,
-        image_urls=body.imageUrls,
-        store_cart=body.storeCart,
-        sync=False,
-    )
+    try:
+        turn = await chat_turn.accept_chat_turn(
+            thread_id=effective_thread_id,
+            user_id=effective_user_id,
+            business_id=effective_business_id,
+            message=effective_message,
+            image_urls=body.imageUrls,
+            store_cart=body.storeCart,
+            sync=False,
+        )
+    except Exception as agent_err:
+        # async 臂同伞(夜评 2026-10-07 #2):受理脊(append/闸/建作业)任何
+        # 残余异常同形降级,信封保持 async 形(jobId 空 + 道歉文案),不裸 500
+        print(f"[Chat] async accept raised, graceful degrade: {agent_err!r}")
+        return {
+            "success": True,
+            "jobId": "",
+            "threadId": effective_thread_id,
+            "userId": effective_user_id,
+            "output": _DEGRADED_APOLOGY,
+            "result": _DEGRADED_APOLOGY,
+        }
     if turn["paused"]:
         # P1 AI 暂停闸:接管期不建作业不调 LLM,消息照常落库;信封复用
         # isHumanActive 契约(apps/web useChatMessages 消费方,零前端改动)。
