@@ -442,6 +442,15 @@ export const api = {
     }
   },
 
+  /** 答案反馈(反馈闭环 v3.1):traceId 来自终局帧,👎 可带自由文本备注。 */
+  feedback: {
+    submit: async (p: { traceId: string; verdict: 'up' | 'down'; note?: string }) =>
+      fetchJson('/api/admin/analytics/feedback', {
+        method: 'POST',
+        body: JSON.stringify(p),
+      }),
+  },
+
   /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录)。 */
   staff: {
     list: async (): Promise<{

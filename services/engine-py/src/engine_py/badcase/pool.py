@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import select
 
 from ..db import BadcaseCandidate, get_session
@@ -83,3 +85,30 @@ async def record_badcase_signal(
     except Exception as err:
         print(f"[BadcasePool] Failed to record badcase signal ({signal_source}/{conversation_ref}): {err}")
         return None
+
+
+async def dismiss_badcase_signal(badcase_id: str) -> bool:
+    """撤销误报信号(candidate → dismissed;反馈闭环改判补偿用,2026-10-06)。
+
+    仅 candidate 可撤:已被人工 triage 处置(confirmed/dismissed/converted)的
+    记录**人工裁决优先于员工改判**,查无/已审结一律返回 False。绝不抛 ——
+    调用方(feedback_service)对失败静默吞掉,不影响反馈主契约。
+    """
+    try:
+        async with get_session() as session:
+            row = (
+                await session.execute(
+                    select(BadcaseCandidate).where(
+                        BadcaseCandidate.id == uuid.UUID(badcase_id)
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None or row.status != "candidate":
+                return False
+            row.status = "dismissed"
+            await session.commit()
+            print(f"[BadcasePool] 信号撤销: id={badcase_id} → dismissed")
+            return True
+    except Exception as err:  # 非法 uuid 形态/查写失败同静默(绝不阻断改判主契约)
+        print(f"[BadcasePool] Failed to dismiss badcase signal ({badcase_id}): {err}")
+        return False

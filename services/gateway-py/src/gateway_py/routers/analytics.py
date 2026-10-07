@@ -13,7 +13,7 @@ import asyncio
 import json
 import uuid
 
-from engine_py.analytics import graph, promotions, rbac, report_service
+from engine_py.analytics import feedback_service, graph, promotions, rbac, report_service
 from engine_py.event_bus import publish_agent_event, read_agent_events
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -279,6 +279,27 @@ async def save_result_report(request: Request):
     )
     return {"success": True, **created}
 
+
+@router.post("/api/admin/analytics/feedback")
+async def analytics_feedback(request: Request):
+    """答案反馈(踩/赞,反馈闭环 v3.1):任何在职员工可评,无额外 perm 闸
+    (可问即可评)。台账+两池扇出在 engine feedback_service 单点;traceId
+    来自终局帧(引擎盖章),服务端 join analytics_trace 回查,不信任客户端
+    自报问题/意图。note 为 👎 的可选自由文本。"""
+    ctx = await _ctx(request)
+    body = await request.json()
+    result = await feedback_service.submit_feedback(
+        ctx["business_id"], ctx["staff"],
+        str(body.get("traceId") or ""), str(body.get("verdict") or ""),
+        note=body.get("note"),
+    )
+    if "error" in result:
+        not_found = result["error"].startswith("追踪不存在")
+        return JSONResponse(
+            status_code=404 if not_found else 400,
+            content={"success": False, "message": result["error"]},
+        )
+    return {"success": True, **result}
 
 
 @router.get("/api/admin/analytics/reports/{report_id}")

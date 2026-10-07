@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, Text, text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -733,6 +733,36 @@ class QueryExemplar(Base):
     embedding: Mapped[list | None] = mapped_column(JSONB)
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'manual'"))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+class AnalyticsFeedback(Base):
+    """答案反馈台账(反馈闭环 v3.1,2026-10-06):一次 trace × 一位员工一行。
+
+    last verdict wins 的 upsert 总账(badcase/query_exemplars 是「行动结果」,
+    本表是「事实流水」—— 采纳率分子分母只认这里,不靠两池对账反推)。
+    badcase_id/exemplar_id 是改判补偿凭据,仅记本路径注册的产物
+    (👍 查重命中跳过时 exemplar_id 必为 None —— 撤判严禁错杀他人范例);
+    question/metric/layers_json 是反馈时点快照,统计不依赖 trace 表的未来清理。
+    """
+
+    __tablename__ = "analytics_feedback"
+    __table_args__ = (
+        UniqueConstraint("business_id", "trace_id", "staff", name="uq_analytics_feedback_staff_trace"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)  # fb_<hex12>
+    business_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    trace_id: Mapped[str] = mapped_column(Text, nullable=False)
+    staff: Mapped[str] = mapped_column(Text, nullable=False)
+    verdict: Mapped[str] = mapped_column(Text, nullable=False)  # up|down
+    note: Mapped[str | None] = mapped_column(Text)
+    question: Mapped[str] = mapped_column(Text, nullable=False)  # trace 快照(截 200 字)
+    metric: Mapped[str | None] = mapped_column(Text)
+    layers_json: Mapped[list | None] = mapped_column(JSONB)  # trace.layers 快照(含 intent 层)
+    badcase_id: Mapped[str | None] = mapped_column(Text)
+    exemplar_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 

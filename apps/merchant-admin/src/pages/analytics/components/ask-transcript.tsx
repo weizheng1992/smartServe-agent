@@ -1,8 +1,11 @@
+import { FeedbackButtons, type FeedbackVerdict } from '@/components/FeedbackButtons';
 import { ResultCard } from '@/components/ResultCard';
 import { type AskClarifyOption, type AskFrame, type AskRow } from '@/lib/analytics-frames';
 
 export type { AskFrame };
+import { api } from '@/lib/api';
 import { getSelection, setSelectionKind } from '@/lib/page-context';
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 
 const ORDER_STATUS: Record<string, string> = {
@@ -25,15 +28,64 @@ function useJumpToOrder() {
   };
 }
 
-/** 问答流水:用户气泡 / 折线卡 / 表格卡 / 客户订单列表卡 / clarify 反问 / 诚实拒绝。 */
+/** 问答流水:用户气泡 / 折线卡 / 表格卡 / 客户订单列表卡 / clarify 反问 / 诚实拒绝。
+ *  反馈闭环(v3.1):终局帧组尾渲染踩/赞(轮次粒度,同 FloatingAgent);
+ *  页面帧不持久化(与现状一致),rated 随会话内存。 */
 export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q: string) => void }) {
   const jumpToOrder = useJumpToOrder();
+  const [rated, setRated] = useState<Record<number, FeedbackVerdict>>({});
+  const [rateBusy, setRateBusy] = useState<number | null>(null);
+  const [rateError, setRateError] = useState<Record<number, string>>({});
+
+  async function rate(i: number, traceId: string, verdict: FeedbackVerdict, note?: string) {
+    if (rateBusy !== null) return;
+    setRateBusy(i);
+    setRateError((prev) => {
+      const next = { ...prev };
+      delete next[i];
+      return next;
+    });
+    const prior = rated[i];
+    setRated((prev) => ({ ...prev, [i]: verdict }));
+    try {
+      await api.feedback.submit({ traceId, verdict, note });
+    } catch (err) {
+      setRated((prev) => {
+        const next = { ...prev };
+        if (prior) next[i] = prior;
+        else delete next[i];
+        return next;
+      });
+      setRateError((prev) => ({ ...prev, [i]: `反馈失败:${String(err)}` }));
+    } finally {
+      setRateBusy(null);
+    }
+  }
+
+  const feedbackProps = (i: number, visible: AskFrame[], f: AskFrame, allowUp: boolean) => {
+    const traceId = String(f.data.traceId || '');
+    const isTail =
+      Boolean(traceId) &&
+      (i + 1 >= visible.length || !visible[i + 1].data.traceId || visible[i + 1].data.traceId !== traceId);
+    if (!isTail) return null;
+    return (
+      <>
+        <FeedbackButtons
+          allowUp={allowUp}
+          rated={rated[i]}
+          busy={rateBusy === i}
+          onSubmit={(verdict, note) => void rate(i, traceId, verdict, note)}
+        />
+        {rateError[i] ? <div className="mt-1 text-[11px] text-red-500">{rateError[i]}</div> : null}
+      </>
+    );
+  };
 
   return (
     <>
       {frames
         .filter((f) => f.event !== 'start')
-        .map((f, i) => (
+        .map((f, i, visible) => (
           /* biome-ignore lint/suspicious/noArrayIndexKey: AskFrame 无业务 id,append-only 对话流不重排 */
           <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
             {f.event === 'user' ? (
@@ -41,13 +93,19 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
             ) : f.event === 'result' && f.data.metric === 'customer_orders' && Array.isArray(f.data.rows) ? (
               // 行级「在订单中查看」跳转是 analytics 全屏问答页独有的交互特例
               // (静态渲染与 ResultCard 同口径);其余 result 帧一律走唯一渲染缝。
-              <CustomerOrdersCard rows={f.data.rows} caliber={f.data.caliber ?? ''} onJump={jumpToOrder} />
+              <>
+                <CustomerOrdersCard rows={f.data.rows} caliber={f.data.caliber ?? ''} onJump={jumpToOrder} />
+                {feedbackProps(i, visible, f, true)}
+              </>
             ) : f.event === 'result' ? (
               // 唯一渲染缝(merchant-admin.md §1.4):折线/条形/诚实降级/文本卡
               // 全在共享 ResultCard —— 折线值列 Number.isFinite 护栏(2026-09-25
               // 此旁路自绘表格曾复现已修复的 NaN 网线事故)、排行自动条形、
               // 「数据点不足」降级均与悬浮面板/看板/报告四处同形。
-              <ResultCard data={f.data} />
+              <>
+                <ResultCard data={f.data} />
+                {feedbackProps(i, visible, f, true)}
+              </>
             ) : (
               <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm">
                 {f.data.message || f.event}
@@ -75,6 +133,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                   </div>
                 )}
                 {f.data.caliber ? <div className="mt-1 text-[11px] text-zinc-400">口径:{f.data.caliber}</div> : null}
+                {f.event === 'unsupported' ? feedbackProps(i, visible, f, false) : null}
               </div>
             )}
           </div>

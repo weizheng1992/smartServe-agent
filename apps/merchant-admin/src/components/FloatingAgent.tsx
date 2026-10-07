@@ -1,3 +1,4 @@
+import { FeedbackButtons, type FeedbackVerdict } from '@/components/FeedbackButtons';
 import { ResultCard } from '@/components/ResultCard';
 import { type AskCard } from '@/lib/analytics-frames';
 import { api } from '@/lib/api';
@@ -31,6 +32,7 @@ type AgentFrame = {
   event: AgentEvent | string;
   data: AgentFrameData;
   saved?: boolean;
+  rated?: FeedbackVerdict;
 };
 
 type AskResultFrame = { event: AgentEvent | string; data: Record<string, unknown> };
@@ -205,6 +207,25 @@ export function FloatingAgent({ route }: { route: string }) {
     }
   }
 
+  // 反馈闭环(v3.1):乐观置 rated(随 localStorage 历史持久化),失败回滚 + 错误帧。
+  // rateBusyId 单飞防双击;服务端另有 UNIQUE 三元 upsert + dedupe 双保险。
+  const [rateBusyId, setRateBusyId] = useState<number | null>(null);
+  async function rate(frame: AgentFrame, verdict: FeedbackVerdict, note?: string) {
+    const traceId = String(frame.data.traceId || '');
+    if (!traceId || rateBusyId !== null) return;
+    setRateBusyId(frame.id);
+    const prior = frame.rated;
+    setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, rated: verdict } : f)));
+    try {
+      await api.feedback.submit({ traceId, verdict, note });
+    } catch (err) {
+      setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, rated: prior } : f)));
+      setFrames((prev) => [...prev, { id: ++frameSeq, event: 'error', data: { message: `反馈失败:${String(err)}` } }]);
+    } finally {
+      setRateBusyId(null);
+    }
+  }
+
   if (!open) {
     return (
       <button
@@ -267,80 +288,105 @@ export function FloatingAgent({ route }: { route: string }) {
         )}
         {frames
           .filter((f) => f.event !== 'start')
-          .map((f) => (
-            <div key={f.id} className={f.event === 'user' ? 'flex justify-end' : ''}>
-              {f.event === 'user' ? (
-                <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
-              ) : f.event === 'pending' ? (
-                <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-400">
-                  正在解析问题并查询…
-                </div>
-              ) : f.event === 'clarify' ? (
-                <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm">
-                  {String(f.data.question ?? '')}
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {((f.data.options || []) as Array<{ label: string }>).map((o, j: number) => (
-                      <button
-                        type="button"
-                        /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
-                        key={j}
-                        className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
-                        onClick={() => {
-                          setQ(`按${o.label}`);
-                        }}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
+          .map((f, fi, visible) => {
+            // 组尾判定(反馈按轮次):同 traceId 连续帧(场景包子帧)只在末帧出按钮;
+            // ask_all 分段各自 traceId,各段各评。traceId 缺失(error/clarify/旧历史帧)不渲染。
+            const traceId = String(f.data.traceId || '');
+            const isFeedbackTail =
+              Boolean(traceId) &&
+              (fi + 1 >= visible.length || !visible[fi + 1].data.traceId || visible[fi + 1].data.traceId !== traceId);
+            return (
+              <div key={f.id} className={f.event === 'user' ? 'flex justify-end' : ''}>
+                {f.event === 'user' ? (
+                  <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
+                ) : f.event === 'pending' ? (
+                  <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-400">
+                    正在解析问题并查询…
                   </div>
-                </div>
-              ) : f.event === 'result' ? (
-                <>
-                  <ResultCard data={f.data as ResultData} />
-                  {(f.data as ResultData).summary ? (
-                    <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                      <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
-                      {String((f.data as ResultData).summary ?? '')}
+                ) : f.event === 'clarify' ? (
+                  <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm">
+                    {String(f.data.question ?? '')}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {((f.data.options || []) as Array<{ label: string }>).map((o, j: number) => (
+                        <button
+                          type="button"
+                          /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
+                          key={j}
+                          className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
+                          onClick={() => {
+                            setQ(`按${o.label}`);
+                          }}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
                     </div>
-                  ) : null}
-                  {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
-                    <div className="mt-1.5 flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
-                        onClick={() => exportResultCsv(f.data as ResultData)}
-                      >
-                        导出 CSV
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
-                        title="钉到看板页定时重放刷新"
-                        onClick={() => pinToBoard(f.data as ResultData)}
-                      >
-                        📌 钉看板
-                      </button>
-                      <button
-                        type="button"
-                        disabled={f.saved}
-                        className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
-                        onClick={() => void saveToReport(f)}
-                      >
-                        {f.saved ? '已存入我的报告 ✓' : '存为报告'}
-                      </button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="rounded-xl border border-zinc-200 bg-white p-3 text-sm">
-                  {String(f.data.message ?? f.event)}
-                  {f.data.caliber ? (
-                    <div className="mt-1 text-[11px] text-zinc-400">口径:{String(f.data.caliber)}</div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          ))}
+                  </div>
+                ) : f.event === 'result' ? (
+                  <>
+                    <ResultCard data={f.data as ResultData} />
+                    {(f.data as ResultData).summary ? (
+                      <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                        <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
+                        {String((f.data as ResultData).summary ?? '')}
+                      </div>
+                    ) : null}
+                    {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
+                      <div className="mt-1.5 flex gap-2">
+                        <button
+                          type="button"
+                          className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
+                          onClick={() => exportResultCsv(f.data as ResultData)}
+                        >
+                          导出 CSV
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
+                          title="钉到看板页定时重放刷新"
+                          onClick={() => pinToBoard(f.data as ResultData)}
+                        >
+                          📌 钉看板
+                        </button>
+                        <button
+                          type="button"
+                          disabled={f.saved}
+                          className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
+                          onClick={() => void saveToReport(f)}
+                        >
+                          {f.saved ? '已存入我的报告 ✓' : '存为报告'}
+                        </button>
+                      </div>
+                    )}
+                    {/* 反馈行在动作行闸外:诚实空结果(rows=[])同样可评 */}
+                    {isFeedbackTail ? (
+                      <FeedbackButtons
+                        rated={f.rated}
+                        busy={rateBusyId === f.id}
+                        onSubmit={(verdict, note) => void rate(f, verdict, note)}
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-zinc-200 bg-white p-3 text-sm">
+                    {String(f.data.message ?? f.event)}
+                    {f.data.caliber ? (
+                      <div className="mt-1 text-[11px] text-zinc-400">口径:{String(f.data.caliber)}</div>
+                    ) : null}
+                    {/* unsupported 帧仅开放 👎:「这问题本该能答」是词林缺口的最高价值信号 */}
+                    {f.event === 'unsupported' && isFeedbackTail ? (
+                      <FeedbackButtons
+                        allowUp={false}
+                        rated={f.rated}
+                        busy={rateBusyId === f.id}
+                        onSubmit={(verdict, note) => void rate(f, verdict, note)}
+                      />
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         {busy && <div className="text-xs text-zinc-400">正在解析问题并查询…</div>}
       </div>
       <div className="flex shrink-0 gap-2 border-t border-zinc-100 p-3">

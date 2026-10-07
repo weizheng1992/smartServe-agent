@@ -112,7 +112,7 @@ async def ask(
     if _INJECTION_SHAPE_RE.search(question):
         await _log_unanswered(session_ctx, question)
         await trace.record("unsupported", final_method="injection_guard")
-        return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": "问句含注入形状,已拒绝处理"}
+        return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": "问句含注入形状,已拒绝处理"}, trace)
 
     try:
         # resolve 内含分类头同步 torch 推理(shadow/on 灰度期每次必打分,首次还
@@ -128,7 +128,7 @@ async def ask(
         except UnsupportedQuery as err:
             await _log_unanswered(session_ctx, question)
             await trace.record("unsupported", final_method="none")
-            return {"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": str(err)}
+            return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": str(err)}, trace)
         if isinstance(intent, Clarify):
             if intent.original_question is None:
                 intent = _dc_replace(intent, original_question=rewritten_q or question)  # 实体反问回问时带上有效问句
@@ -137,7 +137,10 @@ async def ask(
         # 兜底结果同样过角色闭集(防御纵深:resolver 替换/演化时不放行越权)
         if isinstance(intent, StructuredQueryIntent) and allowed and intent.metric not in allowed:
             await _log_unanswered(session_ctx, question)
-            return {"type": "unsupported", "message": "当前角色无权查看该指标", "detail": intent.metric}
+            # 2026-10-06 补账:此路此前只记 agent_unanswered 不落 trace,反馈闭环
+            # 上线后该帧可点 👎,无 trace 行则反馈回查 404(角色闸缺口,补齐)
+            await trace.record("unsupported", final_metric=intent.metric, final_method="role_blocked")
+            return _with_trace({"type": "unsupported", "message": "当前角色无权查看该指标", "detail": intent.metric}, trace)
     else:
         rewritten_q = None
 
@@ -191,16 +194,27 @@ async def ask(
                 original_question=effective_question,
             ).to_frame()
 
+    # 反馈闭环(v3.1):终局前把「最终意图」记进 trace 层 —— 此时 merge_into_intent/
+    # 行内 SPU 绑定/逐字消歧全部生效,是真正被执行的形态。analytics_feedback 的
+    # 👍 注册 exemplar 从这里取回意图,不依赖 Redis 会话(24h TTL、仅存末轮)。
+    # unsupported 各早退路(L115/L131/L140)在此层之前,不携带意图层 —— 那些帧
+    # 本就仅开放 👎(无需意图),与决策一致。
+    trace.add_layer("intent", metric=intent.metric, intent=intent.__dict__)
+
     if allowed is not None and intent.metric not in allowed:
         await trace.record("unsupported", final_metric=intent.metric)
-        return {
+        return _with_trace({
             "type": "unsupported",
             "message": "当前角色无权查看该指标(反问选项集已过滤,此处为直接问越权指标的兜底拒绝)。",
-        }
+        }, trace)
 
     # 场景包(L2 复合意图):一个意图 = 一组子查询,展开为多帧结果卡
     if intent.metric in _SCENARIO_PACKS:
         outcome = await _run_scenario(intent, session_ctx)
+        # traceId 逐子帧盖章:gateway _ask_frames 拆 multi 包时丢外层键,
+        # 盖 wrapper 上前端永远收不到;同包子帧共享一个 traceId(一轮一评)
+        for _sub in outcome.get("frames") or []:
+            _sub.setdefault("traceId", trace.trace_id)
         await trace.record(outcome.get("type", "error"), final_metric=intent.metric,
                            final_method="scenario", row_count=len(outcome.get("frames") or []))
         payload = {"last_question": effective_question, "intent": intent.__dict__}
@@ -220,12 +234,12 @@ async def ask(
         # (「勾选」)分流,另外四处可行动引导被吞成「该指标暂未开放」。
         message = err.hint if isinstance(err, EntityGateRequired) else "该指标暂未开放"
         await trace.record("unsupported", final_metric=intent.metric)
-        return {"type": "unsupported", "message": message, "detail": str(err)}
+        return _with_trace({"type": "unsupported", "message": message, "detail": str(err)}, trace)
     except Exception as err:
         await trace.record("error", final_metric=intent.metric)
-        return {"type": "error", "message": "查询执行失败(已如实报告,未生成估算数据)", "detail": str(err)}
+        return _with_trace({"type": "error", "message": "查询执行失败(已如实报告,未生成估算数据)", "detail": str(err)}, trace)
 
-    outcome = _result_frame(effective_question, result, intent, title_prefix)
+    outcome = _with_trace(_result_frame(effective_question, result, intent, title_prefix), trace)
     # 缓存命中是机器语义,读字段不解析展示串(口径注记的「缓存读」词面只给人看)
     cache_hit = result.from_cache
     await trace.record(
@@ -263,6 +277,14 @@ def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict
         "rows": result.rows,
         "cards": cards,
     }
+
+
+def _with_trace(frame: dict, trace: Trace) -> dict:
+    """终局帧盖 traceId 章(反馈闭环 v3.1 的回查键,analytics_feedback.trace_id
+    → analytics_trace 现成索引)。clarify 是交互中间态非终局,不盖;
+    ask_all 各段独立 ask(),自带各段 traceId。"""
+    frame.setdefault("traceId", trace.trace_id)
+    return frame
 
 
 # 场景包展开表(L2 复合意图,grill 设计定稿):键 = 场景意图,值 = 子指标序列;

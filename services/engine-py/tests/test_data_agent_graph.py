@@ -8,6 +8,7 @@ DB 执行分支由 golden/契约套件覆盖,此处 monkeypatch execute_async �
 from __future__ import annotations
 
 import asyncio
+import re
 
 import pytest
 
@@ -345,3 +346,37 @@ class TestScenarioPacks:
         failed = out["frames"][2]
         assert failed["type"] == "error" and "已如实报告" in failed["message"]
         assert all(f["type"] == "result" for i, f in enumerate(out["frames"]) if i != 2)
+
+
+class TestTraceIdStamping:
+    """终局帧 traceId 盖章(反馈闭环 v3.1,2026-10-06):result/unsupported/error
+    帧携带 tr_ 回查键,clarify 是交互中间态不盖 —— analytics_feedback 靠它
+    join analytics_trace(服务端出处,不信客户端自报问题)。"""
+
+    def test_result_frame_carries_trace_id(self, stub_execute):
+        out = asyncio.run(graph.ask("销售额最高的商品", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "result"
+        assert re.fullmatch(r"tr_[0-9a-f]{12}", out["traceId"])
+
+    def test_unsupported_frame_carries_trace_id(self):
+        out = asyncio.run(graph.ask("今天心情如何", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "unsupported"
+        assert re.fullmatch(r"tr_[0-9a-f]{12}", out["traceId"])
+
+    def test_clarify_frame_has_no_trace_id(self):
+        out = asyncio.run(graph.ask("卖得最好的商品", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "clarify"
+        assert "traceId" not in out
+
+    def test_scenario_subframes_share_one_trace_id(self, stub_execute, monkeypatch):
+        """场景包逐子帧盖章(网关 _ask_frames 拆包丢外层键,盖 wrapper 前端
+        永远收不到);同包子帧共享一个 traceId = 一轮一评。"""
+        async def _allow_all(business_id, role):
+            return None
+
+        monkeypatch.setattr("engine_py.analytics.rbac.allowed_metrics_for_role", _allow_all)
+        out = asyncio.run(graph.ask("经营概览", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "multi" and len(out["frames"]) >= 2
+        ids = {f.get("traceId") for f in out["frames"]}
+        assert len(ids) == 1
+        assert re.fullmatch(r"tr_[0-9a-f]{12}", ids.pop())

@@ -1417,3 +1417,245 @@ class TestSpuCompare:
         })
         events = dict(_sse_events(r))
         assert events["unsupported"]["message"].startswith("请在商品列表勾选至少两个商品")
+
+
+class TestFeedback:
+    """答案反馈闭环(v3.1,2026-10-06):终局帧 traceId 盖章 → POST feedback →
+    analytics_feedback 台账 upsert + 双扇出(👎 badcase_candidates thumbs_down /
+    👍 query_exemplars source='user')。改判补偿与幂等一并钉死。"""
+
+    @pytest.fixture()
+    def patch_llm(self, monkeypatch):
+        """替换 llm_resolve 返回预定意图(TestL3AndGrowth 同款,隔离 L3)。"""
+
+        def _patch(outcome):
+            async def _fake(question, allowed=None, business_id=""):
+                return outcome
+
+            monkeypatch.setattr("engine_py.analytics.llm_intent.llm_resolve", _fake)
+        return _patch
+
+    async def _ask(self, client, headers, question: str) -> dict:
+        r = await client.post("/api/admin/analytics/ask", headers=headers, json={"question": question})
+        assert r.status_code == 200
+        return dict(_sse_events(r))
+
+    async def _feedback(self, client, headers, trace_id: str, verdict: str, note: str | None = None):
+        body: dict = {"traceId": trace_id, "verdict": verdict}
+        if note is not None:
+            body["note"] = note
+        return await client.post("/api/admin/analytics/feedback", headers=headers, json=body)
+
+    async def _ledger_rows(self, trace_id: str) -> list:
+        from engine_py.db import AnalyticsFeedback, get_session
+        from sqlalchemy import select
+        async with get_session() as session:
+            return list((await session.execute(
+                select(AnalyticsFeedback).where(AnalyticsFeedback.trace_id == trace_id)
+            )).scalars())
+
+    async def _badcases(self, trace_id: str) -> list:
+        from engine_py.db import BadcaseCandidate, get_session
+        from sqlalchemy import select
+        async with get_session() as session:
+            return list((await session.execute(
+                select(BadcaseCandidate).where(BadcaseCandidate.conversation_ref == trace_id)
+            )).scalars())
+
+    async def _exemplar(self, exemplar_id: str):
+        from engine_py.db import QueryExemplar, get_session
+        from sqlalchemy import select
+        async with get_session() as session:
+            return (await session.execute(
+                select(QueryExemplar).where(QueryExemplar.id == exemplar_id)
+            )).scalar_one_or_none()
+
+    async def _clear_llm_exemplars(self):
+        """清掉 L3 自注册范例(测试确定性:👍 查重不被同问 llm 范例截胡)。"""
+        from engine_py.db import QueryExemplar, get_session
+        from sqlalchemy import delete
+        async with get_session() as session:
+            await session.execute(delete(QueryExemplar).where(QueryExemplar.source == "llm"))
+            await session.commit()
+
+    async def test_terminal_frames_carry_trace_id(self, client, auth, patch_embedding):
+        """result/unsupported 帧带 tr_ 章,clarify 是中间态不带(反馈闸按存在性守卫)。"""
+        import re
+
+        boss = await auth()
+        events = await self._ask(client, boss, "会话量多少")
+        terminal = events.get("result") or events.get("error")
+        assert terminal and re.fullmatch(r"tr_[0-9a-f]{12}", terminal["traceId"])
+
+        events2 = await self._ask(client, boss, "今天心情如何")
+        assert events2.get("unsupported") and re.fullmatch(r"tr_[0-9a-f]{12}", events2["unsupported"]["traceId"])
+
+        events3 = await self._ask(client, boss, "卖得最好的商品")
+        assert events3.get("clarify") and "traceId" not in events3["clarify"]
+
+    async def test_down_writes_ledger_and_badcase(self, client, auth, patch_embedding):
+        boss = await auth()
+        trace_id = (await self._ask(client, boss, "今天心情如何"))["unsupported"]["traceId"]
+        r = await self._feedback(client, boss, trace_id, "down", note="这个应该能答")
+        assert r.status_code == 200 and r.json()["success"] is True
+
+        rows = await self._ledger_rows(trace_id)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.verdict == "down" and row.note == "这个应该能答"
+        assert row.business_id == "aurora" and row.staff == "test@example.com"
+        assert row.question and row.trace_id == trace_id
+
+        cases = await self._badcases(trace_id)
+        assert len(cases) == 1
+        assert cases[0].signal_source == "thumbs_down" and cases[0].status == "candidate"
+        assert row.badcase_id == str(cases[0].id)
+
+    async def test_up_registers_user_exemplar(self, client, auth, patch_llm, patch_embedding):
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        question = f"E2E 反馈点赞注册范例 {uuid.uuid4().hex[:8]}"
+        boss = await auth()
+        patch_llm(StructuredQueryIntent(metric="gmv"))
+        result = (await self._ask(client, boss, question))["result"]
+        await self._clear_llm_exemplars()  # L3 自注册会让查重跳过,清掉测注册路径
+
+        r = await self._feedback(client, boss, result["traceId"], "up")
+        assert r.status_code == 200
+        exemplar_id = r.json()["exemplarId"]
+        assert exemplar_id
+        row = await self._exemplar(exemplar_id)
+        assert row.source == "user" and row.is_active is True
+
+        ledger = (await self._ledger_rows(result["traceId"]))[0]
+        assert ledger.exemplar_id == exemplar_id and ledger.metric == "gmv"
+
+    async def test_up_skips_when_similar_hit(self, client, auth, patch_llm, patch_embedding):
+        """L3 自注册的 llm 范例使同问 👍 查重命中 → 不注册;台账 exemplar_id
+        必须保持 None(撤判严禁错杀他人范例的凭据面)。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.db import QueryExemplar, get_session
+        from sqlalchemy import select
+
+        question = f"E2E 反馈查重跳过 {uuid.uuid4().hex[:8]}"
+        boss = await auth()
+        patch_llm(StructuredQueryIntent(metric="gmv"))
+        result = (await self._ask(client, boss, question))["result"]
+
+        r = await self._feedback(client, boss, result["traceId"], "up")
+        assert r.status_code == 200 and r.json()["exemplarId"] is None
+        async with get_session() as session:
+            users = list((await session.execute(
+                select(QueryExemplar).where(
+                    QueryExemplar.source == "user", QueryExemplar.question == question)
+            )).scalars())
+        assert users == []
+
+    async def test_revote_up_to_down_compensates(self, client, auth, patch_llm, patch_embedding):
+        """👍→👎:撤 user 范例(is_active=False)+ 落坏例;台账单行 last wins。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        question = f"E2E 反馈改判撤范例 {uuid.uuid4().hex[:8]}"
+        boss = await auth()
+        patch_llm(StructuredQueryIntent(metric="gmv"))
+        result = (await self._ask(client, boss, question))["result"]
+        await self._clear_llm_exemplars()
+
+        up = await self._feedback(client, boss, result["traceId"], "up")
+        exemplar_id = up.json()["exemplarId"]
+        assert exemplar_id and (await self._exemplar(exemplar_id)).is_active is True
+
+        down = await self._feedback(client, boss, result["traceId"], "down", note="其实答错了")
+        assert down.status_code == 200 and down.json()["reversedFrom"] == "up"
+        assert (await self._exemplar(exemplar_id)).is_active is False
+
+        cases = await self._badcases(result["traceId"])
+        assert len(cases) == 1 and cases[0].status == "candidate"
+        ledger = (await self._ledger_rows(result["traceId"]))
+        assert len(ledger) == 1 and ledger[0].verdict == "down"
+
+    async def test_revote_down_to_up_dismisses_and_registers(self, client, auth, patch_llm, patch_embedding):
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        question = f"E2E 反馈改判撤销坏例 {uuid.uuid4().hex[:8]}"
+        boss = await auth()
+        patch_llm(StructuredQueryIntent(metric="gmv"))
+        result = (await self._ask(client, boss, question))["result"]
+        await self._clear_llm_exemplars()
+
+        down = await self._feedback(client, boss, result["traceId"], "down")
+        badcase_id = down.json()["badcaseId"]
+        assert badcase_id
+
+        up = await self._feedback(client, boss, result["traceId"], "up")
+        assert up.status_code == 200 and up.json()["reversedFrom"] == "down"
+        cases = await self._badcases(result["traceId"])
+        assert len(cases) == 1 and cases[0].status == "dismissed"
+        assert (await self._exemplar(up.json()["exemplarId"])).source == "user"
+
+    async def test_llm_sourced_exemplar_never_touched(self, client, auth, patch_llm, patch_embedding):
+        """source 双保险:台账被脏写上 llm 范例 id 时,改判撤销也绝不动它。"""
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        question = f"E2E 反馈 llm 范例豁免 {uuid.uuid4().hex[:8]}"
+        boss = await auth()
+        patch_llm(StructuredQueryIntent(metric="gmv"))
+        result = (await self._ask(client, boss, question))["result"]
+
+        # L3 自注册的 llm 范例 = 该问;脏写台账 exemplar_id 模拟越权归因
+        from engine_py.db import QueryExemplar, get_session
+        from sqlalchemy import select
+        async with get_session() as session:
+            llm_row = (await session.execute(
+                select(QueryExemplar).where(QueryExemplar.source == "llm")
+            )).scalars().first()
+        assert llm_row is not None
+
+        from engine_py.db import AnalyticsFeedback, get_session
+        from sqlalchemy import update
+        await self._feedback(client, boss, result["traceId"], "up")  # 先建台账行再脏写
+        async with get_session() as session:
+            await session.execute(
+                update(AnalyticsFeedback)
+                .where(AnalyticsFeedback.trace_id == result["traceId"])
+                .values(exemplar_id=str(llm_row.id))
+            )
+            await session.commit()
+
+        r = await self._feedback(client, boss, result["traceId"], "down")
+        assert r.status_code == 200
+        assert (await self._exemplar(str(llm_row.id))).is_active is True
+        cases = await self._badcases(result["traceId"])
+        assert len(cases) == 1 and cases[0].status == "candidate"
+
+    async def test_unknown_trace_404(self, client, auth):
+        boss = await auth()
+        r = await self._feedback(client, boss, "tr_000000000000", "up")
+        assert r.status_code == 404 and r.json()["success"] is False
+
+    async def test_invalid_verdict_400(self, client, auth):
+        boss = await auth()
+        r = await self._feedback(client, boss, "tr_000000000000", "meh")
+        assert r.status_code == 400
+
+    async def test_missing_trace_id_400(self, client, auth):
+        boss = await auth()
+        r = await client.post("/api/admin/analytics/feedback", headers=boss, json={"verdict": "up"})
+        assert r.status_code == 400
+
+    async def test_feedback_requires_auth_401(self, client):
+        r = await client.post(
+            "/api/admin/analytics/feedback", headers=TENANT,
+            json={"traceId": "tr_000000000000", "verdict": "up"},
+        )
+        assert r.status_code == 401
+
+    async def test_double_down_idempotent(self, client, auth, patch_embedding):
+        """双击幂等:同 verdict 重复提交 → 台账单行;dedupe 使坏例只入池一次。"""
+        boss = await auth()
+        trace_id = (await self._ask(client, boss, "今天心情如何"))["unsupported"]["traceId"]
+        first = await self._feedback(client, boss, trace_id, "down")
+        second = await self._feedback(client, boss, trace_id, "down")
+        assert first.status_code == 200 and second.status_code == 200
+        assert len(await self._ledger_rows(trace_id)) == 1
+        assert len(await self._badcases(trace_id)) == 1

@@ -21,6 +21,7 @@ paths: ["apps/merchant-admin/**/*"]
 - `pageContext = {route, selection, selectionLabels, sessionId}`;`sessionId` 浏览器侧稳定(localStorage `merchant-admin.session`),服务端 Redis 会话存储按此键维护多轮上下文。
 - localStorage 键位约定:`merchant-admin.token`(JWT)/ `.staff`(当前员工 email)/ `.boss`(老板凭证留底)/ `.agent.history`(对话帧,上限 60)/ `.board`(钉看板 pin,上限 20)/ `.session`(agent 会话 id)。
 - 事件面板:`user`/`pending`/`result`/`clarify`/`unsupported`/`error`;result 帧 = `ResultCard` + `summary` 速览 + 导出 CSV(BOM 头防 Excel 中文乱码)+ 📌 钉看板 + 存为报告(`reports/from-result` 服务端持久化,`saved` 标记防重复)。
+- 答案反馈(反馈闭环 v3.1,2026-10-06):终局帧带 `traceId`(引擎盖章),**同 traceId 连续帧只在组尾**渲染共享组件 `FeedbackButtons`(result 双按钮;unsupported 仅 👎;error/clarify 不渲染);👎 先展开可选备注再提交;`rated` 标记随 `.agent.history` localStorage 持久化(闩锁,失败回滚 + 错误帧);`/analytics` 全屏页 `ask-transcript.tsx` 同款镜像(rated 随会话内存);看板/报告回放页刻意不评(回放生成新 askId,反馈语义不成立)。
 - 就地唤起:任意页面 `window.dispatchEvent(new CustomEvent('merchant-admin:open-agent', {detail: {question}}))` 开面板并自动提问,不跳页。
 
 ### 1.3 page-context 选择上行(T5 契约)
@@ -56,5 +57,5 @@ paths: ["apps/merchant-admin/**/*"]
 1. **数据操作收口 `lib/api.ts`**:页面只做编排,一切后端调用经 `api` 域对象(`menus`/`roles`/`staff`/`menuAdmin`/`customers`/`reports`/`products`/`promotions`/`ask`);新增后端接口同批在此加方法与 TS 类型,严禁页面裸 fetch。
 2. **SSE 帧解析只经 `lib/sse.ts`**(`parseSseFrames` 全量 / `createFrameParser` 增量),与网关 `_sse()` 帧格式一一对应;坏 JSON 跳帧不中断流。
 3. **RBAC 前端只做可见性**:菜单树由服务端下发,权限判定真源在服务端 `permCode`;严禁在前端复制权限表。
-4. **测试**:`cd apps/merchant-admin && bun run test`(vitest,92 例/22 文件,与被测文件同目录就近放置;`src/test/live-api.ts` 可起 live 网关做集成);Playwright E2E `e2e/merchant-admin.config.ts`(testDir `apps/merchant-admin/e2e`,复用运行中的 3006 前端 + 4000 网关;dev 种子账号 `test@example.com` 老板 / `ops@aurora` 运营 / `wh@aurora` 仓储,密码统一 `agent-all-dev`)。
+4. **测试**:`cd apps/merchant-admin && bun run test`(vitest,162 例/30 文件,与被测文件同目录就近放置;`src/test/live-api.ts` 可起 live 网关做集成);Playwright E2E `e2e/merchant-admin.config.ts`(testDir `apps/merchant-admin/e2e`,复用运行中的 3006 前端 + 4000 网关;dev 种子账号 `test@example.com` 老板 / `ops@aurora` 运营 / `wh@aurora` 仓储,密码统一 `agent-all-dev`)。
 5. **中文界面 + workspace 包 `ui` 原子组件 + Tailwind**:与 web/admin 同一零依赖 UI 不变量,严禁引入重型外部组件框架。

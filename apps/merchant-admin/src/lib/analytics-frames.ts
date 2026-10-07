@@ -36,6 +36,9 @@ export interface AskFrameData {
   // unsupported / error 帧
   message?: string;
   detail?: string;
+  // 终局帧反馈回查键(反馈闭环 v3.1):result/unsupported/error 由引擎
+  // _with_trace 盖章(tr_<hex12>),clarify 中间态不带;POST feedback 原样回传
+  traceId?: string;
   // start 帧
   staff?: string;
   role?: string;

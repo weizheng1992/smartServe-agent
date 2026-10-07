@@ -38,8 +38,9 @@ paths: ["services/engine-py/src/engine_py/db/**/*", "services/engine-py/alembic/
    - `llm_call_logs`：逐调用 LLM 计量;`agent_jobs`：Temporal/本地作业。
    - `eval_runs`/`eval_results`/`eval_run_records`：promptfoo 真实入库。
 9. **Data Agent 与 RBAC（2026-09-19 v4）**：
-   - `analytics_trace`：每次问答逐层留痕（`trace_id = tr_<hex12>`,L0/L2/L3/会话/场景包各层）。
+   - `analytics_trace`：每次问答逐层留痕（`trace_id = tr_<hex12>`,L0/L2/L3/会话/场景包/intent 各层）。
    - `analytics_reports`：我的报告服务端持久化（from-result 落库 + CSV 导出）。
+   - `analytics_feedback`（0018,反馈闭环 v3.1）：答案反馈台账,一次 trace × 一员工一行（UNIQUE `business_id+trace_id+staff` upsert,last verdict wins）;badcase_id/exemplar_id 是改判补偿凭据,question/metric/layers_json 为反馈时点快照（统计不依赖 trace 表未来清理）。行动结果在 `badcase_candidates`/`query_exemplars` 两池,与本表严禁混算。
    - `query_exemplars`/`intent_exemplars`：L2 范例回放语料。
    - `agent_unanswered`：意图全层未命中池(覆盖增长闭环)。
    - `menus`/`role_menus`/`staff_members`：RBAC 菜单树/角色-菜单分配/员工(商户侧,与 `engine_py/analytics/rbac.py` 配套)。
