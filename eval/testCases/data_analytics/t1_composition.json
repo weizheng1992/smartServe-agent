@@ -7,7 +7,12 @@
    "expectedMetric": "gmv",
    "expectedDimension": "category"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 客户维度×销售额",
@@ -17,7 +22,12 @@
    "expectedMetric": "gmv",
    "expectedDimension": "customer"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 品类×销量",
@@ -27,7 +37,12 @@
    "expectedMetric": "volume",
    "expectedDimension": "category"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 订单状态分布(枚举维度,无 join)",
@@ -37,7 +52,12 @@
    "expectedMetric": "order_count",
    "expectedDimension": "order_status"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 时间平移算子(品类销售额环比)",
@@ -48,7 +68,12 @@
    "expectedDimension": "category",
    "expectedComparePrevious": true
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 无维度总量(客单价)",
@@ -57,7 +82,12 @@
    "input": "客单价现在是多少",
    "expectedMetric": "aov"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 商品维度×退款率",
@@ -67,7 +97,12 @@
    "expectedMetric": "refund_rate",
    "expectedDimension": "spu"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 品类过滤槽(上个月衬衫)",
@@ -78,7 +113,12 @@
    "expectedCategory": "衬衫",
    "expectedTimeKind": "last_month"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 时间窗槽位(近30天×品类)",
@@ -89,7 +129,12 @@
    "expectedDimension": "category",
    "expectedTimeKind": "last_30d"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 闭集外问题响亮拒绝(非数据问题)",
@@ -98,7 +143,12 @@
    "input": "公司现在有多少名员工",
    "expectRejected": true
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 目录外维度拒绝(区域维度未建模)",
@@ -107,17 +157,33 @@
    "input": "华南区的销售情况怎么样",
    "expectRejected": true
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 角色闭集拒绝(毛利不在 allowed)",
   "vars": {
    "channel": "t1",
    "input": "哪个商品毛利最高",
-   "allowed": ["gmv", "volume", "order_count", "aov", "refund_rate"],
+   "allowed": [
+    "gmv",
+    "volume",
+    "order_count",
+    "aov",
+    "refund_rate"
+   ],
    "expectRejected": true
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 商品维度×销量(实体维度标签列)",
@@ -127,7 +193,12 @@
    "expectedMetric": "volume",
    "expectedDimension": "spu"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  },
  {
   "description": "T1 组合 - 退款率总量(无维度)",
@@ -136,6 +207,26 @@
    "input": "现在的退款率是多少",
    "expectedMetric": "refund_rate"
   },
-  "assert": [{"type": "python", "value": "file://scorers/t1t2_channels.py:get_assert"}]
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T1 组合 - 品牌开放列维度×净销售额",
+  "vars": {
+   "channel": "t1",
+   "input": "各品牌的净销售额对比",
+   "expectedMetric": "net_sales",
+   "expectedDimension": "brand"
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
  }
 ]

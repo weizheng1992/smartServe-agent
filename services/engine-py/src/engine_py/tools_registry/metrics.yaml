@@ -1291,3 +1291,39 @@ spu_compare:
   - 这两款哪个卖得好
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
+net_sales:
+  key: net_sales
+  label: 净销售额 (实收)
+  description: 统计周期内有效订单的消费者实付净额,即 SUM(total_amount);与 GMV(商品定价流水口径 SUM(quantity*price))相对,已扣优惠抵扣。退款单(CANCELLED/REFUNDED)不计入。
+  domain: sales
+  sourceTables:
+  - merchant_orders
+  expression: COALESCE(SUM(o.total_amount), 0)::float
+  compile:
+    shape: total_single
+    base: merchant_orders
+    measure: "COALESCE(SUM(o.total_amount), 0)::float"
+    where: ["o.status NOT IN ('REFUNDED', 'CANCELLED')"]
+    time_column: o.created_at
+    limit_mode: one
+  businessRules:
+  - 有效成交口径(排除退款/取消);实付 = total_amount(已扣优惠)
+  - 与 GMV 的差 = 优惠抵扣 + 定价与实付的价差;两口径并列看毛利分析才有意义
+  direction: DESC
+  unit: 元
+  icon: 💵
+  aliases:
+  - net_revenue
+  - actual_revenue
+  synonyms:
+  - 净销售额
+  - 净收入
+  - 实收
+  - 实收金额
+  - 实际卖了多少
+  conflictGroup: []
+  sampleQueries:
+  - 本月净销售额多少
+  - 上个月的实收金额
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95

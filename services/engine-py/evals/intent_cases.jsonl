@@ -567,3 +567,6 @@
 {"question": "节假日和平日的出货差异", "expect_unsupported": true, "source": "t2_longtail"}
 {"question": "按支付方式统计订单", "expect_unsupported": true, "source": "t2_longtail"}
 {"question": "坏账和退款的关系", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "净销售额多少", "expect_metric": "net_sales", "source": "slot_generated"}
+{"question": "上个月净销售额", "expect_metric": "net_sales", "expect_time": "last_month", "source": "slot_generated"}
+{"question": "实收金额top3", "expect_metric": "net_sales", "source": "slot_generated"}

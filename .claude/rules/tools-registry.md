@@ -34,7 +34,7 @@ paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/engine
 
 ### 1.4 指标语义注册表 (`tools_registry/metric_registry.py` + `metrics.yaml`,2026-09-25 校对)
 
-- **闭集事实源 = `metrics.yaml` + `semantic_model.yaml`（ADR-0010,2026-10-07）**：metrics.yaml **38 指标 × 8 域**（label/description/expression/businessRules/unit/aliases/synonyms/`permissionTag`/sampleQueries/`compile` 编译声明;`sqlTemplate`/`availableDimensions` 死字段已删除）。semantic_model.yaml 为**表关联/维度/口径债务单一事实源**（12 实体/9 join/5 维度/13 债务条目）。两者加载即校验（`metric_registry.py`/`semantic_model.py`,缺键/悬空引用/别名冲突一律 raise 响亮失败），经 `tools_registry_bridge` 双消费。
+- **闭集事实源 = `metrics.yaml` + `semantic_model.yaml`（ADR-0010,2026-10-07）**：metrics.yaml **39 指标 × 8 域**（label/description/expression/businessRules/unit/aliases/synonyms/`permissionTag`/sampleQueries/`compile` 编译声明;`sqlTemplate`/`availableDimensions` 死字段已删除）。semantic_model.yaml 为**表关联/维度/口径债务单一事实源**（12 实体/9 join/5 维度/13 债务条目）。两者加载即校验（`metric_registry.py`/`semantic_model.py`,缺键/悬空引用/别名冲突一律 raise 响亮失败），经 `tools_registry_bridge` 双消费。
 - **消费方**：Data Agent 分析管线经 `analytics/tools_registry_bridge.py`（防 tools_registry ↔ analytics 循环导入的桥）读取；意图解析在 `analytics/engine.py::MetricQueryEngine.resolve`（L0 词表 → 缝②小模型 → L2 范例 → L3 LLM 分层，详见 agent-engine.md §1.9）；SQL 由 `semantic_compiler` 声明编译（形状闭集 + bindparams;23 规整族）或 `_compile_bespoke_family` 手写模板（13 债务族）渲染，经 `analytics/sql_guard.py` AST 审计后执行;T1 组合/T2 探索通道见 agent-engine.md §1.9。
 - **评测联动**：与 promptfoo 指标消歧评测（`eval/scorers/metric_disambiguation.py`）共用同一词表。
 

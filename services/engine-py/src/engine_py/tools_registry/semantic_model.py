@@ -21,7 +21,7 @@ _YAML_PATH = Path(__file__).resolve().parent / "semantic_model.yaml"
 
 _ALLOWED_DATABASES = ("merchant_db", "engine_db")
 _ALLOWED_JOIN_TYPES = ("left", "inner")
-_ALLOWED_DIMENSION_KINDS = ("enum", "entity")
+_ALLOWED_DIMENSION_KINDS = ("enum", "entity", "column")
 
 
 def _load() -> dict[str, Any]:
@@ -83,6 +83,10 @@ def _load() -> dict[str, Any]:
         if dim["kind"] == "enum":
             if not dim.get("column") or not dim.get("values"):
                 raise ValueError(f"semantic_model.yaml: 枚举维度 {dname!r} 缺 column 或 values")
+        elif dim["kind"] == "column":
+            # 开放字串维度(如 brand):无闭集取值声明,过滤/枚举不进 T1 目录
+            if not dim.get("column"):
+                raise ValueError(f"semantic_model.yaml: 列维度 {dname!r} 缺 column")
         elif not dim.get("id_column") or not dim.get("label_column"):
             raise ValueError(f"semantic_model.yaml: 实体维度 {dname!r} 缺 id_column/label_column")
 

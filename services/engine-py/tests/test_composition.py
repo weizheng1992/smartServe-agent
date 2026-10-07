@@ -144,6 +144,17 @@ class TestCompositionCompile:
         assert "LIMIT 1" in compiled.sql
         assert compiled.params["cat"] == "衬衫"
 
+    def test_brand_column_dimension(self):
+        """品牌 = 开放列维度(kind=column,无闭集取值);T1 组合即得「按品牌」。"""
+        comp = CompositionQuery(metric="gmv", dimension="brand")
+        compiled = compile_composition(comp, "aurora")
+        assert 'GROUP BY s.brand ORDER BY "metricScore" DESC LIMIT :lim' in compiled.sql
+
+    def test_net_sales_composable(self):
+        comp = CompositionQuery(metric="net_sales", dimension="category")
+        compiled = compile_composition(comp, "aurora")
+        assert "SUM(o.total_amount)" in compiled.sql
+
     def test_unknown_metric_at_compile_is_loud(self):
         comp = CompositionQuery(metric="review_bad", dimension="category")  # 不可组合指标
         with pytest.raises(Exception, match="未开放语义层组合"):

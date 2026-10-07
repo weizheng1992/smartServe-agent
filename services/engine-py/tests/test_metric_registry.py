@@ -19,7 +19,7 @@ from engine_py.tools_registry.metric_registry import (
 )
 
 _EXPECTED_DOMAINS = {
-    "sales": 13,
+    "sales": 14,
     "customer": 7,
     "promotion": 6,
     "inventory": 3,
@@ -29,12 +29,12 @@ _EXPECTED_DOMAINS = {
     "session": 2,
 }
 
-_EXPECTED_TAGS = {"sales_viewer": 33, "warehouse_operator": 3, "finance_owner": 2}
+_EXPECTED_TAGS = {"sales_viewer": 34, "warehouse_operator": 3, "finance_owner": 2}
 
 
 class TestRegistrySnapshot:
     def test_metric_closed_set(self):
-        assert len(METRIC_SEMANTIC_REGISTRY) == 38, "闭集增删必须显式更新快照与规则文档"
+        assert len(METRIC_SEMANTIC_REGISTRY) == 39, "闭集增删必须显式更新快照与规则文档"
 
     def test_domain_distribution_pinned(self):
         counts: dict[str, int] = {}

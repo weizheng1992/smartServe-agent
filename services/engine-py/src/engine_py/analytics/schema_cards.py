@@ -11,7 +11,7 @@ from typing import Any
 # 商户镜像库分析面(列裁剪:只暴露分析需要的列,token 成本 08-D2 实测 ≈1.5k)
 _MERCHANT_TABLES: dict[str, dict[str, Any]] = {
     "merchant_spus": {
-        "columns": {"id": "uuid 主键", "spu_code": "商品编码", "title": "商品标题", "category": "品类", "status": "ON_SALE/OFF_SALE"},
+        "columns": {"id": "uuid 主键", "spu_code": "商品编码", "title": "商品标题", "category": "品类", "brand": "品牌", "status": "ON_SALE/OFF_SALE"},
         "notes": "在售过滤 status='ON_SALE'",
     },
     "merchant_skus": {

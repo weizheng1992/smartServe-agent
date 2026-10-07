@@ -14,6 +14,7 @@ entities:
       spu_code: 商品编码(明细表关联键)
       title: 商品标题
       category: 品类
+      brand: 品牌
       status: "ON_SALE/OFF_SALE"
     notes: 在售过滤 status='ON_SALE'
   merchant_skus:
@@ -193,6 +194,11 @@ dimensions:
     entity: merchant_orders
     column: status
     values: [PAID, SHIPPED, DELIVERED, REFUNDED, CANCELLED]
+  brand:
+    label: 品牌
+    kind: column
+    entity: merchant_spus
+    column: brand
   spu:
     label: 商品
     kind: entity

@@ -201,6 +201,7 @@ def _measure_expr(metric: str) -> str:
     """认证指标 → 组合面度量表达式(声明式,新指标登记即组合可用)。"""
     return {
         "gmv": "COALESCE(SUM(oi.quantity * oi.price), 0)",
+        "net_sales": "COALESCE(SUM(o.total_amount), 0)",
         "volume": "COALESCE(SUM(oi.quantity), 0)",
         "order_count": "COUNT(DISTINCT o.order_id)",
         "aov": "COALESCE(SUM(oi.quantity * oi.price), 0) / GREATEST(COUNT(DISTINCT o.order_id), 1)",
@@ -212,7 +213,7 @@ def _measure_expr(metric: str) -> str:
 
 
 # 可组合指标闭集(度量表达式已声明;未声明 = 组合目录外,响亮拒绝)
-COMPOSABLE_METRICS = frozenset({"gmv", "volume", "order_count", "aov", "refund_rate"})
+COMPOSABLE_METRICS = frozenset({"gmv", "net_sales", "volume", "order_count", "aov", "refund_rate"})
 
 _ITEMS_JOIN = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
 _VALID_STATUS = "o.status NOT IN ('REFUNDED', 'CANCELLED')"
@@ -243,7 +244,7 @@ def _base_join(metric: str, dim: dict, entity_kind: str | None, entity_ids: list
 def _dim_expr(dim_key: str, dim: dict) -> str:
     alias_by_entity = {"merchant_spus": "s", "merchant_customers": "c", "promotions": "p", "merchant_orders": "o"}
     alias = alias_by_entity[dim["entity"]]
-    if dim["kind"] == "enum":
+    if dim["kind"] in ("enum", "column"):
         return f"{alias}.{dim['column']}"
     return f"{alias}.{dim.get('label_column') or dim['id_column']}"
 

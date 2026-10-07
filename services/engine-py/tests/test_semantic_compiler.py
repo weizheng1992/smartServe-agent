@@ -144,11 +144,18 @@ class TestSweptFamilyShapes:
         assert compiled.params["business_id"] == "aurora"
         assert "business_id" in compiled.sql
 
-    @pytest.mark.parametrize("metric", ("aov", "order_count"))
+    @pytest.mark.parametrize("metric", ("aov", "order_count", "net_sales"))
     def test_single_row_literal_limit(self, engine, metric):
         compiled = engine.compile(StructuredQueryIntent(metric=metric))
         assert "LIMIT 1" in compiled.sql
         assert "lim" not in compiled.params
+
+    def test_net_sales_caliber(self, engine):
+        """净销售额 = 实付净额(有效成交 SUM(total_amount)),与 GMV 流水口径分家。"""
+        compiled = engine.compile(StructuredQueryIntent(metric="net_sales"))
+        assert "SUM(o.total_amount)" in compiled.sql
+        assert "NOT IN ('REFUNDED', 'CANCELLED')" in compiled.sql
+        assert compiled.unit == "元"
 
     def test_trend_day_and_month_granularity(self, engine):
         day = engine.compile(StructuredQueryIntent(metric="gmv_trend"))

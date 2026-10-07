@@ -20,6 +20,7 @@ labels = [
   "stock_value", "customer_spend_trend", "attribution_refund", "attribution_sales",
   "spu_compare",
   "unsupported",   # 闭集外 → 放行 L3 LLM 兜底,不许静默错分
+  "net_sales",
 ]
 
 [data]
