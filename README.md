@@ -2,10 +2,11 @@
 
 [![CI](https://github.com/weizheng1992/smartServe-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/weizheng1992/smartServe-agent/actions/workflows/ci.yml)
 
-smartServe-agent 是基于 **Turborepo Monorepo**、**Python FastAPI 网关** 与 **LangGraph 双决策图** 构建的生产级多租户智能体平台。v4 在智能客服 Agent 之上新增**商户数据分析 Agent**（LLM 永不写 SQL 的语义层路线），并交付**优惠营销资金链**（建券→展示→领券→下单核销→统计对账）、**双端真实登录**、**RBAC 权限体系**与**小模型训练影子接入**全链路。
+smartServe-agent 是基于 **Turborepo Monorepo**、**Python FastAPI 网关** 与 **LangGraph 双决策图** 构建的生产级多租户智能体平台。v4 在智能客服 Agent 之上新增**商户数据分析 Agent**（语义层分层信任路线:T0 核验/T1 组合/T2 探索三通道,LLM 永不在无守卫、无标注的情况下产 SQL），并交付**优惠营销资金链**（建券→展示→领券→下单核销→统计对账）、**双端真实登录**、**RBAC 权限体系**与**小模型训练影子接入**全链路。
 
 > 💡 **版本演进**：
 >
+> - **v4.1 分层信任架构（2026-10-07，[ADR-0010](docs/adr/0010-tiered-trust-architecture.md)/[ADR-0011](docs/adr/0011-attribution-phase-b-boundary.md) 落地）**：data agent 升级**分层信任梯度**——语义层单一事实源（`semantic_model.yaml` 12 实体/9 join/8 维度 + `semantic_compiler` 声明编译器,23 规整族迁声明编译、13 bespoke 族债务清单逃生舱）；**T1 组合通道**（LLM 产组合、编译器拼 SQL,维度拆分语感直通,时间平移算子）与 **T2 探索通道**（LLM 接地生成 SQL 过守卫链强制审计）先后开闸,结果卡三档信任章（核验/组合/探索）；**归因卡**（本期 vs 上期贡献度分解 + 退款率对照列 + AI 推断叙事隔离章,数字可溯源硬校验）；闭集 39 指标（新增净销售额）+ 品牌/区域/城市维度。
 > - **v4 双 Agent 平台（2026-09-19，wayfinder「商城/商户 data agent 双模块重构」收官）**：新增商户**数据分析 Agent**（14 指标语义注册表，LLM 只解析意图、永不写 SQL；sqlglot 四层安全闸；折线图/表格卡）；**优惠营销资金链**端到端（后台建三类活动→商城促销价/领券→下单自动算优惠+核销→客服对话可问→data agent 统计）；**`apps/merchant-admin` 独立商户后台**（真实登录+注册、RBAC 菜单/角色/员工三件套、六页全 CRUD、报告导出）；**小模型训练影子接入**（词表弱标注 590 句 → bge+线性头 heldout 98.9%，三态环境变量灰度）。详见 [ADR-0004](docs/adr/0004-semantic-layer-route-and-dual-agent-seam.md) 与 [训练文档](docs/training/metric-head-training.md)。
 > - **v3.2 页面组件化（2026-09-19）**：merchant-admin 按菜单域文件夹全页面拆分（六 tab 工作台 1937 行 → 容器 855 行 + 五组件 + WorkbenchContext），Workbench 六 tab 门控修复（一次只渲染当前域）。
 > - **v3.1 运营真实化（2026-09-07）**：真实登录（bcrypt+JWT）、限流、LLM 熔断/退避、评测真实入库。
@@ -41,13 +42,14 @@ smartServe-agent 是基于 **Turborepo Monorepo**、**Python FastAPI 网关** �
 │                                                                         │
 │   intake(PageContext 选中实体)                                          │
 │     → resolve: L0 词表归一 → 分类头(小模型缝②) → LLM 兜底反问           │
-│     → compile: 指标模板闭集 + bindparams(业务口径烧在模板里)            │
+│     → compile: 语义模型声明编译(23 规整族) + 13 债务族手写模板          │
 │     → execute: 只读 reader 引擎(READ ONLY + 3s 超时 + SAVEPOINT)        │
-│     → 卡片: 表格/折线图(SVG) + 口径注记                                 │
+│     → 卡片: 表格/折线图(SVG) + 口径注记 + 三档信任章                     │
 │                                                                         │
-│   37 指标 × 8 域: 销售13/客户7/活动5/库存3/评价3/退款2/利润2/会话2     │
+│   39 指标 × 8 域 + 语义模型(12 实体/9 join/8 维度)                      │
 │   意图分层: L0 词表 → 小模型分类头 → L2 范例回放 → L3 LLM/SFT 兜底     │
-│   全层未命中 → 响亮失败落 agent_unanswered(覆盖增长闭环,不编造答案)    │
+│   全层未命中 → T1 组合(语感直通/LLM) → T2 探索(守卫链) → 响亮失败      │
+│   落 agent_unanswered(覆盖增长闭环,不编造答案);归因卡(贡献度分解)     │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │ (与商城客服 Agent 共享: 会话/推送/卡片约定)
                                ▼
@@ -191,8 +193,8 @@ sft_dataset(词面 × 时间窗 × 品类 × limit 程序化组合, 4478 条, �
 
 | 套件 | 数量 | 覆盖 |
 |---|---|---|
-| engine pytest | **942** | 意图仲裁/视觉消歧/记忆/优惠引擎/golden SQL/兜底分发器/ RBAC/报告/数据水龙头/训练流水线/data agent 管线 |
-| gateway pytest | **216** | HTTP/SSE/socket.io 契约 + AST 沙箱 + analytics 路由 39 条 71 例(ask SSE/RBAC/报告/核销幂等) |
+| engine pytest | **1571** | 意图仲裁/视觉消歧/记忆/优惠引擎/golden SQL/兜底分发器/ RBAC/报告/数据水龙头/训练流水线/data agent 管线 |
+| gateway pytest | **375+3skip** | HTTP/SSE/socket.io 契约 + analytics 路由 40 条 84 例(ask SSE/RBAC/报告/核销幂等) |
 | merchant-admin E2E | **11** | 登录门卫/RBAC 菜单/六胶囊真答/悬浮 agent/报告/优惠 CRUD |
 | merchant-admin vitest | **92** | ResultCard 渲染/FloatingAgent/菜单树/SKU 库存/客户抽屉/活动范围/page-context |
 | promptfoo | 就绪 | 意图分类/多意图(含 promotion_query 6 例)/数据 Mapping 8 例 — 分类器用例需模型代理在线 |

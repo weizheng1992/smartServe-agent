@@ -4,6 +4,31 @@
 
 ---
 
+## [2.7.0] - 2026-10-07 (data agent 分层信任架构:语义层 + T0/T1/T2 三通道 + 归因卡,ADR-0010/0011)
+
+课件对照(语义层/指标中台方法论)与两轮「从零推演」裁决:data agent 从「闭集模板管线」升级为**分层信任梯度**——语义层为地基,LLM 自由度随信任分级递增,逐层盖章。铁律字面废除、精神保留:「LLM 永不在无守卫、无标注的情况下产 SQL」(ADR-0004/0005 部分取代,论证链保留)。
+
+### ✨ Features
+
+- **语义层单一事实源**(ADR-0010):`tools_registry/semantic_model.yaml`(12 实体/9 join/8 维度含 brand 开放列维度与 region/city 表达式维度/13 bespoke 债务条目)+ `semantic_model.py` 加载即校验(悬空引用/别名冲突/单冒号禁入——`(?:` 的冒号会被 SQLAlchemy text() 吞成绑定参数,实弹);`semantic_compiler.py` 声明编译器,形状闭集 spu_rank/dim_rank/total_single/trend,23 规整族自手写模板迁声明编译(销售族 5 指标 × 7 意图变体字节级差分对拍后才切,6 族字节差分 + 9 族行为差分),legacy 模板体拆除;差分捕获 legacy 潜伏执行 bug(after_sale_overview 的 :business_id 参数从未注入)。`metrics.yaml` 死字段 sqlTemplate/availableDimensions ×38 与 expression/aliases/sourceTables 三死字段退役(后者并行架构评审收口),闭集 38→39(新增 net_sales 净销售额/实收,与 GMV 定价流水口径分家)。
+- **T0 核验通道**(既有能力正身):认证指标声明编译,零 LLM,`trust: verified`。
+- **T1 组合通道**(`AI_T1_COMPOSE=on` 灰度):LLM 产 `CompositionQuery`(认证指标 × 声明维度 × 过滤 × 时间平移)、编译器确定性拼 SQL,`trust: composed`;**确定性语感直通** `breakdown_reroute`——总量形指标 × 拆分语感(各/按 + 维度词)零 LLM 升格组合(「各品牌净销售额对比」不再被词林命中答成总量单行);**时间平移算子** compare_previous(双期 CTE FULL OUTER JOIN,泛化 gmv_mom/attribution 模式);机械槽位(时间/品类)L0 同源正则兜底回填(LLM 管语义映射,正则管机械槽)。
+- **归因卡**(票 10,ADR-0011 裁决 B1+B2 隔离章):compare_previous 双期 CTE 携带关联度量(退款率)同期对照列(B1);`attribute_narrative` 归因叙事(B2)三重护栏——独立帧区 `narrative` + 「AI 推断(非数据)」章、**数字可溯源硬校验**(叙事数字须数值等价于卡上数据,舍入容差 ≤max(0.5,0.5%)、符号自由——「净减少 24,879」= 卡上 -24,879,违者整段丢弃)、`AI_ATTR_NARRATIVE=on` 默认关;归因速览(净变化 + 主因/次因贡献排序,确定性零叙事,08-D1 不破)。
+- **T2 探索通道**(`AI_T2_EXPLORE=on` ∧ admin/finance_owner 双闸,本轮未开闸):LLM 接地生成 SQL(schema 卡 + 指标口径字典)过守卫链强制审计——围栏/散文剥离 → sqlglot ParseError 归类响亮拒绝 → 中文列别名 AST 自修复 → LIMIT 强制 ≤50 → 引号外 CJK 审计 → 模型 merchant_db 表白名单(engine 库不可达)→ 统一安全闸 → 只读 reader;`trust: explored` + `generatedSql` 折叠展示(口径可审计)。
+- **三档信任章上卡面**:result 帧 `trust: verified|composed|explored`(机器语义字段,gateway SSE 直通零改动);merchant-admin ResultCard 信任徽标(verified 零视觉噪音)+ `generatedSql` 折叠 + 叙事隔离区块, vitest 168 例。
+- **前端/评测配套**:merchant-admin 帧契约同批登记 trust/generatedSql/narrative;意图评测语料 101 → 572(槽位程序生成 + 65 条 T2 型长尾,词面碰撞检查),intent eval 达标;T1/T2 live 评测基建(`promptfoo.t1t2.yaml` + `scorers/t1t2_channels.py`,十轮基线留档:守卫契约恒成立——散文/编造数字全部被拦,通道降级不降诚实;T1 波动源自 bigmodel 结构化输出不稳,已切 bind_tools(L3 同机制)+ 围栏文本兜底手解)。
+
+### 📐 ADR / 重构(并行会话收敛项)
+
+- 新立 [ADR-0010](docs/adr/0010-tiered-trust-architecture.md)(分层信任架构,铁律字面部分取代)与 [ADR-0011](docs/adr/0011-attribution-phase-b-boundary.md)(归因增强边界,B1+B2 隔离章裁决采纳)。
+- 并行架构评审收口三项:skills 路由知识五处散落收口 SkillRouter 深模块;metrics.yaml 三死字段退役 + 双册互验钉面;有效成交谓词单点化 `valid_dealing_where`(14 处字面消零,加状态或改口径只改一处)。
+
+### 🧪 Tests
+
+- 引擎离线册 167 + 容器册 64 + gateway analytics 契约 81+3skip + 前端 vitest 168 全绿;新增契约册 92+7 例(语义编译器差分/组合通道/探索守卫/归因速览/语感直通);双服务 ruff 清;真网关 HTTP 全链路灰度验证(登录 → ask SSE → composed 章 + B1 对照列 + B2 叙事)。
+
+---
+
 ## [2.6.64] - 2026-09-29 (导购搭配语义守卫:searchProducts 子任务不再截胡「搭配一套」)
 
 2.6.56 搭配双族修复的同形残余(实弹复发):同一句「搭配一套…装备和衣服」9-27 走技能路径出双族+合计预算,9-29 却只推 2 件短袖衬衫(「之前只有装备,现在只有衣服了」)。取证:路由判 shopping_guide 正确、货架静态、mall_domain 未变 —— 分叉在 executor 工具选择:搭配请求可被写成 `searchProducts` 工具子任务(query 自拟单脚),工具路径没有技能 SOP 的搭配族补脚/交错合并/合计预算,必然单族输出。机制层缺口与 LLM 分叉概率无关,确定性存在。
