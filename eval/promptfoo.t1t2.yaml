@@ -1,0 +1,21 @@
+description: "data agent T1 组合通道 + T2 探索通道 live 评测(ADR-0010;spec §7 门③实弹版,T2 开闸门)"
+
+prompts:
+  - "{{input}}"
+
+# 断言直调引擎通道(t1t2_channels.get_assert),provider 输出不参与判定
+# (echo 仅为 promptfoo 形态要求,同 promptfoo.data.yaml)
+providers:
+  - "file://providers/echo_provider.py:call_api"
+
+defaultTest:
+  options:
+    provider: "file://providers/echo_provider.py:call_api"
+
+# LLM 逐例调用,串行防 bigmodel 429 限流噪声(同全量大盘纪律)
+evaluateOptions:
+  maxConcurrency: 1
+
+tests:
+  - testCases/data_analytics/t1_composition.json
+  - testCases/data_analytics/t2_explore.json

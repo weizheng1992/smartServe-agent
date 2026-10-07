@@ -24,6 +24,16 @@ _EXPLORE_ROLES = frozenset({"admin", "finance_owner"})
 _MAX_LIMIT = 50
 
 _FENCE_RE = re.compile(r"^```(?:sql)?\s*|\s*```$", re.MULTILINE)
+# 引号外 CJK(中文字符):schema 全 ASCII,生成 SQL 引号字面量外出现中文 =
+# 散文泄漏(live eval 实弹:「SELECT 查询, 且无法满足该更新需求…」被当合法
+# 列名解析通过),响亮拒绝;WHERE category = '衬衫' 这类字面量不受累
+_CJK_RE = re.compile(r"[一-鿿]")
+
+
+def _reject_cjk_outside_literals(sql: str) -> None:
+    unquoted = re.sub(r"'(?:[^']|'')*'", "''", sql)
+    if _CJK_RE.search(unquoted):
+        raise ExploreRejected("生成 SQL 含非 SQL 文本(引号外中文散文,疑似模型跑题)")
 
 
 def t2_enabled() -> bool:
@@ -73,9 +83,17 @@ async def generate_sql(question: str) -> str:
     return _content_text(resp).strip()
 
 
+def _extract_sql(raw_sql: str) -> str:
+    """从生成文本提取 SQL:剥围栏后取首个 SELECT/WITH 起始处 —— 模型常无视
+    「只输出语句原文」纪律带中文铺垫/尾注(live eval 实弹),散文不进解析器。"""
+    text = _FENCE_RE.sub("", (raw_sql or "").strip()).strip()
+    match = re.search(r"\b(SELECT|WITH)\b", text, re.IGNORECASE)
+    return text[match.start() :].strip().rstrip(";").strip() if match else ""
+
+
 def guard_explore_sql(raw_sql: str) -> str:
-    """探索 SQL 强制守卫链:围栏剥离 → 单语句 → LIMIT 注入/钳制 → 模型表白名单
-    (engine 库不可达)→ 统一安全闸。任何一环不过 = ExploreRejected(响亮)。"""
+    """探索 SQL 强制守卫链:围栏/散文剥离 → 单语句 → LIMIT 注入/钳制 → 模型
+    表白名单(engine 库不可达)→ 统一安全闸。任何一环不过 = ExploreRejected(响亮)。"""
     import sqlglot
 
     from .schema_cards import compile_safe_schema_card
@@ -83,9 +101,13 @@ def guard_explore_sql(raw_sql: str) -> str:
     from .sql_guard import UnsafeSqlError, _cte_aliases, assert_safe_select
     from .tools_registry_bridge import semantic_model
 
-    sql = _FENCE_RE.sub("", (raw_sql or "").strip()).strip().rstrip(";").strip()
+    sql = _extract_sql(raw_sql)
     if not sql:
+        stripped = _FENCE_RE.sub("", (raw_sql or "").strip()).strip()
+        if stripped:
+            raise ExploreRejected("生成内容未包含 SELECT 查询(仅允许只读查询)")
         raise ExploreRejected("生成内容为空,拒绝执行")
+    _reject_cjk_outside_literals(sql)
 
     _assert_model_matches_card()
     statements = sqlglot.parse(sql, read="postgres")

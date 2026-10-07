@@ -80,9 +80,14 @@ async def compose_resolve(question: str, allowed: list[str] | None) -> Compositi
     system = (
         "你是商户数据问答的组合规划器。把问题解析为「指标 × 维度 × 过滤 × 时间窗」的语义层组合。\n"
         "规则:\n"
-        "- metric 只能取指标目录中的键;dimension 只能取维度目录中的键;问题问不到维度时留空\n"
-        "- 时间窗 kind ∈ last_month/last_7d/last_30d/last_months(附 n);问「同比/环比/上期对比」时 compare_previous=true\n"
-        "- 问题里的具体商品/客户/活动名称写进 entity_mention(附 entity_kind=spu/customer/promotion),不要改写\n"
+        "- 你的职责是【组合】:优先产出「指标 × 维度」配对(如 品类×销售额 → metric=gmv, dimension=category);\n"
+        "  不要映射到目录中的成品指标(customer_spend_top/order_overview/category_gmv_top 等)——\n"
+        "  闭集路由在你之前已经试过并失败,再映射成品指标等于重复失败\n"
+        "- metric 只能取指标目录中的键;dimension 只能取维度目录中的键;问题确实不含维度拆分时才留空\n"
+        "- 时间窗 kind ∈ last_month/last_7d/last_30d/last_months(附 n);问句出现「近/最近/上个月/N 个月」必须提取;\n"
+        "  问「同比/环比/上期对比/变化」时 compare_previous=true\n"
+        "- 问题里的具体商品/客户/活动名称写进 entity_mention(附 entity_kind=spu/customer/promotion),不要改写;\n"
+        "  出现目录枚举中的品类词(衬衫/配饰等)写进 category\n"
         "- 组合不出目录内的查询 → metric 输出 \"__unsupported__\",绝不猜\n"
         + composition_catalog()
     )

@@ -51,7 +51,9 @@ class TestExploreGuard:
             guard_explore_sql("SELECT 1; SELECT 2")
 
     def test_non_select_rejected(self):
-        with pytest.raises(ExploreRejected, match="仅允许 SELECT"):
+        """非查询语句(无 SELECT/WITH 可提取)响亮拒绝;文案区分「空生成」与
+        「生成了非查询语句」。"""
+        with pytest.raises(ExploreRejected, match="未包含 SELECT"):
             guard_explore_sql("DELETE FROM merchant_spus")
 
     def test_engine_db_table_rejected(self):

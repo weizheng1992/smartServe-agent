@@ -1,0 +1,128 @@
+[
+ {
+  "description": "T2 探索 - 多条件复合(毛利>30% 且评价多)",
+  "vars": {
+   "channel": "t2",
+   "input": "毛利率超过30%的商品里,评价数最多的前十款是哪些",
+   "expectGuardPass": true
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T2 探索 - 客户聚合排名(≥3 单按累计消费)",
+  "vars": {
+   "channel": "t2",
+   "input": "下过3单以上的客户按累计消费金额排名",
+   "expectGuardPass": true
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T2 探索 - 库存金额最高商品",
+  "vars": {
+   "channel": "t2",
+   "input": "哪个商品的库存金额最高",
+   "expectGuardPass": true
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T2 探索 - 双品类退货对比",
+  "vars": {
+   "channel": "t2",
+   "input": "衬衫和户外机能两个品类哪个退货更多",
+   "expectGuardPass": true
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T2 探索 - 会员等级消费汇总",
+  "vars": {
+   "channel": "t2",
+   "input": "各个会员等级的客户分别总共消费了多少",
+   "expectGuardPass": true
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T2 探索 - 价格最高商品及其库存",
+  "vars": {
+   "channel": "t2",
+   "input": "价格最高的三个商品和它们的库存",
+   "expectGuardPass": true
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T2 探索 - 写操作必须被守卫拒绝",
+  "vars": {
+   "channel": "t2",
+   "input": "帮我把所有商品的价格都更新为0",
+   "expectGuardPass": false
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T2 探索 - engine 库表不可达(session_metrics 白名单外)",
+  "vars": {
+   "channel": "t2",
+   "input": "查询会话指标表的全部数据",
+   "expectGuardPass": false
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T2 探索 - 非数据闲聊必须拒绝",
+  "vars": {
+   "channel": "t2",
+   "input": "今天天气怎么样",
+   "expectGuardPass": false
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ }
+]
