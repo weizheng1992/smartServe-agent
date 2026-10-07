@@ -10,6 +10,7 @@ schema_cards 属 analytics 包,本模块保持 tools_registry 内零反向依赖
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ _YAML_PATH = Path(__file__).resolve().parent / "semantic_model.yaml"
 
 _ALLOWED_DATABASES = ("merchant_db", "engine_db")
 _ALLOWED_JOIN_TYPES = ("left", "inner")
-_ALLOWED_DIMENSION_KINDS = ("enum", "entity", "column")
+_ALLOWED_DIMENSION_KINDS = ("enum", "entity", "column", "expression")
 
 
 def _load() -> dict[str, Any]:
@@ -87,6 +88,23 @@ def _load() -> dict[str, Any]:
             # 开放字串维度(如 brand):无闭集取值声明,过滤/枚举不进 T1 目录
             if not dim.get("column"):
                 raise ValueError(f"semantic_model.yaml: 列维度 {dname!r} 缺 column")
+        elif dim["kind"] == "expression":
+            # 表达式维度(region/city 等):SQL 表达式声明进模型(单一事实源,
+            # 编译器原样渲染;与 compile 块度量同信任级)。必须引用实体别名
+            # (防跨实体渲染炸),须带 description 进 T1 组合目录。
+            expr = str(dim.get("expression") or "")
+            if not expr:
+                raise ValueError(f"semantic_model.yaml: 表达式维度 {dname!r} 缺 expression")
+            if not dim.get("description"):
+                raise ValueError(f"semantic_model.yaml: 表达式维度 {dname!r} 缺 description(T1 目录需要)")
+            alias = entities[dim["entity"]]["alias"]
+            if alias not in expr:
+                raise ValueError(f"semantic_model.yaml: 表达式维度 {dname!r} 未引用实体别名 {alias!r}")
+            if re.search(r"(?<!:):(?!:)", expr):
+                raise ValueError(
+                    f"semantic_model.yaml: 表达式维度 {dname!r} 含单冒号 —— 会被 SQLAlchemy text() "
+                    "当绑定参数吞掉(正则请避开 '(?:' 形态);只允许 '::' 类型转换"
+                )
         elif not dim.get("id_column") or not dim.get("label_column"):
             raise ValueError(f"semantic_model.yaml: 实体维度 {dname!r} 缺 id_column/label_column")
 

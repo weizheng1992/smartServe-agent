@@ -199,6 +199,30 @@ dimensions:
     kind: column
     entity: merchant_spus
     column: brand
+  region:
+    label: 区域
+    kind: expression
+    entity: merchant_orders
+    description: 按收货地址提取的七大地理区(华东/华北/华中/华南/西南/西北/东北)
+    expression: >-
+      CASE
+      WHEN o.shipping_address->>'fullAddress' ~ '^(北京市|天津市|河北省|山西省|内蒙古自治区)' THEN '华北'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(上海市|江苏省|浙江省|安徽省|福建省|江西省|山东省)' THEN '华东'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(河南省|湖北省|湖南省)' THEN '华中'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(广东省|广西壮族自治区|海南省)' THEN '华南'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(重庆市|四川省|贵州省|云南省|西藏自治区)' THEN '西南'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(陕西省|甘肃省|青海省|宁夏回族自治区|新疆维吾尔自治区)' THEN '西北'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(黑龙江省|吉林省|辽宁省)' THEN '东北'
+      ELSE '其他' END
+  city:
+    label: 城市
+    kind: expression
+    entity: merchant_orders
+    description: 按收货地址首段提取的城市/省(北京市、杭州市…)
+    # 正则须避开 '(?:' —— 单冒号会被 SQLAlchemy text() 当绑定参数吞掉
+    # (实弹:'(?:自治区' → ':自治区' → $1);外层捕获组让 substring 返回整段
+    expression: >-
+      substring(o.shipping_address->>'fullAddress' from '^([^省市区县]+(自治区|省|市|地区|盟))')
   spu:
     label: 商品
     kind: entity

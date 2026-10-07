@@ -54,6 +54,14 @@ class TestSemanticModel:
             assert debt["metric"] in METRIC_SEMANTIC_REGISTRY
             assert debt["reason"] and debt["plan"]
 
+    def test_expression_dimensions_reference_entity_alias(self):
+        """表达式维度(region/city)必须引用实体别名且带 description(T1 目录)。"""
+        for dim in semantic_model()["dimensions"].values():
+            if dim["kind"] == "expression":
+                assert dim["entity"] == "merchant_orders"
+                assert "o." in dim["expression"] or "o " in dim["expression"]
+                assert dim["description"]
+
     def test_model_entities_subset_of_schema_card(self):
         from engine_py.analytics.schema_cards import compile_safe_schema_card
 

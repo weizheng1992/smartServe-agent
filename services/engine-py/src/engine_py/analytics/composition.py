@@ -62,6 +62,8 @@ def composition_catalog() -> str:
     for dkey, dim in model["dimensions"].items():
         if dim["kind"] == "enum":
             dim_lines.append(f"- {dkey}({dim['label']}):取值 {'/'.join(dim['values'])}")
+        elif dim["kind"] == "expression":
+            dim_lines.append(f"- {dkey}({dim['label']}):{dim['description']}")
         else:
             dim_lines.append(f"- {dkey}({dim['label']}):实体维度,问句中的具体名称会确定性绑定")
     return "指标目录:\n" + "\n".join(metric_lines) + "\n维度目录:\n" + "\n".join(dim_lines)
@@ -115,7 +117,11 @@ async def compose_resolve(question: str, allowed: list[str] | None) -> Compositi
 
 def _validate(out: Any, allowed: list[str] | None, question: str) -> CompositionQuery:
     """闭集校验:目录外任何成分都响亮拒绝(宁可 unsupported,不做近似组合)。"""
+    # 机械槽位先提取(所有分支可用;LLM 漏填的时间/品类由此回填)
+    from .l0_lexicon import extract_slots
     from .tools_registry_bridge import metric_semantic_registry, semantic_model
+
+    _, slot_time, slot_category = extract_slots((question or "").strip().lower())
 
     if out.metric == "__unsupported__" or out.metric not in metric_semantic_registry():
         raise CompositionRejected(f"指标 {out.metric!r} 不在语义层目录内")
@@ -123,8 +129,12 @@ def _validate(out: Any, allowed: list[str] | None, question: str) -> Composition
         raise CompositionRejected(f"当前角色无权查看指标 {out.metric!r}")
     model = semantic_model()
     dims = model["dimensions"]
+    if out.dimension is not None:
+        out.dimension = out.dimension.strip() or None  # LLM 偶发填空串(live eval 实弹),归一为「无维度」
     if out.dimension is not None and out.dimension not in dims:
         raise CompositionRejected(f"维度 {out.dimension!r} 不在语义层目录内")
+    if out.category is None and slot_category:
+        out.category = slot_category
     if out.category is not None:
         enum_values = dims.get("category", {}).get("values") or []
         if out.category not in enum_values:
@@ -136,6 +146,11 @@ def _validate(out: Any, allowed: list[str] | None, question: str) -> Composition
         time_window = {"kind": out.time_kind}
         if out.time_kind == "last_months":
             time_window["n"] = min(max(int(out.time_n or 6), 1), 24)
+    # 机械槽位确定性兜底(live eval 四轮实弹:LLM 对时间/品类槽位依从性不稳):
+    # 语义映射(指标×维度)归 LLM,时间/品类/limit 归 L0 同源正则 —— LLM 漏填
+    # 时回填,两源都有以 LLM 为准(它看得到完整问句语境)
+    if time_window is None and slot_time:
+        time_window = slot_time
     # 品类过滤挂在 SPU 维度表上:维度是客户/活动/订单状态时没有 s 别名,拒绝
     # (组合合法性 = join 图可达,宁可响亮不做错组合)
     if out.category is not None and out.dimension not in (None, "category", "spu"):
@@ -242,6 +257,15 @@ def _base_join(metric: str, dim: dict, entity_kind: str | None, entity_ids: list
 
 
 def _dim_expr(dim_key: str, dim: dict) -> str:
+    from .engine import UnsupportedQuery
+
+    if dim["kind"] == "expression":
+        # 表达式维度:模型声明原样渲染(与 compile 块度量同信任级);加载器已
+        # 校验引用实体别名,此处再闸实体 = 组合基表(merchant_orders),跨实体
+        # 表达式宁可响亮不做错组合
+        if dim["entity"] != "merchant_orders":
+            raise UnsupportedQuery(f"表达式维度 {dim_key} 仅支持订单基组合")
+        return dim["expression"]
     alias_by_entity = {"merchant_spus": "s", "merchant_customers": "c", "promotions": "p", "merchant_orders": "o"}
     alias = alias_by_entity[dim["entity"]]
     if dim["kind"] in ("enum", "column"):

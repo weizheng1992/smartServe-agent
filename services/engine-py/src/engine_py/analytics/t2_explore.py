@@ -32,8 +32,19 @@ _CJK_RE = re.compile(r"[一-鿿]")
 
 def _reject_cjk_outside_literals(sql: str) -> None:
     unquoted = re.sub(r"'(?:[^']|'')*'", "''", sql)
+    unquoted = re.sub(r'"(?:[^"]|"")*"', '""', unquoted)
     if _CJK_RE.search(unquoted):
         raise ExploreRejected("生成 SQL 含非 SQL 文本(引号外中文散文,疑似模型跑题)")
+
+
+def _quote_cjk_aliases(stmt: exp.Expression) -> None:
+    """中文列别名自动加引号(AST 自修复):模型常写 `AS 品类` 不带引号 —— SQL
+    本身合法,PG 接受未加引号的 CJK 标识符,但白名单渲染/下游展示都要求规范
+    形态;修完再过 CJK 审计(live eval 实弹:双品类退货对比整条 SQL 死于风格)。"""
+    for alias_node in stmt.find_all(exp.Alias):
+        alias_exp = alias_node.args.get("alias")
+        if isinstance(alias_exp, exp.Identifier) and _CJK_RE.search(str(alias_exp.this or "")):
+            alias_exp.set("quoted", True)
 
 
 def t2_enabled() -> bool:
@@ -107,15 +118,21 @@ def guard_explore_sql(raw_sql: str) -> str:
         if stripped:
             raise ExploreRejected("生成内容未包含 SELECT 查询(仅允许只读查询)")
         raise ExploreRejected("生成内容为空,拒绝执行")
-    _reject_cjk_outside_literals(sql)
 
     _assert_model_matches_card()
-    statements = sqlglot.parse(sql, read="postgres")
+    try:
+        statements = sqlglot.parse(sql, read="postgres")
+    except sqlglot.errors.ParseError as err:
+        # 散文混入并非都能被 sqlglot 当合法标识符消化(实弹两种结局:解析通过
+        # 靠 CJK 审计拦 / 解析炸 → 此处响亮归类),绝不裸异常穿透
+        raise ExploreRejected(f"生成内容不是合法 SQL(解析失败): {err}") from err
     if len(statements) != 1:
         raise ExploreRejected(f"多语句被拒({len(statements)} 条;探索通道只允许单条 SELECT)")
     stmt = statements[0]
     if not isinstance(stmt, (exp.Select, exp.Union)):
         raise ExploreRejected(f"仅允许 SELECT,实际 {type(stmt).__name__}")
+
+    _quote_cjk_aliases(stmt)
 
     # LIMIT 强制:缺失注入 50,超限钳回 50(行数上限双保险之一,DB 侧另有超时)
     limit = stmt.args.get("limit")
@@ -144,6 +161,7 @@ def guard_explore_sql(raw_sql: str) -> str:
                 raise ExploreRejected(f"探索通道表白名单外(engine 库不可达): {name}")
 
     sql = stmt.sql(dialect="postgres")
+    _reject_cjk_outside_literals(sql)
     try:
         assert_safe_select(sql, compile_safe_schema_card(), require_business_id=False)
     except UnsafeSqlError as err:

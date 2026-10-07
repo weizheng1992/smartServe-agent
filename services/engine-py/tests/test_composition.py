@@ -69,7 +69,7 @@ class TestCompositionValidate:
 
     def test_unknown_dimension_rejected(self):
         with pytest.raises(CompositionRejected, match="不在语义层目录"):
-            _validate(_Out(metric="gmv", dimension="region"), _ALLOWED, "按区域")
+            _validate(_Out(metric="gmv", dimension="age_group"), _ALLOWED, "按年龄段")
 
     def test_category_filter_incompatible_dimension_rejected(self):
         """品类过滤挂在 SPU 表:客户/活动/订单状态维度不可组合(宁可响亮)。"""
@@ -154,6 +154,22 @@ class TestCompositionCompile:
         comp = CompositionQuery(metric="net_sales", dimension="category")
         compiled = compile_composition(comp, "aurora")
         assert "SUM(o.total_amount)" in compiled.sql
+
+    def test_region_expression_dimension(self):
+        """区域 = 七大地理区 CASE(表达式维度,声明进模型);「华东上月净销售额」
+        场景的落地件。"""
+        comp = CompositionQuery(metric="net_sales", dimension="region", time_window={"kind": "last_month"})
+        compiled = compile_composition(comp, "aurora")
+        assert "THEN '华东'" in compiled.sql and "ELSE '其他'" in compiled.sql
+        assert 'AS "区域"' in compiled.sql
+        assert "GROUP BY CASE" in compiled.sql
+        assert compiled.params["window_start"] is not None
+
+    def test_city_expression_dimension(self):
+        comp = CompositionQuery(metric="order_count", dimension="city")
+        compiled = compile_composition(comp, "aurora")
+        assert "substring(o.shipping_address->>'fullAddress'" in compiled.sql
+        assert 'AS "城市"' in compiled.sql
 
     def test_unknown_metric_at_compile_is_loud(self):
         comp = CompositionQuery(metric="review_bad", dimension="category")  # 不可组合指标

@@ -33,7 +33,7 @@
     "test:prompt:record": "bun eval/recordEvals.ts",
     "evals:import": "cd services/engine-py && uv run python -m engine_py.evals.promptfoo_import ../../eval/.records",
     "test:prompt:data": "promptfoo eval -c eval/promptfoo.data.yaml --no-write --no-cache",
-    "test:prompt:t1t2": "promptfoo eval -c eval/promptfoo.t1t2.yaml --no-write --no-cache",
+    "test:prompt:t1t2": "promptfoo eval -c eval/promptfoo.t1t2.yaml --no-write --no-cache --delay 3000",
     "test:prompt:persona": "promptfoo eval -c eval/promptfoo.persona.yaml --no-write --no-cache"
   },
   "devDependencies": {

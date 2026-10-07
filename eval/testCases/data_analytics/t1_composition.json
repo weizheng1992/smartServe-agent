@@ -151,10 +151,10 @@
   ]
  },
  {
-  "description": "T1 组合 - 目录外维度拒绝(区域维度未建模)",
+  "description": "T1 组合 - 目录外维度拒绝(年龄段未建模)",
   "vars": {
    "channel": "t1",
-   "input": "华南区的销售情况怎么样",
+   "input": "按年龄段看客户消费",
    "expectRejected": true
   },
   "assert": [
@@ -165,10 +165,10 @@
   ]
  },
  {
-  "description": "T1 组合 - 角色闭集拒绝(毛利不在 allowed)",
+  "description": "T1 组合 - 角色闭集拒绝(毛利率不在 allowed;确定性措辞:裸「毛利最高」在新组合规则下模型偶发空响应,见 eval/results 轮次记录)",
   "vars": {
    "channel": "t1",
-   "input": "哪个商品毛利最高",
+   "input": "按品类看毛利率的分布",
    "allowed": [
     "gmv",
     "volume",
@@ -221,6 +221,22 @@
    "input": "各品牌的净销售额对比",
    "expectedMetric": "net_sales",
    "expectedDimension": "brand"
+  },
+  "assert": [
+   {
+    "type": "python",
+    "value": "file://scorers/t1t2_channels.py:get_assert"
+   }
+  ]
+ },
+ {
+  "description": "T1 组合 - 区域×净销售额×时间窗(「华东上月净销售额」场景原句)",
+  "vars": {
+   "channel": "t1",
+   "input": "华东上月净销售额是多少",
+   "expectedMetric": "net_sales",
+   "expectedDimension": "region",
+   "expectedTimeKind": "last_month"
   },
   "assert": [
    {

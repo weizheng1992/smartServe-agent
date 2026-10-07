@@ -124,17 +124,17 @@ def _log(channel: str, question: str, result: dict) -> None:
 
 
 def get_assert(output, context):
+    vars = (context or {}).get("vars") or {}
+    channel = str(vars.get("channel") or "?")
+    question = str(vars.get("input") or "")
     try:
-        vars = (context or {}).get("vars") or {}
-        channel = vars.get("channel")
-        question = vars.get("input", "")
         if channel == "t1":
             result = _assert_t1(vars)
         elif channel == "t2":
             result = _assert_t2(vars)
         else:
             result = {"pass": False, "score": 0.0, "reason": f"未知 channel: {channel!r}"}
-        _log(channel or "?", question, result)
-        return result
     except Exception as err:  # 断言器自身异常 = 失败并如实报告,绝不静默绿
-        return {"pass": False, "score": 0.0, "reason": f"断言器异常: {type(err).__name__}: {err}"}
+        result = {"pass": False, "score": 0.0, "reason": f"断言器异常: {type(err).__name__}: {err}"}
+    _log(channel, question, result)
+    return result
