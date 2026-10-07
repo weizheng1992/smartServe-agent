@@ -60,7 +60,7 @@ def stubbed_order(monkeypatch: pytest.MonkeyPatch) -> None:
 def _run_apply(params: dict, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, _CapturingSession]:
     session = _CapturingSession()
     monkeypatch.setattr(
-        "engine_py.tools_registry.mall_domain.get_session", lambda: session
+        "engine_py.tools_registry.mall.fulfillment.get_session", lambda: session
     )
     result = asyncio.run(MallDomainService.apply_after_sale({"threadId": "t1", **params}))
     return result, session
@@ -168,7 +168,7 @@ def test_db_failure_errors_honestly(monkeypatch: pytest.MonkeyPatch, stubbed_ord
         async def execute(self, stmt):
             raise RuntimeError("db down")
 
-    monkeypatch.setattr("engine_py.tools_registry.mall_domain.get_session", lambda: _BrokenSession())
+    monkeypatch.setattr("engine_py.tools_registry.mall.fulfillment.get_session", lambda: _BrokenSession())
     result = asyncio.run(
         _svc.apply_after_sale({"threadId": "t1", "orderId": "X", "type": "refund_only", "reason": "no_reason_7d"})
     )
