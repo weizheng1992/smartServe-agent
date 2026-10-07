@@ -163,8 +163,8 @@ def _validate(out: Any, allowed: list[str] | None, question: str) -> Composition
     # 维度词回声归一(live eval 九轮实弹):「各品类销售额」的 LLM 把「品类」
     # 这个维度词当过滤值回填 —— 维度词是切片轴不是取值,丢弃
     _DIM_WORDS = {"品类", "品牌", "区域", "城市", "客户", "活动", "类目"}
-    if out.category in _DIM_WORDS:
-        out.category = None
+    if out.category in _DIM_WORDS or (out.category is not None and not out.category.strip()):
+        out.category = None  # 维度词回声 / 空串(live 十轮实弹)都不是过滤值
     if out.category is not None:
         enum_values = dims.get("category", {}).get("values") or []
         if out.category not in enum_values:
