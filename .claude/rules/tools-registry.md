@@ -30,12 +30,12 @@ paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/engine
   - **解析层**：sqlglot parse → 单语句断言 → AST 白名单（仅 SELECT/UNION/子查询/CTE，`INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/GRANT` 等一律 `UnsafeSqlError`）→ **表白名单**（sqlglot qualify 对照 schema 卡片,挡幻觉表;语句内 CTE 别名豁免）→ 危险函数黑名单（`pg_sleep`/`dblink`/`pg_read_file`/`lo_import`/`pg_terminate_backend`）。
   - **编译层断言**：`require_business_id=True` 时 AST 必须含 `business_id` 谓词 —— 租户边界由**服务端模板注入**后不可被剥离（旧沙箱「调用方自携过滤」的弱契约已由该断言取代）。
   - **DB 层纵深**：商户真账走只读 reader（READ ONLY 事务 + 超时 + SAVEPOINT），见 agent-engine.md §1.9;选型否决留档：pglast（GPL 法务）、sqlparse（non-validating 不可作安全边界）。
-- **接线纪律**：任何新的 NL2SQL/自由查询入口必须先接 `assert_safe_select`（白名单 SQL 模板编译后审计）再执行,严禁绕闸直连;新增自由 SQL 能力前须先扩 schema 卡片与表白名单,严禁字符串拼接租户值。
+- **接线纪律**：任何新的 NL2SQL/自由查询入口必须先接 `assert_safe_select`（白名单 SQL 模板编译后审计）再执行,严禁绕闸直连;新增自由 SQL 能力前须先扩 schema 卡片与表白名单,严禁字符串拼接租户值。**T2 探索通道（ADR-0010）即按此纪律接线**:生成 SQL 必过 `t2_explore.guard_explore_sql`(单语句→LIMIT 强制≤50→模型 merchant_db 表白名单→统一安全闸),engine 库实体不可达;语义模型新增实体须先登记 schema 卡(编译期漂移断言)。
 
 ### 1.4 指标语义注册表 (`tools_registry/metric_registry.py` + `metrics.yaml`,2026-09-25 校对)
 
-- **闭集事实源 = `metrics.yaml`**：**38 指标 × 8 域**（sales 13 / customer 7 / promotion 6 / inventory 3 / review 3 / refund 2 / profit 2 / session 2），每条带 label/description/expression/sqlTemplate/businessRules/unit/aliases/synonyms/`permissionTag`/sampleQueries。`metric_registry.py` 只做**加载与校验**（缺必填键/空表/key 与条目名不一致一律 raise 响亮失败，不静默跳过），导出 `METRIC_SEMANTIC_REGISTRY`。
-- **消费方**：Data Agent 分析管线经 `analytics/tools_registry_bridge.py`（防 tools_registry ↔ analytics 循环导入的桥）读取；意图解析在 `analytics/engine.py::MetricQueryEngine.resolve`（L0 词表 → 缝②小模型 → L2 范例 → L3 LLM 分层，详见 agent-engine.md §1.9）；SQL 由闭集模板编译渲染（dimensions/groupBy/formula/filters/direction/limit 占位符），经 `analytics/sql_guard.py` AST 审计后执行。
+- **闭集事实源 = `metrics.yaml` + `semantic_model.yaml`（ADR-0010,2026-10-07）**：metrics.yaml **38 指标 × 8 域**（label/description/expression/businessRules/unit/aliases/synonyms/`permissionTag`/sampleQueries/`compile` 编译声明;`sqlTemplate`/`availableDimensions` 死字段已删除）。semantic_model.yaml 为**表关联/维度/口径债务单一事实源**（12 实体/9 join/5 维度/13 债务条目）。两者加载即校验（`metric_registry.py`/`semantic_model.py`,缺键/悬空引用/别名冲突一律 raise 响亮失败），经 `tools_registry_bridge` 双消费。
+- **消费方**：Data Agent 分析管线经 `analytics/tools_registry_bridge.py`（防 tools_registry ↔ analytics 循环导入的桥）读取；意图解析在 `analytics/engine.py::MetricQueryEngine.resolve`（L0 词表 → 缝②小模型 → L2 范例 → L3 LLM 分层，详见 agent-engine.md §1.9）；SQL 由 `semantic_compiler` 声明编译（形状闭集 + bindparams;23 规整族）或 `_compile_bespoke_family` 手写模板（13 债务族）渲染，经 `analytics/sql_guard.py` AST 审计后执行;T1 组合/T2 探索通道见 agent-engine.md §1.9。
 - **评测联动**：与 promptfoo 指标消歧评测（`eval/scorers/metric_disambiguation.py`）共用同一词表。
 
 ---

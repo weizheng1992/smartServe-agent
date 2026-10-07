@@ -32,7 +32,7 @@ paths: ["apps/merchant-admin/**/*"]
 
 ### 1.4 结果卡 ResultCard(同形渲染 + 诚实降级)
 
-- 唯一结果渲染缝:悬浮面板 / analytics 全屏问答 / 看板重放 / 报告详情共用同一 `ResultCard` —— 改渲染行为只改这一处,四处自动一致。
+- 唯一结果渲染缝:悬浮面板 / analytics 全屏问答 / 看板重放 / 报告详情共用同一 `ResultCard` —— 改渲染行为只改这一处,四处自动一致。**信任章(ADR-0010,2026-10-07)**:result 帧 `trust` 字段(verified/composed/explored,机器语义)驱动 `TrustBadge` —— verified 零视觉噪音,composed 蓝章「组合查询」,explored 琥珀章「探索性结果」+ `generatedSql` 折叠展示(口径可审计);呈现层严禁解析口径文案推断信任级。
 - 图形纪律(**诚实降级,绝不画假图**):
   - 折线:值列(行内第 2 列)必须全员 `Number.isFinite` 才画;数据点 <2 或值列非数值(如对比卡第 2 列是「品类」文案)出诚实说明卡 + 表格。实弹:历史持久化帧重放曾把 `Number('潮流T恤')` 画成三条 NaN 网线(2026-09-25 修复)。
   - 条形:`rankingPoints` 需 ≥2 行且末列数值,取前 10;`NO_BAR_METRICS`(`order_overview`/`customer_orders` 逐笔列表)永不画条;`chart='bar'` 用户指令但形状不符 → 诚实说明卡 + 表格。
