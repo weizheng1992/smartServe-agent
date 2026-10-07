@@ -124,230 +124,38 @@ class MetricQueryEngine:
 
         return resolve_question(question)
 
-    # ---------------- compile(模板拼装;LLM 不参与) ----------------
+    # ---------------- compile(声明编译优先;LLM 不参与) ----------------
     def compile(self, intent: StructuredQueryIntent | dict, session_ctx: dict | None = None) -> Any:
         ctx = {**self.session_ctx, **(session_ctx or {})}
         business_id = ctx.get("business_id")
         if not business_id:
             raise ValueError("session_ctx.business_id 必传(租户谓词服务端注入,不可缺席)")
 
-        metric = metric_semantic_registry()[intent.metric]
-        direction = intent.direction
+        # ADR-0010 T0:声明编译优先 —— metrics.yaml 有 compile 块的指标走语义
+        # 编译器(join/维度来自 semantic_model.yaml,度量/HAVING 口径来自声明);
+        # 规整族已全量迁移(差分对拍 test_semantic_compiler 逐字一致后拆除
+        # legacy 模板体);逃生舱债务指标(semantic_model.yaml bespoke_debt)
+        # 走 _compile_bespoke_family 手写模板。business_id 语义不变:只进绑定
+        # 参数,不拼接 SQL 文本。
+        from .semantic_compiler import can_compile, compile_metric
 
-        # 销售族聚合模板(= query_product_ranking 已验证口径的模板化,阶段②销售族迁移底座):
-        # 退款/取消单子查询内排除;明细预聚合防笛卡尔;成本快照不容 COALESCE。
-        # 子查询已按 spu 预聚合(qty/price_sum/cost),外层表达式只引用 agg 输出列
-        # (防笛卡尔同 query_product_ranking);stock 独走 SKU 汇总。
-        metric_expr = {
-            "gmv": "COALESCE(MAX(agg.price_sum), 0)::float",
-            "volume": "COALESCE(MAX(agg.qty), 0)::int",
-            "gross_profit": "(COALESCE(MAX(agg.price_sum), 0) - COALESCE(MAX(agg.cost), 0))::float",
-            "margin_rate": (
-                "(CASE WHEN COALESCE(MAX(agg.price_sum), 0) > 0 "
-                "THEN (COALESCE(MAX(agg.price_sum), 0) - COALESCE(MAX(agg.cost), 0)) * 100.0 "
-                "/ MAX(agg.price_sum) ELSE 0 END)::float"
-            ),
-            "stock_risk": "COALESCE(SUM(k.stock), 0)::int",
-        }.get(intent.metric)
+        if can_compile(intent.metric):
+            return compile_metric(intent, business_id)
+        return self._compile_bespoke_family(intent, business_id)
 
-        if metric_expr is None:
-            # 阶段③新指标族(评价/退货/会话):独立模板族,非销售族形状
-            return self._compile_special_family(intent, business_id)
+    def _compile_bespoke_family(self, intent: StructuredQueryIntent, business_id: str) -> CompiledSQL:
+        """逃生舱债务族(semantic_model.yaml bespoke_debt 登记的 13 指标):
+        声明模型暂不表达的 bespoke 形态(逐笔行/双实体对比/双期归因/反连接…)
+        暂留手写模板,消灭计划见债务清单。新指标严禁再进本方法 —— 走声明编译。
 
-        sql = (
-            # title 必须先于 id 出列:条形图标签/速览榜首/表格首列全部取首个文本列,
-            # s.id 是商户库 UUID,首列放它 = 排行卡全变 UUID(实弹 2026-09-30)
-            'SELECT s.title AS "name", s.id::text AS "productId", s.category, '
-            "COALESCE(SUM(k.stock), 0)::int AS stock, "
-            f"{metric_expr} AS \"metricScore\" "
-            "FROM merchant_spus s "
-            "LEFT JOIN merchant_skus k ON k.spu_id = s.id "
-            "LEFT JOIN ("
-            "SELECT oi.spu_id, SUM(oi.quantity) AS qty, SUM(oi.quantity * oi.price) AS price_sum, "
-            "SUM(oi.quantity * oi.cost_at_purchase) AS cost, "
-            "SUM(oi.quantity) AS metric_score "
-            "FROM merchant_order_items oi "
-            "JOIN merchant_orders o ON o.order_id = oi.order_id "
-            "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') {time_clause} "
-            "GROUP BY oi.spu_id"
-            ") agg ON agg.spu_id = s.spu_code "
-            "WHERE s.status = 'ON_SALE' {category_clause} "
-            'GROUP BY s.id, s.title, s.category '
-            "{having_clause}"
-            f"ORDER BY \"metricScore\" {direction} "
-            "LIMIT :lim"
-        )
-        params: dict[str, Any] = {"lim": intent.limit}
-        time_clause = ""
-        if intent.time_window:
-            time_clause = "AND o.created_at >= :window_start"
-            params["window_start"] = window_start(intent.time_window)
-        category_clause = ""
-        if intent.category:
-            category_clause = "AND s.category = :cat"
-            params["cat"] = intent.category
-        # 零销量 HAVING 口径与旧路径逐位一致(18-D2 冻结):仅 gmv/volume 榜
-        # 排除零成交款(诚实空优于误导);毛利/毛利率/库存风险榜保留全量在售。
-        having_clause = (
-            "HAVING COALESCE(MAX(agg.qty), 0) > 0 " if intent.metric in ("gmv", "volume") else ""
-        )
-
-        sql = sql.format(time_clause=time_clause, category_clause=category_clause, having_clause=having_clause)
-
-        # 租户谓词(08-D4):单商户部署下 merchant_orders 无 business_id 列
-        # (02 号票实证),部署级隔离由「一部署一库」承担;business_id 缺席即拒编译
-        # (接口不变量:调用方必须携租户身份),商户库加列(17 号迁移流程)后
-        # 此处即插 :business_id 行级谓词与参数。
-        if not business_id:
-            raise ValueError("session_ctx.business_id 必传(租户谓词服务端注入,不可缺席)")
-
-        # 实体过滤:PageContext 勾选优先;其次 L3/行内绑定解析出的 spu 实体槽
-        # (「这款商品卖多少」问法)—— 两者同走 IN 绑定,长度上限 100。
-        entities = list(intent.entity_ids) or list((intent.entity_slot or {}).get("spu") or [])
-        if entities:
-            sql = sql.replace("WHERE s.status = 'ON_SALE'", "WHERE s.status = 'ON_SALE' AND s.spu_code = ANY(:entities)")
-            params["entities"] = entities[:100]
-
-        try:
-            ast = assert_safe_select(sql, compile_safe_schema_card(), require_business_id="business_id" in sql)
-        except UnsafeSqlError as err:
-            raise ValueError(f"编译模板未过安全闸(模板缺陷,非用户问题): {err}") from err
-        return CompiledSQL(sql=sql, params=params, metric=intent.metric, unit=metric["unit"], ast=ast, chart_hint=intent.chart_hint)
-
-    def _compile_special_family(self, intent: StructuredQueryIntent, business_id: str) -> CompiledSQL:
-        """阶段③新族模板:评价/退货(商户库)、会话(engine 本地库)。
-
-        闭集 fragment + bindparams 同销售族;差评/退款族输出商品排行形状,
-        会话族输出总量单行(productId=__total__)。未登记指标仍响亮 Unsupported。
+        闭集 fragment + bindparams;必填实体缺失抛 EntityGateRequired;
+        未登记指标响亮 Unsupported。全部商户库路由(单部署单库,02 号票实证)。
         """
         direction = intent.direction
-        # merchant 路无租户列(02 号实证):business_id 只进 engine_db 路参数
         params: dict[str, Any] = {"lim": intent.limit}
-        if intent.metric in ("session_volume", "ai_resolution_rate"):
-            params["business_id"] = business_id
         time_clause = ""
 
-        if intent.metric == "review_bad":
-            if intent.time_window:
-                time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                'SELECT s.title AS "productId", COUNT(*) AS "metricScore" '
-                "FROM merchant_product_reviews r JOIN merchant_spus s ON s.id = r.spu_id "
-                f"WHERE r.rating <= 2 {time_clause} "
-                f'GROUP BY s.id, s.title ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
-        elif intent.metric == "refund_rate":
-            if intent.time_window:
-                time_clause = "AND o.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                'SELECT oi.spu_id AS "productId", '
-                "ROUND(COALESCE(SUM(CASE WHEN o.status = 'REFUNDED' THEN oi.quantity ELSE 0 END), 0)::numeric "
-                "* 100 / GREATEST(SUM(CASE WHEN o.status <> 'CANCELLED' THEN oi.quantity ELSE 0 END), 1), 2)::float AS \"metricScore\" "
-                "FROM merchant_order_items oi JOIN merchant_orders o ON o.order_id = oi.order_id "
-                f"WHERE o.status <> 'CANCELLED' {time_clause} "
-                f'GROUP BY oi.spu_id ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
-        elif intent.metric == "session_volume":
-            if intent.time_window:
-                time_clause = "AND created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                "SELECT '__total__' AS \"productId\", COUNT(*)::int AS \"metricScore\" "
-                f"FROM session_metrics WHERE business_id = :business_id {time_clause} LIMIT :lim"
-            )
-        elif intent.metric in ("promo_orders", "promo_discount_total"):
-            if intent.time_window:
-                time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            value_expr = (
-                "COUNT(DISTINCT r.order_id)" if intent.metric == "promo_orders" else "COALESCE(SUM(r.discount_amount), 0)::float"
-            )
-            sql = (
-                "SELECT p.name AS \"productId\", "
-                f"{value_expr} AS \"metricScore\" "
-                "FROM promotion_redemptions r JOIN promotions p ON p.id = r.promotion_id "
-                f"WHERE 1=1 {time_clause} "
-                f'GROUP BY p.name ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
-        elif intent.metric == "promo_gmv_total":
-            # 实弹修(2026-09-29):「哪一个活动收益好」的活动维度排行 —— 核销
-            # 关联 GMV 按活动聚合。词表此前无「活动收益」词面,L0 落空后 L3 曾把
-            # 该问法误路由成商品 gmv 榜(答非所问);口径与 promo_effect/promo_compare
-            # 同源(真实归因,自然流量不计入)。GROUP BY 带 p.id 防同名活动合并。
-            if intent.time_window:
-                time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                'SELECT p.name AS "productId", '
-                'COALESCE(SUM(o.total_amount), 0)::float AS "metricScore" '
-                "FROM promotion_redemptions r "
-                "JOIN promotions p ON p.id = r.promotion_id "
-                "JOIN merchant_orders o ON o.order_id = r.order_id "
-                f"WHERE 1=1 {time_clause} "
-                f'GROUP BY p.name, p.id ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
-        elif intent.metric == "after_sale_overview":
-            if intent.time_window:
-                time_clause = "AND created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                'SELECT status AS "productId", COUNT(*)::int AS "metricScore" '
-                f"FROM after_sale_tickets WHERE business_id = :business_id {time_clause} "
-                f'GROUP BY status ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
-        elif intent.metric in ("gmv_trend", "volume_trend", "orders_trend", "customer_spend_trend"):
-            # 趋势族(阶段⑥⑦⑧):默认近 30 天按日;「近 N 个月」切自然月粒度
-            params.pop("lim", None)  # 时间序列窗口固定,仍以显式 LIMIT 兜底行数
-            # (expr, label, 是否需要明细表 JOIN)—— 客户消费只走订单表,
-            # JOIN 明细会把 total_amount 按明细行数放大,绝不容忍
-            _TREND_EXPR = {
-                "gmv_trend": ("COALESCE(SUM(oi.quantity * oi.price), 0)::float", "GMV", True),
-                "volume_trend": ("COALESCE(SUM(oi.quantity), 0)::float", "销量", True),
-                "orders_trend": ("COUNT(DISTINCT o.order_id)::float", "订单量", True),
-                "customer_spend_trend": ("COALESCE(SUM(o.total_amount), 0)::float", "消费", False),
-            }
-            # 第三位 needs_items 在趋势分支不消费(明细 JOIN 无条件追加,零点保线不断)
-            value_expr, label, _needs_items = _TREND_EXPR[intent.metric]
-            items_join = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
-            spu_ids = (intent.entity_slot or {}).get("spu") or []
-            if spu_ids and intent.metric in ("volume_trend", "gmv_trend"):
-                # 勾选商品的趋势:过滤入 JOIN ON,无销售日照常出零点(线不断)
-                items_join += "AND oi.spu_id = ANY(:spu_ids) "
-                params["spu_ids"] = spu_ids[:50]
-            cust_ids = (intent.entity_slot or {}).get("customer") or []
-            customer_clause = ""
-            if cust_ids:
-                # 客户过滤入 JOIN ON(非 WHERE):保留无订单日的零值点,折线不断线
-                customer_clause = "AND o.customer_id = ANY(:entities) "
-                params["entities"] = cust_ids[:20]
-            window = intent.time_window or {}
-            n = int(window.get("n") or 0) if window.get("kind") == "last_months" else 0
-            if n >= 2:
-                months = min(n, 24) - 1  # 含当月共 n 个月;倍数已钳 1-24,字面插值安全
-                sql = (
-                    "SELECT to_char(d.month, 'YYYY-MM') AS \"月份\", "
-                    f"{value_expr} AS \"{label}\" "
-                    "FROM generate_series(date_trunc('month', CURRENT_DATE) - "
-                    f"INTERVAL '{months} months', date_trunc('month', CURRENT_DATE), "
-                    "INTERVAL '1 month') d(month) "
-                    "LEFT JOIN merchant_orders o ON date_trunc('month', o.created_at) = d.month "
-                    f"AND o.status NOT IN ('REFUNDED', 'CANCELLED') {customer_clause}"
-                    f"{items_join}"
-                    f"GROUP BY d.month ORDER BY d.month LIMIT 50"
-                )
-            else:
-                sql = (
-                    "SELECT to_char(d.day, 'MM-DD') AS \"日期\", "
-                    f"{value_expr} AS \"{label}\" "
-                    "FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, INTERVAL '1 day') d(day) "
-                    "LEFT JOIN merchant_orders o ON o.created_at::date = d.day "
-                    f"AND o.status NOT IN ('REFUNDED', 'CANCELLED') {customer_clause}"
-                    f"{items_join}"
-                    f"GROUP BY d.day ORDER BY d.day LIMIT 50"
-                )
-        elif intent.metric == "order_overview":
+        if intent.metric == "order_overview":
             # ADR-0005:升级为逐笔行 + 合计/均值窗口列 —— 「两个订单对比」等
             # 对比类问法可直接看每单差异;实体来自 PageContext 勾选(必传)。
             params.pop("lim", None)  # 逐笔展示无 LIMIT 槽位,显式 50 行双保险
@@ -380,15 +188,6 @@ class MetricQueryEngine:
                 'JOIN merchant_orders o ON o.order_id = r.order_id '
                 'WHERE p.id = ANY(:entities) '
                 'GROUP BY p.name, p.id ORDER BY "核销GMV" DESC'
-            )
-        elif intent.metric == "ai_resolution_rate":
-            if intent.time_window:
-                time_clause = "AND created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                "SELECT '__total__' AS \"productId\", ROUND(COALESCE(SUM(CASE WHEN resolution_status = 'resolved_auto' "
-                "THEN 1 ELSE 0 END), 0)::numeric * 100 / GREATEST(COUNT(*), 1), 2)::float AS \"metricScore\" "
-                f"FROM session_metrics WHERE business_id = :business_id {time_clause} LIMIT :lim"
             )
         elif intent.metric == "promo_effect":
             # ADR-0005 活动效果总览(核销关联口径:真实归因,自然流量不计入)
@@ -440,31 +239,6 @@ class MetricQueryEngine:
                 'FROM merchant_orders o WHERE o.customer_id = ANY(:entities) '
                 'ORDER BY o.created_at DESC LIMIT :lim'
             )
-        elif intent.metric in ("aov", "order_count"):
-            # 阶段⑥对话出口族:总量单行(客单价/订单量;有效成交口径,单行天然有界)
-            params.pop("lim", None)  # 单行聚合,LIMIT 1 字面兜底
-            if intent.time_window:
-                time_clause = "AND o.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            value_expr = (
-                "ROUND(AVG(o.total_amount), 2)::float" if intent.metric == "aov" else "COUNT(*)::int"
-            )
-            sql = (
-                f'SELECT \'__total__\' AS "productId", {value_expr} AS "metricScore" '
-                "FROM merchant_orders o WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
-                f"{time_clause} LIMIT 1"
-            )
-        elif intent.metric == "review_good":
-            # 好评榜(与差评榜对偶:rating ≥ 4;评价表 spu_id 为 uuid,join 取商品标题)
-            if intent.time_window:
-                time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                'SELECT s.title AS "productId", COUNT(*) AS "metricScore" '
-                "FROM merchant_product_reviews r JOIN merchant_spus s ON s.id = r.spu_id "
-                f"WHERE r.rating >= 4 {time_clause} "
-                f'GROUP BY s.id, s.title ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
         elif intent.metric == "zero_sales":
             # 零销量在售款(NOT EXISTS 确定性判零),库存降序暴露压货交叉风险
             sql = (
@@ -474,31 +248,6 @@ class MetricQueryEngine:
                 "WHERE s.status = 'ON_SALE' AND NOT EXISTS ("
                 "SELECT 1 FROM merchant_order_items oi WHERE oi.spu_id = s.spu_code) "
                 f'GROUP BY s.id, s.title, s.category ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
-        elif intent.metric == "category_gmv_top":
-            if intent.time_window:
-                time_clause = "AND o.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                'SELECT s.category AS "productId", '
-                'COALESCE(SUM(oi.quantity * oi.price), 0)::float AS "metricScore" '
-                "FROM merchant_spus s JOIN merchant_order_items oi ON oi.spu_id = s.spu_code "
-                "JOIN merchant_orders o ON o.order_id = oi.order_id "
-                "WHERE s.status = 'ON_SALE' AND o.status NOT IN ('REFUNDED', 'CANCELLED') "
-                f"{time_clause} GROUP BY s.category "
-                f'ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
-        elif intent.metric == "customer_spend_top":
-            if intent.time_window:
-                time_clause = "AND o.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-            sql = (
-                'SELECT c.name AS "productId", c.phone AS "phone", '
-                'COALESCE(SUM(o.total_amount), 0)::float AS "metricScore" '
-                "FROM merchant_orders o JOIN merchant_customers c ON c.customer_id = o.customer_id "
-                "WHERE o.status NOT IN ('REFUNDED', 'CANCELLED') "
-                f"{time_clause} GROUP BY c.customer_id, c.name, c.phone "
-                f'ORDER BY "metricScore" {direction} LIMIT :lim'
             )
         elif intent.metric in ("attribution_refund", "attribution_sales"):
             # 归因族(雾区启动):确定性环比分解 —— 本月 vs 上月按商品列 Top 变动
@@ -605,15 +354,6 @@ class MetricQueryEngine:
                 "WHERE c.customer_id = ANY(:entities) "
                 "GROUP BY c.customer_id, c.name, c.member_level, c.created_at LIMIT 1"
             )
-        elif intent.metric == "stock_value":
-            sql = (
-                'SELECT s.title AS "productId", s.category AS "category", '
-                'COALESCE(SUM(k.stock), 0)::int AS "库存", '
-                'COALESCE(SUM(k.stock * k.price), 0)::float AS "metricScore" '
-                "FROM merchant_spus s JOIN merchant_skus k ON k.spu_id = s.id "
-                "WHERE s.status = 'ON_SALE' "
-                f'GROUP BY s.id, s.title, s.category ORDER BY "metricScore" {direction} LIMIT :lim'
-            )
         elif intent.metric == "gmv_mom":
             # 环比:本月 vs 上月(自然月对齐);两侧 UNION 各算一期,SUM 折叠成单行;
             # 上月为 0 → 环比置空(不编造)
@@ -654,11 +394,7 @@ class MetricQueryEngine:
             unit=metric_semantic_registry()[intent.metric]["unit"],
             ast=ast,
             chart_hint=intent.chart_hint,
-            target_db=(
-                "engine_db"
-                if intent.metric in ("session_volume", "ai_resolution_rate", "after_sale_overview")
-                else "merchant_db"
-            ),
+            target_db="merchant_db",
         )
 
     async def execute_async(self, compiled: Any, session_ctx: dict | None = None) -> QueryResult:

@@ -8,9 +8,6 @@ gmv:
   - order_items
   - orders
   expression: COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0)::float
-  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      LEFT JOIN order_items\
-    \ oi ON p.id = oi.product_id\n      {filters}\n      GROUP BY {groupBy}\n      ORDER BY \"metricValue\" {direction}\n\
-    \      LIMIT {limit}\n    "
   businessRules:
   - 仅统计有效销售订单,排除已取消未付款订单
   - 单价取下单时快照 price_at_purchase,防止后续商品改价失真
@@ -36,11 +33,10 @@ gmv:
   - 帮我查一下我负责商品里面卖得最好的几个
   - 查看本月销售额最高的商品榜单
   - 哪个商品流水贡献最大
-  availableDimensions:
-  - p.id
-  - p.name
-  - p.category
-  - p.manager_id
+  compile:
+    shape: spu_rank
+    measure: COALESCE(MAX(agg.price_sum), 0)::float
+    zero_sales_having: true
   permissionTag: sales_viewer
   verifiedConfidence: 0.98
 volume:
@@ -53,9 +49,6 @@ volume:
   - order_items
   - orders
   expression: COALESCE(SUM(oi.quantity), 0)::int
-  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      LEFT JOIN order_items\
-    \ oi ON p.id = oi.product_id\n      {filters}\n      GROUP BY {groupBy}\n      ORDER BY \"metricValue\" {direction}\n\
-    \      LIMIT {limit}\n    "
   businessRules:
   - 退货件数是否扣减需视售后策略而定,默认统计总出货件数
   direction: DESC
@@ -84,11 +77,10 @@ volume:
   - 哪几款商品出货量最大
   - 查看走量最多的爆款商品
   - 销量排名前三的商品
-  availableDimensions:
-  - p.id
-  - p.name
-  - p.category
-  - p.manager_id
+  compile:
+    shape: spu_rank
+    measure: COALESCE(MAX(agg.qty), 0)::int
+    zero_sales_having: true
   permissionTag: warehouse_operator
   verifiedConfidence: 0.99
 gross_profit:
@@ -102,9 +94,6 @@ gross_profit:
   - orders
   expression: (COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) - COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase,
     p.cost_price, 0)), 0))::float
-  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      LEFT JOIN order_items\
-    \ oi ON p.id = oi.product_id\n      {filters}\n      GROUP BY {groupBy}\n      ORDER BY \"metricValue\" {direction}\n\
-    \      LIMIT {limit}\n    "
   businessRules:
   - 如果 order_items 存在下单成本 cost_at_purchase 则优先使用,否则降级回退至 product 当前 cost_price
   - 毛利可为负数(当贴钱促销时)
@@ -130,11 +119,9 @@ gross_profit:
   - 哪几款商品真正最赚钱
   - 净毛利最高的商品排行
   - 刨去进货成本哪款利润最大
-  availableDimensions:
-  - p.id
-  - p.name
-  - p.category
-  - p.manager_id
+  compile:
+    shape: spu_rank
+    measure: (COALESCE(MAX(agg.price_sum), 0) - COALESCE(MAX(agg.cost), 0))::float
   permissionTag: finance_owner
   verifiedConfidence: 0.95
 margin_rate:
@@ -147,9 +134,6 @@ margin_rate:
   - order_items
   expression: CASE WHEN SUM(oi.quantity * oi.price_at_purchase) > 0 THEN (((SUM(oi.quantity * oi.price_at_purchase) - SUM(oi.quantity
     * COALESCE(oi.cost_at_purchase, p.cost_price, 0))) / SUM(oi.quantity * oi.price_at_purchase)) * 100)::float ELSE 0.0 END
-  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      LEFT JOIN order_items\
-    \ oi ON p.id = oi.product_id\n      {filters}\n      GROUP BY {groupBy}\n      ORDER BY \"metricValue\" {direction}\n\
-    \      LIMIT {limit}\n    "
   businessRules:
   - 必须使用 NULLIF 或 CASE WHEN 规避分母为 0 抛出除零异常
   direction: DESC
@@ -171,18 +155,15 @@ margin_rate:
   sampleQueries:
   - 哪些商品毛利率最高
   - 溢价空间最大的商品有哪些
-  availableDimensions:
-  - p.id
-  - p.name
-  - p.category
+  compile:
+    shape: spu_rank
+    measure: "(CASE WHEN COALESCE(MAX(agg.price_sum), 0) > 0 THEN (COALESCE(MAX(agg.price_sum), 0) - COALESCE(MAX(agg.cost), 0)) * 100.0 / MAX(agg.price_sum) ELSE 0 END)::float"
   permissionTag: finance_owner
   verifiedConfidence: 0.94
 stock_risk:
   key: stock_risk
   label: 滞销积压库存
   expression: p.stock::int
-  sqlTemplate: "\n      SELECT {dimensions}, {formula} AS \"metricValue\"\n      FROM products p\n      {filters}\n      ORDER\
-    \ BY \"metricValue\" {direction}\n      LIMIT {limit}\n    "
   description: 当前仓库在库物理剩余库存件数,用于排查滞销压货与动销缓慢风险。
   domain: inventory
   sourceTables:
@@ -210,10 +191,9 @@ stock_risk:
   - 仓库里哪些商品积压最多
   - 滞销库存排查
   - 哪些款压货最严重
-  availableDimensions:
-  - p.id
-  - p.name
-  - p.category
+  compile:
+    shape: spu_rank
+    measure: COALESCE(SUM(k.stock), 0)::int
   permissionTag: warehouse_operator
   verifiedConfidence: 0.96
 review_bad:
@@ -224,7 +204,15 @@ review_bad:
   sourceTables:
   - merchant_product_reviews
   expression: COUNT(*) FILTER (WHERE rating <= 2)
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: merchant_product_reviews
+    joins: [review_of_spu]
+    select: [{expr: "s.title", as: productId}]
+    group_by: [s.id, s.title]
+    measure: COUNT(*)
+    where: ["r.rating <= 2"]
+    time_column: r.created_at
   businessRules:
   - 差评口径 = rating <= 2;商户真实评价,非合成
   direction: DESC
@@ -243,8 +231,6 @@ review_bad:
   sampleQueries:
   - 差评最多的 SKU
   - 最近差评最多的商品
-  availableDimensions:
-  - spu_id
   permissionTag: sales_viewer
   verifiedConfidence: 0.95
 refund_rate:
@@ -256,7 +242,15 @@ refund_rate:
   - merchant_order_items
   - merchant_orders
   expression: refunded_qty / valid_qty * 100
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: merchant_order_items
+    joins: [items_of_order]
+    select: [{expr: "oi.spu_id", as: productId}]
+    group_by: [oi.spu_id]
+    measure: "ROUND(COALESCE(SUM(CASE WHEN o.status = 'REFUNDED' THEN oi.quantity ELSE 0 END), 0)::numeric * 100 / GREATEST(SUM(CASE WHEN o.status <> 'CANCELLED' THEN oi.quantity ELSE 0 END), 1), 2)::float"
+    where: ["o.status <> 'CANCELLED'"]
+    time_column: o.created_at
   businessRules:
   - 退款单全额计入退款件;有效口径排除 CANCELLED
   direction: DESC
@@ -273,8 +267,6 @@ refund_rate:
   sampleQueries:
   - 近 30 天退款率
   - 退款率最高的商品
-  availableDimensions:
-  - spu_id
   permissionTag: sales_viewer
   verifiedConfidence: 0.93
 session_volume:
@@ -285,7 +277,12 @@ session_volume:
   sourceTables:
   - session_metrics
   expression: COUNT(*)
-  sqlTemplate: engine_db
+  compile:
+    shape: total_single
+    base: session_metrics
+    measure: COUNT(*)::int
+    time_column: created_at
+    target_db: engine_db
   businessRules:
   - 与平台大盘同表同口径
   direction: DESC
@@ -305,7 +302,6 @@ session_volume:
   sampleQueries:
   - 客服负载概况
   - 最近会话量
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.97
 promo_orders:
@@ -317,7 +313,14 @@ promo_orders:
   - promotions
   - promotion_redemptions
   expression: COUNT(DISTINCT order_id) GROUP BY promo
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: promotion_redemptions
+    joins: [redemption_of_promotion]
+    select: [{expr: "p.name", as: productId}]
+    group_by: [p.name]
+    measure: COUNT(DISTINCT rd.order_id)
+    time_column: rd.created_at
   businessRules:
   - 同订单同活动只计一次
   direction: DESC
@@ -336,7 +339,6 @@ promo_orders:
   sampleQueries:
   - 各活动的核销情况
   - 优惠活动的核销订单数
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.95
 promo_discount_total:
@@ -348,7 +350,14 @@ promo_discount_total:
   - promotions
   - promotion_redemptions
   expression: SUM(discount_amount) GROUP BY promo
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: promotion_redemptions
+    joins: [redemption_of_promotion]
+    select: [{expr: "p.name", as: productId}]
+    group_by: [p.name]
+    measure: "COALESCE(SUM(rd.discount_amount), 0)::float"
+    time_column: rd.created_at
   businessRules:
   - 优惠额为结算时服务端计算的实际抵扣
   direction: DESC
@@ -369,7 +378,6 @@ promo_discount_total:
   sampleQueries:
   - 各活动优惠总额
   - 活动补贴花了多少钱
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.95
 promo_gmv_total:
@@ -382,7 +390,14 @@ promo_gmv_total:
   - promotion_redemptions
   - merchant_orders
   expression: SUM(o.total_amount) GROUP BY promo
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: promotion_redemptions
+    joins: [redemption_of_promotion, redemption_of_order]
+    select: [{expr: "p.name", as: productId}]
+    group_by: [p.name, p.id]
+    measure: "COALESCE(SUM(o.total_amount), 0)::float"
+    time_column: rd.created_at
   businessRules:
   - 核销关联口径:仅统计该活动核销记录关联的订单
   - 同活动多笔核销按订单实付累加,排行取实付合计
@@ -405,7 +420,6 @@ promo_gmv_total:
   - 哪一个活动收益好
   - 各活动核销GMV排行
   - 哪个活动带来的流水最多
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.95
 gmv_trend:
@@ -417,7 +431,11 @@ gmv_trend:
   - merchant_orders
   - merchant_order_items
   expression: SUM(quantity*price) GROUP BY day
-  sqlTemplate: merchant_db
+  compile:
+    shape: trend
+    measure: "COALESCE(SUM(oi.quantity * oi.price), 0)::float"
+    label: GMV
+    spu_filter_via_items: true
   businessRules:
   - 固定近 30 天窗口;日粒度
   direction: ASC
@@ -439,7 +457,6 @@ gmv_trend:
   - 近 30 天 GMV 趋势
   - 每天的销售额走势
   - 近30天GMV趋势
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.95
 volume_trend:
@@ -451,7 +468,11 @@ volume_trend:
   - merchant_orders
   - merchant_order_items
   expression: SUM(quantity) GROUP BY day|month
-  sqlTemplate: merchant_db
+  compile:
+    shape: trend
+    measure: "COALESCE(SUM(oi.quantity), 0)::float"
+    label: 销量
+    spu_filter_via_items: true
   businessRules:
   - 有效成交口径(排除退款/取消);月粒度含当月,自然月对齐
   direction: ASC
@@ -475,7 +496,6 @@ volume_trend:
   - 近3个月的销量
   - 每月销量趋势
   - 几个月的销量怎么样
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 order_overview:
@@ -486,7 +506,6 @@ order_overview:
   sourceTables:
   - merchant_orders
   expression: COUNT/SUM/AVG(total_amount) FILTER order_id = ANY(entities)
-  sqlTemplate: merchant_db
   businessRules:
   - 实体集为空时响亮拒绝(请先勾选订单);金额取订单实付
   direction: DESC
@@ -518,7 +537,6 @@ order_overview:
   sampleQueries:
   - 这几笔订单的平均金额
   - 选中订单合计多少
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.94
 after_sale_overview:
@@ -529,7 +547,14 @@ after_sale_overview:
   sourceTables:
   - after_sale_tickets
   expression: COUNT(*) GROUP BY status
-  sqlTemplate: engine_db
+  compile:
+    shape: dim_rank
+    base: after_sale_tickets
+    select: [{expr: "t.status", as: productId}]
+    group_by: [t.status]
+    measure: COUNT(*)::int
+    time_column: t.created_at
+    target_db: engine_db
   businessRules:
   - 状态分布:pending_review/approved/rejected/completed 等
   direction: DESC
@@ -547,7 +572,6 @@ after_sale_overview:
   sampleQueries:
   - 售后工单概况
   - 有多少售后工单
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.95
 ai_resolution_rate:
@@ -558,7 +582,12 @@ ai_resolution_rate:
   sourceTables:
   - session_metrics
   expression: resolved_auto / total * 100
-  sqlTemplate: engine_db
+  compile:
+    shape: total_single
+    base: session_metrics
+    measure: "ROUND(COALESCE(SUM(CASE WHEN resolution_status = 'resolved_auto' THEN 1 ELSE 0 END), 0)::numeric * 100 / GREATEST(COUNT(*), 1), 2)::float"
+    time_column: created_at
+    target_db: engine_db
   businessRules:
   - 分子 = resolution_status='resolved_auto'
   direction: DESC
@@ -574,7 +603,6 @@ ai_resolution_rate:
   - session_family
   sampleQueries:
   - AI 自动解决率多少
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.96
 promo_effect:
@@ -587,7 +615,6 @@ promo_effect:
   - promotion_redemptions
   - merchant_orders
   expression: COUNT(DISTINCT order_id), SUM(total_amount), SUM(discount_amount)
-  sqlTemplate: ''
   businessRules:
   - 核销关联口径:仅统计该活动核销记录关联的订单
   - 优惠总额 = SUM(discount_amount)
@@ -605,7 +632,6 @@ promo_effect:
   sampleQueries:
   - 开学季活动卖得怎么样
   - 这个活动的核销情况如何
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 promo_sku_compare:
@@ -619,7 +645,6 @@ promo_sku_compare:
   - merchant_orders
   - merchant_order_items
   expression: SUM(quantity), SUM(quantity*price), COUNT(DISTINCT order_id)
-  sqlTemplate: ''
   businessRules:
   - 按活动核销订单的商品明细聚合
   - 对比分组列标记目标款/其他款
@@ -636,7 +661,6 @@ promo_sku_compare:
   sampleQueries:
   - 开学季活动里冲锋衣对比其他款
   - 这个活动里哪款卖得最好
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 promo_compare:
@@ -649,7 +673,6 @@ promo_compare:
   - promotion_redemptions
   - merchant_orders
   expression: COUNT(DISTINCT order_id), SUM(total_amount), SUM(discount_amount) GROUP BY promotion
-  sqlTemplate: ''
   businessRules:
   - 核销关联口径:各自只统计本活动核销记录关联的订单
   - 两行并排对比
@@ -667,7 +690,6 @@ promo_compare:
   sampleQueries:
   - 新客50元券对比背包品类85折
   - 两个活动哪个效果好
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 customer_orders:
@@ -679,7 +701,6 @@ customer_orders:
   - merchant_orders
   - merchant_customers
   expression: order_id, status, total_amount, created_at
-  sqlTemplate: ''
   businessRules:
   - 名下全部订单,不按成交口径过滤(列表展示原状)
   direction: DESC
@@ -693,7 +714,6 @@ customer_orders:
   sampleQueries:
   - 张三最近的订单
   - 查一下 13800000001 的订单
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 aov:
@@ -704,7 +724,13 @@ aov:
   sourceTables:
   - merchant_orders
   expression: AVG(total_amount) FILTER status NOT IN (REFUNDED, CANCELLED)
-  sqlTemplate: merchant_db
+  compile:
+    shape: total_single
+    base: merchant_orders
+    measure: ROUND(AVG(o.total_amount), 2)::float
+    where: ["o.status NOT IN ('REFUNDED', 'CANCELLED')"]
+    time_column: o.created_at
+    limit_mode: one
   businessRules:
   - 有效成交口径,与 GMV 榜同源
   direction: DESC
@@ -721,7 +747,6 @@ aov:
   sampleQueries:
   - 本月客单价多少
   - 平均每单多少钱
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.92
 order_count:
@@ -732,7 +757,13 @@ order_count:
   sourceTables:
   - merchant_orders
   expression: COUNT(*) FILTER status NOT IN (REFUNDED, CANCELLED)
-  sqlTemplate: merchant_db
+  compile:
+    shape: total_single
+    base: merchant_orders
+    measure: COUNT(*)::int
+    where: ["o.status NOT IN ('REFUNDED', 'CANCELLED')"]
+    time_column: o.created_at
+    limit_mode: one
   businessRules:
   - 有效成交口径,与 GMV 榜同源
   direction: DESC
@@ -749,7 +780,6 @@ order_count:
   sampleQueries:
   - 本月订单量多少
   - 上周成交笔数
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.92
 review_good:
@@ -760,7 +790,15 @@ review_good:
   sourceTables:
   - merchant_product_reviews
   expression: COUNT(*) FILTER rating >= 4 GROUP BY spu_id
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: merchant_product_reviews
+    joins: [review_of_spu]
+    select: [{expr: "s.title", as: productId}]
+    group_by: [s.id, s.title]
+    measure: COUNT(*)
+    where: ["r.rating >= 4"]
+    time_column: r.created_at
   businessRules:
   - 好评口径 = rating ≥ 4(与差评 rating ≤ 2 对偶)
   direction: DESC
@@ -776,7 +814,6 @@ review_good:
   sampleQueries:
   - 好评最多的商品 Top5
   - 看看好评榜
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.92
 zero_sales:
@@ -788,7 +825,6 @@ zero_sales:
   - merchant_spus
   - merchant_order_items
   expression: NOT EXISTS(order_items) ORDER BY stock DESC
-  sqlTemplate: merchant_db
   businessRules:
   - 只列在售款;库存降序暴露压货风险
   direction: DESC
@@ -806,7 +842,6 @@ zero_sales:
   sampleQueries:
   - 哪些商品零销量
   - 滞销零销量商品有哪些
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 category_gmv_top:
@@ -819,7 +854,15 @@ category_gmv_top:
   - merchant_order_items
   - merchant_orders
   expression: SUM(quantity*price) GROUP BY category
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: merchant_spus
+    joins: [items_of_spu_code, items_of_order]
+    select: [{expr: "s.category", as: productId}]
+    group_by: [s.category]
+    measure: "COALESCE(SUM(oi.quantity * oi.price), 0)::float"
+    where: ["s.status = 'ON_SALE'", "o.status NOT IN ('REFUNDED', 'CANCELLED')"]
+    time_column: o.created_at
   businessRules:
   - 有效成交口径;仅统计在售款
   direction: DESC
@@ -836,7 +879,6 @@ category_gmv_top:
   sampleQueries:
   - 品类GMV排行
   - 各品类销售额对比
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 customer_spend_top:
@@ -848,7 +890,15 @@ customer_spend_top:
   - merchant_orders
   - merchant_customers
   expression: SUM(total_amount) GROUP BY customer ORDER BY DESC
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: merchant_orders
+    joins: [orders_of_customer]
+    select: [{expr: "c.name", as: productId}, {expr: "c.phone", as: phone}]
+    group_by: [c.customer_id, c.name, c.phone]
+    measure: "COALESCE(SUM(o.total_amount), 0)::float"
+    where: ["o.status NOT IN ('REFUNDED', 'CANCELLED')"]
+    time_column: o.created_at
   businessRules:
   - 有效成交口径;展示客户名与手机号
   direction: DESC
@@ -865,7 +915,6 @@ customer_spend_top:
   sampleQueries:
   - 消费最高的客户 Top5
   - 客户消费排行
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 customer_spend_stats:
@@ -877,7 +926,6 @@ customer_spend_stats:
   - merchant_customers
   - merchant_orders
   expression: COUNT/SUM/AVG(total_amount) FILTER customer = ANY(entities)
-  sqlTemplate: merchant_db
   businessRules:
   - 有效成交口径;客户实体必传(逐字绑定或反问)
   direction: DESC
@@ -894,7 +942,6 @@ customer_spend_stats:
   sampleQueries:
   - 张伟的消费统计
   - 张伟花了多少
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 customer_coupons:
@@ -906,7 +953,6 @@ customer_coupons:
   - user_coupons
   - promotions
   expression: JOIN promotions FILTER user_id = ANY(entities)
-  sqlTemplate: merchant_db
   businessRules:
   - 含已用与未用;按领取时间倒序
   direction: DESC
@@ -923,7 +969,6 @@ customer_coupons:
   sampleQueries:
   - 张伟的优惠券
   - 张伟领了哪些券
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 customer_profile:
@@ -936,7 +981,6 @@ customer_profile:
   - merchant_orders
   - user_coupons
   expression: 聚合 + 最爱品类子查询 + 券计数子查询
-  sqlTemplate: merchant_db
   businessRules:
   - 宽表单行;消费均为有效成交口径
   direction: DESC
@@ -952,7 +996,6 @@ customer_profile:
   sampleQueries:
   - 张伟的用户画像
   - 看看张伟的客户画像
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 customer_panorama:
@@ -963,7 +1006,6 @@ customer_panorama:
   sourceTables:
   - merchant_customers
   expression: 'scenario: customer_profile + customer_coupons + customer_orders'
-  sqlTemplate: ''
   businessRules:
   - 场景包由编排层展开多帧;客户实体必传
   direction: DESC
@@ -980,7 +1022,6 @@ customer_panorama:
   sampleQueries:
   - 张伟的客户全景
   - 看看张伟的全貌
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 biz_overview:
@@ -993,7 +1034,6 @@ biz_overview:
   - session_metrics
   - merchant_order_items
   expression: 'scenario: gmv + order_count + aov + session_volume + refund_rate'
-  sqlTemplate: ''
   businessRules:
   - 场景包由编排层展开多帧;每节独立口径注记
   direction: DESC
@@ -1011,7 +1051,6 @@ biz_overview:
   sampleQueries:
   - 经营概览
   - 最近生意怎么样
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 gmv_mom:
@@ -1023,7 +1062,6 @@ gmv_mom:
   - merchant_orders
   - merchant_order_items
   expression: 本月子查询 / 上月子查询 + 环比
-  sqlTemplate: merchant_db
   businessRules:
   - 有效成交口径;上月为 0 时环比置空(不编造)
   direction: DESC
@@ -1040,7 +1078,6 @@ gmv_mom:
   sampleQueries:
   - 本月比上个月卖得怎么样
   - GMV环比
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 orders_trend:
@@ -1051,7 +1088,10 @@ orders_trend:
   sourceTables:
   - merchant_orders
   expression: COUNT(DISTINCT order_id) GROUP BY day|month
-  sqlTemplate: merchant_db
+  compile:
+    shape: trend
+    measure: "COUNT(DISTINCT o.order_id)::float"
+    label: 订单量
   businessRules:
   - 有效成交口径;粒度规则同销量趋势
   direction: ASC
@@ -1069,7 +1109,6 @@ orders_trend:
   sampleQueries:
   - 每日订单量走势
   - 近3个月订单量趋势
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 stock_value:
@@ -1081,7 +1120,14 @@ stock_value:
   - merchant_spus
   - merchant_skus
   expression: SUM(stock*price) GROUP BY spu ORDER BY DESC
-  sqlTemplate: merchant_db
+  compile:
+    shape: dim_rank
+    base: merchant_spus
+    joins: [sku_of_spu_strict]
+    select: [{expr: "s.title", as: productId}, {expr: "s.category", as: category}, {expr: "COALESCE(SUM(k.stock), 0)::int", as: 库存}]
+    group_by: [s.id, s.title, s.category]
+    measure: "COALESCE(SUM(k.stock * k.price), 0)::float"
+    where: ["s.status = 'ON_SALE'"]
   businessRules:
   - 仅统计在售款;展示品类与库存件数
   direction: DESC
@@ -1100,7 +1146,6 @@ stock_value:
   sampleQueries:
   - 库存价值排行
   - 哪个商品压的货值最大
-  availableDimensions: []
   permissionTag: warehouse_operator
   verifiedConfidence: 0.9
 customer_spend_trend:
@@ -1112,7 +1157,11 @@ customer_spend_trend:
   - merchant_customers
   - merchant_orders
   expression: SUM(total_amount) FILTER customer = ANY(entities) GROUP BY day|month
-  sqlTemplate: merchant_db
+  compile:
+    shape: trend
+    measure: "COALESCE(SUM(o.total_amount), 0)::float"
+    label: 消费
+    customer_filter: true
   businessRules:
   - 客户实体必传;只走订单表防明细行放大金额
   direction: ASC
@@ -1129,7 +1178,6 @@ customer_spend_trend:
   sampleQueries:
   - 张伟的消费记录折线图
   - 张伟近3个月的消费趋势
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 attribution_refund:
@@ -1141,7 +1189,6 @@ attribution_refund:
   - merchant_orders
   - merchant_order_items
   expression: cur/prev refund count per spu + delta
-  sqlTemplate: merchant_db
   businessRules:
   - 归因只做确定性环比分解,不猜测原因(08-D1);变多/变少由行序表达
   - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
@@ -1167,7 +1214,6 @@ attribution_refund:
   conflictGroup: []
   sampleQueries:
   - 为什么这个月退货突然变多
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 attribution_sales:
@@ -1179,7 +1225,6 @@ attribution_sales:
   - merchant_orders
   - merchant_order_items
   expression: cur/prev GMV per spu + delta
-  sqlTemplate: merchant_db
   businessRules:
   - 归因只做确定性环比分解,不猜测原因(08-D1);变好/变差由行序表达
   - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
@@ -1209,7 +1254,6 @@ attribution_sales:
   conflictGroup: []
   sampleQueries:
   - 为什么这个月销售额变多了
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9
 spu_compare:
@@ -1222,7 +1266,6 @@ spu_compare:
   - merchant_order_items
   - merchant_orders
   expression: SUM(quantity), SUM(quantity*price), COUNT(DISTINCT order_id) FILTER spu = ANY(entities) GROUP BY spu
-  sqlTemplate: merchant_db
   businessRules:
   - 勾选 ≥2 商品(列表页勾选实体走 PageContext);不足两项响亮拒绝
   - 有效成交口径,与 GMV 榜同源
@@ -1246,6 +1289,5 @@ spu_compare:
   sampleQueries:
   - 两个商品销售对比
   - 这两款哪个卖得好
-  availableDimensions: []
   permissionTag: sales_viewer
   verifiedConfidence: 0.9

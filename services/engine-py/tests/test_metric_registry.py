@@ -108,7 +108,6 @@ class TestLoadLoudFailures:
         assert registry["gmv"]["aliases"] == []
         assert registry["gmv"]["conflictGroup"] == []
         assert registry["gmv"]["sampleQueries"] == []
-        assert registry["gmv"]["availableDimensions"] == []
 
 
 class TestTrainingTomlSync:

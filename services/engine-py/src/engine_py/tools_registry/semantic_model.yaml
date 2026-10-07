@@ -1,0 +1,256 @@
+# 数据分析语义模型(ADR-0010 分层信任架构地基;spec .scratch/data-agent-tiered-trust)。
+# 表关联/维度/口径债务的单一事实源:编译器、schema 卡漂移断言、T2 表白名单、
+# T1 组合目录全部从本文件派生。加载即校验(engine_py/tools_registry/semantic_model.py),
+# 坏声明响亮失败,绝不静默跳过(08-P1 纪律延伸到模型面)。
+version: 1
+
+entities:
+  merchant_spus:
+    database: merchant_db
+    alias: s
+    label: 商品 SPU
+    columns:
+      id: uuid 主键
+      spu_code: 商品编码(明细表关联键)
+      title: 商品标题
+      category: 品类
+      status: "ON_SALE/OFF_SALE"
+    notes: 在售过滤 status='ON_SALE'
+  merchant_skus:
+    database: merchant_db
+    alias: k
+    label: 商品 SKU
+    columns:
+      id: uuid 主键
+      spu_id: "→ merchant_spus.id"
+      price: 售价
+      stock: 库存件数
+    notes: 展示价 = MIN(price);库存 = SUM(stock)
+  merchant_orders:
+    database: merchant_db
+    alias: o
+    label: 订单
+    columns:
+      order_id: 订单号
+      customer_id: 客户
+      status: "PAID/SHIPPED/DELIVERED/REFUNDED/CANCELLED"
+      total_amount: 金额
+      created_at: 下单时间
+    notes: 有效成交口径:status NOT IN (REFUNDED, CANCELLED)
+  merchant_order_items:
+    database: merchant_db
+    alias: oi
+    label: 订单明细
+    columns:
+      order_id: "→ merchant_orders.order_id"
+      spu_id: 商品编码(关联 spus.spu_code)
+      quantity: 件数
+      price: 成交价快照
+      cost_at_purchase: 成交成本快照(NOT NULL)
+    notes: 销量 = SUM(quantity);GMV = SUM(quantity*price);成本求和不容 COALESCE
+  merchant_product_reviews:
+    database: merchant_db
+    alias: r
+    label: 商品评价
+    columns:
+      id: 主键
+      spu_id: 商品
+      rating: 1-5 星
+      sentiment: 情感
+      content: 评语
+      created_at: 时间
+    notes: 差评口径:rating <= 2
+  merchant_customers:
+    database: merchant_db
+    alias: c
+    label: 客户
+    columns:
+      id: 主键
+      customer_id: 客户编号
+      name: 姓名
+      phone: 手机号
+      member_level: 会员级
+      created_at: 注册时间
+    notes: ""
+  merchant_audit_logs:
+    database: merchant_db
+    alias: al
+    label: 审计日志
+    columns:
+      id: 主键
+      actor: 操作者
+      action: 动作
+      created_at: 时间
+    notes: 审计面,分析只读可用
+  promotions:
+    database: merchant_db
+    alias: p
+    label: 优惠活动
+    columns:
+      id: 主键
+      name: 活动名
+    notes: ""
+  promotion_redemptions:
+    database: merchant_db
+    alias: rd
+    label: 活动核销
+    columns:
+      promotion_id: "→ promotions.id"
+      order_id: "→ merchant_orders.order_id"
+      discount_amount: 优惠金额
+      created_at: 核销时间
+    notes: 核销关联口径:真实归因,自然流量不计入
+  user_coupons:
+    database: merchant_db
+    alias: uc
+    label: 用户券包
+    columns:
+      user_id: 客户ID(= merchant_customers.customer_id)
+      promotion_id: "→ promotions.id"
+      status: claimed/used
+      claimed_at: 领取时间
+      used_at: 核销时间
+    notes: 客户实体过滤
+  session_metrics:
+    database: engine_db
+    alias: sm
+    label: 会话指标
+    columns:
+      business_id: 租户
+      resolution_status: resolved_auto/未解决
+      created_at: 时间
+    notes: engine 本地库;查询必带 business_id 谓词
+  after_sale_tickets:
+    database: engine_db
+    alias: t
+    label: 售后工单
+    columns:
+      business_id: 租户
+      status: 工单状态
+      created_at: 时间
+    notes: engine 本地库;查询必带 business_id 谓词
+
+# join 语义:table = 被连入表(JOIN 关键字后),base = 基表(FROM 侧);
+# condition 必须同时引用两侧别名。方向不声明即无歧义 —— 连接方向由使用方
+# (形状的 base + joins 序列)决定。
+joins:
+  - name: sku_of_spu
+    table: merchant_skus
+    base: merchant_spus
+    type: left
+    condition: "k.spu_id = s.id"
+  - name: sku_of_spu_strict
+    table: merchant_skus
+    base: merchant_spus
+    type: inner
+    condition: "k.spu_id = s.id"
+  - name: items_of_order
+    table: merchant_orders
+    base: merchant_order_items
+    type: inner
+    condition: "o.order_id = oi.order_id"
+  - name: items_of_spu_code
+    table: merchant_order_items
+    base: merchant_spus
+    type: inner
+    condition: "oi.spu_id = s.spu_code"
+  - name: orders_of_customer
+    table: merchant_customers
+    base: merchant_orders
+    type: inner
+    condition: "c.customer_id = o.customer_id"
+  - name: review_of_spu
+    table: merchant_spus
+    base: merchant_product_reviews
+    type: inner
+    condition: "s.id = r.spu_id"
+  - name: redemption_of_promotion
+    table: promotions
+    base: promotion_redemptions
+    type: inner
+    condition: "p.id = rd.promotion_id"
+  - name: redemption_of_order
+    table: merchant_orders
+    base: promotion_redemptions
+    type: inner
+    condition: "o.order_id = rd.order_id"
+  - name: coupon_of_promotion
+    table: promotions
+    base: user_coupons
+    type: inner
+    condition: "p.id = uc.promotion_id"
+
+dimensions:
+  category:
+    label: 品类
+    kind: enum
+    entity: merchant_spus
+    column: category
+    values: [户外机能, 潮流T恤, 下装裤类, 潮流鞋靴, 背包收纳, 露营装备, 衬衫, 配饰, 运动配件]
+  order_status:
+    label: 订单状态
+    kind: enum
+    entity: merchant_orders
+    column: status
+    values: [PAID, SHIPPED, DELIVERED, REFUNDED, CANCELLED]
+  spu:
+    label: 商品
+    kind: entity
+    entity: merchant_spus
+    id_column: spu_code
+    label_column: title
+  customer:
+    label: 客户
+    kind: entity
+    entity: merchant_customers
+    id_column: customer_id
+    label_column: name
+  promotion:
+    label: 活动
+    kind: entity
+    entity: promotions
+    id_column: id
+    label_column: name
+
+# 逃生舱债务清单(ADR-0010 迁移纪律):声明模型暂不表达、手写 SQL 保留的指标。
+# 每条必须带 reason 与 plan;指标键必须存在于 metrics.yaml(加载器交叉断言)。
+bespoke_debt:
+  - metric: order_overview
+    reason: 逐笔行 + 窗口函数合计/均值列
+    plan: 声明 list 形状(行列表+窗口列)后迁
+  - metric: promo_effect
+    reason: 无维度总览单行 + 实体必传闸
+    plan: total_single 支持必填实体闸后迁
+  - metric: promo_compare
+    reason: 双实体并排对比(≥2 活动闸)
+    plan: 声明 compare 形状后迁
+  - metric: promo_sku_compare
+    reason: 目标款标记列(CASE 实体集合)
+    plan: 声明 target_mark 维度装饰后迁
+  - metric: customer_orders
+    reason: 实体订单列表卡(非聚合)
+    plan: 声明 entity_list 形状后迁
+  - metric: customer_spend_stats
+    reason: 实体宽表单行(多度量并排)
+    plan: 声明 profile 形状后迁
+  - metric: customer_profile
+    reason: 宽表 + 相关子查询(最爱品类/券计数)
+    plan: 拆子度量为可组合度量后迁
+  - metric: customer_coupons
+    reason: 券包明细列表(非聚合)
+    plan: 同 entity_list 形状
+  - metric: spu_compare
+    reason: ≥2 商品勾选并排对比
+    plan: 同 compare 形状
+  - metric: attribution_refund
+    reason: 双期 CTE 环比分解(FULL OUTER JOIN)
+    plan: T1 compare_previous 算子成熟后收编
+  - metric: attribution_sales
+    reason: 同上
+    plan: 同上
+  - metric: gmv_mom
+    reason: UNION ALL 双期环比单行
+    plan: T1 compare_previous 算子成熟后收编
+  - metric: zero_sales
+    reason: NOT EXISTS 反连接判零
+    plan: 声明 anti_join 过滤后迁

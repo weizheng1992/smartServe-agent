@@ -99,3 +99,471 @@
 {"question": "今天心情如何", "expect_unsupported": true, "source": "longtail"}
 {"question": "帮我算算公司估值", "expect_unsupported": true, "source": "longtail"}
 {"question": "今天天气怎么样", "expect_unsupported": true, "source": "longtail"}
+{"question": "销售额", "expect_metric": "gmv", "source": "slot_generated"}
+{"question": "上个月销售额", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天销售额", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天销售额top3", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "流水", "expect_metric": "gmv", "source": "slot_generated"}
+{"question": "上个月流水", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天流水", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天流水top3", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "业绩", "expect_metric": "gmv", "source": "slot_generated"}
+{"question": "上个月业绩", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天业绩", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天业绩top3", "expect_metric": "gmv", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "销量", "expect_metric": "volume", "source": "slot_generated"}
+{"question": "上个月销量", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天销量", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天销量top3", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "走量", "expect_metric": "volume", "source": "slot_generated"}
+{"question": "上个月走量", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天走量", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天走量top3", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "出货量", "expect_metric": "volume", "source": "slot_generated"}
+{"question": "上个月出货量", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天出货量", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天出货量top3", "expect_metric": "volume", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "最赚钱", "expect_metric": "gross_profit", "source": "slot_generated"}
+{"question": "上个月最赚钱", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天最赚钱", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天最赚钱top3", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "利润最高", "expect_metric": "gross_profit", "source": "slot_generated"}
+{"question": "上个月利润最高", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天利润最高", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天利润最高top3", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "利润最大", "expect_metric": "gross_profit", "source": "slot_generated"}
+{"question": "上个月利润最大", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天利润最大", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天利润最大top3", "expect_metric": "gross_profit", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "毛利率", "expect_metric": "margin_rate", "source": "slot_generated"}
+{"question": "上个月毛利率", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天毛利率", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天毛利率top3", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "利润率", "expect_metric": "margin_rate", "source": "slot_generated"}
+{"question": "上个月利润率", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天利润率", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天利润率top3", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "溢价最高", "expect_metric": "margin_rate", "source": "slot_generated"}
+{"question": "上个月溢价最高", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天溢价最高", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天溢价最高top3", "expect_metric": "margin_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "滞销", "expect_metric": "stock_risk", "source": "slot_generated"}
+{"question": "上个月滞销", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天滞销", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天滞销top3", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "积压", "expect_metric": "stock_risk", "source": "slot_generated"}
+{"question": "上个月积压", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天积压", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天积压top3", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "卖不出去", "expect_metric": "stock_risk", "source": "slot_generated"}
+{"question": "上个月卖不出去", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天卖不出去", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天卖不出去top3", "expect_metric": "stock_risk", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "差评", "expect_metric": "review_bad", "source": "slot_generated"}
+{"question": "上个月差评", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天差评", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天差评top3", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "差评最多", "expect_metric": "review_bad", "source": "slot_generated"}
+{"question": "上个月差评最多", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天差评最多", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天差评最多top3", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "吐槽最多", "expect_metric": "review_bad", "source": "slot_generated"}
+{"question": "上个月吐槽最多", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天吐槽最多", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天吐槽最多top3", "expect_metric": "review_bad", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "退款率", "expect_metric": "refund_rate", "source": "slot_generated"}
+{"question": "上个月退款率", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天退款率", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天退款率top3", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "退货率", "expect_metric": "refund_rate", "source": "slot_generated"}
+{"question": "上个月退货率", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天退货率", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天退货率top3", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "退单率", "expect_metric": "refund_rate", "source": "slot_generated"}
+{"question": "上个月退单率", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天退单率", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天退单率top3", "expect_metric": "refund_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "会话量", "expect_metric": "session_volume", "source": "slot_generated"}
+{"question": "上个月会话量", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天会话量", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天会话量top3", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "咨询量", "expect_metric": "session_volume", "source": "slot_generated"}
+{"question": "上个月咨询量", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天咨询量", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天咨询量top3", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "会话数", "expect_metric": "session_volume", "source": "slot_generated"}
+{"question": "上个月会话数", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天会话数", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天会话数top3", "expect_metric": "session_volume", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "核销订单", "expect_metric": "promo_orders", "source": "slot_generated"}
+{"question": "上个月核销订单", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天核销订单", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天核销订单top3", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动核销", "expect_metric": "promo_orders", "source": "slot_generated"}
+{"question": "上个月活动核销", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动核销", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动核销top3", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动使用情况", "expect_metric": "promo_orders", "source": "slot_generated"}
+{"question": "上个月活动使用情况", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动使用情况", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动使用情况top3", "expect_metric": "promo_orders", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "优惠总额", "expect_metric": "promo_discount_total", "source": "slot_generated"}
+{"question": "上个月优惠总额", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天优惠总额", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天优惠总额top3", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动成本", "expect_metric": "promo_discount_total", "source": "slot_generated"}
+{"question": "上个月活动成本", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动成本", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动成本top3", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "优惠了多少钱", "expect_metric": "promo_discount_total", "source": "slot_generated"}
+{"question": "上个月优惠了多少钱", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天优惠了多少钱", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天优惠了多少钱top3", "expect_metric": "promo_discount_total", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动收益", "expect_metric": "promo_gmv_total", "source": "slot_generated"}
+{"question": "上个月活动收益", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动收益", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动收益top3", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "哪个活动收益", "expect_metric": "promo_gmv_total", "source": "slot_generated"}
+{"question": "上个月哪个活动收益", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天哪个活动收益", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天哪个活动收益top3", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动gmv", "expect_metric": "promo_gmv_total", "source": "slot_generated"}
+{"question": "上个月活动gmv", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动gmv", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动gmvtop3", "expect_metric": "promo_gmv_total", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "销售额趋势", "expect_metric": "gmv_trend", "source": "slot_generated"}
+{"question": "销售额走势", "expect_metric": "gmv_trend", "source": "slot_generated"}
+{"question": "销量趋势", "expect_metric": "volume_trend", "source": "slot_generated"}
+{"question": "销量走势", "expect_metric": "volume_trend", "source": "slot_generated"}
+{"question": "月销量", "expect_metric": "volume_trend", "source": "slot_generated"}
+{"question": "订单概览", "expect_metric": "order_overview", "source": "slot_generated"}
+{"question": "上个月订单概览", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天订单概览", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天订单概览top3", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "这几笔订单", "expect_metric": "order_overview", "source": "slot_generated"}
+{"question": "上个月这几笔订单", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天这几笔订单", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天这几笔订单top3", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "选中订单", "expect_metric": "order_overview", "source": "slot_generated"}
+{"question": "上个月选中订单", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天选中订单", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天选中订单top3", "expect_metric": "order_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "售后工单", "expect_metric": "after_sale_overview", "source": "slot_generated"}
+{"question": "上个月售后工单", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天售后工单", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天售后工单top3", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "售后概况", "expect_metric": "after_sale_overview", "source": "slot_generated"}
+{"question": "上个月售后概况", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天售后概况", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天售后概况top3", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "工单概况", "expect_metric": "after_sale_overview", "source": "slot_generated"}
+{"question": "上个月工单概况", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天工单概况", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天工单概况top3", "expect_metric": "after_sale_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "自动解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated"}
+{"question": "上个月自动解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天自动解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天自动解决率top3", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "AI 解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated"}
+{"question": "上个月AI 解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天AI 解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天AI 解决率top3", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated"}
+{"question": "上个月解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天解决率", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天解决率top3", "expect_metric": "ai_resolution_rate", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动效果", "expect_metric": "promo_effect", "source": "slot_generated"}
+{"question": "上个月活动效果", "expect_metric": "promo_effect", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动效果", "expect_metric": "promo_effect", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动效果top3", "expect_metric": "promo_effect", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动销量", "expect_metric": "promo_effect", "source": "slot_generated"}
+{"question": "上个月活动销量", "expect_metric": "promo_effect", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动销量", "expect_metric": "promo_effect", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "活动卖得怎么样", "expect_metric": "promo_effect", "source": "slot_generated"}
+{"question": "上个月活动卖得怎么样", "expect_metric": "promo_effect", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动卖得怎么样", "expect_metric": "promo_effect", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动卖得怎么样top3", "expect_metric": "promo_effect", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动里哪款卖得好", "expect_metric": "promo_sku_compare", "source": "slot_generated"}
+{"question": "上个月活动里哪款卖得好", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动里哪款卖得好", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动里哪款卖得好top3", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动商品对比", "expect_metric": "promo_sku_compare", "source": "slot_generated"}
+{"question": "上个月活动商品对比", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动商品对比", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动商品对比top3", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动内对比", "expect_metric": "promo_sku_compare", "source": "slot_generated"}
+{"question": "上个月活动内对比", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动内对比", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动内对比top3", "expect_metric": "promo_sku_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "两个活动对比", "expect_metric": "promo_compare", "source": "slot_generated"}
+{"question": "上个月两个活动对比", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天两个活动对比", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天两个活动对比top3", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "活动对比", "expect_metric": "promo_compare", "source": "slot_generated"}
+{"question": "上个月活动对比", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天活动对比", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天活动对比top3", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "对比两个活动", "expect_metric": "promo_compare", "source": "slot_generated"}
+{"question": "上个月对比两个活动", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天对比两个活动", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天对比两个活动top3", "expect_metric": "promo_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "客户订单", "expect_metric": "customer_orders", "source": "slot_generated"}
+{"question": "上个月客户订单", "expect_metric": "customer_orders", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天客户订单", "expect_metric": "customer_orders", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天客户订单top3", "expect_metric": "customer_orders", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "名下订单", "expect_metric": "customer_orders", "source": "slot_generated"}
+{"question": "上个月名下订单", "expect_metric": "customer_orders", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天名下订单", "expect_metric": "customer_orders", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天名下订单top3", "expect_metric": "customer_orders", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "客单价", "expect_metric": "aov", "source": "slot_generated"}
+{"question": "上个月客单价", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天客单价", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天客单价top3", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "平均每单", "expect_metric": "aov", "source": "slot_generated"}
+{"question": "上个月平均每单", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天平均每单", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天平均每单top3", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "平均订单金额", "expect_metric": "aov", "source": "slot_generated"}
+{"question": "上个月平均订单金额", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天平均订单金额", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天平均订单金额top3", "expect_metric": "aov", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "订单量", "expect_metric": "order_count", "source": "slot_generated"}
+{"question": "上个月订单量", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天订单量", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天订单量top3", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "订单数", "expect_metric": "order_count", "source": "slot_generated"}
+{"question": "上个月订单数", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天订单数", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天订单数top3", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "成交笔数", "expect_metric": "order_count", "source": "slot_generated"}
+{"question": "上个月成交笔数", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天成交笔数", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天成交笔数top3", "expect_metric": "order_count", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "好评榜", "expect_metric": "review_good", "source": "slot_generated"}
+{"question": "上个月好评榜", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天好评榜", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天好评榜top3", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "好评最多的商品", "expect_metric": "review_good", "source": "slot_generated"}
+{"question": "上个月好评最多的商品", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天好评最多的商品", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天好评最多的商品top3", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "好评数排行", "expect_metric": "review_good", "source": "slot_generated"}
+{"question": "上个月好评数排行", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天好评数排行", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天好评数排行top3", "expect_metric": "review_good", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "滞销零销量", "expect_metric": "zero_sales", "source": "slot_generated"}
+{"question": "上个月滞销零销量", "expect_metric": "zero_sales", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天滞销零销量", "expect_metric": "zero_sales", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "零销量商品", "expect_metric": "zero_sales", "source": "slot_generated"}
+{"question": "上个月零销量商品", "expect_metric": "zero_sales", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天零销量商品", "expect_metric": "zero_sales", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天零销量商品top3", "expect_metric": "zero_sales", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "零销量", "expect_metric": "zero_sales", "source": "slot_generated"}
+{"question": "上个月零销量", "expect_metric": "zero_sales", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天零销量", "expect_metric": "zero_sales", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "品类GMV榜", "expect_metric": "category_gmv_top", "source": "slot_generated"}
+{"question": "上个月品类GMV榜", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天品类GMV榜", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天品类GMV榜top3", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "上个月品类GMV排行", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天品类GMV排行", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天品类GMV排行top3", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "品类销售额排行", "expect_metric": "category_gmv_top", "source": "slot_generated"}
+{"question": "上个月品类销售额排行", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天品类销售额排行", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天品类销售额排行top3", "expect_metric": "category_gmv_top", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "客户消费榜", "expect_metric": "customer_spend_top", "source": "slot_generated"}
+{"question": "上个月客户消费榜", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天客户消费榜", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天客户消费榜top3", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "上个月客户消费排行", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天客户消费排行", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天客户消费排行top3", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "消费最高的客户", "expect_metric": "customer_spend_top", "source": "slot_generated"}
+{"question": "上个月消费最高的客户", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天消费最高的客户", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天消费最高的客户top3", "expect_metric": "customer_spend_top", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "消费统计", "expect_metric": "customer_spend_stats", "source": "slot_generated"}
+{"question": "上个月消费统计", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天消费统计", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天消费统计top3", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "消费情况", "expect_metric": "customer_spend_stats", "source": "slot_generated"}
+{"question": "上个月消费情况", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天消费情况", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天消费情况top3", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "消费总额", "expect_metric": "customer_spend_stats", "source": "slot_generated"}
+{"question": "上个月消费总额", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天消费总额", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天消费总额top3", "expect_metric": "customer_spend_stats", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "优惠券", "expect_metric": "customer_coupons", "source": "slot_generated"}
+{"question": "上个月优惠券", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天优惠券", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天优惠券top3", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "优惠券列表", "expect_metric": "customer_coupons", "source": "slot_generated"}
+{"question": "上个月优惠券列表", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天优惠券列表", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天优惠券列表top3", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "持有哪些券", "expect_metric": "customer_coupons", "source": "slot_generated"}
+{"question": "上个月持有哪些券", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天持有哪些券", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天持有哪些券top3", "expect_metric": "customer_coupons", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "用户画像", "expect_metric": "customer_profile", "source": "slot_generated"}
+{"question": "上个月用户画像", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天用户画像", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天用户画像top3", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "客户画像", "expect_metric": "customer_profile", "source": "slot_generated"}
+{"question": "上个月客户画像", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天客户画像", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天客户画像top3", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "画像", "expect_metric": "customer_profile", "source": "slot_generated"}
+{"question": "上个月画像", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天画像", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天画像top3", "expect_metric": "customer_profile", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "客户全景", "expect_metric": "customer_panorama", "source": "slot_generated"}
+{"question": "上个月客户全景", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天客户全景", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天客户全景top3", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "客户全景看下", "expect_metric": "customer_panorama", "source": "slot_generated"}
+{"question": "上个月客户全景看下", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天客户全景看下", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天客户全景看下top3", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "客户全貌", "expect_metric": "customer_panorama", "source": "slot_generated"}
+{"question": "上个月客户全貌", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天客户全貌", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天客户全貌top3", "expect_metric": "customer_panorama", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "上个月经营概览", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天经营概览", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天经营概览top3", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "经营怎么样", "expect_metric": "biz_overview", "source": "slot_generated"}
+{"question": "上个月经营怎么样", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天经营怎么样", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天经营怎么样top3", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "经营情况", "expect_metric": "biz_overview", "source": "slot_generated"}
+{"question": "上个月经营情况", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天经营情况", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天经营情况top3", "expect_metric": "biz_overview", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "环比", "expect_metric": "gmv_mom", "source": "slot_generated"}
+{"question": "上个月环比", "expect_metric": "gmv_mom", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天环比", "expect_metric": "gmv_mom", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天环比top3", "expect_metric": "gmv_mom", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "上个月GMV环比", "expect_metric": "gmv_mom", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天GMV环比", "expect_metric": "gmv_mom", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天GMV环比top3", "expect_metric": "gmv_mom", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "比上个月", "expect_metric": "gmv_mom", "source": "slot_generated"}
+{"question": "订单走势", "expect_metric": "orders_trend", "source": "slot_generated"}
+{"question": "每日订单", "expect_metric": "orders_trend", "source": "slot_generated"}
+{"question": "库存价值", "expect_metric": "stock_value", "source": "slot_generated"}
+{"question": "上个月库存价值", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天库存价值", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天库存价值top3", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "库存金额", "expect_metric": "stock_value", "source": "slot_generated"}
+{"question": "上个月库存金额", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天库存金额", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天库存金额top3", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "库存货值", "expect_metric": "stock_value", "source": "slot_generated"}
+{"question": "上个月库存货值", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天库存货值", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天库存货值top3", "expect_metric": "stock_value", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "消费记录", "expect_metric": "customer_spend_trend", "source": "slot_generated"}
+{"question": "消费趋势", "expect_metric": "customer_spend_trend", "source": "slot_generated"}
+{"question": "消费折线", "expect_metric": "customer_spend_trend", "source": "slot_generated"}
+{"question": "为什么退货变多", "expect_metric": "attribution_refund", "source": "slot_generated"}
+{"question": "上个月为什么退货变多", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天为什么退货变多", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天为什么退货变多top3", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "为什么退货变少", "expect_metric": "attribution_refund", "source": "slot_generated"}
+{"question": "上个月为什么退货变少", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天为什么退货变少", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天为什么退货变少top3", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "退货为什么变多", "expect_metric": "attribution_refund", "source": "slot_generated"}
+{"question": "上个月退货为什么变多", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天退货为什么变多", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天退货为什么变多top3", "expect_metric": "attribution_refund", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "为什么卖得变好", "expect_metric": "attribution_sales", "source": "slot_generated"}
+{"question": "上个月为什么卖得变好", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天为什么卖得变好", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天为什么卖得变好top3", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "为什么卖得变差", "expect_metric": "attribution_sales", "source": "slot_generated"}
+{"question": "上个月为什么卖得变差", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天为什么卖得变差", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天为什么卖得变差top3", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "为什么销量变多", "expect_metric": "attribution_sales", "source": "slot_generated"}
+{"question": "上个月为什么销量变多", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天为什么销量变多", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天为什么销量变多top3", "expect_metric": "attribution_sales", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "上个月两个商品销售对比", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天两个商品销售对比", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天两个商品销售对比top3", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "商品销售对比", "expect_metric": "spu_compare", "source": "slot_generated"}
+{"question": "上个月商品销售对比", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天商品销售对比", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天商品销售对比top3", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "商品对比", "expect_metric": "spu_compare", "source": "slot_generated"}
+{"question": "上个月商品对比", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_month"}
+{"question": "近7天商品对比", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_7d"}
+{"question": "近30天商品对比top3", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_30d"}
+{"question": "华东区利润贡献排名", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "复购率最高的客户有哪些", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "哪些客户加了购物车没下单", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "退货客户和低分评价客户的重合度", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "库存周转天数是多少", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "各渠道的转化率对比", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "和竞品比我们的价格怎么样", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "下个月的数字预测一下", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "会员和非会员的消费差异", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "新老客复购对比", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按颜色统计出货", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按尺码统计出货", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "哪些商品经常被一起购买", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "活动期间的拉新人数", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "页面停留时长和出货的关系", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "退货原因分布", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "低分评价的关键词汇总", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按供应商统计采购成本", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "库存低于安全线的预警名单", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按收货地区统计订单分布", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "物流时效和评价的关系", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "收藏但未购买的商品", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "每天各时段的下单高峰", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "去年同期比增长率", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "品类之间的关联购买", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "客户生命周期价值排名", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "打折力度和出货的弹性", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "未支付订单的挽回率", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "会员等级分布和消费结构", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按价格带统计出货占比", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "评价情感倾向汇总", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "竞品活动期间我们的客户流失", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按季度汇总的退货占比", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "哪些款断码了", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "组合装商品的动销情况", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "直播带动的出货", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "私域客户和公域客户对比", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "客户投诉和退货的关联", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "每个品类的动销率", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "商品上架时间与出货的关系", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "库龄超过90天的库存", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "订单金额区间的分布", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "首单时间和复购间隔", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按促销类型统计核销", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "每个客服的会话承接量", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "会话响应时长的分布", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按周粒度拆解各月走势", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "每个销售顾问的提成排名", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "每周的增长速率对比", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "每单金额按周的变化率", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "券核销转化漏斗", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "盈利质量差的款有哪些", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "连续三周出货下滑的款", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "大客户的共同特征", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "全年赚头走势", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "老客召回的成效", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按包装规格统计出货", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "赠品对正装出货的带动", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "退货后的二次购买率", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "上新首周表现对比", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "断码预警名单", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "SKU 动销分层", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "节假日和平日的出货差异", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "按支付方式统计订单", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "坏账和退款的关系", "expect_unsupported": true, "source": "t2_longtail"}

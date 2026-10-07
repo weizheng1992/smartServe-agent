@@ -11,3 +11,9 @@ from importlib import import_module
 def metric_semantic_registry() -> dict:
     module = import_module("engine_py.tools_registry.metric_registry")
     return module.METRIC_SEMANTIC_REGISTRY
+
+
+def semantic_model() -> dict:
+    """语义模型(ADR-0010:实体/join/维度/债务清单单一事实源)。"""
+    module = import_module("engine_py.tools_registry.semantic_model")
+    return module.SEMANTIC_MODEL

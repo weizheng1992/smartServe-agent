@@ -19,6 +19,21 @@ from typing import TYPE_CHECKING
 
 from .tools_registry_bridge import metric_semantic_registry
 
+
+def category_pattern() -> re.Pattern[str]:
+    """品类词表正则(ADR-0010:枚举维度单一事实源 = semantic_model.yaml;
+    新增品类改模型 YAML,不改本模块)。惰性构建(进程一次)避免加载环。"""
+    global _CATEGORY_PATTERN
+    if _CATEGORY_PATTERN is None:
+        from .tools_registry_bridge import semantic_model
+
+        values = semantic_model()["dimensions"]["category"]["values"]
+        _CATEGORY_PATTERN = re.compile("|".join(values), re.IGNORECASE)
+    return _CATEGORY_PATTERN
+
+
+_CATEGORY_PATTERN: re.Pattern[str] | None = None
+
 if TYPE_CHECKING:  # 仅类型位;运行时经函数内延迟 import 防顶层环
     from .engine import Clarify, StructuredQueryIntent
 
@@ -70,8 +85,8 @@ def extract_slots(clean: str) -> tuple[int, dict | None, str | None]:
                 n = int(raw) if raw and raw.isdigit() else CN_MONTH_NUMS.get(raw or "", 6)
                 time_window["n"] = min(max(n, 1), 24)
             break
-    cat_match = re.search(r"(户外机能|潮流T恤|下装裤类|潮流鞋靴|背包收纳|露营装备|衬衫|配饰|运动配件)", clean, re.IGNORECASE)
-    category = cat_match.group(1) if cat_match else None
+    cat_match = category_pattern().search(clean)
+    category = cat_match.group(0) if cat_match else None
     return limit, time_window, category
 
 

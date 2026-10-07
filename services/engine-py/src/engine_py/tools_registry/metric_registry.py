@@ -36,7 +36,6 @@ def _load() -> dict[str, dict[str, Any]]:
         entry.setdefault("aliases", [])
         entry.setdefault("conflictGroup", [])
         entry.setdefault("sampleQueries", [])
-        entry.setdefault("availableDimensions", [])
         registry[key] = entry
     if not registry:
         raise ValueError("metrics.yaml 为空:闭集不允许为空(响亮失败)")

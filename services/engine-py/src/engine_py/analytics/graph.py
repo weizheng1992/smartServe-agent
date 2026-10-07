@@ -126,6 +126,25 @@ async def ask(
         try:
             intent, _, rewritten_q = await fallback_intent(question, allowed, session_ctx, history=history, trace=trace)
         except UnsupportedQuery as err:
+            # T1 组合通道(ADR-0010):L0/L2/L3 闭集全未命中 → 语义层组合
+            # (LLM 产组合、编译器拼 SQL);未开闸/组合拒绝/失败 → 维持响亮
+            # unsupported 并落库飞轮,绝不静默近似。
+            composed = await _composition_route(question, allowed, session_ctx, engine, trace)
+            if composed is not None:
+                frame, comp = composed
+                if comp is not None:
+                    payload = {"last_question": question, "intent": comp.__dict__}
+                    if session_id:
+                        if persist_session:
+                            await session_store.save(business_id, session_id, payload)
+                        else:
+                            frame["_sessionPayload"] = payload
+                return frame
+            # T2 探索通道(ADR-0010):双闸(env ∧ admin/finance_owner)通过才
+            # 进入;守卫不过/执行失败回落 unsupported 响亮语义
+            explored = await _explore_route(question, session_ctx, trace)
+            if explored is not None:
+                return explored
             await _log_unanswered(session_ctx, question)
             await trace.record("unsupported", final_method="none")
             return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": str(err)}, trace)
@@ -258,7 +277,7 @@ async def ask(
     return outcome
 
 
-def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict:
+def _result_frame(question: str, result, intent, title_prefix: str = "", *, trust: str = "verified", caliber: str | None = None) -> dict:
     from .tools_registry_bridge import metric_semantic_registry
 
     cards = build_cards(question, result, intent)
@@ -269,7 +288,10 @@ def _result_frame(question: str, result, intent, title_prefix: str = "") -> dict
         "title": title,
         "metric": result.metric,
         "unit": result.unit,
-        "caliber": result.caliber,
+        # 信任章(ADR-0010):verified=核验模板/composed=语义层组合/explored=探索生成;
+        # 机器语义走字段,呈现层严禁解析口径文案推断(2026-10-03 教训)
+        "trust": trust,
+        "caliber": caliber or result.caliber,
         # 用户图表指令(chart_hint)优先,缺省由指标语义自动推断(趋势→折线);
         # 仲裁唯一出处 chart_policy.decide(2026-10-03 收口)
         "chart": chart_policy.decide(intent.chart_hint, intent.metric, result.chart),
@@ -500,6 +522,115 @@ def _clarify_frame(clarify: Clarify, allowed: list[str] | None) -> dict:
     if allowed is not None and options and all("key" in o for o in options):
         clarify = _dc_replace(clarify, options=[o for o in options if o.get("key") in allowed])
     return clarify.to_frame()
+
+
+async def _composition_route(question: str, allowed: list[str] | None, session_ctx: dict, engine: MetricQueryEngine, trace: Trace):
+    """T1 组合通道(ADR-0010):返回 (结果帧, CompositionQuery) 或 None。
+
+    None = 未开闸(AI_T1_COMPOSE≠on)/ 组合闭集外拒绝 / 实体零命中 / 编译执行
+    失败 —— 调用方维持 unsupported 响亮语义并落库。实体提及走确定性落地三态
+    (唯一命中绑定 / 多命中实体反问 / 零命中响亮),与 L3 同纪律。
+    """
+    from . import composition
+
+    if not composition.composition_enabled():
+        return None
+    try:
+        comp = await composition.compose_resolve(question, allowed)
+    except composition.CompositionRejected as err:
+        print(f"[T1] 组合拒绝: {err}")
+        return None
+    except Exception as err:
+        print(f"[T1] 组合解析失败(放行 unsupported): {err}")
+        return None
+
+    entity_ids: list[str] = []
+    if comp.entity_kind and comp.entity_mention:
+        from . import dimensions
+
+        try:
+            candidates = await dimensions.resolve_entity(comp.entity_kind, comp.entity_mention)
+        except Exception as err:
+            print(f"[T1] 实体解析失败(放行 unsupported): {err}")
+            return None
+        hit = dimensions.bind_literal(question, candidates, fields=("name", "label", "id"))
+        if hit is None:
+            if candidates:  # 多命中 → 实体反问(与 L3 三态同源;clarify 不盖章)
+                return _clarify_frame(
+                    Clarify(
+                        kind="entity",
+                        question=f"请选择{dimensions.kind_label(comp.entity_kind)}——",
+                        options=[{"label": c["label"]} for c in candidates],
+                        original_question=question,
+                    ),
+                    None,
+                ), None
+            print(f"[T1] 实体零命中(响亮): {comp.entity_mention!r}")
+            return None
+        entity_ids = [hit["id"]]
+
+    try:
+        compiled = composition.compile_composition(comp, session_ctx["business_id"], entity_ids)
+        result = await engine.execute_async(compiled)
+    except UnsupportedQuery as err:
+        print(f"[T1] 组合编译拒绝: {err}")
+        return None
+    except Exception as err:
+        print(f"[T1] 组合执行失败(放行 unsupported): {err}")
+        return None
+
+    # 组合面用轻量意图占位(复用 _result_frame 的标题/图表/速览管线)
+    shim = StructuredQueryIntent(
+        metric=comp.metric, direction=comp.direction, limit=comp.limit,
+        time_window=comp.time_window, category=comp.category,
+    )
+    frame = _with_trace(_result_frame(
+        comp.source_question or question, result, shim,
+        trust=composition.COMPOSED_TRUST, caliber=composition.COMPOSED_CALIBER,
+    ), trace)
+    await trace.record(
+        frame.get("type", "error"), final_metric=comp.metric,
+        final_method="composition", row_count=len(result.rows or []),
+    )
+    return frame, comp
+
+
+async def _explore_route(question: str, session_ctx: dict, trace: Trace):
+    """T2 探索通道(ADR-0010):返回 explored 结果帧或 None(回落 unsupported)。
+
+    帧必带 trust=explored + generatedSql(折叠展示,口径可审计);注入形状闸
+    在分层之前已拦过一轮,此处信任边界由 t2_explore.guard_explore_sql 承担。
+    """
+    from . import t2_explore
+
+    if not t2_explore.enabled_for(session_ctx.get("role", "")):
+        return None
+    try:
+        result, sql = await t2_explore.explore(question)
+    except t2_explore.ExploreRejected as err:
+        print(f"[T2] 探索拒绝: {err}")
+        return None
+    except Exception as err:
+        print(f"[T2] 探索失败(放行 unsupported): {err}")
+        return None
+
+    shim = StructuredQueryIntent(metric="__explore__")
+    cards = build_cards(question, result, shim)
+    frame = _with_trace({
+        "type": "result",
+        "title": "探索性查询(非核验口径)",
+        "metric": result.metric,
+        "unit": result.unit,
+        "trust": t2_explore.EXPLORED_TRUST,
+        "caliber": t2_explore.EXPLORED_CALIBER,
+        "chart": None,
+        "summary": _quick_summary(result, shim),
+        "rows": result.rows,
+        "cards": cards,
+        "generatedSql": sql,
+    }, trace)
+    await trace.record("result", final_metric="__explore__", final_method="t2_explore", row_count=len(result.rows or []))
+    return frame
 
 
 async def _log_unanswered(session_ctx: dict, question: str) -> None:
