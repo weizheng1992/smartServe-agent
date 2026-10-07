@@ -14,6 +14,9 @@ import { expect, test } from '@playwright/test';
  * 「先推荐产生候选,再序数加购」,商品名动态断言(不再写死 Nike Pegasus)。
  */
 test.use({ baseURL: 'http://localhost:3005' });
+// 真实 LLM 驱动流:三浏览器并发压模型偶发超时(隔离/全量复跑均绿的非确定性
+// 抖动,2026-10-07 实测)—— 单次重试消 flake,不掩饰真回归(重试仍红即暴露)
+test.describe.configure({ retries: 1 });
 
 test('聊天加购后商城购物车应收到 1 件商品(非空、不翻倍)', async ({ page }) => {
   // 每次运行使用独立用户 → 独立线程,保证确定性

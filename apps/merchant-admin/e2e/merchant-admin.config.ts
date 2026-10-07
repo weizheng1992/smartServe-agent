@@ -27,7 +27,9 @@ export default defineConfig({
       timeout: 120 * 1000,
     },
     {
-      command: 'bun run dev:merchant-admin',
+      // webServer 以 config 所在目录为 cwd:`bun run` 不向上找 package.json,
+      // 裸脚本名恒「Script not found」—— 显式 cd 仓库根(2026-10-07 实测修补)
+      command: 'cd ../.. && bun run dev:merchant-admin',
       url: 'http://localhost:3006/',
       reuseExistingServer: true,
       timeout: 120 * 1000,

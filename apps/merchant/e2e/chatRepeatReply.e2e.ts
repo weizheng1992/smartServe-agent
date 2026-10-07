@@ -8,6 +8,9 @@ import { expect, test } from '@playwright/test';
  * chat 返回,刷新之后才有"。修复后去重仅按 messageId 幂等。
  */
 test.use({ baseURL: 'http://localhost:3005' });
+// 真实 LLM 驱动流:三浏览器并发压模型偶发超时(隔离/全量复跑均绿的非确定性
+// 抖动,2026-10-07 实测)—— 单次重试消 flake,不掩饰真回归(重试仍红即暴露)
+test.describe.configure({ retries: 1 });
 
 test('重复询问推荐热销,第二条 AI 回复应实时出现', async ({ page }) => {
   // 每次运行使用独立用户 → 独立线程,保证确定性
