@@ -480,17 +480,31 @@ async def store_cart(customerId: str | None = None):
         return {"success": True, "items": [], "totalQuantity": 0, "totalAmount": 0}
 
 
+class StoreChatIn(BaseModel):
+    """商户门户顾客消息入参 DTO(夜评 2026-10-07 #7 拔除裸 dict;与 /api/chat
+    DispatchChatIn 同风格,字段 camelCase 直用,全部宽容缺省 —— 空文本但有图
+    放行的通道校验仍归路由手写分支)。"""
+
+    message: str | None = None
+    input: str | None = None
+    imageUrls: list[str] | None = None
+    businessId: str | None = None
+    userId: str | None = None
+    threadId: str | None = None
+    storeCart: list[dict] | None = None
+
+
 @router.post("/api/store/chat")
-async def store_chat(body: dict):
-    effective_message = (body.get("message") or body.get("input") or "").strip()
-    image_urls = [u for u in (body.get("imageUrls") or []) if isinstance(u, str) and u.strip()]
+async def store_chat(body: StoreChatIn):
+    effective_message = (body.message or body.input or "").strip()
+    image_urls = [u for u in (body.imageUrls or []) if isinstance(u, str) and u.strip()]
     # 空文本但有图放行(兜底文案由前端补,对齐 /api/chat 语义);两者皆空才拒
     if not effective_message and not image_urls:
         return JSONResponse(status_code=400, content={"success": False, "error": "消息内容不能为空"})
 
-    business_id = body.get("businessId") or "aurora"
-    user_id = body.get("userId") or "CUST-8801"
-    thread_id = body.get("threadId") or f"merchant_thread_{user_id}_{business_id}"
+    business_id = body.businessId or "aurora"
+    user_id = body.userId or "CUST-8801"
+    thread_id = body.threadId or f"merchant_thread_{user_id}_{business_id}"
     job_id = f"job_{_ts_ms()}_{uuid4_hex(7)}"
 
     # 注册闸 raise 型(架构审查 #1):置于兜底 except 作用域之外,GateError 直穿
@@ -507,7 +521,7 @@ async def store_chat(body: dict):
             image_urls=image_urls,
             # 商户门户商城车(2026-09-14 空车谎报收口):引擎空车时水合,
             # 见 MallDomainService.hydrate_cart_from_storefront
-            store_cart=[it for it in (body.get("storeCart") or []) if isinstance(it, dict)],
+            store_cart=[it for it in (body.storeCart or []) if isinstance(it, dict)],
             sync=True,
             job_id=job_id,
         )

@@ -159,7 +159,9 @@ async def update_promotion(promotion_id: str, patch: dict, operator: str) -> dic
             )
         ).mappings().first()
         if not row:
-            return {"error": "活动不存在"}
+            # error-key 机器键(夜评 2026-10-07):not_found 供路由 404 分叉,
+            # 人类文案走 message —— 严禁路由层解析中文词面判状态码
+            return {"error": "not_found", "message": "活动不存在"}
 
         name = row["name"]
         if patch.get("name") is not None:
@@ -236,7 +238,7 @@ async def delete_promotion(promotion_id: str, operator: str) -> dict:
             )
         ).first()
         if not used:
-            return {"error": "活动不存在"}
+            return {"error": "not_found", "message": "活动不存在"}
         if used.used:
             return {"error": "已有核销记录,只可停用不可删除"}
         await conn.execute(

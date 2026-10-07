@@ -102,7 +102,8 @@ async def submit_feedback(
             )
         ).scalar_one_or_none()
         if trace_row is None:
-            return {"error": _UNKNOWN_TRACE}
+            # error-key 机器键:路由 _error_response 按 not_found 映射 404
+            return {"error": "not_found", "message": _UNKNOWN_TRACE}
 
         layers = trace_row.layers if isinstance(trace_row.layers, list) else None
         if isinstance(trace_row.layers, str):  # 裸 SQL 写入路径的字符串形态

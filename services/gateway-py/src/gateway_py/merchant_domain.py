@@ -682,7 +682,8 @@ async def update_customer_member_level(customer_id: str, member_level: str) -> d
             .bindparams(lv=str(member_level or "VIP"), cid=customer_id)
         )
         if result.rowcount == 0:
-            return {"error": "客户不存在"}
+            # error-key 机器键(夜评 2026-10-07):not_found 供路由 404 分叉,文案走 message
+            return {"error": "not_found", "message": "客户不存在"}
     return {"customerId": customer_id, "memberLevel": member_level}
 
 
@@ -816,7 +817,7 @@ async def delete_spu(spu_id: str) -> dict:
             )
         ).scalar()
         if not code:
-            return {"error": "商品不存在"}
+            return {"error": "not_found", "message": "商品不存在"}
         referenced = (
             await conn.execute(
                 text("SELECT 1 FROM merchant_order_items WHERE spu_id = :c LIMIT 1").bindparams(c=code)
@@ -885,7 +886,7 @@ async def create_sku(spu_id: str, body: dict) -> dict:
             )
         ).first()
         if not spu:
-            return {"error": "SPU 不存在"}
+            return {"error": "not_found", "message": "SPU 不存在"}
         await conn.execute(
             text(
                 "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, price, stock, spec_attributes) "

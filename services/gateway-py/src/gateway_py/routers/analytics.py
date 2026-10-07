@@ -17,6 +17,7 @@ from engine_py.analytics import feedback_service, graph, promotions, rbac, repor
 from engine_py.event_bus import publish_agent_event, read_agent_events
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import delete, select
 
 from gateway_py.tenant_context import require_tenant_context
@@ -38,6 +39,92 @@ _SEEDED_TENANTS: set[str] = set()
 def _sse(event: str, data: dict) -> str:
     """首连/gone/内联降级路径的帧渲染(读流泵的帧渲染在 sse_tail 单点)。"""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+
+def _error_response(result: dict, status: int = 400) -> JSONResponse:
+    """领域 error → 统一信封单点(夜评 2026-10-07 #1/#6):机器语义走字段 ——
+    领域键形 {"error": "not_found", "message": 文案} 映射 404,其余 error 形态
+    一律调用方给定的 status(缺省 400);严禁路由层解析中文词面判状态码
+    (领域文案措辞变更曾可静默翻转 404↔400)。promotions create/set_status
+    两条路由刻意保持 {"success": False, **result} 展开信封(生命周期契约
+    断言 json()["error"]),不入本助手。"""
+    message = result.get("message") or str(result["error"])
+    if result.get("error") == "not_found":
+        status = 404
+    return JSONResponse(status_code=status, content={"success": False, "message": message})
+
+
+# ---- CRUD 入参 DTO(夜评 2026-10-07 #7,server-gateway §2.2 拔除)----
+# 字段名与 TS 契约一致(camelCase 直用);全部宽容缺省 —— 形状/类型在边界钉死,
+# 业务必填校验仍归路由手写分支与领域层(400 语义由既有契约测试钉死,不因
+# DTO 化翻转成 422)。PATCH 语义「携带即改」用 model_dump(exclude_unset=True)
+# 保真:未传键不进 patch,与领域层 `"field" in body` 存在性判断同构。
+# 未知键 pydantic 缺省忽略,与领域白名单哲学一致。
+
+
+class PromotionCreateIn(BaseModel):
+    name: str = ""
+    promoType: str = ""
+    threshold: float | None = None
+    value: float | None = None
+    scopeType: str | None = None
+    scopeValue: str | None = None
+    startAt: str | None = None
+    endAt: str | None = None
+    totalQuota: int | None = None
+
+
+class PromotionStatusIn(BaseModel):
+    status: str = ""
+
+
+class PromotionPatchIn(BaseModel):
+    """与 update_promotion 白名单同构(路由旧 allowed 元组由此声明式承载)。"""
+
+    name: str | None = None
+    threshold: float | None = None
+    value: float | None = None
+    scopeType: str | None = None
+    scopeValue: str | None = None
+    startAt: str | None = None
+    endAt: str | None = None
+    totalQuota: int | None = None
+
+
+class CustomerCreateIn(BaseModel):
+    name: str = ""
+    phone: str = ""
+    memberLevel: str | None = None
+
+
+class CustomerPatchIn(BaseModel):
+    memberLevel: str = ""
+
+
+class SpuCreateIn(BaseModel):
+    title: str = ""
+    category: str = ""
+    price: float | None = None
+    stock: int | None = None
+
+
+class SpuPatchIn(BaseModel):
+    status: str | None = None
+    title: str | None = None
+    price: float | None = None
+    stock: int | None = None
+
+
+class SkuCreateIn(BaseModel):
+    price: float | None = None
+    stock: int | None = None
+    specAttributes: dict | None = None
+
+
+class SkuPatchIn(BaseModel):
+    price: float | None = None
+    stock: int | None = None
+    skuTitle: str | None = None
 
 
 async def _ctx(request: Request) -> dict:
@@ -294,11 +381,7 @@ async def analytics_feedback(request: Request):
         note=body.get("note"),
     )
     if "error" in result:
-        not_found = result["error"].startswith("追踪不存在")
-        return JSONResponse(
-            status_code=404 if not_found else 400,
-            content={"success": False, "message": result["error"]},
-        )
+        return _error_response(result)
     return {"success": True, **result}
 
 
@@ -334,24 +417,22 @@ async def promotions_list(request: Request):
 
 
 @router.post("/api/admin/analytics/promotions")
-async def promotions_create(request: Request):
+async def promotions_create(request: Request, body: PromotionCreateIn):
     ctx = await _ctx(request)
     if "promo:create" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
-    body = await request.json()
-    result = await promotions.create_promotion(body, ctx["staff"])
+    result = await promotions.create_promotion(body.model_dump(), ctx["staff"])
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, **result})
     return {"success": True, **result}
 
 
 @router.post("/api/admin/analytics/promotions/{promotion_id}/status")
-async def promotions_set_status(promotion_id: str, request: Request):
+async def promotions_set_status(promotion_id: str, request: Request, body: PromotionStatusIn):
     ctx = await _ctx(request)
     if "promo:disable" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
-    body = await request.json()
-    result = await promotions.set_promotion_status(promotion_id, str(body.get("status") or ""), ctx["staff"])
+    result = await promotions.set_promotion_status(promotion_id, body.status, ctx["staff"])
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, **result})
     return {"success": True, **result}
@@ -610,14 +691,13 @@ async def customer_coupons(customer_id: str, request: Request):
 
 
 @router.patch("/api/admin/analytics/customers/{customer_id}")
-async def customer_update(customer_id: str, request: Request):
+async def customer_update(customer_id: str, request: Request, body: CustomerPatchIn):
     ctx = await _ctx(request)
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可编辑客户"})
-    body = await request.json()
-    result = await mds.update_customer_member_level(customer_id, body.get("memberLevel") or "VIP")
+    result = await mds.update_customer_member_level(customer_id, body.memberLevel or "VIP")
     if "error" in result:
-        return JSONResponse(status_code=404, content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True, **result}
 
 
@@ -665,28 +745,26 @@ async def spus_list(request: Request):
 
 
 @router.post("/api/admin/analytics/spus")
-async def spus_create(request: Request):
+async def spus_create(request: Request, body: SpuCreateIn):
     ctx = await _ctx(request)
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
-    body = await request.json()
-    title = str(body.get("title") or "").strip()
-    category = str(body.get("category") or "").strip()
-    if not title or not category or body.get("price") is None:
+    title = body.title.strip()
+    category = body.category.strip()
+    if not title or not category or body.price is None:
         return JSONResponse(status_code=400, content={"success": False, "message": "title/category/price 必传"})
-    result = await mds.create_spu(title, category, body["price"], int(body.get("stock") or 0))
+    result = await mds.create_spu(title, category, body.price, int(body.stock or 0))
     return {"success": True, **result}
 
 
 @router.patch("/api/admin/analytics/spus/{spu_id}")
-async def spus_update(spu_id: str, request: Request):
+async def spus_update(spu_id: str, request: Request, body: SpuPatchIn):
     ctx = await _ctx(request)
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
-    body = await request.json()
-    result = await mds.update_spu(spu_id, body)
+    result = await mds.update_spu(spu_id, body.model_dump(exclude_unset=True))
     if "error" in result:
-        return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True, **result}
 
 
@@ -697,9 +775,7 @@ async def spus_delete(spu_id: str, request: Request):
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     result = await mds.delete_spu(spu_id)
     if "error" in result:
-        not_found = result["error"] == "商品不存在"
-        return JSONResponse(status_code=404 if not_found else 400,
-                            content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True}
 
 
@@ -707,7 +783,7 @@ async def spus_delete(spu_id: str, request: Request):
 
 
 @router.patch("/api/admin/analytics/promotions/{promotion_id}")
-async def promotions_update(promotion_id: str, request: Request):
+async def promotions_update(promotion_id: str, request: Request, body: PromotionPatchIn):
     """编辑活动(2026-09-27 运营闭环):字段集扩到时间窗/范围/发放上限,SQL
     下沉 engine `promotions.update_promotion` 单一实现(窗口校验、quota 归一、
     审计同 create 一样收在引擎侧),路由只留 perm 闸、字段白名单与错误映射。
@@ -716,18 +792,14 @@ async def promotions_update(promotion_id: str, request: Request):
     ctx = await _ctx(request)
     if "promo:create" not in ctx["perms"]:  # 编辑随建/改活动权限点(0013 动态化)
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
-    body = await request.json()
     from engine_py.analytics import promotions as P
 
-    allowed = ("name", "value", "threshold", "scopeType", "scopeValue", "startAt", "endAt", "totalQuota")
-    patch = {k: body[k] for k in allowed if k in body}
+    patch = body.model_dump(exclude_unset=True)  # 白名单由 PromotionPatchIn 声明式承载
     if not patch:
         return JSONResponse(status_code=400, content={"success": False, "message": "无可更新字段"})
     result = await P.update_promotion(promotion_id, patch, ctx["staff"])
     if "error" in result:
-        not_found = result["error"] == "活动不存在"
-        return JSONResponse(status_code=404 if not_found else 400,
-                            content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True, "id": promotion_id}
 
 
@@ -742,9 +814,7 @@ async def promotions_delete(promotion_id: str, request: Request):
     # 路由只留权限闸与 error-key → HTTP 映射(2026-10-03 自本路由下沉)
     result = await P.delete_promotion(promotion_id, ctx["staff"])
     if "error" in result:
-        not_found = result["error"] == "活动不存在"
-        return JSONResponse(status_code=404 if not_found else 400,
-                            content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True, "id": promotion_id}
 
 
@@ -752,16 +822,15 @@ async def promotions_delete(promotion_id: str, request: Request):
 
 
 @router.post("/api/admin/analytics/customers")
-async def customers_create(request: Request):
+async def customers_create(request: Request, body: CustomerCreateIn):
     ctx = await _ctx(request)
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可新增客户"})
-    body = await request.json()
-    name = str(body.get("name") or "").strip()
-    phone = str(body.get("phone") or "").strip()
+    name = body.name.strip()
+    phone = body.phone.strip()
     if not name or not phone:
         return JSONResponse(status_code=400, content={"success": False, "message": "name/phone 必传"})
-    result = await mds.create_customer_record(name, phone, body.get("memberLevel") or "VIP")
+    result = await mds.create_customer_record(name, phone, body.memberLevel or "VIP")
     return {"success": True, **result}
 
 
@@ -772,7 +841,7 @@ async def customers_delete(customer_id: str, request: Request):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可删除客户"})
     result = await mds.delete_customer(customer_id)
     if "error" in result:
-        return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True}
 
 
@@ -794,28 +863,24 @@ async def skus_list(spu_id: str, request: Request):
 
 
 @router.post("/api/admin/analytics/spus/{spu_id}/skus")
-async def skus_create(spu_id: str, request: Request):
+async def skus_create(spu_id: str, request: Request, body: SkuCreateIn):
     ctx = await _ctx(request)
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
-    body = await request.json()
-    result = await mds.create_sku(spu_id, body)
+    result = await mds.create_sku(spu_id, body.model_dump(exclude_unset=True))
     if "error" in result:
-        not_found = result["error"] == "SPU 不存在"
-        return JSONResponse(status_code=404 if not_found else 400,
-                            content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True, **result}
 
 
 @router.patch("/api/admin/analytics/skus/{sku_id}")
-async def skus_update(sku_id: str, request: Request):
+async def skus_update(sku_id: str, request: Request, body: SkuPatchIn):
     ctx = await _ctx(request)
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
-    body = await request.json()
-    result = await mds.update_sku(sku_id, body)
+    result = await mds.update_sku(sku_id, body.model_dump(exclude_unset=True))
     if "error" in result:
-        return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True, **result}
 
 
@@ -826,5 +891,5 @@ async def skus_delete(sku_id: str, request: Request):
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     result = await mds.delete_sku(sku_id)
     if "error" in result:
-        return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
+        return _error_response(result)
     return {"success": True}
