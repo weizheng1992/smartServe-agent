@@ -2,10 +2,43 @@
 // 入参形状 = lib/analytics-frames.AskFrameData(F4:data:any 换形状契约)
 import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
-import { type AskCardColumn, type AskFrameData, type AskRow } from '@/lib/analytics-frames';
+import { type AskCardColumn, type AskFrameData, type AskRow, type AskTrust } from '@/lib/analytics-frames';
 
 // 明确不做条形图的指标:逐笔列表/窗口列不是排行语义,画条会误导
 const NO_BAR_METRICS = new Set(['order_overview', 'customer_orders']);
+
+// 信任章(ADR-0010):机器语义字段;verified 为默认态零视觉噪音,
+// composed/explored 才显章 —— 商户要能一眼分辨「这个数字敢不敢直接信」
+const TRUST_LABELS: Record<AskTrust, string> = {
+  verified: '核验口径',
+  composed: '组合查询',
+  explored: '探索性结果',
+};
+
+function TrustBadge({ trust }: { trust?: AskTrust }) {
+  if (!trust || trust === 'verified') return null;
+  const style =
+    trust === 'explored' ? 'border-amber-200 bg-amber-50 text-amber-600' : 'border-sky-200 bg-sky-50 text-sky-600';
+  return (
+    <span className={`ml-2 rounded border px-1 py-0.5 align-middle text-[10px] ${style}`}>
+      {TRUST_LABELS[trust] ?? trust}
+    </span>
+  );
+}
+
+// 生成 SQL 折叠(explored 帧必带):探索通道的口径可审计承诺 —— 数字哪来的,
+// 展开即查;默认收起不打扰
+function GeneratedSqlFold({ sql }: { sql?: string }) {
+  if (!sql) return null;
+  return (
+    <details className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">
+      <summary className="cursor-pointer select-none">查看生成 SQL(探索性查询,非核验口径)</summary>
+      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-[10px] leading-4 text-zinc-500">
+        {sql}
+      </pre>
+    </details>
+  );
+}
 
 // 单元格诚实呈现:缺值渲染「—」,不出 "null"/"undefined" 字面量(同页金额
 // 口径 toFixed(2)+「—」同律,夜审 2026-09-29 收口)
@@ -45,6 +78,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">
           {data.title || `${data.metric} · ${data.unit}`}
+          <TrustBadge trust={data.trust} />
         </div>
         <div className="px-3 py-2 text-[11px] text-zinc-400">
           折线至少需要 2 个数据点,当前结果不满足 —— 按表格呈现(诚实降级,未绘制空图)。
@@ -73,11 +107,13 @@ export function ResultCard({ data }: { data: AskFrameData }) {
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">
           {data.title || `${data.metric} · ${data.unit}`}
+          <TrustBadge trust={data.trust} />
         </div>
         <LineChart points={points} unit={data.unit} />
         {data.caliber ? (
           <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{data.caliber}</div>
         ) : null}
+        <GeneratedSqlFold sql={data.generatedSql} />
       </div>
     );
   }
@@ -90,6 +126,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
     return (
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{card.title}</div>
+        <TrustBadge trust={data.trust} />
         <div className="px-3 py-2 text-[11px] text-zinc-400">
           该结果不是排行形状(需 ≥2 行数值),无法绘制条形图 —— 已按表格诚实呈现。
         </div>
@@ -119,6 +156,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
           </table>
         </div>
         <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{card.caliber}</div>
+        <GeneratedSqlFold sql={data.generatedSql} />
       </div>
     );
   }
@@ -126,6 +164,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
       <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">{header}</div>
+      <TrustBadge trust={data.trust} />
       {bars ? <BarChart points={bars} unit={data.unit} /> : null}
       {/* 宽表(UUID 列/多列卡)在面板窄容器里必须可左右滚,卡片根 overflow-hidden 不裁数据 */}
       <div className="overflow-x-auto">
@@ -154,6 +193,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
         </table>
       </div>
       <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{card.caliber}</div>
+      <GeneratedSqlFold sql={data.generatedSql} />
     </div>
   );
 }

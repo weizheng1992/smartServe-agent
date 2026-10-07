@@ -17,6 +17,10 @@ export type AskClarifyOption = {
   intent?: { metric: string; direction: string };
 };
 
+/** 信任章(ADR-0010 分层信任架构):机器语义字段,呈现层严禁解析口径文案推断。
+ * verified=核验模板(T0)/ composed=语义层组合(T1)/ explored=探索生成(T2)。 */
+export type AskTrust = 'verified' | 'composed' | 'explored';
+
 /** 各帧族字段的可选并集(渲染层按 event 分派后字段必然在);新帧字段同批登记。 */
 export interface AskFrameData {
   // result 帧
@@ -28,6 +32,10 @@ export interface AskFrameData {
   summary?: string | null;
   rows?: AskRow[];
   cards?: AskCard[];
+  // 信任章(ADR-0010):缺省 = verified(历史帧无此键,渲染层按默认态处理);
+  // explored 帧必带 generatedSql(折叠展示,口径可审计)
+  trust?: AskTrust;
+  generatedSql?: string;
   // clarify 帧(2026-10-03 起一等公民 Clarify.to_frame)
   clarifyKind?: 'metric' | 'entity';
   question?: string;

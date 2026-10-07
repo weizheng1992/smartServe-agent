@@ -179,3 +179,37 @@ describe('ResultCard(结果卡同形渲染)', () => {
     expect(lineDegrade.container.querySelector('div.overflow-x-auto table')).not.toBeNull();
   });
 });
+
+describe('ResultCard(信任章,ADR-0010 分层信任)', () => {
+  it('explored 帧显探索章 + 生成 SQL 折叠(口径可审计)', () => {
+    render(
+      <ResultCard
+        data={{
+          ...tableCard([
+            { productId: '户外机能', metricScore: 14237 },
+            { productId: '潮流鞋靴', metricScore: 11487 },
+          ]),
+          trust: 'explored',
+          generatedSql: 'SELECT s.category FROM merchant_spus s LIMIT 50',
+        }}
+      />,
+    );
+    expect(screen.getByText('探索性结果')).toBeInTheDocument();
+    expect(screen.getByText(/查看生成 SQL/)).toBeInTheDocument();
+  });
+
+  it('composed 帧显组合章', () => {
+    render(<ResultCard data={{ ...tableCard([{ productId: '户外机能', metricScore: 1 }]), trust: 'composed' }} />);
+    expect(screen.getByText('组合查询')).toBeInTheDocument();
+  });
+
+  it('verified/缺省帧零视觉噪音(不显章)', () => {
+    render(<ResultCard data={tableCard([{ productId: 'x', metricScore: 2 }])} />);
+    expect(screen.queryByText('核验口径')).not.toBeInTheDocument();
+  });
+
+  it('无 generatedSql 时不渲染折叠块', () => {
+    render(<ResultCard data={{ ...tableCard([{ productId: 'x', metricScore: 3 }]), trust: 'explored' }} />);
+    expect(screen.queryByText(/查看生成 SQL/)).not.toBeInTheDocument();
+  });
+});
