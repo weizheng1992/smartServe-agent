@@ -45,9 +45,11 @@ def _error_response(result: dict, status: int = 400) -> JSONResponse:
     """领域 error → 统一信封单点(夜评 2026-10-07 #1/#6):机器语义走字段 ——
     领域键形 {"error": "not_found", "message": 文案} 映射 404,其余 error 形态
     一律调用方给定的 status(缺省 400);严禁路由层解析中文词面判状态码
-    (领域文案措辞变更曾可静默翻转 404↔400)。promotions create/set_status
-    两条路由刻意保持 {"success": False, **result} 展开信封(生命周期契约
-    断言 json()["error"]),不入本助手。"""
+    (领域文案措辞变更曾可静默翻转 404↔400)。promotions create 一条路由刻意
+    保持 {"success": False, **result} 展开信封(生命周期契约断言
+    json()["error"],其错误全为校验类 400,无 not_found 类)。redeem/
+    set_status/claim 的「已结束/已停用」等校验类错误经本助手仍 400(人类
+    文案在 message);not_found 类(查无活动/订单)映射 404。"""
     message = result.get("message") or str(result["error"])
     if result.get("error") == "not_found":
         status = 404
@@ -434,7 +436,7 @@ async def promotions_set_status(promotion_id: str, request: Request, body: Promo
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     result = await promotions.set_promotion_status(promotion_id, body.status, ctx["staff"])
     if "error" in result:
-        return JSONResponse(status_code=400, content={"success": False, **result})
+        return _error_response(result)
     return {"success": True, **result}
 
 
@@ -704,7 +706,7 @@ async def promotions_redeem(promotion_id: str, request: Request):
         return JSONResponse(status_code=400, content={"success": False, "message": "orderId 必传"})
     result = await promotions.redeem(promotion_id, order_id, ctx["staff"])
     if "error" in result:
-        return JSONResponse(status_code=400, content={"success": False, **result})
+        return _error_response(result)
     return {"success": True, **result}
 
 
@@ -720,7 +722,7 @@ async def promotions_grant(promotion_id: str, request: Request):
         return JSONResponse(status_code=400, content={"success": False, "message": "customerId 必传"})
     result = await promotions.claim_coupon(promotion_id, customer_id)
     if "error" in result:
-        return JSONResponse(status_code=400, content={"success": False, **result})
+        return _error_response(result)
     return {"success": True, **result}
 
 

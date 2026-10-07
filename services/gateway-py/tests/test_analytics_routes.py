@@ -558,17 +558,17 @@ class TestTrendAndCrud:
                 "'{\"fullAddress\": \"E2E 测试地址\"}'::jsonb) "
                 "ON CONFLICT (order_id) DO UPDATE SET total_amount = 1299.00"
             ))
-        # 不存在的订单 → 400 诚实
+        # 不存在的订单 → 404 诚实(not_found 键形映射;信封文案走 message)
         bad = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
                                 headers=boss, json={"orderId": "NOT-EXIST"})
-        assert bad.status_code == 400 and "不存在" in bad.json()["error"]
-        # 种子订单 → 核销成功;重复 → 幂等拦截
+        assert bad.status_code == 404 and "不存在" in bad.json()["message"]
+        # 种子订单 → 核销成功;重复 → 幂等拦截(校验类 400,文案在 message)
         ok = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
                                headers=boss, json={"orderId": "AURORA-ORD-2026-9081"})
         assert ok.status_code == 200 and ok.json()["discount"] > 0
         dup = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
                                 headers=boss, json={"orderId": "AURORA-ORD-2026-9081"})
-        assert dup.status_code == 400 and "幂等" in dup.json()["error"]
+        assert dup.status_code == 400 and "幂等" in dup.json()["message"]
 
 
 class TestL3AndGrowth:

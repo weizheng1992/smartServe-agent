@@ -196,7 +196,9 @@ class TestPromotionsLifecycle:
             third = await client.post(f"/api/admin/analytics/promotions/{created['id']}/grant",
                                       headers=boss, json={"customerId": "CUST-QT-3"})
             assert third.status_code == 400
-            assert "上限" in third.json()["error"]
+            # 信封随 error-key 收口:校验类错误文案走 message(grant 复用 claim 护栏,
+            # 2026-10-07 一并迁移)
+            assert "上限" in third.json()["message"]
 
             by_id = await self._listed_by_id(client, boss)
             assert by_id[created["id"]]["totalQuota"] == 2
@@ -227,7 +229,8 @@ class TestPromotionsLifecycle:
             r = await client.post(f"/api/admin/analytics/promotions/{created['id']}/redeem",
                                   headers=boss, json={"orderId": "E2E-QT-ORD"})
             assert r.status_code == 400
-            assert "已结束" in r.json()["error"]
+            # 信封随 error-key 收口:校验类错误文案走 message(2026-10-07)
+            assert "已结束" in r.json()["message"]
         finally:
             await _cleanup([created["id"]])
             async with _merchant_writer_engine().begin() as conn:

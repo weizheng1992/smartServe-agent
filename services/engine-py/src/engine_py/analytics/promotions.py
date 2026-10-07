@@ -217,7 +217,7 @@ async def set_promotion_status(promotion_id: str, status: str, operator: str) ->
             text("UPDATE promotions SET status = :s WHERE id = CAST(:id AS uuid)").bindparams(s=status, id=promotion_id)
         )
         if result.rowcount == 0:
-            return {"error": "活动不存在"}
+            return {"error": "not_found", "message": "活动不存在"}
     await audit("promo_status", operator, {"id": promotion_id, "status": status})
     return {"id": promotion_id, "status": status}
 
@@ -266,7 +266,7 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
             )
         ).mappings().first()
         if not promo:
-            return {"error": "活动不存在"}
+            return {"error": "not_found", "message": "活动不存在"}
         if promo["status"] != "active":
             return {"error": "活动已停用,不可核销"}
         if promo["end_at"] and now >= promo["end_at"]:
@@ -279,7 +279,7 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
             )
         ).mappings().first()
         if not order:
-            return {"error": f"订单不存在:{order_id}"}
+            return {"error": "not_found", "message": f"订单不存在:{order_id}"}
         dup = (
             await conn.execute(
                 text("SELECT 1 FROM promotion_redemptions WHERE promotion_id = CAST(:id AS uuid) AND order_id = :oid LIMIT 1")
@@ -327,7 +327,7 @@ async def claim_coupon(promotion_id: str, user_id: str) -> dict:
             )
         ).mappings().first()
         if not promo or promo["status"] != "active":
-            return {"error": "活动不存在或已停用"}
+            return {"error": "not_found", "message": "活动不存在或已停用"}
         if promo["promo_type"] != "coupon":
             return {"error": "该活动类型无需领券(结算自动应用)"}
         dup = (
