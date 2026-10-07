@@ -3,58 +3,22 @@
 LLM 熔断/图异常降级时,不再一律罐头道歉 —— 对词面可路由到**确定性能力**的
 问题,仍给出真实答案:
 
-- 优惠/券词面(PROMOTION_KEYWORDS_RE,单一事实源)→ PromotionQuerySkill
-  (在售活动 + 用户已领未用券);
-- 显式订单号(EXPLICIT_ORDER_ID_RE)→ 该订单状态快照(含用户归属校验,
-  非本人订单如实告知);
+- 优惠/券词面 → PromotionQuerySkill(在售活动 + 用户已领未用券);
+- 显式订单号 → 该订单状态快照(含用户归属校验,非本人订单如实告知;
+  2026-10-07 查询与渲染收口 order_domain.order_status_line);
 - 复合句(如「查订单9081 顺便看看优惠券」)→ 分段回答両部分;
 - 无确定性能力命中 → None(调用方保留原罐头,并附能力指引)。
 
-数据诚实铁律适用:只答真实查到的,查不到如实说。
+路由判定(词面 → 意图)自 2026-10-07 收口 skills/routing.route_fallback
+单一落点;本模块只剩执行。数据诚实铁律适用:只答真实查到的,查不到如实说。
 """
 
 from __future__ import annotations
 
-import re
-
-from sqlalchemy import text
-
 from ..tools_registry import order_domain
-from ..triage.intent_registry import (
-    EXPLICIT_ORDER_ID_RE,
-    ORDER_KEYWORD_FAMILY,
-    PROMOTION_KEYWORDS_RE,
-    _alt,
-    _pick,
-)
+from . import routing
+from .contract import SkillContext
 from .promotion_skill import PromotionQuerySkill
-
-# 物流/发货单字线索收上词族之家投影(Gen-3 域A);「查/状态」是本面专属词留原位。
-_ORDER_QUERY_HINT = re.compile(
-    "查|" + _alt(*_pick(ORDER_KEYWORD_FAMILY, 2, 6)) + "|状态|" + ORDER_KEYWORD_FAMILY[1],
-    re.IGNORECASE,
-)
-
-
-async def _order_section(conn, order_id: str, user_id: str) -> str:
-    row = (
-        await conn.execute(
-            text(
-                "SELECT status, total_amount, shipping_address FROM merchant_orders "
-                "WHERE order_id = :o AND customer_id = :u LIMIT 1"
-            ).bindparams(o=order_id, u=user_id)
-        )
-    ).mappings().first()
-    if not row:
-        return f"• 订单 {order_id}:未找到(或不在你的名下)"
-    status_map = {"PAID": "待发货", "SHIPPED": "运输中", "DELIVERED": "已签收", "REFUNDED": "已退款", "CANCELLED": "已取消"}
-    status = status_map.get(row["status"], row["status"])
-    addr = row["shipping_address"] if isinstance(row["shipping_address"], dict) else {}
-    full_addr = addr.get("fullAddress") or ""
-    return (
-        f"• 订单 {order_id}:{status} · ¥{float(row['total_amount']):.2f}"
-        + (f" · 收货:{full_addr}" if full_addr else "")
-    )
 
 
 async def deterministic_fallback_answer(
@@ -67,31 +31,25 @@ async def deterministic_fallback_answer(
     user = user_id or ""
     sections: list[str] = []
 
-    wants_promo = bool(PROMOTION_KEYWORDS_RE.search(q))
-    order_hit = EXPLICIT_ORDER_ID_RE.search(q)
-    wants_order = bool(order_hit) or (_ORDER_QUERY_HINT.search(q) and "订单" in q)
+    wants_promo, order_id, wants_order = routing.route_fallback(q)
 
-    async with order_domain._merchant_reader_engine().connect() as conn:
-        if wants_promo:
-            skill = PromotionQuerySkill()
-            from .contract import SkillContext
+    if wants_promo:
+        skill = PromotionQuerySkill()
+        result = await skill.execute(
+            SkillContext(thread_id=thread_id, user_id=user, tenant_id=business_id, input=q)
+        )
+        if result.success and result.output:
+            sections.append(result.output)
 
-            result = await skill.execute(
-                SkillContext(thread_id=thread_id, user_id=user, tenant_id=business_id, input=q)
-            )
-            if result.success and result.output:
-                sections.append(result.output)
-
-        if wants_order and user:
-            order_id = order_hit.group(0) if order_hit else ""
-            if not order_id:
-                sections.append("📦 请提供订单号(可在「订单履约」页复制完整单号),我帮你查状态")
-                return "\n\n".join(sections)
-            try:
-                sections.append("📦 订单状态：")
-                sections.append(await _order_section(conn, order_id, user))
-            except Exception as err:
-                sections.append(f"• 订单 {order_id}:查询失败({err})")
+    if wants_order and user:
+        if not order_id:
+            sections.append("📦 请提供订单号(可在「订单履约」页复制完整单号),我帮你查状态")
+            return "\n\n".join(sections)
+        try:
+            sections.append("📦 订单状态：")
+            sections.append(await order_domain.order_status_line(order_id, user))
+        except Exception as err:
+            sections.append(f"• 订单 {order_id}:查询失败({err})")
 
     if not sections:
         return None

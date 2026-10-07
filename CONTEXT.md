@@ -54,6 +54,18 @@ A deep module facade that orchestrates the execution of individual task plan sub
 
 Financial safety policy checks (double-refund, thresholds) live in `approvals/gatekeeper.py` — the TS `ApprovalPolicyEngine` class was merged there. The TS `ExecutionOutcome` value object was not ported; execution steps return plain dicts (`{task_plan updates, status, result|error, counter increments}`).
 
+### Skill Router (`services/engine-py/src/engine_py/skills/routing.py`)
+
+The single home for skill-routing knowledge (2026-10-07, consolidated from five scattered sites — triage fast-track, `is_action_query` cache gate, `fallback_dispatcher` regexes, the step-engine outfit guard, and the tool-whitelist):
+
+- **`match_skill(skills, context)`**: decided-intent exact `triggerIntents` match first (a keyword-fallback skill must never hijack a decided intent — 实弹:「推荐优惠最大的商品」), then `can_handle` keyword fallback for undecided input.
+- **`is_action_shaped(skills, text)`**: boolean sniff for the semantic-cache write/read gates; fails closed (treat as action) — cache poisoning defence.
+- **`is_money_action_vetoed(input, category)`**: fast-track yield predicate — refund-verb family ∧ non-after-sale skill must yield to structured triage (实弹矩阵 A6).
+- **`reroute_tool(tool_name, input)`**: outfit-shape guard — `searchProducts` on 搭配-shaped input re-routes to `ShoppingGuideSkill` (实弹:工具路径丢双族补全); the outfit/anchor regexes are public class attributes of the skill (single source shared with the skill's own completion logic).
+- **`route_fallback(question)`**: degraded-mode routing — promo wording / explicit order id / order-query intent (order status rendering itself lives in `order_domain.order_status_line`).
+
+Layering discipline: matching functions accept the skills **sequence** (accept dependencies, don't create them); the vocabulary families stay in `triage/intent_registry` (single source) and are imported lazily inside functions — a top-level import would re-enter the `skills` package mid-initialisation through `triage/__init__`. The public interfaces are unchanged: `SkillRegistry.find_matching_skill` (classmethod, the tests' patch seam) and the `is_action_query` re-export in `intent_triage_engine` (the `ctx.ns` dynamic patch face) both delegate here.
+
 ## Database & Persistence Subsystem
 
 ### FakePool — retired with the TS backend

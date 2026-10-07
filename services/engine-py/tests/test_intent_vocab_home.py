@@ -20,7 +20,7 @@ import re
 from engine_py.badcase import intent_signals
 from engine_py.graph import plan_alignment
 from engine_py.graph.nodes import executor_fast_path, planner
-from engine_py.skills import fallback_dispatcher, guide_skills, order_skills, promotion_skill
+from engine_py.skills import guide_skills, order_skills, promotion_skill, routing
 from engine_py.skills.cart import resolver
 from engine_py.skills.cart import skill as cart_skill
 from engine_py.tools_registry import mall_domain
@@ -165,8 +165,8 @@ BYTE_CASES: list[tuple[str, str, str]] = [
     ),
     ("guide._FALLBACK_RE", guide_skills.ShoppingGuideSkill._FALLBACK_RE.pattern, FROZEN_GUIDE_FALLBACK),
     (
-        "guide._CLOTHING_ANCHOR_RE",
-        guide_skills.ShoppingGuideSkill._CLOTHING_ANCHOR_RE.pattern,
+        "guide.CLOTHING_ANCHOR_RE",
+        guide_skills.ShoppingGuideSkill.CLOTHING_ANCHOR_RE.pattern,
         r"衣服|服装|衣着|上衣|外套|裤子|衬衫|夹克|羽绒服|T恤|裤|鞋|靴|衫|帽|袜",
     ),
     (
@@ -180,8 +180,8 @@ BYTE_CASES: list[tuple[str, str, str]] = [
         r"(?:退款|退货|退钱|退单|不想要了|破损|瑕疵)",
     ),
     (
-        "fallback_dispatcher._ORDER_QUERY_HINT",
-        fallback_dispatcher._ORDER_QUERY_HINT.pattern,
+        "routing._order_query_hint()",
+        routing._order_query_hint().pattern,
         r"查|物流|到哪|状态|发货",
     ),
     (
@@ -449,7 +449,7 @@ def test_inventory_family_words_matched_by_derived_faces() -> None:
     for word in R.CLOTHING_ANCHOR_FAMILY + R.ABSENCE_EXTRA_FAMILY:
         assert guide_skills.ShoppingGuideSkill._ABSENCE_ANCHOR_RE.search(word), word
     for word in R.CLOTHING_ANCHOR_FAMILY:
-        assert guide_skills.ShoppingGuideSkill._CLOTHING_ANCHOR_RE.search(word), word
+        assert guide_skills.ShoppingGuideSkill.CLOTHING_ANCHOR_RE.search(word), word
 
 
 def test_inventory_guide_core_covered_by_consumer_faces() -> None:

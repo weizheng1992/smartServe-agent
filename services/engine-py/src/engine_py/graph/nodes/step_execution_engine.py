@@ -247,15 +247,14 @@ async def _execute_single_step_core(
         # (单一事实源,与技能内补脚永不漂移),不依赖 LLM 自觉 —— 同取消语闸
         # 哲学:确定性代码闸收编 prompt 约束。
         if tool_name == "searchProducts":
-            _skills_registry = _try_import_skills()
-            _guide_cls = _skills_registry.get_skill("skill_shopping_guide") if _skills_registry else None
+            # 🧳 搭配语义守卫:改路由判据收口 skills/routing.reroute_tool(2026-10-07,
+            # 路由知识单一落点)—— 此处不再伸手摸技能类私有正则
+            from ...skills import routing as _skill_routing
+
             _guard_input = state.get("input") or ""
-            if (
-                _guide_cls is not None
-                and _guide_cls._OUTFIT_RE.search(_guard_input)
-                and _guide_cls._CLOTHING_ANCHOR_RE.search(_guard_input)
-            ):
-                tool_name = "skill_shopping_guide"
+            _rerouted = _skill_routing.reroute_tool(tool_name, _guard_input)
+            if _rerouted != tool_name:
+                tool_name = _rerouted
                 args = {"userInput": _guard_input}
 
         order_id = args.get("orderId")

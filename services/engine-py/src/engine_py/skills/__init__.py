@@ -1,7 +1,12 @@
-"""技能注册中心 — 镜像 skills/skillRegistry.ts + index.ts。"""
+"""技能注册中心 — 镜像 skills/skillRegistry.ts + index.ts。
+
+路由知识(词族/否决/消融/嗅探)自 2026-10-07 起收口 ``skills/routing.py``
+单一落点;本模块只保留注册簿与两个委托 interface(``find_matching_skill``
+类方法与 ``is_action_query`` —— 二者是测试桩的 patch 面,签名原样)。"""
 
 from __future__ import annotations
 
+from . import routing
 from .base_skill import BaseSkill
 from .cart import CartManageSkill
 from .contract import SkillContext
@@ -42,25 +47,13 @@ class SkillRegistry:
 
     @classmethod
     def find_matching_skill(cls, context: SkillContext) -> BaseSkill | None:
+        """路由 interface(委托 routing.match_skill;测试桩 patch 面原样)。"""
         cls._ensure_initialized()
-        # 已决意图优先(2026-09-22 实弹):上游 triage 判出的意图必须精确命中
-        # triggerIntents,严禁被关键词兜底型 can_handle(如导购的「推荐」词面)
-        # 按注册顺序截胡 —— 实弹:「推荐优惠最大的商品」意图层判 promotion_query,
-        # 导购技能关键词兜底抢先 claim,按销量推荐答非所问。关键词兜底只服务
-        # 未决意图的输入(is_action_query 嗅探等)。
-        active_intent = context.slots.get("activeIntent") or ""
-        if active_intent:
-            for skill in cls._skills.values():
-                if active_intent in skill.metadata.get("triggerIntents", []):
-                    return skill
-        for skill in cls._skills.values():
-            if skill.can_handle(context):
-                return skill
-        return None
+        return routing.match_skill(list(cls._skills.values()), context)
 
 
 def is_action_query(input_text: str, tenant_id: str = "") -> bool:
-    """业务动作嗅探:任一已注册技能声明可处理该输入则返回 True。
+    """业务动作嗅探(委托 routing.is_action_shaped;签名/语义原样)。
 
     语义缓存只服务纯寒暄/FAQ 回复;"动作形"输入(加购/退款/改址等)必须走真实
     执行管道 —— finish 节点据此拒绝回填缓存、triage Step 2 据此拒绝命中缓存,
@@ -69,11 +62,8 @@ def is_action_query(input_text: str, tenant_id: str = "") -> bool:
     嗅探自身失败时按动作处理:宁可缓存失效,不可放行投毒。
     """
     try:
-        return (
-            SkillRegistry.find_matching_skill(
-                SkillContext(input=input_text or "", tenant_id=tenant_id or "ecommerce")
-            )
-            is not None
+        return routing.is_action_shaped(
+            SkillRegistry.get_all_skills(), input_text, tenant_id
         )
     except Exception as err:
         print(f"[SkillRegistry] Action-query sniff failed, treating as action: {err}")
@@ -89,4 +79,5 @@ __all__ = [
     "ShoppingGuideSkill",
     "SkillRegistry",
     "is_action_query",
+    "routing",
 ]

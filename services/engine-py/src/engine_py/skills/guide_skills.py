@@ -141,11 +141,11 @@ class ShoppingGuideSkill(BaseSkill):
     # 吃满(3 件露营装备零衣服),而「衣服」在货架零词法足迹(货架以 衬衫/
     # T恤/裤/夹克 命名),硬命中非空又令 L2 语义补位永不触发 —— 族缺口必须
     # 以裸锚词补一脚(裸词「衣服」经 L2 语义实测正确落 T恤/衬衫)。
-    _OUTFIT_RE = re.compile(r"(?:搭配|一套|套装|一整套)")
+    OUTFIT_RE = re.compile(r"(?:搭配|一套|套装|一整套)")
 
     # 衣着族锚词:输入命中 = 有衣着诉求;商品名命中 = 该商品属衣着族。
     # 词面收上 intent_registry.CLOTHING_ANCHOR_FAMILY(Gen-3 域A,缺席面同源)。
-    _CLOTHING_ANCHOR_RE = re.compile(_alt(*CLOTHING_ANCHOR_FAMILY))
+    CLOTHING_ANCHOR_RE = re.compile(_alt(*CLOTHING_ANCHOR_FAMILY))
 
     # 缺席反问(2026-09-27 实弹事故):「没有衣服呢」是顾客指出上轮推荐缺了
     # 某族,不是新的字面搜索词 —— 整句直查词元「没有衣服」必然诚实空,空分支
@@ -302,11 +302,11 @@ class ShoppingGuideSkill(BaseSkill):
         if (
             products
             and absence_topic is None
-            and self._OUTFIT_RE.search(user_input)
-            and self._CLOTHING_ANCHOR_RE.search(user_input)
-            and not any(self._CLOTHING_ANCHOR_RE.search(str(p.get("name") or "")) for p in products)
+            and self.OUTFIT_RE.search(user_input)
+            and self.CLOTHING_ANCHOR_RE.search(user_input)
+            and not any(self.CLOTHING_ANCHOR_RE.search(str(p.get("name") or "")) for p in products)
         ):
-            anchor = self._CLOTHING_ANCHOR_RE.search(user_input).group(0)
+            anchor = self.CLOTHING_ANCHOR_RE.search(user_input).group(0)
             second_res = await MallDomainService.search_products(
                 {
                     "query": anchor,

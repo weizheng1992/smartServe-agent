@@ -936,9 +936,12 @@ class IntentTriageEngine:
         # 词族而命中的技能非售后域时,拒绝快轨 —— 否则「退了订单X，然后推荐Y」
         # 被导购 fallback 正则整句吞掉,资金动作静默丢失(实弹矩阵 A6)。
         # 返回 None 落回 embedding 锚点/结构化精判,那里有 refund 锚点与判定 3。
-        if _money_action_vetoed(input_text) and (
-            matching_skill.metadata.get("category") != _AFTER_SALE_SKILL_CATEGORY
-        ):
+        # 谓词内脏 2026-10-07 收口 skills/routing.is_money_action_vetoed
+        # (路由知识单一落点);_money_action_vetoed 形状谓词仍留本模块供
+        # slot_fusion(单参形态,语义 = 只看输入不看目标技能)。
+        from ..skills import routing as _skill_routing
+
+        if _skill_routing.is_money_action_vetoed(input_text, matching_skill.metadata.get("category")):
             return None
 
         skill_result = await matching_skill.execute(context)

@@ -89,6 +89,39 @@ def merchant_writer_engine():
     return _merchant_writer_engine()
 
 
+_ORDER_STATUS_ZH = {
+    "PAID": "待发货",
+    "SHIPPED": "运输中",
+    "DELIVERED": "已签收",
+    "REFUNDED": "已退款",
+    "CANCELLED": "已取消",
+}
+
+
+async def order_status_line(order_id: str, user_id: str) -> str:
+    """订单状态单行快照(确定性兜底降级面;2026-10-07 自 skills/fallback_dispatcher
+    回家):归属校验(非本人/查无如实告知)+ 状态中文 + 金额 + 收货地址。
+    状态中文映射此前兜底面与订单域各持一份 —— 收口后永不漂移。"""
+    async with _merchant_reader_engine().connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT status, total_amount, shipping_address FROM merchant_orders "
+                    "WHERE order_id = :o AND customer_id = :u LIMIT 1"
+                ).bindparams(o=order_id, u=user_id)
+            )
+        ).mappings().first()
+    if not row:
+        return f"• 订单 {order_id}:未找到(或不在你的名下)"
+    status = _ORDER_STATUS_ZH.get(row["status"], row["status"])
+    addr = row["shipping_address"] if isinstance(row["shipping_address"], dict) else {}
+    full_addr = addr.get("fullAddress") or ""
+    return (
+        f"• 订单 {order_id}:{status} · ¥{float(row['total_amount']):.2f}"
+        + (f" · 收货:{full_addr}" if full_addr else "")
+    )
+
+
 ORDER_ID_ATTEMPTS = 6
 
 
