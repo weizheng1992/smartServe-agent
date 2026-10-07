@@ -663,22 +663,11 @@ async def staff_update(staff_id: str, request: Request):
 async def customers_list(request: Request):
     await _ctx(request)
     from engine_py.tools_registry.order_domain import merchant_reader_engine
-    from sqlalchemy import text as _text
 
     from .. import merchant_domain as _mds
 
     async with merchant_reader_engine().connect() as conn:
-        rows = (
-            await conn.execute(_text(
-                "SELECT c.customer_id, c.name, c.phone, COALESCE(c.email, '') AS email, "
-                "COALESCE(c.member_level, 'VIP') AS member_level, "
-                "COALESCE(c.addresses, '[]'::jsonb)::text AS addresses, "
-                f"{_mds.CUSTOMER_SPEND_AGG} "
-                f"{_mds.CUSTOMER_SPEND_JOIN} "
-                "GROUP BY c.customer_id, c.name, c.phone, c.email, c.member_level, c.addresses "
-                "ORDER BY total_spent DESC LIMIT 100"
-            ))
-        ).mappings().all()
+        rows = await _mds.fetch_customers_with_spend(conn, extra_column="addresses", limit=100)
     return {"success": True, "customers": [dict(r) for r in rows]}
 
 

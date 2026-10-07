@@ -16,11 +16,23 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from typing import TypedDict
 
 from engine_py.approvals import takeover
 from engine_py.run_agent import AgentJobInput, run_agent
 
 from . import conversation_repo
+
+
+class ChatTurnResult(TypedDict):
+    """受理脊返回契约(夜评 2026-10-07 smell 清尾):两路由(chat/merchant)与
+    测试桩共以此为准 —— 旧五键裸 dict 无形状,键名拼错无检查。"""
+
+    paused: bool
+    jobId: str
+    output: str
+    cards: list
+    state: dict | None
 
 
 def generate_job_id(hex_len: int = 9) -> str:
@@ -37,7 +49,7 @@ async def accept_chat_turn(
     store_cart: list[dict] | None = None,
     sync: bool = True,
     job_id: str | None = None,
-) -> dict:
+) -> ChatTurnResult:
     """受理一回合:落用户行 → 暂停闸 → 跑引擎。
 
     返回 {"paused", "jobId", "output", "cards", "state"}:

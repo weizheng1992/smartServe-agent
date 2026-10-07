@@ -184,18 +184,11 @@ async def live_desk_thread_context(thread_id: str, authorization: str | None = H
         notes: list[dict] = []
         async with merchant_reader_engine().connect() as conn:
             if user_id:
-                row = (
-                    await conn.execute(
-                        _text(
-                            "SELECT c.customer_id, c.name, c.phone, COALESCE(c.email,'') AS email, "
-                            "c.member_level, COALESCE(c.tags,'[]'::jsonb)::text AS tags, "
-                            f"{merchant_domain.CUSTOMER_SPEND_AGG} "
-                            f"{merchant_domain.CUSTOMER_SPEND_JOIN} "
-                            "WHERE c.customer_id = :cid GROUP BY c.id"
-                        ),
-                        {"cid": user_id},
-                    )
-                ).mappings().first()
+                # 唯一查询体(夜评 smell 清尾):坐席上下文与客户列表同核单点
+                matched_rows = await merchant_domain.fetch_customers_with_spend(
+                    conn, customer_id=user_id, extra_column="tags"
+                )
+                row = matched_rows[0] if matched_rows else None
                 if row is not None:
                     customer = {
                         "matched": True,

@@ -6,11 +6,19 @@ import datetime as _dt
 import json
 import os
 import secrets
+import time
+import uuid as _u
 from dataclasses import dataclass
 from typing import Any
 
 from engine_py.tools_registry.mall_domain import MallDomainService
-from engine_py.tools_registry.order_domain import insert_merchant_order, insert_merchant_order_item
+from engine_py.tools_registry.order_domain import (
+    generate_order_id,
+    insert_merchant_order,
+    insert_merchant_order_item,
+    merchant_reader_engine,
+    merchant_writer_engine,
+)
 from sqlalchemy import text
 
 from .merchant_db import ensure_merchant_tables, merchant_engine
@@ -25,8 +33,6 @@ def _api_secret() -> str:
 
 
 def _now_ms() -> int:
-    import time
-
     return int(time.time() * 1000)
 
 
@@ -623,10 +629,12 @@ async def insert_customer(
     addresses: str = "[]",
     tags: str = "[]",
 ) -> None:
-    """客户建档单点(A6 收口,2026-10-06):注册联动(auth)/管理面新增
-    (analytics)/种子(merchant_seed)曾各持一份列清单 —— schema 增删 NOT NULL
-    列时三处独立断裂。列清单自此处唯一;连接与事务由调用方持有。"""
-    from sqlalchemy import text
+    """客户建档**原语**(列清单单点;连接与事务由调用方持有)。
+
+    层次:A6 收口(2026-10-06)后建档列清单唯一于此;上层用例
+    `create_customer_record`(自持事务 + uuid 段 cid)与注册/种子两调用方
+    (auth/merchant_seed,自带连接语境)皆经本原语落库 —— 严禁绕开直写
+    INSERT 列清单。"""
 
     await conn.execute(
         text(
@@ -647,8 +655,6 @@ async def insert_customer(
 
 async def customer_coupons_list(customer_id: str) -> list[dict]:
     """客户名下券列表(核销/发券面板回显)。"""
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-    from sqlalchemy import text
 
     async with merchant_reader_engine().connect() as conn:
         rows = (
@@ -673,8 +679,6 @@ async def customer_coupons_list(customer_id: str) -> list[dict]:
 
 async def update_customer_member_level(customer_id: str, member_level: str) -> dict:
     """会员级编辑;查无返回 error-key。"""
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text
 
     async with merchant_writer_engine().begin() as conn:
         result = await conn.execute(
@@ -688,10 +692,9 @@ async def update_customer_member_level(customer_id: str, member_level: str) -> d
 
 
 async def create_customer_record(name: str, phone: str, member_level: str = "VIP") -> dict:
-    """新增客户(uuid 段 cid + 建档单点)。"""
-    import uuid as _u
+    """新增客户**用例**(uuid 段 cid;自持 writer 事务,经 insert_customer
+    原语落库 —— 原语/用例分层见其 docstring)。"""
 
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
 
     cid = f"CUST-{_u.uuid4().hex[:8].upper()}"
     async with merchant_writer_engine().begin() as conn:
@@ -701,8 +704,6 @@ async def create_customer_record(name: str, phone: str, member_level: str = "VIP
 
 async def delete_customer(customer_id: str) -> dict:
     """删除客户(订单引用护栏:名下有订单不可删)。"""
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text
 
     async with merchant_writer_engine().begin() as conn:
         has_orders = (
@@ -724,8 +725,6 @@ async def delete_customer(customer_id: str) -> dict:
 
 
 async def spus_list() -> list[dict]:
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-    from sqlalchemy import text
 
     async with merchant_reader_engine().connect() as conn:
         rows = (
@@ -744,10 +743,7 @@ async def spus_list() -> list[dict]:
 async def create_spu(title: str, category: str, price: float, stock: int) -> dict:
     """新建 SPU + 默认 SKU 一体(异步pg 严格类型:uuid 列显式 CAST;
     main_image/sku_title/spec_attributes NOT NULL,落诚实默认值)。"""
-    import uuid as _u
 
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text
 
     spu_id = str(_u.uuid4())
     code = f"SPU-{_u.uuid4().hex[:8].upper()}"
@@ -772,8 +768,6 @@ async def create_spu(title: str, category: str, price: float, stock: int) -> dic
 
 async def update_spu(spu_id: str, body: dict) -> dict:
     """字段级更新(status/title/price/stock 携带即改;价格/库存落首个 SKU)。"""
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text
 
     if "status" in body and body["status"] not in ("ON_SALE", "OFF_SALE"):
         return {"error": "status ∈ ON_SALE|OFF_SALE"}
@@ -807,8 +801,6 @@ async def update_spu(spu_id: str, body: dict) -> dict:
 
 async def delete_spu(spu_id: str) -> dict:
     """删除 SPU(成交引用护栏:有订单明细不可删,可下架)。"""
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text
 
     async with merchant_writer_engine().begin() as conn:
         code = (
@@ -831,8 +823,6 @@ async def delete_spu(spu_id: str) -> dict:
 
 
 async def skus_stock_list() -> list[dict]:
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-    from sqlalchemy import text
 
     async with merchant_reader_engine().connect() as conn:
         rows = (
@@ -850,8 +840,6 @@ async def skus_stock_list() -> list[dict]:
 
 
 async def skus_list(spu_id: str) -> list[dict]:
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-    from sqlalchemy import text
 
     async with merchant_reader_engine().connect() as conn:
         rows = (
@@ -868,11 +856,7 @@ async def skus_list(spu_id: str) -> list[dict]:
 
 async def create_sku(spu_id: str, body: dict) -> dict:
     """新增 SKU(目标 SPU 存在性校验在领域层)。"""
-    import json as _json
-    import uuid as _u
 
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text
 
     price = body.get("price")
     if price is None:
@@ -894,7 +878,7 @@ async def create_sku(spu_id: str, body: dict) -> dict:
             ).bindparams(
                 id=str(_u.uuid4()), spu=spu_id, code=sku_code,
                 title=body.get("skuTitle") or "", price=float(price),
-                stock=int(body.get("stock") or 0), spec=_json.dumps(spec, ensure_ascii=False),
+                stock=int(body.get("stock") or 0), spec=json.dumps(spec, ensure_ascii=False),
             )
         )
     return {"skuCode": sku_code}
@@ -902,8 +886,6 @@ async def create_sku(spu_id: str, body: dict) -> dict:
 
 async def update_sku(sku_id: str, body: dict) -> dict:
     """SKU 字段级更新(price/stock/skuTitle 白名单;空补丁诚实拒绝)。"""
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text
 
     sets, params = [], {"id": sku_id}
     for field in ("price", "stock"):
@@ -924,8 +906,6 @@ async def update_sku(sku_id: str, body: dict) -> dict:
 
 async def delete_sku(sku_id: str) -> dict:
     """删除 SKU(成交引用护栏:已有成交不可删,可改库存为 0)。"""
-    from engine_py.tools_registry.order_domain import merchant_writer_engine
-    from sqlalchemy import text
 
     async with merchant_writer_engine().begin() as conn:
         sold = (
@@ -961,6 +941,34 @@ CUSTOMER_SPEND_JOIN = (
 CUSTOMER_SPEND_AGG = (
     "COALESCE(SUM(o.total_amount),0)::float AS total_spent, COUNT(o.order_id)::int AS order_count"
 )
+
+
+async def fetch_customers_with_spend(
+    conn,
+    *,
+    customer_id: str | None = None,
+    extra_column: str = "",
+    limit: int | None = None,
+) -> list[dict]:
+    """客户档 + 消费聚合**唯一查询体**(A7 口径常量的查询侧收口,夜评 smell
+    清尾):客户列表(analytics)与坐席上下文(live_desk)口径常量单点后查询
+    本体仍各拼一份 —— 加列/改排序仍会单侧漂移。extra_column 传 addresses/tags
+    等客户 jsonb 列(归一 COALESCE '[]'::jsonb → text);customer_id 传即单档;
+    limit 传即截断。GROUP BY c.id 依赖 PG 主键函数依赖(列表旧六列 GROUP BY
+    等价改写)。返回 mappings 行的 dict 列表。"""
+    extra = f"COALESCE(c.{extra_column}, '[]'::jsonb)::text AS {extra_column}, " if extra_column else ""
+    where = "WHERE c.customer_id = :cid" if customer_id else ""
+    lim = f" LIMIT {int(limit)}" if limit else ""
+    sql = (
+        "SELECT c.customer_id, c.name, c.phone, COALESCE(c.email, '') AS email, "
+        "COALESCE(c.member_level, 'VIP') AS member_level, "
+        + extra
+        + f"{CUSTOMER_SPEND_AGG} "
+        f"{CUSTOMER_SPEND_JOIN} "
+        f"{where} GROUP BY c.id{lim}"
+    )
+    params = {"cid": customer_id} if customer_id else {}
+    return [dict(r) for r in (await conn.execute(text(sql), params)).mappings().all()]
 
 
 async def get_customer_addresses(customer_id: str = "CUST-8801") -> list[dict]:
@@ -1042,7 +1050,6 @@ async def _generate_order_id(conn: Any) -> str:
     """订单号生成闸:机制单点在 engine order_domain.generate_order_id
     (架构审查 #4 步2,2026-10-04 —— 此前与 mall_domain.checkout 内联 loop
     靠注释互指对齐);本面只做通道语义翻译:六次全撞 → _CartError 整体回滚。"""
-    from engine_py.tools_registry.order_domain import generate_order_id
 
     candidate = await generate_order_id(conn)
     if candidate is None:
