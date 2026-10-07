@@ -36,6 +36,9 @@ export interface AskFrameData {
   // explored 帧必带 generatedSql(折叠展示,口径可审计)
   trust?: AskTrust;
   generatedSql?: string;
+  // B2 归因叙事(ADR-0011):独立帧区块 + 「AI 推断(非数据)」章 —— 与数据
+  // 列视觉分离;数字可溯源硬校验在引擎侧,不过则该键缺席
+  narrative?: { text: string };
   // clarify 帧(2026-10-03 起一等公民 Clarify.to_frame)
   clarifyKind?: 'metric' | 'entity';
   question?: string;

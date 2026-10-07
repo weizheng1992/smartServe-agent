@@ -213,3 +213,28 @@ describe('ResultCard(信任章,ADR-0010 分层信任)', () => {
     expect(screen.queryByText(/查看生成 SQL/)).not.toBeInTheDocument();
   });
 });
+
+describe('ResultCard(B2 归因叙事,ADR-0011 隔离章)', () => {
+  const baseRows = [
+    { 品类: '衬衫', 本期: 400, 上期: 600, 变化: -200 },
+    { 品类: '户外机能', 本期: 150, 上期: 100, 变化: 50 },
+  ];
+
+  it('narrative 帧渲染独立区块 + 「AI 推断(非数据)」章', () => {
+    render(
+      <ResultCard
+        data={{
+          ...tableCard(baseRows),
+          narrative: { text: '净销售额下滑主因是衬衫品类,其退款率同期上升,建议核查售后。' },
+        }}
+      />,
+    );
+    expect(screen.getByText('AI 推断(非数据)')).toBeInTheDocument();
+    expect(screen.getByText(/净销售额下滑主因是衬衫品类/)).toBeInTheDocument();
+  });
+
+  it('无 narrative 键不渲染叙事区块(历史帧/未开闸)', () => {
+    render(<ResultCard data={tableCard(baseRows)} />);
+    expect(screen.queryByText('AI 推断(非数据)')).not.toBeInTheDocument();
+  });
+});

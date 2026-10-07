@@ -40,6 +40,20 @@ function GeneratedSqlFold({ sql }: { sql?: string }) {
   );
 }
 
+// B2 归因叙事(ADR-0011):与数据列视觉分离的独立区块 + 「AI 推断(非数据)」
+// 章 —— 因果叙述允许,但必须让商户一眼知道「这句是推断,上面表格才是数据」
+function NarrativeBlock({ narrative }: { narrative?: { text: string } }) {
+  if (!narrative?.text) return null;
+  return (
+    <div className="border-t border-amber-100 bg-amber-50/60 px-3 py-2 text-[11px] leading-4 text-zinc-600">
+      <span className="mr-1 rounded border border-amber-300 bg-amber-50 px-1 py-0.5 text-[10px] text-amber-700">
+        AI 推断(非数据)
+      </span>
+      {narrative.text}
+    </div>
+  );
+}
+
 // 单元格诚实呈现:缺值渲染「—」,不出 "null"/"undefined" 字面量(同页金额
 // 口径 toFixed(2)+「—」同律,夜审 2026-09-29 收口)
 function cellText(v: unknown): string {
@@ -114,6 +128,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
           <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{data.caliber}</div>
         ) : null}
         <GeneratedSqlFold sql={data.generatedSql} />
+        <NarrativeBlock narrative={data.narrative} />
       </div>
     );
   }
@@ -157,6 +172,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
         </div>
         <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{card.caliber}</div>
         <GeneratedSqlFold sql={data.generatedSql} />
+        <NarrativeBlock narrative={data.narrative} />
       </div>
     );
   }
@@ -194,6 +210,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
       </div>
       <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{card.caliber}</div>
       <GeneratedSqlFold sql={data.generatedSql} />
+        <NarrativeBlock narrative={data.narrative} />
     </div>
   );
 }

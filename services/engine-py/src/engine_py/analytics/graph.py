@@ -596,6 +596,14 @@ async def _composition_route(question: str, allowed: list[str] | None, session_c
         trust=composition.COMPOSED_TRUST, caliber=composition.COMPOSED_CALIBER,
         summary_override=summary,
     ), trace)
+    if comp.compare_previous:
+        # B2 归因叙事(ADR-0011):独立帧区块 + 「AI 推断(非数据)」章;
+        # 数字可溯源硬校验不过 → 叙事缺席,数据照常
+        from .composition import attribute_narrative
+
+        narrative = await attribute_narrative(comp, result.rows, frame.get("summary"))
+        if narrative:
+            frame["narrative"] = narrative
     await trace.record(
         frame.get("type", "error"), final_metric=comp.metric,
         final_method="composition", row_count=len(result.rows or []),

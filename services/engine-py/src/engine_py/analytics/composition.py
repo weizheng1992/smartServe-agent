@@ -14,6 +14,7 @@ compare_previous 时间平移算子:本期 vs 上期并排(泛化自 gmv_mom/att
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -355,12 +356,18 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
     if comp.category:
         params["cat"] = comp.category
 
+    # B1 关联指标对照(ADR-0011):双期 CTE 携带同基关联度量(退款率)的同期值
+    # —— 两列数字并排呈现「跌的同时发生了什么」,因果判断留给人(08-D1 不破)。
+    # 主指标即退款率时不重复携带;差评率需评论-订单跨基 join(扇出风险),留票注。
+    related = None if comp.metric == "refund_rate" else _measure_expr("refund_rate")
+
     def _period(start_param: str, end_clause: str) -> str:
         where = [f"o.created_at >= :{start_param} {end_clause}"]
         if comp.category:
             where.append("AND s.category = :cat")
+        extra = f", {related} AS rv" if related else ""
         return (
-            f"SELECT {dim_sql} AS dim, {measure}::float AS v "
+            f"SELECT {dim_sql} AS dim, {measure}::float AS v{extra} "
             "FROM merchant_orders o "
             f"{_ITEMS_JOIN}"
             f"{join_extra}"
@@ -368,14 +375,21 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
             f"GROUP BY {dim_sql}"
         )
 
+    related_cols = (
+        ', COALESCE(cur.rv, 0)::float AS "本期退款率", '
+        '(COALESCE(cur.rv, 0) - COALESCE(prev.rv, 0))::float AS "退款率变化"'
+        if related
+        else ""
+    )
     sql = (
         "WITH cur AS (" + _period("cur_start", "") + "), "
         "prev AS (" + _period("prev_start", "AND o.created_at < :cur_start") + ") "
         f"SELECT COALESCE(cur.dim, prev.dim) AS \"{label}\", "
         "COALESCE(cur.v, 0)::float AS \"本期\", "
         "COALESCE(prev.v, 0)::float AS \"上期\", "
-        "(COALESCE(cur.v, 0) - COALESCE(prev.v, 0))::float AS \"变化\" "
-        "FROM cur FULL OUTER JOIN prev ON prev.dim = cur.dim "
+        "(COALESCE(cur.v, 0) - COALESCE(prev.v, 0))::float AS \"变化\""
+        + related_cols +
+        " FROM cur FULL OUTER JOIN prev ON prev.dim = cur.dim "
         "ORDER BY ABS(COALESCE(cur.v, 0) - COALESCE(prev.v, 0)) DESC LIMIT :lim"
     )
     return sql, params
@@ -414,3 +428,77 @@ def _compose_total(comp: CompositionQuery, business_id: str) -> tuple[str, dict[
 
 COMPOSED_TRUST = "composed"
 COMPOSED_CALIBER = "组合查询:认证指标 × 声明维度的语义层组合(编译器确定性拼装,口径与核验指标同源)"
+
+# ---------------- B2 归因叙事(ADR-0011;隔离章 + 数字可溯源硬校验) ----------------
+
+NARRATIVE_BADGE = "AI 推断(非数据)"
+_NARRATIVE_NUM_RE = re.compile(r"-?\d[\d,]*\.?\d*")
+
+
+def narrative_enabled() -> bool:
+    return os.environ.get("AI_ATTR_NARRATIVE", "off") == "on"
+
+
+def _narrative_traceable(text: str, rows: list[dict], summary: str | None) -> bool:
+    """数字可溯源硬校验:叙事中的每个数字 token 必须能在归因卡数据(行值/速览)
+    中找到同值(数值等价,逗号/小数尾形态归一)。违者整段丢弃 —— 叙述只许
+    组织措辞,不许引入数据外的事实(ADR-0011 B2 隔离章第一护栏)。"""
+    def _numbers(text: str) -> set[float]:
+        out = set()
+        for token in _NARRATIVE_NUM_RE.findall(text):
+            try:
+                out.add(float(token.replace(",", "")))
+            except ValueError:
+                continue
+        return out
+
+    allowed = _numbers(str([v for r in rows for v in r.values()])) | (_numbers(summary) if summary else set())
+    return _numbers(text) <= allowed
+
+
+def _narrative_context(comp: CompositionQuery, rows: list[dict], summary: str | None) -> str:
+    import json as _json
+
+    from .tools_registry_bridge import metric_semantic_registry
+
+    label = metric_semantic_registry().get(comp.metric, {}).get("label") or comp.metric
+    return _json.dumps(
+        {"指标": label, "归因数据": rows, "系统速览": summary},
+        ensure_ascii=False, default=str,
+    )
+
+
+async def attribute_narrative(comp: CompositionQuery, rows: list[dict], summary: str | None) -> dict | None:
+    """B2 归因叙事:LLM 把确定性归因数据组织成因果叙述。
+
+    三重护栏(ADR-0011 隔离章方案):①独立帧区块 + 「AI 推断(非数据)」章
+    (前端渲染层);②数字可溯源硬校验 —— 叙事含卡外数字即整段丢弃;
+    ③AI_ATTR_NARRATIVE 默认 off。失败/不可溯源一律 None(叙事缺席,数据照常)。
+    """
+    if not narrative_enabled() or not rows or summary is None:
+        return None
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from .llm_intent import _content_text, get_chat_model
+
+    system = (
+        "你是商户数据归因叙述器。把系统确定性算得的归因数据组织成 2-3 句话的归因叙述。\n"
+        "硬规则:\n"
+        "- 只能引用归因数据 JSON 中出现的数字与名称,绝不引入任何数据外的事实\n"
+        "- 主因/次因按「变化」列的正负表述;退款率变化列可以「伴随/同期」描述关联\n"
+        "- 结尾可给一句行动建议(基于数据即可,如「建议核查该品类售后」)\n"
+        "- 只输出叙述文本,不要标题、不要 markdown\n"
+    )
+    user = _narrative_context(comp, rows, summary)
+    try:
+        resp = await get_chat_model().ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    except Exception as err:
+        print(f"[归因叙事] LLM 调用失败(叙事缺席,数据照常): {err}")
+        return None
+    text = _content_text(resp).strip()
+    if not text:
+        return None
+    if not _narrative_traceable(text, rows, summary):
+        print("[归因叙事] 数字不可溯源,整段丢弃(隔离章硬校验)")
+        return None
+    return {"text": text, "badge": NARRATIVE_BADGE}

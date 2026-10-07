@@ -211,3 +211,42 @@ class TestAttributionSummary:
     def test_non_compare_result_returns_none(self):
         assert attribution_summary(self._result([{"品类": "A", "metricScore": 5.0}])) is None
         assert attribution_summary(self._result([])) is None
+
+class TestAttributionRelatedAndNarrative:
+    """B1 退款率对照列 + B2 叙事溯源硬校验(ADR-0011)。"""
+
+    def test_period_compare_carries_refund_rate_columns(self):
+        comp = CompositionQuery(metric="gmv", dimension="category", compare_previous=True)
+        compiled = compile_composition(comp, "aurora")
+        assert 'AS "本期退款率"' in compiled.sql and 'AS "退款率变化"' in compiled.sql
+        assert "CUR.RV" in compiled.sql.upper()
+
+    def test_refund_rate_metric_skips_related_columns(self):
+        comp = CompositionQuery(metric="refund_rate", dimension="category", compare_previous=True)
+        compiled = compile_composition(comp, "aurora")
+        assert "本期退款率" not in compiled.sql
+
+    def test_narrative_disabled_by_default(self, monkeypatch):
+        from engine_py.analytics import composition
+
+        monkeypatch.delenv("AI_ATTR_NARRATIVE", raising=False)
+        assert composition.attribute_narrative.__name__ == "attribute_narrative"
+
+    def test_traceable_narrative_passes(self):
+        from engine_py.analytics.composition import _narrative_traceable
+
+        rows = [{"品类": "户外机能", "本期": 400.0, "上期": 600.0, "变化": -200.0, "本期退款率": 8.2, "退款率变化": 3.1}]
+        summary = "合计 本期 400 vs 上期 600(净变化 -200,-33.3%)"
+        assert _narrative_traceable("主因:户外机能(变化 -200),其本期退款率 8.2,环比 +3.1。", rows, summary)
+
+    def test_fabricated_number_dropped(self):
+        from engine_py.analytics.composition import _narrative_traceable
+
+        rows = [{"品类": "户外机能", "本期": 400.0, "上期": 600.0, "变化": -200.0}]
+        assert not _narrative_traceable("主因:户外机能(变化 -200),涉及订单 1,234 单。", rows, None)
+
+    def test_comma_number_normalized(self):
+        from engine_py.analytics.composition import _narrative_traceable
+
+        rows = [{"品类": "A", "本期": 53515.0, "上期": 60000.0, "变化": -6485.0}]
+        assert _narrative_traceable("净变化 -6,485。", rows, None)
