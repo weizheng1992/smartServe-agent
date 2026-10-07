@@ -277,7 +277,7 @@ async def ask(
     return outcome
 
 
-def _result_frame(question: str, result, intent, title_prefix: str = "", *, trust: str = "verified", caliber: str | None = None) -> dict:
+def _result_frame(question: str, result, intent, title_prefix: str = "", *, trust: str = "verified", caliber: str | None = None, summary_override: str | None = None) -> dict:
     from .tools_registry_bridge import metric_semantic_registry
 
     cards = build_cards(question, result, intent)
@@ -295,7 +295,7 @@ def _result_frame(question: str, result, intent, title_prefix: str = "", *, trus
         # 用户图表指令(chart_hint)优先,缺省由指标语义自动推断(趋势→折线);
         # 仲裁唯一出处 chart_policy.decide(2026-10-03 收口)
         "chart": chart_policy.decide(intent.chart_hint, intent.metric, result.chart),
-        "summary": _quick_summary(result, intent),
+        "summary": summary_override if summary_override is not None else _quick_summary(result, intent),
         "rows": result.rows,
         "cards": cards,
     }
@@ -579,14 +579,22 @@ async def _composition_route(question: str, allowed: list[str] | None, session_c
         print(f"[T1] 组合执行失败(放行 unsupported): {err}")
         return None
 
-    # 组合面用轻量意图占位(复用 _result_frame 的标题/图表/速览管线)
+    # 组合面用轻量意图占位(复用 _result_frame 的标题/图表/速览管线);
+    # 时间平移帧换归因速览(票 10 阶段 A:净变化 + 主因贡献,确定性零叙事)
     shim = StructuredQueryIntent(
         metric=comp.metric, direction=comp.direction, limit=comp.limit,
         time_window=comp.time_window, category=comp.category,
     )
+    summary = None
+    if comp.compare_previous:
+        from .quick_summary import attribution_summary
+
+        summary = attribution_summary(result)
     frame = _with_trace(_result_frame(
         comp.source_question or question, result, shim,
+        title_prefix="归因" if comp.compare_previous and summary else "",
         trust=composition.COMPOSED_TRUST, caliber=composition.COMPOSED_CALIBER,
+        summary_override=summary,
     ), trace)
     await trace.record(
         frame.get("type", "error"), final_metric=comp.metric,

@@ -18,6 +18,7 @@ from engine_py.analytics.composition import (
     compile_composition,
     composition_enabled,
 )
+from engine_py.analytics.quick_summary import attribution_summary
 
 
 class _Out:
@@ -175,3 +176,38 @@ class TestCompositionCompile:
         comp = CompositionQuery(metric="review_bad", dimension="category")  # 不可组合指标
         with pytest.raises(Exception, match="未开放语义层组合"):
             compile_composition(comp, "aurora")
+
+
+class TestAttributionSummary:
+    """归因速览(票 10 阶段 A):compare_previous 帧的确定性呈现。"""
+
+    def _result(self, rows):
+        from engine_py.analytics.engine import QueryResult
+
+        return QueryResult(rows=rows, metric="net_sales", unit="元", caliber="x")
+
+    def test_drop_attribution(self):
+        summary = attribution_summary(self._result([
+            {"品类": "户外机能", "本期": 400.0, "上期": 600.0, "变化": -200.0},
+            {"品类": "潮流鞋靴", "本期": 150.0, "上期": 100.0, "变化": 50.0},
+        ]))
+        assert "合计 本期 550 vs 上期 700" in summary
+        assert "净变化 -150" in summary and "-21.4%" in summary
+        assert "主因:户外机能(-200,占变动的 80%)" in summary
+        assert "次正贡献:潮流鞋靴(+50)" in summary
+
+    def test_rise_top_contributor_wording(self):
+        summary = attribution_summary(self._result([
+            {"品类": "A", "本期": 300.0, "上期": 100.0, "变化": 200.0},
+        ]))
+        assert "最大正贡献:A(+200,占变动的 100%)" in summary
+
+    def test_zero_prev_delta_pct_is_dash(self):
+        summary = attribution_summary(self._result([
+            {"品类": "A", "本期": 100.0, "上期": 0.0, "变化": 100.0},
+        ]))
+        assert "—" in summary
+
+    def test_non_compare_result_returns_none(self):
+        assert attribution_summary(self._result([{"品类": "A", "metricScore": 5.0}])) is None
+        assert attribution_summary(self._result([])) is None

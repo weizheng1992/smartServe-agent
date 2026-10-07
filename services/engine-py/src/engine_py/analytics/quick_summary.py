@@ -60,3 +60,34 @@ def quick_summary(result, intent) -> str | None:
         else:
             parts.append(f"末位 {tail_label} 0{unit}")
     return ";".join(parts) + "。"
+
+def attribution_summary(result) -> str | None:
+    """归因速览(票 10 阶段 A):compare_previous 双期分解(本期/上期/变化列)
+    的确定性呈现 —— 净变化 + 主因贡献排序。纯算术,只陈述算得的差异,不猜测
+    原因(08-D1);无变化列或空结果返回 None(卡片退默认速览)。"""
+    rows = result.rows or []
+    if len(rows) < 1:
+        return None
+    label_col = next((k for k, v in rows[0].items() if not isinstance(v, (int, float))), None)
+    for col in ("本期", "上期", "变化"):
+        if col not in rows[0] or not all(isinstance(r.get(col), (int, float)) for r in rows):
+            return None
+    cur = sum(float(r["本期"]) for r in rows)
+    prev = sum(float(r["上期"]) for r in rows)
+    delta = cur - prev
+    delta_pct = f"{delta / prev * 100:+.1f}%" if prev else "—"
+    parts = [f"合计 本期 {cur:,.0f} vs 上期 {prev:,.0f}(净变化 {delta:+,.0f},{delta_pct})"]
+    contributors = sorted(rows, key=lambda r: abs(float(r["变化"])), reverse=True)
+    top = contributors[0]
+    if float(top["变化"]) != 0:
+        total_abs = sum(abs(float(r["变化"])) for r in rows) or 1.0
+        share = abs(float(top["变化"])) / total_abs * 100
+        word = "主因" if float(top["变化"]) < 0 else "最大正贡献"
+        top_label = str(top.get(label_col) if label_col else top) or "—"
+        parts.append(f"{word}:{top_label}({float(top['变化']):+,.0f},占变动的 {share:.0f}%)")
+    if len(contributors) >= 2 and float(contributors[1]["变化"]) != 0:
+        second = contributors[1]
+        second_label = str(second.get(label_col) if label_col else second) or "—"
+        word2 = "次因" if float(second["变化"]) < 0 else "次正贡献"
+        parts.append(f"{word2}:{second_label}({float(second['变化']):+,.0f})")
+    return ";".join(parts) + "。"
