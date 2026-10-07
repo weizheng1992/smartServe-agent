@@ -16,6 +16,25 @@ const GATEWAY = 'http://localhost:4000';
 
 test.use({ baseURL: 'http://localhost:3005' });
 
+// U2(2026-10-05)游客语义收口后,页面默认身份是 guest-*,/cart 页按 user.id
+// 取车 —— 而 chatSend 的引擎车记在 CUST-8801,游客读车恒空(9489759 只修了
+// merchantApp 册,本册漂移)。两用例显式注入张伟身份,注入值走参数字面量,
+// 严禁引用 Node 闭包常量(注入不捕获闭包,崩在中途即部分键缺失)。
+const injectZhangwei = async (page: any) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'aurora_merchant_current_user',
+      JSON.stringify({
+        id: 'CUST-8801',
+        name: '张伟',
+        phone: '13800138000',
+        tier: '黑金SVIP',
+        defaultAddress: '北京市海淀区中关村南大街1号院8号楼1201室',
+      }),
+    );
+  });
+};
+
 test.describe.configure({ mode: 'serial' });
 
 const chatSend = async (request: any, message: string) => {
@@ -71,6 +90,7 @@ test.describe('🛒 聊天加购 × 商城购物车页 全链路', () => {
       .toBe('both');
 
     // 浏览器打开商城购物车页:全新挂载,走 /api/store/cart 合流路径,两行规格均可见
+    await injectZhangwei(page);
     await page.goto('/cart');
     const body = page.locator('body');
     await expect(body).toContainText('极光三合一全天候户外硬壳冲锋衣', { timeout: 15_000 });
@@ -110,6 +130,7 @@ test.describe('🛒 聊天加购 × 商城购物车页 全链路', () => {
       .toBe('removed');
 
     // 商城购物车页:本地存档清空后,合流路径下应显示空车(引擎权威)
+    await injectZhangwei(page);
     await page.goto('/');
     await page.evaluate(() => localStorage.removeItem('aurora_store_cart'));
     await page.goto('/cart');
