@@ -1,23 +1,14 @@
 gmv:
   key: gmv
   label: 总销售额 (GMV)
-  description: 统计周期内所有已生效订单的实付销售总流水金额,即 SUM(quantity * price_at_purchase)。不扣除进货成本。
+  description: 统计周期内所有已生效订单的实付销售总流水金额,即 SUM(quantity * price)。不扣除进货成本。
   domain: sales
-  sourceTables:
-  - products
-  - order_items
-  - orders
-  expression: COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0)::float
   businessRules:
   - 仅统计有效销售订单,排除已取消未付款订单
-  - 单价取下单时快照 price_at_purchase,防止后续商品改价失真
+  - 单价取下单时快照 price(merchant_order_items 成交价快照列),防止后续商品改价失真
   direction: DESC
   unit: 元
   icon: 💰
-  aliases:
-  - gross_merchandise_volume
-  - total_sales
-  - turnover
   synonyms:
   - 卖得好
   - 销售额
@@ -44,20 +35,11 @@ volume:
   label: 出货销量 (件数)
   description: 统计周期内商品实际售出的总件数总量,即 SUM(quantity)。反映商品物理周转频次和爆款热度。
   domain: sales
-  sourceTables:
-  - products
-  - order_items
-  - orders
-  expression: COALESCE(SUM(oi.quantity), 0)::int
   businessRules:
   - 退货件数是否扣减需视售后策略而定,默认统计总出货件数
   direction: DESC
   unit: 件
   icon: 📦
-  aliases:
-  - sales_volume
-  - total_quantity
-  - order_units
   synonyms:
   - 销量
   - 走量
@@ -86,23 +68,14 @@ volume:
 gross_profit:
   key: gross_profit
   label: 净毛利润 (收益)
-  description: 销售总流水减去进货/物料成本后的净收益,即 SUM(quantity * (price_at_purchase - cost_at_purchase))。
+  description: 销售总流水减去进货/物料成本后的净收益,即 SUM(quantity * (price - cost_at_purchase))。
   domain: profit
-  sourceTables:
-  - products
-  - order_items
-  - orders
-  expression: (COALESCE(SUM(oi.quantity * oi.price_at_purchase), 0) - COALESCE(SUM(oi.quantity * COALESCE(oi.cost_at_purchase,
-    p.cost_price, 0)), 0))::float
   businessRules:
   - 如果 order_items 存在下单成本 cost_at_purchase 则优先使用,否则降级回退至 product 当前 cost_price
   - 毛利可为负数(当贴钱促销时)
   direction: DESC
   unit: 元
   icon: 📈
-  aliases:
-  - profit_amount
-  - gross_margin_dollars
   synonyms:
   - 最赚钱
   - 利润最高
@@ -129,19 +102,11 @@ margin_rate:
   label: 毛利率 (性价比/溢价率)
   description: 净毛利润与总销售额的比率,公式:(毛利润 / NULLIF(总销售额, 0)) * 100。反映单品盈利质量。
   domain: profit
-  sourceTables:
-  - products
-  - order_items
-  expression: CASE WHEN SUM(oi.quantity * oi.price_at_purchase) > 0 THEN (((SUM(oi.quantity * oi.price_at_purchase) - SUM(oi.quantity
-    * COALESCE(oi.cost_at_purchase, p.cost_price, 0))) / SUM(oi.quantity * oi.price_at_purchase)) * 100)::float ELSE 0.0 END
   businessRules:
   - 必须使用 NULLIF 或 CASE WHEN 规避分母为 0 抛出除零异常
   direction: DESC
   unit: '%'
   icon: 🎯
-  aliases:
-  - gross_margin_percentage
-  - margin_percentage
   synonyms:
   - 毛利率
   - 利润率
@@ -163,19 +128,13 @@ margin_rate:
 stock_risk:
   key: stock_risk
   label: 滞销积压库存
-  expression: p.stock::int
   description: 当前仓库在库物理剩余库存件数,用于排查滞销压货与动销缓慢风险。
   domain: inventory
-  sourceTables:
-  - products
   businessRules:
   - 库存预警默认按绝对剩余量降序排列
   direction: DESC
   unit: 件
   icon: ⚠️
-  aliases:
-  - inventory_level
-  - slow_moving_stock
   synonyms:
   - 滞销
   - 积压
@@ -201,9 +160,6 @@ review_bad:
   label: 差评榜 (≤2星)
   description: 统计周期内差评条数排行(rating <= 2);数据源商户镜像库 merchant_product_reviews。
   domain: review
-  sourceTables:
-  - merchant_product_reviews
-  expression: COUNT(*) FILTER (WHERE rating <= 2)
   compile:
     shape: dim_rank
     base: merchant_product_reviews
@@ -218,8 +174,6 @@ review_bad:
   direction: DESC
   unit: 条
   icon: 👎
-  aliases:
-  - bad_reviews
   synonyms:
   - 差评
   - 差评最多
@@ -238,10 +192,6 @@ refund_rate:
   label: 退款率
   description: 退款件数 ÷ 有效成交件数 × 100;数据源商户镜像库订单明细。
   domain: refund
-  sourceTables:
-  - merchant_order_items
-  - merchant_orders
-  expression: refunded_qty / valid_qty * 100
   compile:
     shape: dim_rank
     base: merchant_order_items
@@ -256,8 +206,6 @@ refund_rate:
   direction: DESC
   unit: '%'
   icon: ↩️
-  aliases:
-  - refund_rate_metric
   synonyms:
   - 退款率
   - 退货率
@@ -274,9 +222,6 @@ session_volume:
   label: 会话量
   description: 统计周期内会话条数;engine 本地 session_metrics 同源真算(与平台大盘口径一致)。
   domain: session
-  sourceTables:
-  - session_metrics
-  expression: COUNT(*)
   compile:
     shape: total_single
     base: session_metrics
@@ -288,8 +233,6 @@ session_volume:
   direction: DESC
   unit: 条
   icon: 💬
-  aliases:
-  - session_count
   synonyms:
   - 会话量
   - 咨询量
@@ -309,10 +252,6 @@ promo_orders:
   label: 活动核销订单数
   description: 统计周期内使用优惠活动的订单笔数,按活动汇总;数据源 promotion_redemptions。
   domain: promotion
-  sourceTables:
-  - promotions
-  - promotion_redemptions
-  expression: COUNT(DISTINCT order_id) GROUP BY promo
   compile:
     shape: dim_rank
     base: promotion_redemptions
@@ -326,8 +265,6 @@ promo_orders:
   direction: DESC
   unit: 单
   icon: 🎯
-  aliases:
-  - promo_redemptions
   synonyms:
   - 核销订单
   - 活动核销
@@ -346,10 +283,6 @@ promo_discount_total:
   label: 活动优惠总额
   description: 统计周期内优惠活动抵扣的总金额,按活动汇总;数据源 promotion_redemptions。
   domain: promotion
-  sourceTables:
-  - promotions
-  - promotion_redemptions
-  expression: SUM(discount_amount) GROUP BY promo
   compile:
     shape: dim_rank
     base: promotion_redemptions
@@ -363,8 +296,6 @@ promo_discount_total:
   direction: DESC
   unit: 元
   icon: 💸
-  aliases:
-  - promo_cost
   synonyms:
   - 优惠总额
   - 活动成本
@@ -385,11 +316,6 @@ promo_gmv_total:
   label: 活动核销GMV
   description: 统计周期内各优惠活动核销记录关联订单的实付总额,按活动排行;核销归因口径(自然流量不计入)。
   domain: promotion
-  sourceTables:
-  - promotions
-  - promotion_redemptions
-  - merchant_orders
-  expression: SUM(o.total_amount) GROUP BY promo
   compile:
     shape: dim_rank
     base: promotion_redemptions
@@ -404,8 +330,6 @@ promo_gmv_total:
   direction: DESC
   unit: 元
   icon: 🏆
-  aliases:
-  - promo_gmv
   synonyms:
   - 活动收益
   - 哪个活动收益
@@ -427,10 +351,6 @@ gmv_trend:
   label: GMV 趋势
   description: 近 30 天每日 GMV 折线;有效订单口径(排除退款/取消),按下单日聚合。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  - merchant_order_items
-  expression: SUM(quantity*price) GROUP BY day
   compile:
     shape: trend
     measure: "COALESCE(SUM(oi.quantity * oi.price), 0)::float"
@@ -441,8 +361,6 @@ gmv_trend:
   direction: ASC
   unit: 元
   icon: 📈
-  aliases:
-  - gmv_trend
   synonyms:
   - GMV 趋势
   - 销售额趋势
@@ -464,10 +382,6 @@ volume_trend:
   label: 销量趋势
   description: 销量(件)折线:默认近 30 天按日;问「近 N 个月/几个月的销量」自动切自然月粒度。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  - merchant_order_items
-  expression: SUM(quantity) GROUP BY day|month
   compile:
     shape: trend
     measure: "COALESCE(SUM(oi.quantity), 0)::float"
@@ -478,8 +392,6 @@ volume_trend:
   direction: ASC
   unit: 件
   icon: 📈
-  aliases:
-  - volume_trend
   synonyms:
   - 销量趋势
   - 销量走势
@@ -503,16 +415,11 @@ order_overview:
   label: 选中订单概览
   description: 对页面勾选的订单做笔数/合计金额/平均金额统计;实体集来自 PageContext 选择(必传)。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  expression: COUNT/SUM/AVG(total_amount) FILTER order_id = ANY(entities)
   businessRules:
   - 实体集为空时响亮拒绝(请先勾选订单);金额取订单实付
   direction: DESC
   unit: 元
   icon: 🧮
-  aliases:
-  - selected_orders
   synonyms:
   - 订单概览
   - 这几笔订单
@@ -544,9 +451,6 @@ after_sale_overview:
   label: 售后工单概况
   description: 售后工单按状态分布计数;engine 本地 after_sale_tickets 真算。
   domain: refund
-  sourceTables:
-  - after_sale_tickets
-  expression: COUNT(*) GROUP BY status
   compile:
     shape: dim_rank
     base: after_sale_tickets
@@ -560,8 +464,6 @@ after_sale_overview:
   direction: DESC
   unit: 单
   icon: 🧾
-  aliases:
-  - after_sale_status
   synonyms:
   - 售后工单
   - 售后概况
@@ -579,9 +481,6 @@ ai_resolution_rate:
   label: AI 自动解决率
   description: resolved_auto 会话 ÷ 总会话 × 100;session_metrics 同源。
   domain: session
-  sourceTables:
-  - session_metrics
-  expression: resolved_auto / total * 100
   compile:
     shape: total_single
     base: session_metrics
@@ -593,8 +492,6 @@ ai_resolution_rate:
   direction: DESC
   unit: '%'
   icon: 🤖
-  aliases:
-  - auto_resolution
   synonyms:
   - 自动解决率
   - AI 解决率
@@ -610,18 +507,11 @@ promo_effect:
   label: 活动效果总览
   description: 指定运营活动的核销关联口径汇总:核销订单数、核销GMV、优惠总额。需指明活动(核销归因,自然流量不计入)。
   domain: promotion
-  sourceTables:
-  - promotions
-  - promotion_redemptions
-  - merchant_orders
-  expression: COUNT(DISTINCT order_id), SUM(total_amount), SUM(discount_amount)
   businessRules:
   - 核销关联口径:仅统计该活动核销记录关联的订单
   - 优惠总额 = SUM(discount_amount)
   direction: DESC
   unit: 单
-  aliases:
-  - campaign_effect
   synonyms:
   - 活动效果
   - 活动销量
@@ -639,19 +529,11 @@ promo_sku_compare:
   label: 活动内商品对比
   description: 指定活动核销订单的商品明细按款聚合:销量/GMV/订单数,可标记目标款对比其他款。需指明活动。
   domain: promotion
-  sourceTables:
-  - promotions
-  - promotion_redemptions
-  - merchant_orders
-  - merchant_order_items
-  expression: SUM(quantity), SUM(quantity*price), COUNT(DISTINCT order_id)
   businessRules:
   - 按活动核销订单的商品明细聚合
   - 对比分组列标记目标款/其他款
   direction: DESC
   unit: 件
-  aliases:
-  - campaign_sku_compare
   synonyms:
   - 活动里哪款卖得好
   - 活动商品对比
@@ -668,18 +550,11 @@ promo_compare:
   label: 双活动对比
   description: 两个运营活动并排对比:核销订单数、核销GMV、优惠总额。需指明两个活动(核销归因口径)。
   domain: promotion
-  sourceTables:
-  - promotions
-  - promotion_redemptions
-  - merchant_orders
-  expression: COUNT(DISTINCT order_id), SUM(total_amount), SUM(discount_amount) GROUP BY promotion
   businessRules:
   - 核销关联口径:各自只统计本活动核销记录关联的订单
   - 两行并排对比
   direction: DESC
   unit: 单
-  aliases:
-  - campaign_compare
   synonyms:
   - 两个活动对比
   - 活动对比
@@ -697,16 +572,10 @@ customer_orders:
   label: 客户订单查询
   description: 指定客户名下的订单列表(按下单时间倒序)。需指明客户(姓名/手机号)。
   domain: customer
-  sourceTables:
-  - merchant_orders
-  - merchant_customers
-  expression: order_id, status, total_amount, created_at
   businessRules:
   - 名下全部订单,不按成交口径过滤(列表展示原状)
   direction: DESC
   unit: 单
-  aliases:
-  - customer_recent_orders
   synonyms:
   - 客户订单
   - 名下订单
@@ -721,9 +590,6 @@ aov:
   label: 客单价
   description: 有效订单(排除退款/取消)的平均实付金额;支持时间窗。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  expression: AVG(total_amount) FILTER status NOT IN (REFUNDED, CANCELLED)
   compile:
     shape: total_single
     base: merchant_orders
@@ -736,8 +602,6 @@ aov:
   direction: DESC
   unit: 元
   icon: 🧾
-  aliases:
-  - average_order_value
   synonyms:
   - 客单价
   - 平均每单
@@ -754,9 +618,6 @@ order_count:
   label: 订单量
   description: 有效订单笔数(排除退款/取消);支持时间窗。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  expression: COUNT(*) FILTER status NOT IN (REFUNDED, CANCELLED)
   compile:
     shape: total_single
     base: merchant_orders
@@ -769,8 +630,6 @@ order_count:
   direction: DESC
   unit: 单
   icon: 📦
-  aliases:
-  - order_volume
   synonyms:
   - 订单量
   - 订单数
@@ -787,9 +646,6 @@ review_good:
   label: 好评榜
   description: 商品好评(评分 ≥ 4)条数排行;商户真实评价。
   domain: review
-  sourceTables:
-  - merchant_product_reviews
-  expression: COUNT(*) FILTER rating >= 4 GROUP BY spu_id
   compile:
     shape: dim_rank
     base: merchant_product_reviews
@@ -804,8 +660,6 @@ review_good:
   direction: DESC
   unit: 条
   icon: 🌟
-  aliases:
-  - positive_review_rank
   synonyms:
   - 好评榜
   - 好评最多的商品
@@ -821,17 +675,11 @@ zero_sales:
   label: 滞销零销量商品
   description: 在售但一单未成交的商品,按剩余库存降序(压货风险交叉视角)。
   domain: inventory
-  sourceTables:
-  - merchant_spus
-  - merchant_order_items
-  expression: NOT EXISTS(order_items) ORDER BY stock DESC
   businessRules:
   - 只列在售款;库存降序暴露压货风险
   direction: DESC
   unit: 件
   icon: 🕳️
-  aliases:
-  - unsold_products
   synonyms:
   - 滞销零销量
   - 零销量商品
@@ -849,11 +697,6 @@ category_gmv_top:
   label: 品类GMV榜
   description: 按品类聚合的有效成交 GMV 排行;支持时间窗。
   domain: sales
-  sourceTables:
-  - merchant_spus
-  - merchant_order_items
-  - merchant_orders
-  expression: SUM(quantity*price) GROUP BY category
   compile:
     shape: dim_rank
     base: merchant_spus
@@ -868,8 +711,6 @@ category_gmv_top:
   direction: DESC
   unit: 元
   icon: 🏷️
-  aliases:
-  - category_gmv_rank
   synonyms:
   - 品类GMV榜
   - 品类GMV排行
@@ -886,10 +727,6 @@ customer_spend_top:
   label: 客户消费榜
   description: 客户累计消费金额排行(有效成交口径);支持时间窗。
   domain: customer
-  sourceTables:
-  - merchant_orders
-  - merchant_customers
-  expression: SUM(total_amount) GROUP BY customer ORDER BY DESC
   compile:
     shape: dim_rank
     base: merchant_orders
@@ -904,8 +741,6 @@ customer_spend_top:
   direction: DESC
   unit: 元
   icon: 👑
-  aliases:
-  - customer_spend_rank
   synonyms:
   - 客户消费榜
   - 客户消费排行
@@ -922,17 +757,11 @@ customer_spend_stats:
   label: 客户消费统计
   description: 指定客户的订单数/累计消费/客单价/最近下单;有效成交口径。
   domain: customer
-  sourceTables:
-  - merchant_customers
-  - merchant_orders
-  expression: COUNT/SUM/AVG(total_amount) FILTER customer = ANY(entities)
   businessRules:
   - 有效成交口径;客户实体必传(逐字绑定或反问)
   direction: DESC
   unit: 元
   icon: 🧾
-  aliases:
-  - customer_spend
   synonyms:
   - 消费统计
   - 消费情况
@@ -949,17 +778,11 @@ customer_coupons:
   label: 客户优惠券
   description: 指定客户名下的优惠券列表(券名/面额/状态/领取与核销时间)。
   domain: customer
-  sourceTables:
-  - user_coupons
-  - promotions
-  expression: JOIN promotions FILTER user_id = ANY(entities)
   businessRules:
   - 含已用与未用;按领取时间倒序
   direction: DESC
   unit: 张
   icon: 🎟️
-  aliases:
-  - customer_coupon_list
   synonyms:
   - 优惠券
   - 优惠券列表
@@ -976,18 +799,11 @@ customer_profile:
   label: 用户画像
   description: 指定客户画像:会员级/注册/累计消费/订单数/客单价/最近下单/最爱品类/领券用券数。
   domain: customer
-  sourceTables:
-  - merchant_customers
-  - merchant_orders
-  - user_coupons
-  expression: 聚合 + 最爱品类子查询 + 券计数子查询
   businessRules:
   - 宽表单行;消费均为有效成交口径
   direction: DESC
   unit: 人
   icon: 🧑‍💼
-  aliases:
-  - customer_persona
   synonyms:
   - 用户画像
   - 客户画像
@@ -1003,16 +819,11 @@ customer_panorama:
   label: 客户全景(场景包)
   description: 一次问出客户三节:画像 + 优惠券 + 最近订单;编排层展开为多卡。
   domain: customer
-  sourceTables:
-  - merchant_customers
-  expression: 'scenario: customer_profile + customer_coupons + customer_orders'
   businessRules:
   - 场景包由编排层展开多帧;客户实体必传
   direction: DESC
   unit: 人
   icon: 🗂️
-  aliases:
-  - customer_full_view
   synonyms:
   - 客户全景
   - 客户全景看下
@@ -1029,18 +840,11 @@ biz_overview:
   label: 经营概览(场景包)
   description: 一次问出经营五节:GMV/订单量/客单价/会话量/退款率;编排层展开为多卡。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  - session_metrics
-  - merchant_order_items
-  expression: 'scenario: gmv + order_count + aov + session_volume + refund_rate'
   businessRules:
   - 场景包由编排层展开多帧;每节独立口径注记
   direction: DESC
   unit: 元
   icon: 📊
-  aliases:
-  - business_overview
   synonyms:
   - 经营概览
   - 经营怎么样
@@ -1058,17 +862,11 @@ gmv_mom:
   label: GMV 环比
   description: 本月 vs 上月 GMV 对比与环比百分比;自然月对齐。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  - merchant_order_items
-  expression: 本月子查询 / 上月子查询 + 环比
   businessRules:
   - 有效成交口径;上月为 0 时环比置空(不编造)
   direction: DESC
   unit: 元
   icon: ↔️
-  aliases:
-  - gmv_mom_compare
   synonyms:
   - 环比
   - GMV环比
@@ -1085,9 +883,6 @@ orders_trend:
   label: 订单量趋势
   description: 订单量(单)折线:默认近 30 天按日;「近 N 个月」切自然月粒度。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  expression: COUNT(DISTINCT order_id) GROUP BY day|month
   compile:
     shape: trend
     measure: "COUNT(DISTINCT o.order_id)::float"
@@ -1097,8 +892,6 @@ orders_trend:
   direction: ASC
   unit: 单
   icon: 📉
-  aliases:
-  - order_count_trend
   synonyms:
   - 订单量趋势
   - 订单走势
@@ -1116,10 +909,6 @@ stock_value:
   label: 库存价值排行
   description: 在售商品库存货值(Σ 库存×售价)排行;压货资金视角。
   domain: inventory
-  sourceTables:
-  - merchant_spus
-  - merchant_skus
-  expression: SUM(stock*price) GROUP BY spu ORDER BY DESC
   compile:
     shape: dim_rank
     base: merchant_spus
@@ -1133,8 +922,6 @@ stock_value:
   direction: DESC
   unit: 元
   icon: 💰
-  aliases:
-  - inventory_value
   synonyms:
   - 库存价值
   - 库存金额
@@ -1153,10 +940,6 @@ customer_spend_trend:
   label: 客户消费趋势
   description: 指定客户的消费金额折线:默认近 30 天按日,「近 N 个月」切自然月;有效成交口径。
   domain: customer
-  sourceTables:
-  - merchant_customers
-  - merchant_orders
-  expression: SUM(total_amount) FILTER customer = ANY(entities) GROUP BY day|month
   compile:
     shape: trend
     measure: "COALESCE(SUM(o.total_amount), 0)::float"
@@ -1167,8 +950,6 @@ customer_spend_trend:
   direction: ASC
   unit: 元
   icon: 📈
-  aliases:
-  - customer_spend_line
   synonyms:
   - 消费记录
   - 消费趋势
@@ -1185,18 +966,12 @@ attribution_refund:
   label: 退货变化归因
   description: 本月 vs 上月退货单数对比,按商品列变化最大的贡献者(确定性环比分解)。
   domain: review
-  sourceTables:
-  - merchant_orders
-  - merchant_order_items
-  expression: cur/prev refund count per spu + delta
   businessRules:
   - 归因只做确定性环比分解,不猜测原因(08-D1);变多/变少由行序表达
   - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
   direction: DESC
   unit: 单
   icon: 🔍
-  aliases:
-  - why_refund_change
   synonyms:
   - 为什么退货变多
   - 为什么退货变少
@@ -1221,18 +996,12 @@ attribution_sales:
   label: 销售变化归因
   description: 本月 vs 上月 GMV 对比,按商品列变化最大的贡献者(确定性环比分解)。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  - merchant_order_items
-  expression: cur/prev GMV per spu + delta
   businessRules:
   - 归因只做确定性环比分解,不猜测原因(08-D1);变好/变差由行序表达
   - 固定本月 vs 上月窗口(自然月对齐);问句时间窗暂不生效(语义收窄已在词面注明)
   direction: DESC
   unit: 元
   icon: 🔍
-  aliases:
-  - why_sales_change
   synonyms:
   - 为什么卖得变好
   - 为什么卖得变差
@@ -1261,19 +1030,12 @@ spu_compare:
   label: 商品销售对比
   description: 勾选的商品并排对比:各自销量/GMV/订单数(有效成交口径);需勾选 ≥2 个商品。
   domain: sales
-  sourceTables:
-  - merchant_spus
-  - merchant_order_items
-  - merchant_orders
-  expression: SUM(quantity), SUM(quantity*price), COUNT(DISTINCT order_id) FILTER spu = ANY(entities) GROUP BY spu
   businessRules:
   - 勾选 ≥2 商品(列表页勾选实体走 PageContext);不足两项响亮拒绝
   - 有效成交口径,与 GMV 榜同源
   direction: DESC
   unit: 件
   icon: ⚖️
-  aliases:
-  - spu_sales_compare
   synonyms:
   - 两个商品销售对比
   - 商品销售对比
@@ -1296,9 +1058,6 @@ net_sales:
   label: 净销售额 (实收)
   description: 统计周期内有效订单的消费者实付净额,即 SUM(total_amount);与 GMV(商品定价流水口径 SUM(quantity*price))相对,已扣优惠抵扣。退款单(CANCELLED/REFUNDED)不计入。
   domain: sales
-  sourceTables:
-  - merchant_orders
-  expression: COALESCE(SUM(o.total_amount), 0)::float
   compile:
     shape: total_single
     base: merchant_orders
@@ -1312,9 +1071,6 @@ net_sales:
   direction: DESC
   unit: 元
   icon: 💵
-  aliases:
-  - net_revenue
-  - actual_revenue
   synonyms:
   - 净销售额
   - 净收入

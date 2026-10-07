@@ -33,7 +33,6 @@ def _load() -> dict[str, dict[str, Any]]:
             raise ValueError(f"metrics.yaml: 指标 {key!r} 缺必填键 {missing}(响亮失败,不静默跳过)")
         if entry.get("key") != key:
             raise ValueError(f"metrics.yaml: 指标 {key!r} 的 key 字段与条目名不一致")
-        entry.setdefault("aliases", [])
         entry.setdefault("conflictGroup", [])
         entry.setdefault("sampleQueries", [])
         registry[key] = entry

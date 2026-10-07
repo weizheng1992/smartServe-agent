@@ -48,6 +48,28 @@ class TestRegistrySnapshot:
             tags[m["permissionTag"]] = tags.get(m["permissionTag"], 0) + 1
         assert tags == _EXPECTED_TAGS
 
+    def test_dead_fields_retired(self):
+        """死面清除钉面(2026-10-07):expression(39 条装饰文本,gmv 已实证写错
+        列名)/ aliases(全仓零读者)/ sourceTables(指向语义层不存在的旧 engine
+        表名)退役后不得复活 —— 聚合 SQL 的真身在 semantic_compiler。"""
+        for key, m in METRIC_SEMANTIC_REGISTRY.items():
+            assert "expression" not in m, key
+            assert "aliases" not in m, key
+            assert "sourceTables" not in m, key
+
+    def test_order_status_dimension_matches_domain_map(self):
+        """双册互验(架构评审候选一):semantic_model 的 order_status 枚举值必须
+        与 order_domain 状态中文图的键集严格相等 —— 此前三处各写,枚举加状态
+        时域图不跟即漂移。"""
+        from engine_py.tools_registry.order_domain import _ORDER_STATUS_ZH
+        from engine_py.tools_registry.semantic_model import SEMANTIC_MODEL
+
+        status_dims = [
+            d for d in SEMANTIC_MODEL["dimensions"].values() if d.get("column") == "status"
+        ]
+        assert len(status_dims) == 1
+        assert set(status_dims[0]["values"]) == set(_ORDER_STATUS_ZH)
+
     def test_entries_carry_minimal_search_surface(self):
         for key, m in METRIC_SEMANTIC_REGISTRY.items():
             assert m["label"] and m["description"], f"{key}: 词面/口径描述不得为空"
@@ -105,7 +127,9 @@ class TestLoadLoudFailures:
 
     def test_optional_keys_defaulted(self, tmp_path, monkeypatch):
         registry = self._load_from(tmp_path, monkeypatch, _yaml_with_all_required("gmv"))
-        assert registry["gmv"]["aliases"] == []
+        # aliases 字段已随死面清除退役(2026-10-07,全仓零读者);conflictGroup/
+        # sampleQueries 仍为可选缺省
+        assert "aliases" not in registry["gmv"]
         assert registry["gmv"]["conflictGroup"] == []
         assert registry["gmv"]["sampleQueries"] == []
 
