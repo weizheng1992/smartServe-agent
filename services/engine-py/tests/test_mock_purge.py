@@ -215,7 +215,6 @@ def test_sku_query_all_db_down_honest_empty(monkeypatch: pytest.MonkeyPatch) -> 
 def test_user_addresses_db_down_honest_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """地址簿查询库不可达 → total 0 空列表(旧兜底「张先生/中关村」假地址)。"""
     from engine_py.tools_registry import mall_domain as md
-    from engine_py.tools_registry.mall import addresses as mall_addresses
 
     async def _run():
         return await md.MallDomainService.get_user_addresses(user_id="u1", business_id="ecommerce")
@@ -232,7 +231,6 @@ def test_user_addresses_db_down_honest_empty(monkeypatch: pytest.MonkeyPatch) ->
 def test_save_address_db_failure_is_honest(monkeypatch: pytest.MonkeyPatch) -> None:
     """写地址库失败 → success=False 可读错误(旧兜底假成功 + addr_mock_ 假 ID)。"""
     from engine_py.tools_registry import mall_domain as md
-    from engine_py.tools_registry.mall import addresses as mall_addresses
 
     async def _run():
         return await md.MallDomainService.save_user_address(
