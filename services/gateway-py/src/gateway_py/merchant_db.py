@@ -211,6 +211,27 @@ CREATE TABLE IF NOT EXISTS thread_notes (
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_thread_notes_thread ON thread_notes(thread_id, created_at DESC);
+
+-- 「该找谁」责任人路由(spec .scratch/owner-routing):维度值→员工映射。
+-- staff_id 存 engine 库 staff_members.id 值(跨库无 FK,互验闸在测试钉死);
+-- owner_type 留名列(DataHub business/technical 分型),本期恒 'business'。
+-- 安全边界:本表严禁进 T2 schema 白名单与任何 LLM 上下文 —— 责任人数据只有
+-- 确定性通道一条入口(owner_routing / owner-mappings CRUD)。
+CREATE TABLE IF NOT EXISTS owner_mappings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  map_type TEXT NOT NULL,
+  map_value TEXT NOT NULL,
+  staff_id TEXT NOT NULL,
+  owner_type TEXT NOT NULL DEFAULT 'business',
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT owner_mappings_type_value_key UNIQUE (map_type, map_value)
+);
+
+-- 实体所有权数据原生(Q14/Q15):活动创建时刻捕获操作人、商品分配负责人;
+-- 值同样是 staff_members.id,存量行由种子补齐。
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS owner_id TEXT;
 """
 
 

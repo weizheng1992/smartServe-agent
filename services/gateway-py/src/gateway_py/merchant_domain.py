@@ -730,19 +730,21 @@ async def spus_list() -> list[dict]:
         rows = (
             await conn.execute(
                 text(
-                    "SELECT s.id::text AS id, s.spu_code, s.title, s.category, s.status, "
+                    'SELECT s.id::text AS id, s.spu_code, s.title, s.category, s.status, '
+                    's.owner_id::text AS "ownerId", '
                     "COALESCE(MIN(k.price), 0)::float AS price, COALESCE(SUM(k.stock), 0)::int AS stock "
                     "FROM merchant_spus s LEFT JOIN merchant_skus k ON k.spu_id = s.id "
-                    "GROUP BY s.id, s.spu_code, s.title, s.category, s.status ORDER BY s.title LIMIT 200"
+                    "GROUP BY s.id, s.spu_code, s.title, s.category, s.status, s.owner_id ORDER BY s.title LIMIT 200"
                 )
             )
         ).mappings().all()
     return [dict(r) for r in rows]
 
 
-async def create_spu(title: str, category: str, price: float, stock: int) -> dict:
+async def create_spu(title: str, category: str, price: float, stock: int, owner_id: str | None = None) -> dict:
     """新建 SPU + 默认 SKU 一体(异步pg 严格类型:uuid 列显式 CAST;
-    main_image/sku_title/spec_attributes NOT NULL,落诚实默认值)。"""
+    main_image/sku_title/spec_attributes NOT NULL,落诚实默认值)。
+    owner_id(Q15):负责人默认当前操作人,空 = 未分配(解析端诚实降级)。"""
 
 
     spu_id = str(_u.uuid4())
@@ -750,9 +752,9 @@ async def create_spu(title: str, category: str, price: float, stock: int) -> dic
     async with merchant_writer_engine().begin() as conn:
         await conn.execute(
             text(
-                "INSERT INTO merchant_spus (id, spu_code, title, category, main_image, status) "
-                "VALUES (CAST(:id AS uuid), :code, :t, :cat, '', 'ON_SALE')"
-            ).bindparams(id=spu_id, code=code, t=title, cat=category)
+                "INSERT INTO merchant_spus (id, spu_code, title, category, main_image, status, owner_id) "
+                "VALUES (CAST(:id AS uuid), :code, :t, :cat, '', 'ON_SALE', :owner)"
+            ).bindparams(id=spu_id, code=code, t=title, cat=category, owner=owner_id)
         )
         await conn.execute(
             text(
@@ -767,11 +769,17 @@ async def create_spu(title: str, category: str, price: float, stock: int) -> dic
 
 
 async def update_spu(spu_id: str, body: dict) -> dict:
-    """字段级更新(status/title/price/stock 携带即改;价格/库存落首个 SKU)。"""
+    """字段级更新(status/title/price/stock/ownerId 携带即改;价格/库存落首个 SKU;
+    ownerId 空串 = 清空负责人,Q15)。"""
 
     if "status" in body and body["status"] not in ("ON_SALE", "OFF_SALE"):
         return {"error": "status ∈ ON_SALE|OFF_SALE"}
     async with merchant_writer_engine().begin() as conn:
+        if "ownerId" in body:
+            await conn.execute(
+                text("UPDATE merchant_spus SET owner_id = :o WHERE id = CAST(:id AS uuid)")
+                .bindparams(o=(str(body["ownerId"]).strip() or None), id=spu_id)
+            )
         if "status" in body:
             await conn.execute(
                 text("UPDATE merchant_spus SET status = :s WHERE id = CAST(:id AS uuid)")

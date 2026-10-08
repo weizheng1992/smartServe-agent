@@ -5,6 +5,8 @@ export interface StaffLike {
   displayName: string;
   role: string;
   status: string;
+  dept?: string | null;
+  level?: string | null;
 }
 
 export type StaffStatusFilter = 'ALL' | 'enabled' | 'disabled';

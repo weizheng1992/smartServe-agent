@@ -10,6 +10,8 @@ export interface StaffRow {
   displayName: string;
   role: string;
   status: string;
+  dept: string | null;
+  level: string | null;
 }
 
 interface Props {
@@ -27,6 +29,10 @@ const STATUS_FILTERS: Array<{ key: StaffStatusFilter; label: string }> = [
 ];
 
 const roleLabel = (r: string) => ROLE_LABEL[r] || r;
+
+// 部门/职级闭集(0019 人事属性;展示与责任人路由消费,不参与 RBAC 判定)。
+const DEPTS = ['销售部', '运营部', '售后部', '财务部', '仓储部'];
+const LEVELS = ['店长', '主管', '专员'];
 
 /** 员工表:关键词(姓名/邮箱)+ 角色 + 状态三维筛选;角色改即存;停用有服务端护栏。 */
 export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
@@ -80,6 +86,7 @@ export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
         <thead>
           <tr className="border-b border-zinc-100 text-left text-zinc-400">
             <th className="px-4 py-2 font-medium">员工</th>
+            <th className="px-4 py-2 font-medium">部门 / 职级</th>
             <th className="px-4 py-2 font-medium">角色</th>
             <th className="px-4 py-2 font-medium">状态</th>
             <th className="px-4 py-2 font-medium">操作</th>
@@ -88,7 +95,7 @@ export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={4} className="px-4 py-6 text-center text-xs text-zinc-400">
+              <td colSpan={5} className="px-4 py-6 text-center text-xs text-zinc-400">
                 无匹配员工(诚实空)
               </td>
             </tr>
@@ -98,6 +105,34 @@ export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
               <td className="px-4 py-2">
                 {s.displayName}
                 <span className="ml-2 text-[11px] text-zinc-400">{s.email}</span>
+              </td>
+              <td className="px-4 py-2">
+                <select
+                  aria-label={`部门:${s.displayName}`}
+                  className="mb-1 rounded-lg border border-zinc-300 px-2 py-1 text-xs"
+                  value={s.dept ?? ''}
+                  onChange={(e) => void patch(s.id, { dept: e.target.value })}
+                >
+                  <option value="">未分配</option>
+                  {DEPTS.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label={`职级:${s.displayName}`}
+                  className="rounded-lg border border-zinc-300 px-2 py-1 text-xs"
+                  value={s.level ?? ''}
+                  onChange={(e) => void patch(s.id, { level: e.target.value })}
+                >
+                  <option value="">未定级</option>
+                  {LEVELS.map((l) => (
+                    <option key={l} value={l}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
               </td>
               <td className="px-4 py-2">
                 <select

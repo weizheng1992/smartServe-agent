@@ -108,6 +108,7 @@ class SpuCreateIn(BaseModel):
     category: str = ""
     price: float | None = None
     stock: int | None = None
+    ownerId: str | None = None
 
 
 class SpuPatchIn(BaseModel):
@@ -115,6 +116,7 @@ class SpuPatchIn(BaseModel):
     title: str | None = None
     price: float | None = None
     stock: int | None = None
+    ownerId: str | None = None
 
 
 class SkuCreateIn(BaseModel):
@@ -144,6 +146,7 @@ async def _ctx(request: Request) -> dict:
         "business_id": business_id,
         "role": staff.role,
         "staff": staff.email,
+        "staff_id": staff.id,
         "display": staff.display_name,
         "perms": await rbac.perms_for_role(business_id, staff.role),
     }
@@ -297,7 +300,8 @@ async def analytics_staff(request: Request):
             select(StaffMember).where(StaffMember.business_id == ctx["business_id"])
         )).scalars().all()
     return {"success": True, "staff": [
-        {"id": r.id, "email": r.email, "displayName": r.display_name, "role": r.role, "status": r.status}
+        {"id": r.id, "email": r.email, "displayName": r.display_name, "role": r.role, "status": r.status,
+         "dept": r.dept, "level": r.level}
         for r in rows
     ]}
 
@@ -423,7 +427,7 @@ async def promotions_create(request: Request, body: PromotionCreateIn):
     ctx = await _ctx(request)
     if "promo:create" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
-    result = await promotions.create_promotion(body.model_dump(), ctx["staff"])
+    result = await promotions.create_promotion(body.model_dump(), ctx["staff"], operator_id=ctx["staff_id"])
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, **result})
     return {"success": True, **result}
@@ -617,9 +621,15 @@ async def staff_invite(request: Request):
         ).scalars().first()
         if exists:
             return JSONResponse(status_code=400, content={"success": False, "message": "该邮箱已存在"})
+        def _opt_text(value) -> str | None:
+            text = str(value).strip() if value is not None else ""
+            return text or None
+
         row = StaffMember(
             id=f"staff_{_uuid.uuid4().hex[:10]}", business_id=ctx["business_id"],
             email=email, display_name=display, role=role, status="enabled",
+            # 0019 人事属性:部门/职级随邀请录入(可空,责任人路由展示消费)
+            dept=_opt_text(body.get("dept")), level=_opt_text(body.get("level")),
             password_hash=rbac.seed_password_hash(),  # 0013:新员工以种子密码可真实登录
         )
         session.add(row)
@@ -654,6 +664,11 @@ async def staff_update(staff_id: str, request: Request):
             row.status = body["status"]
         if "displayName" in body:
             row.display_name = body["displayName"]
+        # 0019 人事属性(空串 = 清空):责任人路由卡与映射页展示消费
+        if "dept" in body:
+            row.dept = (str(body["dept"]).strip() or None)
+        if "level" in body:
+            row.level = (str(body["level"]).strip() or None)
         await session.commit()
         return {"success": True, "id": row.id, "role": row.role, "status": row.status}
 
@@ -744,7 +759,11 @@ async def spus_create(request: Request, body: SpuCreateIn):
     category = body.category.strip()
     if not title or not category or body.price is None:
         return JSONResponse(status_code=400, content={"success": False, "message": "title/category/price 必传"})
-    result = await mds.create_spu(title, category, body.price, int(body.stock or 0))
+    result = await mds.create_spu(
+        title, category, body.price, int(body.stock or 0),
+        # Q15:创建默认当前操作人为负责人(显式 ownerId 覆写)
+        owner_id=body.ownerId or ctx["staff_id"],
+    )
     return {"success": True, **result}
 
 
@@ -767,6 +786,62 @@ async def spus_delete(spu_id: str, request: Request):
     result = await mds.delete_spu(spu_id)
     if "error" in result:
         return _error_response(result)
+    return {"success": True}
+
+
+# ---------------- 「该找谁」责任人路由·维护面(spec .scratch/owner-routing §5) ----------------
+# GET 全员可读(答案卡本就展示负责人,Q13 全角色可见);PUT/DELETE 仅老板/管理员
+# (配置面,与 staff/roles 同闸)。商品/活动所有权随实体行走 SPU/活动编辑,不在此。
+
+
+@router.get("/api/admin/analytics/owner-mappings")
+async def owner_mappings_list(request: Request):
+    await _ctx(request)
+    from engine_py.analytics import owner_routing
+    from engine_py.analytics.tools_registry_bridge import metric_semantic_registry, semantic_model
+
+    # 闭集同载:维护页下拉直接吃语义注册表(品类 9 枚举 / 指标 39 键),
+    # 前端零硬编码 —— 语义模型扩值后下拉自动跟上。
+    return {
+        "success": True,
+        "mappings": await owner_routing.list_mappings(),
+        "categories": semantic_model()["dimensions"]["category"]["values"],
+        "metrics": [
+            {"key": key, "label": meta.get("label") or key}
+            for key, meta in sorted(metric_semantic_registry().items())
+        ],
+    }
+
+
+@router.put("/api/admin/analytics/owner-mappings")
+async def owner_mappings_upsert(request: Request):
+    ctx = await _ctx(request)
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可维护责任人"})
+    body = await request.json()
+    from engine_py.analytics import owner_routing
+
+    result = await owner_routing.upsert_mapping(
+        ctx["business_id"],
+        str(body.get("mapType") or ""),
+        str(body.get("mapValue") or ""),
+        str(body.get("staffId") or ""),
+    )
+    if "error" in result:
+        return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
+    return {"success": True, **result}
+
+
+@router.delete("/api/admin/analytics/owner-mappings")
+async def owner_mappings_delete(request: Request, mapType: str = Query(...), mapValue: str = Query(...)):
+    ctx = await _ctx(request)
+    if not rbac.is_manager(ctx["role"]):
+        return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可维护责任人"})
+    from engine_py.analytics import owner_routing
+
+    result = await owner_routing.delete_mapping(mapType, mapValue)
+    if "error" in result:
+        return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
     return {"success": True}
 
 

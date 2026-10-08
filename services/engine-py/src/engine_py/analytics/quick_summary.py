@@ -61,10 +61,14 @@ def quick_summary(result, intent) -> str | None:
             parts.append(f"末位 {tail_label} 0{unit}")
     return ";".join(parts) + "。"
 
-def attribution_summary(result) -> str | None:
+def attribution_summary(result, owners: dict[str, str] | None = None) -> str | None:
     """归因速览(票 10 阶段 A):compare_previous 双期分解(本期/上期/变化列)
     的确定性呈现 —— 净变化 + 主因贡献排序。纯算术,只陈述算得的差异,不猜测
-    原因(08-D1);无变化列或空结果返回 None(卡片退默认速览)。"""
+    原因(08-D1);无变化列或空结果返回 None(卡片退默认速览)。
+
+    owners(责任人路由,2026-10-08):维度值 → 「姓名(部门·职级)」展示串;
+    主因已登记时主因句尾拼「,找:X」(Q11 —— 一行话走完「跌了→主因→找人」,
+    数字全部可溯源卡上,08-D1 不破)。"""
     rows = result.rows or []
     if len(rows) < 1:
         return None
@@ -84,7 +88,11 @@ def attribution_summary(result) -> str | None:
         share = abs(float(top["变化"])) / total_abs * 100
         word = "主因" if float(top["变化"]) < 0 else "最大正贡献"
         top_label = str(top.get(label_col) if label_col else top) or "—"
-        parts.append(f"{word}:{top_label}({float(top['变化']):+,.0f},占变动的 {share:.0f}%)")
+        tail = ""
+        owner = (owners or {}).get(top_label)
+        if owner:
+            tail = f",找:{owner}"
+        parts.append(f"{word}:{top_label}({float(top['变化']):+,.0f},占变动的 {share:.0f}%){tail}")
     if len(contributors) >= 2 and float(contributors[1]["变化"]) != 0:
         second = contributors[1]
         second_label = str(second.get(label_col) if label_col else second) or "—"

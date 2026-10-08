@@ -102,7 +102,7 @@ async def list_promotions() -> list[dict]:
     ]
 
 
-async def create_promotion(payload: dict, operator: str) -> dict:
+async def create_promotion(payload: dict, operator: str, operator_id: str | None = None) -> dict:
     name = str(payload.get("name") or "").strip()
     promo_type = payload.get("promoType")
     value = payload.get("value")
@@ -121,13 +121,15 @@ async def create_promotion(payload: dict, operator: str) -> dict:
         await conn.execute(
             text(
                 "INSERT INTO promotions (id, name, promo_type, threshold_amount, discount_value, scope_type, scope_value, "
-                "start_at, end_at, total_quota) "
-                "VALUES (CAST(:id AS uuid), :name, :pt, :th, :v, :st, :sv, COALESCE(:sa, NOW()), :ea, :tq)"
+                "start_at, end_at, total_quota, created_by) "
+                "VALUES (CAST(:id AS uuid), :name, :pt, :th, :v, :st, :sv, COALESCE(:sa, NOW()), :ea, :tq, :cb)"
             ).bindparams(
                 id=promo_id, name=name, pt=promo_type,
                 th=payload.get("threshold"), v=float(value),
                 st=payload.get("scopeType") or "all", sv=payload.get("scopeValue"),
                 sa=start_at, ea=end_at, tq=total_quota,
+                # Q14 数据原生:创建时刻捕获操作人(staff_id;owner_routing 解析可追溯)
+                cb=operator_id,
             )
         )
     await audit("promo_create", operator, {

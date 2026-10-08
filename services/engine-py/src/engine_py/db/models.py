@@ -664,6 +664,9 @@ class StaffMember(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'enabled'"))
     # 0013:员工自有登录凭证(bcrypt;NULL=该邮箱仅平台账号可登录)
     password_hash: Mapped[str | None] = mapped_column(Text)
+    # 0019:「该找谁」责任人路由人事属性(展示消费,不参与 RBAC 判定);空=未分配/未定级
+    dept: Mapped[str | None] = mapped_column(Text)
+    level: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 

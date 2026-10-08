@@ -1,6 +1,6 @@
 import { type Spu, api } from '@/lib/api';
 import { setSelectionKind } from '@/lib/page-context';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Button } from 'ui';
 import { SkuSubTable } from './sku-subtable';
 
@@ -10,13 +10,28 @@ interface Props {
   onChanged: () => void;
 }
 
-/** SPU 列表:勾选→PageContext(spu 类,对话实时联动);行内编辑(标题/售价/库存)、
+/** SPU 列表:勾选→PageContext(spu 类,对话实时联动);行内编辑(标题/售价/库存/负责人)、
  *  上/下架、删除(订单引用护栏在服务端)、展开 SKU 子表。展开态/行编辑态为本组件局部状态。 */
 export function SpuTable({ spus, onMsg, onChanged }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
-  const [edit, setEdit] = useState({ title: '', price: '', stock: '' });
+  const [edit, setEdit] = useState({ title: '', price: '', stock: '', ownerId: '' });
   const [openSkus, setOpenSkus] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  // 负责人选项(全员;停用员工保留显示 —— 仍可在职员工里改派)
+  const [staffOptions, setStaffOptions] = useState<Array<{ id: string; label: string }>>([]);
+
+  useEffect(() => {
+    void api.staffList().then((res) => {
+      setStaffOptions(
+        (res.staff || []).map((s) => ({
+          id: s.id,
+          label: `${s.displayName}${s.dept ? `(${s.dept}${s.level ? `·${s.level}` : ''})` : ''}`,
+        })),
+      );
+    });
+  }, []);
+
+  const staffLabel = (id: string | null) => staffOptions.find((s) => s.id === id)?.label ?? null;
 
   function toggleSelect(code: string) {
     const next = selected.includes(code) ? selected.filter((x) => x !== code) : [...selected, code];
@@ -30,6 +45,7 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
       title: edit.title,
       price: Number(edit.price),
       stock: Number(edit.stock),
+      ownerId: edit.ownerId,
     });
     onMsg(b.success ? '✓ 已保存' : `失败:${b.message}`);
     setEditing(null);
@@ -62,6 +78,7 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
             <th className="px-4 py-2 font-medium">品类</th>
             <th className="px-4 py-2 font-medium">售价</th>
             <th className="px-4 py-2 font-medium">库存</th>
+            <th className="px-4 py-2 font-medium">负责人</th>
             <th className="px-4 py-2 font-medium">状态</th>
             <th className="px-4 py-2 font-medium">操作</th>
           </tr>
@@ -112,6 +129,25 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
                     s.stock
                   )}
                 </td>
+                <td className="px-4 py-2 text-xs">
+                  {editing === s.id ? (
+                    <select
+                      aria-label={`负责人:${s.title}`}
+                      className="rounded border border-zinc-300 px-2 py-1"
+                      value={edit.ownerId}
+                      onChange={(e) => setEdit({ ...edit, ownerId: e.target.value })}
+                    >
+                      <option value="">未分配</option>
+                      {staffOptions.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    (staffLabel(s.ownerId) ?? <span className="text-zinc-400">未分配</span>)
+                  )}
+                </td>
                 <td className="px-4 py-2">
                   <span className={s.status === 'ON_SALE' ? 'text-emerald-600' : 'text-zinc-400'}>
                     {s.status === 'ON_SALE' ? '在售' : '下架'}
@@ -129,7 +165,12 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
                         variant="ghost"
                         onClick={() => {
                           setEditing(s.id);
-                          setEdit({ title: s.title, price: String(s.price), stock: String(s.stock) });
+                          setEdit({
+                            title: s.title,
+                            price: String(s.price),
+                            stock: String(s.stock),
+                            ownerId: s.ownerId ?? '',
+                          });
                         }}
                       >
                         编辑
@@ -149,7 +190,7 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
               </tr>
               {openSkus === s.id && (
                 <tr className="bg-zinc-50/60">
-                  <td colSpan={6} className="px-6 py-3">
+                  <td colSpan={8} className="px-6 py-3">
                     <SkuSubTable spu={s} onMsg={onMsg} />
                   </td>
                 </tr>

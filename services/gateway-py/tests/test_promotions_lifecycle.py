@@ -115,6 +115,34 @@ class TestPromotionsLifecycle:
         assert r.status_code == 400
         assert "结束时间" in r.json()["error"]
 
+    async def test_create_records_created_by(self, client, boss):
+        """Q14 数据原生:创建时刻捕获操作人 staff_id 落 created_by 列
+        (owner_routing 按此解析「这场活动归谁管」)。"""
+        from engine_py.db import get_session
+        from engine_py.tools_registry.order_domain import _merchant_writer_engine
+        from sqlalchemy import text
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        promo = await self._create(client, boss, "E2E 创建人捕获", "full_reduction", threshold=100, value=10)
+        try:
+            async with get_session() as session:
+                staff = (
+                    await session.execute(
+                        text("SELECT id FROM staff_members WHERE email = 'test@example.com'")
+                    )
+                ).scalar_one()
+            async with _merchant_writer_engine().begin() as conn:
+                row = (
+                    await conn.execute(
+                        text("SELECT created_by FROM promotions WHERE id = CAST(:id AS uuid)").bindparams(id=promo["id"])
+                    )
+                ).scalar_one()
+            assert row == staff, f"created_by 应为操作人 staff_id({staff}),实际 {row!r}"
+        finally:
+            await _cleanup([promo["id"]])
+
     async def test_patch_updates_window_and_validates(self, client, boss):
         """PATCH 改窗生效(下沉 engine update_promotion);坏窗 400;不存在 404。"""
         from gateway_py.merchant_db import ensure_merchant_tables

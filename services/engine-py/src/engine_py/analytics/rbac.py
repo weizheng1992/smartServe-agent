@@ -24,6 +24,28 @@ ROLES = ("finance_owner", "admin", "sales_viewer", "warehouse_operator", "suppor
 MANAGER_ROLES = ("finance_owner", "admin")
 SYSTEM_MENU_IDS = ("m-analytics", "m-reports", "m-board", "m-products", "m-orders", "m-customers", "m-promotions", "m-menus", "m-roles", "m-staff", "m-agent-desk")
 
+# 「该找谁」责任人路由种子组织(spec .scratch/owner-routing):店长 1 + 五部门
+# 主管/专员。员工本体即责任人(Q7 裁决:复用 staff_members,不建第二套人名册);
+# dept/level 是人事属性(0019 列),不参与 RBAC 判定。id 固定 —— gateway
+# merchant_seed 灌 owner_mappings/promotions.created_by/spus.owner_id 时以本册
+# 为唯一 id 事实源(跨库无 FK,互验闸兜底)。前四行是历史三档种子,id/email
+# 冻结不可改(契约与既有库数据依赖)。
+STAFF_SEED_ROSTER: tuple[tuple[str, str, str, str, str | None, str | None], ...] = (
+    # (id, email, display_name, role, dept, level)
+    ("staff_owner", "test@example.com", "老板", "finance_owner", None, "店长"),
+    ("staff_admin", "admin@aurora", "管理员", "admin", None, None),
+    ("staff_ops", "ops@aurora", "运营", "sales_viewer", "运营部", "专员"),
+    ("staff_wh", "wh@aurora", "仓储", "warehouse_operator", "仓储部", "专员"),
+    ("staff_sales_lead", "sales_lead@aurora", "陈锋", "sales_viewer", "销售部", "主管"),
+    ("staff_sales_1", "sales1@aurora", "李芸", "sales_viewer", "销售部", "专员"),
+    ("staff_sales_2", "sales2@aurora", "赵磊", "sales_viewer", "销售部", "专员"),
+    ("staff_ops_lead", "ops_lead@aurora", "周婷", "sales_viewer", "运营部", "主管"),
+    ("staff_aftersale_lead", "as_lead@aurora", "吴敏", "support_agent", "售后部", "主管"),
+    ("staff_aftersale_1", "as1@aurora", "郑浩", "support_agent", "售后部", "专员"),
+    ("staff_finance_lead", "fin_lead@aurora", "孙洁", "finance_owner", "财务部", "主管"),
+    ("staff_wh_lead", "wh_lead@aurora", "何强", "warehouse_operator", "仓储部", "主管"),
+)
+
 # 默认菜单树(16 号原型同构;menu_type: directory|menu|button)。
 # 0014:售后审批不再独立成菜单 —— 待办审核并入「客服工作台」页内呈现。
 DEFAULT_MENUS: list[dict] = [
@@ -33,6 +55,9 @@ DEFAULT_MENUS: list[dict] = [
     {"id": "btn-report-csv", "parent": "m-analytics", "name": "导出 CSV", "type": "button", "perm": "report:csv", "sort": 2},
     {"id": "m-reports", "parent": "d-data", "name": "我的报告", "type": "menu", "route": "/reports", "sort": 2},
     {"id": "m-board", "parent": "d-data", "name": "数据看板", "type": "menu", "route": "/board", "sort": 3},
+    # 「该找谁」责任人路由(spec .scratch/owner-routing §5):映射维护页 ——
+    # 编辑走老板/管理员闸(接口侧),菜单仅可见性;仓储角色子集不含即不可见。
+    {"id": "m-owner-mappings", "parent": "d-data", "name": "责任人维护", "type": "menu", "route": "/owner-mappings", "sort": 4},
     {"id": "d-goods", "parent": None, "name": "商品", "type": "directory", "route": None, "sort": 2},
     {"id": "m-products", "parent": "d-goods", "name": "商品列表", "type": "menu", "route": "/products", "sort": 1},
     {"id": "btn-prod-edit", "parent": "m-products", "name": "商品编辑/上下架", "type": "button", "perm": "prod:edit", "sort": 1},
@@ -162,19 +187,19 @@ async def ensure_defaults(business_id: str) -> None:
         ).scalars().all()
         existing_ids = {s.id for s in rows}
         existing_emails = {s.email for s in rows}
-        # 三档种子员工(13-D1 默认起步;email 变更后旧行按 id 幂等迁移;
-        # 0013 起补 password_hash —— 仅对缺失行算一次 bcrypt,已有值不覆写)
+        # 种子组织(STAFF_SEED_ROSTER 单一事实源;历史三档在前四行,email 变更后
+        # 旧行按 id 幂等迁移;0013 起补 password_hash —— 仅对缺失行算一次 bcrypt,
+        # 已有值不覆写;0019 起带 dept/level 人事属性)
         pwd_hash: str | None = None
-        for sid, email, name, role in (
-            ("staff_owner", "test@example.com", "老板", "finance_owner"),
-            ("staff_admin", "admin@aurora", "管理员", "admin"),
-            ("staff_ops", "ops@aurora", "运营", "sales_viewer"),
-            ("staff_wh", "wh@aurora", "仓储", "warehouse_operator"),
-        ):
+        for sid, email, name, role, dept, level in STAFF_SEED_ROSTER:
             if sid in existing_ids:
                 row = next(s for s in rows if s.id == sid)
                 if row.email != email:
                     row.email, row.display_name, row.role = email, name, role
+                if row.dept != dept:
+                    row.dept = dept
+                if row.level != level:
+                    row.level = level
                 if not row.password_hash:
                     pwd_hash = pwd_hash or seed_password_hash()
                     row.password_hash = pwd_hash
@@ -183,6 +208,7 @@ async def ensure_defaults(business_id: str) -> None:
                 session.add(StaffMember(
                     id=sid, business_id=business_id, email=email,
                     display_name=name, role=role, status="enabled", password_hash=pwd_hash,
+                    dept=dept, level=level,
                 ))
         await session.commit()
 

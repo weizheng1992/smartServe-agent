@@ -17,7 +17,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from . import chart_policy, session_store
+from . import chart_policy, owner_routing, session_store
 from .context_intake import INLINE_SPU_METRICS as _INLINE_SPU_METRICS
 from .context_intake import (
     inline_order_ids,
@@ -31,6 +31,7 @@ from .engine import (
     Clarify,
     EntityGateRequired,
     MetricQueryEngine,
+    QueryResult,
     StructuredQueryIntent,
     UnsupportedQuery,
 )
@@ -113,6 +114,13 @@ async def ask(
         await _log_unanswered(session_ctx, question)
         await trace.record("unsupported", final_method="injection_guard")
         return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": "问句含注入形状,已拒绝处理"}, trace)
+
+    # 「该找谁」快轨(spec .scratch/owner-routing §3):确定性词面 × owner_mappings,
+    # 零 LLM;未命中(不像找谁/目标不认识)返回 None 静默放行原管线。落位在注入闸
+    # 之后、trace 面之内 —— 安全闸先行纪律 + 反馈闭环需要 trace 行盖章。
+    owner_frame = await _owner_route(question, business_id, trace)
+    if owner_frame is not None:
+        return owner_frame
 
     try:
         # resolve 内含分类头同步 torch 推理(shadow/on 灰度期每次必打分,首次还
@@ -292,6 +300,76 @@ async def ask(
         else:
             outcome["_sessionPayload"] = payload  # 并发段:载荷随帧带回,ask_all 收口
     return outcome
+
+
+_OWNER_CALIBER = "责任人注册表(商户维护)"
+
+# 归因帧维度 → owner 源(spec §4):仅列有权威源的维度;brand/region/city/
+# customer/order_status 本期不灌(Q2/Q8),整列不附,不留「未登记」噪音。
+_DIMENSION_OWNER_SOURCE = {
+    "category": owner_routing.MAP_CATEGORY,
+    "spu": owner_routing.MAP_SPU,
+    "promotion": owner_routing.MAP_PROMOTION,
+}
+
+
+async def _owner_route(question: str, business_id: str, trace: Trace) -> dict | None:
+    """「该找谁」快轨:命中 → owner 帧(verified 章,确定性元数据查询);
+    目标已识别但未登记/员工停用 → 诚实引导帧(Q12);否则 None 放行。
+    卡走 build_cards 同构 —— 前端按 cards 渲染,空 cards 会被诚实吞成「空结果」。"""
+    if not owner_routing.looks_like_owner_ask(question):
+        return None
+    target = await owner_routing.find_owner_target(question)
+    if target is None:
+        return None
+    info = await owner_routing.resolve_owner(business_id, target)
+    metric = f"owner_{target.map_type}"
+    if info is None:
+        await trace.record("result", final_metric=metric, final_method="owner_route", row_count=0)
+        return _with_trace(
+            {
+                "type": "result",
+                "title": f"「{target.label}」暂未登记负责人",
+                "metric": metric,
+                "unit": "",
+                "trust": "verified",
+                "caliber": f"{_OWNER_CALIBER};查无登记或员工已停用",
+                "chart": None,
+                "summary": f"「{target.label}」暂未登记负责人,可在『责任人维护』页登记后再问。",
+                "rows": [],
+                "cards": [{
+                    "type": "text",
+                    "text": f"「{target.label}」暂未登记负责人,可在『责任人维护』页登记后再问。",
+                    "caliber": _OWNER_CALIBER,
+                }],
+            },
+            trace,
+        )
+    rows = [{
+        "负责人": info.display,
+        "部门": info.dept or "—",
+        "职级": info.level or "—",
+        "联系方式": info.email,
+        "角色": info.role,
+        "负责范围": target.label,
+    }]
+    result = QueryResult(rows=rows, metric=metric, unit="", caliber=_OWNER_CALIBER)
+    await trace.record("result", final_metric=metric, final_method="owner_route", row_count=1)
+    return _with_trace(
+        {
+            "type": "result",
+            "title": f"「{target.label}」该找谁",
+            "metric": metric,
+            "unit": "",
+            "trust": "verified",
+            "caliber": _OWNER_CALIBER,
+            "chart": None,
+            "summary": f"「{target.label}」的负责人是{owner_routing.format_name(info)}。",
+            "rows": rows,
+            "cards": build_cards(question, result),
+        },
+        trace,
+    )
 
 
 def _result_frame(question: str, result, intent, title_prefix: str = "", *, trust: str = "verified", caliber: str | None = None, summary_override: str | None = None) -> dict:
@@ -616,7 +694,31 @@ async def _composed_frame(
     if comp.compare_previous:
         from .quick_summary import attribution_summary
 
-        summary = attribution_summary(result)
+        # 责任人路由被动通道(spec §4):归因帧行附 owner 列 + 速览主因句尾拼
+        # 「找:X」。仅对有 owner 源的维度附列(Q2:brand/region 等未灌键不硬凑,
+        # 免得整列「未登记」噪音);缓存已在 execute_async 内写毕,行变异安全。
+        owners_display: dict[str, str] = {}
+        source = _DIMENSION_OWNER_SOURCE.get(comp.dimension or "")
+        if source and result.rows:
+            label_col = next(
+                (k for k, v in result.rows[0].items() if not isinstance(v, (int, float))),
+                None,
+            )
+            if label_col:
+                values = [str(r.get(label_col)) for r in result.rows if r.get(label_col)]
+                resolved = await owner_routing.resolve_owners(
+                    session_ctx["business_id"], source, values
+                )
+                owners_display = {
+                    v: owner_routing.format_name(info) if info else "" for v, info in resolved.items()
+                }
+                for r in result.rows:
+                    key = str(r.get(label_col) or "")
+                    if key == "__total__":
+                        continue  # 合计行是算术产物,不是责任实体
+                    # 列键用中文「负责人」:build_cards 按行键生成列头,与 B1 中文列同风格
+                    r["负责人"] = owners_display.get(key) or "未登记"
+        summary = attribution_summary(result, owners=owners_display or None)
     frame = _with_trace(_result_frame(
         comp.source_question or question, result, shim,
         title_prefix="归因" if comp.compare_previous and summary else "",

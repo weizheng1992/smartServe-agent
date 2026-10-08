@@ -29,10 +29,49 @@ import asyncio
 import json
 import zlib
 
+from engine_py.analytics.rbac import STAFF_SEED_ROSTER
+from engine_py.analytics.tools_registry_bridge import metric_semantic_registry, semantic_model
 from engine_py.tools_registry.order_domain import insert_merchant_order_item
 from sqlalchemy import text
 
 from .merchant_db import ensure_merchant_tables, merchant_engine
+
+# 「该找谁」责任人路由种子映射(spec .scratch/owner-routing 批次一)。
+# staff id 单一事实源 = engine STAFF_SEED_ROSTER(跨库无 FK,引用 + 测试互验兜底);
+# 指标 39 键与品类枚举取自语义注册表(单一事实源,严禁手抄 —— 新增指标未配域
+# 映射时播种即 KeyError 响亮,不静默漏灌)。
+_SALES_OWNERS: tuple[str, str, str] = ("staff_sales_lead", "staff_sales_1", "staff_sales_2")
+assert set(_SALES_OWNERS) <= {row[0] for row in STAFF_SEED_ROSTER}, "销售三人组必须 in STAFF_SEED_ROSTER"
+_DOMAIN_OWNER: dict[str, str] = {
+    "profit": "staff_finance_lead",
+    "inventory": "staff_wh_lead",
+    "review": "staff_aftersale_1",
+    "refund": "staff_aftersale_lead",
+    "session": "staff_ops_lead",
+    "promotion": "staff_ops_lead",
+    "customer": "staff_ops",
+}
+assert set(_DOMAIN_OWNER.values()) <= {row[0] for row in STAFF_SEED_ROSTER}, "域映射员工必须 in STAFF_SEED_ROSTER"
+
+
+def _category_owners() -> dict[str, str]:
+    """品类 → 销售三人轮转(语义枚举 9 值全覆盖;种子 6 类是其子集)。"""
+    values = sorted(semantic_model()["dimensions"]["category"]["values"])
+    return {value: _SALES_OWNERS[i % len(_SALES_OWNERS)] for i, value in enumerate(values)}
+
+
+def _metric_owners() -> dict[str, str]:
+    """指标 → 域职能负责人(sales 域三人轮转,与品类对齐;其余域单点)。"""
+    reg = metric_semantic_registry()
+    sales_keys = sorted(key for key, meta in reg.items() if meta["domain"] == "sales")
+    owners: dict[str, str] = {}
+    for i, key in enumerate(sales_keys):
+        owners[key] = _SALES_OWNERS[i % len(_SALES_OWNERS)]
+    for key, meta in reg.items():
+        if meta["domain"] == "sales":
+            continue
+        owners[key] = _DOMAIN_OWNER[meta["domain"]]
+    return owners
 
 # 黑色硬壳冲锋衣(面料带水珠,贴「暴雨级防水」卖点);damaged-jacket.png 底图同源
 _IMG_1 = "https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=800&auto=format&fit=crop&q=60"
@@ -1192,6 +1231,10 @@ async def seed_merchant_data() -> None:
 
     async with merchant_engine().begin() as conn:
         for table in (
+            "owner_mappings",
+            "promotion_redemptions",
+            "user_coupons",
+            "promotions",
             "merchant_product_reviews",
             "merchant_order_items",
             "merchant_audit_logs",
@@ -1202,13 +1245,14 @@ async def seed_merchant_data() -> None:
         ):
             await conn.execute(text(f"DELETE FROM {table}"))
 
+        cat_owners = _category_owners()
         for spu in _SPUS:
             spu_id = (
                 await conn.execute(
                     text(
                         "INSERT INTO merchant_spus (spu_code, title, subtitle, description, category, brand, "
-                        "main_image, banner_images, spec_dimensions, specs, status) "
-                        "VALUES (:c, :t, :subtitle, :d, :cat, 'AURORA 极光', :img, :banners, :dims, :specs, 'ON_SALE') "
+                        "main_image, banner_images, spec_dimensions, specs, status, owner_id) "
+                        "VALUES (:c, :t, :subtitle, :d, :cat, 'AURORA 极光', :img, :banners, :dims, :specs, 'ON_SALE', :owner) "
                         "RETURNING id"
                     ),
                     {
@@ -1221,6 +1265,8 @@ async def seed_merchant_data() -> None:
                         "banners": json.dumps(spu["banners"], ensure_ascii=False),
                         "dims": json.dumps(spu["dimensions"], ensure_ascii=False),
                         "specs": json.dumps(spu["specs"], ensure_ascii=False),
+                        # 商品负责人默认随品类归属(Q15:分配语义,种子期与品类对齐)
+                        "owner": cat_owners[spu["category"]],
                     },
                 )
             ).scalar_one()
@@ -1314,17 +1360,55 @@ async def seed_merchant_data() -> None:
                     cost_at_purchase=_demo_cost(it["price"], it["sku"]),
                 )
 
+        # 「该找谁」责任人种子(spec .scratch/owner-routing 批次一):
+        # 品类 9 + 指标 39 = 48 行映射;活动 created_by 数据原生演示两条
+        # (运营主管为主,刻意一条销售建的 —— 跨部门甩锅演示)。
+        metric_owners = _metric_owners()
+        for map_type, owners in (("category", cat_owners), ("metric", metric_owners)):
+            for map_value, staff_id in owners.items():
+                await conn.execute(
+                    text(
+                        "INSERT INTO owner_mappings (map_type, map_value, staff_id) "
+                        "VALUES (:t, :v, :s)"
+                    ),
+                    {"t": map_type, "v": map_value, "s": staff_id},
+                )
+        for name, promo_type, threshold, discount, staff_id in (
+            ("国庆户外机能节·满500减80", "full_reduction", 500, 80, "staff_ops_lead"),
+            ("背包收纳清仓·件件立减50", "full_reduction", 0, 50, "staff_sales_1"),
+        ):
+            await conn.execute(
+                text(
+                    "INSERT INTO promotions (name, promo_type, threshold_amount, discount_value, "
+                    "scope_type, scope_value, status, start_at, end_at, total_quota, created_by) "
+                    "VALUES (:n, :pt, :th, :dv, 'all', NULL, 'active', "
+                    "NOW() - make_interval(days => 7), NOW() + make_interval(days => 23), 200, :by)"
+                ),
+                {"n": name, "pt": promo_type, "th": threshold, "dv": discount, "by": staff_id},
+            )
+
         # 行数断言:播种静默假绿防线(DELETE 后按清单逐条 INSERT,缺行/多行必须炸出来)
         spu_rows = (await conn.execute(text("SELECT COUNT(*) FROM merchant_spus"))).scalar_one()
         sku_rows = (await conn.execute(text("SELECT COUNT(*) FROM merchant_skus"))).scalar_one()
         order_rows = (await conn.execute(text("SELECT COUNT(*) FROM merchant_orders"))).scalar_one()
         item_rows = (await conn.execute(text("SELECT COUNT(*) FROM merchant_order_items"))).scalar_one()
+        owner_rows = (await conn.execute(text("SELECT COUNT(*) FROM owner_mappings"))).scalar_one()
+        promo_rows = (await conn.execute(text("SELECT COUNT(*) FROM promotions"))).scalar_one()
+        unowned_spus = (
+            await conn.execute(text("SELECT COUNT(*) FROM merchant_spus WHERE owner_id IS NULL"))
+        ).scalar_one()
         expected_skus = sum(len(spu["skus"]) for spu in _SPUS)
         expected_items = sum(len(order["items"]) for order in _ORDERS)
         assert spu_rows == len(_SPUS), f"SPU 落库 {spu_rows} 行,预期 {len(_SPUS)}"
         assert sku_rows == expected_skus, f"SKU 落库 {sku_rows} 行,预期 {expected_skus}"
         assert order_rows == len(_ORDERS), f"订单落库 {order_rows} 行,预期 {len(_ORDERS)}"
         assert item_rows == expected_items, f"订单行落库 {item_rows} 行,预期 {expected_items}"
+        assert owner_rows == len(cat_owners) + len(metric_owners), (
+            f"owner_mappings 落库 {owner_rows} 行,预期 "
+            f"{len(cat_owners) + len(metric_owners)}(品类 {len(cat_owners)} + 指标 {len(metric_owners)})"
+        )
+        assert promo_rows == 2, f"演示活动落库 {promo_rows} 行,预期 2"
+        assert unowned_spus == 0, f"{unowned_spus} 个 SPU 未分配负责人"
 
     print(
         f"[Merchant DB] 播种完成:{len(_SPUS)} SPU / {expected_skus} SKU / "

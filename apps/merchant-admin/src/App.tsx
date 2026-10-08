@@ -11,6 +11,7 @@ import OrderWorkbench from '@/pages/order-manager';
 import PromotionsPage from '@/pages/promotions';
 import ReportsPage from '@/pages/reports';
 import MenusPage from '@/pages/system/menus';
+import OwnerMappingsPage from '@/pages/system/owner-mappings';
 import RolesPage from '@/pages/system/roles';
 import StaffPage from '@/pages/system/staff';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -148,6 +149,7 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
             <Route path="/menus" element={<MenusPage />} />
             <Route path="/roles" element={<RolesPage />} />
             <Route path="/staff" element={<StaffPage />} />
+            <Route path="/owner-mappings" element={<OwnerMappingsPage />} />
             <Route path="/products" element={<ProductsPage />} />
             <Route path="/products/:code" element={<ProductsPage focusCode="*" />} />
             <Route path="/skus" element={<SkusPage />} />

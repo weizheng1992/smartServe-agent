@@ -1659,3 +1659,118 @@ class TestFeedback:
         assert first.status_code == 200 and second.status_code == 200
         assert len(await self._ledger_rows(trace_id)) == 1
         assert len(await self._badcases(trace_id)) == 1
+
+
+class TestOwnerMappings:
+    """「该找谁」责任人路由维护面(spec .scratch/owner-routing §5)。
+
+    GET 全员可读(答案卡本就展示负责人)/ PUT·DELETE 仅老板管理员;
+    map_value 闭集校验与员工在职闸在 engine owner_routing 单点。
+    """
+
+    async def test_upsert_list_reassign_delete_roundtrip(self, client, auth):
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        up = await client.put(
+            "/api/admin/analytics/owner-mappings", headers=boss,
+            json={"mapType": "category", "mapValue": "户外机能", "staffId": "staff_sales_1"},
+        )
+        assert up.status_code == 200 and up.json()["success"] is True
+        body = (await client.get("/api/admin/analytics/owner-mappings", headers=boss)).json()
+        row = next(m for m in body["mappings"] if m["mapValue"] == "户外机能")
+        assert row["staffId"] == "staff_sales_1" and row["displayName"] == "李芸"
+        assert row["dept"] == "销售部" and row["enabled"] is True
+        # 闭集同载(前端下拉吃语义注册表,零硬编码)
+        assert "户外机能" in body["categories"]
+        assert any(m["key"] == "gmv" for m in body["metrics"])
+        # 改派 = 同键 upsert
+        await client.put(
+            "/api/admin/analytics/owner-mappings", headers=boss,
+            json={"mapType": "category", "mapValue": "户外机能", "staffId": "staff_sales_lead"},
+        )
+        body2 = (await client.get("/api/admin/analytics/owner-mappings", headers=boss)).json()
+        row2 = next(m for m in body2["mappings"] if m["mapValue"] == "户外机能")
+        assert row2["staffId"] == "staff_sales_lead" and row2["displayName"] == "陈锋"
+        dele = await client.delete(
+            "/api/admin/analytics/owner-mappings?mapType=category&mapValue=户外机能", headers=boss,
+        )
+        assert dele.status_code == 200
+        body3 = (await client.get("/api/admin/analytics/owner-mappings", headers=boss)).json()
+        assert all(m["mapValue"] != "户外机能" for m in body3["mappings"])
+
+    async def test_upsert_closed_set_guards_400(self, client, auth):
+        """三种脏键全部 400 且文案点名:未知指标 / 非在职员工 / spu 键不归注册表。"""
+        boss = await auth()
+        r1 = await client.put(
+            "/api/admin/analytics/owner-mappings", headers=boss,
+            json={"mapType": "metric", "mapValue": "not_a_metric", "staffId": "staff_sales_1"},
+        )
+        assert r1.status_code == 400 and "不是注册指标" in r1.json()["message"]
+        r2 = await client.put(
+            "/api/admin/analytics/owner-mappings", headers=boss,
+            json={"mapType": "category", "mapValue": "户外机能", "staffId": "staff_nobody"},
+        )
+        assert r2.status_code == 400 and "在职员工" in r2.json()["message"]
+        r3 = await client.put(
+            "/api/admin/analytics/owner-mappings", headers=boss,
+            json={"mapType": "spu", "mapValue": "SPU-1", "staffId": "staff_sales_1"},
+        )
+        assert r3.status_code == 400 and "随实体行" in r3.json()["message"]
+
+    async def test_write_requires_manager_403(self, client, auth):
+        """sales_viewer 可读不可写(配置面与 staff/roles 同闸)。"""
+        ops = await auth(email="ops@aurora")
+        lst = await client.get("/api/admin/analytics/owner-mappings", headers=ops)
+        assert lst.status_code == 200
+        r = await client.put(
+            "/api/admin/analytics/owner-mappings", headers=ops,
+            json={"mapType": "category", "mapValue": "户外机能", "staffId": "staff_sales_1"},
+        )
+        assert r.status_code == 403
+
+    async def test_staff_patch_dept_level_roundtrip(self, client, auth):
+        """0019 人事属性:PATCH 携带即改,空串 = 清空(staff 列表回带 dept/level)。"""
+        boss = await auth()
+        r = await client.patch(
+            "/api/admin/analytics/staff/staff_ops", headers=boss,
+            json={"dept": "运营部", "level": "主管"},
+        )
+        assert r.status_code == 200
+        rows = (await client.get("/api/admin/analytics/staff", headers=boss)).json()["staff"]
+        row = next(s for s in rows if s["id"] == "staff_ops")
+        assert row["dept"] == "运营部" and row["level"] == "主管"
+        await client.patch("/api/admin/analytics/staff/staff_ops", headers=boss, json={"dept": "", "level": ""})
+        rows2 = (await client.get("/api/admin/analytics/staff", headers=boss)).json()["staff"]
+        row2 = next(s for s in rows2 if s["id"] == "staff_ops")
+        assert row2["dept"] is None and row2["level"] is None
+
+    async def test_spu_owner_patch_roundtrip(self, client, auth):
+        """Q15:创建默认当前操作人为负责人;PATCH 改派/空串清空;列表回带 ownerId。"""
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        created = await client.post(
+            "/api/admin/analytics/spus", headers=boss,
+            json={"title": "E2E 责任人测试商品", "category": "户外机能", "price": 99, "stock": 5},
+        )
+        assert created.status_code == 200, created.text
+        spu_id = created.json()["id"]
+        try:
+            spus = (await client.get("/api/admin/analytics/spus", headers=boss)).json()["spus"]
+            target = next(s for s in spus if s["id"] == spu_id)
+            assert target["ownerId"] == "staff_owner", "创建默认负责人 = 当前操作人(老板)"
+            r = await client.patch(
+                f"/api/admin/analytics/spus/{spu_id}", headers=boss,
+                json={"ownerId": "staff_sales_2"},
+            )
+            assert r.status_code == 200
+            spus2 = (await client.get("/api/admin/analytics/spus", headers=boss)).json()["spus"]
+            assert next(s for s in spus2 if s["id"] == spu_id)["ownerId"] == "staff_sales_2"
+            await client.patch(f"/api/admin/analytics/spus/{spu_id}", headers=boss, json={"ownerId": ""})
+            spus3 = (await client.get("/api/admin/analytics/spus", headers=boss)).json()["spus"]
+            assert next(s for s in spus3 if s["id"] == spu_id)["ownerId"] is None
+        finally:
+            await client.delete(f"/api/admin/analytics/spus/{spu_id}", headers=boss)

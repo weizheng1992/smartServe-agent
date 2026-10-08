@@ -91,6 +91,8 @@ export interface Spu {
   status: string;
   price: number;
   stock: number;
+  /** 负责人 staff id(Q15 数据原生;null = 未分配,解析端诚实降级)。 */
+  ownerId: string | null;
 }
 
 export interface Sku {
@@ -360,8 +362,16 @@ export const api = {
   menus: async (): Promise<{ role: string; perms: string[]; menus: MenuNode[] }> =>
     (await req('/api/admin/analytics/menus')).json(),
 
-  staffList: async (): Promise<{ staff: Array<{ id: string; email: string; displayName: string; role: string }> }> =>
-    (await req('/api/admin/analytics/staff')).json(),
+  staffList: async (): Promise<{
+    staff: Array<{
+      id: string;
+      email: string;
+      displayName: string;
+      role: string;
+      dept: string | null;
+      level: string | null;
+    }>;
+  }> => (await req('/api/admin/analytics/staff')).json(),
 
   /** 老板切换查看身份:服务端为目标员工签发 JWT;保存原始老板凭证供切回。 */
   staffSwitch: async (email: string): Promise<{ staffId: string; displayName: string; role: string }> => {
@@ -451,16 +461,55 @@ export const api = {
       }),
   },
 
-  /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录)。 */
+  /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录;dept/level 为责任人路由人事属性)。 */
   staff: {
     list: async (): Promise<{
       success: boolean;
-      staff: Array<{ id: string; email: string; displayName: string; role: string; status: string }>;
+      staff: Array<{
+        id: string;
+        email: string;
+        displayName: string;
+        role: string;
+        status: string;
+        dept: string | null;
+        level: string | null;
+      }>;
     }> => fetchJson('/api/admin/analytics/staff'),
-    invite: async (p: { email: string; displayName: string; role: string }) =>
+    invite: async (p: { email: string; displayName: string; role: string; dept?: string; level?: string }) =>
       fetchJson('/api/admin/analytics/staff', { method: 'POST', body: JSON.stringify(p) }),
-    update: async (id: string, patch: Partial<{ role: string; status: string; displayName: string }>) =>
-      fetchJson(`/api/admin/analytics/staff/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    update: async (
+      id: string,
+      patch: Partial<{ role: string; status: string; displayName: string; dept: string; level: string }>,
+    ) => fetchJson(`/api/admin/analytics/staff/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  },
+
+  /** 「该找谁」责任人映射(品类/指标 → 员工;PUT/DELETE 仅老板/管理员,闸在服务端)。 */
+  ownerMappings: {
+    list: async (): Promise<{
+      success: boolean;
+      mappings: Array<{
+        mapType: string;
+        mapValue: string;
+        staffId: string;
+        ownerType: string;
+        updatedAt: string;
+        displayName: string | null;
+        dept: string | null;
+        level: string | null;
+        enabled: boolean;
+      }>;
+      categories: string[];
+      metrics: Array<{ key: string; label: string }>;
+    }> => fetchJson('/api/admin/analytics/owner-mappings'),
+    upsert: async (p: { mapType: string; mapValue: string; staffId: string }) =>
+      fetchJson('/api/admin/analytics/owner-mappings', { method: 'PUT', body: JSON.stringify(p) }),
+    remove: async (mapType: string, mapValue: string) =>
+      fetchJson(
+        `/api/admin/analytics/owner-mappings?mapType=${encodeURIComponent(mapType)}&mapValue=${encodeURIComponent(mapValue)}`,
+        {
+          method: 'DELETE',
+        },
+      ),
   },
 
   /** 菜单管理 CRUD(目录/菜单/按钮 + 权限点;系统菜单护栏在服务端)。 */
@@ -525,10 +574,12 @@ export const api = {
   products: {
     list: async (): Promise<{ success: boolean; spus: Spu[] }> => fetchJson('/api/admin/analytics/spus'),
     listAllSkus: async (): Promise<{ success: boolean; skus: SkuStockRow[] }> => fetchJson('/api/admin/analytics/skus'),
-    create: async (p: { title: string; category: string; price: number; stock: number }) =>
+    create: async (p: { title: string; category: string; price: number; stock: number; ownerId?: string }) =>
       fetchJson('/api/admin/analytics/spus', { method: 'POST', body: JSON.stringify(p) }),
-    update: async (id: string, patch: Partial<{ title: string; price: number; stock: number; status: string }>) =>
-      fetchJson(`/api/admin/analytics/spus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    update: async (
+      id: string,
+      patch: Partial<{ title: string; price: number; stock: number; status: string; ownerId: string }>,
+    ) => fetchJson(`/api/admin/analytics/spus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: async (id: string) => fetchJson(`/api/admin/analytics/spus/${id}`, { method: 'DELETE' }),
     listSkus: async (spuId: string): Promise<{ success: boolean; skus: Sku[] }> =>
       fetchJson(`/api/admin/analytics/spus/${spuId}/skus`),
