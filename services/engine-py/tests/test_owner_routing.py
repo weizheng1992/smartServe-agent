@@ -215,6 +215,15 @@ class TestFindOwnerTarget:
         target = asyncio.run(owner_routing.find_owner_target("退款该找谁"))
         assert target is not None and target.map_value == "refund_rate"
 
+    def test_colloquial_performance_wordfaces(self, patch_owner_io):
+        """口语绩效词族(2026-10-08 实弹:「热销商品该找谁」「为什么卖得这么差,该找谁」
+        曾 unsupported):热销/畅销/好卖/卖得 → volume;卖得好 → gmv(长词面优先)。"""
+        for word in ("热销商品该找谁", "畅销款谁负责", "好卖的商品该找谁", "为什么卖得这么差,该找谁"):
+            target = asyncio.run(owner_routing.find_owner_target(word))
+            assert target is not None and target.map_value == "volume", f"{word} → volume"
+        target = asyncio.run(owner_routing.find_owner_target("为什么卖得好,该找谁"))
+        assert target is not None and target.map_value == "gmv"
+
     def test_wordfaces_deduped(self):
         faces = owner_routing._metric_wordfaces()
         assert len(faces) == len(set(faces)), "label/去括号/synonyms 三源同文应去重"
