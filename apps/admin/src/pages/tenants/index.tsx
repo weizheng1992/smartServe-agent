@@ -251,7 +251,9 @@ export function TenantsPage() {
           ) : (
             <div className="text-xs text-slate-400">未配置</div>
           )}
-          <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5">{row.webhookUrl || 'Webhook 未配置'}</div>
+          <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5">
+            {row.webhookUrl || 'Webhook 未配置'}
+          </div>
         </div>
       ),
     },

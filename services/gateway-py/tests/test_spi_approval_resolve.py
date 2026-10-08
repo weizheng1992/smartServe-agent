@@ -2,11 +2,14 @@
 
 夜审实查:SPI 通道此前漏注入 resolvedBy/resolvedByRole(gatekeeper 兜底落
 「unknown」),且 `"humanReply": body.get("reviewerId") and None` 恒 None ——
-与商户路由已修的「审批人落库 unknown」(工单 04 审计)同款漂移。钉死三事:
+与商户路由已修的「审批人落库 unknown」(工单 04 审计)同款漂移。钉死六事:
 
 1. SPI reject 携 reviewerId → 外部操作者身份落 pending_approvals.action_payload;
 2. 未带操作者 → 以 AGENT_SPI/system 声明机器通道身份,不再 unknown;
-3. human_reply 带 replyMessage → 人工回复直通(不再被恒 None 吞掉)。
+3. human_reply 带 replyMessage → 人工回复直通(不再被恒 None 吞掉);
+4. 缺 x-tenant-id 头 → 400(架构审查 #2:三方通道此前连归属校验都没有);
+5. 工单归属他租 vs 租户头 → 403 且工单原地不动(全局 key 不得跨租户核销);
+6. 未知动作 → 400 诚实失败(不再落引擎按驳回语义静默错误终局)。
 """
 
 from __future__ import annotations
@@ -116,3 +119,50 @@ class TestSpiApprovalResolve:
         assert body.get("success") is True
         assert body.get("isHumanActive") is True
         assert body.get("threadId") == tid
+
+    async def test_missing_tenant_header_is_400(self, client):
+        """架构审查 #2:归属闸前置 —— 租户头必带,与 escalation 双路由同闸。"""
+        aid = str(uuid.uuid4())
+        await _insert_waiting_ticket(aid)
+        res = await client.post(
+            f"/api/v1/spi/approvals/{aid}/resolve",
+            headers={"x-api-key": "test_spi_key"},
+            json={"action": "reject", "rejectionReason": "无租户头"},
+        )
+        assert res.status_code == 400
+        assert "x-tenant-id" in res.json()["detail"]
+
+    async def test_cross_tenant_ticket_is_403_and_untouched(self, client):
+        """架构审查 #2:全局 key 声明 aurora 头,不得核销 nike 的工单。"""
+        aid = str(uuid.uuid4())
+        await _insert_waiting_ticket(aid)  # business_id='nike'
+        res = await client.post(
+            f"/api/v1/spi/approvals/{aid}/resolve",
+            headers={"x-api-key": "test_spi_key", "x-tenant-id": "aurora"},
+            json={"action": "reject", "rejectionReason": "跨租户核销"},
+        )
+        assert res.status_code == 403, res.text
+        assert "不属于" in res.json()["error"]
+        # 工单原地不动:仍是 waiting,零发件箱事件
+        from engine_py.db import get_session
+
+        async with get_session() as session:
+            status = (
+                await session.execute(
+                    sa.text("SELECT status FROM pending_approvals WHERE id = CAST(:aid AS uuid)").bindparams(aid=aid)
+                )
+            ).scalar_one()
+        assert status == "waiting"
+        assert await _outbox_payloads(aid) == []
+
+    async def test_unknown_action_is_honest_400(self, client):
+        """架构审查 #2:未知动作 400,不再落引擎按驳回语义静默错误终局。"""
+        aid = str(uuid.uuid4())
+        await _insert_waiting_ticket(aid)
+        res = await client.post(
+            f"/api/v1/spi/approvals/{aid}/resolve",
+            headers=_SPI_HEADERS,
+            json={"action": "self_approve_forever", "rejectionReason": "越权动作"},
+        )
+        assert res.status_code == 400
+        assert "未知审批动作" in res.json()["detail"]

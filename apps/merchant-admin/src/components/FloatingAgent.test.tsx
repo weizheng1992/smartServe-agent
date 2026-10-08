@@ -137,14 +137,19 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
   it('result 帧带 traceId → 组尾渲染踩/赞;点赞调 feedback.submit 且闩锁禁用', async () => {
     feedbackMock.mockResolvedValue({ success: true });
     askMock.mockResolvedValue([
-      { event: 'result', data: { traceId: 'tr_abc123', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] } },
+      {
+        event: 'result',
+        data: { traceId: 'tr_abc123', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] },
+      },
     ]);
     renderAgent();
     openPanel();
     submit('品类GMV排行');
     await waitFor(() => expect(screen.getByText('这个结果有帮助吗?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '👍' }));
-    await waitFor(() => expect(feedbackMock).toHaveBeenCalledWith({ traceId: 'tr_abc123', verdict: 'up', note: undefined }));
+    await waitFor(() =>
+      expect(feedbackMock).toHaveBeenCalledWith({ traceId: 'tr_abc123', verdict: 'up', note: undefined }),
+    );
     // 闩锁:已反馈态,两按钮均禁用
     await waitFor(() => expect(screen.getByText('👍 已反馈')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '👎' })).toBeDisabled();
@@ -153,7 +158,10 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
   it('踩先展开备注框,提交携带 note;空备注以 undefined 提交', async () => {
     feedbackMock.mockResolvedValue({ success: true });
     askMock.mockResolvedValue([
-      { event: 'result', data: { traceId: 'tr_note1', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] } },
+      {
+        event: 'result',
+        data: { traceId: 'tr_note1', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] },
+      },
     ]);
     renderAgent();
     openPanel();
@@ -198,8 +206,14 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
 
   it('场景包同 traceId 连续帧只在组尾出一组反馈按钮(一轮一评)', async () => {
     askMock.mockResolvedValue([
-      { event: 'result', data: { traceId: 'tr_multi', metric: 'gmv', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'GMV卡' }] } },
-      { event: 'result', data: { traceId: 'tr_multi', metric: 'aov', rows: [{ b: 2 }], cards: [{ type: 'text', text: 'AOV卡' }] } },
+      {
+        event: 'result',
+        data: { traceId: 'tr_multi', metric: 'gmv', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'GMV卡' }] },
+      },
+      {
+        event: 'result',
+        data: { traceId: 'tr_multi', metric: 'aov', rows: [{ b: 2 }], cards: [{ type: 'text', text: 'AOV卡' }] },
+      },
     ]);
     renderAgent();
     openPanel();
@@ -225,7 +239,10 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
   it('反馈失败:乐观态回滚且错误帧上屏(诚实呈现)', async () => {
     feedbackMock.mockRejectedValue(new Error('network down'));
     askMock.mockResolvedValue([
-      { event: 'result', data: { traceId: 'tr_fail', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] } },
+      {
+        event: 'result',
+        data: { traceId: 'tr_fail', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] },
+      },
     ]);
     renderAgent();
     openPanel();

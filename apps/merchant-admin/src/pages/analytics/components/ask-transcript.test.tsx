@@ -166,7 +166,9 @@ describe('AskTranscript(答案反馈闭环 v3.1)', () => {
     renderTranscript([resultFrame('tr_pg1')]);
     expect(screen.getByText('这个结果有帮助吗?')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '👍' }));
-    await waitFor(() => expect(feedbackMock).toHaveBeenCalledWith({ traceId: 'tr_pg1', verdict: 'up', note: undefined }));
+    await waitFor(() =>
+      expect(feedbackMock).toHaveBeenCalledWith({ traceId: 'tr_pg1', verdict: 'up', note: undefined }),
+    );
   });
 
   it('同 traceId 场景包双帧只出一组反馈;异 traceId 各出一组', () => {
