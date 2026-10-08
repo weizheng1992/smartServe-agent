@@ -209,6 +209,16 @@ class TestFindOwnerTarget:
     def test_no_target_returns_none(self, patch_owner_io):
         assert asyncio.run(owner_routing.find_owner_target("蓝鲸品类该找谁")) is None
 
+    def test_bare_refund_wordface(self, patch_owner_io):
+        """「退款」裸词 ∈ refund_rate 同义词册(2026-10-08 实弹:「为什么退款这么多」
+        落 unsupported 的词面债)。"""
+        target = asyncio.run(owner_routing.find_owner_target("退款该找谁"))
+        assert target is not None and target.map_value == "refund_rate"
+
+    def test_wordfaces_deduped(self):
+        faces = owner_routing._metric_wordfaces()
+        assert len(faces) == len(set(faces)), "label/去括号/synonyms 三源同文应去重"
+
 
 # ---------- graph 快轨接线 ----------
 
@@ -239,6 +249,94 @@ class TestGraphOwnerRoute:
         monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
         out = asyncio.run(graph.ask("卖得最好的商品", {"business_id": "aurora", "role": "finance_owner"}))
         assert out["type"] == "clarify"  # 原管线行为不变
+
+
+class TestReasonAttributionUpgrade:
+    """原因语感升格(2026-10-08 实弹):「为什么退款这么多,什么原因,该找谁」
+    曾落 unsupported —— 找谁 × 指标 × 原因语感 → 确定性升格归因组合,一卡答两问。"""
+
+    def _ask_compound(self, patch_owner_io, monkeypatch):
+        rows = [
+            {"品类": "潮流鞋靴", "本期": 20.0, "上期": 5.0, "变化": 15.0},
+            {"品类": "户外机能", "本期": 2.0, "上期": 8.0, "变化": -6.0},
+        ]
+
+        async def _fake(self, compiled, session_ctx=None):
+            return QueryResult(rows=rows, metric=compiled.metric, unit="%", caliber="组合口径")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
+        patch_owner_io["mappings"] = [("潮流鞋靴", "staff_sales_lead"), ("户外机能", "staff_sales_1")]
+        patch_owner_io["staff"] = [
+            _staff("staff_sales_lead", "陈锋", "销售部", "主管"),
+            _staff("staff_sales_1", "李芸", "销售部", "专员"),
+        ]
+        return asyncio.run(graph.ask(
+            "为什么退款这么多,什么原因,该找谁",
+            {"business_id": "aurora", "role": "finance_owner"},
+        ))
+
+    def test_compound_reason_question_gets_attribution_frame(self, patch_owner_io, monkeypatch):
+        out = self._ask_compound(patch_owner_io, monkeypatch)
+        assert out["type"] == "result" and out["title"].startswith("归因")
+        assert out["rows"][0]["负责人"] == "陈锋(销售部·主管)"  # 归因行自带负责人 = 「该找谁」半问
+        assert out["metric"] == "refund_rate"
+
+    def test_upgrade_failure_falls_back_to_owner_card(self, patch_owner_io, monkeypatch):
+        """组合拒绝/失败 → 退回 owner 卡(至少答「该找谁」半问),绝不静默 unsupported。"""
+        async def _none(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(graph, "_composed_frame", _none)
+        # 注册表 map_value 存指标 key(种子同形),不是词面
+        patch_owner_io["mappings"] = [("refund_rate", "staff_aftersale_lead")]
+        patch_owner_io["staff"] = [_staff("staff_aftersale_lead", "吴敏", "售后部", "主管")]
+        out = asyncio.run(graph.ask(
+            "为什么退款这么多,什么原因,该找谁",
+            {"business_id": "aurora", "role": "finance_owner"},
+        ))
+        assert out["type"] == "result" and "退款率" in out["title"]
+        assert out["rows"][0]["负责人"] == "吴敏"
+
+    def test_reason_words_without_owner_stays_out(self):
+        """无找谁词面 → 快轨不触发;原因直通由 composition.reason_reroute 承接。"""
+        assert owner_routing.looks_like_owner_ask("为什么退款这么多") is False
+        assert owner_routing.has_reason_intent("为什么退款这么多") is True
+
+    def test_reason_reroute_without_owner_word(self, patch_owner_io, monkeypatch):
+        """「为什么退款这么多」(无找谁词面)→ L0 命中 refund_rate → 原因直通归因卡
+        (此前 unsupported/退榜单)。"""
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        rows = [{"品类": "潮流鞋靴", "本期": 0.0, "上期": 28.57, "变化": -28.57}]
+
+        async def _fake(self, compiled, session_ctx=None):
+            return QueryResult(rows=rows, metric=compiled.metric, unit="%", caliber="组合口径")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
+        patch_owner_io["mappings"] = [("潮流鞋靴", "staff_sales_lead")]
+        patch_owner_io["staff"] = [_staff("staff_sales_lead", "陈锋", "销售部", "主管")]
+        out = asyncio.run(graph.ask("为什么退款这么多", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "result" and out["title"].startswith("归因")
+        assert out["metric"] == "refund_rate"
+        assert out["rows"][0]["负责人"] == "陈锋(销售部·主管)"
+
+    def test_reason_reroute_dimension_word_wins(self, monkeypatch):
+        """维度泛词显式优先(「各区域…」→ region,owner 列诚实缺席);缺省 category。"""
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        from engine_py.analytics.composition import reason_reroute
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        intent = StructuredQueryIntent(metric="refund_rate", direction="DESC")
+        comp = reason_reroute("各区域退款率为什么涨了", intent)
+        assert comp is not None and comp.dimension == "region" and comp.compare_previous is True
+        comp2 = reason_reroute("为什么退款这么多", intent)
+        assert comp2 is not None and comp2.dimension == "category"
+
+    def test_reason_reroute_rejects_non_composable(self):
+        from engine_py.analytics.composition import reason_reroute
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        intent = StructuredQueryIntent(metric="order_overview", direction="DESC")
+        assert reason_reroute("为什么这单退款了", intent) is None
 
 
 # ---------- 归因卡附列 + 速览尾拼(Q11/§4) ----------

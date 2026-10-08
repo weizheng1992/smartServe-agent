@@ -595,3 +595,54 @@ def breakdown_reroute(question: str, intent) -> CompositionQuery | None:
     )
 
 
+# 原因语感(2026-10-08 实弹:「为什么退款这么多」曾 unsupported/退榜单;带找谁词面的
+# 复合形由 owner_routing 快轨升格,本处是**无找谁词面**的归因直通)。因果正则单源在此,
+# owner_routing.has_reason_intent 委派本处。另:「怎么」单字太宽(「退款率怎么算」是
+# 口径问不是归因),只收因果词形。
+REASON_RE = re.compile(r"为什么|什么原因|原因|为啥|为何|咋|怎么回事")
+
+
+def dimension_word_of(question: str) -> str | None:
+    """问句中的维度泛词 → 语义维度键(_DIM_WORD_MAP 单点);无泛词返回 None。"""
+    for word, dim in _DIM_WORD_MAP.items():
+        if word in (question or ""):
+            return dim
+    return None
+
+
+def reason_reroute(question: str, intent) -> CompositionQuery | None:
+    """原因语感 → 确定性归因组合升级(不依赖找谁词面;7babb61 语感直通同族)。
+
+    触发:T1 开闸 ∧ 指标在 COMPOSABLE_METRICS 闭集 ∧ 原因语感。维度词显式优先
+    (「各区域退款率为什么涨」→ region),缺省 category —— 归因卡的贡献分解
+    天然是「为什么」的答案。零 LLM;不满足返回 None(调用方照常走 T0)。"""
+    from .engine import StructuredQueryIntent
+    from .tools_registry_bridge import semantic_model
+
+    if not (isinstance(intent, StructuredQueryIntent) and composition_enabled()):
+        return None
+    if intent.metric not in COMPOSABLE_METRICS or not REASON_RE.search(question or ""):
+        return None
+    dimension = dimension_word_of(question or "") or "category"
+    if dimension not in semantic_model()["dimensions"]:
+        return None
+    if intent.category and dimension not in (None, "category", "spu"):
+        return None  # 品类过滤挂在 SPU 表:客户/活动/区域维度不可组合,宁可不升级
+    time_window = intent.time_window
+    if time_window is None:
+        from .l0_lexicon import extract_slots
+
+        _, slot_time, _slot_category = extract_slots((question or "").strip().lower())
+        time_window = slot_time
+    return CompositionQuery(
+        metric=intent.metric,
+        dimension=dimension,
+        direction=intent.direction,
+        limit=intent.limit,
+        time_window=time_window,
+        compare_previous=True,  # 原因问的就是变化,双期分解恒开
+        category=intent.category,
+        source_question=question,
+    )
+
+

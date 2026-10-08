@@ -30,6 +30,13 @@ _OWNER_ASK_RE = re.compile(r"找谁|谁负责|负责人|谁管|找哪位|该找�
 _SPU_CODE_RE = re.compile(r"SPU-[A-Za-z0-9-]+")
 
 
+def has_reason_intent(question: str) -> bool:
+    """原因语感(单源在 composition.REASON_RE;找谁 × 指标 × 原因 = 复合问升格)。"""
+    from .composition import REASON_RE
+
+    return bool(REASON_RE.search(question or ""))
+
+
 @dataclass(frozen=True)
 class OwnerTarget:
     """快轨识别出的问句目标(闭集之一)。"""
@@ -60,13 +67,14 @@ def looks_like_owner_ask(question: str) -> bool:
 
 
 def _metric_wordfaces() -> list[tuple[str, str]]:
-    """(词面, 指标 key),长词面优先 —— 「总销售额」必须压过同义词「销售额」。"""
+    """(词面, 指标 key),长词面优先 —— 「总销售额」必须压过同义词「销售额」;
+    label/去括号/synonyms 三源常同文,去重免重复扫描。"""
     faces: list[tuple[str, str]] = []
     for key, meta in metric_semantic_registry().items():
         label = str(meta.get("label") or "")
         base = label.split("(")[0].split("（")[0].strip()
         candidates = (label, base, *(str(s).strip() for s in (meta.get("synonyms") or [])))
-        for face in candidates:
+        for face in dict.fromkeys(candidates):
             if len(face) >= 2:
                 faces.append((face, key))
     faces.sort(key=lambda pair: len(pair[0]), reverse=True)

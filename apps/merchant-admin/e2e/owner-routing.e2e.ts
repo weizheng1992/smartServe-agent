@@ -66,6 +66,17 @@ test.describe('「该找谁」责任人路由', () => {
     // 速览尾拼「找:」由引擎离线册钉死(test_owner_routing);全屏页不渲染 summary 行
   });
 
+  test('复合问句「为什么退款这么多,什么原因,该找谁」出归因卡(实弹 bug 回钉)', async ({ page }) => {
+    // 2026-10-08 实弹:此句曾落 unsupported(裸词「退款」不在词面集 + 复合语感无升格)。
+    // 修后:找谁 × 指标 × 原因语感 → 确定性升格退款率×品类×环比归因组合,零 LLM。
+    await page.goto('/analytics');
+    await page.getByPlaceholder(/问点什么/).fill('为什么退款这么多,什么原因,该找谁');
+    await page.getByRole('button', { name: '发送' }).click();
+    await expect(page.getByText(/归因 · 退款率/).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('columnheader', { name: '负责人' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: /未登记|销售部|售后部/ }).first()).toBeVisible();
+  });
+
   test('维护页改派与撤销(改后恢复种子态)', async ({ page }) => {
     await page.goto('/owner-mappings');
     await expect(page.getByText(/已登记映射\(\d+\)/)).toBeVisible({ timeout: 15_000 });

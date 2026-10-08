@@ -118,7 +118,7 @@ async def ask(
     # 「该找谁」快轨(spec .scratch/owner-routing §3):确定性词面 × owner_mappings,
     # 零 LLM;未命中(不像找谁/目标不认识)返回 None 静默放行原管线。落位在注入闸
     # 之后、trace 面之内 —— 安全闸先行纪律 + 反馈闭环需要 trace 行盖章。
-    owner_frame = await _owner_route(question, business_id, trace)
+    owner_frame = await _owner_route(question, session_ctx, engine, trace)
     if owner_frame is not None:
         return owner_frame
 
@@ -238,9 +238,9 @@ async def ask(
     # 确定性组合升级(ADR-0011 语感直通):总量形指标 × 维度拆分语感 → 组合
     # 查询(零 LLM;「各品牌净销售额对比」不再答成总量单行)。指标已过角色闸,
     # 品类相容闸在 breakdown_reroute 内。
-    from .composition import breakdown_reroute
+    from .composition import breakdown_reroute, reason_reroute
 
-    reroute = breakdown_reroute(effective_question, intent)
+    reroute = breakdown_reroute(effective_question, intent) or reason_reroute(effective_question, intent)
     if reroute is not None:
         frame = await _composed_frame(effective_question, reroute, session_ctx, engine, trace)
         if frame is not None:
@@ -313,16 +313,37 @@ _DIMENSION_OWNER_SOURCE = {
 }
 
 
-async def _owner_route(question: str, business_id: str, trace: Trace) -> dict | None:
+async def _owner_route(question: str, session_ctx: dict, engine: MetricQueryEngine, trace: Trace) -> dict | None:
     """「该找谁」快轨:命中 → owner 帧(verified 章,确定性元数据查询);
     目标已识别但未登记/员工停用 → 诚实引导帧(Q12);否则 None 放行。
-    卡走 build_cards 同构 —— 前端按 cards 渲染,空 cards 会被诚实吞成「空结果」。"""
+    卡走 build_cards 同构 —— 前端按 cards 渲染,空 cards 会被诚实吞成「空结果」。
+
+    原因语感升格(2026-10-08 实弹收口):「为什么退款这么多,什么原因,该找谁」
+    = 归因 + 责任人复合问 —— 指标目标 × 原因语感 → 确定性升格为
+    「该指标 × 品类维度 × compare_previous」归因组合(零 LLM,refund_rate 在
+    COMPOSABLE_METRICS 闭集),归因卡自带负责人列,一卡答完两问;品类缺省是
+    确定性选择(owner 列所在维度 = 「该找谁」的落点),非编造。组合拒绝/失败
+    退回 owner 卡(至少答「该找谁」半问),绝不静默 unsupported。"""
     if not owner_routing.looks_like_owner_ask(question):
         return None
     target = await owner_routing.find_owner_target(question)
     if target is None:
         return None
-    info = await owner_routing.resolve_owner(business_id, target)
+    if target.map_type == owner_routing.MAP_METRIC and owner_routing.has_reason_intent(question):
+        from .composition import CompositionQuery, dimension_word_of
+
+        comp = CompositionQuery(
+            metric=target.map_value,
+            # 维度泛词显式优先,缺省 category(owner 列所在维度 = 「该找谁」的落点)
+            dimension=dimension_word_of(question) or "category",
+            compare_previous=True,
+            source_question=question,
+        )
+        frame = await _composed_frame(question, comp, session_ctx, engine, trace)
+        if frame is not None:
+            return frame
+        print(f"[Owner] 原因升格组合拒绝,退回 owner 卡: {question[:24]!r}")
+    info = await owner_routing.resolve_owner(session_ctx["business_id"], target)
     metric = f"owner_{target.map_type}"
     if info is None:
         await trace.record("result", final_metric=metric, final_method="owner_route", row_count=0)
