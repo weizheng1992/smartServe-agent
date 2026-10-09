@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 
 from sqlalchemy import text
@@ -16,6 +17,7 @@ from ...tenant_context import resolve_business_id
 from ...vectors import cosine_similarity  # 余弦单一实现(vectors.py)
 from .. import order_domain
 from ..order_domain import OrderDomainService
+from .query_parser import parse_shelf_query
 
 MallDomainService = None  # service.py 类定义后回填(调用时经本模块全局解析,patch 面不漂移)
 
@@ -107,6 +109,14 @@ class CatalogMixin:
     # 词元清洗(ADR 检索链 L1):数量前缀逐块剥、「衬衫都」尾缀语气字仅剥
     # 长块(len>2,「成都」两字不动);⚠️ 分隔符连词只收「和/与」,「跟」
     # 严禁入列(高跟鞋/跟妆会被劈开)。
+    _CHUNK_SEPARATOR_RE = re.compile(r"[\s,，、。.!！?？:；;的和与]+")
+
+    # 场景/修饰册(ADR-0012 决策 2,只剥不扬):非商品词整块进 modifiers 槽,
+    # 不再发死查询。沿用核实纪律 —— 只收核实过的非商品词,存疑一律留 legs
+    # (它们今天也只是废脚,无害);v1 刻意最小册,增长靠 [GuideParser]
+    # diff 观察期回流。
+    _SCENE_MODIFIER_TERMS = ("天气", "外出", "游玩", "旅游", "一些", "来点")
+
     # 数量词块内定位(2026-09-13;原名 _QUANTITY_PREFIX_RE 名不副实 —— 已非
     # ^ 前缀锚定,code-review 2026-09-14 正名):「推荐两款登山包」块首是
     # 「推荐」,前缀锚定剥不掉致词元全死落语义召回(渔夫帽顶了登山包)——
@@ -361,6 +371,24 @@ class CatalogMixin:
         }
 
     @staticmethod
+    def _clean_chunk(chunk: str) -> str:
+        """单块清洗(价格极值/疑问词/数量前缀/口语前后缀),_extract_query_terms
+        与 query_parser(ADR-0012)共用的文本基元,语义与 2026-09-14 版一致。"""
+        chunk = MallDomainService._PRICE_SUPERLATIVE_RE.sub("", chunk.strip()).strip()
+        chunk = MallDomainService._INTERROGATIVE_TOKEN_RE.sub("", chunk).strip()
+        chunk = MallDomainService._QUANTITY_LOCATOR_RE.sub("", chunk.strip()).strip()
+        # 口语前缀循环剥(「我经常爬山」→「爬山」)
+        while True:
+            stripped = MallDomainService._LEADING_FILLER_RE.sub("", chunk).strip()
+            if stripped == chunk:
+                break
+            chunk = stripped
+        # 尾缀语气字仅剥长块(len>2):「衬衫都」→「衬衫」;「成都」两字不动
+        if len(chunk) > 2:
+            chunk = MallDomainService._TRAILING_PARTICLE_RE.sub("", chunk).strip()
+        return chunk
+
+    @staticmethod
     def _extract_query_terms(query: str | None) -> list[str]:
         """原始 NL 输入 → 检索词元:剥导购 wrapper 词,按分隔符切分。
 
@@ -368,37 +396,77 @@ class CatalogMixin:
         跑鞋);剥词后按词元 OR 匹配。剩余为空 = 纯浏览形输入,无关键词,
         由调用方走浏览语义(不加 query 过滤)。替换按词长降序,防「推荐」
         先吃掉「推荐几款」留下裸「几款」。
-        """
+
+        2026-10-09 起为旧词元路:search_products 主路改走 query_parser
+        (ADR-0012),本函数保留为解析器基元(split/clean)+ AI_GUIDE_PARSER
+        off/异常/零产出三态的回退面(行为逐字节不变)。"""
         if not query:
             return []
         rest = query
         for term in sorted(MallDomainService._GUIDE_WRAPPER_TERMS, key=len, reverse=True):
             rest = rest.replace(term, " ")
-        chunks = re.split(r"[\s,，、。.!！?？:；;的和与]+", rest)
         cleaned = []
-        for chunk in chunks:
-            chunk = MallDomainService._PRICE_SUPERLATIVE_RE.sub("", chunk.strip()).strip()
-            chunk = MallDomainService._INTERROGATIVE_TOKEN_RE.sub("", chunk).strip()
-            chunk = MallDomainService._QUANTITY_LOCATOR_RE.sub("", chunk.strip()).strip()
-            # 口语前缀循环剥(「我经常爬山」→「爬山」)
-            while True:
-                stripped = MallDomainService._LEADING_FILLER_RE.sub("", chunk).strip()
-                if stripped == chunk:
-                    break
-                chunk = stripped
-            # 尾缀语气字仅剥长块(len>2):「衬衫都」→「衬衫」;「成都」两字不动
-            if len(chunk) > 2:
-                chunk = MallDomainService._TRAILING_PARTICLE_RE.sub("", chunk).strip()
+        for chunk in MallDomainService._CHUNK_SEPARATOR_RE.split(rest):
+            chunk = MallDomainService._clean_chunk(chunk.strip())
             if chunk and chunk not in cleaned:
                 cleaned.append(chunk)
         return cleaned
+
+    @staticmethod
+    async def _parsed_query_legs(query: str | None, base_terms: list[str]) -> list[str]:
+        """ADR-0012 货架词典解析器接线(2026-10-09):检索脚产出从分块偶然切分
+        升格为块内结构化解析。
+
+        开关纪律(对齐 analytics AI_METRIC_HEAD 先例,消费点即时读便于测试
+        按用例切换):AI_GUIDE_PARSER=0 → 逐字节回退旧词元路;解析异常 →
+        降级旧路(「无异常冷启动」);解析零产出 → 整句回退旧路、严禁部分
+        混搭(全修饰句/未收录口语保持今日行为,含 L2/L4 对死词元的既有兜底)。
+        AI_GUIDE_PARSER_DIFF=0 关 diff 日志 —— 纯函数无统计不确定性,diff 的
+        唯一价值是观察期回流词典缺口,期满拆默认(ADR-0012 决策 6)。"""
+        if not query or os.environ.get("AI_GUIDE_PARSER", "1") == "0":
+            return base_terms
+        try:
+            overview = await MallDomainService.get_shelf_overview()
+            parsed = parse_shelf_query(
+                query,
+                wrapper_terms=MallDomainService._GUIDE_WRAPPER_TERMS,
+                stem_aliases=MallDomainService._TERM_STEM_ALIASES,
+                modifier_terms=MallDomainService._SCENE_MODIFIER_TERMS,
+                categories=[o["category"] for o in overview or []],
+                split_chunks=MallDomainService._CHUNK_SEPARATOR_RE.split,
+                clean_chunk=MallDomainService._clean_chunk,
+            )
+        except Exception as err:
+            print(f"[GuideParser] 解析异常降级旧路(query={query!r}): {err}")
+            return base_terms
+        legs = list(parsed.legs) or base_terms
+        if os.environ.get("AI_GUIDE_PARSER_DIFF", "1") != "0" and set(legs) != set(base_terms):
+            print(
+                f"[GuideParser] query={query!r} legacy={base_terms} legs={legs} "
+                f"modifiers={list(parsed.modifiers)}"
+            )
+        return legs
 
     @staticmethod
     def _expand_stem_aliases(terms: list[str]) -> list[str]:
         """词元 → 词元 + 货架词素别名(扩充 ILIKE OR 匹配面,保持原词元在前)。
 
         词干是子串超集(「%裤%」⊇「%裤子%」),追加不改原词元语义;别名见
-        _TERM_STEM_ALIASES 注释。空表进空表出 —— 浏览形判定不受影响。"""
+        _TERM_STEM_ALIASES 注释。空表进空表出 —— 浏览形判定不受影响。
+
+        黏词兜底(2026-10-09 实弹「推荐一些衣服和装备」0 衣服 + 3 露营装备,
+        0927 搭配补脚/1001 衣族别名后的第三种措辞形状):量化/修饰语黏在族
+        名词前后(「一些衣服」「保暖裤子」「防水冲锋衣」)时精确键查不到、
+        整词 ILIKE 在货架四列永真空,整族词法隐身 —— 升级为最长词素包含扫描,
+        别名键与货架词素双向都认,同族词素仍作 OR 脚补进。原词元与精确展开
+        面保持在前,匹配面只宽不窄。"""
+        # 词素 → 展开面:别名键外,货架词素自身也自映射(黏在词素上的修饰语
+        # 「防水冲锋衣」同样要能落回词素脚)。
+        morpheme_map: dict[str, tuple[str, ...]] = dict(MallDomainService._TERM_STEM_ALIASES)
+        for stems in MallDomainService._TERM_STEM_ALIASES.values():
+            for stem in stems:
+                morpheme_map.setdefault(stem, (stem,))
+        ordered = sorted(morpheme_map.items(), key=lambda kv: len(kv[0]), reverse=True)
         expanded: list[str] = []
         for term in terms:
             if term not in expanded:
@@ -406,6 +474,11 @@ class CatalogMixin:
             for stem in MallDomainService._TERM_STEM_ALIASES.get(term, ()):
                 if stem not in expanded:
                     expanded.append(stem)
+            for morpheme, stems in ordered:
+                if morpheme != term and morpheme in term:
+                    for stem in stems:
+                        if stem not in expanded:
+                            expanded.append(stem)
         return expanded
 
     @staticmethod
@@ -702,8 +775,12 @@ class CatalogMixin:
         # 词干别名展开(2026-09-12):口语统称「裤子/鞋子」→ 追加货架词素「裤/鞋」
         # 作 OR 词元 —— 商户货架与 engine 兜底两条词元路径共享;语义档仍嵌原始
         # query(0.55 阈值按原始查询定标,换表示会毁定标)。
+        # 2026-10-09(ADR-0012):主路改走货架词典解析器 —— 检索脚 = 块内词典
+        # 最长匹配(词素在块不在句,黏词胶水只剥不扬);off/异常/零产出回退
+        # base_terms 旧路。轮转与合并两路统一消费 rotation_terms。
         base_terms = MallDomainService._extract_query_terms(query)
-        terms = MallDomainService._expand_stem_aliases(base_terms)
+        rotation_terms = await MallDomainService._parsed_query_legs(query, base_terms)
+        terms = MallDomainService._expand_stem_aliases(rotation_terms)
 
         if params.get("threadId") and effective_biz_id == "ecommerce":
             ctx = await OrderDomainService.get_thread_session_context(params["threadId"])
@@ -721,9 +798,9 @@ class CatalogMixin:
         # 小 limit 下全灭(实报症状第二层)。单品类/浏览形不进此路。
         merchant_products = None
         merchant_unreachable = False
-        if len(base_terms) >= 2 and not category:
+        if len(rotation_terms) >= 2 and not category:
             per_term_lists: list[list[dict]] = []
-            for term in base_terms:
+            for term in rotation_terms:
                 rows = await MallDomainService._fetch_merchant_catalog(
                     MallDomainService._expand_stem_aliases([term]), category, max_price, limit, color=color
                 )

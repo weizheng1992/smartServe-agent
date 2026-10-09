@@ -213,8 +213,13 @@ def test_off_sale_filtered(pg_factory):
 async def _off_sale_scenario(pg_factory) -> None:
     _engine, merchant_engine, original, embeds, rewrite = await _setup_shelf(pg_factory)
     try:
-        res = await _search("联名背包")  # 只命中 OFF_SALE 行
-        assert res == {"total": 0, "products": []}
+        # 「联名背包」词面只命中 OFF_SALE 行;2026-10-09 词素黏词兜底后含词素
+        # 「背包」→ OR 面放行同品类在售 SPU-T-BAG(生产 L2 语义补位本就会给出
+        # 同款)。钉死的不变量是 status 闸:OFF_SALE 行绝不入列,入列必在售。
+        res = await _search("联名背包")
+        ids = [p["id"] for p in res["products"]]
+        assert "SPU-T-OFF" not in ids, f"OFF_SALE 行入列:{ids}"
+        assert ids == ["SPU-T-BAG"], f"在售 OR 面应只余 38L 背包:{ids}"
     finally:
         await _teardown_shelf(_engine, merchant_engine, original, embeds, rewrite)
 
