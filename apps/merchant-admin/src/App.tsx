@@ -16,6 +16,7 @@ import RolesPage from '@/pages/system/roles';
 import StaffPage from '@/pages/system/staff';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 
 function flattenMenus(nodes: MenuNode[]): Array<MenuNode & { top: string }> {
   return nodes.flatMap((n) => [
@@ -67,6 +68,17 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
   const routable = useMemo(() => flattenMenus(menus), [menus]);
   const currentTop = routable.find((r) => location.pathname.startsWith(r.route || '###'))?.top || '';
 
+  // 切换 = 服务端换签目标员工 JWT;始终以保存的老板凭证发起
+  const switchStaff = useCallback(
+    (email: string) => {
+      api
+        .staffSwitch(email)
+        .then(() => refresh())
+        .catch((err) => alert(String(err).replace('Error: ', '')));
+    },
+    [refresh],
+  );
+
   return (
     <div className="flex h-screen bg-zinc-100 text-zinc-900">
       <aside className="w-56 shrink-0 border-r border-zinc-200 bg-white flex flex-col">
@@ -83,18 +95,19 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
                   {(dir.children || [])
                     .filter((c) => c.menuType === 'menu')
                     .map((m) => (
-                      <button
+                      <Button
                         type="button"
                         key={m.id}
+                        variant="ghost"
                         onClick={() => m.route && navigate(m.route)}
-                        className={`block w-full cursor-pointer rounded-lg px-3 py-1.5 text-left text-[13px] ${
+                        className={`block w-full cursor-pointer justify-start rounded-lg px-3 py-1.5 text-left text-[13px] font-normal ${
                           location.pathname.startsWith(m.route || '###')
-                            ? 'bg-zinc-900 text-white'
-                            : 'text-zinc-600 hover:bg-zinc-50'
+                            ? 'bg-zinc-900 text-white hover:bg-zinc-900 hover:text-white'
+                            : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-600'
                         }`}
                       >
                         {m.name}
-                      </button>
+                      </Button>
                     ))}
                 </>
               )}
@@ -108,30 +121,34 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
           <div className="text-sm font-medium text-zinc-600">{currentTop}</div>
           <div className="flex items-center gap-3 text-xs">
             {hasBossSession() && (
-              <select
-                className="rounded-full bg-zinc-900 px-3 py-1.5 text-white"
-                value={currentStaffEmail()}
-                onChange={(e) => {
-                  // 切换 = 服务端换签目标员工 JWT;始终以保存的老板凭证发起
-                  api
-                    .staffSwitch(e.target.value)
-                    .then(() => refresh())
-                    .catch((err) => alert(String(err).replace('Error: ', '')));
-                }}
-              >
-                {staff.map((s) => (
-                  <option key={s.id} value={s.email}>
-                    {s.displayName} · {s.role}
-                  </option>
-                ))}
-              </select>
+              <Select value={currentStaffEmail()} onValueChange={(v) => void switchStaff(v)}>
+                <SelectTrigger
+                  aria-label="身份切换"
+                  className="h-auto w-fit rounded-full bg-zinc-900 px-3 py-1.5 text-xs text-white border-zinc-900"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {staff.map((s) => (
+                    <SelectItem key={s.id} value={s.email}>
+                      {s.displayName} · {s.role}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
             <span className="text-zinc-400">
               {currentStaffEmail()} · {role}
             </span>
-            <button type="button" className="text-[11px] text-zinc-400 hover:text-zinc-900" onClick={onLogout}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto px-1 py-0.5 text-[11px] font-normal text-zinc-400 hover:text-zinc-900"
+              onClick={onLogout}
+            >
               退出
-            </button>
+            </Button>
           </div>
         </header>
 

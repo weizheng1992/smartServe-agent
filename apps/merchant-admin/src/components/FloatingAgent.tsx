@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import { type SelectionMap, clearSelection, getSelection, getSelectionLabels, subscribe } from '@/lib/page-context';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 
 // 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由(选中数据
 // 由列表页经 localStorage 约定键上行 —— PageContext 19-D3)。
@@ -228,14 +228,14 @@ export function FloatingAgent({ route }: { route: string }) {
 
   if (!open) {
     return (
-      <button
+      <Button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 select-none items-center justify-center rounded-full bg-zinc-900 text-xl text-white shadow-xl"
+        className="fixed bottom-6 right-6 z-40 flex size-14 select-none rounded-full bg-zinc-900 text-xl font-normal text-white shadow-xl hover:bg-zinc-900"
         aria-label="打开数据分析助手"
       >
         🤖
-      </button>
+      </Button>
     );
   }
 
@@ -247,19 +247,33 @@ export function FloatingAgent({ route }: { route: string }) {
           数据分析助手
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
             type="button"
-            className="text-xs text-zinc-400 hover:text-zinc-900"
+            variant="ghost"
+            size="sm"
+            className="h-auto px-1 py-0.5 text-xs font-normal text-zinc-400 hover:text-zinc-900"
             onClick={() => navigate('/board')}
           >
             📌 看板
-          </button>
-          <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={newConversation}>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-auto px-1 py-0.5 text-xs font-normal text-zinc-400 hover:text-zinc-900"
+            onClick={newConversation}
+          >
             ✚ 新对话
-          </button>
-          <button type="button" className="text-xs text-zinc-400 hover:text-zinc-900" onClick={() => setOpen(false)}>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-auto px-1 py-0.5 text-xs font-normal text-zinc-400 hover:text-zinc-900"
+            onClick={() => setOpen(false)}
+          >
             收起
-          </button>
+          </Button>
         </div>
       </div>
       <div className="border-b border-zinc-50 px-4 py-2 flex items-center gap-2">
@@ -267,11 +281,12 @@ export function FloatingAgent({ route }: { route: string }) {
           上下文:{route}
         </span>
         {selMap.order?.length || selMap.spu?.length || selMap.customer?.length ? (
-          <button
+          <Button
             type="button"
+            variant="outline"
             onClick={() => clearSelection()}
             title="勾选会作为查询上下文,点击清除"
-            className="rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700"
+            className="h-auto rounded-md border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-normal text-amber-700 shadow-none hover:bg-amber-50 hover:text-amber-700"
           >
             已勾选{' '}
             {(['order', 'spu', 'customer'] as const)
@@ -279,7 +294,7 @@ export function FloatingAgent({ route }: { route: string }) {
               .map((k) => `${SEL_KIND_LABEL[k]} ${selMap[k]!.length}`)
               .join(' · ')}{' '}
             ✕
-          </button>
+          </Button>
         ) : null}
       </div>
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -308,17 +323,18 @@ export function FloatingAgent({ route }: { route: string }) {
                     {String(f.data.question ?? '')}
                     <div className="mt-2 flex flex-wrap gap-2">
                       {((f.data.options || []) as Array<{ label: string }>).map((o, j: number) => (
-                        <button
+                        <Button
                           type="button"
+                          variant="outline"
                           /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
                           key={j}
-                          className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
+                          className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none"
                           onClick={() => {
                             setQ(`按${o.label}`);
                           }}
                         >
                           {o.label}
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   </div>
@@ -333,29 +349,32 @@ export function FloatingAgent({ route }: { route: string }) {
                     ) : null}
                     {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
                       <div className="mt-1.5 flex gap-2">
-                        <button
+                        <Button
                           type="button"
-                          className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
+                          variant="outline"
+                          className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900"
                           onClick={() => exportResultCsv(f.data as ResultData)}
                         >
                           导出 CSV
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900"
+                          variant="outline"
+                          className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900"
                           title="钉到看板页定时重放刷新"
                           onClick={() => pinToBoard(f.data as ResultData)}
                         >
                           📌 钉看板
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant="outline"
                           disabled={f.saved}
-                          className="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] text-zinc-600 hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
+                          className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
                           onClick={() => void saveToReport(f)}
                         >
                           {f.saved ? '已存入我的报告 ✓' : '存为报告'}
-                        </button>
+                        </Button>
                       </div>
                     )}
                     {/* 反馈行在动作行闸外:诚实空结果(rows=[])同样可评 */}
@@ -390,8 +409,8 @@ export function FloatingAgent({ route }: { route: string }) {
         {busy && <div className="text-xs text-zinc-400">正在解析问题并查询…</div>}
       </div>
       <div className="flex shrink-0 gap-2 border-t border-zinc-100 p-3">
-        <input
-          className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-900"
+        <Input
+          className="flex-1 rounded-lg border-zinc-300 px-3 text-sm shadow-none focus-visible:border-zinc-900 focus-visible:ring-0"
           placeholder="提问…"
           value={q}
           onChange={(e) => setQ(e.target.value)}

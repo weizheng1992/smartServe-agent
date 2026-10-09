@@ -1,6 +1,6 @@
 import { api } from '@/lib/api';
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 
 interface Props {
   onMsg: (m: string) => void;
@@ -27,14 +27,14 @@ export function CustomerCreateForm({ onMsg, onCreated }: Props) {
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <div className="text-sm font-medium">新增客户</div>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        <input
-          className="w-32 rounded-lg border border-zinc-300 px-3 py-2"
+        <Input
+          className="h-auto w-32 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
           placeholder="姓名"
           value={newCust.name}
           onChange={(e) => setNewCust({ ...newCust, name: e.target.value })}
         />
-        <input
-          className="w-40 rounded-lg border border-zinc-300 px-3 py-2"
+        <Input
+          className="h-auto w-40 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
           placeholder="电话"
           value={newCust.phone}
           onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })}

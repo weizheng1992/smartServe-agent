@@ -1,3 +1,11 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import React from 'react';
 import {
   ApprovalContextDrawer,
@@ -71,32 +79,36 @@ export function SpiLogsTab() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
-                  <tr>
-                    <th className="p-3.5">流水 ID</th>
-                    <th className="p-3.5">对应订单号</th>
-                    <th className="p-3.5">动作类型</th>
-                    <th className="p-3.5">幂等防重 Key</th>
-                    <th className="p-3.5">执行时间</th>
-                    <th className="p-3.5 text-right">报文详情</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
+              <DenseTable className="text-left text-xs">
+                <DenseTableHeader>
+                  <DenseTableRow className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold hover:bg-slate-50">
+                    <DenseTableHead className="p-3.5 text-xs">流水 ID</DenseTableHead>
+                    <DenseTableHead className="p-3.5 text-xs">对应订单号</DenseTableHead>
+                    <DenseTableHead className="p-3.5 text-xs">动作类型</DenseTableHead>
+                    <DenseTableHead className="p-3.5 text-xs">幂等防重 Key</DenseTableHead>
+                    <DenseTableHead className="p-3.5 text-xs">执行时间</DenseTableHead>
+                    <DenseTableHead className="p-3.5 text-right text-xs">报文详情</DenseTableHead>
+                  </DenseTableRow>
+                </DenseTableHeader>
+                <DenseTableBody>
                   {filteredAuditLogs.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-50/80 transition">
-                      <td className="p-3.5 font-mono text-slate-900">{log.id.slice(0, 8)}...</td>
-                      <td className="p-3.5 font-semibold text-slate-800">{log.order_id}</td>
-                      <td className="p-3.5">
+                    <DenseTableRow key={log.id} className="hover:bg-slate-50/80 transition">
+                      <DenseTableCell className="p-3.5 font-mono text-slate-900">
+                        {log.id.slice(0, 8)}...
+                      </DenseTableCell>
+                      <DenseTableCell className="p-3.5 font-semibold text-slate-800">{log.order_id}</DenseTableCell>
+                      <DenseTableCell className="p-3.5">
                         <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-200 font-bold">
                           {log.action_type}
                         </Badge>
-                      </td>
-                      <td className="p-3.5 font-mono text-[11px] text-slate-500">
+                      </DenseTableCell>
+                      <DenseTableCell className="p-3.5 font-mono text-[11px] text-slate-500">
                         {log.idempotency_key?.slice(0, 16)}...
-                      </td>
-                      <td className="p-3.5 text-slate-500">{new Date(log.created_at).toLocaleTimeString()}</td>
-                      <td className="p-3.5 text-right">
+                      </DenseTableCell>
+                      <DenseTableCell className="p-3.5 text-slate-500">
+                        {new Date(log.created_at).toLocaleTimeString()}
+                      </DenseTableCell>
+                      <DenseTableCell className="p-3.5 text-right">
                         <Button
                           type="button"
                           variant="secondary"
@@ -106,11 +118,11 @@ export function SpiLogsTab() {
                         >
                           查看 Payload
                         </Button>
-                      </td>
-                    </tr>
+                      </DenseTableCell>
+                    </DenseTableRow>
                   ))}
-                </tbody>
-              </table>
+                </DenseTableBody>
+              </DenseTable>
             </div>
           )}
         </div>

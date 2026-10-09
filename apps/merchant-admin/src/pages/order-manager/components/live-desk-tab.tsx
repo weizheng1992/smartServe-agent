@@ -53,13 +53,15 @@ export function LiveDeskTab() {
                 <h3 className="text-xs font-bold text-slate-900">💬 客服会话队列</h3>
                 <span className="text-[10px] text-slate-500">商户专属客户会话实时接入</span>
               </div>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 onClick={fetchDashboardData}
-                className="text-xs text-slate-500 hover:text-slate-800 cursor-pointer"
+                className="size-auto cursor-pointer text-xs font-normal text-slate-500 hover:bg-transparent hover:text-slate-800"
               >
                 🔄
-              </button>
+              </Button>
             </div>
 
             <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg text-[11px]">
@@ -68,18 +70,19 @@ export function LiveDeskTab() {
                 { key: 'takeover', label: '人工接管' },
                 { key: 'ai', label: 'AI 托管' },
               ].map((f) => (
-                <button
+                <Button
                   key={f.key}
                   type="button"
+                  variant="ghost"
                   onClick={() => setLiveDeskStatusFilter(f.key as any)}
-                  className={`flex-1 py-1 rounded text-center font-medium transition cursor-pointer ${
+                  className={`flex-1 cursor-pointer rounded py-1 text-center text-[11px] transition ${
                     liveDeskStatusFilter === f.key
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-500 hover:text-slate-800'
+                      ? 'bg-white text-slate-900 font-bold shadow-xs hover:bg-white hover:text-slate-900'
+                      : 'font-medium text-slate-500 hover:bg-transparent hover:text-slate-800'
                   }`}
                 >
                   {f.label}
-                </button>
+                </Button>
               ))}
             </div>
 
@@ -249,14 +252,15 @@ export function LiveDeskTab() {
                   '您的退款诉求已转交售后专员核实，请耐心等候。',
                   '收货地址已为您记录，出库前均可为您办理变更。',
                 ].map((reply) => (
-                  <button
+                  <Button
                     key={reply}
                     type="button"
+                    variant="outline"
                     onClick={() => handleSendMessage(reply)}
-                    className="bg-white hover:bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md border border-slate-200 whitespace-nowrap cursor-pointer transition"
+                    className="h-auto cursor-pointer whitespace-nowrap rounded-md border-slate-200 bg-white px-2.5 py-1 text-xs font-normal text-slate-700 shadow-none transition hover:bg-slate-100 hover:text-slate-700"
                   >
                     {reply.slice(0, 16)}...
-                  </button>
+                  </Button>
                 ))}
               </div>
 

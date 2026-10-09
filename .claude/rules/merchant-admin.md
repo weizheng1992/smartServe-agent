@@ -47,7 +47,7 @@ paths: ["apps/merchant-admin/**/*"]
 ### 1.6 优惠活动页 (promotions,2026-09-27 运营闭环)
 
 - **生效态由服务端派生**:列表行的 `effectiveStatus`(disabled > ended > scheduled > running,与结算引擎窗口判定同口径)直显四态,前端严禁自行按 start/end 算;手工启停按钮仍走 `status`(active/disabled)开关,两者解耦。
-- **编辑 = 展开行一次改齐**(名称/门槛/面额/时间窗/范围/发放上限),PATCH 按「携带即更新」发全字段 —— `endAt: null` 置长期、`totalQuota: null` 清上限、`startAt` 传空保持原值(引擎 `update_promotion` 语义:区分「未传」与「传 null」);门槛仅满减携带,不把表单残留值写进库。
+- **新建/编辑 = 页级 `PromoFormDialog` 弹窗一表两态**(页头「+ 新建活动」或行内「编辑」唤起;类型卡片仅新建可选,编辑态类型不可改——PATCH 不携带 promoType)。PATCH 按「携带即更新」发全字段 —— `endAt: null` 置长期、`totalQuota: null` 清上限、`startAt` 传空保持原值(引擎 `update_promotion` 语义:区分「未传」与「传 null」);门槛仅满减携带,不把表单残留值写进库。弹窗内含客户端轻校验(名称/优惠数值必填、折扣 1-99、止 ≥ 起、上限正整数)与实时规则预览,提交失败在弹窗内呈现不关闭。
 - 券型行显 `已领 X/上限 Y`(发放量控,服务端 claim 闸拒超发);发券面板头部显剩余可发;行内小字效果注记 `核销 N 单 · 让利 ¥X` 来自 `redemptionCount`/`discountTotal` 聚合。
 
 ---
@@ -58,4 +58,7 @@ paths: ["apps/merchant-admin/**/*"]
 2. **SSE 帧解析只经 `lib/sse.ts`**(`parseSseFrames` 全量 / `createFrameParser` 增量),与网关 `_sse()` 帧格式一一对应;坏 JSON 跳帧不中断流。
 3. **RBAC 前端只做可见性**:菜单树由服务端下发,权限判定真源在服务端 `permCode`;严禁在前端复制权限表。
 4. **测试**:`cd apps/merchant-admin && bun run test`(vitest,162 例/30 文件,与被测文件同目录就近放置;`src/test/live-api.ts` 可起 live 网关做集成);Playwright E2E `e2e/merchant-admin.config.ts`(testDir `apps/merchant-admin/e2e`,复用运行中的 3006 前端 + 4000 网关;dev 种子账号 `test@example.com` 老板 / `ops@aurora` 运营 / `wh@aurora` 仓储,密码统一 `agent-all-dev`)。
-5. **中文界面 + workspace 包 `ui` 原子组件 + Tailwind**:与 web/admin 同一零依赖 UI 不变量,严禁引入重型外部组件框架。
+5. **中文界面 + workspace 包 `ui` 原子组件 + Tailwind**:与 web/admin 同一零依赖 UI 不变量,严禁引入重型外部组件框架。**全控件 shadcn 化(2026-10-09 用户裁决)**:表单/表格/按钮一律用 `ui`(= packages/ui,shadcn 项目)的 `Input`/`Label`/`Select` 全家/`Checkbox`/`Table` 全家/`Button`/`Dialog` 全家,严禁手写原生 `<input>/<select>/<table>/<button>/<label>`。要点:
+   - **Radix Select 空值两律**:`SelectItem` 的 value 禁空串(Radix 抛错)。不可选占位(「— 选择负责人 —」)→ Root 受控 `value=''` + `<SelectValue placeholder>`;真·可选空值(「未分配/未定级」)→ 哨兵 `__unset__` 在 `onValueChange` 单点映射回 `''`,**哨兵严禁漏进 API payload**。
+   - **表格密度**:ui Table 默认 h-12/p-4 过松,统一用本地 `src/components/dense-table.tsx`(px-4 py-2 / 13px);条件色/选中态类经 className 透传仍后者胜。**ResultCard 三张内嵌表为显式豁免**(四处共用渲染缝,见其文件头注释)。
+   - **jsdom 单测驱动 Radix**:`src/test/setup.ts` 补 `hasPointerCapture`/`releasePointerCapture`/`scrollIntoView` 三桩;选择交互走 `src/test/radix-select.ts` 的 `selectRadixOption(label, option)`。E2E 侧:click trigger → `getByRole('option')` click;trigger 回显断言用 `toHaveText`(button 无 value)。

@@ -4,12 +4,15 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PromoTable } from './promo-table';
 
-// 单测(不依赖网关):展开行编辑与四态/量控展示的确定性渲染契约。
-// api 只桩 products.list(挂载加载)与 promotions.update(编辑保存捕获)。
+// 单测(不依赖网关):四态/量控展示与行内操作的确定性渲染契约。
+// 编辑不再展开行 —— 编辑按钮上报页级 PromoFormDialog 弹窗(表单契约见 promo-dialog.test.tsx)。
+// api 只桩 promotions.setStatus / promotions.remove(启停/删除)。
 const mocks = vi.hoisted(() => {
-  const update = vi.fn();
-  update.mockResolvedValue({ success: true });
-  return { update };
+  const setStatus = vi.fn();
+  const remove = vi.fn();
+  setStatus.mockResolvedValue({ success: true });
+  remove.mockResolvedValue({ success: true });
+  return { setStatus, remove };
 });
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -18,8 +21,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
-      products: { ...actual.api.products, list: async () => ({ success: true, spus: [] }) },
-      promotions: { ...actual.api.promotions, update: mocks.update },
+      promotions: { ...actual.api.promotions, setStatus: mocks.setStatus, remove: mocks.remove },
     },
   };
 });
@@ -49,8 +51,9 @@ function mkPromo(overrides: Partial<Promotion> = {}): Promotion {
 function renderTable(promotions: Promotion[]) {
   const onMsg = vi.fn();
   const onChanged = vi.fn();
-  render(<PromoTable promotions={promotions} onMsg={onMsg} onChanged={onChanged} />);
-  return { onMsg, onChanged };
+  const onEdit = vi.fn();
+  render(<PromoTable promotions={promotions} spuTitles={{}} onMsg={onMsg} onChanged={onChanged} onEdit={onEdit} />);
+  return { onMsg, onChanged, onEdit };
 }
 
 describe('PromoTable 生效态四态', () => {
@@ -108,36 +111,18 @@ describe('PromoTable 有效期与量控展示', () => {
   });
 });
 
-describe('PromoTable 展开行编辑', () => {
-  it('一次改齐:保存按「携带即更新」PATCH 全字段(endAt 空=置长期、quota 空=清上限)', async () => {
-    mocks.update.mockClear();
-    renderTable([mkPromo({ id: 'p1', name: '旧名', promoType: 'coupon', value: 20, totalQuota: 50, claimedCount: 3 })]);
+describe('PromoTable 行内操作', () => {
+  it('编辑上报页级弹窗(携带整行活动),本表不自持表单态', () => {
+    const { onEdit } = renderTable([mkPromo({ id: 'p1' })]);
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-    // 展开行出现,预填当前值
-    const nameInput = screen.getByPlaceholderText('活动名称') as HTMLInputElement;
-    expect(nameInput.value).toBe('旧名');
-    expect(screen.getByPlaceholderText('发放上限(空=不限)')).toBeInTheDocument();
-
-    fireEvent.change(nameInput, { target: { value: '新名' } });
-    fireEvent.change(screen.getByPlaceholderText('发放上限(空=不限)'), { target: { value: '' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-
-    await vi.waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    const patch = mocks.update.mock.calls[0][1];
-    expect(patch.name).toBe('新名');
-    expect(patch.value).toBe(20);
-    expect(patch.threshold).toBeNull(); // 券型无门槛:空串归一为 null(服务端清除)
-    expect(patch.endAt).toBe('2026-09-30T10:00'); // 预填值原样保留
-    expect(patch.totalQuota).toBeNull(); // 清空 = 清除上限
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit.mock.calls[0][0].id).toBe('p1');
   });
 
-  it('取消收起展开行,不触发保存', () => {
-    renderTable([mkPromo({ id: 'p1' })]);
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-    expect(screen.getByPlaceholderText('活动名称')).toBeInTheDocument();
-    // 「取消」有两处(行开关 + 展开行内),点展开行内那颗(后者)
-    fireEvent.click(screen.getAllByRole('button', { name: '取消' })[1]);
-    expect(screen.queryByPlaceholderText('活动名称')).not.toBeInTheDocument();
-    expect(mocks.update).not.toHaveBeenCalled();
+  it('停用/启用按 status 开关,成功回调 onChanged', async () => {
+    const { onChanged } = renderTable([mkPromo({ id: 'p1', status: 'active' })]);
+    fireEvent.click(screen.getByRole('button', { name: '停用' }));
+    await vi.waitFor(() => expect(mocks.setStatus).toHaveBeenCalledWith('p1', 'disabled'));
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
   });
 });

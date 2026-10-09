@@ -1,6 +1,14 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { type SkuStockRow, api } from '@/lib/api';
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 import { type StockFilter, filterSkuStock } from '../filters';
 
 interface Props {
@@ -37,54 +45,57 @@ export function SkuStockTable({ skus, onMsg, onChanged }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50/70 px-4 py-3 text-xs">
         <div className="flex rounded-lg bg-zinc-200/80 p-0.5 font-semibold">
           {FILTERS.map((f) => (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               key={f.key}
               onClick={() => setFilter(f.key)}
-              className={`cursor-pointer rounded-md px-3 py-1 transition ${
-                filter === f.key ? 'bg-white text-zinc-900 shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+              className={`h-auto cursor-pointer rounded-md px-3 py-1 text-xs font-semibold transition ${
+                filter === f.key
+                  ? 'bg-white text-zinc-900 shadow-xs hover:bg-white hover:text-zinc-900'
+                  : 'text-zinc-600 hover:bg-transparent hover:text-zinc-900'
               }`}
             >
               {f.label}
-            </button>
+            </Button>
           ))}
         </div>
-        <input
-          className="w-56 rounded-lg border border-zinc-300 px-3 py-1.5"
+        <Input
+          className="h-auto w-56 rounded-lg border-zinc-300 px-3 py-1.5 text-xs shadow-none focus-visible:ring-0"
           placeholder="搜索 SKU 编码 / 名称 / 商品"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
 
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-zinc-100 text-left text-zinc-400">
-            <th className="px-4 py-2 font-medium">SKU 编码</th>
-            <th className="px-4 py-2 font-medium">名称</th>
-            <th className="px-4 py-2 font-medium">所属商品</th>
-            <th className="px-4 py-2 font-medium">价格</th>
-            <th className="px-4 py-2 font-medium">库存</th>
-            <th className="px-4 py-2 font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      <DenseTable>
+        <DenseTableHeader>
+          <DenseTableRow className="border-b border-zinc-100 hover:bg-transparent">
+            <DenseTableHead>SKU 编码</DenseTableHead>
+            <DenseTableHead>名称</DenseTableHead>
+            <DenseTableHead>所属商品</DenseTableHead>
+            <DenseTableHead>价格</DenseTableHead>
+            <DenseTableHead>库存</DenseTableHead>
+            <DenseTableHead>操作</DenseTableHead>
+          </DenseTableRow>
+        </DenseTableHeader>
+        <DenseTableBody>
           {rows.length === 0 && (
-            <tr>
-              <td colSpan={6} className="px-4 py-6 text-center text-xs text-zinc-400">
+            <DenseTableRow>
+              <DenseTableCell colSpan={6} className="py-6 text-center text-xs text-zinc-400">
                 暂无匹配 SKU(诚实空)
-              </td>
-            </tr>
+              </DenseTableCell>
+            </DenseTableRow>
           )}
           {rows.map((k) => (
-            <tr key={k.id} className="border-b border-zinc-50">
-              <td className="px-4 py-2 font-mono">{k.sku_code}</td>
-              <td className="px-4 py-2">{k.sku_title || '—'}</td>
-              <td className="px-4 py-2">{k.spu_title}</td>
-              <td className="px-4 py-2">
+            <DenseTableRow key={k.id}>
+              <DenseTableCell className="font-mono">{k.sku_code}</DenseTableCell>
+              <DenseTableCell>{k.sku_title || '—'}</DenseTableCell>
+              <DenseTableCell>{k.spu_title}</DenseTableCell>
+              <DenseTableCell>
                 {editing?.id === k.id ? (
-                  <input
-                    className="w-20 rounded border border-zinc-300 px-2 py-1"
+                  <Input
+                    className="h-auto w-20 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
                     placeholder="价格"
                     value={editing.price}
                     onChange={(e) => setEditing({ ...editing, price: e.target.value })}
@@ -92,11 +103,11 @@ export function SkuStockTable({ skus, onMsg, onChanged }: Props) {
                 ) : (
                   `¥${k.price}`
                 )}
-              </td>
-              <td className="px-4 py-2">
+              </DenseTableCell>
+              <DenseTableCell>
                 {editing?.id === k.id ? (
-                  <input
-                    className="w-16 rounded border border-zinc-300 px-2 py-1"
+                  <Input
+                    className="h-auto w-16 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
                     placeholder="库存"
                     value={editing.stock}
                     onChange={(e) => setEditing({ ...editing, stock: e.target.value })}
@@ -104,8 +115,8 @@ export function SkuStockTable({ skus, onMsg, onChanged }: Props) {
                 ) : (
                   <span className={k.stock < 50 ? 'font-semibold text-rose-600' : ''}>{k.stock}</span>
                 )}
-              </td>
-              <td className="px-4 py-2">
+              </DenseTableCell>
+              <DenseTableCell>
                 {editing?.id === k.id ? (
                   <Button size="sm" onClick={() => void save()}>
                     保存
@@ -119,11 +130,11 @@ export function SkuStockTable({ skus, onMsg, onChanged }: Props) {
                     改价/库存
                   </Button>
                 )}
-              </td>
-            </tr>
+              </DenseTableCell>
+            </DenseTableRow>
           ))}
-        </tbody>
-      </table>
+        </DenseTableBody>
+      </DenseTable>
     </div>
   );
 }

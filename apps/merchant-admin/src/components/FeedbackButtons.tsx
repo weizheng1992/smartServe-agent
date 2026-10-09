@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button, Input } from 'ui';
 
 export type FeedbackVerdict = 'up' | 'down';
 
@@ -21,61 +22,74 @@ export function FeedbackButtons({
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState('');
   const done = rated != null;
-  const btn = 'rounded-lg border px-2 py-0.5 text-[11px] disabled:cursor-default disabled:opacity-60';
+  // 反馈组是嵌在结果卡尾部的微缩件,统一 outline/sm + 原字号密度
+  const cls = 'h-auto rounded-lg px-2 py-0.5 text-[11px] font-normal';
 
   return (
     <div className="mt-1.5">
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] text-zinc-400">这个结果{allowUp ? '有帮助吗' : '答错了吗'}?</span>
         {allowUp && (
-          <button
+          <Button
             type="button"
+            variant="outline"
             disabled={done || busy}
             title="有帮助"
-            className={`${btn} ${rated === 'up' ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-zinc-300 text-zinc-500 hover:border-zinc-900 hover:text-zinc-900'}`}
+            className={`${cls} ${
+              rated === 'up'
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-700'
+                : 'border-zinc-300 text-zinc-500 hover:border-zinc-900 hover:text-zinc-900'
+            }`}
             onClick={() => onSubmit('up')}
           >
             👍{rated === 'up' ? ' 已反馈' : ''}
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
+          variant="outline"
           disabled={done || busy}
           title="没帮助"
-          className={`${btn} ${rated === 'down' ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-zinc-300 text-zinc-500 hover:border-zinc-900 hover:text-zinc-900'}`}
+          className={`${cls} ${
+            rated === 'down'
+              ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-50 hover:text-amber-700'
+              : 'border-zinc-300 text-zinc-500 hover:border-zinc-900 hover:text-zinc-900'
+          }`}
           onClick={() => (noteOpen ? onSubmit('down', note.trim() || undefined) : setNoteOpen(true))}
         >
           👎{rated === 'down' ? ' 已反馈' : ''}
-        </button>
+        </Button>
       </div>
       {noteOpen && !done && (
         <div className="mt-1 flex items-center gap-1.5">
-          <input
-            className="flex-1 rounded-lg border border-zinc-300 px-2 py-1 text-[11px] outline-none focus:border-zinc-900"
+          <Input
+            className="h-auto flex-1 rounded-lg border-zinc-300 px-2 py-1 text-[11px] shadow-none focus-visible:border-zinc-900 focus-visible:ring-0"
             placeholder="哪里不对?可留空(选填)"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && onSubmit('down', note.trim() || undefined)}
           />
-          <button
+          <Button
             type="button"
+            variant="outline"
             disabled={busy}
-            className={`${btn} border-zinc-900 bg-zinc-900 text-white`}
+            className={`${cls} border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-900 hover:text-white`}
             onClick={() => onSubmit('down', note.trim() || undefined)}
           >
             提交
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
             disabled={busy}
-            className={`${btn} border-zinc-300 text-zinc-500`}
+            className={`${cls} border-zinc-300 text-zinc-500 hover:text-zinc-500`}
             onClick={() => {
               setNoteOpen(false);
               setNote('');
             }}
           >
             取消
-          </button>
+          </Button>
         </div>
       )}
     </div>

@@ -1,3 +1,11 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { useNavigate } from 'react-router';
 import {
   ApprovalRiskBadge,
@@ -5,6 +13,11 @@ import {
   Button,
   CheckCircle2,
   Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   ShieldAlert,
   diagnoseApprovalTrigger,
   getApprovalCategory,
@@ -91,14 +104,15 @@ export function ApprovalsTab() {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-semibold">
               {FILTERS.map((f) => (
-                <button
+                <Button
                   key={f.key}
                   type="button"
+                  variant="ghost"
                   onClick={() => setApprovalStatusFilter(f.key)}
-                  className={`px-3 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                  className={`h-auto cursor-pointer items-center gap-1.5 rounded-md px-3 py-1 text-xs transition ${
                     approvalStatusFilter === f.key
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-white text-slate-900 font-bold shadow-xs hover:bg-white hover:text-slate-900'
+                      : 'font-semibold text-slate-600 hover:bg-transparent hover:text-slate-900'
                   }`}
                 >
                   <span>{f.label}</span>
@@ -107,21 +121,24 @@ export function ApprovalsTab() {
                       {f.badge}
                     </span>
                   ) : null}
-                </button>
+                </Button>
               ))}
             </div>
 
-            <select
-              value={approvalActionFilter}
-              onChange={(e) => setApprovalActionFilter(e.target.value)}
-              aria-label="筛选业务操作类型"
-              className="px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 font-medium focus:outline-hidden focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="all">全部业务类型</option>
-              <option value="refund">💰 退款审核 (processRefund)</option>
-              <option value="address">🚚 修改地址 (changeAddress)</option>
-              <option value="human">🎧 升级人工 (human_escalation)</option>
-            </select>
+            <Select value={approvalActionFilter} onValueChange={(v) => setApprovalActionFilter(v)}>
+              <SelectTrigger
+                aria-label="筛选业务操作类型"
+                className="h-auto rounded-lg border-slate-200 px-2.5 py-1 text-xs font-medium"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部业务类型</SelectItem>
+                <SelectItem value="refund">💰 退款审核 (processRefund)</SelectItem>
+                <SelectItem value="address">🚚 修改地址 (changeAddress)</SelectItem>
+                <SelectItem value="human">🎧 升级人工 (human_escalation)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="flex items-center gap-2">
@@ -150,23 +167,23 @@ export function ApprovalsTab() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
-                <tr>
-                  <th className="p-3.5">工单信息</th>
-                  <th className="p-3.5">触发动作 / 风控诊断</th>
-                  <th className="p-3.5">业务核心参数</th>
-                  <th className="p-3.5">关联顾客 / 会话</th>
-                  <th className="p-3.5">状态</th>
-                  <th className="p-3.5 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+            <DenseTable className="text-left text-xs">
+              <DenseTableHeader>
+                <DenseTableRow className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold hover:bg-slate-50">
+                  <DenseTableHead className="p-3.5 text-xs">工单信息</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">触发动作 / 风控诊断</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">业务核心参数</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">关联顾客 / 会话</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">状态</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-right text-xs">操作</DenseTableHead>
+                </DenseTableRow>
+              </DenseTableHeader>
+              <DenseTableBody>
                 {filteredList.map((approval) => (
                   <ApprovalRow key={approval.id} approval={approval} />
                 ))}
-              </tbody>
-            </table>
+              </DenseTableBody>
+            </DenseTable>
           </div>
         )}
       </div>
@@ -191,8 +208,8 @@ function ApprovalRow({ approval }: { approval: any }) {
   const isSubmitting = submittingActionId === approval.id;
 
   return (
-    <tr className="hover:bg-slate-50/80 transition">
-      <td className="p-3.5">
+    <DenseTableRow className="p-0 hover:bg-slate-50/80 transition">
+      <DenseTableCell className="p-3.5">
         <div className="font-mono font-bold text-slate-900">{approval.id.slice(0, 8)}...</div>
         <div className="text-[10px] text-slate-400 mt-0.5">
           {approval.createdAt
@@ -204,9 +221,9 @@ function ApprovalRow({ approval }: { approval: any }) {
               })
             : '-'}
         </div>
-      </td>
+      </DenseTableCell>
 
-      <td className="p-3.5">
+      <DenseTableCell className="p-3.5">
         <div className="flex items-center gap-1.5 mb-1">
           <ApprovalRiskBadge riskLevel={diag.riskLevel} />
           <span className="font-semibold text-slate-900">{diag.title.split(' (')[0]}</span>
@@ -214,24 +231,24 @@ function ApprovalRow({ approval }: { approval: any }) {
         <div className="text-[11px] text-slate-500 max-w-xs truncate" title={diag.triggerCause}>
           {diag.triggerCause}
         </div>
-      </td>
+      </DenseTableCell>
 
-      <td className="p-3.5">
+      <DenseTableCell className="p-3.5">
         <ApprovalParams approval={approval} />
-      </td>
+      </DenseTableCell>
 
-      <td className="p-3.5">
+      <DenseTableCell className="p-3.5">
         <div className="font-medium text-slate-900">{approval.userId || '顾客'}</div>
         <div className="text-[10px] text-slate-400 font-mono truncate max-w-[130px]" title={approval.threadId}>
           {approval.threadId}
         </div>
-      </td>
+      </DenseTableCell>
 
-      <td className="p-3.5">
+      <DenseTableCell className="p-3.5">
         <ApprovalStatusBadge status={approval.status} reason={approval.reason} />
-      </td>
+      </DenseTableCell>
 
-      <td className="p-3.5 text-right">
+      <DenseTableCell className="p-3.5 text-right">
         <div className="flex items-center justify-end gap-1.5">
           {isWaiting && (
             <>
@@ -280,8 +297,8 @@ function ApprovalRow({ approval }: { approval: any }) {
             进会话
           </Button>
         </div>
-      </td>
-    </tr>
+      </DenseTableCell>
+    </DenseTableRow>
   );
 }
 

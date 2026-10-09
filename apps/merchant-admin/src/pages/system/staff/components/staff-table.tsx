@@ -1,8 +1,20 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { api } from '@/lib/api';
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 import { type StaffFilter, type StaffStatusFilter, filterStaff } from '../filters';
 import { ROLE_LABEL } from './role-label';
+
+/** Radix SelectItem 禁空串:「未分配/未定级」(dept/level='')的哨兵值,
+ *  onValueChange 单点映射回 '' —— 哨兵严禁进 API payload。 */
+const UNSET = '__unset__';
 
 export interface StaffRow {
   id: string;
@@ -49,106 +61,121 @@ export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 bg-zinc-50/70 px-4 py-3 text-xs">
-        <input
-          className="w-52 rounded-lg border border-zinc-300 px-3 py-1.5"
+        <Input
+          className="h-auto w-52 rounded-lg border-zinc-300 px-3 py-1.5 text-xs shadow-none focus-visible:ring-0"
           placeholder="搜索姓名 / 邮箱"
           value={filter.query}
           onChange={(e) => setFilter({ ...filter, query: e.target.value })}
         />
-        <select
-          className="rounded-lg border border-zinc-300 px-2 py-1.5"
-          value={filter.role}
-          onChange={(e) => setFilter({ ...filter, role: e.target.value })}
-        >
-          <option value="ALL">全部角色</option>
-          {roles.map((r) => (
-            <option key={r} value={r}>
-              {roleLabel(r)}
-            </option>
-          ))}
-        </select>
-        <select
-          className="rounded-lg border border-zinc-300 px-2 py-1.5"
-          value={filter.status}
-          onChange={(e) => setFilter({ ...filter, status: e.target.value as StaffStatusFilter })}
-        >
-          {STATUS_FILTERS.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+        <Select value={filter.role} onValueChange={(v) => setFilter({ ...filter, role: v })}>
+          <SelectTrigger aria-label="角色过滤" className="h-auto rounded-lg px-2 py-1.5 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">全部角色</SelectItem>
+            {roles.map((r) => (
+              <SelectItem key={r} value={r}>
+                {roleLabel(r)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filter.status} onValueChange={(v) => setFilter({ ...filter, status: v as StaffStatusFilter })}>
+          <SelectTrigger aria-label="状态过滤" className="h-auto rounded-lg px-2 py-1.5 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUS_FILTERS.map((s) => (
+              <SelectItem key={s.key} value={s.key}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <span className="text-[11px] text-zinc-400">
           {rows.length} / {staff.length} 人
         </span>
       </div>
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-zinc-100 text-left text-zinc-400">
-            <th className="px-4 py-2 font-medium">员工</th>
-            <th className="px-4 py-2 font-medium">部门 / 职级</th>
-            <th className="px-4 py-2 font-medium">角色</th>
-            <th className="px-4 py-2 font-medium">状态</th>
-            <th className="px-4 py-2 font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      <DenseTable>
+        <DenseTableHeader>
+          <DenseTableRow className="border-b border-zinc-100 hover:bg-transparent">
+            <DenseTableHead>员工</DenseTableHead>
+            <DenseTableHead>部门 / 职级</DenseTableHead>
+            <DenseTableHead>角色</DenseTableHead>
+            <DenseTableHead>状态</DenseTableHead>
+            <DenseTableHead>操作</DenseTableHead>
+          </DenseTableRow>
+        </DenseTableHeader>
+        <DenseTableBody>
           {rows.length === 0 && (
-            <tr>
-              <td colSpan={5} className="px-4 py-6 text-center text-xs text-zinc-400">
+            <DenseTableRow>
+              <DenseTableCell colSpan={5} className="py-6 text-center text-xs text-zinc-400">
                 无匹配员工(诚实空)
-              </td>
-            </tr>
+              </DenseTableCell>
+            </DenseTableRow>
           )}
           {rows.map((s) => (
-            <tr key={s.id} className="border-b border-zinc-50">
-              <td className="px-4 py-2">
+            <DenseTableRow key={s.id}>
+              <DenseTableCell>
                 {s.displayName}
                 <span className="ml-2 text-[11px] text-zinc-400">{s.email}</span>
-              </td>
-              <td className="px-4 py-2">
-                <select
-                  aria-label={`部门:${s.displayName}`}
-                  className="mb-1 rounded-lg border border-zinc-300 px-2 py-1 text-xs"
-                  value={s.dept ?? ''}
-                  onChange={(e) => void patch(s.id, { dept: e.target.value })}
+              </DenseTableCell>
+              <DenseTableCell>
+                <Select value={s.dept || UNSET} onValueChange={(v) => void patch(s.id, { dept: v === UNSET ? '' : v })}>
+                  <SelectTrigger
+                    aria-label={`部门:${s.displayName}`}
+                    className="mb-1 h-auto rounded-lg border-zinc-300 px-2 py-1 text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={UNSET}>未分配</SelectItem>
+                    {DEPTS.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={s.level || UNSET}
+                  onValueChange={(v) => void patch(s.id, { level: v === UNSET ? '' : v })}
                 >
-                  <option value="">未分配</option>
-                  {DEPTS.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label={`职级:${s.displayName}`}
-                  className="rounded-lg border border-zinc-300 px-2 py-1 text-xs"
-                  value={s.level ?? ''}
-                  onChange={(e) => void patch(s.id, { level: e.target.value })}
-                >
-                  <option value="">未定级</option>
-                  {LEVELS.map((l) => (
-                    <option key={l} value={l}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td className="px-4 py-2">
-                <select
-                  className="rounded-lg border border-zinc-300 px-2 py-1 text-xs"
-                  defaultValue={s.role}
-                  onChange={(e) => void patch(s.id, { role: e.target.value })}
-                >
-                  {[...new Set([...roles, s.role])].map((r) => (
-                    <option key={r} value={r}>
-                      {roleLabel(r)}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td className="px-4 py-2">{s.status === 'enabled' ? '启用' : '停用'}</td>
-              <td className="px-4 py-2">
+                  <SelectTrigger
+                    aria-label={`职级:${s.displayName}`}
+                    className="h-auto rounded-lg border-zinc-300 px-2 py-1 text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={UNSET}>未定级</SelectItem>
+                    {LEVELS.map((l) => (
+                      <SelectItem key={l} value={l}>
+                        {l}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </DenseTableCell>
+              <DenseTableCell>
+                <Select defaultValue={s.role} onValueChange={(v) => void patch(s.id, { role: v })}>
+                  <SelectTrigger
+                    aria-label={`角色:${s.displayName}`}
+                    className="h-auto rounded-lg border-zinc-300 px-2 py-1 text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[...new Set([...roles, s.role])].map((r) => (
+                      <SelectItem key={r} value={r}>
+                        {roleLabel(r)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </DenseTableCell>
+              <DenseTableCell>{s.status === 'enabled' ? '启用' : '停用'}</DenseTableCell>
+              <DenseTableCell>
                 {s.role !== 'finance_owner' && (
                   <Button
                     size="sm"
@@ -158,11 +185,11 @@ export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
                     {s.status === 'enabled' ? '停用' : '启用'}
                   </Button>
                 )}
-              </td>
-            </tr>
+              </DenseTableCell>
+            </DenseTableRow>
           ))}
-        </tbody>
-      </table>
+        </DenseTableBody>
+      </DenseTable>
     </div>
   );
 }

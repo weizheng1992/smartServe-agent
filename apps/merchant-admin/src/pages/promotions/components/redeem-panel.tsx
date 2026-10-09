@@ -1,6 +1,6 @@
 import { type Promotion, api } from '@/lib/api';
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 
 interface Props {
   promo: Promotion;
@@ -22,8 +22,8 @@ export function RedeemPanel({ promo, onCancel, onDone }: Props) {
     <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
       <div className="text-sm font-medium">核销「{promo.name}」</div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-        <input
-          className="w-64 rounded-lg border border-zinc-300 px-3 py-2"
+        <Input
+          className="h-auto w-64 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
           placeholder="订单号,如 AURORA-ORD-2026-9091"
           value={orderId}
           onChange={(e) => setOrderId(e.target.value)}

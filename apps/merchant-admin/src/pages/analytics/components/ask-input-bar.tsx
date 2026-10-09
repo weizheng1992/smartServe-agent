@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 
 interface Props {
   busy: boolean;
@@ -24,8 +24,8 @@ export function AskInputBar({ busy, onAsk, onGenReport, reportMsg, roleName }: P
   return (
     <div className="border-t border-zinc-200 bg-white px-6 py-4">
       <div className="flex gap-3">
-        <input
-          className="flex-1 rounded-xl border border-zinc-300 px-4 py-2.5 text-sm outline-none focus:border-zinc-900"
+        <Input
+          className="flex-1 rounded-xl border-zinc-300 px-4 py-2.5 text-sm shadow-none focus-visible:border-zinc-900 focus-visible:ring-0"
           placeholder="问点什么:上个月 GMV 趋势 / 卖得最差的商品 / 为什么退货变多了"
           value={text}
           onChange={(e) => setText(e.target.value)}

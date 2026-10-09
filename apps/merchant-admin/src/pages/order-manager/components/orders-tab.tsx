@@ -1,3 +1,11 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { setSelectionKind } from '@/lib/page-context';
 import React from 'react';
 import {
@@ -6,6 +14,7 @@ import {
   Badge,
   Button,
   CheckCircle2,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -57,19 +66,20 @@ export function OrdersTab() {
                   count: refundedOrdersCount,
                 },
               ].map((tab) => (
-                <button
+                <Button
                   key={tab.key}
                   type="button"
+                  variant="ghost"
                   onClick={() => setOrderStatusFilter(tab.key)}
-                  className={`px-3 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                  className={`h-auto cursor-pointer items-center gap-1.5 rounded-md px-3 py-1 text-xs transition ${
                     orderStatusFilter === tab.key
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-white text-slate-900 font-bold shadow-xs hover:bg-white hover:text-slate-900'
+                      : 'font-semibold text-slate-600 hover:bg-transparent hover:text-slate-900'
                   }`}
                 >
                   <span>{tab.label}</span>
                   <span className="text-[10px] text-slate-400">({tab.count})</span>
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -88,9 +98,9 @@ export function OrdersTab() {
         {selectedOrderIds.length > 0 && (
           <div className="sticky bottom-3 z-10 mx-auto w-fit flex items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-xs text-white shadow-lg">
             <span>已选 {selectedOrderIds.length} 笔订单</span>
-            <button
+            <Button
               type="button"
-              className="rounded-full bg-white px-3 py-1 font-semibold text-slate-900"
+              className="h-auto rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-900 shadow-none hover:bg-white/90"
               // 就地唤起悬浮助手并自动提问(勾选经 PageContext 上行,不跳页)
               onClick={() =>
                 window.dispatchEvent(
@@ -101,7 +111,7 @@ export function OrdersTab() {
               }
             >
               向 AI 提问 →
-            </button>
+            </Button>
           </div>
         )}
         {filteredOrders.length === 0 ? (
@@ -112,49 +122,49 @@ export function OrdersTab() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
-                <tr>
-                  <th className="p-3.5 w-8">
-                    <input
-                      type="checkbox"
+            <DenseTable className="text-left text-xs">
+              <DenseTableHeader>
+                <DenseTableRow className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold hover:bg-slate-50">
+                  <DenseTableHead className="w-8 p-3.5 text-xs">
+                    <Checkbox
                       aria-label="全选本页订单"
                       checked={selectedOrderIds.length > 0 && selectedOrderIds.length === filteredOrders.length}
-                      onChange={(e) => {
-                        const next = e.target.checked ? filteredOrders.map((o) => o.order_id) : [];
+                      onCheckedChange={(v) => {
+                        const next = v === true ? filteredOrders.map((o) => o.order_id) : [];
                         setSelectedOrderIds(next);
                         // PageContext 内存广播(§1.3 严禁 localStorage:残留勾选静默污染查询)
                         setSelectionKind('order', next);
                       }}
                     />
-                  </th>
-                  <th className="p-3.5">订单流水号</th>
-                  <th className="p-3.5">顾客 ID</th>
-                  <th className="p-3.5">订单状态</th>
-                  <th className="p-3.5">实付金额</th>
-                  <th className="p-3.5">收货人 & 联系方式</th>
-                  <th className="p-3.5">配送收货地址</th>
-                  <th className="p-3.5">物流单号</th>
-                  <th className="p-3.5 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+                  </DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">订单流水号</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">顾客 ID</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">订单状态</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">实付金额</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">收货人 & 联系方式</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">配送收货地址</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-xs">物流单号</DenseTableHead>
+                  <DenseTableHead className="p-3.5 text-right text-xs">操作</DenseTableHead>
+                </DenseTableRow>
+              </DenseTableHeader>
+              <DenseTableBody>
                 {filteredOrders.map((o) => (
-                  <tr
+                  <DenseTableRow
                     key={o.order_id}
                     className={`hover:bg-slate-50/80 transition ${selectedOrderIds.includes(o.order_id) ? 'bg-blue-50/60' : ''}`}
                   >
-                    <td className="p-3.5">
-                      <input
-                        type="checkbox"
+                    <DenseTableCell className="p-3.5">
+                      <Checkbox
                         aria-label={`选择订单 ${o.order_id}`}
                         checked={selectedOrderIds.includes(o.order_id)}
-                        onChange={() => toggleOrderSelection(o.order_id)}
+                        onCheckedChange={() => toggleOrderSelection(o.order_id)}
                       />
-                    </td>
-                    <td className="p-3.5 font-semibold text-slate-900 font-mono">{o.order_id}</td>
-                    <td className="p-3.5 text-slate-500">{o.customer_id}</td>
-                    <td className="p-3.5">
+                    </DenseTableCell>
+                    <DenseTableCell className="p-3.5 font-semibold text-slate-900 font-mono">
+                      {o.order_id}
+                    </DenseTableCell>
+                    <DenseTableCell className="p-3.5 text-slate-500">{o.customer_id}</DenseTableCell>
+                    <DenseTableCell className="p-3.5">
                       <Badge
                         variant="outline"
                         className={
@@ -175,18 +185,20 @@ export function OrdersTab() {
                         {o.status === 'DELIVERED' && '已签收'}
                         {!['PAID', 'SHIPPED', 'REFUNDED', 'DELIVERED'].includes(o.status) && o.status}
                       </Badge>
-                    </td>
-                    <td className="p-3.5 font-bold text-slate-900">¥{Number(o.total_amount).toFixed(2)}</td>
-                    <td className="p-3.5">
+                    </DenseTableCell>
+                    <DenseTableCell className="p-3.5 font-bold text-slate-900">
+                      ¥{Number(o.total_amount).toFixed(2)}
+                    </DenseTableCell>
+                    <DenseTableCell className="p-3.5">
                       <div className="font-medium text-slate-800">{o.shipping_address?.recipientName || '张伟'}</div>
                       <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '13800138000'}</div>
-                    </td>
-                    <td className="p-3.5 max-w-xs">
+                    </DenseTableCell>
+                    <DenseTableCell className="p-3.5 max-w-xs">
                       <span className="text-slate-800 line-clamp-2" title={o.shipping_address?.fullAddress}>
                         {o.shipping_address?.fullAddress}
                       </span>
-                    </td>
-                    <td className="p-3.5">
+                    </DenseTableCell>
+                    <DenseTableCell className="p-3.5">
                       {o.tracking_info ? (
                         <span className="text-blue-600 font-mono text-[11px]">
                           {o.tracking_info.carrier} {o.tracking_info.trackingNumber}
@@ -194,8 +206,8 @@ export function OrdersTab() {
                       ) : (
                         <span className="text-slate-400 italic">未发货</span>
                       )}
-                    </td>
-                    <td className="p-3.5 text-right">
+                    </DenseTableCell>
+                    <DenseTableCell className="p-3.5 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <Button
                           type="button"
@@ -222,11 +234,11 @@ export function OrdersTab() {
                           </Button>
                         )}
                       </div>
-                    </td>
-                  </tr>
+                    </DenseTableCell>
+                  </DenseTableRow>
                 ))}
-              </tbody>
-            </table>
+              </DenseTableBody>
+            </DenseTable>
           </div>
         )}
       </div>

@@ -1,5 +1,13 @@
 import { FeedbackButtons, type FeedbackVerdict } from '@/components/FeedbackButtons';
 import { ResultCard } from '@/components/ResultCard';
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { type AskClarifyOption, type AskFrame, type AskRow } from '@/lib/analytics-frames';
 
 export type { AskFrame };
@@ -7,6 +15,7 @@ import { api } from '@/lib/api';
 import { getSelection, setSelectionKind } from '@/lib/page-context';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { Button } from 'ui';
 
 const ORDER_STATUS: Record<string, string> = {
   PAID: '待发货',
@@ -112,11 +121,12 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                 {f.event === 'clarify' && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {(f.data.options || []).map((o: AskClarifyOption, j: number) => (
-                      <button
+                      <Button
                         /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
                         key={j}
                         type="button"
-                        className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs"
+                        variant="outline"
+                        className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none"
                         onClick={() =>
                           onAsk(
                             f.data.clarifyKind === 'entity'
@@ -128,7 +138,7 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                         }
                       >
                         {o.label}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}
@@ -166,36 +176,37 @@ function CustomerOrdersCard({
       {rows.length === 0 ? (
         <div className="px-4 py-4 text-sm text-zinc-400">该客户名下暂无订单(诚实空)。</div>
       ) : (
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="border-b border-zinc-100 text-left text-zinc-400">
-              <th className="px-4 py-2 font-medium">订单号</th>
-              <th className="px-4 py-2 font-medium">状态</th>
-              <th className="px-4 py-2 font-medium">金额</th>
-              <th className="px-4 py-2 font-medium">下单时间</th>
-              <th className="px-4 py-2 font-medium" />
-            </tr>
-          </thead>
-          <tbody>
+        <DenseTable>
+          <DenseTableHeader>
+            <DenseTableRow className="border-b border-zinc-100 hover:bg-transparent">
+              <DenseTableHead>订单号</DenseTableHead>
+              <DenseTableHead>状态</DenseTableHead>
+              <DenseTableHead>金额</DenseTableHead>
+              <DenseTableHead>下单时间</DenseTableHead>
+              <DenseTableHead />
+            </DenseTableRow>
+          </DenseTableHeader>
+          <DenseTableBody>
             {rows.map((r, k) => (
-              <tr key={orderCell(r.order_id) || k} className="border-b border-zinc-50">
-                <td className="px-4 py-2 font-mono">{orderCell(r.order_id)}</td>
-                <td className="px-4 py-2">{ORDER_STATUS[orderCell(r.status)] || orderCell(r.status)}</td>
-                <td className="px-4 py-2">¥{formatAmount(r.total_amount)}</td>
-                <td className="px-4 py-2 text-zinc-500">{orderCell(r.created_at)}</td>
-                <td className="px-4 py-2 text-right">
-                  <button
+              <DenseTableRow key={orderCell(r.order_id) || k}>
+                <DenseTableCell className="font-mono">{orderCell(r.order_id)}</DenseTableCell>
+                <DenseTableCell>{ORDER_STATUS[orderCell(r.status)] || orderCell(r.status)}</DenseTableCell>
+                <DenseTableCell>¥{formatAmount(r.total_amount)}</DenseTableCell>
+                <DenseTableCell className="text-zinc-500">{orderCell(r.created_at)}</DenseTableCell>
+                <DenseTableCell className="text-right">
+                  <Button
                     type="button"
-                    className="cursor-pointer text-xs text-blue-600 hover:text-blue-700"
+                    variant="link"
+                    className="h-auto cursor-pointer p-0 text-xs font-normal text-blue-600 hover:text-blue-700"
                     onClick={() => onJump(orderCell(r.order_id))}
                   >
                     在订单中查看
-                  </button>
-                </td>
-              </tr>
+                  </Button>
+                </DenseTableCell>
+              </DenseTableRow>
             ))}
-          </tbody>
-        </table>
+          </DenseTableBody>
+        </DenseTable>
       )}
       <div className="border-t border-zinc-100 px-4 py-1.5 text-[11px] text-zinc-400">口径:{caliber}</div>
     </div>

@@ -20,3 +20,12 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
 }
+
+// Radix Select 开弹层依赖 pointer capture 与滚动定位,jsdom(30.x)缺这三者
+// (PointerEvent 构造器原生已有);统一在此补桩,配套 helper 见 ./radix-select.ts
+if (typeof window !== 'undefined') {
+  const proto = window.HTMLElement.prototype as unknown as Record<string, unknown>;
+  if (!proto.hasPointerCapture) proto.hasPointerCapture = () => false;
+  if (!proto.releasePointerCapture) proto.releasePointerCapture = () => {};
+  if (!proto.scrollIntoView) proto.scrollIntoView = () => {};
+}

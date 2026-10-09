@@ -85,6 +85,11 @@ export function rankingPoints(data: AskFrameData): Array<{ label: string; value:
   return points.slice(0, 10);
 }
 
+// 注:本组件内 3 张原生 <table> 为【豁免】—— shadcn 迁移裁决(2026-10-09):
+// ① 四处共用渲染缝(悬浮面板/analytics 全屏/看板/报告),改密度会同时改四个载体;
+// ② 卡片内 px-3 py-1.5 / 12px 是容器受限下的刻意紧凑;
+// ③ ResultCard.test 钉死 div.overflow-x-auto 滚动包裹(ui Table 包裹层类名不同)。
+// 如需迁移须连测试与四处载体冒烟一起做,勿单独替换标签。
 export function ResultCard({ data }: { data: AskFrameData }) {
   if (data.chart === 'line' && Array.isArray(data.rows) && data.rows.length < 2) {
     // 用户点名折线但数据点不足:诚实说明,表格呈现(不静默降级)
@@ -210,7 +215,7 @@ export function ResultCard({ data }: { data: AskFrameData }) {
       </div>
       <div className="border-t border-zinc-100 px-3 py-1.5 text-[11px] text-zinc-400">口径:{card.caliber}</div>
       <GeneratedSqlFold sql={data.generatedSql} />
-        <NarrativeBlock narrative={data.narrative} />
+      <NarrativeBlock narrative={data.narrative} />
     </div>
   );
 }

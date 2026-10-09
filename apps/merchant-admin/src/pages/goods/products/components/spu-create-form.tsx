@@ -1,6 +1,6 @@
 import { api } from '@/lib/api';
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 
 export const CATEGORIES = [
   '户外机能',
@@ -42,31 +42,32 @@ export function SpuCreateForm({ msg, onMsg, onCreated }: Props) {
     <div className="rounded-xl border border-zinc-200 bg-white p-4">
       <div className="text-sm font-medium">新增商品</div>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        <input
-          className="w-56 rounded-lg border border-zinc-300 px-3 py-2"
+        <Input
+          className="h-auto w-56 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
           placeholder="商品标题"
           value={form.title}
           onChange={(e) => setForm({ ...form, title: e.target.value })}
         />
-        <select
-          className="rounded-lg border border-zinc-300 px-3 py-2"
-          value={form.category}
-          onChange={(e) => setForm({ ...form, category: e.target.value })}
-        >
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        <input
-          className="w-28 rounded-lg border border-zinc-300 px-3 py-2"
+        <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+          <SelectTrigger aria-label="类目" className="h-auto w-32 rounded-lg border-zinc-300 px-3 py-2 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CATEGORIES.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          className="h-auto w-28 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
           placeholder="售价 ¥"
           value={form.price}
           onChange={(e) => setForm({ ...form, price: e.target.value })}
         />
-        <input
-          className="w-24 rounded-lg border border-zinc-300 px-3 py-2"
+        <Input
+          className="h-auto w-24 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
           placeholder="库存"
           value={form.stock}
           onChange={(e) => setForm({ ...form, stock: e.target.value })}

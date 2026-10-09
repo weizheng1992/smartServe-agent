@@ -1,8 +1,19 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { type Spu, api } from '@/lib/api';
 import { setSelectionKind } from '@/lib/page-context';
 import { Fragment, useEffect, useState } from 'react';
-import { Button } from 'ui';
+import { Button, Checkbox, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 import { SkuSubTable } from './sku-subtable';
+
+/** Radix SelectItem 禁空串:负责人「未分配」的哨兵值(onValueChange 单点映射回 '')。 */
+const UNSET = '__unset__';
 
 interface Props {
   spus: Spu[];
@@ -70,90 +81,96 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-zinc-100 text-left text-zinc-400">
-            <th className="w-10 px-3 py-2" />
-            <th className="px-4 py-2 font-medium">商品</th>
-            <th className="px-4 py-2 font-medium">品类</th>
-            <th className="px-4 py-2 font-medium">售价</th>
-            <th className="px-4 py-2 font-medium">库存</th>
-            <th className="px-4 py-2 font-medium">负责人</th>
-            <th className="px-4 py-2 font-medium">状态</th>
-            <th className="px-4 py-2 font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      <DenseTable>
+        <DenseTableHeader>
+          <DenseTableRow className="border-b border-zinc-100 hover:bg-transparent">
+            <DenseTableHead className="w-10 px-3" />
+            <DenseTableHead>商品</DenseTableHead>
+            <DenseTableHead>品类</DenseTableHead>
+            <DenseTableHead>售价</DenseTableHead>
+            <DenseTableHead>库存</DenseTableHead>
+            <DenseTableHead>负责人</DenseTableHead>
+            <DenseTableHead>状态</DenseTableHead>
+            <DenseTableHead>操作</DenseTableHead>
+          </DenseTableRow>
+        </DenseTableHeader>
+        <DenseTableBody>
           {spus.map((s) => (
             <Fragment key={s.id}>
-              <tr className="border-b border-zinc-50">
-                <td className="px-3 py-2">
-                  <input
-                    type="checkbox"
+              <DenseTableRow>
+                <DenseTableCell className="px-3">
+                  <Checkbox
                     aria-label={`选择商品 ${s.title}`}
                     checked={selected.includes(s.spu_code)}
-                    onChange={() => toggleSelect(s.spu_code)}
+                    onCheckedChange={() => toggleSelect(s.spu_code)}
                   />
-                </td>
-                <td className="px-4 py-2">
+                </DenseTableCell>
+                <DenseTableCell>
                   {editing === s.id ? (
-                    <input
-                      className="w-64 rounded border border-zinc-300 px-2 py-1"
+                    <Input
+                      className="h-auto w-64 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
                       value={edit.title}
                       onChange={(e) => setEdit({ ...edit, title: e.target.value })}
                     />
                   ) : (
                     s.title
                   )}
-                </td>
-                <td className="px-4 py-2">{s.category}</td>
-                <td className="px-4 py-2">
+                </DenseTableCell>
+                <DenseTableCell>{s.category}</DenseTableCell>
+                <DenseTableCell>
                   {editing === s.id ? (
-                    <input
-                      className="w-20 rounded border border-zinc-300 px-2 py-1"
+                    <Input
+                      className="h-auto w-20 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
                       value={edit.price}
                       onChange={(e) => setEdit({ ...edit, price: e.target.value })}
                     />
                   ) : (
                     `¥${s.price}`
                   )}
-                </td>
-                <td className="px-4 py-2">
+                </DenseTableCell>
+                <DenseTableCell>
                   {editing === s.id ? (
-                    <input
-                      className="w-16 rounded border border-zinc-300 px-2 py-1"
+                    <Input
+                      className="h-auto w-16 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
                       value={edit.stock}
                       onChange={(e) => setEdit({ ...edit, stock: e.target.value })}
                     />
                   ) : (
                     s.stock
                   )}
-                </td>
-                <td className="px-4 py-2 text-xs">
+                </DenseTableCell>
+                <DenseTableCell className="text-xs">
                   {editing === s.id ? (
-                    <select
-                      aria-label={`负责人:${s.title}`}
-                      className="rounded border border-zinc-300 px-2 py-1"
-                      value={edit.ownerId}
-                      onChange={(e) => setEdit({ ...edit, ownerId: e.target.value })}
+                    <Select
+                      value={edit.ownerId || UNSET}
+                      onValueChange={(v) => setEdit({ ...edit, ownerId: v === UNSET ? '' : v })}
                     >
-                      <option value="">未分配</option>
-                      {staffOptions.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
+                      {/* Radix SelectItem 禁空串:真·可选空值走 __unset__ 哨兵,提交前已映射回 '' */}
+                      <SelectTrigger
+                        aria-label={`负责人:${s.title}`}
+                        className="h-auto w-44 rounded border-zinc-300 px-2 py-1 text-xs"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={UNSET}>未分配</SelectItem>
+                        {staffOptions.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   ) : (
                     (staffLabel(s.ownerId) ?? <span className="text-zinc-400">未分配</span>)
                   )}
-                </td>
-                <td className="px-4 py-2">
+                </DenseTableCell>
+                <DenseTableCell>
                   <span className={s.status === 'ON_SALE' ? 'text-emerald-600' : 'text-zinc-400'}>
                     {s.status === 'ON_SALE' ? '在售' : '下架'}
                   </span>
-                </td>
-                <td className="px-4 py-2">
+                </DenseTableCell>
+                <DenseTableCell>
                   {editing === s.id ? (
                     <Button size="sm" onClick={() => void saveEdit(s.id)}>
                       保存
@@ -186,19 +203,19 @@ export function SpuTable({ spus, onMsg, onChanged }: Props) {
                       </Button>
                     </div>
                   )}
-                </td>
-              </tr>
+                </DenseTableCell>
+              </DenseTableRow>
               {openSkus === s.id && (
-                <tr className="bg-zinc-50/60">
-                  <td colSpan={8} className="px-6 py-3">
+                <DenseTableRow className="bg-zinc-50/60">
+                  <DenseTableCell colSpan={8} className="px-6 py-3">
                     <SkuSubTable spu={s} onMsg={onMsg} />
-                  </td>
-                </tr>
+                  </DenseTableCell>
+                </DenseTableRow>
               )}
             </Fragment>
           ))}
-        </tbody>
-      </table>
+        </DenseTableBody>
+      </DenseTable>
     </div>
   );
 }

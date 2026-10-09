@@ -26,7 +26,8 @@ const tree: MenuNode[] = [
   },
 ];
 
-const findBox = (name: RegExp) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
+// ui Checkbox(Radix)是 role=checkbox 的 button,勾选态在 aria-checked 而非 .checked
+const findBox = (name: RegExp) => screen.getByRole('checkbox', { name });
 
 describe('PermTree', () => {
   it('渲染三级节点,按钮节点带权限点徽标', () => {
@@ -48,7 +49,7 @@ describe('PermTree', () => {
   it('受控勾选态下取消按钮权限点 → 仅该点从集合移除', () => {
     const onChange = vi.fn();
     render(<PermTree nodes={tree} selected={new Set(['d1', 'm1', 'b1'])} onChange={onChange} />);
-    expect(findBox(/prod:edit/).checked).toBe(true);
+    expect(findBox(/prod:edit/)).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(findBox(/prod:edit/));
     const sel = onChange.mock.calls[0][0] as Set<string>;
     expect(sel.has('b1')).toBe(false);

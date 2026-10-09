@@ -1,7 +1,15 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { type Customer, api } from '@/lib/api';
 import { setSelectionKind } from '@/lib/page-context';
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Checkbox, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 
 export type { Customer };
 
@@ -53,68 +61,71 @@ export function CustomerTable({ customers, onMsg, onChanged, onDetail }: Props) 
           已勾选 {selected.length} 位客户 —— 打开右下角助手即可带着勾选提问(如「他们最近下单是什么时候」)
         </div>
       )}
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-zinc-100 text-left text-zinc-400">
-            <th className="w-10 px-3 py-2" />
-            <th className="px-4 py-2 font-medium">客户</th>
-            <th className="px-4 py-2 font-medium">电话</th>
-            <th className="px-4 py-2 font-medium">累计消费</th>
-            <th className="px-4 py-2 font-medium">订单数</th>
-            <th className="px-4 py-2 font-medium">会员级(改即存)</th>
-            <th className="px-4 py-2 font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      <DenseTable>
+        <DenseTableHeader>
+          <DenseTableRow className="border-b border-zinc-100 hover:bg-transparent">
+            <DenseTableHead className="w-10 px-3" />
+            <DenseTableHead>客户</DenseTableHead>
+            <DenseTableHead>电话</DenseTableHead>
+            <DenseTableHead>累计消费</DenseTableHead>
+            <DenseTableHead>订单数</DenseTableHead>
+            <DenseTableHead>会员级(改即存)</DenseTableHead>
+            <DenseTableHead>操作</DenseTableHead>
+          </DenseTableRow>
+        </DenseTableHeader>
+        <DenseTableBody>
           {customers.length === 0 && (
-            <tr>
-              <td colSpan={7} className="px-4 py-6 text-center text-xs text-zinc-400">
+            <DenseTableRow>
+              <DenseTableCell colSpan={7} className="py-6 text-center text-xs text-zinc-400">
                 暂无客户(诚实空)
-              </td>
-            </tr>
+              </DenseTableCell>
+            </DenseTableRow>
           )}
           {customers.map((c) => (
-            <tr key={c.customer_id} className="border-b border-zinc-50">
-              <td className="px-3 py-2">
-                <input
-                  type="checkbox"
+            <DenseTableRow key={c.customer_id}>
+              <DenseTableCell className="px-3">
+                <Checkbox
                   aria-label={`选择客户 ${c.name}`}
                   checked={selected.includes(c.customer_id)}
-                  onChange={() => toggle(c.customer_id)}
+                  onCheckedChange={() => toggle(c.customer_id)}
                 />
-              </td>
-              <td className="px-4 py-2">
+              </DenseTableCell>
+              <DenseTableCell>
                 {c.name}
                 <span className="ml-2 text-[11px] text-zinc-400">{c.customer_id}</span>
-              </td>
-              <td className="px-4 py-2">{c.phone}</td>
-              <td className="px-4 py-2">¥{c.total_spent.toLocaleString()}</td>
-              <td className="px-4 py-2">{c.order_count}</td>
-              <td className="px-4 py-2">
-                <select
-                  className="rounded-lg border border-zinc-300 px-2 py-1 text-xs"
-                  defaultValue={c.member_level}
-                  onChange={(e) => void setLevel(c.customer_id, e.target.value)}
-                >
-                  {LEVELS.map((lv) => (
-                    <option key={lv} value={lv}>
-                      {lv}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td className="px-4 py-2">
+              </DenseTableCell>
+              <DenseTableCell>{c.phone}</DenseTableCell>
+              <DenseTableCell>¥{c.total_spent.toLocaleString()}</DenseTableCell>
+              <DenseTableCell>{c.order_count}</DenseTableCell>
+              <DenseTableCell>
+                <Select defaultValue={c.member_level} onValueChange={(v) => void setLevel(c.customer_id, v)}>
+                  <SelectTrigger
+                    aria-label={`会员级:${c.name}`}
+                    className="h-auto w-24 rounded-lg border-zinc-300 px-2 py-1 text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LEVELS.map((lv) => (
+                      <SelectItem key={lv} value={lv}>
+                        {lv}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </DenseTableCell>
+              <DenseTableCell>
                 <Button size="sm" variant="ghost" onClick={() => onDetail(c)}>
                   详情
                 </Button>
                 <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void remove(c.customer_id)}>
                   删除
                 </Button>
-              </td>
-            </tr>
+              </DenseTableCell>
+            </DenseTableRow>
           ))}
-        </tbody>
-      </table>
+        </DenseTableBody>
+      </DenseTable>
     </div>
   );
 }

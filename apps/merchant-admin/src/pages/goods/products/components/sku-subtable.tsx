@@ -1,6 +1,14 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { type Sku, type Spu, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 
 interface Props {
   spu: Spu;
@@ -48,22 +56,23 @@ export function SkuSubTable({ spu, onMsg }: Props) {
   return (
     <div>
       <div className="text-[11px] font-semibold text-zinc-500 mb-2">SKU 明细 · {spu.spu_code}</div>
-      <table className="w-full text-[12px]">
-        <thead>
-          <tr className="text-left text-zinc-400">
-            <th className="py-1 pr-4 font-medium">SKU 编码</th>
-            <th className="py-1 pr-4 font-medium">价格</th>
-            <th className="py-1 pr-4 font-medium">库存</th>
-            <th className="py-1 font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      {/* 嵌套在 SPU 展开行内:!overflow-visible 关闭包裹层滚动,密度沿用外层极紧凑风 */}
+      <DenseTable className="!overflow-visible text-[12px]">
+        <DenseTableHeader>
+          <DenseTableRow className="hover:bg-transparent">
+            <DenseTableHead className="py-1 pr-4 text-[12px] text-zinc-400">SKU 编码</DenseTableHead>
+            <DenseTableHead className="py-1 pr-4 text-[12px] text-zinc-400">价格</DenseTableHead>
+            <DenseTableHead className="py-1 pr-4 text-[12px] text-zinc-400">库存</DenseTableHead>
+            <DenseTableHead className="py-1 text-[12px] text-zinc-400">操作</DenseTableHead>
+          </DenseTableRow>
+        </DenseTableHeader>
+        <DenseTableBody>
           {skus.map((k) => (
-            <tr key={k.id}>
-              <td className="py-1 pr-4 font-mono">{k.sku_code}</td>
-              <td className="py-1 pr-4">¥{k.price}</td>
-              <td className="py-1 pr-4">{k.stock}</td>
-              <td className="py-1">
+            <DenseTableRow key={k.id} className="border-b-0">
+              <DenseTableCell className="py-1 pr-4 pl-0 font-mono">{k.sku_code}</DenseTableCell>
+              <DenseTableCell className="py-1 pr-4 pl-0">¥{k.price}</DenseTableCell>
+              <DenseTableCell className="py-1 pr-4 pl-0">{k.stock}</DenseTableCell>
+              <DenseTableCell className="py-1 pl-0">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -74,22 +83,22 @@ export function SkuSubTable({ spu, onMsg }: Props) {
                 <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void deleteSku(k.id)}>
                   删除
                 </Button>
-              </td>
-            </tr>
+              </DenseTableCell>
+            </DenseTableRow>
           ))}
-        </tbody>
-      </table>
+        </DenseTableBody>
+      </DenseTable>
       {skuEdit && (
         <div className="mt-2 flex items-center gap-2 text-xs">
           <span className="text-zinc-500">改价/库存:</span>
-          <input
-            className="w-24 rounded border border-zinc-300 px-2 py-1"
+          <Input
+            className="h-auto w-24 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
             placeholder="价格"
             value={skuEdit.price}
             onChange={(e) => setSkuEdit({ ...skuEdit, price: e.target.value })}
           />
-          <input
-            className="w-20 rounded border border-zinc-300 px-2 py-1"
+          <Input
+            className="h-auto w-20 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
             placeholder="库存"
             value={skuEdit.stock}
             onChange={(e) => setSkuEdit({ ...skuEdit, stock: e.target.value })}
@@ -100,20 +109,20 @@ export function SkuSubTable({ spu, onMsg }: Props) {
         </div>
       )}
       <div className="mt-2 flex items-center gap-2 text-xs">
-        <input
-          className="w-32 rounded border border-zinc-300 px-2 py-1"
+        <Input
+          className="h-auto w-32 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
           placeholder="新 SKU 标题"
           value={newSku.skuTitle}
           onChange={(e) => setNewSku({ ...newSku, skuTitle: e.target.value })}
         />
-        <input
-          className="w-24 rounded border border-zinc-300 px-2 py-1"
+        <Input
+          className="h-auto w-24 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
           placeholder="价格"
           value={newSku.price}
           onChange={(e) => setNewSku({ ...newSku, price: e.target.value })}
         />
-        <input
-          className="w-20 rounded border border-zinc-300 px-2 py-1"
+        <Input
+          className="h-auto w-20 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
           placeholder="库存"
           value={newSku.stock}
           onChange={(e) => setNewSku({ ...newSku, stock: e.target.value })}

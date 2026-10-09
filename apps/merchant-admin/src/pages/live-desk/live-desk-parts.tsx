@@ -1,5 +1,7 @@
 // 坐席台纯展示件(live-desk-rework P2):状态条与列表行不携带 socket/请求
 // 副作用,便于 vitest 就近单测(排序/认领/状态条验收锚点)。
+import { Button } from 'ui';
+
 import type { DeskConversation } from './live-desk-model';
 import {
   DESK_STATE_LABEL,
@@ -90,12 +92,13 @@ export function ConversationRow({
   const state = deriveConversationState(conversation, myEmail);
   const unread = conversation.unreadCount || 0;
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       data-testid="conversation-row"
       onClick={() => onOpen(conversation.threadId)}
-      className={`flex w-full cursor-pointer items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors ${
-        selected ? 'border-zinc-900 bg-zinc-50 shadow-sm' : 'border-transparent hover:bg-zinc-50'
+      className={`flex w-full cursor-pointer items-center justify-start gap-2.5 rounded-xl border px-2.5 py-2 text-left font-normal ${
+        selected ? 'border-zinc-900 bg-zinc-50 shadow-sm hover:bg-zinc-50' : 'border-transparent hover:bg-zinc-50'
       }`}
     >
       <AvatarCircle label={conversation.userId || conversation.threadId} state={state} />
@@ -139,6 +142,6 @@ export function ConversationRow({
           )}
         </span>
       </span>
-    </button>
+    </Button>
   );
 }

@@ -1,3 +1,11 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { type MenuNode, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
@@ -45,32 +53,32 @@ export default function RolesPage() {
           <span>角色列表</span>
           {!boss && <span className="text-[11px] text-zinc-400">需 role:assign 权限点(老板/管理员)</span>}
         </div>
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="border-b border-zinc-100 text-left text-zinc-400">
-              <th className="px-4 py-2 font-medium">角色</th>
-              <th className="px-4 py-2 font-medium">菜单/权限点数</th>
-              <th className="px-4 py-2 font-medium">员工数</th>
-              <th className="px-4 py-2 font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody>
+        <DenseTable>
+          <DenseTableHeader>
+            <DenseTableRow className="border-b border-zinc-100 hover:bg-transparent">
+              <DenseTableHead>角色</DenseTableHead>
+              <DenseTableHead>菜单/权限点数</DenseTableHead>
+              <DenseTableHead>员工数</DenseTableHead>
+              <DenseTableHead>操作</DenseTableHead>
+            </DenseTableRow>
+          </DenseTableHeader>
+          <DenseTableBody>
             {roles.map((r) => (
-              <tr key={r.role} className="border-b border-zinc-50">
-                <td className="px-4 py-2">{r.role}</td>
-                <td className="px-4 py-2">{r.menuCount}</td>
-                <td className="px-4 py-2">{r.staffCount}</td>
-                <td className="px-4 py-2">
+              <DenseTableRow key={r.role}>
+                <DenseTableCell>{r.role}</DenseTableCell>
+                <DenseTableCell>{r.menuCount}</DenseTableCell>
+                <DenseTableCell>{r.staffCount}</DenseTableCell>
+                <DenseTableCell>
                   {boss && (
                     <Button size="sm" variant="ghost" onClick={() => void openAssign(r.role)}>
                       {r.role === 'finance_owner' ? '查看/分配(系统菜单强制保留)' : '分配权限'}
                     </Button>
                   )}
-                </td>
-              </tr>
+                </DenseTableCell>
+              </DenseTableRow>
             ))}
-          </tbody>
-        </table>
+          </DenseTableBody>
+        </DenseTable>
       </div>
 
       {assigning && (

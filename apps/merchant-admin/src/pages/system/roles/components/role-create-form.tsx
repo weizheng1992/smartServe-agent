@@ -1,6 +1,6 @@
 import { type MenuNode, api } from '@/lib/api';
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 import { PermTree } from './perm-tree';
 
 interface Props {
@@ -35,8 +35,8 @@ export function RoleCreateForm({ tree, onMsg, onCreated }: Props) {
       </div>
       <div className="mt-3 flex flex-wrap items-start gap-3 text-xs">
         <div className="space-y-2">
-          <input
-            className="w-44 rounded-lg border border-zinc-300 px-3 py-2"
+          <Input
+            className="h-auto w-44 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
             placeholder="角色标识(如 custom_ops)"
             value={newRole}
             onChange={(e) => setNewRole(e.target.value)}

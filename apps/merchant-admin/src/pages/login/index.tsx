@@ -1,7 +1,7 @@
 import { api, setSession } from '@/lib/api';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 
 // 真实登录(POST /api/auth/login,bcrypt+JWT);0013 起员工经 staff_members
 // 凭证登录,JWT 即身份 —— 顶栏切换只对老板开放(服务端换签 token)。
@@ -36,14 +36,14 @@ export default function LoginPage({ onLogin }: { onLogin: (email: string) => voi
           agent-all-dev
         </div>
         <div className="mt-6 space-y-3">
-          <input
-            className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
+          <Input
+            className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2.5 text-sm shadow-none focus-visible:border-zinc-900 focus-visible:ring-0"
             placeholder="邮箱"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
-          <input
-            className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
+          <Input
+            className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2.5 text-sm shadow-none focus-visible:border-zinc-900 focus-visible:ring-0"
             type="password"
             placeholder="密码"
             value={password}

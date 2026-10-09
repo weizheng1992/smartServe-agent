@@ -35,12 +35,17 @@ test.describe('「该找谁」责任人路由', () => {
     await expect(nav.getByText('责任人维护', { exact: true })).toBeVisible();
     await nav.getByText('责任人维护', { exact: true }).click();
     await expect(page.getByText(/已登记映射\(\d+\)/)).toBeVisible({ timeout: 15_000 });
-    // 品类闭集来自语义注册表(下拉含 衬衫 —— 种子未灌品类,枚举照列)
-    const valueSelect = page.getByLabel('维度值');
-    await expect(valueSelect.locator('option', { hasText: '衬衫' })).toHaveCount(1);
+    // 品类闭集来自语义注册表(下拉含 衬衫 —— 种子未灌品类,枚举照列)。
+    // ui Select(Radix):开层后 option 挂 body 门户,断言后 Esc 收层。
+    await page.getByLabel('维度值').click();
+    await expect(page.getByRole('option', { name: '衬衫' })).toHaveCount(1);
+    await page.keyboard.press('Escape');
     // 指标闭集切换
-    await page.getByLabel('映射类型').selectOption('metric');
-    await expect(valueSelect.locator('option', { hasText: '退款率' })).toHaveCount(1);
+    await page.getByLabel('映射类型').click();
+    await page.getByRole('option', { name: '指标', exact: true }).click();
+    await page.getByLabel('维度值').click();
+    await expect(page.getByRole('option', { name: /退款率/ })).toHaveCount(1);
+    await page.keyboard.press('Escape');
   });
 
   test('找谁问句出 owner 卡(确定性快轨,零 LLM)', async ({ page }) => {
@@ -91,10 +96,13 @@ test.describe('「该找谁」责任人路由', () => {
   test('维护页改派与撤销(改后恢复种子态)', async ({ page }) => {
     await page.goto('/owner-mappings');
     await expect(page.getByText(/已登记映射\(\d+\)/)).toBeVisible({ timeout: 15_000 });
-    // 登记衬衫 → 陈锋(种子原为赵磊)
-    await page.getByLabel('映射类型').selectOption('category');
-    await page.getByLabel('维度值').selectOption('衬衫');
-    await page.getByLabel('负责人').selectOption('staff_sales_lead');
+    // 登记衬衫 → 陈锋(种子原为赵磊)。Radix Select:click trigger → click option 文本
+    await page.getByLabel('映射类型').click();
+    await page.getByRole('option', { name: '品类', exact: true }).click();
+    await page.getByLabel('维度值').click();
+    await page.getByRole('option', { name: '衬衫', exact: true }).click();
+    await page.getByLabel('负责人').click();
+    await page.getByRole('option', { name: /陈锋/ }).click();
     await page.getByRole('button', { name: '登记' }).click();
     await expect(page.getByText('已登记')).toBeVisible({ timeout: 10_000 });
     // 表格行反映改派
@@ -113,7 +121,8 @@ test.describe('「该找谁」责任人路由', () => {
     await page.goto('/staff');
     await expect(page.getByText('陈锋')).toBeVisible({ timeout: 15_000 });
     const row = page.locator('tr', { hasText: '陈锋' });
-    await expect(row.getByLabel('部门:陈锋')).toHaveValue('销售部');
-    await expect(row.getByLabel('职级:陈锋')).toHaveValue('主管');
+    // Radix Select 的 trigger 是 button(无 value),回显走 trigger 文本
+    await expect(row.getByLabel('部门:陈锋')).toHaveText('销售部');
+    await expect(row.getByLabel('职级:陈锋')).toHaveText('主管');
   });
 });

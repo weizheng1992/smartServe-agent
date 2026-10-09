@@ -124,9 +124,14 @@ export default function BoardPage() {
                 <div className="text-sm font-medium">{pin.question}</div>
                 <div className="flex items-center gap-2 text-[11px] text-zinc-400">
                   {st.at && <span>刷新于 {st.at}</span>}
-                  <button type="button" className="hover:text-zinc-900" onClick={() => removePin(pin.id)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-auto px-0.5 py-0 text-[11px] font-normal text-zinc-400 hover:text-zinc-900"
+                    onClick={() => removePin(pin.id)}
+                  >
                     移除
-                  </button>
+                  </Button>
                 </div>
               </div>
               {st.error && <div className="text-xs text-red-500">刷新失败:{st.error}</div>}

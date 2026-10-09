@@ -47,14 +47,11 @@ test.describe('data agent 全链路', () => {
     const nav = page.locator('aside nav');
     await expect(nav.getByText('数据分析', { exact: true })).toBeVisible();
     await expect(nav.getByText('我的报告', { exact: true })).toBeVisible();
-    // 切换到仓储 → 菜单收敛(优惠活动消失)
-    await page
-      .locator('header select')
-      .selectOption({ label: /仓储/.test('') ? '' : undefined } as never)
-      .catch(() => {});
-    const options = page.locator('header select option');
-    const texts = (await options.allTextContents()).join('|');
-    expect(texts).toContain('仓储');
+    // 切换到仓储 → 菜单收敛(优惠活动消失)。ui Select(Radix):顶栏身份切换
+    // 已挂 aria-label;原「软断言枚举 option」升级为真实切换 + 收敛断言。
+    await page.getByLabel('身份切换').click();
+    await page.getByRole('option', { name: /仓储/ }).click();
+    await expect(nav.getByText('优惠活动', { exact: true })).toBeHidden({ timeout: 15_000 });
   });
 
   for (const capsule of CAPSULES) {
@@ -93,10 +90,12 @@ test.describe('data agent 全链路', () => {
   test('优惠活动创建与停用(20 号)', async ({ page }) => {
     await page.goto('/promotions');
     const name = `E2E 满减 ${Date.now()}`;
-    await page.getByPlaceholder('活动名称').fill(name);
-    await page.getByPlaceholder('门槛 ¥').fill('300');
-    await page.getByPlaceholder(/优惠 ¥/).fill('30');
-    await page.getByRole('button', { name: '创建' }).click();
+    // 新建走 PromoFormDialog 弹窗(页头「+ 新建活动」进入)
+    await page.getByRole('button', { name: '新建活动' }).click();
+    await page.getByPlaceholder('如:周年庆满减').fill(name);
+    await page.getByPlaceholder('如 300(订单满此金额生效)').fill('300');
+    await page.getByPlaceholder('如 40').fill('30');
+    await page.getByRole('button', { name: '创建', exact: true }).click();
     await expect(page.locator('td', { hasText: name })).toBeVisible({ timeout: 15_000 });
     const row = page.locator('tr', { hasText: name });
     await row.getByRole('button', { name: '停用' }).click();

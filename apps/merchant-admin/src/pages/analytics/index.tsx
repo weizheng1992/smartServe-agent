@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from 'ui';
 import { AskInputBar } from './components/ask-input-bar';
 import { type AskFrame, AskTranscript } from './components/ask-transcript';
 
@@ -57,14 +58,15 @@ export default function AnalyticsPage({ role }: { role: string }) {
       <div className="pb-1 text-[11px] text-zinc-400">建议问法:</div>
       <div className="flex flex-wrap gap-2 pb-4">
         {CAPSULES.map((c) => (
-          <button
+          <Button
             key={c}
             type="button"
-            className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs hover:border-zinc-900"
+            variant="outline"
+            className="rounded-full border-zinc-200 bg-white px-3 py-1.5 text-xs font-normal shadow-none hover:border-zinc-900"
             onClick={() => void ask(c)}
           >
             {c}
-          </button>
+          </Button>
         ))}
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto">

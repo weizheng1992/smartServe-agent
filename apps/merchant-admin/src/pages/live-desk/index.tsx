@@ -5,7 +5,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 // 待批工单批驳卡)/ 右坐席上下文栏(五项,spec §2.4)+ 坐席在线态。
 // 旧 /live-desk tab(OrderWorkbench)并存不动作回退面;本页是 spec §3 P2-P4
 // 的正式坐席工作台。e2e/vitest 锚点(testid 与关键文本)一概保留。
-import { Button } from 'ui';
+import { Button, Input, Switch } from 'ui';
 import {
   ContextCustomer,
   ContextNotes,
@@ -259,24 +259,27 @@ export default function LiveDeskPage() {
           <div className="border-b border-zinc-100 p-3">
             <div className="flex gap-1">
               {TABS.map((t) => (
-                <button
+                <Button
                   key={t.key}
                   type="button"
+                  variant="ghost"
                   data-testid={`desk-tab-${t.key}`}
                   onClick={() => setTab(t.key)}
-                  className={`cursor-pointer rounded-full px-2.5 py-1 text-[11px] transition-colors ${
-                    tab === t.key ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                  className={`h-auto cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-normal ${
+                    tab === t.key
+                      ? 'bg-zinc-900 text-white hover:bg-zinc-900 hover:text-white'
+                      : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 hover:text-zinc-600'
                   }`}
                 >
                   {t.label}
-                </button>
+                </Button>
               ))}
             </div>
-            <input
+            <Input
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               placeholder="搜索单号 / 用户 / 消息"
-              className="mt-2 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[12px] outline-none transition-colors focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-100"
+              className="mt-2 h-auto w-full rounded-lg border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[12px] shadow-none transition-colors focus-visible:border-zinc-300 focus-visible:ring-2 focus-visible:ring-zinc-100"
             />
           </div>
           <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
@@ -359,13 +362,13 @@ export default function LiveDeskPage() {
                   </div>
                   {rejectOpen && (
                     <div className="mt-2 flex gap-1.5">
-                      <input
+                      <Input
                         value={rejectReason}
                         onChange={(e) => setRejectReason(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && void doReview('reject')}
                         placeholder="驳回理由(可选)"
                         data-testid="desk-ticket-reason"
-                        className="flex-1 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-[12px] outline-none focus:border-zinc-400"
+                        className="h-auto flex-1 rounded-lg border-zinc-200 px-2.5 py-1.5 text-[12px] shadow-none focus-visible:border-zinc-400 focus-visible:ring-0"
                       />
                       <Button
                         variant="outline"
@@ -438,7 +441,7 @@ export default function LiveDeskPage() {
                 )}
                 {mineSelected ? (
                   <div className="flex gap-2">
-                    <input
+                    <Input
                       value={draft}
                       onChange={(e) => {
                         setDraft(e.target.value);
@@ -446,7 +449,7 @@ export default function LiveDeskPage() {
                       }}
                       onKeyDown={(e) => e.key === 'Enter' && void doSend()}
                       placeholder="回复顾客…"
-                      className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-[12px] outline-none transition-colors focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-100"
+                      className="flex-1 rounded-xl border-zinc-200 bg-zinc-50 px-3 py-2 text-[12px] shadow-none transition-colors focus-visible:border-zinc-300 focus-visible:ring-2 focus-visible:ring-zinc-100"
                     />
                     <Button className="h-9 px-4 text-[12px]" onClick={() => void doSend()}>
                       发送
@@ -548,20 +551,15 @@ export default function LiveDeskPage() {
                   </div>
                 ))}
               </div>
-              <label className="mt-3 flex cursor-pointer items-center justify-between border-t border-zinc-100 pt-2.5 text-[12px] text-zinc-600">
+              {/* 免打扰是开关语义,用 ui Switch(原 peer 滑钮自制件退役) */}
+              <div className="mt-3 flex cursor-pointer items-center justify-between border-t border-zinc-100 pt-2.5 text-[12px] text-zinc-600">
                 免打扰
-                <span className="relative inline-flex">
-                  <input
-                    type="checkbox"
-                    data-testid="desk-dnd-toggle"
-                    className="peer sr-only"
-                    checked={desk.dnd}
-                    onChange={(e) => void desk.toggleDnd(e.target.checked)}
-                  />
-                  <span className="h-5 w-9 rounded-full bg-zinc-200 transition-colors peer-checked:bg-emerald-500" />
-                  <span className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
-                </span>
-              </label>
+                <Switch
+                  data-testid="desk-dnd-toggle"
+                  checked={desk.dnd}
+                  onCheckedChange={(v) => void desk.toggleDnd(v === true)}
+                />
+              </div>
             </ContextSection>
           </div>
         </aside>

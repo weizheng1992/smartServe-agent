@@ -4,7 +4,7 @@ import type { DeskNoteItem, LiveDeskContext } from '@/lib/api';
 // 诚实纪律:弱关联未匹配照实呈现(spec 核实结论:聊天身份与商户客户
 // 编号现网无桥),严禁用 userId 伪装修配或编造空态数据。
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 
 /** PG TIMESTAMP naive isoformat(无 Z/时区)→ 本地短格式;Safari 不吃空格分隔。 */
 export function fmtTime(iso: string | null | undefined): string {
@@ -32,11 +32,12 @@ export function ContextSection({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="border-b border-zinc-100 last:border-b-0" data-testid={testId}>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full cursor-pointer items-center justify-between rounded-lg py-2 text-left transition-colors hover:bg-zinc-50"
+        className="flex w-full cursor-pointer items-center justify-between rounded-lg px-0 py-2 text-left font-normal hover:bg-zinc-50"
       >
         <span className="flex items-center gap-1.5 text-[12px] font-semibold text-zinc-700">
           {/* biome-ignore lint/a11y/noSvgWithoutTitle: 装饰性折叠指示箭头,开合态由 aria-expanded 表达 */}
@@ -55,7 +56,7 @@ export function ContextSection({
             <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] font-normal text-zinc-500">{badge}</span>
           )}
         </span>
-      </button>
+      </Button>
       {open && <div className="pb-2.5">{children}</div>}
     </div>
   );
@@ -183,13 +184,13 @@ export function ContextNotes({
   return (
     <div>
       <div className="flex gap-1.5">
-        <input
+        <Input
           value={draft}
           data-testid="ctx-note-input"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="内部备注,仅坐席可见…"
-          className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-2 py-1 text-[11px] outline-none focus:border-zinc-400"
+          className="h-auto min-w-0 flex-1 rounded-lg border-zinc-200 px-2 py-1 text-[11px] shadow-none focus-visible:border-zinc-400 focus-visible:ring-0"
         />
         <Button className="h-7 shrink-0 px-2.5 text-[11px]" data-testid="ctx-note-add" onClick={submit}>
           添加
@@ -205,14 +206,15 @@ export function ContextNotes({
                 {n.authorEmail} · {fmtTime(n.createdAt)}
               </div>
             </div>
-            <button
+            <Button
               type="button"
+              variant="ghost"
               data-testid="ctx-note-remove"
               onClick={() => onRemove(n)}
-              className="shrink-0 cursor-pointer text-[10px] text-zinc-300 hover:text-red-500"
+              className="h-auto shrink-0 cursor-pointer px-0.5 py-0 text-[10px] font-normal text-zinc-300 hover:text-red-500"
             >
               删除
-            </button>
+            </Button>
           </div>
         ))}
       </div>

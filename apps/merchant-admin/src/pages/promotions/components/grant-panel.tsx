@@ -1,6 +1,6 @@
 import { type Customer, type Promotion, api } from '@/lib/api';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from 'ui';
+import { Button, Input } from 'ui';
 
 interface Props {
   promo: Promotion;
@@ -51,8 +51,8 @@ export function GrantPanel({ promo, onCancel, onDone }: Props) {
         )}
         <span className="ml-2 text-[11px] text-zinc-400">按姓名/手机号/客户号搜索,可连续发放</span>
       </div>
-      <input
-        className="mt-2 w-64 rounded-lg border border-zinc-300 px-3 py-2 text-xs"
+      <Input
+        className="mt-2 h-auto w-64 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
         placeholder="搜索客户…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}

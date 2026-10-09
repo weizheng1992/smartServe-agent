@@ -1,5 +1,14 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { api } from '@/lib/api';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 
 type MappingRow = {
   mapType: string;
@@ -65,107 +74,117 @@ export default function OwnerMappingsPage() {
       <section className="rounded border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="mb-2 text-sm font-medium">登记 / 改派责任人</h2>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <select
-            aria-label="映射类型"
-            className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-800"
+          <Select
             value={mapType}
-            onChange={(e) => {
-              setMapType(e.target.value);
+            onValueChange={(v) => {
+              setMapType(v);
               setMapValue('');
             }}
           >
-            <option value="category">品类</option>
-            <option value="metric">指标</option>
-          </select>
-          <select
-            aria-label="维度值"
-            className="min-w-48 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-800"
-            value={mapValue}
-            onChange={(e) => setMapValue(e.target.value)}
-          >
-            <option value="">— 选择{MAP_TYPE_LABEL[mapType] ?? mapType} —</option>
-            {valueOptions.map((opt) => {
-              const value = typeof opt === 'string' ? opt : opt.key;
-              const label = typeof opt === 'string' ? opt : `${opt.label}(${opt.key})`;
-              return (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              );
-            })}
-          </select>
-          <select
-            aria-label="负责人"
-            className="min-w-40 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-800"
-            value={staffId}
-            onChange={(e) => setStaffId(e.target.value)}
-          >
-            <option value="">— 选择负责人 —</option>
-            {staff
-              .filter((s) => s.status === 'enabled')
-              .map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.displayName}
-                  {s.dept ? `(${s.dept}${s.level ? `·${s.level}` : ''})` : ''}
-                </option>
-              ))}
-          </select>
-          <button
+            <SelectTrigger aria-label="映射类型" className="h-auto rounded px-2 py-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="category">品类</SelectItem>
+              <SelectItem value="metric">指标</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={mapValue} onValueChange={(v) => setMapValue(v)}>
+            {/* 未选维度值 = 空串受控值,占位文案走 SelectValue placeholder(不可选) */}
+            <SelectTrigger aria-label="维度值" className="h-auto min-w-48 rounded px-2 py-1">
+              <SelectValue placeholder={`— 选择${MAP_TYPE_LABEL[mapType] ?? mapType} —`} />
+            </SelectTrigger>
+            <SelectContent>
+              {valueOptions.map((opt) => {
+                const value = typeof opt === 'string' ? opt : opt.key;
+                const label = typeof opt === 'string' ? opt : `${opt.label}(${opt.key})`;
+                return (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          <Select value={staffId} onValueChange={(v) => setStaffId(v)}>
+            <SelectTrigger aria-label="负责人" className="h-auto min-w-40 rounded px-2 py-1">
+              <SelectValue placeholder="— 选择负责人 —" />
+            </SelectTrigger>
+            <SelectContent>
+              {staff
+                .filter((s) => s.status === 'enabled')
+                .map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.displayName}
+                    {s.dept ? `(${s.dept}${s.level ? `·${s.level}` : ''})` : ''}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <Button
             type="button"
-            className="rounded bg-zinc-800 px-3 py-1 text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
+            size="sm"
+            className="h-auto rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-800 disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
             disabled={!mapValue || !staffId}
             onClick={() => void submit()}
           >
             登记
-          </button>
+          </Button>
         </div>
         {msg && <div className="mt-2 text-[11px] text-zinc-500">{msg}</div>}
       </section>
 
       <section className="rounded border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="mb-2 text-sm font-medium">已登记映射({mappings.length})</h2>
-        <table className="w-full text-left text-xs">
-          <thead className="text-zinc-500">
-            <tr>
-              <th className="py-1 pr-3">类型</th>
-              <th className="py-1 pr-3">维度值</th>
-              <th className="py-1 pr-3">负责人</th>
-              <th className="py-1 pr-3">状态</th>
-              <th className="py-1" />
-            </tr>
-          </thead>
-          <tbody>
+        <DenseTable className="text-left text-xs">
+          <DenseTableHeader>
+            <DenseTableRow className="hover:bg-transparent">
+              <DenseTableHead className="py-1 pr-3 text-xs">类型</DenseTableHead>
+              <DenseTableHead className="py-1 pr-3 text-xs">维度值</DenseTableHead>
+              <DenseTableHead className="py-1 pr-3 text-xs">负责人</DenseTableHead>
+              <DenseTableHead className="py-1 pr-3 text-xs">状态</DenseTableHead>
+              <DenseTableHead className="py-1 text-xs" />
+            </DenseTableRow>
+          </DenseTableHeader>
+          <DenseTableBody>
             {mappings.map((row) => (
-              <tr key={`${row.mapType}:${row.mapValue}`} className="border-t border-zinc-100 dark:border-zinc-800">
-                <td className="py-1 pr-3">{MAP_TYPE_LABEL[row.mapType] ?? row.mapType}</td>
-                <td className="py-1 pr-3">{row.mapValue}</td>
-                <td className="py-1 pr-3">
+              <DenseTableRow key={`${row.mapType}:${row.mapValue}`} className="border-t border-zinc-100">
+                <DenseTableCell className="py-1 pr-3 text-xs">
+                  {MAP_TYPE_LABEL[row.mapType] ?? row.mapType}
+                </DenseTableCell>
+                <DenseTableCell className="py-1 pr-3 text-xs">{row.mapValue}</DenseTableCell>
+                <DenseTableCell className="py-1 pr-3 text-xs">
                   {row.displayName ?? row.staffId}
                   {row.dept ? `(${row.dept}${row.level ? `·${row.level}` : ''})` : ''}
-                </td>
-                <td className="py-1 pr-3">
+                </DenseTableCell>
+                <DenseTableCell className="py-1 pr-3 text-xs">
                   {row.enabled ? (
                     <span className="text-emerald-600">在职</span>
                   ) : (
                     <span className="text-amber-600">已停用</span>
                   )}
-                </td>
-                <td className="py-1 text-right">
-                  <button type="button" className="text-red-600 hover:underline" onClick={() => void remove(row)}>
+                </DenseTableCell>
+                <DenseTableCell className="py-1 text-right text-xs">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto cursor-pointer p-0 text-xs text-red-600 hover:text-red-600 hover:underline"
+                    onClick={() => void remove(row)}
+                  >
                     撤销
-                  </button>
-                </td>
-              </tr>
+                  </Button>
+                </DenseTableCell>
+              </DenseTableRow>
             ))}
             {mappings.length === 0 && (
-              <tr>
-                <td colSpan={5} className="py-3 text-center text-zinc-400">
+              <DenseTableRow>
+                <DenseTableCell colSpan={5} className="py-3 text-center text-zinc-400">
                   暂无登记
-                </td>
-              </tr>
+                </DenseTableCell>
+              </DenseTableRow>
             )}
-          </tbody>
-        </table>
+          </DenseTableBody>
+        </DenseTable>
       </section>
     </div>
   );

@@ -1,4 +1,18 @@
-import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input } from 'ui';
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from 'ui';
 import { useWorkbench } from '../workbench';
 
 /** 订单一键发货弹窗(承运商 + 运单号;提交后锁定收货地址)。 */
@@ -23,26 +37,31 @@ export function ShipDialog() {
 
         <div className="space-y-3 py-3">
           <div>
-            <label htmlFor="ship-carrier" className="block text-xs font-semibold text-slate-700 mb-1">
+            <Label htmlFor="ship-carrier" className="mb-1 block text-xs font-semibold text-slate-700">
               承运快递公司
-            </label>
-            <select
-              id="ship-carrier"
-              value={carrierInput}
-              onChange={(e) => setCarrierInput(e.target.value)}
-              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-            >
-              <option value="SF">顺丰速运 (SF Express)</option>
-              <option value="JD">京东快递 (JD Logistics)</option>
-              <option value="ZTO">中通快递 (ZTO)</option>
-              <option value="EMS">邮政 EMS</option>
-            </select>
+            </Label>
+            {/* ui Select(Radix):受控 value/onValueChange;Label htmlFor 关联 trigger 内部按钮 */}
+            <Select value={carrierInput} onValueChange={(v) => setCarrierInput(v)}>
+              <SelectTrigger
+                id="ship-carrier"
+                aria-label="承运快递公司"
+                className="w-full rounded-lg border-slate-300 px-3 py-2 text-xs"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="SF">顺丰速运 (SF Express)</SelectItem>
+                <SelectItem value="JD">京东快递 (JD Logistics)</SelectItem>
+                <SelectItem value="ZTO">中通快递 (ZTO)</SelectItem>
+                <SelectItem value="EMS">邮政 EMS</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
-            <label htmlFor="ship-tracking" className="block text-xs font-semibold text-slate-700 mb-1">
+            <Label htmlFor="ship-tracking" className="mb-1 block text-xs font-semibold text-slate-700">
               快递运单号
-            </label>
+            </Label>
             <Input
               id="ship-tracking"
               type="text"

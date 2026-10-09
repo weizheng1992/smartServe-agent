@@ -1,3 +1,11 @@
+import {
+  DenseTable,
+  DenseTableBody,
+  DenseTableCell,
+  DenseTableHead,
+  DenseTableHeader,
+  DenseTableRow,
+} from '@/components/dense-table';
 import { type MenuNode, api } from '@/lib/api';
 import { Fragment, useState } from 'react';
 import { Button } from 'ui';
@@ -28,52 +36,53 @@ export function MenuTable({ menus, onMsg, onChanged }: Props) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="border-b border-zinc-100 text-left text-zinc-400">
-            <th className="px-4 py-2 font-medium">名称</th>
-            <th className="px-4 py-2 font-medium">类型</th>
-            <th className="px-4 py-2 font-medium">路由 / 权限点</th>
-            <th className="px-4 py-2 font-medium text-right">操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      <DenseTable>
+        <DenseTableHeader>
+          <DenseTableRow className="border-b border-zinc-100 hover:bg-transparent">
+            <DenseTableHead>名称</DenseTableHead>
+            <DenseTableHead>类型</DenseTableHead>
+            <DenseTableHead>路由 / 权限点</DenseTableHead>
+            <DenseTableHead className="text-right">操作</DenseTableHead>
+          </DenseTableRow>
+        </DenseTableHeader>
+        <DenseTableBody>
           {rows.map(({ node, depth, hasChildren }) => (
             <Fragment key={node.id}>
-              <tr className="border-b border-zinc-50 hover:bg-zinc-50/60">
-                <td className="px-4 py-2" style={{ paddingLeft: 16 + depth * 20 }}>
+              <DenseTableRow className="hover:bg-zinc-50/60">
+                <DenseTableCell style={{ paddingLeft: 16 + depth * 20 }}>
                   {hasChildren ? (
-                    <button
+                    <Button
                       type="button"
-                      className="mr-1.5 inline-block w-4 cursor-pointer select-none text-zinc-400"
+                      variant="ghost"
+                      className="mr-1.5 inline-block h-auto w-4 cursor-pointer select-none p-0 text-xs font-normal text-zinc-400 hover:bg-transparent"
                       onClick={() => setCollapsed(toggleCollapsed(node.id, collapsed))}
                       aria-label={collapsed.has(node.id) ? `展开 ${node.name}` : `收起 ${node.name}`}
                     >
                       {collapsed.has(node.id) ? '▸' : '▾'}
-                    </button>
+                    </Button>
                   ) : (
                     <span className="mr-1.5 inline-block w-4 text-center text-zinc-300">·</span>
                   )}
                   <span className={node.menuType === 'directory' ? 'font-semibold' : ''}>{node.name}</span>
-                </td>
-                <td className="px-4 py-2 text-zinc-500">{TYPE_BADGE[node.menuType] || node.menuType}</td>
-                <td className="px-4 py-2 text-zinc-500">
+                </DenseTableCell>
+                <DenseTableCell className="text-zinc-500">{TYPE_BADGE[node.menuType] || node.menuType}</DenseTableCell>
+                <DenseTableCell className="text-zinc-500">
                   {node.permCode ? (
                     <code className="rounded bg-zinc-100 px-1 text-[11px]">{node.permCode}</code>
                   ) : (
                     node.route || '—'
                   )}
-                </td>
-                <td className="px-4 py-2 text-right">
+                </DenseTableCell>
+                <DenseTableCell className="text-right">
                   <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void remove(node)}>
                     删除
                   </Button>
-                </td>
-              </tr>
+                </DenseTableCell>
+              </DenseTableRow>
             </Fragment>
           ))}
-        </tbody>
-      </table>
+        </DenseTableBody>
+      </DenseTable>
     </div>
   );
 }

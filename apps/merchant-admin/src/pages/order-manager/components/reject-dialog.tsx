@@ -1,4 +1,4 @@
-import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Textarea } from 'ui';
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Label, Textarea } from 'ui';
 import { useWorkbench } from '../workbench';
 
 const REJECT_TEMPLATES = [
@@ -29,9 +29,9 @@ export function RejectDialog() {
         </DialogHeader>
 
         <div className="space-y-3 py-3">
-          <label htmlFor="reject-reason" className="block text-xs font-semibold text-slate-700">
+          <Label htmlFor="reject-reason" className="block text-xs font-semibold text-slate-700">
             请输入驳回原因 (将通知顾客并载入会话工作流)
-          </label>
+          </Label>
           <Textarea
             id="reject-reason"
             value={rejectReasonInput}
@@ -43,14 +43,15 @@ export function RejectDialog() {
           <div className="flex flex-wrap gap-1.5 pt-1">
             <span className="text-[11px] text-slate-400">常用快捷模板:</span>
             {REJECT_TEMPLATES.map((tpl) => (
-              <button
+              <Button
                 key={tpl}
                 type="button"
+                variant="ghost"
                 onClick={() => setRejectReasonInput(tpl)}
-                className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded cursor-pointer transition"
+                className="h-auto cursor-pointer rounded bg-slate-100 px-2 py-0.5 text-[11px] font-normal text-slate-700 transition hover:bg-slate-200 hover:text-slate-700"
               >
                 {tpl}
-              </button>
+              </Button>
             ))}
           </div>
         </div>

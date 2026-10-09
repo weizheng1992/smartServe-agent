@@ -1,5 +1,6 @@
 import type { MenuNode } from '@/lib/api';
 import { toggleNode } from '@/lib/perm-tree';
+import { Checkbox, Label } from 'ui';
 
 interface Props {
   nodes: MenuNode[];
@@ -12,20 +13,17 @@ interface Props {
 export function PermTree({ nodes, selected, onChange }: Props) {
   const render = (n: MenuNode, depth: number) => (
     <div key={n.id}>
-      <label
-        className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-50 ${n.menuType === 'button' ? 'text-xs text-zinc-500' : 'text-[13px]'}`}
+      <Label
+        className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 font-normal hover:bg-zinc-50 ${
+          n.menuType === 'button' ? 'text-xs text-zinc-500' : 'text-[13px] text-zinc-800'
+        }`}
       >
-        <input
-          type="checkbox"
-          className="accent-zinc-900"
-          checked={selected.has(n.id)}
-          onChange={(e) => onChange(toggleNode(n, e.target.checked, selected))}
-        />
+        <Checkbox checked={selected.has(n.id)} onCheckedChange={(v) => onChange(toggleNode(n, v === true, selected))} />
         <span>{n.name}</span>
         {n.menuType === 'button' && n.permCode && (
-          <code className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500">{n.permCode}</code>
+          <code className="rounded bg-zinc-100 px-1 text-[10px] font-normal text-zinc-500">{n.permCode}</code>
         )}
-      </label>
+      </Label>
       {(n.children || []).length > 0 && (
         <div style={{ paddingLeft: 16 }}>{(n.children || []).map((c) => render(c, depth + 1))}</div>
       )}
