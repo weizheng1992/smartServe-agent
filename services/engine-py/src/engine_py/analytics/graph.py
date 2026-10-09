@@ -329,20 +329,25 @@ async def _owner_route(question: str, session_ctx: dict, engine: MetricQueryEngi
     target = await owner_routing.find_owner_target(question)
     if target is None:
         return None
-    if target.map_type == owner_routing.MAP_METRIC and owner_routing.has_reason_intent(question):
+    if target.map_type == owner_routing.MAP_METRIC:
         from .composition import CompositionQuery, dimension_word_of
 
-        comp = CompositionQuery(
-            metric=target.map_value,
-            # 维度泛词显式优先,缺省 category(owner 列所在维度 = 「该找谁」的落点)
-            dimension=dimension_word_of(question) or "category",
-            compare_previous=True,
-            source_question=question,
-        )
-        frame = await _composed_frame(question, comp, session_ctx, engine, trace)
-        if frame is not None:
-            return frame
-        print(f"[Owner] 原因升格组合拒绝,退回 owner 卡: {question[:24]!r}")
+        reason = owner_routing.has_reason_intent(question)
+        dimension = dimension_word_of(question)
+        # 升格触发:原因语感(为什么 = 看变化 → 双期归因)∨ 维度泛词
+        # (「哪个品类卖得最好」 = 看高低 → 排行);owner 列两形都附。
+        if reason or dimension:
+            comp = CompositionQuery(
+                metric=target.map_value,
+                # 维度泛词显式优先,缺省 category(owner 列所在维度 = 「该找谁」的落点)
+                dimension=dimension or "category",
+                compare_previous=reason,
+                source_question=question,
+            )
+            frame = await _composed_frame(question, comp, session_ctx, engine, trace)
+            if frame is not None:
+                return frame
+            print(f"[Owner] 升格组合拒绝,退回 owner 卡: {question[:24]!r}")
     info = await owner_routing.resolve_owner(session_ctx["business_id"], target)
     metric = f"owner_{target.map_type}"
     if info is None:
@@ -712,33 +717,35 @@ async def _composed_frame(
         time_window=comp.time_window, category=comp.category,
     )
     summary = None
+    # 责任人路由附列(spec §4 + 2026-10-09 第三载体):归因帧恒附;排行帧仅在
+    # 问句带找谁意图时附(Q10:普通卡不露,被动「各品类销售额」不添噪音列)。
+    # 仅对有 owner 源的维度附列(Q2:brand/region 等未灌键不硬凑,免得整列
+    # 「未登记」噪音);缓存已在 execute_async 内写毕,行变异安全。
+    owner_ask = owner_routing.looks_like_owner_ask(comp.source_question or question)
+    owners_display: dict[str, str] = {}
+    source = _DIMENSION_OWNER_SOURCE.get(comp.dimension or "")
+    if (comp.compare_previous or owner_ask) and source and result.rows:
+        label_col = next(
+            (k for k, v in result.rows[0].items() if not isinstance(v, (int, float))),
+            None,
+        )
+        if label_col:
+            values = [str(r.get(label_col)) for r in result.rows if r.get(label_col)]
+            resolved = await owner_routing.resolve_owners(
+                session_ctx["business_id"], source, values
+            )
+            owners_display = {
+                v: owner_routing.format_name(info) if info else "" for v, info in resolved.items()
+            }
+            for r in result.rows:
+                key = str(r.get(label_col) or "")
+                if key == "__total__":
+                    continue  # 合计行是算术产物,不是责任实体
+                # 列键用中文「负责人」:build_cards 按行键生成列头,与 B1 中文列同风格
+                r["负责人"] = owners_display.get(key) or "未登记"
     if comp.compare_previous:
         from .quick_summary import attribution_summary
 
-        # 责任人路由被动通道(spec §4):归因帧行附 owner 列 + 速览主因句尾拼
-        # 「找:X」。仅对有 owner 源的维度附列(Q2:brand/region 等未灌键不硬凑,
-        # 免得整列「未登记」噪音);缓存已在 execute_async 内写毕,行变异安全。
-        owners_display: dict[str, str] = {}
-        source = _DIMENSION_OWNER_SOURCE.get(comp.dimension or "")
-        if source and result.rows:
-            label_col = next(
-                (k for k, v in result.rows[0].items() if not isinstance(v, (int, float))),
-                None,
-            )
-            if label_col:
-                values = [str(r.get(label_col)) for r in result.rows if r.get(label_col)]
-                resolved = await owner_routing.resolve_owners(
-                    session_ctx["business_id"], source, values
-                )
-                owners_display = {
-                    v: owner_routing.format_name(info) if info else "" for v, info in resolved.items()
-                }
-                for r in result.rows:
-                    key = str(r.get(label_col) or "")
-                    if key == "__total__":
-                        continue  # 合计行是算术产物,不是责任实体
-                    # 列键用中文「负责人」:build_cards 按行键生成列头,与 B1 中文列同风格
-                    r["负责人"] = owners_display.get(key) or "未登记"
         summary = attribution_summary(result, owners=owners_display or None)
     frame = _with_trace(_result_frame(
         comp.source_question or question, result, shim,

@@ -347,6 +347,47 @@ class TestReasonAttributionUpgrade:
         intent = StructuredQueryIntent(metric="order_overview", direction="DESC")
         assert reason_reroute("为什么这单退款了", intent) is None
 
+    def test_ranking_with_owner_word_gets_owner_column(self, patch_owner_io, monkeypatch):
+        """第三载体(2026-10-09):「哪个品类卖得最好该找谁」→ 排行卡附负责人列;
+        无 compare_previous(看高低非看变化),标题不带「归因」前缀。"""
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        rows = [
+            {"品类": "潮流鞋靴", "metricScore": 99.0},
+            {"品类": "户外机能", "metricScore": 87.0},
+        ]
+
+        async def _fake(self, compiled, session_ctx=None):
+            return QueryResult(rows=rows, metric=compiled.metric, unit="件", caliber="组合口径")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
+        patch_owner_io["mappings"] = [("潮流鞋靴", "staff_sales_lead"), ("户外机能", "staff_sales_1")]
+        patch_owner_io["staff"] = [
+            _staff("staff_sales_lead", "陈锋", "销售部", "主管"),
+            _staff("staff_sales_1", "李芸", "销售部", "专员"),
+        ]
+        out = asyncio.run(graph.ask(
+            "哪个品类卖得最好该找谁", {"business_id": "aurora", "role": "finance_owner"},
+        ))
+        assert out["type"] == "result" and not out["title"].startswith("归因")
+        assert out["rows"][0]["负责人"] == "陈锋(销售部·主管)"
+
+    def test_passive_ranking_stays_without_owner_column(self, patch_owner_io, monkeypatch):
+        """Q10 纪律:无找谁意图的被动排行(「各品类销售额」)不添 owner 列。"""
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        rows = [{"品类": "潮流鞋靴", "metricScore": 99.0}]
+
+        async def _fake(self, compiled, session_ctx=None):
+            return QueryResult(rows=rows, metric=compiled.metric, unit="元", caliber="组合口径")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
+        patch_owner_io["mappings"] = [("潮流鞋靴", "staff_sales_lead")]
+        patch_owner_io["staff"] = [_staff("staff_sales_lead", "陈锋", "销售部", "主管")]
+        out = asyncio.run(graph.ask(
+            "各品类销售额", {"business_id": "aurora", "role": "finance_owner"},
+        ))
+        assert out["type"] == "result"
+        assert "负责人" not in out["rows"][0]
+
 
 # ---------- 归因卡附列 + 速览尾拼(Q11/§4) ----------
 
