@@ -31,10 +31,17 @@ _SPU_CODE_RE = re.compile(r"SPU-[A-Za-z0-9-]+")
 
 
 def has_reason_intent(question: str) -> bool:
-    """原因语感(单源在 composition.REASON_RE;找谁 × 指标 × 原因 = 复合问升格)。"""
+    """原因语感(单源在 composition.REASON_RE)。"""
     from .composition import REASON_RE
 
     return bool(REASON_RE.search(question or ""))
+
+
+def has_ranking_intent(question: str) -> bool:
+    """排行/枚举语感(单源在 composition.RANKING_RE)。"""
+    from .composition import RANKING_RE
+
+    return bool(RANKING_RE.search(question or ""))
 
 
 @dataclass(frozen=True)
@@ -193,6 +200,51 @@ async def resolve_owners(
 
 async def resolve_owner(business_id: str, target: OwnerTarget) -> OwnerInfo | None:
     return (await resolve_owners(business_id, target.map_type, [target.map_value])).get(target.map_value)
+
+
+async def resolve_owners_by_spu_ids(business_id: str, spu_ids: list[str]) -> dict[str, OwnerInfo | None]:
+    """按 SPU UUID 解析(T0 排行行键是 merchant_spus.id;数据原生 owner_id 列)。"""
+    unique = list(dict.fromkeys(v for v in spu_ids if v))
+    if not unique:
+        return {}
+    async with reader_engine().connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT id::text, owner_id FROM merchant_spus WHERE id::text = ANY(:vs)"),
+                {"vs": unique},
+            )
+        ).all()
+    mapped = {sid: owner for sid, owner in rows}
+    staff_by_id: dict[str, StaffMember] = {}
+    staff_ids = sorted({sid for sid in mapped.values() if sid})
+    if staff_ids:
+        async with get_session() as session:
+            staff_rows = (
+                await session.execute(
+                    select(StaffMember).where(
+                        StaffMember.business_id == business_id,
+                        StaffMember.id.in_(staff_ids),
+                        StaffMember.status == "enabled",
+                    )
+                )
+            ).scalars().all()
+        staff_by_id = {s.id: s for s in staff_rows}
+    result: dict[str, OwnerInfo | None] = {}
+    for sid in unique:
+        staff = staff_by_id.get(mapped.get(sid, ""))
+        result[sid] = (
+            OwnerInfo(
+                staff_id=staff.id,
+                display=staff.display_name,
+                dept=staff.dept,
+                level=staff.level,
+                email=staff.email,
+                role=staff.role,
+            )
+            if staff
+            else None
+        )
+    return result
 
 
 # ---------------- 维护面(spec §5):注册表读写的单一实现 ----------------

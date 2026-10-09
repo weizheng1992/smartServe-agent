@@ -77,13 +77,14 @@ test.describe('「该找谁」责任人路由', () => {
     await expect(page.getByRole('cell', { name: /未登记|销售部|售后部/ }).first()).toBeVisible();
   });
 
-  test('排行问句「哪个品类卖得最好该找谁」出带负责人列的排行卡(第三载体)', async ({ page }) => {
-    // 2026-10-09:找谁 × 指标 × 维度泛词 → 升格排行组合(非归因,看高低非看变化),
-    // owner 列仅在有找谁意图时附(Q10:被动「各品类销售额」不添列)。
+  test('排行问句「哪个品类退货率最高该找谁」出带负责人列的排行卡(第三载体)', async ({ page }) => {
+    // 2026-10-09:找谁 × 指标 × 维度泛词 → 主管线语感直通升格排行组合(非归因,
+    // 看高低非看变化),owner 列仅在有找谁意图时附(Q10:被动「各品类销售额」不添列)。
+    // 「卖得最好」措辞属 gmv/volume 歧义 → L0 泛指反问,不用作本例。
     await page.goto('/analytics');
-    await page.getByPlaceholder(/问点什么/).fill('哪个品类卖得最好该找谁');
+    await page.getByPlaceholder(/问点什么/).fill('哪个品类退货率最高该找谁');
     await page.getByRole('button', { name: '发送' }).click();
-    await expect(page.getByText(/出货销量 \(件数\) · 件|销量.*榜/).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/退款率/).first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('columnheader', { name: '负责人' }).last()).toBeVisible();
   });
 

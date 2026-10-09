@@ -595,11 +595,13 @@ def breakdown_reroute(question: str, intent) -> CompositionQuery | None:
     )
 
 
-# 原因语感(2026-10-08 实弹:「为什么退款这么多」曾 unsupported/退榜单;带找谁词面的
-# 复合形由 owner_routing 快轨升格,本处是**无找谁词面**的归因直通)。因果正则单源在此,
-# owner_routing.has_reason_intent 委派本处。另:「怎么」单字太宽(「退款率怎么算」是
-# 口径问不是归因),只收因果词形。
+# 原因语感(2026-10-08 实弹:「为什么退款这么多」曾 unsupported/退榜单)。因果正则
+# 单源在此,owner_routing.has_reason_intent 委派本处。另:「怎么」单字太宽(「退款率
+# 怎么算」是口径问不是归因),只收因果词形。
 REASON_RE = re.compile(r"为什么|什么原因|原因|为啥|为何|咋|怎么回事")
+# 排行/枚举语感(2026-10-09 第三载体):最好/最差/Top/榜…… 与维度泛词同现时
+# 表示「按该维度看高低」→ 组合排行(owner 列载体),而非 T0 的 SPU 默认维度。
+RANKING_RE = re.compile(r"top\s*\d*|榜|排行|排名|最好|最差|最高|最低|哪些|分别|最好卖", re.IGNORECASE)
 
 
 def dimension_word_of(question: str) -> str | None:
@@ -611,19 +613,26 @@ def dimension_word_of(question: str) -> str | None:
 
 
 def reason_reroute(question: str, intent) -> CompositionQuery | None:
-    """原因语感 → 确定性归因组合升级(不依赖找谁词面;7babb61 语感直通同族)。
+    """复合语感 → 确定性组合升级(不依赖找谁词面;7babb61 语感直通同族)。
 
-    触发:T1 开闸 ∧ 指标在 COMPOSABLE_METRICS 闭集 ∧ 原因语感。维度词显式优先
-    (「各区域退款率为什么涨」→ region),缺省 category —— 归因卡的贡献分解
-    天然是「为什么」的答案。零 LLM;不满足返回 None(调用方照常走 T0)。"""
+    触发(T1 开闸 ∧ 指标在 COMPOSABLE_METRICS):①原因语感(为什么 = 看变化 →
+    compare_previous 归因);②维度泛词 × 排行语感(「哪个品类卖得最好」 = 按维度
+    看高低 → dim_rank 排行)。维度泛词显式优先,缺省 category。纯维度泛词不触发
+    (「各品类销售额」由 L0 词面/场景包既有路承接,此处抢跑会改既有行为)。
+    零 LLM;不满足返回 None(调用方照常走 T0)。"""
     from .engine import StructuredQueryIntent
     from .tools_registry_bridge import semantic_model
 
     if not (isinstance(intent, StructuredQueryIntent) and composition_enabled()):
         return None
-    if intent.metric not in COMPOSABLE_METRICS or not REASON_RE.search(question or ""):
+    if intent.metric not in COMPOSABLE_METRICS:
         return None
-    dimension = dimension_word_of(question or "") or "category"
+    reason = bool(REASON_RE.search(question or ""))
+    dim_word = dimension_word_of(question or "")
+    ranking = bool(RANKING_RE.search(question or ""))
+    if not (reason or (dim_word and ranking)):
+        return None
+    dimension = dim_word or "category"
     if dimension not in semantic_model()["dimensions"]:
         return None
     if intent.category and dimension not in (None, "category", "spu"):
@@ -636,11 +645,11 @@ def reason_reroute(question: str, intent) -> CompositionQuery | None:
         time_window = slot_time
     return CompositionQuery(
         metric=intent.metric,
-        dimension=dimension,
+        dimension=dimension or "category",
         direction=intent.direction,
         limit=intent.limit,
         time_window=time_window,
-        compare_previous=True,  # 原因问的就是变化,双期分解恒开
+        compare_previous=reason,  # 原因问的就是变化;纯排行看高低不出双期
         category=intent.category,
         source_question=question,
     )

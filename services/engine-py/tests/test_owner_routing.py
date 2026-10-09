@@ -96,7 +96,8 @@ def patch_owner_io(monkeypatch):
     """桩掉 owner_routing 的商户库与员工会话;返回可改的桩数据容器。"""
     state = {
         "mappings": [],  # owner_mappings 行 (map_value, staff_id)
-        "spus": [],  # (spu_code, title)
+        "spus": [],  # (spu_code, title) —— find_owner_target 词面扫描用
+        "spu_owner_rows": [],  # (id, owner_id) —— T0 附列按 UUID 解析用
         "promotions": [],  # (name,)
         "spu_owner": {},  # spu_code -> staff_id(owner_id 列)
         "promo_creator": {},  # name -> staff_id(created_by 列)
@@ -112,7 +113,8 @@ def patch_owner_io(monkeypatch):
 
     monkeypatch.setattr(owner_routing, "_mapped_staff_ids", _fake_mapped)
     monkeypatch.setattr(owner_routing, "reader_engine", lambda: _FakeEngine({
-        "FROM merchant_spus": list(state["spus"]),
+        "SELECT spu_code, title": list(state["spus"]),
+        "SELECT id::text, owner_id": list(state["spu_owner_rows"]),
         "FROM promotions": [(name,) for name in state["promotions"]],
     }))
     monkeypatch.setattr(owner_routing, "get_session", lambda: _FakeSession(state["staff"]))
@@ -265,6 +267,9 @@ class TestReasonAttributionUpgrade:
     曾落 unsupported —— 找谁 × 指标 × 原因语感 → 确定性升格归因组合,一卡答两问。"""
 
     def _ask_compound(self, patch_owner_io, monkeypatch):
+        # 收敛后复合句走主管线:L0 同义词(退款→refund_rate)→ reason_reroute
+        # (T1 闸)→ 归因组合;快轨只负责放行。
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
         rows = [
             {"品类": "潮流鞋靴", "本期": 20.0, "上期": 5.0, "变化": 15.0},
             {"品类": "户外机能", "本期": 2.0, "上期": 8.0, "变化": -6.0},
@@ -290,21 +295,27 @@ class TestReasonAttributionUpgrade:
         assert out["rows"][0]["负责人"] == "陈锋(销售部·主管)"  # 归因行自带负责人 = 「该找谁」半问
         assert out["metric"] == "refund_rate"
 
-    def test_upgrade_failure_falls_back_to_owner_card(self, patch_owner_io, monkeypatch):
-        """组合拒绝/失败 → 退回 owner 卡(至少答「该找谁」半问),绝不静默 unsupported。"""
-        async def _none(*args, **kwargs):
-            return None
+    def test_fast_track_yields_compound_to_pipeline(self, patch_owner_io):
+        """混合分层收敛(2026-10-09):指标目标 × 复合语感(原因/维度泛词/排行)
+        → 快轨放行主管线(fluid 语义归管线,快路径只吃定义良好的意图);
+        纯「X 该找谁」仍由快轨答 owner 卡。"""
+        for q in ("为什么退款这么多,该找谁", "哪个品类卖得最好该找谁", "销量 Top10 该找谁"):
+            target = asyncio.run(owner_routing.find_owner_target(q))
+            assert target is not None and target.map_type == owner_routing.MAP_METRIC, q
+            frame = asyncio.run(graph._owner_route(
+                q, {"business_id": "aurora", "role": "finance_owner"}, None,
+                graph.Trace("aurora", "finance_owner", q),
+            ))
+            assert frame is None, f"{q} 应放行主管线"
 
-        monkeypatch.setattr(graph, "_composed_frame", _none)
-        # 注册表 map_value 存指标 key(种子同形),不是词面
+    def test_pure_owner_lookup_still_fast(self, patch_owner_io):
+        """纯查lookup(无复合语感)→ 快轨 owner 卡不变。"""
         patch_owner_io["mappings"] = [("refund_rate", "staff_aftersale_lead")]
         patch_owner_io["staff"] = [_staff("staff_aftersale_lead", "吴敏", "售后部", "主管")]
         out = asyncio.run(graph.ask(
-            "为什么退款这么多,什么原因,该找谁",
-            {"business_id": "aurora", "role": "finance_owner"},
+            "退款率该找谁", {"business_id": "aurora", "role": "finance_owner"},
         ))
-        assert out["type"] == "result" and "退款率" in out["title"]
-        assert out["rows"][0]["负责人"] == "吴敏"
+        assert out["type"] == "result" and "吴敏" in out["summary"]
 
     def test_reason_words_without_owner_stays_out(self):
         """无找谁词面 → 快轨不触发;原因直通由 composition.reason_reroute 承接。"""
@@ -348,8 +359,10 @@ class TestReasonAttributionUpgrade:
         assert reason_reroute("为什么这单退款了", intent) is None
 
     def test_ranking_with_owner_word_gets_owner_column(self, patch_owner_io, monkeypatch):
-        """第三载体(2026-10-09):「哪个品类卖得最好该找谁」→ 排行卡附负责人列;
-        无 compare_previous(看高低非看变化),标题不带「归因」前缀。"""
+        """第三载体(2026-10-09):维度泛词 × 排行语感 × 找谁 → 排行卡附负责人列;
+        无 compare_previous(看高低非看变化),标题不带「归因」前缀。
+        用退货率(无歧义指标);「卖得最好」属 gmv/volume 歧义 → L0 泛指反问
+        (GENERIC_HINTS 既有设计),快轨静默选边才是武断。"""
         monkeypatch.setenv("AI_T1_COMPOSE", "on")
         rows = [
             {"品类": "潮流鞋靴", "metricScore": 99.0},
@@ -357,7 +370,7 @@ class TestReasonAttributionUpgrade:
         ]
 
         async def _fake(self, compiled, session_ctx=None):
-            return QueryResult(rows=rows, metric=compiled.metric, unit="件", caliber="组合口径")
+            return QueryResult(rows=rows, metric=compiled.metric, unit="%", caliber="组合口径")
 
         monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
         patch_owner_io["mappings"] = [("潮流鞋靴", "staff_sales_lead"), ("户外机能", "staff_sales_1")]
@@ -366,10 +379,18 @@ class TestReasonAttributionUpgrade:
             _staff("staff_sales_1", "李芸", "销售部", "专员"),
         ]
         out = asyncio.run(graph.ask(
-            "哪个品类卖得最好该找谁", {"business_id": "aurora", "role": "finance_owner"},
+            "哪个品类退货率最高该找谁", {"business_id": "aurora", "role": "finance_owner"},
         ))
         assert out["type"] == "result" and not out["title"].startswith("归因")
         assert out["rows"][0]["负责人"] == "陈锋(销售部·主管)"
+
+    def test_ambiguous_metric_with_dimension_clarifies(self, patch_owner_io, monkeypatch):
+        """「卖得最好」= gmv/volume 歧义 + 维度泛词 → L0 泛指反问(GENERIC_HINTS
+        既有诚实设计);收敛前快轨静默选 volume 才是武断。"""
+        out = asyncio.run(graph.ask(
+            "哪个品类卖得最好该找谁", {"business_id": "aurora", "role": "finance_owner"},
+        ))
+        assert out["type"] == "clarify"
 
     def test_passive_ranking_stays_without_owner_column(self, patch_owner_io, monkeypatch):
         """Q10 纪律:无找谁意图的被动排行(「各品类销售额」)不添 owner 列。"""
@@ -386,6 +407,42 @@ class TestReasonAttributionUpgrade:
             "各品类销售额", {"business_id": "aurora", "role": "finance_owner"},
         ))
         assert out["type"] == "result"
+        assert "负责人" not in out["rows"][0]
+
+    def test_t0_spu_rank_attach(self, patch_owner_io, monkeypatch):
+        """T0 排行附列(帧级富化层):找谁意图 ∧ spu_rank shape(compile 单源)
+        → 按 SPU UUID 解析 owner_id 数据原生列。"""
+        rows = [
+            {"name": "极光冲锋衣", "productId": "uuid-1", "category": "户外机能", "stock": 5, "metricScore": 9.0},
+            {"name": "极光背包", "productId": "uuid-2", "category": "背包收纳", "stock": 3, "metricScore": 7.0},
+        ]
+
+        async def _fake(self, compiled, session_ctx=None):
+            return QueryResult(rows=rows, metric=compiled.metric, unit="件", caliber="模板口径")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
+        patch_owner_io["spu_owner_rows"] = [("uuid-1", "staff_sales_1")]  # uuid-2 无主
+        patch_owner_io["staff"] = [_staff("staff_sales_1", "李芸", "销售部", "专员")]
+        out = asyncio.run(graph.ask(
+            "销量 Top10 该找谁", {"business_id": "aurora", "role": "finance_owner"},
+        ))
+        assert out["type"] == "result" and out["metric"] == "volume"
+        assert out["rows"][0]["负责人"] == "李芸(销售部·专员)"
+        assert out["rows"][1]["负责人"] == "未登记"
+
+    def test_t0_attach_skipped_without_owner_word(self, patch_owner_io, monkeypatch):
+        """Q10:无找谁意图的 T0 排行不添列。"""
+        rows = [{"name": "极光冲锋衣", "productId": "uuid-1", "stock": 5, "metricScore": 9.0}]
+
+        async def _fake(self, compiled, session_ctx=None):
+            return QueryResult(rows=rows, metric=compiled.metric, unit="件", caliber="模板口径")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake)
+        patch_owner_io["spu_owner_rows"] = [("uuid-1", "staff_sales_1")]
+        patch_owner_io["staff"] = [_staff("staff_sales_1", "李芸", "销售部", "专员")]
+        out = asyncio.run(graph.ask(
+            "本月销量 Top10", {"business_id": "aurora", "role": "finance_owner"},
+        ))
         assert "负责人" not in out["rows"][0]
 
 

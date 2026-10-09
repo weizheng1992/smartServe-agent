@@ -283,6 +283,12 @@ async def ask(
         await trace.record("error", final_metric=intent.metric)
         return _with_trace({"type": "error", "message": "查询执行失败(已如实报告,未生成估算数据)", "detail": str(err)}, trace)
 
+    # 责任人附列·T0 排行(第三载体,帧级富化层):找谁意图 ∧ SPU 排行 shape
+    # (compile shape 单源检测,category_gmv_top 等 dim_rank 不误伤)→ 按 SPU
+    # UUID 解析 owner_id 列(数据原生)。shape 驱动而非指标名单手抄。
+    if owner_routing.looks_like_owner_ask(effective_question) and result.rows:
+        await _attach_t0_spu_owners(result, session_ctx)
+
     outcome = _with_trace(_result_frame(effective_question, result, intent, title_prefix), trace)
     # 缓存命中是机器语义,读字段不解析展示串(口径注记的「缓存读」词面只给人看)
     cache_hit = result.from_cache
@@ -314,40 +320,31 @@ _DIMENSION_OWNER_SOURCE = {
 
 
 async def _owner_route(question: str, session_ctx: dict, engine: MetricQueryEngine, trace: Trace) -> dict | None:
-    """「该找谁」快轨:命中 → owner 帧(verified 章,确定性元数据查询);
-    目标已识别但未登记/员工停用 → 诚实引导帧(Q12);否则 None 放行。
-    卡走 build_cards 同构 —— 前端按 cards 渲染,空 cards 会被诚实吞成「空结果」。
+    """「该找谁」快轨(纯注册表查询单一职责,2026-10-09 收敛):命中 → owner 帧
+    (verified 章,确定性元数据查询);未登记/员工停用 → 诚实引导帧(Q12);否则
+    None 放行。卡走 build_cards 同构 —— 前端按 cards 渲染,空 cards 会被诚实吞成
+    「空结果」。
 
-    原因语感升格(2026-10-08 实弹收口):「为什么退款这么多,什么原因,该找谁」
-    = 归因 + 责任人复合问 —— 指标目标 × 原因语感 → 确定性升格为
-    「该指标 × 品类维度 × compare_previous」归因组合(零 LLM,refund_rate 在
-    COMPOSABLE_METRICS 闭集),归因卡自带负责人列,一卡答完两问;品类缺省是
-    确定性选择(owner 列所在维度 = 「该找谁」的落点),非编造。组合拒绝/失败
-    退回 owner 卡(至少答「该找谁」半问),绝不静默 unsupported。"""
+    复合语感(原因/维度泛词/排行)**不在此处理** —— 混合分层裁决(业界共识:
+    快路径只吃定义良好的意图,fluid 语义升级进管线):指标目标 × 复合语感 →
+    放行主管线,由 L0 同义词 → reason_reroute/归因 → owner 帧级附列接力作答
+    (「为什么退款这么多,该找谁」= 归因卡 + 负责人列,见 reason_reroute)。"""
     if not owner_routing.looks_like_owner_ask(question):
         return None
     target = await owner_routing.find_owner_target(question)
     if target is None:
         return None
     if target.map_type == owner_routing.MAP_METRIC:
-        from .composition import CompositionQuery, dimension_word_of
+        from .composition import dimension_word_of
 
-        reason = owner_routing.has_reason_intent(question)
-        dimension = dimension_word_of(question)
-        # 升格触发:原因语感(为什么 = 看变化 → 双期归因)∨ 维度泛词
-        # (「哪个品类卖得最好」 = 看高低 → 排行);owner 列两形都附。
-        if reason or dimension:
-            comp = CompositionQuery(
-                metric=target.map_value,
-                # 维度泛词显式优先,缺省 category(owner 列所在维度 = 「该找谁」的落点)
-                dimension=dimension or "category",
-                compare_previous=reason,
-                source_question=question,
-            )
-            frame = await _composed_frame(question, comp, session_ctx, engine, trace)
-            if frame is not None:
-                return frame
-            print(f"[Owner] 升格组合拒绝,退回 owner 卡: {question[:24]!r}")
+        if (
+            owner_routing.has_reason_intent(question)
+            or owner_routing.has_ranking_intent(question)
+            or dimension_word_of(question)
+        ):
+            # 复合问句:主管线(L0 同义词 → 语感直通 → 帧级 owner 附列)能给出
+            # 更完整的答案(归因/排行 + 负责人列),快轨的「口径负责人卡」只答半问
+            return None
     info = await owner_routing.resolve_owner(session_ctx["business_id"], target)
     metric = f"owner_{target.map_type}"
     if info is None:
@@ -396,6 +393,24 @@ async def _owner_route(question: str, session_ctx: dict, engine: MetricQueryEngi
         },
         trace,
     )
+
+
+async def _attach_t0_spu_owners(result, session_ctx: dict) -> None:
+    """T0 spu_rank 排行附负责人列(spec §4 第三载体延伸):shape 由语义注册表
+    compile 块单源(严禁指标名单手抄——新登记 spu_rank 指标自动随行);owner 源
+    = merchant_spus.owner_id(数据原生,按行内 productId=SPU UUID 解析)。"""
+    from .tools_registry_bridge import metric_semantic_registry
+
+    shape = (metric_semantic_registry().get(result.metric, {}).get("compile") or {}).get("shape")
+    if shape != "spu_rank" or "productId" not in (result.rows[0] or {}):
+        return
+    ids = [str(r.get("productId")) for r in result.rows if r.get("productId")]
+    if not ids:
+        return
+    resolved = await owner_routing.resolve_owners_by_spu_ids(session_ctx["business_id"], ids)
+    for r in result.rows:
+        info = resolved.get(str(r.get("productId") or ""))
+        r["负责人"] = owner_routing.format_name(info) if info else "未登记"
 
 
 def _result_frame(question: str, result, intent, title_prefix: str = "", *, trust: str = "verified", caliber: str | None = None, summary_override: str | None = None) -> dict:
