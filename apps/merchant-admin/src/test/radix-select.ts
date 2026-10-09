@@ -23,3 +23,18 @@ async function openAndPick(trigger: Trigger, option: string | RegExp) {
 export function selectRadixOption(trigger: Trigger, option: string | RegExp): Promise<void> {
   return openAndPick(trigger, option);
 }
+
+/** 可搜索下拉(SearchableSelect = Popover + Command)的统一驱动:
+ * click 触发器(可选先输入搜索词过滤)→ click role=option(cmdk item 自带)→ 等层关闭。 */
+export async function selectComboboxOption(ariaLabel: string, option: string | RegExp, search?: string): Promise<void> {
+  fireEvent.click(screen.getByRole('combobox', { name: ariaLabel }));
+  if (search !== undefined) {
+    const input = await screen.findByPlaceholderText(searchPlaceholderPattern);
+    fireEvent.change(input, { target: { value: search } });
+  }
+  const item = await screen.findByRole('option', { name: option });
+  fireEvent.click(item);
+  await waitFor(() => expect(screen.queryByRole('option')).toBeNull());
+}
+
+const searchPlaceholderPattern = /搜索/;

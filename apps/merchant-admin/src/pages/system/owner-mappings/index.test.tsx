@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { selectRadixOption } from '@/test/radix-select';
+import { selectComboboxOption, selectRadixOption } from '@/test/radix-select';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OwnerMappingsPage from './index';
@@ -107,10 +107,15 @@ describe('OwnerMappingsPage(责任人维护)', () => {
     render(<OwnerMappingsPage />);
     await waitFor(() => expect(screen.getByText('已登记映射(3)')).toBeInTheDocument());
 
-    // Radix Select(ui):开层点选;「下拉吃语义注册表闭集,前端零硬编码」
-    // 由 option 文案断言承载(旧版遍历 HTMLSelectElement.options 的等价改写)
+    // 登记走弹窗(全站新增/编辑弹窗化)
+    fireEvent.click(screen.getByRole('button', { name: '+ 登记 / 改派' }));
+    await screen.findByText('登记 / 改派责任人');
+
+    // Radix Select(ui)+ 可搜索下拉(SearchableSelect):开层点选;
+    // 「下拉吃语义注册表闭集,前端零硬编码」由 option 文案断言承载
+    // (旧版遍历 HTMLSelectElement.options 的等价改写)
     await selectRadixOption('映射类型', '指标');
-    await selectRadixOption('维度值', /总销售额/); // gmv 的人话 label 含「总销售额」
+    await selectComboboxOption('维度值', /总销售额/); // gmv 的人话 label 含「总销售额」
     await selectRadixOption('负责人', /吴敏/); // staff_aftersale_lead = 售后部主管
     fireEvent.click(screen.getByRole('button', { name: '登记' }));
 

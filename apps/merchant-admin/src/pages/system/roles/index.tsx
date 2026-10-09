@@ -9,8 +9,8 @@ import {
 import { type MenuNode, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
-import { RoleAssignPanel } from './components/role-assign-panel';
-import { RoleCreateForm } from './components/role-create-form';
+import { RoleAssignDialog } from './components/role-assign-panel';
+import { RoleCreateDialog } from './components/role-create-form';
 
 // 角色管理(0014 后无「内置」概念):三档种子只是预置配置,与自定义角色一样
 // 可重新分配菜单+按钮;仅老板角色保留系统菜单防锁死护栏(服务端强制回补)。
@@ -26,6 +26,7 @@ export default function RolesPage() {
   const [tree, setTree] = useState<MenuNode[]>([]);
   const [msg, setMsg] = useState('');
   const [assigning, setAssigning] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [canAssign, setCanAssign] = useState(false);
 
   const load = useCallback(async () => {
@@ -51,7 +52,12 @@ export default function RolesPage() {
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 text-sm font-medium">
           <span>角色列表</span>
-          {!boss && <span className="text-[11px] text-zinc-400">需 role:assign 权限点(老板/管理员)</span>}
+          <div className="flex items-center gap-2">
+            {!boss && <span className="text-[11px] text-zinc-400">分配需 role:assign 权限点(老板/管理员)</span>}
+            <Button size="sm" onClick={() => setCreating(true)}>
+              + 新建角色
+            </Button>
+          </div>
         </div>
         <DenseTable>
           <DenseTableHeader>
@@ -82,18 +88,26 @@ export default function RolesPage() {
       </div>
 
       {assigning && (
-        <RoleAssignPanel
+        <RoleAssignDialog
           role={assigning}
           tree={tree}
           onSaved={setMsg}
-          onCancel={() => {
+          onClose={() => {
             setAssigning(null);
             void load();
           }}
         />
       )}
-
-      <RoleCreateForm tree={tree} onMsg={setMsg} onCreated={() => void load()} />
+      {creating && (
+        <RoleCreateDialog
+          tree={tree}
+          onMsg={setMsg}
+          onClose={() => {
+            setCreating(false);
+            void load();
+          }}
+        />
+      )}
       {msg && <div className="text-[11px] text-zinc-400">{msg}</div>}
     </div>
   );

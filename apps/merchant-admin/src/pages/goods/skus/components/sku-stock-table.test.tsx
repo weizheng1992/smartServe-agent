@@ -1,8 +1,26 @@
 import '@testing-library/jest-dom/vitest';
 import type { SkuStockRow } from '@/lib/api';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SkuStockTable } from './sku-stock-table';
+
+// api 只桩 updateSku(改价/库存弹窗提交捕获)
+const mocks = vi.hoisted(() => {
+  const updateSku = vi.fn();
+  updateSku.mockResolvedValue({ success: true });
+  return { updateSku };
+});
+
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      products: { ...actual.api.products, updateSku: mocks.updateSku },
+    },
+  };
+});
 
 const skus: SkuStockRow[] = [
   {
@@ -48,11 +66,27 @@ describe('SkuStockTable', () => {
     expect(screen.getByText('暂无匹配 SKU(诚实空)')).toBeInTheDocument();
   });
 
-  it('改价/库存进入行内编辑态(不点保存不触发回调)', () => {
+  it('改价/库存走弹窗:预填当前值,不点保存不触发回调', () => {
     const onChanged = vi.fn();
     render(<SkuStockTable skus={skus} onMsg={() => {}} onChanged={onChanged} />);
     fireEvent.click(screen.getAllByRole('button', { name: '改价/库存' })[0]);
-    expect(screen.getByPlaceholderText('库存')).toBeInTheDocument();
+    // 弹窗预填当前值(旧「行内编辑态」断言的等价改写)
+    const priceInput = screen.getByLabelText('价格(¥)') as HTMLInputElement;
+    const stockInput = screen.getByLabelText('库存') as HTMLInputElement;
+    expect(priceInput.value).toBe('99');
+    expect(stockInput.value).toBe('3');
     expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it('弹窗内改价保存 → updateSku 携带数值化 payload,成功后回调刷新', async () => {
+    const onChanged = vi.fn();
+    render(<SkuStockTable skus={skus} onMsg={() => {}} onChanged={onChanged} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '改价/库存' })[0]);
+    fireEvent.change(screen.getByLabelText('价格(¥)'), { target: { value: '129' } });
+    fireEvent.change(screen.getByLabelText('库存'), { target: { value: '55' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(mocks.updateSku).toHaveBeenCalledWith('k1', { price: 129, stock: 55 }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
   });
 });

@@ -28,4 +28,12 @@ if (typeof window !== 'undefined') {
   if (!proto.hasPointerCapture) proto.hasPointerCapture = () => false;
   if (!proto.releasePointerCapture) proto.releasePointerCapture = () => {};
   if (!proto.scrollIntoView) proto.scrollIntoView = () => {};
+  // cmdk(CommandList)挂载时用 ResizeObserver 量列表高度
+  if (!window.ResizeObserver) {
+    window.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof window.ResizeObserver;
+  }
 }

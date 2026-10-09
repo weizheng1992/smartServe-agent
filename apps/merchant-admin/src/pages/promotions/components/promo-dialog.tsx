@@ -1,3 +1,4 @@
+import { SearchableSelect } from '@/components/searchable-select';
 import { type Promotion, type Spu, api } from '@/lib/api';
 import { useEffect, useState } from 'react';
 import {
@@ -194,12 +195,12 @@ export function PromoFormDialog({ open, promo, spus, onClose, onSaved }: Props) 
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl p-6 bg-white text-slate-900 border-slate-200">
-        <DialogHeader className="pb-3 border-b border-slate-100">
-          <DialogTitle className="text-base font-bold text-slate-900">
+      <DialogContent className="max-w-xl rounded-xl border-zinc-200 p-6 text-zinc-900 shadow-xl">
+        <DialogHeader className="pb-3 border-b border-zinc-100">
+          <DialogTitle className="text-base font-bold text-zinc-900">
             {isEdit ? `编辑活动 · ${promo?.name}` : '新建活动'}
           </DialogTitle>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-zinc-500">
             {isEdit
               ? `${TYPE_LABEL[form.promoType] || form.promoType} · 类型创建后不可改,其余字段可一次改齐`
               : '结算时按规则自动应用;时间窗外的活动不参与结算'}
@@ -324,22 +325,14 @@ export function PromoFormDialog({ open, promo, spus, onClose, onSaved }: Props) 
                   </SelectContent>
                 </Select>
                 {form.scopeType === 'spu' && (
-                  <Select value={form.scopeValue} onValueChange={(v) => set({ scopeValue: v })}>
-                    {/* 未选商品 = 空串受控值,走 SelectValue placeholder(占位项不可选) */}
-                    <SelectTrigger
-                      aria-label="适用商品"
-                      className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 text-xs"
-                    >
-                      <SelectValue placeholder="选择商品…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {spus.map((s) => (
-                        <SelectItem key={s.id} value={s.spu_code}>
-                          {s.title}({s.spu_code})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    ariaLabel="适用商品"
+                    value={form.scopeValue}
+                    onValueChange={(v) => set({ scopeValue: v })}
+                    options={spus.map((s) => ({ value: s.spu_code, label: `${s.title}(${s.spu_code})` }))}
+                    placeholder="选择商品…"
+                    triggerClassName="flex-1"
+                  />
                 )}
               </div>
             </div>
@@ -382,7 +375,7 @@ export function PromoFormDialog({ open, promo, spus, onClose, onSaved }: Props) 
           {err && <div className="text-[11px] text-red-600">{err}</div>}
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-slate-100">
+        <DialogFooter className="gap-2 pt-3 sm:gap-0 border-t border-zinc-100">
           <Button type="button" variant="outline" size="sm" onClick={onClose} className="text-xs cursor-pointer">
             取消
           </Button>

@@ -1,0 +1,12 @@
+/*
+ * 站点主题对 shadcn 语义 token 的覆盖(zinc)。
+ * main.tsx 中在 ui/src/styles/globals.css 之后引入:同特异性 :root 后者胜,
+ * bg-primary / ring / data-[state=checked]:bg-primary 等语义类随之贴回站点
+ * 的 zinc 黑主操作色,弹窗与按钮不再出现 shadcn 默认蓝。
+ * 色值:zinc-900 = hsl(240 5.9% 10%) / zinc-50 = hsl(0 0% 98%) / zinc-400 = hsl(240 4.9% 63.9%)。
+ */
+:root {
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+  --ring: 240 4.9% 63.9%;
+}

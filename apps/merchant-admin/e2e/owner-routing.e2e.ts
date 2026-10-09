@@ -35,17 +35,19 @@ test.describe('「该找谁」责任人路由', () => {
     await expect(nav.getByText('责任人维护', { exact: true })).toBeVisible();
     await nav.getByText('责任人维护', { exact: true }).click();
     await expect(page.getByText(/已登记映射\(\d+\)/)).toBeVisible({ timeout: 15_000 });
+    // 登记走弹窗(全站新增/编辑弹窗化)
+    await page.getByRole('button', { name: '+ 登记 / 改派' }).click();
+    await expect(page.getByText('登记 / 改派责任人')).toBeVisible();
     // 品类闭集来自语义注册表(下拉含 衬衫 —— 种子未灌品类,枚举照列)。
-    // ui Select(Radix):开层后 option 挂 body 门户,断言后 Esc 收层。
+    // ui Select(Radix)/SearchableSelect:开层后 option 挂 body 门户。
+    // 不用 Esc 收层 —— 弹窗内按 Esc 连 Dialog 一起关,直接切下一控件靠外点收层。
     await page.getByLabel('维度值').click();
     await expect(page.getByRole('option', { name: '衬衫' })).toHaveCount(1);
-    await page.keyboard.press('Escape');
-    // 指标闭集切换
+    // 指标闭集切换(外点自动收维度值层)
     await page.getByLabel('映射类型').click();
     await page.getByRole('option', { name: '指标', exact: true }).click();
     await page.getByLabel('维度值').click();
     await expect(page.getByRole('option', { name: /退款率/ })).toHaveCount(1);
-    await page.keyboard.press('Escape');
   });
 
   test('找谁问句出 owner 卡(确定性快轨,零 LLM)', async ({ page }) => {
@@ -96,14 +98,16 @@ test.describe('「该找谁」责任人路由', () => {
   test('维护页改派与撤销(改后恢复种子态)', async ({ page }) => {
     await page.goto('/owner-mappings');
     await expect(page.getByText(/已登记映射\(\d+\)/)).toBeVisible({ timeout: 15_000 });
-    // 登记衬衫 → 陈锋(种子原为赵磊)。Radix Select:click trigger → click option 文本
+    // 登记走弹窗;登记衬衫 → 陈锋(种子原为赵磊)。click trigger → click option 文本
+    await page.getByRole('button', { name: '+ 登记 / 改派' }).click();
+    await expect(page.getByText('登记 / 改派责任人')).toBeVisible();
     await page.getByLabel('映射类型').click();
     await page.getByRole('option', { name: '品类', exact: true }).click();
     await page.getByLabel('维度值').click();
     await page.getByRole('option', { name: '衬衫', exact: true }).click();
     await page.getByLabel('负责人').click();
     await page.getByRole('option', { name: /陈锋/ }).click();
-    await page.getByRole('button', { name: '登记' }).click();
+    await page.getByRole('button', { name: '登记', exact: true }).click();
     await expect(page.getByText('已登记')).toBeVisible({ timeout: 10_000 });
     // 表格行反映改派
     const row = page.locator('tr', { hasText: '衬衫' });

@@ -9,8 +9,8 @@ import {
 import { type Promotion, api } from '@/lib/api';
 import { Fragment, useState } from 'react';
 import { Button } from 'ui';
-import { GrantPanel } from './grant-panel';
-import { RedeemPanel } from './redeem-panel';
+import { GrantDialog } from './grant-panel';
+import { RedeemDialog } from './redeem-panel';
 import { scopeLabel } from './scope';
 
 const TYPE_LABEL: Record<string, string> = {
@@ -78,9 +78,9 @@ export function PromoTable({ promotions, spuTitles, onMsg, onChanged, onEdit }: 
   return (
     <>
       {redeemPromo && (
-        <RedeemPanel
+        <RedeemDialog
           promo={redeemPromo}
-          onCancel={() => setRedeem(null)}
+          onClose={() => setRedeem(null)}
           onDone={(m) => {
             onMsg(m);
             onChanged();
@@ -88,9 +88,9 @@ export function PromoTable({ promotions, spuTitles, onMsg, onChanged, onEdit }: 
         />
       )}
       {granting && (
-        <GrantPanel
+        <GrantDialog
           promo={granting}
-          onCancel={() => {
+          onClose={() => {
             setGranting(null);
             onChanged();
           }}

@@ -3,7 +3,7 @@ import { api, setSession } from '@/lib/api';
 import { GATEWAY, gatewayUp, installLiveFetch, login } from '@/test/live-api';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GrantPanel } from './grant-panel';
+import { GrantDialog } from './grant-panel';
 
 // 集成测试(真实网关 + 真实库;不 mock 数据):本用例只读 —— 发放动作的
 // 写路径由 gateway-py 契约测试(密封真实库)覆盖。
@@ -18,7 +18,7 @@ beforeAll(async () => {
 
 beforeEach(() => installLiveFetch());
 
-d('GrantPanel(真实库)', () => {
+d('GrantDialog(真实库)', () => {
   it('加载真实客户列表并可搜索(只读)', async () => {
     const boss = await login('test@example.com');
     const listed = await (
@@ -27,7 +27,7 @@ d('GrantPanel(真实库)', () => {
     const real: Array<{ customer_id: string; name: string }> = listed.customers || [];
 
     render(
-      <GrantPanel
+      <GrantDialog
         promo={{
           id: 'none',
           name: '集成测试(不发放)',
@@ -46,7 +46,7 @@ d('GrantPanel(真实库)', () => {
           discountTotal: 0,
           effectiveStatus: 'running',
         }}
-        onCancel={() => {}}
+        onClose={() => {}}
         onDone={() => {}}
       />,
     );

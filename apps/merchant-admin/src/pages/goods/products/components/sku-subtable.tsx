@@ -8,7 +8,67 @@ import {
 } from '@/components/dense-table';
 import { type Sku, type Spu, api } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Input } from 'ui';
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Label } from 'ui';
+
+/** 通用小弹窗外壳:字段区两枚 Input(价格/库存 或 标题/价格/库存)。 */
+function SkuFormDialog({
+  title,
+  subtitle,
+  submitLabel,
+  submitDisabled,
+  onSubmit,
+  onClose,
+  fields,
+}: {
+  title: string;
+  subtitle: string;
+  submitLabel: string;
+  submitDisabled: boolean;
+  onSubmit: () => void;
+  onClose: () => void;
+  fields: Array<{ id: string; label: string; placeholder: string; value: string; onChange: (v: string) => void }>;
+}) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm rounded-xl border-zinc-200 text-zinc-900 shadow-xl">
+        <DialogHeader className="pb-3 border-b border-zinc-100">
+          <DialogTitle className="text-base font-bold text-zinc-900">{title}</DialogTitle>
+          <p className="mt-1 text-xs text-zinc-500">{subtitle}</p>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-4 text-xs">
+          {fields.map((f) => (
+            <div key={f.id}>
+              <Label htmlFor={f.id} className="mb-1.5 block text-zinc-700">
+                {f.label}
+              </Label>
+              <Input
+                id={f.id}
+                className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 shadow-none focus-visible:ring-0"
+                placeholder={f.placeholder}
+                value={f.value}
+                onChange={(e) => f.onChange(e.target.value)}
+              />
+            </div>
+          ))}
+        </div>
+        <DialogFooter className="gap-2 pt-3 sm:gap-0 border-t border-zinc-100">
+          <Button type="button" variant="outline" size="sm" onClick={onClose} className="text-xs cursor-pointer">
+            取消
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={submitDisabled}
+            onClick={onSubmit}
+            className="text-xs font-bold cursor-pointer"
+          >
+            {submitLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 interface Props {
   spu: Spu;
@@ -21,8 +81,8 @@ const EMPTY_NEW = { skuTitle: '', price: '', stock: '' };
  *  挂载即拉取;删除受"已有成交不可删"服务端护栏。 */
 export function SkuSubTable({ spu, onMsg }: Props) {
   const [skus, setSkus] = useState<Sku[]>([]);
-  const [newSku, setNewSku] = useState(EMPTY_NEW);
-  const [skuEdit, setSkuEdit] = useState<{ id: string; price: string; stock: string } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [priceEdit, setPriceEdit] = useState<Sku | null>(null);
 
   const loadSkus = useCallback(async () => {
     setSkus((await api.products.listSkus(spu.id)).skus || []);
@@ -31,20 +91,22 @@ export function SkuSubTable({ spu, onMsg }: Props) {
     void loadSkus();
   }, [loadSkus]);
 
-  async function createSku() {
+  async function createSku(newSku: { skuTitle: string; price: string; stock: string }, close: () => void) {
     const b = await api.products.createSku(spu.id, newSku);
     onMsg(b.success ? `✓ SKU ${b.skuCode} 已新增` : `失败:${b.message}`);
     if (b.success) {
-      setNewSku(EMPTY_NEW);
+      close();
       void loadSkus();
     }
   }
 
-  async function saveSku(skuId: string, patch: { price: string; stock: string }) {
-    const b = await api.products.updateSku(skuId, { price: Number(patch.price), stock: Number(patch.stock) });
+  async function saveSku(sku: Sku, patch: { price: string; stock: string }, close: () => void) {
+    const b = await api.products.updateSku(sku.id, { price: Number(patch.price), stock: Number(patch.stock) });
     onMsg(b.success ? '✓ SKU 已保存' : `失败:${b.message}`);
-    setSkuEdit(null);
-    void loadSkus();
+    if (b.success) {
+      close();
+      void loadSkus();
+    }
   }
 
   async function deleteSku(skuId: string) {
@@ -73,11 +135,7 @@ export function SkuSubTable({ spu, onMsg }: Props) {
               <DenseTableCell className="py-1 pr-4 pl-0">¥{k.price}</DenseTableCell>
               <DenseTableCell className="py-1 pr-4 pl-0">{k.stock}</DenseTableCell>
               <DenseTableCell className="py-1 pl-0">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setSkuEdit({ id: k.id, price: String(k.price), stock: String(k.stock) })}
-                >
+                <Button size="sm" variant="ghost" onClick={() => setPriceEdit(k)}>
                   改价/库存
                 </Button>
                 <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => void deleteSku(k.id)}>
@@ -88,49 +146,104 @@ export function SkuSubTable({ spu, onMsg }: Props) {
           ))}
         </DenseTableBody>
       </DenseTable>
-      {skuEdit && (
-        <div className="mt-2 flex items-center gap-2 text-xs">
-          <span className="text-zinc-500">改价/库存:</span>
-          <Input
-            className="h-auto w-24 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
-            placeholder="价格"
-            value={skuEdit.price}
-            onChange={(e) => setSkuEdit({ ...skuEdit, price: e.target.value })}
-          />
-          <Input
-            className="h-auto w-20 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
-            placeholder="库存"
-            value={skuEdit.stock}
-            onChange={(e) => setSkuEdit({ ...skuEdit, stock: e.target.value })}
-          />
-          <Button size="sm" onClick={() => skuEdit && void saveSku(skuEdit.id, skuEdit)}>
-            保存
-          </Button>
-        </div>
+      {priceEdit && (
+        <PriceEditDialog sku={priceEdit} onMsg={onMsg} onClose={() => setPriceEdit(null)} onSubmit={saveSku} />
       )}
-      <div className="mt-2 flex items-center gap-2 text-xs">
-        <Input
-          className="h-auto w-32 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
-          placeholder="新 SKU 标题"
-          value={newSku.skuTitle}
-          onChange={(e) => setNewSku({ ...newSku, skuTitle: e.target.value })}
-        />
-        <Input
-          className="h-auto w-24 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
-          placeholder="价格"
-          value={newSku.price}
-          onChange={(e) => setNewSku({ ...newSku, price: e.target.value })}
-        />
-        <Input
-          className="h-auto w-20 rounded border-zinc-300 px-2 py-1 text-xs shadow-none focus-visible:ring-0"
-          placeholder="库存"
-          value={newSku.stock}
-          onChange={(e) => setNewSku({ ...newSku, stock: e.target.value })}
-        />
-        <Button size="sm" variant="outline" disabled={!newSku.price} onClick={() => void createSku()}>
-          新增 SKU
+      <div className="mt-2">
+        <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+          + 新增 SKU
         </Button>
       </div>
+      {creating && <SkuCreateDialog spu={spu} onMsg={onMsg} onClose={() => setCreating(false)} onSubmit={createSku} />}
     </div>
+  );
+}
+
+/** 改价/库存弹窗(行内「改价/库存」唤起,保存走 api.products.updateSku)。 */
+function PriceEditDialog({
+  sku,
+  onMsg,
+  onClose,
+  onSubmit,
+}: {
+  sku: Sku;
+  onMsg: (m: string) => void;
+  onClose: () => void;
+  onSubmit: (sku: Sku, patch: { price: string; stock: string }, close: () => void) => Promise<void>;
+}) {
+  const [patch, setPatch] = useState({ price: String(sku.price), stock: String(sku.stock) });
+  return (
+    <SkuFormDialog
+      title={`改价/库存 · ${sku.sku_code}`}
+      subtitle={sku.sku_title || ''}
+      submitLabel="保存"
+      submitDisabled={false}
+      onSubmit={() => void onSubmit(sku, patch, onClose)}
+      onClose={onClose}
+      fields={[
+        {
+          id: 'sku-price',
+          label: '价格(¥)',
+          placeholder: '如 329',
+          value: patch.price,
+          onChange: (v) => setPatch({ ...patch, price: v }),
+        },
+        {
+          id: 'sku-stock',
+          label: '库存',
+          placeholder: '如 50',
+          value: patch.stock,
+          onChange: (v) => setPatch({ ...patch, stock: v }),
+        },
+      ]}
+    />
+  );
+}
+
+/** 新增 SKU 弹窗(标题/价格/库存;价格必填,与原内联条同口径)。 */
+function SkuCreateDialog({
+  spu,
+  onMsg,
+  onClose,
+  onSubmit,
+}: {
+  spu: Spu;
+  onMsg: (m: string) => void;
+  onClose: () => void;
+  onSubmit: (newSku: { skuTitle: string; price: string; stock: string }, close: () => void) => Promise<void>;
+}) {
+  const [form, setForm] = useState(EMPTY_NEW);
+  return (
+    <SkuFormDialog
+      title={`新增 SKU · ${spu.spu_code}`}
+      subtitle={`挂在「${spu.title}」下;标题/价格必填`}
+      submitLabel="新增"
+      submitDisabled={!form.skuTitle || !form.price}
+      onSubmit={() => void onSubmit(form, onClose)}
+      onClose={onClose}
+      fields={[
+        {
+          id: 'new-sku-title',
+          label: 'SKU 标题',
+          placeholder: '如:红 42',
+          value: form.skuTitle,
+          onChange: (v) => setForm({ ...form, skuTitle: v }),
+        },
+        {
+          id: 'new-sku-price',
+          label: '价格(¥)',
+          placeholder: '如 329',
+          value: form.price,
+          onChange: (v) => setForm({ ...form, price: v }),
+        },
+        {
+          id: 'new-sku-stock',
+          label: '库存',
+          placeholder: '默认同 SPU',
+          value: form.stock,
+          onChange: (v) => setForm({ ...form, stock: v }),
+        },
+      ]}
+    />
   );
 }

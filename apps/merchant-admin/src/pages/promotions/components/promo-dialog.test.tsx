@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { type Promotion, type Spu } from '@/lib/api';
-import { selectRadixOption } from '@/test/radix-select';
+import { selectComboboxOption, selectRadixOption } from '@/test/radix-select';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PromoFormDialog } from './promo-dialog';
@@ -198,14 +198,14 @@ describe('PromoFormDialog 编辑(PATCH 携带即更新)', () => {
   });
 });
 
-describe('PromoFormDialog 适用范围(Radix Select)', () => {
-  it('切「指定商品」→「适用商品」trigger 出现;选 SPU 提交携带 scopeType+scopeValue', async () => {
+describe('PromoFormDialog 适用范围', () => {
+  it('切「指定商品」→「适用商品」可搜索下拉出现;选 SPU 提交携带 scopeType+scopeValue', async () => {
     mocks.create.mockClear();
     renderDialog();
     await selectRadixOption('适用范围', '指定商品');
     expect(screen.getByLabelText('适用商品')).toBeInTheDocument();
 
-    await selectRadixOption('适用商品', /极光防晒皮肤衣/);
+    await selectComboboxOption('适用商品', /极光防晒皮肤衣/);
     fireEvent.change(screen.getByPlaceholderText('如:周年庆满减'), { target: { value: '指定品满减' } });
     fireEvent.change(screen.getByPlaceholderText('如 40'), { target: { value: '30' } });
     fireEvent.click(screen.getByRole('button', { name: '创建' }));

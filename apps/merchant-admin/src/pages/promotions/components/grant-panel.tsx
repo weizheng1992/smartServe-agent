@@ -1,16 +1,17 @@
 import { type Customer, type Promotion, api } from '@/lib/api';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Input } from 'ui';
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input } from 'ui';
 
 interface Props {
   promo: Promotion;
-  onCancel: () => void;
+  onClose: () => void;
+  /** 发放结果消息(连续发放不关窗,由页面负责刷新) */
   onDone: (msg: string) => void;
 }
 
-/** 发券面板:按姓名/手机号搜客户,逐个发放(可连续发;重复发/超上限被服务端
+/** 发券弹窗:按姓名/手机号搜客户,逐个发放(可连续发;重复发/超上限被服务端
  * 护栏拦截并如实呈现 message);头部带剩余可发(有上限时)。 */
-export function GrantPanel({ promo, onCancel, onDone }: Props) {
+export function GrantDialog({ promo, onClose, onDone }: Props) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [query, setQuery] = useState('');
   const [granted, setGranted] = useState<Set<string>>(new Set());
@@ -41,45 +42,48 @@ export function GrantPanel({ promo, onCancel, onDone }: Props) {
   const remaining = promo.totalQuota != null && claimed != null ? Math.max(promo.totalQuota - claimed, 0) : null;
 
   return (
-    <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
-      <div className="text-sm font-medium">
-        发券「{promo.name}」
-        {remaining != null && (
-          <span className="ml-2 text-[11px] text-zinc-500">
-            剩余可发 {remaining}/{promo.totalQuota}
-          </span>
-        )}
-        <span className="ml-2 text-[11px] text-zinc-400">按姓名/手机号/客户号搜索,可连续发放</span>
-      </div>
-      <Input
-        className="mt-2 h-auto w-64 rounded-lg border-zinc-300 px-3 py-2 text-xs shadow-none focus-visible:ring-0"
-        placeholder="搜索客户…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-      <div className="mt-2 space-y-1">
-        {hits.length === 0 && <div className="text-xs text-zinc-400">暂无匹配客户</div>}
-        {hits.map((c) => (
-          <div
-            key={c.customer_id}
-            className="flex items-center justify-between rounded-lg bg-white px-3 py-1.5 text-xs"
-          >
-            <span>
-              {c.name}
-              <span className="ml-2 text-zinc-400">{c.phone}</span>
-              <span className="ml-2 font-mono text-[10px] text-zinc-400">{c.customer_id}</span>
-            </span>
-            <Button size="sm" variant="ghost" disabled={granted.has(c.customer_id)} onClick={() => void grant(c)}>
-              {granted.has(c.customer_id) ? '✓ 已发' : '发放'}
-            </Button>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md rounded-xl border-zinc-200 text-zinc-900 shadow-xl">
+        <DialogHeader className="pb-3 border-b border-zinc-100">
+          <DialogTitle className="text-base font-bold text-zinc-900">
+            发券「{promo.name}」
+            {remaining != null && (
+              <span className="ml-2 text-[11px] font-normal text-zinc-500">
+                剩余可发 {remaining}/{promo.totalQuota}
+              </span>
+            )}
+          </DialogTitle>
+          <p className="mt-1 text-xs text-zinc-500">按姓名/手机号/客户号搜索,可连续发放</p>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto py-4 text-xs">
+          <Input
+            className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 shadow-none focus-visible:ring-0"
+            placeholder="搜索客户…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div className="space-y-1">
+            {hits.length === 0 && <div className="text-xs text-zinc-400">暂无匹配客户</div>}
+            {hits.map((c) => (
+              <div key={c.customer_id} className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1.5">
+                <span>
+                  {c.name}
+                  <span className="ml-2 text-zinc-400">{c.phone}</span>
+                  <span className="ml-2 font-mono text-[10px] text-zinc-400">{c.customer_id}</span>
+                </span>
+                <Button size="sm" variant="ghost" disabled={granted.has(c.customer_id)} onClick={() => void grant(c)}>
+                  {granted.has(c.customer_id) ? '✓ 已发' : '发放'}
+                </Button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="mt-2">
-        <Button size="sm" variant="ghost" onClick={onCancel}>
-          完成
-        </Button>
-      </div>
-    </div>
+        </div>
+        <DialogFooter className="gap-2 pt-3 sm:gap-0 border-t border-zinc-100">
+          <Button type="button" variant="outline" size="sm" onClick={onClose} className="text-xs cursor-pointer">
+            完成
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -7,8 +7,9 @@ import {
   DenseTableRow,
 } from '@/components/dense-table';
 import { api } from '@/lib/api';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
+import { useCallback, useEffect, useState } from 'react';
+import { Button } from 'ui';
+import { OwnerMappingDialog } from './owner-mapping-dialog';
 
 type MappingRow = {
   mapType: string;
@@ -34,9 +35,7 @@ export default function OwnerMappingsPage() {
   const [categories, setCategories] = useState<string[]>([]);
   const [metrics, setMetrics] = useState<Array<{ key: string; label: string }>>([]);
   const [staff, setStaff] = useState<StaffOption[]>([]);
-  const [mapType, setMapType] = useState('category');
-  const [mapValue, setMapValue] = useState('');
-  const [staffId, setStaffId] = useState('');
+  const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState('');
 
   const load = useCallback(async () => {
@@ -50,18 +49,6 @@ export default function OwnerMappingsPage() {
     void load();
   }, [load]);
 
-  const valueOptions = useMemo(() => (mapType === 'category' ? categories : metrics), [mapType, categories, metrics]);
-
-  const submit = async () => {
-    setMsg('');
-    const res = await api.ownerMappings.upsert({ mapType, mapValue, staffId });
-    setMsg(res.success ? '已登记' : `失败:${'message' in res ? res.message : '未知错误'}`);
-    if (res.success) {
-      setMapValue('');
-      await load();
-    }
-  };
-
   const remove = async (row: MappingRow) => {
     setMsg('');
     const res = await api.ownerMappings.remove(row.mapType, row.mapValue);
@@ -72,70 +59,12 @@ export default function OwnerMappingsPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <section className="rounded border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-        <h2 className="mb-2 text-sm font-medium">登记 / 改派责任人</h2>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <Select
-            value={mapType}
-            onValueChange={(v) => {
-              setMapType(v);
-              setMapValue('');
-            }}
-          >
-            <SelectTrigger aria-label="映射类型" className="h-auto rounded px-2 py-1">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="category">品类</SelectItem>
-              <SelectItem value="metric">指标</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={mapValue} onValueChange={(v) => setMapValue(v)}>
-            {/* 未选维度值 = 空串受控值,占位文案走 SelectValue placeholder(不可选) */}
-            <SelectTrigger aria-label="维度值" className="h-auto min-w-48 rounded px-2 py-1">
-              <SelectValue placeholder={`— 选择${MAP_TYPE_LABEL[mapType] ?? mapType} —`} />
-            </SelectTrigger>
-            <SelectContent>
-              {valueOptions.map((opt) => {
-                const value = typeof opt === 'string' ? opt : opt.key;
-                const label = typeof opt === 'string' ? opt : `${opt.label}(${opt.key})`;
-                return (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-          <Select value={staffId} onValueChange={(v) => setStaffId(v)}>
-            <SelectTrigger aria-label="负责人" className="h-auto min-w-40 rounded px-2 py-1">
-              <SelectValue placeholder="— 选择负责人 —" />
-            </SelectTrigger>
-            <SelectContent>
-              {staff
-                .filter((s) => s.status === 'enabled')
-                .map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.displayName}
-                    {s.dept ? `(${s.dept}${s.level ? `·${s.level}` : ''})` : ''}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-          <Button
-            type="button"
-            size="sm"
-            className="h-auto rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-800 disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
-            disabled={!mapValue || !staffId}
-            onClick={() => void submit()}
-          >
-            登记
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-medium">已登记映射({mappings.length})</h2>
+          <Button size="sm" onClick={() => setCreating(true)}>
+            + 登记 / 改派
           </Button>
         </div>
-        {msg && <div className="mt-2 text-[11px] text-zinc-500">{msg}</div>}
-      </section>
-
-      <section className="rounded border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-        <h2 className="mb-2 text-sm font-medium">已登记映射({mappings.length})</h2>
         <DenseTable className="text-left text-xs">
           <DenseTableHeader>
             <DenseTableRow className="hover:bg-transparent">
@@ -186,6 +115,20 @@ export default function OwnerMappingsPage() {
           </DenseTableBody>
         </DenseTable>
       </section>
+
+      {creating && (
+        <OwnerMappingDialog
+          categories={categories}
+          metrics={metrics}
+          staff={staff}
+          onSaved={setMsg}
+          onClose={() => {
+            setCreating(false);
+            void load();
+          }}
+        />
+      )}
+      {msg && <div className="text-[11px] text-zinc-500">{msg}</div>}
     </div>
   );
 }
