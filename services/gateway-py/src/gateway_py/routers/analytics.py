@@ -80,6 +80,15 @@ class PromotionStatusIn(BaseModel):
     status: str = ""
 
 
+class OwnerMappingUpsertIn(BaseModel):
+    """责任人映射三元组(nightly 2026-10-10 code-review:裸 request.json 无
+    类型/必填校验,server-gateway §2.2 客户端输入必须 DTO)。"""
+
+    mapType: str
+    mapValue: str
+    staffId: str
+
+
 class PromotionPatchIn(BaseModel):
     """与 update_promotion 白名单同构(路由旧 allowed 元组由此声明式承载)。"""
 
@@ -814,18 +823,17 @@ async def owner_mappings_list(request: Request):
 
 
 @router.put("/api/admin/analytics/owner-mappings")
-async def owner_mappings_upsert(request: Request):
+async def owner_mappings_upsert(request: Request, body: OwnerMappingUpsertIn):
     ctx = await _ctx(request)
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可维护责任人"})
-    body = await request.json()
     from engine_py.analytics import owner_routing
 
     result = await owner_routing.upsert_mapping(
         ctx["business_id"],
-        str(body.get("mapType") or ""),
-        str(body.get("mapValue") or ""),
-        str(body.get("staffId") or ""),
+        body.mapType,
+        body.mapValue,
+        body.staffId,
     )
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
