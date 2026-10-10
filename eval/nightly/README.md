@@ -1,7 +1,7 @@
 # 夜间 agent 评测(每晚 23:00)
 
-真实 LLM 会话评测两类 agent,由 Claude durable cron 驱动(23:00 档;
-评测收尾后同任务追加一轮 code-review:基点 = 昨晚评审收尾提交,当日无提交跳过,
+真实 LLM 会话评测两类 agent,由 **macOS launchd + headless Claude** 驱动(2026-10-10 起,
+每天 23:00;评测收尾后追加一轮 code-review:基点 = 昨晚评审收尾提交,当日无提交跳过,
 小问题直接修、行为代码改动须全量 pytest+ruff 验证、设计级争议列晨审):
 
 - **商城客服 agent**:`POST /api/store/chat`(33 场景:多场景/全链购物[导购→序数加购→地址簿建档→结算真单]/多模态/多意图复合/模糊意图/多轮指代改口/边界对抗[XSS·超长·空消息·注入]/HITL 正确性·转人工排队/会话隔离)
@@ -28,5 +28,22 @@
 护栏:总轮次 ≤90(LLM 成本),每轮超时 90s,失败不重试;`NIGHTLY_%` 前缀数据隔离,
 收尾删单+回补库存+删线程(审计记录按仓库约定保留)。
 
-cron 自续期:Claude 循环任务 7 天自动过期,每晚触发的 prompt 末尾带「重建同任务并删旧任务」
-自续期指令;链断则用本 README + `scripts` 说明手工重建(任务 #8 的 cron 定义即模板)。
+**调度 = launchd(2026-10-10 起)**:此前的 Claude durable cron 只在「本项目 REPL 会话开着
+且空闲」时触发(10-07/08/09 三晚静默停跑实证),且有 7 天过期+自续期链第二脆弱点,已退役。
+现役链路:`scripts/nightly/com.aurora.nightly-eval.plist`(模板,装于
+`~/Library/LaunchAgents/`,每天 23:00)→ `scripts/nightly/nightly-launchd.sh`(显式注入
+nvm/bun/uv PATH、6h 过期防重叠锁)→ `claude -p <完整 prompt> --dangerously-skip-permissions`
+(headless,含环境自举/评测/失败处置/code-review/CHANGELOG 回填全流程)。
+
+    # 安装/重装
+    cp scripts/nightly/com.aurora.nightly-eval.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aurora.nightly-eval.plist
+    # 状态 / 手动触发真跑
+    launchctl print gui/$(id -u)/com.aurora.nightly-eval
+    launchctl kickstart gui/$(id -u)/com.aurora.nightly-eval
+    # 链路彩排(smoke 切片,不评审不提交)
+    NIGHTLY_LAUNCHD_SMOKE=1 bash scripts/nightly/nightly-launchd.sh
+
+日志:`eval/nightly/logs/launchd.log`(含 headless 摘要与 exit 码)。仍有依赖:23:00 时
+Mac 须开机(可 `pmset repeat wakeorpoweron MTWRFSU 22:55:00` 定时唤醒);prompt 第 1 步
+自举 docker+网关,栈不可用如实记录不产假红。

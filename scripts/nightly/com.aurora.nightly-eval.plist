@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- 夜间 agent 评测调度(2026-10-10 起替代 Claude REPL cron,原因见
+     scripts/nightly/nightly-launchd.sh 头注释)。安装:
+       cp scripts/nightly/com.aurora.nightly-eval.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aurora.nightly-eval.plist
+     验证:launchctl print gui/$(id -u)/com.aurora.nightly-eval
+     手动触发真跑:launchctl kickstart gui/$(id -u)/com.aurora.nightly-eval -->
+<dict>
+  <key>Label</key>
+  <string>com.aurora.nightly-eval</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/weizheng/Desktop/test/ai/agent-all/scripts/nightly/nightly-launchd.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>23</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/weizheng/Desktop/test/ai/agent-all/eval/nightly/logs/launchd-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/weizheng/Desktop/test/ai/agent-all/eval/nightly/logs/launchd-stderr.log</string>
+</dict>
+</plist>
