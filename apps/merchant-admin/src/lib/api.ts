@@ -635,7 +635,10 @@ export const api = {
       fetchJson(`/api/admin/analytics/promotions/${id}/redeem`, { method: 'POST', body: JSON.stringify({ orderId }) }),
   },
 
-  /** 登录(唯一无会话接口;错误以 body 呈现,不走 401 清会话跳转)。 */
+  /** 登录(唯一无会话接口;错误以 body 呈现,不走 401 清会话跳转)。
+   *  网关不可达/挂起曾以两种劣形漏给用户:proxy 500 非 JSON 体 → 裸
+   *  SyntaxError 文案;挂起 → 永久「登录中…」无超时(2026-10-10 实弹)。
+   *  10s 超时 + 非 2xx 诚实报错,失败类一目了然。 */
   login: async (
     email: string,
     password: string,
@@ -645,11 +648,25 @@ export const api = {
     message?: string;
     data?: { token: string; user: { email: string } };
   }> => {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      throw new Error(
+        name === 'TimeoutError' || name === 'AbortError'
+          ? '登录服务无响应(10s 超时),请确认网关(4000)是否存活'
+          : '登录服务不可达,请确认网关(4000)是否已启动',
+      );
+    }
+    // 5xx = 服务/proxy 异常诚实报错;401 等仍返回 body(凭证错误由页面呈现,
+    // 与后端防枚举统一文案契约对齐)
+    if (res.status >= 500) throw new Error(`登录服务异常(HTTP ${res.status}),请稍后重试`);
     return res.json();
   },
 

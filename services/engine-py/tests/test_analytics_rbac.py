@@ -68,6 +68,17 @@ def test_sales_viewer_denies_dangerous_buttons_and_grey_desk():
     assert "m-agent-desk" not in ids
 
 
+def test_warehouse_operator_no_system_face():
+    """仓储种子面 = 数据/订单,系统管理三件套(菜单/角色/员工 + 各自按钮)
+    一律不可见(2026-10-10 用户裁决):变更类接口本就有 is_manager 硬闸,
+    种子面再放行只会产出「看得到、点不动」的 403 体验。"""
+    ids = set(DEFAULT_ROLE_MENUS["warehouse_operator"])
+    for face in ("d-system", "m-menus", "btn-menu-create", "m-roles", "btn-role-assign", "m-staff", "btn-staff-invite"):
+        assert face not in ids
+    # 本职面仍在:数据三页 + 订单履约(含发货按钮) + 接口日志
+    assert {"d-data", "m-analytics", "m-reports", "m-board", "d-orders", "m-orders", "btn-order-ship", "m-spi-logs"} <= ids
+
+
 def test_finance_and_admin_seed_full_face():
     for role in ("finance_owner", "admin"):
         assert set(DEFAULT_ROLE_MENUS[role]) == _MENU_IDS

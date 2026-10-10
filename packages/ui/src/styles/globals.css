@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/*
+ * dark: 变体锁死为类驱动(四 app 单浅色主题)。
+ * Tailwind v4 的 dark: 默认 = @media (prefers-color-scheme: dark),OS 深色模式
+ * 会让散写的 dark:bg-* 半边翻色而文字色不跟随,出现黑底黑字(2026-10-09 实弹:
+ * merchant-admin owner-mappings 表格与 Dialog 在 OS 深色下整块涂黑)。
+ * 本工作区无任何 .dark 类切换,此行使 dark: 仅在显式挂 .dark 时生效 ——
+ * 未来引入 dark: 写法也保持惰性;真要做暗色主题须另立 token 级方案,不走散写变体。
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @source "../**/*.{ts,tsx}";
 @source "../../**/*.{ts,tsx}";
 @source "../../../packages/ui/src/**/*.{ts,tsx}";

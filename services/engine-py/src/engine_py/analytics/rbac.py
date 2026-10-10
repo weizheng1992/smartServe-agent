@@ -97,9 +97,11 @@ DEFAULT_MENUS: list[dict] = [
 ]
 
 # 角色→菜单种子(13-D1;finance_owner=全量,sales_viewer=全量菜单但指标受限,
-# warehouse_operator=数据/订单/系统)。按钮节点即接口权限点(0013 动态化后语义
+# warehouse_operator=数据/订单)。按钮节点即接口权限点(0013 动态化后语义
 # 为真):种子面与原硬编码 _perms() 等效 —— 运营无商品编辑/发货/系统管理,
-# 仓储无报告生成/导出。
+# 仓储无报告生成/导出;系统管理面(菜单/角色/员工)为老板专属,仓储一律
+# 不可见(2026-10-10 用户裁决:仓储只见数据/订单,变更类接口另有 is_manager
+# 硬闸,种子面收敛消除「看得到、点不动」的 403 体验)。
 _SALES_DENY_BUTTONS = {"btn-prod-edit", "btn-order-ship", "btn-menu-create", "btn-role-assign", "btn-staff-invite"}
 # 灰度中菜单(live-desk-rework §3):运营暂不可见,稳后并入其种子面
 _GREY_RELEASE_MENUS = {"m-agent-desk"}
@@ -110,7 +112,6 @@ DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
     "warehouse_operator": [
         "d-data", "m-analytics", "m-reports", "m-board",
         "d-orders", "m-orders", "btn-order-ship", "m-spi-logs",
-        "d-system", "m-menus", "btn-menu-create", "m-roles", "btn-role-assign", "m-staff", "btn-staff-invite",
     ],
     # live-desk-rework §2.2:专职客服 = 客服工作台 + 客户管理,不给数据分析/
     # 订单/商品/优惠/系统面(商户招客服不泄经营数据);新坐席台按灰度暂不授。

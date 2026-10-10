@@ -94,7 +94,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
         role="dialog"
         aria-modal="true"
         className={cn(
-          'relative w-full max-w-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh] overflow-hidden',
+          'relative w-full max-w-lg bg-white text-slate-900 rounded-2xl border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh] overflow-hidden',
           className,
         )}
         onClick={(e) => e.stopPropagation()}
@@ -107,7 +107,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
             type="button"
             aria-label="Close"
             onClick={handleClose}
-            className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors z-20 cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-slate-400"
+            className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors z-20 cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-slate-400"
           >
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
@@ -132,7 +132,7 @@ const DialogClose = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttribut
           onOpenChange?.(false);
         }}
         className={cn(
-          'rounded-lg p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer',
+          'rounded-lg p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer',
           className,
         )}
         {...props}
@@ -147,7 +147,7 @@ const DialogHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLD
     <div
       ref={ref}
       className={cn(
-        'flex flex-col space-y-1.5 text-center sm:text-left pb-4 border-b border-slate-100 dark:border-slate-800 shrink-0 pr-8',
+        'flex flex-col space-y-1.5 text-center sm:text-left pb-4 border-b border-slate-100 shrink-0 pr-8',
         className,
       )}
       {...props}
@@ -161,7 +161,7 @@ const DialogFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLD
     <div
       ref={ref}
       className={cn(
-        'flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 pt-4 border-t border-slate-100 dark:border-slate-800 shrink-0',
+        'flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 pt-4 border-t border-slate-100 shrink-0',
         className,
       )}
       {...props}
@@ -174,7 +174,7 @@ const DialogTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HT
   ({ className, ...props }, ref) => (
     <h3
       ref={ref}
-      className={cn('text-lg font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100', className)}
+      className={cn('text-lg font-semibold leading-none tracking-tight text-slate-900', className)}
       {...props}
     />
   ),
@@ -182,9 +182,7 @@ const DialogTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HT
 DialogTitle.displayName = 'DialogTitle';
 
 const DialogDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
-  ({ className, ...props }, ref) => (
-    <p ref={ref} className={cn('text-sm text-slate-500 dark:text-slate-400', className)} {...props} />
-  ),
+  ({ className, ...props }, ref) => <p ref={ref} className={cn('text-sm text-slate-500', className)} {...props} />,
 );
 DialogDescription.displayName = 'DialogDescription';
 

@@ -58,7 +58,7 @@ export default function OwnerMappingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <section className="rounded border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
+      <section className="rounded border border-zinc-200 bg-white p-4">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-medium">已登记映射({mappings.length})</h2>
           <Button size="sm" onClick={() => setCreating(true)}>
