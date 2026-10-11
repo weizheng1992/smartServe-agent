@@ -339,8 +339,7 @@ async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Qu
     """SSE 事件流 — 读流泵上收 sse_tail(架构审查 #3):Last-Event-ID 回放、
     心跳、断连、坏 seq、JSON 回落、result 优雅收口均为三 SSE 面共享的单点机制;
     本面只声明 Last-Event-ID 起点(+CORS 头)。"""
-    last_event_id_header = request.headers.get("last-event-id") or lastEventId
-    last_seq = int(last_event_id_header) if last_event_id_header and last_event_id_header.isdigit() else 0
+    last_seq = sse_tail.last_event_id_from(request, query_fallback=lastEventId, default=0) or 0
     return StreamingResponse(
         sse_tail.tail_stream(
             job_id,

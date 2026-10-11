@@ -23,6 +23,7 @@ pub/sub 断线即漏)。本 module 把读流收成一个 interface,Stream 与 pu
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import json
 import time
 import typing
@@ -30,7 +31,15 @@ import typing
 from engine_py.event_bus import get_client, read_agent_events, stream_key
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-__all__ = ["get_client", "read_agent_events", "streaming_headers", "tail_pubsub", "tail_stream"]
+__all__ = [
+    "frame_id_from_timestamp",
+    "get_client",
+    "last_event_id_from",
+    "read_agent_events",
+    "streaming_headers",
+    "tail_pubsub",
+    "tail_stream",
+]
 
 
 def _sse_frame(seq: int, event: str, data) -> str:
@@ -44,6 +53,50 @@ def _sse_line(event: str, data) -> str:
 
 def _heartbeat() -> str:
     return _sse_line("heartbeat", {"timestamp": int(time.time() * 1000)})
+
+
+def frame_id_from_timestamp(value) -> int | None:
+    """消息 timestamp → SSE 帧 id(epoch ms,ADR-0013 重连补投的水位单位)。
+
+    接受 数值 / 纯数字串 / iso 字符串(live 发布帧是本地 naive iso,timeline
+    行是 UTC 带偏移 iso,统一 astimezone 归一);不可解析返回 None(该帧不带
+    id,只 live 送达,不参与重放水位)。"""
+    try:
+        if isinstance(value, (int, float)):
+            return int(value)
+        text = str(value or "").strip()
+        if text.isdigit():
+            return int(text)
+        parsed = _dt.datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()  # naive 视作本地墙钟
+        return int(parsed.timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def last_event_id_from(request, query_fallback: str | None = None, default: int | None = None) -> int | None:
+    """请求的 Last-Event-ID 起点(header 优先,兼容 query;isdigit 语义同
+    chat.py 既有契约)。非法/缺省返回 ``default``(chat 面=0 全量回放,商店
+    面=None 不重放)。"""
+    raw = request.headers.get("last-event-id") or query_fallback
+    return int(raw) if raw and raw.isdigit() else default
+
+
+def _pubsub_message_frame(raw: str) -> str:
+    """pubsub 透传帧补 ``id:`` 行(ADR-0013 L1 重连补投的 live 侧半边)。
+
+    id = payload 的 timestamp 转 epoch ms;浏览器 EventSource 原生重连会以
+    Last-Event-ID 带回最后收到的 id,服务端据此重放缺失消息。payload 非法/
+    无 timestamp 时回落无 id 形状 —— **data 段保持原始串逐字透传,不重序列
+    化**(线格式契约)。"""
+    try:
+        eid = frame_id_from_timestamp(json.loads(raw).get("timestamp"))
+    except Exception:
+        eid = None
+    if eid is not None:
+        return f"id: {eid}\nevent: message\ndata: {raw}\n\n"
+    return f"event: message\ndata: {raw}\n\n"
 
 
 def streaming_headers(*, cors: bool = False, extra: dict | None = None) -> dict:
@@ -151,16 +204,30 @@ async def tail_pubsub(
     connected_payload: dict | None = None,
     disconnected: typing.Callable[[], typing.Awaitable[bool]] | None = None,
     idle_seconds: float = 15.0,
+    last_event_id: int | None = None,
+    replay: typing.Callable[[int], typing.Awaitable[list[tuple[int, dict]]]] | None = None,
 ):
     """pub/sub 读流泵(顾客侧实时频道 thread:{id}:message)。
 
     阻塞式等待(socket_timeout 需 > idle_seconds):非阻塞轮询 + sleep 的写法
     会让每条消息延迟 15~30s 才转发 —— get_message(timeout=0) 首轮吞不掉已到达
-    的消息,须下一轮才可见。pub/sub 天然无回放,断线期间消息由上层时间线拉取兜底。
-    """
+    的消息,须下一轮才可见。
+
+    L1 重连补投(ADR-0013,2026-10-10):message 帧补 ``id:``(payload 的
+    timestamp 转 epoch ms);调用方传入 last_event_id(浏览器 EventSource 原生
+    重连自动带 Last-Event-ID header)与 replay 回调(从 DB 时间线取缺失消息)
+    时,订阅前先重放,重叠由客户端按消息 id 幂等吸收。首连(无 last_event_id)
+    不重放,首屏水合仍走 messages 接口。pub/sub 本身依旧无回放,本参数化只补
+    「断线窗口」不改变活路语义。"""
     yield ""  # 让响应头立刻落地
     if connected_payload is not None:
         yield _sse_line("connected", connected_payload)
+    if replay is not None and last_event_id is not None:
+        try:
+            for eid, payload in await replay(last_event_id):
+                yield _sse_frame(eid, "message", payload)
+        except Exception as err:
+            print(f"[SseTail] timeline replay failed, 降级纯 live: {err}")
     pubsub = None
     client = None
     try:
@@ -184,7 +251,7 @@ async def tail_pubsub(
                     data = msg.get("data")
                     if isinstance(data, bytes):
                         data = data.decode()
-                    yield f"event: message\ndata: {data}\n\n"
+                    yield _pubsub_message_frame(data)
                     continue
             else:
                 await asyncio.sleep(idle_seconds)

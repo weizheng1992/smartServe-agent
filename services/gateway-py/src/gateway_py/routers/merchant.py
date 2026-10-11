@@ -39,7 +39,8 @@ from ..conversation_repo import (
     publish_thread_message,
 )
 from ..hmac_signer import verify as hmac_verify
-from ..sse_tail import streaming_headers, tail_pubsub
+from ..sse_tail import frame_id_from_timestamp as _sse_frame_id
+from ..sse_tail import last_event_id_from, streaming_headers, tail_pubsub
 from ..tenant_scope import (
     GateError,
     TenantScope,
@@ -702,14 +703,36 @@ async def store_chat_stream(
     if not same_tenant(owner, tenant):
         raise GateError(403, "会话不属于该商户,拒绝订阅")
 
+    # L1 重连补投(ADR-0013,2026-10-10):浏览器 EventSource 原生重连自动带
+    # Last-Event-ID(header,兼容 query;isdigit 语义收口 sse_tail)。有 id
+    # 才重放:从 DB 时间线取该时刻之后的缺失消息(≤50 条)先发再订阅 —— 断线
+    # 期间的坐席/系统消息从「永久丢失、刷新才回」变「重连即补」;首连不重放,
+    # 首屏水合仍走 GET /api/store/chat/messages;重叠由客户端按消息 id 幂等吸收。
+    last_event_id = last_event_id_from(request)
+
+    async def _replay_timeline(after_ms: int) -> list[tuple[int, dict]]:
+        timeline = await conversation_repo.get_conversation_timeline(threadId, tenant)
+        rows = timeline.get("messages") if isinstance(timeline, dict) else None
+        replayed: list[tuple[int, dict]] = []
+        for msg in rows or []:
+            eid = _sse_frame_id(msg.get("timestamp"))
+            if eid is None or eid <= after_ms:
+                continue
+            # 整行透传(repo 已归一化 id/role/content/cards/imageUrls/timestamp),
+            # 不再手投影 —— 带图行重放不丢图,与 live 帧同 event 形
+            replayed.append((eid, dict(msg)))
+        return replayed[-50:]
+
     # 读流泵上收 sse_tail(架构审查 #3):pub/sub 作第二个 adapter,顺带补齐
     # Stream 泵既有而本面缺失的断连检查;线格式(connected 首帧/message 裸透传/
-    # 心跳)与历史逐字节一致。
+    # 心跳)与历史逐字节一致(message 帧新增 id: 行,ADR-0013)。
     return StreamingResponse(
         tail_pubsub(
             THREAD_CHANNEL.format(thread_id=threadId),
             connected_payload={"threadId": threadId, "timestamp": _ts_ms()},
             disconnected=request.is_disconnected,
+            last_event_id=last_event_id,
+            replay=_replay_timeline,
         ),
         media_type="text/event-stream",
         headers=streaming_headers(),

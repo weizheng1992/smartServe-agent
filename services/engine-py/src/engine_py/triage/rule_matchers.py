@@ -53,6 +53,19 @@ def is_quick_greeting(user_input: str) -> bool:
     """
     clean = normalize_greeting_input(user_input)
     return clean in QUICK_GREETING_WORDS
+
+# 「继续」重派词族(ADR-0013,2026-10-10):上轮 assistant 缺失/失败时,run_agent
+# 入口把输入改写回上轮用户原问题(替用户重新问一遍)。刻意**整句等值**而非子串:
+# 「然后|接着」是 MULTI_INTENT 连接词、「继续推荐便宜的」带新诉求,子串必误劫持
+# 把新条件弄丢;漏接只是落回 LLM 发挥,无害。纯 frozenset + in 谓词(问候词表同
+# 款),规整复用 normalize_greeting_input(「继续。」/「然后呢?」都接得住)。
+CONTINUE_WORDS = frozenset({"继续", "继续说", "请继续", "接着说", "然后呢", "接着讲"})
+
+
+def is_continue_word(user_input: str) -> bool:
+    """规整(去标点空白 + 小写)后精确命中「继续」重派词表(ADR-0013)。"""
+    return normalize_greeting_input(user_input) in CONTINUE_WORDS
+
 EXIT_RE = re.compile(
     r"^(再见|退出|bye|exit|quit|再见啦|拜拜|不聊了|好的，我的问题已经解决了，谢谢|我的问题解决了|问题解决了|解决了|谢谢|谢谢你|多谢)$",
     re.IGNORECASE,

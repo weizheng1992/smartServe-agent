@@ -50,6 +50,7 @@ from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
 from .tenant_context import set_business_context
 from .tools_registry.mall_domain import MallDomainService
+from .triage import rule_matchers
 from .triage.intent_registry import CONSULT_SIDE_INTENTS
 from .triage.rule_matchers import is_quick_greeting
 from .vision import normalize_image_urls
@@ -463,6 +464,63 @@ async def _settle_turn(
     return final_result
 
 
+async def _maybe_continue_rewrite(
+    job: AgentJobInput,
+    input_message: str,
+    short_memory: ShortMemory,
+    task_memory: TaskMemory,
+) -> str:
+    """「继续」确定性重派(ADR-0013 决策 2,2026-10-10):上轮 assistant 缺失
+    或失败时,把输入改写回上轮用户原问题 —— 不是旁路重放(上轮无可放之物),
+    是替用户把没被回答的问题重新问一遍,复用整条既有管线。静默重答,无前缀。
+
+    五道闸,任一不过原样放行;全函数 try/except 包裹(无异常冷启动,闸数据
+    不可得一律放行)。改写挂 run_agent 入口而非 triage Stage:StageContext 的
+    input/clean_input 是不变组(13 出口/41 处读取共享同一可变事实的只读纪律),
+    改写必须在 ctx 构造之前发生 —— 见 .scratch/chat-disconnect-recovery/spec.md
+    §2.2 的偏差记录。时序口径:本轮「继续」的 user 行由网关 chat_turn 先行落库,
+    故上轮问题 = user_msgs[-2](与 duplicate_intercept 同一口径)。"""
+    try:
+        # 闸① 整句等值词表(规整后精确匹配;子串会撞 MULTI_INTENT 连接词
+        # 「然后|接着」、误劫持「继续推荐便宜的」这类带新诉求的合法输入)
+        if not rule_matchers.is_continue_word(input_message):
+            return input_message
+        # 闸② 带图轮次豁免(图证即新证据,与 duplicate_intercept 同源纪律)
+        if job.image_urls:
+            return input_message
+        # 闸③ 无待决议审批 —— HOT-RESUME 契约:planner 测试正拿裸「继续」
+        # 钉「审批未决议必须深规划」。spec 从宽口径:pendingAction 任意真值
+        # 即让位;审批数据不可得同样让位(无法排除待决议,保守放行)
+        try:
+            saved_state = await task_memory.get_task_state()
+        except Exception:
+            return input_message
+        if isinstance(saved_state, dict) and saved_state.get("pendingAction"):
+            return input_message
+        # 闸④⑤ 上轮有 user 文本,且上一条 assistant 缺失或失败(正常完成时
+        # 「继续」交回 LLM 自由发挥——继续推荐更多本来就是对的)
+        history = await short_memory.get_messages()
+        user_msgs = [m for m in history if m.get("role") == "user"]
+        if len(user_msgs) < 2:
+            return input_message
+        prev_question = str(user_msgs[-2].get("content") or "").strip()
+        if not prev_question:
+            return input_message
+        assistant_msgs = [m for m in history if m.get("role") == "assistant"]
+        if assistant_msgs and not rule_matchers.is_failed_response(
+            str(assistant_msgs[-1].get("content") or "")
+        ):
+            return input_message
+        print(
+            f"[ContinueRewrite] 「继续」重派上轮问题 threadId={job.thread_id} "
+            f"rewritten_to={prev_question[:40]!r}"
+        )
+        return prev_question
+    except Exception as err:
+        print(f"[ContinueRewrite] 判定异常,原样放行: {err}")
+        return input_message
+
+
 async def run_agent(job: AgentJobInput) -> dict:
     thread_id = job.thread_id
     user_id = job.user_id
@@ -476,6 +534,10 @@ async def run_agent(job: AgentJobInput) -> dict:
 
     short_memory = ShortMemory(thread_id, 10, job.business_id)
     task_memory = TaskMemory(thread_id)
+
+    # 0. 「继续」确定性重派(ADR-0013):上轮 assistant 缺失/失败时改写回
+    # 上轮用户原问题,落回正常全链;五闸任一不过原样放行
+    input_message = await _maybe_continue_rewrite(job, input_message, short_memory, task_memory)
 
     # 1. 🚀 毫秒级极速直达旁路:纯问候/身份问句零模型开销
     if is_quick_greeting(input_message):

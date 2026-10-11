@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import importlib
 import random
+from datetime import UTC
 from typing import ClassVar
 
 import pytest
@@ -2155,8 +2156,11 @@ class TestMerchantStoreChatStream:
                         published = True
                         await asyncio.sleep(0.2)  # 等服务端 subscribe 完成
                         redis = await get_redis_client()
+                        # L1(ADR-0013):live 帧补 id:(payload.timestamp → epoch ms),
+                        # 浏览器重连时以 Last-Event-ID 带回,服务端据此重放缺失消息
                         await redis.publish(
-                            f"thread:{thread_id}:message", _json.dumps({"text": "contract-relay"})
+                            f"thread:{thread_id}:message",
+                            _json.dumps({"text": "contract-relay", "timestamp": "2026-10-10T01:02:03"}),
                         )
                     buf += chunk
                     if "event: message" in buf:
@@ -2167,6 +2171,89 @@ class TestMerchantStoreChatStream:
                 # 订阅建立后,经由 Redis pub/sub 频道发布的消息应被原样转发
                 assert "event: message" in buf
                 assert '"text": "contract-relay"' in buf
+                assert "id: " in buf, f"live message 帧缺 id: 行(ADR-0013):{buf[-300:]!r}"
+
+    async def test_reconnect_replays_timeline_after_last_event_id(self, live_server):
+        """L1 重连补投(ADR-0013):带 Last-Event-ID 重连 → 先从 DB 时间线重放
+        该时刻之后的缺失消息(带 id: 与完整 payload)再进 live;非数字 id 不重放。
+        断线期间的坐席/系统消息从「永久丢失、刷新才回」变「重连即补」。"""
+        import uuid as _uuid
+        from datetime import datetime, timedelta
+
+        import httpx
+        from engine_py.db import get_session
+        from sqlalchemy import text as _sql
+
+        thread_id = f"merchant_stream_replay_{_TS}"
+        await create_thread(thread_id, "u_stream_replay", "nike")
+        now = datetime.now(UTC)
+        t1, t2 = now - timedelta(seconds=60), now - timedelta(seconds=30)
+
+        async def _insert(role: str, content: str, ts: datetime) -> None:
+            async with get_session() as session:
+                await session.execute(
+                    _sql(
+                        "INSERT INTO messages (id, thread_id, business_id, role, content, timestamp) "
+                        "VALUES (:mid, :tid, :bid, :role, :content, :ts)"
+                    ).bindparams(
+                        mid=str(_uuid.uuid4()), tid=thread_id, bid="nike",
+                        role=role, content=content, ts=ts.isoformat(),
+                    )
+                )
+                await session.commit()
+
+        await _insert("assistant", "replay-old-marker", t1)
+        await _insert("assistant", "replay-new-marker", t2)
+        after_ms = int(t1.timestamp() * 1000)
+
+        timeout = httpx.Timeout(10.0, read=15.0)
+        async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client:
+            # 带 Last-Event-ID(= t1 的 epoch ms):t1 被排除,t2 必须重放
+            async with client.stream(
+                "GET",
+                "/api/store/chat/stream",
+                params={"threadId": thread_id, "businessId": "nike"},
+                headers={"Last-Event-ID": str(after_ms)},
+            ) as res:
+                assert res.status_code == 200
+                buf = ""
+                async for chunk in res.aiter_text():
+                    buf += chunk
+                    if "replay-new-marker" in buf:
+                        break
+            assert "event: connected" in buf
+            assert "replay-new-marker" in buf, f"缺失消息未重放:{buf[-300:]!r}"
+            assert "id: " in buf
+            # 水位之前(≤ Last-Event-ID)的消息严禁重放
+            assert "replay-old-marker" not in buf, f"水位之前的消息被重放:{buf!r}"
+
+            # 非数字 Last-Event-ID → 不重放(与 chat.py 同款 isdigit 语义)
+            async with client.stream(
+                "GET",
+                "/api/store/chat/stream",
+                params={"threadId": thread_id, "businessId": "nike"},
+                headers={"Last-Event-ID": "not-a-number"},
+            ) as res:
+                buf = ""
+                async for chunk in res.aiter_text():
+                    buf += chunk
+                    if "event: heartbeat" in buf:
+                        break
+            assert "replay-new-marker" not in buf, f"非数字 id 不应触发重放:{buf!r}"
+
+            # 无 header(首连)→ 不重放:首屏水合仍走 messages 接口(ADR-0013 §1.1)
+            async with client.stream(
+                "GET",
+                "/api/store/chat/stream",
+                params={"threadId": thread_id, "businessId": "nike"},
+            ) as res:
+                buf = ""
+                async for chunk in res.aiter_text():
+                    buf += chunk
+                    if "event: heartbeat" in buf:
+                        break
+            assert "event: connected" in buf
+            assert "replay-new-marker" not in buf, f"首连不应触发重放:{buf!r}"
 
 
 class TestAuth:
