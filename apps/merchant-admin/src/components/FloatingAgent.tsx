@@ -1,7 +1,7 @@
 import { FeedbackButtons, type FeedbackVerdict } from '@/components/FeedbackButtons';
 import { ResultCard } from '@/components/ResultCard';
 import { type AskCard } from '@/lib/analytics-frames';
-import { api } from '@/lib/api';
+import { AskStreamError, api } from '@/lib/api';
 import { type SelectionMap, clearSelection, getSelection, getSelectionLabels, subscribe } from '@/lib/page-context';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -37,7 +37,12 @@ type AgentFrame = {
 
 type AskResultFrame = { event: AgentEvent | string; data: Record<string, unknown> };
 
-type AgentFrameData = { message?: string; options?: Array<{ label: string }> } & Record<string, unknown>;
+type AgentFrameData = {
+  message?: string;
+  options?: Array<{ label: string }>;
+  /** 断线恢复句柄(AskStreamError 落到 error 帧上):「恢复结果」按钮消费 */
+  resume?: { askId: string; lastEventId: number; question: string; pageContext: object };
+} & Record<string, unknown>;
 
 function exportResultCsv(data: ResultData) {
   const rows = data.rows || [];
@@ -123,6 +128,78 @@ export function FloatingAgent({ route }: { route: string }) {
     return () => window.removeEventListener('merchant-admin:open-agent', handler);
   }, []);
 
+  /** 成功帧落屏:pending 摘除 + 过滤心跳后按本地 id 顺序重编(ADR-0005 流式渲染)。 */
+  function appendAskResult(pendingId: number, question: string, result: AskResultFrame[]) {
+    setFrames((prev) => {
+      const withoutPending = prev.filter((f) => f.id !== pendingId);
+      return [
+        ...withoutPending,
+        // 心跳帧是传输层保活(A6),不是对话内容,不入历史
+        ...(result as AskResultFrame[])
+          .filter((f: AskResultFrame) => f.event !== 'heartbeat')
+          .map((f: AskResultFrame, k: number) => ({
+            id: pendingId + 10 + k,
+            event: f.event,
+            data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
+          })),
+      ];
+    });
+  }
+
+  /** 断线恢复(ADR-0013 同族,ask 面版):错误帧携带的句柄重新进流 ——
+   * 服务端只补 seq>last 的帧不重算(生产者断开不停算,流留 Redis 600s)。 */
+  async function resumeAsk(frame: AgentFrame) {
+    const resume = frame.data.resume;
+    if (!resume || busy) return;
+    setBusy(true);
+    const pendingId = ++frameSeq * 100 + 1;
+    setFrames((prev) => [...prev, { id: pendingId, event: 'pending', data: {} }]);
+    try {
+      const result = await api.ask(resume.question, resume.pageContext, undefined, {
+        askId: resume.askId,
+        lastEventId: resume.lastEventId,
+      });
+      // 连旧错误帧一起摘:恢复成功后不留失效的「恢复结果」按钮
+      setFrames((prev) => {
+        const withoutStale = prev.filter((f) => f.id !== pendingId && f.id !== frame.id);
+        return [
+          ...withoutStale,
+          ...(result as AskResultFrame[])
+            .filter((f) => f.event !== 'heartbeat')
+            .map((f, k) => ({
+              id: pendingId + 10 + k,
+              event: f.event,
+              data: f.event === 'result' ? { ...f.data, __question: resume.question } : f.data,
+            })),
+        ];
+      });
+    } catch (err) {
+      setFrames((prev) =>
+        prev
+          // 连旧错误帧一起摘:恢复再失败只留最新句柄,不堆「恢复结果」按钮
+          .filter((f) => f.id !== pendingId && f.id !== frame.id)
+          .concat({
+            id: pendingId + 10,
+            event: 'error',
+            data: {
+              message: String(err),
+              ...(err instanceof AskStreamError
+                ? {
+                    resume: {
+                      askId: err.askId,
+                      lastEventId: err.lastEventId,
+                      question: resume.question,
+                      pageContext: resume.pageContext,
+                    },
+                  }
+                : {}),
+            },
+          }),
+      );
+    }
+    setBusy(false);
+  }
+
   async function ask(questionOverride?: string) {
     const question = (questionOverride ?? q).trim();
     if (!question || busy) return;
@@ -145,25 +222,41 @@ export function FloatingAgent({ route }: { route: string }) {
     ]);
     try {
       const result = await api.ask(question, { route, selection, selectionLabels: getSelectionLabels(), sessionId });
-      setFrames((prev) => {
-        const withoutPending = prev.filter((f) => f.id !== pendingId);
-        return [
-          ...withoutPending,
-          // 心跳帧是传输层保活(A6),不是对话内容,不入历史
-          ...(result as AskResultFrame[])
-            .filter((f: AskResultFrame) => f.event !== 'heartbeat')
-            .map((f: AskResultFrame, k: number) => ({
-              id: pendingId + 10 + k,
-              event: f.event,
-              data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
-            })),
-        ];
-      });
+      appendAskResult(pendingId, question, result as AskResultFrame[]);
     } catch (err) {
       setFrames((prev) =>
         prev
           .filter((f) => f.id !== pendingId)
-          .concat({ id: pendingId + 10, event: 'error', data: { message: String(err) } }),
+          // 断线前已收到的部分帧(如 clarify)照常上屏,不因失败丢弃
+          .concat(
+            ...(err instanceof AskStreamError && err.frames.length
+              ? (err.frames as AskResultFrame[])
+                  .filter((f) => f.event !== 'heartbeat')
+                  .map((f, k) => ({
+                    id: pendingId + 10 + k,
+                    event: f.event,
+                    data: f.data,
+                  }))
+              : []),
+          )
+          .concat({
+            id: pendingId + 10 + (err instanceof AskStreamError ? err.frames.length : 0),
+            event: 'error',
+            data: {
+              message: String(err),
+              // 恢复句柄:流留 Redis 600s、生产者断开不停算,「恢复结果」不重算
+              ...(err instanceof AskStreamError
+                ? {
+                    resume: {
+                      askId: err.askId,
+                      lastEventId: err.lastEventId,
+                      question,
+                      pageContext: { route, selection, selectionLabels: getSelectionLabels(), sessionId },
+                    },
+                  }
+                : {}),
+            },
+          }),
       );
     }
     setBusy(false);
@@ -391,6 +484,23 @@ export function FloatingAgent({ route }: { route: string }) {
                     {String(f.data.message ?? f.event)}
                     {f.data.caliber ? (
                       <div className="mt-1 text-[11px] text-zinc-400">口径:{String(f.data.caliber)}</div>
+                    ) : null}
+                    {/* 断线恢复(ADR-0013 同族,ask 面版):AskStreamError 落地的
+                        error 帧带句柄 —— 流还在 Redis(600s)、生产者仍在后台跑,
+                        恢复只补剩余帧不重算;过期(流不存在)由服务端 error 帧
+                        诚实回「请重新提问」。 */}
+                    {f.data.resume ? (
+                      <div className="mt-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={busy}
+                          className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
+                          onClick={() => void resumeAsk(f)}
+                        >
+                          恢复结果
+                        </Button>
+                      </div>
                     ) : null}
                     {/* unsupported 帧仅开放 👎:「这问题本该能答」是词林缺口的最高价值信号 */}
                     {f.event === 'unsupported' && isFeedbackTail ? (

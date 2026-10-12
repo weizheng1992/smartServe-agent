@@ -93,7 +93,9 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
   return (
     <>
       {frames
-        .filter((f) => f.event !== 'start')
+        // heartbeat 是传输层保活(ADR-0013 同族纪律):不入对话流,渲染成
+        // 文本气泡曾把长问句刷成每 15s 一条「heartbeat」
+        .filter((f) => f.event !== 'start' && f.event !== 'heartbeat')
         .map((f, i, visible) => (
           /* biome-ignore lint/suspicious/noArrayIndexKey: AskFrame 无业务 id,append-only 对话流不重排 */
           <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>

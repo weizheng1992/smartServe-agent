@@ -4,16 +4,31 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FloatingAgent } from './FloatingAgent';
 
-// 纯单测:api 全桩,不碰真实网关
-vi.mock('@/lib/api', () => ({
-  api: {
-    ask: vi.fn(),
-    reports: { saveFromResult: vi.fn(), create: vi.fn() },
-    feedback: { submit: vi.fn() },
-  },
-}));
+// 纯单测:api 全桩,不碰真实网关(AskStreamError 用真类,组件 instanceof 判恢复句柄)
+vi.mock('@/lib/api', () => {
+  class AskStreamError extends Error {
+    askId: string;
+    lastEventId: number;
+    frames: unknown[];
+    constructor(message: string, askId: string, lastEventId: number, frames: unknown[] = []) {
+      super(message);
+      this.name = 'AskStreamError';
+      this.askId = askId;
+      this.lastEventId = lastEventId;
+      this.frames = frames;
+    }
+  }
+  return {
+    AskStreamError,
+    api: {
+      ask: vi.fn(),
+      reports: { saveFromResult: vi.fn(), create: vi.fn() },
+      feedback: { submit: vi.fn() },
+    },
+  };
+});
 
-import { api } from '@/lib/api';
+import { AskStreamError, api } from '@/lib/api';
 const askMock = api.ask as unknown as ReturnType<typeof vi.fn>;
 const feedbackMock = api.feedback.submit as unknown as ReturnType<typeof vi.fn>;
 
@@ -79,6 +94,50 @@ describe('FloatingAgent(对话面板交互)', () => {
     submit('会话量多少');
     await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument());
     expect(screen.queryByText(/正在解析/)).not.toBeInTheDocument();
+  });
+
+  it('断线失败(AskStreamError):部分帧照常上屏 + 错误帧带「恢复结果」', async () => {
+    askMock.mockRejectedValue(
+      new AskStreamError('TypeError: network error', 'ask_x1', 1, [
+        { event: 'clarify', data: { question: '要看哪个时间范围?', options: [] } },
+      ]),
+    );
+    renderAgent();
+    openPanel();
+    submit('本月销量');
+    expect(await screen.findByText('要看哪个时间范围?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '恢复结果' })).toBeInTheDocument();
+  });
+
+  it('点击「恢复结果」:携句柄重进流不重算,结果上屏', async () => {
+    askMock
+      .mockRejectedValueOnce(new AskStreamError('TypeError: network error', 'ask_x1', 1, []))
+      .mockResolvedValueOnce([{ event: 'result', data: { metric: 'volume', unit: '件', rows: [{ a: 1 }] } }]);
+    renderAgent();
+    openPanel();
+    submit('本月销量');
+    fireEvent.click(await screen.findByRole('button', { name: '恢复结果' }));
+    await waitFor(() =>
+      expect(askMock).toHaveBeenLastCalledWith('本月销量', expect.anything(), undefined, {
+        askId: 'ask_x1',
+        lastEventId: 1,
+      }),
+    );
+    // 恢复成功:pending 摘除、错误帧不再残留
+    expect(screen.queryByText(/正在解析/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '恢复结果' })).not.toBeInTheDocument();
+  });
+
+  it('恢复再失败:新错误帧仍带句柄(可再次恢复)', async () => {
+    askMock
+      .mockRejectedValueOnce(new AskStreamError('TypeError: network error', 'ask_x1', 1, []))
+      .mockRejectedValueOnce(new AskStreamError('TypeError: network error', 'ask_x1', 2, []));
+    renderAgent();
+    openPanel();
+    submit('本月销量');
+    fireEvent.click(await screen.findByRole('button', { name: '恢复结果' }));
+    await waitFor(() => expect(screen.getAllByText(/network error/).length).toBeGreaterThan(0));
+    expect(screen.getByRole('button', { name: '恢复结果' })).toBeInTheDocument();
   });
 
   it('历史持久化:渲染时恢复 localStorage 中的帧', () => {

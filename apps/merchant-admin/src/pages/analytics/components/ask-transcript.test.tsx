@@ -219,4 +219,14 @@ describe('AskTranscript(答案反馈闭环 v3.1)', () => {
       expect(feedbackMock).toHaveBeenCalledWith({ traceId: 'tr_pg2', verdict: 'down', note: '口径不对' }),
     );
   });
+
+  it('heartbeat 帧不渲染(传输层保活不入对话流)', () => {
+    renderTranscript([
+      { event: 'user', data: { message: '本月销量 Top10' } } as AskFrame,
+      { event: 'heartbeat', data: { timestamp: 1 } } as AskFrame,
+      { event: 'result', data: { metric: 'volume', rows: [{ a: 1 }] } } as AskFrame,
+    ]);
+    expect(screen.getByText('本月销量 Top10')).toBeInTheDocument();
+    expect(screen.queryByText('heartbeat')).not.toBeInTheDocument();
+  });
 });

@@ -7,6 +7,23 @@ const TOKEN_KEY = 'merchant-admin.token';
 const STAFF_KEY = 'merchant-admin.staff';
 const BOSS_KEY = 'merchant-admin.boss';
 
+/** ask 流最终失败(3 次续传仍断)且已拿到 askId:携带恢复句柄 —— 流还在
+ * Redis(600s TTL)、生产者仍在后台跑,拿 askId+lastEventId 重新进 ask 的
+ * resume 参数即可续播剩余帧,不重算;frames = 断线前已收到的帧(恢复成功
+ * 时与服务端重放帧恰好互补,无重叠)。 */
+export class AskStreamError extends Error {
+  askId: string;
+  lastEventId: number;
+  frames: SseFrame[];
+  constructor(message: string, askId: string, lastEventId: number, frames: SseFrame[]) {
+    super(message);
+    this.name = 'AskStreamError';
+    this.askId = askId;
+    this.lastEventId = lastEventId;
+    this.frames = frames;
+  }
+}
+
 export function authToken(): string {
   return localStorage.getItem(TOKEN_KEY) || '';
 }
@@ -410,13 +427,18 @@ export const api = {
     pageContext?: object,
     /** 流式渲染回调:每凑齐一帧即触发(帧同时聚全量返回,兼容旧用法)。 */
     onFrame?: (f: SseFrame) => void,
+    /** 断线恢复入口(AskStreamError 携带句柄,错误帧「恢复结果」按钮走此路):
+     * 首连即带 askId+lastEventId,服务端只补剩余帧不重算。 */
+    resume?: { askId: string; lastEventId: number },
   ): Promise<SseFrame[]> => {
     // SSE 经 fetch 流式读取;增量解析逐帧回调(ADR-0005 流式渲染)。
-    // 断线重连(夜审 A6):首连留 X-Ask-Id;网络中断携 askId+lastEventId 重试,
-    // 服务端只补剩余帧不重算(结果卡渲染按 id 去重,重放帧无害)。
+    // 断线续传(夜审 A6):首连留 X-Ask-Id;网络中断携 askId+lastEventId 重试,
+    // 服务端只补 seq>last 的帧不重算 —— 去重由服务端水位保证,客户端无需按
+    // id 去重(重放帧本就不会与已收帧重叠)。最终失败抛 AskStreamError(带
+    // 恢复句柄与已收帧):流还在 Redis(600s)、生产者仍在后台跑,恢复不重算。
     const frames: SseFrame[] = [];
-    let askId = '';
-    let lastEventId = 0;
+    let askId = resume?.askId || '';
+    let lastEventId = resume?.lastEventId || 0;
     for (let attempt = 0; ; attempt++) {
       try {
         const res = await req('/api/admin/analytics/ask', {
@@ -447,7 +469,9 @@ export const api = {
         }
         return frames;
       } catch (err) {
-        if (attempt >= 2 || !askId) throw err;
+        if (attempt >= 2 || !askId) {
+          throw askId ? new AskStreamError(String(err), askId, lastEventId, frames) : err;
+        }
       }
     }
   },

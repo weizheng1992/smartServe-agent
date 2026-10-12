@@ -17,7 +17,7 @@ paths: ["apps/merchant-admin/**/*"]
 
 ### 1.2 悬浮数据分析助手 (FloatingAgent)
 
-- 任意路由可唤起(挂 `AdminShell` 主区右下角);上下文 = 当前路由 + 列表页勾选。提问经 `POST /api/admin/analytics/ask`:fetch 流式读取 + `createFrameParser` 增量解析 SSE 帧逐帧回调。帧带自增 `id`,渲染层按 id 回写状态(按下标会错位);`start` 帧过滤不渲染。
+- 任意路由可唤起(挂 `AdminShell` 主区右下角);上下文 = 当前路由 + 列表页勾选。提问经 `POST /api/admin/analytics/ask`:fetch 流式读取 + `createFrameParser` 增量解析 SSE 帧逐帧回调。帧带自增 `id`,渲染层按 id 回写状态(按下标会错位);`start` 帧过滤不渲染。 **断线续传与恢复(2026-10-12 收口)**:ask 流本身已带续传(夜审 A6)——服务端 POST 收 `askId`+`lastEventId`(body/头双通道)只补 `seq>last` 不重算(生产者挂后台任务,客户端断开不停算;帧留 Redis 600s),`api.ask` 内建 3 次续传循环;本次补最终失败面:`AskStreamError`(api.ts)携带 askId/lastEventId/已收帧抛出,FloatingAgent 把部分帧照常上屏 + error 帧落恢复句柄,「恢复结果」按钮携句柄重进流(**不重算**;恢复成功/再失败都摘旧错误帧不堆按钮;流过期由服务端 error 帧诚实回「请重新提问」)。AskTranscript 渲染缝补 heartbeat 过滤(长问曾每 15s 渲染一条「heartbeat」气泡)。契约:`api.ask.test.ts`(4 例)+ FloatingAgent 断线三例 + ask-transcript heartbeat 例;服务端重放语义由 `test_analytics_ask_replay.py` 钉死。
 - `pageContext = {route, selection, selectionLabels, sessionId}`;`sessionId` 浏览器侧稳定(localStorage `merchant-admin.session`),服务端 Redis 会话存储按此键维护多轮上下文。
 - localStorage 键位约定:`merchant-admin.token`(JWT)/ `.staff`(当前员工 email)/ `.boss`(老板凭证留底)/ `.agent.history`(对话帧,上限 60)/ `.board`(钉看板 pin,上限 20)/ `.session`(agent 会话 id)。
 - 事件面板:`user`/`pending`/`result`/`clarify`/`unsupported`/`error`;result 帧 = `ResultCard` + `summary` 速览 + 导出 CSV(BOM 头防 Excel 中文乱码)+ 📌 钉看板 + 存为报告(`reports/from-result` 服务端持久化,`saved` 标记防重复)。
