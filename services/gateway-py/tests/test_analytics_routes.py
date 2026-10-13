@@ -91,11 +91,17 @@ def patch_embedding(monkeypatch):
     (不会误中其他用例登记的范例)。
     """
     import hashlib
+    import math
 
     class _FakeEmbed:
         async def aembed_query(self, text: str) -> list[float]:
-            idx = int(hashlib.md5(text.encode()).hexdigest(), 16) % 64
-            return [1.0 if i == idx else 0.0 for i in range(64)]
+            # 全摘要字节向量(非 one-hot 取桶):同问字节相同 → 余弦恰 1.0(回放命中);
+            # 异问方向天然不同(cos≈0.5,远低于 0.90 阈值)—— mod-N one-hot 有 1/N
+            # 撞桶率,曾致 👍 查重误命中跳过注册,exemplarId=None 打爆断言(CI 实证)
+            digest = hashlib.md5(text.encode()).digest()
+            vec = [b / 255 for b in digest]
+            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+            return [v / norm for v in vec]
 
     monkeypatch.setattr("engine_py.llm.get_embedding_model", lambda: _FakeEmbed())
 
