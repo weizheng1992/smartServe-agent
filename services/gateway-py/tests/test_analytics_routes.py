@@ -87,19 +87,19 @@ def patch_embedding(monkeypatch):
 
     exemplar_service 走 graph.ask 的 L2 回放(UnsupportedQuery 被 search_exemplar
     吞掉放行),靠异常兜底不算密封 —— ask 面用例统一桩掉模型加载。
-    按问题文本哈希生成 one-hot 向量:同问相似度 1.0(回放命中),异问不串扰
-    (不会误中其他用例登记的范例)。
+    按问题文本哈希生成**中心化**字节向量:同问字节相同 → 余弦恰 1.0(回放命中);
+    异问方向近正交(中心化后 cos 均值 0、σ=1/√32≈0.18,≥0.90 阈值概率 ~1e-7 量级)。
+    演进两轮:mod-64 one-hot 有 1/64 撞桶率(cos 恰 1.0 误中);md5 非负字节向量
+    治标未治本 —— 非负向量余弦天然正偏(d=16 时均值 ~0.75),异问 P(cos≥0.90)
+    ≈1.5% 与 one-hot 同量级(20 万对实测),👍 查重仍会偶发误跳过注册。
     """
     import hashlib
     import math
 
     class _FakeEmbed:
         async def aembed_query(self, text: str) -> list[float]:
-            # 全摘要字节向量(非 one-hot 取桶):同问字节相同 → 余弦恰 1.0(回放命中);
-            # 异问方向天然不同(cos≈0.5,远低于 0.90 阈值)—— mod-N one-hot 有 1/N
-            # 撞桶率,曾致 👍 查重误命中跳过注册,exemplarId=None 打爆断言(CI 实证)
-            digest = hashlib.md5(text.encode()).digest()
-            vec = [b / 255 for b in digest]
+            digest = hashlib.sha256(text.encode()).digest()
+            vec = [(b - 127.5) / 127.5 for b in digest]
             norm = math.sqrt(sum(v * v for v in vec)) or 1.0
             return [v / norm for v in vec]
 
