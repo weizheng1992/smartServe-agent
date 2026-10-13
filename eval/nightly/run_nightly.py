@@ -421,7 +421,7 @@ async def run_concurrency(client) -> dict:
             return 0, round(time.monotonic() - t0, 1), repr(err)[:80]
 
     rs = await asyncio.gather(*(one(i) for i in range(5)))
-    fails = [f"并发路{i}: HTTP {s} / {err if isinstance(err, str) else ''}"
+    fails = [f"并发路{i}: HTTP {s} / {ok if isinstance(ok, str) else ''}"
              for i, (s, _, ok) in enumerate(rs) if s != 200 or ok is not True]
     for i in range(5):
         await client.request("DELETE", "/api/chat/threads",
@@ -525,8 +525,47 @@ async def cleanup() -> dict:
             )
         res = await session.execute(_t("DELETE FROM pending_approvals WHERE thread_id LIKE 'nightly_%'"))
         purged = res.rowcount or 0
+        # 线程外键子表清扫 + 线程本体回收。per-case 的 DELETE /api/chat/threads
+        # 是单事务:threads 行删除撞 session_metrics 等 NOT NULL 外键(每回合
+        # settle 落一行)即整体回滚,messages/task_memory 一并残留,而响应码
+        # 无人检查 —— 历史每轮静默泄漏约 30 条线程与全库近四成 session_metrics
+        # (污染 admin 成本/活跃租户聚合)。「保审计 vs 删线程」的产品侧语义
+        # 矛盾(threads 有 6 张 FK 子表,4 张 NOT NULL)待晨审裁决,评测自身
+        # 前缀数据先在此兜底回收;大小写双前缀都收(线程 nightly_*,顾客 NIGHTLY_*)。
+        tids = (
+            await session.execute(
+                _t(
+                    "SELECT id FROM threads "
+                    "WHERE user_id LIKE 'NIGHTLY_%' OR id LIKE 'nightly_%' OR id LIKE 'NIGHTLY_%'"
+                )
+            )
+        ).scalars().all()
+        child_rows = threads_purged = 0
+        if tids:
+            for tbl in (
+                "messages",
+                "task_memory",
+                "session_metrics",
+                "intent_logs",
+                "low_confidence_logs",
+                "llm_call_logs",
+                "episodic_events",
+                "agent_jobs",
+            ):
+                r = await session.execute(
+                    _t(f"DELETE FROM {tbl} WHERE thread_id = ANY(:tids)"), {"tids": tids}
+                )
+                child_rows += r.rowcount or 0
+            r = await session.execute(_t("DELETE FROM threads WHERE id = ANY(:tids)"), {"tids": tids})
+            threads_purged = r.rowcount or 0
         await session.commit()
-    return {"deleted_orders": deleted_orders, "stock_restored": restored, "nightly_approvals_purged": purged}
+    return {
+        "deleted_orders": deleted_orders,
+        "stock_restored": restored,
+        "nightly_approvals_purged": purged,
+        "nightly_fk_children_purged": child_rows,
+        "nightly_threads_purged": threads_purged,
+    }
 
 
 def render_report(results: list[dict], out: Path, night: str, env_ok: bool, perf: str = "") -> None:
