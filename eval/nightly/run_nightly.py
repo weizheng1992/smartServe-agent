@@ -503,35 +503,18 @@ async def cleanup() -> dict:
             await conn.execute(_t("DELETE FROM merchant_orders WHERE order_id = ANY(:oids)"), {"oids": ids})
             deleted_orders = len(ids)
             await conn.execute(_t("DELETE FROM merchant_customers WHERE customer_id LIKE :p"), {"p": f"{CUST_PREFIX}%"})
-    # engine 侧夜测残留:HITL 工单 + 发件箱事件(线程 nightly_ 前缀)。
+    # engine 侧夜测残留:HITL 工单 + 发件箱事件 + 线程 FK 全家桶。
     # pending_approvals.id 是 uuid、approval_id 是 text —— asyncpg 严格类型,
     # JOIN 必须显式 CAST(uuid = text 无隐式操作符,首夜实弹)
     from engine_py.db import get_session
 
     purged = 0
+    child_rows = threads_purged = 0
     async with get_session() as session:
-        ev_rows = (
-            await session.execute(
-                _t(
-                    "SELECT e.id FROM approval_outbox_events e "
-                    "JOIN pending_approvals a ON a.id = CAST(e.approval_id AS uuid) "
-                    "WHERE a.thread_id LIKE 'nightly_%'"
-                )
-            )
-        ).scalars().all()
-        if ev_rows:
-            await session.execute(
-                _t("DELETE FROM approval_outbox_events WHERE id = ANY(:eids)"), {"eids": list(ev_rows)}
-            )
-        res = await session.execute(_t("DELETE FROM pending_approvals WHERE thread_id LIKE 'nightly_%'"))
-        purged = res.rowcount or 0
-        # 线程外键子表清扫 + 线程本体回收。per-case 的 DELETE /api/chat/threads
-        # 是单事务:threads 行删除撞 session_metrics 等 NOT NULL 外键(每回合
-        # settle 落一行)即整体回滚,messages/task_memory 一并残留,而响应码
-        # 无人检查 —— 历史每轮静默泄漏约 30 条线程与全库近四成 session_metrics
-        # (污染 admin 成本/活跃租户聚合)。「保审计 vs 删线程」的产品侧语义
-        # 矛盾(threads 有 6 张 FK 子表,4 张 NOT NULL)待晨审裁决,评测自身
-        # 前缀数据先在此兜底回收;大小写双前缀都收(线程 nightly_*,顾客 NIGHTLY_*)。
+        # 先收线程 id 全集(宽口径:属主 NIGHTLY_* 或 id 双大小写前缀),
+        # 审批/发件箱/子表/线程全部按同一 tid 集清扫 —— 审批若仍只按旧
+        # nightly_ 前缀删,宽口径捞到的非前缀 id 线程带审批时,删 threads
+        # 撞 pending_approvals NOT NULL 外键即整体回滚(评审 spec 轴实指)。
         tids = (
             await session.execute(
                 _t(
@@ -540,7 +523,33 @@ async def cleanup() -> dict:
                 )
             )
         ).scalars().all()
-        child_rows = threads_purged = 0
+        ev_rows = (
+            await session.execute(
+                _t(
+                    "SELECT e.id FROM approval_outbox_events e "
+                    "JOIN pending_approvals a ON a.id = CAST(e.approval_id AS uuid) "
+                    "WHERE a.thread_id = ANY(:tids) OR a.thread_id LIKE 'nightly_%'"
+                ),
+                {"tids": tids or [""]},
+            )
+        ).scalars().all()
+        if ev_rows:
+            await session.execute(
+                _t("DELETE FROM approval_outbox_events WHERE id = ANY(:eids)"), {"eids": list(ev_rows)}
+            )
+        res = await session.execute(
+            _t("DELETE FROM pending_approvals WHERE thread_id = ANY(:tids) OR thread_id LIKE 'nightly_%'"),
+            {"tids": tids or [""]},
+        )
+        purged = res.rowcount or 0
+        # 线程外键子表清扫 + 线程本体回收。per-case 的 DELETE /api/chat/threads
+        # 是单事务:threads 行删除撞 session_metrics 等 NOT NULL 外键(每回合
+        # settle 落一行)即整体回滚,messages/task_memory 一并残留,而响应码
+        # 无人检查 —— 历史每轮静默泄漏约 30 条线程与全库近四成 session_metrics
+        # (污染 admin 成本/活跃租户聚合)。「保审计 vs 删线程」的产品侧语义
+        # 矛盾(threads 共 9 张 FK 子表、5 张 NOT NULL,见 db/models.py;
+        # approval_outbox_events 无 FK 不阻塞但同批清)待晨审裁决,评测自身
+        # 前缀数据先在此兜底回收(审批已先行,余下八表在此)。
         if tids:
             for tbl in (
                 "messages",
