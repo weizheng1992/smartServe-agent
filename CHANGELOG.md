@@ -4,6 +4,73 @@
 
 ---
 
+## [2.11.0] - 2026-10-13 (上下文子系统改造:历史预算 + 滚动摘要 + 单点装配,ADR-0013① 前端触发面收口)
+
+### ✨ Features
+
+- **上下文子系统改造**(4e9977f,拷问轮 Q1-Q6 决议落地):历史注入无 token 预算(planner/finish 各拼全量 20 条无界增长)、ShortMemory.compress 常量 stub(第 11 轮起上下文悬崖)、同一轮历史序列化两次、cart 无 TTL、episodic importance 恒 5 五处实证收口。`memory/context_builder.py` 单点装配:`AI_HISTORY_BUDGET_TOKENS`(默认 2000,字符近似)按整轮裁剪保底最新一轮,溢出懒触发滚动摘要(每轮至多一次 LLM,失败回退旧摘要);run_agent 装载面回读 `task_memory.historySummary` → `state.history_block` 三消费方(planner/finish/step_execution_engine)直取;租户过滤下沉召回 SQL(与旧 Python 过滤逐字对齐,Python 侧留防御纵深);购物车 Redis 写穿透加 7 天 TTL;episodic importance 规则打分(退款/投诉→9,订单/金额→8,余 4)。契约钉 `test_context_contract.py` ×5。
+
+### 🐛 Fixes
+
+- **ADR-0013① 商店流重连补投前端触发面收口**(49d1ff4):0acc505 的「前端零改动」假设被 P7(4xx 重连风暴收口,EventSource 原生重连被禁)提前推翻——重建的 EventSource 无法携带 Last-Event-ID header,服务端重放闸恒假,断线窗口消息 C 端仍丢(nightly 2026-10-12 实证)。修:商店流 URL 带回 lastEventId query + 连接机收模块,P7 风暴防护保留;ADR-0013 后果区假设修正留痕、server-gateway.md §1.5 同批改口。
+- **nightly 评测残留静默泄漏收口**(3cf2042):per-case 删线程撞 session_metrics 等 NOT NULL 外键整体回滚且响应码无人检查,历史每轮泄漏 ~30 条线程(累积实测 207 条、session_metrics 265/674 污染 admin 聚合);cleanup() 补齐八表 FK 子表清扫 + 线程本体回收;顺手修 p01 并发场景潜伏 NameError(失败明细引用不存在的 `err`)。「保审计 vs 删线程」产品侧语义矛盾列晨审。
+
+### 🧪 Tests
+
+- gw-tests 撞桶修复(7faf679):patch_embedding one-hot 换全摘要字节向量,👍 查重不再误命中;context 三套件 + 契约 66 行新增,engine 全量 1672 过。
+
+## [2.10.1] - 2026-10-12 (悬浮助手断线恢复收口:AskStreamError 恢复句柄)
+
+- **纯前端三修**(9e6906a,服务端零改动——grilling 探索证实 ask 流续传机制早已建成且有契约:POST 收 askId+lastEventId 只补 seq>last 不重算,帧留 Redis 600s;真缝隙在最终失败面与渲染缝):① `AskStreamError` 携 askId/lastEventId/已收帧抛出,FloatingAgent 断线时部分帧照常上屏、error 帧落恢复句柄,「恢复结果」按钮携句柄重进流**不重算**;② AskTranscript 全屏页补 heartbeat 渲染缝过滤(长问每 15s 渲染一条「heartbeat」文本气泡);③ api.ts 陈旧注释修正(去重实由服务端 seq 水位保证)。测试 193/34 全零失败;规则册 merchant-admin.md §1.2 补断线续传与恢复段。
+
+## [2.10.0] - 2026-10-11 (聊天断线收口 ADR-0013:商店流 L1 重连补投 + 「继续」确定性重派)
+
+### ✨ Features
+
+- **两种「断」分层根治**(0acc505,新立 ADR-0013):①商店流 L1 重连补投——`tail_pubsub` 新增 last_event_id/replay 双参,message 帧补 id(epoch ms 单点归一两种时间形状),带 Last-Event-ID(header 兼容 query)重连时先从 DB 时间线重放缺失消息(≤50 条整行透传,带图行不丢图)再订阅;首连不重放(首屏水合仍走 messages GET),前端零改动。②「继续」确定性重派——run_agent 入口 `_maybe_continue_rewrite`:上轮 assistant 缺失或失败时把输入改写回上轮用户原问题落回正常全链(替用户重问,非旁路重放);五道闸任一不过原样放行(整句词表精确匹配防 MULTI_INTENT 连接词撞车/带图豁免/有待决议审批让位 HOT-RESUME 契约/上轮无文本/上轮正常完成)。挂入口而非 triage Stage 的偏差留痕于 spec §2.2 与 ADR 后果区。
+
+### 🧪 Tests
+
+- 新册 test_continue_rewrite 21 例 + store stream live 帧 id 断言与断线重连重放用例;引擎全量 1655、网关契约 387+3skip 零回归;live 实弹双验(真网关 SSE 带 Last-Event-ID 重连收重放帧/真库「问了没答上」线程「继续」得原问题答案)。
+
+## [2.9.1] - 2026-10-10 (夜间调度迁 launchd + OS 深色锁死 + 裸 body DTO 止血)
+
+- **ops: 夜间评测调度迁移 launchd + headless Claude**(3193858)——REPL durable cron 三晚静默停跑退役(10-07/08/09)。
+- **fix(merchant-admin) 三实弹收口**(d59940a):①OS 深色涂黑——全仓 16 处散写 `dark:` 变体在 Tailwind v4 默认走 prefers-color-scheme,深色下背景半边翻色;剥离残留 + ui globals.css 加 `@custom-variant dark` 类驱动结构闸(四 app 单浅色主题一次锁死)+ light-theme-contract 零容忍扫描。②登录韧性——proxy 500 非 JSON 体漏成裸 SyntaxError 文案、无超时永久「登录中…」;加 10s AbortSignal + 超时/不可达/5xx 诚实文案,401 返回 body 防枚举统一。③RBAC 仓储系统面收敛——种子剔系统三页三按钮(服务端 is_manager 硬闸实测 403 无越权)+ 0020 迁移清存量 7 行(expanding 参数绑定防 text() 占位符实弹)。
+- **fix(analytics)**:owner-mappings PUT 裸 `request.json` → Pydantic DTO(3ea1138,nightly 10-10 code-review 硬违规#1:mapType 缺失静默变 "None" 字符串落库收口;同文件存量裸 body 十处留债)。
+
+## [2.9.0] - 2026-10-09 (货架词典 ADR-0012 + 找谁路由泛化两轮 + merchant-admin 全控件 shadcn 化)
+
+### ✨ Features
+
+- **货架词典解析器落地**(036a6d4,ADR-0012)+ 黏词兜底包含式展开——实弹「天气冷了,要外出游玩,推荐一些衣服和装备」0 衣服 + 3 露营装备收口。
+- **找谁路由泛化两轮**:排行卡附负责人列(2185a6b,「哪个品类卖得最好该找谁」曾只答口径负责人;Q10 纪律不破——被动「各品类销售额」实测不添列);快轨混合分层收敛(0a7189b,确定性快轨只吃定义良好的意图,fluid 语义升级进管线;T0 spu_rank 帧级附列新开;行为修正一处:「卖得最好」gmv/volume 歧义收敛后由 L0 泛指反问,不再武断选 volume)。
+- **merchant-admin 全控件 shadcn 迁移**(2825eaa):22 select/16 table/44 input/31 button/9 label 清零迁 workspace ui 组件族;Radix Select 空值两律(SelectItem 禁空串/真·可选空值走哨兵单点映射);PromoFormDialog 一表两态;jsdom Radix 三桩 + selectRadixOption 统一驱动。
+- **弹窗全站化收尾**(812b3b6):客户/员工/角色/商品/SKU/库存/促销九族新建编辑全收敛 Dialog;本地 searchable-select(Popover+Command combobox)接促销两长列表;**修 ui select.tsx Tailwind v4 语法 bug**(max-h-[--var] → max-h-(--var),v3 写法在 v4 生成无效 CSS = 下拉超长不可滚,四 app 共享组件);Esc 断连坐关弹窗。
+
+### 📝 Docs
+
+- 知识点详解补第六部分「实战三根轴」(f6b2e92):工具描述质量/token 成本四实弹计量坑/幻觉五族 × 本仓真实事故。
+
+### 🧪 Tests
+
+- 单测 178→179 零回归、E2E 23 全绿、biome 103 文件 0 违例;规约沉淀 merchant-admin.md §2.5(空值两律/Dense 密度/jsdom 桩/主题覆盖)。
+
+## [2.8.0] - 2026-10-08 (「该找谁」责任人路由落地 + 两篇知识文档全量刷新)
+
+### ✨ Features
+
+- **责任人路由四载体落地**(434ef34,spec .scratch/owner-routing 十六问收口):0019 迁移 staff_members 部门/职级 + STAFF_SEED_ROSTER 十二人五部门名册(员工 id 单一事实源);商户库幂等 DDL 三件(owner_mappings 含 owner_type 留名/promotions.created_by/merchant_spus.owner_id);双通道作答——归因卡附「负责人」列(维度→源路由:品类/指标走注册表、活动走 created_by、商品走数据原生列)+ graph.ask 确定性找谁快轨(词面闭集零 LLM,专名优先防「活动名⊃品类词」撞车);owner-mappings GET/PUT/DELETE 维护面 + 责任人维护新页 + 员工页人事下拉 + 商品负责人选择器;种子灌 48 行映射 + SPU 全有主 + 行数断言防假绿。安全边界:owner_mappings 严禁进 T2 白名单与 LLM 上下文。
+- **复合问句收口两连**(实弹诊断闭环):「为什么退款这么多,什么原因,该找谁」曾 unsupported(b5877c0)——refund_rate synonyms 补裸词「退款」+ REASON_RE 因果语感单源 + reason_reroute 原因直通(闭集指标升格 compare_previous 归因组合,自带负责人列一卡答两问,组合拒绝退回 owner 卡绝不静默 unsupported);口语绩效词族词面债(49e8703)——热销/畅销/好卖/「卖得」兜底入 volume synonyms,方向翻转交 L0 REVERSE_WORDS 既有机制。
+
+### 🧪 Tests
+
+- owner 离线册 22 例 + gateway 契约 11 例 + E2E owner-routing 5 例;SPI 审批核销契约扩容三例(e50dc27);引擎全量 1593、analytics 族回归 93。
+
+### 📝 Docs
+
+- smartServe 知识点详解 813 行新手友好重写(10462cc,五部分两附录,面试腔剥离,数字对齐实机口径);README 全量刷新(9c42048,四终端五张真机截图 + 128 端点/39 指标等数字逐项实机核验 + 目录树改纯目录全量层级)。
+
 ## [2.7.0] - 2026-10-07 (data agent 分层信任架构:语义层 + T0/T1/T2 三通道 + 归因卡,ADR-0010/0011)
 
 课件对照(语义层/指标中台方法论)与两轮「从零推演」裁决:data agent 从「闭集模板管线」升级为**分层信任梯度**——语义层为地基,LLM 自由度随信任分级递增,逐层盖章。铁律字面废除、精神保留:「LLM 永不在无守卫、无标注的情况下产 SQL」(ADR-0004/0005 部分取代,论证链保留)。
