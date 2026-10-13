@@ -41,6 +41,7 @@ merchant-admin 悬浮助手 fetch 流重连/补投(analytics 帧式,另立)/ 引
 ## 后果
 
 - **实现偏差留痕(决策 2 挂点)**:「ContinueResumeStage」落地为 `run_agent` 入口的 `_maybe_continue_rewrite`(`run_agent.py`,问候旁路之前)——`StageContext` 的 input/clean_input 是不变组(13 出口/41 处读取共享同一可变事实的只读纪律),改写必须在 ctx 构造之前发生,Stage 层要么破契约要么 state 键与 `ctx.input_text` 双源漂移;语义与五闸与 ADR 完全一致,spec `.scratch/chat-disconnect-recovery/spec.md` §2.2 有全记录。闸③容灾口径:审批数据不可得 = 无法排除待决议,**保守放行**。
+- **决策 1「前端零改动」修正(2026-10-13,①前端触发面收口,stream-reliability-push 01 号票)**:该假设被 aaa2aba(P7,2026-10-03 4xx 重连风暴收口)提前推翻——其 onerror 一律 close + 显式退避重建**禁用了原生重连**,重建的 EventSource 无法携带 Last-Event-ID header,服务端重放闸恒假,断线窗口消息仍丢(nightly 2026-10-12 实证,architecture-debt 当轮最重项)。修正采用 query 路线而非恢复原生重连(P7 的风暴防护是真实需求,不能回退):商店前端连接机(`FloatingChatWidget` → 新模块 `storeStreamConnection.ts`)把 message 帧 `id:` 行记为水位,退避重建时以 `lastEventId` query 带回;服务端 `store_chat_stream` 补 `lastEventId` Query 参数走 `query_fallback`(header 契约不动,isdigit 同闸);P7 退避语义原样保留并有连接机专册钉面(退避序列/open 重置/MAX_RETRY/水位带回/无 id 帧不污染水位)。
 - 商店流断线期间的坐席/系统消息由「永久丢失、刷新才回」变为「重连即补」;契约测试同批更新(test_http_routes_contract store stream 段:id 帧断言 + 断线重连重放用例)。帧 id 统一 epoch ms:`sse_tail.frame_id_from_timestamp` 单点(live 发布帧=本地 naive iso,timeline 行=UTC 带偏移 iso,astimezone 归一;不可解析帧无 id 只 live 送达)。
 - 「继续」从 LLM 发挥变为确定性重派:新册钉五闸(每闸一反例参数化)+ 词族在册验证;HOT-RESUME 既有探针测试必须照旧绿(闸③的验收线)。
 - 重派走完整管线 = 重跑检索/技能,成本与用户手动重问一致(可接受;语义缓存命中时反而更便宜)。

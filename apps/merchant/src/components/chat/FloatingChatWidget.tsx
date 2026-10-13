@@ -6,6 +6,7 @@ import { useCurrentUser } from '../../context/UserContext';
 import { STOREFRONT_CHAT_OPEN_EVENT, type StorefrontChatOpenDetail } from '../../lib/chatBridge';
 import { readStoreCart, writeStoreCart } from '../../lib/storeCart';
 import { getGreetingForRoute } from './routeGreetingConfig';
+import { openStoreStream } from './storeStreamConnection';
 
 interface ChatMessage {
   id: string;
@@ -447,98 +448,65 @@ export function FloatingChatWidget() {
     }
   }, [pathname]);
 
-  // 方案 B：基于 SSE (Server-Sent Events) 的实时事件流，替代无节制的 3 秒 HTTP 轮询
+  // 方案 B：基于 SSE (Server-Sent Events) 的实时事件流，替代无节制的 3 秒 HTTP 轮询。
+  // 连接机(P7 退避重建 + ADR-0013① 重连补投前端半边)收口于 storeStreamConnection:
+  // message 帧的 id: 行记为水位,断线退避重建时以 lastEventId query 带回,服务端
+  // 重放缺失消息;重叠帧由下方按消息 id 幂等吸收,首连不带水位(首屏水合走 messages GET)。
   useEffect(() => {
     if (!threadId || !isOpen) return;
 
-    let eventSource: EventSource | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let retryCount = 0;
-    let disposed = false;
-    // P7(2026-10-03):EventSource 对 4xx(属主闸 403/线程 404)也会自动重连,
-    // 重连必然同结果 = 无限重连风暴打在服务端租户闸上。改显式指数退避重建:
-    // 出错即 close 浏览器自动重连,1s→2s→…上限 30s,open 即重置;连败到上限
-    // 后停止(线程已删/身份不符时重试无意义),effect 重跑自然重建。
-    const MAX_RETRY = 6;
+    const handle = openStoreStream({
+      threadId,
+      // businessId 参与服务端属主闸(2026-10-02):stream 路由收多租户闸后需自报身份
+      businessId: 'aurora',
+      onMessage: (rawData) => {
+        try {
+          const msgData = JSON.parse(rawData);
+          if (msgData?.content) {
+            const incomingText = String(msgData.content).trim();
+            const incomingId = msgData.id || `sse_${Date.now()}`;
+            const incomingRole = msgData.role === 'user' ? 'user' : 'assistant';
+            const incomingCards = Array.isArray(msgData.cards) ? msgData.cards : [];
 
-    const connect = () => {
-      if (disposed) return;
-      try {
-        // businessId 参与服务端属主闸(2026-10-02):stream 路由收多租户闸后需自报身份
-        eventSource = new EventSource(
-          `/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}&businessId=aurora`,
-        );
-
-        eventSource.onopen = () => {
-          retryCount = 0;
-        };
-
-        eventSource.addEventListener('message', (e) => {
-          try {
-            const msgData = JSON.parse(e.data);
-            if (msgData?.content) {
-              const incomingText = String(msgData.content).trim();
-              const incomingId = msgData.id || `sse_${Date.now()}`;
-              const incomingRole = msgData.role === 'user' ? 'user' : 'assistant';
-              const incomingCards = Array.isArray(msgData.cards) ? msgData.cards : [];
-
-              if (incomingCards.length > 0) {
-                // 幂等键用服务端 messageId(msgData.id);无 id 的兜底消息跳过幂等直接同步
-                syncCartToLocalStorage(incomingCards, msgData.id);
-              }
-
-              setMessages((prev) => {
-                // 幂等去重仅按 id(SSE payload 的 id 与 POST 响应的 messageId 同源)。
-                // 不能按文本匹配:同一问题的模板化回复逐字节相同,文本去重会吞掉
-                // 后续轮次的合法回复(表现为"无实时返回,刷新后才出现")。
-                const alreadyExists = incomingId && prev.some((m) => m.id === incomingId);
-                if (alreadyExists) return prev;
-
-                return [
-                  ...prev,
-                  {
-                    id: incomingId,
-                    role: incomingRole,
-                    text: incomingText,
-                    cards: incomingCards,
-                    time: msgData.timestamp
-                      ? new Date(msgData.timestamp).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                      : new Date().toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }),
-                  },
-                ];
-              });
+            if (incomingCards.length > 0) {
+              // 幂等键用服务端 messageId(msgData.id);无 id 的兜底消息跳过幂等直接同步
+              syncCartToLocalStorage(incomingCards, msgData.id);
             }
-          } catch (err) {
-            console.warn('[SSE] Failed to parse SSE message event:', err);
+
+            setMessages((prev) => {
+              // 幂等去重仅按 id(SSE payload 的 id 与 POST 响应的 messageId 同源)。
+              // 不能按文本匹配:同一问题的模板化回复逐字节相同,文本去重会吞掉
+              // 后续轮次的合法回复(表现为"无实时返回,刷新后才出现")。
+              const alreadyExists = incomingId && prev.some((m) => m.id === incomingId);
+              if (alreadyExists) return prev;
+
+              return [
+                ...prev,
+                {
+                  id: incomingId,
+                  role: incomingRole,
+                  text: incomingText,
+                  cards: incomingCards,
+                  time: msgData.timestamp
+                    ? new Date(msgData.timestamp).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : new Date().toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      }),
+                },
+              ];
+            });
           }
-        });
+        } catch (err) {
+          console.warn('[SSE] Failed to parse SSE message event:', err);
+        }
+      },
+    });
 
-        eventSource.onerror = () => {
-          // P7:close 掉浏览器自动重连,显式指数退避后重建(避免 4xx 无限风暴)
-          eventSource?.close();
-          if (disposed || retryCount >= MAX_RETRY) return;
-          const delay = Math.min(1000 * 2 ** retryCount, 30_000);
-          retryCount += 1;
-          retryTimer = setTimeout(connect, delay);
-        };
-      } catch (err) {
-        console.warn('[SSE] Failed to initialize EventSource:', err);
-      }
-    };
-
-    return () => {
-      disposed = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      if (eventSource) {
-        eventSource.close();
-      }
-    };
+    return () => handle.close();
   }, [threadId, isOpen]);
 
   // 灯箱打开时聚焦遮罩本身:div 默认不可聚焦,不聚焦则 onKeyDown 的 Escape 关闭永不触发

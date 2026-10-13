@@ -2255,6 +2255,72 @@ class TestMerchantStoreChatStream:
             assert "event: connected" in buf
             assert "replay-new-marker" not in buf, f"首连不应触发重放:{buf!r}"
 
+    async def test_reconnect_replays_via_query_param(self, live_server):
+        """L1 重连补投 query 半边(ADR-0013① 收口):商店前端 P7 退避重建
+        (aaa2aba:4xx 重连风暴收口)禁用了原生重连,重建的 EventSource 无法
+        带 Last-Event-ID header —— 前端显式以 lastEventId query 带回水位,
+        服务端必须与 header 同语义(query_fallback,isdigit 同闸)。"""
+        import uuid as _uuid
+        from datetime import datetime, timedelta
+
+        import httpx
+        from engine_py.db import get_session
+        from sqlalchemy import text as _sql
+
+        thread_id = f"merchant_stream_replay_query_{_TS}"
+        await create_thread(thread_id, "u_stream_replay_query", "nike")
+        now = datetime.now(UTC)
+        t1, t2 = now - timedelta(seconds=60), now - timedelta(seconds=30)
+
+        async def _insert(role: str, content: str, ts: datetime) -> None:
+            async with get_session() as session:
+                await session.execute(
+                    _sql(
+                        "INSERT INTO messages (id, thread_id, business_id, role, content, timestamp) "
+                        "VALUES (:mid, :tid, :bid, :role, :content, :ts)"
+                    ).bindparams(
+                        mid=str(_uuid.uuid4()), tid=thread_id, bid="nike",
+                        role=role, content=content, ts=ts.isoformat(),
+                    )
+                )
+                await session.commit()
+
+        await _insert("assistant", "replay-query-old", t1)
+        await _insert("assistant", "replay-query-new", t2)
+        after_ms = int(t1.timestamp() * 1000)
+
+        timeout = httpx.Timeout(10.0, read=15.0)
+        async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client:
+            # query 带水位(= t1 的 epoch ms):t1 排除,t2 必须重放(header 路径同语义)
+            async with client.stream(
+                "GET",
+                "/api/store/chat/stream",
+                params={"threadId": thread_id, "businessId": "nike", "lastEventId": str(after_ms)},
+            ) as res:
+                assert res.status_code == 200
+                buf = ""
+                async for chunk in res.aiter_text():
+                    buf += chunk
+                    if "replay-query-new" in buf:
+                        break
+            assert "event: connected" in buf
+            assert "replay-query-new" in buf, f"query 水位未触发重放:{buf[-300:]!r}"
+            assert "id: " in buf
+            assert "replay-query-old" not in buf, f"query 水位之前的消息被重放:{buf!r}"
+
+            # 非数字 query id → 不重放(isdigit 语义与 header 同)
+            async with client.stream(
+                "GET",
+                "/api/store/chat/stream",
+                params={"threadId": thread_id, "businessId": "nike", "lastEventId": "NaN"},
+            ) as res:
+                buf = ""
+                async for chunk in res.aiter_text():
+                    buf += chunk
+                    if "event: heartbeat" in buf:
+                        break
+            assert "replay-query-new" not in buf, f"非数字 query id 不应触发重放:{buf!r}"
+
 
 class TestAuth:
     """/api/auth/login|logout|me 契约(auth 真实化新增路由,不在 39 条冻结集内)。

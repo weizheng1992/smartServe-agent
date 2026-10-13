@@ -685,6 +685,7 @@ async def store_chat_stream(
     threadId: str | None = Query(None),
     businessId: str | None = Query(None),
     tenantId: str | None = Query(None),
+    lastEventId: str | None = Query(None),
 ):
     if not threadId:
         return Response("Missing threadId parameter", status_code=400)
@@ -703,12 +704,15 @@ async def store_chat_stream(
     if not same_tenant(owner, tenant):
         raise GateError(403, "会话不属于该商户,拒绝订阅")
 
-    # L1 重连补投(ADR-0013,2026-10-10):浏览器 EventSource 原生重连自动带
-    # Last-Event-ID(header,兼容 query;isdigit 语义收口 sse_tail)。有 id
-    # 才重放:从 DB 时间线取该时刻之后的缺失消息(≤50 条)先发再订阅 —— 断线
-    # 期间的坐席/系统消息从「永久丢失、刷新才回」变「重连即补」;首连不重放,
-    # 首屏水合仍走 GET /api/store/chat/messages;重叠由客户端按消息 id 幂等吸收。
-    last_event_id = last_event_id_from(request)
+    # L1 重连补投(ADR-0013,2026-10-10;①前端触发面收口 2026-10-13):两条
+    # 来路同语义 —— 原生重连自动带 Last-Event-ID(header),商店前端 P7 退避
+    # 重建(aaa2aba:4xx 重连风暴收口)后显式以 lastEventId query 带回
+    # (重建的 EventSource 无法携带 header)。isdigit 语义收口 sse_tail。有
+    # id 才重放:从 DB 时间线取该时刻之后的缺失消息(≤50 条)先发再订阅 ——
+    # 断线期间的坐席/系统消息从「永久丢失、刷新才回」变「重连即补」;首连
+    # 不重放,首屏水合仍走 GET /api/store/chat/messages;重叠由客户端按消息
+    # id 幂等吸收。
+    last_event_id = last_event_id_from(request, query_fallback=lastEventId)
 
     async def _replay_timeline(after_ms: int) -> list[tuple[int, dict]]:
         timeline = await conversation_repo.get_conversation_timeline(threadId, tenant)
