@@ -54,15 +54,20 @@ class CartMixin:
             print(f"[MallDomain] Cart Redis load degraded to memory view: {err}")
             return None
 
+    # 购物车 TTL(2026-09-21 拷问轮决议):7 天无动静自动蒸发,陈车不进上下文
+    _CART_TTL_SECONDS = 7 * 24 * 3600
+
     @staticmethod
     async def _save_cart(cart_key: str, items: list[dict]) -> None:
-        """写购物车:进程缓存与 Redis 同步写穿透;Redis 故障静默降级纯内存。"""
+        """写购物车:进程缓存与 Redis 同步写穿透(7 天 TTL);Redis 故障静默降级纯内存。"""
         MallDomainService._cart_storage[cart_key] = items
         try:
             from ...event_bus import get_client
 
             await (await get_client()).set(
-                f"{MallDomainService._CART_REDIS_PREFIX}{cart_key}", json.dumps(items, ensure_ascii=False)
+                f"{MallDomainService._CART_REDIS_PREFIX}{cart_key}",
+                json.dumps(items, ensure_ascii=False),
+                ex=MallDomainService._CART_TTL_SECONDS,
             )
         except Exception as err:
             print(f"[MallDomain] Cart Redis persist degraded to memory only: {err}")

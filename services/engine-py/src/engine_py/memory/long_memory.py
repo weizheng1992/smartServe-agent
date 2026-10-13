@@ -12,6 +12,7 @@ from ..db import LongMemoryFact, get_session
 from ..llm import get_chat_model, get_embedding_model
 from ..tenant_context import resolve_business_id
 from ..vectors import cosine_similarity, parse_embedding
+from .tenant_scope import tenant_scope_condition
 
 PHYSIOLOGICAL_RE = re.compile(
     r"脚长|过敏|身高|体重|尺码|270mm|265mm|42码|43码|allergy|foot|size", re.IGNORECASE
@@ -306,6 +307,9 @@ class LongMemory:
                             .where(
                                 LongMemoryFact.user_id == self.user_id,
                                 LongMemoryFact.status == "approved",
+                                # 租户过滤下沉 SQL(2026-09-21 拷问轮决议):候选窗口
+                                # 不再被他租行挤占;Python 侧 _tenant_visible 保留为防御
+                                tenant_scope_condition(LongMemoryFact, self.business_id),
                             )
                             .order_by(LongMemoryFact.created_at.desc(), LongMemoryFact.id.desc())
                             .limit(500)

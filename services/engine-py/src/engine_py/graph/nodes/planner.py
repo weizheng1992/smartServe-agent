@@ -16,6 +16,7 @@ from ...config import settings
 from ...event_bus import emit_status
 from ...llm import CircuitBreakerOpenError, bind_llm_call_node, get_chat_model
 from ...memory import ShortMemory
+from ...memory.context_builder import build_history_block
 from ...tenant import get_merchant_display_name
 from ...triage.intent_registry import (
     ADDRESS_VERB_FAMILY,
@@ -32,7 +33,7 @@ from ...triage.intent_registry import (
     EXPLICIT_ORDER_ID_RE as _EXPLICIT_ORDER_ID_RE,  # 单号正则收口 intent_registry(工单04)
 )
 from ..plan_alignment import align_plan_to_intents
-from ..state import AgentState, build_history_context
+from ..state import AgentState
 from .utils import extract_order_id
 
 # 泛查单快轨(Gen-3 域A:核心词面上收 intent_registry.ORDER_LIST_CORE_FAMILY,
@@ -526,13 +527,15 @@ async def planner_node(state: AgentState) -> dict:
         "product recommendations."
     )
 
-    # 🚀 会话上下文记忆注入
+    # 🚀 会话上下文记忆注入(2026-09-21 收口:优先 run_agent 预算装配产物,
+    # 含 [EARLIER SUMMARY];直接调用缺省时回退 builder 裸拼,格式单一来源)
     short_memory = state.get("short_memory") or []
     if not short_memory:
         short_memory = await ShortMemory(state.get("thread_id", "")).get_messages()
     history_context = ""
     if short_memory:
-        formatted_history = build_history_context(short_memory)
+        prebuilt = state.get("history_block")
+        formatted_history = prebuilt or build_history_block(short_memory)["block"]
         if formatted_history:
             history_context = (
                 f"\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n{formatted_history}\n\n"

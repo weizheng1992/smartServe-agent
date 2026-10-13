@@ -64,6 +64,9 @@ class AgentState(TypedDict, total=False):
 
     # 循环启动时加载的记忆
     short_memory: list[dict]
+    # 历史装配产物(2026-09-21):run_agent 预算裁剪+滚动摘要一次性生成,
+    # planner/finish 直接消费;缺省时节点内回退 build_history_block 裸拼
+    history_block: str
     long_memory_facts: list[Any]
     episodic_events: list[Any]
     rag_documents: list[dict]
@@ -124,23 +127,3 @@ def to_ts_dict(state: AgentState | dict[str, Any]) -> dict[str, Any]:
     """snake_case → TS camelCase,影子 diff 的序列化格式。"""
     return {_CAMEL_KEY_MAP.get(key, key): value for key, value in state.items()}
 
-
-def build_history_context(short_memory: list[dict]) -> str:
-    """统一对话历史清洗与拼装 — 过滤空/undefined/null 内容,保证 Prompt 干净。"""
-    if not short_memory:
-        return ""
-    lines: list[str] = []
-    for m in short_memory:
-        if not m:
-            continue
-        role = "Customer" if m.get("role") == "user" else "System" if m.get("role") == "system" else "Agent"
-        content = m.get("content")
-        if (
-            content is None
-            or str(content).strip() == ""
-            or str(content) == "undefined"
-            or str(content) == "null"
-        ):
-            continue
-        lines.append(f'{role}: "{str(content).strip()}"')
-    return "\n".join(lines)

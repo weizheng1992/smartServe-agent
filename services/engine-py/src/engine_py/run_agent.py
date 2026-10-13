@@ -45,6 +45,7 @@ from .llm import (
     take_thread_token_total,
 )
 from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
+from .memory.context_builder import build_history_block, summarize_overflow
 from .onboarding import build_entry_cards, resolve_onboarding_config
 from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
@@ -214,6 +215,7 @@ async def _settle_turn(
     saved_guide_context: dict | None,
     saved_cart_context: dict | None,
     saved_order_context: dict | None,
+    history_summary_final: str | None = None,
 ) -> dict:
     """收口(内部缝):图终态 → 交付调用方之间的唯一持久化段,顺序即契约。
 
@@ -401,6 +403,7 @@ async def _settle_turn(
                     "guideContext": result.get("guide_context") or saved_guide_context,
                     "cartContext": result.get("cart_context") or saved_cart_context,
                     "orderContext": result.get("order_context") or saved_order_context,
+                    "historySummary": history_summary_final,
                 }
             )
         except Exception as tm_err:
@@ -427,7 +430,8 @@ async def _settle_turn(
                 _action_intents = _turn_intents - CONSULT_SIDE_INTENTS - {""}
                 if _action_intents or result.get("damage_assessment"):
                     await episodic_memory.add_event(
-                        f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}", 5
+                        f"Handled conversation thread: {thread_id}. Output summary: {result['output'][:80]}",
+                        _episodic_importance(result["output"]),
                     )
             except Exception as mem_err:
                 print(f"[runAgent] 情境记忆回写失败(不阻断): {mem_err!r}")
@@ -448,6 +452,7 @@ async def _settle_turn(
                     "guideContext": result.get("guide_context") or saved_guide_context,
                     "cartContext": result.get("cart_context") or saved_cart_context,
                     "orderContext": result.get("order_context") or saved_order_context,
+                    "historySummary": history_summary_final,
                 }
             )
         except Exception as tm_err:
@@ -519,6 +524,21 @@ async def _maybe_continue_rewrite(
     except Exception as err:
         print(f"[ContinueRewrite] 判定异常,原样放行: {err}")
         return input_message
+
+
+def _episodic_importance(output_text: str) -> int:
+    """情境记忆重要性规则打分(2026-09-21 拷问轮决议,替代恒 5):
+    资损/履约硬事实(退款/投诉/订单号/运单/金额)权重高,常规动作 5,轻交互 4。"""
+    text = output_text or ""
+    if any(k in text for k in ("退款", "退货", "投诉", "赔付", "赔偿")):
+        return 9
+    if "ORD-" in text or "订单号" in text or "金额" in text:
+        return 8
+    if any(k in text for k in ("运单", "地址", "优惠", "发货")):
+        return 7
+    if "购物车" in text:
+        return 5
+    return 4
 
 
 async def run_agent(job: AgentJobInput) -> dict:
@@ -669,6 +689,7 @@ async def run_agent(job: AgentJobInput) -> dict:
     saved_guide_context = None
     saved_cart_context = None
     saved_order_context = None
+    history_summary_prev = None
     try:
         saved_state = await task_memory.get_task_state()
         if saved_state:
@@ -677,8 +698,25 @@ async def run_agent(job: AgentJobInput) -> dict:
             saved_guide_context = saved_state.get("guideContext")
             saved_cart_context = saved_state.get("cartContext")
             saved_order_context = saved_state.get("orderContext")
+            history_summary_prev = saved_state.get("historySummary")
     except Exception as err:
         print(f"[buildGraph] Failed to load saved task plan from taskMemory: {err}")
+
+    # 历史预算 + 懒触发滚动摘要(2026-09-21 拷问轮决议):预算内零摘要成本;
+    # 溢出那一刻把最老轮次压缩成 [EARLIER SUMMARY],每轮至多一次 LLM 调用,
+    # 新摘要经 task_memory.historySummary 跨轮持久化;失败回退旧摘要不阻断。
+    history_summary_final = history_summary_prev
+    history_block = None
+    try:
+        built = build_history_block(history_msgs, summary=history_summary_prev)
+        if built["trimmed"]:
+            history_summary_final = await summarize_overflow(history_summary_prev, built["overflow"])
+            # 触发轮新摘要即时渲染进本轮 block(否则溢出轮在当轮无声消失,下一轮才可见)
+            history_block = build_history_block(history_msgs, summary=history_summary_final)["block"]
+        else:
+            history_block = built["block"]
+    except Exception as ctx_err:
+        print(f"[buildGraph] 历史预算装配失败,回退节点内裸拼: {ctx_err!r}")
 
     initial_state: AgentState = {
         "thread_id": thread_id,
@@ -692,6 +730,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         "rag_documents": rag_docs,
         "business_config": dynamic_config,
         "short_memory": history_msgs,
+        "history_block": history_block,
         "task_plan": saved_task_plan if saved_task_plan is not None else dict(DEFAULT_TASK_PLAN),
         "loop_count": 0,
     }
@@ -782,4 +821,5 @@ async def run_agent(job: AgentJobInput) -> dict:
         saved_guide_context=saved_guide_context,
         saved_cart_context=saved_cart_context,
         saved_order_context=saved_order_context,
+        history_summary_final=history_summary_final,
     )

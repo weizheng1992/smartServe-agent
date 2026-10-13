@@ -9,10 +9,11 @@ import json
 
 from ...llm import CircuitBreakerOpenError, ContentFilterError, bind_llm_call_node, get_chat_model
 from ...memory import ShortMemory
+from ...memory.context_builder import build_history_block
 from ...skills import is_action_query
 from ...tenant import get_merchant_display_name, sanitize_tenant_response
 from ...triage import add_query_to_semantic_cache
-from ..state import AgentState, build_history_context
+from ..state import AgentState
 
 # 注:finish 节点只更新 state,不直接发布事件;终态事件由 run_agent 收口发布。
 
@@ -207,7 +208,10 @@ async def finish_node(state: AgentState) -> dict:
         short_memory = await ShortMemory(state.get("thread_id", "")).get_messages()
     history_context = ""
     if short_memory:
-        formatted_history = build_history_context(short_memory)
+        # 2026-09-21 收口:优先 run_agent 预算装配产物(含 [EARLIER SUMMARY]),
+        # 直接调用缺省时回退 builder 裸拼 —— 历史格式单一来源
+        prebuilt = state.get("history_block")
+        formatted_history = prebuilt or build_history_block(short_memory)["block"]
         if formatted_history:
             history_context = f"\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n{formatted_history}"
 

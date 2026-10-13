@@ -91,6 +91,7 @@ class ShortMemory:
                             else m.content
                         ),
                         "cards": m.cards or None,
+                        "created_at": m.created_at.isoformat() if m.created_at else None,
                     }
                     for m in sliced
                 ]
@@ -131,4 +132,14 @@ class ShortMemory:
             print(f"[ShortMemory Error] Failed to add message: {err}")
 
     async def compress(self, messages: list[dict]) -> str:
-        return "Summary of compressed conversation history"
+        """压缩历史为滚动摘要(2026-09-21 拷问轮决议落地;原为常量 stub ——
+        上下文悬崖:第 11 轮起早期对话无声消失)。委托 context_builder 的
+        摘要器:LLM 失败回退确定性拼接,绝不抛出。"""
+        from .context_builder import summarize_overflow
+
+        if not messages:
+            return ""
+        merged = await summarize_overflow(None, messages)
+        return merged or " ".join(
+            str(m.get("content") or "").strip()[:60] for m in messages if m.get("content")
+        ).strip()

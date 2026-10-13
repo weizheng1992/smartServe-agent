@@ -11,6 +11,7 @@ from ..db import EpisodicEventRow, get_session
 from ..llm import get_embedding_model
 from ..tenant_context import resolve_business_id
 from ..vectors import cosine_similarity, parse_embedding
+from .tenant_scope import tenant_scope_condition
 
 _TOKEN_SPLIT_RE = re.compile(r"[\s,，、。!！?？]+")
 
@@ -66,7 +67,11 @@ class EpisodicMemory:
                     (
                         await session.execute(
                             select(EpisodicEventRow)
-                            .where(EpisodicEventRow.user_id == self.user_id)
+                            .where(
+                                EpisodicEventRow.user_id == self.user_id,
+                                # 租户过滤下沉 SQL(2026-09-21 拷问轮决议);Python 侧保留防御
+                                tenant_scope_condition(EpisodicEventRow, self.business_id),
+                            )
                             .order_by(EpisodicEventRow.timestamp.desc())
                             .limit(50)
                         )

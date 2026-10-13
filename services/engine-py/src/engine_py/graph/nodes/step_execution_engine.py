@@ -10,7 +10,7 @@ from ...approvals.gatekeeper import ApprovalPolicyEngine
 from ...event_bus import emit_status
 from ...llm import get_chat_model
 from ...memory import ShortMemory
-from ..state import build_history_context
+from ...memory.context_builder import build_history_block
 from .executor_fast_path import try_match_executor_fast_path
 
 _JSON_FENCE_START_RE = re.compile(r"^```json\s*")
@@ -583,7 +583,10 @@ async def execute_step(state: dict) -> dict:
     short_memory = state.get("short_memory") or []
     if not short_memory:
         short_memory = await ShortMemory(state.get("thread_id", "")).get_messages()
-    formatted_history = build_history_context(short_memory)
+    # 2026-09-21 收口:与 planner/finish 同源(context_builder,预算+摘要),
+    # 执行器路径不再绕过预算子系统
+    prebuilt = state.get("history_block")
+    formatted_history = prebuilt or build_history_block(short_memory)["block"]
     history_context = (
         f"\n\n[CONVERSATION HISTORY (PAST TURNS)]:\n{formatted_history}"
         if formatted_history

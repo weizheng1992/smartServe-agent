@@ -94,6 +94,10 @@ class Settings:
     # planner 深度规划输出上限:曾对「退货政策」类简单问题生成 5163 token(73.7s),
     # 封顶防失控;截断 JSON 会落 planner 兜底单步计划(功能降级不炸会话)
     planner_max_tokens: int = field(default_factory=lambda: int(_env("AI_PLANNER_MAX_TOKENS", "2000")))
+    # 历史注入 token 预算(2026-09-21 拷问轮决议):字符近似(中文 1 字≈1 token),
+    # 按整轮裁剪不切半轮;预算外老轮懒触发滚动摘要([EARLIER SUMMARY])。
+    # 20 条全量无预算曾是无界增长点(成本/延迟/溢出三重)
+    history_budget_tokens: int = field(default_factory=lambda: int(_env("AI_HISTORY_BUDGET_TOKENS", "2000")))
 
     # L2 商品语义召回(2026-09-11):词元 ILIKE 查空时 bge 余弦补位。默认开;
     # 阈值 0.55 系真 bge-small-zh 实测定标(2026-09-11 实测分布:口语措辞 vs
