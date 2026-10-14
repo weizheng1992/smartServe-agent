@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RunningDetail, TaskPlan } from 'types';
 import { AgentStreamClient } from '../lib/agentStreamClient';
+import { interruptGeneration, markInterrupted } from '../lib/interruptGeneration';
 import { translateTaskPlan } from '../lib/translateTaskPlan';
 import type { Message, UserSession } from './types';
 
@@ -22,9 +23,21 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
   const [tokensConsumed, setTokensConsumed] = useState<number>(0);
   const [runningDetails, setRunningDetails] = useState<RunningDetail[]>([]);
+  // S2a:打断在途回答 —— isInterrupting 驱动「正在停止…」态(按钮禁用防重),
+  // activeJobIdRef 供 stopGeneration 取当前作业
+  const [isInterrupting, setIsInterrupting] = useState(false);
+  const isInterruptingRef = useRef(false);
+
+  // S2a(评审收口):打断态复位三连收敛单点,严禁散写漂移
+  const resetInterruptState = useCallback(() => {
+    isInterruptingRef.current = false;
+    setIsInterrupting(false);
+    activeJobIdRef.current = '';
+  }, []);
 
   const syncPollCountRef = useRef<number>(0);
   const activeThreadIdRef = useRef<string>(activeThreadId);
+  const activeJobIdRef = useRef<string>('');
 
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
@@ -71,6 +84,7 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
     setActivePlan(null);
     setCurrentStepText('');
     setIsSubmitting(false);
+    resetInterruptState();
 
     // 🚀 切换或新建会话时，立即先清空界面消息,彻底消除旧会话视觉残留与历史穿透;
     // 欢迎行随 loadHistory 从服务端恢复(建线程时已落库)
@@ -79,12 +93,24 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
     if (activeThreadId) {
       loadHistory(activeThreadId);
     }
-  }, [activeThreadId, loadHistory]);
+  }, [activeThreadId, loadHistory, resetInterruptState]);
 
   const triggerStream = useCallback(
     async (jobId: string) => {
       setRunningDetails([]);
       const client = new AgentStreamClient(jobId);
+
+      // S2a(评审收口):终局复位 —— 打断态无条件复位;活跃作业登记仅在
+      // 「仍是当前作业」时清空。切线程 mid-stream 后旧流的晚到终局帧
+      // (正常/interrupted/onError 三臂同断言)严禁清掉新作业的登记,
+      // 否则新线程的停止按钮静默失效。
+      const settleStreamTerminal = () => {
+        isInterruptingRef.current = false;
+        setIsInterrupting(false);
+        if (jobId === activeJobIdRef.current) {
+          activeJobIdRef.current = '';
+        }
+      };
 
       client.connect({
         onStatus: (data) => {
@@ -129,6 +155,21 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
             setTokensConsumed(data.tokens);
           }
 
+          // S2a:用户打断的终局帧(引擎 S2c interrupted 收口)—— 部分态诚实
+          // 标注「已停止」,严禁走正常完成路径假装修完
+          if (data.interrupted) {
+            setMessages((prev) => markInterrupted(prev, jobId, data.output || ''));
+            setRunningDetails((prev) =>
+              prev.map((log) => (log.resultText === '正在执行中...' ? { ...log, resultText: '⏹ 已被用户停止' } : log)),
+            );
+            settleStreamTerminal();
+            fetchThreads();
+            setActivePlan(null);
+            setCurrentStepText('');
+            setIsSubmitting(false);
+            return;
+          }
+
           setRunningDetails((prev) =>
             prev.map((log) => {
               if (log.resultText === '正在执行中...') {
@@ -160,6 +201,7 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
           setActivePlan(null);
           setCurrentStepText('');
           setIsSubmitting(false);
+          settleStreamTerminal();
         },
         onError: (err) => {
           console.error('[useChatMessages] SSE Stream error:', err);
@@ -176,11 +218,34 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
           setIsSubmitting(false);
           setCurrentStepText('');
           setActivePlan(null);
+          settleStreamTerminal();
         },
       });
     },
     [fetchThreads],
   );
+
+  // S2a:停止生成 —— 消费网关取消契约(03 号票);404=作业已结束(竞态,
+  // result 帧即将收口,无需本地态),其余失败保持 interrupting 态由 result/
+  // 错误帧兜底收口;按钮禁用防重,重复点击天然幂等
+  const stopGeneration = useCallback(async () => {
+    const jobId = activeJobIdRef.current;
+    if (!jobId || !currentUser || isInterruptingRef.current) return;
+    setIsInterrupting(true);
+    isInterruptingRef.current = true;
+    const outcome = await interruptGeneration({
+      jobId,
+      userId: currentUser.id,
+      businessId: activeBusinessId,
+    });
+    if (!outcome.ok && outcome.status === 404) {
+      // 作业已结束(竞态):result 帧即将/已经收口,撤本地打断态;
+      // 登记仅在仍是本作业时清(与终局臂同守卫)
+      isInterruptingRef.current = false;
+      setIsInterrupting(false);
+      if (activeJobIdRef.current === jobId) activeJobIdRef.current = '';
+    }
+  }, [currentUser, activeBusinessId]);
 
   const handleSend = async (e?: React.FormEvent, customText?: string, customImages?: string[]) => {
     if (e) e.preventDefault();
@@ -237,6 +302,8 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
 
       setMessages((prev) => prev.map((m) => (m.jobId === 'pending-job' ? { ...m, jobId: data.jobId } : m)));
 
+      // S2a:登记活跃作业供 stopGeneration 取用
+      activeJobIdRef.current = data.jobId;
       triggerStream(data.jobId);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -276,5 +343,7 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
     loadHistory,
     triggerStream,
     handleSend,
+    stopGeneration,
+    isInterrupting,
   };
 }

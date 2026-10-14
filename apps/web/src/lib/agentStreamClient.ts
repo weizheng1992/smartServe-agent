@@ -13,6 +13,8 @@ export interface StreamResultEvent {
   taskPlan?: unknown;
   cards?: RichCardBlock[];
   tokens?: number;
+  /** S2a:用户打断的终局帧(引擎 S2c 收口)—— true 时部分态诚实标注,严禁假装修完 */
+  interrupted?: boolean;
 }
 
 export interface AgentStreamClientCallbacks {

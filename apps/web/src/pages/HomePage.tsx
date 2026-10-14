@@ -85,6 +85,8 @@ export function HomePage() {
     loadHistory,
     triggerStream,
     handleSend,
+    stopGeneration,
+    isInterrupting,
   } = useChatMessages({
     currentUser,
     activeThreadId,
@@ -184,6 +186,8 @@ export function HomePage() {
               setSelectedScreenshot={setSelectedScreenshot}
               messagesEndRef={messagesEndRef}
               onStartHumanSupport={() => startActiveTakeover(activeThreadId)}
+              onStopGeneration={stopGeneration}
+              isInterrupting={isInterrupting}
             />
 
             <APMPanel

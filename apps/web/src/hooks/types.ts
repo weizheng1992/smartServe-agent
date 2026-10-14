@@ -12,6 +12,8 @@ export interface Message {
   imageUrls?: string[];
   jobId?: string;
   isLoading?: boolean;
+  /** S2a:被用户打断的回复(部分态诚实标注,ChatArea 渲染「已停止生成」标记) */
+  interrupted?: boolean;
   timestamp?: string;
 }
 

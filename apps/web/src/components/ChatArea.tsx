@@ -43,6 +43,8 @@ interface ChatAreaProps {
   setSelectedScreenshot: (url: string | null) => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   onStartHumanSupport?: () => void;
+  onStopGeneration?: () => void;
+  isInterrupting?: boolean;
 }
 
 export function ChatArea({
@@ -59,6 +61,8 @@ export function ChatArea({
   setSelectedScreenshot,
   messagesEndRef,
   onStartHumanSupport,
+  onStopGeneration,
+  isInterrupting,
 }: ChatAreaProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -206,7 +210,7 @@ export function ChatArea({
                 )}
 
                 {/* Chat Message Box */}
-                {(m.content || m.isLoading) && (
+                {(m.content || m.isLoading || m.interrupted) && (
                   <div
                     className={`rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-xl border ${
                       m.role === 'user'
@@ -215,14 +219,33 @@ export function ChatArea({
                     }`}
                   >
                     {m.isLoading ? (
-                      <div className="flex items-center space-x-3 py-1">
-                        <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400" />
-                        <span className="text-slate-400 font-medium animate-pulse">
-                          正在全速运行多模态有向有环图节点，智能调用工具链中...
-                        </span>
+                      <div className="flex items-center justify-between gap-3 py-1">
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <Loader2 className="h-4.5 w-4.5 animate-spin text-indigo-400 shrink-0" />
+                          <span className="text-slate-400 font-medium animate-pulse truncate">
+                            正在全速运行多模态有向有环图节点，智能调用工具链中...
+                          </span>
+                        </div>
+                        {onStopGeneration && (
+                          <button
+                            type="button"
+                            onClick={onStopGeneration}
+                            disabled={isInterrupting}
+                            className="shrink-0 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isInterrupting ? '正在停止…' : '■ 停止生成'}
+                          </button>
+                        )}
                       </div>
                     ) : (
-                      <MessageText text={m.content} className="whitespace-pre-wrap" />
+                      <>
+                        <MessageText text={m.content} className="whitespace-pre-wrap" />
+                        {m.interrupted && (
+                          <div className="mt-2 border-t border-slate-800 pt-2 text-xs text-slate-500">
+                            ⏹ 已停止生成，可继续输入追问
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
