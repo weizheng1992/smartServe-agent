@@ -15,7 +15,7 @@ paths: ["apps/web/**/*"]
 - **打字机平滑渲染**：文本 Token 实时追加并平滑滚动，避免大段闪烁。
 - **自愈式会话恢复**：页面刷新或网络重连时，通过 `threadId` 自动同步加载历史消息与当前执行状态。
 - **欢迎语服务端权威（new-user-onboarding F，2026-09-10）**：`DEFAULT_ASSISTANT_MESSAGE` 前端本地伪造欢迎语已退役——`useChatMessages` 初始/切换/空历史一律空时间线,welcome 行（含 quick_replies 入口卡）由网关建线程时按租户 `onboarding_config` 落库,前端经 `loadHistory` 恢复真实欢迎语与入口卡（RichCardRenderer 渲染,`CARD_ACTION_HANDLERS.send_message` 发送 `payload.text`）。侧栏会话列表走 `GET /api/chat/threads?userId=`（严格按 userId 归属,含最后消息摘要）,前端不得再对空历史伪造兜底文案。
-- **停止生成（stream-reliability-push 02，2026-10-14）**：流式加载气泡带「■ 停止生成」按钮（`isInterrupting` 驱动禁用态「正在停止…」防重,重复点击天然幂等）——`useChatMessages.stopGeneration` 经 `lib/interruptGeneration` 消费网关取消契约（03 号票;404=作业已结束竞态,静默等 result 帧收尾）;打断终局由引擎 result 帧 `interrupted:true`（S2c 收口）驱动 `markInterrupted`:加载气泡就地转部分输出 + 「⏹ 已停止生成,可继续输入追问」标记,严禁走正常完成路径假装修完;打断与断线恢复语义互不污染（onError 兜底臂同步复位打断态）。
+- **停止生成（stream-reliability-push 02，2026-10-14）**：流式加载气泡带「■ 停止生成」按钮（`isInterrupting` 驱动禁用态「正在停止…」防重,重复点击天然幂等）——`useChatMessages.stopGeneration` 经 `lib/interruptGeneration` 消费网关取消契约（03 号票;404=作业已结束竞态,静默等 result 帧收尾）;打断终局由引擎 result 帧 `interrupted:true`（S2c 收口）驱动 `markInterrupted`:加载气泡就地转「⏹ 已停止生成,可继续输入追问」标记(S2c 中断轮部分态 output 强制空,现网实渲染为纯「已停止」无正文;部分输出能力保留在 `markInterrupted`/测试钉面,引擎放行部分态即原样承接),严禁走正常完成路径假装修完;打断与断线恢复语义互不污染（onError 兜底臂同步复位打断态）。
 
 ### 1.2 多模态交互卡片族谱 (Rich Interactive Cards)
 

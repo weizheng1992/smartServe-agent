@@ -48,8 +48,10 @@ export interface InterruptibleMessage {
   interrupted?: boolean;
 }
 
-/** 中断终局的消息行替换:加载气泡就地转「已停止」诚实态(部分输出原样保留,
- * 严禁假装修完);非目标行原样返回。 */
+/** 中断终局的消息行替换:加载气泡就地转「已停止」诚实态,严禁假装修完。
+ * output 原样落行 —— 函数本身支持部分输出(测试钉面),但当前 S2c 收口把
+ * 中断轮部分态 output 强制为空,现网实渲染即「已停止」标记 + 无正文;
+ * 引擎未来若放行部分态,此行原样承接。非目标行原样返回。 */
 export function markInterrupted<T extends InterruptibleMessage>(messages: T[], jobId: string, output: string): T[] {
   return messages.map((m) =>
     m.jobId === jobId && m.isLoading

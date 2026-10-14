@@ -4,7 +4,7 @@
 > 又落地 ADR-0012(货架词典解析器)、ADR-0013(聊天断线收口:L1 重连补投 +
 > 「继续」确定性重派 + 回复打断续聊)、owner-routing 责任人路由、S5 多商户
 > 租户列收口、SFT 训练管线(`scripts/training/`,见 `docs/sft_training_pipeline.md`)。
-> 现行测试口径:**引擎 pytest 1686 / 网关 397+3skip / 四前端 104(web 25 +
+> 现行测试口径:**引擎 pytest 1689 / 网关 399+3skip / 四前端 104(web 25 +
 > merchant 9 + merchant-admin 35 + admin 35)/ 注册端点 129**。阅读本文时,
 > 概念框架与设计叙事仍成立;凡数字与「最新能力清单」,以上述口径与本仓库
 > HEAD 为准(逐票证据链见 `.scratch/stream-reliability-push/` 与

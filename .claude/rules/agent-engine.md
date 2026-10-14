@@ -96,7 +96,7 @@ paths: ["services/engine-py/**/*"]
 - **RBAC（`rbac.py`）**：角色 `finance_owner`/`admin`/`sales_viewer`/`warehouse_operator`;指标权限 `permissionTag` 挂 metrics.yaml（现分布 sales_viewer 32 / warehouse_operator 3 / finance_owner 2,admin 全量）;菜单树/角色分配/员工 CRUD 的真源在服务端,`staff/switch` 由服务端为目标员工换签 JWT。
 - **观测与持久化**：`trace.py` 每次问答落 `analytics_trace`（`trace_id = tr_<hex12>`,覆盖 L0/L2/L3/会话/场景包各层与方法;终局前另记 `intent` 层存**最终意图**——merge/行内 SPU/逐字消歧全部生效后的形态,反馈注册范例从这里取回,不依赖 Redis 会话 24h TTL）;未命中落 `agent_unanswered`;`report_service.py` 报告服务端持久化（from-result 落库/CSV 导出,无 LLM 参与）。
 - **答案反馈闭环**（v3.1,2026-10-06）：终局帧（result/unsupported/error,场景包逐子帧）由 `graph._with_trace` 盖 `traceId` 章（clarify 中间态不盖）;员工 👍/👎 经 gateway `POST /feedback` 进 `feedback_service.submit_feedback` —— `analytics_feedback` 台账（一次 trace × 一员工一行,UNIQUE 三元 upsert,last verdict wins,快照 question/metric/layers）先行落定,再 post-commit 扇出:👎 → 坏例池 `thumbs_down` 信号（`dedupe=True` 防双击/多帧重复）;👍 → `search_exemplar` 查重（≥0.90 跳过,**exemplar_id 保持 None**——撤判严禁错杀相似命中的他人范例）未命中才注册 active `source="user"` 范例。改判全补偿:👍→👎 撤 user 范例（source 双保险,llm/manual 永不碰）+ 落坏例;👎→👍 dismiss 坏例信号（candidate 态才可撤,人工 triage 裁决优先）。扇出全部 fire-and-forget（print 吞错,不阻断反馈主契约）。unsupported 帧 👍 关闭（down-only,「本该能答」是词林缺口信号）。
-- **测试**：engine 侧 `tests/test_analytics_engine.py` / `test_data_agent_graph.py` / `test_data_agent_smoke.py` / `test_metric_head_seam.py` / `test_new_metric_families.py`;gateway 侧 40 条路由 84 例 `tests/test_analytics_routes.py`（见 server-gateway.md）。
+- **测试**：engine 侧 `tests/test_analytics_engine.py` / `test_data_agent_graph.py` / `test_data_agent_smoke.py` / `test_metric_head_seam.py` / `test_new_metric_families.py`;gateway 侧 40 条路由 91 例 `tests/test_analytics_routes.py`（见 server-gateway.md）。
 
 ---
 
