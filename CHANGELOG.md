@@ -4,6 +4,29 @@
 
 ---
 
+## [2.12.0] - 2026-10-14 (流可靠性战役主链落地:回复打断 S2 三票贯通 + 检索直评 S3 + 多租户收口 S5;商户面单机编排场景 B)
+
+### ✨ Features
+
+- **作业中断原语 S2c**(00bdf49):`engine_py/interruption.py` 进程内登记表(register_run/request_cancel/consume_cancel_request,单实例假设下最小形态,多实例须 Redis 化另立 ADR)+ `run_graph_with_interruption` 检查点化执行(astream 逐步消费全量状态,步间查闸;不取消时零行为漂移,命中返回最后完成步部分态,协作式不撕在跑的 LLM 调用)。命中以 `resolution_status='interrupted'` 收口(独立值压倒子任务态),result 帧带 `interrupted:true` 照发收口 SSE;部分态 output 强制空 → 零 assistant 行(「继续」确定性重派可接力,ADR-0013② 同构)+ 任务记忆照落;中断不是缺陷不入坏例池。挂起作业 run_agent 早已返回、取消打不中,`pending_approvals` 零接触。契约 `test_interruption.py`(登记表+真 langgraph 检查点)+ `test_settle_turn_interrupted.py`(收口三不变量)。
+- **作业取消路由 S2b**(9b90801):`POST /api/chat/{job_id}/cancel` 五态闸收口 `chat_turn.cancel_chat_job_gate`(400 身份缺失:取消是写动作严禁落 dispatch 缺省身份 / 404 未知或已结束:审批挂起作业构造性不可杀 / 403 属主不符:owner=派发身份 businessId:userId,business 段归一大小写空白、user 段精确 / 409 peek 与 cancel 间刚好结束 / 200 受理)+ 引擎 owner 属主记录 + overview 对账竞速收口;`run_agent` 接线钉面 1 例(双轴评审实弹:owner 接线曾在实验性 checkout 中丢失 → 生产面真实取消一律 404 谎报)。契约 `test_chat_cancel_route.py` 闸 7 例 + live 契约 + 引擎属主 2 例 + 接线 1 例。
+- **停止生成 S2a**(6f92e89):C 端流式加载气泡「■ 停止生成」按钮(`isInterrupting` 驱动禁用态防重,重复点击天然幂等),`useChatMessages.stopGeneration` 经 `lib/interruptGeneration` 消费网关取消契约(404=作业已结束竞态静默等 result 帧收尾);打断终局由引擎 result 帧 `interrupted:true` 驱动 `markInterrupted` 诚实标注,严禁走正常完成路径假装修完;打断与断线恢复语义互不污染(onError 兜底臂同步复位)。
+- **RAG 检索层直评册 S3**(0047fac):检索质量可量化 —— hit@k/租户隔离/形状契约三轴直评册(`eval/baselines/rag.json`)+ promptfoo 套件过滤与部分钉定合并。
+- **多商户租户列 S5**(1ef0312):promotions 域租户盲收口(promotions/user_coupons/promotion_redemptions 补 business_id + 存量回填 'aurora')+ owner_mappings 唯一键升维 (business_id, map_type, map_value)(同维度不同租户互不冲突)+ 结算链租户穿透。
+- **商户面单机编排场景 B**(8842379):`deploy/Dockerfile.web.merchant` 双前端(merchant + merchant-admin)裁剪构建 + `docker-compose.merchant.yml`(project 隔离卷)+ nginx 3005/3006 双 server 块 + docs/deploy.md §九与 CLAUDE.md 索引同步。
+
+### 📝 Docs
+
+- **S4 叙事成文**:813 行教程口径卡(补 ADR-0012/0013、owner-routing、S5 租户列、SFT 管线与现行测试口径)+ SFT 训练管线面试文档(6e25063);富卡片合成契约成文 —— 9 卡型全景 + 六条硬规则 + finish.py 陈旧 TODO 勘正(93dec7d);中断原语 + 记忆口径文档回填(agent-engine.md §1.1 interruption/§1.4 episodic 规则分·租户召回·任务记忆滚动摘要,2026-09-21 遗留 WIP 一次结清,444afe4);T1/T2 用例册缩进规范重排(git diff -w 验证零语义变更,9102154)。
+
+### 🐛 Fixes
+
+- **结算券链租户谓词无条件化**(2026-10-14 夜评双轴评审):`list_usable_user_coupons` 的条件谓词形状(`+ ("AND uc.business_id = :b" if biz else "")`)在显参与上下文双缺时产出无租户限定的裸查(database-schema.md §1.2 硬违规形状,且与仓内既定兜底 `tenant_context.resolve_business_id` 三套惯用法并存)——改走 resolve_business_id(显式 > 上下文 > 平台默认 + warning 留痕),租户谓词恒在、读路径永不抛(不变量 #4)。同批:merchant.py 购物车结算路由补传 business_id(下方单 SKU 路径已传、购物车路径漏传,缺省时券查询被租户谓词按平台默认过滤 → 券静默失效;双轴评审与并行网关路由深查独立复现同点)、`set_promotion_status` 续行缩进勘正;phase2 结算套件播种/上下文对齐生产契约(user_coupons 租户列防御式补齐 + `set_business_context('aurora')` + `_teardown` 复位)——券查询契约由「无谓词全库匹配」升级为「上下文租户过滤」并被套件真实钉死。引擎全量 1689 EXIT:0 / 网关全量 399+3skip EXIT:0、双 ruff 干净。
+
+### 🧪 Tests
+
+- analytics 契约例数文档漂移勘正(CLAUDE.md / server-gateway.md / agent-engine.md 84 → 91,无参数化实测);教程口径卡测试数刷新(引擎 1686→1689 / 网关 397+3skip→399+3skip);`markInterrupted` 注释与 client-web.md 口径对齐(S2c 中断轮部分态 output 强制空,现网实渲染为纯「已停止」无正文,「部分输出」是 markInterrupted 保留能力而非现网实况)。
+
 ## [2.11.0] - 2026-10-13 (上下文子系统改造:历史预算 + 滚动摘要 + 单点装配,ADR-0013① 前端触发面收口)
 
 ### ✨ Features
