@@ -1,0 +1,81 @@
+[
+  {
+    "description": "hit@1 - nike 洗护段直查(主题词与语料段面词面重叠,预期首位命中洗护说明)",
+    "vars": {
+      "input": "GORE-TEX 鞋面的鞋子应该怎么清洗保养？",
+      "businessId": "nike"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('nike') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('GORE-TEX'))(JSON.parse(output))"
+      }
+    ]
+  },
+  {
+    "description": "hit@1 - nike 门店段直查(地址营业时间事实面)",
+    "vars": {
+      "input": "你们在上海有实体店吗？具体在哪里、几点开门？",
+      "businessId": "nike"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('nike') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('淮海中路'))(JSON.parse(output))"
+      }
+    ]
+  },
+  {
+    "description": "hit@1 - aurora 语料主题直查(售后退换货段,验租户内跨文档路由)",
+    "vars": {
+      "input": "买回去后悔了想退货怎么办？",
+      "businessId": "aurora"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('aurora') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('退换'))(JSON.parse(output))"
+      }
+    ]
+  },
+  {
+    "description": "跨租户隔离 - adidas 主题查询 × nike 租户:adidas 语料严禁混入任何档位(租户物理隔离检索,§1.5 不变量)",
+    "vars": {
+      "input": "Boost 颗粒中底怎么保养？三里屯店在哪？",
+      "businessId": "nike"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "((o) => o.hits.length > 0 && o.hits.every((h) => !h.sourceUrl.includes('adidas')))(JSON.parse(output))"
+      }
+    ]
+  },
+  {
+    "description": "口语改写鲁棒 - 无词面重叠的口语问法(『脏了有味儿』)预期洗护段进前 2(MRR 风格段位上限,量语义召回而非字面匹配)",
+    "vars": {
+      "input": "鞋子穿脏了还有点味儿，咋整啊？",
+      "businessId": "nike"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "((o) => o.hits.slice(0, 2).some((h) => ((h.headerPath || '') + h.snippet).includes('GORE-TEX') || ((h.headerPath || '') + h.snippet).includes('洗涤')))(JSON.parse(output))"
+      }
+    ]
+  },
+  {
+    "description": "响应形状契约 - rank 连续自 1 递增、score 数值、latencyMs 存在、k 旋钮生效(下游 scorer 的输入面钉死)",
+    "vars": {
+      "input": "会员积分怎么攒？",
+      "businessId": "aurora",
+      "k": 3
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "((o) => o.hits.length <= 3 && o.hits.every((h, i) => h.rank === i + 1 && typeof h.similarity === 'number') && typeof o.latencyMs === 'number')(JSON.parse(output))"
+      }
+    ]
+  }
+]

@@ -75,13 +75,28 @@ function compareSuite(baseline: SuiteBaseline, current: SuiteSummary, currentCas
 async function compareBaselines() {
   const resultsDirIdx = process.argv.indexOf('--results-dir');
   const resultsDir = resultsDirIdx >= 0 ? process.argv[resultsDirIdx + 1] : undefined;
+  // 位置参数套件过滤(可选,与 pin 同款):`bun run test:prompt:compare -- rag`
+  // 多个位置参数 = 白名单集合;拼错的名字响亮 exit(1) —— 门禁严禁「0 套对比
+  // 仍印全部对齐」的假绿(评审 S3-a1)
+  const onlyArgs = process.argv
+    .slice(2)
+    .filter((a) => a !== '--results-dir' && a !== resultsDir && !a.endsWith('.ts') && !a.startsWith('--'));
+  const known = new Set(SUITES.map((s) => s.name));
+  const unknown = onlyArgs.filter((a) => !known.has(a));
+  if (unknown.length > 0) {
+    console.error(`❌ 未知套件: ${unknown.join(', ')}(可选: ${SUITES.map((s) => s.name).join(', ')})`);
+    process.exit(1);
+  }
+  const targetSuites = onlyArgs.length > 0 ? SUITES.filter((s) => onlyArgs.includes(s.name)) : SUITES;
 
   console.log('================================================================');
   console.log('🔍 Promptfoo 基线对比 (Baseline Comparison)');
-  console.log(`结果来源: ${resultsDir ? `--results-dir ${resultsDir}` : '现场重跑三套评测'}`);
+  console.log(
+    `结果来源: ${resultsDir ? `--results-dir ${resultsDir}` : '现场重跑评测'} | 套件: ${targetSuites.map((s) => s.name).join(', ')}`,
+  );
   console.log('================================================================\n');
 
-  const missing = SUITES.filter((s) => !existsSync(baselinePath(s.name)));
+  const missing = targetSuites.filter((s) => !existsSync(baselinePath(s.name)));
   if (missing.length > 0) {
     console.error('❌ 以下基线缺失,请先执行: bun run test:prompt:pin');
     for (const s of missing) {
@@ -96,7 +111,7 @@ async function compareBaselines() {
   }
 
   const comparisons: SuiteComparison[] = [];
-  for (const suite of SUITES) {
+  for (const suite of targetSuites) {
     const baseline = readBaseline(suite.name);
     if (!baseline) continue;
 

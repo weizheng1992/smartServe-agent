@@ -1,0 +1,87 @@
+{
+  "suite": "rag",
+  "pinnedAt": "2026-10-14T08:02:00.640Z",
+  "gitSha": "6f92e895134a49ff8794e2080936f039fb9390d2",
+  "config": {
+    "path": "eval/promptfoo.rag.yaml",
+    "sha256": "d87e9a6cb8c99878b73fd8b18f0b9a7679cf90152698e60489ef977b2701a2fc"
+  },
+  "promptfooVersion": "0.111.1",
+  "summary": {
+    "total": 6,
+    "pass": 6,
+    "fail": 0,
+    "errors": 0,
+    "meanScore": 1,
+    "scorers": {
+      "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('nike') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('GORE-TEX'))(JSON.parse(output))": {
+        "count": 1,
+        "pass": 1,
+        "fail": 0,
+        "meanScore": 1
+      },
+      "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('nike') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('淮海中路'))(JSON.parse(output))": {
+        "count": 1,
+        "pass": 1,
+        "fail": 0,
+        "meanScore": 1
+      },
+      "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('aurora') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('退换'))(JSON.parse(output))": {
+        "count": 1,
+        "pass": 1,
+        "fail": 0,
+        "meanScore": 1
+      },
+      "((o) => o.hits.length > 0 && o.hits.every((h) => !h.sourceUrl.includes('adidas')))(JSON.parse(output))": {
+        "count": 1,
+        "pass": 1,
+        "fail": 0,
+        "meanScore": 1
+      },
+      "((o) => o.hits.slice(0, 2).some((h) => ((h.headerPath || '') + h.snippet).includes('GORE-TEX') || ((h.headerPath || '') + h.snippet).includes('洗涤')))(JSON.parse(output))": {
+        "count": 1,
+        "pass": 1,
+        "fail": 0,
+        "meanScore": 1
+      },
+      "((o) => o.hits.length <= 3 && o.hits.every((h, i) => h.rank === i + 1 && typeof h.similarity === 'number') && typeof o.latencyMs === 'number')(JSON.parse(output))": {
+        "count": 1,
+        "pass": 1,
+        "fail": 0,
+        "meanScore": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "description": "hit@1 - nike 洗护段直查(主题词与语料段面词面重叠,预期首位命中洗护说明)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "hit@1 - nike 门店段直查(地址营业时间事实面)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "hit@1 - aurora 语料主题直查(售后退换货段,验租户内跨文档路由)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "跨租户隔离 - adidas 主题查询 × nike 租户:adidas 语料严禁混入任何档位(租户物理隔离检索,§1.5 不变量)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "口语改写鲁棒 - 无词面重叠的口语问法(『脏了有味儿』)预期洗护段进前 2(MRR 风格段位上限,量语义召回而非字面匹配)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "响应形状契约 - rank 连续自 1 递增、score 数值、latencyMs 存在、k 旋钮生效(下游 scorer 的输入面钉死)",
+      "success": true,
+      "score": 1
+    }
+  ]
+}

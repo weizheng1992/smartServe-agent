@@ -1,0 +1,16 @@
+description: "RAG 检索层直评(S3,stream-reliability-push 05:hit@k/段位/租户隔离/形状契约,直呼 search_relevant_docs,全链无 LLM)"
+
+prompts:
+  - "{{input}}"
+
+# 直调检索 provider:不经 triage/finish,量的是检索本体(混合检索:向量 0.8 +
+# BM25 0.2);embedding 走本地 bge(免费),语料来自 docs/knowledge 自愈种子
+providers:
+  - "file://providers/rag_provider.py:call_api"
+
+defaultTest:
+  options:
+    provider: "file://providers/rag_provider.py:call_api"
+
+tests:
+  - testCases/ecommerce/rag-retrieval.json

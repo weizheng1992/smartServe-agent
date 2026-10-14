@@ -1,6 +1,6 @@
 {
-  "pinnedAt": "2026-10-03T02:24:49.002Z",
-  "gitSha": "798fdc611b3c002530c76fec9146f5622fe587af",
+  "pinnedAt": "2026-10-14T07:50:37.871Z",
+  "gitSha": "6f92e895134a49ff8794e2080936f039fb9390d2",
   "suites": {
     "unified": {
       "total": 58,
@@ -126,6 +126,51 @@
         "unknown": {
           "count": 8,
           "pass": 8,
+          "fail": 0,
+          "meanScore": 1
+        }
+      }
+    },
+    "rag": {
+      "total": 6,
+      "pass": 6,
+      "fail": 0,
+      "errors": 0,
+      "meanScore": 1,
+      "scorers": {
+        "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('nike') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('GORE-TEX'))(JSON.parse(output))": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('nike') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('淮海中路'))(JSON.parse(output))": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "((o) => o.hits.length > 0 && o.hits[0].sourceUrl.includes('aurora') && ((o.hits[0].headerPath || '') + o.hits[0].snippet).includes('退换'))(JSON.parse(output))": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "((o) => o.hits.length > 0 && o.hits.every((h) => !h.sourceUrl.includes('adidas')))(JSON.parse(output))": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "((o) => o.hits.slice(0, 2).some((h) => ((h.headerPath || '') + h.snippet).includes('GORE-TEX') || ((h.headerPath || '') + h.snippet).includes('洗涤')))(JSON.parse(output))": {
+          "count": 1,
+          "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "((o) => o.hits.length <= 3 && o.hits.every((h, i) => h.rank === i + 1 && typeof h.similarity === 'number') && typeof o.latencyMs === 'number')(JSON.parse(output))": {
+          "count": 1,
+          "pass": 1,
           "fail": 0,
           "meanScore": 1
         }

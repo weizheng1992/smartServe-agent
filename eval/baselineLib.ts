@@ -5,7 +5,7 @@ export const REPO_ROOT = resolve(__dirname, '..');
 export const BASELINE_DIR = resolve(__dirname, 'baselines');
 
 export interface SuiteDef {
-  name: 'unified' | 'planner' | 'persona';
+  name: 'unified' | 'planner' | 'persona' | 'rag';
   config: string;
 }
 
@@ -14,10 +14,14 @@ export interface SuiteDef {
 // 由 unified 基线一力承担;独立 classify 分册成为纯冗余。
 // persona 分册入列(persona-hardening 07):画像审计抽取质量;基线已于 2026-10-02
 // 随罐头改真跑整体重钉首次钉定;活 LLM 例偶发波动属已知,pin 挂了重跑即可。
+// rag 分册入列(stream-reliability-push 05):RAG 检索层直评(hit@k/段位/租户
+// 隔离/形状契约)—— 直呼 search_relevant_docs,全链无 LLM(本地 bge),钉定
+// 零 token 成本。
 export const SUITES: SuiteDef[] = [
   { name: 'unified', config: 'eval/promptfooconfig.yaml' },
   { name: 'planner', config: 'eval/promptfoo.planner.yaml' },
   { name: 'persona', config: 'eval/promptfoo.persona.yaml' },
+  { name: 'rag', config: 'eval/promptfoo.rag.yaml' },
 ];
 
 export interface ScorerAggregate {
