@@ -17,6 +17,7 @@ paths: ["services/engine-py/**/*"]
   - 分流分支：日常寒暄/简单单意图走**极速直达旁路**（`executor_fast_path.py`）直接路由至 `finish`；复杂多意图路由至 `planner`。
   - 核心执行环：`planner` ➔ `merge` ➔ 循环 [`executor` ⇄ `validator`] ➔ 校验通过进入 `finish`；未通过或需回溯时退回 `executor`。
 - **回合管线单一深模块（ADR-0007，2026-09-30）**：`run_agent(job) -> dict` 是一回合的唯一接口与唯一执行路径（gateway 派发 / 审批恢复 / 影子回放三调用方共用）；图后收口（卡片合成 ➔ 记忆写入 ➔ task 记忆 ➔ 坏例信号 ➔ token 聚合 ➔ assistant 落库）内聚为私有内部缝。旧「Temporal 工作流 + 本地仿真回退」双模已于 2026-09-30 退役删除（全仓零 `start_workflow` 启动方、Temporal 侧收口接线漂移实证），重引入持久化执行须新立 ADR（`docs/adr/0007-temporal-execution-route-retired.md`）。
+- **作业中断原语（stream-reliability-push 04，2026-10-14）**：`interruption.py` 进程内登记表（`register_run`/`request_cancel`/`consume_cancel_request`，单实例假设 ADR-0007 下最小形态，多实例须 Redis 化另立 ADR）+ `run_graph_with_interruption` —— `ainvoke` 的检查点化等价物（astream 逐步消费全量状态，步间查闸；不取消时零行为漂移，命中返回最后完成步的部分态，协作式不撕正在跑的 LLM 调用）。run_agent 派发即注册、返回即注销（挂起作业 run_agent 早已返回，取消打不中，`pending_approvals` 零接触 —— 与审批面 cancel_execution 动作词两不相干）。命中后以 `resolution_status='interrupted'` 收口（独立值，**压倒子任务态**：中途停止 ≠ waiting_approval/失败）；result 帧照发但带 `interrupted: True`（网关按 result 帧优雅收口，不发则 SSE 流挂死）；部分态 output 强制空 → 零 assistant 行（「继续」确定性重派可接力，ADR-0013② 同构）+ 任务记忆照落（领域上下文跨轮延续）；中断不是缺陷，不入坏例池。网关取消路由归 stream-reliability-push 03 号票（`request_cancel` False → 404/409）。契约：`tests/test_interruption.py`（登记表 + 真 langgraph 检查点）+ `tests/test_settle_turn_interrupted.py`（收口三不变量）。
 - **事件主干**：用户态进度事件经 `event_bus.py` 写入 Redis Streams（INCR 序号 + XADD maxlen），网关 SSE 直接以该流为事件源。
 
 ### 1.2 Skills 技能分发与开放集成架构 (Skills Pipeline)
@@ -50,11 +51,11 @@ paths: ["services/engine-py/**/*"]
 - **短期记忆 (`memory/short_memory.py`)**：基于 `messages` 物理表读取最近 10 轮对话，内存为空时触发自愈补全。
 - **消息写所有权(multimodal 005 治理)**：用户行唯一由**网关**写入(dispatch/SPI/商户 store_chat 三个入口,唯一持有 `imageUrls` 的位置;store_chat 补写系 2026-09-09 修复——商户用户消息此前完全不落库,历史恢复缺用户行);引擎侧零写用户行(`run_agent` 主链/问候旁路均不插,历史经 `short_memory.get_messages` 读网关副本),否则时间线双插 user×2(一行带图一行不带)。assistant 行仍归引擎(`short_memory.add_message`),由 `test_user_message_single_write.py` 钉死;唯一例外是网关建线程时写入的 welcome/greet 引导行(new-user-onboarding C,详见 server-gateway.md §1.1)。
 - **长期偏好记忆 (`memory/long_memory.py`)**：审计 Agent 提取用户习惯，向量化存储至 `long_memory_facts`，检索时基于余弦相似度（硬阈值 ≥ 0.55，03 裁决维持——提档会砍光纯关键词命中的地板分，重定标等 07 抽取 eval 出数据）召回 Top-5。召回事实以 `[USER PROFILE MEMORY]` 结构块注入 **finish 终稿单点**（11 落地：approved-only + 租户可见 + ≤5 条，块指令含防复读闸——严禁据此宣称「已按您的偏好过滤」；consult 直答快轨刻意不在注入面）。
-- **情境记忆 (`memory/episodic_memory.py`)**：关键业务事件按重要性（1-10分）向量化落盘，检索阈值同为 ≥0.55，经 `[MEMORY OF PAST EVENTS]` 块与长期画像同批注入 finish 终稿（03 Q3 泛化，11 落地）。
-- **任务记忆 (`memory/task_memory.py`)**：持久化保存挂起和未完成的任务规划步骤。
+- **情境记忆 (`memory/episodic_memory.py`)**：关键业务事件按重要性规则分（2026-09-21 起 `run_agent._episodic_importance`：退款/退货/投诉/赔付/赔偿 → 9，订单号/金额 → 8，运单/地址/优惠/发货 → 7，购物车 → 5，其余 4；替代早期恒 5）向量化落盘，召回 SQL 层带租户条件（`tenant_scope_condition`，Python 侧 `_tenant_visible` 为防御纵深），检索阈值 ≥0.55，经 `[MEMORY OF PAST EVENTS]` 块与长期画像同批注入 finish 终稿（03 Q3 泛化，11 落地）。
+- **任务记忆 (`memory/task_memory.py`)**：每轮收口 upsert 计划 + 三域上下文 + `historySummary`（滚动历史摘要,见 `memory/context_builder.py`——历史 token 预算 `AI_HISTORY_BUDGET_TOKENS` 默认 2000,溢出轮懒触发摘要,planner/finish 经 `state.history_block` 单点消费）。
 - **双层画像物理隔离**：
   - 严格区分 `scope: 'global'`（客观生理属性，如脚长/过敏史）与 `scope: 'tenant'`（品牌专属偏好/会员积分）。
-  - 上下文装配召回时严格限定：`WHERE user_id = :1 AND (scope = 'global' OR business_id = :2)`，严禁跨租户泄漏画像。
+  - 上下文装配召回时严格限定（2026-09-21 落地为真）：SQL WHERE 带 `tenant_scope_condition`（scope 缺失/global 放行；tenant 域按当前租户精确匹配，ecommerce 缺省放空白）+ Python 侧 `_tenant_visible` 防御纵深，严禁跨租户泄漏画像（契约钉 tests/test_context_contract.py）。
 
 ### 1.5 Contextual RAG 知识检索 (`rag/contextual_rag.py`)
 
