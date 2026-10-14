@@ -1780,3 +1780,129 @@ class TestOwnerMappings:
             assert next(s for s in spus3 if s["id"] == spu_id)["ownerId"] is None
         finally:
             await client.delete(f"/api/admin/analytics/spus/{spu_id}", headers=boss)
+
+
+class TestPromotionsTenantIsolation:
+    """S5 跨租户隔离负向契约(stream-reliability-push 06):promotions 域租户盲
+    收口(nightly 10-11 实证)—— 跨租户读必空、写必 404 查无,原租户不受波及。"""
+
+    async def test_cross_tenant_promotion_invisible_and_untouchable(self, client, auth):
+        from engine_py.analytics import rbac
+        from engine_py.db import get_session
+        from engine_py.db.models import StaffMember
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()  # aurora
+        created = await client.post("/api/admin/analytics/promotions", headers=boss, json={
+            "name": "aurora 专属满减", "promoType": "full_reduction", "threshold": 100, "value": 10,
+        })
+        assert created.status_code == 200
+        pid = created.json()["id"]
+
+        # nike 侧:nike 员工行直插(ensure_defaults 的固定 staff id 会在第二租户
+        # 撞 PK —— 该多商户阻断已记债;测试只造本租户所需一行,并给路由级备忘
+        # 预登记,防首个 nike 请求再触 ensure_defaults 炸 500)
+        from gateway_py.routers import analytics as analytics_routes
+
+        try:
+            await rbac.ensure_defaults("nike")
+        except Exception:
+            pass  # PK 撞已知;本测试自备员工行
+        analytics_routes._SEEDED_TENANTS.add("nike")
+        pwd_hash = rbac.seed_password_hash()
+
+        async with get_session() as session:
+            session.add(StaffMember(
+                id="staff_nike_iso_test",
+                business_id="nike",
+                email="admin@nike",
+                display_name="Nike 管理员",
+                role="admin",
+                status="enabled",
+                password_hash=pwd_hash,
+            ))
+            await session.commit()
+        login = await client.post("/api/auth/login", json={
+            "email": "admin@nike", "password": DEV_PASSWORD,
+        })
+        assert login.status_code == 200
+        nike = {"x-tenant-id": "nike", "Authorization": f"Bearer {login.json()['data']['token']}"}
+
+        listed = await client.get("/api/admin/analytics/promotions", headers=nike)
+        assert listed.status_code == 200
+        assert all(p["id"] != pid for p in listed.json()["promotions"]), "跨租户活动严禁出现在 nike 列表"
+
+        for method, url, json_body in (
+            ("PATCH", f"/api/admin/analytics/promotions/{pid}", {"name": "越权改名"}),
+            ("POST", f"/api/admin/analytics/promotions/{pid}/status", {"status": "disabled"}),
+        ):
+            res = await client.request(method, url, headers=nike, json=json_body)
+            assert res.status_code == 404, f"跨租户 {method} 必 404 查无: {res.status_code} {res.text}"
+
+        # DELETE 在租户判定之前还有老板权限闸(nike admin 非「老板」)—— 403 拒绝
+        # 同样成立;两道闸任意一道拒绝即安全
+        dele = await client.delete(f"/api/admin/analytics/promotions/{pid}", headers=nike)
+        assert dele.status_code in (403, 404), f"跨租户 DELETE 必被拒: {dele.status_code} {dele.text}"
+
+        # 原租户不受波及
+        aurora_list = await client.get("/api/admin/analytics/promotions", headers=boss)
+        assert any(p["id"] == pid for p in aurora_list.json()["promotions"])
+
+    async def test_owner_mappings_tenant_scoped(self, client, auth):
+        """owner_mappings 唯一键升维 (business_id, map_type, map_value):同维度
+        同值在不同租户互不冲突、互不可见(S5;此前表零租户列,多商户复用即串)。"""
+        from engine_py.analytics import rbac
+
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        upsert = await client.put("/api/admin/analytics/owner-mappings", headers=boss, json={
+            "mapType": "category", "mapValue": "潮流鞋靴", "staffId": "staff_admin",
+        })
+        assert upsert.status_code == 200
+
+        aurora_list = await client.get("/api/admin/analytics/owner-mappings", headers=boss)
+        assert any(m["mapValue"] == "潮流鞋靴" for m in aurora_list.json()["mappings"])
+
+        # nike 员工行直插(ensure_defaults 固定 staff id 在第二租户撞 PK,已记债)
+        from gateway_py.routers import analytics as analytics_routes
+
+        try:
+            await rbac.ensure_defaults("nike")
+        except Exception:
+            pass  # PK 撞已知;本测试自备员工行
+        analytics_routes._SEEDED_TENANTS.add("nike")
+        pwd_hash = rbac.seed_password_hash()
+        from engine_py.db import get_session
+        from engine_py.db.models import StaffMember
+
+        async with get_session() as session:
+            session.add(StaffMember(
+                id="staff_nike_iso_mapping",
+                business_id="nike",
+                email="admin@nike",
+                display_name="Nike 管理员",
+                role="admin",
+                status="enabled",
+                password_hash=pwd_hash,
+            ))
+            await session.commit()
+        login = await client.post("/api/auth/login", json={
+            "email": "admin@nike", "password": DEV_PASSWORD,
+        })
+        nike = {"x-tenant-id": "nike", "Authorization": f"Bearer {login.json()['data']['token']}"}
+        nike_list = await client.get("/api/admin/analytics/owner-mappings", headers=nike)
+        assert nike_list.status_code == 200
+        assert all(m["mapValue"] != "潮流鞋靴" for m in nike_list.json()["mappings"]), (
+            "aurora 登记的责任人严禁出现在 nike 列表"
+        )
+
+        # nike 同维度同值可独立登记(唯一键升维的意义):互不冲突;
+        # staffId 用 nike 本店员工(闸校验本店在职)
+        nike_upsert = await client.put("/api/admin/analytics/owner-mappings", headers=nike, json={
+            "mapType": "category", "mapValue": "潮流鞋靴", "staffId": "staff_nike_iso_mapping",
+        })
+        assert nike_upsert.status_code == 200

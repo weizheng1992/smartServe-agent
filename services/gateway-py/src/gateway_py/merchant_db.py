@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS merchant_audit_logs (
 
 CREATE TABLE IF NOT EXISTS promotions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id VARCHAR(64) NOT NULL DEFAULT 'aurora',
   name TEXT NOT NULL,
   promo_type TEXT NOT NULL,             -- full_reduction | discount | coupon
   threshold_amount NUMERIC(10,2),       -- 满减门槛(full_reduction)
@@ -151,6 +152,7 @@ CREATE TABLE IF NOT EXISTS promotion_redemptions (
 
 CREATE TABLE IF NOT EXISTS user_coupons (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id VARCHAR(64) NOT NULL DEFAULT 'aurora',
   promotion_id UUID NOT NULL,
   user_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'claimed',  -- claimed | used
@@ -180,6 +182,8 @@ BEGIN
       FOREIGN KEY (promotion_id) REFERENCES promotions(id);
   END IF;
 END $$;
+
+
 
 -- 索引补齐(2026-09-26 夜审 ③#8):此前全库仅 reviews_spu 一枚索引,PG 外键
 -- 不自动建索引 —— 订单明细按单取行、SKU 按 SPU 取行、审计按单回溯、券按用户
@@ -219,14 +223,46 @@ CREATE INDEX IF NOT EXISTS idx_thread_notes_thread ON thread_notes(thread_id, cr
 -- 确定性通道一条入口(owner_routing / owner-mappings CRUD)。
 CREATE TABLE IF NOT EXISTS owner_mappings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id VARCHAR(64) NOT NULL DEFAULT 'aurora',
   map_type TEXT NOT NULL,
   map_value TEXT NOT NULL,
   staff_id TEXT NOT NULL,
   owner_type TEXT NOT NULL DEFAULT 'business',
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  CONSTRAINT owner_mappings_type_value_key UNIQUE (map_type, map_value)
+  CONSTRAINT owner_mappings_biz_type_value_key UNIQUE (business_id, map_type, map_value)
 );
+
+-- 多商户租户列(stream-reliability-push 06,2026-10-14):promotions 域租户盲
+-- 收口(nightly 10-11 实证 + architecture-debt 在案)—— 此前三表零 business_id,
+-- 多商户复用即串数据。幂等迁移:加列 → 存量回填(单商户时代全部归属 aurora;
+-- user_coupons 从 promotions 取真源)→ NOT NULL → 索引;owner_mappings 唯一键
+-- 同步升维 (business_id, map_type, map_value)(同维度不同租户互不冲突)。
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS business_id VARCHAR(64);
+UPDATE promotions SET business_id = 'aurora' WHERE business_id IS NULL;
+ALTER TABLE promotions ALTER COLUMN business_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_promotions_business ON promotions(business_id);
+
+ALTER TABLE user_coupons ADD COLUMN IF NOT EXISTS business_id VARCHAR(64);
+UPDATE user_coupons uc SET business_id = p.business_id FROM promotions p
+  WHERE uc.promotion_id = p.id AND uc.business_id IS NULL;
+UPDATE user_coupons SET business_id = 'aurora' WHERE business_id IS NULL;
+ALTER TABLE user_coupons ALTER COLUMN business_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_coupons_business ON user_coupons(business_id);
+
+ALTER TABLE owner_mappings ADD COLUMN IF NOT EXISTS business_id VARCHAR(64);
+UPDATE owner_mappings SET business_id = 'aurora' WHERE business_id IS NULL;
+ALTER TABLE owner_mappings ALTER COLUMN business_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_owner_mappings_business ON owner_mappings(business_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'owner_mappings_biz_type_value_key'
+                 AND conrelid = 'owner_mappings'::regclass) THEN
+    ALTER TABLE owner_mappings DROP CONSTRAINT IF EXISTS owner_mappings_type_value_key;
+    ALTER TABLE owner_mappings ADD CONSTRAINT owner_mappings_biz_type_value_key
+      UNIQUE (business_id, map_type, map_value);
+  END IF;
+END $$;
 
 -- 实体所有权数据原生(Q14/Q15):活动创建时刻捕获操作人、商品分配负责人;
 -- 值同样是 staff_members.id,存量行由种子补齐。

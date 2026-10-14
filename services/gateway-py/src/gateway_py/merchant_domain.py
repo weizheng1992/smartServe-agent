@@ -452,6 +452,7 @@ async def place_order(params: dict) -> dict:
                     {str(sku["spu_code"])} if "spu_code" in sku else None,
                     coupon_id=params.get("couponId"),
                     skip_coupon=bool(params.get("skipCoupon")),
+                    business_id=params.get("businessId"),
                 )
             except _CartError:
                 raise
@@ -1113,6 +1114,7 @@ async def _resolve_promotion(
     scope: set[str] | None,
     coupon_id: str | None = None,
     skip_coupon: bool = False,
+    business_id: str | None = None,
 ) -> PromotionResolution:
     """结算优惠决议(服务端唯一算价点,20-D3):全分支统一委托共享的
     resolve_stacked_promotions(2026-09-23 缺省语义漂移收口 —— 旧「缺省自动
@@ -1129,6 +1131,7 @@ async def _resolve_promotion(
         stacked = await resolve_stacked_promotions(
             conn, customer_id, amount, scope,
             coupon_row_id=coupon_id or None, auto_pick_coupon=not skip_coupon and not coupon_id,
+            business_id=business_id,
         )
     except ValueError as err:
         raise _CartError(str(err)) from err
@@ -1163,6 +1166,7 @@ async def create_order_from_cart(
     shipping_address: dict,
     coupon_id: str | None = None,
     skip_coupon: bool = False,
+    business_id: str | None = None,
 ) -> dict:
     if not items:
         return {"success": False, "message": "结算购物车条目不能为空"}
@@ -1232,6 +1236,7 @@ async def create_order_from_cart(
                     {str(oi["spuCode"]) for oi in items_to_insert},
                     coupon_id=coupon_id,
                     skip_coupon=skip_coupon,
+                    business_id=business_id,
                 )
             except _CartError:
                 raise
@@ -1285,7 +1290,7 @@ async def create_order_from_cart(
     }
 
 
-async def preview_cart_pricing(customer_id: str, items: list[dict]) -> dict:
+async def preview_cart_pricing(customer_id: str, items: list[dict], business_id: str | None = None) -> dict:
     """结算页只读试算(2026-09-22 选券重构):原价、活动优惠、券包逐张可用性。
 
     只读:不加锁、不减库存、不落任何表。金额口径与 create_order_from_cart
@@ -1327,7 +1332,9 @@ async def preview_cart_pricing(customer_id: str, items: list[dict]) -> dict:
             auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
             # 叠加口径(与 _resolve_promotion 一致):活动先减,券按余额抵扣封顶
             activity_discount = auto["discount"] if auto else 0.0
-            coupons = await list_usable_user_coupons(conn, customer_id, round(amount - activity_discount, 2))
+            coupons = await list_usable_user_coupons(
+                conn, customer_id, round(amount - activity_discount, 2), business_id
+            )
     except Exception as err:
         return {"success": False, "message": f"试算失败: {err}"}
     return {

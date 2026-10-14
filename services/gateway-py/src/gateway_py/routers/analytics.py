@@ -427,8 +427,12 @@ async def export_report_csv(request: Request, report_id: str):
 
 @router.get("/api/admin/analytics/promotions")
 async def promotions_list(request: Request):
-    await _ctx(request)  # 鉴权闸(租户上下文缺失即 403);列表本身跨租户只读汇总
-    return {"success": True, "promotions": await promotions.list_promotions(), "effect": await promotions.effect_overview()}
+    ctx = await _ctx(request)  # 鉴权闸(租户上下文缺失即 403);列表按租户过滤(S5)
+    return {
+        "success": True,
+        "promotions": await promotions.list_promotions(ctx["business_id"]),
+        "effect": await promotions.effect_overview(ctx["business_id"]),
+    }
 
 
 @router.post("/api/admin/analytics/promotions")
@@ -436,7 +440,9 @@ async def promotions_create(request: Request, body: PromotionCreateIn):
     ctx = await _ctx(request)
     if "promo:create" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
-    result = await promotions.create_promotion(body.model_dump(), ctx["staff"], operator_id=ctx["staff_id"])
+    result = await promotions.create_promotion(
+        body.model_dump(), ctx["staff"], business_id=ctx["business_id"], operator_id=ctx["staff_id"]
+    )
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, **result})
     return {"success": True, **result}
@@ -447,7 +453,7 @@ async def promotions_set_status(promotion_id: str, request: Request, body: Promo
     ctx = await _ctx(request)
     if "promo:disable" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
-    result = await promotions.set_promotion_status(promotion_id, body.status, ctx["staff"])
+    result = await promotions.set_promotion_status(promotion_id, body.status, ctx["staff"], business_id=ctx["business_id"])
     if "error" in result:
         return _error_response(result)
     return {"success": True, **result}
@@ -728,7 +734,7 @@ async def promotions_redeem(promotion_id: str, request: Request):
     order_id = str(body.get("orderId") or "").strip()
     if not order_id:
         return JSONResponse(status_code=400, content={"success": False, "message": "orderId 必传"})
-    result = await promotions.redeem(promotion_id, order_id, ctx["staff"])
+    result = await promotions.redeem(promotion_id, order_id, ctx["staff"], business_id=ctx["business_id"])
     if "error" in result:
         return _error_response(result)
     return {"success": True, **result}
@@ -744,7 +750,7 @@ async def promotions_grant(promotion_id: str, request: Request):
     customer_id = str(body.get("customerId") or "").strip()
     if not customer_id:
         return JSONResponse(status_code=400, content={"success": False, "message": "customerId 必传"})
-    result = await promotions.claim_coupon(promotion_id, customer_id)
+    result = await promotions.claim_coupon(promotion_id, customer_id, business_id=ctx["business_id"])
     if "error" in result:
         return _error_response(result)
     return {"success": True, **result}
@@ -805,7 +811,7 @@ async def spus_delete(spu_id: str, request: Request):
 
 @router.get("/api/admin/analytics/owner-mappings")
 async def owner_mappings_list(request: Request):
-    await _ctx(request)
+    ctx = await _ctx(request)
     from engine_py.analytics import owner_routing
     from engine_py.analytics.tools_registry_bridge import metric_semantic_registry, semantic_model
 
@@ -813,7 +819,7 @@ async def owner_mappings_list(request: Request):
     # 前端零硬编码 —— 语义模型扩值后下拉自动跟上。
     return {
         "success": True,
-        "mappings": await owner_routing.list_mappings(),
+        "mappings": await owner_routing.list_mappings(ctx["business_id"]),
         "categories": semantic_model()["dimensions"]["category"]["values"],
         "metrics": [
             {"key": key, "label": meta.get("label") or key}
@@ -847,7 +853,7 @@ async def owner_mappings_delete(request: Request, mapType: str = Query(...), map
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可维护责任人"})
     from engine_py.analytics import owner_routing
 
-    result = await owner_routing.delete_mapping(mapType, mapValue)
+    result = await owner_routing.delete_mapping(ctx["business_id"], mapType, mapValue)
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, "message": result["error"]})
     return {"success": True}
@@ -871,7 +877,7 @@ async def promotions_update(promotion_id: str, request: Request, body: Promotion
     patch = body.model_dump(exclude_unset=True)  # 白名单由 PromotionPatchIn 声明式承载
     if not patch:
         return JSONResponse(status_code=400, content={"success": False, "message": "无可更新字段"})
-    result = await P.update_promotion(promotion_id, patch, ctx["staff"])
+    result = await P.update_promotion(promotion_id, patch, ctx["staff"], business_id=ctx["business_id"])
     if "error" in result:
         return _error_response(result)
     return {"success": True, "id": promotion_id}
@@ -886,7 +892,7 @@ async def promotions_delete(promotion_id: str, request: Request):
 
     # 业务规则(核销保护/查无 404/审计)住 promotions.delete_promotion 单点,
     # 路由只留权限闸与 error-key → HTTP 映射(2026-10-03 自本路由下沉)
-    result = await P.delete_promotion(promotion_id, ctx["staff"])
+    result = await P.delete_promotion(promotion_id, ctx["staff"], business_id=ctx["business_id"])
     if "error" in result:
         return _error_response(result)
     return {"success": True, "id": promotion_id}

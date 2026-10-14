@@ -1368,10 +1368,10 @@ async def seed_merchant_data() -> None:
             for map_value, staff_id in owners.items():
                 await conn.execute(
                     text(
-                        "INSERT INTO owner_mappings (map_type, map_value, staff_id) "
-                        "VALUES (:t, :v, :s)"
+                        "INSERT INTO owner_mappings (business_id, map_type, map_value, staff_id) "
+                        "VALUES (:b, :t, :v, :s)"
                     ),
-                    {"t": map_type, "v": map_value, "s": staff_id},
+                    {"b": "aurora", "t": map_type, "v": map_value, "s": staff_id},
                 )
         for name, promo_type, threshold, discount, staff_id in (
             ("国庆户外机能节·满500减80", "full_reduction", 500, 80, "staff_ops_lead"),
@@ -1379,12 +1379,12 @@ async def seed_merchant_data() -> None:
         ):
             await conn.execute(
                 text(
-                    "INSERT INTO promotions (name, promo_type, threshold_amount, discount_value, "
+                    "INSERT INTO promotions (business_id, name, promo_type, threshold_amount, discount_value, "
                     "scope_type, scope_value, status, start_at, end_at, total_quota, created_by) "
-                    "VALUES (:n, :pt, :th, :dv, 'all', NULL, 'active', "
+                    "VALUES (:b, :n, :pt, :th, :dv, 'all', NULL, 'active', "
                     "NOW() - make_interval(days => 7), NOW() + make_interval(days => 23), 200, :by)"
                 ),
-                {"n": name, "pt": promo_type, "th": threshold, "dv": discount, "by": staff_id},
+                {"b": "aurora", "n": name, "pt": promo_type, "th": threshold, "dv": discount, "by": staff_id},
             )
 
         # 行数断言:播种静默假绿防线(DELETE 后按清单逐条 INSERT,缺行/多行必须炸出来)

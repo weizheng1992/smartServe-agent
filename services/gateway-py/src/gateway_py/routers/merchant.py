@@ -396,6 +396,7 @@ async def store_place_order(body: dict):
         result = await mds.place_order(
             {
                 "customerId": customer_id,
+                "businessId": (body.get("businessId") or "aurora"),
                 "skuCode": body.get("skuCode"),
                 "quantity": body.get("quantity") or 1,
                 "shippingAddress": body.get("shippingAddress") or "北京市海淀区中关村南大街1号院8号楼1201室",
@@ -419,18 +420,22 @@ class CheckoutPreviewItem(BaseModel):
 
 class CheckoutPreviewRequest(BaseModel):
     customerId: str | None = None
+    businessId: str | None = None
     items: list[CheckoutPreviewItem] = Field(min_length=1)
 
 
 @router.post("/api/store/checkout/preview")
 async def store_checkout_preview(body: CheckoutPreviewRequest):
-    """结算页只读试算:原价/活动/券包逐张可用性(不加锁不落表)。"""
+    """结算页只读试算:原价/活动/券包逐张可用性(不加锁不落表);
+    businessId 供券包按租户过滤(S5;缺省 aurora = 当前单店部署口径)。"""
     try:
         normalized = [
             {"skuCode": item.skuCode, "quantity": item.quantity} for item in body.items
         ]
         customer_id = body.customerId or "CUST-8801"
-        return await mds.preview_cart_pricing(customer_id, normalized)
+        return await mds.preview_cart_pricing(
+            customer_id, normalized, business_id=body.businessId or "aurora"
+        )
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
 
@@ -947,15 +952,15 @@ async def store_claim_coupon(request: Request):
         return JSONResponse(status_code=400, content={"success": False, "message": "promoId/userId 必传"})
     from engine_py.analytics import promotions as P
 
-    result = await P.claim_coupon(promo_id, user_id)
+    result = await P.claim_coupon(promo_id, user_id, business_id=str(body.get("businessId") or "aurora"))
     if "error" in result:
         return JSONResponse(status_code=400, content={"success": False, **result})
     return {"success": True, **result}
 
 
 @merchant_promotions_router.get("/api/store/coupons")
-async def store_my_coupons(request: Request, userId: str = Query(...)):
+async def store_my_coupons(request: Request, userId: str = Query(...), businessId: str = Query("aurora")):
     from engine_py.analytics import promotions as P
 
-    coupons = await P.my_coupons(userId)
+    coupons = await P.my_coupons(userId, businessId)
     return {"success": True, "coupons": coupons}

@@ -61,7 +61,7 @@ async def audit(action: str, operator: str, payload: dict) -> None:
         print(f"[Promotions] audit failed: {err}")
 
 
-async def list_promotions() -> list[dict]:
+async def list_promotions(business_id: str) -> list[dict]:
     """活动列表(运营闭环 2026-09-27):每行带发放/核销聚合与生效态派生。
 
     聚合用标量子查询而非 JOIN+GROUP BY —— 券行×核销行会互相翻倍计数;
@@ -79,8 +79,8 @@ async def list_promotions() -> list[dict]:
                     "(SELECT COUNT(*) FROM user_coupons uc WHERE uc.promotion_id = p.id AND uc.status = 'used') AS used_count, "
                     "(SELECT COUNT(*) FROM promotion_redemptions pr WHERE pr.promotion_id = p.id) AS redemption_count, "
                     "(SELECT COALESCE(SUM(pr.discount_amount), 0) FROM promotion_redemptions pr WHERE pr.promotion_id = p.id) AS discount_total "
-                    "FROM promotions p ORDER BY p.created_at DESC LIMIT 100"
-                )
+                    "FROM promotions p WHERE p.business_id = :b ORDER BY p.created_at DESC LIMIT 100"
+                ).bindparams(b=(business_id or "").strip().lower())
             )
         ).mappings().all()
     return [
@@ -102,7 +102,9 @@ async def list_promotions() -> list[dict]:
     ]
 
 
-async def create_promotion(payload: dict, operator: str, operator_id: str | None = None) -> dict:
+async def create_promotion(
+    payload: dict, operator: str, *, business_id: str, operator_id: str | None = None
+) -> dict:
     name = str(payload.get("name") or "").strip()
     promo_type = payload.get("promoType")
     value = payload.get("value")
@@ -120,10 +122,11 @@ async def create_promotion(payload: dict, operator: str, operator_id: str | None
     async with merchant_writer_engine().begin() as conn:
         await conn.execute(
             text(
-                "INSERT INTO promotions (id, name, promo_type, threshold_amount, discount_value, scope_type, scope_value, "
+                "INSERT INTO promotions (business_id, id, name, promo_type, threshold_amount, discount_value, scope_type, scope_value, "
                 "start_at, end_at, total_quota, created_by) "
-                "VALUES (CAST(:id AS uuid), :name, :pt, :th, :v, :st, :sv, COALESCE(:sa, NOW()), :ea, :tq, :cb)"
+                "VALUES (:b, CAST(:id AS uuid), :name, :pt, :th, :v, :st, :sv, COALESCE(:sa, NOW()), :ea, :tq, :cb)"
             ).bindparams(
+                b=(business_id or "").strip().lower(),
                 id=promo_id, name=name, pt=promo_type,
                 th=payload.get("threshold"), v=float(value),
                 st=payload.get("scopeType") or "all", sv=payload.get("scopeValue"),
@@ -141,7 +144,7 @@ async def create_promotion(payload: dict, operator: str, operator_id: str | None
     return {"id": promo_id, "name": name}
 
 
-async def update_promotion(promotion_id: str, patch: dict, operator: str) -> dict:
+async def update_promotion(promotion_id: str, patch: dict, operator: str, *, business_id: str) -> dict:
     """编辑活动(PATCH 单一实现,2026-09-27 运营闭环;路由只留 perm 闸与审计)。
 
     patch 只收**携带的字段**(key 存在才参与更新,未携带保持不变)——
@@ -156,8 +159,8 @@ async def update_promotion(promotion_id: str, patch: dict, operator: str) -> dic
             await conn.execute(
                 text(
                     "SELECT name, promo_type, threshold_amount, discount_value, scope_type, scope_value, "
-                    "start_at, end_at, total_quota FROM promotions WHERE id = CAST(:id AS uuid)"
-                ).bindparams(id=promotion_id)
+                    "start_at, end_at, total_quota FROM promotions WHERE id = CAST(:id AS uuid) AND business_id = :b"
+                ).bindparams(id=promotion_id, b=(business_id or "").strip().lower())
             )
         ).mappings().first()
         if not row:
@@ -195,9 +198,9 @@ async def update_promotion(promotion_id: str, patch: dict, operator: str) -> dic
             text(
                 "UPDATE promotions SET name = :name, threshold_amount = :th, discount_value = :v, "
                 "scope_type = :st, scope_value = :sv, start_at = :sa, end_at = :ea, total_quota = :tq "
-                "WHERE id = CAST(:id AS uuid)"
+                "WHERE id = CAST(:id AS uuid) AND business_id = :b"
             ).bindparams(
-                id=promotion_id, name=name, th=threshold, v=value,
+                id=promotion_id, b=(business_id or "").strip().lower(), name=name, th=threshold, v=value,
                 st=scope_type or "all", sv=scope_value,
                 sa=start_at, ea=end_at, tq=total_quota,
             )
@@ -211,12 +214,14 @@ async def update_promotion(promotion_id: str, patch: dict, operator: str) -> dic
     return {"id": promotion_id, "name": name}
 
 
-async def set_promotion_status(promotion_id: str, status: str, operator: str) -> dict:
+async def set_promotion_status(promotion_id: str, status: str, operator: str, *, business_id: str) -> dict:
     if status not in ("active", "disabled"):
         return {"error": "status ∈ active|disabled"}
     async with merchant_writer_engine().begin() as conn:
         result = await conn.execute(
-            text("UPDATE promotions SET status = :s WHERE id = CAST(:id AS uuid)").bindparams(s=status, id=promotion_id)
+            text("UPDATE promotions SET status = :s WHERE id = CAST(:id AS uuid) AND business_id = :b").bindparams(
+            s=status, id=promotion_id, b=(business_id or "").strip().lower()
+        )
         )
         if result.rowcount == 0:
             return {"error": "not_found", "message": "活动不存在"}
@@ -224,7 +229,7 @@ async def set_promotion_status(promotion_id: str, status: str, operator: str) ->
     return {"id": promotion_id, "status": status}
 
 
-async def delete_promotion(promotion_id: str, operator: str) -> dict:
+async def delete_promotion(promotion_id: str, operator: str, *, business_id: str) -> dict:
     """删除活动(2026-10-03 自 gateway 路由下沉,业务规则单点):已有核销记录
     的活动不可删只可停用 —— 核销行是活动效果归因(ADR-0005 核销关联口径)的
     真源,随删除蒸发即静默改写历史口径。查无此活动按「活动不存在」报错
@@ -235,8 +240,8 @@ async def delete_promotion(promotion_id: str, operator: str) -> dict:
             await conn.execute(
                 text(
                     "SELECT p.id, EXISTS(SELECT 1 FROM promotion_redemptions r WHERE r.promotion_id = p.id) AS used "
-                    "FROM promotions p WHERE p.id = CAST(:id AS uuid)"
-                ).bindparams(id=promotion_id)
+                    "FROM promotions p WHERE p.id = CAST(:id AS uuid) AND p.business_id = :b"
+                ).bindparams(id=promotion_id, b=(business_id or "").strip().lower())
             )
         ).first()
         if not used:
@@ -244,13 +249,15 @@ async def delete_promotion(promotion_id: str, operator: str) -> dict:
         if used.used:
             return {"error": "已有核销记录,只可停用不可删除"}
         await conn.execute(
-            text("DELETE FROM promotions WHERE id = CAST(:id AS uuid)").bindparams(id=promotion_id)
+            text("DELETE FROM promotions WHERE id = CAST(:id AS uuid) AND business_id = :b").bindparams(
+                id=promotion_id, b=(business_id or "").strip().lower()
+            )
         )
     await audit("promo_delete", operator, {"id": promotion_id})
     return {"id": promotion_id}
 
 
-async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
+async def redeem(promotion_id: str, order_id: str, operator: str, *, business_id: str) -> dict:
     """补录核销(20-D4 订单↔优惠关联):对已存在的订单登记某活动的优惠金额。
 
     优惠额由服务端按活动规则 × 订单实付计算(不在本模块动结算链,20-D3);
@@ -263,8 +270,8 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
         promo = (
             await conn.execute(
                 text("SELECT promo_type, threshold_amount, discount_value, status, start_at, end_at "
-                     "FROM promotions WHERE id = CAST(:id AS uuid)")
-                .bindparams(id=promotion_id)
+                     "FROM promotions WHERE id = CAST(:id AS uuid) AND business_id = :b")
+                .bindparams(id=promotion_id, b=(business_id or "").strip().lower())
             )
         ).mappings().first()
         if not promo:
@@ -314,7 +321,7 @@ async def redeem(promotion_id: str, order_id: str, operator: str) -> dict:
     return {"promotionId": promotion_id, "orderId": order_id, "discount": discount}
 
 
-async def claim_coupon(promotion_id: str, user_id: str) -> dict:
+async def claim_coupon(promotion_id: str, user_id: str, *, business_id: str) -> dict:
     """用户领券(仅 coupon 型活动;同活动同用户一次;须在售;发放上限量控)。
 
     量控闸(2026-09-27 运营闭环):total_quota 非空时 COUNT(已发放,含已核销)
@@ -325,7 +332,9 @@ async def claim_coupon(promotion_id: str, user_id: str) -> dict:
     async with merchant_writer_engine().connect() as conn:
         promo = (
             await conn.execute(
-                text("SELECT promo_type, status, total_quota FROM promotions WHERE id = CAST(:id AS uuid)").bindparams(id=promotion_id)
+                text("SELECT promo_type, status, total_quota FROM promotions WHERE id = CAST(:id AS uuid) AND business_id = :b").bindparams(
+                    id=promotion_id, b=(business_id or "").strip().lower()
+                )
             )
         ).mappings().first()
         if not promo or promo["status"] != "active":
@@ -362,7 +371,7 @@ async def claim_coupon(promotion_id: str, user_id: str) -> dict:
     return {"promotionId": promotion_id, "userId": user_id}
 
 
-async def my_coupons(user_id: str) -> list[dict]:
+async def my_coupons(user_id: str, business_id: str) -> list[dict]:
     """我的券:claimed(可用)+ used(已核销)全量带 status —— 核销态必须仍在
     列表(2026-09-21 bug:修前只回 claimed,商品页 claimedIds 丢记录,领券按钮
     复现,重复领取 400「已领取过该券」);可用性由消费方按 status 过滤。"""
@@ -373,9 +382,9 @@ async def my_coupons(user_id: str) -> list[dict]:
                     "SELECT uc.id, uc.promotion_id, p.name, p.discount_value, uc.claimed_at, uc.status "
                     "FROM user_coupons uc "
                     "JOIN promotions p ON p.id = uc.promotion_id "
-                    "WHERE uc.user_id = :u AND p.promo_type = 'coupon' "
+                    "WHERE uc.user_id = :u AND uc.business_id = :b AND p.promo_type = 'coupon' "
                     "ORDER BY uc.claimed_at DESC"
-                ).bindparams(u=user_id)
+                ).bindparams(u=user_id, b=(business_id or "").strip().lower())
             )
         ).mappings().all()
     return [{"id": r["id"], "promotionId": r["promotion_id"], "name": r["name"],
@@ -412,18 +421,23 @@ async def mark_coupon_used(conn, coupon_row_id: str, order_id: str) -> bool:
     return result.rowcount > 0
 
 
-async def effect_overview() -> dict:
+async def effect_overview(business_id: str) -> dict:
     """效果速览(20-D4):核销单数/优惠总额/最近核销;真实聚合,零活动诚实空。"""
     async with merchant_writer_engine().connect() as conn:
         row = (
             await conn.execute(
                 text(
                     "SELECT COUNT(*) AS redemptions, COALESCE(SUM(discount_amount), 0)::float AS total_discount "
-                    "FROM promotion_redemptions"
-                )
+                    "FROM promotion_redemptions pr JOIN promotions p ON p.id = pr.promotion_id "
+                    "WHERE p.business_id = :b"
+                ).bindparams(b=(business_id or "").strip().lower())
             )
         ).mappings().first()
         active = (
-            await conn.execute(text("SELECT COUNT(*) AS c FROM promotions WHERE status = 'active'"))
+            await conn.execute(
+                text("SELECT COUNT(*) AS c FROM promotions WHERE status = 'active' AND business_id = :b").bindparams(
+                    b=(business_id or "").strip().lower()
+                )
+            )
         ).scalar()
     return {"activePromotions": int(active or 0), "redemptions": int(row["redemptions"]), "totalDiscount": float(row["total_discount"])}

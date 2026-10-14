@@ -104,7 +104,7 @@ def patch_owner_io(monkeypatch):
         "staff": [],  # StaffMember 形行
     }
 
-    async def _fake_mapped(map_type, values):
+    async def _fake_mapped(business_id, map_type, values):
         if map_type == owner_routing.MAP_SPU:
             return {v: state["spu_owner"].get(v) for v in values}
         if map_type == owner_routing.MAP_PROMOTION:

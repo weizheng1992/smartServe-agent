@@ -127,9 +127,13 @@ async def find_owner_target(question: str) -> OwnerTarget | None:
     return None
 
 
-async def _mapped_staff_ids(map_type: str, values: list[str]) -> dict[str, str | None]:
+async def _mapped_staff_ids(
+    business_id: str, map_type: str, values: list[str]
+) -> dict[str, str | None]:
     """键类型 → staff_id 来源路由:品类/指标走注册表;商品/活动走实体列
-    (Q14/Q15 数据原生 —— 实体的所有权长在实体行上,不进注册表)。"""
+    (Q14/Q15 数据原生 —— 实体的所有权长在实体行上,不进注册表)。
+    注册表分支带租户闸(S5:owner_mappings 唯一键升维后按租户隔离);
+    实体列分支 merchant_spus/promotions 行自带 business_id,staff_id 即租户内。"""
     async with reader_engine().connect() as conn:
         if map_type == MAP_SPU:
             rows = (
@@ -141,8 +145,11 @@ async def _mapped_staff_ids(map_type: str, values: list[str]) -> dict[str, str |
         elif map_type == MAP_PROMOTION:
             rows = (
                 await conn.execute(
-                    text("SELECT name, created_by FROM promotions WHERE name = ANY(:vs)"),
-                    {"vs": values},
+                    text(
+                        "SELECT name, created_by FROM promotions "
+                        "WHERE name = ANY(:vs) AND business_id = :b"
+                    ),
+                    {"vs": values, "b": (business_id or "").strip().lower()},
                 )
             ).all()
         else:
@@ -150,9 +157,9 @@ async def _mapped_staff_ids(map_type: str, values: list[str]) -> dict[str, str |
                 await conn.execute(
                     text(
                         "SELECT map_value, staff_id FROM owner_mappings "
-                        "WHERE map_type = :t AND map_value = ANY(:vs)"
+                        "WHERE business_id = :b AND map_type = :t AND map_value = ANY(:vs)"
                     ),
-                    {"t": map_type, "vs": values},
+                    {"b": (business_id or "").strip().lower(), "t": map_type, "vs": values},
                 )
             ).all()
     return {value: staff_id for value, staff_id in rows}
@@ -165,7 +172,7 @@ async def resolve_owners(
     unique = [v for v in dict.fromkeys(values) if v]
     if not unique:
         return {}
-    mapped = await _mapped_staff_ids(map_type, unique)
+    mapped = await _mapped_staff_ids(business_id, map_type, unique)
     staff_by_id: dict[str, StaffMember] = {}
     staff_ids = sorted({sid for sid in mapped.values() if sid})
     if staff_ids:
@@ -282,17 +289,18 @@ async def upsert_mapping(business_id: str, map_type: str, map_value: str, staff_
     async with writer_engine().begin() as conn:
         await conn.execute(
             text(
-                "INSERT INTO owner_mappings (map_type, map_value, staff_id) VALUES (:t, :v, :s) "
-                "ON CONFLICT (map_type, map_value) DO UPDATE SET staff_id = EXCLUDED.staff_id, "
+                "INSERT INTO owner_mappings (business_id, map_type, map_value, staff_id) "
+                "VALUES (:b, :t, :v, :s) "
+                "ON CONFLICT (business_id, map_type, map_value) DO UPDATE SET staff_id = EXCLUDED.staff_id, "
                 "updated_at = NOW()"
             ),
-            {"t": map_type, "v": map_value, "s": staff_id},
+            {"b": (business_id or "").strip().lower(), "t": map_type, "v": map_value, "s": staff_id},
         )
     return {"mapType": map_type, "mapValue": map_value, "staffId": staff_id}
 
 
-async def delete_mapping(map_type: str, map_value: str) -> dict:
-    """撤销登记(下轮解析即「未登记」,诚实降级)。"""
+async def delete_mapping(business_id: str, map_type: str, map_value: str) -> dict:
+    """撤销登记(下轮解析即「未登记」,诚实降级);租户闸防跨租户误删。"""
     map_type = (map_type or "").strip()
     map_value = (map_value or "").strip()
     if map_type not in (MAP_CATEGORY, MAP_METRIC):
@@ -301,22 +309,27 @@ async def delete_mapping(map_type: str, map_value: str) -> dict:
         return {"error": "mapValue 必传"}
     async with writer_engine().begin() as conn:
         await conn.execute(
-            text("DELETE FROM owner_mappings WHERE map_type = :t AND map_value = :v"),
-            {"t": map_type, "v": map_value},
+            text(
+                "DELETE FROM owner_mappings "
+                "WHERE business_id = :b AND map_type = :t AND map_value = :v"
+            ),
+            {"b": (business_id or "").strip().lower(), "t": map_type, "v": map_value},
         )
     return {"deleted": True}
 
 
-async def list_mappings() -> list[dict]:
-    """全量映射(维护页列表用;含员工展示字段,停用员工照列 —— 呈现层标停用)。"""
+async def list_mappings(business_id: str) -> list[dict]:
+    """全量映射(维护页列表用;含员工展示字段,停用员工照列 —— 呈现层标停用);
+    租户闸:只列本店登记(S5)。"""
     async with reader_engine().connect() as conn:
         rows = (
             await conn.execute(
                 text(
                     'SELECT map_type AS "mapType", map_value AS "mapValue", staff_id AS "staffId", '
                     'owner_type AS "ownerType", updated_at AS "updatedAt" FROM owner_mappings '
-                    "ORDER BY map_type, map_value"
-                )
+                    "WHERE business_id = :b ORDER BY map_type, map_value"
+                ),
+                {"b": (business_id or "").strip().lower()},
             )
         ).mappings().all()
     mappings = [dict(r) for r in rows]
