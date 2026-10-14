@@ -220,8 +220,8 @@ async def set_promotion_status(promotion_id: str, status: str, operator: str, *,
     async with merchant_writer_engine().begin() as conn:
         result = await conn.execute(
             text("UPDATE promotions SET status = :s WHERE id = CAST(:id AS uuid) AND business_id = :b").bindparams(
-            s=status, id=promotion_id, b=(business_id or "").strip().lower()
-        )
+                s=status, id=promotion_id, b=(business_id or "").strip().lower()
+            )
         )
         if result.rowcount == 0:
             return {"error": "not_found", "message": "活动不存在"}

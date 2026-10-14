@@ -141,6 +141,11 @@ _MERCHANT_DDL = [
     "ALTER TABLE merchant_order_items ADD COLUMN IF NOT EXISTS spec_summary TEXT",
     "ALTER TABLE merchant_order_items ADD COLUMN IF NOT EXISTS image_url TEXT",
     "ALTER TABLE merchant_order_items ADD COLUMN IF NOT EXISTS cost_at_purchase NUMERIC(10,2) NOT NULL DEFAULT 0",
+    # user_coupons 生产形状含租户列(1ef0312 S5;生产 DDL 默认 'aurora')。
+    # 2026-10-14 起 list_usable_user_coupons 租户谓词无条件携带(评审收口:
+    # 条件谓词形状会产出无租户限定裸查),列缺失时券计算在 SAVEPOINT 内响亮
+    # 失败降级原价(cart.py 吞错保结算),本套券用例随即抓获 —— 列在此补齐。
+    "ALTER TABLE user_coupons ADD COLUMN IF NOT EXISTS business_id VARCHAR(64) NOT NULL DEFAULT 'aurora'",
 ]
 
 # (spu_code, title, category, status, [(sku_code, sku_title, price, stock, cost), ...])
@@ -161,6 +166,8 @@ _SPUS = [
 ]
 
 HISTORY_ORDER_ID = "AURORA-ORD-2026-9001"
+
+_BIZ_TOKEN = None
 
 
 def _spu_id(code: str) -> str:
@@ -237,6 +244,15 @@ async def _setup(pg_factory):
     # 阶段①只读收紧后:结算写事务走 writer(与生产一致,测试同指容器)
     order_domain._merchant_writer_engine = lambda: merchant_engine
 
+    # 租户上下文对齐生产:聊天通道结算在 run_agent 内恒有 set_business_context,
+    # 券查询按上下文租户过滤(2026-10-14 起 list_usable_user_coupons 谓词无条件)。
+    # 本套播种行走列默认 'aurora',上下文同设 'aurora' —— 上下文↔租户列联动
+    # 即被本套真实钉死;_teardown 复位防跨用例残留。
+    from engine_py.tenant_context import set_business_context
+
+    global _BIZ_TOKEN
+    _BIZ_TOKEN = set_business_context("aurora")
+
     async def _sealed_embed(*_args, **_kwargs):
         raise RuntimeError("embedding sealed in this suite")
 
@@ -253,6 +269,13 @@ async def _setup(pg_factory):
 async def _teardown(engine, merchant_engine, original, original_embeds):
     from engine_py.tools_registry import order_domain
     from engine_py.tools_registry.mall_domain import MallDomainService
+
+    global _BIZ_TOKEN
+    if _BIZ_TOKEN is not None:
+        from engine_py.tenant_context import reset_business_context
+
+        reset_business_context(_BIZ_TOKEN)
+        _BIZ_TOKEN = None
 
     reader_original, writer_original = original
     order_domain._merchant_reader_engine = reader_original

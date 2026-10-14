@@ -390,6 +390,9 @@ async def store_place_order(body: dict):
                 },
                 coupon_id=coupon_id,
                 skip_coupon=skip_coupon,
+                # 结算链租户穿透(与下方单 SKU 路径同口径;1ef0312 承诺 + 2026-10-14
+                # 夜评实证:缺省时券查询被 S5 租户谓词按平台默认过滤,券静默失效)
+                business_id=(body.get("businessId") or "aurora"),
             )
             return result
 

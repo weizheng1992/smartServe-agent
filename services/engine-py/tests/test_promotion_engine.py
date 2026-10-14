@@ -101,3 +101,65 @@ class TestFetchActivePromosWindow:
         # SELECT 必须带出窗口两列(下游 _in_window 的数据来源)
         assert running["start_at"] is not None
         assert "end_at" in running
+
+
+class TestListUsableUserCouponsTenantGuard:
+    """租户谓词无条件携带(2026-10-14 夜评 Standards 轴:S5 租户列收口后,
+    条件谓词形状(`+ ("AND uc.business_id = :b" if biz else "")`)在显参与
+    上下文双缺时产出无租户限定的裸查 —— database-schema.md §1.2 硬违规形状。
+    修后走 tenant_context.resolve_business_id(显式 > 上下文 > 平台默认
+    +warning 留痕),谓词恒在;读路径永不抛(不变量 #4)由解析器兜底保证。"""
+
+    class _CaptureConn:
+        def __init__(self):
+            self.captured = None
+
+        async def execute(self, stmt, *args, **kwargs):
+            self.captured = stmt
+
+            class _Rows:
+                def mappings(self):
+                    return self
+
+                def all(self):
+                    return []
+
+            return _Rows()
+
+    @staticmethod
+    def _run(coupons_conn, business_id=None):
+        import asyncio
+
+        from engine_py.analytics.promotion_engine import list_usable_user_coupons
+
+        asyncio.run(list_usable_user_coupons(coupons_conn, "CUST-TG-1", 100.0, business_id))
+
+    def _binds(self, conn):
+        return {k: v.value for k, v in conn.captured._bindparams.items()}
+
+    def test_explicit_tenant_normalizes_and_predicate_always_present(self):
+        conn = self._CaptureConn()
+        self._run(conn, "Nike ")
+        assert "AND uc.business_id = :b" in str(conn.captured)
+        assert self._binds(conn)["b"] == "nike"
+
+    def test_context_tenant_used_when_explicit_missing(self):
+        from engine_py.tenant_context import reset_business_context, set_business_context
+
+        conn = self._CaptureConn()
+        token = set_business_context("Aurora")
+        try:
+            self._run(conn)
+        finally:
+            reset_business_context(token)
+        assert "AND uc.business_id = :b" in str(conn.captured)
+        assert self._binds(conn)["b"] == "aurora"
+
+    def test_no_context_falls_back_to_platform_default_with_warning(self, caplog):
+        import logging
+
+        conn = self._CaptureConn()
+        with caplog.at_level(logging.WARNING, logger="engine_py.tenant_context"):
+            self._run(conn)
+        assert self._binds(conn)["b"] == "ecommerce"
+        assert "[tenant-context]" in caplog.text, "双缺兜底必须 warning 留痕(resolve_business_id 契约)"

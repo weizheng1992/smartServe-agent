@@ -136,16 +136,19 @@ async def promo_prices_batch(conn, items: list[tuple[str, float]]) -> list[dict 
 
 
 async def list_usable_user_coupons(conn, user_id: str, amount: float, business_id: str | None = None) -> list[dict]:
-    """business_id 缺省时回落引擎租户上下文(current_business_id,A7 同源)——
-    聊天通道结算在 run_agent 上下文内自带租户;网关商城面须显式传入。"""
     """用户已领取且未使用的券,逐张对面额求可用性与优惠额(结算页选券面)。
+
+    business_id 缺省时经 tenant_context.resolve_business_id 回落(显式 >
+    上下文 > 平台默认+warning 留痕,A7 同源)—— 聊天通道结算在 run_agent
+    上下文内自带租户;网关商城面须显式传入。租户谓词无条件携带,严禁产出
+    无租户限定的裸查(database-schema.md §1.2)。
 
     返回 [{coupon_row_id, promotion_id, name, value, discount}](仅 coupon 型、
     claimed、活动在售且在有效期;金额口径与结算一致:min(面额, 金额) 永不为负)。
     """
-    from ..tenant_context import current_business_id
+    from ..tenant_context import resolve_business_id
 
-    biz = business_id or current_business_id()
+    biz = resolve_business_id(business_id).strip().lower()
     rows = (
         await conn.execute(
             text(
@@ -153,10 +156,8 @@ async def list_usable_user_coupons(conn, user_id: str, amount: float, business_i
                 "FROM user_coupons uc JOIN promotions p ON p.id = uc.promotion_id "
                 "WHERE uc.user_id = :u AND uc.status = 'claimed' AND p.status = 'active' "
                 "AND p.promo_type = 'coupon' AND (p.end_at IS NULL OR p.end_at > NOW()) "
-                + ("AND uc.business_id = :b" if biz else "")
-            ).bindparams(
-                u=user_id, **({"b": (biz or "").strip().lower()} if biz else {})
-            )
+                "AND uc.business_id = :b"
+            ).bindparams(u=user_id, b=biz)
         )
     ).mappings().all()
     coupons: list[dict] = []
