@@ -1,5 +1,15 @@
 # smartServe-Agent 项目知识点详解(新手学习版)
 
+> **⚠️ 口径更新(2026-10-14,以此为准)**:本文写作于 ADR-0011 时点,其后仓库
+> 又落地 ADR-0012(货架词典解析器)、ADR-0013(聊天断线收口:L1 重连补投 +
+> 「继续」确定性重派 + 回复打断续聊)、owner-routing 责任人路由、S5 多商户
+> 租户列收口、SFT 训练管线(`scripts/training/`,见 `docs/sft_training_pipeline.md`)。
+> 现行测试口径:**引擎 pytest 1686 / 网关 397+3skip / 四前端 104(web 25 +
+> merchant 9 + merchant-admin 35 + admin 35)/ 注册端点 129**。阅读本文时,
+> 概念框架与设计叙事仍成立;凡数字与「最新能力清单」,以上述口径与本仓库
+> HEAD 为准(逐票证据链见 `.scratch/stream-reliability-push/` 与
+> `.scratch/portfolio-direction-verdict/assets/asset-defense-grades.md`)。
+
 > 项目仓库:`~/Desktop/test/ai/agent-all`(GitHub: weizheng1992/smartServe-agent)
 > 本文定位:**纯知识点讲解**——每个知识点先讲通用背景(是什么/为什么),再讲本项目怎么用、代码在哪、新手容易懵的点。不假设你已懂 LangGraph、SSE、事务发件箱这些词,遇到都会先解释。
 > 架构决策见 `docs/adr/0001~0011`。
