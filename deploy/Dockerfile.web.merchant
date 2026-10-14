@@ -1,0 +1,27 @@
+# 商户面专用镜像:只构建并分发 apps/merchant(3005) 与 apps/merchant-admin(3006)
+# 配套 deploy/nginx.merchant.conf 与 deploy/docker-compose.merchant.yml;web(3000)/admin(3001) 不在内
+FROM oven/bun:1.4.0 AS build
+
+ENV DO_NOT_TRACK=1
+WORKDIR /app
+
+# 先装依赖(workspace 清单+锁文件独立成层)
+COPY package.json bun.lock turbo.json ./
+COPY apps ./apps
+COPY packages ./packages
+RUN bun install --frozen
+
+# 只构建商户两面前端(turbo dependsOn ^build 自动带上 packages/ui、packages/types)
+COPY . .
+RUN bun run build --filter=merchant --filter=merchant-admin
+
+FROM nginx:1.27-alpine
+
+COPY deploy/nginx.merchant.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/apps/merchant/dist       /var/www/merchant
+COPY --from=build /app/apps/merchant-admin/dist /var/www/merchant-admin
+
+EXPOSE 3005 3006
+
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3005/healthz >/dev/null 2>&1 || exit 1

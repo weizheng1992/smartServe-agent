@@ -1,4 +1,4 @@
-# 生产部署方案（Docker Compose 全栈 · 场景 A 基础单机版）
+# 生产部署方案（Docker Compose · 场景 A 全栈 / 场景 B 只部署商户面）
 
 > **按规模选方案**：本篇是基础单机版（已实测），适用内部/几十并发。更大规模见
 > [deploy-scaling.md](deploy-scaling.md)——单机压榨（§1）/ 中型生产·监控·蓝绿（§2）/
@@ -148,3 +148,25 @@ bun run build                                      # 四前端 dist
 - [ ] merchant 真实登录/注册可用（种子已导入）
 - [ ] merchant-admin 数据分析六页出真数（连接的是种子库）
 - [ ] 重启服务器后 `docker compose -f deploy/docker-compose.prod.yml up -d` 一键恢复（卷持久化）
+
+## 九、场景 B：只部署商户面（merchant / merchant-admin）
+
+只要商户门户（3005）与商户后台（3006）时用这套编排——`web`（3000）/`admin`（3001）不构建、不暴露：
+
+| 文件 | 作用 |
+|---|---|
+| `deploy/docker-compose.merchant.yml` | 编排：PG + Redis + migrate + gateway + `merchant-web`（仅 3005/3006） |
+| `deploy/Dockerfile.web.merchant` | 只构建 `merchant` + `merchant-admin` 两个 dist（turbo filter 带上 ui/types） |
+| `deploy/nginx.merchant.conf` | 只留 3005/3006 两个 server 块，代理参数与全量 nginx.conf 逐字一致 |
+
+```bash
+# 1) 环境变量与场景 A 共用同一份模板/文件
+cp deploy/.env.prod.example deploy/.env.prod && vim deploy/.env.prod
+
+# 2) 一键起（镜像构建 + 迁移 + 启动）
+docker compose -f deploy/docker-compose.merchant.yml up -d --build
+```
+
+- **网关不裁剪**：商户两面前端的后端 = 同一 gateway（engine/PG/Redis 也是同一套）；web/admin 专属路由闲置无害，代码级裁端点不划算也不做。4000 端口仍暴露，便于直连调试与 SPI 回调。
+- **数据隔离**：project name 是 `smartserve-merchant`，卷名带前缀，与全量版（`smartserve-prod`）的库数据互不串；同一台机器二选一跑，或并存（内存够 8G 才建议并存）。
+- **验证清单**（替换第八节对应项）：`curl :3005/healthz` / `:3006/healthz` 返回 ok；3005 商城可登录加购；3006 登录后悬浮助手提问出真数；`docker compose -f deploy/docker-compose.merchant.yml up -d` 一键恢复。
