@@ -30,6 +30,11 @@ class _OpenBreakerGraph:
     async def ainvoke(self, _state):
         raise CircuitBreakerOpenError(global_circuit_breaker.get_status())
 
+    async def astream(self, _state, stream_mode=None):
+        # S2c 起 run_agent 的图接缝是检查点化 astream,桩与真图同契约(异常照常上抛)
+        yield _state
+        await self.ainvoke(_state)
+
 
 class _GraphBreakerGraph:
     """伪图:返回触绘图级熔断的结果(全局转移 24 次 ≥ 22 阈值;2026-09-27
@@ -43,6 +48,11 @@ class _GraphBreakerGraph:
             "global_transitions_count": 24,
             "tool_errors_count": 1,
         }
+
+    async def astream(self, _state, stream_mode=None):
+        # S2c 起 run_agent 的图接缝是检查点化 astream,桩与真图同契约
+        yield _state
+        yield await self.ainvoke(_state)
 
 
 class _NoopEpisodic:
@@ -198,6 +208,11 @@ def test_正常会话不入池(monkeypatch):
                 "global_transitions_count": 4,
                 "tool_errors_count": 0,
             }
+
+        async def astream(self, _state, stream_mode=None):
+            # S2c 起 run_agent 的图接缝是检查点化 astream,桩与真图同契约
+            yield _state
+            yield await self.ainvoke(_state)
 
     thread_id = "dbg_thread_cb_pool_healthy"
     _run_agent_with_graph(monkeypatch, _HealthyGraph(), thread_id)

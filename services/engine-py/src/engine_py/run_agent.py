@@ -37,6 +37,7 @@ from .event_bus import emit_job_result, emit_status, publish_agent_event
 from .graph import build_graph
 from .graph.build_graph import CIRCUIT_BREAKER_TOOL_ERRORS, CIRCUIT_BREAKER_TRANSITIONS
 from .graph.state import DEFAULT_TASK_PLAN, AgentState, to_ts_dict
+from .interruption import register_run, run_graph_with_interruption, unregister_run
 from .llm import (
     CircuitBreakerOpenError,
     bind_llm_call_context,
@@ -216,6 +217,7 @@ async def _settle_turn(
     saved_cart_context: dict | None,
     saved_order_context: dict | None,
     history_summary_final: str | None = None,
+    interrupted: bool = False,
 ) -> dict:
     """收口(内部缝):图终态 → 交付调用方之间的唯一持久化段,顺序即契约。
 
@@ -224,6 +226,11 @@ async def _settle_turn(
     `${jobId}:result` 事件发布。各段自吞错不阻断交付;返回值即调用方交付的
     final_result。身份实参(business_id 为线程行自愈后的权威租户)由 run_agent
     显式递入 —— 降级臂结果里没有 business_config,收口不得依赖图终态携带租户。
+
+    interrupted(S2c):用户主动中断的运行级收口 —— resolution_status 落
+    ``interrupted``(独立值,压倒子任务态:中途停止 ≠ 等待审批/失败);result
+    帧仍发布(网关「result 帧优雅收口」语义不变,否则 SSE 流挂死)但带
+    ``interrupted: True`` 诚实标注;中断不是缺陷,不入坏例池。
     """
     thread_id = job.thread_id
     user_id = job.user_id
@@ -259,8 +266,16 @@ async def _settle_turn(
                 global_transitions >= CIRCUIT_BREAKER_TRANSITIONS or tool_errors >= CIRCUIT_BREAKER_TOOL_ERRORS
             )
 
-            # 🛡️ LLM 熔断落盘(resilience.py 全局熔断器拦截):job 级终态,优先于图级判定
-            if llm_breaker_fired:
+            # 🛡️ LLM 熔断落盘(resilience.py 全局熔断器拦截):job 级终态,优先于图级判定。
+            # 中断旗标列首位:S2c 与两熔断臂按构造互斥(中断走正常流退出,熔断走异常臂),
+            # 防御性优先只表达「运行级用户中断是最高叙事优先级」;子任务态(waiting_approval
+            # 等)再低一档 —— 中途停止的计划若按 waiting_approval 落,会把「用户已停止」
+            # 谎成「等待审批」,污染 HOT-RESUME 恢复面语义。
+            if interrupted:
+                resolution_status = "interrupted"
+                is_success = False
+                feedback_comment = "Run interrupted by user before finish."
+            elif llm_breaker_fired:
                 resolution_status = "llm_circuit_breaker"
                 is_success = False
                 feedback_comment = "Upstream LLM circuit breaker open; job degraded with apology fallback."
@@ -279,7 +294,10 @@ async def _settle_turn(
 
             plan = result.get("task_plan") or {}
             subtasks = plan.get("subtasks") or []
-            if subtasks and not breaker_fired:
+            # 运行级中断(interrupted)压倒子任务态:运行没跑完,子任务状态不是
+            # 终局叙事(中途停止的挂起子任务若按 waiting_approval 落,会把「用户
+            # 已停止」谎成「等待审批」)
+            if subtasks and not breaker_fired and not interrupted:
                 has_pending = any((st.get("result") or {}).get("waitingForApproval") for st in subtasks)
                 has_cancelled = any((st.get("result") or {}).get("cancelledByUser") for st in subtasks)
                 has_expired = any((st.get("result") or {}).get("expiredByTimeout") for st in subtasks)
@@ -327,7 +345,9 @@ async def _settle_turn(
             # 后台调用,而池以会话为评审单位,与 session_metrics 熔断落盘(003
             # 数据源)同位;dedupe=True 使 OPEN 窗口内同一会话多次回合只入池一次;
             # 入池失败静默降级不阻断主流程(内建)。
-            if llm_breaker_fired or graph_error_fired or breaker_fired:
+            if (llm_breaker_fired or graph_error_fired or breaker_fired) and not interrupted:
+                # 中断不是缺陷(S2c):用户掐死打转 run 的部分态(tool_errors≥3 /
+                # 转移≥22 正是取消的典型形态)不入坏例池 —— 那是产品行为不是缺陷信号
                 await record_badcase_signal(
                     SOURCE_CIRCUIT_BREAKER,
                     conversation_ref=f"thread:{thread_id}",
@@ -459,6 +479,10 @@ async def _settle_turn(
             print(f"[runAgent] 任务状态落库失败(不阻断): {tm_err!r}")
 
     final_result = {**to_ts_dict(result), "cards": final_cards}
+    if interrupted:
+        # S2c:result 帧仍发(网关按 result 帧优雅收口,不发则 SSE 流挂死),
+        # 但带 interrupted 标记诚实声明「未完成」—— 严禁复用 error 帧或沉默
+        final_result["interrupted"] = True
 
     if job_id:
         try:
@@ -767,8 +791,19 @@ async def run_agent(job: AgentJobInput) -> dict:
     graph_app = build_graph()
     llm_breaker_fired = False
     graph_error_fired = False
+    interrupted = False
+    # S2c:作业入活跃登记表 —— 网关取消路由(03 号票)的 request_cancel 只有
+    # 打在活跃表上的作业才生效;返回(含降级/异常臂)即注销,挂起作业天然不可取消
+    register_run(job_id)
     try:
-        result = await graph_app.ainvoke(initial_state)
+        # 检查点化执行(S2c):ainvoke → astream 步间查取消闸;不取消时行为
+        # 与 ainvoke 等价,取消命中返回最后完成步的部分态(interrupted=True)
+        result, interrupted = await run_graph_with_interruption(graph_app, initial_state, job_id)
+        if interrupted:
+            # 部分态无 finish 终稿:严禁把中间产物冒充输出交付 —— output 清空,
+            # 收口据此跳过 assistant 行落库(时间线无回答 → 「继续」确定性重派
+            # 可接力,ADR-0013② 同构);任务记忆仍落,领域上下文跨轮延续。
+            result = {**result, "output": ""}
     except CircuitBreakerOpenError as breaker_err:
         # 🛡️ 上游 LLM 熔断(连续失败达阈值,见 llm/resilience.py):全图中止,
         # 降级为道歉回复;session_metrics 落 resolution_status='llm_circuit_breaker'
@@ -806,6 +841,8 @@ async def run_agent(job: AgentJobInput) -> dict:
                 result = {**result, "output": fallback_output}
         except Exception as fb_err:
             print(f"[runAgent] 确定性兜底失败,保留道歉罐头: {fb_err}")
+    finally:
+        unregister_run(job_id)
     elapsed_latency_ms = (time.time() - start_time) * 1000
 
     # 收口(内部缝,ADR-0007):图后持久化段整体内聚在 _settle_turn —— 遥测/
@@ -822,4 +859,5 @@ async def run_agent(job: AgentJobInput) -> dict:
         saved_cart_context=saved_cart_context,
         saved_order_context=saved_order_context,
         history_summary_final=history_summary_final,
+        interrupted=interrupted,
     )

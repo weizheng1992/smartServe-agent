@@ -63,10 +63,20 @@ class _OpenBreakerGraph:
     async def ainvoke(self, _state):
         raise CircuitBreakerOpenError("OPEN(test)")
 
+    async def astream(self, _state, stream_mode=None):
+        # S2c 起 run_agent 的图接缝是检查点化 astream,桩与真图同契约
+        # (缺 astream 会被通用降级臂吞掉,熔断臂钉面静默漂移成 graph_error 臂)
+        yield _state
+        await self.ainvoke(_state)
+
 
 class _ExplodingGraph:
     async def ainvoke(self, _state):
         raise RuntimeError("图内未捕获异常(测试桩)")
+
+    async def astream(self, _state, stream_mode=None):
+        yield _state
+        await self.ainvoke(_state)
 
 
 def _make_job():

@@ -27,6 +27,12 @@ class _CapturingBreakerGraph:
         type(self).captured.append(state)
         raise CircuitBreakerOpenError("OPEN(test)")
 
+    async def astream(self, state, stream_mode=None):
+        # S2c 起 run_agent 的图接缝是检查点化 astream,桩与真图同契约(values
+        # 模式逐快照产出);ainvoke 必抛,异常照常向上传播走既有熔断臂
+        yield state
+        await self.ainvoke(state)
+
 
 class _BoomLongMemory:
     def __init__(self, *args, **kwargs):
@@ -119,6 +125,11 @@ class _TurnIntentGraph:
             "task_plan": {"goal": "g", "subtasks": [], "currentStepIndex": 0},
             "intents": self._intents,
         }
+
+    async def astream(self, state, stream_mode=None):
+        # S2c 起 run_agent 的图接缝是检查点化 astream,桩与真图同契约
+        yield state
+        yield await self.ainvoke(state)
 
 
 class _RecordingEpi:

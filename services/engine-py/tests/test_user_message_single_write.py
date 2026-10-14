@@ -34,6 +34,12 @@ class _StubGraph:
             "tool_errors_count": 0,
         }
 
+    async def astream(self, _state, stream_mode=None):
+        # S2c 起 run_agent 的图接缝是检查点化 astream,桩与真图同契约
+        # (缺 astream 会被通用降级臂吞掉,测试静默漂移到降级臂持久化)
+        yield _state
+        yield await self.ainvoke(_state)
+
 
 class _NoopEpisodic:
     def __init__(self, *args, **kwargs):
