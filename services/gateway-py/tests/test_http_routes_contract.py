@@ -841,31 +841,50 @@ class TestOverview:
     README 编造的 94.2% Autopilot 率在此被真实值取代。"""
 
     async def test_overview_cards_match_sql_ground_truth(self, client, contract_fixtures):
+        import asyncio
+
         from engine_py.db import get_session
         from sqlalchemy import text
 
-        res = await client.get("/api/overview")
-        assert res.status_code == 200
-        data = res.json()["data"]
-
-        # 直连 SQL 算地面真值
-        async with get_session() as session:
-            auto, total = (
-                await session.execute(
-                    text(
-                        "SELECT COUNT(*) FILTER (WHERE resolution_status = 'resolved_auto'), COUNT(*) "
-                        "FROM session_metrics"
+        # 对账竞速免疫(债务 #10 实证收口,stream-reliability-push 03):审批
+        # Fast-Path 的背景恢复作业 asyncio.create_task 后句柄即弃,其 settle
+        # (session_metrics 落库)可能落进「API 读数」与「SQL 真值」之间的窗口
+        # —— ainvoke→astream 换用(S2c)曾扰动该窗口落点致两轮全量挂此。指标
+        # 是最终一致写入,双方读数一致才判:不一致短暂退避重读,上限 5 轮。
+        async def _read_both():
+            res = await client.get("/api/overview")
+            assert res.status_code == 200
+            data = res.json()["data"]
+            async with get_session() as session:
+                auto, total = (
+                    await session.execute(
+                        text(
+                            "SELECT COUNT(*) FILTER (WHERE resolution_status = 'resolved_auto'), COUNT(*) "
+                            "FROM session_metrics"
+                        )
                     )
-                )
-            ).one()
-            expected_rate = round(auto / total, 4) if total else 0
-            waiting = (
-                await session.execute(text("SELECT COUNT(*) FROM pending_approvals WHERE status = 'waiting'"))
-            ).scalar_one()
-            expected_tokens = (
-                await session.execute(text("SELECT COALESCE(SUM(total_tokens), 0) FROM session_metrics"))
-            ).scalar_one()
+                ).one()
+                waiting = (
+                    await session.execute(text("SELECT COUNT(*) FROM pending_approvals WHERE status = 'waiting'"))
+                ).scalar_one()
+                expected_tokens = (
+                    await session.execute(text("SELECT COALESCE(SUM(total_tokens), 0) FROM session_metrics"))
+                ).scalar_one()
+            return data, auto, total, waiting, expected_tokens
 
+        for attempt in range(5):
+            data, auto, total, waiting, expected_tokens = await _read_both()
+            if (
+                data["autopilotRate"] == (round(auto / total, 4) if total else 0)
+                and data["sessions"]["total"] == total
+                and data["usage"]["tokens"] == expected_tokens
+                and data["approvals"]["waiting"] == waiting
+            ):
+                break
+            if attempt < 4:
+                await asyncio.sleep(0.5)
+
+        expected_rate = round(auto / total, 4) if total else 0
         assert data["autopilotRate"] == expected_rate
         assert data["approvals"]["waiting"] == waiting
         assert data["usage"]["tokens"] == expected_tokens
@@ -1298,6 +1317,25 @@ class TestChatNonLlm:
         body = res.json()
         assert body["success"] is True
         assert isinstance(body["orders"], list)
+
+    async def test_cancel_unknown_job_404_envelope(self, client, contract_fixtures):
+        """S2b(stream-reliability-push 03):POST /api/chat/{job_id}/cancel 路由
+        存在性与错误信封 —— 未知作业 404(success/error 形);身份参数缺失 400
+        (取消是写动作,严禁落到 dispatch 的缺省身份上)。受理/属主/409 语义的
+        深钉在 test_chat_cancel_route.py(活跃作业须真派发,live 面不造长跑作业);
+        引擎侧 interrupted 终帧归 test_settle_turn_interrupted.py(S2c)。"""
+        res = await client.post(
+            "/api/chat/job_contract_unknown/cancel",
+            params={"userId": "CUST-8801", "businessId": "nike"},
+        )
+        assert res.status_code == 404
+        body = res.json()
+        assert body["success"] is False
+        assert "error" in body
+
+        res = await client.post("/api/chat/job_contract_unknown/cancel")
+        assert res.status_code == 400
+        assert res.json()["success"] is False
 
     async def test_orders_shape_camelcase_contract(self):
         """审批抽屉订单区线格式钉死(_serialize_context_order 纯函数):

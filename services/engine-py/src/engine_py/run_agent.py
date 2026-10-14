@@ -792,9 +792,11 @@ async def run_agent(job: AgentJobInput) -> dict:
     llm_breaker_fired = False
     graph_error_fired = False
     interrupted = False
-    # S2c:作业入活跃登记表 —— 网关取消路由(03 号票)的 request_cancel 只有
-    # 打在活跃表上的作业才生效;返回(含降级/异常臂)即注销,挂起作业天然不可取消
-    register_run(job_id)
+    # S2c/S2b:作业入活跃登记表 —— 网关取消路由(03 号票)的 request_cancel 只有
+    # 打在活跃表上的作业才生效;owner 记派发身份(权威租户:用户,线程行自愈后的
+    # business_id)供网关属主闸,记账侧与比对侧同归一(小写 strip 的 business 段)
+    # 防大小写差自伤 403;返回(含降级/异常臂)即注销,挂起作业天然不可取消
+    register_run(job_id, owner=f"{business_id.strip().lower()}:{user_id.strip()}")
     try:
         # 检查点化执行(S2c):ainvoke → astream 步间查取消闸;不取消时行为
         # 与 ainvoke 等价,取消命中返回最后完成步的部分态(interrupted=True)

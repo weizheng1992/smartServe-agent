@@ -19,6 +19,7 @@ import uuid
 from typing import TypedDict
 
 from engine_py.approvals import takeover
+from engine_py.interruption import peek_job_owner, request_cancel
 from engine_py.run_agent import AgentJobInput, run_agent
 
 from . import conversation_repo
@@ -37,6 +38,40 @@ class ChatTurnResult(TypedDict):
 
 def generate_job_id(hex_len: int = 9) -> str:
     return f"job_{int(time.time() * 1000)}_{uuid.uuid4().hex[:hex_len]}"
+
+
+def cancel_chat_job_gate(
+    job_id: str,
+    *,
+    user_id: str | None,
+    business_id: str | None,
+) -> tuple[dict, int]:
+    """取消闸(S2b):消费引擎中断原语(interruption),返回 (响应体, 状态码)。
+
+    - 400 身份参数缺失:取消是写动作,严禁落到 dispatch 的缺省身份
+      (CUST-8801/ecommerce)上 —— 否则缺省身份即可停任何人的作业;
+    - 404 作业未知/已结束:审批挂起作业 run_agent 早已返回、不在活跃表,
+      「审批挂起不可被停止误杀」构造性成立(HITL 边界,引擎侧同源钉面);
+    - 403 属主不符:owner = 派发身份(引擎侧 register_run 记录的权威租户:
+      用户),business 段归一大小写与空白(store 面 tenant 同口径),user 段
+      精确 —— 多租户不变量 #1;
+    - 409 peek 与 cancel 之间刚好结束(窗口竞态):防御性分支 —— 当前闸体无
+      await、引擎派发同循环,构造性不可达;登记表 Redis 化(多实例化)后成真
+      语义,保留以免那时谎报已受理;
+    - 200 受理:引擎在下一个图检查点协作停止,终态 interrupted 走 result 帧
+      (interrupted:true)照常收口 SSE 流(S2c 契约)。
+    """
+    if not user_id or not business_id:
+        return {"success": False, "error": "userId 与 businessId 必填"}, 400
+    owner = peek_job_owner(job_id)
+    if owner is None:
+        return {"success": False, "error": f"作业 {job_id} 不存在或已结束"}, 404
+    owner_biz, _, owner_user = owner.partition(":")
+    if owner_user != user_id.strip() or owner_biz != business_id.strip().lower():
+        return {"success": False, "error": "作业不属于该用户,拒绝取消"}, 403
+    if not request_cancel(job_id):
+        return {"success": False, "error": f"作业 {job_id} 刚已结束,无需取消"}, 409
+    return {"success": True, "jobId": job_id, "status": "cancelling"}, 200
 
 
 async def accept_chat_turn(

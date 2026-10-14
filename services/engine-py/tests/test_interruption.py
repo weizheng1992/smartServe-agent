@@ -21,6 +21,7 @@ import pytest
 
 from engine_py.interruption import (
     consume_cancel_request,
+    peek_job_owner,
     register_run,
     request_cancel,
     run_graph_with_interruption,
@@ -35,9 +36,11 @@ def _clean_registry():
 
     interruption._active_jobs.clear()
     interruption._cancel_requests.clear()
+    interruption._job_owners.clear()
     yield
     interruption._active_jobs.clear()
     interruption._cancel_requests.clear()
+    interruption._job_owners.clear()
 
 
 class TestInterruptionRegistry:
@@ -67,6 +70,22 @@ class TestInterruptionRegistry:
         register_run("job_suspended")
         unregister_run("job_suspended")
         assert request_cancel("job_suspended") is False
+
+    def test_owner_recorded_and_peekable(self):
+        """S2b 属主闸:登记时记派发身份,peek 供网关取消路由校验。"""
+        assert peek_job_owner("job_o") is None
+        register_run("job_o", owner="aurora:CUST-1")
+        assert peek_job_owner("job_o") == "aurora:CUST-1"
+        unregister_run("job_o")
+        assert peek_job_owner("job_o") is None, "注销必须连带清属主,防泄漏"
+
+    def test_register_without_owner_is_cancellable_but_anonymous(self):
+        """owner 缺省(None)兼容 S2c 形态:可取消性不变;网关 peek 到 None
+        按 404「不存在或已结束」处理(生产路径 run_agent 恒记 owner,
+        None 形态仅存于手工注册方)。"""
+        register_run("job_anon")
+        assert peek_job_owner("job_anon") is None
+        assert request_cancel("job_anon") is True
 
 
 class _RecordingFakeGraph:

@@ -24,19 +24,29 @@ from typing import Any
 # 进程级单例:事件循环单线程内 set 操作天然原子,无需加锁
 _active_jobs: set[str] = set()
 _cancel_requests: set[str] = set()
+_job_owners: dict[str, str] = {}
 
 
-def register_run(job_id: str) -> None:
-    """run_agent 派发时注册活跃作业;空 job_id(本地无事件面)静默忽略。"""
+def register_run(job_id: str, owner: str | None = None) -> None:
+    """run_agent 派发时注册活跃作业;owner 记派发身份(``businessId:userId``,
+    S2b 网关取消路由的属主闸数据源);空 job_id(本地无事件面)静默忽略。"""
     if job_id:
         _active_jobs.add(job_id)
+        if owner is not None:
+            _job_owners[job_id] = owner
 
 
 def unregister_run(job_id: str) -> None:
-    """run_agent 返回(正常/降级/异常)即注销;残留的待取消请求一并清除。"""
+    """run_agent 返回(正常/降级/异常)即注销;残留的待取消请求与属主一并清除。"""
     if job_id:
         _active_jobs.discard(job_id)
         _cancel_requests.discard(job_id)
+        _job_owners.pop(job_id, None)
+
+
+def peek_job_owner(job_id: str) -> str | None:
+    """查活跃作业的派发身份;作业未知/已结束返回 None(网关据此 404)。"""
+    return _job_owners.get(job_id)
 
 
 def request_cancel(job_id: str) -> bool:

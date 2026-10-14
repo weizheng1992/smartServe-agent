@@ -5,7 +5,7 @@ paths: ["services/gateway-py/**/*"]
 
 # 服务端多租户网关与实时协同规范 (Server Gateway)
 
-本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送、商户数据分析面与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面；pytest 契约测试为唯一真实来源）。当前注册端点共 **128 条**：analytics 40 / merchant 30 / admin 23 / crud 14 / chat 8 / auth 4 / spi 3 / live_desk 5 + `/api/health`。
+本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送、商户数据分析面与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面；pytest 契约测试为唯一真实来源）。当前注册端点共 **129 条**：analytics 40 / merchant 30 / admin 23 / crud 14 / chat 9 / auth 4 / spi 3 / live_desk 5 + `/api/health`。
 
 ## 1. 核心模块与架构规范
 
@@ -19,6 +19,7 @@ paths: ["services/gateway-py/**/*"]
    - 会话列表 `GET /api/chat/threads?userId=`（new-user-onboarding B,42→43 条契约）：`conversation_repo.list_user_threads` 严格 `user_id` 等值匹配（**严禁 ILIKE 模糊**,admin 侧模糊检索是另一码事——跨用户泄漏防线）,LEFT JOIN LATERAL 取最后一条消息摘要（≤80 字）,`updated_at DESC`,limit 封顶 50;web 侧栏「历史会话恢复」的真实数据源,首访/回访判定同源复用。
    - 删线程 `DELETE /api/chat/threads?threadId=&userId=`（2026-09-10 补齐,43→44 条契约;web 侧栏删除按钮自 TS 时代调用至今恒 405）：`conversation_repo.delete_thread` 属主严格等值守卫（无主线程 403——顾客列表本就看不到;跨用户 403;查无 404）;同一事务删除 threads + messages + task_memory（挂起任务态——POST 接受客户端自报 threadId,同 id 重建不得复活旧任务态）;**审计类记录（pending_approvals/intent_logs/session_metrics 等）刻意保留**——审批与遥测是平台审计资产,不随顾客删线程蒸发;web 确认弹窗文案与现实对齐（不再谎称抹除审核单据/日志度量）。
    - 图片上传 `POST /api/chat/upload`（wayfinder multimodal-image-chat 002）：MIME 白名单 jpeg/png/webp/gif、10MB 读流限长（不信任声明）、UUID 文件名落盘 `public/uploads`（`UPLOADS_DIR` env 可覆写,测试隔离用），`/api/uploads` StaticFiles 回读；响应顶层 `{success, url}`、失败顶层 `error` 供前端 alert 精确展示。
+   - 作业取消 `POST /api/chat/{job_id}/cancel?userId=&businessId=`（stream-reliability-push 03，2026-10-14）：消费引擎中断原语（`engine_py.interruption`，S2c）——闸语义收口 `chat_turn.cancel_chat_job_gate`（400 身份缺失：取消是写动作严禁落 dispatch 缺省身份 / 404 未知或已结束：审批挂起作业 run_agent 已返回不在活跃表，「审批挂起不可被停止误杀」构造性成立 / 403 属主不符：owner=派发身份 businessId:userId，business 段归一大小写空白、user 段精确 / 409 peek 与 cancel 间刚好结束 / 200 受理）；引擎在下一个图检查点协作停止，终态 `interrupted` 走 result 帧（`interrupted:true`）照常收口 SSE 流。契约：`tests/test_chat_cancel_route.py`（闸 7 例）+ `test_http_routes_contract.py::TestChatNonLlm::test_cancel_unknown_job_404_envelope`。
 3. **`routers/admin.py` / `crud.py`**：
    - 会话历史、审批单（Approve / Reject，触发事务发件箱与幂等恢复）、Skills 配置（`GET/PUT /api/skills/config`）、RAG 文档、画像、护栏、计费配额、日志等管理端 CRUD。
    - 租户引导配置编辑（new-user-onboarding E,2026-09-10）：`PUT /api/tenant/{id}` 收 `onboardingConfig` 完整 JSON 文档——服务端 `validate_onboarding_config` 校验（未知顶层键/按钮错形 400 诚实失败,错误信息点名具体字段）,携带即整体覆写 `tenant_configs.onboarding_config`、未携带保留既有（合并式,与 spi/skills 同语义）;`GET /api/tenant/list` 回读 `onboardingConfig`（null = 未配置）供编辑面预填。**`POST /api/tenant` 创建流同语义（2026-09-10 补齐「仅编辑态」边界）**：创建即携带即写入（tenant_configs 两分支——既有行合并式仅携带时写、新行 INSERT 带列）,错形 400 且租户不落库,未携带保持未配置;admin 表单 JSON 文本域创建/编辑两态同渲染。admin 前端 JSON 文本域:非法 JSON 提交前拦截,服务端 400 经 throw→alert 可见（create/update 均 `res.success` 检查,不静默假装保存成功）。

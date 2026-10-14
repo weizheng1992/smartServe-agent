@@ -352,6 +352,22 @@ async def sse_stream(job_id: str, request: Request, lastEventId: str | None = Qu
     )
 
 
+@router.post("/{job_id}/cancel")
+async def cancel_chat_job(
+    job_id: str,
+    userId: str | None = Query(None),
+    businessId: str | None = Query(None),
+):
+    """S2b(stream-reliability-push 03):取消在途作业 —— 消费引擎中断原语
+    (interruption),引擎在下一个图检查点协作停止,终态 interrupted 走 result
+    帧(interrupted:true)照常收口 SSE 流(S2c 契约)。属主闸(owner = 派发
+    身份 businessId:userId)守多租户不变量 #1;审批挂起作业不在活跃表,结构上
+    打不中 —— 「审批挂起不可被停止误杀」构造性成立。闸语义(400/403/404/409)
+    收口 chat_turn.cancel_chat_job_gate,本路由只做 HTTP 映射。"""
+    payload, status = chat_turn.cancel_chat_job_gate(job_id, user_id=userId, business_id=businessId)
+    return JSONResponse(status_code=status, content=payload)
+
+
 @router.get("/messages")
 async def chat_messages(
     threadId: str | None = Query(None),
