@@ -1,6 +1,9 @@
 """收尾节点 — 镜像 finish.node.ts(熔断道歉文案/审批转接文案/旁路透传/RAG 注入/LLM 终稿)。
 
-TODO(Phase 1b):CardSynthesizer 卡片合成、session_metrics 埋点、LangSmith 回传。
+旧 TODO(Phase 1b)三项已全部落地它处(2026-10-14 勘正):卡片合成 =
+run_agent._settle_turn → cards.CardSynthesizer.synthesize_cards(合成契约见
+docs/multimodal-and-rich-cards.md §合成契约);session_metrics = _settle_turn
+遥测泳道;LangSmith = run_agent._report_langsmith_feedback。本节点只管终稿文本。
 """
 
 from __future__ import annotations

@@ -95,27 +95,46 @@ TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `n
 
 - **协议定义**: `packages/types/src/card.ts`（冻结的前端契约，TS 退役后保留）
 - **合成引擎**: `services/engine-py/src/engine_py/cards/card_synthesizer.py`
+- **合成时机（2026-10-14 勘正）**: 不在 `finish` 节点 —— 卡片合成内聚在
+  `run_agent._settle_turn` 收口缝（ADR-0007）:`fetch_shelf_categories` 购物轮
+  实查真货架 → `synthesize_cards` 全量合成;`finish` 只产终稿文本。
 
 ### 3.1 核心卡片类型规范 (JSON Blocks Schema)
 
-系统支持 5 种高保真交互卡片：
+系统支持 9 种高保真交互卡片（合成器逐型装配）：
 
 | 卡片类型 (`type`)     | 适用场景                   | 核心承载数据                                                                         |
 | --------------------- | -------------------------- | ------------------------------------------------------------------------------------ |
 | `order_card`          | 订单详情查询、订单列表展示 | 订单 ID、状态（已发货/派送中/已签收）、实付金额、币种、快捷 Action 按钮              |
-| `tracking_timeline`   | 物流轨迹追踪               | 承运商名称、运单号、当前最新状态、节点时间轴数组 (`time`, `location`, `description`) |
-| `refund_confirmation` | 退款成功/审批通过核签凭证  | 订单号、退款金额、退款状态、退回渠道（原路退回）、预估到账时效、审核提示             |
+| `order_picker`        | 多笔订单命中               | 标题 + 总数 + 订单数组（多单合一屏,严禁刷屏）                                        |
+| `tracking_timeline`   | 物流轨迹追踪（仅单笔订单挂）| 承运商名称、运单号、当前最新状态、节点时间轴数组 (`time`, `location`, `description`) |
+| `refund_confirmation` | 退款成功/审批通过核签凭证  | 订单号、退款金额、退款状态（pending_confirmation/submitted/approved）、退回渠道     |
 | `damage_assessment`   | AI 视觉定损评级            | 破损级别 (`negligible`/`minor`/`severe`)、综合诊断描述、置信度、处置建议             |
+| `product_ranking`     | 商品排行（真销量聚合）     | 排行口径指标、指标标签/单位、条目数、summary、products 数组                          |
+| `step_progress`       | 售后流转步进追踪           | ticketId/orderId、当前步/总步、steps 数组、settledSummary                            |
+| `interactive_product` | 交互式商品卡（选规格加购） | productId、标题/图、basePrice、skus、选中规格/数量、actions                          |
 | `quick_replies`       | 动态快捷操作胶囊           | 交互胶囊列表（文本发送、订单查询、物流追踪、申请退款、唤起上传图片）                 |
 
-### 3.2 动态卡片合成逻辑 (`CardSynthesizer`)
+### 3.2 动态卡片合成逻辑与契约 (`CardSynthesizer.synthesize_cards`)
 
-`finish` 节点在合成最终文本答复的同时调用 `CardSynthesizer.synthesize_cards({ taskPlan, damageAssessment, ... })`：
+合成顺序即契约:`域卡片(技能自带)优先作基座 → 合成器逐子任务装配域卡 →
+场景/消歧快捷组统一追加尾部`。六条硬规则(全部有 ADR 与实弹背书):
 
-1. 若执行计划中包含 `getOrderStatus`，自动解析输出 payload 并构建 `OrderCard` 与 `TrackingTimeline`；
-2. 若执行计划中包含 `processRefund`，自动解析退款金额与流水构建 `RefundConfirmationCard`；
-3. 若存在多模态视觉定损分析，自动生成 `DamageAssessmentCard`；
-4. 依据当前上下文动态附带 `QuickReplies` 快捷操作胶囊，实现连续闭环体验。
+1. **域卡片优先 + first-wins 胶囊**(ADR-0001 Q4):技能自带的 `quick_replies`
+   (如破损照片消歧组)是更具体的场景行,原样保留,严禁一屏两条胶囊。
+2. **死按钮禁令**(2.6.8 数据诚实铁律延伸 UI 层):每个按钮背后必须有真实能力
+   兜底;「热销」类文案自 ADR-0002 起为数据条件禁令 —— 入口可挂,但点击必须
+   走真销量排行(`queryProductRanking` 商户真订单聚合),品类 chip 严禁热度词。
+3. **真货架盘点喂 chips**(ADR-0001 Q3):品类快捷区只认真货架实查数据,盘点空
+   退通用组,严禁静态假目录;非购物轮零查库。
+4. **排行签名判定**(2.6.12 契约):排行卡只认排行签名(rankingMetric/步骤语义),
+   严禁「products 非空即排行卡」—— 检索结果同键误装曾致前端白屏 + 假 GMV 头衔;
+   消歧组指标键运行时查 `RANKING_VIEW_REGISTRY` 派生表,严禁手抄漂移(ADR-0003)。
+5. **场景组按意图分形**(ADR-0001 Q1/Q2):退款/售后场景撤「申请退款」钮(用户
+   已在流程中);兜底通用组并入重复出口(「查物流」并入订单查询,不留两个按钮
+   挤一个门)。
+6. **流式骨架卡**(`synthesize_skeleton_cards`):执行计划 → order/step 骨架
+   (hydrationState: skeleton),前端先渲染占位再注水。
 
 ---
 
