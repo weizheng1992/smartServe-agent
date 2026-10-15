@@ -4,12 +4,14 @@ import { useParams } from 'react-router';
 import type { ThirdPartyOrder } from 'types';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { LogisticsModal } from '../components/orders/LogisticsModal';
+import { useCurrentUser } from '../context/UserContext';
 import { openStorefrontChat } from '../lib/chatBridge';
 import { parseShippingAddress } from '../lib/shippingAddress';
 
 export default function SingleOrderDetailPage() {
   const params = useParams();
   const orderId = params?.id as string;
+  const { user } = useCurrentUser();
 
   const [order, setOrder] = useState<ThirdPartyOrder | null>(null);
   const [loading, setLoading] = useState(true);
@@ -21,7 +23,9 @@ export default function SingleOrderDetailPage() {
     const fetchDetail = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/store/orders/${orderId}`);
+        // customerId 属主闸(2026-10-14 夜评 IDOR 收口):详情仅本人可读,
+        // 与订单列表同身份源;缺失/不匹配服务端 400/404,页面走诚实失败态
+        const res = await fetch(`/api/store/orders/${orderId}?customerId=${encodeURIComponent(user?.id ?? '')}`);
         const data = await res.json();
         if (data.success && data.order) {
           setOrder(data.order);
@@ -35,7 +39,7 @@ export default function SingleOrderDetailPage() {
       }
     };
     fetchDetail();
-  }, [orderId]);
+  }, [orderId, user?.id]);
 
   if (loading) {
     return (

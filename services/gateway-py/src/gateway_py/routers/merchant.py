@@ -183,7 +183,8 @@ async def admin_conversation_detail(
 @router.get("/api/admin/orders")
 async def admin_orders(scope: TenantScope = Depends(staff_scope)):
     try:
-        data = await mds.get_admin_dashboard_data()
+        # 属主闸(2026-10-14 夜评批次):运营台只见本店订单/审计,scope 此前收而未用
+        data = await mds.get_admin_dashboard_data(scope.tenant)
         return {"success": True, **data}
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})
@@ -208,8 +209,13 @@ async def admin_orders_ship(
             return JSONResponse(
                 status_code=400, content={"success": False, "message": "orderId and trackingNo are required"}
             )
+        # 属主闸(2026-10-14 夜评批次):跨租户订单诚实 404,零副作用
+        owned = await mds.get_order_detail(body["orderId"], business_id=scope.tenant)
+        if owned is None:
+            return JSONResponse(status_code=404, content={"success": False, "error": f"订单 {body['orderId']} 不存在"})
         result = await mds.ship_order(
-            body["orderId"], body.get("carrierCode") or "SF", body["trackingNo"]
+            body["orderId"], body.get("carrierCode") or "SF", body["trackingNo"],
+            business_id=scope.tenant,
         )
         return result
     except HTTPException:
@@ -220,9 +226,10 @@ async def admin_orders_ship(
 
 @router.get("/api/admin/orders/{order_id}")
 async def admin_order_detail(order_id: str, scope: TenantScope = Depends(staff_scope)):
-    """订单详情 = 行项目(camelCase 序列化,与 storefront /spi/v1/orders/detail 同形)+ 该订单审计时间线。"""
+    """订单详情 = 行项目(camelCase 序列化,与 storefront /spi/v1/orders/detail 同形)+ 该订单审计时间线。
+    属主闸(2026-10-14 夜评批次):business_id 命中才回,跨租户诚实 404。"""
     try:
-        order = await mds.get_order_detail(order_id)
+        order = await mds.get_order_detail(order_id, business_id=scope.tenant)
         if order is None:
             return JSONResponse(status_code=404, content={"success": False, "error": f"订单 {order_id} 不存在"})
         logs = await mds.get_order_audit_logs(order_id)
@@ -444,10 +451,14 @@ async def store_checkout_preview(body: CheckoutPreviewRequest):
 
 
 @router.get("/api/store/orders/{order_id}")
-async def store_order_detail(order_id: str):
+async def store_order_detail(order_id: str, customerId: str | None = Query(None)):
+    """订单详情(C 端)。customerId 属主闸(2026-10-14 夜评 IDOR 收口):
+    缺失 400 诚实校验,他人读取 404 不泄存在性,属主 200。"""
     try:
+        if not (customerId or "").strip():
+            return JSONResponse(status_code=400, content={"success": False, "error": "customerId 必传"})
         order = await mds.get_order_detail(order_id)
-        if order is None:
+        if order is None or str(order.get("userId") or "") != customerId.strip():
             return JSONResponse(status_code=404, content={"success": False, "error": f"未找到订单 [{order_id}]"})
         return {"success": True, "order": order}
     except Exception as err:
@@ -871,13 +882,16 @@ async def spi_orders_action(request: Request):
 
 
 @merchant_promotions_router.get("/api/store/promotions")
-async def store_promotions():
-    """在售活动列表(商城首页/商品页展示;仅 active 且未过期)。"""
+async def store_promotions(businessId: str | None = Query(None)):
+    """在售活动列表(商城首页/商品页展示;仅 active 且未过期,租户内)。
+
+    businessId 缺省 aurora(单店部署口径,与下方下单/券包路由同律);
+    2026-10-14 夜评:此前零租户过滤,跨租户活动前台可见可用。"""
     from engine_py.analytics.promotion_engine import fetch_active_promos
     from engine_py.tools_registry.order_domain import merchant_reader_engine
 
     async with merchant_reader_engine().connect() as conn:
-        promos = await fetch_active_promos(conn)
+        promos = await fetch_active_promos(conn, businessId or "aurora")
     return {
         "success": True,
         "promotions": [
@@ -890,20 +904,21 @@ async def store_promotions():
 
 
 @merchant_promotions_router.get("/api/store/promotions/price")
-async def store_promo_price(productId: str = Query(...), price: float = Query(...)):
-    """单商品促销价(划线价展示;无可用活动返回原价)。"""
+async def store_promo_price(productId: str = Query(...), price: float = Query(...),
+                            businessId: str | None = Query(None)):
+    """单商品促销价(划线价展示;无可用活动返回原价;租户内,同上)。"""
     from engine_py.analytics.promotion_engine import promo_for_spu
     from engine_py.tools_registry.order_domain import merchant_reader_engine
 
     async with merchant_reader_engine().connect() as conn:
-        promo = await promo_for_spu(conn, productId, price)
+        promo = await promo_for_spu(conn, productId, price, businessId or "aurora")
     if not promo:
         return {"success": True, "originalPrice": price, "promoPrice": price, "promoName": None}
     return {"success": True, "originalPrice": price, "promoPrice": promo["promoPrice"], "promoName": promo["name"]}
 
 @merchant_promotions_router.post("/api/store/promotions/prices")
-async def store_promo_prices_batch(items: list[dict]):
-    """批量促销价(商城商品列表;服务端唯一算价,避免前端规则漂移)。
+async def store_promo_prices_batch(items: list[dict], businessId: str | None = Query(None)):
+    """批量促销价(商城商品列表;服务端唯一算价,避免前端规则漂移;租户内,同上)。
 
     活动集整批一次拉取后内存打分 —— 不逐商品重查活动(此前 200 商品 =
     200 次活动全量 SELECT,2026-09-27 夜审 F3)。"""
@@ -913,7 +928,8 @@ async def store_promo_prices_batch(items: list[dict]):
     sliced = items[:200]
     async with merchant_reader_engine().connect() as conn:
         bests = await promo_prices_batch(
-            conn, [(str(i.get("productId")), float(i.get("price") or 0)) for i in sliced]
+            conn, [(str(i.get("productId")), float(i.get("price") or 0)) for i in sliced],
+            businessId or "aurora",
         )
     out = []
     for item, promo in zip(sliced, bests):

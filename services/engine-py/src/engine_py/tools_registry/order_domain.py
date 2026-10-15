@@ -154,6 +154,7 @@ async def insert_merchant_order(
     total_amount: float,
     discount_amount: float,
     shipping_address_json: str,
+    business_id: str | None = None,
 ) -> None:
     """商户真账主单插入单点(架构审查 #4 步3,2026-10-04):INSERT 列清单此前
     四份独立维护(本文件 checkout / gateway place_order / gateway
@@ -162,15 +163,18 @@ async def insert_merchant_order(
 
     账本语义:status 恒 PAID、CNY;total_amount=实付(原价−优惠),
     discount_amount=优惠额(3c4c843 口径)。地址以 jsonb CAST 显式落列。
+    business_id:订单租户列(2026-10-14 夜评批次,admin 属主闸的数据基础)——
+    gateway 结算/直购两路径显式传入(店铺面缺省 aurora);引擎聊天结算经
+    resolve_business_id 上下文承接,双缺回落平台默认(引擎语义)留痕。
     """
     await conn.execute(
         text(
-            "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, currency, "
-            "shipping_address, is_returnable, is_address_modifiable) "
-            "VALUES (:oid, :cid, 'PAID', :amt, :disc, 'CNY', CAST(:addr AS jsonb), TRUE, TRUE)"
+            "INSERT INTO merchant_orders (order_id, business_id, customer_id, status, total_amount, discount_amount, "
+            "currency, shipping_address, is_returnable, is_address_modifiable) "
+            "VALUES (:oid, :biz, :cid, 'PAID', :amt, :disc, 'CNY', CAST(:addr AS jsonb), TRUE, TRUE)"
         ).bindparams(
-            oid=order_id, cid=customer_id, amt=round(total_amount, 2),
-            disc=round(discount_amount, 2), addr=shipping_address_json,
+            oid=order_id, biz=resolve_business_id(business_id), cid=customer_id,
+            amt=round(total_amount, 2), disc=round(discount_amount, 2), addr=shipping_address_json,
         )
     )
 

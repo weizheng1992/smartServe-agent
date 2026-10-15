@@ -254,6 +254,13 @@ ALTER TABLE owner_mappings ADD COLUMN IF NOT EXISTS business_id VARCHAR(64);
 UPDATE owner_mappings SET business_id = 'aurora' WHERE business_id IS NULL;
 ALTER TABLE owner_mappings ALTER COLUMN business_id SET NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_owner_mappings_business ON owner_mappings(business_id);
+
+-- 订单链租户列(2026-10-14 夜评 🟡 批次):merchant_orders 此前零 business_id,
+-- admin 订单链(列表/详情/发货)与 storefront 详情无属主闸 —— A 店员工可操作
+-- B 店订单。加列带 NOT NULL DEFAULT 对存量行直接生效(PG 11+,免回填;
+-- promotions S5 走三段式是因需按 promotions 真源逐行回填,此处默认值即终值)。
+ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS business_id VARCHAR(64) NOT NULL DEFAULT 'aurora';
+CREATE INDEX IF NOT EXISTS idx_merchant_orders_business ON merchant_orders(business_id);
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'owner_mappings_biz_type_value_key'

@@ -146,6 +146,11 @@ _MERCHANT_DDL = [
     # 条件谓词形状会产出无租户限定裸查),列缺失时券计算在 SAVEPOINT 内响亮
     # 失败降级原价(cart.py 吞错保结算),本套券用例随即抓获 —— 列在此补齐。
     "ALTER TABLE user_coupons ADD COLUMN IF NOT EXISTS business_id VARCHAR(64) NOT NULL DEFAULT 'aurora'",
+    # promotions/merchant_orders 租户列同批(2026-10-14 夜评批次):活动分支
+    # 谓词(fetch_active_promos)与订单租户列(insert_merchant_order)落地后,
+    # 缺列即在 SAVEPOINT 内响亮失败 —— 形状对齐 gateway merchant_db。
+    "ALTER TABLE promotions ADD COLUMN IF NOT EXISTS business_id VARCHAR(64) NOT NULL DEFAULT 'aurora'",
+    "ALTER TABLE merchant_orders ADD COLUMN IF NOT EXISTS business_id VARCHAR(64) NOT NULL DEFAULT 'aurora'",
 ]
 
 # (spu_code, title, category, status, [(sku_code, sku_title, price, stock, cost), ...])

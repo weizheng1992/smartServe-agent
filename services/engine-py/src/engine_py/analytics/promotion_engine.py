@@ -46,31 +46,40 @@ def best_discount_for_amount(
     return best
 
 
-async def fetch_active_promos(conn) -> list[dict]:
-    """候选活动集(status active + 窗口内)。SELECT 必须带 start_at/end_at ——
+async def fetch_active_promos(conn, business_id: str | None = None) -> list[dict]:
+    """候选活动集(status active + 窗口内 + 租户内)。SELECT 必须带 start_at/end_at ——
     2026-09-27 运营闭环修正:此前 SELECT 漏 start_at,下游 in_window 恒读到
-    None,未来开始的活动会立即进结算;WHERE 同步补 start 闸,双层同口径。"""
+    None,未来开始的活动会立即进结算;WHERE 同步补 start 闸,双层同口径。
+    business_id 缺省时经 tenant_context.resolve_business_id 回落(显式 > 上下文 >
+    平台默认+warning 留痕,与 list_usable_user_coupons 同源)—— 租户谓词无条件
+    携带,严禁产出无租户限定的裸查(2026-10-14 夜评:跨租户活动可被自动择优
+    结算/前台可见,d3405ed 只闸了券分支,活动分支本补)。"""
+    from ..tenant_context import resolve_business_id
+
+    biz = resolve_business_id(business_id).strip().lower()
     rows = (
         await conn.execute(
             text(
                 "SELECT id::text, name, promo_type, threshold_amount, discount_value, "
                 "scope_type, scope_value, start_at, end_at FROM promotions "
                 "WHERE status = 'active' AND (start_at IS NULL OR start_at <= NOW()) "
-                "AND (end_at IS NULL OR end_at > NOW())"
-            )
+                "AND (end_at IS NULL OR end_at > NOW()) AND business_id = :b"
+            ).bindparams(b=biz)
         )
     ).mappings().all()
     return [dict(r) for r in rows]
 
 
 async def best_for_amount(conn, amount: float, scope_spus: set[str] | None = None,
-                          exclude_coupon: bool = False) -> dict | None:
+                          exclude_coupon: bool = False,
+                          business_id: str | None = None) -> dict | None:
     """对该金额选最优活动;scope_spus 非空时优先取命中商品范围的活动。
 
+    business_id 语义同 fetch_active_promos(结算活动分支的租户边界)。
     返回 {promo_id, name, promo_type, discount} 或 None(无可用活动 —— 调用方
     按原价结算,诚实无优惠)。
     """
-    promos = await fetch_active_promos(conn)
+    promos = await fetch_active_promos(conn, business_id)
     promos = [p for p in promos if in_window(p)]
     if exclude_coupon:
         promos = [p for p in promos if p["promo_type"] != "coupon"]  # 券类须用户领取后使用(20-D4)
@@ -120,18 +129,20 @@ def _best_promo_for_spu(promos: list[dict], spu_code: str, price: float) -> dict
     return best
 
 
-async def promo_for_spu(conn, spu_code: str, price: float) -> dict | None:
+async def promo_for_spu(conn, spu_code: str, price: float,
+                        business_id: str | None = None) -> dict | None:
     """商品促销价(商城展示):命中的最优活动 + 促销价。无 → None(原价展示)。"""
-    return _best_promo_for_spu(await fetch_active_promos(conn), spu_code, price)
+    return _best_promo_for_spu(await fetch_active_promos(conn, business_id), spu_code, price)
 
 
-async def promo_prices_batch(conn, items: list[tuple[str, float]]) -> list[dict | None]:
+async def promo_prices_batch(conn, items: list[tuple[str, float]],
+                             business_id: str | None = None) -> list[dict | None]:
     """批量促销价:活动集一次拉取,逐 (spu, price) 内存打分。
 
     入参 [(spu_code, price)];返回与入参等长的结果列表(元素同 promo_for_spu)。
     活动数量级为个位/十位,批内共享一份候选集 —— 200 商品批量从 200 次活动
     全量查询降为 1 次(2026-09-27 夜审 F3)。"""
-    promos = await fetch_active_promos(conn)
+    promos = await fetch_active_promos(conn, business_id)
     return [_best_promo_for_spu(promos, spu, price) for spu, price in items]
 
 
@@ -203,7 +214,7 @@ async def resolve_stacked_promotions(
     返回 {"activity": best_for_amount 结果|None, "coupon": 券 dict|None,
     "discount": 合计优惠}。
     """
-    activity = await best_for_amount(conn, amount, scope_spus, exclude_coupon=True)
+    activity = await best_for_amount(conn, amount, scope_spus, exclude_coupon=True, business_id=business_id)
     act_disc = activity["discount"] if activity else 0.0
     remaining = round(max(amount - act_disc, 0.0), 2)
     coupon = None

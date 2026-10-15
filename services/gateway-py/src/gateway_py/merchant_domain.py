@@ -202,12 +202,26 @@ async def list_orders(params: dict) -> list[dict]:
         return [_order_from_row(row, items_grouped.get(row["order_id"], [])) for row in rows]
 
 
-async def get_order_detail(order_id: str) -> dict | None:
+async def get_order_detail(order_id: str, business_id: str | None = None) -> dict | None:
+    """订单详情(camelCase 同形序列化)。business_id 提供时即属主闸
+    (2026-10-14 夜评批次:admin 订单链零租户过滤,A 店员工可读 B 店订单)——
+    闸不中与查无同返回 None,调用方诚实 404,不泄存在性。"""
     await ensure_merchant_tables()
     async with merchant_engine().connect() as conn:
-        row = (
-            await conn.execute(text("SELECT * FROM merchant_orders WHERE order_id = :oid LIMIT 1"), {"oid": order_id})
-        ).mappings().first()
+        if business_id:
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT * FROM merchant_orders WHERE order_id = :oid "
+                        "AND LOWER(business_id) = :b LIMIT 1"
+                    ),
+                    {"oid": order_id, "b": business_id.strip().lower()},
+                )
+            ).mappings().first()
+        else:
+            row = (
+                await conn.execute(text("SELECT * FROM merchant_orders WHERE order_id = :oid LIMIT 1"), {"oid": order_id})
+            ).mappings().first()
         if row is None:
             return None
         items = await _fetch_items(conn, row["order_id"])
@@ -489,6 +503,8 @@ async def place_order(params: dict) -> dict:
                     },
                     ensure_ascii=False,
                 ),
+                # 订单租户列(2026-10-14 夜评批次):店铺面单店口径,与券查询同律
+                business_id=params.get("businessId") or "aurora",
             )
             if promo.coupon_row_id:
                 from engine_py.analytics import promotions as _promo_svc
@@ -527,7 +543,10 @@ async def place_order(params: dict) -> dict:
     }
 
 
-async def ship_order(order_id: str, carrier_code: str, tracking_no: str) -> dict:
+async def ship_order(order_id: str, carrier_code: str, tracking_no: str,
+                     business_id: str | None = None) -> dict:
+    """发货(真实世界副作用)。business_id 提供时即属主闸:闸不中 rowcount 0
+    走「订单不存在」,跨租户零副作用(2026-10-14 夜评批次)。"""
     await ensure_merchant_tables()
     now = _dt.datetime.now()
 
@@ -561,13 +580,25 @@ async def ship_order(order_id: str, carrier_code: str, tracking_no: str) -> dict
         ],
     }
     async with merchant_engine().begin() as conn:
-        result = await conn.execute(
-            text(
-                "UPDATE merchant_orders SET status = 'SHIPPED', tracking_info = :ti, is_address_modifiable = FALSE "
-                "WHERE order_id = :oid"
-            ),
-            {"ti": json.dumps(tracking_info, ensure_ascii=False), "oid": order_id},
-        )
+        if business_id:
+            result = await conn.execute(
+                text(
+                    "UPDATE merchant_orders SET status = 'SHIPPED', tracking_info = :ti, is_address_modifiable = FALSE "
+                    "WHERE order_id = :oid AND LOWER(business_id) = :b"
+                ),
+                {
+                    "ti": json.dumps(tracking_info, ensure_ascii=False), "oid": order_id,
+                    "b": business_id.strip().lower(),
+                },
+            )
+        else:
+            result = await conn.execute(
+                text(
+                    "UPDATE merchant_orders SET status = 'SHIPPED', tracking_info = :ti, is_address_modifiable = FALSE "
+                    "WHERE order_id = :oid"
+                ),
+                {"ti": json.dumps(tracking_info, ensure_ascii=False), "oid": order_id},
+            )
     updated = result.rowcount or 0
     return {
         "success": updated > 0,
@@ -575,11 +606,38 @@ async def ship_order(order_id: str, carrier_code: str, tracking_no: str) -> dict
     }
 
 
-async def get_admin_dashboard_data() -> dict:
+async def get_admin_dashboard_data(business_id: str | None = None) -> dict:
+    """运营台聚合数据。business_id 提供时按租户过滤订单与审计时间线
+    (2026-10-14 夜评批次:A 店员工不得见 B 店订单);SPU/SKU 目录当前为
+    平台共享单目录,不在本闸范围。"""
     await ensure_merchant_tables()
     async with merchant_engine().connect() as conn:
-        orders = [dict(r) for r in (await conn.execute(text("SELECT * FROM merchant_orders ORDER BY created_at DESC LIMIT 50"))).mappings().all()]
-        audit_logs = [dict(r) for r in (await conn.execute(text("SELECT * FROM merchant_audit_logs ORDER BY created_at DESC LIMIT 50"))).mappings().all()]
+        if business_id:
+            orders = [
+                dict(r)
+                for r in (
+                    await conn.execute(
+                        text("SELECT * FROM merchant_orders WHERE LOWER(business_id) = :b "
+                             "ORDER BY created_at DESC LIMIT 50"),
+                        {"b": business_id.strip().lower()},
+                    )
+                ).mappings().all()
+            ]
+            audit_logs = [
+                dict(r)
+                for r in (
+                    await conn.execute(
+                        text("SELECT a.* FROM merchant_audit_logs a "
+                             "JOIN merchant_orders o ON a.order_id = o.order_id "
+                             "WHERE LOWER(o.business_id) = :b "
+                             "ORDER BY a.created_at DESC LIMIT 50"),
+                        {"b": business_id.strip().lower()},
+                    )
+                ).mappings().all()
+            ]
+        else:
+            orders = [dict(r) for r in (await conn.execute(text("SELECT * FROM merchant_orders ORDER BY created_at DESC LIMIT 50"))).mappings().all()]
+            audit_logs = [dict(r) for r in (await conn.execute(text("SELECT * FROM merchant_audit_logs ORDER BY created_at DESC LIMIT 50"))).mappings().all()]
         spus = [dict(r) for r in (await conn.execute(text("SELECT * FROM merchant_spus ORDER BY created_at ASC"))).mappings().all()]
         skus = [
             dict(r)
@@ -1253,6 +1311,9 @@ async def create_order_from_cart(
                 total_amount=total_amount - discount,
                 discount_amount=discount,
                 shipping_address_json=json.dumps(shipping_address, ensure_ascii=False),
+                # 订单租户列(2026-10-14 夜评批次):结算路由已收 businessId(S5),
+                # 缺省 aurora 与店铺面单店口径同律
+                business_id=business_id or "aurora",
             )
             if promo.coupon_row_id:
                 from engine_py.analytics import promotions as _promo_svc
@@ -1329,7 +1390,7 @@ async def preview_cart_pricing(customer_id: str, items: list[dict], business_id:
             from engine_py.analytics.promotion_engine import best_for_amount, list_usable_user_coupons
 
             amount = round(total_amount, 2)
-            auto = await best_for_amount(conn, amount, scope, exclude_coupon=True)
+            auto = await best_for_amount(conn, amount, scope, exclude_coupon=True, business_id=business_id)
             # 叠加口径(与 _resolve_promotion 一致):活动先减,券按余额抵扣封顶
             activity_discount = auto["discount"] if auto else 0.0
             coupons = await list_usable_user_coupons(

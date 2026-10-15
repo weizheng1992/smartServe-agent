@@ -56,7 +56,7 @@ def _RECOMMEND_RE() -> re.Pattern:
 
 
 async def recommend_deals(
-    conn, guide_context: dict, question: str
+    conn, guide_context: dict, question: str, business_id: str | None = None
 ) -> tuple[str, list[str]]:
     """优惠荐品主入口:返回 (文案, 本轮已荐 spu_codes)。
 
@@ -77,7 +77,8 @@ async def recommend_deals(
     products = (
         await conn.execute(text(_CATALOG_SQL))
     ).mappings().all()
-    promos = await fetch_active_promos(conn)
+    # 荐品活动集限本租户(2026-10-14 夜评批次;skill 层显式传 ctx.tenant_id)
+    promos = await fetch_active_promos(conn, business_id)
 
     def _collect(exclude: set[str]) -> list[dict]:
         deals: list[dict] = []

@@ -74,6 +74,11 @@ class PromotionQuerySkill(BaseSkill):
     async def execute(self, context: SkillContext) -> SkillResult:
         ctx = await order_domain.OrderDomainService.get_thread_session_context(context.thread_id)
         user_id = context.user_id or ctx.get("userId") or ""
+        # 租户谓词无条件携带(2026-10-14 夜评批次):活动列表/券包均限本租户
+        # (user_id 跨租户可撞,CUST-8801 在多租户各有一份券包 —— 双层画像同源)。
+        from ..tenant_context import resolve_business_id
+
+        biz = resolve_business_id(context.tenant_id).strip().lower()
 
         question = context.input or ""
         try:
@@ -84,8 +89,9 @@ class PromotionQuerySkill(BaseSkill):
                         text(
                             "SELECT name, promo_type, threshold_amount, discount_value FROM promotions "
                             "WHERE status = 'active' AND (end_at IS NULL OR end_at > NOW()) "
+                            "AND business_id = :b "
                             "ORDER BY created_at DESC LIMIT 10"
-                        )
+                        ).bindparams(b=biz)
                     )
                 ).mappings().all()
                 # 全量带 status(claimed+used):核销态必须可答(2026-09-22 券向问法)
@@ -95,9 +101,9 @@ class PromotionQuerySkill(BaseSkill):
                             "SELECT p.name, p.discount_value, uc.status, uc.used_order_id, uc.used_at "
                             "FROM user_coupons uc "
                             "JOIN promotions p ON p.id = uc.promotion_id "
-                            "WHERE uc.user_id = :u AND p.promo_type = 'coupon' "
+                            "WHERE uc.user_id = :u AND uc.business_id = :b AND p.promo_type = 'coupon' "
                             "ORDER BY uc.status ASC, uc.claimed_at DESC"
-                        ).bindparams(u=user_id)
+                        ).bindparams(u=user_id, b=biz)
                     )
                 ).mappings().all()
                 # 优惠荐品(2026-09-22/23):荐品/价格诉求/预算问法委托
@@ -107,7 +113,7 @@ class PromotionQuerySkill(BaseSkill):
                 budget, cheaper = parse_price_hint(question)
                 if is_deal_recommendation_ask(question, budget, cheaper):
                     recommendation, recommendation_spus = await recommend_deals(
-                        conn, context.guide_context or {}, question
+                        conn, context.guide_context or {}, question, business_id=context.tenant_id
                     )
         except Exception as err:
             return SkillResult(success=True, output=f"优惠数据暂时查询不到({err})", next_action="finish")

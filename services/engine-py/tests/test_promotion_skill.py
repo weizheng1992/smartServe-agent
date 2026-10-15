@@ -45,6 +45,11 @@ def container(pg_factory, monkeypatch):
                     "promotion_id UUID, user_id TEXT, status TEXT DEFAULT 'claimed', used_order_id TEXT, "
                     "claimed_at TIMESTAMP DEFAULT NOW(), used_at TIMESTAMP)"
                 ),
+                # 租户列(2026-10-14 夜评批次):活动列表/券包/荐品三条查询谓词
+                # 无条件携带后,容器旧形缺列会响亮失败 —— 对齐生产形状
+                # (S5 DDL 默认 'aurora',种子行经默认值落 aurora,ctx.tenant_id 同)。
+                "ALTER TABLE promotions ADD COLUMN IF NOT EXISTS business_id VARCHAR(64) NOT NULL DEFAULT 'aurora'",
+                "ALTER TABLE user_coupons ADD COLUMN IF NOT EXISTS business_id VARCHAR(64) NOT NULL DEFAULT 'aurora'",
             ):
                 await conn.execute(text(ddl))
             await conn.execute(text("DELETE FROM promotion_redemptions"))
@@ -184,6 +189,30 @@ class TestCouponWalletQueries:
         assert "¥30 券" in result.output, f"可用券必须出现: {result.output}"
         assert "已使用" in result.output, f"已核销券必须出现: {result.output}"
         assert "9856" in result.output, f"已核销券须带核销单号: {result.output}"
+
+    def test_coupons_and_promos_scoped_by_tenant(self, container):
+        """券包/活动列表租户谓词(2026-10-14 夜评批次):user_id 跨租户可撞
+        (CUST-8801 在多租户各有一份券包),同租户券/活动才可答。"""
+        async def _seed_foreign():
+            e = create_async_engine(container.url.render_as_string(hide_password=False), poolclass=NullPool)
+            async with e.begin() as conn:
+                await conn.execute(text(
+                    "INSERT INTO promotions (business_id, name, promo_type, discount_value, status) "
+                    "VALUES ('nike', 'NIKE租户专属券', 'coupon', 100, 'active')"
+                ))
+                await conn.execute(text(
+                    "INSERT INTO user_coupons (business_id, promotion_id, user_id) "
+                    "SELECT 'nike', id, 'CUST-8801' FROM promotions WHERE name = 'NIKE租户专属券'"
+                ))
+            await e.dispose()
+
+        asyncio.run(_seed_foreign())
+        result = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "我的优惠券")))
+        assert result.success is True
+        assert "NIKE租户专属券" not in result.output, f"他租券严禁出现在券包: {result.output}"
+
+        promos = asyncio.run(PromotionQuerySkill().execute(_ctx("CUST-8801", "有什么优惠活动")))
+        assert "NIKE租户专属券" not in promos.output, f"他租活动严禁出现在活动列表: {promos.output}"
 
     def test_used_coupons_query_shows_used_only(self, container):
         _seed_claimed_and_used(container)
