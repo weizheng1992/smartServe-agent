@@ -37,13 +37,30 @@ from .resilience import resilient_ainvoke, resilient_invoke
 from .telemetry import LlmCallTelemetryHandler
 
 
-class _SerializedEmbeddings(Embeddings):
-    """本地 embedding 并发护栏(2026-09-05 段错误事故)。
+class _FastembedEmbeddings(Embeddings):
+    """fastembed(ONNX Runtime)→ langchain Embeddings 适配(2026-10-15 台账 #1)。
 
-    本地 torch 推理(sentence-transformers)在两个线程同时 encode 时进程级
-    SIGSEGV(exit 139)——网关任意两个并发聊天请求的 triage 向量化即可触雷,
-    整个进程连同全部 SSE 连接一起死。以进程内 asyncio.Lock 串行化异步推理;
-    同步方法保持透传(引擎全链路仅走 aembed_*)。
+    fastembed.embed 返回 numpy 矩阵(行=文本),逐行转 list[float];
+    bge 系权重自带归一化,下游余弦检索口径不变。 """
+
+    def __init__(self, model: Any) -> None:
+        self._model = model
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [row.tolist() for row in self._model.embed(list(texts))]
+
+    def embed_query(self, text: str) -> list[float]:
+        return next(iter(self._model.embed([text]))).tolist()
+
+
+class _SerializedEmbeddings(Embeddings):
+    """本地 embedding 并发护栏(2026-09-05 段错误事故;2026-10-15 起为防御纵深)。
+
+    事故原貌:本地 torch 推理(sentence-transformers)两线程同时 encode 即进程级
+    SIGSEGV(exit 139)—— 网关任意两个并发聊天请求的 triage 向量化即可触雷。
+    2026-10-15 换 fastembed/ONNX 后端根治竞态(onnxruntime session 线程安全),
+    本锁降级为防御纵深(顺带避免并发推理的内存尖峰);移除前须复验 ONNX
+    并发语义。同步方法保持透传(引擎全链路仅走 aembed_*)。
 
     openai 提供方为网络客户端,线程安全,不经本包装。
     """
@@ -203,24 +220,19 @@ def get_vision_model() -> ChatOpenAI:
 def get_embedding_model() -> Embeddings:
     if settings.embedding_provider == "local":
         # huggingface_hub 在导入时读取 HF_ENDPOINT,须在 import 前设置;
-        # 默认镜像 hf-mirror.com,用户已显式配置则不覆盖
+        # 默认镜像 hf-mirror.com,用户已显式配置则不覆盖(fastembed 经 hub
+        # 下载 ONNX 权重,首用落 ~/.cache/huggingface)。Xet 传输通道绕过
+        # 镜像直连 cas-server 匿名 401(实弹),镜像代理不了它 —— 禁用回落
+        # 普通 HTTP resolve,镜像可代理。
         os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-        # 懒加载:仅在实际向量化时加载 torch 与模型权重
-        from langchain_huggingface import HuggingFaceEmbeddings
+        os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+        # fastembed/ONNX Runtime 后端(2026-10-15 夜评台账 #1):torch 推理在
+        # cpython 3.14 有段错误竞态(09-14 A/B 实弹,双线程 encode 即 SIGSEGV,
+        # _SerializedEmbeddings 串行护栏是当时的止血),且常驻内存 1GB+;
+        # ONNX 权重 ~90MB,同模型同维度(512),onnxruntime session 线程安全。
+        from fastembed import TextEmbedding
 
-        try:
-            return _SerializedEmbeddings(
-                HuggingFaceEmbeddings(
-                    model_name=settings.embedding_model,
-                    model_kwargs={"local_files_only": True},
-                )
-            )
-        except Exception as cache_err:
-            print(
-                f"[LLM] 本地权重缓存未命中({cache_err}),"
-                f"经 {os.environ['HF_ENDPOINT']} 在线拉取 {settings.embedding_model}"
-            )
-            return _SerializedEmbeddings(HuggingFaceEmbeddings(model_name=settings.embedding_model))
+        return _SerializedEmbeddings(_FastembedEmbeddings(TextEmbedding(model_name=settings.embedding_model)))
     # openai 提供方走 AI_BASE_URL,与对话模型同受 fail-fast 校验;local 分支
     # 纯进程内推理不涉端点,不校验(db 类脚本 import 本模块不得被牵连)
     ensure_llm_config(settings)

@@ -13,14 +13,21 @@
 
 密封化(2026-09-20 CI 实证):CI 无本地权重缓存且 hf-mirror.com 不可达,
 真模型用例每轮必挂 OSError。被测对象是 ``_SerializedEmbeddings`` 的串行化
-语义而非 torch 本身 —— 桩掉 ``HuggingFaceEmbeddings``(保留真实包装层),
-断言从「维度一致」加强为「同一时刻至多一个在飞」。
+语义而非模型本体 —— 桩掉底层模型(保留真实包装层),断言从「维度一致」
+加强为「同一时刻至多一个在飞」。
+
+后端迁移(2026-10-15 台账 #1):torch → fastembed/ONNX(竞态根治),本用例
+随之把桩从 HuggingFaceEmbeddings 换到 fastembed.TextEmbedding —— 串行护栏
+语义不变,继续作为防御纵深钉死(fastembed embed 为同步调用,经 langchain
+默认 run_in_executor 进线程池,锁串行化语义同构)。
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 
+import numpy as np
 import pytest
 
 from engine_py.llm.chat import get_embedding_model
@@ -28,28 +35,19 @@ from engine_py.llm.chat import get_embedding_model
 pytestmark = pytest.mark.asyncio
 
 
-class _FakeHFEmbeddings:
+class _FakeFastembed:
     """底层模型替身:可观测并发重叠(在飞计数),定长向量。"""
 
     def __init__(self, **kwargs) -> None:
         self.inflight = 0
         self.max_inflight = 0
 
-    async def aembed_query(self, text: str) -> list[float]:
+    def embed(self, texts: list[str]) -> list[np.ndarray]:
         self.inflight += 1
         self.max_inflight = max(self.max_inflight, self.inflight)
-        await asyncio.sleep(0.01)
+        time.sleep(0.01)
         self.inflight -= 1
-        return [1.0, 0.5, 0.25]
-
-    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [await self.aembed_query(t) for t in texts]
-
-    def embed_query(self, text: str) -> list[float]:
-        return [1.0, 0.5, 0.25]
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [[1.0, 0.5, 0.25] for _ in texts]
+        return [np.array([1.0, 0.5, 0.25]) for _ in texts]
 
 
 async def test_concurrent_aembed_does_not_segfault(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,7 +55,8 @@ async def test_concurrent_aembed_does_not_segfault(monkeypatch: pytest.MonkeyPat
     # 填充 —— 清空让本测的桩工厂真正生效;收尾再清,不留假模型给后续测试
     get_embedding_model.cache_clear()
     try:
-        monkeypatch.setattr("langchain_huggingface.HuggingFaceEmbeddings", _FakeHFEmbeddings)
+        stub = _FakeFastembed()
+        monkeypatch.setattr("fastembed.TextEmbedding", lambda **kwargs: stub)
         model = get_embedding_model()
 
         async def one(i: int) -> int:
@@ -69,8 +68,6 @@ async def test_concurrent_aembed_does_not_segfault(monkeypatch: pytest.MonkeyPat
         assert all(d > 0 for d in dims), f"向量化维度异常: {dims}"
         assert len(set(dims)) == 1, f"同模型并发产出维度不一致: {dims}"
         # 串行化语义硬钉:asyncio.Lock 锁内同一时刻至多一个在飞
-        assert model._inner.max_inflight == 1, (
-            f"并发推理未被串行化: max_inflight={model._inner.max_inflight}"
-        )
+        assert stub.max_inflight == 1, f"并发推理未被串行化: max_inflight={stub.max_inflight}"
     finally:
         get_embedding_model.cache_clear()
