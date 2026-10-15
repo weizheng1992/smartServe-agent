@@ -404,6 +404,12 @@ export const api = {
       },
       body: JSON.stringify({ staffId: email }),
     });
+    if (res.status === 401) {
+      // 凭证失效与 req 同收口(此前裸 fetch 401 只 throw 由顶栏 alert,不清会话不回登录)
+      clearSession();
+      location.href = '/';
+      throw new Error('401 登录已过期');
+    }
     const body = await res.json();
     if (!res.ok || !body.success) throw new Error(body.message || body.detail || '切换失败');
     localStorage.setItem(BOSS_KEY, JSON.stringify(switchAs));

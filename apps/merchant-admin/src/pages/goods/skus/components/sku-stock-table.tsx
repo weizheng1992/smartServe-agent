@@ -9,7 +9,7 @@ import {
 import { type SkuStockRow, api } from '@/lib/api';
 import { useEffect, useState } from 'react';
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Label } from 'ui';
-import { type StockFilter, filterSkuStock } from '../filters';
+import { LOW_STOCK_THRESHOLD, type StockFilter, filterSkuStock } from '../filters';
 
 interface Props {
   skus: SkuStockRow[];
@@ -19,7 +19,7 @@ interface Props {
 
 const FILTERS: Array<{ key: StockFilter; label: string }> = [
   { key: 'ALL', label: '全部' },
-  { key: 'low', label: '低库存(<50)' },
+  { key: 'low', label: `低库存(<${LOW_STOCK_THRESHOLD})` },
   { key: 'normal', label: '正常' },
 ];
 
@@ -32,19 +32,6 @@ export function SkuStockTable({ skus, onMsg, onChanged }: Props) {
   const [priceEdit, setPriceEdit] = useState<SkuStockRow | null>(null);
 
   const rows = filterSkuStock(skus, filter, query);
-
-  async function save() {
-    if (!priceEdit) return;
-    const b = await api.products.updateSku(priceEdit.id, {
-      price: Number(priceEdit.price),
-      stock: Number(priceEdit.stock),
-    });
-    onMsg(b.success ? '✓ SKU 已保存' : `失败:${b.message}`);
-    if (b.success) {
-      setPriceEdit(null);
-      onChanged();
-    }
-  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
@@ -100,7 +87,7 @@ export function SkuStockTable({ skus, onMsg, onChanged }: Props) {
               <DenseTableCell>{k.spu_title}</DenseTableCell>
               <DenseTableCell>¥{k.price}</DenseTableCell>
               <DenseTableCell>
-                <span className={k.stock < 50 ? 'font-semibold text-rose-600' : ''}>{k.stock}</span>
+                <span className={k.stock < LOW_STOCK_THRESHOLD ? 'font-semibold text-rose-600' : ''}>{k.stock}</span>
               </DenseTableCell>
               <DenseTableCell>
                 <Button size="sm" variant="ghost" onClick={() => setPriceEdit(k)}>

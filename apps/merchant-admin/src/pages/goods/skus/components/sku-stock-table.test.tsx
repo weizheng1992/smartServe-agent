@@ -60,6 +60,25 @@ describe('SkuStockTable', () => {
     expect(screen.queryByText('SKU-A-2')).not.toBeInTheDocument();
   });
 
+  it('筛选与标红同口径(LOW_STOCK_THRESHOLD 单点):阈值行不算低也不标红(此前标红硬编码另一处 50,两层静默分歧)', () => {
+    render(
+      <SkuStockTable
+        skus={[
+          { ...skus[0], stock: 49 },
+          { ...skus[1], stock: 50 },
+        ]}
+        onMsg={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /低库存/ }));
+    expect(screen.getByText('SKU-A-1')).toBeInTheDocument(); // 49 ∈ 低库存
+    expect(screen.queryByText('SKU-A-2')).not.toBeInTheDocument(); // 50 ∉ 低库存
+    fireEvent.click(screen.getByRole('button', { name: '全部' }));
+    expect(screen.getByText('49')).toHaveClass('text-rose-600'); // 标红谓词同源
+    expect(screen.getByText('50')).not.toHaveClass('text-rose-600');
+  });
+
   it('搜索命中所属商品;无匹配诚实空', () => {
     render(<SkuStockTable skus={skus} onMsg={() => {}} onChanged={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText(/搜索 SKU/), { target: { value: '不存在' } });

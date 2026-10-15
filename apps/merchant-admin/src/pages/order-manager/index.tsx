@@ -31,8 +31,7 @@ export default function OrderWorkbench({ scope = 'orders' }: { scope?: Workbench
 
 /** 薄壳:按 scope 渲染对应功能域(数据仍共享同一轮询上下文),弹窗与抽屉常挂。 */
 function WorkbenchShell({ scope }: { scope: WorkbenchScope }) {
-  const { inspectingApproval, setInspectingApproval, setRejectionReasons, handleApprovalAction, handleHumanReply } =
-    useWorkbench();
+  const { inspectingApproval, setInspectingApproval, handleApprovalAction, handleHumanReply } = useWorkbench();
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
@@ -57,10 +56,10 @@ function WorkbenchShell({ scope }: { scope: WorkbenchScope }) {
           await handleApprovalAction(id, 'approve');
         }}
         onReject={async (id, reason) => {
-          if (reason) {
-            setRejectionReasons((prev) => ({ ...prev, [id]: reason }));
-          }
-          await handleApprovalAction(id, 'reject');
+          // 驳回原因直传 explicitReason(工单 04 同病灶的抽屉版收口):旧形先写
+          // setRejectionReasons 再调用,state 异步更新使 executeApprovalAction
+          // 闭包读到旧 map,用户填写的原因被吞成兜底文案(与 RejectDialog 同修法)
+          await handleApprovalAction(id, 'reject', reason);
         }}
         onHumanReply={async (id, replyMsg, isFinish) => {
           await handleHumanReply(id, replyMsg, isFinish);

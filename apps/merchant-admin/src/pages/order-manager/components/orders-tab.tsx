@@ -6,6 +6,7 @@ import {
   DenseTableHeader,
   DenseTableRow,
 } from '@/components/dense-table';
+import { fmtMoney } from '@/lib/format';
 import { setSelectionKind } from '@/lib/page-context';
 import React from 'react';
 import {
@@ -187,7 +188,7 @@ export function OrdersTab() {
                       </Badge>
                     </DenseTableCell>
                     <DenseTableCell className="p-3.5 font-bold text-slate-900">
-                      ¥{Number(o.total_amount).toFixed(2)}
+                      ¥{fmtMoney(o.total_amount)}
                     </DenseTableCell>
                     <DenseTableCell className="p-3.5">
                       <div className="font-medium text-slate-800">{o.shipping_address?.recipientName || '张伟'}</div>
