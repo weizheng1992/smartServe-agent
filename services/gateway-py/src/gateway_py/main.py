@@ -65,6 +65,11 @@ async def _lifespan(app: FastAPI):
         ensure_llm_config()
     except Exception as startup_err:
         raise SystemExit(f"[Startup] LLM 配置校验失败: {startup_err}") from startup_err
+    # 进程版本戳(2026-10-15 夜评台账 #3):巡检/重启裁决判「网关跑的是哪份
+    # 代码」的数据源 —— /tmp/smartserve-gateway.json(sha/pid/started_at)。
+    from .version_stamp import write_stamp
+
+    write_stamp()
     await _sync_product_knowledge_on_startup()
     # 周期任务随网关宿主(ADR-0007:Temporal 执行路线退役后,scheduler 的唯一
     # 宿主)—— outbox 对账 / 接管释放 / 坏例摘要。dev:all 从此自带对账兜底,
