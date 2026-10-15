@@ -1,8 +1,9 @@
-"""商户门户服务端路由 — 移植 apps/merchant/app/{api,spi}/**/route.ts(18 条,路径与响应包 1:1)。
+"""商户门户服务端路由 — 移植 apps/merchant/app/{api,spi}/**/route.ts(路径与响应包 1:1)。
 
 - /api/admin/*:商户运营台(会话接管、订单发货、HITL 审批)
 - /api/store/*:门店前台(商品、地址、下单、AI 客服聊天 + SSE)
-- /spi/v1/*:对外 SPI 合同(HMAC 强制签名 + nonce 防重放,success/data/timestamp 信封)
+- /spi/v1/*:对外 SPI 合同 — 已拆至 store_spi.py(2026-10-15 拆缝)
+- /api/store/promotions*、/api/store/coupons*:商城促销/领券 — 已拆至 merchant_promotions.py
 - SSE 推送通道:Redis pub/sub 频道 ``thread:{threadId}:message``(替代 TS 进程内 agentEventEmitter)
 """
 
@@ -10,13 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
-import json
-import os
 import time
 import uuid as _uuid
 
 from engine_py.approvals.gatekeeper import ApprovalGatekeeper
-from engine_py.event_bus import get_client as get_redis
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -38,7 +36,6 @@ from ..conversation_repo import (
     list_conversations,
     publish_thread_message,
 )
-from ..hmac_signer import verify as hmac_verify
 from ..sse_tail import frame_id_from_timestamp as _sse_frame_id
 from ..sse_tail import last_event_id_from, streaming_headers, tail_pubsub
 from ..tenant_scope import (
@@ -50,7 +47,6 @@ from ..tenant_scope import (
 )
 
 router = APIRouter()
-merchant_promotions_router = APIRouter()
 
 
 class MerchantApprovalActionIn(BaseModel):
@@ -83,55 +79,11 @@ def _ts_ms() -> int:
 
 
 # ---------------------------------------------------------------------------
-# SPI 鉴权 — 移植 apps/merchant/src/services/spiAuthGuard.ts
+# SPI 鉴权(verify_spi_request)已随 /spi/v1 合同面拆至 store_spi.py
+# (2026-10-15 夜评拆缝);商城促销/领券面拆至 merchant_promotions.py。
+# 本文件只留商户运营台(/api/admin/*)、门店前台(/api/store/* 商品/地址/
+# 订单/结算)与商城 AI 客服(cart/chat/SSE)。
 # ---------------------------------------------------------------------------
-
-
-async def verify_spi_request(
-    method: str,
-    path: str,
-    body: str,
-    signature: str | None,
-    timestamp: str | None,
-    nonce: str | None,
-) -> tuple[bool, str | None]:
-    """SPI 合同面 HMAC 验签(fail-closed,2026-10-14 夜评 🟡 收口):
-    - 无签名恒拒绝(免签名后门参数已删除 —— 五调用点此前全显式 True,参数
-      是纯逃逸面);
-    - 密钥只认 env(MERCHANT_API_SECRET > API_SECRET),源码兜底密钥
-      aurora_secret_key_8899 删除 —— 密钥进源码即进 git 史,拿着仓库即可
-      伪造签名;env 双缺时拒绝并响亮留痕,生产在 .env 配置。"""
-    if not signature:
-        return False, "Missing x-signature header for protected SPI endpoint"
-    if not timestamp or not nonce:
-        return False, "Missing x-timestamp or x-nonce headers for signed request"
-    try:
-        req_time = int(timestamp)
-    except ValueError:
-        return False, "Request timestamp expired (> 5 minutes window)"
-    if abs(_ts_ms() - req_time) > 300000:
-        return False, "Request timestamp expired (> 5 minutes window)"
-    secret = os.environ.get("MERCHANT_API_SECRET") or os.environ.get("API_SECRET")
-    if not secret:
-        print(
-            "[SPI] HMAC 密钥未配置(MERCHANT_API_SECRET/API_SECRET 均缺),fail-closed 拒绝验签 —— "
-            "生产/联调环境须在 .env 配置密钥"
-        )
-        return False, "SPI secret not configured (set MERCHANT_API_SECRET)"
-    ok = hmac_verify(secret, signature, method, path, timestamp, nonce, body)
-    if not ok:
-        return False, "Invalid HMAC-SHA256 signature"
-    # nonce 防重放(2026-10-02 code-review:此前 nonce 收而不查重,同一签名
-    # 300s 窗口内可无限重放 —— tools-registry §1.2「防重放」从此完整兑现)。
-    # Redis 不可用 fail-open(与 rate_limit 同一取向),不阻断正常签名流。
-    try:
-        client = await get_redis()
-        if client is not None:
-            if not await client.set(f"spi:nonce:{nonce}", "1", nx=True, ex=300):
-                return False, "Replayed nonce (anti-replay window 300s)"
-    except Exception as err:
-        print(f"[SPI] nonce 防重放 Redis 不可用,fail-open: {err}")
-    return True, None
 
 
 # ---------------------------------------------------------------------------
@@ -770,225 +722,3 @@ async def store_chat_stream(
         headers=streaming_headers(),
     )
 
-
-# ---------------------------------------------------------------------------
-# /spi/v1 — 对外 SPI 合同(HMAC 强制;2026-10-02 code-review 收免签名放行,
-# 2026-10-14 夜评收口:require_signature 逃逸参数删除(无签名恒拒)+ 源码
-# 兜底密钥删除(env 双缺 fail-closed,见 verify_spi_request))
-# ---------------------------------------------------------------------------
-
-
-@router.get("/spi/v1/products/search")
-async def spi_products_search(
-    request: Request,
-    query: str | None = Query(None),
-    category: str | None = Query(None),
-    limit: str | None = Query(None),
-):
-    try:
-        ok, error = await verify_spi_request(
-            request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
-        )
-        if not ok:
-            return JSONResponse(status_code=401, content={"success": False, "message": error})
-        products = await mds.search_products(
-            query=query or None, category=category or None, limit=int(limit) if limit else 10
-        )
-        return {"success": True, "data": products, "timestamp": _ts_ms()}
-    except Exception as err:
-        print(f"[SPI] GET /spi/v1/products/search failed: {err}")
-        return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
-
-
-@router.get("/spi/v1/user/info")
-async def spi_user_info(request: Request, userId: str | None = Query(None), userEmail: str | None = Query(None)):
-    try:
-        ok, error = await verify_spi_request(
-            request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
-        )
-        if not ok:
-            return JSONResponse(status_code=401, content={"success": False, "message": error})
-        user = await mds.get_user_info({"userId": userId, "userEmail": userEmail})
-        return {"success": True, "data": user, "timestamp": _ts_ms()}
-    except Exception as err:
-        print(f"[SPI] GET /spi/v1/user/info failed: {err}")
-        return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
-
-
-@router.get("/spi/v1/orders/list")
-async def spi_orders_list(
-    request: Request,
-    userId: str | None = Query(None),
-    status: str | None = Query(None),
-    limit: str | None = Query(None),
-):
-    try:
-        ok, error = await verify_spi_request(
-            request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
-        )
-        if not ok:
-            return JSONResponse(status_code=401, content={"success": False, "message": error})
-        orders = await mds.list_orders(
-            {"userId": userId or None, "status": status or None, "limit": int(limit) if limit else 10}
-        )
-        return {"success": True, "data": orders, "timestamp": _ts_ms()}
-    except Exception as err:
-        print(f"[SPI] GET /spi/v1/orders/list failed: {err}")
-        return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
-
-
-@router.get("/spi/v1/orders/detail")
-async def spi_orders_detail(request: Request, orderId: str | None = Query(None)):
-    try:
-        ok, error = await verify_spi_request(
-            request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
-        )
-        if not ok:
-            return JSONResponse(status_code=401, content={"success": False, "message": error})
-        if not orderId:
-            return JSONResponse(status_code=400, content={"success": False, "message": "orderId is required"})
-        order = await mds.get_order_detail(orderId)
-        if order is None:
-            return JSONResponse(
-                status_code=404, content={"success": False, "message": f"Order {orderId} not found"}
-            )
-        return {"success": True, "data": order, "timestamp": _ts_ms()}
-    except Exception as err:
-        print(f"[SPI] GET /spi/v1/orders/detail failed: {err}")
-        return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
-
-
-@router.post("/spi/v1/orders/action")
-async def spi_orders_action(request: Request):
-    try:
-        raw_body = (await request.body()).decode()
-        signature = request.headers.get("x-signature") or ""
-
-        ok, error = await verify_spi_request(
-            request.method, request.url.path, raw_body, signature,
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
-        )
-        if not ok:
-            return JSONResponse(status_code=401, content={"success": False, "message": error})
-
-        payload = json.loads(raw_body)
-        if not payload.get("orderId") or not payload.get("actionType"):
-            return JSONResponse(
-                status_code=400, content={"success": False, "message": "orderId and actionType are required"}
-            )
-
-        result = await mds.execute_order_action(payload, signature)
-        return {"success": result.get("success"), "data": result, "timestamp": _ts_ms()}
-    except Exception as err:
-        print(f"[SPI] POST /spi/v1/orders/action failed: {err}")
-        return JSONResponse(status_code=500, content={"success": False, "message": _err_msg(err)})
-
-# ---------------- 商城促销(20 号:参加活动/促销价展示) ----------------
-
-
-@merchant_promotions_router.get("/api/store/promotions")
-async def store_promotions(businessId: str | None = Query(None)):
-    """在售活动列表(商城首页/商品页展示;仅 active 且未过期,租户内)。
-
-    businessId 缺省 aurora(单店部署口径,与下方下单/券包路由同律);
-    2026-10-14 夜评:此前零租户过滤,跨租户活动前台可见可用。"""
-    from engine_py.analytics.promotion_engine import fetch_active_promos
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-
-    async with merchant_reader_engine().connect() as conn:
-        promos = await fetch_active_promos(conn, businessId or "aurora")
-    return {
-        "success": True,
-        "promotions": [
-            {"id": p["id"], "name": p["name"], "promoType": p["promo_type"],
-             "threshold": float(p["threshold_amount"]) if p["threshold_amount"] is not None else None,
-             "value": float(p["discount_value"]), "scopeType": p["scope_type"], "scopeValue": p["scope_value"]}
-            for p in promos
-        ],
-    }
-
-
-@merchant_promotions_router.get("/api/store/promotions/price")
-async def store_promo_price(productId: str = Query(...), price: float = Query(...),
-                            businessId: str | None = Query(None)):
-    """单商品促销价(划线价展示;无可用活动返回原价;租户内,同上)。"""
-    from engine_py.analytics.promotion_engine import promo_for_spu
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-
-    async with merchant_reader_engine().connect() as conn:
-        promo = await promo_for_spu(conn, productId, price, businessId or "aurora")
-    if not promo:
-        return {"success": True, "originalPrice": price, "promoPrice": price, "promoName": None}
-    return {"success": True, "originalPrice": price, "promoPrice": promo["promoPrice"], "promoName": promo["name"]}
-
-@merchant_promotions_router.post("/api/store/promotions/prices")
-async def store_promo_prices_batch(items: list[dict], businessId: str | None = Query(None)):
-    """批量促销价(商城商品列表;服务端唯一算价,避免前端规则漂移;租户内,同上)。
-
-    活动集整批一次拉取后内存打分 —— 不逐商品重查活动(此前 200 商品 =
-    200 次活动全量 SELECT,2026-09-27 夜审 F3)。"""
-    from engine_py.analytics.promotion_engine import promo_prices_batch
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-
-    sliced = items[:200]
-    async with merchant_reader_engine().connect() as conn:
-        bests = await promo_prices_batch(
-            conn, [(str(i.get("productId")), float(i.get("price") or 0)) for i in sliced],
-            businessId or "aurora",
-        )
-    out = []
-    for item, promo in zip(sliced, bests):
-        out.append({
-            "productId": item.get("productId"),
-            "originalPrice": float(item.get("price") or 0),
-            "promoPrice": promo["promoPrice"] if promo else float(item.get("price") or 0),
-            "promoName": promo["name"] if promo else None,
-        })
-    return {"success": True, "prices": out}
-
-
-@merchant_promotions_router.get("/api/store/promotions/by-order")
-async def store_promo_by_order(orderId: str = Query(...)):
-    """订单优惠关联(商城订单展示原价/优惠/实付)。"""
-    from engine_py.tools_registry.order_domain import merchant_reader_engine
-    from sqlalchemy import text as _t
-
-    async with merchant_reader_engine().connect() as conn:
-        row = (
-            await conn.execute(_t(
-                "SELECT p.name AS promo_name, r.discount_amount AS discount, p.promo_type "
-                "FROM promotion_redemptions r JOIN promotions p ON p.id = r.promotion_id "
-                "WHERE r.order_id = :oid LIMIT 1"
-            ).bindparams(oid=orderId))
-        ).mappings().first()
-    if not row:
-        return {"success": True, "applied": False}
-    return {"success": True, "applied": True, "promoName": row["promo_name"],
-            "discount": float(row["discount"]), "promoType": row["promo_type"]}
-
-
-@merchant_promotions_router.post("/api/store/coupons/claim")
-async def store_claim_coupon(request: Request):
-    body = await request.json()
-    promo_id = str(body.get("promoId") or "")
-    user_id = str(body.get("userId") or "").strip()
-    if not promo_id or not user_id:
-        return JSONResponse(status_code=400, content={"success": False, "message": "promoId/userId 必传"})
-    from engine_py.analytics import promotions as P
-
-    result = await P.claim_coupon(promo_id, user_id, business_id=str(body.get("businessId") or "aurora"))
-    if "error" in result:
-        return JSONResponse(status_code=400, content={"success": False, **result})
-    return {"success": True, **result}
-
-
-@merchant_promotions_router.get("/api/store/coupons")
-async def store_my_coupons(request: Request, userId: str = Query(...), businessId: str = Query("aurora")):
-    from engine_py.analytics import promotions as P
-
-    coupons = await P.my_coupons(userId, businessId)
-    return {"success": True, "coupons": coupons}

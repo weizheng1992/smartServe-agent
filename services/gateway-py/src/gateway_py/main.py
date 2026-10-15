@@ -19,7 +19,18 @@ from socketio import ASGIApp
 
 from .rate_limit import RateLimitMiddleware
 from .realtime import sio
-from .routers import admin, analytics, auth, chat, crud, live_desk, merchant, spi
+from .routers import (
+    admin,
+    analytics,
+    auth,
+    chat,
+    crud,
+    live_desk,
+    merchant,
+    merchant_promotions,
+    spi,
+    store_spi,
+)
 from .tenant_context import TenantContextMiddleware, _PermissionError
 from .tenant_scope import GateError
 
@@ -126,8 +137,9 @@ fastapi_app.include_router(auth.router)
 fastapi_app.include_router(chat.router)
 fastapi_app.include_router(spi.router)
 fastapi_app.include_router(merchant.router)
+fastapi_app.include_router(store_spi.router)
 fastapi_app.include_router(analytics.router)
-fastapi_app.include_router(merchant.merchant_promotions_router)
+fastapi_app.include_router(merchant_promotions.router)
 fastapi_app.include_router(live_desk.router)
 
 # 聊天图片静态服务(wayfinder multimodal-image-chat 002):上传端点回 /api/uploads/ URL,
