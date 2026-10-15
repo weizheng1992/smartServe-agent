@@ -1,7 +1,8 @@
 import { ResultCard } from '@/components/ResultCard';
 import { type AskCard } from '@/lib/analytics-frames';
 import { api, errMsgOf } from '@/lib/api';
-import { useCallback, useEffect, useState } from 'react';
+import { useListPage } from '@/lib/use-list-page';
+import { useCallback, useState } from 'react';
 import { Button } from 'ui';
 
 type ReportRow = { id: string; title: string; timeWindow: string; createdAt: string | null };
@@ -16,22 +17,15 @@ type Section = {
 
 /** 我的报告(T4 补强):清单 + 图表重放 —— 存档行数据按图型重绘,CSV 照常导出。 */
 export default function ReportsPage() {
-  const [reports, setReports] = useState<ReportRow[]>([]);
-  const [msg, setMsg] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
   const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      setReports((await api.reports.list()).reports || []);
-    } catch (err) {
-      setMsg(String(err));
-    }
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const {
+    rows: reports,
+    msg,
+    setMsg,
+    reload,
+  } = useListPage<ReportRow>(async () => (await api.reports.list()).reports || []);
 
   async function toggleExpand(id: string) {
     if (openId === id) {
@@ -93,7 +87,7 @@ export default function ReportsPage() {
           <div className="text-sm font-medium">我的报告</div>
           <div className="mt-0.5 text-[11px] text-zinc-400">展开可重放图表(存档快照);CSV 随时可导</div>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void api.reports.create().then(load)}>
+        <Button size="sm" variant="outline" onClick={() => void api.reports.create().then(reload)}>
           ＋ 生成报告
         </Button>
       </div>

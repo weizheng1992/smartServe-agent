@@ -7,7 +7,8 @@ import {
   DenseTableRow,
 } from '@/components/dense-table';
 import { type MenuNode, api } from '@/lib/api';
-import { useCallback, useEffect, useState } from 'react';
+import { useListPage } from '@/lib/use-list-page';
+import { useState } from 'react';
 import { Button } from 'ui';
 import { RoleAssignDialog } from './components/role-assign-panel';
 import { RoleCreateDialog } from './components/role-create-form';
@@ -22,23 +23,24 @@ interface RoleRow {
 }
 
 export default function RolesPage() {
-  const [roles, setRoles] = useState<RoleRow[]>([]);
   const [tree, setTree] = useState<MenuNode[]>([]);
-  const [msg, setMsg] = useState('');
   const [assigning, setAssigning] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [canAssign, setCanAssign] = useState(false);
 
-  const load = useCallback(async () => {
-    setRoles((await api.roles.list()).roles || []);
+  // 次级资源(菜单树 + 分配权)在 loader 闭包内就地 set(useListPage 候选④)
+  const {
+    rows: roles,
+    msg,
+    setMsg,
+    reload,
+  } = useListPage<RoleRow>(async () => {
     const m = await api.menus();
     setTree(m.menus || []);
     // 分配权限点(老板/管理员角色自带 role:assign;也可经菜单管理勾给其他角色)
     setCanAssign((m.perms || []).includes('role:assign'));
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
+    return (await api.roles.list()).roles || [];
+  });
 
   const boss = canAssign;
 
@@ -91,10 +93,10 @@ export default function RolesPage() {
         <RoleAssignDialog
           role={assigning}
           tree={tree}
-          onSaved={setMsg}
+          onMsg={setMsg}
           onClose={() => {
             setAssigning(null);
-            void load();
+            void reload();
           }}
         />
       )}
@@ -104,7 +106,7 @@ export default function RolesPage() {
           onMsg={setMsg}
           onClose={() => {
             setCreating(false);
-            void load();
+            void reload();
           }}
         />
       )}

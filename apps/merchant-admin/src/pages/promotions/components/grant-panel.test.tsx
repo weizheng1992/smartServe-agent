@@ -47,7 +47,7 @@ d('GrantDialog(真实库)', () => {
           effectiveStatus: 'running',
         }}
         onClose={() => {}}
-        onDone={() => {}}
+        onMsg={() => {}}
       />,
     );
 

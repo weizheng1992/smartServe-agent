@@ -5,13 +5,13 @@ import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 interface Props {
   promo: Promotion;
   onClose: () => void;
-  /** 发放结果消息(连续发放不关窗,由页面负责刷新) */
-  onDone: (msg: string) => void;
+  /** 发放结果消息(连续发放不关窗,由页面负责刷新);命名收敛 onDone → onMsg(候选④) */
+  onMsg: (msg: string) => void;
 }
 
 /** 发券弹窗:按姓名/手机号搜客户,逐个发放(可连续发;重复发/超上限被服务端
  * 护栏拦截并如实呈现 message);头部带剩余可发(有上限时)。 */
-export function GrantDialog({ promo, onClose, onDone }: Props) {
+export function GrantDialog({ promo, onClose, onMsg }: Props) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [query, setQuery] = useState('');
   const [granted, setGranted] = useState<Set<string>>(new Set());
@@ -32,10 +32,10 @@ export function GrantDialog({ promo, onClose, onDone }: Props) {
     if (b.success) {
       setGranted((prev) => new Set(prev).add(c.customer_id));
       setClaimed((n) => (n == null ? n : n + 1));
-      onDone(`✓ 已向 ${c.name}(${c.customer_id})发放「${promo.name}」`);
+      onMsg(`✓ 已向 ${c.name}(${c.customer_id})发放「${promo.name}」`);
     } else {
       // 量控/查重等服务端拒发如实呈现(发放已达上限等)
-      onDone(`发放失败:${errMsgOf(b)}`);
+      onMsg(`发放失败:${errMsgOf(b)}`);
     }
   }
 

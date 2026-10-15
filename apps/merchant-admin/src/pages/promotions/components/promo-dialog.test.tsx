@@ -70,11 +70,10 @@ function renderDialog(opts: { promo?: Promotion | null; open?: boolean } = {}) {
   const onClose = vi.fn();
   render(
     <PromoFormDialog
-      open={opts.open ?? true}
       promo={opts.promo !== undefined ? opts.promo : null}
       spus={[MOCK_SPU]}
       onClose={onClose}
-      onSaved={onSaved}
+      onMsg={onSaved}
     />,
   );
   return { onSaved, onClose };

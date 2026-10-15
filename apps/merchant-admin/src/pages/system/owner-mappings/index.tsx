@@ -7,7 +7,8 @@ import {
   DenseTableRow,
 } from '@/components/dense-table';
 import { api, errMsgOf } from '@/lib/api';
-import { useCallback, useEffect, useState } from 'react';
+import { useListPage } from '@/lib/use-list-page';
+import { useEffect, useState } from 'react';
 import { Button } from 'ui';
 import { MAP_TYPE_LABEL } from './map-type-label';
 import { OwnerMappingDialog } from './owner-mapping-dialog';
@@ -32,29 +33,29 @@ type StaffOption = { id: string; displayName: string; dept: string | null; level
 // 下拉吃语义注册表闭集(服务端 GET 同载,前端零硬编码);PUT/DELETE 仅老板/管理员
 // (闸在服务端,前端按 400/403 文案如实呈现)。商品/活动所有权随实体行编辑,不在此页。
 export default function OwnerMappingsPage() {
-  const [mappings, setMappings] = useState<MappingRow[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [metrics, setMetrics] = useState<Array<{ key: string; label: string }>>([]);
   const [staff, setStaff] = useState<StaffOption[]>([]);
   const [creating, setCreating] = useState(false);
-  const [msg, setMsg] = useState('');
-
-  const load = useCallback(async () => {
+  // 次级资源(闭集/员工选项)在 loader 闭包内就地 set(useListPage 候选④)
+  const {
+    rows: mappings,
+    msg,
+    setMsg,
+    reload,
+  } = useListPage<MappingRow>(async () => {
     const [list, staffRes] = await Promise.all([api.ownerMappings.list(), api.staff.list()]);
-    setMappings(list.mappings || []);
     setCategories(list.categories || []);
     setMetrics(list.metrics || []);
     setStaff((staffRes.staff || []) as StaffOption[]);
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
+    return list.mappings || [];
+  });
 
   const remove = async (row: MappingRow) => {
     setMsg('');
     const res = await api.ownerMappings.remove(row.mapType, row.mapValue);
     setMsg(res.success ? `已撤销:${row.mapValue}` : `失败:${errMsgOf(res)}`);
-    if (res.success) await load();
+    if (res.success) await reload();
   };
 
   return (
@@ -122,10 +123,10 @@ export default function OwnerMappingsPage() {
           categories={categories}
           metrics={metrics}
           staff={staff}
-          onSaved={setMsg}
+          onMsg={setMsg}
           onClose={() => {
             setCreating(false);
-            void load();
+            void reload();
           }}
         />
       )}

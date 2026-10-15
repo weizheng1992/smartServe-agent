@@ -81,7 +81,7 @@ export function PromoTable({ promotions, spuTitles, onMsg, onChanged, onEdit }: 
         <RedeemDialog
           promo={redeemPromo}
           onClose={() => setRedeem(null)}
-          onDone={(m) => {
+          onMsg={(m) => {
             onMsg(m);
             onChanged();
           }}
@@ -94,7 +94,7 @@ export function PromoTable({ promotions, spuTitles, onMsg, onChanged, onEdit }: 
             setGranting(null);
             onChanged();
           }}
-          onDone={onMsg}
+          onMsg={onMsg}
         />
       )}
 

@@ -1,5 +1,6 @@
 import { type MenuNode, api } from '@/lib/api';
-import { useCallback, useEffect, useState } from 'react';
+import { useListPage } from '@/lib/use-list-page';
+import { useState } from 'react';
 import { Button } from 'ui';
 import { MenuCreateDialog } from './components/menu-create-form';
 import { MenuTable } from './components/menu-table';
@@ -8,16 +9,8 @@ import { MenuTable } from './components/menu-table';
 // 这里登记的按钮权限点(perm_code)即角色管理页可勾选的接口权限。
 // 页面只做编排;新增弹窗与树列表拆在同目录 components/ 下。
 export default function MenusPage() {
-  const [menus, setMenus] = useState<MenuNode[]>([]);
-  const [msg, setMsg] = useState('');
+  const { rows: menus, msg, setMsg, reload } = useListPage<MenuNode>(async () => (await api.menus()).menus || []);
   const [creating, setCreating] = useState(false);
-
-  const load = useCallback(async () => {
-    setMenus((await api.menus()).menus || []);
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -30,14 +23,14 @@ export default function MenusPage() {
           + 新增菜单
         </Button>
       </div>
-      <MenuTable menus={menus} onMsg={setMsg} onChanged={() => void load()} />
+      <MenuTable menus={menus} onMsg={setMsg} onChanged={() => void reload()} />
       {creating && (
         <MenuCreateDialog
           menus={menus}
           onMsg={setMsg}
           onClose={() => {
             setCreating(false);
-            void load();
+            void reload();
           }}
         />
       )}

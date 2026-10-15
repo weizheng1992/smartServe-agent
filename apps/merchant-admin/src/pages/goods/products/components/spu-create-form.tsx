@@ -1,20 +1,7 @@
-import { api } from '@/lib/api';
+import { FormDialogShell } from '@/components/form-dialog-shell';
+import { api, errMsgOf } from '@/lib/api';
 import { useEffect, useState } from 'react';
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from 'ui';
+import { Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 
 /** 品类闭集降级面(真源在服务端注册表,挂载时经 ownerMappings.list 拉取;
  *  此前手写数组为唯一真源,服务端品类变更在此静默滞后 —— 2026-10-15 候选③收口)。
@@ -51,94 +38,79 @@ export function SpuCreateDialog({ onMsg, onClose }: Props) {
       .catch(() => {});
   }, []);
 
-  async function create() {
-    const b = await api.products.create({
-      title: form.title,
-      category: form.category,
-      price: Number(form.price),
-      stock: Number(form.stock),
-    });
-    onMsg(b.success ? `✓ 已上架「${form.title}」(${b.spuCode})` : `失败:${b.message}`);
-    if (b.success) onClose();
-  }
-
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md rounded-xl border-zinc-200 text-zinc-900 shadow-xl">
-        <DialogHeader className="pb-3 border-b border-zinc-100">
-          <DialogTitle className="text-base font-bold text-zinc-900">新增商品</DialogTitle>
-          <p className="mt-1 text-xs text-zinc-500">上架即建 SPU + 默认 SKU;标题与售价必填</p>
-        </DialogHeader>
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-4 text-xs">
-          <div>
-            <Label htmlFor="spu-title" className="mb-1.5 block text-zinc-700">
-              商品标题
-            </Label>
-            <Input
-              id="spu-title"
-              className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 shadow-none focus-visible:ring-0"
-              placeholder="如:极光防晒皮肤衣"
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label className="mb-1.5 block text-zinc-700">类目</Label>
-            <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
-              <SelectTrigger aria-label="类目" className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="spu-price" className="mb-1.5 block text-zinc-700">
-                售价(¥)
-              </Label>
-              <Input
-                id="spu-price"
-                className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 shadow-none focus-visible:ring-0"
-                placeholder="如 329"
-                value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="spu-stock" className="mb-1.5 block text-zinc-700">
-                库存
-              </Label>
-              <Input
-                id="spu-stock"
-                className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 shadow-none focus-visible:ring-0"
-                placeholder="默认 10"
-                value={form.stock}
-                onChange={(e) => setForm({ ...form, stock: e.target.value })}
-              />
-            </div>
-          </div>
+    <FormDialogShell
+      title="新增商品"
+      subtitle="上架即建 SPU + 默认 SKU;标题与售价必填"
+      maxWidth="max-w-md"
+      submitLabel="上架"
+      submitDisabled={!form.title || !form.price}
+      onClose={onClose}
+      onSubmit={async () => {
+        const b = await api.products.create({
+          title: form.title,
+          category: form.category,
+          price: Number(form.price),
+          stock: Number(form.stock),
+        });
+        if (!b.success) return errMsgOf(b);
+        onMsg(`✓ 已上架「${form.title}」(${b.spuCode})`);
+        return null;
+      }}
+    >
+      <div>
+        <Label htmlFor="spu-title" className="mb-1.5 block text-zinc-700">
+          商品标题
+        </Label>
+        <Input
+          id="spu-title"
+          className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 shadow-none focus-visible:ring-0"
+          placeholder="如:极光防晒皮肤衣"
+          value={form.title}
+          onChange={(e) => setForm({ ...form, title: e.target.value })}
+        />
+      </div>
+      <div>
+        <Label className="mb-1.5 block text-zinc-700">类目</Label>
+        <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+          <SelectTrigger aria-label="类目" className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {categories.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor="spu-price" className="mb-1.5 block text-zinc-700">
+            售价(¥)
+          </Label>
+          <Input
+            id="spu-price"
+            className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 shadow-none focus-visible:ring-0"
+            placeholder="如 329"
+            value={form.price}
+            onChange={(e) => setForm({ ...form, price: e.target.value })}
+          />
         </div>
-        <DialogFooter className="gap-2 pt-3 sm:gap-0 border-t border-zinc-100">
-          <Button type="button" variant="outline" size="sm" onClick={onClose} className="text-xs cursor-pointer">
-            取消
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            disabled={!form.title || !form.price}
-            onClick={() => void create()}
-            className="text-xs font-bold cursor-pointer"
-          >
-            上架
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div>
+          <Label htmlFor="spu-stock" className="mb-1.5 block text-zinc-700">
+            库存
+          </Label>
+          <Input
+            id="spu-stock"
+            className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2 shadow-none focus-visible:ring-0"
+            placeholder="默认 10"
+            value={form.stock}
+            onChange={(e) => setForm({ ...form, stock: e.target.value })}
+          />
+        </div>
+      </div>
+    </FormDialogShell>
   );
 }

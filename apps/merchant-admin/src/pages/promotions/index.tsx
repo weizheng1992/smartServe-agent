@@ -1,5 +1,6 @@
 import { type PromoEffect, type Promotion, type Spu, api } from '@/lib/api';
-import { useCallback, useEffect, useState } from 'react';
+import { useListPage } from '@/lib/use-list-page';
+import { useEffect, useState } from 'react';
 import { Button } from 'ui';
 import { EffectCards } from './components/effect-cards';
 import { PromoFormDialog } from './components/promo-dialog';
@@ -8,28 +9,27 @@ import { PromoTable } from './components/promo-table';
 // 优惠活动页(薄编排):页头新建入口 + 效果速览 + 活动表;新建/编辑统一走
 // PromoFormDialog 弹窗(页级单实例,promo=null 新建 / 非空编辑),组件在同目录 components/。
 export default function PromotionsPage() {
-  const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [effect, setEffect] = useState<PromoEffect | null>(null);
   const [spus, setSpus] = useState<Spu[]>([]);
-  const [msg, setMsg] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Promotion | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const body = await api.promotions.list();
-      setPromotions(body.promotions || []);
-      setEffect(body.effect || null);
-    } catch (err) {
-      setMsg(String(err));
-    }
-  }, []);
+  // 次级资源(效果速览)在 loader 闭包内就地 set(useListPage 候选④)
+  const {
+    rows: promotions,
+    msg,
+    setMsg,
+    reload,
+  } = useListPage<Promotion>(async () => {
+    const body = await api.promotions.list();
+    setEffect(body.effect || null);
+    return body.promotions || [];
+  });
 
   useEffect(() => {
-    void load();
     // SPU 选项(弹窗范围选择)与表格范围回显共用一次拉取
     void api.products.list().then((b) => setSpus(b.spus || []));
-  }, [load]);
+  }, []);
 
   const spuTitles = Object.fromEntries(spus.map((s) => [s.spu_code, s.title]));
 
@@ -59,19 +59,24 @@ export default function PromotionsPage() {
         promotions={promotions}
         spuTitles={spuTitles}
         onMsg={setMsg}
-        onChanged={() => void load()}
+        onChanged={() => void reload()}
         onEdit={openEdit}
       />
-      <PromoFormDialog
-        open={dialogOpen}
-        promo={editing}
-        spus={spus}
-        onClose={() => setDialogOpen(false)}
-        onSaved={(m) => {
-          setMsg(m);
-          void load();
-        }}
-      />
+      {/* 条件挂载(候选④统一协议):新建置 dialogOpen,编辑置 editing;卸载即重置 */}
+      {(dialogOpen || editing) && (
+        <PromoFormDialog
+          promo={editing}
+          spus={spus}
+          onClose={() => {
+            setDialogOpen(false);
+            setEditing(null);
+          }}
+          onMsg={(m) => {
+            setMsg(m);
+            void reload();
+          }}
+        />
+      )}
     </div>
   );
 }

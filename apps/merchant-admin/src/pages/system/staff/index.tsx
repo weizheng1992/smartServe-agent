@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
-import { useCallback, useEffect, useState } from 'react';
+import { useListPage } from '@/lib/use-list-page';
+import { useState } from 'react';
 import { Button } from 'ui';
 import { StaffInviteDialog } from './components/staff-invite-form';
 import { type StaffRow, StaffTable } from './components/staff-table';
@@ -7,18 +8,18 @@ import { type StaffRow, StaffTable } from './components/staff-table';
 // 员工管理:邀请(弹窗,角色下拉动态)/ 三维筛选 / 改角色 / 停用启用。
 // 页面只做编排;表单/表格/筛选逻辑拆在同目录 components|filters 下。
 export default function StaffPage() {
-  const [staff, setStaff] = useState<StaffRow[]>([]);
   const [roles, setRoles] = useState<string[]>(['finance_owner', 'sales_viewer', 'warehouse_operator']);
-  const [msg, setMsg] = useState('');
   const [inviting, setInviting] = useState(false);
-
-  const load = useCallback(async () => {
-    setStaff((await api.staff.list()).staff || []);
+  const {
+    rows: staff,
+    msg,
+    setMsg,
+    reload,
+  } = useListPage<StaffRow>(async () => {
+    // 次级资源(角色闭集)在 loader 闭包内就地 set
     setRoles((await api.roles.list()).roles.map((r) => r.role));
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
+    return (await api.staff.list()).staff || [];
+  });
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -31,14 +32,14 @@ export default function StaffPage() {
           + 邀请员工
         </Button>
       </div>
-      <StaffTable staff={staff} roles={roles} onMsg={setMsg} onChanged={() => void load()} />
+      <StaffTable staff={staff} roles={roles} onMsg={setMsg} onChanged={() => void reload()} />
       {inviting && (
         <StaffInviteDialog
           roles={roles}
           onMsg={setMsg}
           onClose={() => {
             setInviting(false);
-            void load();
+            void reload();
           }}
         />
       )}
