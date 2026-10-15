@@ -15,6 +15,17 @@ import {
   currentStaffEmail,
 } from '@/lib/api';
 import type { MessageItem } from '@/lib/api';
+import {
+  OPERATOR_DESK_CONNECT,
+  OPERATOR_DESK_NS,
+  appendOptimistic,
+  applyConversationPatch,
+  buildOptimisticMessage,
+  emitDeskAck,
+  newClientMsgId,
+  operatorDeskAuth,
+  sendOperatorMessage,
+} from '@/lib/desk-link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Socket, io } from 'socket.io-client';
 import { deriveConversationState } from './live-desk-model';
@@ -135,11 +146,9 @@ export function useLiveDesk() {
   // socket.io operator 连接(员工 JWT 必须有效且租户一致,服务端裁)
   useEffect(() => {
     if (!authToken()) return;
-    const socket = io('/ws/chat', {
-      path: '/socket.io',
-      transports: ['websocket'],
-      auth: { tenantId: TENANT_ID, userId: myEmail, role: 'operator', token: authToken() },
-      reconnection: true,
+    const socket = io(OPERATOR_DESK_NS, {
+      ...OPERATOR_DESK_CONNECT,
+      auth: operatorDeskAuth(TENANT_ID),
     });
     socketRef.current = socket;
     socket.on('connect', () => {
@@ -158,9 +167,7 @@ export function useLiveDesk() {
     // 认领/释放广播:就地更新行(threads 真源三键 status/assignedOperatorId/unreadCount)
     socket.on('conversation_state_changed', (payload: Partial<DeskConversationRow> & { threadId?: string }) => {
       if (!payload?.threadId) return;
-      setConversations((prev) =>
-        prev.map((c) => (c.threadId === payload.threadId ? ({ ...c, ...payload } as DeskConversationRow) : c)),
-      );
+      setConversations((prev) => applyConversationPatch(prev, payload.threadId!, payload));
       void loadConversations(); // 兜底对齐(排队新行/列表序变化)
     });
     // 选中会话的实时消息(顾客/同事坐席发言)
@@ -216,19 +223,10 @@ export function useLiveDesk() {
     return () => clearInterval(timer);
   }, []);
 
-  const emitAck = useCallback((event: string, payload: Record<string, unknown>): Promise<LiveDeskAck> => {
-    return new Promise((resolve) => {
-      const socket = socketRef.current;
-      if (!socket || !socket.connected) {
-        resolve({ success: false, error: '未连接实时通道,请稍候重试' });
-        return;
-      }
-      const timer = setTimeout(() => resolve({ success: false, error: '响应超时,请重试' }), ACK_TIMEOUT_MS);
-      socket.emit(event, payload, (ack: LiveDeskAck) => {
-        clearTimeout(timer);
-        resolve(ack || { success: false, error: '空响应' });
-      });
-    });
+  // ack 守卫收口 desk-link(resolve 永不 throw;未连接/超时/空响应文案随词表)
+  const emitAck = useCallback(async (event: string, payload: Record<string, unknown>): Promise<LiveDeskAck> => {
+    const r = await emitDeskAck<LiveDeskAck>(socketRef.current, event, payload, ACK_TIMEOUT_MS);
+    return r.ok ? r.ack : { success: false, error: r.error };
   }, []);
 
   const claim = useCallback(
@@ -237,11 +235,11 @@ export function useLiveDesk() {
       if (ack.success) {
         // 坐席未入房时收不到房间广播,ack 即就地更新 + 兜底重拉
         setConversations((prev) =>
-          prev.map((c) =>
-            c.threadId === threadId
-              ? { ...c, status: ack.status || 'human_takeover', assignedOperatorId: myEmail, unreadCount: 0 }
-              : c,
-          ),
+          applyConversationPatch(prev, threadId, {
+            status: ack.status || 'human_takeover',
+            assignedOperatorId: myEmail,
+            unreadCount: 0,
+          }),
         );
         void loadConversations();
       }
@@ -254,9 +252,7 @@ export function useLiveDesk() {
       const ack = await emitAck('release_takeover', { threadId, tenantId: TENANT_ID });
       if (ack.success) {
         setConversations((prev) =>
-          prev.map((c) =>
-            c.threadId === threadId ? { ...c, status: ack.status || 'active', assignedOperatorId: null } : c,
-          ),
+          applyConversationPatch(prev, threadId, { status: ack.status || 'active', assignedOperatorId: null }),
         );
         void loadConversations();
       }
@@ -278,22 +274,22 @@ export function useLiveDesk() {
       // ack 成功即整表重同步(服务端真相同 id 单行);失败/超时不盲删,重拉
       // 时间线以真源裁决(重放可能已落库,只有 ack 未达)。重放静默由服务端
       // ON CONFLICT DO NOTHING 保证,ack 恒回既有 messageId。
-      const clientMsgId =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      setTimeline((prev) =>
-        prev.some((m) => m.id === clientMsgId)
-          ? prev
-          : [...prev, { id: clientMsgId, role: 'operator', content, timestamp: new Date().toISOString() }],
+      // 幂等键/乐观行/守卫 emit/恒 resync 组合收口 desk-link(候选⑤)。
+      const clientMsgId = newClientMsgId();
+      setTimeline((prev) => appendOptimistic(prev, buildOptimisticMessage(clientMsgId, content)));
+      const { result } = await sendOperatorMessage<LiveDeskAck>(
+        {
+          socket: async () => socketRef.current,
+          threadId,
+          tenantId: TENANT_ID,
+          content,
+        },
+        () => openThread(threadId),
+        clientMsgId,
       );
-      const ack = await emitAck('send_message', { threadId, tenantId: TENANT_ID, content, clientMsgId });
-      // 发完即对齐时间线;ack 失败(含超时)同样回真源 —— 没落库则乐观行消失
-      // (回滚),落库而 ack 未达则如实显示,盲删会把已落库真消息一并抹掉。
-      await openThread(threadId);
-      return ack;
+      return result.ok ? result.ack : { success: false, error: result.error };
     },
-    [emitAck, openThread],
+    [openThread],
   );
 
   // P4 台内批驳(spec §2.6):员工代行 approve/reject 走 /api/chat/approvals,

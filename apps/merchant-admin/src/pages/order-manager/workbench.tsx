@@ -1,8 +1,18 @@
-import { api, authToken, authedFetch, currentStaffEmail } from '@/lib/api';
+import { api, authedFetch, errMsgOf } from '@/lib/api';
 import type { OrderAuditLog, OrderDetail } from '@/lib/api';
+import {
+  OPERATOR_DESK_CONNECT,
+  OPERATOR_DESK_NS,
+  type Socket,
+  appendOptimistic,
+  buildOptimisticMessage,
+  emitDeskAck,
+  newClientMsgId,
+  operatorDeskAuth,
+} from '@/lib/desk-link';
 import * as pageContext from '@/lib/page-context';
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type Socket, io } from 'socket.io-client';
+import { io } from 'socket.io-client';
 import { useApprovalMachine } from 'ui';
 import type { ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow } from './workbench.types';
 
@@ -13,16 +23,16 @@ const contains = (hay: string, q: string) => hay.toLowerCase().includes(q);
 /** P4 消息/工单显式解耦(spec §2.7):回退面坐席发言走 socket send_message,
  *  不再借道/新造审批工单 —— 此前「找 waiting 工单否则先 takeover 再 human_reply」
  *  会把普通聊天偷换为工单回复,并把转人工工单当消息通道吞掉。连接懒建:首条
- *  消息才拨号;拨号/发送失败清缓存下次重拨。clientMsgId 幂等透传(P4 §2.7)。 */
+ *  消息才拨号;拨号/发送失败清缓存下次重拨。clientMsgId 幂等透传(P4 §2.7)。
+ *  幂等键/守卫 ack/拨号共享面收口 lib/desk-link(候选⑤);拨号生命周期(模块
+ *  单例懒拨)为回退面合法所有权,保留本地。 */
 let deskSocketPromise: Promise<Socket> | null = null;
 function deskSocket(): Promise<Socket> {
   if (!deskSocketPromise) {
     deskSocketPromise = new Promise<Socket>((resolve, reject) => {
-      const socket = io('/ws/chat', {
-        path: '/socket.io',
-        transports: ['websocket'],
-        auth: { tenantId: 'aurora', userId: currentStaffEmail(), role: 'operator', token: authToken() },
-        reconnection: true,
+      const socket = io(OPERATOR_DESK_NS, {
+        ...OPERATOR_DESK_CONNECT,
+        auth: operatorDeskAuth('aurora'),
       });
       const timer = setTimeout(() => {
         // 超时同样毒化缓存:不清单例则后续发送永远 await 同一已 reject 的 promise
@@ -46,20 +56,18 @@ function deskSocket(): Promise<Socket> {
   return deskSocketPromise;
 }
 
+/** throw 语义保留(调用方 catch 即 resync):ack 守卫在 desk-link(resolve 永不
+ *  throw),本面在此转 throw —— 文案随 desk-link 统一词表。 */
 async function emitDeskMessage(threadId: string, content: string, clientMsgId: string): Promise<void> {
   const socket = await deskSocket();
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('发送响应超时,请重试')), 8_000);
-    socket.emit(
-      'send_message',
-      { threadId, tenantId: 'aurora', role: 'operator', content, clientMsgId },
-      (ack: { success: boolean; error?: string } | undefined) => {
-        clearTimeout(timer);
-        if (ack?.success) resolve();
-        else reject(new Error(ack?.error || '发送失败'));
-      },
-    );
+  const r = await emitDeskAck(socket, 'send_message', {
+    threadId,
+    tenantId: 'aurora',
+    role: 'operator',
+    content,
+    clientMsgId,
   });
+  if (!r.ok) throw new Error(r.error);
 }
 
 /** 集中式状态 hook(功能域:订单/审批/客服/审计;商品库有独立页,不再入工作台)。
@@ -285,20 +293,11 @@ export function useWorkbenchState(initialTab: string) {
 
     // Optimistic append(P1:坐席消息落 role='operator',无前缀;P4 起走
     // socket send_message 直发,消息与工单彻底解耦 —— 不再吞 waiting 工单
-    // 当回复通道,也不再为发一条消息暗造接管工单)
-    const clientMsgId =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        // 服务端幂等键正则 ^[0-9a-zA-Z-]{8,64}$(realtime.py:34):此前下划线分隔
-        // 被静默剥成空串换发服务端 uuid,randomUUID 不可用的环境下幂等键整个丢失
-        : `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const optMsg: MessageItem = {
-      id: clientMsgId,
-      role: 'operator',
-      content: msg,
-      timestamp: new Date().toISOString(),
-    };
-    setActiveThreadMessages((prev) => (prev.some((m) => m.id === clientMsgId) ? prev : [...prev, optMsg]));
+    // 当回复通道,也不再为发一条消息暗造接管工单)。幂等键/乐观行构造走
+    // lib/desk-link 单点(候选⑤:fallback 下划线违正则的实弹自此绝源)
+    const clientMsgId = newClientMsgId();
+    const optMsg = buildOptimisticMessage(clientMsgId, msg);
+    setActiveThreadMessages((prev) => appendOptimistic(prev, optMsg));
 
     try {
       await emitDeskMessage(activeThreadId, msg, clientMsgId);
