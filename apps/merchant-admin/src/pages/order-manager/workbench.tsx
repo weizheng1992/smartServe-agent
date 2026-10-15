@@ -24,7 +24,13 @@ function deskSocket(): Promise<Socket> {
         auth: { tenantId: 'aurora', userId: currentStaffEmail(), role: 'operator', token: authToken() },
         reconnection: true,
       });
-      const timer = setTimeout(() => reject(new Error('实时通道连接超时')), 8_000);
+      const timer = setTimeout(() => {
+        // 超时同样毒化缓存:不清单例则后续发送永远 await 同一已 reject 的 promise
+        //(整页刷新前所有发送必败),socket 也成了无人消费的孤儿重连器
+        deskSocketPromise = null;
+        socket.close();
+        reject(new Error('实时通道连接超时'));
+      }, 8_000);
       socket.on('connect', () => {
         clearTimeout(timer);
         resolve(socket);
@@ -281,9 +287,11 @@ export function useWorkbenchState(initialTab: string) {
     // socket send_message 直发,消息与工单彻底解耦 —— 不再吞 waiting 工单
     // 当回复通道,也不再为发一条消息暗造接管工单)
     const clientMsgId =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
-        : `opt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        // 服务端幂等键正则 ^[0-9a-zA-Z-]{8,64}$(realtime.py:34):此前下划线分隔
+        // 被静默剥成空串换发服务端 uuid,randomUUID 不可用的环境下幂等键整个丢失
+        : `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const optMsg: MessageItem = {
       id: clientMsgId,
       role: 'operator',
