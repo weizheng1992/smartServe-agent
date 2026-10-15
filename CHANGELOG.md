@@ -4,6 +4,30 @@
 
 ---
 
+## [2.13.0] - 2026-10-15 (多商户租户闸批次收口 + SPI fail-closed + dev 启动自检闸;merchant-admin 架构审查候选①-⑤ 范式收敛)
+
+### ✨ Features
+
+- **本地 embedding 换 fastembed/ONNX**(408d953,nightly 台账 #1):两线程并发 encode 整进程 SIGSEGV 的 torch 竞态根治——embedding 后端整体换装 fastembed/ONNX 本地推理,`get_embedding_model()` 串行护栏保留为纵深;`test_embedding_concurrency` 扩例 + `test_embedding_local_backend` 真后端钉面。
+- **dev 启动自检闸 + 进程版本戳**(5420db1 + 3d58993,nightly 台账 #3/#9):`scripts/dev_preflight.py` 启动前置四闸——深模块真导入(uvicorn --reload 不监视 engine_py 的盲区)、PG/Redis 存活探活进启动闸;`version_stamp.py` 版本戳识别过期/半成品进程,启动事故从「实跑时炸」前移到「启动即拒」。
+
+### 🔧 Refactoring
+
+- **merchant.py 夜评拆缝**(a3aaa32):994 → 723 行——/spi/v1 合同面成册 `store_spi.py`、促销领券面成册 `merchant_promotions.py`,路由路径零变化(契约面同数钉死)。
+- **merchant-admin 架构审查候选①-⑤ 落地**(fbdb934 / aa6c04b / 02cb184 / 32ea113 / 33e1757 + 8927906):「Ask 会话」四表面收敛 ask-session 单点 + 帧类型归册;transport 归一 `requestJson` 唯一收口 + `errMsgOf` 错误键单点 + conversations adapter;数据诚实律与领域词汇模块化(`fmtMoney` 变参/`ORDER_STATUS_META` 正典表/`OptionalSelect` 哨兵/vocab 单点);CRUD 范式收口 `FormDialogShell` + `useListPage`;坐席发送不变量单点 `lib/desk-link.ts` 五纯导出新旧两面接线 + OrderWorkbench 数据面裁剪(scope 进 hook/3s 轮询守卫/死 chrome 条件挂载)。
+
+### 🐛 Fixes
+
+- **多商户租户闸批次收口**(cbb7df9,nightly 10-13/14 遗留):促销域活动谓词恒在(`fetch_active_promos` 补 business 过滤)+ 三条前台路由收参;admin 订单链属主闸(发货/详情/dashboard);`store_order_detail` IDOR 补闸;`merchant_orders` 落 business_id 列闭环(`insert_merchant_order` 写列)。
+- **SPI 合同面 fail-closed 三项**(5bcede3,nightly 10-14 🟡🟢):兜底密钥硬编码废除只认 env;限流从审批面移挂真合同面;analytics aurora 兜底微型复发清理。
+- **LlmQuotaError 三义分类 + 余额不足快败**(98ffee3,nightly 台账 #2):降级文案按配额/熔断/超时三义归臂,余额不足走独立降级臂快败不再空转重试。
+- **merchant-admin 实弹批**:快修五连(31c1d11:抽屉驳回吞原因/订单金额裸奔/低库存阈值双 50/staffSwitch 401 洞/死 save);旧面坐席发送两实弹(f9e945a:fallback clientMsgId 违反服务端正则 + 拨号超时毒化单例);终审工作流五闸收口(8c538e8:ask 非 2xx ok 闸/悬浮路由冻结/reports success 闸/看板诚实空闸/全屏 pending 分支);报告页「生成报告」失败如实呈现(6197034);路由守卫菜单驱动 + ask 恢复面两处补齐(497ef52)。
+- **merchant-admin E2E 网关自拉路径修正**(62df5fa):webServer cwd=config 目录(e2e/),三级向上 + env-file 相对路径配套核对,4000 未常驻时自拉不再必炸。
+
+### 🧪 Tests
+
+- 同批契约扩员:租户闸三册(`test_order_chain_tenant` 新册 / `test_store_promotions_tenant` / `test_spi_signature_and_tenant_gates` 扩)+ `test_version_stamp`;引擎侧 `test_llm_resilience` 新册 + `test_promotion_engine`/`test_promotion_skill` 扩例 + `test_phase2_checkout_bridge` 播种对齐。
+
 ## [2.12.0] - 2026-10-14 (流可靠性战役主链落地:回复打断 S2 三票贯通 + 检索直评 S3 + 多租户收口 S5;商户面单机编排场景 B)
 
 ### ✨ Features
