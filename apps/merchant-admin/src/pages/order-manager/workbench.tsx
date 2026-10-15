@@ -18,6 +18,10 @@ import type { ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow
 
 export type { ApprovalItem, AuditLogRow, ConversationItem, MessageItem, OrderRow };
 
+/** 工作台范围(与菜单一一对应):orders=订单;approvals=纯待办;live-desk=聊天+待办;
+ *  spi-logs=审计流水。真源在 workbench.tsx,index.tsx 再导出(App 路由传入)。 */
+export type WorkbenchScope = 'orders' | 'approvals' | 'live-desk' | 'spi-logs';
+
 const contains = (hay: string, q: string) => hay.toLowerCase().includes(q);
 
 /** P4 消息/工单显式解耦(spec §2.7):回退面坐席发言走 socket send_message,
@@ -71,8 +75,13 @@ async function emitDeskMessage(threadId: string, content: string, clientMsgId: s
 }
 
 /** 集中式状态 hook(功能域:订单/审批/客服/审计;商品库有独立页,不再入工作台)。
- *  派生集合(计数/过滤)useMemo 化:任一 state 变化不再整树逐项重算。 */
-export function useWorkbenchState(initialTab: string) {
+ *  派生集合(计数/过滤)useMemo 化:任一 state 变化不再整树逐项重算。
+ *  scope 数据面裁剪(2026-10-15 候选⑤):此前 scope-blind 三连拉 —— 访问
+ *  /spi-logs 也 8s 轮询订单+审批+会话,且 3s 消息轮询在任意 scope 自启
+ *  (conversations 载荷一到就自动选首线程);现在只拉本 scope 消费的域。 */
+export function useWorkbenchState(scope: WorkbenchScope) {
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const [orders, setOrders] = useState<OrderRow[]>([]);
   // PageContext(19-D3,T5 翻新):勾选订单 → 内存广播库(类型标记 order),
   // 悬浮 agent 实时订阅;不再写 localStorage(残留会静默污染查询)
@@ -90,7 +99,6 @@ export function useWorkbenchState(initialTab: string) {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [activeThreadMessages, setActiveThreadMessages] = useState<MessageItem[]>([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [loading, setLoading] = useState(true);
 
   // Filters & Searches
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>('ALL');
@@ -103,7 +111,6 @@ export function useWorkbenchState(initialTab: string) {
   const [liveDeskStatusFilter, setLiveDeskStatusFilter] = useState<'ALL' | 'takeover' | 'ai'>('ALL');
   const [liveDeskSearchQuery, setLiveDeskSearchQuery] = useState<string>('');
 
-  const [spiActionFilter, setSpiActionFilter] = useState<string>('ALL');
   const [spiSearchQuery, setSpiSearchQuery] = useState<string>('');
 
   // Modals & Drawers state
@@ -129,7 +136,6 @@ export function useWorkbenchState(initialTab: string) {
   // 不再随会话切换重建,8s 轮询间隔不被反复 clearInterval;首载完成后不再置
   // loading,后台轮询刷新不闪整页骨架。
   const activeThreadIdRef = useRef<string | null>(null);
-  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
@@ -152,14 +158,12 @@ export function useWorkbenchState(initialTab: string) {
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      if (!hasLoadedRef.current) {
-        setLoading(true);
-      }
       // 单域失败不拖垮面板:各自 catch 落 null,成功的域照常渲染
+      const scope = scopeRef.current;
       const [orderData, appData, convData] = await Promise.all([
-        api.orders.list().catch(() => null),
-        api.approvals.list().catch(() => null),
-        api.conversations.list().catch(() => null),
+        scope === 'orders' || scope === 'spi-logs' ? api.orders.list().catch(() => null) : Promise.resolve(null),
+        scope === 'approvals' || scope === 'live-desk' ? api.approvals.list().catch(() => null) : Promise.resolve(null),
+        scope === 'live-desk' ? api.conversations.list().catch(() => null) : Promise.resolve(null),
       ]);
 
       if (orderData?.success) {
@@ -183,9 +187,6 @@ export function useWorkbenchState(initialTab: string) {
       }
     } catch (err) {
       console.error('Failed to fetch merchant admin data:', err);
-    } finally {
-      hasLoadedRef.current = true;
-      setLoading(false);
     }
   }, [loadConversationMessages]);
 
@@ -196,11 +197,12 @@ export function useWorkbenchState(initialTab: string) {
   }, [fetchDashboardData]);
 
   useEffect(() => {
-    if (activeThreadId) {
-      loadConversationMessages(activeThreadId);
-      const interval = setInterval(() => loadConversationMessages(activeThreadId), 3000);
-      return () => clearInterval(interval);
-    }
+    // 3s 时间线轮询仅 live-desk 面(候选⑤:此前 conversations 载荷一到位就
+    // 自动选首线程,任意 scope 都会自启 3s 轮询 —— /orders /spi-logs 全中招)
+    if (scopeRef.current !== 'live-desk' || !activeThreadId) return;
+    loadConversationMessages(activeThreadId);
+    const interval = setInterval(() => loadConversationMessages(activeThreadId), 3000);
+    return () => clearInterval(interval);
   }, [activeThreadId, loadConversationMessages]);
 
   // 仅末条消息变化时滚动:数组身份每轮轮询都重建,拿它当触发器会在内容
@@ -364,7 +366,6 @@ export function useWorkbenchState(initialTab: string) {
   }, []);
 
   // ---- 派生:计数与各域过滤集(useMemo;过滤谓词纯函数内聚在本 hook) ----
-  const pendingApprovalsCount = useMemo(() => approvals.filter((a) => a.status === 'waiting').length, [approvals]);
   const paidOrdersCount = useMemo(() => orders.filter((o) => o.status === 'PAID').length, [orders]);
   const shippedOrdersCount = useMemo(() => orders.filter((o) => o.status === 'SHIPPED').length, [orders]);
   const refundedOrdersCount = useMemo(() => orders.filter((o) => o.status === 'REFUNDED').length, [orders]);
@@ -404,31 +405,25 @@ export function useWorkbenchState(initialTab: string) {
   const filteredAuditLogs = useMemo(
     () =>
       auditLogs.filter((log) => {
-        if (spiActionFilter !== 'ALL' && log.action_type !== spiActionFilter) return false;
         if (spiSearchQuery.trim()) {
           const q = spiSearchQuery.toLowerCase().trim();
           if (!contains(`${log.id} ${log.order_id} ${log.action_type} ${log.idempotency_key}`, q)) return false;
         }
         return true;
       }),
-    [auditLogs, spiActionFilter, spiSearchQuery],
+    [auditLogs, spiSearchQuery],
   );
 
   return {
     orders,
     auditLogs,
     approvals,
-    setApprovals,
     conversations,
-    setConversations,
     activeThreadId,
     setActiveThreadId,
     activeThreadMessages,
-    setActiveThreadMessages,
     inputMessage,
     setInputMessage,
-    loading,
-    setLoading,
     orderStatusFilter,
     setOrderStatusFilter,
     orderSearchQuery,
@@ -443,8 +438,6 @@ export function useWorkbenchState(initialTab: string) {
     setLiveDeskStatusFilter,
     liveDeskSearchQuery,
     setLiveDeskSearchQuery,
-    spiActionFilter,
-    setSpiActionFilter,
     spiSearchQuery,
     setSpiSearchQuery,
     shippingOrderId,
@@ -479,8 +472,6 @@ export function useWorkbenchState(initialTab: string) {
     toggleOrderSelection,
     submittingActionId,
     setRejectionReasons,
-    executeApprovalAction,
-    executeHumanReplyAction,
     loadConversationMessages,
     fetchDashboardData,
     handleApprovalAction,
@@ -489,7 +480,6 @@ export function useWorkbenchState(initialTab: string) {
     handleRelease,
     handleSendMessage,
     handleShipOrder,
-    pendingApprovalsCount,
     paidOrdersCount,
     shippedOrdersCount,
     refundedOrdersCount,

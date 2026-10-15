@@ -7,21 +7,12 @@ import { PayloadDialog } from './components/payload-dialog';
 import { RejectDialog } from './components/reject-dialog';
 import { ShipDialog } from './components/ship-dialog';
 import { SpiLogsTab } from './components/spi-logs-tab';
-import { WorkbenchProvider, useWorkbench, useWorkbenchState } from './workbench';
+import { WorkbenchProvider, type WorkbenchScope, useWorkbench, useWorkbenchState } from './workbench';
 
-/** 工作台范围(与菜单一一对应,各渲染各的):
- *  orders=订单列表;approvals=纯待办审核;live-desk=在线聊天+待办审核;spi-logs=审计流水。 */
-export type WorkbenchScope = 'orders' | 'approvals' | 'live-desk' | 'spi-logs';
-
-const PRIMARY_TAB: Record<WorkbenchScope, string> = {
-  orders: 'orders',
-  approvals: 'approvals',
-  'live-desk': 'live_desk',
-  'spi-logs': 'spi_logs',
-};
+export type { WorkbenchScope };
 
 export default function OrderWorkbench({ scope = 'orders' }: { scope?: WorkbenchScope }) {
-  const w = useWorkbenchState(PRIMARY_TAB[scope]);
+  const w = useWorkbenchState(scope);
   return (
     <WorkbenchProvider value={w}>
       <WorkbenchShell scope={scope} />
@@ -29,7 +20,8 @@ export default function OrderWorkbench({ scope = 'orders' }: { scope?: Workbench
   );
 }
 
-/** 薄壳:按 scope 渲染对应功能域(数据仍共享同一轮询上下文),弹窗与抽屉常挂。 */
+/** 薄壳:按 scope 渲染对应功能域与对应弹窗(候选⑤:死 chrome 不常挂 ——
+ *  此前五个弹窗/抽屉全 scope 常驻,/spi-logs 也挂着永远打不开的 ShipDialog)。 */
 function WorkbenchShell({ scope }: { scope: WorkbenchScope }) {
   const { inspectingApproval, setInspectingApproval, handleApprovalAction, handleHumanReply } = useWorkbench();
 
@@ -47,29 +39,33 @@ function WorkbenchShell({ scope }: { scope: WorkbenchScope }) {
         {scope === 'spi-logs' && <SpiLogsTab />}
       </div>
 
-      {/* 审核上下文抽屉 */}
-      <ApprovalContextDrawer
-        isOpen={Boolean(inspectingApproval)}
-        onClose={() => setInspectingApproval(null)}
-        approval={inspectingApproval as any}
-        onApprove={async (id) => {
-          await handleApprovalAction(id, 'approve');
-        }}
-        onReject={async (id, reason) => {
-          // 驳回原因直传 explicitReason(工单 04 同病灶的抽屉版收口):旧形先写
-          // setRejectionReasons 再调用,state 异步更新使 executeApprovalAction
-          // 闭包读到旧 map,用户填写的原因被吞成兜底文案(与 RejectDialog 同修法)
-          await handleApprovalAction(id, 'reject', reason);
-        }}
-        onHumanReply={async (id, replyMsg, isFinish) => {
-          await handleHumanReply(id, replyMsg, isFinish);
-        }}
-      />
+      {/* 审核上下文抽屉(仅审批/聊天两域可达) */}
+      {(scope === 'approvals' || scope === 'live-desk') && (
+        <ApprovalContextDrawer
+          isOpen={Boolean(inspectingApproval)}
+          onClose={() => setInspectingApproval(null)}
+          approval={inspectingApproval as any}
+          onApprove={async (id) => {
+            await handleApprovalAction(id, 'approve');
+          }}
+          onReject={async (id, reason) => {
+            // 驳回原因直传 explicitReason(工单 04 同病灶的抽屉版收口,快修五连)
+            await handleApprovalAction(id, 'reject', reason);
+          }}
+          onHumanReply={async (id, replyMsg, isFinish) => {
+            await handleHumanReply(id, replyMsg, isFinish);
+          }}
+        />
+      )}
+      {(scope === 'approvals' || scope === 'live-desk') && <RejectDialog />}
 
-      <ShipDialog />
-      <OrderDetailDrawer />
-      <PayloadDialog />
-      <RejectDialog />
+      {scope === 'orders' && (
+        <>
+          <ShipDialog />
+          <OrderDetailDrawer />
+        </>
+      )}
+      {scope === 'spi-logs' && <PayloadDialog />}
     </div>
   );
 }

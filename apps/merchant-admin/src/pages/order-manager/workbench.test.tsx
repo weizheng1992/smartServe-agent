@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import { act } from 'react';
-import { describe, expect, it, vi } from 'vitest';
-import { useWorkbenchState } from './workbench';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type WorkbenchScope, useWorkbenchState } from './workbench';
 
 // 审批原因直传契约钉(2026-10-15 快修):handleApprovalAction(id, 'reject', reason)
 // 必须把用户填写的原因放进 POST body —— 此前审批抽屉 onReject 先写
@@ -81,15 +81,84 @@ mocks.approvalsList.mockResolvedValue({ success: true, approvals: [] });
 mocks.convsList.mockResolvedValue(ONE_CONV);
 mocks.convsMessages.mockResolvedValue({ success: true, data: { messages: [] } });
 
-function Harness({ onReady }: { onReady: (w: ReturnType<typeof useWorkbenchState>) => void }) {
-  const w = useWorkbenchState('approvals');
+function Harness({
+  onReady,
+  scope = 'approvals',
+}: { onReady: (w: ReturnType<typeof useWorkbenchState>) => void; scope?: WorkbenchScope }) {
+  const w = useWorkbenchState(scope);
   onReady(w);
   return null;
 }
 
+// scope 数据面裁剪钉(候选⑤):此前 scope-blind 三连拉 + 3s 消息轮询任意 scope
+// 自启(spi-logs 审计页三端点只消费半个、/orders 自启 3s 幽灵轮询)。每钉先
+// mockClear,断言「该拉的叫了、不该拉的一次都没有」。
+describe('workbench scope 数据面裁剪', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mocks.ordersList.mockClear();
+    mocks.approvalsList.mockClear();
+    mocks.convsList.mockClear();
+    mocks.convsMessages.mockClear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('scope=orders:只拉订单域,审批/会话零请求,3s 消息轮询不自启;8s 轮询在跑且卸载即停', async () => {
+    const { unmount } = render(<Harness scope="orders" onReady={() => {}} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.ordersList).toHaveBeenCalledTimes(1);
+    expect(mocks.approvalsList).not.toHaveBeenCalled();
+    expect(mocks.convsList).not.toHaveBeenCalled();
+    expect(mocks.convsMessages).not.toHaveBeenCalled(); // 幽灵轮询绝迹
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(mocks.ordersList).toHaveBeenCalledTimes(2); // 8s 轮询在跑
+
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000);
+    });
+    expect(mocks.ordersList).toHaveBeenCalledTimes(2); // 卸载即停
+  });
+
+  it('scope=spi-logs:审计页只消费 orders 的 auditLogs 半边,审批/会话/消息零请求', async () => {
+    render(<Harness scope="spi-logs" onReady={() => {}} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.ordersList).toHaveBeenCalledTimes(1);
+    expect(mocks.approvalsList).not.toHaveBeenCalled();
+    expect(mocks.convsList).not.toHaveBeenCalled();
+    expect(mocks.convsMessages).not.toHaveBeenCalled();
+  });
+
+  it('scope=live-desk:审批+会话两域拉取,首线程自选后 3s 时间线轮询就位', async () => {
+    render(<Harness scope="live-desk" onReady={() => {}} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.approvalsList).toHaveBeenCalledTimes(1);
+    expect(mocks.convsList).toHaveBeenCalledTimes(1);
+    // 时间线拉两趟是既有行为:首线程自选一趟 + 3s 轮询 effect 挂载即跑一趟
+    expect(mocks.convsMessages).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(mocks.convsMessages).toHaveBeenCalledTimes(3); // +3s 轮询一次
+  });
+});
+
 async function mountWithActiveThread(onReady: (w: ReturnType<typeof useWorkbenchState>) => void) {
   const spy = vi.fn(onReady);
-  render(<Harness onReady={spy} />);
+  // 发送前提是 activeThreadId 就位 —— 仅 live-desk scope 拉会话(候选⑤裁剪)
+  render(<Harness scope="live-desk" onReady={spy} />);
   await vi.waitFor(() => expect(mocks.convsList).toHaveBeenCalled());
   // 自动选中首个会话(activeThreadId 就位)后才可发送
   await vi.waitFor(() =>
@@ -101,7 +170,8 @@ describe('workbench 审批动作(驳回原因契约)', () => {
   it('handleApprovalAction 直传 explicitReason:用户填写的原因原样进 POST body', async () => {
     let w!: ReturnType<typeof useWorkbenchState>;
     render(<Harness onReady={(x) => (w = x)} />);
-    await vi.waitFor(() => expect(mocks.ordersList).toHaveBeenCalled());
+    // scope=approvals 不拉订单域(候选⑤裁剪):挂载信号换审批列表
+    await vi.waitFor(() => expect(mocks.approvalsList).toHaveBeenCalled());
 
     mocks.authedFetch.mockResolvedValue(emptyOk);
     await act(async () => {
@@ -120,7 +190,7 @@ describe('workbench 审批动作(驳回原因契约)', () => {
   it('未填原因:机器兜底文案仍在(不空串)', async () => {
     let w!: ReturnType<typeof useWorkbenchState>;
     render(<Harness onReady={(x) => (w = x)} />);
-    await vi.waitFor(() => expect(mocks.ordersList).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mocks.approvalsList).toHaveBeenCalled());
 
     mocks.authedFetch.mockResolvedValue(emptyOk);
     await act(async () => {
@@ -140,17 +210,19 @@ describe('workbench 坐席发送(旧面不变量,候选⑤补钉)', () => {
   // 顺序即隔离:毒化用例消费文件初始的干净单例,fallback 用例复用其换签后的缓存 socket
   // (vi.resetModules 会复制 React 两份,跨拷贝 act 互不认领 —— 不走模块重置)
   it('拨号 8s 超时不再毒化单例:超时后下一次发送重新拨号可成功', async () => {
+    // 顺序即隔离:本用例是发送 describe 的首用例,deskSocketPromise 单例此刻必为
+    // 干净初始态(scope/approval 用例不拨号);不走 vi.resetModules —— 模块重置
+    // 会复制 React 两份,跨拷贝 act 互不认领,activeThreadId 永不就位
     vi.useFakeTimers();
     try {
       let fw!: ReturnType<typeof useWorkbenchState>;
       act(() => {
-        render(<Harness onReady={(x) => (fw = x)} />);
+        render(<Harness scope="live-desk" onReady={(x) => (fw = x)} />);
       });
-      // 挂载拉取 + 首线程自选(纯微任务,advance(0) 冲一次即可)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(fw.activeThreadId).toBe('t-1');
+      await vi.waitFor(() => expect(fw.activeThreadId).toBe('t-1'));
 
       // 第一次发送:假 socket 永不 connect → 8s 拨号超时
       await act(async () => {
@@ -193,9 +265,14 @@ describe('workbench 坐席发送(旧面不变量,候选⑤补钉)', () => {
     const original = (globalThis.crypto as { randomUUID?: () => string }).randomUUID;
     Object.defineProperty(globalThis.crypto, 'randomUUID', { value: undefined, configurable: true });
     try {
-      await act(async () => {
+      const sendP = act(async () => {
         await w.handleSendMessage('你好');
       });
+      // 单例缓存自毒化用例的第二次拨号:复用缓存不再新拨(instances 不增),
+      // 缓存 socket 已连接,emit 即 ack(否则 8s 真等待)
+      await vi.waitFor(() => expect(socketMocks.instances).toHaveLength(2));
+      socketMocks.instances.at(-1)!.__connect();
+      await sendP;
     } finally {
       Object.defineProperty(globalThis.crypto, 'randomUUID', { value: original, configurable: true });
     }
