@@ -1,4 +1,5 @@
 import { type Customer, type CustomerCoupon, api } from '@/lib/api';
+import { fmtMoney, orderStatusMeta } from '@/lib/format';
 import { getSelection, setSelectionKind } from '@/lib/page-context';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -24,13 +25,7 @@ interface Props {
   onClose: () => void;
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  PAID: '待发货',
-  SHIPPED: '已发货',
-  DELIVERED: '已送达',
-  REFUNDED: '已退款',
-  COMPLETED: '已完成',
-};
+const STATUS_LABEL = (status: string) => orderStatusMeta(status).label;
 
 /** 客户详情抽屉:基本信息 + 只读地址簿 + 关联优惠券 + 关联订单(跳转并勾选)。 */
 export function CustomerDetailDrawer({ customer, onClose }: Props) {
@@ -142,8 +137,8 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
             >
               <div>
                 <span className="font-mono text-zinc-700">{o.order_id}</span>
-                <span className="ml-2 text-zinc-500">{STATUS_LABEL[o.status] || o.status}</span>
-                <span className="ml-2">¥{o.total_amount}</span>
+                <span className="ml-2 text-zinc-500">{STATUS_LABEL(o.status)}</span>
+                <span className="ml-2">¥{fmtMoney(o.total_amount)}</span>
               </div>
               <Button size="sm" variant="ghost" onClick={() => openOrder(o.order_id)}>
                 在订单中查看

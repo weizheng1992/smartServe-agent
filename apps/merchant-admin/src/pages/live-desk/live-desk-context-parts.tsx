@@ -1,4 +1,5 @@
 import type { DeskNoteItem, LiveDeskContext } from '@/lib/api';
+import { fmtMoney } from '@/lib/format';
 // 坐席上下文栏渲染件(live-desk-rework P3,spec §2.4 五项):
 // 客户档案 / 最近订单 / 售后工单 / 双层画像 / 内部备注,堆叠可折叠。
 // 诚实纪律:弱关联未匹配照实呈现(spec 核实结论:聊天身份与商户客户
@@ -14,8 +15,7 @@ export function fmtTime(iso: string | null | undefined): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-const fmtMoney = (n: number) => `¥${Number(n).toFixed(2).replace(/\.00$/, '')}`;
-
+// 金额呈现走 lib/format.fmtMoney 单点;本栏紧凑场景统一传 trim=true(去整 .00)
 export function ContextSection({
   title,
   testId,
@@ -88,7 +88,7 @@ export function ContextCustomer({ context }: { context: LiveDeskContext }) {
       <div className="text-zinc-500">手机 {c.phoneMasked || '—'}</div>
       {c.email ? <div className="text-zinc-500">{c.email}</div> : null}
       <div className="text-zinc-500">
-        累计消费 {fmtMoney(c.totalSpent || 0)} · {c.orderCount ?? 0} 单
+        累计消费 ¥{fmtMoney(c.totalSpent || 0, true)} · {c.orderCount ?? 0} 单
       </div>
     </div>
   );
@@ -103,7 +103,7 @@ export function ContextOrders({ context }: { context: LiveDeskContext }) {
         <div key={o.orderId} className="flex items-center justify-between text-[11px]" data-testid="ctx-order-row">
           <span className="min-w-0 truncate text-zinc-600">{o.orderId}</span>
           <span className="ml-2 shrink-0 text-zinc-400">
-            {o.status} · {fmtMoney(o.totalAmount)} · {fmtTime(o.createdAt)}
+            {o.status} · ¥{fmtMoney(o.totalAmount, true)} · {fmtTime(o.createdAt)}
           </span>
         </div>
       ))}
@@ -122,7 +122,7 @@ export function ContextTickets({ context }: { context: LiveDeskContext }) {
           <span className="text-zinc-400"> · {t.reason}</span>
           <span className="float-right text-zinc-400">
             {t.status}
-            {t.refundAmount ? ` · ${fmtMoney(t.refundAmount)}` : ''}
+            {t.refundAmount ? ` · ¥${fmtMoney(t.refundAmount, true)}` : ''}
           </span>
         </div>
       ))}

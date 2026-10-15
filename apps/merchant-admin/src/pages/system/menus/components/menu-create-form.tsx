@@ -1,3 +1,4 @@
+import { OptionalSelect } from '@/components/optional-select';
 import { type MenuNode, api } from '@/lib/api';
 import { useState } from 'react';
 import {
@@ -16,9 +17,6 @@ import {
   SelectValue,
 } from 'ui';
 
-/** Radix SelectItem 禁空串:「作为顶级」(parentId='')的哨兵值。 */
-const ROOT = '__root__';
-
 interface Props {
   menus: MenuNode[];
   onMsg: (m: string) => void;
@@ -28,7 +26,7 @@ interface Props {
 const EMPTY = { name: '', menuType: 'menu', route: '', parentId: '', permCode: '' };
 
 /** 新增菜单/按钮弹窗:按钮型需权限点(即角色管理页可勾选的接口权限);
- * 父级空值走 __root__ 哨兵(onValueChange 单点映射回 null 提交)。 */
+ * 父级空值走 OptionalSelect(onChange 直收 '',提交前映射 null)。 */
 export function MenuCreateDialog({ menus, onMsg, onClose }: Props) {
   const [form, setForm] = useState(EMPTY);
 
@@ -111,26 +109,15 @@ export function MenuCreateDialog({ menus, onMsg, onClose }: Props) {
             <Label htmlFor="menu-parent" className="mb-1.5 block text-zinc-700">
               父级
             </Label>
-            <Select
-              value={form.parentId || ROOT}
-              onValueChange={(v) => setForm({ ...form, parentId: v === ROOT ? '' : v })}
-            >
-              <SelectTrigger
-                id="menu-parent"
-                aria-label="父级"
-                className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ROOT}>作为顶级</SelectItem>
-                {menus.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    {d.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <OptionalSelect
+              value={form.parentId}
+              onChange={(v) => setForm({ ...form, parentId: v })}
+              options={menus.map((d) => ({ value: d.id, label: d.name }))}
+              emptyLabel="作为顶级"
+              id="menu-parent"
+              ariaLabel="父级"
+              className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2"
+            />
           </div>
         </div>
         <DialogFooter className="gap-2 pt-3 sm:gap-0 border-t border-zinc-100">

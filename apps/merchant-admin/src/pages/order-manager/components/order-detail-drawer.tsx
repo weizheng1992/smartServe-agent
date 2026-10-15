@@ -1,4 +1,5 @@
 import type { OrderAuditLog } from '@/lib/api';
+import { fmtMoney, orderStatusMeta } from '@/lib/format';
 import { Badge, Button } from 'ui';
 import { useWorkbench } from '../workbench';
 
@@ -68,10 +69,11 @@ export function OrderDetailDrawer() {
                     <span>{it.specSummary || '—'}</span>
                     <span>
                       {/* price 可空(DB 无价,DTO price: number | null):缺值诚实「—」,
-                          ?? 0 会把缺价渲染成假 ¥0.00(merchant-admin.md §1.4 纪律) */}
-                      {it.price == null ? '—' : `¥${it.price.toFixed(2)}`} × {it.quantity}
+                          ?? 0 会把缺价渲染成假 ¥0.00(merchant-admin.md §1.4 纪律;
+                          fmtMoney 单点 lib/format) */}
+                      {it.price == null ? '—' : `¥${fmtMoney(it.price)}`} × {it.quantity}
                       <span className="ml-2 font-semibold text-zinc-700">
-                        小计 {it.price == null ? '—' : `¥${(it.price * it.quantity).toFixed(2)}`}
+                        小计 {it.price == null ? '—' : `¥${fmtMoney(it.price * it.quantity)}`}
                       </span>
                     </span>
                   </div>
@@ -126,13 +128,7 @@ export function OrderDetailDrawer() {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; cls: string }> = {
-    PAID: { label: '待发货', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
-    SHIPPED: { label: '已发货', cls: 'bg-blue-100 text-blue-800 border-blue-200' },
-    DELIVERED: { label: '已签收', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-    REFUNDED: { label: '已退款', cls: 'bg-purple-100 text-purple-800 border-purple-200' },
-  };
-  const s = map[status] || { label: status, cls: 'bg-slate-100 text-slate-800 border-slate-200' };
+  const s = orderStatusMeta(status);
   return (
     <Badge variant="outline" className={`${s.cls} font-bold`}>
       {s.label}
@@ -161,8 +157,8 @@ function AmountCell({
           strong ? 'text-zinc-900' : muted ? 'text-zinc-500 line-through' : accent ? 'text-rose-600' : 'text-zinc-700'
         }`}
       >
-        {/* 合同漂移防护:非数值(undefined/null/NaN)诚实「—」,不崩不画假 ¥0.00 */}
-        {Number.isFinite(value) ? `¥${value.toFixed(2)}` : '—'}
+        {/* 合同漂移防护:非数值(undefined/null/NaN)诚实「—」,不崩不画假 ¥0.00(fmtMoney 单点) */}
+        {`¥${fmtMoney(value)}`}
       </div>
     </div>
   );

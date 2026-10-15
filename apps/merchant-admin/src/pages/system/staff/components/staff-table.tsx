@@ -6,15 +6,13 @@ import {
   DenseTableHeader,
   DenseTableRow,
 } from '@/components/dense-table';
+import { OptionalSelect } from '@/components/optional-select';
 import { api } from '@/lib/api';
 import { useState } from 'react';
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 import { type StaffFilter, type StaffStatusFilter, filterStaff } from '../filters';
 import { ROLE_LABEL } from './role-label';
-
-/** Radix SelectItem 禁空串:「未分配/未定级」(dept/level='')的哨兵值,
- *  onValueChange 单点映射回 '' —— 哨兵严禁进 API payload。 */
-const UNSET = '__unset__';
+import { DEPTS, LEVELS } from './vocab';
 
 export interface StaffRow {
   id: string;
@@ -42,9 +40,7 @@ const STATUS_FILTERS: Array<{ key: StaffStatusFilter; label: string }> = [
 
 const roleLabel = (r: string) => ROLE_LABEL[r] || r;
 
-// 部门/职级闭集(0019 人事属性;展示与责任人路由消费,不参与 RBAC 判定)。
-const DEPTS = ['销售部', '运营部', '售后部', '财务部', '仓储部'];
-const LEVELS = ['店长', '主管', '专员'];
+// 部门/职级闭集(0019)收口 ./vocab(与邀请弹窗同源,此前两份)
 
 /** 员工表:关键词(姓名/邮箱)+ 角色 + 状态三维筛选;角色改即存;停用有服务端护栏。 */
 export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
@@ -121,41 +117,23 @@ export function StaffTable({ staff, roles, onMsg, onChanged }: Props) {
                 <span className="ml-2 text-[11px] text-zinc-400">{s.email}</span>
               </DenseTableCell>
               <DenseTableCell>
-                <Select value={s.dept || UNSET} onValueChange={(v) => void patch(s.id, { dept: v === UNSET ? '' : v })}>
-                  <SelectTrigger
-                    aria-label={`部门:${s.displayName}`}
-                    className="mb-1 h-auto rounded-lg border-zinc-300 px-2 py-1 text-xs"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={UNSET}>未分配</SelectItem>
-                    {DEPTS.map((d) => (
-                      <SelectItem key={d} value={d}>
-                        {d}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={s.level || UNSET}
-                  onValueChange={(v) => void patch(s.id, { level: v === UNSET ? '' : v })}
-                >
-                  <SelectTrigger
-                    aria-label={`职级:${s.displayName}`}
-                    className="h-auto rounded-lg border-zinc-300 px-2 py-1 text-xs"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={UNSET}>未定级</SelectItem>
-                    {LEVELS.map((l) => (
-                      <SelectItem key={l} value={l}>
-                        {l}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* 哨兵生命周期封在 OptionalSelect(onChange 直收 '',写漏哨兵入库的坑已绝) */}
+                <OptionalSelect
+                  value={s.dept || ''}
+                  onChange={(v) => void patch(s.id, { dept: v })}
+                  options={DEPTS.map((d) => ({ value: d, label: d }))}
+                  emptyLabel="未分配"
+                  ariaLabel={`部门:${s.displayName}`}
+                  className="mb-1 h-auto rounded-lg border-zinc-300 px-2 py-1 text-xs"
+                />
+                <OptionalSelect
+                  value={s.level || ''}
+                  onChange={(v) => void patch(s.id, { level: v })}
+                  options={LEVELS.map((l) => ({ value: l, label: l }))}
+                  emptyLabel="未定级"
+                  ariaLabel={`职级:${s.displayName}`}
+                  className="h-auto rounded-lg border-zinc-300 px-2 py-1 text-xs"
+                />
               </DenseTableCell>
               <DenseTableCell>
                 <Select defaultValue={s.role} onValueChange={(v) => void patch(s.id, { role: v })}>

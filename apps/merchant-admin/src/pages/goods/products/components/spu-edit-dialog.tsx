@@ -1,23 +1,7 @@
+import { OptionalSelect } from '@/components/optional-select';
 import { type Spu, api } from '@/lib/api';
 import { useEffect, useState } from 'react';
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from 'ui';
-
-/** Radix SelectItem 禁空串:负责人「未分配」的哨兵值(onValueChange 单点映射回 '')。 */
-const UNSET = '__unset__';
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Label } from 'ui';
 
 interface Props {
   spu: Spu;
@@ -110,23 +94,15 @@ export function SpuEditDialog({ spu, onMsg, onClose }: Props) {
           </div>
           <div>
             <Label className="mb-1.5 block text-zinc-700">负责人</Label>
-            <Select
-              value={form.ownerId || UNSET}
-              onValueChange={(v) => setForm({ ...form, ownerId: v === UNSET ? '' : v })}
-            >
-              {/* Radix SelectItem 禁空串:真·可选空值走 __unset__ 哨兵,提交前已映射回 '' */}
-              <SelectTrigger aria-label="负责人" className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={UNSET}>未分配</SelectItem>
-                {staffOptions.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* 哨兵生命周期封在 OptionalSelect(onChange 直收 '') */}
+            <OptionalSelect
+              value={form.ownerId}
+              onChange={(v) => setForm({ ...form, ownerId: v })}
+              options={staffOptions.map((o) => ({ value: o.id, label: o.label }))}
+              emptyLabel="未分配"
+              ariaLabel="负责人"
+              className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2"
+            />
           </div>
         </div>
         <DialogFooter className="gap-2 pt-3 sm:gap-0 border-t border-zinc-100">

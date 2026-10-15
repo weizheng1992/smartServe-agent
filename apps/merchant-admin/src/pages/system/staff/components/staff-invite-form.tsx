@@ -1,3 +1,4 @@
+import { OptionalSelect } from '@/components/optional-select';
 import { api } from '@/lib/api';
 import { useState } from 'react';
 import {
@@ -16,9 +17,7 @@ import {
   SelectValue,
 } from 'ui';
 import { ROLE_LABEL } from './role-label';
-
-/** Radix SelectItem 禁空串:「部门未分配/职级未定」(invite.dept/level='')的哨兵值。 */
-const UNSET = '__unset__';
+import { DEPTS, LEVELS } from './vocab';
 
 interface Props {
   /** 可分配角色(来自角色列表,动态;含自定义角色)。 */
@@ -26,9 +25,6 @@ interface Props {
   onMsg: (m: string) => void;
   onClose: () => void;
 }
-
-const DEPTS = ['销售部', '运营部', '售后部', '财务部', '仓储部'];
-const LEVELS = ['店长', '主管', '专员'];
 
 const EMPTY = { email: '', displayName: '', role: 'sales_viewer', dept: '', level: '' };
 
@@ -108,51 +104,29 @@ export function StaffInviteDialog({ roles, onMsg, onClose }: Props) {
               <Label htmlFor="invite-dept" className="mb-1.5 block text-zinc-700">
                 部门
               </Label>
-              <Select
-                value={invite.dept || UNSET}
-                onValueChange={(v) => setInvite({ ...invite, dept: v === UNSET ? '' : v })}
-              >
-                <SelectTrigger
-                  id="invite-dept"
-                  aria-label="部门"
-                  className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={UNSET}>部门未分配</SelectItem>
-                  {DEPTS.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <OptionalSelect
+                value={invite.dept}
+                onChange={(v) => setInvite({ ...invite, dept: v })}
+                options={DEPTS.map((d) => ({ value: d, label: d }))}
+                emptyLabel="部门未分配"
+                id="invite-dept"
+                ariaLabel="部门"
+                className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2"
+              />
             </div>
             <div>
               <Label htmlFor="invite-level" className="mb-1.5 block text-zinc-700">
                 职级
               </Label>
-              <Select
-                value={invite.level || UNSET}
-                onValueChange={(v) => setInvite({ ...invite, level: v === UNSET ? '' : v })}
-              >
-                <SelectTrigger
-                  id="invite-level"
-                  aria-label="职级"
-                  className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={UNSET}>职级未定</SelectItem>
-                  {LEVELS.map((l) => (
-                    <SelectItem key={l} value={l}>
-                      {l}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <OptionalSelect
+                value={invite.level}
+                onChange={(v) => setInvite({ ...invite, level: v })}
+                options={LEVELS.map((l) => ({ value: l, label: l }))}
+                emptyLabel="职级未定"
+                id="invite-level"
+                ariaLabel="职级"
+                className="h-auto w-full rounded-lg border-zinc-300 px-3 py-2"
+              />
             </div>
           </div>
         </div>

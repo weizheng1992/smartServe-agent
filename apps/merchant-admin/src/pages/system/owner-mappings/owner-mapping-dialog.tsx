@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from 'ui';
+import { MAP_TYPE_LABEL } from './map-type-label';
 
 type StaffOption = { id: string; displayName: string; dept: string | null; level: string | null; status: string };
 
@@ -24,8 +25,6 @@ interface Props {
   onSaved: (msg: string) => void;
   onClose: () => void;
 }
-
-const MAP_TYPE_LABEL: Record<string, string> = { category: '品类', metric: '指标' };
 
 /** 登记 / 改派责任人弹窗:维度值下拉吃语义注册表闭集(服务端同载,前端零
  * 硬编码;指标 40+ 项走可搜索);PUT 闸在服务端(仅老板/管理员)。 */

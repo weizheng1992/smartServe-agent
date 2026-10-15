@@ -10,18 +10,12 @@ import {
 } from '@/components/dense-table';
 import type { AskClarifyOption, AskRow, FeedbackVerdict, SessionFrame } from '@/lib/analytics-frames';
 import { clarifyAskQuestion, isFeedbackTail } from '@/lib/ask-session';
+import { fmtMoney, orderStatusMeta } from '@/lib/format';
 import { getSelection, setSelectionKind } from '@/lib/page-context';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
 
-const ORDER_STATUS: Record<string, string> = {
-  PAID: '待发货',
-  SHIPPED: '已发货',
-  DELIVERED: '已送达',
-  REFUNDED: '已退款',
-  CANCELLED: '已取消',
-  COMPLETED: '已完成',
-};
+const ORDER_STATUS = (status: string) => orderStatusMeta(status).label;
 
 /** 订单行点击 → PageContext 契约:并入内存选中集合并跳订单管理(勾选态带过去;
  *  严禁 localStorage——残留勾选曾两次静默污染查询,merchant-admin.md §1.3)。 */
@@ -145,14 +139,6 @@ function orderCell(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);
 }
 
-/** 金额口径与订单管理页一致(toFixed(2));缺值/坏值诚实「—」—— 注意
- *  Number(null) === 0,必须先挡空值,否则缺金额渲染成假 ¥0.00。 */
-function formatAmount(v: unknown): string {
-  if (v === null || v === undefined || v === '') return '—';
-  const n = Number(v);
-  return Number.isFinite(n) ? n.toFixed(2) : '—';
-}
-
 /** 客户订单列表卡:行级「在订单中查看」跳订单管理并勾选。 */
 function CustomerOrdersCard({
   rows,
@@ -179,8 +165,8 @@ function CustomerOrdersCard({
             {rows.map((r, k) => (
               <DenseTableRow key={orderCell(r.order_id) || k}>
                 <DenseTableCell className="font-mono">{orderCell(r.order_id)}</DenseTableCell>
-                <DenseTableCell>{ORDER_STATUS[orderCell(r.status)] || orderCell(r.status)}</DenseTableCell>
-                <DenseTableCell>¥{formatAmount(r.total_amount)}</DenseTableCell>
+                <DenseTableCell>{ORDER_STATUS(orderCell(r.status))}</DenseTableCell>
+                <DenseTableCell>¥{fmtMoney(r.total_amount)}</DenseTableCell>
                 <DenseTableCell className="text-zinc-500">{orderCell(r.created_at)}</DenseTableCell>
                 <DenseTableCell className="text-right">
                   <Button

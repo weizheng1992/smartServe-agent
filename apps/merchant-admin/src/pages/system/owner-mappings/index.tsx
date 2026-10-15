@@ -9,6 +9,7 @@ import {
 import { api, errMsgOf } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
+import { MAP_TYPE_LABEL } from './map-type-label';
 import { OwnerMappingDialog } from './owner-mapping-dialog';
 
 type MappingRow = {
@@ -25,7 +26,7 @@ type MappingRow = {
 
 type StaffOption = { id: string; displayName: string; dept: string | null; level: string | null; status: string };
 
-const MAP_TYPE_LABEL: Record<string, string> = { category: '品类', metric: '指标' };
+// MAP_TYPE_LABEL 单点在 ./map-type-label(候选③;此前 index/dialog 各一份)
 
 // 「该找谁」责任人维护(spec .scratch/owner-routing §5):品类/指标 → 员工映射。
 // 下拉吃语义注册表闭集(服务端 GET 同载,前端零硬编码);PUT/DELETE 仅老板/管理员

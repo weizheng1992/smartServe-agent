@@ -1,5 +1,5 @@
 import { api } from '@/lib/api';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Button,
   Dialog,
@@ -16,7 +16,10 @@ import {
   SelectValue,
 } from 'ui';
 
-export const CATEGORIES = [
+/** 品类闭集降级面(真源在服务端注册表,挂载时经 ownerMappings.list 拉取;
+ *  此前手写数组为唯一真源,服务端品类变更在此静默滞后 —— 2026-10-15 候选③收口)。
+ *  品类闭集真源现寄居 owner-mappings 注册表属临时耦合,应另立商品域端点(后端票)。 */
+export const CATEGORIES_FALLBACK = [
   '户外机能',
   '潮流T恤',
   '下装裤类',
@@ -35,7 +38,18 @@ interface Props {
 
 /** 新增商品弹窗(上架即建 SPU + 默认 SKU)。 */
 export function SpuCreateDialog({ onMsg, onClose }: Props) {
-  const [form, setForm] = useState({ title: '', category: CATEGORIES[0], price: '', stock: '10' });
+  const [form, setForm] = useState({ title: '', category: CATEGORIES_FALLBACK[0], price: '', stock: '10' });
+  const [categories, setCategories] = useState<string[]>(CATEGORIES_FALLBACK);
+
+  // 品类闭集以服务端注册表为真源(拉取失败诚实降级本地闭集,不阻断建品)
+  useEffect(() => {
+    void api.ownerMappings
+      .list()
+      .then((r) => {
+        if (r.categories?.length) setCategories(r.categories);
+      })
+      .catch(() => {});
+  }, []);
 
   async function create() {
     const b = await api.products.create({
@@ -75,7 +89,7 @@ export function SpuCreateDialog({ onMsg, onClose }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CATEGORIES.map((c) => (
+                {categories.map((c) => (
                   <SelectItem key={c} value={c}>
                     {c}
                   </SelectItem>

@@ -6,7 +6,7 @@ import {
   DenseTableHeader,
   DenseTableRow,
 } from '@/components/dense-table';
-import { fmtMoney } from '@/lib/format';
+import { fmtMoney, orderStatusMeta } from '@/lib/format';
 import { setSelectionKind } from '@/lib/page-context';
 import React from 'react';
 import {
@@ -166,25 +166,8 @@ export function OrdersTab() {
                     </DenseTableCell>
                     <DenseTableCell className="p-3.5 text-slate-500">{o.customer_id}</DenseTableCell>
                     <DenseTableCell className="p-3.5">
-                      <Badge
-                        variant="outline"
-                        className={
-                          o.status === 'PAID'
-                            ? 'bg-amber-100 text-amber-800 border-amber-200 font-bold'
-                            : o.status === 'SHIPPED'
-                              ? 'bg-blue-100 text-blue-800 border-blue-200 font-bold'
-                              : o.status === 'REFUNDED'
-                                ? 'bg-purple-100 text-purple-800 border-purple-200 font-bold'
-                                : o.status === 'DELIVERED'
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200 font-bold'
-                                  : 'bg-slate-100 text-slate-800 border-slate-200 font-bold'
-                        }
-                      >
-                        {o.status === 'PAID' && '待发货'}
-                        {o.status === 'SHIPPED' && '已发货'}
-                        {o.status === 'REFUNDED' && '已退款'}
-                        {o.status === 'DELIVERED' && '已签收'}
-                        {!['PAID', 'SHIPPED', 'REFUNDED', 'DELIVERED'].includes(o.status) && o.status}
+                      <Badge variant="outline" className={`${orderStatusMeta(o.status).cls} font-bold`}>
+                        {orderStatusMeta(o.status).label}
                       </Badge>
                     </DenseTableCell>
                     <DenseTableCell className="p-3.5 font-bold text-slate-900">
