@@ -90,7 +90,12 @@ export function createAskSession(config: AskSessionConfig = {}): AskSession {
   // 历史回放(坏档/异形行由 load 实现自管);id 续排防写回撞车
   const restored = config.history?.load() ?? null;
   if (Array.isArray(restored) && restored.length) {
-    frames = restored.slice(-limit);
+    // 一次性升级:旧历史的 __question 私货通道迁移为帧级 question 标注
+    // (钉看板/存报告在旧帧上不再拿到空问句)
+    frames = restored.slice(-limit).map((f) => {
+      const legacy = (f.data as { __question?: string }).__question;
+      return legacy && !f.question ? { ...f, question: legacy } : f;
+    });
     seq = frames.reduce((m, f) => Math.max(m, Number(f.id) || 0), 0);
     prevLen = frames.length;
     snapshot = { frames, busy, rateBusyId };

@@ -45,11 +45,19 @@ export function FloatingAgent({ route }: { route: string }) {
   const [selMap, setSelMap] = useState<SelectionMap>({});
   useEffect(() => subscribe((s) => setSelMap({ ...s })), []);
 
+  // route 经 ref 进会话闭包:面板常驻跨路由,闭包若捕获首帧 route 会话上行
+  // 永远携带过期路由(2026-10-15 终审 M3)
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const sessionRef = useRef<AskSession | null>(null);
   if (!sessionRef.current) {
     sessionRef.current = createAskSession({
       getSessionId: currentAskSessionId,
-      getPageContext: () => ({ route, selection: getSelection(), selectionLabels: getSelectionLabels() }),
+      getPageContext: () => ({
+        route: routeRef.current,
+        selection: getSelection(),
+        selectionLabels: getSelectionLabels(),
+      }),
       history: {
         load: () => {
           try {

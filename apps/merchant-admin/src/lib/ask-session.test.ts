@@ -86,9 +86,12 @@ describe('ask-session(提问与流式帧)', () => {
 
 describe('ask-session(断线与恢复,ADR-0013 同族)', () => {
   it('断线:已流式帧保留且不重复追加,错误帧携恢复句柄(askId/lastEventId/question/pageContext)', async () => {
-    const err = new AskStreamError('TypeError: network error', 'ask_x1', 3, [resultFrame()]);
+    // 同一帧既经 onFrame 交付又躺在 err.frames:生产里两者同源,
+    // core 若从错误对象重复追加,此钉当场红
+    const clarify = { event: 'clarify', data: { question: '选谁?' } } as AskFrame;
+    const err = new AskStreamError('TypeError: network error', 'ask_x1', 3, [clarify]);
     askMock.mockImplementation((_q: unknown, _pc: unknown, cb: (f: AskFrame) => void) => {
-      cb({ event: 'clarify', data: { question: '选谁?' } } as AskFrame);
+      cb(clarify);
       return Promise.reject(err);
     });
     const session = createAskSession({ getSessionId: () => 's-1', getPageContext: () => ({ route: '/x' }) });

@@ -88,7 +88,7 @@ export function ContextCustomer({ context }: { context: LiveDeskContext }) {
       <div className="text-zinc-500">手机 {c.phoneMasked || '—'}</div>
       {c.email ? <div className="text-zinc-500">{c.email}</div> : null}
       <div className="text-zinc-500">
-        累计消费 ¥{fmtMoney(c.totalSpent || 0, true)} · {c.orderCount ?? 0} 单
+        累计消费 ¥{fmtMoney(c.totalSpent, true)} · {c.orderCount ?? 0} 单
       </div>
     </div>
   );

@@ -25,7 +25,12 @@ export default function ReportsPage() {
     msg,
     setMsg,
     reload,
-  } = useListPage<ReportRow>(async () => (await api.reports.list()).reports || []);
+  } = useListPage<ReportRow>(async () => {
+    // 业务错误返 body:success 闸 → hook 横幅,严禁错误体当空数据假陈述
+    const body = await api.reports.list();
+    if (!body.success) throw new Error(errMsgOf(body));
+    return body.reports || [];
+  });
 
   async function toggleExpand(id: string) {
     if (openId === id) {
@@ -35,6 +40,7 @@ export default function ReportsPage() {
     setLoading(true);
     try {
       const detail = await api.reports.detail(id);
+      if (!detail.success) throw new Error(errMsgOf(detail));
       const built: Section[] = Object.entries(detail.rows || {}).map(([metric, rows]) => {
         const list = Array.isArray(rows) ? rows : [];
         const cols = list[0] ? Object.keys(list[0]) : [];

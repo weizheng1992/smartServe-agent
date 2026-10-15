@@ -199,11 +199,11 @@ export function useWorkbenchState(scope: WorkbenchScope) {
   useEffect(() => {
     // 3s 时间线轮询仅 live-desk 面(候选⑤:此前 conversations 载荷一到位就
     // 自动选首线程,任意 scope 都会自启 3s 轮询 —— /orders /spi-logs 全中招)
-    if (scopeRef.current !== 'live-desk' || !activeThreadId) return;
+    if (scope !== 'live-desk' || !activeThreadId) return;
     loadConversationMessages(activeThreadId);
     const interval = setInterval(() => loadConversationMessages(activeThreadId), 3000);
     return () => clearInterval(interval);
-  }, [activeThreadId, loadConversationMessages]);
+  }, [scope, activeThreadId, loadConversationMessages]);
 
   // 仅末条消息变化时滚动:数组身份每轮轮询都重建,拿它当触发器会在内容
   // 未变时也整页平滑滚动(3s 一次的滚动抖动)

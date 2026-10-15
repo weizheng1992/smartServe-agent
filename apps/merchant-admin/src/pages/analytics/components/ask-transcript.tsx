@@ -85,6 +85,10 @@ export function AskTranscript({
                 />
               ) : null}
             </>
+          ) : f.event === 'pending' ? (
+            <div className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs text-zinc-400">
+              正在解析问题并查询…
+            </div>
           ) : (
             <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm">
               {/* clarify 帧正文在 question(引擎 Clarify.to_frame 无 message 键;

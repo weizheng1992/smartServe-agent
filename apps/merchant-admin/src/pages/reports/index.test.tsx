@@ -31,6 +31,7 @@ const ROWS = {
 beforeEach(() => {
   vi.clearAllMocks();
   reports.list.mockResolvedValue({
+    success: true,
     reports: [
       {
         id: 'r1',
@@ -81,7 +82,7 @@ describe('ReportsPage(我的报告 + 图表重放)', () => {
   });
 
   it('空列表走引导文案', async () => {
-    reports.list.mockResolvedValue({ reports: [] });
+    reports.list.mockResolvedValue({ success: true, reports: [] });
     render(
       <MemoryRouter>
         <ReportsPage />

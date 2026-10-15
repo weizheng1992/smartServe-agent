@@ -137,7 +137,7 @@ function PinCard({
   refreshedAt: string | null;
   onRemove: (id: string) => void;
 }) {
-  const { frames } = useAskSession(session);
+  const { frames, busy } = useAskSession(session);
   const results = frames.filter((f: SessionFrame) => f.event === 'result');
   const failed = frames.find((f) => f.event === 'unsupported' || f.event === 'error');
   return (
@@ -168,7 +168,8 @@ function PinCard({
           ) : null}
         </div>
       ))}
-      {!failed && !results.length && <div className="text-xs text-zinc-400">本轮无结果(诚实空)</div>}
+      {/* 诚实空仅在「本轮已完成」时呈现;重放在途把「还没查」说成「查了没有」是假陈述 */}
+      {!busy && !failed && !results.length && <div className="text-xs text-zinc-400">本轮无结果(诚实空)</div>}
     </div>
   );
 }

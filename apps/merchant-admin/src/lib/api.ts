@@ -464,7 +464,9 @@ export const api = {
     for (let attempt = 0; ; attempt++) {
       try {
         // authedFetch 而非 requestJson:SSE 要的是原始 Response 流式读取,严禁经
-        // requestJson 的 res.text() 消费 body;身份头与 401 收口照旧
+        // requestJson 的 res.text() 消费 body;身份头与 401 收口照旧。
+        // ok 闸(2026-10-15 终审 M1):authedFetch 只收 401,其余非 2xx 若不在此
+        // 判 ok 会把错误应答当「零帧成功流」静默吞掉(旧 req 的 !res.ok throw 语义)
         const res = await authedFetch('/api/admin/analytics/ask', {
           method: 'POST',
           body: JSON.stringify({
@@ -474,6 +476,10 @@ export const api = {
           }),
         });
         askId = res.headers.get('X-Ask-Id') || askId;
+        if (!res.ok) {
+          // 非 2xx:应答体不是帧流,按传输失败 throw(进 ask 的重试/AskStreamError 通路)
+          throw new Error(`${res.status} ${await res.text().then((t) => t.slice(0, 120))}`);
+        }
         const parser = createFrameParser((f) => {
           frames.push(f);
           if (typeof f.id === 'number' && f.id > lastEventId) lastEventId = f.id;
