@@ -3,11 +3,28 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BoardPage from './index';
 
-vi.mock('@/lib/api', () => ({
-  api: {
-    ask: vi.fn(),
-  },
-}));
+// Ask 会话 core 以 AskStreamError instanceof 判恢复句柄(与 FloatingAgent.test
+// 同一模式):桩必须导出真类,否则 appendError 当场 TypeError、错误帧落不了
+vi.mock('@/lib/api', () => {
+  class AskStreamError extends Error {
+    askId: string;
+    lastEventId: number;
+    frames: unknown[];
+    constructor(message: string, askId: string, lastEventId: number, frames: unknown[] = []) {
+      super(message);
+      this.name = 'AskStreamError';
+      this.askId = askId;
+      this.lastEventId = lastEventId;
+      this.frames = frames;
+    }
+  }
+  return {
+    AskStreamError,
+    api: {
+      ask: vi.fn(),
+    },
+  };
+});
 
 import { api } from '@/lib/api';
 const askMock = api.ask as unknown as ReturnType<typeof vi.fn>;
@@ -45,7 +62,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   localStorage.setItem('merchant-admin.board', JSON.stringify(PINS));
-  askMock.mockResolvedValue(RESULT_FRAME);
+  // 会话经 onFrame 流式入列(与真流同构);返回值只兜底不再被消费
+  askMock.mockImplementation((_q: unknown, _pc: unknown, cb?: (f: unknown) => void) => {
+    for (const f of RESULT_FRAME) cb?.(f);
+    return Promise.resolve(RESULT_FRAME);
+  });
 });
 
 afterEach(() => {
@@ -65,6 +86,7 @@ describe('BoardPage(常驻看板)', () => {
       expect(askMock).toHaveBeenCalledWith(
         '品类GMV排行',
         expect.objectContaining({ route: '/analytics', selection: [] }),
+        expect.any(Function),
       ),
     );
     expect(screen.getByText('品类GMV排行')).toBeInTheDocument();
@@ -92,6 +114,27 @@ describe('BoardPage(常驻看板)', () => {
     await waitFor(() => expect(askMock).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: '立即刷新' }));
     await waitFor(() => expect(askMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('busy 闸:重放在途时立即刷新被跳过(慢流>60s 严禁重叠 ask,2026-10-15 收口)', async () => {
+    let release!: () => void;
+    askMock.mockImplementation(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+        }),
+    );
+    render(
+      <MemoryRouter>
+        <BoardPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(askMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '立即刷新' }));
+    expect(askMock).toHaveBeenCalledTimes(1); // 在途闸:跳过本轮
+    release();
+    await waitFor(() => expect(screen.getByText(/刷新于/)).toBeInTheDocument());
+    expect(askMock).toHaveBeenCalledTimes(1); // 释放后本轮收尾,不补发
   });
 
   it('重放失败:显示失败信息不崩溃(诚实帧)', async () => {

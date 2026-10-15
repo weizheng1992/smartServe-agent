@@ -1,4 +1,4 @@
-import { FeedbackButtons, type FeedbackVerdict } from '@/components/FeedbackButtons';
+import { FeedbackButtons } from '@/components/FeedbackButtons';
 import { ResultCard } from '@/components/ResultCard';
 import {
   DenseTable,
@@ -8,12 +8,9 @@ import {
   DenseTableHeader,
   DenseTableRow,
 } from '@/components/dense-table';
-import { type AskClarifyOption, type AskFrame, type AskRow } from '@/lib/analytics-frames';
-
-export type { AskFrame };
-import { api } from '@/lib/api';
+import type { AskClarifyOption, AskRow, FeedbackVerdict, SessionFrame } from '@/lib/analytics-frames';
+import { clarifyAskQuestion, isFeedbackTail } from '@/lib/ask-session';
 import { getSelection, setSelectionKind } from '@/lib/page-context';
-import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
 
@@ -37,146 +34,109 @@ function useJumpToOrder() {
   };
 }
 
-/** 问答流水:用户气泡 / 折线卡 / 表格卡 / 客户订单列表卡 / clarify 反问 / 诚实拒绝。
- *  反馈闭环(v3.1):终局帧组尾渲染踩/赞(轮次粒度,同 FloatingAgent);
- *  页面帧不持久化(与现状一致),rated 随会话内存。
- *  断线恢复(2026-10-13 夜评收口):error 帧带 resume 句柄时渲染「恢复结果」,
- *  与悬浮面板同权 —— 流留 Redis 600s、生产者断开不停算,恢复只补帧不重算。 */
+/** 问答流水(渲染 adapter):用户气泡 / 折线卡 / 表格卡 / 客户订单列表卡 /
+ *  clarify 反问 / 诚实拒绝。会话状态(帧机/断线恢复/反馈闩锁)在 lib/ask-session
+ *  单点 —— 本组件只渲染:rated 读帧标注、反馈与恢复经回调打回会话
+ *  (onResume → session.resume(f.id),onRate → session.rate(f.id, verdict, note));
+ *  组尾判定与 clarify 追问句组装走共享纯函数,严禁组件内重抄。
+ *  heartbeat/start 在会话摄入期已过滤,不入对话流。 */
 export function AskTranscript({
   frames,
   onAsk,
   onResume,
+  onRate,
+  rateBusyId = null,
   busy = false,
 }: {
-  frames: AskFrame[];
+  frames: SessionFrame[];
   onAsk: (q: string) => void;
-  onResume?: (resume: { askId: string; lastEventId: number; question: string }) => void;
+  onResume?: (frame: SessionFrame) => void;
+  onRate?: (frame: SessionFrame, verdict: FeedbackVerdict, note?: string) => void;
+  rateBusyId?: number | null;
   busy?: boolean;
 }) {
   const jumpToOrder = useJumpToOrder();
-  const [rated, setRated] = useState<Record<number, FeedbackVerdict>>({});
-  const [rateBusy, setRateBusy] = useState<number | null>(null);
-  const [rateError, setRateError] = useState<Record<number, string>>({});
-
-  async function rate(i: number, traceId: string, verdict: FeedbackVerdict, note?: string) {
-    if (rateBusy !== null) return;
-    setRateBusy(i);
-    setRateError((prev) => {
-      const next = { ...prev };
-      delete next[i];
-      return next;
-    });
-    const prior = rated[i];
-    setRated((prev) => ({ ...prev, [i]: verdict }));
-    try {
-      await api.feedback.submit({ traceId, verdict, note });
-    } catch (err) {
-      setRated((prev) => {
-        const next = { ...prev };
-        if (prior) next[i] = prior;
-        else delete next[i];
-        return next;
-      });
-      setRateError((prev) => ({ ...prev, [i]: `反馈失败:${String(err)}` }));
-    } finally {
-      setRateBusy(null);
-    }
-  }
-
-  const feedbackProps = (i: number, visible: AskFrame[], f: AskFrame, allowUp: boolean) => {
-    const traceId = String(f.data.traceId || '');
-    const isTail =
-      Boolean(traceId) &&
-      (i + 1 >= visible.length || !visible[i + 1].data.traceId || visible[i + 1].data.traceId !== traceId);
-    if (!isTail) return null;
-    return (
-      <>
-        <FeedbackButtons
-          allowUp={allowUp}
-          rated={rated[i]}
-          busy={rateBusy === i}
-          onSubmit={(verdict, note) => void rate(i, traceId, verdict, note)}
-        />
-        {rateError[i] ? <div className="mt-1 text-[11px] text-red-500">{rateError[i]}</div> : null}
-      </>
-    );
-  };
 
   return (
     <>
-      {frames
-        // heartbeat 是传输层保活(ADR-0013 同族纪律):不入对话流,渲染成
-        // 文本气泡曾把长问句刷成每 15s 一条「heartbeat」
-        .filter((f) => f.event !== 'start' && f.event !== 'heartbeat')
-        .map((f, i, visible) => (
-          /* biome-ignore lint/suspicious/noArrayIndexKey: AskFrame 无业务 id,append-only 对话流不重排 */
-          <div key={i} className={f.event === 'user' ? 'flex justify-end' : ''}>
-            {f.event === 'user' ? (
-              <div className="rounded-xl bg-zinc-900 px-4 py-2 text-sm text-white">{f.data.message}</div>
-            ) : f.event === 'result' && f.data.metric === 'customer_orders' && Array.isArray(f.data.rows) ? (
-              // 行级「在订单中查看」跳转是 analytics 全屏问答页独有的交互特例
-              // (静态渲染与 ResultCard 同口径);其余 result 帧一律走唯一渲染缝。
-              <>
-                <CustomerOrdersCard rows={f.data.rows} caliber={f.data.caliber ?? ''} onJump={jumpToOrder} />
-                {feedbackProps(i, visible, f, true)}
-              </>
-            ) : f.event === 'result' ? (
-              // 唯一渲染缝(merchant-admin.md §1.4):折线/条形/诚实降级/文本卡
-              // 全在共享 ResultCard —— 折线值列 Number.isFinite 护栏(2026-09-25
-              // 此旁路自绘表格曾复现已修复的 NaN 网线事故)、排行自动条形、
-              // 「数据点不足」降级均与悬浮面板/看板/报告四处同形。
-              <>
-                <ResultCard data={f.data} />
-                {feedbackProps(i, visible, f, true)}
-              </>
-            ) : (
-              <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm">
-                {f.data.message || f.event}
-                {f.event === 'clarify' && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {(f.data.options || []).map((o: AskClarifyOption, j: number) => (
-                      <Button
-                        /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
-                        key={j}
-                        type="button"
-                        variant="outline"
-                        className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none"
-                        onClick={() =>
-                          onAsk(
-                            f.data.clarifyKind === 'entity'
-                              ? f.data.originalQuestion
-                                ? `${f.data.originalQuestion}(${o.label})`
-                                : o.label
-                              : `按${o.label}的商品排行`,
-                          )
-                        }
-                      >
-                        {o.label}
-                      </Button>
-                    ))}
-                  </div>
-                )}
-                {f.data.caliber ? <div className="mt-1 text-[11px] text-zinc-400">口径:{f.data.caliber}</div> : null}
-                {onResume && f.data.resume ? (
-                  <div className="mt-2">
+      {frames.map((f, i) => (
+        <div key={f.id} className={f.event === 'user' ? 'flex justify-end' : ''}>
+          {f.event === 'user' ? (
+            <div className="rounded-xl bg-zinc-900 px-4 py-2 text-sm text-white">{f.data.message}</div>
+          ) : f.event === 'result' && f.data.metric === 'customer_orders' && Array.isArray(f.data.rows) ? (
+            // 行级「在订单中查看」跳转是 analytics 全屏问答页独有的交互特例
+            // (静态渲染与 ResultCard 同口径);其余 result 帧一律走唯一渲染缝。
+            <>
+              <CustomerOrdersCard rows={f.data.rows} caliber={f.data.caliber ?? ''} onJump={jumpToOrder} />
+              {onRate && isFeedbackTail(frames, i) ? (
+                <FeedbackButtons
+                  rated={f.rated}
+                  busy={rateBusyId === f.id}
+                  onSubmit={(verdict, note) => onRate(f, verdict, note)}
+                />
+              ) : null}
+            </>
+          ) : f.event === 'result' ? (
+            // 唯一渲染缝(merchant-admin.md §1.4):折线/条形/诚实降级/文本卡
+            // 全在共享 ResultCard —— 折线值列 Number.isFinite 护栏(2026-09-25
+            // 此旁路自绘表格曾复现已修复的 NaN 网线事故)、排行自动条形、
+            // 「数据点不足」降级均与悬浮面板/看板/报告四处同形。
+            <>
+              <ResultCard data={f.data} />
+              {onRate && isFeedbackTail(frames, i) ? (
+                <FeedbackButtons
+                  rated={f.rated}
+                  busy={rateBusyId === f.id}
+                  onSubmit={(verdict, note) => onRate(f, verdict, note)}
+                />
+              ) : null}
+            </>
+          ) : (
+            <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm">
+              {/* clarify 帧正文在 question(引擎 Clarify.to_frame 无 message 键;
+                  读 message 曾把全屏页 clarify 渲染成字面量 "clarify") */}
+              {f.event === 'clarify' ? (f.data.question ?? '') : f.data.message || f.event}
+              {f.event === 'clarify' && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(f.data.options || []).map((o: AskClarifyOption) => (
                     <Button
+                      key={o.label}
                       type="button"
                       variant="outline"
-                      disabled={busy}
-                      className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none hover:border-zinc-900 disabled:opacity-60"
-                      onClick={() =>
-                        onResume(f.data.resume as { askId: string; lastEventId: number; question: string })
-                      }
+                      className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none"
+                      onClick={() => onAsk(clarifyAskQuestion(f.data, o))}
                     >
-                      恢复结果
+                      {o.label}
                     </Button>
-                  </div>
-                ) : null}
-                {f.event === 'unsupported' ? feedbackProps(i, visible, f, false) : null}
-              </div>
-            )}
-          </div>
-        ))}
+                  ))}
+                </div>
+              )}
+              {f.data.caliber ? <div className="mt-1 text-[11px] text-zinc-400">口径:{f.data.caliber}</div> : null}
+              {onResume && f.data.resume ? (
+                <div className="mt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none hover:border-zinc-900 disabled:opacity-60"
+                    onClick={() => onResume(f)}
+                  >
+                    恢复结果
+                  </Button>
+                </div>
+              ) : null}
+              {f.event === 'unsupported' && onRate && isFeedbackTail(frames, i) ? (
+                <FeedbackButtons
+                  allowUp={false}
+                  rated={f.rated}
+                  busy={rateBusyId === f.id}
+                  onSubmit={(verdict, note) => onRate(f, verdict, note)}
+                />
+              ) : null}
+            </div>
+          )}
+        </div>
+      ))}
     </>
   );
 }

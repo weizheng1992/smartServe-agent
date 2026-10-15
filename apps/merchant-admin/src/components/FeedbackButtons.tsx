@@ -1,7 +1,8 @@
+import { type FeedbackVerdict } from '@/lib/analytics-frames';
 import { useState } from 'react';
 import { Button, Input } from 'ui';
 
-export type FeedbackVerdict = 'up' | 'down';
+export type { FeedbackVerdict };
 
 /** 答案反馈按钮组(反馈闭环 v3.1):受控组件,评分态(rated)由宿主持有 ——
  *  FloatingAgent 随 localStorage 历史持久化,/analytics 页随会话内存。

@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FloatingAgent } from './FloatingAgent';
 
-// 纯单测:api 全桩,不碰真实网关(AskStreamError 用真类,组件 instanceof 判恢复句柄)
+// 纯单测:api 全桩,不碰真实网关(AskStreamError 用真类,ask-session core instanceof 判恢复句柄)
 vi.mock('@/lib/api', () => {
   class AskStreamError extends Error {
     askId: string;
@@ -32,6 +32,14 @@ import { AskStreamError, api } from '@/lib/api';
 const askMock = api.ask as unknown as ReturnType<typeof vi.fn>;
 const feedbackMock = api.feedback.submit as unknown as ReturnType<typeof vi.fn>;
 
+/** 流式桩:帧经 onFrame 逐帧入列(会话消费 onFrame,与真流同构)。 */
+function mockFrames(frames: unknown[]) {
+  askMock.mockImplementation((_q: unknown, _pc: unknown, cb?: (f: unknown) => void) => {
+    for (const f of frames) cb?.(f);
+    return Promise.resolve(frames);
+  });
+}
+
 function renderAgent(route = '/analytics') {
   return render(
     <MemoryRouter>
@@ -54,12 +62,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   pageContext.clearSelection();
-  askMock.mockResolvedValue([
+  // 会话经 onFrame 流式入列(api.ask 返回值不再兜底),桩须逐帧回调 —— 与真流同构
+  const DEFAULT_RESULT = [
     {
       event: 'result',
       data: { metric: 'volume', unit: '件', caliber: '口径A', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] },
     },
-  ]);
+  ];
+  askMock.mockImplementation((_q: unknown, _pc: unknown, cb?: (f: unknown) => void) => {
+    for (const f of DEFAULT_RESULT) cb?.(f);
+    return Promise.resolve(DEFAULT_RESULT);
+  });
 });
 
 describe('FloatingAgent(对话面板交互)', () => {
@@ -97,11 +110,11 @@ describe('FloatingAgent(对话面板交互)', () => {
   });
 
   it('断线失败(AskStreamError):部分帧照常上屏 + 错误帧带「恢复结果」', async () => {
-    askMock.mockRejectedValue(
-      new AskStreamError('TypeError: network error', 'ask_x1', 1, [
-        { event: 'clarify', data: { question: '要看哪个时间范围?', options: [] } },
-      ]),
-    );
+    // 部分帧经 onFrame 流式上屏(与 AskStreamError.frames 同源,core 严禁重复追加)
+    askMock.mockImplementation((_q: unknown, _pc: unknown, cb?: (f: unknown) => void) => {
+      cb?.({ event: 'clarify', data: { question: '要看哪个时间范围?', options: [] } });
+      return Promise.reject(new AskStreamError('TypeError: network error', 'ask_x1', 1, []));
+    });
     renderAgent();
     openPanel();
     submit('本月销量');
@@ -118,7 +131,7 @@ describe('FloatingAgent(对话面板交互)', () => {
     submit('本月销量');
     fireEvent.click(await screen.findByRole('button', { name: '恢复结果' }));
     await waitFor(() =>
-      expect(askMock).toHaveBeenLastCalledWith('本月销量', expect.anything(), undefined, {
+      expect(askMock).toHaveBeenLastCalledWith('本月销量', expect.anything(), expect.any(Function), {
         askId: 'ask_x1',
         lastEventId: 1,
       }),
@@ -143,11 +156,10 @@ describe('FloatingAgent(对话面板交互)', () => {
   it('恢复再失败:resume 补投的部分帧照常上屏(与首失败对称,严禁丢弃)', async () => {
     askMock
       .mockRejectedValueOnce(new AskStreamError('TypeError: network error', 'ask_x1', 1, []))
-      .mockRejectedValueOnce(
-        new AskStreamError('TypeError: network error', 'ask_x1', 3, [
-          { event: 'clarify', data: { question: '恢复补投的澄清帧', options: [] } },
-        ]),
-      );
+      .mockImplementationOnce((_q: unknown, _pc: unknown, cb?: (f: unknown) => void) => {
+        cb?.({ event: 'clarify', data: { question: '恢复补投的澄清帧', options: [] } });
+        return Promise.reject(new AskStreamError('TypeError: network error', 'ask_x1', 3, []));
+      });
     renderAgent();
     openPanel();
     submit('本月销量');
@@ -211,7 +223,7 @@ describe('FloatingAgent(对话面板交互)', () => {
 describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
   it('result 帧带 traceId → 组尾渲染踩/赞;点赞调 feedback.submit 且闩锁禁用', async () => {
     feedbackMock.mockResolvedValue({ success: true });
-    askMock.mockResolvedValue([
+    mockFrames([
       {
         event: 'result',
         data: { traceId: 'tr_abc123', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] },
@@ -232,7 +244,7 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
 
   it('踩先展开备注框,提交携带 note;空备注以 undefined 提交', async () => {
     feedbackMock.mockResolvedValue({ success: true });
-    askMock.mockResolvedValue([
+    mockFrames([
       {
         event: 'result',
         data: { traceId: 'tr_note1', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] },
@@ -253,7 +265,7 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
   });
 
   it('无 traceId 的 result 帧(旧历史帧/error)不出反馈按钮', async () => {
-    askMock.mockResolvedValue([
+    mockFrames([
       { event: 'result', data: { metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] } },
     ]);
     renderAgent();
@@ -265,7 +277,7 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
 
   it('unsupported 帧 down-only:仅踩可点(👎 首击开备注框,提交直发)', async () => {
     feedbackMock.mockResolvedValue({ success: true });
-    askMock.mockResolvedValue([{ event: 'unsupported', data: { traceId: 'tr_uns1', message: '该问题暂不支持。' } }]);
+    mockFrames([{ event: 'unsupported', data: { traceId: 'tr_uns1', message: '该问题暂不支持。' } }]);
     renderAgent();
     openPanel();
     submit('今天心情如何');
@@ -280,7 +292,7 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
   });
 
   it('场景包同 traceId 连续帧只在组尾出一组反馈按钮(一轮一评)', async () => {
-    askMock.mockResolvedValue([
+    mockFrames([
       {
         event: 'result',
         data: { traceId: 'tr_multi', metric: 'gmv', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'GMV卡' }] },
@@ -313,7 +325,7 @@ describe('FloatingAgent(答案反馈闭环 v3.1)', () => {
 
   it('反馈失败:乐观态回滚且错误帧上屏(诚实呈现)', async () => {
     feedbackMock.mockRejectedValue(new Error('network down'));
-    askMock.mockResolvedValue([
+    mockFrames([
       {
         event: 'result',
         data: { traceId: 'tr_fail', metric: 'volume', rows: [{ a: 1 }], cards: [{ type: 'text', text: 'ok' }] },

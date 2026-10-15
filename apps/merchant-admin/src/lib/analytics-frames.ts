@@ -47,6 +47,8 @@ export interface AskFrameData {
   // unsupported / error 帧
   message?: string;
   detail?: string;
+  // 客户端 error 帧的断线恢复句柄(ask-session 会话层物化;服务端 error 帧无此键)
+  resume?: AskResumeHandle;
   // 终局帧反馈回查键(反馈闭环 v3.1):result/unsupported/error 由引擎
   // _with_trace 盖章(tr_<hex12>),clarify 中间态不带;POST feedback 原样回传
   traceId?: string;
@@ -57,3 +59,36 @@ export interface AskFrameData {
 }
 
 export type AskFrame = { event: string; data: AskFrameData };
+
+// ─── 会话层标注(ask-session):客户端自造帧与宿主标注,单点归此册 ───
+// 服务端只发 start/heartbeat/result/clarify/unsupported/error;user/pending
+// 与带恢复句柄的 error 是 ask-session 的客户端自造帧,与服务端帧形同册
+// (F4 消费侧 lib 裁决)。组件内严禁再自造并行类型(2026-10-15「Ask 会话」
+// 四表面收敛裁决,见 CONTEXT.md;此前 FloatingAgent 内的 AgentFrame/
+// AgentFrameData/__question 私货通道就此退役)。
+
+export type AskFrameEvent = 'start' | 'heartbeat' | 'user' | 'pending' | 'result' | 'clarify' | 'unsupported' | 'error';
+
+/** 断线恢复句柄(挂 error 帧 data.resume):流留 Redis 600s、生产者断开不停算,
+ *  携 askId+lastEventId 重进 ask 的 resume 参数只补 seq>last 不重算;
+ *  question/pageContext 由会话层带入(AskStreamError 错误对象只携 askId/
+ *  lastEventId)。pageContext 缺席 = 无上下文面(无勾选/无路由上行)。 */
+export type AskResumeHandle = {
+  askId: string;
+  lastEventId: number;
+  question: string;
+  pageContext?: object;
+};
+
+/** 答案反馈判定(反馈闭环 v3.1):提交真源在 api.feedback.submit,组件只持闩锁态。 */
+export type FeedbackVerdict = 'up' | 'down';
+
+/** 会话帧 = 服务端帧 + 会话层扩充:id 供按帧回写(渲染层按下标回写会错位);
+ *  question 标注产生该帧的问句(钉看板/存报告读取 —— wrapper 级标注,严禁
+ *  __question 私货通道复活);saved/rated 为宿主动作标注,随历史持久化。 */
+export type SessionFrame = AskFrame & {
+  id: number;
+  question?: string;
+  saved?: boolean;
+  rated?: FeedbackVerdict;
+};

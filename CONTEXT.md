@@ -127,6 +127,10 @@ A dedicated SSE network stream client that decouples EventSource transport, even
 - **EventSource Transport Management**: Handles SSE connection establishment, event listener binding, and safe resource cleanup.
 - **Typed Event Dispatching**: Emits structured status, result, and error events to UI subscribers (`onStatus`, `onResult`, `onError`).
 
+### Ask 会话 ask-session (`apps/merchant-admin/src/lib/ask-session.ts`)
+
+一次与 Data Agent 的问答交互(提问 → 帧流 → 终局)的单一 deep module 所有者;悬浮助手面板 / analytics 全屏问答页 / 看板重放是其上的 adapter(ResultCard 是其下方的唯一渲染缝;报告回放的反向 adapter 暂缓另批)。会话拥有:帧数组与 id 纪律、heartbeat/start 过滤、`AskStreamError` 恢复句柄的物化(error 帧 + 「恢复结果」不重算)、pageContext 组装(route + 勾选上行)、clarify 追问句组装语义(含 entity 分支)、rated 反馈闩锁(同 traceId 组尾判定)。**会话身份 = 多轮记忆开关**:sessionId 缺席时服务端零读零写(`session_store` 双闸,24h TTL);面板与全屏页共享同一会话身份(localStorage `merchant-admin.session`),看板重放刻意不带 sessionId —— 重放非对话,不参与多轮记忆。客户端自造帧(user/pending/恢复 error)与 `saved`/`rated` 标注归 `analytics-frames.ts` 单点;帧→问题的关联由会话状态持有,严禁 `__question` 私货通道(2026-10-15 架构审查裁决,四表面收敛)。
+
 ### Turn Pipeline (回合管线) (`services/engine-py/src/engine_py/run_agent.py`)
 
 One conversational turn = one deep module. The public interface is `run_agent(job) -> dict`, and every entry scenario crosses this single seam: gateway chat dispatch, approval resumption (`job_resume_{approvalId}`), shadow replay (ADR-0007). Internally three sections, none of which are part of the interface:

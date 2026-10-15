@@ -2,16 +2,18 @@
 // 钉卡 = 保存「问句 + 上下文」而非查询结果;看板按卡片重放 /ask 定时刷新 ——
 // 权限/闭集/口径全复用对话管线,零新后端,不碰 SQL(08-D1 同源纪律)。
 // 刷新策略:60s 轮询 + 页面不可见时暂停 + 手动立即刷新。
+// 2026-10-15 起:重放走 lib/ask-session(每 pin 一个会话实例,replace 整轮换帧
+// 防闪空);重放不带 sessionId —— 重放非对话,服务端双闸零读零写(多轮记忆
+// 不受看板轮询污染);也刻意不接 resume:重放=刷新,要的是新数据,resume 只会
+// 取回 600s 内缓存的旧帧。重放与手动刷新互斥(busy 闸,慢流>60s 严禁重叠 ask)。
 
 import { ResultCard } from '@/components/ResultCard';
-import { type AskFrame } from '@/lib/analytics-frames';
-import { api } from '@/lib/api';
+import type { SessionFrame } from '@/lib/analytics-frames';
+import { type AskSession, createAskSession, useAskSession } from '@/lib/ask-session';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
 import { Button } from 'ui';
 
 type Pin = { id: string; question: string; route: string; pinnedAt: string };
-type ReplayState = { frames: AskFrame[] | null; error: string | null; at: string | null };
 
 const REFRESH_MS = 60_000;
 
@@ -23,38 +25,32 @@ function loadPins(): Pin[] {
   }
 }
 
-function sessionId(): string {
-  let sid = localStorage.getItem('merchant-admin.session');
-  if (!sid) {
-    sid = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    localStorage.setItem('merchant-admin.session', sid);
-  }
-  return sid;
-}
-
 export default function BoardPage() {
-  const navigate = useNavigate();
   const [pins, setPins] = useState<Pin[]>(loadPins);
-  const [states, setStates] = useState<Record<string, ReplayState>>({});
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState<Record<string, string>>({});
+  const sessionsRef = useRef<Map<string, AskSession>>(new Map());
   const timer = useRef<number | null>(null);
 
+  /** 每 pin 一个会话实例(重放面:无会话身份,零多轮记忆);render 期幂等建。 */
+  function sessionFor(pin: Pin): AskSession {
+    let s = sessionsRef.current.get(pin.id);
+    if (!s) {
+      s = createAskSession({ getPageContext: () => ({ route: pin.route, selection: [] }) });
+      sessionsRef.current.set(pin.id, s);
+    }
+    return s;
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionFor 只触 sessionsRef(组件生命周期稳定的 Map),首渲染闭包即正确
   const replay = useCallback(async (list: Pin[]) => {
+    // busy 闸(2026-10-15 收口):任一目标 pin 仍在途(慢流>60s)即跳过本轮,
+    // 严禁与上一轮重叠 ask(旧实现无闸,慢流下 interval 与手动刷新并发)
+    if (list.some((p) => sessionsRef.current.get(p.id)?.getState().busy)) return;
     setRefreshing(true);
-    const sid = sessionId();
-    await Promise.all(
-      list.map(async (pin) => {
-        try {
-          const frames = await api.ask(pin.question, { route: pin.route, selection: [], sessionId: sid });
-          setStates((prev) => ({ ...prev, [pin.id]: { frames, error: null, at: new Date().toLocaleTimeString() } }));
-        } catch (err) {
-          setStates((prev) => ({
-            ...prev,
-            [pin.id]: { frames: null, error: String(err), at: new Date().toLocaleTimeString() },
-          }));
-        }
-      }),
-    );
+    await Promise.all(list.map((pin) => sessionFor(pin).ask(pin.question, { replace: true })));
+    const at = new Date().toLocaleTimeString();
+    setRefreshedAt((prev) => ({ ...prev, ...Object.fromEntries(list.map((p) => [p.id, at])) }));
     setRefreshing(false);
   }, []);
 
@@ -84,6 +80,7 @@ export default function BoardPage() {
   function removePin(id: string) {
     const next = loadPins().filter((p) => p.id !== id);
     localStorage.setItem('merchant-admin.board', JSON.stringify(next));
+    sessionsRef.current.delete(id);
     setPins(next);
   }
 
@@ -114,49 +111,64 @@ export default function BoardPage() {
       )}
 
       <div className={bigScreen ? 'grid grid-cols-2 gap-4 xl:grid-cols-3' : 'space-y-4'}>
-        {pins.map((pin) => {
-          const st = states[pin.id] || { frames: null, error: null, at: null };
-          const results = (st.frames || []).filter((f) => f.event === 'result');
-          const failed = (st.frames || []).find((f) => f.event === 'unsupported' || f.event === 'error');
-          return (
-            <div key={pin.id} className="rounded-2xl border border-zinc-200 bg-white p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-sm font-medium">{pin.question}</div>
-                <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-                  {st.at && <span>刷新于 {st.at}</span>}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-auto px-0.5 py-0 text-[11px] font-normal text-zinc-400 hover:text-zinc-900"
-                    onClick={() => removePin(pin.id)}
-                  >
-                    移除
-                  </Button>
-                </div>
-              </div>
-              {st.error && <div className="text-xs text-red-500">刷新失败:{st.error}</div>}
-              {!st.error && failed && (
-                <div className="text-xs text-zinc-500">{failed.data?.message || failed.event}</div>
-              )}
-              {results.map((f: any, i: number) => (
-                /* biome-ignore lint/suspicious/noArrayIndexKey: SseFrame 无业务 id,看板只读重放不重排 */
-                <div key={i} className="mb-2">
-                  <ResultCard data={f.data} />
-                  {f.data.summary ? (
-                    <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                      <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
-                      {f.data.summary}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-              {!st.error && !results.length && !failed && st.frames && (
-                <div className="text-xs text-zinc-400">本轮无结果(诚实空)</div>
-              )}
-            </div>
-          );
-        })}
+        {pins.map((pin) => (
+          <PinCard
+            key={pin.id}
+            pin={pin}
+            session={sessionFor(pin)}
+            refreshedAt={refreshedAt[pin.id] ?? null}
+            onRemove={removePin}
+          />
+        ))}
       </div>
+    </div>
+  );
+}
+
+/** 单钉卡:自订阅其会话(useSyncExternalStore),重放结果/错误帧经会话状态上屏。 */
+function PinCard({
+  pin,
+  session,
+  refreshedAt,
+  onRemove,
+}: {
+  pin: Pin;
+  session: AskSession;
+  refreshedAt: string | null;
+  onRemove: (id: string) => void;
+}) {
+  const { frames } = useAskSession(session);
+  const results = frames.filter((f: SessionFrame) => f.event === 'result');
+  const failed = frames.find((f) => f.event === 'unsupported' || f.event === 'error');
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-sm font-medium">{pin.question}</div>
+        <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+          {refreshedAt && <span>刷新于 {refreshedAt}</span>}
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-auto px-0.5 py-0 text-[11px] font-normal text-zinc-400 hover:text-zinc-900"
+            onClick={() => onRemove(pin.id)}
+          >
+            移除
+          </Button>
+        </div>
+      </div>
+      {failed && <div className="text-xs text-zinc-500">{String(failed.data.message ?? failed.event)}</div>}
+      {results.map((f) => (
+        <div key={f.id} className="mb-2">
+          <ResultCard data={f.data} />
+          {f.data.summary ? (
+            <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+              <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
+              {String(f.data.summary)}
+            </div>
+          ) : null}
+        </div>
+      ))}
+      {!failed && !results.length && <div className="text-xs text-zinc-400">本轮无结果(诚实空)</div>}
     </div>
   );
 }

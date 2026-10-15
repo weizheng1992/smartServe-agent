@@ -1,50 +1,26 @@
-import { FeedbackButtons, type FeedbackVerdict } from '@/components/FeedbackButtons';
+import { FeedbackButtons } from '@/components/FeedbackButtons';
 import { ResultCard } from '@/components/ResultCard';
-import { type AskCard } from '@/lib/analytics-frames';
-import { AskStreamError, api } from '@/lib/api';
+import { type AskFrameData, type SessionFrame } from '@/lib/analytics-frames';
+import { api } from '@/lib/api';
+import {
+  type AskSession,
+  clarifyAskQuestion,
+  createAskSession,
+  currentAskSessionId,
+  isFeedbackTail,
+  useAskSession,
+} from '@/lib/ask-session';
 import { type SelectionMap, clearSelection, getSelection, getSelectionLabels, subscribe } from '@/lib/page-context';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button, Input } from 'ui';
 
-// 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由(选中数据
-// 由列表页经 localStorage 约定键上行 —— PageContext 19-D3)。
-// 阶段⑥:排行卡条形图化 + 结果卡底部「导出 CSV / 存为报告」(存入我的报告)。
-// 帧带自增 id:渲染层会过滤 start 帧,按下标回写状态会错位 —— 一律按 id 回写
-let frameSeq = 0;
-type ResultData = {
-  metric: string;
-  unit?: string;
-  caliber?: string;
-  chart?: 'line' | 'bar' | 'table' | null;
-  summary?: string | null;
-  title?: string;
-  __question?: string;
-  rows: Record<string, unknown>[];
-  cards?: AskCard[];
-  [key: string]: unknown;
-};
+// 全局悬浮 agent(19 号修订):任意路由可唤起;上下文 = 当前路由 + 列表页勾选
+// (page-context 内存上行)。2026-10-15「Ask 会话」四表面收敛:帧机/断线恢复/
+// 反馈闩锁/history 防抖落盘/会话身份全部下沉 lib/ask-session 单点,本组件只剩
+// 面板 chrome、动作行(导出 CSV/钉看板/存报告)与 localStorage 键。
 
-type AgentEvent = 'start' | 'user' | 'pending' | 'result' | 'clarify' | 'unsupported' | 'error';
-
-type AgentFrame = {
-  id: number;
-  event: AgentEvent | string;
-  data: AgentFrameData;
-  saved?: boolean;
-  rated?: FeedbackVerdict;
-};
-
-type AskResultFrame = { event: AgentEvent | string; data: Record<string, unknown> };
-
-type AgentFrameData = {
-  message?: string;
-  options?: Array<{ label: string }>;
-  /** 断线恢复句柄(AskStreamError 落到 error 帧上):「恢复结果」按钮消费 */
-  resume?: { askId: string; lastEventId: number; question: string; pageContext: object };
-} & Record<string, unknown>;
-
-function exportResultCsv(data: ResultData) {
+function exportResultCsv(data: AskFrameData) {
   const rows = data.rows || [];
   if (!rows.length) return;
   const cols = Object.keys(rows[0]);
@@ -64,57 +40,35 @@ const SEL_KIND_LABEL: Record<string, string> = { order: '订单', spu: '商品',
 export function FloatingAgent({ route }: { route: string }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [frames, setFrames] = useState<AgentFrame[]>([]);
   const [q, setQ] = useState('');
   // 勾选实时联动(T5):内存广播库订阅,勾/清即刻反映到面板横幅
   const [selMap, setSelMap] = useState<SelectionMap>({});
   useEffect(() => subscribe((s) => setSelMap({ ...s })), []);
-  // 会话历史持久化:刷新/重开面板不丢对话(localStorage,上限 60 帧)
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('merchant-admin.agent.history') || '[]');
-      if (Array.isArray(saved) && saved.length) setFrames(saved);
-    } catch {
-      /* 坏档忽略 */
-    }
-  }, []);
-  // 落盘防抖(夜审 2026-09-29):SSE 流式期间逐帧 setFrames 曾逐帧全量
-  // JSON.stringify 同步写、阻塞主线程 —— 800ms 拖尾合流。仅「非空→空」
-  // (新对话清空)立即落盘空数组保持同步语义;空→空(挂载初态)不写,
-  // 避免把待恢复的历史抹掉;卸载 flush 尾帧,关面板不丢对话。
-  const latestFramesRef = useRef<AgentFrame[]>(frames);
-  const prevLenRef = useRef(frames.length);
-  const historyFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const wasPopulated = prevLenRef.current > 0;
-    prevLenRef.current = frames.length;
-    latestFramesRef.current = frames;
-    if (historyFlushRef.current) clearTimeout(historyFlushRef.current);
-    if (frames.length === 0) {
-      if (wasPopulated) {
-        try {
-          localStorage.setItem('merchant-admin.agent.history', '[]');
-        } catch {}
-      }
-      return;
-    }
-    historyFlushRef.current = setTimeout(() => {
-      try {
-        localStorage.setItem('merchant-admin.agent.history', JSON.stringify(frames.slice(-60)));
-      } catch {}
-    }, 800);
-  }, [frames]);
-  useEffect(
-    () => () => {
-      if (historyFlushRef.current) clearTimeout(historyFlushRef.current);
-      if (latestFramesRef.current.length === 0) return;
-      try {
-        localStorage.setItem('merchant-admin.agent.history', JSON.stringify(latestFramesRef.current.slice(-60)));
-      } catch {}
-    },
-    [],
-  );
+
+  const sessionRef = useRef<AskSession | null>(null);
+  if (!sessionRef.current) {
+    sessionRef.current = createAskSession({
+      getSessionId: currentAskSessionId,
+      getPageContext: () => ({ route, selection: getSelection(), selectionLabels: getSelectionLabels() }),
+      history: {
+        load: () => {
+          try {
+            const saved = JSON.parse(localStorage.getItem('merchant-admin.agent.history') || '[]');
+            return Array.isArray(saved) && saved.length ? (saved as SessionFrame[]) : null;
+          } catch {
+            return null; /* 坏档忽略 */
+          }
+        },
+        save: (frames) => {
+          try {
+            localStorage.setItem('merchant-admin.agent.history', JSON.stringify(frames));
+          } catch {}
+        },
+      },
+    });
+  }
+  const session = sessionRef.current;
+  const { frames, busy, rateBusyId } = useAskSession(session);
   const askRef = useRef<(q?: string) => void>(() => {});
 
   // 就地唤起(如订单页「向 AI 提问」):开面板 + 自动提问,不跳页
@@ -128,206 +82,46 @@ export function FloatingAgent({ route }: { route: string }) {
     return () => window.removeEventListener('merchant-admin:open-agent', handler);
   }, []);
 
-  /** 成功帧落屏:pending 摘除 + 过滤心跳后按本地 id 顺序重编(ADR-0005 流式渲染)。 */
-  function appendAskResult(pendingId: number, question: string, result: AskResultFrame[]) {
-    setFrames((prev) => {
-      const withoutPending = prev.filter((f) => f.id !== pendingId);
-      return [
-        ...withoutPending,
-        // 心跳帧是传输层保活(A6),不是对话内容,不入历史
-        ...(result as AskResultFrame[])
-          .filter((f: AskResultFrame) => f.event !== 'heartbeat')
-          .map((f: AskResultFrame, k: number) => ({
-            id: pendingId + 10 + k,
-            event: f.event,
-            data: f.event === 'result' ? { ...f.data, __question: question } : f.data,
-          })),
-      ];
-    });
-  }
-
-  /** 断线恢复(ADR-0013 同族,ask 面版):错误帧携带的句柄重新进流 ——
-   * 服务端只补 seq>last 的帧不重算(生产者断开不停算,流留 Redis 600s)。 */
-  async function resumeAsk(frame: AgentFrame) {
-    const resume = frame.data.resume;
-    if (!resume || busy) return;
-    setBusy(true);
-    const pendingId = ++frameSeq * 100 + 1;
-    setFrames((prev) => [...prev, { id: pendingId, event: 'pending', data: {} }]);
-    try {
-      const result = await api.ask(resume.question, resume.pageContext, undefined, {
-        askId: resume.askId,
-        lastEventId: resume.lastEventId,
-      });
-      // 连旧错误帧一起摘:恢复成功后不留失效的「恢复结果」按钮
-      setFrames((prev) => {
-        const withoutStale = prev.filter((f) => f.id !== pendingId && f.id !== frame.id);
-        return [
-          ...withoutStale,
-          ...(result as AskResultFrame[])
-            .filter((f) => f.event !== 'heartbeat')
-            .map((f, k) => ({
-              id: pendingId + 10 + k,
-              event: f.event,
-              data: f.event === 'result' ? { ...f.data, __question: resume.question } : f.data,
-            })),
-        ];
-      });
-    } catch (err) {
-      setFrames((prev) =>
-        prev
-          // 连旧错误帧一起摘:恢复再失败只留最新句柄,不堆「恢复结果」按钮
-          .filter((f) => f.id !== pendingId && f.id !== frame.id)
-          // 恢复补投的部分帧照常上屏(2026-10-13 夜评:与首失败对称,严禁丢弃)
-          .concat(
-            ...(err instanceof AskStreamError && err.frames.length
-              ? (err.frames as AskResultFrame[])
-                  .filter((f) => f.event !== 'heartbeat')
-                  .map((f, k) => ({
-                    id: pendingId + 10 + k,
-                    event: f.event,
-                    data: f.data,
-                  }))
-              : []),
-          )
-          .concat({
-            id: pendingId + 10 + (err instanceof AskStreamError ? err.frames.length : 0),
-            event: 'error',
-            data: {
-              message: String(err),
-              ...(err instanceof AskStreamError
-                ? {
-                    resume: {
-                      askId: err.askId,
-                      lastEventId: err.lastEventId,
-                      question: resume.question,
-                      pageContext: resume.pageContext,
-                    },
-                  }
-                : {}),
-            },
-          }),
-      );
-    }
-    setBusy(false);
-  }
-
-  async function ask(questionOverride?: string) {
+  /** 面板触发提问:问句取输入框(或就地唤起带参),实际发出交会话(busy 闸在 core)。 */
+  function submit(questionOverride?: string) {
     const question = (questionOverride ?? q).trim();
     if (!question || busy) return;
-    setBusy(true);
     setQ('');
-    const selection = getSelection();
-    // T3 多轮:浏览器侧稳定 session_id(服务端 Redis 按此键存会话上下文)
-    let sessionId = localStorage.getItem('merchant-admin.session');
-    if (!sessionId) {
-      sessionId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      localStorage.setItem('merchant-admin.session', sessionId);
-    }
-    // 用户问句即时上屏 + 思考中占位(不等 AI 返回才显示)
-    const userStamp = ++frameSeq * 100;
-    const pendingId = userStamp + 1;
-    setFrames((prev) => [
-      ...prev,
-      { id: userStamp, event: 'user', data: { message: question } },
-      { id: pendingId, event: 'pending', data: {} },
-    ]);
-    try {
-      const result = await api.ask(question, { route, selection, selectionLabels: getSelectionLabels(), sessionId });
-      appendAskResult(pendingId, question, result as AskResultFrame[]);
-    } catch (err) {
-      setFrames((prev) =>
-        prev
-          .filter((f) => f.id !== pendingId)
-          // 断线前已收到的部分帧(如 clarify)照常上屏,不因失败丢弃
-          .concat(
-            ...(err instanceof AskStreamError && err.frames.length
-              ? (err.frames as AskResultFrame[])
-                  .filter((f) => f.event !== 'heartbeat')
-                  .map((f, k) => ({
-                    id: pendingId + 10 + k,
-                    event: f.event,
-                    data: f.data,
-                  }))
-              : []),
-          )
-          .concat({
-            id: pendingId + 10 + (err instanceof AskStreamError ? err.frames.length : 0),
-            event: 'error',
-            data: {
-              message: String(err),
-              // 恢复句柄:流留 Redis 600s、生产者断开不停算,「恢复结果」不重算
-              ...(err instanceof AskStreamError
-                ? {
-                    resume: {
-                      askId: err.askId,
-                      lastEventId: err.lastEventId,
-                      question,
-                      pageContext: { route, selection, selectionLabels: getSelectionLabels(), sessionId },
-                    },
-                  }
-                : {}),
-            },
-          }),
-      );
-    }
-    setBusy(false);
+    void session.ask(question);
   }
-  askRef.current = (qOverride?: string) => void ask(qOverride);
+  askRef.current = (qOverride?: string) => submit(qOverride);
 
   function newConversation() {
-    setFrames([]);
-    localStorage.removeItem('merchant-admin.agent.history');
+    // 会话清帧 + 「非空→空」立即落盘空数组(core reset);轮转会话身份 ——
+    // 全屏问答页同键随动(一个员工一个当前 Ask 会话身份)
+    session.reset();
     localStorage.setItem('merchant-admin.session', `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   }
 
-  function pinToBoard(data: ResultData) {
+  function pinToBoard(f: SessionFrame) {
     const pins = JSON.parse(localStorage.getItem('merchant-admin.board') || '[]');
     pins.push({
       id: `pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      question: String(data.__question || ''),
+      question: f.question ?? '',
       route,
       pinnedAt: new Date().toISOString(),
     });
     localStorage.setItem('merchant-admin.board', JSON.stringify(pins.slice(-20)));
   }
 
-  async function saveToReport(frame: AgentFrame) {
-    const data = frame.data as ResultData;
+  async function saveToReport(f: SessionFrame) {
     try {
       await api.reports.saveFromResult({
-        question: String(data.__question || ''),
-        metric: String(data.metric || 'result'),
-        unit: String(data.unit || ''),
-        caliber: String(data.caliber || ''),
-        rows: data.rows || [],
-        chart: typeof data.chart === 'string' ? data.chart : undefined,
+        question: f.question ?? '',
+        metric: String(f.data.metric || 'result'),
+        unit: String(f.data.unit || ''),
+        caliber: String(f.data.caliber || ''),
+        rows: f.data.rows || [],
+        chart: typeof f.data.chart === 'string' ? f.data.chart : undefined,
       });
-      setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, saved: true } : f)));
+      session.markSaved(f.id);
     } catch (err) {
-      setFrames((prev) => [
-        ...prev,
-        { id: ++frameSeq, event: 'error', data: { message: `存报告失败:${String(err)}` } },
-      ]);
-    }
-  }
-
-  // 反馈闭环(v3.1):乐观置 rated(随 localStorage 历史持久化),失败回滚 + 错误帧。
-  // rateBusyId 单飞防双击;服务端另有 UNIQUE 三元 upsert + dedupe 双保险。
-  const [rateBusyId, setRateBusyId] = useState<number | null>(null);
-  async function rate(frame: AgentFrame, verdict: FeedbackVerdict, note?: string) {
-    const traceId = String(frame.data.traceId || '');
-    if (!traceId || rateBusyId !== null) return;
-    setRateBusyId(frame.id);
-    const prior = frame.rated;
-    setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, rated: verdict } : f)));
-    try {
-      await api.feedback.submit({ traceId, verdict, note });
-    } catch (err) {
-      setFrames((prev) => prev.map((f) => (f.id === frame.id ? { ...f, rated: prior } : f)));
-      setFrames((prev) => [...prev, { id: ++frameSeq, event: 'error', data: { message: `反馈失败:${String(err)}` } }]);
-    } finally {
-      setRateBusyId(null);
+      session.pushError(`存报告失败:${String(err)}`);
     }
   }
 
@@ -406,128 +200,114 @@ export function FloatingAgent({ route }: { route: string }) {
         {frames.length === 0 && (
           <div className="text-[11px] text-zinc-400">试试:本月销量 Top10 / 差评最多的 SKU / 会话量多少</div>
         )}
-        {frames
-          .filter((f) => f.event !== 'start')
-          .map((f, fi, visible) => {
-            // 组尾判定(反馈按轮次):同 traceId 连续帧(场景包子帧)只在末帧出按钮;
-            // ask_all 分段各自 traceId,各段各评。traceId 缺失(error/clarify/旧历史帧)不渲染。
-            const traceId = String(f.data.traceId || '');
-            const isFeedbackTail =
-              Boolean(traceId) &&
-              (fi + 1 >= visible.length || !visible[fi + 1].data.traceId || visible[fi + 1].data.traceId !== traceId);
-            return (
-              <div key={f.id} className={f.event === 'user' ? 'flex justify-end' : ''}>
-                {f.event === 'user' ? (
-                  <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
-                ) : f.event === 'pending' ? (
-                  <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-400">
-                    正在解析问题并查询…
+        {frames.map((f, fi) => (
+          <div key={f.id} className={f.event === 'user' ? 'flex justify-end' : ''}>
+            {f.event === 'user' ? (
+              <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm text-white">{f.data.message}</div>
+            ) : f.event === 'pending' ? (
+              <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-400">
+                正在解析问题并查询…
+              </div>
+            ) : f.event === 'clarify' ? (
+              <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm">
+                {String(f.data.question ?? '')}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(f.data.options || []).map((o) => (
+                    <Button
+                      key={o.label}
+                      type="button"
+                      variant="outline"
+                      className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none"
+                      onClick={() => setQ(clarifyAskQuestion(f.data, o))}
+                    >
+                      {o.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : f.event === 'result' ? (
+              <>
+                <ResultCard data={f.data} />
+                {f.data.summary ? (
+                  <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                    <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
+                    {String(f.data.summary ?? '')}
                   </div>
-                ) : f.event === 'clarify' ? (
-                  <div className="rounded-xl border border-amber-200 bg-white p-3 text-sm">
-                    {String(f.data.question ?? '')}
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {((f.data.options || []) as Array<{ label: string }>).map((o, j: number) => (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          /* biome-ignore lint/suspicious/noArrayIndexKey: clarify 选项无 id,静态文案按钮不重排 */
-                          key={j}
-                          className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none"
-                          onClick={() => {
-                            setQ(`按${o.label}`);
-                          }}
-                        >
-                          {o.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                ) : f.event === 'result' ? (
-                  <>
-                    <ResultCard data={f.data as ResultData} />
-                    {(f.data as ResultData).summary ? (
-                      <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                        <span className="mr-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500">速览</span>
-                        {String((f.data as ResultData).summary ?? '')}
-                      </div>
-                    ) : null}
-                    {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
-                      <div className="mt-1.5 flex gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900"
-                          onClick={() => exportResultCsv(f.data as ResultData)}
-                        >
-                          导出 CSV
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900"
-                          title="钉到看板页定时重放刷新"
-                          onClick={() => pinToBoard(f.data as ResultData)}
-                        >
-                          📌 钉看板
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={f.saved}
-                          className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
-                          onClick={() => void saveToReport(f)}
-                        >
-                          {f.saved ? '已存入我的报告 ✓' : '存为报告'}
-                        </Button>
-                      </div>
-                    )}
-                    {/* 反馈行在动作行闸外:诚实空结果(rows=[])同样可评 */}
-                    {isFeedbackTail ? (
-                      <FeedbackButtons
-                        rated={f.rated}
-                        busy={rateBusyId === f.id}
-                        onSubmit={(verdict, note) => void rate(f, verdict, note)}
-                      />
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="rounded-xl border border-zinc-200 bg-white p-3 text-sm">
-                    {String(f.data.message ?? f.event)}
-                    {f.data.caliber ? (
-                      <div className="mt-1 text-[11px] text-zinc-400">口径:{String(f.data.caliber)}</div>
-                    ) : null}
-                    {/* 断线恢复(ADR-0013 同族,ask 面版):AskStreamError 落地的
-                        error 帧带句柄 —— 流还在 Redis(600s)、生产者仍在后台跑,
-                        恢复只补剩余帧不重算;过期(流不存在)由服务端 error 帧
-                        诚实回「请重新提问」。 */}
-                    {f.data.resume ? (
-                      <div className="mt-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={busy}
-                          className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
-                          onClick={() => void resumeAsk(f)}
-                        >
-                          恢复结果
-                        </Button>
-                      </div>
-                    ) : null}
-                    {/* unsupported 帧仅开放 👎:「这问题本该能答」是词林缺口的最高价值信号 */}
-                    {f.event === 'unsupported' && isFeedbackTail ? (
-                      <FeedbackButtons
-                        allowUp={false}
-                        rated={f.rated}
-                        busy={rateBusyId === f.id}
-                        onSubmit={(verdict, note) => void rate(f, verdict, note)}
-                      />
-                    ) : null}
+                ) : null}
+                {Array.isArray(f.data.rows) && f.data.rows.length > 0 && (
+                  <div className="mt-1.5 flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900"
+                      onClick={() => exportResultCsv(f.data)}
+                    >
+                      导出 CSV
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900"
+                      title="钉到看板页定时重放刷新"
+                      onClick={() => pinToBoard(f)}
+                    >
+                      📌 钉看板
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={f.saved}
+                      className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
+                      onClick={() => void saveToReport(f)}
+                    >
+                      {f.saved ? '已存入我的报告 ✓' : '存为报告'}
+                    </Button>
                   </div>
                 )}
+                {/* 反馈行在动作行闸外:诚实空结果(rows=[])同样可评 */}
+                {isFeedbackTail(frames, fi) ? (
+                  <FeedbackButtons
+                    rated={f.rated}
+                    busy={rateBusyId === f.id}
+                    onSubmit={(verdict, note) => void session.rate(f.id, verdict, note)}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <div className="rounded-xl border border-zinc-200 bg-white p-3 text-sm">
+                {String(f.data.message ?? f.event)}
+                {f.data.caliber ? (
+                  <div className="mt-1 text-[11px] text-zinc-400">口径:{String(f.data.caliber)}</div>
+                ) : null}
+                {/* 断线恢复(ADR-0013 同族):error 帧带句柄 —— 流还在 Redis(600s)、
+                    生产者仍在后台跑,恢复只补剩余帧不重算;过期(流不存在)由服务端
+                    error 帧诚实回「请重新提问」。句柄细节在 ask-session 单点。 */}
+                {f.data.resume ? (
+                  <div className="mt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      className="h-auto rounded-lg border-zinc-300 px-2.5 py-1 text-[11px] font-normal text-zinc-600 shadow-none hover:border-zinc-900 hover:text-zinc-900 disabled:opacity-60"
+                      onClick={() => void session.resume(f.id)}
+                    >
+                      恢复结果
+                    </Button>
+                  </div>
+                ) : null}
+                {/* unsupported 帧仅开放 👎:「这问题本该能答」是词林缺口的最高价值信号 */}
+                {f.event === 'unsupported' && isFeedbackTail(frames, fi) ? (
+                  <FeedbackButtons
+                    allowUp={false}
+                    rated={f.rated}
+                    busy={rateBusyId === f.id}
+                    onSubmit={(verdict, note) => void session.rate(f.id, verdict, note)}
+                  />
+                ) : null}
               </div>
-            );
-          })}
+            )}
+          </div>
+        ))}
         {busy && <div className="text-xs text-zinc-400">正在解析问题并查询…</div>}
       </div>
       <div className="flex shrink-0 gap-2 border-t border-zinc-100 p-3">
@@ -536,9 +316,9 @@ export function FloatingAgent({ route }: { route: string }) {
           placeholder="提问…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && void ask()}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
         />
-        <Button size="sm" disabled={busy} onClick={() => void ask()}>
+        <Button size="sm" disabled={busy} onClick={() => submit()}>
           发送
         </Button>
       </div>
