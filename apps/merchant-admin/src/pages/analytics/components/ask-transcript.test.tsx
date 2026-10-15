@@ -229,4 +229,30 @@ describe('AskTranscript(答案反馈闭环 v3.1)', () => {
     expect(screen.getByText('本月销量 Top10')).toBeInTheDocument();
     expect(screen.queryByText('heartbeat')).not.toBeInTheDocument();
   });
+
+  it('error 帧带 resume 句柄 → 渲染「恢复结果」,点击携句柄回调(全屏页与悬浮同权)', async () => {
+    const onResume = vi.fn();
+    render(
+      <MemoryRouter>
+        <AskTranscript
+          frames={[
+            { event: 'error', data: { message: 'TypeError: network error' } } as AskFrame,
+            {
+              event: 'error',
+              data: {
+                message: 'TypeError: network error',
+                resume: { askId: 'ask_fs1', lastEventId: 2, question: '本月销量 Top10' },
+              },
+            } as AskFrame,
+          ]}
+          onAsk={onAsk}
+          onResume={onResume}
+        />
+      </MemoryRouter>,
+    );
+    // 无句柄 error 帧不出按钮;带句柄出且只出一份
+    expect(screen.getAllByRole('button', { name: '恢复结果' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '恢复结果' }));
+    expect(onResume).toHaveBeenCalledWith({ askId: 'ask_fs1', lastEventId: 2, question: '本月销量 Top10' });
+  });
 });

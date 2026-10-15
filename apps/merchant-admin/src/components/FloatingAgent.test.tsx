@@ -140,6 +140,22 @@ describe('FloatingAgent(对话面板交互)', () => {
     expect(screen.getByRole('button', { name: '恢复结果' })).toBeInTheDocument();
   });
 
+  it('恢复再失败:resume 补投的部分帧照常上屏(与首失败对称,严禁丢弃)', async () => {
+    askMock
+      .mockRejectedValueOnce(new AskStreamError('TypeError: network error', 'ask_x1', 1, []))
+      .mockRejectedValueOnce(
+        new AskStreamError('TypeError: network error', 'ask_x1', 3, [
+          { event: 'clarify', data: { question: '恢复补投的澄清帧', options: [] } },
+        ]),
+      );
+    renderAgent();
+    openPanel();
+    submit('本月销量');
+    fireEvent.click(await screen.findByRole('button', { name: '恢复结果' }));
+    expect(await screen.findByText('恢复补投的澄清帧')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '恢复结果' })).toBeInTheDocument();
+  });
+
   it('历史持久化:渲染时恢复 localStorage 中的帧', () => {
     localStorage.setItem(
       'merchant-admin.agent.history',

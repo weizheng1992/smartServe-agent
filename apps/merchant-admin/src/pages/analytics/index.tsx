@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { type AskStreamError, api } from '@/lib/api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'ui';
 import { AskInputBar } from './components/ask-input-bar';
@@ -21,6 +21,29 @@ export default function AnalyticsPage({ role }: { role: string }) {
   const [reportMsg, setReportMsg] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  /** 错误帧落屏:AskStreamError 附恢复句柄(流留 Redis 600s,恢复不重算;
+   *  question 由调用侧带入 —— 错误对象只携 askId/lastEventId)。 */
+  const appendError = useCallback((err: unknown, question: string) => {
+    setFrames((p) => [
+      ...p,
+      {
+        event: 'error',
+        data: {
+          message: String(err),
+          ...(err instanceof Error && err.name === 'AskStreamError'
+            ? {
+                resume: {
+                  askId: (err as AskStreamError).askId,
+                  lastEventId: (err as AskStreamError).lastEventId,
+                  question,
+                },
+              }
+            : {}),
+        },
+      } as AskFrame,
+    ]);
+  }, []);
+
   const ask = useCallback(
     async (question: string) => {
       if (!question.trim() || busy) return;
@@ -30,12 +53,43 @@ export default function AnalyticsPage({ role }: { role: string }) {
         // 流式:每凑齐一帧即上屏(含 clarify/result/unsupported,不再整段等待)
         await api.ask(question, undefined, (f) => setFrames((p) => [...p, f]));
       } catch (err) {
-        setFrames((p) => [...p, { event: 'error', data: { message: String(err) } }]);
+        appendError(err, question);
       }
       setBusy(false);
       requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 1e9 }));
     },
-    [busy],
+    [busy, appendError],
+  );
+
+  /** 断线恢复(ADR-0013 同族,全屏面版):携句柄重进流只补帧不重算;
+   *  旧错误帧按句柄匹配摘除 —— 成功不留失效按钮,再失败只留最新句柄。 */
+  const resumeAsk = useCallback(
+    async (resume: { askId: string; lastEventId: number; question: string }) => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        await api.ask(resume.question, undefined, (f) => setFrames((p) => [...p, f]), {
+          askId: resume.askId,
+          lastEventId: resume.lastEventId,
+        });
+        setFrames((p) =>
+          p.filter(
+            (f) => !(f.event === 'error' && (f.data.resume as { askId?: string } | undefined)?.askId === resume.askId),
+          ),
+        );
+      } catch (err) {
+        // 摘旧句柄帧后落新错误帧(只留最新句柄,不堆「恢复结果」按钮)
+        setFrames((p) =>
+          p.filter(
+            (f) => !(f.event === 'error' && (f.data.resume as { askId?: string } | undefined)?.askId === resume.askId),
+          ),
+        );
+        appendError(err, resume.question);
+      }
+      setBusy(false);
+      requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 1e9 }));
+    },
+    [busy, appendError],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: 挂载即发出首问(仅一次)
@@ -70,7 +124,7 @@ export default function AnalyticsPage({ role }: { role: string }) {
         ))}
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto">
-        <AskTranscript frames={frames} onAsk={(q) => void ask(q)} />
+        <AskTranscript frames={frames} onAsk={(q) => void ask(q)} onResume={(h) => void resumeAsk(h)} busy={busy} />
         {busy && <div className="text-xs text-zinc-400">正在解析问题并查询…</div>}
       </div>
       <AskInputBar

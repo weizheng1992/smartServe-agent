@@ -1,5 +1,6 @@
 import { FloatingAgent } from '@/components/FloatingAgent';
 import { type MenuNode, api, clearSession, currentStaffEmail, hasBossSession } from '@/lib/api';
+import { flattenMenus, routeAllowed } from '@/lib/route-guard';
 import AnalyticsPage from '@/pages/analytics';
 import BoardPage from '@/pages/board';
 import CustomersPage from '@/pages/customers';
@@ -17,13 +18,6 @@ import StaffPage from '@/pages/system/staff';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
-
-function flattenMenus(nodes: MenuNode[]): Array<MenuNode & { top: string }> {
-  return nodes.flatMap((n) => [
-    ...(n.menuType === 'menu' ? [{ ...n, top: n.name }] : []),
-    ...flattenMenus(n.children || []),
-  ]);
-}
 
 export default function App() {
   const [authed, setAuthed] = useState(() => !!localStorage.getItem('merchant-admin.token'));
@@ -45,19 +39,25 @@ export default function App() {
 
 function AdminShell({ onLogout }: { onLogout: () => void }) {
   const [menus, setMenus] = useState<MenuNode[]>([]);
+  // 菜单装载态(2026-10-13 夜评收口:路由守卫的数据基础 —— loading/error 先行
+  // 呈现,fail-closed 严禁拿空树放行)
+  const [menusState, setMenusState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [role, setRole] = useState('');
   const [staff, setStaff] = useState<Array<{ id: string; email: string; displayName: string; role: string }>>([]);
   const navigate = useNavigate();
   const location = useLocation();
 
   const refresh = useCallback(async () => {
+    setMenusState('loading');
     try {
       const m = await api.menus();
       setMenus(m.menus);
       setRole(m.role);
       setStaff((await api.staffList()).staff);
+      setMenusState('ready');
     } catch (err) {
       console.error('[merchant-admin] 菜单/员工加载失败(网关未启动?)', err);
+      setMenusState('error');
     }
   }, []);
 
@@ -67,6 +67,9 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
 
   const routable = useMemo(() => flattenMenus(menus), [menus]);
   const currentTop = routable.find((r) => location.pathname.startsWith(r.route || '###'))?.top || '';
+  // 路由守卫:路径必须落在服务端下发的菜单树内(纪律不变 —— 前端只做可见性,
+  // 权限真源在服务端 permCode;服务端 403 仍兜住数据)
+  const allowed = menusState === 'ready' && routeAllowed(location.pathname, menus);
 
   // 切换 = 服务端换签目标员工 JWT;始终以保存的老板凭证发起
   const switchStaff = useCallback(
@@ -153,26 +156,45 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <Routes>
-            <Route path="/analytics" element={<AnalyticsPage role={role} />} />
-            <Route path="/board" element={<BoardPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/orders" element={<OrderWorkbench scope="orders" />} />
-            <Route path="/live-desk" element={<OrderWorkbench scope="live-desk" />} />
-            {/* 坐席台独立页(P2);旧 /live-desk 并存作回退面 */}
-            <Route path="/agent-desk" element={<LiveDeskPage />} />
-            <Route path="/promotions" element={<PromotionsPage />} />
-            <Route path="/customers" element={<CustomersPage />} />
-            <Route path="/menus" element={<MenusPage />} />
-            <Route path="/roles" element={<RolesPage />} />
-            <Route path="/staff" element={<StaffPage />} />
-            <Route path="/owner-mappings" element={<OwnerMappingsPage />} />
-            <Route path="/products" element={<ProductsPage />} />
-            <Route path="/products/:code" element={<ProductsPage focusCode="*" />} />
-            <Route path="/skus" element={<SkusPage />} />
-            <Route path="/spi-logs" element={<OrderWorkbench scope="spi-logs" />} />
-            <Route path="*" element={<NotFoundRedirect />} />
-          </Routes>
+          {menusState === 'loading' ? (
+            <div className="flex h-full items-center justify-center text-xs text-zinc-400">菜单加载中…</div>
+          ) : menusState === 'error' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3">
+              <div className="text-sm text-zinc-500">菜单加载失败(网关未启动或会话失效)</div>
+              <Button type="button" variant="outline" className="rounded-lg text-xs" onClick={() => void refresh()}>
+                重试
+              </Button>
+            </div>
+          ) : !allowed ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2">
+              <div className="text-3xl">🔒</div>
+              <div className="text-sm font-semibold text-zinc-800">无权访问</div>
+              <div className="max-w-sm text-center text-xs text-zinc-500">
+                当前身份的菜单中没有此页面(直敲 URL 已被拦截)。如需开通请联系管理员调整角色菜单。
+              </div>
+            </div>
+          ) : (
+            <Routes>
+              <Route path="/analytics" element={<AnalyticsPage role={role} />} />
+              <Route path="/board" element={<BoardPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/orders" element={<OrderWorkbench scope="orders" />} />
+              <Route path="/live-desk" element={<OrderWorkbench scope="live-desk" />} />
+              {/* 坐席台独立页(P2);旧 /live-desk 并存作回退面 */}
+              <Route path="/agent-desk" element={<LiveDeskPage />} />
+              <Route path="/promotions" element={<PromotionsPage />} />
+              <Route path="/customers" element={<CustomersPage />} />
+              <Route path="/menus" element={<MenusPage />} />
+              <Route path="/roles" element={<RolesPage />} />
+              <Route path="/staff" element={<StaffPage />} />
+              <Route path="/owner-mappings" element={<OwnerMappingsPage />} />
+              <Route path="/products" element={<ProductsPage />} />
+              <Route path="/products/:code" element={<ProductsPage focusCode="*" />} />
+              <Route path="/skus" element={<SkusPage />} />
+              <Route path="/spi-logs" element={<OrderWorkbench scope="spi-logs" />} />
+              <Route path="*" element={<NotFoundRedirect />} />
+            </Routes>
+          )}
         </div>
 
         <FloatingAgent route={location.pathname} />

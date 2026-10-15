@@ -178,8 +178,20 @@ export function FloatingAgent({ route }: { route: string }) {
         prev
           // 连旧错误帧一起摘:恢复再失败只留最新句柄,不堆「恢复结果」按钮
           .filter((f) => f.id !== pendingId && f.id !== frame.id)
+          // 恢复补投的部分帧照常上屏(2026-10-13 夜评:与首失败对称,严禁丢弃)
+          .concat(
+            ...(err instanceof AskStreamError && err.frames.length
+              ? (err.frames as AskResultFrame[])
+                  .filter((f) => f.event !== 'heartbeat')
+                  .map((f, k) => ({
+                    id: pendingId + 10 + k,
+                    event: f.event,
+                    data: f.data,
+                  }))
+              : []),
+          )
           .concat({
-            id: pendingId + 10,
+            id: pendingId + 10 + (err instanceof AskStreamError ? err.frames.length : 0),
             event: 'error',
             data: {
               message: String(err),

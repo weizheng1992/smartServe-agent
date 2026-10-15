@@ -39,8 +39,20 @@ function useJumpToOrder() {
 
 /** 问答流水:用户气泡 / 折线卡 / 表格卡 / 客户订单列表卡 / clarify 反问 / 诚实拒绝。
  *  反馈闭环(v3.1):终局帧组尾渲染踩/赞(轮次粒度,同 FloatingAgent);
- *  页面帧不持久化(与现状一致),rated 随会话内存。 */
-export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q: string) => void }) {
+ *  页面帧不持久化(与现状一致),rated 随会话内存。
+ *  断线恢复(2026-10-13 夜评收口):error 帧带 resume 句柄时渲染「恢复结果」,
+ *  与悬浮面板同权 —— 流留 Redis 600s、生产者断开不停算,恢复只补帧不重算。 */
+export function AskTranscript({
+  frames,
+  onAsk,
+  onResume,
+  busy = false,
+}: {
+  frames: AskFrame[];
+  onAsk: (q: string) => void;
+  onResume?: (resume: { askId: string; lastEventId: number; question: string }) => void;
+  busy?: boolean;
+}) {
   const jumpToOrder = useJumpToOrder();
   const [rated, setRated] = useState<Record<number, FeedbackVerdict>>({});
   const [rateBusy, setRateBusy] = useState<number | null>(null);
@@ -145,6 +157,21 @@ export function AskTranscript({ frames, onAsk }: { frames: AskFrame[]; onAsk: (q
                   </div>
                 )}
                 {f.data.caliber ? <div className="mt-1 text-[11px] text-zinc-400">口径:{f.data.caliber}</div> : null}
+                {onResume && f.data.resume ? (
+                  <div className="mt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      className="rounded-lg border-zinc-300 px-3 py-1.5 text-xs font-normal shadow-none hover:border-zinc-900 disabled:opacity-60"
+                      onClick={() =>
+                        onResume(f.data.resume as { askId: string; lastEventId: number; question: string })
+                      }
+                    >
+                      恢复结果
+                    </Button>
+                  </div>
+                ) : null}
                 {f.event === 'unsupported' ? feedbackProps(i, visible, f, false) : null}
               </div>
             )}
