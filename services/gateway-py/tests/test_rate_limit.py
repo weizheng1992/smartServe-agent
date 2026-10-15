@@ -109,22 +109,40 @@ class TestRateLimitMiddleware:
         rotated = await client.get("/api/chat/messages", headers={"x-tenant-id": "rl-t3"})
         assert rotated.status_code == 429
 
-    async def test_spi_scope_own_quota_and_precedes_auth(self, client, monkeypatch):
+    async def test_spi_contract_face_own_quota_and_precedes_auth(self, client, monkeypatch):
+        """SPI 限流挂真合同面 /spi/v1(2026-10-14 夜评:此前 300/min 错挂在
+        审批面 /api/v1/spi,第三方合同面裸奔)。限流仍在路由鉴权之前生效 ——
+        无凭证 401 计入窗口,超限 429 抢在 401 之前。"""
         monkeypatch.setenv("RATE_LIMIT_SPI_TENANT_MAX", "2")
         monkeypatch.setenv("RATE_LIMIT_SPI_IP_MAX", "99")
         for _ in range(2):
             # 无合法凭证 → 401,但未到限额(证明限流与鉴权各司其职)
-            res = await client.post(
-                "/api/v1/spi/escalation/thread_rl/close",
-                headers={"x-tenant-id": "rl-spi"},
-                json={},
-            )
+            res = await client.get("/spi/v1/products/search", headers={"x-tenant-id": "rl-spi"})
             assert res.status_code != 429
 
-        over = await client.post(
-            "/api/v1/spi/escalation/thread_rl/close", headers={"x-tenant-id": "rl-spi"}, json={}
-        )
+        over = await client.get("/spi/v1/products/search", headers={"x-tenant-id": "rl-spi"})
         assert over.status_code == 429  # 限流在路由鉴权之前生效
+
+    async def test_approval_face_no_longer_limited(self, client, monkeypatch):
+        """审批面 /api/v1/spi 移出限流范围(API-key 鉴权自守;内部面非 TS 规格
+        限流对象):窗口压到 1 也不得出现 429。"""
+        monkeypatch.setenv("RATE_LIMIT_SPI_TENANT_MAX", "1")
+        monkeypatch.setenv("RATE_LIMIT_SPI_IP_MAX", "1")
+        for _ in range(3):
+            res = await client.post(
+                "/api/v1/spi/escalation/thread_rl/close",
+                headers={"x-tenant-id": "rl-approval"},
+                json={},
+            )
+            assert res.status_code != 429, f"审批面不得再挂 SPI 限流: {res.status_code}"
+
+    def test_rate_scopes_pin_real_contract_face(self):
+        """范围映射钉死:chat + 真合同面 /spi/v1;/api/v1/spi 审批面不在册。"""
+        from gateway_py.rate_limit import _RATE_SCOPES
+
+        assert ("/api/chat", "chat") in _RATE_SCOPES
+        assert ("/spi/v1", "spi") in _RATE_SCOPES
+        assert all(prefix != "/api/v1/spi" for prefix, _ in _RATE_SCOPES)
 
     async def test_non_scoped_route_never_limited(self, client, monkeypatch):
         monkeypatch.setenv("RATE_LIMIT_CHAT_TENANT_MAX", "1")

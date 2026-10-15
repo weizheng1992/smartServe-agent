@@ -170,7 +170,8 @@ VALUES (
 
 ```bash
 # services/.env（网关读取）
-MERCHANT_API_SECRET=aurora_secret_key_8899   # SPI 验签密钥;缺省回落 aurora_secret_key_8899
+MERCHANT_API_SECRET=<openssl rand -hex 32 生成>   # SPI 验签密钥;2026-10-14 起 fail-closed ——
+                                                  # env 缺失时签名请求一律拒绝(源码兜底密钥已删除)
 ```
 
 ---

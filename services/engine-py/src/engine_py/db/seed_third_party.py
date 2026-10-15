@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 from sqlalchemy import text
 
@@ -95,7 +96,7 @@ VALUES (
   '您好！我是极光潮品官方智能客服。请问有什么可以帮您？',
   'published',
   1,
-  '{"mode": "remote_spi", "spiBaseUrl": "http://localhost:3005", "apiSecret": "aurora_secret_key_8899", "timeoutMs": 5000}'::jsonb,
+  '{"mode": "remote_spi", "spiBaseUrl": "http://localhost:3005", "apiSecret": "__SPI_SECRET__", "timeoutMs": 5000}'::jsonb,
   '["skill_order_address_modification", "skill_order_refund", "skill_product_inquiry"]'::jsonb,
   '{
     "welcomeText": "您好！欢迎来到 {brand} 👋 我是极光小助手，可以帮您：\\n1. 查订单、改收货地址\\n2. 办退款与售后\\n3. 推荐与查询商品\\n\\n点击下方快捷入口，或直接说出您的需求～",
@@ -114,6 +115,14 @@ ON CONFLICT (id) DO UPDATE SET
   system_prompt = EXCLUDED.system_prompt,
   onboarding_config = EXCLUDED.onboarding_config;
 """
+
+# SPI 验签密钥只认 env(2026-10-14 夜评收口:源码兜底密钥删除,网关 fail-closed)。
+# 种子配置与网关读同一 MERCHANT_API_SECRET;双缺落开发占位值 —— 联调两端须同值
+# 显式配置,生产严禁使用占位值。
+_TENANT_SQL = _TENANT_SQL.replace(
+    "__SPI_SECRET__",
+    os.environ.get("MERCHANT_API_SECRET") or "dev-spi-secret-change-me",
+)
 
 _PRODUCTS = [
     ("AURORA-SKU-001", "aurora", "极光纯棉重磅短袖T恤 (220g重磅)", "apparel", 129.0, 180),

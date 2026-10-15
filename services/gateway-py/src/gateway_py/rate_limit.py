@@ -40,8 +40,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# (路径前缀, 作用域) —— 精确匹配前缀或其子路径;仅这两组高频入口限流
-_RATE_SCOPES = (("/api/chat", "chat"), ("/api/v1/spi", "spi"))
+# (路径前缀, 作用域) —— 精确匹配前缀或其子路径;仅这两组高频入口限流。
+# spi 挂真合同面 /spi/v1(2026-10-14 夜评勘正:此前错挂审批面 /api/v1/spi,
+# 第三方合同面 /spi/v1/* 反而裸奔;审批面 API-key 鉴权自守,非 TS 规格限流对象)。
+_RATE_SCOPES = (("/api/chat", "chat"), ("/spi/v1", "spi"))
 
 _DEFAULT_LIMITS = {"chat": {"tenant": 60, "ip": 120}, "spi": {"tenant": 300, "ip": 600}}
 

@@ -28,10 +28,6 @@ def _merchant_id() -> str:
     return os.environ.get("MERCHANT_ID", "aurora")
 
 
-def _api_secret() -> str:
-    return os.environ.get("MERCHANT_API_SECRET") or os.environ.get("API_SECRET") or "aurora_secret_key_8899"
-
-
 def _now_ms() -> int:
     return int(time.time() * 1000)
 

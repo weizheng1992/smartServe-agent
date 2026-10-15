@@ -79,6 +79,29 @@ class TestSpiSignatureEnforcement:
         assert res.status_code == 401
         assert "Invalid HMAC" in res.json()["message"]
 
+    async def test_fail_closed_when_secret_env_missing(self, client, monkeypatch):
+        """env 双缺必须 fail-closed(2026-10-14 夜评 🟡:源码兜底密钥
+        aurora_secret_key_8899 = 密钥进 git 史,拿着源码即可伪造签名)。
+        双缺时签什么都被拒,错误信息点名缺失的 env 变量。"""
+        monkeypatch.delenv("MERCHANT_API_SECRET", raising=False)
+        monkeypatch.delenv("API_SECRET", raising=False)
+        # 用历史硬编码密钥签名 —— 修前此请求 200(兜底密钥命中),修后必须 401
+        headers = _signed_headers("GET", "/spi/v1/products/search", secret="aurora_secret_key_8899")
+        res = await client.get("/spi/v1/products/search", headers=headers)
+        assert res.status_code == 401
+        body = res.json()
+        assert body["success"] is False
+        assert "MERCHANT_API_SECRET" in body["message"], f"错误须点名缺失 env: {body['message']}"
+
+    async def test_missing_signature_never_fails_open(self, client, monkeypatch):
+        """免签名后门封死(夜评 🟡 残留面):require_signature 参数删除后,
+        无签名恒 401,不存在任何「免验签」调用形态。"""
+        monkeypatch.setenv("MERCHANT_API_SECRET", _SPI_SECRET)
+        for path in _SPI_GET_PATHS:
+            res = await client.get(path)
+            assert res.status_code == 401, f"{path} 未签名必须 401"
+            assert "signature" in res.json()["message"]
+
     async def test_stale_timestamp_beyond_300s_rejected(self, client, monkeypatch):
         monkeypatch.setenv("MERCHANT_API_SECRET", _SPI_SECRET)
         stale_ts = str(int(time.time() * 1000) - 301_000)

@@ -94,12 +94,15 @@ async def verify_spi_request(
     signature: str | None,
     timestamp: str | None,
     nonce: str | None,
-    require_signature: bool = True,
 ) -> tuple[bool, str | None]:
+    """SPI 合同面 HMAC 验签(fail-closed,2026-10-14 夜评 🟡 收口):
+    - 无签名恒拒绝(免签名后门参数已删除 —— 五调用点此前全显式 True,参数
+      是纯逃逸面);
+    - 密钥只认 env(MERCHANT_API_SECRET > API_SECRET),源码兜底密钥
+      aurora_secret_key_8899 删除 —— 密钥进源码即进 git 史,拿着仓库即可
+      伪造签名;env 双缺时拒绝并响亮留痕,生产在 .env 配置。"""
     if not signature:
-        if require_signature:
-            return False, "Missing x-signature header for protected SPI endpoint"
-        return True, None
+        return False, "Missing x-signature header for protected SPI endpoint"
     if not timestamp or not nonce:
         return False, "Missing x-timestamp or x-nonce headers for signed request"
     try:
@@ -108,7 +111,13 @@ async def verify_spi_request(
         return False, "Request timestamp expired (> 5 minutes window)"
     if abs(_ts_ms() - req_time) > 300000:
         return False, "Request timestamp expired (> 5 minutes window)"
-    secret = os.environ.get("MERCHANT_API_SECRET") or os.environ.get("API_SECRET") or "aurora_secret_key_8899"
+    secret = os.environ.get("MERCHANT_API_SECRET") or os.environ.get("API_SECRET")
+    if not secret:
+        print(
+            "[SPI] HMAC 密钥未配置(MERCHANT_API_SECRET/API_SECRET 均缺),fail-closed 拒绝验签 —— "
+            "生产/联调环境须在 .env 配置密钥"
+        )
+        return False, "SPI secret not configured (set MERCHANT_API_SECRET)"
     ok = hmac_verify(secret, signature, method, path, timestamp, nonce, body)
     if not ok:
         return False, "Invalid HMAC-SHA256 signature"
@@ -763,9 +772,9 @@ async def store_chat_stream(
 
 
 # ---------------------------------------------------------------------------
-# /spi/v1 — 对外 SPI 合同(HMAC 强制;2026-10-02 code-review:四条 GET 此前
-# require_signature=False 免签名放行,商户订单/用户 PII 裸奔,违背
-# tools-registry §1.2,也对不上 merchant-onboarding-guide 已宣称的验签防护)
+# /spi/v1 — 对外 SPI 合同(HMAC 强制;2026-10-02 code-review 收免签名放行,
+# 2026-10-14 夜评收口:require_signature 逃逸参数删除(无签名恒拒)+ 源码
+# 兜底密钥删除(env 双缺 fail-closed,见 verify_spi_request))
 # ---------------------------------------------------------------------------
 
 
@@ -779,7 +788,7 @@ async def spi_products_search(
     try:
         ok, error = await verify_spi_request(
             request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})
@@ -797,7 +806,7 @@ async def spi_user_info(request: Request, userId: str | None = Query(None), user
     try:
         ok, error = await verify_spi_request(
             request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})
@@ -818,7 +827,7 @@ async def spi_orders_list(
     try:
         ok, error = await verify_spi_request(
             request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})
@@ -836,7 +845,7 @@ async def spi_orders_detail(request: Request, orderId: str | None = Query(None))
     try:
         ok, error = await verify_spi_request(
             request.method, request.url.path, "", request.headers.get("x-signature"),
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})
@@ -861,7 +870,7 @@ async def spi_orders_action(request: Request):
 
         ok, error = await verify_spi_request(
             request.method, request.url.path, raw_body, signature,
-            request.headers.get("x-timestamp"), request.headers.get("x-nonce"), require_signature=True,
+            request.headers.get("x-timestamp"), request.headers.get("x-nonce"),
         )
         if not ok:
             return JSONResponse(status_code=401, content={"success": False, "message": error})

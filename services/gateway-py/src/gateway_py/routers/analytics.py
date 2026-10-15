@@ -144,7 +144,9 @@ async def _ctx(request: Request) -> dict:
     """统一请求上下文:租户 + 员工身份(JWT)+ 角色 + 按钮权限点闭集。"""
     tc = require_tenant_context()
     claims = await require_claims(request.headers.get("authorization"))
-    business_id = tc.get("tenantId") or "aurora"
+    # require_tenant_context 已保证 tenantId 非空(缺失即 403)—— 隐式默认
+    # 兜底是 spec 明令废弃形状,2026-10-14 夜评微型复发勘正后直取。
+    business_id = tc["tenantId"]
     if business_id not in _SEEDED_TENANTS:
         await rbac.ensure_defaults(business_id)
         _SEEDED_TENANTS.add(business_id)
