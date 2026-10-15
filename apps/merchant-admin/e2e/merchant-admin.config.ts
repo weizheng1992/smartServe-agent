@@ -20,8 +20,10 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
+      // webServer cwd = config 目录(e2e/):此前 `cd services/gateway-py` 从该目录
+      // 永远失败 —— 4000 常驻时 reuseExistingServer 跳过故从未暴露(2026-10-15 修)
       command:
-        'cd services/gateway-py && uv run --env-file ../../.env uvicorn gateway_py.main:app --host 127.0.0.1 --port 4000',
+        'cd ../../../services/gateway-py && uv run --env-file ../../.env uvicorn gateway_py.main:app --host 127.0.0.1 --port 4000',
       url: 'http://localhost:4000/api/health',
       reuseExistingServer: true,
       timeout: 120 * 1000,
