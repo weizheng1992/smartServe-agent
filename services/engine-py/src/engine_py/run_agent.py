@@ -40,6 +40,7 @@ from .graph.state import DEFAULT_TASK_PLAN, AgentState, to_ts_dict
 from .interruption import register_run, run_graph_with_interruption, unregister_run
 from .llm import (
     CircuitBreakerOpenError,
+    LlmQuotaError,
     bind_llm_call_context,
     drain_llm_call_writes,
     get_embedding_model,
@@ -148,18 +149,34 @@ async def _resolve_business_context(
     return business_id, dynamic_config
 
 
-def _degraded_apology_result() -> dict:
-    """LLM 熔断或图执行异常时的降级结果:道歉回复 + 空计划,沿用图终态消费链路。
+def _degraded_apology_result(source: str = "graph_error") -> dict:
+    """降级结果:道歉回复 + 空计划,沿用图终态消费链路;文案按降级来源分流
+    (2026-10-15 夜评台账 #2 —— 「上游模型波动」一词此前混淆 LLM 熔断/余额
+    缺额/图执行异常三类来源,三次排障误判,用户所见与遥测同口径)。
 
     run_agent 主流程(metrics 落盘 / 任务记忆 / result 事件)继续走通;
     resolution_status 由调用方按旗标落 ``llm_circuit_breaker`` /
-    ``graph_error_degraded``(区分降级来源,遥测如实)。
+    ``llm_quota_exhausted`` / ``graph_error_degraded``(区分降级来源,遥测如实)。
     """
-    return {
-        "output": (
+    copy_by_source = {
+        # 瞬态可用性波动(连续失败熔断):上游模型波动语义贴切
+        "llm_circuit_breaker": (
             "非常抱歉,智能服务当前遇到上游模型波动,暂时无法处理您的请求。"
             "请稍后再试,或选择人工客服协助。"
         ),
+        # 账户额度缺额(code 1113):缺的是钱不是模型,严禁谎称波动
+        "llm_quota": (
+            "非常抱歉,智能客服当前因服务额度限制暂时不可用,我们正在紧急处理。"
+            "请稍后再试,或选择人工客服协助。"
+        ),
+        # 图执行异常(重试耗尽/单节点 bug 等):与模型可用性无关
+        "graph_error": (
+            "非常抱歉,系统处理您的请求时遇到异常,暂时无法完成答复。"
+            "请稍后再试,或选择人工客服协助。"
+        ),
+    }
+    return {
+        "output": copy_by_source.get(source, copy_by_source["graph_error"]),
         "task_plan": dict(DEFAULT_TASK_PLAN),
         "loop_count": 0,
         "global_transitions_count": 0,
@@ -211,7 +228,8 @@ async def _settle_turn(
     job: AgentJobInput,
     business_id: str,
     llm_breaker_fired: bool,
-    graph_error_fired: bool,
+    llm_quota_fired: bool = False,
+    graph_error_fired: bool = False,
     elapsed_latency_ms: float,
     saved_guide_context: dict | None,
     saved_cart_context: dict | None,
@@ -279,6 +297,12 @@ async def _settle_turn(
                 resolution_status = "llm_circuit_breaker"
                 is_success = False
                 feedback_comment = "Upstream LLM circuit breaker open; job degraded with apology fallback."
+            elif llm_quota_fired:
+                # 账户额度缺额独立落盘(2026-10-15 夜评台账 #2):严禁混入
+                # llm_circuit_breaker/graph_error —— 排障口径与用户文案同源
+                resolution_status = "llm_quota_exhausted"
+                is_success = False
+                feedback_comment = "Provider account quota exhausted (code 1113); job degraded."
             elif graph_error_fired:
                 resolution_status = "graph_error_degraded"
                 is_success = False
@@ -345,7 +369,7 @@ async def _settle_turn(
             # 后台调用,而池以会话为评审单位,与 session_metrics 熔断落盘(003
             # 数据源)同位;dedupe=True 使 OPEN 窗口内同一会话多次回合只入池一次;
             # 入池失败静默降级不阻断主流程(内建)。
-            if (llm_breaker_fired or graph_error_fired or breaker_fired) and not interrupted:
+            if (llm_breaker_fired or llm_quota_fired or graph_error_fired or breaker_fired) and not interrupted:
                 # 中断不是缺陷(S2c):用户掐死打转 run 的部分态(tool_errors≥3 /
                 # 转移≥22 正是取消的典型形态)不入坏例池 —— 那是产品行为不是缺陷信号
                 await record_badcase_signal(
@@ -357,9 +381,13 @@ async def _settle_turn(
                         "上游 LLM 熔断(OPEN)拦截,会话降级道歉回复"
                         if llm_breaker_fired
                         else (
-                            "图执行未捕获异常,降级道歉回复"
-                            if graph_error_fired
-                            else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
+                            "供应商账户额度缺额(1113),会话降级道歉回复"
+                            if llm_quota_fired
+                            else (
+                                "图执行未捕获异常,降级道歉回复"
+                                if graph_error_fired
+                                else f"图级熔断:全局转移 {global_transitions} 次 / 工具错误 {tool_errors} 次"
+                            )
                         )
                     ),
                 )
@@ -790,6 +818,7 @@ async def run_agent(job: AgentJobInput) -> dict:
     start_time = time.time()
     graph_app = build_graph()
     llm_breaker_fired = False
+    llm_quota_fired = False
     graph_error_fired = False
     interrupted = False
     # S2c/S2b:作业入活跃登记表 —— 网关取消路由(03 号票)的 request_cancel 只有
@@ -825,6 +854,24 @@ async def run_agent(job: AgentJobInput) -> dict:
                 result = {**result, "output": fallback_output}
         except Exception as fb_err:
             print(f"[runAgent] 确定性兜底失败,保留道歉罐头: {fb_err}")
+    except LlmQuotaError as quota_err:
+        # 🚨 供应商账户额度缺额(code 1113,2026-10-15 夜评台账 #2):独立于
+        # 熔断/图异常的第三降级臂 —— 文案如实点名额度限制,session_metrics 落
+        # resolution_status='llm_quota_exhausted'(排障口径与用户所见同源,
+        # 严禁混入「上游模型波动」)。
+        print(f"[runAgent] 🚨 供应商账户额度缺额,降级道歉回复: {quota_err}")
+        llm_quota_fired = True
+        result = _degraded_apology_result("llm_quota")
+        try:
+            from .skills.fallback_dispatcher import deterministic_fallback_answer
+
+            fallback_output = await deterministic_fallback_answer(
+                input_message, thread_id, user_id, job.business_id
+            )
+            if fallback_output:
+                result = {**result, "output": fallback_output}
+        except Exception as fb_err:
+            print(f"[runAgent] 确定性兜底失败,保留道歉罐头: {fb_err}")
     except Exception as graph_err:
         # 拓宽降级网(2026-09-12):图中任一未捕获异常(如上游 429 重试耗尽、
         # 单节点 bug)不得穿透为网关 500 / SSE 流挂死 —— 与熔断同形道歉降级。
@@ -832,7 +879,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         # 严禁把降级作业记成 resolved_auto 成功(遥测如实,双轴审查工单)。
         print(f"[runAgent] ⚠️ 图执行未捕获异常,降级道歉回复: {graph_err!r}")
         graph_error_fired = True
-        result = _degraded_apology_result()
+        result = _degraded_apology_result("graph_error")
         try:
             from .skills.fallback_dispatcher import deterministic_fallback_answer
 
@@ -855,6 +902,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         job=job,
         business_id=business_id,
         llm_breaker_fired=llm_breaker_fired,
+        llm_quota_fired=llm_quota_fired,
         graph_error_fired=graph_error_fired,
         elapsed_latency_ms=elapsed_latency_ms,
         saved_guide_context=saved_guide_context,

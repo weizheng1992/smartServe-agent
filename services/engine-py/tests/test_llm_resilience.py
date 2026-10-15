@@ -16,6 +16,7 @@ from engine_py.llm.resilience import (
     CircuitBreaker,
     CircuitBreakerOpenError,
     ContentFilterError,
+    LlmQuotaError,
     global_circuit_breaker,
     resilient_ainvoke,
     resilient_invoke,
@@ -559,3 +560,127 @@ class TestContentFilterFastFail:
         with pytest.raises(ContentFilterError):
             resilient_invoke(_attempt)
         assert calls["n"] == 1
+
+
+class TestLlmQuotaFastFail:
+    """余额不足确定性快败(2026-10-15 夜评台账 #2:降级文案三义分类)。
+
+    bigmodel code 1113(账户余额不足/无可用渠道)与 1301 同律 —— 账户级
+    确定性拒绝,重试必然同判,白烧退避;且不计熔断(服务在线,缺的是钱)。
+    快败 + 响亮告警,降噪「上游模型波动」对排障的混淆。"""
+
+    @staticmethod
+    def _quota_call(counter: dict | None = None):
+        def _factory():
+            async def _call():
+                if counter is not None:
+                    counter["n"] += 1
+                raise RuntimeError(
+                    "Error code: 429 - {'error': {'code': '1113', "
+                    "'message': '当前账户余额不足或无可用渠道,请充值后重试'}}"
+                )
+
+            return _call()
+
+        return _factory
+
+    def test_fast_fail_without_retry(self):
+        counter = {"n": 0}
+        with pytest.raises(LlmQuotaError, match="1113"):
+            asyncio.run(resilient_ainvoke(self._quota_call(counter)))
+        assert counter["n"] == 1, "余额不足必须一次快败,严禁退避重试(重试必然同判)"
+
+    def test_does_not_trip_breaker(self):
+        def _factory():
+            async def _call():
+                raise RuntimeError("Error code: 429 - {'error': {'code': '1113', 'message': '余额不足'}}")
+
+            return _call()
+
+        with pytest.raises(LlmQuotaError):
+            asyncio.run(resilient_ainvoke(_factory))
+        status = global_circuit_breaker.get_status()
+        assert status["state"] == "CLOSED", "服务在线,计费缺额不得计入熔断失败(与 1301 同律)"
+        assert status["failureCount"] == 0
+
+    def test_sync_invoke_fast_fail(self):
+        calls = {"n": 0}
+
+        def _attempt():
+            calls["n"] += 1
+            raise RuntimeError("Error code: 429 - {'error': {'code': '1113', 'message': '余额不足'}}")
+
+        with pytest.raises(LlmQuotaError):
+            resilient_invoke(_attempt)
+        assert calls["n"] == 1
+
+    def test_rate_limit_1302_keeps_retry_semantics(self, monkeypatch):
+        """1302 限流是瞬态拥塞:退避重试语义不变(本条只钉不快败)。
+
+        注意与 1113 的分野 —— 夜评处方只令 1113 跳过重试;429/1302 拥塞
+        退避后可恢复,照旧重试、照旧计熔断。"""
+        TestResilientAinvoke._capture_sleep(monkeypatch)
+        counter = {"n": 0}
+
+        def _factory():
+            async def _call():
+                counter["n"] += 1
+                raise RuntimeError(
+                    "Error code: 429 - {'error': {'code': '1302', 'message': '当前 API 请求过多,请稍后重试'}}"
+                )
+
+            return _call()
+
+        with pytest.raises(RuntimeError, match="1302"):
+            asyncio.run(resilient_ainvoke(_factory))
+        assert counter["n"] == 3, "限流保持既有重试语义(瞬态拥塞,退避可恢复)"
+
+    def test_latency_number_1113_is_not_quota(self, monkeypatch):
+        """窄匹配防误伤:报文里恰好出现 1113 数字(如耗时/行号)且无计费
+        关键词,不得误判余额不足 —— 照旧重试。"""
+        TestResilientAinvoke._capture_sleep(monkeypatch)
+        counter = {"n": 0}
+
+        def _factory():
+            async def _call():
+                counter["n"] += 1
+                raise RuntimeError("Error code: 500 - upstream took 1113ms then died")
+
+            return _call()
+
+        with pytest.raises(RuntimeError, match="1113ms"):
+            asyncio.run(resilient_ainvoke(_factory))
+        assert counter["n"] == 3, "非计费语义的 1113 数字保持既有重试语义"
+
+
+class TestDegradedCopyThreeWay:
+    """降级文案三义(2026-10-15 夜评台账 #2):「上游模型波动」此前一词
+    混淆 LLM 熔断/余额缺额/图执行异常三类来源,排障三次误判 —— 文案按
+    降级来源分流,遥测(resolution_status)与用户所见同口径。"""
+
+    def test_breaker_arm_keeps_transient_copy(self):
+        from engine_py.run_agent import _degraded_apology_result
+
+        result = _degraded_apology_result("llm_circuit_breaker")
+        assert "上游模型波动" in result["output"], "瞬态熔断语义仍是最贴切文案"
+
+    def test_quota_arm_names_the_billing_cause(self):
+        from engine_py.run_agent import _degraded_apology_result
+
+        result = _degraded_apology_result("llm_quota")
+        assert "额度" in result["output"], "余额缺额必须如实点名,严禁谎称模型波动"
+        assert "上游模型波动" not in result["output"]
+
+    def test_graph_error_arm_does_not_blame_the_model(self):
+        from engine_py.run_agent import _degraded_apology_result
+
+        result = _degraded_apology_result("graph_error")
+        assert "上游模型波动" not in result["output"], "图执行异常(单节点 bug 等)严禁误导为模型问题"
+        assert "稍后再试" in result["output"]
+
+    def test_default_shape_unchanged(self):
+        from engine_py.run_agent import _degraded_apology_result
+
+        result = _degraded_apology_result()
+        assert result["task_plan"]["subtasks"] == []
+        assert result["loop_count"] == 0

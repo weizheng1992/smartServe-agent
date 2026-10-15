@@ -168,6 +168,36 @@ def _as_content_filter_error(err: Exception) -> ContentFilterError | None:
     return None
 
 
+class LlmQuotaError(RuntimeError):
+    """供应商账户额度缺额确定性拒绝(bigmodel code 1113,2026-10-15 夜评台账 #2)。
+
+    账户级确定性失败:余额/渠道不因重试恢复,退避纯属白烧;不计熔断 ——
+    服务在线应答,缺的是计费,熔"上游可用性"语义不符(与 1301 同律)。
+    响亮告警排障:此前与 429 限流/图执行异常同落「上游模型波动」一词,
+    三次排障误判。"""
+
+
+def _as_quota_error(err: Exception) -> LlmQuotaError | None:
+    """识别 bigmodel 账户额度缺额(code 1113)。
+
+    窄匹配防误伤:1113 数字须伴随计费关键词(余额/渠道/quota/balance/
+    channel)或 code 字段形状('code': '1113'),裸数字(耗时/行号)不判。
+    """
+    text = str(err)
+    if "1113" not in text:
+        return None
+    low = text.lower()
+    code_shape = "'code': '1113'" in text or '"code": "1113"' in text or '"code":"1113"' in text
+    billing_keyword = (
+        "余额" in text or "balance" in low or "quota" in low or "渠道" in text or "channel" in low
+    )
+    if code_shape or billing_keyword:
+        return LlmQuotaError(
+            f"供应商账户额度缺额(code 1113,余额不足/无可用渠道): {text[:300]}"
+        )
+    return None
+
+
 async def _sleep(delay_s: float) -> None:
     """退避等待(独立函数便于测试截获退避序列)。"""
     await asyncio.sleep(delay_s)
@@ -269,6 +299,13 @@ async def resilient_ainvoke(attempt: Callable[[], Awaitable[Any]]) -> Any:
                 # 确定性内容过滤:重试必然同判,快速失败;不计熔断(服务在线)
                 await _emit_job_status("content_filter", filtered.args[0])
                 raise filtered from err
+            quota = _as_quota_error(err)
+            if quota is not None:
+                # 账户额度缺额:确定性失败(2026-10-15 夜评处方 —— 1113 跳过
+                # 重试直接失败并告警);不计熔断(服务在线,缺的是钱)
+                print(f"[LLM Quota] 🚨 账户余额不足(code 1113),请运营侧尽快充值!{quota.args[0]}")
+                await _emit_job_status("llm_quota", quota.args[0])
+                raise quota from err
             if attempts >= max_attempts:
                 global_circuit_breaker.record_failure()
                 terminal = _trip_or_original(err)
@@ -300,6 +337,10 @@ def resilient_invoke(attempt: Callable[[], Any]) -> Any:
             filtered = _as_content_filter_error(err)
             if filtered is not None:
                 raise filtered from err
+            quota = _as_quota_error(err)
+            if quota is not None:
+                print(f"[LLM Quota] 🚨 账户余额不足(code 1113),请运营侧尽快充值!{quota.args[0]}")
+                raise quota from err
             if attempts >= max_attempts:
                 global_circuit_breaker.record_failure()
                 raise _trip_or_original(err) from err

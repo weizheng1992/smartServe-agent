@@ -11,6 +11,7 @@ from .resilience import (
     CircuitBreaker,
     CircuitBreakerOpenError,
     ContentFilterError,
+    LlmQuotaError,
     global_circuit_breaker,
 )
 from .telemetry import (
@@ -24,6 +25,7 @@ __all__ = [
     "CircuitBreaker",
     "CircuitBreakerOpenError",
     "ContentFilterError",
+    "LlmQuotaError",
     "bind_llm_call_context",
     "bind_llm_call_node",
     "drain_llm_call_writes",
