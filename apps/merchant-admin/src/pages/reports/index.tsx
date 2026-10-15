@@ -93,7 +93,19 @@ export default function ReportsPage() {
           <div className="text-sm font-medium">我的报告</div>
           <div className="mt-0.5 text-[11px] text-zinc-400">展开可重放图表(存档快照);CSV 随时可导</div>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void api.reports.create().then(reload)}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void api.reports
+              .create()
+              .then((b) => {
+                if (!b.success) setMsg(errMsgOf(b)); // 生成失败如实呈现(此前静默)
+                return reload();
+              })
+              .catch((err) => setMsg(`生成失败:${String(err)}`))
+          }
+        >
           ＋ 生成报告
         </Button>
       </div>
