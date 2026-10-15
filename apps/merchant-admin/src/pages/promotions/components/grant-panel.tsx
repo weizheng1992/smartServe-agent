@@ -1,4 +1,4 @@
-import { type Customer, type Promotion, api } from '@/lib/api';
+import { type Customer, type Promotion, api, errMsgOf } from '@/lib/api';
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input } from 'ui';
 
@@ -35,7 +35,7 @@ export function GrantDialog({ promo, onClose, onDone }: Props) {
       onDone(`✓ 已向 ${c.name}(${c.customer_id})发放「${promo.name}」`);
     } else {
       // 量控/查重等服务端拒发如实呈现(发放已达上限等)
-      onDone(`发放失败:${b.error || b.message}`);
+      onDone(`发放失败:${errMsgOf(b)}`);
     }
   }
 

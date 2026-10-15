@@ -158,16 +158,11 @@ export function useWorkbenchState(initialTab: string) {
       }
 
       if (convData?.success) {
-        const rawList = convData.conversations || [];
-        const convList: ConversationItem[] = rawList.map((item: any) => ({
-          ...item,
-          id: item.id || item.threadId,
-          threadId: item.threadId || item.id,
-          lastMessage: item.lastMessage || item.lastMessageSnippet,
-        }));
+        // 行形状修补(id/threadId/lastMessage)已收口 api.conversations.list adapter —— 页面拿成品行
+        const convList = convData.conversations || [];
         setConversations(convList);
         if (convList.length > 0 && !activeThreadIdRef.current) {
-          const initialId = convList[0].threadId || convList[0].id;
+          const initialId = convList[0].threadId;
           setActiveThreadId(initialId);
           loadConversationMessages(initialId);
         }

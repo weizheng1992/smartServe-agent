@@ -1,7 +1,7 @@
 import { FeedbackButtons } from '@/components/FeedbackButtons';
 import { ResultCard } from '@/components/ResultCard';
 import { type AskFrameData, type SessionFrame } from '@/lib/analytics-frames';
-import { api } from '@/lib/api';
+import { api, errMsgOf } from '@/lib/api';
 import {
   type AskSession,
   clarifyAskQuestion,
@@ -111,7 +111,7 @@ export function FloatingAgent({ route }: { route: string }) {
 
   async function saveToReport(f: SessionFrame) {
     try {
-      await api.reports.saveFromResult({
+      const b = await api.reports.saveFromResult({
         question: f.question ?? '',
         metric: String(f.data.metric || 'result'),
         unit: String(f.data.unit || ''),
@@ -119,6 +119,11 @@ export function FloatingAgent({ route }: { route: string }) {
         rows: f.data.rows || [],
         chart: typeof f.data.chart === 'string' ? f.data.chart : undefined,
       });
+      // 业务错误返 body:success 闸防「失败也标已存」假成功
+      if (!b.success) {
+        session.pushError(`存报告失败:${errMsgOf(b)}`);
+        return;
+      }
       session.markSaved(f.id);
     } catch (err) {
       session.pushError(`存报告失败:${String(err)}`);

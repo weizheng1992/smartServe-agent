@@ -59,19 +59,40 @@ export function authHeaders(): Record<string, string> {
   };
 }
 
-async function req(path: string, init?: RequestInit) {
-  const res = await fetch(path, {
-    ...init,
-    headers: { ...authHeaders(), ...(init?.headers || {}) },
-  });
+/** 401 统一出口:清会话回登录页(login 不走此 transport,自带防枚举语义)。 */
+function bounce401() {
+  clearSession();
+  location.href = '/';
+}
+
+/** 域数据请求 —— 唯一 transport(2026-10-15 候选②归一;此前 req「非 2xx 即
+ *  throw」与 fetchJson「400 级返 body」两套语义并存,规约 §1.1 本就规定后者):
+ *  - 401:清会话回登录(唯一收口);
+ *  - 业务错误(4xx/5xx 带 JSON body):body 原样返回,由页面按 success/message
+ *    呈现文案 —— 严禁吞进 throw;
+ *  - 传输失败(网络不可达 / 非 JSON 体,如 proxy ECONNREFUSED 回 HTML):
+ *    throw 诚实报错,严禁裸 SyntaxError(login 同款实弹教训)。
+ *  authedFetch(ui 审批机注入面,不吞非 2xx)、login(唯一无会话端点,10s 超时)、
+ *  api.ask(SSE 流式,ADR-0013)各保留自有形状。 */
+async function requestJson<T = any>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, { ...init, headers: { ...authHeaders(), ...(init?.headers || {}) } });
   if (res.status === 401) {
-    // 凭证失效/过期 → 清会话回登录页
-    clearSession();
-    location.href = '/';
+    bounce401();
     throw new Error('401 登录已过期');
   }
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  return res;
+  const raw = await res.text();
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error(`${res.status} 非 JSON 响应:${raw.slice(0, 120) || '(空体)'}`);
+  }
+}
+
+/** 服务端错误体文案单点出口(message/detail/error 三键并存,冻结面不抹平 body)。
+ *  页面呈现失败文案一律走此,严禁再散写 `b.error || b.message` 式三读法。 */
+export function errMsgOf(body: unknown, fallback = '操作失败'): string {
+  const b = body as { message?: string; error?: string; detail?: string } | null;
+  return String(b?.message || b?.error || b?.detail || fallback);
 }
 
 /** 注入 ui 包 useApprovalMachine 的鉴权 fetch(夜审 A4/A5):只附加身份头与
@@ -79,25 +100,10 @@ async function req(path: string, init?: RequestInit) {
 export async function authedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const res = await fetch(input, { ...init, headers: { ...authHeaders(), ...(init?.headers || {}) } });
   if (res.status === 401) {
-    clearSession();
-    location.href = '/';
+    bounce401();
     throw new Error('401 登录已过期');
   }
   return res;
-}
-
-/** 域数据请求:400 级业务错误也返回 body,由页面按 success/message 呈现文案。 */
-async function fetchJson(path: string, init?: RequestInit) {
-  const res = await fetch(path, {
-    ...init,
-    headers: { ...authHeaders(), ...(init?.headers || {}) },
-  });
-  if (res.status === 401) {
-    clearSession();
-    location.href = '/';
-    throw new Error('401 登录已过期');
-  }
-  return res.json();
 }
 
 export interface Spu {
@@ -272,7 +278,8 @@ export interface ApprovalItem {
 
 export interface ConversationItem {
   id: string;
-  threadId?: string;
+  /** 恒有两键(api.conversations.list adapter 互补修补;部分行只有 threadId) */
+  threadId: string;
   businessId: string;
   userId?: string;
   status: string;
@@ -377,7 +384,7 @@ export interface MenuNode {
 
 export const api = {
   menus: async (): Promise<{ role: string; perms: string[]; menus: MenuNode[] }> =>
-    (await req('/api/admin/analytics/menus')).json(),
+    requestJson('/api/admin/analytics/menus'),
 
   staffList: async (): Promise<{
     staff: Array<{
@@ -388,44 +395,53 @@ export const api = {
       dept: string | null;
       level: string | null;
     }>;
-  }> => (await req('/api/admin/analytics/staff')).json(),
+  }> => requestJson('/api/admin/analytics/staff'),
 
-  /** 老板切换查看身份:服务端为目标员工签发 JWT;保存原始老板凭证供切回。 */
-  staffSwitch: async (email: string): Promise<{ staffId: string; displayName: string; role: string }> => {
+  /** 老板切换查看身份:服务端为目标员工签发 JWT;保存原始老板凭证供切回。
+   *  Authorization 覆写默认头 —— 切换动作始终以留底老板凭证发起。
+   *  业务错误(非老板 403 等)按 transport 语义返 body,由调用方 errMsgOf 呈现。 */
+  staffSwitch: async (
+    email: string,
+  ): Promise<{
+    success: boolean;
+    token?: string;
+    staffId?: string;
+    displayName?: string;
+    role?: string;
+    message?: string;
+    error?: string;
+  }> => {
     const boss = JSON.parse(localStorage.getItem(BOSS_KEY) || 'null') as { token: string; email: string } | null;
     const switchAs = boss ?? { token: authToken(), email: currentStaffEmail() };
     if (!switchAs.token) throw new Error('缺少老板凭证,无法切换');
-    const res = await fetch('/api/admin/analytics/staff/switch', {
+    const body = await requestJson<{
+      success: boolean;
+      token?: string;
+      staffId?: string;
+      role?: string;
+      message?: string;
+      error?: string;
+    }>('/api/admin/analytics/staff/switch', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-id': 'aurora',
-        Authorization: `Bearer ${switchAs.token}`,
-      },
+      headers: { Authorization: `Bearer ${switchAs.token}` },
       body: JSON.stringify({ staffId: email }),
     });
-    if (res.status === 401) {
-      // 凭证失效与 req 同收口(此前裸 fetch 401 只 throw 由顶栏 alert,不清会话不回登录)
-      clearSession();
-      location.href = '/';
-      throw new Error('401 登录已过期');
+    if (body.success && body.token && body.staffId) {
+      localStorage.setItem(BOSS_KEY, JSON.stringify(switchAs));
+      setSession(body.token, body.staffId);
     }
-    const body = await res.json();
-    if (!res.ok || !body.success) throw new Error(body.message || body.detail || '切换失败');
-    localStorage.setItem(BOSS_KEY, JSON.stringify(switchAs));
-    setSession(body.token, body.staffId);
     return body;
   },
 
   roles: {
     list: async (): Promise<{ roles: Array<{ role: string; menuCount: number; staffCount: number }> }> =>
-      fetchJson('/api/admin/analytics/roles'),
+      requestJson('/api/admin/analytics/roles'),
     menusOf: async (role: string): Promise<{ role: string; menuIds: string[] }> =>
-      fetchJson(`/api/admin/analytics/roles/${role}/menus`),
+      requestJson(`/api/admin/analytics/roles/${role}/menus`),
     saveMenus: async (role: string, menuIds: string[]) =>
-      fetchJson(`/api/admin/analytics/roles/${role}/menus`, { method: 'POST', body: JSON.stringify({ menuIds }) }),
+      requestJson(`/api/admin/analytics/roles/${role}/menus`, { method: 'POST', body: JSON.stringify({ menuIds }) }),
     create: async (role: string, menuIds: string[]) =>
-      fetchJson('/api/admin/analytics/roles', { method: 'POST', body: JSON.stringify({ role, menuIds }) }),
+      requestJson('/api/admin/analytics/roles', { method: 'POST', body: JSON.stringify({ role, menuIds }) }),
   },
 
   ask: async (
@@ -447,7 +463,9 @@ export const api = {
     let lastEventId = resume?.lastEventId || 0;
     for (let attempt = 0; ; attempt++) {
       try {
-        const res = await req('/api/admin/analytics/ask', {
+        // authedFetch 而非 requestJson:SSE 要的是原始 Response 流式读取,严禁经
+        // requestJson 的 res.text() 消费 body;身份头与 401 收口照旧
+        const res = await authedFetch('/api/admin/analytics/ask', {
           method: 'POST',
           body: JSON.stringify({
             question,
@@ -485,7 +503,7 @@ export const api = {
   /** 答案反馈(反馈闭环 v3.1):traceId 来自终局帧,👎 可带自由文本备注。 */
   feedback: {
     submit: async (p: { traceId: string; verdict: 'up' | 'down'; note?: string }) =>
-      fetchJson('/api/admin/analytics/feedback', {
+      requestJson('/api/admin/analytics/feedback', {
         method: 'POST',
         body: JSON.stringify(p),
       }),
@@ -504,13 +522,13 @@ export const api = {
         dept: string | null;
         level: string | null;
       }>;
-    }> => fetchJson('/api/admin/analytics/staff'),
+    }> => requestJson('/api/admin/analytics/staff'),
     invite: async (p: { email: string; displayName: string; role: string; dept?: string; level?: string }) =>
-      fetchJson('/api/admin/analytics/staff', { method: 'POST', body: JSON.stringify(p) }),
+      requestJson('/api/admin/analytics/staff', { method: 'POST', body: JSON.stringify(p) }),
     update: async (
       id: string,
       patch: Partial<{ role: string; status: string; displayName: string; dept: string; level: string }>,
-    ) => fetchJson(`/api/admin/analytics/staff/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    ) => requestJson(`/api/admin/analytics/staff/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   },
 
   /** 「该找谁」责任人映射(品类/指标 → 员工;PUT/DELETE 仅老板/管理员,闸在服务端)。 */
@@ -530,11 +548,11 @@ export const api = {
       }>;
       categories: string[];
       metrics: Array<{ key: string; label: string }>;
-    }> => fetchJson('/api/admin/analytics/owner-mappings'),
+    }> => requestJson('/api/admin/analytics/owner-mappings'),
     upsert: async (p: { mapType: string; mapValue: string; staffId: string }) =>
-      fetchJson('/api/admin/analytics/owner-mappings', { method: 'PUT', body: JSON.stringify(p) }),
+      requestJson('/api/admin/analytics/owner-mappings', { method: 'PUT', body: JSON.stringify(p) }),
     remove: async (mapType: string, mapValue: string) =>
-      fetchJson(
+      requestJson(
         `/api/admin/analytics/owner-mappings?mapType=${encodeURIComponent(mapType)}&mapValue=${encodeURIComponent(mapValue)}`,
         {
           method: 'DELETE',
@@ -551,30 +569,36 @@ export const api = {
       permCode?: string;
       parentId?: string | null;
       sort?: number;
-    }) => fetchJson('/api/admin/analytics/menus', { method: 'POST', body: JSON.stringify(p) }),
+    }) => requestJson('/api/admin/analytics/menus', { method: 'POST', body: JSON.stringify(p) }),
     update: async (
       id: string,
       patch: Partial<{ name: string; route: string; permCode: string; sort: number; status: string }>,
-    ) => fetchJson(`/api/admin/analytics/menus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    remove: async (id: string) => fetchJson(`/api/admin/analytics/menus/${id}`, { method: 'DELETE' }),
+    ) => requestJson(`/api/admin/analytics/menus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: async (id: string) => requestJson(`/api/admin/analytics/menus/${id}`, { method: 'DELETE' }),
   },
 
   /** 客户管理(商户库客户;会员级编辑/新增/删除/详情关联数据)。 */
   customers: {
-    list: async (): Promise<{ success: boolean; customers: Customer[] }> => fetchJson('/api/admin/analytics/customers'),
+    list: async (): Promise<{ success: boolean; customers: Customer[] }> =>
+      requestJson('/api/admin/analytics/customers'),
     coupons: async (customerId: string): Promise<{ success: boolean; coupons: CustomerCoupon[] }> =>
-      fetchJson(`/api/admin/analytics/customers/${customerId}/coupons`),
+      requestJson(`/api/admin/analytics/customers/${customerId}/coupons`),
     create: async (p: { name: string; phone: string; memberLevel?: string }) =>
-      fetchJson('/api/admin/analytics/customers', { method: 'POST', body: JSON.stringify(p) }),
+      requestJson('/api/admin/analytics/customers', { method: 'POST', body: JSON.stringify(p) }),
     update: async (id: string, patch: { memberLevel: string }) =>
-      fetchJson(`/api/admin/analytics/customers/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    remove: async (id: string) => fetchJson(`/api/admin/analytics/customers/${id}`, { method: 'DELETE' }),
+      requestJson(`/api/admin/analytics/customers/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: async (id: string) => requestJson(`/api/admin/analytics/customers/${id}`, { method: 'DELETE' }),
   },
 
   reports: {
-    list: async () => (await req('/api/admin/analytics/reports')).json(),
-    create: async () => (await req('/api/admin/analytics/reports', { method: 'POST', body: '{}' })).json(),
-    csv: async (id: string) => (await req(`/api/admin/analytics/reports/${id}/csv`)).json(),
+    list: async (): Promise<{
+      success: boolean;
+      reports: Array<{ id: string; title: string; timeWindow: string; createdAt: string | null }>;
+    }> => requestJson('/api/admin/analytics/reports'),
+    create: async (): Promise<{ success: boolean; title?: string; message?: string; error?: string }> =>
+      requestJson('/api/admin/analytics/reports', { method: 'POST', body: '{}' }),
+    csv: async (id: string): Promise<{ csv?: string; filename?: string; message?: string; error?: string }> =>
+      requestJson(`/api/admin/analytics/reports/${id}/csv`),
     detail: async (
       id: string,
     ): Promise<{
@@ -583,7 +607,7 @@ export const api = {
       title: string;
       chart: string | null;
       rows: Record<string, Record<string, unknown>[]>;
-    }> => (await req(`/api/admin/analytics/reports/${id}`)).json(),
+    }> => requestJson(`/api/admin/analytics/reports/${id}`),
     saveFromResult: async (p: {
       question: string;
       metric: string;
@@ -592,38 +616,37 @@ export const api = {
       rows: Record<string, unknown>[];
       chart?: string;
     }) =>
-      (
-        await req('/api/admin/analytics/reports/from-result', {
-          method: 'POST',
-          body: JSON.stringify(p),
-        })
-      ).json(),
+      requestJson<{ success: boolean; message?: string; error?: string }>('/api/admin/analytics/reports/from-result', {
+        method: 'POST',
+        body: JSON.stringify(p),
+      }),
   },
 
   /** 商品目录(SPU/SKU;页面只做编排,数据操作收口在此)。 */
   products: {
-    list: async (): Promise<{ success: boolean; spus: Spu[] }> => fetchJson('/api/admin/analytics/spus'),
-    listAllSkus: async (): Promise<{ success: boolean; skus: SkuStockRow[] }> => fetchJson('/api/admin/analytics/skus'),
+    list: async (): Promise<{ success: boolean; spus: Spu[] }> => requestJson('/api/admin/analytics/spus'),
+    listAllSkus: async (): Promise<{ success: boolean; skus: SkuStockRow[] }> =>
+      requestJson('/api/admin/analytics/skus'),
     create: async (p: { title: string; category: string; price: number; stock: number; ownerId?: string }) =>
-      fetchJson('/api/admin/analytics/spus', { method: 'POST', body: JSON.stringify(p) }),
+      requestJson('/api/admin/analytics/spus', { method: 'POST', body: JSON.stringify(p) }),
     update: async (
       id: string,
       patch: Partial<{ title: string; price: number; stock: number; status: string; ownerId: string }>,
-    ) => fetchJson(`/api/admin/analytics/spus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    remove: async (id: string) => fetchJson(`/api/admin/analytics/spus/${id}`, { method: 'DELETE' }),
+    ) => requestJson(`/api/admin/analytics/spus/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: async (id: string) => requestJson(`/api/admin/analytics/spus/${id}`, { method: 'DELETE' }),
     listSkus: async (spuId: string): Promise<{ success: boolean; skus: Sku[] }> =>
-      fetchJson(`/api/admin/analytics/spus/${spuId}/skus`),
+      requestJson(`/api/admin/analytics/spus/${spuId}/skus`),
     createSku: async (spuId: string, sku: { skuTitle: string; price: string; stock: string }) =>
-      fetchJson(`/api/admin/analytics/spus/${spuId}/skus`, { method: 'POST', body: JSON.stringify(sku) }),
+      requestJson(`/api/admin/analytics/spus/${spuId}/skus`, { method: 'POST', body: JSON.stringify(sku) }),
     updateSku: async (skuId: string, patch: { price: number; stock: number }) =>
-      fetchJson(`/api/admin/analytics/skus/${skuId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    removeSku: async (skuId: string) => fetchJson(`/api/admin/analytics/skus/${skuId}`, { method: 'DELETE' }),
+      requestJson(`/api/admin/analytics/skus/${skuId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    removeSku: async (skuId: string) => requestJson(`/api/admin/analytics/skus/${skuId}`, { method: 'DELETE' }),
   },
 
   /** 优惠活动(创建/编辑/启停/删除/核销)。 */
   promotions: {
     list: async (): Promise<{ success: boolean; promotions: Promotion[]; effect: PromoEffect }> =>
-      fetchJson('/api/admin/analytics/promotions'),
+      requestJson('/api/admin/analytics/promotions'),
     create: async (p: {
       name: string;
       promoType: string;
@@ -636,10 +659,10 @@ export const api = {
       endAt?: string;
       /** 发放上限,仅券型消费;非券型服务端忽略 */
       totalQuota?: number;
-    }) => fetchJson('/api/admin/analytics/promotions', { method: 'POST', body: JSON.stringify(p) }),
+    }) => requestJson('/api/admin/analytics/promotions', { method: 'POST', body: JSON.stringify(p) }),
     /** 商家向指定客户发券(仅券型/在售/同人同活动一次,服务端护栏)。 */
     grant: async (id: string, customerId: string) =>
-      fetchJson(`/api/admin/analytics/promotions/${id}/grant`, {
+      requestJson(`/api/admin/analytics/promotions/${id}/grant`, {
         method: 'POST',
         body: JSON.stringify({ customerId }),
       }),
@@ -657,12 +680,15 @@ export const api = {
         endAt: string | null;
         totalQuota: number | null;
       }>,
-    ) => fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    ) => requestJson(`/api/admin/analytics/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     setStatus: async (id: string, status: string) =>
-      fetchJson(`/api/admin/analytics/promotions/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
-    remove: async (id: string) => fetchJson(`/api/admin/analytics/promotions/${id}`, { method: 'DELETE' }),
+      requestJson(`/api/admin/analytics/promotions/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+    remove: async (id: string) => requestJson(`/api/admin/analytics/promotions/${id}`, { method: 'DELETE' }),
     redeem: async (id: string, orderId: string) =>
-      fetchJson(`/api/admin/analytics/promotions/${id}/redeem`, { method: 'POST', body: JSON.stringify({ orderId }) }),
+      requestJson(`/api/admin/analytics/promotions/${id}/redeem`, {
+        method: 'POST',
+        body: JSON.stringify({ orderId }),
+      }),
   },
 
   /** 登录(唯一无会话接口;错误以 body 呈现,不走 401 清会话跳转)。
@@ -705,30 +731,30 @@ export const api = {
     detail: async (
       orderId: string,
     ): Promise<{ success: boolean; order?: OrderDetail; auditLogs?: OrderAuditLog[]; error?: string }> =>
-      fetchJson(`/api/admin/orders/${encodeURIComponent(orderId)}`),
+      requestJson(`/api/admin/orders/${encodeURIComponent(orderId)}`),
     /** 列表 + 审计流水(工作台轮询数据源;snake_case 裸行)。 */
     list: async (): Promise<{ success: boolean; orders: OrderRow[]; auditLogs: AuditLogRow[] }> =>
-      fetchJson('/api/admin/orders'),
+      requestJson('/api/admin/orders'),
     /** 发货(服务端 RBAC order:ship 闸;真实世界副作用,失败以 message 呈现)。 */
     ship: async (p: { orderId: string; carrierCode: string; trackingNo: string }): Promise<{
       success: boolean;
       message?: string;
-    }> => fetchJson('/api/admin/orders/ship', { method: 'POST', body: JSON.stringify(p) }),
+    }> => requestJson('/api/admin/orders/ship', { method: 'POST', body: JSON.stringify(p) }),
   },
 
   /** 审批工单(裁决/人工回复经 useApprovalMachine 同端点)。 */
   approvals: {
     list: async (): Promise<{ success: boolean; approvals: ApprovalItem[]; total: number }> =>
-      fetchJson('/api/admin/approvals?tenantId=aurora'),
+      requestJson('/api/admin/approvals?tenantId=aurora'),
     /** 人工接管开席:返回 approvalId 供人工回复直投。 */
     takeover: async (threadId: string): Promise<{ success: boolean; approvalId?: string; error?: string }> =>
-      fetchJson('/api/admin/approvals', {
+      requestJson('/api/admin/approvals', {
         method: 'POST',
         body: JSON.stringify({ threadId, action: 'start_human_takeover' }),
       }),
     /** 释放接管回 AI(P1 事故止血):写真源 threads → active,幂等。 */
     release: async (threadId: string): Promise<{ success: boolean; released?: boolean; error?: string }> =>
-      fetchJson('/api/admin/approvals', {
+      requestJson('/api/admin/approvals', {
         method: 'POST',
         body: JSON.stringify({ threadId, action: 'release_takeover' }),
       }),
@@ -736,10 +762,24 @@ export const api = {
 
   /** 会话(客服工作台;tenantId 与 x-tenant-id 同值)。 */
   conversations: {
-    list: async (): Promise<{ success: boolean; conversations: ConversationItem[] }> =>
-      fetchJson('/api/admin/conversations?tenantId=aurora'),
+    /** 行形状修补在此收口(2026-10-15 候选②,此前 workbench 页内 reconcile):
+     *  id/threadId 互补恒有两键、lastMessage 回退 snippet —— 调用方拿成品行。 */
+    list: async (): Promise<{ success: boolean; conversations: ConversationItem[] }> => {
+      const json = await requestJson<{ success: boolean; conversations?: Array<Record<string, unknown>> }>(
+        '/api/admin/conversations?tenantId=aurora',
+      );
+      return {
+        ...json,
+        conversations: (json.conversations || []).map((item) => ({
+          ...item,
+          id: String(item.id || item.threadId || ''),
+          threadId: String(item.threadId || item.id || ''),
+          lastMessage: (item.lastMessage || item.lastMessageSnippet) as string | undefined,
+        })) as ConversationItem[],
+      };
+    },
     messages: async (threadId: string): Promise<{ success: boolean; data?: { messages: MessageItem[] } }> =>
-      fetchJson(`/api/admin/conversations/${encodeURIComponent(threadId)}?tenantId=aurora`),
+      requestJson(`/api/admin/conversations/${encodeURIComponent(threadId)}?tenantId=aurora`),
   },
 
   /** 坐席台(live-desk-rework P2;员工 JWT,持 live_desk:operate 打开时间线顺带清未读)。 */
@@ -751,7 +791,7 @@ export const api = {
       if (params?.search) qs.set('search', params.search);
       qs.set('limit', String(params?.limit ?? 100));
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
-      return fetchJson(`/api/conversations${suffix}`) as Promise<{
+      return requestJson(`/api/conversations${suffix}`) as Promise<{
         success: boolean;
         tenantId: string;
         conversations: DeskConversationRow[];
@@ -759,18 +799,18 @@ export const api = {
       }>;
     },
     timeline: async (threadId: string): Promise<{ success: boolean; data?: { messages: MessageItem[] } }> =>
-      fetchJson(`/api/conversations/${encodeURIComponent(threadId)}`),
+      requestJson(`/api/conversations/${encodeURIComponent(threadId)}`),
     /** 坐席在线态(员工行 ⨝ presence;Redis 不可用如实空态)。 */
     presence: async (): Promise<{ success: boolean; tenantId: string; agents: DeskAgentRow[] }> =>
-      fetchJson('/api/merchant/live-desk/presence'),
+      requestJson('/api/merchant/live-desk/presence'),
     setDnd: async (enabled: boolean): Promise<{ success: boolean; dnd: boolean }> =>
-      fetchJson('/api/merchant/live-desk/presence/dnd', { method: 'POST', body: JSON.stringify({ enabled }) }),
+      requestJson('/api/merchant/live-desk/presence/dnd', { method: 'POST', body: JSON.stringify({ enabled }) }),
     /** 坐席上下文五项一次聚合(单次往返);弱关联未匹配由前端诚实呈现。 */
     context: async (threadId: string): Promise<LiveDeskContext> =>
-      fetchJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/context`),
+      requestJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/context`),
     /** 待批工单(P4 台内批驳;员工 JWT 本租户收窄,threadId 由前端就地过滤)。 */
     pendingApprovals: async (): Promise<{ success: boolean; approvals: ApprovalItem[] }> =>
-      fetchJson('/api/chat/approvals?status=waiting'),
+      requestJson('/api/chat/approvals?status=waiting'),
     /** 批/驳(P4 spec §2.6):员工代行走 /api/chat/approvals,服务端闸
      *  live_desk:approve;400 级业务错误(403 无权限/已处理过)照 fetchJson
      *  语义返回 body,由调用方按 error/detail 呈现。 */
@@ -779,16 +819,19 @@ export const api = {
       action: 'approve' | 'reject';
       rejectionReason?: string;
     }): Promise<{ success?: boolean; status?: string; error?: string; detail?: string }> =>
-      fetchJson('/api/chat/approvals', { method: 'POST', body: JSON.stringify(body) }),
+      requestJson('/api/chat/approvals', { method: 'POST', body: JSON.stringify(body) }),
     noteCreate: async (threadId: string, content: string): Promise<{ success: boolean; note?: DeskNoteItem }> =>
-      fetchJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/notes`, {
+      requestJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/notes`, {
         method: 'POST',
         body: JSON.stringify({ content }),
       }),
     /** 幂等删除:重复删/非法 id 服务端都 success,前端直接对齐本地态。 */
     noteDelete: async (threadId: string, noteId: string): Promise<{ success: boolean }> =>
-      fetchJson(`/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/notes/${encodeURIComponent(noteId)}`, {
-        method: 'DELETE',
-      }),
+      requestJson(
+        `/api/merchant/live-desk/threads/${encodeURIComponent(threadId)}/notes/${encodeURIComponent(noteId)}`,
+        {
+          method: 'DELETE',
+        },
+      ),
   },
 };

@@ -1,4 +1,4 @@
-import { type Promotion, api } from '@/lib/api';
+import { type Promotion, api, errMsgOf } from '@/lib/api';
 import { useState } from 'react';
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Label } from 'ui';
 
@@ -15,7 +15,7 @@ export function RedeemDialog({ promo, onClose, onDone }: Props) {
 
   async function submitRedeem() {
     const b = await api.promotions.redeem(promo.id, orderId);
-    onDone(b.success ? `✓ 已核销:订单 ${b.orderId} 优惠 ¥${b.discount}` : `失败:${b.error || b.message}`);
+    onDone(b.success ? `✓ 已核销:订单 ${b.orderId} 优惠 ¥${b.discount}` : `失败:${errMsgOf(b)}`);
     if (b.success) onClose();
   }
 

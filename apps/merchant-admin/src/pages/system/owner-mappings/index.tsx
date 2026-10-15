@@ -6,7 +6,7 @@ import {
   DenseTableHeader,
   DenseTableRow,
 } from '@/components/dense-table';
-import { api } from '@/lib/api';
+import { api, errMsgOf } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
 import { OwnerMappingDialog } from './owner-mapping-dialog';
@@ -52,7 +52,7 @@ export default function OwnerMappingsPage() {
   const remove = async (row: MappingRow) => {
     setMsg('');
     const res = await api.ownerMappings.remove(row.mapType, row.mapValue);
-    setMsg(res.success ? `已撤销:${row.mapValue}` : `失败:${'message' in res ? res.message : '未知错误'}`);
+    setMsg(res.success ? `已撤销:${row.mapValue}` : `失败:${errMsgOf(res)}`);
     if (res.success) await load();
   };
 

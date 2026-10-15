@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, errMsgOf } from '@/lib/api';
 import { type AskSession, createAskSession, currentAskSessionId, useAskSession } from '@/lib/ask-session';
 import { getSelection, getSelectionLabels } from '@/lib/page-context';
 import { useEffect, useRef, useState } from 'react';
@@ -52,6 +52,11 @@ export default function AnalyticsPage({ role }: { role: string }) {
     setReportMsg('生成中…');
     try {
       const r = await api.reports.create();
+      // 业务错误返 body:success 闸防「✓ undefined 已生成」假成功
+      if (!r.success) {
+        setReportMsg(`生成失败:${errMsgOf(r)}`);
+        return;
+      }
       setReportMsg(`✓ ${r.title} 已生成(我的报告可查)`);
     } catch (err) {
       setReportMsg(`生成失败:${String(err)}`);

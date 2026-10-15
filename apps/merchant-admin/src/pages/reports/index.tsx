@@ -1,6 +1,6 @@
 import { ResultCard } from '@/components/ResultCard';
 import { type AskCard } from '@/lib/analytics-frames';
-import { api } from '@/lib/api';
+import { api, errMsgOf } from '@/lib/api';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
 
@@ -73,10 +73,15 @@ export default function ReportsPage() {
 
   function downloadCsv(id: string) {
     void api.reports.csv(id).then((j) => {
+      // 业务错误返 body:无 csv 键时不落空文件
+      if (!j.csv) {
+        setMsg(errMsgOf(j, '导出失败'));
+        return;
+      }
       const blob = new Blob([j.csv], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = j.filename;
+      a.download = j.filename || `${id}.csv`;
       a.click();
     });
   }

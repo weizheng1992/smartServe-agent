@@ -1,5 +1,5 @@
 import { FloatingAgent } from '@/components/FloatingAgent';
-import { type MenuNode, api, clearSession, currentStaffEmail, hasBossSession } from '@/lib/api';
+import { type MenuNode, api, clearSession, currentStaffEmail, errMsgOf, hasBossSession } from '@/lib/api';
 import { flattenMenus, routeAllowed } from '@/lib/route-guard';
 import AnalyticsPage from '@/pages/analytics';
 import BoardPage from '@/pages/board';
@@ -51,9 +51,11 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
     setMenusState('loading');
     try {
       const m = await api.menus();
+      // transport 归一后业务错误返 body(错误体无 menus 键):如实落 error 态 fail-closed
+      if (!Array.isArray(m.menus)) throw new Error(errMsgOf(m, '菜单加载失败'));
       setMenus(m.menus);
       setRole(m.role);
-      setStaff((await api.staffList()).staff);
+      setStaff((await api.staffList()).staff || []);
       setMenusState('ready');
     } catch (err) {
       console.error('[merchant-admin] 菜单/员工加载失败(网关未启动?)', err);
@@ -71,12 +73,19 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
   // 权限真源在服务端 permCode;服务端 403 仍兜住数据)
   const allowed = menusState === 'ready' && routeAllowed(location.pathname, menus);
 
-  // 切换 = 服务端换签目标员工 JWT;始终以保存的老板凭证发起
+  // 切换 = 服务端换签目标员工 JWT;始终以保存的老板凭证发起。
+  // 业务错误(非老板 403 等)按 transport 语义返 body,errMsgOf 呈现;传输失败仍 throw
   const switchStaff = useCallback(
     (email: string) => {
       api
         .staffSwitch(email)
-        .then(() => refresh())
+        .then((b) => {
+          if (!b.success) {
+            alert(errMsgOf(b, '切换失败'));
+            return;
+          }
+          return refresh();
+        })
         .catch((err) => alert(String(err).replace('Error: ', '')));
     },
     [refresh],
