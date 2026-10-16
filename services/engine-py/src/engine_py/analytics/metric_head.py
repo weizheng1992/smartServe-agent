@@ -23,6 +23,25 @@ from pathlib import Path
 from typing import Any
 
 
+def _load_smoke_encoder():
+    """hash 冒烟编码器:与训练侧 scripts/training/common.HashEncoder 同一实现(单一事实源)。
+
+    严禁把 "hash" 交给 SentenceTransformer —— 它永远不是 HF 模型,本地加载
+    失败后会落入联网回退,无外网环境即挂在 hf_hub 连接上(seam 批次 2026-10-16
+    实测:poll 挂死数分钟)。仅测试/冒烟 run 会出现该 encoder 名;实现文件
+    缺失(非源码树部署)时响亮失败。
+    """
+    import importlib.util
+
+    common_path = Path(__file__).resolve().parents[3] / "scripts" / "training" / "common.py"
+    if not common_path.exists():
+        raise RuntimeError(f"[MetricHead] hash encoder 需要训练脚手架实现,未找到: {common_path}")
+    spec = importlib.util.spec_from_file_location("_training_common", common_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.HashEncoder()
+
+
 class MetricHead:
     def __init__(self, run_dir: str | Path) -> None:
         run = Path(run_dir)
@@ -42,19 +61,22 @@ class MetricHead:
 
     def _encode(self, texts: list[str]):
         if self._encoder is None:
-            # 本地缓存优先(与 llm/chat.get_embedding_model 同策略):线上
-            # HF 不可达时不允许结算链挂起 —— 失败即响亮抛错走 L3
-            import os
+            if self.encoder_name == "hash":
+                self._encoder = _load_smoke_encoder()
+            else:
+                # 本地缓存优先(与 llm/chat.get_embedding_model 同策略):线上
+                # HF 不可达时不允许结算链挂起 —— 失败即响亮抛错走 L3
+                import os
 
-            from sentence_transformers import SentenceTransformer
+                from sentence_transformers import SentenceTransformer
 
-            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-            try:
-                self._encoder = SentenceTransformer(
-                    self.encoder_name, device="cpu", local_files_only=True
-                )
-            except Exception:
-                self._encoder = SentenceTransformer(self.encoder_name, device="cpu")
+                os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+                try:
+                    self._encoder = SentenceTransformer(
+                        self.encoder_name, device="cpu", local_files_only=True
+                    )
+                except Exception:
+                    self._encoder = SentenceTransformer(self.encoder_name, device="cpu")
         out = self._encoder.encode(texts)
         import torch
 
@@ -73,9 +95,14 @@ class MetricHead:
         return self.labels[int(idx)], float(conf)
 
 
+def head_mode() -> str:
+    """AI_METRIC_HEAD 归一值(off|shadow|on;遥测标注与工厂同源,单一事实源)。"""
+    return os.environ.get("AI_METRIC_HEAD", "").strip().lower()
+
+
 def get_metric_head() -> MetricHead | None:
     """按 AI_METRIC_HEAD 三态返回 adapter 实例;工厂带模式供 resolve 分支判断。"""
-    mode = os.environ.get("AI_METRIC_HEAD", "").strip().lower()
+    mode = head_mode()
     if mode not in ("shadow", "on"):
         return None
     run_dir = os.environ.get("AI_METRIC_HEAD_DIR", "training_runs/metric_head")

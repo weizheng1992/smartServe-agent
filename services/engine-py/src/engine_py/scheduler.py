@@ -17,6 +17,7 @@ import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from .analytics.head_telemetry import flush_pending
 from .approvals.outbox_worker import process_pending_events
 from .approvals.takeover import release_expired_queue_waits, release_expired_takeovers
 from .badcase.digest import run_badcase_digest
@@ -53,6 +54,8 @@ def default_tasks() -> list[PeriodicTask]:
         PeriodicTask(name="outbox_reconcile", interval_seconds=30.0, func=_outbox_reconcile_tick),
         PeriodicTask(name="takeover_release", interval_seconds=30.0, func=_takeover_release_tick),
         PeriodicTask(name="badcase_digest", interval_seconds=6 * 3600.0, func=run_badcase_digest),
+        # 分类头缝②遥测聚合(600s,与 badcase 同款硬编码间隔;空窗口不触库)
+        PeriodicTask(name="head_telemetry_flush", interval_seconds=600.0, func=flush_pending),
     ]
 
 

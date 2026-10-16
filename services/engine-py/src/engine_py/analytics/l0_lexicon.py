@@ -17,6 +17,7 @@ import os
 import re
 from typing import TYPE_CHECKING
 
+from . import head_telemetry
 from .tools_registry_bridge import metric_semantic_registry
 
 
@@ -98,9 +99,10 @@ class LexiconResolver:
 
     def __init__(self) -> None:
         # 11-D1 缝②:AI_METRIC_HEAD=off|shadow|on(默认不启用)
-        from .metric_head import get_metric_head
+        from .metric_head import get_metric_head, head_mode
 
         self._head = get_metric_head()
+        self._head_mode = head_mode()  # 遥测标注与工厂同源(仅 head 非 None 时事件才打)
         self._head_threshold = float(os.environ.get("AI_METRIC_HEAD_THRESHOLD", "0.5"))
 
     def resolve(self, question: str) -> StructuredQueryIntent | Clarify:
@@ -145,12 +147,20 @@ class LexiconResolver:
             try:
                 head_label, head_conf = self._head.predict(question)
                 head_call = (head_label, head_conf)
-                if hit is not None and head_label != hit[0]:
-                    print(
-                        f"[MetricHead][shadow] 不一致: L0={hit[0]} head={head_label}({head_conf:.2f})"
-                        f" question={question[:40]!r}"
+                if hit is not None:
+                    # 遥测:一致只计数不打 print(分歧率 = 分歧/(分歧+一致) 需要分母)
+                    head_telemetry.record_event(
+                        "shadow_agree" if head_label == hit[0] else "shadow_divergence",
+                        question=question, mode=self._head_mode,
+                        head_label=head_label, head_conf=head_conf, l0_metric=hit[0],
                     )
+                    if head_label != hit[0]:
+                        print(
+                            f"[MetricHead][shadow] 不一致: L0={hit[0]} head={head_label}({head_conf:.2f})"
+                            f" question={question[:40]!r}"
+                        )
             except Exception as head_err:
+                head_telemetry.record_event("head_error", question=question, mode=self._head_mode)
                 print(f"[MetricHead] 打分失败(放行 L0/L3): {head_err}")
 
         if hit is None:
@@ -162,11 +172,22 @@ class LexiconResolver:
                     if head_label in registry and head_conf >= self._head_threshold:
                         print(f"[MetricHead][on] 接管: {head_label}({head_conf:.2f}) question={question[:40]!r}")
                         limit2, time2, cat2 = extract_slots(clean)
+                        head_telemetry.record_event(
+                            "head_takeover",
+                            question=question, mode=self._head_mode,
+                            head_label=head_label, head_conf=head_conf,
+                        )
                         return StructuredQueryIntent(
                             metric=head_label, direction=registry[head_label]["direction"],
                             limit=limit2, time_window=time2, category=cat2,
                             chart_hint=parse_chart_hint(clean),
                         )
+                    # 置信不足(或标签出闭集)→ 放行 L3,遥测如实计一笔
+                    head_telemetry.record_event(
+                        "head_low_conf_pass",
+                        question=question, mode=self._head_mode,
+                        head_label=head_label, head_conf=head_conf,
+                    )
                 except UnsupportedQuery:
                     pass
                 except Exception as head_err:

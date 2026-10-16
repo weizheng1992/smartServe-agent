@@ -3,7 +3,7 @@
 钉死三件事:
 - ``ENGINE_SCHEDULER_ENABLED`` 开关(0/false/no,忽略大小写与空白)整体关闭,
   连 default_tasks 都不该被触碰;
-- 默认任务清单:outbox 对账(30s)+ 坏例池摘要(6h);
+- 默认任务清单:outbox 对账(30s)+ 坏例池摘要(6h)+ 分类头遥测聚合(600s);
 - 单 tick 异常不终止循环(逐 tick 容错),任务按间隔反复执行。
 
 纯 asyncio 逻辑,不依赖 DB;间隔用毫秒级小值 + 抖动按比例缩小,无需冻结随机源。
@@ -35,10 +35,12 @@ def test_开关关闭_周期任务整体不启动(monkeypatch, flag):
 def test_默认任务清单_对账30s坏例摘要6h():
     tasks = {t.name: t for t in default_tasks()}
     # P1(live-desk-rework):接管掉线超时释放扫描 30s 入列
-    assert set(tasks) == {"outbox_reconcile", "badcase_digest", "takeover_release"}
+    # 遥测聚合(2026-10-16):分类头缝②小时窗计数 600s 落库(空窗口不触库)
+    assert set(tasks) == {"outbox_reconcile", "badcase_digest", "takeover_release", "head_telemetry_flush"}
     assert tasks["outbox_reconcile"].interval_seconds == 30.0
     assert tasks["badcase_digest"].interval_seconds == 6 * 3600.0
     assert tasks["takeover_release"].interval_seconds == 30.0
+    assert tasks["head_telemetry_flush"].interval_seconds == 600.0
 
 
 def _run_until(coro_factory, predicate, budget_s: float = 2.0) -> None:

@@ -17,7 +17,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from . import chart_policy, owner_routing, session_store
+from . import chart_policy, head_telemetry, owner_routing, session_store
 from .context_intake import INLINE_SPU_METRICS as _INLINE_SPU_METRICS
 from .context_intake import (
     inline_order_ids,
@@ -127,8 +127,17 @@ async def ask(
         # 要加载模型权重),直调会阻塞事件循环 —— 与 llm_intent._sft_generate
         # 同纪律,下放线程执行。
         intent = await asyncio.to_thread(engine.resolve, question)
-        trace.add_layer("L0", metric=intent.metric if isinstance(intent, StructuredQueryIntent) else "clarify")
+        _l0_detail: dict = {"metric": intent.metric if isinstance(intent, StructuredQueryIntent) else "clarify"}
+        _head = head_telemetry.pop_trace_payload(question)  # 分类头单次判定载荷(无记录为 None)
+        if _head is not None:
+            _l0_detail["head"] = _head
+        trace.add_layer("L0", **_l0_detail)
     except UnsupportedQuery:
+        # 分类头参与过判定(shadow 分歧 / on 低置信放行 / 打分失败)但 L0 未命中:
+        # 独立小写层名入 trace,不冒充 L0 命中
+        _head = head_telemetry.pop_trace_payload(question)
+        if _head is not None:
+            trace.add_layer("head", **_head)
         # L2 范例回放 → L3 LLM 意图兜底(ADR-0005);全部未命中 → 响亮失败 + 落库
         rewritten_q = None
         try:
