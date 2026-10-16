@@ -14,8 +14,9 @@ TS 规格 docs/specs/server-gateway-hardening-and-scaling.md Solution 3:对话�
   可信代理追加);不可信直连一律用真实 peer —— 伪造 XFF 旋转不了 IP 桶。
 - **挂载顺序**:须注册在 TenantContextMiddleware 之前(内层),复用其解析好的
   ``request.state.tenant``,与 guard 同一租户口径;admin 聚合态 ``tenantId="all"``
-  非真实租户,不设租户桶(仅 IP 维兜底)。只挂 /api/chat 与 /api/v1/spi 高频
-  入口,39 条冻结路由形状不变(仅超载请求收到 429)。
+  非真实租户,不设租户桶(仅 IP 维兜底)。挂 /api/chat、/spi/v1 与 /api/store
+  高频入口(spi 面 2026-10-14 勘正至真合同面,store 面 2026-10-16 收编),
+  39 条冻结路由形状不变(仅超载请求收到 429)。
 - **fail-open**:Redis 故障时打印错误放行 —— Redis 与网关 SSE/事件主干同生共死,
   它挂时业务本身已不可用,限流组件不额外阻断(打印错误上下文,严禁空 except)。
 - **阈值 env**::code:`RATE_LIMIT_WINDOW_SECONDS`(60)、

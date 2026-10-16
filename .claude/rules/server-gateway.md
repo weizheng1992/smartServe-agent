@@ -11,7 +11,7 @@ paths: ["services/gateway-py/**/*"]
 
 ### 1.1 模块职责划分
 
-1. **`main.py`**：FastAPI 应用装配（CORS、路由注册、socketio ASGI 挂载、lifespan 连接池管理、本地 embedding 后台预热）；中间件栈 `RateLimitMiddleware`（租户+IP 滑动窗口,仅 `/api/chat` 与 `/api/v1/spi`,Redis 故障 fail-open）+ `TenantContextMiddleware`（最外层 CORS）。
+1. **`main.py`**：FastAPI 应用装配（CORS、路由注册、socketio ASGI 挂载、lifespan 连接池管理、本地 embedding 后台预热）；中间件栈 `RateLimitMiddleware`（租户+IP 滑动窗口,挂 `/api/chat`、`/spi/v1` 与 `/api/store` 三面（spi 面 2026-10-14 勘正至真合同面,store 面 2026-10-16 收编）,Redis 故障 fail-open）+ `TenantContextMiddleware`（最外层 CORS）。
 2. **`routers/chat.py`**：
    - 智能体作业受理（入队 Redis Stream / 直跑）与 SSE 事件流端点（`Last-Event-ID` 断线重连回放，事件源为 Redis Streams 本身）。
    - 会话消息持久化与历史拉取（多租户过滤）。
