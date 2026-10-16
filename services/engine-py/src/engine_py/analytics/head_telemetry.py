@@ -128,11 +128,13 @@ async def _ensure_table() -> None:
     global _ready
     if _ready:
         return
+    # commit 必须在 async-with 内:get_session 退出即 close,未提交的 DDL 事务
+    # 会被回滚(get_session 契约「未提交即回滚」;2026-10-16 实弹探针坐实)
     async with get_session() as session:
         for stmt in _DDL.split(";"):
             if stmt.strip():
                 await session.execute(text(stmt))
-    await session.commit()
+        await session.commit()
     _ready = True
 
 

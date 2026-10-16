@@ -46,11 +46,14 @@ async def _ensure_table() -> None:
         return
     from ..db import get_session as _gs
 
+    # commit 必须在 async-with 内:get_session 退出即 close,未提交的 DDL 事务
+    # 会被回滚 —— 旧写法(裸 commit 在外)在新库上永远建不出表,被「坏库静默」
+    # 掩盖(2026-10-16 遥测验证实弹探针坐实,head_telemetry 同批顺修)
     async with _gs() as session:
         for stmt in _DDL.split(";"):
             if stmt.strip():
                 await session.execute(text(stmt))
-    await session.commit()
+        await session.commit()
     _ready = True
 
 
