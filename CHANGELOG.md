@@ -4,6 +4,18 @@
 
 ---
 
+## [2.14.0] - 2026-10-16 (小模型训练监控补全:metric head 逐 epoch flush/择优/曲线自动化 + SFT 过程落盘 + 分类头服务期遥测)
+
+### ✨ Features
+
+- **metric head 训练期监控补全**:`train.py` 逐 epoch stderr 进度行 + `metrics.json` 原子 flush(中途崩溃已跑 epoch 曲线不丢,`meta.completed=false` 即残局)+ 运行元数据 `meta`(started_at/duration/样本数/git_commit/best_epoch)+ **heldout 最优 epoch 择优**(此前固定存最终权重);新增 `plot_curve.py` 训练曲线 SVG 生成器(读 metrics.json → curve.html,train.py 收尾自动生成、支持 `--run-dir` 独立重生成——终结 2026-09-18 手工一次性曲线页重训即陈旧);`run_all.sh` 全程 tee 日志归档 `training_runs/logs/`(set -euo pipefail,已 gitignore)。
+- **SFT 训练过程落盘**:新增 `sft_metrics.py`(`SftMetricsCallback` 逐 logging_steps 原子写 output_dir/metrics.json 的 log_history 快照,崩溃保留已跑部分 + `build_run_summary` 训练终局摘要)——此前 TRL 控制台 stdout 是唯一过程指标通道,云端日志不取回即永久蒸发(pai-dsw 实录只能人工抄录);`run_summary.json` 补上文档承诺未兑现的「最终 loss/train_runtime」机器可读版。零 trl/peft 依赖,fake state 本地单测钉死。
+- **分类头缝②服务期遥测**:新增 `analytics/head_telemetry.py` —— shadow 一致/分歧、on 接管/低置信放行、打分失败五事件进程内线程安全 recorder(同步零 IO 永不抛),单次判定载荷经 `pop_trace_payload` 侧信道入 trace(L0 层 `head` 载荷或独立 `head` 层,冻结接口 09-D5 零改),小时窗聚合计数 600s 周期 upsert 落 `analytics_head_telemetry_agg`(运行时建表对齐 trace.py 先例;失败 print 不回灌,badcase/digest 同裁决)——「影子跑分歧率达标再切 on」自此有数据底盘,不再是文档规则。一致事件只计数不打 print(分母语义)。顺修 `MetricHead._encode`:hash 冒烟编码器此前误入 SentenceTransformer 联网回退,无外网环境挂在 hf_hub 连接(seam 批次实测 poll 挂死数分钟),现直连训练侧 HashEncoder 同一实现,seam 测试离线确定性。
+
+### 🧪 Tests
+
+- `test_training_pipeline.py` 扩例(meta/best_epoch 逐项一致、curve.html 生成、`write_json_atomic`、中途崩溃残局、plot 三态)+ `test_sft_metrics.py` 新册(8 例)+ `test_head_telemetry.py` 新册(9 例,窗口切分/pop 一次性/有界淘汰/flush 容错/线程并发)+ `test_metric_head_seam.py` 扩例(分歧 print+计数/一致无 print/on 接管/打分失败,补上 shadow 用例 capsys 零断言的欠账)+ `test_scheduler.py` 任务清单钉面扩员。
+
 ## [2.13.0] - 2026-10-15 (多商户租户闸批次收口 + SPI fail-closed + dev 启动自检闸;merchant-admin 架构审查候选①-⑤ 范式收敛)
 
 ### ✨ Features
