@@ -728,7 +728,16 @@ async def main() -> int:
             # 菜单/按钮矩阵:每轮以老板实时全量做基线
             smoke_menus = [c for c in MENU_CASES if (not os.environ.get("NIGHTLY_SMOKE") or c.case_id in ("m01_老板_全量", "m03_运营_受限")) and (not only or any(c.case_id.startswith(x) for x in only))]
             for case in smoke_menus:
-                owner_perms = await _owner_perms(client, tokens)
+                try:
+                    owner_perms = await _owner_perms(client, tokens)
+                except Exception as err:
+                    # containment 残洞补口(spec 评审实弹):_owner_perms 在用例
+                    # containment 之外,重试耗尽后的 raise 会连坐整跑 —— 此处
+                    # 只烧掉以它为基线的菜单用例,后续用例照跑
+                    results.append({"kind": "menu", "case_id": case.case_id, "dimension": "权限面",
+                                    "ok": False, "fails": [f"老板全量基线获取失败 {err!r}"], "advisory": False})
+                    print(f"[FAIL] {case.case_id}  ← 老板全量基线获取失败 {err!r}")
+                    continue
                 await _run_contained(results, run_menu_case, client, owner_perms, case, tokens,
                                      case_id=case.case_id, kind="menu", dimension="权限面")
                 r = results[-1]
