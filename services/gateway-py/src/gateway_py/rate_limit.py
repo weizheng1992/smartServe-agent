@@ -40,12 +40,18 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# (路径前缀, 作用域) —— 精确匹配前缀或其子路径;仅这两组高频入口限流。
+# (路径前缀, 作用域) —— 精确匹配前缀或其子路径。
 # spi 挂真合同面 /spi/v1(2026-10-14 夜评勘正:此前错挂审批面 /api/v1/spi,
 # 第三方合同面 /spi/v1/* 反而裸奔;审批面 API-key 鉴权自守,非 TS 规格限流对象)。
-_RATE_SCOPES = (("/api/chat", "chat"), ("/spi/v1", "spi"))
+# store 挂商城面(2026-10-15 安全审计 #2:含无鉴权领券写面,伪造 userId 轮换
+# 领券/量控耗尽的脚本滥用在 IP 维被节流;商城匿名无租户头,实际主要走 IP 桶)。
+_RATE_SCOPES = (("/api/chat", "chat"), ("/spi/v1", "spi"), ("/api/store", "store"))
 
-_DEFAULT_LIMITS = {"chat": {"tenant": 60, "ip": 120}, "spi": {"tenant": 300, "ip": 600}}
+_DEFAULT_LIMITS = {
+    "chat": {"tenant": 60, "ip": 120},
+    "spi": {"tenant": 300, "ip": 600},
+    "store": {"tenant": 120, "ip": 240},
+}
 
 # KEYS=各维度窗口键;ARGV=[now_ms, window_ms, limit_1..N, member_1..N]
 # 任一维度超限 → 全部维度不计数(all-or-nothing);返回 {1|0放行, retry_after秒}

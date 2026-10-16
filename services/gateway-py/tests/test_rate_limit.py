@@ -137,12 +137,26 @@ class TestRateLimitMiddleware:
             assert res.status_code != 429, f"审批面不得再挂 SPI 限流: {res.status_code}"
 
     def test_rate_scopes_pin_real_contract_face(self):
-        """范围映射钉死:chat + 真合同面 /spi/v1;/api/v1/spi 审批面不在册。"""
+        """范围映射钉死:chat + 真合同面 /spi/v1 + 商城写面 /api/store;
+        /api/v1/spi 审批面不在册。"""
         from gateway_py.rate_limit import _RATE_SCOPES
 
         assert ("/api/chat", "chat") in _RATE_SCOPES
         assert ("/spi/v1", "spi") in _RATE_SCOPES
+        assert ("/api/store", "store") in _RATE_SCOPES, "无鉴权商城写面必须在限流范围内(审计 #2)"
         assert all(prefix != "/api/v1/spi" for prefix, _ in _RATE_SCOPES)
+
+    async def test_store_face_ip_throttled(self, client, monkeypatch):
+        """商城面(含无鉴权领券写面)挂 IP 维限流(2026-10-15 安全审计 #2):
+        伪造 userId 轮换领券的脚本滥用在 IP 桶上被节流。"""
+        monkeypatch.setenv("RATE_LIMIT_STORE_TENANT_MAX", "99")
+        monkeypatch.setenv("RATE_LIMIT_STORE_IP_MAX", "2")
+        for _ in range(2):
+            res = await client.post("/api/store/coupons/claim", json={})
+            assert res.status_code != 429
+
+        over = await client.post("/api/store/coupons/claim", json={})
+        assert over.status_code == 429
 
     async def test_non_scoped_route_never_limited(self, client, monkeypatch):
         monkeypatch.setenv("RATE_LIMIT_CHAT_TENANT_MAX", "1")

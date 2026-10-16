@@ -54,9 +54,12 @@ services:
     env_file: .env.prod
     ports:
       - "4000:4000"
+    environment:
+      # fastembed ONNX 权重缓存指向挂载卷(chat.py 读此 env;缺省 tempdir 随容器蒸发)
+      FASTEMBED_CACHE_PATH: /root/.cache/fastembed
     volumes:
       - uploads:/data/uploads          # UPLOADS_DIR 指到这里,聊天附件持久化
-      - hf_cache:/root/.cache/huggingface  # bge 本地 embedding 模型缓存,重启免下载
+      - hf_cache:/root/.cache/fastembed  # fastembed ONNX 权重缓存(FASTEMBED_CACHE_PATH),重启免下载
     depends_on:
       postgres:
         condition: service_healthy

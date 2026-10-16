@@ -119,6 +119,49 @@ class TestTenant:
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
 
+    async def test_configured_secret_is_write_only_never_echoed(self, client, contract_fixtures):
+        """已配置租户的 apiSecret 是 write-only(2026-10-15 安全审计 #1):
+        GET /api/tenant/list 无鉴权依赖,DB 里存了活体密钥也严禁明文回吐 ——
+        密钥真源在网关 env(验签消费),DB 字段仅配置面。"""
+        from engine_py.db import get_session
+        from sqlalchemy import text
+
+        st_id = f"st_{_TS}"
+        async with get_session() as session:
+            await session.execute(text("DELETE FROM tenant_configs WHERE business_id = :bid").bindparams(bid=st_id))
+            await session.execute(text("DELETE FROM tenants WHERE business_id = :bid").bindparams(bid=st_id))
+            await session.execute(
+                text(
+                    "INSERT INTO tenants (business_id, name, plan_tier, status) "
+                    "VALUES (:bid, '密钥write-only契约域', 'builtin', 'active')"
+                ).bindparams(bid=st_id)
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO tenant_configs (id, business_id, spi_config, status) "
+                    "VALUES (gen_random_uuid(), :bid, CAST(:cfg AS jsonb), 'published')"
+                ).bindparams(
+                    bid=st_id,
+                    cfg='{"apiSecret": "live-secret-do-not-echo", "spiBaseUrl": "http://x"}',
+                )
+            )
+            await session.commit()
+        try:
+            listing = await client.get("/api/tenant/list")
+            row = next((t for t in listing.json()["tenants"] if t["id"] == st_id), None)
+            assert row is not None
+            assert row["apiKey"] is None, "密钥必须 write-only,严禁明文回吐"
+            assert "live-secret-do-not-echo" not in listing.text, "响应全文不得含密钥"
+        finally:
+            async with get_session() as session:
+                await session.execute(
+                    text("DELETE FROM tenant_configs WHERE business_id = :bid").bindparams(bid=st_id)
+                )
+                await session.execute(
+                    text("DELETE FROM tenants WHERE business_id = :bid").bindparams(bid=st_id)
+                )
+                await session.commit()
+
     async def test_update_tenant_roundtrip(self, client, contract_fixtures):
         ut_id = f"ut_{_TS}"
         create_res = await client.post(

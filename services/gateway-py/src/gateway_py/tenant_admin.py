@@ -94,7 +94,11 @@ async def list_tenant_summaries() -> list[dict]:
                 "channel": "Web + Mobile + SPI",
                 # 未配置即回 null,前端「未配置」态呈现(数据真实性约定:严禁编造
                 # 密钥/风控阈值/Webhook 地址——update 路由对 falsy 值不覆写,回传安全)
-                "apiKey": spi.get("apiSecret"),
+                # apiSecret write-only(2026-10-15 安全审计 #1):密钥真源在网关
+                # env(验签消费方),DB 字段是配置面残留 —— 本路由无鉴权依赖,
+                # 明文回吐 = 匿名者拿活体密钥自签 HMAC 打 /spi/v1 全租户。
+                # 恒 None(update 对 falsy 不覆写,编辑面回传不会冲掉存量)。
+                "apiKey": None,
                 "refundLimit": refund_limit,
                 "autoEscalation": True,
                 "webhookUrl": spi.get("spiBaseUrl"),

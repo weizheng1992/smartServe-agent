@@ -53,6 +53,28 @@ def test_local_provider_uses_fastembed_adapter(local_backend):
     assert len(vec) == 4
 
 
+def test_cache_dir_env_passthrough(monkeypatch, local_backend):
+    """FASTEMBED_CACHE_PATH 透传给 TextEmbedding(2026-10-15 安全审计 #4):
+    缺省 tempdir 会让容器每次启动重拉 ONNX 权重并进进程执行 —— 生产必须
+    可配到部署卷;网关进程同时验证显式 env 生效。"""
+    captured: dict = {}
+
+    class _Capture(_StubFastembed):
+        def __init__(self, model_name: str = "", **kwargs: Any) -> None:
+            captured.update(kwargs)
+            captured["model_name"] = model_name
+            super().__init__(model_name)
+
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", "/data/fastembed")
+    monkeypatch.setattr("fastembed.TextEmbedding", _Capture)
+    get_embedding_model.cache_clear()
+    try:
+        get_embedding_model()
+    finally:
+        get_embedding_model.cache_clear()
+    assert captured.get("cache_dir") == "/data/fastembed", f"cache_dir 必须透传: {captured}"
+
+
 def test_embedding_singleton_survives_backend_swap(local_backend):
     assert get_embedding_model() is get_embedding_model(), "lru_cache 单例契约不因换后端改变"
 

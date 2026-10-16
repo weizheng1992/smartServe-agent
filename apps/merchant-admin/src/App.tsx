@@ -70,7 +70,9 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
   const routable = useMemo(() => flattenMenus(menus), [menus]);
   const currentTop = routable.find((r) => location.pathname.startsWith(r.route || '###'))?.top || '';
   // 路由守卫:路径必须落在服务端下发的菜单树内(纪律不变 —— 前端只做可见性,
-  // 权限真源在服务端 permCode;服务端 403 仍兜住数据)
+  // 权限真源在服务端 permCode。信任边界如实(2026-10-15 安全审计 #3):读数据
+  // 面的服务端 permCode 闸尚未覆盖,直打网关的数据越权由身份/租户闸兜底、
+  // permCode 收敛属待办 —— 本守卫拦截的是页面骨架,不是数据闸)
   const allowed = menusState === 'ready' && routeAllowed(location.pathname, menus);
 
   // 切换 = 服务端换签目标员工 JWT;始终以保存的老板凭证发起。

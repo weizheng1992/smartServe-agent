@@ -221,9 +221,8 @@ def get_embedding_model() -> Embeddings:
     if settings.embedding_provider == "local":
         # huggingface_hub 在导入时读取 HF_ENDPOINT,须在 import 前设置;
         # 默认镜像 hf-mirror.com,用户已显式配置则不覆盖(fastembed 经 hub
-        # 下载 ONNX 权重,首用落 ~/.cache/huggingface)。Xet 传输通道绕过
-        # 镜像直连 cas-server 匿名 401(实弹),镜像代理不了它 —— 禁用回落
-        # 普通 HTTP resolve,镜像可代理。
+        # 下载 ONNX 权重)。Xet 传输通道绕过镜像直连 cas-server 匿名 401
+        # (实弹),镜像代理不了它 —— 禁用回落普通 HTTP resolve,镜像可代理。
         os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
         # fastembed/ONNX Runtime 后端(2026-10-15 夜评台账 #1):torch 推理在
@@ -232,7 +231,18 @@ def get_embedding_model() -> Embeddings:
         # ONNX 权重 ~90MB,同模型同维度(512),onnxruntime session 线程安全。
         from fastembed import TextEmbedding
 
-        return _SerializedEmbeddings(_FastembedEmbeddings(TextEmbedding(model_name=settings.embedding_model)))
+        # cache_dir 显式化(2026-10-15 安全审计 #4):fastembed 缺省落 tempdir,
+        # 容器可写层随销毁蒸发 → 每次启动都从第三方镜像重拉权重并进进程执行,
+        # 且镜像不可达时首用调用在锁内同步重试冻结事件循环。生产经
+        # FASTEMBED_CACHE_PATH 指到部署卷(compose 挂载),dev 缺省 tempdir 即可。
+        return _SerializedEmbeddings(
+            _FastembedEmbeddings(
+                TextEmbedding(
+                    model_name=settings.embedding_model,
+                    cache_dir=os.environ.get("FASTEMBED_CACHE_PATH") or None,
+                )
+            )
+        )
     # openai 提供方走 AI_BASE_URL,与对话模型同受 fail-fast 校验;local 分支
     # 纯进程内推理不涉端点,不校验(db 类脚本 import 本模块不得被牵连)
     ensure_llm_config(settings)
