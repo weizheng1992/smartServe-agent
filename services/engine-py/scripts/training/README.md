@@ -51,13 +51,15 @@ intent_conflict 唯一句/周连升两周 = 漂移重训信号。**先清 71 条
 
 ## 产物与三缝接入
 
-`run_dir/` 内四件：`head.pt`（线性头权重）、`labels.json`（闭集标签序 + encoder 名）、
-`config.snapshot.toml`（训练配置快照）、`metrics.json`（每类 P/R/F1）。
+`run_dir/` 内六件：`head.pt`（线性头权重，**heldout 最优 epoch 择优**）、`labels.json`
+（闭集标签序 + encoder 名）、`config.snapshot.toml`（训练配置快照）、`metrics.json`
+（每类 P/R/F1 + `loss_curve` 逐 epoch 曲线 + `meta` 运行元数据）、`curve.html`
+（训练曲线页，`plot_curve.py` 从 metrics.json 自动生成，可 `--run-dir` 独立重生成）。
 
-- 缝②指标映射：`MetricQueryEngine.resolve` 前端 adapter 加载 run 目录，L0 未命中处调用；
-- 缝①意图分类：`IntentScorer` 新 adapter + `get_intent_classifier()` 配置切换；
-- 接入纪律：先影子跑（并行打分记日志对比）→ promptfoo intentF1 同评测集达标且高于基线
-  → 配置切换；**回滚 = 配置回退一行**。评测集永远不入训（prepare 的近邻过滤就是护栏）。
+监控纪律（2026-10-16）：训练逐 epoch 打 stderr 进度行并原子 flush metrics.json
+（中途崩溃曲线不丢，`meta.completed=false` 即残局标记）；`meta` 记
+started_at / duration_seconds / 样本数 / git_commit / best_epoch。`run_all.sh`
+全程 tee 归档到 `training_runs/logs/train_<时间戳>.log`（已 gitignore）。
 
 ## SFT 轨（SemQL 意图解析，已跑通）
 
@@ -84,16 +86,18 @@ intent_conflict 唯一句/周连升两周 = 漂移重训信号。**先清 71 条
 
 | 文件 | 职责 |
 |---|---|
-| `common.py` | 配置/JSONL 读写、编码器工厂（hash 冒烟 / sentence-transformers）、指标 |
+| `common.py` | 配置/JSONL 读写（含 `write_json_atomic` 原子写）、编码器工厂（hash 冒烟 / sentence-transformers）、指标 |
 | `prelabel.py` | LLM 预标（httpx 直连 OpenAI 兼容端点，env 取 AI_BASE_URL/AI_MODEL） |
 | `prepare_data.py` | 去重 / 近邻过滤 / 分层切分 / 标签闭集校验，出 stats.json（够不够训看它） |
-| `train.py` | config 驱动训练，产出 run 目录 |
+| `train.py` | config 驱动训练，产出 run 目录（逐 epoch flush + meta + best-epoch 择优） |
+| `plot_curve.py` | 训练曲线 SVG 生成器（读 metrics.json → curve.html；train.py 收尾自动调，也支持独立重跑） |
 | `evaluate.py` | 对任意 JSONL 复检 run，出 markdown 报告 |
 | `configs/*.example.toml` | 两份配置样例（指标头 / 意图头），复制后修改即用 |
 | `tests/test_training_pipeline.py` | 端到端测试（hash 编码器，不下载模型不依赖 DB） |
 | `sft_dataset.py` | SemQL SFT 数据构建（词面 × 时间窗 × 品类 × limit 程序化组合；评测集纯门排除，4478 条已验证零泄漏） |
 | `sft_train.py` | QLoRA SFT 训练（**标准 transformers+peft+trl 栈**；勿用 unsloth，原因见排障记录） |
-| `run_all.sh` | metric_head 一键流水线（种子 → 数据 → 训练 → 评估） |
+| `sft_metrics.py` | SFT 过程监控：TrainerCallback 逐 logging_steps 落 metrics.json + 训练结束出 run_summary.json（零 trl 依赖，本地可单测） |
+| `run_all.sh` | metric_head 一键流水线（种子 → 数据 → 训练 → 评估；全程 tee 日志归档） |
 
 决策溯源：wayfinder 票 05（落点）/ 06（数据可行性）/ 07（水龙头）/ 11（决策文档），
 见 `docs/wayfinder/mall-data-agent-split/issues/`。

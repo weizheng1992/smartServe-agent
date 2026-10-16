@@ -16,7 +16,9 @@ import pytest
 TRAINING_DIR = Path(__file__).resolve().parents[1] / "scripts" / "training"
 sys.path.insert(0, str(TRAINING_DIR))
 
-from common import classification_report
+import plot_curve
+import train
+from common import classification_report, write_json_atomic
 from evaluate import load_run
 from prepare_data import dedup_by_query, near_dup_filter, stratified_split, validate_labels
 from prepare_data import main as prepare_main
@@ -71,6 +73,16 @@ run_dir = "{run_dir}"
     return path
 
 
+class TestAtomic:
+    def test_write_json_atomic(self, tmp_path):
+        target = tmp_path / "nested" / "m.json"
+        write_json_atomic({"a": 1}, target)
+        assert json.loads(target.read_text(encoding="utf-8")) == {"a": 1}
+        assert not (tmp_path / "nested" / "m.json.tmp").exists()  # tmp 已替换清理
+        write_json_atomic({"a": 2}, target)  # 覆盖旧版(逐 epoch 重写路径)
+        assert json.loads(target.read_text(encoding="utf-8")) == {"a": 2}
+
+
 class TestPrepare:
     def test_dedup_keeps_first(self):
         records = [{"query": "退款", "label": "refund"}, {"query": "退款", "label": "refund"}, {"query": "发货", "label": "logistics"}]
@@ -100,19 +112,24 @@ class TestPrepare:
         assert report["per_class"]["a"]["support"] == 2
 
 
+def _prepare(tmp_path: Path) -> Path:
+    """合成数据落盘 + prepare_data 跑完,返回 config 路径(run 目录约定 = tmp_path/"run")。"""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "labeled.jsonl").write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in _synthetic_records()), encoding="utf-8"
+    )
+    cfg = _write_config(tmp_path, data_dir, tmp_path / "run")
+    assert prepare_main(["--config", str(cfg)]) == 0
+    return cfg
+
+
 class TestEndToEnd:
     """prepare → train → evaluate 三连(全程 hash 编码器,秒级)。"""
 
     def test_full_pipeline(self, tmp_path, capsys):
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
-        (data_dir / "labeled.jsonl").write_text(
-            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in _synthetic_records()), encoding="utf-8"
-        )
-        cfg = _write_config(tmp_path, data_dir, tmp_path / "run")
-
-        assert prepare_main(["--config", str(cfg)]) == 0
-        stats = json.loads((data_dir / "processed" / "stats.json").read_text(encoding="utf-8"))
+        cfg = _prepare(tmp_path)
+        stats = json.loads((tmp_path / "data" / "processed" / "stats.json").read_text(encoding="utf-8"))
         assert stats["train"] > 0 and stats["heldout"] > 0
         assert set(stats["per_class"]) == set(LABELS)
 
@@ -127,3 +144,80 @@ class TestEndToEnd:
         import torch
 
         assert head.weight.shape == (len(LABELS), head.weight.shape[1]) and torch.isfinite(head.weight).all()
+
+    def test_metrics_meta_and_best_epoch(self, tmp_path):
+        cfg = _prepare(tmp_path)
+        stats = json.loads((tmp_path / "data" / "processed" / "stats.json").read_text(encoding="utf-8"))
+        assert train_main(["--config", str(cfg)]) == 0
+        run_dir = tmp_path / "run"
+        metrics = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+
+        assert {"train", "heldout", "loss_curve"} <= set(metrics)  # 三旧键原样(向后兼容)
+        meta = metrics["meta"]
+        assert meta["completed"] is True
+        assert meta["train_samples"] == stats["train"] and meta["heldout_samples"] == stats["heldout"]
+        assert meta["encoder"] == "hash"
+        assert meta["started_at"] and meta["duration_seconds"] is not None
+        assert meta["git_commit"] is None or len(meta["git_commit"]) == 40  # 仓库内跑有 hash,CI 外无 git 时 None
+
+        # best_epoch 与 loss_curve 逐项一致(严格大于取最早最大,与训练内克隆同规则)
+        curve = metrics["loss_curve"]
+        best_acc = max(e["heldout_acc"] for e in curve if "heldout_acc" in e)
+        first_best = next(e["epoch"] for e in curve if e.get("heldout_acc") == best_acc)
+        assert meta["best_epoch"] == first_best and meta["best_heldout_acc"] == best_acc
+
+    def test_curve_html_generated(self, tmp_path):
+        cfg = _prepare(tmp_path)
+        assert train_main(["--config", str(cfg)]) == 0
+        run_dir = tmp_path / "run"
+        page = (run_dir / "curve.html").read_text(encoding="utf-8")  # train.py 收尾自动生成
+        assert "<svg" in page and "train_loss" in page and "heldout 准确率" in page
+        assert not list(run_dir.glob("*.tmp"))  # 原子写无半截文件残留
+
+
+class TestCrashFlush:
+    """训练中途被杀:已跑 epoch 的曲线必须已在盘上(meta.completed=False 标记残局)。"""
+
+    def test_partial_metrics_survive_crash(self, tmp_path, monkeypatch):
+        cfg = _prepare(tmp_path)
+        real_flush = train._flush_partial
+        calls = {"n": 0}
+
+        def flaky_flush(run_dir, meta, curve):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                raise SystemExit("[Test] 模拟训练中途被杀")
+            real_flush(run_dir, meta, curve)
+
+        monkeypatch.setattr(train, "_flush_partial", flaky_flush)
+        with pytest.raises(SystemExit):
+            train_main(["--config", str(cfg)])
+
+        metrics = json.loads((tmp_path / "run" / "metrics.json").read_text(encoding="utf-8"))
+        assert metrics["meta"]["completed"] is False
+        assert [e["epoch"] for e in metrics["loss_curve"]] == [1]  # 第 1 epoch 已 flush,未蒸发
+
+
+class TestPlot:
+    def test_build_svg_single_epoch(self):
+        svg = plot_curve.build_svg([{"epoch": 1, "train_loss": 0.5, "heldout_acc": 0.9}], title="t", subtitle="s")
+        assert "<svg" in svg and "<circle" in svg  # 单点以圆点标记保证可见
+        flat = plot_curve.build_svg(
+            [{"epoch": 1, "train_loss": 2.0, "heldout_acc": 0.9}, {"epoch": 2, "train_loss": 2.0, "heldout_acc": 0.9}],
+            title="t",
+            subtitle="s",
+        )
+        assert "2.00" in flat  # 等值退化落中线,不炸不除零
+
+    def test_build_svg_without_heldout(self):
+        svg = plot_curve.build_svg([{"epoch": 1, "train_loss": 1.0}], title="t", subtitle="s")
+        assert "无 heldout 评估" in svg
+        assert 'stroke="#10b981"' not in svg  # 无评估带不渲染曲线/参考线
+
+    def test_cli_standalone(self, tmp_path, capsys):
+        cfg = _prepare(tmp_path)
+        assert train_main(["--config", str(cfg)]) == 0
+        run_dir = tmp_path / "run"
+        (run_dir / "curve.html").unlink()
+        assert plot_curve.main(["--run-dir", str(run_dir)]) == 0  # 对现存 run 独立重生成
+        assert (run_dir / "curve.html").exists()

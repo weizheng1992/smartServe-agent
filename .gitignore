@@ -106,3 +106,6 @@ services/engine-py/training_data/sft/adapter/
 deploy/.env.prod
 eval/nightly/results/
 eval/results/
+
+# 训练流水线运行日志(run_all.sh tee 归档,本地排查用不入库)
+services/engine-py/training_runs/logs/

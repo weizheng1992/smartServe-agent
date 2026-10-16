@@ -134,14 +134,23 @@ heldout_ratio = 0.15 # 实际切出 89 句(分层)
 
 ## 6. 产物与部署
 
-### 6.1 产物四件（`training_runs/metric_head/`）
+### 6.1 产物五件（`training_runs/metric_head/`）
 
 | 文件 | 大小 | 内容 |
 |---|---|---|
-| `head.pt` | 26KB | 线性头权重（唯一的「模型」）|
+| `head.pt` | 26KB | 线性头权重（唯一的「模型」；**heldout 最优 epoch 择优**，2026-10-16 起）|
 | `labels.json` | <1KB | 闭集标签序 + encoder 名（推理 argmax 索引即此序）|
 | `config.snapshot.toml` | 1.5KB | 训练配置快照（评测/接入据此加载同款 encoder）|
-| `metrics.json` | 5KB | 逐 epoch 损失/准确率曲线 + 最终指标 |
+| `metrics.json` | 5KB+ | 逐 epoch 损失/准确率曲线（`loss_curve`）+ 最终指标 + `meta` 运行元数据 |
+| `curve.html` | ~2KB | 训练曲线页 —— **`plot_curve.py` 从 metrics.json 自动生成**（train.py 收尾自动调；重训后自动更新，也可 `--run-dir` 独立重生成）|
+
+`meta` 字段（2026-10-16 补）：`started_at` / `duration_seconds` / `train_samples` /
+`heldout_samples` / `encoder` / `git_commit`（无 git 环境为 null）/ `best_epoch` /
+`best_heldout_acc` / `completed`。训练过程逐 epoch 原子 flush metrics.json
+（`completed=false` 即中途崩溃残局，已跑 epoch 的曲线不丢）。
+
+> 注：历史版本 curve.html 为 2026-09-18 手工一次性产物（无生成代码，重训后陈旧）；
+> 2026-10-16 起 `plot_curve.py` 接管生成，上表「五件」以生成器产物为准。
 
 ### 6.2 部署形态：**进程内，无独立模型服务**
 

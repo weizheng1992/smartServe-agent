@@ -14,6 +14,7 @@ sys.path;测试经 sys.path 注入)。刻意零新增依赖:torch 与 sentence-t
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,19 @@ def write_jsonl(records: list[dict[str, Any]], path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r, ensure_ascii=False, default=str) + "\n" for r in records), encoding="utf-8")
+
+
+def write_json_atomic(payload: dict[str, Any], path: str | Path) -> None:
+    """JSON 原子写:tmp 落盘后 os.replace 整体替换。
+
+    监控产物(metrics.json 等)会被训练循环逐 epoch 重写,崩溃瞬间读者
+    (测试/人/plot_curve)只应看到完整旧版或完整新版,不能看到半截文件。
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 class HashEncoder:
