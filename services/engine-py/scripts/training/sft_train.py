@@ -9,6 +9,10 @@ trl 校验必挂;标准栈时长约多一半,在免费计算时额度内可忽�
 配置:--config 传 YAML(值作默认,显式 CLI 参数覆盖);
 推荐 configs/sft_semql.yaml(2026-09-20 首训实录提取)。
 
+过程监控(2026-10-16):训练中逐 logging_steps 落 output_dir/metrics.json
+(log_history 快照,崩溃保留已跑部分),结束另落 run_summary.json(最终
+loss/train_runtime 机器可读 —— 补 pai-dsw 实录人工抄录的缺口)。
+
 用法(services/engine-py 下)::
 
     uv run python scripts/training/sft_train.py \\
@@ -80,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         import torch
         from datasets import Dataset
         from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+        from sft_metrics import SftMetricsCallback, build_run_summary, write_json_atomic
         from transformers import AutoModelForCausalLM, AutoTokenizer
         from trl import SFTConfig, SFTTrainer
     except ImportError as err:
@@ -119,10 +124,18 @@ def main(argv: list[str] | None = None) -> int:
             learning_rate=tr["learning_rate"], logging_steps=tr["logging_steps"],
             save_strategy=tr["save_strategy"], report_to=tr["report_to"],
         ),
+        # 过程落盘:逐 logging_steps 把 log_history 原子写 output_dir/metrics.json
+        # (崩溃保留已跑部分);此前只有控制台 stdout,云端日志不取回即永久蒸发。
+        callbacks=[SftMetricsCallback(args.out)],
     )
     trainer.train()
     trainer.save_model(args.out)
-    print(f"[SFT] adapter 已保存: {args.out}")
+    summary = build_run_summary(trainer.state, dataset_size=len(rows), num_train_epochs=args.epochs)
+    write_json_atomic(summary, Path(args.out) / "run_summary.json")
+    print(
+        f"[SFT] adapter 已保存: {args.out}(final_loss={summary['final_loss']}"
+        f" train_runtime={summary['train_runtime_seconds']}s → run_summary.json)"
+    )
     return 0
 
 
