@@ -1,10 +1,14 @@
 # smartServe-Agent 项目知识点详解(新手学习版)
 
-> **⚠️ 口径更新(2026-10-14,以此为准)**:本文写作于 ADR-0011 时点,其后仓库
+> **⚠️ 口径更新(2026-10-16,以此为准)**:本文写作于 ADR-0011 时点,其后仓库
 > 又落地 ADR-0012(货架词典解析器)、ADR-0013(聊天断线收口:L1 重连补投 +
 > 「继续」确定性重派 + 回复打断续聊)、owner-routing 责任人路由、S5 多商户
-> 租户列收口、SFT 训练管线(`scripts/training/`,见 `docs/sft_training_pipeline.md`)。
-> 现行测试口径:**引擎 pytest 1689 / 网关 399+3skip / 四前端 104(web 25 +
+> 租户列收口、SFT 训练管线(`scripts/training/`,见 `docs/sft_training_pipeline.md`)、
+> 本地 embedding 换 fastembed/ONNX(并发段错误根治,2.13)、**小模型训练监控补全**
+> (2.14:metric head 逐 epoch flush/运行元数据/heldout 择优/curve.html 自动生成 +
+> SFT 过程落盘 + 分类头服务期遥测 `analytics/head_telemetry.py` —— §3.6 的
+> 「影子跑看分歧率」自此有真库数据底盘)。
+> 现行测试口径:**引擎 pytest 1735 / 网关 399+3skip / 四前端 104(web 25 +
 > merchant 9 + merchant-admin 35 + admin 35)/ 注册端点 129**。阅读本文时,
 > 概念框架与设计叙事仍成立;凡数字与「最新能力清单」,以上述口径与本仓库
 > HEAD 为准(逐票证据链见 `.scratch/stream-reliability-push/` 与
@@ -611,7 +615,10 @@ def reject_unsafe(sql, schema, require_business_id=False):
 1. **弱标注造数据**:词面 × 模板程序化生成 590 句(人工零标注);
 2. **防泄漏三件**:精确去重 + 评测集近邻过滤(cos≥0.90 剔除防泄漏)+ 分层切分 heldout 15%——「98.88% 准确率不可信,可信的是独立切分 + 泄漏防线 + shadow 分歧率三件套」;
 3. **训练**:bge 冻结编码 + 只训 `Linear(384→12)` 约 4.6K 参数,CPU 2 分钟,heldout 98.88%;
-4. **灰度部署**:shadow 跑 1~2 周看分歧率 → 达标切 on → 回滚 = 删一个环境变量。「ML 系统的上线不是部署事件,是观测周期」。
+4. **灰度部署**:shadow 跑 1~2 周看分歧率(2.14 起有真库数据底盘:`head_telemetry` 五事件
+   —— shadow 一致/分歧、on 接管/低置信放行、打分失败 —— 小时窗聚合 600s 落
+   `analytics_head_telemetry_agg`,单次判定载荷入 trace 的 L0 层;一致也计数,分歧率才有分母)
+   → 达标切 on → 回滚 = 删一个环境变量。「ML 系统的上线不是部署事件,是观测周期」。
 
 **SFT 轨(另一条)**:程序化生成 4478 条「问句→SemQL」样本(QLoRA 微调 Qwen2.5-7B,单卡 A10,token 准确率 99.6%,vLLM 部署)——替换 L3 的外部 LLM 端点。**LoRA 原理一句话**:微调权重变化 ΔW 具有低秩性,分解为两个小矩阵 BA(7B 模型只训 154MB adapter);QLoRA = 4bit 量化基座 + LoRA(7B 进 24GB 单卡)。
 
@@ -635,6 +642,13 @@ def train_linear_head(embeddings, label_idx, num_classes, *, epochs, batch_size,
             loss.backward(); opt.step()
         # 每 epoch 记 heldout_acc → metrics.json 曲线
 ```
+
+> **2026-10 监控补全后的真实形态(2.14)**:循环内每 epoch 经 `on_epoch` 回调打
+> stderr 进度行并**原子 flush** metrics.json(中途崩溃已跑曲线不丢,`meta.completed=false`
+> 即残局);结束**回装 heldout 最优 epoch 权重**(不再固定存最终权重),`meta` 记
+> started_at/耗时/样本数/git hash/best_epoch;`plot_curve.py` 从 metrics.json 自动生成
+> curve.html(终结手产曲线页重训即陈旧)。SFT 轨同批补 `SftMetricsCallback`
+> 逐 logging_steps 落盘 + `run_summary.json`(最终 loss/train_runtime 机器可读)。
 
 **一条真实训练样本**(SemQL,可推导):
 
@@ -733,7 +747,7 @@ signature = hmac.new(api_secret, f"{method}{path}{timestamp}{body}".encode(), sh
 
 | 层 | 工具 | 钉什么 | 数量级 |
 |---|---|---|---|
-| 引擎单测/契约 | pytest(testcontainers 密封 PG+Redis) | 决策图行为、SQL 安全闸、记忆策略、编译器 | 1601 passed |
+| 引擎单测/契约 | pytest(testcontainers 密封 PG+Redis) | 决策图行为、SQL 安全闸、记忆策略、编译器 | 1735 passed |
 | 网关契约 | pytest + ASGITransport | HTTP/SSE 线格式、鉴权、租户闸、限流 | 375+3skip |
 | 评测 | promptfoo / intent eval | LLM 输出质量(意图分类 F1、指标消歧),基线钉定 + compare 门禁 | 三册钉基线 |
 | E2E | Playwright(三浏览器) | 商城购物车全链路、控制台鉴权 | 39+9 |
@@ -841,7 +855,7 @@ async def on_llm_end(self, response, *, run_id, **kwargs):
 | 咨询直答快轨 | 整次深度规划调用 | 咨询类 57~114s → 秒级(§2.5) |
 | L0 词表 + L2 范例回放 | 高频/重复问题的解析成本 | 余弦 ≥0.90 直接回放,「成功变免费」(§3.2) |
 | 确定性 Contextual 模板 | O(n) 次 LLM 灌库成本 | 零 LLM 达到近似效果(§2.9) |
-| 本地 embedding(bge-small-zh) | API 账单 | 免费;代价是并发段错误坑,必须走串行护栏单点 |
+| 本地 embedding(bge-small-zh) | API 账单 | 免费;torch 双线程并发 encode 曾整进程 SIGSEGV,2.13 起 embedding 后端换 fastembed/ONNX 根治(串行护栏保留为纵深) |
 | 评测断 L3 | 评测本身烧钱 | `AI_INTENT_L3=off`,确定性层单独跑分(§5.1) |
 
 **新手要点**:token 成本问题的答案从来不是「换便宜模型」,而是**流量分层**——让零成本的确定性层(词表/快轨/缓存)吃掉大部分流量,贵的 LLM 只兜长尾,分层本身就是成本架构。另外记住计量纪律:usage 缺失记 NULL 不记 0——0 会污染聚合,NULL 诚实。
@@ -950,6 +964,7 @@ analytics/engine.py             resolve/compile/execute
 analytics/semantic_compiler.py  语义模型→SQL(形状闭集)
 analytics/sql_guard.py          四层安全闸
 analytics/l0_lexicon.py         词表归一+槽位
+analytics/head_telemetry.py     分类头服务期遥测(五事件/小时窗聚合落库)
 analytics/llm_intent.py         L3 结构化输出
 skills/spi_client.py            SPI 防腐适配
 tools_registry/metrics.yaml     39 指标闭集
@@ -960,4 +975,5 @@ gateway_py/routers/analytics.py 40 条数据分析路由
 gateway_py/sse_tail.py          SSE 读流泵单点
 gateway_py/routers/spi.py       HMAC 开放接口
 eval/nightly/                   夜间评测(58 用例)
+scripts/training/               训练脚手架(train 逐 epoch flush/plot_curve 曲线页/sft_metrics 落盘)
 ```
