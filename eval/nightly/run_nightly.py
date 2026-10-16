@@ -79,6 +79,26 @@ async def health_check(client: httpx.AsyncClient) -> bool:
         return False
 
 
+_CONNECT_RETRY_ATTEMPTS = 4
+_CONNECT_RETRY_BACKOFF_S = 3.0
+
+
+async def _retry_on_connect(fn, *args, what: str, **kwargs):
+    """连接类异常退避重试:结果只在整跑收尾才落盘,网关重启窗口
+    (并行会话顶替 4000 端口等)拒绝连接会令整夜台账蒸发 —— 2026-10-16
+    实弹:approvals_waiting 在逐轮 try 块之外,重启窗口一个 ConnectError
+    终止全部 58 例且 results.jsonl 零落盘。仅重试连接被拒/重置类签名
+    (重启窗口),ReadTimeout 等 LLM 慢回复不在此列、维持一次性语义。"""
+    for attempt in range(1, _CONNECT_RETRY_ATTEMPTS + 1):
+        try:
+            return await fn(*args, **kwargs)
+        except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as err:
+            if attempt == _CONNECT_RETRY_ATTEMPTS:
+                raise
+            print(f"[retry] {what} 第{attempt}次连接失败({err!r}),{_CONNECT_RETRY_BACKOFF_S}s 后重试")
+            await asyncio.sleep(_CONNECT_RETRY_BACKOFF_S)
+
+
 # ---------------------------------------------------------------------------
 # 客服 agent
 # ---------------------------------------------------------------------------
@@ -88,7 +108,9 @@ _PHONE_RE = re.compile(r"1[3-9]\d{9}")
 
 
 async def approvals_waiting(client: httpx.AsyncClient, thread_id: str) -> set[str]:
-    r = await client.get("/api/chat/approvals", params={"tenantId": TENANT, "status": "waiting"})
+    r = await _retry_on_connect(client.get, "/api/chat/approvals",
+                                params={"tenantId": TENANT, "status": "waiting"},
+                                what="approvals_waiting")
     if r.status_code != 200:
         return set()
     return {
@@ -100,7 +122,7 @@ async def approvals_waiting(client: httpx.AsyncClient, thread_id: str) -> set[st
 
 async def _create_nightly_order(client, customer_id: str) -> str:
     """夜测顾客自购真单(种子货架咖啡套装 ×1):售后/HITL 场景的归属前置。"""
-    r = await client.get("/api/store/products")
+    r = await _retry_on_connect(client.get, "/api/store/products", what="store_products")
     sku_code = ""
     for p in r.json().get("products") or []:
         if "咖啡" in str(p.get("title") or ""):
@@ -109,7 +131,8 @@ async def _create_nightly_order(client, customer_id: str) -> str:
             break
     if not sku_code:
         return ""
-    r = await client.post(
+    r = await _retry_on_connect(
+        client.post,
         "/api/store/orders",
         json={
             "customerId": customer_id,
@@ -120,6 +143,7 @@ async def _create_nightly_order(client, customer_id: str) -> str:
             "shippingAddress": "北京市海淀区夜测路 1 号",
         },
         timeout=60,
+        what="create_nightly_order",
     )
     return str((r.json() or {}).get("orderId") or "")
 
@@ -149,11 +173,13 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
         message = turn.message.replace("{order_id}", order_id) if order_id else turn.message.replace("{order_id}", "AURORA-ORD-2026-0000")
         try:
             images = [budget.get("image_map", {}).get(u, u) for u in turn.image_urls]
-            r = await client.post(
+            r = await _retry_on_connect(
+                client.post,
                 "/api/store/chat",
                 json={"message": message, "businessId": TENANT, "userId": customer_id, "threadId": thread_id,
                       **({"imageUrls": images} if images else {})},
                 timeout=TURN_TIMEOUT,
+                what=f"store_chat/{case.case_id}#轮{i}",
             )
             latency = round(time.monotonic() - t0, 1)
             body = r.json() if r.status_code == 200 else {}
@@ -297,11 +323,13 @@ async def run_data_case(client, tokens: dict[str, str], case, budget: dict) -> d
             body = {"question": q}
             if case.turns:
                 body["pageContext"] = {"sessionId": session_id}
-            r = await client.post(
+            r = await _retry_on_connect(
+                client.post,
                 "/api/admin/analytics/ask",
                 headers={"x-tenant-id": TENANT, "Authorization": f"Bearer {token}"},
                 json=body,
                 timeout=TURN_TIMEOUT,
+                what=f"analytics_ask/{case.case_id}",
             )
             status_code = r.status_code
             frames = _parse_sse(r.text) if r.status_code == 200 else []
@@ -334,8 +362,12 @@ async def run_data_case(client, tokens: dict[str, str], case, budget: dict) -> d
 
 
 async def _owner_perms(client, tokens: dict[str, str]) -> set[str]:
-    r = await client.get("/api/admin/analytics/menus",
-                         headers={"x-tenant-id": TENANT, "Authorization": f"Bearer {tokens.get(STAFF_EMAIL, '')}"})
+    r = await _retry_on_connect(
+        client.get,
+        "/api/admin/analytics/menus",
+        headers={"x-tenant-id": TENANT, "Authorization": f"Bearer {tokens.get(STAFF_EMAIL, '')}"},
+        what="owner_perms",
+    )
     return set((r.json() or {}).get("perms") or []) if r.status_code == 200 else set()
 
 
@@ -615,6 +647,18 @@ td,th{{border:1px solid #ddd;padding:6px 8px;vertical-align:top;font-size:13px;t
 <p class="skip">skipped 场景因轮次预算未执行,详见 results.jsonl。</p></body></html>""")
 
 
+async def _run_contained(results: list, fn, *args, case_id: str, kind: str = "customer", dimension: str = "环境", **kwargs) -> None:
+    """用例级 containment:辅助用例(isolation/sse/menus 等)里零散 REST 未逐点
+    守卫,撞上重启窗口的连接异常时只烧掉该用例并如实记档,严禁连坐整跑 ——
+    台账只在收尾落盘,一个未捕获异常即令整夜结果蒸发(2026-10-16 实弹)。"""
+    try:
+        results.append(await fn(*args, **kwargs))
+    except Exception as err:
+        results.append({"kind": kind, "case_id": case_id, "dimension": dimension,
+                        "ok": False, "fails": [f"用例级异常 {err!r}"], "advisory": False})
+        print(f"[FAIL] {case_id}  ← 用例级异常 {err!r}")
+
+
 async def main() -> int:
     _load_env()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -645,13 +689,15 @@ async def main() -> int:
                 continue
             if os.environ.get("NIGHTLY_SMOKE") and case.case_id not in ("c01_导购_冲锋衣", "c15_幽灵单号_诚实查无"):
                 continue
-            res = await run_customer_case(client, case, seeded_ids, created_ids, budget)
-            results.append(res)
+            await _run_contained(results, run_customer_case, client, case, seeded_ids, created_ids, budget,
+                                 case_id=case.case_id)
+            res = results[-1]
             print(("[PASS] " if res["ok"] else "[FAIL] ") + res["case_id"] + ("" if res["ok"] else "  ← " + "; ".join(res["fails"])))
 
         # 会话隔离(确定性):X 的线程不得泄漏进 Y 的列表
         # isolation kind=perf,统一由性能打印循环输出(避免双重打印)
-        results.append(await run_isolation_case(client))
+        await _run_contained(results, run_isolation_case, client,
+                             case_id="c23_会话隔离", kind="perf", dimension="多场景·会话")
 
         # Data Agent + 菜单矩阵:按需登录各角色(token 缓存)
         needed_staff = {c.staff_email for c in DATA_CASES} | {c.staff_email for c in MENU_CASES}
@@ -674,7 +720,8 @@ async def main() -> int:
                     continue
                 if os.environ.get("NIGHTLY_SMOKE") and case.case_id not in ("d01_销售_GMV", "d11_权限_运营问毛利"):
                     continue
-                results.append(await run_data_case(client, tokens, case, budget))
+                await _run_contained(results, run_data_case, client, tokens, case, budget,
+                                     case_id=case.case_id, kind="data", dimension=case.dimension)
                 r = results[-1]
                 print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
@@ -682,8 +729,9 @@ async def main() -> int:
             smoke_menus = [c for c in MENU_CASES if (not os.environ.get("NIGHTLY_SMOKE") or c.case_id in ("m01_老板_全量", "m03_运营_受限")) and (not only or any(c.case_id.startswith(x) for x in only))]
             for case in smoke_menus:
                 owner_perms = await _owner_perms(client, tokens)
-                r = await run_menu_case(client, owner_perms, case, tokens)
-                results.append(r)
+                await _run_contained(results, run_menu_case, client, owner_perms, case, tokens,
+                                     case_id=case.case_id, kind="menu", dimension="权限面")
+                r = results[-1]
                 print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
             # 跨角色差异:运营与仓储可见集不得相同
             if not os.environ.get("NIGHTLY_SMOKE"):
@@ -700,8 +748,10 @@ async def main() -> int:
             results.append({"kind": "perf", "case_id": "perf_skipped", "dimension": "优化",
                             "ok": True, "skipped": True, "fails": []})
         else:
-            results.append(await run_concurrency(client))
-            results.append(await run_sse_bridge(client))
+            await _run_contained(results, run_concurrency, client,
+                                 case_id="p01_并发5路", kind="perf", dimension="优化·并发")
+            await _run_contained(results, run_sse_bridge, client,
+                                 case_id="p02_SSE桥存活", kind="perf", dimension="优化·实时")
         for r in [x for x in results if x.get("kind") == "perf"]:
             print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
