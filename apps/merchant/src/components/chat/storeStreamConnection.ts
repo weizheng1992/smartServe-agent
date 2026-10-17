@@ -12,9 +12,16 @@
 //   last_event_id_from 的 query_fallback 路径)。重叠帧由消费方按消息 id
 //   幂等吸收,首连(无水位)不重放。
 
-/** stream URL 构造:水位存在时以 lastEventId query 带回,首连不带(不重放)。 */
-export function buildStoreStreamUrl(threadId: string, businessId: string, lastEventId: string | null): string {
-  const base = `/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}&businessId=${encodeURIComponent(businessId)}`;
+/** stream URL 构造:水位存在时以 lastEventId query 带回,首连不带(不重放)。
+ *  userId 参与服务端顾客属主闸(2026-10-17 窃听族收口):有主线程必须声明
+ *  匹配 userId,否则 403 —— 缺它即无法订阅他人可猜的默认线程。 */
+export function buildStoreStreamUrl(
+  threadId: string,
+  businessId: string,
+  lastEventId: string | null,
+  userId: string,
+): string {
+  const base = `/api/store/chat/stream?threadId=${encodeURIComponent(threadId)}&businessId=${encodeURIComponent(businessId)}&userId=${encodeURIComponent(userId)}`;
   return lastEventId ? `${base}&lastEventId=${encodeURIComponent(lastEventId)}` : base;
 }
 
@@ -27,6 +34,8 @@ const DEFAULT_MAX_RETRY = 6;
 export function openStoreStream(params: {
   threadId: string;
   businessId: string;
+  /** 顾客属主闸身份(2026-10-17):有主线程必须与 threads.user_id 精确等值。 */
+  userId: string;
   /** 原始 message 帧 data(JSON 串),解析与消费归调用方。 */
   onMessage: (rawData: string) => void;
   maxRetry?: number;
@@ -41,7 +50,9 @@ export function openStoreStream(params: {
   const connect = () => {
     if (disposed) return;
     try {
-      eventSource = new EventSource(buildStoreStreamUrl(params.threadId, params.businessId, lastEventId));
+      eventSource = new EventSource(
+        buildStoreStreamUrl(params.threadId, params.businessId, lastEventId, params.userId),
+      );
 
       eventSource.onopen = () => {
         retryCount = 0;

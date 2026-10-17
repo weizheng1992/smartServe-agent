@@ -101,7 +101,7 @@ The RAG facade across multi-tenant knowledge bases (see `docs/architecture/conte
 - **`approval_actions.py`(审批动作装配)**:HITL 动作三通道(商户运营台 / 管理台顾客+坐席 / SPI)共享的机制单点 —— 动作词表(`CUSTOMER_ACTIONS`/`OPERATOR_ACTIONS`/`STAFF_REVIEW_ACTIONS`/`SPI_ACTIONS`)、对象级租户闸(ensure_*=success 形 / assert_*=detail 形)、humanReply 别名、operator 快照、引擎载荷装配。SPI 通道归属闸 2026-10-04 收口(全局 key 不得跨租户核销工单)。
 - **`sse_tail.py`(SSE 读流泵)**:chat / analytics ask / merchant store 三份手抄泵的归一单点 —— `tail_stream`(历史回放 + XREAD 尾随 + 心跳 + 终局收口,`__done__` 类哨兵不出 SSE 线)、`tail_pubsub`(顾客侧频道 adapter)、`streaming_headers`。测试桩点唯一:monkeypatch 本 module 的 `get_client` / `read_agent_events`。
 
-配套单点:engine 侧 `engine_py/db/merchant_access.py`(agent_merchant 库 URL 解析与 reader/writer/gateway 三执行位构造)、`order_domain.generate_order_id`(订单号六次闸,两包同一机制)与 `insert_merchant_order(_item)`(真账 INSERT 列清单唯一);gateway 侧 `approval_actions` 动作词表与 `conversation_repo.thread_owner`(线程属主访问器)。
+配套单点:engine 侧 `engine_py/db/merchant_access.py`(agent_merchant 库 URL 解析与 reader/writer/gateway 三执行位构造)、`order_domain.generate_order_id`(订单号六次闸,两包同一机制)与 `insert_merchant_order(_item)`(真账 INSERT 列清单唯一);gateway 侧 `approval_actions` 动作词表与 `conversation_repo.thread_ownership`(线程归属双列访问器,`thread_owner` 为其租户投影;2026-10-17 窃听族收口:socket join/send 与 store SSE 对有主线程必须 connect/查询 userId 精确等值,换房退旧房,server-gateway.md §1.1.5/§1.2 同律)。
 
 ### 商户结算核 commit_order(2026-10-17 结算核落地)
 

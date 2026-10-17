@@ -621,6 +621,21 @@ async def store_chat_messages(
                 "userThreads": user_threads,
             }
 
+        # 显式线程属主闸(2026-10-17 窃听族收口 sec-4):显式 threadId 直取此前
+        # 仅租户闸,同租跨客可读他人时间线。有主线程必须命中请求者身份(userId
+        # 或其 PG 映射),否则诚实空 —— 不泄漏线程存在性。
+        if threadId:
+            ownership = await conversation_repo.thread_ownership(threadId)
+            owner_user = str((ownership or {}).get("user_id") or "")
+            if owner_user and owner_user not in {(userId or "").strip(), (pg_user_id or "").strip()}:
+                return {
+                    "success": True,
+                    "threadId": threadId,
+                    "thread": None,
+                    "messages": [],
+                    "userThreads": user_threads,
+                }
+
         timeline = await get_conversation_timeline(threadId, tenant)
 
         include_older = includeOlder == "true" or allHistory == "true"
@@ -666,6 +681,7 @@ async def store_chat_stream(
     businessId: str | None = Query(None),
     tenantId: str | None = Query(None),
     lastEventId: str | None = Query(None),
+    userId: str | None = Query(None),
 ):
     if not threadId:
         return Response("Missing threadId parameter", status_code=400)
@@ -676,13 +692,19 @@ async def store_chat_stream(
     # raise 型 GateError 直穿(信封 {"success", "error"} 与历史 JSONResponse 同形)。
     tenant = (businessId or tenantId or "aurora").lower().strip()
     await ensure_tenant_registered(tenant)
-    # 属主闸走 repo.thread_owner 访问器(架构审查 #5:此前裸 SQL 直查 threads
-    # 是线程归属的第三种接口形状)
-    owner = await conversation_repo.thread_owner(threadId)
-    if owner is None:
+    # 归属双列走 repo.thread_ownership 访问器(2026-10-17 窃听族收口:租户闸挡
+    # 不住同租跨客,threads.user_id 是「归哪个顾客」的权威)
+    ownership = await conversation_repo.thread_ownership(threadId)
+    if ownership is None:
         raise GateError(404, f"会话 {threadId} 不存在")
-    if not same_tenant(owner, tenant):
+    if not same_tenant(ownership.get("business_id"), tenant):
         raise GateError(403, "会话不属于该商户,拒绝订阅")
+    # 顾客属主闸(2026-10-17):有主线程必须声明匹配的 userId —— 顾客弱身份
+    # 模型下,默认线程 id merchant_thread_{userId}_{biz} 可由 userId 推得,此闸
+    # 令「知线程 id 即听」失效(攻击者还须知道受害者 userId)。无主线程放行。
+    owner_user = str(ownership.get("user_id") or "")
+    if owner_user and owner_user != (userId or "").strip():
+        raise GateError(403, "会话不属于当前用户,拒绝订阅")
 
     # L1 重连补投(ADR-0013,2026-10-10;①前端触发面收口 2026-10-13):两条
     # 来路同语义 —— 原生重连自动带 Last-Event-ID(header),商店前端 P7 退避

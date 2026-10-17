@@ -377,6 +377,9 @@ export function FloatingChatWidget() {
       threadId,
       // businessId 参与服务端属主闸(2026-10-02):stream 路由收多租户闸后需自报身份
       businessId: MERCHANT_ID,
+      // userId 参与服务端顾客属主闸(2026-10-17 窃听族收口):有主线程须与
+      // threads.user_id 精确等值,否则 403
+      userId: user.id,
       onMessage: (rawData) => {
         try {
           const msgData = JSON.parse(rawData);

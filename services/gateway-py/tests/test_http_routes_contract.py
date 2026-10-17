@@ -2371,7 +2371,7 @@ class TestMerchantStoreChatStream:
         async with (
             httpx.AsyncClient(base_url=live_server, timeout=timeout) as client,
             client.stream(
-                "GET", "/api/store/chat/stream", params={"threadId": thread_id, "businessId": "nike"}
+                "GET", "/api/store/chat/stream", params={"threadId": thread_id, "businessId": "nike", "userId": "u_stream_contract"}
             ) as res,
         ):
                 assert res.status_code == 200
@@ -2442,7 +2442,7 @@ class TestMerchantStoreChatStream:
             async with client.stream(
                 "GET",
                 "/api/store/chat/stream",
-                params={"threadId": thread_id, "businessId": "nike"},
+                params={"threadId": thread_id, "businessId": "nike", "userId": "u_stream_replay"},
                 headers={"Last-Event-ID": str(after_ms)},
             ) as res:
                 assert res.status_code == 200
@@ -2461,7 +2461,7 @@ class TestMerchantStoreChatStream:
             async with client.stream(
                 "GET",
                 "/api/store/chat/stream",
-                params={"threadId": thread_id, "businessId": "nike"},
+                params={"threadId": thread_id, "businessId": "nike", "userId": "u_stream_replay"},
                 headers={"Last-Event-ID": "not-a-number"},
             ) as res:
                 buf = ""
@@ -2475,7 +2475,7 @@ class TestMerchantStoreChatStream:
             async with client.stream(
                 "GET",
                 "/api/store/chat/stream",
-                params={"threadId": thread_id, "businessId": "nike"},
+                params={"threadId": thread_id, "businessId": "nike", "userId": "u_stream_replay"},
             ) as res:
                 buf = ""
                 async for chunk in res.aiter_text():
@@ -2525,7 +2525,7 @@ class TestMerchantStoreChatStream:
             async with client.stream(
                 "GET",
                 "/api/store/chat/stream",
-                params={"threadId": thread_id, "businessId": "nike", "lastEventId": str(after_ms)},
+                params={"threadId": thread_id, "businessId": "nike", "userId": "u_stream_replay_query", "lastEventId": str(after_ms)},
             ) as res:
                 assert res.status_code == 200
                 buf = ""
@@ -2542,7 +2542,7 @@ class TestMerchantStoreChatStream:
             async with client.stream(
                 "GET",
                 "/api/store/chat/stream",
-                params={"threadId": thread_id, "businessId": "nike", "lastEventId": "NaN"},
+                params={"threadId": thread_id, "businessId": "nike", "userId": "u_stream_replay_query", "lastEventId": "NaN"},
             ) as res:
                 buf = ""
                 async for chunk in res.aiter_text():

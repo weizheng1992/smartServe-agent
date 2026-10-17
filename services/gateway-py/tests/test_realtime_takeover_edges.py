@@ -270,25 +270,34 @@ class TestTakeoverReleaseEdges:
                 await user.disconnect()
 
     async def test_未认证连接仅能以user身份发言(self, live_server, edge_threads):
-        """02 安全先行:无员工 JWT 的连接以 operator/system 等身份发言 → 拒绝;
-        以 user 身份发言 → 放行且不带坐席信息。"""
+        """02 安全先行:无员工 JWT 的连接以 operator/system 等身份发言 → 拒绝。
+        属主闸(2026-10-17 窃听族收口):非属主 user 连接 join/写他人线程一律
+        拒绝;属主 user 发言放行且不带坐席信息(旧契约「他客可正常发言」钉的
+        正是窃听族漏洞,已按属主语义重写)。"""
         import socketio as socketio_lib
 
         _, thread_id = edge_threads
         intruder = socketio_lib.AsyncClient(reconnection=False)
+        owner = socketio_lib.AsyncClient(reconnection=False)
         received: list[dict] = []
-        intruder.on("new_message", lambda p=None: received.append(p or {}), namespace=_NS)
+        owner.on("new_message", lambda p=None: received.append(p or {}), namespace=_NS)
         await intruder.connect(
             live_server, transports=["websocket"], namespaces=[_NS],
             auth={"tenantId": "nike", "userId": "u_edge_intruder", "role": "user"},
         )
+        await owner.connect(
+            live_server, transports=["websocket"], namespaces=[_NS],
+            auth={"tenantId": "nike", "userId": "u_edge_user", "role": "user"},
+        )
         try:
-            # 入房后才收得到 new_message 房间广播(负断言与放行断言都依赖在房)
-            await intruder.call(
+            # 非属主 join 他人线程 → 拒绝(不在房就收不到任何房间广播)
+            denied_join = await intruder.call(
                 "join_thread",
                 {"threadId": thread_id, "tenantId": "nike", "role": "user"},
                 namespace=_NS, timeout=5,
             )
+            assert denied_join["success"] is False
+            assert "会话不属于当前用户" in denied_join["error"]
 
             denied = await intruder.call(
                 "send_message",
@@ -298,7 +307,23 @@ class TestTakeoverReleaseEdges:
             assert denied["success"] is False
             assert "未认证" in denied["error"]
 
-            allowed = await intruder.call(
+            # 非属主以 user 身份写他人线程 → 属主闸拒绝(旧契约放行,正是漏洞)
+            denied_user = await intruder.call(
+                "send_message",
+                {"threadId": thread_id, "tenantId": "nike", "role": "user", "content": "顾客正常发言"},
+                namespace=_NS, timeout=5,
+            )
+            assert denied_user["success"] is False
+            assert "会话不属于当前用户" in denied_user["error"]
+
+            # 属主入房发言放行:自己房间收到,role=user 不带坐席信息
+            joined = await owner.call(
+                "join_thread",
+                {"threadId": thread_id, "tenantId": "nike", "role": "user"},
+                namespace=_NS, timeout=5,
+            )
+            assert joined["success"] is True
+            allowed = await owner.call(
                 "send_message",
                 {"threadId": thread_id, "tenantId": "nike", "role": "user", "content": "顾客正常发言"},
                 namespace=_NS, timeout=5,
@@ -309,8 +334,9 @@ class TestTakeoverReleaseEdges:
             assert msg["role"] == "user"
             assert not msg.get("operatorInfo")
         finally:
-            if intruder.connected:
-                await intruder.disconnect()
+            for c in (intruder, owner):
+                if c.connected:
+                    await c.disconnect()
 
 
 # ---------- 哨兵语义(repo 级,无需 socket) ----------

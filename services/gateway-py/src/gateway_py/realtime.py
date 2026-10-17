@@ -140,6 +140,29 @@ def _tenant_mismatch(sid: str, data: dict) -> bool:
     return str(data.get("tenantId") or "") != record.get("tenantId")
 
 
+def _connect_user_id(sid: str) -> str:
+    """connect 握手自报的顾客 userId(弱身份模型在案);operator 连接不用此值。"""
+    return str((connected_clients.get(sid) or {}).get("userId") or "")
+
+
+async def _user_thread_guard(thread_id: str, tenant_id: str, user_id: str) -> str | None:
+    """user 侧线程属主闸(2026-10-17 窃听族收口):线程必须存在、租户须一致、
+    有主线程必须 connect userId 精确等值 —— 顾客弱身份模型下,此闸令「猜线程
+    id 听/写他会话」失效(攻击者还须知道受害者 userId)。None=通过,否则拒绝
+    文案。无主线程(user_id NULL)放行:无从属主保护,兼容存量。operator 连接
+    不走此闸(JWT+operate 权限已是其闸)。"""
+    ownership = await conversation_repo.thread_ownership(thread_id)
+    if ownership is None:
+        return "会话不存在"
+    owner_tenant = str(ownership.get("business_id") or "")
+    if owner_tenant and owner_tenant != tenant_id:
+        return "会话不属于该商户"
+    owner_user = str(ownership.get("user_id") or "")
+    if owner_user and owner_user != user_id:
+        return "会话不属于当前用户"
+    return None
+
+
 @sio.on("connect", namespace=NAMESPACE)
 async def on_connect(sid: str, environ, auth=None):
     auth = auth or {}
@@ -159,6 +182,9 @@ async def on_connect(sid: str, environ, auth=None):
         "threadId": auth.get("threadId"),
         "tenantId": clean_tenant,
         "role": auth.get("role", "user"),
+        # 顾客 userId 在 connect 握手一次绑定(join/send 的属主闸只认握手值,
+        # 事件内自报不再采信 —— 防同连接中途换 userId 入他人线程)
+        "userId": str(auth.get("userId") or ""),
     }
     # 02 安全先行(2026-09-27):operator 角色连接必须持有效员工 JWT,且员工
     # 租户与 connect tenantId 一致 —— 此前 operatorId/operatorName 全凭客户端
@@ -222,9 +248,19 @@ async def on_join_thread(sid: str, data: dict):
     if _tenant_mismatch(sid, data):
         return {"success": False, "error": "会话租户与连接租户不一致"}
     staff = _staff_of(sid)
+    # user 侧属主闸(2026-10-17 窃听族收口):匿名连接此前凭猜到的 threadId 即
+    # 可入任意房间听会话全文(new_message 含 content)。operator 不走此闸。
+    if staff is None:
+        err = await _user_thread_guard(thread_id, tenant_id, _connect_user_id(sid))
+        if err:
+            return {"success": False, "error": err}
     # 坐席展示身份一律服务端派生;未认证连接不得自报 operatorId/Name 冒充坐席
     operator_id = staff["email"] if staff else None
     operator_name = staff["name"] if staff else None
+    # 换房先退旧房:入房不退房会让切线程后的连接继续收旧房 new_message(残留窃听面)
+    prev = connected_clients.get(sid) or {}
+    if prev.get("threadId") and prev.get("tenantId"):
+        await sio.leave_room(sid, _room(prev["threadId"], prev["tenantId"]), namespace=NAMESPACE)
     room = _room(thread_id, tenant_id)
     connected_clients[sid] = {**connected_clients.get(sid, {}), "threadId": thread_id, "tenantId": tenant_id, "role": role}
     await sio.enter_room(sid, room, namespace=NAMESPACE)
@@ -331,6 +367,10 @@ async def on_send_message(sid: str, data: dict):
         # 未认证连接仅能以 user 身份发言(顾客 socket 通道;收口归 chat 面身份)
         if str(data.get("role") or "operator") != "user":
             return {"success": False, "error": "未认证连接仅能以 user 身份发言"}
+        # user 侧属主闸(与 join_thread 同律):严禁借 socket 通道往他人线程写
+        err = await _user_thread_guard(thread_id, tenant_id, _connect_user_id(sid))
+        if err:
+            return {"success": False, "error": err}
         role = "user"
         operator_info = {}
     if _tenant_mismatch(sid, data):

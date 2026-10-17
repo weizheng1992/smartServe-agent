@@ -164,7 +164,9 @@ class TestStoreStreamTenantGate:
         async with (
             httpx.AsyncClient(timeout=10.0) as hc,
             hc.stream(
-                "GET", f"{live_server}/api/store/chat/stream", params={"threadId": tid, "businessId": "adidas"}
+                "GET",
+                f"{live_server}/api/store/chat/stream",
+                params={"threadId": tid, "businessId": "adidas", "userId": "u_stream_gate"},
             ) as res,
         ):
                 assert res.status_code == 200

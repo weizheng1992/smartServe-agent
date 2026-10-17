@@ -31,7 +31,9 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 @pytest_asyncio.fixture(scope="module", loop_scope="session")
 async def rt_thread(seeded):
     """socket.io takeover/release 会更新会话状态,需要 thread fixture。"""
-    await create_thread(RT_THREAD, "u_rt_contract", "nike")
+    # 属主 = u_rt_user(与下方 user 客户端 connect userId 一致 —— 2026-10-17
+    # join/send 属主闸后,有主线程仅属主可入)
+    await create_thread(RT_THREAD, "u_rt_user", "nike")
     return RT_THREAD
 
 
@@ -506,7 +508,7 @@ class TestSocketIoEdgeStates:
             async with httpx.AsyncClient(base_url=live_server, timeout=timeout) as client, client.stream(
                 # businessId 自报(2026-10-02 属主闸,29beb83):流订阅必须携带
                 # 商户身份,缺省回落 aurora 与本线程属主 nike 不符即 403
-                "GET", f"/api/store/chat/stream?threadId={rt_thread}&businessId=nike"
+                "GET", f"/api/store/chat/stream?threadId={rt_thread}&businessId=nike&userId=u_rt_user"
             ) as res:
                 assert res.status_code == 200
                 # 单循环双闸(httpx 流只能消费一次):先等到 connected 帧(订阅

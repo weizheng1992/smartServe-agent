@@ -247,20 +247,31 @@ async def update_conversation_status(
         }
 
 
+async def thread_ownership(thread_id: str) -> dict | None:
+    """线程归属双列(business_id + user_id);查无 → None。
+
+    属主闸的数据基础(2026-10-17 实时窃听族收口):thread_owner 只回租户,
+    租户闸挡不住同租跨客;user_id 列是「这条线程归哪个顾客」的权威。读属主
+    走这里,裁决(403/404/诚实空)留在各面。"""
+    async with get_session() as session:
+        row = (
+            await session.execute(
+                text("SELECT business_id, user_id FROM threads WHERE id = :tid").bindparams(tid=thread_id)
+            )
+        ).mappings().first()
+    return dict(row) if row else None
+
+
 async def thread_owner(thread_id: str) -> str | None:
-    """线程属主租户(business_id);查无 → None。
+    """线程属主租户(business_id);查无 → None。(投影:双列见 thread_ownership)
 
     路由层属主闸的廉价访问器(架构审查 #5):此前 store 流订阅裸 SQL 直查、
     live_desk _load_thread_scoped 自抛 404/403、timeline 返 None —— 同一
     「线程归属」三种接口形状。读属主走这里,裁决(403/404 形状)留在各面。
     """
-    async with get_session() as session:
-        row = (
-            await session.execute(
-                text("SELECT business_id FROM threads WHERE id = :tid").bindparams(tid=thread_id)
-            )
-        ).first()
-    return str(row[0]) if row and row[0] is not None else None
+    ownership = await thread_ownership(thread_id)
+    business_id = (ownership or {}).get("business_id")
+    return str(business_id) if business_id is not None else None
 
 
 async def create_thread(thread_id: str, business_id: str, user_id: str | None = None) -> dict | None:

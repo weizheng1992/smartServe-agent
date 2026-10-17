@@ -264,6 +264,9 @@ class TestClientMsgIdIdempotency:
         import socketio as socketio_lib
 
         tid = f"p4_idem_bad_{_TS}"
+        # 属主闸(2026-10-17 窃听族收口)后,user 发言必须对准存在的有主线程 ——
+        # 旧「向不存在线程直写被容忍」的孤儿写形状随闸退役
+        await create_thread(tid, _P4_USER, "nike")
         ns = "/ws/chat"
         user = socketio_lib.AsyncClient(reconnection=False)
         await user.connect(
