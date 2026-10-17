@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as _dt
 import math
+import uuid
+from pathlib import Path
 
 from engine_py.analytics import rbac
 from engine_py.approvals import ApprovalGatekeeper
@@ -11,9 +13,11 @@ from engine_py.approvals.gatekeeper import thread_owner_id  # 线程归属单一
 from engine_py.db import RagDocumentRow, get_session
 from engine_py.onboarding import validate_onboarding_config
 from engine_py.rag import ContextualRAG
+from engine_py.rag.document_ingest import ingest_document_file
+from engine_py.rag.document_parse import uploads_root
 from engine_py.skills import SkillRegistry
 from engine_py.tenant_config import get_tenant_config, update_tenant_skill_config
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import desc, select, text
 from sqlalchemy.orm import defer
@@ -592,6 +596,130 @@ async def delete_rag_document(doc_id: str, tenantId: str | None = Query(None), x
         await session.delete(row)
         await session.commit()
     return {"success": True, "message": f"Document {doc_id} deleted successfully"}
+
+
+# ---- 文档上传摄取(2026-10-17 文档 RAG,路由计数 129→130)----
+# 与 chat.py 图片上传同纪律:不信任客户端声明,真实类型以文件头魔数自证;
+# 大小以读流实测为准。同名文件重复上传 = 同 source_url 整组替换(版本演进
+# 语义,与 knowledge_files 文件级替换一致)。摄取为同步 v1(docling + VLM
+# 字幕在请求内完成,大文档秒到分钟级);异步作业化是 v2 裁决项。
+_MAX_DOC_UPLOAD_BYTES = 20 * 1024 * 1024
+_DOC_UPLOAD_CHUNK_BYTES = 256 * 1024
+
+
+def _sniff_doc_kind(head: bytes) -> str | None:
+    """文件头魔数 → 规范扩展名;不认识返回 None。docx 是 zip 容器(PK\x03\x04);
+    .doc 是 OLE2 复合文档(D0 CF 11 E0)—— 放行到引擎侧给「另存为 .docx」的
+    诚实错误,比在网关吞掉更可诊断。"""
+    if head.startswith(b"%PDF-"):
+        return ".pdf"
+    if head.startswith(b"PK\x03\x04"):
+        return ".docx"
+    if head.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        return ".doc"
+    return None
+
+
+def _rag_docs_dir():
+    target = uploads_root() / "rag" / "docs"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+@router.post("/api/rag/documents/upload", status_code=201)
+async def upload_rag_document(
+    request: Request,
+    file: UploadFile = File(...),
+    businessId: str | None = Form(None),
+    category: str | None = Form(None),
+    x_tenant_id: str | None = Header(None),
+):
+    """上传 PDF/Word 文档,解析切块(表格原子块)入 rag_documents。
+
+    租户必须显式具名(businessId 表单字段或 x-tenant-id 头),'all' 上帝视角
+    严禁挂载摄取 —— 租户归属是写侧决策,缺省猜测曾把 aurora 货架挂到演示
+    租户名下(product_knowledge 帐篷幻觉先例)。摄取失败/扫描件空内容 422
+    透出诚实原因,落盘文件同批清理。文件名只作展示用 source_url(同名重传
+    即整组替换),落盘一律 UUID 命名,无路径穿越面。
+    """
+    business_id = (businessId or x_tenant_id or "").strip()
+    if not business_id or business_id == "all":
+        raise HTTPException(400, "文档摄取必须指定具名租户 businessId,严禁 'all' 上帝视角挂载或缺省猜测")
+    # 声明长度前置闸(2026-10-17 对抗审查):starlette 对 multipart 在进 handler
+    # 前就把整个 body spool 落盘,读流限长是事后闸 —— 超大 body 会先填临时盘。
+    # Content-Length 客户端可谎报,故只作廉价前置拒绝(声明合规才进读流实测);
+    # 分块传输无 CL 时放行,由读流闸兜底。+64KB 容 multipart 表单结构开销。
+    try:
+        declared_length = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        declared_length = 0
+    if declared_length > _MAX_DOC_UPLOAD_BYTES + 64 * 1024:
+        raise HTTPException(413, "文档超过 20MB 上限")
+
+    target = _rag_docs_dir() / f"{uuid.uuid4().hex}.bin"
+    out = None
+    out_path = target
+    header = b""
+    written = 0
+    try:
+        while chunk := await file.read(_DOC_UPLOAD_CHUNK_BYTES):
+            written += len(chunk)
+            if written > _MAX_DOC_UPLOAD_BYTES:
+                raise HTTPException(413, "文档超过 20MB 上限")
+            if out is None:
+                # 首块嗅探只取截断副本,写入仍用完整块(chat.py 同纪律)
+                header = (header + chunk)[:16]
+                if len(header) >= 8:  # 最长魔数 OLE2 8 字节
+                    kind = _sniff_doc_kind(header)
+                    if kind is None:
+                        raise HTTPException(400, "不支持的文档类型,仅限 pdf / docx")
+                    out_path = target.with_suffix(kind)
+                    out = out_path.open("wb")
+            if out is not None:
+                out.write(chunk)
+    except HTTPException:
+        out_path.unlink(missing_ok=True)  # 半截文件不许残留(close 在 finally 幂等收口)
+        raise
+    finally:
+        await file.close()
+        if out is not None:
+            out.close()
+
+    if out is None:
+        raise HTTPException(400, "不支持的文档类型,仅限 pdf / docx(短于魔数长度的残流必然不符)")
+    if out_path.suffix == ".doc":
+        out_path.unlink(missing_ok=True)
+        raise HTTPException(422, "老式 .doc 二进制格式暂不支持,请先用 Word/WPS 另存为 .docx 或导出 PDF 后重试")
+
+    original_name = Path(file.filename or out_path.name).name
+    if len(original_name) > 200:
+        original_name = original_name[-200:]
+    try:
+        result = await ingest_document_file(
+            out_path,
+            business_id,
+            category=(category or "").strip() or "document",
+            caption_images=True,
+            source_url=original_name,
+        )
+    except Exception as err:
+        out_path.unlink(missing_ok=True)
+        raise HTTPException(500, f"文档摄取异常: {err}") from err
+    if result.status != "ingested":
+        out_path.unlink(missing_ok=True)
+        raise HTTPException(422, f"文档摄取未完成({result.status}): {result.reason or '未知原因'}")
+    return {
+        "success": True,
+        "data": {
+            "sourceUrl": original_name,
+            "docTitle": result.doc_title,
+            "chunks": result.chunks,
+            "tables": result.tables,
+            "images": result.images,
+            "captioned": result.captioned,
+            "partial": result.partial,
+        },
+    }
 
 
 class RagQueryIn(BaseModel):

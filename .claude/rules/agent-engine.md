@@ -57,10 +57,16 @@ paths: ["services/engine-py/**/*"]
   - 严格区分 `scope: 'global'`（客观生理属性，如脚长/过敏史）与 `scope: 'tenant'`（品牌专属偏好/会员积分）。
   - 上下文装配召回时严格限定（2026-09-21 落地为真）：SQL WHERE 带 `tenant_scope_condition`（scope 缺失/global 放行；tenant 域按当前租户精确匹配，ecommerce 缺省放空白）+ Python 侧 `_tenant_visible` 防御纵深，严禁跨租户泄漏画像（契约钉 tests/test_context_contract.py）。
 
-### 1.5 Contextual RAG 知识检索 (`rag/contextual_rag.py`)
+### 1.5 Contextual RAG 知识检索 (`rag/contextual_rag.py` + 三条摄取源)
 
-- **上下文增强切片**：文档入库时切片，并由大模型为每个切片前缀生成包含全局文档背景的 Contextual Summary。
-- **租户物理隔离检索**：向量检索与 SQL 过滤强制附带 `WHERE business_id = :tenant_id`，物理阻断跨租户政策混淆。
+- **混合检索（`search_relevant_docs`）**：BM25(k1=1.2,b=0.75,英文按词/CJK 按单字混合分词)+ 余弦向量 → RRF(k=60) 融合排序;过线分 = `similarity*0.8 + normalized_bm25*0.2 ≥ min_score`(默认 0.4)。**无 pgvector**——embedding 存 `rag_documents.embedding` Text 列(JSON 串,本地 bge-small-zh-v1.5 经 fastembed/ONNX,512 维),余弦在 Python 侧,候选集封顶 500(`RAG_SEARCH_CANDIDATE_CAP` + created_at/id 确定性新序)。库失败/嵌入失败一律**诚实空**,严禁假召回兜底。
+- **上下文增强切片(确定性模板,零 LLM)**:切片前缀 `contextual_summary()` = 「本段切片出自商户 [X] 的文档《Y》中「Z」章节」固定模板(旧文档「大模型生成 summary」的表述有误,现实从来是模板);embedding 输入 = `[Context] {summary}\n\n[Content] {chunk_text}`。
+- **租户物理隔离**：SQL `WHERE business_id = :tenant_id` + Python 侧二次校验双锁;`None/''/'all'` = 跨租户上帝视角(管理台专用,聊天侧不触及)。
+- **三条摄取源,同一张 `rag_documents` 单表,按 (business_id, source_url) 整组替换**:
+  1. **Markdown 知识文件**(`rag/knowledge_files.py`):`docs/knowledge/*.md` frontmatter 声明归属,缺 businessId 整份跳过;`#/##/###` 标题路径栈 + 有序列表原子 + ≤500 字符贪心打包。检索侧**自愈播种**(`_ensure_seed_data`,目录指纹进程级闸)——文件增改免手动清库。
+  2. **商品目录派生**(`rag/product_knowledge.py`):商户真货架 SPU/SKU → 每 SPU 一块,`source_url='product_catalog_sync.md'` 键整组替换,business_id 必显式传(帐篷幻觉先例)。
+  3. **PDF/Word 文档**(`rag/document_parse.py` + `document_chunker.py` + `document_ingest.py`,2026-10-17 文档 RAG):docling 一条管线解析 .pdf/.docx → Markdown(标题层级/管道表格/插图落盘 `public/uploads/rag/`),切块沿用 knowledge_files 纪律 + **表格原子块**(≤1500 字符成块,超长按行组切且每组重复表头;HTML 退化表整块)、图片独立块(alt 即字幕,URL 进 `metadata.imageUrl`)、首标题前前置段落以 doc_title 兜底不丢;插图字幕走 glm-4.6v(`RAG_DOC_VLM_CAPTION=0` 可关,每文档上限 20 张超限降级,失败降级「未生成图片描述」,字幕改写走函数替换防 re 转义注入,严禁编造)。老式 .doc 诚实拒绝;扫描件(无文本层)诚实 skip,OCR 为 v2。**无自愈播种**——摄取入口只有 CLI(`uv run --env-file .env python -m engine_py.rag.document_ingest <路径> --business-id X [--no-vlm]`,任一 failed 退出码 1)与网关 `POST /api/rag/documents/upload`;整组替换带 (business_id, source_url) 事务级 advisory lock 串行化并发同名摄取。`metadata_` 增量键:`contentType`(text/table/image)/`sourceFormat`/`imageUrl`,不破坏既有消费方。docling 的 HF 模型权重下载走镜像(`HF_ENDPOINT=hf-mirror.com + HF_HUB_DISABLE_XET=1`,document_parse 模块顶 setdefault,与 fastembed 同纪律)。**PDF 版面模型不进密封测试套件**——pytest 钉 docx 规则后端与切块器,PDF 路径由真弹冒烟覆盖。
+- **chunk 消费方**:run_agent 预取注入 `state.rag_documents`(planner/finish/咨询直答快轨共用,直答需 top 相似度 ≥0.55)+ 管理台 `POST /api/rag/query`。检索结果 dict 的 `sourceUrl/docTitle/headerPath/category` 直读 `metadata_`,表格切片以 chunk_text 原文(管道表)进入 prompt,无独立渲染。
 
 ### 1.6 审批门禁与事务发件箱 (`approvals/gatekeeper.py` & `approvals/outbox_worker.py`)
 

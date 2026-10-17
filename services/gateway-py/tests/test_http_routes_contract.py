@@ -1610,6 +1610,144 @@ class TestConversations:
         assert empty_data["totals"]["tokens"] == 0
 
 
+class TestRagDocumentUpload:
+    """POST /api/rag/documents/upload(2026-10-17 文档 RAG,路由计数 129→130)。
+
+    魔数自证(pdf/docx/doc)、20MB 读流限长、具名租户强制('all' 与缺省拒绝)、
+    摄取失败 422 诚实透因 + 落盘文件同批清理。docling 摄取在本套件打桩
+    (密封套件严禁拉解析模型);摄取管线真实行为由 engine 侧 test_document_rag
+    与真弹冒烟钉死。
+    """
+
+    DOCX_MAGIC = b"PK\x03\x04" + b"\x14\x00\x00\x00"  # zip 容器头(docx 前缀)
+    DOC_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # OLE2 复合文档头(老式 .doc)
+
+    async def _stub_ingest(self, monkeypatch, status="ingested", reason=None):
+        from engine_py.rag.document_ingest import DocumentIngestResult
+
+        from gateway_py.routers import admin as admin_router
+
+        calls: dict = {}
+
+        async def _fake(path, business_id, *, category, caption_images, source_url):
+            calls.update(path=path, business_id=business_id, category=category, source_url=source_url)
+            return DocumentIngestResult(
+                file=path.name,
+                status=status,
+                chunks=3,
+                tables=1,
+                images=1,
+                captioned=1,
+                doc_title="契约文档",
+                reason=reason,
+            )
+
+        monkeypatch.setattr(admin_router, "ingest_document_file", _fake)
+        return calls
+
+    async def test_upload_docx_ingests_with_named_tenant(self, client, contract_fixtures, monkeypatch, tmp_path):
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+        calls = await self._stub_ingest(monkeypatch)
+        res = await client.post(
+            "/api/rag/documents/upload",
+            files={"file": ("会员章程.docx", self.DOCX_MAGIC, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+            data={"businessId": "nike"},
+        )
+        assert res.status_code == 201
+        body = res.json()
+        assert body["success"] is True
+        assert body["data"]["sourceUrl"] == "会员章程.docx"
+        assert body["data"]["chunks"] == 3
+        assert body["data"]["tables"] == 1
+        assert calls["business_id"] == "nike"
+        assert calls["source_url"] == "会员章程.docx"
+        saved = list((tmp_path / "uploads" / "rag" / "docs").glob("*.docx"))
+        assert len(saved) == 1, "成功摄取的文档本体保留在 uploads/rag/docs"
+
+    async def test_upload_rejects_god_view_and_missing_tenant(self, client, contract_fixtures, monkeypatch, tmp_path):
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+        await self._stub_ingest(monkeypatch)
+        for form in ({"businessId": "all"}, {}):
+            res = await client.post(
+                "/api/rag/documents/upload",
+                files={"file": ("doc.docx", self.DOCX_MAGIC, "application/octet-stream")},
+                data=form,
+            )
+            assert res.status_code == 400, f"form={form} 应拒绝上帝视角/缺省租户"
+            assert "具名租户" in res.json()["detail"]
+
+    async def test_upload_rejects_unknown_magic(self, client, contract_fixtures, monkeypatch, tmp_path):
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+        res = await client.post(
+            "/api/rag/documents/upload",
+            files={"file": ("fake.docx", b"hello world, not a document", "application/octet-stream")},
+            data={"businessId": "nike"},
+        )
+        assert res.status_code == 400
+        assert "不支持的文档类型" in res.json()["detail"]
+        assert not list((tmp_path / "uploads" / "rag" / "docs").glob("*")), "拒绝分支不得残留落盘文件"
+
+    async def test_upload_rejects_legacy_doc_with_honest_message(self, client, contract_fixtures, monkeypatch, tmp_path):
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+        res = await client.post(
+            "/api/rag/documents/upload",
+            files={"file": ("legacy.doc", self.DOC_MAGIC + b"\0" * 32, "application/msword")},
+            data={"businessId": "nike"},
+        )
+        assert res.status_code == 422
+        assert "另存为" in res.json()["detail"]
+        assert not list((tmp_path / "uploads" / "rag" / "docs").glob("*"))
+
+    async def test_upload_rejects_oversize_by_streamed_length(self, client, contract_fixtures, monkeypatch, tmp_path):
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+        payload = self.DOCX_MAGIC + b"\0" * (20 * 1024 * 1024)  # 20MB + 8 字节
+        res = await client.post(
+            "/api/rag/documents/upload",
+            files={"file": ("big.docx", payload, "application/octet-stream")},
+            data={"businessId": "nike"},
+        )
+        assert res.status_code == 413
+        assert "20MB" in res.json()["detail"]
+        assert not list((tmp_path / "uploads" / "rag" / "docs").glob("*")), "超限分支不得残留半截文件"
+
+    async def test_upload_ingest_failure_422_and_cleans_file(self, client, contract_fixtures, monkeypatch, tmp_path):
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+        await self._stub_ingest(monkeypatch, status="failed", reason="文档转换失败(status=error): 测试桩")
+        res = await client.post(
+            "/api/rag/documents/upload",
+            files={"file": ("broken.docx", self.DOCX_MAGIC, "application/octet-stream")},
+            data={"businessId": "nike"},
+        )
+        assert res.status_code == 422
+        assert "文档转换失败" in res.json()["detail"]
+        assert not list((tmp_path / "uploads" / "rag" / "docs").glob("*")), "失败分支必须清理落盘文件"
+
+    async def test_upload_accepts_tenant_via_header_and_forwards_category(self, client, contract_fixtures, monkeypatch, tmp_path):
+        """x-tenant-id 头臂(server-gateway.md §1.3 承诺的合法入租方式)+ category
+        透传与缺省:对抗审查(2026-10-17)实证六例全走表单臂,头臂零覆盖时删掉
+        头解析代码套件照常全绿。"""
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+        calls = await self._stub_ingest(monkeypatch)
+        res = await client.post(
+            "/api/rag/documents/upload",
+            files={"file": ("章程.docx", self.DOCX_MAGIC, "application/octet-stream")},
+            data={"category": "prd"},
+            headers={"x-tenant-id": "nike"},
+        )
+        assert res.status_code == 201, res.json()
+        assert calls["business_id"] == "nike"
+        assert calls["category"] == "prd"
+
+        default_calls = await self._stub_ingest(monkeypatch)
+        default_res = await client.post(
+            "/api/rag/documents/upload",
+            files={"file": ("默认分类.docx", self.DOCX_MAGIC, "application/octet-stream")},
+            headers={"x-tenant-id": "nike"},
+        )
+        assert default_res.status_code == 201
+        assert default_calls["category"] == "document", "category 缺省必须落 document"
+
+
 class TestRagDocuments:
     async def test_crud_roundtrip(self, client, contract_fixtures):
         create_res = await client.post(
