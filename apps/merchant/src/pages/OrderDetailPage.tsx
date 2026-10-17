@@ -99,7 +99,7 @@ export default function SingleOrderDetailPage() {
             onClick={() => setIsLogisticsOpen(true)}
             className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer"
           >
-            🚚 查看实时顺丰物流
+            🚚 查看物流轨迹
           </button>
         </div>
 
@@ -109,11 +109,18 @@ export default function SingleOrderDetailPage() {
           <div className="divide-y divide-slate-100">
             {order.items?.map((item) => (
               <div key={item.skuCode || item.title || item.imageUrl} className="py-3 flex items-center space-x-4">
-                <img
-                  src={item.imageUrl || 'https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=200'}
-                  alt={item.title}
-                  className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0"
-                />
+                {/* 缺图条件渲染(CartPage 同款 house 先例):不虚构 unsplash 占位图 */}
+                {item.imageUrl ? (
+                  <img
+                    src={item.imageUrl}
+                    alt={item.title}
+                    className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-xl bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-xl">
+                    🛍️
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-bold text-slate-900">{item.title}</div>
                   <div className="text-[11px] text-slate-500 mt-0.5">

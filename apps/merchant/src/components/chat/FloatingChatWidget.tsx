@@ -4,7 +4,8 @@ import { type CardActionName, type CardActionPayload, type OrderCardData, type R
 import { Button, Input, Loader2, MessageText, Paperclip, RichCardRenderer, X } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
 import { STOREFRONT_CHAT_OPEN_EVENT, type StorefrontChatOpenDetail } from '../../lib/chatBridge';
-import { readStoreCart, writeStoreCart } from '../../lib/storeCart';
+import { mergeCartSnapshot, readStoreCart, writeStoreCart } from '../../lib/storeCart';
+import { MERCHANT_ID, activeThreadKey, chatMsgsKey, merchantThreadId } from '../../lib/tenant';
 import { getGreetingForRoute } from './routeGreetingConfig';
 import { openStoreStream } from './storeStreamConnection';
 
@@ -23,6 +24,8 @@ interface ChatMessage {
 const _syncedCartMsgIds = new Set<string>();
 
 // 辅助函数：将对话中的购物车卡片物理同步到浏览器端 localStorage，并广播 cart_updated 事件
+// (合并/对账语义 2026-10-17 收口至 storeCart.mergeCartSnapshot,此处只留幂等门、
+//  cart_card 识别、清空分支与 try/catch 落盘)
 function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
   if (typeof window === 'undefined' || !cards || cards.length === 0) return;
   if (messageId) {
@@ -34,8 +37,6 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
   if (!cartCard || !('items' in cartCard.data)) return;
 
   try {
-    // 经单一所有者读写(2026-09-14 NaN 事故):读取侧归一历史嵌套条目
-    const existingCart: any[] = readStoreCart();
     const actionType = cartCard.data.actionType;
 
     if (actionType === 'cleared') {
@@ -43,80 +44,29 @@ function syncCartToLocalStorage(cards?: RichCardBlock[], messageId?: string) {
       return;
     }
 
-    const items = cartCard.data.items || [];
-    for (const item of items) {
-      const skuCode = item.skuCode || item.skuId || item.id;
-      if (!skuCode) continue;
-
-      const idx = existingCart.findIndex((it: any) => (it.skuCode || it.sku?.skuCode || it.id) === skuCode);
-
-      if (idx >= 0) {
-        // 服务端 cart_card 的 items 是加购/改量后的全量快照(该 SKU 当前总数),
-        // 一律覆盖而非累加——engine 侧已按 userId 维度累加,前端再累加会翻倍。
-        // 标题/规格/价格同样以服务端快照为准:若只覆盖 quantity,localStorage 里
-        // 陈旧占位标题(如历史演示数据)会在车页永久残留(2026-09-08 同步修复)。
-        existingCart[idx].quantity = Number(item.quantity || 1);
-        if (item.title) existingCart[idx].title = item.title;
-        const specTitle = item.specSummary || item.skuTitle;
-        if (specTitle) {
-          existingCart[idx].skuTitle = specTitle;
-          if (existingCart[idx].sku) existingCart[idx].sku.skuTitle = specTitle;
-        }
-        if (item.price !== undefined && item.price !== null) {
-          existingCart[idx].price = Number(item.price);
-          if (existingCart[idx].sku) existingCart[idx].sku.price = Number(item.price);
-        }
-        if (item.imageUrl) existingCart[idx].imageUrl = item.imageUrl;
-      } else {
-        existingCart.push({
-          id: skuCode,
-          spuId: item.spuId || 'SPU-AURORA-001',
-          skuCode: skuCode,
-          title: item.title,
-          skuTitle: item.specSummary || item.skuTitle || '官方精选规格',
-          imageUrl:
-            item.imageUrl ||
-            'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=800&auto=format&fit=crop&q=60',
-          price: Number(item.price || 899.0),
-          quantity: Number(item.quantity || 1),
-          // 聊天快照行不带库存,存 null(诚实未知);此前编造 99 会让 + 按钮帽与展示骗人
-          stock: null,
-          specAttributes: {},
-          selected: true,
-        });
-      }
-    }
-
-    // 快照对账(2026-09-14):cart_card items 是引擎车的全量快照 —— 本地有而
-    // 快照没有的条目即聊天侧已删除,不剔除则商城页删除永不生效。引擎车行是
-    // SPU 粒度(skuId=spu 码),快照同时携带 skuCode(确切规格)与 spuId,
-    // 本地条目任一键命中即视为仍在车。
+    // 对账只对真快照执行(2026-09-14 语义保持):items 非数组时不合并不剔除,
+    // 否则空快照会把本地整车误判为「聊天侧已删除」而清空。
+    // (有意省略 HEAD 的病态分支回写:旧代码对 items 非数组也无条件回写归一
+    // 结果并广播 storage —— 「读什么写什么 + 一次多余刷新」无信息量,收口后
+    // 该分支 no-op,经对抗复核裁决为有意省略,2026-10-17)
     if (Array.isArray(cartCard.data.items)) {
-      const snapshotIds = new Set<string>();
-      for (const it of cartCard.data.items as any[]) {
-        for (const key of [it.skuCode, it.skuId, it.id, it.spuId]) {
-          if (key) snapshotIds.add(String(key));
-        }
-      }
-      const reconciled = existingCart.filter((it: any) => {
-        const own = [it.skuCode, it.sku?.skuCode, it.id, it.spuId].filter(Boolean).map(String);
-        return own.length === 0 || own.some((k) => snapshotIds.has(k));
-      });
-      existingCart.length = 0;
-      existingCart.push(...reconciled);
+      writeStoreCart(mergeCartSnapshot(cartCard.data.items));
     }
-
-    writeStoreCart(existingCart);
   } catch (err) {
     console.warn('[FloatingChatWidget] Failed to sync cart to localStorage:', err);
   }
 }
 
+// HH:mm 时间戳布料单点(原 toLocaleTimeString 块在文件内重复 10 处,2026-10-17 收口):
+// 缺省取当下;传 createdAt/timestamp 则格式化该时刻,opts 与原各处一致
+function nowHM(at?: string | Date): string {
+  const d = at ? new Date(at) : new Date();
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 // 服务端历史消息 → UI 消息统一映射(3 处拉取路径共用;id 兜底前缀区分来源)
 function toChatMessage(m: any, idx: number, idPrefix: string): ChatMessage {
-  const time = m.createdAt
-    ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = nowHM(m.createdAt);
   return {
     id: m.id || `${idPrefix}_${idx}`,
     role: m.role === 'user' ? 'user' : 'assistant',
@@ -224,6 +174,19 @@ export function FloatingChatWidget() {
   const prevScrollHeightRef = useRef<number>(0);
   const isInitialLoadRef = useRef(true);
 
+  // 欢迎语消息布料单点(原 4 处重复块,2026-10-17 收口):路由首句 + msg_ 前缀 id + 当前时刻。
+  // 初始化/路由恢复路径用 msg_init_,handleStartNewThread 用 msg_new_(前缀语义勿混)
+  const makeGreeting = (idPrefix: string): ChatMessage => ({
+    id: `${idPrefix}_${Date.now()}`,
+    role: 'assistant',
+    text: getGreetingForRoute({
+      pathname,
+      cartItemCount: readStoreCart().length,
+    }),
+    cards: [],
+    time: nowHM(),
+  });
+
   // 消息变动时自动持久化至本地缓存 (按用户与会话隔离)。
   // 只存最近 60 条(与 merchant-admin FloatingAgent 同型上限):本地缓存仅是
   // 暖启动加速,服务端历史才是事实源(触顶加载可重取更早消息);卡片消息体积
@@ -233,7 +196,7 @@ export function FloatingChatWidget() {
     if (typeof window === 'undefined' || !user?.id || !threadId) return;
     if (messages.length > 0) {
       try {
-        localStorage.setItem(`aurora_chat_msgs_${user.id}_${threadId}`, JSON.stringify(messages.slice(-60)));
+        localStorage.setItem(chatMsgsKey(user.id, threadId), JSON.stringify(messages.slice(-60)));
       } catch {
         // ignore
       }
@@ -246,7 +209,9 @@ export function FloatingChatWidget() {
       if (!user?.id) return;
       try {
         const queryTid = targetThreadId || '';
-        const res = await fetch(`/api/store/chat/messages?threadId=${queryTid}&userId=${user.id}&tenantId=aurora`);
+        const res = await fetch(
+          `/api/store/chat/messages?threadId=${queryTid}&userId=${user.id}&tenantId=${MERCHANT_ID}`,
+        );
         const data = await res.json();
         if (data.success) {
           if (Array.isArray(data.userThreads)) {
@@ -276,7 +241,7 @@ export function FloatingChatWidget() {
         prevScrollHeightRef.current = container.scrollHeight;
       }
 
-      const res = await fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=aurora&includeOlder=true`);
+      const res = await fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=${MERCHANT_ID}&includeOlder=true`);
       const data = await res.json();
       if (data.success && Array.isArray(data.allHistoricalMessages)) {
         const allMsgs = data.allHistoricalMessages;
@@ -338,14 +303,12 @@ export function FloatingChatWidget() {
     let activeTid = threadId;
     if (!activeTid && typeof window !== 'undefined') {
       activeTid =
-        localStorage.getItem(`aurora_active_thread_${user.id}`) ||
-        sessionStorage.getItem(`aurora_active_thread_${user.id}`) ||
-        '';
+        localStorage.getItem(activeThreadKey(user.id)) || sessionStorage.getItem(activeThreadKey(user.id)) || '';
     }
 
     // 1. 如果已有本地缓存的消息，秒级呈现
     if (activeTid && typeof window !== 'undefined') {
-      const cached = localStorage.getItem(`aurora_chat_msgs_${user.id}_${activeTid}`);
+      const cached = localStorage.getItem(chatMsgsKey(user.id, activeTid));
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
@@ -363,13 +326,13 @@ export function FloatingChatWidget() {
     }
 
     // 2. 若无本地缓存，向后端查询该用户最新活跃会话
-    fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=aurora`)
+    fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=${MERCHANT_ID}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.threadId && Array.isArray(data.messages) && data.messages.length > 0) {
           setThreadId(data.threadId);
           if (typeof window !== 'undefined') {
-            localStorage.setItem(`aurora_active_thread_${user.id}`, data.threadId);
+            localStorage.setItem(activeThreadKey(user.id), data.threadId);
           }
           const formattedMsgs: ChatMessage[] = data.messages.map((m: any, idx: number) =>
             toChatMessage(m, idx, 'msg_hist'),
@@ -380,48 +343,18 @@ export function FloatingChatWidget() {
           }
         } else {
           // 纯新会话：注入路由首句欢迎语
-          const freshTid = activeTid || `merchant_thread_${user.id}_aurora_${Date.now()}`;
+          const freshTid = activeTid || merchantThreadId(user.id);
           setThreadId(freshTid);
           if (typeof window !== 'undefined') {
-            localStorage.setItem(`aurora_active_thread_${user.id}`, freshTid);
+            localStorage.setItem(activeThreadKey(user.id), freshTid);
           }
-          const greetingText = getGreetingForRoute({
-            pathname,
-            cartItemCount: readStoreCart().length,
-          });
-          setMessages([
-            {
-              id: `msg_init_${Date.now()}`,
-              role: 'assistant',
-              text: greetingText,
-              cards: [],
-              time: new Date().toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              }),
-            },
-          ]);
+          setMessages([makeGreeting('msg_init')]);
         }
       })
       .catch(() => {
-        const freshTid = activeTid || `merchant_thread_${user.id}_aurora_${Date.now()}`;
+        const freshTid = activeTid || merchantThreadId(user.id);
         setThreadId(freshTid);
-        const greetingText = getGreetingForRoute({
-          pathname,
-          cartItemCount: readStoreCart().length,
-        });
-        setMessages([
-          {
-            id: `msg_init_${Date.now()}`,
-            role: 'assistant',
-            text: greetingText,
-            cards: [],
-            time: new Date().toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-          },
-        ]);
+        setMessages([makeGreeting('msg_init')]);
       });
   }, [user?.id]);
 
@@ -429,22 +362,7 @@ export function FloatingChatWidget() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖刻意最小化——仅在用户切换时执行,防消息流触发欢迎语覆盖
   useEffect(() => {
     if (messages.length === 1 && messages[0].id.startsWith('msg_init_')) {
-      const greetingText = getGreetingForRoute({
-        pathname,
-        cartItemCount: readStoreCart().length,
-      });
-      setMessages([
-        {
-          id: `msg_init_${Date.now()}`,
-          role: 'assistant',
-          text: greetingText,
-          cards: [],
-          time: new Date().toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-        },
-      ]);
+      setMessages([makeGreeting('msg_init')]);
     }
   }, [pathname]);
 
@@ -458,7 +376,7 @@ export function FloatingChatWidget() {
     const handle = openStoreStream({
       threadId,
       // businessId 参与服务端属主闸(2026-10-02):stream 路由收多租户闸后需自报身份
-      businessId: 'aurora',
+      businessId: MERCHANT_ID,
       onMessage: (rawData) => {
         try {
           const msgData = JSON.parse(rawData);
@@ -487,15 +405,7 @@ export function FloatingChatWidget() {
                   role: incomingRole,
                   text: incomingText,
                   cards: incomingCards,
-                  time: msgData.timestamp
-                    ? new Date(msgData.timestamp).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                    : new Date().toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      }),
+                  time: nowHM(msgData.timestamp),
                 },
               ];
             });
@@ -537,29 +447,14 @@ export function FloatingChatWidget() {
   // 开启新会话
   const handleStartNewThread = () => {
     if (!user?.id) return;
-    const newTid = `merchant_thread_${user.id}_aurora_${Date.now()}`;
+    const newTid = merchantThreadId(user.id);
     setThreadId(newTid);
     setHasMoreOlder(true);
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`aurora_active_thread_${user.id}`, newTid);
-      sessionStorage.setItem(`aurora_active_thread_${user.id}`, newTid);
+      localStorage.setItem(activeThreadKey(user.id), newTid);
+      sessionStorage.setItem(activeThreadKey(user.id), newTid);
     }
-    const greetingText = getGreetingForRoute({
-      pathname,
-      cartItemCount: readStoreCart().length,
-    });
-    setMessages([
-      {
-        id: `msg_new_${Date.now()}`,
-        role: 'assistant',
-        text: greetingText,
-        cards: [],
-        time: new Date().toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      },
-    ]);
+    setMessages([makeGreeting('msg_new')]);
   };
 
   // 上传图片至网关(与 web 端 ChatArea 同一端点),返回 /api/uploads/* URL 供消息携带
@@ -603,10 +498,7 @@ export function FloatingChatWidget() {
     const msgToSend = (customMsg || input).trim() || (imagesToSend.length > 0 ? '请查看我上传的图片' : '');
     if ((!msgToSend && imagesToSend.length === 0) || isSending) return;
 
-    const userTime = new Date().toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const userTime = nowHM();
 
     const newMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
@@ -630,7 +522,7 @@ export function FloatingChatWidget() {
           message: msgToSend,
           threadId,
           userId: user.id,
-          businessId: 'aurora',
+          businessId: MERCHANT_ID,
           imageUrls: imagesToSend.length > 0 ? imagesToSend : undefined,
           // 商城车随消息上行(2026-09-14 空车谎报收口):引擎车空时水合,
           // 否则客服对商城页加购的商品永远「看不到车」;spuId 供引擎车行
@@ -693,10 +585,7 @@ export function FloatingChatWidget() {
             role: 'assistant',
             text: replyText,
             cards: replyCards,
-            time: new Date().toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
+            time: nowHM(),
           },
         ];
       });
@@ -709,10 +598,7 @@ export function FloatingChatWidget() {
           role: 'assistant',
           text: '网络通信异常，请检查商户后端服务连接。',
           cards: [],
-          time: new Date().toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
+          time: nowHM(),
         },
       ]);
     } finally {
@@ -834,7 +720,7 @@ export function FloatingChatWidget() {
                       if (!user?.id) return;
                       setThreadId(t.threadId);
                       if (typeof window !== 'undefined') {
-                        sessionStorage.setItem(`aurora_active_thread_${user.id}`, t.threadId);
+                        sessionStorage.setItem(activeThreadKey(user.id), t.threadId);
                       }
                       fetchHistory(t.threadId);
                       setShowHistoryList(false);

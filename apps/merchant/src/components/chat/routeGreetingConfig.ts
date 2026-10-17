@@ -30,7 +30,7 @@ export function getGreetingForRoute(ctx: RouteGreetingContext): string {
 
   if (pathname === '/orders') {
     if (orderCount && orderCount > 0) {
-      return `您好！您目前有 ${orderCount} 笔订单记录。如果您需要查询实时顺丰物流、申请退款退货，或者修改未发货订单的配送地址，请直接告诉我订单号！`;
+      return `您好！您目前有 ${orderCount} 笔订单记录。如果您需要查询实时物流、申请退款退货，或者修改未发货订单的配送地址，请直接告诉我订单号！`;
     }
     return '您好！这是您的订单中心。您可以在此查看历史消费流水、跟踪包裹轨迹，或发起售后与退款咨询。';
   }

@@ -2,6 +2,7 @@ import type React from 'react';
 import type { ThirdPartyOrder } from 'types';
 import { Badge, Button, Dialog, DialogContent, DialogHeader, DialogTitle } from 'ui';
 import { fmtDate, fmtMoney, toNum } from '../../lib/format';
+import { carrierLabel } from '../../lib/logistics';
 import { parseShippingAddress } from '../../lib/shippingAddress';
 
 interface OrderDetailModalProps {
@@ -11,14 +12,6 @@ interface OrderDetailModalProps {
   onOpenLogistics: (order: ThirdPartyOrder) => void;
   onOpenChatWithOrder: (orderId: string, initialPrompt?: string) => void;
 }
-
-// 发货面可选的四家承运商编码 → 展示名(ship-dialog 同款),未知编码原样透出
-const CARRIER_LABEL: Record<string, string> = {
-  SF: '顺丰速运',
-  JD: '京东快递',
-  ZTO: '中通快递',
-  EMS: '邮政 EMS',
-};
 
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   isOpen,
@@ -103,9 +96,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 </Badge>
                 {order.status === 'SHIPPED' && (
                   <span className="text-xs text-emerald-600 font-medium">
-                    {/* 承运商如实显示(已知编码译名,未知编码原样),不再硬编码顺丰 */}
+                    {/* 承运商如实显示(已知编码译名,未知编码原样;译名字典已迁 logistics.ts),不再硬编码顺丰 */}
                     {order.tracking?.carrier
-                      ? `${CARRIER_LABEL[order.tracking.carrier] || order.tracking.carrier} 派送中`
+                      ? `${carrierLabel(order.tracking.carrier)} 派送中`
                       : '已发货,物流信息待承运商更新'}
                   </span>
                 )}

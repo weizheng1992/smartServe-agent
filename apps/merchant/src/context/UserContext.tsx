@@ -104,12 +104,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const loginUser = (custom: Partial<MerchantUser>) => {
     const updated: MerchantUser = {
       // U2:CUST-1000~9000 随机段与种子真客(CUST-8801 等)同域可撞;web 自助
-      // 身份走 CUST-WEB-* 专用命名空间
+      // 身份走 CUST-WEB-* 专用命名空间。缺失字段(电话/地址)诚实空串,
+      // 不编造缺省值。
       id: custom.id || `CUST-WEB-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       name: custom.name || '极光顾客',
-      phone: custom.phone || '13800138000',
+      phone: custom.phone || '',
       tier: custom.tier || '注册会员',
-      defaultAddress: custom.defaultAddress || '北京市朝阳区三里屯太古里北区B1层',
+      defaultAddress: custom.defaultAddress || '',
     };
     switchUser(updated);
   };
@@ -131,8 +132,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 export function useCurrentUser() {
   const context = useContext(UserContext);
   if (!context) {
+    // 无 Provider 也绝不冒充真实种子客户(U2 同语义);App 恒包 Provider,
+    // 此分支仅为误用兜底。
     return {
-      user: PRESET_USERS[0],
+      user: guestUser(),
       switchUser: () => {},
       loginUser: () => {},
       presetUsers: PRESET_USERS,

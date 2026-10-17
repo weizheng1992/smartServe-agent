@@ -379,15 +379,18 @@ export default function StorefrontPage() {
 
             <div className="py-2 space-y-4 flex-1 overflow-y-auto">
               <div className="bg-slate-50 p-3.5 rounded-xl flex items-center space-x-3.5 border border-slate-200">
-                <img
-                  src={
-                    selectedSku?.imageUrl ||
-                    buyingProduct.imageUrl ||
-                    'https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=200'
-                  }
-                  alt="SKU"
-                  className="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-white"
-                />
+                {/* 缺图诚实占位(2026-10-17 审查收口):严禁 unsplash 假图兜底,与 CartPage 同款条件渲染 */}
+                {selectedSku?.imageUrl || buyingProduct.imageUrl ? (
+                  <img
+                    src={selectedSku?.imageUrl || buyingProduct.imageUrl}
+                    alt="SKU"
+                    className="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-white"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-lg bg-slate-100 border border-slate-200 bg-white shrink-0 flex items-center justify-center text-xl">
+                    🛍️
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold text-slate-900 text-xs truncate">
                     {selectedSku?.skuTitle || buyingProduct.title}

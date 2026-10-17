@@ -2,6 +2,7 @@ import type React from 'react';
 import { useState } from 'react';
 import type { ThirdPartyOrder } from 'types';
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from 'ui';
+import { carrierLabel } from '../../lib/logistics';
 import { parseShippingAddress } from '../../lib/shippingAddress';
 
 interface LogisticsModalProps {
@@ -18,7 +19,8 @@ export const LogisticsModal: React.FC<LogisticsModalProps> = ({ isOpen, onClose,
 
   const tracking = order.tracking;
   const trackingNumber = tracking?.trackingNumber || '暂无单号';
-  const carrier = tracking?.carrier || '顺丰速运';
+  // 承运商如实显示(已知编码译名,未知编码原样),缺失诚实呈现「待确认」,不再硬编码顺丰
+  const carrier = carrierLabel(tracking?.carrier) || '承运商待确认';
   const timeline = tracking?.timeline || [];
 
   const handleCopy = () => {
@@ -62,7 +64,7 @@ export const LogisticsModal: React.FC<LogisticsModalProps> = ({ isOpen, onClose,
           <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between text-xs text-emerald-200">
             <div>
               <span>当前最新状态：</span>
-              <strong className="text-white ml-1">{tracking?.status || '运输中'}</strong>
+              <strong className="text-white ml-1">{tracking?.status || '—'}</strong>
             </div>
             <div className="text-right">
               <span>目的地：</span>

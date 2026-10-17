@@ -7,6 +7,7 @@ import { OrderDetailModal } from '../components/orders/OrderDetailModal';
 import { useCurrentUser } from '../context/UserContext';
 import { openStorefrontChat } from '../lib/chatBridge';
 import { fmtMoney } from '../lib/format';
+import { carrierLabel } from '../lib/logistics';
 import { parseShippingAddress } from '../lib/shippingAddress';
 
 export default function OrdersPage() {
@@ -50,7 +51,7 @@ export default function OrdersPage() {
     fetchOrders(filterStatus, user.id);
   }, [filterStatus, user.id]);
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, carrier?: string | null) => {
     switch (status) {
       case 'PAID':
         return (
@@ -61,7 +62,8 @@ export default function OrdersPage() {
       case 'SHIPPED':
         return (
           <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-            运输中 · 顺丰速运
+            {/* 承运商如实显示(已知编码译名,未知编码原样),缺失不虚构,不再硬编码顺丰 */}
+            {carrier ? `运输中 · ${carrierLabel(carrier)}` : '运输中'}
           </span>
         );
       case 'DELIVERED':
@@ -96,7 +98,7 @@ export default function OrdersPage() {
               <span>📋 我的订单中心</span>
               <span className="text-xs font-normal text-slate-500">({orders.length} 笔订单)</span>
             </h1>
-            <p className="text-xs text-slate-500 mt-1">支持实时查询顺丰物流轨迹、AI 极速申请退款或变更未发货收货地址</p>
+            <p className="text-xs text-slate-500 mt-1">支持实时查询物流轨迹、AI 极速申请退款或变更未发货收货地址</p>
           </div>
 
           {/* 状态筛选 Tab */}
@@ -174,18 +176,25 @@ export default function OrdersPage() {
                       下单时间: {order.createdAt ? new Date(order.createdAt).toLocaleString('zh-CN') : '-'}
                     </span>
                   </div>
-                  <div>{getStatusBadge(order.status)}</div>
+                  <div>{getStatusBadge(order.status, order.tracking?.carrier)}</div>
                 </div>
 
                 {/* 订单明细项 */}
                 <div className="space-y-3">
                   {order.items?.map((item) => (
                     <div key={item.skuCode || item.title || item.imageUrl} className="flex items-center space-x-4">
-                      <img
-                        src={item.imageUrl || 'https://images.unsplash.com/photo-1654719796836-62b889d4598d?w=200'}
-                        alt={item.title}
-                        className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0"
-                      />
+                      {/* 缺图条件渲染(CartPage 同款 house 先例):不虚构 unsplash 占位图 */}
+                      {item.imageUrl ? (
+                        <img
+                          src={item.imageUrl}
+                          alt={item.title}
+                          className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-xl">
+                          🛍️
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-bold text-slate-900 truncate">{item.title}</div>
                         <div className="text-[11px] text-slate-500 mt-0.5">

@@ -19,6 +19,7 @@ import {
   getApprovalContextData,
   useApprovalMachine,
 } from 'ui';
+import { MERCHANT_ID } from '../lib/tenant';
 
 interface OrderRow {
   order_id: string;
@@ -168,7 +169,7 @@ export default function MerchantAdminPage() {
   const loadConversationMessages = useCallback(async (threadId: string) => {
     if (!threadId) return;
     try {
-      const resp = await fetch(`/api/admin/conversations/${threadId}?tenantId=aurora`);
+      const resp = await fetch(`/api/admin/conversations/${threadId}?tenantId=${MERCHANT_ID}`);
       if (resp.ok) {
         const json = await resp.json();
         if (json.success && json.data) {
@@ -184,8 +185,8 @@ export default function MerchantAdminPage() {
     try {
       const [orderResp, appResp, convResp] = await Promise.all([
         fetch('/api/admin/orders').catch(() => null),
-        fetch('/api/admin/approvals?tenantId=aurora').catch(() => null),
-        fetch('/api/admin/conversations?tenantId=aurora').catch(() => null),
+        fetch(`/api/admin/approvals?tenantId=${MERCHANT_ID}`).catch(() => null),
+        fetch(`/api/admin/conversations?tenantId=${MERCHANT_ID}`).catch(() => null),
       ]);
 
       if (orderResp?.status === 401) {
@@ -788,10 +789,8 @@ export default function MerchantAdminPage() {
                         </td>
                         <td className="p-3.5 font-bold text-slate-900">¥{Number(o.total_amount).toFixed(2)}</td>
                         <td className="p-3.5">
-                          <div className="font-medium text-slate-800">
-                            {o.shipping_address?.recipientName || '张伟'}
-                          </div>
-                          <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '13800138000'}</div>
+                          <div className="font-medium text-slate-800">{o.shipping_address?.recipientName || '—'}</div>
+                          <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '—'}</div>
                         </td>
                         <td className="p-3.5 max-w-xs">
                           <span className="text-slate-800 line-clamp-2" title={o.shipping_address?.fullAddress}>
@@ -1307,7 +1306,7 @@ export default function MerchantAdminPage() {
                       <div className="flex items-center space-x-2">
                         <span className="font-bold text-xs text-slate-900">会话: {activeThreadId}</span>
                         <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
-                          Tenant: aurora
+                          Tenant: {MERCHANT_ID}
                         </span>
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5">

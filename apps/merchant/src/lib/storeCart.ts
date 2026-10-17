@@ -71,6 +71,90 @@ export function writeStoreCart(items: StoreCartItem[]): void {
   window.dispatchEvent(new Event('storage'));
 }
 
+// 聊天 cart_card 快照行(服务端宽松形状:skuCode/skuId/id 多键并存,字段皆可选)
+export interface CartSnapshotItem {
+  skuCode?: string;
+  skuId?: string;
+  id?: string;
+  spuId?: string;
+  title?: string;
+  specSummary?: string;
+  skuTitle?: string;
+  imageUrl?: string;
+  price?: number | string;
+  quantity?: number | string;
+}
+
+// 聊天快照合并单点(2026-10-17 自 FloatingChatWidget.syncCartToLocalStorage 逐行搬入,
+// Feature Envy 收口:widget 只识别卡片/清空并落盘,合并与对账语义归本模块所有)。
+// 语义保持:多键命中覆盖不累加、specTitle/price/imageUrl 仅在有值时覆盖、快照对账剔除;
+// 唯一行为变更是新增条目的伪造缺省改诚实(price 0 由车页 hasPrice 闸渲染「价格待确认」)。
+export function mergeCartSnapshot(items: CartSnapshotItem[]): StoreCartItem[] {
+  // 经单一所有者读写(2026-09-14 NaN 事故):读取侧归一历史嵌套条目
+  const existingCart: any[] = readStoreCart();
+  for (const item of items) {
+    const skuCode = item.skuCode || item.skuId || item.id;
+    if (!skuCode) continue;
+
+    const idx = existingCart.findIndex((it: any) => (it.skuCode || it.sku?.skuCode || it.id) === skuCode);
+
+    if (idx >= 0) {
+      // 服务端 cart_card 的 items 是加购/改量后的全量快照(该 SKU 当前总数),
+      // 一律覆盖而非累加——engine 侧已按 userId 维度累加,前端再累加会翻倍。
+      // 标题/规格/价格同样以服务端快照为准:若只覆盖 quantity,localStorage 里
+      // 陈旧占位标题(如历史演示数据)会在车页永久残留(2026-09-08 同步修复)。
+      existingCart[idx].quantity = Number(item.quantity || 1);
+      if (item.title) existingCart[idx].title = item.title;
+      const specTitle = item.specSummary || item.skuTitle;
+      if (specTitle) {
+        existingCart[idx].skuTitle = specTitle;
+        if (existingCart[idx].sku) existingCart[idx].sku.skuTitle = specTitle;
+      }
+      if (item.price !== undefined && item.price !== null) {
+        existingCart[idx].price = Number(item.price);
+        if (existingCart[idx].sku) existingCart[idx].sku.price = Number(item.price);
+      }
+      if (item.imageUrl) existingCart[idx].imageUrl = item.imageUrl;
+    } else {
+      existingCart.push({
+        id: skuCode,
+        spuId: item.spuId || '',
+        skuCode: skuCode,
+        title: item.title,
+        skuTitle: item.specSummary || item.skuTitle || '',
+        imageUrl: item.imageUrl || '',
+        price: Number.isFinite(Number(item.price)) ? Number(item.price) : 0,
+        // 钳制与 normalizeStoreCartItem 读侧同一法(负数量入档即 1,存档形态归一);
+        // 对抗复核裁定:与所有者模块自身不变量对齐,非语义漂移(2026-10-17)
+        quantity: Math.max(1, Number(item.quantity) || 1),
+        // 聊天快照行不带库存,存 null(诚实未知);此前编造 99 会让 + 按钮帽与展示骗人
+        stock: null,
+        specAttributes: {},
+        selected: true,
+      });
+    }
+  }
+
+  // 快照对账(2026-09-14):cart_card items 是引擎车的全量快照 —— 本地有而
+  // 快照没有的条目即聊天侧已删除,不剔除则商城页删除永不生效。引擎车行是
+  // SPU 粒度(skuId=spu 码),快照同时携带 skuCode(确切规格)与 spuId,
+  // 本地条目任一键命中即视为仍在车。
+  const snapshotIds = new Set<string>();
+  for (const it of items) {
+    for (const key of [it.skuCode, it.skuId, it.id, it.spuId]) {
+      if (key) snapshotIds.add(String(key));
+    }
+  }
+  const reconciled = existingCart.filter((it: any) => {
+    const own = [it.skuCode, it.sku?.skuCode, it.id, it.spuId].filter(Boolean).map(String);
+    return own.length === 0 || own.some((k) => snapshotIds.has(k));
+  });
+  existingCart.length = 0;
+  existingCart.push(...reconciled);
+
+  return existingCart;
+}
+
 // UI 加购统一入口(商城弹窗/商品详情页共用):同 SKU 累加数量,新条目产扁平形状
 export function addStoreCartItem(product: ThirdPartyProduct, sku: ThirdPartySku, quantity: number): StoreCartItem[] {
   const cart = readStoreCart();
