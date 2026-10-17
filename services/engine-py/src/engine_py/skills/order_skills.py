@@ -15,7 +15,11 @@ class OrderRefundSkill(BaseSkill):
     metadata = {
         "id": "skill_order_refund",
         "name": "售后退款与理赔 SOP",
-        "description": "支持退款时效校验、多模态破损阶梯赔付计算、HITL 高危金额安全门禁拦截与凭证核签",
+        # description 仅消费于 GET /api/skills/registry(admin 展示面),不进 LLM prompt;
+        # 措辞须与 execute 真实行为一致(2026-10-17 视觉加固零散项诚实化:旧文案宣称
+        # 「多模态破损阶梯赔付计算」但 execute 零读 damage_assessment —— 虚假能力
+        # 描述即 admin 侧幻觉源头;真实资金闸是金额阈值,视觉评级不参与)
+        "description": "支持退款时效校验、双退款幂等检查、金额阈值 HITL 高危审批门禁与小额免签直退,退款凭证经审批载荷核签",
         "category": "after_sale",
         "triggerIntents": ["order_return", "refund"],  # A5 清死词:UPPER 变体大小写敏感永不命中;process_refund 是工具名非意图;order_cancel 刻意不收编(无专属取消工具,见 intent_registry lifecycle)
         "requiredTools": ["getOrderDetail", "executeOrderAction"],
