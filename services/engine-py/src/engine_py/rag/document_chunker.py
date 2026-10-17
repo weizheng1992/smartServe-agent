@@ -34,12 +34,18 @@ _HTML_TABLE_OPEN_RE = re.compile(r"^<table[ >]", re.IGNORECASE)
 
 @dataclass
 class DocumentChunk(KnowledgeChunk):
-    """文档切片:在 KnowledgeChunk 之上携带内容类型与图片引用(增量键,
-    不破坏 admin 列表/_rag_item 既有 metadata 消费方)。"""
+    """文档切片:在 KnowledgeChunk 之上携带内容类型、图片引用与结构化计算面
+    (增量键,不破坏 admin 列表/_rag_item 既有 metadata 消费方)。
+
+    table_data / chart_data 是确定性聚合器的计算面(chunk_text 管道表/字幕是
+    检索索引面)——行组切分会把文本面切碎,结构化面永远整表;chart_data 带
+    provenance(native=零读数误差 / vlm=需读数误差标注)。"""
 
     content_type: str = "text"  # text | table | image
     image_url: str | None = None
     source_format: str = "pdf"  # pdf | docx
+    table_data: dict | None = None  # {"headers": [...], "rows": [[...]]}
+    chart_data: dict | None = None  # {"headers","rows","kind","title","provenance"}
 
     def metadata_dict(self) -> dict:
         meta = super().metadata_dict()
@@ -47,6 +53,10 @@ class DocumentChunk(KnowledgeChunk):
         meta["sourceFormat"] = self.source_format
         if self.image_url:
             meta["imageUrl"] = self.image_url
+        if self.table_data:
+            meta["tableData"] = self.table_data
+        if self.chart_data:
+            meta["chartData"] = self.chart_data
         return meta
 
 

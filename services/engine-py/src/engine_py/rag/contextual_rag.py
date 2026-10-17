@@ -300,6 +300,9 @@ class ContextualRAG:
                         "headerPath": meta.get("headerPath"),
                         "docTitle": meta.get("docTitle"),
                         "parentChunk": meta.get("parentChunk"),
+                        # 增量键(2026-10-17 v2):结构化计算面(tableData/chartData)
+                        # 供确定性聚合器求值,既有消费方零影响
+                        "metadata": meta,
                     }
                 )
 

@@ -96,6 +96,7 @@ async def ingest_document_file(
         return result
 
     markdown = parsed.markdown
+    vlm_chart_payloads: dict[str, dict] = {}
     if caption_images and vlm_caption_enabled() and parsed.image_urls:
         for url in parsed.image_urls:
             if result.captioned >= _MAX_CAPTIONS_PER_DOC:
@@ -104,7 +105,9 @@ async def ingest_document_file(
                     f"其余 {len(parsed.image_urls) - result.captioned} 张降级无描述"
                 )
                 break
-            caption = await _vlm_caption(url)
+            caption, vlm_chart = await _vlm_enrich(url)
+            if vlm_chart and url not in parsed.chart_payloads:
+                vlm_chart_payloads[url] = vlm_chart  # 原生数据缺席才收 VLM 读数(真数据 > 读数)
             if caption:
                 try:
                     markdown = _apply_caption(markdown, url, caption)
@@ -128,6 +131,13 @@ async def ingest_document_file(
         result.reason = "未提取到任何内容(扫描件无文本层或空文档);OCR 支持为 v2 裁决项"
         return result
 
+    _stitch_structured_payloads(chunks, parsed, vlm_chart_payloads)
+    result.tables = sum(1 for c in chunks if c.content_type == "table")
+    result.images = sum(1 for c in chunks if c.content_type == "image")
+    structured = sum(1 for c in chunks if c.table_data or c.chart_data)
+    if structured:
+        print(f"[DocIngest] {path.name}: 结构化计算面 {structured} 块(表 {result.tables}/图 {result.images} 中)")
+
     try:
         written = await _replace_document_chunks(business_id, chunks)
     except Exception as err:
@@ -137,8 +147,6 @@ async def ingest_document_file(
 
     result.status = "ingested"
     result.chunks = written
-    result.tables = sum(1 for c in chunks if c.content_type == "table")
-    result.images = sum(1 for c in chunks if c.content_type == "image")
     result.doc_title = parsed.doc_title or path.stem
     result.partial = parsed.partial
     print(
@@ -207,6 +215,26 @@ async def _replace_document_chunks(business_id: str, chunks: list[DocumentChunk]
         return len(rows)
 
 
+def _stitch_structured_payloads(chunks: list[DocumentChunk], parsed, vlm_chart_payloads: dict[str, dict] | None = None) -> None:
+    """把 parse 层结构化负载缝接到切片上(计算面与索引面同体落库)。
+
+    表格:parse 的 table_payloads 与 chunker 渲染出的 table 切片同序(同一遍
+    iterate_items 单源产出,渲染失败两边都不留),按下标对齐;
+    图表:按 image_url 精确键接,原生负载缺席时回落 VLM 读数(provenance 已分标)。
+    """
+    vlm_chart_payloads = vlm_chart_payloads or {}
+    table_index = 0
+    for chunk in chunks:
+        if chunk.content_type == "table":
+            if table_index < len(parsed.table_payloads):
+                chunk.table_data = parsed.table_payloads[table_index]
+            table_index += 1
+        elif chunk.content_type == "image" and chunk.image_url:
+            payload = parsed.chart_payloads.get(chunk.image_url) or vlm_chart_payloads.get(chunk.image_url)
+            if payload:
+                chunk.chart_data = payload
+
+
 def _apply_caption(markdown: str, url: str, caption: str) -> str:
     r"""把指定图片引用的 alt 改写为字幕(字幕净化掉会破坏 markdown 语法的字符)。
 
@@ -222,16 +250,27 @@ def _apply_caption(markdown: str, url: str, caption: str) -> str:
 
 
 async def _vlm_caption(image_url: str) -> str | None:
-    """插图字幕:glm-4.6v 单图描述;失败降级 None(切片落「未生成图片描述」)。
-    视觉失败域独立(vision 同纪律),不入全局熔断。"""
+    """插图字幕(兼容旧签名):只取描述部分,结构化数据经 _vlm_enrich 获取。"""
+    caption, _chart_data = await _vlm_enrich(image_url)
+    return caption
+
+
+async def _vlm_enrich(image_url: str) -> tuple[str | None, dict | None]:
+    """插图富化:glm-4.6v 单次调用双产出 —— ①中文描述(入检索索引)
+    ②闭集结构化图表数据(provenance=vlm,计算结果须带读数误差标注)。
+
+    降级链:结构化调用失败 → 纯文本字幕;再失败 → None(切片落
+    「未生成图片描述」)。视觉失败域独立(vision 同纪律),不入全局熔断。
+    """
     from langchain_core.messages import HumanMessage
+    from pydantic import BaseModel, Field
 
     from ..llm import get_vision_model
 
     local_path = uploads_root() / image_url.removeprefix("/api/uploads/")
     if not local_path.is_file():
         print(f"[DocIngest] 插图文件缺失,跳过字幕: {image_url}")
-        return None
+        return None, None
     mime = {
         ".png": "image/png",
         ".jpg": "image/jpeg",
@@ -240,6 +279,46 @@ async def _vlm_caption(image_url: str) -> str | None:
         ".webp": "image/webp",
     }.get(local_path.suffix.lower(), "image/png")
     data_url = f"data:{mime};base64,{base64.b64encode(local_path.read_bytes()).decode()}"
+
+    class ChartEnrichment(BaseModel):
+        """glm-4.6v 闭集富化(function_calling;v2 计算面第三级来源)。"""
+
+        description: str = Field(description="用中文一两句话客观描述这张插图,只描述图中真实存在的内容")
+        has_numeric_data: bool = Field(description="图中是否包含可读出的数值数据(柱状图/折线图/饼图/数据表)")
+        headers: list[str] = Field(default_factory=list, description="若含数值数据:列头(如 [类别, 数值])")
+        rows: list[list[str]] = Field(default_factory=list, description="若含数值数据:按行列读出的字符串值")
+
+    try:
+        structured = await get_vision_model().with_structured_output(ChartEnrichment, method="function_calling").ainvoke(
+            [
+                HumanMessage(
+                    content=[
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                        {
+                            "type": "text",
+                            "text": "描述这张文档插图;若图中有柱状图/折线图/饼图等数值数据,"
+                            "请把每个类目与其数值逐项读出填入表格字段,严禁编造图中没有的数据。",
+                        },
+                    ]
+                )
+            ]
+        )
+        caption = (structured.description or "").strip() or None
+        chart_data = None
+        if structured.has_numeric_data and structured.rows:
+            headers = [h.strip() for h in structured.headers if h and h.strip()] or ["类目", "数值"]
+            rows = [[("" if v is None else str(v)).strip() for v in row] for row in structured.rows if row]
+            if rows:
+                chart_data = {
+                    "kind": "tabular",
+                    "title": None,
+                    "headers": headers,
+                    "rows": rows,
+                    "provenance": "vlm",  # VLM 读数,聚合结果必须带读数误差标注
+                }
+        return caption, chart_data
+    except Exception as err:
+        print(f"[DocIngest] 插图富化失败,降级纯文本字幕({image_url}): {err}")
     try:
         response = await get_vision_model().ainvoke(
             [
@@ -254,11 +333,10 @@ async def _vlm_caption(image_url: str) -> str | None:
         content = response.content
         if isinstance(content, list):
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        caption = (content or "").strip()
-        return caption or None
+        return ((content or "").strip() or None), None
     except Exception as err:
         print(f"[DocIngest] 插图字幕生成失败,降级无描述({image_url}): {err}")
-        return None
+        return None, None
 
 
 def _print_summary(results: list[DocumentIngestResult]) -> int:

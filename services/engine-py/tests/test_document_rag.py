@@ -346,3 +346,218 @@ def test_ingest_scanned_document_skips_honestly(pg_factory, monkeypatch, tmp_pat
         assert total == 0, "失败摄取严禁写行"
 
     asyncio.run(_scenario())
+
+
+# ---------------------------------------------------------------------------
+# 4. 结构化计算面(v2):tableData/chartData 缝接 + 确定性聚合器
+# ---------------------------------------------------------------------------
+def test_coerce_number_variants():
+    from engine_py.rag.aggregator import coerce_number
+
+    assert coerce_number("1,000") == 1000
+    assert coerce_number("95%") == 0.95
+    assert coerce_number("310万") == 3_100_000
+    assert coerce_number("2.5亿") == 250_000_000
+    assert coerce_number(" 6200 ") == 6200
+    assert coerce_number("不限量") is None, "非数值必须诚实 None,严禁猜"
+    assert coerce_number("") is None
+    assert coerce_number(None) is None
+
+
+def test_pick_op_and_column_disambiguation():
+    from engine_py.rag.aggregator import pick_column, pick_op
+
+    assert pick_op("表格里所有项目所需积分的总计") == "sum"
+    assert pick_op("平均响应时长") == "avg"
+    assert pick_op("最高的门店") == "max"
+    assert pick_op("政策内容是什么") is None, "非计算问句必须 None"
+    assert pick_op("最大和最小的差值") is None, "复合意图(双操作)交回原链路"
+
+    headers = ["兑换项目", "所需积分", "库存策略"]
+    assert pick_column(headers, "所需积分的总计是多少") == "所需积分"
+    assert pick_column(headers, "兑换项目的总计") == "兑换项目", "精确子串命中"
+    assert pick_column(headers, "门槛的合计") is None, "「门槛」是语义同义词,规则层不懂 → 诚实 None(交 LLM 闭集或降级)"
+    assert pick_column(["退款金额", "订单金额"], "金额的总计是多少") is None, "「金额」同中两列 → 歧义 None"
+
+
+def test_aggregate_math_over_table_data():
+    from engine_py.rag.aggregator import aggregate
+
+    data = {
+        "headers": ["兑换项目", "所需积分"],
+        "rows": [["10 元优惠券", "1000"], ["帆布袋", "2000"], ["保温杯", "5000"], ["蓝牙音箱", "12000"]],
+    }
+    assert aggregate(data, "所需积分", "sum") == 20000
+    assert aggregate(data, "所需积分", "avg") == 5000
+    assert aggregate(data, "所需积分", "max") == 12000
+    assert aggregate(data, "所需积分", "min") == 1000
+    assert aggregate(data, None, "count") == 4
+    assert aggregate(data, "兑换项目", "sum") is None, "非数值列严禁聚合,诚实 None"
+    assert aggregate(data, "不存在的列", "sum") is None
+
+
+def test_parse_native_chart_docx_yields_chart_payload(tmp_path):
+    """docx 原生 Word chart → parse 层 chart_payloads(零模型无损提取,provenance=native)。
+
+    OOXML 逐字节对齐真实 Word 导出形状(XML 声明/c:title/formatCode/正规 extent)
+    —— 缺声明或 1x1 extent 时 docling-parse 会静默丢掉整个 drawing 实测。
+    """
+    import zipfile
+
+    C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+    A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+    def _pt(idx, val):
+        return f'<c:pt idx="{idx}"><c:v>{val}</c:v></c:pt>'
+
+    chart_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<c:chartSpace xmlns:c="{C}" xmlns:a="{A}" xmlns:r="{R}">'
+        "<c:chart><c:plotArea><c:barChart><c:barDir val=\"col\"/><c:ser>"
+        f'<c:tx><c:strRef><c:f>Sheet1!$B$1</c:f><c:strCache><c:ptCount val="1"/>{_pt(0, "兑换量")}</c:strCache></c:strRef></c:tx>'
+        f'<c:cat><c:strRef><c:f>Sheet1!$A$2:$A$5</c:f><c:strCache><c:ptCount val="4"/>'
+        + "".join(_pt(i, q) for i, q in enumerate(["Q1", "Q2", "Q3", "Q4"]))
+        + "</c:strCache></c:strRef></c:cat>"
+        '<c:val><c:numRef><c:f>Sheet1!$B$2:$B$5</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="4"/>'
+        + "".join(_pt(i, v) for i, v in enumerate([120, 185, 240, 310]))
+        + "</c:numCache></c:numRef></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"
+    )
+    doc_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<w:document xmlns:w="{W}" xmlns:r="{R}" xmlns:wp="{WP}" xmlns:a="{A}" xmlns:c="{C}"><w:body>'
+        f'<w:p><w:r><w:t>季度兑换量:</w:t></w:r></w:p>'
+        f'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="5486400" cy="3200400"/>'
+        f'<a:graphic><a:graphicData uri="{C}"><c:chart r:id="rId1"/></a:graphicData></a:graphic>'
+        f"</wp:inline></w:drawing></w:r></w:p></w:body></w:document>"
+    )
+    path = tmp_path / "native.docx"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            '<Override PartName="/word/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>',
+        )
+        z.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+        )
+        z.writestr("word/document.xml", doc_xml)
+        z.writestr(
+            "word/_rels/document.xml.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="charts/chart1.xml"/></Relationships>',
+        )
+        z.writestr("word/charts/chart1.xml", chart_xml)
+
+    parsed = parse_document(path)
+    # 无位图的原生 chart:数据以管道表就地渲染,负载按渲染序进 table_payloads
+    # (文档自有数据 = 零读数误差,聚合器按 tableData 消费,无需 provenance 标注)
+    assert len(parsed.table_payloads) == 1, "原生 chart 数据必须以结构化表落地,严禁静默丢弃"
+    payload = parsed.table_payloads[0]
+    assert payload["rows"] == [["Q1", "120"], ["Q2", "185"], ["Q3", "240"], ["Q4", "310"]], "缓存值必须原样无损"
+    assert "兑换量" in payload["headers"]
+
+    chunks = chunk_document(
+        parsed.markdown,
+        business_id="aurora",
+        source_url="native.docx",
+        category="document",
+        source_format="docx",
+        doc_title="季度兑换量",
+    )
+    table_chunks = [c for c in chunks if c.content_type == "table"]
+    assert any("120" in c.chunk_text and "310" in c.chunk_text for c in table_chunks), "图表数据成为表格原子块(检索面)"
+
+
+def test_table_payloads_stitch_and_metadata(pg_factory, monkeypatch, tmp_path):
+    """摄取 → 召回切片 metadata 携带 tableData;try_aggregate 端到端出数。"""
+
+    async def _scenario() -> None:
+        from engine_py.rag import contextual_rag as cr
+        from engine_py.rag.aggregator import format_result, try_aggregate
+
+        async with pg_factory.begin() as conn:
+            await conn.execute(text("DELETE FROM rag_documents"))
+
+        blocks = [
+            ("h1", "积分兑换规则"),
+            ("p", "会员可用积分兑换以下礼品。"),
+            ("table", [["兑换项目", "所需积分"], ["10 元优惠券", "1000"], ["帆布袋", "2000"], ["保温杯", "5000"]]),
+        ]
+        ingested = await _ingest_docx(pg_factory, monkeypatch, tmp_path, "积分兑换规则.docx", blocks, "aurora")
+        assert ingested.status == "ingested"
+
+        hits = await cr.ContextualRAG("aurora").search_relevant_docs(
+            "积分兑换 礼品 门槛", limit=3, precomputed_embedding=_query_vec("积分兑换 礼品 门槛"), min_score=0.1
+        )
+        assert hits
+        table_hit = next((h for h in hits if (h.get("metadata") or {}).get("tableData")), None)
+        assert table_hit is not None, "表格切片必须携带 tableData 计算面"
+        assert table_hit["metadata"]["tableData"]["headers"] == ["兑换项目", "所需积分"]
+        assert table_hit["metadata"]["tableData"]["rows"] == [["10 元优惠券", "1000"], ["帆布袋", "2000"], ["保温杯", "5000"]]
+
+        result = try_aggregate("这些礼品所需积分的总计是多少", hits)
+        assert result is not None and result["value"] == 8000, "确定性聚合必须精确(sum=8000)"
+        assert result["annotated"] is False, "表格结构化数据无需读数误差标注"
+        summary = format_result(result)
+        assert "8000" in summary and "确定性代码计算" in summary
+
+        assert try_aggregate("政策内容是什么", hits) is None, "非计算问句必须 None(回落原链路)"
+
+    asyncio.run(_scenario())
+
+
+def test_vlm_chart_fallback_stitch(pg_factory, monkeypatch, tmp_path):
+    """原生数据缺席时 VLM 结构化读数回落(provenance=vlm,聚合结果带误差标注)。"""
+
+    async def _scenario() -> None:
+        from engine_py.rag import document_ingest as di
+        from engine_py.rag.aggregator import format_result, try_aggregate
+        from engine_py.rag.contextual_rag import ContextualRAG
+
+        async with pg_factory.begin() as conn:
+            await conn.execute(text("DELETE FROM rag_documents"))
+
+        async def _fake_enrich(image_url):
+            return "文档插图:柱状图展示四季度兑换量", {
+                "kind": "tabular",
+                "title": None,
+                "headers": ["类别", "数值"],
+                "rows": [["Q1", "120"], ["Q2", "185"], ["Q3", "240"], ["Q4", "310"]],
+                "provenance": "vlm",
+            }
+
+        monkeypatch.setattr(di, "_vlm_enrich", _fake_enrich)
+        monkeypatch.setattr(di, "get_embedding_model", lambda: _StubEmbeddings())
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+
+        path = build_docx(
+            tmp_path / "兑换量图表.docx",
+            [("h1", "季度兑换量"), ("p", "下图给出各季度兑换量:"), ("image",)],
+        )
+        ingested = await di.ingest_document_file(path, "aurora", caption_images=True)
+        assert ingested.status == "ingested"
+
+        hits = await ContextualRAG("aurora").search_relevant_docs(
+            "季度兑换量", limit=3, precomputed_embedding=_query_vec("季度兑换量"), min_score=0.1
+        )
+        chart_hit = next((h for h in hits if (h.get("metadata") or {}).get("chartData")), None)
+        assert chart_hit is not None, "VLM 读数必须作为 chartData 缝接进图片切片"
+        assert chart_hit["metadata"]["chartData"]["provenance"] == "vlm"
+
+        result = try_aggregate("四个季度兑换量加起来一共多少", hits)
+        assert result is not None and result["value"] == 855
+        assert result["annotated"] is True, "VLM 读数的聚合结果必须带读数误差标注"
+        assert "读数误差" in format_result(result)
+
+    asyncio.run(_scenario())

@@ -72,11 +72,19 @@ def rag_images_dir() -> Path:
 
 @dataclass
 class ParsedDocument:
-    """单份文档的解析产物:Markdown 骨架 + 已落盘的插图 URL。"""
+    """单份文档的解析产物:Markdown 骨架 + 已落盘的插图 URL + 结构化负载。
+
+    table_payloads 与 markdown 中的管道表**按出现顺序一一对应**(同一遍
+    iterate_items 产出,失败渲染的表两边都不留);chart_payloads 以插图
+    URL 为键,只含有损数据的来源(当前 = docx 原生 chart 缓存,零读数误差;
+    PDF granite-vision 抽数与 VLM 兜底在 ingest 层按需补)。
+    """
 
     markdown: str
     source_format: str  # pdf | docx
     image_urls: list[str] = field(default_factory=list)  # /api/uploads/rag/*.png(仅位图成功的图片位)
+    table_payloads: list[dict | None] = field(default_factory=list)  # {"headers": [...], "rows": [[...]]}
+    chart_payloads: dict[str, dict] = field(default_factory=dict)  # url → {"headers","rows","kind","title","provenance"}
     doc_title: str | None = None
     partial: bool = False  # PARTIAL_SUCCESS:部分页失败,内容不完整 —— 如实暴露
 
@@ -102,28 +110,34 @@ def parse_document(path: Path) -> ParsedDocument:
         errors = "; ".join(err.error_message for err in (result.errors or []))
         raise DocumentParseError(f"文档转换失败(status={status or 'unknown'}): {errors or '无错误详情'}")
 
-    markdown, image_urls = _export_markdown(result.document)
+    markdown, image_urls, table_payloads, chart_payloads = _export_markdown(result.document)
     title_match = _FIRST_TITLE_RE.search(markdown)
     return ParsedDocument(
         markdown=markdown,
         source_format=source_format,
         image_urls=image_urls,
+        table_payloads=table_payloads,
+        chart_payloads=chart_payloads,
         doc_title=title_match.group(1).strip() if title_match else None,
         partial=(status == "partial_success"),
     )
 
 
-def _export_markdown(doc) -> tuple[str, list[str]]:
-    """按 iterate_items 阅读序自拼 Markdown,返回 (markdown, 已落盘插图 URL 序列)。
+def _export_markdown(doc) -> tuple[str, list[str], list[dict | None], dict[str, dict]]:
+    """按 iterate_items 阅读序自拼 Markdown,返回 (markdown, 插图 URL 序列,
+    表格结构化负载序列, 图表结构化负载 dict)。
 
     标题层级 = 阅读树深度 - 1(实测 docx:标题 L2/节 L3/小节 L4 → #/##/###,
-    绝对基准漂移无妨 —— chunker 会把首个标题强制压栈为 1 级,相对嵌套保真);
-    表格走单表导出(管道表);有序列表按连续 run 重编号(SOP 步骤语义不丢);
+    绝对基准漂移无妨 —— chunker 会把首个 `#` 强制压栈为 1 级,相对嵌套保真);
+    表格走单表导出(管道表)+ export_to_dataframe 结构化负载(按渲染序对齐,
+    供确定性聚合器计算);有序列表按连续 run 重编号(SOP 步骤语义不丢);
     流内图片就地落位;未进阅读流的图片(docx 内嵌图实测无树锚点)追加附录。
     """
     lines: list[str] = []
     image_urls: list[str] = []
     image_markers: list[str | None] = []  # 与文件内标记序对齐;None = 该图片位无位图,删行
+    chart_payloads: dict[str, dict] = {}
+    table_payloads: list[dict | None] = []
     yielded_picture_refs: set[str] = set()
     ordered_counter = 0
 
@@ -148,16 +162,27 @@ def _export_markdown(doc) -> tuple[str, list[str]]:
                 table_md = ""
             if table_md:
                 lines += ["", table_md, ""]
+                table_payloads.append(_table_payload(item, doc))
             ordered_counter = 0
         elif kind == "PictureItem":
             yielded_picture_refs.add(str(item.self_ref))
             url = _persist_picture(item.image)
+            chart_payload = _native_chart_payload(item)
             if url:
                 image_markers.append(url)  # 与文件内 @@IMAGE:序号@@ 一一对应(序号 = len(image_urls))
                 image_urls.append(url)
+                if chart_payload:
+                    chart_payloads[url] = chart_payload
+                lines += ["", f"@@IMAGE:{len(image_markers) - 1}@@", ""]
+            elif chart_payload:
+                # 无位图的原生 chart(实测:docx 内嵌 chart 不经 LibreOffice 渲染就没有
+                # 位图):数据以管道表就地渲染,负载按渲染序进 table_payloads —— 它本就是
+                # 文档自有数据(零读数误差),聚合器按 tableData 消费;严禁静默丢弃
+                lines += ["", _render_pipe_table(chart_payload), ""]
+                table_payloads.append({"headers": chart_payload["headers"], "rows": chart_payload["rows"]})
             else:
                 image_markers.append(None)
-            lines += ["", f"@@IMAGE:{len(image_markers) - 1}@@", ""]
+                lines += ["", f"@@IMAGE:{len(image_markers) - 1}@@", ""]  # 无位图占位,落位时删行
             ordered_counter = 0
         elif kind == "ListItem" or label == "list_item":
             text = (getattr(item, "text", "") or "").strip()
@@ -180,9 +205,15 @@ def _export_markdown(doc) -> tuple[str, list[str]]:
         lines += ["", "## 附录:文档插图", ""]
         for pic in leftovers:
             url = _persist_picture(pic.image)
+            chart_payload = _native_chart_payload(pic)
             if url:
                 lines.append(f"![]({url})")
                 image_urls.append(url)
+                if chart_payload:
+                    chart_payloads[url] = chart_payload
+            elif chart_payload:
+                lines += ["", _render_pipe_table(chart_payload), ""]
+                table_payloads.append({"headers": chart_payload["headers"], "rows": chart_payload["rows"]})
 
     # 标记落位:有 URL 换引用行,无位图的图片位删行(严禁空壳占位进切块)
     out: list[str] = []
@@ -196,7 +227,60 @@ def _export_markdown(doc) -> tuple[str, list[str]]:
                 out.append(f"![]({url})")
             continue
         out.append(line)
-    return "\n".join(out), image_urls
+    return "\n".join(out), image_urls, table_payloads, chart_payloads
+
+
+def _table_payload(item, doc) -> dict | None:
+    """TableItem → {"headers": [...], "rows": [[...]]}(字符串化,全单元格保序);
+    失败诚实 None(管道表文本照常入索引,只是没有计算面)。"""
+    try:
+        frame = item.export_to_dataframe(doc)
+        headers = [str(c) for c in frame.columns]
+        rows = [[("" if v is None else str(v)) for v in row] for row in frame.values]
+        if not headers or not rows:
+            return None
+        return {"headers": headers, "rows": rows}
+    except Exception as err:
+        print(f"[DocParse] 表格结构化失败(文本索引不受影响,计算面缺失): {err}")
+        return None
+
+
+def _native_chart_payload(item) -> dict | None:
+    """docx 原生 Word chart → meta.tabular_chart 缓存重建(零模型零读数误差,
+    provenance=native);无该负载返回 None(交由 ingest 层 VLM 兜底)。"""
+    meta = getattr(item, "meta", None)
+    tabular = getattr(meta, "tabular_chart", None) if meta else None
+    if tabular is None:
+        return None
+    try:
+        chart_data = tabular.chart_data
+        grid = [["" for _ in range(chart_data.num_cols)] for _ in range(chart_data.num_rows)]
+        for cell in chart_data.table_cells:
+            grid[cell.start_row_offset_idx][cell.start_col_offset_idx] = cell.text
+        if not grid:
+            return None
+        return {
+            "kind": "tabular",
+            "title": getattr(tabular, "title", None) or getattr(chart_data, "title", None),
+            "headers": grid[0],
+            "rows": grid[1:] if len(grid) > 1 else [],
+            "provenance": "native",  # 原生缓存 = 真数据,计算结果无需读数误差标注
+        }
+    except Exception as err:
+        print(f"[DocParse] 原生 chart 数据重建失败,降级无计算面: {err}")
+        return None
+
+
+def _render_pipe_table(payload: dict) -> str:
+    """{"headers","rows"} → 管道表 markdown(chunker 的表格原子块直接消费)。"""
+    headers = [str(h) for h in (payload.get("headers") or [])]
+    rows = [[str(c) for c in row] for row in (payload.get("rows") or [])]
+    if not headers:
+        return ""
+    out = ["| " + " | ".join(headers) + " |", "|" + "|".join([" --- "] * len(headers)) + "|"]
+    for row in rows:
+        out.append("| " + " | ".join(row) + " |")
+    return "\n".join(out)
 
 
 def _persist_picture(image_ref) -> str | None:

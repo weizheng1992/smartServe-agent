@@ -122,6 +122,11 @@ async def finish_node(state: AgentState) -> dict:
     rag_context = ""
     rag_documents = state.get("rag_documents") or []
     if rag_documents:
+        # 确定性聚合注入(2026-10-17 文档 RAG v2):计算类问句命中结构化
+        # 表格/图表切片时,代码算数、LLM 只组织语言(严禁心算)
+        from ...rag.aggregator import grounding_block
+
+        computation_block = grounding_block(input_text, rag_documents)
         formatted_docs = "\n".join(
             f'[Store Policy Rule {idx + 1}] (Context Summary: {doc.get("contextualSummary") or "N/A"}): '
             f'"{doc.get("chunkText")}"'
@@ -133,6 +138,8 @@ async def finish_node(state: AgentState) -> dict:
             "actions (like returns or shipping constraints) can or cannot be taken, and strictly ground your "
             "explanation on these rules."
         )
+        if computation_block:
+            rag_context += f"\n\n{computation_block}\n当顾客的问题正是询问该数值时,以上述确定性计算结果作答,严禁重新加总或修改数字。"
 
     # 🧠 画像/情境记忆注入(persona-hardening 03 裁决:终稿单点 + 防复读闸)
     # bug#2 教训制度化:画像参与措辞 ≠ 参与检索 —— 块指令明写「未参与当轮

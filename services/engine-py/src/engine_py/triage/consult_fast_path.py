@@ -209,12 +209,18 @@ async def answer_consult_from_rag(
         f"{'User' if m.get('role') == 'user' else 'Assistant'}: {m.get('content')}"
         for m in (history_msgs or [])[-4:]
     )
+    # 确定性聚合注入(2026-10-17 文档 RAG v2):计算类问句命中结构化表格/图表
+    # 切片时,代码算好数、LLM 只组织语言 —— 严禁 LLM 对文档数据心算
+    from ..rag.aggregator import grounding_block
+
+    computation_block = grounding_block(input_text, rag_documents)
     prompt = (
         f"You are an advanced, professional AI Customer Support Agent representing {brand_name}.\n"
         "Answer the customer's informational question about the store in Chinese, strictly grounded "
         "on the store policy excerpts below.\n\n"
         f"[STORE POLICY EXCERPTS]:\n{_format_rag_chunks(rag_documents)}\n\n"
-        "[RECENT CONVERSATION — UNVERIFIED MEMORY, NOT A FACT SOURCE]:\n"
+        + (f"{computation_block}\n\n" if computation_block else "")
+        + "[RECENT CONVERSATION — UNVERIFIED MEMORY, NOT A FACT SOURCE]:\n"
         f"{recent_history or 'No previous history.'}\n\n"
         f'Customer Question: "{input_text}"\n\n'
         "CRITICAL RULES:\n"
