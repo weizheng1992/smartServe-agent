@@ -45,6 +45,7 @@ paths: ["services/engine-py/src/engine_py/db/**/*", "services/engine-py/alembic/
    - `agent_unanswered`：意图全层未命中池(覆盖增长闭环)。
    - `menus`/`role_menus`/`staff_members`：RBAC 菜单树/角色-菜单分配/员工(商户侧,与 `engine_py/analytics/rbac.py` 配套)。
 10. **商户库表(不归本模型所有权)**:`merchant_orders`/`merchant_spus`/promotions/券/核销/审计等真账表在 **`agent_merchant` 独立库**,无 SQLAlchemy 模型 —— gateway 侧经 `merchant_db.py` 裸 SQL,engine 侧经只读 reader(订单域 `order_domain.py`、数据分析 `analytics/engine.py` 按 `target_db` 路由)。
+11. **视觉证据链(0021,2026-10-17 视觉加固)**:`image_fingerprints`:图证内容指纹账本(`business_id`+`sha256` 复合索引、`url` UNIQUE 幂等防多轮重分析重复记账、`user_id` 匿名可空、**只存哈希不存图内容**)——引擎 vision 评级非空时先查后记(`vision/fingerprints.py`),同租户同哈希已有不同 user 先前记录即跨用户复用命中,命中只降级 `human_review`+`fraudFlag` 绝不拒赔;检索必须 WHERE `business_id` 硬条件。
 
 ### 1.2 多租户物理隔离约束
 
