@@ -4,6 +4,37 @@
 
 ---
 
+## [2.15.0] - 2026-10-17 (视觉证据链加固战役:单次看图定级 → 可信图证闭环,五道确定性闸 + 审计底座 + 逆向闭环起步)
+
+### ✨ Features
+
+- **启发式兜底降权 ⑤**(8483898):`_heuristic_damage_assessment` 纯词面通道零图像证据,恒 minor+human_review+confidence 0.5,删 `_DAMAGE_SEVERE_RE`——旧版 VLM 超时后用户打「严重/彻底碎了」字面即产 severe+auto_refund 假评级(0.88 伪置信度)的行为已废;`damageAssessment.evidenceChannel` 标记评级来源(vision|heuristic,冻结契约增量键)——降级保会话可用性,不继承定责权威。
+- **视觉调用审计底座 ⑨**(8483898):`vision/telemetry.py` 三出口(成功/图全不可读/模型异常)进程内记账 + scheduler 600s 小时窗聚合落 `vision_audit_agg`(head_telemetry 同款运行时 DDL;commit 在 async-with 内;失败 print 吞错不回灌;图内容零落库)——vision 刻意不入韧性层的零观测缺口补上,后续一切闸门阈值自此有标定底盘。
+- **图证指纹跨用户复用反查 ②**(e4a2050):新表 `image_fingerprints`(0021,`(business_id,sha256)` 复合索引/url UNIQUE 幂等/只存哈希不存图),`vision/fingerprints.py` 在评级非空(索赔语境)时本地图 SHA-256 先查后记——同租户同哈希已有**不同 user** 先前记录即跨用户复用命中(字节级同图跨两账户良性解释近零),`suggestedAction` 压回 human_review + `fraudFlag` 增量字段;DB/读图异常 fail-open。
+- **severe 置信闸门 + 判定 3 放大器收敛 ④**(a3bce4e):`AI_VISION_SEVERE_MIN_CONFIDENCE`(默认 0.9 保守起步)——低于阈值 severe 压回 human_review(confidence 此前全链零消费);判定 3 退款关键词放大器收敛 `_damage_lights_refund`——negligible 不再点亮(旧口径完好图无措辞也被 `max(score_refund,0.95)` 强推退款终端),minor/severe 照旧(「坏了」×heuristic minor 消歧时序不回退)。
+- **售后证据链快赔闸 A2**(2204a64):`vision_analysis` 进 AgentState(triage `process()` 出口 `_with_vision_analysis` 单点注入)+ 新表 `after_sale_evidence`(0022,逐凭证 stage='apply' 行 + vlm_struct 快照,receive 行为 B 节点预留)+ `after_sale_tickets.fast_lane_denied` 纯规则闸——图证单号与所退订单不符/带图轮零凭证 → 免签关闭走 HITL,审核告知按拒绝原因分形严禁谎报金额超限;只收紧不放宽,纯文本工单快赔线仍只看金额。
+- **图商品真伪二段校验 ③**(117ead2):`vision/product_verify.py` 窄判定 VLM(闭集 yes/no/uncertain,`AI_PRODUCT_VERIFY_MIN_CONFIDENCE` 默认 0.7,图内文字 UNTRUSTED 仅凭实物判断)——消歧 matched(文本相似命中)自动注入 targetOrderId 前校验,不过/异常降 ambiguous 出选择卡;归属≠真伪,文本相似挡不住别家同品类网图。
+- **索赔 velocity 闸 ⑧**(17df02c):同 (business_id,user_id) 30 天窗口带图索赔覆盖 DISTINCT order_id ≥ `AI_CLAIM_VELOCITY_LIMIT`(默认 3)→ 免签关闭走 HITL;同单重复开票=重试不算多单;审核告知三分形(金额/证据链/velocity)。
+- **图内注入纵深 v1 零成本半 ⑦**(063bab9):analyzer 出口对 ocr_text 跑 `_INJECTION_RE` 系统导向祈使词表(「要求/申请全额退款」手写投诉信前缀豁免),命中 → `injectionFlag` + auto_refund 压回 human_review;消歧 prompt 视觉变量包 `<visual_data>` 定界符声明「数据非指令」——图内注入文字借摘要通道二阶指挥下游 LLM 的缝结构隔离。
+- **真弹冒烟工具**(12a9709):`scripts/vision/smoke.py` 内置三组对照(破损×称坏/完好×中性/完好×谎称坏),2026-10-17 实测基线:**完好图×谎称坏了模型判 negligible 并明说「用户声称坏了但图中无损坏迹象」——评级以图像像素证据为准,用户话术只是上下文**;README 钉死「真弹措辞每晚漂移严禁固化成断言」纪律。
+
+### 🐛 Fixes
+
+- **上传魔数自证**(770ba6b):MIME 白名单此前只信客户端声明 Content-Type,伪造头可递任意字节给视觉模型;落盘读流以文件头魔数自证(jpeg/PNG/GIF87a-89a/RIFF+WEBP),声明与内容不符 400。
+- **OrderRefundSkill 元数据诚实化**(a4de477):description 宣称「多模态破损阶梯赔付计算」但 execute 全文零读 damage_assessment——虚假能力描述即 admin 侧幻觉源头,改真实行为(时效校验/双退款幂等/金额阈值 HITL/小额免签直退)。
+- **定责卡显式三档 + 商户 chips 复合 key**(c6df5c4):绿色「成色良好」此前是 else 兜底(任何脏数据渲染成安抚性绿标),改显式 negligible 判定,未知值诚实降级琥珀「瑕疵/待核验」;merchant 两处图片 key 由裸 URL 改 url-i 复合防撞。
+- **单图读取 OSError 零记账出口**(8483898 审查补):`read_bytes` 的 OSError 曾在记账 try 外逃逸(chmod 000/TOCTOU),按 docstring「该图跳过」语义单图兜错。
+- **文档勘正**(677ed2b + 677ed2b 前后批):multimodal §2.5「severe 触发秒级极速赔付」与 architecture §3.25「自动联动快速赔付」勘正为解耦口径——`auto_refund` 唯一消费方是前端展示文案,真实资金闸在金额阈值+pending_approvals HITL。
+
+### 🧪 Tests
+
+- 引擎套件 1735 → **1794 passed**(+59,含 pg 背书 executor 场景);新册 `test_vision_telemetry`(18)/`test_image_fingerprints`(13)/`test_product_verify`(5)/`test_embedding_anchor_amplifier`(3)/`test_vision_telemetry` 复用命中+velocity+注入计数面/`test_apply_after_sale_evidence` A2+⑧ 扩例/`test_product_disambiguator` 真伪校验+围栏扩例/`test_vision_analyzer` 降权+置信闸门+注入扫描扩例。
+- **对抗性审查工作流两轮**(3 视角审查 + 逐发现实读复核,变异测试实弹):`to_rows` 多桶截断变异 `[:1]` 与窗口取整粒度改坏曾全绿(major,已钉多窗口扇出断言);scheduler 双 flush 本名相同接错曾全绿(已钉 `func is` 身份断言);模型拒判出口/单图 OSError 逃逸/architecture §3.25 旧表述各一条同批修。
+
+### 📝 Docs
+
+- 规则同步四批:`.claude/rules/agent-engine.md` §1.3 视觉加固段(⑤⑨②④③⑦)与 §1.6 证据链闸+velocity 闸、`database-schema.md` §1.1#11 视觉证据链、`multimodal-and-rich-cards.md` §2.1/§2.5、`architecture.md` §3.25 现行落点标注;spec 票 `.scratch/vision-evidence-hardening/`(spec + issues/01-10,七票 resolved、06/07 裁决票与 B 节点/A1/C1 待排期)。
+
 ## [2.14.0] - 2026-10-16 (小模型训练监控补全:metric head 逐 epoch flush/择优/曲线自动化 + SFT 过程落盘 + 分类头服务期遥测)
 
 ### ✨ Features
