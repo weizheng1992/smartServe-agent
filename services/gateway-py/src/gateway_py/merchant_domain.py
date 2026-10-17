@@ -239,131 +239,171 @@ async def get_order_audit_logs(order_id: str) -> list[dict]:
         ]
 
 
+class _IdempotentReplay(Exception):
+    """同 idempotency_key 并发失利:审计 INSERT 撞唯一约束,败者回滚自身变更
+    并回放胜者结果(唯一约束即幂等闸,替代旧「查后插」的竞态窗)。"""
+
+    def __init__(self, log_row: dict) -> None:
+        self.log_row = log_row
+        super().__init__(str(log_row.get("id") or ""))
+
+
+async def _audit_insert_idempotent(
+    conn: Any, *, action_type: str, order_id: str, idempotency_key: str, payload_json: str, result_json: str
+) -> None:
+    """审计落账单点:ON CONFLICT DO NOTHING + RETURNING —— 插入成功返回;
+    撞 key(并发败者)回读胜者行抛 _IdempotentReplay,由调用方事务整体回滚。"""
+    inserted = (
+        await conn.execute(
+            text(
+                "INSERT INTO merchant_audit_logs (action_type, order_id, idempotency_key, operator, payload, result) "
+                "VALUES (:at, :oid, :ik, 'AGENT_SPI', :p, :r) "
+                "ON CONFLICT (idempotency_key) DO NOTHING RETURNING id"
+            ),
+            {
+                "at": action_type,
+                "oid": order_id,
+                "ik": idempotency_key,
+                "p": payload_json,
+                "r": result_json,
+            },
+        )
+    ).first()
+    if inserted is not None:
+        return
+    winner = (
+        await conn.execute(
+            text("SELECT * FROM merchant_audit_logs WHERE idempotency_key = :ik LIMIT 1"),
+            {"ik": idempotency_key},
+        )
+    ).mappings().first()
+    raise _IdempotentReplay(dict(winner) if winner else {})
+
+
 async def execute_order_action(req: dict, signature: str | None = None) -> dict:
     await ensure_merchant_tables()
     action_id = f"ACT_{_now_ms()}_{secrets.token_hex(2)}"
 
-    async with merchant_engine().begin() as conn:
-        # 幂等防重
-        if req.get("idempotencyKey"):
-            log = (
+    def _replay_envelope(log_row: dict) -> dict:
+        result = log_row.get("result")
+        if isinstance(result, str):
+            result = json.loads(result)
+        return {
+            **(result or {}),
+            "success": True,
+            "actionType": req["actionType"],
+            "orderId": req["orderId"],
+            "actionId": str(log_row.get("id") or ""),
+            "message": "幂等防重响应：已成功执行过该指令",
+        }
+
+    try:
+        async with merchant_engine().begin() as conn:
+            # 幂等防重快路(重放免变更尝试;真正的并发闸在审计 INSERT 的
+            # 唯一约束 —— async-4:旧「查后插」竞态败者 IntegrityError→500)
+            if req.get("idempotencyKey"):
+                log = (
+                    await conn.execute(
+                        text("SELECT * FROM merchant_audit_logs WHERE idempotency_key = :ik LIMIT 1"),
+                        {"ik": req["idempotencyKey"]},
+                    )
+                ).mappings().first()
+                if log is not None:
+                    return _replay_envelope(dict(log))
+
+            order = (
                 await conn.execute(
-                    text("SELECT * FROM merchant_audit_logs WHERE idempotency_key = :ik LIMIT 1"),
-                    {"ik": req["idempotencyKey"]},
+                    text("SELECT * FROM merchant_orders WHERE order_id = :oid LIMIT 1"), {"oid": req["orderId"]}
                 )
             ).mappings().first()
-            if log is not None:
-                result = log["result"]
-                if isinstance(result, str):
-                    result = json.loads(result)
+            if order is None:
                 return {
-                    **(result or {}),
-                    "success": True,
+                    "success": False,
                     "actionType": req["actionType"],
                     "orderId": req["orderId"],
-                    "actionId": str(log["id"]),
-                    "message": "幂等防重响应：已成功执行过该指令",
+                    "message": f"订单 [{req['orderId']}] 不存在",
+                }
+            shipping = order["shipping_address"] or {}
+
+            if req["actionType"] == "MODIFY_ADDRESS":
+                if bool(order["is_address_modifiable"]) is False or order["status"] in ("SHIPPED", "DELIVERED"):
+                    return {
+                        "success": False,
+                        "actionType": "MODIFY_ADDRESS",
+                        "orderId": req["orderId"],
+                        "message": f"修改失败：订单当前状态为【{order['status']}】，包裹已发出或完结，禁止修改地址。",
+                    }
+
+                new_addr = req.get("newAddress") or {}
+                address_str = new_addr if isinstance(new_addr, str) else (new_addr.get("fullAddress") or "")
+
+                updated = {
+                    "recipientName": (None if isinstance(new_addr, str) else new_addr.get("recipientName"))
+                    or shipping.get("recipientName")
+                    or "客户",
+                    "phone": (None if isinstance(new_addr, str) else new_addr.get("phone"))
+                    or shipping.get("phone")
+                    or "13800000000",
+                    "fullAddress": address_str,
+                }
+                await conn.execute(
+                    text("UPDATE merchant_orders SET shipping_address = :a WHERE order_id = :oid"),
+                    {"a": json.dumps(updated, ensure_ascii=False), "oid": req["orderId"]},
+                )
+                result_payload = {"updatedAddress": address_str, "message": "收货地址修改成功"}
+                await _audit_insert_idempotent(
+                    conn,
+                    action_type="MODIFY_ADDRESS",
+                    order_id=req["orderId"],
+                    idempotency_key=req.get("idempotencyKey") or action_id,
+                    payload_json=json.dumps({**req, "signature": signature}, ensure_ascii=False),
+                    result_json=json.dumps(result_payload, ensure_ascii=False),
+                )
+                return {
+                    "success": True,
+                    "actionType": "MODIFY_ADDRESS",
+                    "orderId": req["orderId"],
+                    "actionId": action_id,
+                    **result_payload,
                 }
 
-        order = (
-            await conn.execute(
-                text("SELECT * FROM merchant_orders WHERE order_id = :oid LIMIT 1"), {"oid": req["orderId"]}
-            )
-        ).mappings().first()
-        if order is None:
+            if req["actionType"] == "REQUEST_REFUND":
+                refund_id = f"RF_AURORA_{_now_ms()}"
+                await conn.execute(
+                    text("UPDATE merchant_orders SET status = 'REFUNDED', is_returnable = FALSE WHERE order_id = :oid"),
+                    {"oid": req["orderId"]},
+                )
+                result_payload = {
+                    "refundId": refund_id,
+                    "refundedAmount": req.get("refundAmount") or float(order["total_amount"]),
+                    "message": "极光潮品退款已受理入账",
+                }
+                await _audit_insert_idempotent(
+                    conn,
+                    action_type="REQUEST_REFUND",
+                    order_id=req["orderId"],
+                    idempotency_key=req.get("idempotencyKey") or action_id,
+                    payload_json=json.dumps({**req, "signature": signature}, ensure_ascii=False),
+                    result_json=json.dumps(result_payload, ensure_ascii=False),
+                )
+                return {
+                    "success": True,
+                    "actionType": "REQUEST_REFUND",
+                    "orderId": req["orderId"],
+                    "actionId": action_id,
+                    **result_payload,
+                }
+
             return {
                 "success": False,
                 "actionType": req["actionType"],
                 "orderId": req["orderId"],
-                "message": f"订单 [{req['orderId']}] 不存在",
+                "message": f"未知的操作指令: {req['actionType']}",
             }
-        shipping = order["shipping_address"] or {}
-
-        if req["actionType"] == "MODIFY_ADDRESS":
-            if bool(order["is_address_modifiable"]) is False or order["status"] in ("SHIPPED", "DELIVERED"):
-                return {
-                    "success": False,
-                    "actionType": "MODIFY_ADDRESS",
-                    "orderId": req["orderId"],
-                    "message": f"修改失败：订单当前状态为【{order['status']}】，包裹已发出或完结，禁止修改地址。",
-                }
-
-            new_addr = req.get("newAddress") or {}
-            address_str = new_addr if isinstance(new_addr, str) else (new_addr.get("fullAddress") or "")
-
-            updated = {
-                "recipientName": (None if isinstance(new_addr, str) else new_addr.get("recipientName"))
-                or shipping.get("recipientName")
-                or "客户",
-                "phone": (None if isinstance(new_addr, str) else new_addr.get("phone"))
-                or shipping.get("phone")
-                or "13800000000",
-                "fullAddress": address_str,
-            }
-            await conn.execute(
-                text("UPDATE merchant_orders SET shipping_address = :a WHERE order_id = :oid"),
-                {"a": json.dumps(updated, ensure_ascii=False), "oid": req["orderId"]},
-            )
-            result_payload = {"updatedAddress": address_str, "message": "收货地址修改成功"}
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_audit_logs (action_type, order_id, idempotency_key, operator, payload, result) "
-                    "VALUES (:at, :oid, :ik, 'AGENT_SPI', :p, :r)"
-                ),
-                {
-                    "at": "MODIFY_ADDRESS",
-                    "oid": req["orderId"],
-                    "ik": req.get("idempotencyKey") or action_id,
-                    "p": json.dumps({**req, "signature": signature}, ensure_ascii=False),
-                    "r": json.dumps(result_payload, ensure_ascii=False),
-                },
-            )
-            return {
-                "success": True,
-                "actionType": "MODIFY_ADDRESS",
-                "orderId": req["orderId"],
-                "actionId": action_id,
-                **result_payload,
-            }
-
-        if req["actionType"] == "REQUEST_REFUND":
-            refund_id = f"RF_AURORA_{_now_ms()}"
-            await conn.execute(
-                text("UPDATE merchant_orders SET status = 'REFUNDED', is_returnable = FALSE WHERE order_id = :oid"),
-                {"oid": req["orderId"]},
-            )
-            result_payload = {
-                "refundId": refund_id,
-                "refundedAmount": req.get("refundAmount") or float(order["total_amount"]),
-                "message": "极光潮品退款已受理入账",
-            }
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_audit_logs (action_type, order_id, idempotency_key, operator, payload, result) "
-                    "VALUES (:at, :oid, :ik, 'AGENT_SPI', :p, :r)"
-                ),
-                {
-                    "at": "REQUEST_REFUND",
-                    "oid": req["orderId"],
-                    "ik": req.get("idempotencyKey") or action_id,
-                    "p": json.dumps({**req, "signature": signature}, ensure_ascii=False),
-                    "r": json.dumps(result_payload, ensure_ascii=False),
-                },
-            )
-            return {
-                "success": True,
-                "actionType": "REQUEST_REFUND",
-                "orderId": req["orderId"],
-                "actionId": action_id,
-                **result_payload,
-            }
-
-        return {
-            "success": False,
-            "actionType": req["actionType"],
-            "orderId": req["orderId"],
-            "message": f"未知的操作指令: {req['actionType']}",
-        }
+    except _IdempotentReplay as replay:
+        # 并发败者:自身变更随事务整体回滚(与旧 IntegrityError 回滚语义一致),
+        # 回放胜者结果 —— 200 幂等重放,不再泄漏 500(store_spi:178 兜底退役)
+        return _replay_envelope(replay.log_row)
 
 
 async def search_products(query: str | None = None, category: str | None = None, limit: int = 10) -> list[dict]:
