@@ -57,14 +57,21 @@ async def _seed_customer_with_orders(uid: str) -> None:
         {"cid": uid},
         write=True,
     )
-    for i, (status, amount) in enumerate([("SHIPPED", 299.0), ("COMPLETED", 159.5)]):
-        await _merchant_exec(
-            "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, "
-            "shipping_address, created_at) VALUES (:oid, :cid, :st, :amt, "
-            "'{\"city\":\"测试市\"}'::jsonb, NOW() - make_interval(hours => :h))",
-            {"oid": f"ORD-{uid[-8:]}-{i}", "cid": uid, "st": status, "amt": amount, "h": i * 24},
-            write=True,
-        )
+    from engine_py.tools_registry.order_domain import _merchant_writer_engine
+
+    from tests.merchant_seed_helpers import seed_merchant_order
+
+    async with _merchant_writer_engine().begin() as conn:
+        for i, (status, amount) in enumerate([("SHIPPED", 299.0), ("COMPLETED", 159.5)]):
+            await seed_merchant_order(
+                conn,
+                order_id=f"ORD-{uid[-8:]}-{i}",
+                customer_id=uid,
+                total_amount=amount,
+                status=status,
+                shipping_address={"city": "测试市"},
+                created_at_sql=f"NOW() - make_interval(hours => {i * 24})",
+            )
 
 
 async def _seed_fact(uid: str, scope: str, business_id: str | None, fact: str) -> None:

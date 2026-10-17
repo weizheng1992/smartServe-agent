@@ -14,6 +14,7 @@ import uuid as _uuid
 from sqlalchemy import text
 
 from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
+from tests.merchant_seed_helpers import seed_merchant_catalog, seed_merchant_order
 
 _UID = "CUST-CT-SELC-A"
 _SPUCODE = "CT-SELC-SPU-1"
@@ -25,23 +26,15 @@ _PROMO_TAG = "CT-SELC-PROMO-TAG"
 async def _seed_catalog() -> None:
     await ensure_merchant_tables()
     async with merchant_engine().begin() as conn:
-        existing = (
-            await conn.execute(text("SELECT 1 FROM merchant_skus WHERE sku_code = :c"), {"c": _SKUCODE})
-        ).first()
-        if existing is None:
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_spus (spu_code, title, main_image) "
-                    "VALUES (:sc, '选券回归测试商品', 'x.png')"
-                ).bindparams(sc=_SPUCODE)
-            )
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_skus (spu_id, sku_code, sku_title, spec_attributes, price, stock) "
-                    "SELECT p.id, :kc, '默认规格', CAST(:spec AS jsonb), :price, 99 "
-                    "FROM merchant_spus p WHERE p.spu_code = :sc"
-                ).bindparams(kc=_SKUCODE, spec='{"颜色":"黑"}', price=_PRICE, sc=_SPUCODE)
-            )
+        await seed_merchant_catalog(
+            conn,
+            spu_code=_SPUCODE,
+            sku_code=_SKUCODE,
+            price=_PRICE,
+            stock=99,
+            title="选券回归测试商品",
+            spec='{"颜色":"黑"}',
+        )
 
 
 async def _seed_coupon(user_id: str, value: float) -> str:
@@ -487,13 +480,7 @@ class _SeqRandom:
 
 async def _seed_existing_order(order_id: str) -> None:
     async with merchant_engine().begin() as conn:
-        await conn.execute(
-            text(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, "
-                "currency, shipping_address, is_returnable, is_address_modifiable) "
-                "VALUES (:o, :u, 'PAID', 1, 0, 'CNY', CAST('{}' AS jsonb), TRUE, TRUE)"
-            ).bindparams(o=order_id, u=_UID)
-        )
+        await seed_merchant_order(conn, order_id=order_id, customer_id=_UID, total_amount=1)
 
 
 async def test_order_id_collision_retries_to_free_id(client, contract_fixtures, monkeypatch):

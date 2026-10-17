@@ -16,6 +16,7 @@ import pytest
 import sqlalchemy as sa
 
 from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
+from tests.merchant_seed_helpers import seed_merchant_catalog, seed_merchant_order
 
 _TAG = "OTN"
 _UID = "CUST-OTN-1"
@@ -26,35 +27,27 @@ _SKUCODE = "OTN-SKU-1"
 async def _seed_catalog() -> None:
     await ensure_merchant_tables()
     async with merchant_engine().begin() as conn:
-        existing = (
-            await conn.execute(sa.text("SELECT 1 FROM merchant_skus WHERE sku_code = :c"), {"c": _SKUCODE})
-        ).first()
-        if existing is not None:
-            return
-        await conn.execute(
-            sa.text("INSERT INTO merchant_spus (spu_code, title, main_image) VALUES (:sc, '订单租户测试商品', 'x.png')"),
-            {"sc": _SPUCODE},
-        )
-        await conn.execute(
-            sa.text(
-                "INSERT INTO merchant_skus (spu_id, sku_code, sku_title, spec_attributes, price, stock) "
-                "SELECT p.id, :kc, '默认规格', CAST(:spec AS jsonb), 100.0, 99 "
-                "FROM merchant_spus p WHERE p.spu_code = :sc"
-            ),
-            {"kc": _SKUCODE, "spec": '{"颜色":"黑"}', "sc": _SPUCODE},
+        await seed_merchant_catalog(
+            conn,
+            spu_code=_SPUCODE,
+            sku_code=_SKUCODE,
+            price=100.0,
+            stock=99,
+            title="订单租户测试商品",
+            spec='{"颜色":"黑"}',
         )
 
 
 async def _seed_order(order_id: str, business_id: str, customer_id: str = _UID) -> None:
     await ensure_merchant_tables()
     async with merchant_engine().begin() as conn:
-        await conn.execute(
-            sa.text(
-                "INSERT INTO merchant_orders (order_id, business_id, customer_id, status, total_amount, "
-                "shipping_address) VALUES (:o, :b, :u, 'PAID', 100.0, CAST('{}' AS jsonb)) "
-                "ON CONFLICT (order_id) DO UPDATE SET business_id = EXCLUDED.business_id"
-            ),
-            {"o": order_id, "b": business_id, "u": customer_id},
+        await seed_merchant_order(
+            conn,
+            order_id=order_id,
+            customer_id=customer_id,
+            total_amount=100.0,
+            business_id=business_id,
+            on_conflict_update=True,
         )
 
 

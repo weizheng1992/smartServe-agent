@@ -110,19 +110,17 @@ class TestAsk:
     async def test_ask_selected_orders_compare(self, client, auth):
         """PageContext 勾选两单 → 「两个订单对比」出逐笔行 + 合计/均值(ADR-0005)。"""
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
-        from sqlalchemy import text as _t
 
         from gateway_py.merchant_db import ensure_merchant_tables
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         await ensure_merchant_tables()
         boss = await auth()
         async with _merchant_writer_engine().begin() as c:
             for oid, amt in (("E2E-CMP-A", 300.00), ("E2E-CMP-B", 500.00)):
-                await c.execute(_t(
-                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                    "VALUES (:oid, 'CUST-CMP', 'PAID', :amt, '{}'::jsonb) "
-                    "ON CONFLICT (order_id) DO UPDATE SET total_amount = :amt, status = 'PAID'"
-                ), {"oid": oid, "amt": amt})
+                await seed_merchant_order(
+                    c, order_id=oid, customer_id="CUST-CMP", total_amount=amt, on_conflict_update=True,
+                )
 
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={
             "question": "两个订单对比",
@@ -350,9 +348,9 @@ class TestPromotions:
         查无 404「活动不存在」/ 无核销可删 200 且列表消失 / 已核销 400 保护
         (核销行是 ADR-0005 归因口径真源,不可随删除蒸发)。"""
         from engine_py.tools_registry.order_domain import merchant_writer_engine
-        from sqlalchemy import text as _t
 
         from gateway_py.merchant_db import ensure_merchant_tables
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         await ensure_merchant_tables()
         boss = await auth()
@@ -376,12 +374,14 @@ class TestPromotions:
         })
         gpid = guarded.json()["id"]
         async with merchant_writer_engine().begin() as conn:
-            await conn.execute(_t(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                "VALUES ('AURORA-ORD-2026-9081', 'CUST-8801', 'PAID', 1299.00, "
-                "'{\"fullAddress\": \"E2E 测试地址\"}'::jsonb) "
-                "ON CONFLICT (order_id) DO UPDATE SET total_amount = 1299.00"
-            ))
+            await seed_merchant_order(
+                conn,
+                order_id="AURORA-ORD-2026-9081",
+                customer_id="CUST-8801",
+                total_amount=1299.00,
+                shipping_address={"fullAddress": "E2E 测试地址"},
+                on_conflict_update=True,
+            )
         redeemed = await client.post(f"/api/admin/analytics/promotions/{gpid}/redeem",
                                      headers=boss, json={"orderId": "AURORA-ORD-2026-9081"})
         assert redeemed.status_code == 200
@@ -555,15 +555,18 @@ class TestTrendAndCrud:
         pid = created.json()["id"]
         # 种一笔真实订单(容器商户库为空;经写引擎直写,与生产同链路)
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
-        from sqlalchemy import text as _t
+
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         async with _merchant_writer_engine().begin() as conn:
-            await conn.execute(_t(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                "VALUES ('AURORA-ORD-2026-9081', 'CUST-8801', 'PAID', 1299.00, "
-                "'{\"fullAddress\": \"E2E 测试地址\"}'::jsonb) "
-                "ON CONFLICT (order_id) DO UPDATE SET total_amount = 1299.00"
-            ))
+            await seed_merchant_order(
+                conn,
+                order_id="AURORA-ORD-2026-9081",
+                customer_id="CUST-8801",
+                total_amount=1299.00,
+                shipping_address={"fullAddress": "E2E 测试地址"},
+                on_conflict_update=True,
+            )
         # 不存在的订单 → 404 诚实(not_found 键形映射;信封文案走 message)
         bad = await client.post(f"/api/admin/analytics/promotions/{pid}/redeem",
                                 headers=boss, json={"orderId": "NOT-EXIST"})
@@ -601,6 +604,7 @@ class TestL3AndGrowth:
         from sqlalchemy import text as _t
 
         from gateway_py.merchant_db import ensure_merchant_tables
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         await ensure_merchant_tables()
         boss = await auth()
@@ -611,11 +615,13 @@ class TestL3AndGrowth:
 
         # 种核销归因:活动 → 真实订单
         async with _merchant_writer_engine().begin() as conn:
-            await conn.execute(_t(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                "VALUES ('E2E-L3-ORD', 'CUST-L3', 'PAID', 500.00, '{}'::jsonb) "
-                "ON CONFLICT (order_id) DO UPDATE SET total_amount = 500.00"
-            ))
+            await seed_merchant_order(
+                conn,
+                order_id="E2E-L3-ORD",
+                customer_id="CUST-L3",
+                total_amount=500.00,
+                on_conflict_update=True,
+            )
             await conn.execute(_t(
                 "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
                 "VALUES (CAST(:p AS uuid), 'E2E-L3-ORD', 10.00)"
@@ -793,6 +799,7 @@ class TestL3AndGrowth:
         from sqlalchemy import text as _t
 
         from gateway_py.merchant_db import ensure_merchant_tables
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         await ensure_merchant_tables()
         boss = await auth()
@@ -804,11 +811,9 @@ class TestL3AndGrowth:
 
         async with _merchant_writer_engine().begin() as conn:
             for oid, cid, amt in (("E2E-CMP2-A", "C1", 400.00), ("E2E-CMP2-B", "C2", 800.00)):
-                await conn.execute(_t(
-                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                    "VALUES (:oid, :cid, 'PAID', :amt, '{}'::jsonb) "
-                    "ON CONFLICT (order_id) DO UPDATE SET total_amount = :amt"
-                ), {"oid": oid, "cid": cid, "amt": amt})
+                await seed_merchant_order(
+                    conn, order_id=oid, customer_id=cid, total_amount=amt, on_conflict_update=True,
+                )
             await conn.execute(_t(
                 "INSERT INTO promotion_redemptions (promotion_id, order_id, discount_amount) "
                 "VALUES (CAST(:a AS uuid), 'E2E-CMP2-A', 20.00), (CAST(:b AS uuid), 'E2E-CMP2-B', 40.00)"
@@ -1104,17 +1109,21 @@ class TestInlineProductMention:
         code = await self._spu_code_by_title(client, boss, title)
 
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
-        from sqlalchemy import text as _t
+
+        from tests.merchant_seed_helpers import seed_merchant_order, seed_merchant_order_item
+
         async with _merchant_writer_engine().begin() as c:
-            await c.execute(_t(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                "VALUES ('E2E-INLINE-ORD', 'CUST-INLINE', 'PAID', 597.00, '{}'::jsonb) "
-                "ON CONFLICT (order_id) DO NOTHING"
-            ))
-            await c.execute(_t(
-                "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price) "
-                "VALUES ('E2E-INLINE-ORD', :spu, 'SKU-INLINE-1', :title, 'Pro限定版 L', 3, 199.00)"
-            ), {"spu": code, "title": title})
+            await seed_merchant_order(c, order_id="E2E-INLINE-ORD", customer_id="CUST-INLINE", total_amount=597.00)
+            await seed_merchant_order_item(
+                c,
+                order_id="E2E-INLINE-ORD",
+                sku_code="SKU-INLINE-1",
+                spu_id=code,
+                quantity=3,
+                price=199.00,
+                title=title,
+                sku_title="Pro限定版 L",
+            )
 
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={"question": f"{title} 最近销量"})
         events = dict(_sse_events(r))
@@ -1223,16 +1232,14 @@ class TestSelectionSlotCoexistence:
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
         from sqlalchemy import text as _t
 
+        from tests.merchant_seed_helpers import seed_merchant_order
+
         async with _merchant_writer_engine().begin() as c:
             await c.execute(_t(
                 "INSERT INTO merchant_customers (customer_id, name, phone) "
                 "VALUES ('CUST-E2E-SEL', '勾选共存客', '13899991111') ON CONFLICT DO NOTHING"
             ))
-            await c.execute(_t(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                "VALUES ('E2E-SEL-ORD', 'CUST-E2E-SEL', 'PAID', 88.00, '{}'::jsonb) "
-                "ON CONFLICT (order_id) DO NOTHING"
-            ))
+            await seed_merchant_order(c, order_id="E2E-SEL-ORD", customer_id="CUST-E2E-SEL", total_amount=88.00)
         # 故意带无关勾选 —— 客户实体槽必须仍然生效
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={
             "question": "勾选共存客的消费统计",
@@ -1310,6 +1317,7 @@ class TestSelectionKindMap:
         from sqlalchemy import text as _t
 
         from gateway_py.merchant_db import ensure_merchant_tables
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         await ensure_merchant_tables()
         boss = await auth()
@@ -1318,11 +1326,7 @@ class TestSelectionKindMap:
                 "INSERT INTO merchant_customers (customer_id, name, phone) "
                 "VALUES ('CUST-E2E-KIND', '类型勾选客', '13899992222') ON CONFLICT DO NOTHING"
             ))
-            await c.execute(_t(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                "VALUES ('E2E-KIND-ORD', 'CUST-E2E-KIND', 'PAID', 66.00, '{}'::jsonb) "
-                "ON CONFLICT (order_id) DO NOTHING"
-            ))
+            await seed_merchant_order(c, order_id="E2E-KIND-ORD", customer_id="CUST-E2E-KIND", total_amount=66.00)
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={
             "question": "消费统计",
             "pageContext": {"selection": {"customer": ["CUST-E2E-KIND"]}},
@@ -1354,14 +1358,11 @@ class TestInlineOrderId:
         await ensure_merchant_tables()
         boss = await auth()
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
-        from sqlalchemy import text as _t
+
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         async with _merchant_writer_engine().begin() as c:
-            await c.execute(_t(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                "VALUES ('E2E-DET-ORD', 'CUST-E2E-MT', 'PAID', 123.00, '{}'::jsonb) "
-                "ON CONFLICT (order_id) DO NOTHING"
-            ))
+            await seed_merchant_order(c, order_id="E2E-DET-ORD", customer_id="CUST-E2E-MT", total_amount=123.00)
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={
             "question": "E2E-DET-ORD 订单详情",
         })
@@ -1378,33 +1379,47 @@ class TestAttributionFamily:
 
     async def test_why_refund_increase_attributed(self, client, auth):
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
-        from sqlalchemy import text as _t
 
         from gateway_py.merchant_db import ensure_merchant_tables
+        from tests.merchant_seed_helpers import (
+            seed_merchant_catalog,
+            seed_merchant_order,
+            seed_merchant_order_item,
+        )
 
         await ensure_merchant_tables()
         boss = await auth()
         async with _merchant_writer_engine().begin() as c:
-            await c.execute(_t(
-                "INSERT INTO merchant_spus (id, spu_code, title, category, main_image, status) "
-                "VALUES (CAST(:id AS uuid), :code, :title, '配饰', '', 'ON_SALE') "
-                "ON CONFLICT (spu_code) DO NOTHING"
-            ), {"id": "11111111-1111-1111-1111-111111111111", "code": "SPU-E2E-ATTR", "title": "归因测试款"})
-            await c.execute(_t(
-                "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, spec_attributes, price, stock) "
-                "VALUES (CAST(:sid AS uuid), CAST(:id AS uuid), :code, '默认', CAST('{}' AS jsonb), 100, 5) "
-                "ON CONFLICT DO NOTHING"
-            ), {"sid": "22222222-2222-2222-2222-222222222222", "id": "11111111-1111-1111-1111-111111111111", "code": "SPU-E2E-ATTR-SKU"})
+            await seed_merchant_catalog(
+                c,
+                spu_code="SPU-E2E-ATTR",
+                sku_code="SPU-E2E-ATTR-SKU",
+                price=100,
+                stock=5,
+                spu_id="11111111-1111-1111-1111-111111111111",
+                title="归因测试款",
+                sku_title="默认",
+                category="配饰",
+            )
             # 本月一笔退款单、上月无 → 归因行:变化 +1
-            await c.execute(_t(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address, created_at) "
-                "VALUES ('E2E-ATTR-CUR', 'CUST-E2E-MT', 'REFUNDED', 100.00, '{}'::jsonb, date_trunc('month', CURRENT_DATE) + INTERVAL '1 day') "
-                "ON CONFLICT (order_id) DO NOTHING"
-            ))
-            await c.execute(_t(
-                "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price) "
-                "VALUES ('E2E-ATTR-CUR', 'SPU-E2E-ATTR', 'SPU-E2E-ATTR-SKU', '归因测试款', '默认', 1, 100.00)"
-            ))
+            await seed_merchant_order(
+                c,
+                order_id="E2E-ATTR-CUR",
+                customer_id="CUST-E2E-MT",
+                total_amount=100.00,
+                status="REFUNDED",
+                created_at_sql="date_trunc('month', CURRENT_DATE) + INTERVAL '1 day'",
+            )
+            await seed_merchant_order_item(
+                c,
+                order_id="E2E-ATTR-CUR",
+                sku_code="SPU-E2E-ATTR-SKU",
+                spu_id="SPU-E2E-ATTR",
+                quantity=1,
+                price=100.00,
+                title="归因测试款",
+                sku_title="默认",
+            )
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={
             "question": "为什么这个月退货突然变多",
         })
@@ -1421,20 +1436,22 @@ class TestSpuCompare:
 
     async def test_compare_with_selection(self, client, auth):
         from engine_py.tools_registry.order_domain import _merchant_writer_engine
-        from sqlalchemy import text as _t
 
         from gateway_py.merchant_db import ensure_merchant_tables
+        from tests.merchant_seed_helpers import seed_merchant_spu
 
         await ensure_merchant_tables()
         boss = await auth()
         # 自种两款(容器 SPU 种子可能为空)
         async with _merchant_writer_engine().begin() as c:
-            await c.execute(_t(
-                "INSERT INTO merchant_spus (id, spu_code, title, category, main_image, status) "
-                "VALUES (CAST(:id AS uuid), :code, :title, '配饰', '', 'ON_SALE') "
-                "ON CONFLICT (spu_code) DO NOTHING"
-            ), [{"id": "33333333-3333-3333-3333-333333333331", "code": "SPU-E2E-CMPA", "title": "对比测试款A"},
-                {"id": "33333333-3333-3333-3333-333333333332", "code": "SPU-E2E-CMPB", "title": "对比测试款B"}])
+            await seed_merchant_spu(
+                c, spu_code="SPU-E2E-CMPA", title="对比测试款A",
+                spu_id="33333333-3333-3333-3333-333333333331", category="配饰",
+            )
+            await seed_merchant_spu(
+                c, spu_code="SPU-E2E-CMPB", title="对比测试款B",
+                spu_id="33333333-3333-3333-3333-333333333332", category="配饰",
+            )
         codes = ["SPU-E2E-CMPA", "SPU-E2E-CMPB"]
         r = await client.post("/api/admin/analytics/ask", headers=boss, json={
             "question": "两个商品销售对比",

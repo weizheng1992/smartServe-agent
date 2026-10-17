@@ -101,7 +101,11 @@ The RAG facade across multi-tenant knowledge bases (see `docs/architecture/conte
 - **`approval_actions.py`(审批动作装配)**:HITL 动作三通道(商户运营台 / 管理台顾客+坐席 / SPI)共享的机制单点 —— 动作词表(`CUSTOMER_ACTIONS`/`OPERATOR_ACTIONS`/`STAFF_REVIEW_ACTIONS`/`SPI_ACTIONS`)、对象级租户闸(ensure_*=success 形 / assert_*=detail 形)、humanReply 别名、operator 快照、引擎载荷装配。SPI 通道归属闸 2026-10-04 收口(全局 key 不得跨租户核销工单)。
 - **`sse_tail.py`(SSE 读流泵)**:chat / analytics ask / merchant store 三份手抄泵的归一单点 —— `tail_stream`(历史回放 + XREAD 尾随 + 心跳 + 终局收口,`__done__` 类哨兵不出 SSE 线)、`tail_pubsub`(顾客侧频道 adapter)、`streaming_headers`。测试桩点唯一:monkeypatch 本 module 的 `get_client` / `read_agent_events`。
 
-配套单点:engine 侧 `engine_py/db/merchant_access.py`(agent_merchant 库 URL 解析与 reader/writer/gateway 三执行位构造)、`order_domain.generate_order_id`(订单号六次闸,两包同一机制)与 `insert_merchant_order(_item)`(真账 INSERT 列清单唯一);gateway 侧 `approval_actions` 动作词表与 `conversation_repo.thread_owner`(线程属主访问器)。`conversation_repo.update_conversation_status` 内嵌接管不变量:任何把 human_takeover 线程改走的状态写自动清除暂停闸元数据键(坐席字段保留为审计痕迹,契约钉死)。
+配套单点:engine 侧 `engine_py/db/merchant_access.py`(agent_merchant 库 URL 解析与 reader/writer/gateway 三执行位构造)、`order_domain.generate_order_id`(订单号六次闸,两包同一机制)与 `insert_merchant_order(_item)`(真账 INSERT 列清单唯一);gateway 侧 `approval_actions` 动作词表与 `conversation_repo.thread_owner`(线程属主访问器)。
+
+### 商户结算核 commit_order(2026-10-17 结算核落地)
+
+`merchant_domain.py` 内私有深模块 `_commit_order`,单 SKU 直购(`place_order`)与购物车主结算(`create_order_from_cart`)两条编排的共用落库核:取货 → 校验 → 优惠决议 → 扣库存(**统一条件 UPDATE 防超卖**,废弃购物车路径的 FOR UPDATE+无条件 UPDATE 双语义)→ 插单 → 防双花核销 → 核销流水 → 行项目,一段一次,**核全权管事务**(取货入事务,根除直购路径事务外预读的陈价雷)。前奏只剩参数装配与信封翻译(错误经结构化子类 `_SkuMissing`/`_StockShortage` 各译本臂历史文案,线契约零变化);跨核载荷强类型 `_OrderItemRequest`(cost_price 必填直取 SKU 行,camelCase 幽灵键类消失)。动因:ADR-0003 成交进价快照在购物车路径恒 0 的复发型复制品漂移(单 SKU 路径旧 `:530` 注释自证同款洞修过一次)。同批:tests 九册手写 `merchant_*` INSERT 收敛为 `tests/merchant_seed_helpers.py` 夹具单点(列清单镜像 `_MERCHANT_DDL`;实付类断言必须相对、原价/库存/快照可绝对——共享容器他册残留促销会把 900 打成 820,实弹)+ 双臂同参差分册 `test_settlement_core_parity.py`(快照非零/行项目逐键相等/缺货查无回滚/同码需求合计);幂等竞态(idempotency_key 查后插→500)另立 follow-up,不进本批。`conversation_repo.update_conversation_status` 内嵌接管不变量:任何把 human_takeover 线程改走的状态写自动清除暂停闸元数据键(坐席字段保留为审计痕迹,契约钉死)。
 
 ### Chat Router (`services/gateway-py/src/gateway_py/routers/chat.py`)
 

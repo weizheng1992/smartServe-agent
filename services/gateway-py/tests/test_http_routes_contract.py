@@ -614,35 +614,25 @@ class TestStoreOrdersStrictScoping:
     的订单,与聊天侧视图永久不一致且跨用户泄漏。"""
 
     async def test_store_orders_scoped_to_requested_customer(self, client, contract_fixtures):
-        import json as _json
-
-        from sqlalchemy import text
 
         from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         await ensure_merchant_tables()
         async with merchant_engine().begin() as conn:
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, "
-                    "shipping_address) VALUES (:oid, :cid, 'PAID', 100, CAST(:addr AS jsonb)) "
-                    "ON CONFLICT (order_id) DO NOTHING"
-                ).bindparams(
-                    oid="CT-ORD-SCOPE-A",
-                    cid="CUST-CT-SCOPE-A",
-                    addr=_json.dumps({"fullAddress": "契约测试地址"}),
-                )
+            await seed_merchant_order(
+                conn,
+                order_id="CT-ORD-SCOPE-A",
+                customer_id="CUST-CT-SCOPE-A",
+                total_amount=100,
+                shipping_address={"fullAddress": "契约测试地址"},
             )
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, "
-                    "shipping_address) VALUES (:oid, :cid, 'PAID', 200, CAST(:addr AS jsonb)) "
-                    "ON CONFLICT (order_id) DO NOTHING"
-                ).bindparams(
-                    oid="CT-ORD-SCOPE-8801",
-                    cid="CUST-8801",
-                    addr=_json.dumps({"fullAddress": "契约测试地址"}),
-                )
+            await seed_merchant_order(
+                conn,
+                order_id="CT-ORD-SCOPE-8801",
+                customer_id="CUST-8801",
+                total_amount=200,
+                shipping_address={"fullAddress": "契约测试地址"},
             )
 
         res = await client.get("/api/store/orders", params={"customerId": "CUST-CT-SCOPE-A"})

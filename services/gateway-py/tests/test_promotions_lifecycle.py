@@ -240,14 +240,17 @@ class TestPromotionsLifecycle:
         from sqlalchemy import text
 
         from gateway_py.merchant_db import ensure_merchant_tables
+        from tests.merchant_seed_helpers import seed_merchant_order
 
         await ensure_merchant_tables()
         async with _merchant_writer_engine().begin() as conn:
-            await conn.execute(text(
-                "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, shipping_address) "
-                "VALUES ('E2E-QT-ORD', 'CUST-QT-1', 'PAID', 500, '{}'::jsonb) "
-                "ON CONFLICT (order_id) DO UPDATE SET status = 'PAID', total_amount = 500"
-            ))
+            await seed_merchant_order(
+                conn,
+                order_id="E2E-QT-ORD",
+                customer_id="CUST-QT-1",
+                total_amount=500,
+                on_conflict_update=True,
+            )
 
         now = datetime.now()
         created = await self._create(client, boss, "E2E 过期核销", "full_reduction", threshold=100, value=10,

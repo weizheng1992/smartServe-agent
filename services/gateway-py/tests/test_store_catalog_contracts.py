@@ -19,28 +19,19 @@ _SKUCODE = "CT-CAT-SKU-1"
 
 async def _seed_one_product() -> None:
     await ensure_merchant_tables()
-    from sqlalchemy import text
-
     from gateway_py.merchant_db import merchant_engine
+    from tests.merchant_seed_helpers import seed_merchant_catalog
 
     async with merchant_engine().begin() as conn:
-        existing = (
-            await conn.execute(text("SELECT 1 FROM merchant_skus WHERE sku_code = :c"), {"c": _SKUCODE})
-        ).first()
-        if existing is None:
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_spus (spu_code, title, main_image) "
-                    "VALUES (:sc, '目录契约测试冲锋衣', 'x.png')"
-                ).bindparams(sc=_SPUCODE)
-            )
-            await conn.execute(
-                text(
-                    "INSERT INTO merchant_skus (spu_id, sku_code, sku_title, spec_attributes, price, stock) "
-                    "SELECT p.id, :kc, '默认规格', CAST(:spec AS jsonb), 258, 10 "
-                    "FROM merchant_spus p WHERE p.spu_code = :sc"
-                ).bindparams(kc=_SKUCODE, spec='{"颜色":"黑"}', sc=_SPUCODE)
-            )
+        await seed_merchant_catalog(
+            conn,
+            spu_code=_SPUCODE,
+            sku_code=_SKUCODE,
+            price=258,
+            stock=10,
+            title="目录契约测试冲锋衣",
+            spec='{"颜色":"黑"}',
+        )
 
 
 @pytest.mark.usefixtures("seeded")

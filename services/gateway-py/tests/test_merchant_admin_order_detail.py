@@ -26,21 +26,34 @@ async def _seed_detail_order() -> None:
     from engine_py.tools_registry.order_domain import _merchant_writer_engine
 
     from gateway_py.merchant_db import ensure_merchant_tables
+    from tests.merchant_seed_helpers import seed_merchant_order, seed_merchant_order_item
 
     await ensure_merchant_tables()
     async with _merchant_writer_engine().begin() as c:
-        await c.execute(sa.text(
-            "INSERT INTO merchant_orders (order_id, customer_id, status, total_amount, discount_amount, "
-            "shipping_address, tracking_info) "
-            "VALUES (:oid, 'CUST-DETAIL', 'PAID', 499.00, 50.00, "
-            "CAST('{\"recipientName\":\"张伟\",\"phone\":\"13800138000\",\"fullAddress\":\"浙江省杭州市\"}' AS jsonb), "
-            "NULL) ON CONFLICT (order_id) DO UPDATE SET total_amount = 499.00, discount_amount = 50.00"
-        ), {"oid": _DETAIL_ORDER_ID})
-        await c.execute(sa.text(
-            "INSERT INTO merchant_order_items (order_id, spu_id, sku_code, title, sku_title, quantity, price) "
-            "SELECT :oid, 'SPU-DETAIL-001', 'SKU-DETAIL-001', '极光轻量三防连帽冲锋衣', '曜石黑/L', 1, 499.00 "
-            "WHERE NOT EXISTS (SELECT 1 FROM merchant_order_items WHERE order_id = :oid AND sku_code = 'SKU-DETAIL-001')"
-        ), {"oid": _DETAIL_ORDER_ID})
+        await seed_merchant_order(
+            c,
+            order_id=_DETAIL_ORDER_ID,
+            customer_id="CUST-DETAIL",
+            total_amount=499.00,
+            discount_amount=50.00,
+            shipping_address={
+                "recipientName": "张伟",
+                "phone": "13800138000",
+                "fullAddress": "浙江省杭州市",
+            },
+            on_conflict_update=True,
+        )
+        await seed_merchant_order_item(
+            c,
+            order_id=_DETAIL_ORDER_ID,
+            sku_code="SKU-DETAIL-001",
+            spu_id="SPU-DETAIL-001",
+            quantity=1,
+            price=499.00,
+            title="极光轻量三防连帽冲锋衣",
+            sku_title="曜石黑/L",
+            skip_if_exists=True,
+        )
         await c.execute(sa.text(
             "INSERT INTO merchant_audit_logs (action_type, order_id, idempotency_key, operator, payload, result) "
             "VALUES ('ship', :oid, :ik, 'merchant_operator', CAST('{}' AS jsonb), CAST('{}' AS jsonb)) "
