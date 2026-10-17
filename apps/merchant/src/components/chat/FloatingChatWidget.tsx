@@ -936,9 +936,10 @@ export function FloatingChatWidget() {
                 <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
                   {m.imageUrls && m.imageUrls.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 justify-end mb-1 max-w-[85%]">
-                      {m.imageUrls.map((url) => (
+                      {m.imageUrls.map((url, i) => (
                         <button
-                          key={url}
+                          // biome-ignore lint/suspicious/noArrayIndexKey: 复合 key 防同 URL 重复入列撞 key(列表无稳定 id,与 web 端 chips 同先例)
+                          key={`${url}-${i}`}
                           type="button"
                           onClick={() => setSelectedImage(url)}
                           className="block overflow-hidden rounded-xl border border-emerald-500/30 shadow-2xs cursor-pointer hover:opacity-90 transition"
@@ -984,7 +985,8 @@ export function FloatingChatWidget() {
               <div className="flex flex-wrap gap-1.5">
                 {attachedImages.map((url, i) => (
                   <div
-                    key={url}
+                    // biome-ignore lint/suspicious/noArrayIndexKey: 复合 key 防同 URL 重复入列撞 key(粘贴重发等路径,列表无稳定 id,web 端 chips 同先例)
+                    key={`${url}-${i}`}
                     className="relative w-12 h-12 rounded-lg overflow-hidden border border-emerald-500/30 shadow-2xs group"
                   >
                     <img src={url} alt="待发送图片" className="w-full h-full object-cover" />

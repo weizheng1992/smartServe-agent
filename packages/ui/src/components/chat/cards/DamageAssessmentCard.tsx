@@ -11,6 +11,9 @@ export interface DamageAssessmentCardProps {
 export const DamageAssessmentCard: React.FC<DamageAssessmentCardProps> = ({ data }) => {
   const isSevere = data.damageLevel === 'severe';
   const isMinor = data.damageLevel === 'minor';
+  // 显式三元判断,绿色「成色良好」只认 negligible —— else 兜底曾把任何脏数据
+  // 渲染成安抚性绿标,对定责卡是误导性降级(2026-10-17 视觉加固零散项)
+  const isNegligible = data.damageLevel === 'negligible';
 
   return (
     <div className="my-2 max-w-md overflow-hidden rounded-xl border border-indigo-500/30 bg-gradient-to-b from-indigo-950/40 to-slate-900/90 p-4 text-slate-100 shadow-xl backdrop-blur-md">
@@ -29,13 +32,19 @@ export const DamageAssessmentCard: React.FC<DamageAssessmentCardProps> = ({ data
           className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
             isSevere
               ? 'bg-rose-500/10 text-rose-400 ring-1 ring-inset ring-rose-500/20'
-              : isMinor
-                ? 'bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20'
-                : 'bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20'
+              : isNegligible
+                ? 'bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20'
+                : 'bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20'
           }`}
         >
-          {isSevere ? <AlertOctagon className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
-          {isSevere ? '严重破损' : isMinor ? '瑕疵/轻微受损' : '成色良好'}
+          {isSevere ? (
+            <AlertOctagon className="h-3 w-3" />
+          ) : isNegligible ? (
+            <CheckCircle2 className="h-3 w-3" />
+          ) : (
+            <AlertTriangle className="h-3 w-3" />
+          )}
+          {isSevere ? '严重破损' : isNegligible ? '成色良好' : isMinor ? '瑕疵/轻微受损' : '瑕疵/待核验'}
         </span>
       </div>
 
