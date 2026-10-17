@@ -44,11 +44,14 @@ d('RedeemDialog(真实库,仅错误路径)', () => {
     render(<RedeemDialog promo={promo} onClose={onCancel} onMsg={onMsg} />);
     fireEvent.change(screen.getByPlaceholderText(/订单号/), { target: { value: 'E2E-不存在的订单' } });
     fireEvent.click(screen.getByRole('button', { name: '确认核销' }));
-    // 失败文案留窗内(壳 err),不假成功、不关窗
+    // 失败文案留窗内(壳 err),不假成功、不关窗;内容断言钉服务端真话回显
+    // (核销链活动校验先于订单:engine analytics/promotions.py not_found →
+    // errMsgOf relay「活动不存在」)—— 泛化兜底「操作失败」/硬编码文案在此
+    // 必红,存在断言于 2026-10-17 审查锐化
     await waitFor(() => {
       const err = document.querySelector('.text-red-600');
       expect(err).not.toBeNull();
-      expect(String(err!.textContent).length).toBeGreaterThan(0);
+      expect(err!.textContent).toContain('活动不存在');
     });
     expect(onMsg).not.toHaveBeenCalled(); // 失败严禁走成功横幅
     expect(onCancel).not.toHaveBeenCalled(); // 弹窗保留,用户可改单号重试

@@ -110,10 +110,14 @@ describe('FloatingAgent(对话面板交互)', () => {
   });
 
   it('断线失败(AskStreamError):部分帧照常上屏 + 错误帧带「恢复结果」', async () => {
-    // 部分帧经 onFrame 流式上屏(与 AskStreamError.frames 同源,core 严禁重复追加)
+    // 部分帧经 onFrame 流式上屏,同一帧同时进 err.frames(与真实 api.ts 同源 ——
+    // 双通道共一数组;若 core 违反「严禁重复追加」把 err.frames 再 append 一遍,
+    // 本镜像钉当场双气泡变红。2026-10-17 审查收口:原 err.frames=[] 对重复追加
+    // 回归是盲的)
     askMock.mockImplementation((_q: unknown, _pc: unknown, cb?: (f: unknown) => void) => {
-      cb?.({ event: 'clarify', data: { question: '要看哪个时间范围?', options: [] } });
-      return Promise.reject(new AskStreamError('TypeError: network error', 'ask_x1', 1, []));
+      const clarify = { event: 'clarify', data: { question: '要看哪个时间范围?', options: [] } };
+      cb?.(clarify);
+      return Promise.reject(new AskStreamError('TypeError: network error', 'ask_x1', 1, [clarify]));
     });
     renderAgent();
     openPanel();
