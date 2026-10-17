@@ -144,6 +144,15 @@ class TestRecorder:
         assert summary == {"windows": 3, "calls": 3}
         assert len(written[0]) == 3
 
+    def test_record_velocity_hit_counts_without_inflating_calls(self):
+        """索赔 velocity 命中(⑧ executor 侧)单独累计,严禁虚增调用量。"""
+        telemetry.record_velocity_hit()
+        by_source = {}
+        for (_w, source), counts in telemetry.snapshot_and_reset_counters().items():
+            by_source[source] = counts
+        assert by_source["vision"]["claim_velocity_hit"] == 1
+        assert by_source["vision"]["calls"] == 0
+
     def test_flush_writes_rows_and_resets(self, monkeypatch):
         written: list[list[dict]] = []
 

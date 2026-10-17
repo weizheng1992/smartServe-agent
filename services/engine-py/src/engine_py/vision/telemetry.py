@@ -43,6 +43,8 @@ COUNTERS = (
     "degraded_unreadable",
     "latency_sum_ms",
     "fraud_reuse_hit",
+    "product_verify_downgrade",
+    "claim_velocity_hit",
 )
 
 _DDL = """
@@ -61,12 +63,16 @@ CREATE TABLE IF NOT EXISTS vision_audit_agg (
   degraded_unreadable INTEGER NOT NULL DEFAULT 0,
   latency_sum_ms BIGINT NOT NULL DEFAULT 0,
   fraud_reuse_hit INTEGER NOT NULL DEFAULT 0,
+  product_verify_downgrade INTEGER NOT NULL DEFAULT 0,
+  claim_velocity_hit INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   UNIQUE (window_start, source)
 );
 CREATE INDEX IF NOT EXISTS ix_vision_audit_agg_window ON vision_audit_agg(window_start);
 ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS fraud_reuse_hit INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS severe_conf_clamp INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS product_verify_downgrade INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS claim_velocity_hit INTEGER NOT NULL DEFAULT 0;
 """
 
 _ready = False
@@ -138,6 +144,34 @@ def record_reuse_hit(*, hits: int = 1) -> None:
             bucket["fraud_reuse_hit"] += max(1, int(hits))
     except Exception as err:  # pragma: no cover - 观测面自兜底,正常路径不可达
         print(f"[VisionTelemetry] 复用命中记录失败(观测面不反噬主流程): {err}")
+
+
+def record_verify_downgrade() -> None:
+    """记图商品真伪校验不过的降级(2026-10-17 视觉加固 ③,disambiguator 侧)。
+
+    matched 自动注入被校验拦下 → 降 ambiguous 出选择卡;与 record_call 分离
+    (不虚增 calls),桶固定挂 vision 来源。
+    """
+    try:
+        with _lock:
+            bucket = _counters.setdefault((hour_window(), "vision"), dict.fromkeys(COUNTERS, 0))
+            bucket["product_verify_downgrade"] += 1
+    except Exception as err:  # pragma: no cover - 观测面自兜底,正常路径不可达
+        print(f"[VisionTelemetry] 真伪校验降级记录失败(观测面不反噬主流程): {err}")
+
+
+def record_velocity_hit() -> None:
+    """记索赔 velocity 闸命中(2026-10-17 视觉加固 ⑧,executor 4.4 侧单独累计)。
+
+    同用户滚动窗口带图索赔覆盖多单 → 免签关闭走 HITL;与 record_call 分离
+    (不虚增 calls),桶固定挂 vision 来源。
+    """
+    try:
+        with _lock:
+            bucket = _counters.setdefault((hour_window(), "vision"), dict.fromkeys(COUNTERS, 0))
+            bucket["claim_velocity_hit"] += 1
+    except Exception as err:  # pragma: no cover - 观测面自兜底,正常路径不可达
+        print(f"[VisionTelemetry] velocity 命中记录失败(观测面不反噬主流程): {err}")
 
 
 def snapshot_and_reset_counters() -> dict[tuple[_dt.datetime, str], dict[str, int]]:

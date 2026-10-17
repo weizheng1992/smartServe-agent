@@ -742,7 +742,12 @@ class IntentTriageEngine:
         三个意图浮现点共用,2026-09-09 收口):matched 时注入 targetOrderId 并播报
         订单关联;其余状态原样返回,由调用方经 _vision_disambig_bypass 收口。
         闸门条件(带图 × 售后意图 × 全链无单号)经 _vision_disambig_due 唯一实现。"""
-        disambig = await disambiguate_product(vision_analysis, state.get("user_id"), tenant_id)
+        disambig = await disambiguate_product(
+            vision_analysis,
+            state.get("user_id"),
+            tenant_id,
+            image_urls=state.get("image_urls"),
+        )
         if disambig["status"] == "matched":
             _set_target_order_id(state, disambig["orderId"])
             await _emit_vision_order_linked(

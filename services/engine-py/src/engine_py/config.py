@@ -91,6 +91,19 @@ class Settings:
     vision_severe_min_confidence: float = field(
         default_factory=lambda: float(_env("AI_VISION_SEVERE_MIN_CONFIDENCE", "0.9"))
     )
+    # 图商品真伪二段校验(2026-10-17 视觉加固 ③):消歧 matched 自动注入前,
+    # 窄判定 VLM「图中商品是否为该商品」的最低置信;不过 → 降级出选择卡。
+    # 默认 0.7 保守起步,标定等 vision_audit_agg 数据
+    product_verify_min_confidence: float = field(
+        default_factory=lambda: float(_env("AI_PRODUCT_VERIFY_MIN_CONFIDENCE", "0.7"))
+    )
+    # 索赔 velocity 闸(2026-10-17 视觉加固 ⑧):同用户滚动窗口内带图索赔覆盖的
+    # 订单数超过阈值 → 免签通道关闭走 HITL(只降级不拒赔);正常高频售后用户
+    # 落人工而非拒赔,阈值保守起步、标定等 vision_audit_agg 数据
+    claim_velocity_limit: int = field(default_factory=lambda: int(_env("AI_CLAIM_VELOCITY_LIMIT", "3")))
+    claim_velocity_window_days: int = field(
+        default_factory=lambda: int(_env("AI_CLAIM_VELOCITY_WINDOW_DAYS", "30"))
+    )
 
     # glm-4.7 每次调用默认开思维链(reasoning_content):裸测"只回复ok"也先生成 131-239
     # 推理 token,管线单次调用 11-74s(2026-09-09 实测,商户咨询类回复 57-114s 的大头)。

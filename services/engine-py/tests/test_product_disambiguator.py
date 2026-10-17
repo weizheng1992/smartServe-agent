@@ -267,3 +267,105 @@ class TestBuildSelectCard:
         candidates = [{"orderId": f"ORD-{n}", "productName": f"商品{n}", "quantity": 1} for n in range(20)]
         card = build_select_card(candidates)
         assert len(card["data"]["options"]) == MAX_CARD_OPTIONS
+
+
+# ── ③ 二段真伪校验(2026-10-17 视觉加固 issues/08)─────────────────────────
+
+
+class TestMatchedVerifyGate:
+    """matched 自动注入前的窄判定校验:归属≠真伪,不过/异常一律降 ambiguous。"""
+
+    def test_matched_without_images_skips_verify(self, monkeypatch):
+        """缺省(历史调用方/无图)零行为破坏:校验器不得被触碰。"""
+        _wire_candidates(monkeypatch, _candidates_fixture())
+
+        async def _must_not_call(image_refs, product_name):
+            raise AssertionError("无图不应触发真伪校验")
+
+        result = asyncio.run(
+            disambiguate_product(
+                _VISION,
+                "CUST-1",
+                "aurora",
+                model=_FakeModel(_match("ORD-1001", "Nike Air 红色运动鞋", 0.92)),
+                verifier=_must_not_call,
+            )
+        )
+        assert result["status"] == "matched"
+        assert result["orderId"] == "ORD-1001"
+
+    def test_matched_passes_verification(self, monkeypatch):
+        _wire_candidates(monkeypatch, _candidates_fixture())
+        calls = []
+
+        async def _pass(image_refs, product_name):
+            calls.append((image_refs, product_name))
+            return {"verified": True, "confidence": 0.9, "degraded": False}
+
+        result = asyncio.run(
+            disambiguate_product(
+                _VISION,
+                "CUST-1",
+                "aurora",
+                model=_FakeModel(_match("ORD-1001", "Nike Air 红色运动鞋", 0.92)),
+                image_urls=["/api/uploads/shot.png"],
+                verifier=_pass,
+            )
+        )
+        assert result["status"] == "matched"
+        assert calls == [(["/api/uploads/shot.png"], "Nike Air 红色运动鞋")]
+
+    def test_matched_rejected_by_verify_downgrades_to_ambiguous(self, monkeypatch):
+        from engine_py.vision import telemetry
+
+        telemetry.reset_for_tests()
+        _wire_candidates(monkeypatch, _candidates_fixture())
+
+        async def _reject(image_refs, product_name):
+            return {"verified": False, "confidence": 0.85, "degraded": False}
+
+        result = asyncio.run(
+            disambiguate_product(
+                _VISION,
+                "CUST-1",
+                "aurora",
+                model=_FakeModel(_match("ORD-1001", "Nike Air 红色运动鞋", 0.92)),
+                image_urls=["/api/uploads/shot.png"],
+                verifier=_reject,
+            )
+        )
+        assert result["status"] == "ambiguous", "别家同品类网图不得自动注入退款单号"
+        assert result["verifyRejected"]["claimedOrder"] == "ORD-1001"
+        assert result["verifyRejected"]["claimedProduct"] == "Nike Air 红色运动鞋"
+        assert result["candidates"] == _candidates_fixture()
+        totals = {}
+        for counts in telemetry.snapshot_and_reset_counters().values():
+            for key, value in counts.items():
+                totals[key] = totals.get(key, 0) + value
+        assert totals["product_verify_downgrade"] == 1
+        assert totals["calls"] == 0  # 降级计数严禁虚增调用量
+        telemetry.reset_for_tests()
+
+    def test_matched_degraded_verify_downgrades_conservatively(self, monkeypatch):
+        """校验 VLM 挂了 → 保守降 ambiguous(最坏多问一次),绝不带病自动注入。"""
+        from engine_py.vision import telemetry
+
+        telemetry.reset_for_tests()
+        _wire_candidates(monkeypatch, _candidates_fixture())
+
+        async def _boom(image_refs, product_name):
+            return {"verified": None, "confidence": 0.0, "degraded": True}
+
+        result = asyncio.run(
+            disambiguate_product(
+                _VISION,
+                "CUST-1",
+                "aurora",
+                model=_FakeModel(_match("ORD-1002", "玻璃茶具套装", 0.9)),
+                image_urls=["/api/uploads/shot.png"],
+                verifier=_boom,
+            )
+        )
+        assert result["status"] == "ambiguous"
+        assert result["verifyRejected"]["degraded"] is True
+        telemetry.reset_for_tests()

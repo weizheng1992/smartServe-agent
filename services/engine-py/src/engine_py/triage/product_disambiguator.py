@@ -69,6 +69,8 @@ async def disambiguate_product(
     business_id: str | None,
     *,
     model=None,
+    image_urls: list[str] | None = None,
+    verifier=None,
 ) -> dict:
     """视觉摘要 × 近单商品行消歧。
 
@@ -78,6 +80,12 @@ async def disambiguate_product(
        "confidence", "candidates"}                        唯一高置信命中
     - {"status": "no_match", "candidates": [...]}        模型判定图片与所有候选都无关
     - {"status": "ambiguous", "candidates": [...]}       多候选/置信居中/模型失败/疑似幻觉
+
+    matched 自动注入前另有二段真伪校验(2026-10-17 视觉加固 ③,issues/08):
+    ``image_urls`` 非空时对第一张图做窄判定「图中商品是否为该商品」,不过/不确定/
+    校验异常一律降级 ambiguous 出选择卡(归属≠真伪,文本相似挡不住别家同品类网图);
+    ``image_urls`` 缺省(历史调用方/测试)不校验,行为零破坏。``verifier`` 为
+    测试注入缝(缺省 vision/product_verify.verify_product_match)。
     """
     candidates = await _build_candidates_async(user_id, business_id)
     if not candidates:
@@ -115,13 +123,22 @@ async def disambiguate_product(
         confidence >= CONFIDENCE_AUTO_INJECT
         and (matched_order, matched_product) in candidate_keys
     ):
-        return {
+        matched = {
             "status": "matched",
             "orderId": matched_order,
             "productName": matched_product,
             "confidence": confidence,
             "candidates": candidates,
         }
+        # ③ 二段真伪校验(2026-10-17 视觉加固):归属≠真伪 —— matched 打开自动
+        # 注入(免签/退款快流的入口),注入前用窄判定 VLM 确认图中商品确实是它;
+        # 不过/不确定/校验异常一律降 ambiguous 出选择卡,最坏多问一次。
+        if image_urls:
+            from ..vision.product_verify import downgrade_matched_on_verify, verify_product_match
+
+            verification = await (verifier or verify_product_match)(image_urls, matched_product)
+            return downgrade_matched_on_verify(matched, verification)
+        return matched
     # 「都不像」出口(2026-09-14 坏例探测):模型按规则给底线以下置信 = 图片与
     # 候选全无关联,交由接线层出引导文案而非逼选卡片;疑似幻觉(高置信但不在
     # 候选集)不落此分支 —— 那说明模型看出了些什么,出卡片让人裁更稳。
