@@ -248,8 +248,11 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
                 fails.append(f"编造单号 {oid}")
         # 转人工排队:线程真源须翻 human_takeover(engine takeover.mark_takeover_requested)
         if turn.expect_takeover:
+            # 属主闸随行(2026-10-17 窃听族收口):显式 threadId 的有主线程必须
+            # 命中请求者身份,否则诚实空(thread:null)——不随行即误读「未接管」
             tr = await client.get("/api/store/chat/messages",
-                                  params={"threadId": thread_id, "businessId": TENANT})
+                                  params={"threadId": thread_id, "businessId": TENANT,
+                                          "userId": customer_id})
             tstatus = str(((tr.json() or {}).get("thread") or {}).get("status") or "")
             row["thread_status"] = tstatus
             if tstatus != "human_takeover":
@@ -475,8 +478,11 @@ async def run_sse_bridge(client) -> dict:
     }, timeout=30)
 
     async def listen():
+        # 属主闸随行(2026-10-17 窃听族收口):有主线程订阅必须声明匹配 userId,
+        # 否则 403 掐流——「知线程 id 即听」正是本闸要封的口,评测须走正门
         async with client.stream("GET", "/api/store/chat/stream",
-                                 params={"threadId": thread_id, "businessId": TENANT},
+                                 params={"threadId": thread_id, "businessId": TENANT,
+                                         "userId": f"{CUST_PREFIX}_sse"},
                                  timeout=45) as resp:
             async for chunk in resp.aiter_text():
                 if "event: message" in chunk:
