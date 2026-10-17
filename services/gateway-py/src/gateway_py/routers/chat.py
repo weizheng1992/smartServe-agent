@@ -36,6 +36,24 @@ _ALLOWED_IMAGE_TYPES = {
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 _UPLOAD_CHUNK_BYTES = 256 * 1024
 
+
+def _sniff_image_kind(head: bytes) -> str | None:
+    """文件头魔数 → 规范 MIME(键与 _ALLOWED_IMAGE_TYPES 同口径);不认识返回 None。
+
+    2026-10-17 视觉加固(零散项,vision-evidence-hardening):白名单此前只看客户端
+    声明的 Content-Type,伪造头可递任意字节给视觉模型 —— 落盘前以魔数自证真实类型,
+    声明与内容不符 400。WEBP 是 RIFF 容器:0..3 "RIFF" + 8..11 "WEBP"。
+    """
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if head.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
 # 默认仓库根 public/uploads(TS 原版同址,已在 .gitignore);env 可覆写(测试隔离用)
 UPLOADS_DIR = Path(
     os.environ.get("UPLOADS_DIR")
@@ -50,7 +68,8 @@ async def upload_chat_image(file: UploadFile = File(...)):  # FastAPI 依赖注�
 
     前端契约(ChatArea.tsx):成功顶层 {success, url} 直接入 attachedImages;
     失败顶层 {success: false, error} 供 alert 精确展示。大小以读流实测为准,
-    不信任 client 声明的 Content-Length。
+    不信任 client 声明的 Content-Length;真实类型以文件头魔数自证,
+    声明 Content-Type 与内容不符 400。
     """
     ext = _ALLOWED_IMAGE_TYPES.get(file.content_type or "")
     if ext is None:
@@ -61,7 +80,15 @@ async def upload_chat_image(file: UploadFile = File(...)):  # FastAPI 依赖注�
                 "error": f"不支持的图片类型 {file.content_type or '(未知)'},仅限 jpeg/png/webp/gif",
             },
         )
+    declared = file.content_type
     dest = UPLOADS_DIR / f"{uuid.uuid4().hex}{ext}"
+
+    def _reject(status: int, error: str) -> JSONResponse:
+        dest.unlink(missing_ok=True)
+        return JSONResponse(status_code=status, content={"success": False, "error": error})
+
+    header = b""
+    sniffed: str | None = None
     try:
         with dest.open("wb") as out:
             written = 0
@@ -69,14 +96,22 @@ async def upload_chat_image(file: UploadFile = File(...)):  # FastAPI 依赖注�
                 written += len(chunk)
                 if written > _MAX_UPLOAD_BYTES:
                     out.close()
-                    dest.unlink(missing_ok=True)
-                    return JSONResponse(
-                        status_code=413,
-                        content={"success": False, "error": "图片超过 10MB 上限"},
-                    )
+                    return _reject(413, "图片超过 10MB 上限")
+                if sniffed is None:
+                    # 首块即含全部主流图片头(≤16 字节);不足 12 字节的残流在循环后终判
+                    header = (header + chunk)[:16]
+                    if len(header) >= 12:
+                        sniffed = _sniff_image_kind(header)
+                        if sniffed != declared:
+                            out.close()
+                            return _reject(400, "文件内容与声明类型不符,仅限真实 jpeg/png/webp/gif 图片")
                 out.write(chunk)
     finally:
         await file.close()
+    if sniffed is None:
+        # <12 字节的流:任何真实图片都远大于此,终判必然不符
+        if _sniff_image_kind(header) != declared:
+            return _reject(400, "文件内容与声明类型不符,仅限真实 jpeg/png/webp/gif 图片")
     return {"success": True, "url": f"/api/uploads/{dest.name}"}
 
 

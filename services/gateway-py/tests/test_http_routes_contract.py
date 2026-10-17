@@ -1251,6 +1251,27 @@ class TestChatUpload:
         assert body["success"] is False
         assert body["error"]
 
+    async def test_upload_rejects_forged_content_type_magic_mismatch(self, client, contract_fixtures):
+        """魔数自证(2026-10-17 视觉加固):声明 image/png 递文本字节 —— 白名单只看
+        声明头时任意字节可直通视觉模型,落盘前必须内容与声明一致。"""
+        res = await client.post(
+            "/api/chat/upload", files={"file": ("fake.png", b"hello world, not an image", "image/png")}
+        )
+        assert res.status_code == 400
+        body = res.json()
+        assert body["success"] is False
+        assert "不符" in body["error"]
+
+    async def test_upload_rejects_real_image_with_mismatched_declared_mime(self, client, contract_fixtures):
+        """严格一致性:真 JPEG 字节配 image/png 声明同样 400 —— 扩展名由声明 MIME
+        反推,内容与扩展名背离会让引擎以错误 Data URL 形态直传模型。"""
+        jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\0" * 32  # JPEG 魔数头
+        res = await client.post(
+            "/api/chat/upload", files={"file": ("mislabeled.png", jpeg_bytes, "image/png")}
+        )
+        assert res.status_code == 400
+        assert res.json()["success"] is False
+
     async def test_upload_rejects_oversize_by_streamed_length(self, client, contract_fixtures):
         # 10MB + 1 字节,MIME 合法 —— 限长必须读流实测,不信任声明
         payload = self.PNG_1PX + b"\0" * (10 * 1024 * 1024)
