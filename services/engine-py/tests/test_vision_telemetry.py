@@ -159,6 +159,15 @@ class TestRecorder:
         assert asyncio.run(telemetry.flush_pending()) == {"windows": 0, "calls": 0}
         assert len(written) == 1
 
+    def test_record_reuse_hit_counts_without_inflating_calls(self):
+        """图证复用命中(vision_parse 侧)单独累计,严禁虚增调用量(②①期)。"""
+        telemetry.record_reuse_hit(hits=2)
+        by_source = {}
+        for (_w, source), counts in telemetry.snapshot_and_reset_counters().items():
+            by_source[source] = counts
+        assert by_source["vision"]["fraud_reuse_hit"] == 2
+        assert by_source["vision"]["calls"] == 0  # 空桶合法:命中计数不等于一次调用
+
     def test_flush_failure_swallows_and_drops_window(self, monkeypatch):
         async def _boom(rows):
             raise RuntimeError("db down")

@@ -798,3 +798,29 @@ class EvalRunRecordRow(Base):
     hitl_trigger_rate: Mapped[float | None] = mapped_column(Float, server_default=text("0.12"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'completed'"))
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+class ImageFingerprint(Base):
+    """图证内容指纹账本(2026-10-17 视觉加固 ②①期,vision-evidence-hardening issues/04)。
+
+    「这张图是否已被别的人拿来索赔过」的事实源:引擎侧 vision 评级时
+    (triage Step 0.5 后,vision/fingerprints.py)读本地图算 SHA-256,先查后记 ——
+    同 (business_id, sha256) 已有**不同 user** 的先前记录即跨用户复用命中
+    (字节级相同的图出现在两个账户下,良性解释近零),命中只降级
+    (suggestedAction→human_review + fraudFlag 字段),绝不拒赔。
+    同 URL 幂等(UNIQUE,多轮重分析不重复记账);同用户重传同图只记账不 flag
+    (重试噪声,v2 接订单关联后再收紧);只存哈希不存图内容(隐私纪律)。
+    """
+
+    __tablename__ = "image_fingerprints"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)  # fp_<hex12>
+    business_id: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)  # /api/uploads/<uuid> 全局唯一
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)  # 内容指纹(hex 64);重传必换 URL 故防重放必须按内容
+    user_id: Mapped[str | None] = mapped_column(Text)  # 匿名上传留空(留空行不参与跨用户判定)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+Index("uq_image_fingerprints_url", ImageFingerprint.url, unique=True)
+Index("image_fingerprints_biz_sha_idx", ImageFingerprint.business_id, ImageFingerprint.sha256)

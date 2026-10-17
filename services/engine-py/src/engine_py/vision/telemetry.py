@@ -41,6 +41,7 @@ COUNTERS = (
     "degraded_model_error",
     "degraded_unreadable",
     "latency_sum_ms",
+    "fraud_reuse_hit",
 )
 
 _DDL = """
@@ -57,10 +58,12 @@ CREATE TABLE IF NOT EXISTS vision_audit_agg (
   degraded_model_error INTEGER NOT NULL DEFAULT 0,
   degraded_unreadable INTEGER NOT NULL DEFAULT 0,
   latency_sum_ms BIGINT NOT NULL DEFAULT 0,
+  fraud_reuse_hit INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   UNIQUE (window_start, source)
 );
 CREATE INDEX IF NOT EXISTS ix_vision_audit_agg_window ON vision_audit_agg(window_start);
+ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS fraud_reuse_hit INTEGER NOT NULL DEFAULT 0;
 """
 
 _ready = False
@@ -115,6 +118,20 @@ def record_call(
                 bucket["latency_sum_ms"] += max(0, int(latency_ms))
     except Exception as err:  # pragma: no cover - 观测面自兜底,正常路径不可达
         print(f"[VisionTelemetry] 记录失败(观测面不反噬主流程): {err}")
+
+
+def record_reuse_hit(*, hits: int = 1) -> None:
+    """记图证跨用户复用命中(2026-10-17 视觉加固 ②,vision_parse 侧单独累计)。
+
+    与 record_call 分离:命中发生在评级记账之后,严禁再 +1 calls(否则调用量
+    虚高)。桶固定挂 vision 来源、calls 保持 0 的空桶是合法形态。
+    """
+    try:
+        with _lock:
+            bucket = _counters.setdefault((hour_window(), "vision"), dict.fromkeys(COUNTERS, 0))
+            bucket["fraud_reuse_hit"] += max(1, int(hits))
+    except Exception as err:  # pragma: no cover - 观测面自兜底,正常路径不可达
+        print(f"[VisionTelemetry] 复用命中记录失败(观测面不反噬主流程): {err}")
 
 
 def snapshot_and_reset_counters() -> dict[tuple[_dt.datetime, str], dict[str, int]]:

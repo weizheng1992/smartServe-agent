@@ -20,6 +20,7 @@ from ..skills import is_action_query  # noqa: F401 (测试 patch 面)
 from ..skills.contract import SkillContext
 from ..tenant import sanitize_tenant_response, tenant_of_state
 from ..vision import analyze_images  # noqa: F401 (测试 patch 面)
+from ..vision.fingerprints import audit_image_reuse  # noqa: F401 (测试 patch 面;图证指纹反查 ctx.ns 缝)
 from . import labeling
 from .consult_fast_path import (  # noqa: F401 (测试 patch 面)
     is_consult_query,
