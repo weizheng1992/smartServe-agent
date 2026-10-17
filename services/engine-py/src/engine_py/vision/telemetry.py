@@ -45,6 +45,7 @@ COUNTERS = (
     "fraud_reuse_hit",
     "product_verify_downgrade",
     "claim_velocity_hit",
+    "injection_flag_hit",
 )
 
 _DDL = """
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS vision_audit_agg (
   fraud_reuse_hit INTEGER NOT NULL DEFAULT 0,
   product_verify_downgrade INTEGER NOT NULL DEFAULT 0,
   claim_velocity_hit INTEGER NOT NULL DEFAULT 0,
+  injection_flag_hit INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   UNIQUE (window_start, source)
 );
@@ -73,6 +75,7 @@ ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS fraud_reuse_hit INTEGER NO
 ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS severe_conf_clamp INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS product_verify_downgrade INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS claim_velocity_hit INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS injection_flag_hit INTEGER NOT NULL DEFAULT 0;
 """
 
 _ready = False
@@ -172,6 +175,20 @@ def record_velocity_hit() -> None:
             bucket["claim_velocity_hit"] += 1
     except Exception as err:  # pragma: no cover - 观测面自兜底,正常路径不可达
         print(f"[VisionTelemetry] velocity 命中记录失败(观测面不反噬主流程): {err}")
+
+
+def record_injection_flag() -> None:
+    """记图内指令注入特征命中(2026-10-17 视觉加固 ⑦ v1,analyzer 出口)。
+
+    ocr_text 命中系统导向祈使词表 → injectionFlag + auto_refund 压制;与
+    record_call 分离(不虚增 calls),桶固定挂 vision 来源。
+    """
+    try:
+        with _lock:
+            bucket = _counters.setdefault((hour_window(), "vision"), dict.fromkeys(COUNTERS, 0))
+            bucket["injection_flag_hit"] += 1
+    except Exception as err:  # pragma: no cover - 观测面自兜底,正常路径不可达
+        print(f"[VisionTelemetry] 注入特征记录失败(观测面不反噬主流程): {err}")
 
 
 def snapshot_and_reset_counters() -> dict[tuple[_dt.datetime, str], dict[str, int]]:

@@ -34,7 +34,7 @@ from ..config import settings
 from ..llm import get_vision_model
 from ..tools_registry.scrubber import scrub_pii_string
 from ..triage.intent_registry import VISION_ORDER_ID_RE  # 图内 OCR 单号正则收口 intent_registry(工单04)
-from .telemetry import record_call
+from .telemetry import record_call, record_injection_flag
 
 # ---- TS 原版正则,1:1 继承(破损词表按真实措辞扩充,见 docstring) ----
 _ORDER_RE = VISION_ORDER_ID_RE
@@ -43,6 +43,18 @@ _TRACKING_RE = re.compile(r"\b(SF|YTO|ZTO|EMS|TRACK)[\w\d]{8,14}\b", re.IGNORECA
 # LLM 超时降级后连兜底定责都丢——类目真实措辞,补词非契约变更)
 _DAMAGE_RE = re.compile(
     r"破损|坏了|碎了|裂开|断裂|开胶|脱胶|漏液|划痕|撕裂|瑕疵|damage|broken|crack|stain|defect",
+    re.IGNORECASE,
+)
+# 图内指令注入特征(2026-10-17 视觉加固 ⑦ v1,issues/10):S06 实测攻击面是
+# 「图内公告/横幅指挥系统动作」。词表瞄准**系统导向的祈使**而非用户诉求
+# ——「要求全额退款」的手写投诉信是合法证据(命中只降 human_review,误报
+# 代价一次人工看图;漏报代价是 auto_refund 暴露面,不对称故从严)。
+_INJECTION_RE = re.compile(
+    r"忽略(以上|之前|所有|全部|上述)|无视(以上|之前|规则|指令)|不要遵循|"
+    r"系统(提示|指令|消息)|你是(现在|一个)|新的?指令|"
+    r"免审|直接退款|必须退款|(?<!要求)(?<!申请)(?<!希望)全额退款|"
+    r"ignore\s+(all\s+)?(previous|above|prior)|disregard\s+(all\s+)?(previous|above)|"
+    r"system\s+(prompt|message|instruction)|you\s+are\s+now|refund\s+(in\s+)?full\s+without",
     re.IGNORECASE,
 )
 
@@ -305,6 +317,16 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
             "ocrText": scrub_pii_string(parsed.ocr_text or ""),
             "damageAssessment": damage_dict,
         }
+        # ⑦ 注入特征扫描 v1(2026-10-17,issues/10):图内文字命中系统导向祈使
+        # → injectionFlag 增量标记 + auto_refund 压回 human_review(信息卫生,
+        # 非资金闸)+ 遥测单独计数。零新增调用:纯正则扫 OCR 文本,不拆调用
+        # (评级/OCR 拆两次的纵深为 v2,成本裁决另议)。
+        ocr_clean = result["ocrText"] or ""
+        if ocr_clean and _INJECTION_RE.search(ocr_clean):
+            result["injectionFlag"] = True
+            if damage_dict is not None and damage_dict.get("suggestedAction") == "auto_refund":
+                damage_dict["suggestedAction"] = "human_review"
+            record_injection_flag()
         _audit_result(
             result,
             started=started,
