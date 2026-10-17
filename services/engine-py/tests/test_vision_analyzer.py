@@ -69,6 +69,8 @@ class TestVisionAnalyzer:
         assert runnable.captured == []
 
     def test_llm_failure_falls_back_to_heuristic_damage(self):
+        # 2026-10-16 视觉加固 05:启发式降权 —— 零图像证据一律 minor+human_review,
+        # evidenceChannel 标记来源;旧版词面定级(0.88 假置信度/severe)已废
         runnable = _FakeStructuredRunnable(exc=TimeoutError("vision timeout"))
         res = asyncio.run(
             analyze_images(
@@ -80,10 +82,29 @@ class TestVisionAnalyzer:
         assert res["extractedOrderId"] == "ORD-77889"
         dmg = res["damageAssessment"]
         assert dmg is not None
-        assert dmg["damageLevel"] in ("minor", "severe")
-        assert dmg["confidence"] == 0.88
+        assert dmg["damageLevel"] == "minor"
+        assert dmg["confidence"] == 0.5
         assert dmg["imageUrl"] == "https://cdn.store.com/uploads/broken_shoes.jpg"
-        assert dmg["suggestedAction"] in ("auto_refund", "require_inspection", "human_review")
+        assert dmg["suggestedAction"] == "human_review"
+        assert dmg["evidenceChannel"] == "heuristic"
+
+    def test_heuristic_severe_wording_never_produces_severe_or_auto_refund(self):
+        """⑤ 核心语义钉死(2026-10-16 视觉加固):VLM 挂时用户喊「严重/彻底碎了」
+        也不得凭词面产出 severe/auto_refund —— 旧版画像级行为,图像零证据。"""
+        runnable = _FakeStructuredRunnable(exc=TimeoutError("vision timeout"))
+        res = asyncio.run(
+            analyze_images(
+                ["https://cdn.store.com/x.jpg"],
+                "商品彻底碎了,严重损坏,全坏了,申请退款",
+                model=_FakeModel(runnable),
+            )
+        )
+        dmg = res["damageAssessment"]
+        assert dmg is not None
+        assert dmg["damageLevel"] == "minor"
+        assert dmg["suggestedAction"] == "human_review"
+        assert dmg["confidence"] == 0.5
+        assert dmg["evidenceChannel"] == "heuristic"
 
     def test_heuristic_extracts_tracking_number_regex(self):
         runnable = _FakeStructuredRunnable(exc=RuntimeError("llm down"))
@@ -159,8 +180,10 @@ class TestVisionAnalyzer:
         assert dmg["suggestedAction"] == "human_review"
         assert dmg["confidence"] == 0.92
         # 契约字段名 camelCase(前端 DamageAssessmentCard 钉死)+ imageUrl 服务端强制回填
-        assert set(dmg) == {"damageLevel", "summary", "confidence", "suggestedAction", "imageUrl"}
+        # evidenceChannel(2026-10-16 视觉加固 05)标记评级来源,前端暂不消费(增量键)
+        assert set(dmg) == {"damageLevel", "summary", "confidence", "suggestedAction", "imageUrl", "evidenceChannel"}
         assert dmg["imageUrl"] == "https://cdn.store.com/uploads/broken_shoes.jpg"
+        assert dmg["evidenceChannel"] == "vision"
         # PII:手机号不得明文出现在任何输出文本
         assert "13812345678" not in dmg["summary"]
         assert "138****" in dmg["summary"]
@@ -191,6 +214,27 @@ class TestVisionAnalyzer:
         assert res["damageAssessment"] is not None
         assert res["damageAssessment"]["imageUrl"] == "/api/uploads/missing.png"
         assert res["extractedOrderId"] == "ORD-2"
+
+    def test_unreadable_file_bytes_skip_image_without_crashing(self, tmp_path, monkeypatch):
+        """单图读取 IO 异常(chmod 000/读时被并发清理)按「不可读」跳过,不炸整体
+        (2026-10-16 审查补:read_bytes 的 OSError 曾在记账 try 之外逃逸成零记账出口)。"""
+        from pathlib import Path
+
+        monkeypatch.setenv("UPLOADS_DIR", str(tmp_path))
+        (tmp_path / "shot.png").write_bytes(_PNG_1PX)
+
+        def _denied(self):
+            raise PermissionError(f"read denied: {self}")
+
+        monkeypatch.setattr(Path, "read_bytes", _denied)
+        runnable = _FakeStructuredRunnable(exc=AssertionError("无图可发不应调模型"))
+        res = asyncio.run(
+            analyze_images(["/api/uploads/shot.png"], "破损 ORD-3", model=_FakeModel(runnable))
+        )
+        assert runnable.captured == []
+        assert res["damageAssessment"] is not None
+        assert res["damageAssessment"]["evidenceChannel"] == "heuristic"
+        assert res["extractedOrderId"] == "ORD-3"
 
 
 class TestNormalizeImageUrls:

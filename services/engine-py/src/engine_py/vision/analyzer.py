@@ -6,7 +6,11 @@
 - 手写 ```json 围栏剥离 → Pydantic 结构化输出,method="function_calling"
   (001 裁决:GLM-4.6V 无 response_format,仅 tools 白名单可取参)。
 - 1500ms Promise.race 硬超时(真实多模态必降级)→ 模型级 request_timeout,
-  ``AI_VISION_TIMEOUT_SECONDS`` 可调(默认 15s);失败保留启发式部分结果。
+  ``AI_VISION_TIMEOUT_SECONDS`` 可调(config 默认 30s);失败保留启发式部分结果。
+- 启发式兜底降权(2026-10-16 视觉加固 05,.scratch/vision-evidence-hardening):
+  纯词面通道零图像证据,一律 minor + human_review + confidence 0.5,
+  damageAssessment.evidenceChannel 标记评级来源(vision|heuristic);
+  出口经 vision/telemetry 聚合记账(09 审计底座)。
 - TS 传公网 CDN URL;本地图(``/api/uploads/``)经 base64 Data URL 直传 ——
   bigmodel 拉不到 localhost,同时免本地文件服务出网暴露。
 
@@ -19,6 +23,7 @@ from __future__ import annotations
 import base64
 import os
 import re
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +33,7 @@ from pydantic import BaseModel, Field
 from ..llm import get_vision_model
 from ..tools_registry.scrubber import scrub_pii_string
 from ..triage.intent_registry import VISION_ORDER_ID_RE  # 图内 OCR 单号正则收口 intent_registry(工单04)
+from .telemetry import record_call
 
 # ---- TS 原版正则,1:1 继承(破损词表按真实措辞扩充,见 docstring) ----
 _ORDER_RE = VISION_ORDER_ID_RE
@@ -38,7 +44,6 @@ _DAMAGE_RE = re.compile(
     r"破损|坏了|碎了|裂开|断裂|开胶|脱胶|漏液|划痕|撕裂|瑕疵|damage|broken|crack|stain|defect",
     re.IGNORECASE,
 )
-_DAMAGE_SEVERE_RE = re.compile(r"严重|彻底|全碎|碎裂|severe|crushed", re.IGNORECASE)
 
 _MIME_BY_EXT = {
     ".jpg": "image/jpeg",
@@ -124,16 +129,22 @@ def _to_llm_image_url(url: str) -> str | None:
 
 
 def _heuristic_damage_assessment(raw_text: str, primary_url: str) -> dict | None:
-    """启发式破损定责(TS 统一助手 1:1):关键词命中才产出,confidence 0.88。"""
+    """启发式破损兜底(2026-10-16 视觉加固 05 降权版):关键词命中才产出。
+
+    纯词面通道零图像证据 —— 一律 minor + human_review + confidence 0.5,
+    evidenceChannel='heuristic' 标记来源;严禁凭用户措辞产出 severe/auto_refund
+    (旧版「严重/彻底」词面曾直接产出 severe+auto_refund 假评级)。降权保的是
+    会话可用性,不继承定责权威。
+    """
     if not _DAMAGE_RE.search(raw_text):
         return None
-    is_severe = bool(_DAMAGE_SEVERE_RE.search(raw_text))
     return {
-        "damageLevel": "severe" if is_severe else "minor",
-        "summary": "用户上传了商品严重破损/碎裂照片" if is_severe else "用户上传了商品瑕疵/局部破损凭证照片",
-        "confidence": 0.88,
-        "suggestedAction": "auto_refund" if is_severe else "human_review",
+        "damageLevel": "minor",
+        "summary": "启发式降级判定(未经视觉精判):检出破损相关表述,待人工定责复验",
+        "confidence": 0.5,
+        "suggestedAction": "human_review",
         "imageUrl": primary_url,
+        "evidenceChannel": "heuristic",
     }
 
 
@@ -166,6 +177,36 @@ def _fallback_result(order_id: str | None, tracking_no: str | None, raw_text: st
     }
 
 
+def _elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
+def _audit_result(
+    result: dict,
+    *,
+    started: float,
+    clamped: bool = False,
+    degraded: str | None = None,
+) -> None:
+    """出口统一记账(2026-10-16 视觉加固 09,.scratch/vision-evidence-hardening)。
+
+    来源/评级取自结果本身(damageAssessment.evidenceChannel);record_call 自身
+    永不抛(观测面不反噬视觉主链)。空图入口不记 —— 无调用发生。
+    """
+    damage = result.get("damageAssessment")
+    if damage is None:
+        record_call(source="none", latency_ms=_elapsed_ms(started), degraded_reason=degraded)
+        return
+    record_call(
+        source=damage.get("evidenceChannel", "heuristic"),
+        damage_level=damage.get("damageLevel"),
+        clamped=clamped,
+        order_id_extracted=bool(result.get("extractedOrderId")),
+        latency_ms=_elapsed_ms(started),
+        degraded_reason=degraded,
+    )
+
+
 async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=None) -> dict:
     """视觉与多模态核心解析:OCR 面单实体、破损定责、视觉摘要。
 
@@ -183,6 +224,7 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
     if not image_urls:
         return empty
 
+    started = time.monotonic()
     primary_url = image_urls[0]
     raw_text = f"{user_prompt} {' '.join(image_urls)}"
     order_match = _ORDER_RE.search(raw_text)
@@ -192,14 +234,23 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
 
     llm_urls = []
     for url in image_urls:
-        resolved = _to_llm_image_url(url)
+        try:
+            resolved = _to_llm_image_url(url)
+        except OSError as img_err:
+            # 单图读取 IO 异常(chmod 000/读时被并发清理)按「不可读」语义跳过该图,
+            # 不炸整体 —— 兑现 _to_llm_image_url「该图跳过」的 docstring 承诺;
+            # 此循环在下方记账 try 之外,逃逸即成零记账第四出口(2026-10-16 审查补)
+            print(f"[Vision] 图片读取失败,已跳过: {url} ({img_err})")
+            continue
         if resolved:
             llm_urls.append(resolved)
         else:
             print(f"[Vision] 图片不可读,已跳过: {url}")
 
     if not llm_urls:
-        return _fallback_result(order_id, tracking_no, raw_text, primary_url)
+        result = _fallback_result(order_id, tracking_no, raw_text, primary_url)
+        _audit_result(result, started=started, degraded="unreadable")
+        return result
 
     try:
         chat = model or get_vision_model()
@@ -211,6 +262,7 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
         parsed = await structured.ainvoke([HumanMessage(content=content)])
 
         damage = parsed.damage_assessment
+        clamped = False
         if damage is not None:
             confidence = damage.confidence
             if not isinstance(confidence, (int, float)) or not (0 < confidence <= 1):
@@ -222,17 +274,19 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
             # 保险,非 severe 一律不给 auto_refund。
             if damage.damage_level != "severe" and suggested == "auto_refund":
                 suggested = "human_review"
+                clamped = True
             damage_dict = {
                 "damageLevel": damage.damage_level or "minor",
                 "summary": scrub_pii_string(damage.summary or "商品外观检测"),
                 "confidence": confidence,
                 "suggestedAction": suggested,
                 "imageUrl": primary_url,  # 服务端强制回填原始引用,不采模型值
+                "evidenceChannel": "vision",
             }
         else:
             damage_dict = _heuristic_damage_assessment(raw_text, primary_url)
 
-        return {
+        result = {
             "visualSummary": scrub_pii_string(parsed.visual_summary or ""),
             "detectedObjects": parsed.detected_objects or [],
             "extractedOrderId": parsed.extracted_order_id or order_id,
@@ -240,6 +294,15 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
             "ocrText": scrub_pii_string(parsed.ocr_text or ""),
             "damageAssessment": damage_dict,
         }
+        _audit_result(
+            result,
+            started=started,
+            clamped=clamped,
+            degraded=None if damage is not None else "model_no_damage",
+        )
+        return result
     except Exception as vision_err:
         print(f"[VisionAnalyzer] 多模态精判失败,降级启发式: {vision_err}")
-        return _fallback_result(order_id, tracking_no, raw_text, primary_url)
+        result = _fallback_result(order_id, tracking_no, raw_text, primary_url)
+        _audit_result(result, started=started, degraded="model_error")
+        return result

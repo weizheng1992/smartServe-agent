@@ -184,6 +184,8 @@ export interface DamageAssessmentData {
   confidence: number;
   suggestedAction: 'auto_refund' | 'require_inspection' | 'human_review';
   imageUrl?: string;
+  /** 评级来源(2026-10-16 视觉加固 05):vision=视觉模型精判 / heuristic=词面降级兜底(零图像证据,恒 minor+human_review) */
+  evidenceChannel?: 'vision' | 'heuristic';
 }
 
 export interface OrderPickerCardData {
