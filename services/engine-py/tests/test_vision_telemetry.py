@@ -214,6 +214,27 @@ class TestAnalyzerWiring:
         totals = _totals(telemetry.snapshot_and_reset_counters())
         assert totals["clamp_action_hit"] == 1
 
+    def test_severe_conf_clamp_counted(self, monkeypatch):
+        """④ severe 置信闸门(issues/03):低置信 severe 压回 human_review 并单独计数。"""
+        import types
+
+        monkeypatch.setattr(analyzer, "settings", types.SimpleNamespace(vision_severe_min_confidence=0.9))
+        low_conf = VisionAnalysis(
+            damage_assessment=DamageAssessment(
+                damage_level="severe", summary="碎了", confidence=0.7, suggested_action="auto_refund"
+            ),
+        )
+        res = asyncio.run(
+            analyzer.analyze_images(
+                ["https://cdn.store.com/x.jpg"], "退款", model=_FakeModel(_FakeStructuredRunnable(low_conf))
+            )
+        )
+        assert res["damageAssessment"]["suggestedAction"] == "human_review"
+        totals = _totals(telemetry.snapshot_and_reset_counters())
+        assert totals["severe_conf_clamp"] == 1
+        assert totals["damage_severe"] == 1  # 等级分布照记(等级不动)
+        assert totals["clamp_action_hit"] == 0  # S06 与置信闸互不串计数
+
     def test_model_error_with_damage_words_records_heuristic(self):
         res = asyncio.run(
             analyzer.analyze_images(

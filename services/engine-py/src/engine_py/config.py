@@ -85,6 +85,12 @@ class Settings:
     # GLM-4.6V 无 response_format,结构化输出须 method="function_calling"(tools 白名单)
     vision_model: str = field(default_factory=lambda: _env("AI_VISION_MODEL", "glm-4.6v"))
     vision_timeout_seconds: float = field(default_factory=lambda: float(_env("AI_VISION_TIMEOUT_SECONDS", "30")))
+    # severe 置信闸门(2026-10-17 视觉加固 ④,issues/03):VLM 幻觉把好图评成 severe
+    # 的兜底 —— 低于阈值的 severe 压回 human_review;默认 0.9 为保守起步值,
+    # 标定依据 vision_audit_agg 的 severe 分布(数据攒够前先落机制)
+    vision_severe_min_confidence: float = field(
+        default_factory=lambda: float(_env("AI_VISION_SEVERE_MIN_CONFIDENCE", "0.9"))
+    )
 
     # glm-4.7 每次调用默认开思维链(reasoning_content):裸测"只回复ok"也先生成 131-239
     # 推理 token,管线单次调用 11-74s(2026-09-09 实测,商户咨询类回复 57-114s 的大头)。

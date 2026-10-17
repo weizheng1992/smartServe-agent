@@ -164,6 +164,56 @@ class TestVisionAnalyzer:
         )
         assert res["damageAssessment"]["suggestedAction"] == "auto_refund"
 
+    def test_severe_low_confidence_clamped_to_human_review(self, monkeypatch):
+        """④ severe 置信闸门(2026-10-17 视觉加固,issues/03):confidence 是模型
+        自报且此前全链零消费 —— 幻觉把好图评成 severe 的兜底,低于阈值压回
+        human_review。阈值经 analyzer.settings 模块指针换桩。"""
+        import types
+
+        from engine_py.vision import analyzer as analyzer_mod
+
+        monkeypatch.setattr(analyzer_mod, "settings", types.SimpleNamespace(vision_severe_min_confidence=0.9))
+        low_conf = VisionAnalysis(
+            visual_summary="一个杯子",
+            damage_assessment=DamageAssessment(
+                damage_level="severe",
+                summary="杯子碎了",
+                confidence=0.7,  # 幻觉典型的「自信不足的 severe」
+                suggested_action="auto_refund",
+            ),
+        )
+        res = asyncio.run(
+            analyze_images(
+                ["https://cdn.store.com/x.jpg"], "退款", model=_FakeModel(_FakeStructuredRunnable(low_conf))
+            )
+        )
+        assert res["damageAssessment"]["suggestedAction"] == "human_review"
+        assert res["damageAssessment"]["damageLevel"] == "severe"  # 等级不动,只降动作
+        assert res["damageAssessment"]["evidenceChannel"] == "vision"
+
+    def test_severe_at_threshold_boundary_passes(self, monkeypatch):
+        """边界:confidence == 阈值放行(严格小于才钳);阈值可 env 经 settings 调。"""
+        import types
+
+        from engine_py.vision import analyzer as analyzer_mod
+
+        monkeypatch.setattr(analyzer_mod, "settings", types.SimpleNamespace(vision_severe_min_confidence=0.9))
+        boundary = VisionAnalysis(
+            visual_summary="完全碎裂",
+            damage_assessment=DamageAssessment(
+                damage_level="severe",
+                summary="碎裂",
+                confidence=0.9,
+                suggested_action="auto_refund",
+            ),
+        )
+        res = asyncio.run(
+            analyze_images(
+                ["https://cdn.store.com/x.jpg"], "碎了退款", model=_FakeModel(_FakeStructuredRunnable(boundary))
+            )
+        )
+        assert res["damageAssessment"]["suggestedAction"] == "auto_refund"
+
     def test_llm_success_structured_and_pii_scrubbed(self):
         runnable = _FakeStructuredRunnable(result=_llm_damage_result())
         fake = _FakeModel(runnable)

@@ -37,6 +37,7 @@ COUNTERS = (
     "damage_minor",
     "damage_severe",
     "clamp_action_hit",
+    "severe_conf_clamp",
     "order_id_extracted",
     "degraded_model_error",
     "degraded_unreadable",
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS vision_audit_agg (
   damage_minor INTEGER NOT NULL DEFAULT 0,
   damage_severe INTEGER NOT NULL DEFAULT 0,
   clamp_action_hit INTEGER NOT NULL DEFAULT 0,
+  severe_conf_clamp INTEGER NOT NULL DEFAULT 0,
   order_id_extracted INTEGER NOT NULL DEFAULT 0,
   degraded_model_error INTEGER NOT NULL DEFAULT 0,
   degraded_unreadable INTEGER NOT NULL DEFAULT 0,
@@ -64,6 +66,7 @@ CREATE TABLE IF NOT EXISTS vision_audit_agg (
 );
 CREATE INDEX IF NOT EXISTS ix_vision_audit_agg_window ON vision_audit_agg(window_start);
 ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS fraud_reuse_hit INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE vision_audit_agg ADD COLUMN IF NOT EXISTS severe_conf_clamp INTEGER NOT NULL DEFAULT 0;
 """
 
 _ready = False
@@ -86,6 +89,7 @@ def record_call(
     source: str,
     damage_level: str | None = None,
     clamped: bool = False,
+    low_conf_severe: bool = False,
     order_id_extracted: bool = False,
     degraded_reason: str | None = None,
     latency_ms: int | None = None,
@@ -108,6 +112,8 @@ def record_call(
                 bucket["damage_severe"] += 1
             if clamped:
                 bucket["clamp_action_hit"] += 1
+            if low_conf_severe:
+                bucket["severe_conf_clamp"] += 1
             if order_id_extracted:
                 bucket["order_id_extracted"] += 1
             if degraded_reason == "model_error":

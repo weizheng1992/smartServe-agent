@@ -30,6 +30,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
+from ..config import settings
 from ..llm import get_vision_model
 from ..tools_registry.scrubber import scrub_pii_string
 from ..triage.intent_registry import VISION_ORDER_ID_RE  # 图内 OCR 单号正则收口 intent_registry(工单04)
@@ -186,6 +187,7 @@ def _audit_result(
     *,
     started: float,
     clamped: bool = False,
+    low_conf_severe: bool = False,
     degraded: str | None = None,
 ) -> None:
     """出口统一记账(2026-10-16 视觉加固 09,.scratch/vision-evidence-hardening)。
@@ -201,6 +203,7 @@ def _audit_result(
         source=damage.get("evidenceChannel", "heuristic"),
         damage_level=damage.get("damageLevel"),
         clamped=clamped,
+        low_conf_severe=low_conf_severe,
         order_id_extracted=bool(result.get("extractedOrderId")),
         latency_ms=_elapsed_ms(started),
         degraded_reason=degraded,
@@ -263,6 +266,7 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
 
         damage = parsed.damage_assessment
         clamped = False
+        low_conf_severe = False
         if damage is not None:
             confidence = damage.confidence
             if not isinstance(confidence, (int, float)) or not (0 < confidence <= 1):
@@ -275,6 +279,13 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
             if damage.damage_level != "severe" and suggested == "auto_refund":
                 suggested = "human_review"
                 clamped = True
+            # severe 置信闸门(2026-10-17 视觉加固 ④,issues/03):confidence 是模型
+            # 自报且此前全链零消费 —— 幻觉把好图评成 severe 无任何闸。低于阈值
+            # (默认 0.9,env 可调)的 severe 压回 human_review;阈值标定等
+            # vision_audit_agg 数据。与 S06 钳制并列,同为信息卫生非资金闸。
+            if damage.damage_level == "severe" and confidence < settings.vision_severe_min_confidence:
+                suggested = "human_review"
+                low_conf_severe = True
             damage_dict = {
                 "damageLevel": damage.damage_level or "minor",
                 "summary": scrub_pii_string(damage.summary or "商品外观检测"),
@@ -298,6 +309,7 @@ async def analyze_images(image_urls: list[str], user_prompt: str = "", *, model=
             result,
             started=started,
             clamped=clamped,
+            low_conf_severe=low_conf_severe,
             degraded=None if damage is not None else "model_no_damage",
         )
         return result

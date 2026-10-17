@@ -23,6 +23,18 @@ from ..slot_extractor import ORDER_ID_RE, AgentIntentType
 from .context import StageContext, StageVerdict
 
 
+def _damage_lights_refund(damage_assessment: dict | None) -> bool:
+    """视觉评级是否点亮退款关键词(判定 3 放大器,2026-10-17 视觉加固 ④ 收敛)。
+
+    旧口径 ``bool(damage_assessment)``:任何非空评级(含 negligible)都点亮,
+    判定 3 随即给 ``max(score_refund, 0.95)`` 的终局 refund 意图 —— 完好图
+    (negligible)+ 无任何退款措辞也被强推退款终端,且评级被幻觉/注入污染一次
+    就把置信度抬到 0.95。收敛为 minor/severe 才点亮:negligible 交回文本词表
+    与 Step 3 LLM 精判。
+    """
+    return bool(damage_assessment) and damage_assessment.get("damageLevel") in ("minor", "severe")
+
+
 async def judge(ctx: StageContext) -> StageVerdict:
     state, input_text, thread_id, tenant_id = ctx.state, ctx.input_text, ctx.thread_id, ctx.tenant_id
     score_order = 0.0
@@ -79,7 +91,9 @@ async def judge(ctx: StageContext) -> StageVerdict:
         confirmed_order_id = (state.get("order_context") or {}).get("targetOrderId")
         fused_order_id = matched_order_id or confirmed_order_id or ctx.vision_order_id
         has_order_keywords = bool(ORDER_KEYWORDS_RE.search(input_text))
-        has_refund_keywords = bool(REFUND_KEYWORDS_RE.search(input_text)) or bool(ctx.damage_assessment)
+        has_refund_keywords = bool(REFUND_KEYWORDS_RE.search(input_text)) or _damage_lights_refund(
+            ctx.damage_assessment
+        )
 
         # 判定 1: 复合意图直达
         if (
