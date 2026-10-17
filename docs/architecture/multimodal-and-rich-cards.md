@@ -63,6 +63,8 @@ except Exception:
 
 TS 时代的 1500ms `Promise.race` 硬超时已废弃（真实多模态请求 1.5s 内几乎必超时，等于永久降级）；本地图（`/api/uploads/` 引用）经 **base64 Data URL 直传**（bigmodel 拉不到 localhost，亦免本地文件服务出网暴露）。
 
+**启发式兜底降权与审计底座（2026-10-16 视觉加固 05/09，`.scratch/vision-evidence-hardening`）**：启发式是纯词面通道（零图像证据），产出恒为 `minor` + `human_review` + confidence 0.5，`damageAssessment.evidenceChannel` 标记评级来源（`vision` | `heuristic`，前端暂不消费）——降级保的是会话可用性，不继承定责权威，旧版「严重/彻底」词面直接产出 severe+auto_refund 假评级的行为已废。`vision/telemetry.py` 在 analyzer 三出口（模型成功 / 图全不可读 / 模型异常）聚合计数（来源、评级分布、S06 钳制命中、单号提取、耗时；空图不记、图内容零落库），scheduler 600s 落 `vision_audit_agg`（head_telemetry 同款运行时 DDL），为后续 confidence 闸门 / 指纹去重 / 索赔 velocity 阈值提供标定底盘。
+
 ### 2.2 入图归一化与限额治理
 
 TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `normalize_image_urls` 统一收口（剔除非字符串/空白项、去重保序、截断至 **≤3 图/条**）。网关上传端点另钳制单张 ≤10MB，两侧限额对齐；垃圾输入最多变少图，绝不抛错 —— 治理目标是"少看图"，不是"失败会话"。
@@ -87,7 +89,7 @@ TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `n
 
 - **`negligible` (无明显瑕疵/完好)**: 建议正常走通用退换货流程。
 - **`minor` (轻微划痕/外包装微损)**: 置信度较高时建议发放代金券或补偿小额退款。
-- **`severe` (严重破损/碎裂/不可逆损坏)**: 触发秒级极速赔付，或由 `ApprovalPolicyEngine` 路由至人工客服审核。
+- **`severe` (严重破损/碎裂/不可逆损坏)**: 展示卡建议极速赔付通道（`suggestedAction=auto_refund`）或路由人工客服审核。**勘正（2026-10-16）**: 旧表述「触发秒级极速赔付」与实现不符——`auto_refund` 的唯一消费方是前端展示文案，真实资金闸与评级解耦（按金额阈值走免签 / `pending_approvals` HITL，见 §6.3 与 agent-engine.md §1.6）。
 
 ---
 

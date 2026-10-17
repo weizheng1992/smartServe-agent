@@ -481,6 +481,8 @@ LLM 是仲裁员与终局。每一层的判定以 `{layer, intent, confidence}` 
 
 ## 3.25 🚀 新增：多模态视觉感知、智能破损定责与富交互卡片体系 (Multimodal Vision & Rich Cards)
 
+> 📍 现行落点（2026-09 Python 移植 + 2026-10-16 视觉加固）：视觉链路现役代码在 `services/engine-py/src/engine_py/vision/`（详见 `multimodal-and-rich-cards.md`）；下文 TS 路径与 1500ms 超时竞速为已退役基线，启发式兜底已降权（零图像证据恒 minor+human_review）、`suggestedAction` 与资金闸解耦。
+
 为了支持图文多模态交互、快递面单智能 OCR 解析、商品破损瑕疵评级与高保真 JSON Blocks 结构化卡片渲染：
 
 ### 📂 核心文件：
@@ -495,7 +497,7 @@ LLM 是仲裁员与终局。每一层的判定以 `{layer, intent, confidence}` 
 ### 💡 架构解析：
 
 - **Triage 视觉感知与 1500ms 超时熔断**：用户上传图片时优先执行视觉与 OCR 感知，提取订单号与承运单号并自动注入意图分类与规划节点；内置 1500ms 超时竞速与规则降级机制，杜绝视觉模型阻塞主对话流。
-- **商品破损瑕疵三级定责与建议处置**：支持 `negligible`（无损）、`minor`（轻损）、`severe`（重损）智能定责评级，自动联动安控审批网关决策快速赔付或人工复核。
+- **商品破损瑕疵三级定责与建议处置**：支持 `negligible`（无损）、`minor`（轻损）、`severe`（重损）智能定责评级；评级仅驱动展示卡建议（`suggestedAction`）与意图路由，真实资金闸与评级解耦（金额阈值免签 / `pending_approvals` HITL）。
 - **PII 隐私脱敏切面**：视觉与 OCR 输出物理过滤手机号、身份证与银行卡敏感信息。
 - **JSON Blocks 结构化卡片协议**：标准化 `order_card`、`tracking_timeline`、`refund_confirmation`、`damage_assessment` 与 `quick_replies` 协议，并通过 SSE 随流式消息挂载返回。
 - **零外部图标依赖 UI 渲染体系**：基于原生 SVG 矢量图标封装高保真组件，支持订单快速追踪、一键申请退款与快捷回复气泡联动。
