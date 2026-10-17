@@ -345,6 +345,24 @@ async def _execute_single_step_core(
                         }
                 except Exception as gate_err:
                     print(f"[执行引擎] 快赔闸查询异常,fail-open 放行: {gate_err}")
+            # 索赔 velocity 闸(⑧,issues/09):同用户滚动窗口内带图索赔覆盖多单
+            # → 免签关闭走 HITL(正常高频售后用户落人工而非拒赔);fail-open 同上。
+            if tool_name == "processRefund" and auto_check["shouldAutoApprove"]:
+                try:
+                    from ...tools_registry.mall_domain import MallDomainService
+                    from ...vision import telemetry
+
+                    if await MallDomainService.user_claim_velocity_hit(
+                        state.get("user_id"), state.get("business_id")
+                    ):
+                        auto_check = {
+                            **auto_check,
+                            "shouldAutoApprove": False,
+                            "denyReason": "claim_velocity",
+                        }
+                        telemetry.record_velocity_hit()
+                except Exception as gate_err:
+                    print(f"[执行引擎] velocity 闸查询异常,fail-open 放行: {gate_err}")
             if tool_name != "processRefund" or not auto_check["shouldAutoApprove"]:
                 approval_result = await ApprovalPolicyEngine.evaluate_pending_approval_state(
                     {
@@ -386,9 +404,14 @@ async def _execute_single_step_core(
                                     "人工审核，审批通过后将自动执行，请耐心等待审核结果。"
                                     if auto_check.get("denyReason") == "evidence_chain"
                                     else (
-                                        f"🛠️ 该订单退款金额(¥{auto_check['groundedAmount']})超过商户免签限额"
-                                        f"(¥{tenant_limit})，退款申请已提交人工审核，审批通过后将自动执行，"
-                                        "请耐心等待审核结果。"
+                                        "🛠️ 检测到您近期提交了多笔带凭证的售后申请，为保障资金安全，"
+                                        "本次退款已转人工客服审核，审批通过后将自动执行，请耐心等待。"
+                                        if auto_check.get("denyReason") == "claim_velocity"
+                                        else (
+                                            f"🛠️ 该订单退款金额(¥{auto_check['groundedAmount']})超过商户免签限额"
+                                            f"(¥{tenant_limit})，退款申请已提交人工审核，审批通过后将自动执行，"
+                                            "请耐心等待审核结果。"
+                                        )
                                     )
                                 ),
                             )

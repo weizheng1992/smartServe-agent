@@ -334,3 +334,89 @@ def test_injection_carries_vision_context_for_apply_only(monkeypatch: pytest.Mon
     refund_args = asyncio.run(maybe_inject_aftersale_evidence("processRefund", {"orderId": "O1"}, state))
     assert "visionAnalysis" not in refund_args and "visionClaimed" not in refund_args
     assert refund_args["evidenceImageUrls"] == ["/now.jpg"]
+
+
+# ── ⑧ 索赔 velocity 闸(2026-10-17 视觉加固 issues/09)──────────────────────
+
+
+class _CountResult:
+    def __init__(self, value: int):
+        self._value = value
+
+    def first(self):
+        return (self._value,)
+
+
+class _CountSession:
+    def __init__(self, value: int | Exception):
+        self._value = value
+        self.params_captured: list = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def execute(self, stmt):
+        if isinstance(self._value, Exception):
+            raise self._value
+        self.params_captured.append(stmt.compile().params)
+        return _CountResult(self._value)
+
+    async def commit(self):
+        pass
+
+
+def test_claim_velocity_hit_over_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """窗口内带图索赔覆盖订单数 ≥ 阈值 → True(免签关闭走 HITL)。"""
+    session = _CountSession(3)
+    monkeypatch.setattr(
+        "engine_py.tools_registry.mall.fulfillment.get_session", lambda: session
+    )
+    assert asyncio.run(MallDomainService.user_claim_velocity_hit("u1", "aurora")) is True
+    assert session.params_captured[0]["uid"] == "u1"
+    assert session.params_captured[0]["bid"] == "aurora"
+
+
+def test_claim_velocity_under_limit_and_empty_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _CountSession(2)  # 2 < 默认阈值 3
+    monkeypatch.setattr(
+        "engine_py.tools_registry.mall.fulfillment.get_session", lambda: session
+    )
+    assert asyncio.run(MallDomainService.user_claim_velocity_hit("u1", "aurora")) is False
+    # 空用户短路:不触库
+    empty = _CountSession(9)
+    monkeypatch.setattr(
+        "engine_py.tools_registry.mall.fulfillment.get_session", lambda: empty
+    )
+    assert asyncio.run(MallDomainService.user_claim_velocity_hit(None, "aurora")) is False
+    assert empty.params_captured == []
+
+
+def test_claim_velocity_db_failure_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _CountSession(RuntimeError("db down"))
+    monkeypatch.setattr(
+        "engine_py.tools_registry.mall.fulfillment.get_session", lambda: session
+    )
+    assert asyncio.run(MallDomainService.user_claim_velocity_hit("u1", "aurora")) is False
+
+
+def test_claim_velocity_distinct_orders_not_ticket_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """口径钉死:SQL 必须 COUNT(DISTINCT order_id) —— 同单重复开票(重试)不算多单。"""
+
+    class _SqlSession(_CountSession):
+        def __init__(self, value):
+            super().__init__(value)
+            self.sqls: list[str] = []
+
+        async def execute(self, stmt):
+            self.sqls.append(str(stmt))
+            return await super().execute(stmt)
+
+    session = _SqlSession(0)
+    monkeypatch.setattr(
+        "engine_py.tools_registry.mall.fulfillment.get_session", lambda: session
+    )
+    asyncio.run(MallDomainService.user_claim_velocity_hit("u1", "aurora"))
+    assert any("COUNT(DISTINCT order_id)" in sql for sql in session.sqls)

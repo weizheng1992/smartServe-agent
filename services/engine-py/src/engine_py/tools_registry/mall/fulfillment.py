@@ -314,3 +314,39 @@ class FulfillmentMixin:
         except Exception as err:
             print(f"[MallDomainService] 快赔闸查询失败,fail-open 放行 orderId={order_id}: {err}")
             return False
+
+    @staticmethod
+    async def user_claim_velocity_hit(user_id: str | None, business_id: str | None) -> bool:
+        """索赔 velocity 闸(2026-10-17 视觉加固 ⑧):同用户滚动窗口内带图索赔
+        覆盖的订单数 ≥ 阈值 → True(processRefund 免签通道关闭走 HITL)。
+
+        数据源 = after_sale_tickets 带非空 evidence_urls 的工单(带图索赔的
+        事实信号,A2 前的存量工单同口径),DISTINCT order_id —— 同单重复开票
+        (重试)不算多单。查询异常 fail-open False(与 fast_lane_denied_for_order
+        同裁决);正常高频售后用户落人工而非拒赔。
+        """
+        if not user_id:
+            return False
+        from ...config import settings
+
+        try:
+            async with get_session() as session:
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT COUNT(DISTINCT order_id) FROM after_sale_tickets "
+                            "WHERE business_id = :bid AND user_id = :uid "
+                            "AND jsonb_array_length(evidence_urls) > 0 "
+                            "AND created_at > NOW() - make_interval(days => :days)"
+                        ).bindparams(
+                            bid=business_id or "ecommerce",
+                            uid=user_id,
+                            days=settings.claim_velocity_window_days,
+                        )
+                    )
+                ).first()
+            limit = settings.claim_velocity_limit
+            return bool(row) and int(row[0]) >= limit
+        except Exception as err:
+            print(f"[MallDomainService] 索赔 velocity 查询失败,fail-open 放行 uid={user_id}: {err}")
+            return False
