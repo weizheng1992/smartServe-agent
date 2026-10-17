@@ -409,9 +409,13 @@ async def get_product_detail(product_id_or_id: str) -> dict | None:
     is_uuid = bool(_re.match(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", product_id_or_id))
     async with merchant_engine().connect() as conn:
         if is_uuid:
+            # 单参单语境(2026-10-17 Story 9 e2e 实弹):uuid 列与 text 参数直比
+            # 会炸 operator does not exist(text = uuid);而同参双语境(CAST 要
+            # uuid、spu_code = :pid 要 text)会让 Postgres 类型推断直接失败 ——
+            # 两坑都踩过后定式:按形状分流,uuid 分支只留 CAST 单比较。
             spu = (
                 await conn.execute(
-                    text("SELECT * FROM merchant_spus WHERE id = :pid OR spu_code = :pid LIMIT 1"),
+                    text("SELECT * FROM merchant_spus WHERE id = CAST(:pid AS uuid) LIMIT 1"),
                     {"pid": product_id_or_id},
                 )
             ).mappings().first()
@@ -937,7 +941,7 @@ async def create_sku(spu_id: str, body: dict) -> dict:
         await conn.execute(
             text(
                 "INSERT INTO merchant_skus (id, spu_id, sku_code, sku_title, price, stock, spec_attributes) "
-                "VALUES (:id, CAST(:spu AS uuid), :code, :title, :price, :stock, CAST(:spec AS jsonb))"
+                "VALUES (CAST(:id AS uuid), CAST(:spu AS uuid), :code, :title, :price, :stock, CAST(:spec AS jsonb))"
             ).bindparams(
                 id=str(_u.uuid4()), spu=spu_id, code=sku_code,
                 title=body.get("skuTitle") or "", price=float(price),
@@ -948,22 +952,40 @@ async def create_sku(spu_id: str, body: dict) -> dict:
 
 
 async def update_sku(sku_id: str, body: dict) -> dict:
-    """SKU 字段级更新(price/stock/skuTitle 白名单;空补丁诚实拒绝)。"""
+    """SKU 字段级更新(price/stock/skuTitle 白名单;空补丁诚实拒绝;查无 404)。
+
+    值域校验诚实 400(2026-10-17 Story 9 收口):price > 0 / stock >= 0 /
+    skuTitle 非空 —— 此前负价负库存直接入库(商店 MIN(price) 会展示负价),
+    查无 id 静默 success 回显 id(假成功)。
+    """
 
     sets, params = [], {"id": sku_id}
-    for field in ("price", "stock"):
-        if field in body:
-            sets.append(f"{field} = :{field}")
-            params[field] = float(body[field]) if field == "price" else int(body[field])
+    if "price" in body:
+        price = float(body["price"])
+        if not price > 0:
+            return {"error": "invalid", "message": "价格必须为大于 0 的数值"}
+        sets.append("price = :price")
+        params["price"] = price
+    if "stock" in body:
+        stock = int(body["stock"])
+        if stock < 0:
+            return {"error": "invalid", "message": "库存不能为负数"}
+        sets.append("stock = :stock")
+        params["stock"] = stock
     if "skuTitle" in body:
+        title = str(body["skuTitle"]).strip()
+        if not title:
+            return {"error": "invalid", "message": "规格名不能为空"}
         sets.append("sku_title = :skuTitle")
-        params["skuTitle"] = str(body["skuTitle"])
+        params["skuTitle"] = title
     if not sets:
         return {"error": "无可更新字段"}
     async with merchant_writer_engine().begin() as conn:
-        await conn.execute(
+        result = await conn.execute(
             text(f"UPDATE merchant_skus SET {', '.join(sets)} WHERE id = CAST(:id AS uuid)").bindparams(**params)
         )
+    if result.rowcount == 0:
+        return {"error": "not_found", "message": f"SKU {sku_id} 不存在"}
     return {"id": sku_id}
 
 

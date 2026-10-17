@@ -124,8 +124,16 @@ function PriceEditDialog({
   onClose: () => void;
 }) {
   const [patch, setPatch] = useState({ price: String(sku.price), stock: String(sku.stock) });
-  // 价格数值未就绪不提交(防 NaN),与原行内保存同口径
-  const ready = patch.price !== '' && Number.isFinite(Number(patch.price));
+  // 双字段就绪才可提交(2026-10-17 Story 9 收口):原闸只看 price —— 清空库存
+  // 字段提交会以 Number('')=0 静默清零库存;负价由服务端 400 诚实拒绝,
+  // 此处预闸减少一次必败往返。携带即改语义不变(空值是拒绝不是跳过)。
+  const ready =
+    patch.price !== '' &&
+    Number.isFinite(Number(patch.price)) &&
+    Number(patch.price) > 0 &&
+    patch.stock !== '' &&
+    Number.isFinite(Number(patch.stock)) &&
+    Number(patch.stock) >= 0;
 
   return (
     <FormDialogShell

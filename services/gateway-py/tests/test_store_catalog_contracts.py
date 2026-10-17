@@ -69,6 +69,28 @@ class TestStoreCatalogContracts:
         assert missing.status_code == 404
         assert "未找到或已下架" in missing.json()["error"]
 
+    async def test_product_detail_by_uuid(self, client):
+        """uuid 路径(「uuid 或 spu_code 双收」契约的 uuid 半边):原实现
+        `WHERE id = :pid OR spu_code = :pid` 同参双语境(text 列 + uuid 列)
+        让 Postgres 类型推断失败 → operator does not exist(text = uuid)500,
+        Story 9 跨 app e2e 2026-10-17 实弹逮到;修复为按形状分流,uuid 分支
+        单参单语境 CAST(asyncpg 原生绑定双形状实证)。"""
+        await _seed_one_product()
+        from sqlalchemy import text
+
+        from gateway_py.merchant_db import merchant_engine
+
+        async with merchant_engine().connect() as conn:
+            spu_id = (
+                await conn.execute(text("SELECT id FROM merchant_spus WHERE spu_code = :c"), {"c": _SPUCODE})
+            ).scalar_one()
+
+        detail = await client.get(f"/api/store/products/{spu_id}")
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["success"] is True
+        assert body["product"]["productId"] == _SPUCODE
+
     async def test_addresses_get_returns_list(self, client):
         res = await client.get("/api/store/addresses", params={"userId": _UID})
         assert res.status_code == 200

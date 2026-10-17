@@ -961,6 +961,37 @@ class TestSkuCrud:
                               headers=ops, json={"skuTitle": "越权", "price": 1, "stock": 1})
         assert r.status_code == 403
 
+    async def test_sku_patch_unknown_id_404(self, client, auth):
+        """查无此 SKU → 404 诚实失败(Story 9 收口:此前 UPDATE 0 行静默 success 回显 id)。"""
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        patched = await client.patch("/api/admin/analytics/skus/00000000-0000-0000-0000-00000000000f",
+                                     headers=boss, json={"price": 9.9})
+        assert patched.status_code == 404
+        assert "不存在" in patched.json()["message"]
+
+    async def test_sku_patch_invalid_values_400(self, client, auth):
+        """值域校验诚实 400:price>0 / stock>=0 / skuTitle 非空 —— 负价负库存在此拒绝
+        (此前直接入库,商店 MIN(price) 会展示负价),非法值严禁 500。校验先于 UPDATE,
+        任意 id 形即可测;错误体 {success:False, message} 经 errMsgOf 由页面呈现。"""
+        from gateway_py.merchant_db import ensure_merchant_tables
+
+        await ensure_merchant_tables()
+        boss = await auth()
+        cases = [
+            ({"price": -1}, "价格"),
+            ({"price": 0}, "价格"),
+            ({"stock": -3}, "库存"),
+            ({"skuTitle": "   "}, "规格名"),
+        ]
+        for payload, fragment in cases:
+            r = await client.patch("/api/admin/analytics/skus/00000000-0000-0000-0000-00000000000e",
+                                   headers=boss, json=payload)
+            assert r.status_code == 400, f"{payload} 应 400,实得 {r.status_code}"
+            assert fragment in r.json()["message"], f"{payload} 文案应含「{fragment}」"
+
 
 class TestRegister:
     """商城用户注册(auth/register):建 engine 账号 + 客户档案联动 + 重复 409。"""
