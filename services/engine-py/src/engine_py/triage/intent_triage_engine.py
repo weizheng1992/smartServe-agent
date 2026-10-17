@@ -880,11 +880,27 @@ class IntentTriageEngine:
         for stage in stages:
             verdict = await stage.judge(ctx)
             if verdict.terminal:
-                return verdict.result
+                return IntentTriageEngine._with_vision_analysis(verdict.result, ctx)
 
         # 所有阶段均未终局(理论不可达:Step 3 兜底必终局)——诚实兜底
         fallback_intents = [{"intent": "general_query", "confidence": 0.5}]
-        return _triage_terminal_result(fallback_intents, input_text, history_msgs, ctx.damage_assessment)
+        return IntentTriageEngine._with_vision_analysis(
+            _triage_terminal_result(fallback_intents, input_text, history_msgs, ctx.damage_assessment),
+            ctx,
+        )
+
+    @staticmethod
+    def _with_vision_analysis(result: dict | None, ctx) -> dict | None:
+        """vision_analysis 进图全局态的单点(A2 证据快照,2026-10-17 视觉加固 issues/05)。
+
+        此前该产物只活 StageContext 惰性组,triage 一收口即丢,apply_after_sale
+        落证据表时不可达;所有 triage 出口(含 bypass)都经 process() 汇聚,在此
+        统一注入零散落改。state 侧『有值才覆盖』reducer:带图轮次覆盖旧值、
+        纯文本轮保留上一轮产物(售后快照跨轮可用)。
+        """
+        if result is not None and ctx.vision_analysis:
+            result.setdefault("vision_analysis", ctx.vision_analysis)
+        return result
 
     @staticmethod
     async def _try_skill_fast_track(

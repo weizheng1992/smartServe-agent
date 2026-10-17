@@ -29,25 +29,34 @@ BLOCKED_APPROVAL_STATES = frozenset({"expired", "cancelled", "rejected", "error"
 async def maybe_inject_aftersale_evidence(tool_name: str, args: dict, state: dict) -> dict:
     """售后工具凭证程序化注入(ADR-0002 Q1 + ADR-0003 Q3):
     本轮 state.image_urls 优先(有图严禁额外查库);本轮无图回溯本会话
-    历史用户消息图片;两者皆无 → 原样返回。上限与引擎视觉上限一致。"""
+    历史用户消息图片;两者皆无 → 原样返回。上限与引擎视觉上限一致。
+
+    applyAfterSale 另注入视觉上下文(A2 证据快照,2026-10-17 视觉加固 issues/05):
+    visionAnalysis = state.vision_analysis 完整产物(落 after_sale_evidence 的
+    vlm_struct 基线 + 图证单号比对),visionClaimed = 本轮是否带图(索赔语境判定,
+    供「带图轮却零凭证」的异常闸)——两者只服务售后工单,processRefund 不注入。"""
     from ...vision.analyzer import MAX_IMAGES_PER_MESSAGE
 
     if tool_name not in _AFTERSALE_EVIDENCE_TOOLS:
         return args
-    if args.get("evidenceImageUrls"):
-        return args
-    current = list(state.get("image_urls") or [])
-    if not current:
-        try:
-            from ...tools_registry.order_domain import OrderDomainService
+    if not args.get("evidenceImageUrls"):
+        current = list(state.get("image_urls") or [])
+        if not current:
+            try:
+                from ...tools_registry.order_domain import OrderDomainService
 
-            current = await OrderDomainService.get_thread_evidence_images(state.get("thread_id"))
-        except Exception as err:
-            print(f"[StepExecutionEngine] 历史凭证图回溯失败 threadId={state.get('thread_id')}: {err}")
-            current = []
-    if not current:
-        return args
-    return {**args, "evidenceImageUrls": current[:MAX_IMAGES_PER_MESSAGE]}
+                current = await OrderDomainService.get_thread_evidence_images(state.get("thread_id"))
+            except Exception as err:
+                print(f"[StepExecutionEngine] 历史凭证图回溯失败 threadId={state.get('thread_id')}: {err}")
+                current = []
+        if current:
+            args = {**args, "evidenceImageUrls": current[:MAX_IMAGES_PER_MESSAGE]}
+    if tool_name == "applyAfterSale":
+        vision_analysis = state.get("vision_analysis")
+        if vision_analysis:
+            args = {**args, "visionAnalysis": vision_analysis}
+        args = {**args, "visionClaimed": bool(state.get("image_urls"))}
+    return args
 
 
 def _try_import_skills():
@@ -319,6 +328,23 @@ async def _execute_single_step_core(
             auto_check = await ApprovalPolicyEngine.evaluate_refund_auto_approval(
                 order_id, args.get("refundAmount") or args.get("amount"), tenant_limit
             )
+            # 证据链快赔闸(A2,2026-10-17 视觉加固 issues/05):该订单最近一笔
+            # 售后工单若被证据链闸命中(图证单号与订单不符/带图轮零凭证),免签
+            # 通道关闭走 HITL——只收紧不放宽;helper 自身 fail-open。
+            if tool_name == "processRefund" and auto_check["shouldAutoApprove"]:
+                try:
+                    from ...tools_registry.mall_domain import MallDomainService
+
+                    if await MallDomainService.fast_lane_denied_for_order(
+                        order_id, state.get("user_id"), state.get("business_id")
+                    ):
+                        auto_check = {
+                            **auto_check,
+                            "shouldAutoApprove": False,
+                            "denyReason": "evidence_chain",
+                        }
+                except Exception as gate_err:
+                    print(f"[执行引擎] 快赔闸查询异常,fail-open 放行: {gate_err}")
             if tool_name != "processRefund" or not auto_check["shouldAutoApprove"]:
                 approval_result = await ApprovalPolicyEngine.evaluate_pending_approval_state(
                     {
@@ -354,9 +380,17 @@ async def _execute_single_step_core(
                                 business_id=str(state.get("business_id") or "ecommerce"),
                             ).add_message(
                                 "assistant",
-                                f"🛠️ 该订单退款金额(¥{auto_check['groundedAmount']})超过商户免签限额"
-                                f"(¥{tenant_limit})，退款申请已提交人工审核，审批通过后将自动执行，"
-                                "请耐心等待审核结果。",
+                                # 拒绝原因分形(A2,issues/05):证据链闸命中严禁谎报金额超限
+                                (
+                                    "🛠️ 您提交的凭证与订单信息存在出入，为保障资金安全，退款申请已提交"
+                                    "人工审核，审批通过后将自动执行，请耐心等待审核结果。"
+                                    if auto_check.get("denyReason") == "evidence_chain"
+                                    else (
+                                        f"🛠️ 该订单退款金额(¥{auto_check['groundedAmount']})超过商户免签限额"
+                                        f"(¥{tenant_limit})，退款申请已提交人工审核，审批通过后将自动执行，"
+                                        "请耐心等待审核结果。"
+                                    )
+                                ),
                             )
                         except Exception as notice_err:
                             print(f"[执行引擎] 审核告知消息写入失败: {notice_err}")

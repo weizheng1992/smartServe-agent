@@ -151,9 +151,11 @@ def test_executor_injection_noop_cases() -> None:
     # 非售后工具不注入
     state = {"image_urls": ["/a.jpg"], "thread_id": "t1"}
     assert asyncio.run(maybe_inject_aftersale_evidence("getOrderStatus", {"orderId": "O1"}, state)) == {"orderId": "O1"}
-    # 已有凭证(LLM 或上游已给)不覆盖
+    # 已有凭证(LLM 或上游已给)不覆盖(A2 后 applyAfterSale 会附注 vision 上下文,
+    # 契约是「凭证不被覆盖」而非对象同一性)
     with_evidence = {"orderId": "O1", "evidenceImageUrls": ["/x.jpg"]}
-    assert asyncio.run(maybe_inject_aftersale_evidence("applyAfterSale", with_evidence, state)) is with_evidence
+    patched = asyncio.run(maybe_inject_aftersale_evidence("applyAfterSale", with_evidence, state))
+    assert patched["evidenceImageUrls"] == ["/x.jpg"]
 
 
 def test_db_failure_errors_honestly(monkeypatch: pytest.MonkeyPatch, stubbed_order) -> None:
@@ -174,3 +176,161 @@ def test_db_failure_errors_honestly(monkeypatch: pytest.MonkeyPatch, stubbed_ord
     )
     assert "error" in result, "落库失败必须诚实报错"
     assert result.get("success") is not True, "严禁假成功"
+
+
+# ── A2 证据链快赔闸(2026-10-17 视觉加固 issues/05)─────────────────────────
+
+
+def _evidence_rows(session) -> list[dict]:
+    return [s for s in session.statements if "after_sale_evidence" in s["sql"] and "INSERT" in s["sql"]]
+
+
+def test_ocr_order_mismatch_denies_fast_lane(monkeypatch: pytest.MonkeyPatch, stubbed_order) -> None:
+    """图证单号与所退订单不符(拿 ORD-X 的破损图退 ORD-Y)→ fast_lane_denied,
+    免签通道关闭走 HITL,拒绝原因落 after_sale_logs 供 admin 审计。"""
+    result, session = _run_apply(
+        {
+            "orderId": "AURORA-ORD-2026-9083",
+            "type": "refund_only",
+            "reason": "quality_issue",
+            "evidenceImageUrls": ["/api/uploads/a.jpg"],
+            "visionAnalysis": {"extractedOrderId": "ORD-77777", "visualSummary": "破损鞋"},
+            "visionClaimed": True,
+        },
+        monkeypatch,
+    )
+
+    assert result["success"] is True and result["fastLaneDenied"] is True
+    assert "人工" in result["instruction"], "闸命中严禁承诺快赔时限"
+    insert = next(s for s in session.statements if "after_sale_tickets" in s["sql"])
+    assert insert["params"]["fastlane"] is True
+    denied_logs = [
+        s
+        for s in session.statements
+        if "after_sale_logs" in s["sql"] and "fast_lane_denied" in s["sql"]
+    ]
+    assert len(denied_logs) == 1 and "ORD-77777" in denied_logs[0]["params"]["note"]
+
+
+def test_ocr_order_match_keeps_fast_lane(monkeypatch: pytest.MonkeyPatch, stubbed_order) -> None:
+    result, session = _run_apply(
+        {
+            "orderId": "AURORA-ORD-2026-9083",
+            "type": "refund_only",
+            "reason": "quality_issue",
+            "evidenceImageUrls": ["/api/uploads/a.jpg"],
+            "visionAnalysis": {"extractedOrderId": "aurora-ord-2026-9083"},  # 大小写归一
+            "visionClaimed": True,
+        },
+        monkeypatch,
+    )
+
+    insert = next(s for s in session.statements if "after_sale_tickets" in s["sql"])
+    assert insert["params"]["fastlane"] is False
+    assert result["fastLaneDenied"] is False
+
+
+def test_vision_turn_with_zero_evidence_denies(monkeypatch: pytest.MonkeyPatch, stubbed_order) -> None:
+    """带图轮却零凭证(注入链异常态)→ 闸命中;纯文本工单不受影响(旧行为)。"""
+    result, session = _run_apply(
+        {
+            "orderId": "AURORA-ORD-2026-9083",
+            "type": "refund_only",
+            "reason": "quality_issue",
+            "visionClaimed": True,
+        },
+        monkeypatch,
+    )
+    assert result["fastLaneDenied"] is True
+    assert _evidence_rows(session) == []
+
+    legacy, _legacy_session = _run_apply(
+        {"orderId": "AURORA-ORD-2026-9083", "type": "refund_only", "reason": "no_reason_7d"},
+        monkeypatch,
+    )
+    assert legacy["fastLaneDenied"] is False  # 纯文本快赔线仍只看金额(旧行为零破坏)
+
+
+def test_evidence_snapshot_rows_written_with_vlm_struct(monkeypatch: pytest.MonkeyPatch, stubbed_order) -> None:
+    """A2 核心:每张凭证一行 apply 阶段行,vlm_struct 存当轮 vision_analysis 完整
+    快照(B 节点「退回来的是不是原来那件」的比对基线)。"""
+    vision = {"extractedOrderId": "AURORA-ORD-2026-9083", "visualSummary": "鞋底开胶", "detectedObjects": ["shoe"]}
+    result, session = _run_apply(
+        {
+            "orderId": "AURORA-ORD-2026-9083",
+            "type": "return_and_refund",
+            "reason": "quality_issue",
+            "evidenceImageUrls": ["/api/uploads/a.jpg", "/api/uploads/b.jpg"],
+            "visionAnalysis": vision,
+            "visionClaimed": True,
+        },
+        monkeypatch,
+    )
+
+    assert result["success"] is True
+    rows = _evidence_rows(session)
+    assert len(rows) == 2
+    assert "'apply'" in rows[0]["sql"]  # stage 是字面量非绑定参数
+    assert json.loads(rows[0]["params"]["vlm"]) == vision
+
+
+def test_fast_lane_denied_lookup_fail_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """processRefund 免签闸的查询 helper:DB 炸 fail-open False(维持现状,
+    资金闸仍在金额阈值);命中返回 True。"""
+
+    class _BoomSession:
+        async def __aenter__(self):
+            raise RuntimeError("db down")
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        "engine_py.tools_registry.mall.fulfillment.get_session", lambda: _BoomSession()
+    )
+    assert asyncio.run(MallDomainService.fast_lane_denied_for_order("O1", "u1", "biz")) is False
+
+    class _RowResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+    class _RowSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, stmt):
+            return _RowResult([(True,)])
+
+        async def commit(self):
+            pass
+
+    row_session = _RowSession()
+    monkeypatch.setattr(
+        "engine_py.tools_registry.mall.fulfillment.get_session", lambda: row_session
+    )
+    assert asyncio.run(MallDomainService.fast_lane_denied_for_order("O1", "u1", "biz")) is True
+    assert asyncio.run(MallDomainService.fast_lane_denied_for_order("", "u1", "biz")) is False
+
+
+def test_injection_carries_vision_context_for_apply_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A2 注入:applyAfterSale 带 visionAnalysis + visionClaimed;processRefund 不带
+    (视觉上下文只服务售后工单快照,退款工具无消费面)。"""
+    from engine_py.graph.nodes.step_execution_engine import maybe_inject_aftersale_evidence
+
+    state = {
+        "image_urls": ["/now.jpg"],
+        "vision_analysis": {"extractedOrderId": "O9", "visualSummary": "s"},
+    }
+    apply_args = asyncio.run(maybe_inject_aftersale_evidence("applyAfterSale", {"orderId": "O1"}, state))
+    assert apply_args["visionAnalysis"]["extractedOrderId"] == "O9"
+    assert apply_args["visionClaimed"] is True
+
+    refund_args = asyncio.run(maybe_inject_aftersale_evidence("processRefund", {"orderId": "O1"}, state))
+    assert "visionAnalysis" not in refund_args and "visionClaimed" not in refund_args
+    assert refund_args["evidenceImageUrls"] == ["/now.jpg"]

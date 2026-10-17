@@ -568,6 +568,11 @@ class AfterSaleTicket(Base):
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending_review'"), nullable=False)
     # ADR-0002 Q1:本轮上传的瑕疵凭证(/api/uploads/... 相对 URL),审批员看单即看图
     evidence_urls: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    # 证据链快赔闸(A2,2026-10-17 视觉加固 issues/05):图证单号与所退订单不符,
+    # 或带图轮却零凭证(异常态)→ true,processRefund 免签通道对此单关闭(走 HITL)
+    fast_lane_denied: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
     return_tracking_number: Mapped[str | None] = mapped_column(Text)
     human_approval_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
@@ -824,3 +829,33 @@ class ImageFingerprint(Base):
 
 Index("uq_image_fingerprints_url", ImageFingerprint.url, unique=True)
 Index("image_fingerprints_biz_sha_idx", ImageFingerprint.business_id, ImageFingerprint.sha256)
+
+
+class AfterSaleEvidence(Base):
+    """售后证据表(A2 证据快照,2026-10-17 视觉加固 issues/05)。
+
+    逆向闭环的比对基线:apply 阶段行由 apply_after_sale 落票时写入(url + 当轮
+    vision_analysis 完整结构化快照);receive 阶段行(仓库收货质检图)是 B 节点
+    (两段式收货验收)的预留位,表结构一次到位。UNIQUE(ticket, stage, url) 幂等;
+    只存 URL 与结构化摘要,不存图内容(隐私纪律)。
+    """
+
+    __tablename__ = "after_sale_evidence"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)  # ase_<hex12>
+    business_id: Mapped[str] = mapped_column(Text, nullable=False)
+    ticket_id: Mapped[str] = mapped_column(Text, nullable=False)
+    stage: Mapped[str] = mapped_column(Text, nullable=False)  # 'apply' | 'receive'(B 节点预留)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    vlm_struct: Mapped[dict | None] = mapped_column(JSONB)  # 当轮 vision_analysis 快照
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+Index(
+    "uq_after_sale_evidence_ticket_stage_url",
+    AfterSaleEvidence.ticket_id,
+    AfterSaleEvidence.stage,
+    AfterSaleEvidence.url,
+    unique=True,
+)
+Index("after_sale_evidence_biz_idx", AfterSaleEvidence.business_id)

@@ -109,4 +109,6 @@ def test_injection_no_history_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     out = asyncio.run(
         maybe_inject_aftersale_evidence("applyAfterSale", args, {"image_urls": [], "thread_id": "t1"})
     )
-    assert out is args, "无图可带时原样返回"
+    # A2 后 applyAfterSale 会附注 visionClaimed(索赔语境标记),凭证注入契约
+    # 仍是「无图不注凭证」而非对象同一性
+    assert out.get("evidenceImageUrls") is None, "无图可带时不注凭证"

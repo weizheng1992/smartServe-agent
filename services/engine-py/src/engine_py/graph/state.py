@@ -44,6 +44,10 @@ class AgentState(TypedDict, total=False):
     input: str
     image_urls: Annotated[list[str], _replace_if_present_reducer]
     damage_assessment: Annotated[dict | None, _replace_if_present_reducer]
+    # 视觉解析完整产物(A2 证据快照,2026-10-17 视觉加固):此前只活 triage
+    # StageContext 惰性组,apply_after_sale 落证据表时不可达;『有值才覆盖』——
+    # 带图轮次覆盖旧值,无图轮次保留上一轮视觉产物供售后快照跨轮可用
+    vision_analysis: Annotated[dict | None, _replace_if_present_reducer]
     input_embedding: list[float]
     history: Annotated[list[dict], _concat_reducer]
 
@@ -106,6 +110,7 @@ _CAMEL_KEY_MAP = {
     "job_id": "jobId",
     "image_urls": "imageUrls",
     "damage_assessment": "damageAssessment",
+    "vision_analysis": "visionAnalysis",
     "input_embedding": "inputEmbedding",
     "active_domain_role": "activeDomainRole",
     "guide_context": "guideContext",

@@ -125,6 +125,12 @@ def _patch_common(
 
     monkeypatch.setattr(triage_mod.IntentTriageEngine, "log_intent_to_db", _noop_log)
     monkeypatch.setattr(triage_mod, "search_relevant_exemplars", _fake_exemplars)
+    # 图证指纹反查(A2,issues/05)同样离线:回放未命中,严禁真拨 DB(conftest
+    # 死地址口径;漏桩即真实连接尝试——memory: metric-head 联网回退挂死教训)
+    async def _fake_audit(image_urls, *, user_id, business_id):
+        return {"flagged": False, "hits": [], "checked": 0}
+
+    monkeypatch.setattr(triage_mod, "audit_image_reuse", _fake_audit)
     monkeypatch.setattr(SemanticVectorCache, "_tenant_cache", {})
     monkeypatch.setattr(SemanticVectorCache, "get_embedding_with_cache", _fake_embed)
     monkeypatch.setattr(SemanticVectorCache, "get_anchor_vectors", _fake_anchors)
