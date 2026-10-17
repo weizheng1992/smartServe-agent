@@ -128,6 +128,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - `server-gateway.md`:FastAPI 路由、人工接管服务、技能管理端点。
 - `admin-web.md`:10 个 CRUD 模块、统一 CRUD 套件(`useAdminCrud`、`DataTable` 等)、HITL 抽屉。
 - `merchant-admin.md`:商户独立后台(3006)、悬浮数据分析助手与 page-context 选择上行、`ResultCard` 同形渲染与诚实降级、RBAC 动态菜单。
+- `merchant.md`:独立商户门户(3005):api 传输单点(无 401 会话臂)、购物车所有者与快照合并、租户/承运商字典单点、U2 游客律、数据诚实律、/admin 死页契约。
 - `client-web.md`:客户端 SSE 聊天、多模态卡片渲染、人工接管切换。
 - `shared-ui.md`:原子设计、卡片家族规格、SVG 图标规范。
 - `observability.md`:带租户上下文的结构化日志、telemetry 追踪、token 成本统计。

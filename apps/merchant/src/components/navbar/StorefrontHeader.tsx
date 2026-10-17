@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router';
 import { useLocation } from 'react-router';
 import { useCurrentUser } from '../../context/UserContext';
+import { auth } from '../../lib/api';
 import { readStoreCart } from '../../lib/storeCart';
 
 export function StorefrontHeader({
@@ -58,16 +59,11 @@ export function StorefrontHeader({
     setRegBusy(true);
     setRegErr('');
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: customEmail.trim(),
-          password: customPassword,
-          displayName: regName || customEmail.split('@')[0],
-        }),
-      });
-      const body = await res.json();
+      const body = (await auth.register({
+        email: customEmail.trim(),
+        password: customPassword,
+        displayName: regName || customEmail.split('@')[0],
+      })) as any;
       if (!body.success) throw new Error(body.message || '注册失败');
       localStorage.setItem('merchant.token', body.data.token);
       loginUser({
@@ -90,12 +86,10 @@ export function StorefrontHeader({
     setLoginBusy(true);
     setLoginErr('');
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: customEmail.trim(), password: customPassword }),
-      });
-      const body = await res.json();
+      const body = (await auth.login({
+        email: customEmail.trim(),
+        password: customPassword,
+      })) as any;
       if (!body.success) throw new Error(body.message || '登录失败');
       localStorage.setItem('merchant.token', body.data.token);
       loginUser({

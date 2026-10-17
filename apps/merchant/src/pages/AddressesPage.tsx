@@ -4,6 +4,7 @@ import { Button, Input } from 'ui';
 import type { CustomerAddress } from '../components/address/AddressModal';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { useCurrentUser } from '../context/UserContext';
+import { postJson, qs, requestJson } from '../lib/api';
 
 export default function AddressesPage() {
   const { user } = useCurrentUser();
@@ -27,8 +28,7 @@ export default function AddressesPage() {
     try {
       // 网关契约只认 userId:曾硬编码 customerId=CUST-8801 被静默忽略,
       // 恒回落张伟地址,切换身份整页失效(实弹 2026-09-30)
-      const res = await fetch(`/api/store/addresses?userId=${encodeURIComponent(user.id)}`);
-      const data = await res.json();
+      const data = await requestJson<any>(`/api/store/addresses${qs({ userId: user.id })}`);
       if (data.success && data.addresses) {
         setAddresses(data.addresses);
       }
@@ -53,22 +53,17 @@ export default function AddressesPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/store/addresses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          recipientName,
-          phone,
-          province,
-          city,
-          district,
-          detailAddress,
-          tag,
-          isDefault,
-        }),
+      const data = await postJson<any>('/api/store/addresses', {
+        userId: user.id,
+        recipientName,
+        phone,
+        province,
+        city,
+        district,
+        detailAddress,
+        tag,
+        isDefault,
       });
-      const data = await res.json();
       if (data.success && data.address) {
         setAddresses((prev) => [data.address, ...prev]);
         setRecipientName('');

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router';
 import { type CardActionName, type CardActionPayload, type OrderCardData, type RichCardBlock } from 'types';
 import { Button, Input, Loader2, MessageText, Paperclip, RichCardRenderer, X } from 'ui';
 import { useCurrentUser } from '../../context/UserContext';
+import { postJson, qs, requestJson, uploadJson } from '../../lib/api';
 import { STOREFRONT_CHAT_OPEN_EVENT, type StorefrontChatOpenDetail } from '../../lib/chatBridge';
 import { mergeCartSnapshot, readStoreCart, writeStoreCart } from '../../lib/storeCart';
 import { MERCHANT_ID, activeThreadKey, chatMsgsKey, merchantThreadId } from '../../lib/tenant';
@@ -209,10 +210,9 @@ export function FloatingChatWidget() {
       if (!user?.id) return;
       try {
         const queryTid = targetThreadId || '';
-        const res = await fetch(
-          `/api/store/chat/messages?threadId=${queryTid}&userId=${user.id}&tenantId=${MERCHANT_ID}`,
+        const data = await requestJson<any>(
+          `/api/store/chat/messages${qs({ threadId: queryTid, userId: user.id, tenantId: MERCHANT_ID })}`,
         );
-        const data = await res.json();
         if (data.success) {
           if (Array.isArray(data.userThreads)) {
             setUserThreads(data.userThreads);
@@ -241,8 +241,9 @@ export function FloatingChatWidget() {
         prevScrollHeightRef.current = container.scrollHeight;
       }
 
-      const res = await fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=${MERCHANT_ID}&includeOlder=true`);
-      const data = await res.json();
+      const data = await requestJson<any>(
+        `/api/store/chat/messages${qs({ userId: user.id, tenantId: MERCHANT_ID, includeOlder: true })}`,
+      );
       if (data.success && Array.isArray(data.allHistoricalMessages)) {
         const allMsgs = data.allHistoricalMessages;
         const currentTexts = new Set(messages.map((m) => `${m.role}:${m.text.trim()}`));
@@ -326,8 +327,7 @@ export function FloatingChatWidget() {
     }
 
     // 2. 若无本地缓存，向后端查询该用户最新活跃会话
-    fetch(`/api/store/chat/messages?userId=${user.id}&tenantId=${MERCHANT_ID}`)
-      .then((res) => res.json())
+    requestJson<any>(`/api/store/chat/messages${qs({ userId: user.id, tenantId: MERCHANT_ID })}`)
       .then((data) => {
         if (data.success && data.threadId && Array.isArray(data.messages) && data.messages.length > 0) {
           setThreadId(data.threadId);
@@ -464,15 +464,7 @@ export function FloatingChatWidget() {
 
     try {
       setUploadingImage(true);
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const res = await fetch('/api/chat/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
+      const data = await uploadJson<any>('/api/chat/upload', file);
       if (data.success && data.url) {
         setAttachedImages((prev) => [...prev, data.url]);
       } else {
@@ -515,35 +507,30 @@ export function FloatingChatWidget() {
     setIsSending(true);
 
     try {
-      const res = await fetch('/api/store/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: msgToSend,
-          threadId,
-          userId: user.id,
-          businessId: MERCHANT_ID,
-          imageUrls: imagesToSend.length > 0 ? imagesToSend : undefined,
-          // 商城车随消息上行(2026-09-14 空车谎报收口):引擎车空时水合,
-          // 否则客服对商城页加购的商品永远「看不到车」;spuId 供引擎车行
-          // 维持 SPU 粒度主键(skuId=spu 码契约)
-          storeCart: readStoreCart().map((it) => ({
-            skuCode: it.skuCode,
-            spuId: it.spuId,
-            title: it.title,
-            price: it.price,
-            quantity: it.quantity,
-            imageUrl: it.imageUrl,
-            specAttributes: it.specAttributes,
-          })),
-          routeContext: {
-            pathname,
-            cartItemCount: readStoreCart().length,
-          },
-        }),
+      const data = await postJson<any>('/api/store/chat', {
+        message: msgToSend,
+        threadId,
+        userId: user.id,
+        businessId: MERCHANT_ID,
+        imageUrls: imagesToSend.length > 0 ? imagesToSend : undefined,
+        // 商城车随消息上行(2026-09-14 空车谎报收口):引擎车空时水合,
+        // 否则客服对商城页加购的商品永远「看不到车」;spuId 供引擎车行
+        // 维持 SPU 粒度主键(skuId=spu 码契约)
+        storeCart: readStoreCart().map((it) => ({
+          skuCode: it.skuCode,
+          spuId: it.spuId,
+          title: it.title,
+          price: it.price,
+          quantity: it.quantity,
+          imageUrl: it.imageUrl,
+          specAttributes: it.specAttributes,
+        })),
+        routeContext: {
+          pathname,
+          cartItemCount: readStoreCart().length,
+        },
       });
 
-      const data = await res.json();
       // 人工接管静默轮(2026-09-29 罐头防复读):闸内非首轮 isHumanActive=true
       // 且无 output —— 顾客消息已落库,坐席稍后真人回复,不插占位气泡、
       // 也不回退「服务遇到问题」道歉文案(空 output ≠ 故障)。

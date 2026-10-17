@@ -11,6 +11,7 @@ import { Button } from 'ui';
 import { AddressModal, type CustomerAddress } from '../components/address/AddressModal';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { useCurrentUser } from '../context/UserContext';
+import { postJson, requestJson } from '../lib/api';
 import { type StoreCartItem, readStoreCart, writeStoreCart } from '../lib/storeCart';
 
 export default function CartPage() {
@@ -49,8 +50,7 @@ export default function CartPage() {
     if (!user.id) return;
     const fetchAddresses = async () => {
       try {
-        const res = await fetch(`/api/store/addresses?userId=${encodeURIComponent(user.id)}`);
-        const data = await res.json();
+        const data = await requestJson<any>(`/api/store/addresses?userId=${encodeURIComponent(user.id)}`);
         if (data.success && data.addresses) {
           setAddresses(data.addresses);
           const defaultAddr = data.addresses.find((a: CustomerAddress) => a.isDefault) || data.addresses[0];
@@ -72,8 +72,7 @@ export default function CartPage() {
     if (!user.id) return;
     const fetchEngineCart = async () => {
       try {
-        const res = await fetch(`/api/store/cart?customerId=${encodeURIComponent(user.id)}`);
-        const data = await res.json();
+        const data = await requestJson<any>(`/api/store/cart?customerId=${encodeURIComponent(user.id)}`);
         if (!data.success || !Array.isArray(data.items) || data.items.length === 0) return;
         const engineRows: StoreCartItem[] = data.items.map((r: any) => ({
           id: r.skuCode || r.skuId,
@@ -162,15 +161,10 @@ export default function CartPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/store/checkout/preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            customerId: user.id,
-            items: items.map((it) => ({ skuCode: it.skuCode, quantity: it.quantity })),
-          }),
+        const data = await postJson<any>('/api/store/checkout/preview', {
+          customerId: user.id,
+          items: items.map((it) => ({ skuCode: it.skuCode, quantity: it.quantity })),
         });
-        const data = await res.json();
         if (!cancelled && data.success) setPreview(data);
       } catch {
         // 试算不可达:保持原价明细,选券面板为空
@@ -207,21 +201,16 @@ export default function CartPage() {
       // 整单一次结算(2026-09-22 重构):单订单 + 服务端按整单金额判优惠,
       // 替代旧的逐商品下单 —— 旧口径下多件商品会静默烧掉多张券,且满减
       // 阈值按单件金额判,整单够门槛却不生效
-      const res = await fetch('/api/store/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerId: user.id,
-          items: selectedItems.map((it) => ({ skuCode: it.skuCode, quantity: it.quantity })),
-          shippingAddress: {
-            recipientName: selectedAddress.recipientName || user.name,
-            phone: selectedAddress.phone || user.phone,
-            fullAddress: selectedAddress.fullAddress,
-          },
-          couponId: selectedCouponId,
-        }),
+      const data = await postJson<any>('/api/store/orders', {
+        customerId: user.id,
+        items: selectedItems.map((it) => ({ skuCode: it.skuCode, quantity: it.quantity })),
+        shippingAddress: {
+          recipientName: selectedAddress.recipientName || user.name,
+          phone: selectedAddress.phone || user.phone,
+          fullAddress: selectedAddress.fullAddress,
+        },
+        couponId: selectedCouponId,
       });
-      const data = await res.json();
       if (data.success && data.orderId) {
         // 结算完成后从购物车剔除选中的项;所选券已核销,回落「不使用」
         saveCart(cart.filter((it) => !it.selected));
@@ -537,15 +526,10 @@ export default function CartPage() {
           // 吞错会让弹窗把失败当成功收表单(错误死路)
           let data: { success?: boolean; address?: CustomerAddress; error?: string };
           try {
-            const res = await fetch('/api/store/addresses', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userId: user.id,
-                ...newAddr,
-              }),
+            data = await postJson<any>('/api/store/addresses', {
+              userId: user.id,
+              ...newAddr,
             });
-            data = await res.json();
           } catch {
             throw new Error('网络异常，保存地址失败，请重试');
           }

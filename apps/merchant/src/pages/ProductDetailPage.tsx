@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router';
 import type { ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button } from 'ui';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
+import { postJson, requestJson } from '../lib/api';
 import { addStoreCartItem } from '../lib/storeCart';
 
 export default function ProductDetailPage() {
@@ -29,12 +30,10 @@ export default function ProductDetailPage() {
   const [couponMsg, setCouponMsg] = useState('');
   const userId = (user as any).id;
   const refreshCoupons = useCallback(() => {
-    fetch(`/api/store/coupons?userId=${encodeURIComponent(userId)}`)
-      .then((r) => r.json())
+    requestJson<any>(`/api/store/coupons?userId=${encodeURIComponent(userId)}`)
       .then((b) => setCouponStatus(new Map((b.coupons || []).map((x: any) => [x.promotionId, x.status as string]))))
       .catch(() => {});
-    fetch('/api/store/promotions')
-      .then((r) => r.json())
+    requestJson<any>('/api/store/promotions')
       .then((b) => setCouponPromos((b.promotions || []).filter((p: any) => p.promoType === 'coupon')))
       .catch(() => {});
   }, [userId]);
@@ -47,8 +46,7 @@ export default function ProductDetailPage() {
     const fetchProduct = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/store/products/${productId}`);
-        const data = await res.json();
+        const data = await requestJson<any>(`/api/store/products/${productId}`);
         if (data.success && data.product) {
           const p: ThirdPartyProduct = data.product;
           setProduct(p);
@@ -146,12 +144,7 @@ export default function ProductDetailPage() {
 
   const currentPrice = selectedSku ? Number(selectedSku.price) : Number(product.price);
   async function claimCoupon(promoId: string) {
-    const res = await fetch('/api/store/coupons/claim', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ promoId, userId: (user as any).id }),
-    });
-    const b = await res.json();
+    const b = await postJson<any>('/api/store/coupons/claim', { promoId, userId: (user as any).id });
     setCouponMsg(b.success ? '✓ 领取成功,结算自动抵扣' : b.message);
     refreshCoupons();
   }

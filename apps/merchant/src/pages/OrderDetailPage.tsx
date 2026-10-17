@@ -5,6 +5,7 @@ import type { ThirdPartyOrder } from 'types';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { LogisticsModal } from '../components/orders/LogisticsModal';
 import { useCurrentUser } from '../context/UserContext';
+import { requestJson } from '../lib/api';
 import { openStorefrontChat } from '../lib/chatBridge';
 import { parseShippingAddress } from '../lib/shippingAddress';
 
@@ -25,8 +26,9 @@ export default function SingleOrderDetailPage() {
       try {
         // customerId 属主闸(2026-10-14 夜评 IDOR 收口):详情仅本人可读,
         // 与订单列表同身份源;缺失/不匹配服务端 400/404,页面走诚实失败态
-        const res = await fetch(`/api/store/orders/${orderId}?customerId=${encodeURIComponent(user?.id ?? '')}`);
-        const data = await res.json();
+        const data = await requestJson<any>(
+          `/api/store/orders/${orderId}?customerId=${encodeURIComponent(user?.id ?? '')}`,
+        );
         if (data.success && data.order) {
           setOrder(data.order);
         } else {
@@ -175,8 +177,7 @@ export default function SingleOrderDetailPage() {
 function PromoLine({ orderId, totalAmount }: { orderId: string; totalAmount: number }) {
   const [promo, setPromo] = useState<{ promoName: string; discount: number } | null>(null);
   useEffect(() => {
-    fetch(`/api/store/promotions/by-order?orderId=${encodeURIComponent(orderId)}`)
-      .then((r) => r.json())
+    requestJson<any>(`/api/store/promotions/by-order?orderId=${encodeURIComponent(orderId)}`)
       .then((b) => {
         if (b.applied) setPromo({ promoName: b.promoName, discount: b.discount });
       })

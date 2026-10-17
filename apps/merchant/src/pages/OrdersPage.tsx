@@ -5,6 +5,7 @@ import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { LogisticsModal } from '../components/orders/LogisticsModal';
 import { OrderDetailModal } from '../components/orders/OrderDetailModal';
 import { useCurrentUser } from '../context/UserContext';
+import { requestJson } from '../lib/api';
 import { openStorefrontChat } from '../lib/chatBridge';
 import { fmtMoney } from '../lib/format';
 import { carrierLabel } from '../lib/logistics';
@@ -32,8 +33,7 @@ export default function OrdersPage() {
         status === 'ALL'
           ? `/api/store/orders?customerId=${targetUserId}`
           : `/api/store/orders?customerId=${targetUserId}&status=${status}`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const data = await requestJson<any>(url);
       if (data.success && data.orders) {
         setOrders(data.orders);
       } else {

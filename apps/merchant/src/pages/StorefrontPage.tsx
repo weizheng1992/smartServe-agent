@@ -4,6 +4,7 @@ import type { ThirdPartyOrder, ThirdPartyProduct, ThirdPartySku } from 'types';
 import { Badge, Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from 'ui';
 import { StorefrontHeader } from '../components/navbar/StorefrontHeader';
 import { useCurrentUser } from '../context/UserContext';
+import { postJson, requestJson } from '../lib/api';
 import { addStoreCartItem, readStoreCart } from '../lib/storeCart';
 
 /** 品类切换的「全部」哨兵:tab 清单首项与过滤判断共用同一常量 */
@@ -34,26 +35,21 @@ export default function StorefrontPage() {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const prodRes = await fetch('/api/store/products');
-      const prodJson = await prodRes.json();
+      const prodJson = await requestJson<any>('/api/store/products');
       if (prodJson.success) {
         const list = prodJson.products || [];
         setProducts(list);
         // 促销价(服务端唯一算价;20 号):批量取后回填
         try {
-          const promoRes = await fetch('/api/store/promotions/prices', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(
-              // 商品 DTO 只产 camelCase productId(merchant_domain._spu_to_product):
-              // 曾发 p.product_id || p.id 双双 undefined,网关 str(None)="None",
-              // 活动打分对鬼 id 永远落空,促销价回填整条死路(全树审查 2026-09-30)
-              list
-                .slice(0, 60)
-                .map((p: any) => ({ productId: p.productId, price: Number(p.price) || 0 })),
-            ),
-          });
-          const promoJson = await promoRes.json();
+          const promoJson = await postJson<any>(
+            '/api/store/promotions/prices',
+            // 商品 DTO 只产 camelCase productId(merchant_domain._spu_to_product):
+            // 曾发 p.product_id || p.id 双双 undefined,网关 str(None)="None",
+            // 活动打分对鬼 id 永远落空,促销价回填整条死路(全树审查 2026-09-30)
+            list
+              .slice(0, 60)
+              .map((p: any) => ({ productId: p.productId, price: Number(p.price) || 0 })),
+          );
           const map: Record<string, { promoPrice: number; promoName: string | null }> = {};
           for (const it of promoJson.prices || [])
             map[it.productId] = { promoPrice: it.promoPrice, promoName: it.promoName };
@@ -71,8 +67,7 @@ export default function StorefrontPage() {
 
   const fetchPromos = async () => {
     try {
-      const res = await fetch('/api/store/promotions');
-      const body = await res.json();
+      const body = await requestJson<any>('/api/store/promotions');
       setActivePromos(body.promotions || []);
     } catch {
       /* 活动横幅失败按无活动展示 */
@@ -87,12 +82,10 @@ export default function StorefrontPage() {
       setCartCount(totalCart);
 
       // 订单与地址数量(地址契约只认 userId,发 customerId 恒回落张伟)
-      const [ordRes, addrRes] = await Promise.all([
-        fetch(`/api/store/orders?customerId=${targetUserId}`),
-        fetch(`/api/store/addresses?userId=${targetUserId}`),
+      const [ordJson, addrJson] = await Promise.all([
+        requestJson<any>(`/api/store/orders?customerId=${targetUserId}`),
+        requestJson<any>(`/api/store/addresses?userId=${targetUserId}`),
       ]);
-      const ordJson = await ordRes.json();
-      const addrJson = await addrRes.json();
       if (ordJson.success && ordJson.orders) setOrdersCount(ordJson.orders.length);
       if (addrJson.success && addrJson.addresses) setAddressCount(addrJson.addresses.length);
     } catch {
