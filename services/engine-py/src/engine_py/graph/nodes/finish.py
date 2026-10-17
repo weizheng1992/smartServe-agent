@@ -278,11 +278,17 @@ async def finish_node(state: AgentState) -> dict:
         intents = state.get("intents") or []
         is_only_general = len(intents) == 1 and intents[0].get("intent") == "general_query"
         input_embedding = state.get("input_embedding") or []
+        from ...rag.aggregator import grounding_block as _cache_guard_block
+
         if (
             is_only_general
             and state.get("input")
             and len(input_embedding) > 0
             and not is_action_query(state["input"], tenant_id)
+            # 确定性聚合轮严禁入语义缓存(v2 审查):含具体数字的答复按 ≥0.96
+            # 余弦原样重放,而缓存命中路径不再执行 try_aggregate —— 文档改版后
+            # 旧数会以新文档名义照答。聚合轮答案每次现算,不走缓存。
+            and _cache_guard_block(state["input"], rag_documents) is None
         ):
             try:
                 add_query_to_semantic_cache(tenant_id, state["input"], sanitized_content.strip(), input_embedding)

@@ -345,8 +345,12 @@ async def run_consult_direct_answer(state: dict, history_msgs: list[dict]) -> tu
             )
         return ROUTE_TO_ACTION_MARKER, [], 0.0
 
-    # 回填语义缓存:咨询形输入非动作、回答有 RAG 切片依据,后续相似提问秒回
-    if vector:
+    # 回填语义缓存:咨询形输入非动作、回答有 RAG 切片依据,后续相似提问秒回。
+    # 确定性聚合轮豁免(v2 审查):聚合答复含具体数字,缓存重放会在文档改版后
+    # 照答旧数,且缓存命中路径不再执行 try_aggregate —— 聚合轮每次现算。
+    from ..rag.aggregator import grounding_block as _cache_guard_block
+
+    if vector and _cache_guard_block(input_text, rag_documents) is None:
         try:
             add_query_to_semantic_cache(tenant_id, input_text, answer.strip(), vector)
         except Exception as cache_err:

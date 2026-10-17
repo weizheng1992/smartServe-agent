@@ -125,6 +125,7 @@ async def ingest_document_file(
         category=category,
         source_format=parsed.source_format,
         doc_title=parsed.doc_title or path.stem,
+        table_payloads=parsed.table_payloads,
     )
     if not chunks:
         result.status = "skipped"
@@ -218,18 +219,14 @@ async def _replace_document_chunks(business_id: str, chunks: list[DocumentChunk]
 def _stitch_structured_payloads(chunks: list[DocumentChunk], parsed, vlm_chart_payloads: dict[str, dict] | None = None) -> None:
     """把 parse 层结构化负载缝接到切片上(计算面与索引面同体落库)。
 
-    表格:parse 的 table_payloads 与 chunker 渲染出的 table 切片同序(同一遍
-    iterate_items 单源产出,渲染失败两边都不留),按下标对齐;
+    表格:负载由 chunker 按 `<!--DOC-TABLE:i-->` 锚点在切块时直接挂载(行组
+    扇出的每一片挂同一份全表 payload),本函数不再按下标对齐 —— 序号对齐在
+    「一表扇 k 片」时曾把后续表的 payload 错缝到大表续片(v2 对抗审查 high)。
     图表:按 image_url 精确键接,原生负载缺席时回落 VLM 读数(provenance 已分标)。
     """
     vlm_chart_payloads = vlm_chart_payloads or {}
-    table_index = 0
     for chunk in chunks:
-        if chunk.content_type == "table":
-            if table_index < len(parsed.table_payloads):
-                chunk.table_data = parsed.table_payloads[table_index]
-            table_index += 1
-        elif chunk.content_type == "image" and chunk.image_url:
+        if chunk.content_type == "image" and chunk.image_url:
             payload = parsed.chart_payloads.get(chunk.image_url) or vlm_chart_payloads.get(chunk.image_url)
             if payload:
                 chunk.chart_data = payload

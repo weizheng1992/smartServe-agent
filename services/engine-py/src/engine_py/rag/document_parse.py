@@ -161,7 +161,10 @@ def _export_markdown(doc) -> tuple[str, list[str], list[dict | None], dict[str, 
                 print(f"[DocParse] 表格导出失败,降级丢弃该表(不虚构内容): {err}")
                 table_md = ""
             if table_md:
-                lines += ["", table_md, ""]
+                # 标记锚定:行组切分会把一张表扇出 k 个切片,序号对齐会错缝
+                # (2026-10-17 v2 对抗审查 high)—— 改为标记锚定,切片侧每片
+                # 按 marker 取同一份 payload(全表计算面,任一片被召回都可算)
+                lines += ["", f"<!--DOC-TABLE:{len(table_payloads)}-->", table_md, ""]
                 table_payloads.append(_table_payload(item, doc))
             ordered_counter = 0
         elif kind == "PictureItem":
@@ -178,8 +181,10 @@ def _export_markdown(doc) -> tuple[str, list[str], list[dict | None], dict[str, 
                 # 无位图的原生 chart(实测:docx 内嵌 chart 不经 LibreOffice 渲染就没有
                 # 位图):数据以管道表就地渲染,负载按渲染序进 table_payloads —— 它本就是
                 # 文档自有数据(零读数误差),聚合器按 tableData 消费;严禁静默丢弃
-                lines += ["", _render_pipe_table(chart_payload), ""]
-                table_payloads.append({"headers": chart_payload["headers"], "rows": chart_payload["rows"]})
+                rendered = _render_pipe_table(chart_payload)
+                if rendered:
+                    lines += ["", f"<!--DOC-TABLE:{len(table_payloads)}-->", rendered, ""]
+                    table_payloads.append({"headers": chart_payload["headers"], "rows": chart_payload["rows"]})
             else:
                 image_markers.append(None)
                 lines += ["", f"@@IMAGE:{len(image_markers) - 1}@@", ""]  # 无位图占位,落位时删行
@@ -212,8 +217,10 @@ def _export_markdown(doc) -> tuple[str, list[str], list[dict | None], dict[str, 
                 if chart_payload:
                     chart_payloads[url] = chart_payload
             elif chart_payload:
-                lines += ["", _render_pipe_table(chart_payload), ""]
-                table_payloads.append({"headers": chart_payload["headers"], "rows": chart_payload["rows"]})
+                rendered = _render_pipe_table(chart_payload)
+                if rendered:
+                    lines += ["", f"<!--DOC-TABLE:{len(table_payloads)}-->", rendered, ""]
+                    table_payloads.append({"headers": chart_payload["headers"], "rows": chart_payload["rows"]})
 
     # 标记落位:有 URL 换引用行,无位图的图片位删行(严禁空壳占位进切块)
     out: list[str] = []
@@ -257,8 +264,8 @@ def _native_chart_payload(item) -> dict | None:
         grid = [["" for _ in range(chart_data.num_cols)] for _ in range(chart_data.num_rows)]
         for cell in chart_data.table_cells:
             grid[cell.start_row_offset_idx][cell.start_col_offset_idx] = cell.text
-        if not grid:
-            return None
+        if not grid or all(not any(row) for row in grid):
+            return None  # 空网格/全空退化 grid:v2 审查实证 [[]] truthy 会占 payload 槽致后续表错位
         return {
             "kind": "tabular",
             "title": getattr(tabular, "title", None) or getattr(chart_data, "title", None),

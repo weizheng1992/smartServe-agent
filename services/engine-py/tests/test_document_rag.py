@@ -510,7 +510,7 @@ def test_table_payloads_stitch_and_metadata(pg_factory, monkeypatch, tmp_path):
         assert result is not None and result["value"] == 8000, "确定性聚合必须精确(sum=8000)"
         assert result["annotated"] is False, "表格结构化数据无需读数误差标注"
         summary = format_result(result)
-        assert "8000" in summary and "确定性代码计算" in summary
+        assert "8,000" in summary and "确定性代码计算" in summary, "千分位全精度渲染"
 
         assert try_aggregate("政策内容是什么", hits) is None, "非计算问句必须 None(回落原链路)"
 
@@ -561,3 +561,111 @@ def test_vlm_chart_fallback_stitch(pg_factory, monkeypatch, tmp_path):
         assert "读数误差" in format_result(result)
 
     asyncio.run(_scenario())
+
+
+# ---------------------------------------------------------------------------
+# 5. v2 对抗审查回归:锚定缝接 / 筛选意图 / count / 格式化 / 类型闸
+# ---------------------------------------------------------------------------
+def test_marker_anchor_survives_row_group_split():
+    """v2 审查 high 回归:行组切分扇出 k 片时,每片都挂同一份全表 payload,
+    后续表格的 payload 不得错缝到大表续片(实测曾静默算错账)。"""
+    long_rows = ["| 序号 | 明细金额 |", "| --- | --- |"] + [
+        f"| {i} | 金额明细第 {i} 行,附带足够长的说明文字以撑爆行组上限 |" for i in range(40)
+    ]
+    md = (
+        "# 财务明细\n\n"
+        "<!--DOC-TABLE:0-->\n"
+        + "\n".join(long_rows)
+        + "\n\n<!--DOC-TABLE:1-->\n\n| 项目 | 数量 |\n| --- | --- |\n| 门店数 | 5 |\n"
+    )
+    payloads = [
+        {"headers": ["序号", "明细金额"], "rows": [[str(i), str(100 + i)] for i in range(40)]},
+        {"headers": ["项目", "数量"], "rows": [["门店数", "5"]]},
+    ]
+    chunks = chunk_document(md, business_id="aurora", source_url="f.docx", category="document",
+                            source_format="docx", doc_title="财务明细", table_payloads=payloads)
+    big_pieces = [c for c in chunks if c.content_type == "table" and "明细金额" in c.chunk_text]
+    small = [c for c in chunks if c.content_type == "table" and "门店数" in c.chunk_text]
+    assert len(big_pieces) >= 2, "长表应扇出多片"
+    assert all(c.table_data is payloads[0] for c in big_pieces), "大表每一片都挂同一份全表 payload"
+    assert small and small[0].table_data is payloads[1], "后续表挂自己的 payload,严禁错缝到大表续片"
+
+
+def test_filter_and_row_intent_questions_return_none():
+    """v2 审查 high 回归:条件聚合(超过/以下)与行级定位(北京)必须诚实 None ——
+    聚合器无谓词模型,整列求和曾以确定性权威口径算错账。"""
+    from engine_py.rag.aggregator import try_aggregate
+
+    data = {
+        "headers": ["城市", "销售额"],
+        "rows": [["北京", "100"], ["上海", "200"], ["广州", "300"]],
+        "provenance": "native",
+    }
+    hits = [{"sourceUrl": "t.docx", "headerPath": "t", "metadata": {"tableData": data}}]
+    assert try_aggregate("北京销售额合计是多少", hits) is None, "行级定位曾拿全城市总和 600 冒充北京"
+    assert try_aggregate("销售额超过150的一共多少", hits) is None, "条件聚合曾拿全表总和冒充筛选结果"
+    assert try_aggregate("销售额加起来一共多少", hits) is not None, "无过滤的全列聚合照常可算"
+    assert try_aggregate("各城市销售额加起来一共多少", hits) is None, "「城市+销售额」双列精确命中 = 维度歧义,诚实 None"
+
+
+def test_count_honors_column_and_word_overlap_gate():
+    """v2 审查 medium 回归:count 带列时数该列数值单元格;无词面交集的无关
+    表格严禁产出权威行数。"""
+    from engine_py.rag.aggregator import try_aggregate
+
+    data = {
+        "headers": ["城市", "销售额"],
+        "rows": [["北京", "100"], ["上海", "abc"], ["广州", "300"]],
+    }
+    hits = [{"sourceUrl": "t.docx", "headerPath": "t", "metadata": {"tableData": data}}]
+    result = try_aggregate("销售额列有几个有效数值", hits)
+    assert result is not None and result["value"] == 2, "count 带列必须数数值单元格(abc 非数值)"
+    unrelated = [{"sourceUrl": "u.docx", "headerPath": "u", "metadata": {"tableData": {
+        "headers": ["SKU", "库存"], "rows": [["A", "1"], ["B", "2"]],
+    }}}]
+    assert try_aggregate("销售额有几个有效数值", unrelated) is None, "问句与表零词面交集 → None"
+
+
+def test_percent_column_sum_refused_and_avg_annotated():
+    """v2 审查 medium 回归:百分比列 sum 语义可疑必须拒绝;avg/max/min 还原
+    百分数呈现(「合计为 2.7」真值 270% 曾裸出)。"""
+    from engine_py.rag.aggregator import format_result, try_aggregate
+
+    data = {
+        "headers": ["月份", "增长率"],
+        "rows": [["5月", "50%"], ["6月", "60%"]],
+    }
+    hits = [{"sourceUrl": "g.docx", "headerPath": "g", "metadata": {"tableData": data}}]
+    assert try_aggregate("两个月增长率加起来一共多少", hits) is None, "百分比列 sum 必须拒绝"
+    result = try_aggregate("两个月增长率的平均值", hits)
+    assert result is not None and result["percent"] is True
+    assert "55%" in format_result(result), "avg 必须还原百分数呈现"
+
+
+def test_large_number_never_scientific_notation():
+    """v2 审查 medium 回归:%g 曾把 ≥1e6 渲染成「6.2e+06」、>6 位有效数静默截断,
+    与「确定性精确计算」自相矛盾。"""
+    from engine_py.rag.aggregator import format_result
+
+    out = format_result({"value": 6200000.0, "op": "sum", "column": "GMV", "source": "s", "headerPath": "", "percent": False})
+    assert "6,200,000" in out and "e+" not in out
+    out = format_result({"value": 12345678.0, "op": "sum", "column": "GMV", "source": "s", "headerPath": "", "percent": False})
+    assert "12,345,678" in out, "12 位整数必须全精度,严禁 6 位有效数截断"
+    out = format_result({"value": 0.55, "op": "avg", "column": "r", "source": "s", "headerPath": "", "percent": False})
+    assert "0.55" in out
+
+
+def test_non_dict_payload_rejected_without_crash():
+    """v2 审查 medium 回归:metadata.tableData 可被 admin 任意 JSON 写成 list/str,
+    聚合器必须类型闸跳过,严禁 AttributeError 炸掉 grounding_block。"""
+    from engine_py.rag.aggregator import try_aggregate
+
+    hits = [
+        {"sourceUrl": "bad.docx", "headerPath": "b", "metadata": {"tableData": ["not", "a", "dict"]}},
+        {"sourceUrl": "bad2.docx", "headerPath": "b", "metadata": {"tableData": "string 负载"}},
+        {"sourceUrl": "good.docx", "headerPath": "g", "metadata": {"tableData": {
+            "headers": ["项目", "数量"], "rows": [["门店", "5"]],
+        }}},
+    ]
+    result = try_aggregate("数量一共多少", hits)
+    assert result is not None and result["value"] == 5, "非法负载跳过后,合法表照常可算"

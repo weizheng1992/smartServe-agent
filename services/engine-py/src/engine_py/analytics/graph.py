@@ -113,7 +113,7 @@ async def ask(
     if _INJECTION_SHAPE_RE.search(question):
         await _log_unanswered(session_ctx, question)
         await trace.record("unsupported", final_method="injection_guard")
-        return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": "问句含注入形状,已拒绝处理"}, trace)
+        return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」;文档/PRD 里的表格与图表数据请到客服知识问答提问", "detail": "问句含注入形状,已拒绝处理"}, trace)
 
     # 「该找谁」快轨(spec .scratch/owner-routing §3):确定性词面 × owner_mappings,
     # 零 LLM;未命中(不像找谁/目标不认识)返回 None 静默放行原管线。落位在注入闸
@@ -164,7 +164,7 @@ async def ask(
                 return explored
             await _log_unanswered(session_ctx, question)
             await trace.record("unsupported", final_method="none")
-            return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」", "detail": str(err)}, trace)
+            return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」;文档/PRD 里的表格与图表数据请到客服知识问答提问", "detail": str(err)}, trace)
         if isinstance(intent, Clarify):
             if intent.original_question is None:
                 intent = _dc_replace(intent, original_question=rewritten_q or question)  # 实体反问回问时带上有效问句

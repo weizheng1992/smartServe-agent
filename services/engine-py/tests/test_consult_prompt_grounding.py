@@ -94,3 +94,59 @@ if __name__ == "__main__":
     import pytest
 
     pytest.main([__file__])
+
+
+class TestDocumentComputationInjection:
+    """文档 RAG v2(2026-10-17):计算类问句命中结构化切片时,grounding_block
+    必须注入「确定性代码计算」结果并明令 LLM 禁止重新心算;非计算问句零渲染。"""
+
+    def _compute_docs(self) -> list[dict]:
+        return [
+            {
+                "chunkText": "| 兑换项目 | 所需积分 |\n| --- | --- |\n| 10 元优惠券 | 1000 |\n| 保温杯 | 5000 |",
+                "contextualSummary": "积分兑换规则",
+                "sourceUrl": "积分兑换规则.docx",
+                "headerPath": "积分兑换规则 > 兑换门槛",
+                "similarity": 0.75,
+                "metadata": {
+                    "contentType": "table",
+                    "tableData": {
+                        "headers": ["兑换项目", "所需积分"],
+                        "rows": [["10 元优惠券", "1000"], ["保温杯", "5000"]],
+                    },
+                },
+            }
+        ]
+
+    def test_compute_question_injects_authoritative_block(self, monkeypatch):
+        prompt, _ = self._prompt_for("这些礼品所需积分的总计是多少", self._compute_docs(), monkeypatch)
+        assert "DOCUMENT DATA COMPUTATION" in prompt, "计算命中必须注入权威结果块"
+        assert "6,000" in prompt, "sum=1000+5000 必须精确(千分位渲染)"
+        assert "确定性代码计算" in prompt and "重新加总" in prompt, "必须明令 LLM 禁止心算"
+
+    def test_non_compute_question_renders_no_block(self, monkeypatch):
+        prompt, _ = self._prompt_for("积分兑换的规则是什么", self._compute_docs(), monkeypatch)
+        assert "DOCUMENT DATA COMPUTATION" not in prompt, "非计算问句零渲染零行为变化"
+
+    def test_vlm_provenance_keeps_reading_error_annotation(self, monkeypatch):
+        docs = self._compute_docs()
+        docs[0]["metadata"] = {
+            "contentType": "image",
+            "chartData": {
+                "headers": ["类别", "数值"],
+                "rows": [["Q1", "120"], ["Q2", "185"], ["Q3", "240"], ["Q4", "310"]],
+                "provenance": "vlm",
+            },
+        }
+        prompt, _ = self._prompt_for("四个季度的数值加起来一共多少", docs, monkeypatch)
+        assert "855" in prompt and "读数误差" in prompt, "VLM 来源的计算结果必须带读数误差标注"
+
+    def _prompt_for(self, question: str, rag_docs: list[dict], monkeypatch) -> tuple[str, object]:
+        import engine_py.triage.consult_fast_path as cfp
+
+        fake = _CapturingChatModel()
+        monkeypatch.setattr(cfp, "get_chat_model", lambda: fake)
+        answer = asyncio.run(cfp.answer_consult_from_rag(question, rag_docs, [], "极光潮品官方旗舰店"))
+        assert answer
+        assert len(fake.prompts) == 1
+        return fake.prompts[0], fake

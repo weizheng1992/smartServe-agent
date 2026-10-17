@@ -29,6 +29,13 @@ _OP_KEYWORDS: list[tuple[str, str]] = [
 
 _NUMERIC_RE = re.compile(r"^[-+]?[\d,]+(?:\.\d+)?%?$")
 _UNIT_MULTIPLIERS = {"万": 10_000, "亿": 100_000_000, "千": 1_000}
+# 筛选/条件限定语(2026-10-17 v2 对抗审查 high):聚合器只有「列×op」两维,
+# 没有行级谓词模型 —— 问句含条件词面时整列全量求值必然错(「超过5000的一共
+# 多少」曾被答成全表总和 20000,真值 12000),一律诚实 None 交回原链路
+_FILTER_WORDS = (
+    "超过", "以上", "以下", "大于", "小于", "高于", "低于", "不足", "不满",
+    "之内", "以内", "之外", "满足", "至少", "至多", "超出", "少于", "多于",
+)
 
 
 def coerce_number(text: str) -> float | None:
@@ -51,9 +58,29 @@ def coerce_number(text: str) -> float | None:
     if _NUMERIC_RE.match(cleaned):
         value = float(cleaned.rstrip("%"))
         if cleaned.endswith("%"):
-            value = value / 100  # 百分比统一小数口径
+            value = value / 100  # 百分比统一小数口径(出口侧按列 % 标记还原呈现)
         return value * multiplier
     return None
+
+
+def _bigrams(text: str) -> set[str]:
+    return {text[i : i + 2] for i in range(len(text) - 1)} - {" "}
+
+
+def _has_filter_or_row_intent(query: str, data: dict) -> bool:
+    """问句是否含筛选条件或行级定位意图(2026-10-17 v2 对抗审查 high)。
+
+    ① 条件词面命中 → 聚合器没有谓词模型,必须 None;
+    ② 问句二元组命中首列(类目列)的**单元格值**(「北京销售额合计」的「北京」)
+    → 行级过滤意图,整列求和必错 —— 同样 None。
+    检索面管道表就在 LLM 的 prompt 里,交回原链路时 LLM 能看见真值行自行作答。
+    """
+    if any(w in query for w in _FILTER_WORDS):
+        return True
+    rows = data.get("rows") or []
+    cell_values = {str(row[0]).strip() for row in rows if row}  # 首列 = 类目/维度列
+    query_bigrams = _bigrams(query)
+    return any(value and (value in query or (len(value) >= 2 and _bigrams(value) & query_bigrams)) for value in cell_values)
 
 
 def pick_op(query: str) -> str | None:
@@ -75,15 +102,15 @@ def pick_column(headers: list[str], query: str) -> str | None:
         return exact[0]
     if len(exact) > 1:
         return None
-    bigrams = {query[i : i + 2] for i in range(len(query) - 1)} - {" "}
-    contains = [h for h in headers if h and any(bg and bg in h for bg in bigrams)]
+    query_bigrams = _bigrams(query)
+    contains = [h for h in headers if h and (_bigrams(h) & query_bigrams)]
     if len(contains) == 1:
         return contains[0]
     return None  # 无命中或多列命中:歧义诚实交回,严禁猜列
 
 
-def _numeric_column_index(data: dict, column: str | None) -> int | None:
-    """列名 → 可解析数值列下标;列名不存在或整列无数值 → None。
+def _numeric_column_index(data: dict, column: str | None) -> tuple[int | None, bool]:
+    """列名 → (可解析数值列下标, 该列是否含百分比单元格);不存在/无数值 → (None, False)。
 
     严禁「未知列回落首个数值列」式的猜测(2026-10-17 实测曾把「不存在的列」
     静默算成别的列的总和)—— 列错答比答不了危害大。
@@ -91,26 +118,34 @@ def _numeric_column_index(data: dict, column: str | None) -> int | None:
     headers = [str(h) for h in (data.get("headers") or [])]
     rows = data.get("rows") or []
     if column is None:
-        return None
+        return None, False
     candidates = [i for i, h in enumerate(headers) if h == column]
     for index in candidates:
         values = [row[index] if index < len(row) else "" for row in rows]
-        if any(coerce_number(v) is not None for v in values):
-            return index
-    return None
+        parsed = [v for v in (coerce_number(v) for v in values) if v is not None]
+        if parsed:
+            has_percent = any(str(v).strip().endswith("%") for v in values if str(v).strip())
+            return index, has_percent
+    return None, False
 
 
 def aggregate(data: dict, column: str | None, op: str) -> float | None:
     """对 tableData/chartData 做一次确定性聚合;非数值列/空行集诚实 None。
 
-    count 特例:column None 时返回数据行数(数行数不需要列)。
+    count:column None 时返回数据行数;column 非 None 时返回该列可解析数值
+    单元格数(v2 审查修复:此前恒返回全表行数,列解析被丢弃)。
     """
     rows = data.get("rows") or []
     if op == "count":
-        return float(len(rows))
+        if column is None:
+            return float(len(rows))
+        index, _has_percent = _numeric_column_index(data, column)
+        if index is None:
+            return None
+        return float(sum(1 for row in rows if index < len(row) and coerce_number(row[index]) is not None))
     if column is None:
         return None
-    index = _numeric_column_index(data, column)
+    index, _has_percent = _numeric_column_index(data, column)
     if index is None:
         return None
     values = [coerce_number(row[index]) for row in rows if index < len(row)]
@@ -148,9 +183,9 @@ def _single_numeric_column(data: dict) -> str | None:
 def try_aggregate(query: str, rag_results: list[dict]) -> dict | None:
     """检索结果上的规则意图解析 + 确定性求值(消费方唯一入口)。
 
-    返回 None = 意图不明/无计算面/列歧义/非数值,调用方必须回落原 LLM 链路
-    并诚实作答,严禁拿 None 编数。命中返回:
-    {"value", "op", "column", "provenance", "source", "headerPath", "annotated"}
+    返回 None = 意图不明/无计算面/列歧义/非数值/含筛选或行级过滤意图,调用方
+    必须回落原 LLM 链路并诚实作答,严禁拿 None 编数。命中返回:
+    {"value", "op", "column", "provenance", "source", "headerPath", "annotated", "percent"}
     """
     op = pick_op(query)
     if op is None:
@@ -161,15 +196,22 @@ def try_aggregate(query: str, rag_results: list[dict]) -> dict | None:
         table_data = meta.get("tableData")
         chart_data = meta.get("chartData")
         data = table_data or chart_data
-        if not data:
-            continue
+        if not isinstance(data, dict):
+            continue  # 负载类型闸:v2 审查实证 admin 任意 metadata 可写 list/str,不闸会 AttributeError
+        if _has_filter_or_row_intent(query, data):
+            continue  # 条件聚合/行级定位意图:聚合器无谓词模型,交回 LLM(检索面原文在场)
         column = pick_column([str(h) for h in (data.get("headers") or [])], query)
         if column is None and table_data is None and chart_data is not None:
             # 图表数值列按结构定位(唯一可解析列);表格多列歧义严禁此回落
             column = _single_numeric_column(chart_data)
+        if op == "count" and column is None and not (_bigrams(query) & _table_word_set(data)):
+            continue  # count 无列时须与表词面有交集,防「政策有几个例外条款」误中无关表格行数
         value = aggregate(data, column, op)
         if value is None:
             continue
+        _index, has_percent = _numeric_column_index(data, column)
+        if has_percent and op == "sum":
+            continue  # 百分比列求和语义可疑(v2 审查:「合计为 2.7」真值 270%),诚实拒绝
         best = {
             "value": value,
             "op": op,
@@ -177,6 +219,7 @@ def try_aggregate(query: str, rag_results: list[dict]) -> dict | None:
             "provenance": (data.get("provenance") or "table"),
             "source": item.get("sourceUrl") or item.get("docTitle") or "",
             "headerPath": item.get("headerPath") or "",
+            "percent": has_percent,
         }
         break  # 首个可算的命中即用(检索序即置信序)
     if best is None:
@@ -185,10 +228,33 @@ def try_aggregate(query: str, rag_results: list[dict]) -> dict | None:
     return best
 
 
+def _table_word_set(data: dict) -> set[str]:
+    """表头 + 首列单元格值的二元组集合(count 误伤闸的词面交集域)。"""
+    words: set[str] = set()
+    for h in data.get("headers") or []:
+        words |= _bigrams(str(h))
+    for row in (data.get("rows") or [])[:20]:
+        if row:
+            words |= _bigrams(str(row[0]))
+    return words
+
+
 def format_result(result: dict) -> str:
-    """聚合结果 → 中文一句话(带出处;VLM 读数强制读数误差标注)。"""
+    """聚合结果 → 中文一句话(带出处;VLM 读数强制读数误差标注)。
+
+    数值渲染严禁 %g(2026-10-17 v2 审查:6 位有效数字 + ≥1e6 切科学计数法,
+    「6.2e+06」「1.23457e+07」曾以确定性权威口径注入)—— 整数千分位、浮点
+    repr 全精度往返。
+    """
     value = result["value"]
-    display = f"{value:g}"
+    if result.get("percent"):
+        display = f"{value * 100:g}%"
+    elif isinstance(value, float) and value.is_integer():
+        display = f"{int(value):,}"
+    elif isinstance(value, float):
+        display = repr(value)
+    else:
+        display = f"{value:,}"
     op_label = {"sum": "合计", "avg": "平均值", "max": "最大值", "min": "最小值", "count": "行数"}[result["op"]]
     column_part = f"「{result['column']}」列" if result.get("column") else ""
     annotation = "(数值读自图表,可能存在读数误差)" if result.get("annotated") else ""

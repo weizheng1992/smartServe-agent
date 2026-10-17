@@ -30,6 +30,9 @@ TABLE_MAX_CHUNK_SIZE = 1500
 _HEADER_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _MD_IMAGE_LINE_RE = re.compile(r"^!\[([^\]]*)\]\((/api/uploads/[^)]+)\)\s*$")
 _HTML_TABLE_OPEN_RE = re.compile(r"^<table[ >]", re.IGNORECASE)
+# parse 层的表格负载锚点(先于通用 <!-- 丢弃消费):行组切分把一张表扇出
+# k 个切片,标记让每一片都取到同一份全表 payload —— 序号隐式对齐会错缝
+_DOC_TABLE_MARKER_RE = re.compile(r"^<!--DOC-TABLE:(\d+)-->\s*$")
 
 
 @dataclass
@@ -68,22 +71,33 @@ def chunk_document(
     category: str,
     source_format: str,
     doc_title: str,
+    table_payloads: list[dict | None] | None = None,
 ) -> list[DocumentChunk]:
     """Markdown 全文 → 切片序列。doc_title 须由调用方给缺省(文件名词干),
-    首个一级标题出现时升格覆盖为文档标题。"""
+    首个一级标题出现时升格覆盖为文档标题。
+
+    table_payloads:parse 层的 `<!--DOC-TABLE:i-->` 锚定负载(结构化计算面);
+    传入时,标记后的管道表切片(含行组切分的每一片)都携带同一份全表
+    tableData —— 任一片被召回都能整表聚合。不传时标记行按注释丢弃(纯文本面)。
+    """
     chunks: list[DocumentChunk] = []
     header_stack: list[tuple[int, str]] = []  # (级别, 标题),级别 >3 收敛到 3(docling 可出 4-6 级)
     resolved_title = doc_title
     title_resolved = False
+    payload_list = table_payloads if table_payloads is not None else []
+    pending_payload_index: int | None = None
 
     def _current_header_path() -> str:
         if header_stack:
             return " > ".join(title for _, title in header_stack)
         return resolved_title  # 首个标题前的前置段落:挂文档标题,不静默丢
 
-    def _emit(kind: str, text: str, image_url: str | None = None) -> None:
+    def _emit(kind: str, text: str, image_url: str | None = None, payload_index: int | None = None) -> None:
         if not text.strip():
             return
+        table_data = None
+        if kind == "table" and payload_index is not None and payload_list and payload_index < len(payload_list):
+            table_data = payload_list[payload_index]
         chunks.append(
             DocumentChunk(
                 business_id=business_id,
@@ -95,6 +109,7 @@ def chunk_document(
                 content_type=kind,
                 image_url=image_url,
                 source_format=source_format,
+                table_data=table_data,
             )
         )
 
@@ -113,15 +128,25 @@ def chunk_document(
     while index < len(lines):
         line = lines[index].rstrip()
         index += 1
-        if not line.strip() or line.lstrip().startswith("<!--"):
-            # 空行 = 段落边界保留进缓冲;docling 图片空壳占位(<!-- image -->)丢弃
+        if not line.strip():
+            # 空行 = 段落边界保留进缓冲
             if plain and plain[-1] != "":
                 plain.append("")
+            continue
+
+        marker_match = _DOC_TABLE_MARKER_RE.match(line.strip())
+        if marker_match:
+            pending_payload_index = int(marker_match.group(1))  # 负载锚点:下一个表格块消费
+            continue
+
+        if line.lstrip().startswith("<!--"):
+            # 其余 HTML 注释(docling 图片空壳占位等)丢弃
             continue
 
         header_match = _HEADER_RE.match(line)
         if header_match:
             _flush_plain()
+            pending_payload_index = None  # 锚定失效于任何非表格内容
             level = min(len(header_match.group(1)), 3)
             title = header_match.group(2).strip()
             if not title_resolved and len(header_match.group(1)) == 1:
@@ -142,6 +167,7 @@ def chunk_document(
         image_match = _MD_IMAGE_LINE_RE.match(line.strip())
         if image_match:
             _flush_plain()
+            pending_payload_index = None
             caption = image_match.group(1).strip()
             _emit("image", f"文档插图:{caption or '未生成图片描述'}", image_url=image_match.group(2))
             continue
@@ -153,11 +179,15 @@ def chunk_document(
                 rows.append(lines[index].rstrip())
                 index += 1
             for table_piece in _split_table_chunks(rows):
-                _emit("table", table_piece)
+                # 行组扇出的每一片都挂同一份全表 payload(锚点语义),任一片
+                # 被召回都能整表聚合 —— 这正是切片只碎检索面的设计本意
+                _emit("table", table_piece, payload_index=pending_payload_index)
+            pending_payload_index = None
             continue
 
         if _HTML_TABLE_OPEN_RE.match(line.strip()):
             _flush_plain()
+            pending_payload_index = None  # HTML 退化表无锚定负载
             first = line.strip()
             if "</table>" in first.lower():
                 # 单行自闭合表:整行即一表,严禁向后续行吞并(2026-10-17 对抗审查:
