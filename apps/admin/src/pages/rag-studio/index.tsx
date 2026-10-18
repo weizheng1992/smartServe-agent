@@ -106,9 +106,13 @@ export function RagStudioPage() {
   const [formData, setFormData] = useState<Partial<KnowledgeChunkRecord>>({});
 
   const handleOpenCreate = () => {
+    // 具名租户强制(2026-10-17 窃听族收口):后端对缺省/'all' 一律 400(语料
+    // 是聊天 prompt 的检索来源,租户归属是写侧决策)——前端同律,'all' 视图
+    // 禁止新建,严禁回落 'ecommerce' 假具名(写侧编造,帐篷幻觉同族)
+    if (selectedTenantId === 'all') return;
     setFormData({
       id: `chunk_${Date.now()}`,
-      businessId: selectedTenantId === 'all' ? 'ecommerce' : selectedTenantId,
+      businessId: selectedTenantId,
       docTitle: '',
       category: 'product_knowledge',
       content: '',
@@ -260,7 +264,9 @@ export function RagStudioPage() {
             <button
               type="button"
               onClick={handleOpenCreate}
-              className="px-3.5 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+              disabled={selectedTenantId === 'all'}
+              title={selectedTenantId === 'all' ? '上帝视角禁止写入:请先选定具体商户租户' : undefined}
+              className="px-3.5 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-900"
             >
               <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

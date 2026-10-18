@@ -46,12 +46,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 # 第三方合同面 /spi/v1/* 反而裸奔;审批面 API-key 鉴权自守,非 TS 规格限流对象)。
 # store 挂商城面(2026-10-15 安全审计 #2:含无鉴权领券写面,伪造 userId 轮换
 # 领券/量控耗尽的脚本滥用在 IP 维被节流;商城匿名无租户头,实际主要走 IP 桶)。
-_RATE_SCOPES = (("/api/chat", "chat"), ("/spi/v1", "spi"), ("/api/store", "store"))
+# rag 挂知识库面(2026-10-17 窃听族收口 resource-1:重摄取同步 docling+VLM
+# 分钟级管线,匿名可打即资源耗尽面;列/写/删/传/查同前缀一网节流)。
+_RATE_SCOPES = (("/api/chat", "chat"), ("/spi/v1", "spi"), ("/api/store", "store"), ("/api/rag", "rag"))
 
 _DEFAULT_LIMITS = {
     "chat": {"tenant": 60, "ip": 120},
     "spi": {"tenant": 300, "ip": 600},
     "store": {"tenant": 120, "ip": 240},
+    "rag": {"tenant": 30, "ip": 60},
 }
 
 # KEYS=各维度窗口键;ARGV=[now_ms, window_ms, limit_1..N, member_1..N]

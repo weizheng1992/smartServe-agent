@@ -558,7 +558,12 @@ async def add_rag_document(body: RagDocIn, x_tenant_id: str | None = Header(None
     chunk_text = (body.chunkText or body.content or "").strip()
     if not chunk_text:
         raise HTTPException(422, "chunkText (或 content 别名) 不能为空")
-    business_id = body.businessId or x_tenant_id or "ecommerce"
+    # 具名租户强制(2026-10-17 窃听族收口 sec-2):语料是聊天 prompt 的检索来源,
+    # 租户归属是写侧决策。此前 body 具名即可直入任意租户语料、缺省兜底
+    # "ecommerce" 静默落演示租户 —— 与 upload 同律,'all' 上帝视角严禁直入。
+    business_id = (body.businessId or x_tenant_id or "").strip()
+    if not business_id or business_id == "all":
+        raise HTTPException(400, "租户必须显式具名(businessId 或 x-tenant-id),'all' 严禁直入语料")
     user_meta = body.metadata or {}
     # 用户自拟标题/分类优先,缺省才落平台默认 —— 此前硬编码 "知识文档"/"通用政策" 覆盖入参,
     # 管理台新建切片标题永远显示成兜底名(2026-09-13 修复)
@@ -585,11 +590,13 @@ async def add_rag_document(body: RagDocIn, x_tenant_id: str | None = Header(None
 
 @router.delete("/api/rag/documents/{doc_id}")
 async def delete_rag_document(doc_id: str, tenantId: str | None = Query(None), x_tenant_id: str | None = Header(None)):
-    tenant_id = tenantId or x_tenant_id
+    # 具名租户强制(2026-10-17 窃听族收口 sec-2):空头曾免 WHERE,凭 doc_id
+    # 即可删任意租户文档。'all' 上帝视角严禁挂删除。
+    tenant_id = (tenantId or x_tenant_id or "").strip()
+    if not tenant_id or tenant_id == "all":
+        raise HTTPException(400, "删除必须显式具名租户(tenantId 或 x-tenant-id),'all' 严禁")
     async with get_session() as session:
-        stmt = select(RagDocumentRow).where(RagDocumentRow.id == doc_id)
-        if tenant_id and tenant_id != "all":
-            stmt = stmt.where(RagDocumentRow.business_id == tenant_id)
+        stmt = select(RagDocumentRow).where(RagDocumentRow.id == doc_id, RagDocumentRow.business_id == tenant_id)
         row = (await session.execute(stmt)).scalar_one_or_none()
         if not row:
             raise HTTPException(404, f"Document with ID '{doc_id}' not found in database")

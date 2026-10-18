@@ -1785,8 +1785,40 @@ class TestRagDocuments:
         empty_res = await client.post("/api/rag/documents", headers={"x-tenant-id": "nike"}, json={})
         assert empty_res.status_code == 422
 
-        await client.delete(f"/api/rag/documents/{data['id']}")
-        await client.delete(f"/api/rag/documents/{alias_res.json()['data']['id']}")
+        await client.delete(f"/api/rag/documents/{data['id']}", headers={"x-tenant-id": "nike"})
+        await client.delete(
+            f"/api/rag/documents/{alias_res.json()['data']['id']}", headers={"x-tenant-id": "nike"}
+        )
+
+    async def test_write_faces_require_named_tenant(self, client, contract_fixtures):
+        """写/删具名租户强制(2026-10-17 窃听族收口 sec-2):缺省/'all' 一律 400 ——
+        此前 add 缺省兜底 ecommerce 静默落演示租户、delete 空头免 WHERE 全库可删。"""
+        # add:双头皆缺 → 400(HTTPException 形 {"detail": …})
+        no_tenant = await client.post("/api/rag/documents", json={"chunkText": "x"})
+        assert no_tenant.status_code == 400
+        assert "具名" in no_tenant.json()["detail"]
+        # add:'all' → 400(上帝视角严禁直入语料)
+        all_view = await client.post(
+            "/api/rag/documents", headers={"x-tenant-id": "all"}, json={"chunkText": "x"}
+        )
+        assert all_view.status_code == 400
+
+        # delete:空头/'all' → 400 且文档仍在;具名删除放行
+        created = await client.post(
+            "/api/rag/documents", headers={"x-tenant-id": "nike"}, json={"chunkText": f"具名闸锚点 {_TS}"}
+        )
+        assert created.status_code == 201
+        doc_id = created.json()["data"]["id"]
+        bare_del = await client.delete(f"/api/rag/documents/{doc_id}")
+        assert bare_del.status_code == 400
+        assert "具名" in bare_del.json()["detail"]
+        all_del = await client.delete(f"/api/rag/documents/{doc_id}", headers={"x-tenant-id": "all"})
+        assert all_del.status_code == 400
+
+        still = await client.get("/api/rag/documents", params={"tenantId": "nike"})
+        assert any(d["id"] == doc_id for d in still.json()["data"]), "空头/'all' 删除必须不生效"
+        named_del = await client.delete(f"/api/rag/documents/{doc_id}", headers={"x-tenant-id": "nike"})
+        assert named_del.status_code == 200
 
     async def test_query_returns_honest_empty_without_fake_scores(self, client, contract_fixtures):
         """拆除「前 N 条文档 + 硬编码 0.75」假召回兜底:无命中时必须诚实空。"""
