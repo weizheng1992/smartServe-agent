@@ -120,8 +120,11 @@ def _build_document_sources(rag_documents: list[dict], max_sources: int = 4, max
                 "snippet": None,
                 "imageUrl": image_url,
                 "tableMarkdown": doc.get("chunkText") if content_type == "table" else None,
+                # 表格切片原文 = docling 确定性解析(零读数误差)→ native;
+                # 闭集须与 types 契约 'native'|'extracted'|'vlm' 对齐,漏出
+                # 集外的值(旧 "table")前端 ProvenanceBadge 静默不渲染。
                 "provenance": (meta.get("chartData") or {}).get("provenance")
-                or ("table" if content_type == "table" else None),
+                or ("native" if content_type == "table" else None),
             }
         )
     return sources

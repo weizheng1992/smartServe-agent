@@ -39,6 +39,10 @@ def test_rich_media_hits_produce_document_source_card():
     assert len(data["sources"]) == 2
     assert data["sources"][0]["imageUrl"] == "/api/uploads/rag/a.png"
     assert data["sources"][1]["tableMarkdown"].startswith("| 项目 |"), "表格切片原文可直接渲染"
+    assert data["sources"][1]["provenance"] == "native", (
+        "表格切片 = docling 确定性解析零读数误差,provenance 闭集 'native'|'extracted'|'vlm'"
+        "(types 契约),漏出集外值前端徽章静默丢失"
+    )
 
 
 def test_text_only_hits_produce_no_card():
@@ -63,7 +67,7 @@ def test_image_cap_and_dedupe():
     docs = [_image_doc(f"/api/uploads/rag/{i}.png", path=f"章节{i}") for i in range(5)]
     sources = _build_document_sources(docs)
     assert len([s for s in sources if s["imageUrl"]]) == 3, "图片上限 3 张"
-    docs_dup = [_image_doc(f"/api/uploads/rag/dup.png")] * 2  # 同文档同章节同类型 = 重复项
+    docs_dup = [_image_doc("/api/uploads/rag/dup.png")] * 2  # 同文档同章节同类型 = 重复项
     assert len(_build_document_sources(docs_dup)) == 1, "重复项去重"
 
 
