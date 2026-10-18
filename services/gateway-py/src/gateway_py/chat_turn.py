@@ -24,6 +24,44 @@ from engine_py.run_agent import AgentJobInput, run_agent
 
 from . import conversation_repo
 
+# 后台受理任务持有表(async-1 作业蒸发收口,2026-10-18):asyncio 对 task 是
+# 弱引用 —— 即弃 create_task 可被 GC 中途打断,异常无人 retrieve 只在 GC 时
+# 打一条「Task exception was never retrieved」。强引用 + done 回调:自清、
+# 异常带 jobId 留痕、并注入合成 result 帧让 SSE 流诚实收口(tail 只认 result
+# 终局,不注入则流侧心跳挂死到客户端断连)。analytics ask 面 _ASK_PRODUCERS
+# 同款机制(其对照在对抗核验 stream-5 中成立)。
+_ASYNC_TURNS: set[asyncio.Task] = set()
+_TURN_DEGRADED_OUTPUT = "抱歉,本次回答中断了,请稍后重试。"
+
+
+async def _emit_terminal_frame(job_id: str) -> None:
+    """终局帧兜底:仅图前段异常逃逸时注入(引擎图内异常自带降级 result 帧)。"""
+    try:
+        from engine_py.event_bus import publish_agent_event
+
+        await publish_agent_event(
+            job_id,
+            "result",
+            {"output": _TURN_DEGRADED_OUTPUT, "cards": [], "degraded": True},
+        )
+    except Exception as err:
+        print(f"[ChatTurn] 后台受理作业 {job_id} 终局帧注入失败: {err}")
+
+
+def _on_background_turn_done(job_id: str):
+    def _cb(task: asyncio.Task) -> None:
+        _ASYNC_TURNS.discard(task)
+        if task.cancelled():
+            print(f"[ChatTurn] 后台受理作业 {job_id} 已取消(S2c)")
+            return
+        err = task.exception()
+        if err is None:
+            return
+        print(f"[ChatTurn] 后台受理作业 {job_id} 异常逃逸: {err!r}")
+        asyncio.get_running_loop().create_task(_emit_terminal_frame(job_id))
+
+    return _cb
+
 
 class ChatTurnResult(TypedDict):
     """受理脊返回契约(夜评 2026-10-07 smell 清尾):两路由(chat/merchant)与
@@ -120,7 +158,9 @@ async def accept_chat_turn(
         storeCart=store_cart or [],
     )
     if not sync:
-        asyncio.create_task(run_agent(job))
+        task = asyncio.create_task(run_agent(job))
+        _ASYNC_TURNS.add(task)
+        task.add_done_callback(_on_background_turn_done(job_id))
         return {"paused": False, "jobId": job_id, "output": "", "cards": [], "state": None}
 
     state = await run_agent(job)
