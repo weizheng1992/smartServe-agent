@@ -18,12 +18,16 @@ from engine_py.db import (
     Thread,
     get_session,
 )
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.orm import defer
 
 router = APIRouter()
+
+# 平台闸(SaaS 管控台全族,2026-10-18 平台面零鉴权收口):本文件全部路由为
+# 跨租户上帝视角,须持 role='platform_admin' 员工 JWT(自报 x-tenant-id 时代终结)。
+from ..tenant_scope import StaffIdentity, require_platform_admin
 
 
 def _date_str(value) -> str | None:
@@ -59,7 +63,7 @@ def _guardrail_item(r: GuardrailRule) -> dict:
 
 
 @router.get("/api/guardrails")
-async def list_guardrails(tenantId: str | None = Query(None), x_tenant_id: str | None = Header(None)):
+async def list_guardrails(_platform: StaffIdentity = Depends(require_platform_admin), tenantId: str | None = Query(None), x_tenant_id: str | None = Header(None)):
     tenant_id = tenantId or x_tenant_id
     async with get_session() as session:
         stmt = select(GuardrailRule).order_by(desc(GuardrailRule.created_at))
@@ -71,7 +75,7 @@ async def list_guardrails(tenantId: str | None = Query(None), x_tenant_id: str |
 
 
 @router.post("/api/guardrails", status_code=201)
-async def create_guardrail(body: GuardrailRuleIn, x_tenant_id: str | None = Header(None)):
+async def create_guardrail(body: GuardrailRuleIn, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     async with get_session() as session:
         row = GuardrailRule(
             id=f"gr_{int(time.time() * 1000)}",
@@ -90,7 +94,7 @@ async def create_guardrail(body: GuardrailRuleIn, x_tenant_id: str | None = Head
 
 
 @router.put("/api/guardrails/{rule_id}")
-async def update_guardrail(rule_id: str, body: dict, x_tenant_id: str | None = Header(None)):
+async def update_guardrail(rule_id: str, body: dict, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     async with get_session() as session:
         stmt = select(GuardrailRule).where(GuardrailRule.id == rule_id)
         # 租户所有权闸(2026-10-02 code-review:此前按 id 裸查,具名租户凭 id
@@ -123,7 +127,7 @@ async def update_guardrail(rule_id: str, body: dict, x_tenant_id: str | None = H
 
 
 @router.delete("/api/guardrails/{rule_id}")
-async def delete_guardrail(rule_id: str, x_tenant_id: str | None = Header(None)):
+async def delete_guardrail(rule_id: str, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     async with get_session() as session:
         stmt = select(GuardrailRule).where(GuardrailRule.id == rule_id)
         # 租户所有权闸(同 update_guardrail,2026-10-02 code-review)
@@ -184,6 +188,7 @@ def _assert_persona_mutable(row: LongMemoryFact, tenant_id: str | None) -> None:
 
 @router.get("/api/personas")
 async def list_personas(
+    _platform: StaffIdentity = Depends(require_platform_admin),
     tenantId: str | None = Query(None),
     userId: str | None = Query(None),
     x_tenant_id: str | None = Header(None),
@@ -212,7 +217,7 @@ async def list_personas(
 
 
 @router.post("/api/personas", status_code=201)
-async def create_persona(body: PersonaFactIn, x_tenant_id: str | None = Header(None)):
+async def create_persona(body: PersonaFactIn, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     # 🛡️ 铸造面同闸(persona-hardening 06 补 05 不对称):global 画像只归平台
     # 视角铸造,具名租户头不得借 POST 造出全员可见事实(与 PUT/DELETE 闸同不变量)。
     if body.scope == "global" and x_tenant_id and x_tenant_id != "all":
@@ -238,7 +243,7 @@ async def create_persona(body: PersonaFactIn, x_tenant_id: str | None = Header(N
 
 
 @router.put("/api/personas/{fact_id}")
-async def update_persona(fact_id: str, body: dict, x_tenant_id: str | None = Header(None)):
+async def update_persona(fact_id: str, body: dict, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     async with get_session() as session:
         row = (
             await session.execute(select(LongMemoryFact).where(LongMemoryFact.id == fact_id))
@@ -258,7 +263,7 @@ async def update_persona(fact_id: str, body: dict, x_tenant_id: str | None = Hea
 
 
 @router.delete("/api/personas/{fact_id}")
-async def delete_persona(fact_id: str, x_tenant_id: str | None = Header(None)):
+async def delete_persona(fact_id: str, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     async with get_session() as session:
         row = (
             await session.execute(select(LongMemoryFact).where(LongMemoryFact.id == fact_id))
@@ -292,7 +297,7 @@ _TENANT_NAMES = {
 
 
 @router.get("/api/billing/usages")
-async def billing_usages():
+async def billing_usages(_platform: StaffIdentity = Depends(require_platform_admin)):
     async with get_session() as session:
         quotas = (await session.execute(select(TenantBillingQuota))).scalars().all()
         quota_map = {q.business_id: q.monthly_limit_tokens for q in quotas}
@@ -349,7 +354,7 @@ class QuotaIn(BaseModel):
 
 
 @router.put("/api/billing/quota")
-async def update_quota(body: QuotaIn):
+async def update_quota(body: QuotaIn, _platform: StaffIdentity = Depends(require_platform_admin)):
     async with get_session() as session:
         existing = (
             await session.execute(select(TenantBillingQuota).where(TenantBillingQuota.business_id == body.businessId))
@@ -406,7 +411,7 @@ def _eval_item(r: EvalRunRecordRow) -> dict:
 
 
 @router.get("/api/evals/results")
-async def eval_results(limit: int = Query(200, ge=1, le=1000)):
+async def eval_results(_platform: StaffIdentity = Depends(require_platform_admin), limit: int = Query(200, ge=1, le=1000)):
     """评测批次历史(追加型日志表,newest-first)。
 
     2026-09-30 夜审:原实现无界全表扫,随 test:prompt:record 累积线性变慢;
@@ -421,7 +426,7 @@ async def eval_results(limit: int = Query(200, ge=1, le=1000)):
 
 
 @router.get("/api/evals/results/{run_record_id}/cases")
-async def eval_run_cases(run_record_id: str):
+async def eval_run_cases(run_record_id: str, _platform: StaffIdentity = Depends(require_platform_admin)):
     """评测批次样本下钻(admin-readiness 10):逐用例 case_name/passed/score/
     latencyMs/error。关联键:eval_run_records.id 即 "eval_run_" + eval_runs.id
     (导入器同事务写入,wayfinder 005);解析失败/无样本诚实空列表。"""
@@ -468,7 +473,7 @@ class TriggerEvalIn(BaseModel):
 
 
 @router.post("/api/evals/run")
-async def trigger_eval(body: TriggerEvalIn):
+async def trigger_eval(body: TriggerEvalIn, _platform: StaffIdentity = Depends(require_platform_admin)):
     """评测随机生成器已下线(wayfinder 005):不再产出假指标。
 
     真实评测由 ``bun run test:prompt:record`` 执行 promptfoo 三套件并自动入库
@@ -487,6 +492,7 @@ async def trigger_eval(body: TriggerEvalIn):
 @router.get("/api/logs")
 async def system_logs(
     request: Request,
+    _platform: StaffIdentity = Depends(require_platform_admin),
     tenantId: str | None = Query(None),
     level: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),

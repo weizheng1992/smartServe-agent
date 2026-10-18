@@ -1,3 +1,4 @@
+export { default as LoginPage } from './login';
 export * from './dashboard';
 export * from './tenants';
 export * from './conversations';

@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { AdminLayout } from './components/layout';
+import { authToken } from './lib/api';
 import {
   AuditsPage,
   BillingPage,
@@ -13,13 +14,27 @@ import {
   SkillsToolsPage,
   SystemLogsPage,
   TenantsPage,
+  LoginPage,
 } from './pages';
+
+function RequireAuth({ children }: { children: React.ReactElement }) {
+  // 平台闸前端半边(2026-10-18):无 token 一律回登录页
+  if (!authToken()) return <Navigate to="/login" replace />;
+  return children;
+}
 
 export function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<AdminLayout />}>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          element={
+            <RequireAuth>
+              <AdminLayout />
+            </RequireAuth>
+          }
+        >
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/tenants" element={<TenantsPage />} />

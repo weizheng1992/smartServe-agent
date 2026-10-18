@@ -218,28 +218,52 @@ class TestTimelineSelfHeal:
         assert timeline["thread"]["threadId"] == tid
 
 
+@pytest.fixture()
+async def platform(client):
+    """平台运营者 JWT(platform@aurora;ASGITransport 不触发 lifespan,显式种子)。"""
+    import os
+
+    from engine_py.analytics import rbac
+
+    await rbac.ensure_platform_admin()
+    password = os.environ.get("E2E_ACCOUNT_PASSWORD", "agent-all-dev")
+    r = await client.post("/api/auth/login", json={"email": "platform@aurora", "password": password})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['data']['token']}"}
+
+
 class TestGuardrailTenantScope:
-    async def test_cross_tenant_write_delete_rejected_404(self, client):
+    async def test_cross_tenant_write_delete_rejected_404(self, client, platform):
+        # 平台闸(2026-10-18):guardrails 写面须持 platform_admin JWT;具名租户
+        # 头在平台身份下仍决定所有权 WHERE(他租 404 语义不变)
         create = await client.post(
             "/api/guardrails",
-            headers={"x-tenant-id": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={"ruleName": "隔离闸-禁词", "ruleType": "keyword", "pattern": "越权"},
         )
         assert create.status_code == 201
         rule_id = create.json()["data"]["id"]
 
         put_foreign = await client.put(
-            f"/api/guardrails/{rule_id}", headers={"x-tenant-id": "adidas"}, json={"severity": "low"}
+            f"/api/guardrails/{rule_id}",
+            headers={**platform, "x-tenant-id": "adidas"},
+            json={"severity": "low"},
         )
         assert put_foreign.status_code == 404
-        del_foreign = await client.delete(f"/api/guardrails/{rule_id}", headers={"x-tenant-id": "adidas"})
+        del_foreign = await client.delete(
+            f"/api/guardrails/{rule_id}", headers={**platform, "x-tenant-id": "adidas"}
+        )
         assert del_foreign.status_code == 404
 
         put_own = await client.put(
-            f"/api/guardrails/{rule_id}", headers={"x-tenant-id": "nike"}, json={"severity": "low"}
+            f"/api/guardrails/{rule_id}",
+            headers={**platform, "x-tenant-id": "nike"},
+            json={"severity": "low"},
         )
         assert put_own.status_code == 200
-        del_own = await client.delete(f"/api/guardrails/{rule_id}", headers={"x-tenant-id": "nike"})
+        del_own = await client.delete(
+            f"/api/guardrails/{rule_id}", headers={**platform, "x-tenant-id": "nike"}
+        )
         assert del_own.status_code == 200
 
 

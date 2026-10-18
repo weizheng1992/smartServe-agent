@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { Combobox } from 'ui';
+import { clearSession } from '../../lib/api';
 import { useAdminTenantStore } from '../../store/tenantStore';
 
 const PAGE_TITLE_MAP: Record<string, { title: string; subtitle: string }> = {
@@ -57,6 +58,7 @@ export function Header() {
     loadTenantsFromServer();
   }, [loadTenantsFromServer]);
 
+  const navigate = useNavigate();
   const currentPath = Object.keys(PAGE_TITLE_MAP).find((p) => location.pathname.startsWith(p)) || '/tenants';
 
   const pageInfo = PAGE_TITLE_MAP[currentPath] || {
@@ -95,15 +97,25 @@ export function Header() {
           compact
         />
 
-        {/* 平台管理员身份 */}
+        {/* 平台管理员身份 + 退出(平台闸会话,2026-10-18) */}
         <div className="flex items-center gap-2 pl-3 border-l border-slate-200">
           <div className="w-7 h-7 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-semibold">
             AD
           </div>
           <div className="hidden sm:block text-left">
             <div className="text-xs font-semibold text-slate-800">管理控制台</div>
-            <div className="text-[10px] text-slate-400">超级管理员</div>
+            <div className="text-[10px] text-slate-400">platform_admin</div>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              clearSession();
+              navigate('/login');
+            }}
+            className="ml-1 text-[11px] text-slate-500 hover:text-slate-900 border border-slate-200 hover:border-slate-400 rounded px-2 py-1 transition-colors cursor-pointer"
+          >
+            退出
+          </button>
         </div>
       </div>
     </header>

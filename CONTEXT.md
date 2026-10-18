@@ -97,7 +97,7 @@ The RAG facade across multi-tenant knowledge bases (see `docs/architecture/conte
 
 `services/gateway-py/src/gateway_py/` 的三个共享缝,路由声明、不再各自装配:
 
-- **`tenant_scope.py`(租户边界与员工身份闸)**:身份解析(`resolve_staff` / `require_staff` / `optional_staff`,JWT→在职员工,租户由 DB 行带出)、租户边界(`bound_tenant`,他租/`all` 聚合 403)、商户注册表闸(`ensure_tenant_registered`,raise 型 fail-closed)、`same_tenant` 谓词与 `staff_scope` Depends。**两形规则**(契约钉死):身份/租户闸走 HTTPException `{"detail"}` 形,业务闸走 `GateError` → 全局 handler 渲染 `{"success": false, error|message}`。
+- **`tenant_scope.py`(租户边界与员工身份闸)**:身份解析(`resolve_staff` / `require_staff` / `optional_staff`,JWT→在职员工,租户由 DB 行带出)、租户边界(`bound_tenant`,他租/`all` 聚合 403)、商户注册表闸(`ensure_tenant_registered`,raise 型 fail-closed)、`same_tenant` 谓词与 `staff_scope` Depends。**平台闸**(2026-10-18 平台面零鉴权收口):`require_platform_admin`(管控台全族,员工 JWT 且 role='platform_admin'——角色名沿用 spi/gatekeeper 白名单;账号 `rbac.ensure_platform_admin` 启动期种子,business_id='all')与 `operator_scope`(坐席/管控双面:员工 JWT 必需,platform_admin 跨租户缺省 all,普通员工钉本租户——自报租户头退役)。**两形规则**(契约钉死):身份/租户闸走 HTTPException `{"detail"}` 形,业务闸走 `GateError` → 全局 handler 渲染 `{"success": false, error|message}`。
 - **`approval_actions.py`(审批动作装配)**:HITL 动作三通道(商户运营台 / 管理台顾客+坐席 / SPI)共享的机制单点 —— 动作词表(`CUSTOMER_ACTIONS`/`OPERATOR_ACTIONS`/`STAFF_REVIEW_ACTIONS`/`SPI_ACTIONS`)、对象级租户闸(ensure_*=success 形 / assert_*=detail 形)、humanReply 别名、operator 快照、引擎载荷装配。SPI 通道归属闸 2026-10-04 收口(全局 key 不得跨租户核销工单)。
 - **`sse_tail.py`(SSE 读流泵)**:chat / analytics ask / merchant store 三份手抄泵的归一单点 —— `tail_stream`(历史回放 + XREAD 尾随 + 心跳 + 终局收口,`__done__` 类哨兵不出 SSE 线)、`tail_pubsub`(顾客侧频道 adapter)、`streaming_headers`。测试桩点唯一:monkeypatch 本 module 的 `get_client` / `read_agent_events`。
 

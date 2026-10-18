@@ -895,11 +895,13 @@ async def list_conversations(
     search: str | None = Query(None),
     limit: str | None = Query(None),
     offset: str | None = Query(None),
+    tenantId: str | None = Query(None),
     authorization: str | None = Header(None),
 ):
     # 坐席/管控双面闸(2026-10-18 窃听族收口 sec-1 收尾):员工 JWT 必需,
-    # platform_admin 跨租户,普通员工钉本租户 —— 四源自报头 + 'ecommerce' 兜底链退役
-    tenant_id, _identity = await operator_scope(authorization, None)
+    # platform_admin 跨租户(缺省 'all',tenantId query 显式选租户),普通员工
+    # 钉本租户(参数对其忽略)—— 四源自报头 + 'ecommerce' 兜底链退役
+    tenant_id, _identity = await operator_scope(authorization, tenantId)
 
     result = await conversation_repo.list_conversations(
         business_id=tenant_id,
@@ -913,10 +915,14 @@ async def list_conversations(
 
 
 @router.get("/api/conversations/{thread_id}")
-async def get_conversation(thread_id: str, authorization: str | None = Header(None)):
+async def get_conversation(
+    thread_id: str,
+    tenantId: str | None = Query(None),
+    authorization: str | None = Header(None),
+):
     # 属主闸收口(sec-1 实弹:此前匿名可凭 thread_id 读任意租户会话,timeline
     # 租户闸在租户为 None 时整段跳过)—— operator_scope 后租户恒有权威来源
-    tenant_id, _identity = await operator_scope(authorization, None)
+    tenant_id, _identity = await operator_scope(authorization, tenantId)
     timeline = await conversation_repo.get_conversation_timeline(thread_id, tenant_id)
     return {"success": True, "data": timeline}
 
@@ -929,9 +935,12 @@ class ConversationStatusIn(BaseModel):
 
 @router.post("/api/conversations/{thread_id}/status")
 async def update_conversation_status(
-    thread_id: str, body: ConversationStatusIn, authorization: str | None = Header(None)
+    thread_id: str,
+    body: ConversationStatusIn,
+    tenantId: str | None = Query(None),
+    authorization: str | None = Header(None),
 ):
-    tenant_id, _identity = await operator_scope(authorization, None)
+    tenant_id, _identity = await operator_scope(authorization, tenantId)
     updated = await conversation_repo.update_conversation_status(
         thread_id, tenant_id, body.status, body.assignedOperatorId, body.tags
     )
@@ -941,12 +950,16 @@ async def update_conversation_status(
 
 
 @router.get("/api/conversations/{thread_id}/telemetry")
-async def conversation_telemetry(thread_id: str, authorization: str | None = Header(None)):
+async def conversation_telemetry(
+    thread_id: str,
+    tenantId: str | None = Query(None),
+    authorization: str | None = Header(None),
+):
     """会话级真实决策遥测(real-data-only,2026-09-13):按 LangGraph 节点聚合
     llm_call_logs 的调用次数/Token/成本/延迟 —— 此前管理台「LangGraph 决策流」Tab
     整段是前端编造的假节点耗时/假置信度/假运单号,现全部替换为库内真算;
     无遥测记录时诚实空,严禁合成演示链路。"""
-    tenant_id, _identity = await operator_scope(authorization, None)
+    tenant_id, _identity = await operator_scope(authorization, tenantId)
     clean_tenant = (tenant_id or "").lower().strip()
     params: dict = {"tid": thread_id.strip()}
     tenant_filter = ""

@@ -63,6 +63,11 @@ class TestPlatformGate:
 
     async def test_non_platform_staff_403(self, client, contract_fixtures):
         """JWT 有效但非 platform_admin(普通商户员工)→ 403。"""
+        from engine_py.analytics import rbac
+
+        # test@example.com 是 STAFF_SEED_ROSTER 的 aurora 种子员工:登录前幂等补
+        # bcrypt 密码(与 conftest staff_auth 同租户,避免跨租户固定 staff id 撞 PK)
+        await rbac.ensure_defaults("aurora")
         password = os.environ.get("E2E_ACCOUNT_PASSWORD", "agent-all-dev")
         r = await client.post("/api/auth/login", json={"email": "test@example.com", "password": password})
         assert r.status_code == 200, r.text
@@ -97,8 +102,8 @@ class TestTenant:
         assert "config" in body
         assert isinstance(body["timestamp"], str)
 
-    async def test_list_contains_seeded_tenants(self, client, contract_fixtures):
-        res = await client.get("/api/tenant/list")
+    async def test_list_contains_seeded_tenants(self, client, contract_fixtures, platform):
+        res = await client.get("/api/tenant/list", headers=platform)
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
@@ -110,7 +115,7 @@ class TestTenant:
         sample = body["tenants"][0]
         assert isinstance(sample.get("planTier"), str)
 
-    async def test_builtin_tenant_delete_and_disable_protected(self, client, contract_fixtures):
+    async def test_builtin_tenant_delete_and_disable_protected(self, client, contract_fixtures, platform):
         """内置业务域保护(admin-readiness 02):builtin 行禁删、禁停用,
         名称/行业仍可改 —— nike/adidas/ecommerce 是 nightly 评测与密封契约的依赖基线。"""
         from engine_py.db import get_session
@@ -127,13 +132,14 @@ class TestTenant:
             await session.commit()
 
         # 禁删
-        del_res = await client.delete(f"/api/tenant/{builtin_id}")
+        del_res = await client.delete(f"/api/tenant/{builtin_id}", headers=platform)
         assert del_res.status_code == 403
         assert "不可删除" in str(del_res.json())
 
         # 禁停用
         disable_res = await client.put(
             f"/api/tenant/{builtin_id}",
+            headers=platform,
             json={"name": "内置保护契约域", "status": "disabled"},
         )
         assert disable_res.status_code == 403
@@ -142,11 +148,12 @@ class TestTenant:
         # 名称/行业仍可改(status 保持 active)
         rename_res = await client.put(
             f"/api/tenant/{builtin_id}",
+            headers=platform,
             json={"name": "内置保护契约域-改名", "status": "active", "industry": "契约测试"},
         )
         assert rename_res.status_code == 200
 
-        listing = await client.get("/api/tenant/list")
+        listing = await client.get("/api/tenant/list", headers=platform)
         row = next(t for t in listing.json()["tenants"] if t["id"] == builtin_id)
         assert row["name"] == "内置保护契约域-改名"
         assert row["status"] == "active"
@@ -157,13 +164,13 @@ class TestTenant:
             await session.execute(text("DELETE FROM tenants WHERE business_id = :bid").bindparams(bid=builtin_id))
             await session.commit()
 
-    async def test_create_list_delete_roundtrip(self, client, contract_fixtures):
+    async def test_create_list_delete_roundtrip(self, client, contract_fixtures, platform):
         ct_id = f"ct_{_TS}"
-        create_res = await client.post("/api/tenant", json={"id": ct_id, "name": "契约测试租户"})
+        create_res = await client.post("/api/tenant", headers=platform, json={"id": ct_id, "name": "契约测试租户"})
         assert create_res.status_code in (200, 201)
         assert create_res.json()["success"] is True
 
-        list_after_create = await client.get("/api/tenant/list")
+        list_after_create = await client.get("/api/tenant/list", headers=platform)
         created = next((t for t in list_after_create.json()["tenants"] if t["id"] == ct_id), None)
         assert created is not None
 
@@ -173,11 +180,11 @@ class TestTenant:
         assert created["webhookUrl"] is None
         assert created["refundLimit"] is None
 
-        del_res = await client.delete(f"/api/tenant/{created['id']}")
+        del_res = await client.delete(f"/api/tenant/{created['id']}", headers=platform)
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
 
-    async def test_configured_secret_is_write_only_never_echoed(self, client, contract_fixtures):
+    async def test_configured_secret_is_write_only_never_echoed(self, client, contract_fixtures, platform):
         """已配置租户的 apiSecret 是 write-only(2026-10-15 安全审计 #1):
         GET /api/tenant/list 无鉴权依赖,DB 里存了活体密钥也严禁明文回吐 ——
         密钥真源在网关 env(验签消费),DB 字段仅配置面。"""
@@ -205,7 +212,7 @@ class TestTenant:
             )
             await session.commit()
         try:
-            listing = await client.get("/api/tenant/list")
+            listing = await client.get("/api/tenant/list", headers=platform)
             row = next((t for t in listing.json()["tenants"] if t["id"] == st_id), None)
             assert row is not None
             assert row["apiKey"] is None, "密钥必须 write-only,严禁明文回吐"
@@ -220,10 +227,11 @@ class TestTenant:
                 )
                 await session.commit()
 
-    async def test_update_tenant_roundtrip(self, client, contract_fixtures):
+    async def test_update_tenant_roundtrip(self, client, contract_fixtures, platform):
         ut_id = f"ut_{_TS}"
         create_res = await client.post(
             "/api/tenant",
+            headers=platform,
             json={
                 "id": ut_id,
                 "name": "契约测试租户",
@@ -236,6 +244,7 @@ class TestTenant:
 
         upd_res = await client.put(
             f"/api/tenant/{ut_id}",
+            headers=platform,
             json={
                 "name": "契约测试租户V2",
                 "refundLimit": 500,
@@ -249,17 +258,17 @@ class TestTenant:
         assert body["businessId"] == ut_id
 
         # 名称/退款阈值/行业应反映更新后的真实值(industry 落 tenants 表;refundLimit 从 tenant_configs.skills_config 读取)
-        list_res = await client.get("/api/tenant/list")
+        list_res = await client.get("/api/tenant/list", headers=platform)
         updated = next((t for t in list_res.json()["tenants"] if t["id"] == ut_id), None)
         assert updated is not None
         assert updated["name"] == "契约测试租户V2"
         assert updated["refundLimit"] == 500
         assert updated["industry"] == "跨境母婴"
 
-        ghost_res = await client.put(f"/api/tenant/ghost_{_TS}", json={"name": "幽灵租户"})
+        ghost_res = await client.put(f"/api/tenant/ghost_{_TS}", headers=platform, json={"name": "幽灵租户"})
         assert ghost_res.status_code == 404
 
-        await client.delete(f"/api/tenant/{ut_id}")
+        await client.delete(f"/api/tenant/{ut_id}", headers=platform)
 
 
 class TestTenantOnboardingConfig:
@@ -283,112 +292,131 @@ class TestTenantOnboardingConfig:
         ],
     }
 
-    async def test_create_with_onboarding_config_write_and_readback(self, client, contract_fixtures):
+    async def test_create_with_onboarding_config_write_and_readback(self, client, contract_fixtures, platform):
         """创建即携带(2026-09-10):POST /api/tenant 带 onboardingConfig → 校验通过
         即随建租户一并落库,列表回读等值;消除「先建后编辑」两步走。"""
         ct_id = f"otc_{_TS}"
         res = await client.post(
             "/api/tenant",
+            headers=platform,
             json={"id": ct_id, "name": "创建带引导配置租户", "onboardingConfig": self.VALID_ONBOARDING},
         )
         assert res.status_code in (200, 201)
         assert res.json()["success"] is True
 
-        list_res = await client.get("/api/tenant/list")
+        list_res = await client.get("/api/tenant/list", headers=platform)
         row = next((t for t in list_res.json()["tenants"] if t["id"] == ct_id), None)
         assert row is not None
         assert row["onboardingConfig"] == self.VALID_ONBOARDING
 
-        await client.delete(f"/api/tenant/{ct_id}")
+        await client.delete(f"/api/tenant/{ct_id}", headers=platform)
 
-    async def test_create_with_invalid_onboarding_rejected_400(self, client, contract_fixtures):
+    async def test_create_with_invalid_onboarding_rejected_400(self, client, contract_fixtures, platform):
         """创建流错形与 PUT 同姿态:400 诚实失败,且租户不落库(不留半成品行)。"""
         ct_id = f"otc2_{_TS}"
         bad = {**self.VALID_ONBOARDING, "welcomText": "未知键错形"}
         res = await client.post(
             "/api/tenant",
+            headers=platform,
             json={"id": ct_id, "name": "创建错形校验租户", "onboardingConfig": bad},
         )
         assert res.status_code == 400
         assert "onboardingConfig" in res.json()["detail"]
 
-        list_res = await client.get("/api/tenant/list")
+        list_res = await client.get("/api/tenant/list", headers=platform)
         assert next((t for t in list_res.json()["tenants"] if t["id"] == ct_id), None) is None
 
-    async def test_create_without_onboarding_leaves_unconfigured(self, client, contract_fixtures):
+    async def test_create_without_onboarding_leaves_unconfigured(self, client, contract_fixtures, platform):
         """未携带 = 保持未配置(回读 null,首访走平台默认),与编辑态「未携带保留」同语义。"""
         ct_id = f"otc3_{_TS}"
-        res = await client.post("/api/tenant", json={"id": ct_id, "name": "创建不带引导租户"})
+        res = await client.post("/api/tenant", headers=platform, json={"id": ct_id, "name": "创建不带引导租户"})
         assert res.status_code in (200, 201)
 
-        list_res = await client.get("/api/tenant/list")
+        list_res = await client.get("/api/tenant/list", headers=platform)
         row = next((t for t in list_res.json()["tenants"] if t["id"] == ct_id), None)
         assert row is not None
         assert row["onboardingConfig"] is None
 
-        await client.delete(f"/api/tenant/{ct_id}")
+        await client.delete(f"/api/tenant/{ct_id}", headers=platform)
 
-    async def test_valid_onboarding_config_write_and_readback(self, client, contract_fixtures):
+    async def test_valid_onboarding_config_write_and_readback(self, client, contract_fixtures, platform):
         ot_id = f"ot_{_TS}"
-        create_res = await client.post("/api/tenant", json={"id": ot_id, "name": "引导配置测试租户"})
+        create_res = await client.post(
+            "/api/tenant", headers=platform, json={"id": ot_id, "name": "引导配置测试租户"}
+        )
         assert create_res.status_code in (200, 201)
 
         upd_res = await client.put(
             f"/api/tenant/{ot_id}",
+            headers=platform,
             json={"name": "引导配置测试租户", "onboardingConfig": self.VALID_ONBOARDING},
         )
         assert upd_res.status_code == 200
         assert upd_res.json()["success"] is True
 
         # 列表回读:编辑面预填取到的是刚写入的真实配置,非伪造默认
-        list_res = await client.get("/api/tenant/list")
+        list_res = await client.get("/api/tenant/list", headers=platform)
         row = next((t for t in list_res.json()["tenants"] if t["id"] == ot_id), None)
         assert row is not None
         assert row["onboardingConfig"] == self.VALID_ONBOARDING
 
-        await client.delete(f"/api/tenant/{ot_id}")
+        await client.delete(f"/api/tenant/{ot_id}", headers=platform)
 
-    async def test_unknown_top_level_key_rejected_400(self, client, contract_fixtures):
+    async def test_unknown_top_level_key_rejected_400(self, client, contract_fixtures, platform):
         ot_id = f"ot2_{_TS}"
-        await client.post("/api/tenant", json={"id": ot_id, "name": "引导校验测试租户"})
+        await client.post("/api/tenant", headers=platform, json={"id": ot_id, "name": "引导校验测试租户"})
 
         bad = {**self.VALID_ONBOARDING, "welcomText": "未知键错形"}
-        res = await client.put(f"/api/tenant/{ot_id}", json={"name": "引导校验测试租户", "onboardingConfig": bad})
+        res = await client.put(
+            f"/api/tenant/{ot_id}",
+            headers=platform,
+            json={"name": "引导校验测试租户", "onboardingConfig": bad},
+        )
         assert res.status_code == 400
         # FastAPI HTTPException 序列化为 detail;错误信息须点名具体错形供编辑面展示
         assert "onboardingConfig" in res.json()["detail"]
 
-        await client.delete(f"/api/tenant/{ot_id}")
+        await client.delete(f"/api/tenant/{ot_id}", headers=platform)
 
-    async def test_button_shape_error_rejected_400(self, client, contract_fixtures):
+    async def test_button_shape_error_rejected_400(self, client, contract_fixtures, platform):
         ot_id = f"ot3_{_TS}"
-        await client.post("/api/tenant", json={"id": ot_id, "name": "引导按钮校验租户"})
+        await client.post("/api/tenant", headers=platform, json={"id": ot_id, "name": "引导按钮校验租户"})
 
         bad = {**self.VALID_ONBOARDING, "quickReplies": [{"label": "缺 action 与 payload"}]}
-        res = await client.put(f"/api/tenant/{ot_id}", json={"name": "引导按钮校验租户", "onboardingConfig": bad})
+        res = await client.put(
+            f"/api/tenant/{ot_id}",
+            headers=platform,
+            json={"name": "引导按钮校验租户", "onboardingConfig": bad},
+        )
         assert res.status_code == 400
         assert "quickReplies" in res.json()["detail"]
 
-        await client.delete(f"/api/tenant/{ot_id}")
+        await client.delete(f"/api/tenant/{ot_id}", headers=platform)
 
-    async def test_update_without_onboarding_preserves_existing(self, client, contract_fixtures):
+    async def test_update_without_onboarding_preserves_existing(self, client, contract_fixtures, platform):
         """合并式语义:不带 onboardingConfig 的常规更新(改名/阈值)不得清空既有引导配置。"""
         ot_id = f"ot4_{_TS}"
-        await client.post("/api/tenant", json={"id": ot_id, "name": "引导保留测试租户"})
+        await client.post("/api/tenant", headers=platform, json={"id": ot_id, "name": "引导保留测试租户"})
         await client.put(
-            f"/api/tenant/{ot_id}", json={"name": "引导保留测试租户", "onboardingConfig": self.VALID_ONBOARDING}
+            f"/api/tenant/{ot_id}",
+            headers=platform,
+            json={"name": "引导保留测试租户", "onboardingConfig": self.VALID_ONBOARDING},
         )
 
-        plain_res = await client.put(f"/api/tenant/{ot_id}", json={"name": "引导保留测试租户V2", "refundLimit": 888})
+        plain_res = await client.put(
+            f"/api/tenant/{ot_id}",
+            headers=platform,
+            json={"name": "引导保留测试租户V2", "refundLimit": 888},
+        )
         assert plain_res.status_code == 200
 
-        list_res = await client.get("/api/tenant/list")
+        list_res = await client.get("/api/tenant/list", headers=platform)
         row = next((t for t in list_res.json()["tenants"] if t["id"] == ot_id), None)
         assert row["name"] == "引导保留测试租户V2"
         assert row["refundLimit"] == 888
         assert row["onboardingConfig"] == self.VALID_ONBOARDING  # 未携带 → 保留
 
-        await client.delete(f"/api/tenant/{ot_id}")
+        await client.delete(f"/api/tenant/{ot_id}", headers=platform)
 
 
 class TestMerchantTenantGate:
@@ -762,26 +790,26 @@ class TestStoreCouponLifecycle:
 
 
 class TestSkills:
-    async def test_registry(self, client, contract_fixtures):
-        res = await client.get("/api/skills/registry")
+    async def test_registry(self, client, contract_fixtures, platform):
+        res = await client.get("/api/skills/registry", headers=platform)
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
         assert isinstance(body["skills"], list)
         assert len(body["skills"]) >= 5
 
-    async def test_get_config(self, client, contract_fixtures):
-        res = await client.get("/api/skills/config", headers={"x-tenant-id": "nike"})
+    async def test_get_config(self, client, contract_fixtures, platform):
+        res = await client.get("/api/skills/config", headers={**platform, "x-tenant-id": "nike"})
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
         assert body["tenantId"] == "nike"
         assert isinstance(body["skills"], list)
 
-    async def test_put_config(self, client, contract_fixtures):
+    async def test_put_config(self, client, contract_fixtures, platform):
         res = await client.put(
             "/api/skills/config",
-            headers={"x-tenant-id": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={"skillId": "skill_order_refund", "approvalThresholdAmount": 260},
         )
         assert res.status_code == 200
@@ -791,15 +819,15 @@ class TestSkills:
         assert body["skillId"] == "skill_order_refund"
         assert body["config"] is not None
 
-    async def test_tenant_alias_route(self, client, contract_fixtures):
-        res = await client.get("/api/skills/tenant", headers={"x-tenant-id": "nike"})
+    async def test_tenant_alias_route(self, client, contract_fixtures, platform):
+        res = await client.get("/api/skills/tenant", headers={**platform, "x-tenant-id": "nike"})
         assert res.status_code == 200
         assert res.json()["tenantId"] == "nike"
 
-    async def test_patch_tenant_skill(self, client, contract_fixtures):
+    async def test_patch_tenant_skill(self, client, contract_fixtures, platform):
         res = await client.patch(
             "/api/skills/tenant/skill_order_refund",
-            headers={"x-tenant-id": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={"enabled": True},
         )
         assert res.status_code == 200
@@ -931,7 +959,7 @@ class TestOverview:
     """全局指标大盘(admin-readiness 03):六卡全部库内真算,与直连 SQL 对账;
     README 编造的 94.2% Autopilot 率在此被真实值取代。"""
 
-    async def test_overview_cards_match_sql_ground_truth(self, client, contract_fixtures):
+    async def test_overview_cards_match_sql_ground_truth(self, client, contract_fixtures, platform):
         import asyncio
 
         from engine_py.db import get_session
@@ -943,7 +971,7 @@ class TestOverview:
         # —— ainvoke→astream 换用(S2c)曾扰动该窗口落点致两轮全量挂此。指标
         # 是最终一致写入,双方读数一致才判:不一致短暂退避重读,上限 5 轮。
         async def _read_both():
-            res = await client.get("/api/overview")
+            res = await client.get("/api/overview", headers=platform)
             assert res.status_code == 200
             data = res.json()["data"]
             async with get_session() as session:
@@ -1540,10 +1568,11 @@ class TestChatImagePersistence:
 
 
 class TestConversations:
-    async def test_list_pagination_contains_fixture(self, client, contract_fixtures):
+    async def test_list_pagination_contains_fixture(self, client, contract_fixtures, platform):
         res = await client.get(
             "/api/conversations",
             params={"tenantId": "nike", "status": "all", "limit": 20, "offset": 0},
+            headers=platform,
         )
         assert res.status_code == 200
         body = res.json()
@@ -1554,18 +1583,21 @@ class TestConversations:
         ids = [c.get("threadId") or c.get("id") for c in items]
         assert CONTRACT_THREAD in ids
 
-    async def test_detail_timeline(self, client, contract_fixtures):
-        res = await client.get(f"/api/conversations/{CONTRACT_THREAD}", headers={"x-tenant-id": "nike"})
+    async def test_detail_timeline(self, client, contract_fixtures, platform):
+        res = await client.get(
+            f"/api/conversations/{CONTRACT_THREAD}", headers={**platform, "x-tenant-id": "nike"}
+        )
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
         assert body["data"]["thread"]["businessId"] == "nike"
         assert isinstance(body["data"]["messages"], list)
 
-    async def test_update_status(self, client, contract_fixtures):
+    async def test_update_status(self, client, contract_fixtures, platform):
         res = await client.post(
             f"/api/conversations/{CONTRACT_THREAD}/status",
-            headers={"x-tenant-id": "nike"},
+            params={"tenantId": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={"status": "human_takeover", "assignedOperatorId": "op_contract"},
         )
         assert res.status_code == 200
@@ -1573,7 +1605,7 @@ class TestConversations:
         assert body["success"] is True
         assert body["data"] is not None
 
-    async def test_list_carries_real_per_thread_telemetry(self, client, contract_fixtures):
+    async def test_list_carries_real_per_thread_telemetry(self, client, contract_fixtures, platform):
         """会话列表的 messageCount/totalTokens/costUsd 必须是库内真算
         (此前前端对缺失字段兜底 850 tokens / $0.0035 / 1 轮等编造值)。"""
         from engine_py.db import get_session
@@ -1602,7 +1634,9 @@ class TestConversations:
             await session.commit()
 
         res = await client.get(
-            "/api/conversations", params={"tenantId": "nike", "status": "all", "limit": 50, "offset": 0}
+            "/api/conversations",
+            params={"tenantId": "nike", "status": "all", "limit": 50, "offset": 0},
+            headers=platform,
         )
         assert res.status_code == 200
         items = res.json().get("conversations") or []
@@ -1613,7 +1647,7 @@ class TestConversations:
         assert abs(row["costUsd"] - 0.006) < 1e-9
         assert row["llmCalls"] == 2
 
-    async def test_telemetry_endpoint_aggregates_real_llm_logs(self, client, contract_fixtures):
+    async def test_telemetry_endpoint_aggregates_real_llm_logs(self, client, contract_fixtures, platform):
         """会话遥测端点:节点级真算聚合;无记录线程诚实空(严禁假节点/假耗时)。"""
         from engine_py.db import get_session
         from sqlalchemy import text
@@ -1633,7 +1667,9 @@ class TestConversations:
             )
             await session.commit()
 
-        res = await client.get(f"/api/conversations/{tid}/telemetry", headers={"x-tenant-id": "nike"})
+        res = await client.get(
+            f"/api/conversations/{tid}/telemetry", headers={**platform, "x-tenant-id": "nike"}
+        )
         assert res.status_code == 200
         data = res.json()["data"]
         nodes = {n["node"]: n for n in data["nodes"]}
@@ -1650,7 +1686,9 @@ class TestConversations:
         # 无遥测线程:诚实空(此前该场景由前端假节点链顶替)
         empty_tid = f"tel_empty_{_TS}"
         await create_thread(empty_tid, "u_tel", "nike")
-        empty = await client.get(f"/api/conversations/{empty_tid}/telemetry", headers={"x-tenant-id": "nike"})
+        empty = await client.get(
+            f"/api/conversations/{empty_tid}/telemetry", headers={**platform, "x-tenant-id": "nike"}
+        )
         assert empty.status_code == 200
         empty_data = empty.json()["data"]
         assert empty_data["nodes"] == []
@@ -1826,17 +1864,17 @@ class TestRagDocumentUpload:
 
 
 class TestRagDocuments:
-    async def test_crud_roundtrip(self, client, contract_fixtures):
+    async def test_crud_roundtrip(self, client, contract_fixtures, platform):
         create_res = await client.post(
             "/api/rag/documents",
-            headers={"x-tenant-id": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={"chunkText": "契约测试:Nike 退换货政策 30 天内可退。"},
         )
         assert create_res.status_code == 201
         assert create_res.json()["success"] is True
         doc_id = create_res.json()["data"]["id"]
 
-        list_res = await client.get("/api/rag/documents", params={"tenantId": "nike"})
+        list_res = await client.get("/api/rag/documents", params={"tenantId": "nike"}, headers=platform)
         assert list_res.status_code == 200
         body = list_res.json()
         assert body["success"] is True
@@ -1844,17 +1882,19 @@ class TestRagDocuments:
         assert body["total"] >= 1
         assert isinstance(body["data"], list)
 
-        del_res = await client.delete(f"/api/rag/documents/{doc_id}", headers={"x-tenant-id": "nike"})
+        del_res = await client.delete(
+            f"/api/rag/documents/{doc_id}", headers={**platform, "x-tenant-id": "nike"}
+        )
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
         assert isinstance(del_res.json()["message"], str)
 
-    async def test_create_persists_user_title_and_category(self, client, contract_fixtures):
+    async def test_create_persists_user_title_and_category(self, client, contract_fixtures, platform):
         """管理台新建切片:自拟标题/分类必须落库(此前被硬编码「知识文档」覆盖),content 别名可用,空正文 422。"""
         titled = f"契约自拟标题 {_TS}"
         create_res = await client.post(
             "/api/rag/documents",
-            headers={"x-tenant-id": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={"chunkText": f"契约测试:自拟标题切片 {_TS}", "title": titled, "category": "product_knowledge"},
         )
         assert create_res.status_code == 201
@@ -1864,61 +1904,75 @@ class TestRagDocuments:
 
         alias_res = await client.post(
             "/api/rag/documents",
-            headers={"x-tenant-id": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={"content": f"契约测试 content 别名切片 {_TS}"},
         )
         assert alias_res.status_code == 201
 
-        empty_res = await client.post("/api/rag/documents", headers={"x-tenant-id": "nike"}, json={})
+        empty_res = await client.post(
+            "/api/rag/documents", headers={**platform, "x-tenant-id": "nike"}, json={}
+        )
         assert empty_res.status_code == 422
 
-        await client.delete(f"/api/rag/documents/{data['id']}", headers={"x-tenant-id": "nike"})
         await client.delete(
-            f"/api/rag/documents/{alias_res.json()['data']['id']}", headers={"x-tenant-id": "nike"}
+            f"/api/rag/documents/{data['id']}", headers={**platform, "x-tenant-id": "nike"}
+        )
+        await client.delete(
+            f"/api/rag/documents/{alias_res.json()['data']['id']}", headers={**platform, "x-tenant-id": "nike"}
         )
 
-    async def test_write_faces_require_named_tenant(self, client, contract_fixtures):
+    async def test_write_faces_require_named_tenant(self, client, contract_fixtures, platform):
         """写/删具名租户强制(2026-10-17 窃听族收口 sec-2):缺省/'all' 一律 400 ——
         此前 add 缺省兜底 ecommerce 静默落演示租户、delete 空头免 WHERE 全库可删。"""
         # add:双头皆缺 → 400(HTTPException 形 {"detail": …})
-        no_tenant = await client.post("/api/rag/documents", json={"chunkText": "x"})
+        no_tenant = await client.post("/api/rag/documents", headers=platform, json={"chunkText": "x"})
         assert no_tenant.status_code == 400
         assert "具名" in no_tenant.json()["detail"]
         # add:'all' → 400(上帝视角严禁直入语料)
         all_view = await client.post(
-            "/api/rag/documents", headers={"x-tenant-id": "all"}, json={"chunkText": "x"}
+            "/api/rag/documents", headers={**platform, "x-tenant-id": "all"}, json={"chunkText": "x"}
         )
         assert all_view.status_code == 400
 
         # delete:空头/'all' → 400 且文档仍在;具名删除放行
         created = await client.post(
-            "/api/rag/documents", headers={"x-tenant-id": "nike"}, json={"chunkText": f"具名闸锚点 {_TS}"}
+            "/api/rag/documents",
+            headers={**platform, "x-tenant-id": "nike"},
+            json={"chunkText": f"具名闸锚点 {_TS}"},
         )
         assert created.status_code == 201
         doc_id = created.json()["data"]["id"]
-        bare_del = await client.delete(f"/api/rag/documents/{doc_id}")
+        bare_del = await client.delete(f"/api/rag/documents/{doc_id}", headers=platform)
         assert bare_del.status_code == 400
         assert "具名" in bare_del.json()["detail"]
-        all_del = await client.delete(f"/api/rag/documents/{doc_id}", headers={"x-tenant-id": "all"})
+        all_del = await client.delete(
+            f"/api/rag/documents/{doc_id}", headers={**platform, "x-tenant-id": "all"}
+        )
         assert all_del.status_code == 400
 
-        still = await client.get("/api/rag/documents", params={"tenantId": "nike"})
+        still = await client.get("/api/rag/documents", params={"tenantId": "nike"}, headers=platform)
         assert any(d["id"] == doc_id for d in still.json()["data"]), "空头/'all' 删除必须不生效"
-        named_del = await client.delete(f"/api/rag/documents/{doc_id}", headers={"x-tenant-id": "nike"})
+        named_del = await client.delete(
+            f"/api/rag/documents/{doc_id}", headers={**platform, "x-tenant-id": "nike"}
+        )
         assert named_del.status_code == 200
 
-    async def test_query_returns_honest_empty_without_fake_scores(self, client, contract_fixtures):
+    async def test_query_returns_honest_empty_without_fake_scores(self, client, contract_fixtures, platform):
         """拆除「前 N 条文档 + 硬编码 0.75」假召回兜底:无命中时必须诚实空。"""
-        res = await client.post("/api/rag/query", json={"query": "zzz_qq_无任何语义关联乱串_xyzzy", "tenantId": "nike"})
+        res = await client.post(
+            "/api/rag/query",
+            headers=platform,
+            json={"query": "zzz_qq_无任何语义关联乱串_xyzzy", "tenantId": "nike"},
+        )
         assert res.status_code == 200
         body = res.json()["data"]
         assert isinstance(body["matches"], list)
         for match in body["matches"]:
             assert abs(match["score"] - 0.75) > 1e-9
 
-    async def test_query_tenant_all_does_not_crash_and_stays_honest(self, client, contract_fixtures):
+    async def test_query_tenant_all_does_not_crash_and_stays_honest(self, client, contract_fixtures, platform):
         """上帝视角 tenantId=all:不再被硬编码降级成 ecommerce;响应契约与单租户一致。"""
-        res = await client.post("/api/rag/query", json={"query": "退换货政策", "tenantId": "all"})
+        res = await client.post("/api/rag/query", headers=platform, json={"query": "退换货政策", "tenantId": "all"})
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
@@ -1927,10 +1981,10 @@ class TestRagDocuments:
 
 
 class TestPersonas:
-    async def test_crud_roundtrip(self, client, contract_fixtures):
+    async def test_crud_roundtrip(self, client, contract_fixtures, platform):
         create_res = await client.post(
             "/api/personas",
-            headers={"x-tenant-id": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={
                 "userId": "u_contract_persona",
                 "fact": "偏好深色跑鞋",
@@ -1942,7 +1996,7 @@ class TestPersonas:
         assert create_res.json()["success"] is True
         fact_id = create_res.json()["data"]["id"]
 
-        list_res = await client.get("/api/personas", params={"tenantId": "nike"})
+        list_res = await client.get("/api/personas", params={"tenantId": "nike"}, headers=platform)
         assert list_res.status_code == 200
         body = list_res.json()
         assert body["success"] is True
@@ -1950,17 +2004,19 @@ class TestPersonas:
         assert any(f["id"] == fact_id for f in body["data"])
 
         put_res = await client.put(
-            f"/api/personas/{fact_id}", headers={"x-tenant-id": "nike"}, json={"confidence": 0.9}
+            f"/api/personas/{fact_id}", headers={**platform, "x-tenant-id": "nike"}, json={"confidence": 0.9}
         )
         assert put_res.status_code == 200
         assert put_res.json()["success"] is True
         assert put_res.json()["data"] is not None
 
-        del_res = await client.delete(f"/api/personas/{fact_id}", headers={"x-tenant-id": "nike"})
+        del_res = await client.delete(
+            f"/api/personas/{fact_id}", headers={**platform, "x-tenant-id": "nike"}
+        )
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
 
-    async def test_named_tenant_view_global_readonly_and_ownership_gate(self, client, contract_fixtures):
+    async def test_named_tenant_view_global_readonly_and_ownership_gate(self, client, contract_fixtures, platform):
         """persona-hardening 05:具名租户视图与坐席台同口径 —— global 画像只读
         附带(scope 缺省回填 global 与 DB/召回/坐席台四方同向)、本租户行可见、
         他租户行不可见;变更面由属主闸收紧(读得到改不了,403),平台视角
@@ -1978,7 +2034,7 @@ class TestPersonas:
             await session.commit()
             seeded_ids = [str(r.id) for r in rows]
         try:
-            list_res = await client.get("/api/personas", params={"tenantId": "nike"})
+            list_res = await client.get("/api/personas", params={"tenantId": "nike"}, headers=platform)
             assert list_res.status_code == 200
             by_id = {f["id"]: f for f in list_res.json()["data"]}
             assert seeded_ids[0] in by_id and by_id[seeded_ids[0]]["scope"] == "global"
@@ -1987,45 +2043,58 @@ class TestPersonas:
 
             # 具名租户变更面:global 403(读得到改不了)/ 他租户 403 / 本租户 200
             put_global = await client.put(
-                f"/api/personas/{seeded_ids[0]}", headers={"x-tenant-id": "nike"}, json={"confidence": 0.5}
+                f"/api/personas/{seeded_ids[0]}",
+                headers={**platform, "x-tenant-id": "nike"},
+                json={"confidence": 0.5},
             )
             assert put_global.status_code == 403
-            del_global = await client.delete(f"/api/personas/{seeded_ids[0]}", headers={"x-tenant-id": "nike"})
+            del_global = await client.delete(
+                f"/api/personas/{seeded_ids[0]}", headers={**platform, "x-tenant-id": "nike"}
+            )
             assert del_global.status_code == 403
             put_foreign = await client.put(
-                f"/api/personas/{seeded_ids[1]}", headers={"x-tenant-id": "nike"}, json={"confidence": 0.5}
+                f"/api/personas/{seeded_ids[1]}",
+                headers={**platform, "x-tenant-id": "nike"},
+                json={"confidence": 0.5},
             )
             assert put_foreign.status_code == 403
             put_own = await client.put(
-                f"/api/personas/{seeded_ids[2]}", headers={"x-tenant-id": "nike"}, json={"confidence": 0.95}
+                f"/api/personas/{seeded_ids[2]}",
+                headers={**platform, "x-tenant-id": "nike"},
+                json={"confidence": 0.95},
             )
             assert put_own.status_code == 200
-            del_foreign = await client.delete(f"/api/personas/{seeded_ids[1]}", headers={"x-tenant-id": "nike"})
+            del_foreign = await client.delete(
+                f"/api/personas/{seeded_ids[1]}", headers={**platform, "x-tenant-id": "nike"}
+            )
             assert del_foreign.status_code == 403
 
             # 铸造面同闸(06 补 05 不对称):具名租户不得 POST scope=global 铸平台级事实
             post_global_named = await client.post(
                 "/api/personas",
-                headers={"x-tenant-id": "nike"},
+                headers={**platform, "x-tenant-id": "nike"},
                 json={"userId": "u_gate_nike", "fact": "越权铸造-契约", "businessId": "nike", "scope": "global"},
             )
             assert post_global_named.status_code == 403
 
             # 平台视角不受限:all 头可改 global,回填仍是 global;亦可铸造 global
-            put_platform = await client.put(
-                f"/api/personas/{seeded_ids[0]}", headers={"x-tenant-id": "all"}, json={"confidence": 0.88}
+            put_platform_view = await client.put(
+                f"/api/personas/{seeded_ids[0]}",
+                headers={**platform, "x-tenant-id": "all"},
+                json={"confidence": 0.88},
             )
-            assert put_platform.status_code == 200
-            assert put_platform.json()["data"]["scope"] == "global"
+            assert put_platform_view.status_code == 200
+            assert put_platform_view.json()["data"]["scope"] == "global"
             post_global_platform = await client.post(
                 "/api/personas",
-                headers={"x-tenant-id": "all"},
+                headers={**platform, "x-tenant-id": "all"},
                 json={"userId": "u_gate_platform", "fact": "平台铸造-契约", "scope": "global"},
             )
             assert post_global_platform.status_code == 201
             assert post_global_platform.json()["data"]["scope"] == "global"
             minted_del = await client.delete(
-                f"/api/personas/{post_global_platform.json()['data']['id']}", headers={"x-tenant-id": "all"}
+                f"/api/personas/{post_global_platform.json()['data']['id']}",
+                headers={**platform, "x-tenant-id": "all"},
             )
             assert minted_del.status_code == 200
         finally:
@@ -2039,7 +2108,7 @@ class TestPersonas:
                 await session.commit()
 
     async def test_delete_records_badcase_signal_and_silent_degradation(
-        self, client, contract_fixtures, monkeypatch
+        self, client, contract_fixtures, monkeypatch, platform
     ):
         """persona-hardening 06:删除画像 → 坏例池信号入池(persona_fact_deleted,
         suspected_defect 先验,ref=fact:<id>,note 带用户);池写失败静默降级,
@@ -2059,7 +2128,9 @@ class TestPersonas:
 
         fact_ids.append(await _seed_fact("u_bc_nike"))
         try:
-            del_res = await client.delete(f"/api/personas/{fact_ids[0]}", headers={"x-tenant-id": "nike"})
+            del_res = await client.delete(
+                f"/api/personas/{fact_ids[0]}", headers={**platform, "x-tenant-id": "nike"}
+            )
             assert del_res.status_code == 200
 
             async with get_session() as session:
@@ -2087,7 +2158,9 @@ class TestPersonas:
 
             monkeypatch.setattr("engine_py.badcase.pool.get_session", _pool_down)
             fact_ids.append(await _seed_fact("u_bc_nike2"))
-            del_res2 = await client.delete(f"/api/personas/{fact_ids[1]}", headers={"x-tenant-id": "nike"})
+            del_res2 = await client.delete(
+                f"/api/personas/{fact_ids[1]}", headers={**platform, "x-tenant-id": "nike"}
+            )
             assert del_res2.status_code == 200
             assert del_res2.json()["success"] is True
         finally:
@@ -2106,7 +2179,7 @@ class TestPersonas:
                 )
                 await session.commit()
 
-    async def test_list_tenant_filter_matrix_and_dto_backfill(self, client, contract_fixtures):
+    async def test_list_tenant_filter_matrix_and_dto_backfill(self, client, contract_fixtures, platform):
         """persona-hardening 06:list 租户过滤矩阵(05 口径)—— 具名租户只见本店 +
         global/NULL 只读附带,tenantId=all 见全部,跨租户不可见;_persona_item
         缺省回填(confidence/source/status/scope/businessId)一并钉死。"""
@@ -2131,20 +2204,26 @@ class TestPersonas:
             )
             await session.commit()
         try:
-            nike_view = (await client.get("/api/personas", params={"tenantId": "nike"})).json()
+            nike_view = (await client.get("/api/personas", params={"tenantId": "nike"}, headers=platform)).json()
             assert nike_view["tenantId"] == "nike"
             nike_ids = {f["id"] for f in nike_view["data"]}
             assert {nike_id, global_id, null_id} <= nike_ids
             assert aurora_id not in nike_ids
 
             aurora_ids = {
-                f["id"] for f in (await client.get("/api/personas", params={"tenantId": "aurora"})).json()["data"]
+                f["id"]
+                for f in (await client.get("/api/personas", params={"tenantId": "aurora"}, headers=platform)).json()[
+                    "data"
+                ]
             }
             assert aurora_id in aurora_ids
             assert nike_id not in aurora_ids
 
             all_ids = {
-                f["id"] for f in (await client.get("/api/personas", params={"tenantId": "all"})).json()["data"]
+                f["id"]
+                for f in (await client.get("/api/personas", params={"tenantId": "all"}, headers=platform)).json()[
+                    "data"
+                ]
             }
             assert {nike_id, aurora_id, global_id, null_id} <= all_ids
 
@@ -2167,17 +2246,17 @@ class TestPersonas:
 
 
 class TestGuardrails:
-    async def test_crud_roundtrip(self, client, contract_fixtures):
+    async def test_crud_roundtrip(self, client, contract_fixtures, platform):
         create_res = await client.post(
             "/api/guardrails",
-            headers={"x-tenant-id": "nike"},
+            headers={**platform, "x-tenant-id": "nike"},
             json={"ruleName": "契约-禁词", "ruleType": "keyword", "pattern": "诈骗"},
         )
         assert create_res.status_code == 201
         assert create_res.json()["success"] is True
         rule_id = create_res.json()["data"]["id"]
 
-        list_res = await client.get("/api/guardrails", params={"tenantId": "nike"})
+        list_res = await client.get("/api/guardrails", params={"tenantId": "nike"}, headers=platform)
         assert list_res.status_code == 200
         body = list_res.json()
         assert body["success"] is True
@@ -2185,27 +2264,29 @@ class TestGuardrails:
         assert body["total"] >= 1
 
         put_res = await client.put(
-            f"/api/guardrails/{rule_id}", headers={"x-tenant-id": "nike"}, json={"severity": "high"}
+            f"/api/guardrails/{rule_id}", headers={**platform, "x-tenant-id": "nike"}, json={"severity": "high"}
         )
         assert put_res.status_code == 200
         assert put_res.json()["success"] is True
 
-        del_res = await client.delete(f"/api/guardrails/{rule_id}", headers={"x-tenant-id": "nike"})
+        del_res = await client.delete(
+            f"/api/guardrails/{rule_id}", headers={**platform, "x-tenant-id": "nike"}
+        )
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
 
 
 class TestBilling:
-    async def test_usages_returns_array(self, client, contract_fixtures):
-        res = await client.get("/api/billing/usages")
+    async def test_usages_returns_array(self, client, contract_fixtures, platform):
+        res = await client.get("/api/billing/usages", headers=platform)
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
         assert isinstance(body["data"], list)
 
-    async def test_put_quota(self, client, contract_fixtures):
+    async def test_put_quota(self, client, contract_fixtures, platform):
         res = await client.put(
-            "/api/billing/quota", json={"businessId": "nike", "monthlyLimitTokens": 5_000_000}
+            "/api/billing/quota", headers=platform, json={"businessId": "nike", "monthlyLimitTokens": 5_000_000}
         )
         assert res.status_code == 200
         body = res.json()
@@ -2246,7 +2327,7 @@ class TestEvals:
         return _seed
 
     async def test_results_lists_real_rows_without_mock_marker(
-        self, client, contract_fixtures, seed_random_eval_rows
+        self, client, contract_fixtures, seed_random_eval_rows, platform
     ):
         """随机生成器已下线(wayfinder 005):列表来自 promptfoo_import 写入的真实
         汇总行,响应不再携带 isMock;此处播种确定性一行 + 随机多行钉死透传口径。"""
@@ -2269,7 +2350,7 @@ class TestEvals:
             await session.commit()
         random_ids = await seed_random_eval_rows(3)
 
-        res = await client.get("/api/evals/results")
+        res = await client.get("/api/evals/results", headers=platform)
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
@@ -2285,13 +2366,13 @@ class TestEvals:
         assert mine[0]["toolAccuracy"] == 1.0
         assert "isMock" not in mine[0]  # 假数据标注随真实链路移除
 
-    async def test_run_endpoint_retired(self, client, contract_fixtures):
+    async def test_run_endpoint_retired(self, client, contract_fixtures, platform):
         """POST /api/evals/run 不再产出随机指标:410 指引真实评测通道。"""
-        res = await client.post("/api/evals/run", json={"datasetName": "contract_dataset"})
+        res = await client.post("/api/evals/run", headers=platform, json={"datasetName": "contract_dataset"})
         assert res.status_code == 410
         assert "test:prompt:record" in res.json()["detail"]
 
-    async def test_result_cases_drilldown_lists_real_rows(self, client, contract_fixtures):
+    async def test_result_cases_drilldown_lists_real_rows(self, client, contract_fixtures, platform):
         """评测批次样本下钻(admin-readiness 10):run_record_id 即
         "eval_run_" + eval_runs.id,逐用例 caseName/passed/score/latencyMs/error
         按升序透传,失败样本错误保真。"""
@@ -2322,7 +2403,7 @@ class TestEvals:
             )
             await session.commit()
 
-        res = await client.get(f"/api/evals/results/eval_run_{run_uuid}/cases")
+        res = await client.get(f"/api/evals/results/eval_run_{run_uuid}/cases", headers=platform)
         assert res.status_code == 200
         body = res.json()
         assert body["success"] is True
@@ -2337,27 +2418,27 @@ class TestEvals:
         assert second["passed"] is False
         assert second["error"] == "assert unbacked claim"
 
-    async def test_result_cases_honest_empty_for_garbage_and_unknown(self, client, contract_fixtures):
+    async def test_result_cases_honest_empty_for_garbage_and_unknown(self, client, contract_fixtures, platform):
         """非法 id / 无样本 → 诚实空列表,严禁编造。"""
         import uuid as _uuid
 
-        res = await client.get("/api/evals/results/eval_run_not-a-uuid/cases")
+        res = await client.get("/api/evals/results/eval_run_not-a-uuid/cases", headers=platform)
         assert res.status_code == 200
         assert res.json() == {"success": True, "total": 0, "data": []}
 
         unknown = _uuid.uuid4()
-        res2 = await client.get(f"/api/evals/results/eval_run_{unknown}/cases")
+        res2 = await client.get(f"/api/evals/results/eval_run_{unknown}/cases", headers=platform)
         assert res2.status_code == 200
         assert res2.json() == {"success": True, "total": 0, "data": []}
 
 
 class TestLogs:
-    async def test_success_envelope(self, client, contract_fixtures):
-        res = await client.get("/api/logs", params={"tenantId": "nike"})
+    async def test_success_envelope(self, client, contract_fixtures, platform):
+        res = await client.get("/api/logs", params={"tenantId": "nike"}, headers=platform)
         assert res.status_code == 200
         assert res.json()["success"] is True
 
-    async def test_llm_call_rows_come_from_llm_call_logs(self, client, contract_fixtures):
+    async def test_llm_call_rows_come_from_llm_call_logs(self, client, contract_fixtures, platform):
         """回归钉:llm_call 类型必须来自真实 llm_call_logs 行(2026-09-05 接线)。
 
         此前 llm_call 行由 session_metrics 会话汇总拼装(token 记 0、模型名硬编码);
@@ -2392,7 +2473,9 @@ class TestLogs:
             )
             await session.commit()
 
-        res = await client.get("/api/logs", params={"tenantId": "nike", "level": "llm_call", "limit": 50})
+        res = await client.get(
+            "/api/logs", params={"tenantId": "nike", "level": "llm_call", "limit": 50}, headers=platform
+        )
         assert res.status_code == 200
         rows = res.json()["data"]
         match = next((r for r in rows if r["id"] == f"log_llm_{str(row_id)[:8]}"), None)
@@ -2406,9 +2489,9 @@ class TestLogs:
         assert match["latencyMs"] == 842
         assert match["rawDetail"]["node"] == "planner"
 
-    async def test_session_metrics_rows_labeled_session_metric(self, client, contract_fixtures):
+    async def test_session_metrics_rows_labeled_session_metric(self, client, contract_fixtures, platform):
         """回归钉:会话遥测汇总不再冒充 llm_call —— logType 必须为 session_metric。"""
-        res = await client.get("/api/logs", params={"level": "llm_call", "limit": 50})
+        res = await client.get("/api/logs", params={"level": "llm_call", "limit": 50}, headers=platform)
         assert res.status_code == 200
         for row in res.json()["data"]:
             assert row["logType"] == "llm_call"
