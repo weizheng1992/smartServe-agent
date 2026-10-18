@@ -131,7 +131,7 @@ async def health():
         "success": True,
         "status": "ok",
         "service": "gateway-py",
-        "timestamp": __import__("datetime").datetime.now().isoformat(),
+        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
     }
 
 

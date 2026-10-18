@@ -57,4 +57,5 @@ paths: ["services/gateway-py/**/*"]
 1. **依赖注入显式化**：FastAPI `Depends` 提供会话/连接池，跨模块调用通过显式参数传递，不引入全局单例服务注册表。
 2. **DTO 严格校验**：所有接收客户端输入的主体必须使用 Pydantic 模型定义清晰的 DTO（字段名保持与 TS 契约一致的 camelCase 输出）。
 3. **契约测试先行**：新增或修改路由时，必须在 `services/gateway-py/tests/test_http_routes_contract.py` / `test_realtime_contract.py` 同步维护用例；契约改动需同步前端 `packages/types`。
+4. **时间戳一律 UTC aware（2026-10-18 两套钟收口）**：网关产出的 ISO 时间戳（消息/事件/审计/健康端点）统一 `datetime.now(_dt.UTC)`——库侧 `func.now()` 是 UTC 钟、前端 `new Date` 对 naive 串按本地解析（实弹：下单时间显示早 8 小时），naive 本地时间与 UTC 混排即排序/对账错位。
 

@@ -217,7 +217,7 @@ async def on_disconnect(sid: str):
         room = _room(info["threadId"], info["tenantId"])
         await sio.emit(
             "peer_disconnected",
-            {"socketId": sid, "role": info.get("role"), "timestamp": _dt.datetime.now().isoformat()},
+            {"socketId": sid, "role": info.get("role"), "timestamp": _dt.datetime.now(_dt.UTC).isoformat()},
             room=room,
             namespace=NAMESPACE,
         )
@@ -285,7 +285,7 @@ async def on_join_thread(sid: str, data: dict):
             "role": role,
             "operatorId": operator_id,
             "operatorName": operator_name,
-            "timestamp": _dt.datetime.now().isoformat(),
+            "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
         },
         room=room,
         namespace=NAMESPACE,

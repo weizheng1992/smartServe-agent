@@ -122,7 +122,7 @@ async def admin_conversation_detail(
     await ensure_tenant_registered(tenant_id)
     try:
         timeline = await get_conversation_timeline(thread_id, tenant_id)
-        now = _dt.datetime.now().isoformat()
+        now = _dt.datetime.now(_dt.UTC).isoformat()
         data = timeline or {
             "thread": {
                 "threadId": thread_id,
@@ -530,7 +530,7 @@ async def store_chat(body: StoreChatIn):
                 "role": "assistant",
                 "content": output,
                 "cards": turn["cards"],
-                "timestamp": _dt.datetime.now().isoformat(),
+                "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
             },
         )
 
@@ -586,9 +586,11 @@ async def store_chat_messages(
         pg_user_id: str | None = None
         if userId:
             try:
-                from engine_py.db.session import _engine
+                # 公共访问器(分层纪律,同 auth 收口先例):跨包直引私有 _engine
+                # 是审查 Std-4 同型残留
+                from engine_py.db.session import get_engine
 
-                async with _engine.connect() as conn:
+                async with get_engine().connect() as conn:
                     row = (
                         await conn.execute(
                             text(

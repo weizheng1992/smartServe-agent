@@ -52,7 +52,7 @@ async def tenant_ping(x_tenant_id: str | None = Header(None)):
         "message": "Tenant context active",
         "tenant": ctx,
         "config": config,
-        "timestamp": _dt.datetime.now().isoformat(),
+        "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
     }
 
 

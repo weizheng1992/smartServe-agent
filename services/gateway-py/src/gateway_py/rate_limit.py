@@ -48,13 +48,22 @@ from starlette.middleware.base import BaseHTTPMiddleware
 # 领券/量控耗尽的脚本滥用在 IP 维被节流;商城匿名无租户头,实际主要走 IP 桶)。
 # rag 挂知识库面(2026-10-17 窃听族收口 resource-1:重摄取同步 docling+VLM
 # 分钟级管线,匿名可打即资源耗尽面;列/写/删/传/查同前缀一网节流)。
-_RATE_SCOPES = (("/api/chat", "chat"), ("/spi/v1", "spi"), ("/api/store", "store"), ("/api/rag", "rag"))
+# auth_register 单挂注册端点(resource-3:注册建 users+商户客户行两表写入,
+# 无节流即脚本批量造号面;10/分钟已远超真人操作密度,不影响契约测试)。
+_RATE_SCOPES = (
+    ("/api/chat", "chat"),
+    ("/spi/v1", "spi"),
+    ("/api/store", "store"),
+    ("/api/rag", "rag"),
+    ("/api/auth/register", "auth_register"),
+)
 
 _DEFAULT_LIMITS = {
     "chat": {"tenant": 60, "ip": 120},
     "spi": {"tenant": 300, "ip": 600},
     "store": {"tenant": 120, "ip": 240},
     "rag": {"tenant": 30, "ip": 60},
+    "auth_register": {"tenant": 10, "ip": 10},
 }
 
 # KEYS=各维度窗口键;ARGV=[now_ms, window_ms, limit_1..N, member_1..N]

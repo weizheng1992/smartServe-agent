@@ -24,6 +24,17 @@ async def test_background_turn_failure_publishes_terminal_frame(client, contract
         raise RuntimeError("图前段爆炸(测试注入)")
 
     monkeypatch.setattr("gateway_py.chat_turn.run_agent", _boom)
+    # 任务句柄侦查:accept 内部 await 期间任务可能已跑完并出表,事后从共享表
+    # 反查不可靠 —— 记录受理期间创建的任务,拿确定性句柄
+    created: list[asyncio.Task] = []
+    _real_create_task = asyncio.create_task
+
+    def _spy_create(coro, **kwargs):
+        t = _real_create_task(coro, **kwargs)
+        created.append(t)
+        return t
+
+    monkeypatch.setattr("gateway_py.chat_turn.asyncio.create_task", _spy_create)
     job_id = f"job_evaporate_{_uuid.uuid4().hex[:8]}"
     out = await accept_chat_turn(
         thread_id=f"evaporate_{job_id}",
@@ -45,5 +56,8 @@ async def test_background_turn_failure_publishes_terminal_frame(client, contract
     assert terminal, f"终局帧必须注入(SSE 流据此收口): {events}"
     assert terminal[-1]["data"].get("degraded") is True
     assert "中断" in (terminal[-1]["data"].get("output") or "")
-    # 自清:表内不得残留未完成任务
-    assert all(t.done() for t in _ASYNC_TURNS)
+    # 自清:受理期间创建的任务(done 回调已把句柄从持有表摘除)
+    assert created, "受理必须创建后台任务(强引用持有面)"
+    turn_task = created[-1]
+    assert turn_task.done()
+    assert turn_task not in _ASYNC_TURNS

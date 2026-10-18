@@ -35,7 +35,7 @@ def _now_ms() -> int:
 def _iso(row: Any, key: str) -> str:
     val = row.get(key)
     if not val:
-        return _dt.datetime.now().isoformat()
+        return _dt.datetime.now(_dt.UTC).isoformat()
     if val.tzinfo is None:
         # 库为 TIMESTAMP WITHOUT TIME ZONE 且 TimeZone=UTC(实弹:naive 值被
         # 前端 new Date 按本地解析,下单时间显示早 8 小时)—— 补 UTC 时区后
@@ -509,7 +509,7 @@ async def ship_order(order_id: str, carrier_code: str, tracking_no: str,
     """发货(真实世界副作用)。business_id 提供时即属主闸:闸不中 rowcount 0
     走「订单不存在」,跨租户零副作用(2026-10-14 夜评批次)。"""
     await ensure_merchant_tables()
-    now = _dt.datetime.now()
+    now = _dt.datetime.now(_dt.UTC)
 
     def _t(hours: int) -> str:
         return (now - _dt.timedelta(hours=hours)).isoformat()

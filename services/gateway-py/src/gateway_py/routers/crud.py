@@ -489,7 +489,7 @@ async def system_logs(
     request: Request,
     tenantId: str | None = Query(None),
     level: str | None = Query(None),
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=500),
 ):
     # 三路查询相互独立 —— 并行取回(各自独立连接,池 10+10 充裕),
     # 省去 admin 日志页三次串行往返(2026-09-27 夜审 F5)

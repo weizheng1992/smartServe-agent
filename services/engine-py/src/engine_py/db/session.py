@@ -13,6 +13,12 @@ _engine = create_async_engine(settings.database_url, pool_size=10, max_overflow=
 _session_factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
 
 
+def get_engine():
+    """平台主库异步引擎公共访问器(分层纪律:跨包消费方一律走这里,
+    严禁直引私有 _engine —— auth/merchant 跨库用户解析的收口先例)。"""
+    return _engine
+
+
 @asynccontextmanager
 async def get_session() -> AsyncIterator[AsyncSession]:
     """产出一次性会话;事务提交由调用方显式 commit,退出时自动 close(未提交即回滚)。"""
