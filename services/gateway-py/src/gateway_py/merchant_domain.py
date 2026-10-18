@@ -1031,8 +1031,13 @@ async def get_customer_addresses(customer_id: str = "CUST-8801") -> list[dict]:
 
 
 async def save_customer_address(customer_id: str, addr: dict) -> dict:
+    """保存客户地址簿条目(读整组 → 合并 → 整列覆写)。
+
+    并发安全(async-3 收口,2026-10-18):读整组与覆写此前横跨两个独立连接,
+    并发各存一条地址时后写者以自己读到的旧组整列覆写,先写者地址必丢 ——
+    现取货/合并/覆写收进同一事务,`pg_advisory_xact_lock(hashtext(cid))` 按
+    客户串行化(首存两并发都查不到行、无行可 FOR UPDATE,咨询锁补齐该窗口)。"""
     await ensure_merchant_tables()
-    current = await get_customer_addresses(customer_id)
 
     full_addr = (
         addr.get("fullAddress")
@@ -1041,33 +1046,44 @@ async def save_customer_address(customer_id: str, addr: dict) -> dict:
     )
 
     target_id = addr.get("id") or f"ADDR_{_now_ms()}_{secrets.token_hex(2)}"
-    should_be_default = bool(addr.get("isDefault") or not current)
-
-    formatted = {
-        "id": target_id,
-        "recipientName": addr["recipientName"],
-        "phone": addr["phone"],
-        "province": addr.get("province"),
-        "city": addr.get("city"),
-        "district": addr.get("district"),
-        "detailAddress": addr.get("detailAddress"),
-        "fullAddress": full_addr,
-        "isDefault": should_be_default,
-    }
-
-    updated = [dict(a) for a in current]
-    if should_be_default:
-        updated = [{**a, "isDefault": False} for a in updated]
-
-    existing = next((i for i, a in enumerate(updated) if a.get("id") == target_id), -1)
-    if existing >= 0:
-        updated[existing] = formatted
-    elif should_be_default:
-        updated.insert(0, formatted)
-    else:
-        updated.append(formatted)
 
     async with merchant_engine().begin() as conn:
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:cid))"), {"cid": customer_id}
+        )
+        row = (
+            await conn.execute(
+                text("SELECT addresses FROM merchant_customers WHERE customer_id = :cid"),
+                {"cid": customer_id},
+            )
+        ).mappings().first()
+        current = row["addresses"] if row and isinstance(row["addresses"], list) else []
+
+        should_be_default = bool(addr.get("isDefault") or not current)
+        formatted = {
+            "id": target_id,
+            "recipientName": addr["recipientName"],
+            "phone": addr["phone"],
+            "province": addr.get("province"),
+            "city": addr.get("city"),
+            "district": addr.get("district"),
+            "detailAddress": addr.get("detailAddress"),
+            "fullAddress": full_addr,
+            "isDefault": should_be_default,
+        }
+
+        updated = [dict(a) for a in current]
+        if should_be_default:
+            updated = [{**a, "isDefault": False} for a in updated]
+
+        existing = next((i for i, a in enumerate(updated) if a.get("id") == target_id), -1)
+        if existing >= 0:
+            updated[existing] = formatted
+        elif should_be_default:
+            updated.insert(0, formatted)
+        else:
+            updated.append(formatted)
+
         # T7 契约揪出(2026-10-06):首存客户此前 UPDATE 0 行 —— 地址静默丢失
         # 却照报 success。upsert 建档+落地址一步原子(customer_id UNIQUE)。
         await conn.execute(

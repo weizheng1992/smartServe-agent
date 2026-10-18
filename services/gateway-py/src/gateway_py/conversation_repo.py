@@ -311,12 +311,18 @@ async def create_thread(thread_id: str, business_id: str, user_id: str | None = 
         if user_id and row["user_id"] and row["user_id"] != user_id:
             return None  # 同 id 线程已有属主且非调用者 → 拒绝回显
         if user_id and row["user_id"] is None:
-            # 旧线程无属主 → 自愈认领(dispatch_chat 自愈建线程的补全路径)
-            await session.execute(
-                text('UPDATE threads SET "user_id" = :uid, updated_at = NOW() WHERE id = :tid').bindparams(
-                    uid=user_id, tid=thread_id
-                )
+            # 旧线程无属主 → 自愈认领(dispatch_chat 自愈建线程的补全路径)。
+            # 条件 UPDATE(user_id IS NULL)+rowcount(async-2 收口):两并发认领者
+            # 都读过「无主」,无谓词 UPDATE 后写覆写夺主且败者已收 success ——
+            # 认领失利返回 None(路由层 409,不回显),与同 id 异用户冲突同语义。
+            claimed = await session.execute(
+                text(
+                    'UPDATE threads SET "user_id" = :uid, updated_at = NOW() '
+                    'WHERE id = :tid AND "user_id" IS NULL'
+                ).bindparams(uid=user_id, tid=thread_id)
             )
+            if claimed.rowcount == 0:
+                return None  # 认领失利:并发调用者已认领 → 409,事务随会话关闭回滚
             row = {**row, "user_id": user_id}
         await session.commit()
     return {

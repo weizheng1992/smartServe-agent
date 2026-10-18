@@ -16,9 +16,11 @@ pytestmark = pytest.mark.usefixtures("seeded")
 
 
 @pytest.fixture()
-async def catalog():
+async def catalog(monkeypatch):
     from gateway_py.merchant_seed import seed_merchant_data
 
+    # 环境隔离闸(2026-10-18)显式 opt-in:测试即种子消费者,声明放行
+    monkeypatch.setenv("MERCHANT_SEED_ALLOW", "1")
     await seed_merchant_data()
 
 

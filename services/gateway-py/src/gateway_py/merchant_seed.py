@@ -20,13 +20,17 @@ damaged-jacket.png 的底图与 _IMG_1 是同一张照片(黑色硬壳冲锋衣,
 
 用法::
 
-    cd services/gateway-py && uv run python -m gateway_py.merchant_seed
+    cd services/gateway-py && MERCHANT_SEED_ALLOW=1 uv run python -m gateway_py.merchant_seed
+
+安全闸:未设 MERCHANT_SEED_ALLOW=1 时拒绝执行(种子清空并重插商户真账库,
+误跑即污染销量聚合;2026-10-18 环境隔离闸)。
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import zlib
 
 from engine_py.analytics.rbac import STAFF_SEED_ROSTER
@@ -1226,6 +1230,16 @@ _ORDERS.extend(_build_history_orders())
 
 
 async def seed_merchant_data() -> None:
+    # 环境隔离闸(2026-10-18 critic #5):本函数清空并重插商户真账库的演示
+    # 目录/27 笔历史单/CUST-8801/促销种子 —— 商户真账库是商城前台与销量聚合
+    # 的数据面,误跑即污染。显式 opt-in:MERCHANT_SEED_ALLOW=1(db:seed 脚本
+    # 与测试夹具各自声明)。
+    if os.environ.get("MERCHANT_SEED_ALLOW", "").strip().lower() not in ("1", "yes", "true"):
+        raise RuntimeError(
+            "MERCHANT_SEED_ALLOW 未显式开启:种子会清空并重插商户真账库"
+            "(演示目录/历史单/CUST-8801/促销),误跑即污染销量聚合与订单流。"
+            "确要执行请设 MERCHANT_SEED_ALLOW=1。"
+        )
     await ensure_merchant_tables()
     print("[Merchant DB] 开始执行独立商户多规格领域数据 Seed 初始化...")
 
