@@ -38,6 +38,10 @@ The TS `AgentMemoryEngine` facade was not ported as a single class; `run_agent.p
 - **History budget + rolling summary (2026-09-21)**: `memory/context_builder.py` is the single assembly point — recent turns within `AI_HISTORY_BUDGET_TOKENS` (default 2000, char-approx) are formatted as `[T{n} MM-dd HH:mm] Role: "..."`; older turns are lazily rolled into `[EARLIER SUMMARY]` via one LLM call per turn max, persisted cross-turn as `task_memory.historySummary`. `ShortMemory.compress` delegates to it (no more stub).
 - **Naming note ("persona" is overloaded)**: here it means the **memory persona** (`long_memory_facts`). Two unrelated homonyms: the Data Agent `customer_profile` merchant wide table (`analytics/engine.py`) and the product review-reputation profile (evaluation queries in `tools_registry/mall_domain.py`). See `agent-engine.md` §1.4 for the full disambiguation.
 
+### 金额精度 — float + 逐步 round 即方案(ADR-0014,2026-10-18)
+
+商户金额域(2 位小数 + NUMERIC 存储 + 每算价步 `round(…, 2)`)的精度方案已裁定:**维持现状**,Decimal/整数分不采纳(改造成本 > 病痛,核验零实弹分位 bug)。每步 round 语义是精度方案的组成部分,重构不得移除;出现真实分位 bug 实弹时按 ADR-0014 升级条件再议。架构审查/盲区扫描不再将 float 金额列为待修项。
+
 ### NL2SQL Sandbox — retired, zero callers
 
 The TS `NLMetricQueryEngine` was retired with the TS backend and **not ported** (the TS baseline already had zero call sites). The Data Agent never generates SQL text (iron rule 08-D1): intents resolve to a closed set of `StructuredQueryIntent` shapes and SQL is assembled deterministically from per-metric templates, audited read-only by `analytics/sql_guard.py` (AST SELECT-only + LIMIT). Do not route NL-to-SQL features through any generative path without a new ADR.
