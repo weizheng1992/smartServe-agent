@@ -15,16 +15,15 @@ import uuid
 
 from engine_py.analytics import feedback_service, graph, promotions, rbac, report_service
 from engine_py.event_bus import publish_agent_event, read_agent_events
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
-from gateway_py.tenant_context import require_tenant_context
-
 from .. import merchant_domain as mds
 from .. import sse_tail
-from .auth import issue_token, require_claims
+from ..tenant_scope import StaffContext, staff_context
+from .auth import issue_token
 
 router = APIRouter(tags=["merchant-analytics"])
 
@@ -32,8 +31,7 @@ router = APIRouter(tags=["merchant-analytics"])
 # 每请求全量重扫(菜单 2 次 SELECT + 员工 1 次 SELECT + 两次空 commit,
 # 合计 6-8 次冗余往返)。每租户进程内只跑一次;DB 被外部清空时重启网关即
 # 恢复重种。rbac.ensure_defaults 本体不加备忘 —— 测试基建的显式重种调用
-# 必须保持真跑。
-_SEEDED_TENANTS: set[str] = set()
+# 必须保持真跑。(缓存随闸上收 tenant_scope._staff_seeded_tenants,2026-10-18。)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -140,29 +138,6 @@ class SkuPatchIn(BaseModel):
     skuTitle: str | None = None
 
 
-async def _ctx(request: Request) -> dict:
-    """统一请求上下文:租户 + 员工身份(JWT)+ 角色 + 按钮权限点闭集。"""
-    tc = require_tenant_context()
-    claims = await require_claims(request.headers.get("authorization"))
-    # require_tenant_context 已保证 tenantId 非空(缺失即 403)—— 隐式默认
-    # 兜底是 spec 明令废弃形状,2026-10-14 夜评微型复发勘正后直取。
-    business_id = tc["tenantId"]
-    if business_id not in _SEEDED_TENANTS:
-        await rbac.ensure_defaults(business_id)
-        _SEEDED_TENANTS.add(business_id)
-    staff = await rbac.find_staff(business_id, str(claims.get("email") or ""))
-    if staff is None or staff.status != "enabled":
-        raise HTTPException(status_code=403, detail="非商户员工或已停用,拒绝访问")
-    return {
-        "business_id": business_id,
-        "role": staff.role,
-        "staff": staff.email,
-        "staff_id": staff.id,
-        "display": staff.display_name,
-        "perms": await rbac.perms_for_role(business_id, staff.role),
-    }
-
-
 ASK_TAIL_DEADLINE_SECONDS = 300  # 生产者意外死亡时消费端兜底收口;期间心跳续命不误杀慢问
 _ASK_PRODUCERS: set[asyncio.Task] = set()  # 持引用防 GC,done 回调自清
 
@@ -200,7 +175,7 @@ async def _tail_ask_events(request: Request, ask_id: str, last_seq: int):
 
 
 @router.post("/api/admin/analytics/ask")
-async def analytics_ask(request: Request):
+async def analytics_ask(request: Request, ctx: StaffContext = Depends(staff_context)):
     """一轮问答 SSE:body {question, pageContext?};事件 clarify|result|unsupported|error。
 
     断线回放(2026-09-26 夜审 A6 收口):首连响应头 ``X-Ask-Id`` 返回本轮流 id,
@@ -209,7 +184,6 @@ async def analytics_ask(request: Request):
     回放剩余帧,**不重算** —— 计算挂后台任务,客户端断开不停算,与 chat
     ``/api/chat/{jobId}/stream`` 同一事件源架构。Redis 故障静默降级为内联直排
     (回放能力让路,当次问答照常)。"""
-    ctx = await _ctx(request)
     body = await request.json()
     question = str(body.get("question") or "").strip()
     if not question:
@@ -264,16 +238,14 @@ async def analytics_ask(request: Request):
 
 
 @router.get("/api/admin/analytics/menus")
-async def analytics_menus(request: Request):
-    ctx = await _ctx(request)
+async def analytics_menus(ctx: StaffContext = Depends(staff_context)):
     tree = await rbac.menu_tree_for_role(ctx["business_id"], ctx["role"])
     return {"success": True, "role": ctx["role"], "perms": ctx["perms"], "menus": tree}
 
 
 @router.post("/api/admin/analytics/roles/{role}/menus")
-async def set_role_menus(role: str, request: Request):
+async def set_role_menus(role: str, request: Request, ctx: StaffContext = Depends(staff_context)):
     """保存角色菜单+按钮权限分配(0013:按钮权限点随 role_menus 动态生效)。"""
-    ctx = await _ctx(request)
     if role not in rbac.ROLES and not role.startswith("custom_"):
         return JSONResponse(status_code=400, content={"success": False, "message": f"未知角色 {role}"})
     if not rbac.is_manager(ctx["role"]):
@@ -284,9 +256,8 @@ async def set_role_menus(role: str, request: Request):
 
 
 @router.get("/api/admin/analytics/roles/{role}/menus")
-async def get_role_menus(role: str, request: Request):
+async def get_role_menus(role: str, ctx: StaffContext = Depends(staff_context)):
     """角色当前权限分配明细(角色管理页勾选树回填)。"""
-    ctx = await _ctx(request)
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可查看权限分配"})
     from engine_py.db import RoleMenu, get_session
@@ -301,11 +272,10 @@ async def get_role_menus(role: str, request: Request):
 
 
 @router.get("/api/admin/analytics/staff")
-async def analytics_staff(request: Request):
+async def analytics_staff(ctx: StaffContext = Depends(staff_context)):
     from engine_py.db import StaffMember, get_session
     from sqlalchemy import select
 
-    ctx = await _ctx(request)
     async with get_session() as session:
         rows = (await session.execute(
             select(StaffMember).where(StaffMember.business_id == ctx["business_id"])
@@ -318,11 +288,10 @@ async def analytics_staff(request: Request):
 
 
 @router.post("/api/admin/analytics/staff/switch")
-async def switch_account(request: Request):
+async def switch_account(request: Request, ctx: StaffContext = Depends(staff_context)):
     """老板快捷切换身份(0013 收口):切换 = 服务端为目标员工签发 JWT,
     前端换 token 后即以该员工身份行事;非老板 403(旧实现任意 staffId 可
     自报身份,已随 x-user-id 信任一并拆除)。"""
-    ctx = await _ctx(request)
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可切换查看身份"})
     body = await request.json()
@@ -344,15 +313,15 @@ async def switch_account(request: Request):
 
 
 @router.get("/api/admin/analytics/reports")
-async def analytics_reports(request: Request, limit: int = Query(20, ge=1, le=50)):
-    ctx = await _ctx(request)
+async def analytics_reports(
+    ctx: StaffContext = Depends(staff_context), limit: int = Query(20, ge=1, le=50)
+):
     reports = await report_service.list_reports(ctx["business_id"])
     return {"success": True, "reports": reports[:limit]}
 
 
 @router.post("/api/admin/analytics/reports")
-async def create_report(request: Request):
-    ctx = await _ctx(request)
+async def create_report(request: Request, ctx: StaffContext = Depends(staff_context)):
     if "report:gen" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无报告权限"})
     body = await request.json()
@@ -363,12 +332,11 @@ async def create_report(request: Request):
 
 
 @router.post("/api/admin/analytics/reports/from-result")
-async def save_result_report(request: Request):
+async def save_result_report(request: Request, ctx: StaffContext = Depends(staff_context)):
     """对话结果卡 → 存为报告(我的报告页可见、可导 CSV;权限同报告生成)。
 
     只搬运对话里真实执行过的查询结果(14-D3:不重算、不编造),行数上限 200。
     """
-    ctx = await _ctx(request)
     if "report:gen" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无报告权限"})
     body = await request.json()
@@ -385,12 +353,11 @@ async def save_result_report(request: Request):
 
 
 @router.post("/api/admin/analytics/feedback")
-async def analytics_feedback(request: Request):
+async def analytics_feedback(request: Request, ctx: StaffContext = Depends(staff_context)):
     """答案反馈(踩/赞,反馈闭环 v3.1):任何在职员工可评,无额外 perm 闸
     (可问即可评)。台账+两池扇出在 engine feedback_service 单点;traceId
     来自终局帧(引擎盖章),服务端 join analytics_trace 回查,不信任客户端
     自报问题/意图。note 为 👎 的可选自由文本。"""
-    ctx = await _ctx(request)
     body = await request.json()
     result = await feedback_service.submit_feedback(
         ctx["business_id"], ctx["staff"],
@@ -403,8 +370,7 @@ async def analytics_feedback(request: Request):
 
 
 @router.get("/api/admin/analytics/reports/{report_id}")
-async def get_report(request: Request, report_id: str):
-    ctx = await _ctx(request)
+async def get_report(report_id: str, ctx: StaffContext = Depends(staff_context)):
     report = await report_service.get_report(ctx["business_id"], report_id)
     if not report:
         return JSONResponse(status_code=404, content={"success": False, "message": "报告不存在"})
@@ -412,8 +378,7 @@ async def get_report(request: Request, report_id: str):
 
 
 @router.get("/api/admin/analytics/reports/{report_id}/csv")
-async def export_report_csv(request: Request, report_id: str):
-    ctx = await _ctx(request)
+async def export_report_csv(report_id: str, ctx: StaffContext = Depends(staff_context)):
     if "report:csv" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无报告导出权限"})
     csv_text = await report_service.export_csv(ctx["business_id"], report_id)
@@ -428,8 +393,8 @@ async def export_report_csv(request: Request, report_id: str):
 
 
 @router.get("/api/admin/analytics/promotions")
-async def promotions_list(request: Request):
-    ctx = await _ctx(request)  # 鉴权闸(租户上下文缺失即 403);列表按租户过滤(S5)
+# 鉴权闸(租户上下文缺失即 403);列表按租户过滤(S5)
+async def promotions_list(ctx: StaffContext = Depends(staff_context)):
     return {
         "success": True,
         "promotions": await promotions.list_promotions(ctx["business_id"]),
@@ -438,8 +403,7 @@ async def promotions_list(request: Request):
 
 
 @router.post("/api/admin/analytics/promotions")
-async def promotions_create(request: Request, body: PromotionCreateIn):
-    ctx = await _ctx(request)
+async def promotions_create(request: Request, body: PromotionCreateIn, ctx: StaffContext = Depends(staff_context)):
     if "promo:create" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     result = await promotions.create_promotion(
@@ -451,8 +415,9 @@ async def promotions_create(request: Request, body: PromotionCreateIn):
 
 
 @router.post("/api/admin/analytics/promotions/{promotion_id}/status")
-async def promotions_set_status(promotion_id: str, request: Request, body: PromotionStatusIn):
-    ctx = await _ctx(request)
+async def promotions_set_status(
+    promotion_id: str, body: PromotionStatusIn, ctx: StaffContext = Depends(staff_context)
+):
     if "promo:disable" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     result = await promotions.set_promotion_status(promotion_id, body.status, ctx["staff"], business_id=ctx["business_id"])
@@ -465,8 +430,7 @@ async def promotions_set_status(promotion_id: str, request: Request, body: Promo
 
 
 @router.post("/api/admin/analytics/menus")
-async def create_menu(request: Request):
-    ctx = await _ctx(request)
+async def create_menu(request: Request, ctx: StaffContext = Depends(staff_context)):
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可管理菜单"})
     body = await request.json()
@@ -494,8 +458,7 @@ async def create_menu(request: Request):
 
 
 @router.patch("/api/admin/analytics/menus/{menu_id}")
-async def update_menu(menu_id: str, request: Request):
-    ctx = await _ctx(request)
+async def update_menu(menu_id: str, request: Request, ctx: StaffContext = Depends(staff_context)):
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可管理菜单"})
     body = await request.json()
@@ -520,8 +483,7 @@ async def update_menu(menu_id: str, request: Request):
 
 
 @router.delete("/api/admin/analytics/menus/{menu_id}")
-async def delete_menu(menu_id: str, request: Request):
-    ctx = await _ctx(request)
+async def delete_menu(menu_id: str, ctx: StaffContext = Depends(staff_context)):
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可管理菜单"})
     if menu_id in rbac.SYSTEM_MENU_IDS:
@@ -555,13 +517,12 @@ async def delete_menu(menu_id: str, request: Request):
 
 
 @router.get("/api/admin/analytics/roles")
-async def roles_list(request: Request):
+async def roles_list(ctx: StaffContext = Depends(staff_context)):
     """角色列表(0013 后无「内置」特权:三档种子只是预置配置,可像自定义角色
     一样重新分配;仅老板角色保留系统菜单防锁死护栏)。"""
     from engine_py.db import RoleMenu, StaffMember, get_session
     from sqlalchemy import func, select
 
-    ctx = await _ctx(request)
     async with get_session() as session:
         menu_counts = dict(
             (await session.execute(
@@ -585,8 +546,7 @@ async def roles_list(request: Request):
 
 
 @router.post("/api/admin/analytics/roles")
-async def roles_create(request: Request):
-    ctx = await _ctx(request)
+async def roles_create(request: Request, ctx: StaffContext = Depends(staff_context)):
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可新建角色"})
     body = await request.json()
@@ -614,8 +574,7 @@ async def roles_create(request: Request):
 
 
 @router.post("/api/admin/analytics/staff")
-async def staff_invite(request: Request):
-    ctx = await _ctx(request)
+async def staff_invite(request: Request, ctx: StaffContext = Depends(staff_context)):
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可邀请员工"})
     body = await request.json()
@@ -655,8 +614,7 @@ async def staff_invite(request: Request):
 
 
 @router.patch("/api/admin/analytics/staff/{staff_id}")
-async def staff_update(staff_id: str, request: Request):
-    ctx = await _ctx(request)
+async def staff_update(staff_id: str, request: Request, ctx: StaffContext = Depends(staff_context)):
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可管理员工"})
     body = await request.json()
@@ -694,8 +652,7 @@ async def staff_update(staff_id: str, request: Request):
 
 
 @router.get("/api/admin/analytics/customers")
-async def customers_list(request: Request):
-    await _ctx(request)
+async def customers_list(ctx: StaffContext = Depends(staff_context)):
     from engine_py.tools_registry.order_domain import merchant_reader_engine
 
     from .. import merchant_domain as _mds
@@ -706,16 +663,16 @@ async def customers_list(request: Request):
 
 
 @router.get("/api/admin/analytics/customers/{customer_id}/coupons")
-async def customer_coupons(customer_id: str, request: Request):
+async def customer_coupons(customer_id: str, ctx: StaffContext = Depends(staff_context)):
     """客户关联优惠券(user_id 与商户客户档案同源;含已使用)。"""
-    await _ctx(request)
     coupons = await mds.customer_coupons_list(customer_id)
     return {"success": True, "coupons": coupons}
 
 
 @router.patch("/api/admin/analytics/customers/{customer_id}")
-async def customer_update(customer_id: str, request: Request, body: CustomerPatchIn):
-    ctx = await _ctx(request)
+async def customer_update(
+    customer_id: str, body: CustomerPatchIn, ctx: StaffContext = Depends(staff_context)
+):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可编辑客户"})
     result = await mds.update_customer_member_level(customer_id, body.memberLevel or "VIP")
@@ -728,8 +685,7 @@ async def customer_update(customer_id: str, request: Request, body: CustomerPatc
 
 
 @router.post("/api/admin/analytics/promotions/{promotion_id}/redeem")
-async def promotions_redeem(promotion_id: str, request: Request):
-    ctx = await _ctx(request)
+async def promotions_redeem(promotion_id: str, request: Request, ctx: StaffContext = Depends(staff_context)):
     if "promo:redeem" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无核销权限"})
     body = await request.json()
@@ -743,9 +699,8 @@ async def promotions_redeem(promotion_id: str, request: Request):
 
 
 @router.post("/api/admin/analytics/promotions/{promotion_id}/grant")
-async def promotions_grant(promotion_id: str, request: Request):
+async def promotions_grant(promotion_id: str, request: Request, ctx: StaffContext = Depends(staff_context)):
     """商家向指定客户发券(复用领券护栏:仅券型/在售/同人同活动一次)。"""
-    ctx = await _ctx(request)
     if "promo:create" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无发券权限"})
     body = await request.json()
@@ -762,14 +717,12 @@ async def promotions_grant(promotion_id: str, request: Request):
 
 
 @router.get("/api/admin/analytics/spus")
-async def spus_list(request: Request):
-    await _ctx(request)
+async def spus_list(ctx: StaffContext = Depends(staff_context)):
     return {"success": True, "spus": await mds.spus_list()}
 
 
 @router.post("/api/admin/analytics/spus")
-async def spus_create(request: Request, body: SpuCreateIn):
-    ctx = await _ctx(request)
+async def spus_create(body: SpuCreateIn, ctx: StaffContext = Depends(staff_context)):
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     title = body.title.strip()
@@ -785,8 +738,7 @@ async def spus_create(request: Request, body: SpuCreateIn):
 
 
 @router.patch("/api/admin/analytics/spus/{spu_id}")
-async def spus_update(spu_id: str, request: Request, body: SpuPatchIn):
-    ctx = await _ctx(request)
+async def spus_update(spu_id: str, body: SpuPatchIn, ctx: StaffContext = Depends(staff_context)):
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     result = await mds.update_spu(spu_id, body.model_dump(exclude_unset=True))
@@ -796,8 +748,7 @@ async def spus_update(spu_id: str, request: Request, body: SpuPatchIn):
 
 
 @router.delete("/api/admin/analytics/spus/{spu_id}")
-async def spus_delete(spu_id: str, request: Request):
-    ctx = await _ctx(request)
+async def spus_delete(spu_id: str, ctx: StaffContext = Depends(staff_context)):
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     result = await mds.delete_spu(spu_id)
@@ -812,8 +763,7 @@ async def spus_delete(spu_id: str, request: Request):
 
 
 @router.get("/api/admin/analytics/owner-mappings")
-async def owner_mappings_list(request: Request):
-    ctx = await _ctx(request)
+async def owner_mappings_list(ctx: StaffContext = Depends(staff_context)):
     from engine_py.analytics import owner_routing
     from engine_py.analytics.tools_registry_bridge import metric_semantic_registry, semantic_model
 
@@ -831,8 +781,7 @@ async def owner_mappings_list(request: Request):
 
 
 @router.put("/api/admin/analytics/owner-mappings")
-async def owner_mappings_upsert(request: Request, body: OwnerMappingUpsertIn):
-    ctx = await _ctx(request)
+async def owner_mappings_upsert(body: OwnerMappingUpsertIn, ctx: StaffContext = Depends(staff_context)):
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可维护责任人"})
     from engine_py.analytics import owner_routing
@@ -849,8 +798,11 @@ async def owner_mappings_upsert(request: Request, body: OwnerMappingUpsertIn):
 
 
 @router.delete("/api/admin/analytics/owner-mappings")
-async def owner_mappings_delete(request: Request, mapType: str = Query(...), mapValue: str = Query(...)):
-    ctx = await _ctx(request)
+async def owner_mappings_delete(
+    ctx: StaffContext = Depends(staff_context),
+    mapType: str = Query(...),
+    mapValue: str = Query(...),
+):
     if not rbac.is_manager(ctx["role"]):
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板/管理员可维护责任人"})
     from engine_py.analytics import owner_routing
@@ -865,13 +817,14 @@ async def owner_mappings_delete(request: Request, mapType: str = Query(...), map
 
 
 @router.patch("/api/admin/analytics/promotions/{promotion_id}")
-async def promotions_update(promotion_id: str, request: Request, body: PromotionPatchIn):
+async def promotions_update(
+    promotion_id: str, body: PromotionPatchIn, ctx: StaffContext = Depends(staff_context)
+):
     """编辑活动(2026-09-27 运营闭环):字段集扩到时间窗/范围/发放上限,SQL
     下沉 engine `promotions.update_promotion` 单一实现(窗口校验、quota 归一、
     审计同 create 一样收在引擎侧),路由只留 perm 闸、字段白名单与错误映射。
     白名单兜底是刻意的:body 里的未知键(如 status)不进 patch,启停仍走
     专用 status 路由。"""
-    ctx = await _ctx(request)
     if "promo:create" not in ctx["perms"]:  # 编辑随建/改活动权限点(0013 动态化)
         return JSONResponse(status_code=403, content={"success": False, "message": "无优惠活动编辑权限"})
     from engine_py.analytics import promotions as P
@@ -886,8 +839,7 @@ async def promotions_update(promotion_id: str, request: Request, body: Promotion
 
 
 @router.delete("/api/admin/analytics/promotions/{promotion_id}")
-async def promotions_delete(promotion_id: str, request: Request):
-    ctx = await _ctx(request)
+async def promotions_delete(promotion_id: str, ctx: StaffContext = Depends(staff_context)):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可删除活动"})
     from engine_py.analytics import promotions as P
@@ -904,8 +856,7 @@ async def promotions_delete(promotion_id: str, request: Request):
 
 
 @router.post("/api/admin/analytics/customers")
-async def customers_create(request: Request, body: CustomerCreateIn):
-    ctx = await _ctx(request)
+async def customers_create(body: CustomerCreateIn, ctx: StaffContext = Depends(staff_context)):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可新增客户"})
     name = body.name.strip()
@@ -917,8 +868,7 @@ async def customers_create(request: Request, body: CustomerCreateIn):
 
 
 @router.delete("/api/admin/analytics/customers/{customer_id}")
-async def customers_delete(customer_id: str, request: Request):
-    ctx = await _ctx(request)
+async def customers_delete(customer_id: str, ctx: StaffContext = Depends(staff_context)):
     if ctx["role"] != "finance_owner":
         return JSONResponse(status_code=403, content={"success": False, "message": "仅老板可删除客户"})
     result = await mds.delete_customer(customer_id)
@@ -931,22 +881,19 @@ async def customers_delete(customer_id: str, request: Request):
 
 
 @router.get("/api/admin/analytics/skus")
-async def skus_stock_list(request: Request):
+async def skus_stock_list(ctx: StaffContext = Depends(staff_context)):
     """跨 SPU 的 SKU 库存总表(SKU 库存菜单独立视角;行内改价/改库存走
     既有 PATCH /skus/{id};低库存阈值口径与工作台一致,前端过滤)。"""
-    await _ctx(request)
     return {"success": True, "skus": await mds.skus_stock_list()}
 
 
 @router.get("/api/admin/analytics/spus/{spu_id}/skus")
-async def skus_list(spu_id: str, request: Request):
-    await _ctx(request)
+async def skus_list(spu_id: str, ctx: StaffContext = Depends(staff_context)):
     return {"success": True, "skus": await mds.skus_list(spu_id)}
 
 
 @router.post("/api/admin/analytics/spus/{spu_id}/skus")
-async def skus_create(spu_id: str, request: Request, body: SkuCreateIn):
-    ctx = await _ctx(request)
+async def skus_create(spu_id: str, body: SkuCreateIn, ctx: StaffContext = Depends(staff_context)):
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     result = await mds.create_sku(spu_id, body.model_dump(exclude_unset=True))
@@ -956,8 +903,7 @@ async def skus_create(spu_id: str, request: Request, body: SkuCreateIn):
 
 
 @router.patch("/api/admin/analytics/skus/{sku_id}")
-async def skus_update(sku_id: str, request: Request, body: SkuPatchIn):
-    ctx = await _ctx(request)
+async def skus_update(sku_id: str, body: SkuPatchIn, ctx: StaffContext = Depends(staff_context)):
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     result = await mds.update_sku(sku_id, body.model_dump(exclude_unset=True))
@@ -967,8 +913,7 @@ async def skus_update(sku_id: str, request: Request, body: SkuPatchIn):
 
 
 @router.delete("/api/admin/analytics/skus/{sku_id}")
-async def skus_delete(sku_id: str, request: Request):
-    ctx = await _ctx(request)
+async def skus_delete(sku_id: str, ctx: StaffContext = Depends(staff_context)):
     if "prod:edit" not in ctx["perms"]:
         return JSONResponse(status_code=403, content={"success": False, "message": "无商品编辑权限"})
     result = await mds.delete_sku(sku_id)

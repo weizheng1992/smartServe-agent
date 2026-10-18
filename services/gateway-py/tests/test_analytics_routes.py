@@ -1852,13 +1852,13 @@ class TestPromotionsTenantIsolation:
         # nike 侧:nike 员工行直插(ensure_defaults 的固定 staff id 会在第二租户
         # 撞 PK —— 该多商户阻断已记债;测试只造本租户所需一行,并给路由级备忘
         # 预登记,防首个 nike 请求再触 ensure_defaults 炸 500)
-        from gateway_py.routers import analytics as analytics_routes
+        from gateway_py.tenant_scope import _staff_seeded_tenants
 
         try:
             await rbac.ensure_defaults("nike")
         except Exception:
             pass  # PK 撞已知;本测试自备员工行
-        analytics_routes._SEEDED_TENANTS.add("nike")
+        _staff_seeded_tenants.add("nike")
         pwd_hash = rbac.seed_password_hash()
 
         async with get_session() as session:
@@ -1916,13 +1916,13 @@ class TestPromotionsTenantIsolation:
         assert any(m["mapValue"] == "潮流鞋靴" for m in aurora_list.json()["mappings"])
 
         # nike 员工行直插(ensure_defaults 固定 staff id 在第二租户撞 PK,已记债)
-        from gateway_py.routers import analytics as analytics_routes
+        from gateway_py.tenant_scope import _staff_seeded_tenants
 
         try:
             await rbac.ensure_defaults("nike")
         except Exception:
             pass  # PK 撞已知;本测试自备员工行
-        analytics_routes._SEEDED_TENANTS.add("nike")
+        _staff_seeded_tenants.add("nike")
         pwd_hash = rbac.seed_password_hash()
         from engine_py.db import get_session
         from engine_py.db.models import StaffMember

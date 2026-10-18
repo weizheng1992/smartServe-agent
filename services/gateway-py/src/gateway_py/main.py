@@ -31,7 +31,7 @@ from .routers import (
     spi,
     store_spi,
 )
-from .tenant_context import TenantContextMiddleware, _PermissionError
+from .tenant_context import TenantContextMiddleware
 from .tenant_scope import GateError
 
 
@@ -110,11 +110,6 @@ fastapi_app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@fastapi_app.exception_handler(_PermissionError)
-async def permission_error_handler(request: Request, exc: _PermissionError):
-    return JSONResponse(status_code=403, content={"statusCode": 403, "message": "Forbidden: tenant context required"})
 
 
 @fastapi_app.exception_handler(ValueError)

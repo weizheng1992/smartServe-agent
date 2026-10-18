@@ -41,9 +41,9 @@ Interface(调用方须知的一切):
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import NamedTuple, TypedDict
 
-from fastapi import Header, HTTPException, Query
+from fastapi import Header, HTTPException, Query, Request
 from sqlalchemy import select, text
 
 from .tenant_context import get_tenant_context
@@ -174,6 +174,57 @@ async def staff_scope(
     """Depends 闸:员工身份 + 租户边界一次落定(商户管理面标准入口)。"""
     identity = await require_staff(authorization)
     return TenantScope(identity=identity, tenant=bound_tenant(identity.staff, tenantId))
+
+
+class StaffContext(TypedDict):
+    """analytics 面请求上下文(2026-10-18 闸族收口,键集契约物):此前
+    analytics._ctx 返回未声明 dict,engine 侧 ``session_ctx.get("role", …)`` 的
+    lenient 缺省把键漂移变成「静默按 finance_owner 放行」—— 键集自此有类型。"""
+
+    business_id: str
+    role: str
+    staff: str
+    staff_id: object
+    display: str
+    perms: list[str]
+
+
+_staff_seeded_tenants: set[str] = set()
+
+
+async def staff_context(
+    request: Request,
+    authorization: str | None = Header(None),
+) -> StaffContext:
+    """Depends 闸(analytics 面标准入口,2026-10-18 闸族收口):租户上下文 +
+    员工身份 + 角色/权限点一次装配。原 analytics._ctx 手写平行实现上收于此
+    (_seeded_tenants 幂等缓存随迁);require_tenant_context/_PermissionError
+    双胞胎随之退役,无租户上下文 403 统一 {"detail"} 形(两形规则 detail 半边,
+    原 {statusCode,message} 信封零契约用例钉过)。perms 暂随装配(与旧 _ctx
+    同开销);只读路由免付 perms 的两档化留作后续。"""
+    tc = get_tenant_context()
+    if not (tc and tc.get("tenantId")):
+        raise HTTPException(403, "Forbidden: tenant context required (x-tenant-id header)")
+    from engine_py.analytics import rbac
+
+    from .routers.auth import require_claims
+
+    claims = await require_claims(authorization)
+    business_id = tc["tenantId"]
+    if business_id not in _staff_seeded_tenants:
+        await rbac.ensure_defaults(business_id)
+        _staff_seeded_tenants.add(business_id)
+    staff = await rbac.find_staff(business_id, str(claims.get("email") or ""))
+    if staff is None or staff.status != "enabled":
+        raise HTTPException(status_code=403, detail="非商户员工或已停用")
+    return {
+        "business_id": business_id,
+        "role": staff.role,
+        "staff": staff.email,
+        "staff_id": staff.id,
+        "display": staff.display_name,
+        "perms": await rbac.perms_for_role(business_id, staff.role),
+    }
 
 
 PLATFORM_ADMIN_ROLE = "platform_admin"  # 角色名沿用 spi/gatekeeper 既有白名单字面量
