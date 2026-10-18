@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from typing import NamedTuple, TypedDict
 
-from fastapi import Header, HTTPException, Query, Request
+from fastapi import Header, HTTPException, Query
 from sqlalchemy import select, text
 
 from .tenant_context import get_tenant_context
@@ -193,7 +193,6 @@ _staff_seeded_tenants: set[str] = set()
 
 
 async def staff_context(
-    request: Request,
     authorization: str | None = Header(None),
 ) -> StaffContext:
     """Depends 闸(analytics 面标准入口,2026-10-18 闸族收口):租户上下文 +

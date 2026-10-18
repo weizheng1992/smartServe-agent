@@ -294,9 +294,12 @@ export async function uploadRagDocument(
   form.append('businessId', businessId);
   if (category) form.append('category', category);
   try {
+    // FormData 必须裸 fetch(request 硬编码 JSON);平台闸与手写切片写同律,
+    // Authorization 手动随行(adminApi 同款 token 来源)。
+    const token = authToken();
     const res = await fetch(`${API_BASE_URL}/api/rag/documents/upload`, {
       method: 'POST',
-      headers: { 'x-tenant-id': tenantId || businessId },
+      headers: { 'x-tenant-id': tenantId || businessId, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: form,
     });
     const json = await res.json().catch(() => ({}));

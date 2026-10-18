@@ -651,11 +651,14 @@ async def upload_rag_document(
     businessId: str | None = Form(None),
     category: str | None = Form(None),
     x_tenant_id: str | None = Header(None),
+    _platform: StaffIdentity = Depends(require_platform_admin),
 ):
     """上传 PDF/Word 文档,异步摄取(202 返回 jobId,轮询 jobs/{id} 状态)。
 
     摄取管线(docling+VLM+granite 抽数)在后台任务执行:闸门(租户/魔数/限长)
-    同步快败,落盘后立即受理。
+    同步快败,落盘后立即受理。平台闸与手写切片写(POST /api/rag/documents)
+    同律 —— 20MB 重管线是最贵写面,不能只靠具名租户 400 + 30/60 限流兜着
+    (匿名面严禁触达);轮询端点 jobId 即能力令牌维持文档化豁免。
 
     租户必须显式具名(businessId 表单字段或 x-tenant-id 头),'all' 上帝视角
     严禁挂载摄取 —— 租户归属是写侧决策,缺省猜测曾把 aurora 货架挂到演示

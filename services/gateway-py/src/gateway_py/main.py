@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 from contextlib import asynccontextmanager
 
 from engine_py.llm import warm_embedding_model_in_background
@@ -133,7 +134,7 @@ async def health():
         "success": True,
         "status": "ok",
         "service": "gateway-py",
-        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
     }
 
 
