@@ -91,4 +91,16 @@ describe('FormDialogShell(chrome/footer/busy 状态机单点)', () => {
     );
     expect(screen.getByRole('button', { name: '提交' })).toBeDisabled();
   });
+
+  it('视觉契约:壳必须自带 p-6 内边距(ui DialogContent 不带 padding,32ea113 曾抄丢致 13 弹窗贴边)', () => {
+    render(
+      <FormDialogShell title="t" submitLabel="提交" onClose={() => {}} onSubmit={async () => null}>
+        <div>body</div>
+      </FormDialogShell>,
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveClass('p-6');
+    expect(dialog.className).toContain('rounded-xl');
+    expect(dialog.className).toContain('shadow-xl');
+  });
 });

@@ -6,6 +6,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } fro
 // 中 caller 类在后,tailwind-merge 保证此处的密度类可被使用处再覆盖
 // (如条件色 text-rose-600、选中态 bg-blue-50/60、列宽 w-8)。
 
+// whitespace-nowrap 是本单点的职责(2026-10-18 用户实弹:表头「库存/状态」、
+// 单元格「满/减」「进行/中」全站中文竖排折行)——横向溢出交 ui Table 的
+// overflow-auto 包裹滚动,严禁在单元格内折行;真需折行的长文本列(如订单
+// 收货地址 line-clamp-2)由 caller 显式 whitespace-normal 解除。
+
 /** 紧凑数据表(text-[13px];仍带 ui Table 的 overflow-auto 包裹)。 */
 export const DenseTable = forwardRef<HTMLTableElement, ComponentProps<typeof Table>>(({ className, ...props }, ref) => (
   <Table ref={ref} className={cn('w-full text-[13px]', className)} {...props} />
@@ -26,7 +31,7 @@ export const DenseTableHead = forwardRef<HTMLTableCellElement, ComponentProps<ty
   ({ className, ...props }, ref) => (
     <TableHead
       ref={ref}
-      className={cn('h-auto px-4 py-2 text-[13px] font-medium text-zinc-400', className)}
+      className={cn('h-auto whitespace-nowrap px-4 py-2 text-[13px] font-medium text-zinc-400', className)}
       {...props}
     />
   ),
@@ -35,7 +40,7 @@ DenseTableHead.displayName = 'DenseTableHead';
 
 export const DenseTableCell = forwardRef<HTMLTableCellElement, ComponentProps<typeof TableCell>>(
   ({ className, ...props }, ref) => (
-    <TableCell ref={ref} className={cn('px-4 py-2 align-middle text-[13px]', className)} {...props} />
+    <TableCell ref={ref} className={cn('whitespace-nowrap px-4 py-2 align-middle text-[13px]', className)} {...props} />
   ),
 );
 DenseTableCell.displayName = 'DenseTableCell';

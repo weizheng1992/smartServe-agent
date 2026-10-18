@@ -16,7 +16,7 @@ import OwnerMappingsPage from '@/pages/system/owner-mappings';
 import RolesPage from '@/pages/system/roles';
 import StaffPage from '@/pages/system/staff';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 
 export default function App() {
@@ -176,6 +176,10 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
                 重试
               </Button>
             </div>
+          ) : location.pathname === '/login' ? (
+            // 已登录直敲 /login:回工作台,不落「无权访问」卡(/login 不在菜单树,
+            // 守卫必然拦截;登录面只属于未登录整树分支)
+            <Navigate replace to="/analytics" />
           ) : !allowed ? (
             <div className="flex h-full flex-col items-center justify-center gap-2">
               <div className="text-3xl">🔒</div>

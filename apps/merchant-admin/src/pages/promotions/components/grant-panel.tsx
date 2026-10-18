@@ -43,7 +43,8 @@ export function GrantDialog({ promo, onClose, onMsg }: Props) {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md rounded-xl border-zinc-200 text-zinc-900 shadow-xl">
+      {/* p-6 自给(ui DialogContent 不带 padding,同 form-dialog-shell 契约) */}
+      <DialogContent className="max-w-md rounded-xl border-zinc-200 p-6 text-zinc-900 shadow-xl">
         <DialogHeader className="pb-3 border-b border-zinc-100">
           <DialogTitle className="text-base font-bold text-zinc-900">
             发券「{promo.name}」

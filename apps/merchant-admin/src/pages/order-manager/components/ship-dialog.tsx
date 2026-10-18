@@ -87,7 +87,7 @@ export function ShipDialog() {
             type="button"
             size="sm"
             onClick={() => shippingOrderId && handleShipOrder(shippingOrderId)}
-            className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer"
+            className="text-xs font-bold cursor-pointer"
           >
             确认发货并锁定地址
           </Button>

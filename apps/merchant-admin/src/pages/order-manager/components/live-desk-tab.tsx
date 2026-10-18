@@ -284,7 +284,7 @@ export function LiveDeskTab() {
                   size="sm"
                   onClick={() => handleSendMessage()}
                   disabled={!inputMessage.trim()}
-                  className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white text-xs font-semibold h-9 px-4 cursor-pointer"
+                  className="text-xs font-semibold h-9 px-4 cursor-pointer"
                 >
                   发送
                 </Button>

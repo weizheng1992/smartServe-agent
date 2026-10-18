@@ -177,7 +177,9 @@ export function OrdersTab() {
                       <div className="font-medium text-slate-800">{o.shipping_address?.recipientName || '张伟'}</div>
                       <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '13800138000'}</div>
                     </DenseTableCell>
-                    <DenseTableCell className="p-3.5 max-w-xs">
+                    {/* 收货地址是唯一豁免:长文本两行预览(line-clamp),dense-table 的
+                        nowrap 预设在此显式解除,其余列一律单行横向滚动 */}
+                    <DenseTableCell className="max-w-xs whitespace-normal p-3.5">
                       <span className="text-slate-800 line-clamp-2" title={o.shipping_address?.fullAddress}>
                         {o.shipping_address?.fullAddress}
                       </span>
@@ -212,7 +214,7 @@ export function OrdersTab() {
                               // 假物流(顾客按假单查件永远查无),弹窗侧空值已闸
                               setTrackingNumberInput('');
                             }}
-                            className="bg-blue-600 text-white hover:bg-blue-500 h-7 text-xs font-semibold cursor-pointer"
+                            className="h-7 text-xs font-semibold cursor-pointer"
                           >
                             一键发货
                           </Button>
