@@ -9,12 +9,12 @@ import {
   DashboardPage,
   EvalsPage,
   GuardrailsPage,
+  LoginPage,
   PersonasPage,
   RagStudioPage,
   SkillsToolsPage,
   SystemLogsPage,
   TenantsPage,
-  LoginPage,
 } from './pages';
 
 function RequireAuth({ children }: { children: React.ReactElement }) {

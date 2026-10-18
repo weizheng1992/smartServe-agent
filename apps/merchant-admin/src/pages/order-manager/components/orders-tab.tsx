@@ -174,8 +174,9 @@ export function OrdersTab() {
                       ¥{fmtMoney(o.total_amount)}
                     </DenseTableCell>
                     <DenseTableCell className="p-3.5">
-                      <div className="font-medium text-slate-800">{o.shipping_address?.recipientName || '张伟'}</div>
-                      <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '13800138000'}</div>
+                      {/* 缺值诚实呈现「—」,严禁假名/假号兜底(数据诚实律) */}
+                      <div className="font-medium text-slate-800">{o.shipping_address?.recipientName || '—'}</div>
+                      <div className="text-[11px] text-slate-400">{o.shipping_address?.phone || '—'}</div>
                     </DenseTableCell>
                     {/* 收货地址是唯一豁免:长文本两行预览(line-clamp),dense-table 的
                         nowrap 预设在此显式解除,其余列一律单行横向滚动 */}

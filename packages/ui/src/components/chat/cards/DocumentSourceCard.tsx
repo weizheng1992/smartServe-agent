@@ -26,9 +26,10 @@ const renderPipeTable = (markdown: string): React.ReactNode => {
     <table className="w-full border-collapse text-xs">
       <thead>
         <tr>
-          {header.map((h) => (
+          {/* 表格单元格文本可重复(同值两格/两行同文),key 复合索引防撞名 */}
+          {header.map((h, i) => (
             <th
-              key={h}
+              key={`h-${i}-${h}`}
               className="border border-slate-700 bg-slate-800/60 px-2 py-1 text-left font-semibold text-slate-200"
             >
               {h}
@@ -37,10 +38,12 @@ const renderPipeTable = (markdown: string): React.ReactNode => {
         </tr>
       </thead>
       <tbody>
-        {body.map((line) => (
-          <tr key={line}>
-            {cells(line).map((c) => (
-              <td key={c} className="border border-slate-700 px-2 py-1 text-slate-300">
+        {body.map((line, r) => (
+          /* biome-ignore lint/suspicious/noArrayIndexKey: 管道表静态渲染不重排无元素状态,单元格文本可重复(同值撞名)才是实害 */
+          <tr key={`r-${r}`}>
+            {cells(line).map((c, i) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: 单元格文本可重复,复合索引唯一 */
+              <td key={`r${r}-c${i}`} className="border border-slate-700 px-2 py-1 text-slate-300">
                 {c}
               </td>
             ))}

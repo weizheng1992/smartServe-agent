@@ -1,7 +1,7 @@
-import { authApi, setSession } from '../../lib/api';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button, Input } from 'ui';
+import { authApi, setSession } from '../../lib/api';
 
 // 平台运营者登录(2026-10-18 平台面零鉴权收口):员工 JWT(role='platform_admin')
 // 即管控台身份。dev 种子账号 platform@aurora(启动期幂等种子),密码统一 agent-all-dev。
