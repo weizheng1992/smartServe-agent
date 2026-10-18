@@ -32,8 +32,20 @@ test.describe('Admin 修复回归 (2026-09-13)', () => {
     await page.goto('/rag-studio');
     await expect(page.getByText('RAG 向量检索在线演练台')).toBeVisible();
 
+    // 具名租户强制(2026-10-17 窃听族收口 / 714251e):默认 'all' 上帝视角禁写
+    // —— 禁用态本身是契约;'all' 下点击不开窗(收口前此点击直接开弹窗)
+    const createButton = page.getByRole('button', { name: '新增知识切片' });
+    await expect(createButton).toBeDisabled();
+    await createButton.click({ force: true }).catch(() => {});
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // 切换到具名租户 aurora(FilterBar 全局租户选择器,cmdk option),按钮解禁
+    await page.getByRole('combobox', { expanded: false }).first().click();
+    await page.getByRole('option', { name: /极光潮品官方旗舰店/ }).click();
+    await expect(createButton).toBeEnabled();
+
     // 新增切片:弹窗打开、归属商户下拉含注册表真实租户 aurora(P2-5 同源验证)
-    await page.getByRole('button', { name: '新增知识切片' }).click();
+    await createButton.click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     const businessSelect = dialog.locator('select').first();

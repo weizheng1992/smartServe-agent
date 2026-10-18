@@ -129,7 +129,7 @@ async def ingest_document_file(
     )
     if not chunks:
         result.status = "skipped"
-        result.reason = "未提取到任何内容(扫描件无文本层或空文档);OCR 支持为 v2 裁决项"
+        result.reason = "未提取到任何内容(空文档或图片无法 OCR 识别)"
         return result
 
     _stitch_structured_payloads(chunks, parsed, vlm_chart_payloads)

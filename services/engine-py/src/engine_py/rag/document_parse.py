@@ -14,7 +14,8 @@ doc.pictures 有、iterate_items 无),referenced 模式也只认本地路径不�
 
 诚实边界(数据诚实律):
 - 老式 .doc 二进制格式不解析,显式报错要求另存为 .docx(严禁猜测转换);
-- 扫描型 PDF(无文本层)交由调用方按「空内容」诚实跳过,OCR 为 v2 裁决项;
+- 扫描型 PDF:PDF 管线内置 RapidOCR(PP-OCRv6)自动提取(2026-10-18 实证,图片型
+  PDF 全文可读且带标题层级;P0→PO 类字符混淆属 OCR 固有误差,provenance 诚实不变);真正空文档由调用方按「空内容」诚实跳过;
 - PARTIAL_SUCCESS 转换结果照常返回但在 partial 标记上如实暴露(如个别页超时);
 - 无位图数据的图片位不生成引用行,严禁虚构占位。
 
@@ -48,6 +49,36 @@ _FIRST_TITLE_RE = re.compile(r"^#{1,2}\s+(.+?)\s*$", re.MULTILINE)
 _SUPPORTED_SUFFIXES = {".pdf": "pdf", ".docx": "docx"}
 _MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
 _SKIP_LABELS = {"page_header", "page_footer"}  # 页眉页脚严禁污染知识切片
+
+# zip 炸弹成员预读闸(v2 在案残余收口,2026-10-18):docx 是 zip 容器,
+# 20MB 压缩体按 ~1032:1 极限 deflate 可展开 GB 级 XML 全量进 docling 解析器。
+# 落盘后、转换前按 zip 头声明的解压尺寸预读(零解压成本),超限诚实拒绝。
+_DOCX_MAX_MEMBER_UNCOMPRESSED = 64 * 1024 * 1024  # 单成员 64MB
+_DOCX_MAX_TOTAL_UNCOMPRESSED = 200 * 1024 * 1024  # 解压总量 200MB
+
+
+def _guard_docx_zip(path: Path) -> None:
+    """docx 容器成员预读闸:单成员/解压总量超限即诚实拒绝(严禁全量进解析器)。"""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            total = 0
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                if info.file_size > _DOCX_MAX_MEMBER_UNCOMPRESSED:
+                    raise DocumentParseError(
+                        f"文档内部成员 {info.filename} 解压后约 {info.file_size // (1024 * 1024)}MB,"
+                        f"超过 {_DOCX_MAX_MEMBER_UNCOMPRESSED // (1024 * 1024)}MB 上限,已拒绝处理"
+                    )
+                total += info.file_size
+                if total > _DOCX_MAX_TOTAL_UNCOMPRESSED:
+                    raise DocumentParseError(
+                        f"文档解压后总量超过 {_DOCX_MAX_TOTAL_UNCOMPRESSED // (1024 * 1024)}MB 上限,已拒绝处理"
+                    )
+    except zipfile.BadZipFile as err:
+        raise DocumentParseError(f"docx 容器损坏或非 zip 结构: {err}") from err
 
 
 class DocumentParseError(RuntimeError):
@@ -101,9 +132,9 @@ def parse_document(path: Path) -> ParsedDocument:
         raise DocumentParseError(f"不支持的文档格式 {suffix or '(无扩展名)'},仅支持 .pdf / .docx")
 
     # max_num_pages 防御页数无界(docling 缺省 sys.maxsize,2026-10-17 对抗审查:
-    # 恶意/异常文档逐页 2x 渲染可在网关进程内造成分钟级占用)。zip 炸弹
-    # (20MB 压缩体展开 GB 级 XML)无现成参数可闸,属在案残余(v2 项:
-    # docx 成员预读),上传面为员工后台 + 20MB 闸兜底。
+    # 恶意/异常文档逐页 2x 渲染可在网关进程内造成分钟级占用)。
+    if source_format == "docx":
+        _guard_docx_zip(path)  # zip 炸弹成员预读闸(v2 在案残余收口,2026-10-18)
     result = _get_converter().convert(str(path), max_num_pages=500)
     status = str(result.status.value) if result.status is not None else ""
     if status not in ("success", "partial_success"):

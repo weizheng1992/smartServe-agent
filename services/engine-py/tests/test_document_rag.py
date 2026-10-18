@@ -678,3 +678,28 @@ def test_non_dict_payload_rejected_without_crash():
     ]
     result = try_aggregate("数量一共多少", hits)
     assert result is not None and result["value"] == 5, "非法负载跳过后,合法表照常可算"
+
+
+def test_docx_zip_bomb_member_guard(tmp_path):
+    """v2 在案残余收口(2026-10-18):zip 炸弹成员预读 —— 解压后超大成员在
+    转换前诚实拒绝(100MB 全零 document.xml 经 deflate 仅 ~100KB,压缩体
+    远低于上传闸,唯独解压面超限)。"""
+    import zipfile
+
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    bomb_xml = f'<w:document xmlns:w="{W}"><w:body><w:p><w:r><w:t>{"0" * (100 * 1024 * 1024)}</w:t></w:r></w:p></w:body></w:document>'
+    path = tmp_path / "bomb.docx"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        z.writestr("word/document.xml", bomb_xml)
+    assert path.stat().st_size < 1024 * 1024, "夹具本身应是高压缩比(压缩体极小)"
+    with pytest.raises(DocumentParseError, match="解压后"):
+        parse_document(path)
+
+
+def test_docx_corrupt_zip_honest_error(tmp_path):
+    """损坏 zip 容器:诚实 DocumentParseError(非裸 zipfile 异常穿透)。"""
+    path = tmp_path / "broken.docx"
+    path.write_bytes(b"PK\x03\x04" + b"\x00" * 64)  # zip 魔数但结构损坏
+    with pytest.raises(DocumentParseError, match="zip"):
+        parse_document(path)
