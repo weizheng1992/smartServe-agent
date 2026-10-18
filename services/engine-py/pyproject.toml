@@ -24,7 +24,8 @@ dependencies = [
 [dependency-groups]
 # outbox 对账等 DB 语义测试经 testcontainers 起 PG(镜像 gateway-py 密封测试模式;Docker 不可用时自动 skip)
 dev = ["ruff>=0.6", "pytest>=8.3", "pytest-asyncio>=1.0", "testcontainers[postgres]>=4.8", "pytest-github-actions-annotate-failures>=0.4", # 文档 RAG 测试夹具(docx_fixtures 现场合成交付解析的 docx)
-       "python-docx>=1.2.0"]
+       "python-docx>=1.2.0", # docs/rag-samples/generate_samples.py 演示语料生成(PIL 画图表)
+       "pillow>=10.0"]
 
 [build-system]
 requires = ["hatchling"]
