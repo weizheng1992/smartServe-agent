@@ -176,6 +176,36 @@ async def staff_scope(
     return TenantScope(identity=identity, tenant=bound_tenant(identity.staff, tenantId))
 
 
+PLATFORM_ADMIN_ROLE = "platform_admin"  # 角色名沿用 spi/gatekeeper 既有白名单字面量
+
+
+async def operator_scope(authorization: str | None, tenant_param: str | None) -> tuple[str, StaffIdentity]:
+    """坐席/管控双面闸(2026-10-18):员工 JWT 必需;platform_admin 跨租户
+    (显式租户参数缺省 'all' 上帝视角),普通员工**钉本租户**——自报租户头不再
+    采信(provenance:租户来源从「头自报」变「身份推导」,admin conversations
+    四端点的 'ecommerce' 兜底链随之消灭)。返回 (tenant_id, identity)。"""
+    identity = await require_staff(authorization)
+    if str(identity.staff.role or "") == PLATFORM_ADMIN_ROLE:
+        return str(tenant_param or "all").strip().lower(), identity
+    return str(identity.staff.business_id or "").strip().lower(), identity
+
+
+async def require_platform_admin(
+    authorization: str | None = Header(None),
+) -> StaffIdentity:
+    """Depends 闸:平台运营者(2026-10-18 平台面零鉴权收口)。
+
+    SaaS 管控台(tenant CRUD/overview/billing/skills/rag/evals/logs/guardrails/
+    personas 等跨租户上帝视角)须持 role='platform_admin' 员工 JWT(business_id
+    ='all' 的平台账号,rbac.ensure_platform_admin 启动期种子)—— 此前自报
+    x-tenant-id/x-role 即可匿名读写,「刻意上帝视角」与「忘了装闸」在签名上
+    零差别,审计只能逐条考古。401/403 {"detail"} 形(同 require_staff)。"""
+    identity = await require_staff(authorization)
+    if str(identity.staff.role or "") != PLATFORM_ADMIN_ROLE:
+        raise HTTPException(status_code=403, detail="需要平台运营者角色(platform_admin)")
+    return identity
+
+
 async def ensure_tenant_registered(business_id: str | None) -> None:
     """商户注册表闸(raise 型):403 未注册/停用、503 注册表不可达(fail-closed)。
 

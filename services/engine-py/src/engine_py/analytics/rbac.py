@@ -179,6 +179,37 @@ async def ensure_menu_seed(business_id: str) -> None:
         await session.commit()
 
 
+PLATFORM_ADMIN_EMAIL = "platform@aurora"
+PLATFORM_ADMIN_ROLE = "platform_admin"
+
+
+async def ensure_platform_admin() -> None:
+    """平台运营者账号种子(2026-10-18 平台面零鉴权收口):SaaS 管控台(tenant
+    CRUD/overview/billing/skills/rag/evals/logs 等跨租户上帝视角)此前零鉴权
+    ——自报 x-tenant-id/x-role 即可读写。闸 = 员工 JWT 且 role='platform_admin'
+    (角色名沿用 spi.py:81 / gatekeeper.py:655 既有白名单字面量,不新造)。
+
+    business_id='all':平台运营者不属于任何商户租户;幂等按 email——行在即
+    补缺失密码(与 ensure_defaults 同纪律,已有值不覆写)。"""
+    async with get_session() as session:
+        row = (
+            await session.execute(
+                select(StaffMember).where(StaffMember.email == PLATFORM_ADMIN_EMAIL)
+            )
+        ).scalars().first()
+        if row is not None:
+            if not row.password_hash:
+                row.password_hash = seed_password_hash()
+                await session.commit()
+            return
+        session.add(StaffMember(
+            id="staff_platform", business_id="all", email=PLATFORM_ADMIN_EMAIL,
+            display_name="平台运营者", role=PLATFORM_ADMIN_ROLE, status="enabled",
+            password_hash=seed_password_hash(), dept="平台运营", level="owner",
+        ))
+        await session.commit()
+
+
 async def ensure_defaults(business_id: str) -> None:
     """种子幂等:菜单树/角色分配/三档员工账号(员工补密码,可真实登录)。"""
     await ensure_menu_seed(business_id)

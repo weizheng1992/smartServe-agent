@@ -70,6 +70,13 @@ async def _lifespan(app: FastAPI):
     from .version_stamp import write_stamp
 
     write_stamp()
+    # 平台运营者账号(2026-10-18 平台闸):apps/admin 登录身份,启动期幂等种子
+    try:
+        from engine_py.analytics import rbac
+
+        await rbac.ensure_platform_admin()
+    except Exception as seed_err:
+        print(f"[Startup] 平台账号种子失败(不阻断启动): {seed_err}")
     await _sync_product_knowledge_on_startup()
     # 周期任务随网关宿主(ADR-0007:Temporal 执行路线退役后,scheduler 的唯一
     # 宿主)—— outbox 对账 / 接管释放 / 坏例摘要。dev:all 从此自带对账兜底,
