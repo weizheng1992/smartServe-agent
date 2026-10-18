@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
-import { ragApi, uploadRagDocument } from '../../lib/api';
+import { pollRagUploadJob, ragApi, uploadRagDocument } from '../../lib/api';
 import { useAdminTenantStore } from '../../store/tenantStore';
 import { KnowledgeFormModal } from './components/KnowledgeFormModal';
 import { RagPlayground } from './components/RagPlayground';
@@ -133,22 +133,31 @@ export function RagStudioPage() {
     setIsUploading(true);
     try {
       const res = await uploadRagDocument(file, selectedTenantId, 'document', selectedTenantId);
-      if (!res.success) {
+      if (!res.success || !res.data?.jobId) {
         alert(res.error || '文档上传失败');
         return;
       }
-      const d = res.data;
-      const parts = [
-        `${d?.chunks ?? 0} 个切片`,
-        d?.tables ? `表格 ${d.tables}` : null,
-        d?.images ? `插图 ${d.images}` : null,
-      ]
-        .filter(Boolean)
-        .join(' / ');
+      // 异步作业化(2026-10-18):202 受理后轮询终态(解析中…态由 isUploading 呈现)
+      const job = await pollRagUploadJob(res.data.jobId, selectedTenantId);
+      if (job.status === 'completed') {
+        const parts = [
+          `${job.chunks ?? 0} 个切片`,
+          job.tables ? `表格 ${job.tables}` : null,
+          job.images ? `插图 ${job.images}` : null,
+        ]
+          .filter(Boolean)
+          .join(' / ');
+        alert(
+          `文档「${job.sourceUrl ?? file.name}」摄取成功:${parts}${job.partial ? '(⚠️ 部分页转换失败,内容不完整)' : ''}`,
+        );
+        await refetch();
+        return;
+      }
       alert(
-        `文档「${d?.sourceUrl ?? file.name}」摄取成功:${parts}${d?.partial ? '(⚠️ 部分页转换失败,内容不完整)' : ''}`,
+        job.status === 'skipped'
+          ? `文档「${job.sourceUrl ?? file.name}」未入库:${job.error || '空文档'}`
+          : `文档「${job.sourceUrl ?? file.name}」摄取失败:${job.error || '未知原因'}`,
       );
-      await refetch();
     } finally {
       setIsUploading(false);
       if (uploadInputRef.current) uploadInputRef.current.value = '';

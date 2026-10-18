@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
+import json
 import math
+import time
 import uuid
 from pathlib import Path
 
@@ -17,7 +20,8 @@ from engine_py.rag.document_ingest import ingest_document_file
 from engine_py.rag.document_parse import uploads_root
 from engine_py.skills import SkillRegistry
 from engine_py.tenant_config import get_tenant_config, update_tenant_skill_config
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, select, text
 from sqlalchemy.orm import defer
@@ -35,7 +39,14 @@ from ..approval_actions import (
     operator_snapshot,
 )
 from ..tenant_context import get_tenant_context
-from ..tenant_scope import optional_staff, require_tenant, same_tenant
+from ..tenant_scope import (
+    StaffIdentity,
+    operator_scope,
+    optional_staff,
+    require_platform_admin,
+    require_tenant,
+    same_tenant,
+)
 
 router = APIRouter()
 
@@ -57,7 +68,7 @@ async def tenant_ping(x_tenant_id: str | None = Header(None)):
 
 
 @router.get("/api/overview")
-async def platform_overview():
+async def platform_overview(_platform: StaffIdentity = Depends(require_platform_admin)):
     """全局指标大盘聚合端点(admin-readiness 03,real-data-only):一次请求出全部
     卡片,全部库内真算 —— 活跃租户(近7天 session_metrics 有落账)、会话状态分布、
     待审批 HITL 工单(含最老积压)、Token/成本(session_metrics SUM,与计费页同源)、
@@ -159,7 +170,7 @@ async def platform_overview():
 
 
 @router.get("/api/tenant/list")
-async def tenant_list():
+async def tenant_list(_platform: StaffIdentity = Depends(require_platform_admin)):
     try:
         tenants = await tenant_admin.list_tenant_summaries()
         return {"success": True, "tenants": tenants}
@@ -196,7 +207,7 @@ class TenantUpdateIn(BaseModel):
 
 
 @router.post("/api/tenant")
-async def create_tenant(body: TenantCreateIn):
+async def create_tenant(body: TenantCreateIn, _platform: StaffIdentity = Depends(require_platform_admin)):
     clean_id = (body.id or "").lower().strip()
     if not clean_id or not body.name:
         raise HTTPException(400, "Tenant ID and Name are required")
@@ -225,7 +236,7 @@ async def create_tenant(body: TenantCreateIn):
 
 
 @router.put("/api/tenant/{business_id}")
-async def update_tenant(business_id: str, body: TenantUpdateIn):
+async def update_tenant(business_id: str, body: TenantUpdateIn, _platform: StaffIdentity = Depends(require_platform_admin)):
     clean_id = business_id.lower().strip()
     if not body.name:
         raise HTTPException(400, "Tenant Name is required")
@@ -255,7 +266,7 @@ async def update_tenant(business_id: str, body: TenantUpdateIn):
 
 
 @router.delete("/api/tenant/{business_id}")
-async def delete_tenant(business_id: str):
+async def delete_tenant(business_id: str, _platform: StaffIdentity = Depends(require_platform_admin)):
     try:
         await tenant_admin.delete_tenant(business_id=business_id.lower().strip())
     except PermissionError as err:
@@ -267,12 +278,12 @@ async def delete_tenant(business_id: str):
 # skills
 # ---------------------------------------------------------------------------
 @router.get("/api/skills/registry")
-async def skills_registry():
+async def skills_registry(_platform: StaffIdentity = Depends(require_platform_admin)):
     return {"success": True, "skills": [s.metadata for s in SkillRegistry.get_all_skills()]}
 
 
 @router.get("/api/skills/config")
-async def skills_config(x_tenant_id: str | None = Header(None)):
+async def skills_config(_platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     ctx = require_tenant()
     skills = await _tenant_skills(ctx["tenantId"])
     return {"success": True, "tenantId": ctx["tenantId"], "skills": skills}
@@ -307,7 +318,7 @@ async def _tenant_skills(tenant_id: str) -> list[dict]:
 
 
 @router.put("/api/skills/config")
-async def update_skills_config(body: dict, x_tenant_id: str | None = Header(None)):
+async def update_skills_config(body: dict, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     ctx = require_tenant()
     if body.get("skillId"):
         updated = await update_tenant_skill_config(ctx["tenantId"], body["skillId"], body)
@@ -322,14 +333,14 @@ async def update_skills_config(body: dict, x_tenant_id: str | None = Header(None
 
 
 @router.get("/api/skills/tenant")
-async def skills_tenant_alias(x_tenant_id: str | None = Header(None)):
+async def skills_tenant_alias(_platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     ctx = require_tenant()
     skills = await _tenant_skills(ctx["tenantId"])
     return {"success": True, "tenantId": ctx["tenantId"], "skills": skills}
 
 
 @router.patch("/api/skills/tenant/{skill_id}")
-async def update_tenant_skill(skill_id: str, body: dict, x_tenant_id: str | None = Header(None)):
+async def update_tenant_skill(skill_id: str, body: dict, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     ctx = require_tenant()
     updated = await update_tenant_skill_config(ctx["tenantId"], skill_id, body)
     return {
@@ -494,7 +505,7 @@ async def resolve_approval(body: dict, request: Request, authorization: str | No
 # rag
 # ---------------------------------------------------------------------------
 @router.get("/api/rag/documents")
-async def rag_documents(tenantId: str | None = Query(None), x_tenant_id: str | None = Header(None)):
+async def rag_documents(_platform: StaffIdentity = Depends(require_platform_admin), tenantId: str | None = Query(None), x_tenant_id: str | None = Header(None)):
     tenant_id = tenantId or x_tenant_id
     async with get_session() as session:
         # 列表页封顶 + 免拉 embedding 列(2026-09-28 夜审):此前无界全量且整行
@@ -554,7 +565,7 @@ class RagDocIn(BaseModel):
 
 
 @router.post("/api/rag/documents", status_code=201)
-async def add_rag_document(body: RagDocIn, x_tenant_id: str | None = Header(None)):
+async def add_rag_document(body: RagDocIn, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     chunk_text = (body.chunkText or body.content or "").strip()
     if not chunk_text:
         raise HTTPException(422, "chunkText (或 content 别名) 不能为空")
@@ -589,7 +600,7 @@ async def add_rag_document(body: RagDocIn, x_tenant_id: str | None = Header(None
 
 
 @router.delete("/api/rag/documents/{doc_id}")
-async def delete_rag_document(doc_id: str, tenantId: str | None = Query(None), x_tenant_id: str | None = Header(None)):
+async def delete_rag_document(doc_id: str, _platform: StaffIdentity = Depends(require_platform_admin), tenantId: str | None = Query(None), x_tenant_id: str | None = Header(None)):
     # 具名租户强制(2026-10-17 窃听族收口 sec-2):空头曾免 WHERE,凭 doc_id
     # 即可删任意租户文档。'all' 上帝视角严禁挂删除。
     tenant_id = (tenantId or x_tenant_id or "").strip()
@@ -633,7 +644,7 @@ def _rag_docs_dir():
     return target
 
 
-@router.post("/api/rag/documents/upload", status_code=201)
+@router.post("/api/rag/documents/upload", status_code=202)
 async def upload_rag_document(
     request: Request,
     file: UploadFile = File(...),
@@ -641,7 +652,10 @@ async def upload_rag_document(
     category: str | None = Form(None),
     x_tenant_id: str | None = Header(None),
 ):
-    """上传 PDF/Word 文档,解析切块(表格原子块)入 rag_documents。
+    """上传 PDF/Word 文档,异步摄取(202 返回 jobId,轮询 jobs/{id} 状态)。
+
+    摄取管线(docling+VLM+granite 抽数)在后台任务执行:闸门(租户/魔数/限长)
+    同步快败,落盘后立即受理。
 
     租户必须显式具名(businessId 表单字段或 x-tenant-id 头),'all' 上帝视角
     严禁挂载摄取 —— 租户归属是写侧决策,缺省猜测曾把 aurora 货架挂到演示
@@ -701,23 +715,104 @@ async def upload_rag_document(
     original_name = Path(file.filename or out_path.name).name
     if len(original_name) > 200:
         original_name = original_name[-200:]
-    try:
-        result = await ingest_document_file(
+
+    # 异步作业化(v2,2026-10-18):docling+VLM+granite 抽数的摄取管线在网关
+    # 进程内跑秒到分钟级,同步占位曾把管理请求钉在「解析中…」。闸门(租户/
+    # 魔数/限长)保持同步快败,落盘后即 202 派后台任务,状态写 Redis(TTL 1h,
+    # 免迁移;单实例假设 ADR-0007,网关重启在途任务失联 → 状态端点按账龄
+    # 诚实降级 stale 提示重传)。jobId 为随机 uuid 能力令牌。
+    job_id = uuid.uuid4().hex
+    await _write_ingest_job(
+        job_id,
+        {
+            "status": "processing",
+            "sourceUrl": original_name,
+            "createdAt": time.time(),
+            "businessId": business_id,
+        },
+    )
+    task = asyncio.create_task(
+        _run_ingest_job(
+            job_id,
             out_path,
             business_id,
-            category=(category or "").strip() or "document",
+            (category or "").strip() or "document",
+            original_name,
+        )
+    )
+    _INGEST_TASKS.add(task)
+    task.add_done_callback(_INGEST_TASKS.discard)
+    return JSONResponse(
+        status_code=202,
+        content={"success": True, "data": {"jobId": job_id, "sourceUrl": original_name, "status": "processing"}},
+    )
+
+
+# 后台摄取任务的强引用集(asyncio.create_task 弱引用会被 GC 的已知坑)
+_INGEST_TASKS: set[asyncio.Task] = set()
+_INGEST_JOB_TTL_SECONDS = 3600
+_INGEST_JOB_STALE_SECONDS = 900  # processing 超过 15 分钟视为失联(网关重启)
+
+
+async def _write_ingest_job(job_id: str, payload: dict) -> None:
+    from engine_py.event_bus import get_client as get_redis
+
+    redis = await get_redis()
+    await redis.set(
+        f"rag:ingest_job:{job_id}",
+        json.dumps(payload, ensure_ascii=False),
+        ex=_INGEST_JOB_TTL_SECONDS,
+    )
+
+
+async def _read_ingest_job(job_id: str) -> dict | None:
+    from engine_py.event_bus import get_client as get_redis
+
+    redis = await get_redis()
+    raw = await redis.get(f"rag:ingest_job:{job_id}")
+    return json.loads(raw) if raw else None
+
+
+async def _run_ingest_job(
+    job_id: str,
+    file_path: Path,
+    business_id: str,
+    category: str,
+    original_name: str,
+) -> None:
+    """后台摄取任务:结果(含失败)写 Redis 作业状态;失败同批清理落盘文件。"""
+    try:
+        result = await ingest_document_file(
+            file_path,
+            business_id,
+            category=category,
             caption_images=True,
             source_url=original_name,
         )
     except Exception as err:
-        out_path.unlink(missing_ok=True)
-        raise HTTPException(500, f"文档摄取异常: {err}") from err
+        file_path.unlink(missing_ok=True)
+        await _write_ingest_job(
+            job_id,
+            {"status": "failed", "error": f"文档摄取异常: {err}", "sourceUrl": original_name, "createdAt": time.time()},
+        )
+        print(f"[RAG Upload] 作业 {job_id[:8]} 摄取异常: {err}")
+        return
     if result.status != "ingested":
-        out_path.unlink(missing_ok=True)
-        raise HTTPException(422, f"文档摄取未完成({result.status}): {result.reason or '未知原因'}")
-    return {
-        "success": True,
-        "data": {
+        file_path.unlink(missing_ok=True)
+        await _write_ingest_job(
+            job_id,
+            {
+                "status": result.status,
+                "error": result.reason or "未知原因",
+                "sourceUrl": original_name,
+                "createdAt": time.time(),
+            },
+        )
+        return
+    await _write_ingest_job(
+        job_id,
+        {
+            "status": "completed",
             "sourceUrl": original_name,
             "docTitle": result.doc_title,
             "chunks": result.chunks,
@@ -725,8 +820,24 @@ async def upload_rag_document(
             "images": result.images,
             "captioned": result.captioned,
             "partial": result.partial,
+            "createdAt": time.time(),
         },
-    }
+    )
+
+
+@router.get("/api/rag/documents/upload/jobs/{job_id}")
+async def rag_upload_job_status(job_id: str):
+    """上传作业状态轮询端点。jobId 为随机 uuid 能力令牌(不校验租户);
+    processing 超过 15 分钟诚实降级 stale(疑似网关重启,任务失联),提示重传。"""
+    payload = await _read_ingest_job(job_id)
+    if payload is None:
+        raise HTTPException(404, f"上传作业 {job_id} 不存在或已过期(TTL 1 小时)")
+    if payload.get("status") == "processing":
+        age = time.time() - float(payload.get("createdAt") or 0)
+        if age > _INGEST_JOB_STALE_SECONDS:
+            payload["status"] = "stale"
+            payload["error"] = "处理超时(疑似网关重启,任务失联),请重新上传"
+    return {"success": True, "data": payload}
 
 
 class RagQueryIn(BaseModel):
@@ -736,7 +847,7 @@ class RagQueryIn(BaseModel):
 
 
 @router.post("/api/rag/query")
-async def rag_query(body: RagQueryIn, x_tenant_id: str | None = Header(None)):
+async def rag_query(body: RagQueryIn, _platform: StaffIdentity = Depends(require_platform_admin), x_tenant_id: str | None = Header(None)):
     tenant_id = body.tenantId or x_tenant_id
     # 'all' = 管理台上帝视角:跨租户检索。此前硬编码降级成 ecommerce,
     # 上帝视角永远检不到他租知识(2026-09-13 修复,与 ContextualRAG 全局模式配套)
@@ -784,16 +895,11 @@ async def list_conversations(
     search: str | None = Query(None),
     limit: str | None = Query(None),
     offset: str | None = Query(None),
-    request: Request = None,
+    authorization: str | None = Header(None),
 ):
-    ctx = get_tenant_context()
-    tenant_id = (
-        request.headers.get("x-tenant-id")
-        or request.headers.get("x-business-id")
-        or request.query_params.get("tenantId")
-        or request.query_params.get("businessId")
-        or "ecommerce"
-    ) if request else ((ctx or {}).get("tenantId") or "ecommerce")
+    # 坐席/管控双面闸(2026-10-18 窃听族收口 sec-1 收尾):员工 JWT 必需,
+    # platform_admin 跨租户,普通员工钉本租户 —— 四源自报头 + 'ecommerce' 兜底链退役
+    tenant_id, _identity = await operator_scope(authorization, None)
 
     result = await conversation_repo.list_conversations(
         business_id=tenant_id,
@@ -807,13 +913,10 @@ async def list_conversations(
 
 
 @router.get("/api/conversations/{thread_id}")
-async def get_conversation(thread_id: str, request: Request):
-    tenant_id = (
-        request.headers.get("x-tenant-id")
-        or request.headers.get("x-business-id")
-        or request.query_params.get("tenantId")
-        or request.query_params.get("businessId")
-    )
+async def get_conversation(thread_id: str, authorization: str | None = Header(None)):
+    # 属主闸收口(sec-1 实弹:此前匿名可凭 thread_id 读任意租户会话,timeline
+    # 租户闸在租户为 None 时整段跳过)—— operator_scope 后租户恒有权威来源
+    tenant_id, _identity = await operator_scope(authorization, None)
     timeline = await conversation_repo.get_conversation_timeline(thread_id, tenant_id)
     return {"success": True, "data": timeline}
 
@@ -825,8 +928,10 @@ class ConversationStatusIn(BaseModel):
 
 
 @router.post("/api/conversations/{thread_id}/status")
-async def update_conversation_status(thread_id: str, body: ConversationStatusIn, request: Request):
-    tenant_id = request.headers.get("x-tenant-id") or request.headers.get("x-business-id") or "ecommerce"
+async def update_conversation_status(
+    thread_id: str, body: ConversationStatusIn, authorization: str | None = Header(None)
+):
+    tenant_id, _identity = await operator_scope(authorization, None)
     updated = await conversation_repo.update_conversation_status(
         thread_id, tenant_id, body.status, body.assignedOperatorId, body.tags
     )
@@ -836,17 +941,12 @@ async def update_conversation_status(thread_id: str, body: ConversationStatusIn,
 
 
 @router.get("/api/conversations/{thread_id}/telemetry")
-async def conversation_telemetry(thread_id: str, request: Request):
+async def conversation_telemetry(thread_id: str, authorization: str | None = Header(None)):
     """会话级真实决策遥测(real-data-only,2026-09-13):按 LangGraph 节点聚合
     llm_call_logs 的调用次数/Token/成本/延迟 —— 此前管理台「LangGraph 决策流」Tab
     整段是前端编造的假节点耗时/假置信度/假运单号,现全部替换为库内真算;
     无遥测记录时诚实空,严禁合成演示链路。"""
-    tenant_id = (
-        request.headers.get("x-tenant-id")
-        or request.headers.get("x-business-id")
-        or request.query_params.get("tenantId")
-        or "all"
-    )
+    tenant_id, _identity = await operator_scope(authorization, None)
     clean_tenant = (tenant_id or "").lower().strip()
     params: dict = {"tid": thread_id.strip()}
     tenant_filter = ""

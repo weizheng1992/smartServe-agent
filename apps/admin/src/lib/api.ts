@@ -6,6 +6,29 @@
 export const API_BASE_URL =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:4000';
 
+// 平台闸会话(2026-10-18 平台面零鉴权收口):员工 JWT(role='platform_admin')
+// 即管控台身份 —— localStorage 形态与 merchant-admin 同款。
+const TOKEN_KEY = 'admin.token';
+const TOKEN_EMAIL_KEY = 'admin.token.email';
+
+export function setSession(token: string, email: string) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(TOKEN_EMAIL_KEY, email);
+}
+
+export function clearSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EMAIL_KEY);
+}
+
+export function authToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function sessionEmail(): string | null {
+  return localStorage.getItem(TOKEN_EMAIL_KEY);
+}
+
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
@@ -21,11 +44,12 @@ async function request<T = any>(
   const { tenantId, headers = {}, ...restOptions } = options;
 
   const resolvedTenant = tenantId || 'all';
+  const token = authToken();
   const resolvedHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     'x-tenant-id': resolvedTenant,
     'x-business-id': resolvedTenant,
-    'x-role': 'admin',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(headers as Record<string, string>),
   };
 
@@ -40,6 +64,12 @@ async function request<T = any>(
     const json = await res.json().catch(() => ({}));
 
     if (!res.ok) {
+      // 401 统一出口:平台闸拒绝(未登录/过期)→ 清会话回登录页
+      // (login 自身不走此导流;403 是已登录但角色不足,留在页内诚实报错)
+      if (res.status === 401 && !path.includes('/api/auth/login')) {
+        clearSession();
+        window.location.assign('/login');
+      }
       return {
         success: false,
         error: json.message || json.error || `HTTP ${res.status}: 请求失败`,
@@ -55,6 +85,18 @@ async function request<T = any>(
     };
   }
 }
+
+export const authApi = {
+  /** 登录不走统一 request(无 token 可附带;401 是登录失败本身,不得触发导流)。 */
+  login: async (email: string, password: string): Promise<ApiResponse> => {
+    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    return (await res.json().catch(() => ({}))) as ApiResponse;
+  },
+};
 
 export const adminApi = {
   get: <T = any>(path: string, tenantId?: string, query?: Record<string, any>) => {
@@ -246,17 +288,7 @@ export async function uploadRagDocument(
   businessId: string,
   category: string | undefined,
   tenantId?: string,
-): Promise<
-  ApiResponse<{
-    sourceUrl: string;
-    docTitle?: string;
-    chunks: number;
-    tables: number;
-    images: number;
-    captioned: number;
-    partial: boolean;
-  }>
-> {
+): Promise<ApiResponse<{ jobId: string; sourceUrl: string; status: 'processing' }>> {
   const form = new FormData();
   form.append('file', file);
   form.append('businessId', businessId);
@@ -279,6 +311,31 @@ export async function uploadRagDocument(
   } catch (err: any) {
     return { success: false, error: err.message || '网络通信异常，请检查后端网关是否已启动' };
   }
+}
+
+export interface RagUploadJob {
+  status: 'processing' | 'completed' | 'failed' | 'skipped' | 'stale';
+  sourceUrl?: string;
+  docTitle?: string;
+  chunks?: number;
+  tables?: number;
+  images?: number;
+  captioned?: number;
+  partial?: boolean;
+  error?: string;
+}
+
+/** 轮询上传作业至终态(间隔 1.5s,上限 5 分钟;超时抛错由调用方 alert) */
+export async function pollRagUploadJob(jobId: string, tenantId?: string): Promise<RagUploadJob> {
+  const deadline = Date.now() + 5 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const res = await adminApi.get(`/api/rag/documents/upload/jobs/${jobId}`, tenantId);
+    if (!res.success) throw new Error(res.error || '作业状态查询失败');
+    const job = res.data as RagUploadJob;
+    if (job.status !== 'processing') return job;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  throw new Error('文档解析超时(超过 5 分钟),请稍后在列表确认或重试');
 }
 
 export const ragApi = {

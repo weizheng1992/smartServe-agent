@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import importlib
+import os
 import random
 from datetime import UTC
 from typing import ClassVar
@@ -18,6 +19,63 @@ from typing import ClassVar
 import pytest
 
 from .conftest import _TS, CONTRACT_APPROVAL, CONTRACT_THREAD, create_thread
+
+
+@pytest.fixture()
+async def platform(client):
+    """平台运营者 JWT(platform@aurora;ASGITransport 不触发 lifespan,显式种子)。
+
+    平台面零鉴权收口(2026-10-18,critical):管控台全族(tenant/overview/
+    billing/skills/rag/evals/logs/guardrails/personas)须持 platform_admin JWT。"""
+    from engine_py.analytics import rbac
+
+    await rbac.ensure_platform_admin()
+    password = os.environ.get("E2E_ACCOUNT_PASSWORD", "agent-all-dev")
+    r = await client.post("/api/auth/login", json={"email": "platform@aurora", "password": password})
+    assert r.status_code == 200, f"平台登录失败: {r.text}"
+    return {"Authorization": f"Bearer {r.json()['data']['token']}"}
+
+
+class TestPlatformGate:
+    """平台面零鉴权收口负例:匿名 401、普通商户员工 403、平台运营者放行。"""
+
+    async def test_anonymous_platform_reads_401(self, client):
+        for path in (
+            "/api/tenant/list",
+            "/api/overview",
+            "/api/guardrails",
+            "/api/billing/usages",
+            "/api/evals/results",
+            "/api/logs",
+            "/api/skills/registry",
+            "/api/rag/documents",
+        ):
+            res = await client.get(path)
+            assert res.status_code == 401, f"{path}: {res.status_code} {res.text[:120]}"
+
+    async def test_anonymous_platform_writes_401(self, client):
+        res = await client.put("/api/billing/quota", json={"businessId": "nike", "monthlyLimitTokens": 1})
+        assert res.status_code == 401
+        res = await client.post("/api/tenant", json={"id": "x", "name": "x"})
+        assert res.status_code == 401
+        res = await client.delete("/api/tenant/nike")
+        assert res.status_code == 401
+
+    async def test_non_platform_staff_403(self, client, contract_fixtures):
+        """JWT 有效但非 platform_admin(普通商户员工)→ 403。"""
+        password = os.environ.get("E2E_ACCOUNT_PASSWORD", "agent-all-dev")
+        r = await client.post("/api/auth/login", json={"email": "test@example.com", "password": password})
+        assert r.status_code == 200, r.text
+        staff_headers = {"Authorization": f"Bearer {r.json()['data']['token']}"}
+        res = await client.get("/api/tenant/list", headers=staff_headers)
+        assert res.status_code == 403
+        assert "platform_admin" in res.json()["detail"]
+
+    async def test_platform_admin_reads_pass(self, client, platform):
+        res = await client.get("/api/tenant/list", headers=platform)
+        assert res.status_code == 200
+        res = await client.get("/api/overview", headers=platform)
+        assert res.status_code == 200
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -1601,13 +1659,28 @@ class TestConversations:
 
 
 class TestRagDocumentUpload:
-    """POST /api/rag/documents/upload(2026-10-17 文档 RAG,路由计数 129→130)。
+    """POST /api/rag/documents/upload + GET /api/rag/documents/upload/jobs/{id}
+    (2026-10-17 文档 RAG;2026-10-18 异步作业化 201→202)。
 
-    魔数自证(pdf/docx/doc)、20MB 读流限长、具名租户强制('all' 与缺省拒绝)、
-    摄取失败 422 诚实透因 + 落盘文件同批清理。docling 摄取在本套件打桩
+    闸门(魔数自证/20MB 读流限长/具名租户强制)同步快败;落盘后 202 派后台
+    任务,状态写 Redis(TTL 1h),轮询端点读终态。docling 摄取在本套件打桩
     (密封套件严禁拉解析模型);摄取管线真实行为由 engine 侧 test_document_rag
     与真弹冒烟钉死。
     """
+
+    async def _await_job(self, client, job_id: str, timeout_seconds: float = 10.0) -> dict:
+        """轮询作业至终态(打桩摄取为内存级,亚秒完成;超时即失败)。"""
+        import asyncio
+
+        deadline = asyncio.get_event_loop().time() + timeout_seconds
+        while asyncio.get_event_loop().time() < deadline:
+            res = await client.get(f"/api/rag/documents/upload/jobs/{job_id}")
+            assert res.status_code == 200
+            payload = res.json()["data"]
+            if payload.get("status") in ("completed", "failed", "skipped"):
+                return payload
+            await asyncio.sleep(0.2)
+        raise AssertionError(f"作业 {job_id} 超时未达终态")
 
     DOCX_MAGIC = b"PK\x03\x04" + b"\x14\x00\x00\x00"  # zip 容器头(docx 前缀)
     DOC_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # OLE2 复合文档头(老式 .doc)
@@ -1643,16 +1716,25 @@ class TestRagDocumentUpload:
             files={"file": ("会员章程.docx", self.DOCX_MAGIC, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
             data={"businessId": "nike"},
         )
-        assert res.status_code == 201
+        assert res.status_code == 202, "异步作业化:受理即 202,摄取在后台"
         body = res.json()
         assert body["success"] is True
-        assert body["data"]["sourceUrl"] == "会员章程.docx"
-        assert body["data"]["chunks"] == 3
-        assert body["data"]["tables"] == 1
+        job_id = body["data"]["jobId"]
+        assert job_id and body["data"]["sourceUrl"] == "会员章程.docx"
+        assert body["data"]["status"] == "processing"
+
+        job = await self._await_job(client, job_id)
+        assert job["status"] == "completed"
+        assert job["chunks"] == 3 and job["tables"] == 1
         assert calls["business_id"] == "nike"
         assert calls["source_url"] == "会员章程.docx"
         saved = list((tmp_path / "uploads" / "rag" / "docs").glob("*.docx"))
         assert len(saved) == 1, "成功摄取的文档本体保留在 uploads/rag/docs"
+
+    async def test_upload_job_unknown_404(self, client, contract_fixtures):
+        res = await client.get("/api/rag/documents/upload/jobs/nonexistent-job-id")
+        assert res.status_code == 404
+        assert "TTL" in res.json()["detail"]
 
     async def test_upload_rejects_god_view_and_missing_tenant(self, client, contract_fixtures, monkeypatch, tmp_path):
         monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
@@ -1700,7 +1782,7 @@ class TestRagDocumentUpload:
         assert "20MB" in res.json()["detail"]
         assert not list((tmp_path / "uploads" / "rag" / "docs").glob("*")), "超限分支不得残留半截文件"
 
-    async def test_upload_ingest_failure_422_and_cleans_file(self, client, contract_fixtures, monkeypatch, tmp_path):
+    async def test_upload_ingest_failure_polls_failed_and_cleans_file(self, client, contract_fixtures, monkeypatch, tmp_path):
         monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
         await self._stub_ingest(monkeypatch, status="failed", reason="文档转换失败(status=error): 测试桩")
         res = await client.post(
@@ -1708,8 +1790,10 @@ class TestRagDocumentUpload:
             files={"file": ("broken.docx", self.DOCX_MAGIC, "application/octet-stream")},
             data={"businessId": "nike"},
         )
-        assert res.status_code == 422
-        assert "文档转换失败" in res.json()["detail"]
+        assert res.status_code == 202
+        job = await self._await_job(client, res.json()["data"]["jobId"])
+        assert job["status"] == "failed"
+        assert "文档转换失败" in job["error"]
         assert not list((tmp_path / "uploads" / "rag" / "docs").glob("*")), "失败分支必须清理落盘文件"
 
     async def test_upload_accepts_tenant_via_header_and_forwards_category(self, client, contract_fixtures, monkeypatch, tmp_path):
@@ -1724,7 +1808,9 @@ class TestRagDocumentUpload:
             data={"category": "prd"},
             headers={"x-tenant-id": "nike"},
         )
-        assert res.status_code == 201, res.json()
+        assert res.status_code == 202, res.json()
+        job = await self._await_job(client, res.json()["data"]["jobId"])
+        assert job["status"] == "completed"
         assert calls["business_id"] == "nike"
         assert calls["category"] == "prd"
 
@@ -1734,7 +1820,8 @@ class TestRagDocumentUpload:
             files={"file": ("默认分类.docx", self.DOCX_MAGIC, "application/octet-stream")},
             headers={"x-tenant-id": "nike"},
         )
-        assert default_res.status_code == 201
+        assert default_res.status_code == 202
+        await self._await_job(client, default_res.json()["data"]["jobId"])
         assert default_calls["category"] == "document", "category 缺省必须落 document"
 
 
