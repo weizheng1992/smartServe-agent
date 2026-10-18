@@ -84,6 +84,49 @@ def _parse_amount(raw: Any) -> float:
     return 0
 
 
+def _build_document_sources(rag_documents: list[dict], max_sources: int = 4, max_images: int = 3) -> list[dict]:
+    """rag_documents 切片 → 文档来源卡条目(v2 富卡片回显)。
+
+    只收**富媒体切片**:metadata 带 imageUrl(图表位图)或 contentType=table
+    (表格原子块,chunk_text 即管道表原文可直接渲染);纯文本切片零条目 ——
+    正文引用已覆盖,卡只做富媒体增量,严禁为凑卡重复正文。
+    图片 ≤3 张(normalize_image_urls 同纪律),来源 ≤4 条,按检索序(即置信序)。
+    """
+    sources: list[dict] = []
+    seen: set[tuple] = set()
+    image_count = 0
+    for doc in rag_documents:
+        meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+        content_type = meta.get("contentType")
+        image_url = meta.get("imageUrl")
+        if content_type not in ("image", "table"):
+            continue
+        doc_title = doc.get("docTitle") or doc.get("sourceUrl") or "未命名文档"
+        header_path = doc.get("headerPath") or ""
+        key = (doc_title, header_path, content_type)
+        if key in seen:
+            continue
+        if content_type == "image":
+            if not image_url or image_count >= max_images:
+                continue
+            image_count += 1
+        if len(sources) >= max_sources:
+            break
+        seen.add(key)
+        sources.append(
+            {
+                "docTitle": str(doc_title),
+                "headerPath": str(header_path) if header_path else None,
+                "snippet": None,
+                "imageUrl": image_url,
+                "tableMarkdown": doc.get("chunkText") if content_type == "table" else None,
+                "provenance": (meta.get("chartData") or {}).get("provenance")
+                or ("table" if content_type == "table" else None),
+            }
+        )
+    return sources
+
+
 class CardSynthesizer:
     @staticmethod
     async def fetch_shelf_categories(intents: list[dict] | None, thread_id: str | None = None) -> list[dict]:
@@ -151,6 +194,7 @@ class CardSynthesizer:
                         }
                     )
         return skeletons
+
 
     @staticmethod
     def synthesize_cards(options: dict) -> list[dict]:
@@ -355,6 +399,20 @@ class CardSynthesizer:
         # 契约),其余按本轮意图出场景组,统一追加在消息尾部。
         # 技能自带的 quick_replies(如破损照片消歧组)是更具体的场景行:
         # first-wins 原样保留,严禁一屏两条胶囊。
+        # 7. 文档知识来源卡(v2,2026-10-17 文档 RAG):文档命中含图/表切片时回显
+        # 原图与表格原文(纯文本命中不出卡 —— 引用已在正文,卡是富媒体增量)。
+        # 图片 ≤3 张与 normalize_image_urls 同纪律;数量随条数封顶防一屏刷爆。
+        rag_documents = options.get("ragDocuments") or []
+        document_sources = _build_document_sources(rag_documents)
+        if document_sources:
+            cards.append(
+                {
+                    "type": "document_source",
+                    "hydrationState": "ready",
+                    "data": {"title": "文档知识来源", "sources": document_sources},
+                }
+            )
+
         existing_cards = options.get("existingCards") or []
         base_cards = list(existing_cards) if existing_cards else cards
         if any(c.get("type") == "quick_replies" for c in base_cards):

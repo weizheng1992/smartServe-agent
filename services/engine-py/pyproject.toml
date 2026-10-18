@@ -18,7 +18,7 @@ dependencies = [
     "sqlglot>=25.0",
     "pyyaml>=6.0",
     "fastembed>=0.9.0",
-    "docling>=2.140.0",
+    "docling[granite-vision]>=2.140.0",
 ]
 
 [dependency-groups]
@@ -33,6 +33,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/engine_py"]
+
 
 [tool.ruff]
 line-length = 110

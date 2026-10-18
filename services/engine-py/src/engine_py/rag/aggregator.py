@@ -17,6 +17,7 @@ provenance 分级(数据诚实律):
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 
 # 聚合操作词表(规则意图层;英文同族兜底)
 _OP_KEYWORDS: list[tuple[str, str]] = [
@@ -224,7 +225,8 @@ def try_aggregate(query: str, rag_results: list[dict]) -> dict | None:
         break  # 首个可算的命中即用(检索序即置信序)
     if best is None:
         return None
-    best["annotated"] = best["provenance"] == "vlm"
+    # native/table = 文档自有数据零读数误差;vlm/extracted = VLM 读数,强制标注
+    best["annotated"] = best["provenance"] in ("vlm", "extracted")
     return best
 
 
@@ -239,6 +241,20 @@ def _table_word_set(data: dict) -> set[str]:
     return words
 
 
+def _format_number(value: float | Decimal) -> str:
+    """数值渲染纪律(v2,2026-10-17):整数千分位、浮点取最短往返表示,严禁 %g
+    (6 位有效数字截断 + ≥1e6 切科学计数法,「6.2e+06」曾以确定性权威口径注入)。"""
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return f"{int(value):,}"
+        return format(value.normalize(), "f")  # normalize 剥尾零,f 强制定点防 E 计数法
+    if isinstance(value, float) and value.is_integer():
+        return f"{int(value):,}"
+    if isinstance(value, float):
+        return repr(value)
+    return f"{value:,}"
+
+
 def format_result(result: dict) -> str:
     """聚合结果 → 中文一句话(带出处;VLM 读数强制读数误差标注)。
 
@@ -248,13 +264,14 @@ def format_result(result: dict) -> str:
     """
     value = result["value"]
     if result.get("percent"):
-        display = f"{value * 100:g}%"
-    elif isinstance(value, float) and value.is_integer():
-        display = f"{int(value):,}"
-    elif isinstance(value, float):
-        display = repr(value)
+        # 百分比列还原呈现(表内 50% 经 coerce_number 存 0.5)。移位走
+        # Decimal(repr(value)):二进制 ×100 会造伪影(0.55*100 =
+        # 55.00000000000001),repr 是最短往返表示,纯十进制移位既不造数也
+        # 不吞位;%g 的截断在百分比支同禁(2026-10-17 夜审补口)
+        scaled = Decimal(repr(value)) * 100
+        display = _format_number(scaled) + "%"
     else:
-        display = f"{value:,}"
+        display = _format_number(value)
     op_label = {"sum": "合计", "avg": "平均值", "max": "最大值", "min": "最小值", "count": "行数"}[result["op"]]
     column_part = f"「{result['column']}」列" if result.get("column") else ""
     annotation = "(数值读自图表,可能存在读数误差)" if result.get("annotated") else ""

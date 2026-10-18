@@ -431,6 +431,7 @@ async def _settle_turn(
             "damageAssessment": result.get("damage_assessment"),
             "existingCards": result.get("cards") or [],
             "shelfCategories": shelf_categories,
+            "ragDocuments": result.get("rag_documents") or [],
         }
     )
 

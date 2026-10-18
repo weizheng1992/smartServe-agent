@@ -110,7 +110,10 @@ def parse_document(path: Path) -> ParsedDocument:
         errors = "; ".join(err.error_message for err in (result.errors or []))
         raise DocumentParseError(f"文档转换失败(status={status or 'unknown'}): {errors or '无错误详情'}")
 
-    markdown, image_urls, table_payloads, chart_payloads = _export_markdown(result.document)
+    markdown, image_urls, table_payloads, chart_payloads = _export_markdown(
+        result.document,
+        provenance=("native" if source_format == "docx" else "extracted"),
+    )
     title_match = _FIRST_TITLE_RE.search(markdown)
     return ParsedDocument(
         markdown=markdown,
@@ -123,9 +126,12 @@ def parse_document(path: Path) -> ParsedDocument:
     )
 
 
-def _export_markdown(doc) -> tuple[str, list[str], list[dict | None], dict[str, dict]]:
+def _export_markdown(doc, provenance: str) -> tuple[str, list[str], list[dict | None], dict[str, dict]]:
     """按 iterate_items 阅读序自拼 Markdown,返回 (markdown, 插图 URL 序列,
     表格结构化负载序列, 图表结构化负载 dict)。
+
+    provenance:图表负载的数据来源分级(docx → native / pdf → extracted),
+    由 parse_document 按格式传入。
 
     标题层级 = 阅读树深度 - 1(实测 docx:标题 L2/节 L3/小节 L4 → #/##/###,
     绝对基准漂移无妨 —— chunker 会把首个 `#` 强制压栈为 1 级,相对嵌套保真);
@@ -170,7 +176,7 @@ def _export_markdown(doc) -> tuple[str, list[str], list[dict | None], dict[str, 
         elif kind == "PictureItem":
             yielded_picture_refs.add(str(item.self_ref))
             url = _persist_picture(item.image)
-            chart_payload = _native_chart_payload(item)
+            chart_payload = _native_chart_payload(item, provenance)
             if url:
                 image_markers.append(url)  # 与文件内 @@IMAGE:序号@@ 一一对应(序号 = len(image_urls))
                 image_urls.append(url)
@@ -210,7 +216,7 @@ def _export_markdown(doc) -> tuple[str, list[str], list[dict | None], dict[str, 
         lines += ["", "## 附录:文档插图", ""]
         for pic in leftovers:
             url = _persist_picture(pic.image)
-            chart_payload = _native_chart_payload(pic)
+            chart_payload = _native_chart_payload(pic, provenance)
             if url:
                 lines.append(f"![]({url})")
                 image_urls.append(url)
@@ -252,9 +258,12 @@ def _table_payload(item, doc) -> dict | None:
         return None
 
 
-def _native_chart_payload(item) -> dict | None:
-    """docx 原生 Word chart → meta.tabular_chart 缓存重建(零模型零读数误差,
-    provenance=native);无该负载返回 None(交由 ingest 层 VLM 兜底)。"""
+def _native_chart_payload(item, provenance: str) -> dict | None:
+    """图片位上的图表数据 → 结构化负载。provenance 按来源分级(数据诚实律):
+    - docx → native:OOXML 缓存重建,零模型零读数误差,结果无需标注;
+    - pdf → extracted:granite-vision 抽数(do_chart_extraction),VLM 读数,
+      聚合结果强制「读数误差」标注。
+    无负载返回 None(交由 ingest 层 VLM 兜底)。"""
     meta = getattr(item, "meta", None)
     tabular = getattr(meta, "tabular_chart", None) if meta else None
     if tabular is None:
@@ -271,10 +280,10 @@ def _native_chart_payload(item) -> dict | None:
             "title": getattr(tabular, "title", None) or getattr(chart_data, "title", None),
             "headers": grid[0],
             "rows": grid[1:] if len(grid) > 1 else [],
-            "provenance": "native",  # 原生缓存 = 真数据,计算结果无需读数误差标注
+            "provenance": provenance,
         }
     except Exception as err:
-        print(f"[DocParse] 原生 chart 数据重建失败,降级无计算面: {err}")
+        print(f"[DocParse] 图表数据重建失败,降级无计算面: {err}")
         return None
 
 
@@ -325,18 +334,31 @@ def _persist_picture(image_ref) -> str | None:
 def _get_converter():
     """DocumentConverter 单例:构造零成本,模型权重在首次 PDF 转换时才按需下载
     (HF 镜像见模块顶);PDF 管线开 generate_picture_images 让插图位图随转换产出
-    (缺省关)。docx 走规则后端,不涉模型下载,图片以内嵌 data URI 携带。"""
+    (缺省关)。docx 走规则后端,不涉模型下载,图片以内嵌 data URI 携带。
+
+    granite-vision 抽数层(v2,2026-10-17):``RAG_DOC_CHART_EXTRACTION=1`` 时开
+    do_chart_extraction —— bar/pie/line 图表经 granite-vision 读数为结构化表格
+    (provenance=extracted,聚合结果带读数误差标注)。缺省关:预设模型权重
+    数 GB、首用下载 + 逐图 VLM 推理都在网关进程内,属显式运维决策;
+    preset 经 ``RAG_DOC_CHART_PRESET`` 可选(缺省 granite_vision_v3_3 =
+    Chart2CSV 专用 2B,基准 60.1)。"""
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
+    pipeline_options = PdfPipelineOptions(
+        generate_picture_images=True,
+        images_scale=2.0,
+    )
+    if os.environ.get("RAG_DOC_CHART_EXTRACTION", "0") == "1":
+        from docling.datamodel.chart_extraction_options import ChartExtractionVlmEngineOptions
+
+        pipeline_options.do_chart_extraction = True
+        preset = os.environ.get("RAG_DOC_CHART_PRESET", "granite_vision_v3_3")
+        pipeline_options.chart_extraction_options = ChartExtractionVlmEngineOptions.from_preset(preset)
+        print(f"[DocParse] granite-vision 图表抽数已启用(preset={preset};首用将下载模型权重)")
     return DocumentConverter(
         format_options={
-            InputFormat.PDF: PdfFormatOption(
-                pipeline_options=PdfPipelineOptions(
-                    generate_picture_images=True,
-                    images_scale=2.0,
-                ),
-            )
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
         }
     )

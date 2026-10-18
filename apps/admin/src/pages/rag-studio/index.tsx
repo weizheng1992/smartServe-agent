@@ -1,7 +1,7 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ConfirmDialog, DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
-import { ragApi } from '../../lib/api';
+import { ragApi, uploadRagDocument } from '../../lib/api';
 import { useAdminTenantStore } from '../../store/tenantStore';
 import { KnowledgeFormModal } from './components/KnowledgeFormModal';
 import { RagPlayground } from './components/RagPlayground';
@@ -76,6 +76,7 @@ export function RagStudioPage() {
     createItem,
     deleteItem,
     error,
+    refetch,
   } = useAdminCrud<KnowledgeChunkRecord>({
     fetchList: fetchChunks,
     createApi: createDocApi,
@@ -103,6 +104,11 @@ export function RagStudioPage() {
   const [playSearched, setPlaySearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
 
+  // 文档上传摄取(v2,2026-10-17):multipart 直传 /api/rag/documents/upload,
+  // 同步 v1(docling+VLM 在请求内完成,秒到分钟级),上传中禁重复触发
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+
   const [formData, setFormData] = useState<Partial<KnowledgeChunkRecord>>({});
 
   const handleOpenCreate = () => {
@@ -119,6 +125,34 @@ export function RagStudioPage() {
       tokenCount: 0,
     });
     setIsCreateOpen(true);
+  };
+
+  const handleUploadDocument = async (file: File) => {
+    // 'all' 上帝视角禁写(与新增切片同律);具名租户直传,businessId 双保险随行
+    if (selectedTenantId === 'all' || isUploading) return;
+    setIsUploading(true);
+    try {
+      const res = await uploadRagDocument(file, selectedTenantId, 'document', selectedTenantId);
+      if (!res.success) {
+        alert(res.error || '文档上传失败');
+        return;
+      }
+      const d = res.data;
+      const parts = [
+        `${d?.chunks ?? 0} 个切片`,
+        d?.tables ? `表格 ${d.tables}` : null,
+        d?.images ? `插图 ${d.images}` : null,
+      ]
+        .filter(Boolean)
+        .join(' / ');
+      alert(
+        `文档「${d?.sourceUrl ?? file.name}」摄取成功:${parts}${d?.partial ? '(⚠️ 部分页转换失败,内容不完整)' : ''}`,
+      );
+      await refetch();
+    } finally {
+      setIsUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -261,18 +295,51 @@ export function RagStudioPage() {
           showTenantFilter={true}
           onReset={handleResetFilters}
           actions={
-            <button
-              type="button"
-              onClick={handleOpenCreate}
-              disabled={selectedTenantId === 'all'}
-              title={selectedTenantId === 'all' ? '上帝视角禁止写入:请先选定具体商户租户' : undefined}
-              className="px-3.5 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-900"
-            >
-              <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              新增知识切片
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleOpenCreate}
+                disabled={selectedTenantId === 'all'}
+                title={selectedTenantId === 'all' ? '上帝视角禁止写入:请先选定具体商户租户' : undefined}
+                className="px-3.5 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-900"
+              >
+                <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                新增知识切片
+              </button>
+              <button
+                type="button"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={selectedTenantId === 'all' || isUploading}
+                title={
+                  selectedTenantId === 'all'
+                    ? '上帝视角禁止写入:请先选定具体商户租户'
+                    : '上传 PDF/Word 文档,解析切块入知识库(同名重传即整组替换)'
+                }
+                className="px-3.5 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0-12l-4 4m4-4l4 4"
+                  />
+                </svg>
+                {isUploading ? '解析中…' : '上传文档'}
+              </button>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleUploadDocument(file);
+                }}
+              />
+            </>
           }
         />
 

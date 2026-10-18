@@ -8,7 +8,8 @@ export type RichCardType =
   | 'product_ranking'
   | 'cart_card'
   | 'step_progress'
-  | 'interactive_product';
+  | 'interactive_product'
+  | 'document_source';
 
 export type CardHydrationState = 'skeleton' | 'hydrating' | 'ready' | 'action_pending' | 'settled';
 
@@ -194,6 +195,24 @@ export interface OrderPickerCardData {
   orders: OrderCardData[];
 }
 
+/** 文档知识来源单条(v2,2026-10-17 文档 RAG):命中文档切片的回显单元 */
+export interface DocumentSourceItem {
+  docTitle: string;
+  headerPath?: string;
+  snippet?: string;
+  /** 图表原图(/api/uploads/rag/*,静态可回访) */
+  imageUrl?: string;
+  /** 表格切片原文(管道表 markdown,渲染为表格) */
+  tableMarkdown?: string;
+  /** 数据来源分级:native=文档原生零误差;extracted/vlm=VLM 读数,须带误差提示 */
+  provenance?: 'native' | 'extracted' | 'vlm';
+}
+
+export interface DocumentSourceCardData {
+  title?: string;
+  sources: DocumentSourceItem[];
+}
+
 export type RichCardBlock = {
   id?: string;
   hydrationState?: CardHydrationState;
@@ -208,6 +227,7 @@ export type RichCardBlock = {
   | { type: 'cart_card'; data: CartCardData }
   | { type: 'step_progress'; data: StepProgressCardData }
   | { type: 'interactive_product'; data: InteractiveProductCardData }
+  | { type: 'document_source'; data: DocumentSourceCardData }
 );
 
 export interface MultimodalMessagePayload {

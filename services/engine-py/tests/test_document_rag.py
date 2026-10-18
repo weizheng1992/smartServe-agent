@@ -653,6 +653,15 @@ def test_large_number_never_scientific_notation():
     assert "12,345,678" in out, "12 位整数必须全精度,严禁 6 位有效数截断"
     out = format_result({"value": 0.55, "op": "avg", "column": "r", "source": "s", "headerPath": "", "percent": False})
     assert "0.55" in out
+    # 百分比支同纪律(2026-10-17 夜审补口:%g 残留于百分比支,avg/max/min
+    # 权威块仍可 6 位有效数静默截断/科学计数法)
+    out = format_result({"value": 62000.0, "op": "avg", "column": "r", "source": "s", "headerPath": "", "percent": True})
+    assert "6,200,000%" in out and "e+" not in out and "E+" not in out
+    out = format_result({"value": 0.123456789, "op": "avg", "column": "r", "source": "s", "headerPath": "", "percent": True})
+    assert "12.3456789%" in out, "百分比支同样严禁 6 位有效数截断"
+    # ×100 的二进制伪影不得进展示(Decimal(repr) 纯十进制移位,不造数)
+    out = format_result({"value": (0.5 + 0.6) / 2, "op": "avg", "column": "r", "source": "s", "headerPath": "", "percent": True})
+    assert "55%" in out and "55.00000" not in out
 
 
 def test_non_dict_payload_rejected_without_crash():

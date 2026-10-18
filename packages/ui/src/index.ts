@@ -42,6 +42,7 @@ export * from './components/chat/cards/ProductRankingCard';
 export * from './components/chat/cards/CartCard';
 export * from './components/chat/cards/StepProgressCard';
 export * from './components/chat/cards/InteractiveProductCard';
+export * from './components/chat/cards/DocumentSourceCard';
 export * from './components/chat/cards/QuickReplies';
 export * from './components/chat/cards/RichCardRenderer';
 export * from './lib/utils';

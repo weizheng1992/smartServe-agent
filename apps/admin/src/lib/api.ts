@@ -236,6 +236,51 @@ export const tenantsApi = {
 };
 
 /** 5. RAG 知识库 API */
+/**
+ * 文档上传摄取(multipart;2026-10-17 文档 RAG)。request() 硬编码 JSON
+ * Content-Type,FormData 必须裸 fetch 让浏览器自带 multipart boundary。
+ * 后端失败体是 HTTPException 的 {detail},成功体是 {success, data}。
+ */
+export async function uploadRagDocument(
+  file: File,
+  businessId: string,
+  category: string | undefined,
+  tenantId?: string,
+): Promise<
+  ApiResponse<{
+    sourceUrl: string;
+    docTitle?: string;
+    chunks: number;
+    tables: number;
+    images: number;
+    captioned: number;
+    partial: boolean;
+  }>
+> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('businessId', businessId);
+  if (category) form.append('category', category);
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/rag/documents/upload`, {
+      method: 'POST',
+      headers: { 'x-tenant-id': tenantId || businessId },
+      body: form,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        error: json.detail || json.message || json.error || `HTTP ${res.status}: 上传失败`,
+        ...json,
+      };
+    }
+    return json;
+  } catch (err: any) {
+    return { success: false, error: err.message || '网络通信异常，请检查后端网关是否已启动' };
+  }
+}
+
 export const ragApi = {
   list: (tenantId?: string) => {
     return adminApi.get('/api/rag/documents', tenantId);
