@@ -4,6 +4,39 @@
 
 ---
 
+## [2.16.0] - 2026-10-18 (平台闸收口 + 文档 RAG 计算面/异步上传 + 商户结算核:安全韧性三线并进,端点 133→134;含 10-17 晚间自 2.15.0 后提交)
+
+### ✨ Features
+
+- **平台闸三件套与管控台登录基建**(b8a832e/5820a17/6459849):`require_platform_admin` / `operator_scope` / `staff_context` 三 Depends 闸 —— crud 14 条与 admin 平台族全量挂平台闸(平台面零鉴权 critical 收口);conversations 四端点转 operator_scope(员工 JWT 必需,platform_admin 跨租户缺省 all、普通员工钉本租户,四源自报头 + 'ecommerce' 兜底链退役);analytics 43 handler 全量 staff_context 化(StaffContext TypedDict 键集契约物:此前未声明 dict 经 engine lenient 缺省可静默按 finance_owner 放行);apps/admin 登录基建(登录页 platform@aurora + localStorage 会话 + 401 导流 + Header 退出);TenantContextMiddleware payload 补 source provenance;无租户 403 统一 {"detail"} 形。
+- **文档 RAG 战役五连**(5ab5aaf/d320d55/4a6c417/2b870f5/8c10c75):docling 双格式管线解析 PDF/Word 入 Contextual RAG(检索侧零改动自动生效)→ 表格/图表结构化计算面 + 确定性聚合器 v2(闭集 op 词表 + 三道诚实闸,LLM 永不心算;筛选/行级意图诚实 None)→ granite-vision 抽数层(`RAG_DOC_CHART_EXTRACTION` 缺省关,权重数 GB 属显式运维决策)→ `document_source` 第 11 型富卡片(图片 ≤3/来源 ≤4/provenance 分级徽章)→ 上传异步作业化(闸门同步快败 202 受理,状态 Redis TTL 1h,轮询端点 jobId 即能力令牌;**端点总数 133→134**)+ admin 上传入口与轮询终态;对抗审查加固八项(zip 炸弹成员预读闸/扫描件 OCR 边界实证修正)(2b870f5/52d01ba)。
+- **商户结算核 commit_order**(3e902c0):place_order/create_order_from_cart 双编排归一 —— 核全权管事务(修直购陈价雷)、统一条件 UPDATE 防超卖、强类型行请求根除 camelCase 幽灵键;修购物车路径 cost_at_purchase 恒 0(ADR-0003 快照静默失效);tests 九册 30 处手写 merchant_* INSERT 收编 merchant_seed_helpers 夹具单点 + 差分册 test_settlement_core_parity;商户库 schema 契约册冻结 12 表活库列集(d791b48,漂移以可行动文案点名而非 43 个下游失败显形);alembic 0023 after_sale_evidence.vlm_struct JSON→JSONB 对齐(26db71e)。
+
+### 🔧 Fixes(安全与韧性)
+
+- **RAG 投毒/越权与实时窃听族收口**(714251e/a83dad4):写删具名租户强制(缺省兜底 ecommerce 静默落演示租户/body 具名直入他租语料/空头免 WHERE 凭 id 删任意租户文档一律 400)+ /api/rag 入限流第四面(30/60)+ admin 'all' 视图禁写;socket join/send 顾客属主闸 + store SSE/messages userId 闸(非属主 403 掐流/诚实空 thread:null)。
+- **RAG 上传平台闸补齐**(5159972,夜审 Spec 轴):POST /api/rag/documents/upload 挂 require_platform_admin —— 20MB docling+VLM 分钟级重管线此前仅靠具名租户 400 + 30/60 限流兜着(单行手写切片写反而有闸,最贵写面裸奔);契约册 platform 头随行 + 匿名 401 负例;admin 前端裸 fetch 补 Authorization 随行。
+- **并发守卫与幂等**(dec7967/78d85b9):无主线程自愈认领条件 UPDATE + rowcount(两并发恰一胜者,败者 409 不回显);save_customer_address 取/合/覆写同事务 + pg_advisory_xact_lock(hashtext(cid)) 按客户串行化;merchant_seed 环境隔离闸 `MERCHANT_SEED_ALLOW`(误跑清空重插真账库即污染);订单动作幂等审计 ON CONFLICT DO NOTHING + 败者 `_IdempotentReplay` 回放胜者(竞态回归册双钉)。
+- **后台任务持有表**(a93abdb):chat_turn sync=False 的 create_task 强引用 `_ASYNC_TURNS`(GC 不可中断)+ done 回调(自清/异常带 jobId 留痕/图前段异常注入合成 degraded result 帧让 SSE 诚实收口而非心跳挂死);analytics `_ASK_PRODUCERS` 同款对齐。
+- **小批 medium**(582c0fa):gateway 九处 naive datetime.now() → `_dt.UTC`(两套钟退役,跨时区部署排序/对账错位);/api/auth/register 入限流第五域 10/10(批量造号面);crud system_logs limit 钳制 le=500(负值 = PG LIMIT -1 全表);engine db.session 出 get_engine() 公共访问器(弃跨包私引)。
+
+### 🐛 其他
+
+- merchant-admin:Story 9 SKU 编辑诚实缝隙 + 两个存量 SQL 雷(c730bb3,跨 app e2e 实弹);弹窗家族贴边 + 全站表格折行 + zinc 主题三实弹收口 + ui-contract e2e 新册(139543e);终审遗留三行级收口(8a1839d)。
+- 夜审收口(879d265/b03fb47):document_source provenance 'table'→'native' 对齐 types 闭集(旧值漏出 'native'|'extracted'|'vlm' 外,前端徽章静默丢失)+ F541;orders-tab 收件人/电话假兜底「张伟/13800138000」→「—」(数据诚实律);DocumentSourceCard 管道表 React key 撞名复合索引;staff_context 死参退役。
+
+### 📚 文档
+
+- **ADR-0014 金额精度裁定**(38022b9):float + 每算价步 round(…,2) 即精度方案,Decimal/整数分不采纳(2-dp 域 + NUMERIC 存储 + 既有 round 纪律已吸收浮点偏差,核验零实弹分位 bug);每步 round 语义属精度方案组成部分,重构不得移除。
+- 卡片家族表同步 11 型(56d79e4);rag-samples 模拟样例语料集(45d1ad1);知识点 §2.11 多模态视觉定责(a5f3ebc)。
+
+### 🧪 测试
+
+- 套件规模:engine 1834 passed / gateway 454 passed(453 + 夜审 1)/ merchant-admin vitest 251。
+- 新增册:商户库 schema 契约册(d791b48)、并发守卫册(dec7967)、后台任务册(a93abdb)、幂等竞态册(78d85b9)、TestPlatformGate 负例册(5820a17)、ui-contract e2e(139543e);夜评测脚本属主闸随行适配(3590743)。
+
+---
+
 ## [2.15.0] - 2026-10-17 (视觉证据链加固战役:单次看图定级 → 可信图证闭环,五道确定性闸 + 审计底座 + 逆向闭环起步)
 
 ### ✨ Features
