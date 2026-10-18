@@ -103,7 +103,7 @@ TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `n
 
 ### 3.1 核心卡片类型规范 (JSON Blocks Schema)
 
-系统支持 9 种高保真交互卡片（合成器逐型装配）：
+系统支持 11 种高保真交互卡片（合成器逐型装配；2026-10-18 文档 RAG v2 增第 11 型 `document_source`）：
 
 | 卡片类型 (`type`)     | 适用场景                   | 核心承载数据                                                                         |
 | --------------------- | -------------------------- | ------------------------------------------------------------------------------------ |
@@ -115,6 +115,8 @@ TS 时代入图零防护；Python 侧在 `run_agent` 构建初始状态时经 `n
 | `product_ranking`     | 商品排行（真销量聚合）     | 排行口径指标、指标标签/单位、条目数、summary、products 数组                          |
 | `step_progress`       | 售后流转步进追踪           | ticketId/orderId、当前步/总步、steps 数组、settledSummary                            |
 | `interactive_product` | 交互式商品卡（选规格加购） | productId、标题/图、basePrice、skus、选中规格/数量、actions                          |
+| `cart_card` | 购物车卡（加购/改量/结算） | 车内条目、合计、checkout/view 动作（动作收口 card-actions.ts） |
+| `document_source` | 文档 RAG 富媒体回显（v2，2026-10-18） | sources 数组：docTitle/headerPath/图表原图 URL（imageUrl）/表格原文（tableMarkdown）/provenance（native 零误差；extracted/vlm 前端带「读数误差」提示）；纯文本命中零卡，图片 ≤3 张 |
 | `quick_replies`       | 动态快捷操作胶囊           | 交互胶囊列表（文本发送、订单查询、物流追踪、申请退款、唤起上传图片）                 |
 
 ### 3.2 动态卡片合成逻辑与契约 (`CardSynthesizer.synthesize_cards`)
