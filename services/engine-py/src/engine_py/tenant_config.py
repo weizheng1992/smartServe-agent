@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from sqlalchemy import text
 
 from .db import get_session
+from .ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
 
 _CACHE: dict[str, tuple[dict, float]] = {}
 _TTL_SECONDS = 60.0
@@ -90,7 +91,9 @@ async def get_tenant_config(business_id: str = "ecommerce") -> dict:
         "enabledSkills": enabled_skills,
         "skillsConfig": skills_config,
         "confidenceThresholds": {"high": 0.85, "mid": 0.6},
-        "refundAutoApprovalLimit": 50,
+        # 免签缺省单源(ADR-0015 决策 4):本处 50 与执行器/网关侧共用同一常量,
+        # 六处 50/100 分叉(资金闸行为取决于代码路径)就此收口
+        "refundAutoApprovalLimit": DEFAULT_REFUND_AUTO_APPROVAL_LIMIT,
     }
     _CACHE[clean_id] = (result, time.time())
     return result

@@ -1,0 +1,72 @@
+# 交易域声明(ADR-0015 批一;parity 与 engine semantic_model 逐键相等)
+version: 1
+domain: trading
+
+entities:
+  merchant_orders:
+    table: merchant_orders
+    database: merchant_db
+    alias: o
+    label: 订单
+    columns:
+      order_id: 订单号
+      customer_id: 客户
+      status: "PAID/SHIPPED/DELIVERED/REFUNDED/CANCELLED"
+      total_amount: 金额
+      created_at: 下单时间
+    notes: 有效成交口径:status NOT IN (REFUNDED, CANCELLED)
+  merchant_order_items:
+    table: merchant_order_items
+    database: merchant_db
+    alias: oi
+    label: 订单明细
+    columns:
+      order_id: "→ merchant_orders.order_id"
+      spu_id: 商品编码(关联 spus.spu_code)
+      quantity: 件数
+      price: 成交价快照
+      cost_at_purchase: 成交成本快照(NOT NULL)
+    notes: 销量 = SUM(quantity);GMV = SUM(quantity*price);成本求和不容 COALESCE
+
+joins:
+  - name: items_of_order
+    table: merchant_orders
+    base: merchant_order_items
+    type: inner
+    condition: "o.order_id = oi.order_id"
+  - name: orders_of_customer
+    table: merchant_customers      # 跨域引用(crm)
+    base: merchant_orders
+    type: inner
+    condition: "c.customer_id = o.customer_id"
+
+dimensions:
+  order_status:
+    label: 订单状态
+    kind: enum
+    entity: merchant_orders
+    column: status
+    values: [PAID, SHIPPED, DELIVERED, REFUNDED, CANCELLED]
+  region:
+    label: 区域
+    kind: expression
+    entity: merchant_orders
+    description: 按收货地址提取的七大地理区(华东/华北/华中/华南/西南/西北/东北)
+    # 正则须避开 '(?:' —— 单冒号会被 SQLAlchemy text() 当绑定参数吞掉
+    expression: >-
+      CASE
+      WHEN o.shipping_address->>'fullAddress' ~ '^(北京市|天津市|河北省|山西省|内蒙古自治区)' THEN '华北'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(上海市|江苏省|浙江省|安徽省|福建省|江西省|山东省)' THEN '华东'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(河南省|湖北省|湖南省)' THEN '华中'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(广东省|广西壮族自治区|海南省)' THEN '华南'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(重庆市|四川省|贵州省|云南省|西藏自治区)' THEN '西南'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(陕西省|甘肃省|青海省|宁夏回族自治区|新疆维吾尔自治区)' THEN '西北'
+      WHEN o.shipping_address->>'fullAddress' ~ '^(黑龙江省|吉林省|辽宁省)' THEN '东北'
+      ELSE '其他' END
+  city:
+    label: 城市
+    kind: expression
+    entity: merchant_orders
+    description: 按收货地址首段提取的城市/省(北京市、杭州市…)
+    expression: >-
+      substring(o.shipping_address->>'fullAddress' from '^([^省市区县]+(自治区|省|市|地区|盟))')

@@ -1,7 +1,7 @@
 # ADR-0015: 本体知识层为 v5 载体——声明式对象-动作语义层;物理拆分家族与 W3C/图数据库/记忆产品栈不采纳
 
 - 日期: 2026-10-19
-- 状态: **已决议(批〇已落地)**
+- 状态: **已决议(批〇·批一已落地)**
 - 上位关系: 关联 ADR-0004(双 agent 模块缝)、ADR-0010(语义层单一事实源——批二吸收 `semantic_model.yaml` 载体时部分修订)、ADR-0012(显式小词表哲学)、ADR-0014(结算核金额纪律,第一红线);无被取代。
 
 ## 1. 背景(取证驱动)
@@ -59,4 +59,6 @@
 - 批〇(本批):环闭合实证,**engine/gateway 零改动零行为影响**;批一(四域+应用层+三面闸+四实弹,预计有意红 3-6 改 4 增);批二(映射接管+codegen,红 2-4);批三(文档+CI 门,近零)。
 - `.claude/rules` 的改写随批一/批二消费方接入同批(批〇 无行为变化,不动规则面)。
 - **实现偏差留痕(批〇)**:①未入 uv workspace、tests 以 conftest 上仓库根路径引入(零调用方不预建装配;批一首个消费方接入时收编);②marketing 试点仅含域内 join,跨域 join `redemption_of_order`(table=merchant_orders 属 trading)随 trading.yaml 批一落位——域内引用闭合原则,不预建跨域机制;③实体声明含 `table` 键(semantic_model 无此键,parity 投影五键不含 table),为批二表列映射预置。
+- **批一落地(2026-10-19 同日)**:四域全量声明(12 实体/9 join/8 维度;registry 两阶段构建,跨域 join 在 base 侧域文件声明、全局实体表校验)+ `application/actions.yaml`(9 动作 + faces/permission/roles + 幽灵 `reply` 登记 + 阈值缺省 50)+ codegen(`engine_py/ontology_generated.py` 自包含分发,漂移门钉死)+ 引擎七处阈值单源(gatekeeper 形参 / step_execution_engine 两处 / run_agent 两处 / graph/state / tenant_config / seed ecommerce,后者含 systemPrompt 文案 $100→$50 的**有意行为收紧**;nike=150/adidas=120 显式覆写保留)+ gatekeeper 受理集显式化 + 入口早退 400 + reject 显式分支 + schema 卡 membership→member_level 勘正 + 商户台动作白名单 400 + gateway 四词表改派生再出口(`__all__` 再出口契约)。回归:engine **1834 全绿**(零意外红——旧 100 缺省与静默驳回路径无存量测试钉住)、gateway **458+3skip 全绿**(基线 454 + 新册 4 例)、ontology 一致性门 **40 例全绿**、ruff 双服务清。
+- **实现偏差留痕(批一)**:①permission 真实性断言为 rbac 源码扫描级(`inspect.getsource`),DB 级闭包断言随批三 CI 门升级;②动作语义注记(P4/P5 口径)从 approval_actions.py 行内注释迁至声明 notes,原文保留;③TS 双向对齐断言以文本解析 packages/types 与 ui 的 union 行(pytest 读 TS 为新机制),契约面重构时须同批更新解析器;④ontology 仍未入 uv workspace——engine 消费经生成物而非直接依赖声明层,workspace 收编推迟至批二映射接管时一并裁决(生成物路径已把声明层与运行时解耦,收编紧迫性下降)。
 - 升级条件汇总见否决项表;任何升级动议须先回读本 ADR 对应行,防止重诉。

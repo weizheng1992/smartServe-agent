@@ -1,0 +1,80 @@
+# 动作面声明(ADR-0015 批一)——写径动作政策的单一事实源。
+# faces ⊆ core.yaml faces;派生词表(CUSTOMER/OPERATOR/STAFF_REVIEW/SPI)经
+# ontology_generated.py 分发,与 gateway approval_actions.py 现行字面量
+# 逐成员相等(migration 守卫钉死)。
+# permission 真实性断言(perm 码必须在 rbac 真实集)在 ontology/tests 契约册。
+version: 1
+
+actions:
+  approve:
+    label: 审批通过
+    faces: [customer, staff_review, spi]
+    permission: live_desk:approve    # 员工代行批驳闸(admin.py:P4);顾客/SPI 面身份闸即足
+    roles: [platform_admin, merchant_operator, system, customer]
+    requires_approval_id: true
+    notes: "human_escalation 工单 → resolved_by_human;其余 → approved"
+  reject:
+    label: 审批驳回
+    faces: [customer, staff_review, spi]
+    permission: live_desk:approve
+    roles: [platform_admin, merchant_operator, system, customer]
+    requires_approval_id: true
+    notes: >-
+      2026-10-19 前无显式分支、靠 next_status 初值兜底——未知动作静默驳回与之
+      同路(gatekeeper else 兜底);现显式分支 + 引擎早退 400 双闸收口(ADR-0015 批一)
+  cancel:
+    label: 取消工单
+    faces: [customer, spi]
+    permission: null
+    roles: [platform_admin, merchant_operator, system, customer]
+    requires_approval_id: true
+    notes: "→ cancelled"
+  start_human_takeover:
+    label: 呼叫人工接管
+    faces: [customer, spi]
+    permission: null
+    roles: [platform_admin, merchant_operator, system, customer]
+    requires_approval_id: false
+    notes: "无 operator 即呼叫排队形态;带 operator 即认领(P1 坐席身份)"
+  human_message:
+    label: 坐席发言(不结束)
+    faces: [operator, spi]
+    permission: null
+    roles: [platform_admin, merchant_operator]
+    requires_approval_id: true
+    notes: "带 operator 落 role=operator 列;无身份旧通道前缀写(P5 退役)"
+  human_finish:
+    label: 坐席结案
+    faces: [operator, spi]
+    permission: null
+    roles: [platform_admin, merchant_operator]
+    requires_approval_id: true
+    notes: "→ resolved_by_human + 释放接管(幂等)"
+  release_takeover:
+    label: 释放人工接管
+    faces: [operator, spi]
+    permission: null
+    roles: [platform_admin, merchant_operator]
+    requires_approval_id: false
+    notes: "线程级动作(P1),条件 UPDATE 幂等;网关按线程归属校验租户"
+  human_reply:
+    label: 人工回复(SPI 旧通道)
+    faces: [spi]
+    permission: null
+    roles: [platform_admin, merchant_operator]
+    requires_approval_id: true
+    notes: "SPI 面仍合法(P4 只收管理台面);引擎分支保留至 P5"
+
+# 冻结面已知差异(packages/types/src/approval.ts:36):union 多 cancel/reply 两枚
+# 后端不受理/零发送方成员;反向漏登实发的 start_human_takeover/release_takeover/
+# human_message/human_finish —— 双向对齐由 test_ts_alignment 钉死,差异清单不得
+# 静默增长。
+ts_ghost_actions: [reply]
+
+defaults:
+  # 免签退款限额缺省(ADR-0015 决策 4,2026-10-19 用户裁决统一 50,收紧方向)。
+  # 历史六处分叉:tenant_config.py:93 / order_skills.py:27 / base_skill.py:36 = 50
+  # vs step_execution_engine.py:307,327 / gatekeeper.py:139 = 100,另 run_agent.py
+  # 自愈装配与 graph/state.py:104 / db/seed.py 种子;租户级显式覆写
+  # (nike=150/adidas=120)通道语义不变,此处只钉缺省。
+  refund_auto_approval_limit: 50.0

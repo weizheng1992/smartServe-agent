@@ -174,6 +174,6 @@ CartManageSkill is a thin shell over `ACTION_TABLE` — verbs (checkout / order-
 
 ## Ontology Knowledge Layer (v5, ADR-0015)
 
-### 本体知识层 ontology/(`ontology/registry.py`,2026-10-19 批〇)
+### 本体知识层 ontology/(`ontology/registry.py`,2026-10-19 批〇+批一落地)
 
-声明式对象-动作语义层(产业学名 semantic layer × schema grounding × Palantir 式 object/action type 的本仓形态):`core.yaml` 闭集词汇(domains/databases/faces)+ `domain/*.yaml` 实体/连接/维度声明,`registry.py` pydantic v2 加载即校验(坏声明进程起不来)并编译为与现行运行时同形的常量投影。批〇 = marketing 域试点,与 engine `semantic_model` 的 parity + 校验负例共 20 例钉死于 `ontology/tests/`(`services/.venv/bin/python -m pytest ontology/tests`);engine/gateway 零改动。消费方自批一起接入(三面动作闸 + 四实弹修复:商户台静默驳回→400、免签阈值六处单源=50、TS 幽灵动作登记、schema 卡 membership 列漂移勘正),批二接管 schema 卡/manifest 对拍与 generated codegen。物理拆分家族/W3C 栈/Neo4j/记忆产品的否决理由与升级条件见 ADR-0015 否决项表;根 README「🧬 v5 规划」专节为对外方案全文。
+声明式对象-动作语义层(产业学名 semantic layer × schema grounding × Palantir 式 object/action type 的本仓形态):`core.yaml` 闭集词汇(domains/databases/faces)+ `domain/*.yaml` 四域全量(12 实体/9 join/8 维度,跨域 join 在 base 侧域文件声明、两阶段全局校验)+ `application/actions.yaml`(9 动作 + 幽灵 reply 登记 + 免签缺省 50);`registry.py` pydantic v2 加载即校验并编译,`emit_python()` 产出 `engine_py/ontology_generated.py`(自包含分发,漂移门钉死)。批一已接线:gatekeeper 受理集显式化+入口早退 400+reject 显式分支、免签阈值七处单源(gatekeeper/执行器×2/run_agent×2/state/tenant_config/seed,seed ecommerce $100→$50 有意收紧)、schema 卡 membership→member_level 勘正、商户台动作白名单 400(实弹①静默驳回收口)、gateway approval_actions 四词表派生再出口。测试:ontology 一致性门 40 例 + engine 1834 + gateway 458 全绿。批二 = 映射接管 schema 卡/manifest 对拍 + generated TS;批三 = SKOS 词汇全量/文档生成/CI regen 门。物理拆分家族/W3C 栈/Neo4j/记忆产品的否决理由与升级条件见 ADR-0015 否决项表;根 README「🧬 v5 规划」专节为对外方案全文。

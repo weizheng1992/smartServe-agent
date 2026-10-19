@@ -1,9 +1,9 @@
-# 营销域声明(ADR-0015 批〇试点域)
+# 营销域声明(ADR-0015 批〇试点域,批一补跨域 join)
 # parity:与 services/engine-py/src/engine_py/tools_registry/semantic_model.yaml
-# 的同名实体/连接/维度逐键相等,由 ontology/tests/test_parity_marketing.py 钉死;
+# 的同名实体/连接/维度逐键相等,由 ontology/tests/test_parity_semantic_model.py 钉死;
 # 本文件是未来唯一事实源,批二起接管 schema 卡与 manifest 对拍。
-# 注:跨域 join redemption_of_order(table=merchant_orders 属 trading 域)随
-# trading.yaml 批一落位后再登记(域内引用闭合原则,批〇 不建跨域机制)。
+# 跨域 join 机制(批一):join 声明在 base 侧(FROM 表)所属域,table 可引用
+# 他域实体,registry 两阶段构建做全局校验 —— redemption_of_order 即此形态。
 version: 1
 domain: marketing
 
@@ -47,6 +47,11 @@ joins:
     base: promotion_redemptions
     type: inner
     condition: "p.id = rd.promotion_id"
+  - name: redemption_of_order
+    table: merchant_orders      # 跨域引用(trading)
+    base: promotion_redemptions
+    type: inner
+    condition: "o.order_id = rd.order_id"
   - name: coupon_of_promotion
     table: promotions
     base: user_coupons

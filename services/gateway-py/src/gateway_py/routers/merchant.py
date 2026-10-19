@@ -23,6 +23,7 @@ from sqlalchemy import text
 from .. import chat_turn, conversation_repo
 from .. import merchant_domain as mds
 from ..approval_actions import (
+    SPI_ACTIONS,
     actor_from_staff,
     build_payload,
     ensure_approval_owned,
@@ -223,9 +224,19 @@ async def admin_approvals(
 @router.post("/api/admin/approvals")
 async def admin_approvals_action(body: MerchantApprovalActionIn, scope: TenantScope = Depends(staff_scope)):
     staff = scope.staff
+    # 动作白名单(ADR-0015 批一,实弹①收口):此前本面无白名单(历史口径
+    # 「本租全权」),未知动作直透引擎落 next_status="rejected" 初值兜底 =
+    # 真实退款工单被静默驳回;现与 admin/SPI 两面同律 400 诚实报错。受理集
+    # 单一事实源 = ontology/application/actions.yaml(经 ontology_generated 分发)。
+    action = (body.action or "").strip()
+    if action not in SPI_ACTIONS:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": f"未知审批动作 {action},受理集见 ontology actions.yaml"},
+        )
     # 装配上收 approval_actions(架构审查 #2):对象级租户闸 / actor 派生 /
     # humanReply 别名 / operator 快照 / 引擎载荷,三通道机制单点;本面保留
-    # 权限画像(本租全权,无白名单)与结果错误映射(包装 success 形)。
+    # 权限画像(本租全权)与结果错误映射(包装 success 形)。
     try:
         await ensure_approval_owned(body.approvalId, staff.business_id)
         # P1(live-desk-rework spec §2.1):release_takeover 是线程级动作(无审批单),

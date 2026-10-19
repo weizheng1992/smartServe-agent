@@ -31,7 +31,11 @@ _MERCHANT_TABLES: dict[str, dict[str, Any]] = {
         "notes": "差评口径:rating <= 2",
     },
     "merchant_customers": {
-        "columns": {"id": "主键", "email": "邮箱", "membership": "会员级"},
+        # 2026-10-19 勘正(ADR-0015 批一,实弹④):旧卡列 {email, membership} 系
+        # 手抄漂移 —— 真表无 email 列、会员级实名 member_level;错卡此前正喂
+        # T2 接地 LLM prompt(t2_explore.py:65-72,对模型说谎)。批二起本卡改由
+        # ontology domain/crm 声明投影,手抄形态届时退役。
+        "columns": {"id": "主键", "customer_id": "客户编号", "member_level": "会员级"},
         "notes": "",
     },
     "merchant_audit_logs": {

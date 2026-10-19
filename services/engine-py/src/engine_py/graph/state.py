@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Annotated, Any, TypedDict
 
+from ..ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
+
 
 def _counter_reducer(current: int, update: int) -> int:
     return 0 if update == -1 else current + update
@@ -101,7 +103,8 @@ DEFAULT_BUSINESS_CONFIG: dict = {
     "tools": ["getOrderStatus", "processRefund", "listUserOrders"],
     "executionMode": "plan-and-execute",
     "confidenceThresholds": {"high": 0.85, "mid": 0.6},
-    "refundAutoApprovalLimit": 100,
+    # 免签缺省单源(ADR-0015 决策 4):历史 100 与技能侧 50 分叉,统一 50
+    "refundAutoApprovalLimit": DEFAULT_REFUND_AUTO_APPROVAL_LIMIT,
 }
 
 _CAMEL_KEY_MAP = {

@@ -13,9 +13,9 @@ actor 派生、对象级租户闸、humanReply 别名解析、operator 快照各
   (商户运营台 / SPI 外部通道)。
 - ``assert_approval_owned`` / ``assert_thread_owned``:HTTPException detail 形
   (管理台审批面,文案契约钉死)。
-- 动作词表(``CUSTOMER_ACTIONS`` 等)是领域词汇唯一权威:管理台面白名单闸
-  与 SPI 通道未知动作 400 共用;商户运营台面不做白名单(引擎词表即权威,
-  历史口径)。
+- 动作词表(``CUSTOMER_ACTIONS`` 等)派生自 ontology/application/actions.yaml
+  (ADR-0015 批一,经 ``engine_py.ontology_generated`` 编译分发,本模块再出口,
+  名字/成员/消费点零变化):admin/SPI/商户运营台三面白名单同源共用。
 
 各面**保留自身**的:身份来源(JWT / 可选 JWT+顾客 / HMAC key)、动作权限画像
 (管理台坐席代行须 live_desk:approve;商户运营台本租全权;SPI 凭租户头 +
@@ -25,22 +25,38 @@ actor 派生、对象级租户闸、humanReply 别名解析、operator 快照各
 from __future__ import annotations
 
 from engine_py.approvals.gatekeeper import ApprovalGatekeeper, thread_business_id
+from engine_py.ontology_generated import (
+    CUSTOMER_ACTIONS,
+    OPERATOR_ACTIONS,
+    SPI_ACTIONS,
+    STAFF_REVIEW_ACTIONS,
+)
 from fastapi import HTTPException
 
 from .tenant_scope import GateError, same_tenant
 
+__all__ = [
+    "CUSTOMER_ACTIONS",
+    "OPERATOR_ACTIONS",
+    "SPI_ACTIONS",
+    "STAFF_REVIEW_ACTIONS",
+    "actor_from_staff",
+    "assert_approval_owned",
+    "assert_thread_owned",
+    "build_payload",
+    "ensure_approval_owned",
+    "ensure_thread_owned",
+    "human_reply",
+    "operator_snapshot",
+]
+
 # ---------------------------------------------------------------------------
-# 动作词表(领域词汇唯一权威;admin.resolve_approval 原地迁移)
+# 动作词表:派生自 ontology/application/actions.yaml(ADR-0015 批一)——
+# 顶部经 engine_py.ontology_generated 再出口;语义注记(顾客自有/坐席/批驳/
+# human_reply 的 P4·P5 口径)随声明迁移至 actions.yaml 条目的 notes。
+# 迁移守卫 = ontology/tests/test_actions_registry(派生集与历史字面量逐成员
+# 相等);受理集断言 = gateway tests/test_approval_action_registry。
 # ---------------------------------------------------------------------------
-# 顾客自有动作(线程归属绑定:userId 必须是 thread 属主)
-CUSTOMER_ACTIONS = frozenset({"approve", "reject", "cancel", "start_human_takeover"})
-# 人工坐席动作(必须持员工 JWT);release_takeover 为线程级员工动作(P1)
-OPERATOR_ACTIONS = frozenset({"human_message", "human_finish", "release_takeover"})
-# 员工代行批驳(资金语义,须 live_desk:approve;P4 台内一等批驳闸)
-STAFF_REVIEW_ACTIONS = frozenset({"approve", "reject"})
-# SPI 三方通道词表:human_reply 在本面仍合法(P4 退役只收管理台面,SPI 直通
-# 引擎白名单,与禁区 useApprovalMachine 的配合挪 P5 一并收口)
-SPI_ACTIONS = CUSTOMER_ACTIONS | OPERATOR_ACTIONS | frozenset({"human_reply"})
 
 
 def human_reply(*values: str | None) -> str | None:

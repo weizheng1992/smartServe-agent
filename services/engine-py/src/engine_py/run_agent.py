@@ -49,6 +49,7 @@ from .llm import (
 from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from .memory.context_builder import build_history_block, summarize_overflow
 from .onboarding import build_entry_cards, resolve_onboarding_config
+from .ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
 from .rag import ContextualRAG
 from .tenant import get_merchant_display_name
 from .tenant_context import set_business_context
@@ -114,7 +115,8 @@ async def _resolve_business_context(
         "tools": ["getOrderStatus", "processRefund", "takeScreenshot", "listUserOrders"],
         "executionMode": "plan-and-execute",
         "confidenceThresholds": {"high": 0.85, "mid": 0.6},
-        "refundAutoApprovalLimit": 100,
+        # 免签缺省单源(ADR-0015 决策 4):六处 50/100 分叉统一 50(收紧方向)
+        "refundAutoApprovalLimit": DEFAULT_REFUND_AUTO_APPROVAL_LIMIT,
     }
 
     try:
@@ -140,8 +142,13 @@ async def _resolve_business_context(
             if config_row and config_row.config:
                 dynamic_config = {**dynamic_config, **config_row.config, "businessId": business_id}
             else:
-                # 自愈装配(Nike $150 / Adidas $120 / 主站 $100)
-                default_limit = 150 if business_id == "nike" else 120 if business_id == "adidas" else 100
+                # 自愈装配(Nike $150 / Adidas $120 显式覆写;主站随平台缺省
+                # —— ADR-0015 决策 4,历史 $100 分叉收口为 50)
+                default_limit = (
+                    150 if business_id == "nike"
+                    else 120 if business_id == "adidas"
+                    else DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
+                )
                 dynamic_config = {**dynamic_config, "businessId": business_id, "refundAutoApprovalLimit": default_limit}
     except Exception as err:
         print(f"[SaaS Config Engine] Failed to dynamically load business config: {err}")

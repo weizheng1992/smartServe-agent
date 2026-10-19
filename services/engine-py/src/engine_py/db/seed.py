@@ -15,6 +15,7 @@ import bcrypt
 from sqlalchemy import text
 
 from ..llm import get_embedding_model
+from ..ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
 from ..rag.knowledge_files import default_knowledge_dir, load_knowledge_chunks
 from .session import _engine
 
@@ -189,9 +190,13 @@ async def main() -> None:
         # 4. 商户热加载配置快照
         await conn.execute(
             text(
+                # 免签缺省单源(ADR-0015 决策 4,2026-10-19):主站种子随平台缺省
+                # 统一 50(历史 $100 分叉收口);nike/adidas 保留租户级显式覆写
+                # ($150/$120),覆写通道语义不变。
                 "INSERT INTO business_configs (business_id, version, config, is_active, created_by) VALUES "
-                "('ecommerce', 1, '{\"systemPrompt\": \"You are a professional customer assistant. "
-                "Autopilot refund limit is $100.\", \"refundAutoApprovalLimit\": 100}', true, 'admin'), "
+                f"('ecommerce', 1, '{{\"systemPrompt\": \"You are a professional customer assistant. "
+                f"Autopilot refund limit is ${int(DEFAULT_REFUND_AUTO_APPROVAL_LIMIT)}.\", "
+                f"\"refundAutoApprovalLimit\": {int(DEFAULT_REFUND_AUTO_APPROVAL_LIMIT)}}}', true, 'admin'), "
                 "('nike', 1, '{\"systemPrompt\": \"You are a friendly Nike representative. "
                 "Run like the wind! Autopilot refund limit is $150.\", \"refundAutoApprovalLimit\": 150}', true, 'admin'), "
                 "('adidas', 1, '{\"systemPrompt\": \"You are an energetic Adidas assistant. "

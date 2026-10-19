@@ -23,6 +23,7 @@ from ..badcase.pool import SOURCE_APPROVAL_REJECTED, SOURCE_HUMAN_TAKEOVER, reco
 from ..db import ApprovalOutboxEvent, Message, PendingApproval, get_session
 from ..event_bus import emit_status, get_client, publish_agent_event
 from ..memory.short_memory import _FALLBACK_USER_ID
+from ..ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT, ENGINE_HANDLED_ACTIONS
 from . import takeover
 
 _UUID_RE = re.compile(
@@ -136,7 +137,12 @@ class ApprovalGatekeeper:
 
     @staticmethod
     async def evaluate_refund_auto_approval(
-        order_id: str | None = None, refund_amount_arg=None, auto_approval_limit: float = 100
+        order_id: str | None = None,
+        refund_amount_arg=None,
+        # 免签限额缺省单源(ADR-0015 决策 4,2026-10-19 统一 50 收紧方向):
+        # 此前形参缺省 100 与 tenant_config/技能侧 50 分叉 —— 同一笔 80 元退款
+        # 走执行器工具路直接免签、走技能快轨挂人工,资金闸行为取决于代码路径。
+        auto_approval_limit: float = DEFAULT_REFUND_AUTO_APPROVAL_LIMIT,
     ) -> dict:
         refund_amount = 999999.99
         amount_str = str(refund_amount_arg) if refund_amount_arg is not None else None
@@ -685,6 +691,15 @@ class ApprovalGatekeeper:
             return {"error": "approvalId and action are required", "statusCode": 400}
         if not _UUID_RE.match(approval_id):
             return {"error": f"Approval工单 {approval_id} 格式无效或未找到", "statusCode": 404}
+        if action not in ENGINE_HANDLED_ACTIONS:
+            # 纵深第四闸(ADR-0015 批一):未知动作 400 诚实报错。此前落入
+            # next_status="rejected" 初值兜底 = 真实工单被静默驳回(商户台无
+            # 白名单时的实弹形态);本闸位于三面路由白名单之后,未来任何新面
+            # 漏闸仍有引擎侧兜底。受理集单一事实源 = ontology actions.yaml。
+            return {
+                "error": f"未知审批动作 {action},受理集见 ontology/application/actions.yaml",
+                "statusCode": 400,
+            }
 
         lock_key = f"lock:approval:{approval_id}"
         lock_acquired = False
@@ -754,6 +769,11 @@ class ApprovalGatekeeper:
                         next_status = "approved"
                 elif action == "cancel":
                     next_status = "cancelled"
+                elif action == "reject":
+                    # 显式分支(ADR-0015 批一,与入口早退 400 同批落位):此前
+                    # reject 无显式分支、靠 next_status 初值兜底 —— 与未知动作
+                    # 静默驳回同一条路;显式化后受理集语义不再依赖 else 副作用。
+                    next_status = "rejected"
                 elif record.action_type == "human_escalation":
                     # live-desk-rework P4(spec §2.6):批驳 ≠ 结束人工服务 ——
                     # 升级工单被驳只落 rejected 终局,不发「[人工客服]」文案、

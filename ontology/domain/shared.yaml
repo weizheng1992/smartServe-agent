@@ -1,0 +1,38 @@
+# 共享面声明(ADR-0015 批一):无四域归属的实体 —— 审计日志(商户库)与
+# engine 本地库两张分析面表。thread_notes/owner_mappings(坐席备注/责任人路由)
+# 尚无分析面消费,登记随首个消费方再入册(零调用方不先建)。
+version: 1
+domain: shared
+
+entities:
+  merchant_audit_logs:
+    table: merchant_audit_logs
+    database: merchant_db
+    alias: al
+    label: 审计日志
+    columns:
+      id: 主键
+      actor: 操作者
+      action: 动作
+      created_at: 时间
+    notes: 审计面,分析只读可用
+  session_metrics:
+    table: session_metrics
+    database: engine_db
+    alias: sm
+    label: 会话指标
+    columns:
+      business_id: 租户
+      resolution_status: resolved_auto/未解决
+      created_at: 时间
+    notes: engine 本地库;查询必带 business_id 谓词
+  after_sale_tickets:
+    table: after_sale_tickets
+    database: engine_db
+    alias: t
+    label: 售后工单
+    columns:
+      business_id: 租户
+      status: 工单状态
+      created_at: 时间
+    notes: engine 本地库;查询必带 business_id 谓词

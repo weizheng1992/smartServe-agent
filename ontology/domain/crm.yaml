@@ -1,0 +1,27 @@
+# 用户域声明(ADR-0015 批一;parity 与 engine semantic_model 逐键相等)
+version: 1
+domain: crm
+
+entities:
+  merchant_customers:
+    table: merchant_customers
+    database: merchant_db
+    alias: c
+    label: 客户
+    columns:
+      id: 主键
+      customer_id: 客户编号
+      name: 姓名
+      phone: 手机号
+      member_level: 会员级
+      created_at: 注册时间
+    notes: ""
+
+# customer 实体维度;跨域 join(orders_of_customer)声明在 trading(base 侧)
+dimensions:
+  customer:
+    label: 客户
+    kind: entity
+    entity: merchant_customers
+    id_column: customer_id
+    label_column: name

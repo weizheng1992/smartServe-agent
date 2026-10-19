@@ -1,0 +1,85 @@
+# 商品域声明(ADR-0015 批一;parity 与 engine semantic_model 逐键相等)
+# 跨域 join 机制:join 声明在 base 侧(FROM 表)所属域文件,table 可引用
+# 他域实体(registry 两阶段构建全局校验);见 ADR-0015 批〇偏差留痕③的收口。
+version: 1
+domain: product
+
+entities:
+  merchant_spus:
+    table: merchant_spus
+    database: merchant_db
+    alias: s
+    label: 商品 SPU
+    columns:
+      id: uuid 主键
+      spu_code: 商品编码(明细表关联键)
+      title: 商品标题
+      category: 品类
+      brand: 品牌
+      status: "ON_SALE/OFF_SALE"
+    notes: 在售过滤 status='ON_SALE'
+  merchant_skus:
+    table: merchant_skus
+    database: merchant_db
+    alias: k
+    label: 商品 SKU
+    columns:
+      id: uuid 主键
+      spu_id: "→ merchant_spus.id"
+      price: 售价
+      stock: 库存件数
+    notes: 展示价 = MIN(price);库存 = SUM(stock)
+  merchant_product_reviews:
+    table: merchant_product_reviews
+    database: merchant_db
+    alias: r
+    label: 商品评价
+    columns:
+      id: 主键
+      spu_id: 商品
+      rating: 1-5 星
+      sentiment: 情感
+      content: 评语
+      created_at: 时间
+    notes: 差评口径:rating <= 2
+
+joins:
+  - name: sku_of_spu
+    table: merchant_skus
+    base: merchant_spus
+    type: left
+    condition: "k.spu_id = s.id"
+  - name: sku_of_spu_strict
+    table: merchant_skus
+    base: merchant_spus
+    type: inner
+    condition: "k.spu_id = s.id"
+  - name: items_of_spu_code
+    table: merchant_order_items      # 跨域引用(trading)
+    base: merchant_spus
+    type: inner
+    condition: "oi.spu_id = s.spu_code"
+  - name: review_of_spu
+    table: merchant_spus
+    base: merchant_product_reviews
+    type: inner
+    condition: "s.id = r.spu_id"
+
+dimensions:
+  category:
+    label: 品类
+    kind: enum
+    entity: merchant_spus
+    column: category
+    values: [户外机能, 潮流T恤, 下装裤类, 潮流鞋靴, 背包收纳, 露营装备, 衬衫, 配饰, 运动配件]
+  brand:
+    label: 品牌
+    kind: column
+    entity: merchant_spus
+    column: brand
+  spu:
+    label: 商品
+    kind: entity
+    entity: merchant_spus
+    id_column: spu_code
+    label_column: title

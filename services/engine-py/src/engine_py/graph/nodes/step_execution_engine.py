@@ -11,6 +11,7 @@ from ...event_bus import emit_status
 from ...llm import get_chat_model
 from ...memory import ShortMemory
 from ...memory.context_builder import build_history_block
+from ...ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
 from .executor_fast_path import try_match_executor_fast_path
 
 _JSON_FENCE_START_RE = re.compile(r"^```json\s*")
@@ -304,7 +305,10 @@ async def _execute_single_step_core(
                 return {"updatedStep": failed_step, "toolErrorsCount": 1}
 
             # 4.2 免签限额判定
-            tenant_limit = (state.get("business_config") or {}).get("refundAutoApprovalLimit") or 100
+            tenant_limit = (
+                (state.get("business_config") or {}).get("refundAutoApprovalLimit")
+                or DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
+            )
             auto_check = await ApprovalPolicyEngine.evaluate_refund_auto_approval(
                 order_id, args.get("refundAmount") or args.get("amount"), tenant_limit
             )
@@ -324,7 +328,10 @@ async def _execute_single_step_core(
 
         # 4.4 人工审批工单门禁
         if tool_name == "processRefund" or is_high_value_addr:
-            tenant_limit = (state.get("business_config") or {}).get("refundAutoApprovalLimit") or 100
+            tenant_limit = (
+                (state.get("business_config") or {}).get("refundAutoApprovalLimit")
+                or DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
+            )
             auto_check = await ApprovalPolicyEngine.evaluate_refund_auto_approval(
                 order_id, args.get("refundAmount") or args.get("amount"), tenant_limit
             )
