@@ -22,6 +22,11 @@ export function clearSession() {
 }
 
 export function authToken(): string | null {
+  // 浏览器外环境(如 bun test 无 DOM)localStorage 不存在:无会话返回 null,
+  // request() 照常走无 Authorization 分支(2026-10-19 CI 实弹:平台闸批把本
+  // 函数引入 request 路径后,admin bun 册 10 连红于此——作者当时只跑了
+  // merchant-admin 的 vitest,未跑 admin 的 bun test)。
+  if (typeof localStorage === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
 }
 

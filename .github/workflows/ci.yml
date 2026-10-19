@@ -50,17 +50,15 @@ jobs:
         run: uv run ruff check .
         working-directory: services/gateway-py
       # 本体知识层(ADR-0015):lint 同口径 + 声明→生成物再生成漂移门 + 一致性门
+      # (三步均在仓库根跑;首版 ../../ontology 相对 services 解析到仓库外,实弹已修)
       - name: Ruff (ontology)
-        run: uv run --project engine-py ruff check ../../ontology
-        working-directory: services
+        run: uv run --project services/engine-py ruff check ontology
       - name: ontology 再生成漂移门 (regen + git diff --exit-code)
         run: |
-          uv run --project engine-py python ../../ontology/registry.py --write-all
+          uv run --project services/engine-py python ontology/registry.py --write-all
           git diff --exit-code -- ontology services/engine-py/src/engine_py/ontology_generated.py
-        working-directory: services
       - name: ontology 一致性门 (parity + 负例 + codegen/TS/docs 同步)
-        run: uv run --project engine-py python -m pytest ../../ontology/tests -q
-        working-directory: services
+        run: uv run --project services/engine-py python -m pytest ontology/tests -q
         env:
           # 占位连接串:parity 册 import engine semantic_model 需 env 在位,零真实连接
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
