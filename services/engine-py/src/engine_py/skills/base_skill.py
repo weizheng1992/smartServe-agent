@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from ..ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
 from ..tenant_config import get_tenant_config
 from .contract import SkillContext, SkillResult
 from .spi_client import LocalDbSpiAdapter
@@ -33,7 +34,9 @@ class BaseSkill(ABC):
         config = await self.get_effective_config(tenant_id)
         if config and config.get("approvalThresholdAmount") is not None:
             return float(config["approvalThresholdAmount"])
-        return float(self.metadata.get("approvalThresholdAmount") or 50)
+        return float(
+            self.metadata.get("approvalThresholdAmount") or DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
+        )
 
     @abstractmethod
     async def execute(self, context: SkillContext) -> SkillResult: ...

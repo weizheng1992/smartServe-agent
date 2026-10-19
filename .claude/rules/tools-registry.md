@@ -42,7 +42,7 @@ paths: ["services/engine-py/src/engine_py/tools_registry/**/*", "services/engine
 
 - **单一事实源**：领域知识（闭集词汇 core.yaml / 四域实体 domain/*.yaml / 动作面+资金闸缺省 application/actions.yaml）声明于仓库根 `ontology/`,pydantic v2 加载即校验（坏声明进程起不来）；运行时消费**生成物** `services/engine-py/src/engine_py/ontology_generated.py`（自包含零依赖）。
 - **再生成纪律**：改任何 `ontology/*.yaml` 后必须执行 `services/.venv/bin/python ontology/registry.py --write-all` 并同批提交三类生成物（Python/TS/docs）；漂移门 = `ontology/tests/test_codegen_sync.py` + CI `regen + git diff --exit-code`。**严禁手改生成物**。
-- **消费面**：动作词表（`approval_actions.py` 派生再出口/三面路由白名单/gatekeeper 受理集）、免签退款限额缺省（`DEFAULT_REFUND_AUTO_APPROVAL_LIMIT`=50,七处单源；租户覆写通道不变）、schema 卡（`analytics/schema_cards.py` 自批二起由 `MAIN_CARD_TABLES/SPECIAL_FAMILY_TABLES` 投影，手抄形态退役；列裁剪 `analysis_columns` ⊆ `columns` 声明层校验）。
+- **消费面**：动作词表（`approval_actions.py` 派生再出口/三面路由白名单/gatekeeper 受理集）、免签退款限额缺省（`DEFAULT_REFUND_AUTO_APPROVAL_LIMIT`=50,九处单源,含技能元数据 `order_skills.py` 与 `BaseSkill` 兜底;租户覆写通道不变）、schema 卡（`analytics/schema_cards.py` 自批二起由 `MAIN_CARD_TABLES/SPECIAL_FAMILY_TABLES` 投影，手抄形态退役；列裁剪 `analysis_columns` ⊆ `columns` 声明层校验）。
 - **对拍闸**：ontology parity 册钉 semantic_model 逐键相等；`semantic_compiler._assert_model_matches_card` 列级断言（卡列 ⊆ 模型列）；gateway `test_merchant_schema_contract` 增本体列 ⊆ manifest 真实列断言。
 - **新表/新列/新动作流程**：`ontology/domain/*.yaml` 声明 → `--write-all` 再生成 → semantic_model.yaml 同批（parity 门）→（商户表）`_MERCHANT_DDL` 与 manifest 同批 → 契约册/一致性门转绿。审批动作另需 faces/permission/roles 三键齐备（permission 必须存在于 rbac 种子面）。
 - **否决与升级条件**：物理拆分家族/W3C RDF·OWL·SHACL 栈/Neo4j 等图数据库/Zep·mem0·Letta 记忆产品/运营 agent 走既有审批闸——理由与升级触发见 ADR-0015 否决项表；任何相关动议先回读该表防重诉。

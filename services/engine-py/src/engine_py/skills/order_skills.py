@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 
+from ..ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
 from ..triage.intent_registry import REFUND_VERB_FAMILY, _grp, _pick
 from .base_skill import BaseSkill
 from .contract import SkillContext, SkillResult
@@ -24,7 +25,7 @@ class OrderRefundSkill(BaseSkill):
         "triggerIntents": ["order_return", "refund"],  # A5 清死词:UPPER 变体大小写敏感永不命中;process_refund 是工具名非意图;order_cancel 刻意不收编(无专属取消工具,见 intent_registry lifecycle)
         "requiredTools": ["getOrderDetail", "executeOrderAction"],
         "requiresApproval": True,
-        "approvalThresholdAmount": 50,
+        "approvalThresholdAmount": DEFAULT_REFUND_AUTO_APPROVAL_LIMIT,
         "version": "1.0.0",
     }
 
