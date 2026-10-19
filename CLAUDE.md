@@ -92,6 +92,8 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 
 后端历史:原始 TypeScript 后端(`apps/server` NestJS 网关、`packages/{engine,tools,db,business-configs,observability}`)在 1:1 Python 移植(2026-09)后退役。`packages/types` 作为冻结的前端契约保留;退役 TS 代码的行为由 `services/gateway-py/tests/` 的 pytest 契约套件钉死。
 
+**本体知识层(ADR-0015,v5,2026-10-19)**:仓库根 `ontology/` 是领域知识的单一事实源(闭集词汇 core.yaml + 四域实体 domain/*.yaml + 动作面/资金闸缺省 application/actions.yaml),pydantic v2 加载即校验;运行时一律消费生成物 `services/engine-py/src/engine_py/ontology_generated.py`(自包含零依赖)。改声明后必须 `services/.venv/bin/python ontology/registry.py --write-all` 再生成并同批提交(Python/TS/docs 三类生成物),严禁手改生成物——漂移门 = ontology 一致性册(pytest)+ CI regen `git diff --exit-code`。再生成纪律、新表/新列/新动作流程与消费面见 `.claude/rules/tools-registry.md` §1.5;拆分家族/图数据库/W3C 栈的否决与升级条件见 ADR-0015 否决项表。
+
 ---
 
 ## 3. 核心架构不变量

@@ -4,6 +4,31 @@
 
 ---
 
+## [2.17.0] - 2026-10-19 (v5 本体知识层战役:ADR-0015 四批一次打穿——领域知识单一事实源 + 四实弹收口 + 两起存量发明列实弹;不含 2.16.0 后并行会话提交)
+
+### ✨ Features
+
+- **本体知识层 ontology/**(ADR-0015,359b868/e1cb465/fe224a9,批〇~批三):仓库根新顶层声明式对象-动作语义层(产业学名 semantic layer × schema grounding × Palantir 式 object/action type)——`core.yaml` 闭集词汇(五域/两库/四面)+ `domain/` 四域全量(12 实体/9 join/8 维度,跨域 join 在 base 侧域文件声明、registry 两阶段全局校验)+ `application/actions.yaml`(9 动作 faces/permission/roles + 幽灵 reply 登记 + 免签缺省 50);pydantic v2 加载即校验,`--write-all` 三路 codegen:`engine_py/ontology_generated.py`(运行时唯一消费面,自包含零依赖)/ `generated/ts/ontology-actions.ts` / `docs/ontology.md` 知识地图(Mermaid ER)。schema 卡投影化(schema_cards.py 手抄列卡退役,列裁剪 analysis_columns 声明层闭包,客户表 PII 列不进 T2 prompt);`semantic_compiler` 漂移断言升列级;gateway manifest 册增本体对拍;CI 三道新门(ontology ruff 同口径 + regen 后 `git diff --exit-code` 漂移门 + 一致性门)。选型时效经 4 路网络实查定调(2026-10):该形态即产业主流;Neo4j/图数据库、W3C RDF·OWL·SHACL 栈、Zep/mem0/Letta 记忆产品、物理拆分家族(拆库/拆 schema/售前售后 agent 拆分)经行业共识与适用边界调研**明确不用**,否决项九行带升级触发条件入 ADR-0015。
+- **动作面收口与四实弹修复**(e1cb465):gatekeeper 受理集显式化 + 入口未知动作早退 400(纵深第四闸;此前 else 兜底 = **商户台拼错动作字符串即真实退款工单被静默驳回**)+ reject 显式分支;免签退款限额缺省七处单源 = 50(gatekeeper 形参 100/执行器两处 or-100/run_agent 两处/state/tenant_config/seed,seed ecommerce $100→$50 含 systemPrompt 文案同步——同一笔 80 元退款不再因代码路径异果,nike150/adidas120 租户覆写保留);商户台动作白名单 400(与 admin/SPI 同律);gateway approval_actions 四词表改派生再出口(名字/成员/消费点零变化);TS 双向对齐断言(approval.ts union 幽灵 cancel/reply + 漏登实发词四枚均钉住)。
+
+### 🐛 其他
+
+- **存量发明列两起被对拍闸首战逮获**(fe224a9):semantic_model/schema 卡自 08-D2 手抄时代就声明真表不存在的列——`merchant_product_reviews.sentiment`、`merchant_audit_logs.actor/action`(真列 action_type/operator),错卡一直喂 T2 接地 LLM prompt;两侧声明同批改真列(零消费方佐证安全)。另 `schema_cards` merchant_customers 卡勘正(membership→member_level、除编造 email 列,e1cb465)。
+- **admin bun 册 10 连红修**(随 2.17.0):平台闸批(5820a17)把 authToken() 引入 request 路径后,bun test 无 DOM 环境 localStorage 未定义直接炸穿(作者当时只跑 merchant-admin vitest 未跑 admin bun test,CI 自该批起红);authToken 浏览器外返回 null,浏览器行为不变。
+- **CI ontology 步骤路径错修**:首版 `../../ontology` 相对 services 解析到仓库外(E902),三步统一仓库根 cwd + `--project services/engine-py`。
+
+### 📚 文档
+
+- **ADR-0015 本体知识层**(359b868 起同批):载体裁决链如实留痕(17-agent 对案裁判荐案 A → 用户三轮升维去 W3C → 终形态分层 YAML + pydantic v2)、三条分层裁定(平台级一份本体/租户差异留 tenant_configs/业务数据留 PG)、四批路径与零行为承诺、免签阈值统一 50 裁决、portfolio §⑥ 冻结推翻留痕、批〇~批三偏差留痕(DDL 单源化与 packages/contracts 前端接线推迟及理由)。
+- 根 README「🧬 v5 规划」专节(57049e3/c504a6b,平台实览上方):为什么(五处散装+四实弹)/是什么(产业主流形态定位)/怎么做(四批)/好处(八条)/为什么不用别的(Neo4j/W3C/记忆产品三组带证据理由);数字刷新 134 端点/engine 1834/gateway 454→458/vitest 251。`.claude/rules/tools-registry.md` §1.5 本体知识层节(再生成纪律/新表新列新动作流程);CONTEXT.md 指针;ontology README/CHANGELOG。
+
+### 🧪 测试
+
+- 套件规模:engine 1834 / gateway 458+3skip / merchant-admin vitest 251 / **ontology 一致性门 43(新)**:parity 册(12 实体/9 join/8 维度与 semantic_model 逐键相等)+ 校验负例 21(未知域/库、悬空 join、别名冲突、单冒号表达式、幽灵重叠等)+ 动作守卫 6(四词表 == 历史字面量)+ codegen/TS/docs 三同步门 + TS 双向对齐 3。
+- 新增册:gateway test_approval_action_registry(商户台 400×2 + 受理集 parity + rbac 源码级 permission 真实性);manifest 册增本体列对拍断言;admin bun 册回绿(10 例)。
+
+---
+
 ## [2.16.0] - 2026-10-18 (平台闸收口 + 文档 RAG 计算面/异步上传 + 商户结算核:安全韧性三线并进,端点 133→134;含 10-17 晚间自 2.15.0 后提交)
 
 ### ✨ Features
