@@ -420,7 +420,10 @@ export function FloatingChatWidget() {
     });
 
     return () => handle.close();
-  }, [threadId, isOpen]);
+    // userId 入依赖(2026-10-19 nightly 深查):窃听族收口后 stream 自报身份参与
+    // 服务端属主闸,guest→登录切身份而 threadId 未变时旧 userId 会撞属主闸 403
+    // 死连——依赖缺失曾致 biome useExhaustiveDependencies 红闸。
+  }, [threadId, isOpen, user.id]);
 
   // 灯箱打开时聚焦遮罩本身:div 默认不可聚焦,不聚焦则 onKeyDown 的 Escape 关闭永不触发
   useEffect(() => {
