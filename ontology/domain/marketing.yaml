@@ -1,0 +1,62 @@
+# 营销域声明(ADR-0015 批〇试点域)
+# parity:与 services/engine-py/src/engine_py/tools_registry/semantic_model.yaml
+# 的同名实体/连接/维度逐键相等,由 ontology/tests/test_parity_marketing.py 钉死;
+# 本文件是未来唯一事实源,批二起接管 schema 卡与 manifest 对拍。
+# 注:跨域 join redemption_of_order(table=merchant_orders 属 trading 域)随
+# trading.yaml 批一落位后再登记(域内引用闭合原则,批〇 不建跨域机制)。
+version: 1
+domain: marketing
+
+entities:
+  promotions:
+    table: promotions
+    database: merchant_db
+    alias: p
+    label: 优惠活动
+    columns:
+      id: 主键
+      name: 活动名
+    notes: ""
+  promotion_redemptions:
+    table: promotion_redemptions
+    database: merchant_db
+    alias: rd
+    label: 活动核销
+    columns:
+      promotion_id: "→ promotions.id"
+      order_id: "→ merchant_orders.order_id"
+      discount_amount: 优惠金额
+      created_at: 核销时间
+    notes: 核销关联口径:真实归因,自然流量不计入
+  user_coupons:
+    table: user_coupons
+    database: merchant_db
+    alias: uc
+    label: 用户券包
+    columns:
+      user_id: 客户ID(= merchant_customers.customer_id)
+      promotion_id: "→ promotions.id"
+      status: claimed/used
+      claimed_at: 领取时间
+      used_at: 核销时间
+    notes: 客户实体过滤
+
+joins:
+  - name: redemption_of_promotion
+    table: promotions
+    base: promotion_redemptions
+    type: inner
+    condition: "p.id = rd.promotion_id"
+  - name: coupon_of_promotion
+    table: promotions
+    base: user_coupons
+    type: inner
+    condition: "p.id = uc.promotion_id"
+
+dimensions:
+  promotion:
+    label: 活动
+    kind: entity
+    entity: promotions
+    id_column: id
+    label_column: name

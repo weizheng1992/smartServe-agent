@@ -1,0 +1,36 @@
+# 本体知识层 · 核心词汇(ADR-0015,批〇)
+# 全部闭集在此声明;domain/*.yaml 与 application/*.yaml 的引用一律经
+# registry.py 加载期交叉断言(悬空/越界响亮失败,进程起不来)。
+# 面曝光面(faces)在批一 application/actions.yaml 承接动作条目时启用。
+version: 1
+
+# 领域轴:逻辑分域(物理 schema 不拆,见 ADR-0015 否决项表)
+domains:
+  - key: product
+    label: 商品域
+  - key: trading
+    label: 交易域
+  - key: marketing
+    label: 营销域
+  - key: crm
+    label: 用户域
+  - key: shared
+    label: 共享面(thread_notes/owner_mappings 等无四域归属的表)
+
+# 物理库路由(与 engine_py/db/merchant_access.merchant_database_url 的同实例两库派生同源)
+databases:
+  - key: merchant_db
+    label: 商户真账库 agent_merchant
+  - key: engine_db
+    label: 平台库 agent_platform
+
+# 应用层动作曝光面:商城/后台不是两份本体,是动作条目的 faces 投影(ADR-0015 决策 2)
+faces:
+  - key: customer
+    label: 顾客面(线程属主绑定)
+  - key: operator
+    label: 坐席/员工面(员工 JWT)
+  - key: staff_review
+    label: 员工代行批驳面(live_desk:approve)
+  - key: spi
+    label: SPI 三方面(HMAC 签名)
