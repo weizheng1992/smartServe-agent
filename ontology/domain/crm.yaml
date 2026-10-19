@@ -15,6 +15,8 @@ entities:
       phone: 手机号
       member_level: 会员级
       created_at: 注册时间
+    # 分析面列裁剪(08-D2 token 成本;PII 列 name/phone 不进 T2 接地 prompt)
+    analysis_columns: [id, customer_id, member_level]
     notes: ""
 
 # customer 实体维度;跨域 join(orders_of_customer)声明在 trading(base 侧)

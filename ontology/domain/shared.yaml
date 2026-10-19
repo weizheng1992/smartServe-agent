@@ -12,9 +12,13 @@ entities:
     label: 审计日志
     columns:
       id: 主键
-      actor: 操作者
-      action: 动作
+      action_type: 动作类型
+      order_id: 订单
+      operator: 操作者
       created_at: 时间
+    # 2026-10-19 批二对拍闸实弹:旧声明含真表不存在的 actor/action 列(真列
+    # 实为 action_type/operator,manifest 对拍逮到,08-D2 手抄时代漂移);
+    # idempotency_key/payload/result 未进分析面,按需登记。
     notes: 审计面,分析只读可用
   session_metrics:
     table: session_metrics

@@ -105,3 +105,21 @@ async def test_merchant_schema_matches_manifest(contract_fixtures):
     if extra_tables:
         problems.append(f"manifest 外多出商户表 {extra_tables}(新表须同步登记)")
     assert not problems, "商户库 schema 漂移:\n" + "\n".join(problems)
+
+
+def test_ontology_entity_columns_within_manifest():
+    """本体声明列 ⊆ manifest 真实列集(ADR-0015 批二对拍,纯数据零 DB)。
+
+    本体 domain 声明若发明真表没有的列(membership 类漂移),在本册红灯,
+    先于任何消费方;列裁剪(analysis_columns)只影响 schema 卡,不影响本断言。
+    engine_db 实体不在此册(商户库 manifest 只钉 agent_merchant 12 表)。"""
+    from engine_py.ontology_generated import ONTOLOGY_ENTITIES
+
+    problems: list[str] = []
+    for table, spec in ONTOLOGY_ENTITIES.items():
+        if spec["database"] != "merchant_db":
+            continue
+        unknown = set(spec["columns"]) - MANIFEST.get(table, set())
+        if unknown:
+            problems.append(f"{table}: 本体声明了 manifest 之外的列 {sorted(unknown)}(发明列)")
+    assert not problems, "本体 ↔ 商户库 DDL 漂移:\n" + "\n".join(problems)

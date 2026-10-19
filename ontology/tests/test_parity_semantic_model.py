@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 from engine_py.tools_registry.semantic_model import SEMANTIC_MODEL
-
 from ontology import (
     BUNDLES,
     ONTOLOGY_ENTITIES,

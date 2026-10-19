@@ -42,14 +42,24 @@ def can_compile(metric: str) -> bool:
 
 
 def _assert_model_matches_card() -> None:
-    """模型实体 ⊆ 编译期安全卡表(漂移断言):模型登记新表必须先登记 schema 卡,
-    否则任何引用该表的编译产物都会被表白名单拒绝 —— 与断言同源,缺卡在编译期
-    响亮暴露而非执行期。"""
-    card_tables = set(compile_safe_schema_card()["tables"])
-    model_tables = set(_model()["entities"])
-    missing = model_tables - card_tables
+    """模型实体 ⊆ 编译期安全卡(表级)+ 卡列 ⊆ 模型列(列级,ADR-0015 批二)。
+
+    schema 卡自批二起由本体声明投影(engine_py.ontology_generated);本断言
+    由此升为 semantic_model.yaml ↔ 本体 的列级漂移闸 —— 发明列(如历史上的
+    membership ≠ member_level)在编译期响亮暴露。列裁剪(卡 ⊂ 模型,如客户表
+    PII 列不进 T2 prompt)是 08-D2 的 token 成本设计,合法;反向即漂移。"""
+    card = compile_safe_schema_card()["tables"]
+    model_entities = _model()["entities"]
+    missing = set(model_entities) - set(card)
     if missing:
         raise ValueError(f"语义模型实体未登记 schema 卡(表白名单将拒绝): {sorted(missing)}")
+    for table, spec in card.items():
+        model_columns = set((model_entities.get(table) or {}).get("columns") or {})
+        unknown = set(spec["columns"]) - model_columns
+        if unknown:
+            raise ValueError(
+                f"schema 卡列超出语义模型声明(本体 ↔ semantic_model 漂移): {table}: {sorted(unknown)}"
+            )
 
 
 def compile_metric(intent: StructuredQueryIntent, business_id: str, chart_hint: str | None = None) -> CompiledSQL:

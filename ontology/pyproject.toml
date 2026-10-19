@@ -1,0 +1,19 @@
+# 本体知识层 lint 配置(与 services 双服务同口径)。
+# 非构建包 —— uv workspace 成员资格收编时点见 ADR-0015 批一偏差留痕④;
+# 本文件只服务 ruff/编辑器,Build/依赖不读它。
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+# 与 services/engine-py 同款豁免;本包无 DB/async 代码,豁免面实际不触发
+ignore = [
+  "DTZ005",
+  "DTZ011",
+  "RUF012",
+  "S110",
+  "BLE001",
+  "ASYNC230",
+  "SIM102",
+  "SIM103",
+]

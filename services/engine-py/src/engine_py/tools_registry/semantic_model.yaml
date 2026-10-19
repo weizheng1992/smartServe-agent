@@ -50,6 +50,9 @@ entities:
       cost_at_purchase: 成交成本快照(NOT NULL)
     notes: 销量 = SUM(quantity);GMV = SUM(quantity*price);成本求和不容 COALESCE
   merchant_product_reviews:
+    # 2026-10-19 批二对拍闸实弹:移除真表不存在的 sentiment 列(08-D2 手抄
+    # 时代漂移,ontology manifest 对拍逮到);真列另有 sku_code/customer_id
+    # 未进分析面,按需登记。
     database: merchant_db
     alias: r
     label: 商品评价
@@ -57,7 +60,6 @@ entities:
       id: 主键
       spu_id: 商品
       rating: 1-5 星
-      sentiment: 情感
       content: 评语
       created_at: 时间
     notes: 差评口径:rating <= 2
@@ -74,13 +76,17 @@ entities:
       created_at: 注册时间
     notes: ""
   merchant_audit_logs:
+    # 2026-10-19 批二对拍闸实弹:actor/action 系发明列(真列 action_type/
+    # operator,manifest 对拍逮到);idempotency_key/payload/result 未进
+    # 分析面,按需登记。
     database: merchant_db
     alias: al
     label: 审计日志
     columns:
       id: 主键
-      actor: 操作者
-      action: 动作
+      action_type: 动作类型
+      order_id: 订单
+      operator: 操作者
       created_at: 时间
     notes: 审计面,分析只读可用
   promotions:

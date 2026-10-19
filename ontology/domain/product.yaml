@@ -38,9 +38,11 @@ entities:
       id: 主键
       spu_id: 商品
       rating: 1-5 星
-      sentiment: 情感
       content: 评语
       created_at: 时间
+    # 2026-10-19 批二对拍闸实弹:旧声明含真表不存在的 sentiment 列(08-D2
+    # 手抄时代漂移,manifest 对拍逮到);真列另有 sku_code/customer_id 未进
+    # 分析面,按需登记。
     notes: 差评口径:rating <= 2
 
 joins:

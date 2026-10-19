@@ -15,7 +15,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from ontology import ACTION_SPECS, ENGINE_HANDLED_ACTIONS, TS_GHOST_ACTIONS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

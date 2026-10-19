@@ -7,9 +7,8 @@ engine semantic_model.py / metric_registry.py 同纪律。
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from ontology import CORE, build_application, build_core, build_ontology
+from pydantic import ValidationError
 
 MARKETING_YAML: dict = {
     "version": 1,

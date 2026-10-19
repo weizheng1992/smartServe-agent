@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 ROOT: Final[Path] = Path(__file__).resolve().parent
 GENERATED_PY_PATH: Final[Path] = (
@@ -63,12 +63,26 @@ class EntitySpec(_Spec):
     label: str
     columns: dict[str, str]   # 列 → 口径注记(与 semantic_model 实体同形)
     notes: str = ""
+    analysis_columns: list[str] | None = None   # 分析面列裁剪(08-D2 token 成本;None = 全列)
 
     @field_validator("columns")
     @classmethod
     def _columns_nonempty(cls, value: dict[str, str]) -> dict[str, str]:
         if not value:
             raise ValueError("columns 必须是非空映射(实体无列即无声称)")
+        return value
+
+    @field_validator("analysis_columns")
+    @classmethod
+    def _analysis_columns_subset(cls, value: list[str] | None, info: Any) -> list[str] | None:
+        if value is None:
+            return value
+        if not value:
+            raise ValueError("analysis_columns 声明即非空(空裁剪 = 无声称)")
+        columns = info.data.get("columns") or {}
+        unknown = set(value) - set(columns)
+        if unknown:
+            raise ValueError(f"analysis_columns 越出 columns 声明: {sorted(unknown)}")
         return value
 
 
@@ -345,6 +359,53 @@ def semantic_dimension_projection() -> dict[str, dict[str, Any]]:
     return out
 
 
+# --- schema 卡投影(批二:analytics/schema_cards.py 手抄形态退役)--------------
+# 分组规则 = 08-D2 token 成本冻结的历史形态:主卡 = merchant_db ∧ 非营销域
+# (进 L3 上下文 prompt);special 族 = 营销域 merchant 实体 + engine_db 实体
+# (只进编译期 AST 白名单,不进 prompt)。展示顺序亦冻结(schema_card_text
+# 行序 = T2 接地 prompt 逐字节)。
+
+CARD_MAIN_ORDER: Final = (
+    "merchant_spus", "merchant_skus", "merchant_orders", "merchant_order_items",
+    "merchant_product_reviews", "merchant_customers", "merchant_audit_logs",
+)
+CARD_SPECIAL_ORDER: Final = (
+    "promotions", "promotion_redemptions", "session_metrics", "after_sale_tickets", "user_coupons",
+)
+
+
+def _card_entry(key: str) -> dict[str, Any]:
+    spec = entity(key)
+    cols = spec.analysis_columns or list(spec.columns)
+    return {"columns": {c: spec.columns[c] for c in cols}, "notes": spec.notes}
+
+
+def card_projection() -> dict[str, dict[str, dict[str, Any]]]:
+    """主卡 + special 族投影(与批一前手抄卡逐键等价,唯 user_coupons 注记删去
+    「商城券包;」前缀——语义不变,ADR-0015 批二留痕)。"""
+    for key in (*CARD_MAIN_ORDER, *CARD_SPECIAL_ORDER):
+        entity(key)   # 声明缺失即 KeyError 响亮
+    return {
+        "main": {k: _card_entry(k) for k in CARD_MAIN_ORDER},
+        "special": {k: _card_entry(k) for k in CARD_SPECIAL_ORDER},
+    }
+
+
+def _validate_card_grouping() -> None:
+    marketing_keys = set(BUNDLES["marketing"].entities)
+    for key in CARD_MAIN_ORDER:
+        spec = entity(key)
+        if spec.database != "merchant_db" or key in marketing_keys:
+            raise ValueError(f"主卡成员 {key!r} 违反分组规则(merchant_db ∧ 非营销域)")
+    for key in CARD_SPECIAL_ORDER:
+        spec = entity(key)
+        if not (key in marketing_keys or spec.database == "engine_db"):
+            raise ValueError(f"special 族成员 {key!r} 违反分组规则(营销域 merchant ∨ engine_db)")
+
+
+_validate_card_grouping()
+
+
 # ---------------------------------------------------------------------------
 # 代码生成(批一):动作面 + 资金闸缺省 → engine_py.ontology_generated
 # ---------------------------------------------------------------------------
@@ -390,6 +451,43 @@ def emit_python() -> str:
         "ENGINE_HANDLED_ACTIONS: Final[frozenset[str]] = frozenset(APPROVAL_ACTIONS)",
         "TS_GHOST_ACTIONS: Final[frozenset[str]] = " + f"frozenset({sorted(TS_GHOST_ACTIONS)!r})",
         "",
+    ])
+    # --- 实体与 schema 卡(批二:schema_cards/manifest 派生源) ---
+    lines.extend([
+        "# --- 实体与 schema 卡(domain 投影;批二 schema_cards/manifest 派生源)-------",
+        "ONTOLOGY_ENTITIES: Final[dict[str, dict[str, object]]] = {",
+    ])
+    entity_domain = {key: bundle.domain for bundle in BUNDLES.values() for key in bundle.entities}
+    for key, spec in ONTOLOGY_ENTITIES.items():
+        lines.append(f"    {_py_str(key)}: {{")
+        lines.append(f"        'domain': {_py_str(entity_domain[key])},")
+        lines.append(f"        'table': {_py_str(spec.table)},")
+        lines.append(f"        'database': {_py_str(spec.database)},")
+        lines.append(f"        'alias': {_py_str(spec.alias)},")
+        lines.append(f"        'label': {_py_str(spec.label)},")
+        lines.append("        'columns': {")
+        for col, note in spec.columns.items():
+            lines.append(f"            {_py_str(col)}: {_py_str(note)},")
+        lines.append("        },")
+        lines.append(f"        'notes': {_py_str(spec.notes)},")
+        lines.append("    },")
+    lines.append("}")
+    lines.append(f"CARD_MAIN_ORDER: Final[tuple[str, ...]] = {CARD_MAIN_ORDER!r}")
+    lines.append(f"CARD_SPECIAL_ORDER: Final[tuple[str, ...]] = {CARD_SPECIAL_ORDER!r}")
+    cards = card_projection()
+    for const_name, group in (("MAIN_CARD_TABLES", "main"), ("SPECIAL_FAMILY_TABLES", "special")):
+        lines.append(f"{const_name}: Final[dict[str, dict[str, object]]] = {{")
+        for table, entry in cards[group].items():
+            lines.append(f"    {_py_str(table)}: {{")
+            lines.append("        'columns': {")
+            for col, note in entry["columns"].items():
+                lines.append(f"            {_py_str(col)}: {_py_str(note)},")
+            lines.append("        },")
+            lines.append(f"        'notes': {_py_str(entry['notes'])},")
+            lines.append("    },")
+        lines.append("}")
+    lines.extend([
+        "",
         "# --- 资金闸缺省(application/actions.yaml defaults)-------------------------",
         "# 考古注记:历史六处分叉 50/100 —— 统一 50(收紧方向,ADR-0015 决策 4);",
         "# 租户级显式覆写(nike=150/adidas=120)通道语义不变,本常量只钉缺省。",
@@ -397,10 +495,15 @@ def emit_python() -> str:
         "",
         "__all__ = [",
         '    "APPROVAL_ACTIONS",',
+        '    "CARD_MAIN_ORDER",',
+        '    "CARD_SPECIAL_ORDER",',
         '    "CUSTOMER_ACTIONS",',
         '    "DEFAULT_REFUND_AUTO_APPROVAL_LIMIT",',
         '    "ENGINE_HANDLED_ACTIONS",',
+        '    "MAIN_CARD_TABLES",',
+        '    "ONTOLOGY_ENTITIES",',
         '    "OPERATOR_ACTIONS",',
+        '    "SPECIAL_FAMILY_TABLES",',
         '    "SPI_ACTIONS",',
         '    "STAFF_REVIEW_ACTIONS",',
         '    "TS_GHOST_ACTIONS",',
@@ -416,10 +519,137 @@ def write_generated(path: Path = GENERATED_PY_PATH) -> Path:
     return path
 
 
+# ---------------------------------------------------------------------------
+# TS 发射(批二:动作面消费侧类型;前端接线随首个真实消费方,ADR 留痕)
+# ---------------------------------------------------------------------------
+
+GENERATED_TS_PATH: Final[Path] = ROOT / "generated" / "ts" / "ontology-actions.ts"
+
+
+def emit_typescript() -> str:
+    """确定性 TS 发射(单引号风格对齐仓内 biome;禁时间戳保 diff 稳定)。"""
+    lines: list[str] = [
+        "// 本体知识层编译产物 —— GENERATED,手改无效(漂移门 test_codegen_sync)。",
+        "// 源头:ontology/application/actions.yaml(经 ontology/registry.py emit_typescript)。",
+        "// 再生成:仓库根执行 `services/.venv/bin/python ontology/registry.py --write-all`。",
+        "// 前端接线(消费本文件的包)随首个真实消费方落地 —— 零消费方不预建装配。",
+        "",
+        "export const FACES = ['customer', 'operator', 'staff_review', 'spi'] as const;",
+        "export type Face = (typeof FACES)[number];",
+        "",
+        "export const APPROVAL_ACTIONS = [",
+    ]
+    for name in ACTION_SPECS:
+        lines.append(f"  '{name}',")
+    lines.extend([
+        "] as const;",
+        "export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];",
+        "",
+        "export const ACTION_FACES: Record<ApprovalAction, readonly Face[]> = {",
+    ])
+    for name, spec in ACTION_SPECS.items():
+        faces = ", ".join(f"'{f}'" for f in spec.faces)
+        lines.append(f"  {name}: [{faces}],")
+    lines.extend([
+        "};",
+        "",
+        "export const TS_GHOST_ACTIONS = [" + ", ".join(f"'{g}'" for g in sorted(TS_GHOST_ACTIONS)) + "] as const;",
+        (
+            "export const DEFAULT_REFUND_AUTO_APPROVAL_LIMIT = "
+            f"{DEFAULT_REFUND_AUTO_APPROVAL_LIMIT!r};"
+        ),
+        "",
+    ])
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 文档发射(批三:知识地图,Mermaid ER + 动作面 + 词汇)
+# ---------------------------------------------------------------------------
+
+GENERATED_DOCS_PATH: Final[Path] = ROOT / "docs" / "ontology.md"
+
+
+def emit_docs() -> str:
+    """确定性 Markdown 知识地图(GitHub 可渲染 Mermaid;同步门钉死漂移)。"""
+    out: list[str] = [
+        "# 本体知识层 · 知识地图(GENERATED)",
+        "",
+        "> 手改无效 —— 再生成:仓库根执行 `services/.venv/bin/python ontology/registry.py --write-all`;",
+        (
+            "> 漂移门:`ontology/tests/test_codegen_sync.py`。决策全文见"
+            "[ADR-0015](../../docs/adr/0015-ontology-knowledge-layer.md)。"
+        ),
+        "",
+        (
+            "三条分层裁定:平台级一份本体(租户差异留 tenant_configs)· 业务数据留 PG · "
+            "商城/后台 = faces 曝光面。"
+        ),
+        "",
+        "## 词汇闭集(core.yaml)",
+        "",
+    ]
+    for field, label in (("domains", "领域"), ("databases", "库路由"), ("faces", "曝光面")):
+        items = ", ".join(f"`{i.key}`({i.label})" for i in getattr(CORE, field))
+        out.append(f"- **{label}**:{items}")
+    out.extend(["", "## 实体(四域 + 共享面)", ""])
+    for domain, bundle in BUNDLES.items():
+        out.append(f"### {domain}({next(i.label for i in CORE.domains if i.key == domain)})")
+        out.append("")
+        out.append("| 实体 | 物理表 | 库 | 别名 | 列 |")
+        out.append("|---|---|---|---|---|")
+        for key, spec in bundle.entities.items():
+            cols = "、".join(f"`{c}`" for c in spec.columns)
+            out.append(f"| {key} | `{spec.table}` | {spec.database} | `{spec.alias}` | {cols} |")
+        out.append("")
+    out.extend(["## 实体关系(Mermaid ER)", "", "```mermaid", "erDiagram"])
+    for bundle in BUNDLES.values():
+        for join in bundle.joins:
+            out.append(f"  {join.base} ||--o{{ {join.table} : {join.name}")
+    out.extend(["```", "", "## 动作面(application/actions.yaml)", ""])
+    out.append("| 动作 | 面 | 权限锚 | 需工单 | 说明 |")
+    out.append("|---|---|---|---|---|")
+    for name, spec in ACTION_SPECS.items():
+        faces = "、".join(f"`{f}`" for f in spec.faces)
+        perm = f"`{spec.permission}`" if spec.permission else "—"
+        out.append(f"| `{name}` | {faces} | {perm} | {'是' if spec.requires_approval_id else '否'} | {spec.label} |")
+    out.extend([
+        "",
+        f"冻结面已知差异(幽灵,后端不受理):{', '.join(f'`{g}`' for g in sorted(TS_GHOST_ACTIONS))}。",
+        "",
+        "## 资金闸缺省",
+        "",
+        (
+            f"- 免签退款限额缺省 = **{DEFAULT_REFUND_AUTO_APPROVAL_LIMIT:g}**(六处分叉单源,收紧方向;"
+            "租户级显式覆写 nike=150 / adidas=120 通道不变)。"
+        ),
+        "",
+    ])
+    return "\n".join(out)
+
+
+def write_all() -> dict[str, Path]:
+    """全部生成物一次落盘(Python / TS / docs);CI regen 门消费本入口。"""
+    written = {
+        "python": write_generated(),
+        "typescript": GENERATED_TS_PATH,
+        "docs": GENERATED_DOCS_PATH,
+    }
+    GENERATED_TS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GENERATED_TS_PATH.write_text(emit_typescript(), encoding="utf-8")
+    GENERATED_DOCS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GENERATED_DOCS_PATH.write_text(emit_docs(), encoding="utf-8")
+    return written
+
+
 if __name__ == "__main__":  # pragma: no cover - 手动再生成入口
     import sys
 
-    if "--write" in sys.argv:
+    args = sys.argv[1:]
+    if "--write" in args:
         print(f"written: {write_generated()}")
+    elif "--write-all" in args:
+        for kind, path in write_all().items():
+            print(f"written[{kind}]: {path}")
     else:
         sys.stdout.write(emit_python())
