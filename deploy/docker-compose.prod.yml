@@ -26,7 +26,10 @@ services:
     # ports: ["6379:6379"]
 
   # 一次性:alembic 迁移,gateway 等它成功后才启动
+  # image 与 gateway 同镜像(alembic 命令覆盖)——不写 image 则 compose 会在部署机本地
+  # build(弱机必炸,B 机实测);传输走 CI 部署步的南大代理预拉 + retag(见 ci.yml)
   migrate:
+    image: ghcr.io/weizheng1992/smartserve-gateway:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.gateway

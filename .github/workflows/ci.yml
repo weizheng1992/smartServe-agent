@@ -151,7 +151,12 @@ jobs:
           set -euo pipefail
           cd ~/agent-all
           git pull --ff-only
-          docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml pull gateway web
+          # 镜像传输走南大代理(国内直连 ghcr.io 拉 GB 级 layer 会断流,B 机实测两连挂),
+          # 拉完 retag 回正规名,compose 文件保持 ghcr.io 原名不留镜像源歧义
+          docker pull ghcr.nju.edu.cn/weizheng1992/smartserve-gateway:latest
+          docker tag ghcr.nju.edu.cn/weizheng1992/smartserve-gateway:latest ghcr.io/weizheng1992/smartserve-gateway:latest
+          docker pull ghcr.nju.edu.cn/weizheng1992/smartserve-web:latest
+          docker tag ghcr.nju.edu.cn/weizheng1992/smartserve-web:latest ghcr.io/weizheng1992/smartserve-web:latest
           docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d
           REMOTE
           rm -f ~/deploy_key
