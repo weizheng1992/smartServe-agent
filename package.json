@@ -14,6 +14,7 @@
     "dev:all": "turbo run dev",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
+    "db:init-external": "bash scripts/init_external_pg.sh",
     "db:push": "cd services/engine-py && uv run --env-file ../../.env alembic upgrade head",
     "db:seed": "cd services/engine-py && uv run --env-file ../../.env python -m engine_py.db.seed && uv run --env-file ../../.env python -m engine_py.db.seed_third_party && cd ../gateway-py && MERCHANT_SEED_ALLOW=1 uv run --env-file ../../.env python -m gateway_py.merchant_seed",
     "build": "turbo run build",

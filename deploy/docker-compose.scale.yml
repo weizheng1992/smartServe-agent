@@ -29,17 +29,7 @@ services:
       driver: json-file
       options: { max-size: "20m", max-file: "3" }
 
-  postgres:
-    # 持久化强化 + 资源上限
-    command: >
-      postgres -c shared_buffers=1GB -c max_connections=200
-               -c work_mem=16MB -c effective_cache_size=3GB
-    logging:
-      driver: json-file
-      options: { max-size: "20m", max-file: "3" }
-    deploy:
-      resources:
-        limits: { memory: 4g }
+  # postgres 段已随 PG 剥离删除(2026-10-20 统一 adkg PG18);调优改在 ad-kg 侧做
 
   redis:
     # AOF 持久化:重启不丢限流窗口与缓存

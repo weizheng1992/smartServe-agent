@@ -5,7 +5,7 @@
 > 多机水平扩展（§3）/ K8s（§4），每档含架构与操作步骤（设计稿，采用前需目标环境验证）。
 >
 > 一套 `deploy/` 目录 = 服务器完整上线能力：四个前端（nginx 一体镜像）、
-> gateway（FastAPI，周期任务随 lifespan）、PostgreSQL/Redis。
+> gateway（FastAPI，周期任务随 lifespan）、Redis（PG 复用同机 adkg PG18）。
 > 训练产物（SFT adapter）的部署另见 [sft-deploy-eval.md](sft-deploy-eval.md)。
 
 ## 一、架构总览
@@ -14,7 +14,8 @@
                     ┌────────────────────── 服务器 (Docker 24+, 2C8G+, 40GB 盘) ─────────────────────┐
 浏览器 ──HTTP──▶ web :3000/:3001/:3005/:3006   nginx 四站点静态 + SPA 回退
                     │      └── /api/* 反代 ──▶  gateway :4000  FastAPI(双 Agent/数据分析/客服)
-                    │                              ├── PostgreSQL 15 (pg_data 卷, 不暴露宿主)
+                    │                              ├── PostgreSQL 18 (adkg-postgres 容器, shared-infra 网络直连,
+                    │                              │   agent_platform/agent_merchant 两库, 归 ad-kg 侧编排)
                     │                              ├── Redis 7     (redis_data 卷, 不暴露宿主)
                     │                              ├── uploads 卷 (/data/uploads 聊天附件)
                     │                              └── hf_cache 卷 (bge 本地 embedding 模型)
@@ -26,7 +27,9 @@
 - 前端全部走**相对路径 `/api/...`**，nginx 同源反代到 gateway——无 CORS 问题，
   SSE（`/api/chat/*/stream`）与 socket.io 升级头已按长连接调优
 - gateway 镜像含 torch/sentence-transformers（本地 embedding），体积 GB 级属预期
-- 数据全部落在 named volume；`postgres`/`redis` 默认**不向宿主机暴露端口**
+- 数据全部落在 named volume；`redis` 默认**不向宿主机暴露端口**；PG 由 ad-kg 侧
+  compose 管理（宿主 :5433），上线五步前先按其 README 起 PG 并跑
+  `bash scripts/init_external_pg.sh`
 
 ## 二、服务器要求
 
@@ -43,12 +46,17 @@
 # 0) 服务器装 Docker(官方脚本) 后,克隆仓库
 git clone git@github.com:weizheng1992/smartServe-agent.git && cd smartServe-agent
 
-# 1) 环境变量:复制模板并改密(LLM 端点/PG/Redis 三个 change-me 必改)
+# 0.5) 先起同机 ad-kg 侧 PG18(见 ad-kg 仓库 README;本编排不自带 PG)
+docker network create shared-infra
+cd ~/Desktop/test/ai/ad-kg && docker compose up -d && cd -
+bash scripts/init_external_pg.sh    # 共享 PG 建 agent_user 角色 + 两库(幂等,一次性)
+
+# 1) 环境变量:复制模板并改密(LLM 端点/PG/Redis 凭据必改;PG 主机名固定 adkg-postgres)
 cp deploy/.env.prod.example deploy/.env.prod
 vim deploy/.env.prod
 
-# 2) 起基础设施(数据库先就绪)
-docker compose -f deploy/docker-compose.prod.yml up -d postgres redis
+# 2) 起基础设施(Redis 先就绪;PG 已由上一步就绪)
+docker compose -f deploy/docker-compose.prod.yml up -d redis
 
 # 3) 构建应用镜像(首次 5~15 分钟;uv/bun 都走锁文件,可复现)
 docker compose -f deploy/docker-compose.prod.yml build gateway web
@@ -77,6 +85,15 @@ docker compose -f docker-compose.prod.yml run --rm gateway \
 ```
 
 **周期任务**（HITL 对账/超时扫描/坏例摘要）随 gateway lifespan 自动在场，无需单独启用。
+
+## 三·五、自动发布（push main 即发，2026-10-20 起）
+
+`.github/workflows/ci.yml` 四棒接力：`frontend + python 测试 → build-push（runner 上构建 gateway/web 镜像推 GHCR，sha+latest 双 tag）→ deploy（SSH 到 B 机 pull + up + 健康断言）`。PR 只跑前两棒；push main 全链路。构建在 runner（4C16G）——服务器零构建，弱机也能跑。
+
+- **Secrets 三枚**：`DEPLOY_HOST` / `DEPLOY_USER` / `DEPLOY_SSH_KEY`（部署专用用户：git deploy key + docker 组，无 sudo）
+- **GHCR 首次**：push 成功后到 Packages 页把 `smartserve-gateway` / `smartserve-web` 设 **public**（默认 private，B 机匿名 pull 会 401）；国内直连拉不动走 daocloud 代理 retag
+- **回滚**：镜像带 sha tag，compose 的 `image:` 指回上一个 sha 再 `up -d`，一条命令
+- **两机拓扑**：本机（B 机）只跑 smartServe 全栈；PG 在 A 机（ad-kg 仓库，`DATABASE_URL` 填 A 机内网 IP:5433，安全组只对 B 机放行）——见 ad-kg 仓库 `docs/deployment.md`
 
 ## 四、镜像说明
 
@@ -121,7 +138,8 @@ healthcheck + 依赖编排（gateway 等 migrate 成功、web 等 gateway 健康
 ## 六、安全清单
 
 - [ ] `deploy/.env.prod` 三个 `change-me` 全改强密码；该文件已在 gitignore，永不入库
-- [ ] 5432/6379 未暴露（默认未开）；如需外部访问走 SSH 隧道
+- [ ] 6379 未暴露（默认未开）；如需外部访问走 SSH 隧道。PG 共享同机 adkg PG18（5433
+      由 ad-kg 侧管理暴露面，smartServe 经 shared-infra 内网直连，不经宿主端口）
 - [ ] 对外暴露仅 3000/3001/3005/3006/4000；云安全组按此收敛
 - [ ] 域名 + TLS：前面加一层宿主 nginx/Caddy 或云 SLB 反代这五个端口，
       websocket/SSE 头照抄 `deploy/nginx.conf` 的 proxy 段

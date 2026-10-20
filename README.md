@@ -382,7 +382,8 @@ cd apps/merchant-admin && bun run build   # tsc + vite
 ```bash
 bun install && uv sync                    # 依赖(services/ 下 uv sync)
 cp .env.example .env                      # LLM/DB/Redis 凭据
-bun run docker:up                         # PostgreSQL + Redis
+bun run docker:up                         # Redis(PG 共享同机 adkg PG18 :5433,不自带)
+bash scripts/init_external_pg.sh          # 一次性:在共享 PG18 建 agent_user 角色 + 两库(幂等)
 bun run db:push && bun run db:seed        # 迁移 + 种子(含测试账号 test@example.com / agent-all-dev)
 
 bun run dev:all                           # 四前端(turbo): web 3000 / admin 3001 / merchant 3005 / merchant-admin 3006

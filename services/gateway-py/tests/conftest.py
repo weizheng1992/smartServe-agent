@@ -66,7 +66,8 @@ def _bootstrap_sealed_env() -> None:
         from testcontainers.postgres import PostgresContainer
         from testcontainers.redis import RedisContainer
 
-        pg = PostgresContainer("postgres:15-alpine")
+        # 与共享实例同版本(2026-10-20 统一 adkg PG18),消除"测 15 跑 18"漂移
+        pg = PostgresContainer("postgres:18-alpine")
         pg.start()
         redis = RedisContainer("redis:7-alpine")
         redis.start()

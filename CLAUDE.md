@@ -30,7 +30,8 @@
 
 ### 1.4 数据库与基础设施
 
-- **启动核心 Docker 服务:** `bun run docker:up`(PostgreSQL + Redis)
+- **启动核心 Docker 服务:** `bun run docker:up`(Redis;PG 不自带,共享同机 ad-kg 的 PG18 实例)
+- **初始化共享 PG(一次性,幂等):** `bun run db:init-external`(建 agent_user 角色 + agent_platform/agent_merchant 两库;前置:ad-kg 侧 `docker compose up -d`)
 - **停止 Docker 服务:** `bun run docker:down`
 - **应用 Schema 迁移:** `bun run db:push`(Alembic `upgrade head`,在 `services/engine-py` 中执行)
 - **数据库播种:** `bun run db:seed`(engine 播种 + 第三方播种 + 商户播种)

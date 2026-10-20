@@ -1,28 +1,16 @@
-# 商户面生产编排:merchant(3005) + merchant-admin(3006) 两面前端 + gateway + migrate + PG/Redis
+# 商户面生产编排:merchant(3005) + merchant-admin(3006) 两面前端 + gateway + migrate + Redis
 # 只裁前端构建与端口暴露;网关/引擎/数据库与全量部署(Dockerfile.web 四端)同一套,
 # web/admin 专属路由在网关闲置无害。用法见 docs/deploy.md「场景 B」。
 # 注:project name 与全量版不同 → 卷按 smartserve-merchant_* 命名,两套编排数据互不串。
-# 注:postgres/redis/migrate/gateway 四 service 与 docker-compose.prod.yml 逐字同构,改版须两文件同批。
+# 注:PG 已剥离(2026-10-20),与 docker-compose.prod.yml 同批同构改版:redis/migrate/gateway
+# 三 service 逐字同构,改版须两文件同批;外部 PG 为同机 adkg PG18(见 prod.yml 头注)。
 name: smartserve-merchant
 
-services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_password}
-      POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_user} -d ${POSTGRES_DB:-agent_platform}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-    # 生产默认不向宿主机暴露 5432;需要外部 BI/psql 再放开注释
-    # ports: ["5432:5432"]
+networks:
+  shared-infra:
+    external: true
 
+services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis_password}"]
@@ -42,18 +30,26 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.gateway
     env_file: .env.prod
+    networks:
+      - default
+      - shared-infra
     working_dir: /app/services/engine-py
     command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
     depends_on:
-      postgres:
+      redis:
         condition: service_healthy
     restart: "no"
 
   gateway:
+    # 与 prod.yml 同批同构:CI 推 GHCR;merchant-web 镜像不入流水线(主拓扑用 prod 版 web)
+    image: ghcr.io/weizheng1992/smartserve-gateway:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.gateway
     env_file: .env.prod
+    networks:
+      - default
+      - shared-infra
     ports:
       - "4000:4000"
     environment:
@@ -63,8 +59,6 @@ services:
       - uploads:/data/uploads          # UPLOADS_DIR 指到这里,聊天附件持久化
       - hf_cache:/root/.cache/fastembed  # fastembed ONNX 权重缓存(FASTEMBED_CACHE_PATH),重启免下载
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       migrate:
@@ -90,7 +84,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  pg_data:
   redis_data:
   uploads:
   hf_cache:

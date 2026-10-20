@@ -5,18 +5,19 @@
 # 红灯 = 审批通过后 merchant_orders.status 仍未变为 REFUNDED(用户症状:店铺没反应)
 # 绿灯 = 订单状态在审批后 90s 内变为 REFUNDED
 #
-# 前置: gateway(4000) / shared-postgres / shared-redis 运行中
+# 前置: gateway(4000) / adkg-postgres(共享 PG18,宿主 :5433) / shared-redis 运行中
 
 set -uo pipefail
 
 ORDER_ID="${1:-AURORA-ORD-2026-9081}"
 BASE="${BASE:-http://localhost:4000}"
+PG_CONTAINER="${ADKG_PG_CONTAINER:-adkg-postgres}"   # 2026-10-20 起 PG 共享 adkg 实例
 STAMP="$(date +%s)"
 THREAD="merchant_thread_CUST-8801_aurora_dbg_${STAMP}"   # 每轮独立线程,免清理旧工单
 PASS=0
 
-psql_merchant() { docker exec shared-postgres psql -U agent_user -d agent_merchant -tA -c "$1"; }
-psql_engine()   { docker exec shared-postgres psql -U agent_user -d agent_platform -tA -c "$1"; }
+psql_merchant() { docker exec "$PG_CONTAINER" psql -U agent_user -d agent_merchant -tA -c "$1"; }
+psql_engine()   { docker exec "$PG_CONTAINER" psql -U agent_user -d agent_platform -tA -c "$1"; }
 
 echo "== [0] 重置订单状态: $ORDER_ID -> PAID"
 psql_merchant "UPDATE merchant_orders SET status='PAID' WHERE order_id='$ORDER_ID';"

@@ -35,7 +35,7 @@ def merchant_database_url() -> str:
     """商户库连接串(读写共用解析,单点实现)。"""
     url = os.environ.get("MERCHANT_DATABASE_URL")
     if not url:
-        base = settings.database_url or "postgres://agent_user:agent_password@localhost:5432/agent_platform"
+        base = settings.database_url or "postgres://agent_user:agent_password@localhost:5433/agent_platform"
         url = re.sub(r"/[^/]+$", "/agent_merchant", base)
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+asyncpg://", 1)

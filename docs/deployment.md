@@ -30,16 +30,18 @@ Temporal 执行路线已于 2026-09-30 退役删除(ADR-0007:全仓零 `start_wo
 
 | 命令 | 起什么 | 说明 |
 |------|--------|------|
-| `bun run docker:up` | PostgreSQL 15(5432,库 agent_platform/agent_merchant)+ Redis 7(6379,带密码) | **必启**;两者是网关与引擎的硬依赖 |
+| `bun run docker:up` | Redis 7(6379,带密码) | **必启**;网关与引擎的硬依赖之一 |
+| `bash scripts/init_external_pg.sh` | 共享 PG18 里建 agent_user 角色 + agent_platform/agent_merchant 两库 | 一次性,幂等;PG 实例本身由同机 ad-kg 仓库的 compose 提供(容器 adkg-postgres,宿主 :5433),前置是 ad-kg 侧 `docker compose up -d` |
 
 ### 1.3 启动顺序与依赖矩阵
 
 ```bash
-bun run docker:up        # ① PG + Redis(一切的前置)
-bun run db:push          # ② Alembic 迁移(engine-py 内执行)
-bun run db:seed          # ③ 播种(engine + 三方 + 商户,按需)
-bun run dev:server       # ④ gateway :4000(周期任务随 lifespan 自动在场)
-bun run dev:web / dev:admin / dev:merchant   # ⑤ 前端 3000/3001/3005
+bun run docker:up        # ① Redis(一切的前置之一)
+bash scripts/init_external_pg.sh   # ② 共享 PG18 建角色两库(幂等;PG 实例须先由 ad-kg 侧起好)
+bun run db:push          # ③ Alembic 迁移(engine-py 内执行)
+bun run db:seed          # ④ 播种(engine + 三方 + 商户,按需)
+bun run dev:server       # ⑤ gateway :4000(周期任务随 lifespan 自动在场)
+bun run dev:web / dev:admin / dev:merchant   # ⑥ 前端 3000/3001/3005
 ```
 
 **dev 常踩坑清单**:

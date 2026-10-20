@@ -1,26 +1,17 @@
-# 生产编排:四前端(nginx 一体) + gateway + migrate + PG/Redis
-# 用法见 docs/deploy.md;基础设施与本地开发共用仓库根 docker-compose.yml,两者不冲突
+# 生产编排:四前端(nginx 一体) + gateway + migrate + Redis
+# PG 已剥离(2026-10-20):统一复用同机 adkg 的 PG18 实例(容器 adkg-postgres,pgvector 镜像),
+# 经共享 docker 网络 shared-infra 按容器名直连(见文件尾 networks)。启动顺序:
+#   ① docker network create shared-infra   ② ad-kg 仓库 docker compose up -d(内含一次性
+#   bash scripts/init_external_pg.sh 建两库一角色)   ③ 本编排 up
+# 用法见 docs/deploy.md;Redis 与本地开发共用仓库根 docker-compose.yml,两者不冲突
 
 name: smartserve-prod
 
-services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_password}
-      POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_user} -d ${POSTGRES_DB:-agent_platform}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-    # 生产默认不向宿主机暴露 5432;需要外部 BI/psql 再放开注释
-    # ports: ["5432:5432"]
+networks:
+  shared-infra:
+    external: true
 
+services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis_password}"]
@@ -40,18 +31,26 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.gateway
     env_file: .env.prod
+    networks:
+      - default
+      - shared-infra
     working_dir: /app/services/engine-py
     command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
     depends_on:
-      postgres:
+      redis:
         condition: service_healthy
     restart: "no"
 
   gateway:
+    # CI push main 自动推 GHCR(build-push job);build 段保留作本地兜底
+    image: ghcr.io/weizheng1992/smartserve-gateway:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.gateway
     env_file: .env.prod
+    networks:
+      - default
+      - shared-infra
     ports:
       - "4000:4000"
     environment:
@@ -61,8 +60,6 @@ services:
       - uploads:/data/uploads          # UPLOADS_DIR 指到这里,聊天附件持久化
       - hf_cache:/root/.cache/fastembed  # fastembed ONNX 权重缓存(FASTEMBED_CACHE_PATH),重启免下载
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       migrate:
@@ -76,6 +73,7 @@ services:
     restart: unless-stopped
 
   web:
+    image: ghcr.io/weizheng1992/smartserve-web:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.web
@@ -90,7 +88,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  pg_data:
   redis_data:
   uploads:
   hf_cache:

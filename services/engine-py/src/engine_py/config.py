@@ -58,7 +58,7 @@ def _database_url() -> str:
 
     显式带驱动的 URL(postgresql+psycopg2:// 等)原样保留,便于测试容器换驱动。
     """
-    url = _env("DATABASE_URL", "postgres://agent_user:agent_password@localhost:5432/agent_platform")
+    url = _env("DATABASE_URL", "postgres://agent_user:agent_password@localhost:5433/agent_platform")
     if url.startswith("postgres://"):
         return url.replace("postgres://", "postgresql+asyncpg://", 1)
     if url.startswith("postgresql://"):

@@ -1,22 +1,8 @@
 services:
-  postgres:
-    # Use the native Postgres 15 image and we will configure an alternative
-    # array-based numeric mock and store JSON arrays inside the standard text columns
-    # if pgvector compilation is not desired locally, OR use standard postgres:15-alpine
-    # but map embedding to a text column. This completely guarantees 100% successful builds,
-    # zero Docker image pull issues, and flawless local startup with zero internet dependency!
-    image: postgres:15-alpine
-    container_name: shared-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_password}
-      POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
-    ports:
-      - "5432:5432"
-    volumes:
-      - shared_postgres_data:/var/lib/postgresql/data
-    restart: always
-
+  # PostgreSQL 已剥离：统一复用同机 adkg 的 PG18 实例（容器 adkg-postgres，宿主 :5433，
+  # 库 agent_platform / agent_merchant，账号 agent_user）。一次性初始化：
+  #   bash scripts/init_external_pg.sh（建角色两库，幂等）
+  # 详见 scripts/init_external_pg.sh 头注；旧 shared_postgres_data 卷保留未删（回滚保险）。
   redis:
     image: redis:7-alpine
     container_name: shared-redis
@@ -34,7 +20,5 @@ services:
       retries: 5
 
 volumes:
-  shared_postgres_data:
-    driver: local
   shared_redis_data:
     driver: local
