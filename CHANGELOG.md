@@ -4,6 +4,21 @@
 
 ---
 
+## [2.18.0] - 2026-10-20 (部署拓扑改造:PG15 退役统一 adkg PG18 + CI 自动发布流水线两机上线;CI 三连修复与部署文档残留收口)
+
+### ✨ Features
+
+- **部署拓扑改造 + CI 自动发布**(5e90daf):①数据库外置——根 compose 剥离 postgres 服务,统一复用同机 ad-kg 的 PG18(容器 adkg-postgres,宿主 :5433,库 agent_platform/agent_merchant);新增 `scripts/init_external_pg.sh` 一次性幂等初始化(agent_user 角色含 CREATEDB——商户库自愈建库依赖 + 两库,同机 docker exec / 跨机 psql 容器双模式),package.json 收编 `db:init-external`;config.py 与 merchant_access.py 缺省连接串 5432→5433;两服务测试容器 postgres:15-alpine→18-alpine(消除测 15 跑 18 漂移)。②CI 四棒自动发布——push main 且前后端测试双绿后 build-push(GHCR sha+latest 双 tag,gateway/四端一体 web 两镜像,GHA 缓存)→ SSH 部署 B 机(pull + up + 健康断言,2C4G 服务器零构建);CLAUDE.md §1.4 / README / deployment.md / deploy.md 全量改写新流程。
+
+### 🔧 Fixes
+
+- **compose ${REDIS_PASSWORD} 插值收口 --env-file**(0e14dc8):compose 文件内插值只读 --env-file 传入文件、`env_file:` 只注入容器内——CI 部署步无 --env-file 时 redis requirepass 回落缺省口令,与 gateway env_file 注入的强口令 REDIS_URL 错配必连不上;ci.yml deploy 两命令 + deploy.md 全量命令统一 `--env-file deploy/.env.prod`;备份命令改一次性 psql 客户端容器连 A 机 :5433(原 postgres 服务已剥离)。
+- **CI Python job 显式 HF_ENDPOINT 指回原站**(51d1384):引擎 chat.py 对 HF_ENDPOINT 做 setdefault hf-mirror.com(国内开发机纪律),美国 runner 跨洋拉北京镜像致 fastembed 拉模型两源全挂、需 embedding 用例连带超时;job 级 env 显式配置后引擎让位,runner 直连 huggingface.co。
+- **CI uv sync 加 --frozen + 失败重试**(8972ab8):海外 runner 访问 tuna 索引间歇超时致 sync 步偶发 exit2;锁文件入库后 --frozen 免元数据网络往返属语义正确写法,sleep 20 重试一次兜瞬时波动。
+- **部署文档拓扑残留收口**(2622f4c,nightly 评审):上线五步开发机绝对路径改仓库根占位并标注两机执行位;镜像表删 postgres 行(PG 已外置);§七裸机 PG15→18;「服务器零构建」限定 prod 面(场景 B merchant-web 仍本机构建);两机拓扑补 B 机 `docker network create shared-infra` 前置(prod/merchant 两 compose 以 `external: true` 引用,缺网 up 即败);deploy-scaling pg_data 两处外置口径;根 compose 卷注释校准(存量宿主机卷,新环境无此卷)。
+
+---
+
 ## [2.17.0] - 2026-10-19 (v5 本体知识层战役:ADR-0015 四批一次打穿——领域知识单一事实源 + 四实弹收口 + 两起存量发明列实弹;不含 2.16.0 后并行会话提交)
 
 ### ✨ Features
