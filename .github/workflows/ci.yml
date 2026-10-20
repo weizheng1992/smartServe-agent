@@ -46,7 +46,9 @@ jobs:
       # 与本地开发 venv 保持同版本(services/.venv 为 3.14)
       - run: uv python install 3.14
         working-directory: services
-      - run: uv sync --all-extras
+      # --frozen:锁文件已入库,免索引元数据往返(tuna 对海外 runner 间歇超时,
+      # run 39402051669 实证 uv sync exit2+timed out,同一步首跑却过);重试一次兜波动
+      - run: uv sync --frozen --all-extras || { sleep 20; uv sync --frozen --all-extras; }
         working-directory: services
       - name: Ruff (engine-py)
         run: uv run ruff check .
