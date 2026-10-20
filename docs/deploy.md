@@ -56,16 +56,18 @@ cp deploy/.env.prod.example deploy/.env.prod
 vim deploy/.env.prod
 
 # 2) 起基础设施(Redis 先就绪;PG 已由上一步就绪)
-docker compose -f deploy/docker-compose.prod.yml up -d redis
+# ⚠️ compose 文件内 ${REDIS_PASSWORD} 插值只认 --env-file 传入的 .env.prod,
+#    env_file: 只注入容器内——漏了 --env-file Redis 会回落缺省口令,与 gateway 错配
+docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d redis
 
 # 3) 构建应用镜像(首次 5~15 分钟;uv/bun 都走锁文件,可复现)
-docker compose -f deploy/docker-compose.prod.yml build gateway web
+docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml build gateway web
 
 # 4) 数据库迁移(migrate 服务跑完自动退出,gateway 等它成功才启动)
-docker compose -f deploy/docker-compose.prod.yml up -d gateway
+docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d gateway
 
 # 5) 起前端 + 验证
-docker compose -f deploy/docker-compose.prod.yml up -d web
+docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d web
 curl -s http://127.0.0.1:4000/api/health     # {"status":...} 即网关就绪
 curl -s http://127.0.0.1:3000/healthz        # ok
 ```
@@ -77,10 +79,10 @@ curl -s http://127.0.0.1:3000/healthz        # ok
 
 ```bash
 cd deploy
-docker compose -f docker-compose.prod.yml run --rm gateway \
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm gateway \
   sh -c 'cd engine-py && uv run --no-sync python -m engine_py.db.seed && \
                         uv run --no-sync python -m engine_py.db.seed_third_party'
-docker compose -f docker-compose.prod.yml run --rm gateway \
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm gateway \
   sh -c 'cd gateway-py && uv run --no-sync python -m gateway_py.merchant_seed'
 ```
 
@@ -115,19 +117,21 @@ docker compose -f docker-compose.prod.yml run --rm gateway \
 
 **日志**：`docker compose -f deploy/docker-compose.prod.yml logs -f gateway`（其余同理）
 
-**备份**（每日 cron，示例）：
+**备份**（每日 cron，示例；PG 在 A 机，走一次性 psql 客户端容器）：
 
 ```bash
-docker compose -f deploy/docker-compose.prod.yml exec -T postgres \
-  pg_dump -U agent_user agent_platform | gzip > /backup/agent_$(date +%F).sql.gz
+PW=$(grep ^POSTGRES_PASSWORD deploy/.env.prod | cut -d= -f2-)
+docker run --rm -e PGPASSWORD="$PW" docker.m.daocloud.io/library/postgres:18-alpine \
+  pg_dump -h <A机内网IP> -p 5433 -U agent_user agent_platform | gzip > /backup/agent_$(date +%F).sql.gz
+# 商户库同理：库名换 agent_merchant
 ```
 
 **升级发版**：
 
 ```bash
 git pull
-docker compose -f deploy/docker-compose.prod.yml build gateway web
-docker compose -f deploy/docker-compose.prod.yml up -d     # migrate 自动执行
+docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml build gateway web
+docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d     # migrate 自动执行
 ```
 
 **回滚**：`git checkout <上一个tag/commit>` 后重复升级命令；镜像层缓存让回滚重建很快。
@@ -165,7 +169,7 @@ bun run build                                      # 四前端 dist
 - [ ] 四端口站点能打开，客服发消息有 SSE 流式回复（LLM 端点已配）
 - [ ] merchant 真实登录/注册可用（种子已导入）
 - [ ] merchant-admin 数据分析六页出真数（连接的是种子库）
-- [ ] 重启服务器后 `docker compose -f deploy/docker-compose.prod.yml up -d` 一键恢复（卷持久化）
+- [ ] 重启服务器后 `docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d` 一键恢复（卷持久化）
 
 ## 九、场景 B：只部署商户面（merchant / merchant-admin）
 
@@ -173,7 +177,7 @@ bun run build                                      # 四前端 dist
 
 | 文件 | 作用 |
 |---|---|
-| `deploy/docker-compose.merchant.yml` | 编排：PG + Redis + migrate + gateway + `merchant-web`（仅 3005/3006） |
+| `deploy/docker-compose.merchant.yml` | 编排：Redis + migrate + gateway + `merchant-web`（仅 3005/3006；PG 复用 A 机） |
 | `deploy/Dockerfile.web.merchant` | 只构建 `merchant` + `merchant-admin` 两个 dist（turbo filter 带上 ui/types） |
 | `deploy/nginx.merchant.conf` | 只留 3005/3006 两个 server 块，代理参数与全量 nginx.conf 逐字一致 |
 
@@ -182,9 +186,9 @@ bun run build                                      # 四前端 dist
 cp deploy/.env.prod.example deploy/.env.prod && vim deploy/.env.prod
 
 # 2) 一键起（镜像构建 + 迁移 + 启动）
-docker compose -f deploy/docker-compose.merchant.yml up -d --build
+docker compose --env-file deploy/.env.prod -f deploy/docker-compose.merchant.yml up -d --build
 ```
 
 - **网关不裁剪**：商户两面前端的后端 = 同一 gateway（engine/PG/Redis 也是同一套）；web/admin 专属路由闲置无害，代码级裁端点不划算也不做。4000 端口仍暴露，便于直连调试与 SPI 回调。
 - **数据隔离**：project name 是 `smartserve-merchant`，卷名带前缀，与全量版（`smartserve-prod`）的库数据互不串；同一台机器二选一跑，或并存（内存够 8G 才建议并存）。
-- **验证清单**（替换第八节对应项）：`curl :3005/healthz` / `:3006/healthz` 返回 ok；3005 商城可登录加购；3006 登录后悬浮助手提问出真数；`docker compose -f deploy/docker-compose.merchant.yml up -d` 一键恢复。
+- **验证清单**（替换第八节对应项）：`curl :3005/healthz` / `:3006/healthz` 返回 ok；3005 商城可登录加购；3006 登录后悬浮助手提问出真数；`docker compose --env-file deploy/.env.prod -f deploy/docker-compose.merchant.yml up -d` 一键恢复。
