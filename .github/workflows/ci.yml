@@ -33,6 +33,11 @@ jobs:
   python:
     name: Python (ruff / engine 单测 / gateway 契约)
     runs-on: ubuntu-latest
+    env:
+      # runner 在海外:HF 端点必须显式指回原站——引擎代码缺省 setdefault hf-mirror.com,
+      # 美国 runner 拉北京镜像必败(fastembed 两源全挂 → embedding 用例连带超时,
+      # 首跑实证 tests/test_merchant_admin_order_detail.py TimeoutError 而本地 3 passed)
+      HF_ENDPOINT: https://huggingface.co
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
