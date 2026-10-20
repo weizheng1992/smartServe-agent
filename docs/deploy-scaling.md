@@ -105,7 +105,7 @@ docker compose -p smartserve-green -f deploy/docker-compose.prod.yml up -d --bui
 
 - pg_dump 每日 cron（基础版已有）+ **上传异地对象存储**（OSS/COS，`ossutil cp`）
 - 每月一次**恢复演练**：备份文件灌进临时库，跑一遍 seed 对账
-- 卷快照：云盘快照策略（若云服务器）覆盖 `pg_data`
+- 卷快照：云盘快照策略（若云服务器）覆盖 ad-kg 侧 PG 数据卷（PG 已外置，数据卷归 ad-kg 编排管理）
 
 ---
 
@@ -167,7 +167,7 @@ Deployment+Service+HPA/web/worker/TEI/migrate Job/Ingress + README 含 apply
 | compose 概念 | K8s 对应 |
 |---|---|
 | `deploy/docker-compose.prod.yml` 的 service | Deployment（无状态：gateway/web/worker）+ Service + Ingress |
-| `volumes:` | PVC（pg_data → 云盘 StorageClass）/ Secret 挂载 |
+| `volumes:` | PVC（Redis 数据卷等 → 云盘 StorageClass）/ Secret 挂载；PG 外置 ad-kg，不在本编排 |
 | `deploy/.env.prod` | Secret（AI key/JWT/DB 密码）+ ConfigMap（开关类） |
 | `migrate` 一次性服务 | Job（pre-install hook 或独立 Job，滚动前跑） |
 | 副本数手工 | HPA（CPU 60% 目标，min 2 max 10） |

@@ -46,10 +46,10 @@
 # 0) 服务器装 Docker(官方脚本) 后,克隆仓库
 git clone git@github.com:weizheng1992/smartServe-agent.git && cd smartServe-agent
 
-# 0.5) 先起同机 ad-kg 侧 PG18(见 ad-kg 仓库 README;本编排不自带 PG)
-docker network create shared-infra
-cd ~/Desktop/test/ai/ad-kg && docker compose up -d && cd -
-bash scripts/init_external_pg.sh    # 共享 PG 建 agent_user 角色 + 两库(幂等,一次性)
+# 0.5) 先起 ad-kg 侧 PG18(本编排不自带 PG;同机模式在本机、两机模式在 A 机执行)
+docker network create shared-infra   # 两机模式下 B 机也须建(prod.yml/merchant.yml 以 external 引用此网,缺了 up 直接报错)
+cd <ad-kg 仓库根目录> && docker compose up -d && cd -   # 克隆 ad-kg 后进入其根目录,见其 docs/deployment.md
+bash scripts/init_external_pg.sh    # 共享 PG 建 agent_user 角色 + 两库(幂等,一次性;跨机模式见脚本头注)
 
 # 1) 环境变量:复制模板并改密(LLM 端点/PG/Redis 凭据必改;PG 主机名固定 adkg-postgres)
 cp deploy/.env.prod.example deploy/.env.prod
@@ -90,12 +90,12 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm gateway 
 
 ## 三·五、自动发布（push main 即发，2026-10-20 起）
 
-`.github/workflows/ci.yml` 四棒接力：`frontend + python 测试 → build-push（runner 上构建 gateway/web 镜像推 GHCR，sha+latest 双 tag）→ deploy（SSH 到 B 机 pull + up + 健康断言）`。PR 只跑前两棒；push main 全链路。构建在 runner（4C16G）——服务器零构建，弱机也能跑。
+`.github/workflows/ci.yml` 四棒接力：`frontend + python 测试 → build-push（runner 上构建 gateway/web 镜像推 GHCR，sha+latest 双 tag）→ deploy（SSH 到 B 机 pull + up + 健康断言）`。PR 只跑前两棒；push main 全链路。构建在 runner（4C16G）——prod 面（场景 A）服务器零构建；场景 B 的 `merchant-web` 仍走本机构建（CI 流水线未覆盖该 Dockerfile，见 §九）。
 
 - **Secrets 三枚**：`DEPLOY_HOST` / `DEPLOY_USER` / `DEPLOY_SSH_KEY`（部署专用用户：git deploy key + docker 组，无 sudo）
 - **GHCR 首次**：push 成功后到 Packages 页把 `smartserve-gateway` / `smartserve-web` 设 **public**（默认 private，B 机匿名 pull 会 401）；国内直连拉不动走 daocloud 代理 retag
 - **回滚**：镜像带 sha tag，compose 的 `image:` 指回上一个 sha 再 `up -d`，一条命令
-- **两机拓扑**：本机（B 机）只跑 smartServe 全栈；PG 在 A 机（ad-kg 仓库，`DATABASE_URL` 填 A 机内网 IP:5433，安全组只对 B 机放行）——见 ad-kg 仓库 `docs/deployment.md`
+- **两机拓扑**：本机（B 机）只跑 smartServe 全栈；PG 在 A 机（ad-kg 仓库，`DATABASE_URL` 填 A 机内网 IP:5433，安全组只对 B 机放行）——见 ad-kg 仓库 `docs/deployment.md`。B 机首次部署前置：`docker network create shared-infra`（prod.yml/merchant.yml 以 `external: true` 引用，缺网 `up` 直接报错；该网仅满足 compose 声明，gateway 实际走 A 机内网 IP 连 PG）；A 机侧建网 + 起 ad-kg PG 见 §二 0.5 步
 
 ## 四、镜像说明
 
@@ -103,7 +103,9 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm gateway 
 |---|---|---|---|
 | gateway | `deploy/Dockerfile.gateway` | uv workspace 安装 engine-py+gateway-py（含 torch/bge），CMD uvicorn | 4~6GB |
 | web | `deploy/Dockerfile.web` | bun 1.4 构建四个 Vite 应用 → nginx:1.27 四站点静态 | ~200MB |
-| postgres/redis | 官方镜像 | 数据 | 官方体积 |
+| redis | 官方镜像 `redis:7-alpine` | 缓存/事件主干 | 官方体积 |
+
+> PG 不在本编排内：已外置 ad-kg 侧 PG18（`scripts/init_external_pg.sh` 初始化），无对应镜像。
 
 设计细节：
 
@@ -152,7 +154,7 @@ healthcheck + 依赖编排（gateway 等 migrate 成功、web 等 gateway 健康
 ## 七、裸机替代方案（不用 Docker 时）
 
 ```bash
-# 前提: python3.14 + uv、bun 1.4、PostgreSQL15、Redis7 装好(uv 读 services/.python-version 自动装对版本;夜审 B2:与 CI/本地 venv 对齐,旧文 3.12 与实际运行时漂移)
+# 前提: python3.14 + uv、bun 1.4、PostgreSQL 18(自装或指向 adkg 外置实例,建 agent_user 角色与两库)、Redis7 装好(uv 读 services/.python-version 自动装对版本;夜审 B2:与 CI/本地 venv 对齐,旧文 3.12 与实际运行时漂移)
 uv sync --directory services                       # Python 依赖
 bun install                                        # 前端依赖
 bun run build                                      # 四前端 dist
