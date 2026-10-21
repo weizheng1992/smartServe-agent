@@ -9,7 +9,7 @@ import uuid
 import pytest
 from fastapi import Request
 
-from gateway_py.rate_limit import _allow, _client_ip
+from gateway_py.rate_limit import _allow, client_ip
 
 
 @pytest.fixture(autouse=True)
@@ -60,12 +60,12 @@ class TestClientIpExtraction:
     def test_untrusted_peer_ignores_forged_xff(self):
         # 直连 peer 不在可信代理名单 → 伪造 XFF 无效,用真实 peer
         req = self._request("203.0.113.9", "1.1.1.1, 2.2.2.2")
-        assert _client_ip(req) == "203.0.113.9"
+        assert client_ip(req) == "203.0.113.9"
 
     def test_trusted_proxy_takes_rightmost_untrusted_hop(self):
         # 本方反代(127.0.0.1)追加真实客户端 → 取最右非可信跳,左侧伪造段失效
         req = self._request("127.0.0.1", "fake-attacker-hop, 198.51.100.7, 127.0.0.1")
-        assert _client_ip(req) == "198.51.100.7"
+        assert client_ip(req) == "198.51.100.7"
 
 
 class TestRateLimitMiddleware:

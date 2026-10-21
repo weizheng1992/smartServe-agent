@@ -120,8 +120,11 @@ def _trusted_proxies() -> frozenset[str]:
     return frozenset(hop.strip() for hop in raw.split(",") if hop.strip())
 
 
-def _client_ip(request: Request) -> str:
-    """直连 peer 可信(本方反代)才采信 XFF,取最右非可信跳;否则用真实 peer。"""
+def client_ip(request: Request) -> str:
+    """直连 peer 可信(本方反代)才采信 XFF,取最右非可信跳;否则用真实 peer。
+
+    公共名(2026-10-21 配额闸引入跨模块消费方:quota.py/chat.py/merchant.py)——
+    下划线私有名不成公共契约。"""
     peer = request.client.host if request.client else ""
     trusted = _trusted_proxies()
     if peer in trusted:
@@ -156,7 +159,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         try:
             tenant_ctx = getattr(request.state, "tenant", None) or {}
             tenant_id = str(tenant_ctx.get("tenantId") or "").strip()[:64]
-            ip = _client_ip(request)
+            ip = client_ip(request)
             now_ms = int(time.time() * 1000)
 
             keys: list[str] = []

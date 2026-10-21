@@ -628,6 +628,53 @@ class TenantBillingQuota(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
+class MerchantCreditAccount(Base):
+    """商户积分池账户(2026-10-21 用量配额闸):余额唯一真相在 PG。
+
+    游客/登录用户每次 agent 问询由网关闸单语句原子扣 1;懒初始化由闸首触达
+    INSERT ON CONFLICT DO NOTHING 赠 AI_MERCHANT_INITIAL_CREDITS 并落
+    initial_grant 台账。与既有 tenant_billing_quotas(token 观测预算)互不干涉。
+    """
+
+    __tablename__ = "merchant_credit_accounts"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    business_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    balance: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class CreditTransaction(Base):
+    """积分流水(只追加台账,2026-10-21 配额闸)。
+
+    reason ∈ initial_grant | consume | refund | admin_adjust;refund 部分唯一
+    索引(uq_credit_transactions_refund_job,0024)以 ref_job_id 挡双退;consume
+    行 ref_job_id=jobId 供对账;admin_adjust 记平台管理员身份。
+    """
+
+    __tablename__ = "credit_transactions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    business_id: Mapped[str] = mapped_column(Text, nullable=False)
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    ref_job_id: Mapped[str | None] = mapped_column(Text)
+    operator: Mapped[str | None] = mapped_column(Text)
+    # tz-aware(两套钟收口律):台账 isoformat 直通前端,naive 串会被 new Date
+    # 按本地钟解析(实弹:下单时间早 8 小时同款事故),建表即带时区
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+Index("credit_transactions_biz_idx", CreditTransaction.business_id)
+Index(
+    "uq_credit_transactions_refund_job",
+    CreditTransaction.business_id,
+    CreditTransaction.ref_job_id,
+    unique=True,
+    postgresql_where=text("reason = 'refund'"),
+)
+
+
 class Menu(Base):
     """菜单树(13 号 RBAC 三件套):目录/菜单/按钮三级;前端路由按此动态渲染。"""
 

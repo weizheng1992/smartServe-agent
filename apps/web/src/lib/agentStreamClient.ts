@@ -15,6 +15,8 @@ export interface StreamResultEvent {
   tokens?: number;
   /** S2a:用户打断的终局帧(引擎 S2c 收口)—— true 时部分态诚实标注,严禁假装修完 */
   interrupted?: boolean;
+  /** 配额拒机读码(2026-10-21 配额闸,增量键;仅拒时出现,output 为后端权威文案) */
+  quotaCode?: string;
 }
 
 export interface AgentStreamClientCallbacks {

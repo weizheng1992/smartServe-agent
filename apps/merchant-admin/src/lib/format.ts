@@ -33,3 +33,15 @@ export const ORDER_STATUS_META: Record<string, { label: string; cls: string }> =
 export function orderStatusMeta(status: string): { label: string; cls: string } {
   return ORDER_STATUS_META[status] || { label: status, cls: 'bg-slate-100 text-slate-800 border-slate-200' };
 }
+
+/** 积分台账 reason 机读枚举呈现(2026-10-21 用量配额闸)。admin_adjust 在服务端
+ *  落「admin_adjust: 详情」复合形态,拆前缀呈现;未知值原样透传(诚实律)。 */
+export function creditReasonMeta(reason: string | null | undefined): string {
+  if (!reason) return '—';
+  if (reason === 'initial_grant') return '初始赠送';
+  if (reason === 'consume') return '问询消耗';
+  if (reason === 'refund') return '失败退回';
+  if (reason === 'admin_adjust') return '平台调整';
+  if (reason.startsWith('admin_adjust: ')) return `平台调整:${reason.slice('admin_adjust: '.length)}`;
+  return reason;
+}

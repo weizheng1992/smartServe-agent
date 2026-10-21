@@ -1,8 +1,10 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DataTable, FilterBar } from '../../components/crud';
 import { useAdminCrud } from '../../hooks/useAdminCrud';
 import { billingApi } from '../../lib/api';
 import { BillingStatsSummary } from './components/BillingStatsSummary';
+import { CreditsAdjustModal } from './components/CreditsAdjustModal';
+import { CreditsDetailModal } from './components/CreditsDetailModal';
 import { QuotaFormModal } from './components/QuotaFormModal';
 import type { TenantBillingRecord } from './types';
 
@@ -59,6 +61,37 @@ export function BillingPage() {
 
   const [formData, setFormData] = useState<Partial<TenantBillingRecord>>({});
 
+  // ---- 积分池(2026-10-21 用量配额闸)----
+  // 余额按行懒取(进页 N 次 GET 换真余额);undefined = 未取/未知「—」,
+  // null = 服务端明示未开通「未开通」,严禁编 0。
+  const [balances, setBalances] = useState<Record<string, number | null>>({});
+  const balanceRequestedRef = useRef<Set<string>>(new Set());
+  const [adjustTarget, setAdjustTarget] = useState<TenantBillingRecord | null>(null);
+  const [detailTarget, setDetailTarget] = useState<TenantBillingRecord | null>(null);
+
+  const loadBalance = useCallback(async (businessId: string) => {
+    balanceRequestedRef.current.add(businessId);
+    try {
+      const res = await billingApi.getCredits(businessId);
+      if (res.success && res.data) {
+        const balance = res.data.balance ?? null;
+        setBalances((prev) => ({ ...prev, [businessId]: balance }));
+      }
+    } catch {
+      // 传输失败保持「—」未知态,不编造
+    }
+  }, []);
+
+  useEffect(() => {
+    for (const row of paginatedData) {
+      if (!balanceRequestedRef.current.has(row.businessId)) void loadBalance(row.businessId);
+    }
+  }, [paginatedData, loadBalance]);
+
+  const handleCreditsAdjusted = useCallback((businessId: string, balance: number | null) => {
+    setBalances((prev) => ({ ...prev, [businessId]: balance }));
+  }, []);
+
   const handleOpenEditQuota = (item: TenantBillingRecord) => {
     setFormData({ ...item });
     openEdit(item);
@@ -114,6 +147,22 @@ export function BillingPage() {
       ),
     },
     {
+      key: 'credits',
+      header: '积分余额(共享池)',
+      render: (row: TenantBillingRecord) => {
+        const v = balances[row.businessId];
+        if (v === null) {
+          return <span className="text-xs text-slate-400">未开通</span>;
+        }
+        if (v === undefined) {
+          return <span className="text-xs text-slate-300">—</span>;
+        }
+        return (
+          <span className="text-xs font-bold font-mono tabular-nums text-slate-800">{v.toLocaleString()}</span>
+        );
+      },
+    },
+    {
       key: 'sessionsCount',
       header: '会话总数 / 自动解决率',
       render: (row: TenantBillingRecord) => (
@@ -128,13 +177,29 @@ export function BillingPage() {
       header: '操作',
       align: 'right' as const,
       render: (row: TenantBillingRecord) => (
-        <button
-          type="button"
-          onClick={() => handleOpenEditQuota(row)}
-          className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-        >
-          调整配额
-        </button>
+        <div className="flex items-center justify-end gap-1">
+          <button
+            type="button"
+            onClick={() => handleOpenEditQuota(row)}
+            className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
+          >
+            调整配额
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdjustTarget(row)}
+            className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
+          >
+            调整积分
+          </button>
+          <button
+            type="button"
+            onClick={() => setDetailTarget(row)}
+            className="text-xs text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
+          >
+            积分流水
+          </button>
+        </div>
       ),
     },
   ];
@@ -173,6 +238,15 @@ export function BillingPage() {
         formData={formData}
         setFormData={setFormData}
       />
+
+      <CreditsAdjustModal
+        isOpen={!!adjustTarget}
+        onClose={() => setAdjustTarget(null)}
+        record={adjustTarget}
+        onSuccess={handleCreditsAdjusted}
+      />
+
+      <CreditsDetailModal isOpen={!!detailTarget} onClose={() => setDetailTarget(null)} record={detailTarget} />
     </div>
   );
 }

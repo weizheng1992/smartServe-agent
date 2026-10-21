@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RunningDetail, TaskPlan } from 'types';
 import { AgentStreamClient } from '../lib/agentStreamClient';
 import { interruptGeneration, markInterrupted } from '../lib/interruptGeneration';
+import { quotaBubbleText } from '../lib/quotaGuidance';
 import { translateTaskPlan } from '../lib/translateTaskPlan';
 import type { Message, UserSession } from './types';
+import { TOKEN_KEY } from './useAuth';
 
 interface UseChatMessagesProps {
   currentUser: UserSession | null;
@@ -95,8 +97,11 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
     }
   }, [activeThreadId, loadHistory, resetInterruptState]);
 
+  // quotaHint(2026-10-21 配额闸):POST 信封的 quotaCode 增量键(仅配额拒时
+  // 出现)—— 正常路径由 SSE result 帧(output+quotaCode)渲染引导气泡;流
+  // 若中断,凭信封码仍能按码给引导文案,不谎称「未能完成,请重新发送」。
   const triggerStream = useCallback(
-    async (jobId: string) => {
+    async (jobId: string, quotaHint = '') => {
       setRunningDetails([]);
       const client = new AgentStreamClient(jobId);
 
@@ -170,6 +175,32 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
             return;
           }
 
+          // 配额拒终局帧(2026-10-21 配额闸):result 帧携 quotaCode 增量键,
+          // data.output 为后端权威文案 —— 业务拒绝非系统故障:不发「成功履约」
+          // 步骤标注、不落 plan;气泡 = output 照实 + 固定操作建议(文案映射
+          // 收口 lib/quotaGuidance,诚实律:不编造剩余额度)。
+          if (data.quotaCode) {
+            const quotaCode = data.quotaCode;
+            setMessages((prev) => {
+              const next = [...prev];
+              const loaderIdx = next.findIndex((m) => m.jobId === jobId);
+              if (loaderIdx !== -1) {
+                next[loaderIdx] = {
+                  role: 'assistant',
+                  content: quotaBubbleText(quotaCode, data.output || ''),
+                  jobId,
+                };
+              }
+              return next;
+            });
+            fetchThreads();
+            setActivePlan(null);
+            setCurrentStepText('');
+            setIsSubmitting(false);
+            settleStreamTerminal();
+            return;
+          }
+
           setRunningDetails((prev) =>
             prev.map((log) => {
               if (log.resultText === '正在执行中...') {
@@ -208,10 +239,17 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
           // 流中断诚实降级(2026-09-30 夜审):AgentStreamClient 的 error 监听
           // 已显式 close(),不会自动重连 —— 加载气泡必须就地转错误文案,
           // 否则「打字中」永挂且无任何提示(POST 失败路径同款处理)。
+          // 配额拒已定局(信封 quotaHint 在案)而流中断:按码给引导文案,
+          // 不谎称「未能完成可重发」(该回合已被拒绝,重发仍会被拒)。
           setMessages((prev) =>
             prev.map((m) =>
               m.isLoading && m.jobId === jobId
-                ? { role: 'assistant', content: '连接中断，本次回复未能完成，请重新发送或稍后重试。' }
+                ? {
+                    role: 'assistant',
+                    content: quotaHint
+                      ? quotaBubbleText(quotaHint, '')
+                      : '连接中断，本次回复未能完成，请重新发送或稍后重试。',
+                  }
                 : m,
             ),
           );
@@ -276,9 +314,17 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
     setMessages((prev) => [...prev, userMessage, loaderMessage]);
 
     try {
+      // 配额闸 Q5b(2026-10-21):/api/chat 强制 JWT —— 无/坏 token 401
+      // {success:false,error};body.userId 与 JWT sub 不一致 403。token 从
+      // localStorage 单点读入(useAuth TOKEN_KEY);currentUser.id 经
+      // /api/auth/me 静默自愈即 JWT sub,自报字段仅作交叉校验。
+      const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           message: userQuery,
           threadId: activeThreadId,
@@ -304,7 +350,9 @@ export function useChatMessages({ currentUser, activeThreadId, activeBusinessId,
 
       // S2a:登记活跃作业供 stopGeneration 取用
       activeJobIdRef.current = data.jobId;
-      triggerStream(data.jobId);
+      // 配额拒信封增量键(仅拒时出现,jobId 同有值):作 hint 传入,流中断
+      // 时仍能按码给引导;正常路径由 SSE result 帧 output+quotaCode 渲染
+      triggerStream(data.jobId, typeof data.quotaCode === 'string' ? data.quotaCode : '');
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(err);

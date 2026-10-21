@@ -411,6 +411,30 @@ export const guardrailsApi = {
   },
 };
 
+/** 商户积分池台账行(GET /api/billing/credits/{businessId};2026-10-21 用量配额闸)。 */
+export interface CreditTransaction {
+  id: string;
+  /** 正 = 充值/赠送/退回,负 = 消耗/核减 */
+  delta: number;
+  /** 机读枚举(admin_adjust 携「前缀: 详情」复合形态);呈现层经 describeCreditReason 转人话 */
+  reason: string;
+  refJobId: string | null;
+  operator: string | null;
+  createdAt: string | null;
+}
+
+export interface CreditsDetail {
+  businessId: string;
+  /** null = 积分账户未初始化(未开通),诚实呈现,严禁前端编 0 */
+  balance: number | null;
+  transactions: CreditTransaction[];
+}
+
+export interface CreditsAdjustResult {
+  businessId: string;
+  balance: number | null;
+}
+
 /** 8. 多租户账单与 Token 计量 API */
 export const billingApi = {
   getOverview: (tenantId?: string) => {
@@ -424,6 +448,17 @@ export const billingApi = {
   updateQuota: (tenantId: string, quota: number) => {
     // 契约:PUT /api/billing/quota,body 为 {businessId, monthlyLimitTokens}
     return adminApi.put('/api/billing/quota', { businessId: tenantId, monthlyLimitTokens: quota }, tenantId);
+  },
+
+  /** 商户积分池手动充值/核减(2026-10-21 用量配额闸,D4:v1 无支付,台账留审计)。
+   *  delta 可负;服务端 400 诚实拒(reason 空 / delta 0 / 核减穿零),body 原样返回。 */
+  adjustCredits: (businessId: string, delta: number, reason: string) => {
+    return adminApi.post<CreditsAdjustResult>('/api/billing/credits/adjust', { businessId, delta, reason });
+  },
+
+  /** 余额 + 最近流水(新→旧;balance null = 未开通,严禁编 0)。 */
+  getCredits: (businessId: string) => {
+    return adminApi.get<CreditsDetail>(`/api/billing/credits/${encodeURIComponent(businessId)}`);
   },
 };
 

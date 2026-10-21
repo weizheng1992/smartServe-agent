@@ -19,8 +19,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .. import chat_turn, conversation_repo, sse_tail
+from ..rate_limit import client_ip
 from ..sse_tail import streaming_headers
 from ..tenant_scope import optional_staff
+from .auth import _resolve_bearer
 
 router = APIRouter(prefix="/api/chat")
 
@@ -140,14 +142,25 @@ _DEGRADED_APOLOGY = (
 
 @router.post("")
 async def dispatch_chat(body: DispatchChatIn, request: Request):
+    # 身份锚定(2026-10-21 配额闸 Q5b):web 面强制 JWT,身份取 sub —— 此前
+    # body.userId 自报且缺省回落 CUST-8801(种子真客),自报身份下配额额度可
+    # 换壳绕闸/嫁祸他人。无/坏/登出 token → 401(与 auth 面同形 {success,
+    # error});body.userId 与 sub 不一致 → 403(自报字段自此仅作交叉校验)。
+    auth_result = await _resolve_bearer(request.headers.get("authorization"))
+    if isinstance(auth_result, JSONResponse):
+        return auth_result
+    effective_user_id = str(auth_result.get("sub") or "")
+    if body.userId and body.userId != effective_user_id:
+        return JSONResponse(status_code=403, content={"success": False, "error": "userId 与凭证身份不符"})
+
     effective_message = (body.message or body.input or "").strip()
     if not effective_message:
         raise HTTPException(400, "Message is required")
 
     effective_thread_id = body.threadId or _generate_thread_id()
-    effective_user_id = body.userId or "CUST-8801"
     tenant_header = request.headers.get("x-tenant-id") or request.headers.get("x-business-id")
     effective_business_id = body.businessId or tenant_header or "ecommerce"
+    peer_ip = client_ip(request)
 
     # A3(2026-10-06):受理脊(用户行落库 → P1 暂停闸 → run_agent)上收
     # chat_turn 单点,store_chat 同脊共享;sync 降级文案与信封形状留本路由。
@@ -166,6 +179,7 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
                 image_urls=body.imageUrls,
                 store_cart=body.storeCart,
                 sync=True,
+                client_ip=peer_ip,
             )
         except Exception as agent_err:
             print(f"[Chat] agent job raised, graceful degrade: {agent_err!r}")
@@ -187,6 +201,20 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
                 "cards": [],
                 "isHumanActive": True,
             }
+        if turn.get("quotaCode"):
+            # 配额拒(2026-10-21):业务拒绝非系统故障 —— 诚实信封 success=False
+            # + 机读码,不降级道歉、不伪装成功。
+            return {
+                "success": False,
+                "error": turn["output"],
+                "jobId": turn["jobId"],
+                "threadId": effective_thread_id,
+                "userId": effective_user_id,
+                "output": turn["output"],
+                "result": turn["output"],
+                "cards": [],
+                "quotaCode": turn["quotaCode"],
+            }
         output = turn["output"] or "智能客服已为您处理完毕。"
         return {
             "success": True,
@@ -207,6 +235,7 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             image_urls=body.imageUrls,
             store_cart=body.storeCart,
             sync=False,
+            client_ip=peer_ip,
         )
     except Exception as agent_err:
         # async 臂同伞(夜评 2026-10-07 #2):受理脊(append/闸/建作业)任何
@@ -231,12 +260,17 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
             "output": turn["output"],
             "isHumanActive": True,
         }
-    return {
+    envelope = {
         "success": True,
         "jobId": turn["jobId"],
         "threadId": effective_thread_id,
         "userId": effective_user_id,
     }
+    if turn.get("quotaCode"):
+        # 配额拒:流上已有 result 终局帧(quotaCode 增量键);信封同码供前端
+        # 免开流短路渲染引导(增量字段,不动既有键)。
+        envelope["quotaCode"] = turn["quotaCode"]
+    return envelope
 
 
 def _greeting_row(

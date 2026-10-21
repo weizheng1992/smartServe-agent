@@ -24,7 +24,7 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-from .conftest import _TS, create_thread
+from .conftest import _TS, create_thread, user_auth
 
 pytestmark = pytest.mark.usefixtures("seeded")
 
@@ -252,8 +252,10 @@ class TestPauseGate:
         assert body3["cards"] == []
 
         # 顾客入口②:dispatch_chat(异步建作业链)—— 第二轮起静默
+        # (2026-10-21 起 /api/chat 强制 JWT,测试直签顾客 token,sub=uid)
         res2 = await client.post(
             "/api/chat",
+            headers=user_auth(uid),
             json={"message": "还在吗", "threadId": tid, "userId": uid, "businessId": "aurora"},
         )
         assert res2.status_code == 200
@@ -276,6 +278,7 @@ class TestPauseGate:
         # sync 直跑链同闸(同样静默轮)
         res4 = await client.post(
             "/api/chat",
+            headers=user_auth(uid),
             json={"message": "同步链也要闸", "threadId": tid, "userId": uid, "businessId": "aurora", "sync": True},
         )
         body4 = res4.json()
@@ -324,7 +327,9 @@ class TestPauseGate:
 
         # 释放前:闸住
         res = await client.post(
-            "/api/chat", json={"message": "第一条", "threadId": tid, "userId": uid, "businessId": "aurora"}
+            "/api/chat",
+            headers=user_auth(uid),
+            json={"message": "第一条", "threadId": tid, "userId": uid, "businessId": "aurora"},
         )
         assert res.json()["jobId"] == ""
 
@@ -336,7 +341,9 @@ class TestPauseGate:
 
         # 释放后:下一条自然走 AI(建作业,无 isHumanActive 标记)
         res3 = await client.post(
-            "/api/chat", json={"message": "第二条", "threadId": tid, "userId": uid, "businessId": "aurora"}
+            "/api/chat",
+            headers=user_auth(uid),
+            json={"message": "第二条", "threadId": tid, "userId": uid, "businessId": "aurora"},
         )
         assert res3.status_code == 200
         body3 = res3.json()

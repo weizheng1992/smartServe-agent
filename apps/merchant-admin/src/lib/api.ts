@@ -382,6 +382,26 @@ export interface MenuNode {
   children: MenuNode[];
 }
 
+/** 商户积分池台账行(GET /api/admin/credits;2026-10-21 用量配额闸)。 */
+export interface CreditTransaction {
+  id: string;
+  /** 正 = 充值/赠送/退回,负 = 消耗/核减 */
+  delta: number;
+  /** 机读枚举(admin_adjust 携「前缀: 详情」复合形态);呈现层经 creditReasonMeta 转人话 */
+  reason: string;
+  refJobId: string | null;
+  operator: string | null;
+  createdAt: string | null;
+}
+
+/** 服务额度明细(本商户只读;充值/核减走平台面,商户侧 v1 无写路径)。 */
+export interface CreditsDetail {
+  businessId: string;
+  /** null = 积分账户未初始化(未开通),诚实呈现,严禁前端编 0 */
+  balance: number | null;
+  transactions: CreditTransaction[];
+}
+
 export const api = {
   menus: async (): Promise<{ role: string; perms: string[]; menus: MenuNode[] }> =>
     requestJson('/api/admin/analytics/menus'),
@@ -513,6 +533,13 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(p),
       }),
+  },
+
+  /** 服务额度(积分池):本商户只读(余额 + 最近流水;充值/核减由平台管理员
+   *  在 admin 面操作,商户侧 v1 无写路径)。balance null = 未开通,严禁编 0。 */
+  credits: {
+    get: async (): Promise<{ success: boolean; data?: CreditsDetail; error?: string }> =>
+      requestJson('/api/admin/credits'),
   },
 
   /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录;dept/level 为责任人路由人事属性)。 */

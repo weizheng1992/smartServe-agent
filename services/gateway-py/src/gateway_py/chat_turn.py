@@ -22,7 +22,7 @@ from engine_py.approvals import takeover
 from engine_py.interruption import peek_job_owner, request_cancel
 from engine_py.run_agent import AgentJobInput, run_agent
 
-from . import conversation_repo
+from . import conversation_repo, quota
 
 # 后台受理任务持有表(async-1 作业蒸发收口,2026-10-18):asyncio 对 task 是
 # 弱引用 —— 即弃 create_task 可被 GC 中途打断,异常无人 retrieve 只在 GC 时
@@ -65,17 +65,35 @@ def _on_background_turn_done(job_id: str):
 
 class ChatTurnResult(TypedDict):
     """受理脊返回契约(夜评 2026-10-07 smell 清尾):两路由(chat/merchant)与
-    测试桩共以此为准 —— 旧五键裸 dict 无形状,键名拼错无检查。"""
+    测试桩共以此为准 —— 旧五键裸 dict 无形状,键名拼错无检查。
+    quotaCode:配额拒时携机读码(QUOTA_*),放行/暂停/正常轮为空串(2026-10-21 配额闸)。"""
 
     paused: bool
     jobId: str
     output: str
     cards: list
     state: dict | None
+    quotaCode: str
 
 
 def generate_job_id(hex_len: int = 9) -> str:
     return f"job_{int(time.time() * 1000)}_{uuid.uuid4().hex[:hex_len]}"
+
+
+async def _emit_quota_rejection(job_id: str, verdict) -> None:
+    """配额拒终局帧:result 是尾认终局帧(stop_on),quotaCode 增量键承载机器
+    语义 —— web 异步臂在流上收;store/chat 同步臂走 POST 信封同码。写入失败
+    只留痕不阻断(同步臂信封仍会送达)。"""
+    try:
+        from engine_py.event_bus import publish_agent_event
+
+        await publish_agent_event(
+            job_id,
+            "result",
+            {"output": verdict.message, "cards": [], "quotaCode": verdict.code},
+        )
+    except Exception as err:
+        print(f"[ChatTurn] 配额拒终局帧写入失败 {job_id}: {err}")
 
 
 def cancel_chat_job_gate(
@@ -122,16 +140,40 @@ async def accept_chat_turn(
     store_cart: list[dict] | None = None,
     sync: bool = True,
     job_id: str | None = None,
+    client_ip: str | None = None,
 ) -> ChatTurnResult:
-    """受理一回合:落用户行 → 暂停闸 → 跑引擎。
+    """受理一回合:暂停闸 → 配额闸 → 落用户行 → 跑引擎。
 
-    返回 {"paused", "jobId", "output", "cards", "state"}:
+    返回 {"paused", "jobId", "output", "cards", "state", "quotaCode"}:
     - paused=True 时 jobId 为空串、state 为 None(output = 暂停闸文案);
+    - 配额拒时 quotaCode 携机读码,用户行不落、作业不建(D9);
     - sync=False 时仅受理(后台任务),output/cards 为空、state 为 None;
     - sync=True 且非 paused 时 state 为 run_agent 终态(调用方可取 cards 等)。
     异常自然上抛,通道错误语义留路由。
     """
     job_id = job_id or generate_job_id()
+
+    # 闸序(2026-10-21 配额闸):暂停闸先行 —— 接管期零 LLM 成本,不占问询
+    # 额度,用户消息照常落库(接管语义不变);配额闸次之,拒的轮次不落用户行
+    # (拒绝的问询不在历史里凭空出现)。
+    paused, paused_output = await takeover.paused_gate(thread_id)
+    if not paused:
+        verdict = await quota.check_and_consume(
+            user_id=user_id,
+            business_id=business_id,
+            client_ip=client_ip or "",
+            job_id=job_id,
+        )
+        if not verdict.allowed:
+            await _emit_quota_rejection(job_id, verdict)
+            return {
+                "paused": False,
+                "jobId": job_id,
+                "output": verdict.message,
+                "cards": [],
+                "state": None,
+                "quotaCode": verdict.code,
+            }
 
     await conversation_repo.append_message(
         {
@@ -144,9 +186,8 @@ async def accept_chat_turn(
         }
     )
 
-    paused, paused_output = await takeover.paused_gate(thread_id)
     if paused:
-        return {"paused": True, "jobId": "", "output": paused_output or "", "cards": [], "state": None}
+        return {"paused": True, "jobId": "", "output": paused_output or "", "cards": [], "state": None, "quotaCode": ""}
 
     job = AgentJobInput(
         jobId=job_id,
@@ -161,7 +202,7 @@ async def accept_chat_turn(
         task = asyncio.create_task(run_agent(job))
         _ASYNC_TURNS.add(task)
         task.add_done_callback(_on_background_turn_done(job_id))
-        return {"paused": False, "jobId": job_id, "output": "", "cards": [], "state": None}
+        return {"paused": False, "jobId": job_id, "output": "", "cards": [], "state": None, "quotaCode": ""}
 
     state = await run_agent(job)
     return {
@@ -170,4 +211,5 @@ async def accept_chat_turn(
         "output": state.get("output") or "",
         "cards": state.get("cards") or [],
         "state": state,
+        "quotaCode": "",
     }

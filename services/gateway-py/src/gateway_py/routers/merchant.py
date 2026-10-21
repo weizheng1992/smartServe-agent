@@ -37,6 +37,7 @@ from ..conversation_repo import (
     list_conversations,
     publish_thread_message,
 )
+from ..rate_limit import client_ip
 from ..sse_tail import frame_id_from_timestamp as _sse_frame_id
 from ..sse_tail import last_event_id_from, streaming_headers, tail_pubsub
 from ..tenant_scope import (
@@ -487,7 +488,7 @@ class StoreChatIn(BaseModel):
 
 
 @router.post("/api/store/chat")
-async def store_chat(body: StoreChatIn):
+async def store_chat(body: StoreChatIn, request: Request):
     effective_message = (body.message or body.input or "").strip()
     image_urls = [u for u in (body.imageUrls or []) if isinstance(u, str) and u.strip()]
     # 空文本但有图放行(兜底文案由前端补,对齐 /api/chat 语义);两者皆空才拒
@@ -495,9 +496,16 @@ async def store_chat(body: StoreChatIn):
         return JSONResponse(status_code=400, content={"success": False, "error": "消息内容不能为空"})
 
     business_id = body.businessId or "aurora"
-    user_id = body.userId or "CUST-8801"
+    # 身份必报(2026-10-21 配额闸):缺省回落 CUST-8801 会拿种子真客的登录日顶
+    # (嫁祸面)——与 cancel 闸同律,计费动作严禁落缺省身份。3005 自报立约不变
+    # (前端恒带 user.id:guest-* / CUST-*),但不再替匿名调用者冒领身份。
+    if not (body.userId or "").strip():
+        return JSONResponse(status_code=400, content={"success": False, "error": "userId 必填"})
+    user_id = body.userId.strip()
     thread_id = body.threadId or f"merchant_thread_{user_id}_{business_id}"
     job_id = f"job_{_ts_ms()}_{uuid4_hex(7)}"
+    # 配额闸 IP 采信与 rate_limit 同法(可信代理才解析 XFF,伪造旋转不了 IP 桶)
+    peer_ip = client_ip(request)
 
     # 注册闸 raise 型(架构审查 #1):置于兜底 except 作用域之外,GateError 直穿
     await ensure_tenant_registered(business_id)
@@ -516,6 +524,7 @@ async def store_chat(body: StoreChatIn):
             store_cart=[it for it in (body.storeCart or []) if isinstance(it, dict)],
             sync=True,
             job_id=job_id,
+            client_ip=peer_ip,
         )
         if turn["paused"]:
             return {
@@ -528,6 +537,22 @@ async def store_chat(body: StoreChatIn):
                 "result": turn["output"],
                 "cards": [],
                 "isHumanActive": True,
+            }
+        if turn.get("quotaCode"):
+            # 配额拒(2026-10-21):业务拒绝非系统故障 —— 诚实信封 success=False
+            # + 机读码(3005 面 sync 直返,SSE 流不承载 agent 帧,前端按码渲染
+            # 引导;用户行未落库,消息历史不出现被拒问询)。
+            return {
+                "success": False,
+                "error": turn["output"],
+                "messageId": "",
+                "jobId": job_id,
+                "threadId": thread_id,
+                "userId": user_id,
+                "output": turn["output"],
+                "result": turn["output"],
+                "cards": [],
+                "quotaCode": turn["quotaCode"],
             }
 
         state = turn["state"] or {}

@@ -56,6 +56,10 @@ def _bootstrap_sealed_env() -> None:
     # (契约全桩),意外真拨则 127.0.0.1:1 即时连接拒绝,失败点显式可见
     os.environ.setdefault("AI_BASE_URL", "http://127.0.0.1:1/unavailable")
     os.environ.setdefault("AI_MODEL", "unavailable-in-tests")
+    # 配额闸关断(2026-10-21):密封套件大量复用同一 user×business 直呼 /api/chat
+    # 与 /api/store/chat,日顶/游客额会把既有契约例打成配额拒;闸专项测试显式
+    # monkeypatch AI_QUOTA_GATE=1 + 唯一键自隔离
+    os.environ.setdefault("AI_QUOTA_GATE", "0")
     if not _CONTAINERS and os.environ.get("AGENT_ALL_TEST_USE_EXTERNAL") != "1":
         # Docker Desktop(macOS)默认 context 指向 ~/.docker/run/docker.sock,该路径挂进
         # ryuk 容器不通(Desktop 仅对 /var/run/docker.sock 做特权 socket 转发)→ ryuk
@@ -283,3 +287,11 @@ async def wait_for(predicate, timeout: float = 5.0, interval: float = 0.05) -> N
             return
         await asyncio.sleep(interval)
     raise AssertionError(f"waitFor timed out after {timeout}s")
+
+
+def user_auth(user_id: str) -> dict:
+    """顾客 JWT 头(2026-10-21 /api/chat 强制凭证):sub=user_id 直签,免走密码
+    登录链路(与 staff_auth fixture 同纪律 —— 这里只关心「已登录」这一身份事实)。"""
+    from gateway_py.routers.auth import issue_token
+
+    return {"Authorization": f"Bearer {issue_token(user_id, f"{user_id}@chat.test")}"}

@@ -243,6 +243,20 @@ async def analytics_menus(ctx: StaffContext = Depends(staff_context)):
     return {"success": True, "role": ctx["role"], "perms": ctx["perms"], "menus": tree}
 
 
+@router.get("/api/admin/credits")
+async def admin_credits(ctx: StaffContext = Depends(staff_context)):
+    """本商户积分余额 + 最近流水(2026-10-21 配额闸,merchant-admin 只读仪表盘)。
+
+    员工 JWT + 租户上下文闸(staff_context),租户取身份推导值——**无跨租户
+    查询参数**,普通员工与老板同权只读(余额非敏感分级数据);充值/核减走
+    平台面 POST /api/billing/credits/adjust(crud.py),商户侧 v1 无写路径。"""
+    from engine_py.credits import get_balance, recent_transactions
+
+    balance = await get_balance(ctx["business_id"])
+    transactions = await recent_transactions(ctx["business_id"])
+    return {"success": True, "data": {"businessId": ctx["business_id"], "balance": balance, "transactions": transactions}}
+
+
 @router.post("/api/admin/analytics/roles/{role}/menus")
 async def set_role_menus(role: str, request: Request, ctx: StaffContext = Depends(staff_context)):
     """保存角色菜单+按钮权限分配(0013:按钮权限点随 role_menus 动态生效)。"""

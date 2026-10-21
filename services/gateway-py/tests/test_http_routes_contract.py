@@ -18,7 +18,7 @@ from typing import ClassVar
 
 import pytest
 
-from .conftest import _TS, CONTRACT_APPROVAL, CONTRACT_THREAD, create_thread
+from .conftest import _TS, CONTRACT_APPROVAL, CONTRACT_THREAD, create_thread, user_auth
 
 
 @pytest.fixture()
@@ -1539,6 +1539,7 @@ class TestChatImagePersistence:
         image_urls = ["/api/uploads/contract_img_a.png", "/api/uploads/contract_img_b.png"]
         res = await client.post(
             "/api/chat",
+            headers=user_auth("CUST-8801"),  # 2026-10-21 起 /api/chat 强制 JWT
             json={
                 "message": "请查看我上传的图片",
                 "threadId": thread_id,

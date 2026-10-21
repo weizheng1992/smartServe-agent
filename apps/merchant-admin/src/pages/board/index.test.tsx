@@ -22,6 +22,13 @@ vi.mock('@/lib/api', () => {
     AskStreamError,
     api: {
       ask: vi.fn(),
+      // 服务额度只读卡(2026-10-21 配额闸)挂看板页:桩给最小成功体,卡内自消化
+      credits: {
+        get: vi.fn(async () => ({
+          success: true,
+          data: { businessId: 'aurora', balance: 500, transactions: [] },
+        })),
+      },
     },
   };
 });

@@ -8,6 +8,7 @@
 // 取回 600s 内缓存的旧帧。重放与手动刷新互斥(busy 闸,慢流>60s 严禁重叠 ask)。
 
 import { ResultCard } from '@/components/ResultCard';
+import { CreditsCard } from '@/components/credits-card';
 import type { SessionFrame } from '@/lib/analytics-frames';
 import { type AskSession, createAskSession, useAskSession } from '@/lib/ask-session';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -103,6 +104,10 @@ export default function BoardPage() {
           </Button>
         </div>
       </div>
+
+      {/* 服务额度(积分)只读卡(2026-10-21 用量配额闸):常驻看板即工作台首页,
+          余额+最近流水一屏可见;不加菜单(RBAC 菜单树在服务端种子)。 */}
+      {!bigScreen && <CreditsCard />}
 
       {pins.length === 0 && (
         <div className="rounded-xl border border-dashed border-zinc-300 px-4 py-10 text-center text-xs text-zinc-400">

@@ -24,4 +24,5 @@
 ## 4. 测试
 
 - vitest 与被测文件同目录(`bun run test`);Playwright e2e 六册(`e2e/`,复用运行中的 3005 + 4000;跨册身份注入走 `addInitScript` **参数字面量,严禁引用 Node 闭包常量**)。
+- 宿主 env 须 `AI_QUOTA_GATE=0`(用量配额闸,2026-10-21;`.env.example` 已缺省关):闸开时 e2e 复用 profile 的 guest-* 会撞游客终身 10 次、CI 绿锚慢性翻红。
 - e2e 已钉契约:游客/顾客身份隔断(chatCartStorefront)、订单状态文案(merchantApp:75「待发货」)、/admin 引导卡与 401 闸(merchantConsoleAudit)。

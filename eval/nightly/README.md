@@ -19,7 +19,7 @@
     cd services/gateway-py && uv run python ../../eval/nightly/run_nightly.py
     NIGHTLY_SMOKE=1 …   # 彩排切片(2 客服 + 1 数据 + 2 菜单,约 6 次 LLM 调用)
 
-前置:docker(PG/Redis)+ 网关 4000(--env-file 仓库根 .env)+ 种子在库。
+前置:docker(PG/Redis)+ 网关 4000(--env-file 仓库根 .env)+ 种子在库。宿主网关须 AI_QUOTA_GATE=0(配额闸,2026-10-21;仓库 .env.example 模板已缺省关,launchd 自启行亦有保险前缀)——130 轮/夜会被 AI_USER_DAILY 日顶掐死、aurora 池慢性耗尽。
 栈不可用退出码 2,不产假红。
 
 产出:`results/<时间戳>/{report.html, results.jsonl}`(gitignore);失败自动入坏例池

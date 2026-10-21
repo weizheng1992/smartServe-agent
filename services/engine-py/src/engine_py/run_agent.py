@@ -32,6 +32,7 @@ from sqlalchemy import select, text
 from .badcase.intent_signals import record_claim_mismatch_if_any
 from .badcase.pool import SOURCE_CIRCUIT_BREAKER, record_badcase_signal
 from .cards import CardSynthesizer
+from .credits import refund_credit
 from .db import BusinessConfigRow, SessionMetric, Thread, get_session
 from .event_bus import emit_job_result, emit_status, publish_agent_event
 from .graph import build_graph
@@ -58,6 +59,16 @@ from .triage import rule_matchers
 from .triage.intent_registry import CONSULT_SIDE_INTENTS
 from .triage.rule_matchers import is_quick_greeting
 from .vision import normalize_image_urls
+
+# 积分退回白名单(2026-10-21 配额闸 D2):降级道歉族 = 用户只收到道歉、未获得
+# 任何真实答案的技术失败;interrupted(用户主动停)/ 子任务 failed(真实处理
+# 已发生)/ waiting_approval(HITL 挂起)不退。
+_REFUNDABLE_STATUSES = frozenset({
+    "llm_circuit_breaker",
+    "llm_quota_exhausted",
+    "graph_error_degraded",
+    "circuit_breaker",
+})
 
 
 class AgentJobInput(BaseModel):
@@ -369,6 +380,14 @@ async def _settle_turn(
                     )
                 )
                 await session.commit()
+
+            # 积分退回(2026-10-21 配额闸 D2):降级道歉族 = 未产出有效答案的
+            # 技术失败(用户只收到道歉,问询积分原路退回;refund 部分唯一索引
+            # 挡双退)。用户主动中断(自己的选择)与子任务级 failed(真实处理
+            # 已发生,有诚实答复)不退。
+            if resolution_status in _REFUNDABLE_STATUSES:
+                if await refund_credit(business_id, job_id=job_id):
+                    print(f"[Quota] 技术失败退回积分: job={job_id} biz={business_id} status={resolution_status}")
 
             # 📥 熔断信号入坏例池(wayfinder 006):被熔断打断的会话以会话为评审
             # 单位入池(先验 suspected_defect,人审定性,见 badcase/pool.py)。

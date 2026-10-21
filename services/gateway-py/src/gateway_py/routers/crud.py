@@ -7,6 +7,7 @@ import time
 import uuid
 
 from engine_py.badcase.pool import SOURCE_PERSONA_FACT_DELETED, record_badcase_signal
+from engine_py.credits import adjust_credit, get_balance, recent_transactions
 from engine_py.db import (
     EvalRunRecordRow,
     GuardrailRule,
@@ -19,6 +20,7 @@ from engine_py.db import (
     get_session,
 )
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.orm import defer
@@ -384,6 +386,48 @@ async def update_quota(body: QuotaIn, _platform: StaffIdentity = Depends(require
             "billingStatus": "normal",
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# credits 商户积分池(2026-10-21 用量配额闸,spec .scratch/agent-usage-quota)
+# ---------------------------------------------------------------------------
+class CreditAdjustIn(BaseModel):
+    businessId: str
+    delta: int
+    reason: str
+
+
+@router.post("/api/billing/credits/adjust")
+async def adjust_credits(body: CreditAdjustIn, platform: StaffIdentity = Depends(require_platform_admin)):
+    """平台管理员手动充值/核减(D4:v1 无支付,台账留审计)。负 delta 带余额
+    守卫防穿零(400 诚实拒绝);余额与台账同事务(engine_py.credits 单点)。"""
+    if not body.reason.strip():
+        return JSONResponse(status_code=400, content={"success": False, "error": "reason 必填(审计口径)"})
+    if body.delta == 0:
+        return JSONResponse(status_code=400, content={"success": False, "error": "delta 不能为 0"})
+    ok = await adjust_credit(
+        body.businessId,
+        body.delta,
+        # 台账 reason 是机读枚举位(refund 唯一索引按 reason 过滤);人工详情
+        # 以「前缀: 详情」复合形态随行,审计两全
+        reason=f"admin_adjust: {body.reason.strip()}",
+        operator=platform.email,
+    )
+    if not ok:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "核减后余额不能为负(或商户账户不可用)"},
+        )
+    balance = await get_balance(body.businessId)
+    return {"success": True, "data": {"businessId": body.businessId, "balance": balance}}
+
+
+@router.get("/api/billing/credits/{business_id}")
+async def credit_detail(business_id: str, _platform: StaffIdentity = Depends(require_platform_admin)):
+    """余额 + 最近流水(平台管理员跨租户查)。未初始化商户余额诚实 null。"""
+    balance = await get_balance(business_id)
+    transactions = await recent_transactions(business_id)
+    return {"success": True, "data": {"businessId": business_id, "balance": balance, "transactions": transactions}}
 
 
 # ---------------------------------------------------------------------------

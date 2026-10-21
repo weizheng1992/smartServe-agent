@@ -10,6 +10,8 @@ from httpx import ASGITransport, AsyncClient
 
 from gateway_py.main import app
 
+from .conftest import user_auth
+
 TENANT = {"x-tenant-id": "ecommerce"}
 APOLOGY_FRAGMENT = "上游模型波动"
 
@@ -34,7 +36,9 @@ def raise_accept(monkeypatch):
 
 
 async def _post(client: AsyncClient, body: dict):
-    return await client.post("/api/chat", headers=TENANT, json=body)
+    # /api/chat 强制凭证(2026-10-21 配额闸 Q5b):测试直签顾客 JWT
+    headers = {**TENANT, **user_auth("u_umbrella")}
+    return await client.post("/api/chat", headers=headers, json=body)
 
 
 async def test_sync_arm_degrades_with_apology(client, raise_accept):

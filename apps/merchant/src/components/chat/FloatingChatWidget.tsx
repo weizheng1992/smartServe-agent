@@ -5,6 +5,7 @@ import { Button, Input, Loader2, MessageText, Paperclip, RichCardRenderer, X } f
 import { useCurrentUser } from '../../context/UserContext';
 import { postJson, qs, requestJson, uploadJson } from '../../lib/api';
 import { STOREFRONT_CHAT_OPEN_EVENT, type StorefrontChatOpenDetail } from '../../lib/chatBridge';
+import { quotaReplyText } from '../../lib/quotaGuidance';
 import { mergeCartSnapshot, readStoreCart, writeStoreCart } from '../../lib/storeCart';
 import { MERCHANT_ID, activeThreadKey, chatMsgsKey, merchantThreadId } from '../../lib/tenant';
 import { getGreetingForRoute } from './routeGreetingConfig';
@@ -536,6 +537,25 @@ export function FloatingChatWidget() {
           cartItemCount: readStoreCart().length,
         },
       });
+
+      // 配额拒(2026-10-21 配额闸):信封 success=false + quotaCode(机读码)
+      // + output(后端权威文案),HTTP 200 —— 业务拒绝非系统故障,渲染引导
+      // 气泡后收口;被拒问询的用户行未落库(服务端 D9),不 fetchHistory。
+      // 文案映射收口 lib/quotaGuidance:游客(guest-*)带注册/登录引导,其余
+      // 照实显示 output(诚实律:不编造剩余额度)。
+      if (data.quotaCode) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `quota_${Date.now()}`,
+            role: 'assistant',
+            text: quotaReplyText(String(data.quotaCode), data.output || data.result || '', user.id),
+            cards: [],
+            time: nowHM(),
+          },
+        ]);
+        return;
+      }
 
       // 人工接管静默轮(2026-09-29 罐头防复读):闸内非首轮 isHumanActive=true
       // 且无 output —— 顾客消息已落库,坐席稍后真人回复,不插占位气泡、
