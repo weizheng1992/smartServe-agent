@@ -6,6 +6,13 @@
 # 三 service 逐字同构,改版须两文件同批;外部 PG 为同机 adkg PG18(见 prod.yml 头注)。
 name: smartserve-merchant
 
+# 日志轮转(2026-10-21):与 prod.yml 同批同构,json-file 3×10m 封顶防小盘吃满
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 networks:
   shared-infra:
     external: true
@@ -21,6 +28,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *default-logging
     restart: unless-stopped
     # ports: ["6379:6379"]
 
@@ -69,6 +77,7 @@ services:
       timeout: 10s
       retries: 10
       start_period: 180s   # 首启需下载 bge 本地 embedding 模型(卷缓存后重启秒过)
+    logging: *default-logging
     restart: unless-stopped
 
   merchant-web:
@@ -81,6 +90,7 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
 volumes:

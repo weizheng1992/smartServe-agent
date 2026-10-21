@@ -7,6 +7,14 @@
 
 name: smartserve-prod
 
+# 日志轮转(2026-10-21):json-file 缺省无界,B 机小盘会被 gateway 的 print 日志
+# 慢性吃满;单容器 3×10m 封顶,历史用 docker compose logs --tail 查
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 networks:
   shared-infra:
     external: true
@@ -22,6 +30,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *default-logging
     restart: unless-stopped
     # ports: ["6379:6379"]
 
@@ -73,6 +82,7 @@ services:
       timeout: 10s
       retries: 10
       start_period: 180s   # 首启需下载 bge 本地 embedding 模型(卷缓存后重启秒过)
+    logging: *default-logging
     restart: unless-stopped
 
   web:
@@ -88,6 +98,7 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
 volumes:

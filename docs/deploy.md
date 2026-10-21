@@ -117,7 +117,16 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm gateway 
 
 ## 五、运维
 
-**日志**：`docker compose -f deploy/docker-compose.prod.yml logs -f gateway`（其余同理）
+**日志**（两层，2026-10-21 起容器日志 3×10m 轮转封顶）：
+
+```bash
+# ① 容器 stdout(print 日志,全部带 [模块] 前缀):实时跟
+docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml logs -f --tail=100 gateway
+# 常用前缀过滤:[Quota] 配额闸(fail-open/退回) [RateLimit] 限流 [Chat]/[ChatTurn] 受理与降级 [LLM Quota]/[LLM Circuit] 上游额度与熔断
+docker logs <gateway 容器> 2>&1 | grep -E "\[Quota\]|\[RateLimit\]"
+```
+
+② 结构化数据不走 stdout,落 A 机 PG(agent_platform 库),看板或 psql 直查:`llm_call_logs`(每次 LLM 调用:token/延迟/node 归因)、`session_metrics`(每回合聚合)、`credit_transactions`(积分台账逐笔)、`intent_logs`——admin(3001) 系统日志页与 billing 页是这两类的看板消费方。
 
 **备份**（每日 cron，示例；PG 在 A 机，走一次性 psql 客户端容器）：
 
