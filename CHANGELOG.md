@@ -4,6 +4,23 @@
 
 ---
 
+## [2.19.0] - 2026-10-21 (agent 用量配额闸上线:游客终身额度 + 商户积分池 + 身份锚定;部署管道本土化两修与容器日志轮转)
+
+### ✨ Features
+
+- **agent 用量配额闸**(a8e3c6f,spec `.scratch/agent-usage-quota`):游客 guest-* 终身 10 次(`AI_GUEST_QUOTA`)+ 同 IP 每日 30 次(`AI_GUEST_IP_DAILY`)+ 登录用户每日 5 次(`AI_USER_DAILY`),所有问询同扣所在商户积分池(Q6:免费层=商户让利)。闸序 = Redis Lua 全有或全无计数臂(拒绝不占名额,DECR 自愈)→ `engine_py.credits` PG 单语句守卫扣减(资金路径异常如实上抛,不静默放行);0024 迁移落 `merchant_credit_accounts`/`merchant_credit_transactions` 双表。机器语义经 result 终局帧 `quotaCode` 增量键承载(Q4 修订:error 帧非终局会挂流),sync 直返臂信封同码 `success=False`;admin 积分台账 + 平台调额弹窗、merchant-admin 只读积分卡、web/merchant 按码渲染诚实引导文案。**身份锚定同批收口**:`POST /api/chat` 强制 Bearer JWT(`sub` 交叉校验不符 403,自报身份缺省回落 CUST-8801 退役——否则额度可换壳绕闸/嫁祸真客)、`POST /api/store/chat` userId 必报 400;`AI_QUOTA_GATE=0` 应急阀(密封测试套件缺省关),身份闸恒开不受其关断。
+
+### 🔧 Fixes
+
+- **部署管道本土化两修**(78c11de):①migrate 服务补 `image:` 行(与 gateway 同镜像,alembic 命令覆盖)——此前无 image 则 compose 在部署机本地 build,弱机(2C2G)必炸,B 机实弹曾以手工预打标 `smartserve-prod-migrate` 绕过,本批固化进编排;②CI 部署步以「南大代理预拉 + retag」取代 compose pull 直连——国内直连 ghcr.io 拉 GB 级 layer 必断流(B 机实证 2.84/4.34/5.05GB 三连 short read EOF),代理拉完 retag 回 ghcr.io 正规名,compose 镜像源语义单一。
+- **夜评四修**(0947940,nightly 2026-10-21 双轴评审):quota 计数臂 fail-open 裸 print 升 `logging.warning` 并补 job/biz/user 上下文(spec D7 ERROR 日志 + observability §1.1 上下文律);`_resolve_bearer` 转正 `resolve_bearer`(跨模块引私有名,同批 `client_ip` 转正先例);merchant-admin CreditsCard 失败文案走 `errMsgOf` 单点——403 `{"detail"}` 形的服务端诚实文案此前被 `body.error || 兜底话` 单读法吞掉,测试桩改 `importOriginal` 保留真模块导出并补 detail 形契约钉;quota 放行判定惰性单例改模块常量 `ALLOW_OK`;server-gateway.md §1.1 补登配额双闸登记。
+
+### 🐛 其他
+
+- **容器日志轮转**(0babf85):docker json-file 缺省无界,redis/migrate/gateway/web(print 日志主体)慢性写满 B 机小盘;prod/merchant 两编排同批加 `x-logging` 锚(3×10m 封顶,migrate 一次性任务不配);docs/deploy.md §五运维补两层日志口径(容器 stdout 前缀过滤 + 结构化落库四表的看板/psql 消费)。
+
+---
+
 ## [2.18.0] - 2026-10-20 (部署拓扑改造:PG15 退役统一 adkg PG18 + CI 自动发布流水线两机上线;CI 三连修复与部署文档残留收口)
 
 ### ✨ Features
