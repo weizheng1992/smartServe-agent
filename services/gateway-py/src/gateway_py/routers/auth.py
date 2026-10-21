@@ -92,7 +92,7 @@ async def require_claims(authorization: str | None) -> dict:
     return claims
 
 
-async def _resolve_bearer(authorization: str | None) -> dict | JSONResponse:
+async def resolve_bearer(authorization: str | None) -> dict | JSONResponse:
     """校验 Bearer JWT;坏 token / 黑名单 token → 401 响应,否则返回 claims。"""
     try:
         return await require_claims(authorization)
@@ -189,7 +189,7 @@ async def register(body: RegisterIn):
 
 @router.post("/api/auth/logout")
 async def logout(authorization: str | None = Header(None)):
-    claims = await _resolve_bearer(authorization)
+    claims = await resolve_bearer(authorization)
     if isinstance(claims, JSONResponse):
         return claims
 
@@ -200,7 +200,7 @@ async def logout(authorization: str | None = Header(None)):
 
 @router.get("/api/auth/me")
 async def me(authorization: str | None = Header(None)):
-    claims = await _resolve_bearer(authorization)
+    claims = await resolve_bearer(authorization)
     if isinstance(claims, JSONResponse):
         return claims
 

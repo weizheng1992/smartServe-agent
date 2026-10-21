@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import os
 from dataclasses import dataclass
 
@@ -34,9 +35,6 @@ _IP_MSG = "当前网络环境的免费试用额度已用完，请注册或登录
 _USER_DAILY_MSG = "您今日的问询次数已达上限，请明天再试。"
 _EXHAUSTED_MSG = "当前商户的服务额度已用尽，请联系商户充值后继续使用。"
 
-_ALLOWED = None  # 惰性单例(GateVerdict frozen dataclass)
-
-
 @dataclass(frozen=True)
 class GateVerdict:
     allowed: bool
@@ -44,11 +42,7 @@ class GateVerdict:
     message: str = ""
 
 
-def allowed() -> GateVerdict:
-    global _ALLOWED
-    if _ALLOWED is None:
-        _ALLOWED = GateVerdict(True)
-    return _ALLOWED
+ALLOW_OK = GateVerdict(True)  # 放行判定单例(frozen,只此一份)
 
 
 def gate_enabled() -> bool:
@@ -114,7 +108,7 @@ async def _check_counters(*, user_id: str, business_id: str, client_ip: str) -> 
                 return GateVerdict(False, QUOTA_GUEST_LIMIT, _GUEST_MSG)
             return GateVerdict(False, QUOTA_USER_DAILY, _USER_DAILY_MSG)
         return GateVerdict(False, QUOTA_IP_LIMIT, _IP_MSG)
-    return allowed()
+    return ALLOW_OK
 
 
 async def check_and_consume(
@@ -126,14 +120,20 @@ async def check_and_consume(
     额时的竞态窗口(peek 通过后他人耗尽)可忽略,扣减侧原子守卫兜底。
     """
     if not gate_enabled():
-        return allowed()
+        return ALLOW_OK
     try:
         verdict = await _check_counters(user_id=user_id, business_id=business_id, client_ip=client_ip)
         if not verdict.allowed:
             return verdict
     except Exception as err:
         # fail-open:计数是反滥用臂;Redis 与事件主干同生共死,它挂时池扣减仍兜底
-        print(f"[Quota] Redis 计数臂故障,fail-open 放行: {err}")
+        logging.getLogger(__name__).warning(
+            "[Quota] Redis 计数臂故障,fail-open 放行 job=%s biz=%s user=%s: %r",
+            job_id,
+            business_id,
+            user_id,
+            err,
+        )
     if not await consume_credit(business_id, job_id=job_id):
         return GateVerdict(False, QUOTA_MERCHANT_EXHAUSTED, _EXHAUSTED_MSG)
-    return allowed()
+    return ALLOW_OK

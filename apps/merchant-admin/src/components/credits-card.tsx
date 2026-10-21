@@ -1,4 +1,4 @@
-import { type CreditsDetail, api } from '@/lib/api';
+import { type CreditsDetail, api, errMsgOf } from '@/lib/api';
 import { creditReasonMeta } from '@/lib/format';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui';
@@ -31,9 +31,10 @@ export function CreditsCard() {
     try {
       const body = await api.credits.get();
       if (!body.success || !body.data) {
-        // 业务/HTTP 错误体原样呈现(transport 收口语义),不吞不编
+        // 业务/HTTP 错误体原样呈现(transport 收口语义),文案走 errMsgOf 单点
+        // (message/detail/error 三键——403 平台闸是 {"detail"} 形,单读 body.error 会吞)
         setPhase('error');
-        setErrMsg(body.error || '服务额度加载失败');
+        setErrMsg(errMsgOf(body, '服务额度加载失败'));
         return;
       }
       setDetail(body.data);
@@ -63,7 +64,13 @@ export function CreditsCard() {
         ) : phase === 'error' ? (
           <>
             <span className="text-xs text-zinc-500">{errMsg}</span>
-            <Button type="button" variant="outline" size="sm" className="h-auto px-2 py-0.5 text-[11px]" onClick={() => void load()}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-auto px-2 py-0.5 text-[11px]"
+              onClick={() => void load()}
+            >
               重试
             </Button>
           </>

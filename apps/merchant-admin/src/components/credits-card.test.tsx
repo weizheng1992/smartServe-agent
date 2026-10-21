@@ -7,16 +7,36 @@ import { CreditsCard } from './credits-card';
 // 流水正负着色 + 台账人话、最近 10 条截断、失败诚实可重试。
 
 const getMock = vi.fn();
-vi.mock('@/lib/api', () => ({
-  api: { credits: { get: (...args: unknown[]) => getMock(...args) } },
-}));
+// 桩须保留真模块导出(errMsgOf 是被测契约的一部分)——整体替换式 mock 会把
+// errMsgOf 一并抹掉,组件落 catch 臂、服务端文案测不到(promo-dialog 同款范式)。
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>();
+  return {
+    ...actual,
+    api: { ...actual.api, credits: { ...actual.api.credits, get: (...args: unknown[]) => getMock(...args) } },
+  };
+});
 
-type Tx = { id: string; delta: number; reason: string; refJobId: string | null; operator: string | null; createdAt: string | null };
+type Tx = {
+  id: string;
+  delta: number;
+  reason: string;
+  refJobId: string | null;
+  operator: string | null;
+  createdAt: string | null;
+};
 
 function makeDetail({
   balance = 987 as number | null,
   transactions = [
-    { id: 't1', delta: 100, reason: 'admin_adjust: 双十一活动赠送', refJobId: null, operator: 'platform@aurora', createdAt: '2026-10-20T10:00:00Z' },
+    {
+      id: 't1',
+      delta: 100,
+      reason: 'admin_adjust: 双十一活动赠送',
+      refJobId: null,
+      operator: 'platform@aurora',
+      createdAt: '2026-10-20T10:00:00Z',
+    },
     { id: 't2', delta: -1, reason: 'consume', refJobId: 'job-1', operator: null, createdAt: '2026-10-21T08:00:00Z' },
   ] as Tx[],
 } = {}) {
@@ -89,6 +109,15 @@ describe('CreditsCard(服务额度只读卡)', () => {
     getMock.mockResolvedValueOnce({ success: true, data: makeDetail() });
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => expect(screen.getByText('987')).toBeInTheDocument());
+  });
+
+  it('403 {"detail"} 形:errMsgOf 三键单点出口,服务端文案不被兜底话吞掉', async () => {
+    // 员工闸 403 的真实错误体是 {"detail"} 形(server-gateway.md §1.4),
+    // 无 success 键 —— 页面严禁单读 body.error 后散写兜底话。
+    getMock.mockResolvedValueOnce({ detail: '需要员工凭证' });
+    render(<CreditsCard />);
+    await waitFor(() => expect(screen.getByText('需要员工凭证')).toBeInTheDocument());
+    expect(screen.queryByText('服务额度加载失败')).not.toBeInTheDocument();
   });
 
   it('传输失败(throw):诚实报错不崩溃', async () => {

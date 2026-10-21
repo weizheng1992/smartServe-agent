@@ -22,7 +22,7 @@ from .. import chat_turn, conversation_repo, sse_tail
 from ..rate_limit import client_ip
 from ..sse_tail import streaming_headers
 from ..tenant_scope import optional_staff
-from .auth import _resolve_bearer
+from .auth import resolve_bearer
 
 router = APIRouter(prefix="/api/chat")
 
@@ -146,7 +146,7 @@ async def dispatch_chat(body: DispatchChatIn, request: Request):
     # body.userId 自报且缺省回落 CUST-8801(种子真客),自报身份下配额额度可
     # 换壳绕闸/嫁祸他人。无/坏/登出 token → 401(与 auth 面同形 {success,
     # error});body.userId 与 sub 不一致 → 403(自报字段自此仅作交叉校验)。
-    auth_result = await _resolve_bearer(request.headers.get("authorization"))
+    auth_result = await resolve_bearer(request.headers.get("authorization"))
     if isinstance(auth_result, JSONResponse):
         return auth_result
     effective_user_id = str(auth_result.get("sub") or "")
