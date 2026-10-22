@@ -95,6 +95,11 @@ services:
       - "3001:3001"
       - "3005:3005"
       - "3006:3006"
+    volumes:
+      # 访问分析(2026-10-22):nginx access_log 双写落此卷(rw);同卷再只读挂到
+      # /var/www/reports 供 /reports/ 服务 goaccess 快照与 .htpasswd
+      - nginx_logs:/data/logs
+      - nginx_logs:/var/www/reports:ro
     depends_on:
       gateway:
         condition: service_healthy
@@ -105,3 +110,4 @@ volumes:
   redis_data:
   uploads:
   hf_cache:
+  nginx_logs:
