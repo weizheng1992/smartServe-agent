@@ -15,6 +15,9 @@
 #
 # 说明:
 #   - 终端模式经 SSH 直接看,最常用;HTML 模式适合手机上翻(每次运行刷新快照)。
+#   - 镜像源可覆写:GOACCESS_IMG 环境变量(缺省 docker.io/allinone/goaccess:1.9.3)。
+#     国内网络直连 docker.io 拉不动时,先 `export GOACCESS_IMG=docker.m.daocloud.io/allinone/goaccess:1.9.3`
+#     或预拉同 tag 后 `docker tag` 回缺省名(与 CI 部署步的代理预拉套路同型)。
 #   - 日志无界增长由本脚本不负轮转之责:低流量(作品集级)数月无虞,若要收紧
 #     可在宿主 cron 里定期 `docker run --rm -v smartserve-prod_nginx_logs:/l alpine \
 #     sh -c 'tail -n 50000 /l/access.log > /l/a && mv /l/a /l/access.log'`。
@@ -22,15 +25,18 @@
 set -euo pipefail
 
 VOL="smartserve-prod_nginx_logs"
-GOACCESS_IMG="docker.io/allinone/goaccess:1.9.3"
+GOACCESS_IMG="${GOACCESS_IMG:-docker.io/allinone/goaccess:1.9.3}"
 REPORT="report.html"
 # 与 deploy/nginx.conf 的 log_format analytics 逐 token 对齐(combined + 尾列
 # $server_port → %v,端口即四端区分:3000=web 3001=admin 3005=merchant 3006=merchant-admin)。
 # 格式串含空格与引号 —— 经环境变量传入容器、容器内 "$LOGFMT" 整体引用,
-# 严禁拼进 sh -c 命令串(词法拆碎)。
+# 严禁拼进 sh -c 命令串(词法拆碎)。必须 export:`docker run -e VAR`(裸形式)
+# 只透传 docker CLI 进程环境中的变量,未 export 的 shell 变量到不了容器
+# (2026-10-22 夜评实证:漏 export 时容器内格式串为空、goaccess 全量误解析)。
 LOGFMT='%h %^[%d:%t %^] "%r" %s %b "%R" "%u" %v'
 DATEFMT='%d/%b/%Y'
-TIMEFMT='%H:%M:%S' 
+TIMEFMT='%H:%M:%S'
+export LOGFMT DATEFMT TIMEFMT
 
 say() { printf '\033[1;36m[visits]\033[0m %s\n' "$*"; }
 
@@ -63,10 +69,13 @@ case "${1:-}" in
     ;;
   --tail)
     n="${2:-50}"
+    # n 经 "$1" 传参整体引用 —— 此前拼进 sh -c 命令串,操作员参数含空格/; 即容器内注入面
     docker run --rm -v "$VOL":/logs:ro alpine:3.20 \
-      sh -c "tail -n $n /logs/access.log | grep -v healthz"
+      sh -c 'tail -n "$1" /logs/access.log | grep -v healthz' _ "$n"
     ;;
   --set-password)
+    # Ctrl-C 中断于 read 时恢复终端回显(缺省 trap 覆盖正常/异常两路退出)
+    trap 'stty echo 2>/dev/null || true' EXIT
     printf '新密码: ' >&2; stty -echo; read -r pw; stty echo; printf '\n' >&2
     [ -n "$pw" ] || { say "空密码,未改"; exit 1; }
     write_htpasswd "$pw"

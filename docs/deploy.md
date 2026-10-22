@@ -129,17 +129,18 @@ docker logs <gateway 容器> 2>&1 | grep -E "\[Quota\]|\[RateLimit\]"
 ② 结构化数据不走 stdout,落 A 机 PG(agent_platform 库),看板或 psql 直查:`llm_call_logs`(每次 LLM 调用:token/延迟/node 归因)、`session_metrics`(每回合聚合)、`credit_transactions`(积分台账逐笔)、`intent_logs`——admin(3001) 系统日志页与 billing 页是这两类的看板消费方。
 
 **访问分析（谁看过这个网站，2026-10-22 起）**：nginx 每条请求双写持久卷
-（`smartserve-prod_nginx_logs`，combined 格式），`deploy/scripts/visits.sh` 按需起 goaccess 分析、用完即焚（B 机无常驻开销）：
+（`smartserve-prod_nginx_logs`，combined + 尾列 `$server_port` 的 `log_format analytics` —— 端口列是四端 3000/3001/3005/3006 的区分符），`deploy/scripts/visits.sh` 按需起 goaccess 分析、用完即焚（B 机无常驻开销）：
 
 ```bash
 bash deploy/scripts/visits.sh                 # 终端交互报表：独立访客/IP/UA/URL/时间分布（最常用，经 SSH）
 bash deploy/scripts/visits.sh --html          # HTML 快照 → http://<服务器>:3001/reports/report.html
                                                #   基本认证 admin/<首次生成的随机密码，仅显示一次>
 bash deploy/scripts/visits.sh --tail 100      # 原始日志快看（healthz 已滤）
+bash deploy/scripts/visits.sh --raw 200       # 不过滤的原始尾行（含 healthz，排查用）
 bash deploy/scripts/visits.sh --set-password  # 改报表密码
 ```
 
-要点：看「谁来看过」→ 终端报表的 *Unique visitors per day*（按 IP 去重）+ *Visitor Hostnames/UA* 面板（公司网络 vs 家宽 vs 爬虫机房一眼可辨；`curl`/`python-requests` UA 即爬虫）。访客 IP 属敏感数据，报表挂基本认证且 `.htpasswd` 拒绝拉取；空卷（未跑过 `--html`）时 `/reports/` 整体 403 关闭。聊天访客的精确身份（guest-\*/CUST-\*）另见 `agent_platform.threads` 表（§五上方结构化数据段）。
+要点：看「谁来看过」→ 终端报表的 *Unique visitors per day*（按 IP 去重）+ *Visitor Hostnames/UA* 面板（公司网络 vs 家宽 vs 爬虫机房一眼可辨；`curl`/`python-requests` UA 即爬虫）。访客 IP 属敏感数据，报表挂基本认证且 `.htpasswd` 拒绝拉取；空卷（未跑过 `--html`，无 `.htpasswd`）时安全缺省关闭 —— 无凭证 401 挑战、任意凭证 403（nginx 缺认证文件语义，2026-10-22 真容器实测）；快照尚未生成时正确凭证得 404。聊天访客的精确身份（guest-\*/CUST-\*）另见 `agent_platform.threads` 表（§五上方结构化数据段）。
 
 **备份**（每日 cron，示例；PG 在 A 机，走一次性 psql 客户端容器）：
 
