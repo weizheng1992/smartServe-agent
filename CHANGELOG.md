@@ -4,6 +4,18 @@
 
 ---
 
+## [2.20.0] - 2026-10-22 (访问分析上线:「谁看过这个网站」—— nginx 日志双写 + goaccess 用完即焚 + 基本认证报表页;夜评四修含 critical 格式变量 export 缺失)
+
+### ✨ Features
+
+- **访问分析落地**(e2744dd):①nginx access_log 双写 —— stdout(docker logs 既有行为不变)之外落持久卷 `nginx_logs`,自定义 `log_format analytics`(combined + 尾列 `$server_port`:四端 3000/3001/3005/3006 共用日志,端口是唯一可靠区分符,`$host` 对 IP 直访会剥端口不可用);②admin:3001 新增 `/reports/`(基本认证 + dotfile 一律 404;空卷未生成 `.htpasswd` 时安全缺省关闭:无凭证 401 挑战、任意凭证 403);③`deploy/scripts/visits.sh` B 机一键:终端交互报表(缺省)/`--html` 快照 + 首跑随机密码(经 stdin 进 httpd:2.4-alpine htpasswd,不进 argv/env/ps)/`--set-password`/`--tail`/`--raw`,goaccess 按需起用完即焚(2C4G 零常驻);④docs/deploy.md §五 运维段。作者侧真容器/真二进制全链验证(nginx 新格式落行、认证矩阵、goaccess 解析真行零错误、1.8M HTML 产出),途中实证抓掉三个真 bug(alpine 无 openssl 改 httpd htpasswd、goaccess `--no-progress`、`%d:%t` 分离 spec 必须配 `--date-format`+`--time-format`)。
+
+### 🔧 Fixes
+
+- **夜评四修**(e454e3c,nightly 2026-10-22 双轴评审 + 真容器实证):①**critical** —— visits.sh 格式变量补 `export`:`docker run -e VAR` 裸形式只透传 docker CLI 进程环境中的变量,提交版未 export,三处 goaccess 调用的格式串实际全空、规格「格式串经环境变量整体引用」被整体击穿(envtest 真容器复现:未 export 容器内空串);②`--tail` 计数参数改经 `"$1"` 整体引用(原拼进 `sh -c`,操作员参数即容器内注入面,实测修后同输入诚实报错);③`--set-password` 补 EXIT trap —— Ctrl-C 中断于 read 时原版把终端留在无回显态(pty 工装对照 LEAKED_ECHO_OFF → ECHO_OK);④`GOACCESS_IMG` 可环境覆写并补代理源/预拉 retag 说明(本机实测 docker.io/镜像源拉 allinone/goaccess >25min 未完成,B 机首跑需预拉);⑤docs/deploy.md 校准:combined → combined+端口尾列、空卷「整体 403」→ 实测语义(401 挑战/403 拒绝/快照未生成 404)、补 `--raw` 行。
+
+---
+
 ## [2.19.0] - 2026-10-21 (agent 用量配额闸上线:游客终身额度 + 商户积分池 + 身份锚定;部署管道本土化两修与容器日志轮转)
 
 ### ✨ Features
