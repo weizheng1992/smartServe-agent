@@ -30,8 +30,18 @@ export interface LiveSession {
   email: string;
 }
 
+/** 同进程成功会话记忆(2026-10-23 夜评审收口):网关自 8a00c75 起对
+ * /api/auth/login 挂 10/min 限流(生产审计防爆破),全量套件 5 个 live 文件
+ * 合计 ~11 次登录按时间聚集度非确定性撞闸(429「请求过于频繁」假红)。
+ * 每凭据每进程仍走一次真实登录链路(bcrypt + JWT),之后复用 30 天期
+ * token;失败登录不记忆(401 路径保持真实)。单轮登录请求降至 7 次。 */
+const sessionCache = new Map<string, LiveSession>();
+
 /** 真实登录(bcrypt + JWT,同生产链路)。 */
 export async function login(email: string, password = 'agent-all-dev'): Promise<LiveSession> {
+  const key = `${email}:${password}`;
+  const cached = sessionCache.get(key);
+  if (cached) return cached;
   const r = await fetch(`${GATEWAY}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -39,5 +49,7 @@ export async function login(email: string, password = 'agent-all-dev'): Promise<
   });
   const b = await r.json();
   if (!b.success) throw new Error(`登录失败 ${email}: ${JSON.stringify(b)}`);
-  return { token: b.data.token, email: b.data.user.email };
+  const session: LiveSession = { token: b.data.token, email: b.data.user.email };
+  sessionCache.set(key, session);
+  return session;
 }

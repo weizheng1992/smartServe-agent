@@ -206,6 +206,53 @@ describe('workbench 审批动作(驳回原因契约)', () => {
   });
 });
 
+// 审批「进会话」URL 指路契约钉(2026-10-23 收口,当日夜评审补测):activeThreadId
+// 是组件内 state,路由切换即蒸发 —— 进会话靠 ?thread= 跨实例传递;workbench 会话
+// 载荷到达时 URL 参数优先选线程(在列即选/否则首行兜底),命中即 replaceState
+// 抹参一次性消费,防 8s 轮询用陈旧参数反复劫持用户后续手动选择。
+describe('workbench 初始选择:URL ?thread= 指路', () => {
+  beforeEach(() => {
+    mocks.ordersList.mockClear();
+    mocks.approvalsList.mockClear();
+    mocks.convsList.mockClear();
+    mocks.convsMessages.mockClear();
+  });
+  afterEach(() => {
+    window.history.replaceState(null, '', window.location.pathname);
+  });
+
+  it('参数在线程列表内:选中目标线程并一次性抹参', async () => {
+    mocks.convsList.mockResolvedValue({
+      success: true,
+      conversations: [
+        ONE_CONV.conversations[0],
+        { id: 't-9', threadId: 't-9', businessId: 'aurora', status: 'queuing', lastMessage: '审批指路' },
+      ],
+    });
+    window.history.pushState(null, '', '/live-desk?thread=t-9');
+    let w!: ReturnType<typeof useWorkbenchState>;
+    render(<Harness scope="live-desk" onReady={(x) => (w = x)} />);
+    await vi.waitFor(() => expect(w.activeThreadId).toBe('t-9'));
+    expect(window.location.search).toBe(''); // 命中即抹参(一次性消费)
+    expect(mocks.convsMessages).toHaveBeenCalledWith('t-9'); // 时间线拉的是目标线程
+  });
+
+  it('参数不在列表内:回落首行,参数保留(目标线程晚到时下一轮命中才消费)', async () => {
+    window.history.pushState(null, '', '/live-desk?thread=t-404');
+    let w!: ReturnType<typeof useWorkbenchState>;
+    render(<Harness scope="live-desk" onReady={(x) => (w = x)} />);
+    await vi.waitFor(() => expect(w.activeThreadId).toBe('t-1'));
+    expect(window.location.search).toBe('?thread=t-404'); // 未命中不抹参
+  });
+
+  it('无参数:首行兜底(既有行为不回归)', async () => {
+    let w!: ReturnType<typeof useWorkbenchState>;
+    render(<Harness scope="live-desk" onReady={(x) => (w = x)} />);
+    await vi.waitFor(() => expect(w.activeThreadId).toBe('t-1'));
+    expect(window.location.search).toBe('');
+  });
+});
+
 describe('workbench 坐席发送(旧面不变量,候选⑤补钉)', () => {
   // 顺序即隔离:毒化用例消费文件初始的干净单例,fallback 用例复用其换签后的缓存 socket
   // (vi.resetModules 会复制 React 两份,跨拷贝 act 互不认领 —— 不走模块重置)
