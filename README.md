@@ -361,19 +361,56 @@ smartServe-agent/
 
 | 套件 | 数量 | 覆盖 |
 |---|---|---|
-| engine pytest | **1834** | 意图仲裁/视觉消歧/记忆/优惠引擎/golden SQL/兜底分发器/RBAC/报告/数据水龙头/训练流水线/data agent 管线；2.7.0 新增语义编译器差分对拍/组合通道/探索守卫/归因速览/语感直通契约册 |
-| gateway pytest | **454** | HTTP/SSE/socket.io 契约 + analytics 路由 43 条 93 例(ask SSE/反馈/RBAC/报告/核销幂等) |
+| engine pytest | **1850** | 意图仲裁/视觉消歧/记忆/优惠引擎/golden SQL/兜底分发器/RBAC/报告/数据水龙头/训练流水线/data agent 管线；语义编译器差分对拍/组合通道/探索守卫(含常量查询盲区负例)/归因速览/语感直通契约册 |
+| gateway pytest | **486** | HTTP/SSE/socket.io 契约 + analytics 路由 43 条 93 例(ask SSE/反馈/RBAC/报告/核销幂等) |
 | merchant-admin vitest | **251** | ResultCard 渲染(信任章/generatedSql 折叠/叙事隔离区)/FloatingAgent/菜单树/SKU 库存/客户抽屉/活动范围/page-context/答案反馈 |
 | merchant-admin E2E | **11** | 登录门卫/RBAC 菜单/六胶囊真答/悬浮 agent/报告/优惠 CRUD |
-| promptfoo | 就绪 | 统一意图册 58(槽位程序生成+T2 型长尾) / planner 8 / persona 8 / T1·T2 通道十轮守卫基线 — 需模型代理在线 |
 
 ```bash
-bun run test:engine        # engine 全量 (1834)
-bun run test:eval          # gateway 全量 (454)
+bun run test:engine        # engine 全量 (1850)
+bun run test:eval          # gateway 全量 (486)
 bun run test:e2e           # Playwright E2E
-bun run test:prompt        # promptfoo 意图评估
 cd apps/merchant-admin && bun run build   # tsc + vite
 ```
+
+---
+
+## 📊 评测集记录 (Evaluation Suites, 2026-10-23)
+
+确定性测试之外,平台维持一套**五层评测金字塔**测 LLM 行为质量(与 pytest 契约互补:契约钉形状,评测钉智能)。
+
+### 第 1 层:promptfoo 六册离线评测(基线钉定 + 漂移门禁)
+
+| 册 | 例数 | 测什么 | 怎么测 | 最新结果 |
+|---|---|---|---|---|
+| unified | 55 | 意图分类/多意图/槽位反问/指标消歧/咨询直答/仲裁留痕/多租户隔离/安全注入/RAG 忠实度/多模态/事故回归 | **真跑生产管线**(agent_provider 直调 triage 瀑布+run_agent 端到端);13 scorer 判定:确定性规则断言为主 + intentF1 集合级 F1 + answerQuality LLM-judge(三维 rubric:中文表达/零幻觉/SOP 合规,≥0.8 过) | **55/55,均分 0.9949**(2026-10-23 重钉) |
+| data | 41 | 意图→闭集指标四要素映射(metric/direction/timeWindow/limit + clarify/unsupported 负例) | 纯规则断言直调 `MetricQueryEngine.resolve`,零 LLM;评测集冻结为纯门永不入训(SFT blocklist 源) | **41/41**(2026-10-23 首钉) |
+| t1t2 | 23 | T1 LLM 组合通道(闭集校验/角色闭集拒绝)+ T2 探索通道(LLM 产 SQL 过 AST 守卫链,ADR-0010) | 真跑 `compose_resolve`/`generate_sql`+守卫;正例须过全部结构闸,负例(写操作/表白名单外/闲聊)必须响亮拒绝 | **23/23**(2026-10-23 首钉,引擎三修后) |
+| planner | 8 | 工具规划提示词回归 | 直连 LLM(temp=0)测冻结提示词文本,toolAccuracy 工具名集合匹配 | 8/8 |
+| persona | 8 | 画像审计抽取质量 | scope 双层判定(global/tenant)+ 置信档位路由正则断言 | 8/8 |
+| rag | 6 | RAG 检索层本体质量 | 直呼 `search_relevant_docs`(向量 0.8+BM25 0.2),hit@1/跨租户隔离/口语改写鲁棒/形状契约,零 LLM | 6/6 |
+
+**门禁机制**(`eval/baselines/`):每册基线记录 git SHA + config sha256 + **数据集指纹(逐文件 sha256)+ promptfoo 版本 + 逐用例明细**;`bun run test:prompt:compare` 六规则(总数/通过/失败/均分/逐 scorer/逐用例翻转)+ 指纹漂移任一命中即 exit 1。数组 vars 一律 `disableVarExpansion`(防笛卡尔裂行腰斩断言)。运行需 `PROMPTFOO_PYTHON=$PWD/services/.venv/bin/python`。
+
+### 第 2 层:意图评测集 572 例
+
+`services/engine-py/evals/intent_cases.jsonl`:确定性意图跑分(95% 硬闸),四源语料(registry/edge/entity/longtail + 槽位生成 406 + T2 长尾 65),Gen-3 演练差分对拍 170+ 例全绿。
+
+### 第 3 层:夜间真 LLM E2E(launchd 23:00)
+
+`eval/nightly/`:61 场景打真实 4000 网关 —— 全链购物(真下单)、HITL 挂起观察、转人工接管、多轮指代改口、边界对抗(注入/XSS/无中生有/成本价套取)、多模态破损、Data Agent 21 问、菜单 RBAC、性能(隔离/并发/SSE 桥)。判分 = 词干级锚点 + 语义反面断言 + **全局编造检查**(回答中单号必须 ∈ 种子∪本夜新建∪本顾客真单)+ HITL 计数差;失败自动入坏例池;栈不可用退 2 不产假红。最新一夜(2026-10-22)严格用例 **55/55**。
+
+### 第 4 层:契约测试(CI 门禁)
+
+engine pytest 1850 + gateway pytest 486(testcontainers 密封 PG+Redis)+ Playwright e2e 六册 —— 钉死 HTTP/SSE 契约、闭集 SQL 编译器差分对拍、取消/打断/重放等流可靠性不变量。
+
+### 第 5 层:生产信号飞轮
+
+`engine_py/badcase/` 坏例池:8 信号源(人工接管/点踩/审批驳回/熔断/意图冲突/宣称落库不符/夜间失败等)实时入池 → 两层脱敏 → 周期 digest;Data Agent 👍 自动注册 user 范例回灌 L2 回放。信号永不直接成为断言,人工 triage 后经 draft 通道转回归用例。
+
+### 已知隔离与改进线(2026-10-23 审计,`.scratch/eval-gap-2026-10/`)
+
+13 条缺口三批推进:✅ 第一批门禁完整性(六册+指纹+展开律+四层腐烂修复)已收口;⏳ 第二批 HITL 终态判分 + 流可靠性评测册(S1/S2 可量化证据);其余见 tracker(judge 校准/pass^k/意图集再生性等 7 张引擎与方法学票)。3 例已知漂移隔离于 `known-drift.json`(竞品静默兜底/品类环比裸维度分组/守卫中文别名),对应引擎票 14/15/16。
 
 ---
 

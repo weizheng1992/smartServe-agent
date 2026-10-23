@@ -7,6 +7,7 @@ MetricSemanticResolver 后的 eval 侧 1:1 重建,数据读 metrics.yaml 注册�
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -38,7 +39,16 @@ def get_assert(output, context):
 
         resolution = resolve(input)
 
-        is_metric_match = resolution["primaryMetric"]["key"] == expected_metric
+        # any-of 语义等价类(eval-gap-2026-10):冲突组内的平局裁决顺序(同义词
+        # 表序)不是产品保证 —— 生产侧此类输入走 Clarify 消歧,断言收敛到等价类;
+        # JSON 串形式防数组 vars 笛卡尔展开
+        expected_metric_set = expected_metric
+        if isinstance(expected_metric, str) and expected_metric.startswith("["):
+            expected_metric_set = json.loads(expected_metric)
+        if isinstance(expected_metric_set, list):
+            is_metric_match = resolution["primaryMetric"]["key"] in expected_metric_set
+        else:
+            is_metric_match = resolution["primaryMetric"]["key"] == expected_metric_set
         is_ambiguity_match = expected_ambiguity is None or resolution["hasAmbiguity"] == expected_ambiguity
         is_conflict_group_match = expected_conflict_group is None or any(
             m["key"] == expected_conflict_group for m in resolution["conflictMetrics"]
