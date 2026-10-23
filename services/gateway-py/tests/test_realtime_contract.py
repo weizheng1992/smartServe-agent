@@ -825,3 +825,19 @@ class TestCustomerHttpToOperatorBridge:
         finally:
             if operator.connected:
                 await operator.disconnect()
+
+    async def test_bridge_emit_failure_does_not_propagate(self, monkeypatch):
+        """桥容错纪律(2026-10-23 夜评审收口):sio.emit 裸抛会从 accept_chat_turn
+        受理脊炸穿两条顾客消息通道(paused 臂 HTTP 500、async 臂作业永不建立)。
+        与镜像 publish_thread_message「发布失败只打日志不抛」同律:socket 故障
+        只降级坐席台实时性,不降级顾客消息受理本身。"""
+        from gateway_py import realtime
+
+        async def _broken_emit(*args, **kwargs):
+            raise RuntimeError("socket.io emit down")
+
+        monkeypatch.setattr(realtime.sio, "emit", _broken_emit)
+        # 不抛即过;_publish_ws_event 自 catch,不受 sio.emit 故障牵连
+        await realtime.broadcast_customer_message(
+            "t-bridge", "nike", {"id": "m_bridge", "timestamp": "2026-10-23T00:00:00"}, "桥故障臂"
+        )

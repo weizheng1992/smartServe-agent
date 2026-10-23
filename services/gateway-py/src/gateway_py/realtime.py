@@ -18,6 +18,7 @@ wire 协议 1:1:
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import re
 
 import socketio
@@ -56,6 +57,24 @@ async def _publish_ws_event(event: str, room: str, data) -> None:
         print(f"[WS] Failed to publish redis ws event: {err}")
 
 
+def _new_message_payload(
+    thread_id: str, tenant_id: str, role: str, content: str, cards, operator_info, saved: dict
+) -> dict:
+    """new_message 线格式单一事实源(冻结线格式):坐席自发言(on_send_message)
+    与顾客 HTTP 桥(broadcast_customer_message)两消费方逐字段同构,载荷散两处
+    必漂移(2026-10-23 夜评审收口)。"""
+    return {
+        "id": saved["id"],
+        "threadId": thread_id,
+        "tenantId": tenant_id,
+        "role": role,
+        "content": content,
+        "cards": cards,
+        "operatorInfo": operator_info,
+        "timestamp": saved.get("timestamp"),
+    }
+
+
 async def broadcast_customer_message(thread_id: str, tenant_id: str, saved: dict, content: str) -> None:
     """顾客 HTTP 消息 → 坐席 socket 房间桥(2026-10-23 线上「接管后顾客消息坐席
     不再看到」收口)。
@@ -70,17 +89,17 @@ async def broadcast_customer_message(thread_id: str, tenant_id: str, saved: dict
     顾客 SSE 频道(thread:{id}:message)刻意**不**补发 user 帧 —— 顾客端对自有
     消息乐观呈现,补发双气泡(乐观 id ≠ 服务端 id,按 id 去重不命中)。"""
     room = _room(thread_id, tenant_id)
-    payload = {
-        "id": saved["id"],
-        "threadId": thread_id,
-        "tenantId": tenant_id,
-        "role": "user",
-        "content": content,
-        "cards": None,
-        "operatorInfo": {},
-        "timestamp": saved.get("timestamp"),
-    }
-    await sio.emit("new_message", payload, room=room, namespace=NAMESPACE)
+    payload = _new_message_payload(thread_id, tenant_id, "user", content, None, {}, saved)
+    # 与镜像桥 publish_thread_message 同纪律(「发布失败只打日志不抛」):本函数挂在
+    # accept_chat_turn 受理脊,sio.emit 裸抛会炸穿两条顾客消息通道(paused 臂
+    # HTTP 500、async 臂作业永不建立)—— socket 故障只降级坐席台实时性,
+    # 不降级顾客消息受理本身(2026-10-23 夜评审收口)。
+    try:
+        await sio.emit("new_message", payload, room=room, namespace=NAMESPACE)
+    except Exception as err:
+        logging.getLogger(__name__).warning(
+            "[Realtime] customer bridge emit failed (thread=%s tenant=%s): %r", thread_id, tenant_id, err
+        )
     await _publish_ws_event("new_message", room, payload)
 
 
@@ -461,16 +480,7 @@ async def on_send_message(sid: str, data: dict):
             },
         )
     room = _room(thread_id, tenant_id)
-    msg_payload = {
-        "id": saved["id"],
-        "threadId": thread_id,
-        "tenantId": tenant_id,
-        "role": role,
-        "content": content,
-        "cards": cards,
-        "operatorInfo": operator_info,
-        "timestamp": saved.get("timestamp"),
-    }
+    msg_payload = _new_message_payload(thread_id, tenant_id, role, content, cards, operator_info, saved)
     await sio.emit("new_message", msg_payload, room=room, namespace=NAMESPACE)
     await _publish_ws_event("new_message", room, msg_payload)
     return {"success": True, "messageId": saved["id"]}

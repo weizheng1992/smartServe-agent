@@ -397,7 +397,8 @@ async def list_approvals(
         item["resolvedByRole"] = payload.get("resolvedByRole") or None
     if staff is None:
         # 匿名脱敏(2026-10-23 生产审计收口):匿名列表不再吐 userEmail/userId/
-        # actionPayload 与决议人字段 —— 防两点:PII 直出(订单号/金额/邮箱),与
+        # actionPayload 与决议明细(rejectionReason/humanReply/resolvedBy/
+        # resolvedByRole,共七字段)—— 防两点:PII 直出(订单号/金额/邮箱),与
         # 「GET 喂 POST」组合链(此前匿名 GET 泄漏属主 userId,POST 自报该 userId
         # 即过线程归属闸,可匿名核准/驳回退款)。apps/web 顾客卡仅消费 id/
         # threadId/actionType/status/createdAt(动作提交的 userId 来自会话),
