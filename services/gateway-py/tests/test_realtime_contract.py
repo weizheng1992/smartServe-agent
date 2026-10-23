@@ -737,3 +737,91 @@ class TestWsEventsBroadcast:
         self._stub_state(monkeypatch, {"status": "ai_takeover"})
         state = await realtime._broadcast_state_changed("t-3", "adidas")
         assert state == {"status": "ai_takeover"}
+
+
+class TestCustomerHttpToOperatorBridge:
+    """顾客 HTTP 消息 → 坐席 socket 房间桥(2026-10-23 线上「接管后顾客消息坐席
+    不再看到」收口)。
+
+    坐席台开着的线程面板只靠 socket new_message 刷新(use-live-desk);顾客消息
+    经 POST /api/store/chat / POST /api/chat(HTTP 面,无 socket 客户端)落库,
+    此前从不进坐席房间 —— 接管会话中坐席只看得到自己发言,顾客后续消息全部
+    「不显示了」(线上实弹:unread_count 堆到 8,刷新才见)。桥挂两表面共用的
+    受理脊 chat_turn.accept_chat_turn 落库点,paused/常规两臂均覆盖;顾客 SSE
+    频道不补发 user 帧(顾客端乐观呈现,补发双气泡,见 realtime.py send_message
+    侧 2026-09-29 坐席→顾客桥的镜像注释)。"""
+
+    async def test_takeover_customer_http_message_reaches_operator_room(
+        self, live_server, rt_thread, nike_operator
+    ):
+        import socketio as socketio_lib
+
+        ns = "/ws/chat"
+        operator = socketio_lib.AsyncClient(reconnection=False)
+        received: list[dict] = []
+
+        def _collect(event):
+            def handler(payload=None):
+                received.append({"event": event, "payload": payload})
+
+            return handler
+
+        for evt in ("joined_room", "new_message", "conversation_state_changed"):
+            operator.on(evt, _collect(evt), namespace=ns)
+
+        await operator.connect(
+            live_server,
+            transports=["websocket"],
+            namespaces=[ns],
+            auth={"tenantId": "nike", "userId": "u_rt_operator", "role": "operator", "token": nike_operator["token"]},
+        )
+        try:
+            await operator.call(
+                "join_thread", {"threadId": rt_thread, "tenantId": "nike", "role": "operator"}, namespace=ns, timeout=5
+            )
+            await operator.call(
+                "takeover_conversation", {"threadId": rt_thread, "tenantId": "nike"}, namespace=ns, timeout=5
+            )
+            await wait_for(
+                lambda: any(
+                    r["event"] == "conversation_state_changed" and r["payload"].get("status") == "human_takeover"
+                    for r in received
+                )
+            )
+
+            # 顾客走 HTTP 面(接管态 → paused 臂,零 LLM):与线上实弹完全同形
+            import httpx
+
+            resp = await httpx.AsyncClient(base_url=live_server, timeout=15).post(
+                "/api/store/chat",
+                json={
+                    "userId": "u_rt_user",
+                    "threadId": rt_thread,
+                    "businessId": "nike",
+                    "message": "契约测试:顾客HTTP消息应达坐席",
+                },
+            )
+            assert resp.status_code == 200
+            assert resp.json()["isHumanActive"] is True  # paused 臂确认
+
+            await wait_for(
+                lambda: any(
+                    r["event"] == "new_message"
+                    and r["payload"].get("role") == "user"
+                    and r["payload"].get("content") == "契约测试:顾客HTTP消息应达坐席"
+                    for r in received
+                ),
+                timeout=8,
+            )
+            msg = next(
+                r
+                for r in received
+                if r["event"] == "new_message"
+                and r["payload"].get("role") == "user"
+                and r["payload"].get("content") == "契约测试:顾客HTTP消息应达坐席"
+            )
+            assert msg["payload"]["threadId"] == rt_thread
+            assert msg["payload"]["id"], "载荷须带落库消息 id(openThread 幂等对齐)"
+        finally:
+            if operator.connected:
+                await operator.disconnect()

@@ -175,7 +175,7 @@ async def accept_chat_turn(
                 "quotaCode": verdict.code,
             }
 
-    await conversation_repo.append_message(
+    saved_user_row = await conversation_repo.append_message(
         {
             "threadId": thread_id,
             "businessId": business_id,
@@ -185,6 +185,13 @@ async def accept_chat_turn(
             "imageUrls": image_urls,
         }
     )
+    # 坐席侧桥(2026-10-23):顾客 HTTP 消息落库即向坐席 socket 房间补发
+    # new_message —— 坐席台开着的线程面板只靠该事件刷新,此前桥缺失致接管
+    # 会话中顾客后续消息坐席全部「不显示了」。paused/常规两臂同覆盖;顾客
+    # SSE 频道不补发(防顾客端双气泡),详见 realtime.broadcast_customer_message。
+    from .realtime import broadcast_customer_message
+
+    await broadcast_customer_message(thread_id, business_id, saved_user_row, message)
 
     if paused:
         return {"paused": True, "jobId": "", "output": paused_output or "", "cards": [], "state": None, "quotaCode": ""}

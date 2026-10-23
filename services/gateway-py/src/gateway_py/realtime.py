@@ -56,6 +56,34 @@ async def _publish_ws_event(event: str, room: str, data) -> None:
         print(f"[WS] Failed to publish redis ws event: {err}")
 
 
+async def broadcast_customer_message(thread_id: str, tenant_id: str, saved: dict, content: str) -> None:
+    """顾客 HTTP 消息 → 坐席 socket 房间桥(2026-10-23 线上「接管后顾客消息坐席
+    不再看到」收口)。
+
+    坐席台开着的线程面板只靠 new_message 刷新(use-live-desk);顾客消息经
+    POST /api/chat / POST /api/store/chat(HTTP 面,顾客端零 socket 客户端)落库,
+    此前从不进坐席房间 —— 接管会话中坐席只看得到自己发言,顾客后续消息全部
+    静默(线上实弹:unread_count 堆到 8,刷新才见)。本桥挂在两表面共用的受理脊
+    chat_turn.accept_chat_turn 落库点,paused/常规两臂均覆盖。
+
+    镜像 2026-09-29 坐席→顾客桥(send_message 侧补 publish_thread_message);
+    顾客 SSE 频道(thread:{id}:message)刻意**不**补发 user 帧 —— 顾客端对自有
+    消息乐观呈现,补发双气泡(乐观 id ≠ 服务端 id,按 id 去重不命中)。"""
+    room = _room(thread_id, tenant_id)
+    payload = {
+        "id": saved["id"],
+        "threadId": thread_id,
+        "tenantId": tenant_id,
+        "role": "user",
+        "content": content,
+        "cards": None,
+        "operatorInfo": {},
+        "timestamp": saved.get("timestamp"),
+    }
+    await sio.emit("new_message", payload, room=room, namespace=NAMESPACE)
+    await _publish_ws_event("new_message", room, payload)
+
+
 async def _staff_from_token(token: str | None):
     """Bearer JWT → 在职员工(02 安全先行);缺/坏/登出 token 或非在职员工
     返回 None(socket 侧以拒绝连接呈现,非 HTTP 401)。接受裸 token 与
