@@ -71,7 +71,9 @@ export function DeskStateBadge({
   );
 }
 
-/** 左栏会话行:头像圆标 + 状态条 + 未读徽标 + 认领按钮(仅排队态)。 */
+/** 左栏会话行:头像圆标 + 状态条 + 未读徽标 + 认领/介入按钮(排队态「认领」;
+ *  AI 托管态「介入」= 坐席主动接管 —— 服务端 assign_operator 本就无状态限制,
+ *  2026-10-23 前仅 UI 不放按钮;我/同事接管态无按钮)。 */
 export function ConversationRow({
   conversation,
   myEmail,
@@ -119,12 +121,12 @@ export function ConversationRow({
               {unread}
             </span>
           )}
-          {state === 'queuing' && (
+          {(state === 'queuing' || state === 'ai') && (
             <span
               role="button"
               tabIndex={0}
               data-testid="claim-button"
-              aria-label={`认领会话 ${conversation.threadId}`}
+              aria-label={`${state === 'ai' ? '介入' : '认领'}会话 ${conversation.threadId}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onClaim(conversation.threadId);
@@ -137,7 +139,7 @@ export function ConversationRow({
               }}
               className="shrink-0 cursor-pointer rounded-full bg-zinc-900 px-2.5 py-0.5 text-[11px] text-white transition-colors hover:bg-zinc-700 disabled:opacity-50"
             >
-              {claiming ? '认领中…' : '认领'}
+              {claiming ? '接入中…' : state === 'ai' ? '介入' : '认领'}
             </span>
           )}
         </span>

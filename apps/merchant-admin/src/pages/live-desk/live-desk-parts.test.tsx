@@ -74,10 +74,28 @@ describe('ConversationRow 列表行', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it('非排队态无认领按钮;点行打开', async () => {
+  it('AI 托管态显示「介入」按钮(坐席主动接管,2026-10-23),点击回调且不冒泡开卡', async () => {
     const onOpen = vi.fn();
     const onClaim = vi.fn();
     render(<ConversationRow conversation={conv()} myEmail={ME} onOpen={onOpen} onClaim={onClaim} />);
+    const btn = screen.getByTestId('claim-button');
+    expect(btn).toHaveTextContent('介入');
+    fireEvent.click(btn);
+    expect(onClaim).toHaveBeenCalledWith('t1');
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('已接管态(我/同事)无认领按钮;点行打开', async () => {
+    const onOpen = vi.fn();
+    const onClaim = vi.fn();
+    render(
+      <ConversationRow
+        conversation={conv({ status: 'human_takeover', assignedOperatorId: 'colleague@aurora' })}
+        myEmail={ME}
+        onOpen={onOpen}
+        onClaim={onClaim}
+      />,
+    );
     expect(screen.queryByTestId('claim-button')).toBeNull();
     fireEvent.click(screen.getByTestId('conversation-row'));
     expect(onOpen).toHaveBeenCalledWith('t1');
