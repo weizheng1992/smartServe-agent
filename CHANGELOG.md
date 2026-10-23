@@ -4,6 +4,27 @@
 
 ---
 
+## [2.21.0] - 2026-10-23 (线上实弹收口日:B 机生产安全审计三修 + 实时协同缺口三连修 + 坐席主动介入;评测门禁六册落地)
+
+### ✨ Features
+
+- **坐席主动介入**(abace19):AI 托管态会话行新增「介入」按钮 —— 站主需求(2026-10-23):人工可直接接管进行中的会话,不必等顾客转人工排队。事实核查后卡点纯在 UI(服务端 takeover.assign_operator 本就无状态限制);queuing 态「认领」之外 ai 态渲染「介入」,同一 takeover_conversation 通道,mine/others 已接管态无按钮;顾客侧落「人工客服【X】已接入会话」系统消息即时可见。
+
+### 🔧 Fixes
+
+- **B 机生产审计三修**(8a00c75):①gateway 4000 端口绑回 127.0.0.1 —— 公网发布只会把 137 条端点裸露给扫描器(实弹多段 IP 直敲 /、/mcp 探测),nginx 反代走容器网不经宿主端口零连带;②审批 GET 匿名列表脱敏 —— 匿名无租户参数时原样吐全租户最新 200 条工单(userEmail/userId/actionPayload 含订单金额理由),且属主 userId 恰是 POST 顾客动作线程归属闸的自报凭证,「GET 喂 POST」组合链 = 匿名核准/驳回退款;匿名臂仍 200(apps/web 顾客卡轮询依赖)但七字段置空,员工 JWT 臂全量不变;③`/api/auth/login` 补挂 10/min 限流(此前不在任何限流域,四端公网可达 = 在线爆破无界);另 .env.prod.example + docs/deploy.md 补 E2E_ACCOUNT_PASSWORD 生产强值告警。
+- **线上坐席认领失效**(d102f92):nginx 3006 补 `/socket.io/` 反代块 —— 四端配置只有 `/api/` 反代,socket.io 握手落 SPA 回退收 HTML 永远失败,live-desk 在生产从未通过 nginx 工作过(dev 由 Vite proxy 代转掩盖,即 live-desk-rework P5 搁置后的镜像陷阱);双升级头 + proxy_buffering off + 1h 读超时,静态契约 `test_deploy_nginx_contract.py` 钉死。
+- **顾客 HTTP 消息 → 坐席 socket 房间桥**(c34a2be):线上「接管后顾客消息坐席不再看到」—— 顾客端零 socket 客户端(web/merchant 立约),消息经 POST 落库后从不进坐席房间(unread_count 堆到 8、刷新才见);桥挂两表面共用的受理脊 `accept_chat_turn` 落库点,paused/常规、sync/async 全臂覆盖,载荷镜像坐席自发言线格式;顾客 SSE 频道刻意不补发 user 帧防双泡(2026-09-29 镜像桥同款纪律)。夜评同批补 sio.emit 异常守卫(裸抛会从受理脊炸穿两条顾客消息通道)+ new_message 载荷提取单一事实源(ca5e1c4,修前红/修后绿)。
+- **审批「进会话」点击无反应**(4e2961f):目标线程改走 URL 参数跨实例传递 —— activeThreadId 是组件内 state,路由切换卸载即蒸发、新挂实例自动选首行;navigate 携 `?thread=`,workbench 会话载荷到达时 URL 参数优先选线程(在列即选/首行兜底),命中即 replaceState 抹参一次性消费,防 8s 轮询用陈旧参数劫持用户后续手动选择。
+- **CI 部署镜像新鲜度闸**(f97ee4b):deploy job 拉到南大镜像缓存滞后的旧镜像不报错、容器静默陈旧、健康断言打在旧 gateway 上假绿(10-21/10-22/10-23 三次推送均如此落地失败,实弹服务器代码新而容器 Up 2 days);pull_image 先比两源 manifest 原文哈希(纯元数据秒级),一致走南大快路、不一致或任一查询失败回落直连 ghcr —— 双挂时真 pull 失败即响亮红。
+
+### 🧪 Tests / 评测
+
+- **评测门禁完整性收口**(20ea153,eval-gap-2026-10 01):SUITES 四册扩六册(+data/t1t2,闭集 SQL 映射 + AST 守卫 ADR-0010 高风险面首入门禁)+ 数组 vars 笛卡尔展开律(promptfoo `generateVarCombinations` 把数组值 vars 逐元素裂行,断言强度被静默腰斩/四分之一化,`disableVarExpansion` 钉死,unified 55 行基线即此出生异常的产物)+ 数据集指纹门禁(pin 写 `datasets: {files[], combinedSha256}`,数据集被改而基线未重钉 compare 无从发现的盲区);data/t1t2 入门禁掀出四层无门禁腐烂(null vars 拒载/scorer null reason 假红/clarify 死形状/两例真红)同批修复。**unified 重钉(58→55)未执行留晨审** —— 夜评审掀出 spec AC 勾选与仓库状态不符(旧基线无指纹且必判漂移),已如实改 unchecked。
+- **夜评双轴两补**(ca5e1c4/c362556,nightly 2026-10-23):双轴 code-review(基点 e430673,覆盖当日七笔提交)发现分级处置 —— ①顾客桥 sio.emit 异常守卫 + new_message 线格式单一事实源(gateway 全量 485 passed + ruff 双服务绿);②4e2961f 补 URL 指路回归测试三例(当日唯一零测试落点的修复)+ live-api 登录会话记忆(8a00c75 限流后全量套件 5 个 live 文件 ~11 次登录非确定性撞闸假红,同进程按凭据复用后 11→7,全量 44 文件 263/263 绿);③span chip→Button 迁移、composition 去重等 6 项列晨审清单不夜改。夜间评测 58 用例严格全绿(网关窗口期 c13 两连重试护栏按设计恢复)。
+
+---
+
 ## [2.20.0] - 2026-10-22 (访问分析上线:「谁看过这个网站」—— nginx 日志双写 + goaccess 用完即焚 + 基本认证报表页;夜评四修含 critical 格式变量 export 缺失)
 
 ### ✨ Features
