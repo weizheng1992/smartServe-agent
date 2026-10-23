@@ -179,10 +179,22 @@ export function useWorkbenchState(scope: WorkbenchScope) {
         // 行形状修补(id/threadId/lastMessage)已收口 api.conversations.list adapter —— 页面拿成品行
         const convList = convData.conversations || [];
         setConversations(convList);
-        if (convList.length > 0 && !activeThreadIdRef.current) {
-          const initialId = convList[0].threadId;
-          setActiveThreadId(initialId);
-          loadConversationMessages(initialId);
+        if (convList.length > 0) {
+          // 初始选择:URL ?thread= 优先(审批「进会话」跨实例指路——activeThreadId
+          // 是组件内 state,路由切换即蒸发,2026-10-23 收口),列表首行兜底;
+          // 参数命中即一次性消费(抹参),防 8s 轮询反复劫持用户后续手动选择。
+          const wanted = new URLSearchParams(window.location.search).get('thread');
+          const targetId =
+            wanted && convList.some((c) => c.threadId === wanted)
+              ? wanted
+              : activeThreadIdRef.current || convList[0].threadId;
+          if (targetId && targetId !== activeThreadIdRef.current) {
+            if (wanted === targetId) {
+              window.history.replaceState(null, '', window.location.pathname);
+            }
+            setActiveThreadId(targetId);
+            loadConversationMessages(targetId);
+          }
         }
       }
     } catch (err) {
