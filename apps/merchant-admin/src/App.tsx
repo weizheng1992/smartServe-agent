@@ -194,8 +194,11 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
               <Route path="/board" element={<BoardPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/orders" element={<OrderWorkbench scope="orders" />} />
+              <Route path="/approvals" element={<OrderWorkbench scope="approvals" />} />
+              {/* 旧 /live-desk 并存作回退面(2026-10-24 收敛:退出菜单,菜单指向
+                  /approvals 待办审核 + /agent-desk 客服工作台;e2e 回绿钉仍走本路由) */}
               <Route path="/live-desk" element={<OrderWorkbench scope="live-desk" />} />
-              {/* 坐席台独立页(P2);旧 /live-desk 并存作回退面 */}
+              {/* 坐席台独立页(P2);2026-10-24 菜单名升正「客服工作台」 */}
               <Route path="/agent-desk" element={<LiveDeskPage />} />
               <Route path="/promotions" element={<PromotionsPage />} />
               <Route path="/customers" element={<CustomersPage />} />

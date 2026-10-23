@@ -1,10 +1,12 @@
 import type { MessageItem } from '@/lib/api';
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 // 坐席台独立页(live-desk-rework P2/P3/P4):台面顶栏(排队/我的计数 + 实时
 // 连接态)+ 三栏 —— 左会话池(排队等待最久置顶)/ 中时间线(认领后回复 +
 // 待批工单批驳卡)/ 右坐席上下文栏(五项,spec §2.4)+ 坐席在线态。
 // 旧 /live-desk tab(OrderWorkbench)并存不动作回退面;本页是 spec §3 P2-P4
 // 的正式坐席工作台。e2e/vitest 锚点(testid 与关键文本)一概保留。
+// 2026-10-24 工作台收敛:本页菜单名升正「客服工作台」,待办审核独立成
+// /approvals 页,旧 /live-desk 保留路由但退出菜单(e2e 回绿钉仍走它)。
 import { Button, Input, Switch } from 'ui';
 import {
   ContextCustomer,
@@ -139,6 +141,16 @@ export default function LiveDeskPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [reviewing, setReviewing] = useState(false);
+
+  // 待办审核「进会话」深链(2026-10-24 工作台收敛):?thread= 直选目标会话,
+  // 命中列表即选并一次性抹参 —— 会话列表异步到达,effect 挂 conversations 载荷。
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('thread');
+    if (!wanted || wanted === desk.selectedThreadId) return;
+    if (!desk.conversations.some((c) => c.threadId === wanted)) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    void desk.openThread(wanted);
+  }, [desk.conversations, desk.selectedThreadId, desk.openThread]);
 
   // 时间线视口贴底(2026-09-29 实弹:聊天记录打开总停在顶部=最旧消息,
   // 最新消息沉在视口外):切换会话无条件回底部;新消息仅当操作员原本

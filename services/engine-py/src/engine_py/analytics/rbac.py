@@ -68,7 +68,12 @@ DEFAULT_MENUS: list[dict] = [
     {"id": "m-spi-logs", "parent": "d-orders", "name": "接口日志", "type": "menu", "route": "/spi-logs", "sort": 3},
     {"id": "d-users", "parent": None, "name": "用户", "type": "directory", "route": None, "sort": 4},
     {"id": "m-customers", "parent": "d-users", "name": "客户管理", "type": "menu", "route": "/customers", "sort": 1},
-    {"id": "m-live-desk", "parent": "d-users", "name": "客服工作台", "type": "menu", "route": "/live-desk", "sort": 2},
+    # 2026-10-24 工作台收敛:m-agent-desk 升正「客服工作台」(坐席实时台);
+    # m-live-desk 改名「待办审核」指向 /approvals 纯审批面(scope 已有),
+    # 旧 /live-desk 路由保留(e2e 回绿钉)但退出菜单。改名/改指向对已种库
+    # 需一次性 SQL(ensure_menu_seed 只增不改)。
+    {"id": "m-agent-desk", "parent": "d-users", "name": "客服工作台", "type": "menu", "route": "/agent-desk", "sort": 2},
+    {"id": "m-live-desk", "parent": "d-users", "name": "待办审核", "type": "menu", "route": "/approvals", "sort": 3},
     # 02 安全先行(2026-09-27):工作台此前整菜单无任何权限点,按钮级收口无词可查
     # (perm 闭包只认 button 型子节点)。占位编码 live_desk:operate,种子面与菜单
     # 可见性对齐(老板/管理员/运营可见即持有,仓储无此菜单);坐席身份模型定档后
@@ -78,10 +83,9 @@ DEFAULT_MENUS: list[dict] = [
     # 员工代行 approve/reject(/api/chat/approvals)都过此闸;退款核准是资金
     # 语义,与接单/发言(live_desk:operate)分粒度,不放给无批驳权限的坐席。
     {"id": "btn-live-desk-approve", "parent": "m-live-desk", "name": "工单批驳", "type": "button", "perm": "live_desk:approve", "sort": 2},
-    # live-desk-rework P2(spec §3 灰度):新坐席台独立页 —— 灰度开关就是本菜单的
-    # 角色可见性,零新 env。先只授老板/管理员(sales_viewer 种子排除,见
-    # _GREY_RELEASE_MENUS);support_agent 稳后放;旧 /live-desk tab 并存至 P5 退役。
-    {"id": "m-agent-desk", "parent": "d-users", "name": "坐席工作台", "type": "menu", "route": "/agent-desk", "sort": 3},
+    # live-desk-rework P2(spec §3 灰度)原注:新坐席台独立页灰度开关 = 菜单
+    # 角色可见性(_GREY_RELEASE_MENUS);2026-10-24 收敛后本菜单即为唯一
+    # 客服工作台入口(见上方 m-agent-desk),待办审核拆至 m-live-desk。
     {"id": "d-ops", "parent": None, "name": "运营", "type": "directory", "route": None, "sort": 5},
     {"id": "m-promotions", "parent": "d-ops", "name": "优惠活动", "type": "menu", "route": "/promotions", "sort": 1},
     {"id": "btn-promo-create", "parent": "m-promotions", "name": "新建活动", "type": "button", "perm": "promo:create", "sort": 1},

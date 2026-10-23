@@ -291,9 +291,11 @@ function ApprovalRow({ approval }: { approval: any }) {
             onClick={() => {
               // 目标线程走 URL 参数跨实例传递:activeThreadId 是 workbench 组件内
               // state,先 setState 再 navigate 会在路由卸载旧实例时随组件蒸发,
-              // 新挂的 /live-desk 实例只认列表首行 —— 表现为「点击没反应」。
+              // 新挂实例只认列表首行 —— 表现为「点击没反应」。
+              // 2026-10-24 工作台收敛:指向坐席台(/agent-desk)深链,LiveDeskPage
+              // 消费 ?thread= 直选会话。
               setActiveThreadId(approval.threadId);
-              navigate(`/live-desk?thread=${encodeURIComponent(approval.threadId)}`);
+              navigate(`/agent-desk?thread=${encodeURIComponent(approval.threadId)}`);
             }}
             className="text-xs h-7 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200 font-medium cursor-pointer"
           >
