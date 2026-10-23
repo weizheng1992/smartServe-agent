@@ -71,8 +71,14 @@ def _assert_t1(vars: dict) -> dict:
         }
     problems = []
     want_metric = vars.get("expectedMetric")
-    if want_metric and comp.metric != want_metric:
-        problems.append(f"metric {comp.metric} != {want_metric}")
+    # any-of 语义等价类(eval-gap-2026-10):「卖了多少」类歧义措辞 gmv/volume
+    # 皆可,断言语义等价类而非武断 token;JSON 串形式防数组 vars 笛卡尔展开
+    if isinstance(want_metric, str) and want_metric.startswith("["):
+        want_metric = json.loads(want_metric)
+    if want_metric and comp.metric not in (
+        want_metric if isinstance(want_metric, list) else [want_metric]
+    ):
+        problems.append(f"metric {comp.metric} 不在期望集 {want_metric}")
     want_dim = vars.get("expectedDimension")
     if want_dim is not None and comp.dimension != want_dim:
         problems.append(f"dimension {comp.dimension} != {want_dim}")

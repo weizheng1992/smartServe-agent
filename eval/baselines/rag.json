@@ -1,10 +1,19 @@
 {
   "suite": "rag",
-  "pinnedAt": "2026-10-14T08:02:00.640Z",
-  "gitSha": "6f92e895134a49ff8794e2080936f039fb9390d2",
+  "pinnedAt": "2026-10-23T13:29:22.060Z",
+  "gitSha": "f97ee4b3c53446cd970f81942b2bd26670a16b38",
   "config": {
     "path": "eval/promptfoo.rag.yaml",
     "sha256": "d87e9a6cb8c99878b73fd8b18f0b9a7679cf90152698e60489ef977b2701a2fc"
+  },
+  "datasets": {
+    "files": [
+      {
+        "path": "testCases/ecommerce/rag-retrieval.json",
+        "sha256": "7c3c9ee22574e7fea9b76d43a992b7cc44308ab1c575fb2b579908882948053d"
+      }
+    ],
+    "combinedSha256": "0533974dec5d948b059149832059a442a81dfb2877e15db257c3166a3476f6e7"
   },
   "promptfooVersion": "0.111.1",
   "summary": {

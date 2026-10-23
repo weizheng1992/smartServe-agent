@@ -1,0 +1,241 @@
+{
+  "suite": "data",
+  "pinnedAt": "2026-10-23T13:23:19.931Z",
+  "gitSha": "f97ee4b3c53446cd970f81942b2bd26670a16b38",
+  "config": {
+    "path": "eval/promptfoo.data.yaml",
+    "sha256": "a9a3685e0b33ce174c32929966c5719300cbaba98cdbca0bd6de00c04b79c0cd"
+  },
+  "datasets": {
+    "files": [
+      {
+        "path": "testCases/data_analytics/mapping.json",
+        "sha256": "a5325bd971a952e065643ef551a6197e643a7461dd67917e9a1f13c43dec7c8e"
+      }
+    ],
+    "combinedSha256": "e443075c77d621ffbd15aee6370abe89ed72703bf73fa4293cb458fd1b87a6c7"
+  },
+  "promptfooVersion": "0.111.1",
+  "summary": {
+    "total": 41,
+    "pass": 41,
+    "fail": 0,
+    "errors": 0,
+    "meanScore": 1,
+    "scorers": {
+      "data_mapping.py:get_assert": {
+        "count": 41,
+        "pass": 41,
+        "fail": 0,
+        "meanScore": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "description": "dataMapping 四要素 - 同义词直命中 gmv(销售族)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping 四要素 - 反向词翻转方向(卖得最差 → ASC,08-P1 回归门)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping 四要素 - 时间窗解析(近 30 天退款率)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping 四要素 - 泛指歧义反问(conflictGroup 为选项集)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 退货变多归因(归因族 aacd6af 上线后由 unsupported 转正,2026-10-23 数据集校准)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping 四要素 - 差评榜(阶段③新族)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping 四要素 - 会话量(engine 本地族)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping 四要素 - LIMIT 提取与 clamp(Top 20)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 营业额 Top10",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 成交额最低的商品",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 流水 top 3",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 销量 Top5",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 毛利最高的商品",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 毛利最低的商品",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 毛利率排行榜",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 毛利率最低的商品",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 库存风险最高的商品",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 差评 Top10",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 近 7 天退款率",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 上个月退款率",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 近 7 天会话量",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - AI 解决率多少",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 各活动核销订单数",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 活动核销 Top10",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 各活动优惠总额",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 优惠总额最低的活动",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 售后工单分布",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 户外机能品类销量 Top10",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 潮流鞋靴品类销售额 top3",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 上个月销售额最高的商品",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 近 7 天销量 Top5",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 公司营收目标完成率",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 帮我写一段营销文案",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 件数最少的商品",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - GMV 趋势",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 勾选订单的统计",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 哪个商品卖得好",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 两个订单对比(order_overview 对比族,ADR-0005)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 对比这两笔订单(order_overview 对比族,ADR-0005)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 两个活动对比(promo_compare 登记流水线)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 对比一下新客50元券和背包品类85折(promo_compare 登记流水线)",
+      "success": true,
+      "score": 1
+    }
+  ]
+}

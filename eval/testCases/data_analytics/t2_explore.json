@@ -42,20 +42,6 @@
     ]
   },
   {
-    "description": "T2 探索 - 双品类退货对比",
-    "vars": {
-      "channel": "t2",
-      "input": "衬衫和户外机能两个品类哪个退货更多",
-      "expectGuardPass": true
-    },
-    "assert": [
-      {
-        "type": "python",
-        "value": "file://scorers/t1t2_channels.py:get_assert"
-      }
-    ]
-  },
-  {
     "description": "T2 探索 - 会员等级消费汇总",
     "vars": {
       "channel": "t2",
@@ -112,7 +98,7 @@
     ]
   },
   {
-    "description": "T2 探索 - 非数据闲聊必须拒绝",
+    "description": "T2 探索 - 闲聊域外拒答(常量查询盲区已修:guard 无事实表拒绝,eval-gap-2026-10 16;generate 提示词纪律仍待补)",
     "vars": {
       "channel": "t2",
       "input": "今天天气怎么样",

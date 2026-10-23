@@ -175,6 +175,36 @@
           "meanScore": 1
         }
       }
+    },
+    "data": {
+      "total": 41,
+      "pass": 41,
+      "fail": 0,
+      "errors": 0,
+      "meanScore": 1,
+      "scorers": {
+        "data_mapping.py:get_assert": {
+          "count": 41,
+          "pass": 41,
+          "fail": 0,
+          "meanScore": 1
+        }
+      }
+    },
+    "t1t2": {
+      "total": 23,
+      "pass": 23,
+      "fail": 0,
+      "errors": 0,
+      "meanScore": 1,
+      "scorers": {
+        "t1t2_channels.py:get_assert": {
+          "count": 23,
+          "pass": 23,
+          "fail": 0,
+          "meanScore": 1
+        }
+      }
     }
   }
 }

@@ -9,6 +9,10 @@ providers:
 defaultTest:
   options:
     provider: "file://providers/agent_provider.py:call_api"
+    # 数组 vars 律(2026-10-23):promptfoo generateVarCombinations 会把数组值 vars
+    # 逐元素笛卡尔裂行 —— expectedTools:[a,b] 裂成两行、每行只断言半个期望集
+    # (断言强度被静默腰斩;58 行旧基线即此产物)。期望集必须整队断言,一律关展开。
+    disableVarExpansion: true
 
 # 串行 + 行间隔:真跑 triage/RAG/judge 的行背靠背调用会撞 bigmodel RPM 限制,
 # 429 把咨询直答打成 consult_no_rag 回退、judge 打成 scorer 报错(限流噪声

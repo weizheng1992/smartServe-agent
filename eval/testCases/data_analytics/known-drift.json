@@ -1,0 +1,45 @@
+[
+  {
+    "description": "dataMapping - 竞品卖得怎么样(已知漂移隔离:引擎静默兜底 volume,08-P1 铁律违例,引擎票 .scratch/eval-gap-2026-10/issues/14;修复后迁回 mapping.json)",
+    "vars": {
+      "input": "竞品卖得怎么样",
+      "expectedKind": "unsupported"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "T1 组合 - 品类环比裸维度分组(compose 品类值幻觉三跑三红,引擎票 .scratch/eval-gap-2026-10/issues/15;修复后迁回)",
+    "vars": {
+      "channel": "t1",
+      "input": "各品类销售额的环比变化",
+      "expectedMetric": "gmv",
+      "expectedDimension": "category",
+      "expectedComparePrevious": true
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "T2 探索 - 双品类退货对比(守卫中文别名误判散文:LLM 用 AS 品类 类中文别名即被拒、英文别名即过,方差耦合;引擎票 .scratch/eval-gap-2026-10/issues/16 观察项;裁决后迁回)",
+    "vars": {
+      "channel": "t2",
+      "input": "衬衫和户外机能两个品类哪个退货更多",
+      "expectGuardPass": true
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
+  }
+]

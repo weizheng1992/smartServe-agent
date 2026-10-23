@@ -84,3 +84,19 @@ class TestExploreGuard:
     def test_non_literal_limit_rejected(self):
         with pytest.raises(ExploreRejected, match="字面整数"):
             guard_explore_sql("SELECT title FROM merchant_spus LIMIT :n")
+
+    def test_constant_query_rejected(self):
+        """常量查询盲区(eval-gap-2026-10 16):写请求/闲聊在 generate 域外拒答
+        纪律缺位时,LLM 偶发产出无事实表的合法废话查询 —— 结构闸须拒,不能只
+        赌生成层拒答。"""
+        with pytest.raises(ExploreRejected, match="事实表"):
+            guard_explore_sql("SELECT '' LIMIT 1")
+        with pytest.raises(ExploreRejected, match="事实表"):
+            guard_explore_sql("SELECT ' weather' AS message LIMIT 1")
+
+    def test_cte_over_real_table_passes(self):
+        """CTE 锚定真实表白名单时不受常量查询闸影响(只拦零事实表查询)。"""
+        sql = guard_explore_sql(
+            "WITH top AS (SELECT title FROM merchant_spus LIMIT 5) SELECT * FROM top"
+        )
+        assert "merchant_spus" in sql

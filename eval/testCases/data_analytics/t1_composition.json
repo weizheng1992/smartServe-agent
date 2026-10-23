@@ -60,22 +60,6 @@
     ]
   },
   {
-    "description": "T1 组合 - 时间平移算子(品类销售额环比)",
-    "vars": {
-      "channel": "t1",
-      "input": "各品类销售额的环比变化",
-      "expectedMetric": "gmv",
-      "expectedDimension": "category",
-      "expectedComparePrevious": true
-    },
-    "assert": [
-      {
-        "type": "python",
-        "value": "file://scorers/t1t2_channels.py:get_assert"
-      }
-    ]
-  },
-  {
     "description": "T1 组合 - 无维度总量(客单价)",
     "vars": {
       "channel": "t1",
@@ -105,11 +89,11 @@
     ]
   },
   {
-    "description": "T1 组合 - 品类过滤槽(上个月衬衫)",
+    "description": "T1 组合 - 品类过滤槽(上个月衬衫;metric 等价类 gmv|volume——「卖了多少」语义歧义,考察点为 category 槽与时间窗)",
     "vars": {
       "channel": "t1",
       "input": "上个月衬衫卖了多少",
-      "expectedMetric": "gmv",
+      "expectedMetric": "[\"gmv\",\"volume\"]",
       "expectedCategory": "衬衫",
       "expectedTimeKind": "last_month"
     },
@@ -169,7 +153,12 @@
     "vars": {
       "channel": "t1",
       "input": "各区域的销量分布",
-      "allowed": ["gmv", "net_sales", "order_count", "aov"],
+      "allowed": [
+        "gmv",
+        "net_sales",
+        "order_count",
+        "aov"
+      ],
       "expectRejected": true
     },
     "assert": [

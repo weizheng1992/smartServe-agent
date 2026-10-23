@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 if TYPE_CHECKING:  # 运行时惰性 import(engine ↔ composition 防环)
     from .engine import CompiledSQL
@@ -137,7 +137,13 @@ async def _invoke_compose_out(model, messages) -> _ComposeOut:
     except Exception as tool_err:
         print(f"[T1] function calling 不可用,回落文本解析: {tool_err}")
     resp = await model.ainvoke(messages)
-    return _ComposeOut(**_parse_llm_json(_content_text(resp)))
+    try:
+        return _ComposeOut(**_parse_llm_json(_content_text(resp)))
+    except ValidationError as err:
+        # LLM 偶发产出不合契约的成分类型(实测 dimension=非字符串,live eval
+        # eval-gap-2026-10 16 号票)—— 垃圾输出 = 组合失败,驯化为响亮拒绝,
+        # 严禁裸 ValidationError 逃逸成调用方无法分类的"断言器异常"
+        raise CompositionRejected(f"组合解析输出不合契约: {err}") from err
 
 
 def _validate(out: Any, allowed: list[str] | None, question: str) -> CompositionQuery:
@@ -158,6 +164,17 @@ def _validate(out: Any, allowed: list[str] | None, question: str) -> Composition
         out.dimension = out.dimension.strip() or None  # LLM 偶发填空串(live eval 实弹),归一为「无维度」
     if out.dimension is not None and out.dimension not in dims:
         raise CompositionRejected(f"维度 {out.dimension!r} 不在语义层目录内")
+    # 维度漏填确定性回填(eval-gap-2026-10 15/16 实弹):LLM 偶发把「各品类的
+    # 成交额」「订单都处于什么状态」类拆分句式组合成无维度总量 —— 拆分语感
+    # 词表单一事实源(_BREAKDOWN_RE)先验兜底,与时间/品类机械槽位回填同律;
+    # 只兜漏填(dimension=None),绝不覆盖 LLM 显式输出
+    if out.dimension is None:
+        _m = _BREAKDOWN_RE.search(question or "")
+        if _m:
+            _word = next((w for w in _m.groups() if w), None)
+            _dim = _DIM_WORD_MAP.get(_word or "")
+            if _dim in dims:
+                out.dimension = _dim
     if out.category is None and slot_category:
         out.category = slot_category
     # 维度词回声归一(live eval 九轮实弹):「各品类销售额」的 LLM 把「品类」
@@ -541,13 +558,24 @@ async def attribute_narrative(comp: CompositionQuery, rows: list[dict], summary:
 
 # ---------------- 确定性组合升级(维度拆分语感直通;零 LLM) ----------------
 
-# 语感:「各/按 + 维度词」或「维度词 + 分布/对比/排行」;环比/同比 → 时间平移
+# 语感:「各/按 + 维度词」或「维度词 + 分布/对比/排行」或「(处于)什么/哪些状态」;
+# 环比/同比 → 时间平移。状态→order_status(2026-10-23 扩:订单状态分布问句的
+# 拆分语感,eval-gap-2026-10 15/16 实弹 LLM 偶发漏提 dimension)
 _BREAKDOWN_RE = re.compile(
-    r"(?:各|按)\s*(品牌|区域|城市|品类|客户|活动)"
-    r"|(品牌|区域|城市|品类|客户|活动)(?:的)?(?:分布|对比|排行)"
+    r"(?:各|按)\s*(品牌|区域|城市|品类|客户|活动|状态)"
+    r"|(品牌|区域|城市|品类|客户|活动|状态)(?:的)?(?:分布|对比|排行)"
+    r"|(?:处于)?(?:什么|哪些)(状态)"
 )
 _COMPARE_PREV_RE = re.compile(r"环比|同比|对比上期|较上期")
-_DIM_WORD_MAP = {"品牌": "brand", "区域": "region", "城市": "city", "品类": "category", "客户": "customer", "活动": "promotion"}
+_DIM_WORD_MAP = {
+    "品牌": "brand",
+    "区域": "region",
+    "城市": "city",
+    "品类": "category",
+    "客户": "customer",
+    "活动": "promotion",
+    "状态": "order_status",
+}
 
 
 def breakdown_reroute(question: str, intent) -> CompositionQuery | None:

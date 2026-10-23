@@ -11,6 +11,10 @@ providers:
 defaultTest:
   options:
     provider: "file://providers/echo_provider.py:call_api"
+    # 数组 vars 律(2026-10-23):T1 角色闭集拒绝用例的 vars.allowed 是 4 元素数组,
+    # 笛卡尔展开曾把该用例裂成 4 行、每行只拿到四分之一闭集(t1t2 25→28 行)。
+    # 角色闭集必须整队传入 compose_resolve,t1t2_channels.py 已兼容完整数组。
+    disableVarExpansion: true
 
 # LLM 逐例调用,串行防 bigmodel 429 限流噪声(同全量大盘纪律)
 evaluateOptions:

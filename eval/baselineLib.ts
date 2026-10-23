@@ -5,7 +5,7 @@ export const REPO_ROOT = resolve(__dirname, '..');
 export const BASELINE_DIR = resolve(__dirname, 'baselines');
 
 export interface SuiteDef {
-  name: 'unified' | 'planner' | 'persona' | 'rag';
+  name: 'unified' | 'planner' | 'persona' | 'rag' | 'data' | 't1t2';
   config: string;
 }
 
@@ -17,11 +17,17 @@ export interface SuiteDef {
 // rag 分册入列(stream-reliability-push 05):RAG 检索层直评(hit@k/段位/租户
 // 隔离/形状契约)—— 直呼 search_relevant_docs,全链无 LLM(本地 bge),钉定
 // 零 token 成本。
+// data/t1t2 分册入列(eval-gap-2026-10 01):闭集指标映射(42 例,纯规则断言直调
+// resolve,零 LLM)与 T1 组合/T2 探索双通道(25 例,LLM+AST 守卫链,ADR-0010
+// 分层信任的高风险面)此前有 yaml 有命令但无基线无门禁 —— 占 promptfoo 总量
+// 四成的高风险面没有回归锚。data 分册 echo provider 零 token,t1t2 真跑 LLM。
 export const SUITES: SuiteDef[] = [
   { name: 'unified', config: 'eval/promptfooconfig.yaml' },
   { name: 'planner', config: 'eval/promptfoo.planner.yaml' },
   { name: 'persona', config: 'eval/promptfoo.persona.yaml' },
   { name: 'rag', config: 'eval/promptfoo.rag.yaml' },
+  { name: 'data', config: 'eval/promptfoo.data.yaml' },
+  { name: 't1t2', config: 'eval/promptfoo.t1t2.yaml' },
 ];
 
 export interface ScorerAggregate {
@@ -51,9 +57,23 @@ export interface SuiteBaseline {
   pinnedAt: string;
   gitSha: string;
   config: { path: string; sha256: string };
+  // 数据集指纹(eval-gap-2026-10 01):config sha 只覆盖 yaml 本身,数据集
+  // (testCases/*.json / planner 冻结提示词)被改而基线未重钉时 compare 无从
+  // 发现 —— 指纹漂移即回归。2026-10-23 前的旧基线无此字段(compare 警告不拦截)。
+  datasets?: DatasetFingerprint;
   promptfooVersion: string;
   summary: SuiteSummary;
   cases: BaselineCase[];
+}
+
+export interface DatasetFileHash {
+  path: string;
+  sha256: string;
+}
+
+export interface DatasetFingerprint {
+  files: DatasetFileHash[];
+  combinedSha256: string;
 }
 
 export interface LatestIndex {
@@ -93,6 +113,50 @@ interface PromptfooSummary {
 
 export function sha256File(filePath: string): string {
   return new Bun.CryptoHasher('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+// 从 config yaml 行级提取数据集文件清单:tests: 列表项(*.json)+
+// prompts: 中的文件型条目(planner 分册被测对象是冻结提示词文本本身,
+// prompts/planner_prompt.txt 一并入指纹)。六册 config 的 tests 均为扁平
+// `- path` 列表;内联用例(planner 8 例)由 config 自身 sha256 覆盖,此处
+// 不适用。提取器对未知形态宁可少收(少收=指纹变窄,不会假红)。
+export function extractDatasetFiles(configPath: string): string[] {
+  const lines = readFileSync(resolve(REPO_ROOT, configPath), 'utf-8').split('\n');
+  const files: string[] = [];
+  let section: 'tests' | 'prompts' | null = null;
+  for (const line of lines) {
+    const sectionMatch = line.match(/^(tests|prompts):\s*$/);
+    if (sectionMatch) {
+      section = sectionMatch[1] as 'tests' | 'prompts';
+      continue;
+    }
+    if (!section) continue;
+    if (line.trim() === '' || line.trim().startsWith('#')) continue;
+    const itemMatch = line.match(/^\s+-\s+(.+?)\s*$/);
+    if (!itemMatch) {
+      section = null; // 任何非列表行(下一个顶层键)结束当前 section
+      continue;
+    }
+    const value = itemMatch[1].replace(/^['"]|['"]$/g, '');
+    if (section === 'tests' && value.endsWith('.json')) {
+      files.push(value);
+    } else if (section === 'prompts' && /\.[a-z]+$/.test(value) && value.includes('/')) {
+      files.push(value); // 文件型 prompt(模板串如 {{input}} 不含路径分隔符,天然排除)
+    }
+  }
+  return [...new Set(files)].sort();
+}
+
+export function fingerprintDatasets(configPath: string): DatasetFingerprint {
+  const files = extractDatasetFiles(configPath);
+  const hashes = files.map((p) => ({
+    path: p,
+    sha256: sha256File(resolve(REPO_ROOT, 'eval', p)),
+  }));
+  const combinedSha256 = new Bun.CryptoHasher('sha256')
+    .update(hashes.map((h) => `${h.path}:${h.sha256}\n`).join(''))
+    .digest('hex');
+  return { files: hashes, combinedSha256 };
 }
 
 export function gitSha(): string {

@@ -295,3 +295,62 @@ class TestBreakdownReroute:
         monkeypatch.setenv("AI_T1_COMPOSE", "on")
         comp = composition.breakdown_reroute("各品类净销售额环比", self._intent("net_sales"))
         assert comp is not None and comp.compare_previous is True
+
+
+class TestMalformedComposeOutput:
+    """LLM 产出不合契约的成分类型时驯化为响亮拒绝(eval-gap-2026-10 16):
+    垃圾输出 = 组合失败,严禁裸 ValidationError 逃逸成调用方无法分类的异常。"""
+
+    def test_nonstring_dimension_becomes_rejection(self):
+        import asyncio
+
+        from engine_py.analytics import composition as c
+
+        class _StubModel:
+            def bind_tools(self, tools, tool_choice=None):  # 逼走文本解析路径
+                raise RuntimeError("tools unavailable")
+
+            async def ainvoke(self, messages):
+                class _Resp:
+                    content = '{"metric": "gmv", "dimension": ["品类"]}'
+
+                return _Resp()
+
+        with pytest.raises(c.CompositionRejected, match="不合契约"):
+            asyncio.run(c._invoke_compose_out(_StubModel(), []))
+
+
+class TestDimensionBackfill:
+    """维度漏填确定性回填(eval-gap-2026-10 15/16):拆分句式的 dimension
+    由 _BREAKDOWN_RE 语感词表先验兜底,只兜漏填、不覆盖 LLM 显式输出。"""
+
+    def _out(self, **kw):
+        from engine_py.analytics.composition import _ComposeOut
+
+        base = {"metric": "gmv", "dimension": None, "limit": 10}
+        base.update(kw)
+        return _ComposeOut(**base)
+
+    def test_ge_phrase_backfill(self):
+        from engine_py.analytics.composition import _validate
+
+        comp = _validate(self._out(), None, "近30天各品类的成交额")
+        assert comp.dimension == "category"
+
+    def test_status_question_backfill(self):
+        from engine_py.analytics.composition import _validate
+
+        comp = _validate(self._out(metric="order_count"), None, "订单目前都处于什么状态")
+        assert comp.dimension == "order_status"
+
+    def test_explicit_dimension_not_overridden(self):
+        from engine_py.analytics.composition import _validate
+
+        comp = _validate(self._out(dimension="spu"), None, "各品类的成交额")
+        assert comp.dimension == "spu"
+
+    def test_no_breakdown_phrase_stays_none(self):
+        from engine_py.analytics.composition import _validate
+
+        comp = _validate(self._out(), None, "现在的客单价是多少")
+        assert comp.dimension is None

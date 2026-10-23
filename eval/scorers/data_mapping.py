@@ -20,7 +20,7 @@ if str(_ENGINE_SRC) not in sys.path:
 
 def get_assert(output, context):
     try:
-        from engine_py.analytics.engine import MetricQueryEngine, UnsupportedQuery
+        from engine_py.analytics.engine import Clarify, MetricQueryEngine, UnsupportedQuery
 
         vars = (context or {}).get("vars") or {}
         question = vars.get("input")
@@ -32,7 +32,7 @@ def get_assert(output, context):
                 engine.resolve(question)
                 return {"pass": False, "reason": f"「{question}」应 unsupported(严禁静默兜底)", "score": 0}
             except UnsupportedQuery:
-                return {"pass": True, "score": 1}
+                return {"pass": True, "score": 1, "reason": "响亮拒绝(符合预期)"}
 
         try:
             intent = engine.resolve(question)
@@ -40,8 +40,16 @@ def get_assert(output, context):
             return {"pass": False, "reason": f"意外 unsupported:{err}", "score": 0}
 
         if expected_kind == "clarify":
-            ok = isinstance(intent, dict) and intent.get("clarify") is True
-            return {"pass": ok, "reason": "应为歧义反问" if not ok else None, "score": 1 if ok else 0}
+            # 引擎 Clarify 是 frozen dataclass(engine.py:75;kind/question/options);
+            # 旧 dict+"clarify":True 形状在引擎帧归一时已删除,此处曾检死形状致
+            # clarify 用例恒红(2026-10-23 随 data 册入门禁时修复)
+            ok = isinstance(intent, Clarify)
+            # reason 必须 always-string:promptfoo isGradingResult 对 null reason 整体
+            # 拒收(assertions/python.js:66),成功路径回 None 会把通过误翻成执行失败
+            return {"pass": ok, "reason": "歧义反问(符合预期)" if ok else "应为歧义反问", "score": 1 if ok else 0}
+
+        if isinstance(intent, Clarify):
+            return {"pass": False, "reason": f"意外反问:{intent.question}", "score": 0}
 
         if not isinstance(intent, dict):
             mismatches = []
@@ -54,7 +62,11 @@ def get_assert(output, context):
                 mismatches.append(f"timeWindow={tw} 期望 {vars['expectedTimeWindow']}")
             if vars.get("expectedLimit") is not None and intent.limit != vars["expectedLimit"]:
                 mismatches.append(f"limit={intent.limit} 期望 {vars['expectedLimit']}")
-            return {"pass": not mismatches, "reason": ";".join(mismatches) or None, "score": 1 if not mismatches else 0}
+            return {
+                "pass": not mismatches,
+                "reason": ";".join(mismatches) if mismatches else "四要素全对齐",
+                "score": 1 if not mismatches else 0,
+            }
 
         return {"pass": False, "reason": f"意外反问:{intent}", "score": 0}
     except Exception as err:  # noqa: BLE001 — 评测器必须把内部异常也翻成不通过

@@ -160,6 +160,18 @@ def guard_explore_sql(raw_sql: str) -> str:
             if name not in allowed_tables:
                 raise ExploreRejected(f"探索通道表白名单外(engine 库不可达): {name}")
 
+    # 常量查询盲区(eval-gap-2026-10 16):generate 提示词的域外拒答纪律非硬保证,
+    # LLM 偶发为写请求/闲聊产出无事实表的"合法废话查询"(实测 SELECT '' LIMIT 1 /
+    # SELECT ' weather' AS message LIMIT 1)绕过全部结构闸。数据 Agent 查询必锚
+    # 事实表 —— 全树零真实 Table 节点(CTE 名不算)即拒。
+    real_tables = [
+        node
+        for node in stmt.walk()
+        if isinstance(node, exp.Table) and node.name and node.name not in cte_names
+    ]
+    if not real_tables:
+        raise ExploreRejected("常量查询被拒(探索通道查询必须锚定事实表,无 FROM 子句)")
+
     sql = stmt.sql(dialect="postgres")
     _reject_cjk_outside_literals(sql)
     try:

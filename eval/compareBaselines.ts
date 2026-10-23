@@ -3,14 +3,17 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import {
   type BaselineCase,
+  REPO_ROOT,
   SUITES,
   type SuiteBaseline,
   type SuiteSummary,
   baselinePath,
   extractCases,
+  fingerprintDatasets,
   readBaseline,
   readPromptfooSummary,
   runPromptfooSuite,
+  sha256File,
   summarizeSuite,
 } from './baselineLib';
 
@@ -123,6 +126,36 @@ async function compareBaselines() {
     const current = summarizeSuite(raw);
     const currentCases = extractCases(raw);
     const regressions = compareSuite(baseline, current, currentCases);
+
+    // 门禁完整性(eval-gap-2026-10 01):config/数据集被改而基线未同批重钉,
+    // 基线钉的就不再是当前行为 —— 指纹漂移本身即回归,与跑分无关。
+    const currentConfigSha = sha256File(resolve(REPO_ROOT, baseline.config.path));
+    if (currentConfigSha !== baseline.config.sha256) {
+      regressions.push(
+        `config 变更未重钉基线: ${baseline.config.path} sha256 ${baseline.config.sha256.slice(0, 8)} -> ${currentConfigSha.slice(0, 8)}`,
+      );
+    }
+    if (!baseline.datasets) {
+      console.warn(`⚠️ [${suite.name}] 旧基线无数据集指纹(2026-10-23 前钉定),建议同批重钉补齐`);
+    } else {
+      const currentDatasets = fingerprintDatasets(suite.config);
+      if (currentDatasets.combinedSha256 !== baseline.datasets.combinedSha256) {
+        const changed = currentDatasets.files
+          .filter((f) => baseline.datasets?.files.find((b) => b.path === f.path)?.sha256 !== f.sha256)
+          .map((f) => f.path);
+        const removed = baseline.datasets.files
+          .filter((b) => !currentDatasets.files.some((f) => f.path === b.path))
+          .map((b) => b.path);
+        const details = [
+          changed.length > 0 ? `变更: ${changed.join(', ')}` : '',
+          removed.length > 0 ? `移除: ${removed.join(', ')}` : '',
+        ]
+          .filter(Boolean)
+          .join(' | ');
+        regressions.push(`数据集指纹变化(数据集被改而基线未重钉): ${details || '文件集合变化'}`);
+      }
+    }
+
     comparisons.push({ suite: suite.name, baseline, current, currentCases, regressions });
   }
 
