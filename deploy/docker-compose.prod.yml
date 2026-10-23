@@ -64,7 +64,10 @@ services:
       - default
       - shared-infra
     ports:
-      - "4000:4000"
+      # 2026-10-23 生产审计:绑回环 —— nginx 容器网走 gateway:4000 不经宿主端口,
+      # 公网发布只会裸露 137 条端点给扫描器(实测已有多段 IP 直敲);CI 健康断言
+      # 与 SSH 监控恰用 127.0.0.1:4000,零连带。
+      - "127.0.0.1:4000:4000"
     environment:
       # fastembed ONNX 权重缓存指向挂载卷(chat.py 读此 env;缺省 tempdir 随容器蒸发)
       FASTEMBED_CACHE_PATH: /root/.cache/fastembed

@@ -60,6 +60,11 @@ def _bootstrap_sealed_env() -> None:
     # 与 /api/store/chat,日顶/游客额会把既有契约例打成配额拒;闸专项测试显式
     # monkeypatch AI_QUOTA_GATE=1 + 唯一键自隔离
     os.environ.setdefault("AI_QUOTA_GATE", "0")
+    # 登录限流松绑(2026-10-23 生产审计):auth_login 10/min 是生产防爆破值,但密封
+    # 套件同 IP 复用登录极多(analytics 93 例逐例真登);限流行为由 test_rate_limit.py
+    # 专项钉死(monkeypatch 低阈值),契约套件不与限流基础设施纠缠(与配额闸同纪律)
+    os.environ.setdefault("RATE_LIMIT_AUTH_LOGIN_IP_MAX", "100000")
+    os.environ.setdefault("RATE_LIMIT_AUTH_LOGIN_TENANT_MAX", "100000")
     if not _CONTAINERS and os.environ.get("AGENT_ALL_TEST_USE_EXTERNAL") != "1":
         # Docker Desktop(macOS)默认 context 指向 ~/.docker/run/docker.sock,该路径挂进
         # ryuk 容器不通(Desktop 仅对 /var/run/docker.sock 做特权 socket 转发)→ ryuk

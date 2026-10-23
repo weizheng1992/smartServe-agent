@@ -50,12 +50,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 # 分钟级管线,匿名可打即资源耗尽面;列/写/删/传/查同前缀一网节流)。
 # auth_register 单挂注册端点(resource-3:注册建 users+商户客户行两表写入,
 # 无节流即脚本批量造号面;10/分钟已远超真人操作密度,不影响契约测试)。
+# auth_login 单挂登录端点(2026-10-23 生产审计:登录此前不在任何限流域,四端
+# 公网可达 + bcrypt 离线慢哈希挡不住在线字典爆破;与 register 同密度镜像)。
 _RATE_SCOPES = (
     ("/api/chat", "chat"),
     ("/spi/v1", "spi"),
     ("/api/store", "store"),
     ("/api/rag", "rag"),
     ("/api/auth/register", "auth_register"),
+    ("/api/auth/login", "auth_login"),
 )
 
 _DEFAULT_LIMITS = {
@@ -64,6 +67,7 @@ _DEFAULT_LIMITS = {
     "store": {"tenant": 120, "ip": 240},
     "rag": {"tenant": 30, "ip": 60},
     "auth_register": {"tenant": 10, "ip": 10},
+    "auth_login": {"tenant": 10, "ip": 10},
 }
 
 # KEYS=各维度窗口键;ARGV=[now_ms, window_ms, limit_1..N, member_1..N]

@@ -24,7 +24,7 @@ import uuid
 import pytest
 import pytest_asyncio
 
-from .conftest import _TS, CONTRACT_APPROVAL, create_thread
+from .conftest import _TS, CONTRACT_APPROVAL, CONTRACT_THREAD, create_thread
 
 pytestmark = pytest.mark.usefixtures("seeded")
 
@@ -201,6 +201,50 @@ class TestGetListStaffFace:
         )
         assert res.status_code == 200
         assert CONTRACT_APPROVAL in [item["id"] for item in res.json()["approvals"]]
+
+    async def test_anonymous_get_redacts_pii_fields(self, client, contract_fixtures):
+        """匿名脱敏(2026-10-23 生产审计收口):匿名列表可见工单存在性(顾客卡
+        靠 id/threadId/status/actionType 工作),但 userEmail/userId/actionPayload
+        与决议人字段一律置空 —— 掐断「GET 泄漏属主 userId → POST 自报过归属闸」
+        组合链与 PII 直出。"""
+        res = await client.get(
+            "/api/chat/approvals",
+            params={"tenantId": "nike", "status": "waiting"},
+        )
+        assert res.status_code == 200
+        item = next(
+            (a for a in res.json()["approvals"] if a["id"] == CONTRACT_APPROVAL), None
+        )
+        assert item is not None  # 卡面消费的字段照常在场
+        assert item["threadId"] == CONTRACT_THREAD
+        assert item["actionType"] == "processRefund"
+        assert item["status"] == "waiting"
+        for field in (
+            "userEmail",
+            "userId",
+            "actionPayload",
+            "rejectionReason",
+            "humanReply",
+            "resolvedBy",
+            "resolvedByRole",
+        ):
+            assert item[field] is None, f"匿名列表不得吐 {field}"
+
+    async def test_staff_get_keeps_full_fields(self, client, contract_fixtures, nike_operator):
+        """员工 JWT 对照组:脱敏只作用于匿名臂 —— 员工列表照常拿到属主 userId
+        与 actionPayload(admin 大盘/审计列的真实数据源)。"""
+        res = await client.get(
+            "/api/chat/approvals",
+            params={"tenantId": "nike", "status": "waiting"},
+            headers={"Authorization": f"Bearer {nike_operator['token']}"},
+        )
+        assert res.status_code == 200
+        item = next(
+            (a for a in res.json()["approvals"] if a["id"] == CONTRACT_APPROVAL), None
+        )
+        assert item is not None
+        assert item["userId"] == "u_contract"
+        assert item["actionPayload"] == {"orderId": "ORD-CONTRACT-1", "amount": 300}
 
 
 class TestLiveDeskButtonPermSeed:

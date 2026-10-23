@@ -52,6 +52,10 @@ cd <ad-kg 仓库根目录> && docker compose up -d && cd -   # 克隆 ad-kg 后�
 bash scripts/init_external_pg.sh    # 共享 PG 建 agent_user 角色 + 两库(幂等,一次性;跨机模式见脚本头注)
 
 # 1) 环境变量:复制模板并改密(LLM 端点/PG/Redis 凭据必改;PG 主机名固定 adkg-postgres)
+#    ⚠️ E2E_ACCOUNT_PASSWORD 必须显式设强值(2026-10-23 生产审计):全部种子账号
+#    (platform@aurora 等 13 员工 + test@example.com)的登录口令缺省回落仓库字面量
+#    agent-all-dev——看过仓库/演示的人即可直登 platform_admin 上帝视角。已存量落库
+#    的账号不受 env 追溯,轮换见 .env.prod.example 同名注释。
 cp deploy/.env.prod.example deploy/.env.prod
 vim deploy/.env.prod
 

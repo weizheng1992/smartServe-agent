@@ -137,14 +137,32 @@ class TestRateLimitMiddleware:
             assert res.status_code != 429, f"审批面不得再挂 SPI 限流: {res.status_code}"
 
     def test_rate_scopes_pin_real_contract_face(self):
-        """范围映射钉死:chat + 真合同面 /spi/v1 + 商城写面 /api/store;
+        """范围映射钉死:chat + 真合同面 /spi/v1 + 商城写面 /api/store + 登录;
         /api/v1/spi 审批面不在册。"""
         from gateway_py.rate_limit import _RATE_SCOPES
 
         assert ("/api/chat", "chat") in _RATE_SCOPES
         assert ("/spi/v1", "spi") in _RATE_SCOPES
         assert ("/api/store", "store") in _RATE_SCOPES, "无鉴权商城写面必须在限流范围内(审计 #2)"
+        assert ("/api/auth/login", "auth_login") in _RATE_SCOPES, "公网登录面必须有限流(2026-10-23 生产审计)"
         assert all(prefix != "/api/v1/spi" for prefix, _ in _RATE_SCOPES)
+
+    async def test_login_burst_throttled(self, client, monkeypatch):
+        """登录防爆破(2026-10-23 生产审计):/api/auth/login 四端公网可达且此前
+        不在任何限流域 —— 错误口令连打必须 429 收口(conftest 对套件整体松绑,
+        本测 monkeypatch 低阈值钉行为)。"""
+        monkeypatch.setenv("RATE_LIMIT_AUTH_LOGIN_TENANT_MAX", "99")
+        monkeypatch.setenv("RATE_LIMIT_AUTH_LOGIN_IP_MAX", "2")
+        for _ in range(2):
+            res = await client.post(
+                "/api/auth/login", json={"email": "burst@x.test", "password": "wrong"}
+            )
+            assert res.status_code == 401  # 错口令诚实 401,但未到限额
+
+        over = await client.post(
+            "/api/auth/login", json={"email": "burst@x.test", "password": "wrong"}
+        )
+        assert over.status_code == 429  # 第 3 发在 IP 维被截,爆破面收口
 
     async def test_store_face_ip_throttled(self, client, monkeypatch):
         """商城面(含无鉴权领券写面)挂 IP 维限流(2026-10-15 安全审计 #2):

@@ -896,11 +896,12 @@ class TestApprovals:
             )
             await session.commit()
 
-    async def test_resolve_carries_actor_identity(self, client, contract_fixtures, staff_auth):
+    async def test_resolve_carries_actor_identity(self, client, contract_fixtures, staff_auth, nike_operator):
         """核准人契约(admin-readiness 01 + 02 安全先行改版):员工面身份来自
         JWT(actor 显式声明/缺省取员工 email),顾客面固定 customer 语义;
         均落 actionPayload.resolvedBy/resolvedByRole 并由列表顶层透出;
-        非法 actorRole 归 system。"""
+        非法 actorRole 归 system。2026-10-23 起回读一律持员工 JWT(匿名列表
+        脱敏不见 actionPayload,见 test_chat_approval_surface_auth 脱敏例)。"""
         import uuid as _uuid
 
         from .conftest import _TS, create_thread
@@ -918,7 +919,7 @@ class TestApprovals:
             json={"approvalId": aid, "action": "approve", "actor": "op_12(王店长)", "actorRole": "merchant_operator"},
         )
         assert res.status_code == 200
-        listing = await client.get("/api/approvals", params={"tenantId": "aurora"})
+        listing = await client.get("/api/approvals", params={"tenantId": "aurora"}, headers=staff_auth)
         row = next(a for a in listing.json()["approvals"] if a["id"] == aid)
         assert row["actionPayload"]["resolvedBy"] == "op_12(王店长)"
         assert row["actionPayload"]["resolvedByRole"] == "merchant_operator"
@@ -934,7 +935,7 @@ class TestApprovals:
             json={"approvalId": aid2, "action": "reject", "rejectionReason": "契约驳回"},
         )
         assert res2.status_code == 200
-        listing2 = await client.get("/api/approvals", params={"tenantId": "aurora"})
+        listing2 = await client.get("/api/approvals", params={"tenantId": "aurora"}, headers=staff_auth)
         row2 = next(a for a in listing2.json()["approvals"] if a["id"] == aid2)
         assert row2["status"] == "rejected"
         assert row2["actionPayload"]["resolvedBy"] == "test@example.com"
@@ -949,7 +950,11 @@ class TestApprovals:
             json={"approvalId": aid3, "action": "approve", "actor": "ghost", "actorRole": "hacker", "userId": "u_contract"},
         )
         assert res3.status_code == 200
-        listing3 = await client.get("/api/approvals", params={"tenantId": "nike"})
+        listing3 = await client.get(
+            "/api/approvals",
+            params={"tenantId": "nike"},
+            headers={"Authorization": f"Bearer {nike_operator['token']}"},
+        )
         row3 = next(a for a in listing3.json()["approvals"] if a["id"] == aid3)
         assert row3["actionPayload"]["resolvedBy"] == "customer"
         assert row3["actionPayload"]["resolvedByRole"] == "customer"

@@ -370,9 +370,10 @@ async def list_approvals(
     ctx = get_tenant_context()
     effective_tenant = tenantId or businessId or (ctx or {}).get("tenantId")
     # 13 GET 收口(最小面):持员工 JWT 时列表按本租户收窄,显式租户参数与
-    # 本租户不一致 403(与 POST 员工路径对象级同口径)。裸匿名维持历史放行
-    # —— apps/web 顾客审批卡轮询与 admin 大盘仍依赖匿名 GET,硬切 401 归
-    # 票 14(apps/web 接线)同批收紧;顾客 JWT/属主过滤面届时一并落。
+    # 本租户不一致 403(与 POST 员工路径对象级同口径)。裸匿名维持放行但
+    # 2026-10-23 起脱敏(见下方 redaction 块)—— apps/web 顾客审批卡轮询与
+    # admin 大盘依赖匿名可达,硬切 401 仍归票 14(apps/web 接线)同批收紧;
+    # 顾客 JWT/属主过滤面届时一并落。
     staff = await optional_staff(authorization)
     if staff is not None:
         staff_tenant = staff.staff.business_id
@@ -394,6 +395,21 @@ async def list_approvals(
         item["humanReply"] = payload.get("humanReply") or None
         item["resolvedBy"] = payload.get("resolvedBy") or None
         item["resolvedByRole"] = payload.get("resolvedByRole") or None
+    if staff is None:
+        # 匿名脱敏(2026-10-23 生产审计收口):匿名列表不再吐 userEmail/userId/
+        # actionPayload 与决议人字段 —— 防两点:PII 直出(订单号/金额/邮箱),与
+        # 「GET 喂 POST」组合链(此前匿名 GET 泄漏属主 userId,POST 自报该 userId
+        # 即过线程归属闸,可匿名核准/驳回退款)。apps/web 顾客卡仅消费 id/
+        # threadId/actionType/status/createdAt(动作提交的 userId 来自会话),
+        # 员工 JWT 路径(admin 大盘/merchant-admin)全量不变;票 14 落地整体收紧。
+        for item in approvals:
+            item["userEmail"] = None
+            item["userId"] = None
+            item["actionPayload"] = None
+            item["rejectionReason"] = None
+            item["humanReply"] = None
+            item["resolvedBy"] = None
+            item["resolvedByRole"] = None
     return {"success": True, "approvals": approvals, "total": len(approvals), "tenantId": effective_tenant}
 
 
