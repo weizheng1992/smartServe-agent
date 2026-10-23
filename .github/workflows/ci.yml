@@ -152,11 +152,28 @@ jobs:
           cd ~/agent-all
           git pull --ff-only
           # 镜像传输走南大代理(国内直连 ghcr.io 拉 GB 级 layer 会断流,B 机实测两连挂),
-          # 拉完 retag 回正规名,compose 文件保持 ghcr.io 原名不留镜像源歧义
-          docker pull ghcr.nju.edu.cn/weizheng1992/smartserve-gateway:latest
-          docker tag ghcr.nju.edu.cn/weizheng1992/smartserve-gateway:latest ghcr.io/weizheng1992/smartserve-gateway:latest
-          docker pull ghcr.nju.edu.cn/weizheng1992/smartserve-web:latest
-          docker tag ghcr.nju.edu.cn/weizheng1992/smartserve-web:latest ghcr.io/weizheng1992/smartserve-web:latest
+          # 拉完 retag 回正规名,compose 文件保持 ghcr.io 原名不留镜像源歧义。
+          # 新鲜度闸(2026-10-23 实弹收口):南大镜像对刚推送的镜像有同步延迟,拉到旧镜像
+          # 不会报错——compose up 无变化、容器静默陈旧、健康断言打在旧 gateway 上照样绿
+          # (10-21/10-22 两次推送均如此落地失败)。故先比 manifest 哈希(纯元数据,秒级),
+          # 镜像源滞后才回落直连 ghcr(B 机已持久 docker login,直连可用但慢)。
+          pull_image() {
+            local img=$1
+            local nj=ghcr.nju.edu.cn/weizheng1992/$img gh=ghcr.io/weizheng1992/$img
+            local nj_raw gh_raw
+            nj_raw=$(docker manifest inspect $nj:latest 2>/dev/null || true)
+            gh_raw=$(docker manifest inspect $gh:latest 2>/dev/null || true)
+            if [ -n "$nj_raw" ] && [ -n "$gh_raw" ] \
+               && [ "$(echo "$nj_raw" | sha256sum)" = "$(echo "$gh_raw" | sha256sum)" ]; then
+              docker pull $nj:latest
+              docker tag $nj:latest $gh:latest
+            else
+              echo ":: 镜像源未同步($img),回落直连 ghcr.io"
+              docker pull $gh:latest
+            fi
+          }
+          pull_image smartserve-gateway
+          pull_image smartserve-web
           docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d
           REMOTE
           rm -f ~/deploy_key
