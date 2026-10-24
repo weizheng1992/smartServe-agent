@@ -4,7 +4,29 @@
 
 ---
 
-## [2.21.0] - 2026-10-23 (线上实弹收口日:B 机生产安全审计三修 + 实时协同缺口三连修 + 坐席主动介入;评测门禁六册落地)
+## [2.22.0] - 2026-10-24 (多轮任务状态管理 P0-P2 落地日:task_state/边界判定器/步级 journal/KV-cache 纪律;记忆系统 SOTA 对齐;AI 用量面板;评测体系五票)
+
+### ✨ Features
+
+- **多轮任务状态管理 P0-P2**(4e12452 设计定稿;1314279 P0 / f8a9480 P1 / 7948dbb P2,docs/multi-turn-task-state.md):六票三批全落地 —— **P0** 结构化 task_state 小节(retire_and_set 覆盖即退休 + superseded 截帽 / hot keys 白名单拒绝留痕 / 序列化截帽 80·20·40 / turns 单调计数)+ badcase 回灌 shadow 集(suspected_defect 先验族派生、脱敏兜底、CLI shadow/promote 人审转正、夜评 sh01 advisory 报告例);**P1** 任务边界判定器(triage 结构化输出加 boundary{modify|new,confidence,rationale,entitiesChanged},与意图分类同源零额外调用;llm_refine 低置信澄清旁路 fail 方向=澄清严禁默认重规划;planner Boundary-Preserve 保留既有计划零 LLM,四道门禁逐一钉死;评测 30 例实弹首跑 26/30)+ 多轮任务健康度看板(网关 summary taskHealth 五指标 + merchant-admin 五 KPI 卡 null 诚实缺省);**P2** 步级 journal(0028 迁移 append-only 表,executor_node 进出 plan diff 单缝写点;run_agent 非 System 轮载回 + rebuild 真值修补;崩溃臂 plan_to_persist_on_crash 严禁空桩覆写在途计划——恢复面存续根因修复)+ KV-cache 前缀纪律(快照测试钉 append-only 前缀稳定性 + 确定性两性质)。
+- **记忆系统 SOTA 对齐**(462efb8 / aa98ef3 / 4f2cb16,docs/memory-sota-upgrade.md):画像事实主体归属(subject 维度 + 身材同维度最新覆盖 + pending 再现升级闭环)+ 审计 op 裁决(UPDATE 权威豁免 / DELETE 清槽位 / 租户过滤 / badcase 零原文)+ 结构化画像槽位(profile_slots 0027)+ episodic 三因子打分(阈值锚定 base)。
+- **AI 用量面板**(484df4a P0 / 608628a / 9ef6385 P1,docs/ai-usage-panel.md):轮↔调用精确关联 + 商户后台用量页 + 商城端 ?debug=usage 角标(仅本机渲染仅当轮);历史轮标签「未知(降级轮)」→「未记录」诚实修正。
+- **商户目录扩充**(8c14a2a):38 SPU/119 SKU + 产品 RAG 加厚(规格矩阵 + 口碑聚合)+ 旅行/骑行知识册。
+- **工作台收敛与坐席台 UX**(4d36136 / e1cfe1d):双工作台困惑收口 —— m-agent-desk 升正「客服工作台」、m-live-desk 改名「待办审核」指向 /approvals 纯审批面;客服会话列表优化(未读红点归位头像 / 相对时间列 / 描边按钮 / 恒定两行结构)。
+
+### 🔧 Fixes
+
+- **HITL reject 恢复链四连修**(ebd3ffc,eval-gap-2026-10 17 号票):驳回后恢复不重挂死环(reject → resume 不再二次 suspend)、金额三源 grounding(商户真单优先,废 999999.99 哨兵恒超限)、PlanAlignment 恢复豁免、BLOCKED 零计错;夜评 c36 真弹转绿翻严判。
+- **引擎票三连修**(b649819,eval-gap 14/15/16 号):L0 域外实体入口闸(「竞品卖得怎么样」不再静默落 volume)+ compose 垃圾串归一/环比置位/成品指标硬闸 + T2 首分号截断与 Identifier 引号化;known-drift 三例全部迎回,数据册 42/42 重钉。
+- **夜评双轴评审两修**(b0788d5,nightly 2026-10-24):`_ingest_fact` 回声/覆盖候选查询补租户条件(裸 user_id+subject 漏网令 B 租户 ingest 可 supersede A 租户 tenant 画像——多租户隔离击穿;同文件三处同款唯此查询漏网)+ `APPROVAL_ECHO_GUARD_MINUTES` 收口 config 单点(坏值回落不炸导入)。
+
+### 🧪 Tests / 评测
+
+- **评测体系五票**(4d5324b / b22ce7d / e2088f4,eval-gap-2026-10 02/03/04/06/07):HITL 审批恢复链终态评测(c35/c36 三段剧本 τ 式终态判分,reject 分支首跑实证引擎缺陷三连)+ 流可靠性评测层(s01 断线补投 DB 时间线锚定、s02 打断终态全链)+ 工具轨迹真断言(expectedTools 回声废除改端到端真跑 + 终态轨迹提取,irrelevance 零派发三负例)+ 意图集再生性双护栏(覆写护栏 + 行数单调地板)与 pass^3 可靠性口径、意图 95 闸入夜评 + judge 校准复判包(05 号基建)。
+- **夜评 Spec 轴三补**(5c0d4e8):工作台收敛一次性 SQL 交付(docs/sql/,4d36136 声称随批而缺文件)+ multi-turn spec §5 ⚠️ 段过期修正 + eval-gap 票簿记(14-17 AC 补勾、07 号 AC④ 补 18 号票载体)。
+- **夜间评测 58 用例**:首跑 56/58,两败(s01/s02)均定性环境事故——旧网关在评测尾段被外部替换(ConnectError 窗口)+ 替换实例配额闸默认开(.env 缺 AI_QUOTA_GATE=0 行,QUOTA_USER_DAILY 静默拒);按端口隔离纪律自拉 4001(关闸关 scheduler)复跑 s01/s02 双 PASS,行为面全绿;意图解析 564 例 99.3% 达标(闸 95%)。环境侧已补 .env 闸行,launchd 网关需重启生效留晨审。
+
+
 
 ### ✨ Features
 
