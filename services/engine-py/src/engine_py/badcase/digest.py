@@ -61,4 +61,14 @@ async def run_badcase_digest() -> dict:
         print(f"[BadcaseDigest] 池分布={summary['distribution']} 过期转dismissed={summary['expired']} 清理={summary['purged']}")
     except Exception as err:
         print(f"[BadcaseDigest] 摘要/保留期执行异常: {err}")
+
+    # 回灌 shadow 集自动起草(docs/multi-turn-task-state.md P0-2/D7):挂在
+    # 保留期之后跑 —— 过期候选已转 dismissed,不会进起草面;独立 try 自吞,
+    # 起草失败不影响摘要/保留期主职责。
+    try:
+        from .shadow import auto_draft_shadow_cases
+
+        summary["shadow"] = await auto_draft_shadow_cases()
+    except Exception as err:
+        print(f"[BadcaseDigest] shadow 自动起草异常(不阻断): {err!r}")
     return summary

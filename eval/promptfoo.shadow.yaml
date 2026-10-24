@@ -1,0 +1,24 @@
+description: "badcase 回灌 shadow 集(docs/multi-turn-task-state.md P0-2/D7)—— 夜评只跑只报告、不出闸"
+
+# 结构性不出闸:本文件不被 run_nightly / pinBaselines / compareBaselines 引用,
+# 主配置(promptfooconfig.yaml)suites 显式列举也不含 testCases/shadow/。
+# shadow 草稿由引擎 digest 节奏(6h)自动起草、人审 `cli promote` 转正进硬闸套件;
+# 本配置只用于人工/节奏任务观察 shadow 草稿在真实网关上的表现。
+
+prompts:
+  - "{{input}}"
+
+providers:
+  - "file://providers/agent_provider.py:call_api"
+
+defaultTest:
+  options:
+    provider: "file://providers/agent_provider.py:call_api"
+    # 数组 vars 律(2026-10-23,与主配置同律):期望集必须整队断言,一律关展开
+    disableVarExpansion: true
+
+evaluateOptions:
+  maxConcurrency: 1
+
+tests:
+  - testCases/shadow/pending.json

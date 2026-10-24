@@ -118,6 +118,20 @@ class Settings:
     # 20 条全量无预算曾是无界增长点(成本/延迟/溢出三重)
     history_budget_tokens: int = field(default_factory=lambda: int(_env("AI_HISTORY_BUDGET_TOKENS", "2000")))
 
+    # 任务态实体热键白名单(docs/multi-turn-task-state.md P0-1/D8):白名单外
+    # 的槽位键不进结构化任务态(防垃圾串入提示词)。键为 snake 规范形,
+    # camelCase 槽位键(orderId/guestCount)在入口先归一;扩展改 env 即可。
+    task_state_hot_keys: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            k.strip()
+            for k in _env(
+                "AI_TASK_STATE_HOT_KEYS",
+                "date,time,city,address,product,order_id,guest_count",
+            ).split(",")
+            if k.strip()
+        )
+    )
+
     # L2 商品语义召回(2026-09-11):词元 ILIKE 查空时 bge 余弦补位。默认开;
     # 阈值 0.55 系真 bge-small-zh 实测定标(2026-09-11 实测分布:口语措辞 vs
     # 商品文案的正例落 0.56-0.58、无关品类 0.36-0.45 —— bge-small 的余弦

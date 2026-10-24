@@ -9,12 +9,19 @@
         [--expected-tools listUserOrders,getOrderStatus] [--not-contains 退款已到账] \
         [--intents order_status] [--out /path/to/case.json]
     uv run python -m engine_py.badcase.cli expire                 # 立即执行保留期(90d/30d)
+    uv run python -m engine_py.badcase.cli shadow                # shadow 集自动起草(P0-2,高置信信号→pending.json)
+    uv run python -m engine_py.badcase.cli promote <候选ID> --suite testCases/ecommerce/order-query.json \
+        [--expected-tools ...] [--not-contains ...] [--input 手改输入]   # 人审转正进硬闸套件
 
 设计原则(2026-09-03 评审锁定):
 - 信号只入池,永不直接成为回归断言;``draft`` 产出的用例由人确认后手工并入
   ``eval/testCases/``,跑通 promptfoo 再 ``triage --status converted`` 留痕;
 - 断言最小化:只写 ``expectedTools`` / ``not-contains``,禁止整句黄金答案;
 - 仓库零原始数据:draft 的 ``--input`` 必须基于脱敏侧撰写(``show`` 已给对照)。
+
+shadow 通道(docs/multi-turn-task-state.md P0-2/D7,2026-10-24):高置信信号
+自动起草进 ``eval/testCases/shadow/pending.json``(不被任何硬闸 yaml 引用,
+夜评只跑只报告);promote 是人审闸 —— 选套件、补断言都在这一步发生。
 """
 
 from __future__ import annotations
@@ -34,6 +41,26 @@ from .redaction import redact_text
 
 # draft 允许的状态:confirmed(评审确认)后才能起草;converted 后禁止重复起草
 _DRAFT_ALLOWED_STATUS = ("candidate", "confirmed")
+
+# promote 额外允许 shadow_draft(自动起草产物;docs/multi-turn-task-state.md P0-2)
+_PROMOTE_ALLOWED_STATUS = ("candidate", "confirmed", "shadow_draft")
+
+
+def apply_case_assertions(
+    case: dict, expected_tools: str, expected_intents: str, not_contains: str
+) -> dict:
+    """断言旗标 → case(与 cmd_draft 同一口径;promote 复用,断言最小化纪律)。"""
+    expected_tools_list = [t.strip() for t in (expected_tools or "").split(",") if t.strip()]
+    expected_intents_list = [t.strip() for t in (expected_intents or "").split(",") if t.strip()]
+    if expected_tools_list:
+        case["vars"]["expectedTools"] = expected_tools_list
+    if expected_intents_list:
+        case["vars"]["expectedIntents"] = expected_intents_list
+    if expected_tools_list or expected_intents_list:
+        case["assert"].append({"type": "javascript", "value": "file://scorers/intentF1.scorer.ts"})
+    for phrase in [p.strip() for p in (not_contains or "").split(",") if p.strip()]:
+        case["assert"].append({"type": "not-contains", "value": phrase})
+    return case
 
 
 def _short_id(c: BadcaseCandidate) -> str:
@@ -126,16 +153,21 @@ async def _show_approval(approval_id: str, business_id: str | None) -> None:
     print(f"  脱敏后: {await redact_text(payload, business_id)}")
 
 
-async def cmd_triage(args: argparse.Namespace) -> None:
-    c = await _get_candidate(args.id)
+async def _mark_candidate(candidate_id, status: str, note: str | None) -> None:
+    """候选状态留痕单点(triage/promote 共用;note 追加式留痕)。"""
     async with get_session() as session:
         row = (
-            await session.execute(select(BadcaseCandidate).where(BadcaseCandidate.id == c.id))
+            await session.execute(select(BadcaseCandidate).where(BadcaseCandidate.id == candidate_id))
         ).scalar_one()
-        row.status = args.status
-        if args.note:
-            row.note = f"{row.note or ''}; {args.note}".lstrip("; ")
+        row.status = status
+        if note:
+            row.note = f"{row.note or ''}; {note}".lstrip("; ")
         await session.commit()
+
+
+async def cmd_triage(args: argparse.Namespace) -> None:
+    c = await _get_candidate(args.id)
+    await _mark_candidate(c.id, args.status, args.note)
     print(f"[BadcaseCLI] 候选 {_short_id(c)} → {args.status}" + (f"(备注: {args.note})" if args.note else ""))
 
 
@@ -160,16 +192,7 @@ async def cmd_draft(args: argparse.Namespace) -> None:
         },
         "assert": [],
     }
-    expected_tools = [t.strip() for t in (args.expected_tools or "").split(",") if t.strip()]
-    expected_intents = [t.strip() for t in (args.intents or "").split(",") if t.strip()]
-    if expected_tools or expected_intents:
-        if expected_tools:
-            case["vars"]["expectedTools"] = expected_tools
-        if expected_intents:
-            case["vars"]["expectedIntents"] = expected_intents
-        case["assert"].append({"type": "javascript", "value": "file://scorers/intentF1.scorer.ts"})
-    for phrase in [p.strip() for p in (args.not_contains or "").split(",") if p.strip()]:
-        case["assert"].append({"type": "not-contains", "value": phrase})
+    case = apply_case_assertions(case, args.expected_tools, args.intents, args.not_contains)
 
     payload = json.dumps([case], ensure_ascii=False, indent=2)
     if args.out:
@@ -177,6 +200,86 @@ async def cmd_draft(args: argparse.Namespace) -> None:
         print(f"[BadcaseCLI] 用例草稿已写入 {args.out}(人工确认后并入 eval/testCases/,跑通后 triage --status converted)")
     else:
         print(payload)
+
+
+async def cmd_shadow(_: argparse.Namespace) -> None:
+    """立即执行 shadow 集自动起草(digest 6h 节奏同函数;P0-2 手动触发口)。"""
+    from .shadow import auto_draft_shadow_cases, default_pending_path
+
+    summary = await auto_draft_shadow_cases()
+    print(
+        f"[BadcaseCLI] shadow 起草完成: drafted={summary['drafted']} skipped={summary['skipped']} "
+        f"→ {default_pending_path()}"
+    )
+
+
+async def cmd_promote(args: argparse.Namespace, *, pending_path=None, eval_dir=None) -> None:
+    """人审转正:shadow 草稿(或 --input 现写)补断言 → 并入硬闸套件 → 留痕 converted。
+
+    D7 纪律的人工侧:套件文件由人显式指定(--suite),选哪个硬闸集、加什么
+    断言都是评审决定 —— 自动只到 shadow 为止。``pending_path``/``eval_dir``
+    为注入缝(测试);缺省分别取仓库 shadow 集与 ``<repo>/eval/``。
+    """
+    from .shadow import (
+        STATUS_SHADOW_DRAFT,
+        build_shadow_case,
+        default_pending_path,
+        load_pending,
+        remove_shadow_case,
+        save_pending,
+    )
+
+    c = await _get_candidate(args.id)
+    if c.status not in _PROMOTE_ALLOWED_STATUS:
+        raise SystemExit(f"[BadcaseCLI] 状态 {c.status} 不可转正(需 candidate/confirmed/{STATUS_SHADOW_DRAFT})")
+
+    _default = default_pending_path()
+    pending_path = pending_path or _default
+    origin = f"badcase:{c.id}"
+    pending = load_pending(pending_path)
+    case, pending = remove_shadow_case(pending, origin)
+    if case is not None:
+        if args.input:
+            case["vars"]["input"] = await redact_text(args.input, c.business_id)
+        print(f"[BadcaseCLI] 取 shadow 草稿(origin={origin[:20]}…),输入: {case['vars']['input']}")
+    elif args.input:
+        redacted_input = await redact_text(args.input, c.business_id)
+        case = build_shadow_case(str(c.id), c.signal_source, redacted_input)
+        print(f"[BadcaseCLI] shadow 无草稿,按 --input 现建(origin={origin[:20]}…)")
+    else:
+        raise SystemExit(
+            "[BadcaseCLI] shadow 集无该候选草稿且未给 --input(可先 `shadow` 自动起草或 --input 现写)"
+        )
+
+    if args.description:
+        case["description"] = f"[badcase:{_short_id(c)}] {args.description}"
+    case = apply_case_assertions(case, args.expected_tools, args.intents, args.not_contains)
+
+    eval_dir = eval_dir or _default.parents[2]  # 默认几何:pending.json → shadow/ → testCases/ → eval/
+    suite_path = Path(args.suite)
+    if not suite_path.is_absolute():
+        suite_path = eval_dir / suite_path
+    suite = []
+    if suite_path.exists():
+        try:
+            loaded = json.loads(suite_path.read_text(encoding="utf-8"))
+            suite = loaded if isinstance(loaded, list) else []
+        except ValueError as err:
+            raise SystemExit(f"[BadcaseCLI] 套件文件不是合法 JSON 数组: {suite_path} ({err})") from err
+    suite.append(case)
+    suite_path.parent.mkdir(parents=True, exist_ok=True)
+    suite_path.write_text(json.dumps(suite, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    save_pending(pending_path, pending)  # 已转正,从 shadow 集摘除
+
+    async with get_session() as session:
+        row = (
+            await session.execute(select(BadcaseCandidate).where(BadcaseCandidate.id == c.id))
+        ).scalar_one()
+        row.status = "converted"
+        if args.note:
+            row.note = f"{row.note or ''}; {args.note}".lstrip("; ")
+        await session.commit()
+    print(f"[BadcaseCLI] 已转正 → {suite_path}(共 {len(suite)} 例);候选 {_short_id(c)} → converted")
 
 
 async def cmd_expire(_: argparse.Namespace) -> None:
@@ -214,6 +317,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p_draft.add_argument("--context", help="附加上下文(须自行脱敏)")
     p_draft.add_argument("--out", help="输出文件路径(缺省打印到 stdout)")
     p_draft.set_defaults(func=cmd_draft)
+
+    p_shadow = sub.add_parser(
+        "shadow", help="立即执行 shadow 集自动起草(高置信信号 → eval/testCases/shadow/,digest 6h 节奏同函数)"
+    )
+    p_shadow.set_defaults(func=cmd_shadow)
+
+    p_promote = sub.add_parser(
+        "promote", help="人审转正:shadow 草稿补断言并入硬闸套件,候选留痕 converted(P0-2 最后一公里)"
+    )
+    p_promote.add_argument("id", help="候选 ID(支持 8 位短 ID 前缀)")
+    p_promote.add_argument(
+        "--suite", required=True, help="目标硬闸套件(eval 相对路径,如 testCases/ecommerce/order-query.json)"
+    )
+    p_promote.add_argument("--input", help="覆盖/现写回归输入(缺省用 shadow 草稿的脱敏输入)")
+    p_promote.add_argument("--description", help="覆盖用例描述")
+    p_promote.add_argument("--expected-tools", default="", help="逗号分隔,如 listUserOrders,getOrderStatus")
+    p_promote.add_argument("--intents", default="", help="逗号分隔,如 order_status")
+    p_promote.add_argument("--not-contains", default="", help="逗号分隔的禁止出现短语")
+    p_promote.add_argument("--note", help="转正理由(追加入 note 留痕)")
+    p_promote.set_defaults(func=cmd_promote)
 
     p_expire = sub.add_parser("expire", help="立即执行保留期(candidate 90d / dismissed 30d)")
     p_expire.set_defaults(func=cmd_expire)

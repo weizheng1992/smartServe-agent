@@ -58,16 +58,23 @@ def build_history_block(
     messages: list[dict] | None,
     summary: str | None = None,
     budget: int | None = None,
+    task_state_line: str | None = None,
 ) -> dict:
     """历史 → {block, overflow, kept_count, trimmed}。
 
     从最新往旧累积整轮,预算耗尽即停:更老的轮次整体进 ``overflow``(交由
     懒触发摘要),保留段保持时间正序。预算再小也至少保留最新一轮 —— 当轮
     上下文绝不能只剩摘要。``summary`` 非空时渲染 ``[EARLIER SUMMARY]:`` 段。
+    ``task_state_line`` 非空时渲染 ``[TASK STATE]`` 段且**置于最前**(任务层
+    段前置于装配面,docs/multi-turn-task-state.md P0-1);与摘要同律不占预算。
     """
     messages = messages or []
     if budget is None:
         budget = settings.history_budget_tokens
+    if task_state_line:
+        # 任务层段受同一预算管控(P0-1 规格;code-review 裁定):先扣自身
+        # 成本再装轮,序列化截帽保证扣减有界;预算扣穿仍保底最新一轮
+        budget = max(budget - estimate_tokens(task_state_line.strip()), 0)
 
     # 正序格式化(轮次号 = 会话内序号),空行跳过但序号连续
     formatted: list[tuple[int, dict, str]] = []
@@ -91,6 +98,8 @@ def build_history_block(
     kept.reverse()  # 恢复时间正序
 
     sections: list[str] = []
+    if task_state_line:
+        sections.append(task_state_line.strip())
     if summary:
         # 摘要渲染截 600 字:滚动合并不占预算,LLM 不守 300 字时防缓慢膨胀
         sections.append(f"{_EARLIER_HEADER}\n{summary.strip()[:600]}")

@@ -108,6 +108,41 @@ class TestBuildHistoryBlock:
         out = build_history_block(msgs, budget=10)
         assert out["kept_count"] >= 1
 
+    def test_task_state_section_leads_block(self):
+        """任务层段前置于装配面(docs/multi-turn-task-state.md P0-1):渲染在
+        [EARLIER SUMMARY] 与历史轮之前 —— planner/finish 消费 block 的首个段。"""
+        from engine_py.memory.context_builder import build_history_block
+
+        out = build_history_block(
+            [_msg("user", "订当天的酒店")],
+            summary="顾客之前咨询过高铁。",
+            task_state_line="[TASK STATE] 当前任务:上海行程 ｜ 关键实体:date=周三",
+            budget=10_000,
+        )
+        lines = out["block"].splitlines()
+        assert lines[0].startswith("[TASK STATE]")
+        assert "[EARLIER SUMMARY]:" in lines[1]
+        assert "[T1" in lines[3]
+
+    def test_no_task_state_no_header(self):
+        from engine_py.memory.context_builder import build_history_block
+
+        out = build_history_block([_msg("user", "在吗")], budget=10_000)
+        assert "[TASK STATE]" not in out["block"]
+
+    def test_task_state_line_counts_against_budget(self):
+        """任务层段受同一预算管控(P0-1 规格/code-review 裁定):先扣自身成本
+        再装轮;同预算下无任务行能装两轮、有任务行只装一轮 —— 扣减真实生效。"""
+        from engine_py.memory.context_builder import build_history_block
+
+        msgs = [_msg("user", "X" * 20), _msg("assistant", "Y" * 20)]
+        line = "[TASK STATE] " + "字" * 30  # 43 字符
+        without = build_history_block(msgs, budget=100)
+        assert without["kept_count"] == 2
+        out = build_history_block(msgs, task_state_line=line, budget=100)
+        assert out["kept_count"] == 1 and out["trimmed"] is True
+        assert out["block"].startswith("[TASK STATE]")
+
 
 class TestSummarizeOverflow:
     @pytest.mark.asyncio

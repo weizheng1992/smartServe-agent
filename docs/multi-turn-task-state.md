@@ -97,16 +97,17 @@
 }
 ```
 
-- **写入单点** `retire_and_set(key, value, turn)`:覆盖即退休、旧值进 superseded——照搬长记忆已验证模式(`long_memory.py:40-58`)。所有实体更新点(slot 抽取/工具回填)统一走它,替代散点修补。
-- **hot keys 白名单**(D8):初版 `date / time / city / address / product / order_id / guest_count`,可配;白名单外键 → logger 观察通道,不落状态(防垃圾串,compose 归一前科票同源纪律)。
-- **读取**:context_builder 序列化"任务层段"(goal/约束/活跃实体)置于域总线段之前(任务层→域层),受同一预算管控。
+- **写入单点** `retire_and_set(key, value, turn)`:覆盖即退休、旧值进 superseded——照搬长记忆已验证模式(`long_memory.py:40-58`)。**任务层实体的统一入口 = 收口缝 `advance_task_state`**(goal ← 计划、实体 ← 本轮意图槽位、约束 ← 用户输入句式);域总线回填(step_execution「有值才覆盖」)按 D3 分层裁决保持域侧不动,P1-1 边界判定器的 `entities_changed` 落地时再统一走 `retire_and_set`。
+- **hot keys 白名单**(D8):初版 `date / time / city / address / product / order_id / guest_count`,env `AI_TASK_STATE_HOT_KEYS` 可扩;白名单外键 → **观察通道留痕再拒**(print 单行,同轮同名去重刷屏)——静默丢弃会让该扩的白名单无从发现(code-review 裁定,2026-10-24)。
+- **约束来源**(实施细化):保守窄句式正则(不要/不用/无需/只要/尽量/务必 + 1-8 字尾串,句读截停),误收面靠窄模式+截帽(20 字)控制;同文本去重刷新轮次,超帽(3 条)丢最旧。
+- **读取**:context_builder 序列化"任务层段"(goal/约束/活跃实体)置于域总线段之前(任务层→域层),**受同一预算管控**(先扣自身成本再装轮;goal 80/约束 20/实体值 40 截帽保证扣减有界——code-review 裁定),`turns` 自带单调轮次计数(short_memory 截 10 长度非单调)。
 
 ### 4.2 P0-2 · bad case 回灌 shadow 集(飞轮最后一公里)
 
 **解决**:课程⑩回灌的"人工 CLI 起草"断点。
 
 - 现状:信号自动入池(`badcase/intent_signals.py:46,97`,BadcaseCandidate + 去重)→ CLI `cmd_draft` 人工起草(`badcase/cli.py:142-180`)→ 人工并入 testCases。
-- 改造:高置信信号**自动**生成用例草稿 → **shadow 集**(testCases 带 `status=shadow` 或独立文件);夜评对 shadow **只跑只报告、不出闸**;CLI 增 `promote` 命令人工一键转正进硬闸集。
+- 改造:高置信信号**自动**生成用例草稿 → **shadow 集**(`eval/testCases/shadow/pending.json`,不被任何硬闸 yaml 引用——主配置 suites 显式列举,新目录天然不入闸);开闸面**派生自** `pool.SOURCE_PRIORS` 的 suspected_defect 族(circuit_breaker 刻意排除,「单独立案聚合不直接转 case」);夜评新增报告例 `sh01_shadow集`(advisory 恒真:失败不进退出码、不回灌坏例池,空集/promptfoo 缺位诚实记 skipped);CLI `promote` 人审一键转正(选套件+补断言+留痕 converted)。
 - 纪律(D7):自动只到 shadow 为止,人审才拦发版——防误信号锁死发版。
 
 ### 4.3 P1-1 · 任务边界判定器(最大缺口)
@@ -164,12 +165,16 @@
 
 | 票 | 内容 | 依赖 | 验收 |
 |---|---|---|---|
-| **P0-1** | task_state 小节 + retire_and_set + context 任务层序列化 | — | 单测(覆盖/退休/白名单外观察/旧数据缺省)+ context 快照 |
-| **P0-2** | 回灌 shadow 集 + promote 命令 | — | shadow 夜评只跑不出闸;转正后进硬闸 |
+| **P0-1** ✅(2026-10-24) | task_state 小节 + retire_and_set + context 任务层序列化 | — | `test_task_state.py`(29 断言级:退休/白名单观察/缺省兜底/截帽/预算管控)+ `test_context_builder.py` 任务层段断言;run_agent 收口链路回归绿 |
+| **P0-2** ✅(2026-10-24) | 回灌 shadow 集 + promote 命令 | — | `test_badcase_shadow.py`(端到端:起草→promote→硬闸套件落例→converted);夜评 `sh01_shadow集` 报告例 advisory 不出闸 |
 | **P1-1** | 边界判定器(boundary 字段 + modify 载回 + 澄清旁路) | P0-1 | boundary 集 30 例全绿;意图 95 闸 / data 42/42 / t1t2 25/25 不回退 |
 | **P1-2** | 四指标 + 切换代理 d-ops 看板 | — | 口径 SQL 单测;看板呈现;无新采集 |
 | **P2-1** | 步级 journal + 下一轮续跑 | — | 崩溃注入:从最后 ok 步续跑;HITL 不误伤;异常不阻断 |
 | **P2-2** | KV-cache 前缀纪律 + 装配顺序快照测试 | — | 审计清单 + 快照测试 |
+
+P0 批次落地文件(P0-1:`memory/task_state.py`、`memory/context_builder.py`、`config.py` 热键;P0-2:`badcase/shadow.py`、`badcase/cli.py`(shadow/promote)、`badcase/digest.py`(6h 挂钩)、`eval/promptfoo.shadow.yaml`、`eval/testCases/shadow/pending.json`、夜评报告例、`package.json` `test:prompt:shadow`)。
+
+> **⚠️ run_agent 三缝接线暂缓提交(2026-10-24)**:run_agent.py 被并行会话(memory-sota 升级批,0027_profile_slots)共写 —— 其 `thread_id 透传`(op 裁决)长泳道 hunk 依赖同批未提交的 `long_memory.py` 签名,此刻提交 run_agent 会把 HEAD 落成运行时即炸态。按「并行写入不混提交」纪律,任务态接线(载入 prev_task_state/装配 task_state_line/收口 advance+落库)留在工作区,作为并行批落地后的后续小票单独提交;`test_settle_turn_seam` 3 例红同为并行批桩签名未同步所致,非本批引入。
 
 顺序依据(D12/Q12):判定器修用户可感病象,journal 是韧性加固后置不加重病象。
 

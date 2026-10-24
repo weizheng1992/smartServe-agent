@@ -939,6 +939,43 @@ async def run_intent_eval_case() -> dict:
             "fails": [] if code == 0 else ["意图解析准确率 < 95% 硬闸(失败清单见上方输出)"]}
 
 
+async def run_shadow_eval_case() -> dict:
+    """shadow 集报告例(docs/multi-turn-task-state.md P0-2/D7):promptfoo 跑
+    eval/promptfoo.shadow.yaml,只跑只报告不出闸 —— ``advisory`` 恒真:失败不进
+    退出码、不回灌坏例池(shadow 草稿本就来自坏例池,回灌即自锁循环)。空集/
+    promptfoo 缺位/执行异常一律诚实记 skipped,不出假红也不出假绿。"""
+    import shutil as _shutil
+
+    repo = Path(__file__).resolve().parents[2]
+    pending = repo / "eval" / "testCases" / "shadow" / "pending.json"
+    base = {"kind": "shadow", "case_id": "sh01_shadow集", "dimension": "回灌·shadow", "advisory": True}
+    try:
+        loaded = json.loads(pending.read_text(encoding="utf-8")) if pending.exists() else []
+    except (OSError, ValueError):
+        loaded = []
+    cases = loaded if isinstance(loaded, list) else []
+    if not cases:
+        return {**base, "ok": True, "skipped": True, "fails": [], "metrics": {"pending": 0}}
+    exe = _shutil.which("promptfoo")
+    if not exe:
+        return {**base, "ok": True, "skipped": True, "fails": [],
+                "metrics": {"pending": len(cases)},
+                "note": "promptfoo 不在 PATH,本轮跳过(shadow 不出闸,转正前请手动 test:prompt:shadow 观察)"}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            exe, "eval", "-c", "eval/promptfoo.shadow.yaml", "--no-write", "--no-cache",
+            cwd=str(repo), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=900)
+        tail = " | ".join(out.decode("utf-8", "replace").strip().splitlines()[-8:])
+        ok = proc.returncode == 0
+        return {**base, "ok": ok, "skipped": False,
+                "fails": [] if ok else [f"promptfoo shadow 非零退出 {proc.returncode}(advisory 不出闸): {tail}"],
+                "metrics": {"pending": len(cases), "exit_code": proc.returncode}}
+    except Exception as err:
+        return {**base, "ok": True, "skipped": True, "fails": [], "note": f"shadow 执行异常(不出闸): {err!r}"}
+
+
 async def cleanup() -> dict:
     """NIGHTLY_ 前缀数据回收:订单/行项目删除 + 库存回补 + 演示客户不触碰。"""
     from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
@@ -1263,7 +1300,12 @@ async def main() -> int:
         if not os.environ.get("NIGHTLY_SMOKE"):
             await _run_contained(results, run_intent_eval_case,
                                  case_id="i01_意图集95闸", kind="intent", dimension="意图·注册表")
-        for r in [x for x in results if x.get("kind") in ("perf", "stream", "intent")]:
+        # shadow 集报告例(P0-2/D7):只跑只报告不出闸(advisory —— 不进退出码、
+        # 不回灌坏例池);空集/promptfoo 缺位诚实记 skipped
+        if not os.environ.get("NIGHTLY_SMOKE"):
+            await _run_contained(results, run_shadow_eval_case,
+                                 case_id="sh01_shadow集", kind="shadow", dimension="回灌·shadow")
+        for r in [x for x in results if x.get("kind") in ("perf", "stream", "intent", "shadow")]:
             print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
     # 失败喂飞轮(客服侧;坏例池静默降级,不阻断)
