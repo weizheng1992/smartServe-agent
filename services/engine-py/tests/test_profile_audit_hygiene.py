@@ -183,8 +183,9 @@ class TestEchoDedup:
         rows = _rows_of(clean_profile_tables, "t-prof-hygiene-3")
         assert [r["fact"] for r in rows] == ["买包只买黑色的包"]
 
-    def test_echo_of_pending_fact_also_dropped(self, clean_profile_tables):
-        """pending 事实同属回声源 —— 否则待审队列照样被重复污染。"""
+    def test_echo_of_pending_fact_promotes_on_reoccurrence(self, clean_profile_tables):
+        """pending 事实同属回声源,但再现 = 群众复核(2026-10-24 画像归属票):
+        不落重复行,pending 升 approved(补 pending 永无人审的闭环)。"""
         _seed_fact(clean_profile_tables, "t-prof-hygiene-4", "用户喜欢徒步", [1.0, 0.0], status="pending")
         payload = json.dumps(
             {
@@ -197,7 +198,7 @@ class TestEchoDedup:
         )
         _run_audit("t-prof-hygiene-4", payload, {"用户喜欢徒步": [1.0, 0.0]})
         rows = _rows_of(clean_profile_tables, "t-prof-hygiene-4")
-        assert len(rows) == 1 and rows[0]["status"] == "pending"
+        assert len(rows) == 1 and rows[0]["status"] == "approved"
 
     def test_below_threshold_new_fact_still_stored(self, clean_profile_tables):
         """低于阈值(余弦 0.866 < 0.90)是真新事实,照常落库。"""

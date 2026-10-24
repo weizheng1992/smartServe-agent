@@ -164,7 +164,13 @@ async def finish_node(state: AgentState) -> dict:
         # 缺失 scope 兜底 global 与系统语义同向:召回侧 `row.scope or "global"`
         # 已归并,DB 默认即 global;可见性闸在召回 _tenant_visible,渲染侧
         # 不构成 tenant 事实误标全局的泄漏面。
-        return fact.get("scope") if isinstance(fact, dict) and fact.get("scope") in ("global", "tenant") else "global"
+        # 主体前缀(2026-10-24 画像归属票):第三人事实(妻子等)显式标注,
+        # 与本人事实同列时 LLM 不再靠猜主体 —— 尺码/荐品防用错人。
+        scope = fact.get("scope") if isinstance(fact, dict) and fact.get("scope") in ("global", "tenant") else "global"
+        subject = (fact.get("subject") if isinstance(fact, dict) else None) or "self"
+        if subject in ("self", "本人"):
+            return scope
+        return f"{scope}|主体:{subject}"
 
     persona_context = ""
     persona_lines = _memory_lines(state.get("long_memory_facts") or [], "fact", profile_limit, tag=_scope_tag)

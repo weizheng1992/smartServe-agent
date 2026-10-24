@@ -186,6 +186,9 @@ class LongMemoryFact(Base):
     business_id: Mapped[str | None] = mapped_column(Text)
     scope: Mapped[str | None] = mapped_column(Text, server_default=text("'global'"))
     fact: Mapped[str] = mapped_column(Text, nullable=False)
+    # 主体归属(2026-10-24 画像归属票):'self'=本人;第三人存关系称谓(如 妻子)。
+    # 检索仍按 user_id 隔离;subject 参与回声/覆盖分组(同主体)与终稿渲染。
+    subject: Mapped[str] = mapped_column(Text, server_default=text("'self'"))
     embedding: Mapped[str | None] = mapped_column(Text)  # JSON 串(与 TS 侧序列化方式一致)
     type: Mapped[str | None] = mapped_column(Text, server_default=text("'fact'"))
     confidence: Mapped[float | None] = mapped_column(Float, server_default=text("1.0"))

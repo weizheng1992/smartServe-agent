@@ -49,9 +49,16 @@ def _fake_models(audit_payload: str | None = None):
     from engine_py.memory import long_memory as lm
     from engine_py.tools_registry import order_domain as od
 
+    # 首现顺序正交向量桩(2026-10-24 画像归属票):同文本复用同向量(回声判定
+    # 成立),异文本正交 —— 写侧改为逐事实查库去重后,旧「全同向量」桩会让同轮
+    # 多条不同事实互判回声,与真实嵌入语义不符
+    seen_vecs: dict[str, list[float]] = {}
+
     class _StubEmbed:
-        async def aembed_query(self, _text: str) -> list[float]:
-            return [1.0, 0.0]
+        async def aembed_query(self, text: str) -> list[float]:
+            if text not in seen_vecs:
+                seen_vecs[text] = [1.0, 0.0] if len(seen_vecs) % 2 == 0 else [0.0, 1.0]
+            return seen_vecs[text]
 
     class _Resp:
         content = audit_payload or ""
