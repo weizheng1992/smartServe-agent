@@ -7,6 +7,7 @@ import {
   DESK_STATE_LABEL,
   type DeskState,
   deriveConversationState,
+  formatUpdatedAt,
   formatWait,
   queueWaitSeconds,
 } from './live-desk-model';
@@ -71,9 +72,11 @@ export function DeskStateBadge({
   );
 }
 
-/** 左栏会话行:头像圆标 + 状态条 + 未读徽标 + 认领/介入按钮(排队态「认领」;
- *  AI 托管态「介入」= 坐席主动接管 —— 服务端 assign_operator 本就无状态限制,
- *  2026-10-23 前仅 UI 不放按钮;我/同事接管态无按钮)。 */
+/** 左栏会话行(2026-10-24 列表优化):头像(未读角标挂头像右上)+ 首行
+ *  会话名/相对时间 + 次行状态条/摘要/认领-介入描边按钮(黑实心改描边,整列
+ *  高权重按钮不再喧宾夺主;排队态「认领」、AI 托管态「介入」= 坐席主动接管
+ *  —— 服务端 assign_operator 本就无状态限制;我/同事接管态无按钮)。
+ *  两行结构恒定渲染,行高一致(摘要缺值诚实「—」占位)。 */
 export function ConversationRow({
   conversation,
   myEmail,
@@ -93,6 +96,7 @@ export function ConversationRow({
 }) {
   const state = deriveConversationState(conversation, myEmail);
   const unread = conversation.unreadCount || 0;
+  const time = formatUpdatedAt(conversation.updatedAt, nowMs);
   return (
     <Button
       type="button"
@@ -103,24 +107,29 @@ export function ConversationRow({
         selected ? 'border-zinc-900 bg-zinc-50 shadow-sm hover:bg-zinc-50' : 'border-transparent hover:bg-zinc-50'
       }`}
     >
-      <AvatarCircle label={conversation.userId || conversation.threadId} state={state} />
+      <span className="relative shrink-0">
+        <AvatarCircle label={conversation.userId || conversation.threadId} state={state} />
+        {unread > 0 && (
+          <span
+            data-testid="unread-badge"
+            className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-medium leading-none text-white ring-2 ring-white"
+          >
+            {unread > 99 ? '99+' : unread}
+          </span>
+        )}
+      </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
           <span className="truncate text-[13px] font-medium text-zinc-800">
             {conversation.userId || conversation.threadId}
           </span>
-          <DeskStateBadge conversation={conversation} myEmail={myEmail} nowMs={nowMs} />
+          {time && <span className="shrink-0 text-[10px] tabular-nums text-zinc-400">{time}</span>}
         </span>
-        <span className="mt-1 flex items-center justify-between gap-2">
-          <span className="truncate text-[11px] text-zinc-400">{conversation.lastMessageSnippet || '—'}</span>
-          {unread > 0 && (
-            <span
-              data-testid="unread-badge"
-              className="shrink-0 rounded-full bg-red-500 px-1.5 text-[10px] font-medium text-white"
-            >
-              {unread}
-            </span>
-          )}
+        <span className="mt-1 flex items-center gap-2">
+          <DeskStateBadge conversation={conversation} myEmail={myEmail} nowMs={nowMs} />
+          <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-400">
+            {conversation.lastMessageSnippet || '—'}
+          </span>
           {(state === 'queuing' || state === 'ai') && (
             <span
               role="button"
@@ -137,7 +146,7 @@ export function ConversationRow({
                   onClaim(conversation.threadId);
                 }
               }}
-              className="shrink-0 cursor-pointer rounded-full bg-zinc-900 px-2.5 py-0.5 text-[11px] text-white transition-colors hover:bg-zinc-700 disabled:opacity-50"
+              className="shrink-0 cursor-pointer rounded-full border border-zinc-300 bg-white px-2.5 py-0.5 text-[11px] font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-800"
             >
               {claiming ? '接入中…' : state === 'ai' ? '介入' : '认领'}
             </span>

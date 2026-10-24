@@ -59,6 +59,24 @@ export function formatWait(totalSeconds: number): string {
   return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/** 列表行相对时间(2026-10-24 列表优化):今天 HH:mm / 昨天 / 今年 M月D日 /
+ *  跨年 YYYY/M/D;缺值/坏值回空串(诚实空,调用侧不渲染)。nowMs 注入便于测试。 */
+export function formatUpdatedAt(iso?: string | null, nowMs?: number): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date(nowMs ?? Date.now());
+  const two = (n: number) => String(n).padStart(2, '0');
+  if (d.toDateString() === now.toDateString()) {
+    return `${two(d.getHours())}:${two(d.getMinutes())}`;
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return '昨天';
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
 /**
  * 列表排序:排队中置顶且等待最久优先(呼叫即工单,先到先接);其余按
  * updatedAt DESC(与列表接口默认序一致)。原地不修改入参。

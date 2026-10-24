@@ -5,6 +5,7 @@ import {
   type DeskConversation,
   deriveConversationState,
   filterConversations,
+  formatUpdatedAt,
   formatWait,
   queueWaitSeconds,
   sortQueueFirst,
@@ -151,5 +152,24 @@ describe('状态条文案', () => {
     expect(DESK_STATE_LABEL.queuing).toBe('排队中');
     expect(DESK_STATE_LABEL.mine).toContain('我');
     expect(DESK_STATE_LABEL.others).toContain('同事');
+  });
+});
+
+describe('formatUpdatedAt 相对时间(2026-10-24 列表优化)', () => {
+  const NOW = new Date(2026, 9, 24, 15, 0, 0).getTime(); // 2026-10-24 15:00 本地
+  it('今天 → HH:mm;昨天 → 昨天;今年 → M月D日;跨年带年份', () => {
+    const today = new Date(2026, 9, 24, 9, 5).toISOString();
+    expect(formatUpdatedAt(today, NOW)).toBe('09:05');
+    const yesterday = new Date(2026, 9, 23, 22, 0).toISOString();
+    expect(formatUpdatedAt(yesterday, NOW)).toBe('昨天');
+    const thisYear = new Date(2026, 7, 2, 10, 0).toISOString();
+    expect(formatUpdatedAt(thisYear, NOW)).toBe('8月2日');
+    const lastYear = new Date(2025, 11, 31, 10, 0).toISOString();
+    expect(formatUpdatedAt(lastYear, NOW)).toBe('2025/12/31');
+  });
+  it('缺值/坏值诚实空串', () => {
+    expect(formatUpdatedAt(undefined, NOW)).toBe('');
+    expect(formatUpdatedAt(null, NOW)).toBe('');
+    expect(formatUpdatedAt('not-a-date', NOW)).toBe('');
   });
 });

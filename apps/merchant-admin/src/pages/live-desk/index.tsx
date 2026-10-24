@@ -246,17 +246,10 @@ export default function LiveDeskPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      {/* 台面顶栏:标题 + 排队/我的计数 + 实时连接态 */}
+      {/* 台面顶栏:标题 + 实时连接态(排队/我的计数并入下方 Tab,2026-10-24
+          列表优化 —— 顶栏徽章与 Tab 维度重复) */}
       <div className="flex shrink-0 items-center justify-between">
-        <div className="flex items-baseline gap-2.5">
-          <h1 className="text-[15px] font-semibold text-zinc-900">客服工作台</h1>
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700 tabular-nums">
-            排队 {counts.queuing}
-          </span>
-          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-700 tabular-nums">
-            我的 {counts.mine}
-          </span>
-        </div>
+        <h1 className="text-[15px] font-semibold text-zinc-900">客服工作台</h1>
         <span
           className={`flex items-center gap-1.5 text-[11px] ${desk.connected ? 'text-emerald-600' : 'text-zinc-400'}`}
         >
@@ -270,22 +263,26 @@ export default function LiveDeskPage() {
         <aside className="flex w-80 shrink-0 flex-col rounded-xl border border-zinc-200 bg-white">
           <div className="border-b border-zinc-100 p-3">
             <div className="flex gap-1">
-              {TABS.map((t) => (
-                <Button
-                  key={t.key}
-                  type="button"
-                  variant="ghost"
-                  data-testid={`desk-tab-${t.key}`}
-                  onClick={() => setTab(t.key)}
-                  className={`h-auto cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-normal ${
-                    tab === t.key
-                      ? 'bg-zinc-900 text-white hover:bg-zinc-900 hover:text-white'
-                      : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 hover:text-zinc-600'
-                  }`}
-                >
-                  {t.label}
-                </Button>
-              ))}
+              {TABS.map((t) => {
+                const n = t.key === 'all' ? desk.conversations.length : counts[t.key as 'queuing' | 'mine'];
+                return (
+                  <Button
+                    key={t.key}
+                    type="button"
+                    variant="ghost"
+                    data-testid={`desk-tab-${t.key}`}
+                    onClick={() => setTab(t.key)}
+                    className={`h-auto cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-normal ${
+                      tab === t.key
+                        ? 'bg-zinc-900 text-white hover:bg-zinc-900 hover:text-white'
+                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 hover:text-zinc-600'
+                    }`}
+                  >
+                    {t.label}
+                    <span className="ml-1 tabular-nums opacity-70">{n}</span>
+                  </Button>
+                );
+              })}
             </div>
             <Input
               value={keyword}
