@@ -283,9 +283,11 @@ class LongMemory:
         except Exception as sql_err:
             print(f"[Profiler Agent] Failed to fetch SQL transaction stream for audit: {sql_err}")
 
-        # op 裁决对照清单(2026-10-24):该用户既有事实(approved/pending/superseded
-        # 近 50 条,id+subject+fact+status)随 prompt 提供给审计 LLM;清单获取失败
-        # 不阻断 —— LLM 收不到清单就按默认 ADD 输出,规则路径兜底
+        # op 裁决对照清单(2026-10-24):该用户既有活跃事实(approved/pending 近 50
+        # 条,id+subject+fact+status)随 prompt 提供给审计 LLM。租户过滤下沉同召回
+        # 侧(code-review 2026-10-24:裸 user_id 查询是隔离缺口);superseded/deleted
+        # 不进清单 —— LLM 据失效行判 NOOP 会静默吞掉真实改口,重改旧值由 ADD+
+        # 维度覆盖路径自然接管。清单获取失败不阻断(LLM 按默认 ADD 输出)。
         existing_facts: list[dict] = []
         try:
             from sqlalchemy import select
@@ -295,7 +297,11 @@ class LongMemory:
                     (
                         await session.execute(
                             select(LongMemoryFact)
-                            .where(LongMemoryFact.user_id == self.user_id)
+                            .where(
+                                LongMemoryFact.user_id == self.user_id,
+                                LongMemoryFact.status.in_(("approved", "pending")),
+                                tenant_scope_condition(LongMemoryFact, self.business_id),
+                            )
                             .order_by(LongMemoryFact.created_at.desc())
                             .limit(50)
                         )
@@ -350,12 +356,18 @@ class LongMemory:
 
                     # op 裁决(2026-10-24 SOTA 对齐 P1#1):LLM 对照既有事实清单
                     # 决定 ADD/UPDATE/DELETE/NOOP;op 缺失/不可信一律按 ADD 走
-                    # 规则兜底(韧性纪律:裁决是增强不是依赖)。DELETE 是用户
-                    # 明确撤回 —— 权威语义,不受置信度门槛约束。
+                    # 规则兜底(韧性纪律:裁决是增强不是依赖)。DELETE/UPDATE 是
+                    # 用户明确撤回/改口 —— 权威语义,不受置信度门槛约束
+                    # (code-review 2026-10-24:UPDATE 撞门槛会「废旧值又弃新值」
+                    # 事实湮灭,新值最低落 pending)。
                     op = (item.get("op") or "ADD").strip().upper() if isinstance(item, dict) else "ADD"
                     target_id = item.get("targetId") if isinstance(item, dict) else None
                     if op not in ("ADD", "UPDATE", "DELETE", "NOOP"):
                         op = "ADD"
+                    # 空 fact 守卫:prompt 允许 DELETE 的 fact 留空,严禁落空串事实行
+                    if not (fact_text or "").strip() and op != "DELETE":
+                        print("[Profiler Agent] ⚠️ 空 fact 丢弃")
+                        continue
                     if op == "NOOP":
                         print(f"[Profiler Agent] ⏭️ op=NOOP(既有事实已覆盖): {fact_text}")
                         continue
@@ -374,8 +386,10 @@ class LongMemory:
                             continue
                         # UPDATE 未命中目标 → 落到下方按 ADD 存新值
 
-                    # 置信度红线路由:<0.60 丢弃;>=0.85 approved;其余 pending
-                    if confidence < 0.6:
+                    # 置信度红线路由:<0.60 丢弃;>=0.85 approved;其余 pending。
+                    # 已生效的 UPDATE 豁免(撤回/改口是用户权威,新值最低落 pending)
+                    authoritative_update = op == "UPDATE" and target_id is not None
+                    if confidence < 0.6 and not authoritative_update:
                         continue
                     status = "approved" if confidence >= 0.85 else "pending"
 
@@ -421,9 +435,13 @@ class LongMemory:
     ) -> bool:
         """对既有事实执行 UPDATE(转 superseded)/DELETE(转 deleted)。
 
-        归属先验:id 必须属于本 user —— 不命中返回 False(调用方降级)。
-        成功即入 badcase 候选池(SOURCE_PERSONA_FACT_DELETED,auto-draft 源):
-        记忆 churn 是画像质量的第一手信号,人审定性后可转回归 case。
+        归属先验:id 必须属于本 user 且过租户过滤(code-review 2026-10-24:裸
+        user_id 条件是隔离缺口,与召回侧 tenant_scope_condition 对齐)——不命中
+        返回 False(调用方降级)。DELETE 同步清对应槽位(撤回身材后槽位残留会
+        继续喂尺码工具,槽/事实分叉)。成功即入 badcase 候选池
+        (SOURCE_PERSONA_FACT_DELETED,auto-draft 源):记忆 churn 是画像质量的
+        第一手信号 —— note 只存维度引用不存画像原文(database-schema §1.1.6
+        零原始数据纪律)。
         """
         from sqlalchemy import select
 
@@ -437,6 +455,7 @@ class LongMemory:
                             select(LongMemoryFact).where(
                                 LongMemoryFact.id == target_id,
                                 LongMemoryFact.user_id == self.user_id,
+                                tenant_scope_condition(LongMemoryFact, self.business_id),
                             )
                         )
                     )
@@ -446,20 +465,35 @@ class LongMemory:
                 if row is None:
                     return False
                 old_fact = row.fact  # commit 前物化(会话关闭后访问 ORM 属性会 Detached)
+                row_subject = row.subject or "self"
+                dimension = fact_dimension_value(old_fact)
                 row.status = "deleted" if op == "DELETE" else "superseded"
+                if op == "DELETE" and dimension and _DIMENSION_TO_SLOT.get(dimension[0]):
+                    await session.execute(
+                        text(
+                            "DELETE FROM profile_slots WHERE user_id = :u AND subject = :s AND slot = :slot"
+                        ).bindparams(u=self.user_id, s=row_subject, slot=_DIMENSION_TO_SLOT[dimension[0]])
+                    )
                 await session.commit()
             await record_badcase_signal(
                 SOURCE_PERSONA_FACT_DELETED,
                 conversation_ref=f"thread:{thread_id}" if thread_id else f"user:{self.user_id}",
                 business_id=self.business_id or "aurora",
                 suggested_class="suspected_defect",
-                note=f"op={op} target={target_id} 旧事实『{old_fact}』 新表述『{note_fact[:60]}』",
+                note=(
+                    f"op={op} target={target_id} "
+                    f"dimension={dimension[0] if dimension else '非维度事实'} "
+                    f"subject={row_subject}"
+                ),
                 dedupe=True,
             )
-            print(f"[Profiler Agent] ✅ op={op} 已生效: {old_fact} -> {'deleted' if op == 'DELETE' else 'superseded'}")
+            print(
+                f"[Profiler Agent] ✅ op={op} 已生效: 维度={dimension[0] if dimension else '非维度'} "
+                f"subject={row_subject} -> {'deleted' if op == 'DELETE' else 'superseded'}"
+            )
             return True
         except Exception as op_err:
-            print(f"[Profiler Agent] op={op} 执行失败,降级按 ADD 处理: {op_err}")
+            print(f"[Profiler Agent] op={op} 执行失败: {op_err}(调用方将跳过该条,不降级落 ADD)")
             return False
 
     async def _ingest_fact(

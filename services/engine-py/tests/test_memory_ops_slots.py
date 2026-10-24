@@ -13,7 +13,7 @@ import json
 import uuid
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from engine_py.badcase.pool import SOURCE_PERSONA_FACT_DELETED
 from engine_py.db import BadcaseCandidate, LongMemoryFact, get_session

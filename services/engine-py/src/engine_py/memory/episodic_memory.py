@@ -116,7 +116,9 @@ class EpisodicMemory:
             else:
                 age_days = 0
             recency_factor = 0.85 + 0.15 * math.exp(-age_days / 30.0)
-            importance_factor = 0.8 + 0.2 * min(int(row.importance or 3), 9) / 9.0
+            # falsy 守卫:importance=0 是合法分值,严禁被 `or 3` 吞成 3 反而提权
+            importance = row.importance if row.importance is not None else 3
+            importance_factor = 0.8 + 0.2 * min(int(importance), 9) / 9.0
             effective_score = base * recency_factor * importance_factor
             scored.append(
                 {
@@ -130,10 +132,13 @@ class EpisodicMemory:
                         "businessId": row.business_id or None,
                     },
                     "similarity": effective_score,
+                    "base": base,
                 }
             )
 
         scored.sort(key=lambda item: item["similarity"], reverse=True)
-        threshold = 0.55
-        filtered = [item for item in scored if item["similarity"] >= threshold]
+        # 阈值锚定在 base(2026-10-24 code-review):recency/importance 两因子只
+        # 重排不弃召回 —— 乘法后旧低权事件的 effective 被系统性压到 0.55 之下
+        # 会静默改变召回边界(最劣 0.55/0.68≈0.81),与「降级不灭失」矛盾
+        filtered = [item for item in scored if item["base"] >= 0.55]
         return [item["event"] for item in filtered[:limit]]

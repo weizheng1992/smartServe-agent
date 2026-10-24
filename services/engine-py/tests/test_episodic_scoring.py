@@ -84,3 +84,14 @@ def test_importance_alone_reorders_equal_age():
     _add(mem, "退款事件高权", 9)
 
     assert _recall(mem)[0] == "退款事件高权"
+
+
+def test_importance_zero_not_falsy_swallowed():
+    """importance=0 是合法分值:`or 3` 会吞成 3 反而提权(code-review 2026-10-24)。"""
+    user = f"eps_{uuid.uuid4().hex[:8]}"
+    mem = EpisodicMemory(user, "aurora")
+    _add(mem, "退款事件零权", 0)
+    _add(mem, "退款事件低权", 3)
+    # 同时间戳下 importance=0 应排最后(0.8 档 vs 3 的 0.867 档)
+    recalled = _recall(mem)
+    assert recalled[-1] == "退款事件零权"
