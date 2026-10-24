@@ -576,6 +576,33 @@ def _demote_consult_keep_actions(parsed: list[dict]) -> list[dict]:
     return [promoted, *result]
 
 
+# ── 轮路径闭集(docs/ai-usage-panel.md P0-1):triage 旁路 route_key →
+# session_metrics.turn_path。单一事实源,消费方为 handle_immediate_bypass
+# 出口(旁路族)与 triage 节点默认(非旁路主链 deep_path);用量页按此聚合
+# 零 LLM 命中率与快轨占比。
+_BYPASS_TURN_PATH_EXACT = {
+    "super_semantic_cache": "semantic_cache",
+    "duplicate_bypass": "duplicate_bypass",
+    "rag_consult_direct": "rag_direct",
+    "rag_consult_direct_llm": "rag_direct",
+    "consult_no_rag": "rag_direct",
+}
+
+
+def turn_path_for_route(route_key: str) -> str:
+    """旁路 route_key → turn_path 闭集映射。
+
+    未来新增路由键默认归 bypass_other(其余确定性旁路),严禁静默落
+    deep_path —— 主链占比是用量页的核心对照面,误归即假数据。"""
+    if "greeting" in route_key:
+        return "greeting"
+    if route_key in _BYPASS_TURN_PATH_EXACT:
+        return _BYPASS_TURN_PATH_EXACT[route_key]
+    if "clarif" in route_key or route_key == "confidence_clarify":
+        return "clarify"
+    return "bypass_other"
+
+
 class IntentTriageEngine:
     @staticmethod
     async def log_intent_to_db(
@@ -707,6 +734,9 @@ class IntentTriageEngine:
             "damage_assessment": damage_assessment,
             "global_transitions_count": -1,
             "tool_errors_count": -1,
+            # 轮路径一等公民(docs/ai-usage-panel.md P0-1):所有旁路出口的
+            # 单点标注,收口泳道据此落 session_metrics.turn_path
+            "turn_path": turn_path_for_route(route_key),
         }
 
     @staticmethod

@@ -24,12 +24,12 @@ _FAIL_CLOSED_AMOUNT = 999999.99
 
 def test_amount_within_limit_auto_approves():
     out = asyncio.run(ApprovalGatekeeper.evaluate_refund_auto_approval("ORD-1", "¥88.00", 100))
-    assert out == {"shouldAutoApprove": True, "groundedAmount": 88.0}
+    assert out == {"shouldAutoApprove": True, "groundedAmount": 88.0, "amountGrounded": True}
 
 
 def test_amount_over_limit_requires_approval():
     out = asyncio.run(ApprovalGatekeeper.evaluate_refund_auto_approval("ORD-1", "1299", 100))
-    assert out == {"shouldAutoApprove": False, "groundedAmount": 1299.0}
+    assert out == {"shouldAutoApprove": False, "groundedAmount": 1299.0, "amountGrounded": True}
 
 
 def test_dirty_format_amount_parsed():
@@ -83,7 +83,7 @@ def test_amount_grounded_from_orders_snapshot(pg_factory):
         return await ApprovalGatekeeper.evaluate_refund_auto_approval("ORD-GROUND-1", None, 100)
 
     out = asyncio.run(_scenario())
-    assert out == {"shouldAutoApprove": True, "groundedAmount": 59.9}
+    assert out == {"shouldAutoApprove": True, "groundedAmount": 59.9, "amountGrounded": True}
 
 
 def test_grounded_snapshot_over_limit(pg_factory):

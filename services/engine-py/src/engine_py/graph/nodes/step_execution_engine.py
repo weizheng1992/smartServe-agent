@@ -415,9 +415,15 @@ async def _execute_single_step_core(
                                         "本次退款已转人工客服审核，审批通过后将自动执行，请耐心等待。"
                                         if auto_check.get("denyReason") == "claim_velocity"
                                         else (
-                                            f"🛠️ 该订单退款金额(¥{auto_check['groundedAmount']})超过商户免签限额"
-                                            f"(¥{tenant_limit})，退款申请已提交人工审核，审批通过后将自动执行，"
-                                            "请耐心等待审核结果。"
+                                            # 金额未接地分形(17 号票):哨兵 999999.99 严禁示人
+                                            "🛠️ 该订单退款金额待人工核实，已超过商户免签限额"
+                                            f"(¥{tenant_limit})，退款申请已提交人工审核，请耐心等待审核结果。"
+                                            if not auto_check.get("amountGrounded", True)
+                                            else (
+                                                f"🛠️ 该订单退款金额(¥{auto_check['groundedAmount']})超过商户免签限额"
+                                                f"(¥{tenant_limit})，退款申请已提交人工审核，审批通过后将自动执行，"
+                                                "请耐心等待审核结果。"
+                                            )
                                         )
                                     )
                                 ),
@@ -454,7 +460,12 @@ async def _execute_single_step_core(
                             "approvalId": approval_result.get("approvalId"),
                         },
                     }
-                    return {"updatedStep": failed_step, "toolErrorsCount": 1}
+                    # 人工驳回/取消/超时是合法业务终局,不是工具故障(17 号票):
+                    # 还原挂起计划的恢复回合可能带多个退款类步骤,逐一撞回声闸
+                    # 若各计 1 错,tool_errors ≥3 即触发图级熔断,把诚实 decline
+                    # 打成「系统繁忙」通用降级(nightly c36 实弹)。终局照常
+                    # failed 推进,但零计错 —— 与「中断不是缺陷」同律。
+                    return {"updatedStep": failed_step, "toolErrorsCount": 0}
 
         # 5. 工具/技能物理调度
         skill_registry = _try_import_skills()

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import json
+import os
 import re
 import uuid
 
@@ -136,6 +137,25 @@ class ApprovalGatekeeper:
         return {"isDoubleRefund": False, "orderFound": True}
 
     @staticmethod
+    def _resolved_recently(approval: PendingApproval) -> bool:
+        """决议时间戳(action_payload.resolvedAt)是否落在回声短窗内(17 号票)。
+
+        窗口缺省 10 分钟,``APPROVAL_ECHO_GUARD_MINUTES`` 可调;无戳/坏戳
+        一律 False(无戳的存量工单不短路,保持旧语义)。
+        """
+        resolved_at = str((approval.action_payload or {}).get("resolvedAt") or "")
+        if not resolved_at:
+            return False
+        try:
+            dt = _dt.datetime.fromisoformat(resolved_at)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_dt.UTC)
+            window = float(os.environ.get("APPROVAL_ECHO_GUARD_MINUTES", "10") or 10)
+            return (_dt.datetime.now(_dt.UTC) - dt) < _dt.timedelta(minutes=window)
+        except Exception:
+            return False
+
+    @staticmethod
     async def evaluate_refund_auto_approval(
         order_id: str | None = None,
         refund_amount_arg=None,
@@ -154,6 +174,23 @@ class ApprovalGatekeeper:
                 refund_amount = 999999.99
 
         if order_id and not amount_str:
+            # 三源 grounding 之商户真账优先(17 号票):商户真单在 agent_merchant
+            # (三库分离),旧序只查 engine orders 表 → 商户单恒查无 → 哨兵
+            # 999999.99 恒超限,执行器闸通知曾向用户展示假金额(nightly c36 实弹
+            # ¥999999.99)。快照门面与建票金额回照(admin-readiness 11)同源。
+            try:
+                from ..tools_registry.order_domain import merchant_order_snapshot
+
+                snap = await merchant_order_snapshot(str(order_id))
+                if snap is not None and snap.get("total_amount") is not None:
+                    try:
+                        refund_amount = float(_AMOUNT_STRIP_RE.sub("", str(snap["total_amount"]))) or refund_amount
+                    except ValueError:
+                        pass
+            except Exception as err:
+                print(f"[ApprovalGatekeeper] merchant snapshot grounding error: {err}")
+            # engine 本地表兜底(引擎侧种子单);两库皆无 → 哨兵(安全侧:恒走
+            # HITL),amountGrounded=False 供下游文案「金额待人工核实」分形
             try:
                 async with get_session() as session:
                     row = (
@@ -174,6 +211,9 @@ class ApprovalGatekeeper:
         return {
             "shouldAutoApprove": refund_amount <= auto_approval_limit,
             "groundedAmount": refund_amount,
+            # 金额是否接了地(实参/商户快照/engine 表任一命中);哨兵=未接地,
+            # 下游通知文案据此分形,严禁向用户展示 ¥999999.99 假金额
+            "amountGrounded": refund_amount != 999999.99,
         }
 
     @staticmethod
@@ -295,6 +335,19 @@ class ApprovalGatekeeper:
                             )
                         if not matched:
                             continue
+                        # 驳回/取消回声短路(eval-gap-2026-10 17 号票,2026-10-24):
+                        # reject/cancel 恢复链 replan 出的新计划不带 approvalId,
+                        # 线程扫描若只认领 waiting 工单就会重开新票 → 重挂死环
+                        # (nightly c36 实弹:每驳回一次新增一张工单 + 一轮 LLM
+                        # 回合 + 「审批通过后将自动执行」谎报文案)。同动作×同单
+                        # 的 rejected/cancelled 终态工单在决议后短窗内视为恢复
+                        # 回声:短路返回其终态,交上层 BLOCKED_APPROVAL_STATES
+                        # 诚实 decline;approved 仍只走 existingApprovalId 通道
+                        # (双退款旁路修复语义不变);expired 不短路(超时后顾客
+                        # 重新申请是正当流)。
+                        if approval.status in ("rejected", "cancelled") and ApprovalGatekeeper._resolved_recently(approval):
+                            latest_approval = approval
+                            break
                         # 线程扫描只认领 waiting 工单(幂等挂起,避免重复开票);
                         # approved 等终态工单只能经 existingApprovalId(审批恢复路径)
                         # 复用 —— 否则历史已批工单会被当作本次执行的授权,静默绕过
@@ -806,6 +859,9 @@ class ApprovalGatekeeper:
                     "humanReply": human_reply or "",
                     "resolvedBy": resolved_by,
                     "resolvedByRole": resolved_by_role,
+                    # 决议时间戳(17 号票):回声短窗判定的依据 —— 无 resolved_at 列,
+                    # 落 payload 零迁移;approved 决议同样落戳(未来对账用)
+                    "resolvedAt": _dt.datetime.now(_dt.UTC).isoformat(),
                 }
 
                 # 🎯 确定性 Job ID:job_resume_${approvalId},物理防重幂等

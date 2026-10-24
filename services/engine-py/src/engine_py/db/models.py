@@ -143,11 +143,19 @@ class SessionMetric(Base):
     tool_errors_count: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
     resolution_status: Mapped[str] = mapped_column(Text, nullable=False)
     avg_latency_ms: Mapped[float | None] = mapped_column(Float, server_default=text("0"))
+    # 用量面板(docs/ai-usage-panel.md P0-1):轮↔llm_call_logs 精确关联键 +
+    # 路径闭集(greeting/semantic_cache/duplicate_bypass/rag_direct/clarify/
+    # bypass_other/deep_path;降级轮 NULL=路径未决即离场)。写入方 run_agent
+    # 收口泳道与问候旁路补行。
+    job_id: Mapped[str | None] = mapped_column(Text)
+    turn_path: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
 # 管理大盘聚合热路径:按租户 + 时间窗扫会话成本/熔断计数
 Index("session_metrics_biz_created_idx", SessionMetric.business_id, SessionMetric.created_at)
+# 用量页轮下钻:job_id → 轮行归属校验
+Index("session_metrics_job_idx", SessionMetric.job_id)
 
 
 class BadcaseCandidate(Base):
@@ -353,6 +361,9 @@ class LlmCallLog(Base):
     # 租户归因:多租户遥测按 business_id 过滤(架构不变量 #1),写入方为
     # llm/telemetry.py 的统一捕获 handler;历史行与图外调用可空。
     business_id: Mapped[str | None] = mapped_column(Text)
+    # 轮关联键(docs/ai-usage-panel.md P0-1):run_agent 每轮 job 唯一,轮下钻
+    # 调用明细按此查询;CallContext.job_id 自韧性层沿用。
+    job_id: Mapped[str | None] = mapped_column(Text)
     node: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str] = mapped_column(Text, nullable=False)
     tokens_in: Mapped[int | None] = mapped_column(Integer)
@@ -364,6 +375,8 @@ class LlmCallLog(Base):
 
 Index("llm_log_thread_idx", LlmCallLog.thread_id)
 Index("llm_log_biz_created_idx", LlmCallLog.business_id, LlmCallLog.created_at)
+# 用量页轮下钻:job_id → 调用明细
+Index("llm_log_job_idx", LlmCallLog.job_id)
 
 
 class AgentJob(Base):

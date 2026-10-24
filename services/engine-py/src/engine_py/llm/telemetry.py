@@ -168,6 +168,9 @@ class LlmCallTelemetryHandler(BaseCallbackHandler):
         row = {
             "thread_id": ctx.thread_id if ctx else None,
             "business_id": ctx.business_id if ctx else None,
+            # 轮关联键(docs/ai-usage-panel.md P0-1):CallContext.job_id 自
+            # 韧性层沿用,轮下钻调用明细按此查询
+            "job_id": ctx.job_id if ctx else None,
             "node": node,
             "model": model_name,
             "tokens_in": tokens_in,

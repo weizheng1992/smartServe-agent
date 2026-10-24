@@ -66,6 +66,16 @@ def test_sales_viewer_denies_dangerous_buttons_and_grey_desk():
     assert "btn-role-assign" not in ids
     assert "btn-staff-invite" not in ids
     assert "m-agent-desk" not in ids
+    assert "m-ai-usage" not in ids
+
+
+def test_ai_usage_menu_grey_release():
+    """用量菜单首版灰度(docs/ai-usage-panel.md P0-3):仅老板/管理员可见 ——
+    成本/用量数据对一线坐席无价值且有唬人效果;finance/admin 全量面由
+    test_finance_and_admin_seed_full_face 的等式断言自动覆盖。"""
+    assert "m-ai-usage" in _MENU_IDS
+    for role in ("sales_viewer", "warehouse_operator", "support_agent"):
+        assert "m-ai-usage" not in set(DEFAULT_ROLE_MENUS[role])
 
 
 def test_warehouse_operator_no_system_face():

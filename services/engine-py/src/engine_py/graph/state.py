@@ -81,6 +81,11 @@ class AgentState(TypedDict, total=False):
     # 最终产出
     output: str
 
+    # 轮路径闭集(docs/ai-usage-panel.md P0-1):greeting/semantic_cache/
+    # duplicate_bypass/rag_direct/clarify/bypass_other/deep_path;降级轮可缺
+    # (路径未决即离场),收口侧原样落 NULL
+    turn_path: str
+
     # 循环控制计数(-1 归零语义见 _counter_reducer)
     loop_count: int
     global_transitions_count: Annotated[int, _counter_reducer]

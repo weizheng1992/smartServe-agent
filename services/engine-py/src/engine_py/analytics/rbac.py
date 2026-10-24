@@ -91,6 +91,9 @@ DEFAULT_MENUS: list[dict] = [
     {"id": "btn-promo-create", "parent": "m-promotions", "name": "新建活动", "type": "button", "perm": "promo:create", "sort": 1},
     {"id": "btn-promo-disable", "parent": "m-promotions", "name": "停用活动", "type": "button", "perm": "promo:disable", "sort": 2},
     {"id": "btn-promo-redeem", "parent": "m-promotions", "name": "核销", "type": "button", "perm": "promo:redeem", "sort": 3},
+    # AI 用量(docs/ai-usage-panel.md P0-3):轮/调用两级 token 与延迟视图,
+    # 灰度机制见 _GREY_RELEASE_MENUS —— 首版仅老板/管理员可见。
+    {"id": "m-ai-usage", "parent": "d-ops", "name": "AI 用量", "type": "menu", "route": "/ai-usage", "sort": 2},
     {"id": "d-system", "parent": None, "name": "系统", "type": "directory", "route": None, "sort": 9},
     {"id": "m-menus", "parent": "d-system", "name": "菜单管理", "type": "menu", "route": "/menus", "sort": 1},
     {"id": "btn-menu-create", "parent": "m-menus", "name": "新增", "type": "button", "perm": "menu:create", "sort": 1},
@@ -107,8 +110,9 @@ DEFAULT_MENUS: list[dict] = [
 # 不可见(2026-10-10 用户裁决:仓储只见数据/订单,变更类接口另有 is_manager
 # 硬闸,种子面收敛消除「看得到、点不动」的 403 体验)。
 _SALES_DENY_BUTTONS = {"btn-prod-edit", "btn-order-ship", "btn-menu-create", "btn-role-assign", "btn-staff-invite"}
-# 灰度中菜单(live-desk-rework §3):运营暂不可见,稳后并入其种子面
-_GREY_RELEASE_MENUS = {"m-agent-desk"}
+# 灰度中菜单(live-desk-rework §3;m-ai-usage 为用量面板首版,docs/ai-usage-panel.md
+# P0-3:成本/用量数据对一线坐席无价值且有唬人效果,稳后并入其种子面)
+_GREY_RELEASE_MENUS = {"m-agent-desk", "m-ai-usage"}
 DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
     "finance_owner": [m["id"] for m in DEFAULT_MENUS],
     "admin": [m["id"] for m in DEFAULT_MENUS],

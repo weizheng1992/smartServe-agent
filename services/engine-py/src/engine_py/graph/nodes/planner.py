@@ -55,6 +55,17 @@ _GENERAL_ORDER_LIST_RE = re.compile(
 # (METRIC_REGISTRY 5 键:gmv/volume/gross_profit/margin_rate/stock_risk)。
 # 词面收上 intent_registry(METRIC_FAMILY/GUIDE_CORE_FAMILY)。
 _METRIC_HINT_RE = re.compile(_grp(*_pick(METRIC_FAMILY, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)), re.IGNORECASE)
+
+# 审批恢复回合标记(17 号票):gatekeeper 派发的 job_resume_* 以 System 指令为
+# 输入(granted/rejected/cancelled 三态),此类回合的计划豁免对齐剪枝 ——
+# 精确匹配三种前缀,不做宽泛 "System:" 豁免(防伪造输入蹭豁免面)。
+_APPROVAL_RECOVERY_INPUT_RE = re.compile(
+    r"^\s*System:\s*Human approval (granted|rejected|cancelled)", re.IGNORECASE
+)
+
+
+def _is_approval_recovery_input(input_text: str | None) -> bool:
+    return bool(_APPROVAL_RECOVERY_INPUT_RE.search(input_text or ""))
 _SHOPPING_HINT_RE = re.compile(_grp(*_pick(GUIDE_CORE_FAMILY, 0, 1, 2, 3, 8)), re.IGNORECASE)
 
 # 销量榜词族(cart 榜词加购快轨,2026-09-27 立案 planner-plan-intent-alignment)。
@@ -937,8 +948,13 @@ async def planner_node(state: AgentState) -> dict:
         # 仅 LLM 解析成功的计划过闸;截断兜底的 per-intent 计划系确定性构造,
         # 天然对齐不过闸。剪枝留痕(租户/thread/被剪描述),不阻断不透出
         # (OQ3 裁决:由 finish 终稿自然指引)。
+        # 豁免面(17 号票,2026-10-24):审批恢复回合是系统指令驱动(approve/
+        # reject/cancel 三态 System 前缀),其 replan 子任务(如驳回后的诚实
+        # 告知叙事步)无 Call/Execute 动词,按「无动词叙事=幻觉发明」被剪后
+        # 计划清空 → 恢复链落入通用降级臂(nightly c36 实弹);恢复回合的
+        # 子任务源自权威系统指令而非自由发挥,整体豁免对齐闸。
         pruned_steps: list[str] = []
-        if llm_plan_parsed:
+        if llm_plan_parsed and not _is_approval_recovery_input(input_text):
             task_plan, pruned_steps = align_plan_to_intents(intents, task_plan, input_text)
         if pruned_steps:
             print(

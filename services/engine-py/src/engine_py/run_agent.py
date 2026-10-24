@@ -377,6 +377,10 @@ async def _settle_turn(
                         tool_errors_count=tool_errors,
                         resolution_status=resolution_status,
                         avg_latency_ms=elapsed_latency_ms,
+                        # 轮关联键 + 路径闭集(docs/ai-usage-panel.md P0-1):
+                        # 降级/中断臂的终态 result 无 turn_path,原样落 NULL
+                        job_id=job_id,
+                        turn_path=result.get("turn_path"),
                     )
                 )
                 await session.commit()
@@ -620,6 +624,31 @@ def _episodic_importance(output_text: str) -> int:
     return 4
 
 
+async def _record_greeting_bypass_metric(
+    business_id: str, thread_id: str, job_id: str | None, latency_ms: float
+) -> None:
+    """进图前问候旁路的用量落行(docs/ai-usage-panel.md P0-1):该路径此前
+    完全不写 session_metrics,轮数统计缺行。零 token 罐头回复,turn_path='greeting';
+    落库失败自吞不炸问候(与旁路 assistant 行同 T3 纪律)。"""
+    try:
+        async with get_session() as session:
+            session.add(
+                SessionMetric(
+                    business_id=business_id,
+                    thread_id=thread_id,
+                    total_tokens=0,
+                    calculated_cost_usd=0,
+                    resolution_status="resolved_auto",
+                    avg_latency_ms=latency_ms,
+                    job_id=job_id,
+                    turn_path="greeting",
+                )
+            )
+            await session.commit()
+    except Exception as m_err:
+        print(f"[runAgent] 问候旁路 metrics 行落库失败(不阻断): {m_err!r}")
+
+
 async def run_agent(job: AgentJobInput) -> dict:
     thread_id = job.thread_id
     user_id = job.user_id
@@ -640,6 +669,7 @@ async def run_agent(job: AgentJobInput) -> dict:
 
     # 1. 🚀 毫秒级极速直达旁路:纯问候/身份问句零模型开销
     if is_quick_greeting(input_message):
+        greeting_t0 = time.time()
         # P9(2026-10-03):问候旁路曾对同一行三连串行 DB 往返(SELECT 自愈 →
         # onboarding → _ensure_thread upsert)。现 upsert 带 RETURNING 一次拿到
         # 权威 business_id(ON CONFLICT 只续 updated_at 不覆盖归属 —— 返回值即
@@ -711,6 +741,9 @@ async def run_agent(job: AgentJobInput) -> dict:
             except Exception as pub_err:
                 print(f"[runAgent] 问候旁路事件发布失败(sync 返回值仍完整): {pub_err!r}")
 
+        await _record_greeting_bypass_metric(
+            resolved_biz_id, thread_id, job_id, (time.time() - greeting_t0) * 1000
+        )
         return greeting_result
 
     # 2. 🔍 三路 RAG 与记忆检索(文本过短时跳过,节省 1.5s+ 首字延迟)

@@ -296,10 +296,8 @@ CUSTOMER_CASES: list[CustomerCase] = [
     ),
     CustomerCase(
         "c36_hitl_reject_诚实回复",
-        # 2026-10-24 冒烟实证引擎缺陷(17 号票):reject 恢复不 decline 反而重挂
-        # (死环)+「审批通过后将自动执行」谎报 + ¥999999.99 跨库金额接地板。
-        # 断言全量保留照跑(审批脱离 waiting/订单不动/诚实回复锚点),缺陷修复
-        # 落地后把 approval.advisory 翻 False 即收严。
+        # 2026-10-24 冒烟曾实证引擎缺陷三连(17 号票),同日修复:回声短路 +
+        # 金额商户快照 grounding + 待核文案分形;本例自此恢复严判。
         "HITL",
         [
             Turn(
@@ -310,7 +308,6 @@ CUSTOMER_CASES: list[CustomerCase] = [
                     reply_contains_any=("无法", "拒绝", "驳回", "未通过", "不能", "未能"),
                     reply_not_contains=("已为您办理退款", "退款申请已提交", "已发起退款", "自动执行"),
                     order_must_stay=True,
-                    advisory=True,
                 ),
             )
         ],
