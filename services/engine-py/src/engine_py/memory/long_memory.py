@@ -511,6 +511,8 @@ class LongMemory:
         """事实落库单一决策点(2026-10-24 画像归属票):审计/正则两写路统一。
 
         - 分组键 = (user_id, subject):妻子的事实永不与本人互为回声、永不覆盖;
+          回声/覆盖候选集带租户条件(与召回侧 tenant_scope_condition 同语义,
+          B 租户写入不得 supersede/promote A 租户的 tenant 事实;global 行照旧跨租户参与);
         - 可变数字维度(身高/体重/脚长/尺码):同维度同值=真回声(pending 顺带
           升级),异值=落新值+同维度旧值 superseded(修实弹「70/75 并存」与
           「措辞雷同改口被 0.90 吞」双失败模式);
@@ -528,6 +530,7 @@ class LongMemory:
                                 LongMemoryFact.user_id == self.user_id,
                                 LongMemoryFact.subject == subject,
                                 LongMemoryFact.status.in_(("approved", "pending")),
+                                tenant_scope_condition(LongMemoryFact, self.business_id),
                             )
                         )
                     )

@@ -14,13 +14,13 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import json
-import os
 import re
 import uuid
 
 from sqlalchemy import desc, select, text
 
 from ..badcase.pool import SOURCE_APPROVAL_REJECTED, SOURCE_HUMAN_TAKEOVER, record_badcase_signal
+from ..config import settings
 from ..db import ApprovalOutboxEvent, Message, PendingApproval, get_session
 from ..event_bus import emit_status, get_client, publish_agent_event
 from ..memory.short_memory import _FALLBACK_USER_ID
@@ -140,8 +140,8 @@ class ApprovalGatekeeper:
     def _resolved_recently(approval: PendingApproval) -> bool:
         """决议时间戳(action_payload.resolvedAt)是否落在回声短窗内(17 号票)。
 
-        窗口缺省 10 分钟,``APPROVAL_ECHO_GUARD_MINUTES`` 可调;无戳/坏戳
-        一律 False(无戳的存量工单不短路,保持旧语义)。
+        窗口缺省 10 分钟,``APPROVAL_ECHO_GUARD_MINUTES`` 可调(config 单点,
+        坏值回落 10);无戳/坏戳一律 False(无戳的存量工单不短路,保持旧语义)。
         """
         resolved_at = str((approval.action_payload or {}).get("resolvedAt") or "")
         if not resolved_at:
@@ -150,8 +150,9 @@ class ApprovalGatekeeper:
             dt = _dt.datetime.fromisoformat(resolved_at)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=_dt.UTC)
-            window = float(os.environ.get("APPROVAL_ECHO_GUARD_MINUTES", "10") or 10)
-            return (_dt.datetime.now(_dt.UTC) - dt) < _dt.timedelta(minutes=window)
+            return (_dt.datetime.now(_dt.UTC) - dt) < _dt.timedelta(
+                minutes=settings.approval_echo_guard_minutes
+            )
         except Exception:
             return False
 

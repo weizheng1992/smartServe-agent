@@ -227,3 +227,41 @@ def test_写侧_平台默认上下文非生理特征落global(clean_facts):
     with _fake_embedding_model():
         asyncio.run(LongMemory("CUST-W4", "ecommerce").extract_and_store_fact("user prefers 顺丰快递"))
     assert _rows_of(factory, "CUST-W4") == [("global", None)]
+
+
+def test_写侧_B租户ingest不得覆盖A租户tenant画像(clean_facts):
+    """_ingest_fact 回声/覆盖候选带租户条件(与召回侧 tenant_scope_condition 同语义):
+    adidas 上下文 ingest 同维度异值事实,nike 的 tenant 事实不得被 supersede
+    (B 租户写入压制 A 租户画像 = 多租户隔离击穿);adidas 自身新值照落。"""
+    factory = clean_facts
+    asyncio.run(
+        _insert(factory, _mk_fact(user="CUST-I1", scope="tenant", business="nike", fact="用户身高175cm"))
+    )
+    mem = LongMemory("CUST-I1", "adidas")
+    asyncio.run(
+        mem._ingest_fact(
+            fact_text="用户身高178cm",
+            embedding=[1.0, 0.0],
+            scope="tenant",
+            business_id="adidas",
+            confidence=0.95,
+            status="approved",
+            source="agent_audit",
+            subject="self",
+        )
+    )
+
+    async def _q() -> dict:
+        from sqlalchemy import select
+
+        async with factory() as session:
+            rows = (
+                (await session.execute(select(LongMemoryFact).where(LongMemoryFact.user_id == "CUST-I1")))
+                .scalars()
+                .all()
+            )
+            return {r.fact: r.status for r in rows}
+
+    statuses = asyncio.run(_q())
+    assert statuses.get("用户身高175cm") == "approved", "B 租户 ingest supersede 了 A 租户 tenant 画像(隔离击穿)"
+    assert "用户身高178cm" in statuses, "adidas 自身新值未落库(修过头)"

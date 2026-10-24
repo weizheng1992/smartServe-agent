@@ -16,6 +16,17 @@ def _env(key: str, default: str) -> str:
     return value if value else default
 
 
+def _env_float(key: str, default: float) -> float:
+    """float 型 env 安全解析:空/坏值回落缺省,不在导入时炸(守卫类参数宁缺省不炸启动)。"""
+    raw = os.environ.get(key)
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 class ConfigError(RuntimeError):
     """必需配置缺失/非法 —— 拒绝以死端口或垃圾缺省静默启动(persona-hardening 09)。"""
 
@@ -140,6 +151,12 @@ class Settings:
     )
     boundary_clarify_enabled: bool = field(
         default_factory=lambda: _env("AI_BOUNDARY_CLARIFY", "1") == "1"
+    )
+
+    # 审批决议回声短窗(eval-gap 17 号票):驳回/取消后该窗内同作业恢复直接短路,
+    # 不再挂新工单。env 坏值回落 10 分钟(原内联读同语义,且不炸导入)。
+    approval_echo_guard_minutes: float = field(
+        default_factory=lambda: _env_float("APPROVAL_ECHO_GUARD_MINUTES", 10.0)
     )
 
     # L2 商品语义召回(2026-09-11):词元 ILIKE 查空时 bge 余弦补位。默认开;
