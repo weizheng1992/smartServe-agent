@@ -286,12 +286,16 @@ async def _settle_turn(
     #   · result 事件恒最后(交付信号)。各泳道自吞异常,降级粒度不变。
 
     output_before_guard = str(result.get("output") or "")
+    # 商城端 debug 角标载体(docs/ai-usage-panel.md P1):遥测泳道取真值后
+    # 回填,final_result.usage 随终态透传网关信封与顾客 SSE 帧
+    turn_usage: dict = {}
 
     async def _settle_metrics_lane() -> None:
         """遥测泳道:drain → 真值取数 → 状态判定 → LangSmith 派发 → metrics 落盘 → 熔断坏例入池。"""
         try:
             await drain_llm_call_writes(thread_id)
             total_tokens = take_thread_token_total(thread_id)
+            turn_usage["total_tokens"] = total_tokens
             cost_usd = (total_tokens / 1_000_000) * 0.15
             node_transitions = result.get("loop_count") or 3
 
@@ -539,6 +543,13 @@ async def _settle_turn(
             print(f"[runAgent] 任务状态落库失败(不阻断): {tm_err!r}")
 
     final_result = {**to_ts_dict(result), "cards": final_cards}
+    # usage 仅当轮生效(docs/ai-usage-panel.md P1):?debug=usage 角标数据源,
+    # 历史不回填;降级臂 total_tokens=0(turn_usage 未回填)但 latency/路径如实
+    final_result["usage"] = {
+        "totalTokens": turn_usage.get("total_tokens") or 0,
+        "latencyMs": round(elapsed_latency_ms),
+        "turnPath": result.get("turn_path"),
+    }
     if interrupted:
         # S2c:result 帧仍发(网关按 result 帧优雅收口,不发则 SSE 流挂死),
         # 但带 interrupted 标记诚实声明「未完成」—— 严禁复用 error 帧或沉默
@@ -745,9 +756,14 @@ async def run_agent(job: AgentJobInput) -> dict:
             except Exception as pub_err:
                 print(f"[runAgent] 问候旁路事件发布失败(sync 返回值仍完整): {pub_err!r}")
 
-        await _record_greeting_bypass_metric(
-            resolved_biz_id, thread_id, job_id, (time.time() - greeting_t0) * 1000
-        )
+        greeting_latency_ms = (time.time() - greeting_t0) * 1000
+        await _record_greeting_bypass_metric(resolved_biz_id, thread_id, job_id, greeting_latency_ms)
+        # 商城端 debug 角标(docs/ai-usage-panel.md P1):问候臂零 token 如实
+        greeting_result["usage"] = {
+            "totalTokens": 0,
+            "latencyMs": round(greeting_latency_ms),
+            "turnPath": "greeting",
+        }
         return greeting_result
 
     # 2. 🔍 三路 RAG 与记忆检索(文本过短时跳过,节省 1.5s+ 首字延迟)

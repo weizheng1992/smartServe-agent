@@ -7,6 +7,7 @@ import { postJson, qs, requestJson, uploadJson } from '../../lib/api';
 import { STOREFRONT_CHAT_OPEN_EVENT, type StorefrontChatOpenDetail } from '../../lib/chatBridge';
 import { quotaReplyText } from '../../lib/quotaGuidance';
 import { mergeCartSnapshot, readStoreCart, writeStoreCart } from '../../lib/storeCart';
+import { type TurnUsage, usageBadgeText } from '../../lib/usageBadge';
 import { MERCHANT_ID, activeThreadKey, chatMsgsKey, merchantThreadId } from '../../lib/tenant';
 import { getGreetingForRoute } from './routeGreetingConfig';
 import { openStoreStream } from './storeStreamConnection';
@@ -19,7 +20,13 @@ interface ChatMessage {
   cards?: RichCardBlock[];
   imageUrls?: string[];
   isDivider?: boolean;
+  usage?: TurnUsage | null;
 }
+
+// ?debug=usage 开发者角标开关(docs/ai-usage-panel.md P1):仅本机渲染、
+// 仅当轮生效 —— 顾客默认不可见,气泡除时间旁小字外零改动
+const DEBUG_USAGE =
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === 'usage';
 
 // 已同步过购物车卡片的消息 id(SSE 推送与 POST 响应两路携带同一 messageId,
 // 不做幂等会双路累加,导致加购 1 件购物车显示 2 件)
@@ -410,6 +417,7 @@ export function FloatingChatWidget() {
                   text: incomingText,
                   cards: incomingCards,
                   time: nowHM(msgData.timestamp),
+                  usage: (msgData.usage ?? null) as TurnUsage | null,
                 },
               ];
             });
@@ -599,6 +607,7 @@ export function FloatingChatWidget() {
             text: replyText,
             cards: replyCards,
             time: nowHM(),
+            usage: (data.usage ?? null) as TurnUsage | null,
           },
         ];
       });
@@ -865,7 +874,14 @@ export function FloatingChatWidget() {
                       <RichCardRenderer cards={m.cards} onAction={handleCardAction} />
                     </div>
                   )}
-                  {m.time && <span className="text-[10px] text-slate-400 mt-1 px-1">{m.time}</span>}
+                  {m.time && (
+                    <span className="text-[10px] text-slate-400 mt-1 px-1">
+                      {m.time}
+                      {DEBUG_USAGE && m.role === 'assistant' && usageBadgeText(m.usage) ? (
+                        <span className="ml-1.5 text-emerald-700/60">{usageBadgeText(m.usage)}</span>
+                      ) : null}
+                    </span>
+                  )}
                 </div>
               );
             })}

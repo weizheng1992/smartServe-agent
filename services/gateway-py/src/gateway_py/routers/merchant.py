@@ -558,6 +558,9 @@ async def store_chat(body: StoreChatIn, request: Request):
         state = turn["state"] or {}
         output = turn["output"] or state.get("result") or "极光潮品智能客服已为您处理完毕。"
         message_id = f"ast_{_ts_ms()}_{uuid4_hex(5)}"
+        # usage 仅当轮透传(docs/ai-usage-panel.md P1):商城端 ?debug=usage
+        # 角标数据源,顾客默认无感,历史消息接口不动
+        turn_usage = state.get("usage") if isinstance(state, dict) else None
 
         await publish_thread_message(
             thread_id,
@@ -567,6 +570,7 @@ async def store_chat(body: StoreChatIn, request: Request):
                 "content": output,
                 "cards": turn["cards"],
                 "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
+                "usage": turn_usage,
             },
         )
 
@@ -579,6 +583,7 @@ async def store_chat(body: StoreChatIn, request: Request):
             "output": output,
             "result": output,
             "cards": turn["cards"],
+            "usage": turn_usage,
         }
     except Exception as err:
         return JSONResponse(status_code=500, content={"success": False, "error": _err_msg(err)})

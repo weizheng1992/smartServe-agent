@@ -134,6 +134,13 @@ def test_旁路回欢迎文案并带入口卡落库():
     assert 3 <= len(options) <= 5
     assert "转人工" in options[-1]["label"]
 
+    # usage 仅当轮透传(docs/ai-usage-panel.md P1):问候臂零 token 如实,
+    # 商城端 ?debug=usage 角标数据源
+    usage = result.get("usage") or {}
+    assert usage.get("turnPath") == "greeting"
+    assert usage.get("totalTokens") == 0
+    assert isinstance(usage.get("latencyMs"), int)
+
     rows = asyncio.run(_fetch_assistant_rows(thread_id))
     assert len(rows) == 1
     assert "智能客服小助手" in rows[0].content

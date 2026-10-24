@@ -125,6 +125,44 @@ class TestAiUsageSummary:
         assert after["calls"]["totalTokens"] - before["calls"]["totalTokens"] == 1600
 
 
+class TestStoreChatUsage:
+    async def test_store_chat_envelope_carries_usage(self, client):
+        """商城端 debug 角标数据源(docs/ai-usage-panel.md P1):问候轮信封携
+        usage(turnPath=greeting、零 token 如实)—— 仅当轮,顾客默认无感。"""
+        # 注册闸:store/chat 过 check_tenant_registered(同 conftest staff_auth 种子)
+        from engine_py.db import get_session
+        from sqlalchemy import text as _text
+
+        async with get_session() as session:
+            await session.execute(
+                _text(
+                    "INSERT INTO tenants (id, business_id, name, plan_tier, status) "
+                    "VALUES (CAST(:id AS uuid), 'aurora', 'Aurora 极光(测试种子)', 'free', 'active') "
+                    "ON CONFLICT (business_id) DO NOTHING"
+                ).bindparams(id=str(uuid.uuid4()))
+            )
+            await session.commit()
+
+        suffix = uuid.uuid4().hex[:8]
+        r = await client.post(
+            "/api/store/chat",
+            headers=TENANT,
+            json={
+                "message": "你好",
+                "userId": f"usage_probe_{suffix}",
+                "threadId": f"usage_th_env_{suffix}",
+                "businessId": "aurora",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["success"] is True
+        usage = body.get("usage") or {}
+        assert usage.get("turnPath") == "greeting"
+        assert usage.get("totalTokens") == 0
+        assert isinstance(usage.get("latencyMs"), int)
+
+
 class TestAiUsageTurnsAndCalls:
     async def test_turns_thread_filter_and_order(self, client, auth):
         boss = await auth()

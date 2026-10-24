@@ -67,7 +67,10 @@
 
 ## P1（后续票）
 
-- 商城端 `?debug=usage` 角标：SSE 帧冒泡 usage+turn_path，仅当轮生效，历史接口与顾客气泡零改动。
+- ~~商城端 `?debug=usage` 角标~~ **已交付(2026-10-24)**:SSE 帧 + POST 信封透传
+  usage(totalTokens/latencyMs/turnPath,引擎 final_result 携带,greeting 臂与收口臂
+  双写),FloatingChatWidget 时间旁小字「⚡ 耗时 · tok · 路径」仅本机渲染、仅当轮,
+  历史接口与顾客气泡零改动;浏览器实测双向往返(带参数出角标/无参数零渲染)。
 - data agent 归因修复：gateway analytics ask 路径补 `bind_llm_call_context`（绑定点唯一先例 run_agent）。
 - 反事实估算"本月快轨+缓存为你省约 X"（基线=全管线历史均值，UI 标注估算）。
 
