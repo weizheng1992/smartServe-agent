@@ -618,5 +618,18 @@
         "value": "file://scorers/data_mapping.py:get_assert"
       }
     ]
+  },
+  {
+    "description": "dataMapping - 竞品卖得怎么样(域外实体入口闸:闭集外语料限定词在词林匹配前响亮拒绝,严禁静默按本店口径作答;eval-gap-2026-10 14 号票)",
+    "vars": {
+      "input": "竞品卖得怎么样",
+      "expectedKind": "unsupported"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   }
 ]

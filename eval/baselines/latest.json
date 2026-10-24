@@ -192,15 +192,15 @@
       }
     },
     "t1t2": {
-      "total": 23,
-      "pass": 23,
+      "total": 25,
+      "pass": 25,
       "fail": 0,
       "errors": 0,
       "meanScore": 1,
       "scorers": {
         "t1t2_channels.py:get_assert": {
-          "count": 23,
-          "pass": 23,
+          "count": 25,
+          "pass": 25,
           "fail": 0,
           "meanScore": 1
         }

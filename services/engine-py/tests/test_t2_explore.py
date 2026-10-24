@@ -47,8 +47,12 @@ class TestExploreGuard:
         assert "500" not in sql
 
     def test_multi_statement_rejected(self):
-        with pytest.raises(ExploreRejected, match="多语句"):
+        """首分号截断(16 号票)后语义:仅首语句进守卫,尾随语句视同尾注丢弃;
+        常量多语句由常量查询闸拒绝(执行面永不触达第二条)。"""
+        with pytest.raises(ExploreRejected, match="事实表"):
             guard_explore_sql("SELECT 1; SELECT 2")
+        sql = guard_explore_sql("SELECT title FROM merchant_spus LIMIT 3; SELECT 1")
+        assert sql.startswith("SELECT") and "; SELECT 1" not in sql
 
     def test_non_select_rejected(self):
         """非查询语句(无 SELECT/WITH 可提取)响亮拒绝;文案区分「空生成」与
@@ -100,3 +104,20 @@ class TestExploreGuard:
             "WITH top AS (SELECT title FROM merchant_spus LIMIT 5) SELECT * FROM top"
         )
         assert "merchant_spus" in sql
+
+    def test_trailing_prose_after_semicolon_cut(self):
+        """首分号截断(16 号票):模型尾注接在分号后,旧序整条进解析器被
+        「引号外中文散文」误杀 —— 截断后合法 SQL 存活。"""
+        sql = guard_explore_sql(
+            "SELECT title FROM merchant_spus LIMIT 5; 以上查询对比了两个品类的退货情况"
+        )
+        assert "merchant_spus" in sql and "以上" not in sql
+
+    def test_cjk_alias_bare_reference_in_order_by(self):
+        """中文别名裸引用(16 号票 live 实弹:ORDER BY 退款单数)非 Alias 节点,
+        只扫 Alias 漏引号化 → 引号外中文误杀 —— 通用 Identifier 遍历覆盖。"""
+        sql = guard_explore_sql(
+            "SELECT s.category AS 品类, COUNT(o.order_id) AS 退款单数 "
+            "FROM merchant_orders o GROUP BY s.category ORDER BY 退款单数 DESC LIMIT 10"
+        )
+        assert '"品类"' in sql and '"退款单数"' in sql

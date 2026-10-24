@@ -149,10 +149,10 @@
     ]
   },
   {
-    "description": "T1 组合 - 角色闭集拒绝(可组合指标不在 allowed;确定性措辞)",
+    "description": "T1 组合 - 角色闭集拒绝(出货件数钉死 volume 不在 allowed;措辞歧义会令 LLM 组出 allowed 内的 order_count 成为合法组合,2026-10-24 校准)",
     "vars": {
       "channel": "t1",
-      "input": "各区域的销量分布",
+      "input": "各区域的出货件数分布",
       "allowed": [
         "gmv",
         "net_sales",
@@ -220,6 +220,22 @@
       "expectedMetric": "net_sales",
       "expectedDimension": "region",
       "expectedTimeKind": "last_month"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "T1 组合 - 时间平移算子(品类销售额环比;裸维度分组:category 垃圾串归一+dimension 语感回填+环比词确定性置位,eval-gap-2026-10 15 号票)",
+    "vars": {
+      "channel": "t1",
+      "input": "各品类销售额的环比变化",
+      "expectedMetric": "gmv",
+      "expectedDimension": "category",
+      "expectedComparePrevious": true
     },
     "assert": [
       {

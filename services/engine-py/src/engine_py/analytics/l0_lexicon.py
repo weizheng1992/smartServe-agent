@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING
 from . import head_telemetry
 from .tools_registry_bridge import metric_semantic_registry
 
+# 域外实体闭集(14 号票):见 resolve 入口闸注释 —— 逐词可举证,宽泛词不入列
+_EXTERNAL_ENTITY_RE = re.compile(r"竞品|竞争对手|对手店|同行|供应商|供货商")
+
 
 def category_pattern() -> re.Pattern[str]:
     """品类词表正则(ADR-0010:枚举维度单一事实源 = semantic_model.yaml;
@@ -111,6 +114,17 @@ class LexiconResolver:
         clean = (question or "").strip().lower()
         if not clean:
             raise UnsupportedQuery("空问题")
+
+        # 域外实体入口闸(eval-gap-2026-10 14 号票):「竞品卖得怎么样」曾被
+        # volume 词面命中后静默丢弃「竞品」限定词、按本店销量榜作答(08-P1
+        # 铁律违例)—— 域外限定词在词林匹配**之前**响亮拒绝。词表刻意收紧
+        # (逐词可枚举、可举证);「市场/行业」等高碰撞词不入列,防误伤
+        # 「市场份额」类合法问句。
+        if _EXTERNAL_ENTITY_RE.search(clean):
+            raise UnsupportedQuery(
+                "「竞品/同行/供应商」类域外数据不在本店分析范围,暂不支持该问题"
+                "(数据源仅覆盖本店订单/商品/客户/活动)"
+            )
 
         registry = metric_semantic_registry()
         hit: tuple[str, str] | None = None

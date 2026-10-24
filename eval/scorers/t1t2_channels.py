@@ -57,7 +57,11 @@ def _assert_t1(vars: dict) -> dict:
         from engine_py.analytics.composition import COMPOSABLE_METRICS, compile_composition
         from engine_py.analytics.engine import UnsupportedQuery
 
-        comp.source_question = vars.get("input", "")
+        # frozen dataclass 不可原地赋值(live 实弹:本分支首次被 LLM 触达即
+        # FrozenInstanceError)—— dataclasses.replace 造新实例
+        import dataclasses as _dc
+
+        comp = _dc.replace(comp, source_question=vars.get("input", ""))
         try:
             compile_composition(comp, "aurora")
         except (UnsupportedQuery, Exception):

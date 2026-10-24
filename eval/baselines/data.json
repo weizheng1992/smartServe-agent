@@ -1,7 +1,7 @@
 {
   "suite": "data",
-  "pinnedAt": "2026-10-23T13:23:19.931Z",
-  "gitSha": "f97ee4b3c53446cd970f81942b2bd26670a16b38",
+  "pinnedAt": "2026-10-24T04:27:24.064Z",
+  "gitSha": "e1cfe1d4d0af8fd5454818aad24226598e275712",
   "config": {
     "path": "eval/promptfoo.data.yaml",
     "sha256": "a9a3685e0b33ce174c32929966c5719300cbaba98cdbca0bd6de00c04b79c0cd"
@@ -10,22 +10,22 @@
     "files": [
       {
         "path": "testCases/data_analytics/mapping.json",
-        "sha256": "a5325bd971a952e065643ef551a6197e643a7461dd67917e9a1f13c43dec7c8e"
+        "sha256": "08bad132f18fb3a448ded70039e03c5df4925fb0de28c819754b9c69f6aa3730"
       }
     ],
-    "combinedSha256": "e443075c77d621ffbd15aee6370abe89ed72703bf73fa4293cb458fd1b87a6c7"
+    "combinedSha256": "d1acfa8fa15c49dce333dedc759eef52a609005d06e8fe68a3259256cdfc8b6c"
   },
   "promptfooVersion": "0.111.1",
   "summary": {
-    "total": 41,
-    "pass": 41,
+    "total": 42,
+    "pass": 42,
     "fail": 0,
     "errors": 0,
     "meanScore": 1,
     "scorers": {
       "data_mapping.py:get_assert": {
-        "count": 41,
-        "pass": 41,
+        "count": 42,
+        "pass": 42,
         "fail": 0,
         "meanScore": 1
       }
@@ -234,6 +234,11 @@
     },
     {
       "description": "dataMapping - 对比一下新客50元券和背包品类85折(promo_compare 登记流水线)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "dataMapping - 竞品卖得怎么样(域外实体入口闸:闭集外语料限定词在词林匹配前响亮拒绝,严禁静默按本店口径作答;eval-gap-2026-10 14 号票)",
       "success": true,
       "score": 1
     }

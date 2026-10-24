@@ -45,6 +45,12 @@ class CompositionQuery:
     source_question: str = ""
 
 
+# 成品指标闭集(15 号票):T1 组合的职责是「指标×维度」新组合,成品指标
+# (闭集路由既有形态)在此前路由已试过并失败 —— prompt 规则是软约束,
+# _validate 硬闸兜底(live 实弹:LLM 偶发仍映射 order_overview)
+_PRODUCT_METRICS = frozenset({"customer_spend_top", "order_overview", "category_gmv_top"})
+
+
 class CompositionRejected(Exception):
     """组合查询落在语义层闭集之外(响亮失败;呈现层归 unsupported,落库飞轮)。"""
 
@@ -101,7 +107,7 @@ async def compose_resolve(question: str, allowed: list[str] | None) -> Compositi
         "你是商户数据问答的组合规划器。把问题解析为「指标 × 维度 × 过滤 × 时间窗」的语义层组合。\n"
         "规则:\n"
         "- 你的职责是【组合】:优先产出「指标 × 维度」配对(如 品类×销售额 → metric=gmv, dimension=category);\n"
-        "  不要映射到目录中的成品指标(customer_spend_top/order_overview/category_gmv_top 等)——\n"
+        f"  不要映射到目录中的成品指标({'/'.join(sorted(_PRODUCT_METRICS))} 等)——\n"
         "  闭集路由在你之前已经试过并失败,再映射成品指标等于重复失败\n"
         "- metric 只能取指标目录中的键;dimension 只能取维度目录中的键;问题确实不含维度拆分时才留空\n"
         "- 时间窗 kind ∈ last_month/last_7d/last_30d/last_months(附 n);问句出现「近/最近/上个月/N 个月」必须提取;\n"
@@ -156,6 +162,8 @@ def _validate(out: Any, allowed: list[str] | None, question: str) -> Composition
 
     if out.metric == "__unsupported__" or out.metric not in metric_semantic_registry():
         raise CompositionRejected(f"指标 {out.metric!r} 不在语义层目录内")
+    if out.metric in _PRODUCT_METRICS:
+        raise CompositionRejected(f"成品指标 {out.metric!r} 由闭集路由承担,T1 组合不重复映射(重复失败)")
     if allowed is not None and out.metric not in allowed:
         raise CompositionRejected(f"当前角色无权查看指标 {out.metric!r}")
     model = semantic_model()
@@ -175,13 +183,29 @@ def _validate(out: Any, allowed: list[str] | None, question: str) -> Composition
             _dim = _DIM_WORD_MAP.get(_word or "")
             if _dim in dims:
                 out.dimension = _dim
+    # 环比/同比确定性置位(15 号票):问句明示环比词而 LLM 漏标 compare_previous
+    # 是错判不是风格差异 —— 与时间/品类机械回填同律,词面命中即置 True
+    # (composition.py 模块级 _COMPARE_PREV_RE 与 breakdown_reroute 同源)
+    if _COMPARE_PREV_RE.search(question or ""):
+        out.compare_previous = True
     if out.category is None and slot_category:
         out.category = slot_category
     # 维度词回声归一(live eval 九轮实弹):「各品类销售额」的 LLM 把「品类」
     # 这个维度词当过滤值回填 —— 维度词是切片轴不是取值,丢弃
     _DIM_WORDS = {"品类", "品牌", "区域", "城市", "客户", "活动", "类目"}
-    if out.category in _DIM_WORDS or (out.category is not None and not out.category.strip()):
-        out.category = None  # 维度词回声 / 空串(live 十轮实弹)都不是过滤值
+    if out.category is not None:
+        _cat = out.category.strip()
+        # LLM 垃圾串归一(15 号票三跑三红实证:'各品类'/'null'/'' 各不同变体):
+        # 各/每/所有/全部 前缀 + 维度词、JSON null 字面串、裸维度词 —— 都不是
+        # 过滤值;真实枚举值(衬衫/户外机能)不受影响
+        for _p in ("各", "每", "所有", "全部"):
+            if _cat.startswith(_p):
+                _cat = _cat[len(_p):].strip()
+                break
+        if _cat.lower() in ("null", "none", "true", "false", "无", "") or _cat in _DIM_WORDS:
+            out.category = None
+        else:
+            out.category = _cat
     if out.category is not None:
         enum_values = dims.get("category", {}).get("values") or []
         if out.category not in enum_values:

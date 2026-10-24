@@ -354,3 +354,36 @@ class TestDimensionBackfill:
 
         comp = _validate(self._out(), None, "现在的客单价是多少")
         assert comp.dimension is None
+
+    def test_category_garbage_strings_normalized(self):
+        """LLM 品类垃圾串归一(15 号票三跑三红:'各品类'/'null'/'')—— 裸维度
+        分组问句的 category 一律归 None,dimension 由语感回填承担。"""
+        from engine_py.analytics.composition import _validate
+
+        for garbage in ("各品类", "null", "none", "无", ""):
+            comp = _validate(self._out(category=garbage), None, "各品类销售额的环比变化")
+            assert comp.dimension == "category"
+            assert comp.category is None, garbage
+            assert comp.compare_previous is True, "环比词确定性置位(15 号票)"
+
+    def test_compare_previous_phrase_overrides(self):
+        """问句明示环比/同比而 LLM 漏标 → 确定性置 True(错判非风格差异)。"""
+        from engine_py.analytics.composition import _validate
+
+        comp = _validate(self._out(compare_previous=False), None, "上月与这个月的销售额环比对比")
+        assert comp.compare_previous is True
+
+    def test_product_metric_denied(self):
+        """成品指标硬闸(15 号票):LLM 偶发映射 order_overview(prompt 软约束
+        漏网)—— _validate 兜底拒绝,「订单状态分布」类问句不得走成品指标。"""
+        from engine_py.analytics.composition import CompositionRejected, _validate
+
+        with pytest.raises(CompositionRejected, match="成品指标"):
+            _validate(self._out(metric="order_overview"), None, "订单目前都处于什么状态")
+
+    def test_category_boolean_leak_normalized(self):
+        """LLM 布尔串泄漏(15 号票 live 实弹:category='true')同归垃圾集。"""
+        from engine_py.analytics.composition import _validate
+
+        comp = _validate(self._out(category="true"), None, "各品类销售额的环比变化")
+        assert comp.category is None

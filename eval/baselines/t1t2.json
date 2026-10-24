@@ -1,7 +1,7 @@
 {
   "suite": "t1t2",
-  "pinnedAt": "2026-10-23T14:10:36.181Z",
-  "gitSha": "abace19c5397371ae9eb9f966dfa9dc2ead39925",
+  "pinnedAt": "2026-10-24T04:48:51.616Z",
+  "gitSha": "e1cfe1d4d0af8fd5454818aad24226598e275712",
   "config": {
     "path": "eval/promptfoo.t1t2.yaml",
     "sha256": "d86f46fe3ee6c19247ba56e3f7b67d0cdaf7af9e2d32a524eec76600eba60ec5"
@@ -10,26 +10,26 @@
     "files": [
       {
         "path": "testCases/data_analytics/t1_composition.json",
-        "sha256": "390cbc489e02b8169ab6cca51d87559788c76bcf4e2643807f2a47195e12b667"
+        "sha256": "e7cfa8c1c161fe21338d1b9378866ee0891e32640e30f8be771490f5c7669f02"
       },
       {
         "path": "testCases/data_analytics/t2_explore.json",
-        "sha256": "2d6e003b0264c9dad1133667c4488b34af25d4b0dd81e7f9ad74f502145dc0cb"
+        "sha256": "bb462d551d419318c60ca857b9ae86f30f9c8b969c372dfda387754b1789cb91"
       }
     ],
-    "combinedSha256": "ba09adaa4948d55b92b70ab29d5ba04c18a8476a694ab594dc07c4458fc79be4"
+    "combinedSha256": "c88df7c9d167e74b82273b1c0c770d3eae1ca6eda18a53d3e4bc357d75f8ece4"
   },
   "promptfooVersion": "0.111.1",
   "summary": {
-    "total": 23,
-    "pass": 23,
+    "total": 25,
+    "pass": 25,
     "fail": 0,
     "errors": 0,
     "meanScore": 1,
     "scorers": {
       "t1t2_channels.py:get_assert": {
-        "count": 23,
-        "pass": 23,
+        "count": 25,
+        "pass": 25,
         "fail": 0,
         "meanScore": 1
       }
@@ -87,7 +87,7 @@
       "score": 1
     },
     {
-      "description": "T1 组合 - 角色闭集拒绝(可组合指标不在 allowed;确定性措辞)",
+      "description": "T1 组合 - 角色闭集拒绝(出货件数钉死 volume 不在 allowed;措辞歧义会令 LLM 组出 allowed 内的 order_count 成为合法组合,2026-10-24 校准)",
       "success": true,
       "score": 1
     },
@@ -108,6 +108,11 @@
     },
     {
       "description": "T1 组合 - 区域×净销售额×时间窗(「华东上月净销售额」场景原句)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "T1 组合 - 时间平移算子(品类销售额环比;裸维度分组:category 垃圾串归一+dimension 语感回填+环比词确定性置位,eval-gap-2026-10 15 号票)",
       "success": true,
       "score": 1
     },
@@ -148,6 +153,11 @@
     },
     {
       "description": "T2 探索 - 闲聊域外拒答(常量查询盲区已修:guard 无事实表拒绝,eval-gap-2026-10 16;generate 提示词纪律仍待补)",
+      "success": true,
+      "score": 1
+    },
+    {
+      "description": "T2 探索 - 双品类退货对比(守卫中文别名 AST 引号化+首分号截断后回归,16 号票;中文列别名合法,尾注截断防散文误杀)",
       "success": true,
       "score": 1
     }

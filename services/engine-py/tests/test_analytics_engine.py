@@ -187,3 +187,24 @@ class TestExecute:
         """execute 的 rows 走真实 DB;此处只验契约形状:QueryResult 必带口径注记。"""
         r = QueryResult(rows=[], metric="gmv", unit="元", caliber="有效订单聚合(排除退款/取消)")
         assert r.rows == [] and r.caliber
+
+
+class TestExternalEntityGate:
+    """域外实体入口闸(eval-gap-2026-10 14 号票):「竞品卖得怎么样」曾被
+    volume 词面命中后静默丢弃限定词按本店口径作答(08-P1 铁律违例)。"""
+
+    def test_competitor_question_rejected(self, engine):
+        with pytest.raises(UnsupportedQuery, match="域外"):
+            engine.resolve("竞品卖得怎么样")
+
+    def test_competitor_family_words_rejected(self, engine):
+        for q in ("竞争对手的销量排名", "同行都在卖什么", "供应商的供货价多少", "供货商名单"):
+            with pytest.raises(UnsupportedQuery):
+                engine.resolve(q)
+
+    def test_normal_question_unaffected(self, engine):
+        """闸外问句零影响:收紧词表不误伤合法问(市场/行业类高碰撞词不入列)。"""
+        intent = engine.resolve("上月GMV是多少")
+        assert intent.metric == "gmv"
+        intent2 = engine.resolve("各品类的销量对比")
+        assert intent2.metric == "volume"

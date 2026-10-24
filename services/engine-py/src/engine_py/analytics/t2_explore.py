@@ -41,10 +41,12 @@ def _quote_cjk_aliases(stmt: exp.Expression) -> None:
     """中文列别名自动加引号(AST 自修复):模型常写 `AS 品类` 不带引号 —— SQL
     本身合法,PG 接受未加引号的 CJK 标识符,但白名单渲染/下游展示都要求规范
     形态;修完再过 CJK 审计(live eval 实弹:双品类退货对比整条 SQL 死于风格)。"""
-    for alias_node in stmt.find_all(exp.Alias):
-        alias_exp = alias_node.args.get("alias")
-        if isinstance(alias_exp, exp.Identifier) and _CJK_RE.search(str(alias_exp.this or "")):
-            alias_exp.set("quoted", True)
+    # 通用 Identifier 遍历(16 号票 live 实弹):`ORDER BY 退款单数` 对中文别名的
+    # 裸引用不是 Alias 节点,只扫 Alias 会漏 —— ORDER BY 引号化后仍引用同名
+    # 别名,语义不变;中文表/列名本就不在白名单,只会被表白名单闸另行拒绝
+    for ident in stmt.find_all(exp.Identifier):
+        if _CJK_RE.search(str(ident.this or "")):
+            ident.set("quoted", True)
 
 
 def t2_enabled() -> bool:
@@ -88,6 +90,8 @@ async def generate_sql(question: str) -> str:
         "- 常用口径常量:有效成交 = status NOT IN ('REFUNDED', 'CANCELLED');差评 = rating <= 2;\n"
         "  在售 = status = 'ON_SALE';GMV = SUM(oi.quantity * oi.price)\n"
         "- 问题与 schema/指标字典无法对应时,输出空字符串,绝不编造表名\n"
+        "- 非数据分析问题(闲聊/天气/写作等)与一切写操作请求(改价/删除/更新数据):\n"
+        "  必须输出空字符串,绝不为敷衍而编造 SELECT 常量查询(如 SELECT '...' LIMIT 1)\n"
         + grounding_context()
     )
     resp = await get_chat_model().ainvoke([SystemMessage(content=system), HumanMessage(content=question)])
@@ -96,10 +100,16 @@ async def generate_sql(question: str) -> str:
 
 def _extract_sql(raw_sql: str) -> str:
     """从生成文本提取 SQL:剥围栏后取首个 SELECT/WITH 起始处 —— 模型常无视
-    「只输出语句原文」纪律带中文铺垫/尾注(live eval 实弹),散文不进解析器。"""
+    「只输出语句原文」纪律带中文铺垫/尾注(live eval 实弹),散文不进解析器;
+    **首分号截断**(16 号票):尾注常接在分号后,旧序只 rstrip 尾分号,尾注
+    随语句进解析器即「引号外中文散文/多语句」误杀整条合法 SQL。"""
     text = _FENCE_RE.sub("", (raw_sql or "").strip()).strip()
     match = re.search(r"\b(SELECT|WITH)\b", text, re.IGNORECASE)
-    return text[match.start() :].strip().rstrip(";").strip() if match else ""
+    if not match:
+        return ""
+    seg = text[match.start() :]
+    semi = seg.find(";")
+    return (seg[:semi] if semi >= 0 else seg).strip()
 
 
 def guard_explore_sql(raw_sql: str) -> str:

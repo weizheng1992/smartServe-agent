@@ -110,5 +110,19 @@
         "value": "file://scorers/t1t2_channels.py:get_assert"
       }
     ]
+  },
+  {
+    "description": "T2 探索 - 双品类退货对比(守卫中文别名 AST 引号化+首分号截断后回归,16 号票;中文列别名合法,尾注截断防散文误杀)",
+    "vars": {
+      "channel": "t2",
+      "input": "衬衫和户外机能两个品类哪个退货更多",
+      "expectGuardPass": true
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
   }
 ]
