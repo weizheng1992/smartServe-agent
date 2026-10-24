@@ -493,6 +493,24 @@ async def planner_node(state: AgentState) -> dict:
                 "request cannot be fulfilled, generate a step to explain the reason politely to the user."
             )
 
+    # 🛡️ Journal-Resume(docs/multi-turn-task-state.md P2-1/D5):崩溃恢复轮 ——
+    # run_agent 轮入口检测到步级 journal 崩溃尾巴并载回在途计划,直接保留继续
+    # 执行(执行器跳过 completed 步、failed 步重试)。门禁:System 轮不抢(HITL
+    # 语义优先)、当前步挂审批不抢(决议语义优先);计划不在场不适用(载回侧
+    # 已保证,双保险)。
+    if state.get("journal_resume") and prior_subtasks and not is_system_resume:
+        _jr_idx = prior_plan.get("currentStepIndex", 0)
+        _jr_step = prior_subtasks[_jr_idx] if 0 <= _jr_idx < len(prior_subtasks) else None
+        if not (_jr_step and (_jr_step.get("result") or {}).get("waitingForApproval")):
+            if job_id:
+                await emit_status(
+                    job_id,
+                    "🔄 崩溃恢复:检测到上一轮执行中断，保留既有计划从断点继续执行！",
+                    node="planner",
+                    plan=prior_plan,
+                )
+            return {"task_plan": prior_plan, "global_transitions_count": 1}
+
     # 🛡️ Boundary-Preserve(docs/multi-turn-task-state.md P1-1/D2):判定器
     # 高置信判 modify → 保留既有计划不重规划 —— 实体修正/追加不改目标,
     # 剩余步骤照跑,新槽位由 step_execution 现取现用。四道门禁:

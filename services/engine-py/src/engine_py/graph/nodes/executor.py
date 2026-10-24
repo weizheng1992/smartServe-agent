@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 from ...llm import bind_llm_call_node
+from ...memory.step_journal import write_step_transitions
 from ..state import AgentState
 from .step_execution_engine import execute_step
 
 
 async def executor_node(state: AgentState) -> dict:
     bind_llm_call_node("executor")
+    prev_subtasks = ((state.get("task_plan") or {}).get("subtasks")) or []
     result = await execute_step(dict(state))
+    # 步级 journal(docs/multi-turn-task-state.md P2-1/D5):进出 plan diff →
+    # append-only 行(崩溃恢复真值源);旁路自吞,任何异常不阻断执行
+    await write_step_transitions(
+        str(state.get("thread_id") or ""),
+        str(state.get("job_id") or ""),
+        prev_subtasks,
+        (result.get("taskPlan") or {}).get("subtasks") or [],
+    )
     update: dict = {
         "task_plan": result["taskPlan"],
         "global_transitions_count": result["globalTransitionsCount"],

@@ -143,6 +143,31 @@ class TestBuildHistoryBlock:
         assert out["kept_count"] == 1 and out["trimmed"] is True
         assert out["block"].startswith("[TASK STATE]")
 
+    def test_append_only_prefix_stability(self):
+        """KV-cache 前缀纪律(docs/multi-turn-task-state.md P2-2,Manus 裁决):
+        预算内新轮只追加 —— 上一轮的装配产物必须是本轮产物的严格前缀,任何
+        重排/改写都是缓存命中率的敌人。"""
+        from engine_py.memory.context_builder import build_history_block
+
+        msgs = [
+            _msg("user", "订周三的酒店", "2026-10-24T09:00:00"),
+            _msg("assistant", "好的", "2026-10-24T09:00:10"),
+            _msg("user", "换成周四", "2026-10-24T09:01:00"),
+        ]
+        line = "[TASK STATE] 当前任务:上海行程 ｜ 关键实体:date=周四"
+        block3 = build_history_block(msgs, task_state_line=line, budget=10_000)["block"]
+        block4 = build_history_block([*msgs, _msg("assistant", "已改", "2026-10-24T09:01:30")], task_state_line=line, budget=10_000)["block"]
+        assert block4.startswith(block3), "预算内追加必须保持前缀稳定"
+
+    def test_determinism_same_inputs_same_block(self):
+        """同输入同产物(纯函数无时钟/随机注入)—— 可缓存性的前提。"""
+        from engine_py.memory.context_builder import build_history_block
+
+        msgs = [_msg("user", "在吗"), _msg("assistant", "在的")]
+        a = build_history_block(msgs, summary="s", task_state_line="[TASK STATE] x", budget=10_000)["block"]
+        b = build_history_block(list(msgs), summary="s", task_state_line="[TASK STATE] x", budget=10_000)["block"]
+        assert a == b
+
 
 class TestSummarizeOverflow:
     @pytest.mark.asyncio

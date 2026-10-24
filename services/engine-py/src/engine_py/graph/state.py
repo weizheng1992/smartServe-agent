@@ -92,6 +92,11 @@ class AgentState(TypedDict, total=False):
     # 判定器本轮弃权(无前任务/解析失败/模型省略),全链按 pass 处理
     boundary: Annotated[dict | None, _replace_if_present_reducer]
 
+    # 崩溃恢复旗标(docs/multi-turn-task-state.md P2-1/D5):run_agent 轮入口
+    # 检测到步级 journal 崩溃尾巴(上一轮崩溃且在途计划存续)→ True,planner
+    # Journal-Resume 保留计划续跑;检测是旁路,任何异常 False
+    journal_resume: bool
+
     # 循环控制计数(-1 归零语义见 _counter_reducer)
     loop_count: int
     global_transitions_count: Annotated[int, _counter_reducer]

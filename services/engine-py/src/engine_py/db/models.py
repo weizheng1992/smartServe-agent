@@ -231,6 +231,30 @@ class TaskMemoryRow(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
 
 
+class TaskStepJournalRow(Base):
+    """步级执行日志(docs/multi-turn-task-state.md P2-1/D5,2026-10-24)。
+
+    append-only:每个子任务状态变化一行(ok/failed),崩溃恢复的「执行停在
+    哪」真值源 —— 降级臂曾把在途计划用空桩覆写,恢复面无从谈起。HITL 审批
+    挂起不产生行(步未完成),与计划级恢复(PendingApproval)正交;消费方
+    memory/step_journal.py(写入方 graph/nodes/executor.py 的进出 plan diff)。
+    """
+
+    __tablename__ = "task_step_journal"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    thread_id: Mapped[str] = mapped_column(Text, ForeignKey("threads.id"), nullable=False)
+    job_id: Mapped[str] = mapped_column(Text, nullable=False)
+    step_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    result_digest: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+
+
+Index("ix_task_step_journal_thread_created", TaskStepJournalRow.thread_id, TaskStepJournalRow.created_at)
+Index("ix_task_step_journal_job", TaskStepJournalRow.job_id)
+
+
 class EpisodicEventRow(Base):
     __tablename__ = "episodic_events"
 

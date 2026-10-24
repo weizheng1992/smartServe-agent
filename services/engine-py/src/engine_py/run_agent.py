@@ -49,6 +49,7 @@ from .llm import (
 )
 from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from .memory.context_builder import build_history_block, summarize_overflow
+from .memory.step_journal import detect_crash_tail, plan_to_persist_on_crash, rebuild_plan_from_journal
 from .memory.task_state import (
     GOAL_PLACEHOLDER,
     advance_task_state,
@@ -261,6 +262,7 @@ async def _settle_turn(
     history_summary_final: str | None = None,
     prev_task_state: dict | None = None,
     current_turn: int = 1,
+    prev_saved_state: dict | None = None,
     interrupted: bool = False,
 ) -> dict:
     """收口(内部缝):图终态 → 交付调用方之间的唯一持久化段,顺序即契约。
@@ -498,11 +500,17 @@ async def _settle_turn(
         turn=current_turn,
     )
 
+    # 崩溃臂计划保真(docs/multi-turn-task-state.md P2-1/D5):降级桩的空
+    # task_plan 严禁覆写在途计划 —— journal 恢复面依赖它存续,下一轮入口
+    # detect_crash_tail 载回续跑。interrupted(S2c)部分态自带计划,不走此臂。
+    _crash_arm = llm_breaker_fired or graph_error_fired
+    plan_to_persist = plan_to_persist_on_crash(task_plan_to_save, prev_saved_state, _crash_arm)
+
     async def _task_memory_lane():
         try:
             await task_memory.save_task_state(
                 {
-                    **task_plan_to_save,
+                    **plan_to_persist,
                     "guideContext": result.get("guide_context") or saved_guide_context,
                     "cartContext": result.get("cart_context") or saved_cart_context,
                     "orderContext": result.get("order_context") or saved_order_context,
@@ -556,7 +564,7 @@ async def _settle_turn(
         try:
             await task_memory.save_task_state(
                 {
-                    **task_plan_to_save,
+                    **plan_to_persist,
                     "guideContext": result.get("guide_context") or saved_guide_context,
                     "cartContext": result.get("cart_context") or saved_cart_context,
                     "orderContext": result.get("order_context") or saved_order_context,
@@ -847,6 +855,7 @@ async def run_agent(job: AgentJobInput) -> dict:
     saved_cart_context = None
     saved_order_context = None
     history_summary_prev = None
+    saved_state = None
     # 结构化任务态(docs/multi-turn-task-state.md P0-1):缺省兜底,旧数据无
     # taskState 键 → 合法空形;turns 单调计数自增得本轮轮次号(short_memory
     # 截 10 条长度非单调,不能当轮次号)
@@ -863,6 +872,21 @@ async def run_agent(job: AgentJobInput) -> dict:
             prev_task_state = normalize_task_state(saved_state.get("taskState"))
     except Exception as err:
         print(f"[buildGraph] Failed to load saved task plan from taskMemory: {err}")
+
+    # 崩溃恢复载回(docs/multi-turn-task-state.md P2-1/D5):上一轮执行中崩溃
+    # (resolution_status 落崩溃态)且 journal 有该 job 的步级行 → 非 System 轮
+    # 也载回在途计划,按 journal 真值修补步状态(completed 保留/failed 重试),
+    # planner Journal-Resume 据此保留计划续跑。检测自身旁路自吞(异常按无尾巴),
+    # 此处不再包 try —— 双重防御是噪音(code-review 裁定)。
+    journal_tail = await detect_crash_tail(thread_id)
+    journal_resume = False
+    if journal_tail and isinstance(saved_state, dict) and saved_state.get("subtasks"):
+        saved_task_plan = rebuild_plan_from_journal(saved_state, journal_tail["rows"])
+        journal_resume = True
+        print(
+            f"[runAgent] 崩溃恢复:job={journal_tail['job_id']} 检测到步级尾巴,"
+            f"载回在途计划({len(saved_task_plan.get('subtasks') or [])} 步)续跑"
+        )
     current_turn = prev_task_state["turns"] + 1
 
     # 历史预算 + 懒触发滚动摘要(2026-09-21 拷问轮决议):预算内零摘要成本;
@@ -900,6 +924,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         "short_memory": history_msgs,
         "history_block": history_block,
         "task_plan": saved_task_plan if saved_task_plan is not None else dict(DEFAULT_TASK_PLAN),
+        "journal_resume": journal_resume,
         "loop_count": 0,
     }
     if saved_guide_context is not None:
@@ -1027,5 +1052,6 @@ async def run_agent(job: AgentJobInput) -> dict:
         history_summary_final=history_summary_final,
         prev_task_state=prev_task_state,
         current_turn=current_turn,
+        prev_saved_state=saved_state if isinstance(saved_state, dict) else None,
         interrupted=interrupted,
     )

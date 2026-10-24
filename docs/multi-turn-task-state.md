@@ -143,22 +143,28 @@
 - 呈现:`apps/merchant-admin/src/pages/ai-usage/` 「多轮任务健康度」五卡节;网关 summary `taskHealth` 键(含分子分母绝对数,比率可自洽验证);口径 SQL 有 delta 单测。
 - 节奏(D6):看板先行,硬闸阈值等 ~2 周基线再定——"管道盲闸吞失败"前科纪律。
 
-### 4.5 P2-1 · 步级 journal(第二缺口)
+### 4.5 P2-1 · 步级 journal(第二缺口)—— ✅ 已落地(2026-10-24)
 
-**解决**:课程⑧;修"执行中崩溃整体降级道歉"(`run_agent.py:330-334`)。
+**解决**:课程⑧;修"执行中崩溃整体降级道歉 + 降级桩空 task_plan 覆写在途计划"(`run_agent.py` 崩溃臂)。
 
-- **新表** `task_step_journal`(append-only,无 update):`id, thread_id, job_id, plan_id, step_index, status(pending|ok|failed), result_digest, created_at`。
-- **写点**:step_execution_engine 每步完成 / 工具结果落一行(含 result_digest 供幂等重放判断)。
-- **恢复**(D5):run_agent 轮入口检测同 thread 存在未完成尾巴(且非 HITL 审批挂起)→ 从最后 ok 步续跑剩余;超 1 轮未续或 task_state 相关实体已变 → 放弃,降级致歉。
-- **正交性**:PendingApproval 计划级暂停不算"未完成";journal 任何异常不阻断主流程(context_builder"回退不阻断"同款纪律)。
-- **不引入** Temporal/Restate(D10):A 档单机部署矩阵不匹配其运维面;步级重放由本表实现。
+- **新表** `task_step_journal`(0028 迁移,幂等守卫沿 0027 先例;append-only 无 update):`id, thread_id, job_id, step_index, status(completed|failed), result_digest, created_at`。状态词汇与子任务本词汇一致(不做 ok 翻译)。
+- **写点**:executor_node 对进出 task_plan 做 **diff** —— 单缝覆盖全部 return 路径,只记状态变化行,completed 步带结果 sha256 指纹(16 位,审计留痕);旁路自吞 print,绝不阻断执行。
+- **恢复**(D5):run_agent 轮入口 `detect_crash_tail` —— 同会话最新一轮 session_metrics 落崩溃态(graph_error_degraded / llm_circuit_breaker)∧ 该 job 有步级行 → 非 System 轮也载回 task_memory 在途计划,`rebuild_plan_from_journal` 按 journal 真值修补(completed 保留/failed 显式标 failed 由执行器重试),planner **Journal-Resume** 保留计划续跑(门禁:System 轮不抢/当前步挂审批不抢)。「超 1 轮未续」由构造自然成立:任何更新一轮都让 latest 不再是那个崩溃 job。interrupted(S2c)部分态自带计划、llm_quota 需人工干预,均不入恢复面。
+- **code-review as-built 裁决(2026-10-24)**:①currentStepIndex = **首个未完成步**(并行分支下 failed 先于 completed 共存时,取 max(completed)+1 会把失败步跳过);②detect 排序契约 = (step_index, created_at) 后写 last-wins,latest 轮以 id 作同秒 tiebreak;③已知窗口:validator 在 executor 节点返回之后把 completed 降级 failed 的转变不落 journal(v1 接受,后续票把 diff 上移 settle 层)。
+- **崩溃臂计划保真**:settle 落库策略 `plan_to_persist_on_crash` —— 降级桩的空 task_plan 严禁覆写 task_memory 在途计划(恢复面依赖它存续);此前崩溃=计划蒸发是恢复面无从谈起的根因。
+- **正交性**:PendingApproval 计划级暂停不产生 journal 行(步未完成),两套恢复互不越界;journal 任何异常不阻断主流程。
 
-### 4.6 P2-2 · KV-cache 前缀稳定纪律
+### 4.6 P2-2 · KV-cache 前缀稳定纪律 —— ✅ 已落地(2026-10-24,审计清单形态)
 
-**事实**:全链路无缓存命中字段——`llm_call_logs` 仅 tokens_in/out + cost + latency(`db/models.py:359-374`),telemetry 只读 `input_tokens/output_tokens`(`llm/telemetry.py:126`)。
+**事实**:全链路无缓存命中字段(`llm_call_logs` 仅 tokens_in/out+cost+latency)。
 
-- **本轮**(D9):context_builder **可缓存性审计 + 结构纪律**——稳定前缀(system/tools/任务层)在前,history append-only,易变段(时间戳等)后置或剥离;产出装配顺序快照测试锁死顺序。
-- **后续票**(不在本轮):网关上报 cached tokens → llm_call_logs 加列 → 看板命中率指标。依据 Manus:命中率是比 Token Budget 更硬的成本指标。
+- **本轮交付**:①快照测试钉死 context_builder 两条可缓存性性质——**预算内 append-only**(上一轮装配产物必须是本轮严格前缀)+ **确定性**(同输入同产物,无时钟/随机注入);②可缓存性审计清单(下)。
+- **审计结论(2026-10-24)**:
+  - ✅ 历史块本身:预算内严格 append-only,轮行格式稳定(`[T{n} ts] Role: "..."`),摘要段截 600 防膨胀 —— 块内性质合格;
+  - ⚠️ **任务层段(P0-1)置于块首且逐轮演进**:与 KV-cache 前缀稳定相抵。裁决:保持前置 —— 会话内 provider prefix cache 本就逐轮失效,命中主要吃 system/tools 段;任务层前置是提示词注意力效能选择,重排记观察池(触发器:provider 缓存计费成为成本大头);
+  - ⚠️ planner 深规划 prompt 的 RAG 注入逐轮变化且位于历史块之前:易变段居中会截断后续 append 段的命中;重排(易变段后置)涉及提示词语义,记后续票(与网关缓存字段上报同批);
+  - ❌ 命中率监控:需网关上报 cached tokens + `llm_call_logs` 加列,记后续票(Manus:命中率是比 Token Budget 更硬的成本指标)。
+- **后续票捆绑建议**:tool_calls_count 落库列(P1-2 真失败率分母)+ cached_tokens 上报与加列 + RAG 段重排,三件都是"网关↔引擎遥测面"工程,一批做掉。
 
 ---
 
@@ -170,8 +176,8 @@
 | **P0-2** ✅(2026-10-24) | 回灌 shadow 集 + promote 命令 | — | `test_badcase_shadow.py`(端到端:起草→promote→硬闸套件落例→converted);夜评 `sh01_shadow集` 报告例 advisory 不出闸 |
 | **P1-1** ✅(2026-10-24) | 边界判定器(boundary 字段 + modify 保留 + 低置信澄清) | P0-1 | parse/漂移/纯谓词/planner 门禁 17 例全绿;实弹首跑 26/30;意图 95 闸/data 42/42/t1t2 25/25 零涉及;夜评闸 AI_BOUNDARY_GATE=off 攒基线 |
 | **P1-2** ✅(2026-10-24) | 四指标 + 切换代理 d-ops 看板 | — | 网关 delta 单测 + 页面 5 例;口径自洽断言;无新采集 |
-| **P2-1** | 步级 journal + 下一轮续跑 | — | 崩溃注入:从最后 ok 步续跑;HITL 不误伤;异常不阻断 |
-| **P2-2** | KV-cache 前缀纪律 + 装配顺序快照测试 | — | 审计清单 + 快照测试 |
+| **P2-1** ✅(2026-10-24) | 步级 journal + 崩溃恢复载回 | — | 纯函数/PG 集成/planner 门禁 19 例全绿;0028 迁移幂等守卫;崩溃臂计划保真 |
+| **P2-2** ✅(2026-10-24) | KV-cache 前缀纪律 + 装配快照测试 | — | append-only 前缀稳定性+确定性两性质钉死;审计清单入档(任务层前置/RAG 居中两处相抵已记录裁决) |
 
 P0 批次落地文件(P0-1:`memory/task_state.py`、`memory/context_builder.py`、`config.py` 热键;P0-2:`badcase/shadow.py`、`badcase/cli.py`(shadow/promote)、`badcase/digest.py`(6h 挂钩)、`eval/promptfoo.shadow.yaml`、`eval/testCases/shadow/pending.json`、夜评报告例、`package.json` `test:prompt:shadow`)。
 
