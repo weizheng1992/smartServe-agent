@@ -1,8 +1,8 @@
 """promptfoo 自定义 Provider(Python)— 源自 eval/providers/agentProvider.ts。
 
 由 promptfoo 以 `file://providers/agent_provider.py:call_api` 调用:
-除指标消歧预言机(eval/lib/metric_resolver.py,engine 侧已删)与槽位抽取/
-expectedTools 纯回声两类确定性分支外,一律真跑 engine_py(槽位抽取 /
+除指标消歧预言机(eval/lib/metric_resolver.py,engine 侧已删)与槽位抽取两类
+确定性分支外,一律真跑 engine_py(expectedTools 轨迹断言亦自 04 号票起真跑端到端)(槽位抽取 /
 triage 瀑布 / run_agent 端到端)。多租户/安全注入/RAG/回答质量四族曾为
 TS 时代的硬编码罐头回复(2026-10 审查定案假绿:套件绿与引擎死活脱钩),
 已全部摘除 —— 这些用例自此走真实引擎,断言的是生产行为而非罐头文本。
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import threading
 import time
@@ -289,26 +290,52 @@ def call_api(prompt, options=None, context=None):
         #    planner(省一次 LLM 调用);triage 内旁路直答时 subtasks 镜像生产
         #    bypass_plan 形状(planner 在生产中从未被运行)。纯 expectedTools
         #    (无意图断言)的用例 triage 真跑不验任何东西,维持纯回声不跑引擎。
-        if vars.get("expectedIntents") is not None or vars.get("expectedTools") is not None:
-            expected_tools = _coerce(vars.get("expectedTools"))
+        # 工具轨迹真断言(eval-gap-2026-10 04 号票,2026-10-24):expectedTools
+        # 用例从「回声构造 subtasks」(vacuous —— scorer 关键词嗅探的是我们自造
+        # 的描述)升级为 run_agent 端到端真跑,实际序列取自终态
+        # task_plan.subtasks[*].result.toolExecuted;HITL 挂起步按「已派发」计权
+        # (waitingForApproval 本身就是技能 SOP 真实抵达的证据,工具名取自计划
+        # 描述 Call X 形态);expectedTools="none" 断言零业务派发(irrelevance
+        # 负例)。纯 expectedIntents 用例维持 triage 瀑布轻跑(省一次全链 LLM)。
+        if vars.get("expectedTools") is not None:
+            agent_res = _run(_run_agent_e2e(thread_id, user_id, business_id, input))
+            plan = (agent_res.get("taskPlan") or agent_res.get("task_plan") or {}) if isinstance(agent_res, dict) else {}
+            called_tools: list[str] = []
+            real_subtasks: list[dict] = []
+            for st in (plan.get("subtasks") or []):
+                if not isinstance(st, dict):
+                    continue
+                real_subtasks.append(st)
+                res = st.get("result") or {}
+                tool_name = res.get("toolExecuted")
+                if tool_name:
+                    called_tools.append(str(tool_name))
+                elif res.get("waitingForApproval"):
+                    m = re.search(r"Call\s+([A-Za-z_][A-Za-z0-9_]*)", str(st.get("description") or ""))
+                    if m:
+                        called_tools.append(m.group(1))
+            intents = (agent_res.get("intents") if isinstance(agent_res, dict) else []) or []
+            return {
+                "output": json.dumps(
+                    {
+                        "intents": intents,
+                        "intent": intents[0].get("intent") if intents else None,
+                        "calledTools": called_tools,
+                        "subtasks": real_subtasks,
+                        "taskPlan": plan,
+                        "output": (agent_res.get("output") if isinstance(agent_res, dict) else "") or "",
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                )
+            }
 
-            if vars.get("expectedIntents") is not None:
-                triage_full = _run(_triage_full(input, thread_id, business_id, vars.get("context") or ""))
-                intents = triage_full["intents"]
-                triage_output = triage_full.get("output")
-                arbitration = triage_full.get("arbitration") or {}
-            else:
-                intents = []
-                triage_output = None
-                arbitration = {}
-
-            if expected_tools:
-                tools = expected_tools if isinstance(expected_tools, list) else [expected_tools]
-                subtasks = [
-                    {"id": f"step_{t}", "description": f"Call {t} for order request", "status": "pending"}
-                    for t in tools
-                ]
-            elif triage_output is not None:
+        if vars.get("expectedIntents") is not None:
+            triage_full = _run(_triage_full(input, thread_id, business_id, vars.get("context") or ""))
+            intents = triage_full["intents"]
+            triage_output = triage_full.get("output")
+            arbitration = triage_full.get("arbitration") or {}
+            if triage_output is not None:
                 subtasks = [
                     {
                         "id": "bypass_step",

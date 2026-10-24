@@ -1,0 +1,24 @@
+description: "answerQuality LLM-judge 校准专用(eval-gap-2026-10 05 号票):复用 unified 同款 testCases,产出含 judge score+reason 的逐例结果供人工复判"
+
+prompts:
+  - "{{input}}"
+
+providers:
+  - "file://providers/agent_provider.py:call_api"
+
+defaultTest:
+  options:
+    provider: "file://providers/agent_provider.py:call_api"
+    # 数组 vars 律同 unified(04 号票后 expectedTools 真跑,本册不含该族)
+    disableVarExpansion: true
+
+evaluateOptions:
+  maxConcurrency: 1
+
+tests:
+  - testCases/ecommerce/single-intent.json
+  - testCases/ecommerce/multi-intent.json
+  - testCases/ecommerce/multimodal-damage.json
+  - testCases/ecommerce/rag-evaluation.json
+  - testCases/legal/single-intent.json
+  - testCases/security/injection.json

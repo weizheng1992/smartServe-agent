@@ -383,7 +383,7 @@ cd apps/merchant-admin && bun run build   # tsc + vite
 
 | 册 | 例数 | 测什么 | 怎么测 | 最新结果 |
 |---|---|---|---|---|
-| unified | 55 | 意图分类/多意图/槽位反问/指标消歧/咨询直答/仲裁留痕/多租户隔离/安全注入/RAG 忠实度/多模态/事故回归 | **真跑生产管线**(agent_provider 直调 triage 瀑布+run_agent 端到端);13 scorer 判定:确定性规则断言为主 + intentF1 集合级 F1 + answerQuality LLM-judge(三维 rubric:中文表达/零幻觉/SOP 合规,≥0.8 过) | **55/55,均分 0.9949**(2026-10-23 重钉) |
+| unified | 58 | 意图分类/多意图/槽位反问/指标消歧/咨询直答/仲裁留痕/多租户隔离/安全注入/RAG 忠实度/多模态/事故回归/工具轨迹(真跑)+零派发负例 | **真跑生产管线**(agent_provider 直调 triage 瀑布+run_agent 端到端);13 scorer 判定:确定性规则断言为主 + intentF1 集合级 F1 + answerQuality LLM-judge(三维 rubric:中文表达/零幻觉/SOP 合规,≥0.8 过) | **55/55,均分 0.9949**(2026-10-23 重钉) |
 | data | 41 | 意图→闭集指标四要素映射(metric/direction/timeWindow/limit + clarify/unsupported 负例) | 纯规则断言直调 `MetricQueryEngine.resolve`,零 LLM;评测集冻结为纯门永不入训(SFT blocklist 源) | **41/41**(2026-10-23 首钉) |
 | t1t2 | 23 | T1 LLM 组合通道(闭集校验/角色闭集拒绝)+ T2 探索通道(LLM 产 SQL 过 AST 守卫链,ADR-0010) | 真跑 `compose_resolve`/`generate_sql`+守卫;正例须过全部结构闸,负例(写操作/表白名单外/闲聊)必须响亮拒绝 | **23/23**(2026-10-23 首钉,引擎三修后) |
 | planner | 8 | 工具规划提示词回归 | 直连 LLM(temp=0)测冻结提示词文本,toolAccuracy 工具名集合匹配 | 8/8 |

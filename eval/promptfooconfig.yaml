@@ -38,5 +38,6 @@ tests:
   - testCases/ecommerce/baseline-incidents.json
   - testCases/legal/single-intent.json
   - testCases/security/injection.json
+  - testCases/ecommerce/irrelevance.json
   - testCases/ecommerce/rag-evaluation.json
   - testCases/ecommerce/multi-tenant.json

@@ -9,6 +9,31 @@ export default function (output: string, context: any) {
       };
     }
 
+    // "none":irrelevance 负例 —— 断言零业务工具派发(04 号票)
+    const expectNone = String(expectedTools) === 'none';
+
+    let expectedToolsArray: string[] = [];
+    if (typeof expectedTools === 'string') {
+      try {
+        const parsed = JSON.parse(expectedTools);
+        if (Array.isArray(parsed)) {
+          expectedToolsArray = parsed.map((s: any) => String(s).trim());
+        } else {
+          expectedToolsArray = expectedTools
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      } catch {
+        expectedToolsArray = expectedTools
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    } else if (Array.isArray(expectedTools)) {
+      expectedToolsArray = expectedTools.flat().map((s: any) => String(s).trim());
+    }
+
     let parsed: any;
     try {
       parsed = JSON.parse(output);
@@ -21,6 +46,28 @@ export default function (output: string, context: any) {
       }
     }
 
+    if (expectNone) {
+      const called: string[] = Array.isArray(parsed.calledTools) ? parsed.calledTools : [];
+      return called.length === 0
+        ? { pass: true, score: 1.0, reason: '零业务工具派发(符合预期)' }
+        : { pass: false, score: 0.0, reason: `应零业务派发却调用: ${called.join(', ')}` };
+    }
+
+    if (Array.isArray(parsed.calledTools)) {
+      // 真跑轨迹(04 号票):provider 端到端 run_agent 终态提取,HITL 挂起
+      // 步按已派发计权 —— 集合断言(期望集全命中,容纳合法路径多样性)
+      const calledReal: string[] = parsed.calledTools.map((s: any) => String(s));
+      const matchedReal = expectedToolsArray.every((t: string) => calledReal.includes(t));
+      return matchedReal
+        ? { pass: true, score: 1.0, reason: `实际调用覆盖期望集: [${calledReal.join(', ')}]` }
+        : {
+            pass: false,
+            score: 0.0,
+            reason: `Tool mismatch. Expected: [${expectedToolsArray.join(', ')}], Called: [${calledReal.join(', ')}]`,
+          };
+    }
+
+    // legacy 嗅探保底(planner 分册:llm_provider 直连提示词,subtasks 描述形态)
     const calledTools: string[] = [];
     if (parsed.subtasks) {
       for (const st of parsed.subtasks) {
@@ -44,28 +91,6 @@ export default function (output: string, context: any) {
           calledTools.push('queryProductRanking');
         }
       }
-    }
-
-    let expectedToolsArray: string[] = [];
-    if (typeof expectedTools === 'string') {
-      try {
-        const parsed = JSON.parse(expectedTools);
-        if (Array.isArray(parsed)) {
-          expectedToolsArray = parsed.map((s: any) => String(s).trim());
-        } else {
-          expectedToolsArray = expectedTools
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
-        }
-      } catch {
-        expectedToolsArray = expectedTools
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
-      }
-    } else if (Array.isArray(expectedTools)) {
-      expectedToolsArray = expectedTools.flat().map((s: any) => String(s).trim());
     }
 
     const matched = expectedToolsArray.every((t: string) => calledTools.includes(t));

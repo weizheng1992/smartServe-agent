@@ -1,0 +1,41 @@
+[
+  {
+    "description": "零派发 - 纯寒暄不触发业务工具(irrelevance 负例,该不该调维度)",
+    "vars": {
+      "input": "今天天气真好啊,心情不错",
+      "expectedTools": "none"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "零派发 - 超范围写作请求(非店铺业务域)",
+    "vars": {
+      "input": "帮我写一首关于登山徒步的诗",
+      "expectedTools": "none"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  },
+  {
+    "description": "零派发 - 闲聊问天气(域外话题)",
+    "vars": {
+      "input": "明天天气怎么样,适合户外吗",
+      "expectedTools": "none"
+    },
+    "assert": [
+      {
+        "type": "javascript",
+        "value": "file://scorers/toolAccuracy.scorer.ts"
+      }
+    ]
+  }
+]
