@@ -71,7 +71,7 @@ DEFAULT_MENUS: list[dict] = [
     # 2026-10-24 工作台收敛:m-agent-desk 升正「客服工作台」(坐席实时台);
     # m-live-desk 改名「待办审核」指向 /approvals 纯审批面(scope 已有),
     # 旧 /live-desk 路由保留(e2e 回绿钉)但退出菜单。改名/改指向对已种库
-    # 需一次性 SQL(ensure_menu_seed 只增不改)。
+    # 需一次性 SQL(ensure_menu_seed 只增不改):docs/sql/2026-10-24-workspace-menu-rename.sql。
     {"id": "m-agent-desk", "parent": "d-users", "name": "客服工作台", "type": "menu", "route": "/agent-desk", "sort": 2},
     {"id": "m-live-desk", "parent": "d-users", "name": "待办审核", "type": "menu", "route": "/approvals", "sort": 3},
     # 02 安全先行(2026-09-27):工作台此前整菜单无任何权限点,按钮级收口无词可查

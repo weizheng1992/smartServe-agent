@@ -181,7 +181,7 @@
 
 P0 批次落地文件(P0-1:`memory/task_state.py`、`memory/context_builder.py`、`config.py` 热键;P0-2:`badcase/shadow.py`、`badcase/cli.py`(shadow/promote)、`badcase/digest.py`(6h 挂钩)、`eval/promptfoo.shadow.yaml`、`eval/testCases/shadow/pending.json`、夜评报告例、`package.json` `test:prompt:shadow`)。
 
-> **⚠️ run_agent 三缝接线暂缓提交(2026-10-24)**:run_agent.py 被并行会话(memory-sota 升级批,0027_profile_slots)共写 —— 其 `thread_id 透传`(op 裁决)长泳道 hunk 依赖同批未提交的 `long_memory.py` 签名,此刻提交 run_agent 会把 HEAD 落成运行时即炸态。按「并行写入不混提交」纪律,任务态接线(载入 prev_task_state/装配 task_state_line/收口 advance+落库)留在工作区,作为并行批落地后的后续小票单独提交;`test_settle_turn_seam` 3 例红同为并行批桩签名未同步所致,非本批引入。
+> **run_agent 三缝接线(暂缓→已落地,2026-10-24 as-built)**:P0 批提交时 run_agent.py 被并行会话(memory-sota 升级批,0027_profile_slots)共写,其 `thread_id 透传`(op 裁决)hunk 依赖同批未提交的 `long_memory.py` 签名,按「并行写入不混提交」纪律暂缓。**该接线最终随并行批 aa98ef3 进 HEAD**(载入/装配/收口三缝俱在,未单独成票、未获原计划的独立评审票——欠账见 §5 L125 as-built 裁决注);`test_settle_turn_seam` 此后全绿。
 
 顺序依据(D12/Q12):判定器修用户可感病象,journal 是韧性加固后置不加重病象。
 
