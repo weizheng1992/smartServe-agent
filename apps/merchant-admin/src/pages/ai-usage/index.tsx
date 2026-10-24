@@ -18,7 +18,8 @@ import { Button } from 'ui';
 // 口由服务端单点计算;无美元(成本是平台内部数据);轮未决路径/无 job 关联的
 // 历史轮如实呈现,严禁编数。
 
-/** turn_path 闭集中文标签(与引擎 turn_path_for_route 同源,前端仅呈现)。 */
+/** turn_path 闭集中文标签(与引擎 turn_path_for_route 同源,前端仅呈现)。
+ *  unknown = NULL:升级前历史行与三个降级臂,统一「未记录」如实呈现。 */
 const TURN_PATH_LABEL: Record<string, string> = {
   greeting: '极速问候',
   semantic_cache: '同问缓存命中',
@@ -27,10 +28,10 @@ const TURN_PATH_LABEL: Record<string, string> = {
   clarify: '澄清反问',
   bypass_other: '确定性旁路',
   deep_path: '全管线',
-  unknown: '未知(降级轮)',
+  unknown: '未记录',
 };
 
-const turnPathLabel = (p: string | null): string => (p ? (TURN_PATH_LABEL[p] ?? p) : '未知(降级轮)');
+const turnPathLabel = (p: string | null): string => (p ? (TURN_PATH_LABEL[p] ?? p) : '未记录');
 
 function fmtInt(n: number): string {
   return n.toLocaleString('zh-CN');
