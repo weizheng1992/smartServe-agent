@@ -378,7 +378,8 @@ async def _settle_turn(
                         resolution_status=resolution_status,
                         avg_latency_ms=elapsed_latency_ms,
                         # 轮关联键 + 路径闭集(docs/ai-usage-panel.md P0-1):
-                        # 降级/中断臂的终态 result 无 turn_path,原样落 NULL
+                        # 三个降级臂(_degraded_apology_result 新 dict)无
+                        # turn_path 落 NULL;中断臂保留部分态的已决路径
                         job_id=job_id,
                         turn_path=result.get("turn_path"),
                     )
@@ -646,7 +647,10 @@ async def _record_greeting_bypass_metric(
             )
             await session.commit()
     except Exception as m_err:
-        print(f"[runAgent] 问候旁路 metrics 行落库失败(不阻断): {m_err!r}")
+        print(
+            f"[runAgent] 问候旁路 metrics 行落库失败(不阻断): {m_err!r} "
+            f"threadId={thread_id} businessId={business_id} jobId={job_id}"
+        )
 
 
 async def run_agent(job: AgentJobInput) -> dict:

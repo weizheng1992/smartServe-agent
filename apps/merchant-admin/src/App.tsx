@@ -1,6 +1,7 @@
 import { FloatingAgent } from '@/components/FloatingAgent';
 import { type MenuNode, api, clearSession, currentStaffEmail, errMsgOf, hasBossSession } from '@/lib/api';
 import { flattenMenus, routeAllowed } from '@/lib/route-guard';
+import AiUsagePage from '@/pages/ai-usage';
 import AnalyticsPage from '@/pages/analytics';
 import BoardPage from '@/pages/board';
 import CustomersPage from '@/pages/customers';
@@ -201,6 +202,8 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
               {/* 坐席台独立页(P2);2026-10-24 菜单名升正「客服工作台」 */}
               <Route path="/agent-desk" element={<LiveDeskPage />} />
               <Route path="/promotions" element={<PromotionsPage />} />
+              {/* AI 用量(docs/ai-usage-panel.md P0):菜单 m-ai-usage 挂 d-ops,灰度首版仅老板/管理员 */}
+              <Route path="/ai-usage" element={<AiUsagePage />} />
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/menus" element={<MenusPage />} />
               <Route path="/roles" element={<RolesPage />} />

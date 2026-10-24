@@ -579,26 +579,31 @@ def _demote_consult_keep_actions(parsed: list[dict]) -> list[dict]:
 # ── 轮路径闭集(docs/ai-usage-panel.md P0-1):triage 旁路 route_key →
 # session_metrics.turn_path。单一事实源,消费方为 handle_immediate_bypass
 # 出口(旁路族)与 triage 节点默认(非旁路主链 deep_path);用量页按此聚合
-# 零 LLM 命中率与快轨占比。
+# 零 LLM 命中率与快轨占比。口径族供 gateway summary 比率消费(单点防
+# engine 新增路径后网关静默漂移)。
+ZERO_LLM_TURN_PATHS = ("greeting", "semantic_cache", "duplicate_bypass")
+FAST_PATH_TURN_PATHS = (*ZERO_LLM_TURN_PATHS, "rag_direct")
 _BYPASS_TURN_PATH_EXACT = {
     "super_semantic_cache": "semantic_cache",
     "duplicate_bypass": "duplicate_bypass",
     "rag_consult_direct": "rag_direct",
     "rag_consult_direct_llm": "rag_direct",
-    "consult_no_rag": "rag_direct",
+    # consult_no_rag 刻意不在表内:RAG 空弱回落轮走 _triage_terminal_result
+    # (主链 finish 终稿),不经旁路出口 —— 落 triage 节点默认 deep_path 才诚实
 }
 
 
 def turn_path_for_route(route_key: str) -> str:
     """旁路 route_key → turn_path 闭集映射。
 
-    未来新增路由键默认归 bypass_other(其余确定性旁路),严禁静默落
+    greeting 族按子串归位(未来 rule_* 问候变体同族);clarif 族同法;
+    其余未登记键默认归 bypass_other(其余确定性旁路),严禁静默落
     deep_path —— 主链占比是用量页的核心对照面,误归即假数据。"""
     if "greeting" in route_key:
         return "greeting"
     if route_key in _BYPASS_TURN_PATH_EXACT:
         return _BYPASS_TURN_PATH_EXACT[route_key]
-    if "clarif" in route_key or route_key == "confidence_clarify":
+    if "clarif" in route_key:
         return "clarify"
     return "bypass_other"
 

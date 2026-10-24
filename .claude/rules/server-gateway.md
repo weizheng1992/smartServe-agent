@@ -5,7 +5,7 @@ paths: ["services/gateway-py/**/*"]
 
 # 服务端多租户网关与实时协同规范 (Server Gateway)
 
-本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送、商户数据分析面与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面；pytest 契约测试为唯一真实来源）。当前注册端点共 **137 条**：analytics 43 / merchant 30 / admin 26 / crud 16 / chat 9 / auth 4 / spi 3 / live_desk 5 + `/api/health`（2026-10-21 积分池三端点入账 134→137：`POST /api/billing/credits/adjust` + `GET /api/billing/credits/{businessId}`（crud.py，平台闸）+ `GET /api/admin/credits`（analytics.py，staff_context 本租户只读））。
+本服务是整个平台的服务端 API 网关，基于 FastAPI 构建（`services/gateway-py/src/gateway_py/`），负责多租户路由转发、实时人工客服协同接管 (Live Takeover)、Skills 技能与工具配置同步、会话流式推送、商户数据分析面与审计追踪。39 条 TS 基线 HTTP 路由与 SSE/socket.io 线格式已冻结；冻结集合外新增路由须同批补契约测试（早前扩充 `/api/auth/me`、`POST/GET/DELETE /api/chat/threads`、`POST /api/chat/upload` 合计 44 条冻结面；pytest 契约测试为唯一真实来源）。当前注册端点共 **140 条**：analytics 43 / merchant 30 / admin 29 / crud 16 / chat 9 / auth 4 / spi 3 / live_desk 5 + `/api/health`（2026-10-24 AI 用量三端点入账 137→140：`GET /api/admin/ai-usage/summary` + `/turns` + `/calls`（admin.py，operator_scope 本租户只读；轮=session_metrics、下钻=llm_call_logs.job_id，docs/ai-usage-panel.md），契约 `test_ai_usage_routes.py`）。
 
 ## 1. 核心模块与架构规范
 

@@ -20,6 +20,7 @@ from engine_py.rag.document_ingest import ingest_document_file
 from engine_py.rag.document_parse import uploads_root
 from engine_py.skills import SkillRegistry
 from engine_py.tenant_config import get_tenant_config, update_tenant_skill_config
+from engine_py.triage.intent_triage_engine import FAST_PATH_TURN_PATHS, ZERO_LLM_TURN_PATHS
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -1037,3 +1038,215 @@ async def conversation_telemetry(
         "avgLatencyMs": round(float(total_row["avg_latency_ms"])),
     }
     return {"success": True, "data": {"threadId": thread_id, "nodes": nodes, "totals": totals}}
+
+
+# ---------------------------------------------------------------------------
+# AI 用量(docs/ai-usage-panel.md P0-2;轮 = session_metrics 行,下钻 = llm_call_logs)
+# 路径口径族(ZERO_LLM/FAST_PATH)自 engine_py.triage.intent_triage_engine 单点
+# 导入 —— engine 新增路径时网关比率不会静默漂移。
+# ---------------------------------------------------------------------------
+
+
+def _ai_usage_tenant(tenant_id: str | None) -> str:
+    """商户租户规整:平台 all 视角无单一配额口径,显式拒绝(不做假全量)。"""
+    biz = (tenant_id or "").lower().strip()
+    if not biz or biz == "all":
+        raise HTTPException(400, "ai-usage 需要商户租户上下文")
+    return biz
+
+
+@router.get("/api/admin/ai-usage/summary")
+async def ai_usage_summary(
+    authorization: str | None = Header(None),
+    tenantId: str | None = Query(None),
+):
+    """商户 AI 用量自然月汇总(real-data-only):配额口径 = session_metrics
+    (与 billing 闸同源),调用明细口径 = llm_call_logs 归因行。时间窗在 DB 侧
+    date_trunc('month', NOW()) 单点计算,规避容器时区漂移(明细口径只认
+    business_id 归因行 —— data agent 等图外调用暂未按租户归因(P1 修复),
+    为不越租户边界不做跨租户合计,仅口径注记,严禁编数)。"""
+    tenant_id, _identity = await operator_scope(authorization, tenantId)
+    biz = _ai_usage_tenant(tenant_id)
+    month_start = "date_trunc('month', NOW())"
+    async with get_session() as session:
+        quota_row = (
+            await session.execute(
+                text(
+                    "SELECT COALESCE(SUM(total_tokens), 0) AS tokens, COUNT(*) AS turns, "
+                    "COALESCE(AVG(avg_latency_ms), 0) AS avg_latency "
+                    f"FROM session_metrics WHERE business_id = :biz AND created_at >= {month_start}"
+                ).bindparams(biz=biz)
+            )
+        ).mappings().first()
+        limit_row = (
+            await session.execute(
+                text("SELECT monthly_limit_tokens FROM tenant_billing_quotas WHERE business_id = :biz").bindparams(
+                    biz=biz
+                )
+            )
+        ).mappings().first()
+        day_rows = (
+            await session.execute(
+                text(
+                    "SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, "
+                    "COALESCE(SUM(total_tokens), 0) AS tokens, COUNT(*) AS turns "
+                    f"FROM session_metrics WHERE business_id = :biz AND created_at >= {month_start} "
+                    "GROUP BY 1 ORDER BY 1"
+                ).bindparams(biz=biz)
+            )
+        ).mappings().all()
+        path_rows = (
+            await session.execute(
+                text(
+                    "SELECT COALESCE(turn_path, 'unknown') AS path, COUNT(*) AS turns, "
+                    "COALESCE(SUM(total_tokens), 0) AS tokens "
+                    f"FROM session_metrics WHERE business_id = :biz AND created_at >= {month_start} "
+                    "GROUP BY 1 ORDER BY 2 DESC"
+                ).bindparams(biz=biz)
+            )
+        ).mappings().all()
+        calls_row = (
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) AS calls, "
+                    "COALESCE(SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)), 0) AS tokens, "
+                    "COALESCE(AVG(latency_ms), 0) AS avg_latency "
+                    f"FROM llm_call_logs WHERE business_id = :biz AND created_at >= {month_start}"
+                ).bindparams(biz=biz)
+            )
+        ).mappings().first()
+
+    monthly_limit = int(limit_row["monthly_limit_tokens"]) if limit_row else None
+    used_tokens = int(quota_row["tokens"])
+    total_turns = int(quota_row["turns"])
+    by_path = [{"path": r["path"], "turns": int(r["turns"]), "tokens": int(r["tokens"])} for r in path_rows]
+    zero_llm_turns = sum(p["turns"] for p in by_path if p["path"] in ZERO_LLM_TURN_PATHS)
+    fast_path_turns = sum(p["turns"] for p in by_path if p["path"] in FAST_PATH_TURN_PATHS)
+    return {
+        "success": True,
+        "data": {
+            "businessId": biz,
+            "quota": {
+                "monthlyLimitTokens": monthly_limit,
+                "usedTokens": used_tokens,
+                "usageRate": round(used_tokens / monthly_limit, 4) if monthly_limit else None,
+            },
+            "turns": {
+                "total": total_turns,
+                "avgLatencyMs": round(float(quota_row["avg_latency"])),
+                "zeroLlmRate": round(zero_llm_turns / total_turns, 4) if total_turns else 0,
+                "fastPathRate": round(fast_path_turns / total_turns, 4) if total_turns else 0,
+            },
+            "byDay": [{"day": r["day"], "tokens": int(r["tokens"]), "turns": int(r["turns"])} for r in day_rows],
+            "byPath": by_path,
+            "calls": {
+                "total": int(calls_row["calls"]),
+                "totalTokens": int(calls_row["tokens"]),
+                "avgLatencyMs": round(float(calls_row["avg_latency"])),
+            },
+            "notes": ["data agent 等图外调用量暂未按租户归因,不在本页口径内(归因修复排期 P1)"],
+        },
+    }
+
+
+@router.get("/api/admin/ai-usage/turns")
+async def ai_usage_turns(
+    threadId: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    authorization: str | None = Header(None),
+    tenantId: str | None = Query(None),
+):
+    """轮列表(session_metrics 每轮一行,新→旧);threadId 可选过滤供会话下钻。"""
+    tenant_id, _identity = await operator_scope(authorization, tenantId)
+    biz = _ai_usage_tenant(tenant_id)
+    params: dict = {"biz": biz, "limit": limit, "offset": offset}
+    thread_filter = ""
+    if threadId and threadId.strip():
+        thread_filter = " AND thread_id = :tid"
+        params["tid"] = threadId.strip()
+    async with get_session() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT job_id, thread_id, turn_path, total_tokens, avg_latency_ms, "
+                    f"resolution_status, created_at FROM session_metrics "
+                    f"WHERE business_id = :biz{thread_filter} "
+                    "ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+                ).bindparams(**params)
+            )
+        ).mappings().all()
+    return {
+        "success": True,
+        "data": {
+            "turns": [
+                {
+                    "jobId": r["job_id"],
+                    "threadId": r["thread_id"],
+                    "turnPath": r["turn_path"],
+                    "totalTokens": int(r["total_tokens"] or 0),
+                    "latencyMs": round(float(r["avg_latency_ms"] or 0)),
+                    "resolutionStatus": r["resolution_status"],
+                    # server-gateway.md §2.4 时间戳 UTC aware:PG naive 列存 UTC
+                    # 墙钟(docker 默认),显式补 Z 防前端按本地时区解析早 8 小时
+                    "createdAt": (r["created_at"].isoformat() + "Z") if r["created_at"] else None,
+                }
+                for r in rows
+            ]
+        },
+    }
+
+
+@router.get("/api/admin/ai-usage/calls")
+async def ai_usage_turn_calls(
+    jobId: str = Query(...),
+    authorization: str | None = Header(None),
+    tenantId: str | None = Query(None),
+):
+    """轮下钻调用明细:先验该 job 的轮行归属本租户(异租 job_id 一律 404,
+    不泄露存在性),再按 job_id 取 llm_call_logs。零 LLM 轮(问候/缓存命中)
+    诚实空列表。"""
+    tenant_id, _identity = await operator_scope(authorization, tenantId)
+    biz = _ai_usage_tenant(tenant_id)
+    jid = jobId.strip()
+    async with get_session() as session:
+        turn_row = (
+            await session.execute(
+                text(
+                    "SELECT thread_id, turn_path FROM session_metrics "
+                    "WHERE job_id = :jid AND business_id = :biz"
+                ).bindparams(jid=jid, biz=biz)
+            )
+        ).mappings().first()
+        if turn_row is None:
+            raise HTTPException(404, f"Turn '{jid}' not found")
+        call_rows = (
+            await session.execute(
+                text(
+                    "SELECT COALESCE(node, 'unknown') AS node, model, tokens_in, tokens_out, "
+                    "latency_ms, created_at FROM llm_call_logs WHERE job_id = :jid ORDER BY created_at"
+                ).bindparams(jid=jid)
+            )
+        ).mappings().all()
+    return {
+        "success": True,
+        "data": {
+            "jobId": jid,
+            "threadId": turn_row["thread_id"],
+            "turnPath": turn_row["turn_path"],
+            "calls": [
+                {
+                    "node": r["node"],
+                    "model": r["model"],
+                    "tokensIn": int(r["tokens_in"] or 0),
+                    "tokensOut": int(r["tokens_out"] or 0),
+                    "totalTokens": int((r["tokens_in"] or 0) + (r["tokens_out"] or 0)),
+                    "latencyMs": int(r["latency_ms"] or 0),
+                    # server-gateway.md §2.4 时间戳 UTC aware:PG naive 列存 UTC
+                    # 墙钟(docker 默认),显式补 Z 防前端按本地时区解析早 8 小时
+                    "createdAt": (r["created_at"].isoformat() + "Z") if r["created_at"] else None,
+                }
+                for r in call_rows
+            ],
+        },
+    }

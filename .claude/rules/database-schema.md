@@ -34,8 +34,8 @@ paths: ["services/engine-py/src/engine_py/db/**/*", "services/engine-py/alembic/
    - `pending_approvals`：待人工审核记录（`approval_id`（UUID）、`business_id`、`job_id`、`tool_name`、`status`）。
    - `approval_outbox_events`：事务发件箱事件表（`event_type`、`payload`、`status: 'pending' | 'processing' | 'completed' | 'failed'`、`retry_count`）。
 8. **遥测与评测**：
-   - `session_metrics`：会话成本遥测;2026-09-03 起新增 `global_transitions_count` / `tool_errors_count` 熔断计数列,`resolution_status` 含 `'circuit_breaker'`。
-   - `llm_call_logs`：逐调用 LLM 计量;`agent_jobs`：Temporal/本地作业。
+   - `session_metrics`：会话成本遥测;2026-09-03 起新增 `global_transitions_count` / `tool_errors_count` 熔断计数列,`resolution_status` 含 `'circuit_breaker'`;2026-10-24 起新增 `job_id`（轮↔llm_call_logs 关联,0025 迁移）与 `turn_path`（轮路径闭集,greeting/semantic_cache/duplicate_bypass/rag_direct/clarify/bypass_other/deep_path,见 docs/ai-usage-panel.md）—— 本表每轮一行 INSERT 从不 update。
+   - `llm_call_logs`：逐调用 LLM 计量;2026-10-24 起新增 `job_id`（轮下钻关联键,0025 迁移）。`agent_jobs`：Temporal/本地作业。
    - `eval_runs`/`eval_results`/`eval_run_records`：promptfoo 真实入库。
 9. **Data Agent 与 RBAC（2026-09-19 v4）**：
    - `analytics_trace`：每次问答逐层留痕（`trace_id = tr_<hex12>`,L0/L2/L3/会话/场景包/intent 各层）。

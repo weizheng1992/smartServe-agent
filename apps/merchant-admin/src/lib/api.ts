@@ -402,6 +402,39 @@ export interface CreditsDetail {
   transactions: CreditTransaction[];
 }
 
+/** AI 用量自然月汇总(docs/ai-usage-panel.md P0;turn_path 闭集见引擎
+ *  turn_path_for_route —— unknown = 降级/中断轮路径未决,诚实呈现不编造)。 */
+export interface AiUsageSummary {
+  businessId: string;
+  quota: { monthlyLimitTokens: number | null; usedTokens: number; usageRate: number | null };
+  turns: { total: number; avgLatencyMs: number; zeroLlmRate: number; fastPathRate: number };
+  byDay: Array<{ day: string; tokens: number; turns: number }>;
+  byPath: Array<{ path: string; turns: number; tokens: number }>;
+  calls: { total: number; totalTokens: number; avgLatencyMs: number };
+  notes: string[];
+}
+
+export interface AiUsageTurn {
+  /** 问候旁路补行前的历史轮无 job 关联,诚实 null(不可下钻) */
+  jobId: string | null;
+  threadId: string;
+  turnPath: string | null;
+  totalTokens: number;
+  latencyMs: number;
+  resolutionStatus: string;
+  createdAt: string | null;
+}
+
+export interface AiUsageCall {
+  node: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  totalTokens: number;
+  latencyMs: number;
+  createdAt: string | null;
+}
+
 export const api = {
   menus: async (): Promise<{ role: string; perms: string[]; menus: MenuNode[] }> =>
     requestJson('/api/admin/analytics/menus'),
@@ -540,6 +573,26 @@ export const api = {
   credits: {
     get: async (): Promise<{ success: boolean; data?: CreditsDetail; error?: string }> =>
       requestJson('/api/admin/credits'),
+  },
+
+  /** AI 用量(docs/ai-usage-panel.md P0):轮 = session_metrics 行,下钻 =
+   *  llm_call_logs 按 jobId。商户口径无美元 —— 成本是平台内部数据,配额对照
+   *  走 token;自然月窗口由服务端 date_trunc 单点计算。 */
+  aiUsage: {
+    summary: async (): Promise<{ success: boolean; data?: AiUsageSummary; message?: string; error?: string }> =>
+      requestJson('/api/admin/ai-usage/summary'),
+    turns: async (
+      threadId?: string,
+    ): Promise<{ success: boolean; data?: { turns: AiUsageTurn[] }; message?: string; error?: string }> =>
+      requestJson(`/api/admin/ai-usage/turns${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`),
+    calls: async (
+      jobId: string,
+    ): Promise<{
+      success: boolean;
+      data?: { jobId: string; threadId: string | null; turnPath: string | null; calls: AiUsageCall[] };
+      message?: string;
+      error?: string;
+    }> => requestJson(`/api/admin/ai-usage/calls?jobId=${encodeURIComponent(jobId)}`),
   },
 
   /** 员工管理(邀请/改角色/停用;新员工以种子密码可登录;dept/level 为责任人路由人事属性)。 */
