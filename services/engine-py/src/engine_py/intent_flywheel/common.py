@@ -29,11 +29,24 @@ def load_jsonl(path: str | Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def write_jsonl(records: list[dict], out: str | Path | None) -> None:
-    """写 JSONL:``out`` 为空或 '-' 打到 stdout,否则写文件(父目录自动创建)。"""
+def write_jsonl(records: list[dict], out: str | Path | None, *, allow_shrink: bool = False) -> None:
+    """写 JSONL:``out`` 为空或 '-' 打到 stdout,否则写文件(父目录自动创建)。
+
+    覆写护栏(eval-gap-2026-10 07 号票):落盘目标已存在且行数多于本次载荷时
+    拒绝盲覆写 —— 意图评测集曾一次性手工扩充至 572 行而生成器只产 ~101 行,
+    重跑 ``gen_intent_cases`` 即静默灭顶;有意缩减须显式 ``allow_shrink=True``
+    (gen CLI 的 --force)。stdout 管道不受影响。
+    """
     lines = [json.dumps(record, ensure_ascii=False, default=str) for record in records]
     if out and out != "-":
         path = Path(out)
+        if path.exists() and not allow_shrink:
+            existing = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+            if existing > len(lines):
+                raise RuntimeError(
+                    f"覆写护栏:目标 {path} 已有 {existing} 行 > 本次 {len(lines)} 行,"
+                    "疑似生成器回退灭顶;确属有意缩减请 allow_shrink=True(gen_intent_cases --force)"
+                )
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
     else:

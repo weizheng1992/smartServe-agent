@@ -304,8 +304,13 @@ CUSTOMER_CASES: list[CustomerCase] = [
                 "订单 {order_id} 的咖啡套装到货破了,申请退款",
                 expect_new_approval=True,
                 approval=ApprovalFlow(
+                    # 恢复终局双形态(2026-10-24 pass^3 实弹):planner 对驳回的
+                    # replan 多数为诚实 decline(未能通过/驳回理由),偶发转人工
+                    # 升级(呼叫人工客服)—— 两者都非谎报且订单不动,锚点收编双族;
+                    # 硬不变量(订单保持/无新工单/禁词)不放松。
                     action="reject",
-                    reply_contains_any=("无法", "拒绝", "驳回", "未通过", "不能", "未能"),
+                    reply_contains_any=("无法", "拒绝", "驳回", "未通过", "不能", "未能",
+                                        "人工客服", "转人工"),
                     reply_not_contains=("已为您办理退款", "退款申请已提交", "已发起退款", "自动执行"),
                     order_must_stay=True,
                 ),

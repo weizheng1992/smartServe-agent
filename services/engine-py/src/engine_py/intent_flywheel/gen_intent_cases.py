@@ -105,7 +105,17 @@ OUT = EVAL_CASES_PATH
 
 
 def main() -> None:
-    write_jsonl(CASES, OUT)
+    # 覆写护栏(07 号票):本生成器只产四源基础集(~101 行),评测集已扩至
+    # 572 行(槽位生成+T2 长尾为一次性扩充,生成器未入库)—— 默认拒绝灭顶
+    # 覆写,--force 显式放行(此时请先备份并知会评审)。
+    import sys
+
+    force = "--force" in sys.argv
+    try:
+        write_jsonl(CASES, OUT, allow_shrink=force)
+    except RuntimeError as err:
+        print(f"❌ {err}")
+        raise SystemExit(1)
     by_source = {}
     for c in CASES:
         by_source[c["source"]] = by_source.get(c["source"], 0) + 1

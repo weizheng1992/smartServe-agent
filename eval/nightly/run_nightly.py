@@ -39,8 +39,15 @@ BASE = os.environ.get("NIGHTLY_BASE_URL", "http://localhost:4000")
 TENANT = "aurora"
 STAFF_EMAIL = os.environ.get("NIGHTLY_STAFF_EMAIL", "test@example.com")
 STAFF_PASSWORD = os.environ.get("NIGHTLY_STAFF_PASSWORD", "agent-all-dev")
-MAX_TURNS = 130
+MAX_TURNS = int(os.environ.get("NIGHTLY_MAX_TURNS", "220"))
 TURN_TIMEOUT = 90.0
+# pass^k 可靠性口径(eval-gap-2026-10 06,τ-bench 律):高资金风险链与闭集
+# Data Agent 问每夜 k 跑,单次红的采样方差与真回归由「多数决 + pass^k 全过率
+# 指标」分账 —— v1 门禁取多数决(pass^k 全过率入台账供晨审跨夜看趋势,
+# 严格 pass^k 门禁待基线数据后收严);k 可经 NIGHTLY_PASS_K 调(=1 关闭)。
+PASS_K = int(os.environ.get("NIGHTLY_PASS_K", "3"))
+CUSTOMER_PASS_K_PREFIXES = ("c06_", "c08_", "c21_", "c35_", "c36_")  # HITL/全链购物/双退款/审批终态族
+DATA_PASS_K_PREFIXES = ("d01_", "d03_", "d04_", "d06_")  # 闭集指标问族(应确定性,pass^3<1 即非确定性信号)
 NIGHT = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 CUST_PREFIX = "NIGHTLY"
 
@@ -239,12 +246,16 @@ async def _resolve_approval_flow(client, staff_token: str, approval_id: str, thr
 
 
 async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set[str], budget: dict,
-                            staff_token: str = "") -> dict:
-    """跑一个客服场景(多轮连续 threadId);返回逐轮结果与裁决。"""
-    thread_id = f"nightly_{case.case_id}_{int(time.time())}"
+                            staff_token: str = "", run_idx: int = 0) -> dict:
+    """跑一个客服场景(多轮连续 threadId);返回逐轮结果与裁决。
+
+    run_idx:pass^k 第几跑(0=单跑形态)—— 顾客 id 附加跑次后缀防购物车/
+    线程上下文跨跑残留(与每夜唯一后缀同律)。
+    """
+    thread_id = f"nightly_{case.case_id}_{int(time.time())}{'_' + str(run_idx) if run_idx else ''}"
     # 顾客 id 带每夜唯一后缀:引擎侧购物车按 userId 挂账(Redis),case_id 恒定
     # 会跨跑残留(首夜实弹:上次失败跑的瑜伽垫混进本次结算)
-    customer_id = f"{CUST_PREFIX}_{case.case_id}_{NIGHT}"
+    customer_id = f"{CUST_PREFIX}_{case.case_id}_{NIGHT}{'_' + str(run_idx) if run_idx else ''}"
     order_id = ""
     if case.setup == "order":
         order_id = await _create_nightly_order(client, customer_id)
@@ -413,7 +424,7 @@ def _parse_sse(text: str) -> list[tuple[str, dict]]:
     return frames
 
 
-async def run_data_case(client, tokens: dict[str, str], case, budget: dict) -> dict:
+async def run_data_case(client, tokens: dict[str, str], case, budget: dict, run_idx: int = 0) -> dict:
     if budget["turns"] >= MAX_TURNS:
         return {"kind": "data", "case_id": case.case_id, "dimension": case.dimension,
                 "ok": True, "skipped": True, "fails": []}
@@ -425,7 +436,7 @@ async def run_data_case(client, tokens: dict[str, str], case, budget: dict) -> d
     t0 = time.monotonic()
     fails: list[str] = []
     questions = case.turns or [case.question]
-    session_id = f"nightly_{case.case_id}"
+    session_id = f"nightly_{case.case_id}{'_' + str(run_idx) if run_idx else ''}"
     qa_rows: list[dict] = []
     frames: list[tuple[str, dict]] = []
     status_code = 0
@@ -909,6 +920,25 @@ async def run_stream_interrupt(client) -> dict:
             "ok": not fails, "fails": fails, "metrics": metrics}
 
 
+async def run_intent_eval_case() -> dict:
+    """意图集终评 95% 硬闸(eval-gap-2026-10 07):确定性 L0/L2 面零 token
+    (AI_INTENT_L3 强制 off),词面/模板/注册表改动后由夜间节奏自动出回归
+    证据;注册表结构不变量另由 engine pytest 册钉(行数地板/唯一性/闭集)。"""
+    import os as _os
+
+    _os.environ.setdefault("AI_INTENT_L3", "off")
+    try:
+        from engine_py.intent_flywheel.run_intent_eval import main_async
+
+        code = await asyncio.wait_for(main_async(show_fails=False), timeout=300)
+    except Exception as err:
+        return {"kind": "intent", "case_id": "i01_意图集95闸", "dimension": "意图·注册表",
+                "ok": False, "fails": [f"意图评测执行异常 {err!r}"]}
+    return {"kind": "intent", "case_id": "i01_意图集95闸", "dimension": "意图·注册表",
+            "ok": code == 0,
+            "fails": [] if code == 0 else ["意图解析准确率 < 95% 硬闸(失败清单见上方输出)"]}
+
+
 async def cleanup() -> dict:
     """NIGHTLY_ 前缀数据回收:订单/行项目删除 + 库存回补 + 演示客户不触碰。"""
     from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
@@ -1109,10 +1139,29 @@ async def main() -> int:
                 continue
             if os.environ.get("NIGHTLY_SMOKE") and case.case_id not in ("c01_导购_冲锋衣", "c15_幽灵单号_诚实查无"):
                 continue
-            await _run_contained(results, run_customer_case, client, case, seeded_ids, created_ids, budget,
-                                 staff_token, case_id=case.case_id)
+            # pass^k(06 号票):高资金风险链每夜 k 跑 —— 多数决定门禁,pass^k 全过率
+            # 入台账(pass_k.all_pass)供晨审看跨夜趋势;严格门禁待基线数据后收严
+            k = PASS_K if (not os.environ.get("NIGHTLY_SMOKE")
+                           and any(case.case_id.startswith(p) for p in CUSTOMER_PASS_K_PREFIXES)) else 1
+            runs: list[dict] = []
+            for run_idx in range(k):
+                await _run_contained(results, run_customer_case, client, case, seeded_ids, created_ids, budget,
+                                     staff_token, run_idx, case_id=case.case_id)
+                runs.append(results.pop())
+            if k > 1:
+                oks = [bool(r.get("ok")) and not r.get("skipped") for r in runs]
+                agg_fails = [f"[跑{i + 1}] {'; '.join(r.get('fails') or [])}" for i, r in enumerate(runs) if r.get('fails')]
+                results.append({
+                    **runs[0],
+                    "ok": sum(oks) * 2 > len(oks),
+                    "pass_k": {"k": k, "oks": oks, "all_pass": all(oks)},
+                    "fails": agg_fails if not all(oks) else [],
+                })
+            else:
+                results.append(runs[0])
             res = results[-1]
-            print(("[PASS] " if res["ok"] else "[FAIL] ") + res["case_id"] + ("" if res["ok"] else "  ← " + "; ".join(res["fails"])))
+            tag = "" if k == 1 else f" [pass^{k}:{'全过' if (res.get('pass_k') or {}).get('all_pass') else '有抖动'}]"
+            print(("[PASS] " if res["ok"] else "[FAIL] ") + res["case_id"] + tag + ("" if res["ok"] else "  ← " + "; ".join(res["fails"])))
 
         # 会话隔离(确定性):X 的线程不得泄漏进 Y 的列表
         # isolation kind=perf,统一由性能打印循环输出(避免双重打印)
@@ -1139,10 +1188,28 @@ async def main() -> int:
                     continue
                 if os.environ.get("NIGHTLY_SMOKE") and case.case_id not in ("d01_销售_GMV", "d11_权限_运营问毛利"):
                     continue
-                await _run_contained(results, run_data_case, client, tokens, case, budget,
-                                     case_id=case.case_id, kind="data", dimension=case.dimension)
+                # pass^k(06):闭集指标问应确定性 —— pass^3 < 1 即非确定性信号
+                k = PASS_K if (not os.environ.get("NIGHTLY_SMOKE")
+                               and any(case.case_id.startswith(p) for p in DATA_PASS_K_PREFIXES)) else 1
+                runs_d: list[dict] = []
+                for run_idx in range(k):
+                    await _run_contained(results, run_data_case, client, tokens, case, budget, run_idx,
+                                         case_id=case.case_id, kind="data", dimension=case.dimension)
+                    runs_d.append(results.pop())
+                if k > 1:
+                    oks = [bool(r.get("ok")) and not r.get("skipped") for r in runs_d]
+                    agg_fails = [f"[跑{i + 1}] {'; '.join(r.get('fails') or [])}" for i, r in enumerate(runs_d) if r.get('fails')]
+                    results.append({
+                        **runs_d[0],
+                        "ok": sum(oks) * 2 > len(oks),
+                        "pass_k": {"k": k, "oks": oks, "all_pass": all(oks)},
+                        "fails": agg_fails if not all(oks) else [],
+                    })
+                else:
+                    results.append(runs_d[0])
                 r = results[-1]
-                print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
+                tag = "" if k == 1 else f" [pass^{k}:{'全过' if (r.get('pass_k') or {}).get('all_pass') else '有抖动'}]"
+                print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + tag + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
             # 菜单/按钮矩阵:每轮以老板实时全量做基线
             smoke_menus = [c for c in MENU_CASES if (not os.environ.get("NIGHTLY_SMOKE") or c.case_id in ("m01_老板_全量", "m03_运营_受限")) and (not only or any(c.case_id.startswith(x) for x in only))]
@@ -1192,7 +1259,11 @@ async def main() -> int:
                                  case_id="s01_断线补投不重不漏", kind="stream", dimension="流可靠性·S1")
             await _run_contained(results, run_stream_interrupt, client,
                                  case_id="s02_打断终态", kind="stream", dimension="流可靠性·S2")
-        for r in [x for x in results if x.get("kind") in ("perf", "stream")]:
+        # 意图集 95% 硬闸(07 号票):确定性零 token,收尾自动出回归证据
+        if not os.environ.get("NIGHTLY_SMOKE"):
+            await _run_contained(results, run_intent_eval_case,
+                                 case_id="i01_意图集95闸", kind="intent", dimension="意图·注册表")
+        for r in [x for x in results if x.get("kind") in ("perf", "stream", "intent")]:
             print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
     # 失败喂飞轮(客服侧;坏例池静默降级,不阻断)
