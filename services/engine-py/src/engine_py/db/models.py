@@ -201,6 +201,27 @@ class LongMemoryFact(Base):
 Index("long_facts_user_scope_biz_idx", LongMemoryFact.user_id, LongMemoryFact.scope, LongMemoryFact.business_id)
 
 
+class ProfileSlot(Base):
+    """结构化画像槽位(2026-10-24 SOTA 对齐 P1#2,schema-guided profile 路线)。
+
+    同 (user_id, subject, slot) 永远一行最新值 —— 尺码/荐品工具可直接消费的
+    结构化档案(代买场景:成员×槽位×值);自由文本 long_memory_facts 继续承载
+    长尾与叙事。槽位闭集见 long_memory._DIMENSION_TO_SLOT(height/weight/
+    foot_length/size/fit)。"""
+
+    __tablename__ = "profile_slots"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    subject: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'self'"))
+    slot: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, server_default=text("1.0"))
+    source: Mapped[str | None] = mapped_column(Text, server_default=text("'agent_audit'"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=text("now()"))
+    __table_args__ = (UniqueConstraint("user_id", "subject", "slot", name="uq_profile_slots_user_subject_slot"),)
+
+
 class TaskMemoryRow(Base):
     __tablename__ = "task_memory"
 

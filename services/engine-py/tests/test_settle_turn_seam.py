@@ -52,7 +52,7 @@ class _SettleStubs:
             def __init__(self, user_id, business_id):
                 stubs.constructed.append(("long", user_id, business_id))
 
-            async def extract_and_store_fact(self, output, message):
+            async def extract_and_store_fact(self, output, message, thread_id=None):
                 stubs.long_facts.append((output, message))
                 stubs.log.append("long_fact")
 

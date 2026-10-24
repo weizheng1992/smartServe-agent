@@ -52,15 +52,21 @@ export default function (output: string, context: any) {
         scope: string;
         pattern: string;
         minConfidence?: number;
+        subject?: string; // 可选(2026-10-24 画像归属):断言主体归属,缺省不校验
       }>;
       for (const want of expected) {
         const re = new RegExp(want.pattern, 'i');
-        const matched = facts.filter((f) => f?.scope === want.scope && re.test(String(f?.fact || '')));
+        const matched = facts.filter(
+          (f) =>
+            f?.scope === want.scope &&
+            re.test(String(f?.fact || '')) &&
+            (!want.subject || (f?.subject || 'self') === want.subject),
+        );
         if (matched.length === 0) {
           return {
             pass: false,
             score: 0.0,
-            reason: `未抽出 scope=${want.scope} 且命中 /${want.pattern}/ 的事实;实际: ${JSON.stringify(facts).slice(0, 240)}`,
+            reason: `未抽出 scope=${want.scope}${want.subject ? ` subject=${want.subject}` : ''} 且命中 /${want.pattern}/ 的事实;实际: ${JSON.stringify(facts).slice(0, 240)}`,
           };
         }
         if (want.minConfidence != null) {

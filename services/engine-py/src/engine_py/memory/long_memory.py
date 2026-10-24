@@ -8,7 +8,7 @@ import re
 
 from sqlalchemy import text
 
-from ..db import LongMemoryFact, get_session
+from ..db import LongMemoryFact, ProfileSlot, get_session
 from ..llm import get_chat_model, get_embedding_model
 from ..tenant_context import resolve_business_id
 from ..vectors import cosine_similarity, parse_embedding
@@ -36,7 +36,20 @@ _DIMENSION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("体重", re.compile(r"体[重視][^0-9]{0,6}(\d{2,3}(?:\.\d+)?)\s*(公斤|kg|KG|斤)?")),
     ("脚长", re.compile(r"脚[长長][^0-9]{0,6}(\d{2,3}(?:\.\d+)?)\s*(?:mm|毫米)?")),
     ("尺码", re.compile(r"尺[码碼][^0-9A-Za-z]{0,4}([A-Z]{1,2}|\d{2,3}(?:\.\d+)?)", re.IGNORECASE)),
+    # 版型(2026-10-24 SOTA 对齐 P0-2):宽松/修身/紧身互斥 —— 同维度新值覆盖旧值
+    # 是真语义;颜色/面料/品牌是集合型偏好(并存合法),刻意不进覆盖面(见
+    # docs/memory-sota-upgrade.md 偏差决策 2)
+    ("版型", re.compile(r"(宽松|修身|紧身|oversized?|合身)", re.IGNORECASE)),
 )
+# 槽位映射(2026-10-24 SOTA 对齐 P1#2):可变维度 → profile_slots 闭集 slot。
+# 槽位表 = 尺码/荐品工具可消费的结构化档案(自由文本事实继续留长尾)。
+_DIMENSION_TO_SLOT: dict[str, str] = {
+    "身高": "height",
+    "体重": "weight",
+    "脚长": "foot_length",
+    "尺码": "size",
+    "版型": "fit",
+}
 _THIRD_PERSON_RE = re.compile(
     r"(妻子|老婆|爱人|女友|女朋友|男友|男朋友|丈夫|老公|母亲|妈妈|父亲|爸爸|儿子|女儿|闺蜜|朋友|同事)"
 )
@@ -60,6 +73,8 @@ def fact_dimension_value(fact_text: str | None) -> tuple[str, str] | None:
                 return dimension, f"{value:g}"
             if dimension == "尺码":
                 return dimension, raw.upper()
+            if dimension == "版型":
+                return dimension, raw  # 字符串值(宽松/修身),严禁走 float 归一
             return dimension, f"{float(raw):g}"
         except (TypeError, ValueError):
             continue
@@ -100,7 +115,14 @@ Assistant 回复中对已注入画像事实的引用或转述（例如「根据�
 严禁把他人的身高/体重/尺码记成用户本人的生理事实。
 
 [CRITICAL INSTRUCTIONS]:
-请不要生成任何解释性废话。你必须只输出一个合规的 JSON 对象，包含以下字段：
+请不要生成任何解释性废话。你必须只输出一个合规的 JSON 对象，包含以下字段。
+【op 裁决规则(2026-10-24)】对照输入里的【该用户既有画像事实】决定每条的操作：
+- "ADD"： genuinely 新的事实（默认值，拿不准就用 ADD，引擎侧规则会兜底去重）；
+- "UPDATE"：用户改口/修正了某条既有事实 —— 必须携带 targetId=既有事实的 id，
+  且 fact 字段写「新值的完整表述」；
+- "DELETE"：用户明确撤回某条事实（如「忘掉我的身高」「记错了，我没有…」）——
+  必须携带 targetId，此时 fact 字段可留空串；
+- "NOOP"：既有事实已覆盖本条表达，无需任何写入。
 {
   "hasNewPreference": boolean,
   "extractedFacts": [
@@ -108,7 +130,9 @@ Assistant 回复中对已注入画像事实的引用或转述（例如「根据�
       "fact": string,
       "scope": "global" | "tenant",
       "subject": "self" | 关系称谓,
-      "confidence": number
+      "confidence": number,
+      "op": "ADD" | "UPDATE" | "DELETE" | "NOOP",
+      "targetId": string | null
     }
   ]
 }
@@ -116,16 +140,29 @@ Assistant 回复中对已注入画像事实的引用或转述（例如「根据�
 
 
 def build_profile_audit_prompt(
-    past_orders: list[dict], user_query: str, assistant_response: str
+    past_orders: list[dict],
+    user_query: str,
+    assistant_response: str,
+    existing_facts: list[dict] | None = None,
 ) -> str:
-    """装配画像审计 prompt(与 _run_profile_audit 生产调用同一份)。"""
-    return (
+    """装配画像审计 prompt(与 _run_profile_audit 生产调用同一份)。
+
+    existing_facts(2026-10-24 op 裁决):该用户既有画像事实清单(id/subject/fact/
+    status)—— LLM 据此裁决 ADD/UPDATE/DELETE/NOOP;缺省 None 时省略该段,
+    LLM 按默认 ADD 输出(规则路径兜底,评测管道向后兼容)。"""
+    sections = (
         f"{PROFILE_AUDIT_SYSTEM_PROMPT}\n\n[INPUT CONTEXT]:\n"
         f"1. 🛍️ 用户历史购买流水 (SQL Transaction Stream):\n"
         f"{json.dumps(past_orders, ensure_ascii=False, indent=2, default=str)}\n\n"
         f'2. 💬 本轮最新聊天交互 (Conversational Context):\n- Customer: "{user_query}"\n'
-        f'- Assistant: "{assistant_response}"\n\n请进行画像分析并返回结果 JSON：\n'
+        f'- Assistant: "{assistant_response}"\n'
     )
+    if existing_facts:
+        sections += (
+            f"\n3. 🧠 该用户既有画像事实 (Existing Profile Facts — op 裁决对照清单):\n"
+            f"{json.dumps(existing_facts, ensure_ascii=False, indent=2, default=str)}\n"
+        )
+    return sections + "\n请进行画像分析并返回结果 JSON：\n"
 
 
 def parse_profile_audit_response(content: str) -> dict:
@@ -158,6 +195,7 @@ class LongMemory:
         user_query: str | None = None,
         explicit_scope: str | None = None,
         explicit_business_id: str | None = None,
+        thread_id: str | None = None,
     ) -> None:
         if not self.user_id:
             print("[LongMemory] Cannot extract or store facts without userId")
@@ -168,7 +206,9 @@ class LongMemory:
             import asyncio
 
             asyncio.create_task(
-                self._run_profile_audit(user_query, conversation_text, explicit_scope, explicit_business_id)
+                self._run_profile_audit(
+                    user_query, conversation_text, explicit_scope, explicit_business_id, thread_id
+                )
             )
 
         # 轻量正则匹配双重容灾
@@ -217,6 +257,7 @@ class LongMemory:
         assistant_response: str,
         explicit_scope: str | None = None,
         explicit_business_id: str | None = None,
+        thread_id: str | None = None,
     ) -> None:
         past_orders: list[dict] = []
         try:
@@ -242,7 +283,41 @@ class LongMemory:
         except Exception as sql_err:
             print(f"[Profiler Agent] Failed to fetch SQL transaction stream for audit: {sql_err}")
 
-        audit_prompt = build_profile_audit_prompt(past_orders, user_query, assistant_response)
+        # op 裁决对照清单(2026-10-24):该用户既有事实(approved/pending/superseded
+        # 近 50 条,id+subject+fact+status)随 prompt 提供给审计 LLM;清单获取失败
+        # 不阻断 —— LLM 收不到清单就按默认 ADD 输出,规则路径兜底
+        existing_facts: list[dict] = []
+        try:
+            from sqlalchemy import select
+
+            async with get_session() as session:
+                fact_rows = (
+                    (
+                        await session.execute(
+                            select(LongMemoryFact)
+                            .where(LongMemoryFact.user_id == self.user_id)
+                            .order_by(LongMemoryFact.created_at.desc())
+                            .limit(50)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                existing_facts = [
+                    {
+                        "id": str(r.id),
+                        "subject": r.subject or "self",
+                        "fact": r.fact,
+                        "status": r.status or "approved",
+                    }
+                    for r in fact_rows
+                ]
+        except Exception as facts_err:
+            print(f"[Profiler Agent] 既有事实清单获取失败,本轮 op 裁决降级 ADD: {facts_err}")
+
+        audit_prompt = build_profile_audit_prompt(
+            past_orders, user_query, assistant_response, existing_facts=existing_facts
+        )
 
         try:
             response = await get_chat_model().ainvoke(audit_prompt)
@@ -262,6 +337,42 @@ class LongMemory:
                     # -用户主动提及徒步行程」),归因查询全废。审计 Agent 产物
                     # 一律 agent_audit(legacy 字符串项形状照旧 agent_audit_legacy)。
                     source = "agent_audit_legacy" if isinstance(item, str) else "agent_audit"
+
+                    # 第三人归属(2026-10-24 画像归属票):LLM 输出 subject 字段,
+                    # 缺失/不可信时按 fact 文本关系称谓兜底
+                    subject = "self"
+                    if isinstance(item, dict):
+                        subject = normalize_subject(item.get("subject"))
+                    if subject == "self" and fact_text:
+                        m = _THIRD_PERSON_RE.search(fact_text)
+                        if m:
+                            subject = normalize_subject(m.group(1))
+
+                    # op 裁决(2026-10-24 SOTA 对齐 P1#1):LLM 对照既有事实清单
+                    # 决定 ADD/UPDATE/DELETE/NOOP;op 缺失/不可信一律按 ADD 走
+                    # 规则兜底(韧性纪律:裁决是增强不是依赖)。DELETE 是用户
+                    # 明确撤回 —— 权威语义,不受置信度门槛约束。
+                    op = (item.get("op") or "ADD").strip().upper() if isinstance(item, dict) else "ADD"
+                    target_id = item.get("targetId") if isinstance(item, dict) else None
+                    if op not in ("ADD", "UPDATE", "DELETE", "NOOP"):
+                        op = "ADD"
+                    if op == "NOOP":
+                        print(f"[Profiler Agent] ⏭️ op=NOOP(既有事实已覆盖): {fact_text}")
+                        continue
+                    if op in ("DELETE", "UPDATE") and target_id:
+                        handled = await self._apply_target_op(
+                            op=op,
+                            target_id=str(target_id),
+                            note_fact=fact_text or "",
+                            thread_id=thread_id,
+                        )
+                        if handled and op == "DELETE":
+                            continue
+                        # DELETE 未命中目标:撤回无的放矢,不落"删除"为事实
+                        if handled is False and op == "DELETE":
+                            print(f"[Profiler Agent] ⚠️ DELETE 目标不存在或不属于该用户: {target_id}")
+                            continue
+                        # UPDATE 未命中目标 → 落到下方按 ADD 存新值
 
                     # 置信度红线路由:<0.60 丢弃;>=0.85 approved;其余 pending
                     if confidence < 0.6:
@@ -285,16 +396,6 @@ class LongMemory:
                         else None
                     )
 
-                    # 第三人归属(2026-10-24 画像归属票):LLM 输出 subject 字段,
-                    # 缺失/不可信时按 fact 文本关系称谓兜底
-                    subject = "self"
-                    if isinstance(item, dict):
-                        subject = normalize_subject(item.get("subject"))
-                    if subject == "self" and fact_text:
-                        m = _THIRD_PERSON_RE.search(fact_text)
-                        if m:
-                            subject = normalize_subject(m.group(1))
-
                     embedding = await get_embedding_model().aembed_query(fact_text)
 
                     # 回声/覆盖决策收口 _ingest_fact(同主体分组):可变数字维度
@@ -314,6 +415,52 @@ class LongMemory:
                     print(f"[Profiler Agent] Failed to vectorise and store extracted fact: {rag_err}")
         except Exception as err:
             print(f"[Profiler Agent Error] 画像 Agent 提取偏好发生异常: {err}")
+
+    async def _apply_target_op(
+        self, *, op: str, target_id: str, note_fact: str, thread_id: str | None
+    ) -> bool:
+        """对既有事实执行 UPDATE(转 superseded)/DELETE(转 deleted)。
+
+        归属先验:id 必须属于本 user —— 不命中返回 False(调用方降级)。
+        成功即入 badcase 候选池(SOURCE_PERSONA_FACT_DELETED,auto-draft 源):
+        记忆 churn 是画像质量的第一手信号,人审定性后可转回归 case。
+        """
+        from sqlalchemy import select
+
+        from ..badcase.pool import SOURCE_PERSONA_FACT_DELETED, record_badcase_signal
+
+        try:
+            async with get_session() as session:
+                row = (
+                    (
+                        await session.execute(
+                            select(LongMemoryFact).where(
+                                LongMemoryFact.id == target_id,
+                                LongMemoryFact.user_id == self.user_id,
+                            )
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if row is None:
+                    return False
+                old_fact = row.fact  # commit 前物化(会话关闭后访问 ORM 属性会 Detached)
+                row.status = "deleted" if op == "DELETE" else "superseded"
+                await session.commit()
+            await record_badcase_signal(
+                SOURCE_PERSONA_FACT_DELETED,
+                conversation_ref=f"thread:{thread_id}" if thread_id else f"user:{self.user_id}",
+                business_id=self.business_id or "aurora",
+                suggested_class="suspected_defect",
+                note=f"op={op} target={target_id} 旧事实『{old_fact}』 新表述『{note_fact[:60]}』",
+                dedupe=True,
+            )
+            print(f"[Profiler Agent] ✅ op={op} 已生效: {old_fact} -> {'deleted' if op == 'DELETE' else 'superseded'}")
+            return True
+        except Exception as op_err:
+            print(f"[Profiler Agent] op={op} 执行失败,降级按 ADD 处理: {op_err}")
+            return False
 
     async def _ingest_fact(
         self,
@@ -378,6 +525,14 @@ class LongMemory:
                             await _promote(twin, confidence)
                         else:
                             print(f"[LongMemory] 🔄 同值回声弃落: {fact_text}")
+                        if _DIMENSION_TO_SLOT.get(dimension):
+                            await self._upsert_profile_slot(
+                                slot=_DIMENSION_TO_SLOT[dimension],
+                                value=value,
+                                confidence=confidence,
+                                source=source,
+                                subject=subject,
+                            )
                         return
                     for row in same_dim:
                         row.status = "superseded"
@@ -400,6 +555,14 @@ class LongMemory:
                         print(
                             f"[LongMemory] ⏫ 维度新值覆盖: {fact_text}"
                             f"(superseded {len(same_dim)} 条旧值, subject={subject})"
+                        )
+                    if dimension_value is not None and _DIMENSION_TO_SLOT.get(dimension_value[0]):
+                        await self._upsert_profile_slot(
+                            slot=_DIMENSION_TO_SLOT[dimension_value[0]],
+                            value=dimension_value[1],
+                            confidence=confidence,
+                            source=source,
+                            subject=subject,
                         )
                     return
 
@@ -436,6 +599,26 @@ class LongMemory:
                 await session.commit()
         except Exception as store_err:
             print(f"[LongMemory] 事实落库失败(user={self.user_id}): {store_err}")
+
+    async def _upsert_profile_slot(
+        self, *, slot: str, value: str, confidence: float, source: str, subject: str
+    ) -> None:
+        """结构化画像槽位 upsert(2026-10-24 SOTA 对齐 P1#2):同一 (user, subject,
+        slot) 永远只有一行最新值 —— 尺码/荐品工具消费的结构化档案,自由文本
+        事实层继续留长尾。失败打印不阻断(槽位是增强,不是事实层的依赖)。"""
+        try:
+            async with get_session() as session:
+                await session.execute(
+                    text(
+                        "INSERT INTO profile_slots (user_id, subject, slot, value, confidence, source) "
+                        "VALUES (:u, :s, :slot, :v, :c, :src) "
+                        "ON CONFLICT (user_id, subject, slot) "
+                        "DO UPDATE SET value = :v, confidence = :c, source = :src, updated_at = NOW()"
+                    ).bindparams(u=self.user_id, s=subject, slot=slot, v=value, c=confidence, src=source)
+                )
+                await session.commit()
+        except Exception as slot_err:
+            print(f"[LongMemory] 槽位 upsert 失败(不阻断): {slot_err}")
 
     async def search_relevant_facts(self, query: str, precomputed_embedding: list[float] | None = None) -> list[dict]:
         if not self.user_id:
@@ -525,3 +708,32 @@ class LongMemory:
         threshold = 0.55
         filtered = [item for item in scored if item["similarity"] >= threshold]
         return [item["fact"] for item in filtered[:5]]
+
+
+async def read_profile_slots(user_id: str, subject: str | None = None) -> list[dict]:
+    """结构化画像槽位读取(2026-10-24 SOTA 对齐 P1#2):getProfileSlots 工具与
+    尺码/荐品消费方的单一入口。subject 缺省返回全部主体(subject 字段标注)。"""
+    from sqlalchemy import select
+
+    if not user_id:
+        return []
+    try:
+        async with get_session() as session:
+            stmt = select(ProfileSlot).where(ProfileSlot.user_id == user_id)
+            if subject:
+                stmt = stmt.where(ProfileSlot.subject == subject)
+            rows = (await session.execute(stmt.order_by(ProfileSlot.slot))).scalars().all()
+        return [
+            {
+                "subject": r.subject or "self",
+                "slot": r.slot,
+                "value": r.value,
+                "confidence": r.confidence if r.confidence is not None else 1.0,
+                "source": r.source or "agent_audit",
+                "updatedAt": (r.updated_at or _dt.datetime.now()).isoformat(),
+            }
+            for r in rows
+        ]
+    except Exception as err:
+        print(f"[LongMemory] 槽位读取失败(user={user_id}): {err}")
+        return []

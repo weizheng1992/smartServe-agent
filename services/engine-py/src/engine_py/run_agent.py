@@ -49,6 +49,12 @@ from .llm import (
 )
 from .memory import EpisodicMemory, LongMemory, ShortMemory, TaskMemory
 from .memory.context_builder import build_history_block, summarize_overflow
+from .memory.task_state import (
+    GOAL_PLACEHOLDER,
+    advance_task_state,
+    normalize_task_state,
+    serialize_task_state,
+)
 from .onboarding import build_entry_cards, resolve_onboarding_config
 from .ontology_generated import DEFAULT_REFUND_AUTO_APPROVAL_LIMIT
 from .rag import ContextualRAG
@@ -253,6 +259,8 @@ async def _settle_turn(
     saved_cart_context: dict | None,
     saved_order_context: dict | None,
     history_summary_final: str | None = None,
+    prev_task_state: dict | None = None,
+    current_turn: int = 1,
     interrupted: bool = False,
 ) -> dict:
     """收口(内部缝):图终态 → 交付调用方之间的唯一持久化段,顺序即契约。
@@ -474,10 +482,21 @@ async def _settle_turn(
     # 持久化失败不阻断交付)。各象限独立降级:单路失败只吞本路,严禁连坐——
     # 否则 episodic 抛错会静默跳过 long 事实抽取(2026-10-02 夜审收口)。
     task_plan_to_save = result.get("task_plan") or {
-        "goal": "Multi-turn conversational assistance",
+        "goal": GOAL_PLACEHOLDER,
         "subtasks": [],
         "currentStepIndex": 0,
     }
+
+    # 任务态单轮推进(docs/multi-turn-task-state.md P0-1):goal ← 计划,
+    # 实体 ← 本轮意图槽位(retire_and_set 白名单退休),约束 ← 用户输入句式;
+    # turn 用载入侧 turns+1 的单调号。纯函数不抛,降级臂(intents 缺)自然空转。
+    task_state_next = advance_task_state(
+        prev_task_state,
+        goal=task_plan_to_save.get("goal"),
+        intents=result.get("intents"),
+        user_text=input_message,
+        turn=current_turn,
+    )
 
     async def _task_memory_lane():
         try:
@@ -488,6 +507,7 @@ async def _settle_turn(
                     "cartContext": result.get("cart_context") or saved_cart_context,
                     "orderContext": result.get("order_context") or saved_order_context,
                     "historySummary": history_summary_final,
+                    "taskState": task_state_next,
                 }
             )
         except Exception as tm_err:
@@ -522,7 +542,11 @@ async def _settle_turn(
 
         async def _long_lane():
             try:
-                await long_memory.extract_and_store_fact(result["output"], input_message)
+                # thread_id 透传(2026-10-24 op 裁决):UPDATE/DELETE 的记忆 churn
+                # badcase 以会话为归因单位
+                await long_memory.extract_and_store_fact(
+                    result["output"], input_message, thread_id=thread_id
+                )
             except Exception as mem_err:
                 print(f"[runAgent] 长期记忆回写失败(不阻断): {mem_err!r}")
 
@@ -537,6 +561,7 @@ async def _settle_turn(
                     "cartContext": result.get("cart_context") or saved_cart_context,
                     "orderContext": result.get("order_context") or saved_order_context,
                     "historySummary": history_summary_final,
+                    "taskState": task_state_next,
                 }
             )
         except Exception as tm_err:
@@ -822,6 +847,10 @@ async def run_agent(job: AgentJobInput) -> dict:
     saved_cart_context = None
     saved_order_context = None
     history_summary_prev = None
+    # 结构化任务态(docs/multi-turn-task-state.md P0-1):缺省兜底,旧数据无
+    # taskState 键 → 合法空形;turns 单调计数自增得本轮轮次号(short_memory
+    # 截 10 条长度非单调,不能当轮次号)
+    prev_task_state = normalize_task_state(None)
     try:
         saved_state = await task_memory.get_task_state()
         if saved_state:
@@ -831,20 +860,27 @@ async def run_agent(job: AgentJobInput) -> dict:
             saved_cart_context = saved_state.get("cartContext")
             saved_order_context = saved_state.get("orderContext")
             history_summary_prev = saved_state.get("historySummary")
+            prev_task_state = normalize_task_state(saved_state.get("taskState"))
     except Exception as err:
         print(f"[buildGraph] Failed to load saved task plan from taskMemory: {err}")
+    current_turn = prev_task_state["turns"] + 1
 
     # 历史预算 + 懒触发滚动摘要(2026-09-21 拷问轮决议):预算内零摘要成本;
     # 溢出那一刻把最老轮次压缩成 [EARLIER SUMMARY],每轮至多一次 LLM 调用,
     # 新摘要经 task_memory.historySummary 跨轮持久化;失败回退旧摘要不阻断。
     history_summary_final = history_summary_prev
     history_block = None
+    # 任务层段前置于装配面(本轮渲染的是上一轮收口后的累积任务态 —— 当轮
+    # 更新在收口 advance 时落库,下一轮可见;与摘要同律不占预算)
+    task_state_line = serialize_task_state(prev_task_state)
     try:
-        built = build_history_block(history_msgs, summary=history_summary_prev)
+        built = build_history_block(history_msgs, summary=history_summary_prev, task_state_line=task_state_line)
         if built["trimmed"]:
             history_summary_final = await summarize_overflow(history_summary_prev, built["overflow"])
             # 触发轮新摘要即时渲染进本轮 block(否则溢出轮在当轮无声消失,下一轮才可见)
-            history_block = build_history_block(history_msgs, summary=history_summary_final)["block"]
+            history_block = build_history_block(
+                history_msgs, summary=history_summary_final, task_state_line=task_state_line
+            )["block"]
         else:
             history_block = built["block"]
     except Exception as ctx_err:
@@ -989,5 +1025,7 @@ async def run_agent(job: AgentJobInput) -> dict:
         saved_cart_context=saved_cart_context,
         saved_order_context=saved_order_context,
         history_summary_final=history_summary_final,
+        prev_task_state=prev_task_state,
+        current_turn=current_turn,
         interrupted=interrupted,
     )

@@ -21,6 +21,7 @@ from engine_py.memory.long_memory import (
     LongMemory,
     fact_dimension_value,
     normalize_subject,
+    read_profile_slots,
 )
 
 pytestmark = pytest.mark.usefixtures("pg_factory")
@@ -88,8 +89,19 @@ def test_fact_dimension_value_normalization():
     assert fact_dimension_value("现在体重75了") == ("体重", "75")
     assert fact_dimension_value("脚长270mm") == ("脚长", "270")
     assert fact_dimension_value("尺码：XL") == ("尺码", "XL")
-    assert fact_dimension_value("喜欢宽松版型") is None
+    assert fact_dimension_value("喜欢宽松版型") == ("版型", "宽松")  # 2026-10-24 版型入覆盖面
+    assert fact_dimension_value("喜欢亚麻面料") is None  # 集合型偏好不覆盖
     assert fact_dimension_value(None) is None
+
+
+def test_fit_dimension_extraction():
+    """版型维度(2026-10-24 SOTA 对齐 P0-2):宽松/修身互斥可覆盖。"""
+    assert fact_dimension_value("用户偏好宽松版型服装") == ("版型", "宽松")
+    assert fact_dimension_value("用户喜欢修身剪裁") == ("版型", "修身")
+    assert fact_dimension_value("oversized 风格") == ("版型", "oversized")
+    # 集合型偏好不进覆盖面(偏差决策 2)
+    assert fact_dimension_value("用户喜欢亚麻面料") is None
+    assert fact_dimension_value("用户偏好黑色") is None
 
 
 def test_normalize_subject():
@@ -184,3 +196,46 @@ def test_regex_fallback_third_person_subject():
     assert len(rows) == 1
     assert rows[0].subject == "妻子"
     assert rows[0].source == "regex_fallback"
+
+
+# ---- SOTA 对齐(2026-10-24):版型覆盖 + 结构化槽位 ----
+
+
+def test_fit_dimension_supersedes():
+    """宽松→修身互斥:同维度新值覆盖旧值,槽位同步。"""
+    user = f"mem_{uuid.uuid4().hex[:8]}"
+    mem = LongMemory(user, None)
+    _ingest(mem, "用户偏好宽松版型")
+    _ingest(mem, "用户偏好修身版型")
+
+    rows = _rows(user)
+    by_fact = {r.fact: r.status for r in rows}
+    assert by_fact["用户偏好宽松版型"] == "superseded"
+    assert by_fact["用户偏好修身版型"] == "approved"
+    slots = asyncio.run(read_profile_slots(user))
+    fit = [s for s in slots if s["slot"] == "fit"]
+    assert len(fit) == 1 and fit[0]["value"] == "修身"
+
+
+def test_profile_slots_upsert_single_row_latest():
+    user = f"mem_{uuid.uuid4().hex[:8]}"
+    mem = LongMemory(user, None)
+    _ingest(mem, "用户身高175cm")
+    _ingest(mem, "用户身高178cm")
+
+    slots = asyncio.run(read_profile_slots(user))
+    height = [s for s in slots if s["slot"] == "height"]
+    assert len(height) == 1, "UNIQUE(user,subject,slot):永远一行最新值"
+    assert height[0]["value"] == "178"
+
+
+def test_profile_slots_subject_isolation():
+    user = f"mem_{uuid.uuid4().hex[:8]}"
+    mem = LongMemory(user, None)
+    _ingest(mem, "用户身高175cm")
+    _ingest(mem, "用户的妻子身高约160cm", subject="妻子")
+
+    slots = asyncio.run(read_profile_slots(user))
+    assert {(s["subject"], s["value"]) for s in slots} == {("self", "175"), ("妻子", "160")}
+    mine = asyncio.run(read_profile_slots(user, subject="self"))
+    assert [s["value"] for s in mine] == ["175"]

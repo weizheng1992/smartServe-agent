@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
+import math
 import re
 
 from sqlalchemy import select
@@ -97,6 +99,10 @@ class EpisodicMemory:
             return []
 
         query_tokens = [t for t in _TOKEN_SPLIT_RE.split(query.lower()) if len(t) >= 2]
+        # 三因子打分(2026-10-24 SOTA 对齐 P0-1):相关性(base)×时近性×重要性
+        # —— importance 此前落库但检索完全不用(LongMemEval 弱项:时序推理)。
+        # 乘法降级不灭失:90 天旧事件 ×0.85 档仍可凭高相关过 0.55 阈值。
+        now = _dt.datetime.now()
         scored = []
         for row in visible_rows:
             embedding_array = parse_embedding(row.embedding)
@@ -104,7 +110,14 @@ class EpisodicMemory:
             content_lower = (row.content or "").lower()
             keyword_matches = sum(1 for token in query_tokens if token in content_lower)
             keyword_score = (keyword_matches / len(query_tokens)) * 0.95 if query_tokens else 0
-            effective_score = max(similarity, keyword_score)
+            base = max(similarity, keyword_score)
+            if row.timestamp:
+                age_days = max((now - row.timestamp).days, 0)
+            else:
+                age_days = 0
+            recency_factor = 0.85 + 0.15 * math.exp(-age_days / 30.0)
+            importance_factor = 0.8 + 0.2 * min(int(row.importance or 3), 9) / 9.0
+            effective_score = base * recency_factor * importance_factor
             scored.append(
                 {
                     "event": {

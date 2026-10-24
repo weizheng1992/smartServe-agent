@@ -12,6 +12,25 @@ from .mall_domain import MallDomainService
 from .order_domain import OrderDomainService
 
 
+async def _get_profile_slots(args: dict) -> dict:
+    """结构化画像槽位读取(2026-10-24 SOTA 对齐 P1#2):尺码/荐品的结构化档案。
+
+    threadId 必带(会话上下文解析 userId,与 recordUserPreference 同法);
+    subject 可选(代买场景,如 妻子)。"""
+    from ..memory.long_memory import read_profile_slots
+
+    thread_id = (args.get("threadId") or "").strip()
+    if not thread_id:
+        return {"error": "Session threadId is strictly required."}
+    ctx = await OrderDomainService.get_thread_session_context(thread_id)
+    user_id = ctx.get("userId")
+    if not user_id:
+        return {"error": "Could not resolve user context from current session."}
+    subject = (args.get("subject") or "").strip() or None
+    slots = await read_profile_slots(user_id, subject)
+    return {"slots": slots, "count": len(slots)}
+
+
 async def _get_order_status(args: dict):
     return await OrderDomainService.get_order_status(args["orderId"], args.get("threadId"))
 
@@ -226,6 +245,23 @@ register_tool(
             },
         },
         execute=_record_user_preference,
+    )
+)
+register_tool(
+    ToolDefinition(
+        name="getProfileSlots",
+        description=(
+            "Read the customer's structured profile slots (height/weight/foot length/clothing size/"
+            "fit preference with confidence) for size advice and personalized recommendations. "
+            "Pass subject (e.g. 妻子) when the customer is buying for someone else."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "关系称谓(代买对象),缺省读取本人档案"},
+            },
+        },
+        execute=_get_profile_slots,
     )
 )
 register_tool(
