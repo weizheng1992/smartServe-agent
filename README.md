@@ -452,6 +452,7 @@ bun run dev:server                        # FastAPI 网关 (Port 4000, uvicorn -
 | [商户接入指南](docs/merchant-onboarding-guide.md) | SPI 对接/RAG 灌入/审批策略 |
 | [架构深度指南](docs/architecture/) | RAG/HITL 重规划/弹性部署/多实例扩容 |
 | **[生产部署方案](docs/deploy.md)** | **Docker Compose 全栈上线:四前端 nginx 一体/gateway/PG/Redis,五步上线+运维+安全清单** |
+| [多轮任务状态设计](docs/multi-turn-task-state.md) | **聊天不是 State:多轮任务状态管理——课程/业界 2026-10 对照、三缺口裁决与六票实施规划(P0 task_state→P1 边界判定器→P2 步级 journal)** |
 | [CHANGELOG](CHANGELOG.md) | 版本明细（2.7.0 = v4.1；2.6.x 日粒度演进持续回填） |
 
 ---
