@@ -86,6 +86,12 @@ class AgentState(TypedDict, total=False):
     # (路径未决即离场),收口侧原样落 NULL
     turn_path: str
 
+    # 任务边界判定(docs/multi-turn-task-state.md P1-1/D2):triage LLM 结构化
+    # 输出的 boundary{decision: modify|new, confidence, rationale, entitiesChanged}。
+    # modify→planner 保留既有计划,new→现状重规划,低置信→澄清旁路;None=
+    # 判定器本轮弃权(无前任务/解析失败/模型省略),全链按 pass 处理
+    boundary: Annotated[dict | None, _replace_if_present_reducer]
+
     # 循环控制计数(-1 归零语义见 _counter_reducer)
     loop_count: int
     global_transitions_count: Annotated[int, _counter_reducer]

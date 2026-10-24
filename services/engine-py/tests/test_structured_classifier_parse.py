@@ -90,3 +90,51 @@ def test_coerce_category_inside_intents_list() -> None:
 def test_parse_rejects_non_json() -> None:
     with pytest.raises(ValueError, match="no JSON object"):
         parse_structured_output_text("抱歉,我不知道你在说什么。")
+
+
+# ── boundary 字段(docs/multi-turn-task-state.md P1-1)────────────────────
+
+
+def test_parse_boundary_present_and_defaults() -> None:
+    """boundary 完整产出解析;缺省时保持 None(判定器弃权)。"""
+    out = parse_structured_output_text(
+        '{"intents": [{"intent": "cart_manage"}],'
+        ' "boundary": {"decision": "modify", "confidence": 0.85,'
+        ' "rationale": "仅修正日期", "entitiesChanged": ["date"]}}'
+    )
+    assert out.boundary is not None
+    assert out.boundary.decision == "modify"
+    assert out.boundary.confidence == 0.85
+    assert out.boundary.entitiesChanged == ["date"]
+
+    bare = parse_structured_output_text('{"intents": [{"intent": "order_status"}]}')
+    assert bare.boundary is None
+
+
+def test_coerce_boundary_decision_aliases() -> None:
+    """decision 同义词漂移归一到闭集。"""
+    for raw, expected in (("continue", "modify"), ("switch_task", "new"), ("MODIFY", "modify")):
+        data = coerce_structured_payload(
+            {"intents": [{"intent": "cart_manage"}], "boundary": {"decision": raw, "confidence": 0.9}}
+        )
+        assert data["boundary"]["decision"] == expected
+
+
+def test_coerce_boundary_invalid_dropped_not_fatal() -> None:
+    """boundary 坏了绝不连坐 intents(意图才是主产出):decision 修不好整体
+    摘除;confidence 坏则夹到 0.0 保留 —— 0.0 走澄清旁路,fail 方向更安全。"""
+    for bad in ({"decision": "我也不知道", "confidence": 0.9}, "modify"):
+        data = coerce_structured_payload({"intents": [{"intent": "cart_manage"}], "boundary": bad})
+        assert data["intents"][0]["intent"] == "cart_manage"
+        assert data.get("boundary") is None
+    bad_conf = coerce_structured_payload(
+        {"intents": [{"intent": "cart_manage"}], "boundary": {"decision": "modify", "confidence": "很高"}}
+    )
+    assert bad_conf["boundary"] == {"decision": "modify", "confidence": 0.0}
+
+
+def test_coerce_boundary_confidence_clamped() -> None:
+    data = coerce_structured_payload(
+        {"intents": [{"intent": "cart_manage"}], "boundary": {"decision": "new", "confidence": 7}}
+    )
+    assert data["boundary"]["confidence"] == 1.0

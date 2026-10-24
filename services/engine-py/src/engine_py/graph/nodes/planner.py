@@ -493,6 +493,33 @@ async def planner_node(state: AgentState) -> dict:
                 "request cannot be fulfilled, generate a step to explain the reason politely to the user."
             )
 
+    # 🛡️ Boundary-Preserve(docs/multi-turn-task-state.md P1-1/D2):判定器
+    # 高置信判 modify → 保留既有计划不重规划 —— 实体修正/追加不改目标,
+    # 剩余步骤照跑,新槽位由 step_execution 现取现用。四道门禁:
+    # System: 恢复轮不抢(HITL 保存/驳回回溯自有语义);有驳回上下文必重规划
+    # (驳回 = 明确要求换方案);当前步挂审批(waitingForApproval)不抢 ——
+    # 审批通道轮自有决议语义;计划不在场不适用 —— 非 System 轮 initial
+    # task_plan 为空,run_agent 载回接线落地前 modify 天然 inert(安全灰度)。
+    _boundary = state.get("boundary") or {}
+    _cur_idx = prior_plan.get("currentStepIndex", 0)
+    _cur_step = prior_subtasks[_cur_idx] if 0 <= _cur_idx < len(prior_subtasks) else None
+    if (
+        not is_system_resume
+        and not rejection_context
+        and prior_subtasks
+        and not (_cur_step and (_cur_step.get("result") or {}).get("waitingForApproval"))
+        and (_boundary.get("decision") or "") == "modify"
+        and float(_boundary.get("confidence") or 0.0) >= settings.boundary_confidence_threshold
+    ):
+        if job_id:
+            await emit_status(
+                job_id,
+                "🔄 边界判定:本轮是对当前任务的修正/追加，保留既有计划继续执行，不重新规划！",
+                node="planner",
+                plan=prior_plan,
+            )
+        return {"task_plan": prior_plan, "global_transitions_count": 1}
+
     # 📦 SaaS Contextual RAG 注入
     rag_context = ""
     rag_documents = state.get("rag_documents") or []

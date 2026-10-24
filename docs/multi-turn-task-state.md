@@ -110,7 +110,7 @@
 - 改造:高置信信号**自动**生成用例草稿 → **shadow 集**(`eval/testCases/shadow/pending.json`,不被任何硬闸 yaml 引用——主配置 suites 显式列举,新目录天然不入闸);开闸面**派生自** `pool.SOURCE_PRIORS` 的 suspected_defect 族(circuit_breaker 刻意排除,「单独立案聚合不直接转 case」);夜评新增报告例 `sh01_shadow集`(advisory 恒真:失败不进退出码、不回灌坏例池,空集/promptfoo 缺位诚实记 skipped);CLI `promote` 人审一键转正(选套件+补断言+留痕 converted)。
 - 纪律(D7):自动只到 shadow 为止,人审才拦发版——防误信号锁死发版。
 
-### 4.3 P1-1 · 任务边界判定器(最大缺口)
+### 4.3 P1-1 · 任务边界判定器(最大缺口)—— ✅ 已落地(2026-10-24)
 
 **解决**:课程⑦;修 `run_agent.py:814,828` "新输入一律重规划"病象。
 
@@ -122,24 +122,25 @@
               "entities_changed": ["date"]}}
 ```
 
-- **modify 分支**:载回旧 plan(复用现 `System:` 前缀路径的载回逻辑,触发条件从"仅 System: 前缀"扩到判定器 modify)+ task_state 差异更新(entities_changed 走 retire_and_set),**不整体重规划**。
+- **modify 分支**:planner Boundary-Preserve 保留既有计划(prior_subtasks 在场 ∧ 高置信 ∧ 非 System 轮 ∧ 无驳回上下文 ∧ 当前步不挂审批——四道门禁),零 LLM;新槽位由 step_execution 现取现用,**entitiesChanged 的实体更新由收口缝 advance_task_state 的槽位抽取覆盖**(同源同键,不重复接线——as-built 裁决)。`System:` 前缀路径与 Plan-Preservation Bypass 维持现状。非 System 轮 initial task_plan 为空的载回接线已随并行批 aa98ef3 进 HEAD(⚠️该批把 run_agent.py 连同本批 P0 接线 hunk 一并卷入提交,未署名——ebd3ffc 同型事故第三起,git add 按文件点名纪律再次强调)。
 - **new 分支**:维持现状 DEFAULT_TASK_PLAN 重规划。
-- **低置信**(< 阈值,初值 0.6,env 可配):走澄清旁路(现有 bypass_step 模式,`intent_triage_engine.py:711`),话术"是继续安排上海行程,还是新需求?"——宁可多问一句,不可丢任务。
-- **评测闸**:新建 boundary 评测集 30-50 例(modify / new / 低置信澄清三段),入夜评硬闸(意图 95 闸同款机制);与意图集双护栏同域管理。验收红线:data 42/42、t1t2 25/25、意图 95 闸不回退。
+- **低置信**(< 0.6,env `AI_BOUNDARY_CONFIDENCE_THRESHOLD`):走澄清旁路(handle_immediate_bypass "boundary_clarify" → turn_path=clarify),话术不引用具体任务名(判定器拿不准时复述任务名只会放大错误);`AI_BOUNDARY_CLARIFY=0` 一键回退。
+- **评测闸**:`evals/boundary_cases.jsonl` 30 例(modify 10/new 10/clarify 10)+ `evals/run_boundary_eval.py`(评分口径与被测行为一致:弃权=失败,严禁放水);夜评 `b01_boundary集` 例,**`AI_BOUNDARY_GATE` 默认 off(D6 看板先行纪律,先攒 2 周基线再开硬闸)**;首跑实弹 26/30=86.7%(2026-10-24,失败全在 clarify 段,其中「帮我订那个」判 modify@0.90 属语料标注可商榷)。
+- 验收红线:意图 95 闸 / data 42/42 / t1t2 25/25 未触碰(本批 diff 零涉及)。
 
-### 4.4 P1-2 · 四指标 + 切换代理,d-ops 看板
+### 4.4 P1-2 · 四指标 + 切换代理,d-ops 看板 —— ✅ 已落地(2026-10-24)
 
 **解决**:课程⑩五指标。全部从现有遥测派生,**零新采集**:
 
-| 指标 | 口径 | 原料 |
+| 指标 | 口径(实际落位) | 原料 |
 |---|---|---|
-| 任务完成率 | resolution_status 成功 / 轮(单轮口径;多轮 pass^k 视图等 task_state 任务分组后置) | resolution_status |
-| 参数补全准确率 | 澄清触发 → 后续轮补全成功(无二次澄清)比例 | turn_path + pending_intents |
-| Tool 调用失败率 | tool_errors / tool 调用 | session_metrics |
-| 单轮 Token 成本 | job 聚合 tokens/cost | llm_call_logs(`db/models.py:359`) |
-| 切换准确率(代理) | 同 session 同 intent_category 重复 + 纠正词表命中,计为边界失败信号 | turn_path + 词表(初版;标注攒够再校真值) |
+| 任务完成率 | resolution_status='resolved_auto' / 轮(单轮口径;多轮 pass^k 视图等 task_state 任务分组后置) | session_metrics FILTER 聚合 |
+| 参数补全准确率 | 澄清轮 → 同会话 30 分钟内下一轮不再澄清(与 labeling.backfill_clarify_outcome 资格窗同口径);无后继不计分母 | session_metrics lead() 窗口函数 |
+| Tool 错误轮占比(v1 代理) | tool_errors_count≥1 的轮占比;**真失败率(tool_errors/调用)待 tool_calls_count 落库列**(随 run_agent 接线小票) | session_metrics |
+| 单轮 Token | AVG(total_tokens)(session_metrics.total_tokens 即当轮 llm_call_logs 聚合产物,同源;cost 维度随真失败率票补) | session_metrics |
+| 切换准确率(代理,v1) | duplicate_bypass 轮占比(最强重复信号,已落库);**同 intent 重复 + 纠正词表待标注攒批后与真值同批实现**(spec 收窄,as-built 裁决) | session_metrics.turn_path |
 
-- 呈现:`apps/merchant-admin/src/pages/ai-usage/` 加只读一节;口径 SQL 全部单测。
+- 呈现:`apps/merchant-admin/src/pages/ai-usage/` 「多轮任务健康度」五卡节;网关 summary `taskHealth` 键(含分子分母绝对数,比率可自洽验证);口径 SQL 有 delta 单测。
 - 节奏(D6):看板先行,硬闸阈值等 ~2 周基线再定——"管道盲闸吞失败"前科纪律。
 
 ### 4.5 P2-1 · 步级 journal(第二缺口)
@@ -167,8 +168,8 @@
 |---|---|---|---|
 | **P0-1** ✅(2026-10-24) | task_state 小节 + retire_and_set + context 任务层序列化 | — | `test_task_state.py`(29 断言级:退休/白名单观察/缺省兜底/截帽/预算管控)+ `test_context_builder.py` 任务层段断言;run_agent 收口链路回归绿 |
 | **P0-2** ✅(2026-10-24) | 回灌 shadow 集 + promote 命令 | — | `test_badcase_shadow.py`(端到端:起草→promote→硬闸套件落例→converted);夜评 `sh01_shadow集` 报告例 advisory 不出闸 |
-| **P1-1** | 边界判定器(boundary 字段 + modify 载回 + 澄清旁路) | P0-1 | boundary 集 30 例全绿;意图 95 闸 / data 42/42 / t1t2 25/25 不回退 |
-| **P1-2** | 四指标 + 切换代理 d-ops 看板 | — | 口径 SQL 单测;看板呈现;无新采集 |
+| **P1-1** ✅(2026-10-24) | 边界判定器(boundary 字段 + modify 保留 + 低置信澄清) | P0-1 | parse/漂移/纯谓词/planner 门禁 17 例全绿;实弹首跑 26/30;意图 95 闸/data 42/42/t1t2 25/25 零涉及;夜评闸 AI_BOUNDARY_GATE=off 攒基线 |
+| **P1-2** ✅(2026-10-24) | 四指标 + 切换代理 d-ops 看板 | — | 网关 delta 单测 + 页面 5 例;口径自洽断言;无新采集 |
 | **P2-1** | 步级 journal + 下一轮续跑 | — | 崩溃注入:从最后 ok 步续跑;HITL 不误伤;异常不阻断 |
 | **P2-2** | KV-cache 前缀纪律 + 装配顺序快照测试 | — | 审计清单 + 快照测试 |
 

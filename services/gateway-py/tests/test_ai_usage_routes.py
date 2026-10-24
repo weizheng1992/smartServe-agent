@@ -124,6 +124,54 @@ class TestAiUsageSummary:
         assert after["calls"]["total"] - before["calls"]["total"] == 2
         assert after["calls"]["totalTokens"] - before["calls"]["totalTokens"] == 1600
 
+    async def test_summary_task_health_math(self, client, auth):
+        """多轮任务健康度(docs/multi-turn-task-state.md §4.4):五指标口径
+        逐项 delta 钉值 —— 完成率/工具错误轮/重复代理为单轮 FILTER 聚合,
+        澄清补全走 30 分钟后继窗(补全 +1 / 二次澄清 +1 / 沉默不计入分母)。"""
+        boss = await auth()
+        suffix = uuid.uuid4().hex[:8]
+        th_a, th_b, th_c, th_d, th_e = (f"usage_thh_{suffix}_{i}" for i in range(5))
+        before = (await client.get("/api/admin/ai-usage/summary", headers=boss)).json()["data"]["taskHealth"]
+
+        from engine_py.db import get_session
+
+        async with get_session() as session:
+            await _seed_threads(session, [th_a, th_b, th_c, th_d, th_e])
+            # 六轮:t1 完成轮;澄清链两对(t2 补全 / t3 二次澄清)+ 工具错轮 + 重复代理轮
+            await session.execute(
+                text(
+                    "INSERT INTO session_metrics (business_id, thread_id, total_tokens, "
+                    "calculated_cost_usd, resolution_status, avg_latency_ms, job_id, turn_path, "
+                    "tool_errors_count, created_at) VALUES "
+                    "('aurora', :a, 500, 0.0001, 'resolved_auto', 800, NULL, 'deep_path', 0, NOW() - INTERVAL '40 min'), "
+                    "('aurora', :b, 100, 0.00002, 'resolved_auto', 300, NULL, 'clarify', 0, NOW() - INTERVAL '20 min'), "
+                    "('aurora', :b, 300, 0.00005, 'resolved_auto', 600, NULL, 'deep_path', 0, NOW() - INTERVAL '15 min'), "
+                    "('aurora', :c, 100, 0.00002, 'resolved_auto', 300, NULL, 'clarify', 0, NOW() - INTERVAL '20 min'), "
+                    "('aurora', :c, 100, 0.00002, 'resolved_auto', 300, NULL, 'clarify', 0, NOW() - INTERVAL '15 min'), "
+                    "('aurora', :d, 400, 0.00008, 'resolved_auto', 700, NULL, 'deep_path', 2, NOW() - INTERVAL '30 min'), "
+                    "('aurora', :e, 200, 0.00003, 'resolved_auto', 400, NULL, 'duplicate_bypass', 0, NOW() - INTERVAL '10 min')"
+                ).bindparams(a=th_a, b=th_b, c=th_c, d=th_d, e=th_e)
+            )
+            await session.commit()
+
+        after = (await client.get("/api/admin/ai-usage/summary", headers=boss)).json()["data"]["taskHealth"]
+        assert after["totalTurns"] - before["totalTurns"] == 7
+        assert after["resolvedTurns"] - before["resolvedTurns"] == 7
+        assert after["clarifyTurns"] - before["clarifyTurns"] == 3  # t2 澄清 1 + t3 澄清 2(二次澄清行本身也是 clarify 轮)
+        # 澄清后继:t2 15 分钟内转 deep_path=补全;t3 二次澄清;无后继不计分母
+        assert after["clarifyFollowupCompleted"] - before["clarifyFollowupCompleted"] == 1
+        assert after["clarifyFollowupReclarified"] - before["clarifyFollowupReclarified"] == 1
+        if before["clarifyFollowupAccuracy"] is not None:
+            # 比率随全表走,只钉 delta 一致性:新分子/新分母与回填比率自洽
+            expected = after["clarifyFollowupCompleted"] / (
+                after["clarifyFollowupCompleted"] + after["clarifyFollowupReclarified"]
+            )
+            assert after["clarifyFollowupAccuracy"] == round(expected, 4)
+        # 完成率与自身分子分母自洽(比率=纯函数,防前端展示与后端口径漂移)
+        assert after["completionRate"] == round(after["resolvedTurns"] / after["totalTurns"], 4)
+        for rate in (after["toolErrorTurnRate"], after["duplicateBypassRate"]):
+            assert 0 <= rate <= 1
+
 
 class TestStoreChatUsage:
     async def test_store_chat_envelope_carries_usage(self, client):

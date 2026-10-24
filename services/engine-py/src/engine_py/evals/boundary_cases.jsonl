@@ -1,0 +1,30 @@
+{"input": "不是周三，改周四", "history": [{"role": "user", "content": "帮我安排下周去上海的行程"}, {"role": "assistant", "content": "好的，已为您查询周三去上海的高铁，需要继续订酒店吗？"}], "expect": "modify", "note": "课程⑦原型:同任务实体修正"}
+{"input": "再帮我加一件M码的", "history": [{"role": "user", "content": "这件冲锋衣有M码吗"}, {"role": "assistant", "content": "有的,已加入购物车一件M码冲锋衣"}], "expect": "modify", "note": "购物车追加"}
+{"input": "改成退到银行卡", "history": [{"role": "user", "content": "订单AURORA-ORD-2026-6307要退款"}, {"role": "assistant", "content": "已登记退款申请,默认退回原支付方式"}], "expect": "modify", "note": "退款参数修正"}
+{"input": "联系人电话也换成139开头的这个", "history": [{"role": "user", "content": "帮我把收货地址改到望京路1号"}, {"role": "assistant", "content": "收货地址已更新为望京路1号"}], "expect": "modify", "note": "改地址任务内补充"}
+{"input": "酒店换到外滩那家", "history": [{"role": "user", "content": "订周三上海的酒店"}, {"role": "assistant", "content": "已找到人民广场附近三家酒店,需要推荐吗"}], "expect": "modify", "note": "订酒店任务内换标的"}
+{"input": "顺便帮我看下另一个单子AURORA-ORD-2026-1201到哪了", "history": [{"role": "user", "content": "我的订单AURORA-ORD-2026-9908发货了吗"}, {"role": "assistant", "content": "已发货,预计明天送达"}], "expect": "modify", "note": "查物流任务内换单号(goal同entity变)"}
+{"input": "周三的会议取消掉，只保留酒店", "history": [{"role": "user", "content": "安排周三上海行程:高铁加酒店加会议"}, {"role": "assistant", "content": "行程已排好:高铁、酒店、会议均已列出"}], "expect": "modify", "note": "行程裁剪"}
+{"input": "M码没货的话就换L码", "history": [{"role": "user", "content": "加购一件M码卫衣"}, {"role": "assistant", "content": "M码卫衣已加入购物车"}], "expect": "modify", "note": "购物车条件修正"}
+{"input": "金额不对，是89元不是98元", "history": [{"role": "user", "content": "订单AURORA-ORD-2026-6307申请退款98元"}, {"role": "assistant", "content": "已提交98元退款审批"}], "expect": "modify", "note": "退款金额纠正"}
+{"input": "那就还按原计划周三出发", "history": [{"role": "user", "content": "周三去上海的高铁订好了吗"}, {"role": "assistant", "content": "已订好周三上午出发的高铁"}], "expect": "modify", "note": "确认延续"}
+{"input": "这个月信用卡花了多少", "history": [{"role": "user", "content": "帮我安排下周去上海的行程"}, {"role": "assistant", "content": "好的,正在为您规划上海行程"}], "expect": "new", "note": "课程⑦原型:目标实体全变"}
+{"input": "你们家的退货政策是什么", "history": [{"role": "user", "content": "订单AURORA-ORD-2026-6307要退款"}, {"role": "assistant", "content": "退款申请已登记"}], "expect": "new", "note": "操作转资讯"}
+{"input": "怎么开发票", "history": [{"role": "user", "content": "把这件羽绒服加入购物车"}, {"role": "assistant", "content": "羽绒服已加购"}], "expect": "new", "note": "加购转开票"}
+{"input": "推荐一款适合跑步的鞋", "history": [{"role": "user", "content": "订单AURORA-ORD-2026-9908到哪了"}, {"role": "assistant", "content": "已到上海转运中心"}], "expect": "new", "note": "查物流转导购"}
+{"input": "你们几点下班", "history": [{"role": "user", "content": "帮我查下单子物流"}, {"role": "assistant", "content": "单子已发出,预计三天达"}], "expect": "new", "note": "业务转闲聊"}
+{"input": "帮我查一下话费账单", "history": [{"role": "user", "content": "规划一下下周上海出差"}, {"role": "assistant", "content": "出差规划进行中"}], "expect": "new", "note": "域外新任务"}
+{"input": "新款羽绒服什么时候上架", "history": [{"role": "user", "content": "我的退款什么时候到账"}, {"role": "assistant", "content": "预计1-3个工作日到账"}], "expect": "new", "note": "售后转商品资讯"}
+{"input": "我要投诉快递员", "history": [{"role": "user", "content": "订单AURORA-ORD-2026-9908物流信息查一下"}, {"role": "assistant", "content": "在派送中,今天可达"}], "expect": "new", "note": "查询转投诉"}
+{"input": "怎么修改登录密码", "history": [{"role": "user", "content": "订周三上海外滩酒店"}, {"role": "assistant", "content": "外滩酒店已选好房型"}], "expect": "new", "note": "订房转账号"}
+{"input": "你们平台和某某品牌是什么关系", "history": [{"role": "user", "content": "推荐一款通勤包"}, {"role": "assistant", "content": "为您推荐三款通勤包"}], "expect": "new", "note": "导购转平台咨询"}
+{"input": "帮我订那个", "history": [{"role": "user", "content": "看一下周三上海的高铁和酒店"}, {"role": "assistant", "content": "高铁G102和两家酒店已列出"}], "expect": "clarify", "note": "指代不明(高铁?酒店?)"}
+{"input": "就按之前说的办", "history": [{"role": "user", "content": "订单要退款"}, {"role": "assistant", "content": "退款已登记"}, {"role": "user", "content": "另外帮我看下购物车里的外套"}, {"role": "assistant", "content": "外套在购物车里"}], "expect": "clarify", "note": "双任务线索含混"}
+{"input": "也要那个", "history": [{"role": "user", "content": "购物车里有卫衣和牛仔裤"}, {"role": "assistant", "content": "是的,两件都在"}], "expect": "clarify", "note": "指代+动作都不明"}
+{"input": "那个先不弄了，弄另一个", "history": [{"role": "user", "content": "退款和改地址两件事都在办"}, {"role": "assistant", "content": "好的,两件都在推进"}], "expect": "clarify", "note": "哪个是那个不明"}
+{"input": "改一下", "history": [{"role": "user", "content": "把地址改到望京路1号"}, {"role": "assistant", "content": "已改"}, {"role": "user", "content": "日期改成周四"}, {"role": "assistant", "content": "日期已更新"}], "expect": "clarify", "note": "两处可改对象"}
+{"input": "还是老样子吧", "history": [{"role": "user", "content": "酒店有大床房和双床房"}, {"role": "assistant", "content": "两种房型都有房"}], "expect": "clarify", "note": "老样子无锚点"}
+{"input": "你懂的，就那个", "history": [{"role": "user", "content": "我的退款在处理吗"}, {"role": "assistant", "content": "在处理中"}], "expect": "clarify", "note": "纯含混指代"}
+{"input": "算了，换掉", "history": [{"role": "user", "content": "订周四的航班和酒店"}, {"role": "assistant", "content": "航班和酒店都已选好"}], "expect": "clarify", "note": "换哪个不明"}
+{"input": "再看看别的", "history": [{"role": "user", "content": "推荐一款跑步鞋"}, {"role": "assistant", "content": "已推荐三款跑步鞋"}], "expect": "clarify", "note": "别的=新品类还是同品类不明"}
+{"input": "先这样吧，然后你看着办", "history": [{"role": "user", "content": "行程里酒店还没订"}, {"role": "assistant", "content": "是的,酒店待订"}], "expect": "clarify", "note": "看着办无授权范围"}

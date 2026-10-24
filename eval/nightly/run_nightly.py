@@ -976,6 +976,29 @@ async def run_shadow_eval_case() -> dict:
         return {**base, "ok": True, "skipped": True, "fails": [], "note": f"shadow 执行异常(不出闸): {err!r}"}
 
 
+async def run_boundary_eval_case() -> dict:
+    """边界评测集(docs/multi-turn-task-state.md P1-1):live LLM 跑 triage
+    classify 的 boundary 字段(30 例,与意图分类同源零额外调用)。硬闸由
+    AI_BOUNDARY_GATE 单独控制 —— 默认 off 只记 skipped(D6 看板先行纪律:
+    先攒 2 周基线,阈值有据后再开闸),on 才出真闸。"""
+    import os as _os
+
+    base = {"kind": "boundary", "case_id": "b01_boundary集", "dimension": "边界·P1-1"}
+    if _os.environ.get("AI_BOUNDARY_GATE", "off") != "on":
+        return {**base, "ok": True, "skipped": True, "fails": [],
+                "note": "AI_BOUNDARY_GATE=off(D6:先攒基线再开硬闸;手动跑分 bun run eval:boundary)"}
+    _os.environ.setdefault("AI_THINKING", "disabled")
+    try:
+        from engine_py.evals.run_boundary_eval import main_async
+
+        # show_fails=True:失败清单必须真实落 stdout,严禁文案指向不存在的输出
+        code = await asyncio.wait_for(main_async(show_fails=True), timeout=600)
+    except Exception as err:
+        return {**base, "ok": False, "fails": [f"边界评测执行异常 {err!r}"]}
+    return {**base, "ok": code == 0,
+            "fails": [] if code == 0 else ["boundary 准确率低于闸(失败清单见上方输出)"]}
+
+
 async def cleanup() -> dict:
     """NIGHTLY_ 前缀数据回收:订单/行项目删除 + 库存回补 + 演示客户不触碰。"""
     from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
@@ -1305,7 +1328,11 @@ async def main() -> int:
         if not os.environ.get("NIGHTLY_SMOKE"):
             await _run_contained(results, run_shadow_eval_case,
                                  case_id="sh01_shadow集", kind="shadow", dimension="回灌·shadow")
-        for r in [x for x in results if x.get("kind") in ("perf", "stream", "intent", "shadow")]:
+        # 边界评测集(P1-1):AI_BOUNDARY_GATE=off(默认)只记 skipped,开闸后才硬闸
+        if not os.environ.get("NIGHTLY_SMOKE"):
+            await _run_contained(results, run_boundary_eval_case,
+                                 case_id="b01_boundary集", kind="boundary", dimension="边界·P1-1")
+        for r in [x for x in results if x.get("kind") in ("perf", "stream", "intent", "shadow", "boundary")]:
             print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
     # 失败喂飞轮(客服侧;坏例池静默降级,不阻断)

@@ -110,6 +110,13 @@ async def judge(ctx: StageContext) -> StageVerdict:
             exemplars_prompt=exemplars_prompt,
         )
 
+        # 任务边界判定(docs/multi-turn-task-state.md P1-1/D2):与意图分类
+        # 同源(新输入 vs 近期对话),classify 顺带产出,零额外调用。getattr
+        # 防御为测试桩鸭型兼容(StructuredTriageOutput 必有此字段,桩未必);
+        # 漂移防御已由 coerce_structured_payload 兜底(坏形状整体摘除)。
+        _boundary_res = getattr(structured_res, "boundary", None)
+        boundary_dump = _boundary_res.model_dump() if _boundary_res is not None else None
+
         fallback_match = ORDER_ID_RE.search(input_text)
         fallback_order_id = fallback_match.group(0) if fallback_match else None
 
@@ -352,6 +359,37 @@ async def judge(ctx: StageContext) -> StageVerdict:
                 ),
             )
 
+        # 任务边界低置信澄清(P1-1/D2):意图级联已放行的轮才走到这 ——
+        # 意图明确但"延续还是新任务"拿不准时多问一句,宁澄清不猜方向。
+        from ...config import settings as _settings
+        from ..intent_triage_engine import BOUNDARY_CLARIFY_MESSAGE, resolve_boundary_action
+
+        if (
+            resolve_boundary_action(
+                boundary_dump,
+                history_turns=len(context_msgs),
+                enabled=_settings.boundary_clarify_enabled,
+                threshold=_settings.boundary_confidence_threshold,
+            )
+            == "clarify"
+        ):
+            ctx.proposals.append(
+                _proposal("boundary_cascade", primary_intent, float(boundary_dump.get("confidence") or 0.0))
+            )
+            return StageVerdict(
+                terminal=True,
+                result=await ctx.engine.handle_immediate_bypass(
+                    state,
+                    "boundary_clarify",
+                    BOUNDARY_CLARIFY_MESSAGE,
+                    parsed,
+                    "boundary_cascade",
+                    float(boundary_dump.get("confidence") or 0.0),
+                    ctx.damage_assessment,
+                    candidates=[*ctx.proposals, llm_proposal],
+                ),
+            )
+
         if state.get("job_id"):
             from ...event_bus import emit_status
 
@@ -371,7 +409,7 @@ async def judge(ctx: StageContext) -> StageVerdict:
             terminal=True,
             result=_triage_terminal_result(
                 parsed, input_text, ctx.history_msgs, ctx.damage_assessment,
-                state=state, with_order_context=True,
+                state=state, with_order_context=True, boundary=boundary_dump,
             ),
         )
     except CircuitBreakerOpenError:

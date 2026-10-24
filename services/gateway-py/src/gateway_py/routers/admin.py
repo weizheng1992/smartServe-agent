@@ -1115,6 +1115,42 @@ async def ai_usage_summary(
                 ).bindparams(biz=biz)
             )
         ).mappings().first()
+        # 多轮任务健康度(docs/multi-turn-task-state.md §4.4/P1-2):单遍 FILTER
+        # 聚合 + 澄清后继窗口函数,全部派生自既有遥测,零新采集
+        health_row = (
+            await session.execute(
+                text(
+                    "SELECT "
+                    "COUNT(*) FILTER (WHERE resolution_status = 'resolved_auto') AS resolved, "
+                    "COUNT(*) FILTER (WHERE COALESCE(turn_path, '') = 'clarify') AS clarify_turns, "
+                    "COUNT(*) FILTER (WHERE COALESCE(turn_path, '') = 'duplicate_bypass') AS duplicate_turns, "
+                    "COUNT(*) FILTER (WHERE COALESCE(tool_errors_count, 0) >= 1) AS tool_error_turns, "
+                    "COALESCE(AVG(total_tokens), 0) AS avg_tokens "
+                    f"FROM session_metrics WHERE business_id = :biz AND created_at >= {month_start}"
+                ).bindparams(biz=biz)
+            )
+        ).mappings().first()
+        # 参数补全准确率:澄清轮 → 同会话 30 分钟内的下一轮不再澄清(与
+        # labeling.backfill_clarify_outcome 的 30 分钟资格窗同口径);用户未再
+        # 说话(无后继)不计入分母 —— 沉默不是失败也不是成功
+        clarify_follow_row = (
+            await session.execute(
+                text(
+                    "WITH seq AS ("
+                    "  SELECT turn_path, created_at, "
+                    "         lead(created_at) OVER (PARTITION BY thread_id ORDER BY created_at) AS next_at, "
+                    "         lead(turn_path) OVER (PARTITION BY thread_id ORDER BY created_at) AS next_path "
+                    f"  FROM session_metrics WHERE business_id = :biz AND created_at >= {month_start}"
+                    ") "
+                    "SELECT "
+                    "COUNT(*) FILTER (WHERE next_path IS NOT NULL AND next_path <> 'clarify' "
+                    "                 AND next_at <= created_at + INTERVAL '30 minutes') AS completed, "
+                    "COUNT(*) FILTER (WHERE next_path = 'clarify' "
+                    "                 AND next_at <= created_at + INTERVAL '30 minutes') AS reclarified "
+                    "FROM seq WHERE turn_path = 'clarify'"
+                ).bindparams(biz=biz)
+            )
+        ).mappings().first()
 
     monthly_limit = int(limit_row["monthly_limit_tokens"]) if limit_row else None
     used_tokens = int(quota_row["tokens"])
@@ -1122,6 +1158,10 @@ async def ai_usage_summary(
     by_path = [{"path": r["path"], "turns": int(r["turns"]), "tokens": int(r["tokens"])} for r in path_rows]
     zero_llm_turns = sum(p["turns"] for p in by_path if p["path"] in ZERO_LLM_TURN_PATHS)
     fast_path_turns = sum(p["turns"] for p in by_path if p["path"] in FAST_PATH_TURN_PATHS)
+    resolved_turns = int(health_row["resolved"])
+    clarify_completed = int(clarify_follow_row["completed"])
+    clarify_reclarified = int(clarify_follow_row["reclarified"])
+    clarify_followups = clarify_completed + clarify_reclarified
     return {
         "success": True,
         "data": {
@@ -1144,7 +1184,31 @@ async def ai_usage_summary(
                 "totalTokens": int(calls_row["tokens"]),
                 "avgLatencyMs": round(float(calls_row["avg_latency"])),
             },
-            "notes": ["data agent 等图外调用量暂未按租户归因,不在本页口径内(归因修复排期 P1)"],
+            # 多轮任务健康度(P1-2/D6:看板先行,硬闸阈值等 2 周基线)。
+            # Tool 真失败率(tool_errors/调用)待 tool_calls_count 落库列
+            # (随 run_agent 接线小票),v1 用错误轮占比诚实代理并注记
+            "taskHealth": {
+                "totalTurns": total_turns,
+                "resolvedTurns": resolved_turns,
+                "completionRate": round(resolved_turns / total_turns, 4) if total_turns else 0,
+                "clarifyTurns": int(health_row["clarify_turns"]),
+                "clarifyFollowupAccuracy": (
+                    round(clarify_completed / clarify_followups, 4) if clarify_followups else None
+                ),
+                "clarifyFollowupCompleted": clarify_completed,
+                "clarifyFollowupReclarified": clarify_reclarified,
+                "toolErrorTurnRate": (
+                    round(int(health_row["tool_error_turns"]) / total_turns, 4) if total_turns else 0
+                ),
+                "duplicateBypassRate": (
+                    round(int(health_row["duplicate_turns"]) / total_turns, 4) if total_turns else 0
+                ),
+                "avgTokensPerTurn": round(float(health_row["avg_tokens"]), 1) if total_turns else 0,
+            },
+            "notes": [
+                "data agent 等图外调用量暂未按租户归因,不在本页口径内(归因修复排期 P1)",
+                "任务完成率=resolved_auto 占比;Tool 失败率 v1 为错误轮占比(分母列 tool_calls_count 待落库)",
+            ],
         },
     }
 

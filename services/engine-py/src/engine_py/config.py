@@ -132,6 +132,16 @@ class Settings:
         )
     )
 
+    # 任务边界判定器(docs/multi-turn-task-state.md P1-1/D2):boundary 置信度
+    # 低于阈值 → 澄清旁路(fail 方向=澄清,严禁默认重规划——那是病象本身)。
+    # 开关默认开(D2 裁决);误澄清噪音时 AI_BOUNDARY_CLARIFY=0 一键回退。
+    boundary_confidence_threshold: float = field(
+        default_factory=lambda: float(_env("AI_BOUNDARY_CONFIDENCE_THRESHOLD", "0.6"))
+    )
+    boundary_clarify_enabled: bool = field(
+        default_factory=lambda: _env("AI_BOUNDARY_CLARIFY", "1") == "1"
+    )
+
     # L2 商品语义召回(2026-09-11):词元 ILIKE 查空时 bge 余弦补位。默认开;
     # 阈值 0.55 系真 bge-small-zh 实测定标(2026-09-11 实测分布:口语措辞 vs
     # 商品文案的正例落 0.56-0.58、无关品类 0.36-0.45 —— bge-small 的余弦

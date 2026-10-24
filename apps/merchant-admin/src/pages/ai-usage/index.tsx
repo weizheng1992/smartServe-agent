@@ -144,7 +144,7 @@ export default function AiUsagePage() {
     );
   }
 
-  const { quota, turns: turnStats, byDay, byPath, calls: callStats } = summary;
+  const { quota, turns: turnStats, byDay, byPath, calls: callStats, taskHealth } = summary;
 
   return (
     <div className="space-y-4 p-6">
@@ -181,6 +181,39 @@ export default function AiUsagePage() {
           value={fmtPct(turnStats.fastPathRate)}
           sub={`含咨询直答 · 全管线调用 ${fmtInt(callStats.total)} 次 / ${fmtInt(callStats.totalTokens)} tok`}
         />
+      </div>
+
+      {/* 多轮任务健康度(docs/multi-turn-task-state.md §4.4):任务层质量四指标,
+          口径注记见页底 notes;clarifyFollowupAccuracy null = 无澄清后继轮 */}
+      <div>
+        <div className="mb-2 text-sm font-medium text-zinc-700">多轮任务健康度</div>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+          <KpiCard
+            label="任务完成率"
+            value={fmtPct(taskHealth.completionRate)}
+            sub={`resolved_auto ${fmtInt(taskHealth.resolvedTurns)} / ${fmtInt(taskHealth.totalTurns)} 轮`}
+          />
+          <KpiCard
+            label="澄清补全准确率"
+            value={taskHealth.clarifyFollowupAccuracy === null ? '—' : fmtPct(taskHealth.clarifyFollowupAccuracy)}
+            sub={`本月澄清 ${fmtInt(taskHealth.clarifyTurns)} 轮 · 30 分钟内不再澄清即补全`}
+          />
+          <KpiCard
+            label="工具错误轮占比"
+            value={fmtPct(taskHealth.toolErrorTurnRate)}
+            sub="Tool 真失败率待调用数落库列,当前为错误轮代理口径"
+          />
+          <KpiCard
+            label="重复/切换代理"
+            value={fmtPct(taskHealth.duplicateBypassRate)}
+            sub="duplicate_bypass 轮占比 · 切换准确率真值待标注"
+          />
+          <KpiCard
+            label="单轮 Token"
+            value={fmtInt(taskHealth.avgTokensPerTurn)}
+            sub="自然月均值 · 会话级成本见按天趋势"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">

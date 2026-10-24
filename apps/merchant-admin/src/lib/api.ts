@@ -411,6 +411,20 @@ export interface AiUsageSummary {
   byDay: Array<{ day: string; tokens: number; turns: number }>;
   byPath: Array<{ path: string; turns: number; tokens: number }>;
   calls: { total: number; totalTokens: number; avgLatencyMs: number };
+  /** 多轮任务健康度(docs/multi-turn-task-state.md P1-2):全部派生自既有遥测;
+   *  clarifyFollowupAccuracy null = 本月无澄清后继轮(诚实缺省,严禁编 0) */
+  taskHealth: {
+    totalTurns: number;
+    resolvedTurns: number;
+    completionRate: number;
+    clarifyTurns: number;
+    clarifyFollowupAccuracy: number | null;
+    clarifyFollowupCompleted: number;
+    clarifyFollowupReclarified: number;
+    toolErrorTurnRate: number;
+    duplicateBypassRate: number;
+    avgTokensPerTurn: number;
+  };
   notes: string[];
 }
 

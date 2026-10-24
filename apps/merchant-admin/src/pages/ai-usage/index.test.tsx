@@ -43,6 +43,18 @@ const summaryBody = {
       { path: 'semantic_cache', turns: 45, tokens: 23_456 },
     ],
     calls: { total: 300, totalTokens: 90_000, avgLatencyMs: 1200 },
+    taskHealth: {
+      totalTurns: 210,
+      resolvedTurns: 189,
+      completionRate: 0.9,
+      clarifyTurns: 12,
+      clarifyFollowupAccuracy: 0.8333,
+      clarifyFollowupCompleted: 10,
+      clarifyFollowupReclarified: 2,
+      toolErrorTurnRate: 0.05,
+      duplicateBypassRate: 0.02,
+      avgTokensPerTurn: 620.5,
+    },
     notes: ['data agent 等图外调用量暂未按租户归因,不在本页口径内(归因修复排期 P1)'],
   },
 };
@@ -113,6 +125,25 @@ describe('AiUsagePage', () => {
     expect(screen.getByText(/本页不展示美元成本/)).toBeInTheDocument();
     expect(screen.getByLabelText('服务额度(积分)')).toBeInTheDocument();
     expect(summaryMock).toHaveBeenCalled();
+  });
+
+  it('多轮任务健康度四指标卡:数值如实呈现,无后继澄清诚实缺省 —', async () => {
+    render(<AiUsagePage />);
+    await waitFor(() => expect(screen.getByText('任务完成率')).toBeInTheDocument());
+    expect(screen.getByText('90.0%')).toBeInTheDocument(); // completionRate
+    expect(screen.getByText('resolved_auto 189 / 210 轮')).toBeInTheDocument();
+    expect(screen.getByText('83.3%')).toBeInTheDocument(); // clarifyFollowupAccuracy
+    expect(screen.getByText(/本月澄清 12 轮/)).toBeInTheDocument();
+    expect(screen.getByText('5.0%')).toBeInTheDocument(); // toolErrorTurnRate
+    expect(screen.getByText('2.0%')).toBeInTheDocument(); // duplicateBypassRate
+    expect(screen.getByText('620.5')).toBeInTheDocument(); // avgTokensPerTurn 原样呈现
+    // null 口径诚实缺省(P1-2):改桩后渲染 — 而非编造 0%
+    summaryMock.mockResolvedValue({
+      ...summaryBody,
+      data: { ...summaryBody.data, taskHealth: { ...summaryBody.data.taskHealth, clarifyFollowupAccuracy: null } },
+    });
+    render(<AiUsagePage />);
+    await waitFor(() => expect(screen.getAllByText('—').length).toBeGreaterThan(0));
   });
 
   it('点行下钻调用明细:按 jobId 精确取数并渲染节点行', async () => {

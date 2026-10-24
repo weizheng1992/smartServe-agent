@@ -31,11 +31,32 @@ class IntentNode(BaseModel):
     condition: IntentCondition | None = Field(default=None)
 
 
+class BoundaryDecision(BaseModel):
+    """任务边界判定(docs/multi-turn-task-state.md P1-1/D2):与意图分类同源
+    (新输入 vs 近期对话),modify=延续当前任务(修正/追加/继续),new=目标与
+    实体都已改变。低置信是合法输出 —— 下游 fail 方向是澄清而非猜测。"""
+
+    decision: Literal["modify", "new"] = Field(
+        default="new",
+        description="modify = continues the ongoing task (correction / addition / follow-up); new = goal and entities both changed",
+    )
+    confidence: float = Field(default=0.0, ge=0, le=1, description="Judgment confidence; give a LOW score when genuinely unsure")
+    rationale: str = Field(default="", description="One short sentence (Chinese) explaining the judgment")
+    entitiesChanged: list[str] = Field(
+        default_factory=list,
+        description="snake_case entity keys that changed this turn, e.g. ['date', 'city']; empty if none",
+    )
+
+
 class StructuredTriageOutput(BaseModel):
     executionMode: Literal["parallel", "sequential", "conditional"] = Field(default="parallel")
     intents: list[IntentNode] = Field(min_length=1, description="List of classified intent nodes")
     clarificationMessage: str | None = Field(default=None)
     isOutOfScope: bool = Field(default=False)
+    boundary: BoundaryDecision | None = Field(
+        default=None,
+        description="Task boundary judgment; omit entirely when no prior task exists in context",
+    )
 
 
 # ── LLM 输出自修复(纯函数,供 classify 与回归测试复用)─────────────────
@@ -50,6 +71,42 @@ _EXECUTION_MODE_ALIASES = {
     "auto": "parallel",
     "none": "parallel",
 }
+
+# boundary.decision 漂移别名(2026-10-24 P1-1):模型偶发输出同义词,归一到
+# Literal 闭集;归一后仍非法则整体丢弃 boundary —— 边界字段坏了绝不能连坐
+# intents(意图才是主产出)。
+_BOUNDARY_DECISION_ALIASES = {
+    "continue": "modify",
+    "continues": "modify",
+    "same": "modify",
+    "update": "modify",
+    "modify_current": "modify",
+    "switch": "new",
+    "change": "new",
+    "new_task": "new",
+    "switch_task": "new",
+}
+
+
+def _sanitize_boundary(data: dict[str, Any]) -> None:
+    """boundary 字段漂移防御(原地):decision 别名归一、confidence 夹取;
+    修不好就整体摘除(None = 判定器本轮弃权,下游按 pass 处理)。"""
+    boundary = data.get("boundary")
+    if boundary is None:
+        return
+    if not isinstance(boundary, dict):
+        data.pop("boundary", None)
+        return
+    decision = str(boundary.get("decision") or "").strip().lower()
+    decision = _BOUNDARY_DECISION_ALIASES.get(decision, decision)
+    if decision not in ("modify", "new"):
+        data.pop("boundary", None)
+        return
+    boundary["decision"] = decision
+    try:
+        boundary["confidence"] = min(1.0, max(0.0, float(boundary.get("confidence") or 0.0)))
+    except (TypeError, ValueError):
+        boundary["confidence"] = 0.0
 
 
 def strip_code_fences(text: str) -> str:
@@ -69,6 +126,8 @@ def coerce_structured_payload(data: dict[str, Any]) -> dict[str, Any]:
     if mode not in _VALID_EXECUTION_MODES:
         mode = _EXECUTION_MODE_ALIASES.get(mode, "parallel")
     data["executionMode"] = mode
+
+    _sanitize_boundary(data)
 
     intents = data.get("intents")
     if not (isinstance(intents, list) and intents):
@@ -112,7 +171,8 @@ Instructions:
 - Extract relevant slots/entities (e.g., orderId, newAddress, productName) if mentioned.
 - If an order ID (e.g. "ORD-98712") is found, populate entities.orderId.
 - If a required slot is missing (e.g., modify address without newAddress), list it in missingSlots and provide a friendly clarificationMessage.
-- If the query contains "if...then..." logic (e.g., "如果没发货就改地址，发货了就查物流"), set executionMode="conditional" and populate the condition object."""
+- If the query contains "if...then..." logic (e.g., "如果没发货就改地址，发货了就查物流"), set executionMode="conditional" and populate the condition object.
+- Boundary judgment (task boundary): if the Recent Conversation Context contains an ongoing task (e.g. a trip being arranged, an ongoing refund, items being added to a cart), judge whether the latest input CONTINUES that task — decision="modify" for corrections / parameter changes / additions / follow-ups about the same goal and entities (e.g. "不是周三,改周四", "再帮我加一个酒店") — or starts a NEW task — decision="new" when the goal and the entities have both changed (e.g. a new unrelated question). Provide confidence (give a LOW score below 0.6 when genuinely unsure) and a one-sentence rationale, and list changed entity keys in entitiesChanged. If there is NO ongoing task in the context, omit the boundary field entirely."""
 
 
 async def classify(

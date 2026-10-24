@@ -152,6 +152,40 @@ def build_confidence_clarify_message(parsed: list[dict]) -> str:
     )
 
 
+# 任务边界低置信澄清文案(docs/multi-turn-task-state.md P1-1/D2)。fail 方向
+# 纪律:边界模糊宁可多问一句,严禁默认重规划(那正是病象);话术不引用具体
+# 任务名 —— 判定器本身都拿不准时,复述任务名只会放大错误。
+BOUNDARY_CLARIFY_MESSAGE = (
+    "想跟您确认一下：您是想**继续之前正在处理的事情**（改个细节、补充要求都可以），"
+    "还是有**新的需求**？麻烦说具体一点，我马上接着办～"
+)
+
+
+def resolve_boundary_action(
+    boundary: dict | None,
+    *,
+    history_turns: int,
+    enabled: bool,
+    threshold: float,
+) -> str:
+    """边界判定消费决策(纯谓词,测试缝):低置信 → "clarify",其余 "pass"。
+
+    - 判定器弃权(无 boundary 字段)→ pass;
+    - 无前文(history_turns<=0)= 无前任务,boundary 无从谈起 → pass(防御:
+      prompt 已要求无前任务时省略,模型违约也不澄清首问);
+    - 开关关闭(AI_BOUNDARY_CLARIFY=0)→ pass(误澄清噪音一键回退)。
+    """
+    if not enabled or not isinstance(boundary, dict):
+        return "pass"
+    if history_turns <= 0:
+        return "pass"
+    try:
+        confidence = float(boundary.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        return "pass"
+    return "clarify" if confidence < threshold else "pass"
+
+
 def _should_clarify_first(parsed: list[dict]) -> bool:
     """纯谓词(测试缝):结构化层缺槽反问收窄 —— 仅 primary 缺槽且无「非咨询
     族且槽位齐备」的营救意图时才反问。secondary 缺槽不陪葬(A1:建地址+下单
@@ -531,11 +565,12 @@ def _triage_terminal_result(
     role: str | None = None,
     state: dict | None = None,
     with_order_context: bool = False,
+    boundary: dict | None = None,
 ) -> dict:
     """成功路径(非 bypass)终局返回形状收口(工单03 2026-09-11):此前 9 处
     逐字重复。role 显式覆盖咨询回落路径的 chitchat 字面量;with_order_context
     逐站点保持键存在性 —— 是否透传单号上下文是各判定的语义差异,不在收口内
-    拉齐。"""
+    拉齐。boundary(P1-1)仅在判定器产出时入态,planner 据此保留/重规划。"""
     result = {
         "intents": intents,
         "active_domain_role": role if role is not None else resolve_domain_role(intents, input_text),
@@ -544,6 +579,8 @@ def _triage_terminal_result(
         "global_transitions_count": -1,
         "tool_errors_count": -1,
     }
+    if boundary is not None:
+        result["boundary"] = boundary
     if with_order_context and state is not None:
         result["order_context"] = state.get("order_context")
     return result
