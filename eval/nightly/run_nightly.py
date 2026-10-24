@@ -148,7 +148,98 @@ async def _create_nightly_order(client, customer_id: str) -> str:
     return str((r.json() or {}).get("orderId") or "")
 
 
-async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set[str], budget: dict) -> dict:
+async def _thread_messages(client, thread_id: str, customer_id: str) -> list[dict]:
+    """线程时间线(store 面,属主随行);失败诚实空列表。"""
+    try:
+        r = await client.get("/api/store/chat/messages",
+                             params={"threadId": thread_id, "businessId": TENANT, "userId": customer_id})
+        if r.status_code != 200:
+            return []
+        return list((r.json() or {}).get("messages") or [])
+    except Exception:
+        return []
+
+
+async def _order_status(client, customer_id: str, order_id: str) -> str:
+    """商户真单当前状态(τ 式终态判分的真值源;查无返回空串)。"""
+    try:
+        r = await client.get("/api/store/orders", params={"customerId": customer_id, "limit": 50})
+        for o in (r.json() or {}).get("orders") or []:
+            if str(o.get("orderId") or "") == order_id:
+                return str(o.get("status") or "")
+    except Exception:
+        pass
+    return ""
+
+
+async def _resolve_approval_flow(client, staff_token: str, approval_id: str, thread_id: str,
+                                 customer_id: str, order_id: str, flow) -> dict:
+    """HITL 三段剧本(eval-gap-2026-10 02):决议 → 等恢复回合 → 终态真值断言。
+
+    τ-bench 律:判 DB/订单/审批单终态,不判文本相似 —— 恢复回复只做词干锚点
+    与谎报禁词双保险,资金语义以 merchant_orders.status 为准。
+    """
+    out: dict = {"action": flow.action, "approval_id": approval_id, "fails": []}
+    msg_ids_before = {str(m.get("id") or "") for m in await _thread_messages(client, thread_id, customer_id)}
+    status_before = await _order_status(client, customer_id, order_id)
+    out["order_status_before"] = status_before
+
+    body = {"approvalId": approval_id, "action": flow.action}
+    if flow.action == "reject":
+        body["rejectionReason"] = "夜评驳回分支:订单信息与申请不符"
+    r = await _retry_on_connect(
+        client.post, "/api/approvals", json=body,
+        headers={"Authorization": f"Bearer {staff_token}"} if staff_token else {},
+        what=f"approval_{flow.action}",
+    )
+    if r.status_code != 200:
+        out["fails"].append(f"审批决议 HTTP {r.status_code}: {str(r.text)[:180]}")
+        return out
+
+    # 恢复回合:Fast-Path job_resume_${approvalId} → run_agent → finish 落 assistant 行
+    deadline = time.monotonic() + flow.poll_timeout
+    recovery = ""
+    while time.monotonic() < deadline:
+        msgs = await _thread_messages(client, thread_id, customer_id)
+        new_rows = [m for m in msgs
+                    if str(m.get("id") or "") not in msg_ids_before and m.get("role") == "assistant"]
+        if new_rows:
+            recovery = str(new_rows[-1].get("content") or "")
+            break
+        await asyncio.sleep(3)
+    out["recovery_reply"] = recovery[:400]
+    if not recovery:
+        out["fails"].append(f"恢复回复 {flow.poll_timeout:.0f}s 未落地(决议后 Fast-Path 恢复链断裂?)")
+        return out
+    if flow.reply_contains_any and not any(k.lower() in recovery.lower() for k in flow.reply_contains_any):
+        out["fails"].append(f"恢复回复缺锚点 {flow.reply_contains_any}")
+    for kw in flow.reply_not_contains:
+        if kw.lower() in recovery.lower():
+            out["fails"].append(f"恢复回复出现禁词 {kw}")
+
+    # 终态真值①:审批单脱离 waiting
+    if approval_id in await approvals_waiting(client, thread_id):
+        out["fails"].append("审批单决议后仍挂在 waiting(状态未翻转)")
+
+    # 终态真值②:商户订单状态(给落账一个短暂结算窗,恢复回复已落但退款执行
+    # 与 finish 落库同批,通常已可见)
+    status_after = await _order_status(client, customer_id, order_id)
+    if flow.order_must_stay:
+        if status_after != status_before:
+            out["fails"].append(f"reject 后订单状态漂移 {status_before}→{status_after}(应保持不动)")
+    else:
+        accepts = flow.order_terminal_any or (flow.order_terminal,)
+        if status_after not in accepts:
+            await asyncio.sleep(3)  # 结算窗重读一次再判
+            status_after = await _order_status(client, customer_id, order_id)
+        if status_after not in accepts:
+            out["fails"].append(f"approve 终态 {status_after or '(查无)'} 不在 {accepts}(退款未落账?)")
+    out["order_status_after"] = status_after
+    return out
+
+
+async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set[str], budget: dict,
+                            staff_token: str = "") -> dict:
     """跑一个客服场景(多轮连续 threadId);返回逐轮结果与裁决。"""
     thread_id = f"nightly_{case.case_id}_{int(time.time())}"
     # 顾客 id 带每夜唯一后缀:引擎侧购物车按 userId 挂账(Redis),case_id 恒定
@@ -246,6 +337,23 @@ async def run_customer_case(client, case, seeded_ids: set[str], created_ids: set
                 pass
             if oid not in created_ids and oid not in turn.message:
                 fails.append(f"编造单号 {oid}")
+        # HITL 审批恢复链三段剧本(eval-gap-2026-10 02):决议 → 恢复 → 终态
+        if turn.approval is not None:
+            if not new:
+                fails.append("审批流缺前置:本轮无新审批单可决议")
+            elif not staff_token:
+                fails.append("审批流缺员工 JWT(STAFF 登录失败?),三段剧本无法执行")
+            else:
+                flow_row = await _resolve_approval_flow(
+                    client, staff_token, sorted(new)[0], thread_id, customer_id, order_id, turn.approval,
+                )
+                row["approval_flow"] = flow_row
+                if turn.approval.advisory:
+                    # 已知缺陷观察位:断言结果进台账(advisory_notes 供晨审),不判红
+                    row.setdefault("advisory_notes", []).extend(
+                        f"审批流[{turn.approval.action}]: {f}" for f in flow_row.get("fails") or [])
+                else:
+                    fails.extend(flow_row.get("fails") or [])
         # 转人工排队:线程真源须翻 human_takeover(engine takeover.mark_takeover_requested)
         if turn.expect_takeover:
             # 属主闸随行(2026-10-17 窃听族收口):显式 threadId 的有主线程必须
@@ -507,6 +615,300 @@ async def run_sse_bridge(client) -> dict:
             "ok": got["message"], "fails": [] if got["message"] else ["35s 内未收到顾客侧 message 帧"]}
 
 
+# ---------------- 流可靠性评测层(eval-gap-2026-10 03) ----------------
+# pytest 契约(test_realtime_contract / test_interruption / test_settle_turn_interrupted /
+# test_chat_cancel_route)钉的是密封环境下的行为不变量;此处对**运行中的 4000
+# 网关**实弹同一批语义并产出可量化指标(补投保真度 / 打断收口延迟),每晚入
+# report.html 与 results.jsonl —— S1/S2 主线的可量化证据层。
+
+
+def _sse_split(buf: str) -> tuple[list[dict], str]:
+    """SSE 增量切帧:按空行边界切,解析 id:/event:/data: 行;余量留待下块。"""
+    frames: list[dict] = []
+    while "\n\n" in buf:
+        raw, buf = buf.split("\n\n", 1)
+        frame: dict = {}
+        data_lines: list[str] = []
+        for line in raw.split("\n"):
+            if line.startswith("id:"):
+                frame["id"] = line[3:].strip()
+            elif line.startswith("event:"):
+                frame["event"] = line[6:].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+        if data_lines:
+            frame["data"] = "\n".join(data_lines)
+        if frame:
+            frames.append(frame)
+    return frames, buf
+
+
+def _message_frames(frames: list[dict]) -> list[dict]:
+    out = []
+    for f in frames:
+        if f.get("event") != "message":
+            continue
+        try:
+            payload = json.loads(f.get("data") or "{}")
+        except Exception:
+            payload = {}
+        out.append({"frame_id": str(f.get("id") or ""), "msg_id": str(payload.get("id") or ""),
+                    "role": str(payload.get("role") or ""), "content": str(payload.get("content") or "")})
+    return out
+
+
+async def _collect_store_stream(client, params: dict, *, collect_s: float | None = None,
+                                stop_on_message: bool = False, timeout_s: float = 60) -> list[dict]:
+    """订阅商店流收集帧:collect_s 到点即断;stop_on_message=首帧 message 即断
+    (在途断连语义)。退出 async with 即断开连接 —— 这正是被测行为。"""
+    frames: list[dict] = []
+    buf = ""
+    try:
+        async with client.stream("GET", "/api/store/chat/stream", params=params, timeout=timeout_s) as resp:
+            # 硬墙钟:15s 心跳会不断重置 httpx 读超时,stop_on_message 若无帧
+            # 到达将无限续命 —— 收集器必须自设墙钟兜底(2026-10-24 实弹挂死)
+            hard_end = time.monotonic() + (collect_s if collect_s else 90)
+            async for chunk in resp.aiter_text():
+                buf += chunk
+                fresh, buf = _sse_split(buf)
+                frames.extend(fresh)
+                if stop_on_message and any(f.get("event") == "message" for f in fresh):
+                    break
+                if time.monotonic() >= hard_end:
+                    break
+    except Exception:
+        pass  # 断连/超时即收集终止,断言侧诚实判
+    return frames
+
+
+def _frame_id(ts: str) -> int:
+    """镜像网关 frame_id_from_timestamp:ISO → epoch ms(naive 按 UTC,与两套钟
+    收口后的网关产出一致)。补投契约的真值源是 DB 时间线,断言以同一比较器
+    展开期望集。"""
+    import datetime as _dt
+
+    try:
+        dt = _dt.datetime.fromisoformat(str(ts or "").replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_dt.UTC)
+        return int(dt.timestamp() * 1000)
+    except Exception:
+        return 0
+
+
+async def run_stream_replay(client) -> dict:
+    """S1 断线补投不重不漏(ADR-0013① L1 实弹):**期望集锚定 DB 时间线**
+    (补投契约的真值源 —— live pubsub 帧面与时间线回放面天然不同源,拿 live
+    帧集当期望会自造假红):镜像网关比较器(frame_id > 水位)算期望消息集,
+    断言补投消息 id 多重集精确等值 + 内容一致;水位=最新时零补投;在途断连
+    后补齐该轮剩余帧。段①③零 LLM(问候直答旁路)。"""
+    user = f"{CUST_PREFIX}_s1"
+    thread_id = f"nightly_s1replay_{int(time.time())}"
+    base = {"threadId": thread_id, "businessId": TENANT, "userId": user}
+    fails: list[str] = []
+    metrics: dict = {}
+
+    async def say(msg: str):
+        return await _retry_on_connect(client.post, "/api/store/chat",
+                                       json={"message": msg, "businessId": TENANT, "userId": user,
+                                             "threadId": thread_id},
+                                       timeout=TURN_TIMEOUT, what="s1_say")
+
+    async def timeline() -> list[dict]:
+        return await _thread_messages(client, thread_id, user)
+
+    def expected_after(watermark: int) -> list[dict]:
+        return [m for m in timeline_cache if _frame_id(str(m.get("timestamp") or "")) > watermark]
+
+    await client.post("/api/chat/threads", json={"threadId": thread_id, "businessId": TENANT, "userId": user}, timeout=30)
+    timeline_cache: list[dict] = []
+
+    # 段①:live 收两个零 LLM 回合的帧 —— 唯一用途是取「真实观测到的水位值」
+    listener = asyncio.create_task(_collect_store_stream(client, base, collect_s=14))
+    await asyncio.sleep(1.5)
+    await say("你好")
+    await say("在吗")
+    live_msgs = _message_frames(await listener)
+    metrics["live_message_frames"] = len(live_msgs)
+    timeline_cache = await timeline()
+    metrics["timeline_rows"] = len(timeline_cache)
+    if len(timeline_cache) < 3 or not live_msgs:
+        fails.append(f"基线不足(时间线 {len(timeline_cache)} 行/live {len(live_msgs)} 帧):S1 断言无法展开")
+    else:
+        from collections import Counter as _Counter
+
+        # 段②:水位=首条业务消息(欢迎行之后),补投须精确补齐其余时间线消息
+        anchor_ts = str(timeline_cache[0].get("timestamp") or "")
+        watermark = _frame_id(anchor_ts)
+        expect = expected_after(watermark)
+        got = _message_frames(await _collect_store_stream(client, {**base, "lastEventId": watermark}, collect_s=6))
+        metrics["gap_replayed"] = len(got)
+        if _Counter(m["msg_id"] for m in got) != _Counter(str(m.get("id") or "") for m in expect):
+            fails.append(f"水位补投不重不漏被击穿:期望 {[m.get('id') for m in expect]} 实得 {[m['msg_id'] for m in got]}")
+        else:
+            expect_contents = {str(m.get("content") or "")[:60] for m in expect}
+            if not all(m["content"][:60] in expect_contents for m in got):
+                fails.append("补投帧内容与时间线不一致(补错帧)")
+        # 段③:水位=最新一条,零补投
+        latest_wm = _frame_id(str(timeline_cache[-1].get("timestamp") or ""))
+        got2 = _message_frames(await _collect_store_stream(client, {**base, "lastEventId": latest_wm}, collect_s=5))
+        metrics["latest_watermark_replayed"] = len(got2)
+        if got2:
+            fails.append(f"水位=最新仍补投 {[m['msg_id'] for m in got2]}(重复补投)")
+
+    # 段④:在途断连 —— live 收到首帧即断(真实断线),该轮剩余时间线消息经重连补齐
+    listener2 = asyncio.create_task(_collect_store_stream(client, base, stop_on_message=True, timeout_s=45))
+    await asyncio.sleep(1.5)
+    post = asyncio.create_task(say("给我详细介绍一下你们店的冲锋衣都有哪些款式和特点"))
+    early_msgs = _message_frames(await listener2)
+    r = await post
+    output = str((r.json() or {}).get("output") or "") if r.status_code == 200 else ""
+    timeline_cache = await timeline()
+    if not early_msgs:
+        # 无帧可能是回合慢/未发帧(SSE 桥存活由 p02 专册钉),段④降级为记录不断言
+        metrics["midturn_note"] = "90s 硬墙内未见 message 帧,段④未展开(LLM 慢/帧未发)"
+    else:
+        wm = int(early_msgs[-1]["frame_id"] or 0)
+        expect = expected_after(wm)
+        got3 = _message_frames(await _collect_store_stream(client, {**base, "lastEventId": wm}, collect_s=8))
+        metrics["midturn_replayed"] = len(got3)
+        metrics["midturn_expected"] = len(expect)
+        from collections import Counter as _Counter
+
+        if _Counter(m["msg_id"] for m in got3) != _Counter(str(m.get("id") or "") for m in expect):
+            fails.append(f"在途断连补投不等值:期望 {[m.get('id') for m in expect]} 实得 {[m['msg_id'] for m in got3]}(ADR-0013①)")
+        elif got3 and output and not any((m["content"][:30] and m["content"][:30] in output)
+                                         or (output[:30] and output[:30] in m["content"]) for m in got3):
+            fails.append("在途断连补投帧内容与该轮回复不一致(补错帧)")
+    await client.request("DELETE", "/api/chat/threads", params={"threadId": thread_id, "userId": user})
+    return {"kind": "stream", "case_id": "s01_断线补投不重不漏", "dimension": "流可靠性·S1",
+            "ok": not fails, "fails": fails, "metrics": metrics}
+
+
+async def run_stream_interrupt(client) -> dict:
+    """S2 打断终态(S2a/S2b/S2c 全链实弹):在途 LLM 回合取消 → result 帧
+    interrupted:true 收口 + 该轮零 assistant 行 + 后续追问会话不脏。
+    404/409=回合在取消前已完结(未截住):诚实记 not_caught 不判红(截住率是
+    指标不是断言);404/409 语义本身由 pytest 契约钉死,此处不重复断言。"""
+    fails: list[str] = []
+    metrics: dict = {"caught": False}
+    email, password = "nightly.s2@eval.local", STAFF_PASSWORD
+    try:
+        await client.post("/api/auth/register", json={"email": email, "password": password,
+                                                      "displayName": "夜评S2打断"})
+    except Exception:
+        pass  # 非首夜已注册,登录即可
+    lr = await _retry_on_connect(client.post, "/api/auth/login",
+                                 json={"email": email, "password": password}, what="s2_login")
+    data = (lr.json().get("data") or {}) if lr.status_code == 200 else {}
+    token, uid = str(data.get("token") or ""), str((data.get("user") or {}).get("id") or "")
+    if not token or not uid:
+        return {"kind": "stream", "case_id": "s02_打断终态", "dimension": "流可靠性·S2",
+                "ok": False, "fails": [f"S2 测试用户登录失败 HTTP {lr.status_code}"], "metrics": metrics}
+    headers = {"Authorization": f"Bearer {token}"}
+    thread_id = f"nightly_s2_{int(time.time())}"
+    await client.post("/api/chat/threads", json={"threadId": thread_id, "businessId": TENANT, "userId": uid},
+                      headers=headers, timeout=30)
+
+    async def _chat_messages() -> list[dict]:
+        try:
+            rm = await client.get("/api/chat/messages", params={"threadId": thread_id, "businessId": TENANT})
+            return list((rm.json() or {}).get("messages") or [])
+        except Exception:
+            return []
+
+    async def attempt(question: str) -> tuple[int, dict]:
+        """受理→订阅作业流→2.5s 后取消→等 result 帧;返回 (取消HTTP, 观测)。"""
+        msgs_before = {str(m.get("id") or "") for m in await _chat_messages()}
+        dr = await client.post("/api/chat", json={"message": question, "threadId": thread_id,
+                                                  "userId": uid, "businessId": TENANT},
+                               headers=headers, timeout=30)
+        if dr.status_code != 200:
+            return dr.status_code, {}
+        job_id = str((dr.json() or {}).get("jobId") or "")
+        if not job_id:
+            return -1, {}
+
+        async def read_result():
+            frames, buf = [], ""
+            try:
+                async with client.stream("GET", f"/api/chat/{job_id}/stream", timeout=120) as resp:
+                    async for chunk in resp.aiter_text():
+                        buf += chunk
+                        fresh, buf = _sse_split(buf)
+                        frames.extend(fresh)
+                        if any(f.get("event") == "result" for f in fresh):
+                            return frames
+            except Exception:
+                pass
+            return frames
+
+        reader = asyncio.create_task(read_result())
+        await asyncio.sleep(2.5)
+        t_cancel = time.monotonic()
+        cr = await client.post(f"/api/chat/{job_id}/cancel", params={"userId": uid, "businessId": TENANT},
+                               headers=headers, timeout=15)
+        if cr.status_code != 200:
+            reader.cancel()
+            return cr.status_code, {}
+        frames = await asyncio.wait_for(reader, timeout=120)
+        result = next((json.loads(f["data"]) for f in frames
+                       if f.get("event") == "result" and f.get("data")), {})
+        new_asst = [m for m in await _chat_messages()
+                    if str(m.get("id") or "") not in msgs_before and m.get("role") == "assistant"
+                    and not str(m.get("id") or "").startswith("welcome_")]
+        return 200, {"result": result, "settle_s": round(time.monotonic() - t_cancel, 1),
+                     "job_id": job_id, "new_asst_rows": len(new_asst)}
+
+    question = "请非常详细地介绍冬季户外装备的选择,冲锋衣、背包、水壶、登山鞋每一类都展开讲,越详细越好"
+    status, info = await attempt(question)
+    if status in (404, 409):  # 未截住:换更重的问句重试一次
+        status, info = await attempt(question + ",并给出搭配建议与保养方法")
+    metrics["cancel_http"] = status
+    if status in (404, 409):
+        metrics["not_caught"] = "回合在取消前已完结(404/409);截住率记录在案,不判红"
+        await client.request("DELETE", "/api/chat/threads", params={"threadId": thread_id, "userId": uid})
+        return {"kind": "stream", "case_id": "s02_打断终态", "dimension": "流可靠性·S2",
+                "ok": True, "fails": [], "metrics": metrics, "advisory": True}
+    if status != 200 or not info:
+        fails.append(f"打断链路异常:受理/取消 HTTP {status}")
+    else:
+        metrics["caught"] = True
+        metrics["settle_s"] = info.get("settle_s")
+        result = info.get("result") or {}
+        metrics["interrupted"] = bool(result.get("interrupted"))
+        if not result:
+            fails.append("取消受理后 120s 无 result 帧收口(S2c 违例:打断回合流挂死)")
+        elif not result.get("interrupted"):
+            fails.append("result 帧 interrupted≠true(打断终态未按 S2c 契约收口)")
+        metrics["new_asst_rows"] = info.get("new_asst_rows")
+        if info.get("new_asst_rows"):
+            fails.append(f"打断回合仍落 {info['new_asst_rows']} 条 assistant 行(期望零)")
+        # 会话不脏:打断后追问照常完成(问候零 LLM 旁路,快速可判)
+        ok_follow = False
+        try:
+            fr = await client.post("/api/chat", json={"message": "在吗", "threadId": thread_id,
+                                                      "userId": uid, "businessId": TENANT},
+                                   headers=headers, timeout=30)
+            if fr.status_code == 200:
+                deadline = time.monotonic() + 60
+                while time.monotonic() < deadline:
+                    rows = await _chat_messages()
+                    if any(m.get("role") == "assistant" and not str(m.get("id") or "").startswith("welcome_")
+                           for m in rows):
+                        ok_follow = True
+                        break
+                    await asyncio.sleep(3)
+        except Exception:
+            pass
+        metrics["followup_ok"] = ok_follow
+        if not ok_follow:
+            fails.append("打断后追问 60s 未获回复(会话脏)")
+    await client.request("DELETE", "/api/chat/threads", params={"threadId": thread_id, "userId": uid})
+    return {"kind": "stream", "case_id": "s02_打断终态", "dimension": "流可靠性·S2",
+            "ok": not fails, "fails": fails, "metrics": metrics}
+
+
 async def cleanup() -> dict:
     """NIGHTLY_ 前缀数据回收:订单/行项目删除 + 库存回补 + 演示客户不触碰。"""
     from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
@@ -690,13 +1092,25 @@ async def main() -> int:
             budget["image_map"] = {"@UPLOADS_FIRST_PNG": first_png}
 
         only = [x for x in os.environ.get("NIGHTLY_CASES", "").split(",") if x.strip()]
+
+        # HITL 三段剧本(eval-gap-2026-10 02)需员工 JWT:顾客循环之前预登老板
+        # (finance_owner 兜底持 live_desk:approve);后续员工批量登录复用同一
+        # token,免撞 auth_login 10/min 限流
+        staff_token = ""
+        try:
+            lr = await client.post("/api/auth/login", json={"email": STAFF_EMAIL, "password": STAFF_PASSWORD})
+            staff_token = str((lr.json().get("data") or {}).get("token") or "")
+        except Exception:
+            staff_token = ""
+        tokens: dict[str, str] = {STAFF_EMAIL: staff_token} if staff_token else {}
+
         for case in CUSTOMER_CASES:
             if only and not any(case.case_id.startswith(x) for x in only):
                 continue
             if os.environ.get("NIGHTLY_SMOKE") and case.case_id not in ("c01_导购_冲锋衣", "c15_幽灵单号_诚实查无"):
                 continue
             await _run_contained(results, run_customer_case, client, case, seeded_ids, created_ids, budget,
-                                 case_id=case.case_id)
+                                 staff_token, case_id=case.case_id)
             res = results[-1]
             print(("[PASS] " if res["ok"] else "[FAIL] ") + res["case_id"] + ("" if res["ok"] else "  ← " + "; ".join(res["fails"])))
 
@@ -705,9 +1119,8 @@ async def main() -> int:
         await _run_contained(results, run_isolation_case, client,
                              case_id="c23_会话隔离", kind="perf", dimension="多场景·会话")
 
-        # Data Agent + 菜单矩阵:按需登录各角色(token 缓存)
-        needed_staff = {c.staff_email for c in DATA_CASES} | {c.staff_email for c in MENU_CASES}
-        tokens: dict[str, str] = {}
+        # Data Agent + 菜单矩阵:按需登录各角色(token 缓存;老板已在顾客段预登)
+        needed_staff = ({c.staff_email for c in DATA_CASES} | {c.staff_email for c in MENU_CASES}) - set(tokens)
         for email in sorted(needed_staff):
             try:
                 lr = await client.post("/api/auth/login", json={"email": email, "password": STAFF_PASSWORD})
@@ -767,7 +1180,19 @@ async def main() -> int:
                                  case_id="p01_并发5路", kind="perf", dimension="优化·并发")
             await _run_contained(results, run_sse_bridge, client,
                                  case_id="p02_SSE桥存活", kind="perf", dimension="优化·实时")
-        for r in [x for x in results if x.get("kind") == "perf"]:
+
+        # 流可靠性评测层(eval-gap-2026-10 03):S1 断线补投 + S2 打断终态,
+        # 对运行中的网关实弹并产出量化指标;NIGHTLY_CASES 点名 s 前缀可定向跑
+        stream_only = [x for x in only if x.startswith("s")]
+        if os.environ.get("NIGHTLY_SMOKE") or (only and not stream_only):
+            results.append({"kind": "stream", "case_id": "stream_skipped", "dimension": "流可靠性",
+                            "ok": True, "skipped": True, "fails": []})
+        else:
+            await _run_contained(results, run_stream_replay, client,
+                                 case_id="s01_断线补投不重不漏", kind="stream", dimension="流可靠性·S1")
+            await _run_contained(results, run_stream_interrupt, client,
+                                 case_id="s02_打断终态", kind="stream", dimension="流可靠性·S2")
+        for r in [x for x in results if x.get("kind") in ("perf", "stream")]:
             print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
     # 失败喂飞轮(客服侧;坏例池静默降级,不阻断)

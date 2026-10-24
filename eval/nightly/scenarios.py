@@ -26,6 +26,28 @@ SEED_ORDER_IDS = ("9081", "9083", "9099")  # 冲锋衣 PAID / 咖啡套装 SHIPP
 
 
 @dataclass
+class ApprovalFlow:
+    """HITL 审批恢复链终态评测(eval-gap-2026-10 02,τ 式终态判分)。
+
+    挂起观察(expect_new_approval)之后由跑批器执行三段剧本:决议(approve/reject
+    经网关 API + 员工 JWT)→ 等恢复回合落库(Fast-Path job_resume)→ 断言**终态
+    真值**(审批单脱离 waiting / 商户订单状态 / 恢复回复锚点),不判文本相似。
+    """
+
+    action: str = "approve"                      # approve | reject
+    reply_contains_any: tuple[str, ...] = ()     # 恢复回复词干锚点
+    reply_not_contains: tuple[str, ...] = ()     # 恢复回复禁词(谎报类)
+    order_terminal: str = "REFUNDED"             # 期望的商户真单终态
+    order_terminal_any: tuple[str, ...] = ()     # 终态等价类(备选集,二选一)
+    order_must_stay: bool = False                # reject 律:订单状态必须保持决议前
+    poll_timeout: float = 150.0                  # 恢复回合落库等待上限(秒)
+    # 已知引擎缺陷观察位(17 号票:reject 恢复重挂死环+谎报文案+999999.99 金额
+    # 接地板):断言照跑照记录,但不判红夜评 —— 已知缺陷不该每晚假红,修复落地
+    # 后翻 False 收严
+    advisory: bool = False
+
+
+@dataclass
 class Turn:
     message: str
     contains_any: tuple[str, ...] = ()
@@ -36,6 +58,7 @@ class Turn:
     expect_http: int | None = None      # 断言 HTTP 状态(空消息 400 等传输层契约)
     image_urls: list[str] = field(default_factory=list)  # 多模态;"@UPLOADS_FIRST_PNG" 运行时解析
     expect_takeover: bool = False       # 本轮后线程须转 human_takeover(转人工排队)
+    approval: ApprovalFlow | None = None  # HITL 三段剧本:决议→恢复→终态断言
 
 
 @dataclass
@@ -248,6 +271,50 @@ CUSTOMER_CASES: list[CustomerCase] = [
         "c34_价格询答",
         "多场景·售前",
         [Turn("这件硬壳冲锋衣多少钱", contains_any=("¥", "元", "价格"))],
+    ),
+    # ---- HITL 审批恢复链终态(eval-gap-2026-10 02)----
+    # 此前只测「挂起」(expect_new_approval 计数差),恢复链(决议→Fast-Path
+    # job_resume→兑现承诺)零行为评测;e2e chat-approval-flow 有 approve 全链
+    # 原型但不进夜间节奏。此处 τ 式判终态真值:订单状态/审批单脱离 waiting/
+    # 恢复回复锚点,不赌措辞。
+    CustomerCase(
+        "c35_hitl_approve_终态",
+        "HITL",
+        [
+            Turn(
+                "订单 {order_id} 的咖啡套装到货破了,申请退款",
+                expect_new_approval=True,
+                approval=ApprovalFlow(
+                    action="approve",
+                    reply_contains_any=("退款", "退回"),
+                    reply_not_contains=("已到账", "退款已完成并到账"),
+                    order_terminal_any=("REFUNDED", "REFUNDING"),
+                ),
+            )
+        ],
+        setup="order",
+    ),
+    CustomerCase(
+        "c36_hitl_reject_诚实回复",
+        # 2026-10-24 冒烟实证引擎缺陷(17 号票):reject 恢复不 decline 反而重挂
+        # (死环)+「审批通过后将自动执行」谎报 + ¥999999.99 跨库金额接地板。
+        # 断言全量保留照跑(审批脱离 waiting/订单不动/诚实回复锚点),缺陷修复
+        # 落地后把 approval.advisory 翻 False 即收严。
+        "HITL",
+        [
+            Turn(
+                "订单 {order_id} 的咖啡套装到货破了,申请退款",
+                expect_new_approval=True,
+                approval=ApprovalFlow(
+                    action="reject",
+                    reply_contains_any=("无法", "拒绝", "驳回", "未通过", "不能", "未能"),
+                    reply_not_contains=("已为您办理退款", "退款申请已提交", "已发起退款", "自动执行"),
+                    order_must_stay=True,
+                    advisory=True,
+                ),
+            )
+        ],
+        setup="order",
     ),
 ]
 
