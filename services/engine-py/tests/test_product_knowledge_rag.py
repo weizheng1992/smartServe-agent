@@ -54,6 +54,21 @@ class TestBuildProductChunks:
         assert c.category == "product_knowledge"
         assert c.header_path.startswith("商品目录 > 下装裤类 >")
 
+    def test_chunk_carries_dimensions_and_reviews(self):
+        """2026-10-24 目录扩充:颜色×尺码矩阵与口碑聚合进知识块(尺码/值不值
+        问句的事实源);脏形状(_dimensions_line 异常)诚实跳过不炸。"""
+        rows = [dict(
+            _fake_rows()[0],
+            spec_dimensions=[{"name": "颜色", "values": ["炭黑", "岩灰"]}, {"name": "尺码", "values": ["M", "L"]}],
+            reviews={"avg_rating": 4.6, "n": 23},
+        )]
+        body = build_product_chunks(rows, "ecommerce")[0].chunk_text
+        assert "可选规格：颜色 炭黑/岩灰；尺码 M/L" in body
+        assert "用户口碑：均分 4.6/5（23 条评价）" in body
+        # 脏形状:非 list 的 spec_dimensions 与缺字段行不炸不编
+        dirty = build_product_chunks([dict(_fake_rows()[0], spec_dimensions="oops", reviews={})], "ecommerce")
+        assert "可选规格" not in dirty[0].chunk_text
+
     def test_no_fabricated_content_for_bare_spu(self):
         """无 subtitle/specs/SKU 的 SPU:切片不得编造内容。"""
         bare = [{"id": "u", "spu_code": "S", "title": "某商品", "subtitle": None,
@@ -82,6 +97,7 @@ _MERCHANT_DDL = [
       category TEXT NOT NULL DEFAULT '下装裤类',
       main_image TEXT,
       specs JSONB DEFAULT '{}'::jsonb,
+      spec_dimensions JSONB,
       status TEXT NOT NULL DEFAULT 'ON_SALE',
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     )
@@ -107,15 +123,21 @@ async def _seed_merchant(engine, title: str = "极光 420g重磅毛圈棉抽绳�
         async with engine.begin() as conn:
             for ddl in _MERCHANT_DDL:
                 await conn.execute(text(ddl))
+            # 共享密封容器表形状由先到文件决定(⑰′):他册先建 merchant_spus
+            # 时本册 CREATE IF NOT EXISTS 不生效,补列用 ALTER IF NOT EXISTS 并集
+            await conn.execute(
+                text("ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS spec_dimensions JSONB")
+            )
             await conn.execute(text("TRUNCATE merchant_skus, merchant_spus"))
             sid = _uuid.uuid5(_uuid.NAMESPACE_URL, "SPU-010")
             await conn.execute(
                 text(
-                    "INSERT INTO merchant_spus (id, spu_code, title, subtitle, description, category, specs) "
-                    "VALUES (CAST(:id AS uuid), 'SPU-010', :t, :st, :d, '下装裤类', CAST(:spec AS jsonb))"
+                    "INSERT INTO merchant_spus (id, spu_code, title, subtitle, description, category, specs, spec_dimensions) "
+                    "VALUES (CAST(:id AS uuid), 'SPU-010', :t, :st, :d, '下装裤类', CAST(:spec AS jsonb), CAST(:dims AS jsonb))"
                 ).bindparams(
                     id=str(sid), t=title, st="420g毛圈棉 | 高弹罗纹收口", d=None,
                     spec=_json.dumps({"面料材质": "420g 重磅毛圈棉混纺"}, ensure_ascii=False),
+                    dims=_json.dumps([{"name": "颜色", "values": ["炭黑", "岩灰"]}, {"name": "尺码", "values": ["M", "L"]}], ensure_ascii=False),
                 )
             )
             await conn.execute(

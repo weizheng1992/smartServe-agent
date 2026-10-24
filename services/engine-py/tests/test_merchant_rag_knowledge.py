@@ -175,8 +175,11 @@ def test_contextual_rag_aurora_retrieval_isolated(pg_factory, monkeypatch):
             await conn.execute(text("DELETE FROM rag_documents"))
         await _run_seed_twice(pg_factory, monkeypatch)
 
+        # limit=5(2026-10-24 语料扩充:aurora 新增旅行/骑行选购与面料养护两册,
+        # 合成向量下 top3 会全被知识册占位,政策/门店册掉出窗口 —— 语料增长后
+        # 窗口放宽,断言语义不变:aurora 自有内容与竞品隔离)
         results = await cr.ContextualRAG("aurora").search_relevant_docs(
-            "极光潮品退换货政策尺码", limit=3, precomputed_embedding=[1.0, 0.0]
+            "极光潮品退换货政策尺码", limit=5, precomputed_embedding=[1.0, 0.0]
         )
         assert results, "aurora 知识库应召回至少一条切片"
         assert all(r["businessId"] == "aurora" for r in results)

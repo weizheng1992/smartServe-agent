@@ -46,7 +46,7 @@ class TestSemanticModel:
         values = set(semantic_model()["dimensions"]["category"]["values"])
         assert values == {
             "户外机能", "潮流T恤", "下装裤类", "潮流鞋靴", "背包收纳",
-            "露营装备", "衬衫", "配饰", "运动配件",
+            "露营装备", "衬衫", "配饰", "运动配件", "旅行装备", "骑行装备",
         }
 
     def test_bespoke_debt_metrics_all_in_registry(self):

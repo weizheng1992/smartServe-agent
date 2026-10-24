@@ -25,7 +25,7 @@ from .knowledge_files import KnowledgeChunk
 SYNC_SOURCE_URL = "product_catalog_sync.md"
 
 _SPUS_SQL = (
-    "SELECT s.id, s.spu_code, s.title, s.subtitle, s.description, s.category, s.specs, s.status "
+    "SELECT s.id, s.spu_code, s.title, s.subtitle, s.description, s.category, s.specs, s.spec_dimensions, s.status "
     "FROM merchant_spus s WHERE s.status = 'ON_SALE' ORDER BY s.spu_code"
 )
 # 2026-09-27 夜审 F4:SPU→SKU 从逐 SPU 查询(30 SPU = 30 往返)改为
@@ -36,10 +36,33 @@ _SKUS_SQL = (
     "FROM merchant_skus k WHERE k.spu_id = ANY(CAST(:sids AS uuid[])) "
     "ORDER BY k.price, k.sku_code"
 )
+# 2026-10-24 用量/目录扩充:评价聚合进知识块 —— 口碑是「值不值」问句的高频
+# 事实源,此前只有描述没有买家反馈,直答只能空口无凭。
+_REVIEWS_SQL = (
+    "SELECT r.spu_id::text AS spu_id, ROUND(AVG(r.rating)::numeric, 1) AS avg_rating, COUNT(*) AS n "
+    "FROM merchant_product_reviews r WHERE r.spu_id = ANY(CAST(:sids AS uuid[])) "
+    "GROUP BY r.spu_id"
+)
 
 
 def _spec_line(specs: dict) -> str:
     parts = [f"{k}:{v}" for k, v in (specs or {}).items() if v]
+    return "；".join(parts) if parts else ""
+
+
+def _dimensions_line(spec_dimensions) -> str:
+    """颜色×尺码矩阵渲染(2026-10-24 目录扩充):spec_dimensions 是 [{name,values}]
+    JSONB,尺码咨询/选码问句此前只能从 SKU 标题猜矩阵。脏形状诚实跳过。"""
+    if not isinstance(spec_dimensions, list):
+        return ""
+    try:
+        parts = [
+            f"{d.get('name')} {'/'.join(d.get('values') or [])}"
+            for d in spec_dimensions
+            if isinstance(d, dict) and d.get("name") and d.get("values")
+        ]
+    except Exception:
+        return ""
     return "；".join(parts) if parts else ""
 
 
@@ -57,6 +80,12 @@ def build_product_chunks(rows: list[dict], business_id: str) -> list[KnowledgeCh
         spec = _spec_line(row.get("specs") or {})
         if spec:
             lines.append(f"核心规格：{spec}")
+        dims = _dimensions_line(row.get("spec_dimensions"))
+        if dims:
+            lines.append(f"可选规格：{dims}")
+        reviews = row.get("reviews") or {}
+        if reviews.get("avg_rating") is not None and reviews.get("n"):
+            lines.append(f"用户口碑：均分 {reviews['avg_rating']}/5（{int(reviews['n'])} 条评价）")
         skus = row.get("skus") or []
         if skus:
             variants = "；".join(
@@ -109,9 +138,19 @@ async def sync_product_knowledge(business_id: str) -> dict:
                 skus_by_spu: dict[str, list[dict]] = {}
                 for s in sku_rows:
                     skus_by_spu.setdefault(str(s["spu_id"]), []).append(dict(s))
+                reviews_by_spu: dict[str, dict] = {}
+                try:
+                    review_rows = (
+                        await conn.execute(text(_REVIEWS_SQL).bindparams(sids=sids))
+                    ).mappings().all()
+                    for r in review_rows:
+                        reviews_by_spu[str(r["spu_id"])] = {"avg_rating": r["avg_rating"], "n": r["n"]}
+                except Exception as rev_err:
+                    print(f"[ProductKnowledge] 评价聚合不可达,知识块跳过口碑行: {rev_err}")
                 for spu in spus:
                     item = dict(spu)
                     item["skus"] = skus_by_spu.get(str(spu["id"]), [])
+                    item["reviews"] = reviews_by_spu.get(str(spu["id"]), {})
                     rows.append(item)
     except Exception as err:
         print(f"[ProductKnowledge] 商户货架不可达,跳过商品知识同步: {err}")
