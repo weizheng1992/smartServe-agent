@@ -43,15 +43,15 @@ def _real_order_ids(task_plan: dict | None) -> set[str]:
         desc = (step.get("description") or "").lower()
         result = step.get("result") or {}
         # 凭据面:checkoutCart 工具 + cart 技能结算分支(CartManageSkill
-        # checkout 分支输出真实订单号)都在本轮回执里
-        if (
-            (_CHECKOUT_SUCCESS_MARKER in desc or "cartskill" in desc)
-            and result.get("success")
-            and result.get("output")
-        ):
-            output = result["output"]
-            output = output if isinstance(output, str) else json_dumps(output)
-            ids.update(_CLAIMED_ORDER_ID_RE.findall(output))
+        # checkout 分支输出真实订单号)都在本轮回执里;output 文本与 data.orderId
+        # 两种回执形状互不前置 —— 旧实现把 data 提取藏在 output 真值臂内,
+        # data-only 回执(结构化 orderId)永远进不了凭据集,test_plain_ord_prefix
+        # 一直靠 _order_exists 库不可达 fail-open 假绿(2026-10-25 夜跑实证)
+        if (_CHECKOUT_SUCCESS_MARKER in desc or "cartskill" in desc) and result.get("success"):
+            output = result.get("output")
+            if output:
+                output = output if isinstance(output, str) else json_dumps(output)
+                ids.update(_CLAIMED_ORDER_ID_RE.findall(output))
             data = result.get("data") or {}
             order_id = data.get("orderId") if isinstance(data, dict) else None
             if order_id:

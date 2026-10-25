@@ -124,19 +124,22 @@ def route_fallback(question: str) -> tuple[bool, str, bool]:
     )
 
 
-def is_address_save_vetoed(input_text: str | None, skill_category: str | None) -> bool:
+def is_address_save_vetoed(input_text: str | None) -> bool:
     """快轨地址簿否决(eval-gap-2026-10 19 号票):输入携带**完整确定性**地址
     保存 payload(detect_address_manage 全字段命中)时拒绝一切技能快轨 ——
     「已加购成功。麻烦帮我保存收货地址:…」复合确认句曾整句被购物车技能
     fallback 正则吞掉,地址写动作静默丢失(实弹 probe19)。地址簿无专属技能,
     任何技能命中该形状都是误路由;与资金动作否决(is_money_action_vetoed,
-    A6 实弹同型)对称,让位后由判定 1.6 地址簿前置接管。"""
+    A6 实弹同型)对称,让位后由判定 1.6 地址簿前置接管。无条件否决、无域
+    豁免(与资金否决的售后域豁免不同,故无 skill_category 形参)。"""
     if not input_text:
         return False
     try:
         from ..triage.intent_triage_engine import detect_address_manage
 
         detected = detect_address_manage(input_text)
-    except Exception:
+    except Exception as err:
+        # 建议性守卫 fail-open:检测器自身故障不得阻断快轨(与上方 sniffer 同款留痕)
+        print(f"[SkillRouter] Address-save veto sniff failed, fail-open: {err}")
         return False
     return bool(detected and detected.get("mode") == "save" and not detected.get("missingSlots"))

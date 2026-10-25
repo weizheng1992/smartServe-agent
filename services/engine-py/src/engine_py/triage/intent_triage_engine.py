@@ -1074,7 +1074,7 @@ class IntentTriageEngine:
         # 地址簿保存 payload 一票否决(19 号票):完整确定性保存形状被任何技能命中
         # 都是误路由(「已加购成功。+保存收货地址:…」复合确认句实弹 probe19),
         # 让位给判定 1.6 地址簿前置 —— 与资金动作否决同型
-        if _skill_routing.is_address_save_vetoed(input_text, matching_skill.metadata.get("category")):
+        if _skill_routing.is_address_save_vetoed(input_text):
             return None
 
         skill_result = await matching_skill.execute(context)

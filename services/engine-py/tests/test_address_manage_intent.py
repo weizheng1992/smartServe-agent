@@ -656,10 +656,9 @@ class TestSwapFormAndFastTrackVeto:
         from engine_py.skills.routing import is_address_save_vetoed
 
         assert is_address_save_vetoed(
-            "已加购成功。麻烦帮我保存收货地址:北京市海淀区夜测路 5 号,收件人夜测,电话 13800001113",
-            "shopping",
+            "已加购成功。麻烦帮我保存收货地址:北京市海淀区夜测路 5 号,收件人夜测,电话 13800001113"
         )
         # 无地址形状的普通加购句不否决(快轨照常)
-        assert not is_address_save_vetoed("把第2件加入购物车", "shopping")
+        assert not is_address_save_vetoed("把第2件加入购物车")
         # 缺件地址句不否决(交澄清,不抢)
-        assert not is_address_save_vetoed("帮我保存一下地址", "shopping")
+        assert not is_address_save_vetoed("帮我保存一下地址")
