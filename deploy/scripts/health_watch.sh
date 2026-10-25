@@ -1,5 +1,5 @@
 #!/bin/bash
-# health_watch.sh —— B 机自监控 + 微信告警(Server酱 / 企业微信机器人二选一)
+# health_watch.sh —— B 机自监控 + 告警通知(飞书群机器人 → 企业微信 → Server酱 优先)
 #
 # 设计(2026-10-25):2C2G 小机零常驻,cron 每 5 分钟巡检;告警按 key 冷却
 # (默认 30 分钟,CRITICAL 与恢复通知不受冷却压制首次);状态落
@@ -54,8 +54,21 @@ WATCH_LOG="$STATE_DIR/cron.log"
 NOW=$(date +%s)
 
 # ---------------------------------------------------------------- 通知通道
-send_wechat() {
-  local title="$1" body="$2"
+# 发送成功判据(2026-10-25 诚实化):curl 出口码 0 ∧ 应答体 JSON code/errcode=0。
+# 此前三通道 >/dev/null 弃应答、出口码不查——通道拒收/网络失败静默无痕,--test
+# 无条件打印「已触发」(cf128ce 只修了 payload 构造层)。返回非 0 = 发送失败,
+# 调用方(告警/恢复/心跳)据此**不落发送状态**,失败留待下轮 cron 重试。
+_notify_ok() {  # stdin=通道应答体;exit 0 = 通道确认接收
+  python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if d.get("code", 0) == 0 and d.get("errcode", 0) == 0 else 1)'
+}
+
+send_notify() {
+  local title="$1" body="$2" resp
   if [ "$DRY_RUN" = 1 ]; then
     echo "[dry-run] $title"
     echo "$body" | sed 's/^/  | /'
@@ -83,7 +96,15 @@ print(json.dumps({"msg_type": "text", "content": {"text": sys.argv[1] + nl + sys
 PY
 )
     fi
-    curl -s -m 10 -H 'Content-Type: application/json' -d "$payload" "$WATCH_FEISHU_WEBHOOK" >/dev/null
+    if ! resp=$(curl -s -m 10 -H 'Content-Type: application/json' -d "$payload" "$WATCH_FEISHU_WEBHOOK"); then
+      echo "[watch] 飞书通道 curl 失败(网络/超时),本轮未送达"
+      return 1
+    fi
+    if ! printf '%s' "$resp" | _notify_ok; then
+      echo "[watch] 飞书通道应答未确认接收:${resp:0:120}"
+      return 1
+    fi
+    return 0
   elif [ -n "${WATCH_WECOM_WEBHOOK:-}" ]; then
     local payload
     payload=$(python3 - "$title" "$body" <<'PY'
@@ -92,12 +113,29 @@ nl = chr(10)
 print(json.dumps({"msgtype": "text", "text": {"content": sys.argv[1] + nl + sys.argv[2]}}, ensure_ascii=False))
 PY
 )
-    curl -s -m 10 -H 'Content-Type: application/json' -d "$payload" "$WATCH_WECOM_WEBHOOK" >/dev/null
+    if ! resp=$(curl -s -m 10 -H 'Content-Type: application/json' -d "$payload" "$WATCH_WECOM_WEBHOOK"); then
+      echo "[watch] 企业微信通道 curl 失败(网络/超时),本轮未送达"
+      return 1
+    fi
+    if ! printf '%s' "$resp" | _notify_ok; then
+      echo "[watch] 企业微信通道应答未确认接收:${resp:0:120}"
+      return 1
+    fi
+    return 0
   elif [ -n "${WATCH_SENDKEY:-}" ]; then
-    curl -s -m 10 -G "https://sctapi.ftqq.com/${WATCH_SENDKEY}.send" \
-      --data-urlencode "title=$title" --data-urlencode "desp=$body" >/dev/null
+    if ! resp=$(curl -s -m 10 -G "https://sctapi.ftqq.com/${WATCH_SENDKEY}.send" \
+      --data-urlencode "title=$title" --data-urlencode "desp=$body"); then
+      echo "[watch] Server酱通道 curl 失败(网络/超时),本轮未送达"
+      return 1
+    fi
+    if ! printf '%s' "$resp" | _notify_ok; then
+      echo "[watch] Server酱通道应答未确认接收(免费 5 条/天可能耗尽):${resp:0:120}"
+      return 1
+    fi
+    return 0
   else
     echo "[watch] 未配置 WATCH_FEISHU_WEBHOOK / WATCH_WECOM_WEBHOOK / WATCH_SENDKEY,告警只落日志"
+    return 1
   fi
 }
 
@@ -169,14 +207,19 @@ fi
 HOST_TAG="B机 $(hostname) $(date '+%m-%d %H:%M')"
 
 if [ "$TEST_MODE" = 1 ]; then
-  send_wechat "✅ health_watch 通道测试" "$HOST_TAG
+  # 巡检已照常跑完:FAIL_LINES 行数 = 当前失败项条数(旧实现误用字符串长度)
+  fail_n=$(printf '%s' "$FAIL_LINES" | grep -c .)
+  if send_notify "✅ health_watch 通道测试" "$HOST_TAG
 
-巡检 ${#FAIL_LINES}+ 项通道连通性验证消息。收到即链路可用。"
-  echo "test 消息已触发(配置正确则微信可见)"
+当前巡检失败 ${fail_n} 项;此为通道连通性验证消息,收到即链路可用。"; then
+    echo "test 消息已送达(通道应答 code:0)"
+  else
+    echo "test 消息发送失败 —— 诊断见上方 [watch] 行(诚实红,不再无条件报已触发)"
+  fi
   exit 0
 fi
 
-SENT_NEW=(); SENT_RECOVER=(); STILL_FAIL=()
+SENT_NEW=(); SENT_RECOVER=(); STILL_FAIL=(); SEND_FAIL=()
 while IFS='|' read -r key level detail; do
   [ -z "$key" ] && continue
   last_file="$STATE_DIR/${key}.last"; state_file="$STATE_DIR/${key}.state"
@@ -184,28 +227,36 @@ while IFS='|' read -r key level detail; do
   prev_state=$(cat "$state_file" 2>/dev/null || echo OK)
 
   if [ $((NOW - last_sent)) -ge "$COOLDOWN" ]; then
-    send_wechat "⚠️ ${level}: ${key}" "$HOST_TAG
+    if send_notify "⚠️ ${level}: ${key}" "$HOST_TAG
 
 ${detail}
 
-(冷却 ${COOLDOWN}s 内不重发同 key)"
-    if [ "$DRY_RUN" = 0 ]; then echo "$NOW" > "$last_file"; echo FAIL > "$state_file"; fi
-    SENT_NEW+=("$key")
+(冷却 ${COOLDOWN}s 内不重发同 key)"; then
+      # 发送成功才落「已发」状态;失败留下轮 cron 重试(不写 last_file,
+      # 否则通道故障被冷却窗口整段吞掉)
+      if [ "$DRY_RUN" = 0 ]; then echo "$NOW" > "$last_file"; echo FAIL > "$state_file"; fi
+      SENT_NEW+=("$key")
+    else
+      SEND_FAIL+=("$key")
+    fi
   else
     [ "$DRY_RUN" = 0 ] && echo FAIL > "$state_file"
     STILL_FAIL+=("$key")
   fi
 done <<< "$FAIL_LINES"
 
-# 恢复通知:上一轮 FAIL 且本轮不在失败清单 → 发恢复 + 清状态
+# 恢复通知:上一轮 FAIL 且本轮不在失败清单 → 发恢复 + 清状态(发送成功才清)
 for state_file in "$STATE_DIR"/*.state; do
   [ -e "$state_file" ] || continue
   key=$(basename "$state_file" .state)
   grep -q "^$key|" <<< "$FAIL_LINES" && continue
   [ "$(cat "$state_file")" = "FAIL" ] || continue
-  send_wechat "✅ 恢复: ${key}" "$HOST_TAG"
-  if [ "$DRY_RUN" = 0 ]; then echo OK > "$state_file"; rm -f "$STATE_DIR/${key}.last"; fi
-  SENT_RECOVER+=("$key")
+  if send_notify "✅ 恢复: ${key}" "$HOST_TAG"; then
+    if [ "$DRY_RUN" = 0 ]; then echo OK > "$state_file"; rm -f "$STATE_DIR/${key}.last"; fi
+    SENT_RECOVER+=("$key")
+  else
+    SEND_FAIL+=("recover:$key")
+  fi
 done
 
 # 每日心跳(dead-man 开关):全绿且距上次心跳 ≥24h → 发一条「巡检正常」,
@@ -213,14 +264,17 @@ done
 HB_FILE="$STATE_DIR/_heartbeat.last"
 HB_LAST=$(cat "$HB_FILE" 2>/dev/null || echo 0)
 if [ ${#FAIL_LINES} -eq 0 ] && [ $((NOW - HB_LAST)) -ge 86400 ]; then
-  send_wechat "✅ 每日心跳:B 机巡检正常" "$HOST_TAG
+  if send_notify "✅ 每日心跳:B 机巡检正常" "$HOST_TAG
 
-磁盘/内存/负载/三容器/网关/四前端/PG 全绿;此消息 ≥24h 一条,长期收不到 = 巡检脚本本身失联。"
-  [ "$DRY_RUN" = 0 ] && echo "$NOW" > "$HB_FILE"
+磁盘/内存/负载/三容器/网关/四前端/PG 全绿;此消息 ≥24h 一条,长期收不到 = 巡检脚本本身失联。"; then
+    [ "$DRY_RUN" = 0 ] && echo "$NOW" > "$HB_FILE"
+  else
+    SEND_FAIL+=("daily_heartbeat")
+  fi
 fi
 
 if [ "$DRY_RUN" = 1 ]; then
-  echo "[dry-run] 失败项 ${#SENT_NEW[@]} 新发 / ${#STILL_FAIL[@]} 冷却中 / ${#SENT_RECOVER[@]} 恢复"
+  echo "[dry-run] 失败项 ${#SENT_NEW[@]} 新发 / ${#STILL_FAIL[@]} 冷却中 / ${#SENT_RECOVER[@]} 恢复 / ${#SEND_FAIL[@]} 发送失败"
 else
-  echo "$(date '+%F %T') new=${#SENT_NEW[@]} cooling=${#STILL_FAIL[@]} recovered=${#SENT_RECOVER[@]}"
+  echo "$(date '+%F %T') new=${#SENT_NEW[@]} cooling=${#STILL_FAIL[@]} recovered=${#SENT_RECOVER[@]} sendfail=${#SEND_FAIL[@]}"
 fi
