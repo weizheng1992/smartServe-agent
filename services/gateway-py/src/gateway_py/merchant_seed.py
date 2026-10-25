@@ -100,6 +100,48 @@ _IMG_CAMP = "https://images.unsplash.com/photo-1517824806704-9040b037703b?w=800&
 _IMG_SLEEP = "https://images.unsplash.com/photo-1510312305653-8ed496efae75?w=800&auto=format&fit=crop&q=60"
 
 
+# ── 2026-10-25 目录扩容图池(32 题网图,逐张 curl 验活 200/image/*;来源:
+#    image-search MCP 转存桶,选无水印/无广告贴图的实拍)—— 修复 019-038
+#    复用 8 张通用图造成的图文不符,并为 039-060 新 SPU 供图 ──
+_IMG_SUITCASE_20 = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/481b38b2222d.jpg"
+_IMG_SUITCASE_28 = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/6b079871a02c.jpeg"
+_IMG_NECK_PILLOW = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/d951623af7c2.jpg"
+_IMG_PACKING_CUBES = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/d3a7efb81244.jpg"
+_IMG_TOILETRY = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/8e24a2448998.jpg"
+_IMG_ADAPTER = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/c51726d26b40.jpeg"
+_IMG_THERMOS = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/d022982011b6.jpg"
+_IMG_LUGGAGE_SCALE = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/5483f6ac88f9.jpg"
+_IMG_CLOTHESLINE = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/9995c871e8c0.jpeg"
+_IMG_BIKE_HELMET = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/a3a30bbde5c8.jpg"
+_IMG_BIKE_GLOVES = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/58a6b5bbc79e.jpg"
+_IMG_SADDLE_BAG = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/424f7940832f.jpg"
+_IMG_BIKE_LIGHT = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/f95dcb8e2042.jpg"
+_IMG_BIKE_PUMP = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/22923ded008a.png"
+_IMG_BIKE_MULTITOOL = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/d08187f86587.jpg"
+_IMG_BIKE_PHONE_MOUNT = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/96477112ee60.jpg"
+_IMG_JERSEY = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/40bb8bb70740.jpg"
+_IMG_TEE_BASIC = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/77f862c084a8.jpg"
+_IMG_HOODIE = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/a68835fb9181.jpg"
+_IMG_OXFORD = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/436cd9dca6d9.jpg"
+_IMG_TROUSERS = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/217bac4af2f8.png"
+_IMG_SHORTS = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/cb8f8bb26e5e.png"
+_IMG_JOGGERS_FLEECE = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/659f7194c9d6.webp"
+_IMG_SNEAKERS = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/a596cd3b9ce9.jpg"
+_IMG_MESSENGER = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/a624552ca52d.jpg"
+_IMG_BEANIE = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/8a3c1803cf22.png"
+_IMG_SOCKS = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/1e83f378acfa.jpg"
+_IMG_FLANNEL = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/aefb68628bf2.jpg"
+_IMG_BUCKET_HAT = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/baf7c32579cd.jpg"
+_IMG_TOUCH_GLOVES = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/bac42a05bad7.jpg"
+_IMG_NECK_GAITER = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/52e603d28d49.jpg"
+_IMG_VISOR = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/1c17d9149a88.jpg"
+_IMG_SQUEEZE_BOTTLE = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/bd9b9af7149f.jpeg"
+_IMG_KNEE_SLEEVE = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/6e35ef0ab447.jpg"
+_IMG_YOGA_MAT = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/16042bc2db57.jpg"
+_IMG_CAMP_LIGHT = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/46d3d4c93725.jpg"
+_IMG_DRY_TEE = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/9cad32b6dfaa.webp"
+_IMG_PACKABLE_WINDBREAKER = "https://image-search-mcp-cn-beijing.oss-cn-beijing.aliyuncs.com/image-search-mcp/images-ppt/6b0961fe91bb.jpg"
+
 _COST_RATIOS = (0.42, 0.45, 0.48, 0.52)
 
 
@@ -699,8 +741,8 @@ _SPUS = [
         'subtitle': "磨毛法兰绒 | 复古格纹 | 起绒保暖",
         'description': "精梳棉磨毛法兰绒,双面起绒亲肤保暖;经典复古格纹,山系穿搭与秋冬通勤都能压得住场。",
         'category': "衬衫",
-        'main_image': _IMG_RACK,
-        'banners': [_IMG_RACK, _IMG_SHIRTS],
+        'main_image': _IMG_FLANNEL,
+        'banners': [_IMG_FLANNEL],
         'dimensions': [
             {
                 'name': "颜色",
@@ -731,7 +773,7 @@ _SPUS = [
                 '尺码': "L (175/92A)",
             }, 459.0, 559.0, 18, "690123420013"),
         ],
-        'image': _IMG_RACK,
+        'image': _IMG_FLANNEL,
     },
     {
         'code': "SPU-AURORA-021",
@@ -814,8 +856,8 @@ _SPUS = [
         'subtitle': "UPF50+ | 可折叠随行 | 双面两戴",
         'description': "UPF50+ 防晒渔夫帽,帽檐定型可任意折叠不塌;双面两戴一帽两色,收纳进背包侧袋毫无存在感。",
         'category': "配饰",
-        'main_image': _IMG_CAMP,
-        'banners': [_IMG_CAMP],
+        'main_image': _IMG_BUCKET_HAT,
+        'banners': [_IMG_BUCKET_HAT],
         'dimensions': [
             {
                 'name': "颜色",
@@ -841,7 +883,7 @@ _SPUS = [
                 '尺码': "均码 (56-60cm)",
             }, 129.0, 159.0, 55, "690123423012"),
         ],
-        'image': _IMG_CAMP,
+        'image': _IMG_BUCKET_HAT,
     },
     {
         'code': "SPU-AURORA-024",
@@ -849,8 +891,8 @@ _SPUS = [
         'subtitle': "触屏指尖 | 防风抓绒 | 弹力贴合",
         'description': "防风抓绒外层搭配导电触屏指尖,冬天刷手机不用脱手套;四面弹力贴合手型,骑行通勤山野皆宜。",
         'category': "配饰",
-        'main_image': _IMG_SLEEP,
-        'banners': [_IMG_SLEEP],
+        'main_image': _IMG_TOUCH_GLOVES,
+        'banners': [_IMG_TOUCH_GLOVES],
         'dimensions': [
             {
                 'name': "尺码",
@@ -869,7 +911,7 @@ _SPUS = [
                 '尺码': "L",
             }, 99.0, 129.0, 44, "690123424012"),
         ],
-        'image': _IMG_SLEEP,
+        'image': _IMG_TOUCH_GLOVES,
     },
     {
         'code': "SPU-AURORA-025",
@@ -877,8 +919,8 @@ _SPUS = [
         'subtitle': "无缝编织 | 速干吸汗 | 12种戴法",
         'description': "无缝圆筒编织不勒头,速干吸汗面料;面罩、发带、围脖、头巾十二种戴法,是山野多面手。",
         'category': "配饰",
-        'main_image': _IMG_CAMP,
-        'banners': [_IMG_CAMP],
+        'main_image': _IMG_NECK_GAITER,
+        'banners': [_IMG_NECK_GAITER],
         'dimensions': [
             {
                 'name': "颜色",
@@ -903,7 +945,7 @@ _SPUS = [
                 '尺码': "均码",
             }, 59.0, 79.0, 75, "690123425012"),
         ],
-        'image': _IMG_CAMP,
+        'image': _IMG_NECK_GAITER,
     },
     {
         'code': "SPU-AURORA-026",
@@ -911,8 +953,8 @@ _SPUS = [
         'subtitle': "宽檐大帽檐 | 空顶透气 | 围头可调节",
         'description': "空顶设计头顶散热,宽檐全向遮阳;围头魔术贴可调节,跑步徒步都不晃。",
         'category': "配饰",
-        'main_image': _IMG_CAMP,
-        'banners': [_IMG_CAMP],
+        'main_image': _IMG_VISOR,
+        'banners': [_IMG_VISOR],
         'dimensions': [
             {
                 'name': "颜色",
@@ -942,7 +984,7 @@ _SPUS = [
                 '尺码': "加大 (60-63cm)",
             }, 139.0, 169.0, 12, "690123426013"),
         ],
-        'image': _IMG_CAMP,
+        'image': _IMG_VISOR,
     },
     {
         'code': "SPU-AURORA-027",
@@ -950,8 +992,8 @@ _SPUS = [
         'subtitle': "Tritan材质 | 1L大容量 | 弹盖直饮",
         'description': "食品级 Tritan 材质耐摔无异味,1L 大容量减少接水次数;单手弹盖直饮,登山骑行办公都顺手。",
         'category': "运动配件",
-        'main_image': _IMG_CAMP,
-        'banners': [_IMG_CAMP],
+        'main_image': _IMG_SQUEEZE_BOTTLE,
+        'banners': [_IMG_SQUEEZE_BOTTLE],
         'dimensions': [
             {
                 'name': "容量",
@@ -971,7 +1013,7 @@ _SPUS = [
                 '容量': "1L",
             }, 89.0, 109.0, 58, "690123427012"),
         ],
-        'image': _IMG_CAMP,
+        'image': _IMG_SQUEEZE_BOTTLE,
     },
     {
         'code': "SPU-AURORA-028",
@@ -979,8 +1021,8 @@ _SPUS = [
         'subtitle': "硅胶缓震环 | 透气针织 | 左右通用",
         'description': "环形硅胶缓震垫稳定髌骨,三维针织逐区透气加压;跑步登山羽毛球,膝盖不舒服时它最懂。",
         'category': "运动配件",
-        'main_image': _IMG_TRAIL,
-        'banners': [_IMG_TRAIL],
+        'main_image': _IMG_KNEE_SLEEVE,
+        'banners': [_IMG_KNEE_SLEEVE],
         'dimensions': [
             {
                 'name': "尺码",
@@ -1003,7 +1045,7 @@ _SPUS = [
                 '尺码': "XL",
             }, 149.0, 179.0, 16, "690123428013"),
         ],
-        'image': _IMG_TRAIL,
+        'image': _IMG_KNEE_SLEEVE,
     },
     {
         'code': "SPU-AURORA-029",
@@ -1011,8 +1053,8 @@ _SPUS = [
         'subtitle': "8mm加厚 | TPE双面防滑 | 附绑带",
         'description': "8mm 加厚缓冲护膝护踝,TPE 双面防滑纹路抓地稳;自带绑带收纳,家练外出都轻便。",
         'category': "运动配件",
-        'main_image': _IMG_CAMP,
-        'banners': [_IMG_CAMP],
+        'main_image': _IMG_YOGA_MAT,
+        'banners': [_IMG_YOGA_MAT],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1032,7 +1074,7 @@ _SPUS = [
                 '颜色': "暮蓝",
             }, 199.0, 239.0, 24, "690123429012"),
         ],
-        'image': _IMG_CAMP,
+        'image': _IMG_YOGA_MAT,
     },
     {
         'code': "SPU-AURORA-030",
@@ -1040,8 +1082,8 @@ _SPUS = [
         'subtitle': "三档亮度 | USB-C充电 | 磁吸悬挂",
         'description': "三档亮度一键切换,最高 300 流明照亮整顶帐篷;底部磁吸 + 提挂两用,USB-C 快充 6 小时续航。",
         'category': "运动配件",
-        'main_image': _IMG_TENT,
-        'banners': [_IMG_TENT],
+        'main_image': _IMG_CAMP_LIGHT,
+        'banners': [_IMG_CAMP_LIGHT],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1061,7 +1103,7 @@ _SPUS = [
                 '颜色': "军绿",
             }, 169.0, 199.0, 28, "690123430012"),
         ],
-        'image': _IMG_TENT,
+        'image': _IMG_CAMP_LIGHT,
     },
     # ---- 2026-10-24 目录扩充:旅行装备 / 骑行装备 / 速干防晒衣(用户诉求:
     # 衣服/旅行设备/骑行设备更多 SKU,产品信息更详细喂 RAG)。新品类已在
@@ -1072,8 +1114,8 @@ _SPUS = [
         'subtitle': "20寸登机尺寸 | TSA海关密码锁 | 静音万向轮",
         'description': "出差与短途旅行主力箱：20寸符合国内主流航司登机标准免托运；TSA 海关密码锁美国海关可开箱验货不破坏锁体；五档铝合金宽拉杆摇晃小，360° 静音万向轮推行顺滑；箱内 X 束紧带加拉链隔层干湿分区，长途旅行衣物不散乱。",
         'category': "旅行装备",
-        'main_image': _IMG_BACKPACK_HIKE,
-        'banners': [_IMG_BACKPACK_HIKE],
+        'main_image': _IMG_SUITCASE_20,
+        'banners': [_IMG_SUITCASE_20],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1099,7 +1141,7 @@ _SPUS = [
                 '颜色': "雾霾蓝",
             }, 399.0, 499.0, 22, "690123431103"),
         ],
-        'image': _IMG_BACKPACK_HIKE,
+        'image': _IMG_SUITCASE_20,
     },
     {
         'code': "SPU-AURORA-032",
@@ -1107,8 +1149,8 @@ _SPUS = [
         'subtitle': "七件分装 | 防水涤纶 | 洗漱包独立防水内衬",
         'description': "一套搞定行李分类：衣物袋×2、鞋袋、平板收纳袋、洗漱包、证件包、杂物袋七件；防水涤纶面料配顺滑拉链；洗漱包独立防水内衬，湿毛巾不外渗；证件包透明窗口，登机取证件卡不用翻包。",
         'category': "旅行装备",
-        'main_image': _IMG_SLING,
-        'banners': [_IMG_SLING],
+        'main_image': _IMG_PACKING_CUBES,
+        'banners': [_IMG_PACKING_CUBES],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1129,7 +1171,7 @@ _SPUS = [
                 '颜色': "军绿",
             }, 89.0, 119.0, 48, "690123431202"),
         ],
-        'image': _IMG_SLING,
+        'image': _IMG_PACKING_CUBES,
     },
     {
         'code': "SPU-AURORA-033",
@@ -1168,8 +1210,8 @@ _SPUS = [
         'subtitle': "PC+EPS一体成型 | 23孔透气 | USB-C警示灯",
         'description': "PC 外壳加 EPS 一体成型缓冲层，23 个风道透气不闷头；后旋钮三档调节适配不同头围；尾部 USB-C 充电警示灯，夜骑常亮/慢闪/快闪三模式；内置衬垫可拆洗，长途骑行也清爽。",
         'category': "骑行装备",
-        'main_image': _IMG_CAMP,
-        'banners': [_IMG_CAMP],
+        'main_image': _IMG_BIKE_HELMET,
+        'banners': [_IMG_BIKE_HELMET],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1206,7 +1248,7 @@ _SPUS = [
                 '尺码': "L (58-62cm)",
             }, 219.0, 269.0, 15, "690123431404"),
         ],
-        'image': _IMG_CAMP,
+        'image': _IMG_BIKE_HELMET,
     },
     {
         'code': "SPU-AURORA-035",
@@ -1214,8 +1256,8 @@ _SPUS = [
         'subtitle': "5mm SBR减震垫 | 指尖触屏 | 指背反光",
         'description': "掌心 5mm 吸震 SBR 减震垫，长骑不手麻；指尖导电纱触屏，看导航不用摘手套；指背反光标夜骑更醒目；背部网眼透气，夏季骑行也干爽。",
         'category': "骑行装备",
-        'main_image': _IMG_TRAIL,
-        'banners': [_IMG_TRAIL],
+        'main_image': _IMG_BIKE_GLOVES,
+        'banners': [_IMG_BIKE_GLOVES],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1251,7 +1293,7 @@ _SPUS = [
                 '尺码': "L",
             }, 79.0, 99.0, 26, "690123431504"),
         ],
-        'image': _IMG_TRAIL,
+        'image': _IMG_BIKE_GLOVES,
     },
     {
         'code': "SPU-AURORA-036",
@@ -1259,8 +1301,8 @@ _SPUS = [
         'subtitle': "1.5L 容积 | 防水拉链 | 尾部反光",
         'description': "1.5L 座管尾包，装内胎、撬胎棒与随身工具刚刚好；防水拉链加防泼水面料，小雨骑行无忧；魔术贴三点固定，适配多数座弓不晃动；尾部反光标提升夜骑辨识度。",
         'category': "骑行装备",
-        'main_image': _IMG_TENT,
-        'banners': [_IMG_TENT],
+        'main_image': _IMG_SADDLE_BAG,
+        'banners': [_IMG_SADDLE_BAG],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1283,7 +1325,7 @@ _SPUS = [
                 '颜色': "军绿",
             }, 69.0, 89.0, 38, "690123431602"),
         ],
-        'image': _IMG_TENT,
+        'image': _IMG_SADDLE_BAG,
     },
     {
         'code': "SPU-AURORA-037",
@@ -1291,8 +1333,8 @@ _SPUS = [
         'subtitle': "冰丝凉感 | UPF50+防晒 | 速干不贴身",
         'description': "凉感冰丝面料上身瞬降体感温度；UPF50+ 紫外线阻隔，旅行、通勤、轻户外一件搞定；速干排汗不贴身，机洗不易变形；基础合身版型男女同款，出行收纳无负担。",
         'category': "潮流T恤",
-        'main_image': _IMG_SHIRTS,
-        'banners': [_IMG_SHIRTS],
+        'main_image': _IMG_DRY_TEE,
+        'banners': [_IMG_DRY_TEE],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1336,7 +1378,7 @@ _SPUS = [
                 '尺码': "XL",
             }, 129.0, 159.0, 32, "690123431706"),
         ],
-        'image': _IMG_SHIRTS,
+        'image': _IMG_DRY_TEE,
     },
     {
         'code': "SPU-AURORA-038",
@@ -1344,8 +1386,8 @@ _SPUS = [
         'subtitle': "UPF50+ | 轻DWR防泼水 | 自带收纳袋",
         'description': "阳光防护加轻护二合一：UPF50+ 阻隔紫外线，轻 DWR 防泼水应对途中阵雨；整衣可收入自带收纳袋约拳头大小，塞进旅行背包无感；网眼内衬透气，春夏出行备用外套首选。",
         'category': "户外机能",
-        'main_image': _IMG_SOFTSHELL,
-        'banners': [_IMG_SOFTSHELL],
+        'main_image': _IMG_PACKABLE_WINDBREAKER,
+        'banners': [_IMG_PACKABLE_WINDBREAKER],
         'dimensions': [
             {
                 'name': "颜色",
@@ -1381,7 +1423,643 @@ _SPUS = [
                 '尺码': "L",
             }, 199.0, 249.0, 20, "690123431804"),
         ],
-        'image': _IMG_SOFTSHELL,
+        'image': _IMG_PACKABLE_WINDBREAKER,
+    },
+    {
+        'code': "SPU-AURORA-039",
+        'title': "极光 260g 精梳棉纯色基础圆领短袖T恤 (五色可选)",
+        'subtitle': "260g重磅 | 精梳棉不透 | 五色基础百搭",
+        'description': "衣橱基石款:260g 精梳棉双纱面料,厚而不闷、久洗不透不变形;罗纹领口二本针加固不塌领;五 个基础色覆盖通勤休闲全部搭配场景,客服推荐按常穿尺码拍,落肩微宽松不挑身材。",
+        'category': "潮流T恤",
+        'main_image': _IMG_TEE_BASIC,
+        'banners': [_IMG_TEE_BASIC],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["曜黑", "云白", "石墨灰", "藏青", "燕麦杏"],
+            },
+            {
+                'name': "尺码",
+                'values': ["L (175/92A)", "XL (180/96A)"],
+            },
+        ],
+        'specs': {
+            '克重': "260g/m² 双纱精梳棉",
+            '领口工艺': "二本针罗纹领(不塌领)",
+            '版型': "落肩微宽松",
+            '洗护建议': "冷水机洗,翻面阴干不暴晒",
+            '色牢度': "4级以上(深色首次单独洗)",
+            '适用场景': "通勤 / 日常 / 打底叠穿",
+        },
+        'skus': [
+            ("AURORA-SKU-039-BLK-L", "基础T 曜黑 L", {'颜色': "曜黑", '尺码': "L (175/92A)"}, 129.0, 169.0, 60, "690123459001"),
+            ("AURORA-SKU-039-BLK-XL", "基础T 曜黑 XL", {'颜色': "曜黑", '尺码': "XL (180/96A)"}, 129.0, 169.0, 40, "690123459002"),
+            ("AURORA-SKU-039-WHT-L", "基础T 云白 L", {'颜色': "云白", '尺码': "L (175/92A)"}, 129.0, 169.0, 55, "690123459003"),
+            ("AURORA-SKU-039-WHT-XL", "基础T 云白 XL", {'颜色': "云白", '尺码': "XL (180/96A)"}, 129.0, 169.0, 40, "690123459004"),
+            ("AURORA-SKU-039-GRY-L", "基础T 石墨灰 L", {'颜色': "石墨灰", '尺码': "L (175/92A)"}, 129.0, 169.0, 35, "690123459005"),
+            ("AURORA-SKU-039-GRY-XL", "基础T 石墨灰 XL", {'颜色': "石墨灰", '尺码': "XL (180/96A)"}, 129.0, 169.0, 30, "690123459006"),
+            ("AURORA-SKU-039-NVY-L", "基础T 藏青 L", {'颜色': "藏青", '尺码': "L (175/92A)"}, 129.0, 169.0, 30, "690123459007"),
+            ("AURORA-SKU-039-NVY-XL", "基础T 藏青 XL", {'颜色': "藏青", '尺码': "XL (180/96A)"}, 129.0, 169.0, 25, "690123459008"),
+            ("AURORA-SKU-039-OAT-L", "基础T 燕麦杏 L", {'颜色': "燕麦杏", '尺码': "L (175/92A)"}, 129.0, 169.0, 25, "690123459009"),
+            ("AURORA-SKU-039-OAT-XL", "基础T 燕麦杏 XL", {'颜色': "燕麦杏", '尺码': "XL (180/96A)"}, 129.0, 169.0, 20, "690123459010"),
+        ],
+        'image': _IMG_TEE_BASIC,
+    },
+    {
+        'code': "SPU-AURORA-040",
+        'title': "极光 380g 加绒保暖连帽卫衣 (落肩廓形)",
+        'subtitle': "380g加绒 | 落肩廓形 | 袋鼠兜",
+        'description': "秋冬内搭外穿两用:380g 加绒毛圈里布贴身即暖,落肩廓形包容不同身材;双层帽桶挺括不塌,袋鼠兜加内藏耳机孔;袖口下摆罗纹收紧锁温。",
+        'category': "潮流T恤",
+        'main_image': _IMG_HOODIE,
+        'banners': [_IMG_HOODIE],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["曜黑", "雾灰", "燕麦杏"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M (170/88A)", "L (175/92A)", "XL (180/96A)"],
+            },
+        ],
+        'specs': {
+            '克重': "380g/m² 加绒毛圈",
+            '帽型': "双层帽桶(不塌)",
+            '细节': "袋鼠兜内藏耳机孔",
+            '版型': "落肩廓形",
+            '洗护建议': "翻面冷水洗,平铺晾干防坠长",
+            '适用场景': "秋冬通勤 / 校园 / 户外保暖层",
+        },
+        'skus': [
+            ("AURORA-SKU-040-BLK-M", "加绒卫衣 曜黑 M", {'颜色': "曜黑", '尺码': "M (170/88A)"}, 259.0, 329.0, 30, "690123459011"),
+            ("AURORA-SKU-040-BLK-L", "加绒卫衣 曜黑 L", {'颜色': "曜黑", '尺码': "L (175/92A)"}, 259.0, 329.0, 35, "690123459012"),
+            ("AURORA-SKU-040-BLK-XL", "加绒卫衣 曜黑 XL", {'颜色': "曜黑", '尺码': "XL (180/96A)"}, 259.0, 329.0, 22, "690123459013"),
+            ("AURORA-SKU-040-GRY-M", "加绒卫衣 雾灰 M", {'颜色': "雾灰", '尺码': "M (170/88A)"}, 259.0, 329.0, 25, "690123459014"),
+            ("AURORA-SKU-040-GRY-L", "加绒卫衣 雾灰 L", {'颜色': "雾灰", '尺码': "L (175/92A)"}, 259.0, 329.0, 30, "690123459015"),
+            ("AURORA-SKU-040-OAT-L", "加绒卫衣 燕麦杏 L", {'颜色': "燕麦杏", '尺码': "L (175/92A)"}, 259.0, 329.0, 18, "690123459016"),
+        ],
+        'image': _IMG_HOODIE,
+    },
+    {
+        'code': "SPU-AURORA-041",
+        'title': "极光 免烫牛津纺长袖衬衫 (商务休闲两用)",
+        'subtitle': "免烫抗皱 | 4.8oz牛津纺 | 通勤休闲",
+        'description': "4.8oz 精纺牛津布,免烫整理出炉即穿、机洗后基本无褶;领口插片挺括,版型微收腰不贴身;浅雾蓝与云白两色都是通勤会议与日常约会的安全牌。",
+        'category': "衬衫",
+        'main_image': _IMG_OXFORD,
+        'banners': [_IMG_OXFORD],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["浅雾蓝", "云白"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M (170/88A)", "L (175/92A)", "XL (180/96A)"],
+            },
+        ],
+        'specs': {
+            '面料': "4.8oz 精纺牛津纺(棉)",
+            '免烫等级': "家庭机洗免烫整理",
+            '领型': "标准领(可打领带)",
+            '版型': "微收腰合体",
+            '洗护建议': "机洗低温,中温熨烫即可",
+            '适用场景': "通勤会议 / 商务出差 / 日常",
+        },
+        'skus': [
+            ("AURORA-SKU-041-BLU-M", "牛津衬衫 浅雾蓝 M", {'颜色': "浅雾蓝", '尺码': "M (170/88A)"}, 219.0, 279.0, 25, "690123459017"),
+            ("AURORA-SKU-041-BLU-L", "牛津衬衫 浅雾蓝 L", {'颜色': "浅雾蓝", '尺码': "L (175/92A)"}, 219.0, 279.0, 30, "690123459018"),
+            ("AURORA-SKU-041-BLU-XL", "牛津衬衫 浅雾蓝 XL", {'颜色': "浅雾蓝", '尺码': "XL (180/96A)"}, 219.0, 279.0, 20, "690123459019"),
+            ("AURORA-SKU-041-WHT-M", "牛津衬衫 云白 M", {'颜色': "云白", '尺码': "M (170/88A)"}, 219.0, 279.0, 22, "690123459020"),
+            ("AURORA-SKU-041-WHT-L", "牛津衬衫 云白 L", {'颜色': "云白", '尺码': "L (175/92A)"}, 219.0, 279.0, 28, "690123459021"),
+            ("AURORA-SKU-041-WHT-XL", "牛津衬衫 云白 XL", {'颜色': "云白", '尺码': "XL (180/96A)"}, 219.0, 279.0, 18, "690123459022"),
+        ],
+        'image': _IMG_OXFORD,
+    },
+    {
+        'code': "SPU-AURORA-042",
+        'title': "极光 直筒阔腿休闲长裤 (垂感免烫)",
+        'subtitle': "垂感阔腿 | 直筒遮肉 | 四季通用",
+        'description': "垂感混纺面料垂顺不贴腿,直筒微阔的裤型对腿型宽容度极高;腰头半松紧加抽绳,久坐不勒;卡其/深灰/藏青三色都是好搭的安全色,通勤与周末两相宜。",
+        'category': "下装裤类",
+        'main_image': _IMG_TROUSERS,
+        'banners': [_IMG_TROUSERS],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["卡其", "深灰", "藏青"],
+            },
+            {
+                'name': "尺码",
+                'values': ["30 (2.3尺)", "32 (2.5尺)", "34 (2.7尺)"],
+            },
+        ],
+        'specs': {
+            '面料': "垂感混纺(聚酯纤维+粘纤)",
+            '腰头': "半松紧 + 抽绳",
+            '裤型': "直筒微阔",
+            '免烫': "基础抗皱,机洗晾干即可穿",
+            '洗护建议': "冷水洗,悬挂晾干",
+            '适用场景': "通勤 / 休闲 / 旅行",
+        },
+        'skus': [
+            ("AURORA-SKU-042-KHK-30", "休闲长裤 卡其 30", {'颜色': "卡其", '尺码': "30 (2.3尺)"}, 199.0, 259.0, 20, "690123459023"),
+            ("AURORA-SKU-042-KHK-32", "休闲长裤 卡其 32", {'颜色': "卡其", '尺码': "32 (2.5尺)"}, 199.0, 259.0, 25, "690123459024"),
+            ("AURORA-SKU-042-GRY-32", "休闲长裤 深灰 32", {'颜色': "深灰", '尺码': "32 (2.5尺)"}, 199.0, 259.0, 22, "690123459025"),
+            ("AURORA-SKU-042-GRY-34", "休闲长裤 深灰 34", {'颜色': "深灰", '尺码': "34 (2.7尺)"}, 199.0, 259.0, 18, "690123459026"),
+            ("AURORA-SKU-042-NVY-32", "休闲长裤 藏青 32", {'颜色': "藏青", '尺码': "32 (2.5尺)"}, 199.0, 259.0, 22, "690123459027"),
+            ("AURORA-SKU-042-NVY-34", "休闲长裤 藏青 34", {'颜色': "藏青", '尺码': "34 (2.7尺)"}, 199.0, 259.0, 16, "690123459028"),
+        ],
+        'image': _IMG_TROUSERS,
+    },
+    {
+        'code': "SPU-AURORA-043",
+        'title': "极光 四向弹力速干运动短裤 (内衬防走光)",
+        'subtitle': "四向弹力 | 速干内衬 | 5寸裤长",
+        'description': "夏季跑步健身主力:四面弹速干面料汗湿不贴腿,内置网眼衬裤防走光防磨腿;腰部抽绳 + 拉链侧兜,手机钥匙稳稳当当;5寸裤长跑步不羁绊。",
+        'category': "下装裤类",
+        'main_image': _IMG_SHORTS,
+        'banners': [_IMG_SHORTS],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["曜黑", "军绿"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M", "L", "XL"],
+            },
+        ],
+        'specs': {
+            '面料': "四面弹速干聚酯纤维",
+            '内衬': "网眼衬裤(防磨防走光)",
+            '裤长': "5寸(约膝上 12cm)",
+            '口袋': "双侧拉链口袋",
+            '洗护建议': "机洗冷水,不可柔顺剂(伤速干)",
+            '适用场景': "跑步 / 健身 / 球类运动",
+        },
+        'skus': [
+            ("AURORA-SKU-043-BLK-M", "运动短裤 曜黑 M", {'颜色': "曜黑", '尺码': "M"}, 139.0, 179.0, 30, "690123459029"),
+            ("AURORA-SKU-043-BLK-L", "运动短裤 曜黑 L", {'颜色': "曜黑", '尺码': "L"}, 139.0, 179.0, 35, "690123459030"),
+            ("AURORA-SKU-043-BLK-XL", "运动短裤 曜黑 XL", {'颜色': "曜黑", '尺码': "XL"}, 139.0, 179.0, 25, "690123459031"),
+            ("AURORA-SKU-043-OLV-M", "运动短裤 军绿 M", {'颜色': "军绿", '尺码': "M"}, 139.0, 179.0, 22, "690123459032"),
+            ("AURORA-SKU-043-OLV-L", "运动短裤 军绿 L", {'颜色': "军绿", '尺码': "L"}, 139.0, 179.0, 28, "690123459033"),
+            ("AURORA-SKU-043-OLV-XL", "运动短裤 军绿 XL", {'颜色': "军绿", '尺码': "XL"}, 139.0, 179.0, 20, "690123459034"),
+        ],
+        'image': _IMG_SHORTS,
+    },
+    {
+        'code': "SPU-AURORA-044",
+        'title': "极光 加绒保暖束脚卫裤 (秋冬居家运动两用)",
+        'subtitle': "加绒锁温 | 束脚罗纹 | 抽绳腰头",
+        'description': "秋冬保暖主力:内里细腻摇粒绒,贴身即暖不扎;束脚罗纹配运动鞋利落不拖沓;膝部立体剪裁下蹲不紧绷,居家懒人沙发与冬日晨跑一件搞定。",
+        'category': "下装裤类",
+        'main_image': _IMG_JOGGERS_FLEECE,
+        'banners': [_IMG_JOGGERS_FLEECE],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["燕麦杏", "曜黑"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M", "L", "XL"],
+            },
+        ],
+        'specs': {
+            '面料': "外层毛圈棉混纺 + 内里摇粒绒",
+            '裤脚': "束脚罗纹",
+            '腰部': "松紧 + 抽绳",
+            '克重': "约 340g/m²",
+            '洗护建议': "翻面机洗冷水,低温烘干",
+            '适用场景': "秋冬居家 / 晨跑 / 日常保暖",
+        },
+        'skus': [
+            ("AURORA-SKU-044-OAT-M", "加绒卫裤 燕麦杏 M", {'颜色': "燕麦杏", '尺码': "M"}, 189.0, 239.0, 25, "690123459035"),
+            ("AURORA-SKU-044-OAT-L", "加绒卫裤 燕麦杏 L", {'颜色': "燕麦杏", '尺码': "L"}, 189.0, 239.0, 30, "690123459036"),
+            ("AURORA-SKU-044-OAT-XL", "加绒卫裤 燕麦杏 XL", {'颜色': "燕麦杏", '尺码': "XL"}, 189.0, 239.0, 20, "690123459037"),
+            ("AURORA-SKU-044-BLK-M", "加绒卫裤 曜黑 M", {'颜色': "曜黑", '尺码': "M"}, 189.0, 239.0, 25, "690123459038"),
+            ("AURORA-SKU-044-BLK-L", "加绒卫裤 曜黑 L", {'颜色': "曜黑", '尺码': "L"}, 189.0, 239.0, 32, "690123459039"),
+            ("AURORA-SKU-044-BLK-XL", "加绒卫裤 曜黑 XL", {'颜色': "曜黑", '尺码': "XL"}, 189.0, 239.0, 22, "690123459040"),
+        ],
+        'image': _IMG_JOGGERS_FLEECE,
+    },
+    {
+        'code': "SPU-AURORA-045",
+        'title': "极光 复古帆布低帮滑板鞋 (硫化底)",
+        'subtitle': "硫化软底 | 复古鞋型 | 百搭耐造",
+        'description': "经典硫化工艺帆布鞋:软木硫化大底抓地又跟脚,双层帆布鞋面耐造好打理;低帮复古鞋型,牛仔裤工装裤全搭;内垫缓震,久走不累。",
+        'category': "潮流鞋靴",
+        'main_image': _IMG_SNEAKERS,
+        'banners': [_IMG_SNEAKERS],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["米白", "墨绿"],
+            },
+            {
+                'name': "尺码",
+                'values': ["41", "42", "43"],
+            },
+        ],
+        'specs': {
+            '鞋面': "双层加密帆布",
+            '大底': "硫化软木橡胶底",
+            '内垫': "缓震发泡鞋垫",
+            '偏码提示': "正常运动鞋码,宽脚建议大半码",
+            '洗护建议': "软刷中性洗涤剂,阴干忌暴晒",
+            '适用场景': "日常 / 校园 / 滑板休闲",
+        },
+        'skus': [
+            ("AURORA-SKU-045-WHT-41", "帆布鞋 米白 41", {'颜色': "米白", '尺码': "41"}, 219.0, 279.0, 20, "690123459041"),
+            ("AURORA-SKU-045-WHT-42", "帆布鞋 米白 42", {'颜色': "米白", '尺码': "42"}, 219.0, 279.0, 25, "690123459042"),
+            ("AURORA-SKU-045-WHT-43", "帆布鞋 米白 43", {'颜色': "米白", '尺码': "43"}, 219.0, 279.0, 22, "690123459043"),
+            ("AURORA-SKU-045-GRN-41", "帆布鞋 墨绿 41", {'颜色': "墨绿", '尺码': "41"}, 219.0, 279.0, 15, "690123459044"),
+            ("AURORA-SKU-045-GRN-42", "帆布鞋 墨绿 42", {'颜色': "墨绿", '尺码': "42"}, 219.0, 279.0, 20, "690123459045"),
+            ("AURORA-SKU-045-GRN-43", "帆布鞋 墨绿 43", {'颜色': "墨绿", '尺码': "43"}, 219.0, 279.0, 18, "690123459046"),
+        ],
+        'image': _IMG_SNEAKERS,
+    },
+    {
+        'code': "SPU-AURORA-046",
+        'title': "极光 帆布邮差包 (14寸笔电仓 翻盖磁扣)",
+        'subtitle': "加厚帆布 | 14寸笔电仓 | 磁扣翻盖",
+        'description': "通勤背的三色帆布邮差包:加厚帆布挺括耐造,主仓带 14 寸笔电隔层加文件层;翻盖磁扣开合顺手,背带可调长度;五色任选,学生党上班族都能背。",
+        'category': "背包收纳",
+        'main_image': _IMG_MESSENGER,
+        'banners': [_IMG_MESSENGER],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["卡其", "藏青", "曜黑"],
+            },
+        ],
+        'specs': {
+            '容量': "约 12L(14寸笔电仓)",
+            '面料': "加厚水洗帆布",
+            '开合': "翻盖磁扣",
+            '背带': "可调长度,肩背/斜挎",
+            '适用场景': "通勤 / 上课 / 短途出行",
+        },
+        'skus': [
+            ("AURORA-SKU-046-KHK", "邮差包 卡其", {'颜色': "卡其"}, 179.0, 229.0, 25, "690123459047"),
+            ("AURORA-SKU-046-NVY", "邮差包 藏青", {'颜色': "藏青"}, 179.0, 229.0, 22, "690123459048"),
+            ("AURORA-SKU-046-BLK", "邮差包 曜黑", {'颜色': "曜黑"}, 179.0, 229.0, 28, "690123459049"),
+        ],
+        'image': _IMG_MESSENGER,
+    },
+    {
+        'code': "SPU-AURORA-047",
+        'title': "极光 羊毛混纺针织冷帽 (四色罗纹)",
+        'subtitle': "羊毛混纺 | 罗纹锁温 | 四色",
+        'description': "秋冬保暖小件:羊毛混纺罗纹针织,弹力包头不紧勒;四色都是好搭的秋冬色,男女同款;洗护建议冷水手洗平铺阴干,防变形。",
+        'category': "配饰",
+        'main_image': _IMG_BEANIE,
+        'banners': [_IMG_BEANIE],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["曜黑", "深棕", "驼色", "米白"],
+            },
+        ],
+        'specs': {
+            '材质': "羊毛混纺(含羊毛约 30%)",
+            '帽型': "罗纹卷边冷帽(均码)",
+            '弹力': "高弹包头的钱不勒头",
+            '洗护建议': "冷水手洗,平铺阴干",
+            '适用场景': "秋冬通勤 / 骑行 / 户外",
+        },
+        'skus': [
+            ("AURORA-SKU-047-BLK", "冷帽 曜黑", {'颜色': "曜黑"}, 79.0, 99.0, 40, "690123459050"),
+            ("AURORA-SKU-047-BRN", "冷帽 深棕", {'颜色': "深棕"}, 79.0, 99.0, 30, "690123459051"),
+            ("AURORA-SKU-047-CML", "冷帽 驼色", {'颜色': "驼色"}, 79.0, 99.0, 30, "690123459052"),
+            ("AURORA-SKU-047-WHT", "冷帽 米白", {'颜色': "米白"}, 79.0, 99.0, 25, "690123459053"),
+        ],
+        'image': _IMG_BEANIE,
+    },
+    {
+        'code': "SPU-AURORA-048",
+        'title': "极光 精梳棉毛圈运动袜 (五双装)",
+        'subtitle': "毛圈底缓震 | 精梳棉 | 五双装",
+        'description': "五双装的良心基础袜:足弓中筒加毛圈底,缓震吸汗不磨脚;精梳棉透气,罗纹袜口不勒腿不滑落;39-42 与 43-46 两个码段覆盖全家。",
+        'category': "运动配件",
+        'main_image': _IMG_SOCKS,
+        'banners': [_IMG_SOCKS],
+        'dimensions': [
+            {
+                'name': "尺码",
+                'values': ["39-42", "43-46"],
+            },
+        ],
+        'specs': {
+            '材质': "精梳棉 + 氨纶",
+            '底部': "毛圈底缓震",
+            '数量': "五双装(混色)",
+            '袜口': "中筒罗纹(不滑落)",
+            '洗护建议': "机洗洗衣袋,忌高温烘干",
+            '适用场景': "运动 / 日常 / 徒步",
+        },
+        'skus': [
+            ("AURORA-SKU-048-3942", "运动袜五双装 39-42", {'尺码': "39-42"}, 59.0, 79.0, 50, "690123459054"),
+            ("AURORA-SKU-048-4346", "运动袜五双装 43-46", {'尺码': "43-46"}, 59.0, 79.0, 45, "690123459055"),
+        ],
+        'image': _IMG_SOCKS,
+    },
+    {
+        'code': "SPU-AURORA-049",
+        'title': "极光 速干网眼骑行短袖骑行服 (后置三袋)",
+        'subtitle': "速干网眼 | 后置三袋 | 反光条",
+        'description': "入门到进阶都合适的骑行上衣:速干网眼面料贴合不兜风,后置三兜放能量胶与手机;下摆防滑带骑行动作不卷边;夜骑反光条提升辨识度,按骑行服贴身码选,偏胖建议大一号。",
+        'category': "骑行装备",
+        'main_image': _IMG_JERSEY,
+        'banners': [_IMG_JERSEY],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["橄榄绿", "曜黑"],
+            },
+            {
+                'name': "尺码",
+                'values': ["M", "L", "XL"],
+            },
+        ],
+        'specs': {
+            '面料': "速干网眼聚酯纤维",
+            '口袋': "后置三袋(能量胶/手机)",
+            '防滑': "下摆防滑带",
+            '安全': "夜骑反光条",
+            '尺码建议': "骑行服贴身码,微胖大一号",
+            '适用场景': "公路骑行 / 通勤骑 / 骑行台",
+        },
+        'skus': [
+            ("AURORA-SKU-049-OLV-M", "骑行服 橄榄绿 M", {'颜色': "橄榄绿", '尺码': "M"}, 179.0, 229.0, 20, "690123459056"),
+            ("AURORA-SKU-049-OLV-L", "骑行服 橄榄绿 L", {'颜色': "橄榄绿", '尺码': "L"}, 179.0, 229.0, 25, "690123459057"),
+            ("AURORA-SKU-049-OLV-XL", "骑行服 橄榄绿 XL", {'颜色': "橄榄绿", '尺码': "XL"}, 179.0, 229.0, 18, "690123459058"),
+            ("AURORA-SKU-049-BLK-M", "骑行服 曜黑 M", {'颜色': "曜黑", '尺码': "M"}, 179.0, 229.0, 20, "690123459059"),
+            ("AURORA-SKU-049-BLK-L", "骑行服 曜黑 L", {'颜色': "曜黑", '尺码': "L"}, 179.0, 229.0, 26, "690123459060"),
+            ("AURORA-SKU-049-BLK-XL", "骑行服 曜黑 XL", {'颜色': "曜黑", '尺码': "XL"}, 179.0, 229.0, 18, "690123459061"),
+        ],
+        'image': _IMG_JERSEY,
+    },
+    {
+        'code': "SPU-AURORA-050",
+        'title': "极光 USB-C 快充自行车前尾灯组 (IPX5)",
+        'subtitle': "前白后红 | USB-C快充 | IPX5防水",
+        'description': "夜骑安全刚需:前灯白光三档 + 尾灯红光五档爆闪,城市通勤穿透力足够;USB-C 快充二合一充电线,单次续航高亮约 3 小时;硅胶绑带免工具安装,任何车把都能上。",
+        'category': "骑行装备",
+        'main_image': _IMG_BIKE_LIGHT,
+        'banners': [_IMG_BIKE_LIGHT],
+        'dimensions': [],
+        'specs': {
+            '灯组': "前灯白光三档 + 尾灯红光五档",
+            '充电': "USB-C 快充(二合一)",
+            '续航': "高亮约 3h / 闪模式约 6h",
+            '防水': "IPX5(雨天可用)",
+            '安装': "硅胶绑带免工具",
+            '适用场景': '夜骑通勤 / 山地夜练',
+        },
+        'skus': [
+            ("AURORA-SKU-050-STD", "前尾灯组 标准套装", {}, 99.0, 139.0, 40, "690123459062"),
+        ],
+        'image': _IMG_BIKE_LIGHT,
+    },
+    {
+        'code': "SPU-AURORA-051",
+        'title': "极光 数显便携电动打气筒 (120psi 预设胎压)",
+        'subtitle': "数显胎压 | 预设自停 | 一机双嘴",
+        'description': "充电式电动打气筒:数显屏实时胎压,预设目标值自动停止,法嘴/美嘴双气嘴免转换;单次充电可充 8-10 条公路胎,家用车库与骑行应急两相宜,随车附收纳袋。",
+        'category': "骑行装备",
+        'main_image': _IMG_BIKE_PUMP,
+        'banners': [_IMG_BIKE_PUMP],
+        'dimensions': [],
+        'specs': {
+            '压力': "最高 120psi(公路胎够用)",
+            '显示': "LED 数显实时胎压",
+            '模式': "预设胎压自动停止",
+            '气嘴': "法嘴/美嘴双兼容 + 球类气针",
+            '续航': "单充约 8-10 条 700c 胎",
+            '适用场景': "家用备胎 / 骑行应急 / 球类充气",
+        },
+        'skus': [
+            ("AURORA-SKU-051-STD", "电动打气筒 标准版", {}, 199.0, 259.0, 30, "690123459063"),
+        ],
+        'image': _IMG_BIKE_PUMP,
+    },
+    {
+        'code': "SPU-AURORA-052",
+        'title': "极光 16合1 折叠自行车修理多功能工具",
+        'subtitle': "16合1 | 折叠便携 | 内六角全套",
+        'description': "车友口袋工具:16 合 1 折叠整合内六角/梅花批/辐条刀/截链器位,阳极氧化铝片体不锈蚀;折叠后掌心大小塞进尾包刚好,长途骑行与家用维护一件搞定。",
+        'category': "骑行装备",
+        'main_image': _IMG_BIKE_MULTITOOL,
+        'banners': [_IMG_BIKE_MULTITOOL],
+        'dimensions': [],
+        'specs': {
+            '功能数': "16 合 1(内六角/梅花/辐条刀等)",
+            '材质': "Cr-V 铬钒钢 + 阳极氧化铝片",
+            '收纳': "折叠后约 8cm,尾包可放",
+            '重量': "约 180g",
+            '适用场景': "长途骑行 / 家用维护",
+        },
+        'skus': [
+            ("AURORA-SKU-052-STD", "16合1 多功能工具", {}, 79.0, 99.0, 45, "690123459064"),
+        ],
+        'image': _IMG_BIKE_MULTITOOL,
+    },
+    {
+        'code': "SPU-AURORA-053",
+        'title': "极光 骑行手机支架 (减震快拆 360°旋转)",
+        'subtitle': "减震快拆 | 360°旋转 | 四爪锁固",
+        'description': "导航好帮手:四爪机械锁固 + 橡胶减震垫,颠簸路手机纹丝不动;360° 旋转横竖屏随心切,快拆扳手一秒取下;适配 4.7-7 寸主流机型与两类车把径。",
+        'category': "骑行装备",
+        'main_image': _IMG_BIKE_PHONE_MOUNT,
+        'banners': [_IMG_BIKE_PHONE_MOUNT],
+        'dimensions': [],
+        'specs': {
+            '锁固': "四爪机械锁 + 橡胶减震",
+            '旋转': "360° 横竖屏",
+            '快拆': "扳手一秒取放",
+            '适配': "4.7-7 寸手机 / 22-32mm 车把",
+            '适用场景': '骑行导航 / 电动通勤',
+        },
+        'skus': [
+            ("AURORA-SKU-053-STD", "骑行手机支架 标准版", {}, 69.0, 89.0, 40, "690123459065"),
+        ],
+        'image': _IMG_BIKE_PHONE_MOUNT,
+    },
+    {
+        'code': "SPU-AURORA-054",
+        'title': "极光 28寸万向轮托运行李箱 (大容量加厚拉杆)",
+        'subtitle': "28寸托运 | 加厚铝拉杆 | 干湿分区",
+        'description': "长途托运主力:28寸约 85L 装下两周行李,加厚铝合金宽拉杆摇晃小;TSA 海关锁托运免撬箱,静音万向轮重箱也好推;内部 X 束紧带加拉链湿区,脏衣鞋履分开装。",
+        'category': "旅行装备",
+        'main_image': _IMG_SUITCASE_28,
+        'banners': [_IMG_SUITCASE_28],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["曜黑", "雾霾蓝"],
+            },
+        ],
+        'specs': {
+            '容积': "约 85L(28寸托运规格)",
+            '拉杆': "加厚铝合金宽拉杆",
+            '锁具': "TSA 海关密码锁",
+            '轮组': "360° 静音万向轮",
+            '内部分区': "X 束紧带 + 拉链湿区",
+            '适用场景': "长途托运 / 留学 / 全家出游",
+        },
+        'skus': [
+            ("AURORA-SKU-054-BLK", "托运箱28寸 曜黑", {'颜色': "曜黑"}, 529.0, 659.0, 18, "690123459066"),
+            ("AURORA-SKU-054-BLU", "托运箱28寸 雾霾蓝", {'颜色': "雾霾蓝"}, 529.0, 659.0, 15, "690123459067"),
+        ],
+        'image': _IMG_SUITCASE_28,
+    },
+    {
+        'code': "SPU-AURORA-055",
+        'title': "极光 U型记忆棉旅行颈枕 (可拆洗外套)",
+        'subtitle': "记忆棉慢回弹 | 可拆洗 | 挂扣收纳",
+        'description': "红眼航班救星:慢回弹记忆棉托住颈椎不落枕,U 型人体工学两侧加高;外套拉链可拆洗,车里机舱说睡就睡;收纳后压缩挂扣上行李箱不占地方。",
+        'category': "旅行装备",
+        'main_image': _IMG_NECK_PILLOW,
+        'banners': [_IMG_NECK_PILLOW],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["藏青", "雾灰"],
+            },
+        ],
+        'specs': {
+            '内芯': "慢回弹记忆棉",
+            '外套': "针织外套拉链可拆洗",
+            '收纳': "压缩收纳 + 行李箱挂扣",
+            '重量': "约 280g",
+            '适用场景': "航班 / 高铁 / 长途大巴",
+        },
+        'skus': [
+            ("AURORA-SKU-055-NVY", "旅行颈枕 藏青", {'颜色': "藏青"}, 89.0, 119.0, 35, "690123459068"),
+            ("AURORA-SKU-055-GRY", "旅行颈枕 雾灰", {'颜色': "雾灰"}, 89.0, 119.0, 30, "690123459069"),
+        ],
+        'image': _IMG_NECK_PILLOW,
+    },
+    {
+        'code': "SPU-AURORA-056",
+        'title': "极光 大容量防水挂式洗漱包 (干湿分离)",
+        'subtitle': "防水面料 | 挂钩干湿分离 | 多隔层",
+        'description': "出差住酒店的体面细节:防水面料溅水不渗,展开挂钩一挂台面再小也有落脚处;干湿分离 wet 区放剃须刀化妆棉,多隔层牙刷护肤品各归各位。",
+        'category': "旅行装备",
+        'main_image': _IMG_TOILETRY,
+        'banners': [_IMG_TOILETRY],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["藏青", "曜黑"],
+            },
+        ],
+        'specs': {
+            '面料': "防水涤纶(溅水不渗)",
+            '结构': "展开挂钩 + 干湿分离 wet 区",
+            '隔层': "多隔层 + 弹性插带",
+            '容量': "约 6L",
+            '适用场景': "出差 / 健身房 / 旅行",
+        },
+        'skus': [
+            ("AURORA-SKU-056-NVY", "洗漱包 藏青", {'颜色': "藏青"}, 99.0, 129.0, 30, "690123459070"),
+            ("AURORA-SKU-056-BLK", "洗漱包 曜黑", {'颜色': "曜黑"}, 99.0, 129.0, 28, "690123459071"),
+        ],
+        'image': _IMG_TOILETRY,
+    },
+    {
+        'code': "SPU-AURORA-057",
+        'title': "极光 全球通用旅行转换插头 (双Type-C快充)",
+        'subtitle': "全球四标 | 双Type-C | 保险丝保护",
+        'description': "出境游一件搞定充电:覆盖美标/欧标/英标/澳标四大插座体系,双 Type-C 加双 USB-A 最多四设备同充;内置 10A 保险丝过载保护,出行前记得确认目的地电压范围。",
+        'category': "旅行装备",
+        'main_image': _IMG_ADAPTER,
+        'banners': [_IMG_ADAPTER],
+        'dimensions': [],
+        'specs': {
+            '插座体系': "美/欧/英/澳四标覆盖",
+            '充电口': "双 Type-C + 双 USB-A",
+            '功率': "Type-C 单口最大 20W PD",
+            '保护': "10A 保险丝过载保护",
+            '适用场景': "出境旅行 / 商务出差",
+        },
+        'skus': [
+            ("AURORA-SKU-057-STD", "全球转换插头 标准版", {}, 129.0, 169.0, 40, "690123459072"),
+        ],
+        'image': _IMG_ADAPTER,
+    },
+    {
+        'code': "SPU-AURORA-058",
+        'title': "极光 316不锈钢真空保温杯 500ml (弹盖直饮)",
+        'subtitle': "316内胆 | 6h保温 | 弹盖直饮",
+        'description': "通勤与户外的水杯答案:316 不锈钢真空内胆,6 小时保温 4 小时保冷;弹盖单手开合直饮不洒,杯底防滑硅胶垫;车载杯架与背包侧兜都放得下。",
+        'category': "旅行装备",
+        'main_image': _IMG_THERMOS,
+        'banners': [_IMG_THERMOS],
+        'dimensions': [
+            {
+                'name': "颜色",
+                'values': ["曜黑", "岩灰"],
+            },
+        ],
+        'specs': {
+            '内胆': "316 不锈钢真空",
+            '保温': "6h(95℃ 注水)/ 保冷 4h",
+            '开合': "弹盖单手直饮",
+            '容量': "500ml(车载杯架适配)",
+            '洗护建议': "首次使用温水洗,勿装碳酸饮料",
+            '适用场景': "通勤 / 户外 / 车载",
+        },
+        'skus': [
+            ("AURORA-SKU-058-BLK", "保温杯 曜黑", {'颜色': "曜黑"}, 149.0, 189.0, 35, "690123459073"),
+            ("AURORA-SKU-058-GRY", "保温杯 岩灰", {'颜色': "岩灰"}, 149.0, 189.0, 30, "690123459074"),
+        ],
+        'image': _IMG_THERMOS,
+    },
+    {
+        'code': "SPU-AURORA-059",
+        'title': "极光 数显便携行李秤 (50kg 精准防超重)",
+        'subtitle': "50kg量程 | 数显防超重 | 挂钩称重",
+        'description': "值机柜台前的底气:50kg 量程 10g 精度,挂钩式单手称行李,超重当场匀行李不窘迫;TARE 去皮与单位切换 kg/lb 都有,自带备用电池出行即用。",
+        'category': "旅行装备",
+        'main_image': _IMG_LUGGAGE_SCALE,
+        'banners': [_IMG_LUGGAGE_SCALE],
+        'dimensions': [],
+        'specs': {
+            '量程': "50kg / 精度 10g",
+            '显示': "LCD 数显(蓝底白字)",
+            '功能': "TARE 去皮 / kg-lb 切换 / 过载提示",
+            '电池': "CR2032(随附+备用)",
+            '适用场景': '值机防超重 / 采购称重',
+        },
+        'skus': [
+            ("AURORA-SKU-059-STD", "行李秤 标准版", {}, 59.0, 79.0, 40, "690123459075"),
+        ],
+        'image': _IMG_LUGGAGE_SCALE,
+    },
+    {
+        'code': "SPU-AURORA-060",
+        'title': "极光 便携晾衣绳 + 速干毛巾旅行套装",
+        'subtitle': "弹力晾衣绳 | 速干毛巾 | 收纳袋装",
+        'description': "长途旅行洗衣自由:弹力晾衣绳带 8 个防滑夹,浴缸阳台随时晾;加厚速干毛巾 3 倍吸水率,2 小时风干;全套收进附赠收纳袋,塞进行李箱侧兜刚刚好。",
+        'category': "旅行装备",
+        'main_image': _IMG_CLOTHESLINE,
+        'banners': [_IMG_CLOTHESLINE],
+        'dimensions': [],
+        'specs': {
+            '晾衣绳': "弹力绳 + 8 防滑夹(约 2.5m)",
+            '毛巾': "加厚速干巾 70×140cm(3 倍吸水)",
+            '风干': "通风环境约 2h",
+            '收纳': "附赠收纳袋(约掌心大)",
+            '适用场景': "长途旅行 / 露营 / 健身房",
+        },
+        'skus': [
+            ("AURORA-SKU-060-STD", "晾衣绳速干巾套装", {}, 69.0, 89.0, 35, "690123459076"),
+        ],
+        'image': _IMG_CLOTHESLINE,
     },
 ]
 
