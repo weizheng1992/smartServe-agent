@@ -11,7 +11,9 @@
 #   health_watch.sh --dry-run  # 只打印判定,不发不写状态(部署验收用)
 #   health_watch.sh --test     # 发送一条测试消息(验证微信通道)
 #
-# 凭据(服务器侧 .env.prod 追加,不入库;两者都配则企业微信优先):
+# 凭据(服务器侧 .env.prod 追加,不入库;多通道并存按 飞书→企业微信→Server酱 优先):
+#   WATCH_FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx  # 飞书群自定义机器人(推荐)
+#   WATCH_FEISHU_SECRET=xxx                              # 飞书机器人「加签」密钥(启用了签名校验才配)
 #   WATCH_SENDKEY=SCTxxxx                                # Server酱·个人微信
 #   WATCH_WECOM_WEBHOOK=https://qyapi.weixin.qq.com/...  # 企业微信群机器人
 # 阈值/目标可覆写(同文件):WATCH_DISK_PCT(85) WATCH_DISK_MIN_GB(8)
@@ -59,11 +61,35 @@ send_wechat() {
     echo "$body" | sed 's/^/  | /'
     return 0
   fi
-  if [ -n "${WATCH_WECOM_WEBHOOK:-}" ]; then
+  if [ -n "${WATCH_FEISHU_WEBHOOK:-}" ]; then
+    # 飞书群自定义机器人;启用「加签」时按官方算法补 timestamp+sign
+    # (sign = base64(hmac_sha256(key=timestamp+"\n"+secret, data="")))
+    local ts sign payload
+    ts=$(date +%s)
+    if [ -n "${WATCH_FEISHU_SECRET:-}" ]; then
+      sign=$(printf '%s\n%s' "$ts" "$WATCH_FEISHU_SECRET" | openssl dgst -sha256 -hmac "$(printf '%s\n%s' "$ts" "$WATCH_FEISHU_SECRET")" -binary | base64)
+      payload=$(python3 - "$title" "$body" "$ts" "$sign" <<'PY'
+import json, sys
+print(json.dumps({"timestamp": sys.argv[3], "sign": sys.argv[4], "msg_type": "text",
+                  "content": {"text": sys.argv[1] + "
+" + sys.argv[2]}}, ensure_ascii=False))
+PY
+)
+    else
+      payload=$(python3 - "$title" "$body" <<'PY'
+import json, sys
+print(json.dumps({"msg_type": "text", "content": {"text": sys.argv[1] + "
+" + sys.argv[2]}}, ensure_ascii=False))
+PY
+)
+    fi
+    curl -s -m 10 -H 'Content-Type: application/json' -d "$payload" "$WATCH_FEISHU_WEBHOOK" >/dev/null
+  elif [ -n "${WATCH_WECOM_WEBHOOK:-}" ]; then
     local payload
     payload=$(python3 - "$title" "$body" <<'PY'
 import json, sys
-print(json.dumps({"msgtype": "text", "text": {"content": sys.argv[1] + "\n" + sys.argv[2]}}, ensure_ascii=False))
+print(json.dumps({"msgtype": "text", "text": {"content": sys.argv[1] + "
+" + sys.argv[2]}}, ensure_ascii=False))
 PY
 )
     curl -s -m 10 -H 'Content-Type: application/json' -d "$payload" "$WATCH_WECOM_WEBHOOK" >/dev/null
@@ -71,7 +97,7 @@ PY
     curl -s -m 10 -G "https://sctapi.ftqq.com/${WATCH_SENDKEY}.send" \
       --data-urlencode "title=$title" --data-urlencode "desp=$body" >/dev/null
   else
-    echo "[watch] 未配置 WATCH_SENDKEY / WATCH_WECOM_WEBHOOK,告警只落日志"
+    echo "[watch] 未配置 WATCH_FEISHU_WEBHOOK / WATCH_WECOM_WEBHOOK / WATCH_SENDKEY,告警只落日志"
   fi
 }
 

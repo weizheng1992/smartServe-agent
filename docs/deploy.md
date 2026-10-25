@@ -168,19 +168,20 @@ docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up 
 **健康检查**：`/api/health`（gateway）、`/healthz`（四个前端站点）；compose 已带
 healthcheck + 依赖编排（gateway 等 migrate 成功、web 等 gateway 健康）。
 
-**监控告警 → 微信（2026-10-25 起）**：`deploy/scripts/health_watch.sh` 由 B 机
-cron 每 5 分钟巡检，异常推微信。巡检面：根分区磁盘（**第一公民** —— 10-24 网关
+**监控告警 → 飞书（2026-10-25 起）**：`deploy/scripts/health_watch.sh` 由 B 机
+cron 每 5 分钟巡检，异常推送。巡检面：根分区磁盘（**第一公民** —— 10-24 网关
 镜像 19.8GB 拉取曾把 50G 盘写爆；85% 或剩 <8GB 即 CRITICAL）、内存、load1、
 三容器运行+健康+重启计数增量、gateway `/api/health`、四前端 `/healthz`、A 机
 PG TCP 连通。告警按 key 冷却 30 分钟（`WATCH_COOLDOWN` 可调），故障恢复另发
 ✅ 通知；状态落 `deploy/.watch/`。接入（凭据只进服务器 `.env.prod`，不入库）：
 
 ```bash
-# 个人微信:Server酱(https://sct.ftqq.com)微信扫码拿 SendKey,免费 5 条/天
-echo 'WATCH_SENDKEY=SCTxxxx' >> ~/agent-all/deploy/.env.prod
-# 或企业微信群机器人(群设置→添加机器人→webhook,近无限额,重度告警推荐)
-echo 'WATCH_WECOM_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...' >> ~/agent-all/deploy/.env.prod
-bash ~/agent-all/deploy/scripts/health_watch.sh --test     # 通道验证,微信应收到测试消息
+# 飞书群自定义机器人(推荐,官方通道近无限额):群设置→群机器人→添加自定义机器人
+# →复制 Webhook;若启用了「签名校验」,同页复制加签密钥一并配:
+echo 'WATCH_FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx' >> ~/agent-all/deploy/.env.prod
+echo 'WATCH_FEISHU_SECRET=xxx' >> ~/agent-all/deploy/.env.prod   # 只在启用加签时需要
+# 备选通道(与飞书并存时飞书优先):WATCH_WECOM_WEBHOOK=企业微信机器人 / WATCH_SENDKEY=Server酱(个人微信,免费 5 条/天)
+bash ~/agent-all/deploy/scripts/health_watch.sh --test     # 通道验证,飞书群应收到测试消息
 # cron(B 机已装,重装同款):
 # */5 * * * * /home/ubuntu/agent-all/deploy/scripts/health_watch.sh >> /home/ubuntu/agent-all/deploy/.watch/cron.log 2>&1
 ```
