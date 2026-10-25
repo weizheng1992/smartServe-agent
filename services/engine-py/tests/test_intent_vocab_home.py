@@ -39,7 +39,7 @@ FROZEN_GUIDE_FALLBACK = (
 
 BYTE_CASES: list[tuple[str, str, str]] = [
     # (说明, 新派生 pattern, 冻结旧字面)
-    ("resolver._ADD_RE", resolver._ADD_RE.pattern, r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购)"),
+    ("resolver._ADD_RE", resolver._ADD_RE.pattern, r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购|加到购物车|加进购物车)"),
     (
         "resolver._VIEW_ONLY_RE",
         resolver._VIEW_ONLY_RE.pattern,
@@ -248,7 +248,7 @@ BYTE_CASES: list[tuple[str, str, str]] = [
     (
         "cart_skill._CAN_HANDLE_RE(头段即 ADD_TO_CART_RE 原样拼入;余段 fixture 钉)",
         cart_skill._CAN_HANDLE_RE.pattern.split("|购物车|")[0],
-        r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购)",
+        r"(?:加购物车|加入购物车|放进购物车|放入购物车|加购|加到购物车|加进购物车)",
     ),
 ]
 
@@ -401,16 +401,19 @@ def test_fixture_parity_reordered_faces() -> None:
 def test_fixture_parity_add_action_strip_sub() -> None:
     """剥词面是 re.sub 语义:剥词结果必须与旧串逐字一致(短词殿后约束)。"""
     frozen = (
-        r"加入购物车|放进购物车|放入购物车|加购物车|加购|购物车|帮我|给我|麻烦|我想|想要|"
+        r"加购物车|加入购物车|放进购物车|放入购物车|加购|加到购物车|加进购物车|购物车|帮我|给我|麻烦|我想|想要|"
         r"放到|放进|放入|装进|扔进|丢进|"
-        r"下单|结账|来一[件个个只]|一[件个个只]|\d+\s*[件个个只]|加入|谢谢|最后|这个|那个|一下|买|要|加|吧|呗|哦|哈|把|"
-        r"第\s*[0-9一二三四五六七八九十百千]*"
+        r"下单|结账|来一[件个个只]|一[件个个只]|\d+\s*[件个个只]|加入|谢谢|最后|这个|那个|那款|这款|一下|买|要|吧|呗|哦|哈|把|"
+        r"第\s*[0-9一二三四五六七八九十百千]*\s*[件款个只]?"
     )
     old_re = re.compile(frozen)
     samples = [
         "把第2件加入购物车", "帮我把加购一下", "我想加购卫衣", "放进购物车",
         "放入购物车", "加购跑步鞋", "把那个加入购物车", "给我加购最后一件",
         "改成M码", "曜石黑", "买单",
+        # 2026-10-25 sim 实弹三形:加到/加进变体、名字内含「加」、那款前缀
+        "那把极光 8mm加厚TPE双面防滑瑜伽垫加到购物车", "帮我加进购物车～",
+        "把那款无线蓝牙耳机加到购物车里", "那把第2件加入购物车吧，高山徒步背包 45L 规格。",
     ]
     diff = [
         f"{s!r}: old={old_re.sub(' ', s)!r} new={resolver._ADD_ACTION_STRIP_RE.sub(' ', s)!r}"

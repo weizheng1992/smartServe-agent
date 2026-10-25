@@ -643,7 +643,41 @@ async def _add(env: CartEnv) -> dict:
         return await _bestseller_search_reply(env)
     if named_query:
         shelf_hit = await MallDomainService.find_shelf_sku_by_description(named_query)
-        if shelf_hit:
+        shelf_status = (shelf_hit or {}).get("status")
+        if shelf_status == "same_spu_specs":
+            # 货架命中 SPU 但规格未消解(2026-10-25 sim 实弹改判):反问规格,
+            # 严禁落「店内没有」话术 —— 此前歧义与 miss 同返 None,货架明明
+            # 匹配到了正确商品(实弹 F1 0.78 瑜伽垫/0.47 双肩包/0.52 徒步背包)
+            # 却被谎报「没有找到」。
+            specs_text = "\n".join(
+                f"{i}. {c['skuTitle'] or ' / '.join(str(v) for v in (c['spec'] or {}).values())} ¥{c['price']}"
+                for i, c in enumerate(shelf_hit["candidates"], 1)
+            )
+            return {
+                "success": True,
+                "output": (
+                    f"找到了「{shelf_hit['spuTitle']}」，共有 {len(shelf_hit['candidates'])} 个在售规格：\n"
+                    f"{specs_text}\n\n"
+                    "请告诉我您要哪个规格（例如颜色/尺码），我马上帮您加入！🛒"
+                ),
+                "nextAction": "finish",
+                "extra": _no_add_extra(env),
+            }
+        if shelf_status == "cross_spu":
+            cand_text = "\n".join(
+                f"{i}. 【{c['spuTitle']}】 {(c['skuTitle'] + ' ') if c['skuTitle'] else ''}¥{c['price']}".rstrip()
+                for i, c in enumerate(shelf_hit["candidates"], 1)
+            )
+            return {
+                "success": True,
+                "output": (
+                    f"您说的商品没有唯一匹配，最接近的是这几款：\n{cand_text}\n\n"
+                    "请告诉我您想要哪一款，我马上帮您加入！🛒"
+                ),
+                "nextAction": "finish",
+                "extra": _no_add_extra(env),
+            }
+        if shelf_status == "hit":
             # 点名直配行以 SKU 码为主键(与商城页加购同构);行上同时携带
             # spuId(SPU 回指)与干净 SPU 标题;结算 sku_code 直配优先不被换规格。
             target_sku_id = shelf_hit["skuCode"]

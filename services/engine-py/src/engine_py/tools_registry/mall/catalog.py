@@ -999,10 +999,15 @@ class CatalogMixin:
         实现按名解析 —— 名字被静默忽略后落 candidate[0],真商品错替与幻影
         同族(此前拆除的是假商品兜底,真商品错替这半一直都在)。
 
-        评分:查询对 (SPU 标题 + SKU 标题 + 规格值) 的字符二元组 F1。判据:
-        冠军分 ≥0.35 且领先次名 ≥0.03 才直配;并列/接近并列 = 无法唯一确定,
-        返回 None 由调用方诚实反问(同名不同规格、货架无此物都走这条路)。
-        货架不可达/空架返回 None,绝不阻断。
+        评分:查询对 (SPU 标题 + SKU 标题 + 规格值) 的字符二元组 F1。四种
+        出口(2026-10-25 歧义改判:此前歧义与 miss 同返 None,调用方统一
+        转述「店内没有」,货架明明匹配到了正确 SPU 也被谎报):
+        - 唯一冠军(≥0.35 且领先次名 ≥0.03)→ ``status="hit"`` 携带确切 SKU;
+        - 同 SPU 兄弟规格并列、规格词消解不出唯一 → ``status="same_spu_specs"``
+          携带 SPU 与在售规格清单(调用方须反问规格,严禁谎称没找到);
+        - 跨 SPU 近并列 → ``status="cross_spu"`` 携带候选清单(反问哪款);
+        - 冠军分不足/货架不可达/空架 → ``None``(真 miss,调用方可诚实说
+          没找到)。绝不阻断。
         """
         query_tokens = MallDomainService._shelf_text_tokens(query)
         if not query_tokens:
@@ -1051,20 +1056,32 @@ class CatalogMixin:
 
         near = [s for s in scored if s[0] >= best_f1 - 0.03]
         if len(near) > 1:
-            # 近并列二分:跨 SPU(两款不同商品都像)→ 诚实反问;同 SPU 兄弟规格
-            # → 规格词命中多者胜(「冰川白 M码」vs「曜石黑 L」),命中同数 =
-            # 用户没消解规格,反问尺码颜色。
+            # 近并列二分:跨 SPU(两款不同商品都像)→ 列候选反问;同 SPU 兄弟
+            # 规格 → 规格词命中多者胜(「冰川白 M码」vs「曜石黑 L」),命中同数
+            # = 用户没消解规格 → 反问规格(2026-10-25 前此路误返 None 被
+            # 调用方谎报「店内没有」)。
             if any(s[2]["spu_code"] != near[0][2]["spu_code"] for s in near[1:]):
-                return None
+                return {
+                    "status": "cross_spu",
+                    "candidates": [MallDomainService._shelf_candidate(s[2]) for s in near[:3]],
+                }
             hits = [(_spec_hits(s[2]), s) for s in near]
             max_h = max(h for h, _ in hits)
             winners = [s for h, s in hits if h == max_h]
             if len(winners) != 1:
-                return None
+                head = winners[0][2] if winners else near[0][2]
+                return {
+                    "status": "same_spu_specs",
+                    "spuCode": head["spu_code"],
+                    "spuTitle": head["spu_title"],
+                    "imageUrl": head["main_image"],
+                    "candidates": [MallDomainService._shelf_candidate(s[2]) for s in near],
+                }
             best_code, best_row = winners[0][1], winners[0][2]
 
         best_spec = best_row["spec_attributes"] if isinstance(best_row["spec_attributes"], dict) else {}
         return {
+            "status": "hit",
             "skuCode": best_code,
             "spuCode": best_row["spu_code"],
             "spuTitle": best_row["spu_title"],
@@ -1074,4 +1091,19 @@ class CatalogMixin:
             "stock": int(best_row["stock"] or 0),
             "imageUrl": best_row["main_image"],
             "spec": best_spec,
+        }
+
+    @staticmethod
+    def _shelf_candidate(row: dict) -> dict:
+        """歧义出口的候选行投影:反问面渲染所需的最小字段集。"""
+        spec = row["spec_attributes"] if isinstance(row["spec_attributes"], dict) else {}
+        return {
+            "skuCode": row["sku_code"],
+            "spuCode": row["spu_code"],
+            "spuTitle": row["spu_title"],
+            "skuTitle": row["sku_title"] or "",
+            "spec": spec,
+            "price": float(row["price"]),
+            "stock": int(row["stock"] or 0),
+            "imageUrl": row["main_image"],
         }

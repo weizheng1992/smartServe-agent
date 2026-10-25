@@ -310,3 +310,55 @@ async def _pure_deixis_scenario(pg_factory) -> None:
         )
     finally:
         await _teardown_shelf(merchant_engine, original_reader)
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-25 sim 实弹改判:同 SPU 规格并列曾被谎报「店内没有」+ 剥词面
+# 单字「加」打穿商品名(「8mm加厚」→「厚」)。钉剥词契约与规格反问出口。
+# ---------------------------------------------------------------------------
+
+def test_named_query_remainder_2026_10_25_regressions():
+    """实弹三形的剥词契约:动作变体整族剥净、名字内「加」原样留存、
+    悬空指代前缀「那款」与尾缀「里/～」随剥。"""
+    from engine_py.skills.cart import resolver
+
+    # 「加到购物车」变体整族剥掉,商品名「8mm加厚」的「加」不受伤
+    rest = resolver.named_query_remainder("那把极光 8mm加厚TPE双面防滑瑜伽垫加到购物车")
+    assert "加厚" in rest, f"商品名「加」被剥穿: {rest!r}"
+    assert "加到购物车" not in rest and "购物车" not in rest
+    # 「加进购物车～」变体 + 波浪尾缀
+    rest = resolver.named_query_remainder("帮我加进购物车～")
+    assert rest == "", f"变体加购无点名应剥净: {rest!r}"
+    # 悬空指代前缀「那款」+ 尾缀「里」
+    assert resolver.named_query_remainder("把那款无线蓝牙耳机加到购物车里") == "无线蓝牙耳机"
+    # 序数+规格复合句:序数盘词(第2件)整段剥掉,规格文本留存供货架直配
+    rest = resolver.named_query_remainder("那把第2件加入购物车吧，高山徒步背包 45L 规格。")
+    assert "45L" in rest and "件" not in rest, f"序数残词未剥净: {rest!r}"
+    assert "规格" in rest
+
+
+def test_same_spu_spec_ambiguity_asks_not_lies(pg_factory):
+    """同 SPU 规格未消解 → 列在售规格反问,严禁谎报「店内没有」(2026-10-25
+    sim 实弹:瑜伽垫/双肩包/徒步背包三条全被「没有在店内找到」误答)。"""
+    asyncio.run(_same_spu_ambiguity_scenario(pg_factory))
+
+
+async def _same_spu_ambiguity_scenario(pg_factory) -> None:
+    from engine_py.tools_registry.mall_domain import MallDomainService
+
+    merchant_engine, original_reader = await _setup_shelf(pg_factory)
+    try:
+        # 冲锋衣三规格(曜石黑M/L、冰川白M),点名 SPU 全名不带规格词 → 规格并列
+        # (稀疏短名 F1 0.296<0.35 阈值走真 miss,另一契约;全名 0.727 进歧义出口)
+        result = (await CartManageSkill().execute(
+            _named_add_context("把极光三合一全天候户外硬壳冲锋衣加到购物车")
+        )).to_dict()
+        assert result["success"] is True
+        output = result["output"]
+        assert "没有在店内找到" not in output, f"货架有货却谎报没有: {output}"
+        assert "三合一" in output and "全天候" in output, f"必须回显命中的 SPU: {output[:80]}"
+        assert "曜石黑" in output and "冰川白" in output, f"必须列全在售规格: {output[:120]}"
+        items = (await MallDomainService._load_cart("CUST-NAMED-01")) or []
+        assert items == [], f"规格未消解严禁入车: {items}"
+    finally:
+        await _teardown_shelf(merchant_engine, original_reader)
