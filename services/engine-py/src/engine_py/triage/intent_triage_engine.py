@@ -245,6 +245,9 @@ _ADDRESS_INVERTED_RE = re.compile(
 )
 _ADDRESS_EXPLICIT_SAVE_RE = re.compile(r"\u4fdd\u5b58|\u5b58\u4e00\u4e0b|\u8bb0\u4e00\u4e0b|\u5b58\u5230\u5730\u5740\u7c3f|\u5b58\u8fdb\u5730\u5740\u7c3f|\u5e2e\u6211\u5b58")
 
+# \u6536\u4ef6\u4eba\u6807\u8bb0(18 \u53f7\u7968):\u8bed\u5e8f\u4e8c\u300cADDR,\u6536\u4ef6\u4ebaNAME,\u7535\u8bddPHONE\u300d\u7684\u786e\u5b9a\u6027\u5207\u5206\u951a
+_ADDRESS_RECEIVER_MARK_RE = re.compile(r"(?:\u6536\u4ef6\u4eba|\u6536\u8d27\u4eba|\u8054\u7cfb\u4eba|\u59d3\u540d)\s*[:\uff1a]?\s*")
+
 
 def _detect_address_save_inverted(text: str) -> dict | None:
     """\u5012\u88c5\u4fdd\u5b58\u5f62\u68c0\u51fa(\u7eaf\u51fd\u6570,\u6d4b\u8bd5\u7f1d;\u4ec5 _ADDRESS_CREATE_PAYLOAD_RE \u672a\u547d\u4e2d\u65f6
@@ -318,20 +321,36 @@ def detect_address_manage(text: str | None) -> dict | None:
     if phone_match:
         entities["receiverPhone"] = phone_match.group(1)
         before = payload[: phone_match.start()].strip(" ,，:：-—")
-        while True:
-            stripped = _NAME_PREFIX_RE.sub("", before).strip()
-            if stripped == before:
-                break
-            before = stripped
-        name_match = _CHINESE_NAME_RE.search(before)
-        if name_match:
-            entities["receiverName"] = name_match.group(1)
-        after = payload[phone_match.end():].strip(" ,，:：-—")
-        if after:
-            entities["fullAddress"] = after
-            parsed_addr = parse_chinese_address(after)
+        # 语序二收件人标记切分(18 号票 sim 模拟器实弹):自然语序
+        # 「保存收货地址:ADDR,收件人NAME,电话PHONE」地址在电话**前** —— 旧序
+        # 只认电话后取地址,此语序四字段全缺漏给 LLM 自由填(district 丢失/
+        # 城市重复/误路由全由此起)。标记前=地址段、标记后=姓名段,确定性解析。
+        seg = _ADDRESS_RECEIVER_MARK_RE.split(before, maxsplit=1)
+        if len(seg) == 2 and seg[1].strip():
+            entities["fullAddress"] = seg[0].strip(" ,，:：-—")
+            # 姓名取段首锚定匹配(段形「NAME,电话」:search 会越过逗号抓到
+            # 「电话」标签字面 —— 18 号票实弹);先剥残余电话标签再 match
+            name_seg = re.sub(r"[,，]\s*(?:电话|手机|联系方式|联系电话)\s*[:：]?\s*$", "", seg[1]).strip(" ,，:：-—")
+            name_match = _CHINESE_NAME_RE.match(name_seg)
+            if name_match:
+                entities["receiverName"] = name_match.group(1)
+        else:
+            # 语序一(历史形,电话居前):姓名走电话前段前缀剥除,地址取电话后段
+            while True:
+                stripped = _NAME_PREFIX_RE.sub("", before).strip()
+                if stripped == before:
+                    break
+                before = stripped
+            name_match = _CHINESE_NAME_RE.search(before)
+            if name_match:
+                entities["receiverName"] = name_match.group(1)
+            entities["fullAddress"] = payload[phone_match.end():].strip(" ,，:：-—")
+        if entities.get("fullAddress"):
+            parsed_addr = parse_chinese_address(entities["fullAddress"])
             if parsed_addr:
                 entities.update(parsed_addr)
+            else:
+                entities.pop("fullAddress", None)  # 解析不动=缺件,严禁半吊子地址进槽
     missing = [key for key in _ADDRESS_SAVE_REQUIRED if not entities.get(key)]
     return {"mode": "save", "entities": entities, "missingSlots": missing}
 

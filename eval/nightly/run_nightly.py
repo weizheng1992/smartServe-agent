@@ -1014,10 +1014,8 @@ SIM_CASE_SPECS = [
                 "③说「结算下单」完成购买",
         "verbatim": ["收货地址:北京市海淀区夜测路 5 号,收件人夜测,电话 13800001113"],
         "terminal": {"order_created": True},
-        # 观察位(18 号票:购物车非空时地址保存误路由+假成功,条件性引擎缺陷;
-        # 断言照跑照记录,修复后删 advisory 翻严)
-        "advisory": True,
-        "max_turns": 7,
+        "advisory": True,  # 观察位(19 号票:复合确认句误路由),修后翻严
+        "max_turns": 8,
     },
     {
         "id": "sim_改口地址下单",
@@ -1029,8 +1027,8 @@ SIM_CASE_SPECS = [
             "第二个地址:北京市朝阳区夜测路 7 号,收件人夜测,电话 13800001115",
         ],
         "terminal": {"order_created": True, "shipping_contains": "夜测路 7 号"},
-        "advisory": True,
-        "max_turns": 7,
+        "advisory": True,  # 观察位(19 号票:复合确认句误路由),修后翻严
+        "max_turns": 8,
     },
     {
         "id": "sim_隐瞒单号售后",

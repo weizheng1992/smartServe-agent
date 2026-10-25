@@ -593,3 +593,35 @@ class TestExecutorFastPathAddressBook:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class TestAddressSaveNaturalOrder:
+    """语序二确定性解析(18 号票,sim 模拟器实弹):「保存收货地址:ADDR,
+    收件人NAME,电话PHONE」地址在电话前 —— 旧序只认电话后取地址,此语序
+    四字段全缺漏给 LLM 自由填(district 丢失/城市重复/误路由全由此起)。"""
+
+    def test_natural_order_full_parse(self):
+        from engine_py.triage.intent_triage_engine import detect_address_manage
+
+        r = detect_address_manage("好的,麻烦帮我保存收货地址:北京市海淀区夜测路 5 号,收件人夜测,电话 13800001113。")
+        assert r["mode"] == "save"
+        assert r["missingSlots"] == []
+        e = r["entities"]
+        assert (e["province"], e["city"], e["district"]) == ("北京市", "北京市", "海淀区")
+        assert e["detailAddress"] == "夜测路 5 号"
+        assert e["receiverName"] == "夜测"  # 旧缺陷:search 越过逗号抓到「电话」字面
+        assert e["receiverPhone"] == "13800001113"
+
+    def test_create_verb_variant_and_second_address(self):
+        from engine_py.triage.intent_triage_engine import detect_address_manage
+
+        r = detect_address_manage("那麻烦你先帮我创建收货地址:北京市朝阳区夜测路 7 号,收件人夜测,电话 13800001115。")
+        assert r["missingSlots"] == []
+        assert r["entities"]["district"] == "朝阳区"
+        assert r["entities"]["detailAddress"] == "夜测路 7 号"
+
+    def test_incomplete_still_honest_missing(self):
+        from engine_py.triage.intent_triage_engine import detect_address_manage
+
+        r = detect_address_manage("帮我保存一下地址")
+        assert "district" in r["missingSlots"]  # 缺件诚实反问,严禁瞎猜落库
