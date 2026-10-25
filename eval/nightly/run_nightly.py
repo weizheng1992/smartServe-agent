@@ -999,6 +999,152 @@ async def run_boundary_eval_case() -> dict:
             "fails": [] if code == 0 else ["boundary 准确率低于闸(失败清单见上方输出)"]}
 
 
+# ---------------- LLM 用户模拟器(eval-gap-2026-10 09,τ²-bench 式) ----------------
+# 固定脚本多轮测不出真实分布形态(改口/隐瞒/犹豫);此处 LLM 按 persona 推进
+# 顾客侧对话,断言**全锚 DB 终态**(新订单/地址/审批单真值)—— 模拟器措辞方差
+# 伤不了断言。verbatim 信息(地址/单号)逐字注入,严禁模拟器即兴编造。
+# 模拟器 prompt 属试用期:累计人审 20 轮转正;期间断言语义不受影响。
+
+SIM_CASE_SPECS = [
+    {
+        "id": "sim_犹豫导购下单",
+        "persona": "犹豫型顾客:拿不准要什么,爱比较、追问细节,被推荐后会下决心",
+        "goal": "先就「背包或冲锋衣」咨询一到两轮(问材质/区别),然后按序完成购买:"
+                "①把客服推荐中的一件加入购物车;②给出收货地址要求保存;"
+                "③说「结算下单」完成购买",
+        "verbatim": ["收货地址:北京市海淀区夜测路 5 号,收件人夜测,电话 13800001113"],
+        "terminal": {"order_created": True},
+        # 观察位(18 号票:购物车非空时地址保存误路由+假成功,条件性引擎缺陷;
+        # 断言照跑照记录,修复后删 advisory 翻严)
+        "advisory": True,
+        "max_turns": 7,
+    },
+    {
+        "id": "sim_改口地址下单",
+        "persona": "干脆但爱改主意的顾客:下单前反复换主意",
+        "goal": "①要求把一件具体商品加入购物车;②给出第一个收货地址要求保存;"
+                "③马上改口要求把地址换成第二个地址;④说「结算下单」完成购买",
+        "verbatim": [
+            "第一个地址:北京市海淀区夜测路 6 号,收件人夜测,电话 13800001114",
+            "第二个地址:北京市朝阳区夜测路 7 号,收件人夜测,电话 13800001115",
+        ],
+        "terminal": {"order_created": True, "shipping_contains": "夜测路 7 号"},
+        "advisory": True,
+        "max_turns": 7,
+    },
+    {
+        "id": "sim_隐瞒单号售后",
+        "persona": "着急且表述不全的顾客:能少说就少说,被追问才补信息",
+        "goal": "要求退掉自己刚买的咖啡套装,第一轮只说「我要退款」不给订单号;"
+                "客服追问订单号或商品信息后才给出订单号",
+        "setup": "order",
+        "terminal": {"approval_waiting": True},
+        "max_turns": 4,
+    },
+]
+
+
+async def _sim_next_message(spec: dict, history: list[dict]) -> str:
+    """模拟顾客下一消息(或 <DONE>);verbatim 信息逐字注入防模拟器编地址/单号。"""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from engine_py.llm.chat import get_chat_model
+
+    verbatim = "\n".join(f"- {v}" for v in spec.get("verbatim") or [])
+    system = (
+        "你在评测中扮演一位电商顾客,与智能客服对话。只输出顾客的下一条消息原文"
+        "(纯文本,不超过 60 字,无旁白无引号无动作描述),严格按人设与目标推进对话,"
+        "每轮只推进一小步。若目标已达成(客服已办完你要的事)或对话明显卡死,只输出 <DONE>。\n"
+        f"人设:{spec['persona']}\n目标:{spec['goal']}\n"
+        + (f"以下信息出现时必须逐字使用,严禁改写或编造:\n{verbatim}\n" if verbatim else "")
+    )
+    resp = await get_chat_model().ainvoke(
+        [SystemMessage(content=system), HumanMessage(content=json.dumps(history, ensure_ascii=False))]
+    )
+    return str(getattr(resp, "content", "") or "").strip()
+
+
+async def run_sim_case(client, spec: dict, budget: dict) -> dict:
+    """τ² 式模拟顾客场景:LLM 顾客按 persona 推进,断言全锚 DB 终态,全局
+    编造检查照跑;预算/超时护栏与固定脚本场景同律。"""
+    thread_id = f"nightly_{spec['id']}_{int(time.time())}"
+    customer_id = f"{CUST_PREFIX}_{spec['id']}_{NIGHT}"
+    order_id = ""
+    if spec.get("setup") == "order":
+        order_id = await _create_nightly_order(client, customer_id)
+        if order_id:
+            spec = {**spec, "verbatim": [f"订单号:{order_id}"]}
+    orders_before: set[str] = set()
+    try:
+        r0 = await client.get("/api/store/orders", params={"customerId": customer_id, "limit": 50})
+        orders_before = {str(o.get("orderId") or "") for o in ((r0.json() or {}).get("orders") or [])}
+    except Exception:
+        pass
+
+    history: list[dict] = []
+    transcript: list[dict] = []
+    fails: list[str] = []
+    for i in range(int(spec.get("max_turns", 5))):
+        if budget["turns"] >= MAX_TURNS:
+            transcript.append({"turn": i, "message": "(轮次预算触顶,场景提前收束)", "output": ""})
+            break
+        budget["turns"] += 1
+        try:
+            msg = await asyncio.wait_for(_sim_next_message(spec, history), timeout=60)
+        except Exception as err:
+            fails.append(f"模拟器调用异常 {err!r}")
+            break
+        if not msg or msg.strip().upper() == "<DONE>":
+            break
+        history.append({"role": "customer", "text": msg[:120]})
+        t0 = time.monotonic()
+        try:
+            r = await _retry_on_connect(
+                client.post, "/api/store/chat",
+                json={"message": msg, "businessId": TENANT, "userId": customer_id, "threadId": thread_id},
+                timeout=TURN_TIMEOUT, what=f"sim_chat/{spec['id']}",
+            )
+            output = str((r.json() or {}).get("output") or "") if r.status_code == 200 else ""
+        except Exception as err:
+            fails.append(f"客服请求异常 {err!r}")
+            break
+        history.append({"role": "agent", "text": output[:300]})
+        transcript.append({"turn": i + 1, "message": msg[:120], "output": output[:400],
+                           "latency_s": round(time.monotonic() - t0, 1)})
+        for frag in _ORDER_ID_RE.findall(output):
+            oid = f"AURORA-ORD-2026-{frag}"
+            if oid != order_id and oid not in orders_before and oid not in msg:
+                fails.append(f"编造单号 {oid}")
+
+    # 终态断言(DB 真值 —— τ 律:不赌措辞,判状态)
+    term = spec.get("terminal") or {}
+    try:
+        r1 = await client.get("/api/store/orders", params={"customerId": customer_id, "limit": 50})
+        orders_after = ((r1.json() or {}).get("orders") or [])
+    except Exception:
+        orders_after = []
+    new_orders = [o for o in orders_after if str(o.get("orderId") or "") not in orders_before]
+    if term.get("order_created") and not new_orders:
+        fails.append("终态:未产生新订单(目标未达成)")
+    if term.get("shipping_contains"):
+        hit = any(term["shipping_contains"] in str(((o.get("shippingAddress") or {}).get("fullAddress") or ""))
+                  for o in new_orders)
+        if not hit:
+            fails.append(f"终态:新订单地址不含「{term['shipping_contains']}」(改口未生效或用错址)")
+    if term.get("approval_waiting"):
+        if not await approvals_waiting(client, thread_id):
+            fails.append("终态:无 waiting 审批单(售后挂起未达成)")
+
+    advisory = bool(spec.get("advisory"))
+    return {"kind": "sim", "case_id": spec["id"], "dimension": "模拟器·多轮",
+            "ok": (True if advisory else not fails),
+            "fails": [] if advisory else fails,
+            "advisory_notes": ([f"观察位(18 号票): {f}" for f in fails] if advisory and fails else []),
+            "turns": transcript,
+            "metrics": {"turns_used": len([t for t in transcript if t.get("message")]),
+                        "new_orders": len(new_orders), "goal_order": order_id or "-"}}
+
+
 async def cleanup() -> dict:
     """NIGHTLY_ 前缀数据回收:订单/行项目删除 + 库存回补 + 演示客户不触碰。"""
     from gateway_py.merchant_db import ensure_merchant_tables, merchant_engine
@@ -1108,7 +1254,7 @@ async def cleanup() -> dict:
 
 
 def render_report(results: list[dict], out: Path, night: str, env_ok: bool, perf: str = "") -> None:
-    cust = [r for r in results if r["kind"] == "customer"]
+    cust = [r for r in results if r["kind"] in ("customer", "sim")]
     data = [r for r in results if r["kind"] == "data"]
     strict = [r for r in results if not r.get("advisory") and not r.get("skipped")]
     passed = [r for r in strict if r["ok"]]
@@ -1121,7 +1267,7 @@ def render_report(results: list[dict], out: Path, night: str, env_ok: bool, perf
         fails = "; ".join(r.get("fails") or [])
         extra = f' <span class="adv">advisory:{ "; ".join(sum([t.get("advisory_notes", []) for t in r.get("turns", []) if isinstance(t, dict)], []))}</span>' if r.get("kind") == "customer" else ""
         trans = ""
-        if r.get("kind") == "customer":
+        if r.get("kind") in ("customer", "sim"):
             trans = "".join(
                 f'<details><summary>轮{t.get("turn")} ({t.get("latency_s")}s)</summary><pre>{html.escape(str(t.get("output", "")))[:1200]}</pre></details>'
                 for t in r.get("turns", []) if isinstance(t, dict) and not t.get("skipped")
@@ -1227,6 +1373,17 @@ async def main() -> int:
         # isolation kind=perf,统一由性能打印循环输出(避免双重打印)
         await _run_contained(results, run_isolation_case, client,
                              case_id="c23_会话隔离", kind="perf", dimension="多场景·会话")
+
+        # τ² 式 LLM 用户模拟器(09 号票):犹豫导购/改口地址/隐瞒单号三 persona,
+        # 断言全锚 DB 终态;NIGHTLY_CASES 以 sim_ 前缀定向
+        if not os.environ.get("NIGHTLY_SMOKE") and (not only or any(x.startswith("sim_") for x in only)):
+            for spec in SIM_CASE_SPECS:
+                if only and not any(spec["id"].startswith(x) for x in only):
+                    continue
+                await _run_contained(results, run_sim_case, client, spec, budget,
+                                     case_id=spec["id"], kind="sim", dimension="模拟器·多轮")
+                r = results[-1]
+                print(("[PASS] " if r["ok"] else "[FAIL] ") + r["case_id"] + ("" if r["ok"] else "  ← " + "; ".join(r["fails"])))
 
         # Data Agent + 菜单矩阵:按需登录各角色(token 缓存;老板已在顾客段预登)
         needed_staff = ({c.staff_email for c in DATA_CASES} | {c.staff_email for c in MENU_CASES}) - set(tokens)
