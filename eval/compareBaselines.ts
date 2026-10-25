@@ -192,7 +192,7 @@ async function compareBaselines() {
     );
     for (const r of c.regressions) {
       const flipPP =
-        n > 0 ? ` [n=${n},单例翻转 ±${((100 / n) * 1).toFixed(1)}pp${n < 30 ? ',小样本只测大回归' : ''}]` : '';
+        n > 0 ? ` [n=${n},单例翻转 ±${(100 / n).toFixed(1)}pp${n < 30 ? ',小样本只测大回归' : ''}]` : '';
       console.log(`    - ${r}${/通过数下降|转为失败/.test(r) ? flipPP : ''}`);
     }
   }

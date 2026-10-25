@@ -19,7 +19,7 @@ import json
 import os
 import sys
 
-from engine_py.analytics.engine import MetricQueryEngine, UnsupportedQuery
+from engine_py.analytics.engine import Clarify, MetricQueryEngine, UnsupportedQuery
 
 from .common import EVAL_CASES_PATH, load_jsonl
 
@@ -35,7 +35,9 @@ async def eval_case(case: dict, engine: MetricQueryEngine) -> dict:
         out["got"] = "unsupported"
         out["ok"] = bool(case.get("expect_unsupported"))
         return out
-    if isinstance(intent, dict):  # 冲突反问(如「卖得最好」歧义)= 设计行为
+    if isinstance(intent, (dict, Clarify)):  # 反问 = 设计行为(dict 兼容旧裸形状,
+        # Clarify 是 2026-10-03 起的一等公民;漏判曾把 expect_clarify 用例记成
+        # AttributeError 硬失败,夜评假红两例 2026-10-25 实证)
         out["got"] = "clarify"
         out["ok"] = bool(case.get("expect_clarify")) or bool(case.get("expect_unsupported"))
         return out

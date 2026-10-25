@@ -1075,12 +1075,16 @@ async def run_sim_case(client, spec: dict, budget: dict) -> dict:
         order_id = await _create_nightly_order(client, customer_id)
         if order_id:
             spec = {**spec, "verbatim": [f"订单号:{order_id}"]}
-    orders_before: set[str] = set()
+    orders_before: set[str] = set()  # 场景前基线:终态「新单」断言专用,严禁中途污染
     try:
         r0 = await client.get("/api/store/orders", params={"customerId": customer_id, "limit": 50})
         orders_before = {str(o.get("orderId") or "") for o in ((r0.json() or {}).get("orders") or [])}
     except Exception:
         pass
+    # 真单登记簿(编造检查专用)= 基线 ∪ 轮内刷新所见;与 orders_before 分离 ——
+    # 4177d91 把刷新所见并回 orders_before 后,结算成功自带的新单号回显会把自己
+    # 从终态差集里吸收掉,order_created 断言假阴(2026-10-25 夜跑 sim 两场景实证)
+    live_orders: set[str] = set(orders_before)
 
     history: list[dict] = []
     transcript: list[dict] = []
@@ -1114,17 +1118,17 @@ async def run_sim_case(client, spec: dict, budget: dict) -> dict:
                            "latency_s": round(time.monotonic() - t0, 1)})
         for frag in _ORDER_ID_RE.findall(output):
             oid = f"AURORA-ORD-2026-{frag}"
-            if oid != order_id and oid not in orders_before and oid not in msg:
+            if oid != order_id and oid not in live_orders and oid not in msg:
                 # 当轮结算新单不在任何预登记集 —— 刷新本顾客订单后存在即真实
                 # (与 customer 册同律;首版漏抄致合法新单被冤判编造,19 号票收口时修)
                 try:
                     r2 = await client.get("/api/store/orders", params={"customerId": customer_id, "limit": 50})
                     for o in ((r2.json() or {}).get("orders") or []):
                         oid_live = str(o.get("orderId") or "")
-                        orders_before.add(oid_live)
+                        live_orders.add(oid_live)
                 except Exception:
                     pass
-                if oid not in orders_before:
+                if oid not in live_orders:
                     fails.append(f"编造单号 {oid}")
 
     # 终态断言(DB 真值 —— τ 律:不赌措辞,判状态)
@@ -1276,7 +1280,11 @@ def render_report(results: list[dict], out: Path, night: str, env_ok: bool, perf
     def _row(r):
         icon = "✅" if r["ok"] else "❌"
         fails = "; ".join(r.get("fails") or [])
-        extra = f' <span class="adv">advisory:{ "; ".join(sum([t.get("advisory_notes", []) for t in r.get("turns", []) if isinstance(t, dict)], []))}</span>' if r.get("kind") == "customer" else ""
+        # advisory 注记双面收口:customer 轮级 + 任意 kind 的用例级(sim 的观察位
+        # 失败曾只在 results.jsonl 可见,HTML 报告零渲染路径,2570546 声称落空)
+        adv_notes = list(r.get("advisory_notes") or [])
+        adv_notes += [n for t in r.get("turns", []) if isinstance(t, dict) for n in (t.get("advisory_notes") or [])]
+        extra = f' <span class="adv">advisory:{ "; ".join(adv_notes)}</span>' if adv_notes else ""
         trans = ""
         if r.get("kind") in ("customer", "sim"):
             trans = "".join(
