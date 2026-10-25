@@ -246,6 +246,9 @@ _ADDRESS_INVERTED_RE = re.compile(
 _ADDRESS_EXPLICIT_SAVE_RE = re.compile(r"\u4fdd\u5b58|\u5b58\u4e00\u4e0b|\u8bb0\u4e00\u4e0b|\u5b58\u5230\u5730\u5740\u7c3f|\u5b58\u8fdb\u5730\u5740\u7c3f|\u5e2e\u6211\u5b58")
 
 # \u6536\u4ef6\u4eba\u6807\u8bb0(18 \u53f7\u7968):\u8bed\u5e8f\u4e8c\u300cADDR,\u6536\u4ef6\u4ebaNAME,\u7535\u8bddPHONE\u300d\u7684\u786e\u5b9a\u6027\u5207\u5206\u951a
+_ADDRESS_SWAP_PAYLOAD_RE = re.compile(r"(?:收货)?地址[^。,，:：\n]{0,16}[:：]\s*(?P<payload>.+)$")
+_ADDRESS_SWAP_GATE_RE = re.compile(r"换|存|第[一二三四五两0-9]{1,2}个|另一个|新地址|地址簿")
+_ORDER_REF_RE = re.compile(r"订单|这一单|该单")  # intent-exception(19号票:订单指涉守卫词面,非意图词表消费)
 _ADDRESS_RECEIVER_MARK_RE = re.compile(r"(?:\u6536\u4ef6\u4eba|\u6536\u8d27\u4eba|\u8054\u7cfb\u4eba|\u59d3\u540d)\s*[:\uff1a]?\s*")
 
 
@@ -312,11 +315,23 @@ def detect_address_manage(text: str | None) -> dict | None:
             "missingSlots": [],
         }
     payload_match = _ADDRESS_CREATE_PAYLOAD_RE.search(text)
-    if not payload_match:
-        return _detect_address_save_inverted(text)
+    if payload_match:
+        payload = (payload_match.group(1) or "").strip()
+        payload = _ADDRESS_PAYLOAD_TRUNCATE_RE.split(payload)[0].strip()
+    else:
+        # 语序三(19 号票 sim 实弹):「地址还是换成第二个吧:ADDR,收件人NAME,
+        # 电话PHONE」换址/存第N个形 —— 门闸(地址簿意图词 ∧ 无订单指涉)过了
+        # 才认,否则维持 inverted 兜底;防「把订单的收货地址换成:…」误吸(归
+        # 订单改址 HITL 面)
+        swap = (
+            _ADDRESS_SWAP_PAYLOAD_RE.search(text)
+            if (_ADDRESS_SWAP_GATE_RE.search(text) and not _ORDER_REF_RE.search(text))
+            else None
+        )
+        if not swap:
+            return _detect_address_save_inverted(text)
+        payload = _ADDRESS_PAYLOAD_TRUNCATE_RE.split((swap.group("payload") or "").strip())[0].strip()
     entities: dict = {"addressAction": "save"}
-    payload = (payload_match.group(1) or "").strip()
-    payload = _ADDRESS_PAYLOAD_TRUNCATE_RE.split(payload)[0].strip()
     phone_match = _PHONE_RE.search(payload)
     if phone_match:
         entities["receiverPhone"] = phone_match.group(1)
@@ -1055,6 +1070,11 @@ class IntentTriageEngine:
         from ..skills import routing as _skill_routing
 
         if _skill_routing.is_money_action_vetoed(input_text, matching_skill.metadata.get("category")):
+            return None
+        # 地址簿保存 payload 一票否决(19 号票):完整确定性保存形状被任何技能命中
+        # 都是误路由(「已加购成功。+保存收货地址:…」复合确认句实弹 probe19),
+        # 让位给判定 1.6 地址簿前置 —— 与资金动作否决同型
+        if _skill_routing.is_address_save_vetoed(input_text, matching_skill.metadata.get("category")):
             return None
 
         skill_result = await matching_skill.execute(context)

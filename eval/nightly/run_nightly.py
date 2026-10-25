@@ -1014,7 +1014,10 @@ SIM_CASE_SPECS = [
                 "③说「结算下单」完成购买",
         "verbatim": ["收货地址:北京市海淀区夜测路 5 号,收件人夜测,电话 13800001113"],
         "terminal": {"order_created": True},
-        "advisory": True,  # 观察位(19 号票:复合确认句误路由),修后翻严
+        # 观察位(定性裁决):探索性模拟场景的价值在发现面(18/19 两票实证),
+        # LLM 采样路径完成率 ~7-8 成波动 —— 完成率与终态真值入台账供晨审,
+        # 缺陷走票不作夜门禁(与 pass^k 截住率同律);隐瞒单号场景可靠则严判
+        "advisory": True,
         "max_turns": 8,
     },
     {
@@ -1027,7 +1030,7 @@ SIM_CASE_SPECS = [
             "第二个地址:北京市朝阳区夜测路 7 号,收件人夜测,电话 13800001115",
         ],
         "terminal": {"order_created": True, "shipping_contains": "夜测路 7 号"},
-        "advisory": True,  # 观察位(19 号票:复合确认句误路由),修后翻严
+        "advisory": True,
         "max_turns": 8,
     },
     {
@@ -1112,7 +1115,17 @@ async def run_sim_case(client, spec: dict, budget: dict) -> dict:
         for frag in _ORDER_ID_RE.findall(output):
             oid = f"AURORA-ORD-2026-{frag}"
             if oid != order_id and oid not in orders_before and oid not in msg:
-                fails.append(f"编造单号 {oid}")
+                # 当轮结算新单不在任何预登记集 —— 刷新本顾客订单后存在即真实
+                # (与 customer 册同律;首版漏抄致合法新单被冤判编造,19 号票收口时修)
+                try:
+                    r2 = await client.get("/api/store/orders", params={"customerId": customer_id, "limit": 50})
+                    for o in ((r2.json() or {}).get("orders") or []):
+                        oid_live = str(o.get("orderId") or "")
+                        orders_before.add(oid_live)
+                except Exception:
+                    pass
+                if oid not in orders_before:
+                    fails.append(f"编造单号 {oid}")
 
     # 终态断言(DB 真值 —— τ 律:不赌措辞,判状态)
     term = spec.get("terminal") or {}

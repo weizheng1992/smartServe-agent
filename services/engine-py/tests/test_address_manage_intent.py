@@ -625,3 +625,41 @@ class TestAddressSaveNaturalOrder:
 
         r = detect_address_manage("帮我保存一下地址")
         assert "district" in r["missingSlots"]  # 缺件诚实反问,严禁瞎猜落库
+
+
+class TestSwapFormAndFastTrackVeto:
+    """19 号票:换址语序三 + 技能快轨地址簿否决(sim 实弹两族误路由)。"""
+
+    def test_swap_form_full_parse(self):
+        from engine_py.triage.intent_triage_engine import detect_address_manage
+
+        r = detect_address_manage("地址还是换成第二个吧:北京市朝阳区夜测路 7 号,收件人夜测,电话 13800001115")
+        assert r["mode"] == "save"
+        assert r["missingSlots"] == []
+        assert r["entities"]["district"] == "朝阳区"
+        assert r["entities"]["detailAddress"] == "夜测路 7 号"
+
+    def test_order_context_not_absorbed(self):
+        """订单指涉的换址归订单改址 HITL 面,地址簿检出必须让位。"""
+        from engine_py.triage.intent_triage_engine import detect_address_manage
+
+        assert detect_address_manage("把订单的收货地址换成:北京市朝阳区夜测路 7 号,收件人夜测,电话 13800001115") is None
+
+    def test_plain_recommendation_not_absorbed(self):
+        from engine_py.triage.intent_triage_engine import detect_address_manage
+
+        assert detect_address_manage("推荐一款防水的冲锋衣") is None
+
+    def test_fast_track_veto_on_compound_ack(self):
+        """复合确认句「已加购成功。+保存收货地址:…」:完整 payload 在场时
+        一切技能快轨否决(购物车 fallback 曾整句吞掉,probe19 实弹)。"""
+        from engine_py.skills.routing import is_address_save_vetoed
+
+        assert is_address_save_vetoed(
+            "已加购成功。麻烦帮我保存收货地址:北京市海淀区夜测路 5 号,收件人夜测,电话 13800001113",
+            "shopping",
+        )
+        # 无地址形状的普通加购句不否决(快轨照常)
+        assert not is_address_save_vetoed("把第2件加入购物车", "shopping")
+        # 缺件地址句不否决(交澄清,不抢)
+        assert not is_address_save_vetoed("帮我保存一下地址", "shopping")
