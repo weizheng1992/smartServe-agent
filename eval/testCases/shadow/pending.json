@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "description": "[badcase:b42703af] persona_fact_deleted",
+    "vars": {
+      "input": "不涉及订单，请直接把我保存的收货地址更新为北京市朝阳区夜测路 7 号，收件人夜测，电话 138****1115",
+      "origin": "badcase:b42703af-9776-452f-b137-c9a52a8936ef"
+    },
+    "assert": []
+  },
+  {
+    "description": "[badcase:f6374302] persona_fact_deleted",
+    "vars": {
+      "input": "麻烦帮我保存收货地址:北京市海淀区夜测路 5 号,收件人夜测,电话 138****1113",
+      "origin": "badcase:f6374302-4964-45c6-9525-9a077d9ba99e"
+    },
+    "assert": []
+  },
+  {
+    "description": "[badcase:44804073] persona_fact_deleted",
+    "vars": {
+      "input": "不是改订单，是保存新收货地址：北京市朝阳区夜测路 7 号，收件人夜测，电话 138****1115",
+      "origin": "badcase:44804073-a6b8-41d5-9ca9-89fccc08484b"
+    },
+    "assert": []
+  }
+]

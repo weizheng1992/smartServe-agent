@@ -406,7 +406,7 @@ engine pytest 1850 + gateway pytest 486(testcontainers 密封 PG+Redis)+ Playwri
 
 ### 第 5 层:生产信号飞轮
 
-`engine_py/badcase/` 坏例池:8 信号源(人工接管/点踩/审批驳回/熔断/意图冲突/宣称落库不符/夜间失败等)实时入池 → 两层脱敏 → 周期 digest;Data Agent 👍 自动注册 user 范例回灌 L2 回放。信号永不直接成为断言,人工 triage 后经 draft 通道转回归用例。
+`engine_py/badcase/` 坏例池:8 信号源(人工接管/点踩/审批驳回/熔断/意图冲突/宣称落库不符/夜间失败等)实时入池 → 两层脱敏 → 周期 digest;Data Agent 👍 自动注册 user 范例回灌 L2 回放。信号永不直接成为断言,人工 triage 后经 draft 通道转回归用例。**覆盖对照表**(`eval/badcase_coverage.py`):池内信号源族 × 套件覆盖面月度盘点,缺口族进回灌议程。
 
 ### 已知隔离与改进线(2026-10-23 审计,`.scratch/eval-gap-2026-10/`)
 

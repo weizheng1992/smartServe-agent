@@ -1,0 +1,18 @@
+description: "能力探针集(13 号票,季度跑·只报分不门禁):多意图长链/跨轮指代/对抗升级/资金红线/缓存陷阱/域外推导六轴 headroom 测量 —— 与回归册(六册+冒烟)分离,饱和轴的精力转新切片"
+
+prompts:
+  - "{{input}}"
+
+providers:
+  - "file://providers/agent_provider.py:call_api"
+
+defaultTest:
+  options:
+    provider: "file://providers/agent_provider.py:call_api"
+    disableVarExpansion: true
+
+evaluateOptions:
+  maxConcurrency: 1
+
+tests:
+  - testCases/capability/probes.json

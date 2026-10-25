@@ -22,7 +22,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-CONFIG = Path(__file__).resolve().parent / "judge-calibration.yaml"
+CONFIG = Path(__file__).resolve().parents[1] / "judge-calibration.yaml"
 
 
 def _is_judge_component(c: dict) -> bool:
@@ -76,8 +76,17 @@ def main() -> None:
     args = ap.parse_args()
 
     all_rows: list[dict] = []
+    failed_runs = 0
     for i in range(1, args.runs + 1):
-        all_rows.extend(_run_once(str(i)))
+        try:
+            all_rows.extend(_run_once(str(i)))
+        except SystemExit as err:
+            # 单轮偶发红(judge 方差例)不应炸掉整包 —— 已产出的轮次照收,
+            # 失败轮记数如实呈现(判次不足时人工可补跑)
+            failed_runs += 1
+            print(f"[calib] 第 {i} 轮失败({err}),跳过")
+    if failed_runs:
+        print(f"[calib] ⚠ {failed_runs}/{args.runs} 轮失败,判次按成功轮计")
 
     sheet = Path(__file__).resolve().parent / "calibration_sheet.md"
     lines = [
