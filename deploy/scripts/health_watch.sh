@@ -70,16 +70,16 @@ send_wechat() {
       sign=$(printf '%s\n%s' "$ts" "$WATCH_FEISHU_SECRET" | openssl dgst -sha256 -hmac "$(printf '%s\n%s' "$ts" "$WATCH_FEISHU_SECRET")" -binary | base64)
       payload=$(python3 - "$title" "$body" "$ts" "$sign" <<'PY'
 import json, sys
+nl = chr(10)
 print(json.dumps({"timestamp": sys.argv[3], "sign": sys.argv[4], "msg_type": "text",
-                  "content": {"text": sys.argv[1] + "
-" + sys.argv[2]}}, ensure_ascii=False))
+                  "content": {"text": sys.argv[1] + nl + sys.argv[2]}}, ensure_ascii=False))
 PY
 )
     else
       payload=$(python3 - "$title" "$body" <<'PY'
 import json, sys
-print(json.dumps({"msg_type": "text", "content": {"text": sys.argv[1] + "
-" + sys.argv[2]}}, ensure_ascii=False))
+nl = chr(10)
+print(json.dumps({"msg_type": "text", "content": {"text": sys.argv[1] + nl + sys.argv[2]}}, ensure_ascii=False))
 PY
 )
     fi
@@ -88,8 +88,8 @@ PY
     local payload
     payload=$(python3 - "$title" "$body" <<'PY'
 import json, sys
-print(json.dumps({"msgtype": "text", "text": {"content": sys.argv[1] + "
-" + sys.argv[2]}}, ensure_ascii=False))
+nl = chr(10)
+print(json.dumps({"msgtype": "text", "text": {"content": sys.argv[1] + nl + sys.argv[2]}}, ensure_ascii=False))
 PY
 )
     curl -s -m 10 -H 'Content-Type: application/json' -d "$payload" "$WATCH_WECOM_WEBHOOK" >/dev/null
@@ -207,6 +207,17 @@ for state_file in "$STATE_DIR"/*.state; do
   if [ "$DRY_RUN" = 0 ]; then echo OK > "$state_file"; rm -f "$STATE_DIR/${key}.last"; fi
   SENT_RECOVER+=("$key")
 done
+
+# 每日心跳(dead-man 开关):全绿且距上次心跳 ≥24h → 发一条「巡检正常」,
+# 否则长期静默分不清「全绿」与「脚本已死」。有任一在冷却的失败项时不发。
+HB_FILE="$STATE_DIR/_heartbeat.last"
+HB_LAST=$(cat "$HB_FILE" 2>/dev/null || echo 0)
+if [ ${#FAIL_LINES} -eq 0 ] && [ $((NOW - HB_LAST)) -ge 86400 ]; then
+  send_wechat "✅ 每日心跳:B 机巡检正常" "$HOST_TAG
+
+磁盘/内存/负载/三容器/网关/四前端/PG 全绿;此消息 ≥24h 一条,长期收不到 = 巡检脚本本身失联。"
+  [ "$DRY_RUN" = 0 ] && echo "$NOW" > "$HB_FILE"
+fi
 
 if [ "$DRY_RUN" = 1 ]; then
   echo "[dry-run] 失败项 ${#SENT_NEW[@]} 新发 / ${#STILL_FAIL[@]} 冷却中 / ${#SENT_RECOVER[@]} 恢复"
