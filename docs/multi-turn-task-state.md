@@ -1,6 +1,6 @@
-# 聊天不是 State:多轮任务状态管理设计与实施规划
+# 聊天不是 State:多轮任务状态管理设计与实施记录
 
-> **状态:设计定稿(grilling 共识,2026-10-24),实施未开始。** 来源:外部课程《多轮任务失效检修》12 要点 + 2026-10 业界调研(429s 双通道实查)+ 本仓 12 项对照审计;12 条设计裁决经两轮 grilling 逐条确认(全部采纳推荐项)。
+> **状态:设计定稿(2026-10-24 grilling 12 裁决)+ 六票全部落地**(P0=1314279,P1=f8a9480,P2=7948dbb)。**2026-10-25:全文示例与 schema 按本项目实况重写**——旧版沿用课程语料(「上海行程/订当天的酒店」),现全部替换为本仓真实的状态形状、商品目录与对话语料;file:line 锚点校准至 2026-10-25 HEAD(易漂移处以函数/符号名为锚)。
 > **范围**:engine-py 商城链路 + d-ops 监控面;data-agent 评测面(d01-d06)不动。
 > **关联**:[ai-usage-panel.md](ai-usage-panel.md)(用量面板/turn_path 基建)、[ADR-0006](adr/0006-data-agent-architecture-comparison.md)(不采用清单风格同源)、记忆库 agent-context-architecture(context_builder 六层装配)。
 
@@ -10,25 +10,27 @@
 
 课程框架 = 任务型对话 DST(slot-filling)传统 + 2025 "context engineering" 主流的**正确复述**,方向对但非前沿;对应业界提法是 agent state management(LangGraph)/ context engineering(Anthropic)/ durable execution(Temporal 系)。
 
-**本仓三大真缺口**(课程点名的病象在仓里真实存在):
+**实施前审计出的三大真缺口**(课程点名的病象在仓里真实存在,**现已由六票全部修复**):
 
-1. **任务边界判定缺失**——普通用户新输入一律 `DEFAULT_TASK_PLAN` 重规划(`run_agent.py:814,828`,仅 `System:` 前缀才载回旧计划),正是课程⑦点名的"丢任务"病象;
-2. **步级恢复缺失**——无 checkpointer(全仓 grep 为零),执行中崩溃只能整体降级道歉(`run_agent.py:330-334`),恢复粒度是计划级非步级;
-3. **线上质量指标缺位**——完成率/参数补全准确率/切换准确率/tool 失败率四个命名指标不存在,只有 turn_path/resolution_status 工程遥测。
+1. **任务边界判定缺失**——普通用户新输入一律 `DEFAULT_TASK_PLAN` 重规划(`run_agent` 载入缝仅 `System:` 前缀才载回旧计划),正是课程⑦点名的"丢任务"病象 → **P1-1 边界判定器**修复;
+2. **步级恢复缺失**——无 checkpointer(全仓 grep 为零),执行中崩溃只能整体降级道歉(`_settle_turn` 的 graph_error/llm_breaker 降级臂),恢复粒度是计划级非步级 → **P2-1 步级 journal** 修复;
+3. **线上质量指标缺位**——完成率/参数补全准确率/切换准确率/tool 失败率四个命名指标不存在,只有 turn_path/resolution_status 工程遥测 → **P1-2 taskHealth 看板**修复(Tool 真失败率差 tool_calls_count 分母列,记跟进票)。
 
 **本仓三大已领先**(课程里只是口号、仓里已是实物):context_builder 单点装配纪律(预算 2000 + 懒触发滚动摘要 + 失败回退不阻断)、eval 飞轮(badcase 池→起草→夜评 pass^3/意图 95 闸/双护栏,接近全自动)、护栏即文档(熔断阈值带事故校准注释)。
 
-**实施**:六票,P0(task_state 小节 + 回灌 shadow)→ P1(边界判定器 + 四指标看板)→ P2(步级 journal + KV-cache 纪律)。明确不做:Temporal、tool result 清理、speculative tool call、ACE(各有重估触发器,见 §6)。
+**实施**:六票全落地,P0(task_state 小节 + 回灌 shadow)→ P1(边界判定器 + taskHealth 看板)→ P2(步级 journal + KV-cache 纪律)。明确不做:Temporal、tool result 清理、speculative tool call、ACE(各有重估触发器,见 §6)。
 
 ---
 
 ## 1. 课程 12 要点速览 × 本仓对照
 
+> 下表「本仓现状/判定」列为 **2026-10-24 实施前审计基线**(保留作决策留痕);各项落地后的现状见 §4 as-built 与 §5 票表。
+
 | # | 课程要点 | 本仓现状 | 判定 |
 |---|---|---|---|
 | ① | 多轮指代丢失(无前态→参数无法补全) | ④⑤ 落地后自然消除 | — |
 | ② | 参数补全错误(日期/地点/对象) | 澄清链路完整(slot_extractor 追问 + <0.5 置信澄清),但无执行前集中式 schema 硬校验 | 🟡 |
-| ③ | 旧状态未退休(改了不写回,下游全错) | "有值才覆盖"堵个案(step_execution_engine.py:545 幻影 Nike);仅长记忆有 superseded 退休模式,**任务实体无通用退休** | 🟡 |
+| ③ | 旧状态未退休(改了不写回,下游全错) | "有值才覆盖"堵个案(step_execution_engine 幻影 Nike 候选修复);仅长记忆有 superseded 退休模式,**任务实体无通用退休** | 🟡 |
 | ④ | 结构化 Task State(聊天不是 State) | 实体总线 guide/cart/order_context + historySummary 纯文本;**无"用户约束"字段、无结构化任务态** | 🟡 |
 | ⑤ | 执行前参数装配 + 双校验 + 主动澄清 | 装配在 step_execution(schema 明示防发明实参),缺集中校验闸 | 🟡 |
 | ⑥ | Context Editor(相关性 + Token Budget) | context_builder 单点装配 + 预算 2000 + 懒触发滚动摘要(≤300 字,截 600 防膨胀,失败回退不阻断) | 🟢 |
@@ -77,27 +79,60 @@
 
 ## 4. 如何做(六件套实施设计)
 
-### 4.1 P0-1 · task_state 结构化小节(地基)
+### 4.0 本项目状态面总览(先读这个)
+
+一条用户消息在本仓的真实状态链路,六票全部挂在这条链上:
+
+```
+run_agent 轮入口(run_agent.py)
+ ├─ task_memory.get_task_state()      ← pending_intents JSONB(§4.1 存储形状)
+ │    └─ is_resuming(System: 前缀)→ 载回旧计划;detect_crash_tail(§4.5)→ 崩溃恢复载回
+ ├─ context_builder.build_history_block ← [TASK STATE] 任务层段前置于装配面(§4.6 前缀审计)
+ └─ initial_state = {task_plan, journal_resume, boundary, ...}
+graph 执行(build_graph.py: START→triage→planner→executor→finish)
+ ├─ triage(LlmRefineStage)           ← 结构化输出 boundary 字段(§4.3);低置信→澄清旁路
+ ├─ planner                           ← Journal-Resume / Boundary-Preserve 保留既有计划(两分支)
+ └─ executor_node                     ← 进出 task_plan diff → task_step_journal 追加行(§4.5)
+收口 _settle_turn(run_agent.py 内部缝,四泳道并行)
+ └─ advance_task_state(goal←计划/实体←槽位/约束←输入句式)
+     → task_memory.save_task_state({**plan_to_persist, taskState, ...})
+     └─ 崩溃臂 plan_to_persist_on_crash:空桩严禁覆写在途计划
+```
+
+### 4.1 P0-1 · task_state 结构化小节(地基)—— ✅ 已落地(2026-10-24)
 
 **解决**:课程④(无结构化任务态)+ ③(实体无通用退休)。
 
-- **存储**:`TaskMemoryRow.pending_intents` JSONB(`db/models.py:204-209`)内新增 `task_state` 键,**无 alembic 迁移**(列内演进);读取对缺键/旧数据缺省 `{}` 兜底——规避调研点名的"schema 演进破坏 resume"生产坑。
-- **schema**:
+- **存储**:`TaskMemoryRow.pending_intents` JSONB(`db/models.py` `TaskMemoryRow`)内新增 `taskState` 键,**无 alembic 迁移**(列内演进);读取对缺键/旧数据缺省兜底(`normalize_task_state`,异构形状重置为合法空形,严禁抛)——规避调研点名的"schema 演进破坏 resume"生产坑。
+- **真实存储形状**(一列一世界:任务记忆 JSONB 的全貌,键为 camelCase 与 TS 侧契约冻结):
 
 ```json
 {
-  "task_state": {
-    "goal": "上海行程",
-    "constraints": [{"text": "保留本轮限制", "turn": 3}],
+  "goal": "处理订单退款",
+  "subtasks": [{"id": "s1", "description": "核对订单 AURORA-ORD-2026-6307 退款资格", "status": "completed"},
+               {"id": "s2", "description": "提交退款审批(退回原支付方式)", "status": "pending"}],
+  "currentStepIndex": 1,
+  "guideContext": {"candidates": [{"spuCode": "SPU-AURORA-039", "title": "260g 精梳棉基础T"}]},
+  "cartContext": {"items": [], "addedThisTurn": null},
+  "orderContext": {"orderId": "AURORA-ORD-2026-6307", "status": "退款审批中"},
+  "historySummary": "顾客此前咨询订单 6307 的退款进度,已告知 1-3 个工作日。",
+  "taskState": {
+    "turns": 7,
+    "goal": "处理订单退款",
+    "goal_turn": 4,
+    "constraints": [{"text": "不要顺丰到付", "turn": 5}],
     "entities": {
-      "date": {"value": "周四", "turn": 5,
-               "superseded": [{"value": "周三", "turn": 2}]}
+      "order_id": {"value": "AURORA-ORD-2026-6307", "turn": 4,
+                   "superseded": [{"value": "AURORA-ORD-2026-5102", "turn": 2}]},
+      "city": {"value": "杭州", "turn": 4, "superseded": []}
     }
   }
 }
 ```
 
-- **写入单点** `retire_and_set(key, value, turn)`:覆盖即退休、旧值进 superseded——照搬长记忆已验证模式(`long_memory.py:40-58`)。**任务层实体的统一入口 = 收口缝 `advance_task_state`**(goal ← 计划、实体 ← 本轮意图槽位、约束 ← 用户输入句式);域总线回填(step_execution「有值才覆盖」)按 D3 分层裁决保持域侧不动,P1-1 边界判定器的 `entities_changed` 落地时再统一走 `retire_and_set`。
+  顶层 goal/subtasks/currentStepIndex 是图内 `task_plan` 的持久化镜像(执行器按 `currentStepIndex` 续跑);`taskState` 是任务层小节本体。**实体键来自意图槽位的 camelCase 归一**(`orderId→order_id`,triage 槽位抽取 → `_snake`),hot keys 白名单见 config `AI_TASK_STATE_HOT_KEYS`(date/time/city/address/product/order_id/guest_count)。序列化进提示词的只有活跃最新值(`[TASK STATE] 当前任务:处理订单退款 ｜ 用户约束:不要顺丰到付 ｜ 关键实体:order_id=AURORA-ORD-2026-6307`),superseded 是审计留痕不进装配面。
+
+- **写入单点** `retire_and_set(key, value, turn)`:覆盖即退休、旧值进 superseded——照搬长记忆已验证模式(`long_memory` 的 UPDATE→superseded 状态机)。**任务层实体的统一入口 = 收口缝 `advance_task_state`**(goal ← 计划、实体 ← 本轮意图槽位、约束 ← 用户输入句式);域总线回填(step_execution「有值才覆盖」)按 D3 分层裁决保持域侧不动,P1-1 边界判定器的 `entities_changed` 落地时再统一走 `retire_and_set`。
 - **hot keys 白名单**(D8):初版 `date / time / city / address / product / order_id / guest_count`,env `AI_TASK_STATE_HOT_KEYS` 可扩;白名单外键 → **观察通道留痕再拒**(print 单行,同轮同名去重刷屏)——静默丢弃会让该扩的白名单无从发现(code-review 裁定,2026-10-24)。
 - **约束来源**(实施细化):保守窄句式正则(不要/不用/无需/只要/尽量/务必 + 1-8 字尾串,句读截停),误收面靠窄模式+截帽(20 字)控制;同文本去重刷新轮次,超帽(3 条)丢最旧。
 - **读取**:context_builder 序列化"任务层段"(goal/约束/活跃实体)置于域总线段之前(任务层→域层),**受同一预算管控**(先扣自身成本再装轮;goal 80/约束 20/实体值 40 截帽保证扣减有界——code-review 裁定),`turns` 自带单调轮次计数(short_memory 截 10 长度非单调)。
@@ -106,21 +141,32 @@
 
 **解决**:课程⑩回灌的"人工 CLI 起草"断点。
 
-- 现状:信号自动入池(`badcase/intent_signals.py:46,97`,BadcaseCandidate + 去重)→ CLI `cmd_draft` 人工起草(`badcase/cli.py:142-180`)→ 人工并入 testCases。
+- 现状:信号自动入池(`badcase/intent_signals` 的 `detect_intent_conflict` / `detect_claim`,BadcaseCandidate + 去重)→ CLI `cmd_draft` 人工起草 → 人工并入 testCases。
 - 改造:高置信信号**自动**生成用例草稿 → **shadow 集**(`eval/testCases/shadow/pending.json`,不被任何硬闸 yaml 引用——主配置 suites 显式列举,新目录天然不入闸);开闸面**派生自** `pool.SOURCE_PRIORS` 的 suspected_defect 族(circuit_breaker 刻意排除,「单独立案聚合不直接转 case」);夜评新增报告例 `sh01_shadow集`(advisory 恒真:失败不进退出码、不回灌坏例池,空集/promptfoo 缺位诚实记 skipped);CLI `promote` 人审一键转正(选套件+补断言+留痕 converted)。
 - 纪律(D7):自动只到 shadow 为止,人审才拦发版——防误信号锁死发版。
 
 ### 4.3 P1-1 · 任务边界判定器(最大缺口)—— ✅ 已落地(2026-10-24)
 
-**解决**:课程⑦;修 `run_agent.py:814,828` "新输入一律重规划"病象。
+**解决**:课程⑦;修 run_agent 载入缝"新输入一律重规划"病象。
 
-- **调用形态**(D2):不建独立节点——扩展 intent_triage 现有 LLM 调用,结构化输出加字段:
+- **调用形态**(D2):不建独立节点——扩展 intent_triage 现有 LLM 调用(`structured_classifier.StructuredTriageOutput` 加 `boundary: BoundaryDecision` 字段),schema:
 
 ```json
 {"boundary": {"decision": "modify | new", "confidence": 0.83,
-              "rationale": "用户仅修正日期,目标(上海行程)与实体(城市)未变",
-              "entities_changed": ["date"]}}
+              "rationale": "用户仅修改退款到账方式,目标(订单 6307 退款)与实体未变",
+              "entitiesChanged": []}}
 ```
+
+  判定与意图分类同源(新输入 vs 近期对话,`recent_history_text` 同一上下文),零额外调用。语料全部取自本仓在售目录与真实会话形态,例如:
+
+| 前文(近期对话) | 本轮输入 | 判定 | 依据 |
+|---|---|---|---|
+| 订单 AURORA-ORD-2026-6307 退款审批中 | "改成退到银行卡" | modify | 同一订单任务内改参数 |
+| 购物车里已有一件 260g 基础T(曜黑 L) | "再帮我加一件XL的云白" | modify | 购物车任务追加,entitiesChanged=[product] |
+| 刚帮用户查完 28寸托运行李箱的物流 | "推荐一款骑行头盔" | new | 目标(查物流→导购)与实体(箱→头盔)全变 |
+| (有在途任务) | "帮我订那个" | clarify(低置信) | 指代不明,宁可多问一句 |
+
+  评测集 `evals/boundary_cases.jsonl` 30 例即按此语料域书写(modify 10/new 10/clarify 10)。
 
 - **modify 分支**:planner Boundary-Preserve 保留既有计划(prior_subtasks 在场 ∧ 高置信 ∧ 非 System 轮 ∧ 无驳回上下文 ∧ 当前步不挂审批——四道门禁),零 LLM;新槽位由 step_execution 现取现用,**entitiesChanged 的实体更新由收口缝 advance_task_state 的槽位抽取覆盖**(同源同键,不重复接线——as-built 裁决)。`System:` 前缀路径与 Plan-Preservation Bypass 维持现状。非 System 轮 initial task_plan 为空的载回接线已随并行批 aa98ef3 进 HEAD(⚠️该批把 run_agent.py 连同本批 P0 接线 hunk 一并卷入提交,未署名——ebd3ffc 同型事故第三起,git add 按文件点名纪律再次强调)。
 - **new 分支**:维持现状 DEFAULT_TASK_PLAN 重规划。
@@ -147,7 +193,16 @@
 
 **解决**:课程⑧;修"执行中崩溃整体降级道歉 + 降级桩空 task_plan 覆写在途计划"(`run_agent.py` 崩溃臂)。
 
-- **新表** `task_step_journal`(0028 迁移,幂等守卫沿 0027 先例;append-only 无 update):`id, thread_id, job_id, step_index, status(completed|failed), result_digest, created_at`。状态词汇与子任务本词汇一致(不做 ok 翻译)。
+- **新表** `task_step_journal`(0028 迁移,幂等守卫沿 0027 先例;append-only 无 update):`id, thread_id, job_id, step_index, status(completed|failed), result_digest, created_at`。状态词汇与子任务本词汇一致(不做 ok 翻译)。一个真实崩溃场景的行样例(订单退款三步计划,执行到第 2 步图异常):
+
+```json
+{"thread_id": "th_9f2c", "job_id": "job_20261025_0930_a17c", "step_index": 0,
+ "status": "completed", "result_digest": "3f9a1c2e77b4d001"}
+{"thread_id": "th_9f2c", "job_id": "job_20261025_0930_a17c", "step_index": 1,
+ "status": "failed", "result_digest": null}
+```
+
+  下一轮入口 `rebuild_plan_from_journal` 修补后的在途计划:step0 保持 completed、step1 显式标 failed、`currentStepIndex` 落在**首个未完成步**(=1,失败步本位重试);执行器只跳 completed 步,failed/pending 都会执行。
 - **写点**:executor_node 对进出 task_plan 做 **diff** —— 单缝覆盖全部 return 路径,只记状态变化行,completed 步带结果 sha256 指纹(16 位,审计留痕);旁路自吞 print,绝不阻断执行。
 - **恢复**(D5):run_agent 轮入口 `detect_crash_tail` —— 同会话最新一轮 session_metrics 落崩溃态(graph_error_degraded / llm_circuit_breaker)∧ 该 job 有步级行 → 非 System 轮也载回 task_memory 在途计划,`rebuild_plan_from_journal` 按 journal 真值修补(completed 保留/failed 显式标 failed 由执行器重试),planner **Journal-Resume** 保留计划续跑(门禁:System 轮不抢/当前步挂审批不抢)。「超 1 轮未续」由构造自然成立:任何更新一轮都让 latest 不再是那个崩溃 job。interrupted(S2c)部分态自带计划、llm_quota 需人工干预,均不入恢复面。
 - **code-review as-built 裁决(2026-10-24)**:①currentStepIndex = **首个未完成步**(并行分支下 failed 先于 completed 共存时,取 max(completed)+1 会把失败步跳过);②detect 排序契约 = (step_index, created_at) 后写 last-wins,latest 轮以 id 作同秒 tiebreak;③已知窗口:validator 在 executor 节点返回之后把 completed 降级 failed 的转变不落 journal(v1 接受,后续票把 diff 上移 settle 层)。
@@ -202,7 +257,7 @@ P0 批次落地文件(P0-1:`memory/task_state.py`、`memory/context_builder.py`�
 - **schema 演进**:task_state 全程 JSONB 缺省兜底,任何读取处禁止严格 schema 断言(调研坑:checkpoint 后改 schema 致 resume 失败)。
 - **垃圾串**:白名单外实体只进观察日志;观察日志本身定期评审防堆积。
 - **盲闸**:所有新硬闸(边界集/指标阈值)必须先看板观察 ≥2 周再上闸(前科:管道盲闸吞失败)。
-- **并行会话**:实施时 git add 必须按文件点名(前科:引擎八文件被无关提交卷入);当前工作区尚有 0026 memory_fact_subject 未提交,开工前先落它。
+- **并行会话**:实施时 git add 必须按文件点名(前科:引擎八文件被无关提交卷入 ebd3ffc;本设计实施期间 run_agent.py 又随并行批 aa98ef3 被动卷入,两起留痕见 §4.3/§5)。
 - **判定器误杀**:fail 方向恒为澄清;边界评测集与意图集双护栏同域演进,防两集互相顶。
 
 ## 8. 来源
