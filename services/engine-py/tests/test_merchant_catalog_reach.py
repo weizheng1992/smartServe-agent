@@ -489,7 +489,7 @@ async def _semantic_threshold_scenario(pg_factory) -> None:
     MallDomainService._embed_query = staticmethod(_diagonal_query)
     MallDomainService._embed_texts = staticmethod(_uniform_texts)
     try:
-        assert await _search("野外露营睡觉用的") == {"total": 0, "products": []}
+        assert (r := await _search("野外露营睡觉用的"))["total"] == 1, f"品类词回退应命中帐篷: {r}"
     finally:
         await _teardown_shelf(_engine, merchant_engine, original, embeds, rewrite)
 
@@ -539,8 +539,8 @@ def test_semantic_embedding_failure_degrades_to_honest_empty(pg_factory):
 async def _semantic_failure_scenario(pg_factory) -> None:
     _engine, merchant_engine, original, embeds, rewrite = await _setup_shelf(pg_factory)
     try:
-        res = await _search("野外露营睡觉用的")  # 词元空 → 语义 → 嵌入 raise → 降级
-        assert res == {"total": 0, "products": []}
+        res = await _search("野外露营睡觉用的")  # 词元空 → 语义 raise → 品类词回退接管
+        assert res["total"] == 1, f"品类词回退应命中帐篷: {res}"
     finally:
         await _teardown_shelf(_engine, merchant_engine, original, embeds, rewrite)
 
@@ -567,7 +567,7 @@ async def _semantic_disabled_scenario(pg_factory) -> None:
     previous = settings.mall_semantic_enabled
     object.__setattr__(settings, "mall_semantic_enabled", False)
     try:
-        assert await _search("野外露营睡觉用的") == {"total": 0, "products": []}
+        assert (r := await _search("野外露营睡觉用的"))["total"] == 1, f"品类词回退应命中帐篷: {r}"
         assert query_calls == [], "开关关闭不得触达嵌入"
     finally:
         object.__setattr__(settings, "mall_semantic_enabled", previous)
@@ -714,7 +714,7 @@ async def _l4_sealed_degrade_scenario(pg_factory) -> None:
     # _rewrite_query_terms except 捕获 → [],检索链终点仍是诚实空。
     _engine, merchant_engine, original, embeds, rewrite = await _setup_shelf(pg_factory)
     try:
-        assert await _search("野外露营睡觉用的") == {"total": 0, "products": []}
+        assert (r := await _search("野外露营睡觉用的"))["total"] == 1, f"品类词回退应命中帐篷: {r}"
     finally:
         await _teardown_shelf(_engine, merchant_engine, original, embeds, rewrite)
 

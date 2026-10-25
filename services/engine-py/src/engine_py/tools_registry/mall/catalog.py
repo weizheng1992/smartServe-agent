@@ -761,6 +761,31 @@ class CatalogMixin:
         return cleaned
 
     @staticmethod
+    def _category_bigram_fallback(query: str, categories: list[str]) -> list[str]:
+        """L4 降级兜底(2026-10-24 实弹诊断):「推荐当季热销机能外套」复合词
+        L1/L2 合法 miss 后,改写档 LLM 撞 2s 超时(asyncio.TimeoutError 的
+        str 为空 = 日志冒号后空白)降级空表,直调复现 ~50%(LLM 延迟骑在
+        超时线上)—— 此前空表即链终点,荐品道歉。
+
+        词表锚定的确定性回退:查询串与品类名的 ≥2 字连续重叠(品类二元组
+        出现在查询里)即候选品类,按最长重叠排序 —— 「机能外套」∩「户外
+        机能」=「机能」。零 LLM、零外联,候选只能来自货架词表,同守「不
+        跨目录补货」红线。"""
+        if not query or not categories:
+            return []
+        ranked: list[tuple[int, str]] = []
+        for cat in categories:
+            best = 0
+            for n in range(len(cat) - 1, 1, -1):  # ≥2 字窗口,取最长命中
+                if any(cat[start : start + n] in query for start in range(len(cat) - n + 1)):
+                    best = n
+                    break
+            if best >= 2:
+                ranked.append((best, cat))
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
+        return [cat for _, cat in ranked[:3]]
+
+    @staticmethod
     async def search_products(params: dict) -> dict:
         """6. 商品检索与导购选品。sort: "price_desc" 按价格降序(「最贵的X」)。
         color:本轮说出的颜色偏好(SKU spec 级过滤,2026-10-01)—— 上游导购
@@ -843,10 +868,17 @@ class CatalogMixin:
             # 货架命名既无词元交集、余弦又卡阈值下时(「背心」症状:0.51-0.53
             # vs 0.55),LLM 以货架品类词表为锚改写一次。词表锚定 + 短超时降级,
             # 重试空即诚实空,不跨目录补货。
+            # 2026-10-24:改写档降级(超时/不可解析)不再终结 —— 品类词二元组
+            # 确定性回退补位(实弹:「机能外套」撞 2s 超时 → 空表 → 荐品道歉,
+            # 复现 ~50%);LLM 判「语义无关」的空同样过回退,词面重叠是比
+            # LLM 判断更硬的证据,候选仍锁死货架词表。
             if not merchant_products and query and settings.mall_query_rewrite_enabled:
-                rewritten = await MallDomainService._rewrite_query_terms(
-                    query, [o["category"] for o in await MallDomainService.get_shelf_overview()]
-                )
+                shelf_categories = [o["category"] for o in await MallDomainService.get_shelf_overview()]
+                rewritten = await MallDomainService._rewrite_query_terms(query, shelf_categories)
+                if not rewritten:
+                    rewritten = MallDomainService._category_bigram_fallback(query, shelf_categories)
+                    if rewritten:
+                        print(f"[MallDomain] 查询改写降级,品类词回退命中: {rewritten}")
                 if rewritten:
                     merchant_products = (
                         await MallDomainService._fetch_merchant_catalog(
