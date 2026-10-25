@@ -195,3 +195,65 @@ jobs:
           echo "健康检查 5 分钟未过" >&2; exit 1
           REMOTE
           rm -f ~/deploy_key
+
+  # 评测冒烟门禁(eval-gap-2026-10 11 号票):零 LLM 册(rag 检索直评 + data
+  # 闭集映射 + 指标消歧预言机)以退出码进 PR——行为退化发现时点从 T+1 夜评
+  # 提前到 PR 时刻;真 LLM 大盘(unified/persona/t1t2)仍夜间全量,费用纪律不变。
+  eval-smoke:
+    name: 评测冒烟 (零 LLM promptfoo)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+          POSTGRES_DB: agent_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://agent:agent@localhost:5432/agent_platform
+      REDIS_URL: redis://localhost:6379/0
+      AI_QUOTA_GATE: "0"
+      # 海外 runner 直连 HF 原站(同 python job 实弹教训:镜像必败)
+      HF_ENDPOINT: https://huggingface.co
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.14
+        working-directory: services
+      - run: uv sync --frozen --all-extras || { sleep 20; uv sync --frozen --all-extras; }
+        working-directory: services
+      - run: bun install --frozen-lockfile
+      # embedding 模型缓存(bge-small-zh ~100MB,命中后秒级)
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastembed
+          key: fastembed-bge-small-zh-v1.5
+      # schema 迁移(rag 自愈播种在首查时自动落 docs/knowledge 语料)
+      - name: Alembic 迁移
+        run: uv run alembic upgrade head
+        working-directory: services/engine-py
+      - name: promptfoo 冒烟 (退出码即门禁)
+        run: |
+          PROMPTFOO_PYTHON=$PWD/services/.venv/bin/python \
+            bunx promptfoo eval -c eval/promptfoo.smoke.yaml --no-write --no-cache

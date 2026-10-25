@@ -132,8 +132,8 @@
       }
     },
     "rag": {
-      "total": 6,
-      "pass": 6,
+      "total": 14,
+      "pass": 14,
       "fail": 0,
       "errors": 0,
       "meanScore": 1,
@@ -171,6 +171,12 @@
         "((o) => o.hits.length <= 3 && o.hits.every((h, i) => h.rank === i + 1 && typeof h.similarity === 'number') && typeof o.latencyMs === 'number')(JSON.parse(output))": {
           "count": 1,
           "pass": 1,
+          "fail": 0,
+          "meanScore": 1
+        },
+        "rag_recall.py:get_assert": {
+          "count": 8,
+          "pass": 8,
           "fail": 0,
           "meanScore": 1
         }

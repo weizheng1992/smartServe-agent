@@ -51,6 +51,8 @@ async def _retrieve(business_id: str, query: str, k: int) -> dict:
                 "headerPath": doc.get("headerPath") or "",
                 "similarity": round(float(doc.get("similarity") or 0.0), 4),
                 "snippet": chunk[:80],
+                # 300 字全文面(10 号票 recall/MRR 锚点断言;80 字 snippet 盖不住锚点)
+                "text": chunk[:300],
             }
         )
     return {

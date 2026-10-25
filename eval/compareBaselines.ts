@@ -19,6 +19,17 @@ import {
 
 const SCORE_EPSILON = 1e-9;
 
+/** Wilson 95% 置信区间(12 号票):小样本 pass 率的误差条,报告附注用。 */
+function wilsonCI(pass: number, n: number): [number, number] {
+  if (n <= 0) return [0, 0];
+  const z = 1.96;
+  const p = pass / n;
+  const denom = 1 + (z * z) / n;
+  const center = (p + (z * z) / (2 * n)) / denom;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / denom;
+  return [Math.max(0, center - half), Math.min(1, center + half)];
+}
+
 interface SuiteComparison {
   suite: string;
   baseline: SuiteBaseline;
@@ -163,19 +174,26 @@ async function compareBaselines() {
   console.log('📊 对比汇总');
   console.log('================================================================');
   console.log(
-    `${'套件'.padEnd(10)}${'基线 pass/fail'.padEnd(18)}${'当前 pass/fail'.padEnd(18)}${'基线均分'.padEnd(12)}${'当前均分'.padEnd(12)}判定`,
+    `${'套件'.padEnd(10)}${'基线 pass/fail'.padEnd(18)}${'当前 pass/fail'.padEnd(18)}${'基线均分'.padEnd(12)}${'当前均分'.padEnd(12)}${'基线 CI 95%'.padEnd(18)}判定`,
   );
-  console.log('-'.repeat(80));
+  console.log('-'.repeat(100));
 
   let anyRegression = false;
   for (const c of comparisons) {
     const bad = c.regressions.length > 0;
     anyRegression = anyRegression || bad;
+    // 统计误差条(12 号票):Wilson 95% CI 附注 —— 注解不软化,六规则门禁语义
+    // 不变;小样本册(n<30)单例翻转即 ±3-50pp,读数时须带着 CI 看
+    const n = c.baseline.summary.total;
+    const [lo, hi] = wilsonCI(c.baseline.summary.pass, n);
+    const ciLabel = n > 0 ? `${(lo * 100).toFixed(0)}-${(hi * 100).toFixed(0)}%` : '-';
     console.log(
-      `${c.suite.padEnd(10)}${`${c.baseline.summary.pass}/${c.baseline.summary.fail}`.padEnd(18)}${`${c.current.pass}/${c.current.fail}`.padEnd(18)}${c.baseline.summary.meanScore.toFixed(4).padEnd(12)}${c.current.meanScore.toFixed(4).padEnd(12)}${bad ? '❌ 回归' : '✅ 对齐'}`,
+      `${c.suite.padEnd(10)}${`${c.baseline.summary.pass}/${c.baseline.summary.fail}`.padEnd(18)}${`${c.current.pass}/${c.current.fail}`.padEnd(18)}${c.baseline.summary.meanScore.toFixed(4).padEnd(12)}${c.current.meanScore.toFixed(4).padEnd(12)}${ciLabel.padEnd(18)}${bad ? '❌ 回归' : '✅ 对齐'}`,
     );
     for (const r of c.regressions) {
-      console.log(`    - ${r}`);
+      const flipPP =
+        n > 0 ? ` [n=${n},单例翻转 ±${((100 / n) * 1).toFixed(1)}pp${n < 30 ? ',小样本只测大回归' : ''}]` : '';
+      console.log(`    - ${r}${/通过数下降|转为失败/.test(r) ? flipPP : ''}`);
     }
   }
 

@@ -14,3 +14,5 @@ defaultTest:
 
 tests:
   - testCases/ecommerce/rag-retrieval.json
+  # recall/MRR 册(10 号票):score=1/rank,基线 rag_recall meanScore 即 MRR
+  - testCases/ecommerce/rag-recall.json

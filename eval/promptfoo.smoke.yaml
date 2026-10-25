@@ -1,0 +1,24 @@
+description: "PR 级零 LLM 冒烟册(eval-gap-2026-10 11 号票):rag 检索直评(本地 bge,零 token)+ data 闭集映射(纯规则断言)+ 指标消歧(注册表预言机)—— 行为退化的发现时点从 T+1 夜评提前到 PR 时刻;unified 真 LLM 面仍夜间全量"
+
+prompts:
+  - "{{input}}"
+
+providers:
+  - "file://providers/echo_provider.py:call_api"
+
+defaultTest:
+  options:
+    provider: "file://providers/echo_provider.py:call_api"
+    disableVarExpansion: true
+
+evaluateOptions:
+  maxConcurrency: 1
+
+tests:
+  - testCases/data_analytics/mapping.json
+  - testCases/ecommerce/metric-disambiguation.json
+  # rag 直评(检索本体,本地 bge 零 token;需要 DB + embedding 模型,CI 已备)
+  - path: testCases/ecommerce/rag-retrieval.json
+    provider: "file://eval/providers/rag_provider.py:call_api"
+  - path: testCases/ecommerce/rag-recall.json
+    provider: "file://eval/providers/rag_provider.py:call_api"

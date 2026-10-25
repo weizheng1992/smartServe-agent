@@ -388,7 +388,7 @@ cd apps/merchant-admin && bun run build   # tsc + vite
 | t1t2 | 23 | T1 LLM 组合通道(闭集校验/角色闭集拒绝)+ T2 探索通道(LLM 产 SQL 过 AST 守卫链,ADR-0010) | 真跑 `compose_resolve`/`generate_sql`+守卫;正例须过全部结构闸,负例(写操作/表白名单外/闲聊)必须响亮拒绝 | **23/23**(2026-10-23 首钉,引擎三修后) |
 | planner | 8 | 工具规划提示词回归 | 直连 LLM(temp=0)测冻结提示词文本,toolAccuracy 工具名集合匹配 | 8/8 |
 | persona | 8 | 画像审计抽取质量 | scope 双层判定(global/tenant)+ 置信档位路由正则断言 | 8/8 |
-| rag | 6 | RAG 检索层本体质量 | 直呼 `search_relevant_docs`(向量 0.8+BM25 0.2),hit@1/跨租户隔离/口语改写鲁棒/形状契约,零 LLM | 6/6 |
+| rag | 14 | RAG 检索层本体质量 | 直呼 `search_relevant_docs`(向量 0.8+BM25 0.2):hit@1/跨租户隔离/口语改写鲁棒/形状契约 + **recall@k 与 MRR**(score=1/rank,册级均分即 MRR),零 LLM | 14/14,MRR=1.000 |
 
 **门禁机制**(`eval/baselines/`):每册基线记录 git SHA + config sha256 + **数据集指纹(逐文件 sha256)+ promptfoo 版本 + 逐用例明细**;`bun run test:prompt:compare` 六规则(总数/通过/失败/均分/逐 scorer/逐用例翻转)+ 指纹漂移任一命中即 exit 1。数组 vars 一律 `disableVarExpansion`(防笛卡尔裂行腰斩断言)。运行需 `PROMPTFOO_PYTHON=$PWD/services/.venv/bin/python`。
 

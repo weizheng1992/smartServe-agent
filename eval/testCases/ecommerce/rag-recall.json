@@ -1,0 +1,42 @@
+[
+  {
+    "description": "recall/MRR - 帐篷睡袋存放(口语问句,锚点=涂层水解报损语义)",
+    "vars": { "input": "露营回来帐篷没淋雨,要不要晾干再收起来", "businessId": "aurora", "expectedDoc": "aurora_product_knowledge", "expectedAnchor": "涂层水解" },
+    "assert": [{ "type": "python", "value": "file://scorers/rag_recall.py:get_assert" }]
+  },
+  {
+    "description": "recall/MRR - 骑行头盔选购与撞击更换(EPS 一次吸能)",
+    "vars": { "input": "骑公路车戴的头盔怎么挑,摔过一次还能继续用吗", "businessId": "aurora", "expectedDoc": "aurora_travel_cycling_guide", "expectedAnchor": "EPS 一次吸能" },
+    "assert": [{ "type": "python", "value": "file://scorers/rag_recall.py:get_assert" }]
+  },
+  {
+    "description": "recall/MRR - 登机箱尺寸选择(20 寸 38L 直查)",
+    "vars": { "input": "坐飞机想直接带上飞机,买多大箱子合适", "businessId": "aurora", "expectedDoc": "aurora_travel_cycling_guide", "expectedAnchor": "38L" },
+    "assert": [{ "type": "python", "value": "file://scorers/rag_recall.py:get_assert" }]
+  },
+  {
+    "description": "recall/MRR - 冲锋衣机洗禁忌(压胶条锚点防跨段误命中)",
+    "vars": { "input": "三合一冲锋衣脏了能扔洗衣机洗吗", "businessId": "aurora", "expectedDoc": "aurora_product_knowledge", "expectedAnchor": "压胶条忌熨烫" },
+    "assert": [{ "type": "python", "value": "file://scorers/rag_recall.py:get_assert" }]
+  },
+  {
+    "description": "recall/MRR - 跑步鞋尺码测量时机(傍晚脚胀)",
+    "vars": { "input": "跑步鞋买大一码还是按脚长选,什么时候量脚最准", "businessId": "aurora", "expectedDoc": "aurora_product_knowledge", "expectedAnchor": "傍晚脚部微胀" },
+    "assert": [{ "type": "python", "value": "file://scorers/rag_recall.py:get_assert" }]
+  },
+  {
+    "description": "recall/MRR - 七天无理由退换货政策(ecommerce SOP)",
+    "vars": { "input": "买大了想退掉,签收一个星期了还能退吗", "businessId": "ecommerce", "expectedDoc": "ecommerce_sop_guides", "expectedAnchor": "无理由退换货" },
+    "assert": [{ "type": "python", "value": "file://scorers/rag_recall.py:get_assert" }]
+  },
+  {
+    "description": "recall/MRR - 电子发票企业抬头流程(信用代码锚点)",
+    "vars": { "input": "发票能开公司抬头吗,具体怎么操作", "businessId": "ecommerce", "expectedDoc": "ecommerce_sop_guides", "expectedAnchor": "统一社会信用代码" },
+    "assert": [{ "type": "python", "value": "file://scorers/rag_recall.py:get_assert" }]
+  },
+  {
+    "description": "recall/MRR - 未发货改地址 SOP",
+    "vars": { "input": "快递还没发出去,我想改一下收货地址怎么弄", "businessId": "ecommerce", "expectedDoc": "ecommerce_sop_guides", "expectedAnchor": "系统自动更新" },
+    "assert": [{ "type": "python", "value": "file://scorers/rag_recall.py:get_assert" }]
+  }
+]
