@@ -249,21 +249,25 @@ class _IdempotentReplay(Exception):
 
 
 async def _audit_insert_idempotent(
-    conn: Any, *, action_type: str, order_id: str, idempotency_key: str, payload_json: str, result_json: str
+    conn: Any, *, action_type: str, order_id: str, idempotency_key: str, payload_json: str, result_json: str,
+    operator: str = "AGENT_SPI",
 ) -> None:
     """审计落账单点:ON CONFLICT DO NOTHING + RETURNING —— 插入成功返回;
-    撞 key(并发败者)回读胜者行抛 _IdempotentReplay,由调用方事务整体回滚。"""
+    撞 key(并发败者)回读胜者行抛 _IdempotentReplay,由调用方事务整体回滚。
+    operator 缺省 AGENT_SPI(SPI 通道既有语义);员工面动作(发货)传员工 email,
+    订单详情审计时间线才看得到「谁发的货」(2026-10-25 客服优化批)。"""
     inserted = (
         await conn.execute(
             text(
                 "INSERT INTO merchant_audit_logs (action_type, order_id, idempotency_key, operator, payload, result) "
-                "VALUES (:at, :oid, :ik, 'AGENT_SPI', :p, :r) "
+                "VALUES (:at, :oid, :ik, :op, :p, :r) "
                 "ON CONFLICT (idempotency_key) DO NOTHING RETURNING id"
             ),
             {
                 "at": action_type,
                 "oid": order_id,
                 "ik": idempotency_key,
+                "op": operator,
                 "p": payload_json,
                 "r": result_json,
             },
@@ -504,67 +508,103 @@ async def place_order(params: dict) -> dict:
     }
 
 
+# 承运商译名单点(与 apps/merchant/src/lib/logistics.ts carrierLabel 同词表;
+# 未知编码原样透传 —— 数据诚实律,严禁编造承运商缺省)
+_CARRIER_LABELS = {"SF": "顺丰速运", "JD": "京东快递", "ZTO": "中通快递", "EMS": "邮政 EMS"}
+
+
 async def ship_order(order_id: str, carrier_code: str, tracking_no: str,
-                     business_id: str | None = None) -> dict:
-    """发货(真实世界副作用)。business_id 提供时即属主闸:闸不中 rowcount 0
-    走「订单不存在」,跨租户零副作用(2026-10-14 夜评批次)。"""
+                     business_id: str | None = None, operator: str = "AGENT_SPI") -> dict:
+    """发货(真实世界副作用)。2026-10-25 客服优化批收口三个既有坑:
+
+    1. **状态谓词**:UPDATE 带 ``status = 'PAID'`` 条件 —— 此前已退款/已发货单
+       可被 API 直接打成 SHIPPED,前端按钮显隐是唯一状态闸。谓词不中回查现状:
+       同单同运单号 = 幂等重放(网络重试不误报冲突),否则 stateConflict 由路由
+       映射 409。
+    2. **审计落账**:SHIP 动作写 merchant_audit_logs(operator=发货员工 email),
+       与 MODIFY_ADDRESS/REQUEST_REFUND 同律;此前发货零审计,订单详情审计
+       时间线看不到发货动作。
+    3. **诚实轨迹**:tracking_info 落单节点「已发货 + 轨迹待更新」—— 旧实现的
+       揽收/运输/派送三节点是硬编码伪造文案(违数据诚实律),真实物流源未接入
+       前严禁宣称在途/派送中;坐席推物流卡会把该字段变成顾客可见断言。
+
+    business_id 提供时即属主闸:闸不中 rowcount 0 走「订单不存在」,跨租户零
+    副作用(2026-10-14 夜评批次)。
+    """
     await ensure_merchant_tables()
     now = _dt.datetime.now(_dt.UTC)
-
-    def _t(hours: int) -> str:
-        return (now - _dt.timedelta(hours=hours)).isoformat()
-
+    carrier_label = _CARRIER_LABELS.get(carrier_code or "", carrier_code or "顺丰速运")
     tracking_info = {
-        "carrier": "顺丰速运" if carrier_code == "SF" else (carrier_code or "顺丰速运"),
+        "carrier": carrier_label,
         "trackingNumber": tracking_no,
-        "status": "IN_TRANSIT",
-        "latestLocation": "北京市朝阳区三里屯派件部",
+        "status": "SHIPPED",
         "timeline": [
             {
-                "time": _t(4),
-                "status": "揽收成功",
-                "location": "极光潮品华北智能一号仓",
-                "description": "包裹已由顺丰速运揽收并打包出库",
-            },
-            {
-                "time": _t(2),
-                "status": "运输中",
-                "location": "北京顺丰转运中心",
-                "description": "快件已到达北京顺丰转运中心，正发往朝阳区三里屯营业点",
-            },
-            {
                 "time": now.isoformat(),
-                "status": "派送中",
-                "location": "北京市朝阳区三里屯派件部",
-                "description": "顺丰快递员已接单，正在派送途中 (联系电话: 95338)",
-            },
+                "status": "已发货",
+                "location": "",
+                "description": f"商家已发货 · {carrier_label} · 运单号 {tracking_no}，物流轨迹待更新",
+            }
         ],
     }
+    ti_json = json.dumps(tracking_info, ensure_ascii=False)
+    tenant_pred = "AND LOWER(business_id) = :b" if business_id else ""
+    bind: dict = {"ti": ti_json, "oid": order_id}
+    if business_id:
+        bind["b"] = business_id.strip().lower()
     async with merchant_engine().begin() as conn:
-        if business_id:
-            result = await conn.execute(
-                text(
-                    "UPDATE merchant_orders SET status = 'SHIPPED', tracking_info = :ti, is_address_modifiable = FALSE "
-                    "WHERE order_id = :oid AND LOWER(business_id) = :b"
+        result = await conn.execute(
+            text(
+                "UPDATE merchant_orders SET status = 'SHIPPED', tracking_info = :ti, is_address_modifiable = FALSE "
+                f"WHERE order_id = :oid AND status = 'PAID' {tenant_pred}"
+            ),
+            bind,
+        )
+        if (result.rowcount or 0) > 0:
+            await _audit_insert_idempotent(
+                conn,
+                action_type="SHIP",
+                order_id=order_id,
+                idempotency_key=f"SHIP_{order_id}_{tracking_no}",
+                payload_json=json.dumps(
+                    {"orderId": order_id, "carrierCode": carrier_code, "trackingNo": tracking_no, "operator": operator},
+                    ensure_ascii=False,
                 ),
-                {
-                    "ti": json.dumps(tracking_info, ensure_ascii=False), "oid": order_id,
-                    "b": business_id.strip().lower(),
-                },
-            )
-        else:
-            result = await conn.execute(
-                text(
-                    "UPDATE merchant_orders SET status = 'SHIPPED', tracking_info = :ti, is_address_modifiable = FALSE "
-                    "WHERE order_id = :oid"
+                result_json=json.dumps(
+                    {"message": f"已发货 · {carrier_label} · 运单号 {tracking_no}", "status": "SHIPPED"},
+                    ensure_ascii=False,
                 ),
-                {"ti": json.dumps(tracking_info, ensure_ascii=False), "oid": order_id},
+                operator=operator,
             )
-    updated = result.rowcount or 0
-    return {
-        "success": updated > 0,
-        "message": "发货成功，已流转为已发货状态并锁定地址" if updated > 0 else "订单不存在",
-    }
+            return {
+                "success": True,
+                "orderId": order_id,
+                "message": "发货成功，已流转为已发货状态并锁定地址",
+            }
+        # 谓词不中:回查现状裁决 幂等重放 vs 状态冲突 vs 不存在
+        row = (
+            await conn.execute(
+                text(f"SELECT status, tracking_info FROM merchant_orders WHERE order_id = :oid {tenant_pred} LIMIT 1"),
+                {"oid": bind["oid"], **({"b": bind["b"]} if business_id else {})},
+            )
+        ).mappings().first()
+        if row is None:
+            return {"success": False, "message": "订单不存在"}
+        current_status = str(row["status"])
+        current_tracking = (row["tracking_info"] or {}).get("trackingNumber") if isinstance(row["tracking_info"], dict) else None
+        if current_status == "SHIPPED" and current_tracking == tracking_no:
+            return {
+                "success": True,
+                "orderId": order_id,
+                "replay": True,
+                "message": "该订单已按同一运单号发货，幂等放行",
+            }
+        return {
+            "success": False,
+            "stateConflict": True,
+            "currentState": current_status,
+            "message": f"订单当前状态为【{current_status}】，不可发货（仅待发货状态可发货）",
+        }
 
 
 async def get_admin_dashboard_data(business_id: str | None = None) -> dict:

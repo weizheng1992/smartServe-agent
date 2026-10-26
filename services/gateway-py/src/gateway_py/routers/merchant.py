@@ -178,8 +178,15 @@ async def admin_orders_ship(
             return JSONResponse(status_code=404, content={"success": False, "error": f"订单 {body['orderId']} 不存在"})
         result = await mds.ship_order(
             body["orderId"], body.get("carrierCode") or "SF", body["trackingNo"],
-            business_id=scope.tenant,
+            business_id=scope.tenant, operator=scope.email,
         )
+        # 状态冲突(2026-10-25 客服优化批):非 PAID 单发货 = 409 + 当前状态,
+        # 零副作用;成功/幂等重放/竞态查无按既有 200 信封返回。
+        if result.get("stateConflict"):
+            return JSONResponse(
+                status_code=409,
+                content={"success": False, "message": result["message"], "currentState": result.get("currentState")},
+            )
         return result
     except HTTPException:
         raise

@@ -34,6 +34,41 @@ _TENANT_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 # (空/超长/奇异字符)忽略回落服务端 uuid4,幂等退化为无键直写。
 _CLIENT_MSG_ID_RE = re.compile(r"^[0-9a-zA-Z-]{8,64}$")
 
+# 卡片类型闭集(客服优化批 2026-10-25):对齐 packages/types card.ts
+# RichCardType 11 型。坐席台开始主动推卡片后,cards 槽不再是无校验透传 ——
+# 任意形状原样落库 messages.cards 并桥到顾客 SSE 是注入面。卡片内 actions 的
+# 闭集不在此层校验(渲染端 CARD_ACTION_STRATEGIES 未登记动作返回 null 兜底)。
+_CARD_TYPES = frozenset(
+    {
+        "order_card",
+        "order_picker",
+        "tracking_timeline",
+        "refund_confirmation",
+        "quick_replies",
+        "damage_assessment",
+        "product_ranking",
+        "cart_card",
+        "step_progress",
+        "interactive_product",
+        "document_source",
+    }
+)
+_CARDS_MAX = 8
+
+
+def _cards_gate(cards) -> str | None:
+    """send_message 的 cards 载荷闸:None=通过,否则拒绝文案(ack 诚实回败)。"""
+    if cards is None:
+        return None
+    if not isinstance(cards, list) or len(cards) > _CARDS_MAX:
+        return f"cards 载荷非法：须为 ≤{_CARDS_MAX} 张卡片的数组"
+    for c in cards:
+        if not isinstance(c, dict) or c.get("type") not in _CARD_TYPES:
+            return "cards 载荷非法：含未登记的卡片类型（闭集外 type）"
+        if not isinstance(c.get("data"), dict):
+            return "cards 载荷非法：卡片缺少 data 对象"
+    return None
+
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*", namespaces=NAMESPACE)
 
 # sid → {threadId, tenantId, role}
@@ -400,6 +435,10 @@ async def on_send_message(sid: str, data: dict):
     tenant_id = data.get("tenantId", "")
     content = data.get("content", "")
     cards = data.get("cards")
+    # cards 闭集闸(客服优化批):身份/认领闸之前快败 —— 非法载荷零落库零广播
+    cards_err = _cards_gate(cards)
+    if cards_err:
+        return {"success": False, "error": cards_err}
     staff = _staff_of(sid)
     if staff is not None:
         # 员工连接仅能以 operator 身份发言,坐席信息服务端派生 —— 此前客户端
