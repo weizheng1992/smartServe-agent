@@ -121,3 +121,29 @@ export const DESK_STATE_LABEL: Record<DeskState, string> = {
   mine: '我接管中',
   others: '同事接管中',
 };
+
+/** 「全部」tab 的分组节序(2026-10-25 左栏重构):紧急度降序 —— 排队最优先
+ *  (呼叫即工单)、其次我接管的、再同事、AI 托管长尾殿后;消灭无差别长列表。 */
+export const DESK_GROUP_ORDER: DeskState[] = ['queuing', 'mine', 'others', 'ai'];
+
+export interface DeskStateGroup {
+  state: DeskState;
+  label: string;
+  rows: DeskConversation[];
+}
+
+/** 按坐席四态分组(保持入参顺序,排序仍归 sortQueueFirst 单点);空组不产出。 */
+export function groupByState(list: DeskConversation[], myEmail: string): DeskStateGroup[] {
+  const buckets = new Map<DeskState, DeskConversation[]>();
+  for (const c of list) {
+    const state = deriveConversationState(c, myEmail);
+    const bucket = buckets.get(state);
+    if (bucket) bucket.push(c);
+    else buckets.set(state, [c]);
+  }
+  return DESK_GROUP_ORDER.filter((s) => buckets.has(s)).map((s) => ({
+    state: s,
+    label: DESK_STATE_LABEL[s],
+    rows: buckets.get(s) || [],
+  }));
+}

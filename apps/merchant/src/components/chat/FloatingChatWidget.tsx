@@ -7,8 +7,8 @@ import { postJson, qs, requestJson, uploadJson } from '../../lib/api';
 import { STOREFRONT_CHAT_OPEN_EVENT, type StorefrontChatOpenDetail } from '../../lib/chatBridge';
 import { quotaReplyText } from '../../lib/quotaGuidance';
 import { mergeCartSnapshot, readStoreCart, writeStoreCart } from '../../lib/storeCart';
-import { type TurnUsage, usageBadgeText } from '../../lib/usageBadge';
 import { MERCHANT_ID, activeThreadKey, chatMsgsKey, merchantThreadId } from '../../lib/tenant';
+import { type TurnUsage, usageBadgeText } from '../../lib/usageBadge';
 import { getGreetingForRoute } from './routeGreetingConfig';
 import { openStoreStream } from './storeStreamConnection';
 
@@ -391,8 +391,12 @@ export function FloatingChatWidget() {
       onMessage: (rawData) => {
         try {
           const msgData = JSON.parse(rawData);
-          if (msgData?.content) {
-            const incomingText = String(msgData.content).trim();
+          // 纯卡片帧放行(客服优化批 2026-10-25):坐席可推不带文案的卡片,
+          // content 门会把整帧静默丢弃(历史路径 toChatMessage 无此闸,实时/
+          // 历史两路行为漂移);有 content 或有 cards 才是可渲染消息。
+          const hasCards = Array.isArray(msgData?.cards) && msgData.cards.length > 0;
+          if (msgData?.content || hasCards) {
+            const incomingText = String(msgData.content || '').trim();
             const incomingId = msgData.id || `sse_${Date.now()}`;
             const incomingRole = msgData.role === 'user' ? 'user' : 'assistant';
             const incomingCards = Array.isArray(msgData.cards) ? msgData.cards : [];

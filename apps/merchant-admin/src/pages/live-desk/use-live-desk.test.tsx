@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
     setDnd: vi.fn(),
     noteCreate: vi.fn(),
     noteDelete: vi.fn(),
+    // 客服优化批:hook 装配权限点(发货按钮 order:ship 显隐),桩须提供该面
+    menus: vi.fn(async () => ({ role: 'finance_owner', perms: ['order:ship'], menus: [] })),
   };
 });
 
@@ -27,6 +29,7 @@ vi.mock('socket.io-client', () => ({ io: vi.fn(() => mocks.socket) }));
 
 vi.mock('@/lib/api', () => ({
   api: {
+    menus: mocks.menus,
     liveDesk: {
       conversations: mocks.conversations,
       presence: mocks.presence,

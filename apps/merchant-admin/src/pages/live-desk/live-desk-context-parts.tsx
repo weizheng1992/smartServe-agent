@@ -94,17 +94,74 @@ export function ContextCustomer({ context }: { context: LiveDeskContext }) {
   );
 }
 
-/** 五项之②最近订单(≤5,服务端截断)。 */
-export function ContextOrders({ context }: { context: LiveDeskContext }) {
+/** 五项之②最近订单(≤5,服务端截断)。客服优化批(2026-10-25)交互化:
+ *  行点击开详情 / PAID 行「发货」(canShip = order:ship 显隐,真源服务端)/
+ *  「推卡」把订单卡推给顾客(未认领时由调用方拦截提示)。词形「状态 · 金额 ·
+ *  时间」为既有 vitest 钉死锚点,保持原始状态码呈现。 */
+export function ContextOrders({
+  context,
+  canShip,
+  onOpenOrder,
+  onShipOrder,
+  onPushOrderCard,
+}: {
+  context: LiveDeskContext;
+  canShip?: boolean;
+  onOpenOrder?: (orderId: string) => void;
+  onShipOrder?: (orderId: string) => void;
+  onPushOrderCard?: (o: { orderId: string; status: string; totalAmount: number; createdAt: string | null }) => void;
+}) {
   if (context.recentOrders.length === 0) return <EmptyLine text="暂无订单记录" />;
   return (
     <div className="space-y-1.5">
       {context.recentOrders.map((o) => (
-        <div key={o.orderId} className="flex items-center justify-between text-[11px]" data-testid="ctx-order-row">
-          <span className="min-w-0 truncate text-zinc-600">{o.orderId}</span>
-          <span className="ml-2 shrink-0 text-zinc-400">
-            {o.status} · ¥{fmtMoney(o.totalAmount, true)} · {fmtTime(o.createdAt)}
-          </span>
+        <div
+          key={o.orderId}
+          className="rounded-lg border border-zinc-100 px-2 py-1.5 text-[11px] transition-colors hover:border-zinc-200"
+          data-testid="ctx-order-row"
+        >
+          <div className="flex items-center justify-between gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={!onOpenOrder}
+              onClick={() => onOpenOrder?.(o.orderId)}
+              className="h-auto min-w-0 flex-1 cursor-pointer justify-start truncate rounded px-0 py-0 text-left font-mono text-[11px] font-normal text-zinc-600 hover:bg-transparent hover:underline"
+              title={onOpenOrder ? '查看订单详情' : undefined}
+            >
+              {o.orderId}
+            </Button>
+            <span className="shrink-0 text-zinc-400">{fmtTime(o.createdAt)}</span>
+          </div>
+          <div className="mt-0.5 flex items-center justify-between gap-1">
+            <span className="min-w-0 truncate text-zinc-400">
+              {o.status} · ¥{fmtMoney(o.totalAmount, true)}
+            </span>
+            <span className="flex shrink-0 items-center gap-1">
+              {canShip && o.status === 'PAID' && onShipOrder && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-testid="ctx-order-ship"
+                  onClick={() => onShipOrder(o.orderId)}
+                  className="h-auto cursor-pointer rounded-full border-zinc-300 px-2 py-0 text-[10px] font-normal text-zinc-600 hover:border-zinc-400 hover:bg-zinc-50"
+                >
+                  发货
+                </Button>
+              )}
+              {onPushOrderCard && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-testid="ctx-order-push"
+                  onClick={() => onPushOrderCard(o)}
+                  className="h-auto cursor-pointer rounded-full border-zinc-300 px-2 py-0 text-[10px] font-normal text-zinc-600 hover:border-zinc-400 hover:bg-zinc-50"
+                >
+                  推卡
+                </Button>
+              )}
+            </span>
+          </div>
         </div>
       ))}
     </div>

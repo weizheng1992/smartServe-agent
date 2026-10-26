@@ -13,6 +13,7 @@
 // api.liveDesk.timeline)由 face 注入,本模块不硬编码。
 import { type DeskConversationRow, type MessageItem, authToken, currentStaffEmail } from '@/lib/api';
 import type { Socket } from 'socket.io-client';
+import type { RichCardBlock } from 'types';
 
 export type { Socket };
 
@@ -28,9 +29,16 @@ export function newClientMsgId(): string {
     : `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-/** 乐观行构造(坐席发言 role='operator' 无前缀,P1 裁决)。 */
-export function buildOptimisticMessage(clientMsgId: string, content: string): MessageItem {
-  return { id: clientMsgId, role: 'operator', content, timestamp: new Date().toISOString() };
+/** 乐观行构造(坐席发言 role='operator' 无前缀,P1 裁决);cards 乐观同行
+ *  (客服优化批:坐席推卡即时可见,ack 后 resync 对齐真源)。 */
+export function buildOptimisticMessage(clientMsgId: string, content: string, cards?: RichCardBlock[]): MessageItem {
+  return {
+    id: clientMsgId,
+    role: 'operator',
+    content,
+    ...(cards && cards.length > 0 ? { cards } : {}),
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /** 去重追加:同 id 已在表则原数组返回(重入/房间回环不重复挂行)。 */
@@ -74,9 +82,16 @@ export function emitDeskAck<T = Record<string, unknown>>(
 /** 发言组合:幂等键 → 守卫 emit → resync(两面都在 emit 后无条件对齐真源 ——
  *  没落库则乐观行消失,落库而 ack 未达则如实显示,盲删会抹掉已落库真消息;
  *  故 resync 恒调,不由 ok 分支)。socket 提供方由 face 注入(旧面 deskSocket
- *  单例可 reject,新面 socketRef 直取)。 */
+ *  单例可 reject,新面 socketRef 直取)。cards(客服优化批):非空才携带,
+ *  服务端 _cards_gate 闭集闸拒非法形状(ack 诚实回败,resync 后乐观行消失)。 */
 export async function sendOperatorMessage<T = { messageId?: string }>(
-  deps: { socket: () => Promise<Socket | null>; threadId: string; tenantId: string; content: string },
+  deps: {
+    socket: () => Promise<Socket | null>;
+    threadId: string;
+    tenantId: string;
+    content: string;
+    cards?: RichCardBlock[];
+  },
   resync: () => Promise<void> | void,
   clientMsgId = newClientMsgId(),
 ): Promise<{ clientMsgId: string; result: DeskAckResult<T> }> {
@@ -86,6 +101,7 @@ export async function sendOperatorMessage<T = { messageId?: string }>(
     tenantId: deps.tenantId,
     role: 'operator',
     content: deps.content,
+    ...(deps.cards && deps.cards.length > 0 ? { cards: deps.cards } : {}),
     clientMsgId,
   });
   await resync();

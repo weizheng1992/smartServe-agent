@@ -28,6 +28,7 @@ import {
 } from '@/lib/desk-link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Socket, io } from 'socket.io-client';
+import type { RichCardBlock } from 'types';
 import { deriveConversationState } from './live-desk-model';
 
 const TENANT_ID = 'aurora';
@@ -58,6 +59,9 @@ export function useLiveDesk() {
   const [context, setContext] = useState<LiveDeskContext | null>(null);
   const [pendingTicket, setPendingTicket] = useState<ApprovalItem | null>(null);
   const [peerTyping, setPeerTyping] = useState(false);
+  /** 当前员工权限点(api.menus 附带;发货按钮按 order:ship 显隐 —— 前端只做
+   *  可见性,权限真源在服务端 permCode,merchant-admin.md §2.3)。 */
+  const [perms, setPerms] = useState<string[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const socketRef = useRef<Socket | null>(null);
   const typingSentAtRef = useRef(0); // 上行节流
@@ -188,9 +192,9 @@ export function useLiveDesk() {
       setConnected(false);
       if (typingHoldRef.current) clearTimeout(typingHoldRef.current);
     };
-    // loadConversations/openThread 均为稳定 useCallback;myEmail 为稳定字符串,
-    // 不会引发重连
-  }, [loadConversations, openThread, myEmail]);
+    // loadConversations/openThread 均为稳定 useCallback;effect 体不读 myEmail
+    // (旧 deps 多列一项,biome 红于 HEAD,2026-10-25 顺手收口),不会引发重连
+  }, [loadConversations, openThread]);
 
   // 初始加载 + 兜底轮询 + 排队计时 tick
   // now 是 hook 级 state,唯一消费点是排队等待计时;每秒无条件 setNow 会让
@@ -202,6 +206,14 @@ export function useLiveDesk() {
     if (queued && !hasQueuedRef.current) setNow(Date.now());
     hasQueuedRef.current = queued;
   }, [conversations]);
+  useEffect(() => {
+    // 权限点一次装配(失败按空集 = 全部动作按钮隐藏,fail-closed)
+    api
+      .menus()
+      .then((m) => setPerms(m.perms || []))
+      .catch(() => setPerms([]));
+  }, []);
+
   useEffect(() => {
     void loadConversations();
     void loadPresence();
@@ -269,20 +281,23 @@ export function useLiveDesk() {
   }, []);
 
   const sendMessage = useCallback(
-    async (threadId: string, content: string) => {
+    async (threadId: string, content: string, cards?: RichCardBlock[]) => {
       // P4 消息幂等(spec §2.7):客户端 UUID 作消息主键 —— 先挂乐观气泡,
       // ack 成功即整表重同步(服务端真相同 id 单行);失败/超时不盲删,重拉
       // 时间线以真源裁决(重放可能已落库,只有 ack 未达)。重放静默由服务端
       // ON CONFLICT DO NOTHING 保证,ack 恒回既有 messageId。
       // 幂等键/乐观行/守卫 emit/恒 resync 组合收口 desk-link(候选⑤)。
+      // cards(客服优化批 2026-10-25):坐席主动推卡片 —— 服务端闭集闸拒非法
+      // 形状,ack 回败时乐观行经 resync 消失、错误文案由调用方呈现。
       const clientMsgId = newClientMsgId();
-      setTimeline((prev) => appendOptimistic(prev, buildOptimisticMessage(clientMsgId, content)));
+      setTimeline((prev) => appendOptimistic(prev, buildOptimisticMessage(clientMsgId, content, cards)));
       const { result } = await sendOperatorMessage<LiveDeskAck>(
         {
           socket: async () => socketRef.current,
           threadId,
           tenantId: TENANT_ID,
           content,
+          cards,
         },
         () => openThread(threadId),
         clientMsgId,
@@ -291,6 +306,12 @@ export function useLiveDesk() {
     },
     [openThread],
   );
+
+  /** 右栏订单操作(发货)后的上下文刷新:只重拉五项聚合,不动时间线/选中态。 */
+  const reloadContext = useCallback(async () => {
+    const tid = selectedThreadIdRef.current;
+    if (tid) await loadContext(tid);
+  }, [loadContext]);
 
   // P4 台内批驳(spec §2.6):员工代行 approve/reject 走 /api/chat/approvals,
   // 服务端闸 live_desk:approve(403 如实透传);批驳后不自动释放,工单终局
@@ -366,6 +387,7 @@ export function useLiveDesk() {
     connected,
     dnd,
     now,
+    perms,
     selectedThreadId,
     timeline,
     context,
@@ -375,6 +397,7 @@ export function useLiveDesk() {
     claim,
     release,
     sendMessage,
+    reloadContext,
     emitTyping,
     reviewTicket,
     toggleDnd,

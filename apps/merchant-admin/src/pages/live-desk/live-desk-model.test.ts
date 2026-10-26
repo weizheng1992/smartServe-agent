@@ -7,6 +7,7 @@ import {
   filterConversations,
   formatUpdatedAt,
   formatWait,
+  groupByState,
   queueWaitSeconds,
   sortQueueFirst,
   takeoverRequestedAt,
@@ -171,5 +172,27 @@ describe('formatUpdatedAt 相对时间(2026-10-24 列表优化)', () => {
     expect(formatUpdatedAt(undefined, NOW)).toBe('');
     expect(formatUpdatedAt(null, NOW)).toBe('');
     expect(formatUpdatedAt('not-a-date', NOW)).toBe('');
+  });
+});
+
+describe('groupByState 左栏分组(2026-10-25 左栏重构)', () => {
+  const queuing = conv({ threadId: 'q1', status: 'human_takeover', assignedOperatorId: null });
+  const mine = conv({ threadId: 'm1', status: 'human_takeover', assignedOperatorId: ME });
+  const other = conv({ threadId: 'o1', status: 'human_takeover', assignedOperatorId: 'peer@aurora' });
+  const ai = conv({ threadId: 'a1', status: 'active' });
+
+  it('按紧急度序分组:排队 → 我的 → 同事 → AI 托管,空组不产出', () => {
+    const groups = groupByState([ai, other, mine, queuing], ME);
+    expect(groups.map((g) => g.state)).toEqual(['queuing', 'mine', 'others', 'ai']);
+    expect(groups.map((g) => g.rows.map((r) => r.threadId))).toEqual([['q1'], ['m1'], ['o1'], ['a1']]);
+    // 只有一态时其余组不出现
+    expect(groupByState([ai], ME).map((g) => g.state)).toEqual(['ai']);
+  });
+
+  it('保持入参顺序(排序仍归 sortQueueFirst 单点),不改入参', () => {
+    const list = [mine, queuing];
+    const groups = groupByState(list, ME);
+    expect(groups.map((g) => g.rows.map((r) => r.threadId))).toEqual([['q1'], ['m1']]);
+    expect(list.map((c) => c.threadId)).toEqual(['m1', 'q1']);
   });
 });

@@ -1,5 +1,6 @@
 import type { MessageItem } from '@/lib/api';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { RichCardBlock } from 'types';
 // 坐席台独立页(live-desk-rework P2/P3/P4):台面顶栏(排队/我的计数 + 实时
 // 连接态)+ 三栏 —— 左会话池(排队等待最久置顶)/ 中时间线(认领后回复 +
 // 待批工单批驳卡)/ 右坐席上下文栏(五项,spec §2.4)+ 坐席在线态。
@@ -7,7 +8,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 // 的正式坐席工作台。e2e/vitest 锚点(testid 与关键文本)一概保留。
 // 2026-10-24 工作台收敛:本页菜单名升正「客服工作台」,待办审核独立成
 // /approvals 页,旧 /live-desk 保留路由但退出菜单(e2e 回绿钉仍走它)。
-import { Button, Input, Switch } from 'ui';
+import { Button, Input, RichCardRenderer, Switch } from 'ui';
+import { buildOrderCard, buildShippedTrackingCard } from './live-desk-cards';
 import {
   ContextCustomer,
   ContextNotes,
@@ -16,7 +18,15 @@ import {
   ContextSection,
   ContextTickets,
 } from './live-desk-context-parts';
-import { type DeskTab, deriveConversationState, filterConversations, sortQueueFirst } from './live-desk-model';
+import {
+  type DeskState,
+  type DeskTab,
+  deriveConversationState,
+  filterConversations,
+  groupByState,
+  sortQueueFirst,
+} from './live-desk-model';
+import { DeskOrderDialog, DeskShipDialog, QuickRepliesDialog } from './live-desk-order-dialogs';
 import { ConversationRow, DeskStateBadge } from './live-desk-parts';
 import { useLiveDesk } from './use-live-desk';
 
@@ -25,6 +35,14 @@ const TABS: Array<{ key: DeskTab; label: string }> = [
   { key: 'queuing', label: '排队中' },
   { key: 'mine', label: '我的' },
 ];
+
+/** 分组节头圆点配色(与 DeskStateBadge 四态同色系)。 */
+const GROUP_DOT: Record<DeskState, string> = {
+  queuing: 'bg-amber-400',
+  mine: 'bg-emerald-500',
+  others: 'bg-sky-400',
+  ai: 'bg-zinc-300',
+};
 
 /** PG TIMESTAMP naive isoformat(无 Z/时区,空格分隔 Safari 不吃)→ HH:MM。 */
 function fmtClock(iso: string | null | undefined): string {
@@ -50,6 +68,17 @@ function ChatAvatar({ label, className = '' }: { label: string; className?: stri
     >
       {glyph}
     </span>
+  );
+}
+
+/** 消息内卡片(客服优化批 2026-10-25):坐席推卡与 AI 卡片在时间线只读回显 ——
+ *  坐席侧不消费卡片动作(onAction 缺省 = 按钮零副作用),顾客侧才是动作面。 */
+function MessageCards({ cards }: { cards?: any[] }) {
+  if (!cards || cards.length === 0) return null;
+  return (
+    <div className="mt-1 w-full">
+      <RichCardRenderer cards={cards as RichCardBlock[]} />
+    </div>
   );
 }
 
@@ -94,6 +123,7 @@ function TimelineMessage({ m, myEmail }: { m: MessageItem; myEmail: string }) {
           <div className="rounded-2xl rounded-bl-sm border border-zinc-200 bg-white px-3 py-2 text-[12px] leading-5 whitespace-pre-wrap break-words text-zinc-700">
             {m.content}
           </div>
+          <MessageCards cards={m.cards} />
           {clock && <div className="mt-0.5 text-[10px] text-zinc-300">{clock}</div>}
         </div>
       </div>
@@ -125,6 +155,7 @@ function TimelineMessage({ m, myEmail }: { m: MessageItem; myEmail: string }) {
           {mine && m.operatorInfo && <div className="mb-0.5 text-[10px] opacity-70">{name}</div>}
           <div className="whitespace-pre-wrap break-words">{m.content}</div>
         </div>
+        <MessageCards cards={m.cards} />
         {clock && <div className="mt-0.5 text-[10px] text-zinc-300">{clock}</div>}
       </div>
     </div>
@@ -141,6 +172,10 @@ export default function LiveDeskPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [reviewing, setReviewing] = useState(false);
+  // 客服优化批(2026-10-25):右栏订单详情/发货弹窗 + 快捷选项推送
+  const [orderDetailId, setOrderDetailId] = useState<string | null>(null);
+  const [shipOrderId, setShipOrderId] = useState<string | null>(null);
+  const [quickOpen, setQuickOpen] = useState(false);
 
   // 待办审核「进会话」深链(2026-10-24 工作台收敛):?thread= 直选目标会话,
   // 命中列表即选并一次性抹参 —— 会话列表异步到达,effect 挂 conversations 载荷。
@@ -193,6 +228,19 @@ export default function LiveDeskPage() {
     () => sortQueueFirst(filterConversations(desk.conversations, desk.myEmail, tab, keyword)),
     [desk.conversations, desk.myEmail, tab, keyword],
   );
+  // 左栏行渲染单点(分组/平铺两形态共用,props 漂移即两形态行为分叉)
+  const renderRow = (c: (typeof visible)[number]) => (
+    <ConversationRow
+      key={c.threadId}
+      conversation={c}
+      myEmail={desk.myEmail}
+      nowMs={desk.now}
+      selected={c.threadId === desk.selectedThreadId}
+      claiming={claimingId === c.threadId}
+      onOpen={(tid) => void desk.openThread(tid)}
+      onClaim={(tid) => void doClaim(tid)}
+    />
+  );
   // 台面顶栏计数:排队(待认领)与我的(接管中)会话数。
   const counts = useMemo(() => {
     let queuing = 0;
@@ -244,6 +292,55 @@ export default function LiveDeskPage() {
     await desk.removeNote(desk.selectedThreadId, noteId);
   };
 
+  // —— 客服优化批(2026-10-25):右栏订单操作 + 坐席主动推卡 ——
+  /** 发货按钮显隐:前端只做可见性,order:ship 真源在服务端 permCode 闸。 */
+  const canShip = desk.perms.includes('order:ship');
+
+  /** 推订单卡:须已认领(服务端认领闸未接管禁言 —— 前端先拦一道给人话提示),
+   *  卡片构造走 live-desk-cards 纯函数单点(动作闭集,顾客点击回流成消息)。 */
+  const doPushOrderCard = async (o: {
+    orderId: string;
+    status: string;
+    totalAmount: number;
+    createdAt: string | null;
+  }) => {
+    if (!desk.selectedThreadId) return;
+    if (!mineSelected) {
+      setNotice('请先认领会话,再向顾客推送卡片');
+      return;
+    }
+    setNotice('');
+    const ack = await desk.sendMessage(desk.selectedThreadId, `为您查询到订单 ${o.orderId} 的信息:`, [
+      buildOrderCard(o),
+    ]);
+    if (!ack.success) setNotice(ack.error || '推送失败');
+  };
+
+  /** 发货成功:刷新右栏上下文;已认领则自动推诚实单节点发货通知卡
+   *  (未接管时不推 —— 认领闸会拒,如实提示)。 */
+  const doShipped = async (carrierLabel: string, trackingNo: string) => {
+    const shippedId = shipOrderId;
+    setShipOrderId(null);
+    setNotice('');
+    await desk.reloadContext();
+    if (desk.selectedThreadId && mineSelected) {
+      const ack = await desk.sendMessage(
+        desk.selectedThreadId,
+        `您的订单已发货（${carrierLabel} · 运单号 ${trackingNo}），物流轨迹待更新。`,
+        [buildShippedTrackingCard(carrierLabel, trackingNo)],
+      );
+      if (!ack.success) setNotice(`发货成功,但通知卡片推送失败:${ack.error || ''}`);
+    } else {
+      setNotice(`订单 ${shippedId || ''} 发货成功;当前未接管会话,未自动推送通知卡片`);
+    }
+  };
+
+  const doSendQuickReplies = async (card: RichCardBlock) => {
+    if (!desk.selectedThreadId || !mineSelected) return;
+    const ack = await desk.sendMessage(desk.selectedThreadId, '请您从下方选项中选择:', [card]);
+    if (!ack.success) setNotice(ack.error || '推送失败');
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {/* 台面顶栏:标题 + 实时连接态(排队/我的计数并入下方 Tab,2026-10-24
@@ -291,20 +388,23 @@ export default function LiveDeskPage() {
               className="mt-2 h-auto w-full rounded-lg border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[12px] shadow-none transition-colors focus-visible:border-zinc-300 focus-visible:ring-2 focus-visible:ring-zinc-100"
             />
           </div>
-          <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
             {visible.length === 0 && <div className="p-4 text-center text-[12px] text-zinc-400">暂无会话</div>}
-            {visible.map((c) => (
-              <ConversationRow
-                key={c.threadId}
-                conversation={c}
-                myEmail={desk.myEmail}
-                nowMs={desk.now}
-                selected={c.threadId === desk.selectedThreadId}
-                claiming={claimingId === c.threadId}
-                onOpen={(tid) => void desk.openThread(tid)}
-                onClaim={(tid) => void doClaim(tid)}
-              />
-            ))}
+            {/* 左栏重构(2026-10-25):「全部」tab 按坐席四态分组带节头(排队最
+                优先 → 我的 → 同事 → AI 托管长尾),消灭无差别长列表;单维 tab
+                (排队中/我的)内已同质,保持平铺。 */}
+            {tab === 'all'
+              ? groupByState(visible, desk.myEmail).map((g) => (
+                  <div key={g.state} className="space-y-1" data-testid={`desk-group-${g.state}`}>
+                    <div className="sticky top-0 z-10 flex items-center gap-1.5 bg-white/95 px-1.5 py-1 text-[10px] font-semibold tracking-wide text-zinc-400">
+                      <span className={`h-1.5 w-1.5 rounded-full ${GROUP_DOT[g.state]}`} />
+                      {g.label}
+                      <span className="tabular-nums opacity-70">({g.rows.length})</span>
+                    </div>
+                    {g.rows.map(renderRow)}
+                  </div>
+                ))
+              : visible.map(renderRow)}
           </div>
         </aside>
 
@@ -460,7 +560,15 @@ export default function LiveDeskPage() {
                       placeholder="回复顾客…"
                       className="flex-1 rounded-xl border-zinc-200 bg-zinc-50 px-3 py-2 text-[12px] shadow-none transition-colors focus-visible:border-zinc-300 focus-visible:ring-2 focus-visible:ring-zinc-100"
                     />
-                    <Button className="h-9 px-4 text-[12px]" onClick={() => void doSend()}>
+                    <Button
+                      variant="outline"
+                      className="h-9 shrink-0 px-3 text-[12px]"
+                      data-testid="desk-quick-replies"
+                      onClick={() => setQuickOpen(true)}
+                    >
+                      快捷
+                    </Button>
+                    <Button className="h-9 shrink-0 px-4 text-[12px]" onClick={() => void doSend()}>
                       发送
                     </Button>
                   </div>
@@ -498,9 +606,16 @@ export default function LiveDeskPage() {
                 <ContextSection
                   title="最近订单"
                   testId="ctx-section-orders"
+                  defaultOpen
                   badge={desk.context.recentOrders.length ? String(desk.context.recentOrders.length) : undefined}
                 >
-                  <ContextOrders context={desk.context} />
+                  <ContextOrders
+                    context={desk.context}
+                    canShip={canShip}
+                    onOpenOrder={(oid) => setOrderDetailId(oid)}
+                    onShipOrder={(oid) => setShipOrderId(oid)}
+                    onPushOrderCard={(o) => void doPushOrderCard(o)}
+                  />
                 </ContextSection>
                 <ContextSection
                   title="售后工单"
@@ -573,6 +688,19 @@ export default function LiveDeskPage() {
           </div>
         </aside>
       </div>
+
+      {/* 客服优化批(2026-10-25):右栏订单详情/发货 + 快捷选项推送弹窗族 */}
+      <DeskOrderDialog orderId={orderDetailId} onClose={() => setOrderDetailId(null)} />
+      <DeskShipDialog
+        orderId={shipOrderId}
+        onClose={() => setShipOrderId(null)}
+        onShipped={(_code, carrierLabel, trackingNo) => void doShipped(carrierLabel, trackingNo)}
+      />
+      <QuickRepliesDialog
+        open={quickOpen}
+        onClose={() => setQuickOpen(false)}
+        onSend={(card) => void doSendQuickReplies(card)}
+      />
     </div>
   );
 }
