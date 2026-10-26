@@ -44,10 +44,13 @@ def _run_once(tag: str) -> list[dict]:
     ]
     print(f"[calib] 跑第 {tag} 轮: {' '.join(cmd[2:])}")
     res = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
-    if res.returncode != 0 or not out.exists():
+    # promptfoo exit 100 = 有一例失败(判分维度),但结果文件完好且 judge 判次
+    # 照落 —— 退出码不作为否决条件,只看产物是否可解析(05 号票 v2 实弹:3/4
+    # 轮被误毙只剩 9 判次)
+    if not out.exists():
         print(res.stdout[-2000:])
         print(res.stderr[-2000:], file=sys.stderr)
-        raise SystemExit(f"promptfoo 失败 exit={res.returncode}")
+        raise SystemExit(f"promptfoo 失败 exit={res.returncode}:无产物文件")
     raw = json.loads(out.read_text())
     results = raw["results"] if isinstance(raw.get("results"), list) else raw["results"]["results"]
     rows = []
