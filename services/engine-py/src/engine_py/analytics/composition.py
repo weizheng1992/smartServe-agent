@@ -37,7 +37,7 @@ class CompositionQuery:
     dimension: str | None = None  # 语义模型维度键(category/order_status/spu/customer/promotion)
     direction: str = "DESC"
     limit: int = 10
-    time_window: dict | None = None  # 同 StructuredQueryIntent:kind ∈ last_month/last_7d/last_30d/last_months
+    time_window: dict | None = None  # 同 StructuredQueryIntent:kind 见 engine.window_start(P0① 扩容后 11 种)
     compare_previous: bool = False  # 时间平移:本期 vs 上期并排
     category: str | None = None  # 便捷过滤(枚举维度值闭集)
     entity_kind: str | None = None  # 实体提及种类(spu/customer/promotion)
@@ -48,7 +48,12 @@ class CompositionQuery:
 # 成品指标闭集(15 号票):T1 组合的职责是「指标×维度」新组合,成品指标
 # (闭集路由既有形态)在此前路由已试过并失败 —— prompt 规则是软约束,
 # _validate 硬闸兜底(live 实弹:LLM 偶发仍映射 order_overview)
-_PRODUCT_METRICS = frozenset({"customer_spend_top", "order_overview", "category_gmv_top"})
+# 成品指标禁选集:闭集路由已试过,组合面也编译不了(bespoke 族);attribution_*
+# 双胞胎(grill 2026-10-26 实弹)——为什么型问句曾被映射过去,组合编译必拒
+_PRODUCT_METRICS = frozenset({
+    "customer_spend_top", "order_overview", "category_gmv_top",
+    "attribution_sales", "attribution_refund",
+})
 
 
 class CompositionRejected(Exception):
@@ -110,10 +115,13 @@ async def compose_resolve(question: str, allowed: list[str] | None) -> Compositi
         f"  不要映射到目录中的成品指标({'/'.join(sorted(_PRODUCT_METRICS))} 等)——\n"
         "  闭集路由在你之前已经试过并失败,再映射成品指标等于重复失败\n"
         "- metric 只能取指标目录中的键;dimension 只能取维度目录中的键;问题确实不含维度拆分时才留空\n"
-        "- 时间窗 kind ∈ last_month/last_7d/last_30d/last_months(附 n);问句出现「近/最近/上个月/N 个月」必须提取;\n"
-        "  问「同比/环比/上期对比/变化」时 compare_previous=true\n"
+        "- 时间窗 kind ∈ last_month/last_7d/last_30d/last_months(附 n)/today/yesterday/"
+        "this_week/last_week/this_month/this_year/last_year;问句出现「近/最近/上个月/N 个月/"
+        "今天/昨天/本周/上周/本月/今年/去年」必须提取;季度/节日/自定义日期段等闭集外时间留空\n"
+        "  问「同比/环比/上期对比/变化」或「为什么/什么原因/怎么回事」(= 问变化看涨跌)时 compare_previous=true\n"
         "- 问题里的具体商品/客户/活动名称写进 entity_mention(附 entity_kind=spu/customer/promotion),不要改写;\n"
-        "  出现目录枚举中的品类词(衬衫/配饰等)写进 category\n"
+        "  出现目录枚举中的具体品类值(衬衫/配饰等)才写进 category —— 「品类/品牌/区域/客户/活动」"
+        "是维度词不是品类值,严禁把维度词或指标短语写进 category,未提及具体品类留空\n"
         "- 组合不出目录内的查询 → metric 输出 \"__unsupported__\",绝不猜\n"
         + composition_catalog()
     )
@@ -209,11 +217,29 @@ def _validate(out: Any, allowed: list[str] | None, question: str) -> Composition
     if out.category is not None:
         enum_values = dims.get("category", {}).get("values") or []
         if out.category not in enum_values:
-            raise CompositionRejected(f"品类 {out.category!r} 不在枚举闭集内")
+            # LLM 垃圾串(15 号票三跑三红同族;grill 2026-10-26 再实证 JSON blob
+            # 与指标描述串):先子串救回真实枚举值(「衬衫类」→衬衫),救不回
+            # 回落 L0 确定性槽位,再不行视为未提及 —— 垃圾串绝不毙掉整张组合
+            _sub = next((v for v in enum_values if v in out.category), None)
+            if _sub is not None:
+                out.category = _sub
+            elif slot_category and slot_category in enum_values:
+                print(f"[T1] 品类槽位垃圾串 {out.category!r} 回落 L0 槽位 {slot_category!r}")
+                out.category = slot_category
+            else:
+                print(f"[T1] 品类槽位垃圾串 {out.category!r} 丢弃(视为未提及)")
+                out.category = None
+    # entity_kind 裸 null 字面串(live 实弹:函数调用参数偶发把 null 输出成
+    # 字符串)归一为未提及;真越闭集值仍响亮拒绝
+    if isinstance(out.entity_kind, str) and out.entity_kind.strip().lower() in ("null", "none", ""):
+        out.entity_kind = None
     if out.entity_kind is not None and out.entity_kind not in ("spu", "customer", "promotion"):
         raise CompositionRejected(f"实体种类 {out.entity_kind!r} 不在闭集内")
     time_window = None
-    if out.time_kind in ("last_month", "last_7d", "last_30d", "last_months"):
+    if out.time_kind in (
+        "last_month", "last_7d", "last_30d", "last_months",
+        "today", "yesterday", "this_week", "last_week", "this_month", "this_year", "last_year",
+    ):
         time_window = {"kind": out.time_kind}
         if out.time_kind == "last_months":
             time_window["n"] = min(max(int(out.time_n or 6), 1), 24)
@@ -349,7 +375,7 @@ def _dim_label(dim_key: str, dim: dict) -> str:
 
 
 def _compose_rank(comp: CompositionQuery, dim: dict, business_id: str, entity_ids: list[str]) -> tuple[str, dict[str, Any]]:
-    from .engine import UnsupportedQuery, window_start
+    from .engine import UnsupportedQuery, window_end, window_start
 
     measure = _measure_expr(comp.metric)
     if not measure or comp.metric not in COMPOSABLE_METRICS:
@@ -364,6 +390,10 @@ def _compose_rank(comp: CompositionQuery, dim: dict, business_id: str, entity_id
     if comp.time_window:
         where_parts.append("AND o.created_at >= :window_start ")
         params["window_start"] = window_start(comp.time_window)
+        wend = window_end(comp.time_window)
+        if wend is not None:
+            where_parts.append("AND o.created_at < :window_end ")
+            params["window_end"] = wend
     params["lim"] = comp.limit
     sql = (
         f'SELECT {dim_sql} AS "{label}", {measure}::float AS "metricScore" '
@@ -382,7 +412,11 @@ def _dim_key(comp: CompositionQuery) -> str:
 
 
 def _period_bounds(window: dict | None, now: datetime | None = None) -> tuple[datetime, datetime]:
-    """(本期起点, 上期起点):时间平移的通用算术(与 window_start 同源 UTC 钟)。"""
+    """(本期起点, 上期起点):时间平移的通用算术(与 window_start 同源 UTC 钟)。
+
+    P0① 扩容 kind 的双期映射:today↔昨日全天 / yesterday↔前天全天 /
+    this_week↔上周 / last_week↔上上周 / this_month↔上月 / this_year↔去年 /
+    last_year↔前年;上期一律由 SQL 以 `< :cur_start` 封口(等长对齐)。"""
     now = now or datetime.now(UTC).replace(tzinfo=None)
     kind = (window or {}).get("kind")
     if kind == "last_7d":
@@ -399,6 +433,26 @@ def _period_bounds(window: dict | None, now: datetime | None = None) -> tuple[da
         for _ in range(n):
             prev = (prev - timedelta(days=1)).replace(day=1)
         return cur, prev
+    floor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if kind == "today":
+        return floor, floor - timedelta(days=1)
+    if kind == "yesterday":
+        return floor - timedelta(days=1), floor - timedelta(days=2)
+    if kind == "this_week":
+        week_start = floor - timedelta(days=now.weekday())
+        return week_start, week_start - timedelta(days=7)
+    if kind == "last_week":
+        week_start = floor - timedelta(days=now.weekday() + 7)
+        return week_start, week_start - timedelta(days=7)
+    if kind == "this_month":
+        first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return first, (first - timedelta(days=1)).replace(day=1)
+    if kind == "this_year":
+        year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return year_start, year_start.replace(year=year_start.year - 1)
+    if kind == "last_year":
+        year_start = now.replace(year=now.year - 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return year_start, year_start.replace(year=year_start.year - 2)
     # last_month / 缺省:本月 vs 上月(gmv_mom 语义)
     first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     cur = (first - timedelta(days=1)).replace(day=1) if kind == "last_month" else first
@@ -407,7 +461,7 @@ def _period_bounds(window: dict | None, now: datetime | None = None) -> tuple[da
 
 
 def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str, entity_ids: list[str]) -> tuple[str, dict[str, Any]]:
-    from .engine import UnsupportedQuery
+    from .engine import UnsupportedQuery, window_end
 
     measure = _measure_expr(comp.metric)
     if not measure or comp.metric not in COMPOSABLE_METRICS:
@@ -428,8 +482,16 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
 
     # B1 关联指标对照(ADR-0011):双期 CTE 携带同基关联度量(退款率)的同期值
     # —— 两列数字并排呈现「跌的同时发生了什么」,因果判断留给人(08-D1 不破)。
-    # 主指标即退款率时不重复携带;差评率需评论-订单跨基 join(扇出风险),留票注。
+    # 主指标即退款率时不重复携带。
     related = None if comp.metric == "refund_rate" else _measure_expr("refund_rate")
+
+    # 完整过去段(昨天/上周/上个月/去年)本期同样带排他上界(P0①):此前 cur 段
+    # 开口到当前时刻,「上个月为什么跌」把当月数据静默并进本期对照
+    cur_end = window_end(comp.time_window, now)
+    cur_end_clause = ""
+    if cur_end is not None:
+        params["cur_end"] = cur_end
+        cur_end_clause = "AND o.created_at < :cur_end"
 
     def _period(start_param: str, end_clause: str) -> str:
         where = [f"o.created_at >= :{start_param} {end_clause}"]
@@ -445,6 +507,50 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
             f"GROUP BY {dim_sql}"
         )
 
+    # B1 差评率对照(留票注收口,grill 2026-10-26):差评率度量基座是评价表,
+    # 与订单基不存在无扇出 join —— 独立 CTE 按同维度聚合后并排。仅对 join
+    # 路径可达的维度(品类/商品)且无实体过滤时附列,其余诚实缺列不造零。
+    # join 条件从语义模型 review_of_spu 声明派生(评审收口:手抄 SQL 与模型
+    # 声明双向漂移,trend_family 反手抄同族);评价基右界须用 r.created_at
+    # (订单基的 cur_end_clause 是 o. 前缀)。
+    badrate_ctes = badrate_cols = badrate_joins = ""
+    if comp.dimension in ("category", "spu") and not entity_ids:
+        from .tools_registry_bridge import semantic_model
+
+        review_join = next(
+            (j["condition"] for j in semantic_model()["joins"] if j["name"] == "review_of_spu"), None
+        )
+        if review_join is None:
+            raise UnsupportedQuery("语义模型未声明 review_of_spu join(差评率对照不可组合)")
+        bad_dim_sql = "s.category" if comp.dimension == "category" else "s.title"
+        bad_expr = (
+            "ROUND(COALESCE(SUM(CASE WHEN r.rating <= 2 THEN 1 ELSE 0 END), 0) * 100.0 "
+            "/ GREATEST(COUNT(*), 1), 2)"
+        )
+        cur_end_clause_r = "AND r.created_at < :cur_end" if cur_end is not None else ""
+
+        def _badrate(start_param: str, end_clause: str) -> str:
+            return (
+                f"SELECT {bad_dim_sql} AS dim, {bad_expr}::float AS br "
+                f"FROM merchant_product_reviews r "
+                f"LEFT JOIN merchant_spus s ON {review_join} "
+                f"WHERE r.created_at >= :{start_param} {end_clause} "
+                f"GROUP BY {bad_dim_sql}"
+            )
+
+        badrate_ctes = (
+            ", badcur AS (" + _badrate("cur_start", cur_end_clause_r) + ")"
+            ", badprev AS (" + _badrate("prev_start", "AND r.created_at < :cur_start") + ")"
+        )
+        badrate_cols = (
+            ', COALESCE(badcur.br, 0)::float AS "本期差评率", '
+            '(COALESCE(badcur.br, 0) - COALESCE(badprev.br, 0))::float AS "差评率变化"'
+        )
+        badrate_joins = (
+            " LEFT JOIN badcur ON badcur.dim = COALESCE(cur.dim, prev.dim) "
+            "LEFT JOIN badprev ON badprev.dim = COALESCE(cur.dim, prev.dim) "
+        )
+
     related_cols = (
         ', COALESCE(cur.rv, 0)::float AS "本期退款率", '
         '(COALESCE(cur.rv, 0) - COALESCE(prev.rv, 0))::float AS "退款率变化"'
@@ -452,21 +558,23 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
         else ""
     )
     sql = (
-        "WITH cur AS (" + _period("cur_start", "") + "), "
-        "prev AS (" + _period("prev_start", "AND o.created_at < :cur_start") + ") "
-        f"SELECT COALESCE(cur.dim, prev.dim) AS \"{label}\", "
+        "WITH cur AS (" + _period("cur_start", cur_end_clause) + "), "
+        "prev AS (" + _period("prev_start", "AND o.created_at < :cur_start") + ")"
+        + badrate_ctes +
+        f" SELECT COALESCE(cur.dim, prev.dim) AS \"{label}\", "
         "COALESCE(cur.v, 0)::float AS \"本期\", "
         "COALESCE(prev.v, 0)::float AS \"上期\", "
         "(COALESCE(cur.v, 0) - COALESCE(prev.v, 0))::float AS \"变化\""
-        + related_cols +
-        " FROM cur FULL OUTER JOIN prev ON prev.dim = cur.dim "
-        "ORDER BY ABS(COALESCE(cur.v, 0) - COALESCE(prev.v, 0)) DESC LIMIT :lim"
+        + related_cols + badrate_cols +
+        " FROM cur FULL OUTER JOIN prev ON prev.dim = cur.dim"
+        + badrate_joins +
+        " ORDER BY ABS(COALESCE(cur.v, 0) - COALESCE(prev.v, 0)) DESC LIMIT :lim"
     )
     return sql, params
 
 
 def _compose_total(comp: CompositionQuery, business_id: str) -> tuple[str, dict[str, Any]]:
-    from .engine import UnsupportedQuery, window_start
+    from .engine import UnsupportedQuery, window_end, window_start
 
     measure = _measure_expr(comp.metric)
     if not measure or comp.metric not in COMPOSABLE_METRICS:
@@ -483,6 +591,10 @@ def _compose_total(comp: CompositionQuery, business_id: str) -> tuple[str, dict[
     if comp.time_window:
         where.append("AND o.created_at >= :window_start ")
         params["window_start"] = window_start(comp.time_window)
+        wend = window_end(comp.time_window)
+        if wend is not None:
+            where.append("AND o.created_at < :window_end ")
+            params["window_end"] = wend
     sql = (
         f"SELECT '__total__' AS \"productId\", {measure}::float AS \"metricScore\" "
         "FROM merchant_orders o "
@@ -562,8 +674,9 @@ async def attribute_narrative(comp: CompositionQuery, rows: list[dict], summary:
         "你是商户数据归因叙述器。把系统确定性算得的归因数据组织成 2-3 句话的归因叙述。\n"
         "硬规则:\n"
         "- 只能引用归因数据 JSON 中出现的数字与名称,绝不引入任何数据外的事实\n"
-        "- 主因/次因按「变化」列的正负表述;退款率变化列可以「伴随/同期」描述关联\n"
-        "- 结尾可给一句行动建议(基于数据即可,如「建议核查该品类售后」)\n"
+        "- 主因/次因按「变化」列的正负表述;退款率/差评率变化列以「伴随/同期」描述关联对照\n"
+        "- 结尾可给一句行动建议与一个值得核查的追问方向(基于数据即可,如「建议核查该品类售后」)\n"
+        "- 只说同期对照,不下因果定论(因果判断留给人,08-D1)\n"
         "- 只输出叙述文本,不要标题、不要 markdown\n"
     )
     user = _narrative_context(comp, rows, summary)
@@ -664,6 +777,13 @@ def dimension_word_of(question: str) -> str | None:
     return None
 
 
+# 原因语感 × T0 榜单指标 → 可组合基指标(grill 2026-10-26):「为什么各品类
+# 销售额跌了」被 L0 词林命中 category_gmv_top(dim_rank,不可组合)后
+# reason_reroute 拒之门外 → 答成当期品类榜,「为什么」被静默吞掉(笼统感的
+# 直接来源)。归因时榜单指标降维到基度量,口径同源语义模型,双期对照由组合面承担。
+_REASON_METRIC_ALIASES = {"category_gmv_top": "gmv"}
+
+
 def reason_reroute(question: str, intent) -> CompositionQuery | None:
     """复合语感 → 确定性组合升级(不依赖找谁词面;7babb61 语感直通同族)。
 
@@ -677,7 +797,8 @@ def reason_reroute(question: str, intent) -> CompositionQuery | None:
 
     if not (isinstance(intent, StructuredQueryIntent) and composition_enabled()):
         return None
-    if intent.metric not in COMPOSABLE_METRICS:
+    base_metric = _REASON_METRIC_ALIASES.get(intent.metric, intent.metric)
+    if base_metric not in COMPOSABLE_METRICS:
         return None
     reason = bool(REASON_RE.search(question or ""))
     dim_word = dimension_word_of(question or "")
@@ -696,7 +817,7 @@ def reason_reroute(question: str, intent) -> CompositionQuery | None:
         _, slot_time, _slot_category = extract_slots((question or "").strip().lower())
         time_window = slot_time
     return CompositionQuery(
-        metric=intent.metric,
+        metric=base_metric,
         dimension=dimension or "category",
         direction=intent.direction,
         limit=intent.limit,

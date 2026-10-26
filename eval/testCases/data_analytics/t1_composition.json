@@ -243,5 +243,90 @@
         "value": "file://scorers/t1t2_channels.py:get_assert"
       }
     ]
+  },
+  {
+    "description": "grill 归因 - 为什么×品类×上个月 → 双期对照",
+    "vars": {
+      "channel": "t1",
+      "input": "为什么上个月各品类销售额跌了",
+      "expectedMetric": "gmv",
+      "expectedDimension": "category",
+      "expectedComparePrevious": true,
+      "expectedTimeKind": "last_month"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill 归因 - 为什么×品牌×昨天 → 双期对照",
+    "vars": {
+      "channel": "t1",
+      "input": "为什么昨天各品牌销售额跌了",
+      "expectedMetric": "gmv",
+      "expectedDimension": "brand",
+      "expectedComparePrevious": true,
+      "expectedTimeKind": "yesterday"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill 归因 - 为什么×品类×本周 → 双期对照",
+    "vars": {
+      "channel": "t1",
+      "input": "为什么本周各品类销量跌了",
+      "expectedMetric": "volume",
+      "expectedDimension": "category",
+      "expectedComparePrevious": true,
+      "expectedTimeKind": "this_week"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill 归因 - 环比×品类×上月 → 双期对照(非为什么措辞族)",
+    "vars": {
+      "channel": "t1",
+      "input": "上个月各品类销售额环比",
+      "expectedMetric": "gmv",
+      "expectedDimension": "category",
+      "expectedComparePrevious": true,
+      "expectedTimeKind": "last_month"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill 归因 - 为什么×品牌×今年 → 双期对照",
+    "vars": {
+      "channel": "t1",
+      "input": "为什么今年各品牌销售额跌了",
+      "expectedMetric": "gmv",
+      "expectedDimension": "brand",
+      "expectedComparePrevious": true,
+      "expectedTimeKind": "this_year"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
   }
 ]

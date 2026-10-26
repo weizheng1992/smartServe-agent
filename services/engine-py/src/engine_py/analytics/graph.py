@@ -76,6 +76,27 @@ def build_cards(question: str, result: Any, intent: StructuredQueryIntent | None
     }]
 
 
+async def _time_clarify(question: str, trace: Trace) -> dict | None:
+    """时间口径反问(grill 2026-10-26 P0①):问句带时间词但闭集未命中 →
+    反问统计范围,严禁静默按全历史聚合出数(「昨天卖了多少」曾拿全时段
+    GMV 冒充 —— 貌似合理错数的最隐蔽来源,ADR-0006 遗留缺口收口)。
+
+    选项为可解析短语;前端 clarifyAskQuestion 以「原句(选项)」回问,预设窗
+    在 TIME_PATTERNS 中先于闭集外时间词命中,用户所选口径必然生效。"""
+    from .l0_lexicon import unparsed_time_hint
+
+    word = unparsed_time_hint(question)
+    if not word:
+        return None
+    await trace.record("clarify")
+    return Clarify(
+        kind="time",
+        question=f"「{word}」暂不支持精确统计,先按哪个范围算?",
+        options=[{"label": "最近7天"}, {"label": "最近30天"}, {"label": "上个月"}],
+        original_question=question,
+    ).to_frame()
+
+
 async def ask(
     question: str, session_ctx: dict, page_context: dict | None = None, *, persist_session: bool = True
 ) -> dict:
@@ -143,6 +164,12 @@ async def ask(
         try:
             intent, _, rewritten_q = await fallback_intent(question, allowed, session_ctx, history=history, trace=trace)
         except UnsupportedQuery as err:
+            # 时间口径反问先于组合/探索守闸(P0①):组合路的时间闭集外词
+            # 同样会静默落全历史 —— 反问闸覆盖所有「窗未解析」的出数路径;
+            # 窗已解析但模板不消费的路径由结果卡诚实注记兜底(见 _result 前)
+            _tclar = await _time_clarify(question, trace)
+            if _tclar is not None:
+                return _tclar
             # T1 组合通道(ADR-0010):L0/L2/L3 闭集全未命中 → 语义层组合
             # (LLM 产组合、编译器拼 SQL);未开闸/组合拒绝/失败 → 维持响亮
             # unsupported 并落库飞轮,绝不静默近似。
@@ -186,6 +213,13 @@ async def ask(
     if isinstance(intent, Clarify):
         await trace.record("clarify")
         return _clarify_frame(intent, allowed)
+
+    # 时间口径反问(P0①):L0/L2/L3 已解析出意图但时间词闭集外 → 先问口径
+    # 再执行;解析出合法时间窗(含新扩容 kind)则零打扰直通
+    if intent.time_window is None:
+        _tclar = await _time_clarify(effective_question, trace)
+        if _tclar is not None:
+            return _tclar
 
     # 勾选/订单号/标题前缀 intake(context_intake 单一职责模块)
     sel_orders, sel_spu, sel_cust = parse_raw_selection((page_context or {}).get("selection"))
@@ -246,10 +280,12 @@ async def ask(
 
     # 确定性组合升级(ADR-0011 语感直通):总量形指标 × 维度拆分语感 → 组合
     # 查询(零 LLM;「各品牌净销售额对比」不再答成总量单行)。指标已过角色闸,
-    # 品类相容闸在 breakdown_reroute 内。
+    # 品类相容闸在 breakdown_reroute 内。**reason 先于 breakdown**(grill
+    # 2026-10-26):「为什么各品类销售额跌了」曾被 breakdown 短路成当期榜,
+    # 「为什么」被静默吞掉 —— 原因语感优先走双期归因。
     from .composition import breakdown_reroute, reason_reroute
 
-    reroute = breakdown_reroute(effective_question, intent) or reason_reroute(effective_question, intent)
+    reroute = reason_reroute(effective_question, intent) or breakdown_reroute(effective_question, intent)
     if reroute is not None:
         frame = await _composed_frame(effective_question, reroute, session_ctx, engine, trace)
         if frame is not None:
@@ -281,6 +317,16 @@ async def ask(
     try:
         compiled = engine.compile(intent)
         result = await engine.execute_async(compiled)
+        # 时间窗诚实注记(评审收口 2026-10-26):部分 bespoke 手写模板与无
+        # time_column 的编译块不消费时间窗 —— 窗已解析却被模板丢弃时,严禁
+        # 静默按其固定口径作答(趋势族除外:窗转粒度参数,非丢弃)。
+        if (
+            intent.time_window
+            and not intent.metric.endswith("_trend")
+            and "window_start" not in compiled.params
+            and "cur_start" not in compiled.params
+        ):
+            result.caliber += ";已解析的时间范围暂不适用于该指标,按其固定口径统计"
     except UnsupportedQuery as err:
         # 编译期实体闸(EntityGateRequired,「补一句话即可继续」)→ hint 原文
         # 透传;真不支持才替换 generic 文案。2026-10-03 类型化前靠嗅探消息词面

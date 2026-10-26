@@ -52,13 +52,39 @@ GENERIC_POSITIVE = ("卖得最好", "卖得好", "最好", "爆款", "畅销")
 GENERIC_HINTS = (("卖得最好", ("gmv", "volume")), ("卖得好", ("gmv", "volume")), ("最好", ("gmv", "volume")))
 TIME_PATTERNS = (
     ("last_month", re.compile(r"上个月|上月")),
-    ("last_7d", re.compile(r"最近\s*(一|7)\s*天|近\s*7\s*天")),
+    ("last_7d", re.compile(r"最近\s*(一|7)\s*天|近\s*7\s*天|(?:最近|近)\s*一?周")),
     ("last_30d", re.compile(r"最近\s*(三十|30)\s*天|近\s*(三十|30)\s*天")),
     # 跨月统计(用户实弹诉求):近/最近/过去 N 个月、「几个月的销量」(N 缺省 6);
     # 纯「每月/按月/月度」无 N 同样切月粒度(N 缺省 6)
     ("last_months", re.compile(r"(?:(?:近|最近|过去)\s*)?(\d{1,2}|[一两二三四五六七八九十几]+)\s*个月的?")),
     ("last_months", re.compile(r"每月|按月|月度")),
+    # grill 2026-10-26 P0① 时间窗扩容:常见口语时间词此前全部静默落全历史。
+    # 刻意排在预设窗之后 —— clarify 点选回问是「原句(最近7天)」形,预设窗
+    # 先命中才能让用户选的口径压过原句里的闭集外时间词(见 unparsed_time_hint)。
+    ("today", re.compile(r"今天|今日")),
+    ("yesterday", re.compile(r"昨天|昨日")),
+    ("this_week", re.compile(r"本周|这一周|这周")),
+    ("last_week", re.compile(r"上周|上一周")),
+    ("this_month", re.compile(r"本月|这个月|当月")),
+    ("this_year", re.compile(r"今年|本年|本?年度|年初至今")),
+    ("last_year", re.compile(r"去年|上一年|上年度")),
 )
+# 时间语感探测(P0① 反问闸):TIME_PATTERNS 未命中后的兜底探测 —— 问句带
+# **不可解析**时间词(季度/节日/自定义日期段/星期几/昨晚)→ 由 graph 反问
+# 时间口径,严禁静默按全历史聚合出数(「昨天卖了多少」曾拿全时段数冒充)。
+# 刻意只收录闭集外语感:今天/昨天/本周/今年等已可解析,入了 hint 会让无指标
+# 闲聊(「今天心情如何」)错走时间反问而非 unsupported 诚实拒答。
+_TIME_HINT_RE = re.compile(
+    r"昨|前天|大前天|礼拜|星期|季度|q[1-4]|半年|"
+    r"双十一|双11|双十二|618|年货节|"
+    r"\d{4}\s*年|\d{1,2}\s*月份?|\d{1,2}\s*号|\d{1,2}\s*日"
+)
+
+
+def unparsed_time_hint(question: str) -> str | None:
+    """extract_slots 未命中时间窗后调用:返回触发反问的时间词面(无则 None)。"""
+    m = _TIME_HINT_RE.search(question or "")
+    return m.group(0) if m else None
 CN_MONTH_NUMS = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
                  "七": 7, "八": 8, "九": 9, "十": 10, "几": 6}
 CHART_HINTS = (

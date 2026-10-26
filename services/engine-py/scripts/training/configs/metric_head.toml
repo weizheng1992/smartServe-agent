@@ -21,6 +21,7 @@ labels = [
   "spu_compare",
   "unsupported",   # 闭集外 → 放行 L3 LLM 兜底,不许静默错分
   "net_sales",
+  "review_avg", "repeat_purchase_rate",  # grill 2026-10-26 补录(unanswered 高频)
 ]
 
 [data]

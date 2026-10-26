@@ -380,3 +380,24 @@ class TestTraceIdStamping:
         ids = {f.get("traceId") for f in out["frames"]}
         assert len(ids) == 1
         assert re.fullmatch(r"tr_[0-9a-f]{12}", ids.pop())
+
+
+class TestTimeClarify:
+    """P0① 时间口径反问:闭集外时间词(节日/自定义段)反问,合法窗零打扰直通。"""
+
+    def test_unparsed_time_word_asks_clarify(self):
+        out = asyncio.run(graph.ask("双十一的销量", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "clarify" and out["clarifyKind"] == "time"
+        labels = {o["label"] for o in out["options"]}
+        assert "最近7天" in labels and out["originalQuestion"]
+
+    def test_parsed_time_word_goes_straight_through(self):
+        """昨天已入解析集:不反问,直接出结果(诚实空也是结果)。"""
+        out = asyncio.run(graph.ask("昨天的销量排行", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] in ("result", "unsupported", "error")
+        assert out["type"] != "clarify"
+
+    def test_chitchat_with_parseable_time_word_still_unsupported(self):
+        """「今天心情如何」恢复 unsupported:hint 只收录不可解析词面。"""
+        out = asyncio.run(graph.ask("今天心情如何", {"business_id": "aurora", "role": "finance_owner"}))
+        assert out["type"] == "unsupported"

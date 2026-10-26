@@ -81,7 +81,7 @@ class Clarify:
     (前端只读 clarifyKind/options),归一时删除;metric 帧补 clarifyKind
     (加法,无害)。originalQuestion 供实体点选后回问原句。"""
 
-    kind: str  # "metric" | "entity"
+    kind: str  # "metric" | "entity" | "time"(P0① 时间口径反问)
     question: str
     options: list[dict]
     original_question: str | None = None
@@ -195,9 +195,16 @@ class MetricQueryEngine:
             promo_ids = (intent.entity_slot or {}).get("promotion") or []
             if not promo_ids:
                 raise EntityGateRequired("请先指明活动(如「开学季活动卖得怎么样」)")
+            # 缺省空串:无时间窗时 format 引用未赋值局部曾 NameError(潜伏
+            # 缺陷,grill 2026-10-26 顺手收口);右界见 window_end 注
+            time_clause = ""
             if intent.time_window:
                 time_clause = "AND r.created_at >= :window_start"
                 params["window_start"] = window_start(intent.time_window)
+                wend = window_end(intent.time_window)
+                if wend is not None:
+                    time_clause += " AND r.created_at < :window_end"
+                    params["window_end"] = wend
             params["entities"] = promo_ids[:20]
             sql = (
                 'SELECT COUNT(DISTINCT r.order_id) AS "核销订单数", '
@@ -476,12 +483,14 @@ class MetricQueryEngine:
 
 def window_start(window: dict, now: datetime | None = None) -> datetime:
     """相对时间窗下界(公共纯函数,2026-10-03 自私有方法归位为可直测面):
-    kind ∈ last_month/last_7d/last_30d/last_months。
+    kind ∈ last_month/last_7d/last_30d/last_months + grill 2026-10-26 P0①
+    扩容的 today/yesterday/this_week/last_week/this_month/this_year/last_year。
 
     窗口下界必须与库钟同源(UTC):created_at 由 server_default now() 落
     naive UTC,本地 naive now 在非 UTC 部署下让所有相对时间窗整体偏移
     时区(2026-09-29 夜审 F15 波及复核);月对齐分支与
-    date_trunc('month', CURRENT_DATE)(UTC 月界)同口径。
+    date_trunc('month', CURRENT_DATE)(UTC 月界)同口径;周以周一为界
+    (weekday() 周一=0,与业务周口径一致)。
     """
     kind = window.get("kind")
     now = now or datetime.now(UTC).replace(tzinfo=None)
@@ -499,7 +508,43 @@ def window_start(window: dict, now: datetime | None = None) -> datetime:
         for _ in range(max(int(window.get("n") or 6), 1) - 1):
             month = (month - timedelta(days=1)).replace(day=1)
         return month
+    floor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if kind == "today":
+        return floor
+    if kind == "yesterday":
+        return floor - timedelta(days=1)
+    if kind == "this_week":
+        return floor - timedelta(days=now.weekday())
+    if kind == "last_week":
+        return floor - timedelta(days=now.weekday() + 7)
+    if kind == "this_month":
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if kind == "this_year":
+        return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    if kind == "last_year":
+        return now.replace(year=now.year - 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     raise UnsupportedQuery(f"未知时间窗 {kind}")
+
+
+def window_end(window: dict, now: datetime | None = None) -> datetime | None:
+    """时间窗排他上界(None = 开口滚动窗,截至当前时刻)。
+
+    grill 2026-10-26 P0①:昨天/上周/上个月/去年是**完整过去段**,只有下界
+    会把「该段之后到现在」的数据静默算进答案(「上个月销量」曾答成
+    上月+当月累计,「昨天」曾答成全历史)—— 貌似合理错数的最隐蔽来源,
+    一律配排他上界;today/this_* 与滚动窗天然截至现在,保持开口。"""
+    kind = (window or {}).get("kind")
+    now = now or datetime.now(UTC).replace(tzinfo=None)
+    floor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if kind == "yesterday":
+        return floor
+    if kind == "last_week":
+        return floor - timedelta(days=now.weekday())
+    if kind == "last_month":
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if kind == "last_year":
+        return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return None
 
 
 @dataclass(frozen=True)

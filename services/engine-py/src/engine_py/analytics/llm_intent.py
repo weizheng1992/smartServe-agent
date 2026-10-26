@@ -33,8 +33,23 @@ ENTITY_REQUIRED: dict[str, str] = {
     "customer_panorama": "customer",
     "customer_spend_trend": "customer",
 }
-_VALID_TIME = ("last_7d", "last_30d", "last_month")
-_VALID_CATEGORY = ("户外机能", "潮流T恤", "下装裤类", "潮流鞋靴", "背包收纳", "露营装备", "衬衫", "配饰", "运动配件")
+# 时间窗闭集与 L0 TIME_PATTERNS 同步扩容(grill 2026-10-26 P0①);
+# last_months 带 n 仅 L0 槽位路可产,L3 契约为枚举串,不入列
+_VALID_TIME = (
+    "last_7d", "last_30d", "last_month",
+    "today", "yesterday", "this_week", "last_week", "this_month", "this_year", "last_year",
+)
+
+
+def _valid_categories() -> tuple[str, ...]:
+    """品类闭集单一事实源 = semantic_model.yaml(与 L0 category_pattern 同源)。
+
+    grill 2026-10-26 P0② 收口:此前硬编码 9 值曾落后语义模型 11 值,
+    新增品类(旅行装备/骑行装备)在 L3 路径被静默丢弃、答成全品类榜;
+    派生后新增品类改 YAML 即两路同步,永不漂移。"""
+    from .tools_registry_bridge import semantic_model
+
+    return tuple(semantic_model()["dimensions"]["category"]["values"])
 
 
 class LlmIntent(BaseModel):
@@ -43,8 +58,8 @@ class LlmIntent(BaseModel):
     metric: str | None = Field(None, description="指标 key,必须取自闭集;无法确定则为 null")
     direction: str | None = Field(None, description="ASC=升序(最差/最低);DESC=降序(最好/最高);默认 null")
     limit: int | None = Field(None, description="Top N;未表达为 null")
-    time_window: str | None = Field(None, description="last_7d|last_30d|last_month|null")
-    category: str | None = Field(None, description="九品类之一或 null")
+    time_window: str | None = Field(None, description="last_7d|last_30d|last_month|today|yesterday|this_week|last_week|this_month|this_year|last_year|null")
+    category: str | None = Field(None, description="品类闭集之一或 null")
     entity_kind: str | None = Field(None, description="只能是 promotion|customer|spu 三值之一(promotion=活动 customer=客户 spu=商品);涉及具体实体时必填")
     entity_mention: str | None = Field(None, description="实体提及原文(活动名/客户名或手机号/商品名),原样摘取")
     compare_mention: str | None = Field(None, description="对比目标款(商品名/编码),仅对比类问题")
@@ -73,7 +88,10 @@ def _system_prompt(allowed: list[str] | None) -> str:
         "你是商户数据问答的意图解析器。把用户问题解析为 JSON,规则:\n"
         f"- metric 只能从闭集中选,闭集:\n{chr(10).join(rows)}\n"
         "- 问法/措辞任意,但含义不在闭集内(如问原因、问竞品、闲聊)→ metric=null\n"
-        "- time_window ∈ last_7d|last_30d|last_month|null(「昨天/本周」等闭集外时间也置 null 并在 metric 选择时保守处理)\n"
+        f"- time_window ∈ {'|'.join(_VALID_TIME)}|null;"
+        "「昨天/本周/今年」等已在闭集内须照实提取;季度/节日/自定义日期段等"
+        "闭集外时间置 null\n"
+        f"- category ∈ {'|'.join(_valid_categories())}|null(问句提及品类时填;未提及 null)\n"
         "- direction:问最差/最低/垫底 → ASC;最好/最高/Top → DESC;未表达 null\n"
         "- 问某活动的销售/效果 → entity_kind='promotion',entity_mention=活动名原文\n"
         "- 问某客户/某人的订单 → entity_kind='customer',entity_mention=客户名或手机号原文\n"
@@ -161,7 +179,7 @@ async def llm_resolve(
     direction = out.direction if out.direction in ("ASC", "DESC") else metric_meta["direction"]
     limit = min(max(int(out.limit or 5), 1), 50)
     time_window = {"kind": out.time_window} if out.time_window in _VALID_TIME else None
-    category = out.category if out.category in _VALID_CATEGORY else None
+    category = out.category if out.category in _valid_categories() else None
 
     intent = StructuredQueryIntent(
         metric=out.metric, direction=direction, limit=limit,

@@ -309,7 +309,9 @@ export function isFeedbackTail(visible: readonly AskFrame[], i: number): boolean
  *  排行」模板;实体反问保留原问题上下文组合回问。触发方式由 surface 自定
  *  (面板填输入框可改后发送,全屏直接追问),组装语义全站唯一。 */
 export function clarifyAskQuestion(data: AskFrameData, option: AskClarifyOption): string {
-  if (data.clarifyKind === 'entity') {
+  if (data.clarifyKind === 'entity' || data.clarifyKind === 'time') {
+    // time(P0① 时间口径反问):「原句(最近7天)」形回问 —— 预设窗在引擎
+    // TIME_PATTERNS 中先于闭集外时间词命中,所选口径必然生效
     return data.originalQuestion ? `${data.originalQuestion}(${option.label})` : option.label;
   }
   return `按${option.label}的商品排行`;

@@ -1088,3 +1088,65 @@ net_sales:
   - 上个月的实收金额
   permissionTag: sales_viewer
   verifiedConfidence: 0.95
+review_avg:
+  key: review_avg
+  label: 评价平均分
+  description: 统计周期内全部商品评价的平均星级(1-5,差评计入);数据源商户镜像库 merchant_product_reviews。
+  domain: review
+  compile:
+    shape: total_single
+    base: merchant_product_reviews
+    measure: ROUND(AVG(r.rating), 2)::float
+    time_column: r.created_at
+    limit_mode: one
+  businessRules:
+  - 平均星级 = 全部评价未加权平均(含差评),非好评率
+  direction: DESC
+  unit: 分
+  icon: ⭐
+  synonyms:
+  - 平均评分
+  - 评价平均分
+  - 平均星级
+  - 评分平均
+  - 平均分
+  conflictGroup:
+  - review_family
+  sampleQueries:
+  - 商品评价平均分是多少
+  - 最近30天平均评分多少
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95
+repeat_purchase_rate:
+  key: repeat_purchase_rate
+  label: 复购率
+  description: 统计周期内有效成交订单≥2单的客户占全部下单客户的百分比;数据源商户真账 merchant_orders。
+  domain: customer
+  compile:
+    shape: total_single
+    base: merchant_orders
+    pre_agg_cte:
+      name: cust
+      alias: c
+      select: "o.customer_id, COUNT(DISTINCT o.order_id) AS orders_n"
+      where: ["o.status NOT IN ('REFUNDED', 'CANCELLED')"]
+      group_by: o.customer_id
+    measure: ROUND(COALESCE(100.0 * SUM(CASE WHEN c.orders_n >= 2 THEN 1 ELSE 0 END) / GREATEST(COUNT(*), 1), 0), 2)::float
+    time_column: o.created_at
+    limit_mode: one
+  businessRules:
+  - 复购客户 = 有效成交订单 ≥ 2 单;分母同口径全部下单客户;无客户时为 0
+  direction: DESC
+  unit: '%'
+  icon: 🔁
+  synonyms:
+  - 复购率
+  - 回购率
+  - 复购比例
+  - 回头客比例
+  conflictGroup: []
+  sampleQueries:
+  - 复购率是多少
+  - 最近30天复购率
+  permissionTag: sales_viewer
+  verifiedConfidence: 0.95

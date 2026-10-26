@@ -631,5 +631,93 @@
         "value": "file://scorers/data_mapping.py:get_assert"
       }
     ]
+  },
+  {
+    "description": "grill P0③ - 复购率新指标直命中",
+    "vars": {
+      "input": "复购率是多少",
+      "expectedMetric": "repeat_purchase_rate",
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill P0③ - 评价平均分新指标直命中",
+    "vars": {
+      "input": "商品评价平均分是多少",
+      "expectedMetric": "review_avg",
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill P0① - 昨天时间窗",
+    "vars": {
+      "input": "昨天的销量",
+      "expectedMetric": "volume",
+      "expectedTimeWindow": "yesterday",
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill P0① - 上周时间窗",
+    "vars": {
+      "input": "上周销售额最高的商品",
+      "expectedMetric": "gmv",
+      "expectedTimeWindow": "last_week",
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill P0① - 今年时间窗",
+    "vars": {
+      "input": "今年的业绩",
+      "expectedMetric": "gmv",
+      "expectedTimeWindow": "this_year",
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill P0① - 本周时间窗",
+    "vars": {
+      "input": "本周客单价",
+      "expectedMetric": "aov",
+      "expectedTimeWindow": "this_week",
+      "expectedKind": "intent"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/data_mapping.py:get_assert"
+      }
+    ]
   }
 ]

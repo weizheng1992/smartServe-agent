@@ -130,6 +130,14 @@ def _where_parts(
     if intent.time_window and block.get("time_column"):
         parts.append(f"{block['time_column']} >= :window_start")
         params["window_start"] = window_start(intent.time_window)
+        # 完整过去段(昨天/上周/上个月/去年)带排他上界,防「上月+当月累计」
+        # 静默并段(P0①,engine.window_end 注)
+        from .engine import window_end
+
+        wend = window_end(intent.time_window)
+        if wend is not None:
+            parts.append(f"{block['time_column']} < :window_end")
+            params["window_end"] = wend
     if _model()["entities"][base]["database"] == "engine_db":
         parts.append(f"{alias}.business_id = :business_id")
         params["business_id"] = business_id
@@ -158,9 +166,39 @@ def _shape_dim_rank(intent: StructuredQueryIntent, block: dict[str, Any], busine
 
 def _shape_total_single(intent: StructuredQueryIntent, block: dict[str, Any], business_id: str) -> tuple[str, dict[str, Any]]:
     """总量单行('__total__'):limit_mode=param 走 :lim 槽位,one 字面 LIMIT 1
-    (单行聚合天然有界,aov/order_count 形态)。"""
+    (单行聚合天然有界,aov/order_count 形态)。
+
+    pre_agg_cte(grill 2026-10-26 复购率引入):比率型「二段聚合」度量(每客户
+    订单数 → 复购占比)无法在单层 SELECT 平铺表达 —— 声明预聚合 CTE(子查询
+    按行主键先聚),外层度量在 CTE 上求值;时间窗/常量口径入 CTE 内层,与
+    平铺路径同语义(右界见 window_end)。"""
     base = block["base"]
     alias = _model()["entities"][base]["alias"]
+    cte = block.get("pre_agg_cte")
+    if cte:
+        from .engine import window_end, window_start
+
+        parts = list(cte.get("where") or [])
+        params: dict[str, Any] = {}
+        if intent.time_window and block.get("time_column"):
+            parts.append(f"{block['time_column']} >= :window_start")
+            params["window_start"] = window_start(intent.time_window)
+            wend = window_end(intent.time_window)
+            if wend is not None:
+                parts.append(f"{block['time_column']} < :window_end")
+                params["window_end"] = wend
+        where_sql = f"WHERE {' AND '.join(parts)} " if parts else ""
+        sql = (
+            f"WITH {cte['name']} AS ("
+            f"SELECT {cte['select']} "
+            f"FROM {base} {alias} "
+            f"{where_sql}"
+            f"GROUP BY {cte['group_by']}"
+            ") "
+            f"SELECT '__total__' AS \"productId\", {block['measure']} AS \"metricScore\" "
+            f"FROM {cte['name']} {cte.get('alias') or cte['name']}"
+        )
+        return sql + " LIMIT 1", params
     sql = f"SELECT '__total__' AS \"productId\", {block['measure']} AS \"metricScore\" FROM {base} {alias} "
     where_parts, params = _where_parts(intent, block, business_id)
     if where_parts:
@@ -270,6 +308,12 @@ def _shape_spu_rank(intent: StructuredQueryIntent, block: dict[str, Any], busine
     if intent.time_window:
         time_clause = "AND o.created_at >= :window_start"
         params["window_start"] = window_start(intent.time_window)
+        from .engine import window_end
+
+        wend = window_end(intent.time_window)
+        if wend is not None:
+            time_clause += " AND o.created_at < :window_end"
+            params["window_end"] = wend
     category_clause = ""
     if intent.category:
         category_clause = f"AND {base_alias}.category = :cat"

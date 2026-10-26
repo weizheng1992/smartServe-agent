@@ -387,3 +387,106 @@ class TestDimensionBackfill:
 
         comp = _validate(self._out(category="true"), None, "各品类销售额的环比变化")
         assert comp.category is None
+
+
+class TestAttributionP01:
+    """grill 2026-10-26 P0①/② + ADR-0011 裁决落地:时间窗扩容右界、B1 差评率
+    对照列、T0 榜指标归因映射、品类闭集派生、新指标编译。"""
+
+    def test_period_compare_yesterday_complete_past_bounds(self):
+        """完整过去段(昨天)双期对照:本期必须带排他右界,上期=前天全天。"""
+        comp = composition.CompositionQuery(
+            metric="gmv", dimension="category", compare_previous=True, time_window={"kind": "yesterday"},
+        )
+        compiled = composition.compile_composition(comp, "aurora")
+        assert compiled.params["cur_end"] is not None
+        assert compiled.params["cur_start"] + timedelta(days=1) == compiled.params["cur_end"]
+        assert compiled.params["prev_start"] == compiled.params["cur_start"] - timedelta(days=1)
+
+    def test_period_compare_rolling_window_stays_open(self):
+        """滚动窗(近7天)保持开口,不受右界扩容影响。"""
+        comp = composition.CompositionQuery(
+            metric="gmv", dimension="category", compare_previous=True, time_window={"kind": "last_7d"},
+        )
+        compiled = composition.compile_composition(comp, "aurora")
+        assert "cur_end" not in compiled.params
+
+    def test_period_bounds_p01_kinds(self):
+        for kind in ("today", "yesterday", "this_week", "last_week", "this_month", "this_year", "last_year"):
+            cur, prev = composition._period_bounds({"kind": kind})
+            assert cur > prev, f"{kind} 双期起点必须严格递减"
+
+    def test_period_compare_carries_bad_rate_columns(self):
+        """B1 差评率对照列(品类维度):独立 CTE,join 条件从语义模型声明派生。"""
+        from engine_py.analytics.tools_registry_bridge import semantic_model
+
+        comp = composition.CompositionQuery(metric="gmv", dimension="category", compare_previous=True)
+        compiled = composition.compile_composition(comp, "aurora")
+        assert 'AS "本期差评率"' in compiled.sql and 'AS "差评率变化"' in compiled.sql
+        assert "badcur AS" in compiled.sql
+        declared = next(j["condition"] for j in semantic_model()["joins"] if j["name"] == "review_of_spu")
+        assert f"LEFT JOIN merchant_spus s ON {declared}" in compiled.sql
+
+    def test_time_kind_closure_single_source(self):
+        """时间 kind 闭集一致性(P0① 评审收口):L0 槽位、L3 契约、T1 校验
+        三处枚举必须 ⊆ window_start/_period_bounds 的支持集 —— 漏一处即
+        静默丢窗落全历史,这正是本批要修的病,故钉死。"""
+        import datetime as _dt
+
+        from engine_py.analytics import l0_lexicon, llm_intent
+        from engine_py.analytics.engine import UnsupportedQuery, window_start
+
+        l0_kinds = {k for k, _ in l0_lexicon.TIME_PATTERNS}
+        assert l0_kinds <= set(llm_intent._VALID_TIME) | {"last_months"}, "L0 产出的 kind L3 必须认得"
+        probe = _dt.datetime(2026, 10, 26, 12, 0, tzinfo=_dt.timezone.utc).replace(tzinfo=None)
+        for kind in set(llm_intent._VALID_TIME) | {"last_months"}:
+            try:
+                window_start({"kind": kind}, probe)
+                composition._period_bounds({"kind": kind}, probe)
+            except UnsupportedQuery as err:
+                raise AssertionError(f"kind {kind} 被契约接受但算不出边界:{err}") from err
+
+    def test_bad_rate_skipped_for_unreachable_dimension(self):
+        """客户维度与评价表无 join 路径:诚实缺列,不造零。"""
+        comp = composition.CompositionQuery(metric="gmv", dimension="customer", compare_previous=True)
+        compiled = composition.compile_composition(comp, "aurora")
+        assert "差评率" not in compiled.sql
+
+    def test_reason_reroute_maps_t0_rank_metric(self, monkeypatch):
+        """「为什么×品类销售额」被 L0 命中 category_gmv_top(不可组合)时,
+        归因降维到基度量 gmv —— 「为什么」不再被吞成当期榜。"""
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        intent = StructuredQueryIntent(metric="category_gmv_top", time_window={"kind": "last_month"})
+        comp = composition.reason_reroute("为什么各品类销售额跌了", intent)
+        assert comp is not None and comp.metric == "gmv"
+        assert comp.compare_previous is True and comp.dimension == "category"
+
+    def test_valid_categories_derived_from_semantic_model(self):
+        """L3 品类闭集 = semantic_model.yaml 派生(修 9 vs 11 漂移)。"""
+        from engine_py.analytics.llm_intent import _valid_categories
+        from engine_py.analytics.tools_registry_bridge import semantic_model
+
+        expected = tuple(semantic_model()["dimensions"]["category"]["values"])
+        assert _valid_categories() == expected and len(expected) >= 11
+
+    def test_new_metric_review_avg_compiles(self):
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.semantic_compiler import compile_metric
+
+        compiled = compile_metric(StructuredQueryIntent(metric="review_avg"), "aurora")
+        assert "AVG(r.rating)" in compiled.sql and "merchant_product_reviews" in compiled.sql
+
+    def test_new_metric_repeat_purchase_rate_compiles(self):
+        from engine_py.analytics.engine import StructuredQueryIntent
+        from engine_py.analytics.semantic_compiler import compile_metric
+
+        compiled = compile_metric(StructuredQueryIntent(metric="repeat_purchase_rate"), "aurora")
+        assert "WITH cust AS" in compiled.sql and "orders_n >= 2" in compiled.sql
+        assert "FROM cust c" in compiled.sql
+        # 时间窗右界入 CTE 内层(昨天 → 完整过去段)
+        compiled_y = compile_metric(
+            StructuredQueryIntent(metric="repeat_purchase_rate", time_window={"kind": "yesterday"}), "aurora",
+        )
+        assert compiled_y.params["window_end"] is not None
