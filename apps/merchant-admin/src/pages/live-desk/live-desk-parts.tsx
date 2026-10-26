@@ -102,7 +102,7 @@ export function ConversationRow({
       variant="ghost"
       data-testid="conversation-row"
       onClick={() => onOpen(conversation.threadId)}
-      className={`flex w-full cursor-pointer items-center justify-start gap-3 rounded-xl border px-3 py-2.5 text-left font-normal transition-colors ${
+      className={`flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-xl border px-3 py-2.5 text-left font-normal transition-colors ${
         selected
           ? 'border-zinc-900 bg-zinc-100/80 shadow-sm hover:bg-zinc-100/80'
           : 'border-zinc-100 bg-white hover:border-zinc-200 hover:bg-zinc-50/70'
