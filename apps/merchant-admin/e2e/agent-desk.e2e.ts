@@ -318,3 +318,77 @@ test.describe('坐席上下文栏五项(P3)', () => {
     await expect(page.getByTestId('ctx-note-row')).toHaveCount(0, { timeout: 10_000 });
   });
 });
+
+/**
+ * 坐席推卡全链(客服优化批 2026-10-25):快捷选项卡从坐席 UI 推出 →
+ * socket send_message 携 cards 过服务端闭集闸 → 顾客侧 new_message 载荷含
+ * cards → 坐席时间线回显卡片。顾客侧以 Node socket.io-client 断言线协议
+ * (商城 SSE 渲染链由 vitest + 既有 store SSE 契约册覆盖)。
+ */
+test.describe('坐席推卡全链(客服优化批)', () => {
+  let token: string;
+
+  test.beforeAll(async ({ request }) => {
+    token = await loginViaApi(request);
+  });
+
+  const presetAuth = async (page: Page) => {
+    await page.addInitScript(
+      (s: { token: string; email: string }) => {
+        localStorage.setItem('merchant-admin.token', s.token);
+        localStorage.setItem('merchant-admin.staff', s.email);
+        localStorage.setItem('merchant-admin.boss', JSON.stringify(s));
+      },
+      { token, email: STAFF.email },
+    );
+  };
+
+  test('快捷选项卡:坐席推送 → 顾客 socket 收 cards 载荷 → 坐席时间线回显', async ({ page, request }) => {
+    const threadId = `e2e_cards_${Date.now()}`;
+    const userId = `u_e2e_cards_${Date.now()}`;
+    // 建线程 + 摆排队态(与前述各册同款 seeding)
+    const res = await request.post(`${GW}/api/chat/threads`, {
+      headers: { Authorization: `Bearer ${token}`, 'x-tenant-id': 'aurora' },
+      data: { threadId, userId, businessId: 'aurora' },
+    });
+    expect(res.ok()).toBeTruthy();
+    const q = await request.post(`${GW}/api/conversations/${threadId}/status`, {
+      headers: { Authorization: `Bearer ${token}`, 'x-tenant-id': 'aurora' },
+      data: { status: 'human_takeover' },
+    });
+    expect(q.ok()).toBeTruthy();
+
+    await presetAuth(page);
+    const customer = await connectCustomer(userId);
+    try {
+      const joined = await new Promise<any>((resolve) => {
+        customer.emit('join_thread', { threadId, tenantId: 'aurora', role: 'user' }, (ack: any) => resolve(ack));
+        setTimeout(() => resolve({ success: false }), 10_000);
+      });
+      expect(joined?.success ?? true).toBeTruthy();
+
+      await page.goto('/agent-desk');
+      const row = page.locator('[data-testid="conversation-row"]', { hasText: userId }).first();
+      await expect(row).toBeVisible({ timeout: 30_000 });
+      await row.getByTestId('claim-button').click();
+      await expect(row.getByText('我接管中')).toBeVisible({ timeout: 15_000 });
+
+      // 顾客侧先挂监听,再从坐席 UI 推快捷选项卡(闭集闸放行 quick_replies)
+      const gotCards = waitNewMessage(
+        customer,
+        (p) => p.role === 'operator' && Array.isArray(p.cards) && p.cards[0]?.type === 'quick_replies',
+        15_000,
+      );
+      await page.getByTestId('desk-quick-replies').click();
+      await page.getByTestId('quick-reply-push').first().click();
+      const msg = await gotCards;
+      expect(msg.threadId).toBe(threadId);
+      expect((msg.cards[0].data.options || []).length).toBeGreaterThan(0);
+
+      // 坐席时间线回显卡片(选项文案经 QuickReplies 卡渲染)
+      await expect(page.getByTestId('desk-timeline')).toContainText('查询物流', { timeout: 10_000 });
+    } finally {
+      customer.disconnect();
+    }
+  });
+});
