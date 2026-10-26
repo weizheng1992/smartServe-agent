@@ -438,7 +438,7 @@ class TestAttributionP01:
 
         l0_kinds = {k for k, _ in l0_lexicon.TIME_PATTERNS}
         assert l0_kinds <= set(llm_intent._VALID_TIME) | {"last_months"}, "L0 产出的 kind L3 必须认得"
-        probe = _dt.datetime(2026, 10, 26, 12, 0, tzinfo=_dt.timezone.utc).replace(tzinfo=None)
+        probe = _dt.datetime(2026, 10, 26, 12, 0, tzinfo=_dt.UTC).replace(tzinfo=None)
         for kind in set(llm_intent._VALID_TIME) | {"last_months"}:
             try:
                 window_start({"kind": kind}, probe)

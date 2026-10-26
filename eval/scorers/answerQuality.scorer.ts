@@ -63,7 +63,7 @@ Output ONLY JSON with keys "reason" (string, your reasoning first) and "score" (
     }
 
     const resData = await res.json();
-    const content = resData.choices?.[0].message?.content || '';
+    const content = resData.choices?.[0]?.message?.content || '';
 
     let parsedJudge: any;
     try {

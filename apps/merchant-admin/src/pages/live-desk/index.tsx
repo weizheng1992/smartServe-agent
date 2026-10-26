@@ -405,8 +405,8 @@ export default function LiveDeskPage() {
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-2.5">
             {visible.length === 0 && <div className="p-4 text-center text-[12px] text-zinc-400">暂无会话</div>}
             {/* 左栏重构(2026-10-26 密度松弛版):「全部」tab 按坐席四态分组,
-                节头可折叠 —— AI 托管长尾默认收起(只留节头+计数,点开才摊,
-                长列表感主要来自它),紧急组默认展开;单维 tab 内已同质,保持平铺。 */}
+                节头可折叠 —— 四组默认全展开(增量分页已控住列表长度,用户
+                裁决去掉 AI 托管默认收起);单维 tab 内已同质,保持平铺。 */}
             {tab === 'all'
               ? groupByState(visible, desk.myEmail).map((g) => {
                   const collapsed = collapsedGroups[g.state];
