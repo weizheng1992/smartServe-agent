@@ -145,15 +145,18 @@ def is_address_save_vetoed(input_text: str | None) -> bool:
     return bool(detected and detected.get("mode") == "save" and not detected.get("missingSlots"))
 
 
-_PREV_ORDER_REF_RE = __import__("re").compile(r"上一[笔单]|前一[笔单]|上次那[笔单]|上回那[笔单]")
+# intent-exception(20号票:订单指涉守卫词面,非意图词表消费;同型先例 intent_triage_engine._ORDER_REF_RE)
+_PREV_ORDER_REF_RE = re.compile(
+    r"上一[笔单]|前一[笔单]|上次那[笔单]|上回那[笔单]|前几[天日](下|买)?的?那?(?:[笔单]|订单)"
+)
 
 
 def is_previous_order_referent(input_text: str | None) -> bool:
-    """序数指代词形守卫(20 号票,judge 校准飞轮产出):「上一笔/上一单」按
-    定义不是同句另一分句显式提及的单号,也不是历史回填的任何单 —— 资金
-    语义(退款/改址)严禁默认错挂(实弹:「顺便把上一笔订单退款」曾把同句
-    查物流的 ORD-98712 错挂为退款对象)。词面在场的资金动作一律先反问确认。
-    技能 fast-track 与执行器 processRefund 闸双消费(单一落点)。"""
+    """序数指代词形守卫(20 号票,judge 校准飞轮产出):「上一笔/上一单/前几天
+    的订单」类按定义不是同句另一分句显式提及的单号,也不是历史回填的任何
+    单 —— 资金语义(退款/改址)严禁默认错挂(实弹:「顺便把上一笔订单退款」
+    曾把同句查物流的 ORD-98712 错挂为退款对象)。词面在场的资金动作一律先
+    反问确认。技能 fast-track 与执行器 processRefund 闸双消费(单一落点)。"""
     if not input_text:
         return False
     return bool(_PREV_ORDER_REF_RE.search(input_text))

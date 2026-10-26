@@ -37,7 +37,7 @@ def test_prev_referent_guard_blocks_refund_and_asks():
 def test_prev_referent_variants_all_guarded():
     from engine_py.skills.routing import is_previous_order_referent
 
-    for msg in ("把上一笔订单退了", "上一单退款", "前一单申请退款", "上次那单不想要了"):
+    for msg in ("把上一笔订单退了", "上一单退款", "前一单申请退款", "上次那单不想要了", "前几天的订单退了", "前几天买的那单退款"):
         assert is_previous_order_referent(msg), msg
     for msg in ("ORD-98712 退款", "把我刚买的跑鞋退了", "推荐一款背包"):
         assert not is_previous_order_referent(msg), msg
