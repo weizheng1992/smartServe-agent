@@ -4,6 +4,28 @@
 
 ---
 
+## [2.24.0] - 2026-10-26 (客服工作台订单面板+坐席主动推卡上线;judge 校准飞轮首战判 v1 不可用并衍生序数指代守卫;desk 左栏增量分页+时区偏差收口;ADR-0011 归因落地+P0 时间语义收口)
+
+### ✨ Features
+
+- **客服工作台批**(1590b2fd + 0d0a42e5 + c06cb071):gateway 服务臂发货链路三坑收口 —— ship_order UPDATE 带 status='PAID' 谓词(已退款/已发货单直打 409 零副作用,此前前端按钮显隐是唯一状态闸)、同单同运单号重发幂等放行、SHIP 审计落 merchant_audit_logs、tracking_info 改诚实单节点「已发货+轨迹待更新」(旧揽收/运输/派送三节点系硬编码伪造文案)+ realtime send_message cards 闭集闸(RichCardType 11 型 + data 须对象 + ≤8 张,非法形状 ack 诚实回败零落库零广播);agent-desk UI 臂右栏订单行交互化(详情弹窗复用 GET /api/admin/orders/{id}、PAID 行发货 order:ship 权限显隐、一键推卡)、坐席推卡链路 UI 补全(时间线卡片只读回显、快捷选项 quick_replies 卡顾客点选回流成消息,C 级交互零新线协议闭环)、左栏「全部」tab 坐席四态分组(groupByState 纯函数单点);e2e 坐席推卡全链 5/5(3006+4000 真栈)。
+- **desk 左栏增量分页 + 密度松弛**(2c84ace3 + 8ecf8777,用户实弹三轮反馈):/api/conversations offset 真分页、页宽 30「加载更多」按 threadId 去重防轮询位移重叠(零新依赖替代虚拟列表);行卡片化、四组默认展开可折叠;会话时间 8h 偏差根因收口(threads 系 datetime 列裸吐 naive UTC,`_aware_iso` 单点收六序列化面);Button 底座 h-9 溢出致「介入」胶囊与下行时间跨行重叠修复。
+- **Data Agent ADR-0011 归因落地 + P0 时间语义收口**(62503eb3,grill 2026-10-26 裁决):TIME_PATTERNS 扩 7 种口语窗(今天/昨天/本周/上周/本月/今年/去年)+ window_end 排他右界(「上个月」曾把当月累计算进去);闭集外时间词(节日/自定义段/季度)clarify 反问(kind=time),严禁静默按全历史出数;L3 品类闭集改 semantic_model 派生(修硬编码 9 vs 11 漂移);B1 差评率对照列收口(评价基独立 CTE)+ reason_reroute 优先于 breakdown(「为什么」曾被拆分语感吞成当期榜);新指标 39→41(review_avg、repeat_purchase_rate,unanswered 实证高频);组合面加固(attribution_* 双胞胎入成品禁选集、category 垃圾串槽位救回、entity_kind null 归一)。
+
+### 🔧 Fixes
+
+- **序数指代混同守卫**(3c6b8f1d,eval-gap 20 号票,judge 校准飞轮产出):「上一笔订单」退款曾错挂同句查物流的 ORD-98712(三轮复现);单一谓词 `is_previous_order_referent` 双守卫面(OrderRefundSkill fast-track + 执行器 processRefund 门 4.1.0)诚实反问确认;unified 数据集 expectedRules 共犯条款同批收紧(严禁默认错挂)。
+- **双轴评审修复批**(9a9cca14):订单卡状态本地化(顾客面不再裸显 PAID 英文码)、幂等重放通知去重 + 同号换承运商 409 不冒充幂等、弱关联空态两态分形(「未关联商户档案」≠「已关联无订单」)、承运商词表 TS 单点 CARRIER_OPTIONS、空承运商编码空入空出透传、onShipped 参数 declump。
+
+### 🧪 Tests / 评测 / 评审
+
+- **judge 校准首测出数**(a287e28d + 91ae1721,05 号票):人工复判 27 判次一致率 78%<80%(MT-Bench 可用律),v1 三维 rubric judge 判不可用;不同意见聚类三盲区(指代×3/多模态证据透明×2/相关性×1)并直接衍生 20 号票 —— 校准飞轮首战实证:judge 校准的不同意见同时是答案质量坏例;rubric v2 六维 + 双段式 + Unknown 弃权档(score=-1 台账识别);v2 复判表 36 判次 + build_package 退出码误毙修复(promptfoo exit 100 系「有一例失败」判分信号而非运行失败)。
+- **unified 58/58 重钉**(974f4d8d):20 号票行为变更入基线,expectedTools 校准 getOrderStatus 单工具;meanScore 0.9944→0.9926(诚实降:退款从「执行」变「确认」)。
+- **夜间评测 58 用例**:首跑 56/58 —— 两败(d01/d18)同根因:网关进程模块陈旧混载(启动时缓存的旧 engine.py × 盘上已更新的 composition.py 惰性导入 → `window_end` ImportError;uvicorn --reload 不监视 engine-py 盲区的实弹重演),整树重启后定向复跑 **58/58 严格全过**;d18 二轮另现瞬态 LLM 挂起(追问改写臂 ainvoke 无超时护栏,300s SSE 死线兜底,复跑即过)—— 超时护栏留晨审;意图 561/564=99.5% 达标(2 例慢性已知 + 1 例新:repeat_purchase_rate 新指标致「复购率最高的客户有哪些」期望漂移,口径裁决留晨审)。报告 eval/nightly/results/20261026-230023 与 20261027-012457。
+- **夜评双轴评审**:Standards 0 硬违规 / 7 judgement,Spec 4 项;夜修两笔(7923bfba 守卫词形补「前几天的订单」族 + `__import__("re")` 收口 + 词表册外闸豁免注记;08bab915 scorer 空 choices 防崩 + live-desk 陈旧注释对齐 + 存量 UP017);晨审清单:ADR-0011「可组合+可归因」裁决行 vs total_single 现实现(豁免未回写 ADR)、v2 复判表系修前产物(20 号票回归未被校准复测覆盖)、时间 kind 闭集五处手抄、window_end 右界块三文件重复、承运商/卡片闭集跨语言无 parity 测试、graph.py 以参数键嗅探模板时间消费、指代守卫对同位显式单号仍反问(过度拦截 judgement)、LLM 调用超时护栏。
+
+---
+
 ## [2.23.0] - 2026-10-25 (评测战役收尾日:τ² 用户模拟器三场景上线连抓两真缺陷(18/19 号票)+ 门禁三票 + 采样臂/能力探针/judge 复判包;商户目录扩容 60 SPU;B 机自监控 health_watch 上线)
 
 ### ✨ Features
