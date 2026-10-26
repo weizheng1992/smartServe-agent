@@ -7,13 +7,13 @@
       "pass": 58,
       "fail": 0,
       "errors": 0,
-      "meanScore": 0.994396551724138,
+      "meanScore": 0.9926436781609197,
       "scorers": {
         "unknown": {
           "count": 58,
           "pass": 58,
           "fail": 0,
-          "meanScore": 0.992241379310345
+          "meanScore": 0.9898275862068966
         },
         "metric_disambiguation.py:get_assert": {
           "count": 5,

@@ -16,16 +16,13 @@
     ]
   },
   {
-    "description": "步骤规划 - 物流查询与退款双重意图",
+    "description": "步骤规划 - 物流查询与退款双重意图(退款侧:指代守卫 20 号票,「上一笔订单」严禁错挂,processRefund 不派发待确认)",
     "prompts": [
       "planner"
     ],
     "vars": {
       "input": "我想看看我买的跑鞋 ORD-98712 到了没，顺便我想把上一笔订单申请退款了",
-      "expectedTools": [
-        "getOrderStatus",
-        "processRefund"
-      ]
+      "expectedTools": "[\"getOrderStatus\"]"
     },
     "assert": [
       {
