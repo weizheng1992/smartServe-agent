@@ -39,6 +39,9 @@ const NOW_TICK_MS = 1_000; // 排队等待计时刷新
 const ACK_TIMEOUT_MS = 8_000;
 const TYPING_THROTTLE_MS = 1_500; // 输入态上行节流
 const TYPING_HOLD_MS = 2_500; // 「对方正在输入」显示保持窗
+/** 左栏增量分页页宽(2026-10-26 用户裁决:分页/虚拟列表替代整表长列表;
+ *  服务端 /api/conversations limit 封顶 100 + offset 真分页,增量加载零新依赖)。 */
+const LIST_PAGE_SIZE = 30;
 
 export interface LiveDeskAck {
   success: boolean;
@@ -62,20 +65,59 @@ export function useLiveDesk() {
   /** 当前员工权限点(api.menus 附带;发货按钮按 order:ship 显隐 —— 前端只做
    *  可见性,权限真源在服务端 permCode,merchant-admin.md §2.3)。 */
   const [perms, setPerms] = useState<string[]>([]);
+  /** 左栏分页态:总数(服务端 total)/加载更多中。 */
+  const [listTotal, setListTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const socketRef = useRef<Socket | null>(null);
   const typingSentAtRef = useRef(0); // 上行节流
   const typingHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null); // 显示保持窗
   const joinedRoomsRef = useRef<Set<string>>(new Set()); // 已入房集合(join 去重,重连清空重进)
+  // 已载入行数 ref(loadMore 取 offset / 兜底轮询保窗不缩,读最新值不触发重载)
+  const loadedCountRef = useRef(0);
+  useEffect(() => {
+    loadedCountRef.current = conversations.length;
+  }, [conversations]);
 
   const loadConversations = useCallback(async () => {
     try {
-      const body = await api.liveDesk.conversations({ limit: 100 });
-      if (body.success) setConversations(body.conversations);
+      // 兜底轮询/事件对齐:刷「已载入窗口」(offset 0,limit = 已载入行数与页宽
+      // 取大)—— 已手动加载更多的窗口不因轮询回缩,新会话照常从顶部进来。
+      const body = await api.liveDesk.conversations({
+        limit: Math.max(LIST_PAGE_SIZE, loadedCountRef.current),
+      });
+      if (body.success) {
+        setConversations(body.conversations);
+        setListTotal(body.total);
+      }
     } catch (err) {
       console.error('[live-desk] 会话列表加载失败(网关未启动?)', err);
     }
   }, []);
+
+  /** 左栏增量分页(2026-10-26):offset = 已载入行数,追加下一页;按 threadId
+   *  去重防列表位移(轮询期间新会话置顶导致 offset 窗口重叠)。 */
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const body = await api.liveDesk.conversations({
+        limit: LIST_PAGE_SIZE,
+        offset: loadedCountRef.current,
+      });
+      if (body.success) {
+        setListTotal(body.total);
+        setConversations((prev) => {
+          const seen = new Set(prev.map((c) => c.threadId));
+          return [...prev, ...body.conversations.filter((c) => !seen.has(c.threadId))];
+        });
+      }
+    } catch (err) {
+      console.error('[live-desk] 加载更多失败', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore]);
 
   const loadPresence = useCallback(async () => {
     try {
@@ -388,6 +430,10 @@ export function useLiveDesk() {
     dnd,
     now,
     perms,
+    /** 左栏增量分页:总数与「加载更多」(conversations.length < listTotal 即有下一页)。 */
+    listTotal,
+    loadingMore,
+    loadMore,
     selectedThreadId,
     timeline,
     context,

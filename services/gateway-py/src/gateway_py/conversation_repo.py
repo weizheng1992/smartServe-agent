@@ -14,6 +14,24 @@ from sqlalchemy import text
 THREAD_CHANNEL = "thread:{thread_id}:message"
 
 
+def _aware_iso(value) -> str | None:
+    """threads 时间戳序列化单点(两套钟收口 §2.4 补漏,2026-10-26 客服优化批
+    实弹:坐席台左栏会话时间早 8 小时):DB naive UTC 一律补 tzinfo=UTC 再
+    isoformat —— naive 直发会被前端 new Date 按本地解析。str(TEXT 列 /
+    旧引擎遗留行)naive 形态同律;解析失败原样透传(诚实,不编造)。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            parsed = _dt.datetime.fromisoformat(value)
+        except ValueError:
+            return value
+        parsed = parsed if parsed.tzinfo else parsed.replace(tzinfo=_dt.UTC)
+        return parsed.isoformat()
+    dt = value if value.tzinfo else value.replace(tzinfo=_dt.UTC)
+    return dt.isoformat()
+
+
 async def list_conversations(
     business_id: str,
     user_id: str | None = None,
@@ -106,11 +124,11 @@ async def list_conversations(
                 "unreadCount": r["unread_count"],
                 "tags": r["tags"] if isinstance(r["tags"], list) else [],
                 "metadata": r["metadata"] or {},
-                "createdAt": r["created_at"].isoformat() if r["created_at"] else _dt.datetime.now(_dt.UTC).isoformat(),
-                "updatedAt": r["updated_at"].isoformat() if r["updated_at"] else _dt.datetime.now(_dt.UTC).isoformat(),
+                "createdAt": _aware_iso(r["created_at"]) or _dt.datetime.now(_dt.UTC).isoformat(),
+                "updatedAt": _aware_iso(r["updated_at"]) or _dt.datetime.now(_dt.UTC).isoformat(),
                 "lastMessageSnippet": snippet,
                 "lastMessageRole": r["last_msg_role"],
-                "lastMessageTime": r["last_msg_time"],
+                "lastMessageTime": _aware_iso(r["last_msg_time"]),
                 # 会话级真实遥测(llm_call_logs / messages 库内真算,无命中即 0)
                 "messageCount": int(r["msg_count"]),
                 "totalTokens": int(r["total_tokens"]),
@@ -192,8 +210,8 @@ async def get_conversation_timeline(thread_id: str, business_id: str | None = No
             "assignedOperatorId": thread_row["assigned_operator_id"],
             "unreadCount": thread_row["unread_count"] or 0,
             "tags": thread_row["tags"] if isinstance(thread_row["tags"], list) else [],
-            "createdAt": thread_row["created_at"].isoformat() if thread_row["created_at"] else None,
-            "updatedAt": thread_row["updated_at"].isoformat() if thread_row["updated_at"] else None,
+            "createdAt": _aware_iso(thread_row["created_at"]),
+            "updatedAt": _aware_iso(thread_row["updated_at"]),
         },
         "messages": parsed_messages,
     }
@@ -243,7 +261,7 @@ async def update_conversation_status(
             "threadId": row["id"],
             "status": row["status"],
             "assignedOperatorId": row["assigned_operator_id"],
-            "updatedAt": row["updated_at"].isoformat() if row["updated_at"] else None,
+            "updatedAt": _aware_iso(row["updated_at"]),
         }
 
 
@@ -331,8 +349,8 @@ async def create_thread(thread_id: str, business_id: str, user_id: str | None = 
         "businessId": row["business_id"],
         "status": row["status"] or "active",
         "created": created,
-        "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
-        "updatedAt": row["updated_at"].isoformat() if row["updated_at"] else None,
+        "createdAt": _aware_iso(row["created_at"]),
+        "updatedAt": _aware_iso(row["updated_at"]),
     }
 
 
@@ -388,11 +406,11 @@ async def list_user_threads(user_id: str, business_id: str | None = None, limit:
                 "userId": r["user_id"],
                 "businessId": r["business_id"],
                 "status": r["status"] or "active",
-                "createdAt": r["created_at"].isoformat() if r["created_at"] else None,
-                "updatedAt": r["updated_at"].isoformat() if r["updated_at"] else None,
+                "createdAt": _aware_iso(r["created_at"]),
+                "updatedAt": _aware_iso(r["updated_at"]),
                 "lastMessageSnippet": snippet,
                 "lastMessageRole": r["last_msg_role"],
-                "lastMessageTime": last_time if isinstance(last_time, str) else (last_time.isoformat() if last_time else None),
+                "lastMessageTime": _aware_iso(last_time),
             }
         )
     return items

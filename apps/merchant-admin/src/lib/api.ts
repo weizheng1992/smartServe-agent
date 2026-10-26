@@ -886,11 +886,12 @@ export const api = {
 
   /** 坐席台(live-desk-rework P2;员工 JWT,持 live_desk:operate 打开时间线顺带清未读)。 */
   liveDesk: {
-    /** 全租户会话列表(threads 真源;status=search= 分页可选)。 */
+    /** 全租户会话列表(threads 真源;status=search= 分页可选;limit 服务端封顶 100)。 */
     conversations: async (params?: { status?: string; search?: string; limit?: number; offset?: number }) => {
       const qs = new URLSearchParams();
       if (params?.status && params.status !== 'all') qs.set('status', params.status);
       if (params?.search) qs.set('search', params.search);
+      if (params?.offset) qs.set('offset', String(params.offset));
       qs.set('limit', String(params?.limit ?? 100));
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
       return requestJson(`/api/conversations${suffix}`) as Promise<{

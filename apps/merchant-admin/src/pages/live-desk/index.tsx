@@ -176,6 +176,14 @@ export default function LiveDeskPage() {
   const [orderDetailId, setOrderDetailId] = useState<string | null>(null);
   const [shipOrderId, setShipOrderId] = useState<string | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
+  // 左栏分组折叠(2026-10-26 密度松弛版):四组默认全展开(用户裁决去掉 AI 托管
+  // 默认收起 —— 增量分页已控住列表长度,折叠缺省不再必要);节头点击仍可手动收起
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<DeskState, boolean>>({
+    queuing: false,
+    mine: false,
+    others: false,
+    ai: false,
+  });
 
   // 待办审核「进会话」深链(2026-10-24 工作台收敛):?thread= 直选目标会话,
   // 命中列表即选并一次性抹参 —— 会话列表异步到达,effect 挂 conversations 载荷。
@@ -362,8 +370,8 @@ export default function LiveDeskPage() {
       </div>
 
       <div className="flex min-h-0 flex-1 gap-4">
-        {/* 左:会话池 */}
-        <aside className="flex w-80 shrink-0 flex-col rounded-xl border border-zinc-200 bg-white">
+        {/* 左:会话池(2026-10-26 密度松弛:w-[21rem] 微加宽,行卡片化+可折叠分组) */}
+        <aside className="flex w-[21rem] shrink-0 flex-col rounded-xl border border-zinc-200 bg-white">
           <div className="border-b border-zinc-100 p-3">
             <div className="flex gap-1">
               {TABS.map((t) => {
@@ -394,24 +402,62 @@ export default function LiveDeskPage() {
               className="mt-2 h-auto w-full rounded-lg border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[12px] shadow-none transition-colors focus-visible:border-zinc-300 focus-visible:ring-2 focus-visible:ring-zinc-100"
             />
           </div>
-          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-2.5">
             {visible.length === 0 && <div className="p-4 text-center text-[12px] text-zinc-400">暂无会话</div>}
-            {/* 左栏重构(2026-10-25):「全部」tab 按坐席四态分组带节头(排队最
-                优先 → 我的 → 同事 → AI 托管长尾),消灭无差别长列表;单维 tab
-                (排队中/我的)内已同质,保持平铺。 */}
+            {/* 左栏重构(2026-10-26 密度松弛版):「全部」tab 按坐席四态分组,
+                节头可折叠 —— AI 托管长尾默认收起(只留节头+计数,点开才摊,
+                长列表感主要来自它),紧急组默认展开;单维 tab 内已同质,保持平铺。 */}
             {tab === 'all'
-              ? groupByState(visible, desk.myEmail).map((g) => (
-                  <div key={g.state} className="space-y-1" data-testid={`desk-group-${g.state}`}>
-                    <div className="sticky top-0 z-10 flex items-center gap-1.5 bg-white/95 px-1.5 py-1 text-[10px] font-semibold tracking-wide text-zinc-400">
-                      <span className={`h-1.5 w-1.5 rounded-full ${GROUP_DOT[g.state]}`} />
-                      {g.label}
-                      <span className="tabular-nums opacity-70">({g.rows.length})</span>
+              ? groupByState(visible, desk.myEmail).map((g) => {
+                  const collapsed = collapsedGroups[g.state];
+                  return (
+                    <div key={g.state} className="space-y-1.5" data-testid={`desk-group-${g.state}`}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        data-testid={`desk-group-toggle-${g.state}`}
+                        aria-expanded={!collapsed}
+                        onClick={() => setCollapsedGroups((prev) => ({ ...prev, [g.state]: !prev[g.state] }))}
+                        className="sticky top-0 z-10 h-auto w-full cursor-pointer items-center gap-1.5 rounded-lg bg-white/95 px-1.5 py-1.5 text-[11px] font-semibold tracking-wide text-zinc-500 shadow-none backdrop-blur-sm hover:bg-zinc-50"
+                      >
+                        {/* biome-ignore lint/a11y/noSvgWithoutTitle: 装饰性折叠箭头,开合态由 aria-expanded 表达 */}
+                        <svg
+                          aria-hidden
+                          viewBox="0 0 16 16"
+                          className={`h-3 w-3 shrink-0 text-zinc-400 transition-transform ${collapsed ? '' : 'rotate-90'}`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${GROUP_DOT[g.state]}`} />
+                        {g.label}
+                        <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] font-normal tabular-nums text-zinc-500">
+                          {g.rows.length}
+                        </span>
+                      </Button>
+                      {!collapsed && g.rows.map(renderRow)}
                     </div>
-                    {g.rows.map(renderRow)}
-                  </div>
-                ))
+                  );
+                })
               : visible.map(renderRow)}
           </div>
+          {/* 增量分页脚(2026-10-26):服务端 offset 真分页,零依赖替代虚拟列表;
+              已载入 X/共 Y 如实呈现,载尽即隐。 */}
+          {desk.conversations.length < desk.listTotal && (
+            <div className="shrink-0 border-t border-zinc-100 p-2">
+              <Button
+                variant="outline"
+                data-testid="desk-load-more"
+                disabled={desk.loadingMore}
+                onClick={() => void desk.loadMore()}
+                className="h-8 w-full cursor-pointer text-[11px] text-zinc-500"
+              >
+                {desk.loadingMore ? '加载中…' : `加载更多（已载入 ${desk.conversations.length}/${desk.listTotal}）`}
+              </Button>
+            </div>
+          )}
         </aside>
 
         {/* 中:时间线 */}

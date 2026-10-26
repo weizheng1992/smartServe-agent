@@ -40,7 +40,7 @@ function AvatarCircle({ label, state }: { label: string; state: DeskState }) {
   return (
     <span
       aria-hidden
-      className={`flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full text-[13px] font-semibold ${AVATAR_STYLES[state]}`}
+      className={`flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-full text-sm font-semibold ${AVATAR_STYLES[state]}`}
     >
       {glyph}
     </span>
@@ -72,11 +72,10 @@ export function DeskStateBadge({
   );
 }
 
-/** 左栏会话行(2026-10-24 列表优化):头像(未读角标挂头像右上)+ 首行
- *  会话名/相对时间 + 次行状态条/摘要/认领-介入描边按钮(黑实心改描边,整列
- *  高权重按钮不再喧宾夺主;排队态「认领」、AI 托管态「介入」= 坐席主动接管
- *  —— 服务端 assign_operator 本就无状态限制;我/同事接管态无按钮)。
- *  两行结构恒定渲染,行高一致(摘要缺值诚实「—」占位)。 */
+/** 左栏会话行(2026-10-26 密度松弛版):卡片化行(恒有浅描边)+ 头像 36px
+ *  (未读角标挂头像右上)+ 首行会话名/相对时间 + 次行状态条/摘要/认领-介入
+ *  描边按钮(排队态「认领」、AI 托管态「介入」= 坐席主动接管;我/同事接管态
+ *  无按钮)。两行结构恒定渲染,行高一致(摘要缺值诚实「—」占位)。 */
 export function ConversationRow({
   conversation,
   myEmail,
@@ -103,8 +102,10 @@ export function ConversationRow({
       variant="ghost"
       data-testid="conversation-row"
       onClick={() => onOpen(conversation.threadId)}
-      className={`flex w-full cursor-pointer items-center justify-start gap-2.5 rounded-xl border px-2.5 py-2 text-left font-normal ${
-        selected ? 'border-zinc-900 bg-zinc-50 shadow-sm hover:bg-zinc-50' : 'border-transparent hover:bg-zinc-50'
+      className={`flex w-full cursor-pointer items-center justify-start gap-3 rounded-xl border px-3 py-2.5 text-left font-normal transition-colors ${
+        selected
+          ? 'border-zinc-900 bg-zinc-100/80 shadow-sm hover:bg-zinc-100/80'
+          : 'border-zinc-100 bg-white hover:border-zinc-200 hover:bg-zinc-50/70'
       }`}
     >
       <span className="relative shrink-0">
@@ -120,12 +121,12 @@ export function ConversationRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] font-medium text-zinc-800">
+          <span className="truncate text-[13px] font-semibold text-zinc-800">
             {conversation.userId || conversation.threadId}
           </span>
           {time && <span className="shrink-0 text-[10px] tabular-nums text-zinc-400">{time}</span>}
         </span>
-        <span className="mt-1 flex items-center gap-2">
+        <span className="mt-1.5 flex items-center gap-2">
           <DeskStateBadge conversation={conversation} myEmail={myEmail} nowMs={nowMs} />
           <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-400">
             {conversation.lastMessageSnippet || '—'}
@@ -146,7 +147,7 @@ export function ConversationRow({
                   onClaim(conversation.threadId);
                 }
               }}
-              className="shrink-0 cursor-pointer rounded-full border border-zinc-300 bg-white px-2.5 py-0.5 text-[11px] font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-800"
+              className="shrink-0 cursor-pointer rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-800"
             >
               {claiming ? '接入中…' : state === 'ai' ? '介入' : '认领'}
             </span>
