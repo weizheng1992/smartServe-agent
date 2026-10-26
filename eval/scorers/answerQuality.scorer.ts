@@ -17,27 +17,33 @@ export default async function (output: string, context: any) {
       };
     }
 
-    // Lightweight call to the OpenAI-compatible endpoint directly, avoiding complex ESM path resolution bugs with @langchain/core package subpaths
+    // v2 rubric(05 号票首测后收紧,2026-10-26):首测一致率 78%(21/27,<80% 不可用),
+    // 六条不同意见聚类出三个 judge 盲区 —— ④指代准确性(「上一笔订单」被当当前
+    // 订单,judge 放行)、⑤多模态证据透明(破损回复未陈述图识结果/未与用户确认)、
+    // ⑥相关性与范围(保养问题混入门店信息)。v2 增三维 + 双段式(先逐维推理后结论)
+    // + 显式 Unknown 弃权档(score=-1,证据不足严禁猜)。
     const payload = {
       model: judgeModel,
       messages: [
         {
           role: 'user',
           content: `You are a meticulous Customer Support Quality Assurance (QA) Judge.
-Evaluate the following Customer Support Assistant's reply against the Customer's Question and the strictly enforced Business SOP Rules.
+Evaluate the Assistant's reply against the Customer's Question and the strictly enforced Business SOP Rules.
 
 Customer Question: "${customerQuestion}"
 ENFORCED BUSINESS SOP RULES: "${expectedRules}"
 ASSISTANT'S REPLY TO EVALUATE: "${output}"
 
-Perform a thorough evaluation across the following dimensions:
-1. Chinese Expression & Politeness (Professional, helpful, polite, native Chinese phrasing)
-2. Zero Hallucinations (No fabricated tracking numbers, delivery dates, or refund statuses; state unknown if not verified)
-3. SOP Compliance (Strictly follows the business policies, e.g. refunds window, membership status, etc.)
+Evaluate across SIX dimensions:
+1. Chinese Expression & Politeness (professional, helpful, native Chinese phrasing)
+2. Zero Hallucinations (no fabricated tracking numbers, delivery dates, or refund statuses; state unknown if not verified)
+3. SOP Compliance (refund windows, approval thresholds, membership rules, etc.)
+4. Referent Accuracy (entity references must match the customer's actual referent — e.g. 「上一笔订单」 means the PREVIOUS order, which is a DIFFERENT order from any order mentioned in the current message; conflating referents is a severe error)
+5. Multimodal Evidence Transparency (when the turn involves an image, the reply should state what was recognized from it and confirm consistency with the customer's claim where applicable — silent assumptions are errors)
+6. Relevance & Scope (answer the question asked; padding with unrelated store/promotion/location info lowers the score)
 
-Assign a final float score between 0.0 (unacceptable, buggy, hallucinated) and 1.0 (perfect compliance, extremely professional, polite, accurate).
-Provide your review output in JSON format with two keys: "score" (float) and "reason" (brief string explaining your rationale).
-Do NOT include markdown backticks or text outside of the JSON.`,
+PROCEDURE — two-phase: FIRST write your dimension-by-dimension reasoning in "reason" citing specific evidence from the reply; THEN conclude with "score" (float 0.0-1.0). If you genuinely cannot judge a dimension for lack of verifiable context, output {"score": -1, "reason": "abstain: ..."} — an explicit Unknown abstention; NEVER guess.
+Output ONLY JSON with keys "reason" (string, your reasoning first) and "score" (float). No markdown backticks, no text outside the JSON.`,
         },
       ],
       temperature: 0,
@@ -57,7 +63,7 @@ Do NOT include markdown backticks or text outside of the JSON.`,
     }
 
     const resData = await res.json();
-    const content = resData.choices?.[0]?.message?.content || '';
+    const content = resData.choices?.[0].message?.content || '';
 
     let parsedJudge: any;
     try {
@@ -76,6 +82,15 @@ Do NOT include markdown backticks or text outside of the JSON.`,
     }
 
     const score = Number(parsedJudge.score);
+    if (score === -1) {
+      // Unknown 弃权档:证据不足不猜 —— 不算通过(防弃权洗白),理由带 [弃权]
+      // 前缀供台账识别弃权率
+      return {
+        pass: false,
+        score: 0.0,
+        reason: `[弃权] ${parsedJudge.reason || 'judge abstained'}`,
+      };
+    }
     return {
       pass: score >= 0.8,
       score,
