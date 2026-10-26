@@ -286,6 +286,27 @@ async def _execute_single_step_core(
                 }
                 return {"updatedStep": failed_step, "toolErrorsCount": 1}
 
+            # 4.1.0 序数指代守卫(20 号票,judge 校准飞轮产出):「把上一笔订单
+            # 退款」的「上一笔」不是本句另一分句的显式单号 —— 资金动作词面
+            # 在场即诚实反问确认,严禁默认错挂(实弹:审批曾挂上用户正在查的
+            # ORD-98712)。技能 fast-track 同款守卫,此处对齐(与幽灵单拦截同型)。
+            if tool_name == "processRefund":
+                from ...skills.routing import is_previous_order_referent
+
+                if is_previous_order_referent(str(state.get("input") or "")):
+                    failed_step = {
+                        **step_to_run,
+                        "status": "failed",
+                        "result": {
+                            "error": "referent-unresolved: previous-order reference needs explicit order id",
+                            "message": (
+                                "⚠️ 您提到「上一笔订单」——为避免退错单,请确认要退款的具体订单号"
+                                "(可直接回复订单号,如「ORD-xxxx 退款」)后再为您办理。"
+                            ),
+                        },
+                    }
+                    return {"updatedStep": failed_step, "toolErrorsCount": 0}
+
             # 4.1.1 幽灵单前置拦截(2026-09-09 OCR 事故收口):随手图片 OCR 出的
             # 或文本里敲的单号,三库查无此单(或非本人归属)时审批门直接诚实失败
             # —— 旧行为是直达 HITL 开 waiting 工单,finish 终稿还谎称"已为您

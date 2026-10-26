@@ -48,6 +48,34 @@ class OrderRefundSkill(BaseSkill):
         order_id = context.slots.get("orderId") or ""
         reason = context.slots.get("reason") or context.slots.get("returnReason") or "客户申请退款"
 
+        # 指代混同守卫(20 号票,judge 校准飞轮产出):「把上一笔订单申请退款」
+        # 曾把同句查物流分句的 ORD-98712 错挂为退款对象(实弹:审批单挂 waiting
+        # 于 98712)—— 序数指代词在场即不自动执行,列最近订单诚实反问,用户
+        # 复述单号后再走 SOP(与地址技能「多笔未发货先反问」同型)。
+        from .routing import is_previous_order_referent as _is_prev_ref
+
+        if _is_prev_ref(context.input):
+            try:
+                spi_list = await self.get_spi_client(context.tenant_id)
+                orders = await spi_list.list_orders(
+                    {"userId": context.user_id, "threadId": context.thread_id, "tenantId": context.tenant_id}
+                )
+                recent = (orders or [])[:5]
+            except Exception as list_err:
+                print(f"[OrderRefundSkill] 近期订单清点失败,走朴素反问: {list_err}")
+                recent = []
+            lines = [f"• {o.get('orderId')}（¥{float(o.get('totalAmount') or 0):.0f}）" for o in recent]
+            listing = ("\n您最近的订单:\n" + "\n".join(lines)) if lines else ""
+            return SkillResult(
+                success=True,
+                skill_id=self.metadata["id"],
+                output=(
+                    "为避免退错订单,想跟您确认一下:「上一笔订单」具体是指哪一笔呢?"
+                    "请直接回复订单号" + listing
+                ),
+                next_action="finish",
+            )
+
         if not order_id:
             return SkillResult(
                 success=False,
