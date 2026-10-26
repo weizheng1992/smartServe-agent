@@ -111,7 +111,15 @@ export function ContextOrders({
   onShipOrder?: (orderId: string) => void;
   onPushOrderCard?: (o: { orderId: string; status: string; totalAmount: number; createdAt: string | null }) => void;
 }) {
-  if (context.recentOrders.length === 0) return <EmptyLine text="暂无订单记录" />;
+  if (context.recentOrders.length === 0) {
+    // 两态可分辨(code-review Spec 轴 2026-10-25):未关联商户客户档案(弱关联
+    // 不命中,订单恒查不出)≠ 已关联但确实没有订单 —— 诚实区分,不混为一谈。
+    return (
+      <EmptyLine
+        text={context.customer.matched ? '暂无订单记录' : '会话身份未关联商户客户档案，无法带出订单（关联后自动展示）'}
+      />
+    );
+  }
   return (
     <div className="space-y-1.5">
       {context.recentOrders.map((o) => (

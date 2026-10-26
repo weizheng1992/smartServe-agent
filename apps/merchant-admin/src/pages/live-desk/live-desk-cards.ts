@@ -5,6 +5,7 @@
 //
 // 诚实纪律:卡片只装坐席已知事实(context 聚合行/发货输入),严禁编造物流
 // 节点(发货通知卡的轨迹 = 服务端诚实单节点同款文案,「轨迹待更新」)。
+import { orderStatusMeta } from '@/lib/format';
 import type { QuickRepliesData, RichCardBlock, TrackingTimelineData } from 'types';
 
 /** 右栏最近订单行的最小形状(LiveDeskContext.recentOrders 元素)。 */
@@ -16,13 +17,14 @@ export interface DeskOrderBrief {
 }
 
 /** 订单卡:顾客侧自带「查看物流轨迹/申请退款」按钮(回流成消息,坐席时间线
- *  可见;资金动作仍走 AI 技能 HITL,卡片按钮本身零直写)。 */
+ *  可见;资金动作仍走 AI 技能 HITL,卡片按钮本身零直写)。status 走正典中文
+ *  词面(orderStatusMeta 单点)—— 卡片是顾客可见面,原始英文码不出库外显。 */
 export function buildOrderCard(o: DeskOrderBrief): RichCardBlock {
   return {
     type: 'order_card',
     data: {
       orderId: o.orderId,
-      status: o.status,
+      status: orderStatusMeta(o.status).label,
       totalAmount: o.totalAmount,
       createdAt: o.createdAt || undefined,
       actions: [
@@ -51,17 +53,10 @@ export function buildShippedTrackingCard(carrierLabel: string, trackingNo: strin
   return { type: 'tracking_timeline', data };
 }
 
-/** 承运商选项(与网关 _CARRIER_LABELS / order-manager ShipDialog 同词表)。 */
-export const CARRIER_OPTIONS = [
-  { code: 'SF', label: '顺丰速运' },
-  { code: 'JD', label: '京东快递' },
-  { code: 'ZTO', label: '中通快递' },
-  { code: 'EMS', label: '邮政 EMS' },
-] as const;
-
-export function carrierLabelOf(code: string): string {
-  return CARRIER_OPTIONS.find((c) => c.code === code)?.label || code;
-}
+/** 承运商词表单点在 lib/format(本 app 两处消费:发货弹窗/坐席台);此处
+ *  转出口保持既有导入面稳定。跨语言互指:gateway _CARRIER_LABELS、商城
+ *  logistics.ts。 */
+export { CARRIER_OPTIONS, carrierLabelOf } from '@/lib/format';
 
 /** 快捷回复卡预设:坐席一键推选项卡,顾客点选即回流一条消息(send_message
  *  动作 payload.text = 选项文案)。预设是 v1 词面,后续可做配置化。 */

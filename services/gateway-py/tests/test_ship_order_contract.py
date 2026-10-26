@@ -148,7 +148,8 @@ class TestShipContract:
         assert await _ship_audit_rows(order_id) == []
 
     async def test_ship_same_tracking_idempotent_replay(self, client, staff_auth):
-        """同单同运单号重发(网络重试形):幂等成功,审计不重复落。"""
+        """同单同运单号重发(网络重试形):幂等成功,审计不重复落;换承运商
+        同号重发 = 冲突(重放判定比对承运商,防旧承运商文案冒充新提交)。"""
         order_id = _order_id("IDEM")
         await _seed_order(order_id, status="PAID")
         payload = {"orderId": order_id, "trackingNo": "SHP3001", "carrierCode": "SF"}
@@ -158,8 +159,17 @@ class TestShipContract:
         r2 = await client.post("/api/admin/orders/ship", json=payload, headers=staff_auth)
         assert r2.status_code == 200, f"同运单号重发须幂等 200: {r2.status_code} {r2.text}"
         assert r2.json()["success"] is True
+        assert r2.json().get("replay") is True
 
         assert len(await _ship_audit_rows(order_id)) == 1, "幂等重放不得重复落审计"
+
+        # 同号换承运商:不再按幂等放行(首笔事实已定),走状态冲突
+        r3 = await client.post(
+            "/api/admin/orders/ship",
+            json={"orderId": order_id, "trackingNo": "SHP3001", "carrierCode": "JD"},
+            headers=staff_auth,
+        )
+        assert r3.status_code == 409
 
     async def test_ship_shipped_new_tracking_conflict_409(self, client, staff_auth):
         """已发货单换运单号再发:409(不得覆盖既有运单)。"""

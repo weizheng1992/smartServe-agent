@@ -99,10 +99,10 @@ describe('ContextOrders / ContextTickets / ContextProfile', () => {
     expect(screen.getByText('本店专属')).toBeInTheDocument();
   });
 
-  it('诚实空态:三区空文案', () => {
+  it('诚实空态:三区空文案(订单区取已关联形,未关联形另有专测)', () => {
     render(
       <>
-        <ContextOrders context={ctx()} />
+        <ContextOrders context={ctx({ customer: { matched: true } })} />
         <ContextTickets context={ctx()} />
         <ContextProfile context={ctx()} />
       </>,
@@ -110,6 +110,11 @@ describe('ContextOrders / ContextTickets / ContextProfile', () => {
     expect(screen.getByText('暂无订单记录')).toBeInTheDocument();
     expect(screen.getByText('暂无售后中工单')).toBeInTheDocument();
     expect(screen.getByText('暂无画像事实')).toBeInTheDocument();
+  });
+
+  it('订单区空态两态可分辨:未关联档案 ≠ 已关联无订单', () => {
+    render(<ContextOrders context={ctx()} />);
+    expect(screen.getByText('会话身份未关联商户客户档案，无法带出订单（关联后自动展示）')).toBeInTheDocument();
   });
 });
 

@@ -25,7 +25,8 @@ describe('buildOrderCard 订单卡', () => {
     expect(card.type).toBe('order_card');
     if (card.type !== 'order_card') return;
     expect(card.data.orderId).toBe('ORD-1');
-    expect(card.data.status).toBe('PAID');
+    // 顾客可见面走正典中文词面(orderStatusMeta 单点),原始英文码不外显
+    expect(card.data.status).toBe('待发货');
     expect(card.data.totalAmount).toBe(299);
     expect(card.data.actions?.length).toBe(2);
     for (const a of card.data.actions || []) {

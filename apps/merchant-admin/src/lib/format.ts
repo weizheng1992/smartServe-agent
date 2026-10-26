@@ -45,3 +45,19 @@ export function creditReasonMeta(reason: string | null | undefined): string {
   if (reason.startsWith('admin_adjust: ')) return `平台调整:${reason.slice('admin_adjust: '.length)}`;
   return reason;
 }
+
+/** 承运商词表单点(客服优化批 code-review 收敛,此前 4 份拷贝):本 app 发货
+ *  弹窗(order-manager ShipDialog)与坐席台(live-desk-cards)共用。跨语言/
+ *  跨 app 各留一份并互指:gateway `merchant_domain._CARRIER_LABELS`、商城
+ *  `apps/merchant/src/lib/logistics.ts`(carrierLabel)—— 新增承运商四处同步。
+ *  未知编码原样透传,严禁编造(数据诚实律)。 */
+export const CARRIER_OPTIONS = [
+  { code: 'SF', label: '顺丰速运' },
+  { code: 'JD', label: '京东快递' },
+  { code: 'ZTO', label: '中通快递' },
+  { code: 'EMS', label: '邮政 EMS' },
+] as const;
+
+export function carrierLabelOf(code: string): string {
+  return CARRIER_OPTIONS.find((c) => c.code === code)?.label || code;
+}

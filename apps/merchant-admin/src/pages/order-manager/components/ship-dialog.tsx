@@ -1,3 +1,4 @@
+import { CARRIER_OPTIONS } from '@/lib/format';
 import {
   Button,
   Dialog,
@@ -50,10 +51,11 @@ export function ShipDialog() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="SF">顺丰速运 (SF Express)</SelectItem>
-                <SelectItem value="JD">京东快递 (JD Logistics)</SelectItem>
-                <SelectItem value="ZTO">中通快递 (ZTO)</SelectItem>
-                <SelectItem value="EMS">邮政 EMS</SelectItem>
+                {CARRIER_OPTIONS.map((c) => (
+                  <SelectItem key={c.code} value={c.code}>
+                    {c.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

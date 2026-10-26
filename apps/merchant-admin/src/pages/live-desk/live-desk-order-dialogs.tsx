@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from 'ui';
-import { CARRIER_OPTIONS, QUICK_REPLY_PRESETS, buildQuickRepliesCard, carrierLabelOf } from './live-desk-cards';
+import { CARRIER_OPTIONS, QUICK_REPLY_PRESETS, buildQuickRepliesCard } from './live-desk-cards';
 
 /** 审计动作 → 人话(与 order-manager OrderDetailDrawer 同词表的最小子集)。 */
 const AUDIT_ACTION_LABEL: Record<string, string> = {
@@ -206,7 +206,8 @@ export function DeskShipDialog({
 }: {
   orderId: string | null;
   onClose: () => void;
-  onShipped: (carrierCode: string, carrierLabel: string, trackingNo: string) => void;
+  /** replay=true = 服务端幂等重放(同单同运单号重复提交),调用方据此去重通知面。 */
+  onShipped: (carrierCode: string, trackingNo: string, replay: boolean) => void;
 }) {
   const [carrier, setCarrier] = useState('SF');
   const [trackingNo, setTrackingNo] = useState('');
@@ -233,7 +234,7 @@ export function DeskShipDialog({
     try {
       const body = await api.orders.ship({ orderId, carrierCode: carrier, trackingNo: tn });
       if (body.success) {
-        onShipped(carrier, carrierLabelOf(carrier), tn);
+        onShipped(carrier, tn, body.replay === true);
       } else {
         setErr(errMsgOf(body, '发货失败'));
       }

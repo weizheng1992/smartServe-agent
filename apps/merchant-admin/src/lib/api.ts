@@ -835,10 +835,12 @@ export const api = {
     /** 列表 + 审计流水(工作台轮询数据源;snake_case 裸行)。 */
     list: async (): Promise<{ success: boolean; orders: OrderRow[]; auditLogs: AuditLogRow[] }> =>
       requestJson('/api/admin/orders'),
-    /** 发货(服务端 RBAC order:ship 闸;真实世界副作用,失败以 message 呈现)。 */
+    /** 发货(服务端 RBAC order:ship 闸;真实世界副作用,失败以 message 呈现)。
+     *  replay=true = 同单同运单号幂等重放(网络重试形,状态面零副作用)。 */
     ship: async (p: { orderId: string; carrierCode: string; trackingNo: string }): Promise<{
       success: boolean;
       message?: string;
+      replay?: boolean;
     }> => requestJson('/api/admin/orders/ship', { method: 'POST', body: JSON.stringify(p) }),
   },
 

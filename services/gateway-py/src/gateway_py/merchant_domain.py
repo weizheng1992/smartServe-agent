@@ -533,7 +533,10 @@ async def ship_order(order_id: str, carrier_code: str, tracking_no: str,
     """
     await ensure_merchant_tables()
     now = _dt.datetime.now(_dt.UTC)
-    carrier_label = _CARRIER_LABELS.get(carrier_code or "", carrier_code or "顺丰速运")
+    # 空入空出、未知编码原样透传 —— 严禁编造承运商缺省(路由层 or "SF" 已是活
+    # 缺省,此处不再兜第二层假名;code-review Standards 轴 2026-10-25)
+    _code = (carrier_code or "").strip()
+    carrier_label = _CARRIER_LABELS.get(_code, _code)
     tracking_info = {
         "carrier": carrier_label,
         "trackingNumber": tracking_no,
@@ -591,8 +594,10 @@ async def ship_order(order_id: str, carrier_code: str, tracking_no: str,
         if row is None:
             return {"success": False, "message": "订单不存在"}
         current_status = str(row["status"])
-        current_tracking = (row["tracking_info"] or {}).get("trackingNumber") if isinstance(row["tracking_info"], dict) else None
-        if current_status == "SHIPPED" and current_tracking == tracking_no:
+        current_tracking_info = row["tracking_info"] if isinstance(row["tracking_info"], dict) else {}
+        current_tracking = current_tracking_info.get("trackingNumber")
+        current_carrier = current_tracking_info.get("carrier")
+        if current_status == "SHIPPED" and current_tracking == tracking_no and current_carrier == carrier_label:
             return {
                 "success": True,
                 "orderId": order_id,

@@ -9,7 +9,7 @@ import type { RichCardBlock } from 'types';
 // 2026-10-24 工作台收敛:本页菜单名升正「客服工作台」,待办审核独立成
 // /approvals 页,旧 /live-desk 保留路由但退出菜单(e2e 回绿钉仍走它)。
 import { Button, Input, RichCardRenderer, Switch } from 'ui';
-import { buildOrderCard, buildShippedTrackingCard } from './live-desk-cards';
+import { buildOrderCard, buildShippedTrackingCard, carrierLabelOf } from './live-desk-cards';
 import {
   ContextCustomer,
   ContextNotes,
@@ -316,13 +316,19 @@ export default function LiveDeskPage() {
     if (!ack.success) setNotice(ack.error || '推送失败');
   };
 
-  /** 发货成功:刷新右栏上下文;已认领则自动推诚实单节点发货通知卡
-   *  (未接管时不推 —— 认领闸会拒,如实提示)。 */
-  const doShipped = async (carrierLabel: string, trackingNo: string) => {
+  /** 发货成功:刷新右栏上下文;已认领且非幂等重放则自动推诚实单节点发货通知卡
+   *  (replay = 同单同运单号重复提交,状态面幂等零副作用,通知面不重复推;
+   *  未接管时不推 —— 认领闸会拒,如实提示)。 */
+  const doShipped = async (carrierCode: string, trackingNo: string, replay: boolean) => {
     const shippedId = shipOrderId;
     setShipOrderId(null);
     setNotice('');
     await desk.reloadContext();
+    if (replay) {
+      setNotice(`订单 ${shippedId || ''} 已按同一运单号发货过(幂等重放),未重复推送通知卡片`);
+      return;
+    }
+    const carrierLabel = carrierLabelOf(carrierCode);
     if (desk.selectedThreadId && mineSelected) {
       const ack = await desk.sendMessage(
         desk.selectedThreadId,
@@ -694,7 +700,7 @@ export default function LiveDeskPage() {
       <DeskShipDialog
         orderId={shipOrderId}
         onClose={() => setShipOrderId(null)}
-        onShipped={(_code, carrierLabel, trackingNo) => void doShipped(carrierLabel, trackingNo)}
+        onShipped={(carrierCode, trackingNo, replay) => void doShipped(carrierCode, trackingNo, replay)}
       />
       <QuickRepliesDialog
         open={quickOpen}
