@@ -46,8 +46,17 @@ jobs:
       # 与本地开发 venv 保持同版本(services/.venv 为 3.14)
       - run: uv python install 3.14
         working-directory: services
-      # --frozen:锁文件已入库,免索引元数据往返(tuna 对海外 runner 间歇超时,
-      # run 39402051669 实证 uv sync exit2+timed out,同一步首跑却过);重试一次兜波动
+      # 锁内 3150 处 tuna 直链对海外 runner 间歇 403/超时(run 40512601101
+      # attempt3 实证重试也撞 403)。tuna 是 PyPI 字节级镜像:仅 CI 侧把锁内
+      # URL 原位换成官方源(路径与 sha256 全不变,--frozen 不受影响),仓库锁
+      # 不动 —— 本地(国内)继续走 tuna
+      - run: >-
+          sed -i
+          -e 's#https://pypi.tuna.tsinghua.edu.cn/simple#https://pypi.org/simple#g'
+          -e 's#https://pypi.tuna.tsinghua.edu.cn/packages#https://files.pythonhosted.org/packages#g'
+          uv.lock
+        working-directory: services
+      # --frozen:锁文件已入库,免索引元数据往返;重试一次兜波动
       - run: uv sync --frozen --all-extras || { sleep 20; uv sync --frozen --all-extras; }
         working-directory: services
       - name: Ruff (engine-py)
@@ -240,6 +249,13 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install 3.14
+        working-directory: services
+      # 同 Python job:tuna 锁内直连对海外 runner 间歇 403,CI 侧原位换官方源
+      - run: >-
+          sed -i
+          -e 's#https://pypi.tuna.tsinghua.edu.cn/simple#https://pypi.org/simple#g'
+          -e 's#https://pypi.tuna.tsinghua.edu.cn/packages#https://files.pythonhosted.org/packages#g'
+          uv.lock
         working-directory: services
       - run: uv sync --frozen --all-extras || { sleep 20; uv sync --frozen --all-extras; }
         working-directory: services
