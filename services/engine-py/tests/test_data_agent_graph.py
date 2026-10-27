@@ -274,9 +274,10 @@ class TestAskAllParallel:
         monkeypatch.setattr(graph.session_store, "load", _no_history)
         monkeypatch.setattr(graph.session_store, "save", _fake_save)
 
-    def test_session_settles_to_last_successful_segment(self, stub_execute, monkeypatch):
-        """末段 unsupported:收口回退到最后一个成功段(串行版逐段落账的最终态
-        = 前段历史保留,不得因并行化丢失)。"""
+    def test_session_settles_to_last_segment_even_unsupported(self, stub_execute, monkeypatch):
+        """末段 unsupported:收口 = 输入序最后一段(grill 2026-10-27 会话 v2
+        重钉 —— unsupported 也落史,「刚才那个问题换个口径再问」需要末段语境;
+        成功段的榜首实体由单问路继续维护,多段混合以最后问句为准)。"""
         saved: list = []
         self._patch_session(monkeypatch, saved)
         out = asyncio.run(graph.ask_all(
@@ -286,7 +287,8 @@ class TestAskAllParallel:
         assert len(saved) == 1, f"单点收口恰一次,实落账 {len(saved)} 次"
         business_id, session_id, payload = saved[0]
         assert business_id == "aurora" and session_id == "s-askall"
-        assert payload["last_question"] == "销售额排行"
+        assert payload["last_question"] == "今天心情如何"
+        assert payload["intent"] == {} and payload["top1"] is None
 
 
     def test_session_settles_to_last_when_tail_wins(self, stub_execute, monkeypatch):
@@ -302,15 +304,16 @@ class TestAskAllParallel:
         # 私键不得漏进 SSE 线格式
         assert all("_sessionPayload" not in f for f in out["frames"])
 
-    def test_session_not_saved_when_all_segments_fail(self, stub_execute, monkeypatch):
-        """全段不产出 save-worthy 结果(unsupported/error):零落账,历史不污染。"""
+    def test_session_saved_once_when_all_segments_fail(self, stub_execute, monkeypatch):
+        """全段 unsupported:落账恰一次、末段问句(会话 v2 重钉 —— 失败问句
+        也是「上一轮」,改口追问的语境来源;意图留空不冒充成功)。"""
         saved: list = []
         self._patch_session(monkeypatch, saved)
         out = asyncio.run(graph.ask_all(
             "今天心情如何?今天心情如何?", self.CTX, {"sessionId": "s-askall"},
         ))
         assert all(f["type"] == "unsupported" for f in out["frames"])
-        assert saved == []
+        assert len(saved) == 1 and saved[0][2]["last_question"] == "今天心情如何"
 
     def test_segments_actually_overlap(self, stub_execute, monkeypatch):
         """并发证明:三段同时在场执行(串行版计数器 max 恒为 1)。"""
@@ -413,3 +416,74 @@ class TestTimeClarify:
         """「今天心情如何」恢复 unsupported:hint 只收录不可解析词面。"""
         out = asyncio.run(graph.ask("今天心情如何", {"business_id": "aurora", "role": "finance_owner"}))
         assert out["type"] == "unsupported"
+
+
+class TestSessionMemoryV2:
+    """grill 2026-10-27 多轮票:榜首实体入史、unsupported 落史、改写器三规则。"""
+
+    @staticmethod
+    def _patch_session_capture(monkeypatch, saved: list):
+        async def _no_history(business_id, session_id):
+            return None
+
+        async def _fake_save(business_id, session_id, payload):
+            saved.append(payload)
+
+        monkeypatch.setattr(graph.session_store, "load", _no_history)
+        monkeypatch.setattr(graph.session_store, "save", _fake_save)
+
+    def test_result_stores_top1_entity(self, monkeypatch, stub_execute):
+        """榜首实体(首行首个非 __ 前缀字符串列)入会话史,供指代追问改写。"""
+        saved: list = []
+        self._patch_session_capture(monkeypatch, saved)
+
+        async def _fake_exec(self, compiled, session_ctx=None):
+            return QueryResult(
+                rows=[{"品类": "户外机能", "metricScore": 100.0}, {"品类": "衬衫", "metricScore": 3.0}],
+                metric=compiled.metric, unit="元", caliber="测试",
+            )
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "execute_async", _fake_exec)
+        out = asyncio.run(graph.ask(
+            "各品类销售额排行", {"business_id": "aurora", "role": "finance_owner"},
+            {"sessionId": "sess-top1"},
+        ))
+        assert out["type"] == "result" and saved, "结果帧落史"
+        payload = saved[-1]
+        assert payload["top1"] == "户外机能" and payload["intent"].get("metric")
+
+    def test_unsupported_writes_history_for_requestion(self, monkeypatch):
+        """unsupported 也落史(只记问句,意图留空)——「按最近7天再问」需要上一轮语境。"""
+        saved: list = []
+        self._patch_session_capture(monkeypatch, saved)
+        out = asyncio.run(graph.ask(
+            "每股收益EPS是多少", {"business_id": "aurora", "role": "finance_owner"},
+            {"sessionId": "sess-unsup"},
+        ))
+        assert out["type"] == "unsupported" and saved
+        payload = saved[-1]
+        assert payload["last_question"] == "每股收益EPS是多少"
+        assert payload["intent"] == {} and payload["top1"] is None
+
+    def test_rewrite_prompt_carries_top1_and_time_rule(self, monkeypatch):
+        """改写器 v2:榜首实体与时间改口规则进 prompt(替换不叠加)。"""
+        captured: dict = {}
+
+        class _StubMsg:
+            def __init__(self, content):
+                self.content = content
+
+        class _StubModel:
+            async def ainvoke(self, messages):
+                captured["system"] = messages[0].content
+                captured["user"] = messages[1].content
+                return _StubMsg("户外机能的销售额最近7天为什么变了")
+
+        from engine_py.analytics import llm_intent
+        monkeypatch.setattr(llm_intent, "get_chat_model", lambda: _StubModel())
+        out = asyncio.run(graph._rewrite_followup(
+            "它最近7天怎么样",
+            {"last_question": "上个月各品类销售额", "intent": {"metric": "gmv"}, "top1": "户外机能"},
+        ))
+        assert out == "户外机能的销售额最近7天为什么变了"
+        assert "户外机能" in captured["user"] and "替换" in captured["system"]

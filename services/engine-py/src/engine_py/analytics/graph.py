@@ -39,6 +39,9 @@ from .quick_summary import quick_summary as _quick_summary
 from .trace import Trace
 
 # 纯图表切换追问(确定性快捷路):问句只含图型词 → 上一轮问句 + 图型要求重解析
+# 指代/指示词(会话记忆 v2.1):命中且上轮有实体语境 → 追问改写先行
+_DEIXIS_RE = re.compile(r"它|他们|她们|这款|那个(?:商品|品类|客户)|该(?:商品|品类|客户|活动)|榜首|第一名|上一?名")
+
 _CHART_ONLY_RE = re.compile(r"^(?:换成?|改[成为]?|用|来)?\s*(?:一?个?)?\s*(折线图?|柱状图?|条形图?|柱形图?|表格)\s*[?？]?$")
 
 # 注入形状闸(2026-10-01 夜审):语料携带 SQL 写关键词串联 / UNION SELECT /
@@ -74,6 +77,21 @@ def build_cards(question: str, result: Any, intent: StructuredQueryIntent | None
         "rows": [{k: (float(v) if isinstance(v, (int, float)) else str(v)) for k, v in r.items()} for r in rows],
         "caliber": result.caliber,
     }]
+
+
+def _frame_top1(frame: dict) -> str | None:
+    """会话记忆 v2:帧内榜首实体(首卡首行首个非 __ 前缀字符串列)——
+    「它为什么跌了/看它的订单」类指代追问的改写依据;无实体形态返回 None。"""
+    for card in frame.get("cards") or []:
+        rows = card.get("rows") or []
+        if rows:
+            v = next(
+                (x for x in rows[0].values() if isinstance(x, str) and x and not x.startswith("__")),
+                None,
+            )
+            if v:
+                return v
+    return None
 
 
 async def _time_clarify(question: str, trace: Trace) -> dict | None:
@@ -191,6 +209,16 @@ async def ask(
                 return explored
             await _log_unanswered(session_ctx, question)
             await trace.record("unsupported", final_method="none")
+            # 会话记忆 v2:unsupported 也落史(只记问句,意图留空不冒充成功)——
+            # 「刚才那个问题按最近7天再问」类改口追问需要上一轮语境
+            if session_id:
+                payload = {"last_question": question, "intent": {}, "top1": None}
+                if persist_session:
+                    await session_store.save(business_id, session_id, payload)
+                else:
+                    frame = _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」;文档/PRD 里的表格与图表数据请到客服知识问答提问", "detail": str(err)}, trace)
+                    frame["_sessionPayload"] = payload
+                    return frame
             return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」;文档/PRD 里的表格与图表数据请到客服知识问答提问", "detail": str(err)}, trace)
         if isinstance(intent, Clarify):
             if intent.original_question is None:
@@ -213,6 +241,28 @@ async def ask(
     if isinstance(intent, Clarify):
         await trace.record("clarify")
         return _clarify_frame(intent, allowed)
+
+    # 会话记忆 v2.1(L0 命中路径补齐,与 fallback 路 _DEIXIS_RE 同源):指代词
+    # × 上轮实体语境,而本轮意图未绑实体 → 改写为独立问句后重解析一次。
+    # 「它卖得怎么样」曾被 L0 裸命中 volume 丢掉指称对象(答成全店榜),
+    # 与 L2 范例路同病;改写/重解析失败静默回落原意图,零行为破坏。
+    if (
+        history
+        and not rewritten_q
+        and not intent.entity_slot
+        and _DEIXIS_RE.search(question or "")
+        and (history.get("top1") or (history.get("intent") or {}).get("entity_slot"))
+    ):
+        _deix = await _rewrite_followup(effective_question, history)
+        if _deix and _deix.strip() and _deix.strip() != effective_question.strip():
+            try:
+                _intent2 = await asyncio.to_thread(engine.resolve, _deix.strip())
+                if isinstance(_intent2, StructuredQueryIntent):
+                    print(f"[Session] 指代改写重解析: {effective_question[:24]!r} → {_deix[:36]!r}")
+                    trace.add_layer("deixis", rewritten=_deix[:60])
+                    intent, effective_question = _intent2, _deix.strip()
+            except Exception:
+                pass  # 重解析失败回落原意图(响亮语义不变)
 
     # 时间口径反问(P0①):L0/L2/L3 已解析出意图但时间词闭集外 → 先问口径
     # 再执行;解析出合法时间窗(含新扩容 kind)则零打扰直通
@@ -289,7 +339,7 @@ async def ask(
     if reroute is not None:
         frame = await _composed_frame(effective_question, reroute, session_ctx, engine, trace)
         if frame is not None:
-            payload = {"last_question": effective_question, "intent": reroute.__dict__}
+            payload = {"last_question": effective_question, "intent": reroute.__dict__, "top1": _frame_top1(frame)}
             if session_id:
                 if persist_session:
                     await session_store.save(business_id, session_id, payload)
@@ -353,9 +403,11 @@ async def ask(
         sql_template=intent.metric, row_count=len(result.rows or []),
         cache_hit=cache_hit,
     )
-    # 只存问句与意图,不存结果(数据现查);unsupported/error 不污染历史
+    # 只存问句与意图,不存结果(数据现查);会话记忆 v2(grill 2026-10-27
+    # 多轮票)榜首实体入史 —— 「它为什么跌了/看它的订单」类指代追问的改写
+    # 依据;__total__ 形态与纯数值行无实体,留 None。
     if session_id:
-        payload = {"last_question": effective_question, "intent": intent.__dict__}
+        payload = {"last_question": effective_question, "intent": intent.__dict__, "top1": _frame_top1(outcome)}
         if persist_session:
             await session_store.save(business_id, session_id, payload)
         else:
@@ -586,16 +638,20 @@ async def _rewrite_followup(question: str, history: dict) -> str | None:
     from .llm_intent import _content_text, get_chat_model
 
     intent = history.get("intent") or {}
+    top1 = history.get("top1")
     system = (
         "你是商户数据问答的追问改写器。把依赖上下文的追问改写成独立完整的问题。规则:\n"
         "- 只输出改写后的问题本身,不要任何解释或前缀\n"
-        "- 「他/她/它/该客户/这款」等指代 → 用已确认实体名替换\n"
+        "- 「他/她/它/该客户/这款/第一名/榜首」等指代 → 用已确认实体名或上一轮榜首替换\n"
         "- 「换成柱状图/用折线/表格」类 → 在上一轮问题上追加图型要求\n"
+        "- 「按最近7天/换成上个月再问」类时间改口 → 用新时间词**替换**上一轮问句中的旧时间词,不要叠加\n"
+        "- 上一轮未答出(不支持)时,「换个问法/按XX再问」→ 把上一轮问题按新口径改写\n"
         "- 追问与商户数据无关或无法改写 → 原样输出追问\n"
     )
     user = (
         f"上一轮问题:{history.get('last_question', '')}\n"
         f"已确认意图与实体:{_json.dumps(intent, ensure_ascii=False)}\n"
+        f"上一轮榜首实体:{top1 or '无'}\n"
         f"本轮追问:{question}"
     )
     try:
@@ -618,6 +674,19 @@ async def fallback_intent(question: str, allowed: list[str] | None, session_ctx:
     """
     from . import dimensions, exemplar_service
 
+    # 会话记忆 v2.1(2026-10-27 实弹):指代词 × 上轮实体语境 → 改写**先于 L2**
+    # —— 范例回放不带指代,「它卖得怎么样」直出会丢「它」的指称对象(实测
+    # 答成全店榜);改写失败/无实体语境原问句照走,零行为破坏。
+    early_rewrite: str | None = None
+    if history and _DEIXIS_RE.search(question or "") and (
+        history.get("top1") or (history.get("intent") or {}).get("entity_slot")
+    ):
+        rewritten = await _rewrite_followup(question, history)
+        if rewritten and rewritten.strip() and rewritten.strip() != question.strip():
+            print(f"[Session] 指代改写先行: {question[:24]!r} → {rewritten[:36]!r}")
+            early_rewrite = rewritten.strip()
+            question = early_rewrite
+
     try:
         exemplar = await exemplar_service.search_exemplar(question, session_ctx.get("business_id") or "")
         if exemplar and exemplar["intent"].get("metric"):
@@ -632,11 +701,11 @@ async def fallback_intent(question: str, allowed: list[str] | None, session_ctx:
             if stale:
                 from .llm_intent import llm_resolve
 
-                return await llm_resolve(question, allowed, session_ctx.get("business_id") or ""), True, None
+                return await llm_resolve(question, allowed, session_ctx.get("business_id") or ""), True, early_rewrite
             print(f"[L2] 范例命中({exemplar['similarity']:.2f}): {exemplar['question'][:40]!r}")
             if trace:
                 trace.add_layer("L2", similarity=round(exemplar["similarity"], 3), exemplar=exemplar["question"][:40])
-            return StructuredQueryIntent(**exemplar["intent"]), False, None
+            return StructuredQueryIntent(**exemplar["intent"]), False, early_rewrite
     except Exception as err:
         print(f"[L2] 范例检索失败(放行 L3): {err}")
 
@@ -691,8 +760,8 @@ async def fallback_intent(question: str, allowed: list[str] | None, session_ctx:
             print(f"[L2] 范例沉淀失败(不影响回答): {err}")
         if trace:
             trace.add_layer("L3", metric=intent.metric)
-        return intent, True, (rewritten if rewritten_used else None)
-    return intent, False, (rewritten if rewritten_used else None)
+        return intent, True, (rewritten if rewritten_used else early_rewrite)
+    return intent, False, (rewritten if rewritten_used else early_rewrite)
 
 
 def _missing_entity_kind(intent) -> str | None:
