@@ -39,8 +39,9 @@ export interface AskFrameData {
   // B2 归因叙事(ADR-0011):独立帧区块 + 「AI 推断(非数据)」章 —— 与数据
   // 列视觉分离;数字可溯源硬校验在引擎侧,不过则该键缺席
   narrative?: { text: string };
-  // clarify 帧(2026-10-03 起一等公民 Clarify.to_frame)
-  clarifyKind?: 'metric' | 'entity';
+  // clarify 帧(2026-10-03 起一等公民 Clarify.to_frame;'time' = P0① 时间
+  // 口径反问,引擎 graph._time_clarify 产出 —— CI 曾因类型联合漏此值 TS2367)
+  clarifyKind?: 'metric' | 'entity' | 'time';
   question?: string;
   options?: AskClarifyOption[];
   originalQuestion?: string;
