@@ -490,3 +490,55 @@ class TestAttributionP01:
             StructuredQueryIntent(metric="repeat_purchase_rate", time_window={"kind": "yesterday"}), "aurora",
         )
         assert compiled_y.params["window_end"] is not None
+
+
+class TestComposeExpansionTicket:
+    """grill 2026-10-27 票:组合面扩容(毛利/毛利率 + 复购率入组合与归因)。"""
+
+    def test_gross_profit_margin_composable_rank(self):
+        comp = composition.CompositionQuery(metric="gross_profit", dimension="category")
+        compiled = composition.compile_composition(comp, "aurora")
+        assert "cost_at_purchase" in compiled.sql and "GROUP BY s.category" in compiled.sql
+        comp2 = composition.CompositionQuery(metric="margin_rate", dimension="brand")
+        compiled2 = composition.compile_composition(comp2, "aurora")
+        assert "cost_at_purchase" in compiled2.sql and compiled2.params["lim"] == 10
+
+    def test_compose_role_closure_blocks_finance_metrics(self):
+        """毛利/毛利率 finance_owner 专属:allowed 闭集外的组合必须响亮拒绝
+        (组合面扩容不新增权限面)。"""
+        with pytest.raises(composition.CompositionRejected):
+            composition._validate(_Out(metric="gross_profit", dimension="category"), ["gmv"], "各品类毛利")
+        ok = composition._validate(
+            _Out(metric="gross_profit", dimension="category"), ["gmv", "gross_profit"], "各品类毛利"
+        )
+        assert ok.metric == "gross_profit"
+
+    def test_nested_rank_repeat_rate_by_category(self):
+        comp = composition.CompositionQuery(metric="repeat_purchase_rate", dimension="category")
+        compiled = composition.compile_composition(comp, "aurora")
+        assert "orders_n" in compiled.sql and "GROUP BY s.category, o.customer_id" in compiled.sql
+        assert "per_cust" in compiled.sql
+
+    def test_nested_compare_repeat_rate_carries_bad_rate(self):
+        """「为什么复购率变了」:双期嵌套归因 + 差评率对照(退款率对照在嵌套
+        度量下挂不上平铺行集,由差评率 CTE 独立承担)。"""
+        comp = composition.CompositionQuery(
+            metric="repeat_purchase_rate", dimension="category", compare_previous=True,
+            time_window={"kind": "last_month"},
+        )
+        compiled = composition.compile_composition(comp, "aurora")
+        assert "cur_start" in compiled.params and "cur_end" in compiled.params  # 完整过去段右界
+        assert compiled.sql.count("per_cust") == 2  # 双期各一层内嵌
+        assert 'AS "本期差评率"' in compiled.sql and "本期退款率" not in compiled.sql
+
+    def test_breakdown_and_reason_upgrade_repeat_rate(self, monkeypatch):
+        """「各品类复购率」breakdown 升格、「为什么复购率变了」归因 ——
+        T0 total_single 指标入组合面后两条确定性直通自然打通。"""
+        monkeypatch.setenv("AI_T1_COMPOSE", "on")
+        from engine_py.analytics.engine import StructuredQueryIntent
+
+        intent = StructuredQueryIntent(metric="repeat_purchase_rate")
+        bd = composition.breakdown_reroute("各品类复购率", intent)
+        assert bd is not None and bd.metric == "repeat_purchase_rate" and bd.dimension == "category"
+        rs = composition.reason_reroute("为什么复购率变了", intent)
+        assert rs is not None and rs.compare_previous is True and rs.dimension == "category"

@@ -16,6 +16,18 @@ from engine_py.analytics import graph
 from engine_py.analytics.engine import QueryResult
 
 
+@pytest.fixture(autouse=True)
+def _no_unanswered_writes(monkeypatch):
+    """测试流量不污染 unanswered 飞轮(2026-10-27 周报首跑实证:「今天心情
+    如何」×52 全是 pytest 写进真库的):_log_unanswered 改 no-op —— 增长
+    闭环的数据底盘只收真实问句。"""
+
+    async def _swallow(session_ctx, question):
+        return None
+
+    monkeypatch.setattr(graph, "_log_unanswered", _swallow)
+
+
 @pytest.fixture()
 def stub_execute(monkeypatch):
     """桩掉执行层,回可断言的 QueryResult;捕获传入的 intent。"""

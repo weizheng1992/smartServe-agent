@@ -310,13 +310,21 @@ def compile_composition(comp: CompositionQuery, business_id: str, entity_ids: li
 
 
 def _measure_expr(metric: str) -> str:
-    """认证指标 → 组合面度量表达式(声明式,新指标登记即组合可用)。"""
+    """认证指标 → 组合面度量表达式(声明式,新指标登记即组合可用)。
+
+    grill 2026-10-27 组合面扩容:毛利/毛利率入列(finance_owner 闭集,
+    _validate 的 allowed 闸兜底角色越权)。"""
     return {
         "gmv": "COALESCE(SUM(oi.quantity * oi.price), 0)",
         "net_sales": "COALESCE(SUM(o.total_amount), 0)",
         "volume": "COALESCE(SUM(oi.quantity), 0)",
         "order_count": "COUNT(DISTINCT o.order_id)",
         "aov": "COALESCE(SUM(oi.quantity * oi.price), 0) / GREATEST(COUNT(DISTINCT o.order_id), 1)",
+        "gross_profit": "COALESCE(SUM(oi.quantity * (oi.price - oi.cost_at_purchase)), 0)",
+        "margin_rate": (
+            "ROUND(COALESCE(SUM(oi.quantity * (oi.price - oi.cost_at_purchase)), 0)::numeric * 100 "
+            "/ GREATEST(COALESCE(SUM(oi.quantity * oi.price), 0), 1), 2)"
+        ),
         "refund_rate": (
             "ROUND(COALESCE(SUM(CASE WHEN o.status = 'REFUNDED' THEN oi.quantity ELSE 0 END), 0)::numeric "
             "* 100 / GREATEST(SUM(CASE WHEN o.status <> 'CANCELLED' THEN oi.quantity ELSE 0 END), 1), 2)"
@@ -324,8 +332,23 @@ def _measure_expr(metric: str) -> str:
     }.get(metric, "")
 
 
-# 可组合指标闭集(度量表达式已声明;未声明 = 组合目录外,响亮拒绝)
-COMPOSABLE_METRICS = frozenset({"gmv", "net_sales", "volume", "order_count", "aov", "refund_rate"})
+# 二段聚合度量(grill 2026-10-27 票:复购率入组合面):单层「GROUP BY 维度」
+# 表达不了「每客户订单数 → 复购占比」的嵌套 —— 内层按(维度,客户)先聚,
+# 外层在内层产物上求比率;行集/有效成交口径与平铺度量同源(订单×明细),
+# DISTINCT 订单号保证明细扇出不虚增计数。
+_NESTED_MEASURES = {
+    "repeat_purchase_rate": {
+        "per": "o.customer_id",
+        "pre": "COUNT(DISTINCT o.order_id) AS orders_n",
+        "outer": "ROUND(COALESCE(100.0 * SUM(CASE WHEN orders_n >= 2 THEN 1 ELSE 0 END) / GREATEST(COUNT(*), 1), 0), 2)::float",
+    },
+}
+
+# 可组合指标闭集(平铺或嵌套度量已声明;未声明 = 组合目录外,响亮拒绝)
+COMPOSABLE_METRICS = frozenset({
+    "gmv", "net_sales", "volume", "order_count", "aov", "refund_rate",
+    "gross_profit", "margin_rate", "repeat_purchase_rate",
+})
 
 _ITEMS_JOIN = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
 _VALID_STATUS = "o.status NOT IN ('REFUNDED', 'CANCELLED')"
@@ -378,7 +401,7 @@ def _compose_rank(comp: CompositionQuery, dim: dict, business_id: str, entity_id
     from .engine import UnsupportedQuery, window_end, window_start
 
     measure = _measure_expr(comp.metric)
-    if not measure or comp.metric not in COMPOSABLE_METRICS:
+    if (not measure and comp.metric not in _NESTED_MEASURES) or comp.metric not in COMPOSABLE_METRICS:
         raise UnsupportedQuery(f"指标 {comp.metric} 未开放语义层组合")
     dim_sql = _dim_expr(_dim_key(comp), dim)
     label = _dim_label(_dim_key(comp), dim)
@@ -395,6 +418,22 @@ def _compose_rank(comp: CompositionQuery, dim: dict, business_id: str, entity_id
             where_parts.append("AND o.created_at < :window_end ")
             params["window_end"] = wend
     params["lim"] = comp.limit
+    nested = _NESTED_MEASURES.get(comp.metric)
+    if nested:
+        # 二段聚合(复购率族):内层(维度×客户)先聚订单数,外层求复购占比
+        inner = (
+            f"SELECT {dim_sql} AS dim, {nested['per']}, {nested['pre']} "
+            "FROM merchant_orders o "
+            f"{_ITEMS_JOIN}"
+            f"{join_extra}"
+            f"{''.join(where_parts)}"
+            f"GROUP BY {dim_sql}, {nested['per']}"
+        )
+        return (
+            f'SELECT dim AS "{label}", {nested["outer"]} AS "metricScore" '
+            f"FROM ({inner}) per_cust GROUP BY dim "
+            f'ORDER BY "metricScore" {comp.direction} LIMIT :lim'
+        ), params
     sql = (
         f'SELECT {dim_sql} AS "{label}", {measure}::float AS "metricScore" '
         "FROM merchant_orders o "
@@ -464,7 +503,8 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
     from .engine import UnsupportedQuery, window_end
 
     measure = _measure_expr(comp.metric)
-    if not measure or comp.metric not in COMPOSABLE_METRICS:
+    nested = _NESTED_MEASURES.get(comp.metric)
+    if (not measure and nested is None) or comp.metric not in COMPOSABLE_METRICS:
         raise UnsupportedQuery(f"指标 {comp.metric} 未开放语义层组合")
     dim_sql = _dim_expr(_dim_key(comp), dim)
     label = _dim_label(_dim_key(comp), dim)
@@ -482,8 +522,9 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
 
     # B1 关联指标对照(ADR-0011):双期 CTE 携带同基关联度量(退款率)的同期值
     # —— 两列数字并排呈现「跌的同时发生了什么」,因果判断留给人(08-D1 不破)。
-    # 主指标即退款率时不重复携带。
-    related = None if comp.metric == "refund_rate" else _measure_expr("refund_rate")
+    # 主指标即退款率不重复携带;嵌套度量(复购率族)内层是(维度×客户)预聚合,
+    # 退款率列挂不上平铺行集 —— 只由差评率 CTE 独立承担对照。
+    related = None if (comp.metric == "refund_rate" or nested) else _measure_expr("refund_rate")
 
     # 完整过去段(昨天/上周/上个月/去年)本期同样带排他上界(P0①):此前 cur 段
     # 开口到当前时刻,「上个月为什么跌」把当月数据静默并进本期对照
@@ -498,6 +539,17 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
         if comp.category:
             where.append("AND s.category = :cat")
         extra = f", {related} AS rv" if related else ""
+        if nested:
+            # 二段聚合(复购率族):内层(维度×客户)先聚订单数,外层求占比
+            inner = (
+                f"SELECT {dim_sql} AS dim, {nested['per']}, {nested['pre']} "
+                "FROM merchant_orders o "
+                f"{_ITEMS_JOIN}"
+                f"{join_extra}"
+                f"WHERE {' AND '.join(where)} "
+                f"GROUP BY {dim_sql}, {nested['per']}"
+            )
+            return f"SELECT dim, {nested['outer']} AS v FROM ({inner}) per_cust GROUP BY dim"
         return (
             f"SELECT {dim_sql} AS dim, {measure}::float AS v{extra} "
             "FROM merchant_orders o "
@@ -766,7 +818,9 @@ def breakdown_reroute(question: str, intent) -> CompositionQuery | None:
 REASON_RE = re.compile(r"为什么|什么原因|原因|为啥|为何|咋|怎么回事")
 # 排行/枚举语感(2026-10-09 第三载体):最好/最差/Top/榜…… 与维度泛词同现时
 # 表示「按该维度看高低」→ 组合排行(owner 列载体),而非 T0 的 SPU 默认维度。
-RANKING_RE = re.compile(r"top\s*\d*|榜|排行|排名|最好|最差|最高|最低|哪些|分别|最好卖", re.IGNORECASE)
+# 对比/分布入列(grill 2026-10-27 实弹:「各品牌毛利率对比」曾走 T0 商品榜,
+# 维度词被静默丢弃 —— 维度×对比语感升组合面按维度作答)
+RANKING_RE = re.compile(r"top\s*\d*|榜|排行|排名|最好|最差|最高|最低|哪些|分别|最好卖|对比|分布", re.IGNORECASE)
 
 
 def dimension_word_of(question: str) -> str | None:

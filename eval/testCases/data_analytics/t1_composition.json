@@ -328,5 +328,37 @@
         "value": "file://scorers/t1t2_channels.py:get_assert"
       }
     ]
+  },
+  {
+    "description": "grill 组合面扩容 - 复购率入归因(为什么×品类×上月)",
+    "vars": {
+      "channel": "t1",
+      "input": "为什么上个月各品类复购率跌了",
+      "expectedMetric": "repeat_purchase_rate",
+      "expectedDimension": "category",
+      "expectedComparePrevious": true,
+      "expectedTimeKind": "last_month"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
+  },
+  {
+    "description": "grill 组合面扩容 - 毛利率×品牌(finance 域组合)",
+    "vars": {
+      "channel": "t1",
+      "input": "各品牌毛利率对比",
+      "expectedMetric": "margin_rate",
+      "expectedDimension": "brand"
+    },
+    "assert": [
+      {
+        "type": "python",
+        "value": "file://scorers/t1t2_channels.py:get_assert"
+      }
+    ]
   }
 ]
