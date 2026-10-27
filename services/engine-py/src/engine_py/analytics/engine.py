@@ -199,12 +199,9 @@ class MetricQueryEngine:
             # 缺陷,grill 2026-10-26 顺手收口);右界见 window_end 注
             time_clause = ""
             if intent.time_window:
-                time_clause = "AND r.created_at >= :window_start"
-                params["window_start"] = window_start(intent.time_window)
-                wend = window_end(intent.time_window)
-                if wend is not None:
-                    time_clause += " AND r.created_at < :window_end"
-                    params["window_end"] = wend
+                pred, p = window_bounds_predicates("r.created_at", intent.time_window)
+                time_clause = f"AND {pred}"
+                params.update(p)
             params["entities"] = promo_ids[:20]
             sql = (
                 'SELECT COUNT(DISTINCT r.order_id) AS "核销订单数", '
@@ -545,6 +542,22 @@ def window_end(window: dict, now: datetime | None = None) -> datetime | None:
     if kind == "last_year":
         return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     return None
+
+
+def window_bounds_predicates(column: str, window: dict, now: datetime | None = None) -> tuple[str, dict]:
+    """时间窗 → (SQL 谓词串, 绑定参数):左界恒有,完整过去段附排他右界。
+
+    P0① 评审收口(2026-10-27 抽单点):此前「>= :window_start [+ < :window_end]」
+    两行在 6 处编译位逐份复制,新增 kind 漏一处右界即静默并段 —— 单点后
+    只此一家。谓词以 AND 连接(如 "o.created_at >= :window_start AND
+    o.created_at < :window_end"),调用方自行前缀 AND/逗号。"""
+    params: dict = {"window_start": window_start(window, now)}
+    parts = [f"{column} >= :window_start"]
+    wend = window_end(window, now)
+    if wend is not None:
+        parts.append(f"{column} < :window_end")
+        params["window_end"] = wend
+    return " AND ".join(parts), params
 
 
 @dataclass(frozen=True)

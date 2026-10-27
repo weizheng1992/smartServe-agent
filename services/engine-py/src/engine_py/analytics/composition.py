@@ -398,7 +398,7 @@ def _dim_label(dim_key: str, dim: dict) -> str:
 
 
 def _compose_rank(comp: CompositionQuery, dim: dict, business_id: str, entity_ids: list[str]) -> tuple[str, dict[str, Any]]:
-    from .engine import UnsupportedQuery, window_end, window_start
+    from .engine import UnsupportedQuery, window_bounds_predicates
 
     measure = _measure_expr(comp.metric)
     if (not measure and comp.metric not in _NESTED_MEASURES) or comp.metric not in COMPOSABLE_METRICS:
@@ -411,12 +411,9 @@ def _compose_rank(comp: CompositionQuery, dim: dict, business_id: str, entity_id
         where_parts.append("AND s.category = :cat ")
         params["cat"] = comp.category
     if comp.time_window:
-        where_parts.append("AND o.created_at >= :window_start ")
-        params["window_start"] = window_start(comp.time_window)
-        wend = window_end(comp.time_window)
-        if wend is not None:
-            where_parts.append("AND o.created_at < :window_end ")
-            params["window_end"] = wend
+        pred, p = window_bounds_predicates("o.created_at", comp.time_window)
+        where_parts.append(f"AND {pred} ")
+        params.update(p)
     params["lim"] = comp.limit
     nested = _NESTED_MEASURES.get(comp.metric)
     if nested:
@@ -626,7 +623,7 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
 
 
 def _compose_total(comp: CompositionQuery, business_id: str) -> tuple[str, dict[str, Any]]:
-    from .engine import UnsupportedQuery, window_end, window_start
+    from .engine import UnsupportedQuery, window_bounds_predicates
 
     measure = _measure_expr(comp.metric)
     if not measure or comp.metric not in COMPOSABLE_METRICS:
@@ -641,12 +638,9 @@ def _compose_total(comp: CompositionQuery, business_id: str) -> tuple[str, dict[
         where.append("AND s.category = :cat ")
         params["cat"] = comp.category
     if comp.time_window:
-        where.append("AND o.created_at >= :window_start ")
-        params["window_start"] = window_start(comp.time_window)
-        wend = window_end(comp.time_window)
-        if wend is not None:
-            where.append("AND o.created_at < :window_end ")
-            params["window_end"] = wend
+        pred, p = window_bounds_predicates("o.created_at", comp.time_window)
+        where.append(f"AND {pred} ")
+        params.update(p)
     sql = (
         f"SELECT '__total__' AS \"productId\", {measure}::float AS \"metricScore\" "
         "FROM merchant_orders o "

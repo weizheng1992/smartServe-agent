@@ -121,23 +121,17 @@ def _where_parts(
 ) -> tuple[list[str], dict[str, Any]]:
     """dim_rank/total_single 共用过滤拼装:声明常量口径(where)+ 时间窗
     (time_column)+ engine_db 实体自动租户谓词。用户输入永不进文本(全部绑参)。"""
-    from .engine import window_start
-
     base = block["base"]
     alias = _model()["entities"][base]["alias"]
     parts = list(block.get("where") or [])
     params: dict[str, Any] = {}
     if intent.time_window and block.get("time_column"):
-        parts.append(f"{block['time_column']} >= :window_start")
-        params["window_start"] = window_start(intent.time_window)
-        # 完整过去段(昨天/上周/上个月/去年)带排他上界,防「上月+当月累计」
-        # 静默并段(P0①,engine.window_end 注)
-        from .engine import window_end
+        # 完整过去段右界等时间语义单点在 window_bounds_predicates(P0① 收口)
+        from .engine import window_bounds_predicates
 
-        wend = window_end(intent.time_window)
-        if wend is not None:
-            parts.append(f"{block['time_column']} < :window_end")
-            params["window_end"] = wend
+        pred, p = window_bounds_predicates(block["time_column"], intent.time_window)
+        parts.append(pred)
+        params.update(p)
     if _model()["entities"][base]["database"] == "engine_db":
         parts.append(f"{alias}.business_id = :business_id")
         params["business_id"] = business_id
@@ -176,17 +170,14 @@ def _shape_total_single(intent: StructuredQueryIntent, block: dict[str, Any], bu
     alias = _model()["entities"][base]["alias"]
     cte = block.get("pre_agg_cte")
     if cte:
-        from .engine import window_end, window_start
-
         parts = list(cte.get("where") or [])
         params: dict[str, Any] = {}
         if intent.time_window and block.get("time_column"):
-            parts.append(f"{block['time_column']} >= :window_start")
-            params["window_start"] = window_start(intent.time_window)
-            wend = window_end(intent.time_window)
-            if wend is not None:
-                parts.append(f"{block['time_column']} < :window_end")
-                params["window_end"] = wend
+            from .engine import window_bounds_predicates
+
+            pred, p = window_bounds_predicates(block["time_column"], intent.time_window)
+            parts.append(pred)
+            params.update(p)
         where_sql = f"WHERE {' AND '.join(parts)} " if parts else ""
         sql = (
             f"WITH {cte['name']} AS ("
@@ -271,8 +262,6 @@ def _shape_spu_rank(intent: StructuredQueryIntent, block: dict[str, Any], busine
     join/别名/表名全部取自语义模型声明;度量与 HAVING 口径来自 metrics.yaml
     compile 块 —— 本函数只拥有「查询形态」。
     """
-    from .engine import window_start
-
     entities_tbl = _model()["entities"]
     base = "merchant_spus"
     base_alias = entities_tbl[base]["alias"]  # s
@@ -306,14 +295,11 @@ def _shape_spu_rank(intent: StructuredQueryIntent, block: dict[str, Any], busine
     params: dict[str, Any] = {"lim": intent.limit}
     time_clause = ""
     if intent.time_window:
-        time_clause = "AND o.created_at >= :window_start"
-        params["window_start"] = window_start(intent.time_window)
-        from .engine import window_end
+        from .engine import window_bounds_predicates
 
-        wend = window_end(intent.time_window)
-        if wend is not None:
-            time_clause += " AND o.created_at < :window_end"
-            params["window_end"] = wend
+        pred, p = window_bounds_predicates("o.created_at", intent.time_window)
+        time_clause = f"AND {pred}"
+        params.update(p)
     category_clause = ""
     if intent.category:
         category_clause = f"AND {base_alias}.category = :cat"
