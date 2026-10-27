@@ -4,6 +4,27 @@
 
 ---
 
+## [2.25.0] - 2026-10-27 (grill 二期+三期:Data Agent T1 组合面扩容与 T2 开闸、会话记忆 v2 多轮升级;时间窗谓词抽单点;CI 双修;夜评 58/58)
+
+### ✨ Features
+
+- **grill 2026-10-27 二期 · T1/T2/归因/周报**(5319e6b8):组合面扩容 —— 毛利/毛利率入 `COMPOSABLE_METRICS` 闭集(8 员,finance_owner 闭集由 `_validate` allowed 闸兜底越权);复购率入归因(`_NESTED_MEASURES` 嵌套二段度量:先按客户数单再外层聚合 ≥2 单占比);T2 探索开闸(`.env.example` 补 AI_T2_EXPLORE 等 8 行灰度 env,双闸 env ∧ admin/finance_owner 缺省关);`unanswered_report.py` 周报 CLI(80 行,dev/运维手动口径,不入 scheduler);t1_composition.json 评测用例入册。
+- **grill 2026-10-27 三期 · 会话记忆 v2 多轮升级**(0f6efd87,graph.py +85):三能力 —— ①指代追问(`_DEIXIS_RE` 指代词 × 上轮实体语境(top1/entity_slot)→ LLM 改写为独立问句重解析,v2.1 补齐 L0 命中路,「它卖得怎么样」不再丢指称对象答成全店榜);②失败重问(unsupported 也落史,只记问句意图留空不冒充成功);③时间改口(改写器 prompt 增「新窗口替换旧窗口不叠加」规则)。测试 +88 例钉死。
+- **时间窗谓词抽 `window_bounds_predicates` 单点**(8d66ed0b,昨夜 P0① 评审挂账收口):`>= :window_start [+ < :window_end]` 两行块原在 engine/semantic_compiler/composition 6 处编译位逐份复制,新增 kind 漏一处排他右界即静默并段 —— 单点后只此一家(engine.py:547);残留 `window_end` 直调系双期平移数值运算非谓词副本,非重复死角。
+
+### 🔧 Fixes
+
+- **clarifyKind 类型联合补 'time'**(a526a4b8):P0① 时间口径反问帧引擎侧已上线,前端 `analytics-frames.ts` 类型漏收该值致 tsc TS2367 拒编译、前端构建步连续失败(本地 vitest 不跑全量类型检查故未拦住)。
+- **CI 锁内 tuna 直链原位换官方 PyPI 源**(d0374c9b):40512601101 attempt3 实证 tuna 对海外 runner 间歇 403(ruff/pyclipper 下载被拒,重试同撞);`--frozen` 只认锁内 URL 环境变量覆盖无效 —— CI 步内 sed 换域(registry→pypi.org/simple,包体→files.pythonhosted.org,路径与 sha256 全不变),仓库锁不动、本地国内继续走 tuna;Python/评测 job 两处 uv sync 前置同款。
+
+### 🧪 Tests / 评测 / 评审
+
+- **夜间评测 58 用例**:首跑 57/58 —— 唯一失败 d15_评价_均分 系**场景锚点陈旧**而非 agent 缺陷:review_avg 已于 10-26 入册(问句原句即 sampleQueries)、老板=finance_owner 全量(rbac None=全量),result 帧是正确行为,按场景自注释预案(「若未来注册表扩员再改期望」)转正为口径面用例(b837730d),定向复跑 **58/58 严格全过**;意图面 561/564=99.5% 达标(3 例均为已知慢性:上个月销量→volume_trend、复购率最高的客户、坏账和退款的关系 —— 口径裁决挂晨审);c10 三次连接失败重试即过(网关瞬时)。报告 eval/nightly/results/20261027-230038 与 20261027-231718。
+- **夜评双轴评审**(基点 af6e6b78,5 提交):Standards 0 硬违规(挂账①「右界块三文件重复」确认真收口;组合闭集/AST 守卫/灰度缺省关均合规);Spec 4 项。夜修四件(b837730d):graph.py unsupported 引导文案三处逐字复制收口 `_UNSUPPORTED_HINT` + 指代触发条件两路抽 `_has_deixis_context` 单点;composition.py 拒绝文案两义分形(目录外 vs 形状未开放,repeat_purchase_rate 走总计不再谎称目录外);补时间改口行为测试(新窗口落到执行层参数,原仅 prompt 级断言);d15 锚点转正。验证:engine 全量 2042 passed、gateway 全量 500 passed/3 skipped、ruff 双服务绿。
+- **晨审清单**:①T2 开闸 vs data-agent-tiered-trust spec.md §7 三门前置(mapping 48/200、≥50 条 T2 长尾)——grill 二期裁决与原规格冲突需回写或补豁免记录;②ADR-0011「复购率、评价平均分补录可组合+可归因」半量交付(review_avg 组合/归因面缺席);③unanswered 周报无调度接线(scheduler 五任务无它,CLI-only 是否合「周报」意图);④意图集三例慢性口径裁决(含昨夜已挂「复购率最高客户」);⑤`_frame_top1` 趋势卡会把首行日期串当榜首实体入史,指代改写有误绑风险;⑥unanswered_report 全量查询无 --business 过滤(姊妹 CLI 有)与租户不变量的张力;⑦ci.yml sed 两 job 复制可抽 composite step;⑧LLM 追问改写臂 ainvoke 无超时护栏(昨夜遗留,300s SSE 死线兜底)。
+
+---
+
 ## [2.24.0] - 2026-10-26 (客服工作台订单面板+坐席主动推卡上线;judge 校准飞轮首战判 v1 不可用并衍生序数指代守卫;desk 左栏增量分页+时区偏差收口;ADR-0011 归因落地+P0 时间语义收口)
 
 ### ✨ Features
