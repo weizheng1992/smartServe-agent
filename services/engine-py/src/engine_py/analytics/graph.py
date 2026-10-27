@@ -42,6 +42,25 @@ from .trace import Trace
 # 指代/指示词(会话记忆 v2.1):命中且上轮有实体语境 → 追问改写先行
 _DEIXIS_RE = re.compile(r"它|他们|她们|这款|那个(?:商品|品类|客户)|该(?:商品|品类|客户|活动)|榜首|第一名|上一?名")
 
+
+def _has_deixis_context(history: dict | None, question: str) -> bool:
+    """指代改写触发条件(会话记忆 v2.1):指代词 × 上轮实体语境。
+
+    ask 路(L0 命中后)与 fallback 路两处消费同一谓词 —— 分开手抄必漂移
+    (夜评 2026-10-27 Standards:Duplicated Code 收口)。"""
+    return bool(
+        history
+        and _DEIXIS_RE.search(question or "")
+        and (history.get("top1") or (history.get("intent") or {}).get("entity_slot"))
+    )
+
+
+# unsupported 引导文案(注入闸/兜底未命中两路逐字同文;收口防改一处漏两处)
+_UNSUPPORTED_HINT = (
+    "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / "
+    "某客户最近的订单 / 勾选订单后问「订单对比」;文档/PRD 里的表格与图表数据请到客服知识问答提问"
+)
+
 _CHART_ONLY_RE = re.compile(r"^(?:换成?|改[成为]?|用|来)?\s*(?:一?个?)?\s*(折线图?|柱状图?|条形图?|柱形图?|表格)\s*[?？]?$")
 
 # 注入形状闸(2026-10-01 夜审):语料携带 SQL 写关键词串联 / UNION SELECT /
@@ -152,7 +171,7 @@ async def ask(
     if _INJECTION_SHAPE_RE.search(question):
         await _log_unanswered(session_ctx, question)
         await trace.record("unsupported", final_method="injection_guard")
-        return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」;文档/PRD 里的表格与图表数据请到客服知识问答提问", "detail": "问句含注入形状,已拒绝处理"}, trace)
+        return _with_trace({"type": "unsupported", "message": _UNSUPPORTED_HINT, "detail": "问句含注入形状,已拒绝处理"}, trace)
 
     # 「该找谁」快轨(spec .scratch/owner-routing §3):确定性词面 × owner_mappings,
     # 零 LLM;未命中(不像找谁/目标不认识)返回 None 静默放行原管线。落位在注入闸
@@ -216,10 +235,10 @@ async def ask(
                 if persist_session:
                     await session_store.save(business_id, session_id, payload)
                 else:
-                    frame = _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」;文档/PRD 里的表格与图表数据请到客服知识问答提问", "detail": str(err)}, trace)
+                    frame = _with_trace({"type": "unsupported", "message": _UNSUPPORTED_HINT, "detail": str(err)}, trace)
                     frame["_sessionPayload"] = payload
                     return frame
-            return _with_trace({"type": "unsupported", "message": "该问题暂不支持。可试试:销量 Top / 差评榜 / 退款率 / 会话量 / 某活动卖得怎么样 / 某客户最近的订单 / 勾选订单后问「订单对比」;文档/PRD 里的表格与图表数据请到客服知识问答提问", "detail": str(err)}, trace)
+            return _with_trace({"type": "unsupported", "message": _UNSUPPORTED_HINT, "detail": str(err)}, trace)
         if isinstance(intent, Clarify):
             if intent.original_question is None:
                 intent = _dc_replace(intent, original_question=rewritten_q or question)  # 实体反问回问时带上有效问句
@@ -247,11 +266,9 @@ async def ask(
     # 「它卖得怎么样」曾被 L0 裸命中 volume 丢掉指称对象(答成全店榜),
     # 与 L2 范例路同病;改写/重解析失败静默回落原意图,零行为破坏。
     if (
-        history
-        and not rewritten_q
+        not rewritten_q
         and not intent.entity_slot
-        and _DEIXIS_RE.search(question or "")
-        and (history.get("top1") or (history.get("intent") or {}).get("entity_slot"))
+        and _has_deixis_context(history, question)
     ):
         _deix = await _rewrite_followup(effective_question, history)
         if _deix and _deix.strip() and _deix.strip() != effective_question.strip():
@@ -678,9 +695,7 @@ async def fallback_intent(question: str, allowed: list[str] | None, session_ctx:
     # —— 范例回放不带指代,「它卖得怎么样」直出会丢「它」的指称对象(实测
     # 答成全店榜);改写失败/无实体语境原问句照走,零行为破坏。
     early_rewrite: str | None = None
-    if history and _DEIXIS_RE.search(question or "") and (
-        history.get("top1") or (history.get("intent") or {}).get("entity_slot")
-    ):
+    if _has_deixis_context(history, question):
         rewritten = await _rewrite_followup(question, history)
         if rewritten and rewritten.strip() and rewritten.strip() != question.strip():
             print(f"[Session] 指代改写先行: {question[:24]!r} → {rewritten[:36]!r}")

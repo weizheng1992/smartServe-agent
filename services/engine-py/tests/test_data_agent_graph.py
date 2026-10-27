@@ -487,3 +487,41 @@ class TestSessionMemoryV2:
         ))
         assert out == "户外机能的销售额最近7天为什么变了"
         assert "户外机能" in captured["user"] and "替换" in captured["system"]
+
+    def test_time_rephrase_reruns_with_new_window(self, monkeypatch, stub_execute):
+        """时间改口(行为级,夜评 2026-10-27 Spec 补测):「按最近7天再算」→
+        改写为独立问句重跑,新窗口落到执行层(上轮 last_month 不残留)。"""
+        async def _hist(business_id, session_id):
+            return {
+                "last_question": "上个月各品类销售额",
+                "intent": {"metric": "gmv", "time_window": {"kind": "last_month"}},
+                "top1": "户外机能",
+            }
+
+        async def _save(business_id, session_id, payload):
+            pass
+
+        monkeypatch.setattr(graph.session_store, "load", _hist)
+        monkeypatch.setattr(graph.session_store, "save", _save)
+
+        class _StubMsg:
+            def __init__(self, content):
+                self.content = content
+
+        class _StubModel:
+            async def ainvoke(self, messages):
+                return _StubMsg("各品类销售额最近7天排行")
+
+        from engine_py.analytics import llm_intent
+        monkeypatch.setattr(llm_intent, "get_chat_model", lambda: _StubModel())
+        out = asyncio.run(graph.ask(
+            "按最近7天再算一次", {"business_id": "aurora", "role": "finance_owner"},
+            {"sessionId": "sess-timere"},
+        ))
+        assert out["type"] == "result", "改写重解析命中应出结果帧而非 unsupported"
+        start = stub_execute["params"].get("window_start")
+        assert start is not None, "新时间窗必须落到执行层参数"
+        from datetime import UTC, datetime, timedelta
+
+        delta = datetime.now(UTC).replace(tzinfo=None) - start
+        assert timedelta(days=6) <= delta <= timedelta(days=8), f"窗口应≈7天,实得 {delta}"

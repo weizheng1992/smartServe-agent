@@ -401,8 +401,12 @@ def _compose_rank(comp: CompositionQuery, dim: dict, business_id: str, entity_id
     from .engine import UnsupportedQuery, window_bounds_predicates
 
     measure = _measure_expr(comp.metric)
-    if (not measure and comp.metric not in _NESTED_MEASURES) or comp.metric not in COMPOSABLE_METRICS:
+    # 目录外(未入组合闭集)与形状未开放两义分形,拒绝文案随因 —— 否则
+    # repeat_purchase_rate 走总计时谎称「未开放组合」(夜评 2026-10-27 Standards)
+    if comp.metric not in COMPOSABLE_METRICS:
         raise UnsupportedQuery(f"指标 {comp.metric} 未开放语义层组合")
+    if not measure and comp.metric not in _NESTED_MEASURES:
+        raise UnsupportedQuery(f"指标 {comp.metric} 未开放排行形状的组合")
     dim_sql = _dim_expr(_dim_key(comp), dim)
     label = _dim_label(_dim_key(comp), dim)
     join_extra, params = _base_join(comp.metric, dim, comp.entity_kind, entity_ids)
@@ -501,8 +505,10 @@ def _compose_period_compare(comp: CompositionQuery, dim: dict, business_id: str,
 
     measure = _measure_expr(comp.metric)
     nested = _NESTED_MEASURES.get(comp.metric)
-    if (not measure and nested is None) or comp.metric not in COMPOSABLE_METRICS:
+    if comp.metric not in COMPOSABLE_METRICS:
         raise UnsupportedQuery(f"指标 {comp.metric} 未开放语义层组合")
+    if not measure and nested is None:
+        raise UnsupportedQuery(f"指标 {comp.metric} 未开放对比形状的组合")
     dim_sql = _dim_expr(_dim_key(comp), dim)
     label = _dim_label(_dim_key(comp), dim)
     join_extra, base_params = _base_join(comp.metric, dim, comp.entity_kind, entity_ids)
@@ -626,8 +632,12 @@ def _compose_total(comp: CompositionQuery, business_id: str) -> tuple[str, dict[
     from .engine import UnsupportedQuery, window_bounds_predicates
 
     measure = _measure_expr(comp.metric)
-    if not measure or comp.metric not in COMPOSABLE_METRICS:
+    if comp.metric not in COMPOSABLE_METRICS:
         raise UnsupportedQuery(f"指标 {comp.metric} 未开放语义层组合")
+    if not measure:
+        # 已入组合目录但仅嵌套度量(如 repeat_purchase_rate)—— 总计形状
+        # 不消费维度分组,诚实拒形状而非谎称目录外
+        raise UnsupportedQuery(f"指标 {comp.metric} 未开放总计形状")
     params: dict[str, Any] = {}
     where = [f"WHERE {_VALID_STATUS} "]
     joins = ""

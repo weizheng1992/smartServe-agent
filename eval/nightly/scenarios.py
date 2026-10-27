@@ -354,9 +354,10 @@ DATA_CASES: list[DataCase] = [
     DataCase("d13_权限_老板放行", "权限面", "毛利是多少", staff_email="test@example.com"),
     # ---- 指标族扩面 / 场景包 / 多轮改写 / 响亮失败 ----
     DataCase("d14_促销_效果", "指标口径", "上个月促销活动效果怎么样", advisory=True),
-    # 评价族闭集只有差评榜等,无「平均分」指标 —— unsupported 正是 LLM 永不写
-    # SQL 铁律的正确呈现(猜一个才是缺陷);若未来注册表扩员再改期望
-    DataCase("d15_评价_均分", "边界对抗", "商品评价平均分是多少", expect_frame="not_result"),
+    # review_avg 已于 2026-10-26 入册(62503eb3,grill P0 新指标 39→41,
+    # sampleQueries 原句即本问句)—— 本问句从「闭集外诚实拒答」转正为口径面
+    # 用例;「无中生有不编造」的边界覆盖仍由 d09/d19/d21 承担
+    DataCase("d15_评价_均分", "指标口径", "商品评价平均分是多少"),
     DataCase("d16_会话_规模", "指标口径", "总共有多少个会话", advisory=True),
     DataCase("d17_场景包_复合", "多意图复合", "看下销售和库存的整体情况", advisory=True),
     DataCase(
