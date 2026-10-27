@@ -156,7 +156,9 @@ jobs:
         run: |
           install -m 600 /dev/null ~/deploy_key
           echo "$SSH_KEY" > ~/deploy_key
-          ssh -i ~/deploy_key -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" bash -s <<'REMOTE'
+          ssh -i ~/deploy_key -o StrictHostKeyChecking=accept-new \
+              -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+              "$SSH_USER@$SSH_HOST" bash -s <<'REMOTE'
           set -euo pipefail
           cd ~/agent-all
           git pull --ff-only
@@ -166,6 +168,19 @@ jobs:
           # 不会报错——compose up 无变化、容器静默陈旧、健康断言打在旧 gateway 上照样绿
           # (10-21/10-22 两次推送均如此落地失败)。故先比 manifest 哈希(纯元数据,秒级),
           # 镜像源滞后才回落直连 ghcr(B 机已持久 docker login,直连可用但慢)。
+          # 断管韧性(2026-10-27 实弹:新鲜镜像必走 ghcr 直连,SSH 流式输出层进度两连
+          # Broken pipe exit255):①pull -q 静默砍输出量;②重试×5 —— docker 层缓存续传,
+          # 每次中断后已完成层 Already exists 不重拉,反复前进直到拉齐。
+          pull_q() {
+            local img=$1 i
+            for i in 1 2 3 4 5; do
+              docker pull -q "$img" && return 0
+              echo ":: pull 第 $i 次中断(层缓存续传重试): $img"
+              sleep 8
+            done
+            echo ":: pull 五试仍断: $img" >&2
+            return 1
+          }
           pull_image() {
             local img=$1
             local nj=ghcr.nju.edu.cn/weizheng1992/$img gh=ghcr.io/weizheng1992/$img
@@ -174,11 +189,11 @@ jobs:
             gh_raw=$(docker manifest inspect $gh:latest 2>/dev/null || true)
             if [ -n "$nj_raw" ] && [ -n "$gh_raw" ] \
                && [ "$(echo "$nj_raw" | sha256sum)" = "$(echo "$gh_raw" | sha256sum)" ]; then
-              docker pull $nj:latest
+              pull_q $nj:latest
               docker tag $nj:latest $gh:latest
             else
               echo ":: 镜像源未同步($img),回落直连 ghcr.io"
-              docker pull $gh:latest
+              pull_q $gh:latest
             fi
           }
           pull_image smartserve-gateway
