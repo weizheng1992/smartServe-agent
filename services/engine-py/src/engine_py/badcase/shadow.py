@@ -38,6 +38,12 @@ STATUS_SHADOW_DRAFT = "shadow_draft"
 
 _THREAD_PREFIX = "thread:"
 
+# 测试线程前缀闭集(2026-10-28 人审实证):e2e(merchant_thread_e2e_*)与夜评
+# (nightly_*)线程是测试流量 —— 行为面已由 e2e 册与夜评自身门禁钉死,起草进
+# shadow 只产噪声(pending.json 四连 persona_fact_deleted 全来自 e2e 购物车
+# 批次,对话本身零缺陷)。测试候选保持 candidate 留周度人审面,只是不自动起草。
+_TEST_THREAD_PREFIXES = ("merchant_thread_e2e_", "nightly_")
+
 
 def default_pending_path() -> Path:
     """仓库 shadow 集:``<repo>/eval/testCases/shadow/pending.json``。
@@ -135,6 +141,10 @@ async def auto_draft_shadow_cases(pending_path: Path | None = None) -> dict:
                     summary["skipped"] += 1
                     continue
                 thread_id = row.conversation_ref.removeprefix(_THREAD_PREFIX)
+                if thread_id.startswith(_TEST_THREAD_PREFIXES):
+                    print(f"[BadcaseShadow] 测试线程不入 shadow(行为面归 e2e/夜评自有门禁): {thread_id[:48]}")
+                    summary["skipped"] += 1
+                    continue
                 raw_text = await _latest_user_message(thread_id)
                 if not raw_text or not raw_text.strip():
                     summary["skipped"] += 1

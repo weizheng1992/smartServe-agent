@@ -13,7 +13,7 @@ import asyncio
 import pytest
 from sqlalchemy import select, update
 
-from engine_py.badcase.pool import SOURCE_CLAIM_MISMATCH, SOURCE_INTENT_CONFLICT
+from engine_py.badcase.pool import SOURCE_CLAIM_MISMATCH, SOURCE_INTENT_CONFLICT, SOURCE_PERSONA_FACT_DELETED
 from engine_py.badcase.shadow import (
     AUTO_DRAFT_SOURCES,
     build_shadow_case,
@@ -174,6 +174,27 @@ class TestAutoDraft:
         assert summary["drafted"] == 0
         assert self._status_of(cid) == "candidate", "跳过不改状态(等人工 draft 流程)"
         assert all(c["vars"]["origin"] != f"badcase:{cid}" for c in load_pending(pending))
+
+    def test_test_thread_prefix_never_drafted(self, tmp_path):
+        """测试线程前缀闸(2026-10-28 人审实证):e2e/夜评线程是测试流量,
+        行为面归 e2e 册与夜评自有门禁,shadow 自动起草只产噪声 —— 高置信
+        信号(source=persona_fact_deleted 先验 suspected_defect)+ 完整用户行
+        在场也必须 skip,候选保持 candidate 留周度人审面。"""
+        from engine_py.badcase.shadow import auto_draft_shadow_cases
+
+        pending = tmp_path / "pending.json"
+        self._thread("merchant_thread_e2e_cart_1")
+        self._message("merchant_thread_e2e_cart_1", "user", "极光三合一冲锋衣 曜石黑 M码 加入购物车", "2026-10-26T00:19:07")
+        self._thread("nightly_sim_犹豫导购下单_1")
+        self._message("nightly_sim_犹豫导购下单_1", "user", "帮我看看冲锋衣", "2026-10-26T00:20:00")
+        cid_e2e = self._candidate(SOURCE_PERSONA_FACT_DELETED, "merchant_thread_e2e_cart_1")
+        cid_nightly = self._candidate(SOURCE_PERSONA_FACT_DELETED, "nightly_sim_犹豫导购下单_1")
+
+        summary = asyncio.run(auto_draft_shadow_cases(pending_path=pending))
+        assert summary["drafted"] == 0
+        for cid in (cid_e2e, cid_nightly):
+            assert self._status_of(cid) == "candidate", "测试线程跳过不改状态(留周度人审面)"
+            assert all(c["vars"]["origin"] != f"badcase:{cid}" for c in load_pending(pending))
 
     def test_promote_moves_case_into_suite_and_converts(self, tmp_path):
         """端到端:shadow 草稿 → promote(选套件+补断言)→ 硬闸套件落例、
