@@ -55,6 +55,7 @@ jobs:
           -e 's#https://pypi.tuna.tsinghua.edu.cn/simple#https://pypi.org/simple#g'
           -e 's#https://pypi.tuna.tsinghua.edu.cn/packages#https://files.pythonhosted.org/packages#g'
           uv.lock
+          && ! grep -q "pypi.tuna" uv.lock
         working-directory: services
       # --frozen:锁文件已入库,免索引元数据往返;重试一次兜波动
       - run: uv sync --frozen --all-extras || { sleep 20; uv sync --frozen --all-extras; }
@@ -271,6 +272,7 @@ jobs:
           -e 's#https://pypi.tuna.tsinghua.edu.cn/simple#https://pypi.org/simple#g'
           -e 's#https://pypi.tuna.tsinghua.edu.cn/packages#https://files.pythonhosted.org/packages#g'
           uv.lock
+          && ! grep -q "pypi.tuna" uv.lock
         working-directory: services
       - run: uv sync --frozen --all-extras || { sleep 20; uv sync --frozen --all-extras; }
         working-directory: services

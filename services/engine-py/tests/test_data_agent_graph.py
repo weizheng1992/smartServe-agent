@@ -525,3 +525,19 @@ class TestSessionMemoryV2:
 
         delta = datetime.now(UTC).replace(tzinfo=None) - start
         assert timedelta(days=6) <= delta <= timedelta(days=8), f"窗口应≈7天,实得 {delta}"
+
+
+class TestFrameTop1Guard:
+    """评审 Spec③ 收口:状态/口径类首列不冒充榜首实体入史。"""
+
+    def test_status_header_column_skipped(self):
+        frame = {"cards": [{"rows": [{"状态": "PAID", "订单号": "AURORA-ORD-1", "金额": 9.9}]}]}
+        assert graph._frame_top1(frame) == "AURORA-ORD-1"
+
+    def test_all_non_entity_columns_returns_none(self):
+        frame = {"cards": [{"rows": [{"状态": "PAID", "created_at": "10-27"}]}]}
+        assert graph._frame_top1(frame) is None
+
+    def test_dunder_values_never_top1(self):
+        frame = {"cards": [{"rows": [{"productId": "__total__", "metricScore": 4.2}]}]}
+        assert graph._frame_top1(frame) is None

@@ -163,16 +163,22 @@ def extract_slots(clean: str) -> tuple[int, dict | None, str | None]:
     """开放槽位解析(limit/时间窗/品类);L0 命中路与分类头 on 路径共用。"""
     limit_match = LIMIT_RE.search(clean)
     limit = min(max(int(limit_match.group(1)) if limit_match else 5, 1), 50)
+    # 多时间词并现取**最右**命中(评审 Spec① 收口,2026-10-28):口径以最后
+    # 说出的为准 —— 改写器泄漏旧词(「上个月的销量 按最近7天」)时旧首序
+    # 匹配会让上月静默胜出,正是 P0① 要消灭的错答形态;单时间词问句行为不变。
     time_window: dict | None = None
+    best: tuple[int, str, re.Match] | None = None
     for kind, pat in TIME_PATTERNS:
         m = pat.search(clean)
-        if m:
-            time_window = {"kind": kind}
-            if kind == "last_months":
-                raw = m.group(1) if m.groups() else None
-                n = int(raw) if raw and raw.isdigit() else CN_MONTH_NUMS.get(raw or "", 6)
-                time_window["n"] = min(max(n, 1), 24)
-            break
+        if m and (best is None or m.end() > best[0]):
+            best = (m.end(), kind, m)
+    if best is not None:
+        kind, m = best[1], best[2]
+        time_window = {"kind": kind}
+        if kind == "last_months":
+            raw = m.group(1) if m.groups() else None
+            n = int(raw) if raw and raw.isdigit() else CN_MONTH_NUMS.get(raw or "", 6)
+            time_window["n"] = min(max(n, 1), 24)
     cat_match = category_pattern().search(clean)
     category = cat_match.group(0) if cat_match else None
     return limit, time_window, category

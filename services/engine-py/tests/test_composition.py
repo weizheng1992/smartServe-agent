@@ -542,3 +542,13 @@ class TestComposeExpansionTicket:
         assert bd is not None and bd.metric == "repeat_purchase_rate" and bd.dimension == "category"
         rs = composition.reason_reroute("为什么复购率变了", intent)
         assert rs is not None and rs.compare_previous is True and rs.dimension == "category"
+
+    def test_time_slot_rightmost_word_wins(self):
+        """多时间词取最右(Spec① 收口):改写器泄漏旧词时新口径必须胜出,
+        旧首序匹配会让「上个月的销量 按最近7天」静默落回上月。"""
+        from engine_py.analytics.l0_lexicon import extract_slots
+
+        _, tw, _ = extract_slots("上个月的销量 按最近7天")
+        assert tw == {"kind": "last_7d"}, f"泄漏旧词形态被旧窗劫持: {tw}"
+        _, tw2, _ = extract_slots("上个月各品类销售额环比")
+        assert tw2 == {"kind": "last_month"}, "单时间词行为不变"

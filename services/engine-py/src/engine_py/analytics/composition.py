@@ -310,10 +310,13 @@ def compile_composition(comp: CompositionQuery, business_id: str, entity_ids: li
 
 
 def _measure_expr(metric: str) -> str:
-    """认证指标 → 组合面度量表达式(声明式,新指标登记即组合可用)。
+    """认证指标 → 组合面度量表达式。
 
     grill 2026-10-27 组合面扩容:毛利/毛利率入列(finance_owner 闭集,
-    _validate 的 allowed 闸兜底角色越权)。"""
+    _validate 的 allowed 闸兜底角色越权)。注意:组合度量与此表(及
+    _NESTED_MEASURES)是 metrics.yaml compile 块之外的第二维护面 ——
+    新指标入组合须三处同改,口径漂移由 TestComposeExpansionTicket 族
+    对拍兜底;单源化(compile 块派生)挂票。"""
     return {
         "gmv": "COALESCE(SUM(oi.quantity * oi.price), 0)",
         "net_sales": "COALESCE(SUM(o.total_amount), 0)",

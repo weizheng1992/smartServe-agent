@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import re
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 
@@ -24,16 +23,18 @@ from sqlalchemy import text
 
 from ..db import get_session
 
-_REASON_RE = re.compile(r"为什么|什么原因|为啥|怎么回事")
-# 与 l0_lexicon._TIME_HINT_RE 同语感(此处仅作粗分类提示,不追求精确对齐)
-_TIME_HINT_RE = re.compile(r"昨|今天|本周|上周|今年|去年|季度|月|\d+日|\d+号")
+# 词表单点派生(评审收口:本地第三份词表与主表漂移——归因桶直用
+# composition.REASON_RE,时间桶直用 l0.unparsed_time_hint 只圈**不可解析**
+# 时间词,可解析词命中的问句该走别的桶而非时间补录)
+from .composition import REASON_RE
+from .l0_lexicon import unparsed_time_hint
 
 
 def _classify(q: str) -> str:
-    if _REASON_RE.search(q):
+    if REASON_RE.search(q):
         return "归因问句"
-    if _TIME_HINT_RE.search(q):
-        return "含时间词"
+    if unparsed_time_hint(q):
+        return "含不可解析时间词"
     return "其他(评估词表/闭集)"
 
 

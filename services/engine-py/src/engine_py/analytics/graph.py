@@ -98,14 +98,24 @@ def build_cards(question: str, result: Any, intent: StructuredQueryIntent | None
     }]
 
 
+# 非实体列头(评审 Spec③ 收口):订单概览类帧首列是状态/口径文本,误入史
+# 会把非实体词当指称对象喂给改写器 —— 命中即跳过该列继续找
+_NON_ENTITY_HEADERS = {"状态", "对比分组", "created_at", "时间", "日期"}
+
+
 def _frame_top1(frame: dict) -> str | None:
-    """会话记忆 v2:帧内榜首实体(首卡首行首个非 __ 前缀字符串列)——
-    「它为什么跌了/看它的订单」类指代追问的改写依据;无实体形态返回 None。"""
+    """会话记忆 v2:帧内榜首实体(首卡首行首个非 __ 前缀、列头非状态/口径类
+    的字符串列)——「它为什么跌了/看它的订单」类指代追问的改写依据;无实体
+    形态返回 None。"""
     for card in frame.get("cards") or []:
         rows = card.get("rows") or []
         if rows:
             v = next(
-                (x for x in rows[0].values() if isinstance(x, str) and x and not x.startswith("__")),
+                (
+                    x for k, x in rows[0].items()
+                    if k not in _NON_ENTITY_HEADERS
+                    and isinstance(x, str) and x and not x.startswith("__")
+                ),
                 None,
             )
             if v:
@@ -228,7 +238,7 @@ async def ask(
             if composed is not None:
                 frame, comp = composed
                 if comp is not None:
-                    payload = {"last_question": question, "intent": comp.__dict__}
+                    payload = {"last_question": question, "intent": comp.__dict__, "top1": _frame_top1(frame)}
                     if session_id:
                         if persist_session:
                             await session_store.save(business_id, session_id, payload)
@@ -292,8 +302,10 @@ async def ask(
                     print(f"[Session] 指代改写重解析: {effective_question[:24]!r} → {_deix[:36]!r}")
                     trace.add_layer("deixis", rewritten=_deix[:60])
                     intent, effective_question = _intent2, _deix.strip()
-            except Exception:
-                pass  # 重解析失败回落原意图(响亮语义不变)
+            except Exception as _deix_err:
+                # 吞错点须留痕(pyproject ruff 豁免注):失败静默回落原意图,
+                # 但零日志会让「指代改写未生效」不可归因
+                print(f"[Session] 指代改写重解析失败(回落原意图): {_deix_err}")
 
     # 时间口径反问(P0①):L0/L2/L3 已解析出意图但时间词闭集外 → 先问口径
     # 再执行;解析出合法时间窗(含新扩容 kind)则零打扰直通
