@@ -939,7 +939,10 @@ class CatalogMixin:
                                 "description": r["description"],
                                 "category": r["category"],
                                 "specs": {"品类": r["category"] or "精选"},
-                                "imageUrl": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400",
+                                # engine 本地表降级分支的占位图(2026-10-28 种子图本地化:
+                                # 红夹克为种子同款实图,经网关 /api/seed-images 静态面伺服,
+                                # 不再热链 unsplash —— 桶亡即碎且与种子图双表)
+                                "imageUrl": "/api/seed-images/photo-1542291026-7eec264c27ff.jpg",
                             }
                             for r in rows
                         ],

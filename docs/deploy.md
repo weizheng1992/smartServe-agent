@@ -87,8 +87,10 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm gateway 
   sh -c 'cd engine-py && uv run --no-sync python -m engine_py.db.seed && \
                         uv run --no-sync python -m engine_py.db.seed_third_party'
 docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm gateway \
-  sh -c 'cd gateway-py && uv run --no-sync python -m gateway_py.merchant_seed'
+  sh -c 'cd gateway-py && MERCHANT_SEED_ALLOW=1 uv run --no-sync python -m gateway_py.merchant_seed'
 ```
+
+> **重播种注意（2026-10-28 勘误）**：`merchant_seed` 自 2026-10-18 起有环境隔离闸,未带 `MERCHANT_SEED_ALLOW=1` 直接 RuntimeError 拒跑（种子会清空并重插商户真账库,误跑即污染）——此前本文档命令漏带该变量,照抄必失败。存量库要吃上 `/api/seed-images/` 本地图也须重播种（URL 落库为种子时值）。
 
 **周期任务**（HITL 对账/超时扫描/坏例摘要）随 gateway lifespan 自动在场，无需单独启用。
 

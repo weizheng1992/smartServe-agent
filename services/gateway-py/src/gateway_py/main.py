@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from engine_py.llm import warm_embedding_model_in_background
 from fastapi import FastAPI, Request
@@ -153,6 +154,17 @@ fastapi_app.include_router(live_desk.router)
 # 聊天图片静态服务(wayfinder multimodal-image-chat 002):上传端点回 /api/uploads/ URL,
 # 前端经既有 /api 代理直达;目录由 chat 模块导入时确保存在
 fastapi_app.mount("/api/uploads", StaticFiles(directory=str(chat.UPLOADS_DIR)), name="chat-uploads")
+
+# 商户种子商品图静态服务(2026-10-28 种子图本地化,晨审挂账):种子数据 URL
+# 统一 /api/seed-images/* —— 四前端(web/merchant/merchant-admin/admin)dev 均有
+# /api 代理、生产 nginx 已有 /api 路由,商城外的聊天卡/坐席台/追踪抽屉同样可
+# 达(终审实锤:/seed/ 源相对路径只在 merchant 一面活);目录随 Dockerfile
+# COPY services/gateway-py/ 入容器,文件↔引用 parity 由 test_closedset_parity 钉
+fastapi_app.mount(
+    "/api/seed-images",
+    StaticFiles(directory=str(Path(__file__).resolve().parent / "seed_images")),
+    name="seed-images",
+)
 
 # socket.io 挂载在默认 path /socket.io,namespace /ws/chat;其余路径回落到 FastAPI
 app = ASGIApp(sio, other_asgi_app=fastapi_app)
