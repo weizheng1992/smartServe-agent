@@ -94,3 +94,20 @@ def test_repeat_purchase_rank_registered():
     intent = resolve_question("复购率最高的客户有哪些")
     assert isinstance(intent, StructuredQueryIntent)
     assert intent.metric == "repeat_purchase_rate"
+
+
+def test_rank_words_single_value_caliber_annotation():
+    """21 号票裁决 B·注记的 graph 缝钉死:rank 语感 × 单值形指标 → 结果卡
+    caliber 追加诚实口径注记(严禁静默半答);纯单值问句与榜单形指标不扰。"""
+    from types import SimpleNamespace
+
+    from engine_py.analytics.graph import _result_frame
+
+    intent = SimpleNamespace(metric="repeat_purchase_rate", chart_hint=None)
+    result = SimpleNamespace(metric="repeat_purchase_rate", unit="%", caliber="有效成交口径", rows=[], chart=None)
+    assert "不支持按维度排行" in _result_frame("复购率最高的客户有哪些", result, intent)["caliber"]
+    assert "不支持按维度排行" not in _result_frame("复购率是多少", result, intent)["caliber"]
+
+    intent_gmv = SimpleNamespace(metric="gmv", chart_hint=None)
+    result_gmv = SimpleNamespace(metric="gmv", unit="元", caliber="有效订单聚合", rows=[], chart=None)
+    assert "不支持按维度排行" not in _result_frame("销售额最高的商品有哪些", result_gmv, intent_gmv)["caliber"]

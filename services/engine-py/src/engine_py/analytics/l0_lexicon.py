@@ -38,6 +38,11 @@ def is_relation_question(question: str | None) -> bool:
     return bool(_RELATION_Q_RE.search(question or ""))
 
 
+def has_rank_words(question: str | None) -> bool:
+    """rank 语感判定(最高/哪些/top-N/排行;21 号票 B 注记消费,graph 层)。"""
+    return bool(_RANK_WORDS_RE.search(question or "") or "哪些" in (question or "") or "最高" in (question or ""))
+
+
 def arbitrate_trend_hit(metric_key: str, clean: str) -> str:
     """趋势命中后的两道降级仲裁(榜单语义/完整时间窗)—— L0 词林命中路与
     分类头 on 接管路共用同一函数(2026-10-28 终审:接管路此前绕过仲裁,

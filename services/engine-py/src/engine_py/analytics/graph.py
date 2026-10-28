@@ -552,11 +552,18 @@ async def _attach_t0_spu_owners(result, session_ctx: dict) -> None:
 
 
 def _result_frame(question: str, result, intent, title_prefix: str = "", *, trust: str = "verified", caliber: str | None = None, summary_override: str | None = None) -> dict:
+    from .l0_lexicon import has_rank_words
     from .tools_registry_bridge import metric_semantic_registry
 
     cards = build_cards(question, result, intent)
     label = metric_semantic_registry().get(intent.metric, {}).get("label") or intent.metric
     title = f"{title_prefix} · {label} · {result.unit}" if title_prefix else f"{label} · {result.unit}"
+    frame_caliber = caliber or result.caliber or ""
+    # 21 号票裁决 B·注记(2026-10-28):rank 语感(最高/哪些/top-N)× 单值形指标
+    # (total_single)—— T0 只能出全店单值,排行诉求无承接;诚实注记明示口径,
+    # 严禁静默半答。T1 组合路开闸时经 reason_reroute 升维成榜,不走本帧。
+    if has_rank_words(question) and (metric_semantic_registry().get(intent.metric) or {}).get("compile", {}).get("shape") == "total_single":
+        frame_caliber = f"{frame_caliber};全店单值口径,该指标暂不支持按维度排行(如需客户/商品榜请单看对应榜单指标)".lstrip(";")
     return {
         "type": "result",
         "title": title,
@@ -565,7 +572,7 @@ def _result_frame(question: str, result, intent, title_prefix: str = "", *, trus
         # 信任章(ADR-0010):verified=核验模板/composed=语义层组合/explored=探索生成;
         # 机器语义走字段,呈现层严禁解析口径文案推断(2026-10-03 教训)
         "trust": trust,
-        "caliber": caliber or result.caliber,
+        "caliber": frame_caliber,
         # 用户图表指令(chart_hint)优先,缺省由指标语义自动推断(趋势→折线);
         # 仲裁唯一出处 chart_policy.decide(2026-10-03 收口)
         "chart": chart_policy.decide(intent.chart_hint, intent.metric, result.chart),
