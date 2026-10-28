@@ -121,3 +121,48 @@ class TestExploreGuard:
             "FROM merchant_orders o GROUP BY s.category ORDER BY 退款单数 DESC LIMIT 10"
         )
         assert '"品类"' in sql and '"退款单数"' in sql
+
+
+def test_run_explore_execution_path_import_regression(monkeypatch):
+    """T2 执行层导入回归(2026-10-28 实弹:开闸后 run_explore 内
+    `from .tools_registry import order_domain` ImportError——相对层级少一层,
+    守卫册只测生成/守卫层,执行层导入零覆盖,导致 T2 每问必炸、响亮回落
+    unsupported)。桩掉生成/守卫/reader,断言执行层全链可走通。"""
+    import asyncio
+
+    from engine_py.analytics import t2_explore
+    from engine_py.tools_registry import order_domain
+
+    async def _fake_gen(_q):
+        return "SELECT title FROM merchant_spus LIMIT 3"
+
+    monkeypatch.setattr(t2_explore, "generate_sql", _fake_gen)
+    monkeypatch.setattr(
+        t2_explore, "guard_explore_sql",
+        lambda s: "SELECT s.title FROM merchant_spus s LIMIT 3",
+    )
+
+    class _Result:
+        def mappings(self):
+            class _M:
+                def all(self):
+                    return [{"title": "冲锋衣"}]
+            return _M()
+
+    class _Conn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, _sql):
+            return _Result()
+
+    class _Engine:
+        def connect(self):
+            return _Conn()
+
+    monkeypatch.setattr(order_domain, "merchant_reader_engine", lambda: _Engine())
+    result, sql = asyncio.run(t2_explore.explore("测试问句"))
+    assert result.rows == [{"title": "冲锋衣"}] and "merchant_spus" in sql
