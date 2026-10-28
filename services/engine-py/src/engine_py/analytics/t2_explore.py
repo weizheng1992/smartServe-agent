@@ -197,8 +197,10 @@ async def explore(question: str) -> tuple[Any, str]:
     返回的 QueryResult.metric 固定 "__explore__"(非注册表闭集;呈现层据此
     不做指标口径注记,信任级走帧字段 trust=explored)。
     """
+    from ..tools_registry import (
+        order_domain,  # 相对层级修正:T2 开闸后实弹 ImportError(. 少一层,与 engine/dimensions 同法)
+    )
     from .engine import QueryResult
-    from ..tools_registry import order_domain  # 相对层级修正:T2 开闸后实弹 ImportError(. 少一层,与 engine/dimensions 同法)
 
     raw = await generate_sql(question)
     sql = guard_explore_sql(raw)
