@@ -31,6 +31,10 @@ def test_prev_referent_guard_blocks_refund_and_asks():
 
     res = asyncio.run(_run())
     assert res.next_action != "require_approval", "指代未消解严禁挂 HITL 审批"
+    # 「未查询到订单号」负向断言防假绿(2026-10-28 终审):测试环境 DB 不可达时
+    # find_order_by_id fail-open 恒 None,守卫若被删,输出会走「未查询到订单号
+    # [X]」诚实失败分支 —— 其中的「订单号」子串曾令正断言恒真
+    assert "未查询到" not in res.output, "守卫未生效:走了订单查无分支而非反问"
     assert "确认" in res.output or "哪一笔" in res.output or "订单号" in res.output
 
 
@@ -54,3 +58,23 @@ def test_explicit_order_id_refund_unguarded():
 
     res = asyncio.run(_run())
     assert "未查询到订单" in res.output or res.next_action in (None, "require_approval")
+
+
+def test_prev_referent_phrase_with_same_clause_explicit_id_still_asks():
+    """组合形(2026-10-26 夜评挂账钉行为):指代短语 × 同句显式单号。
+
+    「前几天买的订单 ORD-1234 帮我退款」按守卫定义序数指代不是同句显式
+    单号的指称对象,资金语义宁可反问(20 号票精神:错挂资金对象的代价
+    远大于多问一次);显式单号场景已由上方 unguarded 例覆盖(纯单号无
+    指代词)。本例钉死组合形同样走反问,不做静默穿透。
+    """
+
+    async def _run():
+        return await OrderRefundSkill().execute(
+            _ctx("前几天买的订单 ORD-1234 帮我退款", order_id="ORD-1234")
+        )
+
+    res = asyncio.run(_run())
+    assert res.next_action != "require_approval", "指代词在场严禁直接挂 HITL 审批"
+    assert "未查询到" not in res.output, "守卫未生效:走了订单查无分支而非反问"
+    assert "确认" in res.output or "哪一笔" in res.output or "订单号" in res.output

@@ -503,7 +503,7 @@
 {"question": "近7天商品对比", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_7d"}
 {"question": "近30天商品对比top3", "expect_metric": "spu_compare", "source": "slot_generated", "expect_time": "last_30d"}
 {"question": "华东区利润贡献排名", "expect_unsupported": true, "source": "t2_longtail"}
-{"question": "复购率最高的客户有哪些", "expect_unsupported": true, "source": "t2_longtail"}
+{"question": "复购率最高的客户有哪些", "expect_metric": "repeat_purchase_rate", "source": "t2_longtail"}
 {"question": "哪些客户加了购物车没下单", "expect_unsupported": true, "source": "t2_longtail"}
 {"question": "退货客户和低分评价客户的重合度", "expect_unsupported": true, "source": "t2_longtail"}
 {"question": "库存周转天数是多少", "expect_unsupported": true, "source": "t2_longtail"}

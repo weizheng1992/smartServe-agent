@@ -23,6 +23,43 @@ from .tools_registry_bridge import metric_semantic_registry
 # 域外实体闭集(14 号票):见 resolve 入口闸注释 —— 逐词可举证,宽泛词不入列
 _EXTERNAL_ENTITY_RE = re.compile(r"竞品|竞争对手|对手店|同行|供应商|供货商")
 
+# 关系/关联问句闸(闭集诚实律,2026-10-26/27 连续两晚慢性缺口):语义层只答
+# 单一注册指标,「坏账和退款的关系」曾被 refund_rate 的 synonym「退款」半吸
+# —— 用半题冒充整答。跨指标关系问句一律 unsupported 响亮拒答;词面刻意窄
+# (关系/关联/相关性,逐词可举证),「市场份额」类合法问句不含这三词不受扰。
+# graph.ask 另有同款图级闸(is_relation_question,注入闸同位)—— L0 拒后
+# 原问句仍会走 L2/L3/T1/T2,各层 prompt 无关系守卫,单指标半吸可在更深层
+# 复活(2026-10-28 终审实锤),故双层设闸。
+_RELATION_Q_RE = re.compile(r"关系|关联|相关性")
+
+
+def is_relation_question(question: str | None) -> bool:
+    """关系/关联问句判定(graph 层闸消费;词面单一事实源在本模块)。"""
+    return bool(_RELATION_Q_RE.search(question or ""))
+
+
+def arbitrate_trend_hit(metric_key: str, clean: str) -> str:
+    """趋势命中后的两道降级仲裁(榜单语义/完整时间窗)—— L0 词林命中路与
+    分类头 on 接管路共用同一函数(2026-10-28 终审:接管路此前绕过仲裁,
+    同题形状两路行为分叉)。
+
+    1. 榜/排行语义优先于趋势(仅 gmv/volume 族,见 _RANK_SHAPED_DOWNGRADE);
+    2. 完整时间窗(今天/上月/近30天等闭窗 kind≠last_months)问的是该窗的量
+       不是随时间的线:「上个月销量」曾被 volume_trend 的 synonym「月销量」
+       子串假命中(上个·月销量·,长词优先);显式趋势语感(_EXPLICIT_TREND_RE,
+       含每日/每天日粒度)或月粒度语感(last_months,「近3个月的销量」自动切
+       自然月粒度)时趋势指标照旧。
+    """
+    if not metric_key.endswith("_trend"):
+        return metric_key
+    if _RANK_WORDS_RE.search(clean):
+        return _RANK_SHAPED_DOWNGRADE.get(metric_key, metric_key)
+    if not _EXPLICIT_TREND_RE.search(clean):
+        _, tw_probe, _ = extract_slots(clean)
+        if tw_probe and tw_probe.get("kind") != "last_months":
+            return _TREND_DOWNGRADE.get(metric_key, metric_key)
+    return metric_key
+
 
 def category_pattern() -> re.Pattern[str]:
     """品类词表正则(ADR-0010:枚举维度单一事实源 = semantic_model.yaml;
@@ -94,6 +131,22 @@ CHART_HINTS = (
 )
 
 _TREND_UPGRADE = {"gmv": "gmv_trend", "volume": "volume_trend", "order_count": "orders_trend"}
+# 趋势→基础指标降级映射(完整时间窗仲裁消费;程序化派生防手抄漂移)。
+# 注意本三元集**不是**趋势族完整单一事实源 —— 规范源是 chart_policy.
+# trend_family()(4 元,含 customer_spend_trend);这里只收「有基础指标可
+# 降级」的子集,customer_spend_trend 无基础对应故不参与任何降级。
+_TREND_DOWNGRADE = {v: k for k, v in _TREND_UPGRADE.items()}
+# 榜单语义降级专用子集:仅 gmv/volume 两族(基础指标 shape=spu_rank 真榜单形,
+# 「销量趋势榜」问的是榜单);orders_trend→order_count 落点为 total_single
+# 单值,top-N 语义无任何承接,降级即丢语感 —— 榜单词 × 订单趋势保持趋势
+# (2026-10-28 终审收口:程序化派生全集在此处过度扩员)。
+_RANK_SHAPED_DOWNGRADE = {"gmv_trend": "gmv", "volume_trend": "volume"}
+_RANK_WORDS_RE = re.compile(r"排行|排名|榜单|榜|top\s*\d*")
+# 显式趋势语感词:在场时完整时间窗不降级(问的确实是随时间的线)。含日粒度
+# 语感(每日/每天/逐日/按天)—— metrics.yaml 趋势族 synonyms 自身编码了
+# 「每日订单/每天订单数/每日销售额」措辞,漏收则「上个月每日销售额」被降级
+# 成商品榜,序列粒度整层蒸发(2026-10-28 终审实锤)。
+_EXPLICIT_TREND_RE = re.compile(r"趋势|走势|折线|曲线|变化|每日|每天|逐日|按天")
 
 
 def parse_chart_hint(clean: str) -> str | None:
@@ -152,6 +205,13 @@ class LexiconResolver:
                 "(数据源仅覆盖本店订单/商品/客户/活动)"
             )
 
+        # 关系问句闸与域外闸同族(入口响亮拒绝,词林匹配之前):
+        if _RELATION_Q_RE.search(clean):
+            raise UnsupportedQuery(
+                "跨指标「关系/关联」类问答暂不支持:语义层为单一注册指标的确定性"
+                "口径,无指标间关系数据面;请分别询问单个指标"
+            )
+
         registry = metric_semantic_registry()
         hit: tuple[str, str] | None = None
         matched_words: list[tuple[str, str]] = []
@@ -175,10 +235,8 @@ class LexiconResolver:
         if matched_words:
             matched_words.sort(key=lambda p: len(p[1]), reverse=True)
             hit = (matched_words[0][0], matched_words[0][1])
-            # 榜/排行语义优先于趋势:「上个月的销量排行」问的是榜单不是折线;
-            # 时间窗照常生效(_trend → 对应榜单指标),趋势问法不受影响。
-            if hit[0].endswith("_trend") and re.search(r"排行|排名|榜单|榜|top\s*\d*", clean):
-                hit = ({"gmv_trend": "gmv", "volume_trend": "volume"}.get(hit[0], hit[0]), hit[1])
+            # 榜单语义/完整时间窗两道降级仲裁(L0 命中路;规则见 arbitrate_trend_hit)
+            hit = (arbitrate_trend_hit(hit[0], clean), hit[1])
 
         # 分类头同一次 resolve 只打一次分:shadow 对比与 on 接管共用这一次结果。
         # 此前 hit 未命中时上方 shadow 块与下方 on 块各 predict 一遍(同问句双跑)。
@@ -217,8 +275,12 @@ class LexiconResolver:
                             question=question, mode=self._head_mode,
                             head_label=head_label, head_conf=head_conf,
                         )
+                        # 接管路与 L0 命中路共用同一趋势仲裁(2026-10-28 终审:
+                        # 此前接管直接构造意图绕过两道降级,同题两路分叉);
+                        # 遥测记录 head 原始判读,仲裁只作用于接管产物。
                         return StructuredQueryIntent(
-                            metric=head_label, direction=registry[head_label]["direction"],
+                            metric=arbitrate_trend_hit(head_label, clean),
+                            direction=registry[head_label]["direction"],
                             limit=limit2, time_window=time2, category=cat2,
                             chart_hint=parse_chart_hint(clean),
                         )

@@ -173,6 +173,20 @@ async def ask(
         await trace.record("unsupported", final_method="injection_guard")
         return _with_trace({"type": "unsupported", "message": _UNSUPPORTED_HINT, "detail": "问句含注入形状,已拒绝处理"}, trace)
 
+    # 跨指标关系问句闸(闭集诚实律,2026-10-28 终审补图级纵深):L0 入口闸
+    # 拒后原问句仍会走 L2/L3/T1/T2,各层 prompt 无关系守卫,单指标 synonym
+    # 半吸(「坏账和退款的关系」→refund_rate 单值)可在更深层复活 —— 与注入
+    # 闸同位全层短路,词面单一事实源在 l0_lexicon.is_relation_question。
+    from .l0_lexicon import is_relation_question
+
+    if is_relation_question(question):
+        await _log_unanswered(session_ctx, question)
+        await trace.record("unsupported", final_method="relation_guard")
+        return _with_trace(
+            {"type": "unsupported", "message": _UNSUPPORTED_HINT, "detail": "跨指标「关系/关联」类问答暂不支持,请分别询问单个指标"},
+            trace,
+        )
+
     # 「该找谁」快轨(spec .scratch/owner-routing §3):确定性词面 × owner_mappings,
     # 零 LLM;未命中(不像找谁/目标不认识)返回 None 静默放行原管线。落位在注入闸
     # 之后、trace 面之内 —— 安全闸先行纪律 + 反馈闭环需要 trace 行盖章。
