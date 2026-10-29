@@ -1,8 +1,8 @@
-# answerQuality judge 人工复判表(05 号票)
+# answerQuality judge 人工复判表 v2(05 号票,六维 rubric;2026-10-28 已判,94% 过线留档)
 
-生成判次:36(runs=4)。填写规则:每例在「人工」列填
+生成判次:36(runs=1-4,v2 rubric)。填写规则:每例在「人工」列填
 `同意`(judge 判得对)或 `不同意:一句理由`。全部填完跑 tabulate.py 得一致率。
-口径:一致率 ≥80% judge 可用;<80% 收紧 rubric 后重测。
+口径:一致率 ≥80% judge 可用;v1 首测 78%(三维 rubric)收紧为本 v2(六维+双段式+Unknown)。
 
 ## #1 [run1] 最终回复质量评测 - 物流查单回答专业度(端到端真跑:ORD-98712 为 nike 租户种子真单,shipped/FedEx/1234567890 与库内一致)
 
