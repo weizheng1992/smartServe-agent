@@ -122,6 +122,7 @@ async def compose_resolve(question: str, allowed: list[str] | None) -> Compositi
         "- 问题里的具体商品/客户/活动名称写进 entity_mention(附 entity_kind=spu/customer/promotion),不要改写;\n"
         "  出现目录枚举中的具体品类值(衬衫/配饰等)才写进 category —— 「品类/品牌/区域/客户/活动」"
         "是维度词不是品类值,严禁把维度词或指标短语写进 category,未提及具体品类留空\n"
+        "- 订单状态分布类(「订单都处于什么状态/各状态的订单量」)→ metric=order_count, dimension=order_status —— 这是最常漏配的组合,看到「状态」与订单同现优先考虑它\n"
         "- 组合不出目录内的查询 → metric 输出 \"__unsupported__\",绝不猜\n"
         + composition_catalog()
     )
