@@ -49,7 +49,7 @@ if [ "$MODE" = "smoke" ]; then
   PROMPT=$(cat <<'PROMPT_EOF'
 【夜间评测链路彩排(smoke)】只验证 launchd→headless→跑批器链路,严禁做评审/CHANGELOG/修复/提交:
 1. 环境前置:curl -m 5 http://localhost:4000/api/health;不通则 cd /Users/weizheng/Desktop/test/ai/agent-all && bun run docker:up 后等 12s 再探;仍不通则 cd /Users/weizheng/Desktop/test/ai/agent-all/services/gateway-py 后 AI_QUOTA_GATE=0 nohup uv run --env-file /Users/weizheng/Desktop/test/ai/agent-all/.env uvicorn gateway_py.main:app --port 4000 >/tmp/gw-nightly.log 2>&1 & 等 15s;三探仍败 → 如实记录「环境不可用」即止,不产假红。
-2. 彩排跑批:cd /Users/weizheng/Desktop/test/ai/agent-all/services/gateway-py && NIGHTLY_SMOKE=1 uv run python ../../eval/nightly/run_nightly.py
+2. 彩排跑批:cd /Users/weizheng/Desktop/test/ai/agent-all/services/gateway-py && NIGHTLY_SMOKE=1 uv run python ../../eval/nightly/run_nightly.py(链路验证必须由本任务亲自跑出 results 产物,严禁以「等待/他人会跑」为由结束回合)。
 3. 收尾一行摘要:严格通过 x/y、结果目录路径、环境是否自举。严禁 git commit。
 PROMPT_EOF
 )
@@ -57,7 +57,7 @@ else
   PROMPT=$(cat <<'PROMPT_EOF'
 【夜间 agent 评测 + 代码评审 + CHANGELOG 回填(launchd 调度,每晚 23:00,58 用例)】严格按序执行:
 1. 环境前置:curl -m 5 http://localhost:4000/api/health;不通则 cd /Users/weizheng/Desktop/test/ai/agent-all && bun run docker:up 后等 12s 再探;仍不通则 cd /Users/weizheng/Desktop/test/ai/agent-all/services/gateway-py 后 AI_QUOTA_GATE=0 nohup uv run --env-file /Users/weizheng/Desktop/test/ai/agent-all/.env uvicorn gateway_py.main:app --port 4000 >/tmp/gw-nightly.log 2>&1 & 等 15s;三探仍败 → 如实记录「环境不可用」即止,不产假红、不修代码。
-2. 跑评测:cd /Users/weizheng/Desktop/test/ai/agent-all/services/gateway-py && uv run python ../../eval/nightly/run_nightly.py(58 用例、130 轮上限;严禁设 NIGHTLY_SMOKE;可用 NIGHTLY_CASES=c前缀,d前缀 定向复跑)。
+2. 跑评测:cd /Users/weizheng/Desktop/test/ai/agent-all/services/gateway-py && uv run python ../../eval/nightly/run_nightly.py(58 用例、130 轮上限;严禁设 NIGHTLY_SMOKE;可用 NIGHTLY_CASES=c前缀,d前缀 定向复跑)。**评测必须由本任务亲自执行并产出 results 产物 —— 工作区有并行会话在途改动时照常评测(在途工作由并行会话自行验证,与本任务互不等待),严禁以「等待评测完成/他人会跑/先验证修复」为由结束回合(20261030 实弹:此类空转致整夜零产物)。**
 3. 处置评测失败(eval/nightly/results/<最新时间戳>/results.jsonl 含转录与 frame_payloads):① 评测脚本/场景自身缺陷(锚点被新措辞击穿、场景语义设计错、接口变更等)→ 修脚本并提交;② agent 行为缺陷 → 定位根因,能修则按仓库提交规范修复并提交(提交说明只写说明本身,不加任何尾注;涉及契约变化须同批改契约测试,提交前全量 pytest + ruff 双服务验证),不能定位 → 确认坏例池已入档即止,留晨审;③ 性能与优化(p95 超预算、并发失败、慢端点)→ 只列晨审优化清单,严禁夜间自动改性能代码;评测脚本自身性能缺陷(超时参数等)除外可修。
 4. 代码评审:调用 Skill 工具执行 code-review,评审基点 = 昨晚评审收尾时的提交(用 git log 找最近 24h 内全部提交;当日无提交则本步跳过)。评审发现分级处置:文档/注释/测试类小问题直接修复提交;行为代码修复须全量 pytest + ruff 双服务验证后提交;设计级争议与大型重构列晨审清单,严禁夜间大改。
 5. CHANGELOG 回填自检:读 /Users/weizheng/Desktop/test/ai/agent-all/CHANGELOG.md 最新条目日期;若已是今日 → 跳过;若早于今日且 git log 自该日期后日期有提交 → 按日写主题式摘要条目补齐(格式仿既有条目:`## [x.y.z] - 日期 (主题句)` + ✨/🔧/🐛/🧪 小节;版本号顺延——功能/架构日次版本 +1、小修日补丁位 +1,以文件中最新条目为基;主题聚类自当日提交主题忠实合成,不逐笔流水,含关键提交哈希锚点),插于文件最新条目之上;当日无提交则跳过;写完提交(docs(changelog): 回填 x.y.z …)。纯 reformat/文档日可并入相邻日,不空占版本号。
@@ -67,7 +67,30 @@ PROMPT_EOF
 )
 fi
 
-claude -p "$PROMPT" --dangerously-skip-permissions >> "$LOGDIR/launchd.log" 2>&1
-rc=$?
-echo "[$(date '+%F %T')] === nightly exit=$rc (mode=$MODE) ===" >> "$LOGDIR/launchd.log"
-exit "$rc"
+# 产物存在性护栏(20261030 实弹):agent 曾把并行会话的在途状态当成自身处境,
+# 以「等待评测完成通知」结束回合空转 14 分钟且 exit=0 —— 结果目录空壳,脚本
+# 只看退出码无从察觉。claude 退出码不可信,唯一可信信号 = 本轮启动之后新建
+# 且非空的 results.jsonl;缺失即重试一次,再缺 FATAL 留痕非零退出。
+# (已知代价:环境真不可用时 agent 会按前置纪律空手而归,护栏将白耗一次重试
+# —— 换取「零产物必重试」的结构保证,值得。)
+MARKER="$LOGDIR/.nightly_marker"
+has_fresh_results() {
+  local latest
+  latest=$(ls -1dt "$REPO"/eval/nightly/results/*/ 2>/dev/null | head -1)
+  [ -n "$latest" ] \
+    && [ -n "$(find "$latest" -name 'results.jsonl' -size +0c -newer "$MARKER" -print -quit 2>/dev/null)" ]
+}
+
+rc=1
+for attempt in 1 2; do
+  touch "$MARKER"
+  claude -p "$PROMPT" --dangerously-skip-permissions >> "$LOGDIR/launchd.log" 2>&1
+  rc=$?
+  if has_fresh_results; then
+    echo "[$(date '+%F %T')] === nightly exit=$rc (mode=$MODE, attempt=$attempt, results=OK) ===" >> "$LOGDIR/launchd.log"
+    exit "$rc"
+  fi
+  echo "[$(date '+%F %T')] === nightly attempt=$attempt 空转(本轮零 results 产物,claude exit=$rc),重试 ===" >> "$LOGDIR/launchd.log"
+done
+echo "[$(date '+%F %T')] FATAL: 两轮均未产出 results(agent 空转,20261030 型串戏)——晨检必看;手工补跑:bash scripts/nightly/nightly-launchd.sh" >> "$LOGDIR/launchd.log"
+exit 1
