@@ -19,6 +19,9 @@ dependencies = [
     "pyyaml>=6.0",
     "fastembed>=0.9.0",
     "docling[granite-vision]>=2.140.0",
+    # 运行时直接 import(metric_head 线性头);升直接依赖以承载 workspace 层
+    # 的 CPU 轮子 source 钉定(sources 仅对直接依赖生效),linux 走 pytorch-cpu
+    "torch>=2.14",
 ]
 
 [dependency-groups]

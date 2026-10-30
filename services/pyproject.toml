@@ -1,2 +1,15 @@
 [tool.uv.workspace]
 members = ["engine-py", "gateway-py"]
+
+# linux 侧 torch 走 CPU 轮子(瘦身票 .scratch/data-agent-grill-2026-10/issues/
+# image-slim-cpu-torch.md):CUDA 全家桶压缩态 ~2.8GiB(解压约 7GB)是 19.8GB
+# 镜像的最大单件,也是 B 机跨境拉取 1-2 小时的主因。runtime 消费方(docling
+# 解析/metric_head 线性头)CPU 均可跑;macOS 照走 PyPI(其轮子本无 CUDA,
+# darwin 不命中下方 marker)。
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
