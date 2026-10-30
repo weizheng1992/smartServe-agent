@@ -541,3 +541,32 @@ class TestFrameTop1Guard:
     def test_dunder_values_never_top1(self):
         frame = {"cards": [{"rows": [{"productId": "__total__", "metricScore": 4.2}]}]}
         assert graph._frame_top1(frame) is None
+
+
+class TestScenarioTop1:
+    """挂票清偿:场景包出口 payload 也带 top1(多轮 v2 覆盖面补齐)。"""
+
+    def test_scenario_payload_carries_top1(self, monkeypatch):
+        saved: list = []
+        TestSessionMemoryV2._patch_session_capture(monkeypatch, saved)
+
+        async def _fake_scenario(intent, session_ctx):
+            return {
+                "type": "multi",
+                "frames": [
+                    {"type": "result", "cards": [{"rows": [{"品类": "户外机能", "metricScore": 5.0}]}]},
+                    {"type": "result", "cards": [{"rows": [{"productId": "__total__", "metricScore": 2.0}]}]},
+                ],
+            }
+
+        monkeypatch.setattr(graph, "_run_scenario", _fake_scenario)
+        monkeypatch.setattr(
+            graph.MetricQueryEngine, "resolve",
+            lambda self, q: __import__("engine_py.analytics.engine", fromlist=["StructuredQueryIntent"]).StructuredQueryIntent(metric="biz_overview"),
+        )
+        out = asyncio.run(graph.ask(
+            "经营概览", {"business_id": "aurora", "role": "finance_owner"},
+            {"sessionId": "s-scen"},
+        ))
+        assert out["type"] == "multi" and saved
+        assert saved[-1]["top1"] == "户外机能"

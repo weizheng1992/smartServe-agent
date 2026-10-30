@@ -399,7 +399,11 @@ async def ask(
             _sub.setdefault("traceId", trace.trace_id)
         await trace.record(outcome.get("type", "error"), final_metric=intent.metric,
                            final_method="scenario", row_count=len(outcome.get("frames") or []))
-        payload = {"last_question": effective_question, "intent": intent.__dict__}
+        payload = {
+            "last_question": effective_question,
+            "intent": intent.__dict__,
+            "top1": _frame_top1((outcome.get("frames") or [{}])[0]),  # 挂票清偿:场景包路也有指称语境
+        }
         if session_id:
             if persist_session:
                 await session_store.save(business_id, session_id, payload)

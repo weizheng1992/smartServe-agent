@@ -216,5 +216,16 @@ class TestHeadModes:
             pytest.skip("DATABASE_URL 为 conftest 毒丸缺省:本用例需真实 engine_db(export 真库连接串后运行)")
         monkeypatch.setenv("AI_METRIC_HEAD", "on")
         monkeypatch.setenv("AI_METRIC_HEAD_DIR", str(run_dir))
-        out = asyncio.run(graph.ask("gmv 排行", {"business_id": "aurora", "role": "warehouse_operator"}))
+
+        async def _ask():
+            # 本测试用真库(角色闭集查库):graph 系测试先跑时,主引擎 QueuePool
+            # 的池连接绑在它们已关闭的 loop 上,复用即「attached to a different
+            # loop」偶发红(2026-10-27 定性)。loop 内先 dispose —— 池连接关闭,
+            # 本 loop 取用时重建;生产池语义零影响(纯测试侧修)。
+            from engine_py.db.session import get_engine
+
+            await get_engine().dispose()
+            return await graph.ask("gmv 排行", {"business_id": "aurora", "role": "warehouse_operator"})
+
+        out = asyncio.run(_ask())
         assert out["type"] in ("unsupported", "error") or out.get("metric") != "gmv"
