@@ -1,5 +1,7 @@
 gmv:
   key: gmv
+  compose:
+    measure: "COALESCE(SUM(oi.quantity * oi.price), 0)"
   label: 总销售额 (GMV)
   description: 统计周期内所有已生效订单的实付销售总流水金额,即 SUM(quantity * price)。不扣除进货成本。
   domain: sales
@@ -32,6 +34,8 @@ gmv:
   verifiedConfidence: 0.98
 volume:
   key: volume
+  compose:
+    measure: "COALESCE(SUM(oi.quantity), 0)"
   label: 出货销量 (件数)
   description: 统计周期内商品实际售出的总件数总量,即 SUM(quantity)。反映商品物理周转频次和爆款热度。
   domain: sales
@@ -71,6 +75,8 @@ volume:
   verifiedConfidence: 0.99
 gross_profit:
   key: gross_profit
+  compose:
+    measure: "COALESCE(SUM(oi.quantity * (oi.price - oi.cost_at_purchase)), 0)"
   label: 净毛利润 (收益)
   description: 销售总流水减去进货/物料成本后的净收益,即 SUM(quantity * (price - cost_at_purchase))。
   domain: profit
@@ -103,6 +109,8 @@ gross_profit:
   verifiedConfidence: 0.95
 margin_rate:
   key: margin_rate
+  compose:
+    measure: "ROUND(COALESCE(SUM(oi.quantity * (oi.price - oi.cost_at_purchase)), 0)::numeric * 100 / GREATEST(COALESCE(SUM(oi.quantity * oi.price), 0), 1), 2)"
   label: 毛利率 (性价比/溢价率)
   description: 净毛利润与总销售额的比率,公式:(毛利润 / NULLIF(总销售额, 0)) * 100。反映单品盈利质量。
   domain: profit
@@ -193,6 +201,8 @@ review_bad:
   verifiedConfidence: 0.95
 refund_rate:
   key: refund_rate
+  compose:
+    measure: "ROUND(COALESCE(SUM(CASE WHEN o.status = 'REFUNDED' THEN oi.quantity ELSE 0 END), 0)::numeric * 100 / GREATEST(SUM(CASE WHEN o.status <> 'CANCELLED' THEN oi.quantity ELSE 0 END), 1), 2)"
   label: 退款率
   description: 退款件数 ÷ 有效成交件数 × 100;数据源商户镜像库订单明细。
   domain: refund
@@ -592,6 +602,8 @@ customer_orders:
   verifiedConfidence: 0.9
 aov:
   key: aov
+  compose:
+    measure: "COALESCE(SUM(oi.quantity * oi.price), 0) / GREATEST(COUNT(DISTINCT o.order_id), 1)"
   label: 客单价
   description: 有效订单(排除退款/取消)的平均实付金额;支持时间窗。
   domain: sales
@@ -620,6 +632,8 @@ aov:
   verifiedConfidence: 0.92
 order_count:
   key: order_count
+  compose:
+    measure: "COUNT(DISTINCT o.order_id)"
   label: 订单量
   description: 有效订单笔数(排除退款/取消);支持时间窗。
   domain: sales
@@ -1060,6 +1074,8 @@ spu_compare:
   verifiedConfidence: 0.9
 net_sales:
   key: net_sales
+  compose:
+    measure: "COALESCE(SUM(o.total_amount), 0)"
   label: 净销售额 (实收)
   description: 统计周期内有效订单的消费者实付净额,即 SUM(total_amount);与 GMV(商品定价流水口径 SUM(quantity*price))相对,已扣优惠抵扣。退款单(CANCELLED/REFUNDED)不计入。
   domain: sales
@@ -1119,6 +1135,10 @@ review_avg:
   verifiedConfidence: 0.95
 repeat_purchase_rate:
   key: repeat_purchase_rate
+  compose:
+    per: o.customer_id
+    pre: "COUNT(DISTINCT o.order_id) AS orders_n"
+    outer: "ROUND(COALESCE(100.0 * SUM(CASE WHEN orders_n >= 2 THEN 1 ELSE 0 END) / GREATEST(COUNT(*), 1), 0), 2)::float"
   label: 复购率
   description: 统计周期内有效成交订单≥2单的客户占全部下单客户的百分比;数据源商户真账 merchant_orders。
   domain: customer

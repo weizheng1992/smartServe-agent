@@ -310,49 +310,37 @@ def compile_composition(comp: CompositionQuery, business_id: str, entity_ids: li
     )
 
 
-def _measure_expr(metric: str) -> str:
-    """认证指标 → 组合面度量表达式。
+def _compose_registry() -> dict[str, dict]:
+    """metrics.yaml compose 块 → 组合面声明(单源化收口,2026-10-30)。
 
-    grill 2026-10-27 组合面扩容:毛利/毛利率入列(finance_owner 闭集,
-    _validate 的 allowed 闸兜底角色越权)。注意:组合度量与此表(及
-    _NESTED_MEASURES)是 metrics.yaml compile 块之外的第二维护面 ——
-    新指标入组合须三处同改,口径漂移由 TestComposeExpansionTicket 族
-    对拍兜底;单源化(compile 块派生)挂票。"""
+    此前组合度量在本模块手抄字典与 metrics.yaml compile 块两处维护,新指标
+    入组合须多处同改(评审 Standards③);现 compose 块登记即组合可用 ——
+    COMPOSABLE_METRICS 即其派生闭集,度量口径与 T0 同守单一事实源纪律。"""
+
+    from .tools_registry_bridge import metric_semantic_registry
+
     return {
-        "gmv": "COALESCE(SUM(oi.quantity * oi.price), 0)",
-        "net_sales": "COALESCE(SUM(o.total_amount), 0)",
-        "volume": "COALESCE(SUM(oi.quantity), 0)",
-        "order_count": "COUNT(DISTINCT o.order_id)",
-        "aov": "COALESCE(SUM(oi.quantity * oi.price), 0) / GREATEST(COUNT(DISTINCT o.order_id), 1)",
-        "gross_profit": "COALESCE(SUM(oi.quantity * (oi.price - oi.cost_at_purchase)), 0)",
-        "margin_rate": (
-            "ROUND(COALESCE(SUM(oi.quantity * (oi.price - oi.cost_at_purchase)), 0)::numeric * 100 "
-            "/ GREATEST(COALESCE(SUM(oi.quantity * oi.price), 0), 1), 2)"
-        ),
-        "refund_rate": (
-            "ROUND(COALESCE(SUM(CASE WHEN o.status = 'REFUNDED' THEN oi.quantity ELSE 0 END), 0)::numeric "
-            "* 100 / GREATEST(SUM(CASE WHEN o.status <> 'CANCELLED' THEN oi.quantity ELSE 0 END), 1), 2)"
-        ),
-    }.get(metric, "")
+        k: e["compose"]
+        for k, e in metric_semantic_registry().items()
+        if isinstance(e.get("compose"), dict)
+    }
 
 
-# 二段聚合度量(grill 2026-10-27 票:复购率入组合面):单层「GROUP BY 维度」
-# 表达不了「每客户订单数 → 复购占比」的嵌套 —— 内层按(维度,客户)先聚,
-# 外层在内层产物上求比率;行集/有效成交口径与平铺度量同源(订单×明细),
+COMPOSABLE_METRICS = frozenset(_compose_registry())
+
+# 二段聚合度量(repeat_purchase_rate 族):单层「GROUP BY 维度」表达不了
+# 「每客户订单数 → 复购占比」的嵌套 —— compose 块以 per/pre/outer 三键声明,
+# 平铺度量以 measure 键声明;行集/有效成交口径与平铺度量同源(订单×明细),
 # DISTINCT 订单号保证明细扇出不虚增计数。
 _NESTED_MEASURES = {
-    "repeat_purchase_rate": {
-        "per": "o.customer_id",
-        "pre": "COUNT(DISTINCT o.order_id) AS orders_n",
-        "outer": "ROUND(COALESCE(100.0 * SUM(CASE WHEN orders_n >= 2 THEN 1 ELSE 0 END) / GREATEST(COUNT(*), 1), 0), 2)::float",
-    },
+    k: c for k, c in _compose_registry().items() if "per" in c
 }
 
-# 可组合指标闭集(平铺或嵌套度量已声明;未声明 = 组合目录外,响亮拒绝)
-COMPOSABLE_METRICS = frozenset({
-    "gmv", "net_sales", "volume", "order_count", "aov", "refund_rate",
-    "gross_profit", "margin_rate", "repeat_purchase_rate",
-})
+
+def _measure_expr(metric: str) -> str:
+    """认证指标 → 组合面度量表达式(compose 块单源派生,平铺形)。"""
+    return _compose_registry().get(metric, {}).get("measure", "")
+
 
 _ITEMS_JOIN = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
 _VALID_STATUS = "o.status NOT IN ('REFUNDED', 'CANCELLED')"
