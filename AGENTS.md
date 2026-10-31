@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-本文件为 Claude Code (claude.ai/code) 在本仓库中工作时提供指导。
+本文件是本仓库 AI 编码代理的通用指导与唯一指令事实源,所有工具(Claude Code / Codex / Cursor / Gemini CLI 等)直接读本文件。
 
 ## 1. 开发命令
 
@@ -68,7 +68,7 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
                             ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │           决策引擎 (services/engine-py,Python/LangGraph)               │
-│  LangGraph DAG:triage ──→ planner ──→ merge ──→ 循环 [exec ⇄ val]     │
+│  LangGraph DAG:triage ──→ planner ──→ merge ──→ 循环 exec ⇄ val       │
 │  - Skills 管道:BaseSkill、SOP 规则、租户配置覆写                      │
 │  - 记忆:四象限记忆(Short/Long/Episodic/Task)+ 双层画像               │
 │  - Contextual RAG:上下文增强切片 + 租户过滤检索                       │
@@ -136,6 +136,13 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - `shared-ui.md`:原子设计、卡片家族规格、SVG 图标规范。
 - `observability.md`:带租户上下文的结构化日志、telemetry 追踪、token 成本统计。
 - `tenant-configs-types.md`:租户配置注册表与共享契约类型。
+
+工作流配套(agent 工作流结构,`npx vibeworkflow doctor` 验收):
+
+- `agent_docs/`:三册精简构建上下文 —— `project_brief.md`(产品边界)、`tech_stack.md`(技术栈)、`testing.md`(测试分层与判绿纪律)。
+- `MEMORY.md`:项目进度快照(近期完成 / 开放线程 / 高频基建坑)。
+- `REVIEW-CHECKLIST.md`:变更审查清单(14 项,逐项核对)。
+- `docs/PRD-agent-platform-MVP.md` 与 `docs/TechDesign-agent-platform-MVP.md`:溯源基线(由既有事实源压缩,非原始 kickoff 文档)。
 
 ---
 
