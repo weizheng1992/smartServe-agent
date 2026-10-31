@@ -30,7 +30,7 @@ export function NotifyComposeDialog({ lockedCustomer, customers, onClose, onMsg 
     const b = body.trim();
     if (!t) return '标题必填';
     if (t.length > 50) return '标题不超过 50 字';
-    if (!b) return '正文必填';
+    // 正文可留空(spec D2 只钉标题必填,F3 预设空正文合法态),仅闸上限
     if (b.length > 500) return '正文不超过 500 字';
     if (targetType === 'customer' && !effCustomerId) return '定向发送必须选择顾客';
     const res = (await api.notifications.send({
@@ -54,7 +54,7 @@ export function NotifyComposeDialog({ lockedCustomer, customers, onClose, onMsg 
       subtitle="顾客在商城消息中心收到;广播每员工每日限 20 条"
       maxWidth="max-w-md"
       submitLabel="发送"
-      submitDisabled={!title.trim() || !body.trim()}
+      submitDisabled={!title.trim()}
       onSubmit={submit}
       onClose={onClose}
     >
@@ -102,7 +102,7 @@ export function NotifyComposeDialog({ lockedCustomer, customers, onClose, onMsg 
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="notify-body">正文(必填,≤500 字)</Label>
+          <Label htmlFor="notify-body">正文(≤500 字,可留空)</Label>
           <Textarea
             id="notify-body"
             value={body}

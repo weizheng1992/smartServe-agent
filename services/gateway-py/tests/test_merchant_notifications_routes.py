@@ -95,7 +95,6 @@ class TestAdminNotifications:
         cases = [
             ({"targetType": "all", "title": "", "body": "x"}, "标题"),
             ({"targetType": "all", "title": "X" * 51, "body": "x"}, "标题"),
-            ({"targetType": "all", "title": "E2E-通知-x", "body": ""}, "正文"),
             ({"targetType": "all", "title": "E2E-通知-x", "body": "长" * 501}, "正文"),
             ({"targetType": "group", "title": "E2E-通知-x", "body": "x"}, "targetType"),
             ({"targetType": "customer", "title": "E2E-通知-x", "body": "x"}, "customerId"),
@@ -116,6 +115,21 @@ class TestAdminNotifications:
             )
             assert r.status_code == 400
             assert "不存在" in r.json()["message"]
+        finally:
+            await _cleanup()
+
+    async def test_send_empty_body_ok(self, client, boss):
+        """正文可留空(spec D2 只钉标题必填,F3 预设空正文合法态)。"""
+        try:
+            r = await client.post(
+                "/api/admin/notifications",
+                headers=boss,
+                json={"targetType": "all", "title": "E2E-通知-空正文", "body": ""},
+            )
+            assert r.status_code == 200, r.text
+            lst = await client.get("/api/admin/notifications", headers=boss)
+            row = next(n for n in lst.json()["data"]["notifications"] if n["title"] == "E2E-通知-空正文")
+            assert row["body"] == ""
         finally:
             await _cleanup()
 
@@ -240,19 +254,25 @@ class TestStoreNotifications:
         assert r.json()["success"] is False
 
     async def test_guest_honest_empty(self, client):
-        """游客三端点诚实空/零/空操作(U2 律:不查库不落 reads)。"""
-        uid = "guest-e2e-notif"
-        r = await client.get("/api/store/notifications", params={"userId": uid})
-        assert r.status_code == 200
-        assert r.json()["data"]["notifications"] == [] and r.json()["data"]["total"] == 0
+        """游客与非 CUST-* 身份四端点诚实空/零/空操作/拒连(spec F3 原文:按
+        非 CUST-* 返回空且不入库 reads —— 不只挡 guest- 前缀;U2 律)。"""
+        for uid in ("guest-e2e-notif", "user-not-cust"):
+            r = await client.get("/api/store/notifications", params={"userId": uid})
+            assert r.status_code == 200
+            assert r.json()["data"]["notifications"] == [] and r.json()["data"]["total"] == 0
 
-        r = await client.get("/api/store/notifications/unread-count", params={"userId": uid})
-        assert r.json()["data"]["unread"] == 0
+            r = await client.get("/api/store/notifications/unread-count", params={"userId": uid})
+            assert r.json()["data"]["unread"] == 0
 
-        r = await client.post(
-            "/api/store/notifications/read", json={"userId": uid, "all": True}
+            r = await client.post(
+                "/api/store/notifications/read", json={"userId": uid, "all": True}
+            )
+            assert r.status_code == 200 and r.json()["data"]["marked"] == 0
+
+        r = await client.get(
+            "/api/store/notifications/stream", params={"userId": "user-not-cust"}
         )
-        assert r.status_code == 200 and r.json()["data"]["marked"] == 0
+        assert r.status_code == 400
 
     async def test_visibility_and_read_flow(self, client):
         """属主闸 + 已读闭环:只见广播∪发给我的;未读数消减;标已读幂等;
@@ -326,12 +346,12 @@ class TestStoreNotifications:
 
 class TestNotificationStream:
     async def test_stream_gates(self, client):
-        """userId 必报 + 游客拒连(U2 律:无消息入口的匿名身份不养连接)。"""
+        """userId 必报 + 非 CUST-* 拒连(U2 律:无消息入口的身份不养连接)。"""
         r = await client.get("/api/store/notifications/stream")
         assert r.status_code == 400
         r = await client.get("/api/store/notifications/stream", params={"userId": "guest-e2e-notif"})
         assert r.status_code == 400
-        assert "游客" in r.json()["message"]
+        assert "仅注册顾客" in r.json()["message"]
 
     async def test_signals_reach_stream(self, live_server):
         """真栈验证(live_server,SSE 需真网络栈):订阅就绪(connected 帧)后

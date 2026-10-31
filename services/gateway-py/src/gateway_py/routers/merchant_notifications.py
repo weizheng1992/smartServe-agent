@@ -78,8 +78,10 @@ async def admin_send_notification(
     body_text = body.body.strip()
     if not title or len(title) > 50:
         return JSONResponse(status_code=400, content={"success": False, "message": "标题必填且不超过 50 字"})
-    if not body_text or len(body_text) > 500:
-        return JSONResponse(status_code=400, content={"success": False, "message": "正文必填且不超过 500 字"})
+    # 正文可留空(spec D2 只钉标题必填;F3「无正文场景『—』」预设空正文合法),
+    # 仅闸长度上限
+    if len(body_text) > 500:
+        return JSONResponse(status_code=400, content={"success": False, "message": "正文不超过 500 字"})
     target_type = body.targetType
     if target_type not in ("all", "customer"):
         return JSONResponse(status_code=400, content={"success": False, "message": "targetType 仅支持 all | customer"})
@@ -215,6 +217,12 @@ def _bad_request(message: str) -> JSONResponse:
     return JSONResponse(status_code=400, content={"success": False, "message": message})
 
 
+def _is_customer(user_id: str) -> bool:
+    """顾客身份闸单点(spec F3 原文:接口按**非 CUST-*** 返回空且不入库 reads
+    —— 不只挡 guest- 前缀,任意非顾客身份一律诚实空;推送对象域就是顾客)。"""
+    return user_id.startswith("CUST-")
+
+
 def _visible_and_unread(*, unread_only: bool = False) -> str:
     """本人可见集(广播 ∪ 发给我的,:b 租户 / :uid 顾客)与未读判定的 SQL
     片段单点 —— 顾客属主语义只此一处,严禁调用方手工重复拼接(窃听族收口
@@ -233,12 +241,12 @@ async def store_list_notifications(
     page: int = Query(1, ge=1),
     pageSize: int = Query(20, ge=1, le=100),
 ):
-    """我的消息分页(时间倒序,含已读态)。游客(guest-*)诚实空:U2 律零接入,
-    不查库不落 reads。userId 必报走手写 400(store/chat 先例,非 Pydantic 422)。"""
+    """我的消息分页(时间倒序,含已读态)。非 CUST-* 身份诚实空(U2 律零接入,
+    不查库不落 reads)。userId 必报走手写 400(store/chat 先例,非 Pydantic 422)。"""
     user_id = (userId or "").strip()
     if not user_id:
         return _bad_request("userId 必传")
-    if user_id.startswith("guest-"):
+    if not _is_customer(user_id):
         return {"success": True, "data": {"notifications": [], "total": 0, "page": page, "pageSize": pageSize}}
 
     from engine_py.tools_registry.order_domain import merchant_writer_engine
@@ -292,11 +300,11 @@ async def store_list_notifications(
 
 @router.get("/api/store/notifications/unread-count")
 async def store_unread_count(userId: str | None = Query(None), businessId: str = Query("aurora")):
-    """未读数(铃铛徽标真源;anti-join reads)。游客恒 0。"""
+    """未读数(铃铛徽标真源;anti-join reads)。非 CUST-* 恒 0。"""
     user_id = (userId or "").strip()
     if not user_id:
         return _bad_request("userId 必传")
-    if user_id.startswith("guest-"):
+    if not _is_customer(user_id):
         return {"success": True, "data": {"unread": 0}}
 
     from engine_py.tools_registry.order_domain import merchant_writer_engine
@@ -329,11 +337,11 @@ async def store_mark_read(body: NotificationReadIn):
     """标已读(单/批/全部;幂等 ON CONFLICT DO NOTHING)。
 
     可见性闸:INSERT...SELECT 带本人可见集条件 —— 看不到的消息标不了已读
-    (跨客定向 id 混入是静默 no-op,不报错不越权)。游客成功空操作。"""
+    (跨客定向 id 混入是静默 no-op,不报错不越权)。非 CUST-* 成功空操作。"""
     user_id = body.userId.strip()
     if not user_id:
         return _bad_request("userId 必传")
-    if user_id.startswith("guest-"):
+    if not _is_customer(user_id):
         return {"success": True, "data": {"marked": 0}}
 
     from engine_py.tools_registry.order_domain import merchant_writer_engine
@@ -385,8 +393,8 @@ async def store_notifications_stream(
     user_id = (userId or "").strip()
     if not user_id:
         return _bad_request("userId 必传")
-    if user_id.startswith("guest-"):
-        return _bad_request("游客不订阅消息流(U2 律零接入)")
+    if not _is_customer(user_id):
+        return _bad_request("仅注册顾客可订阅消息流(U2 律零接入)")
 
     from fastapi.responses import StreamingResponse
 

@@ -98,7 +98,8 @@ export default function MessagesPage() {
               商户公告与定向消息 · 共 {total} 条{unreadInPage > 0 ? ` · 本页未读 ${unreadInPage} 条` : ''}
             </p>
           </div>
-          {unreadInPage > 0 && (
+          {/* 入口随 total 而非本页未读:未读只在后续页时一键全部已读仍须可达(F4) */}
+          {total > 0 && (
             <Button variant="outline" size="sm" onClick={() => void markRead({ all: true })}>
               全部标为已读
             </Button>

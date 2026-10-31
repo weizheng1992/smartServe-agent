@@ -46,7 +46,11 @@ export function NotifyHistoryTable({ rows }: Props) {
           {rows.map((n) => (
             <DenseTableRow key={n.id}>
               <DenseTableCell className="whitespace-nowrap text-zinc-500">
-                {n.createdAt.slice(0, 16).replace('T', ' ') || '—'}
+                {/* 两套钟律(server-gateway.md §2.4):createdAt 是 aware UTC ISO,
+                    截串直显会复刻「显示早 8 小时」实弹 —— 必须经 Date 解析转本地墙钟 */}
+                {n.createdAt && !Number.isNaN(new Date(n.createdAt).getTime())
+                  ? new Date(n.createdAt).toLocaleString()
+                  : '—'}
               </DenseTableCell>
               <DenseTableCell className="max-w-64 font-medium text-zinc-900">{n.title}</DenseTableCell>
               <DenseTableCell>

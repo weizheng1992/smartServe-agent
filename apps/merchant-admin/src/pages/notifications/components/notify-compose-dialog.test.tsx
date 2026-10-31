@@ -52,7 +52,7 @@ describe('NotifyComposeDialog', () => {
     mocks.send.mockResolvedValue({ success: true });
     const { onMsg, onClose } = renderDialog({ lockedCustomer: { id: 'CUST-8801', name: '张伟' } });
     fireEvent.change(screen.getByLabelText('标题(必填,≤50 字)'), { target: { value: 'E2E 通知标题' } });
-    fireEvent.change(screen.getByLabelText('正文(必填,≤500 字)'), { target: { value: '正文内容' } });
+    fireEvent.change(screen.getByLabelText('正文(≤500 字,可留空)'), { target: { value: '正文内容' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1));
     expect(mocks.send).toHaveBeenCalledWith({
@@ -69,7 +69,7 @@ describe('NotifyComposeDialog', () => {
     mocks.send.mockResolvedValue({ success: false, message: '今日广播已达上限(20 条),请明日再试' });
     const { onClose } = renderDialog();
     fireEvent.change(screen.getByLabelText('标题(必填,≤50 字)'), { target: { value: 'E2E 广播' } });
-    fireEvent.change(screen.getByLabelText('正文(必填,≤500 字)'), { target: { value: '正文' } });
+    fireEvent.change(screen.getByLabelText('正文(≤500 字,可留空)'), { target: { value: '正文' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     expect(await screen.findByText(/今日广播已达上限/)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
