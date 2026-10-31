@@ -14,7 +14,7 @@ interface Props {
 }
 
 /** 撰写/发送弹窗(模块页广播 + 客户详情单发共用一表 —— spec D8):标题 ≤50
- *  必填、正文 ≤500 必填,前后端同闸;范围 = 全部顾客 | 定向单客(Radix Select
+ *  必填,正文可留空仅闸 ≤500 上限(F3 空正文合法态,前后端同闸);范围 = 全部顾客 | 定向单客(Radix Select
  *  空值两律:占位符走受控 '',选项无空串)。频控(单员工单日广播 ≤20)是服务
  *  端闸,超限业务错误文案留窗内(FormDialogShell 契约,窗不关)。 */
 export function NotifyComposeDialog({ lockedCustomer, customers, onClose, onMsg }: Props) {
