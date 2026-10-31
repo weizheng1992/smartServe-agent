@@ -79,3 +79,14 @@ export const auth = {
   login: (payload: JsonBody) => postJson('/api/auth/login', payload),
   register: (payload: JsonBody) => postJson('/api/auth/register', payload),
 };
+
+// 站内消息推送(mall-notifications 05):列表/未读数/标已读走传输单点。
+// SSE 信号流刻意不经此模块(notifyStreamConnection.ts 自管帧流与退避,
+// storeStreamConnection 同律 —— 见文件头「刻意不经此模块」清单)。
+export const notifications = {
+  list: (userId: string, businessId: string, page = 1) =>
+    requestJson(`/api/store/notifications${qs({ userId, businessId, page })}`),
+  unreadCount: (userId: string, businessId: string) =>
+    requestJson(`/api/store/notifications/unread-count${qs({ userId, businessId })}`),
+  markRead: (payload: JsonBody) => postJson('/api/store/notifications/read', payload),
+};

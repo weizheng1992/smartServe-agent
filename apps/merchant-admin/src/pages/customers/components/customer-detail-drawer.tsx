@@ -1,6 +1,7 @@
 import { type Customer, type CustomerCoupon, api } from '@/lib/api';
 import { fmtMoney, orderStatusMeta } from '@/lib/format';
 import { getSelection, setSelectionKind } from '@/lib/page-context';
+import { NotifyComposeDialog } from '@/pages/notifications/components/notify-compose-dialog';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from 'ui';
@@ -32,6 +33,9 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<OrderRowLite[]>([]);
   const [coupons, setCouponList] = useState<CustomerCoupon[]>([]);
+  // 站内单发(mall-notifications D8:单发入口贴客服工作流,与模块页共用表单)
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeMsg, setComposeMsg] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -94,6 +98,28 @@ export function CustomerDetailDrawer({ customer, onClose }: Props) {
             关闭
           </Button>
         </div>
+
+        <Section title="站内消息">
+          <Button size="sm" variant="outline" onClick={() => setComposeOpen(true)}>
+            ✉️ 发消息给该顾客
+          </Button>
+          {composeMsg && (
+            <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600">
+              {composeMsg}
+            </div>
+          )}
+          {composeOpen && (
+            <NotifyComposeDialog
+              lockedCustomer={{ id: customer.customer_id, name: customer.name }}
+              customers={[]}
+              onClose={() => setComposeOpen(false)}
+              onMsg={(m) => {
+                setComposeMsg(m);
+                setComposeOpen(false);
+              }}
+            />
+          )}
+        </Section>
 
         <Section title={`地址簿(${addresses.length})`}>
           {addresses.length === 0 && <Empty text="暂无地址(随商城收货流程沉淀)" />}

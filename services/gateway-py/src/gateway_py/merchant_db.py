@@ -275,6 +275,34 @@ END $$;
 -- 值同样是 staff_members.id,存量行由种子补齐。
 ALTER TABLE promotions ADD COLUMN IF NOT EXISTS created_by TEXT;
 ALTER TABLE merchant_spus ADD COLUMN IF NOT EXISTS owner_id TEXT;
+
+-- 站内消息推送(mall-notifications 01,spec .scratch/mall-notifications):
+-- 商户员工→顾客单向公告。广播不 fan-out(target_type='all',一行全店可见),
+-- 未读 = anti-join reads;recipient_count 发送时快照(广播=商顾客总数,
+-- 单客=1),历史列表直读免实时 COUNT。reads 无 FK(跨表同库,删除路径本期
+-- 不存在 —— spec D7 撤回/删除均不进 MVP)。
+CREATE TABLE IF NOT EXISTS merchant_notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id VARCHAR(64) NOT NULL DEFAULT 'aurora',
+  target_type TEXT NOT NULL DEFAULT 'all',           -- all | customer
+  customer_id TEXT,                                   -- target_type=customer 时必填(应用层闸)
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  msg_type TEXT NOT NULL DEFAULT 'announcement',     -- 枚举预留,本期单值(spec D2)
+  recipient_count INT NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL,                           -- staff_members.id(promotions.created_by 同源)
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_notifications_business ON merchant_notifications(business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_merchant_notifications_customer ON merchant_notifications(customer_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS merchant_notification_reads (
+  notification_id UUID NOT NULL,
+  customer_id TEXT NOT NULL,
+  read_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT merchant_notification_reads_key UNIQUE (notification_id, customer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_notification_reads_customer ON merchant_notification_reads(customer_id);
 """
 
 

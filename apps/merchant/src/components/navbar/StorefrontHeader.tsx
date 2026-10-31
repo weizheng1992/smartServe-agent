@@ -4,6 +4,7 @@ import { useLocation } from 'react-router';
 import { useCurrentUser } from '../../context/UserContext';
 import { auth } from '../../lib/api';
 import { readStoreCart } from '../../lib/storeCart';
+import { NotifyBell } from '../notifications/NotifyBell';
 
 export function StorefrontHeader({
   cartCount = 0,
@@ -300,6 +301,10 @@ export function StorefrontHeader({
               </Link>
             );
           })}
+
+          {/* 消息铃铛(mall-notifications):仅 CUST-* 渲染,游客零接入 ——
+              未读徽标与 SSE 连接自管理,见 components/notifications/NotifyBell */}
+          <NotifyBell />
 
           {/* 管理后台跳转 */}
           <a

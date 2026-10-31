@@ -29,6 +29,7 @@ from .routers import (
     crud,
     live_desk,
     merchant,
+    merchant_notifications,
     merchant_promotions,
     spi,
     store_spi,
@@ -149,6 +150,7 @@ fastapi_app.include_router(merchant.router)
 fastapi_app.include_router(store_spi.router)
 fastapi_app.include_router(analytics.router)
 fastapi_app.include_router(merchant_promotions.router)
+fastapi_app.include_router(merchant_notifications.router)
 fastapi_app.include_router(live_desk.router)
 
 # 聊天图片静态服务(wayfinder multimodal-image-chat 002):上传端点回 /api/uploads/ URL,

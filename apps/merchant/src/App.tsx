@@ -4,6 +4,7 @@ import { UserProvider } from './context/UserContext';
 import AddressesPage from './pages/AddressesPage';
 import CartPage from './pages/CartPage';
 import MerchantAdminPage from './pages/MerchantAdminPage';
+import MessagesPage from './pages/MessagesPage';
 import OrderDetailPage from './pages/OrderDetailPage';
 import OrdersPage from './pages/OrdersPage';
 import ProductDetailPage from './pages/ProductDetailPage';
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:id" element={<OrderDetailPage />} />
           <Route path="/addresses" element={<AddressesPage />} />
+          <Route path="/messages" element={<MessagesPage />} />
           <Route path="/admin" element={<MerchantAdminPage />} />
         </Routes>
         <FloatingChatOnStorefrontOnly />

@@ -94,6 +94,11 @@ DEFAULT_MENUS: list[dict] = [
     # AI 用量(docs/ai-usage-panel.md P0-3):轮/调用两级 token 与延迟视图,
     # 灰度机制见 _GREY_RELEASE_MENUS —— 首版仅老板/管理员可见。
     {"id": "m-ai-usage", "parent": "d-ops", "name": "AI 用量", "type": "menu", "route": "/ai-usage", "sort": 2},
+    # 站内消息推送(mall-notifications,spec .scratch/mall-notifications):员工→
+    # 顾客单向公告;按钮节点即接口权限点(notify:send),与 promotions 同构;
+    # 历史列表与发送同 perm(发送者=审计者同族,另设只读 perm 属零调用方先不建)。
+    {"id": "m-notifications", "parent": "d-ops", "name": "消息推送", "type": "menu", "route": "/notifications", "sort": 3},
+    {"id": "btn-notify-send", "parent": "m-notifications", "name": "发送消息", "type": "button", "perm": "notify:send", "sort": 1},
     {"id": "d-system", "parent": None, "name": "系统", "type": "directory", "route": None, "sort": 9},
     {"id": "m-menus", "parent": "d-system", "name": "菜单管理", "type": "menu", "route": "/menus", "sort": 1},
     {"id": "btn-menu-create", "parent": "m-menus", "name": "新增", "type": "button", "perm": "menu:create", "sort": 1},
@@ -124,8 +129,11 @@ DEFAULT_ROLE_MENUS: dict[str, list[str]] = {
     # live-desk-rework §2.2:专职客服 = 客服工作台 + 客户管理,不给数据分析/
     # 订单/商品/优惠/系统面(商户招客服不泄经营数据);新坐席台按灰度暂不授。
     # P4:客服本职含工单批驳(btn-live-desk-approve,live_desk:approve)。
+    # mall-notifications:客服单发本职(客户详情页入口),仅授消息推送、
+    # 不给数据分析面 —— 菜单在 d-ops 下但 perm 与经营数据无涉。
     "support_agent": [
         "d-users", "m-customers", "m-live-desk", "btn-live-desk-operate", "btn-live-desk-approve",
+        "m-notifications", "btn-notify-send",
     ],
 }
 

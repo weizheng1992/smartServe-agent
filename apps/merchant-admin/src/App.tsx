@@ -9,6 +9,7 @@ import ProductsPage from '@/pages/goods/products';
 import SkusPage from '@/pages/goods/skus';
 import LiveDeskPage from '@/pages/live-desk';
 import LoginPage from '@/pages/login';
+import NotificationsPage from '@/pages/notifications';
 import OrderWorkbench from '@/pages/order-manager';
 import PromotionsPage from '@/pages/promotions';
 import ReportsPage from '@/pages/reports';
@@ -202,6 +203,8 @@ function AdminShell({ onLogout }: { onLogout: () => void }) {
               {/* 坐席台独立页(P2);2026-10-24 菜单名升正「客服工作台」 */}
               <Route path="/agent-desk" element={<LiveDeskPage />} />
               <Route path="/promotions" element={<PromotionsPage />} />
+              {/* 消息推送(mall-notifications):菜单 m-notifications 挂 d-ops */}
+              <Route path="/notifications" element={<NotificationsPage />} />
               {/* AI 用量(docs/ai-usage-panel.md P0):菜单 m-ai-usage 挂 d-ops,灰度首版仅老板/管理员 */}
               <Route path="/ai-usage" element={<AiUsagePage />} />
               <Route path="/customers" element={<CustomersPage />} />

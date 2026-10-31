@@ -183,6 +183,26 @@ export interface CustomerCoupon {
   usedOrderId: string | null;
 }
 
+/** 站内消息历史行(mall-notifications;无已读回执字段 —— spec D6)。 */
+export interface MerchantNotification {
+  id: string;
+  targetType: 'all' | 'customer';
+  customerId: string | null;
+  customerName: string | null;
+  title: string;
+  body: string;
+  msgType: string;
+  recipientCount: number;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface NotificationPage {
+  success: boolean;
+  data?: { notifications: MerchantNotification[]; total: number; page: number; pageSize: number };
+  message?: string;
+}
+
 export type { SseFrame };
 
 /** 订单详情(网关 GET /api/admin/orders/{orderId};camelCase,与 storefront SPI 同形)。 */
@@ -688,6 +708,15 @@ export const api = {
     update: async (id: string, patch: { memberLevel: string }) =>
       requestJson(`/api/admin/analytics/customers/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     remove: async (id: string) => requestJson(`/api/admin/analytics/customers/${id}`, { method: 'DELETE' }),
+  },
+
+  /** 站内消息推送(mall-notifications:员工→顾客单向公告;发送/历史同 perm
+   *  notify:send 服务端闸;历史无已读回执字段 —— spec D6 商户不见回执)。 */
+  notifications: {
+    send: async (p: { targetType: 'all' | 'customer'; customerId?: string; title: string; body: string }) =>
+      requestJson('/api/admin/notifications', { method: 'POST', body: JSON.stringify(p) }),
+    list: async (page = 1, pageSize = 20): Promise<NotificationPage> =>
+      requestJson(`/api/admin/notifications?page=${page}&pageSize=${pageSize}`),
   },
 
   reports: {
