@@ -4,6 +4,32 @@
 
 ---
 
+## [2.28.0] - 2026-10-31 (商户站内消息推送全链路 + 指令单源迁 AGENTS.md;vibe 工作流当日落仓即清退;夜评 58/58)
+
+### ✨ Features
+
+- **站内消息推送 —— 商户员工向顾客单向公告全链路**(65019283 + 双轴复审修复 d9529e1e,spec `.scratch/mall-notifications`):网关六端点(员工 `POST/GET /api/admin/notifications`,perm `notify:send`;顾客列表/未读数/已读/SSE 信号流;单员工单日广播 ≤20 频控)。agent_merchant 两表幂等 DDL:广播不 fan-out、未读 = anti-join、recipient_count 发送时快照、查询全带 business_id 断言。SSE 复用 tail_pubsub 单频道 `notify:business:{bid}` fan-in,定向帧携 targetUserId 连接侧过滤(03 Answer 裁决),帧零内容只当信号、数据真源恒为拉取端点;游客 U2 律零接入(无入口、接口诚实空、SSE 拒连)。RBAC 增 m-notifications(d-ops)+ btn-notify-send(support_agent 显式授、warehouse_operator 不给,ensure_menu_seed 只增自愈)。员工侧 merchant-admin 消息推送模块页(FormDialogShell 撰写 + dense-table 历史)+ 客户详情抽屉内嵌单发;顾客侧 merchant 顶栏铃铛(未读三源:挂载/visibilitychange/SSE 信号)+ /messages 消息中心 + notifyStreamConnection 自管信号流(P7 退避、无回放重连重拉自愈,merchant.md SSE 例外清单入册)。复审五处修复:正文放宽可留空(F3 空正文合法态,仅闸 ≤500)、身份闸收紧为仅 CUST-*(_is_customer 单点四端点同律)、历史表日期改 Date 解析(两套钟律)、「全部标为已读」随 total 渲染、merchant-admin.md 账本同步。测试:网关契约 14 例 + admin 组件 4 例 + merchant 31 例 + e2e 2 例(e2e 第七册,私有 3007→4100 与 dev 3005/4000 完全隔离)。
+
+### 🔧 Fixes / Chores
+
+- **指令单源迁 AGENTS.md**(61de8e9c):CLAUDE.md 全文平移进 AGENTS.md 后删除(工具中立)。同日 vibe 工作流结构落仓(PRD 路径约定 b2877ca4/7a5feac7 两笔勘正)后经用户裁定全数清退(303de9e5 卸载 11 册 vibe 技能、68d87401 清 agent_docs/REVIEW-CHECKLIST/根 MEMORY.md/docs-prd 内容件,引用闭环实测无断链)—— 净存续 = AGENTS.md 单源。
+- **launchd 夜评产物存在性护栏**(5f7dba87):20261030 实弹 agent 空转 14 分钟且 exit=0,结果目录空壳、整夜评测静默蒸发(claude 退出码不可信);脚本改为收尾校验「晚于 marker 的非空 results.jsonl」,缺失重试一次、再缺 FATAL 非零退出;prompt 侧加「评测必须由本任务亲自执行并产出 results、并行会话在途改动照常评测互不等待」纪律。
+
+### 🧪 Tests / 评测 / 评审
+
+- **夜间评测 58 用例**:**58/58 严格全过**,意图面 564/564 = 100%(闸门 95%),pass^k 族全过(c06/c08/c21/c35/c36/d01/d03/d04/d06),辅助册(会话隔离/并发 5 路/SSE 桥/断线补投/打断终态/意图闸/shadow/boundary)全 PASS,收尾清理闭环。报告 eval/nightly/results/20261031-230156。
+- **双轴复审账本同步**(627eaac6,复审 f3c57520..d9529e1e 八笔):e2e 七册 + 私有端口入册 merchant.md §4、契约测试 13→14 例勘正(AGENTS.md/server-gateway.md,d9529e1e 空正文例漏账)、撰写弹窗头注释随正文放宽勘正、prd D10 补 as-built 频道注记;规格轴确认 vibe 清退引用闭环成立、feature 零 scope creep。晨审挂账:merchant_notifications 五 handler 引导段重复与内联 perm 闸 ×2(仓级重构不夜间动)、NotifyBell isCustomer 双判(轻)。
+
+---
+
+## [2.27.0] - 2026-10-30 (Data Agent 组合度量单源化 —— metrics.yaml compose 块派生)
+
+### 🔧 Fixes
+
+- **组合度量单源化**(f3c57520,2026-10-28 双轴评审挂票清偿):9 个可组合指标在 metrics.yaml 增顶层 compose 块(平铺 = measure 键;嵌套 = per/pre/outer 三键),composition 的 _measure_expr/_NESTED_MEASURES/COMPOSABLE_METRICS 全改注册表派生 —— 度量此前在本模块与 compile 块两处维护,新指标入组合须多处同改;现 YAML 登记即组合可用,与 T0 同守单一事实源纪律(COMPOSABLE_METRICS 模块级派生桥 importlib 懒加载零循环风险)。验证:142 过(composition SQL 形状钉测全数等价)、ruff 净、t1t2 31/31。
+
+---
+
 ## [2.26.1] - 2026-10-29 (judge v2 校准过线留档 + 组合 prompt 硬示例加固;夜评 53/58 全系上游 LLM 夜间故障、复跑 5/5 全过)
 
 ### 🔧 Fixes
