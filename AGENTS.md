@@ -137,13 +137,6 @@ Monorepo 由 Turborepo + Bun workspaces(前端)与 uv workspace(Python 服务)�
 - `observability.md`:带租户上下文的结构化日志、telemetry 追踪、token 成本统计。
 - `tenant-configs-types.md`:租户配置注册表与共享契约类型。
 
-工作流配套(agent 工作流结构,`npx vibeworkflow doctor` 验收):
-
-- `agent_docs/`:三册精简构建上下文 —— `project_brief.md`(产品边界)、`tech_stack.md`(技术栈)、`testing.md`(测试分层与判绿纪律)。
-- `MEMORY.md`:项目进度快照(近期完成 / 开放线程 / 高频基建坑)。
-- `REVIEW-CHECKLIST.md`:变更审查清单(14 项,逐项核对)。
-- `docs/prd/agent-platform-MVP.md`(PRD 统一存放 `docs/prd/`,vibe-prd 约定)与 `docs/TechDesign-agent-platform-MVP.md`:溯源基线(由既有事实源压缩,非原始 kickoff 文档)。
-
 ---
 
 ## 5. 架构深潜
