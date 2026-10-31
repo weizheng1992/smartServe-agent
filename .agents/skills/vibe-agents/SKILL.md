@@ -6,7 +6,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
 
 # Vibe Agents
 
-Read the agreed PRD and Tech Design using vibe.project.json paths when available; otherwise inspect docs/PRD-*-MVP.md and docs/TechDesign-*-MVP.md. Reconcile conflicts and reuse Handoff Context before asking anything.
+Read the agreed PRD and Tech Design using vibe.project.json paths when available; otherwise inspect prd/*-MVP.md and docs/TechDesign-*-MVP.md. Reconcile conflicts and reuse Handoff Context before asking anything.
 
 Run `npx vibeworkflow --dry-run --json` to inspect setup changes, then initialize within existing authorization. Existing files are preserved by default. Use --force only for explicitly intended replacement after showing affected files. The CLI installs selected files directly; it does not create a templates/ directory.
 

@@ -140,7 +140,7 @@ After confirmation, generate the PRD document tailored to their level.
 
 If AI is in scope, include provider/account type, retention/training setting to verify, model-visible data, allowed tool/action classes, structured output contracts, approval gates, telemetry/redaction, fallback behavior, cost ceiling, and direct/indirect/negative/auth/failure/trajectory evals.
 
-Write the PRD to `docs/PRD-[AppName]-MVP.md`.
+Write the PRD to `prd/[AppName]-MVP.md`.
 
 ### Append the Meta Block (required)
 
@@ -165,7 +165,7 @@ After the final `---`, append this fenced JSON block. It powers the `vibeworkflo
 
 Tell the user:
 
-> Your PRD is saved to `docs/PRD-[AppName]-MVP.md`.
+> Your PRD is saved to `prd/[AppName]-MVP.md`.
 >
 > **Self-Verification:**
 > - Core problem clearly defined?

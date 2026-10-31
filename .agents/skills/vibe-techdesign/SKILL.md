@@ -14,7 +14,7 @@ Guide the user through deciding HOW to build their MVP using modern tools and be
 
 ## Handoff Context (read this first)
 
-Before asking anything, check whether docs/PRD-*-MVP.md ends with a `## Handoff Context` block.
+Before asking anything, check whether prd/*-MVP.md ends with a `## Handoff Context` block.
 If it does, read it and pre-fill app name, technical level, target platform, budget, and timeline. Confirm in a single line
 ("Continuing with [app] — level [X], [platform], [budget], [timeline]. Correct?")
 and skip those questions entirely. Only ask what the block does not answer.
@@ -41,7 +41,7 @@ Prefer model family names in guidance unless the user explicitly requests pinned
 
 ## Prerequisites
 
-1. Look for `docs/PRD-*.md` in the project - this is REQUIRED
+1. Look for `prd/*.md` in the project - this is REQUIRED
 2. Optionally check for `docs/research-*.md` (or `*.txt` for backward compatibility) for additional context
 3. If no PRD exists, suggest running `/vibe-prd` first
 
