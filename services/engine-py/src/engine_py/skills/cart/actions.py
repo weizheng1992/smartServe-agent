@@ -527,8 +527,12 @@ async def _bestseller_search_reply(env: CartEnv) -> dict:
     noun = R._BEST_SELLER_RE.sub(" ", noun)
     noun = noun.strip(" \t,，。.!！?？:；;的最了吧呢啊")
     if len(noun) >= 2:
+        # 租户解析走 tenant_context 单点(20261030 巡检挂账):裸 `or "ecommerce"`
+        # 静默兜底绕过上下文继承且不留痕,违 resolve_business_id 的告警纪律。
+        from ...tenant_context import resolve_business_id
+
         found = await MallDomainService.search_products(
-            {"query": noun, "businessId": env.tenant_id or "ecommerce", "limit": 5}
+            {"query": noun, "businessId": resolve_business_id(env.tenant_id), "limit": 5}
         )
         products = (found or {}).get("products") or []
         if products:

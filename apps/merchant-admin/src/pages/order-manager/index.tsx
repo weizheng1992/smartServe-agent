@@ -1,3 +1,4 @@
+import { authedFetch } from '@/lib/api';
 import { ApprovalContextDrawer } from 'ui';
 import { ApprovalsTab } from './components/approvals-tab';
 import { LiveDeskTab } from './components/live-desk-tab';
@@ -45,6 +46,7 @@ function WorkbenchShell({ scope }: { scope: WorkbenchScope }) {
           isOpen={Boolean(inspectingApproval)}
           onClose={() => setInspectingApproval(null)}
           approval={inspectingApproval as any}
+          fetcher={authedFetch}
           onApprove={async (id) => {
             await handleApprovalAction(id, 'approve');
           }}

@@ -1,22 +1,11 @@
+import { FormDialogShell } from '@/components/form-dialog-shell';
 import { CARRIER_OPTIONS } from '@/lib/format';
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from 'ui';
+import { Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'ui';
 import { useWorkbench } from '../workbench';
 
-/** 订单一键发货弹窗(承运商 + 运单号;提交后锁定收货地址)。 */
+/** 订单一键发货弹窗(承运商 + 运单号;提交后锁定收货地址)。
+ *  收编 FormDialogShell(2026-10-31 盲区清偿):chrome/busy 防重复提交/错误留窗
+ *  走壳;handleShipOrder 按壳契约返回失败文案(null=成功壳自关)。 */
 export function ShipDialog() {
   const {
     shippingOrderId,
@@ -28,73 +17,54 @@ export function ShipDialog() {
     handleShipOrder,
   } = useWorkbench();
 
+  if (!shippingOrderId) return null;
+
   return (
-    <Dialog open={Boolean(shippingOrderId)} onOpenChange={(open) => !open && setShippingOrderId(null)}>
-      <DialogContent className="max-w-sm p-6 bg-white text-slate-900 border-slate-200">
-        <DialogHeader className="pb-3 border-b border-slate-100">
-          <DialogTitle className="text-base font-bold text-slate-900">订单一键发货</DialogTitle>
-          <p className="text-xs text-slate-500 mt-1 font-mono">订单号: {shippingOrderId}</p>
-        </DialogHeader>
-
-        <div className="space-y-3 py-3">
-          <div>
-            <Label htmlFor="ship-carrier" className="mb-1 block text-xs font-semibold text-slate-700">
-              承运快递公司
-            </Label>
-            {/* ui Select(Radix):受控 value/onValueChange;Label htmlFor 关联 trigger 内部按钮 */}
-            <Select value={carrierInput} onValueChange={(v) => setCarrierInput(v)}>
-              <SelectTrigger
-                id="ship-carrier"
-                aria-label="承运快递公司"
-                className="w-full rounded-lg border-slate-300 px-3 py-2 text-xs"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CARRIER_OPTIONS.map((c) => (
-                  <SelectItem key={c.code} value={c.code}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label htmlFor="ship-tracking" className="mb-1 block text-xs font-semibold text-slate-700">
-              快递运单号
-            </Label>
-            <Input
-              id="ship-tracking"
-              type="text"
-              value={trackingNumberInput}
-              onChange={(e) => setTrackingNumberInput(e.target.value)}
-              className="text-xs h-9 bg-white font-mono"
-              placeholder="请输入运单号..."
-            />
-          </div>
-        </div>
-
-        <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-slate-100">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShippingOrderId(null)}
-            className="text-xs cursor-pointer"
+    <FormDialogShell
+      title="订单一键发货"
+      subtitle={<span className="font-mono">订单号: {shippingOrderId}</span>}
+      maxWidth="max-w-sm"
+      submitLabel="确认发货并锁定地址"
+      submitDisabled={!trackingNumberInput.trim()}
+      onClose={() => setShippingOrderId(null)}
+      onSubmit={async () => handleShipOrder(shippingOrderId)}
+    >
+      <div>
+        <Label htmlFor="ship-carrier" className="mb-1 block text-xs font-semibold text-zinc-700">
+          承运快递公司
+        </Label>
+        {/* ui Select(Radix):受控 value/onValueChange;Label htmlFor 关联 trigger 内部按钮 */}
+        <Select value={carrierInput} onValueChange={(v) => setCarrierInput(v)}>
+          <SelectTrigger
+            id="ship-carrier"
+            aria-label="承运快递公司"
+            className="w-full rounded-lg border-zinc-300 px-3 py-2 text-xs"
           >
-            取消
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => shippingOrderId && handleShipOrder(shippingOrderId)}
-            className="text-xs font-bold cursor-pointer"
-          >
-            确认发货并锁定地址
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CARRIER_OPTIONS.map((c) => (
+              <SelectItem key={c.code} value={c.code}>
+                {c.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label htmlFor="ship-tracking" className="mb-1 block text-xs font-semibold text-zinc-700">
+          快递运单号
+        </Label>
+        <Input
+          id="ship-tracking"
+          type="text"
+          value={trackingNumberInput}
+          onChange={(e) => setTrackingNumberInput(e.target.value)}
+          className="text-xs h-9 bg-white font-mono"
+          placeholder="请输入运单号..."
+        />
+      </div>
+    </FormDialogShell>
   );
 }

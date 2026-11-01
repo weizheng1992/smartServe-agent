@@ -1,4 +1,5 @@
-import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Label, Textarea } from 'ui';
+import { FormDialogShell } from '@/components/form-dialog-shell';
+import { Button, Label, Textarea } from 'ui';
 import { useWorkbench } from '../workbench';
 
 const REJECT_TEMPLATES = [
@@ -8,89 +9,57 @@ const REJECT_TEMPLATES = [
   '请提供清晰的商品破损照片后再试',
 ];
 
-/** 驳回原因弹窗:直传显式原因(工单 04 修复 state 闭包吞文案问题)。 */
+/** 驳回原因弹窗:直传显式原因(工单 04 修复 state 闭包吞文案问题)。
+ *  收编 FormDialogShell(2026-10-31 盲区清偿):busy 防重复提交走壳;
+ *  失败可见性沿用 handleApprovalAction 的 alert 报告(与旧实现行为一致,
+ *  提交后关窗 —— 壳契约的「失败留窗」需 handleApprovalAction 改返回值,未动)。 */
 export function RejectDialog() {
-  const {
-    rejectingApprovalId,
-    setRejectingApprovalId,
-    rejectReasonInput,
-    setRejectReasonInput,
-    submittingActionId,
-    setRejectionReasons,
-    handleApprovalAction,
-  } = useWorkbench();
+  const { rejectingApprovalId, setRejectingApprovalId, rejectReasonInput, setRejectReasonInput, handleApprovalAction } =
+    useWorkbench();
+
+  if (!rejectingApprovalId) return null;
 
   return (
-    <Dialog open={Boolean(rejectingApprovalId)} onOpenChange={(open) => !open && setRejectingApprovalId(null)}>
-      <DialogContent className="max-w-md p-6 bg-white text-slate-900 border-slate-200">
-        <DialogHeader className="pb-3 border-b border-slate-100">
-          <DialogTitle className="text-base font-bold text-slate-900">驳回审批工单</DialogTitle>
-          <p className="text-xs text-slate-500 mt-1 font-mono">工单 ID: {rejectingApprovalId}</p>
-        </DialogHeader>
-
-        <div className="space-y-3 py-3">
-          <Label htmlFor="reject-reason" className="block text-xs font-semibold text-slate-700">
-            请输入驳回原因 (将通知顾客并载入会话工作流)
-          </Label>
-          <Textarea
-            id="reject-reason"
-            value={rejectReasonInput}
-            onChange={(e) => setRejectReasonInput(e.target.value)}
-            rows={3}
-            placeholder="例如：物流轨迹显示已由本人签收，不符合退款条件..."
-            className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
-          />
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            <span className="text-[11px] text-slate-400">常用快捷模板:</span>
-            {REJECT_TEMPLATES.map((tpl) => (
-              <Button
-                key={tpl}
-                type="button"
-                variant="ghost"
-                onClick={() => setRejectReasonInput(tpl)}
-                className="h-auto cursor-pointer rounded bg-slate-100 px-2 py-0.5 text-[11px] font-normal text-slate-700 transition hover:bg-slate-200 hover:text-slate-700"
-              >
-                {tpl}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-slate-100">
+    <FormDialogShell
+      title="驳回审批工单"
+      subtitle={<span className="font-mono">工单 ID: {rejectingApprovalId}</span>}
+      maxWidth="max-w-md"
+      submitLabel="确认驳回"
+      onClose={() => {
+        setRejectingApprovalId(null);
+        setRejectReasonInput('');
+      }}
+      onSubmit={async () => {
+        if (!rejectingApprovalId) return '工单缺失';
+        await handleApprovalAction(rejectingApprovalId, 'reject', rejectReasonInput);
+        return null;
+      }}
+    >
+      <Label htmlFor="reject-reason" className="block text-xs font-semibold text-zinc-700">
+        请输入驳回原因 (将通知顾客并载入会话工作流)
+      </Label>
+      <Textarea
+        id="reject-reason"
+        value={rejectReasonInput}
+        onChange={(e) => setRejectReasonInput(e.target.value)}
+        rows={3}
+        placeholder="例如：物流轨迹显示已由本人签收，不符合退款条件..."
+        className="w-full text-xs p-2.5 border border-zinc-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
+      />
+      <div className="flex flex-wrap gap-1.5 pt-1">
+        <span className="text-[11px] text-zinc-400">常用快捷模板:</span>
+        {REJECT_TEMPLATES.map((tpl) => (
           <Button
+            key={tpl}
             type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setRejectingApprovalId(null);
-              setRejectReasonInput('');
-            }}
-            className="text-xs cursor-pointer"
+            variant="ghost"
+            onClick={() => setRejectReasonInput(tpl)}
+            className="h-auto cursor-pointer rounded bg-zinc-100 px-2 py-0.5 text-[11px] font-normal text-zinc-700 transition hover:bg-zinc-200 hover:text-zinc-700"
           >
-            取消
+            {tpl}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            disabled={submittingActionId === rejectingApprovalId}
-            onClick={async () => {
-              if (!rejectingApprovalId) return;
-              if (rejectReasonInput) {
-                setRejectionReasons((prev: Record<string, string>) => ({
-                  ...prev,
-                  [rejectingApprovalId]: rejectReasonInput,
-                }));
-              }
-              await handleApprovalAction(rejectingApprovalId, 'reject', rejectReasonInput);
-              setRejectingApprovalId(null);
-              setRejectReasonInput('');
-            }}
-            className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
-          >
-            确认驳回
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        ))}
+      </div>
+    </FormDialogShell>
   );
 }

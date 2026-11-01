@@ -323,12 +323,10 @@ export function useWorkbenchState(scope: WorkbenchScope) {
     }
   };
 
-  const handleShipOrder = async (orderId: string) => {
-    if (!trackingNumberInput.trim()) {
-      alert('请填写快递运单号');
-      return;
-    }
-
+  /** 发货提交,FormDialogShell 契约(2026-10-31 弹窗收编):返回失败文案留窗内,
+   *  null=成功(弹窗经壳 onClose 自关,此处不再 setShippingOrderId)。 */
+  const handleShipOrder = async (orderId: string): Promise<string | null> => {
+    if (!trackingNumberInput.trim()) return '请填写快递运单号';
     try {
       const data = await api.orders.ship({
         orderId,
@@ -337,14 +335,13 @@ export function useWorkbenchState(scope: WorkbenchScope) {
       });
       if (data.success) {
         alert('🎉 发货成功！已流转为已发货状态并锁定收货地址');
-        setShippingOrderId(null);
         setTrackingNumberInput('');
         fetchDashboardData();
-      } else {
-        alert(`发货失败: ${data.message || '未知错误'}`);
+        return null;
       }
+      return `发货失败: ${data.message || '未知错误'}`;
     } catch {
-      alert('网络请求失败');
+      return '网络请求失败';
     }
   };
 

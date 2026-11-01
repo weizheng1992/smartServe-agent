@@ -1,5 +1,6 @@
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FetchLike } from '../../hooks/useApprovalMachine';
 import { MessageSquare, RefreshCw, ShieldAlert, Sparkles, User, X } from '../icons';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -29,9 +30,12 @@ export interface HumanChatModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSendReply: (approvalId: string, replyMessage: string, isFinish?: boolean) => Promise<unknown>;
+  /** 注入应用层 fetch(带 Authorization 等);缺省全局 fetch。
+   *  ui 包零依赖不变量(shared-ui §2.1):业务 API 调用的鉴权横切面由调用方注入。 */
+  fetcher?: FetchLike;
 }
 
-export function HumanChatModal({ approval, isOpen, onClose, onSendReply }: HumanChatModalProps) {
+export function HumanChatModal({ approval, isOpen, onClose, onSendReply, fetcher }: HumanChatModalProps) {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [replyMessage, setReplyMessage] = useState('');
@@ -39,11 +43,13 @@ export function HumanChatModal({ approval, isOpen, onClose, onSendReply }: Human
   const [isEnding, setIsEnding] = useState(false);
   const [preferences, setPreferences] = useState<Array<{ id: string; fact: string; confidence?: number }>>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // bind(globalThis):裸 fetch 引用在部分环境下丢失窗口上下文会 Illegal invocation
+  const doFetch = useMemo(() => fetcher ?? fetch.bind(globalThis), [fetcher]);
 
   const fetchHistory = useCallback(async () => {
     if (!approval?.threadId) return;
     try {
-      const res = await fetch(`/api/chat/messages?threadId=${encodeURIComponent(approval.threadId)}`);
+      const res = await doFetch(`/api/chat/messages?threadId=${encodeURIComponent(approval.threadId)}`);
       const data = await res.json();
       if (data.success && data.messages) {
         setMessages(data.messages);
@@ -51,7 +57,7 @@ export function HumanChatModal({ approval, isOpen, onClose, onSendReply }: Human
     } catch (err) {
       console.error('[HumanChatModal] Failed to fetch message history:', err);
     }
-  }, [approval?.threadId]);
+  }, [approval?.threadId, doFetch]);
 
   useEffect(() => {
     if (isOpen && approval) {
@@ -61,7 +67,7 @@ export function HumanChatModal({ approval, isOpen, onClose, onSendReply }: Human
 
       const targetUserId = approval.userId || approval.userEmail;
       if (targetUserId) {
-        fetch(`/api/chat/preferences?userId=${encodeURIComponent(targetUserId)}`)
+        doFetch(`/api/chat/preferences?userId=${encodeURIComponent(targetUserId)}`)
           .then((res) => res.json())
           .then((data) => {
             if (data.success && Array.isArray(data.preferences)) {
@@ -78,7 +84,7 @@ export function HumanChatModal({ approval, isOpen, onClose, onSendReply }: Human
       const interval = setInterval(fetchHistory, 2000);
       return () => clearInterval(interval);
     }
-  }, [isOpen, approval, fetchHistory]);
+  }, [isOpen, approval, fetchHistory, doFetch]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: messages 为滚动触发器,体内经 ref 操作 DOM 不直接读取
   useEffect(() => {

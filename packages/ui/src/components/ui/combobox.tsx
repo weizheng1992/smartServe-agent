@@ -41,8 +41,12 @@ export function Combobox({
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
 
+  // 数据诚实律(2026-10-31 收口):value 未选或不在 options 内时显示 placeholder,
+  // 严禁回落 options[0] —— 旧形静默把首项当已选展示,用户从未选过的假标签
+  // 会误导操作(且 value 与展示不一致)。value∈options 之外属数据面异常,
+  // 由调用方对账,组件不做伪装。
   const selectedOption = React.useMemo(() => {
-    return options.find((opt) => opt.value === value) || options[0];
+    return options.find((opt) => opt.value === value);
   }, [options, value]);
 
   return (

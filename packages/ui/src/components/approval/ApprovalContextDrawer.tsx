@@ -1,6 +1,7 @@
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Approval, OrderItemSummary, UserOrderRecord } from 'types';
+import type { FetchLike } from '../../hooks/useApprovalMachine';
 import {
   Activity,
   AlertTriangle,
@@ -70,6 +71,9 @@ export interface ApprovalContextDrawerProps {
   onReject?: (approvalId: string, reason?: string) => Promise<void> | void;
   onHumanReply?: (approvalId: string, replyMessage: string, isFinish?: boolean) => Promise<unknown>;
   className?: string;
+  /** 注入应用层 fetch(带 Authorization 等);缺省全局 fetch。
+   *  ui 包零依赖不变量(shared-ui §2.1):业务 API 调用的鉴权横切面由调用方注入。 */
+  fetcher?: FetchLike;
 }
 
 type TabType = 'DIAGNOSIS' | 'USER_PROFILE' | 'PURCHASE_HISTORY' | 'CHAT_HISTORY';
@@ -83,6 +87,7 @@ export function ApprovalContextDrawer({
   onReject,
   onHumanReply,
   className = '',
+  fetcher,
 }: ApprovalContextDrawerProps) {
   const [activeTab, setActiveTab] = useState<TabType>('DIAGNOSIS');
   const [loading, setLoading] = useState(false);
@@ -90,6 +95,8 @@ export function ApprovalContextDrawer({
   const [rejectionReason, setRejectionReason] = useState('');
   const [humanReplyText, setHumanReplyText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // bind(globalThis):裸 fetch 引用在部分环境下丢失窗口上下文会 Illegal invocation
+  const doFetch = useMemo(() => fetcher ?? fetch.bind(globalThis), [fetcher]);
 
   // Sync initial detail when approval changes
   useEffect(() => {
@@ -133,12 +140,12 @@ export function ApprovalContextDrawer({
       // Try async fetch from API if available
       if (approval.threadId) {
         setLoading(true);
-        const fetchMessages = fetch(`/api/chat/messages?threadId=${encodeURIComponent(approval.threadId)}`)
+        const fetchMessages = doFetch(`/api/chat/messages?threadId=${encodeURIComponent(approval.threadId)}`)
           .then((res) => res.json())
           .catch(() => ({ success: false }));
 
         const fetchPreferences = targetUserId
-          ? fetch(`/api/chat/preferences?userId=${encodeURIComponent(targetUserId)}`)
+          ? doFetch(`/api/chat/preferences?userId=${encodeURIComponent(targetUserId)}`)
               .then((res) => res.json())
               .catch(() => ({ success: false }))
           : Promise.resolve({ success: false });
@@ -149,7 +156,7 @@ export function ApprovalContextDrawer({
         if (approval.threadId) orderParams.set('threadId', approval.threadId);
         if (approval.businessId) orderParams.set('businessId', approval.businessId);
 
-        const fetchOrders = fetch(`/api/chat/orders?${orderParams.toString()}`)
+        const fetchOrders = doFetch(`/api/chat/orders?${orderParams.toString()}`)
           .then((res) => res.json())
           .catch(() => ({ success: false }));
 
@@ -182,7 +189,7 @@ export function ApprovalContextDrawer({
           .finally(() => setLoading(false));
       }
     }
-  }, [approval, initialDetail]);
+  }, [approval, initialDetail, doFetch]);
 
   if (!isOpen || !approval) return null;
 

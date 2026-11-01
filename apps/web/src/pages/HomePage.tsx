@@ -6,6 +6,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  type FetchLike,
   HumanChatModal,
   ImageIcon,
   Loader2,
@@ -18,6 +19,7 @@ import { AuditDesk } from '../components/AuditDesk';
 import { ChatArea } from '../components/ChatArea';
 import { LeftSidebar } from '../components/LeftSidebar';
 import { useApprovals, useAuth, useChatMessages, useChatThreads } from '../hooks';
+import { TOKEN_KEY } from '../hooks/useAuth';
 
 const formatFriendlyDate = (dateStr: string | Date | undefined | null) => {
   if (!dateStr) return '未知时间';
@@ -31,6 +33,19 @@ const formatFriendlyDate = (dateStr: string | Date | undefined | null) => {
   const minutes = pad(d.getMinutes());
 
   return `${month}-${date} ${hours}:${minutes}`;
+};
+
+// ui 包 DI(shared-ui §2.1):HumanChatModal 的业务 fetch 由应用层注入鉴权横切面。
+// 模块级定义保证引用稳定,组件侧 doFetch useMemo 不因重渲染抖动。
+const authedFetch: FetchLike = (input, init) => {
+  const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+  return fetch(input, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
 };
 
 export function HomePage() {
@@ -222,6 +237,7 @@ export function HomePage() {
 
       <HumanChatModal
         approval={activeChatApproval}
+        fetcher={authedFetch}
         isOpen={Boolean(activeChatApproval)}
         onClose={() => setActiveChatApproval(null)}
         onSendReply={async (approvalId, replyMsg, isFinish) => {
