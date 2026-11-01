@@ -2,7 +2,8 @@
 
 用法::
 
-    cd services/gateway-py && uv run python ../../eval/nightly/run_nightly.py [--base http://localhost:4000]
+    uv run --directory services/gateway-py python eval/nightly/run_nightly.py [--base http://localhost:4000]
+    (命令 cwd 无关化,20261031:cd+相对路径形曾因会话 cwd 漂移连败四次;脚本内部路径全部基于 __file__)
 
 前置:网关 4000 在跑(docker + seed + gateway --env-file);栈不可用退出码 2
 (防假红 —— 环境问题与 agent 退化严格分账)。
