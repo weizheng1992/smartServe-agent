@@ -2,8 +2,10 @@
 
 用法::
 
-    uv run --directory services/gateway-py python eval/nightly/run_nightly.py [--base http://localhost:4000]
-    (命令 cwd 无关化,20261031:cd+相对路径形曾因会话 cwd 漂移连败四次;脚本内部路径全部基于 __file__)
+    uv run --directory <repo>/services/gateway-py python <repo>/eval/nightly/run_nightly.py [--base http://localhost:4000]
+    (命令 cwd 无关化,20261031:cd+相对路径形曾因会话 cwd 漂移连败四次;脚本内部路径全部基于 __file__。
+     注意 --directory 本身即先 chdir 到目标目录,故脚本路径必须绝对/仓库根外可解析 ——
+     相对形 `--directory services/gateway-py python eval/nightly/run_nightly.py` 必败)
 
 前置:网关 4000 在跑(docker + seed + gateway --env-file);栈不可用退出码 2
 (防假红 —— 环境问题与 agent 退化严格分账)。

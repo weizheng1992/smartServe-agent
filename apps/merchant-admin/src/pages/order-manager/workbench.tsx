@@ -339,7 +339,7 @@ export function useWorkbenchState(scope: WorkbenchScope) {
         fetchDashboardData();
         return null;
       }
-      return `发货失败: ${data.message || '未知错误'}`;
+      return `发货失败: ${errMsgOf(data, '未知错误')}`;
     } catch {
       return '网络请求失败';
     }
