@@ -4,6 +4,21 @@
 
 ---
 
+## [2.28.1] - 2026-11-01 (巡检存量四件收口 + 夜评命令 cwd 无关化;夜评 58/58)
+
+### 🔧 Fixes
+
+- **巡检反复点名存量四件收口**(ccf9bd5c,10-16/10-30 两轮深查挂账清偿批):① packages/ui 直 fetch ×5 → `FetchLike` 注入(shared-ui §2.1):HumanChatModal ×2 + ApprovalContextDrawer ×3 加 `fetcher?` prop(useApprovalMachine 同款 bind(globalThis) 兜底),鉴权横切面归调用方 —— merchant-admin index 传 authedFetch、web HomePage 按 TOKEN_KEY 范式模块级构建。② ship/reject-dialog 收编 FormDialogShell(弹窗盲区清偿):chrome/busy 防重复提交/取消-提交 footer 走壳;handleShipOrder 改壳契约(返回失败文案留窗内、null=成功壳自关)。③ combobox 静默回落 options[0] 删除(数据诚实律):value 未选/不在 options 内显 placeholder,不伪装首项;3 例 SSR 回归钉(未选/命中/幽灵 value)。④ cart/actions.py bestseller 检索 `or "ecommerce"` 静默默认 → `resolve_business_id` 单点(显式>上下文>平台默认+告警留痕,promotion_skill 同款先例)。验证:ui bun test 37/37(+3 新钉)、tsc web+admin 零错、engine 全量 2068 过 + ruff 净。
+- **夜评评测命令 cwd 无关化**(5798f019):20261031 实弹夜评开局以 cd+相对路径形跑评测,会话 cwd 漂移连败四次 —— launchd prompt 双模式评测命令改 `uv run --directory <绝对>` + 脚本绝对路径并明注严禁改回;run_nightly.py 用法 docstring 同步(内部路径本就全 `__file__` 基)。
+- **夜评复审双修**(4fbbb590,复审 53df3ed7..ccf9bd5c 两笔):workbench 发货失败文案走 `errMsgOf` 三键单点(merchant-admin §1.1 散写多读法触行);run_nightly docstring 用法行改绝对路径形(`--directory` 实测先 chdir 到 gateway-py,相对脚本路径必败 —— 与 5798f019 同族自纠)。
+
+### 🧪 Tests / 评测 / 评审
+
+- **夜间评测 58 用例**:**58/58 严格全过**,意图面 564/564 = 100%(闸门 95%),pass^k 族全过,辅助册(会话隔离/并发 5 路/SSE 桥/断线补投/打断终态/意图闸/shadow/boundary)全 PASS,收尾清理闭环。报告 eval/nightly/results/20261101-230032。
+- **双轴复审**(基点 53df3ed7):Spec 轴无缺失无实现错,2 处微小 scope creep 良性存档(ship-dialog submitDisabled 前移使壳内空号文案不可达、两弹窗 slate→zinc 统一);Standards 轴 1 硬违(errMsgOf 散写,当晚已修)+ 4 裁量挂晨审:doFetch bind(globalThis) 两组件逐字重复可提 useFetcher、web 侧 authedFetch 第 4 处 TOKEN_KEY+Bearer 拼装与 FetchLike 双定义宜单点、reject-dialog 死防御分支(`!rejectingApprovalId` 不可达)、reject 与 ship 同壳异约(失败不留窗,parity 取舍已注释)。
+
+---
+
 ## [2.28.0] - 2026-10-31 (商户站内消息推送全链路 + 指令单源迁 AGENTS.md;vibe 工作流当日落仓即清退;夜评 58/58)
 
 ### ✨ Features
