@@ -8,16 +8,23 @@ import { expect, test } from '@playwright/test';
 // 身份注入走 addInitScript 参数字面量(仓库律,严禁引用 Node 闭包常量);
 // AI_QUOTA_GATE=0 由 config env 承担(merchant.md 宿主 env 律)。
 
-const BROADCAST_TITLE = 'E2E-e2e-通知-全场包邮';
+// 标题带时间戳:本册无删除端点(spec D7 撤回不进 MVP),残留行不可清 ——
+// 固定标题会让第二次运行 strict mode 撞双行(实测 11-02),唯一化是唯一解。
 
 test.describe('顾客侧消息推送', () => {
   test('广播触达:铃铛未读 +1 → 点开标已读 → 徽标消减', async ({ page, request }) => {
+    const BROADCAST_TITLE = `E2E-e2e-通知-全场包邮-${Date.now()}`;
     // 员工侧经同源代理打私有网关(vite proxy /api → 4100),登录 + 发广播
     const login = await request.post('/api/auth/login', {
       data: { email: 'test@example.com', password: 'agent-all-dev' },
     });
     expect(login.ok()).toBeTruthy();
     const token = (await login.json()).data.token as string;
+    // 跑前把 CUST-8801 未读清零(自家 store 端点,幂等):徽标断言才可钉精确值
+    // —— 历史运行残留的未读行不构成本册零态假设的破坏源
+    await request.post('/api/store/notifications/read', {
+      data: { userId: 'CUST-8801', businessId: 'aurora', all: true },
+    });
     const send = await request.post('/api/admin/notifications', {
       headers: { Authorization: `Bearer ${token}`, 'x-tenant-id': 'aurora' },
       data: { targetType: 'all', title: BROADCAST_TITLE, body: '全场包邮公告正文(e2e)' },
@@ -44,10 +51,14 @@ test.describe('顾客侧消息推送', () => {
     await expect(bell).toBeVisible();
     await expect(bell.getByText(/^\d+$/)).toBeVisible();
 
-    // 点开 = 展开正文 + 标已读;唯一一条 → 「全部标为已读」按钮随之消失
+    // 点开 = 展开正文 + 标已读;已读态信号 = 行内绿点消失 + 页头「本页未读」
+    // 计数消隐(复审 P6 后「全部标为已读」恒驻,按钮可见性不再是已读信号)
     await page.getByRole('button', { name: new RegExp(BROADCAST_TITLE) }).click();
     await expect(page.getByText('全场包邮公告正文(e2e)')).toBeVisible();
-    await expect(page.getByRole('button', { name: '全部标为已读' })).toBeHidden({ timeout: 10_000 });
+    await expect(page.getByText(/本页未读/)).toBeHidden({ timeout: 10_000 });
+    await expect(
+      page.getByRole('button', { name: new RegExp(BROADCAST_TITLE) }).locator('span.bg-emerald-500'),
+    ).toHaveCount(0);
     // 铃铛徽标消减到无(notify_updated 窗口事件同步)
     await expect(bell.getByText(/^\d+$/)).toBeHidden({ timeout: 10_000 });
   });
