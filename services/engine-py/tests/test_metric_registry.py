@@ -148,9 +148,38 @@ class TestLoadLoudFailures:
 
     def test_compose_typo_key_rejected(self, tmp_path, monkeypatch):
         """compose 形状闸(2026-10-30 单源化随批):拼错键在此响亮失败 ——
-        否则指标被静默挤出组合闭集,运行期才以「未开放组合」误导文案拒。"""
+        否则指标被静默挤出组合闭集,运行期才以「未开放组合」误导文案拒。
+        2026-11-02 夜评收紧为闭集键集:唯一键拼错由「未登记键」分支接住
+        (旧「形状不合法」分支只剩空块一种触发形)。"""
         body = _yaml_with_all_required("gmv") + '  compose:\n    mesure: "SUM(oi.quantity)"\n'
-        with pytest.raises(ValueError, match="compose 块形状不合法"):
+        with pytest.raises(ValueError, match="未登记键"):
+            self._load_from(tmp_path, monkeypatch, body)
+
+    def test_compose_typo_alongside_valid_rejected(self, tmp_path, monkeypatch):
+        """闭集键集收敛点(2026-11-02 夜评双轴同点):合法形在场时拼错键
+        此前静默放行 ——「拼键响亮失败」承诺只兑现一半,现越界即拒。"""
+        body = (
+            _yaml_with_all_required("gmv")
+            + '  compose:\n    measure: "SUM(oi.quantity)"\n    measuer: "SUM(oi.price)"\n'
+        )
+        with pytest.raises(ValueError, match="未登记键"):
+            self._load_from(tmp_path, monkeypatch, body)
+
+    def test_compose_dual_form_rejected(self, tmp_path, monkeypatch):
+        """双形并存拒(2026-11-02 夜评):下游 _compose_total 走 measure、
+        _compose_rank 走 nested 各取一赢,歧义不留给运行期。"""
+        body = (
+            _yaml_with_all_required("gmv")
+            + '  compose:\n    measure: "SUM(oi.quantity)"\n    per: o.customer_id\n'
+            '    pre: "COUNT(*) AS n"\n    outer: "SUM(n)"\n'
+        )
+        with pytest.raises(ValueError, match="不得并存"):
+            self._load_from(tmp_path, monkeypatch, body)
+
+    def test_compose_empty_block_rejected(self, tmp_path, monkeypatch):
+        """空块仍走「形状不合法」分支(闭集键集后该分支唯一触发形)。"""
+        body = _yaml_with_all_required("gmv") + "  compose: {}\n"
+        with pytest.raises(ValueError, match="形状不合法"):
             self._load_from(tmp_path, monkeypatch, body)
 
     def test_compose_nested_missing_key_rejected(self, tmp_path, monkeypatch):
