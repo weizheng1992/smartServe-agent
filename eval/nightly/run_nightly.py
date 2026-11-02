@@ -1552,4 +1552,8 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
+    # 慢夜观测位:launchd 默认调用无 -u,stdout 块缓冲曾致慢夜全程零输出,
+    # 健康在途评测被误判挂死连遭误杀(2026-11-02 实弹)—— 行缓冲保每用例即时可见
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
     sys.exit(asyncio.run(main()))
