@@ -133,6 +133,44 @@ class TestLoadLoudFailures:
         assert registry["gmv"]["conflictGroup"] == []
         assert registry["gmv"]["sampleQueries"] == []
 
+    def test_compose_flat_shape_accepted(self, tmp_path, monkeypatch):
+        body = _yaml_with_all_required("gmv") + '  compose:\n    measure: "SUM(oi.quantity)"\n'
+        registry = self._load_from(tmp_path, monkeypatch, body)
+        assert registry["gmv"]["compose"]["measure"] == "SUM(oi.quantity)"
+
+    def test_compose_nested_shape_accepted(self, tmp_path, monkeypatch):
+        body = (
+            _yaml_with_all_required("repeat_purchase_rate")
+            + '  compose:\n    per: o.customer_id\n    pre: "COUNT(*) AS n"\n    outer: "SUM(n)"\n'
+        )
+        registry = self._load_from(tmp_path, monkeypatch, body)
+        assert set(registry["repeat_purchase_rate"]["compose"]) == {"per", "pre", "outer"}
+
+    def test_compose_typo_key_rejected(self, tmp_path, monkeypatch):
+        """compose 形状闸(2026-10-30 单源化随批):拼错键在此响亮失败 ——
+        否则指标被静默挤出组合闭集,运行期才以「未开放组合」误导文案拒。"""
+        body = _yaml_with_all_required("gmv") + '  compose:\n    mesure: "SUM(oi.quantity)"\n'
+        with pytest.raises(ValueError, match="compose 块形状不合法"):
+            self._load_from(tmp_path, monkeypatch, body)
+
+    def test_compose_nested_missing_key_rejected(self, tmp_path, monkeypatch):
+        body = (
+            _yaml_with_all_required("repeat_purchase_rate")
+            + '  compose:\n    per: o.customer_id\n    pre: "COUNT(*) AS n"\n'
+        )
+        with pytest.raises(ValueError, match="嵌套形缺键"):
+            self._load_from(tmp_path, monkeypatch, body)
+
+    def test_compose_blank_measure_rejected(self, tmp_path, monkeypatch):
+        body = _yaml_with_all_required("gmv") + '  compose:\n    measure: "  "\n'
+        with pytest.raises(ValueError, match="非空字符串"):
+            self._load_from(tmp_path, monkeypatch, body)
+
+    def test_compose_non_mapping_rejected(self, tmp_path, monkeypatch):
+        body = _yaml_with_all_required("gmv") + "  compose: just_a_string\n"
+        with pytest.raises(TypeError, match="compose 块必须是映射"):
+            self._load_from(tmp_path, monkeypatch, body)
+
 
 class TestTrainingTomlSync:
     """训练轨配置 ↔ 注册表闭集同源缝(2026-10-02 夜审:metric_head.toml 曾停

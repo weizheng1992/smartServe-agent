@@ -552,3 +552,23 @@ class TestComposeExpansionTicket:
         assert tw == {"kind": "last_7d"}, f"泄漏旧词形态被旧窗劫持: {tw}"
         _, tw2, _ = extract_slots("上个月各品类销售额环比")
         assert tw2 == {"kind": "last_month"}, "单时间词行为不变"
+
+
+class TestComposeSingleSourceSnapshot:
+    """组合面闭集快照(compose 块单源化,2026-10-30):COMPOSABLE_METRICS 与
+    嵌套度量集全部派生自 metrics.yaml compose 块 —— 增删组合指标必须显式
+    更新本快照(与 test_metric_registry 闭集计数同律,防组合面无声漂移)。"""
+
+    def test_composable_metrics_pinned(self):
+        assert composition.COMPOSABLE_METRICS == {
+            "aov", "gmv", "gross_profit", "margin_rate", "net_sales",
+            "order_count", "refund_rate", "repeat_purchase_rate", "volume",
+        }
+
+    def test_nested_measures_pinned(self):
+        assert set(composition._NESTED_MEASURES) == {"repeat_purchase_rate"}
+
+    def test_measure_expr_reads_compose_blocks(self):
+        assert "oi.quantity" in composition._measure_expr("volume")
+        assert composition._measure_expr("repeat_purchase_rate") == ""  # 嵌套形无平铺度量
+        assert composition._measure_expr("not_a_metric") == ""

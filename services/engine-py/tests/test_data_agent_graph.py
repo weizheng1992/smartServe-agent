@@ -560,10 +560,13 @@ class TestScenarioTop1:
             }
 
         monkeypatch.setattr(graph, "_run_scenario", _fake_scenario)
-        monkeypatch.setattr(
-            graph.MetricQueryEngine, "resolve",
-            lambda self, q: __import__("engine_py.analytics.engine", fromlist=["StructuredQueryIntent"]).StructuredQueryIntent(metric="biz_overview"),
-        )
+
+        def _fake_resolve(self, q):
+            from engine_py.analytics.engine import StructuredQueryIntent
+
+            return StructuredQueryIntent(metric="biz_overview")
+
+        monkeypatch.setattr(graph.MetricQueryEngine, "resolve", _fake_resolve)
         out = asyncio.run(graph.ask(
             "经营概览", {"business_id": "aurora", "role": "finance_owner"},
             {"sessionId": "s-scen"},

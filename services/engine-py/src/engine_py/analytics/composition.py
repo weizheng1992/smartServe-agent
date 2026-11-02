@@ -326,20 +326,21 @@ def _compose_registry() -> dict[str, dict]:
     }
 
 
-COMPOSABLE_METRICS = frozenset(_compose_registry())
+_COMPOSE_BLOCKS = _compose_registry()
+COMPOSABLE_METRICS = frozenset(_COMPOSE_BLOCKS)
 
 # 二段聚合度量(repeat_purchase_rate 族):单层「GROUP BY 维度」表达不了
 # 「每客户订单数 → 复购占比」的嵌套 —— compose 块以 per/pre/outer 三键声明,
 # 平铺度量以 measure 键声明;行集/有效成交口径与平铺度量同源(订单×明细),
 # DISTINCT 订单号保证明细扇出不虚增计数。
 _NESTED_MEASURES = {
-    k: c for k, c in _compose_registry().items() if "per" in c
+    k: c for k, c in _COMPOSE_BLOCKS.items() if "per" in c
 }
 
 
 def _measure_expr(metric: str) -> str:
     """认证指标 → 组合面度量表达式(compose 块单源派生,平铺形)。"""
-    return _compose_registry().get(metric, {}).get("measure", "")
+    return _COMPOSE_BLOCKS.get(metric, {}).get("measure", "")
 
 
 _ITEMS_JOIN = "LEFT JOIN merchant_order_items oi ON oi.order_id = o.order_id "
