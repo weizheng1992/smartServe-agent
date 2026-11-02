@@ -21,10 +21,12 @@ test.describe('顾客侧消息推送', () => {
     expect(login.ok()).toBeTruthy();
     const token = (await login.json()).data.token as string;
     // 跑前把 CUST-8801 未读清零(自家 store 端点,幂等):徽标断言才可钉精确值
-    // —— 历史运行残留的未读行不构成本册零态假设的破坏源
-    await request.post('/api/store/notifications/read', {
+    // —— 历史运行残留的未读行不构成本册零态假设的破坏源;清零失败必须当场
+    // 翻红,静默失败只会迟到成尾部徽标断言的误导性失败(播种不断言=假绿同律)
+    const clearRes = await request.post('/api/store/notifications/read', {
       data: { userId: 'CUST-8801', businessId: 'aurora', all: true },
     });
+    expect(clearRes.ok()).toBeTruthy();
     const send = await request.post('/api/admin/notifications', {
       headers: { Authorization: `Bearer ${token}`, 'x-tenant-id': 'aurora' },
       data: { targetType: 'all', title: BROADCAST_TITLE, body: '全场包邮公告正文(e2e)' },
@@ -46,19 +48,23 @@ test.describe('顾客侧消息推送', () => {
     });
     await page.goto('/messages');
     await expect(page.getByText(BROADCAST_TITLE)).toBeVisible();
-    // 未读行有绿点 + 徽标显示未读 ≥1(行首未读点,铃铛数字徽标)
+    // 未读行有绿点 + 徽标显示未读 ≥1(行首未读点,铃铛数字徽标);「消失」型
+    // 断言前先钉「存在」起点 —— UI 侧 class/文案重构后断言恒过不自知(夜评)
     const bell = page.getByRole('link', { name: /🔔 消息/ });
     await expect(bell).toBeVisible();
     await expect(bell.getByText(/^\d+$/)).toBeVisible();
+    const unreadDot = page
+      .getByRole('button', { name: new RegExp(BROADCAST_TITLE) })
+      .locator('span.bg-emerald-500');
+    await expect(unreadDot).not.toHaveCount(0);
+    await expect(page.getByText(/本页未读/)).toBeVisible();
 
     // 点开 = 展开正文 + 标已读;已读态信号 = 行内绿点消失 + 页头「本页未读」
     // 计数消隐(复审 P6 后「全部标为已读」恒驻,按钮可见性不再是已读信号)
     await page.getByRole('button', { name: new RegExp(BROADCAST_TITLE) }).click();
     await expect(page.getByText('全场包邮公告正文(e2e)')).toBeVisible();
     await expect(page.getByText(/本页未读/)).toBeHidden({ timeout: 10_000 });
-    await expect(
-      page.getByRole('button', { name: new RegExp(BROADCAST_TITLE) }).locator('span.bg-emerald-500'),
-    ).toHaveCount(0);
+    await expect(unreadDot).toHaveCount(0);
     // 铃铛徽标消减到无(notify_updated 窗口事件同步)
     await expect(bell.getByText(/^\d+$/)).toBeHidden({ timeout: 10_000 });
   });
