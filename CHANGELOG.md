@@ -4,6 +4,25 @@
 
 ---
 
+## [2.28.2] - 2026-11-02 (compose 形状闸两连收紧 + 消息推送 e2e 幂等化/断言加固;夜评 58/58 慢夜三跑)
+
+### 🔧 Fixes
+
+- **compose 块形状闸两连收紧**(3054f852 + 49c406eb):metrics.yaml 加载期 `_validate_compose` 首笔四查(平铺 {measure}/嵌套 {per,pre,outer} 至少其一、嵌套三键不缺、值非空字符串、块须映射 —— 拼错键此前被静默挤出组合闭集,运行期才以「未开放组合」误导文案拒,双轴评审 Standards②/Spec(c)2 同点);当夜夜评双轴再收敛同点,收紧为**闭集键集**(合法键 = measure ∪ per/pre/outer,越界即拒)+ **二形互斥拒** —— {measure, measur} 傍行拼键与双形并存不再静默放行(下游 `_compose_total` 走 measure、`_compose_rank` 走 nested 各取一赢,歧义不留给运行期;tools-registry §1.4「平铺或嵌套二形」的「或」义落地)。随批:composition `_compose_registry` 三处重派生收 `_COMPOSE_BLOCKS` 单次缓存;组合面闭集快照册(COMPOSABLE_METRICS 九指标/嵌套集单元素/measure_expr 派生三例)防组合面无声漂移;test_metric_registry 形状闸 6→9 例。
+- **run_nightly 自启用行缓冲**(9c0337a2):launchd 默认调用无 `-u`,stdout 块缓冲致慢夜(全程 3.4h,常夜 ~10min)「零输出假象」,健康在途评测被误判挂死连杀两轮(11-02 实弹,教训:0% CPU 的 kevent 等待是等上游响应,栈采样看不见 httpx 定时器)—— `__main__` 入口 `reconfigure(line_buffering)` 兜底观测位,每用例一行即时可见。
+
+### 🔧 消息推送 e2e(merchant)
+
+- **幂等化 + 断言加固**(d9627226 + 105411b1):①标题时间戳唯一化(本册无删除端点,固定标题残留行让二连跑 strict 撞双行);②跑前自家 store 端点 `read all:true` 清零 CUST-8801 未读,并补 `expect(ok())`(清零静默失败只会迟到成尾部徽标断言的误导性翻红);③已读态断言改「行内绿点消失 + 页头未读计数消隐」(复审 P6 后「全部标为已读」恒驻,按钮可见性不再是已读信号),消失型断言先钉「存在」起点防 UI class 重构后恒过不自知。三连跑 2/2×3 幂等证毕;加固后第七册私有拓扑单跑 2 passed。
+- **notifications-ux as-built 文档**(0f13cdea):顾客侧显示链路(铃铛四刷新源/可见性闸、消息中心已读语义/恒驻全读按钮/诚实空态、信号流单频道 fan-in 连接侧过滤/无水位重连自愈、六端点速查)落 `docs/notifications-ux.md`,merchant.md §1 挂指针。
+
+### 🧪 Tests / 评测 / 评审
+
+- **夜间评测 58 用例**:**58/58 严格全过**(第三轮起跑;前两轮系慢夜误判连杀,非环境故障)。意图面 564/564 = 100%(闸门 95%),pass^k 族 c06/c08/c21/c35 全过,辅助册(会话隔离/并发 5 路/SSE 桥/断线补投/打断终态/意图闸/shadow/boundary)全 PASS,收尾清理闭环。观察位台账:c36_hitl_reject pass^3 有抖动(第 3 跑「恢复回复 150s 未落地」,慢夜上游延迟大概率致然,留晨审看跨夜趋势)。报告 eval/nightly/results/20261103-013457。
+- **双轴复审**(基点 740cb0d0,四笔 d9627226/0f13cdea/3054f852/9c0337a2):Standards 0 硬违 + 3 裁量、Spec 无缺失无 creep + 3 存疑;双轴收敛点(compose 闭集键集)当晚修复,e2e 断言双项当晚加固;台账留存:行缓冲修不到 claude CLI 自身输出半径(`-p` 一次性回显本就不受影响)。行为修复验证:engine 全量 2071 passed + gateway 全量 517 passed + 双服务 ruff 净。
+
+---
+
 ## [2.28.1] - 2026-11-01 (巡检存量四件收口 + 夜评命令 cwd 无关化;夜评 58/58)
 
 ### 🔧 Fixes
