@@ -228,11 +228,14 @@ export function useWorkbenchState(scope: WorkbenchScope) {
   const handleApprovalAction = async (
     approvalId: string,
     action: 'approve' | 'reject',
-    /** 弹窗直传驳回原因 —— 不传则由 hook 回退 rejectionReasons/默认文案。
-     * 修复(工单 04 审计):弹窗旧实现只写 setRejectionReasons 后立即调用,
-     * state 异步更新使 hook 闭包读到旧值,用户填写的原因被吞成兜底文案。 */
+    /** 弹窗直传驳回原因 —— 直传是唯一来源,不传由 executeApprovalAction 落
+     *  默认文案。修复(工单 04 审计):弹窗旧实现只写 setRejectionReasons 后
+     *  立即调用,state 异步更新使 hook 闭包读到旧值,用户填写的原因被吞成
+     *  兜底文案;该 state 已随 FormDialogShell 收编删除。 */
     explicitReason?: string,
-  ) => {
+  ): Promise<string | null> => {
+    /** 返回失败文案或 null(FormDialogShell 壳契约,2026-11-01 夜评裁量④:
+     *  reject/ship 同壳同约);alert 决策上移至调用方 UX 边界,不再内联。 */
     const result = await executeApprovalAction({
       approvalId,
       action,
@@ -246,9 +249,9 @@ export function useWorkbenchState(scope: WorkbenchScope) {
       if (inspectingApproval?.id === approvalId) {
         setInspectingApproval(null);
       }
-    } else if (result.error) {
-      alert(result.error);
+      return null;
     }
+    return result.error || '操作失败';
   };
 
   const handleHumanReply = async (approvalId: string, replyMessage: string, isFinish = false) => {

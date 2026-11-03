@@ -1,6 +1,7 @@
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FetchLike } from '../../hooks/useApprovalMachine';
+import { useFetcher } from '../../hooks/useFetcher';
 import { MessageSquare, RefreshCw, ShieldAlert, Sparkles, User, X } from '../icons';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -43,8 +44,7 @@ export function HumanChatModal({ approval, isOpen, onClose, onSendReply, fetcher
   const [isEnding, setIsEnding] = useState(false);
   const [preferences, setPreferences] = useState<Array<{ id: string; fact: string; confidence?: number }>>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // bind(globalThis):裸 fetch 引用在部分环境下丢失窗口上下文会 Illegal invocation
-  const doFetch = useMemo(() => fetcher ?? fetch.bind(globalThis), [fetcher]);
+  const doFetch = useFetcher(fetcher);
 
   const fetchHistory = useCallback(async () => {
     if (!approval?.threadId) return;

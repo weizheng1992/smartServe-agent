@@ -1,7 +1,8 @@
 import type React from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Approval, OrderItemSummary, UserOrderRecord } from 'types';
 import type { FetchLike } from '../../hooks/useApprovalMachine';
+import { useFetcher } from '../../hooks/useFetcher';
 import {
   Activity,
   AlertTriangle,
@@ -95,8 +96,7 @@ export function ApprovalContextDrawer({
   const [rejectionReason, setRejectionReason] = useState('');
   const [humanReplyText, setHumanReplyText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // bind(globalThis):裸 fetch 引用在部分环境下丢失窗口上下文会 Illegal invocation
-  const doFetch = useMemo(() => fetcher ?? fetch.bind(globalThis), [fetcher]);
+  const doFetch = useFetcher(fetcher);
 
   // Sync initial detail when approval changes
   useEffect(() => {

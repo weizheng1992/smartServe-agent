@@ -138,7 +138,12 @@ export default function MessagesPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center space-x-2 min-w-0">
-                      {!item.isRead && <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />}
+                      {!item.isRead && (
+                        <span
+                          data-testid="notify-unread-dot"
+                          className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"
+                        />
+                      )}
                       <span
                         className={`text-sm truncate ${item.isRead ? 'text-slate-600' : 'text-slate-900 font-semibold'}`}
                       >

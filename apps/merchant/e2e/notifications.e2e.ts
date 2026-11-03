@@ -53,9 +53,9 @@ test.describe('顾客侧消息推送', () => {
     const bell = page.getByRole('link', { name: /🔔 消息/ });
     await expect(bell).toBeVisible();
     await expect(bell.getByText(/^\d+$/)).toBeVisible();
-    const unreadDot = page
-      .getByRole('button', { name: new RegExp(BROADCAST_TITLE) })
-      .locator('span.bg-emerald-500');
+    // 未读点走语义 testid:钉 Tailwind 实现类(span.bg-emerald-500)会随样式
+    // 改名脆断/恒过两不自知 —— 结构语义归 testid,视觉归 class
+    const unreadDot = page.getByRole('button', { name: new RegExp(BROADCAST_TITLE) }).getByTestId('notify-unread-dot');
     await expect(unreadDot).not.toHaveCount(0);
     await expect(page.getByText(/本页未读/)).toBeVisible();
 
